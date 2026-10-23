@@ -3,7 +3,9 @@ requires = ["maturin>=1.9,<2"]
 build-backend = "maturin"
 
 [project]
-name = "spacelab"
+# `spacelab` on PyPI is an empty registration by someone else (pypi/support#12822); the
+# import name is `spacelab` regardless.
+name = "spacedatalab"
 description = "Python bindings for the spacelab space-data computation core"
 # The version is the crate's, read by maturin, so a release bumps one number.
 dynamic = ["version"]

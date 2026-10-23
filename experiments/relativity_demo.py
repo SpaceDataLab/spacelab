@@ -12,7 +12,7 @@ determination must model; the Schwarzschild term dominates (the relativistic per
 from __future__ import annotations
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 
 
 def main() -> None:

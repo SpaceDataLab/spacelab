@@ -15,7 +15,7 @@ Build the wheel first, then run with it on the path:
 
 from __future__ import annotations
 
-import spacelab as sl
+import spacedatalab as sl
 from sgp4.api import Satrec
 
 # Near-earth (SGP4 branch); the reference case already used by the smoke test.

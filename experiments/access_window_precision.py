@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 
-import spacelab as sl
+import spacedatalab as sl
 
 MU = 3.986004418e14  # m^3/s^2
 OMEGA = 7.292_115_9e-5  # rad/s, Earth rotation rate (matches the engine's constant)

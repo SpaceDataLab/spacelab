@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 from nrlmsise00 import msise_model
 
 MU = 3.986_004_418e14

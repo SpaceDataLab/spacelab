@@ -9,7 +9,7 @@ Build and run:
 
 import math
 
-import spacelab as sl
+import spacedatalab as sl
 
 
 def close(a, b, tol=1e-6):

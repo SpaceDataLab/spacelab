@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 
 
 def main() -> None:

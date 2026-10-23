@@ -11,7 +11,7 @@ altitude oscillation and the secular regression of the right ascension of the as
 from __future__ import annotations
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 
 
 def raan_deg(r: np.ndarray, v: np.ndarray) -> float:

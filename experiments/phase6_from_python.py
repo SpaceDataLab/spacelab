@@ -18,7 +18,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score as ari
 from sklearn.preprocessing import StandardScaler

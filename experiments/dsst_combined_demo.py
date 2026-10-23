@@ -9,7 +9,7 @@ composed into one semi-analytical propagator.
 Run after `maturin develop` (or `uvx maturin develop`) has installed `spacelab`.
 """
 import numpy as np
-import spacelab as sp
+import spacedatalab as sp
 
 # Sun-synchronous LEO, MEAN equinoctial state [a, k=ex, h=ey, q=hx, p=hy, lambda].
 a0 = 7.2e6

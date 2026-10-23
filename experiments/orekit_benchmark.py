@@ -41,7 +41,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 
 BENCH = Path(os.environ.get("OREKIT_BENCH_DIR", "/tmp/orekit-bench/out"))
 TIMING_REPEATS = 20

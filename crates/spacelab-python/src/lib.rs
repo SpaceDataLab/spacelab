@@ -6,7 +6,7 @@
 //! (no Lambert arc, invalid libration point, degree over the model cap) raise `ValueError`.
 //!
 //! ```python
-//! import spacelab as sl
+//! import spacedatalab as sl
 //! rf, vf = sl.kepler_propagate([7000e3, 0, 0], [0, 7.546e3, 0], 3.986004418e14, 600.0)
 //! a = sl.geopotential_acceleration(70, [6778e3, 0, 0])   # XGM2019e to degree 70
 //! ```
@@ -6135,7 +6135,7 @@ fn delay_breakpoints(delays: Vec<f64>, t0: f64, t1: f64, levels: usize) -> PyRes
 }
 
 #[pymodule]
-fn spacelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn spacedatalab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Sensor>()?;
     m.add_class::<PyDensityRom>()?;
     m.add_class::<PyDmdc>()?;

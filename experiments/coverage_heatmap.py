@@ -18,7 +18,7 @@ import math
 import sys
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 
 RE = 6_378_137.0
 HORIZON = 86_400.0

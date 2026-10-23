@@ -14,7 +14,7 @@ import math
 
 import erfa
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 
 J2000_JD = 2451545.0
 

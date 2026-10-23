@@ -29,7 +29,7 @@ import sys
 import sysconfig
 from itertools import pairwise
 
-import spacelab as sl
+import spacedatalab as sl
 
 MU = 3.986004418e14
 RE = 6378137.0

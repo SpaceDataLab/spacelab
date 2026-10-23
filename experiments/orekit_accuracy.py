@@ -25,7 +25,7 @@ import subprocess
 from pathlib import Path
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 
 JARS = os.environ.get("OREKIT_JARS", "/tmp/orekit-bench/jars")
 CLASSES = os.environ.get("OREKIT_CLASSES", "/tmp/orekit-bench/classes")

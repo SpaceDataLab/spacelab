@@ -13,7 +13,7 @@ and perigee precess over 30 days (validated against Orekit's DSSTPropagator to b
 from __future__ import annotations
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 
 
 def keplerian_to_equinoctial(a: float, e: float, i: float, raan: float, argp: float, m: float):

@@ -13,7 +13,7 @@ theory's residual, confirming the M2 path works and is useful. This is an Orekit
 from __future__ import annotations
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 from scipy.integrate import solve_ivp
 
 MU = 3.986_004_415e14

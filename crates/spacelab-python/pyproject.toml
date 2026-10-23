@@ -3,8 +3,9 @@ requires = ["maturin>=1.9,<2"]
 build-backend = "maturin"
 
 [project]
-# `spacelab` on PyPI is an empty registration by someone else (pypi/support#12822); the
-# import name is `spacelab` regardless.
+# The organisation's Python entry point, for distribution and import alike: its top level is the
+# spacelab core, and later SpaceDataLab products arrive as submodules. A top-level `spacelab`
+# would also collide with another project's package of that name.
 name = "spacedatalab"
 description = "Python bindings for the spacelab space-data computation core"
 readme = "README.md"
@@ -42,5 +43,5 @@ Issues = "https://github.com/SpaceDataLab/spacelab/issues"
 
 [tool.maturin]
 manifest-path = "Cargo.toml"
-module-name = "spacelab"
+module-name = "spacedatalab"
 features = ["pyo3/extension-module"]

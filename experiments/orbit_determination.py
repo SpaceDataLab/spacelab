@@ -23,7 +23,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 
 MU = 3.986004418e14  # m^3/s^2, WGS-84 GM
 J2 = 1.08262668e-3  # Earth second zonal harmonic

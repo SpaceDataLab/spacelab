@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 
 import numpy as np
-import spacelab as sl
+import spacedatalab as sl
 
 OUT = Path(os.environ.get("OREKIT_BENCH_DIR", "/tmp/orekit-bench/out"))
 

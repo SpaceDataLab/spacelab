@@ -26,7 +26,7 @@ spacelab = "0.1"    # the assembled API, or any single crate, e.g. spacelab-sgp4
 ```
 
 ```sh
-pip install spacedatalab    # CPython 3.11+ and free-threaded 3.15t; `import spacelab`
+pip install spacedatalab    # CPython 3.11+ and free-threaded 3.15t; `import spacedatalab`
 ```
 
 C and C++20: build [`crates/spacelab-capi`](crates/spacelab-capi) with CMake. From a checkout:

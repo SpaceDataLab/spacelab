@@ -21,7 +21,9 @@ added and against which independent lineage.
 ### Fixed
 
 - **python**: publish the wheels as `spacedatalab` (`7c695b5`)
+- **python**: read the test sources as UTF-8 on every platform (`e22b35d`)
 
 ### Documentation
 
 - **changelog**: project the first release (`1fc7914`)
+- **changelog**: project the first release with its PyPI name (`f83abee`)

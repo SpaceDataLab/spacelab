@@ -1,49 +1,41 @@
 # spacelab
 
-Astrodynamics in Rust, with the verification as the deliverable.
+[![crates.io](https://img.shields.io/crates/v/spacelab)](https://crates.io/crates/spacelab)
+[![docs.rs](https://img.shields.io/docsrs/spacelab)](https://docs.rs/spacelab)
+[![PyPI](https://img.shields.io/pypi/v/spacedatalab)](https://pypi.org/project/spacedatalab/)
+[![Python](https://img.shields.io/pypi/pyversions/spacedatalab)](https://pypi.org/project/spacedatalab/)
+[![ci](https://github.com/SpaceDataLab/spacelab/actions/workflows/ci.yml/badge.svg)](https://github.com/SpaceDataLab/spacelab/actions/workflows/ci.yml)
+[![wheels](https://github.com/SpaceDataLab/spacelab/actions/workflows/wheels.yml/badge.svg)](https://github.com/SpaceDataLab/spacelab/actions/workflows/wheels.yml)
+[![MSRV 1.94](https://img.shields.io/badge/MSRV-1.94-orange)](Cargo.toml)
+[![no_std core](https://img.shields.io/badge/core-no__std-informational)](crates/spacelab-core)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#licence)
 
-Thirty-two crates: fundamental astronomy and reference frames, SGP4, numerical and semi-analytical
-propagation with the full IERS 2010 force stack, orbit determination, GNSS, satellite laser ranging,
-closed-loop control, coverage and constellation design, and Earth-observation geometry. `no_std` at
-the core, `#![forbid(unsafe_code)]` workspace-wide, `MIT OR Apache-2.0`, and every ported module's
-ancestry read from the upstream licence itself and written down in
-[`docs/provenance.md`](docs/provenance.md) — including the one place the answer is *no* and what
-is being done about it.
+[Website](https://spacedatalab.org) · [API reference](https://docs.rs/spacelab) ·
+[Verification ledger](docs/verification.md) · [Limitations](docs/limitations.md) ·
+[Design](docs/design.md) · [Changelog](CHANGELOG.md)
 
-The claim it is organised around is not "fast" or "complete". It is that **every number it produces
-has been checked against something that did not come from here**, and that the check is written down
-— which oracle, which lineage, what residual, in which test — in
-[`docs/verification.md`](docs/verification.md), one row per check.
-
-## Install
+> **Astrodynamics in Rust, with the verification as the deliverable.** Time scales and reference
+> frames, SGP4, numerical and semi-analytical propagation with the full IERS 2010 force model, orbit
+> determination, GNSS, satellite laser ranging, coverage and constellation design, and
+> Earth-observation geometry. Every number it produces is checked against a lineage that did not
+> come from here, and each check is written down with its oracle and residual.
 
 ```toml
 [dependencies]
-spacelab = "0.1"        # the assembled API, or any single crate, e.g. spacelab-sgp4
+spacelab = "0.1"    # the assembled API, or any single crate, e.g. spacelab-sgp4
 ```
 
 ```sh
-pip install spacedatalab    # CPython 3.11+, and free-threaded 3.15t; `import spacelab`
+pip install spacedatalab    # CPython 3.11+ and free-threaded 3.15t; `import spacelab`
 ```
 
-The Python distribution is `spacedatalab` because `spacelab` on PyPI is an unrelated empty
-registration; the module is `spacelab` either way. The C ABI and its C++20 header build with
-CMake from [`crates/spacelab-capi`](crates/spacelab-capi).
+C and C++20: build [`crates/spacelab-capi`](crates/spacelab-capi) with CMake. From a checkout:
+`tools/fetch-eop.sh && cargo run -p spacelab --example ground_track`.
 
-From a checkout:
+## At a glance
 
-```sh
-tools/fetch-eop.sh
-cargo run -p spacelab --example ground_track
-cargo test --workspace
-```
-
-## The number that matters most
-
-Every other test compares one piece against a reference for that piece. One test runs the whole
-chain against a product nobody here produced: fit a seven-parameter arc to the **IGS final precise
-orbit** for 2025-01-01 — the weighted combination of ten analysis centres, in IGS20 / ITRF2020, at
-the satellite centre of mass — and report the post-fit residual in metres of real orbit.
+The whole chain against a product nobody here produced: a seven-parameter fit to the **IGS final
+precise orbit** for 2025-01-01, post-fit residual in metres of real orbit.
 
 | Third bodies | radial | along | cross | 3D RMS |
 |---|---|---|---|---|
@@ -51,14 +43,35 @@ the satellite centre of mass — and report the post-fit residual in metres of r
 | DE440 kernel | 0.054 | 0.063 | 0.045 | **0.094 m** |
 | Orekit 13.1.7, its own fit of the same file | 0.053 | 0.062 | 0.065 | **0.105 m** |
 
-Measured Earth orientation, the CIO frame chain, the geopotential in the true rotating frame,
-luni-solar attraction, solar radiation pressure, the Schwarzschild term, the automatic-differentiation
-variational equations and the square-root batch estimator all have to be right *together* for that to
-come out small. Two independent implementations land within a centimetre of each other, on
-solar-pressure scales agreeing to 0.3 %. `crates/spacelab/tests/igs_orbit_fit.rs`, and the other half
-of it is `tools/orekit-oracle/IgsOrbitFitOracle.java`.
+
+Earth orientation, the CIO frame chain, the geopotential, luni-solar attraction, solar pressure,
+relativity, the variational equations and the estimator all have to be right together for that to
+come out small. Two independent implementations agree within a centimetre
+([`igs_orbit_fit.rs`](crates/spacelab/tests/igs_orbit_fit.rs)).
+
+## Why it is different
+
+- **Time scales and frames are types.** `Epoch<Tai>` is not `Epoch<Ut1>`; `Rotation<Teme, Itrf>`
+  composes only with a matching frame, and only a `Transform` carries the `ω × r` a velocity needs.
+- **Epochs are exact.** An `i128` of nanoseconds since J2000, not a floating Julian date. UTC is a
+  calendar, not a scale, so converting it is fallible.
+- **Derived, not transcribed.** From the primary literature, with the symbolic derivations
+  committed in [`derivations/`](derivations/) and re-proved in Maxima on every run.
+- **Full-resolution models.** XGM2019e geopotential, FES2014b ocean tide to degree 100, the full
+  IAU 2000A nutation. Truncation is the caller's choice, never the data's.
+- **Independent oracles, chosen by lineage.** Orekit, NEPTUNE, NASA's LRO trajectory and the IGS
+  combination; two SOFA descendants count as one oracle.
+- **Mutation-tested.** Every crate has been through `cargo mutants`; each survivor is killed or
+  argued equivalent in a ledger.
+- **Lean by design.** A `no_std`, stack-allocated core: a degree-120 geopotential propagation holds
+  about 0.84 MB and allocates nothing.
+
+Each point is argued in full in [`docs/design.md`](docs/design.md).
 
 ## Crates
+
+<details>
+<summary>Every crate, what it does, and the section of the verification ledger that covers it</summary>
 
 <!-- BEGIN GENERATED CRATE TABLE — tools/gen-readme.py -->
 
@@ -99,82 +112,17 @@ of it is `tools/orekit-oracle/IgsOrbitFitOracle.java`.
 
 <!-- END GENERATED CRATE TABLE -->
 
-## What is different about this
+</details>
 
-**Time scales are types.** An `Epoch<Tai>` cannot be passed where an `Epoch<Ut1>` is expected. Those
-two differ by tens of seconds of Earth rotation, and no comment has ever prevented that mistake.
-Conversions that are definitionally exact return a value; conversions that need measured data take it
-as an argument and return a `Result`. The asymmetry is visible in the signatures.
+## Limits and provenance
 
-**Frames live in the type system.** `Rotation<Teme, Itrf>` composes with `Rotation<Gcrf, Teme>` and
-with nothing else; the compiler checks the chain and then erases it. A `Rotation` applies to a
-`Position`. Only a `Transform`, which carries the angular velocity, applies to a `StateVector` —
-because moving a velocity between rotating frames needs the `ω × r` term, and forgetting it costs
-465 m/s at the equator while still looking like a plausible orbit.
-
-**UTC is a calendar, not a scale.** Every other scale — TAI, TT, TDB, UT1 — ticks without
-interruption, so an integer nanosecond count names each of its moments once. UTC does not: a day with
-a leap second holds 86 401 of them, and `23:59:60` exists. There is no `Epoch<Utc>`, because it would
-be a lie the type system then enforced. UTC is `UtcDateTime`, and converting it to TAI is fallible.
-
-**Epochs are exact.** An `i128` of nanoseconds since J2000, not a floating Julian Date. An `f64` JD
-near 2460000 resolves to about 20 µs, which is why SOFA threads a two-part `(d1, d2)` split through
-all 192 of its routines. Fixed point solves it once, and the API never mentions it.
-
-**Every routine is derived, not transcribed.** From the primary literature — see
-[`derivations/BIBLIOGRAPHY.md`](derivations/BIBLIOGRAPHY.md) — with the symbolic derivation committed
-beside the code in [`derivations/`](derivations/) and re-proved on every run by
-[`derivations/verify.sh`](derivations/verify.sh), which asserts 49 identities in Maxima and fails if
-one of them stops holding. Constants are machine-generated at the source's own precision and emitted
-correctly rounded; `derivations/oracle_constants.py` checks that every reference value a generator
-prints is still pasted somewhere in the tree.
-
-**Models ship at full resolution.** The runtime degree, order and term count are the caller's choice,
-never baked low in the data: the geopotential carries XGM2019e, the ocean tide carries FES2014b to
-degree 100 with 35 waves, the nutation series is the full IAU 2000A. Truncating for convenience is
-treated as a defect, and an audit that found two of them is recorded in the history.
-
-**Nothing is a single source of truth.** Two oracles for numbers, and the second one is chosen for
-*lineage*, not for language: `pyerfa` and `sofars` are both SOFA descendants and therefore one oracle,
-not two. Where a genuinely independent implementation exists it is run — Orekit for the IERS
-Conventions chain, NEPTUNE for numerical propagation, NASA's reconstructed LRO trajectory for the
-lunar arc, the IGS combination for the whole thing.
-
-**Would the tests notice a wrong answer?** A green suite says the code passes as written, not that a
-wrong version would fail. `cargo mutants` rewrites one operator at a time and asks; every crate has
-been through it, every survivor is either killed by a new test or recorded in `.cargo/mutants.toml`
-with the argument for why it is equivalent, and `docs/verification.md` §8 is the ledger. It has found
-production defects the suite did not.
-
-**Speed and footprint are properties of the design, not a later pass.** The core is `no_std` with
-const-generic, stack-allocated state, so a degree-120 geopotential propagation holds about 0.84 MB
-and allocates nothing. Where a profile named a hot spot it was fixed and measured: the CIO frame
-transform went from 41.9 µs to 0.218 µs per call by exact interpolation of the slow CIP scalars —
-192×, at the `f64` floor — and the geopotential's scratch went from `O(n²)` to `O(n)` rolling rows,
-bit-identically. `cargo bench` carries the numbers.
-
-## What it does not claim
-
-`docs/limitations.md` states the uncertainty budget in two halves — the error the engine introduces,
-and the error it inherits — and says which one dominates. It is worth reading before quoting any
-accuracy number from here, because for TLE-driven work the second is a thousand times the first: our
-footprint-edge predicate places a boundary to 1.4 nm and the TLE feeding it is a kilometre out.
-Capabilities deliberately not built are listed there too, each with the condition that would reopen
-it.
-
-## Provenance
-
-We read papers, not implementations. Equations, algorithms and measured constants are free; source
-code is expression, and translating a program between languages is a derivative work. The rules — and
-why SOFA's permissive-but-encumbered licence is *declined* rather than forbidden — are in
-[`CONTRIBUTING.md`](CONTRIBUTING.md). The same register covers *data*: every embedded table, every
-fixture and every product a fetch script reads has a row with its terms as read and the date, and a
-CI step fails on a host or a file without one.
+[`docs/limitations.md`](docs/limitations.md) splits the error budget into what the engine adds and
+what it inherits; for TLE-driven work the second dominates by a factor of a thousand. Equations come
+from papers, not from other implementations: the rules are in [`CONTRIBUTING.md`](CONTRIBUTING.md),
+and every module and data source has its licence reading in
+[`docs/provenance.md`](docs/provenance.md).
 
 ## Licence
 
-`MIT OR Apache-2.0`. Thirty-two files are translations of permissively licensed code — Orekit and
-pyorbital (Apache-2.0), iquaflow and the `sgp4` crate (MIT) — and carry those notices in
-[`NOTICE`](NOTICE); every other module is written from the published mathematics.
-[`docs/provenance.md`](docs/provenance.md) records each reading, module by module and data source by
-data source, and says which one thing in this tree cannot be released.
+Licensed under either of [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option. Files
+translated from permissively licensed code carry their notices in [`NOTICE`](NOTICE).

@@ -8,7 +8,7 @@ assembled in NumPy. The null-hypothesis conclusion is then reproduced with the b
 to the Rust core.
 
 Build the wheel first, then run with it on the path:
-  cd crates/spacelab-python && maturin build --release -o /tmp/w
+  cd crates/spacelab-python-harness && maturin build --release -o /tmp/w
   uv run --no-project --with /tmp/w/*.whl --with numpy --with scikit-learn --with betula-cluster \
       python experiments/phase6_from_python.py
 """

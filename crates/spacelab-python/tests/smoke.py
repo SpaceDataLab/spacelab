@@ -2,7 +2,7 @@
 """Smoke test for the spacelab PyO3 bindings.
 
 Build and run:
-    cd crates/spacelab-python
+    cd crates/spacelab-python-harness
     maturin build --release -o /tmp/w
     uv run --no-project --with /tmp/w/*.whl python tests/smoke.py
 """

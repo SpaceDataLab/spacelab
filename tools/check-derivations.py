@@ -15,7 +15,8 @@ Three failure modes, all mechanical:
   * a ledger entry whose file no longer exists.
 
 The bridges (`spacelab-capi`, `spacelab-python`) are skipped: their claim is parity with the crates,
-measured in §6 and §7, not a formula of their own. `spacelab-gpu` is skipped because its lanes are
+measured in §6 and §7, not a formula of their own; so is `spacelab-python-harness`, which only loads
+the second. `spacelab-gpu` is skipped because its lanes are
 hardware-gated and its verdicts sit in §2.
 
     uv run python tools/check-derivations.py            # the census, by category
@@ -32,7 +33,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LEDGER_DOC = ROOT / "docs" / "verification.md"
 MARKER = "## 12 · Formula provenance census"
-SKIP_CRATES = {"spacelab-capi", "spacelab-python", "spacelab-gpu"}
+SKIP_CRATES = {"spacelab-capi", "spacelab-python", "spacelab-python-harness", "spacelab-gpu"}
 CATEGORIES = {"physics", "parser", "generated", "infra"}
 
 # What counts as naming a re-runnable check. `§4.13` is a verification row; a `tests/...rs` path is

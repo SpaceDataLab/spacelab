@@ -542,9 +542,11 @@ jobs:
       # run from Python, or the public API of the bindings is unguarded -- which it was until this
       # job existed. Release, because the propagations these tests run take minutes in debug.
       #
-      # Both wheels the crate ships, each on the interpreters it claims. `cp311-abi3` is built
-      # against 3.11, its floor and `requires-python`; `cp315-abi3.abi3t` against 3.15t, and run on
-      # both the GIL and the free-threaded 3.15 -- the free-threaded run is where
+      # Both wheels the bridge ships in, each on the interpreters it claims, built here through
+      # `spacelab-python-harness`; the wheel on PyPI links the same `register` in
+      # SpaceDataLab/spacedatalab. `cp311-abi3` is built against 3.11, its floor and
+      # `requires-python`; `cp315-abi3.abi3t` against 3.15t, and run on both the GIL and the
+      # free-threaded 3.15 -- the free-threaded run is where
       # `test_threads_get_the_serial_answer_and_leave_the_gil_off` has teeth.
       - uses: actions/setup-python@v7
         with:
@@ -553,7 +555,7 @@ jobs:
             3.15
             3.15t
       - name: build the abi3 and abi3t wheels
-        working-directory: crates/spacelab-python
+        working-directory: crates/spacelab-python-harness
         run: |
           pipx run maturin==1.15.0 build --release -i python3.11 -o dist/abi3
           pipx run maturin==1.15.0 build --release -i python3.15t -o dist/abi3t
@@ -563,7 +565,7 @@ jobs:
           for pair in python3.11:abi3 python3.15:abi3t python3.15t:abi3t; do
             py="${pair%%:*}"
             "$py" -m venv "/tmp/venv-$py"
-            "/tmp/venv-$py/bin/pip" install dist/"${pair##*:}"/*.whl
+            "/tmp/venv-$py/bin/pip" install ../spacelab-python-harness/dist/"${pair##*:}"/*.whl
             "/tmp/venv-$py/bin/python" tests/smoke.py
             "/tmp/venv-$py/bin/python" tests/bindings.py
           done

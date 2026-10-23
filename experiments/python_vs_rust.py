@@ -12,7 +12,7 @@ and misses whole passes; only as Δt → 0 does it converge to the event-detecte
 faster there.
 
 Build the wheel, then run with it on the path:
-  cd crates/spacelab-python && maturin build --release -o /tmp/w
+  cd crates/spacelab-python-harness && maturin build --release -o /tmp/w
   uv run --no-project --with /tmp/w/*.whl --with numpy python experiments/python_vs_rust.py
 """
 

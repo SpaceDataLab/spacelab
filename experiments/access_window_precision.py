@@ -12,7 +12,7 @@ engine scans (same analytic orbit, same ground cell, same mask), so any differen
 method, not the geometry. It needs no external data.
 
 Build the wheel first, then run with it on the path:
-  cd crates/spacelab-python && maturin build --release -o /tmp/w
+  cd crates/spacelab-python-harness && maturin build --release -o /tmp/w
   uv run --no-project --with /tmp/w/*.whl python experiments/access_window_precision.py
 """
 

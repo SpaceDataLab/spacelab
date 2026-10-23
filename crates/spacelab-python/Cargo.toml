@@ -6,17 +6,21 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Python bindings (PyO3) for the spacelab space-data computation core"
-# Not on crates.io: its distribution channel is PyPI, as abi3/abi3t wheels built by maturin. A source
-# crate that only makes sense once linked into CPython has no consumer on a Rust registry.
-publish = false
+description = "The PyO3 bindings of the spacelab crates, added to a Python module by `register`; the `spacedatalab` wheel on PyPI is built from them"
+homepage.workspace = true
+readme = "README.md"
+keywords = ["python", "pyo3", "bindings", "astrodynamics", "orbit"]
+categories = ["api-bindings", "aerospace", "science"]
+exclude.workspace = true
 
+# A library rather than the extension itself: the cdylib that links it owns the module and its name.
+# That is `spacedatalab-python` in SpaceDataLab/spacedatalab for the wheel on PyPI, and
+# `spacelab-python-harness` here for this repository's own Python tests.
 [lib]
 name = "spacelab_python"
-crate-type = ["cdylib"]
 
-# NB: intentionally does NOT inherit `[workspace.lints]` — the workspace forbids `unsafe_code`, which the
-# PyO3 module-init macro requires. This crate is the FFI boundary; the pure Rust core stays unsafe-free.
+# NB: intentionally does NOT inherit `[workspace.lints]` — the workspace forbids `unsafe_code`, which
+# PyO3's `#[pyclass]` expansion requires. This crate is the FFI boundary; the pure Rust core stays unsafe-free.
 
 [dependencies]
 spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
@@ -51,7 +55,7 @@ default = ["extension-module"]
 
 # `extension-module` tells PyO3 not to link libpython: the interpreter supplies the `Py*` symbols at
 # import, which is the only correct configuration for a shipped `cdylib` and the thing `abi3-py311`
-# promises. It is on by default and `pyproject.toml` also passes it explicitly, so the wheel is
+# promises. It is on by default and the wheel's `pyproject.toml` also passes it, so the wheel is
 # unaffected by this feature existing.
 #
 # What it costs is testability. A `#[test]` is an ordinary binary that nothing supplies those symbols

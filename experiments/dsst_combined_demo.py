@@ -6,7 +6,7 @@ Propagates a sun-synchronous LEO under the full conservative mean-element rates
 over a week. Each summed contribution is individually bit-exact against Orekit; this shows them
 composed into one semi-analytical propagator.
 
-Run after `maturin develop` (or `uvx maturin develop`) has installed `spacelab`.
+Run after `maturin develop` in `crates/spacelab-python-harness` has installed `spacedatalab`.
 """
 import numpy as np
 import spacedatalab as sp

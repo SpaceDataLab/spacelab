@@ -14,7 +14,7 @@ estimation-convergence demo, not a frames demo, so Earth rotation of the station
 omitted. Visibility is still gated by a geometric inertial-horizon test.
 
 Build the wheel first, then run with it on the path:
-  cd crates/spacelab-python && maturin build --release -o /tmp/w
+  cd crates/spacelab-python-harness && maturin build --release -o /tmp/w
   uv run --no-project --with /tmp/w/*.whl --with numpy python experiments/orbit_determination.py
 """
 

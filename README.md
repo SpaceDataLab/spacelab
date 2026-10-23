@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/spacedatalab)](https://pypi.org/project/spacedatalab/)
 [![Python](https://img.shields.io/pypi/pyversions/spacedatalab)](https://pypi.org/project/spacedatalab/)
 [![ci](https://github.com/SpaceDataLab/spacelab/actions/workflows/ci.yml/badge.svg)](https://github.com/SpaceDataLab/spacelab/actions/workflows/ci.yml)
-[![wheels](https://github.com/SpaceDataLab/spacelab/actions/workflows/wheels.yml/badge.svg)](https://github.com/SpaceDataLab/spacelab/actions/workflows/wheels.yml)
+[![wheels](https://github.com/SpaceDataLab/spacedatalab/actions/workflows/wheels.yml/badge.svg)](https://github.com/SpaceDataLab/spacedatalab/actions/workflows/wheels.yml)
 [![MSRV 1.94](https://img.shields.io/badge/MSRV-1.94-orange)](Cargo.toml)
 [![no_std core](https://img.shields.io/badge/core-no__std-informational)](crates/spacelab-core)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#licence)
@@ -114,7 +114,8 @@ Each point is argued in full in [`docs/design.md`](docs/design.md).
 | [`spacelab-ionosphere`](crates/spacelab-ionosphere) | NeQuick-G (Galileo) ionospheric electron-density and slant-TEC model, verified against the JRC reference implementation | [§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision) (4 rows) |
 | [`spacelab-ndm`](crates/spacelab-ndm) | CCSDS Navigation Data Messages: OPM and OEM readers and writers, CDM reader, in KVN | [§3 Orbital mechanics & automatic differentiation](docs/verification.md#3--orbital-mechanics--automatic-differentiation) (2 rows) |
 | [`spacelab-propagation`](crates/spacelab-propagation) | Orbit propagation: verified integrators (Runge-Kutta, multistep, symplectic, Taylor), the IERS 2010 force model, atmospheric density models, DSST and attitude | [§2 Numerical propagation, forces & DSST](docs/verification.md#2--numerical-propagation-forces--dsst) |
-| [`spacelab-python`](crates/spacelab-python) | Python bindings (PyO3) for the spacelab space-data computation core | [§7 The Python boundary](docs/verification.md#7--the-python-boundary) |
+| [`spacelab-python`](crates/spacelab-python) | The PyO3 bindings of the spacelab crates, added to a Python module by `register`; the `spacedatalab` wheel on PyPI is built from them | [§7 The Python boundary](docs/verification.md#7--the-python-boundary) |
+| [`spacelab-python-harness`](crates/spacelab-python-harness) | Loads spacelab-python into CPython as `spacedatalab`, for this repository's Python tests, figures and experiments | [§7 The Python boundary](docs/verification.md#7--the-python-boundary) |
 | [`spacelab-sensors`](crates/spacelab-sensors) | Coverage constraints: continuous scalar predicates over (satellite, cell, sensor) | [§4 Estimation, control, sensors, coverage & constellations](docs/verification.md#4--estimation-control-sensors-coverage--constellations) (13 rows) |
 | [`spacelab-sgp4`](crates/spacelab-sgp4) | Typed, batch-shaped SGP4 propagation for many satellites | [§3 Orbital mechanics & automatic differentiation](docs/verification.md#3--orbital-mechanics--automatic-differentiation) (8 rows) |
 | [`spacelab-signal`](crates/spacelab-signal) | Space signal processing: the Radon transform and filtered back-projection (tomography / SAR back-projection) | [§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision) (4 rows) |

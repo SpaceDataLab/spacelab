@@ -4182,13 +4182,18 @@ locally convenient.
 
 ## 7 · The Python boundary
 
-`spacelab-python` is a `cdylib`, so `cargo test --workspace` never links it: for a long time no Rust
-test executed a line of the bindings, and `cargo llvm-cov` measured its 2 640 lines at **0.00 %**.
+`spacelab-python` was a `cdylib` until 0.2.0, so `cargo test --workspace` never linked it: for a long
+time no Rust test executed a line of the bindings, and `cargo llvm-cov` measured its 2 640 lines at
+**0.00 %**. It is now a library whose `register` adds the bindings to the module of whichever cdylib
+links it: `spacelab-python-harness` here, and `spacedatalab-python` in SpaceDataLab/spacedatalab for
+the wheel on PyPI.
 What every table above verifies is the algorithm *under* the boundary. What crosses it — an argument
 landing in the slot it was named for, metres arriving where metres were expected, a flat list
 reshaped along the axis the caller meant — no test on either side can see.
 
-The tests are therefore in Python, and the CI `bindings` job builds the wheel and runs them. They
+The tests are therefore in Python, and the CI `bindings` job builds the wheel through the harness and
+runs them; the release workflow of SpaceDataLab/spacedatalab runs the same two files, checked out at
+the tag of the `spacelab-python` it links, against every wheel before it uploads it. They
 are deliberately **self-checking rather than golden**: a copied constant agrees with a swapped
 argument, so instead each one either feeds a solver the answer to its own question, asserts an
 invariant only the correct wiring satisfies, or injects a bias the routine must recover exactly.
@@ -5090,8 +5095,8 @@ missing tests rather than a property of PyO3.
 `#[pyfunction]` leaves the annotated `fn` an ordinary Rust function and generates its wrapper
 alongside, so a `#[cfg(test)]` module in `lib.rs` calls it directly, with no interpreter, no GIL and
 no new dependency. What does *not* work is a test whose signature touches the interpreter. `pyo3` is
-depended on with `extension-module`, which is right for a `cdylib` — the interpreter supplies `Py*`
-at import — and which leaves a test binary with undefined symbols (`PyErr_SetObject`,
+depended on with `extension-module`, which is right for the `cdylib` that links it — the interpreter
+supplies `Py*` at import — and which leaves a test binary with undefined symbols (`PyErr_SetObject`,
 `PyUnicode_FromStringAndSize`, `PyTuple_Type`, …). Measured twice, once through `.expect()` and once
 through a `let Ok(..) = .. else` that instantiates neither `Debug` nor `Display` on `PyErr`; both
 failed the same way, so the reach stops at the *signature* and not at the error path. The token is a
@@ -7993,9 +7998,11 @@ making `cargo` strip them from the published manifests, and would have shipped t
 cannot build. In a repository whose claim is its tests that is the wrong trade. After the change:
 **32 crates packaged and verify-built, 7.5 MB total**, largest `spacelab-propagation` at 2.8 MB.
 
-Three crates stay `publish = false`, each with the reason in its manifest rather than as a bare
+Four crates stay `publish = false`, each with the reason in its manifest rather than as a bare
 line: `spacelab-capi` has no Rust API to depend on (what a consumer wants is the static library and
-the header), `spacelab-python`'s distribution channel is PyPI as an abi3 wheel, and `spacelab-gpu`'s
+the header), `spacelab-testkit` is a path dev-dependency that `cargo publish` drops,
+`spacelab-python-harness` only loads the bridge for this repository's Python tests (the wheel on PyPI
+is built in SpaceDataLab/spacedatalab from the published `spacelab-python`), and `spacelab-gpu`'s
 kernels are gated on hardware CI does not have, so nothing in it has a verification row.
 
 `cargo publish --dry-run` is the wrong command for this tree and is deliberately not what CI runs: it

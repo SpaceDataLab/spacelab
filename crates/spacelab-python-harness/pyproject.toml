@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+# A test harness, never uploaded: the distribution on PyPI is `spacedatalab`, from
+# SpaceDataLab/spacedatalab. The module name is the same, so tests and experiments import what users do.
+name = "spacelab-python-harness"
+dynamic = ["version"]
+requires-python = ">=3.11"
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+module-name = "spacedatalab"
+features = ["pyo3/extension-module"]

@@ -14,7 +14,7 @@ and the 8 jars + orekit-data — see `tools/orekit-oracle/README.md`):
     javac -cp "/tmp/orekit-bench/jars/*" -d /tmp/orekit-bench/classes tools/orekit-oracle/OrekitPropagationBench.java
     java  -cp "/tmp/orekit-bench/jars/*:/tmp/orekit-bench/classes" OrekitPropagationBench
 
-Then, with the spacelab wheel built (`cd crates/spacelab-python && maturin build --release -o /tmp/w`):
+Then, with the spacelab wheel built (`cd crates/spacelab-python-harness && maturin build --release -o /tmp/w`):
 
     uv run --no-project --with /tmp/w/*.whl --with numpy python experiments/orekit_benchmark.py
 

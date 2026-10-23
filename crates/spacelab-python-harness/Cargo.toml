@@ -1,0 +1,28 @@
+[package]
+name = "spacelab-python-harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Loads spacelab-python into CPython as `spacedatalab`, for this repository's Python tests, figures and experiments"
+# Never published: the `spacedatalab` wheel on PyPI is built by SpaceDataLab/spacedatalab from the same
+# `register`. This one exists so the bridge is tested here, against this tree's crates.
+publish = false
+
+[lib]
+name = "spacelab_python_harness"
+crate-type = ["cdylib"]
+# The module is one call; what tests it is `crates/spacelab-python/tests`, from Python.
+test = false
+doctest = false
+
+# NB: like spacelab-python, does NOT inherit `[workspace.lints]`: the module-init macro needs `unsafe_code`.
+
+[dependencies]
+spacelab-python = { path = "../spacelab-python", version = "0.2.0" }
+pyo3 = { version = "0.30", features = ["abi3-py311", "abi3t-py315"] }
+
+[features]
+onnx = ["spacelab-python/onnx"]

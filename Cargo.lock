@@ -2948,6 +2948,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "spacelab-python-harness"
+version = "0.2.0"
+dependencies = [
+ "pyo3",
+ "spacelab-python",
+]
+
+[[package]]
 name = "spacelab-sensors"
 version = "0.2.0"
 dependencies = [

@@ -37,7 +37,8 @@ import matplotlib.pyplot as plt  # after `use`: the backend is chosen before pyp
 
 ROOT = Path(__file__).resolve().parent.parent
 FIGURES = ROOT / "docs" / "figures"
-READMES = (ROOT / "README.md", ROOT / "crates" / "spacelab-python" / "README.md")
+# The PyPI page carries the same block, copied from this README by SpaceDataLab/spacedatalab.
+READMES = (ROOT / "README.md",)
 # Absolute, so the PyPI page, which resolves no relative link, shows them too.
 URL = "https://raw.githubusercontent.com/SpaceDataLab/spacelab/main/docs/figures"
 BEGIN = "<!-- BEGIN GENERATED FIGURES — tools/gen-figures.py -->"

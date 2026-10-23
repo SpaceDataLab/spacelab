@@ -7,7 +7,7 @@ pattern is also summarised in-console so the science is verifiable without a dis
 inclination i, coverage peaks near ±i and vanishes past the reach band ±(i + footprint)).
 
 Build the wheel, then run with it on the path:
-  cd crates/spacelab-python && maturin build --release -o /tmp/w
+  cd crates/spacelab-python-harness && maturin build --release -o /tmp/w
   uv run --no-project --with /tmp/w/*.whl --with numpy --with matplotlib \
       python experiments/coverage_heatmap.py [out.png]
 """

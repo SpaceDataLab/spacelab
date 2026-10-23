@@ -9,7 +9,7 @@ mere rounding. This is the propagator every coverage and access-window result is
 agreement with the reference is load-bearing.
 
 Build the wheel first, then run with it on the path:
-  cd crates/spacelab-python && maturin build --release -o /tmp/w
+  cd crates/spacelab-python-harness && maturin build --release -o /tmp/w
   uv run --no-project --with /tmp/w/*.whl --with sgp4 python experiments/sgp4_validation.py
 """
 

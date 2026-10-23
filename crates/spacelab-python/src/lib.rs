@@ -1,9 +1,9 @@
-//! PyO3 bindings for the spacelab core — the first slice of the `Rust core → Python API` bridge.
+//! The PyO3 bridge of the spacelab core: Python bindings for the `spacelab-*` crates.
 //!
-//! Exposes pure, numeric primitives (no time or frame types yet) so a Python user can call the Rust
-//! astrodynamics and gravity kernels directly: two-body and Lambert transfers, the analytic halo seed,
-//! and the high-degree geopotential. Vectors cross the boundary as plain length-3 lists/tuples; failures
-//! (no Lambert arc, invalid libration point, degree over the model cap) raise `ValueError`.
+//! [`register`] adds the bindings to a Python module, which belongs to the cdylib that links this
+//! crate: the `spacedatalab` wheel on PyPI, built by
+//! [SpaceDataLab/spacedatalab](https://github.com/SpaceDataLab/spacedatalab), or
+//! `spacelab-python-harness`, which loads the bridge for spacelab's own Python tests.
 //!
 //! ```python
 //! import spacedatalab as sl
@@ -11,7 +11,7 @@
 //! a = sl.geopotential_acceleration(70, [6778e3, 0, 0])   # XGM2019e to degree 70
 //! ```
 //!
-//! Build:  `cd crates/spacelab-python && maturin develop` (or `maturin build --release`).
+//! Vectors cross the boundary as lists or tuples; an input a kernel rejects raises `ValueError`.
 
 // The shipped artefact must never be built without `extension-module`. Without it PyO3 links
 // libpython directly, which imports fine on the machine that built it and then breaks the
@@ -25,7 +25,7 @@
     not(test)
 ))]
 compile_error!(
-    "spacelab-python builds a cdylib for CPython and needs the `extension-module` feature; \
+    "spacelab-python is linked into a CPython extension and needs the `extension-module` feature; \
      `--no-default-features` is for `cargo test --features test-interpreter` only"
 );
 
@@ -6134,8 +6134,8 @@ fn delay_breakpoints(delays: Vec<f64>, t0: f64, t1: f64, levels: usize) -> PyRes
     })
 }
 
-#[pymodule]
-fn spacedatalab(m: &Bound<'_, PyModule>) -> PyResult<()> {
+/// Adds every binding to `m`, the Python module of the cdylib that links this crate.
+pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Sensor>()?;
     m.add_class::<PyDensityRom>()?;
     m.add_class::<PyDmdc>()?;

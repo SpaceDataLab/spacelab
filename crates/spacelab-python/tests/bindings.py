@@ -18,7 +18,7 @@ Companion to smoke.py, which covers the rest of the surface; `test_every_export_
 holds the two together.
 
 Build and run:
-    cd crates/spacelab-python
+    cd crates/spacelab-python-harness
     maturin build --release -o /tmp/w
     uv run --no-project --with /tmp/w/*.whl python tests/bindings.py
 """

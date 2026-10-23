@@ -19,7 +19,7 @@ const HEADER_MARK: &str = "/* ---- Closed-loop control ---- */";
 /// The banner that opens the control section of the Python bridge …
 const BRIDGE_MARK: &str = "// ── Control: the loop,";
 /// … and the module registration that closes it.
-const BRIDGE_END: &str = "#[pymodule]";
+const BRIDGE_END: &str = "pub fn register(";
 
 /// A marker that stopped matching would leave an empty set on one side, and two empty sets compare
 /// equal — the vacuous pass this test exists to prevent. Both extractions must clear this floor.

@@ -1,0 +1,23 @@
+[package]
+name = "spacelab-autodiff"
+description = "Forward-mode automatic differentiation: dual numbers for exact Jacobians and sensitivities."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["autodiff", "dual-numbers", "differentiation", "jacobian", "hyperdual"]
+categories = ["mathematics", "science"]
+exclude.workspace = true
+
+[dependencies]
+libm = "0.2"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }

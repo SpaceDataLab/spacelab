@@ -1,0 +1,39 @@
+/* Reference values for `sar::src_fm_rate`, at 60 digits.
+
+   The secondary-range-compression FM rate of the Range-Doppler algorithm — the residual
+   range-frequency chirp that the range-azimuth coupling leaves after range compression:
+
+       K_src(f_eta) = 2*V^2*(f0*D0)^3 / (R0*c*f_eta^2),   f0 = c/lambda,
+       D0           = sqrt(1 - (lambda*f_eta/(2*V))^2)
+
+   The existing focusing tests all run at a spaceborne geometry, where the migration factor
+   lambda*f_eta/(2*V) is ~0.012 and D0 is 1 to within 1e-4. Every factor of D0 is therefore invisible
+   there — a mutation that drops the square, flips the sign under the root or replaces the whole
+   radicand by 1 moves K_src by ~2e-4 relative. These three cases put the migration factor at 0.75,
+   0.5 and 0.9 instead, so D0^3 is 0.29, 0.65 and 0.083 and no factor of it can hide. They are chosen
+   to exercise the formula, not to describe a real sensor; the third has a negative f_eta so that the
+   two squares have to survive it.
+
+   Bigfloats throughout so the reference is limited by the f64 the test compares against. */
+
+fpprec: 60$
+c: 299792458$
+
+d0(lam, f, v)  := sqrt(1 - (lam*f/(2*v))^2)$
+ksrc(lam, f, v, r) := bfloat(2*v^2*(c/lam*d0(lam, f, v))^3 / (r*c*f^2))$
+
+print("A  lam=0.30 f=10000 v=2000 R0=500e3  mig=0.75 -> K_src =",
+      ksrc(3/10, 10000, 2000, 500000))$
+print("B  lam=0.06 f= 5000 v= 300 R0=800e3  mig=0.50 -> K_src =",
+      ksrc(3/50, 5000, 300, 800000))$
+print("C  lam=0.25 f=-7200 v=1000 R0=250e3  mig=-0.90 -> K_src =",
+      ksrc(1/4, -7200, 1000, 250000))$
+
+/* Ratios that hold the migration factor fixed, so D0 cancels and the remaining exponents stand
+   alone. They restate lambda^-3, f_eta^-2, V^2 and R0^-1 without restating the formula. */
+base : [3/10, 10000, 2000, 500000]$
+ratio(a) := bfloat(apply(ksrc, a) / apply(ksrc, base))$
+print("lambda x2, f_eta /2 (mig fixed)", ratio([3/5,  5000, 2000, 500000]))$
+print("lambda x2, v x2     (mig fixed)", ratio([3/5, 10000, 4000, 500000]))$
+print("f_eta x2, v x2      (mig fixed)", ratio([3/10, 20000, 4000, 500000]))$
+print("R0 x2                          ", ratio([3/10, 10000, 2000, 1000000]))$

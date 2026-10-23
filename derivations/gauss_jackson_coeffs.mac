@@ -1,0 +1,61 @@
+/* Gauss–Jackson / Störmer–Cowell ordinate coefficients for x'' = a(x), derived from the exactness
+ * (moment) conditions — never transcribed from a table.
+ *
+ * The second-difference formula   x_{n+1} - 2 x_n + x_{n-1} = h^2 * sum_j w_j a(t_j)
+ * is required to be exact for every polynomial x(t) = t^m. With h = 1 and t_n = 0, x(t) = t^m gives
+ *   LHS = 1^m - 2*0^m + (-1)^m = 1^m + (-1)^m           (m >= 1; = 0 at m = 0)
+ *   a(t) = x''(t) = m(m-1) t^(m-2),   so  RHS = m(m-1) * sum_j w_j (t_j)^(m-2).
+ * Hence for each m >= 2 the one linear condition
+ *
+ *     sum_j w_j (t_j)^(m-2) = (1^m + (-1)^m) / (m(m-1)).
+ *
+ * Eight nodes -> eight conditions (m = 2..9) -> exact through degree 9, i.e. an 8th-order method.
+ *   - Störmer  predictor (explicit): nodes a_n, a_{n-1}, ..., a_{n-7}   -> offsets  0,-1,...,-7
+ *   - Cowell   corrector (implicit): nodes a_{n+1}, a_n, ..., a_{n-6}   -> offsets  1, 0,...,-6
+ *
+ *   maxima --very-quiet -b gauss_jackson_coeffs.mac
+ */
+
+mrhs(m) := (1^m + (-1)^m) / (m*(m-1));
+
+/* Solve the 8x8 moment system for the given node offsets; return the coefficient list. */
+solve_coeffs(nodes) := block(
+    [n, w, eqs, sol],
+    n : length(nodes),
+    w : makelist(concat('w, j), j, 1, n),
+    /* condition for m = 2 .. n+1 : sum_j w_j nodes_j^(m-2) = rhs(m). nodes_j^0 := 1 even at node 0. */
+    eqs : makelist(
+              sum( w[j] * (if (m-2) = 0 then 1 else nodes[j]^(m-2)), j, 1, n) = mrhs(m),
+              m, 2, n+1),
+    sol : solve(eqs, w),
+    map(rhs, first(sol))
+);
+
+stormer_nodes : [0, -1, -2, -3, -4, -5, -6, -7];
+cowell_nodes  : [1, 0, -1, -2, -3, -4, -5, -6];
+
+P : solve_coeffs(stormer_nodes);
+C : solve_coeffs(cowell_nodes);
+
+print("Stormer predictor coefficients (a_n .. a_{n-7}):");
+for c in P do print("  ", c);
+print("Stormer sum (=1?):", ratsimp(apply("+", P)));
+
+print("Cowell corrector coefficients (a_{n+1} .. a_{n-6}):");
+for c in C do print("  ", c);
+print("Cowell sum (=1?):", ratsimp(apply("+", C)));
+
+/* Confirm the order: the first unmatched moment (m = 10, exponent 8) must be nonzero for both,
+ * proving the methods are exactly order 8 (not accidentally higher). */
+resid(coeffs, nodes, m) := ratsimp( sum(coeffs[j]*(if (m-2)=0 then 1 else nodes[j]^(m-2)), j, 1, length(nodes)) - mrhs(m) );
+print("Stormer m=9 residual (=0?):", resid(P, stormer_nodes, 9));
+print("Stormer m=10 residual (leading error, !=0):", resid(P, stormer_nodes, 10));
+print("Cowell  m=9 residual (=0?):", resid(C, cowell_nodes, 9));
+print("Cowell  m=10 residual (leading error, !=0):", resid(C, cowell_nodes, 10));
+
+/* Emit full-precision decimals for the Rust literals (transcribed FROM the CAS, not from memory). */
+print("--- Rust literals (30 digits) ---");
+print("STORMER:");
+for c in P do print("  ", bfloat(c), ",");
+print("COWELL:");
+for c in C do print("  ", bfloat(c), ",");

@@ -1,0 +1,116 @@
+/* The frame algebra of `spacelab-frames::rotation` and `::teme`, proved rather than sampled.
+
+   The frame chain is checked against ERFA numerically (verification.md, the `frames` rows). That
+   settles the *angles*. It says nothing about the algebra wrapped around them: whether
+   `Transform::inverse` really inverts `Transform::state`, what that rests on, and whether the single
+   angular-velocity vector `teme_to_itrf` attaches to a two-rotation chain is the right one. Those
+   are identities, so they are proved here.
+
+   Claims, in order:
+     (1) Mat3::rot3(t) is orthogonal, det = +1, and fixes z-hat.
+     (2) Transform::state then Transform::inverse().state is the identity, for ANY proper rotation
+         and ANY omega -- no small-angle, no alignment assumption.
+     (3) (2) rests on det(R) = +1 and on nothing else. With an improper orthogonal R the round trip
+         is wrong by exactly -2*(omega x r). `Rotation::from_matrix` asserts properness and never
+         checks it, so this is the precondition the type system does not carry.
+     (4) teme_to_itrf's omega = omega*z-hat "expressed in TEME" is exact for the sidereal part,
+         because rot3 fixes z-hat; the whole of the error is the polar-motion rate it drops.         */
+
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+zhat : [0, 0, 1]$
+
+/* ---- (1) the sidereal rotation ------------------------------------------------------------- */
+rot3(t) := matrix([cos(t), sin(t), 0], [-sin(t), cos(t), 0], [0, 0, 1])$
+R3 : rot3(g)$
+print("rot3 . rot3^T - I  =", trigsimp(R3 . transpose(R3) - ident(3)))$
+print("det rot3           =", trigsimp(determinant(R3)))$
+print("rot3 . zhat - zhat =", trigsimp(R3 . transpose(matrix(zhat)) - transpose(matrix(zhat))))$
+
+/* ---- a general proper rotation, 3-1-3 Euler, so orthogonality is structural ----------------- */
+rot1(t) := matrix([1, 0, 0], [0, cos(t), sin(t)], [0, -sin(t), cos(t)])$
+R : trigsimp(rot3(ps) . rot1(th) . rot3(ph))$
+print("general R: R.R^T - I =", trigsimp(R . transpose(R) - ident(3)))$
+print("general R: det R     =", trigsimp(determinant(R)))$
+
+/* ---- (2) the round trip --------------------------------------------------------------------- */
+/* state(T, s): rB = R.r, vB = R.(v - omega x r); inverse(T): R^T and omega' = R.(-omega).        */
+tovec(M) := [M[1][1], M[2][1], M[3][1]]$
+apply_rot(M, a) := tovec(M . transpose(matrix(a)))$
+
+r     : [r1, r2, r3]$
+v     : [v1, v2, v3]$
+omega : [w1, w2, w3]$
+
+forward(M) := block([rB, vB],
+  rB : apply_rot(M, r),
+  vB : apply_rot(M, v - cross(omega, r)),
+  [rB, vB])$
+
+backward(M, rB, vB) := block([Mi, wi],
+  Mi : transpose(M),
+  wi : apply_rot(M, -omega),                      /* Transform::inverse's omega, expressed in `To` */
+  [apply_rot(Mi, rB), apply_rot(Mi, vB - cross(wi, rB))])$
+
+fw   : forward(R)$
+back : backward(R, fw[1], fw[2])$
+print("round trip, position residual =", trigsimp(back[1] - r))$
+print("round trip, velocity residual =", trigsimp(back[2] - v))$
+
+/* ---- (3) the precondition -------------------------------------------------------------------- */
+/* S = R . diag(1,1,-1): still orthogonal, det = -1. Same code path, different answer.            */
+S : trigsimp(R . matrix([1,0,0],[0,1,0],[0,0,-1]))$
+print("improper S: S.S^T - I =", trigsimp(S . transpose(S) - ident(3)))$
+print("improper S: det S     =", trigsimp(determinant(S)))$
+fwS   : forward(S)$
+backS : backward(S, fwS[1], fwS[2])$
+print("improper, position residual =", trigsimp(backS[1] - r))$
+print("improper, velocity residual =", trigsimp(backS[2] - v))$
+print("  compared with -2*(omega x r) =", trigsimp(backS[2] - v + 2*cross(omega, r)))$
+
+/* ---- (4) the angular velocity teme_to_itrf attaches ------------------------------------------ */
+/* The chain is P . rot3(g) with P = pef_to_itrf(xp, yp, sp) taken constant. The angular velocity
+   of PEF relative to TEME is d/dt of rot3(g(t)): the skew matrix Omega with R' = -Omega . R, whose
+   axial vector is the omega the Transform carries, expressed in TEME.                            */
+depends(g, t)$
+Rt   : rot3(g)$
+Rdot : diff(Rt, t)$
+W    : trigsimp(- Rdot . transpose(Rt))$           /* skew, in the TEME frame */
+print("d/dt rot3, as a skew matrix in TEME =", W)$
+print("  its axial vector = [W[3][2], W[1][3], W[2][1]] =", [W[3][2], W[1][3], W[2][1]])$
+print("  i.e. omega = gdot * zhat, exactly, with no dependence on g")$
+
+/* And the part that is dropped, sized. */
+omega0  : 7.292115146706979e-5$
+r_eq    : 6378137.0$
+v_leo   : 7660.0$
+pm_rate : 0.3 * %pi/(180*3600) / (365.25*86400)$   /* 0.3 arcsec/yr, the wander teme.rs quotes */
+print("omega x r at the equator, m/s =", float(omega0*r_eq))$
+print("  as a fraction of a LEO speed =", float(omega0*r_eq/v_leo))$
+print("polar-motion rate, rad/s =", float(pm_rate),
+      "  times r_eq, m/s =", float(pm_rate*r_eq))$
+print("  ratio to the sidereal term =", float(pm_rate/omega0))$
+
+/* ---- (5) polar motion: the transpose identity, and why the reversed product almost passes ------ */
+/* `pef_to_itrf` builds R1(-yp) . R2(-xp) . R3(sp) and claims it is W(t)^T with
+   W(t) = R3(-sp) . R2(xp) . R1(yp), the IERS Conventions' ITRS-to-intermediate matrix.            */
+rot1m(t) := matrix([1, 0, 0], [0, cos(t), sin(t)], [0, -sin(t), cos(t)])$
+rot2m(t) := matrix([cos(t), 0, -sin(t)], [0, 1, 0], [sin(t), 0, cos(t)])$
+rot3m(t) := matrix([cos(t), sin(t), 0], [-sin(t), cos(t), 0], [0, 0, 1])$
+
+W    : rot3m(-sp) . rot2m(xp) . rot1m(yp)$
+shipped : rot1m(-yp) . rot2m(-xp) . rot3m(sp)$
+print("shipped - W^T =", trigsimp(shipped - transpose(W)))$
+
+/* The fourth candidate the module's test rejects: every factor and every sign kept, order reversed.
+   Rotations through microradians nearly commute, so the miss is the commutator -- second order.   */
+reversed : rot3m(sp) . rot2m(-xp) . rot1m(-yp)$
+d : trigsimp(reversed - shipped)$
+small : subst([xp = eps*a, yp = eps*b, sp = eps*c], d)$
+lead : ratsimp(coeff(taylor(small, eps, 0, 2), eps, 2))$
+print("reversed - shipped, leading order in the angles =", lead)$
+print("  (first order in eps cancels: ", ratsimp(coeff(taylor(small, eps, 0, 2), eps, 1)), ")")$
+
+/* Sized on the fixture's own magnitudes: |xp|, |yp| ~ 3e-6 rad, sp ~ -2e-10 rad. */
+mag : subst([a = 3.0e-6/1, b = 3.0e-6/1, c = -2.3e-10/1, eps = 1], lead)$
+print("largest element at |xp| = |yp| = 3e-6 rad, sp = -2.3e-10 rad =",
+      float(lmax(map(abs, flatten(args(mag))))))$

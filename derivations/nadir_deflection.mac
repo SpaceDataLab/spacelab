@@ -1,0 +1,85 @@
+/* The angle between the geocentric nadir and the geodetic nadir, and its rate.
+
+   `Cone` and `AgileOptical` measured off-nadir from `-r/|r|`, the direction to the Earth's centre.
+   A nadir-pointing attitude built on the local vertical holds the ellipsoid's own inward normal
+   instead. This file establishes two things the Rust side asserts:
+
+     1. the deflection's maximum, in closed form, and where it sits -- 45.096 deg, not 45;
+     2. |d(delta)/d(phi)| <= e^2/(1-e^2) exactly, which is what makes multiplying the cone's
+        boresight-turn term by 1/(1-e^2) a *bound* rather than a fitted fudge.
+
+   Both are checked against a numeric sweep in the same run, because a closed form nobody evaluated
+   is a hypothesis. */
+
+fl : 1/298.257223563$
+e2 : 2*fl - fl^2$
+a  : 6378137.0$
+
+/* --- 1. The surface deflection -------------------------------------------------------------- */
+
+/* On the surface, tan(phi') = (1-e^2) tan(phi) with phi geodetic and phi' geocentric. */
+d(phi) := phi - atan((1-e2)*tan(phi))$
+
+closed : atan(e2/(2*sqrt(1-e2)))$
+print("closed form, deg:", float(closed*180/%pi))$
+print("predicted argmax atan(1/sqrt(1-e2)), deg:", float(atan(1/sqrt(1-e2))*180/%pi))$
+
+best : 0$ bestphi : 0$
+for k : 1 thru 89000 do (
+  p : k*%pi/180000,
+  v : float(d(p)),
+  if v > best then (best : v, bestphi : p)
+)$
+gap : abs(float(closed*180/%pi) - float(best*180/%pi))$
+print("numeric max, deg:", float(best*180/%pi), " at, deg:", float(bestphi*180/%pi))$
+if gap < 1e-6 then print("deflection closed form agrees with the sweep")
+else print("MISMATCH: closed form and sweep differ by", gap, "deg")$
+
+/* --- 2. The deflection at height ------------------------------------------------------------ */
+
+/* The satellite's own geodetic position, not the sub-satellite point: the ratio
+   (N(1-e^2)+h)/(N+h) tends to 1 with height, so the deflection shrinks. */
+N(phi) := a/sqrt(1 - e2*sin(phi)^2)$
+dh(phi, h) := phi - atan( (N(phi)*(1-e2)+h)*sin(phi) / ((N(phi)+h)*cos(phi)) )$
+
+maxdefl(h) := block([b : 0, p, v],
+  for k : 1 thru 8900 do (
+    p : k*%pi/18000, v : float(dh(p, h)), if v > b then b : v
+  ), float(b*180/%pi))$
+
+for h in [0.0, 550e3, 700e3, 35786e3] do
+  print("h m:", h, " max deflection deg:", maxdefl(h))$
+
+/* --- 3. The rate bound ---------------------------------------------------------------------- */
+
+/* dg/dt for a pointed cone carries |w| * |d(bhat)/dt|. Going from the geocentric nadir to the
+   geodetic one multiplies the boresight's turn rate by at most 1 + max|d(delta)/d(phi)|, and the
+   supremum is at the pole:
+
+     d(phi')/d(phi) = (1-e^2) sec^2(phi) / (1 + (1-e^2)^2 tan^2(phi))
+     phi -> pi/2  =>  d(phi')/d(phi) -> 1/(1-e^2)
+     d(delta)/d(phi) = 1 - d(phi')/d(phi) -> -e^2/(1-e^2)
+
+   and at the equator d(delta)/d(phi) = +e^2, which is the smaller of the two. */
+
+dpp : diff(atan((1-e2)*tan(phi)), phi)$
+at_equator : float(subst(phi = 0, dpp))$
+limit_at_pole : float(limit(dpp, phi, %pi/2, minus))$
+print("d(phi')/d(phi) at equator:", at_equator, " (1-e^2 =", float(1-e2), ")")$
+print("d(phi')/d(phi) at pole:  ", limit_at_pole, " (1/(1-e^2) =", float(1/(1-e2)), ")")$
+
+bound : float(e2/(1-e2))$
+print("analytic bound e^2/(1-e^2):", bound)$
+
+/* The same quantity swept numerically, over latitude and over height, by central differences --
+   an independent route to the same number. */
+ddphi(phi, h) := (dh(phi+1e-6, h) - dh(phi-1e-6, h))/2e-6$
+worst : 0$
+for h in [0.0, 200e3, 550e3, 700e3, 2000e3, 20200e3, 35786e3] do
+  for k : 1 thru 1799 do (
+    v : float(abs(ddphi(k*%pi/3600, h))),
+    if v > worst then worst : v
+  )$
+print("numeric max |d(delta)/d(phi)| over lat and height:", worst)$
+if worst <= bound then print("rate bound holds: the sweep never exceeds e^2/(1-e^2)")
+else print("BOUND VIOLATED: sweep", worst, "exceeds", bound)$

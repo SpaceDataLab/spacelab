@@ -1,0 +1,98 @@
+/* First-order secular rates under J2, derived from the disturbing function rather than quoted.
+ *
+ * KeplerianElements::anomalistic_mean_motion codes
+ *     Mdot = n [1 + 3/4 J2 (Re/p)^2 sqrt(1-e^2) (3 cos^2 i - 1)],
+ * and no numerical oracle can pin the sqrt(1-e^2) factor: the node-crossing check that covers the
+ * neighbouring rates runs at i = 60 deg, where the Mdot and omegadot corrections cancel to within
+ * the O(J2) osculating-versus-mean floor of any propagated trajectory. This derivation is the
+ * oracle instead — average the J2 disturbing function over one revolution, push it through
+ * Lagrange's planetary equations, and emit a table for the Rust test.
+ *
+ * Run: timeout 180 maxima --very-quiet -b derivations/j2_secular_rates.mac
+ */
+
+/* U = mu/r [1 - J2 (Re/r)^2 P2(sin phi)], sin phi = sin i sin(omega + nu); the disturbing part is
+   everything past the point mass. */
+P2(x) := (3*x^2 - 1)/2$
+R_inst : -mu*J2*Re^2/r^3 * P2(sin(inc)*sin(w + nu))$
+
+/* Average over one revolution in the mean anomaly. dM = (r^2 / (a^2 sqrt(1-e^2))) dnu turns the
+   integral into one over the true anomaly, where r = p/(1 + e cos nu) is rational in cos nu. */
+r_of_nu : p/(1 + e*cos(nu))$
+integrand : ratsimp(subst(r_of_nu, r, R_inst) * r_of_nu^2/(a^2*sqrt(1-e^2)))$
+R_bar : ratsimp(integrate(integrand, nu, 0, 2*%pi)/(2*%pi))$
+R_bar : ratsimp(subst(a*(1-e^2), p, R_bar))$
+print("<R> = ", R_bar)$
+
+/* Lagrange's planetary equations, secular part. */
+Mdot : n - (1-e^2)/(n*a^2*e)*diff(R_bar, e) - 2/(n*a)*diff(R_bar, a)$
+Wdot : 1/(n*a^2*sqrt(1-e^2)*sin(inc))*diff(R_bar, inc)$
+wdot : -cos(inc)/(n*a^2*sqrt(1-e^2)*sin(inc))*diff(R_bar, inc)
+       + sqrt(1-e^2)/(n*a^2*e)*diff(R_bar, e)$
+
+/* mu = n^2 a^3 closes the system; the coded forms are written in terms of p = a(1-e^2). */
+kepler3 : mu = n^2*a^3$
+reduce(x) := trigsimp(ratsimp(subst(a*(1-e^2), p, subst(rhs(kepler3), mu, x))))$
+
+coded_M : n*(1 + 3/4*J2*(Re/p)^2*sqrt(1-e^2)*(3*cos(inc)^2 - 1))$
+coded_W : -3/2*n*J2*(Re/p)^2*cos(inc)$
+coded_w : 3/4*n*J2*(Re/p)^2*(5*cos(inc)^2 - 1)$
+
+check(name, derived, coded) := block([d],
+  d : reduce(derived - subst(a*(1-e^2), p, coded)),
+  print(name, ": derived - coded = ", d),
+  if d # 0 then error("derivation disagrees with the code: ", name))$
+
+check("Mdot", Mdot, coded_M)$
+check("Wdot", Wdot, coded_W)$
+check("wdot", wdot, coded_w)$
+
+/* The golden table the Rust test asserts against. Columns: a, e, i(deg), Re, J2, mu, Mdot.
+   The inclinations avoid 60 deg on purpose - that is where the Mdot and wdot corrections cancel. */
+fpprec : 40$
+rows : [[7278137.0,  0.0,   20.0],
+        [7278137.0,  0.3,   20.0],
+        [7278137.0,  0.3,   98.0],
+        [26560000.0, 0.72, 116.5],
+        [42164000.0, 0.001,  0.5]]$
+mu_v  : 3.986004418b14$
+Re_v  : 6378137.0b0$
+J2_v  : 1.08262668b-3$
+
+emit(row) := block([av, ev, iv, nv, val],
+  av : bfloat(row[1]), ev : bfloat(row[2]), iv : bfloat(row[3])*%pi/180,
+  nv : sqrt(mu_v/av^3),
+  val : bfloat(subst([a = av, e = ev, inc = iv, n = nv, Re = Re_v, J2 = J2_v,
+                      p = av*(1 - ev^2)], coded_M)),
+  printf(true, "GOLDEN ~h ~h ~h ~h~%", av, ev, row[3], val))$
+map(emit, rows)$
+
+/* --- J3 and the frozen eccentricity ---------------------------------------------------------
+ *
+ * design::frozen_eccentricity codes e_f = -(J3/(2 J2))(Re/a) sin i, and the test that guards it
+ * asserts a range wide enough to admit a 23 % error. Derive the condition instead: add the J3 term
+ * to the disturbing function, average it, and solve omegadot = 0 at omega = 90 deg. */
+
+P3(x) := (5*x^3 - 3*x)/2$
+R3_inst : -mu*J3*Re^3/r^4 * P3(sin(inc)*sin(w + nu))$
+i3 : ratsimp(subst(r_of_nu, r, R3_inst) * r_of_nu^2/(a^2*sqrt(1-e^2)))$
+R3_bar : ratsimp(integrate(trigexpand(i3), nu, 0, 2*%pi)/(2*%pi))$
+R3_bar : ratsimp(subst(a*(1-e^2), p, R3_bar))$
+print("<R3> = ", R3_bar)$
+
+wdot_of(RR) := sqrt(1-e^2)/(n*a^2*e)*diff(RR, e)
+               - cos(inc)/(n*a^2*sqrt(1-e^2)*sin(inc))*diff(RR, inc)$
+wdot_tot : subst(%pi/2, w, wdot_of(R_bar + R3_bar))$
+/* omega-dot = 0 is linear in e once the J3 term's 1/e is cleared; keep the leading order in e. */
+e_sol : rhs(first(solve(ratsimp(taylor(wdot_tot*e, e, 0, 1)), e)))$
+e_sol : trigsimp(ratsimp(subst(rhs(kepler3), mu, e_sol)))$
+coded_e : -(J3/(2*J2))*(Re/a)*sin(inc)$
+check("e_frozen", e_sol, coded_e)$
+
+/* Golden table for the Rust test. Columns: a, i(deg), e_frozen. */
+J3_v : -2.53265365b-6$
+efrozen(row) := block([av, iv],
+  av : bfloat(row[1]), iv : bfloat(row[2])*%pi/180,
+  printf(true, "FROZEN ~h ~h ~h~%", av, row[2],
+         bfloat(subst([a = av, inc = iv, Re = Re_v, J2 = J2_v, J3 = J3_v], coded_e))))$
+map(efrozen, [[7078137.0, 98.0], [7078137.0, 30.0], [7078137.0, 145.0], [26560000.0, 63.4]])$

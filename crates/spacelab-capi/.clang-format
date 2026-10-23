@@ -1,0 +1,22 @@
+# The only C and C++ in this repository lives under this crate, so its formatting is pinned here
+# rather than at the root. Two settings are load-bearing:
+#
+#   ColumnLimit 100 matches what the Rust in this workspace is written to, so a comment can be moved
+#   between `lib.rs` and `spacelab.h` without being reflowed.
+#
+#   ReflowComments false, because these headers *are* the documentation. Left on, clang-format
+#   rewraps prose and destroys the indentation of numbered rules and the section banners -- measured
+#   on the first draft of `spacelab.h`, which came back with every rule's continuation lines flush
+#   against the margin and every banner split across two lines.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+ColumnLimit: 100
+IndentWidth: 4
+ReflowComments: false
+AlignAfterOpenBracket: Align
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortEnumsOnASingleLine: false
+PointerAlignment: Right
+SeparateDefinitionBlocks: Always
+SortIncludes: CaseSensitive

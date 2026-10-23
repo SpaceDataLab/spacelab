@@ -1,0 +1,47 @@
+/* Adams-Moulton in Nordsieck form. The Nordsieck vector is z = [y, h y', h^2/2 y'', ..., h^q/q! y^(q)];
+ * the predictor is the Pascal (Taylor-shift) matrix P and the corrector adds l * (h f_{n+1} - z_pred[1])
+ * with the order-q Nordsieck l-vector. This DERIVES the order-5 l-vector from first principles and
+ * checks the facts the code relies on:
+ *
+ *   - The Pascal predictor is the exact Taylor shift: it advances a degree-q polynomial's Nordsieck
+ *     vector with zero residual.
+ *   - The l-vector is pinned by the defining property of the *optimal* Nordsieck-Adams method: the
+ *     one-step matrix M0 = P - l (row_1 P) must have characteristic polynomial x^q (x-1) -- principal
+ *     root 1, ALL spurious roots 0. (A wrong l moves a spurious root off the origin and the method
+ *     goes unstable, which is exactly what a mis-transcribed table produced.) l0 is fixed by
+ *     consistency to the Adams-Moulton first coefficient beta_0(q), derived as a Lagrange integral.
+ *     The result is l = [251/720, 1, 25/24, 35/72, 5/48, 1/120], with l1 = 1 and l5 = 1/5!.
+ *
+ *   maxima --very-quiet -b adams_nordsieck.mac
+ */
+
+q : 5$
+P : genmatrix(lambda([i, j], if j >= i then binomial(j - 1, i - 1) else 0), q + 1, q + 1)$
+
+/* Adams-Moulton beta_0 for order q: f-nodes at offsets [1, 0, -1, ..., -(q-2)]. */
+nodes : append([1], makelist(-(k), k, 0, q - 2))$
+beta0 : integrate(product((s - nodes[m]) / (nodes[1] - nodes[m]), m, 2, q), s, 0, 1)$
+print("AM beta0(5) - 251/720 (=0?):", beta0 - 251/720);
+
+/* Derive l2..l5 from the char-poly condition (l0 free, l1 = 1). */
+row1 : makelist(P[2][j], j, 1, q + 1)$
+lv : [l0, 1, l2, l3, l4, l5]$
+M0 : genmatrix(lambda([i, j], P[i][j] - lv[i] * row1[j]), q + 1, q + 1)$
+cp : expand(charpoly(M0, x))$
+eqs : append(makelist(coeff(cp, x, k), k, 0, q - 1), [coeff(cp, x, q) + 1])$
+sol : first(solve(eqs, [l2, l3, l4, l5]))$
+lder : subst(cons(l0 = beta0, sol), lv)$
+print("derived l-vector:", lder);
+print("l-vector - [251/720,1,25/24,35/72,5/48,1/120] (=0?):",
+      lder - [251/720, 1, 25/24, 35/72, 5/48, 1/120]);
+print("l[1] - 1 (=0?):", lder[2] - 1);
+print("l[5] - 1/5! (=0?):", lder[6] - 1/(5!));
+
+/* char poly of M0 with the derived l is exactly x^5 (x-1) -> spurious roots all 0 (stable). */
+cpder : expand(subst(cons(l0 = beta0, sol), cp))$
+print("char poly M0 - (x^6 - x^5) (=0?):", ratsimp(cpder - (x^6 - x^5)));
+
+/* Pascal predictor exact for a degree-5 polynomial (Nordsieck z_i = 1/i! d^i y at h = 1). */
+znord(y, t0) := transpose(matrix(makelist(1 / (i!) * subst(t = t0, diff(y, t, i)), i, 0, q)))$
+print("Pascal P.z(0) - z(1) for y=t^5 max|.| (=0?):",
+      lmax(map(abs, flatten(args(ratsimp(P . znord(t^5, 0) - znord(t^5, 1)))))));

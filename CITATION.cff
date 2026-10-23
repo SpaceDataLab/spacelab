@@ -1,0 +1,35 @@
+# Checked by `crates/spacelab/tests/release_metadata.rs`, which reads this file and the workspace
+# manifest and fails if `version`, `license`, `repository-code` or `title` disagree with them. A
+# citation file that quietly outlives the release it names is the same defect class as a
+# hand-maintained crate table, and it is fixed the same way: nothing here is a transcription that
+# nothing checks.
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: spacelab
+abstract: >-
+  Astrodynamics in Rust, organised around independent verification: fundamental astronomy and
+  reference frames, SGP4, numerical and semi-analytical propagation with the full IERS 2010 force
+  stack, orbit determination, GNSS, satellite laser ranging, closed-loop control, coverage and
+  constellation design, and Earth-observation geometry. Every published number is checked against a
+  lineage that did not come from the project, and each check is recorded with its oracle and its
+  residual in docs/verification.md.
+authors:
+  - family-names: Gradina
+    given-names: Ilia
+    email: ilia.gradina@gmail.com
+repository-code: "https://github.com/SpaceDataLab/spacelab"
+license:
+  - MIT
+  - Apache-2.0
+version: 0.1.0
+keywords:
+  - astrodynamics
+  - orbit-determination
+  - orbital-mechanics
+  - SGP4
+  - GNSS
+  - satellite-laser-ranging
+  - reference-frames
+  - IERS
+  - rust

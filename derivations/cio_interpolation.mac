@@ -1,0 +1,52 @@
+/* The Lagrange remainder for `spacelab-frames::cio_fast`, and where its stencil is worst.
+
+   `CioInterpolator` precomputes (X, Y, s, s') on a uniform grid of spacing GRID_DT = 600 s and
+   interpolates with STENCIL = 8 nodes, so degree 7. The residual against the exact transform is
+   measured (sub-nanometre at LEO); this is the other half of that statement -- the bound, which
+   holds at every epoch rather than the ones a test happened to sample.
+
+   For nodes t_i = t_0 + i*h, i = 0..7, and a query t = t_0 + u*h,
+
+       f(t) - p(t) = f^(8)(xi)/8! * h^8 * prod(u - i, i, 0, 7).
+
+   Two node products matter, because the implementation clamps the stencil at the array ends:
+   the *centred* case u in [3,4], which is what an interior query gets, and the whole span
+   u in [0,7], which is what a query within half a stencil of either end gets.
+
+   The other factor, sup|f^(8)|, is a property of the IAU 2006/2000A series and is computed from
+   the shipped table by `derivations/cio_interpolation.py`.                                       */
+
+w(u) := product(u - i, i, 0, 7)$
+print("node product w(u) =", expand(w(u)))$
+
+/* Centred: u in [3,4]. w is symmetric about u = 3.5, so the interior extremum is there. */
+print("w(7/2) =", w(7/2), " = ", float(w(7/2)))$
+dw : diff(w(u), u)$
+crit : map(rhs, realroots(dw, 1e-12))$
+print("critical points of w =", float(crit))$
+inside : sublist(crit, lambda([c], is(c >= 3 and c <= 4)))$
+print("  of which in [3,4]:", float(inside), " |w| there =", float(map(lambda([c], abs(w(c))), inside)))$
+
+allmax : lmax(map(lambda([c], abs(w(float(c)))), crit))$
+print("max |w| over the whole stencil [0,7] =", float(allmax))$
+
+print("centred constant  C_c = max|w|/8! =", float(abs(w(7/2))/8!))$
+print("clamped constant  C_e = max|w|/8! =", float(allmax/8!))$
+print("  ratio, end against centre =", float(allmax/abs(w(7/2))))$
+
+/* The other half of the error, and on this grid the larger one: the nodes are f64, so whatever
+   rounding they carry is amplified by the Lebesgue constant of the stencil, Lambda = max sum|l_j|.
+   Truncation shrinks as h^8; this does not shrink at all.                                        */
+lag(j, u) := product(if i = j then 1 else (u - i)/(j - i), i, 0, 7)$
+lebesgue(u) := sum(abs(lag(j, u)), j, 0, 7)$
+print("Lebesgue function at the stencil centre, u = 7/2 :", float(lebesgue(3.5)))$
+grid_c : makelist(3 + k/200, k, 0, 200)$
+print("max over the centred interval u in [3,4] :", float(lmax(map(lebesgue, grid_c))))$
+grid_e : makelist(k/200, k, 0, 1400)$
+print("max over the whole stencil  u in [0,7] :", float(lmax(map(lebesgue, grid_e))))$
+
+/* h^8 for the shipped grid, seconds^8 -- the factor the series bound is multiplied by. */
+h : 600.0$
+print("h = ", h, " s;  h^8 =", h^8)$
+print("so |error| <= C * h^8 * sup|f^(8)|, with C_c =", float(abs(w(7/2))/8!),
+      "and h^8 =", h^8, " => centred prefactor =", float(abs(w(7/2))/8! * h^8))$

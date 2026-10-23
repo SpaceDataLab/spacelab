@@ -1,0 +1,45 @@
+/* Reference values for the IERS sub-daily EOP angular arguments, at 60 decimal digits.
+ *
+ * The IERS-published test cases for ORTHO_EOP, PMSDNUT2 and UTLIBR all sit within a few decades of
+ * J2000, where the t^2, t^3 and t^4 terms of FUNDARG and of the GMST polynomial contribute far less
+ * than the models' own accuracy. Those coefficients are therefore unverifiable from the published
+ * cases alone. Evaluating the same polynomials a millennium either side of J2000 separates every
+ * term; the values below are what `spacelab_eop::subdaily::{fundarg, arguments}` must return there.
+ *
+ * Coefficients are transcribed independently of the Rust source, from the IERS Conventions (2010)
+ * routines FUNDARG.F (Simon et al. 1994) and ARG2.F. A disagreement between the two transcriptions
+ * is the finding this file exists to produce.
+ *
+ * Run: timeout 120 maxima --very-quiet -b tools/gen_fundarg_oracle.mac
+ */
+
+fpprec: 60$
+
+das2r  : 4.848136811095359935899141b-6$  /* arcseconds to radians */
+turnas : 1296000b0$                      /* arcseconds in a full turn */
+rad2sec: 86400b0/(2*%pi)$                /* seconds of time per radian */
+
+/* Rust's `%` truncates toward zero; Maxima's `mod` floors. The two disagree on a negative
+   dividend, which is exactly the case a pre-J2000 epoch produces, so emulate the Rust one. */
+tmod(x, m) := x - truncate(x/m)*m$
+
+/* FUNDARG: the Delaunay arguments l, l', F, D, Omega in radians, t in Julian centuries from J2000. */
+fa(a, b, c, d, e, t) := tmod(a + t*(b + t*(c + t*(d + t*e))), turnas) * das2r$
+
+args(t) := [
+  fa( 485868.249036b0, 1717915923.2178b0,  31.8792b0,  0.051635b0, -0.00024470b0, t),
+  fa(1287104.79305b0,   129596581.0481b0,  -0.5532b0,  0.000136b0, -0.00001149b0, t),
+  fa( 335779.526232b0, 1739527262.8478b0, -12.7512b0, -0.001037b0,  0.00000417b0, t),
+  fa(1072260.70369b0,  1602961601.2090b0,  -6.3706b0,  0.006593b0, -0.00003169b0, t),
+  fa( 450160.398036b0,   -6962890.5431b0,   7.4722b0,  0.007702b0, -0.00005939b0, t)]$
+
+/* ARG2: GMST + pi in radians, the first of the six libration arguments. */
+gmst_arg(t) := block([g],
+  g: tmod(67310.54841b0 + t*((8640184.812866b0 + 3155760000b0)
+       + t*(0.093104b0 + t*(-0.0000062b0))), 86400b0),
+  tmod(g/rad2sec + %pi, 2*%pi))$
+
+for t in [-10b0, -1b0, 0.3b0, 10b0] do (
+  printf(true, "t = ~a~%", float(t)),
+  for u in args(t) do printf(true, "  fundarg ~,20e~%", float(u)),
+  printf(true, "  gmst+pi ~,20e~%", float(gmst_arg(t))));

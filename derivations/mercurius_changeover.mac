@@ -1,0 +1,19 @@
+/* MERCURIUS hybrid — the changeover function K(y) that smoothly hands the interaction from the
+ * symplectic far regime (WHFast, K=1) to the adaptive near regime (IAS15, K=0) as two bodies
+ * approach. A hard switch would inject a discontinuity into the force and wreck the symplectic
+ * structure; the changeover must be a smooth partition of unity. We use the smootherstep polynomial
+ * S(y) = 6y^5 - 15y^4 + 10y^3 (Perlin), which is C^2: S and 1-S sum to 1, S goes 0 -> 1 across the
+ * transition, and its first two derivatives vanish at both ends so the blend is flat where it meets
+ * the constant regimes.
+ *
+ *   maxima --very-quiet -b mercurius_changeover.mac
+ */
+S(y) := 6*y^5 - 15*y^4 + 10*y^3$
+print("S(0) (=0?):", S(0));
+print("S(1) - 1 (=0?):", S(1) - 1);
+print("partition S + (1-S) - 1 (=0?):", ratsimp(S(y) + (1 - S(y)) - 1));
+print("S'(0) (=0?):", subst(y=0, diff(S(y), y)));
+print("S'(1) (=0?):", subst(y=1, diff(S(y), y)));
+print("S''(0) (=0?):", subst(y=0, diff(S(y), y, 2)));
+print("S''(1) (=0?):", subst(y=1, diff(S(y), y, 2)));
+print("monotone S'(y) = 30 y^2 (1-y)^2 >= 0 (=0?):", ratsimp(diff(S(y), y) - 30*y^2*(1-y)^2));

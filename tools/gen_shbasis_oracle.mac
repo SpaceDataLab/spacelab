@@ -1,0 +1,65 @@
+/* Reference values for `DensityCorrection::basis` — the sun-fixed real spherical-harmonic design
+ * vector of the density-calibration layer — at 60 decimal digits.
+ *
+ * The Rust builds P̄_nm by the three-term Holmes–Featherstone recursion. This file builds it from
+ * Rodrigues' formula and the 4π normalisation factor instead, so the two share no arithmetic and a
+ * disagreement is a real error in one of them rather than a copied typo. The crate's own tests reach
+ * `basis` only through `fit`/`log_correction`, which check that a fitted model reproduces the samples
+ * it was fitted to — an internal consistency that a wrong basis satisfies just as well, since the
+ * least-squares coefficients absorb it.
+ *
+ * Conventions pinned here, all three of them observable in the numbers:
+ *   - no Condon–Shortley phase (the recursion has none: P̄₁₁ = √3·cos φ > 0);
+ *   - 4π ("fully normalised", geodesy) scaling, N_nm = √((2−δ_m0)(2n+1)(n−m)!/(n+m)!);
+ *   - an *extra* √2 on every m ≥ 1 term, which is the module's own "orthogonal-ish" (see its header)
+ *     departure from an orthonormal basis. A rescaled basis function is absorbed exactly by the
+ *     fitted coefficient, so it is a convention and not an error — but it is one `from_coefficients`
+ *     callers have to know about, and it is what makes the m ≥ 1 columns shrink less under ridge.
+ *
+ * Packing is the module's: per degree n, the zonal term, then (cos, sin) for each order m = 1..n.
+ *
+ * Run: timeout 300 maxima --very-quiet -b tools/gen_shbasis_oracle.mac
+ */
+
+fpprec: 60$
+
+/* P_nm(x), Rodrigues, no Condon–Shortley phase. */
+plm(n, m, x) := (1 - x^2)^(m/2) * subst(z = x, diff((z^2 - 1)^n / (2^n * n!), z, n + m))$
+
+/* 4π normalisation. */
+nfac(n, m) := sqrt((if m = 0 then 1 else 2) * (2*n + 1) * (n - m)! / (n + m)!)$
+
+pbar(n, m, x) := nfac(n, m) * plm(n, m, x)$
+
+/* The design vector at (latitude, local solar time), degree `deg`. */
+shbasis(deg, lat, lst) := block(
+  [x, lam, out],
+  x   : sin(lat),
+  lam : lst * 2*%pi/24,
+  out : [],
+  for n: 0 thru deg do (
+    out : cons(pbar(n, 0, x), out),
+    for m: 1 thru n do (
+      out : cons(sqrt(2) * pbar(n, m, x) * cos(m*lam), out),
+      out : cons(sqrt(2) * pbar(n, m, x) * sin(m*lam), out))),
+  reverse(out))$
+
+emit(deg, lat_deg, lst) := block(
+  [lat, b, k],
+  lat : bfloat(lat_deg * %pi/180),
+  b   : shbasis(deg, lat, bfloat(lst)),
+  printf(true, "degree=~a latitude_deg=~a lst_h=~a~%", deg, float(lat_deg), float(lst)),
+  for k: 1 thru length(b) do
+    printf(true, "  ~3d ~,20e~%", k - 1, bfloat(b[k])))$
+
+/* Degree 4 (K = 25): the smallest degree that exercises every branch of the recursion — the
+   sectorial step, the two-term step, and the `m <= n - 2` guard on both sides. Points chosen off
+   the equator, off the poles and away from a whole number of hours, so no factor is annihilated. */
+emit(4,  21.2b0,  3.7b0)$
+emit(4, -58.4b0, 11.2b0)$
+emit(4,  74.9b0, 22.9b0)$
+/* Degree 1 (K = 4), the smallest non-trivial case, where the recursion loop never runs at all. */
+emit(1,  21.2b0,  3.7b0)$
+/* Degree 5 (K = 36): the first degree at which `m <= n - 2` and `m <= n / 2` part company, so the
+   guard is pinned as a shape and not just at the three values where the two agree. */
+emit(5,  21.2b0,  3.7b0)$

@@ -1,0 +1,64 @@
+# Checks for the C and C++ under this crate. The set is deliberately narrow: this is a header over
+# a C ABI, so the categories that pay are the ones about the boundary -- lifetimes, ownership,
+# narrowing, and the C-array-to-pointer decay that a span is supposed to have replaced.
+#
+# These families are off on purpose:
+#
+#   modernize-use-trailing-return-type is a formatting opinion, and the repository already has one.
+#
+#   llvmlibc-* and altera-* target other projects entirely.
+#
+#   readability-identifier-length flags `x`, `y`, `z` and `mu`, which are the names the domain
+#   uses. Renaming a gravitational parameter to `gravitationalParameter` would make the code less
+#   like the equations it implements, not more.
+#
+#   cppcoreguidelines-pro-type-vararg and cert-err33-c flag the `printf` family. The only C++ here
+#   is a test runner whose entire output is a failure report; a runner that checked the return of
+#   the call that reports the failure would have nowhere to report that. The library itself calls
+#   nothing variadic.
+#
+#   cppcoreguidelines-avoid-non-const-global-variables flags the runner's failure counter, which is
+#   its result. Threading it through every check as an out-parameter would obscure the assertions
+#   for a property -- single-threaded file-scope state in a 300-line program -- that is not at risk.
+#
+# And four are off because `spacelab.h` is a C header that C++ merely happens to be able to read.
+# Every one of them proposes a construct C99 does not have, so taking the advice would break the C,
+# Julia, C# and Zig consumers that are the reason for a C ABI in the first place. `spacelab.hpp`
+# already offers the C++ forms -- `inline constexpr double mu_earth`, and so on -- to the callers
+# who can use them:
+#
+#   modernize-use-using          -- `using` is C++; a C header declares types with `typedef`.
+#   cppcoreguidelines-macro-usage -- `constexpr` is C++; a C header exports constants as macros.
+#   cppcoreguidelines-use-enum-class -- `enum class` is C++, and it is not an ABI type.
+#
+#   performance-enum-size wants `sl_precision` narrowed to one byte. That would be a silent ABI
+#   break: the enum's width is what the Rust side passes and what every compiled caller has already
+#   agreed to. An enum crossing this boundary is a layout decision, not a size optimisation.
+Checks: >
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-do-while,
+  -misc-include-cleaner,
+  -cert-err58-cpp,
+  -cert-err33-c,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -modernize-use-using,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-use-enum-class,
+  -performance-enum-size
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'spacelab\.(h|hpp)$'
+FormatStyle: file

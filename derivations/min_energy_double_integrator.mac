@@ -1,0 +1,61 @@
+/* Minimum-energy fixed-endpoint control of the double integrator, per axis.
+
+   Verifies the closed form used as the oracle for `spacelab_astro::optimal::min_energy_transfer`
+   at mu = 0: the control law, the boundary conditions it satisfies, the energy cost, and the
+   costate it corresponds to under u = -lambda_v.
+
+   Run: timeout 180 maxima --very-quiet -b derivations/min_energy_double_integrator.mac */
+
+assume(T > 0)$
+
+/* `scalarmatrixp` collapses a 1x1 product to a scalar, so index only when it did not. */
+scalar1(m) := if matrixp(m) then m[1, 1] else m$
+
+/* Controllability Gramian of x' = A x + B u with A = [[0,1],[0,0]], B = [0;1]. */
+Phi(s) := matrix([1, s], [0, 1])$
+B      : matrix([0], [1])$
+W      : integrate(Phi(T - s) . B . transpose(B) . transpose(Phi(T - s)), s, 0, T)$
+Winv   : ratsimp(invert(W))$
+print("W^-1 =", Winv)$
+print("W^-1 as claimed:", is(ratsimp(Winv - matrix([12/T^3, -6/T^2], [-6/T^2, 4/T])) = zeromatrix(2, 2)))$
+
+/* The minimum-energy control u(t) = B' Phi(T-t)' W^-1 delta, delta = [dr; dv] the residual of the
+   free drift: dr = rf - r0 - v0 T, dv = vf - v0. */
+delta : matrix([dr], [dv])$
+umat  : transpose(B) . transpose(Phi(T - t)) . Winv . delta$
+uexpr : ratsimp(scalar1(umat))$
+print("u(t) =", uexpr)$
+print("u(t) in (T-t) form:",
+      is(ratsimp(uexpr - ((T - t)*(12*dr/T^3 - 6*dv/T^2) + (-6*dr/T^2 + 4*dv/T))) = 0))$
+
+/* Boundary conditions: the driven double integrator must absorb exactly delta. */
+us     : subst(t = s, uexpr)$
+dv_ach : ratsimp(integrate(us, s, 0, T))$
+dr_ach : ratsimp(integrate((T - s) * us, s, 0, T))$
+print("velocity change reaches dv:", is(ratsimp(dv_ach - dv) = 0))$
+print("position change reaches dr:", is(ratsimp(dr_ach - dr) = 0))$
+
+/* Energy cost J = 1/2 int u^2 = 1/2 delta' W^-1 delta. */
+J_int  : ratsimp(integrate(us^2, s, 0, T) / 2)$
+Jmat   : transpose(delta) . Winv . delta$
+J_quad : ratsimp(scalar1(Jmat) / 2)$
+print("J =", J_int)$
+print("J matches the quadratic form:", is(ratsimp(J_int - J_quad) = 0))$
+print("J matches the expanded form:",
+      is(ratsimp(J_int - (12*dr^2/T^3 - 12*dr*dv/T^2 + 4*dv^2/T)/2) = 0))$
+
+/* Costate: u = -lambda_v, lambda_v' = -lambda_r, and at mu = 0 lambda_r' = 0 so lambda_r is
+   constant and equals du/dt. */
+lam_v0 : ratsimp(-subst(t = 0, uexpr))$
+lam_r  : ratsimp(diff(uexpr, t))$
+print("lambda_v(0) =", lam_v0)$
+print("lambda_v(0) matches -6 dr/T^2 + 2 dv/T:",
+      is(ratsimp(lam_v0 - (-6*dr/T^2 + 2*dv/T)) = 0))$
+print("lambda_r =", lam_r)$
+print("lambda_r is constant:", is(ratsimp(diff(lam_r, t)) = 0))$
+print("lambda_r matches -12 dr/T^3 + 6 dv/T^2:",
+      is(ratsimp(lam_r - (-12*dr/T^3 + 6*dv/T^2)) = 0))$
+
+/* u is affine, so it lies in span{1, T-t} — the range of B' Phi(T-t)' — which is what makes the
+   cross term of any admissible perturbation vanish and the cost a strict minimum. */
+print("u is affine:", is(ratsimp(diff(uexpr, t, 2)) = 0))$

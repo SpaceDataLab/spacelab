@@ -1,0 +1,27 @@
+[package]
+name = "spacelab-geometry"
+description = "Computational geometry: exact predicates, convex hull, Delaunay triangulation and spherical Voronoi."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["delaunay", "convex-hull", "voronoi", "predicates", "geometry"]
+categories = ["mathematics", "algorithms"]
+exclude.workspace = true
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }
+
+[features]
+default = ["std"]
+std = []
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+# Pinned, not `stable`. `cargo clippy -- -D warnings` is a gate, and a gate whose verdict depends on
+# the date is not a gate: clippy 0.1.98 (2026-08-18) added `manual_midpoint` and turned this
+# workspace red with no commit doing it, exactly as rustfmt's edition default had a year earlier.
+# The mutation job at .github/workflows/ci.yml already pins cargo-mutants for this reason -- "an
+# unpinned tool turns a green tree red on somebody else's schedule" -- and the compiler is a tool.
+#
+# Bumping is a deliberate one-line commit that carries whatever new lints the release brings. The
+# `toolchain-canary` job runs the same gate on floating stable every night without blocking
+# anything, so the cost of the next bump is known before it is paid.
+#
+# `rust-version` in Cargo.toml is the MSRV and is a separate promise; this is only what CI and the
+# developer shell build with. Keep this version and the `check` job's `toolchain:` input in step.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]

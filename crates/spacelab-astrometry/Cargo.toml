@@ -1,0 +1,36 @@
+[package]
+name = "spacelab-astrometry"
+description = "Astrometric plate solving: source detection, TAN/SIP world coordinates, blind asterism matching and reduction to a true topocentric direction."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["astrometry", "plate-solving", "wcs", "star-tracker", "astronomy"]
+categories = ["aerospace", "science", "computer-vision"]
+exclude.workspace = true
+
+[dependencies]
+libm = "0.2"
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+# For `Refraction` and the altitude newtypes only. The alternative was a second copy of the
+# Sæmundsson and Bennett fits, and two implementations of one formula is how they drift apart.
+# The edge is acyclic: spacelab-coverage depends on core and sensors, neither of which is here.
+spacelab-coverage = { path = "../spacelab-coverage", version = "0.1.0" }
+
+[dev-dependencies]
+# Tests only, and deliberately not a real dependency: `Aberration::diurnal` takes the rotation as a
+# vector precisely so this crate does not need the frames crate to use it. What the tests need it
+# for is to hold the two copies of the Earth rotation rate to the same bits -- a constant duplicated
+# across a boundary neither side can see is a constant that drifts.
+spacelab-frames = { path = "../spacelab-frames" }
+
+[features]
+default = ["std"]
+std = []
+
+[lints]
+workspace = true

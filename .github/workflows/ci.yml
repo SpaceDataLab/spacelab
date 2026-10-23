@@ -1,0 +1,581 @@
+name: ci
+
+on:
+  # On request only: `gh workflow run ci.yml --ref <branch>`. The nightly schedule this replaces
+  # cost 1 702 runner-minutes on run 36845252990 (2026-10-01) -- nine mutation lanes, four of them
+  # stopped by the 240-minute ceiling -- of the 2 000 a month the organisation's plan includes, and
+  # the next night's run spent the rest. The Actions budget is $0 with further usage blocked, so the
+  # price was not money but every other job until the cycle reset: the nightly runs of 2026-09-25
+  # to 09-30 were refused in seconds.
+  #
+  # A manual run costs the same, because `mutants-sealed` runs on every dispatch. Given up with the
+  # schedule: `cargo deny check advisories` against a RustSec database that moves without this
+  # repository moving, so a clean verdict is only as recent as its run; and `mutants-diff`, which
+  # only `push` and `pull_request` start.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history, not the default single commit: `tools/gen-changelog.py --check` below builds
+      # the changelog from every commit subject, and against a shallow clone it would build a
+      # shorter file and report the tree stale.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # Pinned, and pinned in two places on purpose: rustup's precedence between an installed
+      # default and rust-toolchain.toml is not something this file should have to be right about,
+      # so both name the same version and either winning gives the same compiler. Keep them in
+      # step; rust-toolchain.toml carries the argument for pinning at all.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+      # A broken intra-doc link is a silent defect: rustdoc emits a warning, drops the hyperlink and
+      # renders the label as plain text, so the published page looks fine and the reader never learns
+      # the reference existed. `-D warnings` is the only thing that makes the difference visible, and
+      # it also catches the two ambiguities rustdoc cannot resolve on its own -- a name that is both a
+      # module and a function, and a link into a private item that no reader can follow.
+      - run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
+
+      # The README's crate table is a projection of `cargo metadata` and `docs/verification.md`, not
+      # prose: a new crate, a changed `description`, or a verification section that gains or loses
+      # rows all move it. Hand-maintained, it described seven crates while the workspace had
+      # thirty-two, and the table that had rotted was the one telling a reader what is verified and
+      # what is not. This fails the build rather than rewriting the file, so the diff stays the
+      # author's. python3 and no `just`, for the same reason `mutants-ledger.py` uses it below: the
+      # script is standard library only plus `cargo metadata`, so this step needs nothing the runner
+      # does not already have.
+      - name: README crate table is a projection of the workspace, not a transcription
+        run: python3 tools/gen-readme.py --check
+
+      # The provenance class `cargo deny` cannot see. It reads dependency metadata; a module that is
+      # a translation of somebody else's implementation carries their licence and no metadata says
+      # so. This fails if a module whose own docs claim a port, a translation or a transcription is
+      # missing from docs/provenance.md -- it does not judge the module, it requires that somebody
+      # did. Both halves of that were needed: the register's first draft named 15 Orekit-derived
+      # files where there are 28, and Apache-2.0's attribution condition is per file.
+      # It also gates the other direction: DTM2020 is licence-restricted and is kept out of the
+      # open-source release, so the register records every file coupled to it. A file that starts
+      # naming it fails here -- which is the moment to decide, rather than discovering on release
+      # day that the drag path will not compile without it.
+      - name: Ports are recorded, and nothing new depends on a licence-restricted module
+        run: python3 tools/check-provenance.py --check
+      # The data half of the same register: every fetch host, fixture and embedded asset has a row
+      # with its terms as read. A licence on a table binds the crate that embeds it.
+      - name: Provenance register covers every data source
+        run: python3 tools/check-provenance.py --data --check
+      # Every module names the derivation, seal, row or oracle test that would catch a wrong
+      # formula, or sits in the ledger of docs/verification.md section 12 with a category. The
+      # ledger can only shrink deliberately.
+      - name: Formula provenance ledger is consistent
+        run: python3 tools/check-derivations.py --check
+
+      # Same argument one file over, with one honest limit. A generated changelog cannot describe
+      # the commit that adds it, so "byte-identical to the projection of HEAD" is a fixed point no
+      # commit can sit at -- it was written that way first and failed on its own commit. What runs
+      # instead asserts that every subject in the history projects (an unrecognised type would
+      # otherwise land silently in `Unparsed`), and that the file is what the generator produces for
+      # the *parent* of the commit that wrote it, which catches a hand edit. It does not catch lag,
+      # and the generator's docstring says so. `fetch-depth: 0` above is what makes either possible.
+      - name: Every commit subject projects, and the changelog was not hand-edited
+        run: python3 tools/gen-changelog.py --check
+
+      # The core crates must build without std, for embedded and wasm targets.
+      - run: rustup target add thumbv7em-none-eabihf
+      - run: cargo build -p spacelab-core -p spacelab-fa --target thumbv7em-none-eabihf
+
+  msrv:
+    # `rust-version` is a promise to a consumer that the crates build on that compiler, and until
+    # this job existed it was a number somebody typed. It was 1.96; measured, the floor is 1.94, and
+    # the two releases in between were a promise nobody could have kept a consumer out of.
+    #
+    # The floor is not ours. `h3o` 0.10 calls `f64::mul_add` in a `const fn`, const-stable in 1.94;
+    # our own code compiles on 1.93. So the number moves when a dependency moves, with no commit
+    # here doing it -- which is the whole reason to build at it rather than to assert it.
+    #
+    # `RUSTUP_TOOLCHAIN` rather than a `toolchain:` input, because rust-toolchain.toml pins a newer
+    # release and the environment variable beats it unconditionally where an installed default
+    # would not.
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: "1.94.0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.0"
+      - uses: Swatinem/rust-cache@v2
+      - run: rustc --version
+      - run: cargo check --workspace --all-targets
+
+  package:
+    # The release rehearsal. `cargo package --workspace` builds every crate from the tarball it
+    # would upload, which is the only thing that catches a file the manifest excludes but the build
+    # needs, and the only thing that catches an unpublishable dependency: it was `spacelab-testkit`,
+    # `publish = false` and a versioned dev-dependency of twenty publishable crates, so the
+    # workspace could not be published at all and nothing said so.
+    #
+    # `cargo publish --dry-run` is the wrong command here -- it resolves each crate against the
+    # registry, where none of these exists yet, so it fails on the first intra-workspace dependency
+    # for a reason that has nothing to do with the tree. `--workspace` resolves them locally.
+    #
+    # `cargo semver-checks` belongs next to this and is deliberately absent: it compares against a
+    # published baseline, and there is no release to compare with. It opens at the first tag.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo package --workspace
+
+  toolchain-canary:
+    # What `check` gave up when it stopped floating: a pinned gate cannot tell you that the next
+    # release breaks it. This runs the same two lint gates on whatever stable is today, on dispatch
+    # and never on a push, and is allowed to fail -- a red canary is the cost of the next bump made
+    # visible in advance, not a reason to block anything.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      # Beats rust-toolchain.toml unconditionally; `rustup default` would not.
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - run: rustc --version && cargo clippy --version
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # A green suite says the tests pass on the code as written. It does not say they would fail on
+  # code written wrongly. cargo-mutants rewrites one operator at a time and asks whether any test
+  # notices; a mutant that survives is a wrong answer this repo would ship. Finding the first batch
+  # turned up an infinite loop in `coverage::root` and 64 accuracy assertions that could not fail on
+  # NaN, so this is a real gate, not hygiene.
+  #
+  # The lane list is the record of which crates have been taken to zero survivors. Extend it as each
+  # one closes; never shorten it to make a red run green. A crate is added on a measurement, never on
+  # an inference that it is probably still clean: the nine added on 2026-08-10 were measured together
+  # as `gate-ci9`, 2 988 mutants, 2 779 caught, 207 unviable, 2 timeouts already in the catalogue in
+  # docs/verification.md, 0 survivors. spacelab-estimation joined on 2026-08-15 on `reseal-estimation`
+  # (2 837 mutants, 2 768 caught, 69 unviable, 0 survivors), spacelab-ndm on 2026-08-16 on
+  # `reseal-ndm` (260, 248, 12, 0), spacelab-control on 2026-08-31 on `reseal-control` (874, 828, 37,
+  # 9 survivors, all nine catalogued as equivalent in .cargo/mutants.toml with a proof each, so the
+  # gate's missed.txt reads empty) -- each the *control* block run after the finding block's
+  # survivors were closed, never the block that found them.
+  #
+  # WHY LANES, AND WHY THE SIZES BELOW ARE WRITTEN DOWN. The nineteen crates of the first four lanes
+  # used to be one `cargo mutants` invocation. They no longer fit: measured on this tree with
+  # `cargo mutants --list`, they are **17 556** mutants, which at the 1.69 s/mutant of run
+  # 31132180464 is **8.2 h**. A GitHub-hosted job is capped at 360 minutes and `timeout-minutes`
+  # can only lower that, never raise it -- so the single job could not be rescued by a larger bound,
+  # and run 33486667445 is what that looks like from outside: 6h02m, cancelled, no missed.txt, no
+  # verdict. A cancelled mutation run is not a clean sheet and it is not a detection either; it is
+  # the gate saying nothing at all, the same shape as the timeout argument in #363.
+  #
+  # So the set is split into lanes sized off the measured per-crate counts, largest first, none above
+  # ~2.0 h:
+  #
+  #   estimation                 4 264   ~2.0 h
+  #   astro                      3 725   ~1.7 h
+  #   slr + sensors + elements   3 976   ~1.9 h
+  #   control + coverage + autodiff + astrometry
+  #                              3 092   ~1.5 h
+  #   the remaining ten          2 499   ~1.2 h
+  #   gnss                       5 376   ~2.5 h   (was 4 307 when its lane was written)
+  #   signal + ionosphere        3 041   ~1.4 h
+  #   fa + geomagnetism + capi   1 796   ~0.8 h   (capi was 356, is 536)
+  #   vision (--features onnx)     474   ~0.2 h
+  #   ---------------------------------------------
+  #   total                     28 243  ~13.3 h across nine lanes
+  #
+  # Re-measure with `cargo mutants --list <packages>` before adding a crate, and re-measure the lane
+  # you are adding to as well: two of the four counts above had drifted by the time they were checked,
+  # and it is that drift rather than any one addition that broke the single job.
+  #
+  # Rotation -- one slot per night, indexed by the date -- was the other candidate and is measurably
+  # worse here: it buys budget this set does not need and pays for it in detection latency, since a
+  # regression in a crate whose slot ran yesterday goes unseen for the rest of the cycle. Revisit
+  # that when a single lane crosses the ceiling on its own.
+  #
+  # `spacelab-vision` needs `--features onnx` -- its gated code compiles away without it and every
+  # mutant in it would read as a survivor -- and a `--features` spec is resolved against each package
+  # named, so a package that does not declare `onnx` fails its *baseline*, and a failed baseline
+  # tests nothing at all. That is why it is a lane of its own rather than an appendage to another.
+  #
+  # The five crates a reading of §8 would suggest and that are **not** here, each for its own reason
+  # rather than a shared one:
+  #
+  #   spacelab-gpu           1 112 mutants, `gpu-seal` clean -- but its tests are hardware-gated, so
+  #                          a runner with no device measures the gate rather than the kernels. It is
+  #                          excluded from `mutants-diff` for exactly this, and the reason has not
+  #                          changed.
+  #   spacelab-earthvision   5 020 mutants against the 2 507 `ev-onnx` sealed; the crate has since
+  #                          grown four campaigns (#274, #280/#282, #297, #353/#361). Only the last
+  #                          of them ends on a clean control -- `reseal4-gas-kdist`, zero survivors,
+  #                          and over three files rather than the crate; the ice/mie/phase block
+  #                          closed at *four* survivors that #287-#289 fixed with no control block
+  #                          after them. Admissible the day a whole-crate re-seal says zero -- and
+  #                          at 5 020 it is its own lane when it arrives.
+  #   spacelab-geometry        597 mutants, `reseal4-predicates` at 51 survivors, all of them the
+  #                          predicate error bound. Open, not stale.
+  #   spacelab-propagation  24 513 mutants -- 11.5 h by itself, so it cannot be a lane at any feature
+  #                          set. Its seal is fifteen file-scoped blocks for that reason, and gating
+  #                          it needs those blocks named individually, not the package.
+  #   spacelab-python       19 225 mutants, and its verdict depends on two feature switches
+  #                          (`test-interpreter` to link libpython, `onnx` to make `cloud_mask`
+  #                          buildable). `mutants-diff-py` already carries that shape for the diff.
+  #
+  # THE VERDICT IS READ FROM missed.txt, NEVER FROM THE EXIT CODE. `LabOutcome::exit_code`
+  # (cargo-mutants 27.1.0, src/outcome.rs:110) tests `timeout > 0` *before* `missed > 0`, so a run
+  # carrying both reports 3 and every survivor in it is invisible to a code check. A local run of the
+  # integrator block exited 3 while missing 749 mutants; under the previous
+  # `[ "$code" -eq 0 ] || [ "$code" -eq 3 ]` gate that was a pass.
+  #
+  # Exit 3 is "a mutant made the suite stop terminating", which is a detection -- slower than an
+  # assertion, but the suite still did not pass. Anything other than 0 or 3 with an empty missed.txt
+  # is a broken run (usage error, baseline already failing) and must not read as a clean sheet either.
+  mutants-sealed:
+    # On demand, never on a push -- see the trigger list at the top of this file.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # The platform's own default is 360 minutes and it reports the kill as a cancellation, with no
+    # missed.txt and so no verdict. An explicit bound below it fails the lane as a lane, with the
+    # slot name attached. The value is 1.5x the largest lane's estimate (gnss, ~2.5 h), rounded up:
+    # tight enough that a lane which has quietly doubled says so, loose enough that a slow runner
+    # does not. Re-derive it when the largest lane moves; 180 was right when that lane was ~2.0 h.
+    timeout-minutes: 240
+    strategy:
+      # One lane's survivors must not hide another's: without this a failure cancels the rest and the
+      # night reports one crate where it measured four.
+      fail-fast: false
+      matrix:
+        include:
+          # 4 264 mutants, ~2.0 h -- `reseal-estimation`. The largest lane, and alone for that reason.
+          - slot: estimation
+            packages: -p spacelab-estimation
+          # 3 725, ~1.7 h -- part of `gate-ci9`.
+          - slot: astro
+            packages: -p spacelab-astro
+          # 1 650 + 1 201 + 1 125 = 3 976, ~1.9 h -- `seal-slr` and `gate-ci9`.
+          #
+          # The exclude is a generated coefficient table whose mutants move the answer by less than
+          # the reference program prints, so no test built on that reference can kill them. The
+          # reasoning is written out in .cargo/mutants.toml; it is a limit of the oracle, not an
+          # equivalence, which is why it is not an exclude_re entry.
+          - slot: slr-sensors-elements
+            packages: -p spacelab-slr -p spacelab-sensors -p spacelab-elements
+            excludes: --exclude crates/spacelab-slr/src/loading_tables.rs
+          # 865 + 834 + 698 + 695 = 3 092, ~1.5 h -- `reseal-control` and `gate-ci9`.
+          - slot: control-coverage-autodiff-astrometry
+            packages: >-
+              -p spacelab-control -p spacelab-coverage
+              -p spacelab-autodiff -p spacelab-astrometry
+          # 520 + 499 + 465 + 327 + 260 + 184 + 147 + 53 + 23 + 21 = 2 499, ~1.2 h. Ten small crates
+          # in one lane because ten baselines cost more than the mutants do.
+          - slot: core-frames-eop-rest
+            packages: >-
+              -p spacelab-core -p spacelab-frames -p spacelab-earth -p spacelab-grid
+              -p spacelab-sgp4 -p spacelab-ephemeris -p spacelab-eop
+              -p spacelab-constellation -p spacelab-testkit -p spacelab-ndm
+          # 5 376 mutants, ~2.5 h -- `seal-gnss-full` measured 4 307 of them (4 211 caught, 0
+          # survivors, 6 catalogued timeouts) and the crate has grown since. The largest lane, alone
+          # for its size, and the one the job's bound is derived from.
+          - slot: gnss
+            packages: -p spacelab-gnss
+          # 1 986 + 1 055 = 3 041, ~1.4 h -- `sig-seal2` and `gate-est3`, both zero.
+          - slot: signal-ionosphere
+            packages: -p spacelab-signal -p spacelab-ionosphere
+          # 743 + 517 + 536 = 1 796, ~0.8 h -- `fa-rescan2`, `seal-geomag-full`, `capi-guards2`.
+          # spacelab-capi was 356 at `capi-guards2` and is 536 after #319 and #378.
+          #
+          # The two `spacelab-fa` excludes are a budget decision and not an equivalence, which is why
+          # they are stated here rather than in .cargo/mutants.toml: `fa-rescan2` caught all 7 711 of
+          # the crate's mutants *including* the tables, so nothing is unreachable. But 6 982 of those
+          # 7 711 are one-coefficient edits to generated tables that a single test verifies as a unit
+          # against pyerfa, so they re-prove one assertion 6 982 times and cost 3.3 h doing it. The
+          # same argument `mutants-diff` makes for these two files and for geopotential_coeffs.rs.
+          - slot: fa-geomagnetism-capi
+            packages: -p spacelab-fa -p spacelab-geomagnetism -p spacelab-capi
+            excludes: >-
+              --exclude crates/spacelab-fa/src/cio_tables.rs
+              --exclude crates/spacelab-fa/src/nut_tables.rs
+          # 474 mutants, ~0.2 h -- `vision-onnx`, 474 caught, 0 survivors. Its own lane because of the
+          # feature, not because of the size.
+          - slot: vision-onnx
+            packages: -p spacelab-vision --features onnx
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Pinned: which mutants a release generates is a property of that release, and an
+      # unpinned mutation tool turns a green tree red on somebody else's schedule.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+
+      - name: mutation gate over ${{ matrix.slot }}
+        run: |
+          set +e
+          cargo mutants --jobs 4 --output mutants \
+            ${{ matrix.packages }} ${{ matrix.excludes }}
+          code=$?
+          set -e
+          missed=mutants/mutants.out/missed.txt
+          if [ ! -f "$missed" ]; then
+            echo "::error::${{ matrix.slot }}: cargo mutants exited $code without writing missed.txt -- broken run"
+            exit 1
+          fi
+          if [ -s "$missed" ]; then
+            echo "::error::${{ matrix.slot }}: mutants survived undetected -- see mutants.out/missed.txt"
+            cat "$missed"
+            exit 1
+          fi
+          case "$code" in
+            0 | 3) ;;
+            *)
+              echo "::error::${{ matrix.slot }}: cargo mutants exited $code -- a broken run, not a clean sheet"
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mutants-sealed-${{ matrix.slot }}.out
+          path: mutants/mutants.out
+
+
+  # The job above can only name crates that have been taken to zero survivors, and taking a crate
+  # there costs hours. `cargo metadata` says the workspace is **thirty-two** members; the job names
+  # twenty-six, and the six it cannot -- `spacelab`, `-earthvision`, `-geometry`, `-gpu`,
+  # `-propagation`, `-python` -- are named in the comment above with the reason each one is out. The
+  # count was five for most of this repository's life, and this job is what closed that gap without
+  # waiting for the seals. It still is: a crate leaves the list the moment a block finds a survivor,
+  # and `spacelab` itself is an example -- §8's verdict table records `facade-seal2` at zero, and the
+  # block that has run since, `gate-face3`, is not in it. This job closes that: `--in-diff` mutates
+  # only the lines a pull request actually changed, so the cost is proportional to the diff instead
+  # of to the workspace, and every crate is in scope from the first commit. Measured on the four
+  # commits that introduced it -- 27 971 diff lines, most of them SLR fixtures -- it generated
+  # **five** mutants, because only changed Rust source is mutated at all.
+  #
+  # It does not replace the full-crate job. A diff gate cannot see a regression caused somewhere
+  # the diff does not touch, which is exactly what the sealed-crate job is for.
+  mutants-diff:
+    # It used to read `github.event_name == 'pull_request'`, and every run of this workflow on
+    # record is `push main` -- so the gate that was supposed to cover the twenty unsealed crates
+    # had never executed once. That is worse than not having it: the comment above described a
+    # protection nobody was getting. Both events now, and a dispatched run is excluded, where "the
+    # lines this event changed" means nothing -- so while every trigger is manual, this never runs.
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # --in-diff needs the merge base, which a shallow clone does not have.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+
+      # The scoped spacelab-python run below links libpython instead of deferring to the importing
+      # interpreter, which needs the development package. `update` only when the direct install
+      # misses, because the refresh is the slow and flaky half and the image usually has it already.
+      - name: libpython for the linked test build
+        run: sudo apt-get install -y python3-dev ||
+          { sudo apt-get update && sudo apt-get install -y python3-dev; }
+
+      # Before the gate, because every exclusion the gate honours is a `file:line:col` regex in
+      # .cargo/mutants.toml and an inserted line above one silently re-arms it. The failure then
+      # surfaces as a survivor in an unrelated function, which reads as a test regression and is
+      # not one. Nothing else runs this: seal blocks and the full gate are manual, so an anchor can
+      # drift for weeks. Measured at 60 s on a warm tree -- two `--list` parses, no build, no
+      # baseline -- against a gate that runs for minutes.
+      #
+      # python3 rather than `uv run`, and no `just`: the script is standard library only precisely
+      # so this step needs nothing the runner does not already have.
+      - name: mutation ledger reconciles with the mutants cargo-mutants generates
+        run: python3 tools/mutants-ledger.py
+
+      - name: mutation gate over the changed lines
+        run: |
+          # A pull request's range is against its base branch. A push's is the range it pushed,
+          # `before...after` -- and `before` is all-zeros for a new branch and an object this
+          # clone may not have after a force-push, so fall back to the first parent, which is
+          # still a real diff to gate on. Failing loudly beats gating an empty diff: a run that
+          # measures nothing and passes is indistinguishable from one that measured everything.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+          else
+            base="${{ github.event.before }}"
+            git rev-parse --verify --quiet "$base^{commit}" > /dev/null || base="HEAD^"
+          fi
+          if ! git rev-parse --verify --quiet "$base^{commit}" > /dev/null; then
+            echo "::error::no commit to diff against ($base) -- cannot gate this event"
+            exit 1
+          fi
+          git diff "$base...HEAD" > pr.diff
+
+          # The five exclusions are the ones .cargo/mutants.toml already argues for, restated here
+          # because they are decisions about what a run can measure rather than equivalences:
+          # spacelab-gpu's tests are hardware-gated, so a runner with no device measures the gate
+          # rather than the kernels; three generated coefficient tables are verified as a unit
+          # against pyerfa and the reference program, not per coefficient; and geopotential_coeffs.rs
+          # is the opposite case, a table whose every mutant is caught by construction because one
+          # test hashes all 7 378 rows -- 7 360 mutants that can only re-prove the same assertion.
+          COMMON=(--in-diff pr.diff
+                  --exclude 'crates/spacelab-gpu/**'
+                  --exclude crates/spacelab-slr/src/loading_tables.rs
+                  --exclude crates/spacelab-fa/src/cio_tables.rs
+                  --exclude crates/spacelab-fa/src/nut_tables.rs
+                  --exclude crates/spacelab-propagation/src/geopotential_coeffs.rs)
+
+          gate() {
+            local out=$1
+            shift
+            # --list is a parse, not a build: it answers "is there anything here to mutate" in a
+            # second and without a baseline, so a scope the diff does not touch never reaches the
+            # expensive path. Asking cargo-mutants itself, with the argument list that would run,
+            # also keeps the answer from drifting -- a `git diff --name-only | grep` would be a
+            # second copy of the exclusions above, and the copy is what goes stale.
+            if [ "$(cargo mutants --list "${COMMON[@]}" "$@" | grep -c .)" -eq 0 ]; then
+              echo "$out: no mutants on the lines this pull request changed"
+              return 0
+            fi
+            set +e
+            cargo mutants --jobs 4 --output "$out" "${COMMON[@]}" "$@"
+            local code=$?
+            set -e
+            local missed="$out/mutants.out/missed.txt"
+            if [ ! -f "$missed" ]; then
+              echo "::error::cargo mutants exited $code without writing missed.txt -- broken run"
+              return 1
+            fi
+            if [ -s "$missed" ]; then
+              echo "::error::mutants survived undetected on lines this PR changed"
+              cat "$missed"
+              return 1
+            fi
+            case "$code" in
+              0 | 3) ;;
+              *)
+                echo "::error::cargo mutants exited $code -- a broken run, not a clean sheet"
+                return 1
+                ;;
+            esac
+          }
+
+          # Two scopes, because cargo-mutants builds and tests one package at a time and a
+          # --features spec is resolved against that package alone. Naming the onnx feature on a
+          # run that covers the whole workspace makes every package which does not declare it fail
+          # its *baseline*: `cargo test --package=spacelab-propagation --features=onnx` is a usage
+          # error, and a failed baseline tests no mutants at all -- the gate then reports nothing
+          # rather than reporting a problem. So the two crates that declare `onnx` get their own
+          # scoped run and are excluded from the general one; without the feature their gated code
+          # compiles away and every mutant in it would read as a survivor.
+          gate mutants-diff \
+            --exclude 'crates/spacelab-vision/**' --exclude 'crates/spacelab-earthvision/**' \
+            --exclude 'crates/spacelab-python/**'
+          gate mutants-diff-onnx \
+            -p spacelab-vision -p spacelab-earthvision --features onnx
+          # spacelab-python for the same reason one level down: `extension-module` promises PyO3 will
+          # not link libpython, so a test binary that names an entry point taking `Python<'_>` or
+          # returning `PyResult` fails to link and 194 of the crate's mutants are unreachable from any
+          # `#[test]`. Turning the feature off and `test-interpreter` on links libpython and starts an
+          # interpreter for the test process; `--cargo-arg` is how that reaches both the build and the
+          # test, and it has to be a scoped run because no other package accepts those features.
+          gate mutants-diff-py -p spacelab-python \
+            --cargo-arg=--no-default-features \
+            --cargo-arg=--features --cargo-arg=test-interpreter
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mutants-diff.out
+          path: |
+            mutants-diff/mutants.out
+            mutants-diff-onnx/mutants.out
+            mutants-diff-py/mutants.out
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The derivation scripts produce the committed coefficient tables, so a defect
+      # in one of them ends up in Rust source that every oracle test then agrees
+      # with. The rule set is pinned in ruff.toml; the version is pinned here,
+      # because "which rules exist" is a property of the release and an unpinned
+      # linter turns a green tree red on somebody else's schedule.
+      - run: pipx run ruff==0.17.1 check --no-cache
+
+  bindings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      # The crate's `#[test]` block can only reach what links without libpython, so every entry
+      # point that takes `Python<'_>` or returns `PyResult` is tested either here or by the
+      # `test-interpreter` build in the mutation gate. These tests live in Python and have to be
+      # run from Python, or the public API of the bindings is unguarded -- which it was until this
+      # job existed. Release, because the propagations these tests run take minutes in debug.
+      #
+      # Both wheels the crate ships, each on the interpreters it claims. `cp311-abi3` is built
+      # against 3.11, its floor and `requires-python`; `cp315-abi3.abi3t` against 3.15t, and run on
+      # both the GIL and the free-threaded 3.15 -- the free-threaded run is where
+      # `test_threads_get_the_serial_answer_and_leave_the_gil_off` has teeth.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: |
+            3.11
+            3.15
+            3.15t
+      - name: build the abi3 and abi3t wheels
+        working-directory: crates/spacelab-python
+        run: |
+          pipx run maturin==1.15.0 build --release -i python3.11 -o dist/abi3
+          pipx run maturin==1.15.0 build --release -i python3.15t -o dist/abi3t
+      - name: smoke and bindings tests on 3.11, 3.15 and 3.15t
+        working-directory: crates/spacelab-python
+        run: |
+          for pair in python3.11:abi3 python3.15:abi3t python3.15t:abi3t; do
+            py="${pair%%:*}"
+            "$py" -m venv "/tmp/venv-$py"
+            "/tmp/venv-$py/bin/pip" install dist/"${pair##*:}"/*.whl
+            "/tmp/venv-$py/bin/python" tests/smoke.py
+            "/tmp/venv-$py/bin/python" tests/bindings.py
+          done
+
+  licences:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The tripwire. AGPL and GPL relicense everything downstream, and that door
+      # only opens one way. cargo-deny cannot stop a human from reading licensed
+      # source and retyping it -- see CONTRIBUTING.md -- but it stops an absent-
+      # minded `cargo add`.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check

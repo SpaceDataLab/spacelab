@@ -1,0 +1,46 @@
+/* Reference values for the four phase terms of `csa::chirp_scaling_focus`, at 60 digits.
+
+   Cumming & Wong, "Digital Processing of Synthetic Aperture Radar Data" (2005), Ch. 7. The
+   Chirp-Scaling Algorithm applies four phase functions, and each is a product whose factors the
+   focused image cannot separate: at a spaceborne geometry the scaling factor alpha = 1/D - 1 is 7e-5,
+   so the terms that carry it contribute microradians, and at a geometry wide enough for them to
+   matter the single-reference azimuth matched filter no longer focuses anything off the reference
+   range. The terms are therefore checked directly, against these values and against the exponents
+   restated as doubling ratios.
+
+       alpha    = 1/D - 1                                        (Eq. 7.20)
+       tau_ref  = (2*R_ref/c)*alpha                              the reference migration delay
+       scaling  = pi*K_m*alpha*(tau - tau_ref)^2                 (Eq. 7.24, step 2)
+       compress = pi*f_tau^2/(K_m*(1+alpha)) + 2*pi*tau_ref*f_tau   (Eq. 7.26/7.27, step 4)
+       azimuth  = 4*pi*R_ref*D/lambda                            (Eq. 7.29, step 6)
+       residual = -4*pi/c^2 * K_m*(1+alpha)*alpha*dR^2           (Eq. 7.31, step 6)
+
+   The arguments below are a wide-beam collection (D = 0.9645, so alpha = 0.0368) with a 5 km range
+   offset, chosen so that no factor is one, no sum cancels, and the residual is a fifth of the
+   azimuth phase rather than a rounding error in it. */
+
+fpprec: 60$
+c: 299792458$
+
+d     : 9645/10000$
+alpha : 1/d - 1$
+km    : 25*10^12$
+r_ref : 2000$
+lam   : 3/10$
+tau   : 13*10^-7$
+f_tau : 41*10^6$
+dr    : 5000$
+
+tau_ref : (2*r_ref/c)*alpha$
+
+print("alpha        ", bfloat(alpha))$
+print("tau_ref      ", bfloat(tau_ref))$
+print("scaling      ", bfloat(%pi*km*alpha*(tau - tau_ref)^2))$
+print("compress     ", bfloat(%pi*f_tau^2/(km*(1+alpha)) + 2*%pi*tau_ref*f_tau))$
+print("azimuth      ", bfloat(4*%pi*r_ref*d/lam))$
+print("residual     ", bfloat(-4*%pi/c^2 * km*(1+alpha)*alpha*dr^2))$
+
+/* The range axis: bin r of nr, at range-frequency sample rate fs. */
+r : 300$ nr : 512$ fs : 15*10^7$
+print("range_time   ", bfloat((r - nr/2)/fs))$
+print("range_offset ", bfloat((r - nr/2)/fs*c/2))$

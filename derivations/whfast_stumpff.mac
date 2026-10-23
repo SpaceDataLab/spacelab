@@ -1,0 +1,54 @@
+/* Stumpff functions c_k(z) = sum_{n>=0} (-z)^n / (2n+k)!  — the analytic core of the universal-
+ * variable (Stumpff) Kepler solver used by WHFast's Kepler drift. Everything the Rust code claims
+ * about these functions is verified here to reduce to 0.
+ *
+ * The Kepler drift advances a two-body orbit by an exact solution of Kepler's equation in the
+ * universal variable X, valid for elliptic, parabolic and hyperbolic orbits alike. The f and g
+ * functions that map (r0, v0) -> (r, v) are built from c_0..c_3 evaluated at z = alpha X^2. Rather
+ * than the slowly-converging series, the Rust code reduces the argument by repeated quartering to
+ * where the series is tiny, sums c_2 and c_3 there, and doubles back up with the identities below —
+ * so all four functions cost one short series and a few multiplies.
+ *
+ *   maxima --very-quiet -b whfast_stumpff.mac
+ */
+
+assume(z > 0)$
+ck(k, N) := sum( (-z)^n / (2*n + k)!, n, 0, N)$
+
+/* Closed forms for z > 0 (z = alpha X^2 with alpha = 1/a > 0 for a bound orbit). */
+print("c0 - cos(sqrt z)      (=0?):", taylor(ck(0,8) - cos(sqrt(z)),               z, 0, 6));
+print("c1 - sin(sqrt z)/sqrtz(=0?):", taylor(ck(1,8) - sin(sqrt(z))/sqrt(z),        z, 0, 6));
+print("c2 - (1-cos)/z        (=0?):", taylor(ck(2,8) - (1-cos(sqrt(z)))/z,          z, 0, 6));
+print("c3 - (sqrtz-sin)/z^3/2(=0?):", taylor(ck(3,8) - (sqrt(z)-sin(sqrt(z)))/z^(3/2), z, 0, 6));
+
+/* Recurrence  c_k(z) = 1/k! - z c_{k+2}(z)  — lets c0,c1 come from c2,c3 for free. */
+print("c0 = 1 - z c2         (=0?):", taylor(ck(0,9) - (1   - z*ck(2,8)), z, 0, 6));
+print("c1 = 1 - z c3         (=0?):", taylor(ck(1,9) - (1   - z*ck(3,8)), z, 0, 6));
+print("c2 = 1/2 - z c4       (=0?):", taylor(ck(2,9) - (1/2 - z*ck(4,8)), z, 0, 6));
+print("c3 = 1/6 - z c5       (=0?):", taylor(ck(3,9) - (1/6 - z*ck(5,8)), z, 0, 6));
+
+/* Danby argument-quadrupling: c2,c3 at u give c2,c3 at 4u. Apply n times to undo n quarterings. */
+c0u : subst(z=z/4, ck(0,12))$ c1u : subst(z=z/4, ck(1,12))$
+c2u : subst(z=z/4, ck(2,12))$ c3u : subst(z=z/4, ck(3,12))$
+print("c2(4u) = c1(u)^2/2            (=0?):", taylor(ck(2,12) - c1u^2/2,            z, 0, 6));
+print("c3(4u) = (c2(u)+c0(u)c3(u))/4 (=0?):", taylor(ck(3,12) - (c2u + c0u*c3u)/4,  z, 0, 6));
+
+/* --- The Kepler drift: universal Kepler equation and the Lagrange f,g map -----------------------
+ * With X the universal anomaly, z = alpha X^2 (alpha = 1/a), sig0 = r0 v0 / sqrt(mu), the closed
+ * forms below satisfy: radius r(X) = r0 c0 + sig0 X c1 + X^2 c2 (since (1/alpha)(1-c0) = X^2 c2),
+ * the Kepler equation sqrt(mu) t = r0 X c1 + sig0 X^2 c2 + X^3 c3 (Newton's derivative is r(X)), and
+ * the Lagrange coefficients f,g,fdot,gdot map (r0,v0) -> (r,v) with Wronskian f gdot - fdot g = 1 --
+ * i.e. the drift is exactly symplectic. This is what integrate_whfast's kepler_drift computes. */
+kill(z)$  assume(alpha > 0, r0 > 0, mu > 0, X > 0)$
+sq : sqrt(alpha)$
+K0 : cos(sq*X)$   K1 : sin(sq*X)/(sq*X)$
+K2 : (1 - K0)/(alpha*X^2)$   K3 : (X - sin(sq*X)/sq)/(alpha*X^3)$
+print("integral c0 dX = X c1     (=0?):", trigsimp(integrate(cos(sq*s), s, 0, X) - X*K1));
+rad : r0*K0 + sig0*X*K1 + X^2*K2$
+print("radius r(0) = r0          (=0?):", trigsimp(subst(X=0, rad) - r0));
+smt : integrate(rad, X)$  smt : smt - subst(X=0, smt)$
+print("Kepler eqn sqrt(mu)t rhs  (=0?):", trigsimp(ratsimp(smt - (r0*X*K1 + sig0*X^2*K2 + X^3*K3))));
+tt   : smt/sqrt(mu)$
+f    : 1 - X^2/r0*K2$   g : tt - X^3/sqrt(mu)*K3$
+fdot : -sqrt(mu)/(rad*r0)*X*K1$   gdot : 1 - X^2/rad*K2$
+print("Wronskian f gdot - fdot g = 1 (=0?):", trigreduce(ratsimp(trigsimp(f*gdot - fdot*g) - 1)));

@@ -1,0 +1,56 @@
+/* Radau IIA, 3 stages, order 5 — Butcher tableau derived from the collocation conditions, never a
+ * transcribed table.
+ *
+ * Radau IIA is the collocation Runge–Kutta whose nodes are the right Radau quadrature points on
+ * [0,1]: the roots of
+ *
+ *     R_s(x) = d^(s-1)/dx^(s-1) [ x^(s-1) (x-1)^s ].
+ *
+ * For s = 3 this is d^2/dx^2 [ x^2 (x-1)^3 ] = 2(10 x^3 - 18 x^2 + 9 x - 1) = 2 (x-1)(10 x^2 - 8x + 1),
+ * so the nodes are (4 - sqrt6)/10, (4 + sqrt6)/10, 1 — the last node is 1, which makes the method
+ * stiffly accurate (b_j = a_{s j}) and L-stable.
+ *
+ * Given the nodes, collocation fixes the tableau exactly:
+ *     a_ij = integral_0^{c_i} L_j(t) dt,     b_j = integral_0^1 L_j(t) dt,
+ * where L_j is the Lagrange basis on {c_1, c_2, c_3}. The method then has order 2s-1 = 5, which we
+ * confirm through the quadrature order conditions B(p): sum_j b_j c_j^(k-1) = 1/k for k = 1..5.
+ *
+ *   maxima --very-quiet -b radau5_coeffs.mac
+ */
+
+/* --- Nodes: roots of the Radau polynomial --------------------------------------------------- */
+Rpoly : diff(x^2 * (x-1)^3, x, 2);
+print("Radau polynomial d^2/dx^2[x^2 (x-1)^3] =", expand(Rpoly));
+roots : solve(Rpoly = 0, x);
+print("roots:", roots);
+/* order them small -> large: c1, c2, c3 = 1 */
+c : [(4 - sqrt(6))/10, (4 + sqrt(6))/10, 1];
+print("nodes c =", c);
+/* confirm each c_i really is a root */
+for ci in c do print("  R(", ci, ") =", ratsimp(subst(x = ci, Rpoly)));
+
+/* --- Lagrange basis on the three nodes, and the tableau by integration ---------------------- */
+L(j, t) := prod( if k = j then 1 else (t - c[k])/(c[j] - c[k]), k, 1, 3);
+
+A : genmatrix( lambda([i,j], ratsimp( integrate(L(j, t), t, 0, c[i]) ) ), 3, 3);
+b : makelist( ratsimp( integrate(L(j, t), t, 0, 1) ), j, 1, 3);
+
+print("A (a_ij) =");
+for i:1 thru 3 do print("  ", A[i]);
+print("b =", b);
+
+/* --- Stiff accuracy: b_j must equal a_{3 j} (last node = 1) --------------------------------- */
+for j:1 thru 3 do print("stiff-accurate b", j, "- a[3,", j, "] (=0?):", ratsimp(b[j] - A[3][j]));
+
+/* --- Order conditions B(p): sum_j b_j c_j^(k-1) = 1/k, k = 1..5  (order 5) ------------------ */
+for k:1 thru 5 do print("B(", k, ") residual (=0?):",
+    ratsimp( sum(b[j]*c[j]^(k-1), j, 1, 3) - 1/k ));
+
+/* also the row-sum condition C(1): sum_j a_ij = c_i */
+for i:1 thru 3 do print("row-sum a[", i, "] - c[", i, "] (=0?):", ratsimp( sum(A[i][j], j, 1, 3) - c[i] ));
+
+/* --- Full-precision literals for the Rust tableau ------------------------------------------- */
+fpprec : 36$
+print("--- nodes ---");   for i:1 thru 3 do print(bfloat(c[i]), ",");
+print("--- A row-major ---"); for i:1 thru 3 do (for j:1 thru 3 do print(bfloat(A[i][j]), ","));
+print("--- b ---");       for j:1 thru 3 do print(bfloat(b[j]), ",");

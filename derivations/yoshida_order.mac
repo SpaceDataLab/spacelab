@@ -1,0 +1,7 @@
+/* Yoshida's 4th-order symplectic composition S(w1 h) S(w0 h) S(w1 h) with
+   w1 = 1/(2 - 2^(1/3)), w0 = -2^(1/3) w1. Consistency requires 2w1 + w0 = 1; fourth order requires
+   the third-order error 2 w1^3 + w0^3 to vanish. `spacelab-propagation::symplectic::yoshida4`. */
+w1: 1/(2 - 2^(1/3))$
+w0: -2^(1/3)*w1$
+print("yoshida consistency: ", radcan(2*w1 + w0))$
+print("yoshida order4: ", radcan(2*w1^3 + w0^3))$

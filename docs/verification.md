@@ -1,0 +1,8040 @@
+# Verification & oracle provenance
+
+Every algorithm in this workspace is verified against a **real external oracle** or an **exact
+analytic / behavioural property** — never a self-referential expectation. This document is the
+provenance map: for each component it names *what defines the answer*, *what it is checked against*
+and *to what residual* — the first two kept in separate columns, because they are not the same claim.
+
+The **Residual / tol** column is the bound the test suite actually enforces (reproducible with
+`cargo test --workspace`); where a doc-comment additionally records the *measured* residual, that
+tighter number is given in parentheses. Nothing here is aspirational — if a row claims `< 1e-9`, a
+test asserts it.
+
+The external oracles used, by lineage:
+
+- **IAU/IERS standards** — SOFA / `pyerfa` golden vectors, the IERS Conventions 2010 routine
+  self-test cases, real IERS `finals2000A` Bulletin A/B, the published leap-second table.
+- **Orekit 13** (Hipparchus 4) — independent-lineage Java astrodynamics; a vendored
+  `tools/orekit-oracle` harness generates golden CSVs for forces, tides, DSST, event detection,
+  tropospheric mapping, conjunction Pc.
+- **Reference model implementations** — python-sgp4 (official SGP4-VER set), Skyfield, JPL DE440
+  (via `anise`) against Horizons, Brodowski's NRLMSISE-00 C, Bowman's JB2008 FORTRAN, CNES DTM2020,
+  rpcm, OpenCV, PyTorch / onnxruntime / torchvision, ppigrf, the H3 library.
+- **Numerics libraries** — scipy, numpy, scikit-learn, PARI/GP (34-digit), mpmath (50-digit),
+  DelayDiffEq.jl (an independent method-of-steps DDE solver, reference track only).
+- **Computer-algebra systems** — Maxima and FriCAS symbolic derivations (`derivations/*.mac`,
+  `*.input`) for geopotential gradients, Richardson halo coefficients, sensor footprint edges.
+
+## How to read the *Oracle* column
+
+| Kind | Meaning |
+|---|---|
+| **External tool** | An independent library/tool computes the same quantity (pyerfa, Orekit, python-sgp4, OpenCV, PyTorch, scipy, PARI/GP, DE440, …). Strongest evidence. |
+| **Primary-source port / constant** | A numerically-exact reproduction of a reference implementation, or verbatim vendored primary-source constants (NRLMSISE-00, JB2008, DTM2020, IERS tables, WGS-84, FES tide grids). Here the oracle *is* the specification — see below for what that does and does not establish. |
+| **Independent recomputation** | A second, algorithmically-*different* in-repo method cross-checks the first (equinoctial VOP vs Gaussian averaging, Battin vs direct third-body, AD vs finite differences, SR-UKF vs SRIF). |
+| **Analytic closed-form** | Checked against a hand/textbook closed-form expression (Kepler period, J2 node regression, conic radii, dipole field, Beer–Lambert). |
+| **Self-consistency / property** | Round-trip, conservation law, symplecticity, bit-exact batch≡scalar, gauge-fixed recovery, degenerate-input guard. Honestly labelled where no external reference exists (common for the semi-analytic integrators and the Phase-8 pillars). |
+
+Hardware-gated GPU rows and network-snapshot rows are marked *(ignored)* — they are `#[ignore]`d in CI
+and run locally.
+
+## Specification source vs oracle
+
+Two different things are being called an oracle in the tables below, and the distinction decides what
+a residual is entitled to claim:
+
+- the **specification source** is the artefact that *defines* the answer — Picone's NRLMSISE-00 C,
+  Bowman's `JB2008.for`, the CNES DTM2020 Fortran, Vallado's `SGP4.cpp` and its printed
+  `tcppver.out`, the IERS Conventions routine self-tests, the WGS-84 defining constants, the FES
+  coefficient grids;
+- the **oracle** is a value arrived at independently of the implementation under test.
+
+Every table below carries both, side by side. The **Specification** column names the artefact that
+fixes what the answer should be — a standards document, a paper, an agency data product, or a
+mathematical definition. The **Oracle** column names what the residual was actually measured
+against. A **⚠** marks a row where the specification is *in practice* another implementation: no
+standard or paper determines the number on its own, so we inherit someone else's reading of it. Two
+cells are neither: *mathematical definition* (SO(3), a group inverse, IEEE-754 exactness) where the
+answer follows from the definition, and *internal API contract* (batch ≡ scalar, a conservative cull
+bound, a dense-output budget) where the promise is ours and the test is what fixes it.
+
+Where a row's oracle *is* its specification source, the residual measures transcription fidelity and
+nothing more. That is worth having — agreement to 1e-5 across NRLMSISE-00's 17 canonical outputs
+rules out a large class of transcription errors — but it is a narrower claim than the size of the
+number suggests, and it does not compose: two ports of one source agreeing adds no information.
+
+The rows where the two coincide split into two kinds, and only one of them is a gap.
+
+**Definitional.** For SGP4/SDP4 the reference implementation *is* the model: an SGP4 state has no
+meaning apart from the code that AFSPC and Vallado published, so transcription fidelity is the whole
+of correctness and `tcppver.out` is the right thing to be pinned to. The same holds for the vendored
+constant tables (WGS-84's defining constants, the leap-second list, the IERS 2010 routine self-test
+vectors, the FES2004/FES2014b grids): the primary source is the definition, and the only failure
+mode available is mis-transcription, which bit-exactness settles.
+
+**Physical.** The empirical atmospheres are not definitional. NRLMSISE-00, JB2008, DTM2020 and
+Harris-Priester each approximate a measurable quantity, so reproducing the reference program leaves
+the physical claim entirely untested — and for these four, reproducing the reference program is all
+the evidence there is. JB2008's `vs Orekit < 1e-12` does not break the circle: Orekit's JB2008 has
+the same specification source, so the two are siblings and the tightness of the agreement is a
+property of shared lineage rather than independent confirmation.
+
+Harris-Priester is a milder case and worth separating out: Orekit's implementation is written
+independently from the same published Montenbruck & Gill table rather than translated from a common
+program, so the two agreeing does test the table's transcription twice over. But the `max_rel < 1e-11`
+in that row is not evidence of independent agreement either — the half-angle cosine here is written
+`(1 + cos ψ)/2` specifically to match Orekit's arithmetic ordering bit-for-bit
+(`src/harris_priester/mod.rs`), so the last few ULP of that residual measure an alignment that was
+engineered on purpose. The honest reading of the row is "the table and the blending law transcribe
+correctly", not "the model is right to 1e-11".
+
+What would break the circle for all four is measured density
+(accelerometer-derived Swarm / GRACE-FO), which is tracker #216 and needs network data, and the
+density-calibration layer that already exists to absorb the residual those measurements would expose.
+
+### Re-deriving the generated tables from the file the agency publishes
+
+Nine of the coefficient tables are machine-generated transcriptions of a published model, and their
+correctness is a matter of provenance rather than of anything an accuracy test can assert. A flipped
+sign at degree 85 of the gravity field moves the acceleration orders of magnitude below the agreement
+the field oracles already demand, so every existing test still passes over the corrupted table —
+mutation testing makes that concrete, with 8 619 of `spacelab-propagation`'s mutants being `delete -`
+on a table entry and nothing in the suite able to see any of them.
+
+`derivations/table_seals.py` answers half of that. It folds every literal in the emitted Rust with
+FNV-1a using Python's float parser, and the matching Rust test folds the table rustc actually
+compiled; agreement means two independent parses of the same text landed on the same doubles in the
+same order. What it cannot see is a generator that mis-read the source, a source file the issuing
+agency has since revised, or a table regenerated with different truncation options — each of which
+yields a table that is internally consistent and wrong.
+
+`derivations/spec_seals.py` closes that loop for the tables whose primary file can be had, by going
+back to the file the agency publishes and re-deriving the seal from it with an extraction written
+from the file format rather than imported from the generator:
+
+| table | primary source | snapshot | seal |
+|---|---|---|---|
+| `geopotential_coeffs.rs` — XGM2019e to degree 120, 7 378 rows | ICGEM `XGM2019e.gfc` | `xgm2019e.5b821a95.gfc` (first 4 MiB, through degree 267) | `0x0efbb3111ef0b35d` ✓ |
+| `ocean_tide_fes2014_table.in` — FES2014b, 35 waves to degree 100 | Sedoo `fes2014b.v1.Cnm-Snm`, POT format | `fes2014b.1062f609.txt` | `0x4a82951c121044f4` ✓ |
+| `igrf14_coeffs.rs` — IGRF-14 epoch 2025.0 + 2025–30 SV | IAGA `igrf14coeffs.txt` | `igrf14coeffs.8f8d8840.txt` | `0xab0848c895262035` ✓ |
+
+All three re-derive **bit-exactly** from a file fetched fresh on 2026-08-09, and the FES2014b
+snapshot is byte-identical to the copy the table was generated from on 2026-07-15 — so the model has
+not been revised under us either. `tools/fetch-specs.sh` obtains the snapshots (digest-named, never
+overwritten, with a provenance sidecar, the same discipline as `tools/fetch-eop.sh`); `data/specs` is
+git-ignored because XGM2019e is 1.1 GB in full and neither it nor FES2014b is ours to redistribute.
+
+The other six of the nine are **not** covered, and the reason differs by table:
+
+| table | what the generator actually read | why not re-derived |
+|---|---|---|
+| `nut_tables.rs` — IAU 2000A nutation, 678 + 687 terms | **SOFA `nut00a.c`** ⚠ | the source is an *implementation*, not the IERS table. IERS TN36 tab5.3a publishes the same model in a different layout; reconciling the two is a transcription of its own, not a comparison |
+| `cio_tables.rs` — CIP X,Y and CIO locator s | **SOFA `xy06.c`, `s06.c`** ⚠ | same shape. IERS tab5.2a/b/d are fetchable and would be a genuinely independent primary source; SOFA keeps 8 of the 14 fundamental arguments where the IERS table prints all 16 columns, so the mapping has to be established before the seals can be compared |
+| `ocean_tide_fes2004.rs` — FES2004 to degree 6 | **Orekit's `orekit-data/fes2004_Cnm-Snm.dat`** ⚠ | deliberately so: this table exists to match the Orekit gate bit-for-bit, down to the summation order. It is a faithful copy of Orekit's copy, and re-deriving it from Orekit would not break that circle. FES2014b, which is the default, comes from the agency file |
+| `nrlmsise00/tables.rs` | **`nrlmsise00_sub.for`**, the NRL FORTRAN's `BLOCK DATA GTD7BK` | the model has no agency-published *table*; the reference program *is* the specification, so this is the definitional case above, not a gap. Re-based off Brodowski's C in `3143a74`, and the re-basing is a measurement: regenerating from the FORTRAN reproduces all 3 290 shipped values byte for byte |
+| `ocean_tide_got.rs` — GOT5.5, 31 waves to degree 6 | GOT5.5 **cotidal grids** (GSFC), analysed here | there is no coefficient file to re-derive from: this table is computed rather than transcribed, so the seal says only that the committed numbers are the generator's. The question a re-derivation would answer is answered instead by `tests/ocean_tide_atlas.rs`, which measures it against two published atlases (§10.8) |
+| `models.rs` — Niell / GMF / VMF3 mapping coefficients | the published papers | the coefficients appear in a paper's tables, not in a machine-readable distribution |
+| `tide_step2_tables.rs` — IERS 2010 Tables 6.5a/b/c | IERS Conventions 2010, chapter 6 | the tables live in the chapter PDF. The IERS site does publish `STEP2DIU.F`/`STEP2LON.F`, but those carry the *site-displacement* Step-2 coefficients — a different quantity from the geopotential ΔC̄/ΔS̄ this table holds |
+
+`subdaily_tables.rs` is outside both lists: `derivations/eop_subdaily.py` transcribes ORTHO_EOP,
+PMSDNUT2 and UTLIBR inside the script and certifies the whole model against each routine's official
+test case before emitting, so the model is pinned end-to-end even though the table is not re-derived
+from a separate file.
+
+Four rows above are flagged ⚠ — their specification is in practice another implementation. For
+`nut_tables.rs` and `cio_tables.rs` the numbers are IAU/IERS model constants either way, and they are
+cross-checked against pyerfa and the SOFA self-test vectors to 1e-18 rad, so this is not a
+correctness worry. It is a *lineage* worry: pyerfa is ERFA is SOFA, so the check and the source share
+an ancestor, and only the IERS tables would break that.
+
+---
+
+## 1 · Time, Earth orientation & geodesy
+
+`spacelab-core`, `spacelab-fa`, `spacelab-frames`, `spacelab-eop`, `spacelab-earth`
+
+| Crate | Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|---|
+| core | Mat3 rot1/rot2/rot3 + products: orthonormality, det, frame-not-vector convention | SO(3) definition | analytic property (R·Rᵀ=I, det=1) | < 1e-15 | src/linalg.rs |
+| core | Vec3 cross/dot/norm | vector algebra | analytic right-hand rule | bit-exact / < 1e-15 | src/linalg.rs |
+| core | UTC calendar round-trip, 23:59:60 leap label, field validation | ISO 8601 / Gregorian calendar; IERS Bull. C leap labelling | self-consistency over ±146 097 d (full Gregorian cycle) + epoch anchors | bit-exact | src/calendar.rs |
+| core | Epoch time scales: J2000 origin, TAI↔TT round-trip, julian_centuries | IAU 1991 Res. A4 / IAU 2006 Res. B3 time scales | self-consistency (36 525 d = 1 century) | bit-exact / < 1e-15 | src/time.rs |
+| core | UtcDateTime validation + MJD anchors | IAU/IAG MJD definition | known constants (MJD 51544.0/.5; 2000-01-01 = day 10957) | bit-exact | tests/core_api.rs |
+| core | Angle/Length unit conversions | SI + IAU angle definitions | analytic exact (180°=π, 3600″=1°) | < 1e-15…1e-18 | tests/core_api.rs |
+| fa | 14 fundamental arguments (Delaunay + planetary) | IERS TN36 §5.7.2 (Simon 1994, Souchay 1999) | pyerfa (ERFA/SOFA) at t=0.06 | < 1e-13 rad | src/fundamental.rs |
+| fa | CIP X,Y (IAU 2006/2000A series) | IERS TN36 tab5.2a/5.2b — SOFA `xy06.c` in practice ⚠ | SOFA `t_xy06` golden vector | < 1e-15 rad | src/cio.rs |
+| fa | CIP X,Y full-nutation cross-check | IERS TN36 Ch. 5 (equinox ≡ CIO route) | erfa.xys06a (independent equinox route) | < 5e-11 rad (meas ~1e-12) | src/cio.rs |
+| fa | CIO locator s | IERS TN36 tab5.2d — SOFA `s06.c` in practice ⚠ | SOFA `t_s06` golden vector | < 1e-20 rad | src/cio.rs |
+| fa | Earth Rotation Angle | IAU 2000 Res. B1.8 (Capitaine 2000) | SOFA `t_era00` golden vector | < 1e-12 rad | src/cio.rs |
+| fa | Nutation Δψ,Δε IAU 2000A / 2006A | IERS TN36 §5.5.1 (MHB2000) — SOFA `nut00a.c` in practice ⚠ | SOFA `t_nut00a` / `t_nut06a` | < 1e-13 rad | src/nutation.rs |
+| fa | GMST82 over 10 millennia (≥40 epochs) | Aoki et al. 1982 / IAU 1982 GMST | pyerfa (SOFA lineage), fixtures from `derivations/gmst82.py` | 8-ULP bound (~1e-12 rad/century) | tests/gmst82_oracle.rs |
+| fa | Leap-second table `delta_at`, every transition | IERS Bulletin C | pyerfa + published leap list | bit-exact integer | tests/delta_at_oracle.rs |
+| fa | TDB−TT (Fairhead–Bretagnon, 787 terms), 441 epochs over ±100 yr | Fairhead & Bretagnon 1990; IERS TN36 §10 | pyerfa `dtdb`, fixtures from `derivations/tdb_tables.py` | 128 ULP of the peak, rounded up (5e-17 s; meas 2.2e-19 = 1 ULP) | tests/dtdb_oracle.rs |
+| fa | TDB−TT coefficient extraction, topocentric included | Fairhead–Bretagnon 1990 — SOFA `dtdb.c` in practice ⚠ | SOFA `t_dtdb` golden vector | < 1e-15 s | derivations/tdb_tables.py |
+| fa | GMST82 coefficients C0–C3 | Aoki et al. 1982 | mpmath 50-digit certified nearest-f64 | bit-exact `to_bits()` | src/earth_rotation.rs |
+| fa | UTC↔TAI round-trip + refusals | IERS Bulletin C / `tai-utc.dat` | IERS leap-second bulletin (vendored) + self-consistency | bit-exact | src/leap_seconds.rs, tests/leap_seconds.rs |
+| frames | GCRF→ITRF full IAU 2006/2000A CIO pipeline | IERS TN36 §5.4–5.6 | pyerfa CIO pipeline, 5 epochs, element-wise | < 5e-13 (meas ~4.9e-14) | tests/cio_oracle.rs |
+| frames | Polar-motion matrix (pom00), ≥30 matrices | IERS TN36 §5.4.1 | pyerfa `pom00` | < 1e-15 | tests/frames.rs |
+| frames | The polar-motion ordering as algebra: the transpose identity, and why one wrong candidate nearly passes | IERS TN36 `W(t) = R₃(−s′)·R₂(x_p)·R₁(y_p)`; the shipped matrix claims to be its transpose | **Maxima**, `derivations/frame_transform.mac` — the identity at symbolic angles, then a Taylor expansion of the reversed product in a common small angle | `R₁(−y_p)·R₂(−x_p)·R₃(s′) − W(t)ᵀ` is the **zero matrix**, exactly and at every angle. The reversed product's **first-order term cancels identically**; the leading miss is `x_p·y_p`, with `±y_p·s′` and `x_p·s′` beside it — **9e-12 at 3 µrad**, which is what the fixture's measured 6.2e-12 is. The dangerous candidate is separated by a product of the two pole coordinates and not by `s′` at all | derivations/frame_transform.mac |
+| frames | GMST82 inside the frame chain, ≥10 epochs | IERS Conventions 1996 §5 | Orekit 13.1.7 (IERS-1996, independent lineage) | < 1e-11 rad | tests/orekit_oracle.rs |
+| frames | TEME→ITRF full transform (pos + vel) | Vallado 2006 (AIAA 2006-6753) — no IAU/IERS definition of TEME ⚠ | Orekit 13 rigorous IERS CIO chain (different algorithm) | pos < 1.5 m (sub-m meas), vel < 5.0 m/s | tests/orekit_oracle.rs |
+| frames | TIO locator | IERS TN36 Eq. 5.13 | analytic pinned −47 µas/century | < 1e-18 arcsec | tests/frames.rs |
+| frames | Frame rotation is proper over a century × polar motion (33 969 rots) | SO(3) definition | analytic property (R·Rᵀ=I, det=1) | worst 5.55e-16 | tests/frames.rs |
+| frames | ω×r velocity (equatorial point → 465 m/s) | IERS TN36 Earth rotation rate ω | analytic (rate × 6 378 137 m) | < 0.2 m/s | tests/frames.rs |
+| frames | transform∘inverse identity on a full state | group-inverse definition | self-consistency round-trip | dr < 1e-8 m, dv < 1e-11 m/s | tests/frames.rs |
+| frames | The same identity as algebra, and the precondition it rests on | group-inverse definition, for a **general** proper rotation and a **general** angular velocity | **Maxima**, `derivations/frame_transform.mac` — 3-1-3 Euler rotation, symbolic `r`, `v`, `ω`; then the same code path with an improper orthogonal matrix | residual identically **0** in position and velocity; with `det = −1` the velocity comes back wrong by exactly **−2 ω × r** (`trigsimp` → `[0,0,0]` against that form). So `Rotation::from_matrix`'s unchecked claim is *properness*, not just the frame pair — a reflection typechecks | derivations/frame_transform.mac |
+| frames | The one term `teme_to_itrf` drops, measured rather than quoted | the angular velocity of ITRF relative to TEME is sidereal plus polar-motion rate; only the first is carried | the algebra in `frame_transform.mac` (`rot3` fixes `ẑ`, so `d/dt rot3` has axial vector `ġ·ẑ` with no dependence on `g`), and `derivations/polar_motion_rate.py` over **19 976 daily IERS rows, 54.7 years** | sidereal half **exact**; pole rate **1.28e-13 rad/s** median, **3.12e-13** worst — **2 µm/s** at the equator against 465.101 m/s, so ω is **2.3e8×** the worst of it. The docstring said `5e-11 rad/s`, `3e-4 m/s` and "four thousand times below": wrong by 250×, by 150×, and self-inconsistent (3e-4 into 465 is 1.5e6, not 4e3). An amplitude had been read as a rate | derivations/polar_motion_rate.py |
+| frames | GCRF/TEME→ITRF batch ≡ scalar | internal API contract | self-consistency (bit-exact) | bit-exact | tests/frames.rs, tests/cio_batch_and_fast.rs |
+| frames | CioInterpolator vs exact transform over 6 h at LEO | internal API contract (interpolation budget) | self-consistency vs pyerfa-validated exact | < 1e-6 m (sub-micron) | src/cio_fast.rs |
+| frames | The interpolator's error as a **bound**, and which half of it is the floor | Lagrange remainder `f⁽⁸⁾(ξ)/8!·h⁸·Π(u−i)` for degree 7 on a 600 s grid | **Maxima** for the node product and the Lebesgue constant (`derivations/cio_interpolation.mac`), and `derivations/cio_interpolation.py` for `sup\|d⁸X/dt⁸\|` summed over the shipped 1309-frequency table | node product exactly **11025/256** centred, **14.87×** that clamped at a grid end; `sup\|d⁸X/dt⁸\|` ≤ **9.84e-48 rad/s⁸** (set by a 306 µas term of 5.6-day period; fastest argument in the series 3.495 d) → truncation **1.3e-21 m** at LEO, 1.9e-20 m clamped. `s′` is linear in `t`, so degree 7 is **exact** for it | derivations/cio_interpolation.mac |
+| frames | What the measured sub-nanometre agreement actually is | node rounding amplified by the stencil's Lebesgue constant, `Λ = max Σ\|ℓⱼ\|` | the same Maxima file, on a 200-point sweep of each interval | **Λ = 1.488** centred, **6.93** clamped; one ulp of a CIP coordinate is 4.34e-19 rad = **2.9 pm** at LEO, so the interpolated value carries 4.4–20 pm. That is **seven orders above** the truncation term: the residual is arithmetic, not method, and `GRID_DT` would have to be **22× coarser** before truncation reached one nanometre | derivations/cio_interpolation.py |
+| eop | Bulletin A vs Bulletin B same pole, post-2000 | IERS EOP products (`finals2000A`) | IERS finals2000A — two independent IERS solutions | < 1e-3 arcsec / < 1e-3 s | tests/finals_parse.rs |
+| eop | Sub-daily EOP: fundarg, ortho_eop, pmsdnut2, utlibr | IERS TN36 §5.5.1, Ch. 8 + the Conventions' own routines | IERS Conventions 2010 official routine self-tests | 1e-9 rad … 1e-3 µas/µs | src/subdaily.rs |
+| eop | Leap second does not smear across a day (dut1 step) | IERS Bulletin C (integer-second UTC step) | IERS finals (physical 1 s step) | ‖step‖−1 < 0.02 s | tests/finals_parse.rs |
+| eop | Full finals2000A parse *(ignored: needs snapshot)* | IERS `finals2000A` fixed-width format | real IERS 3.7 MB file: grid + A−B | gap−1 < 1e-9 d; ‖A−B‖ < 1e-3 arcsec | tests/finals_parse.rs |
+| eop | lagrange4 interpolation / destep_dut1 | polynomial-interpolation definition | analytic exact (degree-3 exact / base-anchored) | < 1e-9 / < 1e-12 | src/finals.rs |
+| earth | Vermeille geodetic↔ITRF, ≥500 pts LEO→GEO | Vermeille 2002/2011 closed form | pyerfa `gc2gd` (Fukushima iteration — different algorithm) | lat < 1e-10 rad, h < 1e-6 m (meas 1.5e-8) | tests/geodetic.rs |
+| earth | WGS-84 defining constants | NIMA TR8350.2 3rd ed. | WGS-84 primary source | a bit-exact; b < 1e-6 | tests/geodetic.rs |
+| earth | Geodetic↔Cartesian round-trip over whole ellipsoid | ellipsoid geometry | self-consistency | dlat < 1e-12 rad, dh < 1e-7 m | tests/geodetic.rs |
+| earth | Geodetic ≠ geocentric latitude (~11.5′ at 45°) | ellipsoid geometry | analytic closed-form | < 0.2′ | tests/geodetic.rs |
+| earth | Geodetic↔ITRF at cities/pole/equator | WGS-84 ellipsoid | self-consistency round-trip | lat/lon < 1e-9°, h < 1e-6 m | tests/wgs84.rs |
+
+*`spacelab-fa` is the workspace's oracle backbone — nearly every function pinned to SOFA golden
+vectors or pyerfa at sub-1e-13-rad tolerances, plus bit-exact coefficient certification and a vendored
+IERS leap-second table. `frames` is dual-oracle validated (tight pyerfa CIO check + independent-lineage
+Orekit cross-check that honestly measures the sub-metre TEME-convention floor). `eop` is checked against
+real IERS primary sources; `earth`'s strongest single check is cross-algorithm (Vermeille vs pyerfa's
+Fukushima). `core` is analytic identities + bit-exact anchors + round-trips, as befits unit wrappers and
+calendar arithmetic.*
+
+---
+
+## 2 · Numerical propagation, forces & DSST
+
+`spacelab-propagation` — anchored overwhelmingly on **Orekit 13 golden fixtures** (via
+`tools/orekit-oracle`) for every force model and the whole DSST stack; empirical atmospheres are
+numerically-exact ports of their primary-source references; the integrator suite leans on measured
+convergence order + Hamiltonian conservation + cross-checks against independently-provenanced DOP853.
+
+### Integrators
+
+| Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|
+| DOP853 tableau | Hairer–Nørsett–Wanner I §II.5 (Dormand–Prince 8(5,3)) | scipy `dop853_coefficients` (machine-generated) + analytic Kepler + DOPRI5 cross-check | energy < 1e-9, Lz < 1e-10; vs DOPRI5 < 1e-8 | tests/dop853.rs |
+| DOPRI5 tableau | Dormand & Prince 1980; order conditions in `derivations/dopri5_order.mac` | Dormand–Prince 1980; order conditions symbolic in `derivations/dopri5_order.mac`; dense = Hairer contd5 | analytic < 1e-8; order 5 | tests/integrators.rs |
+| RKN12(10)17 | Dormand, El-Mikkawy & Prince 1987 | Dormand–El-Mikkawy–Prince 1987 coeffs; analytic Kepler + DOP853 | order 12; adaptive vs DOP853 < 1e-4 | tests/rkn1210.rs |
+| ARK4(3)6L[2]SA IMEX | Kennedy & Carpenter 2003 | exact rationals of SUNDIALS/ARKODE; Prothero–Robinson analytic | order 4; stiff err < 1e-3 | tests/ark.rs |
+| MRI-GARK-ERK33a | Sandu 2019 | exact rationals (Sandu 2019 / SUNDIALS); fine RK4 reference | order 3; vs reference < 1e-3 | tests/mri.rs |
+| Radau IIA-5 | Radau IIA collocation, derived in `derivations/radau5_coeffs.mac` | analytic Kepler + DOP853 | order 5; vs DOP853 < 1e-2; L-stable | tests/radau.rs |
+| Rosenbrock GRK4T | Kaps & Rentrop 1979; Hairer–Wanner `ros4.f` | analytic Kepler + DOP853 | order 4; vs DOP853 < 1e-2 | tests/rosenbrock.rs |
+| GBS extrapolation | Gragg 1965; Bulirsch & Stoer 1966; Deuflhard order control | analytic exp; two-body closure; DOP853 | exp < 1e-11; drift < 1e-6 km; vs DOP853 < 1e-5 | src/gbs.rs |
+| Gauss–Jackson-8 | Störmer–Cowell, derived in `derivations/gauss_jackson_coeffs.mac` | analytic two-body + DOP853 | order 8; 25-orbit drift < 1.0 m | tests/gj.rs |
+| ABM-8 / Adams–Nordsieck-5 | Adams / Nordsieck coefficients, derived in `derivations/adams_coeffs.mac`, `adams_nordsieck.mac` | DOP853 on Kepler | order 8/5; < 1e-3 m / < 2.0 m | tests/abm.rs, tests/adams_nordsieck.rs |
+| IAS15 | Everhart 1985; Rein & Spiegel 2015 | analytic Kepler; energy-drift property | < 1e-3 m; 2nd-half energy peak < 1e-12 | tests/ias15.rs |
+| Symplectic (leapfrog / Yoshida 4·6·8) | Yoshida 1990 | tight DOP853; no-drift property | orders 2/4/6/8; energy bounded over 2000 orbits | tests/symplectic.rs |
+| WHFast / SABA₂/₄ | Wisdom & Holman 1991; Rein & Tamayo 2015; Laskar & Robutel 2001 | exact-Kepler-drift + symplectic + DOP853 (J₂) | drift < 1e-2 m; vs DOP853 < 50 m; energy bounded | tests/whfast.rs, tests/saba.rs |
+| KS regularization | Kustaanheimo & Stiefel 1965; identities in `derivations/ks_regularization.mac` | analytic two-body closure | pos < 1.0 m, vel < 1e-3 m/s | tests/ks.rs |
+| MERCURIUS | Rein et al. 2019 | tight IAS15 through a close encounter | merc_err < 1e3 vs fixed-WHFast miss | tests/mercurius.rs |
+| Taylor-jet integrator | analytic-ODE jet recurrence; step control from Jorba & Zou 2005 | analytic Taylor coeffs (exp/cos/powf/atan2) + DOP853 | coeffs < 1e-12; vs DOP853 < 1e-8 | tests/taylor.rs, src/taylor.rs |
+| Attitude RKMK4 (SO(3)) | Runge–Kutta–Munthe-Kaas; so(3) exponential in `derivations/lie_so3.mac` | self-consistency (invariants) | ‖L‖/energy < 1e-6; orthogonality < 1e-13 | tests/attitude.rs |
+| STM (two-body) | variational-equation definition; Hamiltonian symplecticity | self-consistency (symplectic/Liouville) + FD | ΦᵀJΦ=J < 1e-8; detΦ=1 < 1e-8; FD < 1e-5 | tests/stm.rs |
+| STT (2nd-order tensor) | Park & Scheeres 2006 | finite-difference of STM; Gauss–Hermite covariance | cov < 1e-8, mean < 1e-7 | tests/stt.rs |
+
+### Forces — gravity, third-body, SRP, relativity, radiation, drag coefficient
+
+| Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|
+| GeoPotential gradient (XGM2019e) | ICGEM XGM2019e `.gfc` (re-derived, see above); spherical-harmonic potential | Maxima symbolic-gradient oracle (`derivations/geopotential.mac`) | rel < 1e-9 | src/geopotential.rs |
+| GeoPotential @ degree 70 | ICGEM XGM2019e `.gfc`; associated-Legendre definition | independent scipy assoc-Legendre + numerical gradient | ~1e-8 (assert < 1e-6) | src/geopotential.rs |
+| GeoPotential SIMD ≡ scalar / zonal-only | internal API contract | self-consistency + verified `forces::Zonal` | SIMD rel < 1e-12; zonal < 1e-9 | src/geopotential.rs |
+| Zonal J₂…J_{N+1} force | zonal-harmonic potential; classical J₂ node regression | analytic node-regression Ω̇; J₃ parity; energy/Lz | node < 3%; energy < 1e-9 rel; STM symplectic < 1e-6 | tests/zonal.rs, tests/forces.rs |
+| Time-variable gravity | IERS TN36 Table 6.2; ICGEM `.gfc` time-variable format | IERS 2010 Table 6.2 vendored rates; ICGEM parse vs hand series; `eigen6s2` excerpt | parse/eval < 1e-16…1e-18 | src/time_variable_gravity.rs |
+| Relativity (Schwarzschild / Lense-Thirring / de Sitter) | IERS TN36 §10.3 | closed-form Python golden **and** Orekit 13 golden CSV | Python < 1e-12; Orekit round-off (de Sitter < 1e-10) | src/relativity.rs |
+| Knocke Earth albedo/IR | Knocke, Ries & Tapley 1988 | Orekit 13 `KnockeRediffusedForceModel` golden, 4 LEO geometries | < 1e-12 | src/earth_radiation.rs |
+| Third-body force (Battin form) | Battin, *Astrodynamics* — f(q) indirect-term form | independent direct difference-of-terms; tidal-field limit | Battin≡direct < 1e-8; tidal < 1e-4 | tests/solar_perturbations.rs |
+| SRP force (direction / shadow / 1/d²) | cannonball SRP; solar irradiance at 1 AU | analytic geometry (1 AU ref 1.368e-7) | < 1e-10; near/far≈4 < 1e-3 | tests/solar_perturbations.rs |
+| Conical shadow (lighting ratio) | conical umbra/penumbra geometry (Montenbruck–Gill) | independent circle-intersection-area oracle; Orekit form | < 1e-12 | src/shadow.rs |
+| Analytic Sun / Moon ephemeris | Montenbruck–Gill low-precision solar/lunar series | textbook RA/Dec; JPL Horizons ICRF vector @ J2000 | Sun RA < 0.3°; Moon angular < 0.15°, range < 3000 km | tests/ephemeris.rs |
+| Lunar gravity field (GRGM1200A → 40) | PDS SHADR `gggrx_1200a_sha.tab` (GSFC/GRAIL), parsed by content; header `GM = 4902.8001224453` km³/s², `Re = 1738.000` km | mpmath 60-digit direct Legendre summation of the same coefficients, central-differenced (`derivations/gen_lunar_oracle.py`) — a different algebra from the Gottlieb recursion under test | worst 7.333e-16 rel (assert < 1e-11) | tests/lunar\_gravity.rs |
+| Lunar PA → ME frame rotation | NAIF `moon_de440_250416.tf`, `TKFRAME_31009_ANGLES` (Park et al. 2021) | ANISE reading the same kernel through its own Euler-parameter path; and the mean Earth direction over a nodal cycle of DE440 | 1.255e-7 element (0.22 m on the surface) — an ordering difference, see below | spacelab-ephemeris/tests/lunar\_orientation.rs |
+| Lunar principal-axis orientation (DE440 BPC) | `moon_pa_de440_200625.bpc` via ANISE | orthonormality and det = +1 of the DCM; tidal locking puts Earth 8.37° off the PA `x`-axis | \|M·Mᵀ − I\| = 5.6e-17 | spacelab-ephemeris/tests/lunar\_orientation.rs |
+| Selenocentric origin shift | DE440 Moon state | round trip through `recenter`; the Moon's own speed as the velocity shift; and the Sun recentred Earth→Moon against ANISE's direct selenocentric Sun | position 0.0 km, velocity 1.1e-16 km/s; shift 1.043 km/s; absolute 0.0 km | spacelab-ephemeris/tests/lunar\_orientation.rs |
+| **Selenocentric propagation, end to end** | GRGM1200A→40 in the DE440 principal axes, Earth + Sun third bodies, cannonball SRP occulted by the Moon | NASA's reconstructed LRO trajectory (`lrorg_2025349_2026074_v01`, PDS3, byte-swapped by `tools/daf-swap-endian.py`), from a state on the arc | \|Δr\| = 4.5 m @ 10 min, 14.2 m @ 30 min, 76.9 m @ 60 min (65% along-track); degree 8 is 1288.5 m over the same hour | spacelab-ephemeris/tests/lro\_arc.rs |
+| DAF byte-order conversion | NAIF DAF layout: file record, ASCII comment area, summary records with 4-byte integers packed two to a double slot, name records, element doubles | SPICE reads either byte order, so the same six states are read from the archived big-endian file and the converted one | bit-identical, 0.0 elementwise over 30 days | `tools/daf-swap-endian.py` |
+| **Selenocentric propagation vs a fourth propagator** | GRGM1200A→40 in the DE440 principal axes, Earth + Sun as point masses; drag, SRP, albedo and tides off | **NEPTUNE** (TU Braunschweig ILR/IRAS, Apache-2.0, Fortran-2008), same initial state and *the same coefficients* — `gen_lunar_gravity.py --icgem` emits our field in ICGEM form and `run.sh -d` supplies it under the filename NEPTUNE fixes | \|Δr\| = 37.3 m @ 6 h, 239.4 m @ 24 h, worst 739.9 m over 7 days, and non-monotonic — the signature of a frame difference, not a secular model error | spacelab-ephemeris/tests/neptune\_lro.rs |
+| **Geocentric propagation vs a fourth propagator** | XGM2019e→70 in the true ITRF, Sun + Moon as point masses; drag, SRP, albedo, tides and relativity off on both sides | **NEPTUNE**, same initial state, *the same coefficients* (`make_gravity_overlay.py` writes the embedded table in NEPTUNE's own layout) and *its own EOP row* | \|Δr\| = 0.05 m @ 3 h, 0.25 m @ 12 h, 0.47 m @ 24 h, linear and monotone; the two fields alone differ by 18.4 m over the same day | spacelab/tests/neptune\_sentinel1b.rs |
+| **ITRF → GCRF, one epoch** | IAU 2006/2000A CIO chain on Sentinel-1B's POE state | **NEPTUNE**'s own reduction (libslam `slam_reduction.f90`) on **its own** EOP row for MJD 58659 | \|Δr\| = 1.3e-5 m, \|Δv\| = 1.6e-7 m/s — 0.4 µas of pole | spacelab-frames/tests/neptune\_frames.rs |
+| Sentman drag coefficient | Sentman 1961; Doornbos 2011 | ADBSat `coeff_sentman.m` + Doornbos 2011 benchmark table | table < 1e-4; s vs 7.4549 < 1e-3 | src/drag_coefficient.rs |
+
+### Atmospheres — exact ports of primary-source reference implementations
+
+| Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|
+| NRLMSISE-00 (gtd7/gtd7d) | Picone et al. 2002 — the released C is the specification in practice ⚠ | Brodowski reference C (Picone 2002), 17 canonical outputs | max_rel < 1e-5 | src/nrlmsise00/mod.rs |
+| NRLMSISE-00 drag wrapper | internal API contract (gtd7d + hydrostatic gradient) | underlying gtd7d value + analytic scale-height gradient | value < 1e-12 rel; gradient < 1e-6 | tests/nrlmsise00_atmosphere.rs |
+| JB2008 | Bowman et al. 2008 — the SET `JB2008.for` is the specification in practice ⚠ | canonical FORTRAN JB2008.for (Bowman/SET) + Orekit cross-check | density < 1e-6 rel; vs Orekit < 1e-12 | src/jb2008/mod.rs |
+| DTM2020 | Bruinsma & Boniface 2021 — the CNES Fortran is the specification in practice ⚠ | CNES double-precision Fortran benchmark | temp < 1e-10, density < 1e-9 rel | src/dtm2020/mod.rs |
+| Harris-Priester | Harris & Priester 1962 table (Montenbruck–Gill appendix) | Orekit reference density (Montenbruck–Gill table) | max_rel < 1e-11 | src/harris_priester/mod.rs |
+| Atmospheric drag force | drag-equation definition; King-Hele Δa | King-Hele Δa; co-rotation; dissipative STM detΦ<1 | energy monotone; detΦ < 1−1e-6 | tests/drag.rs |
+
+### Atmospheres — SDTM-1, our own model
+
+Most of these rows verify the **form and the evaluator**, on a hand-built field, and §2.6 says what
+that does and does not settle. The rows from **SDTM-1 under a storm** downward verify the *fitted*
+field and the paths that reach it: Ф15.D has since run on the twelve satellite-months that were
+reachable, and §10.10 is its verdict, its splits and its envelope.
+
+| Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|
+| SDTM-1 `I₁ = ∫₀^ζ dζ′/T` closed form | Bates (1959) temperature profile; form fixed in `plans/16` D-13 | `derivations/sdtm_bates.mac` — four identities at 0 — **and** Simpson on `1/T` at 7 heights to 900 km | < 1e-12 rel; the CAS's printed `0.328264435927652` to 1e-15 | src/sdtm/mod.rs |
+| SDTM-1 diffusive-equilibrium density | Jacchia (1971) §3: `nᵢ = nᵢ(0)(T₀/T)^{1+αᵢ} e^{−mᵢg₀I₁/k}` | Maxima: the residual of the barometric ODE for each species is 0 | exact (symbolic) | derivations/sdtm_bates.mac |
+| SDTM-1 analytic `∂ρ/∂ζ` | differentiation of the same closed form | Richardson-extrapolated central difference of the shipped `density`, h = 200 m | < 1e-9 rel at 5 altitudes | src/sdtm/mod.rs |
+| SDTM-1 boundary continuity | `ρ(z₀) = Σ mᵢnᵢ(0)`, independent of `T∞` | the boundary sum itself, at `T∞` ∈ {380, 500, 1000, 2000} K | **bit-exact** at `ζ = 0`; < 1e-6 rel 1 mm above | src/sdtm/mod.rs |
+| SDTM-1 isothermal limit | barometric law at `T₀` where the `T∞` exponent underflows | the closed-form barometric sum, same boundary composition | `T∞ == T₀` exactly; ρ < 1e-12 rel | src/sdtm/mod.rs |
+| SDTM-1 profile shape | WKB validity `\|dH/dz\| < 1`; literature ρ and H at 400 km | the profile's own scale height, 120→1000 km at 1 km | monotone; worst `\|ΔH\|` 0.61 m/m at 951 km; ρ(400 km) **3.5e-12 kg/m³**, H **57 km** | src/sdtm/mod.rs |
+| SDTM-1 storm kernel | two-constant causal kernel, unit DC gain, `w(0) = 0` | midpoint convolution over a 40-step `ap` history + 20 recovery times of pre-history; closed-form peak `τ*` | gain 1e-9; recursion vs convolution < 1e-6 rel | src/sdtm/mod.rs |
+| SDTM-1 activity-by-season coupling | Bowman et al. (2008): the semiannual amplitude is activity-dependent | the same field with the four cross terms zeroed | swing ratio 20× with, 1.7× without (= the ratio of the two exponentials) | src/sdtm/mod.rs |
+| SDTM-1 boundary scale | a scale on the boundary *total* may move the level and nothing else | the same field twice, scales 1 and 0.75, at four altitudes | ρ and dρ/dz scale by exactly 0.75 (≤ 1 ulp); `T∞` bit-equal; H within 1e-9 | src/sdtm/mod.rs |
+| SDTM-1 uncertainty regimes | a flux × storm cell decided by the model's own drivers; `σ` from the calendar-month split | the interval's own coverage against measured density, two fixture days and every regime of the 348 693-row campaign | never under-covers in sample: 100 % quiet, 94.0 % storm at the nominal 90 %; on a mission held out entirely **92.5 %** GRACE-FO C and **87.8 %** Swarm A, so the 88–92 % band brackets the pair | src/sdtm/uncertainty.rs, tests/measured_density.rs |
+| SDTM-1 normal quantiles | `√2·erf⁻¹(p)` at p = 0.9, 0.95, 0.99 | **Maxima** at 30 digits, and `erf(z/√2)` back against each `p` | correctly-rounded `f64` of the CAS's digits; round-trip < 1e-15 | src/sdtm/uncertainty.rs |
+| SDTM-1 under a storm | the event the model exists for is not a pooled average; scored on Bruinsma & Laurens (2024)'s own protocol so the numbers are comparable to published ones | eight storms in the corpus (`ap` ≥ 80), both missions, debiased on the pre-storm window, held out by calendar month; the same protocol written independently in Python and in Rust | `⟨O/C⟩` **0.994** with **9.4 %** spread held out (in sample 1.013 / 9.3 %), mean R 0.889; the two implementations agree on `t0` for all eight storms and on every statistic to ~1 % | tools/gen_sdtm_coefficients.py, tests/measured_density.rs |
+| Storm peak, five models | whether missing a storm's peak is ours or everyone's | peak *enhancement* over the pre-storm level, orbit-averaged, all five configurations on the same eight storms | four of five miss it by 33–63 % on average; **JB2008 alone reaches 23.7 %**, and it is the only one driven by hourly `Dst` rather than 3-hourly `ap` | tests/measured_density.rs |
+| The storm driver, three hypotheses | which of the driver's cadence, the loss, or the regressor's *scale* caps the peak — the first was the obvious answer and it is wrong | GFZ hourly `ap60` (365 544-row contiguous series) against 3-hourly `ap`; a fit on nothing but the 3130 storm-window rows; four candidate regressor forms, all held out by calendar month | `ap60` **worse** (spread 14.8 → 18.0 %); storm-only fit **worse** (peak error 0.38 → 0.46); `ln(1 + storm/15)` at the same 35 coefficients **better on every aggregate** — spread → 9.4 %, mean peak error 0.58 → 0.36, worst 1.95 → 0.61 | tools/gen_sdtm_coefficients.py, src/sdtm/mod.rs |
+| The storm kernel's memory | whether a longer memory is what the storm peak is short of — the remedy §10.15 named, tested before it was built | eight kernels pinned with `--pin-kernel` at the shipped operating point against the free fit, all held out by calendar month; and the sixteen comparisons split on Bruinsma & Laurens's own multiple-peak label | **no.** The peak error is uncorrelated with activity (r = **−0.19** against `ln(peak ap)`) and the split is **multiple-peak against single-peak**: 0.619 against 1.127, and **all ten MP comparisons under-reach at every one of the eight rungs**. Unit DC gain means a longer kernel lowers every modelled peak, helping the storms that over-reach and hurting the ten that do not | tools/gen_sdtm_coefficients.py |
+| SDTM-1 on the drag path | a fitted field is not a force model: the `Atmosphere` the STM reads must be the field, and its gradient the field's own | the wrapper against the field at the named point, the dual gradient against the analytic `dρ/dz`, the boundary degeneracy, a 6015-point positivity sweep, and `CalibratedAtmosphere` over it | bit-equal value; gradient < **1e-14** relative; `1/H` finite and positive everywhere, smallest ρ **9.0e-33 kg/m³**; no second model evaluation and no fallback arm, unlike the other three wrappers | src/sdtm/atmosphere.rs |
+| SDTM-1's altitude convention | the conventions of the file a model was fitted to are part of its parameters, and nothing that round-trips a model against itself checks them | the fit's own input column against the docstring: TU Delft column 4 is "Altitude (m), GRS80" | the docstring said a spherical datum; the fit used geodetic height. **21.371 km** apart at the equator, a factor of **1.44** in density at 400 km. Corrected, and `SdtmAtmosphere` removes the choice from the caller | src/sdtm/mod.rs |
+| SDTM-1 in both bridges | #319's defect is a capability that reaches one bridge and not the other | the same four names defined, registered and exercised on both sides, enforced by a test that reads both files | 4 of 4 name-for-name; `just capi` **12/12** across C99–C23 × C++20–C++26 × throw/nothrow × `-fshort-enums`; the kernel's unit gain and the interval's multiplicativity pinned as exact equalities in C, C++ and Python | tests/bridge_parity.rs, tests/c/smoke.c, tests/bindings.py |
+| SDTM-1 operational drivers | the fit's conventions — yesterday's F10.7, the **trailing** 81-day mean, the kernel over the `ap` history before the sample — belong to the library, not to each call site | `space_weather::sdtm_drivers` against the hand assembly, and the crate's own 81-day window against the provider's published mean | the two means are not interchangeable (6.7 flux units apart on average, 42.6 at worst); our window matches the published one to **0.0494** over 22 323 fully measured windows, which is its one-decimal rounding | src/space_weather.rs, tests/operational_path.rs |
+| SDTM-1 operational latency and forecast | a density at the newest epoch one fetched file supports, and a measured baseline past it | the feed's last measured day against the download's own timestamp; persistence and 27-day recurrence scored by lead over 420 origins | **1 day** behind a 2026-09-14 fetch (2 behind a 2026-08-10 one); recurrence overtakes persistence at lead **8** in F10.7 and lead **2** in `Ap`, and the two coincide exactly at lead 27 | tests/operational_path.rs |
+| SDTM-1 fitted field — Rust against the generator | the fit is done in Python and the evaluator in Rust; two implementations of one model | `tools/gen_sdtm_coefficients.py`'s own values at 64 of the geometries it fitted on, every field written at round-trip precision | worst `T∞` **1.824e-15**, worst ρ **7.516e-15** relative (tolerances 1e-12 / 1e-11) | tests/sdtm_reference.rs |
+
+### Tides
+
+| Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|
+| Ocean tide ΔC̄/ΔS̄ (FES2004) | IERS TN36 §6.3 — FES2004 grid taken from Orekit's data distribution ⚠ | Orekit 13 `OceanTides` FES2004 deg/order 6 | rel < 1e-9 | src/ocean_tide.rs |
+| Ocean tide acceleration (FES2004) | IERS TN36 §6.3 (same FES2004 provenance) ⚠ | Orekit 13 `OceanTides` (ITRF) | rel < 1e-7 (meas 5.2e-8, cancellation floor) | src/ocean_tide.rs |
+| Ocean tide admittance weights | IERS TN36 §6.3 admittance; FES2014b (aviso-fes) primary file | pyfes (FES2014b / aviso-fes), spline + linear minor waves | < 1e-6 (meas ~7e-15) | src/ocean_tide_admittance.rs |
+| Solid Earth tide Step-2 | IERS TN36 Ch. 6, Tables 6.5a–6.5c | Orekit `getTideFrequencyDependenceFunction` | rel < 2e-3 | src/solid_tide.rs |
+| Solid pole tide (§6.4) / ocean pole tide (§6.5) | IERS TN36 §6.4 / §6.5 | Orekit `getSolidPoleTide` / `getOceanPoleTide`, at `MeanPole::Iers2010` — Orekit implements no other | rel < 1e-9 | src/solid_tide.rs |
+| Secular pole, the shipped default (Ch. 7 Eq. 21) | IERS TN36 Ch. 7 as amended 2018/02/01, Eq. (21) | `derivations/pole_wobble.py` at 50 dps, 7 epochs × 2 polar motions | rel < 1e-15 | src/solid_tide.rs |
+| FES2004 / FES2014b coeff tables | FES2004 via Orekit ⚠ / FES2014b aviso-fes file (re-derived) | vendored verbatim primary source | SCALE=1e-11 verbatim | src/ocean_tide_fes2004.rs, fes2014.rs |
+| Ocean tide ΔC̄/ΔS̄ from a cotidal grid (GOT5.5) | IERS TN36 §6.3 Eq. 6.18–6.21, conventions proved in Maxima | FES2004 **and** FES2014b, the spread between them as the floor | closer to FES2014b than FES2004 is on all 9 waves the three share; worst rms 0.228e-11 over 17 | derivations/tide_to_stokes.py, tests/ocean_tide_atlas.rs |
+| SH analysis quadrature and `P̄nm` | Driscoll & Healy (1994); 4π normalisation, no Condon–Shortley | Maxima at 25 digits (Rodrigues) and closed-form orthogonality | 4.4e-16 (incl. sign); synthetic field 1.0e-15 | tide_to_stokes.py --self-test |
+
+### Spacecraft, maneuvers, DSST semi-analytical
+
+| Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|
+| Box-wing drag + SRP | box-wing radiation model (Montenbruck–Gill); panel convention from Orekit ⚠ | Orekit 13 `BoxAndSolarArraySpacecraft` golden, 5 geometries | < 1e-9 | src/spacecraft.rs |
+| Constant-thrust / impulse / parametric maneuvers | rocket equation; constant-thrust and impulsive definitions | Orekit `ConstantThrustManeuver`/`ImpulseManeuver`/`ParametricAcceleration` golden | r/v < 1e-12; AD vs FD | src/maneuver.rs |
+| DSST **drag** mean rates | Danielson et al. 1995 — Gaussian VOP averaging | Orekit `getMeanElementRate` **+** independent 200k-sample Gauss orbit-average | da bit-exact (0.0 rel); e/i ~4e-14; indep. 3.5e-15 rel | src/dsst/drag.rs |
+| DSST **drag** short-period | Danielson et al. 1995 — Gaussian short-period | Orekit OSCULATING `DSSTPropagator` | a < 5e-6 m; comps < 5e-11 | src/dsst/gaussian_short_period.rs |
+| DSST **SRP** mean rates | Danielson et al. 1995 — Gaussian VOP averaging; cylindrical shadow at the physical `ae` | **independent VOP orbit-average** (`experiments/dsst_srp_independent_verify.py`), with Orekit `getMeanElementRate` reduced to a bracket | vs VOP: da 1.044e-4, dk/dh 2.06e-5, dq/dp/dM 8.3e-5 (bound 1.5×) — vs Orekit 3.455e-4 … 5.3e-5, bracketed not bounded ⚠ | src/dsst/srp.rs |
+| DSST **SRP** short-period | Danielson et al. 1995 — Gaussian short-period | Orekit OSCULATING (~62 mm `a` swing) | a < 5e-6 m (meas 2.0e-6); comps < 5e-12 (meas 2.4e-12) | src/dsst/gaussian_short_period.rs |
+| DSST **zonal** mean rates + prop | Danielson et al. 1995 — zonal; Kaula 1966 | Orekit `getMeanElementRate` J₂…J₆ | rates < 1e-10 rel; along-track < 1 m | src/dsst/mod.rs |
+| DSST **zonal** short-period | Danielson et al. 1995 — zonal short-period | Orekit OSCULATING; numeric J2–J5 cross-check | da < 1e-2 m; comps < 1e-9 | src/dsst/short_period.rs |
+| DSST **tesseral** mean + short-period | Danielson et al. 1995 — resonant tesseral | Orekit (GEO 1:1 & GPS 2:1 resonance) | < 1e-9 rel (meas ~1e-14); non-resonant exact 0.0 | src/dsst/tesseral.rs, tesseral_short_period.rs |
+| DSST **third-body** mean + short-period | Danielson et al. 1995 — third-body | Orekit `getMeanElementRate` **+** independent FD of disturbing potential | Sun/Moon < 1e-10 rel; along < 1 m | src/dsst/third_body.rs |
+| DSST Hansen kernels | Hansen coefficients; recurrences in Danielson et al. 1995 | analytic recurrence self-check | value < 1e-14; deriv < 1e-12 | src/dsst/hansen.rs |
+| DSST full propagator | Danielson et al. 1995 — mean + short-period composition | reproduces Orekit-validated DsstZonal mean/osculating | a < 1e-3 m; 24 h mean-a drift < 1e-2 rel | src/dsst/propagator.rs |
+
+**The SRP row is the one place where the oracle had to be replaced.** Orekit's `getLLimits` casts
+its shadow cylinder at `ae·B` rather than `ae` — Danielson's printed `M = ae²/(a²(1 − h² − k²))` is
+one power of `B²` short of his own eq. 2.1.4-6 — and `l_limits` casts the physical `ae`, so the two
+no longer agree to round-off and never will. Loosening the gate to `1e-3` would have let a real
+regression through, so the Orekit fixture was reduced to a *bracket* on a deviation that is now
+measured rather than bounded, and the accuracy statement moved to a third implementation:
+`experiments/dsst_srp_independent_verify.py`, a variation-of-parameters orbit-average that shares
+no algebra with the module. It lands between the two and 2.5× closer to this one — `1.04e-4` on
+`da` against Orekit's `3.455e-4`. Getting it there needed the shadow crossings bisected rather than
+scanned (`4e-8 rad` instead of `7.6e-6`), the quadrature split at the shadow boundary and again at
+the penumbra kink (a step integrand is `O(1/N)` on a uniform grid, and `⟨da/dt⟩` for a constant
+force over a closed orbit is *entirely* shadow, so it is measured against cancelling halves), and
+the conical penumbra rather than a binary cylinder — that last worth `3.2e-3 → 4.5e-4` on its own.
+Integrating the physical cone over the whole orbit instead of truncating it at the cylindrical
+limits moves `da` by `3.1e-3`, which is the size of the DSST scheme's own approximation and an
+order of magnitude above the implementation differences.
+
+### 2.1 The lunar frame kernel's angles run the other way, and the tolerance is what caught it
+
+The Moon's gravity field is fitted in the **principal-axis** frame; its maps are drawn in the **mean
+Earth/mean rotation** frame. NAIF's `moon_de440_250416.tf` publishes the offset between them as three
+arcsecond angles about axes 3-2-1, under `TKFRAME_31009` — the block that *defines* `MOON_ME_DE440_ME421`
+relative to `MOON_PA_DE440`. Composing them with SPICE's `eul2m` gives a matrix, and the matrix was
+first written into `lunar::pa_to_me` on the reading its placement suggests: PA to ME.
+
+It is the other way round. The kernel says so itself, in a sentence a reader skims — "the angles and
+axis sequence shown below represent the inverse of the cited rotation" — and the cross-check against
+ANISE reading the same file disagreed by **7.630e-4** per element, which is *twice* the rotation, the
+signature of a transpose rather than of a discrepancy. The whole rotation is 3.8e-4, so a tolerance
+set anywhere near the size of the thing being tested would have passed it.
+
+Which of two transposes is right is not settled by reading, so it was measured. The ME frame is
+*defined* so that the mean Earth direction lies on its prime meridian. Averaging the Earth's unit
+direction over 19 years of DE440 — a full nodal cycle, sampled six-hourly — puts it at longitude
+**−71.0″** in the principal axes. The candidate that is correct must take that to zero:
+
+| frame | mean Earth longitude | mean Earth latitude |
+|---|---|---|
+| `MOON_PA_DE440` | −71.042″ | +20.483″ |
+| our first `pa_to_me` | −138.894″ | +99.178″ |
+| ANISE's PA → ME | **−3.189″** | −58.211″ |
+
+The direction is now pinned by that measurement in two places rather than by prose: a unit test in
+`lunar.rs` asserting `me_to_pa` carries ME `+x` to a *negative* PA longitude of about 68″, and the
+kernel cross-check itself, whose 2e-7 tolerance is four orders below a transpose.
+
+**A 1.255e-7 residual remains, and it is a real disagreement, not noise.** We compose
+`R₁(a₃)·R₂(a₂)·R₃(a₁)`, which is SPICE's documented `eul2m(ANGLES(3), ANGLES(2), ANGLES(1), AXES(3),
+AXES(2), AXES(1))` for a `TKFRAME` `ANGLES` spec; ANISE 0.10.4 (`naif::kpl::parser::convert_fk_items`)
+multiplies the axes in array order, giving `R₃(a₁)·R₂(a₂)·R₁(a₃)`. The two agree to first order and
+differ by exactly `a₁·a₂ = 1.255e-7` rad — 0.22 m on the lunar surface. Nothing in the data here
+separates them: the libration residual that fixes the *direction* is 2.8e-4 rad wide, three orders
+above this. So the tolerance admits the difference and the test names it, rather than being widened
+until the disagreement disappears.
+
+### 2.2 The end-to-end check, and the byte order that nearly prevented it
+
+Each of the pieces above is checked against something, and each of those checks can still be
+satisfied by a mistake that is consistent across the pieces. The one that cannot is a real orbiter:
+start from a state on NASA's reconstructed LRO trajectory, propagate the selenocentric model
+forward, and ask the reconstruction where the spacecraft actually was. A ~50 km polar lunar orbit is
+the hard case on purpose — mascons dominate there, which is why lunar missions carry a high-degree
+solution rather than a `J₂`.
+
+| arc | \|Δr\| | along-track share |
+|---|---|---|
+| 10 min | 4.5 m | 20% |
+| 30 min | 14.2 m | 82% |
+| 60 min | 76.9 m | 65% |
+
+Over the same hour a degree-8 truncation — the degree an Earth orbit at this altitude would be
+content with — drifts **1288.5 m**, 16.8× worse, which is the field being evaluated rather than
+approximated away. The error being mostly along-track is the signature of a truncated potential; a
+transposed rotation or a dropped origin shift would be hundreds of kilometres and mostly not.
+
+Getting the truth file readable was its own finding. NAIF's PDS3 volumes are archived **IEEE
+big-endian**; the SPICE toolkit reads either byte order transparently, and ANISE refuses anything
+that is not the host's (`naif/daf/file_record.rs`). `tools/daf-swap-endian.py` rewrites the DAF, and
+the conversion is not a blanket byte swap: a DAF's summary records hold 32-bit integers packed two
+to a double slot, so swapping those as 8-byte words transposes every segment descriptor — body
+against centre, frame against type, start address against end — and yields a file that parses and
+then lies. Verified by reading the same six states over 30 days from the archived file and the
+converted one through SPICE, which accepts both: **bit-identical, 0.0 elementwise**.
+
+### 2.3 The same arc against a fourth propagator, on the same coefficients
+
+The reconstruction answers *is it right*. It cannot answer *is it right for the reasons we think*,
+because a reconstruction is one number per epoch and a model has many ways to reach it. The second
+question needs a second implementation, and **NEPTUNE** (Space-Systems/neptune, TU Braunschweig
+ILR/IRAS, Apache-2.0, Fortran-2008) is one with no shared lineage — not derived from Orekit, not
+reading SPICE, written by a different group against the same standards documents rather than against
+the same code. It is fetched, built and run entirely outside the Cargo workspace
+(`tools/fetch-neptune.sh`, `tools/neptune-oracle/`), and CI sees only the committed fixture.
+
+Two things had to be done before the residual meant anything:
+
+* **The build is verified against the vendor's own case first.** NEPTUNE ships an LRO validation
+  deck and the NAIF reconstruction covering it. `tools/neptune-oracle/check.sh` runs the deck and
+  compares through **spiceypy**, not through `spacelab-ephemeris` — an arbiter that shares code with
+  one of the parties is not an arbiter. Measured: 0.2 m at 10 min, 5.7 m at 60 min, 277 m at 24 h,
+  **2.34 km worst over 7 days**, from an initial match of 1 mm.
+* **Both sides were put on the same gravity field.** NEPTUNE carries AIUB-GRL350A and spacelab
+  embeds GRGM1200A, so a raw residual would be measuring two GRAIL solutions against each other.
+  `derivations/gen_lunar_gravity.py --icgem` emits *our* coefficients in ICGEM form from the same PDS
+  product, and `run.sh -d` supplies them under the filename `gravity.f90` fixes in its source, which
+  is never edited. NEPTUNE's reader takes `GM` and the reference radius from that header, so the two
+  agree on the field, on 4902800122445.3 m³/s² and on 1738000.0 m. Drag, SRP, Earth albedo and both
+  tide models are off on the NEPTUNE side and absent here.
+
+| elapsed | \|Δr\| |
+|---|---|
+| 6 h | 37.3 m |
+| 24 h | 239.4 m |
+| 7 days | 739.9 m worst, 736.9 m final |
+
+The difference **is not monotonic** — it grows to 419 m by hour 67, falls back to 339 m by hour 97,
+and grows again — which is the signature of a periodic frame difference rather than of a secular
+model error, and it is the reason the residual is reported with its floor named rather than as an
+agreement figure. Three differences remain and none is absorbed into the number:
+
+* **The lunar body-fixed frame.** libslam rotates with the IAU 2015 analytical series (Archinal et
+  al. 2018); this crate uses the DE440 principal axes from a frame kernel. The IAU series
+  approximates the *mean-Earth* frame, and PA against ME is **875 m** on the lunar surface — so
+  NEPTUNE is evaluating a principal-axis field at a position expressed in something else. That is a
+  statement about NEPTUNE, found by reading `slam_moon_reduction.f90` rather than assumed, and it is
+  the floor under the table above.
+* **The central body.** NEPTUNE integrates in GCRF with the Moon as a perturbing body carrying
+  harmonics; spacelab integrates selenocentrically. Same physics, different cancellation: a 1e-10
+  relative tolerance on a 384 000 km Earth-centred state is centimetres of truncation per step that a
+  1800 km selenocentric state never pays.
+* **The planetary ephemeris and the inertial triad.** DE421 there, DE440 here; GCRF against J2000 is
+  a 23 mas frame bias, 0.2 m at this orbit radius.
+
+### 2.4 The geocentric case against the same fourth propagator
+
+The selenocentric comparison above is bounded by NEPTUNE's lunar frame, which is a property of
+NEPTUNE and not of anything here. The geocentric case has no such floor, so it measures this
+workspace rather than the oracle. The arc is one Orbit State Vector from ESA's Sentinel-1B precise
+orbit product (`S1B_OPER_AUX_POEORB_..._V20190624T225942_20190626T005942.EOF`, `EARTH_FIXED`, UTC),
+propagated one day.
+
+It is measured in two independent pieces, because a single residual cannot say whether a
+disagreement is the frame or the dynamics.
+
+**The frame chain alone.** The POE state goes into NEPTUNE as an ITRF vector and NEPTUNE logs the
+GCRF state it derives. Reproducing that with `gcrf_to_itrf` on **NEPTUNE's own EOP row** for MJD
+58659 — feeding it ours would compare two EOP series and call the result a frame difference — gives
+**\|Δr\| = 1.3e-5 m and \|Δv\| = 1.6e-7 m/s**, about 0.4 µas of pole at this radius. Two CIO
+implementations with no shared code agree to thirteen micrometres. Neither applies a Helmert step,
+so the deck's "ITRF-2000" label names the product's realization and not a datum transformation
+either code performs (`spacelab-frames/tests/neptune_frames.rs`).
+
+**The dynamics, on identical coefficients.** NEPTUNE ships EGM2008 (tide-free) and this workspace
+embeds XGM2019e (zero-tide). Run against each other *inside NEPTUNE alone* they differ by 0.9 m at
+one hour and **18.4 m at one day** — the zero-tide/tide-free offset in C̄₂₀ is 9e-6 of the term that
+dominates a LEO arc, so an unmatched field would have been the whole measurement.
+`tools/neptune-oracle/make_gravity_overlay.py` emits the embedded table in NEPTUNE's own file layout
+and `run.sh -d` supplies it under the filename `gravity.f90` fixes; the coefficients come from the
+generated Rust table rather than from a re-fetch, so what NEPTUNE integrates is bit-for-bit what
+`GeoPotential::embedded` integrates. Drag, SRP, albedo and both tide models are off on both sides,
+and the relativistic correction is absent on both — NEPTUNE has none, and half-matching it would put
+metres into the residual.
+
+| elapsed | \|Δr\| |
+|---|---|
+| 3 h | 0.05 m |
+| 12 h | 0.25 m |
+| 24 h | 0.47 m |
+
+The growth is **linear and monotone**, which is the signature of a small constant along-track
+acceleration difference rather than of a frame error — the opposite of the lunar case, and the
+reason the two are reported separately. What remains: DE-421 third bodies there against DE440 here
+(metres of body position on a 1e-6 m/s² term), and a variable-step Störmer–Cowell at rtol 1e-10 /
+atol 1e-11 against Dormand–Prince 8(5,3). Also matched deliberately rather than improved on:
+libslam's `getPolarMotion` computes an interpolation and then returns the un-interpolated daily row,
+so the comparison holds polar motion constant over the day as NEPTUNE does
+(`crates/spacelab/tests/neptune_sentinel1b.rs`).
+
+### 2.5 DE442 exists, and that is a reason to measure the choice rather than to change it
+
+DE440/DE441 dates from 2021 and this workspace reads `de440s.bsp`. JPL published **DE442** on
+2025-02-06, and §11's currency table said "Stay" on DE440 — a verdict with no measurement behind it,
+which is the shape of claim this document exists to refuse. `spacelab-ephemeris/tests/de442_delta.rs`
+is the measurement: both kernels loaded, the two bodies the force models actually perturb with read
+from each over the span the tests use, and both compared against the same external authority.
+
+| Body, geocentric, 2000-01-01 .. 2030-01-01 | samples | worst \|Δr\| | RMS \|Δr\| | worst \|Δv\| |
+|---|---|---|---|---|
+| Moon, 6-hourly | 43 833 | **0.300 m** (2029-11-06) | 0.235 m | 0.001 mm/s |
+| Sun, daily | 10 959 | **19.633 m** (2028-03-05) | 11.453 m | 0.004 mm/s |
+
+Relative to the distances that matter those are 7.8e-10 and 1.3e-10, so the *prediction* is that
+nothing downstream moves. Predictions of that kind are cheap and are exactly what this campaign has
+found to be wrong before, so it was run instead: the 32-satellite GPS orbit fit of `igs_orbit_fit.rs`,
+a real day of IGS final orbits with the full force model, on each kernel in turn.
+
+| Kernel | mean 3D RMS over 32 GPS satellites |
+|---|---|
+| DE440 | 0.249 563 547 m |
+| DE442 | 0.249 411 779 m |
+
+**0.152 mm**, 0.06 % of the residual, and in DE442's favour. The ephemeris is not what limits that
+fit, and now that is a number rather than an argument. Against JPL Horizons neither can be told from
+the other at all: the Moon at J2000 is 6.4 m from the reference on DE440 and 6.5 m on DE442, and the
+reference itself is printed to about 10 m.
+
+**What decides the ticket is not in either table.** NAIF publishes no DE442 counterpart for the rest
+of the lunar chain — `generic_kernels/pck/` has only `moon_pa_de440_200625.bpc`,
+`fk/satellites/` only `moon_de440_250416.tf`, and the latest mass file is `gm_de440.tpc`. Every
+selenocentric result in §2 above (`lro_arc.rs`, `neptune_lro.rs`, `lunar_orientation.rs`) is computed
+in the DE440 principal axes, and pairing DE442 positions with a DE440 orientation is a frame mismatch
+rather than an upgrade. Switching only the geocentric path would split the workspace across two
+ephemerides, re-baseline every fixture number in this section, and buy 0.152 mm.
+
+**So DE440 stays, and the decision is now measured.** `tools/fetch-ephemeris.sh` fetches both with
+pinned digests so the comparison stays reproducible, and the delta test doubles as a tripwire: a
+wrong or truncated kernel at either path shows up as kilometres rather than as a quietly shifted
+third-body term. This reopens when NAIF publishes a DE442 lunar orientation, or when a residual in
+this workspace reaches the 0.15 mm the choice is worth.
+
+---
+
+### 2.6 A model with no fitted coefficients is still checkable, and this is exactly what that checks
+
+SDTM-1 is the first atmosphere here that is neither a port nor a table: our own form, on drivers whose
+licences permit commercial use (`docs/provenance.md`, the data register). This section was written
+while it had **no** fitted coefficients — Ф15.A's corpus is blocked, TU Delft's `euclid.lr.tudelft.nl`
+resolving to 131.180.122.135 and timing out on both 443 and 80 at five probes between 2026-09-06 and
+2026-09-14 — and it answers the question that comes before any error statistic: with no coefficients,
+what about an atmosphere model can be verified at all? Ф15.D has since fitted the twelve satellite-months
+that were already cached (§10.10), which adds an error statistic without replacing any of the four
+checks below: every one of them still holds the fitted field to something the fit's own objective
+cannot see.
+
+Four things, kept apart because they fail for different reasons and a single tolerance would hide
+which one broke:
+
+1. **The algebra is right.** `derivations/sdtm_bates.mac` runs in `derivations/verify.sh` and drives
+   four residuals to exactly zero — `d/dζ I₁ − 1/T`, `I₁(0)`, the barometric ODE for each species
+   given the `(T₀/T)^{1+α}` prefactor, and the analytic `dρ/dζ` against the derivative of the same
+   product. It then evaluates `I₁` at one numeric point and matches `quad_qags` to 1e-10.
+2. **The code is that algebra.** The shipped closed form against Simpson's rule on `1/T` at seven
+   heights to 900 km of geopotential, 1e-12 relative — and separately against the literal digits
+   Maxima printed, because a change that moved the expression in the code *and* in the quadrature
+   would pass the first check and not the second.
+3. **The gradient is the derivative of the density the code returns**, to 1e-9 by Richardson
+   extrapolation. This one is not redundant with the algebra: `∂ρ/∂h` is what the drag state-transition
+   matrix consumes, an error there is invisible in a density comparison and fatal in a covariance, and
+   it is the defect §4.5 and §4.10 both turned out to be.
+4. **The units are the units.** Everything above is internal — a model can be perfectly
+   self-consistent in grams and kilometres. Two absolute anchors are not: 3.5e-12 kg/m³ and a 57 km
+   scale height at 400 km, for a field whose `T∞` is 1058 K at F10.7a 141, which is what the
+   literature reports for moderate activity at that altitude. A molar mass where a molecular mass
+   belongs moves those by orders of magnitude and leaves every other assertion in this list passing.
+
+**Three of the first assertions written here were wrong, and all three were wrong in the same
+direction** — a claim stated from the derivation rather than measured, which is the failure mode this
+document exists to catch, here caught inside the ticket rather than a month later:
+
+* `T∞ > T₀` is not strict. Writing `T∞ = T₀ + exp(…)` bounds it, but `exp` underflows below an
+  exponent of −745, so the attainable bound is `≥`. What matters is that the equality case is not a
+  degeneracy: it is the exact isothermal barometric profile at 380 K, which the test now asserts
+  against the closed-form barometric sum. The form degrades into physics at the edge of parameter
+  space, and that is a property worth having rather than one to assert away.
+* The scale-height band was invented (20–150 km) before it was measured (8.47 km at 120.1 km to
+  218 km at 1000 km). The shipped band is 5–400 km with both ends named, because a band fitted to the
+  middle of the range is a band that only rejects the failures nobody makes.
+* A "scale height changes by less than x % per km" bound is not a physical statement, and the first
+  version of it failed honestly at 122 km where the real rate is 4.3 %/km. It is replaced by
+  `|dH/dz| < 1`, dimensionless, which *is* the WKB condition that makes a local scale height
+  meaningful — the same number at 120 km and at 1000 km, where the percentage is not. Measured worst
+  case 0.61 m/m at 951 km, and any discontinuity in ρ or in `∂ρ/∂ζ` breaks it.
+
+**What none of this says is that SDTM-1 is accurate.** Not one measured density has been compared with
+it in this tree. The 23.0 % held-out MAPE quoted in `plans/16` is a pilot number from an out-of-tree
+experiment on two altitude bands with the campaign's own leaky split; it is a reason to build the model,
+not a result of the model, and it does not become a §10 row until Ф15.D and Ф15.E have run on the
+corpus with a split named in advance. The one claim the form does make on its own is a negative one:
+it carries no effective-mass profile and no multi-source collation or weighting, which is what keeps it
+clear of US 10 641 925 B2's claims (`docs/provenance.md`).
+
+---
+
+## 3 · Orbital mechanics & automatic differentiation
+
+`spacelab-sgp4`, `spacelab-elements`, `spacelab-astro`, `spacelab-ephemeris`, `spacelab-autodiff`, `spacelab-ndm`
+
+| Crate | Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|---|
+| sgp4 | propagate_minutes, all 33 official SGP4-VER element sets | Hoots & Roehrich 1980 (Spacetrack 3) as revised by Vallado 2006 — the specification *is* a listing ⚠ | python-sgp4 → Vallado's `SGP4.cpp` via its compiled extension (AIAA 2006-6753) | < 1e-3 m / < 1e-6 m·s⁻¹; >700 states | tests/sgp4_verification.rs |
+| sgp4 | the same states vs the **published** 2006 artefact | Vallado 2006 `tcppver.out`, the printed reference output ⚠ | `tcppver.out`, Vallado's printed output (vendored) | < 1e-3 m; 90% inside the 8.7 µm print floor | tests/sgp4_primary_source.rs |
+| sgp4 | construction accept/refuse decision | Vallado 2006 `SGP4.cpp` error codes ⚠ | python-sgp4 error codes | we_failed==0, they_failed==0 | tests/sgp4_verification.rs |
+| sgp4 | `Regime` branch classification (deep-space, both resonance windows) | Spacetrack 3 deep-space / resonance criteria ⚠ | the `sgp4` crate's own resonance selector (`Constants::initial_state`) | exact agreement, 29 element sets | tests/regime.rs |
+| sgp4 | full chain TLE→SGP4→TEME→ITRF→geodetic (ISS) | Vallado 2006 (TEME) + IERS TN36 + WGS-84 | Skyfield (independent frame + geodetic) | < 1e-7° (11 mm), h < 1e-3 m | tests/ground_track.rs |
+| sgp4 | parallel batch ≡ sequential | internal API contract | self-consistency (bit-exact determinism) | bit-exact | tests/batch_parallel.rs |
+| sgp4 | **the whole active catalogue**, ±24 h of each epoch at 5-minute steps | Spacetrack 3 / Vallado 2006 — a listing ⚠ | **satellite.js 4.1.4** (MIT, Celestrak-hosted single file), driven through `sgp4(satrec, tsince)` so no `Date` millisecond quantisation enters | 16 085 objects, **9 281 045 samples**: worst position **4.220168e-5 m**, worst velocity **7.718614e-9 m/s**; 92 % of samples between 1 nm and 100 nm, 4.34 % bit-identical; **0** disagreements about which element sets load and which propagations succeed | tools/sgp4-catalogue-oracle/, tests/catalogue_oracle.rs |
+| sgp4 | OMM ingest (CCSDS 502.0-B-3 CSV and KVN) ≡ each other, and against the 3LE of the *same* query | CCSDS 502.0-B-3 keywords; `MEAN_ELEMENT_THEORY` refused unless SGP4 | differential: one Celestrak `GROUP=stations` request served three ways | the two OMM encodings **identical**, field for field, over 22 records; the 3LE carries 21 — it drops the six-digit object (100057) silently — and the 21 it does carry sit **1.5230e0 m / 7.9401e-4 m/s** from the OMM over ±24 h, which is what the fixed-width `BSTAR` and eccentricity fields cost | tests/omm_ingest.rs |
+| ndm | OPM and OEM write → read → compare, field by field (§3.4) | CCSDS 502.0-B-3 KVN | the crate's own writer, against the six annex figures it parsed | every OEM field **exact**; every OPM field exact but the four Keplerian angles, which are held to `4·f64::EPSILON` relative; a second cycle byte-identical to the first | tests/ndm\_round\_trip.rs |
+| ndm | OPM, OEM and CDM readers against the published examples | CCSDS 502.0-B-3 annex G (figures G-1, G-2, G-4, G-11, G-12, G-13); 508.0-B-1 §3.6.2–3.6.4 | the blue books' own example messages, transcribed by figure and cited by section | keyword for keyword; the units, block structure and error line numbers each asserted against the figure | tests/fixtures/, src/{opm,oem,cdm}.rs |
+| ndm, estimation | the CDM reader against the conjunction oracle it feeds (§4.10) | CCSDS 508.0-B-1 | the eleven NASA CARA "Alfano" messages, parsed rather than transcribed, through `ConjunctionGeometry::project` | all ten published `Pc` reproduced, worst **2.28e-4** relative, the same bar the transcribed table meets; case 10 proved a duplicate of case 9 in every number | crates/spacelab-estimation/tests/cara\_cdm\_ingest.rs |
+| elements | BrouwerLyddane propagate, 9 golden GCRF states | Brouwer 1959; Lyddane 1963 | Orekit `BrouwerLyddanePropagator` | dr < 1e-4 m / dv < 1e-6 m·s⁻¹ | src/brouwer_lyddane.rs |
+| elements | BrouwerLyddane w/ along-track drag M2 | Brouwer/Lyddane + Orekit's M2 drag term ⚠ | Orekit `BrouwerLyddanePropagator` (M2) | dr < 1e-4 m | src/brouwer_lyddane.rs |
+| elements | EcksteinHechler propagate, 8 golden GCRF states | Eckstein & Hechler 1970 (ESOC) | Orekit `EcksteinHechlerPropagator` | dr < 1e-3 m / dv < 1e-6 m·s⁻¹ | src/eckstein_hechler.rs |
+| elements | EH secular node rate Ω̇ | classical J₂ secular rate (Brouwer 1959) | analytic J2 closed form | rel < 5e-3 | src/eckstein_hechler.rs |
+| elements | The J₂ secular rates **both** zonal propagators are built on — the theory, not the port | Lagrange's planetary equations on the mean-anomaly average of the J₂ disturbing function | **Maxima**, `derivations/zonal_secular.mac`: the average is a definite integral the CAS evaluates rather than a textbook result quoted, then each propagator's own first-order expressions are subtracted in its own variables | **six residuals, all identically 0** at symbolic `a, e, i` — Brouwer–Lyddane's `dsl`, `dsg`, `dsh` in `yp2`/`η`/`cos i`, and Eckstein–Hechler's `omm_d`, `rdpom`, `rdl` at `e = 0`. `rdl` closes only because `α = ω + M`, which ties the two element sets through one derivation. J2²/J4/J5/J6 are second order, need the von Zeipel transformation and are **not** covered | derivations/zonal_secular.mac |
+| elements | closed-form Kepler vs numerically-integrated two-body | two-body solution | numerical ODE (Dop853, tol 1e-13) | rel < 1e-9 | tests/keplerian.rs |
+| elements | SSO / apsidal / draconitic / frozen-perigee design | classical J₂ mission-design relations | numerical J2 propagation | rel < 0.02…5e-3; frozen ω̇ < 1e-16 | tests/design.rs |
+| elements | Landsat-8 233/16 repeat a=7077.7 km; SSO i≈98°; regression −4.31°/day | USGS WRS-2 published parameters | published WRS-2 / textbook values | within published bands | tests/design.rs |
+| elements | state↔elements round-trip incl. circular/equatorial singulars | orbital-element definitions | self-consistency | rel < 1e-12 | tests/keplerian.rs, degenerate_orbits.rs |
+| astro | Universal-variable Kepler propagate | universal-variable / Stumpff formulation (Bate–Mueller–White) | Curtis *Orbital Mechanics* Ex 3.7 | dr < 1.0 km / dv < 1e-3 km·s⁻¹ | src/kepler.rs |
+| astro | Lambert (universal-variable) | Lambert's problem in universal variables | Curtis Ex 5.2 | Δv err < 1e-3 km·s⁻¹ | src/lambert.rs |
+| astro | differential corrector (Target / Vary / Achieve) | the finite-difference Newton shooter every mission-sequence tool is built on, with Marquardt damping | **Izzo's Lambert solver** and the **closed-form Hohmann Δv**, both of which share no line with a black-box shooter. The three-control case gives the corrector a position target 3 000 s downrange and nothing else — no Lambert, no conic — and asks whether it finds the same initial velocity Izzo solves for analytically | Lambert: **1.8e-8, 5.0e-7, 2.8e-6 m·s⁻¹** per component, ≈2e-9 relative; Hohmann: < 1e-6 m·s⁻¹ against √(μ/r₁)(√(2r₂/(r₁+r₂)) − 1), from a 478 m·s⁻¹ initial miss in 7 iterations. Scale invariance is asserted directly rather than argued: metres and kilometres must cost the *identical* iteration and evaluation count (#251's lesson) | src/targeting.rs |
+| astro | CR3BP L1–L5 libration points | CR3BP equations of motion (Szebehely) | standard published values | L1–L3 < 1e-4, L4/L5 < 1e-6 | src/cr3bp.rs |
+| astro | Richardson halo coefficients (L1, L2), synodic seed | Richardson 1980; re-derived in `derivations/richardson_halo.mac` | Maxima CAS (`derivations/richardson_halo.mac`) | < 1e-9 / < 1e-8 | src/richardson.rs |
+| astro | Clohessy–Wiltshire STM vs nonlinear relative motion | Clohessy & Wiltshire 1960 | nonlinear two-body propagation | perr/mag < 1% | src/cw.rs |
+| astro | rectilinear vs **curvilinear** relative motion — where the straight-line frame stops holding | Vallado & Alfano 2014, CMDA 118(3):253–271, with the 2016 errata 125:263–264 | exact two-body truth: the deputy is the chief's *own* orbit phase-shifted by an along-track arc, so both states come from one flow and the residual is the linear model's alone | co-orbital, circular chief at 7000 km: the curvilinear residual is **round-off at every separation to 1000 km** (worst 9.1e-9 m) because a phase offset is a *constant* curvilinear state, while the rectilinear one is exactly quadratic in the arc — 0.325 m at 1 km, 3 252 m at 100 km, 324 656 m at 1000 km over a quarter period. As a fraction of the separation the rectilinear error reaches **1 % at 30.75 km and 10 % at 307.5 km** over a quarter period, **3.71 km and 37.14 km** over a full one, which is what `src/cw.rs`'s unqualified "well under 1 %" (measured at 2 km) was silently resting on. Not a strict upgrade: a cross-track offset `w` bounds the curvilinear residual rather than removing it (0.152 m at `w` = 1 km, 3.79 m at 5 km, 60.65 m at 20 km, flat in the along-track separation), and below `s ≈ 0.44 w` the **rectilinear** form is the better of the two by up to 1.7×. Neither form touches an eccentric chief: at 100 m of separation `e` = 0.001 costs 0.72 m and `e` = 0.01 costs 7.43 m, alike in both (#307) | tests/relative_motion_curvature.rs |
+| astro | periodic-orbit analytic Jacobian | variational-equation definition | central finite difference | < 1e-5 | src/periodic.rs |
+| astro | Lambert arc re-propagates to target; Izzo N=0 ≡ UV | Izzo 2015; universal-variable Lambert | self-consistency (independent propagator) | dr < 1e-3 km / dv < 1e-6 km·s⁻¹ | src/lambert.rs |
+| astro | Lambert bracket — short and hyperbolic arcs | Curtis Alg. 5.2 (universal variables); Numerical Recipes `rtsafe` (safeguarded Newton) | self-consistency: propagate the returned `v1` for `tof` and land on `r2` | 6 s / 44 km arc closes to 3.1e-8 m·s⁻¹; the previously-refused 50–236 s arcs to 3.5e-10 of scale | src/lambert.rs |
+| astro | Lambert refusal floor | `y = 0` degeneracy of the universal-variable formulation | bisection on the tof at which a solution first exists | 0.1347 s the short way, 0.2514 s the long way, on a 20 000 km chord | src/lambert.rs |
+| astro | Lambert long-way sweep — refusals and misses as Δν → 2π | Curtis Eq. 5.38 evaluated through the half-angle identities; closure gate on the returned arc | 25 270 arcs Izzo solves to 1e-9 of the radius, each re-flown through `kepler::propagate` | refused 354 → 111, answers missing r2 by > 1e-6 of its radius 28 → 0, worst accepted 9.3e-7 | examples/lambert_longway_sweep.rs |
+| astro | Lambert domain fingerprint — the guards no count can see | Curtis Alg. 5.2 as #290/#292 left it | differential: nine surviving mutants applied one at a time, output hashed over 13 620 calls | nine bit-identical; the two ceiling mutants move the hash and are now killed by `the_bracket_never_reaches_one_whole_revolution` | examples/lambert_domain_probe.rs |
+| coverage | air mass — Kasten & Young (1989) against Young (1994) | Applied Optics 28, 4735 (apparent altitude); Applied Optics 33, 1108 (true zenith angle) | cross-model: the two published fits joined through Sæmundsson (1986) refraction, which neither used | 6.0e-3 relative at the horizon, 6.2e-4 above 10°; feeding either the other's argument is 20 % at the horizon | src/observability.rs |
+| coverage | rise/set and twilight — polar day and polar night | Astronomical Almanac standard altitudes (−34′, −50′); IAU 2000 ERA rate 15.041 067 178 670 °/h | property: the `\|cos H\| > 1` branches at Tromsø (69.65° N) at both solstices | `AlwaysAbove` / `AlwaysBelow` rather than a NaN; equatorial equinox arc exactly π/2 | src/observability.rs |
+| coverage | air mass and refraction — the four fits against a numerically integrated ray | U.S. Standard Atmosphere 1976 (the seven-layer hydrostatic formulation, from its own constants); Gladstone–Dale; the spherical ray invariant `n r sin ψ = const`; Ciddor (1996) dry-air refractivity | first principles: two quadratures under the `r = r₀ + u²` substitution that cancels the horizon singularity exactly, sharing no coefficient with any fit under test | Kasten & Young 0.63 % at the apparent horizon and 0.16 % above 0.5°; Young 1994 0.05 % where defined; **both refraction fits run high everywhere** — Sæmundsson +0.43 % to +4.79 %, Bennett +0.58 % to +3.27 %, tightest at 2°–3° and worst at 40°–50° (#293) | tests/integrated_airmass.rs |
+| coverage | diurnal arc — 5 sites × 4 solar declinations × 4 thresholds | `cos H = (sin h₀ − sin φ sin δ)/(cos φ cos δ)` | astropy/ERFA: the instant the Sun's geometric `AltAz` altitude crosses the threshold, with `(H, δ)` read off `HADec` at that *same* instant, so the UT1 the generator does not have cancels between the two frames | 2.384 720e-7″ of implied altitude over 74 crossings — the root-finder's own tolerance, because `HADec` → `AltAz` is the rotation this triangle inverts and the parallax is spent before it; 5 polar-day and 1 polar-night day agree on branch *and* duration (#293) | tests/twilight_hour_angle.rs |
+| coverage | lunar sky brightness — Krisciunas & Schaefer (1991) | PASP 103, 1033, Eqs. 2, 3, 15, 20, 21, 27 | the published lunar phase law `−12.73 + 0.026α + 4e−9 α⁴` as the calibration of Eq. 20 | `I*(α)/I*(0)` reproduces it to 1e-12; full-moon sky 18–20, quarter 20–21.6, new moon within 0.01 of moonless | src/photometry.rs |
+| coverage | optical detectability — CCD equation and V zero point | Bessell (1990) V band; Bessell, Castelli & Plez (1998) flux; standard CCD equation | derived zero point vs the published "about 1e10 photons·s⁻¹·m⁻²"; regime scalings | 8.366e9; 4× exposure gives 2.006–2.099× SNR (read-noise floor), 1 m/30 s/dark sky reaches V = 21.35 at SNR 5 | src/photometry.rs |
+| astro | IOD — Gibbs / Herrick–Gibbs crossover | Gibbs (exact); Herrick–Gibbs (Taylor) | velocity error of both against a propagated truth, swept over transfer angle | ordering flips between 0.42° and 0.49° | tests/initial_orbit_determination.rs |
+| astro | IOD — Gauss error order | Curtis Alg. 5.5 (`f`/`g` series truncation) | fitted log-log slope over five arc lengths, not the series' order | slopes 2.000 / 2.003 / 2.021 / 2.124 — square, not cube | tests/initial_orbit_determination.rs |
+| astro | IOD — Gauss vs Gooding accuracy | Gooding 1993/1997 (Newton on ρ₁, ρ₃ closed by Lambert) | propagated truth on a 700 km orbit, 0.1 %–25 % of a period | Gauss 10.1 m → 720 km; Gooding 3.2e-4 m → 1.5e-9 m | tests/initial_orbit_determination.rs |
+| astro | IOD — Laplace vs Gauss, and where the received ordering fails | Laplace's derivative construction: a quadratic through the three lines of sight, `L̇` and `L̈` projected onto the equation of motion | propagated truth on the same 700 km orbit, plus a **paired** 2 000-trial noise experiment (1″ Gaussian per angle, both methods on byte-identical sightings) | position 12.3 m → 634 km, so Laplace loses below **18.96 %–20.00 %** of a period (bracketed by a 40-step sweep) and wins above it — but its velocity is worse at every arc, 1.96× to 2.50×, so it is never the better estimate of the *state*. Under noise on a short arc the two are a tie the literature does not predict: Laplace takes 49.0 % of pairs at 0.5 % of a period and 48.8 % at 1 %, against a 1.1 pp standard error, collapsing to 1.1 % by 5 % where truncation is back in charge (#285) | tests/initial_orbit_determination.rs |
+| astro | Kepler reversibility / energy+h conserved / one-period closure | two-body invariants (energy, h) | self-consistency + invariants | ΔE < 1e-9; closes < 1e-3 km | src/kepler.rs |
+| astro | CR3BP Jacobi constant conserved (RK4); halo/Lyapunov closure; monodromy hyperbolicity | Jacobi integral; Floquet theory | property (invariant / dynamical systems) | Jacobi < 1e-6; reciprocal pair to 1e-2 | src/cr3bp.rs, periodic.rs |
+| astro | Laplace SOI Earth & Mars; B-plane; hyperbolic physicality | Laplace sphere-of-influence definition; standard B-plane convention | published SOI values + property | SOI < 15000 km; B-plane rel < 1e-9 | src/patched.rs |
+| astro | low-thrust / FNPEG entry / ZEM-ZEV descent | Pontryagin maximum principle; published FNPEG and ZEM/ZEV guidance laws | property / end-to-end + analytic optimum signature | energy monotone; range < 5000 m; land < 1.0 m | src/lowthrust.rs, edl.rs, powered.rs |
+| ephemeris | Moon geocentric ICRF @ J2000 | JPL DE440 (SPICE kernel) | JPL Horizons vector (DE440 via anise) | < 1.0 km (ref ~10 m) | tests/moon_horizons.rs |
+| ephemeris | DE440 against DE442, and both against Horizons | JPL DE440/DE441 (2021) and DE442 (2025-02-06) | each other, over 2000–2030; and the same Horizons Moon vector | Moon 0.300 m worst / 0.235 m RMS; Sun 19.633 m / 11.453 m; Horizons 6.4 m and 6.5 m; **0.152 mm** on the 32-satellite GPS fit | tests/de442_delta.rs |
+| ephemeris | ThirdBody lunar accel; 2026 Earth→Mars C3 window | JPL DE440; patched-conic C3 definition | JPL Horizons (DE440) + physical + self-consistency | < 1000 m; best-leg miss < 1.0 km | src/bridge.rs, tests/mars_window.rs |
+| autodiff | Kepler-accel Jacobian ∂aᵢ/∂rⱼ (Dual) | differential calculus (closed form) | analytic closed form −μr⁻³(δᵢⱼ−3rᵢrⱼ/r²) | < 1e-12·scale | tests/derivatives.rs |
+| autodiff | Kepler-accel Hessian (HyperDual) | differential calculus (closed form) | analytic 3rd deriv of potential | < 1e-10·scale; symmetry bit-exact | tests/derivatives.rs |
+| autodiff | AD vs central finite differences | dual-number AD definition | analytic + FD comparison | AD < 1e-12; AD < FD/100 | tests/derivatives.rs |
+| autodiff | elementary + chain-rule + atan2 derivatives (Dual/HyperDual) | differential calculus | analytic calculus (closed form) | < 1e-15…1e-12 | tests/derivatives.rs, scalar_and_operators.rs |
+| autodiff | DoubleDouble exp/ln/sin/cos/atan2/powf | Dekker 1971 / Hida–Li–Bailey double-double arithmetic | mpmath 50-digit oracle (`derivations/dd_transcendentals.py`) | rel < 1e-30 (large-arg 2e-30 floor) | src/double_double.rs |
+| autodiff | DoubleDouble two_prod exact error term (27-bit split) | Dekker 1971 two-product; IEEE-754 exactness | property (exact FP) | exact | src/double_double.rs |
+
+*`sgp4` verification is **transcription fidelity, and it is worth naming as such**: the `sgp4` crate
+we wrap is a Rust port of Vallado's Celestrak source, and the reference states come from that same
+C++ through python-sgp4's compiled extension. Agreement to the millimetre proves the port; it cannot
+prove independent confirmation, because no independent implementation of SGP4 exists — the
+specification *is* a listing. The second rung is the vendored `tcppver.out`, which pins us to the
+numbers Vallado *printed* in 2006 and so detects drift in the reference itself; 90% of its states
+agree to within the file's own 8.7 µm printing floor. The third rung is **breadth**: satellite.js is
+another transcription of the same listing, so it cannot raise the *kind* of evidence, but running it
+over the whole active catalogue raises the *coverage* from 31 hand-picked element sets to 16 085
+operational ones — the eccentricities, drag terms and epoch ages nobody would choose as a test case.
+The distinction is worth keeping sharp: 31 cases with a millimetre residual and 9.3 million with a
+40-micrometre one are the same claim about the model and different claims about the port. The one
+genuinely independent-lineage check in the chain is the Skyfield true-model ground track (and, in §1,
+Orekit). `elements` rests on verbatim Orekit golden
+vectors for both analytical propagators (sub-mm), closed against numerically-integrated J2 dynamics.
+`autodiff` is machine-precision closed-form calculus + an mpmath 1e-30 oracle for the double-double
+transcendentals. `astro` mixes textbook (Curtis), CAS (Maxima) and nonlinear-truth anchors atop a body
+of conservation-law / end-to-end convergence properties. `ephemeris` is DE440-vs-Horizons throughout,
+kernel-gated to skip offline.*
+
+### 3.1 A root-finder with no bracket looks like a limitation of the formulation
+
+`lambert::Arc::solve` used to bracket its root by walking `z += 0.1` from zero while the residual was
+negative, then running unguarded Newton. Two things were wrong with that, and both of them read as
+properties of the mathematics rather than of the search.
+
+**The step was absolute, in a dimensionless quantity whose root can be anywhere.** On the 5.93 s arc
+between two sightings 44 km apart — the regime `iod::gooding` works in, closing the arc with a Lambert
+call — the root is at `z = 3.94e-5`. The first step of the walk overshot it by 2500×:
+
+```text
+  z = 0.000e0    y = 6.986e1   tof_err = -3.466e7   t(z) =   4.1906 s
+  z = 3.900e-5   y = 1.389e2   tof_err = -3.590e5   t(z) =   5.9084 s   <- the root; tof wanted 5.9264 s
+  z = 1.000e-4   y = 2.468e2   tof_err = +3.894e7   t(z) =   7.8768 s
+  z = 1.000e-1   y = 1.767e5   tof_err = +4.124e9   t(z) = 212.4955 s   <- where the walk landed
+```
+
+Newton then started at `z = 0.1`, on a part of the curve where `y` is a difference of two near-equal
+numbers, and did not come back. **Every arc shorter than about 1 % of a period failed**, and the
+failure surfaced as `orbit_from_angles` returning `LambertFailed` — an initial-orbit-determination
+bug whose cause was three files away.
+
+**The walk only went upward, so a hyperbolic root was never bracketed at all.** When the transfer is
+faster than the parabolic one the residual is already positive at `z = 0`, the loop never runs, and
+unguarded Newton steps straight past the `y = 0` edge. `lambert`'s `y ≤ 0` guard then returns `None`
+— and a test had been written asserting that refusal was correct, with a docstring explaining that
+"the iteration drives `y(z)` through zero, and the solver must say so". That was a description of the
+search, not of the formulation. Measured after the fix, the arc at `tof = 10 s` across a 20 000 km
+chord departs at 634 km/s and **reaches `r2` to 5 nanometres**, with the propagator's arrival velocity
+matching to 1e-13 km/s. The arcs were always there.
+
+The replacement searches relatively — doubling outward from `|z| = 1`, in the direction the sign at
+zero picks — and hands Newton a bracket it maintains as an invariant. Three details are not optional:
+
+- **The two ends of the domain overflow in opposite directions.** Under the `y = 0` edge `y` goes
+  negative and the residual is `NaN`, which is *below* the root. At `z = 4π²` both go to `+∞`, which
+  is *above* it. A predicate that tests `is_finite` first calls the second one "below" and walks off
+  its own ceiling — which is exactly what the first version of this fix did, and it broke five tests.
+- **A long-way transfer has `A < 0`, and its residual is not monotone.** `y` *decreases* with `z`
+  there, so the curve crosses zero at the physical root, spikes as `C(z) → 0`, then collapses to
+  `−√µ·tof` at the `y = 0` edge. Both crossings fit inside one rung of a ×4 ladder, which then
+  reports no root at all. A uniform 80-rung sweep backs the ladder up, and taking the *first* crossing
+  takes the physical one.
+- **A bracket is not a root.** Where the transfer really is faster than the formulation can carry, the
+  sign change the search finds is the `y = 0` edge itself, at which the residual equals `−√µ·tof`
+  exactly — a full scale away from zero. Without a residual check on the answer, that edge is returned
+  as a transfer. The real floor, located by bisection, is 0.1347 s the short way and 0.2514 s the long
+  way on these geometries: far below anything physical, since 20 000 km in one second is 6.7 % of the
+  speed of light.
+
+The iteration count rose from 6 to 8 over the 24-case sweep, because it now starts at a bracket
+midpoint instead of at `z = 0`. That is not a regression: the walk that used to place `z = 0` so
+conveniently spent about **160 residual evaluations** getting there on the sweep's largest root,
+against the five probes the doubling ladder spends.
+
+The lesson generalises past Lambert. A solver with no bracket does not fail loudly — it returns a
+plausible number, or a `None` that the surrounding code documents as a property of the problem. Both
+of those had been written down here as facts about the mathematics.
+
+### 3.2 The same refusals came back, and the cause was one subtraction two files away
+
+The bracket of §3.1 still refused 354 of the 25 270 arcs `lambert_multirev` solves to 1e-9 of the
+radius — every one of them a long-way transfer, retrograde at small Δν or prograde near 360°. The
+open ticket blamed the resolution of the 80-rung sweep. It was not that.
+
+`C(z) = (1 − cos√z)/z` has a **double** zero at every `z = (2kπ)²`, and `z = 4π²` is the whole
+revolution the search probes as its ceiling. Measured against 60-digit values, the difference form is
+out by 5.2e-6 relative a part in 1e5 below `4π²`, by 100 % a part in 1e9 below it, and returns a bare
+`0.0` at the ceiling itself. The bracket then read `y = NaN` and a `NaN` residual as *below the root*,
+so an arc whose true residual there is `+2.79e28` — computed in 60-digit arithmetic, independently of
+the code — was reported as having no root anywhere. The existing derivation had covered the
+cancellation at `z → 0` and stopped there.
+
+The fix is three changes, and `examples/lambert_longway_sweep.rs` was run on four builds — the shipped
+one and one with each ingredient taken back out — so that each is attributed rather than assumed:
+
+| build | refused | answers missing `r2` by > 1e-6 of its radius |
+|---|---|---|
+| before: Curtis quotient, `C` as `1 − cos√z`, no closure gate | 354 | 28 |
+| half-angle `C`, closure gate, but Curtis's `y` quotient | 227 | 0 |
+| half-angle `C` and exact `y`, closure gate removed | 68 | 43 |
+| shipped: `C = 2sin²(√z/2)/z`, `y = r1 + r2 − √2·A·cos(√z/2)`, closure gate | **111** | **0** |
+
+The third row is the trade the ticket had already rejected once: evaluating the terms more exactly
+recovers 286 refusals but *creates* wrong answers, because near a whole revolution a root can satisfy
+the residual on `z` to a nanosecond and still be 87 km wide. The residual is a statement about the
+transfer *time*; position is far more sensitive to `z` there than time is. So the acceptance test is
+not a tighter residual but a different question — fly the returned `v1` for `tof` through
+`kepler::propagate` and require it to arrive at `r2`. That converts the 43 wrong answers into
+refusals and leaves nothing accepted worse than 9.3e-7 of the radius.
+
+The 111 that remain are honest. At `4π²` consecutive doubles are 7.1e-15 apart, so `4π² − z` — which
+is what the arc depends on — carries about seven significant figures no matter how exactly the terms
+are evaluated. That is a property of `z` as a coordinate, not of the arithmetic, and the fix is a
+different parameterisation: `lambert_multirev`'s Lancaster–Blanchard variable does not crowd at one
+revolution, and the docs and a regression test point callers there.
+
+Two lessons, and the second is the expensive one. **A cancellation is not fixed once.** The same
+expression cancelled at `z → 0` and again at every `(2kπ)²`; the derivation covered the first, and the
+second surfaced only because a search downstream mistook `NaN` for a sign. And **a converged root is
+not a solution.** The residual the iteration drives to zero answers the question the iteration asks,
+which is not always the question the caller asked.
+
+### 3.3 Nine redundant guards, and the one that was not
+
+Re-sealing the rewritten solver left fourteen survivors, and the counts the solver reports could not
+tell them apart: every one of them left `lambert_longway_sweep.rs` at 25 270 considered, 111 refused,
+0 inaccurate. That is what a redundant guard looks like from the outside. `lambert` ends with a
+closure check — fly the answer forward and require it to arrive at `r2` — and a screen at the top of
+the function that refuses `tof ≤ 0`, or `sin Δν ≈ 0`, or `y ≤ 0`, is refusing an argument the closure
+check refuses too. Deleting one changes which line says no, never the answer.
+
+So the question is not whether the counts move but whether *any bit* of *any answer* moves.
+`examples/lambert_domain_probe.rs` asks it: 13 620 calls spanning hyperbolic through multi-period
+arcs, the pathological times of flight, and the transfer angles where the plane is undefined,
+reporting solved, refused, the worst miss — and an FNV-1a hash of every velocity accepted. Applying
+each survivor one at a time and re-running gives a verdict per mutant in about fifteen seconds.
+
+Nine came back bit-identical, and are in the ledger with the measurement. **Two did not.** Both are
+the ceiling of the doubling ladder, `REVOLUTION * (1.0 - 1e-9)`: `*` mutated to `/`, and `-` to `+`,
+each of which lands the standoff 1e-9 *above* `4π²` instead of below. Solved, refused and the worst
+miss are identical; only the hash moves. That is not an equivalence — it is an invariant with no
+assertion on it. The ladder must not reach one whole revolution, because that is where `C` and `S`
+have their double zero and where the arc belongs to `lambert_multirev` instead, and nothing the
+solver returns is sensitive enough to notice which side of it a bracket ends on.
+`the_bracket_never_reaches_one_whole_revolution` asserts it directly on the bracket — 8 616 geometries,
+all of which bracket, **3 638** of them within 1e-8 of the ceiling — and it counts that last number so
+the assertion cannot pass vacuously on a family that never gets there. Both mutants now fail it on the
+first case they meet, at `Δν = 1°`, with a bracket ending at 39.478 417 643 8 against `4π²` =
+39.478 417 604 4.
+
+The lesson is narrow and worth stating: **a mutant that survives with the counts unchanged has not
+been shown to be equivalent.** It has been shown that no test looks. Hashing the output turns that
+distinction into a fifteen-second measurement, and it is the difference between eleven ledger entries
+and nine ledger entries plus a real test.
+
+### 3.4 A round trip is exact in some units and not in others, and the test has to say which
+
+`spacelab-ndm` writes the two messages it reads, so `parse(write(parse(text)))` is checkable against
+the middle parse. The obvious assertion — compare the two structures and require equality — is right
+for most of the fields and wrong for four of them, and the split is a property of the unit
+conversions rather than of the code.
+
+CCSDS states positions in kilometres, covariances in km², `GM` in km³/s² and angles in degrees; the
+readers return SI. Every one of those conversions but the last is a power of ten, and `x / 1000 *
+1000` is the **identity** on any double that was itself produced by scaling a decimal — which a value
+read from a file always is. So position, velocity, covariance and `GM` come back bit for bit, and the
+test compares them with `assert_eq!`. Angles scale by `π / 180`, which is not a power of ten; degrees
+→ radians → degrees is a double rounding and the last bit is not guaranteed. Those four are held to
+`4 · f64::EPSILON` relative, stated as a number so that a genuinely wrong conversion factor still
+fails rather than disappearing into "well, angles".
+
+Two things that look like the same test and are not. A *second* write must reproduce the first byte
+for byte, which is what separates a writer that round-trips from one that converges slowly: an angle
+drifting one ulp per cycle passes the tolerance above on every individual trip and is ten ulp out
+after ten re-exports. And a keyword the reader silently dropped would survive a structural comparison
+untouched, because the writer would drop it too and both sides would agree on the absence — so the
+last test walks the *file* instead, and requires every keyword the fixtures state and the crate
+understands to appear in what was written back.
+
+The measured consequence of the first paragraph is worth recording, because it caught a test rather
+than a bug: `-0.873160 km × 1000` is `-873.1600000000001 m`, not `-873.16`. Multiplying a decimal by
+a thousand is itself a rounding in binary. What survives exactly is the kilometre the file stated,
+which is why the assertion is on the round trip and not on the metre.
+
+---
+
+---
+
+## 4 · Estimation, control, sensors, coverage & constellations
+
+`spacelab-estimation`, `spacelab-sensors`, `spacelab-coverage`, `spacelab-constellation`,
+`spacelab-grid`, `spacelab-control`, `spacelab-geometry`, `spacelab-slr`, `spacelab-astrometry`
+
+| Crate | Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|---|
+| estimation | Conjunction Pc — Chan series | Chan 1997/2008 equivalent-area series | Chan 1997/2008 (via Orekit) + Alfano + operational CDM, Pc 1e-2…1e-28 | rel < 1e-3 | src/conjunction.rs |
+| estimation | Conjunction Pc — Foster/Patera 3-D | Foster & Estes 1992; Patera 2001 | NASA CARA "Alfano" CDM reference Pc (10 cases) | vs published rel < 3e-4; Foster vs Patera < 1e-8 | src/conjunction.rs |
+| estimation | Conjunction Pc — extreme ellipses | Alfano 2007 test cases | Alfano 2007 exact refs (via Orekit `Alfano2005Test`) | Patera < 1e-4 | src/conjunction.rs |
+| estimation | 2-D Pc usage violations (§4.11) | Hall, Baars & Casali 2023, NTRS 20230010175 | exact two-body circular pair, `F_c` against the closed-form `1/3`; the rectilinear curve against a direct adjugate-inverse quadratic form; the duration constant against Maxima at 40 digits | `F_c` rel **3.0e-12**; `w` **1.5e-10** from `σ/(√(r₁r₂)\|Δn\|)`, which is the comparison's own small-angle truncation; quadratic rel < 1e-12; `erfc⁻¹(10⁻⁶)` residual **3.4e-42** | src/conjunction_domain.rs, tests/conjunction_domain.rs |
+| estimation | DSN sequential range & n-way averaged Doppler (§4.12) | Moyer 2000, JPL DESCANSO Monograph 2, §13.3 eq. 13-52/13-53/13-54 and table 13-1 | Tudat 1.0 `unitTestTransmittingFrequencies.cpp` — five ramp integrals it forms as hand-written trapezoids and six boundary frequencies; the nine turnaround ratios and the three range-conversion cases against Moyer's own fractions | ramp integrals **exact to 8 ulp**; ratios and conversion factors **bit-exact**; a flat-exciter round trip vs the closed form rel < 1e-6 | src/radiometric.rs |
+| estimation | DSN measured frequency (§4.12) | Moyer 2000 §13.3 — the instantaneous counterpart of the Doppler count, `M·f_T(t_transmit)·dt_T/dt_R` | no external oracle and none needed: the exact identity against the observable it complements, `averaged_doppler + measured_frequency = M·f_reference` over a flat exciter, at three transmitter-time rates; then the ramp separately, on Tudat's own discontinuous table | identity residual **< 1e-3 Hz** on terms of 8.4e9 Hz (rel < 1.2e-13); the ramped value and its partial in the transmission epoch both **< 1e-12** | src/radiometric.rs |
+| estimation | ΔDOR against a quasar (§4.12) | delta differential one-way ranging — the DOR of the spacecraft minus the DOR of a radio source at infinity | the far-field limit `B·(ŝ_q − ŝ_sc)/c` on the Goldstone–Canberra baseline, formed from two plane waves against the code's two finite ranges; and the 1/range fall-off of the residual on a spacecraft in the quasar's own direction | plane-wave rel **< 1e-3** at 1e14 m (the wavefront curvature itself); fall-off ratio **4.00 ± 0.01** between 1e11 and 4e11 m | src/radiometric.rs |
+| estimation | Solar-corona plasma delay (§4.12) | Verma et al. 2013 A&A 550 A124 eq. A.4; coefficients Aksim & Pavlov 2022 MNRAS 514(3); sign Moyer 2000 §10.4.2 | the closed form re-derived in Maxima and checked against `quad_qags` in arc length at k = 2, 3, 4, 6; then in-repo against composite Simpson along the line of sight at k = 2, 3, 4, 6 **and 2.7**; the exact recursion against the tanh–sinh rule at every integer order | Maxima rel **0.0** at k = 2, 3, 4 and **1.6e-16** at k = 6; Simpson rel **< 1e-8** at all five exponents; the two integration paths agree to **< 1e-14** | src/radiometric.rs |
+| estimation | PPN `γ` as an estimated parameter (§4.12) | Will 2014 *Living Rev. Rel.* 17:4 §3.2 -- the Shapiro delay's `(1 + γ)` prefactor; the measured value is Bertotti, Iess & Tortora 2003 *Nature* **425** 374 (Cassini, `γ − 1 = (2.1 ± 2.3)×10⁻⁵`) | two independent routes: the near-conjunction asymptote `(1+γ)GM/c² · ln(4 r_E r_P / b²)` against the exact logarithm, at Cassini's own 2002 geometry (Earth at 1 au, probe at 8.43 au, impact 1.6 R☉); and the layer's own AD Jacobian against the closed form `∂ρ/∂γ = Δρ/(1 + γ)` | asymptote rel **< 1e-5**; the `γ` partial vs `Δρ/(1+γ)` rel **< 1e-12**; **bit-exact** (0 ulp) against `shapiro_delay` at `γ = 1`, and `2×` at `γ = 3`, `0` at `γ = −1` | src/modifier.rs |
+| estimation | Tropospheric + ionospheric delay composed onto an observable (§4.12) | the composition, not the models -- GPT3 weather and VMF3 coefficients (Landskron & Böhm 2018), Saastamoinen zenith delays, single-layer ionospheric obliquity, hung on #313's `SlantDelay` seam | central differences on two independent axes: `∂delay/∂ε` from AD against a difference quotient over 5°–85°, and the chain-ruled state partial against a difference of the whole composed observable | AD vs difference rel **< 1e-8** measured (asserted at 1e-6, the quotient's own `√ε` floor); the derivative grows **521×** from 80° to 5°; the corrections move the state partial by **2.3e-6**, against the **exactly 0** an `f64` model contributes and a **2.2e-16** noise floor | crates/spacelab/tests/tropospheric_delay_in_measurements.rs |
+| estimation | Unscented transform — nonlinear covariance | Julier & Uhlmann 1997 | in-repo STT (Park–Scheeres) + Gauss–Hermite on validated J₂ flow | mean rel < 1e-9; cov rel < 1e-7 | src/unscented.rs |
+| estimation | SR-UKF / Square-root Kalman | van der Merwe & Wan 2001 | cross-solver: reproduces SRIF / linear Kalman / covariance-form UKF | < 1e-8…1e-11; stays PD | src/srukf.rs, tests/kalman.rs |
+| estimation | SRIF covariance/solve | Bierman 1977, *Factorization Methods* | analytic P=(HᵀWH)⁻¹=[[2,−1],[−1,2]]/3; Cholesky order-independence | < 1e-12 (P); < 1e-11 (R) | tests/srif.rs, srif_api.rs |
+| estimation | SRIF ill-conditioning (cond vs cond²) | numerical linear algebra (cond A vs cond AᵀA) | vs naive normal equations on clustered Vandermonde | QR < 1e-4; NE > 100·QR | tests/srif.rs |
+| estimation | orbit determination — epoch recovery | batch least squares (Tapley–Schutz–Born) | end-to-end: recover true state from noiseless range/range-rate (AD STM + SRIF) | state < 1e-7; cost < 1e-6 | tests/orbit_determination.rs |
+| estimation | measurement partials (range/rate/RA/dec/az/el) | standard measurement models (Tapley–Schutz–Born) + calculus | analytic AD Jacobian vs closed forms | value < 1e-9; partials < 1e-12…1e-18 | tests/measurement.rs |
+| estimation | light time — one-way down leg | the light-time equation `τ = \|r(t−τ) − r_obs\|/c` | the equation re-substituted; a frozen geometry's closed form; the convergence boundary, ephemeris gap and iteration cap | residual < 1e-18 s; delay exact to 1 ulp | src/light\_time.rs |
+| estimation | The epoch an observable is evaluated at (§4.21) | `c τ = \|r_sat(t_r − τ) − r_station\|`, solved once and then handed to `measurement` unchanged — the formulae there are already right, what was missing was the state | a straight-line trajectory, the one case whose light-time solution is a closed form `τ = (x₀ + v t_r)/(c + v)`; and both refusals, an ephemeris gap and a starved iteration budget | the flight time to **2 ULP** of the closed form; `Transit::path()` and `modifier::Range` at the emission state equal to **1 ULP**, which is the statement that they are one number and not two models; `Signal::Instantaneous` leaves the row **bit-identical** to `partials`, so a correction that was applied and happened to be small cannot pass | src/observed.rs |
+| estimation | The light-time correction to a partial (§4.21) | `∂f/∂x₀ = [w − s·(ρ̂,0)] Φ` with `s = (w·ẋ_e)/(c + ρ̇)` — a rank-one update to the *row*, derived in `derivations/light_time_partials.mac` and checked there against an implicit-function route and a closed form | a central difference of the whole solution: perturb the epoch state, re-solve the flight time, re-evaluate, on three observables whose `w` has a different shape. Gated at the finite difference's own cancellation floor, `ε\|f\|/2h`, because right ascension against the z component sits exactly there | agreement to **5e-8** relative or to the difference's own floor; the pure-range collapse to `1/(1 + ρ̇/c)` = **2.56e-5** at LEO, against the closed form's own derivative `c/(c+v)` to 2 ULP; the acceleration argument asserted to move a range-rate row and to leave a range and a declination row **exactly** unchanged | src/observed.rs, derivations/light\_time\_partials.mac |
+| estimation, umbrella | Light time against Orekit's `Range` (§4.21) | Orekit 13.1.7's own measurement model and `signalTimeOfFlightAdjustableEmitter` — a third lineage, descending from neither SOFA nor Vallado | 470 above-the-horizon epochs of a two-body Keplerian orbit, propagated in closed form on both sides from the same Cartesian epoch state with the same `μ`, in EME2000 throughout with the station's inertial position taken from the fixture. Two-body and one frame deliberately: an SGP4 or a frame difference is metres, which is the size of the effect | the two propagations agree to **8.83e-7 m**, so the comparison is about light time; flight time **2.08e-15 s** (6.23e-7 m) from Orekit's fixed point, with Orekit's own Keplerian-shift shortcut costing 8.01e-8 m; modelled range **6.61e-7 m** against the instantaneous convention's **62.52 m**; range rate **3.30e-9 m/s** against 0.169 m/s. Two-way minus one-way is **3.33 m**, which is what a second two-way implementation here would have to be worth | spacelab/tests/light\_time\_oracle.rs, tools/orekit-oracle/OrekitLightTimeOracle.java |
+| estimation, umbrella | light time in the measurement geometry (§4.8) | Vallado §3 / Moyer 2000: an observation belongs to the emission epoch | the ISS day validated in `access_oracle.rs`, against `(v_sat·ρ̂)τ` and `v_⊥/c` | range 5.9e-4 m; angle 3.3e-5″; sizes 51.8 m and 5.30″ | spacelab/tests/light\_time\_in\_measurements.rs |
+| estimation | closest-approach search (§4.9) | `f' = Δr·Δv` vanishes at every extremum of the separation | a 200 000-sample dense scan of `\|Δr\|` written without the inner product the search evaluates, on a co-planar and on a 63.4°-inclined pair; and a rectilinear pass with a closed-form TCA | counts equal; TCA within the scan's own resolution; distance < 1e-6 m; closed form < 1e-9 s | src/screening.rs |
+| estimation | radial screening filter (§4.9) | Hoots, Crawford & Roehrich 1984, filter 1 | the exact closest approach of two concentric circular orbits, `\|r₂ − r₁\|` | verdict exact at and either side of the threshold | src/screening.rs |
+| estimation | consider (Schmidt) covariance | Schmidt 1966 consider analysis | analytic closed-form error variance | < 1e-12 | src/consider.rs |
+| estimation | linear covariance analysis (truth/filter split) | Geller 2006, *JGCD* **29**(6):1404–1414; Maybeck I §6.8 | a **40 000-trial Monte-Carlo ensemble** of the same scenario driven through the actual filter equations, sharing no code with the recursion. The scenario is mismodelled four ways at once — a truth state the filter does not estimate, a wrong transition, a quarter of the truth's process noise, and half its measurement variance — because a check on a *correctly* modelled filter only proves the recursion reduces to a Kalman filter, which the unit tests already show. Sample-covariance noise at 40 000 trials is √(2/T) = **0.71 %** | the four `Cee` entries land at ratios **0.9897 / 0.9911 / 0.9911 / 1.0079**, all inside 1.1 % against a 4 % gate (5–6σ of the ensemble's own noise); the filter's claimed covariance is optimistic by **4.21×** in position and **2.03×** in velocity, which is the number the analysis exists to produce | src/lincov.rs, tests/lincov_monte_carlo.rs |
+| estimation | filter consistency (NEES/NIS/χ²) | Bar-Shalom, Li & Kirubarajan 2001 | known χ²(100) quantiles (Wilson–Hilferty) + unit identities | quantiles < 1e-2; identities < 1e-12 | src/consistency.rs |
+| estimation | IEKF on SO(3) (invariant) | Barrau & Bonnabel 2017 (invariant EKF) | Barrau–Bonnabel log-linear isometry; Monte-Carlo NEES≈3 | isometry < 1e-12; NEES∈(1.5,5.0) | src/iekf.rs |
+| estimation | SE₂(3) nav EKF / MEKF / SE(3) group | Barrau & Bonnabel 2017; Markley 2003 (MEKF) | group axioms + noise-free bias recovery + ensemble NEES | axioms < 1e-11; pos < 1e-2 m; NEES∈(1.5,5.0) | src/se23.rs, mekf.rs, se3.rs |
+| estimation | Richardson extrapolation / debias (Bach 2021) | Richardson extrapolation; Bach 2021 | analytic 1/k limit + closed-form ridge O(λ²) | ext < raw/100; tableau < 1e-14 | src/richardson.rs |
+| estimation | Process noise — van Loan discretisation | van Loan 1978; Maybeck 1979 | closed forms derived in `derivations/process_noise.mac`: double integrator, Gauss–Markov, DMC | max abs < 1e-12…1e-14 | src/process_noise.rs |
+| estimation | Process noise — matrix exponential | scaling-and-squaring with Padé | analytic exp of diagonal / Jordan block / widely-separated eigenvalues; exp(0)=I; exp(A)exp(−A)=I | < 1e-13 | src/process_noise.rs |
+| estimation | Process noise — SNC/DMC end-to-end tuning | Tapley–Schutz–Born §4.9 (SNC/DMC) | 200-run Monte-Carlo NEES on a tracked arc with a Gauss–Markov truth: DMC consistent, every white-acceleration tuning is not | NEES in χ²(6,200) at z=3 for DMC; no SNC tuning passes | tests/process_noise_consistency.rs |
+| estimation | Process noise — validation boundaries | the guards' own contract (`NonFinite`, `NegativeSigma`) | each argument carrying the bad value in turn, and zero sigma as a legitimate request | exact error variant; `Q = 0` exactly | src/process_noise.rs |
+| estimation | Process noise — `solve` partial pivoting | Golub & Van Loan: largest magnitude, ties to the lowest row index | a permutation matrix (singular without a swap) and an exact magnitude tie | inverse exact; tie-break pinned to the bit | src/process_noise.rs |
+| estimation | Process noise — squaring-ladder boundaries | scaling-and-squaring: smallest `s` with `‖A‖∞/2^s ≤ θ`, capped at `MAX_SQUARINGS` | `‖A‖∞ = θ` exactly, and a nilpotent needing exactly 1024 halvings where `exp(N) = I + N` is exact | boundary result pinned to the bit and within 1 ulp of `libm::exp`; nilpotent exact | src/process_noise.rs |
+| estimation | Robust update — Huber fixed point | Huber 1964 M-estimation | the cubic `w³ν² − c²p·w − c²R = 0` it is defined by, re-substituted | < 1e-12 over ν ∈ [4, 1e4] | src/robust.rs |
+| estimation | Robust update — Student-t variational step | Agamennoni et al. 2012 (VB Student-t filter) | the E-step identity `λ = (n+1)/(n+δ²)` it is derived from, re-substituted | rel < 1e-12 over ν ∈ [0, 1e4] | src/robust.rs |
+| estimation | Robust update — influence functions | Hampel 1974 (influence function) | closed-form asymptotes: Student-t → `p√((n+1)/R)`, inflation → `p·t(p+R)/(R\|ν\|)`, Huber → `\|ν\|^(1/3)` | saturation < 1e-4; asymptotes < 1e-3; cube-root < 1 % | src/robust.rs |
+| estimation | Robust update — χ² gate threshold | Wilson–Hilferty via `consistency::chi_square_mean_interval` | exact χ²₁ quantiles `(Φ⁻¹((1+Φ(z))/2))²` = 5.0239 / 7.8794 / 10.2766 | < 3 % at dof 1 (the approximation's own accuracy), < 0.5 % at dof 3 | src/robust.rs |
+| estimation | Robust estimation — contamination study | Bar-Shalom et al. 2001 (gating); Chang 2014 (Mahalanobis robust KF) | paired Monte-Carlo, 90 000 scalar updates per cell at 0/1/5/20 % contamination, five estimators on identical data | clean-data efficiency loss ≤ 2.43 %; Huber/Student-t within 2 % of each other everywhere | tests/robust_estimation.rs |
+| estimation | Fixed-lag smoother — window equivalence | Rauch–Tung–Striebel; fixed-lag as a truncated backward pass | a lag reaching the arc's end vs the full `RtsSmoother` over the same intervals | state and `S` < 1e-9 | tests/fixed_lag_smoothing.rs |
+| estimation | Fixed-lag smoother — covariance ordering | conditioning on more data cannot increase the covariance | the recursion's own σ, monotone in lag and bounded below by the fixed-interval value | < 1e-12 (arithmetic, not statistical) | tests/fixed_lag_smoothing.rs |
+| estimation | Fixed-lag smoother — latency/accuracy curve | Kelly & Anderson 1971 (why not the Biswas–Mahalanabis recursion) | 60-run Monte-Carlo at two process-noise levels, every lag scored on identical epochs | lag 1 captures 92 % at q=3e-1 and 5.6 % at q=1e-4; NEES 5.9–6.3 on 6 dof | tests/fixed_lag_smoothing.rs |
+| estimation | H∞ — the γ = 0 identity | Simon 2006 §11.4, one-step predictor form | `SquareRootKalman` on identical data, run in the same measurement-then-time order | state 1.8e-15, covariance 2.8e-16 over 12 steps | src/hinf.rs |
+| estimation | H∞ — robustness bought and efficiency paid | minimax vs minimum-variance; the trade is the claim | 200-run Monte Carlo, both filters on identical measurement *and* process-noise streams, γ = 0.9 | unmodelled +3 rate step: RMS 1.190 vs 1.274 and peak 5.068 vs 5.355, both H∞; matched model: 0.2752 vs **0.2738**, Kalman | src/hinf.rs |
+| estimation | H∞ — the existence condition is the factorisation | `M = P⁻¹ − γQ̄ + HᵀV⁻¹H ≻ 0` (Simon §11.4) | a γ infeasible against the prior, and a feasible one walked into infeasibility by process noise in the unobserved direction | the failing diagonal's index is returned as the error; no gain is produced without the Cholesky | src/hinf.rs |
+| estimation | IMM — a bank of one is the filter it wraps | Bar-Shalom, Li & Kirubarajan 2001 §11.6 | `SquareRootUnscentedKalman` on identical data, with all the mixing and reweighting machinery still running | worst \|dx\| 0.0e0 over 15 epochs | src/imm.rs |
+| estimation | IMM — the mixing and the combination are one moment match | `Σ wⱼ [Pⱼ + (x̂ⱼ − x̄)(x̂ⱼ − x̄)ᵀ]` | hand-computed mean and covariance from `μ = [¼, ¾]`, exact in binary | exact == on every entry | src/imm.rs |
+| estimation | IMM — a manoeuvre detector's delay *and* its false-alarm rate | the pair is the claim; either alone is not a detector | 120-epoch canonical two-body arc, `Dop853` truth at 1e-13 against the bank's own RK4, 0.5 % along-track Δv at epoch 40; 200 manoeuvre-free arcs for the null | detected after **0** observations, held 3 epochs; **0 of 200** false alarms, worst quiet-arc statistic 1.634e-6 | tests/imm_manoeuvre.rs |
+| estimation | EnKF — convergence to the exact Kalman answer, at a *measured* rate | Evensen 1994; Burgers, van Leeuwen & Evensen 1998 (perturbed observations) | `SquareRootKalman` on the same linear-Gaussian arc; M = 16/64/256/1024, twelve independent ensembles each, the rate fitted by least squares rather than asserted | \|Δmean\| 0.3021 → 0.0310 and \|ΔP\|_F 0.1097 → 0.0143; fitted slopes **−0.540** and **−0.516** against the sampling theory's −½ | tests/ensemble_particle.rs |
+| estimation | Particle filter — a posterior a linearised filter cannot carry | Gordon, Salmond & Smith 1993 (bootstrap filter), on their own `z = x²/20` observation | an EKF on identical data, started inside the prior on the wrong side of the symmetry; truth at −4, twenty observations | filter holds **48.7 % at −4.03 and 51.3 % at +4.03**; the EKF reports **4.382 ± 0.045** — eight sigma from the truth with a small variance | tests/ensemble_particle.rs |
+| estimation | Resampling — the variance ordering that is the reason to prefer a scheme | Kitagawa 1996 (stratified/systematic); Douc, Cappé & Moulines 2005 (comparison) | `Σᵢ Var[nᵢ]` over 20 000 draws from one fixed weight vector, all four schemes on the same vector | unbiased to < 0.03 in `E[nᵢ]`; **multinomial 6.4199 > residual 3.3802 > stratified 2.4289 > systematic 1.4935** | tests/ensemble_particle.rs |
+| estimation | Sampler — xoshiro256++ seeded by `SplitMix64`, Box–Muller normals | Blackman & Vigna 2018; Box & Muller 1958 | a replayed seed against itself and against a neighbouring one; the first four moments against their exact values; a correlated draw against the `L Lᵀ` it was given | 1000/1000 identical and 1000/1000 distinct; over 200 000 draws mean < 0.01, variance < 0.02, skew < 0.03, kurtosis < 0.10; covariance < 0.08 | src/sampling.rs |
+| geometry | Exact predicates — anti-symmetry under transposition | the definition of a determinant | 2000 random point sets on a coarse integer grid, where exact degeneracies are common rather than measure-zero | exact sign flip, including the collinear and cocircular cases the filter cannot certify | src/predicates.rs |
+| geometry | Exact predicates — the published example floating point gets wrong | Kettner, Mehlhorn, Pion, Schirra & Yap, *Classroom examples of robustness problems in geometric computations*, Comp. Geom. 40(1), 2008 | the 16×16 grid `(0.5 + i·2⁻⁵³, 0.5 + j·2⁻⁵³)` against the line through `(12, 12)` and `(24, 24)`, where the determinant is exactly `12·2⁻⁵³·(j − i)` | `sign(j − i)` on all 256, and the test counts the cases where the `f64` determinant disagrees so that it fails if the fixture ever stops being hard | src/predicates.rs |
+| geometry | Exact predicates — one ulp decides inside from outside | the circumcircle of `(0,0), (1,0), (1,1)` through `(0,1)`; the plane `x + y + z = 1.5` through its three axis points | the fourth point stepped 1–8 ulps either way in `y`; the 5×5×5 lattice of points `i, j, k` ulps off the plane's centre, determinant `2.25·2⁻⁵³·(i + j + k)` | the sign follows the ulp, not the rounding of terms fifteen orders of magnitude larger | src/predicates.rs |
+| geometry | Exact predicates — the filter never certifies what the exact path denies | the exact expansion path, as the reference for the `f64` filter in front of it | 20 000 near-degenerate configurations per predicate, coordinates with every mantissa bit populated: a point placed on the line, the circle or the plane through the others in `f64` | the filtered and the exact answer agree on every sample, and each test counts how often the naive `f64` determinant does not, failing if that count drops below 100 | src/predicates.rs |
+| geometry | Delaunay — the empty-circumcircle property | the defining predicate, not a golden file | every triangle against every point, on scattered sets, a 7×7 grid (cocircular everywhere) and a coarse lattice with duplicates | no point strictly inside any circumcircle; triangle count == 2n − 2 − h | src/delaunay.rs |
+| geometry | Hull and triangulation — against qhull | qhull 8.0.2 (Barber, Dobkin & Huhdanpaa 1996), floating point with facet merging | 8 cases on identical points written to 17 digits: extreme points, hull facets and Delaunay triangles | exact set equality in general position; on the grid, the triangle count Euler fixes | tests/qhull_cross_check.rs |
+| geometry | Spherical Voronoi — the cells tile the sphere | Girard/Van Oosterom–Strackee solid angle; the dual of the hull on the sphere | 200-point golden-angle spiral, cell areas summed | Σ areas − 4π < 1e-9; circumcentre equidistance 1e-14; no generator inside a circumcap | src/sphere.rs |
+| sensors | Elevation-mask footprint edge | ellipsoidal footprint geometry, derived in `footprint.mac` / `footprint.input` | two independent CAS derivations (Maxima `footprint.mac` + FriCAS `footprint.input`) | abs(g) < 64·ε·‖d‖ | tests/predicate.rs |
+| sensors | Cone ∧ Horizon footprint | SaVi closed-form footprint radius ⚠ | SaVi closed-form radius (both branches) | boundary 1e-7 rad (exact ==) | tests/predicate.rs |
+| sensors | covered ≡ (g ≥ 0) | internal API contract | property vs g-sign over 200k random geometries | exact == | tests/predicate.rs |
+| sensors | reachable_band cull — never drops a covered cell | internal contract (conservative bound) | adversarial: >1M covered cells vs exact geodetic coverage | escapes == 0 | tests/cull.rs |
+| sensors | WGS84 cull deflection margin | ellipsoid geometry (max vertical deflection) | analytic max vertical deflection atan(e²/(2√(1−e²))) | margin ∈ (δ_max, 1.2·δ_max) | tests/cull.rs |
+| sensors | batch kernels ≡ scalar predicate | internal API contract | self-consistency (bit-for-bit) | exact == | tests/predicate.rs |
+| sensors | max_rate bound; SAR / comms constraint algebra | Friis link budget; SAR imaging geometry | property (bounds FD of g; monotone link margin) | worst < bound; break-even < 1e-3 dB | tests/predicate.rs, src/sar.rs, comms.rs |
+| sensors | Instrument scan catalogue — 11 instruments, 756 samples (AVHRR, AVHRR/GAC, VIIRS, AMSU-A, MHS, HIRS/4, ATMS, MWHS-2, OLCI, ASCAT, SLSTR-nadir) | published swath geometry per instrument, as `pyorbital.geoloc_instrument_definitions` encodes it (pytroll/pyorbital, **Apache-2.0** — portable into a commercial product where satpy (GPL-3.0) and pyresample (LGPL-3.0) are not) | **pyorbital** run as an oracle over both swath edges, both next-to-edges and the two middle samples, at three scans and every detector row | worst scan-angle difference **2.220e-16 rad** — one ulp — at `slstr_nadir` roll; pixel times ≤ 1 ns, which is pyorbital's own truncation into `timedelta64[ns]` (AVHRR's 1/6 s exports as 1.666 666 66e-1) | tests/pyorbital_geoloc.rs, tools/gen_pyorbital_oracle.py |
+| sensors | Direct sensor model — roll/pitch about the along-track frame, ray–ellipsoid intersection to the ground point | line-of-sight geolocation on WGS-84; geodetic latitude by fixed-point iteration | **pyorbital** `compute_pixels` on **pyorbital's own exported state vectors**, so no SGP4 difference can enter the residual (the NEPTUNE discipline: identical inputs, or the number means nothing) | worst ground point **1.1 mm**, on VIIRS at its 56.28° swath edge, over a NOAA-18 arc at 2011-10-12 13:45 — and *attributed*: 0.9 µm from pyorbital's GRS80-vs-WGS-84 axis mix, 0.24 mm from its `rtol = 1e-5` latitude convergence against this port's `f64` fixed point. Gate 5 mm | tests/pyorbital_geoloc.rs |
+| sensors | Where the port refuses what its source accepts | a look past the limb, an index off the detector, a zero axis, a zero velocity, a ray from the geocentre | the domain edges themselves: pyorbital takes an unguarded square root, loops `while True` in `geodetic_lat`, and bounds no index | `None` rather than a `NaN` ground point; a bounded 12-step iteration rather than a hang; ASCAT's two fans still leave the ground track uncovered; every cross-track swath symmetric to < 1e-15 rad and both Sentinel-3 push-brooms not | tests/scan_geoloc_domain.rs |
+| coverage | Brent root finder | Brent 1973 | PARI/GP 34-digit reference roots | err ≤ tol + 8ε‖root‖ (tol 1e-12) | tests/root.rs |
+| coverage | Brent conformance | Brent 1973; the search modes as Orekit documents them ⚠ | Orekit §9 named modes (endpoint, flat, pathological bisection) | endpoint = 2 evals; superlinear < 15 | tests/root.rs |
+| coverage | Event detectors (eclipse/elevation/FoV) | event-detection conventions as Orekit documents them ⚠ | Orekit `EclipseDetector`/`ElevationDetector`/`CircularFieldOfView` conventions | < 1e-9…1e-12 | src/detectors.rs |
+| coverage | Access windows | spherical pass geometry | closed-form pass geometry (horizon crossings ±acos(Rₑ/r)/ω) | rise/set < 5e-3 s; g < 0.05 m | tests/access.rs |
+| coverage | Coverage & constellation-union metrics | revisit / gap metric definitions | analytic hand-computed gaps + union-shrink property | < 1e-12 | tests/metrics.rs, src/combine.rs |
+| coverage | Parallel revisit_map ≡ serial | internal API contract | self-consistency (bit-for-bit) | exact == | src/parallel.rs |
+| constellation | Draim tetrahedral | Draim 1987 patent Table I | Draim 1987 patent Table I + time-sampled Fibonacci-sphere coverage oracle (600×400) | period < 1.0 s; worst margin > 0 | src/draim.rs |
+| constellation | Street-of-Coverage | Lüders 1961; Adams & Rider 1987 | Adams/Rider/Lüders geometry + Fibonacci-sphere oracle (700×120) | θ < 1e-9; cos λ < 1e-12; margin > −2e-3 | src/soc.rs |
+| constellation | Walker Delta/Star | Walker 1984 (i:T/P/F) | Walker i:T/P/F plane spacing + hand phasing | count/RAAN exact; u < 1e-9 | src/walker.rs |
+| constellation | Flower constellation | Mortari et al. 2004 | Mortari theory (single-track compatibility) + Kepler | Kepler < 1e-12; one-track < 1 m | src/flower.rs |
+| constellation | Mozhaev point groups | Mozhaev 1972/73; icosahedral group A₅ | icosahedral Y≅A₅ conjugacy profile (1/15/20/24) | class counts exact | src/mozhaev.rs |
+| constellation | Lattice / symmetric / shell / α-characteristic | published lattice / symmetric-constellation theory | cross-check vs verified Walker + published theory + coverage oracle | RAAN < 1e-12; ΔV < 1e-6; shell fully seen | src/lattice.rs, symmetric.rs, shell.rs, analysis.rs |
+| grid | H3 grid fidelity | Uber H3 specification ⚠ | H3 library (k-ring count 1+3k(k+1), equal-area) | point→cell→centre < 0.01°; area ratio < 1.15 | tests/grid.rs |
+| grid | culled accumulate ≡ full map; end-to-end AOI revisit pipeline | internal API contract | self-consistency + integration property | byte-identical; 18-plane < 2 h SLA | tests/culled_accumulate.rs, constellation.rs |
+| control | Attitude error — quaternion and MRP | Wie & Barba, JGCD 8(3), 1985; Schaub & Junkins, *Analytical Mechanics of Space Systems* 4th ed. §8.4 | the crate's own verified `exp_so3`: the quaternion of `exp(theta n)` must be `(cos(theta/2), sin(theta/2) n)` | half-angle pair < 1e-12 over theta in 1e-6…3.0; at `theta = pi - 1e-9` the recovery is **exact** (0.000e0) where the naive `sqrt(1+tr)/2` branch returns `q0 = 0.0` and then divides by zero | src/attitude.rs |
+| control | Quaternion PD closed loop | Wie & Barba 1985; the small-angle reduction `I dtheta'' + P dtheta' + (K/2) dtheta = 0` | the analytic critically-damped response `dtheta_0 (1 + w_n t) exp(-w_n t)`, pointwise over the whole transient | worst relative deviation **2.672e-4** at `dtheta_0 = 0.5 deg`, 3000 steps of 0.01 s | src/closed_loop.rs |
+| control | MRP Lyapunov law — global decrease | Schaub & Junkins §8.4, `V = ½ dw' I dw + 2K ln(1 + s's)`, with `dV/dt = -P dw'dw` | the measured `V` sequence along the closed-loop trajectory, from 120 deg away with a three-axis tumble — far outside any linearisation | `V` 0.3134 → 4.902e-7 over 4000 steps of 0.05 s, largest single-step **increase 0.000e0** (monotone, not trending) | src/closed_loop.rs |
+| control | Loop latency — sensor / compute / actuator | the three delays kept apart; commensurate delays are stored samples, not interpolations | a value test: with the vehicle 30 deg off and the initial history at the reference, the commanded torque for the first `lag` steps is **exactly** zero | 20 steps at exactly 0.0 N·m, then > 0.05 N·m; commensurability miss 8.882e-16 against a 3.242e-15 tolerance | src/latency.rs, src/closed_loop.rs |
+| control | Delayed-argument integration — method of steps | Bellen & Zennaro, *Numerical Methods for Delay Differential Equations*, OUP 2003 | the **exact** closed form of `x'(t) = -x(t-1)`, `x = 1` for `t <= 0`, built in Maxima by rational integration and checked symbolically: `x` and `x'` continuous at every breakpoint, the `x''` jump exactly 1 at `t = 1` and 0 at `t = 2`, the DDE residual identically 0 on all 8 intervals | DOP853 vs the closed form over 16 points on `[0, 8]`: worst **8.882e-16** at an arc join, **7.494e-16** between them | src/delayed.rs, derivations/dde_method_of_steps.mac |
+| control | Breakpoint tracking — the order a naive run loses | the propagated discontinuity `t0 + sum k_i tau_i`; one order of smoothing per delay interval | the same RK4 driver, same problem, 7 step sizes each half the last; observed order is the least-squares slope of `log e` against `log h` | mesh **on** the breakpoints holds order **4.00** (successive ratios 4.00 six times); mesh **off** them falls to **1.91** — two orders lost, with no error estimate complaining | src/delayed.rs |
+| control | Dense output as the delay history | `DenseOutput` is only valid inside its own step, so the history selects the arc first and interpolates second | error where an arc ends (an accepted step's own state) against error mid-arc (entirely the interpolant's) — every delayed lookup is the latter | join **5.274e-16**, mid-arc **7.078e-16**: the interpolant is 1.34x the integrator, not the limiting term. Commensurability does *not* remove it — 8 of 21 lookups are still between nodes at `tau/h = 4`, because RK4 evaluates at interior stages | src/delayed.rs |
+| control | Delayed integration — second implementation | DelayDiffEq.jl 6.3.0 `MethodOfSteps(Vern9)`, MIT, reference track only (never a runtime dependency) | the same IVP through an independent method-of-steps solver with its own breakpoint tracking, written by people who were not reading this code | DelayDiffEq agrees with the closed form to **7.483e-13** worst over the 16 points at `abstol = reltol = 1e-14`, in 115 steps; the driver here agrees to **8.882e-16**. Both are far inside anything an engineering claim would need; the smaller residual is on a piecewise-polynomial problem and is not a general speed or accuracy claim | tools/gen_dde_oracle.jl |
+| control | Delay margin — the crossing of the transcendental characteristic equation | `J lam^2 + (kw lam + kt) exp(-lam tau) = 0`; the delay margin is the smallest `tau > 0` at which a root reaches the imaginary axis | **Maxima**, CAS of record: split on `lam = j w`, eliminate `tau` by resultant against `c^2 + s^2 = 1`, factor, and substitute the recovered `(w_c, tau_max)` back into the *original transcendental* equation | the eliminated polynomial factors as `kt^2 (kw^2 w^2 + kt^2)(J^2 w^4 - kw^2 w^2 - kt^2)` — the cofactor is a sum of positive terms and carries no crossing. Residual of the transcendental equation at the recovered pair: **2.296e-41** (critically damped, 40 digits), **8.968e-44** (12U case). The `f64` implementation reproduces Maxima's `w_c` and `tau_max` **bit-exactly** (relative 0.000e0) and holds `\|char. eq.\| / J w^2 < 2.695e-16` across 8 damping ratios | src/margin.rs, derivations/delay_margin.mac |
+| control | Delay margin — the same number out of an integrated DDE | the method of steps of the row above, driving `J th'' = -kt th(t-tau) - kw th'(t-tau)` | integrate at a sequence of delays and bisect on the sign of the log-amplitude slope over the last half of a 15-cycle run — the crossing comes out of a trajectory, sharing no algebra with the closed form | bisection lands at **0.647409080 s** against the analytic **0.647409203 s**, relative **1.907e-7** (the bracket is 4e-7 of itself, so this is at the bisection's own floor). Below the margin the amplitude decays, above it grows | src/margin.rs, src/delayed.rs |
+| control | Delay margin — the shape of the answer, not just its value | `tau_max w_n` depends only on the damping ratio | Maxima's `find_root` on `d(tau_max)/d(zeta)`, against the Rust at 8 damping ratios and two physical scalings | `tau_max w_n` is **non-monotone in zeta**: it peaks at **zeta = 0.6394** with **0.7415**, against **0.6474** at critical damping — 14.5 % more margin at *less* damping. Undamped (`kw = 0`) the margin is **exactly 0.0**. Rust vs Maxima worst deviation **2.267e-16** | src/margin.rs, derivations/delay_margin.mac |
+| control | LQR — the algebraic Riccati equation | Kalman 1960; `AᵀP + PA − PBR⁻¹BᵀP + Q = 0`, solved by the matrix-sign iteration on the Hamiltonian `[[A, −BR⁻¹Bᵀ], [−Q, −Aᵀ]]` | four legs sharing no arithmetic: the scalar quadratic's positive root; the double integrator's closed form `P = [[√3,1],[1,√3]]`; **Maxima**'s closed-loop characteristic polynomial for the Clohessy–Wiltshire plant, derived from `H`'s stable spectrum and never touching `P`; and the cross-track axis, which decouples into a `2 × 2` with an exact solution | scalar `√2 − 1` to **1.1e-16**; double-integrator CARE residual **1.508e-16**; CW residual **8.890e-14**, closed-loop polynomial worst coefficient **7.198e-13** (spectral-factorisation residual 8.85e-43 at 40 digits), cross-track gains **3.007e-13** and 1.839e-13, and the cross-track row reads no in-plane state to < 1e-14 | src/orbit.rs, derivations/lqr_riccati.mac |
+| control | LQR — optimal, not merely stabilising | `∫(xᵀQx + uᵀRu) dt = x₀ᵀPx₀` holds only for the optimal gain; any other stabilising gain costs strictly more | the cost integrated along the actual closed loop (RK4 + Simpson, 5000 s = 112 time constants), against `x₀ᵀPx₀`; then the same integral for four detuned gains `αK`. A `P` solving the wrong Riccati branch passes a residual check and fails this one | integrated cost vs `x₀ᵀPx₀` rel **8.213e-7** — the integration's own truncation, and it cancels between gains because every gain goes through the identical quadrature. Detuned costs **1.0121x** (`α = 1.25`), **1.0123x** (0.8), **1.1214x** (2.0), **1.1227x** (0.5) | src/orbit.rs |
+| control | Gauss variational matrix in equinoctial elements | `œ̇ = B(œ) u` for `[a, k, h, q, p, λ]`, the DSST's own element set and ordering | not the algebra again — a **measured impulse**: perturb the Cartesian state by `Δv` along each axis, convert to elements through an independent state↔element path written for the test, and difference. All 18 entries, spanning 8 orders of magnitude from `8.9e2` to `2.5e-5` | worst **7.491e-10**, at `B[0][2]` (the `a` row, cross-track) where the finite difference is smallest relative to `a` itself; the small entries agree to 2.5e-12 | src/orbit.rs, ../spacelab-propagation/src/dsst/gaussian.rs |
+| control | Element feedback — the Lyapunov decrease, measured | Naasz 2002 / Gurfil 2005; `V = ½ Δœᵀ W Δœ`, `u = −c Bᵀ W Δœ` gives `V̇ = −c‖BᵀWΔœ‖²` | `V̇` evaluated from the same `B` the command used, at **168** (error, true-longitude) pairs — 14 error vectors including single-element, mixed-sign and near-`π` longitude errors, swept around a full revolution — rather than argued from the derivation | `V̇ ≤ 0` at **all 168**; most negative **−6.486e-4**, least negative **exactly 0.000e0** (the pair where `BᵀWΔœ` vanishes, which the derivation predicts). Under saturation the command's direction is unchanged to **< 1e-12** per axis and `V̇` stays negative, so the clip cannot flip the sign it exists inside | src/orbit.rs |
+| control | Station-keeping Δv against the physics floor (§4.14) | for a near-circular orbit `ȧ = 2a_t/n`, so holding `a` against drag costs exactly `Δv = (n/2)\|Δa_drag\|` — no published budget is cited, deliberately (§4.14) | a 3-day 46-rev/3-nodal-day Sun-synchronous repeat at 459.8 km, NRLMSISE-00 live at F10.7 = 150 / Ap = 4, `C_d A/m = 0.02 m²/kg`, DOP853 with the loop closed every 60 s on DSST mean elements. The bar is computed twice from the same run by independent routes: `∫\|a_drag\| dt` from the force, and `(n/2)\|Δa\|` from the uncontrolled trajectory | commanded **0.206429 m/s** against a drag makeup of **0.206459 m/s**, ratio **0.9999** — **25.13 m/s per year**. The floor's two statements agree to **2.237e-3**. Orbit solve residuals: repeat **−4.337e-19 rad/s**, Sun-synchronous **−7.941e-23 rad/s** | tests/station_keeping.rs |
+| control | Station-keeping — the along-track consequence, differentially (§4.14) | `λ̇ ≈ n(a)` gives `Δs = −(3/2) n ∫δa dt + a ∫B_λ·u dt`: a standing semi-major-axis offset is a *linearly growing* phase error, which is what a proportional law cannot remove | the measured free-minus-held gap against that prediction. Differential because both runs are measured against a longitude built from first-order `J₂` secular rates, which is short by `O(J₂²)` — worth **4187.5 m** free and **4364.6 m** held over 3 days, common-mode and cancelling exactly | free − held **79437.6 m** measured against **79614.7 m** predicted, rel **2.224e-3**. The direct thrust term measures **0.00 m** and is expected to: the `λ` row's tangential entry is `≈ −2·pos/A = 2.6e-4 s` against the `a` row's `2/n ≈ 1790 s`, and `pos·v̂ ≈ 0` on a near-circular orbit. Ground track at the equator: **0.56 km** held, **5.40 km** free | tests/station_keeping.rs |
+| control | Graph Laplacian spectrum, and the delay bound off it | `L = D − A` for a weighted undirected graph; `τ_max = π/(2 λ_max(L))` for `ẋ = −L x(t−τ)` (Olfati-Saber & Murray, IEEE TAC **49**(9), 2004) | closed forms nothing in the code derives: the path `P₃` spectrum `{0, 1, 3}`, and the cycle `C_n` spectrum `2k(1 − cos 2πj/n)` — the eigenvalues come out of `jacobi_symmetric`, the reference out of the trigonometric identity. The bound itself is re-derived in **Maxima** by eliminating `τ` against `c² + s² = 1` and re-substituted into the *transcendental* equation, not into the rearrangement | `P₃` exact; `C₆` worst eigenvalue error **3.109e-15**; `L·1 = 0` to **0.000e0**; the Maxima residual of `λ + λ_max e^{−λτ}` at the crossing is **0.0b0** at 40 digits, and `τ_max λ_max = π/2` symbolically. `C₆` at 0.01/s: Rust **39.269908169872402 s** against Maxima **39.269908169872416 s**, rel **3.6e-16** | src/formation.rs, derivations/consensus_delay.mac |
+| control | The critical delay, measured on an ensemble (§4.15) | the same published bound, now as a prediction to be refuted rather than a formula to be re-derived | **24 random connected graphs on 6 agents** (seeded xoshiro256++, gains log-uniform over a decade, `λ_max/λ₂` reaching **15.38**), each integrated as a DDE by the method of steps and bisected on the sign of the decay rate of the **`λ_max` mode** — the state projected onto that eigenvector, enveloped as `hypot(y(t), y(t−τ))` because `ωτ = π/2` at the crossing makes the lagged value the quadrature component. Twenty halvings of a 20 % bracket, 60 delays of span | worst relative gap over the ensemble **9.537e-8** — the bisection's own resolution, so the bound is exact to what the measurement can see. Reading the *aggregate* disagreement norm instead of the mode puts the crossing **6.5 % high on every draw** (§4.15) | tests/formation_consensus.rs |
+| control | The bound belongs to the protocol, not to the link (§4.15) | `ẋ = −D x(t) + A x(t−τ)` — each agent knows its own state now and its neighbour's as of `τ` ago — against `ẋ = −L x(t−τ)`, where the relative measurement is what arrives late | a crossing at `s = jω` would need `1 ≤ ‖(jωI + D)⁻¹A‖_∞ = maxᵢ dᵢ/√(ω² + dᵢ²) < 1`, so there is none at any delay; regular graphs give the same result in closed form, `ω² = −λ(2d − λ) ≤ 0`. Measured on the same graphs and the same starts at **100×** the other protocol's bound, as a reduction ratio `‖x(T)‖/‖x(0)‖` rather than a slope | at 100× the bound the delay-tolerant protocol still converges — worst reduction **×2.72e-5** over 500 delays — while the bounded one blows up by at least **×1.06e93** over 60. Both Maxima endpoint checks hold: a root at the origin at `λ = 0`, real part `2d ≠ 0` at `λ = 2d` | src/formation.rs, derivations/consensus_delay.mac, tests/formation_consensus.rs |
+| control | A 3-D formation, and what the bound does *not* buy (§4.15) | `L ⊗ I₃` has the scalar spectrum with multiplicity three, so a formation in space has the scalar bound; and stability is not clearance | the 12-state ring of 4 bisected the same way, seeded from the `λ_max` eigenvector — the slot-swap start is **orthogonal** to it on `C₄` and excites nothing (§4.15). Then a physical scenario: satellites 0 and 2 swapping slots 141 m apart, biased 10 m out of plane, swept over six delays from 10 % to 99 % of `τ_max`, with the closest approach and `Pc` read by the **conjunction** machinery rather than a separation check written for the test | 3-D critical delay **19.634956 s** against the scalar **19.634954 s**, rel **9.537e-8**. Closest approach across the sweep **9.975 → 10.044 m**, spread **0.69 %**, `Pc` fixed at **3.6972e-3** to five digits — a deliberately reported negative result: the delay margin governs *convergence* and buys no separation | tests/formation_consensus.rs |
+| control | The MRP Lyapunov law against Basilisk's `mrpFeedback` (§4.16) | Schaub & Junkins; `u = −K σ − P δω + ω × Iω`, and the doc comment's own claim that tracking a moving reference adds `I(ω̇_ref − ω × ω_ref)` | **Basilisk 2.11.1** (AVS Lab, ISC), `controlLawType = 1`, at 10 sampled `(σ_BR, δω, ω_RN, ω̇_RN)` states with no integrator anywhere — 7 with a fixed reference and 3 with a moving one, so the doc's claim about *what is missing* is measured as exactly that term rather than absorbed into a tolerance | fixed reference worst **1.241e-16 N·m**; the 3 tracking cases close from **2.4e-4 … 2.4e-3 N·m** raw to **3.103e-17** once the named feedforward is added. MRP round trip through `AttitudeError` **1.594e-16** | tests/basilisk_oracle.rs, tools/gen_basilisk_oracle.py |
+| control | Basilisk's *default* control law is a different law (§4.16) | `mrpFeedback`'s `controlLawType` switch: `0` crosses `ω_RN + K_i z` into `[I]ω_BN`, `1` crosses `ω_BN`. On an inertially fixed reference `ω_RN = 0`, so the default supplies **no gyroscopic cancellation at all** | both laws in the fixture at the same 10 states, and the difference asserted as the identity `u₀ − u₁ = −ω_BR × [I]ω_BN` rather than reported as a residual. Matched on the fixture's case index and not on the state, because two cases share `σ_BR` and `ω_BR` and differ only in `ω_RN` | identity holds to **6.206e-17 N·m** while the term itself reaches **1.609e-1 N·m** over the sampled states — the discrepancy a comparison against the default would have reported as a spacelab defect, growing with the square of the rate | tests/basilisk_oracle.rs |
+| control | The closed loop, and where the actuator sits in the task (§4.16) | Basilisk RK4 on `(σ_BN, ω_BN)` against this crate's RKMK4 Lie-group step on `SO(3)`, command held over the step on both sides | a 120 s slew at four steps (1.0 / 0.5 / 0.25 / 0.125 s), run **twice**: with `ExtForceTorque` ordered before the hub in the task and after it. The assertion is on the *convergence rate*, because a model difference leaves a floor no step reduction touches | both orderings converge at **order 4.0–4.3**, to **1.200e-11 rad** and **1.264e-11 rad** at the finest step. Ordered after the hub the command drives the *next* interval and the first is torque-free; not modelling that leaves **6.685e-3 rad** at a 1 s step converging at **order 1.0** instead of **8.143e-8 rad** — a factor **8.209e4**, and no tolerance distinguishes it from a real defect | tests/basilisk_oracle.rs |
+| control | Gravity-gradient torque, pointwise, against Basilisk (§4.16) | `3μ/R⁵ · R × (I R)`, with the body-frame position obtained from the attitude | Basilisk's `GravityGradientEffector` at 5 geometries, two of which must vanish because `r` lies on a principal axis. The rotation is the thing this expression can get wrong silently, so the comparison pins it: `rotation_of_mrp(σ_BN)` is the **inertial-from-body** matrix and the body vector needs its transpose | worst absolute **4.507e-21 N·m** on torques reaching **4.410e-6 N·m**, relative **1.380e-15**, 2 exact zeros. The untransposed rotation gives **5.5e-6 N·m** — a 180 % error that still reads as a plausible small number | tests/basilisk_oracle.rs |
+| control | A gravity-gradient *arc* against NASA 42 (§4.16) | the same torque, now driving a tumbling asymmetric body over 2000 s of a 400 km circular orbit — not the expression at sampled geometries but its integrated effect | **42** (`ericstoneking/42`, NASA GSFC, **NOSA v1.3**), run unmodified from input decks with `PASSIVE_FSW` and every environment torque but gravity gradient off. Position enters in closed form (the orbit is exactly circular in 42's own `μ = 3.986004418e14`), so it is an independent input rather than a second numerical result | attitude **1.051e-6 rad** at *every* one of 42's four step sizes — its seven printed digits — against a **5.290e-4 rad** spread between 42's own coarsest and finest runs, a factor **503**. Rate **1.3e-8 rad/s**. 42's orbit against the closed-form circle **0.76 m** on a 6 778 137 m radius | tests/nasa42_oracle.rs, tools/gen_42_oracle.py |
+| earth | The inward geodetic normal (§4.19) | the ellipsoid's own normal at the geodetic point — the "down" a nadir-pointing attitude built on the local vertical holds, as against `−r/\|r\|` | its definition, `−(cos φ cos λ, cos φ sin λ, sin φ)`, formed with trigonometry rather than through the Vermeille reuse the implementation shares with `itrf_to_geodetic`; over both hemispheres and four decades of height | **< 1e-15 rad** (0.2 nas) from the definition and **< 1e-15** from unit length; height-independent to the same, which is what makes the axis a per-satellite hoist; the polar axis answers `∓ẑ` including for `−0.0`, and the geocentric lens is refused | crates/spacelab-earth/tests/geodetic\_nadir.rs |
+| earth | The deflection between the two nadirs (§4.19) | `atan(e²/(2√(1−e²)))` at the surface, at geodetic latitude `atan(1/√(1−e²))` — **not** at 45° | `derivations/nadir_deflection.mac`, which derives the closed form and checks it against a 0.001° sweep in the same run; then the location by scanning ±1° at 0.01° and finding nothing larger | **0.192 424 301 159 560°** to **1e-14**, at **45.096 2°**; at height **0.177 125°** (550 km), **0.173 366°** (700 km), **0.029 066°** (GEO), each to **1e-6 °** against the derivation's own sweep, and each below the one above it | crates/spacelab-earth/tests/geodetic\_nadir.rs |
+| sensors | A cone about an explicit boresight (§4.19) | `θ ≤ α ⟺ w·b̂ ≥ 0 ∧ (w·b̂)² ≥ cos²α (w·w)` — the same square-root-free predicate, with the `n2` that existed only to avoid normalising `r` gone | the arm it generalises: `Boresight::Fixed(−r/\|r\|)` against `GeocentricNadir`, over three orbits × four half-angles × four cells; then the batch kernel against the scalar predicate over a 121×121 grid straddling the cone edge | `covered` **exactly equal** in every case; `g` **1.863e-9 m** worst against a *derived* `4·\|r\|·ε` bound — the cancellation in the old form's `\|r\|² − c·r`, which is why the pointed arm is better conditioned as well as one multiply cheaper; kernel and scalar agree on **14 641** cells with the grid measured to straddle the edge | crates/spacelab-sensors/tests/boresight.rs |
+| sensors | The footprint the deflection moves (§4.19) | swapping the axis turns the cone by exactly the deflection | the two axes' separation against the derivation at 550 and 700 km, then the consequence: a geodetic cone opened by the deflection must contain every cell the geocentric cone does, and the un-opened one must not | axes **0.177 125°** / **0.173 366°** apart to **1e-6 °**; **1.70 km** of ground displacement at 550 km to **10 m**; opening by the deflection leaves **0** cells outside, not opening leaves **> 0** — so identical footprints fail the test rather than passing it | crates/spacelab-sensors/tests/boresight.rs |
+| sensors | The rate bound a turning boresight needs (§4.19) | the event search rests on `\|dg/dt\| ≤ max_rate`; a re-supplied geodetic axis turns faster than the geocentric one | `derivations/nadir_deflection.mac`: `d(φ′)/d(φ)` runs from `1−e²` at the equator to `1/(1−e²)` in the limit at the pole, so the factor is `1/(1−e²)`; checked against a sweep over latitude and seven heights in the same run | the sweep's worst **6.739 486e-3** against the analytic **6.739 497e-3** — under it, so the bound holds; the pointed cone's whole-bound ratio measured strictly inside **(1, 1.006 739 5)** | crates/spacelab-sensors/tests/boresight.rs |
+| coverage, sensors | An apparent elevation mask, converted once (§4.18) | a station's "visible above 10°" is an *apparent* elevation; `ElevationMask`/`ElevationDetector` measure the geometric one, and the two differ by 5.3′ at 10° and 34′ at the horizon | the identity the shift rests on, asserted rather than assumed: `h ↦ h + R(h)` swept at 0.001° from the fit's −1° floor to the zenith, 91 001 samples; then the mask against `Refraction::geometric` directly, and the two non-physical ends | strictly increasing at **every** sample; the mask equals `sin(geometric(mask))` **bit-for-bit**; refused below the horizon and refused at the zenith, where both published fits return a *negative* bend and the geometric mask lands 3.9e-7 rad past `π/2` | coverage/src/observability.rs |
+| coverage, sensors | The bias the conversion removes (§4.18) | the pass edge moves by `R(mask)/(dε/dt)`, so the *pass* sets the size as much as the atmosphere does | the ISS day `access_oracle.rs` validates against Orekit, with the shifted mask measured against refracting every sample | **0.81–1.18 s** at a 10° mask, **2.0–8.6 s** at 5°, **9.3–20.3 s** at the horizon, one-signed on every edge of every pass; the two routes agree to **< 6″** of elevation, which is the Sæmundsson/Bennett disagreement and not an approximation in the shift | spacelab/tests/refraction\_in\_access.rs |
+| capi, python | The conversion exists on every bridge (§4.18) | before this, neither bridge exposed refraction at all, so a Python or C caller could not correct the bias even knowing it was there | each bridge against the other's numbers and against the crate's: Bennett's 5.3′ at 10°, the round trip, both domain refusals, the null pointer | C and C++: bend **5.3′ ± 0.1′**, round trip **< 6″**, `SL_ERR_DOMAIN` below the horizon and on a non-positive pressure, `SL_ERR_INVALID_ARGUMENT` on a null out-pointer. Python: the same bend to **2e-2 ′**, `None` outside each domain, `ValueError` from the mask constructor — and the corrected mask measurably lengthens the coverage fraction | capi/tests/{c/smoke.c, cpp/smoke.cpp, cpp/nothrow.cpp}, python/tests/smoke.py |
+| slr | Mendes–Pavlis zenith delay | Mendes & Pavlis 2004, *GRL* **31** L14602; IERS Conventions (2010) ch. 9 | the IERS routine `FCULZD_HPA` itself, rebuilt by `tools/iers-oracle` with `gfortran -fdefault-real-8`, at its own published test point — McDonald Observatory, 2009 Aug 14, the 532 nm second harmonic | measured **1 / 4 / 0 ULP** on hydrostatic, non-hydrostatic and total, against a 4 ULP gate. The routine's *header comment* disagrees with its own code by **3.8 µm**, a constant ratio across all three outputs — the `f` gravity factor that divides them, stale in the IERS distribution's documentation. The compiled value is the oracle; a default `gfortran` build differs from the double one by 1.6e-12 m, six orders below the gap, so the build flag is not the cause | src/troposphere.rs |
+| slr | `FCUL_A` elevation mapping | Mendes et al. 2002, *GRL* **29**(10) 1414 | the same rebuilt routine at *its* published point (30.67° N, 2009 Aug 12, 15° elevation), which does agree with its own header | **0 ULP** — bit-exact against the compiled routine, against the same 4 ULP gate; exactly 1 at the zenith to **2 ULP** — the continued fraction collapsing to its own numerator, which is what makes a zenith delay a zenith delay; monotone over 5°–80° | src/troposphere.rs |
+| slr | Water-vapour pressure | the saturation and enhancement relations as IERS Conventions ch. 9 states them | an independent 60-digit evaluation of the same relations in `tools/gen_slr_vapour_oracle.mac`, at two points straddling the 273.15 K offset and at different pressures, so neither the Celsius term nor the enhancement factor can silently drop out | **16 ULP** asserted; measured **9 / 7 / 9 ULP**, worst at ISA sea level. The four extra bits over this file's usual 1 are the exponent's own: its terms are each an order above their sum (33.94 and −22.01 against ≈2.8), so `f64` gives up ~4 bits to cancellation before `exp` amplifies the remainder | src/troposphere.rs |
+| slr | Ocean tide loading displacement | IERS Conventions ch. 7.1.2; Scherneck's harmonic development, as implemented by `HARDISP` | the reference program's own published 24-hour series at Onsala and Reykjavik, 2009 June 25 0h UTC — Reykjavik included because its radial term reaches 3.8 cm against Onsala's 0.9 cm, so a proportional error shows an order more clearly | worst **4.915e-7 m** (Onsala) and **4.980e-7 m** (Reykjavik) over 72 published values each. The bound is the reference's `3F14.6` print resolution and nothing looser: a value it prints is defined to ±5e-7 m, so every digit it committed to is reproduced | src/loading.rs |
+| slr | Doodson arguments and the admittance spline | `HARDISP`'s `TDFRPH` and `ADMINT`; the Cartwright–Tayler–Edden 342-constituent table machine-read from `ADMINT.F` | the reference routine's frequency and phase at seventeen digits from `tools/iers-oracle`, for M2, K1, Ssa and S2 — S2 because its phase is exactly 720× the day fraction, so a wrong day fraction cannot hide in it | **0 ULP** on all eight values: the Delaunay polynomials are evaluated in the reference's Horner order, so the two produce the same bits. The cubic spline separately to **8 ULP** away from its knots, exact at them, and refusing to extrapolate past them | src/loading.rs, src/loading_tables.rs |
+| slr | Solid Earth tide station displacement | IERS Conventions ch. 7.1.1, `DEHANTTIDEINEL` | that routine's two published reference cases, 2009 Apr 13 and 2012 Jul 13 — the second twelve days past the 2012-07-01 leap second, so the leap count is written out per case rather than carried as one number (using 34 s there moves the answer by half a nanometre) | **< 1e-12 m** absolute, against a round-off floor of ≈1e-17 m on a decimetre — a picometre is four orders above the floor and eight below the effect | src/displacement.rs |
+| slr | Pole tide | IERS Conventions ch. 7.1.4 | each term isolated at a collapsed geometry, and the two properties the model is defined by: it vanishes at the secular pole and is linear in the wander | terms **8 ULP**; the vanishing **0 ULP**; the linearity **2 ULP**; centimetres for a realistic wander. The permanent tide is separately shown *not* restored — a station at the sub-solar longitude changes sign as the Sun crosses its meridian, which a leftover zero-frequency term forbids | src/displacement.rs |
+| slr | Two-way flight time, both legs solved | the pulse leaves at `t`, reflects at `t + τ_up`, returns at `t + τ_up + τ_down`; over LAGEOS's 0.08 s round trip the station moves ≈37 m and the satellite ≈300 km, so an instantaneous geometry is a kilometre-scale error rather than a small-angle one | a frozen geometry, where both legs must return the geometric distance; and a still station, where only its own motion can split them | frozen: legs identical to **0 ULP** and the range to **2 ULP** of 12 270 km; still station: legs **0 ULP** apart, and strictly ordered once it moves. The ephemeris gap, the non-convergent ephemeris and the iteration cap are each refused rather than extrapolated, and the convergence boundary is pinned at the step that only *equals* the tolerance | src/range.rs |
+| slr | Shapiro delay on the laser path | IERS Conventions ch. 11 | the magnitude that chapter states for a low-Earth-to-ground link, plus the two properties: monotone in path length, zero for coincident endpoints | 4–15 mm for a LAGEOS leg and monotone; exactly **0** (0 ULP) at zero separation | src/range.rs |
+| slr | SINEX station coordinates and eccentricities | IERS SINEX 2.02 — `SOLUTION/ESTIMATE`, `SOLUTION/EPOCHS`, `SITE/ECCENTRICITY` | two stations transcribed verbatim from `ITRF2020-ILRS-TRF.SNX`, one of them carrying the two solutions a station rebuild produces | positions and velocities **0 ULP**, the velocity-propagated position **2 ULP**. The multi-solution resolution by epoch, the tie on the latest span, the two-digit year pivoting at 50, the closed eccentricity span, the unbounded zero epoch and the truncated record dropped rather than indexed past are each pinned exactly | src/sinex.rs |
+| slr | ILRS Data Handling File | the Analysis Standing Committee's `MODEL/RANGE_BIAS`, `SOLUTION/ESTIMATE` and deletion blocks — what the network says to *apply* rather than to solve for | records taken verbatim from `ILRS_Data_Handling_File_20250513.snx`, one of each shape the file contains | exact: a bias is returned only for its own pad, target, wavelength and time span; a 532 nm bias does not reach the other colour; a station marked to be estimated yields no number at all; an unbounded start reaches back and not forward | src/dhf.rs |
+| slr | CRD normal points, BLQ loading tables | ILRS CRD v1 and v2 (`h2`/`h3`/`h4`/`c0`/`20`/`11` records); the BLQ block's Fortran `1X, 11F7.5` | published-shape excerpts of both CRD versions and a two-station BLQ table, with the `h4` flags saying which corrections the publisher already removed read rather than assumed | field-by-field equality on both versions; the whitespace-separated form accepted alongside the column-oriented one every generator actually writes | src/crd.rs, src/blq.rs |
+| astrometry | Plate fit against its own projection | gnomonic (TAN) projection with a SIP distortion polynomial, fitted by least squares | a synthetic 40-star field whose plate is known by construction, so the residual is rounding rather than misfit | rms **< 1e-12″**; recovered plate scale and rotation each **< 1e-12** relative to the imposed ones | tests/plate_solve.rs |
+| astrometry | SIP distortion absorbed only at the order that can represent it | Shupe et al. 2005 (SIP) | a radial cubic `u(u²+v²)` put in by hand and asked back — `u³ + uv²` is two order-3 monomials, so the cubic model contains the truth exactly and the linear model cannot | cubic rms **< 1e-8″**, both recovered coefficients within **1e-6** relative; the linear fit is left with **0.589″** rms and inflates the plate *scale* by > 0.5 %, which is the finding: an uncorrected distortion presents as a wrong scale, not as a bad fit | tests/plate_solve.rs |
+| astrometry | Blind solve — geometric hashing with no prior pointing | Lang et al. 2010 (astrometry.net) quad codes | the same stars listed in two different orders and projected about a tangent point **4 arcminutes** from the truth; every correspondence must come back the identity | ≥ 6 correspondences, all identities; the solved plate points **< 1″** from the true tangent point and recovers the scale to **1e-3**. The code is separately shown blind to rotation, scale and translation, canonically ordered independent of how the stars were listed, and refusing a quad whose inner stars fall outside the AB circle | tests/plate_solve.rs |
+| astrometry | Source detection and sub-pixel centroiding | connected components above `background + k σ`, flux-weighted first and second moments | five rendered Gaussians of known position and flux on a 128×128 frame, plus a hand-mottled background | centroid **< 0.05 px** from the source that made it; `position_sigma` brackets its own error at every source and falls with flux; a single hot pixel is not a source; a frame whose shape contradicts its pixel count is refused rather than indexed past | tests/plate_solve.rs |
+| astrometry | Plate covariance scaling | least squares: the variance of the fitted position falls as `1/n` and grows as `σ²` | 25 stars against 100, and 1× noise against 3× on the same scaled draws | a fourfold star count divides the variance by 2–8 (a realisation band, not an equality); a threefold noise multiplies it by **8.9969**. The 0.03 % is not rounding — the design matrix is built from the *measured* pixels, so the noise enters `(AᵀA)⁻¹` as well as the residuals, and asserting exactness would assert a fit against noiseless positions | tests/plate_solve.rs |
+| astrometry | Stellar aberration as the exact Lorentz map | the boost's action on the sphere, not the first-order `β` | the closed forms it must reproduce: `arctan(γβ)` square to the apex, nothing along it, and the IAU constant from `κ = 2πa/(cT√(1−e²))` with `a` the exact IAU 2012 au | perpendicular displacement **< 1e-18** rad against `arctan(γβ)`, parallel **< 1e-15**; the round trip exact rather than closed to an iteration tolerance, because the inverse is the boost by −β. **20.495514″** against the IAU 20.49552″, agreeing to **6.3e-6 arcsec**, which is gated at 1e-5 — the last digit the IAU value is published to, so asserting past it would assert someone else's rounding rather than this crate's arithmetic | tests/reduction.rs |
+| astrometry | Refraction on the observation path | Bennett 1982 (apparent → true) and Sæmundsson 1986 (true → apparent), through `spacelab-coverage`'s own fits | the published bend at 45°, `R = 1/tan(45° + 7.31/49.4°) = 59.69″`, and the classical 34.5′ at the horizon | **< 0.01″** at 45°, **< 0.3′** at the horizon, monotone from 1° to 89°; the azimuth untouched to **1e-15** and the direction bit-identical at the zenith. The round trip is asserted against `R_Sæm(h) − R_Ben(h + R_Sæm(h))` to **1e-15** rather than against a tolerance — so it fails on a wrong plane or a wrong amount, and not merely because two published fits disagree, which they are entitled to do | tests/reduction.rs |
+| astrometry | The composed reduction, pixel to true direction | streak endpoints each with their own epoch, then refraction, then aberration | the band the two corrections bound — 50.1″ of Bennett refraction at 50° altitude against at most 20.5″ of aberration — and the inverse taken in the opposite order | the reduction moves the direction inside **[28″, 70″]**, a band a dropped correction falls out of at either end; the inverse closes to **< 1″**, all of it the two refraction fits; epoch and covariance pass through unchanged by `assert_eq!`, and a target below the horizon has no ray to unbend | tests/reduction.rs |
+| astrometry | Diurnal aberration against an independent implementation | ERFA `ab` — the SOFA lineage, which shares no code with this crate — with the solar light-bending term suppressed (`s = 1e12` au drives its `w2 = SRS/s` to 2e-20), so the comparison is two implementations of one formula rather than two models | 5 stations from the equator to 78° × 4 directions each, `ω × r` in ITRF; the generator is `tools/gen_aberration_oracle.py` | worst separation from ERFA **6.206e-17 rad** (1.3e-11″) over all 20 pairs, against the ticket's 1 mas gate. **465.101 m/s** and **0.320″** at the equator, **381.926 m/s** and **0.262 775″** at 34.9°, **97.011 m/s** at 78°. A direction along the motion does not move: two of the five stations give ERFA's exact 0.0 and the other three ~1e-11″, which is one ULP of a unit vector and is why the fixture is gated at 1e-9″ rather than at equality | tests/aberration_erfa.rs |
+| astrometry, capi, python | Aberration reachable from C and from Python | the crate's own `Aberration`, exposed as `sl_diurnal_velocity` / `sl_aberration_apply` / `sl_aberration_remove` and their three Python twins | the same ERFA fixture row from the bridge rather than from Rust, plus the two refusals a bridge can be asked for: a velocity at `c` and a direction of zero length | the Python bridge lands **< 1e-15 rad** from ERFA at the 34.9° station and reads **0.262 775″**; the C ladder is 12/12 across C99–C23 and C++20–C++26, throwing and non-throwing, both `-fshort-enums` lanes. `SL_ERR_DOMAIN` at the speed of light and `SL_ERR_INVALID_ARGUMENT` for a zero-length direction, in both wrappers | crates/spacelab-capi/tests/{c/smoke.c, cpp/smoke.cpp, cpp/nothrow.cpp}, crates/spacelab-python/tests/smoke.py |
+| astrometry | The units a mutation run named (24 tests) | each helper's own documented contract — row-major bounded indexing, the even-length median branch, the RA wrap past zero, the detection cut's `+` against `×`, the inverse map's per-axis convergence | a value computed by hand or by an expression written independently of the one under test. These exist because the two end-to-end files say the *chain* is right without saying every piece of it is, and `cargo mutants` found exactly where the difference lay | exact where the contract is exact: the median's straddling pair, the pixel exactly at the cut counted as below it, the hand-worked quad code. A source whose signal underflows reports an infinite position error rather than a NaN | tests/units.rs |
+
+*`estimation` is strongest where it counts — conjunction Pc pinned to NASA CARA / Chan / Alfano
+published values, UKF to in-repo STT and Gauss–Hermite — with the filters cross-validated against each
+other (SR-UKF ≡ SR-Kalman ≡ SRIF) and the Lie/attitude filters on group axioms + Monte-Carlo NEES.
+`sensors`'s geometric core is anchored to two independent CAS derivations and SaVi; the bulk is
+exhaustive property/contract verification over hundreds of thousands of geometries plus an adversarial
+cull search, and its instrument catalogue and direct sensor model are anchored to pyorbital run as an
+oracle — one ulp on the scan angles, 1.1 mm on the ground point, both attributed rather than tolerated
+(§4.6). `coverage` is externally anchored (PARI/GP root oracle + Orekit conformance) above
+closed-form pass geometry. `constellation` matches published geometry (Draim patent, Walker, Mozhaev
+A₅) with every continuity claim confirmed by Fibonacci-sphere coverage oracles. `grid` is H3-spec +
+integration wiring. `control` is the newest and the least externally anchored: its attitude laws are
+checked against the analytic response and a Lyapunov function measured along the trajectory rather
+than argued from the derivation, and its delayed integration against an exact closed form that Maxima
+proved solves the equation. What it does not yet have is a like-for-like run through Basilisk or 42,
+which is a ticket of its own behind a licence gate — so nothing here claims parity with either. Its delay margin is the one control result with
+two independent legs — a CAS elimination and a bisection on an integrated DDE, agreeing to 1.9e-7
+(§4.13). The orbit-control side is anchored the same way: the LQR against Maxima's closed-loop spectrum
+(7.2e-13) rather than against its own residual, the Gauss variational matrix against a measured impulse
+(7.5e-10) rather than against the algebra again, and the station-keeping run against the analytic
+drag-makeup floor (0.9999) rather than a published budget — which is a deliberate refusal, argued in
+§4.14. The formation leg is the one place a *published* result is the oracle: Olfati-Saber & Murray's
+critical delay, re-derived in Maxima and then measured on 24 random connected graphs, agreeing to
+9.537e-8 — and it produced two findings the bound does not state, that the bound belongs to the
+protocol rather than to the link, and that it buys convergence and not clearance (§4.15). `slr` and
+`astrometry` sit at the two ends of the measurement path and are anchored oppositely: `slr` reproduces
+four IERS reference programs at their own published test points, to four ULP or better, while
+`astrometry` has no reference program to reproduce and is pinned instead against closed forms and
+synthetic truth it cannot have inherited — a plate known by construction, a distortion put in by hand
+and asked back, and a blind solve given no pointing at all (§4.17).*
+
+---
+
+### 4.1 A χ² innovation gate can lock a filter out, and only one diagnostic catches it
+
+`tests/robust_estimation.rs` compares five estimators on the same contaminated tracking arc — 100 runs
+× 300 steps × 3 axes per cell, every estimator seeing byte-identical data. RMS position error in
+metres, contamination by `±20σ` outliers:
+
+|  | 0 % | 1 % | 5 % | 20 % |
+|---|---|---|---|---|
+| plain Kalman | 4.41 | 9.96 | 20.14 | 37.84 |
+| χ² gate, 3σ | 4.51 | **931.97** | **1644.27** | **1894.05** |
+| χ² inflation, 3σ | 4.42 | 6.09 | 14.45 | 74.47 |
+| Huber, c = 1.345 | 4.48 | 5.92 | 11.58 | 22.29 |
+| Student-t, n = 5 | 4.52 | 5.86 | 11.53 | 22.73 |
+
+The gate — the textbook first thing to reach for — is two orders of magnitude worse than doing
+nothing at 1 % contamination. The mechanism, from the measurement rather than from theory:
+
+1. RMS 932 m. The state drifts unchecked for the whole arc.
+2. 299 of 300 steps rejected every observation on that axis.
+3. Every innovation exceeded `3√f`, because the state was already biased by an outlier taken earlier.
+4. That outlier was accepted because it arrived while `P₀` was still loose — `√f ≈ 100 m`, so the 3σ
+   gate was 300 m wide and a 200 m outlier walked through it.
+
+**The gate's width scales with the filter's own confidence, so it is widest exactly when the filter is
+least able to judge, and once a bad update is taken the same mechanism that should catch the error
+instead protects it.**
+
+Three ways of monitoring a filter were measured against this, and two of them miss it outright:
+
+| diagnostic | locked-out gate | plain filter | catches it? |
+|---|---|---|---|
+| rejection rate at 5 % contamination | 7.4 % | — | no — expected 5.3 % |
+| NEES at 1 % contamination | 17.2 | 23.6 | **no — ranks the broken filter as healthier** |
+| longest rejection run | 299 | 0 | yes |
+
+NEES fails because a state drifting linearly under a covariance growing quadratically stays
+superficially calibrated while the error runs away. `RobustTally::longest_rejection_run` exists
+because of this measurement, and it is a *per-stream* statistic: pooling the three axes into one tally
+turns the run of 299 into a run of 14, because the other two axes keep breaking it.
+
+Two further results from the same experiment, both of which contradict what the influence functions
+predict:
+
+* **Huber is the best of the five under contamination despite having the only unbounded influence
+  function** (`|ν|^{1/3}`). Resisting one bad observation is not the problem; recovering from a bad
+  *state* is, and an estimator that refuses to move for a large innovation refuses to move at all.
+  The redescending policies — the gate absolutely, inflation in slow motion — fail for that reason.
+* **Robustness buys almost nothing against outliers it cannot see.** Repeating the 20 % cell with
+  `3.5σ` outliers: plain 7.97 m, Huber 7.47 m, Student-t 7.74 m, inflation 8.00 m. The same rule that
+  discounts the corruption discounts the clean tail alongside it.
+
+The measured cost on clean data — where the plain Kalman filter is, correctly, the best of the five —
+is 0.11 % for inflation, 1.39 % for Huber, 2.19 % for the gate and 2.43 % for the Student-t, in RMS.
+
+#### 4.1.1 The same ranking, inverted — and what decides which way it points
+
+`tests/robust_vector_estimation.rs` repeats the comparison on a vector-measurement filter: a
+`MultiplicativeEkf` observing two catalogue directions a second at `σ = 1e-4 rad` (20.6″), 40 runs ×
+300 steps × 2 stars = 24 000 vector updates per cell, contaminated by wrong-star matches that rotate
+the measured direction by 5° (870σ). Attitude RMS in arcseconds, NEES against six degrees of freedom,
+and the longest unbroken run of rejections within one arc on one star:
+
+|  | 0 % | 1 % | 5 % | 20 % | NEES @ 20 % | run @ 20 % |
+|---|---|---|---|---|---|---|
+| plain MEKF | 26.3 | 1186.6 | 2523.8 | 5170.3 | 118004.8 | 0 |
+| χ² gate, 3σ | 26.5 | **27.3** | **28.6** | **53.3** | 5.9 | 5 |
+| χ² inflation, 3σ | 26.3 | 60.2 | 60.8 | 612.3 | 66.7 | 0 |
+| Huber, c = 1.345 | 26.4 | 130.5 | 144.8 | 660.0 | 229.4 | 0 |
+| Student-t, n = 5 | 26.9 | 42.2 | 43.8 | 507.5 | 28.4 | 0 |
+
+**Same policies, same code, opposite order.** The gate — worst by two orders of magnitude in §4.1 — is
+here the best by an order of magnitude, and the influence-function ordering is obeyed to the letter.
+The two tables are reconciled by one quantity, and it is not the measurement dimension: it is whether
+the process noise can undo a bad update. In §4.1 the only thing that could re-widen a covariance the
+gate had collapsed was `Q` per step, and it was far too small; here `σ_v² dt = 1e-8 rad²` per second
+*is* the steady-state variance, so a filter that has just taken a bad update is back to a gate several
+σ wide within a few steps — longest rejection run 5, against 299 there.
+
+**So the influence function ranks robust policies correctly exactly when the process noise can undo a
+mistake, and backwards when it cannot.** That is the thing to check before choosing a policy for a new
+filter, and neither file could have found it alone.
+
+Two controls, because one arc cannot separate three explanations:
+
+* **Outlier magnitude, not dimension, decides the ranking.** Repeating the 20 % cell at a 3′
+  near-neighbour mismatch (8.7σ) instead of 5° (870σ), changing nothing else: plain 57.6″, gate
+  767.9″, inflation 49.4″, Huber 46.4″, Student-t 41.2″. The gate is 13× worse than doing nothing and
+  the two M-estimators are the best two — §4.1's conclusion, reproduced on this filter by moving one
+  parameter. An outlier the gate cannot cleanly separate from the bulk is one it starves the filter to
+  reject.
+* **The gate does not need an outlier to lock out.** The same arc started from a coarse 2.9° attitude
+  with **zero contamination**: plain settles at 37.3″, the gate at **16 368″**, rejecting 62.7 % of all
+  observations with a run covering the entire 300-step arc. A MEKF started far from truth is
+  transiently overconfident — `Φ = I + F dt` under-predicts how fast a large error rotates, so the
+  covariance contracts before the error does, and measured NEES over the first 30 steps is 61 against
+  6. The gate reads that as contamination.
+
+That last one sharpens §4.1: **the gate needs only a stretch in which the filter's own covariance is
+wrong, and acquisition is exactly that.** Unlike the scalar case NEES does flag it here — 28.3 against
+11.6 — but `longest_rejection_run` flags it first and unambiguously, which is why that statistic is
+per-stream on every vector entry point too.
+
+Clean-data efficiency loss is 0.76 % for the gate, 0.00 % for inflation, 0.38 % for Huber and 2.28 %
+for the Student-t — smaller than the scalar arc's 1.4–2.4 % for three of the four, because `δ²` is
+χ²(3) and its relative spread is narrower, so a threshold calibrated on the tail clips less of the
+bulk.
+
+One approximation is deliberate and its direction is measured. For a vector observation
+`S = HPHᵀ + R/w`, and unless `HPHᵀ` and `R` share eigenvectors no scalar `w` reproduces the Mahalanobis
+norm — the scalar fixed point of §4.1 becomes a matrix equation with no closed form. `RobustPolicy::
+variance_scale` therefore uses the standard one-step form (Chang 2014): measure `δ² = νᵀS⁻¹ν` once
+against the *nominal* `S`, and scale from there. It discounts **harder** than the fixed point it
+approximates, never more softly, because it standardises against the smaller nominal variance — Huber
+at `δ² = 4` gives `R_eff` scale `0.7434944237918216` against the fixed point's `0.6834451288127696`.
+Weights are formed on `δ̄ = √(δ²/d)` so that `c = 1.345` keeps its scalar meaning at every dimension:
+`E[δ²] = d`, and weighting on `√δ²` would down-weight two thirds of clean 3-vector data.
+
+### 4.2 A fixed-lag smoother needs a long lag exactly where the dynamics are well modelled
+
+The textbook motivation for fixed-lag smoothing assumes a manoeuvring target, and the lag it implies
+is short. Measured on a six-state constant-velocity arc with position observations, sweeping the
+unmodelled acceleration `q`, the fraction of the *fixed-interval* gain each lag captures in reported
+position sigma:
+
+| lag | 0 | 1 | 2 | 3 | 5 | 10 | 20 | 40 | RTS |
+|---|---|---|---|---|---|---|---|---|---|
+| q = 1e-4, σ (m) | 4.486 | 4.330 | 4.183 | 4.043 | 3.787 | 3.253 | 2.528 | 1.858 | 1.705 |
+| — of RTS | 0 % | 5.6 % | 10.9 % | 15.9 % | 25.2 % | 44.3 % | 70.4 % | 94.5 % | 100 % |
+| q = 3e-1, σ (m) | 14.976 | 10.528 | 10.380 | 10.295 | 10.158 | 10.154 | 10.154 | 10.154 | 10.154 |
+| — of RTS | 0 % | 92.2 % | 95.3 % | 97.1 % | 99.9 % | 100 % | 100 % | 100 % | 100 % |
+
+The smoother gain `C = P⁺ΦᵀP⁻⁻¹` decays at the rate the filter forgets, and a filter with almost no
+process noise never forgets. **For precise orbit determination on a well-modelled arc a short-lag
+smoother is close to pointless — use the fixed-interval pass.** Fixed-lag earns its latency where the
+dynamics are poorly known.
+
+Two methodological notes, both of which produced a wrong answer before they were fixed:
+
+* **Every lag must be scored on identical epochs.** A lag-`L` smoother cannot report an epoch before
+  `L`, so scoring each lag over "whatever it can reach" compares different sub-arcs. It read as lag 40
+  beating the fixed-interval limit by 1.4 %, which is impossible.
+* **The ordering assertion belongs on σ, not on the sampled RMS.** In a linear-Gaussian model the
+  covariance does not depend on the data, so "more future is never worse" is arithmetic in σ and
+  merely statistical in RMS — and at `q = 3e-1` the lag-5 and fixed-interval estimators agree to five
+  figures, so their sampled RMS crosses by parts in a million.
+
+### 4.3 A convex hull can be right as a surface and wrong as a vertex set
+
+`spacelab-geometry`'s own tests check the defining properties: every input point behind every face,
+every directed edge matched by its twin, `V − E + F = 2`. A 3×3×3 grid of points passed all of them
+with **26 vertices**. qhull's answer is **8**.
+
+Both surfaces are the same cube. The disagreement is about what a vertex is, and the incremental
+construction's blind spot is exact: a point extreme when it is inserted can stop being extreme later,
+and when it does, the faces it carries are *coplanar* with the new point rather than in front of it.
+Coplanar is not visible, so those faces are never deleted, and the point stays on the surface as the
+apex of a sliver. Insert `(0,0,2)` after `(0,0,0)` and `(0,0,1)` and the middle point is left sitting
+on a hull edge with two slivers attached. On gridded data — the DSM and point-cloud inputs this crate
+exists for — that is the common case, not a curiosity.
+
+The fix is a pass that re-triangulates each maximal coplanar group of faces from the 2-D hull of its
+own points, which is exactly what a facet is: the intersection of the body with a supporting plane,
+hence convex, hence determined by its extreme points. Two things make it safe to do exactly — the
+coplanarity test is `orient3d == 0` against the group's *seed* plane, so it cannot drift along a chain
+of nearly-coplanar neighbours, and the 2-D hull inside the facet is the same exact predicate.
+
+The property tests could not have found this. They ask whether the surface is a hull; they do not ask
+whether it is the *smallest* description of one, and no invariant internal to the crate distinguishes
+26 vertices from 8. It took a second implementation with a different convention to make the question
+visible at all — which is the argument for cross-checking against an oracle even where the defining
+predicate is already tested.
+
+### 4.4 The exact path was never taken
+
+Each predicate runs a floating-point filter and falls back to expansion arithmetic only when the
+filter cannot certify the sign. The tests the module shipped with — a turn, a cocircular unit square,
+2000 anti-symmetry checks on a coarse integer grid — never made that fallback *matter*. On integer
+coordinates a determinant is either exactly zero, and then the exact path and a mutant that always
+answers "collinear" agree, or of order one, and then no error bound is in question.
+
+The seal put a number on it: **41 of the 74 survivors were in `predicates.rs`**, and they included
+`in_circle_exact -> 0`, `orient3d_exact -> 0`, and `scale`, `lift`, `minor3`, `minor3d` each replaced
+by `Default::default()`. The exact half of the module — the half the crate's headline claim is about —
+could be deleted and every test still passed.
+
+What closes it is a fixture whose answer is known in closed form *inside* the regime the filter
+abstains on. Three of them: the published grid `(0.5 + i·2⁻⁵³, 0.5 + j·2⁻⁵³)` against the line through
+`(12, 12)` and `(24, 24)`, whose determinant is exactly `12·2⁻⁵³·(j − i)`; the circumcircle of the unit
+square with its fourth point stepped one ulp at a time; and the plane `x + y + z = 1.5` against points
+`i, j, k` ulps off its centre, determinant `2.25·2⁻⁵³·(i + j + k)`. The first also counts how often the
+naive `f64` determinant disagrees and fails if that count reaches zero — a fixture for a fallback has
+to prove it is still reaching the fallback, or it decays into another test of the filter.
+
+The same measurement explains the filter's error bound. Mutating it in the generous direction sends
+more inputs down the exact path and cannot change an answer; mutating it in the tight direction is a
+wrong sign *only* on inputs whose determinant is near its own rounding error. Both are invisible until
+the suite contains such an input, which is the same gap stated in the other direction.
+
+### 4.5 The error bound was scaled by the cancellation it existed to survive
+
+Closing the survivors above needed an input the closed-form fixtures cannot supply: one where the
+naive `f64` determinant is not merely *zero* where the answer is not, but *nonzero with the wrong
+sign*. A coarse grid cannot produce one. When the coordinate differences are exactly representable,
+the two products the determinant subtracts are roundings of two reals, and rounding is monotone — so
+`fl(left) ≥ fl(right)` whenever `left ≥ right`, and the naive sign can only collapse to zero, never
+flip. The failure mode the filter is built for needs coordinates whose *differences* round too, which
+means full mantissas, which means sampling rather than a grid.
+
+The sample found the bound was wrong. Over 300 000 near-coplanar configurations, `orient3d` certified
+a sign the exact path contradicted **37 times** — not a test gap, a wrong answer returned by the
+public entry point. The cause is one substitution. The bound multiplied the tolerance by
+`|adx·(bdy·cdz − bdz·cdy)| + …`, the magnitudes of the determinant's own terms; but the rounding
+committed while forming `bdy·cdz − bdz·cdy` is proportional to `|bdy·cdz| + |bdz·cdy|`, which survives
+the cancellation the bracket does not. On a near-degenerate input the bracket cancels to nearly
+nothing, the estimate collapses with it, and the error does not. The estimate has to be the
+**permanent** — the same expression with every subtraction replaced by an addition and every factor by
+its absolute value (Shewchuk 1997, §4.3):
+
+```text
+(|bdy·cdz| + |bdz·cdy|)·|adx| + (|bdz·cdx| + |bdx·cdz|)·|ady| + (|bdx·cdy| + |bdy·cdx|)·|adz|
+```
+
+With it the same 300 000 samples certify nothing the exact path denies. `in_circle` had the identical
+structure — its `bc`, `ca`, `ab` are the same cancelling 2×2 minors — and no counterexample turned up
+for it in 300 000 samples, which is a sampling result and not a proof; it is fixed with the same
+permanent. `orient2d` never had the defect: its two terms are elementary products with nothing inside
+them to cancel.
+
+The order matters more than the fix. The mutation survivors were the symptom — 32 of them, every one
+on the bound, all saying the same thing in different words: *nothing here depends on this number*. The
+input that killed them is the input that showed the number was wrong.
+
+What the fix costs in mutation score is worth stating too, because it goes the wrong way: the
+permanent has six products where the old estimate had three, so the block has more operators to mutate
+after the fix than before. Most of the residue is one class. The tolerance is `64·f64::EPSILON`, and
+the first filter stage needs `(3 + 16ε)ε`, `(10 + 96ε)ε` and `(7 + 56ε)ε` for the three predicates
+(Shewchuk 1997, with his `ε = 2⁻⁵³`) — 1.5, 5 and 3.5 in the same units, so guaranteed margins of
+**42.7×, 12.8× and 18.3×**. Measured over 100 000 near-degenerate configurations each, the largest
+error actually committed was 0.94, 1.56 and 1.26 of those units: inside the guarantee, and leaving a
+margin of 68×, 41× and 51× on the inputs that come closest to needing it. Perturbing one term of a
+non-negative six-term sum inside that margin changes which path is taken and nothing else, and no
+assertion on the answer can see it. Removing the margin would make those mutants visible and the
+predicate less safe; the module's doc comment says the trade is taken in one direction on purpose, and
+that is what it means in practice.
+
+The exception is the two mutants that replace an outer `+` between groups with `*`. A product of two
+groups is not homogeneous in the configuration's scale — it goes as the eighth power where the sum
+goes as the fourth — so it collapses far below the margin at small scales, and separately where one
+group is much smaller than the others. Both are caught by sampling the overall scale over `2^±26` and
+crowding two of the points to within `2⁻³⁰` of each other in half the samples, which is the regime a
+mesh is in constantly and a uniform sample never reaches.
+
+### 4.6 A port fails by transcription, so it needs an oracle more than an original does
+
+`spacelab-sensors`' scan catalogue and direct sensor model are ports of pyorbital's. The failure mode
+of a port is not wrong physics — it is one sign, one index, one factor typed wrong, which is invisible
+to inspection and obvious to a comparison. So there are **two fixtures rather than one end-to-end
+residual**: the catalogue alone, with no orbit and no ellipsoid in the loop, and the geometry alone,
+on state vectors pyorbital exported. A single number would let a mistyped scan angle hide inside a
+geolocation difference, and a geolocation difference hide inside a difference between two SGP4s.
+
+Three of pyorbital's conventions are not the ones a reader would assume, and each would have produced
+a port that agreed with nothing:
+
+* **`qrotate` turns the other way.** Its quaternion-to-matrix form is the transpose of the usual one,
+  so `qrotate(v, axis, θ)` is a rotation by *−θ* in the right-hand sense. Measured, not read: `x̂`
+  about `ẑ` by +90° comes back as `−ŷ`. A port that used the textbook sign would mirror every swath
+  about the ground track and still look plausible in a plot.
+* **Its nadir is a third thing.** Not `−r/‖r‖`, and not the inward geodetic vertical, but
+  `−subpoint(r)/‖subpoint(r)‖`. At 45° geodetic latitude and 800 km altitude that is 0.0215° from the
+  geocentric nadir (0.300 km on the ground) and 0.1924° from the geodetic vertical (2.69 km), with the
+  geocentric nadir sitting exactly between the two — 0.0215 + 0.1709 = 0.1924. Either "obvious"
+  choice is a kilometre-scale error dressed as a rounding difference.
+* **`scan_points` means two different things.** For nine instruments it selects samples; for `olci`
+  and `slstr_nadir` it is read as a *count* and the swath is re-interpolated across it, so passing a
+  subset silently changes the angles rather than picking them. The oracle generator builds those two
+  whole and slices afterwards; getting it backwards yields a fixture that agrees with nothing.
+
+The residual that remains is 1.1 mm, and it is worth saying whose it is. pyorbital uses **two
+ellipsoids in one computation** — GRS80's semi-minor axis in `subpoint`, WGS-84's in the ray
+intersection — and stops its geodetic-latitude iteration at `np.allclose`'s default `rtol = 1e-5`.
+Holding one difference and varying the other: the axis swap moves the boresight by 1.04e-12 rad, 0.9
+**micro**metres at an 830 km nadir range; the convergence moves it by 2.86e-10 rad, 0.24 mm there and
+1.8 mm inside the subpoint itself. The second dominates by three hundred to one, and it is
+pyorbital's — this port runs the iteration to the `f64` fixed point. So the 5 mm gate is a bound on a
+*known* pair of differences rather than a tolerance chosen to pass.
+
+Measuring that attribution needed one method change. The first attempt took `arccos(n₁ · n₂)` and
+reported nonzero offsets for a vector against itself: `arccos` near 1 has a noise floor of
+`√(2·ulp)` ≈ 2.1e-8 rad, seventeen millimetres at that range, so it cannot see the angle it was asked
+about. Chord length `‖n₁ − n₂‖` resolves 1.04e-12 rad cleanly. An instrument that cannot resolve the
+effect will report the effect as zero and look like agreement.
+
+### 4.7 Four fits verified against each other share whatever they got from the same atmosphere
+
+#279 shipped the optical-observability module with its published fits checked against *one another*:
+Kasten & Young (1989) and Young (1994) are independent fits in different arguments — apparent
+altitude against true zenith angle — joined through Sæmundsson (1986) refraction, which neither of
+them used, and they agree to 6e-3 at the horizon. That is a real cross-check, and it has one blind
+spot it cannot close from the inside: all four were fitted to the same atmosphere, so an error they
+share is invisible to any comparison between them.
+
+`tools/gen_airmass_oracle.py` computes both quantities instead of fitting them. The density is the
+U.S. Standard Atmosphere 1976's seven hydrostatic layers evaluated from the standard's own constants,
+the refractive index is Gladstone–Dale on that density, and the path is the spherical ray invariant
+`n r sin ψ = const`. Two quadratures, no fit and no table anywhere:
+
+```
+X(z) = ∫ ρ ds / ∫ ρ dr|zenith,   ds/dr = [1 − (n₀ r₀ sin z / n r)²]^(−1/2)
+R(z) = −∫ (1/n)(dn/dr) tan ψ dr
+```
+
+**The verdict splits, and that is the whole value of the exercise.** The air-mass fits are confirmed
+from outside: Kasten & Young to 0.63 % at the apparent horizon and 0.16 % everywhere above 0.5°,
+Young 1994 to 0.05 % wherever it is defined and 8e-6 at 80°, which no comparison between the two
+could have shown because there they differ by the sum of their errors and neither is the reference.
+The half-degree of refracted visibility Young 1994 discards is now priced rather than estimated: at
+the apparent horizon the true altitude is −0.548° and the ray carries **38.16** air masses, which is
+the "38" its doc comment had quoted from the other fit.
+
+**The refraction fits are not confirmed.** Both run high at every altitude — Sæmundsson +0.43 % to
++4.79 %, Bennett +0.58 % to +3.27 % — with the minimum at 2°–3° and the maximum at 40°–50°, and at
+90° both return a *negative* refraction. What makes that theirs rather than the integration's is a
+control that needs no atmosphere model at all: above about 20° altitude refraction is `(n₀ − 1) tan z`
+and nothing else, and the integrated ray reproduces Ciddor's sea-level refractivity to 0.13 % there.
+The ray geometry and the density profile are not what produce the gap. Neither fit is implemented
+wrongly; both are horizon-optimised and neither was meant for the zenith. In absolute terms it is
+2.3″ and 1.4″ at 50° altitude and 47″ and 65″ at the horizon — irrelevant to the air mass, which uses
+refraction only to change arguments, and not irrelevant to astrometry. The module now says so.
+
+The oracle reports the two choices it cannot make for itself instead of burying them: the Earth
+radius, worth 38.109 / 38.159 / 38.184 air masses at the horizon across the geopotential / mean /
+equatorial spread, and the truncation at 86 km, worth 4.090e-6 of the column.
+
+**The hour angle needed a different kind of independence.** `diurnal_arc` solves one spherical
+triangle, and `spacelab-coverage` owns neither a time system nor a solar ephemeris — nor should it
+grow either for a test. `tools/gen_twilight_oracle.py` puts both in the generator: astropy bisects
+for the instant the Sun's geometric altitude crosses each threshold and then reads `(H, δ)` off its
+own `HADec` frame *at that instant*, so nothing in the fixture comes from the formula under test.
+Both frames need UT1 and the generator runs with IERS auto-download off, which is up to 0.9 s of
+rotation — but that error moves *which UTC* is called sunset, not the `(H, δ, h)` triple at a given
+instant, so taking both at one instant cancels it exactly. The fixture carries no times for that
+reason.
+
+The expected residual was the Sun's 8.79″ of diurnal parallax, since astropy answers for an observer
+on the ellipsoid and `diurnal_arc` for one at the geocentre. Measured, it is **2.4e-7″** over 74
+crossings, which is the root-finder's `xtol` and not a physical quantity — because `HADec` → `AltAz`
+is one rotation by `90° − φ` and the triangle `diurnal_arc` solves is that rotation inverted, so the
+parallax is already spent inside astropy's topocentric `(H, δ)` and cannot reappear. The gate is
+1e-5″ rather than the arcseconds the first draft allowed for: at arcseconds it would have passed a
+formula with a wrong term in it. Where a real rise-time error would come from is the solar ephemeris,
+the conversion from `δ` to a clock time, and the choice of `h₀` — none of them this crate's, which is
+the point of it not owning a time system.
+
+**What is still open, and why it is not a tolerance question.** The photometric gate — Krisciunas &
+Schaefer's own published test cases, and a CASTOR-style end-to-end from a real observing campaign —
+needs measured sky brightness at named times, sites and lunar geometries. #279 verified the model's
+*internal* calibration (`I*(α)/I*(0)` reproduces the published lunar phase law to 1e-12) and its
+regime behaviour, and that is not the same claim: it says the equations were transcribed correctly,
+not that they predict a sky anyone has measured. The data exists in the literature and behind
+observatory archives; it is not in this repo and cannot be generated by a script. **Until it is, the
+detectability gate is a model rather than a validated model**, and this paragraph is the record of
+that rather than a gap the tables imply is closed.
+
+### 4.8 The measurement geometry is instantaneous, and the size of that is not a rounding
+
+`measurement.rs` forms every observable from one state, one station and one instant. Light does not:
+it left the satellite a transit time before it arrived, so what an instrument reads belongs to where
+the satellite *was*. `spacelab/tests/light_time_in_measurements.rs` measures the difference on the
+ISS day `access_oracle.rs` validates against Orekit, in TEME rather than ITRF — a light-time
+iteration in a rotating frame carries the frame's rotation during the transit as a fictitious term,
+worth about 1.5 m here, which is the same size as the effect.
+
+| Quantity | At the horizon | At the day's 47.8° peak | Mechanism, and the residual against it |
+|---|---|---|---|
+| Range | **−51.8 m** | −0.68 m | `(v_sat · ρ̂) τ`, to **5.9e-4 m** |
+| Line of sight | 4.83″ | 5.29″ | `v_⊥ / c`, to **3.3e-5″** |
+| Diurnal aberration | 0.262″ at every elevation — the station's own 381.4 m/s over `c` | | |
+
+Three things in that table are worth more than their numbers.
+
+**The range term takes the satellite's own radial speed, not the relative one.** Light time moves the
+satellite back to where it emitted and leaves the observer where the observation happened, so the
+station's motion is not part of it. Reaching for the relative range rate instead — which is what
+`measurement::range_rate` computes, and therefore the obvious reach — is wrong by **2.6 m** here,
+about a hundred normal points of SLR. The test asserts both: 5.9e-4 m against the right mechanism and
+more than a metre against the wrong one, so it fails if the two are ever conflated.
+
+**The angular term does not depend on the range.** The satellite moves `v τ` while the station is
+`ρ = c τ` away, so the angle is `v_⊥ τ / ρ = v_⊥ / c` and the range cancels. The first draft of this
+file asserted that the lag peaks overhead, where the angular rate is largest; the measurement refuted
+it — 4.83″ on the horizon against 5.29″ at the peak, a 9 % spread over a pass that changes range by a
+factor of four. It is bounded by the orbital speed and by nothing about the geometry.
+
+**The aberration is diurnal, and the annual term is absent for a reason worth stating.** Aberration
+is frame-dependent: what enters is the observer's velocity with respect to the frame the directions
+are in. In a geocentric frame the station and the satellite share the Earth's barycentric velocity,
+so the 20.5″ that §11.1 removed from `AnalyticSun` cancels here and what is left is Earth rotation.
+The analogy with the Sun — a distant body, which does carry the annual term — was the error, and it
+survived into a ticket before the measurement caught it.
+
+**What is closed and what is not.** `light_time::down_leg` solves for the emission epoch and is
+sealed by its own unit tests (convergence boundary, ephemeris gap behind the reception epoch,
+non-termination, exhausted budget). The observables are unchanged and still instantaneous: the error
+is a *choice of epoch*, not a missing term, so a caller who propagates to `transit.emit` gets the
+right answer from the functions as they stand. What no code does yet is make that choice for them.
+The SLR two-way solver was deliberately not folded into this one — its up leg holds the station fixed
+and its down leg starts from the up leg's answer, and both iterates are pinned to the ulp by tests
+written against ILRS normal points, so sharing an iteration would change a verified number to save
+nine lines. The 8-day normal-point fit is unchanged at +0.37 cm bias and 2.47 cm RMS.
+
+### 4.9 A gap list read off the competitor is only half a gap list
+
+The 2026 review against Orekit 13.1.7 named maximum-`Pc` as a missing conjunction capability. It has
+been there since #92: `EncounterPlane::probability_max` maximises `probability_foster` over 50
+decades of isotropic covariance scaling by a coarse scan and a golden-section refine, with a test
+asserting it dominates a sweep of rescalings. The review had read "Foster + Chan + Patera + Alfriend"
+out of a grep and matched "Alfriend" to Orekit's `Alfriend1999Max` *class name* rather than to the
+method already implemented. Reading the competitor's API surface finds what they have; only reading
+our own finds what we do not.
+
+Reading ours found something better. `conjunction.rs` takes a relative state and a combined
+covariance **at TCA**. Nothing in the workspace found a TCA — the module was a back end whose entry
+point had to arrive from outside, and in practice arrived by hand-transcription from a CDM.
+`screening.rs` closes that:
+
+- **The minimum is a sign change, not an optimisation.** With `f = ½|Δr|²`, `f' = Δr · Δv`, so every
+  closest approach is a zero of `Δr · Δv` going negative to positive. A maximum is the same zero with
+  the other sign and is discarded by *direction* rather than by comparing distances afterwards. That
+  makes it a bracketed root find, which cannot converge to the wrong kind of stationary point.
+- **Bisection, deliberately, over a secant or Brent step.** Cost is `ceil(log2(step/tolerance))`
+  evaluations per approach — 26 for a 60 s step to a microsecond — with no dependence on the
+  function's behaviour. A superlinear step is fewer evaluations on a smooth pair and unbounded on a
+  pathological one, and a screening run's cost has to be predictable.
+- **The oracle shares no code with the search**, which took a second pass to become true. 200 000
+  samples of `|Δr|` itself against a root find on its derivative, counts equal and each TCA inside
+  the dense scan's own resolution. The first draft asserted the independence and did not have it:
+  the oracle called `norm`, `norm` is `sqrt(dot(a, a))`, and `dot` is the one function the search
+  evaluates — a wrong inner product would have moved both sides together. The separation is now
+  written out separately in the test module.
+
+Two things the tests record rather than defend against. A step too coarse to separate two minima
+reports one, and `a_step_too_coarse_to_resolve_two_minima_reports_one` pins that: no sampled scan can
+bound what it did not sample, and a test asserting otherwise would be asserting something false. And
+the geometry needed for a scan-based test is not free — two circular orbits 40 km apart beat against
+each other over **7.9 days**, so a span short enough to sample at 30 s contains no minimum at all.
+The first draft of the test used exactly that pair and found nothing. The 500 km pair in the file is
+chosen for its 59 000 s beat period and for no other reason, and the radial filter is checked against
+the closed form `|r₂ − r₁|` instead of a scan for the same reason — at a 1 km altitude difference the
+beat is 315 days.
+
+**What the seal found: three findings, none of them a missing assertion.** It took four runs to get
+there — a first one that was interrupted before it finished, and then the three blocks §8 ledgers as
+`seal-screening`, `reseal-screening` and `reseal2-screening`. The first two findings below are the
+interrupted run's, which is why no ledgered block shows them: they were fixed before the block was
+restarted, and a partial run is not a verdict.
+
+- **Two survivors in `dot`, both in the third component.** Every geometry in the file was planar, so
+  `Δr_z` and `Δv_z` were identically zero and `a[2] * b[2]` could be replaced by `a[2] + b[2]`
+  without moving an assertion. The fix is a geometry, not a unit test of a private helper: a second
+  object in a plane inclined 63.4°, because a screen is handed real orbits and no two of them share
+  a plane. That test also carries the `norm`/`dot` independence above — it compares the reported
+  distance against the separation computed the other way, at the search's own epoch.
+- **Two in the argument guard, which is a design finding.** `closest_approaches` returned `()`, which
+  made *a rejected argument* and *a clean sky* the same observable: every mutation that stopped a
+  guard rejecting produced a scan that emitted nothing, which is exactly what the correct code
+  produced. That is the one failure mode a screen cannot have, because "no conjunctions" is the
+  answer a caller acts on by doing nothing. It now returns `ScreeningError`, one variant per
+  argument and carrying the offending value, and each guard became independently observable.
+- **Then the first fix produced a *timeout*, which is the third finding and the largest.** The guard
+  written to reject a step too small to advance the clock was itself a single comparison the loop's
+  termination depended on — invert it and the scan runs forever, so the test that proved it
+  terminates is the test that hung. Two structural changes, and the file is now free of that shape:
+  the scan is **indexed** (`start + i·step` over a count fixed before the first sample, rather than
+  `t += step` compared against `end`), which removes the drift as well — 2.9e6 accumulations in one
+  day at 30 s — and the refinement is a **counted loop** with its own ceiling rather than two exit
+  tests and a hope. Where a bound was still needed it is a `clamp`, not a comparison: a bound one
+  wrong operator can delete is not a bound, and the comparison that remains only decides what to
+  *report*. This is the fifth time the repo has met the same shape — #221 through #224 and #290 are
+  the others — and each time the answer was the same: a loop a mutation can hang is a defect in the
+  loop, not in the tests.
+
+Three of the five refinement survivors died to one test that had been missing on its own merits: the
+module argues for bisection over a superlinear step *because* the cost is `ceil(log2(step/tolerance))`
+evaluations and nothing else, and nothing asserted that. It does now, on a bracket where every
+midpoint is a power of two — `[0, 8]` at a 1 s tolerance is three halvings to `[2, 3]` and an answer
+of exactly 2.5 s in six evaluations. A termination test that halves once more, or one that halves
+until `f64` runs out, changes both numbers.
+
+The last survivor is a small lesson about where to put a constant. The scan's sample ceiling was
+first written at 1e8 — a defensible number, and one no test can stand on, because the accepting side
+of the boundary costs 1e8 evaluations to demonstrate. `>` against `>=` there is exactly the
+difference between refusing the largest legal scan and running it, and it survived on cost alone. The
+ceiling is 1e6 now — eleven days at a one-second step, or a year at thirty, past any screening window
+— chosen so that a test can run *at* it and one sample past it. **A limit no test can reach is a
+limit nothing has checked the sense of.**
+
+**What is deferred, with the reason.** `Alfano2005` and `Laas2015` remain unimplemented. They are
+further quadratures of an integral four methods already agree on to 1e-8, and to 3e-4 against the
+published CARA values, so a fifth buys a cross-check the suite has. `Laas2015`'s distinguishing
+feature is a computable truncation bound, which the other four lack and which would be worth having;
+we do not hold Serra et al. 2016, and deriving the recurrence in-repo while claiming its citation
+would be a provenance failure of exactly the kind §"Specification source vs oracle" exists to
+prevent.
+
+### 4.10 The Pc oracle rested on a transcription, and a transcription is not a measurement
+
+`alfano_cara_cases_reproduce_published_reference` is this repo's primary collision-probability
+oracle: ten real conjunctions, each a relative state and two 3×3 RTN covariances, against published
+`Pc` values. Every one of those numbers — 210 covariance entries and 60 state components — was
+**copied by hand** out of the NASA CARA sample messages. That is a strong test resting on a weak
+step. A digit lost in a low-order position moves `Pc` by less than the 3·10⁻⁴ the test allows, and
+nothing anywhere would say so.
+
+`crates/spacelab-estimation/tests/cara_cdm_ingest.rs` takes the hand out of it. It parses the eleven
+messages with `spacelab_ndm::parse_cdm`, rebuilds each geometry from what the file says, and holds
+the result to the same references at the same tolerance. Worst relative error over the ten cases:
+**2.28e-4** (case 8), against the transcribed table's own worst of 2.28e-4 — the same number, which
+is the point. The reader and the transcription now pass or fail together.
+
+Three things the files could say that the transcription could not.
+
+- **The prose claim about case 10 is now a check.** `conjunction.rs` states that CARA case 10
+  duplicates case 9 and then omits it, which is an assertion about data nobody could see. The two
+  messages differ in exactly seven lines — the message id, and three identifiers per object; every
+  epoch, state and covariance entry is bit-identical. The omission is a fact about the suite, not a
+  hole in the coverage.
+- **`COMMENT HBR` is checked rather than read.** CDM 1.0 has no hard-body-radius keyword, so CARA
+  writes it into a comment. The test lists the radius each published `Pc` was computed at and asserts
+  the file agrees — reading it without asserting it would make the test agree with whatever
+  convention the producer happened to use.
+- **These are operational messages, not annex examples.** They carry `NaN` in eleven optional
+  keywords, a comment containing an `=` that is not the radius, and `[m]` on `RELATIVE_VELOCITY_*`
+  where the standard says `[m/s]`. Each is a way a stricter reader fails on a file the industry
+  nonetheless sends. The last one is why units are stripped and never read: honouring a disagreeing
+  unit is how a metre becomes a metre per second.
+
+**The data is fetched, never vendored.** `nasa/CARA_Analysis_Tools` ships four NASA Open Source
+Agreement documents and no LICENSE; NOSA is OSI-approved and not permissive, and this workspace is
+heading for a permissive release. `tools/fetch-cara-cdms.sh` pulls the eleven files into an ignored
+directory, refuses anything not opening with `CCSDS_CDM_VERS`, and writes a manifest carrying URL,
+licence, digest and size. The test skips cleanly when the directory is absent — which is why the
+transcribed table stays where it is. It is the leg of the oracle that survives a checkout with no
+network. The reference probabilities themselves are quoted, because a number published in a paper
+(Alfano 2009) is a fact and not an expressive work.
+
+### 4.11 The rectilinear model reads a rotation as a separation rate, and is wrong by exactly three
+
+§4.10's oracle says `conjunction.rs` computes the right number for its own model. It says nothing
+about when that model applies, and NASA's CARA programme has measured that: on 1.79 M real
+conjunctions the 2-D method's assumptions fail on **5.3 %** (Hall, Baars and Casali, AAS/AIAA
+Astrodynamics Specialist Conference, August 2023, NTRS 20230010175). `conjunction_domain.rs` is the
+paper's detector — four checks, of which the fourth compares the Mahalanobis distance along the
+rectilinear trajectory against the same quantity along the real one.
+
+Verifying a detector is harder than verifying a probability, because there is no published number to
+land on: CARA's own statistics are over data nobody outside it has. What the module has instead is a
+case where the answer is exactly known.
+
+Put two objects on coplanar circular orbits 300 m apart in radius. The along-track drift rate is
+`√(r₁r₂)|n₁ − n₂|`; the *inertial* relative speed — all a rectilinear extrapolation from TCA has —
+is `|v₁ − v₂|`. With `n = √μ r^{−3/2}` and `v = √μ r^{−1/2}`, writing `a = r₁^{−1/2}` and
+`b = r₂^{−1/2}`, the ratio is
+
+```text
+(a³ − b³) / (ab(a − b)) = a/b + 1 + b/a
+```
+
+which is **3** up to `O((δ/r)²)`. At TCA the separation is purely radial and the relative velocity
+purely transverse, so almost all of that 16 cm/s is rotation rather than separation — and the
+straight line through TCA therefore leaves the covariance three times too slowly, predicts an
+encounter three times too long, and inflates `Pc` by three. The correction factor has a closed form
+and it is `1/3`.
+
+Measured: `F_c = 0.333333333334331`, **3.0·10⁻¹²** relative. The curvilinear width sits `1.5·10⁻¹⁰`
+from `σ/(√(r₁r₂)|Δn|)`, and that residual is `Δθ²/24` at the width — the small-angle truncation of
+the *comparison formula*, not of the search. The two second-order terms have opposite signs and very
+nearly cancel in the ratio, which is why `F_c` lands two decades closer than either width does. The
+same file's crossing case, two circular orbits at right angles closing at 10.7 km/s, registers
+`V_e = 6.7·10⁻⁵` and `V_i = 6.1·10⁻¹⁰` and is not flagged — the 94.7 % regime, behaving.
+
+Two things this does not claim. The paper's curvilinear covariance is the *effective* one from Hall's
+iterative re-centring (2021); the module asks the caller for the plainly propagated covariance, and
+what that substitution costs `F_c` is not measured here. And both samplers in the two-body file hold
+the covariance frozen, varying only the mean trajectory — which is deliberately half of what the
+paper varies, and makes the test conservative rather than generous: every flag it raises is raised by
+geometry alone.
+
+The rest is arithmetic held to its own definitions — the quadratic against a direct adjugate-inverse
+form to `<1e-12`, the duration constant `2√2·erfc⁻¹(10⁻⁶) = 9.783276951397180772…` recomputed in
+Maxima at 40 digits rather than transcribed from the paper's "≈ 9.8", and the two thresholds stood on
+from both sides. **Licence: NASA Open Source Agreement.** `nasa/CARA_Analysis_Tools` was not read for
+this; the paper was, and the paper is a paper.
+
+### 4.12 Four deep-space observables, and the one thing all of them share
+
+`measurement.rs` and `multistatic.rs` compute geometry. A DSN station does not report geometry. It
+reports **range units** — a phase count of the ranging code, scaled by the uplink carrier and wrapped
+at a power of two — and a **Doppler count** averaged over a compression interval against a reference
+frequency the receiver was configured with. Both are integrals of the *transmitter* frequency over an
+interval the orbit itself sets, and the transmitter is ramped. `radiometric.rs` is that algebra
+(Moyer 2000, JPL DESCANSO Monograph 2, §13.3), plus the **measured frequency**, which is the same
+link sampled instantaneously rather than counted, plus the two things a deep-space arc needs beside
+them: ΔDOR, which carries plane-of-sky information the others cannot, and the solar-corona delay,
+which is the largest unmodelled term in any of them near a superior conjunction.
+
+**The oracle for the ramp table is Tudat's own unit test, and it earned its place before a line of
+test code was written.** `unitTestTransmittingFrequencies.cpp` publishes five integrals over a
+four-segment table as hand-formed trapezoids, and six frequencies read off the segments by hand. The
+table is deliberately discontinuous — it steps 14 → 5 Hz at `t = 5`, 13 → 10 at `t = 9`, 11 → 2 at
+`t = 10` — and Tudat's own comment on `t = 5` says "start frequency of the 1st ramp". Checking that
+comment against the lookup as first written exposed a real defect: the interval was closed at both
+ends, so `find` resolved a shared boundary to the segment that had just *ended*. Two consequences,
+and the second is worse than the first — the frequency at `t = 5` came back 14 instead of 5, and the
+integration walk, which advances its cursor to a segment's `end`, resolved that cursor back to the
+segment it had just finished and **never advanced again**. The lookup is now half-open, `[start,
+end)`, with the final `end` as the one closed endpoint, and both consequences are one fix because
+they were one cause.
+
+Moyer's turnaround ratios and the range-conversion factor are compared against his own fractions
+rather than against decimals: nine explicit `numerator/denominator` pairs for the ratios, and
+`1/2`, `221/1498`, `221/7198` for the conversion, all bit-exact. The conversion is written in the
+code as the single expression `221/2d` — Tudat carries it as three separate constants, which is what
+lets two of three drift apart from the third.
+
+**The measured frequency has no external oracle and does not need one: it has an exact identity
+against the observable it complements.** Over a flat exciter, with the receiver referred to the same
+band and frequency, `averaged_doppler + measured_frequency = M·f_reference` — the count is what the
+carrier lost against the reference, the measured frequency is what it kept. Neither function knows
+about the other, so the sum landing on `M·f_reference` checks the turnaround ratio, the sign
+convention and the count-interval scaling in one assertion, and it does so at three transmitter-time
+rates (**residual < 1e-3 Hz on terms of 8.4e9 Hz**, i.e. rel < 1.2e-13). What that identity cannot
+see is the ramp, so it is checked separately: on Tudat's own discontinuous table the frequency at
+`t = 7` is the *second* ramp extrapolated, `5 + 2(7−5) = 9`, and the partial in the transmission
+epoch is the ramp rate times the ratio, both to **1e-12**. The two bands are the same type and the
+ratio is not symmetric, so swapping them is a silent change of answer rather than a compile error —
+asserted rather than assumed.
+
+**The corona's closed form was verified in Maxima before it was implemented, and against a different
+variable afterwards.** Verma et al. (2013) eq. A.4 turns each `c (r/R☉)^-k` term into
+`c R☉^k p^(1−k) ∫cos^(k−2)θ dθ` under `r = p/cos θ`. That substitution was re-derived and checked
+against `quad_qags` in arc length at `k = 2, 3, 4, 6` — relative residual **0.0** at the first three
+and **1.6e-16** at `k = 6` — and the `k = 2` full-pass limit `πR☉²/p` recovered symbolically from
+both sides. The in-repo test then compares the module's own evaluation against composite Simpson
+along the line of sight, at 10 R☉ impact parameter on a station-to-spacecraft geometry with real
+magnitudes in it: **rel < 1e-8 at all five exponents**, including the non-integer 2.7 that no exact
+recursion reaches.
+
+Two bounds make that closed form safe, and neither is a tolerance. The integration limits are
+`α − π/2` and `β + α − π/2`; because the triangle Sun–receiver–transmitter has angles summing to `π`,
+the upper limit is `π/2 − γ` and both are *strictly* inside `(−π/2, π/2)`. The integrand is therefore
+never evaluated at its singularity, and that is a proof rather than a guard. The one guard that does
+exist refuses a line of sight whose perpendicular distance from the Sun is under one solar radius:
+that distance is the path's own closest approach when the perpendicular foot lies between the
+endpoints, and a lower bound on it otherwise.
+
+**Where this exceeds the reference rather than matching it:** Tudat evaluates non-integer exponents
+with 50-point Gauss–Legendre *along the line*, where the integrand is sharply peaked; this uses
+tanh–sinh in `θ`, which is the rule built for the endpoint singularity a fractional power produces.
+The step is measured, not chosen — against a 40-digit reference for `∫cos⁵` over `[-1.55, 1.55]`, the
+widest bounds the module can produce, `h = 1/8` converges to **4.2e-12** relative and `h = 1/16` to
+**1.3e-26**, past what `f64` carries. The first was enough for the corona model and *not* enough to
+agree with the exact recursion, and a quadrature that disagrees with the exact path is a quadrature
+that cannot check it. The two paths now agree to **< 1e-14** at every integer order over four
+intervals, which is the module's own cross-check and needs no external reference at all.
+
+The `h = 1/8` rule was found by that cross-check and so was a second defect: the tanh–sinh sum was
+missing its step factor, and every non-integer exponent came out exactly `1/h = 8` times too large.
+It is the kind of error a plausibility check never sees — the delay was still tens of metres, still
+positive, still `1/f²` — and only a comparison against an independently-correct path exposes.
+
+**ΔDOR is verified against its own limit rather than against a number.** `ΔDOR → B·(ŝ_q − ŝ_sc)/c`
+as the spacecraft recedes: the code forms it from two finite ranges, the test forms it from two plane
+waves on the Goldstone–Canberra baseline, and they agree to **< 1e-3** relative at 1e14 m — the
+residual being the wavefront curvature itself, which is physics rather than error. The companion
+check puts the spacecraft in the quasar's exact direction and asserts the *rate*: the residual falls
+as `1/range`, measured **4.00 ± 0.01** between 1e11 and 4e11 m. Asserting a tolerance there would
+only have been a statement about the range that happened to be picked — and at 1e13/4e13 m the same
+assertion measures `f64` cancellation instead, returning **4.13**: the two ranges are ~4e13 m and
+differ by ~1e7 m, so `ulp` is 8.9e-3 m against a curvature term of 0.129 m, and barely one and a
+half digits of the quantity under test survive the subtraction.
+
+**What is deliberately not here.** `Modifier` from `modifier.rs` cannot carry the corona correction:
+`Modifier::delta` returns a value, not a `Result`, and there is no correct thing for it to return
+when the line of sight passes inside the Sun. Returning zero would be a silent lie and returning NaN
+would propagate one. The correction is a fallible free function instead, and a caller who wants it in
+a chain wraps it after establishing the geometry clears the photosphere — which puts the decision
+where the information is. That is a real limitation of the #313 layer, recorded rather than papered
+over.
+
+**Licence.** Tudat 1.0 is BSD-3-Clause, so it is readable as both a reference and a competitor.
+Nothing was copied: the constants come from Moyer's table 13-1, the closed form from Verma et al.,
+the coefficients from Aksim & Pavlov (2022), and the ramp fixture is Tudat's *test data*, which is
+the part of a test suite that is a statement of fact about the specification.
+
+### 4.13 The delay a loop survives is 12 times the budget, and that is not the reassuring half of the sentence
+
+`Latency` has existed since the loop did, and until now there was nothing to compare it against. The
+delay margin is that number: the largest sensor-to-actuator latency at which the closed loop still
+returns to its reference. `derivations/delay_margin.mac` derives it — set `lam = j w` in
+`J lam^2 + (kw lam + kt) exp(-lam tau) = 0`, eliminate `tau` by resultant against `c^2 + s^2 = 1`, and
+what is left factors as `kt^2 (kw^2 w^2 + kt^2)(J^2 w^4 - kw^2 w^2 - kt^2)`, whose quartic gives
+
+```
+w_c^2 = (kw^2 + sqrt(kw^4 + 4 J^2 kt^2)) / (2 J^2)        tau_max = atan2(kw w_c, kt) / w_c
+```
+
+For a 12U cubesat — smallest principal moment 0.20 kg m², control bandwidth 0.10 rad/s, critically
+damped, so `K = 4.0e-3 N m/rad` and `P = 4.0e-2 N m s/rad` — the margin is **6.474 s**, against a
+worst-case budget of 0.55 s (0.25 s star-tracker integration + 0.10 s processing + 0.20 s wheel
+command lag). That is **11.8x**, and it is the reason this ticket does not end in a new force model:
+at that bandwidth, latency is not what limits the loop.
+
+Three things stop that from being a licence to ignore delay.
+
+**The margin scales as `1/w_n`, so it is spent on bandwidth.** `tau_max w_n` is fixed by the damping
+ratio alone, which turns the 11.8x into a single number with units: on a 0.55 s budget the loop goes
+unstable at `w_n = 1.177 rad/s`. A fine-pointing imager asking for a 1 Hz control bandwidth is past
+it. The comfortable answer above and the uncomfortable one here are the same measurement read in the
+two directions, and only quoting the first would be the more useful half omitted.
+
+**More damping is not safer.** `tau_max w_n` **peaks at `zeta = 0.6394`** with **0.7415**, against
+**0.6474** at critical damping — 14.5 % more margin at *less* damping, because past that point the
+rate term's own phase lag under delay costs more than the damping buys. Undamped, the margin is
+exactly zero: any delay at all destabilises a marginally-stable second-order loop, and that falls out
+of the same `atan2` rather than being special-cased.
+
+**The linearised gain is not the law's gain.** Wie's quaternion PD has `q_v -> dtheta/2`, so
+`kt = K/2`; the Schaub-Junkins MRP law has `sigma -> dtheta/4`, so `kt = K/4`. Using `K` where the
+loop wants `K/2` misstates the margin by `sqrt(2)`. `SmallAngleGains` is implemented next to each law
+rather than at the call site for exactly that reason, and is a separate trait from `ControlLaw`
+because a saturating or bang-bang law has no such linearisation and should not be made to advertise
+one.
+
+The second verification leg is deliberately not more algebra. The same closed loop is integrated as a
+delay differential equation through the method-of-steps driver, and the crossing is found by bisecting
+on the sign of the log-amplitude slope over the last half of a 15-cycle run — decay below, growth
+above. It lands at **0.647409080 s** against the closed form's **0.647409203 s**, relative
+**1.907e-7**, which is the bisection bracket's own resolution. A wrong branch of the quartic or a sign
+error in the phase recovery would have put the analytic answer somewhere the trajectory was plainly
+still decaying.
+
+---
+
+### 4.14 A ground-track hold costs exactly the drag makeup, and the 5x overspend was in the estimator
+
+The ticket that opened this asked for Δv/year against published station-keeping budgets, and that is
+not what is reported here. A published budget is a number for *somebody else's* spacecraft, ballistic
+coefficient, altitude and solar activity, and comparing against a half-remembered one would be the
+specification-source-versus-oracle confusion §4.9 and #217 exist to prevent. The bar used instead is
+analytic and exact. For a near-circular orbit the Gauss equation for the semi-major axis is
+`ȧ = 2a_t/n`, so holding `a` against drag costs
+
+```
+Δv_hold = ∫|a_drag| dt = (n/2) |Δa_drag|
+```
+
+and those two expressions are computed from the same run by routes that share nothing: the first
+integrates the drag force the plant evaluated, the second reads the semi-major-axis decay off the
+uncontrolled trajectory. They agree to **2.237e-3**, which is the discretisation of the 60 s control
+grid, and either one is the smallest Δv any controller can spend. A hold that costs *less* is a bug in
+the plant; a hold that costs much more is a bug in the loop. That is a sharper bar than a literature
+value, not a weaker one, and it is the reason the number below is worth stating.
+
+The scenario is solved rather than chosen: a 46-revolution / 3-nodal-day repeat that is also
+Sun-synchronous, from `k(ω⊕ − Ω̇) = m·n_draconitic` and `Ω̇ = 2π/tropical year`, by alternating
+one-dimensional secant steps — they converge because the coupling between the two conditions is
+`O(J₂)`. That lands at **a = 6837.976 km** (459.8 km altitude), **i = 97.2508°**, residuals
+**−4.337e-19** and **−7.941e-23 rad/s**. NRLMSISE-00 is live at F10.7 = 150 and Ap = 4 with
+`C_d A/m = 0.02 m²/kg`, and the density is evaluated at *geodetic* altitude through Vermeille's closed
+form, because the ellipsoid is worth up to 21 km of altitude and a third of a scale height is a 40 %
+error in density. Over three days the loop commands **0.206429 m/s** against a drag makeup of
+**0.206459 m/s** — **ratio 0.9999**, or **25.13 m/s per year**.
+
+**The first attempt cost 5.13x that, and the law was not at fault.** Closing on the osculating
+semi-major axis is obviously wrong — `J₂` swings it by **19.0 km** peak-to-peak every revolution here
+— so the loop closes on mean elements, recovered by the fixed point `mean = osculating − Δ_sp(mean)`
+over the DSST's zonal short-period series, which converges geometrically because `|∂Δ_sp/∂œ| = O(J₂)`.
+That series is first order in `J₂`. It removes **99.76 %** of the swing and leaves a **±22.6 m
+ripple** at the orbital frequency, where the gain that balances drag settles at a **2.2 m** offset. A
+proportional law spends Δv in proportion to the error it is *shown*, so it bought the ripple instead
+of the disturbance. The excess was not a tuning failure and could not have been tuned away: lowering
+the gain scales the response to the ripple and to the drag equally.
+
+The fix belongs at the producer. The error is averaged over exactly one nodal period before the law
+sees it — a boxcar of that width is a comb filter whose first zero sits on the orbital frequency and
+whose later zeros sit on its harmonics, which is the entire spectrum of what the truncation left. It is
+also what an operational station-keeping loop does, and for the same reason.
+
+**Averaging is a delay, and the delay is what now limits the loop.** A moving average of width `W`
+delays by `W/2`, and a first-order loop `ẋ = −k x(t−τ)` goes unstable at `τ_max = π/(2k)` — set
+`λ = jω` and the crossing condition is `cos ωτ = 0` with `ω = k`. This is the first-order sibling of
+§4.13's second-order margin, arrived at from the opposite direction: there the margin was 12x the
+budget and irrelevant, here it is the binding constraint. Half a nodal period is 2817 s, so
+`k < 5.6e-4 s⁻¹`; the effective loop gain `c·w_a·(2/n)²` is **1.28e-4 s⁻¹**, **4.3x** inside it. The
+tracking requirement never entered the choice.
+
+What that gain leaves is a **−11.10 m** standing offset — the semi-major axis settles where the
+commanded thrust equals the drag, which is what makes the ratio approach 1 from below rather than
+overshoot it. It is not removable by more gain, because the delay margin caps the gain, and it is not
+removable by this law at all: integral action is a different law, not a different constant. Its cost
+is along-track. `λ̇ ≈ n(a)` gives `Δs = −(3/2) n ∫δa dt + a ∫B_λ·u dt`, so a standing `δa` is a
+*linearly growing* phase error — **9218.6 m** over three days held, against **88656.2 m** free, and
+**0.56 km** of equatorial ground-track drift against **5.40 km**.
+
+That relation is checked, and checking it produced the last correction. The held run missed it by 90 %
+while the free run matched to 5 %. The first hypothesis — that the thrust's direct `λ` term explained
+the difference — is **wrong**, and the run reports why: the `λ` row's tangential entry is
+`≈ −2·pos/A = 2.6e-4 s` against the `a` row's `2/n ≈ 1790 s`, and `pos·v̂ ≈ 0` on a near-circular
+orbit, so the term measures **0.00 m** in both runs. The actual cause is common-mode: both runs are
+differenced against a reference longitude built from first-order `J₂` secular rates, which is short by
+`O(J₂²) ≈ 10⁻⁶` of `n` — **4187.5 m** free and **4364.6 m** held over three days. Differencing the two
+runs removes it exactly, and the check closes at **2.224e-3**. An absolute comparison would have
+needed a second-order theory to say anything; the differential one needs none, and is the stronger
+statement about the *controller* because the reference error is not the controller's.
+
+Two things this does not claim. The **25.13 m/s per year** is proportional to the modelled density,
+so it is a statement about NRLMSISE-00 at the stated space weather as much as about the loop — §10.2
+measures that model against GRACE-FO and Swarm and the bias there transfers here directly. The
+**ratio** to the floor is what is model-independent, because both sides of it move together with the
+density. The station-keeping loop specifically has not been run against
+Basilisk or 42 and claims no parity with either; §4.16 does that for the *attitude* pillar, and an
+orbit-control scenario in both is not part of it.
+
+---
+
+### 4.15 The published delay bound is a property of the protocol, and measuring it needs the right mode
+
+The result this ticket set out to check is sharp enough to be refutable: for a fixed connected
+undirected graph with a uniform link delay, `ẋ = −L x(t−τ)` reaches consensus if and only if
+
+```
+τ < π / (2 λ_max(L))
+```
+
+(Olfati-Saber & Murray, IEEE TAC **49**(9), 2004). An if-and-only-if with an equality case is a better
+oracle than a tolerance, because it says what must happen on *both* sides of the threshold. It is
+re-derived in `derivations/consensus_delay.mac` rather than quoted — `L` is symmetric, so an orthogonal
+change of basis leaves `n` scalar equations `ẏ = −λ y(t−τ)`, and eliminating `τ` against `c² + s² = 1`
+leaves `λ²(w − λ)(w + λ)`, whose only positive root is `w = λ`. The pair is then substituted back into
+the **transcendental** equation and not into the rearrangement, where it gives **0.0b0** at 40 digits.
+`τ_max λ_max = π/2` symbolically, for every graph and every weighting: a formation buys delay margin
+only by lowering the gain that produces `λ_max`, and that slows consensus by the same factor.
+
+**The ticket's own protocol is not the one the bound covers, and it has no bound at all.** The law
+written in the plan is `u_i = −Σ_j K_ij [x_i(t) − x_j(t−τ_ij)]` — each agent knows *its own* state now
+and its neighbour's as of `τ` ago, which is what an inter-satellite link actually delivers. That is
+`ẋ = −D x(t) + A x(t−τ)`, not `ẋ = −L x(t−τ)`, and the two are the same system only at `τ = 0`. A
+crossing at `s = jω` would need `(jωI + D)v = e^{−jωτ} A v`, hence `1 ≤ ‖(jωI + D)⁻¹A‖_∞`; the inverse
+is diagonal, so that norm is `maxᵢ dᵢ/√(ω² + dᵢ²)`, which is strictly below 1 for every `ω ≠ 0`
+whatever the degrees, the weights or the delay. There is no crossing. Measured on the same 24 graphs
+with the same starting disagreements at **100×** the other protocol's bound, it still converges —
+worst reduction **×2.72e-5** over 500 delays — while `DelayedRelative` blows up by at least **×1.06e93**
+over 60. The bound everyone quotes is a property of *what is delayed*, not of *how long*.
+
+**Measure the mode, not the norm.** The first version of the ensemble leg bisected on the decay rate of
+the aggregate disagreement `‖x − x̄1‖` and landed **6.5 % above** the bound on every one of the 24 draws
+— identically, which is the signature of a systematic error rather than integration noise. The
+aggregate is a sum over all `n − 1` non-consensus modes, and only the `λ_max` one crosses; the others
+are still decaying fast at the crossing, so the norm keeps falling while the mode that matters is
+already neutral. At exactly `τ_max` the aggregate slope reads **−2.8e-4** where the `λ_max` mode's is
+**−1.1e-14**. The fix is to project onto the eigenvector — which needed `jacobi_symmetric` made public,
+the layering note below — and to envelope it as `hypot(y(t), y(t−τ))`, because `ωτ = π/2` at the
+crossing makes the lagged value the exact quadrature component of a marginally stable oscillation.
+Worst relative gap over the ensemble then falls from **6.5e-2** to **9.537e-8**, which is the
+bisection's own bracket resolution: the bound is exact to everything the measurement can resolve, over
+graphs whose `λ_max/λ₂` reaches **15.38**.
+
+**Two more ways the measurement lied, both fixed at the observable rather than the tolerance.** The
+delay-tolerant protocol appeared to *diverge* on draw 6 — a fitted slope of **+8.166e-5** — and the
+number was identical at tolerances 1e-12 and 1e-14, so it was not the integrator. The disagreement
+collapses from 1.41 to **4.65e-7** by about 20 delays, a transient cancellation null, then rises to
+~1.8e-5 before decaying to **6.16e-9** by 2000 delays. A slope fitted across the null measures the
+recovery from it. Replacing the slope with a reduction ratio `‖x(T)‖/‖x(0)‖` over 500 delays removes
+the question of *where* the window sits. Separately, the 3-D leg passed for the wrong reason: on a
+four-satellite ring `λ_max` belongs to `(1, −1, 1, −1)/2`, and the slot-swap initial condition
+`(1, 0, −1, 0)` is **orthogonal** to it, so the growing mode was never excited and "above the bound it
+must grow" was being tested on a system in which nothing could grow. Seeded from the eigenvector
+instead, the 12-state ring measures **19.634956 s** against the scalar **19.634954 s**, rel
+**9.537e-8** — `L ⊗ I₃` has the scalar spectrum with multiplicity three, and that is now measured
+rather than asserted. A bound test whose initial condition misses the mode measures the initial
+condition.
+
+**The bound governs convergence and buys no clearance.** The obvious operational question — does a
+formation with more delay margin fly further apart during a reconfiguration — is answered *no*, and
+reported as a negative result rather than dropped. Satellites 0 and 2 swap slots 141 m apart, biased
+10 m out of plane, on a 4-ring at 0.02 /s where `τ_max = 19.635 s`. Sweeping the delay from 10 % to
+99 % of that, the closest approach moves from **9.975 m** to **10.044 m** — a **0.69 %** spread with no
+monotone trend — and `Pc`, read from the conjunction machinery rather than a separation check written
+for the test, stays at **3.6972e-3** to five digits. The reason is structural: the swap's clearance is
+set by the out-of-plane bias, which is a property of the *trajectory design*, and consensus only ever
+closes the gap it was given. A delay margin is a statement about whether the formation converges, not
+about what it does on the way. Nothing in the published bound claims otherwise; it is worth measuring
+because the operational reading of "stable at this delay" quietly assumes it does.
+
+Two notes on what this cost elsewhere. The eigensolver is `jacobi_symmetric`, which existed for the
+reduced-order density model's POD and was private; it is now re-exported at
+`spacelab_propagation`'s root, so **`spacelab-control` depends on `spacelab-propagation` for linear
+algebra**. That is the layering question the plan asked to be stated rather than silently accepted:
+the alternative was a second Jacobi rotation with its own tests, and one tested eigensolver in an
+odd crate is a smaller defect than two. And the graphs are random but not arbitrary — 24 connected
+draws on 6 agents from a pinned seed, so the ensemble is reproducible and the worst case is a worst
+case over a stated population, not over all graphs.
+
+---
+
+### 4.16 Two simulators agree with the pillar; what they disagree about is *when* the right-hand side is sampled
+
+The control pillar was the one pillar in this workspace with no external comparator, and not for want
+of looking: Orekit, the oracle everywhere else, has no closed-loop control at all. Two programs do.
+**Basilisk** (AVS Lab, University of Colorado at Boulder) implements the same Schaub–Junkins MRP
+Lyapunov law `MrpLyapunov` does, which makes it like-for-like rather than two programs solving
+adjacent problems. **42** (NASA Goddard) is an independent code base with its own rigid-body
+formulation and supplies the environment-torque arc Basilisk's fixture covers only pointwise.
+
+**The licence gate came first, and both answers had to be read rather than recalled.** Basilisk is
+**ISC** — permissive, confirmed from `LICENSE` in the repository. 42 is the **NASA Open Source
+Agreement v1.3**, confirmed from `License/NASA Open Source Software Agreement.pdf`; GitHub detects no
+SPDX identifier for it, so there is nothing to look up. NOSA is reciprocal-flavoured — §3.A puts any
+redistribution under NOSA, §3.B requires a prominent notice, §3.C a changelog identifying
+Modifications, §3.F requests their registration. None of it binds here, and the reason is stated
+rather than assumed: **42 is run unmodified, from input decks only, and neither program is
+redistributed, vendored, built by CI or named in any manifest.** Basilisk installs from a prebuilt
+`manylinux` wheel under `uv run --with bsk`, which keeps it out of the lockfile too. Both are oracles;
+the fixtures are committed and the runs that produced them are in `tools/`.
+
+**The law agrees to rounding, and a doc comment became a measurement.** `MrpLyapunov`'s comment says
+the law is written for regulation and that tracking a moving reference adds `I(ω̇_ref − ω × ω_ref)`.
+That is a claim about *what is missing*, so the fixture includes three states with `ω_RN ≠ 0`: the raw
+gap there is **2.4e-4 to 2.4e-3 N·m**, and adding exactly the named term closes it to **3.103e-17**.
+Seven fixed-reference states agree to **1.241e-16 N·m** with nothing added.
+
+**Basilisk's default is a different law, and comparing against it would have produced a bug report.**
+`mrpFeedback` carries a `controlLawType` switch whose default crosses `ω_RN + K_i z` into `[I]ω_BN`
+where the other crosses `ω_BN`. On an inertially fixed reference `ω_RN` is zero, so the default has no
+gyroscopic cancellation at all while this crate's law has `ω × Iω`. The difference is checked as the
+identity `u₀ − u₁ = −ω_BR × [I]ω_BN`, which holds to **6.206e-17 N·m** while the term itself reaches
+**1.609e-1 N·m** — so "different law" is a measurement and not an excuse.
+
+**The finding worth carrying out of this ticket is about scheduling, and both simulators taught it.**
+In Basilisk, `ExtForceTorque` latches the command message into the field the hub's equations of motion
+read. Added to the task *after* the hub — the default insertion order, and what every tutorial writes
+— it latches at step `k` a command written at step `k−1`, so the hub applies it over the **next**
+interval and the first interval is torque-free because the message is still zero-initialised. Ordered
+*before* the hub, the same command drives its own interval. That one line of task setup is worth
+**8.143e-8 rad against 6.685e-3 rad** at a one-second step, and turns first-order convergence into
+fourth. The fixture carries both orderings so the effect is measured on each rather than assumed on
+one; each is reproduced to **1.2e-11 rad** by modelling the corresponding timing.
+
+42 says the same thing from the other side. It recomputes the environment once per simulation step and
+holds it across the integrator's stages, which shows in its own step sweep: halving the step cuts the
+attitude difference by 2.3× and then 3.0×, an apparent order near 1.5 rather than 4 — what a
+fourth-order method looks like when part of its right-hand side is zero-order held. Held the same way
+here, the workspace reproduces 42 at **every** step it was run at, **1.051e-6 rad** against a
+**5.290e-4 rad** spread between 42's own coarsest and finest runs. That factor of **503** is what turns
+"we agree in the converged limit" into "we agree with the oracle's actual schedule". Neither residual
+would have been readable as a scheduling effect from a single tolerance; both were found by asking a
+convergence *rate* to be right and watching it come out at one.
+
+**A convention, pinned by measurement rather than by reading.** `exp_so3` builds an *active* rotation
+of a vector; Basilisk's `MRP2C` and 42's quaternion build the change of basis, and for the same
+parameters those are transposes. So a body-frame position is `Mᵀ r_N`, and using `M` reproduces
+Basilisk's gravity-gradient torque to **5.5e-6 N·m** on a **3e-6 N·m** torque — 180 % wrong, and still
+a plausible-looking small number. The transpose closes it to **4.507e-21**. The MRP and the quaternion
+themselves need no care: both conventions parameterise their own matrix by the same coordinates, so
+those cross the boundary unchanged and only a *matrix* has to be transposed.
+
+**What this does not claim.** 42's output carries seven significant digits, a hard floor near 1e-7 in a
+unit quaternion, so that leg does not resolve what the Basilisk leg does and does not try to — it
+separates a model error from a discretisation error, which here differ by four orders of magnitude. No
+orbit-control or formation scenario has been run in either program; §4.14 and §4.15 stand on their own
+oracles. And 42's `ThreeAxisFSW` is a quaternion PD with wheels and a gimbal, not the bare MRP law, so
+running the *controller* in 42 would need a source Modification — which is why 42 is used here as an
+independent opinion on the **plant**, where no Modification arises.
+
+### 4.17 Two crates were mutation-sealed and had no verification rows, and the README is what said so
+
+`tools/gen-readme.py` builds the crate table from `cargo metadata` and from this document, and prints
+`--` for any crate neither signal reaches. It printed `--` twice: `spacelab-slr` (4 468 lines) and
+`spacelab-astrometry` (3 727 lines with its tests) had **zero rows in §1–§7** while both were sealed in
+§8 — `reseal3-astrometry` alone caught 683 mutants with no survivors. So the gap was never that the
+crates were unverified; it was that the verification was not *written down*, which for a document whose
+whole claim is "the verification is the deliverable" is the more embarrassing of the two. The generator
+found it because it derives the table rather than transcribing it; a hand-maintained list would have
+described whatever it described the day it was last edited.
+
+**The two crates are anchored oppositely, and both were worth stating.** `slr` has reference *programs*
+to reproduce — `FCULZD_HPA`, `FCUL_A`, `HARDISP` and `DEHANTTIDEINEL` — so it is pinned at their own
+published test points, with `tools/iers-oracle` rebuilding the Fortran rather than trusting a
+transcribed number. That is what surfaced the `FCULZD_HPA` header-against-code discrepancy recorded in
+§10.3, and it is why the rows above quote 1 / 4 / 0 ULP against the *compiled* routine rather than the
+two-parts-in-10⁶ "port error" the printed value would have implied.
+
+`astrometry` has no such program — astrometry.net is a service and a pipeline, not a routine with a
+published test point — so every check is a closed form or a synthetic truth: a plate fitted to its own
+projection (rms < 1e-12″), a radial cubic distortion put in and asked back (both coefficients to 1e-6,
+while the *linear* fit absorbs it as a 0.5 % plate-scale error rather than as a bad fit), a blind solve
+about a tangent point four arcminutes off the truth that still lands within an arcsecond, and the
+aberration map checked against `arctan(γβ)` to 1e-18 rather than against the first-order β.
+
+The one place a published number appears is the IAU constant of aberration, and writing this section
+found it stated wrongly. The test's comment recorded "20.4960″ … a 5e-5 relative difference"; the chain
+actually produces **20.495514″**, which agrees with the IAU 20.49552″ to **3.1e-7** — the comment was
+off by an order of magnitude in the difference and by four digits in the value, and the 1e-3 arcsec
+gate was 160× looser than the agreement it was justifying, so it could never have failed. Both are
+corrected: the gate is now **1e-5 arcsec**, the last digit the IAU value is published to and therefore
+the most that can be asserted without asserting someone else's rounding. This is the §4.10 pattern in
+miniature — a number in a comment is a measurement, and an assertion loose enough to survive a wrong
+one is not verifying anything.
+
+**Where the end-to-end number lives, and what is still missing.** The rows above are component checks;
+the residual against real data is §10.3, which forms two-way ranges to LAGEOS-1 and -2 over 8 days,
+2 arcs and 26 pads against ILRS normal points and ILRS combined orbits — 2 158 points modelled or
+declined by stated reason. So the arc *is* fitted, and the §4 rows exist to say which part of it each
+number belongs to. What is genuinely absent is on the other crate: `astrometry` has been run against no
+real plate. Every field in its tests is synthetic, which is exactly what makes the fits checkable and
+exactly what leaves detection and centroiding unproven against a real detector's noise, cosmic rays and
+blends — the same shape of gap as the photometric one recorded in §4.7.
+
+### 4.18 The atmosphere was reachable from Rust and from nowhere else
+
+`docs/limitations.md` filed refraction under "the correction exists and is not applied by default",
+which was true and was not the whole truth. `Refraction` lives in `spacelab-coverage`; `ElevationMask`
+lives in `spacelab-sensors`, which `spacelab-coverage` depends on, so the conversion had no home on
+either side and every caller had to know to do it themselves. **Neither bridge exposed refraction at
+all**, so a Python or C user could not correct the 0.81–20.3 s bias even after reading the paragraph
+that measures it. That is the sharper statement of the defect than "not applied by default", and it is
+what this closes: `Refraction::elevation_mask` and `ElevationDetector::apparent` in Rust,
+`Sensor.elevation_apparent` and the two `refraction_*` functions in Python, `sl_refraction_apparent`
+and `sl_refraction_geometric` in C, `elevation_mask_apparent` in C++.
+
+**The geometric mask stays the default, deliberately.** `ElevationMask::new` still takes the geometric
+elevation, because that is the angle the predicate measures and because changing the meaning of a bare
+number would silently move every existing caller's answer — 65 call sites across 33 files and both
+bridges. The fix is an additional constructor that *names* the convention, not a reinterpretation of
+the old one.
+
+**What makes the shift exact rather than approximate is a property, and it is now measured as one.**
+`apparent(h) ≥ mask` and `h ≥ geometric(mask)` are the same condition only if `h ↦ h + R(h)` is
+strictly increasing; if it were not, one apparent threshold would answer to an *interval* of geometric
+ones. The sweep runs at 0.001° from the fit's −1° floor to the zenith, 91 001 samples, and the count is
+asserted so that a sample falling silently outside the domain fails rather than shrinking the claim.
+It holds at every one, including through the first degree above the horizon where `R` falls by 0.164°
+while `h` rises by one — which is the race the property is actually about.
+
+**Both ends of the domain refuse, and for different reasons.** Below the apparent horizon there is no
+ray to have been bent. At the zenith the refusal arrives from further along: both published fits
+return a *negative* refraction at 90° — already documented on `Refraction` and measured against an
+integrated ray — so the geometric mask lands 3.9e-7 rad *above* `π/2`, where `ElevationMask::new` stops
+being invertible and the predicate stops meaning what it says. The conversion returns `None` there
+rather than a mask that would quietly answer the wrong question, and the test asserts the negative
+bend first, so it fails loudly if a future fit change removes the boundary it is testing.
+
+**What this does not claim.** The two fits are still the two fits: Sæmundsson and Bennett are not each
+other's inverse and a round trip closes to a few arcseconds near the horizon, which is their published
+disagreement and not an error in either. Both also run 0.43–4.79 % high against a ray integrated
+through the U.S. Standard Atmosphere (`tests/integrated_airmass.rs`), so the *mask* is now right to the
+fits' own accuracy and no further. Nothing here models a non-standard atmosphere beyond the
+`(P/1010)(283/T)` density scaling the fits were normalised at.
+
+### 4.19 There are two "downs", the cone measured off the wrong one, and nothing at the call site said so
+
+`Cone::new` took a half-angle and measured it from `−r/|r|`, the direction to the Earth's centre.
+A nadir-pointing attitude built on the local vertical holds the ellipsoid's own inward normal, and the
+two are not the same direction: `derivations/nadir_deflection.mac` derives the separation in closed
+form as `atan(e²/(2√(1−e²)))` = **0.192 424 3°** at the surface, and — the part that is easy to get
+wrong — its maximum sits at geodetic latitude **45.096 2°**, not 45°, because the argmax is
+`atan(1/√(1−e²))`. It falls with height as `(N(1−e²)+h)/(N+h) → 1`: **0.177 125°** at 550 km,
+**0.173 366°** at 700 km, **0.029 066°** at GEO. At 550 km that is **1.70 km** of ground straight
+below and more off-nadir, so it is a footprint error rather than a rounding question.
+
+**The fix is an axis, not a second nadir.** `Boresight::Fixed` takes any direction, and the geodetic
+nadir is then one thing a caller can supply. That is deliberately more general than a
+`NadirConvention` enum would have been, for a reason the crate's own name gives away: an *agile*
+optical instrument slews, and `AgileOptical` could not express a commanded pointing at all — "slewable"
+was a name rather than a capability. A two-valued convention would have closed the geodetic gap and
+left that one open.
+
+**Where the ellipsoid lives matters more than it looks.** `spacelab-sensors` depends on
+`spacelab-core` and `libm` and nothing else, which is what lets the batch kernels compile for a target
+with no allocator. Computing a geodetic normal needs the ellipsoid, and taking `spacelab-earth` as a
+dependency here would pull `spacelab-frames` and `spacelab-fa` — CIO tables and all — into the crate
+the kernels live in. So `spacelab_earth::geodetic_nadir` produces the vector and `Boresight::Fixed`
+holds it; the direction is per-satellite and never enters the cell loop, the same hoist `n2` already
+had. The `boresight.rs` test asserts the layering as well as the arithmetic: it reaches the earth
+crate through `dev-dependencies` and never names `spacelab_frames`, so the `Position<Itrf>` the
+conversion takes is passed through without being spelled.
+
+**The new arm is cheaper and better conditioned, and the old arm's error is the measurement that says
+so.** The geocentric form builds `ũ = |r|² − c·r` from two quantities of order `|r|²` whose difference
+is orders smaller, losing about `|r|·ε` metres to cancellation before dividing by `|r|`; the pointed
+form never forms that difference, because a supplied boresight is already unit. Setting
+`Boresight::Fixed(−r/|r|)` against `GeocentricNadir` — the one case where the two must describe the
+same cone — the `g` values differ by at most **1.863e-9 m**, against a bound of `4·|r|·ε` written from
+that analysis rather than fitted to the failure. `covered` is equal exactly, which is the assertion
+with no tolerance to hide in.
+
+**The rate bound is derived, not adjusted.** The event search rests on `|dg/dt| ≤ max_rate`, and a
+caller who re-supplies the geodetic axis as the satellite moves is handing the cone an axis that turns
+faster than the geocentric one. The derivation bounds it: `d(φ′)/d(φ)` runs from `1−e²` at the equator
+to `1/(1−e²)` in the limit at the pole, so `1/(1−e²)` — **0.674 % more** — covers any pointing that
+tracks the local vertical. It is applied to the whole turn term rather than argued away term by term,
+because a bound that is right by 0.674 % and unproven is worth less than one that is loose by 0.674 %
+and derived. The same file checks it against a sweep over latitude and seven heights: worst
+**6.739 486e-3** against the analytic **6.739 497e-3**.
+
+**What this does not claim.** The geocentric nadir stays the default. `Cone::new` and
+`AgileOptical::new` are unchanged, because changing what a bare half-angle is measured from would
+silently move every existing footprint. Nothing here models attitude *error* — a real nadir-pointing
+spacecraft holds its axis to a pointing budget, and this is the difference between two exact
+conventions, not between a convention and a spacecraft. And `geoloc::nadir_direction` is deliberately
+still a third thing: pyorbital's convention, 0.0215° from the geocentric nadir in the *opposite*
+direction, kept because the instrument catalogue's scan angles are calibrated against it (§4.6).
+
+---
+
+### 4.20 The 20.5″ everyone knows is the wrong 20.5″, and the right term was reachable from nowhere
+
+§4.8 measured the diurnal aberration a ground observation carries — **0.262″** at a 34.9° station —
+and named the reason the famous term does not apply: aberration takes the observer's velocity *with
+respect to the frame the directions are in*, and in a geocentric frame the station and the satellite
+share the Earth's 29.8 km/s barycentric motion. It cancels. What is left is the station's own
+**465.1 m/s** of rotation, falling as `cos φ`. The analogy with the Sun — a distant body, which does
+carry the annual term — was the error, and §11.1 removing 20.5″ from `AnalyticSun` is what made the
+analogy tempting.
+
+**The constructor is `ω × r`, and the rotation is a vector.** `Aberration::diurnal(observer, ω)`
+takes the angular velocity as a vector rather than a scalar rate, for two reasons that turned out to
+be the same reason. It lets polar motion tilt the pole, so a caller with real EOP is not forced back
+to `(0, 0, ω)`. And it means `spacelab-astrometry` does not have to depend on `spacelab-frames` to
+provide a rotation rate — a crate that reduces plates has no business pulling in CIO tables. The cost
+is a constant duplicated across a boundary neither side can see, so the test holds
+`7.292_115_146_706_979e-5` to the same **bits** as `spacelab_frames::EARTH_ROTATION_RATE`, through a
+`dev-dependency` that exists for that assertion and nothing else.
+
+**The oracle had to be made independent before it could be believed.** ERFA's `ab` computes
+`pnat·bm1 + w1·v + w2·(v − pdv·pnat)` normalised, where `w2 = SRS/s` is *solar light bending*, not
+aberration at all. Generating the fixture at `s = 1e12` au drives `w2` to about 2e-20 and leaves
+exactly the special-relativistic boost this crate implements — so the comparison is two
+implementations of one formula, and anything above round-off would be a defect rather than a
+modelling difference. Measured worst separation over 20 station-and-direction pairs: **6.206e-17
+rad**, or 1.3e-11″, against the ticket's 1 mas verdict.
+
+**The first oracle run was wrong, and the wrongness was in the comparison rather than in either
+implementation.** Reading the separation as `arccos(u·v)` reported **0.003 074″** of shift for a
+direction pointed exactly along the velocity, which physically cannot shift at all. `arccos` near 1
+returns `√(2δ)`: at `δ ~ 1e-16` that is 1.4e-8 rad, and half the mantissa is gone before the answer is
+formed. `atan2(|u×v|, u·v)` gives 0.000 000″. The lesson generalises past this file — every
+nearly-parallel unit-vector comparison in a verification harness has this failure mode, and it fails
+by *reporting a plausible small number* rather than by being obviously broken.
+
+**And the term was unreachable outside Rust, which is the sharper defect.** Neither bridge depended on
+`spacelab-astrometry` at all, so a Python or C caller could not apply a 0.262″ correction they knew
+about. The three exports (`sl_diurnal_velocity`, `sl_aberration_apply`, `sl_aberration_remove`, and
+the Python twins) close that for aberration. **They do not close it for the crate**: plate solving,
+TAN/SIP world coordinates, blind asterism matching and streak reduction remain Rust-only, which is
+the #319 drift pattern at crate granularity rather than at function granularity, and is recorded here
+as measured rather than fixed in passing.
+
+**What this does not claim.** Nothing applies the correction automatically. It stays on the
+observation, where `Aberration::remove` is, and not inside
+`spacelab_estimation::measurement` — those functions are differentiated by `spacelab-autodiff`, and a
+term that is constant over a fit has no business entering the Jacobian to be differentiated to zero.
+A caller who wants aberrated angles composes the two, which is what `tests/reduction.rs` already does.
+
+---
+
+### 4.21 The light-time solver existed for a year and the model path never called it
+
+`light_time::down_leg` solves `c τ = |r_sat(t_r − τ) − r_station|` and has been sealed by its own
+unit tests since it was written. Nothing in the model path called it: `grep` found it in two test
+files and in one doc comment. So the convention `measurement` implements — one state, one station,
+one instant — was not *chosen* by any caller, it was inherited, and it is wrong by **51.8 m** of
+range at the horizon on the ISS day and **62.5 m** on the 550 km two-body orbit the Orekit oracle
+uses.
+
+**`observed::reduce` is the choice, and `Signal` is what makes it a statement.** A two-variant enum
+rather than a `bool` or a defaulted option: `Signal::Instantaneous` is a legitimate convention — a
+simulation's truth, a covariance study, anything whose geometry is *defined* at one instant — and it
+is now something a caller says rather than something they get. The range that comes back is not a
+second formula: at convergence `Transit::path()` and `modifier::Range` at the emission state are one
+number, asserted to 1 ULP, which is the whole content of "light time is a choice of epoch".
+
+**The partials are not a choice of epoch, and that is why this is a module.**
+`derivations/light_time_partials.mac` derives what they are instead, checking each step against an
+independent route rather than asserting it:
+
+| | |
+|---|---|
+| `∂τ/∂x₀` | `ρ̂·Φ_r / (c + ρ̇)`, with `ρ̇ = ρ̂·v_e` the satellite's **own** radial speed |
+| `∂f/∂x₀` | `[w − s·(ρ̂, 0)] Φ`, `s = (w·ẋ_e)/(c + ρ̇)`, `ẋ_e = (v_e, a_e)` |
+| pure range | collapses to the scalar `1/(1 + ρ̇/c)` — **2.56e-5** relative at LEO |
+
+The second row is what keeps the interface: the correction is a **rank-one update to the row**, so
+the state transition matrix the caller chains is untouched and a light-time-free pipeline changes
+which row it gets, not what it does with it. The Rust test checks that form against a central
+difference of the *whole* solution — perturb the epoch state, re-solve the flight time, re-evaluate
+— on three observables whose `w` has a different shape.
+
+**And the trap the same test found.** `Φ` above is `Φ(t_e, t₀)`, not `Φ(t_r, t₀)`. Chaining to the
+reception epoch is worth `τ/t_r`, which over the test's 100 s arc is **2.3e-4** — an order of
+magnitude *more* than the 2.56e-5 the light-time row correction is worth. A caller who adopts this
+module and keeps propagating the STM to the reception epoch is worse off than before they adopted
+it, so the number is in the module documentation rather than left to be found.
+
+**The oracle is designed to isolate one variable.** Orekit's `Range` on a two-body Keplerian orbit,
+propagated in closed form on both sides from the same Cartesian epoch state with the same `μ`, in
+EME2000 throughout, with the station's inertial position and velocity taken from the fixture. Not a
+convenience: with SGP4 or a numerical orbit the two trajectories would differ by metres, and metres
+is the size of the effect, so a residual could not be attributed. Measured over 470 epochs of real
+above-the-horizon geometry:
+
+| | |
+|---|---|
+| The two propagations are one orbit | **8.83e-7 m** at reception, 8.38e-7 m at emission |
+| Flight time against Orekit's fixed point | **2.08e-15 s** = 6.23e-7 m |
+| Orekit's own Keplerian-shift shortcut costs | 2.67e-16 s = 8.01e-8 m — so "agrees with Orekit" is unambiguous about which Orekit |
+| Modelled range | **6.61e-7 m**, against the instantaneous convention's **62.52 m** |
+| Modelled range rate | **3.30e-9 m/s**, against the instantaneous convention's 0.169 m/s |
+| Two-way minus one-way | **3.33 m** — a different observable, not a refinement |
+
+The range residual is *smaller than the orbit agreement that bounds it*, which is the honest reading:
+the light-time model agrees with Orekit's to better than the two Kepler solvers agree with each other.
+
+**What this does not do.** It does not apply anything automatically — a caller still chooses, which
+is the point. It does not implement the two-way solution: `spacelab_slr::two_way_light_time` is
+that, its up leg holds the station fixed and its down leg starts from the up leg's answer, and both
+iterates are pinned to the ULP by tests written against real ILRS normal points. A second
+implementation here would be a third copy of one iteration, and the copy an orbit determination
+called would not be the one validated against normal points. The oracle measures what that would be
+worth — 3.33 m between the two observables — rather than leaving it as a shrug.
+
+### 4.22 Five literal zeros are not a modelling choice
+
+Every coverage test in this workspace built its TEME→ITRF transform by hand and passed
+`Angle::from_radians(0.0)` twice and `0.0` once. That is a legitimate model — a TLE's own along-track
+error is kilometres and the frame difference is millimetres of *position* — but at a call site it is
+indistinguishable from having forgotten, and `docs/limitations.md` carried it as "tens of ms" with
+no measurement behind the phrase.
+
+**The type is the fix.** `EopSource` has two arms, `Series(&EopSeries)` and `NoEop`, and
+`earth_orientation_at` takes it instead of a bare `&EopSeries`. Zeroing Earth orientation is now
+something a caller writes down. The answer's provenance moved with it:
+`EarthOrientationQuality::Tabulated { quality, dut1_sigma_seconds }` against `Absent` — the σ lives
+*on the arm that has one*, because a zero σ reported for a value nobody measured is worse than no σ
+at all. `NoEop` still carries the real TT: the leap-second count is known exactly and is not an
+Earth-orientation measurement, a distinction worth about a tenth of a millimetre through the TIO
+locator and asserted so it cannot drift into meaning something else.
+
+**Then the phrase became a number.** `access_oracle.rs` runs the identical scan twice against the
+identical Orekit fixture, changing nothing but the `EopSource`. Orekit generated that fixture with
+`FramesFactory.getITRF(IERS_2010, simpleEOP = true)` — its bundled `finals2000A`, without the
+sub-daily terms — so the tabulated run reads the same IERS product, cut to MJD 54725..54735, and the
+comparison is not two tables disagreeing.
+
+| | worst pass-edge disagreement with Orekit |
+|---|---|
+| `EopSource::NoEop` | **38.047 ms** |
+| `EopSource::Series` | **0.082 ms** |
+
+464×, and the direction is the one physics predicts: `ΔUT1 = −0.4809865 s` at this epoch turns the
+Earth by 7.2″, about 223 m at the equator, which a ground track sweeping at ~6.9 km/s crosses in tens
+of milliseconds.
+
+**What remains is not the root-finder, and that was checked rather than assumed.** Dropping the Brent
+abscissa tolerance from `1e-4` to `1e-9` moves the residual to **107 µs** — *up*, not down — so 82 µs
+is not convergence. What is left is the TEME→ITRF path (a GMST rotation here against Orekit's full
+IERS chain) and the two SGP4 transcriptions. Which of the two dominates is not measured and is not
+claimed; the honest statement is a floor with its cause narrowed to two candidates.
+
+The C2 gate stays at the plan's one second per edge, and a second assertion pins the floor at 1 ms,
+so a regression in the frame chain fails rather than passing inside a second that no longer means
+anything. Five call sites moved onto measured orientation — `access_oracle`, `coverage_slice`,
+`refraction_in_access`, `sentinel_reality` and `light_time_in_measurements` — and the refraction
+numbers are unchanged to three figures (0.810–1.179 s at 10°, 2.016–8.564 s at 5°, 9.342–20.265 s at
+the horizon), which is what a *difference between two runs in one frame* must do.
+
+**The by-catch is worth more than the ticket.** `light_time_in_measurements.rs` claimed the angular
+lag is "5.30″ at every elevation" and defended it by comparing two samples: the lowest-elevation one
+and the day's peak. Shifting the frame by 38 ms changed which sample lands nearest the horizon and
+the comparison swung from 8.7 % to 29 %. The claim was not wrong about the mechanism — the residual
+against `v_⊥/c` is 2.8e-5″ — it was wrong about what the mechanism implies. `v_⊥` is a property of
+the *pass*, and over the whole day the lag runs **1.79″..5.30″**, a factor of 3 the two-sample test
+could not see. The assertion is now the exact form of range-independence: the lag can never exceed
+`|v|/c`, because `v τ` and `c τ` carry the same τ and it cancels, leaving only the direction of the
+velocity. Measured ceiling **5.30″**, reached at the pass peak where the velocity is almost wholly
+transverse — against a factor of **1461** in the range error over the same samples. A test that
+passes on which samples the scan grid happened to land on is a test that will fail for a reason that
+has nothing to do with what it measures.
+
+**What this does not close.** Neither bridge can read an EOP series: `spacelab-eop` is unreachable
+from C and from Python, and both expose `teme_to_itrf` with `xp`, `yp` and `lod_seconds` defaulting
+to zero. `EopSource` made the choice explicit inside the workspace and does not reach the boundary
+where a non-Rust caller would make it — the #319 drift pattern at crate granularity, recorded in
+`docs/limitations.md` rather than closed in passing.
+
+---
+
+## 5 · GNSS, ionosphere & Phase-8 (EO / SAR / vision)
+
+`spacelab-gnss`, `spacelab-geomagnetism`, `spacelab-ionosphere`, `spacelab-earthvision`,
+`spacelab-signal`, `spacelab-vision`, `spacelab-gpu`, `spacelab` (umbrella)
+
+| Crate | Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|---|
+| gnss | GMF / VMF1 / VMF3 / Niell mapping functions | Niell 1996; Boehm et al. 2006 (GMF/VMF1); Landskron & Boehm 2018 (VMF3) | Orekit mapping-function tests (Green Bank etc.) | < 2e-6 (VMF) … < 2e-3 (Niell) | src/models.rs |
+| gnss | ITU-R P.834 mapping | ITU-R Rec. P.834 | Orekit `ITURP834MappingFunctionTest` | < 2e-3 | src/itu834_mapping.rs |
+| gnss | GPT3 ah/aw/T/P/e/Tm/λ/gradients | Landskron & Boehm 2018 — the TU Wien MATLAB is the specification in practice ⚠ | Orekit MATLAB GPT3 reference | < 1e-9 | src/gpt3.rs |
+| gnss | VMF3 grid interpolation | TU Wien VMF3 grid product; bilinear interpolation | Orekit `ViennaModelCoefficientsLoaderTest` 5×5 | ah/aw < 1e-8; zhd/zwd < 1e-4 | src/vmf_grid.rs |
+| gnss | RTCM 3 framing + CRC-24Q | RTCM 10403.x; the CRC-24Q polynomial `0x1864CFB` GPS uses for navigation-message parity | the **reveng catalogue's published check value**, and an exhaustive single-bit sweep of a real frame | `crc24q("123456789") = 0xCDE703` exactly — the CRC-24/LTE-A parameters, *not* CRC-24/OPENPGP's `0x21CF02`, which is the same polynomial seeded with `0xB704CE` and the value a search finds first. Every one of the **392 single-bit flips** in a real 49-byte 1057 frame is refused, and the frame length is pinned so the sweep cannot silently shrink; a partial frame is distinguished from a corrupt one at every truncation point of a 1019 | src/rtcm.rs |
+| gnss | RTCM 1005/1006/1019/1057/1058/1060 decode | RTCM 10403.x message definitions; IS-GPS-200 scale factors for 1019 | **physics, not the encoder**: the 1019 fixture is written from physical values by an independent bit-writer and the decoded ephemeris is checked as an *orbit* | semi-major axis within 1 m of `(√a)²`; period **43 076.7 s** against the half-sidereal-day 43 082 s (the 5.3 s is `Δn` plus the fixture's round `√a`); radius at `toe` inside `a(1 ± e)`; every field within its own quantisation step (2⁻³³ on `e`, 2⁻³¹ semicircles on the four angles, 2⁻³¹ s on TGD). The SSR sign convention is pinned on a hand-computed case: the orbit correction is **subtracted** in the radial/along/cross basis and the clock correction **added**, and the polynomials are referenced to `epoch + Δ/2`, not to the epoch | src/rtcm.rs |
+| gnss | NTRIP 1.0 / 2.0 client protocol | RTCM NTRIP 2.0 (and the `ICY 200 OK` 1.0 revision still in service) | the **RFC 4648 base64 vectors** for the authentication header, and the protocol's own failure modes exercised offline | all seven RFC vectors plus the `+/` alphabet top; both revisions' body offsets exact; an incomplete head is `Ok(None)` and a refusal is an error, at every prefix. **Security is asserted, not assumed**: a mountpoint, host, username or password holding CR, LF or NUL is refused at construction — the header-injection boundary — and neither the password nor its base64 appears in any `Debug` rendering or error string | src/ntrip.rs |
+| gnss | Bias-SINEX DSB / OSB / ISB | Bias-SINEX 1.00 `BIAS/SOLUTION` column definition | the two records a whitespace parse gets wrong — an OSB with a blank second observable, and satellite records with a blank station — decoded from fixed columns | fields exact; 1.2345 ns → **0.370 093 789 m**; a cycle-valued GLONASS bias returns `None` rather than a metre value computed from a frequency the record does not carry; an all-zero epoch is an open interval, not year zero; column slicing survives every one of the fixture's truncation points | src/sinex_bias.rs |
+| geomagnetism | IGRF-14 geocentric B_r/B_θ/B_φ (deg-13) | IAGA IGRF-14 coefficient file (re-derived, see above) | ppigrf.igrf_gc (independent) | < 1e-3 nT | src/igrf.rs |
+| geomagnetism | Centred-dipole axis, moment, magnetic latitude / local time | IGRF-14 degree-1 coefficients + their 2025–2030 secular variation | ppigrf (independent tables and interpolation) for the pole and moment at 2028.5; the full IGRF-14 field for the pole's own inclination | pole < 1e-9 rad, moment < 1e-6 nT; the dipole equator sits a median 3.1° and a worst 39.3° (345°E, South Atlantic) from the real one | src/dipole.rs |
+| gnss | GPS reduced two-body / GLONASS RK4 | IS-GPS-200 broadcast algorithm; GLONASS ICD PZ-90 integration | spacelab-elements `to_state` / Kepler flow (independent module) | GPS < 1e-9 rel; GLONASS < 1.0 m | src/gps.rs, glonass.rs |
+| gnss | Klobuchar / Saastamoinen ZHD·ZWD | IS-GPS-200 (Klobuchar); Saastamoinen 1972 | published closed-form | 5 ns floor; 2.28–2.32 m | src/models.rs |
+| gnss | Higher-order iono (dipole, 2nd-order delay) | published higher-order ionospheric expansion; IGRF dipole | published IGRF-14 dipole moment + closed-form | < 1e-8; 0.005–0.05 m | src/higher_order_iono.rs |
+| gnss | Where **7527** comes from, and how much of it is rounding | Appleton–Hartree for a collisionless magnetised plasma, expanded to second order | **Maxima**, `derivations/second_order_iono.mac`: expand `n`, put `X` and `Y_L` back in terms of `Nₑ`, `B`, `f`, and read the coefficients off | the `1/f²` coefficient comes out **40.308**, the 40.3 everybody knows, which is what says the expansion is the right one; the `1/f³` group constant is `q³/(8π³ε₀m²)` = **7527.3854·c**, so the published four digits are low by **5.12e-5** relative. The constant now derives from CODATA in the source instead of being a literal, and the group/phase factor −2 is `f·d/df` on an `f⁻³` term | derivations/second_order_iono.mac |
+| gnss | DOP identities (GDOP²=PDOP²+TDOP², rank-deficiency) | DOP definition (linear algebra) | linear-algebra property | < 1e-10 | src/dop.rs |
+| gnss | SP3 Neville interp / clock / velocity | IGS SP3-c/d format specifications | self-consistency (analytic cubic) | pos < 1e-3 m; clock < 1e-15 s | src/sp3.rs |
+| gnss | RINEX 4.02 navigation - the record framing and all four record types | RINEX 4.02 (1 September 2025), Tables 19-25 and A9-A41 | **three independent readings**: the specification's block-length tables; an empirical walk of DLR's 148 789-line `BRD400DLR` product taking each block as everything up to the next `>`; and the specification's own example records, written by the format's authors | the 38 (record, constellation, message, subtype) shapes the product contains all decode, and **0 of 90 689 records rejected** across four whole products spanning 2024-01-01 to 2026-07-19, including a 4.00 file | src/rinex4.rs, tests/rinex4_nav.rs |
+| gnss | RINEX 3 navigation records, field by field | RINEX 3.05 Table A9 — `4X,4E19.12` for a broadcast-orbit line | **a file the reader did not write**: 40 verbatim lines of IGS/BKG `BRDC00WRD_R_20240010000_01D_MN.rnx`, expected values read off its own columns by eye | every field of G01 exact; each constellation in its own axis band; R11's PZ-90 state exact; a non-numeric column drops its record | tests/rinex3_nav_igs_brdc.rs |
+| gnss | CNAV / CNAV-2 / CNAV-3 orbit propagation | IS-GPS-200N Table 30-II (01-AUG-2022), the CNAV user equations | **two oracles, neither the algorithm itself**: with `Ȧ = Δn̈₀ = 0` the CNAV algorithm must reproduce the Orekit-verified legacy propagator **bit for bit**; and one day of GPS CNAV against `IGS0OPSRAP_20262240000_01D_15M_ORB.SP3`, an eleven-centre precise combination | exact equality on the degenerate case at five values of `tₖ`. Against the precise orbit on 2026-08-12: **LNAV 1.816 m RMS / 4.475 m worst** over 3 072 comparisons, **CNAV 1.854 m RMS / 4.324 m worst** over 2 688 — the specified signal-in-space range error. **Controls: zeroing `Ȧ` takes CNAV to 15.13 m RMS, flipping its sign to 30.08 m**, so the number is measuring the term and not the orbit | src/rinex4.rs, tests/rinex4_nav.rs |
+| gnss | SP3-d against SP3-c — the version's three changes, and a file above SP3-c's satellite ceiling | SP3-d (Hilla, 21 February 2016), whose introduction states the whole difference: 85 → 999 satellites, unlimited comment records, 60 → 80 characters per comment | **a differential test on real bytes**: the three changes applied to three epochs of IGS `IGS0OPSRAP_20262240000_01D_15M_ORB.SP3`, and a 140-satellite file built by relabelling that product's records across five constellations, so every coordinate is IGS data and only the identifiers are the test's | every observable identical between the SP3-c and SP3-d parses, `version()` the only difference; all 140 satellites read, each carrying the orbit it was relabelled from. **Control: an injected 85-satellite cap turns the second test red.** No openly served SP3-d product above 85 satellites was reachable — §5.8 | tests/sp3d.rs, src/sp3.rs |
+| gnss | SP3 format version → `Version` | SP3-a/b/c/d line 1, column 2 | the header of every SP3 fixture in the workspace, plus a synthetic `#e` | `#c` → `C`, `#d` → `D`, an unknown character kept as broadcast rather than rounded to the newest known version, no `#` line → `Unstated` | src/sp3.rs, tests/sp3d.rs |
+| gnss | NavIC L1 ionosphere — the two line layouts the catch-all arm did not have | RINEX 4.02 Tables A38 (`KLOB`) and A39 (`NEQN`) | the specification's own example records — **no product broadcasts either message**, measured across BRD400DLR days 2024/001, 2025/300, 2026/150 and 2026/200 | `KLOB`'s eight coefficients read off lines 1–2 with the 50°E–110°E / 0°N–50°N service area off line 3; `NEQN`'s three regions tiling MODIP in transmit order. Before the fix the catch-all arm returned `IODK` as `α₀` — §5.7 | src/rinex4.rs |
+| gnss | GLONASS CDMA (`L1OC`, `L3OC`) ephemeris | RINEX 4.02 Tables A16 and A17 | the specification's own `R26` example, checked against the orbit it describes rather than against the reader | radius 25 517 km and speed 3.34 km/s — GLONASS's orbit, so the km → m scaling is measured and not assumed; luni-solar acceleration below 10 µm/s²; AODE/AODC off orbit line 4 | src/rinex4.rs |
+| gnss | SBAS geostationary ephemeris | RINEX 4.02 Table A18 | the one record in BRD400DLR 2026/200 with a non-zero hour and a non-zero value in all twelve state columns — two thirds of the day's SBAS records broadcast a zero velocity, on which a scale error is invisible | radius 42 166 km, ECEF speed 57 m/s (a degree of inclination), `Toc` 36 160 s; the accuracy column's `32767` sentinel survives the read, which it did not while the field was a `u8` | tests/rinex4_nav.rs |
+| gnss | SP3 coordinate-system field → `ReferenceFrame` | SP3-c/d line 1, columns 47–51 | the header line of every SP3 product this repository holds, verbatim | `IGS20`, `IGc20` → ITRF2020; `SLR20` → SLRF2020; `PZ90` → not ITRS; absent → `Unstated`, which agrees with nothing including itself | src/sp3.rs |
+| ionosphere | NeQuick-G Galileo STEC: the 108 Annex E cases in all twelve months, an anti-meridian and a zenith ray | Galileo ionospheric correction algorithm ICD, issue 1.2 (Annex E data; Kronrod G7-K15, Annex F.2.6) | the JRC NeQuickG 1.0 reference implementation, run as an oracle (`tools/nequick-jrc-oracle`) | ≤ 1e-10 relative, measured 1.7e-13 over 1298 rays; the printed Annex E table < 0.04 TECU, its own departure from the reference | tests/galileo_stec.rs |
+| ionosphere | NeQuick ITU STEC | ITU-R Rec. P.531 (NeQuick 2) | Orekit `NeQuickItuTest` (ITU-R P.531); the two November rays from Orekit run on the ICD's CCIR files, since its own July–December files are corrupt (`tools/orekit-oracle/NeQuickItuOracle.java`) | < 1e-3 TECU | tests/itu_stec.rs |
+| ionosphere | Where the two MODIP grids come from — the `itu-r-grids` register row's one technical escape hatch | MODIP is a closed form in the magnetic dip, `tan μ = I/√(cos φ)` (Rawer 1963) | the vendored IAGA `igrf14coeffs.txt` (NCEI, public domain) at all 26 DGRF epochs, spherical and geodetic, `derivations/modip_provenance.py` | **not reproducible.** Nearest epoch 1960.0 for the ITU grid (rms **0.489°**) and 2000.0 for the Galileo one (**0.503°**); geodetic moves it 1.5 %; the two grids differ from each other by up to **13.92°**, so they are two maps, not two resolutions | derivations/modip_provenance.py |
+| ionosphere | 1st-order path delay (40.3·STEC/f²) | dispersive-delay definition (40.3·STEC/f²) | published closed-form + property | 3.2–3.3 m; ratio < 1e-9 | src/lib.rs |
+| earthvision | RPC forward/inverse (real Pléiades RPC00B) | RPC00B rational-polynomial convention | rpcm `.projection` / `.localization` (independent RPC impl) | fwd < 1e-4 px; inv < 1e-6° | src/rpc.rs |
+| earthvision | RPC bundle-adjust affine on noisy GCPs | linear least squares | numpy.linalg.lstsq | < 1e-6 | src/rpc_adjust.rs |
+| earthvision | Resection / triangulation | collinearity / DLT photogrammetry (Hartley–Zisserman) | OpenCV `solvePnP` / `triangulatePoints` | centre/rot < 1e-6; point < 1e-6 | src/camera.rs |
+| earthvision | Harris corner response / detection | Harris & Stephens 1988 | numpy Harris oracle / skimage `corner_peaks` | < 1e-6·‖R‖; within ≤ 1 px | src/features.rs |
+| earthvision | Ross-Thick / Li-Sparse-Recip BRDF kernels | Roujean 1992 / Wanner et al. 1995 (MODIS BRDF kernels) | published closed-form (Ross-Li) via numpy | < 1e-12 | src/atmospheric_correction.rs |
+| earthvision | Monte-Carlo slab transmission | radiative-transfer equation; Beer–Lambert law | published Beer-Lambert exp(−τ/μ₀) | < 5e-3 | src/radiative_transfer.rs |
+| earthvision | Slab R and T, 7 cases (isotropic → g = 0.85, absorbing, slant) | radiative-transfer equation (Chandrasekhar) | **DISORT** via `pydisort`, 96 streams / 96 moments | ≤ 5.9e-4 at 10⁶ photons (3σ = 1.5e-3); oracle converged to 1.8e-7 | tests/phase_function_slab.rs, tools/gen_disort_oracle.py |
+| earthvision | Directional path reflectance at 8 wavelengths × 64 sun/view geometries (400–800 nm, `sec θ_s` and `sec θ_v` to 2.5, Δφ 0–180°) | radiative-transfer equation; Rayleigh phase; τ_R from Bodhaine et al. (1999) at 1013.25 hPa — **not fitted** | **libRadtran / DISORT** via the pyspectral `rayleigh_only` LUT v1.0.1 (Zenodo DOI 10.5281/zenodo.1288441, CC-BY-4.0), US Standard profile over a black surface | **0.7–0.9 % RMS at every wavelength**, after one fitted scalar per wavelength for the ozone the table does not mention (§5.1). Our own seed-to-seed scatter at 6·10⁵ photons is 0.17–0.80 % RMS, so much of what is left is our statistics | tests/pyspectral_rayleigh.rs, tools/gen_pyspectral_oracle.py |
+| earthvision | That the fitted term is an absorber and not a curve fit | two-way `exp(−τ₃(1/μ_s + 1/μ_v))` above the scattering layer | out-of-sample prediction: fitted on the 24 geometries below air mass 3.05, measured on the 40 above; and the recovered amplitude against the Chappuis band's shape | predicts out of sample to 0.8–1.1 % RMS; the two halves agree on τ₃ to 4–7 % where the band is strong; the amplitude peaks at 600 nm and is ~10× smaller at 400 and 800 nm | tests/pyspectral_rayleigh.rs |
+| earthvision | The four 6S coupling terms on **120 measured atmospheres** — 5 aerosol regimes × 6 loads × 4 wavelengths, τ 0.079–3.778, ω 0.755–0.992, g 0.442–0.826, at the solar zenith each retrieval actually had (53.3–75.8°) | radiative-transfer equation; the atmosphere is *measured*, not chosen: τ, ω and g are AERONET Version 3 **Level 2.0** almucantar `AOD_Extinction-Total` / `Single_Scattering_Albedo` / `Asymmetry_Factor-Total`, all three from the same inversion | **DISORT** via `pydisort`, 96 streams / 96 moments — converged, by a sweep to 256 streams that moves `ρ_atm` by 1.67e-7; Henyey–Greenstein moments `gˡ`, so both codes see the identical scatterer | worst / RMS relative, each point measured at 3 streams so it carries its own standard error: `T↓` **5.92e-3 / 1.23e-3**, `T↑` **2.58e-3 / 7.64e-4**, `s` **7.00e-3 / 2.29e-3**, `ρ_atm` **1.63e-2 / 4.33e-3**, against RMS sampling noise 9.83e-4 / 7.62e-4 / 2.35e-3 / 4.25e-3 — **ratios 1.25, 1.00, 0.98, 1.02**, so all four agree with DISORT at their own noise and the signed means sit at +1.6σ, −0.5σ, −0.7σ, +0.5σ (§5.3) | tests/aeronet_measured_atmosphere.rs, examples/aeronet_path_residual.rs, tools/gen_aeronet_oracle.py, tools/gen_aeronet_disort_oracle.py |
+| earthvision | What assuming an atmosphere instead of measuring one costs the retrieval | the 6S inversion run with the atmosphere the crate's own fixtures assume — `τ = 0.1`, `ω = 1`, `g = 0` — on a TOA reflectance built through each measured column | the measured column itself, at a surface reflectance of 0.15 | retrieved surface reflectance wrong by **0.2933 worst (196 %) and 0.1308 RMS**; best case 1e-4, on the thinnest and least absorbing of the hundred and twenty | tests/aeronet_measured_atmosphere.rs |
+| earthvision | The spherical albedo's four-node Gauss rule, separated from the sampler that uses it | `∫₀¹ R(μ) 2μ dμ`, four-node Gauss–Legendre as `coupling_from_slab` writes it | DISORT on the **same four nodes** (isolates the Monte Carlo) and on sixteen (bounds the truncation) | four vs sixteen nodes **1.30e-2 worst, 2.89e-3 RMS** — larger than our disagreement with DISORT on the shared nodes, and still worth 2e-4 relative in the retrieval, because `s` enters only through `1/(1 − s·ρ_s)` | tests/aeronet_measured_atmosphere.rs |
+| earthvision | The 6S coupling on **42 measured RadCalNet scenes** — **all 6** instrumented targets, 3 days each (one sampled five times across its solar arc), forward `ρ_s → ρ_TOA` at 9 gas-window wavelengths (410–1030 nm), solar zenith 5.5–81.5° as downloaded and **5.5–71.4° after the gate**, because every row past 71.4° fails RadCalNet's own uncertainty flag, AOT(550) 0.014–0.288, Ångström 0.10–1.84, surface 0.024–0.482, pressure 720–1015 hPa | radiative-transfer equation; **everything is measured except one number** — surface reflectance, AOT(550), Ångström exponent, pressure, water column and ozone column are in-situ, and the Henyey–Greenstein asymmetry `g = 0.5` is *quoted* from RadCalNet's own published MODTRAN deck (Card 3A1 `IPH: 2`, Card 3A2 `G: 0.500`) rather than chosen | **MODTRAN 5.3.3 with DISORT at 8 streams**, as RadCalNet runs it (`DIS: t`, `NSTR: 8`, `SURREF: LAMBER`, `IHAZE: 2`), through a 10 nm FWHM triangular slit — a **third** radiative-transfer lineage after DISORT and libRadtran, and the first attached to a real target | over 313 gated comparisons, each against the quadrature sum of RadCalNet's published TOA uncertainty, our 3-stream sampling error **and this model's own response to the published uncertainty of the four inputs it was given**: worst **7.84e-3**, RMS **1.99e-3**, RMS bar **8.53e-3** — **ratio 0.372**. Per site 0.17 (Gobabeb) to 0.44 (Baotou sand, the darkest target) (§5.4) | tests/radcalnet_measured_radiance.rs, examples/radcalnet_error_budget.rs, tools/gen_radcalnet_oracle.py |
+| earthvision | The inverse — RadCalNet's TOA reflectance in, the reflectance measured on the ground out | `surface_from_toa` on the same coupling, with the ozone divided out first; **this is the number an Earth-observation user cares about** | RadCalNet's in-situ BOA reflectance, measured by the site's own instrument, with its published uncertainty — **on the fitted 42 scenes and, separately, on the 120-day hold-out**, both through one shared loop so the second is not a copy scoring itself | worst **9.42e-3**, RMS **2.37e-3**, RMS bar **9.34e-3** — **ratio 0.456**, wider than the forward because the correction divides by `T↓T↑` and the surface uncertainty is the smaller of the two. **Out of sample, 0.689** on 1004 comparisons, worst site 0.75: going out of sample costs ×1.51 here against ×1.35 forward (§5.4) | tests/radcalnet_measured_radiance.rs |
+| earthvision | **The error budget's other side** — what this model's own answer moves by when the four measured inputs it reads are moved to the edge of *their* published uncertainty | central difference per input under **common random numbers** (same seed, so the photon paths cancel and the difference is a derivative), averaged over 3 streams; pressure enters through the Rayleigh depth it already scaled | RadCalNet's published per-input uncertainty block — `P`, `T`, `WV`, `O₃`, `AOD`, `Ång` — which the first version of this fixture never parsed | AOD(550) **3.58e-4**, ozone **3.12e-4**, pressure **1.77e-4**, Ångström **1.50e-4**; in quadrature **5.28e-4** against RadCalNet's **8.51e-3**, so our side is **6.2 %** of the bar — small, but no longer zero. The finite-difference noise that remains inflates the bar by **0.006 %**; the converged value at five times the photons is 4.59e-4 / **5.4 %**, and the ozone term is bit-stable between the two because it alone carries no Monte Carlo (§5.4) | tests/radcalnet_measured_radiance.rs, examples/radcalnet_error_budget.rs |
+| earthvision | **The fifth term, for the input the model has no channel for** — RadCalNet publishes six uncertainties and the budget above charges four; `T` is correctly absent (a grey scattering slab has no temperature: Bodhaine's depth is a function of λ and the column number density `P/(m g)`), and water is absent because `Atmosphere` carries no gaseous absorption, so its derivative is identically **0** | a zero derivative is a property of *our model*, not a smallness of the effect, so the missing term is **bounded rather than charged**: the empirical water slope from the driver regression, times RadCalNet's own published water uncertainty, times the mean ρ_TOA | RadCalNet's `WV` uncertainty row — averaging **0.1725 cm** over the 1317 rows, about a sixth of the mean column — against the residual's measured response of **+0.00409 ± 0.00046 per cm** (t 8.9), controlled for all eight published drivers **and for the site**, which is the larger of the two designs and therefore the one a bound takes | **1.63e-4 of TOA reflectance**, third of five terms: our side would go 4.59e-4 → 4.87e-4, **5.4 % → 5.7 %** of RadCalNet's bar, the quadrature growing 6.1 %. An **upper** bound — the slope carries whatever else tracks water (pressure at +0.32, air mass at −0.33) — and it **doubled** when the negative ozone column left the fixture (#367), because that one day was inflating the residual variance every slope is measured against (§5.4) | examples/radcalnet_error_budget.rs |
+| earthvision | The one input RadCalNet does not publish: the aerosol single-scattering albedo (`NSSALB: 0` hands it to MODTRAN's internal rural model) | it cannot be looked up, so it is **fitted** — one free parameter against all 313 comparisons, said out loud rather than tuned quietly | a bracket at ω_a ∈ {0.86, 0.88, 0.90} in the suite; an 11-point scan over [0.80, 1.00] and the same scan per instrument in the example, off the suite's clock | interior minimum at **ω_a = 0.88**: RMS **2.0454e-3** there against **2.3492e-3** and **2.2293e-3** at the shoulders. The full scan puts the parabolic minimum at **0.8833** and spans **3.17× the floor**, so the data determine the parameter rather than merely prefer it; the six per-instrument minima run 0.857–0.900, all within 0.027 of the pooled value, and using one number costs at most **16 %** of the worst site's RMS. The signed mean is near zero **by construction** and carries no information; the RMS and the ratio do (§5.4) | tests/radcalnet_measured_radiance.rs, examples/radcalnet_error_budget.rs |
+| earthvision | Which wavelengths a slab with no gaseous absorption may be compared at — decided from the reference's own data, with **no radiative-transfer model in the loop**, on **all 211 published wavelengths** rather than the 14 the gates use | `-ln(ρ_TOA/ρ_BOA) = a·m·τ_scat + b·m·W + c` over the 42 scenes per wavelength, `m` the two-way air mass and `W` the measured water column. The form neglects the path reflectance, so it is valid only where that term is small: scenes are admitted at `τ_scat/(4 μ_s ρ_BOA) < 0.08`, and λ ≥ 760 nm | RadCalNet's own published spectra, both matrices — ρ_BOA and ρ_TOA, not a ratio derived from them | water absorption **0.5 % at 870 and 1030 nm**, but **2.7 %, 3.3 % and 5.1 % at 1240, 1550 and 2130 nm** — the three wavelengths conventionally called SWIR windows are not gas-free at 10 nm resolution, and are held out of every gate. The full grid offers nothing better: the cleanest wavelength beyond 1100 nm is **1630 nm at 1.2 %**, still twice 1030 nm's. 760 nm separates by its *constant* — 0.369, sixty times a window's, which is oxygen and not water. Forward residual then climbs the ladder 0.90 % (windows) → 3.5 % (3.8×, weak bands) → 130 % (145×, O₂-A and water), always overpredicting, because the slab cannot absorb (§5.4) | tests/radcalnet_measured_radiance.rs |
+| earthvision | The same fitted albedo, applied **out of sample** — 120 further days, twenty per site, drawn from `HOLDOUT_PER_SITE` equal-count epoch strata through each instrument's sorted archive with the fitted days removed first, and chosen inside those strata to satisfy the balance equation `Σ (e − ē)(doy − d̄) = 0` so the sample's season does not trend with epoch (#356) | nothing about a day's weather enters the selection, which is what the fitted fixture's own 42 scenes cannot say; the generator refuses to write the file if a (site, date) overlaps, and the test asserts disjointness again on its own side | RadCalNet's own TOA on days the parameter never saw, spanning **2013–2026** — 1.8 % of the published archive against the fitted fixture's 0.23 % | **ratio 0.502** forward and **0.689** inverse on 1004 gated comparisons, against **0.372** and **0.456** in sample — worst site 0.64 forward and 0.75 inverse, the same instrument in both. The fit predicts inside the same bar in both directions, at a cost of ×1.35 and ×1.51 (§5.4) | tests/radcalnet_measured_radiance.rs, examples/radcalnet_error_budget.rs |
+| earthvision | The same classification checked against the reference's **own** absorption-region flag — a second criterion, arrived at differently, rather than a second run of ours | specification §3.5 encodes it by adding 9 to the left of the decimal of the published uncertainty; the generator refuses to emit the mask unless every scene agrees it is a property of the wavelength, and the test asserts **containment**, since RadCalNet's threshold is on *their retrieval* exceeding 10 % and ours is on water absorption being measurable at all | RadCalNet's per-wavelength flag on all 191 wavelengths where they publish an uncertainty | they flag **30**, 1120–1970 nm: **24 our regression also calls bands** (66–98 % water loss), **6 unfittable** because their own reflectance is fill in the band core, **0 contradicted**. The gap runs the other way and is large — 1240/1550/2130 nm and **940 nm at 79.6 %** are bands to us and not absorption regions to them (§5.4) | tests/radcalnet_measured_radiance.rs |
+| earthvision | That the whole fixture was run on one aerosol model, which is what lets one `ω_a` stand for 42 scenes | RadCalNet's per-scene `Type` column, carried into the fixture and asserted before the albedo is fitted | RadCalNet's own daily files, not the specification's `IHAZE: 2` deck line | **`R` (rural) on all 504 rows** — the quoted deck is confirmed by the data rather than trusted (§5.4) | tests/radcalnet_measured_radiance.rs |
+| earthvision | **That every field RadCalNet publishes is either read or waived for a stated reason** — "we use everything they give us" was an assertion nobody checked, since `parse` hands back whole blocks and each reader takes what it needs | the generator declares the two sets next to the code that consumes them, and **refuses to write a fixture** from a file carrying a key in neither — an upstream rename surfaces at generation time instead of being read past, the same discipline as the existing hold-out-length raise | the key sets of RadCalNet's own header, atmospheric and uncertainty blocks in **both** `.input` and `.output`, on all 138 downloaded days | **19 distinct keys: 11 read, 8 waived**, each waiver stating why the key cannot enter the answer — `Lat`/`Lon` (the geometry is published directly as `Zen`), `Alt` (the measured surface pressure is its effect and more), `T`, `DOY(L)`/`Local` (redundant with UTC), `Azi` (degenerate at nadir), `esd` (cancels in a reflectance ratio). Writing the list turned up **two invariants worth holding rather than waiving** — the filename's epoch against the file's own `Year`/`DOY(U)`, and the `.input` atmosphere against the `.output`'s — both passing on all 138 days, the second only after a latent trailing-tab parse defect it exposed was fixed at the producer. All three fixtures came back **byte-identical in every data row** (§5.4) | tools/gen_radcalnet_oracle.py |
+| earthvision | **What the residual depends on** — **all eight** published quantities a scene varies in, so a table of per-site groups becomes a diagnosis | standardised OLS of the *relative* forward residual on AOD(550), air mass, columnar water, ρ_BOA, the path ratio `τ_scat/(4 μ_s ρ_BOA)`, and the ozone column, surface pressure and Ångström exponent a first version left out, with standard errors and the pairwise correlations that inflate them | the pooled 1317 gated comparisons — the fitted 313 and the held-out 1004 — because eight correlated drivers cannot be separated on 42 scenes, run **twice**: pooled, and again with five site indicators so the second column is identified from variation inside a site only | **four of eight survive being identified within a site**, and they are the four with a mechanism — air mass **+0.00335** (t 9.8) → **+0.00269** (t 7.4), path ratio **+0.00271** (7.4) → **+0.00289** (8.0), water **+0.00217** (6.5) → **+0.00327** (8.9), AOD(550) **−0.00192** (−5.9) → **−0.00236** (−6.8), each with a within-site spread above 0.84 of its pooled one, so the second column measures rather than extrapolates. **Ångström was geography**: t 2.8 → 0.1 on 0.92 of its spread. **Pressure is site elevation**, within-site spread 0.064, so neither column measures the model's response to it. **Ozone is unresolvable in both** (t −1.8, +0.8) — an earlier version of this table had it largest of nine at t −12.3 and set out two readings; both were wrong, and the coefficient was one site-day carrying a negative published column (#367). **ρ_BOA is flat in both** (t 0.1, 1.4), restoring the reassurance the same corrupt row had withdrawn (§5.4) | examples/radcalnet_error_budget.rs |
+| earthvision | **Whether the reference itself has moved** across the 2013–2026 record every residual above treats as a fixed bar | relative residual regressed on epoch, per site, centred on each site's own midpoint so the standard error is the slope's alone; the file listing carries no reprocessing version to compare against — measured, **0 multi-version site-days** across all six. **Twice**: on epoch alone, and holding fixed all **eight** published drivers **and the annual harmonic**, because a sampler that fixes the calendar does not fix the weather, and the 42 fitted scenes pooled into this regression were chosen for their content and fix neither. **And then all of it again one point per day** (#366): a scene's wavelengths share its aerosol, water, ozone, pressure and geometry, so a per-row `n` is ten to fourteen times the information the design holds | RadCalNet's own published archive at whatever span each site offers, sampled on the date and not on the weather | per row, three of six are univariately resolvable — Baotou gravel `t` +4.3, La Crau −3.0, Railroad Valley +2.0 — and holding the drivers and the harmonic fixed **moves every one of them**: Baotou gravel collapses 4.3 → 1.4 and Railroad Valley 2.0 → −0.3, while Baotou sand goes the other way, 1.2 → −3.8, leaving La Crau at −3.2 and Baotou sand at −3.8 apparently resolvable. **Per day, nothing is.** Every controlled `\|t\|` falls under 2 — largest Gobabeb −1.9, then La Crau **+1.8**, a sign change rather than a shrinkage — and Baotou sand goes −3.8 → −1.1. The deflation is **not** the √(rows/days) ≈ 3.1 a clustering correction would predict, and that is the finding: averaging removes the within-day wavelength scatter the row-level fit counted as residual, so Gobabeb's bar *narrows* (0.00028 → 0.00018 on 22 points against 234) and its `\|t\|` **rises**, 0.7 → 1.9. What moves is the coefficient, not the bar. Twenty-two days against 12 columns is a small sample and this is "not detected", never "absent" — the bounds run to **0.83 %** of signal across a record. The confounds are measured rather than supposed: **the hold-out's own calendar drift is now 0.00 days per year of record at all six sites** (#356 replaced the index rule with balanced sampling), so the season column that remains — La Crau +8.2 d/yr, `t` 4.2 — is the 42 fitted scenes alone, which is what the annual harmonic is left absorbing; and **Baotou's gravel target is itself darkening at −0.0037 /yr** (t −3.6), the only resolvable ρ_BOA slope, which is the site changing and not the reference (§5.4) | examples/radcalnet_error_budget.rs |
+| earthvision | That §5.1's *fitted* ozone scalar is the same absorber, now *predicted* | measured ozone column × published cross-section (Serdyuchenko et al. 2014, slit-convolved), applied as two-way `exp(−τ₃(1/μ_s + 1/μ_v))` above the scattering — **nothing free** | MODTRAN's own Chappuis absorption on the same scenes | over 540–690 nm: **0.94 % relative RMS with the measured column against 7.57 % without it**, a factor of **8.0**, predicted rather than fitted (§5.4) | tests/radcalnet_measured_radiance.rs, tools/gen_ozone_cross_section.py |
+| earthvision | **The same cross-section on all 211 published wavelengths, not the 14 the gates use** — the fixture tabulated exactly the gate wavelengths, so every other channel carried no ozone at all and a whole-grid comparison could not be run | the same Serdyuchenko et al. (2014) atlas data through the same slit convolution: **only the wavelength list changed**, which is the check — a grid extension must move coverage and nothing else | the fixture's own previous rows, compared value by value, and the absorption fixture's grid, which the Rust invariant now pins the ozone table to element-wise rather than by length | **14 → 211 rows, all 14 that already existed bit-identical, none dropped**. Ozone reaches **47 of the 211**: at the largest column the fixture carries (415 DU) the other 164 sit under a two-way optical depth of 1e-3, below RadCalNet's own 1e-4 reflectance quantisation, so the grid is *covered* rather than merely wider. The three named choices, re-costed on it as what they do to two-way transmittance at 415 DU: slit-averaging the cross-section instead of the transmittance **2.43e-5**, 293 K instead of 223 K **1.12e-3**, a 0.17 nm air/vacuum shift **2.68e-4**. The tabulation's own floor is a slit average of **−9.385e-26 cm²**, 2.1e-6 of two-way depth, which bounds what the clamp to zero discards (§5.4) | tests/radcalnet_measured_radiance.rs, tools/gen_ozone_cross_section.py |
+| earthvision | **Gaseous band absorption inside the transport, on all 211 published wavelengths** — `Atmosphere` was grey, so 197 of RadCalNet's 211 channels were unusable and the residual climbed a ladder 0.90 % → 3.5 % → 130 % from window to strong band | a k-distribution per gas per channel, `T(u) = Σ_j w_j exp(−k_j u)`, fitted line-by-line from HITRAN over a 6-node surface-pressure ladder; the five absorbers' distributions multiply (weights ×, depths +) and the transport runs once per product term, so each term is a grey absorber the photons see rather than a two-way factor applied after | RadCalNet's own MODTRAN TOA reflectance at every published wavelength, not the 14 the window gates use; the fit is checked against its own line-by-line curve, and the table's cost against the exact product it approximates | the ladder **flattens**: strong band mean residual **+1003 % → +2.70 %**, weak band **+7.29 % → +0.31 %**, and the windows, which have no gas to get wrong, come out **unmoved by the layer** — rms 0.0152 → **0.0153**, a wash rather than the small improvement the pre-#369 table reported. Steepness reads **2920× → 11.0×** where an earlier run reported 9.2×, and the rise is the denominator improving rather than the strong band degrading: #361 gave the k-terms their photons in proportion to weight instead of equally, which left the strong band where it was (0.1691 → 0.1695) and took the window rung from 0.0184 to 0.0150 — that A/B, and every 128-against-256 figure below, was measured on the pre-#369 table and is quoted as the historical comparison it is, not as a property of the table that ships. A ratio is only as readable as its denominator, and this one is quoted both ways for that reason. Coverage closes as an identity rather than a floor — 880 compared + 589 RadCalNet fill values + 8 refused = 7 scenes × 211 channels — with **0 refused as untabulated and 0 for a pressure off the ladder**, all eight refusals being a column past the fit's own grid (a prior 6-gas-less run refused 176, of which 169 were pressure). **The ladder's top node was not a node.** All 1055 rows carried bit-identical rates at 1040 and 1013.25 hPa, because the generator clipped its layering with `np.minimum(edge_p, surface_hpa)` while the U.S. Standard profile starts at 1013.25 hPa, so the ceiling had no extra air to add; a surface pressure in between interpolated across a segment of exactly zero sensitivity, and 13.6 % of hold-out rows land there. Fixed at the producer and regenerated in #369, whose own row below carries the evidence and the cost; every figure in this row is measured on the regenerated table. The exact product is **not affordable and this is measured, not assumed**: median **18 816** terms per channel, worst **368 640** at 2170 nm, **5 575 735** transport runs per scene-sweep. The shipped fixture header now agrees on the first two, which it did not before: it counted fit *slots*, including ones the fit drove to zero, which write as `0.0000000000` and produce no transport run, and since #369's regeneration it counts what a consumer pays. It is reduced by a correlated-k resort that preserves Σw and the mean optical depth **exactly** and is one-signed by Jensen. The obvious equal-weight binning is **structurally wrong** — 49 % of the product's weight at 1390 nm sits past τ = 20 where exp(−τ) < 2e-9, so half the bins resolved depths that all transmit the same nothing — and binning on `w exp(−τ)` instead bought **5.2× at identical cost** (1.01e-1 → 1.93e-2 at 64 bins, on the pre-#369 table; the shipped scheme reads 2.40e-2 there now). At the shipped 256 bins the resort costs **3.9e-3** of channel transmittance at worst, at 1400 nm, for **211** terms per channel against the exact 26 636 — a quarter of the **1.52e-2** rms the sweep's own window rung reports with no gas at all, which is the floor any of this sits on (§5.4). The ladder above is quoted at that shipped setting rather than at the 128 bins an earlier run used, and the difference is worth naming: on the pre-#369 table, 128 bins reported strong band **+2.44 %** and weak **+0.29 %** against 256 bins' **+2.48 %** and **+0.30 %** — it is the pair that carries the argument, not the absolute values, which the regeneration has since moved to +2.70 % and +0.31 %. The coarser resort is not the better answer — the bias is one-signed *downward* in transmittance, so the coarser rung cancels part of a real positive residual, and adding bins correctly moves the sweep away from RadCalNet. A residual that improves when the approximation gets worse is the shape of an error being hidden, and here it is measured rather than inferred. **How much of it was ever resort bias is smaller than it looked**: under the equal photon split the 128/256 gap was 0.25 points of strong-band residual, and under #361's weight-proportional split, on the same seeds and the same fixture, it is 0.04 — so roughly six parts in seven of the gap that argument was drawn from was transport noise rather than binning. The direction survives the correction and the magnitude does not, which is the honest way round for it to fail | tests/radcalnet_measured_radiance.rs, src/gas.rs, tools/gen_gas_transmittance.py |
+| earthvision | **How much water absorption the 25 cm^-1 line-wing cutoff leaves out** — the gas table truncates every strong line's Lorentz wing there and charges the truncation in its own header, and the piece that belongs in its place is the water-vapour continuum, which is absent (#358) | the published MT_CKD scaling applied to our own layering: `rho_rat = (P/1013)(296/T)`, self scaled by `(296/T)^texp` and the water VMR, foreign by the dry fraction, both times the radiation term `ν tanh(hcν/2kT)`, summed over the same `gen_gas_transmittance.profile` the shipped table was built on and averaged over the same 10 nm triangular slit | **MT_CKD_H2O 4.3** (AER-RC, tag `4.3`), 2003 coefficients on a 10 cm^-1 grid, self and foreign at 1013 hPa / 296 K. **Oracle, never a dependency** — AER grants use "for scientific and research purposes only" and forbids incorporation into commercial software without written consent, so the file is cached outside the repository and nothing derived from it is committed. Coefficients © Atmospheric and Environmental Research, Inc., 2022; reference Mlawer et al. (2012), doi:10.1098/rsta.2011.0295 | **In the nine gate windows it is negligible and in the bands it is the whole story.** Worst gate window **1.65e-4** of channel transmittance at 600 nm and 2 cm of water — two orders under the **1.52e-2** rms the sweep's own window rung carries with no gas at all — so the forward comparison, which gates on windows, is **not** biased by the absent continuum. At 940 nm it is **7.68e-2** at 2 cm and **2.00e-1** at 5 cm, which is **1.05×** the cutoff ladder's own 50 cm^-1 and 25 cm^-1 rungs (7.29e-2, 1.90e-1) — the missing continuum is the same size as the truncation the header already charges, to five per cent, at both columns, which is the check that the two are the same physics. Deep in the bands it saturates: 0.92 at 1370 nm, 0.97 at 1860 nm. **Three of the nine gate windows have no MT_CKD coefficient at all** — 410, 440 and 490 nm sit above the model's 20000 cm^-1 ceiling, along with every channel below 500 nm (§5.4) | tools/mt_ckd_oracle.py |
+| earthvision | The plane-parallel assumption, bounded rather than asserted — and, once bounded, **refuted as the explanation of the drift it was filed against** (#357) | the same scene propagated across a whole day's air-mass arc — RadCalNet publishes 09:00–15:00 local, so 5 of the 6 sweep days span at least 0.5 units of air mass — regressing the relative forward residual on air mass per day; and then the *displacement* a real slant path would apply to that air mass, two ways: exactly for a homogeneous shell 8 km thick on a 6371 km sphere, which is what this transport models, and by Kasten & Young's (1989) empirical fit, the larger of the two | RadCalNet's own half-hourly cadence on a single site and date, which holds surface and atmosphere near-fixed and varies only the geometry; the displacement needs no oracle, being geometry | worst drift **+0.0165 per unit air mass**, i.e. **+2.2 % of the signal across 1.31 units** at Golmud (2824 m); the other four days run −0.006 to +0.008. **Sphericity is not what that measures.** Over the same day a real slant path displaces the air mass by **0.0097 of 1.314 units — 0.74 %** — so it can account for **0.016 %** of signal, one part in 135 of the drift. Across the gated fixture the displacement is **0.0032 units** on the mean row and **0.026** on the worst, a path error of at most **0.83 %**, which at the measured **+0.00710 ± 0.00073 per unit** is **5.2e-6 of TOA reflectance** — 1.1 % of our own side of the budget, 0.06 % of RadCalNet's bar. Only the solar leg carries it: the reference publishes nadir. Two readings had been conflated — how much the residual *depends* on air mass, and how much error is in the air mass the model *computes* — and only the second is sphericity. The single homogeneous layer is what is left pointing at the coefficient (#368) (§5.4) | tests/radcalnet_measured_radiance.rs, examples/radcalnet_error_budget.rs |
+| earthvision | Whether the **vertical arrangement** of Rayleigh and aerosol matters, or only their sum — `Atmosphere` is one homogeneous layer, and the air-mass coefficient was what was left pointing at it once sphericity was refuted (#368) | a layered photon walk written beside the shipped one, holding the total extinction depth `τ_r + τ_a` and the total scattering depth `τ_r + ω_a τ_a` exactly fixed and varying only where the two sit: maximally separated in both orders, and both components on exponential profiles (`H` = 8 km molecular, 1.0/1.5/2.0 km aerosol) sliced 24 ways. Differenced against the mixed layer **at the same seed**, so the shared Monte-Carlo noise cancels | its own reproduction of the shipped transport: a homogeneous stack must return `monte_carlo_slab`, `path_reflectance` and the whole `AtmosphericCoupling` **bit for bit**, at one slice and at twelve — the second being the check that a layer boundary is free when there is no contrast across it. The bar on every difference is measured, not assumed: how much the paired difference itself moves across three streams | **the arrangement is real and it is not the drift.** Stratified at `H_a` = 1.5 km moves TOA reflectance by **5.26e-4 rms** (worst 2.92e-3, mean +2.81e-4) against a Monte-Carlo bar of 2.04e-4 — **2.6×** — and the effect is monotone in the aerosol scale height (6.30e-4 → 5.26e-4 → 4.63e-4 as it goes 1.0 → 2.0 km) with the maximally separated stacks above all three, which is what says it measures arrangement rather than discretisation. But its air-mass slope is **+3.95e-5 ± 4.58e-5** per unit, `t` = 0.86, against the **1.64e-3** of TOA reflectance per unit the section's own +0.00710 coefficient corresponds to — **2.4 %, unresolvable, and the wrong sign**; the two extreme stacks bracket it at +1.3 % and −3.4 % and neither reaches `t` = 1. On Golmud 2023-210, the sweep the ticket named as its test, it is **6.2 % of the +0.0165 drift with the same sign**, so it steepens rather than flattens. The premise is refuted the way #357's was; what survives is a **budget line worth 1.08× our own 4.87e-4 side and 6.2 % of RadCalNet's bar**, charged at zero today, and two larger terms partly cancelling inside it — ρ_atm 5.43e-4 rms against `T↓T↑` 7.23e-4 (§5.4) | examples/layer_arrangement.rs |
+| earthvision | **That the gas table's top pressure node carries an atmosphere of its own** — 1040 hPa was a bit-identical copy of 1013.25 in all 1055 rows, so the ladder's ceiling was decorative and the 13.7 % of RadCalNet rows that sit above sea-level pressure were being fitted against sea level (#369) | the producer is fixed, not the table: the U.S. Standard Atmosphere is extended one segment *below* sea level at its own lapse rate, density scale and water-drying slope, and a `base_km` edge is prepended whenever `surface_hpa` exceeds 1013.25, so a higher surface pressure builds a genuinely deeper column instead of clipping to the same one. Two assertions in the generator refuse a profile that does not gain a layer or gain water at the surface | the transmittance a consumer divides by — `T(u) = Σ_j w_j exp(−k_j u)` on each channel's own column grid, before against after — because the fitted rates are quantile rungs and a row-by-row comparison of them has no meaningful denominator. And, separately, the **line-by-line curve** rather than the fit that produced it, since a fit is not its own oracle | **the node is a node.** 756 of 756 absorbing rows carried an identical 1040 and 1013.25 block before; **0 of 756** do now. At 1040 hPa the profile builds **193 layers** against 1013.25's 192 and carries **0.01210** surface water VMR against 0.01193. On the consumer-visible transmittance the top node moves by a median **1.2e-5** and a worst **2.3e-1**. The joint fit shares one weight vector across the whole ladder, so the five lower nodes move as well — median 7e-9 to 2e-8, worst 1.2e-2, three orders below the top node at the median — which is why the check is the transmittance and not the parameters, and why "the other five will be bit-identical" was the wrong prediction to make. 277 of the 756 still differ by under 1e-6 across the top segment, and that is physics rather than the old defect: a channel whose lines are far from saturation barely notices 27 hPa. **Cross-checked line-by-line**: over the 1013.25–1040 segment at 940 nm, on RadCalNet's own 1945 slant columns, the shipped table reads **0.034 %/hPa at the median and 0.098 %/hPa at worst** against line-by-line's **0.034 / 0.097** — 1 %. The ceiling earns its place: **266 of those 1945 rows, 13.7 %**, sit above 1013.25 hPa, so a ladder stopping there refuses every one of them, and clamping instead of refusing charges **0.6 % of channel transmittance typically and 1.7 % at worst** over the 17.8 hPa the archive actually overshoots by — an order of magnitude above this table's own fit error, and silently. **It is not free**, and the cost is the reason to state it rather than the reason to hide it: one shared weight vector now has to cover a sixth genuinely distinct pressure, so the worst H2O fit error goes 3.16e-3 → **3.54e-3** at 1360 nm, CH4 3.58e-5 → **7.98e-5** at 2350 nm, the exact product goes from a median 13 104 terms to **18 816** and a worst 234 000 to **368 640**, and the 211-wavelength sweep refuses one channel more than before — 8 against 7, every one of them a column past the fit's own grid rather than a pressure off the ladder | tools/gen_gas_transmittance.py, tests/fixtures/gas_transmittance.txt, tests/radcalnet_measured_radiance.rs |
+| earthvision | Whether the layered atmosphere should become the *default*, now that the arrangement is known to be worth 6.2 % of RadCalNet's bar and charged at zero (#370) | the stacked transport promoted out of the example and into the crate — `monte_carlo_stack`, `stack_path_reflectance`, `coupling_from_stack`, with `monte_carlo_slab`, `path_reflectance` and `coupling_from_slab` re-expressed as their one-slice case over the same kernel — and then the two arrangements scored on the **forward** residual against RadCalNet's published TOA over the same 313 gated rows, `ω_a` swept over five values with each arrangement given its own parabolic optimum | RadCalNet's published TOA reflectance, the only quantity in the comparison that is not ours. For the refactor itself the oracle is the shipped transport: a uniform stack must return `SlabResult`, `path_reflectance` and the whole `AtmosphericCoupling` **bit for bit**, at one slice and at twelve — and the two hold for different reasons, which is worth separating. One slice is structural: `edges` starts its prefix sum at the first thickness rather than at a leading zero, so the total *is* that slice's depth. Twelve is measured: `0.24 / 12.0` summed twelve times lands one ulp below `0.24`, so the stack's `tau` is not the layer's and the runs agree regardless, because no free path drawn there resolves a one-ulp window | **the capability ships; the default does not change.** The one-slice stack reproduces the shipped walk exactly — optical depth is additive along a path, so a boundary with no contrast across it changes neither the free-path draw nor anything looked up by it — and the #368 paired table comes back digit for digit through the public API, which is what says the example was measuring the crate and not a transcription of it. But at each arrangement's own best `ω_a` the layered atmosphere is **4.9 % worse** on the forward residual (`mixed` 1.996e-3 at 0.883, `stratified` 2.093e-3 at 0.878), and the reason is not that the physics is wrong: the arrangement adds almost orthogonally to a residual 4× its size, `sqrt(2.002e-3² + 5.255e-4²)` = 2.070e-3 predicted against 2.096e-3 measured. **A paired difference has no oracle in it** — 5.26e-4 says how far the answer moves, not toward what — and the only oracle that could adjudicate is four times coarser than the effect. `mixed` stays default, the 5.26e-4 is charged as model uncertainty at ±15 % for the scale height (§5.4) | src/radiative_transfer.rs, src/atmospheric_correction.rs, examples/layer_arrangement.rs |
+| earthvision | Mie Q_ext, Q_sca, g at 8 size parameters over x = 0.1…2000 | Lorenz–Mie series (Bohren & Huffman); Wiscombe 1980 truncation; MIEV0 recurrence-start margin | `miepython` 3.3.0 (independent implementation) | Q_ext ≤ 1.6e-10, Q_sca ≤ 1.4e-13, g ≤ 2.4e-11 across the whole range; both worst cases are cancellation, not convergence (was 1.6e-4 on Q_ext at x = 1000 — #288) | src/mie.rs |
+| earthvision | Mie series length and truncation order | Wiscombe (1980) `nₘₐₓ = ⌊x + 4x^{1/3} + 2⌋ + 1` | the criterion evaluated by hand at five x, and the coefficient vectors' own length against it | exact | src/mie.rs |
+| earthvision | Size-distribution densities and quadrature range | Hansen & Travis (1974) modified gamma and lognormal | the published closed forms at three radii each, and `radius_range`'s stated arithmetic at both ends | ≤ 1e-14 relative | src/mie.rs |
+| earthvision | The size integration itself (129-node composite Simpson in ln r) | Simpson's rule, `(h/3)(f₀ + 4f₁ + f₂)` per panel | the same rule reassembled panel by panel in the test — bulk optics *and* the accumulated angular table | ≤ 1e-10 relative at every node and in all four bulk quantities | src/mie.rs |
+| earthvision | The two ways an arbitrarily small particle breaks the arithmetic | `ξₙ` overflows as `(2n−1)!!/xⁿ`; `\|aₙ\|²` underflows as `x⁶` | bisected recurrence floor `x = 1.0344774107715245e-60`, and a distribution six decades above it whose scattering cross-section is still exactly zero | both refused with `None`, neither returns a `NaN` cross-section (#287) | src/mie.rs |
+| earthvision | Mie Rayleigh limit and angular/efficiency consistency | closed form (8/3)x⁴·\|(m²−1)/(m²+2)\|²; ∫(\|S₁\|²+\|S₂\|²)/2k² dΩ = C_sca | published closed form; second code path in the same module | within the O(x²) correction; < 1e-9 rel | src/mie.rs |
+| earthvision | Hexagonal-ice halo angles (22° and 46°) | Snell minimum deviation `2 asin(n sin(A/2)) − A` through the 60° and 90° wedges | published closed form | 21.8° and 45.7°, peaks located within one 0.25° bin | src/ice.rs |
+| earthvision | Thin-slab reflectance, per phase function | single-scattering limit `R → ω τ ∫₋₁⁰ p dμ` | the member's own backscatter fraction (Simpson, 2·10⁵ nodes) | ratio 0.987–1.063 at τ = 10⁻³, consistent with the O(τ ln τ) approach | tests/phase_function_slab.rs |
+| earthvision | Bessel `J₁` (Miller downward recurrence + Σ-normalisation) | recurrence `J_{n−1} = (2n/x)J_n − J_{n+1}`; `1 = J₀ + 2ΣJ_{2k}` | `scipy.special.j1` at 13 arguments over 10⁻⁶–10³, and the tabulated first zero | < 2e-15 absolute everywhere; < 2e-15 at the zero 3.8317059702075123 | src/ice.rs |
+| earthvision | The Hankel asymptotic branch of `J₁`, above `x = 100`, and where it changes over | A&S 9.2.5–9.2.6 with `µ = 4`: `√(2/πx)·(P cos χ − Q sin χ)`, `χ = x − 3π/4`, nine terms of `aₖ = aₖ₋₁(µ − (2k−1)²)/(8kx)` | `mpmath.besselj` at 40 digits, 300 random arguments per band, error as a fraction of the envelope `√(2/πx)` — the only honest measure near a zero of `J₁` | asymptotic vs recurrence: 5.1e-11 / 1.7e-15 on [20, 40]; 7.1e-14 / 2.3e-15 on [40, 80]; **8.1e-15 / 3.8e-15 on [80, 160]** — the crossover; 2.0e-14 / 9.4e-15 on [160, 400]; 2.0e-14 / 7.6e-15 on [400, 1e3]; 2.1e-13 / 3.6e-14 on [1e3, 1e4], where the asymptotic pays `x·ε` for the argument reduction in `cos χ` and the recurrence pays nothing because it calls no trigonometric function. The seam itself is measured across the two adjacent doubles either side of 100: step < 3e-15. What it buys is a *bounded* cost — the recurrence runs `2(x + 10√x + 40)/2` steps, and `x` comes from a public argument (#289) | src/ice.rs |
+| earthvision | The overflow rescale inside that recurrence, and the series cutoff under it | rescale by 10⁻²⁵⁰ whenever the unnormalised value passes 10²⁵⁰; `J₁ = x/2` below 10⁻⁸ | `mpmath.besselj` at `x = 2.5e-5`, the only measured band (`[2.10e-5, 3.67e-5]` over a 5 201-point log sweep of `[1e-8, 1e5]`) where the rescale fires at `n = 2` and so reaches `j1`; and `x = 1e-17`, where the recurrence and the series part company | exact at 2.5e-5; a rescale that added instead of multiplying returns 1e245 there, and the recurrence below the cutoff returns 4.99999999999999959e-18 for 5e-18 | src/ice.rs |
+| earthvision | Hexagon face normals, the branchless tangent frame, and the slab's own tie-breaks | regular hexagon of unit circumradius — inradius √3/2, normals at 30° + 60°k; Duff et al. branchless frame; convex body as an intersection of half-spaces | the geometry written out by hand: normals and offsets, orthonormality on both sides of the `w_z = 0` branch, and five hand-computed intersection configurations | < 1e-15; parallel-and-on-the-face, degenerate plate tangency and an exit at `t = 0` each resolve as documented | src/ice.rs |
+| earthvision | Micro-facet tilt, and what happens when every draw is rejected | Cai–Liou / Yang–Macke distorted facet `n − ζ_x u − ζ_y v`, renormalised | the same draw sequence replayed from a second RNG of the same seed, on the basal cap and on a prism normal | < 1e-15 per component; a ray exactly in the face gets the undistorted normal back, which is what keeps the fallback from losing energy | src/ice.rs |
+| earthvision | Two-index Fresnel reflectance at oblique incidence | unpolarised `½(r_s² + r_p²)` | the closed form written with two indices instead of the code's ratio, at 0–80° in both directions | < 1e-15 | src/ice.rs |
+| earthvision | The ray tracer's own optics, five configurations | geometric-optics Monte Carlo at a fixed seed | golden pins measured from the tracer, alongside `ω ∈ [0, 1]`, `\|g\| ≤ 1` and the ray count | ≤ 1e-12 relative; what they seal is every arithmetic step of the bounce loop, including the one that decides whether a roughened facet's refraction is consistent with the face | src/ice.rs |
+| earthvision | The lobe's inner quadrature, and the moments the asymmetries come from | composite Simpson per grid interval; `∫p dμ` and `∫μp dμ` of the piecewise-linear interpolant | the same Simpson rule reassembled panel by panel, and the moments recomputed from the tables themselves | ≤ 1e-10 relative at every node; both asymmetries and the combined density pinned node by node | src/ice.rs |
+| earthvision | A grid that is not a grid | the lobe's integral must be finite and positive before anything is divided by it | a repeated node, whose cell of zero width divides by its own zero | `None`; `NaN <= 0.0` is false, so a guard testing only the sign would have returned a phase function of `NaN` as success | src/ice.rs |
+| earthvision | Diffraction lobe geometry | Airy pattern `[2J₁(v)/v]²` of the mean projected area (Cauchy, `S/4`) | its own first zero: `θ = 3.8317/x_eq` from geometry the code never stores | 0.72004°, located to < 0.01° on a 0.005° grid | src/ice.rs |
+| earthvision | Ray-traced table's asymmetry parameter | first moment of the tabulated density | the ray tracer's running mean of `cos Θ` — no shared arithmetic | 6e-6 absolute (the unweighted node reconstruction gave 4.5e-2) | src/ice.rs |
+| earthvision | Combined geometric optics = rays + diffraction | `Q_ext → 2`: equal extinction shares, so `ω = (1+ω_ray)/2` | grid refusal to matter: 720 / 360 / 180 nodes on an unresolved 0.72° lobe | combined `g` spread < 1e-3 across a fourfold coarsening | src/ice.rs |
+| earthvision | Facet roughening erases the halos | Cai–Liou / Yang–Macke distorted facet, σ = 0 / 0.03 / 0.50 as labelled by Yang et al. 2013 | the published qualitative result: severely roughened habits have no halo | `p(22°)/p(21°)` = 31.3 → 1.86 → 1.03 → 0.90; `g` moves only 0.628 → 0.600 | src/ice.rs |
+| earthvision | Energy conservation under roughening | a transparent crystal returns everything it intercepts | ω at σ = 0…1 (regression: inconsistent micro-facets leaked 23% at σ = 0.5) | ω > 1 − 1e-4 at every σ | src/ice.rs |
+| earthvision | Ray-tracing asymmetry `g′` vs aspect ratio, 9 points over D/L = 0.1…10 | geometric optics for randomly oriented hexagonal ice | **Fu (2007)** JAS 64(11) Tables 1–2, band 0.25–0.70 µm (fit to Takano–Liou / Yang–Liou, its own error 0.4%) | worst 4.2%, best 0.07%; MC repeatability 1–2e-3 | tests/published_ice_optics.rs |
+| earthvision | Delta-transmission fraction `f_d` vs aspect ratio | undeviated passage through the crystal's parallel faces | Fu (2007) Eqs. (3.5)–(3.6), same band | worst 5.6% over D/L = 0.1…10 | tests/published_ice_optics.rs |
+| earthvision | Combined asymmetry `g` and its shape | ray tracing + diffraction | Fu (2007): "0.77 to above 0.9, minimum at D/L ≈ 1" | 0.771 at D/L = 1 → 0.914 at 10, minimum located at D/L = 1; ≤ 1.6% pointwise | tests/published_ice_optics.rs |
+| earthvision | The two-component split itself | `Q_ext → 2` ⇒ `ω = (1+ω_ray)/2` | Fu (2007) Eq. (2.2) `g = 1/(2ω̃) + [1−1/(2ω̃)]g′`, derived independently | agrees to 8.5e-4 — the amount by which `g_diff = 0.9983` differs from Fu's assumed 1 | tests/published_ice_optics.rs |
+| earthvision | Roughening vs Fu's delta-removal proxy | `g_r = (g_s − f_d)/(1 − f_d)` | Fu (2007) Table 1 `g′_r` | Fu's algebra on our `g_s`, `f_d` reproduces his `g_r` to 1.7%; physical roughening sits up to 7.3% higher, largest at D/L ≈ 1 | tests/published_ice_optics.rs |
+| earthvision | reprojection Jacobians; orthorectification; 6S inversion; bundle adjustment | collinearity model; 6S atmospheric model (Vermote 1997) | self-consistency (FD / round-trip / gauge-fixed recovery) | 6S < 1e-15; ortho < 1e-7°; BA RMS < 1e-6 | src/camera.rs, ortho.rs, atmospheric_correction.rs |
+| earthvision | Tabulated phase: grid endpoints, the interval clamp and the shortest legal grid | piecewise-linear interpolant on `[-1, 1]`, one interval minimum | the table's own knots — `p(±1)` are the end knots, `ξ = 0/1` the end nodes, and `[-1, 1]` alone is the isotropic table | < 1e-15; sampling `ξ = 1` within 1e-9 of `μ = 1` | src/phase.rs |
+| earthvision | Tabulated phase: the linear interpolant and the zero-density knot | `p(μ) = pᵢ + t(pᵢ₊₁ − pᵢ)`; CDF inversion by the stable root `2d/(p₀+√(p₀²+4ad))` | hand-computed knots `k/6` on a 5-node grid; the `p₀ = d = 0` knot at which that root is `0/0` | < 1e-15; the degenerate draw returns the knot, not a NaN direction | src/phase.rs |
+| earthvision | Phase-function parameter domains and the split between mixture lobes | `\|g\| < 1`, open at both ends; `sample` cuts `[0, 1)` at `forward_weight` | the split deviate is the backward lobe's ξ = 0 (μ = −1) and one ulp below it the forward lobe's ξ = 1 (μ = +1) | both poles exact; `\|g\| = 1` refused on either lobe | src/phase.rs |
+| earthvision | Slanted-edge FWHM, RER and MTF of a known Gaussian PSF | ISO 12233 slanted-edge method; `FWHM = 2√(2 ln 2)σ`, `RER = erf(½/(σ√2))`, `MTF = exp(−2π²σ²f²)` | the closed forms themselves — the ground truth is exact because the input is synthetic | FWHM −0.4 % (0.02 abs), RER < 0.01, MTF < 0.01 at 0.1/0.25/0.4/0.5 cycles px⁻¹, `MTF(0) = 1` to 1e-12 | src/image_quality.rs |
+| earthvision | The same MTF for a box PSF, including its zero | `MTF = \|sinc(w f)\|`, first zero at `1/w` | published closed form — a zero is the case an exponential cannot fake | < 0.02 at 0.1/0.2/0.35; the two-pixel box's zero at 0.5 measured < 0.05 | src/image_quality.rs |
+| earthvision | The measurement's own transfer function, divided out | binning and adjacent-bin differencing are each a box of one bin width, so each multiplies the result by `sinc(f h)` | the uncorrected number against the closed form: `sinc(0.0875)·sinc(0.175) = 0.9377`, and `0.3679 × 0.9377 = 0.345` was exactly what the uncorrected code returned | 6 % at 0.35 cycles px⁻¹ and `h = ¼`, removed; what is corrected is the *analysis*, never the camera | src/image_quality.rs |
+| earthvision | Sub-pixel phase coverage — why ISO 12233 forbids a simple-fraction slant | a slant of exactly 1/10 px per row visits ten phases and no others, however many rows the patch has | the same code on both slants, against the same closed form | 1.6 % FWHM error repeating vs 0.4 % covering; the property, not the implementation | src/image_quality.rs |
+| earthvision | An independent ISO 12233 measurement of the same pixels | the standard's pipeline, re-implemented in numpy with a centred derivative and no correction | `tools/gen_edge_oracle.py` — **iquaflow could not be run**: its release pins `opencv-python==4.4.0.44` and pulls GPyOpt, sagemaker and torch, none of which resolve on a 2026 Python | the two codes' gap is the one their two conventions predict: within 1 % of `sinc(f h)·sinc(2 f h)` up to 0.35 cycles px⁻¹, 6 % at Nyquist where each code's own binning error is itself several per cent | tests/slanted_edge_cross_check.rs |
+| earthvision | The degradation modifiers move the metrics by the predicted amount | two Gaussians in series are a Gaussian of the quadrature sum | the predicted `σ = √(0.8² + 1.2²)` rather than merely a larger number | FWHM within 0.05 of the prediction; RER and MTF(0.25) both fall | src/image_quality.rs |
+| earthvision | Both SNR estimators return the noise that was added | LBP-homogeneity and block-variance estimators over a flat field | the injected `σ`; and a monotone ramp, which is a uniform LBP pattern everywhere and must be rejected | within 20 % of 0.6/0.02 = 30; the ramp returns `None` | src/image_quality.rs |
+| earthvision | Ground sample distance through a real RPC | pixel spacing measured by inverse-projecting adjacent pixels, on WGS-84 meridian and prime-vertical radii | the published Pléiades product grid (0.5 m resampled panchromatic), via the Réunion `.RPB` | 0.5078 m across-track, 0.5052 m along-track — 1.6 % and 1.0 %, the scene's own look angle rather than the nominal grid | src/image_quality.rs |
+| earthvision | The metres-per-degree scale the GSD is denominated in | `M = a(1−e²)/(1−e²sin²φ)^{3/2}`, `N = a/(1−e²sin²φ)^{1/2}` | the published WGS-84 values | 110 574 and 111 320 m/° at the equator, 111 694 at the pole, all < 1 m; 55 800 m/° of longitude at 60° within 50 m | src/image_quality.rs |
+| signal | FFT / DCT-II / FISTA-LASSO | DFT / DCT-II definitions; Beck & Teboulle 2009 (FISTA) | numpy `fft` / scipy `dct` / scikit-learn `Lasso` | < 1e-10 / < 1e-9 / < 2e-3 | src/fft.rs, insar.rs, tomosar.rs |
+| signal | SAR range/azimuth compression (IPR, PSLR) | matched-filter theory (Cumming & Wong) | published impulse-response theory (0.886·fs/B, −13.26 dB) | width < 1.0 samp; PSLR −14.5…−12 dB | src/sar.rs |
+| signal | Capon super-resolution / PolSAR H/A/α | Capon 1969; Cloude & Pottier 1997 | published Rayleigh resolution / Cloude-Pottier closed-form | bimodal below ~98 m; < 1e-9 | src/tomosar.rs, polsar.rs |
+| signal | RCMC / CSA / SBAS / InSAR unwrap / SL1MMER | published SAR processing algorithms (RDA/CSA, SBAS, PS-InSAR, SL1MMER) | self-consistency (analytic point target / recover ramp / noise-free) | peak > 1.8×; unwrap < 1e-9; v < 1e-9 | src/sar.rs, csa.rs, psinsar.rs, insar.rs, tomosar.rs |
+| vision | ResNet / U-Net end-to-end | He et al. 2016 (ResNet); Ronneberger et al. 2015 (U-Net) | PyTorch (double precision) reference | < 1e-9 | src/graph.rs |
+| vision | ONNX cloud CNN (tract runtime) | ONNX operator specification | onnxruntime reference | < 1e-4 | src/onnx.rs |
+| vision | Box IoU / NMS keep-set | IoU / greedy-NMS definitions | torchvision `box_iou` / `ops.nms` | < 1e-6 / exact | src/detect.rs |
+| vision | NN primitives (conv2d, pool, dense, softmax, convT, …) | ONNX operator specification | hand-computed exact values | exact / < 1e-12 | src/nn.rs |
+| gpu | SGP4 batch init+propagate (CPU) | Spacetrack 3 / Vallado 2006 — a code listing ⚠ | `sgp4` crate (Vallado) | pos < 1e-6 km, vel < 1e-9 km/s | src/batch_sgp4.rs |
+| gpu | GPU SGP4 / conjunction / coverage / porkchop *(ignored: needs GPU)* | internal API contract (f32 kernel ≡ f64 CPU) | GPU-f32 vs f64 CPU oracle | SGP4 < 2.0 km; conj rel < 1e-3; porkchop rel < 0.05 | src/lib.rs |
+| gpu | Parallel CPU screen/coverage ≡ serial | internal API contract | self-consistency (bit-identical) | exact == | src/lib.rs |
+| spacelab | Access-window rise/set edges (ISS) | elevation-event definition; IERS TN36 frame chain | Orekit `ElevationDetector` (independent frame + root-find), on the **same** IERS series | < 1.0 s per edge (plan C2) and < 1 ms in fact: **82 µs** | tests/access_oracle.rs |
+| spacelab | What Earth orientation is worth on a pass edge | IERS `finals2000A`, MJD 54725..54735 | the same Orekit fixture run twice, `EopSource::Series` against `EopSource::NoEop` | 82 µs against **38.047 ms** — 464× | tests/access_oracle.rs |
+| spacelab | What refraction costs an access edge, and the mask that reproduces it | Sæmundsson (1986) and Bennett (1982), the two fits `observability.rs` carries | self-consistency on the Orekit-validated ISS pass set: refraction applied to every sample against refraction applied once to the mask | every edge one-signed; 0.81–1.18 s at a 10° mask, 9.3–20.3 s at the horizon; the two routes within **3.7″** of elevation | tests/refraction_in_access.rs |
+| spacelab | ISS ground track w/ measured EOP *(ignored: snapshot)* | IERS TN36 + WGS-84 + IERS `finals2000A` | Skyfield fed the same finals2000A | dlat/dlon < 1e-6°, dh < 0.1 m | tests/earth_orientation.rs |
+| spacelab | Sentinel-1A propagated orbit vs design | ESA published Sentinel-1 orbit parameters | published Sentinel-1 orbit (i=98.18°, ~693 km, 0.9856°/day) | inc < 0.15°; precession 0.95–1.02°/day | tests/sentinel_reality.rs |
+| spacelab | teme_to_itrf_at ≡ decomposed transform; error-stage refusals | internal API contract | self-consistency / property | exact equality | tests/earth_orientation.rs |
+| spacelab | `EopSource::NoEop` is the zeroed pole and `UT1 = UTC`, and says so | internal API contract | self-consistency: the transform against `teme_to_itrf` fed the same fields | exact equality; `quality` is `Absent`, and TT is still the real one | tests/earth_orientation.rs |
+
+*`gnss` has the broadest external anchoring of the applied set — mapping functions, GPT3 and VMF grids
+checked digit-for-digit against Orekit, IGRF against ppigrf — over vis-viva / Kepler / round-trip
+layers. `ionosphere` reproduces NeQuick-G against the JRC reference implementation to rounding, and
+NeQuick-ITU against Orekit. Orekit had been NeQuick-G's oracle too, until the reference showed
+Orekit 13.1.7 out by up to 18.8 TECU on the ICD's own verification cases, for four reasons the port
+had inherited: Az re-evaluated along the ray, corrupt CCIR maps for July to December, the E-layer
+floor skipped without an F1 layer, and a quadrature that is not the ICD's
+(`tools/nequick-jrc-oracle/README.md`).
+`earthvision` is the most external-tool-validated Phase-8 crate (rpcm, OpenCV, numpy/skimage, DISORT,
+libRadtran via pyspectral, MODTRAN 5.3.3 via RadCalNet, miepython, scipy, published
+Ross-Li/Beer-Lambert), with ortho/6S/BA as honest round-trips; its radiative transfer is now anchored
+on three independent solver lineages rather than on Beer-Lambert alone, which only constrains the
+unscattered beam — and the outermost of the three is driven by an in-situ surface reflectance and an
+in-situ atmosphere on days nobody chose (§5.4). The ice model's two components are anchored differently
+on purpose: the ray-traced half by Snell's minimum deviation, the diffracted half by the zero of `J₁`
+and by refusing to depend on grid resolution, and their sum by two independent estimators of the same
+asymmetry parameter agreeing to `6e-6`. The crystal habit reaches the operational models' regime
+through facet roughening — at Yang's severely-roughened `σ = 0.50` the halos are gone and the phase
+function decreases monotonically through 22°. And the amount of forward scattering, which is the one
+number a solver consumes, is checked against **Fu (2007)**'s published parameterisation of
+Takano–Liou / Yang–Liou ray tracing: `g′` to 4.2% worst case over two decades of aspect ratio, the
+delta-transmission fraction to 5.6%, the combined `g` inside the published 0.77–0.9 band with its
+minimum at the published `D/L ≈ 1`, and the two-component split reproducing Fu's Eq. (2.2) to the
+`8.5e-4` by which this model's computed diffraction asymmetry differs from the 1 he assumes. The
+image-quality metrics are the crate's one case where the ground truth is exact and synthetic — a
+Gaussian PSF has a closed-form FWHM, RER and MTF, and a box PSF has a zero — so what needed anchoring
+externally was not the arithmetic but the *conventions*: an independent numpy ISO 12233 pipeline
+differing from this one in its derivative and its correction, agreeing to within 1 % of the transfer
+functions those two choices predict; and a real Pléiades RPC, whose ground sample distance comes back
+1 % off the nominal product grid rather than on it. iquaflow, which the port follows and which was to
+be the oracle, could not be installed at all. `signal` mixes three external anchors
+(numpy FFT, scipy DCT, scikit-learn Lasso) with published-formula and analytic self-consistency.
+`vision` rests on true PyTorch / onnxruntime / torchvision end-to-end oracles. `gpu` is a CPU-oracle
+crate whose f32 GPU kernels are `#[ignore]`-gated on hardware. `spacelab` (umbrella) adds third-lineage
+integration checks (Orekit access edges, Skyfield / published-design orbits).*
+
+### 5.1 A table called `rayleigh_only` is not a Rayleigh-only atmosphere
+
+pyspectral's look-up table is named for what it does not contain, and it was read as containing
+nothing else. Against a conservative Rayleigh slab at the Bodhaine et al. (1999) optical depth the
+table came back low everywhere — but not by a constant, and not monotonically in wavelength. The
+deficit in the fitted `τ` ran 1.0 %, 3.6 %, 8 %, **11 %**, 5 %, 2 %, 0 % across 400 → 800 nm, with its
+maximum at 600 nm. A wrong optical-depth model is a smooth function of wavelength; a wrong phase
+function does not care about wavelength at all. Neither shape has a maximum at 600 nm.
+
+The Chappuis band of ozone peaks at 602 nm. Two things then confirmed it independently of each other:
+
+* **pyspectral's own API.** `rayleigh_only` is a value of the *`aerosol_type`* argument — its siblings
+  are `marine_clean_aerosol` and the rest. It says there is no aerosol. The atmosphere is a separate
+  argument, `us-standard`, whose profile carries the standard ozone column, and libRadtran does not
+  remove it unless the input deck says so.
+* **The residual's functional form.** Ozone sits above the scattering layer, so it should appear as a
+  two-way `exp(−τ₃(1/μ_s + 1/μ_v))` and nothing else. Fitting that one scalar per wavelength collapses
+  the residual from 16.5 % to 0.7–0.9 % RMS at *every* wavelength over all 64 geometries, and the
+  fitted amplitude traces the band — peak at 600 nm, an order of magnitude down at 400 and 800.
+
+The third measurement is what makes it a finding rather than a fit. One free parameter can absorb a
+great deal inside the set it was fitted on, so it was fitted on the 24 geometries below air mass 3.05
+and *measured* on the 40 above: it predicts them to 0.8–1.1 % RMS, and the two halves agree on the
+value of `τ₃` to 4–7 % wherever the band is strong. At 400, 450 and 800 nm they agree only to ~22 %,
+which is the honest edge of the result — there the fitted amount is at the level of the ~1 % floor and
+is not a detection of anything.
+
+What this buys is that the number the table now yields is a comparison of *our angular shape* against
+DISORT's, with `τ_R` taken from a published model rather than fitted and the one fitted scalar
+attributable to a named absorber. Had the ozone been left in the residual, the crate would have
+recorded a 16.5 % disagreement with a discrete-ordinate solver at 600 nm and gone looking for it in
+the phase function, which is where it is not.
+
+**The RadCalNet leg of #267 is closed, and it strengthens this section.** It needed an account and
+acceptance of terms in a person's own name, which is the user's to give and not an agent's; the
+account now exists. §5.4 is what it measured. Two things there bear directly on the paragraph above.
+The ozone that is *fitted* here is *predicted* there — RadCalNet publishes a measured column, and a
+published cross-section turns it into an optical depth with nothing free, which reproduces the
+Chappuis absorption to a factor of 8.0 better than dropping it. And the fitted amplitudes here can be
+compared against a second, independent scene set rather than only against the band's own shape.
+
+### 5.2 The atmosphere was in the crate but not in the access geometry
+
+`Refraction` has been in `spacelab-coverage` since #279, with two published fits, a typed
+true/apparent distinction and a domain floor — and every consumer of it is on the *optical
+observability* path. `ElevationMask`, which the coverage engine, the C ABI and the Python bridge all
+scan with, and `ElevationDetector`, the Orekit-parity `g`-function, both compare against the straight
+line of sight, and neither said so. A caller asking for "visible above 10°" got the geometric 10°.
+
+`docs/limitations.md` filed this under negligible: *"a fraction of a degree near the horizon, which
+moves a rise/set by a second or two, again inside the TLE floor."* Measured on the ISS day
+`access_oracle.rs` already validates against Orekit, that is wrong in the direction that matters:
+
+| mask | passes | Δ rise / Δ set |
+|---|---|---|
+| 10° | 3 | 0.81 – 1.18 s |
+| 5° | 6 | 2.02 – 8.56 s |
+| 0° | 7 | 9.34 – 20.27 s |
+
+A second or two is the *best* case at a working mask, and the horizon is an order above the TLE floor
+the budget said contained it. Two properties matter more than the size. It is **one-signed** — every
+edge, every pass, opening early and closing late — so it does not average out of a revisit statistic
+the way the TLE's along-track error does. And its magnitude is `R(mask)/(dε/dt)` at the crossing, so
+the *pass* sets it as much as the atmosphere does: the 20.27 s belongs to a pass peaking at 2.06°,
+which crosses the horizon almost tangentially, against 9.34 s for one peaking at 47.8°.
+
+**The fix is a constant, and that is worth stating precisely.** `h ↦ h + R(h)` is strictly increasing,
+so "apparent elevation ≥ mask" and "geometric elevation ≥ `Refraction::geometric(mask)`" are the same
+condition — an apparent mask is exactly one geometric mask. Nothing needs to reach the batch kernel,
+no per-sample transform is required, and no API had to grow: the conversion is the `Refraction` method
+that already existed. `refraction_in_access.rs` measures both routes rather than asserting the
+identity, and what separates them is **3.7″ of elevation** at every mask — the Sæmundsson/Bennett
+round-trip difference, since the two fits are not exact inverses of each other, and not an
+approximation in the shift. The scale-free form is the one the test asserts: in seconds the same
+difference is 1.3e-2 s at a 10° mask and 2.6e-2 s at the horizon, because the elevation rate that
+divides it is a property of the pass.
+
+What is *not* closed: refraction is still not applied by default, because which of the two elevations
+a coverage product wants is the caller's question and not this crate's. What changed is that the
+choice is now named at all three sites — both mask types and the budget — with the number attached.
+
+### 5.3 The correction had been verified as a solver and never on an atmosphere anyone measured
+
+Every check on `atmospheric_correction.rs` before #326 tested it against another solver — DISORT in
+`phase_function_slab`, libRadtran through pyspectral in §5.1 — on optical depths somebody chose. The
+module's own fixtures use `0.1`, `1e-4`, `0.7` and `1.2`; §5.1 above feeds the model a US Standard
+profile. Those are the right first tests and they answer a different question from the one a
+correction is asked in the field. AERONET answers this one: the Version 3 almucantar inversion
+retrieves the optical depth, the single-scattering albedo and the asymmetry parameter *together*,
+which are exactly `Atmosphere`'s three fields, so the triple is self-consistent rather than three
+numbers assembled by hand.
+
+A hundred and twenty atmospheres — savanna burning at Mongu, Amazon smoke at Alta Floresta, Arabian
+dust at Solar Village, Sahelian dust at Banizoumbou, industrial haze at GSFC, six loads each spanning
+the site's own `AOD(440)` range, four wavelengths — span `τ` 0.079–3.778, `ω` 0.755–0.992 and `g`
+0.442–0.826. **No fixture in this crate had ever absorbed at all**, and none had `g` above zero
+except by construction. The fixture was sixty when #326 wrote it and was doubled by #327, for the
+reason in the fourth bullet below: the worst of a noise distribution is only as meaningful as the
+number of draws it is the worst of.
+
+Four findings, in the order they matter.
+
+* **What assuming costs.** Build the TOA reflectance of a `ρ_s = 0.15` surface through each measured
+  column and invert it with the coupling of the assumed atmosphere: the retrieval is wrong by up to
+  **0.2933** — a 196 % error — and 0.1308 RMS. The best case is 1e-4, on the thinnest and least
+  absorbing column of the hundred and twenty, which is the honest shape of it: assuming is nearly
+  free exactly where the assumption happens to be true and ruinous everywhere else.
+* **All four terms agree with DISORT inside our own noise.** Every comparison point is run at three
+  independent streams, so each carries a standard error and the residual can be divided by something
+  rather than eyeballed against it:
+
+  | term | n | worst | RMS residual | RMS sampling noise | ratio | signed mean |
+  |---|---|---|---|---|---|---|
+  | `T↓` | 120 | 5.92e-3 | 1.225e-3 | 9.834e-4 | **1.25** | +1.46e-4 (+1.6σ) |
+  | `T↑` | 120 | 2.58e-3 | 7.640e-4 | 7.621e-4 | **1.00** | −3.66e-5 (−0.5σ) |
+  | `s` | 120 | 7.00e-3 | 2.294e-3 | 2.351e-3 | **0.98** | −1.50e-4 (−0.7σ) |
+  | `ρ_atm` | 360 | 1.63e-2 | 4.325e-3 | 4.248e-3 | **1.02** | +1.06e-4 (+0.5σ) |
+
+  What is being reported is our statistics, not a difference between the solvers. The test gates on
+  the ratio rather than on the residual, which is the only form of this assertion that does not
+  silently loosen when the photon count changes.
+* **The spherical albedo's error is its quadrature, not its sampler.** The reference is computed on
+  the *same* four Gauss nodes `coupling_from_slab` uses, so the 7.00e-3 above is the Monte Carlo's;
+  the four-node rule differs from a sixteen-node one by 1.30e-2 worst. That is the larger of the two
+  and it is left alone deliberately: `s` enters the correction only through `1/(1 − s·ρ_s)`, and at
+  the `s ≈ 0.1` these columns produce it is worth 2e-4 relative in the answer.
+* **The path reflectance's "twice its noise" was an artefact of comparing two different statistics,
+  and #327 is that correction.** #326 reported `ρ_atm` at 2.43e-2 worst against 1.27e-2 of
+  seed-to-seed movement and left open whether the excess was a systematic in the next-event
+  estimator at high `τ`. It was neither a systematic nor a fat tail: the residual was a **maximum
+  over 180 points at three azimuths**, while the number it was compared against was a maximum
+  deviation among **three seeds at azimuth 0 alone** — a much smaller order statistic, taken at the
+  azimuth where the path reflectance is largest and its *relative* noise therefore smallest. At
+  1.6 M photons the backscattering azimuth is **1.66×** noisier in relative terms than the forward
+  one (4.372e-4 against 2.636e-4 RMS), which is most of the factor by itself.
+
+  Two convergence studies close it, and either would have shown a floor if one existed. **Ours, in
+  photons** (`examples/aeronet_path_residual.rs`, 32 seeds on all 120 atmospheres, 360 points): RMS
+  bias **1.525e-3 → 7.061e-4 → 3.599e-4** at 100 k → 400 k → 1.6 M, ratios 2.16 and 1.96 against the
+  2.00 that `1/√N` predicts and 4.24 against 4.00 over the full 16×; worst 5.60e-3 → 3.14e-3 →
+  1.40e-3; the aggregate lean +1.41σ, +1.76σ, +0.36σ, never significant, and `|z| > 3` in 2, 0 and 1
+  of 360. **Theirs, in streams** (`tools/gen_aeronet_disort_oracle.py`): the reference re-solved at
+  32, 64, 96, 160 and 256 streams moves the path reflectance by 3.02e-3 worst at 32, 8.54e-6 at 64
+  and **1.67e-7 at the 96 the fixture uses** — four orders below the noise it is compared against,
+  at `τ = 3.778` / `g = 0.826` as much as anywhere else. The residual is our sampling and nothing
+  else. The structural fix is in the test: both sides are now the same statistic over the same
+  points, so the comparison cannot be miscalibrated again the same way.
+
+Two limits are structural rather than incidental. AERONET promotes an almucantar SSA to Level 2.0
+only where the load constrains it — in practice `AOD(440) ≥ 0.4` — so every column here is a loaded
+one and none of this speaks for a pristine maritime atmosphere; the clean end exists at Level 1.5 and
+no higher, and Level 1.5 is cloud-screened but not quality-assured, which is not a distinction an
+oracle may absorb quietly. And AERONET measures no ozone: its optical depth is aerosol-only with the
+molecular and gaseous terms already removed by the Version 3 processing, so no ozone enters either
+side of this comparison and none of it hides in the residual — which is the deliberate complement to
+§5.1, where ozone was the whole finding. No Rayleigh term is added on top, because a Rayleigh
+optical-depth model plus a barometric reduction would put a *third* implementation inside a residual
+meant to measure our radiative transfer.
+
+This is still two solvers on a measured *atmosphere*. A measured *radiance* is the rung above, it is
+RadCalNet's, and §5.4 is what it measured.
+
+**No source file changed** in either ticket, so no mutation block was run and none was needed: #326
+is two generators, two fixtures and one test file, #327 adds an example and rewrites the same test,
+and the existing seals on `atmospheric_correction.rs` and `radiative_transfer.rs` stand unaltered.
+
+### 5.4 A measured radiance: RadCalNet, and the SWIR windows that are not windows
+
+§5.1 compared us to libRadtran and §5.3 to DISORT, both on atmospheres somebody specified. #267's
+second leg is the rung above: an atmosphere *and* a surface both measured in situ, on days nobody
+chose, propagated to the top of the atmosphere by a third code. RadCalNet is that. Its instrumented
+targets publish, every half hour in cloud-free conditions, the surface reflectance measured on the
+ground, the atmosphere measured over it, and the top-of-atmosphere reflectance **MODTRAN 5.3.3**
+produces from the two. Its own Quick Start Guide names this use:
+
+> These additional data could be used for various purposes, e.g.: a) to alternatively simulate
+> top-of-atmosphere reflectance over the RadCalNet site with (radiative transfer) tools differing
+> from the MODTRAN model used for the RadCalNet processing
+
+**The gate was the terms, and the terms permit this.** The portal's `RadCalNetDataPolicy_v1.1.pdf`
+says the data "are freely and publically available" and asks that users "acknowledge the contribution
+of RadCalNet and if appropriate any specific sites". There is no redistribution prohibition, so the
+excerpt is vendored rather than gitignored, and the policy is quoted **in full** in the fixture header
+along with the acknowledgement in the form it asks for and the Bouvet et al. (2019) citation. The
+credentials live in `RADCALNET_USER` / `RADCALNET_PASS` and appear in no file. Magellium's
+`radcalnet_api_client.py` is "All rights reserved" with no licence grant; it was read for the
+endpoint shape and no code was taken from it.
+
+**What was taken, and why that much.** All six instrumented targets — Railroad Valley playa,
+Gobabeb, La Crau, both Baotou targets and Golmud at 2824 m — three days each, chosen by *regime*
+rather than by convenience: one day per site with the widest solar-zenith arc, one clean day, and one
+at the edge of that site's own distribution (heaviest aerosol load, wettest column, highest ozone,
+coarsest aerosol). The sweep day is sampled at five times across its arc and the other two once each,
+so seven scenes per site: 42 scenes, 504 rows over the 14 gate wavelengths, and separately the whole
+211-wavelength ρ_BOA and ρ_TOA matrices for those same 42 scenes, since the window classification
+needs no radiative transfer and so costs no Monte Carlo. 84 rows were dropped on RadCalNet's own fill
+values and 66 more carry its uncertainty flag and are excluded from every gate while still being
+printed. Baotou's gravel target publishes nothing beyond about 1 µm, so the SWIR verdict rests on
+three instruments and the test asserts that it does. A **third** fixture holds 120 further days out,
+chosen by a rule rather than by regime, and is described where it is used below.
+
+**Most of the model is quoted, not chosen.** RadCalNet publishes its MODTRAN deck in the format
+specification, which removes almost every degree of freedom a comparison like this usually has:
+`SURREF: LAMBER`, `IHAZE: 2` (rural), `DIS: t` with `NSTR: 8`, and — the find that matters —
+`IPH: 2` with `G: 0.500`, a **Henyey–Greenstein aerosol phase function of asymmetry 0.5**. So the
+scatterer is not assumed; it is `PhaseFunction::HenyeyGreenstein { asymmetry: 0.5 }` because their
+deck says so. The optical depths, ozone column, pressure, water column, geometry and both
+reflectances are measured.
+
+**And `IHAZE: 2` is checked rather than quoted.** That deck line is what makes a *rural* aerosol the
+right microphysics for these scenes, and it comes from a specification document — not from the data.
+The daily files carry a per-scene `Type` column that says which model was actually run, and the
+fixture now carries it: **`R` on all 504 rows**, asserted before the albedo below is fitted. A scene
+on a maritime or urban model would carry different microphysics, and one albedo fitted across the
+mixture would describe neither; the assertion is what stops that from happening silently rather than
+showing up as an unexplained per-site spread.
+
+`NSSALB: 0` leaves the aerosol single-scattering albedo to MODTRAN's
+internal rural model and publishes nothing, so it is the one thing that cannot be looked up — and it
+is **fitted**, not guessed: the suite brackets it at ω_a ∈ {0.86, 0.88, 0.90} and finds the minimum
+interior, RMS 2.0454e-3 against 2.3492e-3 and 2.2293e-3 at the shoulders. One free parameter against
+313 comparisons. That is why the *signed mean* in the table below is near zero by construction and
+says nothing; the RMS and the ratio are the numbers. The full scan, and the per-instrument breakdown
+that asks whether one value can serve six targets at all, cost a hundred times the photons and live
+in `examples/radcalnet_error_budget.rs`, off the suite's clock.
+
+**What the full scan says.** Eleven points over ω_a ∈ [0.80, 1.00] at 40 000 photons: the residual
+runs from 2.08e-3 at the minimum to 6.59e-3 at a non-absorbing aerosol, a span of 4.51e-3 and
+**3.17× the floor**, with a parabolic minimum at **ω_a = 0.8833**. A flat scan would have meant the
+parameter was unidentified and the fitted value decorative; this one is a measurement. Per
+instrument the minima land at 0.857 (Gobabeb), 0.867 (Baotou gravel), 0.874 (La Crau), 0.880
+(Golmud), 0.890 (Railroad Valley) and 0.900 (Baotou sand) — a spread of 0.043, every one within
+0.027 of the pooled value. The cost of using one number instead of six is small and bounded: at the
+worst site (Baotou sand) the RMS rises from 1.93e-3 to 2.23e-3, 16 %; at Railroad Valley the pooled
+value is marginally *better* than that site's own minimum, which is to say the difference there is
+inside the noise. So one fitted albedo does serve all six targets, with the residual per-site
+disagreement stated rather than assumed.
+
+**And it is a prediction, not only a fit.** One free parameter against 313 comparisons is defensible,
+and saying so out loud is better than hiding it — but it is still fitted and reported on the same
+points. The archive makes the honest version nearly free: the portal serves **7719 output-days**
+across the six sites, RVUS back to 2013, and the fitted fixture uses 18 of them, **0.23 %**. So a
+third fixture, `radcalnet_holdout.txt`, holds out **120 more days — twenty per site, chosen by evenly
+spaced *indices* through each instrument's sorted archive** with the fitted days removed first.
+Nothing about a day's weather, aerosol load or water column enters that selection, which is the whole
+point: the 42 scenes were picked after scanning, and a hold-out that repeated the scanning would
+measure the scanning. Where an indexed day is entirely cloud-filled the generator walks forward to
+the next untaken day, a stated repair rather than a judgement; on this download it never had to, and
+the 120 days span **2013–2026**. The generator refuses to write the file if any (site, date) it holds
+also appears in the fitted fixture, and the test asserts the same thing again on its own side.
+
+**Twenty rather than a handful, because two of the regressions below are standard-error-limited.** A
+hold-out large enough to answer "does the fitted albedo predict" is not large enough to answer "has
+the reference moved": at five days a site the epoch slopes at Golmud and La Crau sat close enough to
+their own error bars that the sample size, not RadCalNet, was deciding the verdict. Errors fall as
+1/√n, so quadrupling the days halves every bar in the driver and drift tables. The number is a flat
+twenty rather than per-site because the shallowest archive here — Golmud's, the newest target — still
+holds 177 days outside `SCENES`, which was checked before anything was downloaded rather than assumed.
+The cost is one long example run and 1.8 % of the archive instead of 0.6 %.
+
+What it actually bought was not the expected thing, and that is worth recording. The bars did fall,
+but several drift slopes moved *further* than the old bars allowed and two changed sign — which is
+not what noise does. Chasing that is what turned the drift regression from univariate into a
+controlled one, and the answer below is that most of the apparent drift was the atmosphere being
+sampled differently across the years, not the reference moving. A sample large enough to settle a
+question can instead show that the question was mis-posed; that is the better outcome of the two.
+
+The result, on 1004 gated comparisons the albedo never saw: **ratio 0.502**, against 0.372 in sample —
+inside the bar, at a third again the cost. Worst site 0.64 (Baotou's gravel target) against 0.44 in
+sample, and every site under 1.0: 0.23 Railroad Valley, 0.24 Gobabeb, 0.28 La Crau, 0.39 Golmud, 0.50
+Baotou sand. That number is the one to quote when asking what this comparison predicts, and the
+in-sample 0.372 is the one to quote when asking how well the fitted albedo describes the scenes it was
+fitted on. They are different questions and now they have different answers. The out-of-sample figure
+is *worse* than the 0.498 the first thirty days gave, which is the expected direction and the reason
+to prefer the bigger number: a small hold-out can be lucky, and this one no longer can be.
+
+**The inverse goes out of sample with it, and until recently it did not.** The forward direction
+stopped being an in-sample statement when this fixture arrived; the direction §5.4 itself calls the
+number an Earth-observation user cares about — RadCalNet's TOA in, the reflectance measured on the
+ground out — kept being reported only on the 42 scenes `ω_a` was fitted on, which is the same defect
+the hold-out was built to fix, left standing in the more important of the two directions. Both now
+run through one shared loop, so the second is not a copy scoring itself. Out of sample the inverse
+sits at **0.689** on the same 1004 comparisons against **0.456** in sample: ×1.51, against the
+forward's ×1.35. **An earlier fixture put those two factors at ×1.48 and ×1.47, and the agreement to
+the second digit was reported here as the informative part — that what going out of sample costs is a
+property of the scenes and their bars, not of which way the coupling is run. It was not. Both factors
+were carrying the corrupt ozone column §5.4 traces, and removing it separates them.** What survives
+is weaker and still worth having: the per-site ordering agrees, worst at Baotou's gravel target in
+both directions (0.64 forward, 0.75 inverse) and best at Gobabeb in both (0.24 and 0.25). The two
+directions part company on the tail rather than the body — the inverse's worst comparison is 1.76e-2
+against the forward's 1.00e-2 on the same rows, while their RMS values sit within 27 % of each other.
+What refitting `ω_a` on the hold-out itself would have bought is measured in the example, off
+the suite's clock because it is a diagnosis rather than a gate — and it is almost nothing. The
+hold-out's own parabolic minimum sits at **ω_a = 0.8874** against the **0.8833** fitted in sample, and
+at its own value the RMS over those 1004 comparisons is 2.5662e-3 against 2.5924e-3 at the in-sample
+one: refitting buys **1.0 %**. So what the ratio costs out of sample is not the albedo being wrong
+for these days — it is essentially the answer those days would have given on their own — and what
+that cost measures is the scenes and their bars.
+
+The same run also converges the budget: at 40 000 photons and three draws our side comes to 4.59e-4,
+**5.4 %** of the quadrature sum, against the suite's 5.28e-4 / 6.2 % at its cheaper 8000-photon
+setting. The mechanism is visible in the itemisation rather than inferred — the ozone term is
+identical to four digits across the two runs (3.1208e-4 against 3.1214e-4), because ozone enters as a
+deterministic factor outside the Monte Carlo, while all three sampled terms fall. The suite's figure
+is therefore noise-inflated by about a sixth, which moves the bar by nothing measurable and is exactly
+what its own 0.006 % inflation estimate predicts.
+
+**The error budget has two sides now.** The first version of this comparison charged our own model
+nothing: the bar was RadCalNet's published TOA uncertainty in quadrature with our Monte-Carlo
+sampling error, and the four measured inputs we *read* were treated as exact. RadCalNet publishes
+their uncertainty too — a six-row `P/T/WV/O₃/AOD/Ång` block the generator simply never parsed. It
+does now, and each input is moved to the edge of its own published uncertainty and the model re-run
+**at the same seed**, so the two runs share their photon paths and the difference is a derivative
+rather than the difference of two noisy means. The response, in TOA reflectance: AOD(550) 3.58e-4,
+ozone 3.12e-4, pressure 1.77e-4, Ångström 1.50e-4, and 5.28e-4 in quadrature against RadCalNet's
+8.51e-3 — **6.2 % of the bar**. The reference's uncertainty still dominates, but not so completely
+that charging our side zero was fair. The residual finite-difference noise is measured too, from a
+four-times-photons control on every fourth gated row, and it inflates the bar by **0.006 %**, which is
+the number that says the widened bar is physics and not sampling.
+
+**Four of six, and the two that are missing are missing for different reasons.** That block publishes
+six uncertainties and the budget above charges us for four, which is the kind of gap worth naming
+rather than leaving to be counted. **Temperature is not read at all**, and correctly: a grey
+scattering slab has no temperature. The Rayleigh depth is Bodhaine's function of wavelength and of the
+column number density `P/(m g)`, so `T` has no path into the answer, and moving it to the edge of its
+uncertainty would return a zero that describes the model rather than the scene — at the cost of a
+Monte-Carlo run to produce a number already known analytically. **Water is read into the fixture and
+still not charged**, for the same arithmetic reason and a worse one: `Atmosphere` carries no gaseous
+absorption, so the derivative is identically zero — and the driver regression below shows the residual
+does move with the water column, at a `t` the same table reports. That zero is a property of our
+model, not a smallness of the effect, and the two must not be reported as if they were the same thing.
+
+So the missing term is bounded instead of charged. The driver regression below measures the
+sensitivity the model does not have — the residual moves with the water column at **+0.00409 ±
+0.00046 of signal per centimetre**, `t` = 8.9 — and RadCalNet's own published water uncertainty
+averages **0.1725 cm** across the 1317 rows, about a sixth of the mean column. Their product at the
+mean ρ_TOA of 0.2305 is **1.63e-4 of TOA reflectance**: third of the five terms, above Ångström's
+1.17e-4 and pressure's 1.63e-4, and it would take our side from 4.59e-4 to 4.87e-4 — from **5.4 % of
+RadCalNet's bar to 5.7 %**, our own quadrature growing by 6.1 %. The slope is the *within-site* one,
+which is the larger of the two the table below reports, because this is a bound and a bound built
+from the smaller of two defensible estimates is not one. That is deliberately an upper bound and not a budget
+entry. The slope is empirical, so it carries whatever else tracks the water column with it — pressure
+correlates with water at +0.32 in the matrix below, air mass at −0.35 — and a model that actually
+absorbed water would charge some fraction of this, not all of it. **The bound has itself come down by
+41 %** now that ozone, pressure and Ångström are held fixed in the regression that produces it, which
+is the ordinary behaviour of an empirical slope when the design stops crediting it with other
+variables' variance. What the bound buys is the right shape of statement: the term is small enough
+that adding gaseous absorption would not move the verdict, and that is now measured rather than
+assumed — twice, and smaller the second time.
+
+**All six of those uncertainties are accounted for, and so is every other key in the file.** "We use
+everything RadCalNet gives us" was an assertion nobody checked: `parse` hands back whole blocks and
+each reader takes what it needs, so a key could be read past — or renamed upstream — in silence. The
+generator now carries the list. Between the header, the atmospheric block and its uncertainty twin
+the two files publish **19 distinct keys: 11 read, 8 waived**, each waiver stating why the key
+*cannot enter the answer* rather than only that nothing reads it, and the generator refuses to write
+a fixture from a file carrying a key in neither list. The waivers are `Lat`/`Lon` (the geometry is
+published directly as `Zen`), `Alt` (the slab reads the measured surface pressure, which is the
+altitude's effect and more), `T`, `DOY(L)`/`Local` (redundant with UTC), `Azi` (degenerate at nadir)
+and `esd` — the Earth–Sun distance, which cancels in a *reflectance* comparison because both sides
+have the solar irradiance divided out. The full table with its reasons is in the fixture headers.
+
+**Writing that list turned up two invariants worth holding rather than waiving, and a latent parsing
+bug behind them.** The file states its own `Year` and `DOY(U)`, and every row's date — the epoch the
+drift regression above reads — comes from the *filename*; the two are now checked against each other
+on every downloaded day. And the surface reflectance comes from the `.input` file while the
+top-of-atmosphere reflectance comes from the `.output`, which are comparable only if both describe
+the same atmosphere at the same times: RadCalNet generates the second from the first, so they agree,
+but "so they agree" was the assumption and it is one column mismatch away from comparing a surface
+against a top of atmosphere that never sat above it. Both checks pass on all 138 days. The second
+one failed at first, and not because the atmospheres differ: `.input` rows end in trailing tabs —
+one on most, **two on some uncertainty rows** — where `.output` rows end in none, so a naive split
+gave the two files different widths for the same thirteen half-hourly columns. Nothing had ever
+indexed the extra fields, because the column numbers come from the shorter file, but `float("")` was
+one selection rule away. Stripping them left all three fixtures **byte-identical in every data row**,
+which is the measurement that says the repair changed only the accounting.
+
+**The finding: three of the wavelengths everyone calls SWIR windows are not.** A slab with no gaseous
+absorption may only be compared where no gas absorbs, and picking those wavelengths by reading the
+ρ_TOA/ρ_BOA spectrum for notches is not good enough. `radcalnets_own_data_says_which_windows_are_windows`
+decides it from the reference's own spectra with **no radiative-transfer model in the loop**, by
+regressing `−ln(ρ_TOA/ρ_BOA)` on the two-way water column — and because that regression needs no
+radiative transfer, it costs no Monte Carlo, so it runs on **all 211 published wavelengths** and all
+42 scenes rather than on the 14 the gates use. The result: about 0.5 % of water absorption at 870 and
+1030 nm, and **2.7 %, 3.3 % and 5.1 % at 1240, 1550 and 2130 nm**. At 10 nm resolution those three
+carry real water absorption, so they are held out of every gate and reported as their own class. The
+full grid confirms there is nothing better to move to: the cleanest wavelength beyond 1100 nm is
+**1630 nm at 1.2 %**, still twice what 1030 nm carries. The regression separates the mechanisms
+correctly as a control: at 760 nm the fitted water term is meaningless — at this resolution the O₂-A
+band sits between the 720 and 820 nm water bands and no linear form can tell the shoulder from the
+oxygen — but the *constant* is 0.369 against 0.006 at a window, and a well-mixed gas is exactly what
+lands in a constant.
+
+**What that regression gets wrong if it is pooled, and the bound that fixes it.** The form has no
+column for the path reflectance, and the size of what it neglects, relative to the signal it fits, is
+`τ_scat/(4 μ_s ρ_BOA)`. Across this fixture that runs from 0.004 to 21 — three orders of magnitude —
+and it correlates with the instrument, because a dark 30 m target at high air mass is a different
+regime from a bright playa at noon. The instrument in turn correlates with the water column, so the
+neglected term lands in the water coefficient with the wrong sign: pooling all 42 scenes at 870 nm
+returns **−2.5 % water absorption**, which is not a small error but an impossible one. Two fixes were
+tried and rejected — a linearised fourth column (which gave 1240 nm an unphysical negative path
+coefficient) and a leave-one-out local-quadratic notch detector (contaminated by the surface's own
+spectral features, which enter through ρ_path/ρ_BOA; it reported absorption at 550 and 660 nm, both
+certainly clean). What is used instead is an explicit, stated domain bound: admit a scene only where
+`τ_scat/(4 μ_s ρ_BOA) < 0.08`. That leaves 17 scenes at 870 nm and returns −0.54 %, and the SWIR
+ordering 1240 < 1550 < 2130 nm holds at every bound from 0.03 to 0.12, so the classification does not
+depend on where the line was drawn. The verdict draws on three instruments (Gobabeb, La Crau,
+Railroad Valley), so it is a statement about an atmosphere and not about one radiometer's
+calibration. This is recorded rather than smoothed over because it is the failure mode a smaller
+fixture hides: the 16-scene, 4-site version of this test passed, and it passed by luck.
+
+**RadCalNet has its own opinion about where the bands are, and the two never contradict.** A
+classification arrived at by one regression is one method's answer; the reference publishes a second,
+arrived at differently. Specification section 3.5 marks a *predetermined absorption region* by adding
+9 to the left of the decimal point of the published uncertainty — a flag the generator's decoder
+already read and nothing consumed. It is a property of the wavelength rather than of the scene, and
+the generator now *verifies* that instead of assuming it: it refuses to write the mask unless every
+downloaded scene agrees, and emits one boolean per wavelength. Across the 191 wavelengths where
+RadCalNet publishes an uncertainty at all it flags **30**, in 1120–1970 nm. Of those, **24 our own
+regression also calls bands** (water loss 66–98 %), **6 we cannot fit** — 1810 and 1920–1960 nm, the
+band cores where RadCalNet's own reflectance is a fill value, so the two methods never meet there —
+and **0 are contradicted**. Nothing they call an absorption region is a window of ours.
+
+Containment, not equality, is the right assertion, and the gap between the two criteria is the reason
+the window list had to be measured. Theirs marks where *their retrieval* exceeds 10 % uncertainty;
+ours marks where water absorption is measurable at all. So theirs is strictly the narrower, and by a
+wide margin: 1240, 1550 and 2130 nm carry 2.7 %, 3.3 % and 5.1 % of water absorption here and none is
+a predetermined absorption region to RadCalNet — and neither is **940 nm, at 79.6 %**. Taking their
+flag as the window list would have put all four back in the gates. That is the second independent
+confirmation of the SWIR finding, from the reference's own metadata rather than from its spectra.
+
+**The residuals**, over 313 comparisons at 40 000 photons and three independent streams each, against
+the quadrature sum of RadCalNet's published uncertainty, our own sampling error and our own
+input-uncertainty response:
+
+| term | n | worst | RMS | signed mean | RMS bar | ratio |
+|---|---|---|---|---|---|---|
+| forward `ρ_TOA` | 313 | 7.84e-3 | 1.99e-3 | +3.3e-4 | 8.53e-3 | **0.372** |
+| inverse `ρ_s`   | 313 | 9.42e-3 | 2.37e-3 | −3.8e-4 | 9.34e-3 | **0.456** |
+| forward, out of sample | 1004 | 1.00e-2 | 2.54e-3 | −1.2e-4 | 8.41e-3 | **0.502** |
+| inverse, out of sample | 1004 | 1.76e-2 | 3.23e-3 | +9.2e-5 | 9.37e-3 | **0.689** |
+
+**Both directions are now measured off the days the free parameter was fitted on, and they do not
+cost the same factor to get there** — 0.372 → 0.502 forward and 0.456 → 0.689 inverse, ×1.35 and
+×1.51. An earlier fixture put those at ×1.47 and ×1.48, and the agreement was read here as the useful
+part; the corrupt ozone column §5.4 traces was inside both, and with it gone they separate. What
+still holds is the ordering: the inverse ranking per site is the forward's, worst at Baotou's gravel
+target in both (0.64 forward, 0.75 inverse), best at Gobabeb in both (0.24 and 0.25).
+
+**The tail still grows faster than the body, but nothing like as fast as this section used to
+claim.** Out of sample the RMS rises ×1.28 forward and ×1.36 inverse, and the single worst comparison
+rises ×1.28 forward and ×1.87 inverse. An earlier fixture put that worst-case growth at 6–8×, to about
+6e-2 in both directions, and the paragraph here explained it as thirteen years of weather the 42
+chosen scenes do not contain. The explanation was wrong: the 6e-2 tail was one site-day whose
+published ozone column was −280 DU, which §5.4 traces and the generator now refuses. Weather does
+widen the hold-out — the inverse tail nearly doubles, and that is the honest reason the two
+directions no longer cost the same factor — but the order-of-magnitude version of the claim was an
+artefact of a single corrupt input. Gating a magnitude is still the wrong instrument: the in-sample
+`worst < 1.2e-2` would now pass forward and fail inverse, which makes it a tolerance fitted to the
+sample it was meant to judge. The hold-out tests gate the ratio and print the magnitudes.
+
+Both in-sample numbers sit inside the bar, and both sit further inside it than the four-site version
+did — not because
+the model improved but because the comparison did: 42 scenes over six instruments, three per site
+chosen for regime rather than convenience, and a bar that no longer pretends our inputs were exact.
+The inverse is the wider of the two for a reason worth stating: the correction divides by `T↓T↑`, and
+RadCalNet's surface uncertainty is smaller than its top-of-atmosphere one, so the same disagreement
+measured in surface reflectance is compared against a tighter bar. Per site the forward ratio runs
+0.17 at Gobabeb, 0.20 at Railroad Valley, 0.23 at La Crau, 0.27 at Golmud, 0.33 at Baotou's gravel
+target and 0.44 at Baotou's sand target, the darkest of the six. The inverse ordering is the same.
+Why the ordering runs that way is a question this table cannot answer and the driver regression below
+does — with an answer that is not the obvious one.
+
+Three further results fall out. The residual **climbs the absorption ladder** it should: 0.90 %
+relative in the windows, 3.5 % (3.8×) in the weak SWIR bands, 130 % (145×) inside the O₂-A and water
+bands, and it *overpredicts* at every absorbing wavelength without exception, which is the only thing
+a slab that cannot absorb is allowed to do. §5.1's fitted ozone becomes a **prediction**: RadCalNet
+measures the column, `ozone_cross_section.txt` supplies Serdyuchenko et al. (2014) slit-convolved to
+the same 10 nm triangular slit, and the product reproduces the Chappuis absorption between 540 and
+690 nm to 0.94 % relative RMS against 7.57 % with the ozone dropped — a factor of 8.0, with nothing
+free.
+
+**The largest named unclosed term in the gas table is now measured rather than named.** The
+line-by-line pass truncates every strong line's Lorentz wing at 25 cm^-1 and charges the truncation
+in its own header: at 940 nm the channel transmittance moves 1.90e-1 against a 500 cm^-1 reference,
+7.29e-2 at 50 cm^-1, 2.15e-2 at 100. That is not a convergence parameter set too small. Every
+line-by-line code truncates at exactly 25 cm^-1 — LBLRTM does, and so does the MODTRAN 5.3.3 that
+produces RadCalNet's own TOA — and then adds a **continuum** calibrated against that truncation,
+because the far Lorentz wing is known to be the wrong shape: super-Lorentzian for self-broadening,
+sub-Lorentzian for foreign. So the cutoff is the correct choice and what is missing is the continuum.
+`tools/mt_ckd_oracle.py` measures how much:
+
+| water column | 600 nm (worst gate window) | 940 nm | the cutoff rung it matches at 940 nm |
+|---|---|---|---|
+| 2 cm | 1.65e-4 | **7.68e-2** | 7.29e-2 at 50 cm^-1 — **1.05×** |
+| 5 cm | 4.62e-4 | **2.00e-1** | 1.90e-1 at 25 cm^-1 — **1.05×** |
+
+**The check is the second column against the fourth.** If the continuum is what the truncated wing
+was standing in for, the two are the same size, and at both columns they agree to five per cent. That
+is a stronger statement than either number alone: it says the header's cutoff ladder was not merely a
+convergence cost, it was a measurement of the missing physics all along.
+
+**In the windows the comparison actually gates on, it changes nothing.** The worst is 1.65e-4 of
+channel transmittance at 600 nm, two orders under the 1.52e-2 rms the sweep's own window rung carries
+with no gas at all, so the forward residual §5.4 publishes is not biased by the absent continuum. It
+is the band rungs of the ladder above that carry it — and deep in the bands the continuum saturates
+on its own, 0.92 at 1370 nm and 0.97 at 1860 nm.
+
+**Three of the nine gate windows have no continuum available at all**, which is worth stating because
+it bounds any future fix rather than any current number: MT_CKD stops at 20000 cm^-1, and 410, 440
+and 490 nm are above it, along with every channel below 500 nm. At those wavelengths water absorption
+is negligible anyway, so nothing is lost — but a claim that the continuum has been supplied
+everywhere would be false, and the standard model is where that stops being true.
+
+**Why it stays absent: the licence, not the physics.** MT_CKD is AER's, and its notice grants use
+"for scientific and research purposes only" and forbids incorporating the data **or any modified
+version of it** into commercial software offered for sale without express written consent.
+Redistribution *is* granted, unlike HITRAN's line parameters — but the field-of-use limit is the
+binding clause, and a continuum coefficient interpolated onto this repository's channel grid is
+plainly a modified version of that data. So the escape hatch that works for HITRAN, fetch at
+generation time and commit only our own fit, does not work here: what would be committed is still
+AER's numbers, rearranged. MT_CKD therefore has the standing NRLMSIS 2.x has — an oracle, never a
+dependency — the file is cached outside the repository, nothing derived from it reaches a fixture,
+and what is published above is a measurement of *our* error, which is ours. Closing the gap needs
+either AER's written consent or a continuum whose licence carries no field-of-use limit.
+
+**The pressure ladder the table is tabulated on had a decorative top rung.** `PRESSURE_NODES` runs
+1040 down to 720 hPa, and the top node was a bit-identical copy of the one below it in all 1055
+rows: the generator clipped its layering with `np.minimum(edge_p, surface_hpa)` against a U.S.
+Standard Atmosphere that starts at 1013.25 hPa, so a surface pressure *above* sea level had no extra
+air to add and the ceiling could not produce a thicker column. It is fixed at the producer — the
+standard profile is extended one segment below sea level at its own lapse rate, density scale and
+drying slope — rather than by deleting the node, because RadCalNet's own record needs it: **266 of
+the 1945 slant columns the two fixtures carry, 13.7 %, sit above 1013.25 hPa**. The ceiling is not a
+high-altitude site but La Crau at 1031.1 hPa, a near-sea-level target under a cold anticyclone, which
+is the case the standard atmosphere has no vocabulary for. A ladder stopping at sea level refuses all
+266; clamping them instead is not free either, at 0.6 % of channel transmittance typically and 1.7 %
+at worst over the 17.8 hPa the archive overshoots by, silently and an order of magnitude above this
+table's own fit error. What the fix costs is published with it rather than absorbed: one shared
+weight vector now has to cover a sixth genuinely distinct pressure, so the worst H2O fit error rises
+3.16e-3 → 3.54e-3 and the exact product a consumer pays for goes from a median 13 104 terms to
+18 816. The check is the transmittance `T(u) = Σ_j w_j exp(−k_j u)` rather than the fitted rates,
+because the joint fit shares its weights across the ladder and the rungs are quantiles with no
+meaningful denominator to divide by; on that quantity the two blocks agreed in 756 of 756 absorbing
+rows before and 0 of 756 after (§5.3, #369).
+
+And the **plane-parallel assumption is bounded rather than asserted**: RadCalNet's half-hourly
+cadence holds a site's surface and atmosphere near-fixed while sweeping the geometry, so regressing
+the relative residual on air mass within one day isolates the geometry from everything else. Five
+days span at least half a unit of air mass; the worst drift is +0.0165 per unit at Golmud, 2824 m up,
+which is +2.2 % of the signal across the 1.31 units that day covers. **What that sweep is measuring
+is not sphericity**, though it was read that way for one revision of this section: a real slant path
+displaces the air mass over that same day by 0.0097 units of 1.314, so sphericity can account for
+one part in 135 of the drift. The measurement stands; the attribution is corrected below.
+
+**What the residual depends on, and therefore what to fix next.** A ratio says how large the
+disagreement is and nothing about where it comes from. So the example regresses the *relative*
+residual on **every quantity RadCalNet publishes** that a scene varies in — AOD(550), air mass,
+columnar water, ρ_BOA, the path ratio `τ_scat/(4 μ_s ρ_BOA)` the window classification already
+needed, and the ozone column, surface pressure and Ångström exponent that a first version of this
+table left out — over all **1317** gated comparisons, the fitted 313 and the held-out 1004 pooled,
+each driver standardised so the coefficients are per standard deviation and compare directly. It is
+run **twice**: pooled, and again with five site indicators against a reference site, so the second
+column is identified from variation *inside* a site only. `within sd` is that variation as a fraction
+of the pooled spread both columns are quoted per — a small one means the within-site number is an
+extrapolation rather than a measurement:
+
+| driver | coefficient | std err | t | within site | std err | t | within sd | mean | sd |
+|---|---|---|---|---|---|---|---|---|---|
+| intercept | +0.00109 | 0.00028 | 3.9 | | | | | | |
+| air mass | **+0.00335** | 0.00034 | **9.8** | **+0.00269** | 0.00036 | **7.4** | 0.955 | 2.518 | 0.472 |
+| path ratio | **+0.00271** | 0.00037 | **7.4** | **+0.00289** | 0.00036 | **8.0** | 0.946 | 0.688 | 1.109 |
+| water column | **+0.00217** | 0.00034 | **6.5** | **+0.00327** | 0.00037 | **8.9** | 0.875 | 1.062 cm | 0.799 |
+| AOD(550) | **−0.00192** | 0.00033 | **−5.9** | **−0.00236** | 0.00034 | **−6.8** | 0.847 | 0.101 | 0.076 |
+| Ångström exponent | **+0.00083** | 0.00030 | **2.8** | +0.00004 | 0.00031 | 0.1 | 0.922 | 0.808 | 0.413 |
+| surface pressure | +0.00065 | 0.00035 | 1.9 | +0.05336 | 0.00492 | 10.9 | **0.064** | 886.3 hPa | 88.9 |
+| ozone column | −0.00054 | 0.00030 | −1.8 | +0.00026 | 0.00033 | 0.8 | 0.885 | 298.5 DU | 33.1 |
+| ρ_BOA | +0.00003 | 0.00037 | 0.1 | +0.00063 | 0.00044 | 1.4 | 0.759 | 0.209 | 0.107 |
+
+**Four of the eight survive being identified from within a site**, and they are the four with a
+mechanism: air mass, the path ratio, the water column and the aerosol load, each of them at least as
+large inside a site as across the six and each with a `within sd` above 0.84, so the second column is
+a measurement of the same thing rather than an extrapolation of it. Those four are what to fix next,
+and air mass at `t` 7.4 within site was read as the pseudo-spherical slab with a number against it,
+until the displacement a real slant path would apply was measured and came out a hundredth of the
+drift — the vertical mixing of Rayleigh and aerosol into one layer is what is left (#368, below).
+
+**The Ångström exponent was geography.** It is resolvable pooled at `t` = 2.8 and gone within site at
+`t` = 0.1, on a driver whose within-site spread is 0.922 of its pooled one — so the collapse is not a
+loss of range, it is the coefficient having been a site label. The sites differ in aerosol *type*, and
+across six of them that difference reads as an Ångström slope.
+
+**Surface pressure is not measured by this table at all, in either column.** Its within-site spread is
+**0.064** of its pooled one: pressure here is very nearly site elevation, and Golmud at 2824 m against
+five near sea level supplies almost all of its variance. The pooled coefficient is therefore mostly a
+site indicator, and the within-site one — +0.053 per pooled standard deviation at `t` = 10.9 — is
+quoted per a spread sixteen times wider than the one that identifies it. Per its *own* within-site
+spread it is +0.0034, in line with the other four. Neither number should be read as the model's
+response to pressure; the error budget's pressure term, which is a derivative of this model rather
+than a regression coefficient, is the one that answers that.
+
+**The ozone coefficient is not resolvable, and the story of how it looked resolvable is the finding.**
+An earlier version of this table reported ozone as the **largest** driver of the nine at `t` = −12.3,
+with the tightest standard error, and set out two readings it could not separate: a real
+over-correction by §5.1's `exp(−τ₃(1/μ_s + 1/μ_v))`, or a site indicator, since ozone column tracks
+latitude and the fit had no site term. **Neither was right.** The whole coefficient came from a single
+site-day, Railroad Valley 2023-305, where RadCalNet published `O3 = -280.0 DU` and the generator
+copied it through: a negative column is a negative optical depth, so the two-way transmittance came
+out *above one* and the model added light, while the regression read the point about ten standard
+deviations from the site's own median and levered the fit. Excluding those 14 rows of 1317 took ozone
+from `t` = −13.3 to `t` = −1.9 in one step. The generator now drops a column whose published
+atmosphere carries a negative quantity, with the count printed, and both parsers assert against one
+reaching a fixture again (#367). On the repaired fixture ozone is **−0.00054 at `t` = −1.8 pooled and
++0.00026 at `t` = 0.8 within site** — unresolvable in both, which is what a correctly applied
+absorber should look like. **The lesson is not about ozone.** A driver's `t` says how well the
+regression separates it from the others; it says nothing about whether the input was readable, and
+this table had no check that its inputs were physical until one of them was not.
+
+**Aerosol load and air mass remain the same size with opposite signs**, −0.0019 and +0.0034 per
+standard deviation pooled, −0.0024 and +0.0027 within site. In their own units that is −0.025 per
+unit of AOD(550) and **+0.0071 per unit of air mass** — the latter the same sign as the within-day
+sphericity drift above and 40 % of its worst-day size, which is the cross-check, because that test
+held one site's surface and atmosphere fixed and this one holds nothing fixed at all.
+
+**Both of those were read as evidence for the plane-parallel slab, and the arithmetic refutes it.**
+Two things were being conflated: how much the residual *depends* on air mass, and how much error is
+in the air mass the model *computes*. Only the second is sphericity, and it is small. Replacing
+`sec z` by a real relative air mass — either the exact ratio for a homogeneous shell 8 km thick on a
+6371 km sphere, which is what this transport actually models, or Kasten & Young's (1989) empirical
+fit, which is the larger of the two — displaces the air mass of the mean gated row by **0.0032 units**
+and of the worst by **0.026**, a path error of at most **0.83 %**:
+
+| displacement of the solar leg | mean row | worst row | worst as a fraction of the path |
+|---|---|---|---|
+| homogeneous shell, `H` = 8 km | 0.00196 | 0.01722 | 0.55 % |
+| Kasten & Young 1989 | 0.00320 | 0.02604 | 0.83 % |
+
+At the measured **+0.00710 ± 0.00073 per unit**, that is **5.2e-6 of TOA reflectance** on the mean
+row — **1.1 % of our own 4.87e-4 side of the budget and 0.06 % of RadCalNet's bar.** Only the solar
+leg carries it at all: RadCalNet publishes nadir, so the view leg is exactly 1.0 and has no
+sphericity error to make.
+
+**The within-day sweep settles it, because it is the measurement the argument was drawn from.**
+Golmud 2023-210 spans 1.314 units of air mass and the residual drifts **+2.2 % of signal** across it.
+Of that 1.314 units, sphericity accounts for **0.0097** — **0.74 %** — so it can explain about
+**0.016 %** of signal, one part in 135 of the drift. The worst site-day on this measure is La Crau
+2023-340 at 2.15 % of a much shorter sweep. **A repair worth a hundredth of what it was filed to fix
+is not the largest unfixed approximation**, and #357 is closed on that arithmetic rather than
+implemented (the physics is right; the magnitude claim was not).
+
+**One reason it is this small is the reference's own flag, and it is worth naming because §5.4
+quotes the wider number elsewhere.** The fixture reaches solar zenith 81.5°, where `sec z` is 4.1 %
+long — but every row past **71.4°** fails RadCalNet's own uncertainty flag and never enters a gate.
+The rows where sphericity would matter most are the ones the reference has already declined to
+stand behind.
+
+**The single homogeneous layer was what remained pointing at the air-mass coefficient, and it does
+not carry it either** (#368). Rayleigh has a scale height near 8 km and boundary-layer aerosol near
+1–2 km, and this model mixes them into one layer with one `ω_eff` and one phase function; at a slant
+path the vertical *arrangement* of scatterers changes the path radiance in a way no effective medium
+can follow. `examples/layer_arrangement.rs` measures it before changing anything, by writing a
+layered photon walk beside the shipped one and holding it to reproducing the shipped one **bit for
+bit** on a homogeneous stack — at one slice and at twelve, the second being the check that a layer
+boundary costs nothing when there is no contrast across it. Every arrangement holds the total
+extinction depth `τ_r + τ_a` and the total scattering depth `τ_r + ω_a τ_a` exactly fixed, so the only
+thing that varies is where the two sit. Differenced against `mixed` **at the same seed**, so the
+Monte-Carlo noise the two share cancels and the bar quoted is how much the *difference* moves between
+streams:
+
+| arrangement | rms Δρ_TOA | worst | mean signed | MC noise | rms/noise | slope per unit air mass |
+|---|---|---|---|---|---|---|
+| Rayleigh over aerosol (bound) | 9.21e-4 | 4.46e-3 | +5.03e-4 | 2.62e-4 | 3.5× | +2.13e-5 ± 7.97e-5 |
+| aerosol over Rayleigh (bound) | 6.64e-4 | 4.70e-3 | −2.88e-4 | 2.77e-4 | 2.4× | −5.59e-5 ± 6.17e-5 |
+| stratified, `H_a` = 1.0 km | 6.30e-4 | 3.59e-3 | +3.32e-4 | 2.18e-4 | 2.9× | +2.25e-5 ± 5.54e-5 |
+| **stratified, `H_a` = 1.5 km** | **5.26e-4** | 2.92e-3 | +2.81e-4 | 2.04e-4 | **2.6×** | **+3.95e-5 ± 4.58e-5** |
+| stratified, `H_a` = 2.0 km | 4.63e-4 | 2.58e-3 | +2.37e-4 | 1.89e-4 | 2.5× | +4.11e-5 ± 4.11e-5 |
+
+**The arrangement is real: 2.6× the noise, and monotone in the thing that causes it** — the taller
+the aerosol, the closer to mixed (6.30 → 5.26 → 4.63e-4 as `H_a` goes 1.0 → 2.0 km), with the
+maximally-separated stacks above all three. A quantity that ordered itself the wrong way would be
+measuring the discretisation instead.
+
+**And it is not the air-mass coefficient.** The section's **+0.00710 ± 0.00073** of relative residual
+per unit is, at mean ρ_TOA 0.2306, **1.64e-3 of TOA reflectance per unit air mass**. The shipped
+stratification carries **+3.95e-5 ± 4.58e-5**, `t` = 0.86 — **2.4 % of it, not resolvable from zero,
+and the wrong sign**: to cancel a positive drift the arrangement would have to carry a negative one.
+The two maximally separated stacks bracket the question at **+1.3 %** and **−3.4 %**, and neither
+reaches `t` = 1, so no arrangement this column admits gets past a few per cent of the coefficient.
+
+**On the sweep the ticket named as its own test, it goes the wrong way.** Golmud 2023-210 drifts
++0.0165 of relative residual per unit; the stratified arrangement's Golmud slope is +2.22e-4 of TOA
+reflectance per unit at `t` = 1.57, which at Golmud's own mean ρ_TOA of 0.2149 is +1.03e-3 relative
+per unit — **6.2 % of the drift, with the same sign**, so it would steepen the sweep rather than
+flatten it. No site's slope reaches `t` = 2 (the largest is Baotou's BTCN02 at 1.96). #368 closes the
+way #357 did: the physics is real, the magnitude claim it was filed on is refuted.
+
+**What the measurement does buy is a budget line, and it is not small.** 5.26e-4 of TOA reflectance
+rms is **1.08× our own 4.87e-4 side of the budget** and **6.2 % of RadCalNet's 8.51e-3 bar** — a term
+worth about as much as every measured input put together, currently charged at zero. It is also two
+larger terms partly cancelling: the arrangement moves ρ_atm by 5.43e-4 rms and `T↓T↑` by 7.23e-4, and
+the total is smaller than either. Implementing a layered `Atmosphere` is a Type-1 change to a public
+type, and it now has to be argued on that 6.2 % rather than on a drift it does not explain (#370).
+The scale height is a choice and not a measurement — 1.0/1.5/2.0 km give 6.30/5.26/4.63e-4 — so
+the term carries about ±15 % of itself wherever it is quoted.
+
+**#370 asked whether that budget line should become the default, and the deciding measurement is one
+the paired difference cannot supply.** The stacked transport is now the shipped transport:
+`monte_carlo_stack`, `stack_path_reflectance` and `coupling_from_stack` are public, and
+`monte_carlo_slab`, `path_reflectance` and `coupling_from_slab` are their one-slice case, routed
+through the same kernel. No published number moved — not statistically, *identically* — because
+optical depth is additive along a path, so a slice boundary with no contrast across it changes
+neither the free-path draw nor anything looked up by it. The one-slice identity is exact by
+construction and the twelve-slice one is not quite: twelve twelfths of 0.24 sum one ulp short, and
+the answers match anyway because no free path resolves that window. Which is the honest statement,
+and the tests assert it in that form rather than choosing a depth that divides. What does not
+follow from 5.26e-4 is the default, because **a paired difference has no oracle in it**: it says how far the arrangement moves
+the answer, never whether it moves toward truth. That takes the forward residual against RadCalNet's
+own published TOA, on the same 313 rows, with `ω_a` refitted per arrangement — 0.88 was fitted under
+`mixed`, and scoring `stratified` at it would be scoring one arrangement on the other's home ground:
+
+| `ω_a` | `mixed` rms | `stratified`, `H_a` = 1.5 km, rms |
+|---|---|---|
+| 0.84 | 2.974e-3 | 2.764e-3 |
+| 0.86 | 2.331e-3 | 2.261e-3 |
+| **0.88** | **2.002e-3** | 2.096e-3 |
+| 0.90 | 2.174e-3 | 2.351e-3 |
+| 0.92 | 2.765e-3 | 2.932e-3 |
+
+At each arrangement's own parabolic optimum — **`mixed` 1.996e-3 at `ω_a` = 0.883, `stratified`
+2.093e-3 at `ω_a` = 0.878** — **the layered atmosphere is 4.9 % worse**. And that is not a refutation
+of the physics either; the arithmetic says why. The arrangement adds almost orthogonally to a
+residual four times its size: `sqrt(2.002e-3² + 5.255e-4²)` = **2.070e-3** predicted against
+**2.096e-3** measured, agreeing to 1.2 %. **An oracle four times coarser than the effect cannot
+adjudicate the arrangement** — it can only decline to endorse a default change made on it, which is a
+weaker statement than either party to the argument wanted. So `mixed` stays the shipped default, the
+stack ships as an available capability, and the 5.26e-4 is charged as a named model-uncertainty term
+with its ±15 % scale-height caveat. A term that no measurement in reach can resolve is worth exactly
+its size in the budget and nothing in the code.
+
+**So the air-mass dependence has now outlived both of its named explanations.** Sphericity accounts
+for one part in 135 of the worst sweep and the vertical arrangement for one part in sixteen, with the
+sign that makes it worse. What has not been measured is whether the single fitted `ω_a` absorbs
+air-mass-correlated structure across the fixture, and whether RadCalNet's own MODTRAN carries an
+air-mass-dependent bias of its own — the second of which no amount of work on our side can separate
+from the first. Naming a third culprit before measuring one is what produced the first two.
+
+**The aerosol coefficient is negative**, which is the one that would be alarming with the other sign.
+A failure of the grey-slab mixing rule — one `ω_eff` and one phase function standing in for Rayleigh
+plus aerosol — would make the residual climb with aerosol load. It falls. Falling with τ_a is what a
+single pooled `ω_a` fitted across a range of loads does: the fit trades a small positive bias at low
+load against a small negative one at high, and the coefficient is that trade rather than a model
+error. It is also **not stable across versions of this table** — −0.025 per unit of AOD on thirty
+days, −0.051 on 120, −0.041 once ozone, pressure and Ångström are held fixed — which is what a
+trade-off term does when the sample and the design both change under it, and is the reason the number
+is quoted per unit rather than as a verdict on the mixing rule. The **Ångström exponent used to enter
+beside it at t = 4.9**, read as the same trade seen from the wavelength axis — one fitted albedo
+across a range of aerosol *sizes* buying the same bias-swap that one albedo across a range of loads
+does. It no longer does: pooled it is +0.0020 per unit at t = 2.8, and holding the site fixed takes it
+to t = 0.1. That reading is withdrawn, and what it was reading was the six sites' different aerosol
+types.
+
+**Water is third of eight and it is stronger inside a site than across the six**, +0.00327 per pooled
+standard deviation within site against +0.00217 pooled, `t` 8.9 against 6.5. Its within-site spread is
+0.875 of the pooled one, so that is a measurement and not an extrapolation. The window classification
+excludes wavelengths where water absorption is *measurable*, not where it is zero, and this is the
+price of that distinction: what survives inside the chosen windows is still a function of how much
+water is overhead — consistent with the 0.5 % residual absorption the classification itself measured
+at 870 and 1030 nm. It is also the slope the bounded water term above is built from, which is why it
+is quoted per centimetre there, and the bound moves with it.
+
+**ρ_BOA is flat in both designs**, +0.00003 at `t` = 0.09 pooled and +0.00063 at `t` = 1.4 within
+site, and its within-site spread is 0.759 of the pooled one, so the second is a measurement rather
+than an extrapolation. The residual does not track surface brightness once the drivers are held; what
+it tracks is ρ_BOA's own denominator, the **path ratio at `t` = 7.4 pooled and 8.0 within site**,
+which is the same mechanism read off the numerator. The two correlate at −0.59 by construction, so
+the fit still cannot fully separate them and the shared variance lands wherever the standard errors
+allow; the full correlation matrix is printed alongside for that reason.
+
+**This coefficient has now been read three ways, and the sequence is worth more than the current
+reading.** The per-site ratios were first explained as a brightness effect — Baotou's sand target
+worst at 0.44 because it is the darkest, so path reflectance is most of its signal. The thirty-day
+version withdrew that, ρ_BOA flat at `t` = −0.4 and the path ratio unresolvable at 1.4. The
+eight-driver version restored it, ρ_BOA resolvable at `t` = −3.2. And it is now withdrawn again, at
+`t` = 0.09 — because the `t` = −3.2 was measured on a fixture carrying a negative ozone column
+(#367), which inflated the residual variance and moved every coefficient in the table. The arithmetic
+explanation is the one that has survived all four: the ratio divides by a bar built from RadCalNet's
+own uncertainty, which is smallest at the darkest target, so the same relative disagreement scores
+worse there. What is worth taking from the sequence is the shape of the error: **three of the four
+readings were made on a sample or a design that could not support them**, and the corrections came
+from finding a defect or measuring more, never from arguing better.
+
+**Is the reference itself stationary?** Everything above treats RadCalNet as a fixed oracle across a
+record that now runs 2013 to 2026, and nothing so far has checked that. A radiometer is recalibrated,
+a target is resurfaced, a processing version changes, and the published reflectance moves without the
+atmosphere doing anything. The obvious handle would be the file listing's version suffix, and it is
+not available: measured across all six sites, **0 site-days carry more than one version**, so nothing
+can be compared version to version and epoch is the only handle there is. Same 1317 comparisons, the
+relative residual regressed on epoch per site, each centred on its own midpoint so the reported
+standard error belongs to the slope alone — and then **the same regression again holding fixed every
+quantity RadCalNet publishes that could move the residual, and the season**, because a sampler that
+fixes the calendar does not fix the weather, and a slope on epoch alone cannot tell a reference that
+moved from a scene that was sampled differently:
+
+| site | n | span | slope / yr | std err | t | end to end | controlled | std err | t | end to end |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Railroad Valley `RVUS00` | 225 | 2013.2–2026.3 | +0.00033 | 0.00016 | +2.0 | +0.43 % | −0.00005 | 0.00015 | −0.3 | −0.07 % |
+| La Crau `LCFR01` | 225 | 2015.0–2026.4 | −0.00076 | 0.00025 | −3.0 | −0.86 % | **−0.00089** | 0.00028 | **−3.2** | **−1.01 %** |
+| Baotou gravel `BTCN02` | 208 | 2016.5–2025.9 | +0.00126 | 0.00029 | +4.3 | +1.18 % | +0.00053 | 0.00039 | +1.4 | +0.50 % |
+| Gobabeb `GONA01` | 234 | 2017.5–2026.4 | −0.00012 | 0.00024 | −0.5 | −0.11 % | −0.00020 | 0.00028 | −0.7 | −0.18 % |
+| Baotou sand `BSCN00` | 217 | 2018.2–2025.6 | +0.00054 | 0.00045 | +1.2 | +0.40 % | **−0.00227** | 0.00060 | **−3.8** | **−1.68 %** |
+| Golmud `GSCN01` | 208 | 2023.6–2026.4 | −0.00124 | 0.00073 | −1.7 | −0.35 % | +0.00121 | 0.00083 | +1.5 | +0.35 % |
+
+**Most of the apparent drift is not drift.** Univariately three of the six are resolvable — Baotou
+gravel at t = +4.3, La Crau at −3.0, Railroad Valley right at the line at +2.0. Hold the eight
+published drivers and the annual harmonic fixed and **every one of the three moves**: Baotou gravel
+falls to +1.4 and Railroad Valley to −0.3, while Baotou sand goes the other way, from an
+unresolvable +1.2 to −3.8. Two survive, and unlike the index-sampled version of this table they now
+**agree in sign**: **La Crau at t = −3.2** (−1.01 % across 11.4 years) and **Baotou's sand target at
+t = −3.8** (−1.68 % across 7.4 years). Golmud stays unresolvable on both, which its 2.9-year
+baseline predicts. **Both of those survive the row count and not the day count**, which is the next
+table.
+
+**The same fit on the days those rows came from.** Nothing inside a day is independent: the rows of
+one scene share its aerosol, water, ozone, pressure and solar geometry, and its wavelengths move
+together. So the `n` above is ten to fourteen times the information the design holds, and the honest
+fit averages each day's gated wavelengths into a single observation before regressing — 22 or 23 days
+per site against 12 columns. The six per-day drivers survive that average unchanged; ρ_BOA and the
+path ratio are per-wavelength and become the day's mean, which is the quantity a day-mean residual can
+depend on:
+
+| site | n | span | slope / yr | std err | t | end to end | controlled | std err | t | end to end |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Railroad Valley `RVUS00` | 22 | 2013.2–2026.3 | +0.00026 | 0.00039 | +0.7 | +0.34 % | +0.00003 | 0.00011 | +0.2 | +0.04 % |
+| La Crau `LCFR01` | 23 | 2015.0–2026.4 | −0.00067 | 0.00056 | −1.2 | −0.76 % | +0.00050 | 0.00028 | +1.8 | +0.57 % |
+| Baotou gravel `BTCN02` | 23 | 2016.5–2025.9 | +0.00160 | 0.00075 | +2.1 | +1.50 % | −0.00063 | 0.00102 | −0.6 | −0.59 % |
+| Gobabeb `GONA01` | 22 | 2017.5–2026.4 | −0.00011 | 0.00029 | −0.4 | −0.10 % | −0.00034 | 0.00018 | −1.9 | −0.30 % |
+| Baotou sand `BSCN00` | 23 | 2018.2–2025.6 | +0.00048 | 0.00120 | +0.4 | +0.36 % | −0.00112 | 0.00104 | −1.1 | −0.83 % |
+| Golmud `GSCN01` | 22 | 2023.6–2026.4 | −0.00046 | 0.00147 | −0.3 | −0.13 % | +0.00021 | 0.00126 | +0.2 | +0.06 % |
+
+**On the honest degrees of freedom, nothing in this table is resolvable.** Every controlled `|t|`
+falls under 2 — the largest is Gobabeb's −1.9, then La Crau's +1.8 — and the row-level table's two
+survivors are both gone: Baotou sand from −3.8 to −1.1, and La Crau from −3.2 to **+1.8**, which is a
+sign change and not a shrinkage. Univariately only Baotou gravel is left anywhere near the line, at
++2.1 against +4.3. **This is the table to quote**; the row-level one stays because the gap between the
+two is the measurement of what the clustering was worth.
+
+**That gap is not a factor, which is the part worth having done rather than estimated.** If clustering
+only inflated the `t` column, dividing by √(rows/days) ≈ 3.1 would reproduce this table. It does not.
+Averaging removes the within-day wavelength scatter the row-level fit was counting as residual, so a
+bar can *narrow* rather than widen: Gobabeb's controlled standard error goes 0.00028 → 0.00018 on 22
+points instead of 234, and its `|t|` **rises**, 0.7 → 1.9. What moves everywhere is the coefficient
+rather than the bar — Baotou sand's controlled slope halves, La Crau's changes sign. A slope that
+halves or flips when the response is averaged over the wavelengths of the same day was never a
+property of the day, and no √n correction applied to the row-level table would have shown that.
+
+**What moves with epoch besides the residual, named.** Two things do, and both are measured rather
+than supposed. The `held-out only` column is the same season regression over the 120 sampled days
+alone — the subset the generator controls — against the pooled column's 162:
+
+| site | season, days / yr | t | held-out only | t | ρ_BOA / yr | t |
+|---|---|---|---|---|---|---|
+| La Crau `LCFR01` | **+8.19** | **+4.2** | −0.00 | −0.0 | +0.00071 | +0.4 |
+| Baotou sand `BSCN00` | **+5.80** | **+2.7** | −0.25 | −0.1 | +0.00393 | +1.4 |
+| Railroad Valley `RVUS00` | +4.12 | +2.0 | +0.57 | +0.3 | +0.00076 | +0.5 |
+| Golmud `GSCN01` | −4.58 | −1.0 | −3.51 | −0.6 | −0.00045 | −0.1 |
+| Baotou gravel `BTCN02` | −4.72 | −2.6 | −0.00 | −0.0 | **−0.00366** | **−3.6** |
+| Gobabeb `GONA01` | −3.44 | −1.1 | +0.00 | +0.0 | +0.00289 | +1.0 |
+
+**The calendar drift the first version of this table found was the sampler's, and the sampler was
+replaced rather than controlled for.** The hold-out used to take evenly spaced *indices* through each
+sorted archive, and an index rule is uniform in *archive position*, which is uniform in season only if
+a site delivers at an even rate through the year — these do not, so the sample walked through the
+calendar. It was measured doing it: La Crau's sampled day-of-year advanced **15.1 days per year of
+record**, 175 days across its span, `t` 8.8. `season_balanced` in `tools/gen_radcalnet_oracle.py` now
+keeps the epoch strata and chooses *within* them to satisfy the balance equation
+`Σ (e − ē)(doy − d̄) = 0` directly, by coordinate descent from a seed whose season targets are a
+permutation of the year rather than a ramp. **Measured after: 0.00 days per year of record at all six
+sites**, with the season spread the harmonic needs left intact — day-of-year standard deviation
+across the six now runs 70.7 to 104.1 against 65.3 to 93.0 under the index rule, so the harmonic's
+regressor is no narrower than it was, and its narrowest site is wider.
+
+The `held-out only` column is that constraint reported back through the regression that consumes it,
+and it is not exactly zero at three sites for a reason worth stating rather than rounding away. The
+sampler balances **days**; this regression weights each day by the number of wavelengths that day kept
+after fill and flag filtering, which the generator cannot know for a candidate day without downloading
+it. Where that count is constant across a site's days the two agree to the archive's discrete floor
+(Baotou gravel, Gobabeb, La Crau, all `t` 0.0); where it varies, 10 or 11 rows per day at Baotou sand,
+a residue survives — the largest is Golmud's −3.5 d/yr at `t` −0.62, twenty times inside the bar and
+against the index rule's +8.8.
+
+**What the pooled column still carries is the 42 fitted scenes, and nothing can balance those.** They
+were chosen by scanning the archive, so their own season-on-epoch slopes are enormous and are a
+property of that choice: +38.5 d/yr at La Crau (`t` 69), +48.3 at Railroad Valley, −141.0 at Gobabeb.
+The drift regression pools them with the hold-out, which is why the first column above is resolvable
+at three sites while the second is resolvable at none. **The annual harmonic stays in the design for
+exactly that residue**, and its being unnecessary for the hold-out is the check that the sampler works
+rather than a reason to delete it.
+
+The last column is the other confound, and it is one site's. **Baotou's gravel target is itself
+darkening at −0.0037 per year, t = −3.6** — the only resolvable ρ_BOA slope in the table, about
+−0.034 in absolute reflectance across the record. That is the *site* changing, not the reference, and
+it is what the controlled column is built to hold fixed; it is also the site whose univariate slope is
+the largest in the table and which stops being resolvable once ρ_BOA is held. Neither survivor is
+explained this way: La Crau's ρ_BOA is flat at t = 0.4 and Baotou sand's is unresolvable at t = 1.4.
+
+Three things bound what the per-day table means, now that it has nothing resolvable in it. **The
+magnitudes are small on any reading**: the largest controlled slope is Baotou sand's −0.83 % across
+7.4 years, comparable to the 0.90 % relative RMS the windows themselves carry, so even taken at face
+value and ignoring its bar it is a residual-sized effect rather than a bar-sized one. **Twenty-two
+days is a small sample and an unresolvable slope is not a zero one** — with 10 or 11 residual degrees
+of freedom a real drift of a few tenths of a percent per decade would sit inside these bars, so what
+this table licenses is "not detected at this sample size", never "absent". And the **controlled column
+is the narrower question by construction**: a target that genuinely changed shows up in ρ_BOA, which
+enters both sides of the comparison, so holding it fixed separates a drifting *reference* from a
+drifting *site* and reports only the first. Each number is an **upper bound on a drift**, not an
+attribution of one — and on the fit whose degrees of freedom are honest, every one of those bounds is
+inside its own noise.
+
+**Why the row-level fit was ever read as decisive, since the inflation was visible before it was
+fixed.** It was measured under the index rule and written down: La Crau's season slope read `t` 8.8
+across 280 rows and 1.62 across the 20 days those rows came from, a factor 3.9 against the √14 the
+row count predicts. That measurement is what this pair of tables replaces — a known inflation was
+carried in prose for one revision of this section while the resolvable/unresolvable line at |t| = 2
+was still being drawn on the inflated column. The season columns below are still row-level and carry
+the same caveat; nothing in this section turns on one of them being read as decisive.
+
+**The measurement that made this worth doing is the gap between the two columns, and it took four
+rounds to stop moving.** The thirty-day version of this table was univariate and gave four resolvable
+slopes; two of them changed sign outright when the sample quadrupled — Baotou gravel from −0.00115 to
++0.00110, Railroad Valley from a flat +0.00005 to −0.00068 — on samples sharing their fitted 313 rows
+and both endpoints. A quantity that flips sign between two overlapping samples of the same archive was
+never measuring a stable property. Controlling for five drivers collapsed three of five. Controlling
+for the remaining three published drivers **and the season** then took La Crau from t = −4.4 to −2.7
+and Railroad Valley from −1.1 to −0.0: the first of those is the ozone, pressure and Ångström columns
+that the five-driver design had left in the epoch term, and the second is the calendar. The fourth
+round is the one above, and it is the only one that changed the *sample* rather than the design:
+replacing the index rule with balanced sampling moved Baotou gravel's controlled slope from +2.3 to
++1.4 and Baotou sand's from +0.7 to −3.8, so the pair this section reports as surviving is not the
+pair the third round reported. **A verdict that moves when the sampler is fixed was a verdict about
+the sampler**, and the reason to prefer this one is not that it is newer but that the confound it
+could have been reading has been measured to zero. The lesson generalises past this table — a
+univariate slope over a sample chosen by a rule nobody checked against the covariate is a confound
+until the sampling is shown to be orthogonal to it, and here it was orthogonal to neither the weather
+nor the time of year.
+
+**Bounds of the claim.** RadCalNet's TOA reflectance is a *model output*; what is measured is
+everything fed into it, so this is two radiative-transfer codes on one measured scene and not a
+satellite measurement. Nadir only — RadCalNet simulates no other view and its policy says the data
+are "only valid for the conditions stated i.e. at nadir and times indicated" — so nothing here speaks
+for an off-nadir view or a BRDF. Solar zenith reaches 81.5° in the fixture, where a plane-parallel
+slab is 4.1 % long on the slant path — but every row past 71.4° fails RadCalNet's own uncertainty
+flag, so the gated comparison never sees one, and over the rows it does see the plane-parallel path
+is bounded at 0.83 % and 5.2e-6 of TOA reflectance on the mean row. Gobabeb and La Crau are 30 m targets, small enough that adjacency is part of their own
+error budget, and Baotou's gravel target publishes no TOA reflectance beyond about 1 µm. The fitted
+`ω_a` absorbs any error correlated with it across the whole fixture, which is the price of the one
+unpublished input. The window classification's own bound is stated above and is a domain restriction,
+not a tolerance. The reference is not claimed to be stationary either: with all eight drivers and the
+season held fixed, **no** per-site epoch slope is resolvable on the per-day fit, which is a sample
+size of 22 days and not a demonstration of stationarity — the bounds run to 0.83 % of signal across a
+site's whole record and a drift under that would not be seen here, so a residual measured at one epoch transfers to
+another only at that accuracy. And nothing here is claimed about gaseous absorption: the windows
+exclude it by construction — though the water coefficient above shows the exclusion is imperfect at
+the 0.4 % per centimetre level, worth a bounded 1.63e-4 of TOA reflectance — and carrying a
+gas layer in `Atmosphere` is separate work.
+
+**Source did change here, so a mutation block was owed and run.** For most of this section the work
+was two generators, three fixtures and one test file, and for that much the existing seals stand;
+but #369 regenerated `gas_transmittance.txt` from a fixed producer and #370 moved the stacked
+transport out of the example and into the crate. `reseal3-gas-kdist` re-measured all three files at
+`MUTANTS_TIMEOUT=900` — **513 mutants in 75 min, 451 caught, 1 missed, 45 unviable, 16 timeouts** —
+and the one survivor was in #370's own new code: `slice_at -> 0`, a walk that reads the top slice
+and never looks again. #370 shipped a test whose stated purpose was that mutant and it did not catch
+it, because two orders of two unlike slices disagree either way. The kill is an absorber the mutant
+cannot see — `ω = 0` buried mid-stack, **0.527210** absorbed against the mutant's **exactly
+0.000000** — and `reseal4-gas-kdist` is the control: the same 513, the same 45 unviable and the same
+16 timeouts by name, with that one survivor moved into the caught column and nothing moved out
+(§8). Both generators remain re-runnable end to end and reproduce their committed fixtures byte for
+byte, which is the check that the fixtures are derived and not hand-edited.
+
+### 5.5 The RINEX reader had never read a RINEX file
+
+Ф6.E starts at RINEX 4.02, and the first step of it is to read the specification. Table A9 gives a
+broadcast-orbit line as `4X,4E19.12`: four spaces, then four nineteen-column fields, so 0-based
+starts at **4, 23, 42 and 61**. `orbit_fields` read them at **3, 22, 41 and 60**, and had since the
+module was written.
+
+On a real file that is not an off-by-one in the last digit. Every field straddles its neighbour, so
+the first one loses its last digit and gains the preceding space — G01's `Crs` came back as
+**6.95625** where the file says **69.5625** — and the other three each begin with a stray character
+from the field before and fail to parse outright. `parse_field` ended in `.unwrap_or(0.0)`, so all
+three were reported as **exactly zero**: `e = 0`, `sqrt(A) = 0`, a satellite of zero semi-major axis
+returned as a fact with no error anywhere. `parse_nav` on any file IGS actually publishes returned
+one plausible-looking record per satellite, entirely made up.
+
+**Why the whole suite was green.** Four fixture builders — the reader's own `orbit_line`, the C ABI's,
+the Python bridge's `orbit_line` and `smoke.py`'s `orbit()` — all indented their orbit lines with
+**three** spaces. Each was written by reading the parser rather than the format, and against a writer
+that shares the parser's mistake a round-trip test is exact. It is a real property; it is the property
+that the reader inverts *this writer*, and that is strictly weaker than inverting *the format*. The
+row for `rinex.rs` in this section's verdict table said so in as many words — its oracle column reads
+"self-consistency (analytic cubic / round-trip)" — and a self-consistency oracle is precisely the one
+that cannot see a convention error.
+This is the ocean-tide finding (§10.8) in a second domain within a week: a seal, a 1e-15 self-test and
+an exact round trip all passed a C-for-S transposition, because all three built the field with the
+generator's own convention.
+
+**The fix, and the check that it is one.** The four offsets, and `parse_field` split into the two
+answers it was collapsing: a field that is blank, or a line too short to reach it, is `0.0` — the
+format writes absence that way, and the BeiDou record in the new fixture has such a column — while a
+field holding something that is not a number is `None` and takes its record out of the result. Zero
+and unreadable had been the same value, which is what made three failed parses per line survivable.
+
+The oracle is now a file the reader did not write: 40 verbatim lines of
+`BRDC00WRD_R_20240010000_01D_MN.rnx` (IGS/BKG multi-GNSS broadcast navigation, 2024-01-01), with the
+expected values read off its columns by eye. Reverting the fix was run as a control, and it separates
+cleanly: **the pre-existing suite stays green under the bug — 6 of 6 — and all four new tests fail.**
+That is the measurement that says the tests were the gap and not the code.
+
+### 5.6 RINEX 4's block length follows the message, and the ticket's own verdict did not survive the data
+
+Ф6.E is the RINEX 4.02 upgrade. The format's structural change is one line: a navigation record now
+begins with a **Data Record Header Line** — `> EPH G01 LNAV` — naming the record type, the
+transmitting satellite and the navigation *message*. Everything else follows from it. A file can
+carry things that are not ephemerides at all (system time offsets, Earth orientation, ionosphere
+models, broadcast by the satellites and previously thrown away), and **one constellation can carry
+several ephemeris messages at once with different fields and different lengths**. GPS alone
+broadcasts LNAV in 8 lines, CNAV in 9 and CNAV-2 in 10, and they are not the same orbit
+parameterisation: LNAV gives `√A` and `Δn`, the CNAV family gives `√A₀`, `Ȧ`, `Δn₀` and `Δn̈₀`.
+
+So the block length is a function of the message, not of the constellation, and a reader that guesses
+it desynchronises the rest of the file. That table was read three ways before a line of the module was
+written: from the specification's own tables; from an empirical walk of DLR's 148 789-line
+`BRD400DLR` product with each block taken as "everything up to the next `>`", which produced the 36
+(record, constellation, message) combinations that product contains and the length of each; and from
+the specification's example records, written by the format's authors. All three agree.
+
+**The measured verdict.** 38 record shapes in the committed fixture, all decoded; **0 of 90 689
+records rejected** across four whole products — 2024-01-01, 2025-10-27, 2026-05-30 and 2026-07-19 —
+and every per-type count reconciles term for term against the independent Python walk. The 2024 file
+is RINEX **4.00**, deliberately: a reader that only works on the newest revision of a format is a
+reader that will break.
+
+**The ticket's stated verdict was "a RINEX 4.02 nav file yields the same broadcast orbit as its
+RINEX 3 twin to bit-exact", and the data refuses the premise.** There is no twin. Of the 944 records
+BKG's RINEX 3 merge and DLR's RINEX 4 merge share unambiguously, only **269 are identical in every
+field**, for three unrelated reasons and not one of them a reader:
+
+* **Written precision.** `E19.12` holds thirteen significant digits and neither producer always fills
+  them. BKG writes G32's `√A` as `5.153623479840e+03` where DLR writes `5.153623479843e+03` — the
+  same number to twelve digits, two different doubles.
+* **Flag fields.** QZSS's "codes on L2" and "L2 P data flag" are decoded differently by the two
+  producers: J04 and J07 carry 1 and 0 where the other carries 0 and 1.
+* **Galileo**, below.
+
+Byte identity is therefore a property of one producer's writer, not of the format, and a test
+asserting it asserts something false about real data. What is true, and is what a user depends on, is
+that the two describe the same orbit: worst relative element disagreement **4.98e-12** — one unit in
+the twelfth digit, exactly the write precision — and worst propagated-position disagreement
+**0.42 mm** an hour past the reference epoch, on a 26 560 km orbit. Eleven orders below the scale any
+framing error moves a satellite by. That is the verdict now recorded, and it is a stronger claim than
+the one asked for, because it survives a change of producer.
+
+**Galileo transmits one ephemeris in two messages with two clocks, and that changed the API.** The
+first attempt at the cross-product comparison keyed on `(constellation, PRN, toe, week)` and failed
+twice, each failure a finding:
+
+* **BeiDou rebroadcasts an ephemeris across clock epochs.** C04 appears twice at `toe` 165 600 with
+  `toc` an hour apart. Adding `toc` removes every one of those — with `toc` in the key not one
+  non-Galileo key carries two records.
+* **`(constellation, PRN, toe, toc, week)` is still not a key, and cannot be made one from RINEX 3.**
+  Galileo sends the same ephemeris in F/NAV and I/NAV, which carry the E5a−E1 and E5b−E1
+  ionosphere-free clock calibrations. Measured over the **2 659** keys that carry two records: every
+  one of the fifteen orbit elements agrees bit for bit, and what differs is exactly what the ICD
+  makes frequency-specific — `af0` on **2 584** (worst 1.92e-9 s, **0.58 m** of range), the health
+  word on **214** (F/NAV reports 16, the E5a bits, where I/NAV reports 130, E1B and E5b; Table A13's
+  note 6* says a message zeroes the bits it does not carry, so both are right), and `BGD E5a/E1` on
+  **39** (worst 1.16e-9 s, five steps of its own 2⁻³² s quantisation — one quantity transmitted in
+  two streams updated at different times). A further **46** keys carry a third record, a second
+  I/NAV the merge did not collapse, which is why the comparison picks its two records by message
+  name rather than by position.
+
+A `Vec<BroadcastEphemeris>` cannot express that. A caller looking up "E08 at `toe` 86 400" gets
+whichever record came last and is up to 0.58 m out about half the time, silently — and RINEX 3 offers
+no way out, because it puts the frequency pair in bits 8 and 9 of the data-source field, which
+`BroadcastEphemeris` does not keep. RINEX 4 states it in the record header. So `Rinex4Nav::keplerian`
+is a `Vec<KeplerianRecord>`, each pairing the ephemeris with the message it was broadcast in. The
+type changed because a measurement said the old one was lossy, which is the only reason worth
+changing a type for.
+
+### 5.7 A catch-all match arm decoded NavIC's L1 ionosphere message with the wrong layout
+
+`decode_ion` sorted RINEX 4's ionosphere records by message type and ended, as such functions do,
+with `_ =>` meaning "everything else is Klobuchar". The legacy Klobuchar layout puts `α₀…α₂` on the
+epoch line, `α₃` and `β₀…β₂` on the next and `β₃` on the last, and that is what the arm reads.
+
+Table A38 defines a **second** Klobuchar layout. NavIC's L1 message puts `IODK` alone on the epoch
+line, all four `α` on line 1, all four `β` on line 2, and on line 3 the longitude/latitude box the
+coefficients apply in — a field the legacy layout has no room for and the enum had no variant for.
+Read with the legacy arm, the specification's own example returns
+`α = [1.0, 0, 0, 5.87e-08]` and `β = [2.53e-07, -1.43e-06, -7.51e-06, 1.50e+05]`: the issue-of-data
+counter as `α₀`, every coefficient shifted one place, and the region silently dropped. The same arm
+also swallowed the `NEQN` subtype, which is not a Klobuchar at all — Table A39's NeQuick-N is
+**regional**, three effective-ionisation triples with a MODIP box each, against Galileo's one global
+`aᵢ` triple.
+
+Why it survived: **no satellite broadcasts either message into a published product.** Measured, not
+assumed — across BRD400DLR days 2024/001, 2025/300, 2026/150 and 2026/200 the message-type inventory
+is `CNAV CNV1 CNV2 CNV3 CNVX D1 D1D2 D2 FDMA FNAV IFNV INAV LNAV SBAS` and nothing else. `L1NV`,
+`L1OC`, `L3OC` and `LXOC` appear in no product, so no fixture could disagree with the reader and no
+amount of real data would ever have found it. The specification's own example records are the only
+bytes in existence for those four shapes, and they are now in `SPEC_EXAMPLES`.
+
+This is §5.5's shape one level up. There the fixture had been written from the parser; here the
+*decoder* had been written from one table and applied to another, and the catch-all is what made the
+mismatch silent. A catch-all arm over an open enumeration is an assertion that every future member
+behaves like the ones you tested — worth writing only where that is actually true.
+
+Two smaller things fell out of the same reading. `SbasEphemeris::accuracy_code` was a `u8`; the
+column it comes from takes 2, 4096 and **32767** — the last being the "not available" sentinel that
+8 123 of one day's 9 410 SBAS records carry — and `f64 as u8` saturates, so 4096 and 32767 both read
+as 255. The field was typed from the URA *index* range rather than from the column the format
+transmits; it is a `u16` now. And the fixture's SBAS sample was replaced with the one record in the
+day's product that has a non-zero hour and a non-zero value in all twelve state columns, because a
+km → m scaling is invisible on a zero.
+
+### 5.8 SP3-d: three header changes, and a product that could not be obtained
+
+SP3-d's introduction states its whole difference from SP3-c: *"the maximum number of satellites is
+increased from 85 to 999, there are now an unlimited number of comment records allowed in the header,
+and the maximum length of each comment record has been increased from 60 characters to 80
+characters."* All three are header properties. The `*`, `P`, `V`, `EP` and `EV` records are
+byte-for-byte SP3-c's.
+
+`Sp3::parse` walks records and ignores every header line except the first `#` and the first `%c`, so
+it plausibly read SP3-d already. **Plausibly is not a verdict**, and §9's currency table had SP3-d
+listed as an upgrade candidate on exactly that basis. Two tests replace the assumption:
+
+* the three changes applied to three epochs of a real IGS product, with every observable — frame,
+  time system, start epoch, epoch grid, and each satellite's positions, clocks and velocities —
+  required to be identical between the SP3-c and SP3-d parses. `version()` is the only difference.
+* a 140-satellite file, which SP3-c cannot express. **Control: an 85-satellite cap injected into
+  `set_sample` turns this test red and leaves the other two green**, so it is measuring the ceiling
+  and not the file.
+
+What could not be obtained is worth recording as carefully as what was. **No openly served SP3-d
+product with more than 85 satellites was reachable from this machine.** BKG's MGEX product directory
+is empty; AIUB and Wuhan do not answer; GFZ's ISDC hosts do not resolve; and CDDIS is behind an
+Earthdata login — a registration whose terms attach at registration, which is the AVISO position in
+`docs/provenance.md` and a user's decision rather than a fetch script's. The IGS operational final
+product for 2024/001 is `#cP`, 32 satellites. The specification's Example 1 declares 140 satellites
+but **elides its data section**, so it is not a file. The 140-satellite fixture is therefore built by
+*relabelling* the real product's records across five constellations: every coordinate, clock and
+epoch in it is IGS data, and only the satellite identifiers are the test's. That is stated in the
+test, because a synthetic fixture that does not say so is the §5.5 failure waiting to happen again.
+
+The reader also now reports `Version`. It changes no decoding — SP3-a through SP3-d lay out a `P`
+record identically — but it is what tells a caller which limits the file was written to, and an
+unrecognised version character is kept as broadcast rather than rounded to the newest known one.
+
+### 5.9 The CNAV propagator, and two oracles that are not the algorithm
+
+`CnavEphemeris` carried `Ȧ`, `Δn₀`, `Δn̈₀` and `t_op` and had no propagator, because the parameters
+are read off the file and the algorithm has to be verified against something. IS-GPS-200N Table 30-II
+supplies it: the axis drifts as `A(tₖ) = A₀ + Ȧ·tₖ`, the mean motion as `n_A = n₀ + Δn₀ + ½Δn̈₀tₖ`
+with `n₀` computed from `A₀` and not from `A(tₖ)` — `Ȧ` already carries the secular drift and
+recomputing `n₀` would count it twice — and the corrected radius rate gains `Ȧ(1 − e·cos Eₖ)`.
+Everything else is the legacy algorithm unchanged.
+
+That last fact is the first oracle, and it is exact. **With both rates zeroed the CNAV algorithm has
+to reproduce `BroadcastEphemeris::position_velocity_ecef` bit for bit**, which makes the legacy
+propagator — verified against Orekit and against IGS precise orbits — the reference for the new one,
+with no tolerance to argue about. Getting there required accumulating the second-harmonic
+corrections in the same order the legacy code does: floating-point addition does not associate, and
+`(i₀ + IDOT·tₖ) + (c_is·s + c_ic·c)` is four ulp from `((i₀ + IDOT·tₖ) + c_is·s) + c_ic·c`. Writing
+the sibling's structure rather than a tidier one is what buys the exact equality.
+
+The second oracle is external. `data/validation/IGS0OPSRAP_20262240000_01D_15M_ORB.SP3` is already
+in this repository — an eleven-centre IGS combination for 2026-08-12, accurate to centimetres — and
+`tools/fetch-gnss-nav.sh` now also fetches the BRD400DLR broadcast file for **the same day**, which
+is the only reason that day is in the list. One day of GPS, every 15-minute epoch, nearest record
+within a two-hour fit:
+
+| message | comparisons | RMS | worst |
+|---|---|---|---|
+| LNAV | 3 072 | **1.816 m** | 4.475 m |
+| CNAV | 2 688 | **1.854 m** | 4.324 m |
+
+CNAV has fewer comparisons because four GPS satellites broadcast no CNAV at all. Both numbers are
+the constellation's specified signal-in-space range error, which is what a broadcast ephemeris is
+*supposed* to cost against a precise orbit — this is not a tolerance chosen to pass.
+
+**And two controls, because a number near the right answer proves nothing until you know what moves
+it.** Zeroing `Ȧ` takes CNAV to **15.13 m RMS**; flipping its sign takes it to **30.08 m RMS**. So
+the comparison sees the axis-rate term at eight and sixteen times the residual, and a transcription
+error in it could not have hidden behind "broadcast ephemerides are a couple of metres out".
+
+---
+
+### 5.10 Three ITU data files, and the escape hatch that was measured shut
+
+`docs/provenance.md`'s data register carries one verdict still **unread**, and it is `itu-r-grids`:
+the twelve CCIR monthly `foF2`/`M(3000)F2` coefficient files, the two MODIP grids, and the ITU-R P.834
+mapping coefficients. The files are byte-identical to the ones Orekit distributes under Apache-2.0,
+which is the lineage relied on; ITU's own position is the obstacle. Re-read on **2026-09-14** and
+unchanged from the 2026-09-06 pass: the site-wide copyright page says "ITU holds copyright in the
+information available on this Web site, unless otherwise stated" and directs reproduction requests to
+`jur@itu.int`, with newsroom material the only stated exception; and the Study Group 3 ionospheric /
+tropospheric databank page, which is where these files are offered, carries **warranty disclaimers
+only** — "provided 'as is' without any warranty of any kind" for the software, the validation examples
+and the data products alike — and no grant of any kind. An offer to download is not a licence to
+redistribute, so the row stays unread and `check-provenance.py --public` keeps failing on it.
+
+`plans/16` held a second way out: *regenerate the grids from an open source*. Of the three artefacts
+only MODIP could qualify — the CCIR maps and the P.834 coefficients are fits to measurements nobody
+can refit, but modified dip latitude is a **closed form in the magnetic dip**, `tan μ = I/√(cos φ)`
+(Rawer 1963, both angles in radians), and this repository already vendors the IAGA `igrf14coeffs.txt`
+under NCEI's public-domain notice, with the whole DGRF series from 1900.0 to 2025.0 in it. So the
+question is answerable by arithmetic: synthesise the dip at 350 km at every node of each grid at every
+one of the 26 epochs and ask which one reproduces the file. `derivations/modip_provenance.py` is that
+measurement.
+
+| shipped grid | sampling | nearest DGRF epoch | rms | worst |
+|---|---|---|---|---|
+| ITU `modip.asc` — NeQuick 2, P.531 | 1° × 2°, 181 × 181 | **1960.0** | 0.489° | 3.394° |
+| Galileo `modipNeQG_wrapped.asc` — NeQuick-G | 5° × 10°, 37 × 37 | **2000.0** | 0.503° | 1.998° |
+
+**Neither is a reproduction, and three things say so.**
+
+* **Half a degree is not rounding.** A regenerated file agrees with its source to the last printed
+  digit or it is a different file. Both grids are two decimal places wide and both miss by 5e-1.
+* **The residual sits where MODIP is sensitive to the field and nowhere else.** For the ITU grid at
+  its best epoch, rms by band is **0.82° over 0–30°** and **0.04° over 85–90°** — the magnetic
+  equator's position, which is exactly what a different field model moves. Re-running the whole search
+  with a geodetic recipe (ellipsoid height, the field tilted onto the ellipsoid normal, geodetic φ in
+  the `√cos φ`) changes the answer by **1.5 %** — 0.489 → 0.482 and 0.503 → 0.497, same best epochs.
+  So the disagreement is the field, not the frame, and there is no convention left to guess at.
+* **The two shipped grids are two different maps, not one map at two resolutions.** At the 37 × 37
+  nodes they share: rms **2.13°**, worst **13.92°**. The fitted epochs say why — a ~1960 field against
+  a ~2000 one — and it is the reason `modip.rs` carries two variants rather than one and an
+  interpolator.
+
+**Substitution is not open either.** `tests/galileo_stec.rs` holds STEC to 1e-10 relative against
+the JRC reference implementation and `tests/itu_stec.rs` to < 1e-3 TECU against ITU-R P.531's
+published values, and those tests exist precisely to prove the port is the *same model*. A grid half a degree away in MODIP is a different model; the
+tests would catch it, and they would be right to.
+
+So the escape hatch is shut, measured rather than assumed. NeQuick-G left the row another way on
+2026-10-20: the Galileo ICD embeds its CCIR maps and its MODIP grid in Annex C, under the EU's reuse
+terms, and the crate now ships those (`galileo-icd`). What stays on `itu-r-grids` is NeQuick-ITU's
+`modip.asc` and the P.834 coefficients, and for them the ITU-R letter is the only lever: hold the
+cut for an answer, or leave NeQuick-ITU and P.834 out of the public tree.
+
+**One defect found on the way in.** `derivations/igrf14_tables.py` — the generator whose output
+`igrf14_coeffs.rs` names in its own header — wrote to `crates/spacelab-gnss/src/igrf14_coeffs.rs`, and
+the table has lived in `crates/spacelab-geomagnetism/` since the geomagnetism crate was split out.
+Running the documented regeneration command would have created a stray file in the wrong crate and
+left the real table untouched, silently: a bump would have looked applied and would not have been.
+Path corrected, and the round trip now closes — regenerating from the vendored `igrf14coeffs.txt`
+reproduces the committed table **byte for byte**, which is the check that says the generator and the
+file are still the same artefact.
+
+---
+
+## 6 · The C and C++ boundary
+
+`spacelab-capi` is the same problem as §7 in a language with less help. Rust cannot export C++ — C++
+has no stable ABI, so a Rust compiler has no name to mangle to — which means every "C++ binding" to
+a Rust library is a C boundary with a header over it. That is what this crate is: an `extern "C"`
+surface in `src/lib.rs`, and `include/spacelab.hpp`, a header-only C++20 wrapper that adds
+exceptions, RAII and `std::vector` and nothing else.
+
+The surface is **228 functions**, and the number is chosen by a measurement rather than by taste: the
+Python bridge of §7 registers 196 `#[pyfunction]`s, and **every one of them has a C counterpart**.
+The C count is the
+larger of the two because C has no keyword arguments and no tuple return: what Python exposes as one
+function with an optional argument is often two exports here, and a Python function returning a pair
+becomes one export writing two out-parameters. The comparison was run as a script over both symbol
+lists rather than read off a checklist, because a checklist is what produced the previous answer of
+30.
+
+That parity is a claim with an expiry date, and re-measuring it during #319 is what found the last
+two gaps. The script compares symbol *names*, so it cannot see that `walker_constellation` is
+`sl_walker`, that `saastamoinen_zenith_delay` is the pair `sl_saastamoinen_zenith_hydrostatic` and
+`_wet`, or that `coverage_metrics` is `sl_coverage_scan` — the header says why for that last one:
+the struct had already taken the name, and C has one namespace. Twenty of the twenty-four unmatched
+names resolved that way. Four did not, and two of those were real: **`rinex_obs` and
+`rinex_obs_series`**, #312's observation-file reader, which had no C counterpart at all. The C ABI
+now reads observation files through `sl_rinex_obs_header`, `sl_rinex_obs_descriptors` and
+`sl_rinex_obs_series` — three flat entry points rather than one that hands the parsed file over,
+because `RinexObs` is a per-constellation descriptor map over epochs of per-satellite *ragged* slot
+lists and that shape reaches C only as an opaque handle. Re-parsing per call is the trade
+`sl_rinex_gnss_positions` already makes and the header already documents.
+
+#378 re-ran the same comparison over the control pillar and found the same defect again, inside the
+ticket written to close it: three of the control exports had shipped under two different spellings,
+one per bridge. `sl_attitude_error` against Python's `attitude_error_mrp`, and `delay_margin` /
+`law_delay_margin` against C's `sl_delay_margin_of_gains` / `sl_delay_margin_of_law`. Nothing failed;
+a capability was reachable from both sides and discoverable from neither by the other's name. The
+names are now `sl_attitude_error_mrp`, `sl_delay_margin_of_gains` and `sl_delay_margin_of_law` on
+both sides, and the comparison is no longer a script somebody remembers to run: **the control
+surface is 27 exports in the C ABI and 27 `#[pyfunction]`s in the bridge, and the two sets are
+identical**, checked by `crates/spacelab-capi/tests/bridge_parity.rs`, which reads both files and
+fails on the difference. It carries a floor of 20 names per side, because a marker that stopped
+matching would leave an empty set on each side and two empty sets compare equal — the vacuous pass
+is the failure mode a parity test has, and it is the one worth defending against.
+
+That tripwire is scoped to the control section and says nothing about the other 201 exports; the
+whole-surface comparison remains the script of #319, run by hand. What #378 measured is that a
+section-scoped, always-on check catches within one ticket what the by-hand one caught five tickets
+late.
+
+Export-name parity is not the same question as capability coverage, and the second one is worth its
+own number: `spacelab-control` has **64 distinct public functions and 55 of them are named by at
+least one bridge**. The nine that are not divide into three groups, and none of them is an
+oversight:
+
+* `integrate_delayed_on_mesh`, `integrate_delayed_fixed_on_mesh` and `arc_ends` take a
+  `DelayedSystem` implementation. Neither C nor Python can supply a right-hand side without a
+  callback trampoline back across the boundary, which is a different design decision from a binding.
+  `sl_consensus_run` / `consensus_run` is the one concrete instantiation that is exposed, and
+  `sl_delay_breakpoints` / `delay_breakpoints` exposes the mesh those three would be called on.
+* `degrees`, `laplacian`, `largest_laplacian_eigenvalue`, `within_bound` and `quaternion_vector` are
+  one-line derivations from values both bridges already return — row sums of the adjacency the
+  caller passed in, `D − A` from the same, the last entry of `laplacian_spectrum`, a comparison
+  against `consensus_delay_bound`, and the last three of the four numbers
+  `attitude_error_quaternion` hands back. An export for each would be five more names carrying no
+  capability, and Hyrum's law says every one of them would then be depended on.
+* `seeded_with` constructs a `History<N, C>`. `History` is not a bridged type — the loop owns it —
+  and `attitude_loop_run` takes the seed state directly, which is the same thing said in the
+  arguments the caller already has.
+
+Five things can go wrong here that cannot go wrong in §7, because PyO3 generates the other side and
+a C compiler does not:
+
+**The header can disagree with the library.** `#define SL_MU_EARTH 3.986004418e14` is a number typed
+twice, and a consumer compiled against a stale copy gets no error — it gets a wrong answer. The Rust
+tests `include_str!` the header, parse it, and compare every `#define` bit-exact against the constant
+the library computes with, every enumerator against its discriminant, and every struct field *order*
+against the Rust `#[repr(C)]` declaration. Field order is the one no compiler on either side checks.
+
+**A panic can cross it.** Rust unwinding into C++ is undefined behaviour, not a crash with a
+backtrace. Every entry point routes through one of two wrappers built on `catch_unwind`: the fallible
+shape returns `SL_ERR_PANIC`, the total shape returns NaN, and both put the payload in the
+thread-local message. The test drives each wrapper with a body that panics and asserts the message
+names it — the wrappers rather than a chosen call, because it is the wrappers all 164 exported
+functions share, and a test through one of them would say nothing about the other 163.
+
+**One string is length-counted, and only one.** `sl_sgp4_open` takes NUL-terminated element-set
+lines and scans at most `MAX_C_STRING` for the terminator, which is the right bound for a token. The
+two `sl_rinex_*` entry points take `(text, text_len)` instead, because a navigation file is routinely
+longer than that bound and truncating one silently would be worse than any of the alternatives. The
+divergence is deliberate and is written at both declarations.
+
+**Memory can cross allocators.** No function returns memory the caller must free. Fixed-size results
+go to caller-owned out-parameters; variable-size ones use a two-call protocol (`out == NULL` asks the
+length). Three things are opaque handles — a parsed element set, a dense ephemeris and an information
+filter — and each is owned by a C++ class through a `unique_ptr`; LeakSanitizer on the C++ smoke
+tests is what proves the destructors actually run.
+
+**A type can be a different width on the other side, and this one was.** The width of a C enum is
+the implementation's choice, and `-fshort-enums` — the *default* on most ARM bare-metal toolchains,
+one of which this workspace already targets in CI (`thumbv7em-none-eabihf`) — picks the smallest
+type that fits. Measured with gcc 15 on x86-64: `sizeof(sl_precision)` was **4 normally and 1 under
+that flag**, while the library reads `i32`. As an argument to `sl_propagate_two_body` that is three
+bytes of nothing; as the type of `sl_walker_params.pattern`, at offset 0, it is three bytes of
+uninitialised padding read as part of the tag — a wrong constellation with no error to report it.
+Both enums now carry a `_FORCE_INT32 = 0x7FFFFFFF` enumerator, which fits in `int` and nothing
+narrower: re-measured, 4 bytes on every rung of the standards matrix below, with the flag and
+without. A Rust test asserts the enumerators are still in the header, the C++ smoke test
+static-asserts the widths and the C smoke test reads them at run time, because the failure mode of
+deleting one is silence. C23 can say `enum sl_precision : int32_t` directly and this header does not:
+the guarantee is made to every consumer, and one compiling as C99 would get it only on a standard
+they are not using.
+
+This was found by re-reading the header after the crate was already green, which is the honest
+lesson in it: every gate the crate had — 16 Rust tests, a C++ smoke test, sanitizers, clang-tidy, a
+mutation seal at 0 missed — compiled the header exactly one way, and the bug was in the second way.
+
+**And the header had never been compiled as C.** A C ABI whose only consumer-side test is a C++ one
+is a claim, not a measurement: `bool` in a prototype, an anonymous-struct typedef and an enum with an
+out-of-range sentinel all mean something subtly different to the two front-ends, and the C++ wrapper
+hides the parts of the contract only a C caller reaches — the two-call protocol written by hand
+including its short-buffer branch, and the totality rule that a value-returning function handed a
+null answers NaN rather than trapping. `tests/c/smoke.c` is that consumer. It is written to C99 and
+compiled at every standard from there up, which is the second half of the same lesson: the way to
+stop finding these one at a time is to stop compiling the header exactly one way.
+
+That rung has since caught a second one, of exactly the same shape. The coverage batch first named a
+struct `sl_coverage_metrics` and the function that fills it the same thing, and likewise
+`sl_constellation_fom` — which C++ accepts, because a function name simply hides a class name there,
+and C rejects outright: a typedef name and a function name share one namespace. Both C++ rungs and
+every Rust test were green; `c99` was the only thing that failed, and it failed at the header, on
+every declaration downstream of the collision. The functions are now `sl_coverage_scan` and
+`sl_figures_of_merit`, and the reason they cannot take their structs' names is written where the
+structs are declared, because the next person to add a paired struct-and-function will reach for the
+same name.
+
+**And a consumer may have exceptions turned off.** Games, embedded targets and anything with a
+`-fno-exceptions` house rule cannot use a wrapper whose every failure path is a `throw`, and "use
+the C header instead" gives up the RAII handle and the vector sizing, which is most of what the
+wrapper is for. Every fallible operation therefore comes in two forms: `try_f(...)` returns a
+`result<T>` and never throws, and `f(...)` is written as `unwrap(try_f(...))` so the two cannot
+disagree. Under `-fno-exceptions` the throwing half is not declared at all — `__cpp_exceptions` is
+undefined there on both compilers, and that is the guard. `result<T>` is `std::expected<T,
+sl_status>` where the standard library has it and a stand-in with the same used subset where it does
+not, so the C++20 rung compiles the stand-in and the C++23 and C++26 rungs compile the standard type.
+`tests/cpp/nothrow.cpp` is the proof: it opens with `#ifdef __cpp_exceptions` / `#error`, so it
+cannot be compiled the wrong way by accident, and it never names a throwing entry point, so one
+appearing in a path it uses would fail the build rather than the test.
+
+Mixing the two modes across translation units and linking them is an ODR violation — the
+declarations genuinely differ — and the header says so rather than leaving it to be discovered.
+
+**And the build can test a library that no longer exists.** An `UNKNOWN IMPORTED` library's file is
+not, by itself, something CMake will relink for. Rebuilding the Rust half and running `cmake --build`
+again left every executable here linked against the *previous* archive, so a run could report twelve
+passes against code that had been replaced — found by changing an error message, rebuilding, and
+seeing `strings` disagree between the archive and the binary that supposedly linked it. Each smoke
+target now names the archive in `LINK_DEPENDS`, which is what makes `just capi` a measurement of the
+library it just built.
+
+**And a precondition a core crate states with `assert!` is not a precondition at this boundary.**
+`catch_unwind` turns such a panic into `SL_ERR_PANIC`, which is containment rather than an answer: it
+tells a C caller that something inside went wrong, not that the argument they passed is the one that
+is wrong. Widening the surface to Phase-8 turned up three, each found by writing the refusal test
+before assuming there was a refusal to test. `chirp_scaling_focus` transforms along both axes and the
+FFT asserts radix-2, so a 6 × 16 aperture panicked. The census descriptor in `semi_global_match`
+packs one bit per neighbour into a `u64`, so a radius past 3 shifted neighbours off the top and
+returned a disparity map computed from a window smaller than the one asked for — the worse of the
+three, because it is an answer rather than a fault. `build_tracks` indexes the corner lists a match
+names, and panics when the index is past the end. All three are now checked at the entry point and
+answered with `SL_ERR_INVALID_ARGUMENT` naming the offending number.
+
+A fourth came out of the timeout analysis in §8 rather than the header review, and it is the one with
+a lesson in it. `sl_ephemeris_j2_itrf_series` validated its EOP rows with
+`w[0].t_seconds >= w[1].t_seconds || !w[0].t_seconds.is_finite()` over `windows(2)` — a condition
+written to enforce *ordering*, with finiteness folded into the key the ordering is defined on. So the
+five payload fields were never checked at all, and `t_seconds` was checked on every row except the
+last, which is never any window's `w[0]`. A NaN in `xp_rad` reaches the rotation through `lerp_at`,
+the step controller rejects every step it tries, and the call returns after `DEFAULT_MAX_STEPS`
+instead of refusing: a 600 s arc with a merely *large* payload — every field 1.0 radian, which is
+finite and passed every check — had not returned after **900 s**, measured. The condition now runs
+over each row and each of its six fields, and names both in the refusal. The general form: a
+validation predicate written against the field an invariant is *stated* on will silently exempt every
+field it is not stated on, and `windows(2)` exempts one end.
+
+**That defect was not found by the seal, and could not have been — which is the finding under the
+finding.** `cargo mutants` 27.1.0 generates nothing for the body of an `unsafe fn`. Measured over the
+whole export surface: of the 164 `sl_*` functions, **146 are `pub unsafe extern "C" fn` and produce
+zero mutants between them; the 18 that are `pub extern "C" fn` produce mutants**. Both groups carry
+`#[unsafe(no_mangle)]` and `extern "C"`, so the attribute is not what separates them — the `unsafe`
+on the function is, and the correlation is 164 for 164. `cargo mutants -p spacelab-capi --list`
+returns nothing at all for `sl_ephemeris_j2_itrf_series`, so the run reported **0 missed with the
+defect present** and 0 missed after it was fixed. A verdict of 226 caught / 0 missed on this crate is
+a verdict on the safe helpers and those 18 exports, not on the ABI's 146 entry points.
+
+The structural answer is to put preconditions in a **safe** helper — `check_arc`,
+`check_coverage_orbit`, `dsst_check_zonal`, `dsst_check_spacecraft`, and now `check_eop_series` —
+and reduce the `unsafe fn` to null checks, `from_raw_parts` and delegation. Where that split holds
+the seal reaches the logic; where a condition is written inline it is invisible to the seal by
+construction. Extracting this one condition moved the crate from 257 mutants to 260, and the three
+new ones are the finiteness test, the row loop and the ordering test that were unexaminable the day
+before.
+
+**That split was then applied to the whole surface (#260), and the measurement is the point.** Before
+it, 237 refusal sites sat inside `unsafe fn` bodies where nothing could be generated for them;
+afterwards 143 do. What moved out are the predicates over *values* — finiteness, positivity, counts,
+ranges, exact lengths — into shared primitives (`check_finite`, `check_positive`, `check_nonnegative`,
+`check_all_finite`, `check_nonzero`, `check_at_least`, `check_count`) and, where an entry point
+applies two or more at once, into a composite named for it (`check_swath_inputs`,
+`check_fft_aperture`, `check_tomo_counts`, `check_sgm_config`, `check_matches`, and a dozen more).
+What stayed is what cannot move: the null tests and `borrow_sized_*` calls that have to sit beside
+the raw pointer, and 12 arms that report a *computation* failing rather than an input being wrong —
+`None =>` from a solver that found no arc, `Err(e) =>` from a model that would not build. The crate
+went from **268 mutants to 356**, and 88 more of its refusals became things a test has to earn.
+
+Eight of them were not earned, and the first seal said so: `check_mass_ratio` was never asked for 0
+or 1, `check_positions` never for a NaN in one component at a time, `check_minimum_walker_inputs` and
+`check_tomo_counts` never for the zero they exist to refuse, and `check_sgm_config`'s census radius
+was tested at 4, which fails, but never at 3, which must not. Eight tests later the seal is clean.
+Two mutants became *unviable* rather than caught, which is the same result by a different route:
+`precision_of` and `walker_pattern_of` return `Result<enum, i32>` over enums nothing implements
+`Default` for, so `Ok(Default::default())` does not compile.
+
+It is worth being exact about how far that pattern extends, because that ratio is the number to
+re-derive after any structural change — not the seal's caught count, which can rise while the blind
+spot does too. Counting `fail(SL_ERR_INVALID_ARGUMENT | SL_ERR_DOMAIN)` sites by enclosing top-level
+function in `lib.rs`, the day #260 was filed: **235 refusal sites inside an `unsafe fn` against 21
+inside a safe one**, with **113 unsafe functions carrying at least one guard** — roughly **92 % of
+this crate's input validation outside the reach of its own mutation seal**, since a test that deletes
+a guard and a test that asserts on it are indistinguishable to a run that never generates the mutant.
+The same count after the rework, on a surface four entry points wider: **143 inside an `unsafe fn`
+against 46 inside a safe one**, and of those 143 only 12 are predicates over a value at all — the
+rest are the null and UTF-8 tests that cannot leave. The measurement is `/tmp`-scratch rather than a
+committed script because it is a fact about the tool, not a regression to gate on.
+
+**A build flag must not change the symbol table.** The last `#[pyfunction]` without a C twin was
+`cloud_mask`, and the reason it stayed that way is that it needs `spacelab-vision` built with `onnx`,
+which pulls a whole inference runtime (`tract`) into the static library. The four entry points that
+close it — `sl_cloud_masker_open` / `_close` / `_mask` and the one-shot `sl_cloud_mask` — are
+therefore behind the crate's own `onnx` feature, off by default. They are **exported either way**,
+and refuse with the new `SL_ERR_UNSUPPORTED` when the feature is off. Conditioning the *symbols* on
+the feature was the alternative and is the trap: `sl_abi_version` cannot describe a symbol table, so
+a `dlopen` consumer would discover the difference at load, with nothing useful to say, and
+`spacelab.hpp` would have to be compiled to match how the library it wraps was built. The cost is one
+status code; the C and C++ smoke tests assert the refusal from a default build, so the "still here"
+half is measured rather than asserted in prose. This is what took the ABI from 1 to 2 — additive, but
+a `dlopen` consumer's question is "does this library have `sl_cloud_mask`", and a version is the only
+place to answer it.
+
+Three things about that family are worth writing down because they are decisions rather than
+transcription. The mask crosses as `uint8_t` and not `bool`, because it is an *array*: `_Bool` has
+one width on this platform and no promise of one anywhere else, and `std::vector<bool>` has no
+`data()` to hand back. The two-call protocol is here, but it is the only place in this header where
+**sizing runs the computation** — a segmentation net's output grid is not `height * width` and cannot
+be known without running it — so the header tells callers to allocate `height * width` and re-call on
+`SL_ERR_BUFFER_TOO_SMALL`, and the C++ wrapper does exactly that instead of `detail::sized`. And the
+threshold is deliberately not held to `[0, 1]`: a cut above every probability is how a caller asks
+for "nothing is cloudy", which is an answer. The fixture makes all three checkable — a 3×8×8 tile
+through a net that halves the grid gives **16** outputs against 64 input pixels, so a test that
+assumed the tile's shape would fail, and the expected mask is onnxruntime's recorded probabilities
+against the cut rather than anything this code path computes.
+
+**A `#[cfg]` pair of functions cannot be sealed by either configuration.** The first two seals of this
+family — `capi-cloud-twin` and `capi-onnx-twin` in §8 — each reported exactly one survivor, and each
+reported the *other* one's half. `open_masker` was written as a `#[cfg(feature = "onnx")]` /
+`#[cfg(not(...))]` pair; cargo-mutants emits a whole-body replacement for each half, and a run can
+only judge the half its configuration compiles. The half it does compile rejects the mutant at build
+time — `Ok(Default::default())` wants `SlCloudMasker: Default`, which nothing implements, `E0277` in
+both logs — so that one lands as *unviable*. The half it does not compile changes no binary, every
+test passes, and cargo-mutants calls that *missed*. Two runs, two phantom survivors, and nothing
+wrong with either the code or the tests; the same shape `py257-onnx` found in the Python bridge, one
+step further along, because here both halves are in the same crate and no single configuration can
+seal it. Written instead as one function with two `#[cfg]`-ed bodies, it yields one mutant rather
+than two, unviable in both configurations, and the crate's total falls 269 → 268. `run_cloud_mask`
+beside it stays a pair on purpose: nothing is emitted for the body of an `unsafe fn`, so it has no
+phantom to avoid — the blind spot of #260, convenient for once.
+
+| Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|
+| Header constants (`SL_MU_EARTH`, `SL_RE_EARTH`, `SL_J2/J3_EARTH`, `SL_EARTH_ROTATION_RATE`, `SL_ABI_VERSION`) | the header is the contract | the value the library itself computes with | bit-exact (`to_bits`) | src/lib.rs |
+| Enum tags, struct field order and arity | `#[repr(C)]` layout | the header text, parsed | exact | src/lib.rs |
+| `sl_teme_to_itrf`, `sl_gcrf_to_itrf` | §1 transforms | the `spacelab-frames` function the binding calls | bit-exact | src/lib.rs |
+| `sl_itrf_to_geodetic` / `sl_geodetic_to_itrf` | WGS84 | round-trip, and the crate function | 3 637 891.0 m ± 1.0 measured; round-trip < 1e-6 | src/lib.rs, tests/cpp/smoke.cpp |
+| `sl_sgp4_*` (open / at / batch / one-shot) | §2 SGP4 | the `Sgp4` propagator; batch ≡ singles | bit-exact; ISS radius 6 720 189.23 m ± 0.01 | src/lib.rs, tests/cpp/smoke.cpp |
+| `sl_lambert` | §3 Izzo | closure: fly the returned `v1`, arrive at `r2` | < 1e-6 m | src/lib.rs, tests/cpp/smoke.cpp |
+| `sl_walker`, `sl_street_of_coverage` | §4 generators | the two-call protocol delivers what the crate generated; every state on the design radius | exact count; ± 1.0 m | src/lib.rs, tests/cpp/smoke.cpp |
+| `sl_flower`, `sl_lattice_flower`, `sl_draim`, `sl_draim_geometry` | §4 the three remaining families | the lattice's own containment property — a circular lattice `(No, Nso, Nc) = (P, S, F)` is a Walker Delta `i: T/P/F` satellite for satellite — plus Kepler's third law for Draim's orbit, so neither is checked against itself | position agreement < 1e-6 m over 24 satellites; `a` to 1e-12 relative of `(mu·(T/2π)²)^(1/3)` | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_alpha_characteristic`, `sl_minimum_walker` | §4 Mozhaev α-characteristic | the search answers with a complete `sl_walker_params`, so its own answer is fed back to `sl_walker` and the constellation that comes out is measured against the footprint that was asked for | α ≤ the 0.5 rad requested, total within the budget; an unreachable footprint is `SL_ERR_DOMAIN` | src/lib.rs, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_grid_cells`, `sl_coverage_scan`, `sl_access_windows`, `sl_figures_of_merit` | §5 coverage engine | the aggregate against what it aggregates: the pass count and coverage fraction each cell reports must be the windows `sl_access_windows` lists for that same cell | passes exact; fraction ± 1e-9 of the windows' own share of a 24 h horizon | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_rinex_gnss_positions`, `sl_rinex_glonass_positions` | §9 RINEX-3 broadcast navigation | the same mixed-constellation fixture the Python bridge's smoke test parses, so both bindings are read against the same bytes; each entry point must take only its own constellation out of it | one GPS record at 26.0-27.2 Mm, one GLONASS record at 24.5-26.5 Mm, and zero of the other in each case; non-UTF-8 is `SL_ERR_INVALID_ARGUMENT` | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_glonass_l1/l2_frequency` | §9 FDMA channel plan | the closed form `(1602 + k*0.5625)` / `(1246 + k*0.4375)` MHz, over every channel the standard defines | exact to 1e-6 Hz on all 14; a channel outside the signed byte is NaN, not a wrap | src/lib.rs, tests/c/smoke.c |
+| `sl_dilution_of_precision` | §9 DOP | the two identities the five figures obey, `GDOP^2 = PDOP^2 + TDOP^2` and `PDOP^2 = HDOP^2 + VDOP^2` -- a property of the covariance rather than of the geometry it was measured on | both to 1e-9; three satellites is `SL_ERR_DOMAIN` and the message says four is the minimum | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_ionospheric_path_delay`, `sl_second_order_ionospheric_delay`, `sl_klobuchar_iono_delay`, `sl_ionospheric_mapping_factor` | §9 first- and second-order ionosphere | each against the closed form or documented floor that defines it: `40.3e16*TEC/f^2` exactly and its `1/f^2` scaling; the second-order term's `1/f^3`; Klobuchar with zero coefficients reduced to its 5 ns floor times `F = 1 + 16(0.53-E)^3` | first order to 1e-12 and 3.25 m at 20 TECU on L1; ratios to 1e-9 and 1e-6; the floor to 1e-6 m | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_nequick_galileo_stec`, `sl_nequick_itu_stec`, `sl_igrf_field_ecef` | §9 NeQuick-G / NeQuick-ITU / IGRF-14 | what the physics bounds them to, because a pinned digit would only restate the port: a daytime slant TEC and a surface field magnitude | 1-500 TECU for both variants; 20-70 uT at the surface; month 13 is `SL_ERR_INVALID_ARGUMENT` before the profile is integrated | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp |
+| `sl_niell_mapping`, `sl_gmf_mapping`, `sl_vmf1_mapping`, `sl_vmf3_mapping`, `sl_itu834_mapping`, `sl_saastamoinen_zenith_hydrostatic` / `_wet` | §9 tropospheric mapping | the one thing all five must agree on -- a mapping function is 1 at the zenith and grows towards the horizon -- checked on every one of them rather than on a representative | all five within 1e-2 of 1 at the zenith and above 3x that at 8.6 degrees; the horizon is `SL_ERR_DOMAIN` on all five; the dry zenith delay 2.2-2.4 m at sea level | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_sensor` dispatch | one tagged struct, because C cannot overload | a tag outside the enum, and a SAR whose near edge is past its far one, through both coverage entry points | `SL_ERR_INVALID_ARGUMENT` naming the tag before any field it does not name is read; `SL_ERR_DOMAIN` for the band | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| Double-double toggle across the ABI | `sl_precision` | dd vs f64 two-body round-trip | 8.63e-10 m vs 2.93e-7 m — a factor of 340, not 10⁶: the ABI passes `double`, so precision is bought *within* a call and cannot be carried across one | src/lib.rs |
+| Null out-pointers, unterminated C strings, buffer too small | the four rules in `spacelab.h` | every fallible entry point, exhaustively | refuses; `MAX_C_STRING` bounds the scan | src/lib.rs |
+| An empty batch of epochs | a length of zero is an answer, not a fault | `sgp4::at` on an empty `std::span` | empty vector, no throw (the C entry point still refuses the null the span carries, and should) | tests/cpp/smoke.cpp |
+| Panic containment | `catch_unwind` at every entry | a call chosen to panic underneath | `SL_ERR_PANIC`, message names it | src/lib.rs |
+| Struct layout as C++ computes it | `#[repr(C)]` | `static_assert` on `sizeof`/`alignof`/`offsetof`, `is_trivially_copyable`, `is_standard_layout` | compile-time | tests/cpp/smoke.cpp |
+| Enum width across compilers and flags | the library reads every tag as `i32` | `static_assert` in the C++ smoke test and a run-time `sizeof` in the C one, both compiled with and without `-fshort-enums`; the header text in the Rust test | 4 bytes on every rung, both compilers | tests/cpp/smoke.cpp, tests/c/smoke.c, src/lib.rs |
+| The header parses and links **as C** | `spacelab.h` is a C header, not a C++ one with `extern "C"` | a C99 consumer that opens a handle, propagates, generates a constellation and closes | all checks pass on 4 C standards × 2 compilers | tests/c/smoke.c |
+| The short-buffer branch of the two-call protocol | `SL_ERR_BUFFER_TOO_SMALL` sets `*out_len` and writes nothing | a 1-element buffer for a 24-element Walker | needed length reported, sentinel in the buffer untouched | tests/c/smoke.c |
+| The totality rule under a null | a value-returning function has no status, so NaN is the answer | `sl_range`, `sl_range_rate`, `sl_elevation`, `sl_azimuth` on null pointers, and `sl_horizon_look_angle` on NaN | NaN, no trap | tests/c/smoke.c |
+| String truncation at a short buffer | always NUL-terminated, still reports the full length | `sl_last_error_message` into 4 bytes | 3 characters plus the terminator; return value is the length needed | tests/c/smoke.c |
+| Failure leaves the caller's memory alone | the status convention in `spacelab.h` | a sentinel written into the out-parameter before a call that must fail | sentinel intact; the handle out-parameter also untouched | tests/c/smoke.c |
+| Handle ownership | RAII | LeakSanitizer | 0 leaks | tests/cpp/smoke.cpp |
+| `sl_cloud_masker_open` / `_mask` / `_close`, `sl_cloud_mask` | §8 deepvision through `tract` | onnxruntime's recorded probabilities for the `cloud_tiny` fixture, thresholded outside this code path; a 3×8×8 tile whose model output is 16 pixels, not 64 | mask byte-identical to `p >= 0.5` on all 16; sizing pass reports 16; a 4-byte buffer is `SL_ERR_BUFFER_TOO_SMALL` with `*out_len = 16`; a 3×8×9 shape is `SL_ERR_COMPUTE`; non-ONNX bytes are `SL_ERR_PARSE`; the one-shot form agrees with the handle form | src/lib.rs (`--features onnx`) |
+| The `onnx` feature does not move the symbol table | a build flag is invisible to `sl_abi_version` | the same four calls from C and C++ against a library built *without* the feature | `SL_ERR_UNSUPPORTED`, handle left null, `out_len` untouched; `_close(NULL)` is a no-op | tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| The header's thread-safety promise | `sl_sgp4` is shareable; the error slot is thread-local | a `const _` assertion that `SlSgp4: Send + Sync`, so the promise stops compiling before it stops being true; and ThreadSanitizer over 8 threads × 500 propagations through one handle, with concurrent failures hitting the error slot | compile-time; 0 TSan reports, all 4 000 results identical | src/lib.rs |
+| The package is consumable at all | `find_package(spacelab)` + `spacelab::spacelab` (C++) or `spacelab::spacelab_c` (C) | a scratch third-party project built against `cmake --install` output, off the build tree entirely | links and runs; `find_package(spacelab 9.0.0)` is refused | CMakeLists.txt |
+| The `-fno-exceptions` build | the `try_` half is the whole API when `__cpp_exceptions` is undefined | a translation unit that `#error`s if compiled with exceptions, exercising `result<T>`, both RAII handles, the vector sizing and the callback trampoline | all checks pass on 3 C++ standards × 2 compilers; both `result<T>` flavours compiled | tests/cpp/nothrow.cpp |
+| `sl_ephemeris_*` (J2 / geopotential, sample, span, step counts) | §2 IAS15 and DOP853 with dense output | the interpolant is the integration: radius at 1800 s, and a refusal off the span | 6 768 202.477 m ± 0.01; outside `[t0, t1]` is `SL_ERR_DOMAIN` | src/lib.rs, tests/cpp/smoke.cpp, tests/c/smoke.c |
+| `sl_libration_points`, `sl_richardson_halo` | §3 CR3BP | the crate functions; the C API numbers points from 1 where the crate indexes from 0 | bit-exact; L1 → index 0, L2 → index 1, everything else `SL_ERR_DOMAIN` | src/lib.rs |
+| `sl_dsst_zonal_mean` / `_osculating`, `sl_dsst_mean` / `_osculating` | §2 DSST | what a mean-element theory promises — the zonal mean rate leaves `a` alone, the node regresses for a prograde orbit, and the short-period terms restore kilometres — plus one pinned value per entry point shared by all three suites | `a` fixed to 1e-6 relative over a day; λ 1.940206765692 ± 1e-9 at 1800 s; osculating `a` 6 995 738.8684 m ± 1.0 | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_gauss_newton` | §4 Gauss-Newton / Levenberg-Marquardt | six independent unit measurements of a six-state, whose solution and covariance are known in closed form before the solver runs | state ± 1e-9, covariance `diag(1/w)` ± 1e-12; rank-deficient is `SL_ERR_DOMAIN`; the iteration cap is `SL_OK` with `converged` false | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp |
+| The callback boundary | `sl_residual_fn` is C, and C++ may throw across nothing | a model that throws, through the C++ wrapper; a model that returns a non-zero status, through the C entry point | the exception arrives back at the caller's `try`, not in a Rust frame; the status is `SL_ERR_COMPUTE` and the message names the code returned | tests/cpp/smoke.cpp, src/lib.rs |
+| `sl_srif_*` | §4 square-root information filter | the same closed-form system, folded one row at a time; a prior of full rank answers with no rows at all | state ± 1e-12, covariance ± 1e-12, post-fit sum of squares < 1e-18; half a prior is `SL_ERR_INVALID_ARGUMENT` | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_lfm_chirp`, `sl_matched_filter`, `sl_resolution_3db_samples`, `sl_peak_sidelobe_ratio_db` | §5 SAR range compression | matched-filter theory rather than a pinned array: a chirp is all phase, so compressing it against itself returns its own energy at the peak; and the impulse response of a rectangular window is the textbook sinc | peak = signal energy to 1e-6 relative, every chirp modulus 1 ± 1e-12; −3 dB width 0.885 893 78 × oversampling to 2 % relative, PSLR −13.26 dB ± 0.15; a profile with no main lobe is `SL_ERR_DOMAIN`, not a number | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp |
+| `sl_range_migration`, `sl_src_fm_rate`, `sl_azimuth_fm_rate`, `sl_apply_chirp_scaling`, `sl_chirp_scaling_focus` | §5 RDA / chirp-scaling geometry | the closed forms the geometry is defined by — `Ka = 2V²/(λr₀)` and the quadratic migration `λ²r₀f_η²/(8V²)`, in metres — and the scaling step's own invariant, that it is a phase multiply and moves no modulus | rates and migration exact to 1e-9 relative; every `\|z\|` unchanged to 1e-12; a non-radix-2 aperture is `SL_ERR_INVALID_ARGUMENT` naming both dimensions | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp |
+| `sl_interferogram`, `sl_coherence`, `sl_wrap_phase`, `sl_unwrap_phase_1d`, `sl_unwrap_phase_2d`, `sl_unwrap_phase_2d_branch_cut`, `sl_unwrap_phase_2d_lstsq`, `sl_residues` | §5 InSAR | the definitions: an image against itself is real, positive and unit-coherent; wrapping is a modular reduction, not a clamp; a residue-free ramp is recovered by *all three* 2-D unwrappers, which is what makes it a property rather than a pin of one of them | phase 0 and coherence 1 to 1e-12; the wrap fixes an already-reduced angle to 1e-12 and reduces a shifted one to 1e-9; unwrapped ramp flat to 1e-9 on all three, 0 residues | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_capon_spectrum`, `sl_bartlett_spectrum`, `sl_sl1mmer`, `sl_sl1mmer_spectrum` | §5 TomoSAR | a stack synthesised from one scatterer at a known elevation, so both spectra must peak on it and the compressive solver must return it debiased | both spectra peak on the injected elevation to 1e-9 m; SL1MMER returns exactly 1 scatterer, at that elevation to 1e-9 m, debiased magnitude 1.0 ± 1e-6 | src/lib.rs, tests/cpp/smoke.cpp |
+| `sl_amplitude_dispersion`, `sl_select_persistent_scatterers`, `sl_sbas_invert` | §5 PS-InSAR / SBAS | `D_A = σ/μ` by its own definition, the selection as its threshold; and an interferogram stack built from a known `(v, h)` inverted back to it | dispersion ± 1e-12 and 0 for a constant amplitude, selection exactly the sub-threshold set; velocity ± 1e-12 m/s and height ± 1e-9 m of what the stack was built from | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp |
+| `sl_coherency_matrix`, `sl_cloude_pottier_decompose`, `sl_pauli_powers` | §5 polarimetric decomposition | what T₃ must be regardless of the scatterer: Hermitian, with trace equal to the mean Pauli power that went in; and the one scatterer whose entropy is known exactly, `T₃ = I/3` | Hermitian to 1e-15, trace ± 1e-12; entropy 1.0 ± 1e-12 and anisotropy 0.0 ± 1e-12 on the isotropic case | src/lib.rs, tests/cpp/smoke.cpp |
+| `sl_semi_global_match`, `sl_plane_sweep_mvs`, `sl_triangulate`, `sl_sfm_triangulate`, `sl_harris_corners` | §5 stereo, MVS and SfM | the geometry that generated the input: a pair built by sliding one image sideways has that slide as its disparity, a scene rendered on a plane is swept back onto it, and triangulation inverts the projection it was handed | disparity ± 0.6 px at the known shift; ≥ 90 % of the overlapping pixels on the rendered plane; the world point ± 1e-9 m; a zero-baseline rig is `SL_ERR_DOMAIN`, a census radius past 3 and an out-of-range match index are `SL_ERR_INVALID_ARGUMENT` | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_rpc_block_adjust` | §5 Grodecki–Dial block adjustment | two properties that need no second implementation of the polynomial: one control point under the Shift model is absorbed exactly, and adding a constant (Δrow, Δcol) to every measurement moves the corrected forward by exactly that constant | residual ± 1e-9 px; the induced shift ± 1e-9 px | src/lib.rs, tests/cpp/smoke.cpp |
+| `sl_ross_thick_kernel`, `sl_li_sparse_reciprocal_kernel`, `sl_brdf_reflectance`, `sl_atmospheric_toa_from_surface` / `_surface_from_toa` | §5 Ross–Li BRDF and 6S coupling | that the reflectance is *exactly* its two kernels weighted, with no third term hiding in it, and that the two 6S directions are inverses | linear form to 1e-15; round-trip ± 1e-12; a null coupling is NaN, not a guess | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_brovey_pan_sharpen`, `sl_gram_schmidt_pan_sharpen` | §5 pan-sharpening | Brovey is a ratio substitution, so the sharpened bands must sum back to the panchromatic pixel they were sharpened with | sum ± 1e-12 per pixel; Gram–Schmidt preserves the multispectral shape | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_nms`, `sl_box_iou`, `sl_decode_box`, `sl_generate_anchors` | §5 detection head | the overlap that suppression is defined on, computed by hand — two unit squares overlapping by half are 1/3 — and the identity a zero delta must decode to | IoU 1/3, 1 and 0 to 1e-15; the anchor grid exactly `rows × cols × scales × ratios`; zero delta reproduces its anchor to 1e-12 | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_gpt3`, `sl_vmf_grid_coefficients` | §5 GPT3 climatology and the operational VMF grid | the two independent statements about one point — a climatology and a November 2018 analysis — which must agree in order of magnitude and land in the physical range; equality would mean one of them was not doing its job | the analysis `a_h` within a factor of two of the climatology's; surface pressure 80–110 kPa, temperature 220–320 K with `Tm` below it; zenith delays 1.5–3.0 m hydrostatic and 0–1 m wet; the grid arrives length-counted like RINEX and text that is not a grid is `SL_ERR_PARSE`, not an interpolation of nothing | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+
+`just capi` is the gate and is part of `just check`: `cargo build`, then an out-of-source CMake build
+of all three smoke tests under `-Wall -Wextra -Wpedantic -Werror`, then `ctest` — repeated for gcc
+and for clang, because two front-ends disagree about a header far more readily than two standards do.
+Each is compiled once per language standard the compiler admits, the C++ one twice per standard
+because the `-fno-exceptions` rung is a different translation unit, plus one `-fshort-enums` rung on
+the newest of each: **12 ctest entries per compiler, 24 in the gate**.
+
+| | Standards gated | Draft rung, measured but not gated |
+|---|---|---|
+| C (`tests/c/smoke.c`) | C99, C11, C17, C23 | `-std=c2y`, gcc 16.1.1 and clang 22.1.8: builds and runs |
+| C++ (`tests/cpp/smoke.cpp`) | C++20, C++23, C++26 | `-std=c++2c`, both compilers: builds and runs |
+
+The drafts are measured on demand and deliberately left out of `just check`: a draft moves, so a
+`-Werror` gate against one eventually fails on a compiler upgrade rather than on a change of ours,
+and a gate that cries wolf is worse than a measurement with a date on it. Which standard a consumer
+passes is the consumer's choice — that is exactly why the published ones are rungs rather than
+assumptions. Also verified, and not in the gate because it needs a sanitizer build: all three smoke
+tests run clean under `-fsanitize=address,undefined` with `detect_leaks=1` — under clang, because
+gcc 16.1.1 on this machine ships a `libasan` link stub for a runtime it does not install.
+
+`cmake --install` lays down both headers, the library and a generated `spacelabConfig.cmake`, so a
+downstream project is two lines — `find_package(spacelab REQUIRED)` and `target_link_libraries(app
+PRIVATE spacelab::spacelab)`. The package exports two targets because the artifact is two things:
+`spacelab::spacelab_c` is the C ABI — the library, the include path and the `dl`/`pthread`/`m` a Rust
+`staticlib` needs — and `spacelab::spacelab` is that plus the C++20 the header-only wrapper requires.
+They have to be separate: a `cxx_std_20` compile feature attached to the C library follows into a
+pure C consumer's build, where it means nothing and is an error to require. None of it is a link line
+for the consumer to copy and let rot. That this works was checked the only way it can be — by
+building a scratch project against the installed prefix, with the build tree deleted first.
+`clang-tidy` is clean on all five files as the build invokes it — `-p target/capi-build`, over the
+compile database, which is the only invocation that sees the flags each rung is actually compiled
+with; what it is *not* asked to check, and why, is written at the
+top of `crates/spacelab-capi/.clang-tidy` — the short version is that four of its checks propose C++
+constructs for a header that must remain C, and one of those, `performance-enum-size`, proposes a
+silent ABI break. Two directories narrow it further, for the same reason one rung down each time.
+`tests/c/.clang-tidy` drops three: `nullptr` and the C++ core guidelines are not available to a C99
+translation unit, and the Annex K `_s` functions the security check wants are not available to glibc.
+`tests/cpp/.clang-tidy` drops four whose advice only holds from C++23 or C++26 — `std::println`,
+`std::string::contains`, `std::span::at` — which would break the C++20 rung they are meant to
+improve.
+
+The tests are measured by mutation like every other crate — `capi-guards2` and `capi-guards2-onnx` in
+§8, 322 caught and none missed in *each* of the crate's two build configurations, **on the 18 exports
+and the helpers a mutation run can reach**. The 146 `unsafe fn` entry points it cannot reach are the
+subject of the paragraphs below on `check_eop_series` and #260, which is why their preconditions now
+live in helpers that it does; what remains outside is the null tests and the `borrow_sized_*` calls,
+and no reading in this section should be taken as covering those. The seals that widened the surface
+are worth
+reading rather than skipping,
+because between them they name every way a test here has been wrong. The first, `capi-seal`, had six
+survivors that were one mistake: a test that built its expected value by calling the helper it was
+testing, so mutating that helper moved both sides of the assertion together. The first seal of the
+*widened* surface, `capi-surface`, had **58**, and they were a different mistake with the same shape
+— a test whose input makes the thing under test irrelevant. Twenty-three were the analytic ground
+track every coverage answer is sampled from, which no coverage assertion can see because the pass
+counts and the windows it compares them against both move with it; twelve were the EOP interpolation,
+exercised only through a series built deliberately constant, and a constant series agrees with every
+formula; six were the local solar time the NRLMSISE-00 binding computes, which the height profile the
+test measures does not depend on. Each is now measured against something outside the code that
+produces it — the classical three-rotation construction, the straight line through two rows, and
+where in the *universal* day the diurnal bulge sits — and the six local-solar-time mutants were
+applied by hand one at a time to confirm each moves that measurement before the assertion was
+written around it.
+
+The units are SI and every angle is radians, uniformly — a deliberate divergence from the Python
+bridge, which takes degrees for geodetic latitude and longitude. A C caller has no keyword arguments
+and no docstring at the call site, so the rule that costs nothing to remember beats the rule that is
+locally convenient.
+
+---
+
+## 7 · The Python boundary
+
+`spacelab-python` is a `cdylib`, so `cargo test --workspace` never links it: for a long time no Rust
+test executed a line of the bindings, and `cargo llvm-cov` measured its 2 640 lines at **0.00 %**.
+What every table above verifies is the algorithm *under* the boundary. What crosses it — an argument
+landing in the slot it was named for, metres arriving where metres were expected, a flat list
+reshaped along the axis the caller meant — no test on either side can see.
+
+The tests are therefore in Python, and the CI `bindings` job builds the wheel and runs them. They
+are deliberately **self-checking rather than golden**: a copied constant agrees with a swapped
+argument, so instead each one either feeds a solver the answer to its own question, asserts an
+invariant only the correct wiring satisfies, or injects a bias the routine must recover exactly.
+
+There is now a Rust-side rung under them as well — 102 `#[test]` in `lib.rs`, written to the same
+rule and measured by mutation rather than by coverage. Forty of them need an interpreter in the
+test process and are gated behind `test-interpreter`, which is what
+`cargo test -p spacelab-python --no-default-features --features test-interpreter` turns on; the other
+62 run in an ordinary `cargo test --workspace`. One of the forty also needs `onnx`, because
+`cloud_mask` is only compiled with it. What they reach and what they cannot is `spacelab-python`'s
+entry in §8.
+
+Nine of the forty are #378's, and the reason they are Rust rather than Python is a measurement: the
+control bindings were tested only from `bindings.py`, which runs against an installed wheel, and
+`cargo mutants` runs `cargo test`. A test the mutation harness cannot invoke does not appear in its
+verdict as a weak test — it appears as no test at all, and the block over the control section came
+back with every mutant it reached surviving. The same held one crate over in `spacelab-capi`, where
+the control surface was exercised only by `tests/c/smoke.c` and the two C++ smoke tests under ctest.
+Both are now covered from the language the harness does run.
+
+Where CI runs them is worth being exact about, because the answer is not the obvious one. `cargo
+test --workspace` builds `spacelab-python` with `extension-module`, which promises PyO3 will not
+link libpython, so the forty gated tests are not in that binary at all. What ran them on every push
+and pull request was the `mutants-diff-py` leg of the `mutants-diff` job, which no event starts
+since every trigger became manual (below) — so today they run where
+`cargo test -p spacelab-python --no-default-features --features test-interpreter` is run by hand.
+When that job does run, `cargo mutants` runs an unmutated baseline before it mutates anything, and
+that baseline is a full `cargo test --no-default-features --features test-interpreter`. A gated
+test that regresses turns the mutation gate red rather than the test job — indirect, but not
+absent, and the distinction is the kind of thing that reads as coverage when it is not.
+
+
+
+| Component | Specification | Oracle | Residual / tol | Test file |
+|---|---|---|---|---|
+| Lambert | two-body flow — units and argument order | closure: fly the returned `v1` and arrive at `r2` | < 1e-6 m (swapped `r1`/`r2` gives 3.4e6) | tests/bindings.py |
+| Two-body / IAS15 dense ephemerides | Kepler solution; dense-output contract | the Kepler solution at an interior time | < 1e-3 m; `eval(t1)` ≡ `final_state()` | tests/bindings.py |
+| DSST zonal mean | zonal-field theory (no secular `a`) | analytic property (no secular `a` in a zonal field) | bit-exact | tests/bindings.py |
+| DSST short-period, full DSST | mean-vs-osculating definition | mean-vs-osculating offset; sensitivity to A/m and epoch | 1–30 km; non-zero | tests/bindings.py |
+| Brouwer–Lyddane | Brouwer 1959 nodal regression | epoch identity + J2 nodal regression sign and size | < 1e-6 m; −3…−7 °/day | tests/bindings.py |
+| NRLMSISE-00 density | Picone et al. 2002 argument list ⚠ | monotone altitude profile + every argument moves the answer | 1e-13…5e-11 kg/m³ at 400 km | tests/bindings.py |
+| Solid tide Step 2 | IERS TN36 Ch. 6 Step 2 (GMST-periodic) | analytic property (exactly 2π-periodic in GMST) | < 1e-20 | tests/bindings.py |
+| Solid / ocean pole tide | IERS TN36 §6.4 / §6.5 (affine in m₁, m₂) | affine midpoint identity; ocean/solid size ordering | < 1e-9 rel; ratio 0.05–0.5 | tests/bindings.py |
+| Relativistic, tidal, NRLMSISE-00 drag propagation | each force's own specification, above | departure from the same run without that force | 1 mm–1 m; 1 m–100 km; ΔE < 0 | tests/bindings.py |
+| Topocentric azimuth / range rate | SEZ topocentric convention (north = 0°) | analytic (north = 0°, east = 90°; radial ≡ range rate) | < 1e-9 | tests/bindings.py |
+| Impulse-response metrics | rectangular-window matched filter | **textbook rectangular window**: PSLR −13.26 dB, −3 dB width 0.886 | < 1e-3 rel | tests/bindings.py |
+| Interferogram / coherence | interferometric phase and coherence definitions | known phase difference; identical images | < 1e-12; exactly 1.0 | tests/bindings.py |
+| Coherency matrix `T₃` | Cloude–Pottier T₃ definition | Hermitian by construction; trace ≡ total power | bit-exact; < 1e-12 | tests/bindings.py |
+| Bartlett / Capon / SL1MMER spectra | Bartlett and Capon beamformer definitions | a single scatterer at a known elevation | peak on the exact grid node | tests/bindings.py |
+| Amplitude dispersion / PS selection | Ferretti et al. 2001 amplitude dispersion | a constant-amplitude pixel has `D_A = 0` | bit-exact | tests/bindings.py |
+| Azimuth FM rate / range migration | SAR acquisition geometry (closed form) | scaling laws in V², λ⁻¹, r₀⁻¹; zero at zero Doppler | < 1e-12 | tests/bindings.py |
+| 2-D unwrapping (path-following, branch-cut) | phase-unwrapping definition (modulo-2π residues) | a wrapped ramp unwraps to the ramp | < 1e-12 | tests/bindings.py |
+| Harris corners | Harris & Stephens 1988 | the four corners of a synthetic square, as `(x, y)` | exact pixel indices | tests/bindings.py |
+| Plane-sweep MVS | plane-sweep stereo geometry | a fronto-parallel plane at a known depth | > 60 % of interior pixels | tests/bindings.py |
+| SfM triangulation | collinearity / DLT photogrammetry | project known world points, recover them | < 1e-9 | tests/bindings.py |
+| RPC block adjustment | Grodecki & Dial 2003 RPC bias model | an injected constant image bias | < 1e-6 px | tests/bindings.py |
+| Gram–Schmidt pan-sharpen | Gram–Schmidt spectral sharpening | identity when the pan adds no detail | < 1e-12 | tests/bindings.py |
+| The export surface itself | internal API contract (the export surface) | every public name appears in a test file | 0 unnamed | tests/bindings.py |
+
+The last row is a tripwire, not a proof — naming is not testing. It exists because the failure it
+guards against had already happened: 36 of the module's 145 exports had never been mentioned by any
+test, and nothing reported that until they were counted.
+
+---
+
+## 8 · Mutation testing — would the suite notice a wrong answer?
+
+Every table above says what a component is checked *against*. None of them says whether the check is
+tight enough to fail. A test that asserts `|error| < 1e-3` on a quantity computed to 1e-12 passes
+just as happily when the algorithm is wrong by 1e-4, and the coverage report calls that line covered.
+
+`cargo-mutants` answers the question directly: it rewrites one operator at a time — `+`→`-`,
+`<`→`<=`, a whole function body replaced by a constant — rebuilds, and runs the suite. A mutant that
+is **caught** proves some test discriminates against that specific wrong answer. A mutant that
+**survives** is a wrong answer the suite would ship.
+
+**A survivor is never noise.** Each one ends as exactly one of three things, and nothing else counts
+as resolved:
+
+1. **a new test that kills it** — the usual outcome;
+2. **a written equivalence proof** in `.cargo/mutants.toml`, with the argument in a comment directly
+   above the exclusion — an unexplained exclusion is indistinguishable from giving up;
+3. **a production fix** — the mutant exposed a real defect, or a guard that guards nothing.
+
+### The shapes a blind spot takes
+
+Every survivor in this campaign reduced to one of these patterns, and they recur across unrelated
+crates:
+
+- **The assertion is a bound, not a value.** Any wrong answer inside the band passes. This is the
+  single most common shape.
+- **Two internal quantities are asserted to agree with each other** rather than against an external
+  reference, so a mutation that moves both is invisible. `Graph`'s ConvTranspose buffer size and the
+  shape `nn::conv_transpose2d` recomputes for itself is the clean example.
+- **The assertion is an invariance, and the mutation preserves it.** A metamorphic test states that
+  two calls related by a symmetry of the input must agree — a strong statement about the function, and
+  no statement at all about the constants the symmetry is built out of. SDTM-1's two bridges each
+  derive local solar time as `sec/3600 + longitude/15` and wrap it into `[0, 24)`, and each was checked
+  by two such pairs: "half a day of UT later and 180 degrees west", and "the same meridian reached from
+  either side of the anti-meridian". Both pairs survive `longitude·15` **and** `−longitude/15`, because
+  each mutation moves the *difference* between the two calls by `2·Δλ/15` or `Δλ·(15 − 1/15)` — 24, 48,
+  2 688 and 5 376 hours for the two pairs — every one of them an exact multiple of the 24 the wrap then
+  removes. The remedy is not a tighter tolerance but an assertion on the value: 15 h UT at 30 E **is**
+  17 h local, exactly.
+- **The observable is a ratio, and the mutated quantity is a common factor.** Not a bound and not a
+  symmetry — the *measurement* is invariant to it. SDTM-1's `boundary_scale` multiplies every species
+  in the profile, so it divides out of the vertical ratios the profile tests assert and out of the
+  `⟨O/C⟩` the density validation reports, and the accessor could return `1.0` with nothing moving. The
+  remedy is the only one there is: assert the parameter itself, against what the constructor was given.
+- **The function is public and nothing calls it.** The weaker cousin of the shape above and the easiest
+  to overlook, because coverage of the *module* looks complete: `Thermosphere::temperature` was reached
+  by no test at all, since the density path calls the private `bates` directly, so `-> 0.0`, `-> 1.0`
+  and `-> -1.0` were all indistinguishable from the truth. `seal-gnss-obs` found the same eight times
+  over in two detectors' `threshold()` and `reset()`. An exported surface is a contract whether or not
+  the crate itself consumes it.
+- **The fixture samples a regime where the mutated term is negligible or annihilated.** A 2×2 tensor
+  makes `h + 2·pad` equal `h · 2 · pad`; `pad = 1` makes `2·pad` equal `2/pad`; a single input
+  channel makes `/ ch` the identity; `x = 0` annihilates any coefficient multiplying it. Twelve of
+  `spacelab-vision`'s twenty survivors were one square, stride-1, single-channel fixture.
+- **The boundary is unreachable in floating point.** A `<` / `<=` pair differs only where the two
+  sides are bit-equal, and often nothing in the reachable value set lands there. Sometimes that makes
+  the mutant genuinely equivalent (proved, excluded); sometimes it just means the fixture never tried.
+- **No fixture varies the input the mutation moves.** Not a negligible term — an unobservable one.
+  DOP853 evaluates its stages at `t + cᵢh`, and every test system in `tests/dop853.rs` was autonomous,
+  so `_t` was discarded before it could matter and all seven stage times were free to be wrong. The
+  fix is a system that reads its time argument (`dy/dt = t`), not a tighter tolerance.
+- **The iteration is contractive, so it erases the thing that was mutated.** A fixed point reached
+  from any seed cannot testify about its seed, its update step or its first bracket. This is why the
+  Izzo scan's opening cell — six decades of `T` wide against 1999 cells sharing the rest — went
+  untested for the whole campaign: every fixture's root was a thousand cells along, and the answer
+  was right regardless.
+
+### Production defects mutation testing found that the test suite did not
+
+Every one of these was green under `cargo test --workspace` and reported as covered:
+
+| Defect | Shape |
+|---|---|
+| `coverage::root` looped forever on a non-converging input | no iteration cap at all |
+| IAS15 had no step floor — a mutated force model hangs the integrator (#221) | unbounded refinement |
+| GBS's step-underflow guard was one-sided and NaN-permeable — three ways to loop forever (#222) | one-sided guard |
+| `driver::integrate` bounded how small the step gets but not how many steps it takes (#223) | wrong quantity bounded |
+| Lambert's Newton iteration tested `next == z`, which only sees a period-1 cycle; 12 of 24 arcs reached the root in 3–5 steps and then cycled with period 6 or 7 across 23 ulps for the remaining 95 iterations | equality where a noise floor was meant |
+| `exp_so3` was 28 % wrong at small angles; the SE(3) left Jacobian lost its whole θ/2 term below θ = 1e-8 | series cutoff never sampled |
+| The MEKF error-state transition carried the wrong sign on its rate term (#226) | sign, hidden by a symmetric fixture |
+| Niell's hydrostatic seasonal term had an unpinned sign (#225) | bound-only assertion |
+| `ias15` carried two dead guards; the third was a live accuracy hole (#224) | guard that guards nothing |
+| Lambert's multi-rev degeneracy test had a dead disjunct — the triangle inequality makes `s < 1e-12` unreachable once `c < 1e-12` has passed | dead disjunct |
+| `ModipGrid::compute`'s anti-meridian wrap was written as `while y >= nb + 1 { y -= nb }` — a search where a modular reduction was meant. `GeodeticPoint::new` validates nothing and `Ray` carries longitude additively, so a receiver at 1e10 rad costs 1.6e9 passes per Gauss node and one at 1e300 never returns, reachable from `NeQuickGalileo::stec` with no unsafe code and no invalid float. NaN and near-`f64::MAX` longitudes also slipped past both latitude guards into `[0 - 1]` | unbounded search on unvalidated input |
+| `DoubleDouble::atan2` normalised by `(x² + y²).sqrt()`, halving the exponent range: NaN above ~1.3e154 and below ~1.5e-162, six correct digits instead of thirty-two at 1e-160. Its `y == 0` fast path tested `y.hi == 0.0`, true for `-0.0`, and then discarded the sign | range lost to an intermediate |
+| `sin_series` and `exp` looped until a residual test passed, which terminates only because their callers reduce the argument. Called directly at \|t\| = 1000 the numerator overflows first, `term.hi` goes NaN, and `NaN <= x` is false for ever | precondition assumed, not enforced |
+| The Knocke crown/sector grid's `off += Δ` stops climbing once `Δ < ulp(off)/2`, so the walk plateaus below the bound it is chasing — and `AngularResolution` handed out such a Δ, its boundary test asserting `f64::MIN_POSITIVE` was one. The walk then re-evaluates the element at the plateau until the counted limit cuts it off, so the flux is one contribution counted millions of times rather than an integral (#227, #233) | termination proof holds in ℝ, not in f64 |
+| The entry integrators' break tests were NaN-permeable (a NaN state satisfies neither `<` nor `<=`), and their three caps *multiplied*: one guided entry could cost 1.3e10 right-hand sides where the measured flight costs 1.4e6 (#228) | caps that compose |
+| JB2008's local solar time is wrapped by the FORTRAN's conditional-subtract/conditional-add pair, which is total only on `H ∈ [−3π, 3π)` while the function's contract admits any consistent frame for the two right ascensions — at `H = −4 − 2π` the density came out 2.5 % wrong, at `H = −4 − 4π` 97 % wrong (#230) | a wrap that is not a modular reduction |
+| JB2008's height domain was prose, and off it the model answered three different ways: below ~89.1045 km — the barometric integral's real floor, not the 90 km the doc claimed — a `NaN` density beside `t_alt = 0 K` and a plausible `t_exo = 832.99 K`; between there and 90 km a finite answer outside the stated range; and at an infinite height a panic, `(al / r) as i32` saturating at `i32::MAX` so the `+ 1` overflows (#231) | domain stated in prose, enforced nowhere |
+| `taylor::solution_jets` builds its jet recurrence from `ScalarSystem::eval(t: f64, …)`, so `t` is frozen and `∂f/∂t` reads as zero. Every jet-seeded method inherits it: on a non-autonomous right-hand side `Nordsieck::start`'s startup vector is first-order accurate and the global error is `O(h²)`, not the order 5 the method claims — measured 2.535e-4 / 6.337e-5 / 1.584e-5 / 3.961e-6 / 9.901e-7 at n = 64…1024, an exact factor of 4 per halving. Invisible because every fixture in the file drove an autonomous force from `t₀ = 0` (#234) | the mutated argument was never varied by any fixture |
+| `integrate_taylor` bounded how small a step may be but not how many a span holds — the same defect as #223, one file over. `advances(t, h) = t + h > t` is exact, and its floor is the *epoch's*: `2.2e-308 s` at `t = 0` against `1.2e-7 s` at J2000. From the origin nothing stops the loop, and `y' = y` at `tol = 1e-30` asks for `1.1e30` steps to cross a span of 1 | wrong quantity bounded |
+| Rosenbrock GRK4T was order 1, not 4, on any right-hand side that reads `t`: `rosenbrock_step` omitted the `h·dᵢ·∂f/∂t` stage terms of the reference `ros4.f`. Measured 2.2815e-3 → 1.3957e-4 at n = 20…320, every ratio 2.00–2.02. Every force in `spacelab::forces` reads `t` — drag, third-body, SRP, tides — so on a real force model this was a first-order method advertised as fourth-order. Fixed (#235): the `dᵢ = Σⱼ γᵢⱼ` weights are *derived* from the `cᵢⱼ` the file already carries, by `Γ = (diag(1/γ) − C)⁻¹` at `fpprec: 60` in `derivations/rosenbrock_grk4t.mac`, which lands within 1.1 ulp of the values `ros4.f` prints and recovers the published stage times `c₂`, `c₃` from the same matrix as a check on the convention. `∂f/∂t` uses the one-sided difference `ros4.f` takes when the caller supplies none, because `ScalarSystem::eval` takes `t: f64` and the autodiff that gives `∂f/∂y` exactly cannot reach it. Same ladder after: 4.3781e-7, 2.5937e-8, 1.5795e-9, 9.8775e-11 at n = 20…160, ratios 16.88, 16.42, 15.99 | a stage term dropped, invisible to an autonomous fixture |
+| The difference quotient that #235 installed is sized by the *epoch*, and this crate's epochs are seconds from J2000. `δ = √(u·max(1e-5,\|t\|))` is `ros4.f`'s choice for `IDFX = 0`, right when the problem is scaled so `\|t\| ≈ 1` and wrong at `t = 7.5e8`, where it asks for `δ = 4.1e-4 s` on a force whose only time-scale is the step. The same `y' = y·cos t` ladder that reads order 4.08, 4.04, 4.00 at `t₀ = 1` reads 3.68, −1.55, −2.78 at `t₀ = 7.5e8`: past `n = 40` refinement makes the answer *worse*, because the `δ`-truncation error carried into `∂f/∂t` outgrows the step error it corrects. Found by `rosenbrock.rs:98:31`, the mutant that turns the product into a quotient — invisible at `t₀ = 1`, where the two increments agree, and every GRK4T fixture in the crate started there. Recorded rather than retuned: no scale-free `δ` is free, and #234's differentiable `t` deletes the quotient instead | a heuristic transplanted out of its scaling |
+| `driver::integrate` had a second step-underflow check inside its reject branch. The branch does not touch `t`, and `while t < t1` guarantees `t < t1`, so the check three lines below it fired on exactly the same condition with the same `t` and returned the same error — two mutants of a guard that could not change an outcome | guard that guards nothing |
+| `resolution_3db_samples` and `peak_sidelobe_ratio_db` panicked on inputs the PyO3 bridge accepts unvalidated: `argmax` seeded itself with `mag[0]`, and the two interpolation walks read `mag[pk + 1]` past the end and `mag[pk - 1]` under it — an unsigned underflow — whenever the peak failed to sit strictly above its own half power, which an empty, zero, negative, NaN, infinite or smallest-subnormal input all do (#229) | precondition assumed at a trust boundary |
+| `KeplerianElements::from_state` documents three singular cases and handles them, but a fourth is not a case, it is the absence of one: `r ∥ v` is a line, and `h = 0` makes the equatorial test `n_mag ≤ EQUATORIAL·h_mag` read `0 ≤ 0`, so a state with *no* orbital plane took the *equatorial* branch. Measured: a body at rest at `(0, 0, 7000 km)` — a fall straight down the pole — came back as `i = Ω = 0`, `ω = π`, `e = 1`, `a = 3500 km`, elements whose round trip is NaN because `p = a(1 − e²)` is zero, two lines under a doc comment promising the singular cases round-trip exactly. Found by `keplerian.rs:165:28`, `<` → `<=` on the retrograde sense factor: the two forms differ only at `h.z == 0`, which is a polar orbit everywhere except on that branch. Now returns before the angles when `h_mag` is not finite and positive, `a` and `e` kept because the rectilinear ellipse does define them, the four angles NaN because an undefined angle is not a number | a singular *case* handled, the singular *domain* not |
+| `mie::coefficients` validated its inputs and never its outputs. `x` can be finite and positive and still small enough that the upward recurrence for `χₙ`, which grows as `(2n−1)!!/xⁿ`, overflows before it reaches `nₘₐₓ`; `aₙ` is then `∞ − ∞`, and `phase_on_grid`'s terminal guard is a set of sign tests, every one of which is false against `NaN`. A distribution of `rₑ = 1e-99` came back as `Some(BulkOptics)` with all four fields `NaN`. Fixed at the producer (#287): the recurrence is checked at its output, so the size is skipped and the `!any` guard fires. Floor bisected at `x = 1.0344774107715245e-60` | inputs validated, outputs not |
+| `mie::coefficients` started the downward recurrence for `Dₙ` at `max(nₘₐₓ, \|y\|) + 16`, Bohren & Huffman's flat margin. A flat margin does not hold at large size parameter: against `miepython` 3.3.0, `Q_ext` was 5.7e-8 high at `x = 100` and **1.6e-4 high at `x = 1000`**. The test that would have caught it stopped at `x = 100` and its doc *explained the residual away* as "the level at which the two codes' truncation orders and downward-recurrence start points differ, and six orders below any optical consequence". Fixed (#288) by adopting MIEV0's `+ 25 + ⌊1.5√\|y\|⌋`; worst residual over `x = 0.1…2000` is now 1.6e-10. Found by the mutant that *widens* the margin — the mutant was the more accurate code | an oracle comparison that stops before the regime where the method degrades |
+| `diurnal_arc`'s pole guard read `cos φ cos δ == 0.0`, and `libm::cos` never returns exactly zero — it bottoms out at 6.123 233 995 736 766e-17 on the doubles nearest π/2, so the product of two of them is 3.749 399 456 654 644e-33 and **no finite input reaches the branch**. The documented degeneracy — at a pole the altitude is δ for every hour angle, so the body crosses nothing — was never delivered. `n/3.7e-33` lands outside `[−1, 1]` and gives the right answer for almost every threshold, and lands at exactly 0 when the threshold equals the body's constant altitude: `diurnal_arc(π/2, 30°, 30°)` and `diurnal_arc(π/2, π/2, π/2)` both returned `Rises(1.570796)`, a body that never moves reported as rising. The guard now reads the two angles, where a caller who means a pole passes `FRAC_PI_2` exactly and one ulp away is the continuous case the quotient already answers. A test named `the_pole_is_answered_by_declination_alone` had asserted the right answers at ±10° declination all along, and every one of them came out of the quotient | a guard on an exact zero `f64` arithmetic cannot produce |
+
+### How it is run
+
+Mutated code is arbitrary code: a mutated loop bound is an infinite loop, a mutated allocation is an
+OOM. It therefore **never runs outside a cgroup**. `just mutants-pkg NAME PACKAGES` takes an
+exclusive `flock`, refuses to start below 26 GiB of `MemAvailable`, and wraps the run in a transient
+systemd scope at `MemoryMax=20G / MemorySwapMax=2G / CPUWeight=20`, with each test binary further
+capped at `MemoryMax=4G / RuntimeMaxSec=1200`. The batch builds inside `~/.cache/spacelab-mutants`
+and never touches the repo's `target/`, so ordinary work continues alongside it.
+
+Two properties of the harness matter when reading a result:
+
+- `[profile.mutants] inherits = "release"`, so **overflow checks are off** in a mutation run. An
+  arithmetic mutant that would panic in a debug build silently wraps here.
+- `--iterate` is always passed, so re-running the same block resumes. It also makes each resume
+  slower *per mutant*: the mutants it skips are the caught ones, which are cheap (they fail a test
+  early), leaving the full-suite runners behind.
+- **Code behind a disabled cargo feature is reported as `missed`, not `unviable`.** cargo-mutants can
+  only say `unviable` when the *build* fails; a `cfg`-ed-out module compiles away, the suite passes,
+  and every mutant in it looks like a survivor. `onnx` is the only non-default feature in this
+  workspace that carries code, and it accounted for all 12 of `spacelab-vision`'s apparent survivors
+  and 32 of `spacelab-earthvision`'s 70. Both crates are therefore measured a second time with
+  `--features onnx`; a bare `-p` run is not a verdict on a feature-gated module.
+- **Nothing at all is generated for the body of an `unsafe fn`**, so a crate can report 0 missed on
+  code the run never looked at. This is not a feature gate or a coverage gap, it is the tool's rule,
+  and the only defence is structural: keep `unsafe fn` bodies down to null tests, `from_raw_parts` and
+  a call into a safe helper, and put every predicate in the helper. `spacelab-capi` is 146 `unsafe fn`
+  out of 164 exports and is the crate where this decides the verdict; §6 carries the measurement
+  before and after (#260).
+- **A `#[cfg]`-selected *pair* of functions cannot be sealed by any single configuration**, which is
+  the corollary of the above and is worse, because running the feature on does not fix it: the arm
+  that is then compiled becomes unviable or caught, and the arm that is not takes its place as the
+  survivor. `spacelab-capi`'s `open_masker` was such a pair and cost one phantom survivor in each of
+  two runs. Write one function with two `#[cfg]`-ed bodies instead — one mutant, judged wherever it
+  is run.
+
+`just mutants-verdict <NAME>` is the check — it succeeds only if `missed.txt` is empty. The exit code
+of `cargo mutants` itself is not the check.
+
+**And `just mutants-table <NAME>` is the check on the row you then write.** The four numbers in §5.3
+are copied by hand out of what `mutants-verdict` printed, and until that recipe existed nothing
+compared them with the run again: ten rows of sixty-two disagreed on the first reconciliation. Eight
+carried the *unviable* count where the header says Timeouts, one carried the mutant total where the
+header says Caught, and one left the Caught column an em dash beside a run that had recorded it. The
+direction is what makes it worth a gate rather than a proofread — a timeout is scored as a detection
+and an unviable mutant is not scored at all, so that particular substitution can only ever overstate
+what the suite caught, in the one column #363 has just shown a survivor can hide in. It is not a
+CI step: the runs live in `~/.cache/spacelab-mutants`, outside the repo, so a runner would pass it by
+having nothing to check — which is why the script refuses to exit 0 without having read a run, and
+why it prints the rows it could not read instead of skipping them.
+
+**The multi-package form of the recipe takes one argument, not several.** `just mutants-pkg NAME
+PACKAGES *EXTRA` binds `PACKAGES` to a single word, so `mutants-pkg gate-face spacelab spacelab-slr`
+puts `spacelab-slr` into `EXTRA`, which is spliced verbatim into the command line — `error:
+unexpected argument 'spacelab-slr' found`, one second in, with no `missed.txt` written. Two blocks of
+a four-block queue died that way and read like a snapshot race until the log was opened. Quote the
+list: `mutants-pkg gate-face "spacelab spacelab-slr"`.
+
+### What CI gates, and what it cannot
+
+**Since 2026-10-02 nothing starts on its own.** Every trigger of `ci.yml` and `weekly.yml` is
+`workflow_dispatch` (`gh workflow run ci.yml --ref <branch>`), so what follows is what one run
+gates, not what a push does. The nightly schedule was measured out: run 36845252990 spent 1 702
+runner-minutes — four lanes stopped by their 240-minute bound — of the 2 000 a month the
+organisation's plan includes, the next night's run spent the rest, and with the Actions budget at $0
+and further usage blocked the price was every other job until the cycle reset. A dispatched run
+costs the same, so it is a decision rather than a reflex. What stopped with the schedule: the
+`--in-diff` job below, which only a push or a pull request starts, and the ledger check it carries;
+and an advisories verdict that refreshed without a commit.
+
+Two jobs, because they fail in opposite directions.
+
+The **full-crate job** names the crates taken to zero survivors — **twenty-six** of the workspace's
+thirty-two, `cargo metadata`'s count rather than an estimate — and
+re-measures all of them on every run. It is the only thing that can see a regression whose cause
+lies outside the diff: a changed constant three crates away, a test weakened somewhere unrelated.
+Its limit is that a crate cannot join it until it has been sealed, which costs hours per crate.
+
+It is **nine parallel lanes**, and the reason is a measurement rather than a preference. Nineteen of
+the twenty-six used to be one `cargo mutants` invocation; on 2026-09-01 that job ran **6 h 02 min**
+and was killed at the platform's ceiling. `cargo mutants --list` on the same tree says why: those
+nineteen crates are **17 556** mutants, **8.2 h** at the measured 1.69 s each. A GitHub-hosted job
+is capped at 360 minutes and `timeout-minutes` can only lower that, so the single job could not have
+been rescued by a larger bound — and a cancelled mutation run writes no `missed.txt`, so the gate
+was not reporting a survivor or a clean sheet but nothing at all, the same shape as the timeout
+argument in §5.4's gas block.
+
+The lanes are sized off per-crate counts measured on this tree, largest first, none above ~2.5 h:
+`estimation` 4 264, `astro` 3 725, `slr`+`sensors`+`elements` 3 976,
+`control`+`coverage`+`autodiff`+`astrometry` 3 092, ten small crates 2 499, `gnss` 5 376,
+`signal`+`ionosphere` 3 041, `fa`+`geomagnetism`+`capi` 1 796, `vision` 474 — **28 243** in all,
+13.3 h of work in a 2.5 h wall clock. Each lane carries `timeout-minutes: 240`, 1.5× the largest
+lane, so a lane that has quietly doubled fails *as a lane with its slot name attached* instead of
+being cancelled anonymously.
+
+**Two of the four inherited counts had drifted by the time they were re-measured** — `gnss` from
+4 307 to 5 376, `capi` from 356 to 536 — and that drift, not any single addition, is what put the
+old job over the ceiling. The counts are in the job's comment for exactly this reason, and a crate
+joining a lane means re-measuring the lane, not only the crate.
+
+`spacelab-vision` keeps a lane of its own for a reason that is not size: it needs `--features onnx`,
+its gated code compiles away without it so every mutant would read as a survivor, and a `--features`
+spec is resolved against each package named — so putting it in a run with packages that do not
+declare the feature fails *their* baseline, and a failed baseline tests nothing at all.
+
+Rotation — one slot a night, indexed by the date — was the alternative, and the measurement is what
+argued against it: it buys budget this set does not need and pays in detection latency, since a
+regression in a crate whose slot ran yesterday survives the rest of the cycle. Nine concurrent lanes
+cost the same runner-minutes and see everything the same night. That trade reverses when a single
+lane crosses the ceiling on its own, which is why the counts are in the job's comment.
+
+**What the admission audit found is worth more than the job.** Of the twelve crates that a reading
+of §8 says are sealed-but-ungated, five cannot be admitted, and not for one shared reason (a sixth,
+the `spacelab` facade, is out on the gate's own rule rather than on a limit, and the six together are
+exactly the workspace members the job does not name):
+`spacelab-gpu` (1 112) is clean but hardware-gated, so a runner with no device would measure the
+gate rather than the kernels; `spacelab-earthvision` is now 5 020 mutants against the 2 507
+`ev-onnx` sealed, and only its most recent campaign ends on a clean control — `reseal4-gas-kdist` at
+zero, and over three files rather than the crate — while the block over `ice`/`mie`/`phase` closed
+at four survivors that #287–#289 fixed with no control block after them; `spacelab-geometry` (597)
+is *open*, not stale, at `reseal4-predicates`' 51 error-bound survivors; `spacelab-propagation`
+(24 513) is 11.5 h by itself, which is why its seal is fifteen file-scoped blocks and why gating it
+means naming those, not the package; and `spacelab-python` (19 225) needs two feature switches to be
+measurable at all. A sixth, the `spacelab` facade, is out on the gate's own rule rather than on a
+limit: §8's table records `facade-seal2` at zero and a later block, `gate-face3`, is not in it, so
+there is no current verdict to admit it on.
+
+The full-crate job **never runs on a push**, and that is a measurement rather than a preference.
+Run 31132180464 took **three hours one minute** for 6 444 mutants — 1.69 s each — and the current
+nine lanes are 28 243. A seal that costs half a working day of runner time is not a thing to hold a
+push behind; it ran nightly until the minutes above ran out. A crate joins a lane on a measurement
+and never on an inference that it is probably still clean.
+
+The **`--in-diff` job** mutates only the lines an event changed, so every crate is in scope from the
+first commit and the cost is proportional to the change rather than to the workspace. Measured on the
+four commits that introduced it — 27 971 diff lines, most of them SLR fixtures — it generated
+**five** mutants, because only changed Rust source is mutated at all. Its limit is the mirror image:
+it cannot see anything the diff does not touch.
+
+It was guarded `if: github.event_name == 'pull_request'` for its whole life, and every run of this
+workflow on record is `push main`. So the job written to cover the crates the seal cannot name had
+**never executed once** — a hole of the same shape as the failed baseline below, and found the same
+way, by looking at what ran rather than at what was written. It was then made to run on a push too,
+taking the range from `before...after` with a first-parent fallback for the all-zeros a new branch
+reports.
+A base it cannot resolve is an error, not an empty diff: a run that measures nothing and passes reads
+exactly like one that measured everything.
+
+Neither is a substitute for the other, and the second is what closes "twenty crates can regress with
+nothing measuring it" without waiting on twenty seals. Five exclusions carry over to it, all of them
+statements about what a run can measure rather than equivalences: `spacelab-gpu`'s tests need a
+device the runner does not have; and `loading_tables.rs` /
+`cio_tables.rs` / `nut_tables.rs` are verified as a unit against their reference programs rather than
+per coefficient.
+
+The sixth is the same mechanism for the opposite reason, and the two are worth keeping apart.
+`geopotential_coeffs.rs` declares no functions — it is the XGM2019e table to degree 120 — and all
+**7 360** of its mutants are `delete -` on a coefficient literal. One test folds every element of
+all 7 378 rows into an FNV-1a value and compares it against a fixed seal, so every one of those
+mutants fails it *by construction*; measured by hand at both extremes, degree 2 and degree 120.
+Those three tables are excluded because no test can kill their mutants; this one because a single
+test kills all of them, at a quarter of the largest block's runtime to learn nothing. An exclusion
+that rests on a named test is only as good as the test, which is why the test is named.
+
+The `--in-diff` job runs **three times**, and the reason is a property of the tool rather than of the
+code. cargo-mutants builds and tests one package at a time, so a `--features` spec is resolved against
+that package alone: naming `spacelab-earthvision/onnx` on a run that covers the workspace makes
+`cargo test --package=spacelab-propagation --features=spacelab-earthvision/onnx` a usage error, the
+*baseline* fails, and a failed baseline tests no mutants at all — the job then reports nothing rather
+than reporting a problem. The two crates that declare `onnx` therefore get their own package-scoped
+run with the bare feature name and are excluded from the general one; without the feature their gated
+code compiles away and every mutant in it reads as a survivor. The failure was found by running the
+job's own command locally rather than its `--list` form, which is the only way to exercise a baseline.
+
+`spacelab-python` is the third, for the same reason one level down. `extension-module` promises PyO3
+will not link libpython, so the run that reaches its interpreter-facing entry points has to pass
+`--no-default-features --features test-interpreter` through `--cargo-arg` — a spec no other package in
+the workspace would accept. The runner needs `python3-dev` for that build, since it links libpython
+instead of deferring to the importing interpreter; the workflow installs it and only refreshes the
+package index if the direct install misses.
+
+Two further things a mutation run can decline to measure without saying so. **Denied warnings**: the
+workflow sets `RUSTFLAGS: -D warnings`, and a mutant that returns a constant leaves its arguments
+unread — a warning, so the mutant fails to build and is filed UNVIABLE, which is not a survivor and
+does not fail the gate. On spacelab-testkit's 21 mutants that was 12 of them; `cap_lints = true` in
+`.cargo/mutants.toml` restores all 21 to caught. **Disabled features**, as above. Both are silent by
+construction: the run is green, the count is smaller, and nothing in the output says which question
+went unasked. When reading a verdict, `unviable` deserves the same suspicion as `timeout`.
+
+### A gate whose verdict depends on the date is not a gate
+
+Every job above ran on `dtolnay/rust-toolchain@stable`, and `rust-toolchain.toml` said
+`channel = "stable"`, which is not a pin. On 2026-08-18 clippy 0.1.98 added `manual_midpoint`, and
+`cargo clippy --workspace --all-targets -- -D warnings` went from green to **100 findings across 17
+crates** with no commit in between — 98 of the new lint and 2 `chunks_exact_to_as_chunks`. It was
+the second time a tool version moved a gate under this repository without the repository moving; the
+first was rustfmt's edition default (#291). The mutation job's own comment had already made the
+argument — *an unpinned tool turns a green tree red on somebody else's schedule* — and had applied it
+to cargo-mutants and to nothing else. The compiler is a tool.
+
+**What the lint was asking for, measured rather than assumed.** `f64::midpoint(a, b)` is not
+documented as a spelling of `(a + b) / 2.0`; it is documented as the midpoint *without* the
+intermediate overflow, so the two are the same function only on some domain and the question is
+which. Over 4·10⁶ random operand pairs — 2·10⁶ drawn across 10^±30 and 2·10⁶ across 10^±300 — the two
+returned **bit-identical results in every case**, and they separate only where `a + b` reaches ±∞:
+`midpoint(f64::MAX, f64::MAX)` is `f64::MAX` where the multiply gives `inf`. No physical quantity in
+this workspace is within 290 orders of magnitude of that, so no published number in this document
+moves and none had to be re-derived. The suggestion is not free, though. Compiled at `-O`,
+`(a + b) / 2.0` is `addsd`, `mulsd`, `ret`; `f64::midpoint` is two `andpd`/`ucomisd` compares and a
+branch in front of the same two instructions.
+
+**Two different expressions wear the same shape, and the lint cannot tell them apart.** Where
+`0.5 * (a + b)` is a midpoint — a bisection bracket, a symmetrised matrix element `½(mᵢⱼ + mⱼᵢ)`, the
+mean of two samples, the centre of a bounding box — `f64::midpoint` names the operation better than
+the multiply does, and **78** sites now use it. Where the `½` is a coefficient of a published formula
+it is not a midpoint at all and the rewrite hides the formula: the Gottlieb geopotential recursion,
+the CR3BP centrifugal potential `½(x² + y²)`, unpolarised Fresnel reflectance `½(r_s² + r_p²)`, the
+Gaussian CDF `½(1 + erf z)`, NRLMSISE-00's `ccor2`, the quadratic formula `½(−b + √(b² − 4c))`,
+Sentman's wall-temperature ratio and FISTA's momentum update. Those **20** sites keep the multiply,
+and the two in the geopotential inner loop keep it on the second ground as well — that loop is the
+measured hot spot of the force model, and a branch per term is not free there either. `manual_midpoint
+= "allow"` in `[workspace.lints.clippy]` is what stops the lint demanding otherwise, and the comment
+above it carries this paragraph in short form so the exception is not mistaken for an oversight.
+
+**A lint fix reached into the equivalence ledger, which is the part worth reading twice.** Anchors in
+`.cargo/mutants.toml` are `file:line:col`, so the rewrite broke 13 of them: nine in `lambert.rs`
+where `cargo fmt` reflowed the bisection fallback into a block and shifted every anchor below it by
+four lines, and four in `whfast.rs` that no longer name a mutant at all. Those four are the point.
+`0.5 * (lo + hi)` has a `*` and a `+` for cargo-mutants to flip; `f64::midpoint(lo, hi)` has neither,
+so the site went from seven mutants to three and the four exclusions became dead entries rather than
+stale ones. That is a *reduction* in mutation coverage and also an improvement: the four mutants were
+already excluded as unreachable, and a defect that can no longer be written needs no test to catch it.
+The tree-wide count moved 1 037 exclusions / 1 024 claimed to **1 033 / 1 033, 0 broken**. Every crate
+this commit touches is now behind its seal, which `just mutants-staleness` reports and the full
+gate re-measures.
+
+**The pinning decision, and what it costs.** `rust-toolchain.toml` names `1.99.1` and the `check` job
+passes the same version to the toolchain action — two places on purpose, because rustup's precedence
+between an installed default and the file is not something a CI file should have to be right about,
+and either winning now gives the same compiler. A bump becomes a deliberate commit that carries
+whatever the release brings, which is the point: the alternative is what just happened. What that
+gives up is early warning, so a **`toolchain-canary`** job runs `cargo fmt --all --check` and the
+same clippy gate on floating stable, on dispatch only, with `continue-on-error: true`.
+A red canary is the cost of the next bump made visible in advance; it blocks nothing.
+
+The first bump made that way, 1.98.0 → 1.99.1 on 2026-10-20, cost two new clippy lints and
+nothing else. `assert_is_empty` fired on 51 test assertions. Where the element type is
+`Debug + PartialEq`, 27 took clippy's own rewrite — `assert_eq!(x, [] as [T; 0])`, or
+`assert_ne!(s, "")` for a string — which prints the value on failure; the other 24 became
+`assert_eq!(x.len(), 0)`. `chunks_exact_to_as_chunks` fired three times, all fixed-width byte
+decoding, now `as_chunks::<4>()`.
+
+### The equivalence ledger
+
+`.cargo/mutants.toml` holds **1 012 exclusions**, each with its proof written above it. They are not a
+suppression list; they are the campaign's second output. The proofs that recur:
+
+- a threshold sitting in an empty gap of the *reachable* value set (`acos` returns nothing between 0
+  and 1.49e-8, so `|sin Δν|` can never equal 1e-12);
+- a quantity used only quadratically, so a sign flip is bit-identical (`cholupdate`'s outer product);
+- a symmetric sigma set annihilating a term (`Σ Wᵢ(χᵢ − x̄) = 0` for the off-centre points);
+- an index written after its last read (NMS suppressing a box it has already kept).
+
+Exclusions are anchored by `file:line:col`, which **goes stale the moment a line is inserted above
+the code it names**. `just mutants-anchors <FILE>` re-derives the live mutant list and reports
+`N entries, N mutants excluded, 0 broken`; the real staleness signal is `entries != excluded`.
+
+`just mutants-ledger` does the same over the whole ledger in two `--list` calls instead of two per
+file — ~2 min against ~1.6 h for the 137 anchored files — and asks a strictly stronger question,
+because it can see across files: the per-file count lets an entry matching *two* mutants cancel
+against one matching none. It requires every entry to claim exactly one mutant and every excluded
+mutant to be claimed by exactly one entry. Current: **1 012 entries, 1 012 excluded, 1 012 claimed,
+0 broken**. Every entry sits in a block preceded by prose; an exclusion with no proof above it is
+indistinguishable from having given up on the mutant, so that count is checked alongside the anchor
+reconciliation.
+
+It runs in CI in `mutants-diff`, ahead of the gate that reads the exclusions it validates — a job no
+event starts while every trigger is manual, so today it runs where `just mutants-ledger` is run.
+Nothing else runs it: the seal blocks are manual and the exhaustive gate was nightly, so before this
+an anchor could drift for weeks and surface as a survivor in an unrelated function — which reads as
+a test regression and is not one. The reconciliation was extracted to `tools/mutants-ledger.py`,
+standard library only, so the step needs neither `just` nor `uv` on the runner. It found its first
+regression on its first run: a four-line guard added to `spacecraft.rs` and `earth_radiation.rs`
+moved 11 anchors, ten of them bare basenames that `mutants-anchors` can only report as `same-name
+anchors elsewhere`. They were repaired crate-path-qualified.
+
+It has since found its second, which is the argument for keeping it in front of the gate rather than
+beside it: #305's `F10.7_DATA_TYPE` work added seventy-one lines to `space_weather.rs` and pushed
+`parse_space_weather`'s and `parse_solfsmy`'s `||` guards from 58:28 and 287:28 to 129:28 and 369:28.
+Both proofs still hold — the code is character-for-character the same two lines — but the anchors
+matched nothing, so two mutants argued equivalent were silently re-armed and would have surfaced as
+survivors in the next nightly, in a crate whose diff nobody would connect to them. Re-pointed, and
+back to 1 012 of 1 012.
+
+Its third came from **#319 and spans two crates at once**: the C ABI and the bridge each grew their
+`use` block above the anchored code, so `copy_to_c_buffer`'s UTF-8 truncation walk moved +24 lines
+and the same fourteen step-size proofs moved +22. What earns it a third entry is *which* instrument
+found it. Only `just mutants NAME +FILES` runs `mutants-anchors`, once per named file; `mutants-pkg`
+and any bespoke `--in-diff` invocation name no file and run it for none, so neither of #319's two
+blocks checked. Neither was wrong either, for the reason that makes a diff-scoped block safe here:
+`--in-diff` restricts to lines the diff *added*, none of the fifteen anchors is in either diff, and
+those mutants were therefore never generated. A block scoped to a diff cannot re-arm an exclusion
+outside it — and cannot notice one either. The reconciler is what noticed: 15 broken, then
+1 029 of 1 029. **The same anchor drifted again inside the same ticket**, by one line, when the C ABI
+imported four more names from `spacelab-gnss` to read observation files; the reconciler caught that
+one too, which is the actual argument for running it after every edit rather than after every
+seal — a `use` line costs nothing to add and moves every anchor below it.
+
+Its fourth is `space_weather.rs` for the **third** time, and it is the one that says what the
+instrument cannot do. Ф6.F inserted 110 lines above `parse_solfsmy`, moving its `||`-guard proof from
+`369:28` to `481:28` exactly as #305 had moved it from `287:28` before. `just mutants` runs
+`mutants-anchors` on the named file and it ran here — and reported **`1 entries, 1 mutants excluded,
+0 broken, 1 same-name anchors elsewhere`**. `0 broken` is the exit-code line; the drift is the
+*warning*. A pattern that matches nothing is not distinguishable from a pattern whose mutant is
+merely absent from this run, so a stale anchor can only ever be a warning, and the block proceeded
+with the exclusion disarmed. What made it actionable was the survivor list. The lesson is narrow and
+worth keeping: **the anchor check gates a broken pattern, not a stale one**, so `same-name anchors
+elsewhere` has to be read on every run rather than skimmed past because the recipe exited 0.
+
+And it then drifted a second time inside the same ticket, by **one line and in the other direction**:
+`clippy::filter_next` turned `filter(…).next_back()` into `rfind(…)` in `hpo_at`, deleting a line
+above `parse_solfsmy` and moving the just-repaired anchor from `481:28` to `480:28`. That cost a
+25-minute block whose only survivor was the anchor. Two orderings would have avoided it and only one
+of them generalises: re-reading the warning would have caught it, and so would running the whole gate
+ladder — `fmt`, `clippy -D warnings`, `test` — **before** the seal rather than after, since a lint fix
+is a source edit and a block measures the tree it started on. The second is the rule adopted here.
+
+Its **fifth** is the one that shows the *other* silent direction, and it is not a mutation ticket at
+all. Two documentation-only commits — `186ba88`, which put a licence section at the top of
+`dtm2020/mod.rs`, and `3143a74`, which rewrote `nrlmsise00/mod.rs`'s header onto the NRL FORTRAN —
+added 14 and 23 lines above every anchored line in their files. Neither touched a line of code.
+`just mutants-ledger` then read **1 043 entries, 923 mutants excluded, 923 claimed, 120 broken**, and
+the repair was arithmetic: every anchor in those two files shifted by its file's offset, verified by
+reading the line each now names.
+
+The number worth keeping is the discrepancy between the two counts. **137 anchors had drifted and
+only 120 were reported broken.** The other 17 landed on a *different* mutant of the same shape at the
+old line and went on matching — an exclusion silently transferred from the operator its proof was
+written about to a neighbouring one it was not. That is the failure `mutants-ledger.py`'s header
+warns about in the abstract, measured: after the shift the ledger reads 1 043 / 1 043 / 1 043, and
+before it, seventeen proofs were guarding code they did not describe. It is also why the check has to
+be *both* directions — per-file counting would have shown 923 excluded against 923 claimed and called
+it balanced. The operational rule is the one already stated, extended by one word: the gate ladder
+runs before the seal, and **a documentation edit is a source edit too.**
+
+Reaching that took a census of 14 broken anchors and two different repairs, and the difference
+between them is the point. Nine were line drift and were repaired in place: the three `mie.rs`
+`phase_on_grid` guards had each slipped one line under a `cargo fmt` reflow, and fourteen
+`spacelab-python/lib.rs` step-size proofs and one `spacecraft.rs` guard had slipped 1, 3 and 12 lines.
+Each was re-anchored only after reading the line it now names and confirming it holds the same
+expression the proof describes. Nine `lambert.rs` entries were the same case at larger displacement —
+the module moved 13 and 135 lines and `git diff` shows the enclosing regions untouched and the
+anchored lines byte-identical.
+
+Five more `lambert.rs` entries were **deleted with their prose** rather than re-anchored. `Arc::bracket`
+and `Arc::solve` were rewritten under **#270**, and the `while tof_err(z) < 0.0 { z += 0.1; … }` walk
+those five proofs were about no longer exists. A proof does not survive the code it was written
+against; re-pointing it at whatever now occupies the line would assert an equivalence nobody
+re-established. Whatever the re-seal finds in the new bracket is judged fresh.
+
+The **#290** rewrite of `Arc::y` and `Arc::bracket` and the **#292** loop-counter rewrite in
+`iod::gooding` moved 55 more anchors, and repairing them showed that *nearest line* is the wrong
+rule. Two `iod.rs` entries at 372 and 381 both sat nearest to the same live mutant at 373 and
+collapsed onto it, which reads as one repaired anchor and one that matches nothing. The rule that
+holds is order-preserving assignment: group entries by `(file, column, description)`, sort both the
+entries and the live mutants of that key by line, and pair them off. Pure drift preserves order by
+construction, so the pairing is exact; and where the counts disagree the group is *skipped* rather
+than guessed at, which is what surfaced the last two by hand. One entry was deleted rather than
+moved — `iod.rs:535:91`, a proof about the `damping > 1e-6` bound of a `while` loop that the counted
+rewrite replaced outright.
+
+Getting to that reconciliation needed a repair. The census on 2026-08-10 read 838 entries against
+834 exclusions, and the four gaps were three `sp3.rs` `set_sample` proofs anchored at `72:21` against
+mutants now at `137:21`, and the `space_weather.rs` comment-line proof at `51:28` against `58:28` —
+pure line drift, arguments unchanged. A fifth, `density_data.rs:72:28`, was found by the per-file
+check on the way and is a different failure: its proof still argued about a row "too narrow at
+`t.len() < 10`" two column-count changes after the parser dropped to nine. That one was rewritten
+rather than re-anchored, because a proof naming the wrong shape of the data is not a proof that has
+merely moved.
+
+It has to be re-run after *every* commit that inserts a line, not just after one that edits a proof.
+The JB2008 height-domain fix added sixteen lines at the top of `jb2008` and orphaned nine anchors
+below it in one stroke — and the campaign only noticed because the next census re-reported one of
+those nine, `423:25`, as a fresh survivor. It was not fresh: it was an equivalence proved days
+earlier whose anchor had moved out from under it. A stale anchor is silent in exactly the direction
+that costs measurement time.
+
+#### A bare-basename anchor cannot be called broken, and two crates have an `iod.rs`
+
+The census on 2026-08-15 read **39 broken anchors** — the largest yet, and the reason it got that far
+is a blind spot in the cheap check rather than in the discipline. `just mutants` runs
+`just mutants-anchors` on each file before it seals it, and that check reports a candidate entry it
+cannot place in this file as `same-name anchors elsewhere` rather than as broken, deliberately: a
+bare `lib.rs:` anchor names every crate's, so a miss there is only ever "not this file". The
+workspace has **two** `iod.rs`, `spacelab-astro`'s and `spacelab-estimation`'s, so every `iod.rs:`
+anchor fell into that class. #285 inserted `laplace` into the astro one, shifting eighteen anchors by
++5 and +140 lines, and `mutants-anchors crates/spacelab-astro/src/iod.rs` reported
+`0 entries, 0 mutants excluded, 0 broken, 21 same-name anchors elsewhere` — a clean line, in front of
+a file whose whole ledger had come unmoored. Only `just mutants-ledger`, which sees the ledger as a
+whole, could call it.
+
+The fix is at the anchor rather than at the checker: every repaired entry now carries its **crate
+path** (`crates/spacelab-astro/src/iod\.rs:202:18: …`), which `mutants-anchors` matches exactly, so
+the next drift is reported as `drifted anchor, nothing at that line:col` and stops the seal. That is
+also the rule for new entries.
+
+The 39 split three ways, and the second and third classes are new:
+
+* **21 pure drift**, re-anchored mechanically by matching each entry's operator-and-function
+  signature against the live mutant list and preserving the column, then confirming the line the
+  entry now names holds the expression its proof describes.
+* **4 that moved into another function.** #268 factored the facet walk out of `drag_acceleration`
+  and `srp_acceleration` into `for_each_drag_facet` / `for_each_srp_facet` so `torque` could take
+  moments over the same facets. The `d > 0` / `d < 0` ties and their proof are unchanged; only the
+  enclosing name is, so the entries follow the code.
+* **9 dead duplicates**, deleted. These are the residue of an *earlier* repair: a previous ticket
+  re-anchored the same proof correctly and left the stale copy in place, so the ledger carried two
+  entries for one mutant. The signature is unmistakable once the whole ledger is reconciled at once —
+  `2 entries claim one mutant` — and invisible to any per-file count, because the file's totals still
+  balance. Six are `robust.rs` and `srukf.rs`; three more are `SquareRootUnscentedKalman::update`
+  proofs whose operators the `fold` de-duplication moved into the shared helper, where the surviving
+  copies already claim them. **No proof was discarded**: in each case the argument still stands and is
+  still in the file, once.
+
+### Verdict, as measured on 2026-08-09
+
+| Block | Crate(s) | Caught | Survivors | Timeouts | State |
+|---|---|---|---|---|---|
+| `fa-rescan2` | `spacelab-fa` | 7 711 | 0 | 0 | clean |
+| `gnss-seal` | `spacelab-gnss` | 3 346 | 0 | 6 | clean |
+| `ev-confirm` | `spacelab-earthvision` | 2 507 | 0 | 8 | clean |
+| `estim-seal` | `spacelab-estimation`, `-eop` | 2 422 | 0 | 0 | clean |
+| `sig-seal2` | `spacelab-signal` | 1 896 | 0 | 14 | clean |
+| `elem-seal` | `spacelab-elements`, `-coverage`, `-ephemeris` | 1 396 | 0 | 17 | clean |
+| `gpu-seal` | `spacelab-gpu` | 1 096 | 0 | 0 | clean |
+| `sensors-confirm` | `spacelab-sensors` | 863 | 0 | 0 | clean |
+| `constel-seal` | `spacelab-constellation` | 482 | 0 | 1 | clean |
+| `grid-rescan` | `spacelab-grid` | 51 | 0 | 0 | clean |
+| `facade-seal2` | `spacelab` (facade) | 12 | 0 | 0 | clean |
+| `astro-seal3` | `spacelab-astro` | 2 662 | 0 | 0 | clean — the re-measurement of `astro-seal2`'s seven, all of which were stale |
+| `sgp4-seal2` | `spacelab-frames`, `-sgp4` | 206 | 0 | 0 | clean |
+| `iono-seal3` | `spacelab-ionosphere` | 1 043 | 1 | 1 | `iono-seal2`'s three were indeed stale; this found a fourth nobody had seen — `ccir.rs:63:19`, killed by `d4d5f9d` and re-measured as `iono-ccir` |
+| `iono-ccir` | `spacelab-ionosphere/src/ccir.rs` | 26 | 0 | 0 | clean — the file-scoped seal of `iono-seal3`'s one survivor |
+| `small-seal2` | `spacelab-core`, `-earth`, `-autodiff`, `-testkit` | 1 214 | 0 | 1 | clean |
+| `prop-rescan` | `spacelab-propagation` | 14 422 | 174 | 26 | complete — all 14 924 mutants, but a **census, not a seal**: its snapshot is from 01:45 and the tree moved under it. All 174 survivors are resolved at HEAD, 85 by commits that landed *before* the snapshot and are stale in it, 85 by the epoch-fixture and ledger work this census itself prompted, 4 by the dead-table-coefficient proofs. The per-file blocks below are the re-measurement, one per file the census cannot speak for |
+| `vision-onnx` | `spacelab-vision` `--features onnx` | 474 | 0 | 0 | clean |
+| `ev-onnx` | `spacelab-earthvision` `--features onnx` | 2 507 | 0 | 8 | clean |
+| `gate-py` | `spacelab-python` | 51 | 1 740 | 0 | measured at last — 2 684 mutants, 893 unviable — and the survivors are 194 gated + 1 545 reachable, not the 947 unreachable the ledger used to estimate |
+| `gate-py-fill` + `gate-py-cov` | `spacelab-python`, 14 wrapper functions | 856 | 0 | 0 | clean — the largest reachable clusters, closed by twelve tests; 689 reachable survivors remained crate-wide at the time |
+| `gate-py-gated` | `spacelab-python`, 3 interpreter-facing entry points, `--features test-interpreter` | 85 | 1 | 0 | the feature switch works — 85 of the 86 previously *unreachable* mutants die to four tests, and the one survivor is a dop853 step seed, ledgered as equivalent with the measurement |
+| `py257-a` … `py257-g` | `spacelab-python`, 7 scoped blocks over the survivor list, `--features test-interpreter` | 776 | 25 | 0 | the #257 campaign, written test-first and measured block by block. 12 of the 25 were real gaps — `sl1mmer_spectrum`, `walker_constellation`'s `"star"` arm, `alpha_characteristic`, and four in the density/DSST tail — and are closed by further tests. The other 13 are the `h0` first-trial-step seed the dense wrappers hand their adaptive driver, ledgered with the measurement below; the ledger carries 14 because `gate-py-gated`'s survivor was already excluded before this campaign began |
+| `gate-py2` | `spacelab-python`, whole crate, `--features test-interpreter` | 1 363 | 10 | 0 | the closing re-measurement of #257 — 1 711 mutants in 43 min, iterating over the 2 082 `gate-py` had already resolved, so the crate is 3 793 under this feature set. Every one of the ten survivors is `cloud_mask`, and none of them is a test gap: see `py257-onnx` below |
+| `py257-onnx` | `spacelab-python`, `cloud_mask`, `--features test-interpreter,onnx` | 0 | 0 | 0 | all ten **unviable**, which is the whole point of running it. `cloud_mask` is `#[cfg(feature = "onnx")]`, so without the feature its body is not compiled and a mutation of it changes no binary — the tests pass and cargo-mutants calls that MISSED. Compile it, and the same ten fail to build: cargo-mutants writes `PyResult::new(vec![])` and `PyResult::from_iter([..])` against what is a type alias for `Result`, which is `E0599` / `E0271`. So the mutants are unreachable in one configuration and unbuildable in the other, and the binding is covered by a test either way — the baseline here ran all 80 in 0.37 s |
+| `capi-seal` | `spacelab-capi`, whole crate | 38 | 6 | 1 | the first seal of the C ABI (#198), 49 mutants. Three survivors were one bug: `the_measurement_bindings_are_their_crate_functions` built its expected six-vector with `to_six(sat)` — the helper under test — so mutating `to_six` moved both sides of every assertion together. Two more were `copy_to_c_buffer`'s null-and-capacity guard, unreached because no test passed a null destination with a non-zero capacity |
+| `capi-seal2` | `spacelab-capi`, whole crate | 42 | **0** | 1 | the re-seal after those tests, 47 mutants in 67 s. The four unviable are `Default::default()` written for types that have no `Default`. The timeout is `keep -= 1` → `keep /= 1` in `copy_to_c_buffer` — the truncation walk's termination *is* the decrement — and is the seventeenth of the frozen-loop-counter family catalogued in `.cargo/mutants.toml`. Two mutants are excluded as equivalent, both argued there: `keep > 0` → `>= 0`, where `is_char_boundary(0)` is unconditionally true so the loop exits identically, and `sl_abi_version` returning the literal `1`, which *is* `ABI_VERSION` today — that entry is marked for deletion by whichever commit first revises the ABI |
+| `capi-seal3` | `spacelab-capi`, whole crate | 42 | **0** | 1 | the same 47 re-measured against the tree as it actually ships, after the clippy fix that followed `capi-seal2`. Element for element identical, which is the point of running it: the fix was in the test module and should have moved nothing, and a verdict that says so is worth more than an assumption that it would |
+| `capi-final` | `spacelab-capi`, whole crate | 42 | **0** | 1 | the seal after the five defects the header review turned up. Its first attempt reported **49** mutants where the previous three reported 47, and that difference was the finding: adding a `const _` block shifted `lib.rs` down ten lines and both `exclude_re` anchors, which are `file:line:col`, stopped matching anything. `just mutants NAME FILES` validates its anchors before running; `just mutants-pkg`, which this used, does not — so a package-scoped block can silently un-exclude, and the only symptom is a mutant count nobody was looking at. Anchors corrected to 286:16 and 359:5, `just mutants-anchors` back to 2 of 2, 0 broken |
+| `capi-surface` | `spacelab-capi`, whole crate | 171 | **58** | 10 | the first seal of the surface widened from 30 functions to 160 (#259), 257 mutants. The survivors are not spread thin: 23 are `circular_ground_track` and 12 are `lerp_at`, and both are the same blind spot in two places — a helper every caller of it is measured *through*, by an assertion that moves with it. The other 23 are boundary checks no test had ever made fail (`a > 0` never asked with a zero, three angles checked in one condition and never made non-finite one at a time) and one input the tests that use it do not depend on (the NRLMSISE-00 local solar time). The two `exclude_re` anchors had also drifted to nothing, at 326:16 and 399:5, and were re-pointed to 389:16 and 462:5 before this ran |
+| `capi-surface2` | `spacelab-capi`, whole crate | 226 | **0** | 13 | the re-seal after four new tests and six strengthened ones, the same 257 mutants. Three of the thirteen timeouts are survivors this promoted: a coverage query whose orbit guard is mutated away does not answer wrongly, it does not answer at all — the window search has nothing to converge to — so the test that now reaches the guard detects the mutant by hanging rather than by failing. All thirteen are the frozen-loop-or-removed-guard family catalogued in `.cargo/mutants.toml`; none is a new shape |
+| `capi-surface3` | `spacelab-capi`, whole crate | 226 | **0** | 13 | the seal after the unvalidated EOP payload in §6 was closed. Still 257 mutants, and the count staying put is the reading: replacing a `windows(2).any(...)` closure with a per-row, per-field loop retires as many mutants as it creates, so an unchanged total says the new condition is carrying the same weight the old one did rather than adding unexamined surface. Caught, missed and timeout are element for element `capi-surface2`'s — and *that* is what sent the investigation to `--list`, which returns nothing whatever for `sl_ephemeris_j2_itrf_series`. A run cannot report on a function it does not mutate; see §6 |
+| `capi-surface4` | `spacelab-capi`, whole crate | 229 | **0** | 13 | the seal after the same condition was lifted out of the `unsafe fn` into the safe `check_eop_series`. **260** mutants, and the three the crate gained are the point of the exercise: `delete !`, `replace >= with <`, and `replace check_eop_series -> Result<(), i32> with Ok(())` — the finiteness test, the ordering test and the whole guard, each now able to be deleted and each now caught. Timeouts identical to `capi-surface3`. The other 235 refusal sites in the crate remain unmutatable; that is #260, and it is why this row is not a claim about the ABI |
+| `capi-cloud-twin`, `capi-onnx-twin` | `spacelab-capi`, whole crate, default and `--features onnx` | 236 each | **1** each | 13 each | the first seal of the `sl_cloud_mask*` family, run twice because one configuration cannot speak for both. 269 mutants. Each run's single survivor is the *other* configuration's half of the `#[cfg]`-paired `open_masker` — 8584 in the default run, 8592 in the `onnx` one — and each run's nineteenth unviable is its own half, at the other line: `Ok(Default::default())` wants `SlCloudMasker: Default`, which nothing implements, `E0277` in both logs. Exactly swapped, so between them the two runs judge both halves and neither can do it alone. Two phantom survivors and no test gap; §6 carries the paragraph |
+| `capi-cloud`, `capi-onnx` | `spacelab-capi`, whole crate, default and `--features onnx` | 236 each | **0** each | 13 each | the re-seal after `open_masker` was rewritten as one function with two `#[cfg]`-ed bodies. **268** mutants — one fewer, which is the whole of the change — and the two runs now agree element for element on all four lists, which is the property the pair was written to have. The 13 timeouts are `capi-surface4`'s 13 shifted four lines down by the new status code, same mutants and same descriptions, so nothing new entered the catalogue. Run concurrently in two lanes at `--jobs 3`, 16 and 20 min |
+| `capi-guards`, `capi-guards-onnx` | `spacelab-capi`, whole crate, default and `--features onnx` | 314 each | **8** each | 13 each | the first seal after #260 moved every value precondition out of the `unsafe fn` entry points and into safe `check_*` helpers. **356** mutants, 88 more than `capi-cloud` on the same code — the refactor changes no behaviour and generates a third again as much to judge, which is the whole of its point. Both configurations agree element for element on all four lists. The eight survivors are eight untested boundaries, not eight defects: `check_mass_ratio` never asked for 0 or 1, `check_positions` never for a NaN in one component at a time (its two `&&`s survive separately), `check_minimum_walker_inputs` and `check_tomo_counts` never for the zero they exist to refuse, and `check_sgm_config`'s census radius tested at 4, which must fail, and never at 3, which must not. Two more mutants are now *unviable* rather than caught, which is the same verdict by a different route: `precision_of` and `walker_pattern_of` return `Result<enum, i32>` over enums nothing implements `Default` for, so `Ok(Default::default())` will not build. 19 min |
+| `capi-guards2`, `capi-guards2-onnx` | `spacelab-capi`, whole crate, default and `--features onnx` | 322 each | **0** each | 13 each | the re-seal after the eight tests. Same 356 mutants, the eight moved from missed to caught, and the two configurations again identical on all four lists. Run concurrently in two lanes at `--jobs 3`, 19 and 23 min |
+| `reseal-gnss`, `seal-gnss-full` | `spacelab-gnss`, whole crate | 4 211 each | **0** each | 6 each | the re-seal of the crate `igrf.rs` left, 4 237 mutants. Run twice on purpose. The first used `--iterate`, and its closing line reported 4 609 tested where its own `outcomes.json` held 4 237 and `previously_caught.txt` was empty — a summary that cannot be reconciled with the record it was written from is not a verdict to gate on, whatever number it carries. The second is a fresh block under a new name, and it reproduces the first element for element: same 4 211 caught, same 20 unviable, same 6 timeouts. All six timeouts are `rinex.rs` and all six are the frozen-monotone-index family catalogued in `.cargo/mutants.toml` — `block_len` forced to `Some(0)`, or the record walk's `idx +=` turned into `-=` or `*=` |
+| `seal-wind2` | `spacelab-propagation/src/wind_{data,model}.rs` | 641 | **78** | 0 | the first seal of the horizontal-wind modules (#265), 726 mutants. The survivors cluster, and each cluster is one degenerate test point rather than 78 separate gaps. Sixty are the `Wind` adapter, whose only test sat at `r = (R, 0, 0)` with `sec0 = t = 0` and longitude 0 — a point where the whole time bookkeeping and two thirds of the frame construction are multiplied by a zero. Three more are the vector-harmonic recursion at degree 4, where the `n − 2` back-reference and the `m + 2 ≤ n` guard that selects it are both still picking up zeros; they only carry a value from degree 5 up. Eight are accessors and getters no assertion had ever read back |
+| `seal-wind3` | the same two files | 708 | **9** | 0 | after a table-driven adapter test, a mixed field whose northward component is not identically zero, and a closed-form check of `fit`'s design row — one sample makes the normal equations rank one plus the ridge, so Sherman-Morrison gives the coefficients outright and the row, the driver-major packing, the magnetic rotation, the window and the per-block ridge are all compared against an expression built from the sealed primitives instead of from another run of `fit` |
+| `seal-wind4` | the same two files | 715 | **0** | 0 | the seal. Of `seal-wind3`'s nine, three were a real weakening rather than an equivalence: the reduction of local solar time to `[0, 24)` is read downstream as an *angle*, so removing the wrong number of days is invisible to any wind — the reduction now has a name and a test that checks the range and the whole-day offset directly. A fourth was `east·ê + north·n̂` with `ê[2]` an exact zero, invisible until an amplitude is zero too, which is what an unfitted field is; a zero field now has to produce exactly zero rather than a NaN in the vertical. The remaining five are argued in `.cargo/mutants.toml`: two short-circuits that only ever spend work, two loops whose extra iteration is a self-assignment or a read of a not-yet-written zero, and a day count that the `[0, 24)` reduction removes |
+| `seal-geomag-full` | `spacelab-geomagnetism`, whole crate | 516 | **0** | 0 | the first seal of the crate `igrf.rs` and `igrf14_coeffs.rs` moved into (#264), 517 mutants. Run as a fresh block rather than a resume on purpose: the first attempt used `--iterate`, which skips mutants "previously caught" by `file:line:col`, and a file that has just moved crates is exactly the case where those anchors point at different code — it tested 75 of 517 and excluded 496, and a 0-survivor verdict from that is not a verdict. The full block is the one recorded here |
+| `seal-ice-phase-noise` | `spacelab-earthvision/src/{ice,mie,phase}.rs`, `spacelab-estimation/src/process_noise.rs` | 1 424 | **158** | 25 | the first seal of the ice and Mie optics (#280, #282) and of the process-noise discretisation (#276), 1 625 mutants in 66 min. Closed file by file under #286: 127 of the 158 are killed by new tests and the remaining 31 are argued in `.cargo/mutants.toml`. Two of the 127 were **not** test gaps but shipped defects, and both were found by a mutant rather than by an assertion — `mie::coefficients` returning `Some` around four `NaN` cross-sections (#287), and the `Dₙ` downward recurrence started 1.6e-4 too low at `x = 1000` by a margin the oracle test stopped short of testing (#288). The 31 divide into structural proofs — a loop that re-tests the same cap four times, a branch that cannot be entered because `eta < 1` forbids total internal reflection on entry, a guard whose `denominator == 0` case the preceding branch already consumed — and rounding-level differences bounded by measurement: bit-identity at the branch boundary for two of them, and a worst departure of 1.95e-16 relative over 60 000 rays for the six that renormalise an already-unit exit direction |
+| `reseal-ice-phase-noise` | the same four files | 1 551 | **4** | 26 | the control re-seal after #286's tests and proofs landed, 1 599 mutants in 55 min. The four survivors are the reason a control run is worth its hour: they are `mie.rs:217`'s four `\|\|` disjuncts, all of which the *first* block caught, and what un-caught them was #287's own fix. Since `coefficients` now also refuses a coefficient that came out non-finite, every non-finite *argument* is rejected with or without the input guard, so the guard stopped being observable through the output. It is still load-bearing: with it removed, `x = -1` runs the recurrences to completion and returns four plausible finite wrong coefficients (`a₁ = 0.0153 + 0.1228i`), and `m.re = +∞` panics `truncation_order` with an integer overflow. `unphysical_inputs_are_refused` now asks each disjunct with an argument the output check cannot stand in for, and all four are killed. The per-crate simulation used to close #286 had judged those four caught — it runs one package where the block runs the workspace — which is the measured limit of that proxy. Timeouts went 25 → 26 and the composition changed: two former timeouts are now caught outright, and three are new, two of them created by #286's own shortest-grid tests reaching a binary search that a mutated bound cannot leave. All 26 are catalogued in `.cargo/mutants.toml` |
+| `seal-iod-robust-lambert` | `spacelab-estimation/src/{robust,fixed_lag,iod}.rs` and `spacelab-astro/src/lambert.rs` | 1 648 | **23** | 6 | the first seal of the robust update, the fixed-lag smoother and angles-only IOD (#277, #278, #270), together with the re-seal `lambert.rs` owed after #290 rewrote its sweep, 1 693 mutants in 19 min. The three estimation modules came back clean on the first block; **all 23 survivors and all 6 timeouts are `lambert.rs` and `iod.rs`**, and the timeouts are the finding: `*=` frozen to `+=` or `/=` in `Arc::bracket`'s and `gooding`'s step multipliers turns a geometric walk into one that never leaves its interval, so the loop is unbounded in the mutant and only bounded by luck in the original. That is a structural defect in the loop, not in the tests, and #290 replaced both with counted loops |
+| `seal-iod-lambert-v2` | `lambert.rs`, `iod.rs`, after the counted-loop rewrite | 1 113 | **14** | **0** | the control, 1 142 mutants in 9 min. Every one of the six timeouts is now a kill: a counted loop cannot be made to hang by mutating its step, only to exit with a worse answer, which a test can see. The 14 survivors are what §3.3 measures — nine proved redundant against a 38 890-call output fingerprint, two proved equivalent by exact arithmetic, one by the structure of `gibbs`'s degeneracy chain, and **two that were not equivalent at all** |
+| `seal-iod-lambert-v3` | the same two files, after `the_bracket_never_reaches_one_whole_revolution` | 1 115 | **0** | **0** | the seal, 1 130 mutants in 11 min. The two non-equivalent survivors of `v2` moved no count and no residual but did change the fingerprint, and the new test kills them by asserting the invariant they broke rather than an output they left alone: `hi < REVOLUTION` over 8 616 bracketed geometries, of which 3 638 sit within 1e-8 of the ceiling, so the assertion is measuring something. The mutated ceiling returns `39.478 417 643 8` against `4π² = 39.478 417 604 4` |
+| `seal-robust-vector` | `spacelab-estimation/src/{robust,mekf,iekf,se23,srukf}.rs` | 598 | **43** | **0** | the seal owed after #283 gave the four vector-measurement filters a robust update, 659 mutants. The survivors are one gap and one class of equivalence rather than 43 findings. The gap is that **nothing read `RobustOutcome`** on the vector paths: 24 of the 43 are the `weight = 1/scale` and `innovation_variance = tr(S)/d` lines in all four filters, plus `r·scale` in the IEKF and `σ²`/`σ²·scale` in the SE2(3) update, which no assertion could see because every existing test looked only at the state and the covariance. Four tests close them by running the same observation twice from the same prior — once undiscounted, once inflated — and asserting that `tr(S)/d` moves by exactly `σ²(scale − 1)`, plus one closed form that pins `σ` entering as a variance rather than as `σ + σ` |
+| `reseal-robust-vector` | the same five files | 632 | **0** | **0** | the control, 659 mutants. The nine remaining survivors are argued in `.cargo/mutants.toml` and eight of them are hard equivalences — a guard whose two branches compute the same factor at the boundary, three sign flips a sum of squares or a rank-1 downdate is invariant under, two `sqrt(0)` boundaries, and a back-substitution's extra iteration that reads a not-yet-written zero. The ninth is measured rather than proved and is a finding of its own: `(y − ŷ)` flipped to `+` differs by `2ŷ·Σ Wᵢᶜ(χᵢ − x̂)`, zero in exact arithmetic, and in `f64` the same `ulp(x̂)` residue that already bounds the unmutated SR-UKF's own accuracy — 1.9e-8 relative against the closed-form Kalman gain at `\|x̂\| = 1` and 1.9e-1 at `1e7`, so no assertion separates the mutant without failing on the original first. That conditioning limit is #295 |
+| `seal-observability` | `spacelab-coverage/src/{observability,photometry}.rs` | 433 | **57** | **0** | the first seal of the optical-observability modules (#279), 504 mutants in 3 min. The 27 tests #279 shipped are all published-value comparisons — the right ones to write first, and blind to *composition*: every survivor is a term that only ever appeared inside a sum another term dominated, or a factor a fixture multiplied by one. Fourteen are `moon_scattering`'s two branches, which no assertion evaluates apart from the sky brightness they add up to; twelve the `B_zenith · 10^(−0.4 k (X − 1)) · X` composition; eleven the six vector differences that build an observation out of `ObservationGeometry`, where the end-to-end SNR bands are wide enough for a reversed subtraction to pass; and three the pixel scale, which `metre_class` samples at exactly 1″/px — the one value where `r/scale` and `r·scale` are the same number and `× scale²` is the identity. Bennett's density factor is a fourth of the same kind: `Refraction::STANDARD` makes it exactly 1.0, so every assertion multiplied by one |
+| `reseal-observability` | the same two files | 492 | **0** | **0** | the control, 506 mutants — the first block of the campaign to close with **no `.cargo/mutants.toml` entry at all**, so nothing here rests on an equivalence argument. Eight tests do it. Three of the 57 were not a test gap at all: they sat on `diurnal_arc`'s `denominator == 0.0`, a branch no finite input can reach, and the answer the quotient gave instead was wrong wherever the threshold met the body's constant altitude — the last row of §8's defect table. The mutant count rose 504 → 506 because that fix replaced one comparison with two |
+| `reseal-srukf-origin` | `spacelab-estimation/src/{srukf,unscented}.rs` | 236 | **7** | **0** | the re-seal owed after #295 re-centred every sigma-cloud accumulation on its own centre point, 248 mutants. **Five of the seven were not survivors at all.** `.cargo/mutants.toml` anchors an exclusion by `file:line:col`, and the rewrite moved every excluded line in `srukf.rs` (214→206, 323→311, 364→351, 416→403, 451→438), which silently un-excludes the entry and re-opens a mutant that was argued years of tests ago — the failure mode the seal itself cannot see, since an un-anchored entry reads as a normal miss. Re-anchoring is now part of the ticket that touches a sealed file. A sixth was a real gap in the new `centered_residuals` — `resid[i][j] -= offset[j]` flipped to `+=`, which subtracts the mean offset in the wrong direction and is caught by `the_residuals_are_taken_about_the_transformed_mean_not_the_center` at 11.13 against 5.27. The seventh is argued in the toml. The fix also *retired* an entry: `srukf.rs:193:55`, the `(y − ŷ)` sign flip `reseal-robust-vector` could not separate from the original's own `ulp(x̂)` noise, no longer exists — the residual it mutated is now formed by subtraction of neighbours |
+| `reseal2-srukf-origin` | the same two files | 237 | **0** | **0** | the control, 242 mutants. The mutant count fell 248 → 242 because the three duplicated accumulation loops collapsed into one shared helper — six fewer operators to mutate for the same arithmetic, which is the mutation-count signature of a de-duplication rather than of a deleted test |
+| `seal-hinf` | `spacelab-estimation/src/hinf.rs` | 133 | **5** | **0** | the first seal of the H∞ minimax filter (#271), 140 mutants in 4 min. Three of the five are one blind spot with one cause: **the fixture had a symmetry in it**. `Q̄ = I`, a diagonal `P₀` and `H = [1, 0]` are all invariant under conjugation with `J = diag(1, −1)`, so the whole recursion commutes with `J` and the sign of every strictly-lower entry of a triangular inverse is unobservable — `M' = J M J`, `chol(JMJ) = J chol(M) J`, and the mutated `invert_lower` contributes the second `J` that cancels the first. Measured rather than argued: flipping that sign leaves the γ = 0 Kalman comparison passing at 1e-12. The third rode on `N = 2`, where `2 * N` and `2 + N` are the same number, so a pre-array sweep that stops one column early is invisible. A fourth was the `Display` impl, which nothing read. One test at `N = 3` with a correlated prior and `H = [1, 0.5, 0]` kills all three geometry mutants; one message test kills the fourth |
+| `reseal-hinf` | the same file | 137 | **0** | **0** | the control, 139 mutants. The one remaining survivor is argued in `.cargo/mutants.toml` and it is a bit-identity, not an approximation: negating the pre-array's whole left block negates the Givens rotation coefficients with it, so `c'a_i' + s'a_j' = (−c)(−a_i) + (−s)(−a_j)` is the same pair of products in the same order, and the sweep restores the unmutated column before it ever reaches the un-negated process-noise block. `P` and `S` come out identical to the last bit over six steps |
+| `seal-imm` | `spacelab-estimation/src/{imm,srukf}.rs` | 264 | **21** | **0** | the first seal of the interacting-multiple-model bank (#272), 290 mutants. Four are `gaussian_log_density`'s normalizing constant, and they say what an IMM's own tests cannot see: **a bank compares likelihoods at one epoch, so every factor that does not depend on the model cancels**. `(2π)^{D/2}\|S\|` could be anything and the mixing would still pick the right model. The check that sees it is the density itself — exponentiate and compare against `exp(−δ²/2)/√((2π)^D\|S Sᵀ\|)` formed from the determinant rather than from a sum of logarithms. Twelve more are the two moment-matched sums, which the end-to-end tests only ever see through a filtered estimate, where a wrong spread term is a different covariance rather than a wrong answer; a fixture of exact binary fractions with hand-computed matrices closes them. The rest are `most_likely`'s tie-break, `validate_distribution`'s tolerance and the `Display` impl — three accessors nothing asserted on. **Five of the 21 were not survivors at all**: the `fold` refactor moved every anchored exclusion in `srukf.rs` (206→237, 311→343, 351→398, 403→450, 438→485), the drift `reseal-srukf-origin` first measured, and `just mutants-anchors` reports a bare-basename anchor that stops matching as "same-name anchors elsewhere" rather than as broken |
+| `reseal-imm` | the same two files | 280 | **4** | **0** | 289 mutants, and the four left are one algebraic identity found by measurement rather than argued from the shape of the code. Flipping either `−` to `+` in `(x̂ⱼ[a] − x̄[a])(x̂ⱼ[b] − x̄[b])` adds `2x̄[a]·(Σ wⱼ x̂ⱼ[b] − x̄[b])`, and that bracket is zero *because* `x̄` is `Σ wⱼ x̂ⱼ` — the mutant is the same function, not an approximation to it, in the combination and in the mixing alike. Verified by hand-applying the mutation: the hand-computed matrix still matches to the last bit |
+| `reseal2-imm` | the same two files | 280 | **0** | **0** | the control, 285 mutants |
+| `seal-monte-carlo` | `spacelab-estimation/src/{sampling,ensemble,particle}.rs` | 224 | **66** | 6 | the first seal of the ensemble and particle filters and their sampler (#273), 309 mutants. **Forty-eight of the 66 are `particle.rs`, and the shape of them is that the ticket's three verification legs are all *end-to-end*.** They run the filters and check a convergence rate, a posterior's two modes, and a variance ordering — the right first tests, and blind to every accessor the answer does not pass through: `mean` could return `[0; N]` and `covariance` could return a constant matrix with the bimodal test still green, because it computes its own weighted mean from `particles()` and `weights()` and only asks the filter's own `mean` to be *between* the modes, which zero is. `predict` could do nothing at all — no leg calls it. Six more are the resampling trigger, which nothing ever tripped. The six timeouts are the two index lookups: freezing `comb`'s cursor or `multinomial`'s binary-search bound turns a bounded walk into one that never leaves its interval |
+| `reseal-monte-carlo` | the same three files | 246 | **16** | **0** | 275 mutants, after eleven tests, two dead guards deleted and two loops rewritten. The timeouts are gone the way #290's went: `multinomial`'s hand-rolled binary search is now `partition_point` and `comb`'s cursor advance is a bounded `take_while`, so a mutated step returns a wrong index instead of hanging — 8 lines shorter and 6 mutants more testable. Two of the survivors were not test gaps but *unreachable guards*, and both are now deleted rather than argued: `update`'s second weight-collapse check (the peak particle contributes `exp(0) = 1`, so the total is never below one) and `effective_sample_size`'s zero-divisor branch (the normalisation leaves at least one positive weight). The generator's own four survivors are closed by the published `xoshiro256++` stream, from `tools/gen_xoshiro_oracle.py` — the same fixture discipline `radiative_transfer.rs` uses for its `**` variant, and for the same reason: four moments cannot tell a damaged state update from a sound one |
+| `seal-monte-carlo-v3` | the same three files | 247 | **0** | **0** | the seal, 260 mutants. Two more tests: `residual` resampling with weights that sum to *more* than one, which is the only input that asks its `filled < M` bound anything, and `correlated_normal` against the factor applied to its own standard draws. The 15 exclusions in `.cargo/mutants.toml` are four proofs, not fifteen arguments: the centred-product identity (seven mutants — the same one `reseal-imm` and `sources.rs` already carry), the symmetry of a zero-mean draw under negation (five — `−ξ` and `ξ` have the same law, so no statistic separates them and the sign is pinned at the sampler instead), an idempotent maximum, and a back substitution reading a not-yet-written zero |
+| `seal-geometry` | `spacelab-geometry/src/{predicates,hull,delaunay,sphere}.rs` | 487 | **74** | 1 | the first seal of the geometry crate (#275), 566 mutants. **41 of the 74 are in `predicates.rs`, and they are one gap rather than 41**: the exact fallback is never taken on the coarse integer grids the tests use, so `in_circle_exact`, `orient3d_exact`, `scale`, `lift`, `minor3` and `minor3d` could each be replaced by a constant with the suite still green — §4.4. Of the rest, twelve are `locate`'s visibility walk, whose every failure mode is hidden by the exhaustive scan behind it; four are `between`'s strictness at an endpoint, unreachable from the public entry point because duplicates are removed before it; and the two length guards in `convex_hull_2d` sit one point away from a case the tests never used — a triangle |
+| `reseal-geometry` | the same four files | 515 | **51** | 1 | 571 mutants, after splitting `locate` into a walk and a scan that are tested separately, pinning the mesh's own edge-map and hint invariants at every insertion, and testing `between` and `collinear` directly. The delaunay survivors go 17 → 1 and the hull's 13 → 6; `predicates.rs` is untouched at 41, which is the point — the exact path needed a fixture, not another assertion on the same inputs |
+| `reseal2-geometry` | the same four files | 531 | **32** | 1 | 568 mutants, after three closed-form near-degenerate fixtures for the exact path. `delaunay.rs`, `hull.rs` and `sphere.rs` are at zero; **all 32 survivors are the error bound**, in every one of the three predicates, and they are the gap of §4.4 stated from the other side: the bound decides which path is taken, and no test's answer depended on the choice |
+| `reseal3-predicates` | `spacelab-geometry/src/predicates.rs` | 228 | **54** | 0 | 283 mutants, after the bound was rebuilt as a permanent (#296, §4.5) and the three sampled property tests were added. The survivor count *rose*, 32 → 54, because the correct estimate has six products where the wrong one had three; what it bought is that the wrong answer the old bound returned is gone and pinned by two tests that fail if it comes back |
+| `reseal4-predicates` | the same file | 231 | **51** | 0 | 283 mutants, after the samplers were widened to `2^±26` in overall scale with two of the points crowded to within `2⁻³⁰` in half the samples. That kills three of the four outer-`+` mutants, the only members of the class a test can reach. **Eight of the 51 are now proved equivalent** and excluded — the `FILTER` constant and the `FILTER *` product, which can only enlarge a bound that already exceeds the determinant, and the three `determinant > 0.0` comparisons, which are reached only when the determinant is nonzero. The remaining 43 perturb one term of the permanent inside the 12.8×–42.7× margin the tolerance deliberately carries; §4.5 says why no assertion on an answer can see them |
+| `seal-torque` | `spacelab-propagation/src/{torque,attitude}.rs` | 531 | **54** | 0 | the first seal of the disturbance torques and rigid-body attitude dynamics (#268), 589 mutants in 23 min. Forty-five of the 54 are `attitude.rs`, and 23 of those are `Inertia::from_tensor` alone — the constructor's Sylvester test, which every test reached only through tensors so comfortably positive definite that no minor's sign was ever in question. Seven more are `translate_inertia`'s parallel-axis term and six `rkmk4_step_torqued`'s stage weights, both of which the end-to-end tests see only through an integrated attitude, where a wrong tensor is a slightly different trajectory rather than a wrong answer. The nine in `torque.rs` are three whole-function replacements and the drag-torque moment arm |
+| `reseal-torque` | the same two files | 582 | **3** | 0 | 589 mutants, after nine tests that assert the tensor and the moment directly instead of through a propagation. The three left are one comparison and two products, and the two products say something the fixture hid: the cuboid's edges were `1.2 × 1.5 × 2.0` m, and `t·t == t + t` holds *exactly* at `t = 2` — so a squaring written as a doubling is invisible on a 2 m edge. `thin_plate_inertia` passes `z = 0`, the other exact fixed point, and cannot see the `z` term at all, which is why the cuboid has to |
+| `reseal2-torque` | the same two files | 584 | **0** | 0 | the seal, 588 mutants in 21 min, after the box edge moved to 3.0 m. The one remaining entry in `.cargo/mutants.toml` is `Inertia::from_tensor`'s `minor1 > 0` → `>= 0`, proved equivalent rather than argued: at `sym[0][0] == 0` the second minor is `−sym[0][1]²`, which is never positive, so the two comparisons reject exactly the same matrices. The other two minors are deliberately **not** excluded — they underflow to exactly `0.0` at `principal([1e-200, 1e-200, 1e300])` and `principal([1e-120; 3])`, where the two comparisons genuinely differ |
+| `seal-astrometry` | `spacelab-astrometry`, whole crate | 597 | **99** | 0 | the first seal of the plate-solving crate (#281), 720 mutants in 3 min. **Fifty-six of the 99 are `sources.rs` and 26 of those are `centroid`**, which is one gap rather than 26: the blobs the tests detect are square and centred, and a square blob with `cx == cy` cannot see a swapped row-major index decode, because the second moment is a trace and a trace is invariant under `x ↔ y`. Fifteen are `quads.rs`, where every fixture was a symmetric asterism whose canonical ordering came out the same under either branch of the two tie-breaks. Twenty-four are `wcs.rs`, mostly `sky_to_pixel`'s Newton iteration: an order-1 plate's first linear solve is exact, so the initial guess only decides which equally-converged point inside the tolerance is returned and the `&&` in the convergence test is never load-bearing |
+| `reseal-astrometry` | the same crate | 676 | **20** | 0 | 720 mutants, after 24 unit tests that assert each piece against a hand-worked answer rather than through a solve: quad codes computed by hand for four asterisms including two ties, a blob at rows 4–5 and columns 9–12 so that `cx = 10.5 ≠ cy = 4.5`, a three-valued "mottled" background whose median sits ~100 pixels inside a plateau so a source can be painted on without moving it, and an order-2 plate where the two axes converge at different rates — which is what makes the `&&` load-bearing at last, 9.3e-6 px against the `\|\|` mutant's 9.8e-2 px |
+| `reseal2-astrometry` | the same crate | 683 | **5** | 0 | 712 mutants. The count fell by eight because a dead disjunct was **removed** rather than tested: `best.0.is_nan() \|\| best.0 <= 0.0` can never take its first branch, since the accumulator starts at `−∞` and is only ever assigned through `separation > best.0`, which is false for a NaN. One comparison rejects both a non-finite field and four coincident stars |
+| `reseal3-astrometry` | `-p spacelab-astrometry` | 683 | **0** | 0 | the seal, 707 mutants in 3 min — run package-scoped rather than file-scoped on purpose, because that is the scope the CI gate uses and a gate entry is added on a measurement of the thing the gate actually runs. The five survivors of `reseal2` are proved equivalent in `.cargo/mutants.toml`, and four of them are one identity: `Σ v (x − cx) ≡ 0` by the definition of the weighted centroid `cx = Σvx/Σv`, so `Σ v (x + cx)(x − cx)` and `Σ v (x − cx)²` are the same number and no fixture can separate them — cargo-mutants mutates one operator at a time, so each of the four `−` in the second-moment line is individually the identity. The fifth is `for j in (i + 1)..4` → `(i * 1)..4`, which only adds the pair `(i, i)`, whose separation is exactly `0` and is rejected by the guard above |
+| `slr-seal` | `spacelab-slr`, whole crate | 1 134 | **75** | 0 | the first seal of the SLR crate, 1 218 mutants in 5 min, 9 unviable. The 75 are spread over five files — 28 `sinex.rs`, 20 `displacement.rs`, 10 `crd.rs`, 9 `range.rs`, 8 `troposphere.rs` — and the shape is the same in each: the *parsers* were tested through a well-formed file and the *models* through a reference value, so every branch that only fires on a malformed record or a degenerate geometry was unreached. A published test point exercises one path through a model; it says nothing about the eight guards around it |
+| `slr-seal6` | the same crate | 1 205 | **0** | 0 | the seal, 1 214 mutants, 9 unviable, over five rounds (75 → 42 → 16 → 7 → 3 → 0). The tests it took are the boundaries the reference values cannot reach: the two-digit SINEX year pivoting at 50, the tie on the latest span, the truncated record, the closed eccentricity interval, the still station whose legs must not split, the iteration cap, the wrap that only matters past zero |
+| `slr-loading` | the same crate, after `loading.rs` grew to the full `HARDISP` model | 2 068 | **90** | 0 | 2 168 mutants, 10 unviable — the block the 342-constituent admittance work owed. **74 of the 90 are `loading_tables.rs`**, which is machine-read from `ADMINT.F` by `derivations/hardisp_tables.py`: a mutated constant in a generated table can only be killed by re-transcribing the table, which is the generator's job and not a test's. That is why the file is on the standing `--exclude` list (`.cargo/mutants.toml`, `justfile`'s `MUTANTS_SKIP`, and the nightly gate's `slr-sensors-elements` lane), and excluding it is exactly the 589-mutant drop to the next block |
+| `slr-seal-confirm` | the same crate, `loading_tables.rs` excluded | 1 567 | **0** | 0 | the re-seal, 1 577 mutants, 10 unviable. The last survivor to fall was `loading.rs:431:42`, `<` to `<=` in `spline_evaluate` — the knot the admittance spline is evaluated *at* rather than between — and it was closed by a test rather than ledgered: the ledger has no `loading.rs` entry |
+| `seal-lightcurve` | `spacelab-propagation/src/lightcurve.rs` | 120 | **20** | 0 | the first seal of the photometric forward model (#269), 143 mutants in 7 min. Three clusters, each one absence rather than a spread of gaps. Eight are `ViewGeometry`'s four accessors, which the suite reads only *through* `radiant_intensity` — the fields are used internally, so every getter could have returned a constant. Ten are the double-sided flip in `radiant_intensity`, and the reason is flat: **not one fixture in the file declares a double-sided facet**, so the whole branch was unreachable from the tests. The last two are `to_sidereal`'s domain guard, where neither of the two ways out of the domain was ever offered |
+| `reseal-lightcurve` | the same file | 139 | **0** | 0 | the seal, 142 mutants in 7 min. Three tests. The flip needs two geometries and a tilted normal, and both are load-bearing: sunlit-in-front says the flip must not happen and back-lit says it must, so no single view can pin the condition; and negating a vector two of whose components are `±0.0` is indistinguishable from leaving it alone, so an axis-aligned facet cannot see two thirds of the negation at all. The normal `(2,3,6)/7` separates the three components at `cos θₒ = 41/49`, `31/49` and `−23/49`. One entry is excluded with a proof: `cos_in < 0.0` → `<= 0.0` differs only at `cos_in == ±0.0`, and there both forms reach `continue` through `cos_in <= 0.0` without touching the accumulator — bit-identical, not close |
+| `seal-lunar` | `spacelab-propagation/src/lunar.rs`, `spacelab-ephemeris/src/lib.rs` | 67 | **7** | 0 | the first seal of the lunar field and the selenocentric origin shift (#262), 84 mutants. The seven are one sentence: **a round trip cannot see the sign of the thing it round-trips.** Five of them sit on `Ephemeris::recenter`'s two shift lines and on `me_to_pa`'s helpers, and every assertion that touched them was invariant under the mutation — the recentre-then-recentre-back test cancels the shift whichever way it is applied, and `velocity_shift` is a magnitude. The other two are `parse_shadr`'s header-length guard, which no fixture ever ran short |
+| `reseal-lunar` | the same two files | 66 | **0** | 0 | the control, 75 mutants. Closed with five tests and one real validation tightening, and **no `.cargo/mutants.toml` entry** — nothing here rests on an equivalence argument. The tightening is `parse_shadr`: SHADR defines eight header fields and the guard admitted six, so a header whose reference longitude and latitude are not the origin was read as if it were, which is the same "different origin" statement the degree-1 check already existed to catch. The control block earned its ten minutes twice over — a partial run of it, killed by an unplanned reboot at 54 of 75, is what found the last survivor: the absolute check written to close `seal-lunar` compared `position` only, so the **velocity** sign was still unpinned. Hand-applying that mutant puts the recentred Sun 2.087 km/s out, twice the Moon's own speed, and the test now says so |
+| `seal-image-quality` | `spacelab-earthvision/src/image_quality.rs` | 640 | **141** | 0 | the first seal of the MTF / RER / FWHM / SNR / GSD metrics (#274), 784 mutants, 3 unviable. The tests #274 shipped compare against published and closed-form answers end to end — an MTF at four spatial frequencies, an SNR on a synthetic patch, a GSD — and **an end-to-end number is a projection**: 44 survivors are `snr_homogeneous_area`, 24 `analyse_slanted_edge`, 14 `fit_edge_line`, 13 the `SlantedEdge` accessors nothing read except through the ESF, 12 `snr_homogeneous_blocks` and 12 `resample`. The largest single cause is a fixture sitting on a fixed point of the mutation, the same shape as `seal-observability`'s 1″/px pixel scale and `reseal-torque`'s 2 m edge: `resample`'s image was a `0..23` ramp, and **bilinear interpolation at a footprint centre reproduces the mean of a linear field exactly**, so no assertion on a ramp can tell area-averaging from bilinear |
+| `reseal-image-quality` | the same file | 722 | **59** | 0 | 784 mutants, 3 unviable, after the first round. What the round did not reach is more interesting than what it did: 16 remain in `analyse_slanted_edge` and 15 in `snr_homogeneous_area`, both because the tests still ran the metric rather than the term — the reach measured from the border the edge leans towards, the plateau the normalisation is anchored on, the pixel beyond the reach that must be dropped rather than folded into the end bin, and the ring order of the neighbourhood. Seven are `resample`, still on the ramp |
+| `reseal2-image-quality` | the same file | 759 | **0** | 0 | the seal, 762 mutants — 784 less the 22 excluded below — 3 unviable. Eleven tests, two fixtures rebuilt to be **non-linear on each axis** (`rows[y] + columns[x]` with a step on both), and 22 `.cargo/mutants.toml` entries carrying six proofs rather than 22 arguments. Two of the six are worth naming. **The `crossing` scan invariant**: the downward scan reaches index `i` only if every higher index failed, failure at `j` with `v[j−1] ≤ level` forces `v[j] ≤ level`, and induction up to the peak — which is `> level` by construction — contradicts, so `>` and `>=` agree at every index the scan can test. **The two-pass variance**: `Σ(v − μ)²/n` and `Σ(v + μ)(v − μ)/n` are the same number in ℝ and separate in `f64` only when `ulp(2·pedestal)` exceeds the fractional parts — which needs a pedestal of `1e15`, not the `1e10` the first attempt used, where every product is still exactly representable and the shortcut formula passes. A smaller pedestal is not a weaker version of that test but no test at all. Measurement also *demoted* two assumed equivalences back to findings: `342:22` and `363:25` are bit-identical on the 64×48 fixture and move on an 8×8 patch |
+| `seal-path-reflectance` | `spacelab-earthvision/src/{radiative_transfer,phase,atmospheric_correction}.rs` | 624 | **14** | 26 | the first seal of the directional path reflectance (#297), 667 mutants, 26 timeouts, 3 unviable. **Thirteen of the fourteen are `scatter_direction`, and all thirteen are the same absence: the function has no test.** `phase.rs` and `atmospheric_correction.rs` come out clean; the three-dimensional scattering does not, because the slab never calls it and the path estimator reads it only through a Monte Carlo average over a **uniform** azimuth — which is exactly the average that cannot see a transverse component. The test that looks like it covers this, `scattering_rotates_the_direction_like_the_rotation_matrix_it_stands_for`, exercises `scatter_mu`, the one-dimensional form. Ten of the thirteen are the pole branch, which no photon reaches at all: a walk arrives exactly vertical with probability zero. The 26 timeouts are the `Rng`, `scatter_mu` and phase-sampler mutants that stop a photon ever leaving the layer — `MAX_SCATTERS` bounds the walk at 100 000 steps and the hemispheric-integral test runs 4.9 M photons, so the product outruns the 180 s cap. They are detections, and the same 26 appear in the control |
+| `reseal-path-reflectance` | the same three files | 636 | **0** | 26 | the seal, 665 mutants, the same 26 timeouts, 3 unviable. Two tests and two proofs. The first test builds the rotation a second way — Gram–Schmidt for the tilt, Rodrigues for the azimuth — sharing no term with the closed form. The second reaches the pole branch, and **refuted the comment that justified it**: the branch was documented as "the same rotation in the limit", and it is not one, because a degenerate frame has no limit. Approaching `−ẑ` along `+x` sends the first component to `−sin θ cos φ` and along `+y` to `−sin θ sin φ`. What the branch actually supplies is a *convention*, and the test asserts what survives the choice — unit norm, polar angle `θ` from `d`, and `φ` turning the transverse part through `cos φ`. Of the two exclusions, one is a threshold with nothing on the other side of it: `√(1 − d_z²)` in `f64` is either exactly `0` or at least `1.49e-8`, so `< 1e-9` and `<= 1e-9` select the same directions at every `d`. The other is the `y` term of the scoring dot product, which replaces the view azimuth by its mirror image — and the layer is symmetric under `y → −y`, so it is the same expectation. Measured at `τ = 2`, `ω = 1`, `g = 0.7` over five seeds of 400 000 photons: 0.11 and 0.22 of one seed-to-seed standard deviation, less than reseeding the original |
+| `gate-estimation` | `-p spacelab-estimation` | 2 980 | **3** | 0 | the package-scoped gate run owed before the crate could join the CI list — 3 054 mutants, 71 unviable. Two were real gaps and one was not: `gauss_newton.rs`'s `damping *= …` frozen to `+=`, which a solve started *at* the answer cannot see because it converges on the first step either way — the test that kills it starts there deliberately and asserts the reported iteration count; and `rts.rs:210`'s `+=` → `-=` in the pre-array's right block, which is **bit-identical**, not merely another valid square root: negating that block negates `s` in every Givens rotation, so `c·col_i + (−s)·(−col_j)` is the same two products in the same order and the kept left block comes back unchanged. Verified rather than argued — four chained backward steps on a 3-state chain, all twelve words equal |
+| `reseal-estimation` | `-p spacelab-estimation` | 2 768 | **0** | **0** | the control, 2 837 mutants, 69 unviable. This is the measurement that admits the crate to the nightly CI gate; it is a control block run after `gate-estimation`'s survivors were closed, not the block that found them |
+| `seal-laplace` | `spacelab-astro/src/iod.rs` | 718 | **46** | **0** | the seal owed after #285 added `laplace`, 782 mutants — and **the number is two findings, not one**. Twenty of the 46 were not survivors at all: inserting `laplace` shifted eighteen `.cargo/mutants.toml` anchors by +5 and +140 lines and re-opened proofs argued under #284 and #292, the drift `reseal-srukf-origin` and `seal-imm` had each already met once. It reached forty-six this time because both `spacelab-astro` and `spacelab-estimation` have an `iod.rs`, and a bare-basename anchor that matches nothing is reported by the per-file check as *belonging to the other file* rather than as broken — so the pre-seal check printed a clean line. The other 26 are `laplace`'s own, and they are one gap: **every test #285 shipped samples at `[−a/2, 0, a/2]`**, and Laplace's Lagrange weights are built entirely from differences against `t₂`. At `t₂ = 0` the subtraction disappears — `t₁ − t₂` *is* `t₁`, so `+` and `−` give the same number — and even spacing collapses another pair, which leaves nine weight operators unobservable before the determinants are reached at all |
+| `seal-laplace2` | the same file | 726 | **17** | **0** | 761 mutants, 18 unviable — the ledger repaired and the nine weight operators closed by calling `laplace` from the file's own uneven-epoch test at `[100, 160, 340]` s. All 17 that remain are in `laplace`, and they are the *next* absence: **a fixed observer zeroes half of the construction.** `Ṙ` and `R̈` are built by the same Lagrange weights as `L̇` and `L̈`, so one observer vector handed over three times makes both exactly zero, and with them `D₁ = L·(L̇ × R̈)` and `D₃`. Then `p = −2D₁/D` is `−0.0` and every operator in `c₆ = −(p² + 2(L·R)p + R²)` is arithmetic on zero: `p * p` and `p + p` are the same number, and `2(L·R)p`, `(2 + L·R)p` and `(2/(L·R))p` are all zero |
+| `seal-laplace3` | the same file | 733 | **10** | **0** | 761 mutants, 18 unviable — the control after `laplace_is_given_an_observer_that_moves`, which turns the station with the Earth at 7.292 115e-5 rad/s, 116 km over the 240 s arc. Six of the seven `p`/`c₆` mutants die there. The seventh, `p * p → p + p`, does not: from the ground `p` is −2.6e4 m against an `\|R\|` of 6.2e6, so the `p²` term is 1.7e-5 of `R²` and moves `c₆` by less than the 1 % the test asserts to |
+| `reseal-laplace` | the same file | 738 | **0** | **0** | the control, 756 mutants, 18 unviable. Three more tests and five exclusions. Each test supplies a geometry the file did not have. **An observer in orbit**: `R̈` is 8.7 m/s² against a station's 0.033, so `p` comes out 9.3e7 m — fourteen times `\|R\|` — and `p²` at 8.6e15 against an `R²` of 4.6e13 *is* `c₆`. Laplace pays for it, 189 km against the 49 km the same arc gives from the ground, because `q/r³` then has to cancel that `p` down to a range of a few hundred kilometres; that is the measurement, and it is why a space-based angles-only fix wants Gooding and a range guess. **An observer in the target's orbit plane**, which is Laplace's own degeneracy: every line of sight lies in the plane, so `D = 2L·(L̇ × L̈)` is zero. A centimetre off it is a sine of 1.4e-9 that the method still solves to 41.8 km — while the *un*-normalised triple product reads 2.1e-17 there and a sum `\|L̇\| + \|L̈\|` in place of the product reads 8.6e-15, both under the 1e-12 threshold, so either divisor rejects a triple that is not degenerate at all. **A target below the observer**, the only case where the scan's lower bracket end being a *fraction* of `\|R\|` rather than `\|R\|` itself is observable — everything else in the file looks up. The five exclusions are two exact-equality ties, the sign test `previous * value <= 0` against `previous / value <= 0` — the same test off an exactly-zero sample — and both *widenings* of the scan bracket, which are argued from `c₀ = −q² ≤ 0` and `c₆ ≤ 0` and then verified rather than trusted: the returned state dumped at 17 significant digits over all five geometries, bit-identical in every component |
+| `seal-observed` | `spacelab-estimation/src/observed.rs` | 47 | **8** | 0 | the first seal of the epoch layer (Ф5.A), 65 mutants, 10 unviable. All eight survivors are **one** defect in the tests rather than eight: every unit test put the station at the origin, which makes `r_sat − r_station` equal to `r_sat`, so the three sign mutants in that subtraction could not fail — and with axis-aligned motion two of the three terms of `ρ̂·v` are identically zero, so the operators joining them were unmeasured whatever the tolerance. The remaining three are `line_of_sight()` replaced by a constant, which nothing read |
+| `seal-observed2` | `spacelab-estimation/src/observed.rs` | 55 | **0** | **0** | the re-seal, after the cause rather than the mutants was fixed: the station moved off the origin but stayed *on* the line of motion, so the closed form `τ = (x₀ − p + v t_r)/(c + v)` is still exact; a fully three-dimensional station and trajectory were added for the geometry that has no closed form, with a guard that no component of `ρ̂` falls below 0.01 so the test cannot silently degenerate back into the axis-aligned case; and both accessors are asserted against the geometry recomputed by hand from the emission epoch, including that `range_rate()` is the satellite's *own* radial speed and differs from the relative one by more than a metre per second at the fixture's geometry. No `.cargo/mutants.toml` entry: there was nothing left to argue was equivalent |
+| `seal-eop-source` | `spacelab/src/lib.rs` | 17 | **0** | 0 | the first block over the umbrella crate's composition layer (Ф5.E), 22 mutants, 5 unviable, 0 timeouts — clean on the first block, which is what a file of 150 lines with a test per branch buys. Every one of the four `dut1_sigma_seconds` return replacements dies, and so do both of `tabulated`'s, because `no_eop_is_the_zeroed_transform_and_says_so` asserts `None` on the `Absent` arm while `delta_ut1_carries_the_sign_and_size_the_iers_bulletin_gives_it` asserts the tabulated σ against the fixture's own digits — a sum type is only worth its cost if both arms are read, and these are the tests that read them. The seven arithmetic mutants in `earth_orientation_at` are the ΔAT and ΔUT1 compositions, killed by the same two tests holding TAI→TT and `naive + ΔUT1` to the nanosecond. The 5 unviable are all `Default::default()` over types that have none — `EarthOrientation`, `EarthOrientationError`, `Transform` and `EopQuality` — and `EopQuality` having no `Default` is deliberate: there is no default quality of a measurement |
+| `seal-sp3-frame` | `spacelab-gnss/src/sp3.rs` | 205 | **8** | 6 | the block over the module after Ф6.G taught it to read line 1's coordinate-system field, 219 mutants, 0 timeouts. **Seven of the eight are match arms of `parse_reference_frame`, and they are one gap rather than seven**: the fixture-driven test asks only for the four labels this repository happens to hold — `IGS20`, `IGc20`, `SLR20`, `PZ90` — so `ITR14`, `ITRF2008`, `IGb14`, `WGS84` and the blank-filler arm could each be deleted with nothing moving, and a producer writing any of them would then have read as `Unrecognised`. A function that *is* a lookup table has to be tested as one. The eighth is not a test gap at all: `line.len() > 2` against `>=` in `parse`, where the guard rejects nothing `line.get(46..51)` does not already reject — dead code a mutation block cannot tell from live code, so it was deleted rather than ledgered |
+| `reseal-sp3-frame` | the same file | 209 | **0** | **0** | the control, 215 mutants, 0 timeouts. The seven table arms fell to a test that walks the table itself: every label the parser recognises is asserted to reduce to its own ITRF solution, so a deleted arm now fails on the label it deleted rather than waiting for a producer to emit it. Four fewer mutants than the first block because the dead `line.len() > 2` guard went with it -- the count dropping is the evidence the guard was code, and its going uncaught is the evidence it was not doing anything |
+| `seal-light-time` | `spacelab-estimation/src/light_time.rs` | 36 | **0** | **0** | the first seal of the down-leg solver (#308), 37 mutants, 1 unviable. Clean on the first block, which is what eight tests written against the *mechanism* rather than the output buy: the light-time equation re-substituted at the returned epoch to a residual under 1e-18 s, the emitter checked to have been taken `v τ` behind reception rather than merely earlier, the `<` against `<=` convergence boundary, a gap sitting behind the reception epoch, and an exhausted budget asserted never to return its own starting guess. The single unviable is `Some(Default::default())`, which wants `Transit: Default` and nothing implements it |
+| `seal-screening` | `spacelab-estimation/src/screening.rs` | 77 | **5** | **1** | the first seal of the closest-approach search (#315), 84 mutants, 1 unviable. Every one of the five survivors sits in `refine`, and all five are the same gap: the tests asserted *where* the search converged and never *how it got there*, so the bisection's own arithmetic was unobserved — the interval test `>` against `>=`, the width `b - a` against `b + a` and `b / a`, the `\|\|` joining the two degenerate-midpoint guards, and the branch test `< 0.0` against `<= 0.0`. A method whose whole claim is a cost model needs a test that counts. The timeout is worse than a survivor and is the block's real finding: flipping `<=` to `>` in the step-resolution guard turns the scan into a loop that never terminates, so the test written to prove termination is the test that hangs — and a hang is a timeout, which reads as *no verdict* rather than as a failure |
+| `reseal-screening` | the same file | 83 | **1** | **0** | the first control, 85 mutants, 1 unviable. The five `refine` survivors are dead: a cost-model test that pins `tca` bit-for-bit at 2.5 and asserts exactly six evaluations for a 32 s bracket at 1 s tolerance, plus one that drives the tolerance below the type's own resolution and holds the count under 64. The timeout is gone by construction rather than by a threshold — the comparison-dependent loop was replaced by an indexed scan and a counted `refine`, and the guard it needed became `clamp`. The one survivor is new: `> MAX_SAMPLES` against `>=`, at a ceiling of 1e8 whose accepting side costs 1e8 evaluations to stand on. It survived on price, not on argument |
+| `reseal2-screening` | the same file | 84 | **0** | **0** | the second control, 85 mutants, 1 unviable, clean. `MAX_SAMPLES` was lowered 1e8 → 1e6 — eleven days at 1 s, a year at 30 s, still past anything a screening run asks for — and made `pub`, purely so that a test can request exactly the ceiling and exactly one more and observe the two answers differ. **A limit no test can reach is a limit nothing has checked the sense of.** The single unviable is again `Default::default()`, wanting `CloseApproach: Default` |
+| `seal-ndm` | `spacelab-ndm/src/{kvn,opm,oem,cdm}.rs` | 213 | **42** | **0** | the first seal of the NDM readers and writers (#309), 267 mutants, 12 unviable. The survivors are one shape repeated: the tests were written against the annex figures, and an annex figure is a *sample*, not a coverage plan. Every keyword no figure happens to state — `MESSAGE_ID`, `MESSAGE_FOR`, `REF_FRAME_EPOCH`, `USEABLE_START_TIME` / `USEABLE_STOP_TIME`, `CD_AREA_OVER_MASS` / `CR_AREA_OVER_MASS` — could be deleted from the reader without a single failure, because reading a keyword nothing asserts is indistinguishable from ignoring it. The eight `* M_PER_KM → + / /` in `CdmObject` are the same gap in numbers: the fixture's `X` was asserted and `Y`, `Z` and the three rates were not. Two survivors were not test gaps at all — `day_of_year`'s `1 ≤ ordinal ≤ length` check is wholly subsumed by the trailing `rolled_year == year` roll test, so three of its mutants were unkillable by construction and the fix was to delete the second statement of the rule rather than to argue equivalence for it |
+| `reseal-ndm` | the same four files | 248 | **0** | **0** | the control, 260 mutants, 12 unviable, clean. Seven fewer mutants than the seal because the redundant `day_of_year` guard is gone and `symmetric_from_lower` lost its index arithmetic to iterators. Two closures are worth naming because they are one witness each rather than one test each. **A conjunction is only as tested as its shortest witness**: `Spacecraft::is_empty` and the OPM Keplerian block are five- and six-term `&&` chains, and with every term true no mutation of an operator inside them can change the answer — mutating the k-th `&&` to `\|\|` yields `(c₁..cₖ) \|\| (cₖ₊₁..cₙ)`, which flips for *every* k as soon as exactly one term is false. One OPM stating only `SEMI_MAJOR_AXIS` therefore kills all five Keplerian mutants at once, and one `Spacecraft` with only `mass` set kills all four plus both whole-function replacements. The twelve unviable are all `Ok(Default::default())` on a `Result`-returning reader, wanting `Cdm`, `Oem`, `Opm`, `UtcDateTime` and friends to implement `Default`, which none of them do and none of them should — an NDM message with no `ORIGINATOR` is not a message |
+| `seal-lifetime` | `spacelab-propagation/src/{lifetime,driver}.rs` | 265 | **16** | 18 | the first seal of the decay and re-entry module (#310), run together with the re-seal `driver.rs` owed after its non-finite error norm was fixed — 314 mutants in 34 min, 15 unviable. The sixteen survivors are one sentence: **every test in the module is a decay, and a decay is an integral.** Nine of them sit on arithmetic the answer only reaches after 10⁵ integrator steps have averaged over it — `a(1 − e) − R`'s two operators, the `dλ/dt += n` that is the whole two-body part of the rate, the first step handed to the driver, the bracket width in `refine`, and the two `> reentry_altitude` comparisons, which decide the answer only on an exact tie no round threshold can produce. A re-entry epoch bracketed to 60 s cannot resolve any of that. Five more are the ensemble's bookkeeping, and they are an absence rather than a weakness: `from_members` was only ever reached through `ensemble_lifetime`, which cannot produce an `Unresolved` member, so `unresolved += 1` and `unresolved()` were never once asked for a non-zero. The last is `zonal: model.zonal` in a struct expression whose `..*model` already supplies it — unkillable by construction, and deleted rather than argued. The 18 timeouts are the catalogued frozen-loop family and 16 of them are `driver::integrate`'s own step advance; what is new is that they are timeouts *here*: the identical mutant `driver.rs:436:13 replace < with <=` is recorded **caught** in `prop-driver2` and `prop-rescan`, blocks with no timeouts at all, and adding `lifetime.rs`'s 37 s of decay propagations to the crate suite is the only thing that changed |
+| `reseal-lifetime` | the same two files | 277 | **0** | 18 | the control, 310 mutants, 15 unviable, clean — and the two numbers reconcile exactly, which is the point of running it. Caught rises by twelve, one per mutant the five new tests were written for. The total falls by four: three are code that was deleted rather than tested, because a mutation of a value the next line overwrites cannot be caught by anything (`(to − from).min(60)` duplicates the clamp `integrate` already applies to `h₀`, and the redundant `zonal` field), and the fourth is the single `.cargo/mutants.toml` entry. That entry is `refine`'s `mid <= low \|\| mid >= high` guard: with `&&` the condition reads `high <= mid <= low`, unreachable while `low < high`, so the guard never fires and the counted loop runs to `MAX_BISECTIONS` — on a fixed point, because at exhaustion `advance` is called with the same anchor, start and end as the call that set the endpoint, so both endpoints are reassigned the values they already hold. Identical answer, 2 100 propagations instead of ~50. Two of the five tests are worth naming: a tolerance no finer than the bracket must return the chunk end **unbisected**, and an exact tie at the threshold is reachable only by asking the propagation what altitude it arrives at and making *that* the threshold — same inputs, same bits, so the comparison stands on the boundary rather than approaching it. The 18 timeouts are element for element the seal's |
+| `triage-lifetime` | the same two files, `MUTANTS_TIMEOUT=540` | 282 | **0** | 13 | the control re-run at three times the limit, which is what this ledger owes a timeout rather than a place in the catalogue: a wall clock cannot say whether a mutant was caught or merely slow, and the only way to find out is to stop being in a hurry. **Five of the eighteen are kills.** Two are `lifetime`'s own chunk-ceiling refusal (`requested > MAX_CHUNKS` as `==` and as `<`), which the test standing on both sides of the ceiling does catch — it just has to scan a million chunks first. Three more are `integrate`'s step bookkeeping at 460:15, 468:15 and 470:14. The thirteen that remain are all `driver::integrate` and all the frozen-or-reversed step advance already catalogued in `.cargo/mutants.toml`; they are detections whose evidence is the clock, and 50 min against the control's 36 is what the extra patience cost |
+| `seal-observables` | `spacelab-estimation/src/{multistatic,ephemeris,converter,modifier}.rs`, `spacelab-sgp4/src/tle.rs` | 304 | **83** | **0** | the first seal of the five modules #311, #313 and #314 added to two crates the CI mutation gate already guards — 467 mutants, 80 unviable. The survivors split 29 / 28 / 24 / 2 / **0**, and the zero is the informative entry: `ephemeris.rs` is a thin adapter over machinery sealed in its own crate, so its tests inherited that crate's assertions. The other four each name a different way for a green suite to be blind. **Seventeen of `multistatic`'s twenty-nine are one test.** `the_leg_residuals_expose_epochs_that_do_not_match_the_geometry` built its expected epochs *through* `leg_time`, the function under test, so the residual it asserted was zero under any mutation of `leg_time` whatsoever — a test cannot be a measurement and its own oracle at once. `converter`'s twenty-four are the same shape one level up: the module was reached only through fits that converge to the same parameters whatever the weights say, and `residual_statistics` was never read against a number anyone had computed, so both the weighting and the reporting were exercised without being observed. `modifier`'s two are the smallest instance of it — the existing test *did* assert `EstimatedBias::index()`, at index 1, which is the one value the `-> 1` mutant returns. The twenty-eight in `tle.rs` produced the block's one real defect, below |
+| `reseal-observables` | the same five files | 387 | **0** | **0** | the control, 467 mutants, 80 unviable, clean, and the arithmetic closes on both axes. Caught rises by exactly 83, one per survivor: the oracle for `multistatic` is `derivations/multistatic_observables.mac`, whose leg flight times and residuals are asserted at **0 ulp**; `converter`'s sigmas were chosen so that `1/σ²`, `σ²`, `1/(σ+σ)` and `1/(σ/σ)` are four different numbers and the residual differences so that the reported RMS is exactly 10, 6 and 13; `modifier`'s bias now loops all three indices instead of standing on the mutant's own answer. The total is unchanged at 467 because one mutant left and one arrived — `tle.rs:711:25 replace < with <=` is now excluded (`decimal_point_assumed` returns at `value == 0.0` before the sign test, and `-0.0 == 0.0`, so the two predicates differ only on an input that cannot reach the line), and the guard fixed below added a disjunct that `mean_motion` did not have. **The defect: `mean_motion` accepted `-0.0`.** Its range check was `!(0.0..100.0).contains(&value)`, and IEEE-754 says `-0.0 >= 0.0`, so negative zero passed it and printed as `-0.00000000` — eleven characters, therefore accepted by `place`, therefore a minus sign in columns 53–63 of line 2, where the TLE format defines only digits and a point. The line went out with a consistent checksum. `value.is_sign_negative()` in the guard, and a test that names why it is not redundant with the range |
+| `seal-rinex4` | `spacelab-gnss/src/rinex4.rs` | 109 | **81** | 0 | the first block over the RINEX 4 reader, 198 mutants. The 81 are not 81 gaps — they are **three**, and chasing the third found a production bug. Twenty-three are `decode_glonass_cdma`, every mutant in a function **no test ever calls**, because no published product carries an `L1OC` or `L3OC` record; thirteen more are the `L1OC`/`L3OC`/`LXOC`/`NEQN` arms of the two `from_code` functions and of `decode_ion`, unreachable for the same reason. Reading Tables A16–A18 and A38–A40 to write those tests is what turned up **§5.7**: `decode_ion`'s catch-all decoded NavIC's L1 Klobuchar with the legacy line layout, returning `IODK` as `α₀`. Twenty-six are `decode_sbas` and `decode_cnav` arithmetic that no test asserted a value for, and thirteen are the record walk's own index arithmetic, unreachable because every fixture was well-formed |
+| `reseal-rinex4` | the same file, after the fixes and eleven new tests | 404 | **1** | 0 | the control, 413 mutants — more than double the seal's 198 because the CNAV propagator (§5.9) landed between the two blocks, and a closed-form orbit is arithmetic all the way down. The 81 close as: 36 by reading the specification's own example records for the four shapes no satellite broadcasts; 26 by asserting **components rather than norms** (a 25 517 km radius is still 25 517 km with one axis divided by a thousand instead of multiplied, so the physical check that catches a wrong unit does not catch a wrong axis); 4 by moving the epoch stamp off a whole minute, since three of the four terms of `dow·86400 + h·3600 + m·60 + s` are zero in every example the specification prints; and the walk's thirteen **by construction**. One survivor, and it is the `Ȧ(1 − e·cos Eₖ)` in the CNAV radius rate against `Ȧ/(1 − e·cos Eₖ)` — 4e-5 m/s, which no position assertion can see |
+| — | the record walk, rewritten rather than tested | — | — | — | `idx += 1` → `idx *= 1` at the not-a-record-header branch was a plain *survivor* in `seal-rinex4`, because no fixture put an unframeable line between two records. The test written to close it made the branch reachable and turned the survivor into a **hang**, which is the `rinex_obs.rs` finding of `reseal-gnss-obs` reproduced exactly: turning a mutant nothing can see into a mutant only the clock can see is not progress. The walk now consumes `lines.iter().enumerate().skip(end + 1)` — the header off `records.next()`, the body off `records.by_ref().take(len)` — so there is no counter left to freeze, and with it went the `idx + 1 + len` resynchronisation argument that would otherwise have needed a `.cargo/mutants.toml` entry |
+| `seal-rinex4-sp3` | `spacelab-gnss/src/{rinex4,sp3}.rs` | 616 | 3 | 0 | the closing block over both files, 634 mutants, 15 unviable. `rinex4.rs` is **clean**: the CNAV radius rate's `Ȧ(1 − e·cos Eₖ)` against `Ȧ/(1 − e·cos Eₖ)` -- 4e-5 m/s, which no position assertion can reach -- is caught by the five-point central difference of the shipped position function, `Δn̈₀` zeroed so that `Ėₖ = n/(1 − e·cos Eₖ)` is exact and the comparison is between two exact statements rather than against the specification's dropped half-term. **The three survivors are `sp3::set_sample`'s unreachable back-fill guard, which the ledger has argued out since the crate seal, and they were generated only because the snapshot carried the anchor one line stale** -- `Version` was added to `sp3.rs` between the ledger's last reconciliation and this block's launch, and the entry moved from line 294 to 298. That is the `seal-bridge-319` finding again, and it is why `just mutants` validates anchors per file before it runs: this block was launched with two files, the anchors were re-validated for one of them mid-flight, and the snapshot kept the old copy. The entry is corrected and `just mutants-anchors crates/spacelab-gnss/src/sp3.rs` reports 3 entries / 3 excluded / 0 broken against the tree that ships. **The confirming `sp3.rs`-only block was run on 2026-09-05 on a quiet machine (load 1.0), after the two other projects' campaigns that had held it at load 103 finished**: `seal-sp3-version`, 218 mutants, **211 caught, 7 unviable, 0 missed** — the three "missed" above were the stale anchor and nothing else, as argued. A per-mutant timeout measured under load 103 on eight cores is not a verdict, which is why the block waited — the same reason §*Do not measure a process you are running inside* applies to the profiler |
+| `seal-gnss-obs` | `spacelab-gnss/src/{rinex_obs,combinations,cycle_slip,lambda}.rs` | 557 | **72** | 19 | the first seal of the four modules #312 added to `spacelab-gnss` — 666 mutants, 18 unviable. The crate sits on the *nightly* lane rather than the primary gate, and its last recorded verdict, `seal-gnss-full`, predates every one of these files. The survivors split 42 / 17 / 8 / 5, and each file names a different way to be blind. **Twenty-two of `cycle_slip`'s forty-two are `solve`, and they are one geometry rather than twenty-two gaps.** The Gaussian elimination is reached only through `predict`, which builds its normal matrix as `Σₖ powers[i]·powers[j]` — symmetric by construction, so `a[i·n+j]` and `a[j·n+i]` are the same number and every transposed index is unobservable — and a scaled Vandermonde normal matrix is diagonally dominant, so the partial pivot never selects a row other than `k` and the entire swap branch is dead on every input the module can produce. A solver tested only through its caller is tested only on the caller's matrices. Eight more are the two detectors' `threshold()` and `reset()`, accessors nothing ever read, so `-> 0.0`, `-> 1.0`, `-> -1.0` and `reset with ()` are each indistinguishable from the truth. `rinex_obs`'s seventeen are mostly `epoch_seconds`, whose calendar bounds — `1..=12`, `1..=31`, `hour > 23`, `minute > 59`, `0.0..61.0` — are never crossed because every fixture is a valid date. `combinations`' five are all `carrier_frequency` match arms: a band no test asks for is an arm that can be deleted with nothing moving, and the receiver that tracked it would lose the observable rather than mis-scale it. **Eighteen of the nineteen timeouts are `Reduction::search` or what it calls**, catalogued below and handed to #321 |
+| `reseal-gnss-obs` | the same four files | 611 | **0** | 18 | the control, 647 mutants, 18 unviable, clean, and the arithmetic closes. The 72 resolve as 64 kills, 5 `.cargo/mutants.toml` entries, 2 mutants of a guard deleted rather than tested, and 1 the production fix below dissolved. The total falls by exactly 19 = 5 + 14: five are the ledger entries, fourteen are index arithmetic in `RinexObs::parse` that no longer exists — which is also why caught rises by 54 rather than by 64, `parse` going from 26 mutants to 12. **The deleted guard was a ceiling above every reachable value**: `count > MAX_SATELLITES_PER_EPOCH` refused a satellite count over 999, and the count is read from the format's `I3` field, three columns, so it cannot reach 1 000 however corrupt the file is; what actually bounds the read is the lines that follow, which `TruncatedEpoch` already reports. **The production fix: `RinexObs::parse` walked its lines on a hand-written index, and `index += 1` → `index *= 1` froze it.** That mutant was a plain survivor in the seal because no fixture put a non-epoch line after the header; the test written to close it made the branch reachable and turned the survivor into a hang, which is not progress. The walk is now driven by `records.next()` over `lines.iter().enumerate().skip(start)` and the event-flag branch by `by_ref().take(count)`, so there is no index arithmetic left to freeze — gone by construction rather than by a threshold, as in `reseal-screening`. The one `rinex_obs` timeout is gone with it; the 18 that remain are `lambda`'s, element for element the seal's. Of the five exclusions, `solve`'s is the one worth naming: `for j in i + 1..n` → `for j in i * 1..n` runs the back substitution one iteration early, reading `x[i]` while it still holds its `vec![0.0; n]` initialiser, so the extra term is `a[i][i] · (+0.0)` — finite and non-zero by the pivot test, hence exactly `±0.0` — and the single reachable difference is the sign of a zero component, which `-0.0 == 0.0` hides from every equality and `abs` erases before any consumer. **The instrument had the same defect as the code it measures**: `tools/mutant_triage.py` returned 124 on a wall-clock kill and `classify` read every non-zero exit as a failing suite, so a mutation that *hung* the tests was reported as one the tests *caught*. It now carries a `TIMEOUT` verdict of its own, and runs the suite in its own session so the budget reaps the test binary instead of orphaning it at 100 % of a core — #292's failure mode, one layer up |
+| `seal-lambda40` | `spacelab-gnss/src/lambda.rs`, `MUTANTS_TIMEOUT=540` | 235 | **8** | 4 | the block #321 owed: the file re-measured after the enumeration was rewritten onto Ghasemmehdi & Agrell's reduced conditioning and given a node budget — 254 mutants, 7 unviable. **The eighteen timeouts the previous block left are down to four, and all four are the oracle's rather than the code's.** The rewrite shipped with a differential test whose reference is the enumeration as it was written before, recomputing every conditional float from scratch; that reference had no budget, so a mutation of the factorisation both share — two in `conditional_float`, two in `permute` — stopped the oracle instead of failing it. A test that can hang is a test that reports by clock rather than by assertion, which is the same defect the harness itself had in `reseal-gnss-obs`, one layer further in. Of the eight survivors, **two are exclusions that had stopped applying**: the rewrite moved `is_empty` from line 303 to 330 and the pruning test from 390 to 449, and a `.cargo/mutants.toml` anchor that misses is a proof that is written down and not in force — the ledger reconciles by *count*, so neither `mutants-ledger` nor `mutants-anchors` can see it. **That last clause was true when this block ran and is the gap #299 closed**: `tools/mutants-ledger.py` now matches anchor against anchor and names every pattern that resolves to no live mutant, which is how the same drift surfaced in `seal-bridge-319`, `seal-gnss-325` and `seal-gas-kdist` instead of reappearing as somebody's survivor. Two more are the budget's own comparison, `nodes > MAX_SEARCH_NODES` against `==` and `>=`, which shift a policy number by one node. The last four are the bookkeeping the reduced conditioning introduced, and all four are genuinely equivalent — which is the least interesting thing that can be said about them, because all four were also removable |
+| `reseal-lambda40` | the same file, `MUTANTS_TIMEOUT=540` | 234 | **0** | 2 | the control, 243 mutants, 7 unviable, clean, and both axes reconcile. The total falls by exactly 11 — 6 in `enter`, 4 in `search`, 1 in `is_empty` — and every one is a mutation site that stopped existing rather than a mutant that started being caught. **The layout had slack, and the slack was the survivor.** The projections are sliced at `i · stride`, and a column only ever uses rows `i+1 ..= n`, so consecutive columns stay disjoint for *every* stride at or above `n − 1`: that is why `self.n - 1` and `self.n * 1` were re-packings rather than errors. The stride is now written once, in `search`, and read by both the allocation and the slicing, so a wrong one overruns the buffer. **Three appearances of `i + 1` were one number** — the row the fold starts at, the row `valid[i]` is set to, and the row the conditional float reads. Written separately, two of them were free: an extra fold writes a row nothing reads, and `valid[i] = i` leaves the same empty range. Written once, mutating it moves the conditional float — `L̄`'s diagonal is 1, so the extra fold adds the stale level-`i` residual — and the differential test fails. **A budget spent is not a budget compared**: `nodes += 1` with `if nodes > MAX_SEARCH_NODES` is now `budget.checked_sub(1)`, which has no comparison to shift by one and no counter to freeze. And the oracle carries the same budget as the method it checks, which turned all four of the seal's timeouts into kills. The two that remain are `permute` — `-> ()` and a `k + 1` frozen to `k` — and they are the catalogued frozen-loop family rather than a gap: Algorithm 2.3's sweep restarts at `n − 2` after every permutation and ends only because each permutation strictly lowers the conditional variance of the pair it swaps, so a permutation that does not permute is a sweep that does not end. The loop's termination *is* the mutated statement |
+| `seal-lincov` | `spacelab-estimation/src/lincov.rs` | 118 | **0** | 0 | the first block on #328's linear-covariance driver, and clean on the first pass — 131 mutants, 13 unviable, no timeouts, no `.cargo/mutants.toml` entry. That is unusual enough to be worth saying why rather than claiming it as virtue. The module is a matrix recursion with no branches, no loops that are not bounded by a const generic, and no policy numbers: every statement in it is a term of `Cxx`, `Cex`, `Cee` or `P̂`, and every term shows up in a covariance the Monte-Carlo ensemble measures. A mutation of an accumulation is a covariance that misses the ensemble, and the 4 % gate at 0.71 % sampling noise is five sigma wide. **The seal did not find the module's one real defect — the ensemble did, before the seal ran.** `Cex → 0` when the filter is right was a claim in the doc comment and a test, and it is false: `Cex⁻` picks up `T Q` each step, because the truth's process noise moves the vehicle and the filter, which cannot see it, is moved with it. `Cee = P̂` holds exactly; `Cex = 0` holds only at `Q = 0`. Both are now separate tests |
+| `seal-targeting` | `spacelab-astro/src/targeting.rs` | 104 | **14** | 0 | #329's differential corrector, 123 mutants, 5 unviable. The fourteen are four clusters and each is one missing *kind* of assertion rather than fourteen gaps. **Seven are the damping ladder**, and they were seven because the same statement was written twice — `lambda = if lambda > 0.0 { lambda * 10.0 } else { 1e-3 }` at both the failed-evaluation exit and the rejected-step exit. The `else` branch is reachable only from `initial_lambda = 0.0`, a pure Gauss-Newton corrector, and no test configured one: the physics tests all start at the default 1e-6 and never need a second retry, so neither the guard nor the seed nor the factor of ten was ever stood on. Written once as `increase_damping` and asserted directly, seven mutants become three at one site with a unit test under them. **Four are the stopping rules**, and each is a boundary nothing sat on: a tolerance of exactly zero would make every residual a division by zero and `> 0.0` was the only thing refusing it; `worst_miss > 1.0` and `iterations < max_iterations` were both off-by-one-able because no test started exactly at its tolerance or counted the iterations exactly; and `miss < worst_miss` could be relaxed to `<=` because every test's first trial strictly improves, so nothing in the suite distinguished "better" from "not worse" — which is the difference between a corrector that stops and one that walks for ever at shrinking damping. **One is `worst`'s tie-break**, `>` against `>=`, arbitrary mathematics and not an arbitrary API: a caller that logs `worst_goal` needs it stable. **Two are genuinely equivalent and proved in `.cargo/mutants.toml`**, both in `damped_step` and both backstopped by code further down — the Cholesky pivot guard is an early exit whose every case reaches the final `is_finite` check with a non-finite `delta` anyway, and the back-substitution range `(i + 1)..C` → `(i * 1)..C` adds exactly `l[i][i] · delta[i]` at the moment `delta[i]` is still its zero initialiser |
+| `reseal-targeting` | the same file | 114 | **0** | 0 | the control, 119 mutants, 5 unviable, clean. The total falls by 4 — the duplicated damping statement's second copy, which stopped existing when `increase_damping` was extracted — so caught rises by 10 rather than by 14. **The extraction is the part worth keeping.** Two identical statements are two mutation sites and one behaviour: the seal counted a single untested branch twice, and a reader working down the survivor list would have gone looking for two gaps. A branch that only one configuration can reach is a branch that wants its own name and its own test, not an exclusion |
+| `seal-rtcm` | `spacelab-gnss/src/{rtcm,ntrip,sinex_bias}.rs` | 377 | **44** | 6 | the first seal of #330's real-time plumbing, 449 mutants, 22 unviable, 6 timeouts. The survivors are five clusters and one identity. **Eleven are the ephemeris scale factors**, and they are the clearest statement in the block of what a round trip does not test: the 1019 test checked the fields the *orbit* depends on — `√a`, `e`, `i₀`, the four angles, the period — and left the clock polynomial and the four harmonic corrections unnamed, so `2^-31` could become `2^31` on `af0`, `af1`, `cuc`, `cus`, `cic` and `cis` without a failure. `af2` was worse than untested: **the fixture wrote it as zero**, and a field whose value is zero cannot show a scale error at all, because every scale of zero is zero. **Seven are the radial/along/cross basis.** The hand-computed `apply_orbit` case puts the satellite on +x moving along +y, which is exactly the geometry where the basis degenerates into a permutation of the axes — every transposed term in the cross product and every dropped factor in the normalisation maps onto the same three unit vectors. **Six are the two length boundaries**: `Bits::u64`'s width guard was reached only through a two-byte buffer, so the buffer guard rejected the over-wide read first and the width guard was never the reason; DF002's high two bits were never set because no fixture crossed 255 bytes, though every MSM7 frame in a real stream does; and `remaining()` was never called. **Twelve are the NTRIP surface** — `connect` was never run at all, `Credentials::username` and both `Display` impls were never asserted, and the source table had no row short enough to reject, none exactly at the thirteen-field minimum, and none publishing `N` for authentication. **Six are Bias-SINEX**, each a case the excerpt did not contain: a partly-zero epoch, a `*`-commented record that keeps every other column in place, a record ending exactly at column 91 with no sigma, an `ISB`, and a DSB query matching one observable of two. **Six are genuinely equivalent** and proved in `.cargo/mutants.toml`: `\|` → `^` across the bit reader, the frame scanner's length and CRC assembly and the base64 encoder, where the operands occupy disjoint bit lanes by construction and no input can separate the two operators. The 6 timeouts are all `self.cursor += 1` mutated to `*=` or `-=` in the scanner loop, which is the loop's termination argument removed rather than a gap: the cursor strictly increases and the buffer is finite, and a mutant that breaks the first hangs on the second. One caveat the block itself cannot state: `ntrip.rs` was edited after the run started — the `MAX_RESPONSE_HEAD` bound on an unterminated *header* block, a real defect found by reading rather than by a test — so its twelve verdicts are against the earlier source and the control below is the authoritative one |
+| `reseal-rtcm` | the same three files | 415 | **0** | 6 | the control, 443 mutants, 22 unviable, 6 timeouts, clean — **and the two blocks reconcile to the mutant.** The total falls by exactly six and the fall is exactly the six `.cargo/mutants.toml` entries, file for file: `rtcm.rs` 326 → 322, `ntrip.rs` 67 → 65, `sinex_bias.rs` 56 → 56. Caught rises by 38, which is the 44 survivors less those six. Nothing else moved, which also settles the seal's one caveat: the `MAX_RESPONSE_HEAD` rewrite is net-zero in mutant count, because it replaced one inline bound on the status line with one closure that all three "not complete yet" exits share, and its `>` boundary is now stood on from both sides — a head of exactly the cap is a partial read, one byte more is a fault. Sixteen tests closed the 38. Three are worth naming because each is a *kind* of blindness rather than a missing assertion. **A field whose fixture value is zero cannot show a scale error**: `af2` was written as `0.0` and no power of two distinguishes zero from zero, so the fixture now carries 5e-17 s/s² and every one of the twelve remaining ephemeris fields is asserted at its own quantisation step — 2^-31 on `af0`, 2^-43 on `af1`, 2^-55 on `af2`, 2^-29 on the four harmonics, 2^-43 semicircles on `idot` and `Δn`. **An axis-aligned state cannot test a basis**: `apply_orbit`'s hand-computed case puts radial on +x and cross-track on +z, where the RTN triad is a permutation of the axes; the new case is generic and its expected position is Maxima's at 40 digits, asserted to a micron against corrections of 1–3 m. **A guard reached through the wrong door is not the guard being tested**: `Bits::u64`'s width check was only ever exercised with a two-byte buffer, so the *buffer* check rejected the over-wide read first — 65 bits out of nine bytes, and 64 bits accepted, are what separate the two. The 6 timeouts are element for element the seal's, all `self.cursor += 1` → `*=` or `-=`, and they are the loop's termination argument rather than a gap: the scanner terminates because the cursor strictly increases across a finite buffer, so a mutant that removes the increase hangs by construction and the timeout *is* the detection |
+| `seal-pc-domain` | `spacelab-estimation/src/conjunction_domain.rs` | 285 | **31** | 0 | the first seal of the 2-D usage-violation detector (#322), 321 mutants, 5 unviable. The survivors are one sentence: **every test built its curvilinear curve to land where the rectilinear one already was.** Twenty-three tests shipped with the module and all but two hold the covariance frozen and the trajectory straight, which is the right first test — it pins the arithmetic against a closed form — and is also the one geometry in which the module has nothing to do. A frozen covariance makes `log_determinant` cancel against its own `t = 0` normalisation, so all five of its mutants are free; a straight trajectory makes the two speeds equal, so both of `norm3`'s survive behind a ratio of one; and a minimum that sits exactly on the seed means the search never searches, which is why fourteen mutants live in `bracket_minimum`, `golden_minimum` and `unit_rise`. **A ratio hides a shared error**, and three of the four terms of `F_c` are ratios. The other ten are the public surface: `coefficients`, an accessor redundant with `width`/`time_of_minimum`/`minimum`; the `−` in `assess` that carries the sign of the Mahalanobis gap, invisible while that gap is zero; two of the three `\|\|` in `any`, which `&&` binds tighter than, so a single flag set keeps the disjunction true and only a flag set *alone* can see the change; `inaccuracy`'s threshold and its indicator's accessor; and `Display::fmt`, which no test formatted |
+| `reseal-pc-domain` | the same file | 296 | **13** | 0 | the first control, 314 mutants, 5 unviable. Four tests and one deletion killed 18. The tests each move **one** term of `F_c` while holding the others at unity: a covariance inflating as `A(t) = A·e^{t/τ}`, whose curve is exactly `M(s) = c e^{−s} + 3s` with minimum `3 + 3 ln(c/3)` and a width solving `3(e^{−x} + x − 1) = 1` either side — every one of those numbers carries the factor of two in `ln\|A\| = 2 Σ ln Lᵢᵢ`, so the whole log-determinant dies at once; a sampler reporting twice the speed at a minimum that is otherwise rectilinear, where `F_c` is the ratio and `V_i = 1 − 1/F_c` is exactly a half; a direct assertion on the speed the rectilinear curve carries, which no ratio can then hide; and each error variant formatted against its own string. **The total falls by exactly 7, and it reconciles to the line**: −3 for `coefficients`, deleted rather than tested because every value it returned was reconstructible from the three accessors beside it; −9 for the three threshold predicates, which fell from five mutants each to two; +5 for the single `exceeds` they now share. **Three copies of one predicate were one predicate.** That collapse is also what closed `inaccuracy`'s `>` → `>=`, and it had to: `V_o` and `V_e` are ratios a test can drive onto their thresholds exactly, but `V_i = 1 − exp(−\|ln F_c\|)` cannot be — the subtraction is exact by Sterbenz, so the indicator equals the limit only if the exponential lands exactly on `1 − 0.02`, and its output near 0.98 advances about two ulps per ulp of the ratio behind it, skipping that value. Measured in both directions over 440 ulps, no hit |
+| `reseal2-pc-domain` | the same file | 301 | **8** | 0 | the second control, 314 mutants, 5 unviable, and the eight that remain are the eight now carried in `.cargo/mutants.toml` with their measurements. Three more tests closed five, and all three say the same thing: **the search was only ever exercised on its way to a refusal.** The module refused a minimum a million seconds to the *right* and never one to the left, so the interior test `best > 0 && best < COARSE_INTERVALS` had its lower half unexercised — and `>=` there does not merely mis-bracket, it subtracts one from an index of zero. The expansion was reached only by tests that expected it to give up, so `half *= 2.0` could become `+=` or `/=` and still fail in the same way; a 1 m/s conjunction with a 99 s width and a minimum at 1 500 s succeeds on the *second* window, where an additive expansion cannot arrive and a halving one never will. And the coarse bracket `(node(best−1), node(best+1))` was checked only where the minimum fell left of its nearest node, which the truncated bracket still contains — three offsets straddling a node closes it. The same shape closed the width search, seeded at the rectilinear width and needing five doublings on a curve twenty times wider. **What is left is the family that has no answer to give**: two tie-breaks, one final selection mutated three ways, and two loop exits under a hard cap. Swept over 220 curves against a control of benign implementation choices, seven sit inside that control's spread or at zero; the eighth moves the located time by 1.19e-7 of a width against the unmutated search's own 5.96e-8 floor, and moves the minimum and the width — the only two things `assess` reads — by 1.8e-15 |
+| `seal-radiometric` | `spacelab-estimation/src/radiometric.rs` | 288 | **17** | 5 | the first seal of #324's deep-space observables — 328 mutants, 18 unviable. Three findings, and only one of them is a missing assertion. **Ten of the seventeen are `angle_between`, and they are one fixture rather than ten gaps.** Every corona test built its geometry on the axes — station on `x`, spacecraft in the `xy` plane — which is the same conjunction up to a rotation and gives the same delay, and leaves `a[2] = b[2] = 0` throughout. Two of the three cross-product components are then identically zero, so `-` → `+` and `*` → `/` in them change nothing, and the dot product loses its third term. A planar fixture tests the planar special case of a three-dimensional routine; the fixture is now built along two generic orthogonal unit vectors with no zero component, `(2,3,6)/7` and `(3,6,−4)/√61`, and the same two survivors in `solar_corona_delay`'s difference and negation go with it. **Four are boundaries that were straddled rather than landed on**: `range_modulus`'s `> 0.0`, whose other arm is `2^-1075` underflowing to zero — finite, and a modulus of zero divides by nothing rather than overflowing, so `is_finite` alone misses it; the photosphere guard's `< SOLAR_RADIUS`, now stood on *exactly*, which is available because the geometry can be made exact (dot product `+0.0`, `atan2` returning `π/2` to the last bit, `sin` of that 1.0, and `sqrt(fl(r·r)) == r`); `RampTable::first`, only ever read on a gap fixture that starts at zero, which is what the mutant returns; and **the one that is a real latent defect** — `segment.end < b` in the integration walk chooses between the caller's endpoint, which carries `d/dt`, and the segment's own `end`, which is a constant. They agree in value whenever both apply, so the mutant is invisible to every value assertion; what it destroys is the *partial*, and only when the interval ends exactly on a ramp boundary. The seventeenth is `theta = middle + half·node` in the tanh–sinh rule, and it is equivalent: the node set is symmetric and the weights even, so flipping the sign reindexes `k → −k` and sums the same multiset in the opposite order. **All five timeouts were frozen loop counters, and both loops are now driven by iterators instead.** `RampTable::integral` walked on a cursor of its own; `<` → `<=` sets `stop` equal to the cursor and it never advances again, and the two `segment_at` timeouts are the same hang one level down, reached through that walk. `integer_cosine_power_integral` had the classic pair — `n + 2 <= power` → `>` and `n += 2` → `n *= 2`, both of which leave `n` at zero forever. The first is now `for segment in self.segments.iter().filter(…)` with a `covered` marker for gap detection, the second `for n in (parity..=power).step_by(2).skip(1)`. Neither has a counter left to freeze, which is `reseal-gnss-obs`'s remedy rather than a threshold, and it is the right one: a mutation that stops the suite terminating has been detected by a clock, and a clock cannot say whether it was caught or merely slow |
+| `reseal-radiometric` | the same file | 311 | **4** | **0** | the control, 334 mutants, 19 unviable. **The five timeouts became verdicts** — both loops are now driven by their data rather than by a counter, so there is nothing left to freeze, and the block finished with a clock that had nothing to say. The thirteen real fixes held. What the control found is the other half of #286's lesson: **the rewrite that removed the timeouts opened two gaps of its own**, both on the *lower* endpoint of the walk and both invisible to every value assertion that existed. `s.end > a` → `>=` admits the segment that ends exactly at `from`; its trapezoid is zero-width, so no value moves, but `covered` is then reassigned to that segment's own constant `end` and every partial after it is differentiated against nothing — on the Tudat fixture at `from = 5`, `−f_T(5⁻) = −14` in place of the `−f_T(5⁺) = −5` an integral running rightwards needs. `covered.value() < b` → `>` disables the final coverage check outright, and no test integrated past the table's end, so an interval running off it returned `Ok` on a partial integral. Both are tests now: the derivative at `from = 5.0`, which is exactly the fixture's first boundary, and `integral(13.0, 20.0)` against the `EpochOutsideRampTable` it must refuse with. The other two are equivalent and are in `.cargo/mutants.toml` with their proofs — `s.start < b` → `<=` admits one extra segment *after* the walk has already reached the endpoint, and its contribution is the zero dual in value **and** gradient; the tanh–sinh node sign reindexes a symmetric node set with even weights and sums the same multiset in the opposite order, measured at **5.9e-16** worst relative over five intervals crossed with five exponents |
+| `reseal2-radiometric` | the same file | 311 | **0** | **0** | the second control, 333 mutants, 22 unviable, clean — and it is also the *first* seal of `measured_frequency`, which was added after the previous block and so arrives with a verdict rather than owing one. The two equivalent mutants are excluded by `.cargo/mutants.toml`, and their anchors moved when the new function shifted the file; `just mutants-anchors` refused the run outright rather than silently re-including them, which is what that guard exists for. Nothing in the two closing tests un-caught anything the previous block had caught, so #286's failure mode did not recur here — but that is measured rather than assumed, which is the only reason the control is worth its cost |
+| `seal-density-calib` | `spacelab-propagation/src/density_calibration.rs` | 163 | **0** | 1 | the first block scoped to the calibration layer alone (#135–#140), 181 mutants, 8 unviable and 9 already ledgered. Run because §10.2's MAPE campaign leans on `fit_ridge` and `factor` and no named block had ever measured them apart from the crate's fifteen file-scoped seals. Zero survivors, so the finding is the *negative* one: the sun-fixed correction was already covered, and the assertions #323 added to the campaign test were not needed to close a gap — which is consistent with them carrying no weight here, since the campaign is `#[ignore]`d and this block runs the suite without `--ignored`. The one timeout is `isqrt`'s `+=` → `*=`, already in the catalogue below as one of the six frozen induction variables |
+| `seal-capi-319` | `spacelab-capi/src/lib.rs`, the #310-#314 and #322 entry points #319 added | 40 | **9** | **0** | the first block over the C ABI's #319 additions, scoped by `--in-diff` to the lines the ticket wrote -- 59 mutants in 2 min, 10 unviable. **Fifty-nine viable mutants out of 9 662 added lines**, and that ratio is the crate's defining property rather than a thin diff: cargo-mutants 27.1.0 generates nothing inside an `unsafe fn` body, and every one of the new exports is `unsafe extern "C"`. What it does generate is the safe helpers the three-step shape -- validate, compute, write -- pushes every predicate into, which is why #260 moved them there. The ten unviable are the mirror image: a whole-function replacement needs a value of the return type, and `Default::default()` does not typecheck for `Terminal`, `BistaticGeometry`, `FrequencyPair`, `ConjunctionGeometry`, `DecayModel<'_>` or the `SlLifetime` / `SlSlipVerdict` writers. **All nine survivors are one struct**, `CapiDecayAtmosphere`. Three are `density` -- the `z²` term in the radius, the `y²` product beside it, and the `r₀ - r` in the exponent -- and six are `velocity`: the whole function replaced by `[0.0; 3]` and `[±1.0; 3]`, both `ω·x` products turned into quotients, and the leading `-` deleted. One fixture explains all nine. `sl_orbital_lifetime` takes a mean **equinoctial** state and every case is `[a, 0, 0, 0, 0, 0]`, an equatorial circular orbit, so `z` is zero at every quadrature node and the co-rotation never leaves the orbit plane; a dropped `z²` and a reversed rotation both leave "re-entry inside a 400-day horizon" exactly where it was. The remedy is a direct test of the shell rather than a wider decay case, because a decade of drag averages away what a closed form states in one line: the density at a generic off-equatorial position against `ρ₀·scale·exp((r₀-r)/H)` to 1e-12 relative, the two parameters the shell is named by -- the reference radius exactly, one scale height out divided by `e` -- and `ω ẑ × r` **pinned as written**, because a reflection about the 45° line is horizontal, perpendicular to the horizontal projection and of the same magnitude, and only the exact vector separates it from a rotation. One assertion is end-to-end and is the one the unit test cannot make: `rotation_rate = 0` is the ~480 m/s faster headwind at this radius and must bring the object down sooner, which is the only thing that says the field reaches the quadrature at all. **The same struct is written a second time in the Python bridge**, and `seal-bridge-319` found eight of the same nine there independently |
+| `reseal-capi-319` | the same file | 49 | **0** | **0** | the control, 59 mutants, 10 unviable, clean, and both axes reconcile exactly. Caught rises by nine, one per survivor, and the total does not move at all -- the fix was a test rather than a change of code, so there is nothing for the mutant count to reflect. Nothing the first block caught was un-caught, which is #286's failure mode and is measured rather than assumed |
+| `seal-bridge-319` | `spacelab-python/src/lib.rs`, the #310-#314 and #322 bindings #319 added | 80 | **10** | **0** | the first block over the bridge's #319 additions, `--in-diff` under `--no-default-features --features test-interpreter` -- 9 085 mutants in 74 min, 8 995 unviable. **Ninety viable, which is the C ABI's problem in reverse and has the same effect.** Every `#[pyfunction]` returns `PyResult<T>`, and the function-replacement operator tries a dozen constructions per function -- `PyResult::from(0.0)`, `PyResult::new(1.0)`, `PyResult::from_iter([1.0])` -- none of which typecheck. That 8 995 is a property of the return type, not a measure of the code or of the tests: what can be mutated at all is the arithmetic and the predicates inside the plain helpers the `#[pyfunction]`s delegate to. Ten survivors, three causes. **Eight are `DecayExponential`** -- the C ABI's nine less the exponent's `-`, which the bridge's own two-altitude case happens to catch -- same struct, same equatorial fixture, same remedy, found independently by two blocks that could not have found it through each other. The ninth is `decay_model`'s `zonals.len() < 3` against `>`: the guard exists because `DsstZonal::new` asserts on a short list and an assertion across the FFI boundary is an abort rather than an exception, and nothing had ever crossed it from the refusing side -- the C ABI had that case and the bridge did not. The tenth is `rinex_obs_series`'s `s.sat.system == system && s.sat.prn == prn` against `\|\|`, invisible because the fixture carried one satellite per constellation and either half alone identifies it; a second GPS satellite behind the first in the same epoch is the case the conjunction exists for, and under the mutant the search reports G07's range under G09's name. **Separately, both crates' ledger anchors had gone stale and neither block could see it.** `just mutants` runs `mutants-anchors` per file; an `--in-diff` invocation names no file and does not. Fifteen entries had moved by a fixed offset -- fourteen `h0 = (t1/1000).abs()` step seeds in the bridge by +22 lines, one UTF-8 truncation walk in `copy_to_c_buffer` by +24 -- because both files grew their `use` block above the anchored code. Neither block was affected, and the reason is worth stating: `--in-diff` restricts to lines the diff *added*, none of the fifteen is in either diff, so those mutants were never generated and the stale anchors never had the chance to admit them. What caught it is `tools/mutants-ledger.py`, which reconciles the whole ledger against `cargo mutants --list` rather than against a block: 15 broken before, 1 029 entries / 1 029 claimed / 0 broken after. That reconciler runs in CI (#299), so the drift would have failed a push rather than surfacing as a survivor in someone's next seal |
+| `reseal-bridge-319` | the same file and the same diff | 90 | **0** | **0** | the control, and it closes on every axis at once: **9 085 mutants in 78 min, 90 caught, 0 missed, 8 995 unviable** -- the same 9 085 and the same 8 995 the seal measured, with the ten survivors moved into the caught column and nothing moved out of it. That the totals are *identical* is the check rather than an aside. Every one of the ten was closed on the test side and none on the production side, so the mutant population had no reason to change; a total that moved would have meant the fix rewrote the code under measurement, which is how a control stops being one. Compare `reseal-gnss-obs`, where the count fell by 19 because a guard was deleted and an index walk replaced, and the arithmetic had to be reconciled term by term before the block could be read at all. **What the ten cost was three tests, not three fixes.** Eight are `DecayExponential`, closed by asserting the shell directly -- the density at a generic off-equatorial position against `ρ₀·scale·exp((r₀-r)/H)`, and `ω ẑ × r` pinned as the exact vector -- because a decade of averaged drag cannot see what a closed form states in one line; the same three assertions closed the same eight in `reseal-capi-319`, which is the strongest thing either block says, two independent surfaces of one struct failing and being fixed the same way. The ninth is `decay_model`'s short-`zonals` guard, crossed from the refusing side for the first time. The tenth is `rinex_obs_series`'s `(system, prn)` conjunction, closed by putting a second GPS satellite behind the first in one epoch -- the fixture property `seal-capi-rinex` was built with from the start, having learned it here |
+| `seal-capi-rinex` | `spacelab-capi/src/lib.rs`, the whole #319 diff including the RINEX-observation surface | 64 | **0** | **0** | the block the RINEX work owed, and the control for `seal-capi-319` in the same run -- the diff is the whole of #319's C ABI, so it re-measures the nine survivors that block found and measures the new entry points for the first time. 79 mutants in 4 min, 15 unviable, **no survivors on the first block**. The arithmetic against `reseal-capi-319` closes on both axes: +20 mutants, +15 caught, +5 unviable. **The +5 are the same unviability the crate has had since #260, one line further out.** A whole-function replacement needs a value of the return type, and `Default::default()` typechecks for none of `SlObsHeader`, `SlObsDescriptor`, `Vec<SlObsSample>`, `RinexObs` or the `char` a constellation letter is validated into -- so five of the seven safe helpers cannot be replaced wholesale at all. **The +15 are why the helpers exist.** `sl_rinex_obs_header`, `sl_rinex_obs_descriptors` and `sl_rinex_obs_series` are `unsafe extern "C"` and generate nothing; every predicate in them lives in `obs_system`, `obs_header_of`, `obs_descriptors_of`, `obs_series_of`, `ascii_column`, `time_system_code` and `parse_obs`, which are ordinary safe functions. That is the #260 shape doing exactly what it was put there for: the validation is mutatable because it was moved out of the `unsafe fn`, and it is caught because the fixture was built to catch it. Two things in the fixture do the work. It carries **two GPS satellites in one epoch**, so a lookup matching on either half of `(system, prn)` alone reports G07's range under G09's name -- the same gap `seal-bridge-319` found in the bridge's `rinex_obs_series`, closed here before it could be measured. And it carries a **second header with the records the first one omits** -- `MARKER NAME`, `ANTENNA: DELTA H/E/N`, `TIME OF FIRST OBS` naming GLO -- because NaN-as-absent is only half a convention until something reads the present case: a file declaring neither is a file in which `unwrap_or(f64::NAN)` and `unwrap_or([f64::NAN; 3])` are indistinguishable from returning NaN unconditionally |
+| `seal-gnss-325` | `spacelab-gnss/src/models.rs` and `itu834_mapping.rs`, the #325 diff | 89 | **0** | **0** | 111 mutants in 79 s, 22 unviable, no survivors on the first block -- so the finding is in the *unviable* column rather than the missed one. #325 lifted eight mapping functions into `S: Scalar` **in their elevation argument only** -- `obliquity_mapping`, `niell_fraction`, `niell_mapping`, `gmf_mapping`, `vmf1_mapping`, `vmf3_mapping`, `ionospheric_mapping_factor` and `itu834_mapping` -- so that a tropospheric or ionospheric delay reaching an estimator through #313's `SlantDelay` seam carries `∂/∂ε` instead of a structural zero. The coefficients stay `f64` deliberately: lifting them would allocate derivative slots that are identically zero. **Genericity is a fourth axis of unviability, beside the C ABI's `unsafe fn` bodies (#260) and the bridge's `PyResult<T>` (#319), and it is the sharpest of the three.** All 22 sit in the eight lifted functions and split two ways -- six whole-function replacements, because `Default::default()` needs a bound `Scalar` does not have and must not have (a default `Dual<N>` or `DoubleDouble` is not a number anyone asked for), and sixteen `/` -> `%`, because `Scalar` has no `Rem`. **Both operators were viable on these same functions while they were `f64`**: `gnss-tropo` and `reseal-gnss` list `niell_fraction -> f64 with 0.0` and five `/` -> `%` inside it, all caught. So the block can now say *less* about this code than it could before, and the shrinkage is the type system refusing the mutants rather than the tests missing them -- which is the honest reading of a 22/111 unviable rate here, and the opposite of the C ABI's, where the unviability hides real validation until #260 moves it into a safe helper. What still generates dies: every `+`, `-` and `*` in the two continued fractions, the shared height correction and the obliquity ratio. **One limitation, stated rather than left implied.** The block runs `--package=spacelab-gnss`, so the tests in it are the crate's own 173 and they are all `f64`; the assertions that exercise the `Dual` instantiation live one crate out, in `crates/spacelab/tests/tropospheric_delay_in_measurements.rs`, and no block reaches them. That costs nothing here -- monomorphisation means a mutation to the source is a mutation to every instantiation, so the `f64` tests kill the arithmetic on behalf of all of them -- but it does mean the seal says nothing about the seam itself, only about the mathematics behind it. **The lift also drifted nine ledger anchors, and `--in-diff` could not see it** -- the same shape `seal-bridge-319` recorded: `just mutants` runs `mutants-anchors` per named file, an `--in-diff` invocation names none, and none of the nine is on a line the diff added, so the block never generated them and never had the chance to admit them. All nine are pure line drift with the column unchanged -- `niell_mapping`'s `latitude < 0.0` moved 21 lines, `gmf_mapping`'s and `vmf1_mapping`'s branch and phase terms 16 to 23, `parse_grid`'s `1..NLON - 1` two -- because the eight signatures grew a generic parameter above them. Each was re-anchored against its source line, not its offset, and the proofs stand unchanged: `tools/mutants-ledger.py` reconciles at **1 029 entries / 1 029 claimed / 0 broken**, and it runs in CI (#299), so the drift would have failed a push rather than surfacing as a survivor in someone's next seal |
+| `seal-estimation-325` | `spacelab-estimation/src/modifier.rs`, the #325 diff | 46 | **9** | **0** | 61 mutants, 6 unviable -- the same generic-return unviability `seal-gnss-325` measured, one crate over and in miniature: five whole-function replacements over `S` and `[S; 3]`, one `/` -> `%`. Nine survivors, two causes, and neither is nine gaps. **Seven are `EstimatedShapiroDelay::delta`, and they are one fixture -- the same fixture `seal-radiometric` found one module away.** The test helper `conjunction()` built the superior-conjunction geometry on the axes: Earth on `x`, probe in the `xy` plane, so `station[1]`, `station[2]` and `satellite[2]` are zero through every evaluation of the two geocentric radii. `y·y` and `z·z` are then exactly zero, and between zero terms `*` -> `+` and `+` -> `-` change nothing at all. That is `angle_between`'s gap verbatim -- *a planar fixture tests the planar special case of a three-dimensional routine* -- reappearing in a module written after the lesson was recorded, which is the reason to record it a second time rather than cross-reference it. The fixture is now built on the same two orthonormal directions the corona fixture uses, `(2,3,6)/7` and `(3,6,−4)/√61`, whose dot product `6 + 18 − 24` is zero exactly; a rotation leaves every distance and the impact parameter invariant, so no other assertion in the file moves, and the Cassini numbers are unchanged -- 39 333.696 m of delay at 1.6 R☉ and `∂ρ/∂γ = Δρ/2 = 19 666.848 m`, measured either side of the rotation. **Two are accessors replaced by `-> 0`, each tested only at slot zero.** `EstimatedShapiroDelay::index` and `EstimatedDrift::rate_index` were asserted against constructions that happened to place them at index 0, which is exactly what the mutant returns -- #318's dead-`threshold()` shape. Closed by sweeping the vector instead of sampling it: `γ` read from each of three slots in turn, with the delay asserted equal to `ShapiroDelay`'s wherever `γ = 1` is placed and nonsense in the other two, and each of the three cyclic `(bias, rate)` pairings of the drift asserted as a pair |
+| `reseal-estimation-325` | the same file and the same diff | 55 | **0** | **0** | the control, and it closes the way `reseal-bridge-319` did: **61 mutants in 2 min, 55 caught, 0 missed, 6 unviable** -- the same 61 and the same 6 the seal measured, with the nine survivors moved into the caught column and nothing moved out of it. The identical total is the check rather than an aside. Both fixes were on the test side -- one fixture rotated, two accessors swept -- so the mutant population had no reason to move; a total that had moved would have meant the fix rewrote the code under measurement, which is how a control stops being one. #286's failure mode, a fix that *un-catches* a mutant the first block caught, did not recur, and that is measured here rather than assumed |
+| `seal-gas-kdist` | `spacelab-earthvision/src/{gas,radiative_transfer,atmospheric_correction}.rs`, `MUTANTS_TIMEOUT=540` | 414 | **4** | 19 | the first block over the correlated-k gas layer (#353, #360), 474 mutants in 57 min, 37 unviable. **Its control run is #362, and what blocked that was a bad measurement rather than a bad seal.** `reseal-gas-kdist` aborted on its *unmutated baseline* -- `80s build + 540s test` against the 540 s cap -- and the number taken to diagnose that abort, `cargo test -p spacelab-earthvision --profile mutants` timed outside the harness at **2 658 s**, appeared to make the seal unreproducible by a factor of seventeen against its own recorded `4s build + 155s test`. It reproduces. On an idle machine the same command is **157.6 s**, and `cargo mutants --shard 1/2000 --timeout 3600` run against the seal's own snapshot reports `5s build + 160s test`; the two agree per target to within 2 % -- lib 1.81 s against 1.88, `aeronet_measured_atmosphere` 46.89 against 47.77, `radcalnet_measured_radiance` 98.28 against 99.96, and not the 758 s and 1 686 s the bad run charged them. That figure cannot be reconstructed from any build configuration: on the lib target the entire matrix is 1.81 s (mutants profile, 8 threads), 6.36 s (mutants, `--test-threads=1`), 4.12 s (dev profile, 8 threads) and 15.47 s (dev, 1 thread), against the 36 s the bad run recorded for it -- so neither the optimisation level nor the thread count, nor their product, reaches it. **Machine load is what is left, and it is the one quantity that run did not record**: it was taken minutes after aborting a mutation campaign, with an orphaned test binary from #292 still holding a core. The discipline it violates is the ordinary one -- never benchmark from inside the thing being benchmarked -- and the cost of skipping it was a false claim in this table, that the block's counts were not re-derivable. They are. `MUTANTS_TIMEOUT=540` is the intended 3.5x over a 155 s baseline, and the reseal's abort was contention, not cost. **Two of the four survivors are real gaps and both are the same defect: a one-sided assertion cannot pin a direction.** `transmittance`'s `*` on the air mass survives because the only test that varies air mass asserts `worst > 0.5` — a *lower* bound on how far a grey slab sits from the band, and dividing by the air mass pushes it the safe way. The fix is an identity rather than a tolerance: a column scaled by `m` and a path of air mass `m` are the same optical depth, so `KDistribution::new(&BAND, u·m).transmittance(1)` must equal `KDistribution::new(&BAND, u).transmittance(m)` exactly, at every `m`. **The other is the binning measure, and it is the more interesting one because the mutant is not worse where the only bar stood.** `resort` bins on transmitted weight `w·exp(−τ)`; the mutant bins on `w + exp(−τ)`. Measured on the shipped 1055-row table, worst-case resort error against the unbinned product runs 3.347e-2/1.878e-1 at 32 bins, 1.925e-2/6.779e-2 at 64, 1.033e-2/2.893e-2 at 128 and **4.101e-3/3.747e-3 at 256** — shipped against mutant. The rules converge at the operating point and the mutant is marginally *better* there, so the assertion that pins the design has to sit on the coarse rung, where the choice buys its factor of five. A test can only see a design decision where the decision still costs something. **The remaining two are equivalent, and `reseal-path-reflectance` had already proved both** — `scatter_direction`'s pole threshold by `f64` unreachability, `path_reflectance`'s scoring `+` by the layer's `y → −y` symmetry. They reappeared because #353 inserted 37 lines above them and the two `.cargo/mutants.toml` anchors, written against lines 175 and 255, silently stopped applying. That is the `seal-lambda40` failure mode a second time, with the difference that `tools/mutants-ledger.py` (#299) named both stale patterns instead of letting them surface as somebody's survivors. Re-anchored at 212 and 292, and each proof is now pinned by a test rather than left as prose: `the_pole_threshold_is_unreachable_from_below` walks the `f64` neighbourhood of `\|d_z\| = 1`, and `scattering_commutes_with_the_mirror_the_sun_plane_defines` checks the commutation the symmetry argument rests on to 1e-15. **Seventeen of the nineteen timeouts are the `Rng` / `scatter_mu` / phase-sampler family `seal-path-reflectance` catalogued, and what is new is that the cap is not what makes them time out.** Re-run at `--timeout 900 --jobs 1`, seven of the seven reached timed out again — so it is neither the 540 s limit nor contention between jobs, and raising the cap is not the remedy. The mechanism is undiagnosed; #363 carries the measurement and the one command that settles it. Worth recording *why* it is still undiagnosed, because the trap is a general one: the mutant hand-tested to refute the `MAX_SCATTERS` explanation was `115:19`, and `115:19` is **caught**. `next_u64` draws `result` from `s[1]` alone, so `s[2] \|= s[0]` leaves line 117 flipping every bit of `s[1]` each call — degenerate but moving, dead in seconds — whereas `s[1] \|= s[2]` saturates `s[1]` itself and freezes the stream to one constant. **A refutation measured on a caught mutant says nothing about the uncaught ones**, and the withdrawn explanation is a live candidate again |
+| `reseal2-gas-kdist` | the same three files, `MUTANTS_TIMEOUT=900` | 424 | **0** | 17 | the control `seal-gas-kdist` owed, on the post-#361 tree — 478 mutants, 37 unviable, clean, and clean with a cap that leaves room, which is the part that makes it a control. **It had to be run twice, and the first run is the finding.** At the justfile default `MUTANTS_TIMEOUT := "180"` against this crate's 160 s baseline it returned 423 caught / 0 missed / 22 timeouts and looked finished. One of those 22 was `atmospheric_correction.rs:280:32: replace < with <= in term_photons`, and that mutant is equivalent by inspection: the guard read `if share.is_nan() \|\| share < 1.0 { return 1 }`, the two arms differ only at `share == 1.0`, and there both return 1. **An equivalent mutant cannot hang**, so the timeout was never a fact about the mutant. Run on its own — `--re 'term_photons' --timeout 3600 --jobs 1` — it comes back `MISSED ... in 1s build + 159s test`: a survivor, and one that finishes inside even the 180 s cap when it has the machine to itself. What pushed it over is the campaign's own `--jobs 4`, which leaves each mutant about two threads where the baseline was measured on eight. **A cap at 1.12x the baseline converts "no test caught it" into "detected"**, because a mutant no assertion kills quickly is exactly the one that then has to run the whole suite. The justfile's rule that a timeout is a detection — the suite stopped terminating rather than passing — holds only while the cap sits far above the baseline, and `mutants-verdict`, which gates on `missed == 0` alone, inherits the blind spot. Re-run at 900 s, 5.6x the baseline, the count falls 22 → 17 and **every one of the 17 is in `radiative_transfer.rs`**: the `Rng` / `scatter_mu` / `scatter_direction` / `path_reflectance` family `seal-path-reflectance` catalogued and #363 re-measured, still timing out at `--jobs 1`. The five that dropped out — two in `gas.rs`, `monte_carlo_slab:175`, `path_reflectance:289:32` and `term_photons` — were all caught once given the time, so four were kills the clock was stealing and the fifth was the survivor. The seal's own 19 at `MUTANTS_TIMEOUT=540` included the same two `gas.rs` entries, so its honest figure is 17 as well; the two blocks agree on the family and differ only in what their caps were hiding. `term_photons` was **rewritten rather than excluded** — `share.max(1.0).min(f64::from(u32::MAX))` in place of the branch — which deletes the unobservable tie instead of documenting it. An entry in `.cargo/mutants.toml` is a claim that has to stay true through every later edit, and this one did not have to exist |
+| `reseal3-gas-kdist` | the same three files, `MUTANTS_TIMEOUT=900` | 451 | **1** | 16 | the block #369 and #370 owed, and the one that earns its keep: **513 mutants in 75 min, 45 unviable, one survivor** -- `radiative_transfer.rs:260:5: replace slice_at -> usize with 0`, in #370's new stacked transport. The arithmetic against `reseal2-gas-kdist` is the frame: +35 mutants and +8 unviable, all of them in the code #370 added, so the population moved because the tree did. **The survivor is a lesson about what a difference test can and cannot pin.** #370 shipped `the_order_of_two_unlike_slices_changes_the_answer`, whose stated purpose was exactly this mutant -- "without this the reproduction test above is satisfied by a walk that reads slice zero and never looks again" -- and it does not catch it, because a walk that always reads slice zero *still* reports two different answers for the two orders: slice zero is a different layer in each. Asserting that two numbers differ is weaker than asserting what either one is. The fix is an absorber the mutant cannot see: `ω = 0` buried in the middle of an otherwise conservative stack, where a correct walk absorbs **0.527210** and a walk that always reads the top sees `ω = 1` everywhere, so `rng.unit() >= 1.0` never holds and its absorptance is **exactly 0.000000**. Verified in both directions -- green on the tree, red on the hand-applied mutant. The 16 timeouts are the same population `reseal2` carried, one fewer: the `Rng` and `scatter_mu` operators that make a photon walk non-terminating, now at **5.3x** the 171 s baseline rather than #363's 1.12x, so a timeout here is a hang and not a clipped kill |
+| `reseal4-gas-kdist` | the same three files and the same cap | 452 | **0** | 16 | the control, and it closes the way `reseal-bridge-319` and `reseal-estimation-325` did: **513 mutants in 76 min, 452 caught, 0 missed, 45 unviable, 16 timeouts** -- the same 513, the same 45 and the *same 16 mutants by name* the finding block measured, with the one survivor moved into the caught column and nothing moved out of it. The identical totals are the check rather than an aside: the fix was one assertion in an existing test, so the mutant population had no reason to move, and a total that had moved would have meant the fix rewrote the code under measurement. #286's failure mode -- a fix that *un-catches* a mutant the first block caught -- is what this block exists to rule out, and 451 -> 452 with 0 missed rules it out. The baseline reproduces a third time at **4 s build + 171 s test**, against `seal-gas-kdist`'s recorded 155 s, which is the standing refutation of the 2 658 s that #362 chased |
+| `seal-control` | `spacelab-control/src/{attitude,closed_loop,delayed,formation,latency,lib,margin,orbit}.rs` | 740 | **99** | 36 | the first seal of the whole GNC pillar (#371-#376), 875 mutants in 14 min, 0 timeouts. The survivors concentrate where a pillar's first tests always land: on the published closed forms. `orbit.rs` holds 43 of them, and 13 are `riccati_residual` alone — a residual reported by `Lqr::residual` and asserted only as "small", which is an assertion every wrong normalisation also satisfies. `delayed.rs`'s 22 are the caps and the endpoint filters: `MAX_INTERVALS`, the `t0`/`t1` interior test, the dedup tolerance, and the step counters that no test read. `attitude.rs`'s 13 are Shepperd's branch selection and a `critically_damped` guard; `formation.rs`'s 12 the eigen-normalisation, the delay bound's strictness and `disagreement`; `latency.rs`'s 8 the `steps` boundary arithmetic and the ring's modulo; `margin.rs`'s 1 the worst-axis tie-break |
+| `reseal-control` | the same eight files | 828 | **9** | 37 | the control, 874 mutants, 0 timeouts, and all nine are `.cargo/mutants.toml` entries with a proof each rather than open survivors — so the nightly gate's `missed.txt` is empty and the crate joined the primary lane on the strength of this block. The 99 resolve as 87 kills, 9 ledger entries and 3 mutants of code deleted rather than tested. **The three deletions are the finding worth keeping.** `QuaternionPd::critically_damped` opened with a four-term guard on `proportional` and `moment` that rejected nothing `Self::new` did not already reject — `√(2IK)` is `+inf`, `NaN` or `0` for every moment the guard refused, and none of the three is a finite positive gain — so five mutants of it were unkillable by construction. `History::delayed` reduced `k` modulo `C` inside a closure gated on `k < C`, where the reduction is the identity. And the count is one *lower* than the seal's for a fourth reason: `matrix_sign` now returns its iteration count, because its doc comment made a claim about cost that nothing could check. Measuring it refuted the claim — Higham's norm scaling *costs* the 12 × 12 Clohessy–Wiltshire Hamiltonian four iterations (15 against 11) and saves the 4 × 4 double integrator three (3 against 6), while leaving the better Riccati residual on both. The scaling stays, and the doc comment now says it is kept for accuracy rather than for speed |
+| `seal-capi-control` | `spacelab-capi/src/lib.rs`, the control section #378 added, `--in-diff` | **0** | **88** | **0** | the first block over the C ABI's control surface, 101 mutants in 17 min, 13 unviable — and the verdict is the finding: **not one mutant was caught.** The surface was exercised from C by `tests/c/smoke.c` and from C++ by `tests/cpp/smoke.cpp` and `tests/cpp/nothrow.cpp`, all three driven by ctest under `just capi`, which is green in twelve compiler configurations. `cargo mutants` runs `cargo test` and nothing else, so none of that was reachable and all of it counted for zero. Every earlier capi block had Rust-side `#[test]`s calling `unsafe { sl_… }` directly; this section had none. The 13 unviable are `Ok(Default::default())` over types with no `Default`, the `capi-guards` shape, and every one of the 88 survivors is in a *safe* helper because #260's rule still holds — cargo-mutants 27.1.0 generates nothing inside an `unsafe fn` body |
+| `reseal-capi-control` | the same section and the same diff | 86 | **2** | **0** | after seven Rust-side tests over the same surface, the same 101 mutants in 8 min. Both survivors are one expression: `0.05 * delay`, the first trial step `sl_consensus_run` hands its adaptive driver, mutated to `+` and to `/`. Neither is equivalent and neither is ledgered — measured on the test's own shape at `τ = 0.5` s, the seed costs 0 rejected steps where `0.05 + τ` costs 13 and `0.05 / τ` costs 3, and all three agree on the final state to 3e-12 relative. The seed is invisible in the answer and visible in the work, so `rejected` is the only place it can be asserted |
+| `reseal2-capi-control` | the same section and the same diff | **88** | **0** | **0** | the control, after `assert_eq!(rejected, 0)` closed the two. Still 101 mutants and still 13 unviable: the totals holding is what says the fix was on the test side rather than the code's, which is the property a control block is run to have |
+| `seal-bridge-control` | `spacelab-python/src/lib.rs`, the control section #378 added, `--in-diff`, `--no-default-features --features test-interpreter` | **0** | **306** | **0** | the same measurement one bridge over, 2 889 mutants in 33 min, and the same answer: **nothing caught.** `tests/bindings.py` runs against an installed wheel and the mutation harness cannot see that either. 2 583 of the 2 889 are unviable, which is `PyResult<T>` rather than a test gap — cargo-mutants replaces a whole function's return value and most of those do not typecheck through a `PyResult`. Of the 306 that do, **243 are one function**: `margin_tuple` returns `(f64, f64, f64, f64, f64)` and every assignment of `{0.0, 1.0, -1.0}` to five slots is 3⁵ mutants, the `dilution_of_precision` cluster shape from §8's backlog. The other 63 are the marshalling — `lqr` 11, `attitude_error_mrp` 9, `rows_of` 7, `flatten` 4, `mat3_of` 3 |
+| `reseal-bridge-control` | the same section and the same diff | 311 | **6** | **0** | after nine interpreter-gated Rust tests over the same bindings, **2 900** mutants in 33 min, 2 583 unviable. The total rises by 11 and that is not drift: `quaternion_pd_response` gained the moment guard its C twin `sl_quaternion_pd_response` already had, and an added guard is more surface to judge — the `capi-surface4` shape, where the count going *up* is the point. That guard was itself a defect this ticket introduced: the binding accepted a non-positive moment and returned `(NaN, NaN)` where every other moment-taking control binding refuses. The six survivors are four distinct gaps — the new guard's `>` → `>=` boundary, `lqr`'s squareness disjunct and its `(3,1)` and `(4,2)` dispatch arms, and the `0.05 * delay` seed one bridge over |
+| `reseal2-bridge-control` | the same section and the same diff | **317** | **0** | **0** | the control, and it closes on every axis at once: **2 900 mutants in 34 min, 317 caught, 0 missed, 2 583 unviable.** Caught rises by exactly six, one per survivor, and neither the total nor the unviable count moves — so the six were closed by tests rather than by deleting the code that carried them, which is the distinction a control block exists to draw. Both bridges' control surfaces are now sealed with no ledger entries at all: every survivor either was a real gap or, in the one case where it was a defect, a defect |
+| `seal-sw-hpo` | `spacelab-propagation/src/space_weather.rs`, whole file | 172 | **9** | 12 | the first block over the file since #305 widened it, 193 mutants in 18 min, 0 timeouts, and the survivors split three ways. **Three are code #305 shipped and never tested**: `FluxQuality::parse`'s `INT`, `PRD` and `PRM` arms all fall through to `Unknown` when deleted, and `is_measured` survives being replaced by both constants and by `!=`. The type exists so that an interpolated or forecast flux cannot be read as a measured one, and nothing asserted that it separates `OBS` from the other four -- the one fixture assertion on it, `d.quality == Observed`, is satisfied by a `parse` that returns `Observed` for everything. **Two are line drift, not gaps**: Ф6.F inserted 110 lines above `parse_solfsmy`, and its `\|\|`-guard proof was anchored at `369:28`. `mutants-anchors` reported that as *`1 same-name anchors elsewhere`*, not as broken, so the run proceeded with the exclusion silently disarmed and the mutant surfaced here -- the third recurrence of the #305 / #319 shape in this file, and the first where the warning was the only signal. **Four are the new `parse_hpo`**: the `\|\|` comment guard (equivalent, and now ledgered with its proof) and the width guard `f.len() < 9` -> `<= 9`, which no test could see because every row in the unit fixture carried the file's optional tenth `D` column |
+| `reseal-sw-hpo` | the same file | 179 | **0** | 12 | the first control, 191 mutants in 19 min, 0 timeouts, and **superseded**: `cargo clippy -D warnings` was run after it and rewrote `hpo_at`'s `filter(…).next_back()` as `rfind(…)`, so this block measures a tree that no longer exists. Its numbers are kept because the repairs it verifies are the ones that carried through. Seven of the nine survivors were killed by two tests. `the_flux_provenance_code_is_read_and_only_a_measured_day_counts_as_one` reads all four codes, the empty cell, a code that is none of them, and the padded form, then asserts `is_measured` in both directions across all five variants. `parse_hpo_keeps_the_row_it_can_use_and_drops_every_shape_that_is_not_data` gained a nine-field row -- the width guard is the bounds proof for `f[8]`, so `< 9` keeps the narrowest legal row and `<= 9` drops it -- and a quiet `Hp = 0.000 / ap = 0` row, because the calmest hour the index can report is data and only the file's own `-1` means absent |
+| `reseal2-sw-hpo` | the same file, after the lint fix | 179 | **1** | 12 | 192 mutants in 25 min, and its single survivor is the anchor drifting a *second* time inside one ticket. Deleting one line in `hpo_at` moved `parse_solfsmy`'s `\|\|`-guard proof from `481:28` to `480:28`, and the run reported `1 same-name anchors elsewhere` and exited 0 exactly as the first block had. Worth a row of its own rather than a footnote: it is the measurement behind the ordering rule above -- a lint fix is a source edit, and a block measures the tree it started on, so the whole gate ladder belongs in front of the seal |
+| `reseal3-sw-hpo` | the same file, anchors repaired | **179** | **0** | 12 | the control that stands, 191 mutants in 29 min, 0 timeouts. The population held at 194 across all four blocks -- 193 + 1, 191 + 3, 192 + 2, 191 + 3 -- which is what makes them comparable: every repair was on the test side or in the ledger, so no mutant was created or destroyed and the nine survivors resolve as seven kills and two proofs |
+| `seal-sdtm-atmosphere` | `spacelab-propagation/src/sdtm/atmosphere.rs` | 55 | **0** | 0 | the first block over Ф15.I's drag-path wrapper, 57 mutants in 13 min, 2 unviable, **no survivors on the first block**. Both unviable are whole-function replacements needing a `Default` that neither `SdtmPoint` nor a generic `S: Scalar` has — #260's and `seal-gnss-325`'s two unviability shapes inside eighty lines of one file. The zero is not luck, and it is worth naming what carries it: the module's local-solar-time test asserts the wrap's **post-condition**, `lst ∈ [0, 24)`, at five longitudes — two of which put apparent local time below zero against the 08:03 UT epoch, so the wrap has to fire — and all six mutations of that line are separated by the interval rather than by a density. Both bridges duplicate the same eight lines *without* that assertion, and the next two rows measure what it costs |
+| `seal-sdtm-capi` | `spacelab-capi/src/lib.rs`, the SDTM-1 entry points, `--re sdtm1` | 28 | **4** | **0** | 33 mutants in 6 min, 1 unviable, and the first capi block since #378 whose caught column is not zero — because this ticket wrote five Rust `#[test]`s calling `sl_sdtm1_*` directly *before* the block ran, rather than discovering afterwards that ctest is invisible to `cargo mutants`. **All four survivors are `sdtm1_point`, and all four are one defect in the test**: its two assertions were *symmetries* — "half a day of UT later and 180 degrees west names the same point", "the same meridian reached from either side of the anti-meridian" — and a symmetry says nothing about the constants it is built out of. `longitude·15` and `−longitude/15` both move the difference between the paired calls by `Δλ·(15 − 1/15)` or `2·Δλ/15`, which is 2 688, 5 376, 24 and 48 hours, every one an exact multiple of the 24 the wrap then removes; `-=` → `+=` and `24·floor(lst/24)` → `24·floor(lst % 24)` shift the answer by a multiple of 24 outright. Closed by asserting the point itself rather than a relation between two of them: 15 h UT at 30 E **is** 17 h local, the altitude **is** 400 000 m, the day **is** 172.625, each exact in binary. The single unviable is `Default::default()` over `SdtmPoint`. Half the surface generates nothing at all — `sl_sdtm1_storm_response` and `sl_sdtm1_density_interval` are `unsafe extern "C"` (#260), so what is judged instead is the safe helper the cadence predicate was moved into: five mutants, all caught |
+| `seal-sdtm-bridge` | `spacelab-python/src/lib.rs`, the same surface, `--re sdtm1` under `--no-default-features --features test-interpreter` | 35 | **1** | **0** | the same measurement one bridge over, 37 mutants in 10 min, 1 unviable — and the unviability is *absent* here, which is the interesting half: `seal-bridge-319` reported 8 995 of 9 085 unviable because every `#[pyfunction]` returned `PyResult<T>`, while these four are infallible and return plain `f64` and `(f64, f64)`, so the whole-function operator applies and all nine assignments of `{0, 1, −1}` to the interval's two slots are caught. **One survivor, in the same eight-line function the C block lost four in.** The bridge's copy scored better for a reason that is an accident rather than a property: its test rebuilt the `SdtmPoint` independently and compared densities with `assert_eq!`, and against wrap mutants — which shift local solar time by an exact multiple of 24 h, under harmonics periodic in exactly that — the only thing left to separate them is `libm::cos`'s rounding at the reduced argument. `24·floor(lst·24)` drives that argument to −1 210 rad and dies; `24·floor(lst % 24)` keeps it under 55 rad and dies only because the reference was computed somewhere else; `-=` → `+=` leaves the value untouched wherever the wrap does not fire, and survived both blocks. Same remedy, and it is a value assertion in both |
+| `reseal-sdtm-capi` | the same surface | 32 | **0** | **0** | the control, 33 mutants in 6 min, 1 unviable, and it closes on both axes at once: the population is unchanged and caught rises by exactly four, one per survivor. Two symmetry assertions were replaced by four value assertions and nothing else moved -- no mutant became unviable, none timed out, and the remedy cost no coverage elsewhere in the block |
+| `reseal-sdtm-bridge` | the same surface | 36 | **0** | **0** | the other control, 37 mutants in 10 min, 1 unviable, and the same arithmetic one bridge over: the population unchanged and caught up by exactly one. The two controls together are what lets the finding be stated as a property of the *assertions* rather than of either language's binding -- the same eight lines, the same nineteen mutants, two independently written test suites, and both of them blind in the same place until the symmetry was replaced by a value |
+| `seal-sdtm-core` | `spacelab-propagation/src/sdtm/{mod,uncertainty,coefficients}.rs` | 351 | **11** | 17 | the SDTM-1 *model*, which had never been under a named block -- the `spacelab-propagation` whole-crate census predates the module by a month. **380 mutants in 74 min, 1 timeout.** One survivor is equivalent and ledgered (`lag < 0.0` -> `<=` in `StormKernel::weight`: at `lag == 0` the body computes `(1 - 1)/(τ_r - τ_o)`, so the two paths differ only in the sign of a zero, and nothing divides by a weight). One is a **defect**, not a gap: `sdtm::isqrt` searched from 0 where `density_calibration::isqrt` -- the same helper, twenty files away -- searches from 1, so `isqrt(0)` underflowed `Thermosphere::<0>::degree()` (`isqrt(K) - 1` on a `usize`) and `K = 0` passed the perfect-square clause. The other nine are ordinary gaps with one shape between them: **every parameter was reached through a density**, where a wrong `boundary_scale` is a constant the ratio tests divide out, a temperature never appears on its own, and a `> 0.0` guard is only ever given a *negative* argument rather than zero. The timeout is the thirteen-fold shape the ledger's preamble already names -- `r += 1` rewritten to `r *= 1` freezes the loop counter the loop's termination *is* |
+| `reseal-sdtm-core` | the same three files | **361** | **0** | 17 | the control, **379 mutants in 77 min**, 1 timeout, and both axes reconcile at once. The population falls by exactly one — the equivalent `StormKernel::weight` comparison, now excluded by the ledger and so no longer tested — and caught rises by exactly ten, one per closed survivor. The unviable set is unchanged element for element, the timeout is the same `isqrt` counter, and nothing that the first block caught became uncaught, which is the property #286 made this block worth its hour for |
+"Stale" means the survivors were closed by a commit that landed *after* that block's snapshot was
+taken. A block reports on the tree as it stood when it **started**, so those verdicts are behind the
+tree rather than open, and each needs only a re-measurement. `small-seal`'s five were verified dead
+by hand-flipping each one on the current tree; `astro-seal2`'s seven by the three tests and four
+ledger entries of the commit that follows it; `iono-seal2`'s three by the ledger entries in the same
+commit.
+
+Both of those re-measurements have since run, and they agree with the hand verification: `astro-seal3`
+is 2 662 caught and **0** survivors, `iono-seal3` 1 043 and one — and that one is not a survivor the
+hand check missed but a mutant that block was the first to reach, `ccir.rs:63:19`. A hand-flip
+answers "is this particular mutant still alive"; only the block answers "is anything else".
+
+`spacelab-propagation` is the workspace's largest crate, and its whole-crate block is a **census**,
+not a seal. It snapshotted the tree at 01:45 on 2026-08-09 and took 12½ h over 14 924 mutants, so
+every file repaired *during* the run is reported against the code as it stood before the repair.
+That is not a flaw in the run — it is what a block *is*, since `mutants-pkg` tars the tree before it
+takes the batch lock — but it does mean the census cannot be the seal.
+
+The seal is per-file, one block for each file the census cannot speak for: either its source moved
+after 01:45, or its `.cargo/mutants.toml` entries were written after 01:45 and the census therefore
+still counts the now-ledgered mutants as survivors. A file-scoped block costs minutes rather than
+hours, so the re-measurement is cheap even though there are fifteen of them.
+
+| block | files | caught | missed | timeout |
+|---|---|---|---|---|
+| `prop-sw` | `space_weather.rs` | 95 | 0 | 0 |
+| `prop-symp` | `symplectic.rs` | 118 | 0 | 0 |
+| `prop-multistep` | `abm.rs`, `adams_nordsieck.rs`, `gj.rs` | 436 | 0 | 0 |
+| `prop-driver` | `driver.rs`, `ark.rs` | 303 | 0 | 7 → re-measured, see below |
+| `prop-driver2` | `driver.rs`, `ark.rs`, at `--timeout 180` | 310 | 0 | **0** |
+| `prop-atmo3` | `jb2008/mod.rs`, `jb2008/tables.rs`, `dtm2020/tables.rs` | 1 219 | 0 | 1 — `xambar`'s Horner descent, already in the timeout catalogue |
+| `prop-ias152` | `ias15.rs`, at `--timeout 180` | 695 | 0 | 2 — `226:21` and `263:16`, the two already in the timeout catalogue |
+| `prop-rosen2` | `rosenbrock.rs`, after the epoch test | 139 | 0 | 0 |
+| `prop-mixed` | `taylor.rs`, `rosenbrock.rs`, `radau.rs`, `mercurius.rs`, `mri.rs`, `saba.rs`, `earth_radiation.rs`, `dsst/gaussian_short_period.rs`, `rk4.rs` | 1 218 | 1 → killed, re-measured as `prop-rosen2` | 2 |
+| `prop-t234` | the 15 files #234 touched: `forces.rs`, `geopotential.rs`, `maneuver.rs`, `ocean_tide.rs`, `relativity.rs`, `solid_tide.rs`, `spacecraft.rs`, `stt.rs`, `variational.rs`, `whfast.rs`, `taylor.rs`, `radau.rs`, `rosenbrock.rs`, `earth_radiation.rs`, `ark.rs` | 4 573 | 0 | 3 — all three already in the catalogue below |
+| `est-t234` | `spacelab-estimation`, the other crate `ScalarSystem` reaches | 1 908 | 0 | 0 |
+| `solid-tide-reseal` | `spacelab-propagation/src/solid_tide.rs`, after #236 | 543 | 0 | 0 |
+
+`prop-mixed`'s one survivor is the block that paid for itself. `rosenbrock.rs:98:31` mutates the
+increment GRK4T takes its `∂f/∂t` at, `√(u·max(1e-5,|t|))` → `√(u/max(1e-5,|t|))`, and at `t ≈ 1`
+the two are the same number — which is where every GRK4T fixture in the crate starts. Away from the
+origin the divided form collapses below `ulp(t)`, `t + δ == t`, `∂f/∂t` is identically zero, and the
+method is back to the order one that #235 had just fixed: **1.8214e-4 against 3.7164e-9** at
+`t₀ = 1e6, n = 160`, a factor of 49 000.
+
+Measuring that also measured something the mutant did not cause. The increment is sized by the
+*epoch*, and this crate's epochs are seconds from J2000, so at `t₀ = 7.5e8` it asks for `δ = 4.1e-4 s`
+on a force whose only time-scale is the step. The ladder stops converging and reverses: 9.2998e-7,
+7.2808e-8, 2.1303e-7, 1.4644e-6 at `n = 20 … 160` — refinement makes the answer *worse*, because the
+`δ`-truncation error carried into `∂f/∂t` outgrows the step error it is correcting. The test records
+that rather than asserting the order four it does not have, because no scale-free choice of `δ` is
+free — the real fix is a differentiable `t` (#234), which deletes the difference quotient instead of
+retuning it.
+
+`prop-driver`'s seven timeouts were an artefact of the harness, and finding that out changed it. Left
+without `--timeout`, cargo-mutants auto-sets one at ~5× the baseline — 20 s for a file-scoped block,
+against the 180 s the package-scoped blocks had always passed explicitly. Twenty seconds is shorter
+than a *caught* mutant here: `driver.rs:436:13` (`while t < t1` → `<=`) ends in
+`StepLimit { steps: 100000 }` and fails its own test after 5.0 s, but it also makes every other
+adaptive integration in the crate spend its full 100 000-step budget, so the suite runs past 20 s and
+seven kills were recorded as hangs. The justfile now passes `--timeout {{MUTANTS_TIMEOUT}}` from both
+recipes, so a verdict means the same thing whether the block was scoped by file or by package. The
+re-run settles it: the same two files at 180 s are **310 caught, 0 missed, 0 timeouts**. Every one of
+the seven was a kill the clock had hidden.
+
+Every one of the census's 174 survivors falls inside one of those blocks, and the mapping is
+exhaustive: `space_weather.rs` → `prop-sw`, `symplectic.rs` → `prop-symp`,
+`abm.rs`+`adams_nordsieck.rs`+`gj.rs` → `prop-multistep`, `driver.rs`+`ark.rs` → `prop-driver` and
+then `prop-driver2`, `ias15.rs` → `prop-ias152`, the two dead-coefficient tables and `jb2008/mod.rs`
+→ `prop-atmo3`, and the remaining nine — `taylor.rs`, `rosenbrock.rs`, `radau.rs`, `mercurius.rs`,
+`mri.rs`, `saba.rs`, `earth_radiation.rs`, `dsst/gaussian_short_period.rs`, `rk4.rs` — → `prop-mixed`,
+with `rosenbrock.rs` re-run as `prop-rosen2` after its survivor was killed. Nine files in one block
+rather than nine blocks because the cost of a block is dominated by the per-mutant rebuild, which is
+the same whichever file the mutant is in: `spacelab-propagation` has 32 integration-test targets and
+every one of them relinks against the mutated lib, so the measured split is 19.55 s of build against
+3.06 s of test.
+
+`prop-t234` and `est-t234` are the re-seal #234 owed. Making `t` a differentiable scalar rewrote
+`ScalarSystem::eval` in 37 places across 18 files, which is new mutable surface in files every
+earlier block had already sealed — a seal is a statement about a tree, and that change made a
+different tree. The two blocks put 6 481 mutants through it and come back **0 survivors**: 4 573
+caught in propagation and 1 908 in estimation. The three timeouts are the same three as before, and
+one of them moved with the edit — `taylor.rs`'s frozen step counter is now `384:15` rather than
+`375:15`, the same mutant on the same line of code, which is the ordinary cost of quoting a mutant by
+line number.
+
+One file in that block was **not** sealed by it: `solid_tide.rs`. `prop-t234` snapshotted the tree at
+21:51 and #236 landed after it, so the block reported on the pole tide as it stood before the secular
+pole, a public `MeanPole` enum and three tests existed. That is the same staleness the census section
+above describes, caught this time while it was still one file rather than 174 survivors. `solid-tide-reseal`
+is the answer to it: 543 mutants over the post-#236 file, **0 survivors, 0 timeouts**, one unviable.
+The `MeanPole` match arms and the secular-pole coefficients are now mutation-covered like the rest,
+which is what the two new tests of #236 were written to do and this is the measurement that they do
+it. The other fourteen files in `prop-t234` are untouched since its snapshot and their verdict stands.
+
+With `prop-rosen2` and `iono-ccir` the campaign closed on 2026-08-09: every one of the 25 measured
+crates had a block against the tree that shipped *that day* whose `missed.txt` was empty,
+`just mutants-verdict` exited 0 for each, and the gate was green at the same commit — `cargo fmt
+--all --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test --workspace
+--no-fail-fast` (140 binaries), and the same two with `--features spacelab-earthvision/onnx`.
+
+**A campaign closes; a verdict does not stay closed.** Every commit that touches a crate puts that
+crate's block behind the tree again, and the next day's work put eight of them there: `spacelab`,
+`-slr`, `-astro`, `-elements`, `-frames` and `-gnss` by commits landing after their seal, and
+`-estimation` and `-propagation` by survivors those blocks found. The measurement is a perishable
+good, which is the whole reason the two CI jobs above exist rather than a table in this file.
+
+So staleness is a command, not a memory: **`just mutants-staleness`** reads each block's `lock.json`
+start time against `git log -1 -- crates/<name>` and prints one line per crate — clean, STALE, OPEN
+or NEVER MEASURED — exiting non-zero unless every crate's verdict speaks for HEAD. It is what the
+re-queue is scheduled from, and it is deliberately conservative: *any* commit under a crate's
+directory expires it, `Cargo.toml` included, because a feature or a dependency bump really can move
+a mutant. Most cannot, so the line names the commit as well as the date. Worth knowing before
+reading a run: on 2026-08-10 it answered 8 of 26, and fourteen of the eighteen it called STALE were
+expired by `c493d7c` alone — the commit that added `version = "0.0.1"` to sixteen manifests, which
+changes no Rust source, no mutant and no test. The live mutant counts it prints beside each crate
+are the check: for the nine `gate-ci9` measured they are identical to the counts that block planned,
+element for element. A conservative rule plus a named commit beats a clever rule.
+
+Three of its rules were themselves found by running it and disbelieving the
+output: a block counts only once it has *finished* (`mutants.json` is written at the start, so a
+run in flight otherwise reads as a seal with no survivors yet); its coverage must include
+`previously_caught.txt`, because `--iterate` drops those from `mutants.json` and a resumed block
+would otherwise look narrower than the older one it continues; and a timeout does not open a crate,
+because the suite stopped terminating rather than passing — it is reported beside the verdict
+instead, since it is still owed a catalogue entry.
+
+There is no meaningful grand total of mutants, and quoting one would be the wrong summary: the blocks
+overlap by construction — `prop-rescan`'s census covers the same code as the nine per-file seals that
+followed it, and `ev-onnx` re-measures `ev-confirm` with a feature turned on. What is countable is
+the finding rate. The last four blocks alone — run after the campaign was already believed finished —
+produced two survivors, and both were real: a GRK4T increment that is invisible at `t ≈ 1` and an
+off-by-one in the CCIR month cache that only December can see. That is the argument for re-measuring
+rather than reasoning: a block finds what a reading of the diff cannot.
+
+`spacelab-python` used to be the one **declared** exclusion, on the argument that a run against it
+would measure the harness rather than the code. That was true when it was written — the bridge had 0
+`#[test]` in 3 934 lines and a run reported 5 062 survivors out of 5 074 — and it stopped being true
+without anyone re-checking. The exclusion also carried a number, "a measured 947 of its mutants
+cannot be reached", which was an estimate wearing a measurement's clothes.
+
+The run has now happened: **2 684 mutants, 51 caught, 1 740 missed.** Classifying every survivor
+against its signature gives **194 gated** and **1 545 reachable** (one trait impl unresolved). The
+947 was 4.9× too big, and the difference matters, because five sixths of that backlog is ordinary
+missing tests rather than a property of PyO3.
+
+`#[pyfunction]` leaves the annotated `fn` an ordinary Rust function and generates its wrapper
+alongside, so a `#[cfg(test)]` module in `lib.rs` calls it directly, with no interpreter, no GIL and
+no new dependency. What does *not* work is a test whose signature touches the interpreter. `pyo3` is
+depended on with `extension-module`, which is right for a `cdylib` — the interpreter supplies `Py*`
+at import — and which leaves a test binary with undefined symbols (`PyErr_SetObject`,
+`PyUnicode_FromStringAndSize`, `PyTuple_Type`, …). Measured twice, once through `.expect()` and once
+through a `let Ok(..) = .. else` that instantiates neither `Debug` nor `Display` on `PyErr`; both
+failed the same way, so the reach stops at the *signature* and not at the error path. The token is a
+`PyResult` in the return **or** a `Python<'_>` / `Bound<'_>` parameter — classifying on the return
+type alone finds 178 of the 194 and misses the 16 whose only interpreter contact is the `py`
+argument.
+
+That barrier is now down. `extension-module` is an optional default feature, and
+`--no-default-features --features test-interpreter` links libpython and starts an interpreter for the
+test process, so those entry points are ordinary functions to a `#[test]`. The configuration the
+wheel needs cannot be lost by accident, because both illegal combinations are `compile_error!` in
+`lib.rs`: a bare `--no-default-features` names the feature it wants back, and asking for
+`extension-module` and `test-interpreter` together says which one to drop. Measured on the three
+largest clusters — `propagate_two_body`, `propagate_relativistic_dense` and the EOP guard of
+`propagate_j2_itrf_eop_dense`, 123 mutants of which 37 are unviable — four tests kill **85 of the 86**
+viable ones, and the survivor is a step seed the ledger now carries. 108 gated mutants remain, and
+they are backlog rather than a toolchain limit.
+
+Two of those tests earned their oracle the hard way, and both are the shape this section argues for.
+The relativistic bundle is checked against the same four forces integrated with the Sun's velocity
+from an independent five-point stencil at ten times the step: the two agree to 9.1e-6 m over a day and
+the de Sitter term they feed is worth 5.1e-3 m of the answer, so the bound sits between them and is
+neither vacuous nor unmeetable. The ITRF-frame J2 propagator has no independent implementation to
+check against, and got a **metamorphic** oracle instead — `epoch_utc_ns`, `tt_minus_utc_s` and the
+`eop_dut1` column are three ways of writing two timelines, so advancing the epoch by a day and taking
+a day off both offsets must leave the trajectory where it was. It does, to 0 m exactly, and every
+arithmetic slip in assembling those epochs breaks the cancellation instead of surviving it. That test
+needs realistic polar motion to bite, and the reason is physics rather than tuning: a zonal J2 is
+invariant under rotation about the pole, so at `xp = yp = 0` the ITRF z-axis *is* the CIP and a UT1
+error cancels exactly — 4.7e-9 m for 100 s, which is f64 noise in the rotation and nothing else. At
+0.2" the pole and the rotation axis part company and the same error is worth 2.7e-5 m.
+
+The other 1 545 are a test backlog, and it clusters, because cargo-mutants expands a returned tuple
+into every combination of `0.0` / `1.0` / `-1.0` — `dilution_of_precision` alone is `1 + 3⁵ = 244`.
+One exact assertion per wrapper kills a whole product. **Twelve tests** covering the fourteen largest
+clusters were written against the geometry rather than against stored values — the two DOP identities
+`GDOP² = PDOP² + TDOP²` and `PDOP² = HDOP² + VDOP²`, the spherical law of sines behind the swath
+tuple, the three canonical scatterers of the Pauli decomposition, a projection round trip through
+`triangulate`, Kepler's third law behind `draim_geometry` — and they kill **all 856** of those
+clusters' mutants (860 in scope, 4 unviable, 0 survivors). The reachable backlog is now **689**, and
+its tail is flatter: no remaining cluster is above 43, so the next tranche buys less per test.
+
+One negative result from that exercise is worth more than the counts. The first version of the
+coverage test flew an equatorial orbit with zero node and zero phase, and left 27 mutants alive —
+every one of them inside the analytic `sat_at` closure, because at `inc = raan = 0` each cross term
+of the orbit-plane rotation is multiplied by `sin i = 0` and no mutation of it can reach the output.
+The test was green, it executed those lines, and it could not see them. The replacement flies an
+inclined orbit with a non-zero node and checks the engine's windows against an independently built
+perifocal basis, sample by sample in elevation; that one kills all 90. Line coverage would have
+reported both versions identically.
+
+`astro-seal2` also retired the whole `edl.rs` timeout cluster: 21 timeouts before the #228 fix,
+**0 after**.
+
+### A test the mutation harness cannot run is not a test it can credit
+
+#378's two first blocks are the clearest measurement of this in the campaign, and they say the same
+thing twice. `seal-capi-control` judged 88 viable mutants of the C ABI's control surface and caught
+**none**. `seal-bridge-control` judged 306 of the Python bridge's and caught **none**. Neither
+surface was untested at the time: the C entry points were exercised by `tests/c/smoke.c`,
+`tests/cpp/smoke.cpp` and `tests/cpp/nothrow.cpp` under ctest, green in twelve compiler
+configurations, and the bindings by `tests/bindings.py` against an installed wheel. Both suites had
+been run and both were green.
+
+`cargo mutants` runs `cargo test`. It does not run ctest and it does not install a wheel, so neither
+suite was reachable and neither counted. That is not a flaw in the harness — it is the boundary of
+what a mutation verdict means, and it is invisible from a green CI run because CI *does* execute
+both suites, in other jobs. The consequence is a rule rather than a one-off fix: **a bridge's
+mutation verdict is a statement about its Rust-side `#[test]`s and nothing else.** Every capi block
+before this one happened to satisfy it, because #260 had already moved the ABI's predicates into safe
+`check_*` helpers with Rust tests around them; the control section was written without that habit and
+the block found it immediately.
+
+The fix is the same on both sides — Rust-side tests over the same surface the foreign-language suites
+cover, which brings the two blocks to 88/88 and 317/317 — and it does not retire the C and Python
+suites. Those answer a question the Rust tests cannot: whether the surface is *callable* from C99
+through C23 and C++20 through C++26, with and without exceptions, and whether the wheel that ships
+carries what the crate compiled. Two suites, two questions, and only one of them is a mutation
+verdict.
+
+### Timeouts, one by one
+
+Timeouts are findings too. The disposition is always the same question — **does the *unmutated* loop
+provably terminate?** All 210 are accounted for, and seven of the clusters ended in a production
+change. Two of those seven — `edl.rs` and the NeQuick STEC ladder — are loops that *did* provably
+terminate and were still wrong, because a bound reachable only after 1.3e10 evaluations, or a call
+that costs 146 s, is not a bound anyone can wait for. A timeout is a statement about how long the
+unmutated code takes, and that is worth reading even when the termination proof holds.
+
+The table below is the campaign's cumulative catalogue, not a snapshot: a cluster stays in it after
+its timeouts stop appearing, because the disposition is what is worth keeping. Three of them have
+since gone to zero — `edl.rs`'s 21 and `modip.rs`'s 5 both became kills once their loops were fixed,
+and `rinex_obs.rs`'s single one stopped existing when the loop it froze stopped having a counter —
+and `lambda.rs`'s 18 are down to 2.
+
+| Cluster | n | Disposition |
+|---|---|---|
+| `rinex.rs` — the navigation-record line walk | 6 | **Terminating, and nothing is owed.** `parse_nav` and `parse_glonass_nav` walk `lines` with one index, and it moves in exactly three ways: `idx += 1` past a line with no first character or no recognised system letter, `idx += len` past a record, and `break` when a record would run past the end. `block_len` is total and returns only `Some(8)`, `Some(4)` or `None`, so every advance is a positive constant and `idx` climbs monotonically to `lines.len()`. The six are the ways to take that away: `block_len -> Some(0)` makes every record advance the walk by zero, four are `idx += 1` → `idx *= 1` at the skip branches — the skip stops skipping — and the sixth is `idx += 1` → `idx -= 1`, which steps back onto a line already rejected and cycles between the two. All six remove an advance rather than change an answer, so only the clock can see them; the loop they mutate carries its own proof. |
+| `edl.rs` — entry EOM, FNPEG bisection, guided entry | 21 | **Terminating, but the bound was the finding, and it is fixed.** Every loop is a counted `for _ in 0..N` (`0..max_steps`, `0..40_000`, `0..40`, `0..2_000`, `0..20`), so none of these could hang — but the caps *multiplied*: 2000 guidance passes × 40 bisections × 40 000 prediction steps = 1.28e10 right-hand sides, and the early break that keeps that off the table was NaN-permeable (neither `<` nor `<=` holds of a NaN, so a NaN state flew the whole product). The break is now written as the negated flight condition, and one shared step budget replaces the product with a sum. Measured on `entry_derivative_banked:150:40`, a mutant from this very cluster: 300 s+ before, **40.1 s and six failed assertions after** — a kill, not a timeout |
+| `double_double.rs` — `sin_series`, `exp` | 55 | **Was a defect, fixed.** Both looped on a residual test that terminates only because their callers reduce the argument; called directly at \|t\| = 1000 the numerator overflows first, `term.hi` goes NaN, and `NaN <= x` is false for ever. Both now carry the cap the reduction supplied implicitly, and the file has no `while` and no `loop` left |
+| `dual.rs::Div<f64>` | 1 | Terminating: the site is `self * (1.0 / rhs)`, which contains no loop at all. The mutant supplies one, and it is local rather than a caller's: `*` → `/` reads as `self / (1.0 / rhs)`, which re-enters this same impl with the reciprocal of the reciprocal and so never reaches a division. Measured in `gate-ci9`, the test binary was still inside `dual_operators_and_constructors_carry_the_right_derivative` past the 300 s budget rather than overflowing a stack, which is the recursion running as a loop. Nothing is owed — unmutated, the line is one multiply and one reciprocal |
+| `fft.rs`, `insar.rs`, `sar.rs` — butterflies, Bresenham, main-lobe walks | 14 | Terminating: `bit` halves from `n>>1` against a power-of-two `n`; `len` doubles; Bresenham cannot stall (`dr ≥ 0 ≥ dc` makes the both-guards-fail interval empty) and was checked exhaustively over all 390 625 endpoint pairs in `[0,24]²`; the BFS `head` is strictly increasing against a `visited`-bounded queue; the −3 dB walks are index-bounded, not value-bounded |
+| `root.rs`, `event.rs`, `access.rs` — Brent, event scan, access scan | 17 | Terminating: Brent forces `b += ±tol1` with `tol1 ≥ ½·tol > 0` (`tol` is validated at entry, `BadTolerance` otherwise), so the bracket shrinks by a fixed floor; the scans advance by `advancing_step = h.max(4ε·max(\|t0\|,\|t1\|))`, which `f64::max` keeps positive even when `h` is NaN. The non-finite escape in Brent is the earlier production fix |
+| `earth_radiation.rs` — Knocke crown/sector grid | 7 | **Was a defect, fixed — and the fix is honest about what it buys.** `off += Δ` stops climbing once `Δ < ulp(off)/2`, so each walk now runs against a counted limit as well. That limit converts *never terminates* into *terminates*, not into *terminates soon*: it is `⌈(bound − start)/Δ⌉ + 1`, so at the resolutions that motivated it the grid still has ~10³⁴ elements. The seven mutants on the counters are the measurement of that — the counter is unobservable at every resolution whose grid is payable, so all seven are in the ledger rather than under a test. Measured directly on the walk: the f64 sum tracks the exact-ℝ iteration count with the bound exactly one above it, unchanged at 10⁴, 10⁵, 10⁶, 10⁷ and 3·10⁷ steps, and the deterministic drift bound puts the first possible overrun of that slack at ~1.2·10⁸ steps — a grid of ≥1.4·10¹⁶ elements. The seventh timeout is the accessor itself, `AngularResolution::get -> 0.0`: a zero step makes `step_bound` saturate at `usize::MAX` *and* stops `off += Δ` advancing, so both halves of the fix fail together. That one is unreachable in production — `AngularResolution::new` now rejects every step the accumulator cannot see, `τ + Δ > τ`, which closes the zero case and the whole plateau below `ulp(τ)/2` with it (#233). What the constructor still cannot close is the positive, representable, unpayable step: `Δ = 4.44e-16` is accepted and asks for 2.0e32 elements. That is the caller's budget, and the counted limit is what keeps it finite |
+| `radiative_transfer.rs`, `sfm.rs`, `camera.rs` | 8 | Terminating: `for _ in 0..photons` × `0..MAX_SCATTERS`; `UnionFind::find` walks a forest with strictly decreasing depth; `sample_distinct` increments its guard unconditionally against 1 000 |
+| `rinex.rs` — the nav-record cursor | 6 | Terminating, and specifically not a parser DoS: every path through the body either advances `idx` (the `let`-else arms do `idx += 1` *before* `continue`, and `block_len` returns only `Some(8)`, `Some(4)` or `None`) or breaks on a truncated record |
+| `geopotential.rs`, `density_calibration.rs`, `dsst/coefficients.rs` | 6 | Terminating: the order remainder runs at most three times after the SIMD stride, against a compile-time `MAX_DEGREE = 120`; `isqrt` is an `O(√K)` scan over a const-generic array length; `factorial`'s `i` climbs from 2 against its `i <= n` bound; `jacobi_value_deriv`'s `i` descends against 0. `compute_max_ecc_pow` contributes two and is the only one of the six that needs an argument rather than a bound: its `m` loop counts up against a fixed `min(max_deg, max_order)`, its outer loop drives `max_deg` down by 1 and exits at `max_deg ≤ max_ecc + 2` with `max_ecc ≥ 0`, so it cannot pass `max_deg_top − 2` rounds — and its innermost loop holds the invariant `l + 2·nsld2 = max_deg`, so `l += 2; nsld2 -= 1` reaches `l ≥ max_deg` exactly when `nsld2` hits 0, never below (which is also why the `factorial(nsld2)` calls inside it are always in domain). All six mutants freeze an induction variable (`+= 1` → `*= 1`, `-= 1` → `/= 1`), which is a statement about the mutant and not about the loop |
+| `harris_priester/mod.rs`, `jb2008/mod.rs` — the altitude-bracket scan and `xambar`'s Horner descent | 2 | Terminating: `ia += 1` climbs against `ALT_RHO.len() - 2 == 48`, a `const` table; `xambar`'s `i` descends 5 → 0 and breaks at 0. Both mutants freeze the induction variable (`+= 1` → `*= 1`, `-= 1` → `/= 1`), which is a statement about the mutant, not the loop |
+| `nrlmsise00/mod.rs::splint` — the spline binary search | 2 | Terminating: while `khi − klo ≥ 2`, `usize::midpoint(khi, klo)` lands strictly inside, so either assignment shrinks a positive integer. `>` → `>=` lets the interval reach width 1, where the midpoint *is* `klo` and the `else` arm is a no-op; `−` → `+` replaces the width by a sum that never reaches 1 |
+| `ias15.rs` — the predictor–corrector sweep | 2 | Terminating, and the two are opposite cases worth separating. `263:16` freezes `sweeps` at 0 with `+= 1` → `*= 1`, which disables *both* of the loop's counted exits — the `sweeps >= MAX_SWEEPS` cap and the `sweeps > 2 && err >= predictor_error` oscillation break — leaving only convergence, which a diverging corrector never reaches: measured **still running at 300 s**. Unmutated, `sweeps` climbs monotonically to `MAX_SWEEPS = 12`. `226:21` is not a loop guard at all — it is `/ 2.0` inside the Horner predictor — and both enclosing loops keep their counters, so the mutant terminates: measured **269.6 s, and the suite *fails*** (baseline 0.5 s). That one is a kill the harness clock turned into a timeout, which is the honest reading of any timeout on a provably counted loop: not "undetected", but "detected later than the budget allows" |
+| `taylor.rs` — the adaptive Taylor step loop | 10 | **Was a defect, fixed.** `advances(t, h) = t + h > t` is the exact condition the loop depends on, and it bounds how *small* a step may be, not how many of them a span holds. The two are different bounds: the floor is `ulp(t)/2`, `2.2e-308 s` at `t = 0` against `1.2e-7 s` at a J2000 epoch. From the origin every step the series-tail estimate returns advances the clock, so `y' = y` at `tol = 1e-30` asks for `h = 9e-31` and needs `1.1e30` steps to cross a span of `1` — provably terminating, and unreachable. Both entry points now count steps against `DEFAULT_MAX_STEPS`, the cap and the `StepLimit` error `driver::integrate` already used (#223, the same defect one file over). All ten mutants — the three on `advances`, the four on the two step-estimate divisions, the `delete !` on the underflow guard and the two on `t += h` — are now kills, split between the cap test and a second test at `t = 1e9` where the estimate falls below the epoch's own resolution and `StepUnderflow` is the right answer. Neither test sees the other's bound, which is the point. The fix then created an eleventh, which `prop-mixed` found and which no test can retire: `375:15` freezes the new counter itself, `steps += 1` → `steps *= 1`. A frozen counter is invisible on every run that ends by reaching `t1`, and on the one run that ends by hitting the cap it removes the only exit — so the mutant is observable *only* by waiting, which is the definition of a timeout. Same shape as `ias15.rs:263:16`, and the same reading: the counter that converts a hang into an error is itself unkillable by a test that must terminate |
+| `dsst/tesseral.rs` — the `s` and `n` sums of the tesseral potential | 3 | Terminating: `s` climbs from 0 against `s_max = min(maxEccPow + j, maxDegree)`, a `let` fixed before the loop, and `n` climbs from `max(2, m, \|s\|)` against `maxDegree`. Both bounds are loop-invariant, so each sum ends in at most `bound − start + 1` passes. Two mutants freeze a counter (`+= 1` → `*= 1`), the third runs one backwards (`+= 1` → `-= 1`), which from `s = 0` is 9.2e18 passes to `i64::MIN` — long enough to read as non-termination even though the overflow check would eventually fire |
+| `mozhaev.rs` — icosahedral group closure | 1 | Terminating: a BFS whose `frontier` increments unconditionally against a `count` capped at `buf.len() == 60` |
+| `spacelab-capi/lib.rs` — the C ABI's boundary checks | 13 | **Terminating, and the interesting part is where the loop is: not here.** The crate has exactly one loop that is not a `for` over a slice whose length is fixed before it starts — `copy_to_c_buffer`'s UTF-8 truncation walk — and that accounts for one timeout, `keep -= 1` → `/= 1`, the frozen-counter family's seventeenth member. The other twelve are mutants that remove a *boundary check* and hand a degenerate argument to somebody else's loop: `to_vec3 -> Default::default()` puts the satellite at the centre of the Earth; five in `check_coverage_orbit` let a zero axis or a NaN angle into the access-window search; four in `lerp_at` make every EOP field the same constant, which is a 57° polar motion; two in `circular_ground_track` divide where the rotation multiplies. Those loops are the coverage scan's and `driver::integrate`'s, and their termination is their own crates' rows above. Three of the five `check_coverage_orbit` entries were survivors under `capi-surface` and are timeouts only because the tests added in `capi-surface2` now reach them: a coverage query whose guard is gone does not answer wrongly, it does not answer at all. The reading that matters is `lerp_at -> 1.0`, measured: the test written for it, `the_eop_series_is_a_straight_line_inside_and_a_held_value_outside`, **fails in 0.00 s**, so the mutant is killed by an assertion — and the binary still does not exit, because `a_constant_orientation_series_is_the_fixed_orientation_it_repeats` is propagating against that 57° pole and was **still running at 600 s**, and at **3 000 s**. `cargo test` reports a binary, not a test, so a kill and a hang in the same binary read as a timeout. Bounded by `DEFAULT_MAX_STEPS = 100 000` (#223), which is why it is slow rather than infinite. Chasing that reading is what turned up the unvalidated EOP payload written up in §6: the mutant is slow for the same reason a caller's NaN was, and only one of the two was supposed to be possible |
+| `modip.rs`, `itu.rs` | 6 | **Was a defect, fixed** (`modip.rs`, 5) — the anti-meridian wrap was a search, not a modular reduction. `itu.rs` terminating: `n` doubles geometrically from 8 against a fixed `N_STOP = 1024`, so at most eight iterations. The `modip.rs` five are gone: `iono-seal2` measures **0** timeouts in that file |
+| `lambda.rs` — the LAMBDA integer-least-squares enumeration | 18 | **Terminating, and the node count is the finding.** `Reduction::search` is a Schnorr–Euchner walk: at each level it starts at the conditional float's nearest integer and steps outwards, so the partial cost grows without bound along any branch and every branch is eventually pruned against `bound`. That proof needs the walk to *move*, and all eighteen take the movement away. Six are in `search` itself: the `+` that accumulates the partial cost and the `*` and `/` that build the residual term, `level -= 1` → `/=` on the descent and `level += 1` → `*=` on the climb back, and `best.len() == count` → `!=`, which assigns the pruning bound only while the candidate list is *not* full and so leaves `bound` at infinity for ever. Four more remove the outward step or the integer it steps from — `advance` and `permute` replaced by `()`, `float_of` frozen to a constant, `round_half_away -> 0` — and the remaining eight flatten the factorisation the conditional float is computed through, in `Square::at`, `ltdl`, `conditional_float` and `permute`, so the float stops depending on the level and the residual stops growing. What is owed is not a termination proof but a *budget*: nothing bounds how many nodes an ill-conditioned covariance may cost, and the search has no way to report that it gave up rather than finished. #321 paid it — `MAX_SEARCH_NODES` and `LambdaError::SearchExhausted`, added with the reduced-conditioning rewrite rather than before it, because a budget designed twice is a budget designed badly. **`seal-lambda40` measures 4 and `reseal-lambda40` measures 2.** The sixteen that went are what a budget converts: a mutant that made the enumeration unpayable now returns an error the tests assert on. Of the four the seal still showed, all were the differential oracle added with the rewrite, which reproduced the old enumeration *and its absence of a budget*; it now carries the same one. The last two are `permute`, and they are the frozen-loop family exactly: the reduction sweep restarts at `n − 2` after each permutation and ends only because each permutation strictly lowers the conditional variance of the pair, so `permute -> ()` and `k + 1` → `k * 1` remove the decrease the termination rests on |
+| `rinex_obs.rs` — the observation-record line walk | 1 | **Was reachable only after a test made it so, and is now gone.** `RinexObs::parse` walked `lines` with one index, and `index += 1` → `index *= 1` at the not-an-epoch-record branch stopped the walk advancing. In `seal-gnss-obs` the mutant was an ordinary survivor, because no fixture put a stray line after the header and the branch was never executed; the test written to close that gap made it reachable, and the survivor became a hang. Turning a mutant nothing can see into a mutant only the clock can see is not progress, so the walk was rewritten to consume from `lines.iter().enumerate().skip(start)` — `records.next()` for the outer step, `by_ref().take(count)` for the event-flag block — which leaves no counter to freeze. `reseal-gnss-obs` measures **0** timeouts in the file |
+| `galileo.rs`, `parameters.rs`, `ray.rs`, `itu.rs` — the NeQuick STEC ladder | 11 | Terminating, and the number was the finding. Every one of these mutants breaks the convergence test of one loop, `while \|gn2 − gn1\| > tol·\|gn1\| && count < 20` in `NeQuickGalileo::stec`; `parameters.rs` and `ray.rs` reach it from a distance by moving foF2 or the segment interval. `count < 20` is a hard cap, so the loop ends — after 21 rungs whose interval count doubles from 8 to 8 388 608, 33 554 416 Gauss points in all. The cost per point was the thing worth measuring, and it was **4.36 µs** (`release`, best-of-9 on a 16 384-interval rung, three A-B-A-B rounds: 4.32 / 4.36 / 4.63 µs), i.e. **≈146 s for a single `stec` call** against the 180 s timeout. Two hoists took it to **1.48 µs** (1.48 / 1.70 / 1.21 µs on the same rounds), **≈50 s** for the same ladder: the twelve monthly CCIR blocks now parse once behind a `OnceLock` instead of re-tokenising 2 858 ASCII floats per `stec` call, and the Fourier collapse is split at the seam where it is affine in `azr01` (`EpochSeries`), so a node costs one multiply-add per column rather than `2·depth`. Whole-call, alternated: a short single-rung ray 346.8 → 50.5 µs, the 6-rung Orekit fixture 5 813 → 2 018 µs. The STEC values are bit-identical on the short ray and differ by 1.4e-15 relative on the long one — six ulps of summation order — and both Orekit oracles pass unchanged. The ITU variant caps at `n ≤ 1024`, 2 048 points, so the two implementations' worst cases still differ by 16 384×; the 20-doubling cap is Orekit's and NeQuick-G's and was left alone, because the honest fix to a slow loop is to make the loop cheaper, not to shorten it. Since 2026-10-20 NeQuick-G has no ladder: it integrates with the ICD's Kronrod G7-K15 quadrature, split at 1000 and 2000 km, which the JRC oracle showed the ladder did not reproduce, by up to 2.6 TECU |
+| `galileo.rs` — NeQuick-G's Kronrod G7-K15 acceptance test (2026-10-20) | 21 | Terminating, and bounded in depth rather than work. All 21 corrupt the K15 or G7 sum or the comparison between them, so no interval is ever accepted and every branch halves to `MAX_RECURSION` = 50, the reference implementation's value: 2^50 intervals. The unmutated quadrature reaches depth 41 at most on the 1298-ray fixture, where an interval holds a jump in the density (the Eq. 109/110 thickness switches) and is halved until rounding merges its nodes; that costs about 80 extra evaluations, and the reference behaves the same way. The one input that made the unmutated code hang, a NaN coordinate, now stops at the first non-finite estimate (`a_nan_input_ends_the_quadrature_at_once`). The other 165 mutants of `galileo.rs` are caught, none missed |
+
+Where a loop could *not* be proved terminating, the outcome was a production fix — that is where
+#221, #222, #223 and the two entries above came from.
+
+---
+
+## 9 · Standards currency — which realization, and is there a newer one?
+
+"Modern" is a claim, and a claim needs a date on it. Section 8 asks whether the tests would notice a
+wrong answer; this one asks the question upstream of that — whether the model being reproduced
+faithfully is still the one the issuing body publishes. A residual of 1e-9 against a superseded
+model is 1e-9 of agreement with the wrong thing.
+
+**This table is transcribed, not just read.** `spacelab-book`'s `verification_ladder` generator
+copies the *decision* cell verbatim into LaTeX, so a character with no LaTeX mapping stops the book
+building 244 pages in, naming a file no human wrote. It happened once, with the ticket identifier
+`Ф6.G`; the generator now refuses at the point of writing instead, but the cheaper rule is here:
+keep this column to ASCII, the em dash and `§`, and write for a reader who has never seen the plan.
+
+Every row below is *implemented → current → decision*. **Stay** with a stated reason is a fine
+answer; the rows that matter are the two marked **upgrade**, and one of them is a live defect
+measured below.
+
+### Reference frames and time
+
+| Component | Implemented | Current | Decision |
+|---|---|---|---|
+| Terrestrial frame | **Named where a product names it** — `spacelab_gnss::{ReferenceFrame, Itrs}` reads SP3 line 1 columns 47–51, which the reader used to discard, and the four tests that difference an orbit against station coordinates assert agreement. The CIO chain's own realization is still whatever `finals2000A` realizes, and `finals2000A` has no header to say | ITRF2020 (2022), with the IGN updates ITRF2020-u2023 and u2024; IGS20 is the IGS realization of it; SLR stations live in SLRF2020 | **Half done — §9.1.** The half that closed is the half where the data speaks: `IGS20`, `IGc20`, `SLR20` are read from this repository's own fixtures, and `PZ90` — a different datum, decimetres from ITRF — no longer reads as ITRF. The half that cannot close from `finals2000A` needs the C04 reader in the row below |
+| Celestial frame | GCRF; no catalogue named | ICRF3 (IAU 2018, effective 2019-01-01) | **Stay** — the `dX, dY` we consume are aligned to ICRF3 by the IERS and nothing in the code fixes a radio-source position. Name it in the docs, as above |
+| EOP series | `finals2000A` only — Bulletin A columns and the Bulletin B combination, no C04 reader | IERS EOP 20 C04, in service since 2023-02-14 and consistent with ITRF2020; 14 C04 retired | **Upgrade candidate, and §9.1 gives it a second reason.** The Bulletin B columns of `finals2000A` *are* that combination and it is the only product carrying a prediction span, which is why this said Stay. But `finals2000A` has no header — measured, every line is a data row — so the terrestrial realization cannot be recovered from it at all, while C04 states it in its own second line: `# EOP (IERS) 20 C04 TIME SERIES  consistent with ITRF 2020`. Naming the *chain's* frame is not possible without it |
+| Precession-nutation | IAU 2006/2000A — `X, Y` from tables 5.2a/5.2b, `s` from 5.2d | IAU 2006/2000A remains the IAU and IERS standard | **Stay** — current |
+| Free core nutation | Not modelled; carried by the observed `dX, dY` | IERS TN36 Ch. 5 empirical FCN model, re-fitted yearly | **Stay** — the observed offsets already contain the FCN and are the better input. The empirical model is the fallback for when `dX, dY` are unavailable, which is not our case |
+| Leap seconds | 28 transitions through the 2027 bulletin; none since 2016-12-31 | CGPM 2022 Resolution 4: the leap second is to be discontinued by 2035 | **Stay, watch** — nothing to change before the redefinition, and the table already refuses to extrapolate past its last entry |
+| Ellipsoid | WGS-84 defining constants (`a`, `1/f`, `GM`, `ω`) from NIMA TR8350.2 | WGS 84 (G2296), effective 2024-01-07, aligned to ITRF2020 within 2 cm | **Stay** — a G-realization moves station coordinates, not the defining constants, and the defining constants are all we use |
+
+### Geopotential and tides
+
+| Component | Implemented | Current | Decision |
+|---|---|---|---|
+| Static field | XGM2019e to degree/order 120 | XGM2019e (2019) is current-generation; EGM2020 was announced in 2020 and is still unreleased, with NGA now indicating ~2028 | **Stay** — already the modern combined model. Revisit when EGM2020 ships |
+| Time-variable gravity | IERS TN36 Table 6.2 secular rates plus annual/semiannual, with an ICGEM `.gfc` reader for a full model | Unchanged | **Stay** |
+| Ocean tides | FES2004 (the Orekit-comparable gate), FES2014b (the default) to degree/order 100, and **GOT5.5 to degree 6, computed here from the cotidal grids** | FES2022b (LEGOS/NOVELTIS/CLS via AVISO) | **Partly closed.** GOT5.5 is in the tree: `derivations/tide_to_stokes.py` does the spherical-harmonic analysis and IERS Eq. 6.21 itself, so an atlas that publishes only elevation grids is now usable, and it lands closer to FES2014b than FES2004 does on every shared wave (§10.8). Degree 6 is where IERS publishes `k′n` (Ф6.B′). FES2022b stays deferred and is now *also* a licence question: the grids need an AVISO account, whose terms are accepted at registration |
+| Solid Earth tide | IERS TN36 Ch. 6, Step 1 + Step 2 | Unchanged | **Stay** |
+| **Pole tide** (solid §6.4 and ocean §6.5) | **The secular pole of the Chapter 7 update published 2018/02/01**, Eq. (21): `x_s = 55.0 + 1.677 (t−2000)`, `y_s = 320.5 + 3.460 (t−2000)` mas — `MeanPole::Secular2018`, the default. The Table 7.7 mean pole of the 2010 printing stays available as `MeanPole::Iers2010` for reproducing an Orekit result | Eq. (21) is current | **Fixed** — was the 2010 printing; the defect and the repair are below |
+
+### Atmospheres
+
+| Component | Implemented | Current | Decision |
+|---|---|---|---|
+| NRLMSISE-00 | Picone et al. 2002, full `gtd7`/`gtd7d`, from the **NRL FORTRAN** `nrlmsise00_sub.for` — a US Government work — rather than from the C translation, which carries no licence grant at all | NRLMSIS 2.0 (2020) / 2.1 (2022) | **Blocked** — 2.x is patent- and licence-encumbered; the decision not to port it stands and is recorded at the use site. The 00 implementation was **re-based on the FORTRAN** and the re-basing is measured: regenerating the tables from `BLOCK DATA GTD7BK` reproduces all 3 290 shipped values byte for byte. `docs/provenance.md` §2 |
+| JB2008 | Bowman et al. 2008 | JB2008 is still the published model; HASDM is operational and not distributed as source | **Stay** — with our own open density-calibration layer standing in for what HASDM does |
+| DTM2020 | Bruinsma & Boniface 2021 | Current | **Stay** |
+| Harris-Priester | 1962 table (Montenbruck–Gill tabulation) | Superseded by every model above | **Stay** — kept as the cheap analytic model, not as an accuracy claim |
+| Geomagnetic driver | 3-hourly `Kp`/`ap` from CelesTrak `SW-All`, which is what all three models above are specified on, plus `space_weather::{parse_hpo, hpo_at}` reading GFZ's Hp30/Hp60 | GFZ's Hpo family, published since 2021 at 30- and 60-minute cadence from the same 13 observatories, and uncapped above `Kp` 9 / `ap` 400 | **Read, not yet a driver — §10.7.** The newer product is parsed, fixtured and measured, and the measurement is why it is not wired in: NRLMSISE-00's storm parameterization is a *fit* to 3-hourly `ap` histories, so feeding it an hourly value changes the 400 km density by 3-6 % and is not the model being used as specified. What the hourly index does buy is measured too — the ceiling and the onset's shape. Wiring it in needs a model refitted on Hpo, which nobody has published |
+
+### GNSS, ionosphere, ephemeris
+
+| Component | Implemented | Current | Decision |
+|---|---|---|---|
+| Geomagnetic field | IGRF-14 to degree 13, epoch 2025.0 with the 2025–30 secular variation | IGRF-14 (2024 release, valid to 2030) | **Stay** — current, and re-derived from the IAGA file above |
+| Troposphere | Niell, GMF, VMF1, VMF3, GPT3, ITU-R P.834 | VMF3 and GPT3 are the current Vienna products | **Stay** |
+| Ionosphere | NeQuick-G (Galileo ICD), NeQuick 2 (ITU-R P.531), Klobuchar (IS-GPS-200) | Current | **Stay** |
+| Precise products | SP3 reader reporting `Version`, SP3-a…d; RINEX 3 nav/obs **and RINEX 4.02 nav, every record type** | SP3-d; RINEX 4.02 (1 September 2025) | **Current — §5.6, §5.8.** SP3-d measured rather than assumed: the version's three changes leave every parsed value identical, and a 140-satellite file reads in full against an injected-cap control. RINEX 4.02 reads all 38 record shapes any published product contains, plus the four the specification defines and nothing broadcasts |
+| Planetary ephemeris | DE440 via `anise` | **DE442 (2025-02-06)** | **Stay — measured, §2.5.** DE440−DE442 is 0.300 m on the Moon and 19.633 m on the Sun over 2000–2030, worth **0.152 mm** on a 32-satellite GPS orbit fit; and NAIF publishes no DE442 lunar orientation, frame kernel or mass file, so the selenocentric chain has nothing to move to. Reopens when it does |
+
+### The pole-tide defect, measured — and fixed
+
+`pole_wobble` in `propagation/src/solid_tide.rs` built `(m₁, m₂)` against the Table 7.7 mean pole of
+the 2010 printing. The current Conventions build them against the secular pole, and §6.4 defers to
+§7.1.4 for exactly this definition — so both the solid and the ocean pole tide inherited the
+superseded reference. The two pole models separate linearly at 5.9 mas/yr in `x` and 4.1 mas/yr in
+`y`, and they were already 27.9 mas apart at the 2010 branch point:
+
+| Epoch | `x̄ − x_s` (mas) | `ȳ − y_s` (mas) | Δ`ΔC̄₂₁` | Δ`ΔS̄₂₁` |
+|---|---|---|---|---|
+| 2010.0 | 27.88 | −2.50 | −3.713e-11 | 3.755e-12 |
+| 2020.0 | 87.25 | −43.38 | −1.156e-10 | 5.917e-11 |
+| 2026.6 | 126.44 | −70.37 | −1.675e-10 | 9.574e-11 |
+| 2035.0 | 176.31 | −104.71 | −2.334e-10 | 1.423e-10 |
+
+That is not a small correction to the pole tide — it is the size of the pole tide. At 2026.6 with a
+representative polar motion of `(xₚ, yₚ) = (150, 350)` mas the two models disagree in **sign**:
+Table 7.7 gives `ΔC̄₂₁ = +1.015e-10`, the secular pole gives `−6.813e-11`.
+
+The reason it went unnoticed is the subject of the *Specification* column above: the oracle is
+Orekit's `getSolidPoleTide`, Orekit implements the same Table 7.7 model, and the agreement is
+`rel < 1e-9`. Two implementations of a superseded convention agreeing to nine digits is exactly the
+failure mode that a residual cannot see and a specification column can.
+
+**Resolved.** `MeanPole` now names which conventional pole the wobble is measured from, and
+`MeanPole::default()` is `Secular2018`; `pole_tide_corrections` and `ocean_pole_tide_corrections`
+take it explicitly, because §6.4 and §6.5 share the definition and mixing the two would be
+incoherent. `Iers2010` stays selectable and is what the three Orekit fixtures now ask for, so they
+keep pinning what they can actually pin — Orekit's reading of the retired model — while the shipped
+default is the current one. The new golden `the_secular_pole_is_the_2018_chapter_7_line` checks
+Eq. (21) at the same seven epochs as the Table 7.7 golden, against
+`derivations/pole_wobble.py` at 50 digits, `rel < 1e-15`; a second test asserts the two models
+disagree on the sign of `ΔC̄₂₁` at the fixture epoch, so a caller wired to the wrong one cannot pass
+silently.
+
+### 9.1 The frame a file states, and the frame a file cannot state
+
+"Name the terrestrial realization" turned out to be two problems with different answers, and the
+ticket that asked for it assumed a third that is not true.
+
+**What the plan assumed.** That `finals2000A` carries the realization in its metadata, and that
+"post-2023 rows realize ITRF2020, older rows ITRF2014". Both are wrong, and both were checked rather
+than argued about. `finals2000A` has **no header**: every line of the 20 026-row snapshot is a data
+row, so there is nothing in the bytes to read a realization from. And the IERS did not switch the
+series forward from 2023 — it *reprocessed the whole thing*. The current C04 product's own second
+line reads
+
+```text
+# EOP (IERS) 20 C04 TIME SERIES  consistent with ITRF 2020 - sampled at 0h UTC
+```
+
+and its first data row is **1962-01-01**. So a file downloaded today realizes ITRF2020 back to 1962,
+and one archived in 2022 realizes ITRF2014 all the way forward. The realization is a property of the
+*file's vintage*, not of the row's epoch, and splitting a series by date would have been a bug
+dressed as a feature.
+
+**What a compile-time parameter would have been.** `Itrf<Itrf2020>` as a type parameter is the
+obvious reading of "make mixing a typed error", and it is the wrong one here: which realization a
+chain lands in is a property of the data handed to it at run time, and a type parameter would be a
+claim the caller makes that nothing checks. A claim wearing a check's clothes is worse than an open
+gap, so the realization is a value, not a parameter.
+
+**What the data does state, and now gets read.** SP3 line 1 carries the coordinate system in columns
+47–51, and the reader was discarding it. It is populated in every product this repository holds:
+
+| Fixture | Field | Reads as |
+|---|---|---|
+| `igs20_g02_2025001.sp3` | `IGS20` | `Itrs::Igs20` → ITRF2020 |
+| `igs20_gps_2026224.sp3` | `IGc20` | `Itrs::Igs20` → ITRF2020 |
+| `ilrsa_lageos{1,2}_*.sp3` (6 files) | `SLR20` | `Itrs::Slrf2020` → ITRF2020 |
+| an IAC GLONASS product | `PZ90` | `ReferenceFrame::Pz90` — **not ITRS at all** |
+
+That last row is the one the type exists for. PZ-90.11 agrees with ITRF2008 at the centimetre, but
+PZ-90 and PZ-90.02 differ from ITRF by decimetres to metres, and a station whose coordinates are ITRF
+differenced against an orbit in PZ-90 is wrong by that much with nothing to show for it. Before this,
+the workspace could not have noticed.
+
+`ReferenceFrame::agrees_with` is the check, and it refuses three ways: a different ITRF solution
+(`IGS14` against `IGS20` — centimetres), a different datum (`PZ90`), and an **unstated** frame, which
+does not even agree with itself. A file that did not say what frame it is in has not said it agrees
+with anything, and returning `true` there would be the silent default the type was written to remove.
+`Itrs::itrf` is what makes the *first* refusal precise: `IGS20`, `IGb20`, `IGc20` and `SLR20` are
+successive realizations and a superset of one IERS solution, not four frames, so they must agree —
+and `IGS14` must not.
+
+The four tests that difference an orbit product against station coordinates now assert it —
+`igs_orbit_fit`, `supgp_vs_igs`, `tle_from_precise_orbit` and `slr_range_residuals` — which turns
+four doc comments that stated the frame in prose into four checks. `slr_range_residuals` is the one
+with content: its orbit is SLRF2020 and its stations come from `ITRF2020-ILRS-TRF.SNX`, and the
+reason differencing them is legitimate is exactly that both realize ITRF2020. SLRF2020 being a
+*superset* — it carries pads that joined after ITRF2020's data cut-off — is handled separately, by
+those pads having no station coordinates at all.
+
+**What did not close, and why it cannot from here.** The CIO chain's own realization is still
+unnamed, because `finals2000A` cannot name it. That is not a gap to paper over with a caller-supplied
+constant; it is a reason to read the product that does say, which moves the "EOP series" row above
+from **Stay** to an upgrade candidate with a second motivation.
+
+SINEX is a third case again, and it was checked on the *full* file rather than on the excerpt:
+`data/slr/ITRF2020-ILRS-TRF.SNX` has one `+FILE/COMMENT` block reading "File created by CATREF
+software (Z.Altamimi)", and the string `ITRF` appears nowhere else in it. The `%=SNX` header line
+carries versions, agencies, epochs, a parameter count and a technique code — no frame. So the
+realization of an ITRF SINEX is in its *filename*, and a parser cannot reach it at all. That is why
+`slr_range_residuals.rs` names its station frame as a constant beside the `include_str!` rather than
+reading it: a value the file does not contain has to be declared by whoever chose the file, and
+declaring it next to the path that chose it is as close to checked as this format allows.
+
+---
+
+## 10 · End-to-end validation against agency products
+
+Everything above validates one component against a reference for that component. This section is the
+other kind of evidence: a whole chain, run against a product an agency published, where the residual
+is in metres of real orbit rather than in units of agreement with ourselves.
+
+### 10.1 IGS precise orbits — a 24-hour GPS arc
+
+`IGS0OPSFIN_20250010000_01D_15M_ORB.SP3`, the IGS **final** orbit combination for 2025-01-01: a
+weighted average of ten analysis centres, IGS20 (the IGS realization of ITRF2020), satellite centre
+of mass, 96 epochs on a 15-minute grid, published accurate to a few centimetres. Fetched by
+`tools/fetch-validation-data.sh`; one satellite's 24 hours is committed as
+`crates/spacelab/tests/fixtures/igs20_g02_2025001.sp3` so the always-run test needs no network.
+
+The fit estimates **seven parameters** — six epoch state components and one scale on an isotropic
+solar-radiation pressure — against 288 position residuals, through the AD variational equations and
+`GaussNewton`/`Srif`. Forces: XGM2019e 12×12 in the true rotating frame, Sun and Moon, cannonball SRP
+with the conical shadow, Schwarzschild. Observations are rotated ITRF→GCRF with the **exact**
+per-epoch CIO chain on per-epoch `finals2000A` EOP plus the IERS sub-daily ocean-tide and libration
+terms; the force model's Earth-fixed rotation uses `CioInterpolator`, where fixed-EOP error only
+multiplies the tesseral field.
+
+| Configuration | radial | along | cross | 3D RMS | worst | SRP scale |
+|---|---|---|---|---|---|---|
+| G02, analytic Sun + Moon (committed fixture, CI) | 0.175 | 0.221 | 0.105 | **0.300 m** | 0.614 | 1.0352 |
+| G02, DE440 third bodies *(ignored: needs kernel)* | 0.054 | 0.063 | 0.045 | **0.094 m** | 0.248 | 1.0340 |
+| G02, **Orekit 13.1.7** fitting the same file | 0.053 | 0.062 | 0.065 | **0.105 m** | 0.252 | 1.0310 |
+| All 32 GPS satellites, DE440 *(ignored)* | 0.105 mean | 0.210 | 0.078 | **0.249 m** mean | 0.612 (G31) | — |
+| All 32 GPS satellites, **Orekit** | — | — | — | **0.255 m** mean | 0.616 (G31) | — |
+
+Two findings, both of which a single-component test could not have produced:
+
+- **The low-precision analytic Sun and Moon cost 0.21 m of the 0.30 m** — the largest single term in
+  the residual, larger than the SRP mismodelling one would nominate first. The Moon series is
+  documented at `≤ 278″` and `≤ 458 km`, which moves its `4.6e-6 m/s²` pull by a few `1e-9 m/s²`, and
+  a day of that is decimetres after seven parameters have absorbed what they can. Where an arc has
+  to be right to centimetres, DE440 is not optional. (`spacelab-ephemeris` was already the way to get
+  it; this is the first measurement of what it is worth.)
+- **At equal ephemeris quality the two independent implementations agree to millimetres.** Per
+  satellite the 3D RMS differs by **≤ 11 mm on 31 of the 32**; the exception is G19, where Orekit's
+  solve lands 104 mm worse. The same satellite (G31, 0.61 m) is worst in both, so that number is a
+  property of the satellite — bus type and beta angle against one cannonball — and not of either
+  implementation. The estimated solar-pressure scales agree to 0.3%.
+
+The remaining ~0.25 m is the **SRP model**, named rather than hidden: the IGS analysis centres
+estimate ECOM once- and twice-per-revolution empirical accelerations on top of a box-wing bus, which
+is the difference between decimetres and the product's few centimetres. Nothing in the frames, time
+scales, integrator or estimator is left as a candidate — a fault in any of those is kilometres.
+
+| Component | Specification source | Oracle | Residual / tol | Where |
+|---|---|---|---|---|
+| Seven-parameter GNSS arc, 24 h | IGS final orbit combination (IGS20 / ITRF2020, centre of mass) | the IGS product itself | 3D post-fit RMS < 0.4 m, radial < 0.25 m, worst < 1.0 m | tests/igs_orbit_fit.rs |
+| Same arc on DE440 *(ignored: needs kernel)* | as above | the IGS product | 3D RMS < 0.15 m, and < ½ the analytic-ephemeris residual | tests/igs_orbit_fit.rs |
+| Whole constellation, DE440 *(ignored: needs snapshots)* | as above | the IGS product | worst-satellite 3D RMS < 0.8 m | tests/igs_orbit_fit.rs |
+| Independent fit of the same file | — | **Orekit 13.1.7** `BatchLSEstimator`, its own SP3 parser, frames, DE440 and EIGEN-6S | ≤ 11 mm on 31/32 satellites; means 0.249 vs 0.255 m | tools/orekit-oracle/IgsOrbitFitOracle.java |
+
+### 10.2 Measured thermospheric density — GRACE-FO C and Swarm A
+
+§2's atmospheres are validated as *ports*: NRLMSISE-00 against Brodowski's C, JB2008 against Bowman's
+FORTRAN, DTM2020 against CNES. That establishes the code is the model. It says nothing about whether
+the model is the thermosphere. This section is the other question.
+
+The measurement is the **TU Delft neutral-density product, version 02** (Siemes et al., *J. Space
+Weather Space Clim.* **13**, 16, 2023; CC BY 4.0): along-track mass density from the **GRACE-FO C**
+accelerometer at 10 s in GPS time, and from **Swarm A**'s precise orbit determination at 30 s in UTC.
+Six months are fetched by `tools/fetch-density-data.sh` (226 MB, digest manifest per file), chosen to
+span the solar cycle end to end — 2019-01 and 2021-11 at the cycle-24/25 minimum, 2022-04 and 2023-04
+on the rise, 2024-05 and 2025-06 at the cycle-25 maximum. Two GRACE-FO days are committed as fixtures
+so the always-run test needs no network: **2019-01-01**, the floor of the minimum, and **2024-05-10**,
+the onset of the Gannon superstorm (Kp 9, Dst −412 nT).
+
+The models are driven from what an operational user would have, each index at the lag it was fitted
+with: CelesTrak `SW-All` for F10.7 and 3-hourly `ap`/`Kp`; Space Environment Technologies `SOLFSMY`
+for S10/M10/Y10 and `DTCFILE` for hourly `ΔTc`. JB2008's lags come from the SOLFSMY header itself —
+F10 and S10 by one day, M10 by two, Y10 by five.
+
+**The two fixture days**, 720 samples each at ~490 km, as `mean(ρ_model/ρ_measured)` ± the RMS of the
+relative error:
+
+| model | 2019-01-01 quiet | 2024-05-10 storm | Orekit, quiet | Orekit, storm |
+|---|---|---|---|---|
+| NRLMSISE-00, 3-hourly `ap` array | 2.034 ± 1.264 | **1.661 ± 0.793** | — | — |
+| NRLMSISE-00, daily `Ap` | 2.019 ± 1.235 | 2.087 ± 1.346 | 2.019 ± 1.236 | 2.086 ± 1.346 |
+| JB2008 | 1.359 ± 0.652 | 1.133 ± 0.297 | 1.358 ± 0.645 | 1.156 ± 0.312 |
+| DTM2020 *(Orekit ships DTM2000)* | 1.056 ± 0.316 | 1.189 ± 0.361 | 2.163 ± 1.661 | 2.243 ± 1.725 |
+| **SDTM-1, ours — in sample** | **0.927 ± 0.274** | 1.257 ± 0.383 | — | — |
+
+On MAPE, the metric the density literature reports, in the same order: 103.4 / 102.0 / 47.6 / 23.8 /
+**22.1 %** on the quiet day and 68.2 / 114.7 / **20.6** / 24.1 / 30.1 % on the storm day. SDTM-1's two
+numbers are **in sample** — Ф15.D fitted it on these twelve files (§10.10) — and they are here because
+they answer a question the held-out splits cannot: how much of this measurement the form can absorb at
+all, and in which regime. The answer is that at the deep minimum it absorbs more of it than any of the
+three literature models, including the one fitted on this data family, and that under the Gannon storm
+it does not — and the storm-day number is the one place §10.15's storm regressor is *worse* than the
+linear one it replaced (30.1 % against 26.7 %, bias 1.257 against 1.06), on a day of sustained moderate
+activity ending in the `ap` 400 peak.
+
+**The full campaign** — 348 693 evaluations, one row in six of all twelve product files:
+
+| bin | n | NRLMSISE-00 `ap[]` | JB2008 | DTM2020 |
+|---|---|---|---|---|
+| F10.7 < 100 | 122 475 | 1.853 ± 1.117 | 1.305 ± 0.572 | 1.021 ± 0.324 |
+| 100 ≤ F10.7 < 175 | 185 898 | 1.270 ± 0.406 | 1.034 ± 0.236 | 1.020 ± 0.237 |
+| F10.7 ≥ 175 | 40 320 | 1.410 ± 0.585 | 0.970 ± 0.264 | 1.075 ± 0.311 |
+| `Ap` < 15 (quiet) | 276 116 | 1.527 ± 0.797 | 1.122 ± 0.402 | 1.030 ± 0.270 |
+| 15 ≤ `Ap` < 50 (active) | 53 451 | 1.352 ± 0.511 | 1.097 ± 0.320 | 0.971 ± 0.270 |
+| `Ap` ≥ 50 (G2 storm or worse) | 19 126 | 1.354 ± 0.636 | 1.186 ± 0.410 | 1.134 ± 0.414 |
+| **F10.7 ≥ 175 and `Ap` ≥ 50** | 5 760 | **1.782 ± 1.002** | 1.102 ± 0.402 | 1.303 ± 0.544 |
+| GRACE-FO C, accelerometer | 261 602 | 1.497 ± 0.756 | 1.116 ± 0.384 | 1.032 ± 0.281 |
+| Swarm A, orbit determination | 87 091 | 1.472 ± 0.741 | 1.139 ± 0.410 | 1.011 ± 0.276 |
+
+**And the same 348 693 evaluations on MAPE, with SDTM-1 as a fifth column.** Ф15.E's gate asks whether
+our own model is below NRLMSISE-00 in every bin; this is the table that answers it. SDTM-1's numbers are
+**in sample** — these are the twelve months Ф15.D fitted it on (§10.10) — but not trivially so: the fit
+saw 8 170 rows at one-hour spacing and this is every sixth row of the full product, 43 times as many,
+so the 20.3 % here against 19.3 % there is what the hourly decimation cost.
+
+| bin | n | NRLMSISE-00 `ap[]` | NRLMSISE-00 `Ap` | JB2008 | DTM2020 | SDTM-1, in sample |
+|---|---|---|---|---|---|---|
+| all | 348 693 | 51.7 % | 52.7 % | 25.5 % | **20.2 %** | 20.3 % |
+| F10.7 < 100 | 122 475 | 86.2 % | 88.7 % | 39.0 % | **22.4 %** | 24.2 % |
+| 100 ≤ F10.7 < 175 | 185 898 | 30.7 % | 30.8 % | 17.7 % | 18.2 % | **16.7 %** |
+| F10.7 ≥ 175 | 40 320 | 43.6 % | 44.5 % | **20.8 %** | 22.6 % | 24.9 % |
+| `Ap` < 15 (quiet) | 276 116 | 54.9 % | 55.4 % | 25.8 % | **19.1 %** | 19.9 % |
+| 15 ≤ `Ap` < 50 (active) | 53 451 | 37.3 % | 39.8 % | 22.2 % | 21.6 % | **19.0 %** |
+| `Ap` ≥ 50 (G2 or worse) | 19 126 | 44.3 % | 49.8 % | 31.0 % | 30.5 % | **29.2 %** |
+
+Three readings, and the third is the one that matters for Ф15.E:
+
+* **SDTM-1 is below NRLMSISE-00 in every bin, by a factor of 1.8 to 3.6.** That criterion holds.
+* **Pooled, it is level with DTM2020 to a tenth of a point** — 20.3 % against 20.2 % over 348 693
+  evaluations — and it is best of the five in the three bins where the thermosphere is disturbed or
+  ordinary: moderate flux 16.7 %, active 19.0 %, and *storm* 29.2 %, where it beats both DTM2020
+  (30.5 %) and JB2008 (31.0 %). A two-constant causal kernel on open `ap`, on the log-activity scale
+  §10.15 chose, is level with the model fitted on this data family and ahead of JB2008's Dst-derived
+  `ΔTc` over 19 126 storm evaluations. That is the single most useful thing this table says.
+* **And the 0.9 points §10.15 bought came from the quiet bins, not the storm ones** — which was not the
+  intent and is the more interesting half. Against the linear storm regressor, `Ap` < 15 goes
+  21.2 % → **19.9 %** and F10.7 < 100 goes 26.0 % → **24.2 %**, while the three bins it was aimed at
+  move half a point each and two of them the wrong way (moderate flux 17.2 → 16.7 %, active
+  18.5 → 19.0 %, storm 28.7 → 29.2 %). The mechanism is the one
+  `wind_model::disturbance_drivers` states: a regressor linear in `ap` has its slope pulled by rare
+  storm rows and distorts the quiet baseline to pay for them, and on the log scale the quiet range
+  `ap` 0–15 occupies most of the regressor instead of a hundredth of it. Fixing how a model sees a
+  storm is what made it better at not being in one.
+* **It is worst of the three modern models at both flux extremes** — 24.2 % at F10.7 < 100 against
+  DTM2020's 22.4 %, and 24.9 % at F10.7 ≥ 175 against JB2008's 20.8 %. Those are the two bins the
+  corpus samples with one month each (§10.10's fold table), so this is the same finding as the
+  calendar-month split, on a different axis.
+
+Seven findings, none of which a component test could produce:
+
+- **Driven identically, this crate's models and Orekit's agree to 1e-3 relative.** On the fixture days,
+  where both sides evaluate every row: NRLMSISE-00 2.019 against 2.019 and 2.087 against 2.086,
+  JB2008 1.359 against 1.358 and 1.133 against 1.156. Across all twelve product files the largest
+  disagreement is **0.008 in bias on NRLMSISE-00 and 0.002 on JB2008** — and part of even that is
+  sampling, since the Rust side decimates 1-in-6 and Orekit does not. Two implementations that share
+  nothing but the measurement and the publishers' files. What follows is therefore about the
+  thermosphere, not about either code.
+- **The 3-hourly `ap` array is the entire storm-day difference.** Orekit's `NRLMSISE00` drives the
+  model from the *daily* `Ap`, which on 2024-05-10 is 105 — but the storm began at 17 UT, so the daily
+  average inflates the eighteen quiet hours before it. Resolving `ap` at its native 3-hour cadence
+  moves the bias 2.087 → **1.661** and the RMS 1.346 → **0.793**. That is what the sub-daily driver
+  (#142) bought, measured against the thermosphere rather than against another model.
+- **All three run high, and NRLMSISE-00 runs high by a factor of two at solar minimum.** The
+  2018–2020 minimum was among the deepest on record and NRLMSISE-00's fit predates it; this is the
+  shortfall that motivated NRLMSIS 2.x, which is patent- and licence-encumbered and deliberately not
+  ported (see §9). The caveat belongs with the number: **DTM2020's 1.08 is not independent evidence**,
+  because DTM2020 was fitted on this very data family. JB2008 and NRLMSISE-00 are independent of it
+  and read 1.31 and 1.85 in the same bin.
+- **The bias is a property of the models, not of the instrument.** GRACE-FO C measures density with an
+  accelerometer at 480–540 km; Swarm A infers it from the drag signature in a precise orbit at
+  420–480 km. Two unrelated measurement techniques, at different altitudes, in different time scales
+  (GPS and UTC), put the same three models within **2%** of each other — 1.497/1.472,
+  1.116/1.139, 1.032/1.011. Neither the accelerometer calibration nor the POD drag inversion is
+  carrying the result.
+- **Twenty years of refitting is worth more than any of the above.** Orekit's DTM2000 reads 2.16 and
+  2.24 on the fixture days where DTM2020 reads 1.06 and 1.19, and 2.37 against 1.20 on 2019-01.
+- **Where the error hurts most, it is worst.** High flux *and* a storm — the regime that decides a
+  re-entry prediction or a conjunction screening — is the only bin where NRLMSISE-00 exceeds 1.78 and
+  DTM2020 exceeds 1.30. Aggregate skill over a whole month hides it; that is why the table is
+  stratified rather than summed.
+
+- **Each model wants its own 81-day mean, and the two are different columns.** NRLMSISE-00's Fortran
+  header says `F107A - 81 day AVERAGE OF F10.7 FLUX (centered on day DDD)`; DTM2020's says
+  `fbar(1)=mean flux of last 81 days at t`, which is the *trailing* mean, and the SWAMI documentation
+  repeats it. CelesTrak publishes both — `F10.7_OBS_CENTER81` and `F10.7_OBS_LAST81` — and this
+  campaign was driving DTM2020 from the centred one. Correcting it moved DTM2020 from 1.068 ± 0.302
+  to **1.032 ± 0.281** on GRACE-FO C and from 1.044 ± 0.294 to **1.011 ± 0.276** on Swarm A, with the
+  largest single move at high flux, 1.196 ± 0.404 → **1.075 ± 0.311**; every bias moved toward 1 and
+  every RMS shrank. The NRLMSISE-00 and JB2008 columns are byte-identical across the two runs, which
+  is the control: nothing but DTM2020's driver changed. Neither model's specification states whether
+  it wants the *observed* or the 1-AU-*adjusted* flux — NRLMSISE-00's does ("the actual distance of
+  the Earth from the Sun rather than the radio flux at 1 AU", so: observed) and DTM2020's does not.
+  Both are driven from the observed column; for DTM2020 that is an assumption, not a citation.
+
+One thing the altitude stratification **cannot** support, and is not claimed: the per-bin numbers rise
+from 1.34 at 460–480 km to 2.00 at 520–540 km, but altitude here is confounded with epoch and solar
+activity — GRACE-FO decays across the campaign and Swarm flies lower throughout. The table reports the
+bins; it does not read a height dependence out of them.
+
+**Calibration.** `DensityCorrection` (#135–#140) fits a degree-1 sun-fixed spherical-harmonic
+correction on the first half of a day and is scored on the second, never on what it was fitted to:
+
+| day | model | bias, base → calibrated | RMS, base → calibrated |
+|---|---|---|---|
+| quiet | NRLMSISE-00 `ap[]` | 1.908 → **0.944** | 1.076 → **0.311** |
+| quiet | JB2008 | 1.571 → 1.483 | 0.793 → 0.776 |
+| quiet | DTM2020 | 1.031 → 1.010 | 0.270 → 0.345 |
+| storm | NRLMSISE-00 `ap[]` | 1.622 → **0.969** | 0.838 → **0.314** |
+| storm | JB2008 | 1.106 → 0.995 | 0.339 → 0.379 |
+| storm | DTM2020 | 1.164 → 0.985 | 0.423 → 0.333 |
+
+It removes the bias every time, out of sample. It removes the *scatter* only where the base model's
+error has sun-fixed structure — a 3.5× RMS reduction on NRLMSISE-00, nothing on JB2008, and on quiet
+DTM2020 the RMS gets slightly worse, because four coefficients fitted on half a day are not free.
+
+**On the literature's metric.** Everything above is bias and RMS on the ratio, which is this repo's
+own convention and comparable only with itself. The density-modelling literature reports **MAPE**,
+`mean|ρ_model/ρ_measured − 1|` as a percentage — the same ratios, differently reduced — so the same
+rows can be set beside a published bar. Two bars are relevant:
+
+- **Acciarini et al.**, *Space Weather* **22**, e2023SW003652 (2024),
+  [10.1029/2023SW003652](https://doi.org/10.1029/2023SW003652): on POD-derived densities from
+  CHAMP, GOCE, GRACE and Swarm, **40–60 % for the empirical models against ~20 % for a
+  machine-learned one**.
+- **Licata & Mehta**, *Space Weather* **20**, e2022SW003267 (2022),
+  [10.1029/2022SW003267](https://doi.org/10.1029/2022SW003267): MSIS-UQ is **11 % closer** to
+  satellite density than HASDM. That is a *relative* statement between two models, not a MAPE, and
+  this repo holds neither — so it is recorded here and nothing is placed beside it.
+
+The same rows as the two tables above, on MAPE — the 348 693-evaluation campaign first, then the two
+fixture days:
+
+| bin | n | NRLMSISE-00 `ap[]` | NRLMSISE-00 `Ap` | JB2008 | DTM2020 |
+|---|---|---|---|---|---|
+| **all** | 348 693 | **51.7 %** | 52.7 % | **25.5 %** | **20.2 %** |
+| F10.7 < 100 | 122 475 | 86.2 % | 88.7 % | 39.0 % | 22.4 % |
+| 100 ≤ F10.7 < 175 | 185 898 | 30.7 % | 30.8 % | 17.7 % | 18.2 % |
+| F10.7 ≥ 175 | 40 320 | 43.6 % | 44.5 % | 20.8 % | 22.6 % |
+| `Ap` < 15 (quiet) | 276 116 | 54.9 % | 55.4 % | 25.8 % | 19.1 % |
+| 15 ≤ `Ap` < 50 (active) | 53 451 | 37.3 % | 39.8 % | 22.2 % | 21.6 % |
+| `Ap` ≥ 50 (G2 or worse) | 19 126 | 44.3 % | 49.8 % | 31.0 % | 30.5 % |
+| fixture day, 2019-01-01 quiet | 720 | 103.4 % | 102.0 % | 47.6 % | 23.8 % |
+| fixture day, 2024-05-10 storm | 720 | **68.2 %** | 114.7 % | 20.6 % | 24.1 % |
+
+Six findings:
+
+- **NRLMSISE-00 lands inside the published empirical band**, 51.7 % against 40–60 %. That is not a
+  result about the model, it is the *control*: it says this campaign and Acciarini's are measuring
+  the same quantity on the same kind of data, which is what makes the remaining rows readable at all.
+- **DTM2020 reaches the machine-learned figure with no learned component**, 20.2 % against ~20 %.
+  The caveat that governs the bias table governs this one harder: **DTM2020 was fitted on this data
+  family**, so its number is interpolation, not skill against an unseen thermosphere. JB2008 is
+  independent of it and reads 25.5 %.
+- **A single pooled MAPE is mostly a statement about which months are in it.** NRLMSISE-00 moves
+  from 86.2 % at low flux to 30.7 % at moderate — a factor of 2.8 across bins of the same campaign,
+  wider than the entire 40–60 % published band. Choosing six different months would move our pooled
+  number outside that band without changing a line of code. The comparison is therefore to the
+  *band*, and any single decimal set against a single published decimal would be a coincidence
+  reported as an agreement.
+- **The sun-fixed calibration crosses the band from outside, out of sample.** Leave-one-out over the
+  twelve satellite-months, the correction fitted on eleven and scored on the twelfth:
+
+  | model | base | calibrated |
+  |---|---|---|
+  | NRLMSISE-00 `ap[]` | 51.7 % | **28.9 %** |
+  | JB2008 | 25.5 % | 24.1 % |
+  | DTM2020 | 20.2 % | 20.7 % |
+
+  Four sun-fixed coefficients take NRLMSISE-00 from the middle of the empirical band to below it, on
+  arcs the fit never saw — and do nothing for JB2008 and slightly harm DTM2020. That asymmetry is the
+  result, not a disappointment: a correction with four degrees of freedom can only remove error that
+  has the structure those four describe, and by DTM2020 there is none of it left.
+- **The split is worth measuring, not assuming.** Keying the held-out arc by a fixed 40 000-row block
+  instead of by product file reports 28.6 % / 23.9 % / 20.6 % — every model better by 0.2–0.5 points.
+  That gap is the leakage from a block straddling two files, so each half of a month trains on the
+  other. The honest split is the one that scores worse, which is the only direction that check can
+  usefully fail in.
+- **The sub-daily driver is worth 40 % of the storm-day error on this metric too.** 114.7 % → 68.2 %
+  on 2024-05-10, the same change (#142) the bias table records as 2.087 → 1.661.
+
+One property of the metric itself, since it is now a headline number: **MAPE on a ratio is
+asymmetric.** A model high by a factor of two scores 100 %; one low by a factor of two scores 50 %.
+All three models here run high in every bin, so nothing is being flattered — but our numbers are not
+directly comparable with those of a model that under-predicts, and the published bars do not state
+the sign of their errors.
+
+**What gates what.** The MAPE band, the model ordering and the held-out check are assertions, not
+printed output — but they live in the campaign test, which is `#[ignore]`d because it needs the
+226 MB download, so they gate a manual run and **not** `cargo test`. They therefore carry
+no weight in §8's mutation seal either, since `cargo-mutants` runs the suite without `--ignored`: a
+mutant of `DensityCorrection` that only the campaign would notice is a mutant nothing notices. What
+plain `cargo test` does run is the fixture-day pair — the MAPE ordering on both days, DTM2020 inside
+15–50 %, and the sub-daily driver cutting the storm-day MAPE by a third. That is the smaller claim,
+and it is the one under the gate.
+
+**Two reference artefacts deliberately not used, and why.** The SET **HASDM** database would be the
+natural way to put a number beside Licata & Mehta's 11 %; its licence has not been established, so
+nothing was fetched and the comparison is not made. **Karman**
+([spaceml-org/karman](https://github.com/spaceml-org/karman)) is **Apache-2.0** and could be run on
+these very rows to produce a machine-learned bar *on our data* rather than a published one — a
+strictly stronger comparison than the table above. It is not done here because it needs a Python
+dependency and a model-weight download, which is a dependency decision rather than a measurement.
+Recorded as available and unused.
+
+| Component | Specification source | Oracle | Residual / tol | Where |
+|---|---|---|---|---|
+| NRLMSISE-00 / JB2008 / DTM2020 vs measurement, quiet + storm | the models' own primary sources (§2) | **TU Delft v02 GRACE-FO C accelerometer density** | bias > 1 on both days; JB2008 & DTM2020 < 1.6, NRLMSISE-00 < 2.5 | tests/measured_density.rs |
+| Same days, same indices, independent lineage | — | **Orekit 13.1.7** `NRLMSISE00`/`JB2008`/`DTM2000`, its own loaders, frames, Sun and model code | ≤ 1e-3 relative in bias (NRLMSISE-00), ≤ 5e-3 (JB2008) | tools/orekit-oracle/DensityOracle.java |
+| Sub-daily geomagnetic driver | NRLMSISE-00 `switches[9] = -1` storm mode | the storm day itself | 3-hourly array must beat daily `Ap` by > 0.2 in bias and > 0.3 in RMS | tests/measured_density.rs |
+| Sun-fixed calibration, out of sample | — | second half of a day the fit never saw | \|bias − 1\| < 0.1 for every model; NRLMSISE-00 RMS at least halved | tests/measured_density.rs |
+| Six months, both spacecraft, stratified *(ignored: needs the 226 MB download)* | — | TU Delft v02 GRACE-FO C **and** Swarm A | every file parses; per-bin table printed | tests/measured_density.rs |
+| MAPE against a published bar *(ignored: same download)* | Acciarini et al. 2024, 40–60 % empirical / ~20 % ML | TU Delft v02, both spacecraft, 348 693 rows | NRLMSISE-00 inside 40–60 %; DTM2020 < 25 % and below JB2008 | tests/measured_density.rs |
+| MAPE, calibration held out by satellite-month | — | the eleven arcs the fit never saw, per held-out arc | NRLMSISE-00 must lose a third of its MAPE; no other model may lose more than 2 points | tests/measured_density.rs |
+| MAPE, sub-daily geomagnetic driver | NRLMSISE-00 `switches[9] = -1` | the storm day | 3-hourly array must cut the daily-`Ap` MAPE by a third | tests/measured_density.rs |
+
+### 10.3 SLR normal points on LAGEOS-1 and LAGEOS-2 — centimetre range residuals
+
+§10.1 fits an orbit and reports what is left. This one fits **nothing**. Every input is a published
+product, the modelled range is computed forward, and the residual is the difference between a
+measured flight time and a modelled one — in millimetres of real range.
+
+An SLR normal point is the most accurate range measurement made of an artificial satellite:
+millimetres of formal precision on a passive sphere of brass and glass, published by stations with no
+interest in agreeing with this workspace. Five independent products have to line up before it can be
+modelled, and `tools/fetch-slr-data.sh` fetches all five:
+
+| input | product | source |
+|---|---|---|
+| the measurement | `lageos{1,2}_202501.np2`, ILRS monthly CRD v2 | EDC / DGFI-TUM |
+| the orbit | `ilrsa.orb.lageos{1,2}.250111.v80.sp3`, the ILRS combination, SLRF2020, 120 s, centre of mass | EDC / DGFI-TUM |
+| the stations | `ITRF2020-ILRS-TRF.SNX` | IGN |
+| the eccentricities | ILRS Site and System Information Forms, §3 | ILRS / NASA GSFC |
+| Earth rotation | `finals2000A.all` | IERS Rapid Service |
+
+One day's excerpt of each is committed under `crates/spacelab/tests/fixtures/`, and re-running the
+fetch script reproduces those excerpts byte for byte.
+
+**The chain.** Transmit epoch (UTC) → station ITRF from the frame + its velocity + the eccentricity →
+IERS §7.1.1 solid Earth tide and §7.1.4 pole tide about the 2018 secular pole → ITRF→GCRF at the
+transmit, bounce and receive epochs through the CIO chain on per-epoch `finals2000A` with the
+sub-daily terms → satellite GCRF from the SP3 by degree-10 Neville → two legs solved separately by
+light-time iteration → Shapiro delay (§11) → one-way Mendes–Pavlis refraction at the station's
+logged pressure, temperature and humidity and the session's own laser wavelength → minus the
+251 mm LAGEOS centre-of-mass offset. Nothing is estimated; the `h4` flags are read to confirm the
+publisher applied neither the troposphere nor the centre of mass, rather than assumed.
+
+**Measured on 2025-01-06**, both spheres, 211 normal points from twelve stations:
+
+| station | n | bias, cm | RMS, cm | elevation |
+|---|---|---|---|---|
+| HERL 7840 | 29 | −0.17 | **0.37** | 25–73° |
+| MATM 7941 | 13 | +0.10 | 0.40 | 21–78° |
+| WETL 8834 | 4 | +0.26 | 0.40 | 54–60° |
+| BADL 1890 | 24 | +0.54 | 0.68 | 30–67° |
+| THTL 7124 | 2 | −0.88 | 0.91 | 76–79° |
+| SHA2 7821 | 27 | +0.86 | 0.98 | 41–73° |
+| YARL 7090 | 69 | +0.73 | 1.24 | 14–82° |
+| HA4T 7119 | 8 | +1.39 | 1.52 | 21–34° |
+| SISL 7838 | 8 | −1.86 | 2.26 | 50–75° |
+| BEIL 7249 | 2 | −3.18 | 3.18 | 18–20° |
+| CHAL 7237 | 8 | +3.06 | 3.39 | 48–59° |
+| KUN2 7819 | 17 | +3.62 | 3.81 | 19–41° |
+| **all** | **211** | **+0.75** | **1.64** | worst single 7.02 |
+
+Three findings.
+
+- **Station eccentricity is a metre-scale term nobody warns you about.** ITRF2020 and SLRF2020 both
+  quote the *survey monument*. At three of these twelve pads the telescope does not stand on it, and
+  before the offsets were applied YARL, HA4T and THTL came out at **1.95 m, 1.21 m and 3.08 m** while
+  the other nine were already under 4 cm. The pattern is exact and readable in the file: the three
+  are precisely the three whose DOMES number ends `M` (a site monument) rather than `S`.
+- **The model recovers a surveyed quantity it was never given.** Solving the 69 YARL residuals for a
+  three-component station offset returns **up +3.173 m, north −0.009 m, east +0.018 m**; the site log
+  publishes **+3.1827, −0.0064, +0.0194** from a 2014 local-tie survey. One centimetre in the
+  vertical and two millimetres in the horizontal, and the estimate comes out *vertical*, which is
+  what an eccentricity is. Nothing else in the chain could produce that agreement by accident.
+- **The three stations at 3.1–3.8 cm are biases, not scatter,** and they are the stations the ILRS
+  **Data Handling File** carries a record for. The DHF is now applied, and what it turned up is a
+  distinction the ticket that asked for it did not anticipate: it publishes a *value* for only four
+  of the twelve pads — BADL, HA4T, HERL and WETL, none over 12 mm — and for the other seven,
+  CHAL, KUN2 and BEIL among them, it carries model code `E`, "estimate a range bias here", with the
+  value column empty. So the network independently agrees those three are biased and supplies no
+  number; their |bias| ≈ RMS is the signature, and closing it needs an estimator rather than a
+  table. Applying the four moved the network bias from +0.75 to +0.59 cm and the RMS from 1.64 to
+  1.63 cm.
+
+**What is deliberately not modelled**, in the order it costs: atmospheric pressure loading
+(~5 mm) and the station-dependent centre-of-mass correction (the ILRS single value of 251 mm stands
+in for values spanning about 6 mm between detector types). Those two set the floor this campaign
+measured; the measurement itself is capable of millimetres.
+
+Ocean tide loading was the leading term on that list and is no longer on it: `slr::loading` carries
+the full `HARDISP` model — eleven tabulated constituents expanded to 342 by admittance spline — and
+reproduces the reference program's published series to 4.98e-7 m, which is that program's print
+resolution. It needs a per-station `BLQ` table, which the repository does not ship and the caller
+supplies; the residual campaign above predates it and its numbers have not been recomputed with it.
+
+Two lower-level defects were found and fixed along the way, both in the CRD reader and both silent:
+record keys are written in either case by different stations, and about an eighth of the sessions in
+an ILRS monthly file never receive their `h8` terminator, so a parser that only closes a session on
+`h8` loses those passes without a word. Together they had cost **half the normal points and one
+station** before the residuals were ever computed.
+
+| Component | Specification source | Oracle | Residual / tol | Where |
+|---|---|---|---|---|
+| Forward two-way range model, LAGEOS-1 + LAGEOS-2, one day | IERS Conventions (2010) §7.1.1, §7.1.4, §9, §11; ILRS CRD 2.01 | **ILRS normal points + ILRS combined orbit + ITRF2020** | 211 points, RMS < 3 cm, \|bias\| < 2 cm, worst station < 5 cm, worst single < 12 cm | tests/slr_range_residuals.rs |
+| Mendes–Pavlis zenith delay | *GRL* 31 L14602 (2004) | **IERS `FCULZD_HPA`**, compiled | 1 / 4 / 0 ULP on hydrostatic / non-hydrostatic / total (see below) | spacelab-slr/src/troposphere.rs |
+| FCULa mapping function | *GRL* 29(10) 1414 (2002) | **IERS `FCUL_A`**, compiled | 0 ULP — bit-exact, and its published value matches its own code | spacelab-slr/src/troposphere.rs |
+| Solid Earth tide station displacement | IERS Conventions (2010) §7.1.1 | **IERS `DEHANTTIDEINEL`**, both published cases | 1e-12 m | spacelab-slr/src/displacement.rs |
+| Station eccentricity | SINEX 2.02 `SITE/ECCENTRICITY` | **the residuals themselves**, solved for a 3-D offset | 1 cm vertical, 2 mm horizontal vs the ILRS site log | tests/slr_range_residuals.rs |
+
+`tools/iers-oracle/` rebuilds the Fortran. It records one finding of its own: **`FCULZD_HPA`'s
+header comment disagrees with its own code** by a constant 2 parts in 10⁶ — the `f(φ, H)` gravity
+factor — on all three outputs. It is not a build-precision artefact (default and `-fdefault-real-8`
+builds differ by 1.6e-12 m, six orders below the gap) and `FCUL_A` from the same chapter matches its
+header to the last digit. The port reproduces what the routine computes; a port tuned to the header
+would have carried a fixed 2 ppm error through the whole troposphere with no test to say so.
+
+### 10.4 The same model over a week, two orbit arcs and twenty-six stations
+
+One day says whether the model is right. It cannot say whether a station's bias repeats, whether
+anything moves when the orbit product changes, or whether what is left has a frequency. Those need a
+span, so §10.3's model is run unchanged over **2025-01-05 .. 2025-01-12** — 2158 published normal
+points, 26 pads, both spheres, and the two weekly ILRS combined arcs `250111` and `250118`.
+
+**The arcs do not overlap.** One ends at 23:58 and the next begins at 00:00 two minutes later, so
+there is no common span to difference. What a change of orbit product can be measured in is the step
+across the seam, against the step the same station takes between two consecutive days *inside* one
+arc — same geometry, same weather, no change of product.
+
+| | stations / steps | mean | RMS |
+|---|---|---|---|
+| across the seam, 2025-01-11 → 2025-01-12 | 7 | −0.28 cm | **0.95 cm** |
+| within one arc, consecutive days | 44 | −0.09 cm | **0.88 cm** |
+
+**Changing the orbit arc moves a station by the same amount an ordinary day does.** That is the
+ticket's answer, and it is negative: at this accuracy the weekly products are consistent across
+their boundary.
+
+Three things had to be settled before that number meant anything.
+
+- **108 of the 2158 points are declined, by reason, and the count is asserted.** A single day of the
+  ILRS network is uniform; a week is not. IRKL and MDVS publish 9 sessions with their **system delay
+  not removed** — that range cannot be modelled without their calibration record. TKBL 7306 and
+  YEBL 7817 have **no ITRF2020 solution at all**: the orbit is SLRF2020, which carries stations that
+  joined after ITRF2020's data cut-off, and for those there is no position to model from. The
+  one-day test asserts that *nothing* is declined, which is what makes its own count exact.
+- **The residual scatter is a function of the publisher's own return count**, and that is not a
+  property of the residual:
+
+  | raw ranges in the bin | n | bias | RMS | worst |
+  |---|---|---|---|---|
+  | under 30 | 534 | +0.19 cm | **3.99 cm** | 50.39 cm |
+  | 30 to 50 | 158 | +0.42 cm | 1.56 cm | 5.56 cm |
+  | 50 to 100 | 204 | +0.24 cm | 1.44 cm | 4.56 cm |
+  | 100 to 1000 | 585 | +0.26 cm | 1.46 cm | 7.02 cm |
+  | 1000 and over | 569 | +0.69 cm | 1.85 cm | 6.48 cm |
+
+  The bias is the same in every bin and the scatter is not: below thirty returns it is 2.7× the
+  rest. So the campaign reports both — **all 2050 modelled points: bias +0.37 cm, RMS 2.47 cm**;
+  the **1516 formed from thirty returns or more: bias +0.44 cm, RMS 1.63 cm, worst 7.02 cm** — which
+  is the same 1.63 cm the single day reached, over eight days and twenty stations.
+
+  The three worst residuals in the whole campaign, −50.4, −49.0 and −47.8 cm, are one POT3 pass on
+  2025-01-08 whose points were formed from 23, 29 and 26 returns at a 0.01% return rate. Removing
+  them on their return count alone takes POT3 from −6.08 cm bias / 17.02 cm RMS to **−0.22 / 0.74**.
+  The station is not biased; three normal points built from ~25 photons are not measurements of it.
+
+- **The trimmed orbit fixtures are checked, not trusted.** `Sp3::interpolate` takes the `order + 1`
+  samples nearest by *index*, so on a file cut around the passes that is only the right stencil if
+  those samples are contiguous on the 120 s grid; across a gap it would draw a degree-10 polynomial
+  through hours of arc and return a plausible wrong position. A separate test replicates the
+  window for all 2158 points and asserts the step.
+
+**By frequency, nothing can be attributed.** A mean plus a diurnal and a semi-diurnal harmonic is
+fitted per station by SRIF, with the formal error of each amplitude. Two limits are structural and
+are reported rather than worked around. Over eight days the Rayleigh limit is `1/8 = 0.125` cycles
+per day, while M2 and S2 are 0.068 apart and K1 and O1 are 0.073: **neither pair separates**, so
+what is fitted is a band, not a constituent. And a station that only ranges in its own night samples
+a fraction of the phase circle; the smallest-over-largest diagonal of the information square root
+separates those cleanly — the well-sampled stations sit at 0.09 to 0.51 and BEIL, GRSM and SVEL fall
+to 0.01 and below — and their amplitudes are printed as absent rather than as the metres the solver
+would otherwise return.
+
+Seven stations carry a semi-diurnal amplitude above three formal sigma: HERL 0.57, YARL 0.53,
+BADL 0.63, STL3 0.97, GODL 1.23, HA4T 1.47, JFNL 3.32 cm. That is the ocean-loading scale, and it
+is *not* evidence of ocean loading: BADL is Badary, a thousand kilometres from any coast, where
+loading is a few millimetres. A station observes the same satellite at the same points of its own
+sidereal cycle, so elevation and local time are correlated and any elevation-dependent error maps
+into the same band. Separating them needs the per-station `BLQ` table §10.3 names as the missing
+input to `slr::loading` — the campaign measures a term of the right size and says exactly what would
+attribute it.
+
+| Component | Specification source | Oracle | Residual / tol | Where |
+|---|---|---|---|---|
+| The §10.3 model over 8 days, 2 arcs, 26 pads | as §10.3 | **ILRS normal points + two ILRS combined arcs + ITRF2020** | 2158 points modelled or declined by reason; RMS < 3 cm on ≥30 returns, \|bias\| < 2 cm, worst station < 5 cm | tests/slr_range_residuals.rs |
+| Orbit-arc consistency across the weekly seam | — | **the network's own day-to-day step, within one arc** | seam RMS < 2× the within-arc RMS (measured 0.95 vs 0.88 cm) | tests/slr_range_residuals.rs |
+| Trimmed SP3 excerpt fitness | SP3-c | **the interpolator's own index window** | every stencil contiguous at 120 s, all 2158 points | tests/slr_range_residuals.rs |
+
+### 10.5 Measured thermospheric crosswinds — our own wind model against HWM14
+
+The drag force takes a wind ([`forces::Wind`], default [`NoWind`], bit-identical to the previous law
+when it is the default). What fills it is **our own model**, not a port: HWM14's software and
+coefficients are CC BY-NC-ND — no derivatives, no commercial use — so it can be run and compared
+against but not translated. `tools/fetch-hwm14.sh` downloads NRL's unmodified Fortran into gitignored
+space and `tools/hwm14-oracle/` drives it; no crate in the workspace depends on it.
+
+**The oracle is verified against its own author's reference before it is used to judge anything.**
+NRL ships `checkhwm14.f90` with its expected output embedded as a trailing comment.
+`tools/hwm14-oracle/check.sh` compiles and runs it and compares every printed number: our build
+reproduces all **881 of them to within 0.001 m/s**, the last digit of the published format.
+
+The measurement is the TU Delft `*_WND_ACC_*` crosswind product (Siemes et al. 2023, CC BY 4.0):
+CHAMP, GRACE-A, GOCE and GRACE-FO, twelve satellite-months spanning 2002–2025, 225–500 km, both
+solstices and an equinox, and the 2003-10 Halloween and 2024-05 Gannon storms. An accelerometer sees
+only the component *across* the velocity, so each row is one scalar equation `w · d̂ = speed` — never
+a `(u, v)` pair.
+
+Two arcs are held out of every fit: GRACE-FO 2025-10 and CHAMP 2004-10, a different mission, a
+different altitude, a different season and a different solar cycle, so the held-out score tests
+extrapolation rather than interpolation.
+
+| model | held-out RMS | bias | correlation |
+|---|---|---|---|
+| predict no wind | 133.87 | −97.33 | — |
+| ours, quiet expansion only | 116.64 | — | — |
+| **ours, + high-latitude magnetic block** | **103.07** | −56.62 | 0.428 |
+| **HWM14** | **112.36** | −62.77 | 0.356 |
+
+| \|lat\| band | n | null | ours | HWM14 |
+|---|---|---|---|---|
+| 0–30° | 5921 | 116.3 | **72.1** | 101.6 |
+| 30–50° | 3957 | 77.5 | **64.7** | 82.0 |
+| 50–65° | 3009 | 116.5 | 104.3 | **99.7** |
+| 65–90° | 4969 | 187.9 | 148.5 | **147.3** |
+
+All in m/s. Five things have to be said about that table for it to mean what it looks like.
+
+- **RMS is the honest column.** The product reports a non-negative speed and folds the sign into the
+  direction, so `speed` is `|w·d̂|` with mean 97.33 m/s. RMS is invariant under that convention —
+  flipping `(d̂, speed)` flips the residual and the square is unchanged — but bias and correlation are
+  not. A model predicting nothing scores a bias of exactly −97.33, so −59.53 and −62.77 are two
+  models recovering 39 % and 35 % of the mean, not two models with a physical offset.
+- **Our number is selection-optimistic and HWM14's is not.** The degree and ridge were chosen on
+  these held-out rows, out of 108 candidates. The spread among the good specs bounds that optimism:
+  the second of the 108 scores 103.71 and the best at a different quiet degree 104.05, so the 9.3 m/s
+  margin over HWM14 is several times the selection bias, but the two are closer than the headline
+  suggests.
+- **Ф15.J moved our column 0.6 m/s the wrong way and it was the right change.** Both geomagnetic and
+  solar drivers were being read from the future. `ap` was the index of the 3-hour interval the sample
+  falls *inside*, which is not published while that interval is running, and `f107a` was the **centred**
+  81-day mean, which needs 40 days of flux that have not happened. Replacing them with the previous
+  interval and the trailing mean — the conventions `space_weather::sdtm_ap_history` and
+  `sdtm_drivers` already applied to the density field — takes 102.47 to 103.07 on the same rows and
+  the same spec. The two changes pull opposite ways and were separated by measurement rather than
+  assumed: the trailing mean is worth **−0.30** (102.47 → 102.17) and the causal index **+0.90**
+  (102.17 → 103.07). The two also act in different places, which is what says they are two changes and
+  not one: the loss is where the `ap` regressors are, 102.5 → 104.3 m/s between 50° and 65° and
+  147.2 → 148.5 poleward of 65°, while the equatorial band — which has no disturbance block and reads
+  the flux — *gains*, 73.1 → 72.1. A model whose validation score depends on data published after the
+  epoch it validates at is not a model that can be run forward, and the old figure was that score.
+- **HWM14 wins where it has physics we lack, and we win where we have data it does not.** It is level
+  with us poleward of 65° (147.3 against 147.2) and slightly ahead between 50° and 65°, which is
+  DWM07's quasi-dipole disturbance model doing exactly what it was built for. It is behind at low and
+  mid latitude on these arcs — worse than the null between 30° and 50° — where the crosswind is
+  zonal-dominated and varies with solar flux and season. `hwm14.f90`'s own header says `f107a` and
+  `f107` are *not used*; this model has a solar-flux regressor and two seasonal harmonics, and eleven
+  of its twelve arcs postdate or fall outside HWM14's fit.
+- **Half the variance is still unexplained, and that is the honest ceiling of a climatology.** No set
+  of global harmonics in six drivers carries the weather of an individual pass.
+
+The high-latitude block is what closed the gap the first fit left: a second vector-harmonic expansion
+in centred-dipole magnetic latitude and magnetic local time, windowed to `|maglat| > 40°` with a
+cubic smoothstep, driven by `[1, a, a²]` with `a = ln(1 + ap/15)`. Without the window the two
+expansions are 9.2° apart and the normal equations cannot tell them apart. Poleward of 65° it took
+the error from 171.4 to 149.0 m/s and the correlation from 0.313 to 0.473; raising the *quiet* degree
+instead did nothing — degrees 4 to 6 at every ridge tried are worse out of sample than degree 3, which
+is what pointed at a missing coordinate rather than missing resolution.
+
+**The storm lag the wind wants, measured rather than borrowed.** Ф15.J's stated aim was to drive this
+field from SDTM-1's storm driver — `StormKernel::response` over the 48 h of 3-hourly `ap` — so that
+density and wind could not mean two different things by "geomagnetic activity". Substituting the
+density field's own kernel made the held-out error worse, which says something about *that* kernel and
+nothing about lag, because it was fitted to density and reusing it asserts that two different
+responses share a time constant. So the kernel was swept instead of assumed: same rows, same
+specification, one fit per line, only the reduction from the `ap` history to the regressor changing.
+
+| geomagnetic regressor | peak lag, h | held-out RMS | 50–65° | 65–90° |
+|---|---|---|---|---|
+| own 3 h interval (acausal) | — | 102.17 | 103.01 | 146.87 |
+| **previous 3 h interval (shipped)** | — | **103.07** | 104.33 | 148.52 |
+| kernel 0.08 / 0.25 h | 0.14 | 103.07 | 104.33 | 148.52 |
+| kernel 0.25 / 0.75 h | 0.41 | 103.07 | 104.30 | 148.51 |
+| kernel 0.80 / 2.73 h (SDTM-1's own) | 1.39 | 103.24 | 104.22 | 148.71 |
+| kernel 1.00 / 3.00 h | 1.65 | 103.29 | 104.27 | 148.81 |
+| kernel 2.00 / 6.00 h | 3.30 | 103.59 | 104.61 | 149.59 |
+| kernel 3.00 / 12.00 h | 5.55 | 103.90 | 105.10 | 150.44 |
+| kernel 6.00 / 24.00 h | 11.09 | 104.33 | 106.28 | 151.53 |
+
+All in m/s; the two band columns are held-out rows only, so they are not the all-rows bands quoted
+above. **The column is monotone in the peak lag and the zero-lag end wins**, which is a stronger
+statement than "SDTM-1's kernel does not help": across two decades of lag there is no two-constant
+causal filter of the 3-hourly index that beats the index itself. The degenerate rows are the control
+that the sweep is measuring what it claims — a kernel whose constants are both far under the 3 h
+sampling interval reproduces the bare index to the last printed digit, which it must.
+
+The honest reading is a **limit of the data, not a property of the thermosphere**. The crosswind
+certainly responds to Joule heating over hours; what this says is that a driver sampled every three
+hours cannot resolve that lag well enough for a filter of it to pay, because the filter's own support
+is comparable to the sampling interval. Ф15.K's hourly `ap60` re-fit is where that becomes answerable,
+and the density side has the same question open. So the two fields share the *convention* — yesterday's
+interval, the trailing mean — and not the kernel, and the reason is written on
+[`WindPoint::ap`](../crates/spacelab-propagation/src/wind_model.rs) rather than left to be rediscovered.
+
+| Component | Specification source | Oracle | Residual / tol | Where |
+|---|---|---|---|---|
+| Wind interface in `Drag` / `PanelDrag` | — | **the pre-change drag law, transplanted** | `NoWind` reproduces it **bit for bit** (`to_bits()`) | tests/drag.rs |
+| Crosswind product parse | TU Delft `*_WND_ACC_*` header | **a committed one-day GRACE-FO excerpt** | 30 rows, unit directions to 1e-6, 27/30 within 8° of zonal | src/wind_data.rs |
+| Vector spherical harmonic basis | — | **central differences of its own value recursion** | \|analytic − numeric\| < 1e-6·scale, degree 4, 5 points | src/wind_model.rs |
+| Centred dipole pole and moment | IGRF-14 degree 1 | **`ppigrf` IGRF-14** | pole 80.789 °N, 72.763 °W, moment 29 733 nT — exact to the printed digits | src/dipole.rs (spacelab-geomagnetism) |
+| Centred-dipole equator error | — | **full degree-13 IGRF, cross-checked against `ppigrf`** | median 3.1°, worst 39.3° at 345 °E (the South Atlantic) — measured, not asserted away | src/dipole.rs |
+| HWM14 oracle build | Drob et al. 2015 | **NRL's own `checkhwm14.f90` expected output** | 881 numbers, worst \|Δ\| **0.001 m/s** | tools/hwm14-oracle/ |
+| Fitted field vs measured crosswind | — | **TU Delft crosswinds, two held-out arcs** | 103.07 m/s RMS against a 133.87 null | tests/measured_wind.rs |
+| Fitted field vs HWM14 | — | **HWM14 on the identical held-out rows** | 103.07 vs 112.36 m/s | tests/measured_wind.rs |
+| The wind's storm lag | — | **the same fit, nine geomagnetic regressors, one per line** | monotone in the kernel's peak lag, **zero-lag best** (103.07 at the bare index against 103.24 at SDTM-1's kernel and 104.33 at an 11 h peak) | tests/measured_wind.rs |
+
+### 10.6 Operator-supplied element sets — what an SGP4 fit commits to
+
+Celestrak's **Supplemental GP** (SupGP) sets are contributed by the operators — SpaceX, OneWeb,
+Iridium, the GPS control segment, the ILRS analysis centres for the laser targets — and are fitted
+*forward* from an ephemeris the operator already has. The standard GP catalogue is fitted *backward*
+from tracking observations. For one object at one time there are therefore two element sets built
+from information that does not overlap, which is the only place in the catalogue that offers a
+second opinion on a mega-constellation orbit; neither IGS nor SLR covers those objects at all.
+
+`tools/fetch-supgp.sh` takes the snapshots (2026-08-15, the SupGP sources within minutes of each
+other and the standard catalogue about an hour earlier); `tools/gen_supgp_fixtures.py` cuts the
+committed fixtures by a rule rather than by hand, so the tests run offline. Three measurements come
+out, and the third is the only one with truth in it.
+
+**① Divergence between the two fits.** Both propagated to a common absolute UTC instant — never "at
+the epoch", which would measure the epoch gap instead of the fit — and read at 1, 7 and 30 days.
+Median over the objects of each source, in kilometres:
+
+| source | objects | +1 day | +7 days | +30 days |
+|---|---|---|---|---|
+| starlink (≈550 km) | 60 | **7.548** | **530.265** | **9210.155** |
+| oneweb (≈1200 km) | 40 | 1.097 | 31.927 | 769.699 |
+| iridium (≈780 km) | 80 | 0.400 | 32.838 | 672.371 |
+| gps (MEO) | 32 | 1.108 | 2.377 | 12.205 |
+| cpf (laser targets) | 111 | 1.616 | 2.541 | 11.763 |
+
+The ordering is the physics, not the providers: the two drag-free regimes stay inside 13 km after a
+month, and Starlink — 550 km, high area-to-mass, actively manoeuvring — is three orders of magnitude
+worse over the same span. This is an uncertainty *proxy* with no truth in it, and it is the natural
+input to a conjunction covariance, which today comes from the caller and nothing produces.
+
+**② The laser targets, where two providers disagree about one object.** 45 of the 111 CPF objects
+carry several SupGP records, because several ILRS analysis centres each fit the same published
+prediction independently: **median spread 896.0 m, worst 3020.9 m**. That number needs no truth at
+all — it is two independent fits of one input. Reducing a multi-record object to its first record
+would have thrown the whole case away, so a structural test asserts none is.
+
+**③ Against a precise product.** The IGS **rapid** combination for 2026-08-12 (IGS20 / ITRF2020,
+centre of mass, centimetre-class), 32 GPS satellites at 24 hourly epochs, 768 comparisons per origin,
+through the operational chain TLE → SGP4 → TEME → (GMST82, polar motion, LOD) → ITRF. RMS in metres:
+
+| origin | mean epoch age | radial | along-track | cross-track | 3D | worst |
+|---|---|---|---|---|---|---|
+| standard GP | −1.57 d | 254.6 | 2317.7 | 246.0 | **2344.6** | 7026.8 |
+| operator SupGP | −5.23 d | 521.0 | 6213.7 | 177.6 | **6238.1** | 38345.5 |
+
+Reading "SupGP is worse" off that table is the mistake it exists to prevent. The SupGP records are
+stamped 2026-08-17.7, *after* the orbit they are measured against, so both element sets extrapolate
+backwards and SupGP does so for 5.2 days against the direction it was fitted for. Along-track is 90 %
+of both residuals — a mean-element model turns a semi-major-axis error into a mean-motion error and
+integrates it — and cross-track is the one component SupGP wins (177.6 m against 246.0 m), because
+the out-of-plane geometry is what an operator knows exactly and a tracking fit has to infer. Settling
+which fit is better needs a precise product from the SupGP epoch's own day, which is 13 days of IGS
+latency away; what this supports is narrower and more useful: **at these epoch ages an SGP4 element
+set of either origin is a kilometre-class product, and the epoch age dominates its origin.** Anyone
+reading a metre off an element set is reading noise.
+
+| Component | Specification source | Oracle | Residual / tol | Where |
+|---|---|---|---|---|
+| Operator fit vs catalogue fit, 5 sources × 3 horizons | — | **Celestrak SupGP against the standard GP catalogue** — two fits of one object from disjoint information | medians 0.400 km (+1 d) to 9210.155 km (+30 d); drag ordering asserted, not assumed | tests/supgp_divergence.rs |
+| Several ILRS centres on one laser target | — | **the analysis centres against each other**, at the latest epoch among them | 45 multi-provider objects, median spread **896.0 m**, worst 3020.9 m | tests/supgp_divergence.rs |
+| Both element sets vs a precise orbit | IGS rapid combination (IGS20 / ITRF2020, centre of mass) | **the IGS product itself** | GP **2344.6 m** 3D RMS at −1.57 d; SupGP **6238.1 m** at −5.23 d; along-track 90 % of both | tests/supgp_vs_igs.rs |
+| Multi-record objects survive ingest | — | structural: the fixture's own record count | no object reduced to one record | tests/supgp_divergence.rs |
+
+### 10.7 An hourly geomagnetic index against the three-hourly one every model is specified on
+
+`Kp` and its linear twin `ap` are published every three hours and saturate at 9 and 400. GFZ has
+published the **Hpo family** since 2021 — the same construction from the same 13 observatories at 60-
+and 30-minute cadence, and **uncapped**. `space_weather::{parse_hpo, hpo_at}` read both series; the
+files are 22 MB and 44 MB, so `tools/fetch-density-data.sh` fetches them and one Gannon-storm week of
+each is committed under `tests/fixtures` with GFZ's own 30-line header kept verbatim, because the
+licence is CC BY 4.0 and attribution is the condition.
+
+The two products are not a coarse and a fine sampling of one quantity — the Hpo standardisation
+differs, so `Hp60` is **not** the hour-by-hour breakdown of the `Kp` covering it, and nothing here
+treats it as one. What is compared is what each product can *express*, and then what that is worth in
+density. Three measurements, all on 2024-05-08..14:
+
+* **The ceiling.** The 3-hourly series is *at* 400 — not near it, at it — so it has stopped measuring
+  the peak and is reporting the end of its own scale. Over the same hours `ap60` reads **456** and
+  `Hp60` **10.667**. That 14 % is the size of the statement the older product cannot make.
+* **The shape inside one interval.** On the storm day the worst 3-hour interval, 15–18 UT, holds
+  `ap60` of **80, 94 and 294** — a spread of **3.67×**. Every model specified on `Kp` uses one number
+  for all three hours, so whichever it is, it is wrong by that factor at one end or the other.
+* **What it is worth in density, which is the honest verdict and is small.** Substituting the hour's
+  own `ap60` into slot 1 of NRLMSISE-00's `ap_array` — the current interval, everything else held —
+  moves the 400 km density by **−4.5 %, −3.9 % and +5.9 %** across those three hours. The response is
+  dominated by the 12–33 h and 36–57 h history slots: at 400 km the thermosphere integrates hours of
+  heating, and one hour of it is a correction rather than the signal. **An hourly index is worth
+  single digits of percent through NRLMSISE-00's published storm parameterization**, and anyone
+  expecting tens is expecting the model to be something it is not.
+
+The consequence worth more than the percentages is the sign change. Under the published driver the
+modelled density *falls monotonically* through the onset — the diurnal term is the only thing moving,
+so a storm arriving at 17 UT leaves no trace at all in the series — and resolving the hour arrests the
+fall in the third hour. The three-hourly index does not merely mis-scale the onset; it removes its
+shape. That assertion is measured rather than assumed, and the first version of it was refuted: the
+resolved series was expected to be the *wider* of the two and is the narrower (1.06× against 1.17×),
+because the correction pushes back against the diurnal fall. The refutation is what produced the
+better statement.
+
+None of this wires Hpo into a model. NRLMSISE-00, JB2008 and DTM2020 are *fits* to 3-hourly `ap`
+histories; feeding one an hourly value is no longer running the model as specified, and the gain
+measured above does not pay for that. What the parser buys today is the ability to say how far past
+the ceiling a storm went — §9's currency row records the same verdict.
+
+For the same reason `parse_hpo` and `hpo_at` are **deliberately not on either bridge**, and that is a
+boundary rather than the #319 drift: §7's rule is that the bridges carry the library's *capabilities*,
+and reading an index no model here consumes is not one yet. The three `space_weather_*` entry points
+that are bridged all feed something. When a model specified on Hpo exists, the reader goes across with
+it.
+
+| Component | Specification source | Oracle | Residual / tol | Where |
+|---|---|---|---|---|
+| Hp30 and Hp60 parse, and agree about the week they cover | GFZ Hpo file format | **GFZ `Hp60_ap60` / `Hp30_ap30`, one week each, CC BY 4.0** | 168 and 336 rows; the two cadences bracket the same days | tests/hourly_geomagnetic_index.rs |
+| The published index saturates where the hourly one keeps reading | `ap` table top = 400, `Kp` = 9 | the two products over the same hours | 3-hourly peak **at** 400 exactly; `ap60` 456, `Hp60` 10.667 | tests/hourly_geomagnetic_index.rs |
+| Within-interval spread the 3-hourly product cannot express | — | `ap60` inside each of the day's eight intervals | worst spread **3.67×**, 15–18 UT | tests/hourly_geomagnetic_index.rs |
+| What resolving the onset hour is worth in density | NRLMSISE-00 `switches[9] = -1` storm mode, slot 1 only | the model against itself, one driver changed | worst single-hour deviation inside the measured **3–10 %** band; sign changes across the interval; the monotone fall breaks | tests/hourly_geomagnetic_index.rs |
+
+### 10.8 An ocean-tide atlas turned into geopotential coefficients, by us
+
+Every ocean-tide table this workspace shipped until now was a *transcription*: FES2004 and FES2014b
+publish `ΔC̄nm/ΔS̄nm` files and `derivations/ocean_tide_fes200{4,14}.py` read them. That is why no
+modern openly-licensed atlas was in the tree — GOT ships cotidal grids and nothing else, and the FES
+grids that do have a published coefficient file are behind an AVISO account. `tide_to_stokes.py` closes
+that gap by doing the conversion here: spherical-harmonic analysis of the elevation grid, then IERS
+2010 Eq. 6.21 with the load deformation coefficients and the Doodson–Warburg phase bias.
+
+**The conventions are proved before they are coded.** Three steps in that chain carry a sign and
+nothing downstream can see an error in them, because every self-consistency check uses the same
+convention on both sides. `derivations/ocean_tide_stokes.mac` derives all three from the definitions,
+sharing no arithmetic with the generator — Legendre functions from Rodrigues' formula, integrals in
+closed form, nothing evaluated on a grid. All residuals are zero: the analysis integral recovers
+`(A⁺, A⁻)` exactly; matching `Re{H e^{iθ}}` against Eq. 6.19 gives `C̄ = Re A`, `S̄ = −Im A`; and
+Eq. 6.21 is a rotation of the packed complex number, so the whole generator step is
+`S± + iC± = i·Kₙ·e^{iχ_f}·A±`.
+
+**That file earned its cost immediately.** Eq. 6.20 pairs `C̄` with `sin ε` and `S̄` with `cos ε`, so
+the quantity Eq. 6.21 rotates is `S̄ + iC̄ = iA`. The *other* pairing, `C̄ + iS̄ = conj(A)`, is equally
+true and is what the generator first used — and the Maxima file, in its first version, verified that
+true-but-irrelevant identity instead of the one in use. Every C came out as its own S. The table
+sealed. The quadrature self-test passed at 1e-15. The synthetic round trip was exact. Nothing inside
+the pipeline could see it, because all three checks build their field with the generator's own
+convention. Only the published atlases disagreed, by a factor of order one. **A self-consistency
+check cannot find a convention error; only an independent answer to the same question can.**
+
+**The quadrature is exact, and that is measured rather than argued.** The atlas grid is equiangular,
+the one case with an exact quadrature: Driscoll–Healy weights in latitude and a DFT in longitude.
+`tide_to_stokes.py --self-test` reports the weights summing to 2 with zero error, `P̄nm` agreeing with
+Rodrigues' formula at 4.4e-16 *including sign*, orthonormality at 4.4e-16, and a synthetic field's
+coefficients recovered at 1.0e-15. The sign check is not redundant with orthonormality: flip any
+single `P̄nm` and orthonormality still holds, and the synthetic test builds its field from the same
+recursion it analyses, so a sign error cancels there too.
+
+**Degree 6, and the cap is the physics input.** IERS 2010 §6.3.1 publishes `k′n` for n = 2..6 and
+stops. The analysis itself is exact past degree 700 on a 0.125° grid, so lifting the cap needs a
+primary source for `k′n` at higher degree (Farrell 1972, or a PREM tabulation) obtained and read the
+way `ADMINT.F` was — not recalled. Emitting a degree-20 table on a guessed `k′n` would be worse than
+not emitting one.
+
+**The phase bias comes from a file, not from memory.** χ_f depends on the tidal species and on the
+*sign* of the constituent's Cartwright–Edden amplitude, which is read out of the IERS Conventions
+Centre's own `ADMINT.F` — the same file `derivations/hardisp_tables.py` reads. The decode is checked
+against a second, unrelated source already in the tree: the aviso-fes equilibrium amplitudes baked
+into `ocean_tide_admittance.py`. They agree to ~1e-4 on every wave (M2 0.632208 against 0.631931,
+K1 0.368645 against 0.368731), which is what makes the *signs* trustworthy.
+
+**What is in the table, and what is deliberately not.** GOT5.5 carries 16 explicitly solved
+constituents and 17 more it publishes as inferred — its own README names GRACE processing as the
+reason the second set exists. Thirty-one of those 33 become waves. The two quarter-diurnal compounds
+(M4, MS4) do not, because Table 6.6 has no bias for their species and no equilibrium amplitude whose
+sign could supply one; GOT5.6's four third-degree supplements do not either, because their conversion
+is not Eq. 6.21. Both refusals are printed by the generator rather than left to a silent `continue`.
+
+**The verdict: our analysis of an independent atlas is closer to FES2014b than FES2004 is, on every
+wave all three share.** That comparison needs no invented tolerance. FES2004 and FES2014b are both
+published, ten years apart, from different data and different software, so the difference between
+*them* is the atlas-to-atlas spread at this degree — the noise floor of the exercise. Against
+FES2014b, in the tables' own 10⁻¹¹ units:
+
+| Wave | Doodson | ‖FES2014b‖ peak | GOT − FES2014b | FES2004 − FES2014b |
+|---|---|---|---|---|
+| M2 | 255555 | 47.08 | **0.135** (0.9 %) | 0.216 (1.5 %) |
+| K1 | 165555 | 23.61 | **0.093** (1.4 %) | 0.247 (3.7 %) |
+| S2 | 273555 | 15.86 | **0.123** (2.2 %) | 0.217 (3.8 %) |
+| O1 | 145555 | 18.13 | **0.061** (1.2 %) | 0.185 (3.7 %) |
+| N2 | 245655 | 11.41 | **0.034** (1.1 %) | 0.120 (3.9 %) |
+| K2 | 275555 | 4.46 | **0.040** (2.6 %) | 0.182 (11.6 %) |
+| P1 | 163555 | 7.22 | **0.029** (1.4 %) | 0.187 (8.8 %) |
+| Q1 | 135655 | 3.93 | **0.025** (2.3 %) | 0.081 (7.5 %) |
+| 2N2 | 235755 | 1.89 | **0.032** (6.8 %) | 0.053 (11.3 %) |
+
+Median rms over the nine: **0.050 against 0.185** — our table is 3.7× closer to the modern reference
+than the older reference is. Across all seventeen waves GOT and FES2014b share, the worst rms is
+0.228 (J1) and the worst single cell 0.721 (S2); the largest *relative* gaps are all on waves whose
+own coefficients are near 1, where an absolute difference of 0.1 is most of the signal.
+
+**And the difference is flat in degree, which is the evidence the cap rests on.** A quadrature or
+truncation error grows with degree; an atlas difference does not. For M2 the difference holds between
+0.087 and 0.160 across n = 2..6 while M2's own coefficients fall from 18.9 to 9.0. What is left after
+the conventions are right is two groups disagreeing about the ocean, not this pipeline losing
+accuracy — so degree 6 is a limit on the published `k′n`, not on the analysis.
+
+| Component | Specification source | Oracle | Residual / tol | Where |
+|---|---|---|---|---|
+| Analysis integral, `(A⁺, A⁻)` ← grid | IERS 2010 Eq. 6.18–6.19 | **Maxima, Rodrigues + closed-form integrals** | residual 0, symbolic | derivations/ocean_tide_stokes.mac |
+| Eq. 6.20 packing and the χ_f rotation | IERS 2010 Eq. 6.20–6.21, Table 6.6 | **Maxima**, both pairings checked so the one in use is named | residual 0, symbolic | derivations/ocean_tide_stokes.mac |
+| `P̄nm` recursion, including sign | 4π normalisation, no Condon–Shortley | **Maxima at 25 digits**, Rodrigues' formula | 4.4e-16 | tide_to_stokes.py --self-test |
+| Driscoll–Healy quadrature | Driscoll & Healy (1994) | Σw = 2; orthonormality; synthetic field | 0.0; 4.4e-16; 1.0e-15 | tide_to_stokes.py --self-test |
+| Cartwright–Edden amplitude signs | IERS Conventions Centre `ADMINT.F` | **aviso-fes `H_eq`**, already in the tree | ~1e-4 on every wave | derivations/tide_to_stokes.py |
+| The coefficients themselves | IERS 2010 Eq. 6.21 from GOT5.5 grids | **FES2004 and FES2014b**, spread between them as the floor | closer than FES2004 on all 9 shared; worst rms 0.228e-11 of 17 | tests/ocean_tide_atlas.rs |
+| The committed table is the generated one | — | `derivations/table_seals.py`, a second float parse | FNV-1a exact, 4681 values | tests/generated_tables.rs |
+
+---
+
+
+---
+
+---
+
+### 10.9 The drivers SDTM-1 may be fitted on, and what the ones it may not are worth
+
+`plans/16` Ф15.B admits a driver only if commercial use is permitted, the series spans the corpus or is
+bridged by a documented regression, and the operational latency is at most a day. All three are
+measurements, so `tools/solar_proxy_admissibility.py` makes them:
+`uv run --no-project --with netCDF4 --with numpy python tools/solar_proxy_admissibility.py --fetch`.
+Nothing it fetches is committed; the cache is `~/.cache/spacelab/space-weather`.
+
+**The terms layer is machine-read.** Two providers state a licence in a place a script can reach, and
+that is what the verdicts rest on rather than on someone's reading of a web page:
+
+* every GOES-R EUVS daily science file carries `license = "These data may be redistributed and used
+  without restriction."`;
+* the SDO/EVE L3 merged file carries `license = "CC0 1.0 https://creativecommons.org/publicdomain/zero/1.0/"`;
+* LISIRD publishes its whole catalogue as RDF (`https://lasp.colorado.edu/lemr/lisird/lisird`), in
+  which each dataset either names a licence or does not. **354 of its 420 datasets name none**, against
+  41 CC0 and 25 CC BY 4.0 — and the composites everyone reaches for first are in the 354.
+
+| Candidate | Terms, as the provider states them | Span | Latency | Verdict |
+|---|---|---|---|---|
+| F10.7, F10.7a (CelesTrak `SW-All.csv`) | usage policy, no reuse condition (`celestrak`) | 1957-10-01 → 2026-09-13, 25 125 observed days | **0 d** | **admitted** |
+| ap, Kp (same file) | as above | 1957– | 0 d | **admitted** |
+| Hp30, Hp60, ap30, ap60 (GFZ) | `# LICENSE: CC BY 4.0` in the header, doi:10.5880/Hpo.0003 V3.0 | 1985– | **~1 h** (last row 2026-09-12 23:00, file written 23:54) | **admitted** |
+| GOES-R EUVS 30.4 nm / Ly-α / Mg II | *"redistributed and used without restriction"*, CC0 in LISIRD | 2017-02-07 → (g18/g19 current) | **3 d** | **admitted from 2017-02** |
+| SDO/EVE ESP 27.16–33.8 nm band, MEGS-P Ly-α diode | CC0 1.0, in the file | 2010-04-30 → 2026-09-12, 5959 / 5938 days | **1 d** | **admitted from 2010-04** |
+| SDO/EVE He II 30.4 nm *line* | CC0 1.0 | 2010-04-30 → **2014-05-26** | dead | admitted, unusable alone — MEGS-A failed |
+| LISIRD composite Lyman-α (Machol 2019) | **no licence stated** | 1947-02-14 → 2026-09-10 | 4 d | **rejected: terms** → oracle |
+| Bremen composite Mg II (and the F30-extended form) | **no terms on the page or in the files** | 1978.85 → 2026.69 (17 476 rows) | 2 d | **rejected: terms** → oracle |
+| Viereck composite Mg II, SORCE Mg II, SOHO/SEM, CLS F30 | **no licence stated** (LISIRD catalogue) | various | — | **rejected: terms** |
+| USGS Dst | open, but the series is all-null at every storm tried (Ф14.F) | — | — | **rejected: data** |
+| WDC Kyoto Dst | *"does not allow commercial applications of the geomagnetic indices"* | 1957– | — | **rejected: terms** → oracle |
+| SET SOLFSMY / DTCFILE (S10, M10, Y10, ΔTc) | no terms stated anywhere | 1997– | 1 d | **rejected: terms** → JB2008 validation only |
+
+**So the admitted set is F10.7 with its 81-day mean, and Hp60/ap — over the whole corpus — plus EUV
+from 2010-04-30 and a second, independent EUV source from 2017-02-07.** CHAMP (2000–2010) and the first
+eight years of GRACE have no admissible EUV driver at all, which is a fact about the *licences*, not
+about the instruments: the composites that would cover them exist and state no terms.
+
+**What the missing EUV information is worth, measured.** Each EUV series is regressed on exactly the
+form SDTM-1's exospheric temperature uses — `[1, f, f², d]`, `f = (F10.7a − 150)/100`,
+`d = (F10.7 − F10.7a)/100` — and the residual is reported. That one number reads both ways: forwards it
+is the error of bridging the proxy from F10.7 over the years before the instrument flew, backwards it
+is the information the proxy carries that the admitted driver cannot reach. Kelvin at Jacchia's (1971)
+night-time slope, 3.24 K of `T∞` per sfu.
+
+| Proxy | days | R² on F10.7 | residual rms | of the mean | sfu | K of `T∞` |
+|---|---|---|---|---|---|---|
+| GOES-16 30.4 nm (2017–2025) | 2943 | 0.9699 | 2.217e-5 W/m² | 4.23 % | 7.60 | **24.6** |
+| GOES-16 Lyman-α | 2942 | 0.9581 | 2.744e-4 W/m² | 3.73 % | 8.69 | 28.2 |
+| GOES-16 Mg II | 2943 | 0.9677 | 1.430e-3 | 0.53 % | 8.08 | 26.2 |
+| GOES-18 30.4 nm (2022–2026) | 1454 | 0.8131 | 2.910e-5 W/m² | 4.37 % | 13.58 | 44.0 |
+| GOES-19 30.4 nm (2024–2026) | 699 | 0.8815 | 2.522e-5 W/m² | 3.83 % | 11.28 | 36.5 |
+| SDO/EVE ESP 27–34 nm (2010–2026) | 5947 | 0.8251 | 8.708e-5 W/m² | 10.58 % | 16.05 | 52.0 |
+| SDO/EVE MEGS-P Lyman-α | 5926 | 0.9199 | 3.383e-4 W/m² | 4.54 % | 10.74 | 34.8 |
+| SDO/EVE He II 30.4 nm line (2010–2014) | 1477 | 0.7123 | 2.484e-5 W/m² | 4.77 % | 15.36 | 49.8 |
+
+**That residual is not instrument scatter, and the test for it is two spacecraft on the same day.**
+Where GOES-16 and GOES-18 both measured, they differ by 0.31 % of the mean at 30.4 nm, 0.76 % at
+Lyman-α and 0.07 % in Mg II; GOES-18 against GOES-19, 0.76 %, 2.15 % and 0.15 %. The residual against
+F10.7 is 3.7 % to 10.6 % — **five to fourteen times the floor**. Whatever F10.7 is missing, two
+independent radiometers agree about it.
+
+Put on the axis that matters, through the SDTM-1 profile at `T∞ = 1058 K` (the same reference field
+`sdtm/mod.rs` anchors on, and the script's own re-implementation of the closed form reproduces its
+3.5114e-12 kg/m³ at 400 km):
+
+| altitude | ρ at 1058 K | +24.6 K | +34.8 K | +52.0 K |
+|---|---|---|---|---|
+| 300 km | 2.3823e-11 kg/m³ | +6.72 % | +9.57 % | +14.44 % |
+| 400 km | 3.5114e-12 kg/m³ | **+9.77 %** | +13.98 % | +21.29 % |
+| 550 km | 3.1992e-13 kg/m³ | +14.20 % | +20.48 % | +31.62 % |
+
+**This is an upper bound and is written down as one.** It assumes the whole residual maps to `T∞` at a
+published slope; it is not a prediction that an EUV term will improve the fit by 10 % of density. What
+it does establish is that the quantity is the same order as the entire error budget of the best
+available model (DTM2020's 20.2 % MAPE, §10.2), which is why Ф15.B's answer is not "F10.7 is enough":
+it is that **SDTM-1 v1 is fitted on F10.7 and Hp60 because those are what the whole corpus admits**, and
+that an EUV term is worth building the moment either the fit is restricted to 2010-onwards missions or
+IUP Bremen answers the letter.
+
+**Credit, as the two admitted sources ask for it.** SDO/EVE: *"Courtesy of NASA/SDO and the AIA, EVE,
+and HMI science teams."* — Woods, T. N. et al., *Extreme Ultraviolet Variability Experiment (EVE) on the
+Solar Dynamics Observatory (SDO)*, Sol. Phys. **275**, 115 (2012). GOES-R EUVS: processed at NOAA NCEI,
+`goesr.exis@noaa.gov`, product `sci_euvs-l2-avg1d` v1-0-7. Neither licence requires this; both files ask
+for it, and nothing derived from either is committed, which is why the credit is here rather than in
+`NOTICE`.
+
+**One register row was a claim and is now four readings.** `open-solar-indices` (2026-09-06) recorded
+these three sources as "US Government / NASA-funded / citation-only respectively", verdict **ship+attr**,
+"not yet fetched". Fetching them says otherwise in both directions: NOAA's grant is *stronger* than
+assumed (redistribution without restriction, not merely government works), SDO/EVE is explicitly CC0,
+and the two composites state **no terms at all** — "citation-only" was an inference from the presence of
+a citation request. The row is now `noaa-goes-euvs`, `sdo-eve`, `lisird-composites` and `bremen-mgii`,
+each dated 2026-09-14, two of them **oracle-only**.
+
+### 10.10 SDTM-1's first fitted coefficients, and the three splits that disagree about them
+
+§2.6 verified the form with no coefficients in it. This is the fit — `plans/16` Ф15.D — and the reason
+it is in §10 rather than in §2 is that it is the first thing in this document whose verdict is a
+*statistic about measurements* and not a residual against a reference implementation.
+
+**What was fitted.** `tools/gen_sdtm_coefficients.py`, Levenberg–Marquardt in `ln ρ`, on the twelve
+satellite-months already cached under `data/validation/density/` — the same TU Delft product as §10.2,
+CC BY 4.0, decimated to one row an hour, **8 170 rows**. Finer sampling was measured and rejected: at
+eight-minute spacing the same twelve months give 32 680 rows and every number gets slightly *worse* —
+in sample 20.1 → 20.3 %, LOSMO 22.8 → 23.0 %, LOMO 50.7 → 53.2 % — because the field varies on the
+scale of the orbit, so the extra rows are correlated and the per-row penalty then weighs more than the
+information they add. Free parameters: the admitted
+`ln(T∞ − T₀)` coefficients, the storm kernel's two time constants, and one log scale per mission. Held
+fixed: `σ = 2e-5 m⁻¹`, and the 120 km boundary at Jacchia's published total.
+
+The corpus is small in a specific way that every number below is a consequence of:
+
+| fold | n | altitude, km | F10.7a | F10.7 | day of year |
+|---|---|---|---|---|---|
+| GRACE-FO C 2019-01 | 698 | 506.7 (485–537) | 69.8 | 71.4 | 1–31 |
+| GRACE-FO C 2021-11 | 670 | 505.2 (483–535) | 88.0 | 87.4 | 305–334 |
+| GRACE-FO C 2022-04 | 675 | 504.0 (482–524) | 116.4 | 134.9 | 91–120 |
+| GRACE-FO C 2023-04 | 675 | 500.8 (483–516) | 163.8 | 144.9 | 91–120 |
+| GRACE-FO C 2024-05 | 698 | 490.8 (471–515) | 165.7 | 186.1 | 122–152 |
+| GRACE-FO C 2025-06 | 672 | 474.2 (456–501) | 146.5 | 132.5 | 152–181 |
+| Swarm A 2019-01 | 696 | 447.9 (437–466) | 69.8 | 71.4 | 1–31 |
+| Swarm A 2021-11 | 672 | 439.6 (429–459) | 88.0 | 87.4 | 305–334 |
+| Swarm A 2022-04 | 675 | 434.8 (423–454) | 116.4 | 134.9 | 91–120 |
+| Swarm A 2023-04 | 670 | 470.3 (459–492) | 163.8 | 145.0 | 91–120 |
+| Swarm A 2024-05 | 697 | 482.2 (471–501) | 165.7 | 186.2 | 122–152 |
+| Swarm A 2025-06 | 672 | 451.2 (440–471) | 146.5 | 132.5 | 152–181 |
+
+Three things follow from that table alone, before any fit: the altitudes span **423 to 537 km** and
+nothing else, so the Bates shape parameter has almost no leverage; the two missions occupy *different*
+bands, so a mission comparison is also an altitude comparison; and the six months sit at **five**
+distinct positions in the year (April twice), with a 124-day gap between June and November. An annual
+plus a semiannual harmonic has four free parameters and five points to sit on.
+
+**Three splits, because they answer three different questions.**
+
+* **LOSMO** — leave one *satellite-month* out. The other satellite's *same* month stays in training, so
+  the drivers of the held-out interval are represented. This is the split the pilot reported.
+* **LOMO** — leave one *calendar month* out, both satellites. Nothing from that month, or from that
+  position in the year, is in training.
+* **Transfer** — train on one mission, test on the other. Reported twice: raw, and with the residual's
+  own mean removed, because a held-out mission's scale is not identified by a training set that does
+  not contain it. The debiased number is what the model's *shape* is worth there; the raw one is what a
+  caller with no calibration sees.
+
+**The verdict.** Degree 2 (`K = 9`), harmonic caps `storm-log1` — 35 of the 144 possible
+(driver, harmonic) pairs — ridge 0.1, boundary at the published total. The storm regressor is
+`a = ln(1 + storm/15)` rather than `storm/100`, and **§10.15 is why**: that one substitution, at the
+same coefficient count, is worth 0.8 points of LOSMO, 0.6 of LOMO and a factor of two on the storm
+peak, and the numbers below are all after it.
+
+| split | pooled MAPE | rms `ln(model/measured)` | worst fold |
+|---|---|---|---|
+| in sample | **19.3 %** | 0.243 | — |
+| LOSMO (12 folds) | **22.0 %** | 0.271 | 34.9 % (GRACE-FO C 2019-01) |
+| LOMO (6 folds) | **50.1 %** | 0.507 | 169.8 % (2019-01) |
+| transfer, GRACE-FO C → Swarm A | **27.6 %** | 0.256 | — |
+| transfer, Swarm A → GRACE-FO C | **38.7 %** | 0.310 | — |
+
+Per fold, LOSMO: 34.9, 23.7, 19.2, 20.9, 23.2, 16.0 % (GRACE-FO C 2019-01 … 2025-06) and 30.5, 20.6,
+17.0, 18.1, 23.1, 15.3 % (Swarm A). By bin: F10.7a < 100 **27.5 %**, 100–175 **19.1 %**; day (9–15 LST)
+**18.0 %**, night (21–3 LST) **25.3 %**. `T∞` ranges over **586–1528 K** across the corpus, which is
+inside the physical envelope at both ends — the pilot's dropped to 549 K at solar minimum, and the
+linear-storm form reached 1721 K.
+
+**One number moves the wrong way and it is the mission transfer.** GRACE-FO C → Swarm A goes from
+21.5 % to 27.6 % while Swarm A → GRACE-FO C improves from 39.8 % to 38.7 %: the *worse* direction gets
+better and the better one gets worse, so the spread between the two directions narrows from 18.3 points
+to 11.1. Both remain what they were before — a number a two-mission corpus cannot make trustworthy,
+since with one mission in training the log-scale nuisance is collinear with the intercept (defect 2
+below) and only its ±0.3 bound keeps the fit finite. It is reported because it moved, not because it
+is Ф15.E's answer.
+
+**Against the pilot, on the same twelve months:** in sample 19.3 % against 20.5 %, LOSMO **22.0 %**
+against 23.0 %, LOMO **50.1 %** against 62.4 % — and fold by fold on the honest split, 2019-01
+**169.8 %** against 214.5 %, 2024-05 **26.3 %** against 55.2 %, the other four **21.5–28.8 %** against
+21.9–29.0 %. So the form of §2.6 with 35 fitted numbers reproduces the pilot's headline and improves
+every fold of its honest split. It does not *fix* that split, and the fold table above is why: the model
+is asked for a season it has no data at.
+
+**What the splits disagree about is the whole finding.** LOSMO says 22.0 % and LOMO says 50.1 % of the
+same coefficients. Both are correctly computed; they differ because LOSMO's folds leak — the twin
+satellite-month carries the same drivers and nearly the same season — and the difference between them
+is the size of that leak, measured: **a factor of 2.3**. A model selected on LOSMO alone would be
+chosen for its ability to interpolate between two satellites, which is not what a caller asks of it.
+
+**How the restriction was chosen.** The form allows `DRIVERS × K = 16 × 9 = 144` coefficients — 144
+rather than 117 since §10.15 added the storm-response candidates, of which the shipped set admits one.
+That model is not merely over-parameterised, it is unusable, and the numbers are worth recording
+because the in-sample fit gives no hint of it (2 043 rows, one row every four hours, so that the whole
+ladder fits in an afternoon). The ladder below is the one that chose the *geography* restriction, run
+with the linear storm regressor; §10.15's table is the one that chose the storm regressor itself, at
+this ladder's operating point, and its conclusions on ridge and boundary were re-measured there and
+hold unchanged.
+
+| caps | coefficients | ridge | boundary | in sample | LOSMO | worst | LOMO | worst | transfer | debiased |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `full` | 117 | 0 | fitted | 16.1 % | 3823.3 % | 20028.3 % | 4585.1 % | 18009.4 % | ∞ | — |
+| `full` | 117 | 0.1 | fitted | 17.8 % | 131.5 % | 751.1 % | 132.7 % | 476.0 % | ∞ | — |
+| `graded` | 44 | 0.1 | fitted | 18.9 % | 22.7 % | 35.9 % | 113.7 % | 393.7 % | 52.1 % | 22.9 % |
+| `graded` | 44 | 0.1 | 1 | 19.0 % | 22.9 % | 36.2 % | 111.4 % | 372.5 % | 43.9 % | 23.0 % |
+| **`lean`** | **35** | **0.1** | **1** | **19.9 %** | **22.6 %** | **35.7 %** | **49.7 %** | **165.8 %** | **39.7 %** | **25.6 %** |
+| `lean` | 35 | 0.1 | fitted | 19.8 % | 22.7 % | 34.8 % | 49.7 % | 170.0 % | 47.2 % | 25.6 % |
+| `lean` | 35 | 0 | 1 | 19.6 % | 22.2 % | 33.6 % | 132.2 % | 462.9 % | 40.1 % | 24.9 % |
+| `lean` | 35 | 0 | fitted | 19.5 % | 22.3 % | 34.5 % | 129.8 % | 468.1 % | 47.8 % | 25.1 % |
+| `tight` | 24 | 0.1 | 1 | 20.6 % | 23.0 % | 35.1 % | 53.8 % | 185.7 % | 44.8 % | 23.7 % |
+| `aseasonal` | 24 | 0.1 | 1 | 28.8 % | 46.3 % | 101.9 % | 58.3 % | 112.4 % | 68.8 % | 37.1 % |
+
+`lean` caps the *activity* response at harmonic degree 1, keeps the mean field at degree 2, drops the
+activity-by-season products entirely, and gives the storm and the four seasonal terms degree 1 — a
+hemispheric and a diurnal asymmetry each, which is what the literature models carry for them.
+
+Two of those rows overturned an expectation held while writing the generator. **The seasonal terms earn
+their place even on the calendar-month split**: `aseasonal`, which cannot extrapolate a season because
+it has no seasonal term, is *worse* on LOMO (58.3 %) than `lean` (49.7 %) and much worse everywhere
+else. And the **ridge is the single most influential knob on the honest split** — on `lean`, with the
+boundary held, LOMO goes 132.2 % (ridge 0) → 63.2 % (0.03) → **49.7 % (0.1)** → 50.2 % (0.3) → 59.3 %
+(1) → 75.0 % (3), while LOSMO moves by less than two points across that whole ladder. Selecting the
+ridge on LOSMO would have picked 0.03 and left the honest error 27 % higher.
+
+**Holding the boundary at the published total is a decision, not a default.** A fitted scale on
+Jacchia's 120 km total buys nothing on either held-out split — the two `lean` pairs above differ by
+0.1 points of LOSMO and not at all on LOMO — and it costs **7.5 points of transfer** (47.2 % against
+39.7 %). It also runs into its own ±0.7 log bound: fitted under the shipped restriction it comes out at
+exactly **0.4966**, the bound, i.e. the fit wants half of Jacchia's published 120 km total. That is the
+level/shape degeneracy of a 114 km band talking, not a measurement of the turbopause, and a parameter
+sitting on a bound is not a fitted parameter. The evaluator keeps it because the corpus of Ф15.A can
+identify it; this fit sets it to exactly 1.
+
+**Three defects the splits found, none of which a passing test would have.**
+
+1. **The ridge did nothing.** `ridge` 0, 1e-3, 1e-2 and 1e-1 returned a held-out MAPE identical to four
+   significant digits. The penalty rows were scaled by each column's rms but not by the fold's row
+   count, so against a data term summed over 8 170 rows they contributed a part in ten thousand. The fix
+   is `sqrt(n)`, and its effect is the ladder above — a factor 2.7 on LOMO.
+2. **An unidentified nuisance produced a 1e290 % error.** With one mission in training the mission
+   indicator is constant, so its log scale becomes collinear with the intercept; the fit moved it by
+   −670 in log and compensated with the coefficients, and the held-out mission then read `exp(+670)`.
+   The scale is now bounded to ±0.3, which is what two measurement *methods* can plausibly disagree by
+   — the fitted value is **0.972**, i.e. Swarm A's POD densities 2.8 % below GRACE-FO C's accelerometer,
+   against the 2 % §10.2 measured for three other models on the same two missions.
+3. **The atomic mass constant was four years stale.** `sdtm_reference.rs` compares the Rust evaluator
+   against the generator's own values at 64 geometries, and it failed at **1.06e-8** relative in ρ where
+   `T∞` matched to 1e-15. The cause: `ATOMIC_MASS` was CODATA 2018's `1.6605390666e-27`, the generator
+   used CODATA 2022's `1.66053906892e-27`, a relative difference of 1.4e-10 — multiplied by the ~70 of
+   `m g₀ ζ / kT` in the exponent. The Rust is now CODATA 2022 and the residuals are `T∞` **1.824e-15**,
+   ρ **7.516e-15**. A 1e-8 density error is invisible against a 20 % model error and would have sat
+   there indefinitely; it was caught only because the fixture's tolerance is the *arithmetic's*, which
+   in turn is only possible because every field of the fixture is written at round-trip precision.
+
+**What is not identified, stated so that a later corpus can be seen to fix it.** `σ` is held at
+2e-5 m⁻¹, and the reason has changed with the restriction: under the shipped `lean`/ridge-0.1 model
+fitting it moves it only to **2.508e-5 m⁻¹** and costs 0.2 points of LOSMO and 1.1 of LOMO (22.8 → 23.0,
+50.7 → 51.8) — measured with the linear storm regressor, and the restriction and the ridge are what tame
+it, neither of which §10.15 changed — while under the unrestricted 144-coefficient model it ran to
+**7.4e-6 m⁻¹** with `T∞`
+reaching 2280 K. So a 114 km band constrains `σ` weakly rather than not at all, and what tamed it was
+the restriction and the ridge, not the data. Fitting it buys nothing here and it stays fixed. The split
+of the density *level* between `σ`, `T∞` and the boundary is the part that is genuinely unidentified,
+and the pinned boundary bound is the evidence. The storm kernel's constants come out at onset
+**0.80 h** and recovery **2.73 h**, the gap no longer on its 1 h floor — under the linear regressor the
+fit drove them to the fastest admissible response, 0.94 h and 1.94 h with the gap pinned, and moving
+the regressor to the log-activity scale is what let the recovery constant lengthen. That kernel peaks
+at `τ_o τ_r ln(τ_r/τ_o)/(τ_r − τ_o)` = **1.39 h** and has mean delay `τ_o + τ_r` = **3.53 h**; the
+regressor is sampled at the end of the *previous* 3-hourly interval, which adds 0–3 h, so the total
+delay from an `ap` value to its density response is 1.4–4.4 h at the peak and 3.5–6.5 h in the mean —
+the range the storm literature reports. §10.15 measures what the longer memory cost: a modelled peak
+10.5 h late on the largest storm. §10.17 then holds the *shape* still at eight settings and scores each
+one, which is the closest this corpus gets to resolving shape from total — every memory longer than the
+fitted pair is worse on every aggregate, so the fit's own choice is not an artefact of the two
+parameters being free.
+
+**What this is not.** It is not Ф15.E. There is no comparison here against NRLMSISE-00, JB2008 or
+DTM2020 on these rows, and there cannot usefully be one against a *held-out mission*, because two
+missions in two altitude bands cannot produce that number however the folds are arranged. The
+coefficients that ship today are a twelve-month fit whose honest error is **50.1 %**, published as
+such; `docs/limitations.md` carries the envelope, and `plans/16` Ф15.A — the blocked TU Delft archive,
+or the registered ESA Swarm fallback — is what changes it.
+
+### 10.11 The gate SDTM-1 does not pass, and which half of it fails
+
+`plans/16` Ф15.E set the bar before the fit ran: **pooled held-out-mission MAPE ≤ 25.5 %** (JB2008's
+published figure), **below NRLMSISE-00 in every bin**, and **no regime-edge bin above 40 %**, with
+20.2 % (DTM2020's) as the stretch. This is that gate, evaluated, and the verdict is **not passed** —
+with the useful part being *which* criterion fails and why.
+
+**A held-out-*mission* number cannot be produced from this corpus, and the nearest thing to it fails.**
+Two missions in two non-overlapping altitude bands (§10.10's fold table) mean that holding one out is
+also an altitude extrapolation, so neither direction is the number the gate asks for. Both are worth
+having anyway, because they disagree in an informative direction:
+
+| trained on | tested on | n | raw MAPE | debiased MAPE | bias of the held-out mission | mission log-scale (bound ±0.3) |
+|---|---|---|---|---|---|---|
+| GRACE-FO C, 474–537 km | Swarm A, 423–492 km | 4 082 | **27.6 %** | 20.6 % | 0.743 | −0.2970 |
+| Swarm A, 423–492 km | GRACE-FO C, 474–537 km | 4 088 | **38.7 %** | 25.4 % | **1.259** | −0.3000 |
+| both directions pooled | | 8 170 | **33.1 %** | 25.4 % | — | — |
+
+**Both raw numbers are a bound talking, and the last column is the proof.** With one mission in the
+training set the log-scale nuisance is collinear with the intercept — defect 2 of §10.10 — and the ±0.3
+bound is all that keeps the fit finite. Under the shipped coefficients *both* transfer fits drive it to
+that bound: −0.2970 and −0.3000, and `e^{−0.3} = 0.7408` against the measured 0.743 downward bias. So
+what the raw column measures is `exp(±0.3)` and not the model's level, in both directions. The debiased
+column is the one with content, and it says what §10.10's `σ` paragraph says: the *shape* transfers
+downward better than upward — 20.6 % predicting the lower satellite from the higher, 25.4 % the other
+way — because a fixed `σ` extrapolating a profile *up* out of the 114 km band that constrained it is the
+one direction the corpus cannot support. Against the gate's 25.5 % bar the raw pooled 33.1 % **fails on
+the level** and the debiased 25.4 % passes by a tenth of a point, which is too close to call a pass.
+(Under the linear storm regressor the same table read 21.5 / 39.8 / 30.7 % raw and 23.7 % debiased with
+a downward bias of 0.999; the raw numbers moved because the bound saturated in a direction where it
+previously had not, which is a statement about the nuisance and not about the storm term.)
+
+**Below NRLMSISE-00 in every bin: yes, by a factor of 1.8 to 3.6.** That criterion holds, and §10.2's
+new MAPE table is the measurement — 348 693 evaluations, identical rows and identical drivers for all
+five models. Pooled, SDTM-1 reads **20.3 %** against JB2008's 25.5 % and DTM2020's **20.2 %** — level
+with the model fitted on this data family, to a tenth of a point — and it is *best of the five* in the
+moderate-flux, geomagnetically-active and **storm** bins (16.7 %, 19.0 %, 29.2 % — the last against
+DTM2020's 30.5 % and JB2008's 31.0 % over 19 126 evaluations at `Ap` ≥ 50).
+It is last of the three modern models at both flux extremes, which are the two bins this corpus samples
+with one month each. Every one of those numbers is **in sample** and labelled so everywhere it appears:
+it is evidence about what the form can absorb and in which regime, not about generalisation.
+
+**No regime-edge bin above 40 %: fails, at the one edge this corpus has.** Held out by satellite-month
+the worst bin is F10.7a < 100 at 27.5 %, inside the bar. Held out by calendar month the 2019-01 fold is
+**169.8 %** — the deep-minimum January, the only solar-minimum month in the corpus, predicted from five
+months that do not include it.
+
+**So the gate stands open, and D-12's fallback applies:** the open-release cut ships calibrated
+NRLMSISE-00 (28.9 %) as its headline density model, with SDTM-1 present, documented at 50.1 %, and
+explicitly not the default. What would close the gate is not a better form — the form absorbs this data
+better than DTM2020 at the minimum (§10.2) — but a corpus with **altitude leverage** and more than five
+positions in the year: CHAMP at 300–450 km, GOCE at 250, GRACE A/B and Swarm B/C, which is Ф15.A, which
+is blocked on an archive that has refused connections since 2026-09-05. The registered alternative is
+ESA's own Swarm density product, whose terms are a user decision (`docs/provenance.md`,
+`esa-swarm-dns`), and that decision is now on the critical path of a measured, quantified gap rather
+than of a preference.
+
+### 10.12 The interval SDTM-1 ships with, and which split it has to come from
+
+A density is not an answer a covariance can use. Ф15.F is the other half — `sdtm::DensityUncertainty`,
+a table of the spread of `ln(ρ_model/ρ_measured)` by regime, generated with the coefficients and
+consumed as a multiplicative interval `ρ·e^{±zσ}`. This section is where that table's number comes from
+and what it was measured to be worth.
+
+**The regime is the model's own two drivers.** Three flux cells at 81-day mean F10.7 of 100 and 150 —
+chosen because this corpus spans 69.8 to 165.7 and never reaches the literature's 175 — crossed with two
+storm cells at the kernel response `ap` 15, the quiet/active boundary. Six cells, each exercised by the
+campaign (`measured_density.rs` asserts that none is empty). Both quantities are already in hand to
+evaluate the model, so asking for the uncertainty costs a caller nothing it has not fetched.
+
+**Which held-out split the spread comes from is the whole decision, and it was measured both ways.**
+
+| σ of `ln(model/measured)` | f107a < 100 | | 100–150 | | ≥ 150 | |
+|---|---|---|---|---|---|---|
+| | quiet | active | quiet | active | quiet | active |
+| from the satellite-month split | 0.324 | 0.335 | 0.207 | 0.200 | 0.249 | 0.301 |
+| **from the calendar-month split** | **0.771** | **0.583** | **0.333** | **0.328** | **0.328** | **0.327** |
+| rows in the cell | 2 456 | 280 | 1 798 | 628 | 2 209 | 799 |
+
+| the 90 % interval built from … | covers of the satellite-month residual | covers of the calendar-month residual |
+|---|---|---|
+| … the satellite-month split | 90.2 % | **67.0 %** |
+| … the calendar-month split | 98.3 % | **90.3 %** |
+
+The leaky split's σ is 1.6 to 2.4 times smaller in the solar-minimum cell, and an interval built from it
+covers **67.0 %** of what a genuinely new month produces while claiming 90 %. That is the failure mode
+that makes an interval worse than none, so the shipped table is the calendar-month one and the 98.3 % in
+the other corner — over-covering the easier split — is the price.
+
+**The verdict Ф15.F asked for: 90 % interval coverage on a held-out mission.**
+
+| held out entirely | n | coverage of the 90 % interval |
+|---|---|---|
+| Swarm A | 4 082 | 87.8 % |
+| GRACE-FO C | 4 088 | **92.5 %** |
+
+GRACE-FO C at 92.5 % is half a point above the 88–92 % the ticket set and Swarm A at 87.8 % is two
+tenths below it, so the band now brackets the pair rather than containing either — which is a better
+place to be than the linear storm regressor's 91.8 % and **98.1 %**, where one mission was inside and
+the other eight points conservative. The narrowing is a consequence of §10.15 rather than a separate
+change: this table is fitted on the calendar-month residual, and that residual was inflated by the
+Gannon blow-up the log-activity regressor removes, so the interval tightens with the model. What it
+costs is that Swarm A is now marginally *under*-covered where it used to be over-covered, and
+under-coverage is the direction that costs a caller safety rather than precision. Two tenths of a point
+on 4 082 rows is 9 rows; it is published rather than rounded away, and the honest reading is that a
+two-mission corpus cannot calibrate a mission-transfer interval to better than a few points either way
+— §10.11's bound-saturating nuisance is the same statement from the other side.
+
+**Against measured density, in the repository's own harness.** `measured_density.rs` asserts the
+direction that would make the table useless — that it never *under*-covers — on the two fixture days and
+in every regime of the 348 693-evaluation campaign. On 2019-01-01 it covers 100 % and on 2024-05-10
+94.0 %, and that over-coverage is not a defect but the table's meaning: `σ` = 0.771 in the
+solar-minimum cell is a factor of 3.5 either way, while that one day's own scatter is 0.274. The table
+carries between-month uncertainty that a single day does not exhibit. A test that demanded exactly 90 %
+on one day would be asserting the wrong quantity.
+
+The campaign's own six cells, on all 348 693 evaluations of the two missions (in sample for the fit, so
+this measures that the table is not *narrower* than the data, not how it generalises — §10.11's splits
+are that):
+
+| regime | f107a < 100 | | 100–150 | | ≥ 150 | | pooled |
+|---|---|---|---|---|---|---|---|
+| | quiet | active | quiet | active | quiet | active | |
+| rows | 104 741 | 11 974 | 76 871 | 26 618 | 94 465 | 34 024 | 348 693 |
+| covered by the shipped 90 % interval | 99.9 % | 98.8 % | 98.9 % | 98.7 % | 98.5 % | 93.8 % | 98.6 % |
+
+**The edges are a compile-time assertion, not a comment.** `σ` is meaningless away from the bins it was
+measured in, and moving `FLUX_EDGES` or `STORM_EDGES` without regenerating would re-index the table
+silently — the array would still be the right length. So the generator emits
+`const _: () = assert!(FLUX_EDGES[0] == 100.0);` and its two siblings into `coefficients.rs`: the
+mismatch is a build failure in the crate that owns both halves.
+
+**One number falls out of Ф15.F that belongs to Ф15.D.** The same campaign runs the four-coefficient
+sun-fixed calibration layer of §4 over each model, held out by satellite-month: NRLMSISE-00 goes
+51.7 % → **28.9 %**, JB2008 25.5 % → 24.1 %, DTM2020 20.2 % → 20.7 %, and SDTM-1 20.3 % → **20.1 %**.
+Our own model gains 0.2 points where NRLMSISE-00 gains 22.8, which is the direct evidence that SDTM-1's
+own sun-fixed harmonics have already absorbed the structure that layer exists to remove. A model whose
+error still had a large sun-fixed component would show the opposite, and the pilot's did.
+
+### 10.13 Can SDTM-1 be run now? The operational path, from one file
+
+Everything above measures the model against a past month with the whole feed in hand. Ф15.G asks the
+operational question — a density at the present epoch, from files a caller is allowed to fetch, with no
+SET product in the loop — and it has three parts that fail separately. `tests/operational_path.rs` is
+all three, `#[ignore]`d because they read the un-vendored bulk feed.
+
+**The conventions are the library's now, not the call site's.** `space_weather::sdtm_drivers` assembles
+the three drivers the way `tools/gen_sdtm_coefficients.py` fitted them: F10.7 of the **previous** day,
+the **trailing** 81-day mean, and `StormKernel::response` over the `ap` history ending at the interval
+before the sample. Each has a plausible wrong answer in the same file, and the middle one had a wrong
+answer in this repository's own documentation until Ф15.G: `SdtmDrivers::f107a` was documented as the
+*centred* mean — NRLMSISE-00's convention — while the fit used the trailing one. The two are not
+interchangeable. Over the feed's 25 125 observed days they differ by **6.7** flux units on average,
+**31.6** at the 99th percentile and **42.6** at the worst (2001-09-17), and by **9.3** on average across
+the six months this model was fitted on. The trailing mean was chosen for exactly the reason this section
+exists: a centred mean needs forty days of the future, so it is half forecast within forty days of the
+present, while the trailing one stays an observation to the last published day.
+
+**Latency, measured against the download and not the wall clock.** What is being measured is the feed; a
+stale copy on disk would otherwise read as a slow provider.
+
+| snapshot | last measured day | last row of any kind | latency |
+|---|---|---|---|
+| fetched 2026-09-14 01:06 | 2026-09-13 | 2041-10-01 (`PRM`) | **1 day** |
+| fetched 2026-08-10 04:49 | 2026-08-08 | 2041-10-01 (`PRM`) | 2 days |
+
+25 125 `OBS` rows against 60 `INT`, 44 `PRD` and 180 `PRM` in the newer snapshot — so the forward tail is
+45 days of NOAA forecast and then fifteen years of solar-cycle climatology, and `FluxQuality` is the
+only thing that separates them from a measurement.
+
+**The verdict: a density at the last measured day, from `SW-All.csv` alone.** No SOLFSMY, no DTCFILE, no
+HASDM. At 2026-08-08 12:00 UT (the snapshot in `data/validation/density`), noon local solar time on the
+equator, drivers F10.7 96.5 / F10.7a 134.6 / storm 19.4 `ap`, `T∞` 984 K:
+
+| altitude | ρ, kg/m³ | 90 % interval |
+|---|---|---|
+| 300 km | 1.931e-11 | 1.075e-11 … 3.465e-11 |
+| 400 km | 2.595e-12 | 1.445e-12 … 4.657e-12 |
+| 500 km | 4.613e-13 | 2.570e-13 … 8.281e-13 |
+| 600 km | 9.779e-14 | 5.448e-14 … 1.755e-13 |
+
+**The 81-day window is the provider's window.** `extend_forecast` recomputes both means over the extended
+dailies rather than carrying the last published value forward — holding `F10.7_OBS_LAST81` fixed is the
+mistake the function exists to prevent, because the window keeps rolling whatever the daily value does,
+so a trailing mean under persistence *still moves*. That recomputation is only correct if our window is
+CelesTrak's, and measured days are the one place the two can be compared: over **22 323** windows in
+which all 81 days are `OBS`, the worst difference is **0.0494** flux units in the trailing mean and the
+same in the centred one. The file publishes both to one decimal, so that is its rounding and not a
+different window.
+
+**The forecast baselines, scored by lead.** Mean absolute error over 420 origins sampled every 13 days
+(a prime stride, so the sampling does not beat against the 27-day rotation) through the last fifteen
+years of the feed:
+
+| lead, days | 1 | 2 | 3 | 5 | 8 | 12 | 16 | 20 | 24 | 27 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| F10.7, persistence | **4.23** | **7.01** | **9.74** | **13.17** | 16.21 | 18.07 | 18.72 | 16.52 | 14.91 | 14.47 |
+| F10.7, 27-day recurrence | 14.41 | 14.25 | 15.09 | 15.56 | **14.63** | **14.15** | **15.20** | **14.72** | **14.67** | 14.47 |
+| `Ap`, persistence | **5.11** | 7.23 | 7.95 | 8.06 | 7.38 | 7.26 | 8.13 | 7.65 | 8.19 | 6.62 |
+| `Ap`, 27-day recurrence | 6.63 | **7.04** | **6.70** | **7.16** | **6.63** | **6.71** | **6.72** | **7.00** | **6.89** | 6.62 |
+
+Three readings, and the third is the one worth acting on:
+
+* **recurrence overtakes persistence at lead 8 in F10.7 and at lead 2 in `Ap`.** The geomagnetic
+  crossover is almost immediate, which is the recurrent coronal-hole stream showing up in the metric:
+  `Ap` two days out is already better predicted by the last rotation than by yesterday.
+* **at lead exactly 27 the two are the same forecast**, and the table says so to the last digit — the
+  day one rotation back *is* the origin. That identity is asserted rather than observed, because it is
+  also the check that the lead indexing is not off by a day.
+* **persistence of F10.7 degrades to a plateau of about 18 flux units and recurrence sits flat at
+  14.5 from the start.** Neither is good: 14.5 flux units is a fifth of the solar-minimum level, and
+  §10.12's table says a 0.3 error in `ln ρ` is what the model already carries. A forecast driver is
+  therefore not the limiting term at short lead and is comparable to it past a week — which is the
+  honest reason to publish the baseline rather than a forecast.
+
+**What cannot be scored here.** NOAA's own `PRD` forecast, which is the thing a real operator would use
+past the last measurement: the file carries it only for days that have not happened yet, so scoring it
+needs an archive of past snapshots this repository does not keep. Recording that is the point — the
+baselines above are what a forecast has to beat, not a claim that nothing beats them.
+
+### 10.14 What SDTM-1 does to a storm, on the protocol the literature assesses storms with
+
+A pooled MAPE says nothing about the event the model exists for. Ф15.H is the storm question, and it is
+asked on someone else's protocol on purpose: **Bruinsma & Laurens (2024)**, *Thermosphere model
+assessment for geomagnetic storms from 2001 to 2023*, J. Space Weather Space Clim. **14**, 28 (CC BY
+4.0), which scores five models over 152 storms on exactly these satellites. Implementing their
+definitions rather than inventing ours is what makes our numbers comparable to published ones.
+
+**The protocol, as it is implemented in both places.** A storm is an interval where the 3-hourly `ap`
+reaches **80** (`Kp = 6`). `t0` is the *first peak* of the run at or above that threshold — not the first
+crossing, which on a storm that keeps rising sits hours early and drags every phase boundary with it.
+Four phases follow from `t0`: **1** pre-storm `[−30, −18] h`, **2** onset `[−18, 0]`, **3** main and
+recovery `[0, +36]`, **4** post-storm `[+36, +48]`. A storm that reaches the threshold again between 9
+and 48 h after `t0` is *multiple-peak*, and its phase 3 is extended to 36 h past the last such interval
+with phase 4 following for 12 h. Phase 1 fits one **debiasing scale factor** per storm, satellite and
+model, which is then applied to the model in all four phases — without it the assessment measures the
+level difference between two datasets rather than how either responds to a storm. The three statistics
+are the paper's Eq. (1): the geometric mean of the observed-to-computed ratio `⟨O/C⟩`, the standard
+deviation of `ln(O/C)` about it as a percentage, and the Pearson correlation of the two linear series;
+pairs more than a factor of ten apart are rejected, as there.
+
+The logic is written twice — `tools/gen_sdtm_coefficients.py` and
+`crates/spacelab-propagation/tests/measured_density.rs` — and the two agree on `t0` for all eight
+storms and on every statistic to about a percent (2021-11-03 seen by GRACE-FO, in sample: `⟨O/C⟩` 1.058
+against 1.059, StD 29.4 against 29.3, R 0.879 both, onset +3.0 h both, half-time −3.0 h both, peak M/O
+0.444 against 0.451; the residue is that one decimates the products by 6 and the other to 120 s). That
+is the cross-check, because everything reported here hangs off `t0`.
+
+**The eight storms the corpus covers**, both missions in all eight, 16 comparisons:
+
+| `t0` (UT) | MJD | peak `ap` | type | phase 3 ends |
+|---|---|---|---|---|
+| 2021-11-03 22:30 | 59521.938 | 94 | multiple | `t0` + 48 h |
+| 2022-04-10 04:30 | 59679.188 | 111 | single | +36 |
+| 2022-04-14 16:30 | 59683.688 | 80 | single | +36 |
+| 2023-04-23 19:30 | 60057.812 | 236 | multiple | +48 |
+| 2024-05-02 16:30 | 60432.688 | 111 | single | +36 |
+| 2024-05-10 19:30 | 60440.812 | **400** | multiple | +69 |
+| 2024-05-16 07:30 | 60446.312 | 80 | multiple | +72 |
+| 2025-06-13 01:30 | 60839.062 | 111 | multiple | +57 |
+
+**Held out by calendar month** — the model refitted without the month each storm falls in, which is the
+only honest way to ask this of a model whose corpus is six months long. Evaluated at the products' own
+120 s cadence rather than the fit's sample, because every timing number below is read off an orbit
+average and the fitted sample is one observation per 64 minutes.
+
+| storm | mission | n | `⟨O/C⟩` | StD % | R | P2 | P3 | P4 | onset h | peak M/O | Δ half h |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2021-11-03 | GRACE-FO C | 2 546 | 1.057 | 39.3 | 0.852 | 0.884 | 1.194 | 0.849 | +3.0 | 0.420 | −3.0 |
+| 2021-11-03 | Swarm A | 2 660 | 1.082 | 31.3 | 0.767 | 0.935 | 1.225 | 0.900 | +1.5 | 0.390 | −4.5 |
+| 2022-04-10 | GRACE-FO C | 2 340 | 0.961 | 30.1 | 0.929 | 1.068 | 0.945 | 0.826 | +4.5 | 1.246 | −3.0 |
+| 2022-04-10 | Swarm A | 2 340 | 0.966 | 24.5 | 0.955 | 1.050 | 0.955 | 0.851 | +4.5 | 1.525 | −4.5 |
+| 2022-04-14 | GRACE-FO C | 2 340 | 0.948 | 30.9 | 0.879 | 0.929 | 0.972 | 0.857 | −3.0 | 0.710 | +15.0 |
+| 2022-04-14 | Swarm A | 2 340 | 0.965 | 25.9 | 0.938 | 0.944 | 0.991 | 0.888 | 0.0 | 0.653 | +15.0 |
+| 2023-04-23 | GRACE-FO C | 2 700 | 0.957 | 26.9 | 0.850 | 1.094 | 0.947 | 0.779 | +4.5 | 0.682 | −4.5 |
+| 2023-04-23 | Swarm A | 2 550 | 0.977 | 23.3 | 0.916 | 1.124 | 0.955 | 0.764 | +6.0 | 0.711 | −1.5 |
+| 2024-05-02 | GRACE-FO C | 2 340 | 0.882 | 18.5 | 0.921 | 0.979 | 0.830 | 0.796 | +3.0 | 1.282 | 0.0 |
+| 2024-05-02 | Swarm A | 2 340 | 0.892 | 16.0 | 0.897 | 0.974 | 0.850 | 0.807 | +3.0 | 1.343 | 0.0 |
+| **2024-05-10** | GRACE-FO C | 3 330 | 0.894 | 32.3 | 0.822 | 0.982 | 0.833 | 1.045 | **+10.5** | 0.631 | +6.0 |
+| **2024-05-10** | Swarm A | 3 330 | 0.912 | 30.5 | 0.806 | 0.987 | 0.857 | 1.057 | **+10.5** | 0.559 | +7.5 |
+| 2024-05-16 | GRACE-FO C | 3 420 | 1.200 | 19.4 | 0.954 | 1.087 | 1.230 | 1.438 | **+34.5** | 0.929 | +1.5 |
+| 2024-05-16 | Swarm A | 3 420 | 1.208 | 17.4 | 0.906 | 1.103 | 1.240 | 1.430 | −9.0 | 0.838 | −4.5 |
+| 2025-06-13 | GRACE-FO C | 2 970 | 1.045 | 20.5 | 0.925 | 1.153 | 1.051 | 0.920 | −4.5 | 0.497 | −3.0 |
+| 2025-06-13 | Swarm A | 2 953 | 1.032 | 16.2 | 0.913 | 1.133 | 1.028 | 0.938 | −3.0 | 0.536 | −15.0 |
+
+| aggregate over the 16 | `⟨O/C⟩` | StD `⟨O/C⟩` | mean StD | mean R |
+|---|---|---|---|---|
+| in sample | 1.013 | 9.3 % | 21.0 % | 0.904 |
+| **held out by calendar month** | **0.994** | **9.4 %** | **25.2 %** | **0.889** |
+
+Every row of that table is the storm regressor §10.15 chose. Under the linear one it replaced, the same
+16 comparisons gave `⟨O/C⟩` 0.998 with a **14.8 %** spread and 29.0 % mean scatter, and the 2024-05-10
+pair — held out — read `⟨O/C⟩` 0.719/0.737 with 52.9/48.7 % scatter, `P3` 0.571/0.592 and a peak
+enhancement **2.95×** and **2.59×** the measured one. The largest single failure in the set became an
+ordinary row, and that is where most of the 14.8 → 9.4 % came from.
+
+**Against the published assessment.** Bruinsma & Laurens report `⟨O/C⟩` within 5 % of unity for every
+model but NRLMSISE-00 on single-peak storms, with StD `⟨O/C⟩` from 7.5 % (DTM2020 on GRACE) to 12.1 %
+(JB2008), rising to 9.9–12.1 % on multiple-peak storms. Our held-out **0.994** is as well centred as any
+of them and our **9.4 %** spread is inside their whole range — on a mix of five multiple-peak and three
+single-peak storms, and with the month held out, which their DTM2020 numbers are not: that model was
+fitted to these very datasets. That is the strongest comparison this document makes on behalf of the
+model, and it did not hold before §10.15: the linear storm regressor's 14.8 % sat a few points wider
+than every model in the paper.
+
+**No storm carries the spread any more, and which two used to is the result.** Both were in May 2024,
+the month whose storm dominates the corpus:
+
+* **the Gannon storm, 2024-05-10, `ap` 400** — under the linear regressor, held out, SDTM-1
+  **overestimated** by 36–39 % over the whole interval and by a factor of **1.75 in the main phase**
+  (`P3` 0.571), with its peak enhancement 2.95× the measured one. It now reads `⟨O/C⟩` 0.894/0.912 and
+  `P3` 0.833/0.857 — an overestimate of 10–12 % rather than 36–39 %, and 17–20 % in the main phase rather
+  than 75 %. What changed is not more data but a regressor that does not have to extrapolate a slope
+  calibrated at `Kp` 5 out to `Kp` 9;
+* **2024-05-16, `ap` 80** — held out, it still **underestimates** by 20 %, and by 23 % in the main phase
+  (was 26 % and 31 %). This one is the window rather than the form, below.
+
+**The timing verdict Ф15.H states, and it is not passed.**
+
+| | mean | worst | within the bound | bound |
+|---|---|---|---|---|
+| onset shift, in sample | 6.09 h | 42.0 h | 9 of 16 | ±3 h |
+| onset shift, **held out** | **6.56 h** | **34.5 h** | **7 of 16** | ±3 h |
+| peak enhancement ratio, in sample | 0.38 | 0.59 | 3 of 16 | ±25 % |
+| peak enhancement ratio, **held out** | **0.36** | **0.61** | **3 of 16** | ±25 % |
+| recovery half-time, in sample | 6.09 h | 42.0 h | 11 of 16 | ±6 h |
+| recovery half-time, **held out** | **5.53 h** | **15.0 h** | **12 of 16** | ±6 h |
+
+**The held-out peak is now no worse than the in-sample one**, which is the sentence that says the
+generalisation problem is gone: 0.36 against 0.38, and a worst case of 0.61 against the linear
+regressor's held-out 1.95. What did not improve is the bound itself — 3 of 16 within ±25 %, against
+2 of 16 — because the model is now *consistently* about two thirds of the storm instead of sometimes half
+and sometimes three times it. And the onset got worse: 7 of 16 within ±3 h against 10 of 16, with
+13 of 16 inside ±6 h and 12 of 16 half-times inside ±7.5 h, on a 90-minute orbit average whose own
+resolution is ±45 min. §10.15 has the trade in full.
+
+The two onsets outside ±11 h are **2024-05-16 (+34.5 h, GRACE-FO)** and **2024-05-10 (+10.5 h, both
+missions)**, and they fail for different reasons. The first is a property of the window rather than of
+the model: that storm's pre-storm phase sits inside the Gannon recovery, so the enhancement is still
+falling when the window opens and its maximum lands at the edge. The paper's own rule admits the storm —
+the second `ap` ≥ 80 is 5.5 days after Gannon's `t0`, outside the 48 h that would have merged them — and
+the debiasing absorbs the elevated *level* but not the fact that the storm is riding a decay. The second
+is the model: the fitted recovery constant lengthened from 1.94 h to 2.73 h when the regressor moved to
+the log-activity scale, and a longer memory is what buys the amplitude and what puts the modelled peak
+10.5 h late on the one storm steep enough to show it.
+
+**The peak is the number that fails — and four other models fail it too.** The campaign runs all five
+configurations through the same protocol, on all eight storms and both missions. Once each is debiased
+on its own pre-storm window, *every* model is within 5 % of unity and their scatter is within a few
+points of one another:
+
+| model | Swarm A `⟨O/C⟩` | StD `⟨O/C⟩` | mean StD | R | GRACE-FO C `⟨O/C⟩` | StD `⟨O/C⟩` | mean StD | R |
+|---|---|---|---|---|---|---|---|---|
+| NRLMSISE-00 `ap[]` | 1.007 | 10.3 % | 20.4 % | 0.886 | 0.986 | 10.8 % | 23.4 % | 0.898 |
+| NRLMSISE-00 daily `Ap` | 1.036 | 10.1 % | 24.5 % | 0.830 | 1.019 | 10.2 % | 27.5 % | 0.843 |
+| JB2008 | 0.978 | **8.2 %** | 21.4 % | 0.894 | 0.967 | **8.6 %** | 25.3 % | 0.893 |
+| DTM2020 | 1.014 | 10.9 % | **19.2 %** | 0.897 | 1.000 | 11.2 % | **22.6 %** | 0.895 |
+| SDTM-1, in sample | 1.018 | 9.1 % | 19.4 % | **0.903** | 1.008 | 9.5 % | 22.7 % | **0.904** |
+
+**That table is the strongest single argument for debiasing in this document.** NRLMSISE-00 is the model
+§10.2 measures at 51.7 % pooled MAPE, three times SDTM-1's — and here, with a scale factor from twelve
+hours of pre-storm data, its storm response is as good as anybody's (20.4 % against DTM2020's 19.2 %,
+correlation 0.886 against 0.897). Nearly all of its famous error is a *level* error, not a failure to
+follow a storm. Bruinsma & Laurens say the same thing about their own scale factors; this is that result
+reproduced on an independent implementation and a different set of storms.
+
+And the timing, over all 16 comparisons per model:
+
+| model | mean \|onset\| | worst | mean \|peak M/O − 1\| | worst | mean \|Δ half\| | worst |
+|---|---|---|---|---|---|---|
+| NRLMSISE-00 `ap[]` | 6.1 h | 31.5 | 42.8 % | 65.5 % | 4.6 h | 16.5 |
+| NRLMSISE-00 daily `Ap` | 13.0 h | 49.5 | 63.1 % | 80.1 % | 16.8 h | 36.0 |
+| **JB2008** | **5.1 h** | 42.0 | **23.7 %** | 69.8 % | **2.6 h** | 7.5 |
+| DTM2020 | 6.7 h | 45.0 | 33.5 % | 115.8 % | 6.8 h | 18.0 |
+| SDTM-1, in sample | 6.1 h | 42.0 | 38.4 % | **59.4 %** | 6.2 h | 15.0 |
+
+So the under-peaking is not ours: four of the five models miss the peak enhancement by a third to two
+thirds on average, and the exception is **JB2008 at 23.7 %** — which is also the only one of the five
+whose geomagnetic input is not `ap`. Its `ΔTc` is derived from `Dst` at *hourly* cadence and enters as an
+exospheric-temperature correction; a 3-hourly `ap` cannot resolve a peak that rises and falls inside one
+interval, and the May 2024 storm did exactly that. JB2008 also wins the recovery half-time by a factor
+of two (2.6 h against 4.6–16.8) and the onset by a nose.
+
+That looks diagnosable, and it named a fix: **Hp60/`ap60` is already admitted** (§10.9: GFZ, CC BY 4.0,
+`~1 h` latency, and on 2024-05-10 it assigns 80, 94 and 294 to the three hours `Kp` gives one number to),
+so re-fitting the storm kernel on `ap60` is the licence-clean equivalent of what JB2008 gets from `Dst`.
+**§10.15 ran that experiment and it fails**: the hourly driver makes every aggregate worse, and so does
+weighting the loss towards storms. What was actually wrong was the *scale* of the regressor, not its
+cadence — and the diagnosis above is therefore a plausible story that measurement did not support, left
+standing here because the refutation is the more useful record.
+
+What stayed ours until §10.15 was the **May 2024 pair**: no other model's peak ratio swung from 2.95 to
+0.61 between two storms six days apart. That was the corpus meeting a regressor linear in `ap` — the
+amplitude the fit chose was set by the largest storm it saw, and holding that storm out left an
+amplitude calibrated on the others. On the log-activity scale the same pair reads 0.631 and 0.929. A
+second `ap` 400 event in the training set would have settled the remaining gap on that reading, and
+there is not one to be had (below) — though §10.17 has since measured the gap to be uncorrelated with
+storm size, so a second Gannon would have added a row rather than closed anything.
+
+**Three of the four storms the ticket names could not be run.** `plans/16` asks for 2003-10
+(CHAMP/GRACE), 2015-03 (Swarm/GRACE), 2017-09 (Swarm) and 2024-05, and only the last is in the corpus.
+The other three need months this repository does not have, and the only licence-clean source for them —
+`thermosphere.tudelft.nl`, CC BY 4.0 — has been unreachable since 2026-09-05: `ECONNREFUSED` then, a
+connection timeout after 80 s when re-tested on 2026-09-14. No mirror exists that a search could find:
+the TU Delft *repository* records for this dataset are a poster and a metadata-only paper, the CCMC
+assessment deposit (doi:10.5281/zenodo.8412610, CC BY 4.0) carries slides and no observations, and
+Karman (Apache-2.0) reads the same archive rather than copying it. The eight storms above are what one
+host being down leaves, and the letter of Ф14.G is the only lever.
+
+---
+
+### 10.15 The storm driver: a hypothesis refuted, and the one-line change that was actually the fix
+
+§10.14 names a fix for the peak it measures failing. **It was the wrong fix, and measuring it is what
+found the right one.** The
+argument was this: of the five configurations run through the storm protocol, four miss the peak
+enhancement by a third to two thirds and **JB2008 alone is at 23.7 %**, and JB2008 is the only one of
+the five whose geomagnetic input is not `ap`. Its `ΔTc` comes from *hourly* `Dst`; a 3-hourly `ap`
+cannot resolve a peak that rises and falls inside one interval, and 2024-05-10 did exactly that. So the
+conclusion drawn was that the cadence of the driver caps the peak, and that GFZ's hourly `ap60` — CC BY
+4.0, already admitted in §10.9 — was the licence-clean equivalent of what JB2008 gets from `Dst`.
+
+That is a hypothesis with a cheap test, and it fails.
+
+**The series.** `Hp60_ap60_complete_series.txt` from GFZ (`kp.gfz.de`, CC BY 4.0, `gfz-hpo` in
+`docs/provenance.md`), cached outside the tree: 21.9 MB, **365 544 rows from 1985-01-01 00:00 to
+2026-09-13 23:00 on a contiguous hourly grid with no gaps and no missing values**, checked on load
+rather than assumed. Its Gannon peak is **456** where the 3-hourly `ap` reads 400, which is the extra
+resolution the hypothesis was about. Storms are still *detected* on the 3-hourly `ap`, because that is
+how Bruinsma & Laurens define one; only the kernel's regressor moves.
+
+**A bound was doing work nobody asked it to.** The first `ap60` fit put the kernel's onset constant at
+0.25 h, which is exactly its lower bound — a quarter of one hourly step, and a wall the report would
+have read as a preference. The floor was never physical: the kernel is exact for a piecewise-constant
+input at any `τ`, so the only thing that breaks is `exp(−cadence/τ)` underflowing, which for an hourly
+series happens near `τ = 5 s`. Lowered to one minute — four orders above that, and deliberately not
+binding, since the 3-hourly fit sits at 0.94 h. Re-run with the freed bound it does not move: every
+number the linear-regressor fit reported is reproduced, the one exception being a held-out phase ratio
+that reads 0.570 instead of 0.571, which is the optimiser taking a marginally different path because the
+bounds enter its `x_scale`. Freed, the `ap60` fit goes to **0.02 h**: on an hourly driver it wants *one*
+time constant, not two, and the second is faster than the sampling.
+
+The two tables that follow are both fitted with the **linear** storm regressor `s = storm/100`, which is
+what shipped when §10.14 was written and what §10.14 now reports having replaced; the third compares
+that form against its candidate replacements.
+
+| driver, held out by calendar month | pooled MAPE (satellite-month / calendar-month) | `⟨O/C⟩` | StD `⟨O/C⟩` | peak within ±25 % | mean peak error | worst |
+|---|---|---|---|---|---|---|
+| 3-hourly `ap`, linear | 22.8 % / 50.7 % | 0.998 | 14.8 % | 2/16 | 0.58 | 1.95 |
+| hourly `ap60`, onset pinned at 0.25 h | 22.9 % / 51.1 % | 0.987 | 17.8 % | 4/16 | 0.69 | 3.00 |
+| hourly `ap60`, onset free | 22.9 % / 51.1 % | 0.986 | 18.0 % | 4/16 | 0.68 | 2.94 |
+
+More storms land inside the band and every aggregate is worse: the spread of `⟨O/C⟩` widens from 14.8 %
+to 18.0 % and the worst peak error from 1.95 to 2.94, both because a sharper driver gives the fit a
+sharper feature to over-fit on the one storm that has it. **Cadence is not what caps the peak.**
+
+**Nor is the loss.** The next candidate was the objective: 8170 rows of which a few hundred are storm
+time, all weighted alike, so the storm amplitude is fitted on a minority and shrunk by the ridge. That
+also has a cheap test — fit on nothing but the storm windows, 3130 rows at the products' own cadence,
+and ask whether the form can reach the peak when the loss sees nothing else.
+
+| fit, all with the linear regressor | mean \|peak M/O − 1\| | within ±25 % | worst |
+|---|---|---|---|
+| whole corpus, in sample | 0.38 | 5/16 | 0.65 |
+| storm windows only, `ap`, in sample | **0.46** | 3/16 | 0.71 |
+| storm windows only, `ap60`, in sample | 0.48 | 4/16 | 0.71 |
+
+It gets *worse*. A fit that sees only storms still under-reaches the peak enhancement by nearly half, so
+the limitation is neither the corpus, nor the split, nor the weighting. **It is the regressor.**
+
+**And the regressor was on the wrong scale, which this repository already knew.** `ap` is
+quasi-exponential in `Kp` — 4, 7, 15, 27, 48, 80, 132, 207, 400 for `Kp = 1…9` — so a term linear in `ap`
+gives one storm hour the leverage of a hundred quiet ones, and a least-squares fit in `ln ρ` over a
+corpus that is mostly quiet puts its slope where the quiet data is. `wind_model::disturbance_drivers`
+has carried `[1, a, a²]` with `a = ln(1 + ap/15)` since it was fitted, for exactly that reason, and its
+docstring says so; the density model was written with `s = storm/100` and did not inherit it. Over
+`Kp` 3 to 8 the step per unit of `Kp` varies by a factor of **1.30** in `a` and **6.25** in `s` —
+asserted in `the_log_activity_regressor_steps_evenly_in_kp_where_the_linear_one_does_not`, as a ratio of
+extremes rather than a tolerance somebody chose.
+
+Four candidate forms against the one they replace, all at degree 2, ridge 0.1, boundary fixed, and all
+scored held out by calendar month. The operating point was re-measured for the winner rather than
+inherited: at ridge 0 its LOMO is **162.4 %** with the boundary held and 158.4 % with it fitted against
+50.1 % at ridge 0.1, and fitting the boundary changes nothing at ridge 0.1 — the same two conclusions
+§10.10's ladder reached for the linear form.
+
+| storm regressor | coeffs | in sample | LOSMO | LOMO | `⟨O/C⟩` | StD `⟨O/C⟩` | mean StD | mean R | mean peak err | worst | onset ±3 h |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `s` — linear, what shipped before | 35 | 20.1 % | 22.8 % | 50.7 % | 0.998 | 14.8 % | 29.0 % | 0.874 | 0.58 | 1.95 | 10/16 |
+| `s, s²` | 36 | 19.7 % | 22.3 % | 51.1 % | 1.035 | 10.0 % | 29.4 % | 0.809 | 0.37 | 0.68 | 7/16 |
+| `s, s²` with geography | 39 | 19.7 % | 22.3 % | 51.1 % | 1.032 | 9.6 % | 29.2 % | 0.813 | 0.37 | 0.67 | 7/16 |
+| `a, a²` | 36 | 19.2 % | 22.0 % | 50.5 % | 0.994 | 9.3 % | 25.3 % | 0.888 | 0.38 | 0.61 | 6/16 |
+| **`a` alone — shipped** | **35** | **19.3 %** | **22.0 %** | **50.1 %** | **0.994** | **9.4 %** | **25.2 %** | **0.889** | **0.36** | **0.61** | 7/16 |
+
+Three things that table settles, and the third is the one worth keeping:
+
+* **the quadratic in the raw index is disqualified, not merely second.** On the Gannon storm held out,
+  `s, s²` gives correlation **0.288** for GRACE-FO and **0.035** for Swarm, with 65 % scatter — the
+  series barely relates to the measurement at all. `s²` at `s = 4` is 16 against 0.64 at `s = 0.8`, a
+  factor of 25 beyond its calibration, and a held-out quadratic extrapolated that far is not a model.
+  `a²` spans a factor of 3.2 over the same range and behaves.
+* **the whole gain is the scale, not the curvature.** `a` alone matches or beats `a, a²` on the pooled
+  error, the scatter, the correlation and the peak, with one fewer coefficient — the same 35 the linear
+  form used. There was no missing term; there was a missing logarithm.
+* **the Gannon extrapolation stops being a blow-up.** Held out, the linear form over-predicts that
+  storm's main phase by a factor of 1.75 (`P3` 0.571) and its peak enhancement by 2.95×; the shipped
+  form gives `P3` 0.833/0.857 and peak 0.631/0.559. The 2024-05-10 row was the largest single
+  deviation in the linear form's 14.8 % spread of `⟨O/C⟩` — 0.28 below the mean against the
+  2024-05-16 pair's 0.27 above it — and it is now an ordinary row.
+
+**What it costs, stated rather than buried.** Two things get worse:
+
+* **onset timing.** 7 of 16 within ±3 h against 10 of 16, and on Gannon the modelled enhancement peaks
+  10.5 h late against 1.5 h. A longer memory — the fitted recovery constant grows from 1.94 h to
+  2.73 h — is what buys the amplitude and what delays the peak.
+* **the single Gannon day.** On the 2024-05-10 fixture day, in sample, MAPE goes from 26.7 % to 30.1 %
+  and the bias from 1.06 to **1.257**. That day is sustained moderate activity ending in the `ap` 400
+  peak at 19:30, so a regressor that weights moderate hours heavily enough to reach a `Kp` 6 storm
+  carries the whole day 26 % high. It is the same trade as the rest of the table, seen from the one
+  place it is unfavourable, and the regression bound in
+  `the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storming` is restated at
+  what it now measures rather than at what the previous form managed.
+
+A third number moves and it is **not** a cost: the mission-transfer MAPE of §10.11 goes 21.5 → 27.6 %
+downward in altitude and 39.8 → 38.7 % upward, but both transfer fits now drive the log-scale nuisance
+onto its ±0.3 bound, so both raw numbers are `exp(±0.3)` rather than the model's level. The debiased
+pair — 20.6 % and 25.4 % against 21.5 % and 25.9 % — is the comparison with content, and it is flat.
+§10.11 has the mission log-scales that prove the saturation.
+
+**And the interval got tighter, which is a result and not only a consequence.** The log-normal σ table
+of §10.12 is fitted on the calendar-month residual, and that residual was inflated by the blow-up the
+new form removes. So the 90 % interval narrows, and on the *mission* split — the harder one it is not
+fitted on — it now covers **92.5 % of GRACE-FO C and 87.8 % of Swarm A** against the linear form's
+91.8 % and 98.1 %. The Swarm number is 2.2 points under nominal where it used to be 8 points over: the
+interval is better calibrated on average and no longer conservative on one mission, and Ф15.F's stated
+band of 88–92 % now brackets one mission instead of neither.
+
+**The gate still fails.** 3 of 16 peak enhancement ratios inside ±25 % against a bound of 25 %, and
+7 of 16 onsets inside ±3 h. The mean peak error is 0.36 rather than 0.58, which is the difference
+between a model that is half the storm and one that is two thirds of it, and that is progress rather
+than a pass. What §10.14 says about the remedy is now narrower and better aimed: not the driver's
+cadence, and not the weighting, but how the amplitude reaches the peak — and the next thing to try was
+a kernel whose two constants are themselves functions of activity, since one pair fitted across `Kp` 6
+to `Kp` 9 is what the 10.5 h late peak looked like it was measuring. **§10.17 measured that premise
+before building it and it is wrong**: the peak error does not correlate with activity at all, the
+kernel's memory is not what the peak is short of, and the deficit belongs to the storms that
+reintensify.
+
+---
+
+### 10.16 Shipping it: the drag path, and one convention that was documented wrong
+
+Ф15.H, Ф15.K and the sections above measure a *field*: coefficients, a temperature, a density at a
+named point. None of that is reachable from the place a density model is actually used, which is the
+right-hand side of an integrator, and none of it was reachable from either bridge. This is that step,
+and it found one defect that had nothing to do with the fit.
+
+**The convention was wrong in the docstring, not in the fit.** `SdtmPoint::altitude` said "geometric
+altitude above [`REFERENCE_RADIUS`]". The fit read TU Delft's column 4, which the product's own header
+declares as "Altitude (m), GRS80" — geodetic height above the ellipsoid, the same argument JB2008,
+DTM2020 and NRLMSISE-00 all take, with `REFERENCE_RADIUS` serving as the *effective* radius of the
+geopotential reduction exactly as JB2008's `XGRAV` does. The two readings are not close: a sphere of
+6356.766 km sits **21.371 km below** the GRS80 surface at the equator and 13.7 m above it at the pole,
+so at a 400 km scale height of 58 km a caller who took the docstring literally would be a factor of
+**1.44** low in equatorial density, and right at the pole. This is the shape of F17 — the 81-day mean
+documented as centred while the fit used the trailing one — and it is worth naming as a class:
+**the parameters of a fitted model include the conventions of the file it was fitted to, and those are
+not checked by any test that only ever round-trips the model against itself.** The docstring is now the
+fit's convention, and `SdtmAtmosphere` is what removes the decision from the caller.
+
+**The wrapper needs half the evaluations the other three do.** `Drag`'s state-transition matrix wants
+`∂ρ/∂r`, and the empirical atmospheres are `f64`-only transcribed Fortran, so their wrappers lift the
+value through a local exponential `ρ = ρ₀·exp(−(|r| − |r₀|)/H)` with `H` read from a second model
+evaluation 10 km up — a finite difference of a table, with a fallback arm for the storm-lifted layer
+where that step is not monotone, which
+`nrlmsise00::atmosphere`'s `the_scale_height_floor_is_far_below_any_layer_the_model_produces`
+measures at 9 points of 11 739. SDTM-1 has a closed form, so `Thermosphere::density_gradient`
+returns `dρ/dz` analytically beside `ρ` from one evaluation and `1/H = −(dρ/dz)/ρ` is exact. Measured:
+the dual-number gradient the STM reads equals `dρ/dz · r̂` to better than **1e-14** relative at 150,
+420 and 1100 km, which is the identity `d/d|r| [ρ₀e^{(r₀−|r|)/H}] = −ρ₀/H` and not an approximation of
+it. No second evaluation, and no fallback arm to have to prove reachable.
+
+**The reciprocal is unguarded, and that is a measurement rather than an optimism.** `−(dρ/dz)/ρ` divides
+by the density, so the question is whether the profile has a zero. It does not, and the reason is
+structural: the Bates construction is a function of *geopotential* height `ζ = (z − z₀)(R + z₀)/(R + z)`,
+which is **bounded above by `R + z₀ ≈ 6477 km`** however far the geometric altitude goes, so the species
+exponentials cannot run away. Swept over 6015 points — 120.001 km to 652 000 km log-spaced, five
+latitudes, quiet through `ap` 400 — the smallest density is **9.0e-33 kg/m³**, 290 orders above f64's
+floor, and the tightest layer **8.25 km**, at the boundary where the Bates gradient is steepest. Below
+the boundary the field returns its constant with a zero gradient, so `1/H` is zero and the lift is that
+constant for every radius: carrying the reciprocal rather than `H` is what makes the degenerate case
+arithmetic instead of an infinity.
+
+| property of the drag path | how it was checked | result |
+|---|---|---|
+| the value at the named point | the lift is `exp(0)` at `r = r₀`, so the wrapper must equal the field exactly | bit-equal at 180, 400 and 900 km |
+| the point assembly | km → m, degrees → radians, local solar time from UT and longitude, fractional day of year | one equality per fixture covers all four |
+| the running UT | across midnight both ways and three days on | day of year *and* time of day both advance |
+| the gradient | dual number against the field's analytic `dρ/dz · r̂` | < 1e-14 relative, three altitudes |
+| below the boundary | value and gradient at 0, 60 and 120 km | the constant, and exactly zero |
+| no zero to divide by | 6015-point sweep to 652 000 km | ρ ≥ 9.0e-33, `1/H` finite and positive throughout |
+| the calibration decorator | `CalibratedAtmosphere` over it, against the product of the two | equal to `ρ · factor(φ, λ)` |
+
+The decorator line is the one that makes the model operational: `CalibratedAtmosphere` is generic over
+its base, so SDTM-1 slots under §10.12's fitted correction with no adapter — **and it takes the same
+geodetic closure**, `(t, r) → (altitude_km, latitude_deg, longitude_deg)`, that the NRLMSISE-00 wrapper
+takes. One provider, assembled once, serves the raw model, the calibrated model and either atmosphere
+under a `Drag`. That is a deliberate choice over mirroring DTM2020's four-value closure, which returns
+local solar time and would have made the caller compute a quantity this wrapper can derive.
+
+**Both bridges, four names, one ticket.** #319 exists because a capability reaches one bridge and
+nobody notices the other never got it, and Ф4.H reintroduced that drift inside the ticket meant to
+close it. So the surface was defined once and added to both: `sdtm1_density`,
+`sdtm1_exospheric_temperature`, `sdtm1_storm_response` and `sdtm1_density_interval`, `sl_`-prefixed on
+the C side, enforced by `both_bridges_name_the_same_sdtm1_surface` in
+`crates/spacelab-capi/tests/bridge_parity.rs`. Four and not more, argued rather than assumed: the
+storm response is *not* optional, because the kernel's two time constants belong to the fitted field
+and a caller cannot build that driver itself; the interval is the one thing this model has that
+DTM2020 does not, so a bridge returning only the point value would hide it; and the exospheric
+temperature is the quantity the fit actually parameterises, which is the handle for comparing against
+a published `T∞` rather than against a density. Nothing else was exposed — `driver_terms`,
+`StormKernel::weight`, the coefficient table — because nothing consumes them from outside.
+
+Two properties both smoke suites pin, chosen because they are exact rather than approximate:
+
+* **the kernel has unit gain.** A constant index history answers that constant *exactly*, at any
+  length and any cadence — both internal states are seeded at the first value and stay there, and
+  `(τ_r·a − τ_o·a)/(τ_r − τ_o) = a`. An `ap` 5 history reads 5; twelve quiet intervals then four at
+  `ap` 300 reads 294.9, most of the way up and not there, which is the lag the kernel exists for.
+* **the interval is multiplicative.** `z = 0` collapses it onto the density, and the geometric mean of
+  the two ends is the density itself to 1e-12 — which is what makes an interval that is asymmetric in
+  `ρ` and symmetric in `ln ρ` distinguishable from an additive one.
+
+The C boundary adds what a total function owes a caller in C: every non-finite argument answers NaN,
+including a NaN **day of year**, which the model on its own would carry into a plausible mid-season
+number rather than an obvious failure; a null history answers NaN, which in C is a different thing from
+an empty one (`n = 0` answers 0, as the Python bridge does for an empty list); a non-positive cadence
+answers NaN; and a null out pointer is `SL_ERR_INVALID_ARGUMENT` rather than a write. `just capi` is
+**12/12** with the additions — C99, C11, C17, C23, C++20, C++23, C++26, both the throwing and the
+`-fno-exceptions` layers, and both `-fshort-enums` lanes.
+
+**The mutation seal, and the blind spot it found in the tests written for it.** Five blocks over three
+artefacts. `seal-sdtm-atmosphere` over the new wrapper is **57 mutants in 13 min, 55 caught, 0 missed,
+2 unviable**, and both unviable are whole-function replacements needing a `Default` that neither
+`SdtmPoint` nor a generic `S: Scalar` has — #260's shape and `seal-gnss-325`'s genericity shape in one
+block. Its zero rests on one assertion that the two bridges did not have: the wrapper's test checks the
+**post-condition** of the local-time wrap, `lst ∈ [0, 24)`, at five longitudes — two of which, −170 and
+−179.999 against an 08:03 UT epoch, put apparent local time below zero so the wrap has to fire. All six
+mutations of that line leave a local time outside the interval at one of those two, so none of them
+needs a density to separate it.
+
+**The bridges' blocks measure tests that did not exist until this ticket wrote them.** `just capi`
+drives `tests/c/smoke.c` and the two C++ smokes through ctest, and `tests/bindings.py` runs against an
+installed wheel; `cargo mutants` runs `cargo test` and nothing else, so none of that is reachable and
+all of it counts for zero. That is not a prediction — it is the **0 caught** `seal-capi-control` and
+`seal-bridge-control` each reported over the control surface, one bridge apiece. Applied here *before*
+the block rather than after it: nine tests calling the entry points directly, five in the C ABI and
+four in the bridge under `--no-default-features --features test-interpreter`. `seal-sdtm-capi` is
+**33 mutants in 6 min, 28 caught, 4 missed, 1 unviable**; `seal-sdtm-bridge` **37 in 10 min, 35 caught,
+1 missed, 1 unviable**. Half the C surface still generates nothing: `sl_sdtm1_storm_response` and
+`sl_sdtm1_density_interval` are `unsafe extern "C"`, so their null checks and the two-double write are
+unmutated, and what is judged instead is the safe helper `sdtm1_storm_response` that #260's rule put
+the cadence predicate in — five mutants, all caught.
+
+**All five survivors are one eight-line function, written twice, and the defect is in the test rather
+than the code.** `sdtm1_point` turns a day, UT seconds and three geodetic coordinates into the
+`SdtmPoint` the field takes: `altitude · 1000`, `latitude.to_radians()`, `doy + sec/86 400`, and
+`sec/3600 + longitude/15` wrapped into `[0, 24)`. Both copies were first checked by two *symmetry*
+pairs — "half a day of UT later and 180 degrees west must name the same point", and "the same meridian
+reached from either side of the anti-meridian" — and both pairs survive `longitude·15` **and**
+`−longitude/15`. The arithmetic is the whole finding: each mutation moves the *difference* between the
+two calls by `2·Δλ/15` or `Δλ·(15 − 1/15)`, which is 24, 48, 2 688 and 5 376 hours for the two pairs,
+and every one of those is an exact multiple of the 24 the wrap then removes. A metamorphic assertion
+states something strong about the function and nothing at all about the constants the symmetry is
+built out of; it is now a named entry in §8's catalogue of blind-spot shapes, next to the one it is
+closest to — two internal quantities asserted against each other rather than against a reference.
+
+**The two copies scored differently, and the reason is an accident rather than a property.** The
+bridge's test rebuilt the `SdtmPoint` independently and compared the density with `assert_eq!`; the C
+ABI's compared two calls of the entry point against each other. Both are bit-exact — and against the
+*wrap* mutants there is nothing for a bit-exact comparison to hold on to, because every one of them
+shifts the local solar time by an exact multiple of 24 h and the sun-fixed harmonics are
+`cos(m·lst·2π/24)`, periodic in exactly that. What is left to discriminate on is the last bits of
+`libm::cos` at a reduced argument, which is a function of how large the argument got: `24·floor(lst·24)`
+drives it from 0.8 rad to −1 210 rad and both blocks caught it, while `24·floor(lst % 24)` keeps it
+under 55 rad where the reduction is still exact, and the C block missed it. A comparison that separates
+two mathematically equal expressions by their rounding is not a test of the code, and neither copy's
+score was evidence about its assertions.
+
+The remedy is a value, not a tolerance: `sdtm1_point(172, 54 000 s, 400 km, 45°, 30°)` **is**
+`local_solar_time = 17`, `altitude = 400 000`, `latitude = 45°.to_radians()` and `day_of_year =
+172.625`, with 23 h UT at 150 E reading 9 h and midnight UT at 180 W reading 12 h. Every quantity there
+is exact in binary — 54 000/3 600, 30/15 and 54 000/86 400 = 5/8 — so these are equalities and not
+tolerances in disguise, and they kill all eighteen viable `sdtm1_point` mutants by construction rather
+than by fixture luck (the nineteenth is the `Default::default()` replacement, which does not
+typecheck). One driver detail goes with it: the reference is built with `f107 = 120`, `f107a = 160`,
+`storm = 30` by *name* while the entry point builds the same record from its *argument order*, so a
+swapped `f107`/`f107a` cannot survive — which the previous 150/150 fixture could not have said.
+`reseal-sdtm-capi` is **33 mutants in 6 min, 32 caught, 0 missed, 1 unviable** — the population
+unchanged and caught up by exactly four, one per survivor — and `reseal-sdtm-bridge` **37 in 10 min, 36 caught, 0
+missed, 1 unviable**, up by exactly one. Between them the two controls say the remedy cost nothing:
+no mutant was created or destroyed, none became unviable, and none timed out.
+
+`tests/c/smoke.c` and `tests/bindings.py` gained the same convention as a *physical* check, because it
+is the one a caller is most likely to get wrong: fifteen degrees of longitude is one hour of local
+solar time, so 15 E an hour earlier in UT is the same place in the model and reproduces the density to
+5.9e-4 relative at the Python fixture's day 80 and 3.3e-4 at the C fixture's day 172 — the annual
+harmonic over 1/24 of a day, which is all that is left — while the same 15 E at the same UT is an hour
+later in local time and worth 9.0 % and 11.6 %. Those two blocks are not reachable from a mutation run,
+which is the point: they are what a *caller* in that language is told, and the eighteen mutants are
+what the compiler is told. `just capi` stays **12/12**.
+
+**The model itself had never been sealed, and the block that finally did it found a defect.** Three
+blocks judged the wrappers; `sdtm/mod.rs`, `sdtm/uncertainty.rs` and `sdtm/coefficients.rs` — the Bates
+profile, the storm kernel, the constructor, the regime table and the generated literals — were covered
+only by the `spacelab-propagation` whole-crate census, which predates the module by a month.
+`seal-sdtm-core` is **380 mutants in 74 min, 351 caught, 11 missed, 17 unviable, 1 timeout**. The
+unviable split three ways and none of them is a test statement: **four** whole-function replacements
+needing a `Default` that a generic `Thermosphere<K>` and `DensityUncertainty` have no way to have,
+**seven** rewriting a `const fn` accessor to `Box::leak(Box::new(…))`, which is an allocation a const
+context cannot perform, and **six** on `REGIMES` — whose value is an *array length*, so every
+arithmetic mutation of it makes the generated table's own literal the wrong size. The timeout is the
+shape the ledger's preamble already catalogues thirteen times over:
+`r += 1` rewritten to `r *= 1` in `isqrt`, which freezes the counter that *is* the loop's termination —
+proved rather than waved through, and so not excluded.
+
+**One survivor is a defect and it is the interesting one.** `sdtm::isqrt` began its search at `r = 0`;
+`density_calibration::isqrt`, the same five-line helper in the same crate, begins at `1`. Nothing had
+ever asked either of them about zero, so the difference had never mattered — but `Thermosphere::degree`
+is `isqrt(K) - 1` on a `usize`, which means `Thermosphere::<0>::degree()` underflows, and `K = 0`
+passes `root · root == K` because `0 · 0 == 0`. So the constructor accepted a type whose `degree()`
+cannot be evaluated. Fixed at the cause by clamping the search to start at 1, which is the sibling's
+behaviour and makes the *same* perfect-square clause refuse `K = 0` — `1 · 1 ≠ 0` — with no new
+predicate to test. The two survivors that pointed at it, `(r + 1) * (r + 1)` rewritten to `r * (r + 1)`
+and to `(r + 1) * r`, agree with the true `⌊√n⌋` at every perfect square and disagree everywhere else:
+a helper whose only tests ask about squares cannot see an overshoot. `isqrt` now has a test that walks
+`n = 0..=200` against `⌊√n⌋` directly.
+
+**The other nine are ordinary gaps with a single shape between them: every parameter was reached
+through a density.** `boundary_scale` is a multiplicative constant, so a ratio test divides it out and
+the accessor could return 1.0 unnoticed; `temperature` never appears on its own, because the density
+path calls `bates` and not the public method; and the constructor's three `> 0.0` guards on `sigma`,
+`onset` and `recovery` were only ever handed *negative* arguments, which `>=` refuses too. The remedies
+are values and boundaries rather than more ratios — `T(120 km) = T₀` exactly and `T(2000 km)` a tenth
+of a nanokelvin under `T∞`, the accessors against the literals the constructor was given, each time
+constant set to exactly `0.0` with its partner far enough away that the separation clause cannot be
+what rejects it, and a kernel *exactly* on the separation boundary. That last one needed arithmetic
+rather than a round number: `τ_r = 2000`, `τ_o = 1998` is the pair for which `τ_r − τ_o` and
+`KERNEL_SEPARATION · τ_r` are **both exactly 2.0** in binary, which is the only argument at which `>`
+and `>=` differ, and the test asserts that equality before using it so that a future change to
+`KERNEL_SEPARATION` fails loudly rather than silently testing nothing.
+
+**A constant that nothing reads is a constant that can be regenerated wrong.** The eleventh survivor
+is `delete -` on `coefficients::MISSION_SCALE`, and it survived because the generator's own doc comment
+says the number is *reported rather than applied*: no density is a function of it, so no behavioural
+test can fail on its sign. It is now asserted as what it means — `exp` of it is the factor by which
+SWARM-A's accelerometer densities sit below GRACE-FO-C's precise-orbit ones, negative and a few per
+cent, which is the level Siemes et al. (2023) publish the two methods as disagreeing at. The bound is
+the physics and not the literal, so regenerating the table moves the number without breaking the test
+and flipping its sign breaks it.
+
+`reseal-sdtm-core` closes it: **379 mutants in 77 min, 361 caught, 0 missed, 17 unviable, 1 timeout.**
+Both axes reconcile, which is what a control is for. The population falls by exactly one, and it is the
+one the ledger now excludes rather than one that stopped existing. Caught rises by exactly ten, one per
+survivor. The unviable set is unchanged element for element and the timeout is the same `isqrt` counter
+— so nothing the first block caught became uncaught, which is the failure #286 measured and the only
+reason a re-run of 380 mutants is worth its hour.
+
+---
+
+### 10.17 The kernel's memory, laddered: no length fixes the peak, and what does not fix it is measured
+
+§10.15 closes by naming the next thing to try: a kernel whose two time constants are themselves
+functions of activity, on the reading that one pair fitted across `Kp` 6 to `Kp` 9 is what the 10.5 h
+late peak was measuring. That is a claim about **what the residual is a function of**, and testing the
+premise is far cheaper than building the model. The premise fails, and what replaces it is a different split entirely.
+
+**Step 0 — the peak error is not a function of activity.** Over the sixteen held-out comparisons of
+§10.14's protocol, against the log of each storm's peak `ap`:
+
+| quantity | Pearson r against `ln(peak ap)` |
+|---|---|
+| peak enhancement ratio M/O | **−0.19** (n = 16) |
+| \|M/O − 1\| | **+0.10** (n = 16) |
+| \|onset error\| | +0.04 (n = 16); **+0.72** with the one 34.5 h outlier dropped (n = 15) |
+
+The amplitude error is orthogonal to activity, and the quantity that *does* grow with it is the
+**timing**. So the proposed remedy was aimed at the wrong statistic: onset is already 7 of 16 inside
+±3 h where the peak is 3 of 16, and the peak is the half of the gate that fails hardest.
+
+The controlled comparison needs no fitting at all. Three of the eight storms peak at exactly `ap` 111,
+which over both missions is six comparisons at one and the same activity:
+
+| storm at `ap` 111 | type | GRACE-FO C | Swarm A |
+|---|---|---|---|
+| 2022-04-10 04:30 | SP | 1.25 | 1.53 |
+| 2024-05-02 16:30 | SP | 1.36 | 1.43 |
+| 2025-06-13 01:30 | MP | **0.50** | **0.54** |
+
+A factor of **2.7** between the extremes with the driver's amplitude held fixed. Whatever the model is
+missing, it is not a function of how large the storm is.
+
+**What it is a function of.** Bruinsma & Laurens label a storm *multiple-peak* when a second 3-hourly
+interval clears the detection threshold 9 to 48 h after `t0`. Split the sixteen on that label:
+
+| | n | mean M/O | range | `ap` at the geometric mean |
+|---|---|---|---|---|
+| multiple-peak | 10 | **0.619** | 0.39 – 0.93 | 151 |
+| single-peak | 6 | **1.127** | 0.65 – 1.53 | 99 |
+
+**Every multiple-peak comparison under-reaches; the single-peak ones average 13 % over.** The two groups
+are not activity-matched — 151 against 99 — but the `ap` 111 table above holds activity constant and the
+split survives it, because the one MP storm at that level is the pair reading 0.50 and 0.54.
+
+**Step 1 — a ladder of memories, with nothing else moving.** Scoring a memory length while the fit is
+free to move the two constants itself answers a different question at every rung, so the generator grew
+`--pin-kernel ONSET_H,RECOVERY_H`. It **drops both slots from the parameter vector** rather than pinning
+them inside it: a zero-width bound interval would have been cheaper and is not available, `least_squares`
+refuses `lower == upper`. Eight rungs, all at the shipped operating point — degree 2, `storm-log1`,
+ridge 0.1, boundary fixed, 8170 rows — all held out by calendar month, with the free fit as the control.
+
+| kernel, onset / recovery (h) | in sample | LOSMO | LOMO | `⟨O/C⟩` | StD `⟨O/C⟩` | mean StD | mean R | onset ±3 h | peak ±25 % | mean \|M/O−1\| | worst | d(half) ±6 h | MP mean | SP mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| free fit — **what ships** | 19.3 % | 22.0 % | 50.1 % | 0.994 | 9.4 % | 25.2 % | **0.889** | 7/16 | 3/16 | **0.36** | **0.61** | 12/16 | 0.619 | 1.127 |
+| 0.80 / 2.73 — the same pair, pinned | 19.3 % | **21.9 %** | **50.0 %** | 0.998 | 9.4 % | **25.0 %** | **0.891** | **8/16** | 2/16 | 0.37 | 0.62 | 12/16 | **0.624** | 1.154 |
+| 0.80 / 6.0 | 19.5 % | 22.2 % | 51.1 % | 0.983 | 9.4 % | 26.5 % | 0.877 | 6/16 | **4/16** | 0.37 | 0.71 | 12/16 | 0.561 | 0.940 |
+| 0.80 / 12.0 | 20.3 % | 23.0 % | 51.7 % | 0.983 | 10.3 % | 30.1 % | 0.828 | 2/16 | 1/16 | 0.48 | 0.82 | 12/14 | 0.425 | 0.666 |
+| 0.80 / 24.0 | 21.2 % | 23.8 % | 51.2 % | 1.021 | 13.2 % | 33.9 % | 0.759 | 2/16 | 0/16 | 0.70 | 0.97 | 4/13 | 0.231 | 0.428 |
+| 1.5 / 6.0 | 19.6 % | 22.3 % | 51.1 % | 0.984 | 9.4 % | 27.0 % | 0.870 | 3/16 | **4/16** | 0.37 | 0.73 | 13/15 | 0.546 | 0.904 |
+| 3.0 / 12.0 | 20.6 % | 23.3 % | 51.1 % | 0.994 | 10.3 % | 31.8 % | 0.797 | 0/16 | 1/16 | 0.55 | 0.86 | 11/14 | 0.372 | 0.580 |
+| 3.0 / 24.0 | 21.4 % | 23.9 % | 50.3 % | 1.037 | 13.0 % | 35.0 % | 0.733 | 0/16 | 0/16 | 0.74 | 1.00 | 4/11 | 0.196 | 0.378 |
+| 6.0 / 36.0 | 21.8 % | 24.2 % | **48.5 %** | 1.088 | 13.6 % | 36.5 % | 0.692 | 0/16 | 0/16 | 0.83 | 1.02 | 5/8 | 0.118 | 0.244 |
+
+Six things that table settles.
+
+* **The fit's own pair wins every column the ladder lets it compete in.** The free fit lands at
+  0.80 / 2.73 h to the precision the generator reports, and pinning it there reproduces every aggregate:
+  the two rows differ only by the two parameters pinning removes from each of the six folds. The one
+  visibly different number is the **peak count, 3 against 2 — and it is a single comparison sitting on
+  either side of the wall**, 2022-04-10 GRACE-FO C at 1.246 free and 1.252 pinned. A count gate with a
+  hard edge is that fragile; the mean error, 0.36 against 0.37, is not.
+* **The count rises at exactly one memory, and the verdict clause is a conjunction.** Ф15.L ships only
+  if the peak count rises **and** pooled MAPE does not regress. At 0.80 / 6.0 h the count goes 2 → 4 of
+  16 while LOSMO goes 21.9 → 22.2 %, LOMO 50.0 → 51.1 %, mean R 0.891 → 0.877, worst peak error 0.62 →
+  0.71 and onset 8 → 6 of 16. The second half of the conjunction fails. Nothing ships.
+* **And the two extra comparisons are not the ones that were failing.** In band at 0.80 / 2.73 h: the
+  2024-05-16 pair, both multiple-peak, at 0.978 and 0.882. In band at 0.80 / 6.0 h: three *single-peak*
+  comparisons walking down into it — 2022-04-10 GRACE-FO C 1.083, 2024-05-02 1.030 and 1.084 — while
+  Swarm A's 2024-05-16 falls **out**, 0.882 → 0.729, with its onset going −9.0 → −42.0 h. Net +2 is a
+  change of composition, not a gain.
+* **Because a kernel of unit DC gain can only move the enhancement in time.** The gain is fixed by
+  construction and checked to 1e-9 (§2's storm-kernel row), so a longer recovery spreads one fixed total
+  over more hours and **every** modelled peak falls. That is the right medicine for the single-peak
+  storms, which over-reach, and exactly the wrong one for the multiple-peak storms, which are the ten
+  that under-reach. `MP mean` falls monotonically from 0.624 to 0.118 down the ladder and never exceeds
+  the shortest kernel's value; **all ten multiple-peak comparisons under-reach at every one of the eight
+  rungs.** No single pair of constants moves the two groups in opposite directions.
+* **The one column that improves at the long end is one fold, and it has no storm in it.** LOMO 50.0 →
+  48.5 % at 6 / 36 h is entirely 2019_01, 169.8 → 159.7 %; every other fold is flat or worse. That fold
+  is a flux extrapolation below anything else in the corpus (§10.10) and the storm list contains no 2019
+  event at all, so what a 36 h memory does there is flatten a regressor the month barely exercises. It
+  is not storm skill and the ladder should not be read as if it were.
+* **And the half-decay statistic stops existing.** All 16 comparisons have a `d(half)` at 2.73 h; only
+  13 do at 24 h and 8 at 36 h, because the modelled enhancement never falls to half its peak inside the
+  protocol's window. A statistic that disappears as a parameter grows is not one that parameter can be
+  tuned against.
+
+**The verdict, and the floor it closes at.** No memory length fixes the peak, and the reason is
+structural rather than numerical: the missing quantity is not in the driver's history at all. What the
+multiple-peak storms need is *more* enhancement from the second injection than from the first — the same
+`ap` arriving at a thermosphere already heated and already depleted in molecular species — and the
+shipped regressor has the opposite curvature, since `a = ln(1 + storm/15)` is concave and makes a second
+equal injection contribute **less** than the first. Adding `a²` was measured in §10.15 and disqualified
+on the held-out Gannon correlation (0.288 and 0.035). More to the point, no static function of the
+driver can express *how much is already stored*: that is a state, not an input.
+
+So Ф15.H's peak gate closes as a **measured floor rather than an open remedy** — 3 of 16 within ±25 %
+held out, mean error 0.36 — with the failure localised to the ten multiple-peak comparisons and shown
+independent of the driver's cadence, the loss's weighting and the regressor's scale (§10.15, which fixed
+the one of the three that could be fixed) and now of the kernel's memory. The next aimed try is a
+**preconditioning state** relaxing more slowly than the density responds, entering multiplicatively so a
+second injection lands on a raised base. That is a different model rather than another parameter of this
+one, and it is proposed here, not measured. `docs/limitations.md` states the floor as what a caller
+should plan around.
+
+---
+
+## 11 · Published errata as a second opinion
+
+Celestrak publishes consolidated errata for all five editions of Vallado's *Fundamentals of
+Astrodynamics and Applications* (`ErrataVer5.pdf`, 4 items, 2023-03-02; `ErrataVer4.pdf`, ~140 items,
+2019-06-18, back-referencing the 3rd/2nd/1st page numbers, so it is the consolidated superset).
+Twenty-one of those items name an equation this workspace has some counterpart to.
+
+**Why they are evidence and not a bug list.** Each item marks a place where the *most commonly
+published* form of an equation is wrong — which is exactly where a transcription with one source
+fails silently, and exactly what §0's "specification source vs oracle" split exists to expose. Where
+our form already differs, the errata confirm it independently; where it agrees with the *uncorrected*
+form, that is a finding. The licence position is clean: these are corrections to published
+mathematics, which `CONTRIBUTING.md` rules "fine". The AGPL-3.0 `CelesTrak/fundamentals-of-astrodynamics`
+repository (including `valladopy`) is a different artefact and is not read.
+
+**One premise of the audit was wrong and is corrected here.** The ticket that opened it asserted that
+nothing in the workspace cites Vallado. In fact 29 files do — overwhelmingly `spacelab-sgp4`, where
+the Vallado listing *is* the specification (§3's first footnote already says so), plus `gmst82.py` and
+`earth_rotation.rs` for Eq. 3-47. No erratum touches Eq. 3-47 or the SGP4 algorithm; the one SGP4-adjacent
+item (p. 107, Fig. 2-19) corrects the units and checksums printed in a *sample TLE figure*, not the format.
+
+### 11.1 The two measurements
+
+**The Sun's frame (4th ed. p. 277-281).** "The equations should be made identical to the Almanac
+version, which is TOD, not MOD." `AnalyticSun` runs the Almanac low-precision series and treats the
+result as referred to the **mean** equator and equinox of date, precessing it back to J2000 with the
+IAU 2006 angles and nothing else. Each candidate reading, against ERFA `epv00`, 2001 epochs:
+
+| reading of the series | worst ±25 y | RMS ±25 y | worst ±100 y | RMS ±100 y |
+|---|---|---|---|---|
+| no rotation at all | 1277.0″ | 727.4″ | 5071.0″ | 2909.0″ |
+| **mean of date → J2000 (today)** | **45.77″** | **18.06″** | **58.06″** | **20.76″** |
+| true of date → J2000 (the erratum, read literally) | 56.61″ | 21.38″ | 67.34″ | 24.35″ |
+| − nutation in longitude, then precession | 56.35″ | 20.86″ | 67.21″ | 23.91″ |
+| **− annual aberration, `v_earth/c`, then precession** | **34.23″** | **11.05″** | **45.78″** | **13.53″** |
+| − annual aberration, `κ/r`, then precession | 34.23″ | 11.06″ | 45.78″ | 13.53″ |
+
+The erratum is **half right, and the half that is right is not the half it names**. Rotating out
+nutation — either as a full true-of-date matrix or as `−Δψ` in the longitude before the obliquity is
+applied — makes the residual *worse*, because the Almanac builds its apparent longitude on the
+**mean** obliquity, so the equator the series defines is already the mean one and undoing nutation
+double-counts. But the series *is* an apparent position, and removing annual aberration cuts the RMS
+by **39 %** and the worst case by 25 %.
+
+**Applied (#306), by the last row rather than the fourth.** The classical constant-of-aberration form
+`κ/r`, `κ = 20.49552″`, needs no Earth velocity and no ephemeris, and the two rows above show it is
+the *same answer* — 11.06″ against 11.05″ RMS over ±25 y, four-figure identical over ±100 y. So
+`AnalyticSun` gains one term and stays a closed-form `no_std` series. Over the ±1-century sweep the
+module's own docstring quotes, the worst goes 55.09″ → 47.42″, and the docstring's promise `≤ 0.0153°`
+becomes `≤ 0.0132°`.
+
+**The blast radius the ticket feared is real, it points the other way, and that is the sharper
+finding.** §10.1's 24-hour G02 arc re-fits to **0.300 m** 3-D RMS against 0.293 m before —
+component-wise 0.175 / 0.221 / 0.105 against 0.172 / 0.213 / 0.104, worst 0.614 m against 0.607 m,
+SRP scale 1.0352 against 1.0353. A **39 % more accurate Sun made that fit 2.4 % worse**, and both
+numbers are right. The arc's residual is not a measurement of the solar direction: it is dominated by
+the Moon's own `278″` and by a cannonball SRP standing in for a box-wing bus, and the seven estimated
+parameters had been absorbing the 20.5″ bias as part of a cancellation that has now been removed. A
+compound end-to-end number moving the wrong way when one component is corrected says that component
+was not the binding constraint — it does not say the correction was wrong, and the ERFA comparison,
+which *is* a measurement of the solar direction, is the one that adjudicates that. §10.1's headline
+becomes "the analytic Sun and Moon cost **0.21 m of the 0.30 m**", against DE440's 0.094 m.
+
+**The Moon was checked for the same class of error and does not have it.** The Montenbruck & Gill
+series is geometric: applying the light-time shift its own 1.28 s range implies moves it 0.758″ and
+moves the residual against `moon98` the *wrong* way, 278.3″ → 279.0″ (`light_time_check` in
+`derivations/analytic_ephemeris.py`).
+
+**What pins the new term is not the accuracy bar.** Removing `κ/r` and re-running leaves
+`both_bodies_reach_erfa_at_the_documented_accuracy` green — a constant offset in longitude cancels at
+some epochs and adds at others, and over the eleven in-span goldens it happens to take the worst
+*down*, to 26.93″. The gate that fails is the 50-digit transcription pin, because the derivation
+carries the same term and `5e-12` leaves no room for 20.5″. Recorded because the opposite is the
+natural assumption.
+
+**The geopotential chain rule (4th ed. p. 550, Eq. 8-27).** The corrected equation is implemented as
+a second evaluator — unnormalized associated Legendre functions of `sin φ_gc`, three scalar partials,
+then the chain rule — against the same coefficients as Gottlieb's normalized Cartesian recursion,
+which forms no latitude, longitude or partial derivative at all. At degree 12 the two agree to
+**9.98e-16** relative, worst over seven geometries from a LEO radius to GEO: the corrected equation is
+right, and so is the recursion. The published form is nevertheless the one that breaks down, because
+it divides by `ρ = √(r_I² + r_J²)` and `ρ²` and carries a `tan φ_gc`:
+
+| colatitude | 1° | 10⁻¹° | 10⁻²° | 10⁻³° | 10⁻⁴° | 10⁻⁵° | 10⁻⁶° | 10⁻⁷° |
+|---|---|---|---|---|---|---|---|---|
+| Eq. 8-27 vs the recursion | 1.0e-15 | 5.7e-18 | 8.6e-15 | 1.5e-13 | 3.7e-11 | 2.8e-9 | 6.0e-7 | **NaN** |
+
+Gottlieb's recursion is finite at every one of them, which the test asserts rather than assumes.
+
+**The Delaunay arguments (4th ed. p. 225, Eq. 3-82).** The erratum replaces the printed polynomials
+with the 1996 values in full; `spacelab-fa` implements the *later* IERS Conventions (2003) quartics
+from Simon et al. (1994), so this is a currency measurement. Difference at J2000 / worst over
+±1 century, arcseconds: `l` 1.516 / 2.657, `l′` 4.989 / 5.177, `F` 0.649 / 1.457, `D` 0.603 / 0.610,
+`Ω` 0.118 / 0.140. Through the leading `−17.2″ sin Ω` nutation term the node gap is worth
+**≤ 1.17e-5″** of nutation in longitude — five orders below §1's own EOP tolerance, so the two
+realizations are interchangeable at the accuracy anything here works to.
+
+### 11.2 The other eighteen items
+
+| Erratum (4th ed. page) | Does this workspace implement that formulation? | Verdict |
+|---|---|---|
+| p. 109-110, SEZ/ECI matrix and the velocity form | No — the topocentric frame is built from `Station`/`Topocentric`, not from the printed matrix | The geometry it fixes is pinned independently by `azimuth_and_elevation_match_the_horizon_geometry` |
+| p. 173, Alg. 13, `b = R_K(1 − e_b²)SIGN(r_K)` | No — `itrf_to_geodetic` is Vermeille (2002) closed form | **Confirmed by a stronger oracle**: 504 points against ERFA `gc2gd` (Fukushima), **254 of them southern**, so the hemisphere sign the erratum restores is already checked by a different algorithm |
+| p. 193, Eq. 3-52, the TDB0 sign | No — `tt_to_tdb` is the full Fairhead & Bretagnon 787-term series | Not our formulation; ours is pinned to pyerfa at `< 1e-18` s |
+| p. 208, Fig. 3-26, IAU 1976 precession matrix | No — the frame chain is IAU 2006/2000A throughout | Not implemented |
+| p. 213, the summation runs 0–4 not 0–5 | No — same section | Not implemented |
+| p. 216, Eq. 3-67, the `−0.000 029 956 T⁴` constant | No — earth rotation is GMST(IAU 1982) (Eq. 3-47, which no erratum touches) and, in the CIO chain, ERA | Not our formulation |
+| p. 288-289, the lunar-magnitude numerator is `R_K` | No — `AnalyticMoon` is Montenbruck & Gill's series with explicit kilometre amplitudes, not a parallax form | Not our formulation |
+| p. 414-416, Alg. 49/50, curvilinear relative motion (Vallado & Alfano 2014 + the 2016 errata) | **No — `spacelab-astro`'s relative motion is Clohessy–Wiltshire, the rectilinear linearisation** | **A genuine gap**, filed: curvilinear coordinates are what keep a relative-motion propagation honest over a long along-track separation |
+| p. 445, the `e SIN(ν₂)` denominator | No — IOD is Gibbs, Herrick–Gibbs, Gauss, Gooding and Laplace; the elements-from-three-positions branch is not implemented | Not our formulation |
+| p. 473/475/496, Alg. 56/59, `a_min`, `β_min`, the `K(U)` `c_U` coefficients | No — Lambert is the universal-variable bracket (Curtis Alg. 5.2) plus Izzo; Battin's `K(U)` continued fraction is absent and the minimum-energy arc comes from the bracket, not a closed form | Not our formulation; §3's own sweep (25 270 arcs) is the check that matters here |
+| p. 542/544, Eq. 8-15/8-17, the spurious `2` and the `(2 − δ_k)` | No — those derive coefficients from a mass integral; ours are read from an ICGEM `.gfc` | Nothing to check, and saying so is the finding |
+| p. 559, the `Kp4`/`ap4` terms divided by 6 | No — the 3-hourly history feeds NRLMSISE-00's own 7-element `ap` array | Not our formulation; ours is bit-exact against Brodowski's C |
+| p. 575, Eq. 8-35/8-36, denominators are magnitudes; subscript `K3` | Yes, in substance | **Confirms our form**: `ThirdBody` is Battin's cancellation-free `q`/`f(q)` identity, whose denominators are `‖s‖²`/`‖s‖³` by construction, checked against the direct difference where that is still accurate |
+| p. 626/635/636, the Gauss VOP rates | No — DSST here is Danielson's **equinoctial** formulation ported from Orekit | Not our formulation |
+| p. 709, the SP radial-rate `(1 + e cos ν)²` | No — the short-period corrections are equinoctial | Not our formulation |
+| p. 796, Eq. 10-35, the coefficient error variance | No | Not implemented |
+| p. 802-803, RAZEL covariance: azimuth numerator and denominator switched, both `(3,3)` numerator terms squared | **No, and structurally cannot be** — the measurement partials come from `spacelab-autodiff`, so the matrix is never written down | **The class of error the erratum fixes cannot occur here**; `azimuth_and_elevation_partials_match_the_closed_form` pins the AD result |
+| p. 898-899, Eq. 11-44, a sign; the Danielson reference is 2003 | No — equinoctial DSST again | Not our formulation |
+
+| Component | Specification source | Oracle | Residual / tol | Where |
+|---|---|---|---|---|
+| Geopotential acceleration, degree 12 | Vallado 4th ed. Eq. 8-25/8-27 **as the errata correct them** | **the corrected published chain rule** — unnormalized Legendre partials against Gottlieb's normalized Cartesian recursion, same coefficients, no shared arithmetic | **9.98e-16** relative, worst of seven geometries; the published form goes `NaN` at 10⁻⁷° colatitude where the recursion does not | tests/vallado_errata.rs |
+| Analytic Sun, frame and aberration | Astronomical Almanac low-precision solar formulae; Vallado errata p. 277-281 | **ERFA `epv00`**, 2001 epochs over ±25 y and ±100 y | mean-of-date **45.77″** worst / 18.06″ RMS; the erratum's true-of-date reading is *worse* (56.61″); removing annual aberration is **34.23″ / 11.05″** — a 39 % RMS improvement, **applied** in the `κ/r` form, which measures 11.06″ against the `v_earth/c` form's 11.05″ (#306) | derivations/vallado_errata.py |
+| Analytic Moon, light time | Montenbruck & Gill §3.3.2 (Brown series) | **ERFA `moon98`** (abridged ELP2000), 512 epochs over ±1 century | the series is **geometric**: the 0.758″ light-time shift its own 1.28 s range implies moves the residual the wrong way, 278.3″ → 279.0″, so the Sun's aberration correction has no counterpart here (#306) | derivations/analytic_ephemeris.py |
+| Delaunay arguments, realization currency | IERS Conventions (2003) / Simon et al. (1994) vs the errata's 1996 values | **the two polynomial sets against each other**, ±1 century | worst 5.177″ (`l′`); ≤ **1.17e-5″** of nutation in longitude through the `−17.2″ sin Ω` term | derivations/vallado_errata.py |
+
+---
+
+## 12 · Formula provenance census
+
+Every row above says what was *measured*. This section asks the complementary question of every
+module under `crates/*/src`: does the module's own documentation name the thing a reader can re-run
+to catch a wrong formula — a `derivations/*.mac` identity, a `spec_seals` / `table_seals` seal, a row
+of this file (`§4.13`), or an oracle test by path? `tools/check-derivations.py` sweeps the module
+docs with that rule, and the block below is the ledger of modules that name none, each with a
+category: **physics** (a formula or algorithm whose correctness is a mathematical claim, and the
+only category that matters for "every formula checked"), **parser** (a format reader or writer,
+verified by fixture conformance rather than by derivation), **generated** (a table a generator under
+`derivations/` emits and `table_seals.py` seals, where the seal is simply not named in the emitted
+doc), and **infra** (types, traits, drivers, re-export roots).
+
+The census on 2026-09-06, the day the rule was written: **319 modules, 101 name a check, 218 do
+not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The number is the debt, not a
+verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
+named where the formula lives. The CI step fails when a module joins this list silently or when an
+entry goes stale, so the list can only shrink deliberately, one named derivation at a time
+(`plans/16` Ф17.B orders them). **Today: 323 modules, 112 name a check, 211 do not** — 132 physics,
+the same 22 parsers, 6 generated and 51 infrastructure. The physics column is the one to watch. The
+whole of `spacelab-frames` is off it — `rotation.rs`, `teme.rs`, `cio_fast.rs` and `polar_motion.rs`,
+retired by `derivations/frame_transform.mac`, `derivations/polar_motion_rate.py` and
+`derivations/cio_interpolation.{mac,py}` — and so are the two zonal mean-element propagators,
+`brouwer_lyddane.rs` and `eckstein_hechler.rs`, retired by `derivations/zonal_secular.mac`, and
+`higher_order_iono.rs`, retired by `derivations/second_order_iono.mac`. The Orekit-ported DSST kernels and the two Orekit-ported analytical
+propagators are on it, which is why an independent derivation of each is both an exactness gain and
+a provenance strengthening.
+
+```text
+crates/spacelab/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-astro/src/cr3bp.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/cw.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/edl.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/lambert.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-astro/src/lowthrust.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/optimal.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/powered.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/synodic.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/targeting.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astrometry/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-astrometry/src/quads.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astrometry/src/reduce.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astrometry/src/sources.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astrometry/src/wcs.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-autodiff/src/dual.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-autodiff/src/hyperdual.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-autodiff/src/scalar.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-constellation/src/analysis.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-constellation/src/draim.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-constellation/src/flower.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-constellation/src/lattice.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-constellation/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-constellation/src/mozhaev.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-constellation/src/shell.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-constellation/src/soc.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-constellation/src/symmetric.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-constellation/src/walker.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-control/src/closed_loop.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-control/src/latency.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-control/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-core/src/calendar.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-core/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-core/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-core/src/time.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-coverage/src/access.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-coverage/src/combine.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-coverage/src/detectors.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-coverage/src/fom.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-coverage/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-coverage/src/metrics.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-coverage/src/observability.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-coverage/src/parallel.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-coverage/src/photometry.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earth/src/wgs84.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/atmospheric_correction.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/camera.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/cloud.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/features.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/gas.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/geometry.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/ice.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/image_quality.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-earthvision/src/mie.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/mvs.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/ortho.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/pansharpen.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/phase.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/radiative_transfer.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/rpc.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/rpc_adjust.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/sfm.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/stereo.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/swath.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-elements/src/design.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-elements/src/keplerian.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-elements/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-eop/src/finals.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-eop/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-ephemeris/src/bridge.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-ephemeris/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-estimation/src/conjunction.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/conjunction_domain.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-estimation/src/converter.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-estimation/src/ephemeris.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/iekf.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/lie.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/mixture.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/modifier.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/multistatic.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/rts.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/sampling.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/screening.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/se23.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/se3.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/srukf.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/unscented.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-fa/src/cio_tables.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
+crates/spacelab-fa/src/earth_rotation.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-fa/src/leap_seconds.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
+crates/spacelab-fa/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-fa/src/nut_tables.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
+crates/spacelab-fa/src/tdb_tables.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
+crates/spacelab-frames/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-geomagnetism/src/dipole.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-geomagnetism/src/igrf.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-geomagnetism/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-geometry/src/delaunay.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-geometry/src/hull.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-geometry/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-geometry/src/predicates.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-geometry/src/sphere.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-gnss/src/combinations.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-gnss/src/cycle_slip.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-gnss/src/dop.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-gnss/src/glonass.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-gnss/src/gps.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-gnss/src/gpt3.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-gnss/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-gnss/src/ntrip.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-gnss/src/rinex.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-gnss/src/rinex_obs.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-gnss/src/rtcm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-gnss/src/sinex_bias.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-gnss/src/sp3.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-gnss/src/vmf_grid.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-grid/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-grid/src/output.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-ionosphere/src/ccir.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-ionosphere/src/fourier.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-ionosphere/src/galileo.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-ionosphere/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-ionosphere/src/math.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-ionosphere/src/model.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-ionosphere/src/modip.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-ionosphere/src/parameters.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-ionosphere/src/ray.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-ionosphere/src/types.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-ndm/src/cdm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-ndm/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-propagation/src/attitude_law.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/density_calibration.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/density_data.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-propagation/src/density_rom.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/driver.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-propagation/src/dsst/coefficients.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
+crates/spacelab-propagation/src/dsst/drag.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/gaussian.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/hansen.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/mod.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-propagation/src/dsst/propagator.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/srp.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/tesseral.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/tesseral_short_period.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/third_body.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/zonal.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/earth_radiation.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/ephemeris.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/forces.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-propagation/src/gj.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/harris_priester/atmosphere.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/jb2008/atmosphere.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/jb2008/mod.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-propagation/src/lifetime.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-propagation/src/lunar.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/maneuver.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/nrlmsise00/atmosphere.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/rk4.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/rkn1210.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/rkn1210_consts.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
+crates/spacelab-propagation/src/shadow.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/space_weather.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-propagation/src/spacecraft.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/stt.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/symplectic.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/taylor.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/tolerance.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-propagation/src/variational.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/wind_data.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-sensors/src/agile.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-sensors/src/comms.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-sensors/src/cone.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-sensors/src/elevation.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-sensors/src/grid.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-sensors/src/kernel.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-sensors/src/sar.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-sensors/src/scan.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-sgp4/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-sgp4/src/omm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-sgp4/src/satellite.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-sgp4/src/tle.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-signal/src/csa.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-signal/src/fft.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-signal/src/insar.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-signal/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-signal/src/polsar.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-signal/src/psinsar.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-signal/src/radon.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-signal/src/sar.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-signal/src/tomosar.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-slr/src/blq.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-slr/src/crd.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-slr/src/dhf.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-slr/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-slr/src/loading.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-slr/src/range.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-slr/src/sinex.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-slr/src/troposphere.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-testkit/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-vision/src/detect.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-vision/src/graph.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-vision/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-vision/src/model.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-vision/src/nn.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-vision/src/onnx.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+```
+
+## Reproducing the oracles
+
+The oracle-generating code is vendored so every number here is regenerable:
+
+- **`tools/orekit-oracle/`** — the Java + JPype harness that emits the Orekit 13 golden CSVs
+  (`orekit_*.csv`) consumed by the propagation, coverage and GNSS tests.
+- **`derivations/`** — the CAS and numerics scripts: Maxima (`*.mac`) for symbolic gradients and
+  Richardson coefficients, FriCAS (`*.input`) for the sensor footprint edge, mpmath (`dd_transcendentals.py`,
+  `gmst82.py`) for certified constants, scipy (`geopotential_validate.py`, `dopri5_order.mac`).
+- **Python reference packages** — installed in throwaway venvs: `pyerfa` (SOFA), `sgp4`, `skyfield`,
+  `pyfes`, `rpcm`, `opencv-python`, `torch`/`onnxruntime`/`torchvision`, `ppigrf`, `scikit-learn`,
+  `scipy`, `numpy`. The reference outputs are baked into the tests as golden constants (no network at
+  test time).
+- **Vendored primary sources** — NRLMSISE-00 (Brodowski C), JB2008 (Bowman FORTRAN), DTM2020 (CNES),
+  FES2004 / FES2014b tide grids, IERS Conventions routine self-test cases, the IERS leap-second table,
+  WGS-84 constants — each an exact excerpt with its source cited at the use site.
+
+- **`tools/gen_airmass_oracle.py`** and **`tools/gen_twilight_oracle.py`** — §4.7's two coverage
+  oracles, both offline: the first integrates air mass and refraction through the U.S. Standard
+  Atmosphere 1976 with scipy quadrature (`uv run --with numpy --with scipy`), the second asks astropy
+  for the Sun's altitude crossings and hour angles with `iers.conf.auto_download` off
+  (`uv run --with astropy --with numpy --with scipy`). Both write a fixture under
+  `crates/spacelab-coverage/tests/fixtures/`, and both record the choices they cannot make for
+  themselves in its header.
+- **`tools/fetch-validation-data.sh`** — an IGS SP3 for a given day and product (`FIN`, `RAP` or
+  `ULT`), from the BKG mirror, with a digest manifest beside it. The product reaches both the URL and
+  the snapshot's *name*, so a rapid file can never be filed under a name claiming it is final —
+  §10.6 is measured against `RAP` because a comparison with a current element set cannot wait the
+  final's ~13 days. `tools/fetch-eop.sh` and `tools/fetch-ephemeris.sh` are the other two snapshot
+  fetchers; §10.1 needs all three.
+- **`tools/iers-oracle/`** — §10.3's reference lineage: fetches the IERS Conventions Fortran
+  (`FCULZD_HPA`, `FCUL_A`, `DEHANTTIDEINEL` and its dependencies), compiles it twice — default reals
+  and `-fdefault-real-8` — and prints every published test case at seventeen digits. Needs
+  `gfortran`. Its README records the `FCULZD_HPA` header-versus-code discrepancy.
+- **`tools/fetch-slr-data.sh`** — §10.3's five inputs for a given day, or §10.4's for a span of days
+  (`tools/fetch-slr-data.sh 2025-01-05 2025-01-12`, which fetches every month and weekly arc the span
+  touches and writes one excerpt per arc): the ILRS monthly normal points,
+  the ILRS combined LAGEOS orbits, `ITRF2020-ILRS-TRF.SNX`, and the station eccentricities scraped
+  from the ILRS site logs into a SINEX `SITE/ECCENTRICITY` block, each with a `sha256` + retrieval
+  manifest. It also re-derives the committed fixture excerpts beside the snapshots, so
+  `diff -r data/slr/fixtures crates/spacelab/tests/fixtures` is the reproducibility check. The
+  eccentricities come from the site logs rather than the ILRS `ecc_une.snx` / `ecc_xyz.snx`
+  databases because those are published only through NASA CDDIS, behind an Earthdata login.
+- **`tools/gen_sdtm_coefficients.py`** — §10.10's fit, and the only generator here whose output is a
+  *model* rather than an oracle. Reads the gitignored density product, writes
+  `crates/spacelab-propagation/src/sdtm/coefficients.rs` and the 64-row reference fixture, and prints
+  every split it was scored on. `--sweep` reproduces the cap-set and ridge tables; the shipped
+  coefficients are
+
+  ```bash
+  uv run --no-project --with numpy --with pandas --with scipy python tools/gen_sdtm_coefficients.py \
+      --degree 2 --thin 32 --caps storm-log1 --ridge 0.1 --fix-boundary --emit
+  ```
+
+  `storm-log1` is the cap set §10.15 chose, and it is read off `coefficients.rs`'s own header rather
+  than remembered — the `lean` set this line used to name is the linear-regressor fit that §10.15
+  replaced, and following it would have regenerated a *different* model under the same file name.
+  Re-running on the same inputs reproduces both files **apart from the fit date in the header**,
+  because the only other element that could vary is absent: the starting vector is a literal in the
+  source. The committed pair as fitted on 2026-09-14 is `sha256` `7c8ac607…` and `5c5f59b3…`; that
+  digest moves with the date line, so it identifies the artefact rather than certifying the run.
+- **`tools/fetch-wind-data.sh`** — §10.5's measurement: the TU Delft `*_WND_ACC_*` crosswind product
+  for a list of `MISSION:YYYY-MM` arcs, same manifest discipline as the density fetcher. 337 MB for
+  the default twelve months, into gitignored `data/validation/wind/`.
+- **`tools/fetch-hwm14.sh`** and **`tools/hwm14-oracle/`** — §10.5's competitor: NRL's HWM14 Fortran
+  and its three coefficient files, pinned to a commit and fetched into gitignored
+  `data/oracles/hwm14/`, plus our own driver program and a build/run script. **Not vendored and not
+  ported**: CC BY-NC-ND forbids derivatives and commercial use, so it is run unmodified as an oracle
+  and nothing in the workspace depends on it. Needs `gfortran`.
+- **`derivations/vallado_errata.py`** — §11's two externally-oracled items: the Almanac solar series
+  read six ways against ERFA `epv00` — including both forms of the aberration correction #306
+  applied, so the choice between them stays a measurement — and the errata's 1996 Delaunay arguments
+  against the IERS 2003 ones. Offline apart from the ephemeris package
+  (`uv run --no-project --with pyerfa --with mpmath`). The third item, the corrected Eq. 8-27 chain
+  rule, is a Rust test rather than a script because both sides need the embedded gravity coefficients.
+- **`tools/fetch-satellite-js.sh`** and **`tools/sgp4-catalogue-oracle/`** — §3's whole-catalogue SGP4
+  bar: satellite.js 4.1.4 fetched as the single MIT file Celestrak serves, refused unless its digest
+  matches the pinned one, into gitignored `data/oracles/satellite-js/`; plus a Node driver that
+  streams the oracle's states and a Rust example that consumes them. The driver silences
+  `console.log` — the served build carries leftover debug statements in its three satrec
+  constructors — rather than editing a pinned file. Needs `node`. The committed fixture keeps the
+  hardest 49 objects so the always-run test needs neither network nor Node.
+- **`tools/fetch-supgp.sh`** and **`tools/gen_supgp_fixtures.py`** — §10.6's three measurements: the
+  selected Supplemental GP files and the standard `GROUP=active` catalogue within minutes of each
+  other, per-file digest manifests, and a deterministic cutter that keeps every record of every
+  multi-record object. The script stops on any non-200 and on a 200 carrying no element sets, which
+  is what Celestrak's usage policy asks a machine client to do.
+- **`tools/gen_aeronet_oracle.py`** and **`tools/gen_aeronet_disort_oracle.py`** — §5.3's two halves,
+  kept apart because one is a fetch and the other is a solve. The first pulls AERONET Version 3
+  **Level 2.0** almucantar inversions (`AOD` / `SSA` / `ASY`) plus the coincident direct-sun record
+  from the NASA GSFC web service, standard library only, and writes every query string it used into
+  the fixture header along with each site's PI — the AERONET Data Use Policy asks for the PI to be
+  contacted and acknowledged, and that header is where the obligation is recorded. PI email addresses
+  are published by NASA at those URLs and deliberately not copied into the repository. The second
+  runs DISORT over the resulting atmospheres (`uv run --with pydisort --with numpy`), ephemerally as
+  every DISORT run here is. Between them they fix the three things a naive version would get wrong:
+  Level 1.5 is cloud-screened but *not* quality-assured and is never used; pydisort 1.8.5's
+  `intensity_correction` flag returns `NaN` at every stream count tried, so the radiance convention
+  was pinned against the analytic single-scattering limit instead of taken on trust; and because that
+  flag is off, the 96-stream setting is justified by a sweep to 256 streams recorded in the second
+  script's header rather than by the usual argument that 96 is plenty.
+- **`tools/gen_radcalnet_oracle.py`** and **`tools/gen_ozone_cross_section.py`** — §5.4's fixtures,
+  kept apart because their provenance is different and must not blur. The first signs into the
+  RadCalNet JSON API with `RADCALNET_USER` / `RADCALNET_PASS` from the environment — it refuses to run
+  without them and names them when it does — and parses to the published file specification
+  (QA4EO-WGCV-RadCalNet-R2 v1.0). It writes **two** fixtures from one download: `radcalnet_toa.txt`,
+  504 rows over the 14 gate wavelengths with each scene's measured atmosphere *and that atmosphere's
+  published uncertainty*, which is what lets §5.4's error budget charge our own side; and
+  `radcalnet_absorption.txt`, the full 211-wavelength ρ_BOA and ρ_TOA matrices for all 42 scenes,
+  which the window classification regresses on; and `radcalnet_holdout.txt`, 1441 rows over 120
+  further days chosen on the date rather than by inspection — twenty per site from equal-count epoch
+  strata, picked inside those strata to hold `Σ (e − ē)(doy − d̄) = 0` so the sample's season does not
+  trend with epoch — which is what turns the one fitted parameter into a prediction. That third file is written by the *same* row-formatting code as the first, so the
+  comparison between them is not a comparison of two formatters, and the generator exits non-zero
+  rather than writing it if any (site, date) it holds also appears in the fitted fixture.
+  It emits both reflectance matrices rather than their
+  ratio, because the path bound that classification needs is `τ/(4 μ_s ρ_BOA)` and a ratio has thrown
+  the denominator away. It also carries two pieces of RadCalNet's own metadata rather than trusting
+  the specification for them: each scene's aerosol `Type`, and the per-wavelength absorption-region
+  mask decoded from the uncertainty flag — and it **exits non-zero** rather than writing that mask if
+  any wavelength's flag differs between scenes, because then it is not the wavelength property
+  section 3.5 describes and one boolean per wavelength would be a lie. The same refusal covers the
+  fields it does *not* carry: it holds the list of every key the two files publish, split into the 11
+  it reads and the 8 it waives with a reason each, prints that table into the fixture headers, and
+  **exits non-zero** on a key in neither list — so "everything RadCalNet gives us" is checked against
+  the files on every run rather than asserted once. Three things a naive version
+  gets wrong, all of them fixed here: fill values
+  (9999 through 9995) read as reflectances; the TOA uncertainty is **flag-encoded**, with a negative
+  value meaning out of look-up-table range and a **9 added left of the decimal point** meaning an
+  absorption region, so `9.0155` taken at face value puts a 900 % uncertainty in the denominator of a
+  gate; and the `.input` files have **no blank line** between the atmospheric block and the
+  reflectance block, so a parser that terminates on the blank swallows all 211 reflectance rows and
+  hands back the uncertainty table instead — a plausible-looking number that is not a reflectance. The
+  second fetches Serdyuchenko et al. (2014) ozone cross-sections from the MPI-Mainz UV/VIS Spectral
+  Atlas and convolves them to RadCalNet's own 10 nm triangular slit, costing three choices in the
+  currency the residual is in (two-way transmittance): convolution order 8.9e-6, 223 K vs 293 K
+  1.1e-3, air vs vacuum wavelength 1.5e-4. Stdlib only, both.
+- **`crates/spacelab-earthvision/examples/aeronet_path_residual.rs`** — the other half of §5.3's
+  convergence question, and the one that belongs in Rust: the same atmospheres at many seeds and a
+  ladder of photon counts, reporting each comparison point's bias against its own standard error. It
+  is an example rather than a test because it costs minutes and answers a question once.
+- **`crates/spacelab-earthvision/examples/radcalnet_error_budget.rs`** — the expensive half of §5.4's
+  one fitted parameter. The suite can only afford a three-point bracket on the aerosol
+  single-scattering albedo; this scans the whole range at any photon count, then repeats the scan per
+  instrument, which is the measurement behind the claim that one fitted value serves all six targets
+  rather than laundering a per-site systematic into a constant. It then scans the **hold-out** the
+  same way, which the suite deliberately does not: the test asks only whether the in-sample value
+  predicts inside the bar there, while this asks what refitting on those days would have bought — the
+  part of the out-of-sample residual the albedo is actually responsible for. Two regressions follow,
+  over every comparison in the workspace pooled, because five correlated drivers cannot be separated
+  on 42 scenes: the relative residual on **AOD, air mass, water, surface reflectance and the
+  path-reflectance ratio**, standardised so the five compare directly and printed with their pairwise
+  correlations, since collinearity does not bias a coefficient but does inflate its standard error;
+  and the relative residual on **epoch, per site**, which is the only handle there is on whether
+  RadCalNet itself has moved across the record it publishes — the listing carries no reprocessing
+  versions, measured, 0 multi-version site-days across all six sites. It closes with the four-input
+  error budget itemised, so it is visible which measurement would be worth improving. Same reason as
+  the above: minutes, and an answer rather than an assertion.
+- **`tools/fetch-density-data.sh`** — §10.2's measurement: the TU Delft GRACE-FO and Swarm neutral-density
+  products for a list of months, plus the CelesTrak and Space Environment Technologies driver files
+  and GFZ's two complete Hpo series (§10.7), each with a `sha256` + retrieval-time manifest. The
+  reprocessing suffix (`v02c`/`v02b`/`v02`) is discovered per month rather than assumed. 226 MB for
+  the default six months plus 66 MB of Hpo, into gitignored `data/validation/density/`.
+
+Run the whole suite with `cargo test --workspace`; every non-`#[ignore]` row above is enforced on each
+run. Eleven tests carry `#[ignore]`, and ten of them now run **weekly in CI** —
+`.github/workflows/weekly.yml`, Sunday 05:00 UTC and on demand, in five independent jobs (`eop`,
+`orbit-fit`, `density`, `wind`, `long-integrations`) so that one dead upstream cannot hide the other
+four. Each job runs its own `tools/fetch-*.sh` first and fails on a download that does not arrive: a
+rotted URL is the finding this workflow exists to surface, not a condition to skip past. The
+eleventh, `lambda`'s timing table, stays out deliberately — its own doc comment says it is a
+measurement and not a check, and a timing assertion on a shared runner turns contention into a red
+build.
+
+The gap this closes was **silent, not red**. Nothing ran those ten before: they are gated on
+downloads `ci.yml` deliberately does not make, so the gate never opened, and a fetch script whose
+upstream moved, a product whose format changed, or a validation number that drifted would each have
+sat undetected for as long as nobody ran it by hand. The GPU rows remain hardware-gated and are not
+in this workflow; a hosted runner has no GPU.
+
+Every job's steps were run locally before the file was committed, rather than assumed to work, and
+the numbers they produced are the ones the rows above claim:
+
+| Job | What ran | Measured |
+|---|---|---|
+| `eop` | fresh `finals2000A` (MJD 41684..61659, 20 026 lines), then both tests | 19 920 rows parse; worst \|A−B\| in `xp` after 2000 = 5.56e-4 arcsec. Ignoring EOP displaces the ISS ground point by 236.7 m; with it, worst dlat 2.6e-8°, dlon 1.3e-7°, dh 2.2e-6 m |
+| `orbit-fit` | `igs_orbit_fit`, both ignored tests, release | mean 3D RMS **0.250 m** over 32 GPS satellites, worst 0.612 m (G31) |
+| `density` | `measured_density`, release, 12 satellite-months | 348 693 rows; MAPE base → calibrated: NRLMSISE-00 51.7 → 28.9 %, JB2008 25.5 → 24.1 %, DTM2020 20.2 → 20.7 % |
+| `wind` | `measured_wind`, both ignored tests, release, with `gfortran` and the fetched HWM14 | 2 passed in 315 s; held-out RMS 53.2 m/s equatorial rising to 147.3 m/s poleward of 65° |
+| `long-integrations` | `neptune_sentinel1b` and `neptune_lro`, release | Sentinel-1B vs NEPTUNE over 24 h: worst **0.47 m**. LRO vs NEPTUNE over 7 days: worst **739.9 m**, final 736.9 m |
+
+`RUSTFLAGS: -D warnings` and the toolchain pin (`1.99.1`) are the same as `ci.yml`'s, for the reason
+`rust-toolchain.toml` gives: a gate whose verdict depends on the date is not a gate.
+
+### The release gate
+
+Three of a release's promises were written down and none was checked. Each is now measured, and one
+of them was wrong.
+
+**MSRV: `1.96` declared, `1.94` measured.** `rust-version` is a promise that the published crates
+build on that compiler, and it had never been built at. `cargo check --workspace --all-targets
+--ignore-rust-version` on one toolchain after another gives the ladder:
+
+| Toolchain | Result | What stopped it |
+|---|---|---|
+| 1.85.1 | fails | `let` chains in `spacelab-coverage`, unstable until 1.88 |
+| 1.88.0 | fails | `h3o` 0.10's `const fn` calling `f64::mul_add`; and `str::floor_char_boundary` in the SINEX-bias proptest |
+| 1.93.0 | fails | `h3o` only — our own code compiles here (`--exclude spacelab-grid`, exit 0) |
+| 1.94.0 | **passes** | — |
+| 1.95.0 | passes | — |
+
+So the floor is `h3o`'s, not ours: our own code needs 1.93, the workspace needs 1.94, and the two
+releases between 1.94 and the declared 1.96 were a promise the project was keeping nobody to. It is
+now built at rather than asserted — `ci.yml`'s `msrv` job, `RUSTUP_TOOLCHAIN: "1.94.0"` because
+`rust-toolchain.toml` pins a newer release and the environment variable beats it where an installed default
+would not. Rehearsed locally with the job's own `RUSTFLAGS: -D warnings` before it was written.
+
+**The workspace could not be published, and nothing said so.** `cargo package --workspace` — which
+builds every crate from the tarball it would upload — stopped at the second crate: `spacelab-testkit`
+was `publish = false` and a *versioned* dev-dependency of twenty publishable crates, so `cargo` went
+looking for it on a registry that will never have it. Making it publishable was the smaller of the
+two fixes; the other was dropping the `version` from twenty dev-dependency lines, which works by
+making `cargo` strip them from the published manifests, and would have shipped tarballs whose tests
+cannot build. In a repository whose claim is its tests that is the wrong trade. After the change:
+**32 crates packaged and verify-built, 7.5 MB total**, largest `spacelab-propagation` at 2.8 MB.
+
+Three crates stay `publish = false`, each with the reason in its manifest rather than as a bare
+line: `spacelab-capi` has no Rust API to depend on (what a consumer wants is the static library and
+the header), `spacelab-python`'s distribution channel is PyPI as an abi3 wheel, and `spacelab-gpu`'s
+kernels are gated on hardware CI does not have, so nothing in it has a verification row.
+
+`cargo publish --dry-run` is the wrong command for this tree and is deliberately not what CI runs: it
+resolves each crate against crates.io, where none of these exists, so it fails on the first
+intra-workspace dependency for a reason that has nothing to do with the code. `cargo semver-checks`
+is absent for a related reason — it compares against a published baseline and there is no release to
+compare with. It opens at the first tag.
+
+**`CHANGELOG.md` and `CITATION.cff` are generated and checked.** `tools/gen-changelog.py` projects
+723 lines from 740 commit subjects, grouped by conventional-commit type; `--check` runs in CI beside
+`gen-readme.py --check`, and the `check` job now clones with `fetch-depth: 0` because a shallow clone
+would see a shorter history. `test` commits get their own **Verification** section rather than being
+filed as internal noise, which is a claim about this repository specifically: a commit that seals a
+module changes what the library promises. Four subjects do not parse — all of the same shape, a scope
+written where the type belongs — and they are listed under **Unparsed** with their hashes rather than
+dropped.
+
+The check is not the obvious one, because the obvious one is unsatisfiable and that was found by it
+failing on its own commit: **a generated changelog cannot describe the commit that adds it**, so
+"byte-identical to the projection of `HEAD`" is a fixed point nothing can ever sit at. What is
+checked instead is two invariants that are fixed points. Every subject in the history has to project
+— an unrecognised type would otherwise land silently in `Unparsed`, and four early subjects are
+grandfathered by hash rather than by rewriting history — and the file has to equal the projection of
+the **parent** of the commit that last wrote it, which catches a hand edit or a regeneration by
+something other than the generator. Both were falsified before they were kept: appending one line
+fails the second, and removing one hash from the grandfathered set fails the first. It deliberately
+does not catch lag; the alternative is a rule that makes every commit rewrite the file, which is
+churn rather than a gate, and the first invariant is what makes lag harmless.
+
+`CITATION.cff` is not generated but is checked, by `crates/spacelab/tests/release_metadata.rs`: its
+`version`, its licence list against the workspace SPDX expression, and its `repository-code`. Each
+assertion was falsified before it was kept — the version bumped, `Apache-2.0` swapped for `GPL-3.0`,
+the repository pointed elsewhere — and each broke exactly one test. A fourth assertion was written
+and then **deleted**: that every intra-workspace dependency pins the workspace version. Measured by
+bumping `workspace.package.version` to `0.1.0` and leaving the pins at `0.0.1`, `cargo metadata`
+already refuses — "failed to select a version for the requirement `spacelab-core = "^0.0.1"`" —
+because a path dependency whose version does not satisfy the requirement sends the resolver to a
+registry that does not have it. A test that repeats the resolver can only ever agree with it.
+
+The version was bumped to `0.1.0` on `main`, by the release commit of the first public release, and
+not on a feature branch: every commit before it would otherwise claim a version that was never
+released.

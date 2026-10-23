@@ -1,0 +1,32 @@
+/* Prove rho_ours == rho_savi by eliminating the nested radical.
+   s = sin(a), c^2 = 1-s^2, u = sqrt(L^2 - c^2) = sqrt(L^2 - 1 + s^2), u >= 0. */
+assume(L>1, s>0, s<1, u>0)$
+
+/* our root, from footprint2: cos(lam) = (s*u + 1 - s^2)/L   where u = sqrt(s^2+L^2-1) */
+cl_ours   : (s*u + 1 - s^2)/L$
+rho2_ours : ratsimp(1 - cl_ours^2)$
+
+/* SaVi: rho = cos(a)*(sqrt(1 - cos(a)^2/L^2) - sin(a)/L),  cos(a)^2 = 1-s^2
+   sqrt(1 - (1-s^2)/L^2) = sqrt(L^2-1+s^2)/L = u/L  */
+rho_savi  : sqrt(1-s^2) * (u/L - s/L)$
+rho2_savi : ratsimp(rho_savi^2)$
+
+diff_poly : ratsimp(rho2_ours - rho2_savi)$
+print("MASK: rho_ours^2 - rho_savi^2  (before using u^2 = L^2-1+s^2) =", diff_poly)$
+reduced   : ratsimp(ratsubst(L^2 - 1 + s^2, u^2, diff_poly))$
+print("MASK: after substituting u^2 -> L^2-1+s^2  ==>", reduced)$
+
+/* --- cone --- : our root cos(lam) = L - L*c^2 + c*sqrt(L^2*c^2 - L^2 + 1)
+   discriminant L^2*c^2 - L^2 + 1 = 1 - L^2*s^2  (SaVi's branch condition) */
+print("cone discriminant identity:", ratsimp( (L^2*(1-s^2) - L^2 + 1) - (1 - L^2*s^2) ))$
+
+/* v = sqrt(1 - L^2 s^2) */
+assume(v>0)$
+c : sqrt(1-s^2)$
+cl_cone   : L - L*(1-s^2) + c*v$
+rho2_cone_ours : ratsimp(1 - cl_cone^2)$
+rho_cone_savi  : s*(L*c - v)$
+d2 : ratsimp(rho2_cone_ours - rho_cone_savi^2)$
+print("CONE: diff before v^2 substitution =", d2)$
+print("CONE: after substituting v^2 -> 1-L^2*s^2  ==>",
+      ratsimp(ratsubst(1 - L^2*s^2, v^2, d2)))$

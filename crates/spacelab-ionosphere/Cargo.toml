@@ -1,0 +1,20 @@
+[package]
+name = "spacelab-ionosphere"
+description = "NeQuick-G (Galileo) ionospheric electron-density and slant-TEC model, verified against the JRC reference implementation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["ionosphere", "nequick", "gnss", "tec", "galileo"]
+categories = ["science::geo", "aerospace"]
+exclude.workspace = true
+
+[dependencies]
+libm = "0.2"
+
+[lints]
+workspace = true

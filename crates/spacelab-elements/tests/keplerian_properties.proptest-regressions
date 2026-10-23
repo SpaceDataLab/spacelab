@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 00975e55d797371892e761521ec50108d28948489f1b6051767654d3d08f8536 # shrinks to k = KeplerianElements { semi_major_axis: 7000000.0, eccentricity: 0.5011872336272722, inclination: Angle(3.141592653589793), raan: Angle(0.0), arg_periapsis: Angle(4.758951225801294), true_anomaly: Angle(0.0), mu: 398600441800000.0 }

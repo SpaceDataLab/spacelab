@@ -1,0 +1,83 @@
+/* GRK4T (Kaps-Rentrop 1979), the order-4 Rosenbrock method — its LINEAR order conditions verified by
+ * applying the exact stage recurrence to the Dahlquist test y' = lambda*y and checking that the
+ * stability function R(z) matches exp(z) through z^4.
+ *
+ * The coefficients are transcribed from Hairer & Wanner's reference code ros4.f (SUBROUTINE GRK4T),
+ * the primary source. This script does NOT re-solve for them; it verifies that the *implementation's*
+ * stage recurrence, fed the published coefficients, reproduces the 4th-order stability polynomial.
+ * Together with the nonlinear order-4 conditions (exercised by the Kepler convergence test in
+ * tests/rosenbrock.rs) this confirms the method is order 4.
+ *
+ * For y' = lambda*y the Jacobian is J = lambda; with step h = 1 the test parameter is z = lambda.
+ * The matrix is E = 1/gamma - z (scalar), and each stage is one division by E — the scalar image of
+ * the "one LU factorisation, four solves" structure the Rust code implements.
+ *
+ *   maxima --very-quiet -b rosenbrock_grk4t.mac
+ */
+
+gamma : 0.231$
+A21 :  0.2000000000000000e1$
+A31 :  0.4524708207373116e1$
+A32 :  0.4163528788597648e1$
+C21 : -0.5071675338776316e1$
+C31 :  0.6020152728650786e1$
+C32 :  0.1597506846727117e0$
+C41 : -0.1856343618686113e1$
+C42 : -0.8505380858179826e1$
+C43 : -0.2084075136023187e1$
+B1  :  0.3957503746640777e1$
+B2  :  0.4624892388363313e1$
+B3  :  0.6174772638750108e0$
+B4  :  0.1282612945269037e1$
+
+/* Scalar Dahlquist recurrence (h = 1, J = z), mirroring rosenbrock_step exactly. */
+E  : 1/gamma - z$
+k1 : z / E$                                  /* E k1 = f(1) = z*1                       */
+y2 : 1 + A21*k1$
+k2 : (z*y2 + C21*k1) / E$                     /* E k2 = f(y2) + C21 k1                   */
+y3 : 1 + A31*k1 + A32*k2$
+k3 : (z*y3 + C31*k1 + C32*k2) / E$            /* E k3 = f(y3) + C31 k1 + C32 k2          */
+k4 : (z*y3 + C41*k1 + C42*k2 + C43*k3) / E$   /* E k4 = f(y3) + C41 k1 + C42 k2 + C43 k3 */
+R  : 1 + B1*k1 + B2*k2 + B3*k3 + B4*k4$
+
+/* Taylor-expand R(z) and compare to exp(z): coefficients of z^0..z^4 must match 1/k!. */
+Rt : taylor(R, z, 0, 6)$
+for k:0 thru 6 do block(
+    [ck, want, err],
+    ck : coeff(Rt, z, k),
+    want : 1 / (k!),
+    err : abs(ck - want),
+    print("z^", k, " coeff", float(ck), " vs 1/", k, "! =", float(want),
+          if k <= 4 then (if err < 1e-12 then " MATCH (order cond)" else " FAIL")
+          else " (order-5 term, expected to differ)")
+);
+
+/* R(infinity) governs stiff damping: |R(inf)| < 1 is A-stability at the stiff limit. */
+print("R(z -> -inf) =", float(limit(R, z, minf)));
+
+/* ------------------------------------------------------------------------------------------------
+ * The d_i weights of the h*d_i*df/dt stage terms, DERIVED rather than transcribed.
+ *
+ * Hairer & Wanner II.7 write the implementation form with C = diag(1/gamma) - Gamma^-1 and
+ * A = (alpha_ij) Gamma^-1, where Gamma = (gamma_ij) is the lower-triangular coefficient matrix with
+ * gamma_ii = gamma. So Gamma = (diag(1/gamma) - C)^-1, and d_i = sum_j Gamma[i][j] is its row sum.
+ * ros4.f prints these as D1..D4; here they come out of the c_ij the implementation already uses,
+ * which keeps them consistent with those c_ij to the last bit rather than to a transcription.
+ *
+ * Two independent checks that the convention is the right one: d_1 must be gamma exactly (it is the
+ * single entry gamma_11), and the row sums of alpha = A*Gamma must reproduce the published stage
+ * times c_2 = 0.462 and c_3 = 0.8802083333333334 that the Rust code already carries.
+ * -------------------------------------------------------------------------------------------- */
+
+fpprec : 60$
+Cm : matrix([0,0,0,0], [C21,0,0,0], [C31,C32,0,0], [C41,C42,C43,0])$
+Gm : invert(diagmatrix(4, 1/bfloat(gamma)) - bfloat(Cm))$
+ones : matrix([1],[1],[1],[1])$
+dv : Gm . ones$
+for i:1 thru 4 do print(concat("D", i), "=", bfloat(dv[i][1]));
+print("d1 - gamma =", float(dv[1][1] - gamma), "(must be 0)");
+
+Am : matrix([0,0,0,0], [A21,0,0,0], [A31,A32,0,0], [A31,A32,0,0])$
+alv : (bfloat(Am) . Gm) . ones$
+print("stage times from A*Gamma:", float(alv[2][1]), float(alv[3][1]), float(alv[4][1]));
+print("  against the published  0.462  0.8802083333333334  (stage 4 reuses stage 3)");

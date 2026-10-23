@@ -1,0 +1,38 @@
+/* Reference water-vapour partial pressures for the SLR troposphere model, at 60 decimal digits.
+ *
+ * The relations are transcribed from IERS Conventions (2010) chapter 9 independently of the Rust
+ * source, so a disagreement is a transcription error in one of the two copies. `troposphere.rs`
+ * checks `water_vapour_pressure` only by its linearity in relative humidity — a relation between
+ * two of its own outputs, which every operator inside the saturation exponent and the enhancement
+ * factor leaves untouched. These are the absolute values that pin them.
+ *
+ * Run: timeout 120 maxima --very-quiet -b tools/gen_slr_vapour_oracle.mac
+ */
+
+fpprec: 60$
+
+/* Saturation pressure over water, hPa, from temperature in kelvin. */
+saturation(t) := 0.01b0 * exp(1.2378847b-5 * t^2
+                              - 1.9121316b-2 * t
+                              + 33.93711047b0
+                              - 6.3431645b3 / t)$
+
+/* Enhancement factor: the vapour is mixed with air rather than alone. */
+enhancement(t, p) := 1.00062b0 + 3.14b-6 * p + 5.6b-7 * (t - 273.15b0)^2$
+
+vapour(t, p, rh) := 0.01b0 * rh * enhancement(t, p) * saturation(t)$
+
+/* Two points chosen so the quadratic terms sit on opposite sides of the reference temperature and
+ * neither the celsius offset nor the pressure term can be dropped without moving the answer:
+ * ISA sea level, and a cold high-altitude station. */
+print("T = 288.15 K, p = 1013.25 hPa, RH = 50 %:")$
+print(bfloat(vapour(288.15b0, 1013.25b0, 50b0)))$
+
+print("T = 253.15 K, p = 700 hPa, RH = 90 %:")$
+print(bfloat(vapour(253.15b0, 700b0, 90b0)))$
+
+/* The saturation pressure alone, so a failure can be localised to one of the two factors. */
+print("saturation(288.15 K), hPa:")$
+print(bfloat(saturation(288.15b0)))$
+print("enhancement(288.15 K, 1013.25 hPa):")$
+print(bfloat(enhancement(288.15b0, 1013.25b0)))$

@@ -1,0 +1,133 @@
+/* Consensus over inter-satellite links that are not instantaneous: the delay at which agreement
+   stops being reached, for the two protocols a formation can actually run.
+
+   n agents, a fixed connected undirected graph with non-negative weights a_ij, degree matrix
+   D = diag(sum_j a_ij), adjacency A, Laplacian L = D - A. Every link carries the same delay tau.
+
+   PROTOCOL A -- the relative measurement is what arrives late, so both terms are delayed:
+
+       x_i'(t) = sum_j a_ij [ x_j(t - tau) - x_i(t - tau) ]      i.e.  x' = -L x(t - tau)
+
+   PROTOCOL B -- the agent knows its own state now and its neighbour's as of tau ago:
+
+       x_i'(t) = sum_j a_ij [ x_j(t - tau) - x_i(t) ]            i.e.  x' = -D x(t) + A x(t - tau)
+
+   Same graph, same links, same latency. This file derives the delay at which each one loses
+   consensus, because the two answers are not the same and the difference is the point of the
+   ticket. Protocol A is the one Olfati-Saber & Murray (IEEE TAC 49(9), 2004) bound; Protocol B is
+   what the ticket's own u_i = -sum_j K_ij [x_i(t) - x_j(t - tau_ij)] writes down.
+
+   L is symmetric positive semi-definite with eigenvalues 0 = lam_1 <= ... <= lam_n, and lam_2 > 0
+   exactly when the graph is connected. The weights are control gains, so lam carries units of 1/s
+   and tau_max comes out in seconds without further scaling. */
+
+declare([d, lam, w, tau], real)$
+assume(d > 0, lam > 0, w > 0, tau > 0)$
+
+/* ------------------------------------------------------------------ Protocol A */
+
+/* L is symmetric, so an orthogonal change of basis takes x' = -L x(t - tau) to n scalar equations
+   y_k' = -lam_k y_k(t - tau), one per eigenvalue, with no coupling left. The whole system is
+   therefore stable exactly when every one of them is, and the binding mode is lam_max. */
+
+ceq_a : lam_ + lam*exp(-lam_*tau)$
+
+sub_a : expand(demoivre(subst(lam_ = %i*w, ceq_a)))$
+re_a  : ratsimp(realpart(sub_a))$
+im_a  : ratsimp(imagpart(sub_a))$
+print("A: real part = 0 :", re_a)$
+print("A: imag part = 0 :", im_a)$
+
+/* Eliminate tau the same way delay_margin.mac does: c = cos(w tau), s = sin(w tau), resultant
+   against the Pythagorean identity. What survives is a polynomial in w alone. */
+rec_a : subst([cos(w*tau) = c, sin(w*tau) = s], re_a)$
+imc_a : subst([cos(w*tau) = c, sin(w*tau) = s], im_a)$
+poly_a : factor(first(eliminate([rec_a, imc_a, c^2 + s^2 - 1], [c, s])))$
+print("A: crossing polynomial in w :", poly_a)$
+
+/* It is (w - lam)(w + lam) up to sign; with w > 0 and lam > 0 the only crossing is w = lam. */
+print("A: poly / ((w - lam)(w + lam)) (must be a constant) :",
+      ratsimp(poly_a / ((w - lam)*(w + lam))))$
+
+w_a : lam$
+/* Real part 0 forces cos(w tau) = 0 and the imaginary part then fixes the sign of the sine, so the
+   first crossing is w tau = pi/2 rather than 3pi/2. */
+tau_a : %pi/(2*lam)$
+print("A: w_c =", w_a, "  tau_max =", tau_a)$
+
+/* Substituted back into the *original transcendental* equation, not into a rearrangement of it.
+   Both parts must vanish, at bigfloat precision, or the pair is a solution of something else. */
+fpprec : 40$
+resid_a : subst([lam_ = %i*w_a, tau = tau_a], ceq_a)$
+print("A: residual of the transcendental equation :",
+      bfloat(subst(lam = 1, rectform(resid_a))))$
+
+/* The product tau_max * lam_max is pi/2 for every graph and every weighting -- the shape of the
+   answer, as in delay_margin.mac. A formation buys margin only by lowering the gain that produces
+   lam_max, and doing that slows consensus by the same factor. */
+print("A: tau_max * lam (must be pi/2) :", ratsimp(tau_a*lam))$
+
+/* ------------------------------------------------------------------ Protocol B */
+
+/* D and A do not commute unless the graph is regular, so the general case does not decouple. Take
+   the regular case in closed form here -- every degree equal to d, so A = d I - L and the modes
+   separate again -- and bound the general case below. */
+
+ceq_b : lam_ + d - (d - lam)*exp(-lam_*tau)$
+
+sub_b : expand(demoivre(subst(lam_ = %i*w, ceq_b)))$
+re_b  : ratsimp(realpart(sub_b))$
+im_b  : ratsimp(imagpart(sub_b))$
+print("B: real part = 0 :", re_b)$
+print("B: imag part = 0 :", im_b)$
+
+rec_b : subst([cos(w*tau) = c, sin(w*tau) = s], re_b)$
+imc_b : subst([cos(w*tau) = c, sin(w*tau) = s], im_b)$
+poly_b : factor(first(eliminate([rec_b, imc_b, c^2 + s^2 - 1], [c, s])))$
+print("B: crossing polynomial in w :", poly_b)$
+
+/* The physical factor is w^2 + lam (2 d - lam) and the cofactor is the perfect square (lam - d)^2,
+   which carries no crossing. Divided out and printed rather than read off, so the claim is checked.
+
+   The one value where the cofactor vanishes, lam = d, is not a crossing either: there A's row and
+   D's diagonal cancel, the characteristic equation collapses to lam_ + d = 0 with no delay term at
+   all, and the mode is stable at every tau. The resultant vanishing identically there is the
+   elimination degenerating, not a root reaching the axis. */
+crossing_b : w^2 + lam*(2*d - lam)$
+print("B: poly / (w^2 + lam (2 d - lam)) (must be the square (lam - d)^2) :",
+      ratsimp(poly_b/crossing_b))$
+print("B: the equation at lam = d (no delay term survives) :",
+      ratsimp(subst(lam = d, ceq_b)))$
+
+/* w^2 = -lam (2 d - lam). For any graph 0 <= lam <= 2 d_max, and for a d-regular graph
+   0 <= lam <= 2d exactly, so lam (2 d - lam) >= 0 and w^2 <= 0: there is no real crossing
+   frequency at any positive delay. */
+
+/* The two endpoints of that interval are where the argument would be tight, so both are checked
+   rather than waved at. lam = 0 is the consensus direction itself, which must have a root at the
+   origin -- it is the conserved quantity, not an instability. lam = 2 d is the bipartite case. */
+print("B: at lam = 0, the equation at lam_ = 0 (a root at the origin, as required) :",
+      ratsimp(subst([lam = 0, lam_ = 0], ceq_b)))$
+print("B: at lam = 2 d, w = 0, the real part (must be non-zero, so no crossing) :",
+      ratsimp(subst([lam = 2*d, w = 0], re_b)))$
+
+/* General (non-regular) graph. A crossing at lam_ = %i w needs (%i w I + D) v = exp(-%i w tau) A v
+   for some v != 0, hence v = exp(-%i w tau) (%i w I + D)^-1 A v, hence 1 <= || (%i w I + D)^-1 A ||
+   in any induced norm. The inverse is diagonal with entries 1/(%i w + d_i), so the row-sum
+   (infinity) norm of the product is max_i (sum_j a_ij)/|%i w + d_i| = max_i d_i/sqrt(w^2 + d_i^2).
+   That is strictly below 1 for every w != 0, so no crossing exists off the origin -- whatever the
+   degrees, whatever the weights, whatever the delay. */
+print("B: d/sqrt(w^2 + d^2) < 1 for w /= 0, as  1 - (d/sqrt(w^2+d^2))^2 =",
+      ratsimp(1 - d^2/(w^2 + d^2)))$
+
+/* ------------------------------------------------------------------ a number to quote */
+
+/* A six-satellite ring (cycle C_6) with a uniform link gain k: the Laplacian eigenvalues are
+   2k(1 - cos(2 pi j / 6)), j = 0..5, so lam_max = 4k. Derived rather than looked up. */
+cycle_eig(nn, j, k) := 2*k*(1 - cos(2*%pi*j/nn))$
+print("C_6 Laplacian spectrum / k :",
+      makelist(ratsimp(cycle_eig(6, j, 1)), j, 0, 5))$
+lam_max_c6 : ratsimp(apply(max, makelist(cycle_eig(6, j, 1), j, 0, 5)))$
+print("C_6 lam_max / k :", lam_max_c6)$
+print("C_6 tau_max at k = 0.01 /s :",
+      bfloat(subst(lam = lam_max_c6*0.01, tau_a)), "s")$

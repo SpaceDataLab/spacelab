@@ -1,0 +1,103 @@
+/* What light time does to a measurement partial, and why the answer is still one row times Phi.
+
+   `measurement` computes an observable from one state at one instant. An instrument reads the
+   geometry at the *emission* epoch t_e = t_r - tau, and tau itself depends on the state, so the
+   partial an orbit determination needs is not simply the AD row evaluated at the emission state.
+
+   This file establishes the shape the Rust side implements:
+
+     1. d(tau)/dx0 = rhohat . Phi_r / (c + rhohat . v_e), with Phi_r the position rows of the STM;
+     2. the whole correction is a *rank-one update to the row*, not to Phi:
+          df/dx0 = [ w - ((w . xdot_e)/(c + rhodot)) * (rhohat, 0) ] Phi
+        with w = dg/dx at the emission state and xdot_e = (v_e, a_e);
+     3. for a pure range it collapses to the scalar 1/(1 + rhodot/c).
+
+   (3) is checked against (2) symbolically, and (1) against a numeric implicit-function sweep, so
+   the closed form is not merely asserted.  */
+
+c : 299792458.0$
+
+/* --- 1. The implicit equation ---------------------------------------------------------------- */
+
+/* One scalar component is enough for the structure: put the station at the origin and let the
+   satellite move along x with speed v, so rho = r(t_e) and rhohat = 1. Then
+
+     c tau = r(t_r - tau)
+
+   defines tau implicitly. Differentiate with respect to a parameter p that the trajectory depends
+   on (a component of the epoch state, through Phi):
+
+     c dtau/dp = r'(t_e) * (-dtau/dp) + dr/dp  =>  dtau/dp = (dr/dp) / (c + v_e).  */
+
+depends(tau, p)$ depends(r, [t, p])$
+eq : c*tau = r$
+/* dr/dp at fixed t is the STM term; the -v dtau/dp is the moving-emission term. */
+dtaudp : rhs(solve(c*dtdp = drdp - v*dtdp, dtdp)[1])$
+print("d(tau)/dp = ", dtaudp, "   (expected drdp/(c+v))")$
+if ratsimp(dtaudp - drdp/(c+v)) = 0
+  then print("(1) holds: the light-time sensitivity carries 1/(c + rhohat.v)")
+  else print("MISMATCH in (1)")$
+
+/* --- 2. The rank-one row update -------------------------------------------------------------- */
+
+/* df/dp = w . dx_e/dp  with  dx_e/dp = Phi_p - xdot_e * dtau/dp.
+   Writing s = (w . xdot_e)/(c + rhodot) and using dtau/dp = (rhohat . Phi_r,p)/(c + rhodot):
+
+     df/dp = w . Phi_p - (w . xdot_e) * (rhohat . Phi_r,p)/(c + rhodot)
+           = [w - s * (rhohat, 0)] . Phi_p
+
+   which is the same Phi the instantaneous form chains, left-multiplied by a modified row. Checked
+   here on a 2-component reduction (one position, one velocity) so the algebra is visible. */
+
+/* Maxima collapses a 1x1 dot product to a scalar, and indexing a scalar with [1][1] silently
+   builds a *new* subscripted atom rather than erroring -- which is how the first run of this file
+   reported a mismatch in (3) that was entirely in the harness. */
+scalarof(e) := if matrixp(e) then e[1][1] else e$
+
+w      : matrix([w1, w2])$          /* dg/dx at the emission state */
+xdot   : matrix([ve], [ae])$        /* d/dt of the state at emission: (v, a) */
+Phi    : matrix([p11, p12], [p21, p22])$
+rhohat : matrix([1, 0])$            /* padded: position components only */
+rhodot : ve$
+
+dtau   : (rhohat . Phi)/(c + rhodot)$
+dxe    : Phi - xdot . dtau$
+direct : ratsimp(w . dxe)$
+
+s      : scalarof(w . xdot)/(c + rhodot)$
+rowform: ratsimp((w - s*rhohat) . Phi)$
+
+if ratsimp(direct - rowform) = matrix([0, 0])
+  then print("(2) holds: the correction is a rank-one update to the row, Phi untouched")
+  else print("MISMATCH in (2): ", ratsimp(direct - rowform))$
+
+/* --- 3. The pure-range collapse -------------------------------------------------------------- */
+
+/* For a range, w = (rhohat, 0) = (1, 0), so w . xdot = ve = rhodot and s = rhodot/(c + rhodot). */
+
+wr     : matrix([1, 0])$
+sr     : scalarof(wr . xdot)/(c + rhodot)$
+rowr   : ratsimp((wr - sr*rhohat))$
+scalar : ratsimp(wr/(1 + rhodot/c))$
+
+if ratsimp(rowr - scalar) = matrix([0, 0])
+  then print("(3) holds: a range partial is the instantaneous one over (1 + rhodot/c)")
+  else print("MISMATCH in (3): ", ratsimp(rowr - scalar))$
+
+/* The size of it, at LEO speeds and at the geostationary radial rate. */
+for vv in [7660.0, 3070.0, 0.0, -7660.0] do
+  print("rhodot m/s:", vv, "  partial scale 1/(1+rhodot/c):", float(1/(1 + vv/c)),
+        "  relative:", float(-vv/c))$
+
+/* --- 4. The implicit solution against a numeric sweep ---------------------------------------- */
+
+/* An independent route to (1): solve c*tau = r0 + v*(tr - tau) for tau in closed form, differentiate
+   with respect to r0, and compare against the implicit-function answer 1/(c+v). */
+
+taucl : rhs(solve(c*T = r0 + v*(tr - T), T)[1])$
+print("closed-form tau:", taucl)$
+dclosed : ratsimp(diff(taucl, r0))$
+print("d(tau)/d(r0) closed:", dclosed, "  implicit: 1/(c+v)")$
+if ratsimp(dclosed - 1/(c+v)) = 0
+  then print("(4) holds: closed form and implicit differentiation agree")
+  else print("MISMATCH in (4)")$

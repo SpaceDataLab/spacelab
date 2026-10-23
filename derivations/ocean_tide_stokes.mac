@@ -1,0 +1,152 @@
+/* The spherical-harmonic step of `derivations/tide_to_stokes.py`, proved symbolically.
+ *
+ * The generator turns a cotidal grid (amplitude Z, Greenwich phase lag psi) into the prograde /
+ * retrograde geopotential coefficients of IERS Conventions 2010 Eq. 6.21. Three things in that
+ * chain are conventions rather than arithmetic, and each is a place where a sign error survives
+ * every numerical test that compares the pipeline against itself:
+ *
+ *   1. the analysis integral that recovers A+ and A- from the complex field, whose 1/(4 pi) and
+ *      the m = 0 degeneracy differ between references;
+ *   2. the map from (A+, A-) to the (Cbar, Sbar) of Eq. 6.19, which is *not* real/imaginary parts
+ *      but a quarter turn, because Eq. 6.20 pairs Cbar with sin and Sbar with cos;
+ *   3. the Doodson-Warburg phase bias chi_f of Eq. 6.21, which enters as a rotation in that same
+ *      plane and so cannot be checked separately from 2.
+ *
+ * This file derives all three from the definitions and prints what the Python must implement. It
+ * shares no arithmetic with the generator: the Legendre functions come from Rodrigues' formula,
+ * the integrals are done in closed form, and nothing is evaluated on a grid.
+ *
+ * Conventions pinned, the same three as `tools/gen_shbasis_oracle.mac`:
+ *   - no Condon-Shortley phase;
+ *   - 4 pi ("fully normalised", geodesy) scaling;
+ *   - real Pbar_nm, complex exp(i m lambda) longitude basis.
+ *
+ * Run: timeout 600 maxima --very-quiet -b derivations/ocean_tide_stokes.mac
+ */
+
+/* ── Fully normalised associated Legendre functions, Rodrigues, no Condon-Shortley ────────────── */
+
+plm(n, m, x) := (1 - x^2)^(m/2) * subst(z = x, diff((z^2 - 1)^n / (2^n * n!), z, n + m))$
+nfac(n, m)   := sqrt((if m = 0 then 1 else 2) * (2*n + 1) * (n - m)! / (n + m)!)$
+pbar(n, m, x):= nfac(n, m) * plm(n, m, x)$
+
+/* ── 1. Normalisation: (1/4 pi) * integral of [Pbar_nm cos(m lambda)]^2 over the sphere = 1 ────── */
+
+sphint(f) := integrate(integrate(f * cos(phi), phi, -%pi/2, %pi/2), lam, 0, 2*%pi) / (4*%pi)$
+
+print("1. Normalisation (must all be 1):")$
+for n: 0 thru 4 do
+  for m: 0 thru n do
+    print("   n =", n, " m =", m, " -> ",
+          ratsimp(sphint(subst(x = sin(phi), pbar(n, m, x))^2 * cos(m*lam)^2)))$
+
+/* ── 2. Analysis: recovering A+ and A- from H = Pbar_nm (a exp(i m lam) + b exp(-i m lam)) ─────
+ *
+ * Claim: A_pm = 1/(4 pi (2 - delta_m0)) * integral of H Pbar_nm exp(-/+ i m lam) over the sphere,
+ * with A- forced to zero at m = 0 (where the two basis functions coincide and the split is not
+ * unique -- the FES and GOT coefficient files put the whole m = 0 term in the prograde slot).
+ */
+
+analyse(h, n, m, sgn) := block(
+  [w: if m = 0 then 1 else 2],
+  ratsimp(sphint(h * subst(x = sin(phi), pbar(n, m, x)) * exp(-sgn * %i * m * lam)) / w))$
+
+print("")$
+print("2. Analysis recovers (a, b) exactly:")$
+for n: 1 thru 3 do
+  for m: 0 thru n do block(
+    [h, ap, am],
+    h  : subst(x = sin(phi), pbar(n, m, x)) * (a*exp(%i*m*lam) + (if m = 0 then 0 else b*exp(-%i*m*lam))),
+    ap : demoivre(analyse(h, n, m,  1)),
+    am : if m = 0 then 0 else demoivre(analyse(h, n, m, -1)),
+    print("   n =", n, " m =", m, " -> A+ =", ratsimp(ap), " A- =", ratsimp(am)))$
+
+/* ── 3. (A+, A-) -> (Cbar, Sbar) -> Eq. 6.21, as one rotation ─────────────────────────────────
+ *
+ * Eq. 6.18/6.19 write the elevation as
+ *     xi = sum Pbar_nm [ Cbar+ cos(th + chi + m lam) + Sbar+ sin(th + chi + m lam) + (-) terms ],
+ * while the analysis above writes the same field as Re{ H exp(i th) } with
+ *     H = sum Pbar_nm [ A+ exp(i m lam) + A- exp(-i m lam) ].
+ * Matching the two fixes Cbar/Sbar in terms of A, with no free sign left.
+ */
+
+print("")$
+print("3. Matching Re{H exp(i th)} against Eq. 6.19 (residual must be 0):")$
+declare([cp, sp, cm, sm, ar, ai, br, bi, th, chi, lam, m], real)$
+
+/* the analysis form, one (n, m) term with the Pbar factored out, chi already folded in */
+lhs : realpart(expand(demoivre(
+        ((ar + %i*ai)*exp(%i*m*lam) + (br + %i*bi)*exp(-%i*m*lam)) * exp(%i*(th + chi)))))$
+
+/* Eq. 6.19 with the claimed identification Cbar = -Im A, Sbar = Re A ... tested below */
+rhs : cp*cos(th + chi + m*lam) + sp*sin(th + chi + m*lam)
+    + cm*cos(th + chi - m*lam) + sm*sin(th + chi - m*lam)$
+
+resid : expand(trigexpand(lhs - subst([cp = ar, sp = -ai, cm = br, sm = -bi], rhs)))$
+print("   residual =", ratsimp(resid))$
+print("   so Cbar+ = Re A+, Sbar+ = -Im A+, Cbar- = Re A-, Sbar- = -Im A-")$
+
+/* Eq. 6.20 pairs Cbar with sin(eps) and Sbar with cos(eps), so the quantity Eq. 6.21 rotates is
+ * Sbar + i Cbar = Chat exp(i eps). Section 3 fixed Cbar = Re A and Sbar = -Im A, so
+ *     Sbar + i Cbar = -Im A + i Re A = i A.
+ *
+ * The trap, and it is the reason this section exists: the *other* pairing, Cbar + i Sbar, equals
+ * conjugate(A), which is just as true and just as easy to write down. Using it in place of the one
+ * Eq. 6.20 asks for exchanges every C with its S -- a table that looks entirely plausible, passes
+ * every seal and every round trip, and disagrees with a published atlas by a factor of order one.
+ * The first run of `tide_to_stokes.py` did exactly that. Both identities are checked below so that
+ * the one in use is the one named. */
+
+print("")$
+print("4. Eq. 6.20 packing (both residuals must be 0, and only the first is what Eq. 6.21 takes):")$
+print("   Sbar + i Cbar - i A            =",
+      ratsimp(expand((-ai + %i*ar) - %i*(ar + %i*ai))))$
+print("   Cbar + i Sbar - conjugate(A)   =",
+      ratsimp(expand((ar + %i*(-ai)) - conjugate(ar + %i*ai))))$
+
+/* ── 5. The whole chain as one complex line ───────────────────────────────────────────────────
+ *
+ * Eq. 6.20 packs (Cbar, Sbar) as Sbar + i Cbar = Chat exp(i eps); Eq. 6.21 produces the geopotential
+ * pair as K_n Chat exp(i (eps + chi_f)). So the bias is a rotation of the packed complex number and
+ * the whole generator step is one line.
+ */
+
+print("")$
+print("5. Eq. 6.21 as a rotation, S + iC = K exp(i chi) (Sbar + i Cbar) (residual must be 0):")$
+declare([chat, eps, kn], real)$
+print("   residual =",
+      ratsimp(expand(trigexpand(demoivre(
+        (kn*chat*cos(eps + chi) + %i*kn*chat*sin(eps + chi))
+        - kn*exp(%i*chi)*(chat*cos(eps) + %i*chat*sin(eps)))))))$
+print("   with Sbar + i Cbar = i A, the generator computes")$
+print("     S_nm(+/-) + i C_nm(+/-) = %i K_n exp(i chi_f) A_nm(+/-)")$
+
+/* ── 6. The Eq. 6.21 scale factor ──────────────────────────────────────────────────────────── */
+
+print("")$
+print("6. Eq. 6.21 scale K_n = 4 pi G rho_w (1 + kprime_n) / (g_e (2n+1)), in units of 1e-11:")$
+G     : 6.67428e-11$      /* IERS Conventions 2010, Table 1.1 */
+rhow  : 1025$             /* IERS 2010 section 6.3.1, seawater density, kg m^-3 */
+ge    : 9.7803278$        /* IERS 2010 Table 1.1, mean equatorial gravity, m s^-2 */
+kprime: [0, 0, -0.3075, -0.195, -0.132, -0.1032, -0.0892]$   /* IERS 2010 section 6.3.1 */
+for n: 2 thru 6 do
+  print("   n =", n, " K_n =",
+        float(4*%pi*G*rhow*(1 + kprime[n + 1])/(ge*(2*n + 1))),
+        "  (x 1e11 =", float(1e11*4*%pi*G*rhow*(1 + kprime[n + 1])/(ge*(2*n + 1))), ")")$
+
+/* ── 7. Pbar_nm at a point, for the generator's own self-test ─────────────────────────────────
+ *
+ * Orthonormality is invariant under a sign flip of any single Pbar_nm, and the synthetic-field test
+ * in `tide_to_stokes.py` builds the field from the same recursion it then analyses, so a sign error
+ * cancels in both. Only a comparison against independently built values catches it. These are
+ * Rodrigues' formula at sin(phi) = 3/10; the Python asserts against them.
+ */
+
+print("")$
+print("7. Pbar_nm at sin(phi) = 3/10 (the generator's self-test compares against these):")$
+fpprec: 25$
+for n: 0 thru 6 do
+  for m: 0 thru n do
+    print(concat("   (", n, ", ", m, "): "), bfloat(subst(x = 3/10, pbar(n, m, x))))$
+
+quit()$

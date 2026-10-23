@@ -1,0 +1,169 @@
+/* The continuous-time algebraic Riccati equation, and the closed-loop spectrum it implies.
+
+   Plant  x' = A x + B u,  cost  J = integral (x' Q x + u' R u) dt.  The optimal gain is
+   K = R^-1 B' P where P is the stabilising solution of
+
+       A' P + P A - P B R^-1 B' P + Q = 0.
+
+   The Rust solves this through the matrix sign function of the Hamiltonian
+
+       H = [ A    -G ]     G = B R^-1 B'
+           [ -Q   -A']
+
+   which is an iteration, not a formula, so it cannot be checked by re-deriving itself. This file
+   supplies three independent things:
+
+     1. exact closed forms where one exists (scalar, double integrator, and the cross-track
+        sub-block of the Clohessy-Wiltshire plant), so P and K are known rather than measured;
+
+     2. the *closed-loop characteristic polynomial* of the Clohessy-Wiltshire LQR, obtained from
+        the Hamiltonian alone and never from P. The spectrum of A - B K is exactly the stable half
+        of the spectrum of H (Kalman 1960; the Hamiltonian's eigenvalues are symmetric about the
+        imaginary axis and the optimal closed loop takes the left half). Comparing polynomial
+        *coefficients* avoids having to order eigenvalues, and a gain that solves the wrong branch
+        of the quadratic would fail it;
+
+     3. a proof that the spectral factorisation holds -- charpoly(H) = (-1)^n q(lam) q(-lam) with
+        q the closed-loop polynomial -- so leg 2 is checked before it is used.
+
+   The Clohessy-Wiltshire dynamics, in the LVLH frame of crates/spacelab-astro/src/cw.rs
+   (x radial, y along-track, z cross-track):
+
+       x'' = 3 n^2 x + 2 n y'      y'' = -2 n x'      z'' = -n^2 z                              */
+
+declare([n, rho, lam], real)$
+assume(n > 0, rho > 0)$
+
+/* `is(expr > 0)` on an expression in n and rho is undecidable and sublist silently drops every
+   candidate, so the positive-definite branch is selected by evaluating each candidate at one
+   interior point of the assumed domain. The branch is then carried symbolically. */
+pd_branch(sols, vars, probe) := first(sublist(sols, lambda([s],
+  every(lambda([v], is(float(subst(probe, subst(s, v))) > 0)), vars))))$
+
+/* ---------------------------------------------------------------- 1. scalar closed form */
+
+/* 2 a p - b^2 p^2 / r + q = 0, stabilising root is the positive one. */
+p_scalar : rhs(second(solve(2*a*p - b^2*p^2/r + q, p)))$
+print("scalar P =", ratsimp(p_scalar))$
+print("residual (must be 0) :", ratsimp(2*a*p_scalar - b^2*p_scalar^2/r + q))$
+print("scalar a=-1 b=1 q=1 r=1 :", bfloat(subst([a=-1, b=1, q=1, r=1], p_scalar)))$
+print("scalar a= 0 b=1 q=1 r=1 :", bfloat(subst([a= 0, b=1, q=1, r=1], p_scalar)))$
+
+/* ------------------------------------------------- 2. double integrator, exact P and gain */
+
+/* A = [[0,1],[0,0]], B = [0;1], Q = I, R = 1.  The classic: P = [[sqrt(3),1],[1,sqrt(3)]],
+   K = [1, sqrt(3)], closed-loop poles the roots of s^2 + sqrt(3) s + 1. Derived, not quoted. */
+A2 : matrix([0,1],[0,0])$
+B2 : matrix([0],[1])$
+Q2 : ident(2)$
+R2 : matrix([1])$
+P2 : matrix([p11,p12],[p12,p22])$
+care2 : transpose(A2).P2 + P2.A2 - (1/R2[1,1])*(P2.B2.transpose(B2).P2) + Q2$
+sol2 : solve([care2[1,1], care2[1,2], care2[2,2]], [p11,p12,p22])$
+/* Keep the positive-definite branch: p11 > 0 and p22 > 0. */
+pd2 : pd_branch(sol2, [p11, p22], [])$
+print("double integrator P entries :", pd2)$
+P2v : subst(pd2, P2)$
+print("double integrator P =", P2v)$
+print("CARE residual (must be the zero matrix) :",
+      ratsimp(transpose(A2).P2v + P2v.A2 - P2v.B2.transpose(B2).P2v + Q2))$
+K2 : ratsimp((1/R2[1,1])*transpose(B2).P2v)$
+print("double integrator K =", K2)$
+print("closed loop A - B K =", ratsimp(A2 - B2.K2))$
+print("closed-loop charpoly :", expand(charpoly(A2 - B2.K2, lam)))$
+
+/* ------------------------------------ 3. Clohessy-Wiltshire cross-track block, exact */
+
+/* The z axis decouples from (x, y) entirely, so with a block-diagonal Q and R the 6x6 problem
+   contains a 2x2 one whose answer is closed-form. A_z = [[0,1],[-n^2,0]], B_z = [0;1]. */
+Az : matrix([0,1],[-n^2,0])$
+Bz : matrix([0],[1])$
+Pz : matrix([z11,z12],[z12,z22])$
+carez : transpose(Az).Pz + Pz.Az - (1/rho)*(Pz.Bz.transpose(Bz).Pz) + ident(2)$
+/* `solve` on the three coupled quadratics at once returns the empty list for symbolic n and rho,
+   so they are solved one unknown at a time. The order is forced by the equations themselves --
+   (1,1) involves only z12, (2,2) only z12 and z22, (1,2) all three -- and the cascade is checked
+   by substituting the result back into all three at the end, which is the only thing that makes
+   the ordering an observation rather than an assumption. */
+z12v : rhs(pd_branch(solve(carez[1,1], z12), [z12], [n = 1, rho = 1]))$
+z22v : rhs(pd_branch(solve(subst(z12 = z12v, carez[2,2]), z22), [z22], [n = 1, rho = 1]))$
+z11v : rhs(first(solve(subst([z12 = z12v, z22 = z22v], carez[1,2]), z11)))$
+Pzv  : matrix([z11v, z12v], [z12v, z22v])$
+print("cross-track P =", ratsimp(Pzv))$
+print("cross-track CARE residual (must be zero) :",
+      ratsimp(transpose(Az).Pzv + Pzv.Az - (1/rho)*(Pzv.Bz.transpose(Bz).Pzv) + ident(2)))$
+Kz : ratsimp((1/rho)*transpose(Bz).Pzv)$
+print("cross-track K =", Kz)$
+
+/* ------------------------------- 4. the full 6x6: closed-loop spectrum from H alone */
+
+Acw : matrix([0,     0, 0,     1,     0, 0],
+             [0,     0, 0,     0,     1, 0],
+             [0,     0, 0,     0,     0, 1],
+             [3*n^2, 0, 0,     0,   2*n, 0],
+             [0,     0, 0,  -2*n,     0, 0],
+             [0,     0, -n^2,  0,     0, 0])$
+Bcw : matrix([0,0,0],[0,0,0],[0,0,0],[1,0,0],[0,1,0],[0,0,1])$
+Gcw : ratsimp((1/rho)*(Bcw.transpose(Bcw)))$
+/* Assembled entrywise so the block layout is unambiguous:
+   H[i][j] = A, H[i][j+6] = -G, H[i+6][j] = -Q, H[i+6][j+6] = -A'. */
+Ham : genmatrix(lambda([i,j],
+        if i <= 6 and j <= 6      then Acw[i,j]
+        elseif i <= 6             then -Gcw[i,j-6]
+        elseif j <= 6             then -ident(6)[i-6,j]
+        else                          -transpose(Acw)[i-6,j-6]), 12, 12)$
+
+ph : expand(charpoly(Ham, lam))$
+print("charpoly(H) is even in lam (must be 0) :", ratsimp(expand(subst(lam = -lam, ph) - ph)))$
+
+/* Even, so it is a degree-6 polynomial in mu = lam^2. Extract it by matching coefficients. */
+pmu : sum(coeff(ph, lam, 2*j)*mu^j, j, 0, 6)$
+print("charpoly(H) as P(mu), mu = lam^2 (residual must be 0) :",
+      ratsimp(expand(subst(mu = lam^2, pmu) - ph)))$
+
+fpprec : 40$
+
+/* A 500 km circular orbit: a = 6878.137 km, mu_earth = 398600.4418 km^3/s^2. rho weights the
+   control: 1 (m/s^2)^-2 in the units the Rust uses (km, s), i.e. rho = 1e6 for km/s^2. */
+NVAL   : bfloat(sqrt(398600.4418b0/6878.137b0^3))$
+RHOVAL : 1.0b6$
+print("=== Clohessy-Wiltshire LQR, a = 6878.137 km, Q = I6, R = rho I3 ===")$
+print("n      =", NVAL)$
+print("rho    =", RHOVAL)$
+
+pnum : bfloat(subst([n = NVAL, rho = RHOVAL], pmu))$
+roots_mu : bfallroots(expand(pnum) = 0)$
+print("lam^2 roots of P(mu) :")$
+for r in roots_mu do print("   ", rhs(r))$
+
+/* Each lam^2 gives a +/- pair; the optimal closed loop takes the one in the left half plane. */
+stable : []$
+for r in roots_mu do block([m, s],
+  m : rhs(r),
+  s : sqrt(m),
+  if realpart(s) > 0 then s : -s,
+  stable : cons(s, stable))$
+print("stable eigenvalues (all must have negative real part) :")$
+for s in stable do print("   ", s, "   Re =", realpart(s))$
+
+/* q(lam) = product (lam - lam_i). Its coefficients are what the Rust compares against, because
+   they are real and order-free where the roots are neither. */
+q : expand(product(lam - stable[i], i, 1, 6))$
+print("closed-loop characteristic polynomial coefficients, lam^0 .. lam^6 :")$
+for j : 0 thru 6 do print("   c", j, " = ", bfloat(realpart(coeff(q, lam, j))),
+                          "   |Im| =", bfloat(cabs(imagpart(coeff(q, lam, j)))))$
+
+/* The spectral factorisation, which is what licenses using q at all: for a Hamiltonian,
+   charpoly(H) = (-1)^6 q(lam) q(-lam). If this residual is not zero the stable set was picked
+   wrongly and every coefficient above is worthless. */
+print("spectral factorisation residual |charpoly(H) - q(lam) q(-lam)| coefficientwise :")$
+ph_num   : bfloat(subst([n = NVAL, rho = RHOVAL], ph))$
+fact_res : expand(ph_num - expand(q*subst(lam = -lam, q)))$
+for j : 0 thru 12 do print("   lam^", j, " : ", bfloat(cabs(coeff(fact_res, lam, j))))$
+
+/* And the cross-track pair, from the exact 2x2 solution, must appear among the six above. */
+Kzn : bfloat(subst([n = NVAL, rho = RHOVAL], Kz))$
+print("cross-track gain [k_z, k_vz] =", Kzn)$
+zpoly : expand(charpoly(bfloat(subst(n = NVAL, Az)) - bfloat(Bz.Kzn), lam))$
+print("cross-track closed-loop charpoly :", zpoly)$
+print("its roots :", bfallroots(zpoly = 0))$

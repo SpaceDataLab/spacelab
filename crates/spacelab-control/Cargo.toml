@@ -1,0 +1,41 @@
+[package]
+name = "spacelab-control"
+description = "Closed-loop guidance, navigation and control: feedback laws, and the sensor/compute/actuator latency the loop actually runs at."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["gnc", "guidance", "control", "attitude", "spacecraft"]
+categories = ["aerospace", "science::robotics", "science"]
+exclude.workspace = true
+
+[features]
+default = ["std"]
+std = ["spacelab-propagation/std"]
+
+[dependencies]
+libm = "0.2"
+spacelab-propagation = { path = "../spacelab-propagation", version = "0.1.0", default-features = false }
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }
+# The element-feedback oracle differences real two-body mechanics, so the test needs an
+# independent state <-> elements conversion. Test-only: the crate itself does not depend on either.
+spacelab-core = { path = "../spacelab-core" }
+spacelab-elements = { path = "../spacelab-elements" }
+# The station-keeping run drives NRLMSISE-00, which is defined on geodetic coordinates. Vermeille's
+# closed form rather than a spherical stand-in, because the ellipsoid is worth 21 km of altitude at
+# the poles and a third of a scale height is a 40 % error in density.
+spacelab-earth = { path = "../spacelab-earth" }
+spacelab-frames = { path = "../spacelab-frames" }
+# The formation verdict asks the conjunction machinery what a close approach is worth, rather
+# than inventing a separation check, and draws its graph ensemble from the estimation crate's
+# pinned xoshiro256++ rather than seeding a second generator.
+spacelab-estimation = { path = "../spacelab-estimation" }
+
+[lints]
+workspace = true

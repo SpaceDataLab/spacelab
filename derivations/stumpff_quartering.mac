@@ -1,0 +1,48 @@
+/* The two Stumpff argument-reduction identities used by `spacelab_astro::kepler::stumpff`.
+
+   With z = x^2,
+
+       C(z) = (1 - cos x)/x^2 ,   S(z) = (x - sin x)/x^3 ,
+
+   the claim is that the value at 4z follows from the value at z without any subtraction of nearly
+   equal quantities:
+
+       C(4z) = (1 - z S(z))^2 / 2          S(4z) = [ S(z) + C(z) (1 - z S(z)) ] / 4 .
+
+   Both are proved here as identities in x, not checked at sample points. Run:
+
+       timeout 180 maxima --very-quiet -b derivations/stumpff_quartering.mac
+*/
+
+C(x) := (1 - cos(x)) / x^2$
+S(x) := (x - sin(x)) / x^3$
+
+/* The argument of the reduced value is x; the argument of the unfolded value is 2x, i.e. 4z. */
+z    : x^2$
+lhsC : C(2*x)$
+lhsS : S(2*x)$
+t    : 1 - z * S(x)$
+
+print("C(4z) - (1 - z S)^2/2 = ",
+      trigsimp(ratsimp(trigexpand(lhsC - t^2/2))))$
+print("C identity holds: ",
+      is(trigsimp(ratsimp(trigexpand(lhsC - t^2/2))) = 0))$
+
+print("S(4z) - [S + C(1 - z S)]/4 = ",
+      trigsimp(ratsimp(trigexpand(lhsS - (S(x) + C(x)*t)/4))))$
+print("S identity holds: ",
+      is(trigsimp(ratsimp(trigexpand(lhsS - (S(x) + C(x)*t)/4))) = 0))$
+
+/* `1 - z S(x)` is `sin(x)/x`, which is what makes the unfolding cancellation-free: it is a ratio of
+   two quantities of the same sign for |x| < pi, not a difference. */
+print("1 - z S = sin(x)/x: ",
+      is(ratsimp(t - sin(x)/x) = 0))$
+
+/* The series the implementation uses inside its window, and the first term it drops. */
+print("C series to z^4: ", taylor(C(x), x, 0, 10))$
+print("S series to z^4: ", taylor(S(x), x, 0, 10))$
+
+/* Truncation after the z^4 term, relative to the leading term, at the edge of the window z = 1/32.
+   These are the numbers quoted in the implementation's comment. */
+print("C dropped term / C(0) at z = 1/32: ", float((1/32)^5 / 479001600 / (1/2)))$
+print("S dropped term / S(0) at z = 1/32: ", float((1/32)^5 / 6227020800 / (1/6)))$

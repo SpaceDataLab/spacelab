@@ -1,0 +1,33 @@
+[package]
+name = "spacelab-vision"
+description = "deepvision: pure-Rust CNN inference primitives (conv2d, relu, pooling, dense, softmax) for on-board / offline image models."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["cnn", "inference", "onboard", "neural-network", "conv2d"]
+categories = ["computer-vision", "science", "aerospace"]
+exclude.workspace = true
+
+[package.metadata.docs.rs]
+features = ["onnx"]
+
+[dependencies]
+libm = "0.2"
+# ONNX inference runtime (opt-in). Pure Rust, no C/C++ toolchain — but std-only, so it is gated
+# behind the `onnx` feature and never touches the default no_std build.
+tract-onnx = { version = "0.23", optional = true }
+
+[features]
+default = ["std"]
+# The `nn` primitives are no_std; the `model` runner (owned weight buffers) needs alloc/std.
+std = []
+# Load and run trained ONNX models (`onnx` module) through `tract`. Implies `std`.
+onnx = ["std", "dep:tract-onnx"]
+
+[lints]
+workspace = true

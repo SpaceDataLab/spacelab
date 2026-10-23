@@ -1,0 +1,68 @@
+[package]
+name = "spacelab-python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Python bindings (PyO3) for the spacelab space-data computation core"
+# Not on crates.io: its distribution channel is PyPI, as abi3/abi3t wheels built by maturin. A source
+# crate that only makes sense once linked into CPython has no consumer on a Rust registry.
+publish = false
+
+[lib]
+name = "spacelab_python"
+crate-type = ["cdylib"]
+
+# NB: intentionally does NOT inherit `[workspace.lints]` — the workspace forbids `unsafe_code`, which the
+# PyO3 module-init macro requires. This crate is the FFI boundary; the pure Rust core stays unsafe-free.
+
+[dependencies]
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+spacelab-earth = { path = "../spacelab-earth", version = "0.1.0" }
+spacelab-astro = { path = "../spacelab-astro", version = "0.1.0" }
+spacelab-astrometry = { path = "../spacelab-astrometry", version = "0.1.0" }
+spacelab-elements = { path = "../spacelab-elements", version = "0.1.0" }
+spacelab-constellation = { path = "../spacelab-constellation", version = "0.1.0", features = ["std"] }
+spacelab-control = { path = "../spacelab-control", version = "0.1.0", features = ["std"] }
+spacelab-estimation = { path = "../spacelab-estimation", version = "0.1.0" }
+spacelab-ephemeris = { path = "../spacelab-ephemeris", version = "0.1.0" }
+spacelab-propagation = { path = "../spacelab-propagation", version = "0.1.0" }
+spacelab-autodiff = { path = "../spacelab-autodiff", version = "0.1.0" }
+spacelab-sgp4 = { path = "../spacelab-sgp4", version = "0.1.0" }
+spacelab-frames = { path = "../spacelab-frames", version = "0.1.0", features = ["std"] }
+spacelab-fa = { path = "../spacelab-fa", version = "0.1.0" }
+spacelab-sensors = { path = "../spacelab-sensors", version = "0.1.0" }
+spacelab-coverage = { path = "../spacelab-coverage", version = "0.1.0", features = ["std"] }
+spacelab-geomagnetism = { path = "../spacelab-geomagnetism", version = "0.1.0", features = ["std"] }
+spacelab-gnss = { path = "../spacelab-gnss", version = "0.1.0", features = ["std"] }
+spacelab-ionosphere = { path = "../spacelab-ionosphere", version = "0.1.0" }
+spacelab-earthvision = { path = "../spacelab-earthvision", version = "0.1.0" }
+spacelab-signal = { path = "../spacelab-signal", version = "0.1.0" }
+spacelab-vision = { path = "../spacelab-vision", version = "0.1.0", features = ["std"] }
+# Two stable ABIs, chosen by the interpreter maturin builds against: from 3.11 to 3.14 the wheel is
+# `cp311-abi3`; from 3.15 it is `cp315-abi3.abi3t` (PEP 803), which also loads on the free-threaded
+# build, which plain abi3 cannot. Shipping both wheels covers 3.11 onwards and 3.15t.
+pyo3 = { version = "0.30", features = ["abi3-py311", "abi3t-py315"] }
+
+[features]
+default = ["extension-module"]
+
+# `extension-module` tells PyO3 not to link libpython: the interpreter supplies the `Py*` symbols at
+# import, which is the only correct configuration for a shipped `cdylib` and the thing `abi3-py311`
+# promises. It is on by default and `pyproject.toml` also passes it explicitly, so the wheel is
+# unaffected by this feature existing.
+#
+# What it costs is testability. A `#[test]` is an ordinary binary that nothing supplies those symbols
+# to, so naming an entry point whose signature carries an interpreter token -- a `PyResult` return or
+# a `Python<'_>` / `Bound<'_>` parameter -- fails to link with `undefined symbol: PyErr_SetObject`.
+# Measured: 194 of the crate's mutants sit behind that wall. Turning the feature off links libpython
+# instead, and `test-interpreter` additionally starts an interpreter so those entry points can be
+# called: `cargo test -p spacelab-python --no-default-features --features test-interpreter`.
+extension-module = ["pyo3/extension-module"]
+test-interpreter = ["pyo3/auto-initialize"]
+
+# Cloud-mask ONNX inference (`cloud_mask`) via earthvision -> spacelab-vision -> tract. Off by default
+# so the standard wheel stays lean; build the extension with `--features onnx` to include it.
+onnx = ["spacelab-earthvision/onnx"]

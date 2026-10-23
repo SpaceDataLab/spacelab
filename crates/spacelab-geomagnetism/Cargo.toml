@@ -1,0 +1,27 @@
+[package]
+name = "spacelab-geomagnetism"
+description = "IGRF-14 geomagnetic field and centred-dipole magnetic coordinates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["igrf", "geomagnetism", "magnetic-field", "space-weather", "geophysics"]
+categories = ["science::geo", "aerospace"]
+exclude.workspace = true
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }
+
+[features]
+default = ["std"]
+std = []
+
+[lints]
+workspace = true

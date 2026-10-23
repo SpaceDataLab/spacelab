@@ -1,0 +1,56 @@
+/* Reference values for the SO(3) left Jacobian `V(φ)` and its inverse, at 60 decimal digits.
+ *
+ * The Rust splits both at `‖φ‖ < 1e-8` and evaluates a second-order series below it. That series
+ * is where the module has already been wrong once — `V` lost its whole `θ/2` term because
+ * `1 − cos θ` underflowed — and the quadratic coefficients `1/6` and `1/12` are still unpinned:
+ * they contribute ~1e-17 to a matrix of order 1, which no tolerance the crate's own tests carry
+ * can see. On an *off-diagonal* entry, though, they sit under a first-order term of order θ/2 and
+ * are resolved with eight digits to spare, so a relative comparison there does pin them.
+ *
+ * This file evaluates the closed forms instead, in exact rational input and bigfloat output, so it
+ * shares no arithmetic with the series:
+ *
+ *   V(φ)   = I + ((1 − cos θ)/θ²)·[φ]× + ((θ − sin θ)/θ³)·[φ]×²
+ *   V(φ)⁻¹ = I − ½·[φ]× + (1/θ² − (1 + cos θ)/(2 θ sin θ))·[φ]×²
+ *
+ * The small-angle point uses exact negative powers of two, so the f64 the test passes in is the
+ * rational this file evaluates, bit for bit.
+ *
+ * Run: timeout 300 maxima --very-quiet -b tools/gen_se3_oracle.mac
+ */
+
+fpprec: 60$
+
+ident3 : matrix([1, 0, 0], [0, 1, 0], [0, 0, 1])$
+
+hat(p) := matrix([0, -p[3], p[2]], [p[3], 0, -p[1]], [-p[2], p[1], 0])$
+
+vmat(p) := block(
+  [k, k2, th2, th],
+  k : hat(p), k2 : k . k,
+  th2 : p[1]^2 + p[2]^2 + p[3]^2, th : sqrt(th2),
+  ident3 + ((1 - cos(th))/th2) * k + ((th - sin(th))/th^3) * k2)$
+
+vinv(p) := block(
+  [k, k2, th2, th],
+  k : hat(p), k2 : k . k,
+  th2 : p[1]^2 + p[2]^2 + p[3]^2, th : sqrt(th2),
+  ident3 - k/2 + (1/th2 - (1 + cos(th))/(2*th*sin(th))) * k2)$
+
+emit(label, p) := block(
+  [v, w, i, j],
+  v : vmat(p), w : vinv(p),
+  printf(true, "~a: phi = ~a, theta = ~,20e~%",
+         label, p, bfloat(sqrt(p[1]^2 + p[2]^2 + p[3]^2))),
+  for i: 1 thru 3 do (for j: 1 thru 3 do
+    printf(true, "  V    [~d][~d] ~,20e~%", i-1, j-1, bfloat(v[i,j]))),
+  for i: 1 thru 3 do (for j: 1 thru 3 do
+    printf(true, "  Vinv [~d][~d] ~,20e~%", i-1, j-1, bfloat(w[i,j]))))$
+
+/* Inside the small-angle branch: θ = 4.27e-9, comfortably below the 1e-8 threshold, with all
+   three components distinct so no entry of [φ]× or [φ]×² is annihilated. */
+emit("small", [2^-28, 2^-29, 2^-30])$
+
+/* Well outside it, where the closed forms are evaluated directly and the cancellation the series
+   exists to avoid does not arise. */
+emit("large", [3/10, -7/10, 11/10])$

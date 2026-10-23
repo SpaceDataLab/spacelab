@@ -1,0 +1,37 @@
+/* Reference values for `csa::modified_fm_rate`, at 60 digits.
+
+   The range-Doppler-domain FM rate of Cumming & Wong, "Digital Processing of Synthetic Aperture
+   Radar Data" (2005), Eq. 7.18 — the transmitted rate K_r corrected for the secondary range
+   compression that the range-azimuth coupling introduces:
+
+       1/K_m = 1/K_r - R_ref*lambda^3*f_eta^2 / (2*V^2*c^2*D^3)
+
+   Bigfloats throughout so the reference is limited by the f64 the test compares against and not by
+   this evaluation. The three cases are chosen so that no factor of the correction can be altered
+   without moving a printed digit: D is away from 1 in A and B (D^3 is invisible at D=1), f_eta is
+   negative in C (the square must survive it), and the correction is 0.67%, 2.3e-3% and 0.38% of
+   1/K_r respectively — small enough that a focusing test does not see it, which is the reason this
+   file exists. */
+
+fpprec: 60$
+c: 299792458$
+
+/* The secondary-range-compression term on its own: the part K_r does not appear in. */
+src(r, lam, f, v, d) := r*lam^3*f^2 / (2*v^2*c^2*d^3)$
+km(r, lam, f, v, kr, d) := bfloat(1 / (1/kr - src(r, lam, f, v, d)))$
+
+print("A  r=500e3 lam=0.30 f= 320 v=7500 Kr=2.5e13 d=0.80 -> K_m =",
+      km(500000, 3/10, 320, 7500, 25*10^12, 8/10))$
+print("B  r=800e3 lam=0.06 f=1000 v=7000 Kr=1.0e12 d=0.95 -> K_m =",
+      km(800000, 3/50, 1000, 7000, 10^12, 95/100))$
+print("C  r=250e3 lam=0.25 f=-450 v=7600 Kr=5.0e13 d=1.00 -> K_m =",
+      km(250000, 1/4, -450, 7600, 5*10^13, 1))$
+
+/* The five exponents, as ratios the test can assert without restating the formula. */
+base : [500000, 3/10, 320, 7500, 8/10]$
+ratio(a) := bfloat(apply(src, a) / apply(src, base))$
+print("r doubled     ", ratio([10^6,   3/10, 320, 7500,  8/10]))$
+print("lambda doubled", ratio([500000, 3/5,  320, 7500,  8/10]))$
+print("f_eta doubled ", ratio([500000, 3/10, 640, 7500,  8/10]))$
+print("v doubled     ", ratio([500000, 3/10, 320, 15000, 8/10]))$
+print("D doubled     ", ratio([500000, 3/10, 320, 7500,  16/10]))$

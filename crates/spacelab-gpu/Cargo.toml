@@ -1,0 +1,27 @@
+[package]
+name = "spacelab-gpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Host-side GPU acceleration (wgpu compute) for spacelab batch operations, with CPU fallback"
+# Not on crates.io yet: every one of its kernels is gated on hardware CI does not have, so nothing
+# in it has a verification row. Publishing an accelerator whose numbers have never been compared
+# against the CPU path on a machine that runs the gate would be shipping an untested claim.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+spacelab-astro = { path = "../spacelab-astro", version = "0.1.0" }
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+sgp4 = "2.4"
+wgpu = "30"
+pollster = "1.0"
+bytemuck = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }

@@ -1,0 +1,28 @@
+[package]
+name = "spacelab-ephemeris"
+description = "High-fidelity planetary ephemerides over ANISE (JPL DE440), for cislunar and deep space."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["ephemeris", "jpl", "de440", "spice", "cislunar"]
+categories = ["aerospace", "science"]
+exclude.workspace = true
+
+[dependencies]
+# ANISE (MPL-2.0) reads JPL DE SPK kernels; it is the only crate pulling this heavy tree, so the
+# core crates' build is unaffected. It is NOT nyx-space (AGPL) — see plans/13-deep-space.md.
+anise = "0.10"
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+# For the Ephemeris-trait bridge, so a DE440 body can feed ThirdBody / SolarRadiationPressure.
+spacelab-propagation = { path = "../spacelab-propagation", version = "0.1.0" }
+
+[dev-dependencies]
+spacelab-astro = { path = "../spacelab-astro" }
+
+[lints]
+workspace = true

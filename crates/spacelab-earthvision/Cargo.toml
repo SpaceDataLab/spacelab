@@ -1,0 +1,30 @@
+[package]
+name = "spacelab-earthvision"
+description = "Earth-observation foundations: viewing geometry (sun/sensor angles) and Monte Carlo atmospheric radiative transfer (Marchuk's method)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["earth-observation", "radiative-transfer", "monte-carlo", "remote-sensing", "satellite"]
+categories = ["science::geo", "aerospace", "science"]
+exclude.workspace = true
+
+[package.metadata.docs.rs]
+features = ["onnx"]
+
+[dependencies]
+libm = "0.2"
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+# Cloud-mask ONNX inference (opt-in). Pulls spacelab-vision's `tract` runtime and forces `std`.
+spacelab-vision = { path = "../spacelab-vision", version = "0.1.0", optional = true }
+
+[features]
+# The `cloud` module: run a segmentation CNN (ONNX via spacelab-vision's tract) over a tile. Std-only.
+onnx = ["dep:spacelab-vision", "spacelab-vision/onnx"]
+
+[lints]
+workspace = true

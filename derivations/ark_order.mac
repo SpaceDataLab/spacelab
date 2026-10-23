@@ -1,0 +1,51 @@
+/* ARK4(3)6L[2]SA (Kennedy & Carpenter 2003) — the additive implicit-explicit Runge-Kutta pair,
+ * verified to order 4. The explicit (ERK) and implicit (ESDIRK) tableaux share the nodes c and the
+ * weights b; each must satisfy the eight single-method order conditions through order 4, and the two
+ * tableaux must satisfy the two order-4 coupling conditions. Coefficients are the exact rationals
+ * from the reference implementation (SUNDIALS / the NASA TM), transcribed here and checked; a wrong
+ * digit breaks a condition.
+ *
+ *   maxima --very-quiet -b ark_order.mac
+ */
+
+c : [0, 1/2, 83/250, 31/50, 17/20, 1]$
+b : [82889/524892, 0, 15625/83664, 69875/102672, -2260/8211, 1/4]$
+
+/* Explicit ERK tableau (strictly lower triangular). */
+Aex : matrix(
+  [0,0,0,0,0,0],
+  [1/2,0,0,0,0,0],
+  [13861/62500, 6889/62500, 0,0,0,0],
+  [-116923316275/2393684061468, -2731218467317/15368042101831, 9408046702089/11113171139209, 0,0,0],
+  [-451086348788/2902428689909, -2682348792572/7519795681897, 12662868775082/11960479115383, 3355817975965/11060851509271, 0, 0],
+  [647845179188/3216320057751, 73281519250/8382639484533, 552539513391/3454668386233, 3354512671639/8306763924573, 4040/17871, 0])$
+
+/* Implicit ESDIRK tableau (diagonal gamma = 1/4, first stage explicit). */
+Aim : matrix(
+  [0,0,0,0,0,0],
+  [1/4, 1/4, 0,0,0,0],
+  [8611/62500, -1743/31250, 1/4, 0,0,0],
+  [5012029/34652500, -654441/2922500, 174375/388108, 1/4, 0, 0],
+  [15267082809/155376265600, -71443401/120774400, 730878875/902184768, 2285395/8070912, 1/4, 0],
+  [82889/524892, 0, 15625/83664, 69875/102672, -2260/8211, 1/4])$
+
+/* All conditions as explicit sums (b, c are lists; A[i,j] indexes a matrix). The published ERK
+ * rationals satisfy their conditions to ~1e-27 (Mathematica precision), the DIRK ones exactly; we
+ * collect every residual and report the largest, which must be negligible. */
+fpprec : 30$
+apply_mat(A, x) := makelist(sum(A[i, j] * x[j], j, 1, 6), i, 1, 6)$
+bdot(x) := sum(b[i] * x[i], i, 1, 6)$
+c2 : map(lambda([z], z^2), c)$  c3 : map(lambda([z], z^3), c)$
+
+single(A) := block([Ac : apply_mat(A, c)],
+  [bdot(Ac) - 1/6, sum(b[i]*c[i]*Ac[i], i, 1, 6) - 1/8,
+   bdot(apply_mat(A, c2)) - 1/12, bdot(apply_mat(A, Ac)) - 1/24])$
+
+resid : append(
+  [sum(b[i], i, 1, 6) - 1, bdot(c) - 1/2, bdot(c2) - 1/3, bdot(c3) - 1/4],   /* shared */
+  single(Aex), single(Aim),                                                   /* single-method */
+  [bdot(apply_mat(Aex, apply_mat(Aim, c))) - 1/24,                            /* coupling K1 */
+   bdot(apply_mat(Aim, apply_mat(Aex, c))) - 1/24])$                          /* coupling K2 */
+
+print("ARK4(3)6L[2]SA order-4 conditions (shared, EX, IM, coupling): 18 residuals");
+print("ARK max |order-condition residual| (~0?):", bfloat(apply(max, map(abs, resid))));

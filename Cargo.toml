@@ -1,0 +1,77 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# Measured, not guessed, and it was 1.96 until it was measured. `cargo check --workspace
+# --all-targets --ignore-rust-version` on each toolchain in turn: 1.93 fails, 1.94 and 1.95 pass.
+#
+# The failure at 1.93 is not ours. `h3o` 0.10 -- `spacelab-grid`'s H3 cell library -- calls
+# `f64::mul_add` inside a `const fn`, and that became const-stable in 1.94. Our own code compiles on
+# 1.93: the floor it sets is `str::floor_char_boundary`, used by the SINEX-bias proptest to cut a
+# fixture at an arbitrary byte, and that stabilised in 1.93. So the workspace promise is one release
+# above what the workspace itself needs, and a `h3o` bump can move it again with no commit here
+# doing it -- which is why `ci.yml`'s `msrv` job builds at exactly this version rather than trusting
+# the number.
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/SpaceDataLab/spacelab"
+homepage = "https://spacedatalab.org"
+# The tests and benchmarks read fixtures and data that the published crates do not carry, and
+# nobody runs a dependency's test suite from the registry: the repository is where they run.
+exclude = ["tests/", "benches/"]
+authors = ["SpaceDataLab"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+# `0.5 * (a + b)` is two different things in this workspace and the lint cannot tell them apart.
+#
+# Where it is a midpoint -- a bisection bracket, a symmetrised matrix element, the mean of two
+# samples -- `f64::midpoint` is the better spelling and those sites now use it. Where the `1/2` is a
+# coefficient of a published formula it is not a midpoint at all, and rewriting it hides the
+# formula: the Gottlieb geopotential recursion, the CR3BP centrifugal potential, unpolarised Fresnel
+# reflectance `(r_s^2 + r_p^2)/2`, the Gaussian CDF `(1 + erf z)/2`, NRLMSISE-00's `ccor2`, the
+# quadratic formula, Sentman's wall-temperature ratio and FISTA's momentum update. Those 21 sites
+# keep `0.5 * (...)` and this line is why they do not warn.
+#
+# Taking the suggestion is otherwise safe here and that was measured, not assumed: over 4e6 random
+# operand pairs spanning 1e-300 to 1e300, `f64::midpoint(a, b)` and `(a + b) / 2.0` returned
+# bit-identical results, and they diverge only where `a + b` overflows to infinity -- which no
+# physical quantity in this workspace approaches. It is not free, though: `f64::midpoint` compiles
+# to two `ucomisd` compares and a branch that the multiply does not have, which is why the two
+# geopotential sites, in a measured hot loop, keep the multiply on that ground as well.
+manual_midpoint = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# The profile cargo-mutants builds under. A mutation run rebuilds one crate and re-runs its tests
+# thousands of times, so both halves of that cycle have to be cheap: the numerical suites take
+# 12.9 s in `dev` and 0.22 s optimised (spacelab-astro, 47 tests, measured), which is the whole
+# difference between a workspace sweep that finishes and one that does not.
+#
+# `release` itself is the wrong profile for it. Debug assertions and overflow checks are off there,
+# and both are detectors: the `debug_assert!` on the interpolation stencil in spacelab-frames is
+# what kills the mutants that slide it off the query, and there is no accuracy test that can.
+# Turning them back on costs nothing measurable and keeps those mutants dead.
+#
+# `lto` and `codegen-units` are the release settings undone, for compile time -- link-time
+# optimisation across a whole crate graph is worth its cost once per release and never worth it
+# once per mutant.
+[profile.mutants]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+debug-assertions = true
+overflow-checks = true

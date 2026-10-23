@@ -1,0 +1,35 @@
+/* Lie-group integration on SO(3): the identities the RKMK (Runge-Kutta-Munthe-Kaas) attitude
+ * integrator rests on, so a rotation is advanced ON the group (R^T R = I, det R = 1 by construction)
+ * instead of drifting off it as naive matrix/quaternion integration does.
+ *
+ *   1. The so(3) commutator IS the cross product: [hat(a), hat(b)] = hat(a x b). So every Lie bracket
+ *      in the method becomes a cross product of R^3 vectors.
+ *   2. Skew Cayley-Hamilton: hat(w)^3 = -|w|^2 hat(w). This is what closes the exponential series
+ *      into the Rodrigues formula.
+ *   3. Rodrigues exp map: R = I + (sin th / th) hat(w) + ((1 - cos th)/th^2) hat(w)^2, th = |w|,
+ *      is a rotation (R^T R = I, det R = 1) — the exact exponential of a skew matrix.
+ *   4. dexpinv is the Bernoulli series: dexpinv_u(v) = sum_k B_k/k! ad_u^k(v). The order-4 RKMK
+ *      truncation v - (1/2)[u,v] + (1/12)[u,[u,v]] uses B_0=1, B_1=-1/2, B_2/2!=1/12.
+ *
+ *   maxima --very-quiet -b lie_so3.mac
+ */
+
+hat(w) := matrix([0, -w[3], w[2]], [w[3], 0, -w[1]], [-w[2], w[1], 0])$
+cross(p, q) := [p[2]*q[3] - p[3]*q[2], p[3]*q[1] - p[1]*q[3], p[1]*q[2] - p[2]*q[1]]$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$   /* largest |entry| of a matrix, 0 iff M is zero */
+
+a : [a1, a2, a3]$  b : [b1, b2, b3]$
+print("commutator [hat a, hat b] - hat(a x b) max|.| (=0?):",
+      zmax(ratsimp(hat(a).hat(b) - hat(b).hat(a) - hat(cross(a, b)))));
+
+w : [w1, w2, w3]$  K : hat(w)$  th2 : w1^2 + w2^2 + w3^2$
+print("skew Cayley-Hamilton  hat^3 + |w|^2 hat max|.| (=0?):", zmax(ratsimp(K.K.K + th2*K)));
+
+R : ident(3) + (sin(sqrt(th2))/sqrt(th2))*K + ((1 - cos(sqrt(th2)))/th2)*K.K$
+print("Rodrigues orthogonality  R^T R - I max|.| (=0?):", zmax(trigsimp(transpose(R).R - ident(3))));
+print("Rodrigues determinant    det R - 1 (=0?):", trigsimp(determinant(R) - 1));
+
+print("Bernoulli gen. fn  x/(e^x - 1):", taylor(x/(exp(x) - 1), x, 0, 5));
+print("dexpinv order-4 coeff  B_2/2! - 1/12 (=0?):", coeff(taylor(x/(exp(x) - 1), x, 0, 4), x, 2) - 1/12);
+print("dexpinv order-1 coeff  B_1 - (-1/2) (=0?):", coeff(taylor(x/(exp(x) - 1), x, 0, 4), x, 1) + 1/2);

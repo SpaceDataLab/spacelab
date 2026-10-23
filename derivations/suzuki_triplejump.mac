@@ -1,0 +1,62 @@
+/* Suzuki / Yoshida triple-jump: raising a symmetric symplectic composition by two orders.
+ *
+ * A time-symmetric method S_{2k}(h) of order 2k has a local error whose leading term is order
+ * (2k+1). Composing three copies with a central step of opposite sign,
+ *
+ *     S_{2k+2}(h) = S_{2k}(z h) . S_{2k}((1 - 2 z) h) . S_{2k}(z h),
+ *
+ * preserves symmetry (so the next surviving error is order 2k+3, i.e. the method is order 2k+2)
+ * *iff* two conditions hold on z:
+ *
+ *   (consistency)   the three sub-steps tile the whole step:      2 z + (1 - 2 z) = 1,
+ *   (cancellation)  the leading (2k+1)-order error cancels:       2 z^(2k+1) + (1 - 2 z)^(2k+1) = 0.
+ *
+ * The code uses the closed form z = 1 / (2 - 2^(1/(2k+1))) for k = 1, 2, 3 (yoshida4, yoshida6,
+ * yoshida8). This script proves that closed form is the unique real solution of the two conditions,
+ * and checks the exact coefficients each Yoshida level feeds to the next.
+ *
+ *   maxima --very-quiet -b suzuki_triplejump.mac
+ */
+
+/* --- The closed form solves the cancellation condition, for every order p = 2k+1 --------------- */
+/* Substitute z = 1/(2 - 2^(1/p)) into 2 z^p + (1 - 2 z)^p and show it is identically 0. */
+zc(p) := 1 / (2 - 2^(1/p));
+cancel(p) := 2 * zc(p)^p + (1 - 2*zc(p))^p;
+
+/* p = 5  (order 4 -> 6),  p = 7  (order 6 -> 8),  p = 3  (order 2 -> 4, the original Yoshida) */
+for p in [3, 5, 7] do (
+    r : radcan(cancel(p)),
+    print("cancellation p =", p, ":", r)
+);
+
+/* Consistency is immediate but check it symbolically too. */
+print("consistency (any z): 2*z+(1-2*z) simplifies to", ratsimp(2*z + (1 - 2*z)));
+
+/* --- Uniqueness: the cancellation condition has exactly one real root -------------------------- */
+/* For odd p, x -> x^p is a real bijection, so the real solutions of 2 z^p + (1-2z)^p = 0 are
+ * exactly those of the linear equation obtained by taking real p-th roots:
+ *     (1 - 2z)^p = -2 z^p  =>  1 - 2z = -2^(1/p) z  =>  1 - 2z + 2^(1/p) z = 0.
+ * That linear equation has the single root below, and it equals the closed form. */
+realbranch(p) := 1 - 2*z + 2^(1/p) * z;
+for p in [3, 5, 7] do (
+    root : rhs(first(solve(realbranch(p) = 0, z))),
+    print("p =", p, "unique real root =", root, "  root - closed form (=0?):", radcan(root - zc(p)))
+);
+
+/* --- Exact coefficient chain the code builds -------------------------------------------------- */
+/* yoshida4 base fractions s4 = [w1, w0, w1], w1 = 1/(2 - 2^(1/3)), w0 = -2^(1/3) w1. */
+w1 : 1/(2 - 2^(1/3));
+w0 : -2^(1/3) * w1;
+print("yoshida4 sum 2*w1+w0 (=1?):", radcan(2*w1 + w0));
+print("yoshida4 order-4 cond 2*w1^3+w0^3 (=0?):", radcan(2*w1^3 + w0^3));
+
+/* yoshida6 = triple_jump(s4, order 4): outer z5 = zc(5), the 9 fractions sum to 1. */
+z5 : zc(5);
+s4sum : 2*w1 + w0;                         /* = 1 */
+print("yoshida6 total (2*z5 + (1-2*z5)) * s4sum (=1?):", radcan((2*z5 + (1 - 2*z5)) * s4sum));
+print("yoshida6 cancellation 2*z5^5+(1-2*z5)^5 (=0?):", radcan(2*z5^5 + (1 - 2*z5)^5));
+
+/* yoshida8 = triple_jump(s6, order 6): outer z7 = zc(7). */
+z7 : zc(7);
+print("yoshida8 total scale (2*z7 + (1-2*z7)) (=1?):", radcan(2*z7 + (1 - 2*z7)));
+print("yoshida8 cancellation 2*z7^7+(1-2*z7)^7 (=0?):", radcan(2*z7^7 + (1 - 2*z7)^7));

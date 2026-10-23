@@ -1,0 +1,99 @@
+/* Discrete process noise: the closed forms the `spacelab-estimation::process_noise` tests use as
+ * oracles, and the proof that Van Loan's block-matrix trick computes them.
+ *
+ * A filter's time update needs Q_d, the covariance the continuous process noise accumulates over a
+ * step. Physics gives the CONTINUOUS spectral density Q_c; the discrete matrix is the integral
+ *
+ *     Q_d = integrate(exp(F s) . Q_c . exp(transpose(F) s), s, 0, dt).
+ *
+ * Van Loan (1978) evaluates it without doing the integral: exponentiate the 2n x 2n block matrix
+ *
+ *     C = [[-F, Q_c], [0, transpose(F)]] * dt,
+ *
+ * then Phi = transpose(C22block) and Q_d = Phi . C12block. Section 1 checks that identity
+ * symbolically on a case with no special structure, so the Rust implementation is verified against
+ * the definition and not against itself.
+ *
+ * Sections 2-4 produce the closed forms for the three cases the tests pin:
+ *   2. double integrator          - white acceleration, the classical SNC block
+ *   3. scalar Gauss-Markov        - the DMC acceleration state on its own
+ *   4. single-axis DMC (r, v, w)  - the full 3x3, whose entries are too long to trust to memory
+ *
+ * The DMC forcing is scaled so the acceleration reaches a steady-state variance of sigma^2: for
+ * wdot = -w/tau + u with u of spectral density q, the stationary variance is q*tau/2, hence
+ * q = 2*sigma^2/tau. Section 3 checks that limit rather than asserting it.
+ *
+ *   maxima --very-quiet -b process_noise.mac
+ */
+
+/* Maxima's default simplifies a 1x1 matrix product to a scalar, so `qd` on a scalar state returns
+ * `matrix([...]) . scalar` -- not a matrix, so `integrate` hands back a noun form and every use of
+ * the result downstream fails somewhere else. Section 3 is exactly that case. */
+scalarmatrixp : false$
+
+assume(dt > 0, tau > 0, q > 0)$
+
+/* Q_d straight from the definition, for a matrix exponential Maxima can do in closed form. */
+qd(F, Qc, dt) := block([s, E],
+  E : matrixexp(F * s),
+  ratsimp(integrate(E . Qc . transpose(E), s, 0, dt)))$
+
+/* The n x n block of M whose top-left corner is (r0, c0). */
+blk(M, r0, c0, n) := genmatrix(lambda([i, j], M[r0 + i - 1, c0 + j - 1]), n, n)$
+
+/* Van Loan's construction, as the Rust code implements it. */
+van_loan(F, Qc, dt) := block([n, C, X, Phi, i, j],
+  n : length(F),
+  C : zeromatrix(2*n, 2*n),
+  for i: 1 thru n do for j: 1 thru n do (
+    C[i, j] : -F[i, j],
+    C[i, j + n] : Qc[i, j],
+    C[i + n, j + n] : F[j, i]),
+  X : ratsimp(matrixexp(C * dt)),
+  Phi : transpose(blk(X, n + 1, n + 1, n)),
+  [ratsimp(Phi), ratsimp(Phi . blk(X, 1, n + 1, n))])$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$
+
+print("=== 1. Van Loan reproduces the definition (generic 3-state, no special structure) ===")$
+/* Position-velocity-acceleration with a damped acceleration: F is neither nilpotent nor diagonal,
+ * so nothing about the identity can hold by accident here. */
+F3 : matrix([0, 1, 0], [0, 0, 1], [0, 0, -1/tau])$
+Qc3 : matrix([0, 0, 0], [0, 0, 0], [0, 0, q])$
+vl : van_loan(F3, Qc3, dt)$
+Phi_def : ratsimp(matrixexp(F3 * dt))$
+Qd_def : qd(F3, Qc3, dt)$
+print("  Phi residual:", ratsimp(zmax(vl[1] - Phi_def)))$
+print("  Q_d residual:", ratsimp(zmax(vl[2] - Qd_def)))$
+
+print("=== 2. Double integrator: white acceleration of density q ===")$
+F2 : matrix([0, 1], [0, 0])$
+Qc2 : matrix([0, 0], [0, q])$
+print("  Phi =", ratsimp(matrixexp(F2 * dt)))$
+print("  Q_d =", qd(F2, Qc2, dt))$
+
+print("=== 3. Scalar Gauss-Markov: wdot = -w/tau + u ===")$
+F1 : matrix([-1/tau])$
+Qc1 : matrix([q])$
+gm : qd(F1, Qc1, dt)$
+print("  Phi =", ratsimp(matrixexp(F1 * dt)))$
+print("  Q_d =", gm)$
+/* Stationary variance: the dt -> infinity limit must be q*tau/2, which is what fixes q = 2 sigma^2 / tau. */
+print("  stationary variance:", limit(gm[1, 1], dt, inf), " (assuming tau > 0)")$
+
+print("=== 4. Single-axis DMC (r, v, w), forced only on w ===")$
+dmc : Qd_def$
+print("  Q_rr =", ratsimp(dmc[1, 1]))$
+print("  Q_rv =", ratsimp(dmc[1, 2]))$
+print("  Q_rw =", ratsimp(dmc[1, 3]))$
+print("  Q_vv =", ratsimp(dmc[2, 2]))$
+print("  Q_vw =", ratsimp(dmc[2, 3]))$
+print("  Q_ww =", ratsimp(dmc[3, 3]))$
+
+print("=== 5. Numeric spot values for the Rust tests (tau = 200, q = 1e-12, dt = 60) ===")$
+numer : true$
+vals : [tau = 200, q = 1e-12, dt = 60]$
+print("  DMC Q_d =", float(subst(vals, dmc)))$
+print("  DMC Phi =", float(subst(vals, Phi_def)))$
+print("  double-integrator Q_d =", float(subst([q = 1e-12, dt = 60], qd(F2, Qc2, dt))))$
+print("  Gauss-Markov Q_d =", float(subst(vals, gm)))$

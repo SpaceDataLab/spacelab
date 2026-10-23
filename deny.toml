@@ -1,0 +1,52 @@
+# The tripwire. Set before there is anything to catch.
+#
+# Strong and network copyleft relicense everything downstream. That is a one-way
+# door: permissive -> AGPL is always available later, AGPL -> permissive is not.
+# See plans/00-strategy.md, "The licence decision".
+
+[graph]
+all-features = true
+
+[licenses]
+# Allow-list only. A licence absent from this list fails the build.
+# MPL-2.0 is file-level copyleft: it attaches per file, not per program, and
+# does not infect the linking crate.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "MPL-2.0",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    # Permissive / public-domain, non-copyleft — safe under the one-way relicense rule above; all
+    # transitive: CC0-1.0 (hexf-parse via wgpu, tiny-keccak via ahash), BlueOak-1.0.0 (minicbor via
+    # anise/dhall), CDLA-Permissive-2.0 (webpki-roots' Mozilla CA-root data via anise/ureq).
+    "CC0-1.0",
+    "BlueOak-1.0.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+# Crates whose licences make them unusable in this workspace, named explicitly
+# so the failure message says why rather than "unlicensed dependency".
+deny = [
+    { name = "nyx-space", reason = "AGPL-3.0-or-later; relicenses the workspace" },
+]
+
+[advisories]
+yanked = "deny"
+# Security vulnerabilities and yanks still fail the build (defaults). But "unmaintained" advisories on
+# deep transitive crates we cannot upgrade (e.g. paste via wgpu, proc-macro-error2 via a proc-macro
+# dep) are the ecosystem's to fix, not ours — only flag unmaintained crates the workspace owns.
+unmaintained = "workspace"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

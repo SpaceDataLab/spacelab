@@ -1,0 +1,36 @@
+[package]
+name = "spacelab-sgp4"
+description = "Typed, batch-shaped SGP4 propagation for many satellites"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["sgp4", "tle", "satellite", "orbit", "propagation"]
+categories = ["aerospace", "aerospace::simulation", "science"]
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+spacelab-frames = { path = "../spacelab-frames", version = "0.1.0" }
+# Fitting an element set onto a reference trajectory is least squares, and the workspace has exactly
+# one least-squares solver. `spacelab-estimation` knows nothing about SGP4, so the edge runs this way
+# and only this way.
+spacelab-estimation = { path = "../spacelab-estimation", version = "0.1.0" }
+sgp4 = "2.4"
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+sgp4 = "2.4"
+spacelab-earth = { path = "../spacelab-earth" }
+
+[[bench]]
+name = "sgp4"
+harness = false

@@ -1,0 +1,9 @@
+/* Battin's cancellation-free third-body acceleration equals the direct difference of two nearly
+   equal inverse-square terms, symbolically. Reduced to 1D, where 1+q is the perfect square
+   (s-r)^2/s^2, so (1+q)^(3/2) and f(q) simplify. The identity must be 0. */
+assume(s > r, r > 0)$
+q: (r^2 - 2*r*s)/s^2$
+f: q*(3 + 3*q + q^2)/(1 + (1+q)^(3/2))$
+lhs: -(mu/s^3)*(1+q)^(-3/2)*(r + f*s)$
+rhs: mu*((s-r)/(s-r)^3 - 1/s^2)$
+print("battin identity: ", radcan(lhs - rhs))$

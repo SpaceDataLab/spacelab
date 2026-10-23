@@ -1,0 +1,57 @@
+[package]
+name = "spacelab-capi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "C ABI for the spacelab space-data computation core, and the C++ header that wraps it"
+# Not on crates.io: this crate has no Rust API to depend on. What a consumer wants from it is
+# `libspacelab_capi.a` and `spacelab.h`, which come from a build of this repository, not from a
+# registry that ships source for `cargo` to link against.
+publish = false
+
+[lib]
+name = "spacelab_capi"
+# `staticlib` is the one consumers should reach for: it links the whole core into their binary with
+# no runtime search path and no version skew. `cdylib` is there for the cases where a shared object
+# is the only option -- a plugin host, a language runtime that dlopens, a licence that wants the
+# boundary. `rlib` is what lets `#[test]` in this crate call the entry points directly.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# NB: intentionally does NOT inherit `[workspace.lints]` -- the workspace forbids `unsafe_code`, and a
+# C ABI is raw pointers by definition. This crate and `spacelab-python` are the two FFI boundaries;
+# the pure Rust core stays unsafe-free.
+
+[dependencies]
+spacelab-astro = { path = "../spacelab-astro", version = "0.1.0" }
+spacelab-astrometry = { path = "../spacelab-astrometry", version = "0.1.0" }
+spacelab-autodiff = { path = "../spacelab-autodiff", version = "0.1.0" }
+spacelab-constellation = { path = "../spacelab-constellation", version = "0.1.0", features = ["std"] }
+spacelab-control = { path = "../spacelab-control", version = "0.1.0", features = ["std"] }
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+spacelab-coverage = { path = "../spacelab-coverage", version = "0.1.0", features = ["std"] }
+spacelab-earth = { path = "../spacelab-earth", version = "0.1.0" }
+spacelab-elements = { path = "../spacelab-elements", version = "0.1.0" }
+spacelab-fa = { path = "../spacelab-fa", version = "0.1.0" }
+spacelab-estimation = { path = "../spacelab-estimation", version = "0.1.0" }
+spacelab-earthvision = { path = "../spacelab-earthvision", version = "0.1.0" }
+spacelab-geomagnetism = { path = "../spacelab-geomagnetism", version = "0.1.0", features = ["std"] }
+spacelab-gnss = { path = "../spacelab-gnss", version = "0.1.0", features = ["std"] }
+spacelab-ionosphere = { path = "../spacelab-ionosphere", version = "0.1.0" }
+spacelab-frames = { path = "../spacelab-frames", version = "0.1.0", features = ["std"] }
+spacelab-propagation = { path = "../spacelab-propagation", version = "0.1.0" }
+spacelab-sensors = { path = "../spacelab-sensors", version = "0.1.0" }
+spacelab-sgp4 = { path = "../spacelab-sgp4", version = "0.1.0" }
+spacelab-signal = { path = "../spacelab-signal", version = "0.1.0" }
+spacelab-vision = { path = "../spacelab-vision", version = "0.1.0" }
+
+[features]
+# Cloud-mask ONNX inference (`sl_cloud_masker_*`, `sl_cloud_mask`) via earthvision -> spacelab-vision
+# -> tract. Off by default so the shipped static library stays free of an inference runtime.
+#
+# The four entry points are exported either way, and refuse with `SL_ERR_UNSUPPORTED` when the
+# feature is off. A C ABI whose symbol table depends on a build flag cannot be checked by
+# `sl_abi_version` and breaks a `dlopen` consumer at load rather than at the call it got wrong.
+onnx = ["spacelab-earthvision/onnx"]

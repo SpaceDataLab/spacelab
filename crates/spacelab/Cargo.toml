@@ -1,0 +1,54 @@
+[package]
+name = "spacelab"
+description = "Space data computation: time, Earth orientation, frames, propagation, geodesy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["astrodynamics", "orbit", "satellite", "space", "propagation"]
+categories = ["aerospace", "aerospace::simulation", "science"]
+exclude.workspace = true
+
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }
+spacelab-sensors = { path = "../spacelab-sensors" }
+spacelab-coverage = { path = "../spacelab-coverage", features = ["std"] }
+spacelab-grid = { path = "../spacelab-grid" }
+# The IGS precise-orbit fit is the workspace's one end-to-end reality check, and it needs the whole
+# chain at once — measured Earth orientation and the CIO frame from this crate, the SP3 product, the
+# force model and its AD variational equations, and the batch estimator. Dev-only: nothing here
+# reaches the shipped dependency graph.
+spacelab-autodiff = { path = "../spacelab-autodiff" }
+# `std` for the CIO interpolator, which is what makes a per-stage frame rotation affordable.
+spacelab-frames = { path = "../spacelab-frames", features = ["std"] }
+spacelab-propagation = { path = "../spacelab-propagation" }
+spacelab-estimation = { path = "../spacelab-estimation" }
+# Osculating elements from a state vector: the initial guess a TLE fit starts from when there is no
+# prior element set, which on a precise-orbit product there never is.
+spacelab-elements = { path = "../spacelab-elements" }
+# Tests only: `orekit_light_time.rs` needs the closed-form two-body propagation, so that the
+# oracle comparison is about light time and not about which integrator either side used.
+spacelab-astro = { path = "../spacelab-astro" }
+spacelab-gnss = { path = "../spacelab-gnss", features = ["std"] }
+# DE440, for the ignored arc that measures what the analytic Sun and Moon cost.
+spacelab-ephemeris = { path = "../spacelab-ephemeris" }
+# The SLR range residual is the second end-to-end reality check: the CRD normal point, the ITRF2020
+# station, the refraction and station-displacement models and the two-way light time, against a
+# published measurement. `std` for the two text parsers.
+spacelab-slr = { path = "../spacelab-slr", features = ["std"] }
+
+[lints]
+workspace = true
+
+[dependencies]
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+spacelab-earth = { path = "../spacelab-earth", version = "0.1.0" }
+spacelab-eop = { path = "../spacelab-eop", version = "0.1.0" }
+spacelab-fa = { path = "../spacelab-fa", version = "0.1.0" }
+spacelab-frames = { path = "../spacelab-frames", version = "0.1.0" }
+spacelab-sgp4 = { path = "../spacelab-sgp4", version = "0.1.0" }

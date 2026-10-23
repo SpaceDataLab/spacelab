@@ -1,0 +1,41 @@
+/* SABA_n symplectic integrators for a near-integrable Hamiltonian H = A + eps*B (A = Kepler drift,
+ * B = perturbation kick) — Laskar & Robutel 2001. The drift/kick coefficients are the Gauss-Legendre
+ * quadrature of order n on [0,1]: the kick weights d_i are the GL weights, and the drift lengths c_i
+ * are the gaps between the GL abscissae (c_1 = x_1, c_i = x_i - x_{i-1}, c_{n+1} = 1 - x_n). SABA_n is
+ * order 2n in the step and order 2 in eps; SABA_1 is leapfrog.
+ *
+ * This derives the coefficients from the Legendre roots (never a table) and checks the two invariants
+ * every splitting must satisfy — the drift lengths and the kick weights each sum to 1 — plus the
+ * SABA_2 closed form c = (1/2 -+ 1/(2 sqrt3), 1/sqrt3), d = (1/2, 1/2).
+ *
+ *   maxima --very-quiet -b saba_coeffs.mac
+ */
+
+fpprec : 36$
+
+/* Gauss-Legendre nodes/weights on [0,1] from the shifted Legendre polynomial Pshift = P_n(2x-1). The
+ * [0,1] weight is 4 / ((1 - xi^2) (Pshift ')^2) with xi = 2x-1 (the 4 undoes the 2x-1 chain rule). */
+gl(n) := block([xs, ws],
+  xs : sort(map(lambda([e], realpart(rhs(e))), bfallroots(legendre_p(n, 2*x - 1) = 0))),
+  ws : map(lambda([xx], 4 / ((1 - (2*xx - 1)^2) * subst(x = xx, diff(legendre_p(n, 2*x - 1), x))^2)), xs),
+  [xs, ws])$
+
+saba(n) := block([g, xs, ws],
+  g : gl(n), xs : g[1], ws : g[2],
+  [append([xs[1]], makelist(xs[i] - xs[i - 1], i, 2, n), [1 - xs[n]]), ws])$
+
+for n : 1 thru 4 do block([s],
+  s : saba(n),
+  print("SABA", n, "max |sum - 1| (~0?):",
+        bfloat(max(abs(apply("+", s[1]) - 1), abs(apply("+", s[2]) - 1)))));
+
+/* SABA_2 closed form. */
+print("SABA2 c1 - (1/2 - 1/(2 sqrt3)) (=0?):", bfloat(saba(2)[1][1] - (1/2 - 1/(2*sqrt(3)))));
+print("SABA2 c2 - 1/sqrt3            (=0?):", bfloat(saba(2)[1][2] - 1/sqrt(3)));
+print("SABA2 d  - (1/2, 1/2)         (=0?):", bfloat(saba(2)[2][1] - 1/2 + saba(2)[2][2] - 1/2));
+
+/* Full-precision literals for SABA_2 and SABA_4 (transcribed from the CAS). */
+print("--- SABA2 c ---");  for z in saba(2)[1] do print(bfloat(z), ",");
+print("--- SABA2 d ---");  for z in saba(2)[2] do print(bfloat(z), ",");
+print("--- SABA4 c ---");  for z in saba(4)[1] do print(bfloat(z), ",");
+print("--- SABA4 d ---");  for z in saba(4)[2] do print(bfloat(z), ",");

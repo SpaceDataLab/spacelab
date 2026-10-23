@@ -1,0 +1,25 @@
+[package]
+name = "spacelab-sensors"
+description = "Coverage constraints: continuous scalar predicates over (satellite, cell, sensor)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["sensor", "coverage", "satellite", "field-of-view", "constraints"]
+categories = ["aerospace", "science"]
+exclude.workspace = true
+
+[dependencies]
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+libm = "0.2"
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }
+spacelab-earth = { path = "../spacelab-earth" }
+
+[lints]
+workspace = true

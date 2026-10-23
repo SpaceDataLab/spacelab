@@ -1,0 +1,62 @@
+/* Where 7527 comes from, and how much of it is rounding.
+
+   `spacelab-gnss::higher_order_iono` carries the Bassiri-Hajj (1993) second-order ionospheric term
+   in the grouping ESA Navipedia publishes,
+
+       I2_phase = -(7527*c)/(2*f^3) * integral(Ne*B*cos(theta) dl),   I2_group = -2*I2_phase,
+
+   and 7527 is a literal. A literal with four digits and no derivation is exactly the kind of thing
+   the census gate exists to find, so: expand Appleton-Hartree, read the 1/f^3 coefficient off it,
+   and evaluate with CODATA 2018 constants. The first-order constant 40.3 falls out of the same
+   expansion one order earlier and is checked here too, because a derivation that cannot reproduce
+   the number everybody knows has not earned the one nobody checks.                                */
+
+/* CODATA 2018 (the SI-2019 exact values where they are exact). */
+qe   : 1.602176634e-19$        /* elementary charge, C -- exact */
+me   : 9.1093837015e-31$       /* electron mass, kg */
+eps0 : 8.8541878128e-12$       /* vacuum permittivity, F/m */
+cc   : 299792458$              /* speed of light, m/s -- exact */
+
+/* ---- Appleton-Hartree, quasi-longitudinal, collisionless --------------------------------------
+   n^2 = 1 - X/(1 -/+ YL), with X = Ne*qe^2/(eps0*me*w^2) and YL = qe*B*cos(theta)/(me*w).
+   The two signs are the two circular modes; the sign rides along and cancels in |I2|.            */
+n_ah : sqrt(1 - X/(1 - YL))$
+ser  : taylor(n_ah, [X, YL], 0, [2, 1])$
+print("n - 1, expanded to first order in X and in X*YL:")$
+print("  coefficient of X      =", ratcoef(ratdisrep(ser), X, 1))$
+print("  coefficient of X*YL   =", ratsimp(ratcoef(ratcoef(ratdisrep(ser), X, 1), YL, 1)
+                                           + ratcoef(coeff(ratdisrep(ser), X, 1), YL, 1)))$
+
+/* Rather than fight the two-variable Taylor bookkeeping, expand in one small parameter. */
+nn : sqrt(1 - (eps*X)/(1 - eps*YL))$
+t2 : taylor(nn, eps, 0, 2)$
+c1 : ratsimp(coeff(ratdisrep(t2), eps, 1))$
+c2 : ratsimp(coeff(ratdisrep(t2), eps, 2))$
+print("first order in eps  (n-1) :", c1, "   <- the -X/2 term")$
+print("second order in eps (n-1) :", c2, "   <- the -X*YL/2 term plus -X^2/8")$
+print("  the X*YL part           :", ratsimp(coeff(expand(c2), YL, 1)))$
+
+/* ---- put the physics back in ------------------------------------------------------------------ */
+/* X = Ne*qe^2/(eps0*me*w^2), YL = qe*B*cos(theta)/(me*w), w = 2*%pi*f. Integrating (n-1) along the
+   path gives the phase path excess in metres.                                                     */
+Xs  : Ne*qe^2/(eps0*me*(2*%pi*f)^2)$
+YLs : qe*Bk/(me*(2*%pi*f))$
+
+first  : ratsimp(-Xs/2)$
+second : ratsimp(-Xs*YLs/2)$
+print("first-order phase term  =", first)$
+print("  as K1*Ne/f^2, K1 =", float(ratsimp(-first*f^2/Ne)), " (published 40.3)")$
+print("second-order phase term =", second)$
+print("  as -K2*Ne*Bk/(2*f^3), K2 =", float(ratsimp(-2*second*f^3/(Ne*Bk))))$
+
+K2 : ratsimp(-2*second*f^3/(Ne*Bk))$
+print("K2 / c =", float(K2/cc), "  <- this is the published 7527")$
+print("  relative error of the published four digits =", float((7527 - K2/cc)/(K2/cc)))$
+print("  shipped SECOND_ORDER_GROUP_CONST = 7527*c =", float(7527*cc),
+      " against the derived", float(K2))$
+
+/* ---- group against phase ---------------------------------------------------------------------- */
+/* n_g = n + f*dn/df. For a term A*f^-3 in (n-1) that gives -2*A*f^-3, hence I2_group = -2*I2_phase. */
+A : 'A$
+nph : 1 + A*f^-3$
+print("n_g - 1 for (n-1) = A/f^3 :", ratsimp(nph + f*diff(nph, f) - 1), " => group = -2 * phase")$

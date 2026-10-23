@@ -1,0 +1,23 @@
+/* Conservative spherical-cap cull, derived.
+
+   The exact footprint half-angle on a sphere of radius R, satellite at r_s = L*R, mask s=sin(a):
+       cos(lam_max) = (s*u + 1 - s^2)/L,  u = sqrt(L^2 - 1 + s^2).
+   (Proven equal to SaVi in footprint3.mac.)
+
+   Claim: lam_max is monotone increasing in L. Then using the smallest Earth radius (R_polar)
+   maximises L, hence lam_max, hence the cap — which is the conservative choice. Verify the sign
+   of d(cos lam_max)/dL: if negative, cos decreases so lam_max increases with L. */
+assume(L>1, s>=0, s<1)$
+u : sqrt(L^2 - 1 + s^2)$
+coslam : (s*u + 1 - s^2)/L$
+dc : diff(coslam, L)$
+dc_s : ratsimp(dc)$
+print("d(cos lam_max)/dL =", dc_s)$
+/* evaluate the sign at a representative point */
+print("  at L=1.05, s=sin(5deg):", float(subst([L=1.05, s=sin(5.0*%pi/180)], dc)))$
+print("  at L=1.5,  s=0:        ", float(subst([L=1.5,  s=0], dc)))$
+print("  negative => cos decreases => lam_max increases with L => use R_polar (max L). QED-ish")$
+
+/* The horizon limit: as a -> 0 (s -> 0), lam_max -> the geometric horizon */
+print("horizon lam_max at s=0:", ratsimp(subst(s=0, acos(coslam))))$
+print("  i.e. cos(lam_horizon) = 1/L, the classic result")$

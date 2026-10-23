@@ -1,0 +1,36 @@
+[package]
+name = "spacelab-constellation"
+description = "Constellation design: generators (Walker, Street-of-Coverage, Flower, 2-D Lattice, kinematically-regular, Draim, two-tier shell/SSA) plus the Mozhaev group classification and the alpha-characteristic coverage figure of merit."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["constellation", "walker", "satellite", "coverage", "astrodynamics"]
+categories = ["aerospace", "aerospace::simulation", "science"]
+exclude.workspace = true
+
+[package.metadata.docs.rs]
+features = ["std"]
+
+[features]
+# `std` enables the design-time coverage analysis (the α-characteristic), which allocates; the
+# generators themselves stay `no_std`.
+default = []
+std = []
+
+[dependencies]
+libm = "0.2"
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+spacelab-elements = { path = "../spacelab-elements", version = "0.1.0" }
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }
+spacelab-coverage = { path = "../spacelab-coverage", features = ["std"] }
+spacelab-sensors = { path = "../spacelab-sensors" }
+
+[lints]
+workspace = true

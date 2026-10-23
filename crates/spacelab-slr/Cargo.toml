@@ -1,0 +1,27 @@
+[package]
+name = "spacelab-slr"
+description = "Satellite laser ranging: CRD normal points, SINEX station coordinates, Mendes-Pavlis refraction, IERS station displacement and the two-way range observation model."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["slr", "laser-ranging", "crd", "sinex", "geodesy"]
+categories = ["aerospace", "science::geo", "parser-implementations"]
+exclude.workspace = true
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }
+
+[features]
+default = ["std"]
+std = []
+
+[lints]
+workspace = true

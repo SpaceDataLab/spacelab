@@ -1,0 +1,135 @@
+name: wheels
+
+# The two wheels the bindings ship -- `abi3` for CPython 3.11 and later, `abi3t` for the
+# free-threaded 3.15t -- on every platform PyPI users run, plus the sdist, each wheel installed and
+# tested on its own operating system before anything is uploaded.
+#
+# On request (`gh workflow run wheels.yml`) it builds and tests only. A `v*` tag also uploads to PyPI
+# by trusted publishing, which needs the `pypi` environment on this repository and a matching
+# trusted publisher on pypi.org; no token is stored anywhere. macOS and Windows runners are free only
+# on a public repository, so this is meant to run on the public one.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64, manylinux: "2_28" }
+          - { os: ubuntu-24.04-arm, target: aarch64, manylinux: "2_28" }
+          - { os: macos-15, target: aarch64, manylinux: "auto" }
+          - { os: macos-15-intel, target: x86_64, manylinux: "auto" }
+          - { os: windows-latest, target: x64, manylinux: "auto" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: |
+            3.11
+            3.15t
+      - name: abi3 wheel, CPython 3.11+
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: "1.15.0"
+          working-directory: crates/spacelab-python
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release -i python3.11 -o dist
+      - name: abi3t wheel, free-threaded CPython 3.15t
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: "1.15.0"
+          working-directory: crates/spacelab-python
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release -i python3.15t -o dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: crates/spacelab-python/dist/*.whl
+          if-no-files-found: error
+
+  # Each wheel on the interpreters it claims, on the machine it was built for: the abi3 wheel on its
+  # floor, 3.11; the abi3t wheel on both the GIL and the free-threaded 3.15.
+  test:
+    needs: wheels
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64 }
+          - { os: ubuntu-24.04-arm, target: aarch64 }
+          - { os: macos-15, target: aarch64 }
+          - { os: macos-15-intel, target: x86_64 }
+          - { os: windows-latest, target: x64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: |
+            3.11
+            3.15
+            3.15t
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: dist
+      - name: smoke and bindings tests on 3.11, 3.15 and 3.15t
+        run: |
+          # The tag in the file name tells the two wheels apart: `cp311-abi3-` and `abi3.abi3t-`.
+          for pair in 3.11:cp311-abi3- 3.15:abi3.abi3t- 3.15t:abi3.abi3t-; do
+            version="${pair%%:*}"
+            venv="$RUNNER_TEMP/venv-$version"
+            if [ "$RUNNER_OS" = Windows ]; then
+              py "-$version" -m venv "$venv"; bin="$venv/Scripts"
+            else
+              "python$version" -m venv "$venv"; bin="$venv/bin"
+            fi
+            "$bin/python" -m pip install dist/*"${pair##*:}"*.whl
+            "$bin/python" crates/spacelab-python/tests/smoke.py
+            "$bin/python" crates/spacelab-python/tests/bindings.py
+          done
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: "1.15.0"
+          working-directory: crates/spacelab-python
+          command: sdist
+          args: -o dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: crates/spacelab-python/dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

@@ -1,0 +1,41 @@
+/* Coverage predicate g and the footprint radius, derived from geometry.
+   Sphere radius R, satellite radius r = L*R, Earth-central angle lam.
+   Ground point G at the pole so its zenith is the z axis. */
+assume(R > 0, L > 1, lam > 0, lam < %pi/2, a > 0, a < %pi/2)$
+
+G  : [0, 0, R]$
+S  : L*R*[sin(lam), 0, cos(lam)]$
+d  : S - G$                                   /* line of sight, ground -> satellite */
+zen: [0, 0, 1]$                               /* geodetic normal at G (sphere) */
+nrm: sqrt(trigsimp(d.d))$
+
+/* --- elevation of the satellite seen from G --- */
+sin_eps : trigsimp(d.zen / nrm)$
+print("sin(eps) =", sin_eps)$
+
+/* g_elev = 0  <=>  eps = a.  Solve for the footprint edge. */
+eq  : ratsimp(sin_eps^2 - sin(a)^2)$
+sol : solve(eq, cos(lam))$
+print("cos(lam) roots:", sol)$
+
+/* Take the physical root and express rho = sin(lam) on the unit sphere. */
+cl  : rhs(sol[1])$
+rho1: trigsimp(sqrt(1 - cl^2))$
+print("rho (mask elevation, root 1) =", ratsimp(rho1))$
+cl2 : rhs(sol[2])$
+rho2: trigsimp(sqrt(1 - cl2^2))$
+print("rho (mask elevation, root 2) =", ratsimp(rho2))$
+
+/* SaVi's published closed form, for comparison */
+savi_mask : cos(a)*(sqrt(1 - cos(a)^2/L^2) - sin(a)/L)$
+print("SaVi mask form =", savi_mask)$
+
+/* --- satellite cone of half-angle a, measured from nadir --- */
+Sh  : [sin(lam), 0, cos(lam)]$                /* unit vector O->S */
+cos_th : trigsimp((d . Sh) / nrm)$            /* angle at S between nadir and G */
+print("cos(theta) =", ratsimp(cos_th))$
+eqc : ratsimp(cos_th^2 - cos(a)^2)$
+solc: solve(eqc, cos(lam))$
+print("cone roots:", solc)$
+savi_cone : sin(a)*(L*cos(a) - sqrt(1 - L^2*sin(a)^2))$
+print("SaVi cone form =", savi_cone)$

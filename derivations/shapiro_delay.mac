@@ -1,0 +1,77 @@
+/* The Shapiro gravitational delay of one signal leg, from the integral to the closed form.
+
+   Light in the field of a central mass takes longer than the coordinate distance divided by c.
+   To first post-Newtonian order the extra *coordinate path*, in metres, is
+
+       D = (2*GM/c^2) * integral over the straight leg of dl / r(l),
+
+   with r(l) the geocentric distance of the point l metres along the leg (IERS Conventions
+   (2010) section 11, and Shapiro 1964). Everything below establishes that this integral is the
+   logarithm the code evaluates, and measures the agreement of the two on real geometry.
+
+   Notation: r1, r2 are the geocentric distances of the two endpoints and p the straight-line
+   distance between them. b is the projection of the first endpoint's position on the leg
+   direction, so that r(l)^2 = l^2 + 2*b*l + r1^2. */
+
+fpprec : 40$
+assume(r1 > 0, r2 > 0, p > 0, r1 + r2 - p > 0)$
+
+/* 1. The antiderivative, checked by differentiation rather than trusted from a table. */
+F(l) := log(l + b + sqrt(l^2 + 2*b*l + r1^2))$
+check : ratsimp(radcan(diff(F(l), l) - 1/sqrt(l^2 + 2*b*l + r1^2)))$
+print("d/dl F(l) - 1/r(l) =", check, "  (0 confirms the antiderivative)")$
+
+/* 2. Evaluate between the endpoints. At l = p the radical is r2 by construction, and b follows
+      from r2^2 = p^2 + 2*b*p + r1^2. */
+bval : (r2^2 - r1^2 - p^2)/(2*p)$
+integral : log((p + b + r2)/(b + r1))$
+reduced : radcan(subst(b = bval, (p + b + r2)/(b + r1)))$
+print("argument of the log after substituting b =", reduced)$
+print("difference from the IERS form =",
+      ratsimp(reduced - (r1 + r2 + p)/(r1 + r2 - p)),
+      "  (0 confirms the closed form)")$
+print("so  D = (2*GM/c^2) * log((r1 + r2 + p)/(r1 + r2 - p))")$
+
+/* 3. Numbers. c is exact by the SI definition of the metre; GM is the IERS 2010 value. */
+c : 299792458$
+gm : 3.986004418b14$
+shapiro(a, bb, path) := (2*gm/c^2) * log((a + bb + path)/(a + bb - path))$
+
+/* Quadrature on the original integral, on the three-dimensional geometry, as an independent
+   route to the same number: P1 the station, P2 the satellite, the leg parametrised by t. */
+quad(P1, P2) := block([d, len, integrand],
+  d : P2 - P1,
+  len : sqrt(d . d),
+  integrand : lambda([t], len / sqrt((P1 + t*d) . (P1 + t*d))),
+  (2*float(gm)/c^2) * first(quad_qags(integrand(t), t, 0, 1)))$
+
+re : 6378137.0$
+station : [re, 0, 0]$
+
+/* A 500 km satellite at the station's zenith, and one at 10 degrees elevation. */
+zenith : [re + 500000.0, 0, 0]$
+el10 : block([h : 500000.0, e : 10.0*%pi/180],
+  /* slant range from the law of sines/cosines for a station-centred elevation e */
+  block([s : -re*sin(e) + sqrt((re*sin(e))^2 + 2*re*h + h^2)],
+    [re + s*sin(e), s*cos(e), 0]))$
+
+report(name, P) := block([r1n : sqrt(station . station), r2n : sqrt(P . P), pn, closed, num],
+  pn : sqrt((P - station) . (P - station)),
+  closed : shapiro(bfloat(r1n), bfloat(r2n), bfloat(pn)),
+  num : quad(station, P),
+  print(name, ": r2 =", float(r2n), " path =", float(pn),
+        " one-way =", float(closed*1000), "mm",
+        " two-way =", float(2*closed*1000), "mm",
+        " quadrature - closed form =", float(num - closed), "m"))$
+
+report("LEO 500 km, zenith", zenith)$
+report("LEO 500 km, 10 deg elevation", el10)$
+report("LAGEOS-like 12270 km, zenith", [re + 12270000.0, 0, 0])$
+report("GPS 20200 km, zenith", [re + 20200000.0, 0, 0])$
+
+/* 4. The reference values the Rust unit test is pinned to, at 32 digits. */
+fpprintprec : 25$
+print("station-to-500km-zenith, metres =",
+      shapiro(bfloat(re), bfloat(re + 500000.0), bfloat(500000.0)))$
+print("the test geometry (r1, r2, p) = (7000000, 7500000, 900000), metres =",
+      shapiro(7000000b0, 7500000b0, 900000b0))$

@@ -1,0 +1,29 @@
+[package]
+name = "spacelab-grid"
+description = "H3 geodesic grid: tessellate a region into equal-area cells and place each centre in ITRF."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["h3", "geodesic-grid", "tessellation", "coverage", "geospatial"]
+categories = ["science::geo", "aerospace"]
+exclude.workspace = true
+
+[dependencies]
+h3o = "0.11"
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+spacelab-earth = { path = "../spacelab-earth", version = "0.1.0" }
+spacelab-frames = { path = "../spacelab-frames", version = "0.1.0" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }
+spacelab-sensors = { path = "../spacelab-sensors" }
+spacelab-coverage = { path = "../spacelab-coverage", features = ["std"] }
+spacelab-propagation = { path = "../spacelab-propagation" }

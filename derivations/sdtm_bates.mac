@@ -1,0 +1,30 @@
+/* The Bates temperature profile and diffusive equilibrium above a fixed lower boundary -- the
+   closed forms our own thermosphere model (SDTM-1, plans/16 Ф15) evaluates.
+
+   T(x) = Tinf - (Tinf - T0) exp(-s x), x the geopotential height above the 120 km boundary.
+   The hydrostatic/diffusive-equilibrium integral I1(x) = int_0^x du / T(u) has the closed form
+   (s x + ln(T(x)/T0)) / (s Tinf); each species then has
+     ln n_i(x) = ln n_i(0) - (m_i g0 / k) I1(x) - (1 + alpha_i) ln(T(x)/T0),
+   which is the statement d ln n_i/dx = -m_i g0/(k T) - (1 + alpha_i) d ln T/dx.
+   Every identity below reduces to 0 symbolically; the last two lines are the same integral once
+   in closed form and once by quadrature, and verify.sh requires them to agree. Symbolic
+   integrate() of 1/T is what hangs Maxima on this integrand, so the proof is by differentiation. */
+
+T(x) := Tinf - (Tinf - T0)*exp(-s*x)$
+I1 : (s*x + log(T(x)/T0))/(s*Tinf)$
+
+print("d/dx I1 - 1/T:", ratsimp(diff(I1, x) - 1/T(x)))$
+print("I1 at the boundary:", ratsimp(subst(x = 0, I1)))$
+
+lnn(x) := -mi*g0/kB * I1 - (1 + ai)*log(T(x)/T0)$
+print("diffusive-equilibrium residual:", ratsimp(diff(lnn(x), x) + mi*g0/(kB*T(x)) + (1 + ai)*diff(log(T(x)), x)))$
+
+/* The altitude derivative of a species density, as the model ships it, against the derivative of
+   the closed form: d n_i/dx = n_i * (-m_i g0/(k T) - (1 + alpha_i) T'/T). */
+ni(x) := n0i * exp(lnn(x))$
+shipped : ni(x) * (-mi*g0/(kB*T(x)) - (1 + ai)*diff(T(x), x)/T(x))$
+print("density gradient residual:", ratsimp(diff(ni(x), x) - shipped))$
+
+/* Tinf = 1000 K, T0 = 380 K, s = 0.02 /km, x = 280 km: the closed form and the quadrature. */
+print("numeric I1 closed form:", float(subst([Tinf = 1000, T0 = 380, s = 0.02, x = 280], I1)))$
+print("numeric I1 quadrature:", quad_qags(1/(1000 - 620*exp(-0.02*u)), u, 0, 280)[1])$

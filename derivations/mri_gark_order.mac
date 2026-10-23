@@ -1,0 +1,30 @@
+/* MRI-GARK-ERK33a (Sandu 2019, arXiv:1808.02759; SUNDIALS ARKODE_MRI_GARK_ERK33a) — the order-3
+ * multirate-infinitesimal coupling coefficients, verified against Sandu's order conditions. The slow
+ * base method is a 3rd-order ERK; the coupling Gamma^0, Gamma^1 must satisfy internal consistency
+ * (Gamma^0 . 1 = Dc, Gamma^k . 1 = 0 for k>=1) and the single order-3 coupling condition
+ * (Dc)^T . Amath . c = 1/6, with Amath = A^S + sum_k Gamma^k/((k+1)(k+2)).  All coefficients are
+ * exact rationals.
+ *
+ *   maxima --very-quiet -b mri_gark_order.mac
+ */
+cS : [0, 1/3, 2/3]$
+Dc : [1/3, 1/3, 1/3]$
+AS  : matrix([0,0,0],[1/3,0,0],[0,2/3,0])$          /* slow base ERK, order 3 */
+bS  : [1/4, 0, 3/4]$
+G0  : matrix([1/3,0,0],[-1/3,2/3,0],[0,-2/3,1])$    /* Gamma^0 */
+G1  : matrix([0,0,0],[0,0,0],[1/2,0,-1/2])$         /* Gamma^1 */
+
+rowsum(M) := makelist(sum(M[i,j], j, 1, 3), i, 1, 3)$
+print("internal consistency  Gamma^0 . 1 - Dc (=0?):", rowsum(G0) - Dc);
+print("internal consistency  Gamma^1 . 1     (=0?):", rowsum(G1));
+
+/* base method order 3 */
+print("base b.1 - 1     (=0?):", sum(bS[i], i, 1, 3) - 1);
+print("base b.c - 1/2   (=0?):", sum(bS[i]*cS[i], i, 1, 3) - 1/2);
+print("base b.c2 - 1/3  (=0?):", sum(bS[i]*cS[i]^2, i, 1, 3) - 1/3);
+print("base b.A.c - 1/6 (=0?):", sum(bS[i]*sum(AS[i,j]*cS[j],j,1,3), i, 1, 3) - 1/6);
+
+/* order-3 coupling condition */
+Amath : AS + (1/2)*G0 + (1/6)*G1$
+Ac : makelist(sum(Amath[i,j]*cS[j], j, 1, 3), i, 1, 3)$
+print("coupling (Dc)^T Amath c - 1/6 (=0?):", sum(Dc[i]*Ac[i], i, 1, 3) - 1/6);

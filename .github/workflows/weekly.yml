@@ -1,0 +1,134 @@
+# The tests that need data this repository does not vendor.
+#
+# Eleven tests carry `#[ignore]`, and until this file existed nothing ran ten of them: they are
+# gated on downloads that `ci.yml` deliberately does not make, so the gate never opened. That is a
+# worse failure than a red build, because it is silent -- a fetch script whose upstream URL moved,
+# a product whose format changed, or a validation number that drifted would all sit undetected for
+# as long as nobody ran them by hand.
+#
+# Weekly rather than nightly, and split into independent jobs rather than one. Weekly because the
+# products these read are published in arrears and none of them moves daily; independent because a
+# single dead upstream must not hide the other four. Each job fails loudly on a download that does
+# not arrive -- a rotted URL is exactly the finding this file exists to surface, not a condition to
+# skip past.
+#
+# `crates/spacelab-gnss/src/lambda.rs`'s ignored test is deliberately NOT here. It is a timing
+# measurement on a shared runner, which its own doc comment says is a measurement and not a check;
+# putting it in CI would turn runner contention into a red build.
+name: weekly
+
+on:
+  # On request only: `gh workflow run weekly.yml --ref <branch>`, for the reason `ci.yml` gives at
+  # its own trigger list. That brings back the silence the first paragraph describes -- these run
+  # when somebody runs them -- so "weekly" is now the cadence to run it by hand, not a schedule.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # ── Earth orientation ────────────────────────────────────────────────────────────────────────
+  # `finals2000A` is rewritten daily as the IERS observes and re-predicts, so the parser is tested
+  # against a *committed excerpt* every push and against the whole published series only here. The
+  # series is the one file in this list that genuinely rots: a column that changes width, or a new
+  # prediction row past the end of the table, would break the parse with no commit in between.
+  eop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@v2
+      - run: tools/fetch-eop.sh
+      - run: cargo test -p spacelab-eop --test finals_parse -- --ignored --nocapture
+      - run: cargo test -p spacelab --test earth_orientation -- --ignored --nocapture
+
+  # ── Precise orbits and the planetary ephemeris ───────────────────────────────────────────────
+  # The IGS final combination is the truth an orbit fit is measured against, and the DE kernels are
+  # what make the third-body term real rather than a two-body approximation. Each is tens of
+  # megabytes and none is vendored. Two kernels rather than one because DE442's only job here is to
+  # keep "DE440 stays" a measurement (docs/verification.md 2.5) instead of an assumption.
+  orbit-fit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@v2
+      - run: tools/fetch-ephemeris.sh
+      - run: tools/fetch-validation-data.sh
+      # Not `#[ignore]`d -- it skips cleanly without the kernels, which is the same silent gate this
+      # file exists to close, so it is named here where the kernels are present.
+      - run: cargo test -p spacelab-ephemeris --test de442_delta -- --nocapture
+      - run: cargo test --release -p spacelab --test igs_orbit_fit -- --ignored --nocapture
+
+  # ── Measured thermospheric density ───────────────────────────────────────────────────────────
+  # Six satellite-months spread across solar cycles 24 and 25, ~360 MB, because the question the
+  # test asks is whether the models' error is flat in solar activity -- and one month cannot say.
+  density:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@v2
+      - run: tools/fetch-density-data.sh
+      - run: cargo test --release -p spacelab-propagation --test measured_density -- --ignored --nocapture
+
+  # ── Measured crosswinds, and HWM14 as the oracle ─────────────────────────────────────────────
+  # HWM14 is Fortran and is fetched rather than vendored because its licence is CC BY-NC-ND: the
+  # NoDerivatives clause is why it is an oracle compiled at run time and never a port. `gfortran`
+  # is therefore a build dependency of this job and of nothing else in the repository.
+  wind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y gfortran
+      - run: tools/fetch-wind-data.sh
+      - run: tools/fetch-hwm14.sh
+      - run: cargo test --release -p spacelab-propagation --test measured_wind -- --ignored --nocapture
+
+  # ── Broadcast navigation ─────────────────────────────────────────────────────────────────────
+  # The RINEX readers are tested against committed excerpts on every push. Those excerpts are one
+  # record of every shape the format produces, which is the right unit test and is not the question
+  # a parser has to survive: a quarter of a million lines of records interleaved in whatever order
+  # the satellites transmitted them, where a reader one line out at any single transition reads
+  # every record after it from the wrong columns. That needs whole products, and they are 12 MB
+  # each. This is also the one job here whose *input keeps changing on its own* -- the
+  # constellations add message types (NavIC L1, GLONASS CDMA) and the format adds revisions, and a
+  # shape nobody has written a fixture for shows up in next week's file first.
+  broadcast-nav:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@v2
+      - run: tools/fetch-gnss-nav.sh
+      - run: cargo test -p spacelab-gnss --test rinex4_nav -- --ignored --nocapture
+
+  # ── The two long integrations ────────────────────────────────────────────────────────────────
+  # Not data-gated but time-gated: a day of degree-70 field with a per-step frame chain, and seven
+  # days of degree-40 lunar field. Both are `--release` because in debug they are hours rather than
+  # minutes, which is the whole reason they carry `#[ignore]` and not a shorter span.
+  long-integrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@v2
+      - run: tools/fetch-ephemeris.sh
+      - run: tools/fetch-lunar-kernels.sh
+      - run: cargo test --release -p spacelab --test neptune_sentinel1b -- --ignored --nocapture
+      - run: cargo test --release -p spacelab-ephemeris --test neptune_lro -- --ignored --nocapture

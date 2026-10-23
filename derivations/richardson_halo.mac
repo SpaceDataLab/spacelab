@@ -1,0 +1,212 @@
+/* Richardson (1980) third-order halo construction — independent verification in Maxima.
+ *
+ * This is the authoritative recompute: it shares nothing with the sympy script. Maxima
+ *   (1) derives lambda^2 and k from the linearised CR3BP characteristic / harmonic balance,
+ *   (2) builds the nonlinear forcing from Legendre polynomials (Bonnet recurrence + gradient),
+ *   (3) evaluates every Richardson coefficient numerically for Earth-Moon L1 and L2, and
+ *   (4) tests the coefficient set by substituting the series into the exact EOM in the
+ *       Lindstedt-Poincare bookkeeping the construction assumes -- amplitudes O(eps), the
+ *       detuning lam^2 - c2 = O(eps^2) -- and reporting, per equation and per harmonic, the
+ *       orders eps^1 and eps^2, the non-resonant part of order eps^3, and the solvability
+ *       condition Px = k Py that the resonant pair must satisfy because the linear operator at
+ *       frequency lam is singular. Nothing is claimed for the resonant pair termwise: the
+ *       operator's kernel is the first-order solution itself, so only the projection vanishes.
+ *
+ * Run:  timeout 300 maxima --very-quiet -b derivations/richardson_halo.mac
+ */
+
+fpprintprec : 14$
+ratprint : false$
+
+/* ------------------------------------------------------------------ *
+ * 1. Legendre polynomials by the Bonnet recurrence (not transcribed)  *
+ * ------------------------------------------------------------------ */
+legP[0] : 1$
+legP[1] : uu$
+legP[n] := ratsimp(((2*n-1)*uu*legP[n-1] - (n-1)*legP[n-2])/n)$
+print("P3(u) =", legP[3], "   P4(u) =", legP[4])$
+
+/* ------------------------------------------------------------------ *
+ * 2. Nonlinear forcing  Fq = d/dq [ c3 r^3 P3(x/r) + c4 r^4 P4(x/r) ] *
+ * ------------------------------------------------------------------ */
+Upot : c3*rr^3*subst(uu = x/rr, legP[3]) + c4*rr^4*subst(uu = x/rr, legP[4])$
+Upot : radcan(subst(rr = sqrt(x^2 + y^2 + z^2), Upot))$
+Fx : ratsimp(diff(Upot, x))$
+Fy : ratsimp(diff(Upot, y))$
+Fz : ratsimp(diff(Upot, z))$
+print("Fx =", Fx)$
+print("Fy =", Fy)$
+print("Fz =", Fz)$
+
+/* ------------------------------------------------------------------ *
+ * 3. lambda from the characteristic; k from first-order balance       *
+ * ------------------------------------------------------------------ */
+/* in-plane characteristic  s^4 + (2-c2) s^2 - (1+2c2)(c2-1) = 0, s^2 = -L */
+quadL : LL^2 - (2 - c2)*LL - (1 + 2*c2)*(c2 - 1)$
+rootsL : solve(quadL = 0, LL)$
+print("lambda^2 roots:", rootsL)$
+
+/* k by harmonic balance of the linear x-equation (d/dt = lam d/dtheta) */
+x1 : -Ax*cos(T)$  y1 : kk*Ax*sin(T)$
+Rx1 : lam^2*diff(x1, T, 2) - 2*lam*diff(y1, T) - (1 + 2*c2)*x1$
+kbal : coeff(trigreduce(Rx1), cos(T))$
+ksol : solve(kbal = 0, kk)$
+print("k from balance:", ksol)$
+
+/* ------------------------------------------------------------------ *
+ * 4. Numeric coefficient builder for a collinear point                *
+ * ------------------------------------------------------------------ */
+c_n(mu, g, li, n) := block([sgn : (-1)^n],
+  if li = 1 then (mu + sgn*(1 - mu)*g^(n+1)/(1 - g)^(n+1))/g^3
+  else            (sgn*mu + sgn*(1 - mu)*g^(n+1)/(1 + g)^(n+1))/g^3)$
+
+build(mu, li) := block(
+  [g, c2, c3, c4, lam, k, d1, d2, a21, a22, a23, a24, b21, b22, d21,
+   a31, a32, b31, b32, d31, d32, a1, a2, den, s1, s2, l1, l2, quint],
+  quint : if li = 1
+    then g^5 - (3 - mu)*g^4 + (3 - 2*mu)*g^3 - mu*g^2 + 2*mu*g - mu
+    else g^5 + (3 - mu)*g^4 + (3 - 2*mu)*g^3 - mu*g^2 - 2*mu*g - mu,
+  g : find_root(quint, g, 0.05, 0.30),
+  c2 : c_n(mu, g, li, 2),  c3 : c_n(mu, g, li, 3),  c4 : c_n(mu, g, li, 4),
+  lam : sqrt((2 - c2 + sqrt(9*c2^2 - 8*c2))/2),
+  k : (lam^2 + 1 + 2*c2)/(2*lam),
+  d1 : 3*lam^2/k*(k*(6*lam^2 - 1) - 2*lam),
+  d2 : 8*lam^2/k*(k*(11*lam^2 - 1) - 2*lam),
+  a21 : 3*c3*(k^2 - 2)/(4*(1 + 2*c2)),
+  a22 : 3*c3/(4*(1 + 2*c2)),
+  a23 : -3*c3*lam/(4*k*d1)*(3*k^3*lam - 6*k*(k - lam) + 4),
+  a24 : -3*c3*lam/(4*k*d1)*(2 + 3*k*lam),
+  b21 : -3*c3*lam/(2*d1)*(3*k*lam - 4),
+  b22 : 3*c3*lam/d1,
+  d21 : -c3/(2*lam^2),
+  a31 : -9*lam/(4*d2)*(4*c3*(k*a23 - b21) + k*c4*(4 + k^2))
+        + (9*lam^2 + 1 - c2)/(2*d2)*(3*c3*(2*a23 - k*b21) + c4*(2 + 3*k^2)),
+  a32 : -9*lam/(4*d2)*(4*c3*(k*a24 - b22) + k*c4)
+        - 3*(9*lam^2 + 1 - c2)/(2*d2)*(c3*(k*b22 + d21 - 2*a24) - c4),
+  b31 : 3/(8*d2)*8*lam*(3*c3*(k*b21 - 2*a23) - c4*(2 + 3*k^2))
+        + 3/(8*d2)*(9*lam^2 + 1 + 2*c2)*(4*c3*(k*a23 - b21) + k*c4*(4 + k^2)),
+  b32 : 9*lam/d2*(c3*(k*b22 + d21 - 2*a24) - c4)
+        + 3*(9*lam^2 + 1 + 2*c2)/(8*d2)*(4*c3*(k*a24 - b22) + k*c4),
+  d31 : 3/(64*lam^2)*(4*c3*a24 + c4),
+  d32 : 3/(64*lam^2)*(4*c3*(a23 - d21) + c4*(4 + k^2)),
+  a1 : -3/2*c3*(2*a21 + a23 + 5*d21) - 3/8*c4*(12 - k^2),
+  a2 : 3/2*c3*(a24 - 2*a22) + 9/8*c4,
+  den : 2*lam*(lam*(1 + k^2) - 2*k),
+  s1 : (3/2*c3*(2*a21*(k^2 - 2) - a23*(k^2 + 2) - 2*k*b21) - 3/8*c4*(3*k^4 - 8*k^2 + 8))/den,
+  s2 : (3/2*c3*(2*a22*(k^2 - 2) + a24*(k^2 + 2) + 2*k*b22 + 5*d21) + 3/8*c4*(12 - k^2))/den,
+  l1 : a1 + 2*lam^2*s1,
+  l2 : a2 + 2*lam^2*s2,
+  [g, c2, c3, c4, lam, k, a21, a22, a23, a24, b21, b22, d21,
+   a31, a32, b31, b32, d31, d32, s1, s2, l1, l2])$
+
+names : ["gamma","c2","c3","c4","lambda","k","a21","a22","a23","a24","b21","b22","d21",
+         "a31","a32","b31","b32","d31","d32","s1","s2","l1","l2"]$
+
+mu_em : 0.012150585$
+for li : 1 thru 2 do block([v : build(mu_em, li)],
+  print("==== Earth-Moon L", li, " (maxima, independent of sympy) ===="),
+  for i : 1 thru length(names) do
+    print("  ", names[i], "=", float(v[i])))$
+
+/* ------------------------------------------------------------------ *
+ * 5. Substitute the series back into the exact EOM, order by order    *
+ * ------------------------------------------------------------------ */
+/* The identity is stated in the Lindstedt-Poincare bookkeeping the construction is built in:
+   the amplitudes are O(eps) and the frequency detuning Delta = lam^2 - c2 is O(eps^2) -- which is
+   exactly what the amplitude constraint l1 Ax^2 + l2 Az^2 + Delta = 0 asserts. A third-order
+   series must then annihilate orders eps^1, eps^2 and eps^3 of all three equations, and what is
+   left is the eps^4 truncation.
+
+   Three things this checks that the earlier version of it did not:
+
+   (a) The forcing is evaluated. Fx, Fy and Fz are built above from the *symbols* c3 and c4, and
+       `subst` replaces only what it is handed -- a block-local binding of the same name is never
+       substituted into a stored expression, so shadowing them left every tested coefficient
+       symbolic in c3 and the numeric comparison unreachable. Hence c3v/c4v and Fxn/Fyn/Fzn.
+   (b) `coeff` is applied to *expanded* trigreduce output. Unexpanded, cos(h*T) is not a top-level
+       factor and coeff returns 0 for harmonics that are present.
+   (c) The three equations are kept apart. Adding the harmonic coefficients of Rx and Rz says
+       nothing about either.
+
+   At order eps^3 the in-plane pair does not vanish termwise and is not supposed to: the linear
+   operator at frequency lam is singular -- that is what defines lam -- so its resonant forcing
+   need only lie in the operator's range. The operator is symmetric, its kernel is the first-order
+   solution direction (-1, k), and the condition is therefore Px = k Py on the cos(T) coefficient
+   of the x-equation and the sin(T) coefficient of the y-equation. That single scalar identity is
+   what fixes s1, s2, l1 and l2, and it is the third-order statement worth checking. */
+resid_check(mu, li) := block(
+  [v, c2, c3v, c4v, lam, k, om, X, Y, Z, dn, aX, aZ, Rx, Ry, Rz, Fxn, Fyn, Fzn, dl, axc,
+   ord, res, hx3, hy3, Px, Py, harm, mask],
+  v : build(mu, li),
+  c2 : v[2],  c3v : v[3],  c4v : v[4],  lam : v[5],  k : v[6],
+  dl : lam^2 - c2,
+  Fxn : subst([c3 = c3v, c4 = c4v], Fx),
+  Fyn : subst([c3 = c3v, c4 = c4v], Fy),
+  Fzn : subst([c3 = c3v, c4 = c4v], Fz),
+  /* northern class */
+  dn : 1,
+  aX : ee*Ax,  aZ : ee*Az,
+  om : lam*(1 + v[20]*aX^2 + v[21]*aZ^2),
+  X : v[7]*aX^2 + v[8]*aZ^2 - aX*cos(T) + (v[9]*aX^2 - v[10]*aZ^2)*cos(2*T)
+      + (v[14]*aX^3 - v[15]*aX*aZ^2)*cos(3*T),
+  Y : k*aX*sin(T) + (v[11]*aX^2 - v[12]*aZ^2)*sin(2*T)
+      + (v[16]*aX^3 - v[17]*aX*aZ^2)*sin(3*T),
+  Z : dn*(aZ*cos(T) + v[13]*aX*aZ*(cos(2*T) - 3)
+      + (v[19]*aZ*aX^2 - v[18]*aZ^3)*cos(3*T)),
+  Rx : om^2*diff(X, T, 2) - 2*om*diff(Y, T) - (1 + 2*c2)*X - subst([x=X, y=Y, z=Z], Fxn),
+  Ry : om^2*diff(Y, T, 2) + 2*om*diff(X, T) + (c2 - 1)*Y - subst([x=X, y=Y, z=Z], Fyn),
+  /* c2 = lam^2 - Delta, and Delta carries the eps^2 the constraint gives it */
+  Rz : om^2*diff(Z, T, 2) + (lam^2 - ee^2*dl)*Z - subst([x=X, y=Y, z=Z], Fzn),
+  /* Ax from the constraint at Az = 1; the family has no free amplitude */
+  axc : sqrt(-(v[23] + dl)/v[22]),
+
+  /* the harmonic decomposition of one residual at one order, on the constraint surface */
+  harm(R, p) := block([rr],
+    rr : expand(trigreduce(expand(subst([Ax = axc, Az = 1], ratcoef(expand(R), ee, p))))),
+    [float(subst(append(makelist(cos(i*T) = 0, i, 1, 6), makelist(sin(i*T) = 0, i, 1, 6)), rr)),
+     float(coeff(rr, cos(T))),   float(coeff(rr, sin(T))),
+     float(coeff(rr, cos(2*T))), float(coeff(rr, sin(2*T))),
+     float(coeff(rr, cos(3*T))), float(coeff(rr, sin(3*T)))]),
+
+  /* orders 1 and 2: every harmonic of every equation must vanish */
+  ord : lmax(map(abs, flatten(makelist(makelist(harm(R, p), R, [Rx, Ry, Rz]), p, 1, 2)))),
+  print("  L", li, ": max |residual harmonic| at orders eps^1 and eps^2 =", ord),
+
+  /* order 3: everything but the resonant cos(T) in x and sin(T) in y must vanish.
+     Masked by index, not by `delete` -- `delete` removes by value, and would silently drop a
+     non-resonant harmonic that happened to equal the resonant one. */
+  mask(L, p) := makelist(if i = p then 0 else L[i], i, 1, length(L)),
+  hx3 : harm(Rx, 3),
+  hy3 : harm(Ry, 3),
+  res : append(mask(hx3, 2), mask(hy3, 3), harm(Rz, 3)),
+  print("  L", li, ": max |non-resonant harmonic| at order eps^3 =", lmax(map(abs, res)),
+        "  against an eps^4 truncation of", lmax(map(abs, flatten(makelist(harm(R, 4), R, [Rx, Ry, Rz]))))),
+
+  /* the resonant pair lies in the range of the singular operator: Px = k Py */
+  Px : hx3[2],
+  Py : hy3[3],
+  print("  L", li, ": solvability |Px - k Py| / |Px| =", abs((Px - k*Py)/Px),
+        "  (Px =", Px, ", k Py =", k*Py, ")"))$
+
+
+print("==== Residual by order and harmonic (maxima trigreduce) ====")$
+resid_check(mu_em, 1)$
+resid_check(mu_em, 2)$
+
+/* ------------------------------------------------------------------ *
+ * 6. Synodic perpendicular-crossing guess (matches richardson.rs)     *
+ *    x0 = x_Li + g*X0,  z0 = g*Z0,  vy0 = g*omega*Yp0,  sx = +1        *
+ * ------------------------------------------------------------------ */
+guess(mu, li, az, dn) := block([v, ax, om, g, xli, X0, Z0, Yp0],
+  v : build(mu, li),
+  g : v[1],
+  ax : sqrt(-(v[23]*az^2 + (v[5]^2 - v[2]))/v[22]),
+  om : v[5]*(1 + v[20]*ax^2 + v[21]*az^2),
+  xli : if li = 1 then 1 - mu - g else 1 - mu + g,
+  X0 : v[7]*ax^2 + v[8]*az^2 - ax + (v[9]*ax^2 - v[10]*az^2) + (v[14]*ax^3 - v[15]*ax*az^2),
+  Z0 : dn*(az - 2*v[13]*ax*az + (v[19]*az*ax^2 - v[18]*az^3)),
+  Yp0 : v[6]*ax + 2*(v[11]*ax^2 - v[12]*az^2) + 3*(v[16]*ax^3 - v[17]*ax*az^2),
+  [xli + g*X0, g*Z0, g*om*Yp0])$
+
+print("EM-L1 Az=0.05 northern synodic [x0,z0,vy0] =", float(guess(mu_em, 1, 0.05, 1)))$
+print("DONE")$

@@ -1,0 +1,63 @@
+/* Tesseral geopotential acceleration — Maxima oracle for the Cunningham/Montenbruck-Gill recursion.
+ *
+ * The geopotential (geodesy sign convention, a = +grad U):
+ *   U(x,y,z) = (mu/r) sum_{n=0}^{Nmax} (Re/r)^n sum_{m=0}^{n} P_nm(z/r) [ C_nm cos(m L) + S_nm sin(m L) ]
+ * with r = |(x,y,z)|, L = atan2(y,x), and P_nm the UNNORMALIZED associated Legendre functions in the
+ * geodesy convention (no Condon-Shortley (-1)^m). The point-mass term U = mu/r gives grad U = -mu r/r^3,
+ * so a = grad U is attractive.
+ *
+ * This file differentiates U symbolically and prints a(x,y,z) = grad U at two test points for a fixed
+ * unnormalized coefficient set. Those numbers are the oracle the Rust Montenbruck-Gill recursion
+ * (crates/spacelab-propagation/src/geopotential.rs) must reproduce — the recursion is not transcribed
+ * on trust, it is checked against this direct gradient.
+ *
+ * Run:  timeout 200 maxima --very-quiet -b derivations/geopotential.mac
+ */
+
+fpprintprec : 17$
+ratprint : false$
+
+Re : 6378137.0$
+mu : 3.986004418e14$
+Nmax : 4$
+
+/* unnormalized associated Legendre P_nm(uu), geodesy convention (no (-1)^m) */
+Pnm(n, m) := ratsimp((1 - uu^2)^(m/2) * diff(legendre_p(n, uu), uu, m))$
+
+/* fixed unnormalized test coefficients (small, realistic magnitudes; exercise every term) */
+Cc : zeromatrix(Nmax + 1, Nmax + 1)$
+Ss : zeromatrix(Nmax + 1, Nmax + 1)$
+Cc[1, 1] : 1$                 /* C_00 = 1 (the point mass) */
+Cc[3, 1] : -1.0826e-3$        /* C_20 = -J2 (unnormalized) */
+Cc[3, 2] : 1.0e-6$   Ss[3, 2] : 2.0e-6$
+Cc[3, 3] : 1.5e-6$   Ss[3, 3] : -0.9e-6$
+Cc[4, 1] : 2.5e-6$
+Cc[4, 2] : 1.1e-6$   Ss[4, 2] : -0.7e-6$
+Cc[4, 3] : 0.8e-6$   Ss[4, 3] : 0.5e-6$
+Cc[4, 4] : -0.6e-6$  Ss[4, 4] : 0.4e-6$
+Cc[5, 1] : -1.6e-6$
+Cc[5, 3] : 0.3e-6$   Ss[5, 3] : -0.2e-6$
+/* (matrix is 1-indexed: Cc[n+1,m+1] = C_nm) */
+
+r_ : sqrt(x^2 + y^2 + z^2)$
+L_ : atan2(y, x)$
+Uexpr : (mu/r_) * sum((Re/r_)^n
+          * sum(subst(uu = z/r_, Pnm(n, m)) * (Cc[n+1, m+1]*cos(m*L_) + Ss[n+1, m+1]*sin(m*L_)),
+                m, 0, n),
+          n, 0, Nmax)$
+
+ax : diff(Uexpr, x)$
+ay : diff(Uexpr, y)$
+az : diff(Uexpr, z)$
+
+print("=== tesseral geopotential a = grad U, unnormalized coeffs, Nmax =", Nmax, "===")$
+for pt in [[7000123.0, 1200456.0, 900789.0], [-4200000.0, 5100000.0, -2600000.0]] do
+  block([sub : [x = pt[1], y = pt[2], z = pt[3]], axv, ayv, azv],
+    axv : float(ev(ax, sub)),
+    ayv : float(ev(ay, sub)),
+    azv : float(ev(az, sub)),
+    print("  r =", pt, ":"),
+    print("    ax =", axv),
+    print("    ay =", ayv),
+    print("    az =", azv))$
+print("DONE")$

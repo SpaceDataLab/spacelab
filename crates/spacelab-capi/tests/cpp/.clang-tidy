@@ -1,0 +1,26 @@
+# Checks the C++ test runners cannot take, on top of the crate config they inherit.
+#
+# Every one of these proposes something that does not exist at C++20. These two files are compiled
+# at C++20, C++23 and C++26 -- that is the whole point of the matrix in `CMakeLists.txt` -- so
+# advice that only holds from C++23 on is advice that would break the rung it is meant to improve.
+#
+#   modernize-use-std-print wants `std::println` for the failure reports. `<print>` is C++23.
+#
+#   readability-container-contains wants `s.contains(...)` where the runner writes
+#   `s.find(...) != npos`. `std::string::contains` is C++23.
+#
+#   cppcoreguidelines-pro-bounds-avoid-unchecked-container-access wants `.at()` on a `std::span`.
+#   `std::span::at` is C++26, and the indices here are already bounded by the span's own `size()`.
+#
+# And one is about the boundary itself:
+#
+#   cppcoreguidelines-pro-bounds-constant-array-index fires on `row.jacobian[j]`, where `jacobian`
+#   is `double[6]` in a `#[repr(C)]` struct. A C array is what the ABI is; the alternative it
+#   proposes is `gsl::at`, which is a dependency this repository does not have and would not add
+#   to a test.
+InheritParentConfig: true
+Checks: >
+  -modernize-use-std-print,
+  -readability-container-contains,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-pro-bounds-constant-array-index

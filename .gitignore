@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+.venv/
+__pycache__/
+/data/
+
+# JPL DE ephemeris kernels — fetched by tools/fetch-ephemeris.sh, not committed (tens of MB)
+data/ephemeris/*.bsp
+
+# maturin wheel output (the CI bindings job builds into crates/spacelab-python/dist)
+dist/

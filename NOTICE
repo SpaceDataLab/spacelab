@@ -1,0 +1,240 @@
+spacelab
+Copyright (c) 2026 Ilia Gradina
+
+This product is licensed under either of
+
+  * Apache License, Version 2.0 (LICENSE-APACHE)
+  * MIT license (LICENSE-MIT)
+
+at your option, with the following attributions and conditions, which travel
+with the files named below whichever branch of that choice you take. The
+per-module findings behind this file, and the licence text each one was read
+from, are in docs/provenance.md.
+
+--------------------------------------------------------------------------
+Orekit -- Apache License, Version 2.0
+Copyright 2002-2026 CS GROUP (formerly CS Systemes d'Information / CS-SI)
+https://github.com/CS-SI/Orekit
+--------------------------------------------------------------------------
+
+The following files are derived from Orekit and have been modified. They are
+governed by the Apache License, Version 2.0, whose attribution conditions this
+notice discharges; they are not offered free of those conditions under the MIT
+branch, because that is not ours to waive.
+
+  crates/spacelab-elements/src/brouwer_lyddane.rs
+  crates/spacelab-elements/src/eckstein_hechler.rs
+  crates/spacelab-gnss/src/gpt3.rs
+  crates/spacelab-ionosphere/src/ccir.rs
+  crates/spacelab-ionosphere/src/fourier.rs
+  crates/spacelab-ionosphere/src/galileo.rs
+  crates/spacelab-ionosphere/src/model.rs
+  crates/spacelab-ionosphere/src/modip.rs
+  crates/spacelab-ionosphere/src/parameters.rs
+  crates/spacelab-ionosphere/src/ray.rs
+  crates/spacelab-propagation/src/dsst/auxiliary.rs
+  crates/spacelab-propagation/src/dsst/coefficients.rs
+  crates/spacelab-propagation/src/dsst/drag.rs
+  crates/spacelab-propagation/src/dsst/gaussian.rs
+  crates/spacelab-propagation/src/dsst/gaussian_short_period.rs
+  crates/spacelab-propagation/src/dsst/hansen.rs
+  crates/spacelab-propagation/src/dsst/mod.rs
+  crates/spacelab-propagation/src/dsst/short_period.rs
+  crates/spacelab-propagation/src/dsst/srp.rs
+  crates/spacelab-propagation/src/dsst/tesseral.rs
+  crates/spacelab-propagation/src/dsst/tesseral_short_period.rs
+  crates/spacelab-propagation/src/dsst/third_body.rs
+  crates/spacelab-propagation/src/dsst/third_body_short_period.rs
+  crates/spacelab-propagation/src/dsst/zonal.rs
+  crates/spacelab-propagation/src/earth_radiation.rs
+  crates/spacelab-propagation/src/spacecraft.rs
+
+The modifications are, in every case, a translation from Java to Rust, the
+substitution of this workspace's typed frame, time-scale and element algebra
+for Orekit's, and the generic-over-scalar rewrite that lets the same code carry
+an automatic-differentiation type. Each file names the Orekit class it descends
+from in its module documentation.
+
+Apache-2.0 section 4(d) requires the attribution notices of the original work's
+NOTICE file to travel with a derivative. Orekit's NOTICE.txt, verbatim:
+
+  OREKIT
+  Copyright 2002-2026 CS GROUP
+
+  This product includes software developed by
+  CS GROUP (https://www.cs-soprasteria.com/en/)
+
+  This product includes software developed by
+  Bruce R. Bowman (HQ AFSPC, Space Analysis Division)
+
+  This product includes software developed by
+  Luc Maisonobe (Thales Alenia Space)
+
+  This product includes software translated from original work developed by
+  David A. Vallado, Paul Crawford, Richard Hujsak, T.S. Kelso
+
+  This product includes software translated from original work developed by
+  Felix R. Hoots, Ronald L. Roehrich
+
+  This product includes software translated from original work developed by
+  R. Biancale, S. Bruinsma (CNES)
+
+  This product includes data computed by
+  P. Gégout (CNRS / UMR5563 - GET)
+
+  This product includes software translated from original work developed by
+  R. Biancale, S. Bruinsma (CNES)
+
+  This product includes software translated from original work developed by
+  Mickaël Gastineau (CNRS - Observatoire de Paris - IMCCE)
+
+  This product includes software translated from original work developed by
+  The Apache Software Foundation (https://www.apache.org/)
+
+  This product depends on software developed by
+  The Apache Software Foundation (https://www.apache.org/)
+
+  This product depends on software developed by
+  The Hipparchus project (https://hipparchus.org/)
+
+  This product includes software translated from original work developed by
+  M. Picone, A.E. Hedin, D. Drob (Naval Research Laboratory)
+
+  This product includes software translated from original work developed by
+  Dominik Brodowski
+
+  This product includes software translated from original work developed by
+  Duncan Agnew and copyright 2008 IERS Conventions center
+
+--------------------------------------------------------------------------
+sgp4 (Rust crate), version 2.4 -- MIT license
+Copyright (c) 2020 International Centre for Neuromorphic Systems
+https://github.com/neuromorphicsystems/sgp4
+--------------------------------------------------------------------------
+
+  crates/spacelab-gpu/src/batch_sgp4.rs
+
+is a port of that crate's `from_elements` near-Earth initialisation path,
+written because the crate keeps the initialised constants `pub(crate)` and a
+GPU batch cannot reach them. The MIT notice above accompanies it.
+
+--------------------------------------------------------------------------
+pyorbital (pytroll) -- Apache License, Version 2.0
+Copyright The Pytroll Community
+https://github.com/pytroll/pyorbital
+--------------------------------------------------------------------------
+
+  crates/spacelab-sensors/src/geoloc.rs
+  crates/spacelab-sensors/src/scan.rs
+
+are ported from `pyorbital.geoloc` and `pyorbital.geoloc_instrument_definitions`.
+The same Apache-2.0 conditions apply to them as to the Orekit-derived files
+above.
+
+--------------------------------------------------------------------------
+iquaflow (Satellogic) -- MIT license
+Copyright (c) Satellogic
+https://github.com/satellogic/iquaflow
+--------------------------------------------------------------------------
+
+  crates/spacelab-earthvision/src/image_quality.rs
+
+is ported from the metric core of iquaflow. The MIT notice accompanies it.
+
+--------------------------------------------------------------------------
+Data and fixtures -- attributions the terms ask for
+--------------------------------------------------------------------------
+
+The tables the crates embed and the fixtures the tests read are listed, with
+their terms as read and the date, in docs/provenance.md ("The data register").
+The following ask for attribution, and this is it. None of them restricts use.
+
+  Thermosphere neutral density and crosswind data (c) Delft University of
+  Technology, CC BY 4.0 -- Siemes, C. et al. (2023), J. Space Weather Space
+  Clim. 13, 16, doi:10.1051/swsc/2023014. Fixtures under
+  crates/spacelab-propagation/tests/fixtures/{champ,gracefo}_*.txt.
+
+  Geomagnetic Hpo index, V. 3.0, GFZ Helmholtz Centre for Geosciences,
+  CC BY 4.0 -- Matzka, J. et al. (2024), doi:10.5880/Hpo.0003; Yamazaki, Y.
+  et al. (2024), doi:10.22541/essoar.171838396.68563140/v1. Fixtures
+  crates/spacelab-propagation/tests/fixtures/gfz_hp*_gannon.txt.
+
+  IGS products and multi-GNSS broadcast navigation files, International GNSS
+  Service, under the IGS Data and Product Disclaimer and Terms of Use
+  (2020-08-05) -- Johnston, G. et al. (2017), doi:10.1007/978-3-319-42928-1_33.
+  The BCEmerge file is DLR/GSOC's, doi:10.57677/BRD400DLR.
+
+  European GNSS (Galileo) Open Service, Ionospheric Correction Algorithm for
+  Galileo Single Frequency Users, issue 1.2 (September 2016), (c) EU 2011-2026,
+  reproduced under the European GNSS Service Centre's terms of use: the CCIR
+  maps crates/spacelab-ionosphere/assets/ccir11.asc .. ccir22.asc and the
+  MODIP grid modipNeQG_wrapped.asc are the files embedded in its Annex C, and
+  the inputs of crates/spacelab-ionosphere/tests/fixtures/
+  nequick_g_jrc_stec.tsv are its Annex E cases.
+
+  International Laser Ranging Service data and the ilrsa combined LAGEOS
+  orbits -- Pearlman, M. R. et al. (2019), doi:10.1007/s00190-019-01241-1.
+
+  ITRF2020, Institut national de l'information geographique et forestiere --
+  Altamimi, Z. et al. (2023), doi:10.1007/s00190-023-01738-w.
+
+  XGM2019e gravity field, ICGEM, CC BY 4.0 -- Zingerle, P. et al. (2020),
+  doi:10.1007/s00190-020-01398-0. EIGEN-6C4 (doi:10.5880/icgem.2015.1),
+  EIGEN-6S2 (doi:10.5880/icgem.2016.008) and GOCO06s
+  (doi:10.5880/ICGEM.2019.002), GFZ Data Services, CC BY 4.0 -- read as
+  spec seals and as the time-variable-gravity fixture.
+
+  s2p, Centre Borelli, BSD-3-Clause (https://github.com/centreborelli/s2p):
+  the Pleiades RPC fixture crates/spacelab-earthvision/tests/fixtures/
+  pleiades_reunion.rpb was read from the header of its test image.
+
+  FES2014b ocean-tide geopotential coefficients, produced by Noveltis, Legos
+  and CLS and distributed by AVISO+ with support from CNES, under the AVISO+
+  Licence Agreement -- Lyard, F. et al. (2021), doi:10.5194/os-17-615-2021.
+  Table in crates/spacelab-propagation/src/ocean_tide_fes2014.rs.
+
+  GOT5.5 / GOT5.6 ocean-tide cotidal grids, R. D. Ray, NASA Goddard Space
+  Flight Center; the atlas README asks for Schrama, E. J. O. & Ray, R. D.
+  (1994), J. Geophys. Res. 99(C12), doi:10.1029/94JC01755; Ray, R. D. (1999),
+  NASA/TM-1999-209478; and Ray, R. D. (2013), J. Geophys. Res. Oceans 118,
+  doi:10.1002/jgrc.20336. The coefficients in
+  crates/spacelab-propagation/src/ocean_tide_got.rs are computed here from
+  those grids.
+
+  VMF3 / GPT3, TU Wien VMF Data Server, CC BY 4.0 for archived products --
+  Landskron, D. & Boehm, J. (2018), J. Geod. 92, 349,
+  doi:10.1007/s00190-017-1066-2. The GPT3 grid in
+  crates/spacelab-gnss/assets/gpt3_5.grd is Orekit's copy of the file.
+
+  pyspectral Rayleigh-only look-up table v1.0.1, CC BY 4.0,
+  doi:10.5281/zenodo.1288441. Fixture
+  crates/spacelab-earthvision/tests/fixtures/pyspectral_rayleigh.txt.
+
+  AERONET Version 3 Level 2.0 almucantar inversions, NASA Goddard Space
+  Flight Center -- Holben, B. N. et al. (1998), doi:10.1016/S0034-4257(98)
+  00031-5, and the site principal investigators named in the fixture header.
+
+  Calibration data came from the CEOS WGCV RadCalNet service
+  (https://www.radcalnet.org/), and in particular from the sites named in
+  crates/spacelab-earthvision/tests/fixtures/radcalnet_*.txt --
+  Bouvet, M. et al. (2019), doi:10.3390/rs11202401.
+
+  Ozone absorption cross-section from the MPI-Mainz UV/VIS Spectral Atlas --
+  Keller-Rudek, H. et al. (2013), doi:10.5194/essd-5-365-2013.
+
+  Earth orientation parameters, International Earth Rotation and Reference
+  Systems Service (IERS), finals2000A; planetary and lunar ephemerides and
+  orientation kernels, NASA/JPL NAIF; IGRF-14 coefficients, NOAA NCEI;
+  GPS almanacs, US Coast Guard Navigation Center -- public data, cited by
+  name in the fixtures and in docs/provenance.md.
+
+--------------------------------------------------------------------------
+What is NOT in this workspace
+--------------------------------------------------------------------------
+
+Nothing here is derived from AGPL-licensed, SOFA-licensed or Numerical
+Recipes material; CONTRIBUTING.md states the rule and the reasoning. Where a
+model's reference implementation carries terms this workspace cannot accept,
+the model is either implemented from the published mathematics with the data
+supplied by the user at run time, or not implemented at all. docs/provenance.md
+names each such case and what was decided.

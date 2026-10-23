@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""Regenerate CHANGELOG.md from the commit history.
+
+A changelog is a projection of `git log`, not prose, and a hand-written one drifts the moment a
+commit lands without an entry. This derives every line from the conventional-commit subjects, so the
+only way to change the changelog is to change a commit -- and the only way it can be wrong is for a
+commit subject to be wrong, which is visible in review.
+
+Three decisions this file makes, because they are not obvious:
+
+* **`test:` commits are user-facing here and get their own section.** In most repositories a test
+  commit changes nothing a consumer sees. In this one the verification *is* the deliverable --
+  `docs/verification.md` is the largest document in the tree and the README's opening claim is about
+  what has been checked -- so a commit that seals a module or adds an oracle changes what the
+  library promises. `chore`, `ci`, `build` and `style` do not, and are counted rather than listed.
+* **Nothing is dropped silently.** A subject whose type is absent or unrecognised lands in an
+  "Unparsed" section with its hash rather than being discarded, and `--check` fails on any that is
+  not in `GRANDFATHERED` below. Four exist, all of the same shape -- a scope written where the type
+  belongs, `astro: ...` for `refactor(astro): ...` -- and they are early history.
+* **Sections are ordered by what a reader looks for, not by commit count**, and within a section by
+  scope then by date, oldest first, so a scope reads as its own story.
+
+Until the first tag everything is `Unreleased`; after one, `git tag --sort=creatordate` splits the
+history and each tag becomes its own section.
+
+**What `--check` can and cannot say, because the naive version of it is unsatisfiable.** A generated
+changelog cannot describe the commit that adds it: writing the file changes the history the file is
+a projection of, so "byte-identical to the projection of `HEAD`" is a fixed point no commit can
+ever sit at. It was written that way first and it failed on its own commit.
+
+So the check is two things, and only the second is about the file:
+
+1. **Every commit subject projects.** A type this script does not recognise would silently land in
+   the `Unparsed` section, so the parse is asserted over the whole history rather than over the
+   commits that happen to be in the file. Four subjects are grandfathered by hash; a fifth is a
+   review finding.
+2. **The file equals the projection of the history it was written against** -- `HEAD` while it is
+   still uncommitted, the parent of its own commit once it has landed, which are the same tip either
+   side of that commit. That is a fixed point, it is satisfiable in the working tree rather than
+   only after a push, and it catches the two things worth catching: a hand edit, and a regeneration
+   that produced something other than what the generator produces.
+
+It deliberately does **not** catch lag. A changelog that nobody has regenerated for fifty commits
+passes, and that is the honest boundary: the alternative is a rule that forces every commit to
+rewrite this file, which is churn rather than a gate. Invariant 1 is what makes the lag harmless --
+whenever it is regenerated, nothing is missing.
+
+    python3 tools/gen-changelog.py            # rewrite CHANGELOG.md in place
+    python3 tools/gen-changelog.py --check    # exit 1 on an unprojectable subject or a hand edit
+
+Standard library and `git` only, so CI needs nothing the runner does not already have.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+CHANGELOG = ROOT / "CHANGELOG.md"
+
+# `type(scope):` with an optional `!` for a breaking change. Scopes are comma-separated and are not
+# constrained to ASCII: `docs(Ф0.2)` is real history and refusing it would lose a commit.
+SUBJECT = re.compile(
+    r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<breaking>!?): (?P<text>.+)$"
+)
+
+# Section title, and the commit types that feed it. Order is the order they are written.
+SECTIONS: list[tuple[str, tuple[str, ...]]] = [
+    ("Added", ("feat",)),
+    ("Fixed", ("fix",)),
+    ("Performance", ("perf",)),
+    ("Changed", ("refactor",)),
+    ("Verification", ("test", "bench", "experiment")),
+    ("Documentation", ("docs",)),
+]
+
+# Counted, not listed: none of these changes what the published crates do or what has been checked.
+COUNTED = ("chore", "ci", "build", "style")
+
+# The four early subjects that put a scope where the type belongs. They are history and rewriting
+# history to satisfy a linter is the wrong trade, so they are named here and `--check` passes them.
+# Anything else unparsed is a new commit written wrongly, which is worth failing a build over.
+GRANDFATHERED = frozenset({"2a3d98d", "42766d7", "002ac1a", "9969ad6"})
+
+PREAMBLE = """# Changelog
+
+Every line below is generated from the commit subjects by `tools/gen-changelog.py`, which CI runs in
+`--check` mode. Do not edit this file: edit the commit, or edit the generator.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely and
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) exactly. Versions follow
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html); before `1.0.0` a minor version may
+change the public API.
+
+`Verification` is a section because in this repository a test is a deliverable rather than a
+by-product -- see [`docs/verification.md`](docs/verification.md) for what each of those commits
+added and against which independent lineage.
+"""
+
+
+def commits(tip: str = "HEAD") -> list[tuple[str, str]]:
+    """`(hash, subject)` for everything reachable from `tip`, oldest first."""
+    out = subprocess.run(
+        ["git", "log", "--reverse", "--format=%h\x1f%s", tip],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    rows = []
+    for line in out.splitlines():
+        if line:
+            h, _, subject = line.partition("\x1f")
+            rows.append((h, subject))
+    if not rows:
+        raise SystemExit("git log is empty -- is this a repository?")
+    return rows
+
+
+def releases() -> list[tuple[str, str | None]]:
+    """`(title, ref)` newest first: one entry per tag, plus `Unreleased` for what is past the last."""
+    out = subprocess.run(
+        ["git", "tag", "--sort=creatordate"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    tags = [t for t in out.splitlines() if t]
+    spans: list[tuple[str, str | None]] = [("Unreleased", tags[-1] if tags else None)]
+    for i, tag in enumerate(reversed(tags)):
+        previous = tags[len(tags) - i - 2] if len(tags) - i - 2 >= 0 else None
+        spans.append((tag, previous))
+    return spans
+
+
+def in_span(
+    rows: list[tuple[str, str]], since: str | None, tip: str
+) -> list[tuple[str, str]]:
+    if since is None:
+        return rows
+    reachable = subprocess.run(
+        ["git", "rev-list", "--format=%h", f"{since}..{tip}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    return [row for row in rows if row[0] in set(reachable)]
+
+
+def bullet(h: str, scope: str | None, breaking: str, text: str) -> str:
+    mark = "**BREAKING** " if breaking else ""
+    where = f"**{scope}**: " if scope else ""
+    return f"- {mark}{where}{text} (`{h}`)"
+
+
+def render(rows: list[tuple[str, str]]) -> list[str]:
+    """The body of one release section."""
+    by_type: dict[str, list[tuple[str, str | None, str, str]]] = {}
+    unparsed: list[tuple[str, str]] = []
+    counted: dict[str, int] = {}
+
+    for h, subject in rows:
+        m = SUBJECT.match(subject)
+        if not m:
+            unparsed.append((h, subject))
+            continue
+        kind = m.group("type")
+        if kind in COUNTED:
+            counted[kind] = counted.get(kind, 0) + 1
+            continue
+        by_type.setdefault(kind, []).append(
+            (h, m.group("scope"), m.group("breaking"), m.group("text"))
+        )
+
+    known = {k for _, types in SECTIONS for k in types} | set(COUNTED)
+    for kind in sorted(set(by_type) - known):
+        unparsed.extend((h, f"{kind}: {text}") for h, _, _, text in by_type.pop(kind))
+
+    lines: list[str] = []
+    for title, types in SECTIONS:
+        entries = [e for k in types for e in by_type.get(k, [])]
+        if not entries:
+            continue
+        # Scope first so one component reads as one story. Python's sort is stable, so within a
+        # scope the order is the one `commits()` produced, which is chronological.
+        entries.sort(key=lambda e: e[1] or "")
+        lines += ["", f"### {title}", ""]
+        lines += [bullet(*e) for e in entries]
+
+    if counted:
+        total = sum(counted.values())
+        detail = ", ".join(f"{n} `{k}`" for k, n in sorted(counted.items()))
+        lines += [
+            "",
+            "### Internal",
+            "",
+            f"- {total} commits that change neither the published crates nor what has been checked: "
+            f"{detail}. Listed in `git log`, not here.",
+        ]
+
+    if unparsed:
+        lines += ["", "### Unparsed", ""]
+        lines += [f"- {subject} (`{h}`)" for h, subject in unparsed]
+
+    return lines or ["", "Nothing yet.", ""]
+
+
+def build(tip: str = "HEAD") -> str:
+    rows = commits(tip)
+    out = [PREAMBLE.rstrip("\n")]
+    for title, since in releases():
+        span = in_span(rows, since, tip)
+        if not span and title == "Unreleased":
+            continue
+        out += ["", f"## {title}"]
+        out += render(span)
+    return "\n".join(out).rstrip("\n") + "\n"
+
+
+def unprojectable() -> list[tuple[str, str]]:
+    """Commits whose subject this script cannot file, minus the four that are grandfathered."""
+    known = {k for _, types in SECTIONS for k in types} | set(COUNTED)
+    bad = []
+    for h, subject in commits():
+        if h in GRANDFATHERED:
+            continue
+        m = SUBJECT.match(subject)
+        if m is None or m.group("type") not in known:
+            bad.append((h, subject))
+    return bad
+
+
+def written_against() -> str | None:
+    """The tip `CHANGELOG.md` on disk should be the projection of, or `None` if it has no history.
+
+    Two cases, and both are fixed points. If the file differs from its committed version it has just
+    been regenerated and is waiting to be committed, so it should project `HEAD` -- and after that
+    commit lands, `HEAD` is exactly the parent of the commit that wrote it, which is the other case.
+    Without this branch the gate would be red in the working tree and green only after the push,
+    which is a gate nobody can satisfy before paying for a CI run.
+    """
+    dirty = subprocess.run(
+        ["git", "diff", "--quiet", "HEAD", "--", CHANGELOG.name], cwd=ROOT, check=False
+    ).returncode
+    if dirty:
+        return "HEAD"
+    out = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", CHANGELOG.name],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return f"{out}^" if out else None
+
+
+def check() -> int:
+    bad = unprojectable()
+    if bad:
+        print(
+            "these commit subjects are not conventional commits, so the changelog cannot file "
+            "them:\n" + "\n".join(f"  {h} {subject}" for h, subject in bad),
+            file=sys.stderr,
+        )
+        return 1
+
+    tip = written_against()
+    if tip is None:
+        print(f"{CHANGELOG.name} has never been committed", file=sys.stderr)
+        return 1
+
+    if CHANGELOG.read_text() != build(tip):
+        print(
+            f"{CHANGELOG.name} is not what the generator produces for {tip} — it was hand-edited, "
+            f"or generated by something else",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"{CHANGELOG.name} projects {tip}, and every subject files")
+    return 0
+
+
+def main() -> int:
+    if "--check" in sys.argv:
+        return check()
+    text = build()
+    CHANGELOG.write_text(text)
+    print(f"wrote {CHANGELOG.relative_to(ROOT)} ({text.count(chr(10))} lines)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,67 @@
+/* Exact method-of-steps solution of x'(t) = -x(t - 1) with the constant initial history
+   x(t) = 1 for t <= 0.
+
+   This is the reference the delayed-argument driver is measured against. It is a closed form,
+   not a finer numerical run, so it is an independent code path: polynomial integration in
+   exact rationals against Runge-Kutta in f64.
+
+   Why this problem. On each interval [n, n+1] the delayed argument lies in [n-1, n], where the
+   solution is already known, so the DDE collapses to a quadrature and the solution is a
+   polynomial of degree n+1 in t. The polynomial degree rises by one per delay interval, which
+   is the same statement as "the solution gains one order of smoothness per delay interval" --
+   the smoothing that makes the breakpoints at t = 1, 2, 3, ... matter less and less. The
+   derivative jumps at t = 0 (the history is constant, the solution is not), the second
+   derivative at t = 1, the third at t = 2, and so on.
+
+   The printed values are what the Rust test asserts against. */
+
+nmax : 8$
+
+/* p[n] is the solution on [n, n+1], as an expression in t. p[-1] is the initial history. */
+p : make_array(any, nmax + 2)$
+p[0] : 1$                                  /* offset by one: p[k] holds the interval [k-1, k] */
+
+for n : 1 thru nmax + 1 do block(
+  [prev, shifted, anti, left],
+  /* prev is the solution on [n-2, n-1]; the delayed argument t - 1 lands there for t in [n-1, n] */
+  prev : p[n - 1],
+  shifted : subst(t = t - 1, prev),
+  anti : integrate(-shifted, t),
+  left : n - 1,
+  /* continuity at t = left: the new piece must agree with the old one there */
+  p[n] : ratsimp(anti - subst(t = left, anti) + subst(t = left, prev))
+)$
+
+print("=== piecewise polynomials, x(t) on [n, n+1] ===")$
+for n : 0 thru nmax do print(n, " <= t <= ", n + 1, " : ", ratsimp(p[n + 1]))$
+
+/* Continuity of x and of x' at every breakpoint, and the jump in x'' at t = 1. Each is a
+   property of the exact solution, so each is a check on the recursion above rather than on
+   the numerics. */
+print("=== continuity checks (all must be 0) ===")$
+for n : 1 thru nmax do print("x  continuous at t =", n, ":",
+  ratsimp(subst(t = n, p[n]) - subst(t = n, p[n + 1])))$
+for n : 1 thru nmax do print("x' continuous at t =", n, ":",
+  ratsimp(subst(t = n, diff(p[n], t)) - subst(t = n, diff(p[n + 1], t))))$
+print("x'' jump at t = 1 (must be nonzero, this is the breakpoint):",
+  ratsimp(subst(t = 1, diff(p[2], t, 2)) - subst(t = 1, diff(p[1], t, 2))))$
+print("x'' jump at t = 2 (already smoothed, must be 0):",
+  ratsimp(subst(t = 2, diff(p[3], t, 2)) - subst(t = 2, diff(p[2], t, 2))))$
+
+/* The residual of the DDE itself, symbolically, on each interval: x'(t) + x(t-1) must vanish
+   identically. This is the check that the recursion solved the equation asked for. */
+print("=== DDE residual per interval (all must be 0) ===")$
+for n : 1 thru nmax do print(n - 1, " <= t <= ", n, " : ",
+  ratsimp(diff(p[n], t) + subst(t = t - 1, p[n - 1])))$
+
+fpprec : 40$
+sample(x) := block([n], n : floor(x), if n > nmax then n : nmax,
+  bfloat(subst(t = x, p[n + 1])))$
+
+print("=== reference values, 40 significant digits ===")$
+for k : 1 thru nmax do print(k, bfloat(sample(k)))$
+/* Exact rationals, not 0.5 -- a float argument contaminates the substitution and the printed
+   digits stop being the closed form's. */
+print("interior:")$
+for x in [1/2, 3/2, 5/2, 7/2, 9/2, 11/2, 13/2, 15/2] do
+  print(float(x), bfloat(subst(t = x, p[floor(x) + 1])))$

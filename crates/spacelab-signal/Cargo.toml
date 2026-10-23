@@ -1,0 +1,23 @@
+[package]
+name = "spacelab-signal"
+description = "Space signal processing: the Radon transform and filtered back-projection (tomography / SAR back-projection)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["radon", "tomography", "sar", "back-projection", "signal"]
+categories = ["science", "mathematics", "multimedia::images"]
+exclude.workspace = true
+
+[dependencies]
+libm = "0.2"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+spacelab-testkit = { path = "../spacelab-testkit" }

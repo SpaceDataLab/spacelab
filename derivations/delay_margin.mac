@@ -1,0 +1,112 @@
+/* Delay margin of a linearised attitude loop: the largest sensor-to-actuator latency at which the
+   closed loop still returns to its reference.
+
+   Plant, one principal axis, small angles:   J dtheta'' = u
+   Law, acting on the state as it was tau ago: u(t) = -kt dtheta(t - tau) - kw dtheta'(t - tau)
+
+   so the closed loop is  J dtheta''(t) + kw dtheta'(t - tau) + kt dtheta(t - tau) = 0  and its
+   characteristic equation is transcendental:
+
+       J lam^2 + (kw lam + kt) exp(-lam tau) = 0
+
+   with infinitely many roots. The delay margin is the smallest tau > 0 at which a root sits exactly
+   on the imaginary axis: below it every root is in the left half plane, above it at least one has
+   crossed. This file derives the crossing, so the Rust is checked against the CAS of record rather
+   than against a rearrangement of itself.
+
+   kt and kw are the *linearised* gains, not the law's own. A quaternion PD law u = -K q_v - P dw
+   has q_v -> dtheta/2, so kt = K/2 and kw = P. The Schaub-Junkins MRP law has sigma -> dtheta/4,
+   so kt = K/4. Getting that factor wrong is worth a factor of sqrt(2) in the margin, which is why
+   it is written down here and not left to the reader. */
+
+declare([J, kt, kw, w, tau], real)$
+assume(J > 0, kt > 0, kw >= 0, w > 0, tau > 0)$
+
+ceq : J*lam^2 + (kw*lam + kt)*exp(-lam*tau)$
+
+/* On the imaginary axis. Splitting by hand rather than through realpart/imagpart, because the
+   latter needs every symbol declared real *and* the exponential expanded, and doing it explicitly
+   is shorter than arranging that. */
+sub : subst(lam = %i*w, ceq)$
+sub : expand(demoivre(sub))$
+re  : ratsimp(realpart(sub))$
+im  : ratsimp(imagpart(sub))$
+print("real part = 0 :", re)$
+print("imag part = 0 :", im)$
+
+/* Eliminate tau. Write c = cos(w tau), s = sin(w tau), add the Pythagorean identity, and take the
+   resultant: the delay leaves the system and what remains is a polynomial in w alone. */
+rec : subst([cos(w*tau) = c, sin(w*tau) = s], re)$
+imc : subst([cos(w*tau) = c, sin(w*tau) = s], im)$
+poly : first(eliminate([rec, imc, c^2 + s^2 - 1], [c, s]))$
+print("crossing polynomial in w :", factor(poly))$
+
+/* It factors as  kt^2 (kw^2 w^2 + kt^2) (J^2 w^4 - kw^2 w^2 - kt^2). The quartic is the whole
+   physical content; the cofactor is strictly positive for kt > 0 and so contributes no crossing.
+   Divided out and printed rather than read off, so the claim is checked. */
+crossing : J^2*w^4 - kw^2*w^2 - kt^2$
+print("poly / crossing (must be a sum of positive terms, so never zero) :",
+      ratsimp(poly/crossing))$
+
+/* Biquadratic. Written in u = w^2 explicitly -- subst(w^2 = u, ...) is syntactic and leaves w^4
+   alone -- and the substitution back is the check that the rewrite is the same polynomial. */
+crossing_u : J^2*u^2 - kw^2*u - kt^2$
+print("crossing_u(w^2) - crossing (must be 0) :", ratsimp(subst(u = w^2, crossing_u) - crossing))$
+
+/* Exactly one root is positive: the product of the two is -kt^2/J^2 < 0. */
+u_roots : solve(crossing_u, u)$
+print("w^2 candidates :", u_roots)$
+wc2 : rhs(second(u_roots))$
+print("w_c^2 = ", ratsimp(wc2))$
+print("substituting it back (must be 0) :", ratsimp(subst(u = wc2, crossing_u)))$
+
+/* Recover tau from the phase. The imaginary part gives tan(w tau) = kw w / kt, and the real part
+   fixes the quadrant: cos(w tau) = kt/sqrt(kt^2 + kw^2 w^2) > 0, so w tau lies in the first
+   quadrant and the smallest positive tau is atan(kw w / kt)/w. */
+tau_max(Jv, ktv, kwv) := block([wc],
+  wc : sqrt((kwv^2 + sqrt(kwv^4 + 4*Jv^2*ktv^2))/(2*Jv^2)),
+  atan2(kwv*wc, ktv)/wc)$
+
+wc_of(Jv, ktv, kwv) := sqrt((kwv^2 + sqrt(kwv^4 + 4*Jv^2*ktv^2))/(2*Jv^2))$
+
+/* The residual of the *original* transcendental equation at the recovered (w_c, tau_max). If the
+   elimination or the quadrant were wrong this would not vanish. */
+residual(Jv, ktv, kwv) := block([wc, t, z],
+  wc : bfloat(wc_of(Jv, ktv, kwv)),
+  t  : bfloat(tau_max(Jv, ktv, kwv)),
+  z  : bfloat(-Jv*wc^2 + (%i*kwv*wc + ktv)*exp(-%i*wc*t)),
+  [wc, t, cabs(z)])$
+
+fpprec : 40$
+
+print("=== critically damped quaternion PD, J = 1, K = 1 => kt = 1/2, kw = sqrt(2) ===")$
+print("[w_c, tau_max, |char. eq.|] =", residual(1, 1/2, sqrt(2)))$
+
+print("=== dimensionless: tau_max * w_n depends only on the damping ratio ===")$
+/* With w_n^2 = kt/J and zeta = kw/(2 sqrt(J kt)):  kw = 2 zeta J w_n, kt = J w_n^2. */
+print("zeta   w_c/w_n        tau_max * w_n")$
+for z in [1/8, 1/4, 1/2, 3/4, 1, 3/2, 2, 4] do block([Jv : 1, ktv : 1, kwv],
+  kwv : 2*z,   /* J = 1, w_n = 1 */
+  print(bfloat(z), bfloat(wc_of(Jv, ktv, kwv)), bfloat(tau_max(Jv, ktv, kwv))))$
+
+/* The margin is not monotone in the damping: past some zeta the rate term's own phase lag under
+   delay costs more than the damping buys. Locate the optimum, since "more damping is safer" is the
+   natural assumption and it is false here. */
+dm(z) := tau_max(1, 1, 2*z)$
+zopt : find_root(diff(dm(z), z), z, 0.3, 1.0)$
+print("zeta maximising tau_max * w_n :", bfloat(zopt),
+      " giving ", bfloat(dm(zopt)),
+      " against ", bfloat(dm(1)), " at critical damping")$
+
+print("=== undamped: kw = 0 must give exactly zero margin ===")$
+print("tau_max =", bfloat(tau_max(1, 1, 0)))$
+
+/* A realistic reaction-wheel ADCS loop: a 12U cubesat, smallest principal moment 0.20 kg m^2,
+   control bandwidth 0.10 rad/s, critically damped. Quaternion PD, so kt = K/2. */
+print("=== 12U cubesat, J = 0.20 kg m^2, w_n = 0.10 rad/s, zeta = 1 ===")$
+block([Jv : 0.20b0, wn : 0.10b0, ktv, kwv],
+  ktv : Jv*wn^2,
+  kwv : 2*Jv*wn,
+  print("kt =", ktv, " kw =", kwv),
+  print("K = 2 kt =", 2*ktv, " P = kw =", kwv),
+  print("[w_c, tau_max, |char. eq.|] =", residual(Jv, ktv, kwv)))$

@@ -1,0 +1,17 @@
+/* The zonal-harmonic acceleration in `spacelab-propagation::forces` equals -grad U of the
+   geopotential, symbolically, for J2 (even) and J3 (odd via the general closed form). This is the
+   acceleration<->potential pairing the energy-conservation tests rest on. Each identity must be 0. */
+r: sqrt(x^2 + y^2 + z^2)$
+u: z / r$
+
+/* J2: U = (mu J2 Re^2 / 2)(3z^2 - r^2)/r^5; forces.rs coeff = -3/2 J2 mu Re^2 / r^5. */
+U2: (mu*J2*Re^2/2)*(3*z^2 - r^2)/r^5$
+print("J2 identity ax: ", radcan(-diff(U2,x) - (-(3/2)*J2*mu*Re^2 * x/r^5 * (1 - 5*z^2/r^2))))$
+print("J2 identity az: ", radcan(-diff(U2,z) - (-(3/2)*J2*mu*Re^2 * z/r^5 * (3 - 5*z^2/r^2))))$
+
+/* J3: U_n = (mu/r) J_n (Re/r)^n P_n(z/r); the code's closed form uses P_n and P_n'. */
+P3: (5*u^3 - 3*u)/2$
+P3d: (15*u^2 - 3)/2$
+U3: (mu/r)*J3*(Re/r)^3*P3$
+print("J3 identity ax: ", radcan(-diff(U3,x) - ((mu/r^3)*J3*(Re/r)^3 * x * (4*P3 + u*P3d))))$
+print("J3 identity az: ", radcan(-diff(U3,z) - ((mu/r^3)*J3*(Re/r)^3 * (4*z*P3 - r*(1-u^2)*P3d))))$

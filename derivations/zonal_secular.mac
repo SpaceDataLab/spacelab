@@ -1,0 +1,72 @@
+/* The J2 secular rates both zonal mean-element propagators are built on, derived and subtracted.
+
+   `spacelab-elements::brouwer_lyddane` carries Brouwer (1959) in Lyddane (1963) variables and
+   `::eckstein_hechler` carries Eckstein-Hechler in circular elements. Both are ports of Orekit and
+   both are validated against Orekit numerically. That is a *port* check -- it says the two agree,
+   not that either is right. This is the theory check on the part that dominates every answer they
+   give: the first-order J2 secular rates.
+
+   Route, with no textbook result quoted: average the J2 disturbing function over the mean anomaly
+   (a definite integral the CAS evaluates), apply Lagrange's planetary equations, then subtract each
+   propagator's own first-order expressions in its own notation and variables.
+
+   Out of scope, and said so rather than left to be assumed: the J2^2, J4, J5 and J6 terms are
+   second order and need Brouwer's von Zeipel transformation, not an average. They stay covered by
+   the Orekit comparison until someone does that derivation.                                        */
+
+assume(e > 0, e < 1, a > 0, p > 0, si > 0)$
+
+/* ---- the averaged disturbing function ------------------------------------------------------- */
+/* U = (mu/r)*(1 - J2*(Re/r)^2*P2(sin phi)), so the disturbing function is R = -(mu/r)*J2*(Re/r)^2*P2,
+   with sin(phi) = sin(i)*sin(w + nu). Average over M using r^2 dnu = a^2*sqrt(1-e^2) dM.           */
+P2(u) := (3*u^2 - 1)/2$
+rr  : p/(1 + e*cos(nu))$
+Rd  : -mu*J2*Re^2/rr^3 * P2(si*sin(w + nu))$
+integrand : ratsimp(Rd * rr^2/(a^2*sqrt(1 - e^2)))$
+Rav : ratsimp(integrate(integrand, nu, 0, 2*%pi)/(2*%pi))$
+Rav : ratsimp(subst(p = a*(1 - e^2), Rav))$
+Rav : ratsimp(subst(si^2 = 1 - ci^2, expand(trigreduce(Rav))))$
+print("<R> =", Rav)$
+
+/* ---- Lagrange's planetary equations, secular part -------------------------------------------- */
+eta : sqrt(1 - e^2)$
+dRde : diff(Rav, e)$
+dRda : diff(Rav, a)$
+dRdi : -si * diff(Rav, ci)$   /* d/di = -sin(i) d/d(ci), since <R> is written in ci */
+
+Odot : ratsimp( dRdi/(nn*a^2*eta*si) )$
+wdot : ratsimp( -ci*dRdi/(nn*a^2*eta*si) + eta*dRde/(nn*a^2*e) )$
+Mdot : ratsimp( -(1 - e^2)*dRde/(nn*a^2*e) - 2*dRda/(nn*a) )$   /* the part beyond n */
+
+print("dOmega/dt =", Odot)$
+print("domega/dt =", wdot)$
+print("dM/dt - n =", Mdot)$
+
+/* ---- (1) brouwer_lyddane.rs ------------------------------------------------------------------- */
+/* yp2 = -c20*(Re/a)^2/(2*(1-e^2)^2) with c20 = -J2, and the model's rates are per unit of the mean
+   motion n0, since the propagator multiplies by n0*t.                                              */
+yp2s : J2*Re^2/(2*a^2*(1 - e^2)^2)$
+etas : sqrt(1 - e^2)$
+dsl  : 3/2 * yp2s * etas * (3*ci^2 - 1)$
+dsg  : 3/2 * yp2s * (5*ci^2 - 1)$
+dsh  : -3 * yp2s * ci$
+
+print("checks -- each must be identically 0:")$
+print("  node     :", ratsimp(subst(nn = sqrt(mu/a^3), Odot) / sqrt(mu/a^3) - dsh))$
+print("  perigee  :", ratsimp(subst(nn = sqrt(mu/a^3), wdot) / sqrt(mu/a^3) - dsg))$
+print("  anomaly  :", ratsimp(subst(nn = sqrt(mu/a^3), Mdot) / sqrt(mu/a^3) - dsl))$
+
+/* ---- (2) eckstein_hechler.rs ------------------------------------------------------------------ */
+/* Circular elements, so the checks are at e = 0, which is the regime the theory is written for
+   (the module refuses e > 0.1). g2 = ck0[2]*(Re/a)^2 with ck0[2] = C20 = -J2, and the rates are
+   again per unit of n0. The latitude argument is alpha = omega + M, so its rate is the sum.        */
+g2   : -J2*Re^2/a^2$
+ehnode : ci * 1.5 * g2$                                    /* omm_d, first order */
+ehperi : -0.75 * g2 * (4 - 5*(1 - ci^2))$                  /* rdpom */
+ehlat  : 1 - 1.5 * g2 * (3 - 4*(1 - ci^2))$                /* rdl, the first-order part of a_md */
+
+circ(x) := ratsimp(subst(e = 0, x))$
+print("Eckstein-Hechler checks at e = 0 -- each must be identically 0:")$
+print("  node            :", circ(subst(nn = sqrt(mu/a^3), Odot)/sqrt(mu/a^3) - ehnode))$
+print("  perigee         :", circ(subst(nn = sqrt(mu/a^3), wdot)/sqrt(mu/a^3) - ehperi))$
+print("  latitude arg.   :", circ(subst(nn = sqrt(mu/a^3), wdot + Mdot)/sqrt(mu/a^3) + 1 - ehlat))$

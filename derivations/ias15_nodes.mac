@@ -1,0 +1,45 @@
+/* IAS15 (Everhart 1985; Rein & Spiegel 2015) — the eight Gauss-Radau substep spacings, derived as
+ * polynomial roots, and Everhart's c- and d-conversion matrices, derived from those nodes.
+ *
+ * IAS15 is a 15th-order implicit Runge-Kutta of Gauss-Radau type: eight substep nodes h[0..7] on
+ * [0,1] with h[0]=0 (the LEFT Radau family — the left endpoint is a node, the right is not, h[7]<1).
+ * The seven nonzero nodes are the roots of the Radau-left polynomial
+ *
+ *     d^7/dx^7 [ x^8 (x-1)^7 ]        (degree 8; one root is x=0, the other seven are h[1..7]).
+ *
+ * The acceleration on a step is fitted by a 7th-degree polynomial in the substep parameter, written
+ * in the Newton divided-difference basis with coefficients g[0..6], then converted to the power
+ * basis b[0..6] by the constant lower-triangular matrix c (Everhart Eq. 7). This script derives the
+ * nodes and the c-matrix from first principles so the Rust constants are transcribed from the CAS.
+ *
+ *   maxima --very-quiet -b ias15_nodes.mac
+ */
+
+fpprec : 40$
+
+/* --- Nodes ---------------------------------------------------------------------------------- */
+P : expand(diff(x^8 * (x-1)^7, x, 7))$
+rts : bfallroots(P = 0)$
+h : sort(map(lambda([e], realpart(rhs(e))), rts))$
+print("node count (=8?):", length(h))$
+for i:1 thru 8 do print("h[", i-1, "] =", h[i]);
+/* sanity: node 0 is exactly 0, node 7 is < 1 (Radau-left) */
+print("h[0] (=0?):", h[1], "   h[7] (<1?):", h[8]);
+
+/* --- Everhart c-matrix: b = c . g -----------------------------------------------------------
+ * The Newton form of the acceleration polynomial in the running node parameter,
+ *   A(t) = g0 + g1 (t-h0) + g2 (t-h0)(t-h1) + ... + g6 (t-h0)...(t-h5),
+ * expanded into the power basis A(t) = b0 + b1 t + ... + b6 t^6 (h0 = 0). The coefficient of t^k in
+ * the j-th Newton product is c[j][k]; so b_k = sum_j c[j][k] g_j. Everhart tabulates these; here we
+ * expand the products symbolically and read them off, exactly. */
+newton(j) := prod(t - h[m+1], m, 0, j-1)$   /* j-th Newton product, j = 0..6 (empty prod = 1) */
+C : genmatrix(lambda([jj, kk], coeff(expand(newton(jj-1)), t, kk-1)), 7, 7)$
+print("--- c matrix (b_k = sum_j c[j][k] g_j), lower-triangular, unit diagonal ---");
+for j:1 thru 7 do for k:1 thru j do print("c[", j-1, "][", k-1, "] =", bfloat(C[j][k]));
+
+/* --- d-matrix: the inverse conversion g = d . b, used to rescale the b-coefficients when the step
+ * size changes between steps (Everhart's warm start). d = c^{-1}, also lower-triangular. --------- */
+D : invert(C)$
+print("c.d - I largest entry (=0?):", bfloat(lmax(map(abs, flatten(args(C . D - ident(7)))))));
+print("--- d matrix (g_k = sum_j d[j][k] b_j) ---");
+for j:1 thru 7 do for k:1 thru j do print("d[", j-1, "][", k-1, "] =", bfloat(D[j][k]));

@@ -1,0 +1,23 @@
+/* The `r2 > 0.0` branch in `spacelab-frames::gcrf_to_cirs` is unobservable, and this is why --
+   the evidence behind its entry in `mutants.toml`, where a mutation to `>=` survives.
+
+   IERS Conventions 2010 Eq. 5.10:  Q(t) = R3(-(E+s)) . R2(d) . R3(E),  E = atan2(Y, X),
+   d = atan(sqrt(r2/(1-r2))),  r2 = X^2 + Y^2.  Since r2 is a sum of squares, `>` and `>=` can
+   differ only at r2 = 0 -- where the guard picks E = 0 and its mutant picks atan2(Y, X), which for
+   X = -0.0 is +-%pi rather than 0.  Two facts make that difference invisible: d is exactly 0 there,
+   and at d = 0 the rotation collapses to R3(-s) for EVERY E. */
+
+R3(a) := matrix([ cos(a), sin(a), 0],
+                [-sin(a), cos(a), 0],
+                [      0,      0, 1])$
+R2(a) := matrix([cos(a), 0, -sin(a)],
+                [     0, 1,       0],
+                [sin(a), 0,  cos(a)])$
+
+D : ratsimp(trigreduce(expand(trigexpand(R3(-(E+s)) . R2(0) . R3(E) - R3(-s)))))$
+if is(equal(D, zeromatrix(3, 3))) # true then error("E does NOT cancel at d = 0: ", D)$
+print("VERIFIED: Q(E, s, d = 0) - R3(-s) = 0 identically in E")$
+
+d0 : subst(r2 = 0, atan(sqrt(r2/(1 - r2))))$
+if is(equal(d0, 0)) # true then error("d is not 0 at r2 = 0: ", d0)$
+print("VERIFIED: d = 0 exactly at r2 = 0 -- the only input the two branches disagree on")$

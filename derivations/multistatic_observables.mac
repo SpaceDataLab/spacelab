@@ -1,0 +1,159 @@
+/* Observables formed from more than one terminal: bistatic range and range rate, TDOA, FDOA, and
+   the inter-satellite pair.
+
+   The six observables already in crates/spacelab-estimation/src/measurement.rs are built from one
+   line of sight between one satellite and one station. Every observable below is built from two,
+   and the two legs do not share an epoch: a bistatic radar transmits at t_t, the pulse reflects at
+   t_b and arrives at t_r; a TDOA pair receives one emission at two different instants. What is
+   established here is the algebra of those two-leg quantities, which is what the Rust code
+   evaluates once the epochs have been settled.
+
+   Notation: S is the satellite position and V its velocity; T and Q are the two terminals with
+   velocities vT and vQ, all in one geocentric frame, metres and m/s. c is exact by the SI
+   definition of the metre. */
+
+fpprec : 40$
+
+sep(A, B) := sqrt((A - B) . (A - B))$
+unitv(A, B) := (A - B) / sep(A, B)$
+
+/* ---------------------------------------------------------------------------------------------
+   1. Every rate observable here is the time derivative of a separation.
+
+   bistatic range rate, FDOA and the inter-satellite range rate are all written in the code as a
+   dot product over a norm. That form is asserted, not derived, unless the derivative it claims to
+   be is checked against a differentiation. Both endpoints move, which is the case the single-
+   station range rate never exercises.
+   --------------------------------------------------------------------------------------------- */
+
+declare([ax, ay, az, bx, by, bz, px, py, pz, qx, qy, qz], real)$
+Apos(t) := [ax + px*t, ay + py*t, az + pz*t]$
+Bpos(t) := [bx + qx*t, by + qy*t, bz + qz*t]$
+
+rate_by_diff : ratsimp(subst(t = 0, diff(sep(Apos(t), Bpos(t)), t)))$
+rate_closed : ((Apos(0) - Bpos(0)) . ([px, py, pz] - [qx, qy, qz])) / sep(Apos(0), Bpos(0))$
+print("d/dt |a - b| - (dr . dv)/|dr| =", ratsimp(rate_by_diff - rate_closed),
+      "  (0 confirms the rate form, both endpoints moving)")$
+
+/* ---------------------------------------------------------------------------------------------
+   2. The gradients the automatic differentiation in the Rust code has to reproduce.
+   --------------------------------------------------------------------------------------------- */
+
+Ssym : [sx, sy, sz]$
+Tsym : [tx, ty, tz]$
+Qsym : [ux, uy, uz]$
+gradS(f) := [diff(f, sx), diff(f, sy), diff(f, sz)]$
+
+bistatic : sep(Ssym, Tsym) + sep(Ssym, Qsym)$
+print("grad(bistatic range) - (rho_T + rho_Q unit vectors) =",
+      ratsimp(gradS(bistatic) - (unitv(Ssym, Tsym) + unitv(Ssym, Qsym))),
+      "  (0 confirms the bistatic gradient)")$
+
+/* TDOA is a difference of two legs over c, so its gradient is a difference of two unit vectors and
+   its magnitude can never exceed 2/c: the observable saturates on the baseline, which is why a TDOA
+   pair loses all resolution along its own axis. */
+tdoa_sym : (sep(Ssym, Qsym) - sep(Ssym, Tsym))/cc$
+print("c * grad(TDOA) - (unit_Q - unit_T) =",
+      ratsimp(cc*gradS(tdoa_sym) - (unitv(Ssym, Qsym) - unitv(Ssym, Tsym))),
+      "  (0 confirms the TDOA gradient)")$
+
+/* ---------------------------------------------------------------------------------------------
+   3. TDOA against the hyperboloid, as an independent geometric route.
+
+   The locus of constant range difference between two foci is a hyperboloid of revolution: with the
+   foci at (+/-d, 0, 0), every point on x^2/a^2 - (y^2+z^2)/(d^2-a^2) = 1 has |r-F2| - |r-F1| = 2a.
+   Checking a parametrised point against that constant tests the TDOA formula through a property of
+   the geometry rather than through the same subtraction the code performs.
+   --------------------------------------------------------------------------------------------- */
+
+hyper_check(aa, dd, u, v) := block([bb, pt, f1, f2],
+  bb : sqrt(dd^2 - aa^2),
+  pt : [aa*cosh(u), bb*sinh(u)*cos(v), bb*sinh(u)*sin(v)],
+  f1 : [dd, 0, 0],
+  f2 : [-dd, 0, 0],
+  bfloat(sep(pt, f2) - sep(pt, f1) - 2*aa))$
+print("hyperboloid residual, |r-F2| - |r-F1| - 2a, at three points on the sheet:",
+      [hyper_check(3000000b0, 5000000b0, 0.7b0, 0.4b0),
+       hyper_check(3000000b0, 5000000b0, 1.9b0, 2.7b0),
+       hyper_check(1200000b0, 4000000b0, 0.3b0, 5.1b0)])$
+
+/* ---------------------------------------------------------------------------------------------
+   4. Numbers, on one hand-built geometry, at 40 digits.
+
+   The same satellite state and the same first terminal as the Shapiro fixture in
+   derivations/shapiro_delay.mac and the modifier unit tests, so the geometries stay comparable.
+   --------------------------------------------------------------------------------------------- */
+
+c : 299792458$
+fc : 2200000000$            /* S-band carrier, Hz */
+
+Sat : [3961000b0, 2614000b0, 5215000b0]$
+Vel : [-3140b0, 6190b0, -700b0]$
+Ter1 : [4075530b0, 931781b0, 4801618b0]$      /* transmitter, and TDOA's first receiver  */
+Vt1 : [-67.9b0, 297.2b0, 0b0]$
+Ter2 : [3183899b0, 1421478b0, 5322820b0]$     /* receiver, and TDOA's second receiver    */
+Vt2 : [-103.6b0, 232.2b0, 0b0]$
+
+rho1 : sep(Sat, Ter1)$
+rho2 : sep(Sat, Ter2)$
+rate1 : ((Sat - Ter1) . (Vel - Vt1)) / rho1$
+rate2 : ((Sat - Ter2) . (Vel - Vt2)) / rho2$
+
+fpprintprec : 30$
+print("leg 1 range, m               =", rho1)$
+print("leg 2 range, m               =", rho2)$
+print("bistatic range, m            =", rho1 + rho2)$
+print("leg 1 range rate, m/s        =", rate1)$
+print("leg 2 range rate, m/s        =", rate2)$
+print("bistatic range rate, m/s     =", rate1 + rate2)$
+print("TDOA (leg2 - leg1)/c, s      =", (rho2 - rho1)/bfloat(c))$
+print("FDOA (fc/c)(rate1 - rate2), Hz =", bfloat(fc)*(rate1 - rate2)/bfloat(c))$
+
+/* The bistatic gradient at this geometry — the three numbers the AD partials are pinned to. */
+grad_b : unitv(Sat, Ter1) + unitv(Sat, Ter2)$
+print("d(bistatic range)/dS         =", grad_b)$
+
+/* The inter-satellite pair: a second satellite, not a ground terminal, so both endpoints carry
+   orbital speed and neither is fixed in the working frame. */
+SatB : [4512000b0, 1878000b0, 4903000b0]$
+VelB : [-2050b0, 5780b0, 2400b0]$
+isl : sep(Sat, SatB)$
+print("inter-satellite range, m     =", isl)$
+print("inter-satellite range rate, m/s =", ((Sat - SatB) . (Vel - VelB))/isl)$
+
+/* ---------------------------------------------------------------------------------------------
+   5. The rate observables again, numerically, by differencing the separation along the straight-
+      line motion rather than by the dot product. An independent route to the same numbers.
+   --------------------------------------------------------------------------------------------- */
+
+numeric_rate(A, va, B, vb, h) := block([],
+  (sep(A + va*h, B + vb*h) - sep(A - va*h, B - vb*h)) / (2*h))$
+print("bistatic range rate by central difference - closed form =",
+      (numeric_rate(Sat, Vel, Ter1, Vt1, 1b-6) + numeric_rate(Sat, Vel, Ter2, Vt2, 1b-6))
+      - (rate1 + rate2))$
+print("inter-satellite range rate by central difference - closed form =",
+      numeric_rate(Sat, Vel, SatB, VelB, 1b-6) - ((Sat - SatB) . (Vel - VelB))/isl)$
+
+/* ---------------------------------------------------------------------------------------------
+   6. Flight times, and the leg residuals of a geometry whose epochs are wrong.
+
+   The observables above are functions of position alone; the flight time of a leg is the one
+   quantity that carries the epochs, and the leg residual is what says whether the epochs a caller
+   placed the terminals at are consistent with the geometry. It is a composition — an epoch gap
+   minus a flight time — and a comparison against a single closed form is blind to the term it does
+   not dominate, so both terms are printed here and the residuals are printed for epoch gaps chosen
+   as exact binary fractions, which f64 and bigfloat represent identically.
+   --------------------------------------------------------------------------------------------- */
+
+tau1 : rho1/bfloat(c)$
+tau2 : rho2/bfloat(c)$
+print("leg 1 flight time, s         =", tau1)$
+print("leg 2 flight time, s         =", tau2)$
+
+/* Bistatic: transmit at 0.25, reflect at 0.75, receive at 1.5. */
+print("bistatic up-leg residual, s  =", (0.75b0 - 0.25b0) - tau1)$
+print("bistatic down-leg residual, s=", (1.5b0 - 0.75b0) - tau2)$
+
+/* TDOA: emit at 0.5, receive at 1.25 and at 1.75. */
+print("TDOA first-leg residual, s   =", (1.25b0 - 0.5b0) - tau1)$
+print("TDOA second-leg residual, s  =", (1.75b0 - 0.5b0) - tau2)$

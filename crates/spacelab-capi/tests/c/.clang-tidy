@@ -1,0 +1,24 @@
+# The crate's clang-tidy configuration, minus the checks that only make sense in C++.
+#
+# `smoke.c` is deliberately a C99 translation unit: it exists to prove that a plain C consumer --
+# not a C++ consumer with a C header -- can use `spacelab.h`, and it is compiled at every standard
+# from C99 up. Two of the parent configuration's checks contradict that, and one is unimplementable
+# on this platform.
+
+InheritParentConfig: true
+
+Checks: >
+  -modernize-use-nullptr,
+  -cppcoreguidelines-init-variables,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+
+# modernize-use-nullptr           -- `nullptr` is a C++ keyword and, in C, a C23 one. This file
+#                                    compiles as C99, where `NULL` is the only spelling there is.
+# cppcoreguidelines-init-variables -- fires on the out-parameters this API is built around: an
+#                                    `sl_state out;` handed to a function that fills it is the
+#                                    calling convention, and pre-filling it would hide the very
+#                                    thing two of these tests check, that a failed call leaves the
+#                                    caller's struct alone.
+# ...DeprecatedOrUnsafeBufferHandling -- wants the Annex K `_s` functions for `fprintf`. glibc does
+#                                    not implement Annex K, it was never widely adopted, and the
+#                                    format strings here are literals with no user input in them.

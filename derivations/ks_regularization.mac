@@ -1,0 +1,34 @@
+/* Kustaanheimo-Stiefel regularization — the 4D spinor map and Sundman time transform that turn the
+ * singular Kepler problem into a regular linear oscillator, so a high-eccentricity or near-collision
+ * orbit is integrated with uniform steps in fictitious time and no blow-up at r -> 0.
+ *
+ * The KS matrix L(u) (u in R^4) maps to the Cartesian position by r_vec = (first three rows of
+ * L(u) u); with fictitious time s defined by dt = r ds, the two-body equation of motion becomes
+ * u'' = (h/2) u (h = Kepler energy < 0), a harmonic oscillator. This checks the algebraic identities
+ * the code relies on:
+ *   1. |r_vec| = |u|^2 = r.
+ *   2. the 4th component of L(u) u vanishes (the KS constraint).
+ *   3. L(u)^T L(u) = |u|^2 I_4  (so v = (2/r) L(u) u', and u' = (1/2) L(u)^T v).
+ *   4. the physical (first three) components of L(a) b equal those of L(b) a (needed for r' = 2 L(u) u').
+ *
+ *   maxima --very-quiet -b ks_regularization.mac
+ */
+
+L(u) := matrix([u[1], -u[2], -u[3],  u[4]],
+               [u[2],  u[1], -u[4], -u[3]],
+               [u[3],  u[4],  u[1],  u[2]],
+               [u[4], -u[3],  u[2], -u[1]])$
+
+u : [u1, u2, u3, u4]$
+ru : L(u) . transpose(matrix(u))$
+r1 : ru[1][1]$  r2 : ru[2][1]$  r3 : ru[3][1]$
+usq : u1^2 + u2^2 + u3^2 + u4^2$
+
+print("KS |r_vec|^2 - (|u|^2)^2 (=0?):", ratsimp(r1^2 + r2^2 + r3^2 - usq^2));
+print("KS constraint 4th(L u) (=0?):", ratsimp(ru[4][1]));
+LtL : ratsimp(transpose(L(u)) . L(u) - usq * ident(4))$
+print("KS L^T L - |u|^2 I max|.| (=0?):", lmax(map(abs, flatten(args(LtL)))));
+
+a : [a1, a2, a3, a4]$  b : [b1, b2, b3, b4]$
+d : ratsimp(L(a) . transpose(matrix(b)) - L(b) . transpose(matrix(a)))$
+print("KS bilinear first-3 of L(a)b-L(b)a max|.| (=0?):", lmax([abs(d[1][1]), abs(d[2][1]), abs(d[3][1])]));

@@ -1,0 +1,23 @@
+/* Bound on |dg/dt| for the elevation constraint, in a body-fixed frame.
+
+   g(t) = d . zhat - s*|d|,   d = r_sat(t) - r_cell,  r_cell and zhat constant,
+   s = sin(eps_min) in [0,1),  |zhat| = 1.
+
+   dg/dt = rdot . zhat - s * (d . rdot)/|d|
+   |dg/dt| <= |rdot|*|zhat| + s*|rdot|*|d|/|d| = (1+s)*|rdot|
+   with rdot the satellite velocity *as seen in the rotating frame*. */
+
+declare([s], real)$ assume(s >= 0, s < 1)$
+
+/* Symbolic check of the two Cauchy-Schwarz steps, on generic vectors. */
+d    : [d1,d2,d3]$  rd : [v1,v2,v3]$  z : [z1,z2,z3]$
+dgdt : rd . z - s*(d . rd)/sqrt(d . d)$
+print("dg/dt =", dgdt)$
+
+/* term 1: |rd . z| <= |rd| since |z| = 1.  term 2: |d . rd| / |d| <= |rd|.
+   Verify term 2 is exactly |rd|*cos(angle), hence bounded: */
+print("second term equals |rd| * (d.rd)/(|d||rd|), a cosine:",
+      ratsimp( (d . rd)/sqrt(d . d) - sqrt(rd . rd) * ((d . rd)/(sqrt(d . d)*sqrt(rd . rd))) ))$
+
+print("=> |dg/dt| <= (1+s)*|v_rel|,  and v_rel <= v_perigee + omega_frame * r_apogee")$
+print("   v_perigee = sqrt(mu*(1+e)/(a*(1-e))),  r_apogee = a*(1+e)")$

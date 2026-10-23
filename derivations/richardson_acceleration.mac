@@ -1,0 +1,45 @@
+/* Richardson extrapolation as sequence acceleration (Bach, SIAM J. Math. Data Sci. 2021) — order
+ * proven in Maxima.
+ *
+ * An estimate depending on a control t has the asymptotic expansion  x_t = x_* + sum_{j>=1} c_j t^{j a}
+ * (a = alpha: a = -1 when t is an iteration count -> infinity, a = +1 when t is a regularisation
+ * parameter -> 0). In the variable u = t^a this is an ordinary power series x_* + sum c_j u^j, so
+ * extrapolating to u = 0 by polynomial interpolation at m nodes cancels the first m-1 terms and leaves
+ * error O(u^m) = O(t^{m a}). This file builds the Neville tableau symbolically over geometric nodes
+ * and confirms the m-point diagonal error is exactly order m in the node scale — the same mechanism
+ * as Gragg-Bulirsch-Stoer (derivations/gbs_extrapolation.mac), here for a general exponent.
+ *
+ * Run:  timeout 120 maxima --very-quiet -b derivations/richardson_acceleration.mac
+ */
+
+M : 5$
+/* power series in u = t^alpha, truncated past what the tableau can reach */
+fser(u) := x0 + sum(c[j]*u^j, j, 1, M + 1)$
+/* decreasing geometric nodes u_i = u0 r^(i-1), 0 < r < 1  (finer toward the u=0 limit) */
+uu : makelist(u0*r^(i - 1), i, 1, M)$
+
+/* Neville extrapolation to u = 0 via the increment form (same recurrence as GBS) */
+for i : 1 thru M do T[i, 1] : fser(uu[i])$
+for i : 2 thru M do for k : 2 thru i do
+  T[i, k] : ratexpand(T[i, k-1] + (T[i, k-1] - T[i-1, k-1])/(uu[i-k+1]/uu[i] - 1))$
+
+print("=== m-point Richardson diagonal: error must be O(u0^m) ===")$
+allok : true$
+for m : 1 thru M do block([e : ratexpand(T[m, m] - x0), lp, lc],
+  lp : if e = 0 then inf else lopow(e, u0),
+  lc : if e = 0 then 0 else ratcoef(e, u0, lp),
+  print("  m =", m, ": T[m][m] - x_* ~ u0^", lp, "  (cancels", m - 1,
+        "term(s); leading coeff involves", if lp <= M + 1 then c[lp] else "-", ")"),
+  if lp # m then allok : false)$
+print("")$
+print(if allok then "ALL ORDERS CONFIRMED: m-point cancels m-1 terms" else "ORDER MISMATCH")$
+
+/* two-point closed form: x_* = (u2 x1 - u1 x2)/(u2 - u1); with t2 = 2 t1 it is Bach's (2^a x1 - x2)/(2^a - 1) */
+print("")$
+print("=== two-point check (Bach Fig. 1): nodes t, 2t ===")$
+x1 : x0 + c[1]*t^a + c[2]*t^(2*a)$
+x2 : x0 + c[1]*(2*t)^a + c[2]*(2*t)^(2*a)$
+xstar_hat : ratsimp((2^a*x1 - x2)/(2^a - 1))$
+print("  (2^a x_t - x_2t)/(2^a - 1) - x_* =", ratsimp(xstar_hat - x0),
+      "   -> leading O(t^{2a}) (first term cancelled)")$
+print("DONE")$

@@ -1,0 +1,50 @@
+/* Reference accelerations for the GLONASS ICD 5.1 A.3.1.2 equations of motion, at 60 digits.
+ *
+ * The crate's only oracle for `deriv` is the analytic Kepler flow, which reaches it exclusively
+ * through the reduction `j2 = 0, omega = 0, acc = 0` — so the oblateness term, the rotating-frame
+ * Coriolis and centrifugal terms and the broadcast luni-solar acceleration have no external check
+ * at all. This file supplies one.
+ *
+ * The ICD writes the right-hand side as (μ, aₑ, J₂ unnormalised, Ω̇ₑ the PZ-90 rotation rate):
+ *
+ *   dvx/dt = −μx/r³ + (3/2)·J₂·μ·aₑ²/r⁵ · x · (5z²/r² − 1) + Ω̇ₑ²·x + 2·Ω̇ₑ·vy + ax
+ *   dvy/dt = −μy/r³ + (3/2)·J₂·μ·aₑ²/r⁵ · y · (5z²/r² − 1) + Ω̇ₑ²·y − 2·Ω̇ₑ·vx + ay
+ *   dvz/dt = −μz/r³ + (3/2)·J₂·μ·aₑ²/r⁵ · z · (5z²/r² − 3)                        + az
+ *
+ * which is the ICD's own grouping, not the Rust's (the Rust factors a common `c` out of all three
+ * rows and reaches the `z` row as `c − 2a`). Transcribing the published form rather than the code
+ * is the point: a disagreement is then a finding rather than a typo shared by both.
+ *
+ * Inputs are exact rationals, so the only difference from the f64 evaluation is the rounding of the
+ * decimal constants into doubles — ~1e-16 relative, far below the 1e-13 the test asserts.
+ *
+ * Run: timeout 300 maxima --very-quiet -b tools/gen_glonass_oracle.mac
+ */
+
+fpprec: 60$
+
+mu    : 3986004418 * 10^5$        /* m³/s², exact: 3.986004418e14 < 2^53 */
+ae    : 6378136$                  /* m */
+j2    : 10826257 / 10^10$         /* 1.0826257e-3 */
+omega : 7292115 / 10^11$          /* 7.292115e-5 rad/s */
+
+/* A state with no zero coordinate, no two coordinates equal in magnitude, all three velocity
+   components distinct and non-zero, and a luni-solar acceleration whose three components differ in
+   sign and size — so no term of the right-hand side is annihilated or degenerate. */
+x : 15000000$  y : -8000000$  z : 19000000$
+vx : 1500$     vy : 3000$     vz : -900$
+ax : 1/10^6$   ay : -2/10^6$  az : 3/10^6$
+
+r2 : x^2 + y^2 + z^2$
+r  : sqrt(r2)$
+k  : (3/2) * j2 * mu * ae^2 / r^5$
+q  : 5*z^2/r2$
+
+dvx : -mu*x/r^3 + k*x*(q - 1) + omega^2*x + 2*omega*vy + ax$
+dvy : -mu*y/r^3 + k*y*(q - 1) + omega^2*y - 2*omega*vx + ay$
+dvz : -mu*z/r^3 + k*z*(q - 3)                          + az$
+
+printf(true, "r    ~,20e~%", bfloat(r))$
+printf(true, "dvx  ~,20e~%", bfloat(dvx))$
+printf(true, "dvy  ~,20e~%", bfloat(dvy))$
+printf(true, "dvz  ~,20e~%", bfloat(dvz))$

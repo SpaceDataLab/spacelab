@@ -1,0 +1,62 @@
+/* Gragg-Bulirsch-Stoer extrapolation — order structure verified in Maxima.
+ *
+ * GBS integrates a macro-step H with the modified-midpoint method at increasing substep counts n_j,
+ * then extrapolates the results to h -> 0. Two facts make it work, both proven here on the linear
+ * test y' = lambda y (z = lambda H, exact solution e^z):
+ *
+ *   (1) the modified-midpoint result S_n(z) approximates e^z with a global error that expands in EVEN
+ *       powers of h = H/n (Gragg 1965) — so it is second order and extrapolation in h^2 is valid;
+ *   (2) polynomial (Neville) extrapolation of S over the harmonic sequence n_j = 2,4,6,8,... in the
+ *       node h^2 kills successive even-power terms: the j-th diagonal entry T[j][j] has order 2j.
+ *
+ * Maxima builds S_n(z) from the recurrence (nothing transcribed), forms the tableau, and reports the
+ * leading error power of each diagonal entry. Orders must come out 2, 4, 6, 8, ...
+ *
+ * Run:  timeout 120 maxima --very-quiet -b derivations/gbs_extrapolation.mac
+ */
+
+/* modified-midpoint result for y' = lambda y, n substeps, mu = z/n; returns S_n as a series in z.
+ *   Delta_0 = 1,  Delta_1 = 1 + mu,  Delta_{m+1} = Delta_{m-1} + 2 mu Delta_m,
+ *   S = 1/2 ( (1 + mu) Delta_n + Delta_{n-1} )      [Gragg smoothing, h f(Delta_n) = mu Delta_n] */
+midpoint_S(n) := block([mu : z/n, dp : 1, dc, dn, m],
+  dc : 1 + mu,
+  for m : 1 thru n - 1 do (dn : dp + 2*mu*dc, dp : dc, dc : dn),
+  ratexpand((1/2)*((1 + mu)*dc + dp)))$
+
+/* leading power and coefficient of (expr - e^z) as a series in z */
+leading_err(expr, upto) := block([s, p],
+  s : taylor(expr - exp(z), z, 0, upto),
+  s : ratdisrep(s),
+  if s = 0 then [inf, 0]
+  else block([lp : lopow(expand(s), z)], [lp, ratcoef(expand(s), z, lp)]))$
+
+print("=== modified-midpoint base method (single, no extrapolation) ===")$
+for n in [2, 4, 6] do block([le : leading_err(midpoint_S(n), 6)],
+  print("  n =", n, ": S_n - e^z  leading term  z^", le[1],
+        "  (order", le[1] - 1, ")  coeff =", le[2]))$
+
+/* --- extrapolation tableau over the harmonic sequence n_j = 2 j --- */
+nseq : [2, 4, 6, 8, 10]$
+q : length(nseq)$
+for j : 1 thru q do T[j, 1] : midpoint_S(nseq[j])$
+for j : 2 thru q do for kk : 2 thru j do
+  T[j, kk] : ratexpand(T[j, kk-1]
+             + (T[j, kk-1] - T[j-1, kk-1])/((nseq[j]/nseq[j-kk+1])^2 - 1))$
+
+print("")$
+print("=== extrapolation diagonal T[j][j]: order must be 2 j ===")$
+allok : true$
+for j : 1 thru q do block([le : leading_err(T[j, j], 2*q + 3), want : 2*j],
+  print("  T[", j, "][", j, "]:  error z^", le[1], "  -> order", le[1] - 1,
+        "   (expected", want, ")",
+        if le[1] - 1 = want then " OK" else " MISMATCH"),
+  if le[1] - 1 # want then allok : false)$
+print("")$
+print(if allok then "ALL ORDERS CONFIRMED (2,4,6,8,10)" else "ORDER MISMATCH")$
+
+/* --- extrapolation denominators (n_j/n_{j-k+1})^2 - 1 for the Rust to mirror --- */
+print("")$
+print("=== tableau denominators d[j][k] = (n_j/n_{j-k+1})^2 - 1, harmonic n_j = 2 j ===")$
+for j : 2 thru q do for kk : 2 thru j do
+  print("  d[", j, "][", kk, "] =", (nseq[j]/nseq[j-kk+1])^2 - 1)$
+print("DONE")$

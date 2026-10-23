@@ -1,0 +1,25 @@
+[package]
+name = "spacelab-astro"
+description = "Two-body and conic mission design: universal-variable Kepler, Lambert transfers, patched conics."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["astrodynamics", "lambert", "kepler", "cr3bp", "orbital-mechanics"]
+categories = ["aerospace", "aerospace::simulation", "science"]
+exclude.workspace = true
+
+[dependencies]
+libm = "0.2"
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+
+[dev-dependencies]
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+spacelab-testkit = { path = "../spacelab-testkit" }
+
+[lints]
+workspace = true

@@ -1,0 +1,9 @@
+/* The drag acceleration's velocity Jacobian has trace -2 (Cd A/m) rho |v_rel|, negative, so by
+   Liouville d(ln det Phi)/dt = tr(df/dstate) < 0 and the STM contracts phase volume (det Phi < 1).
+   This is what `forces.rs` claims and the drag STM test measures. rho is independent of v here. */
+vrel: [vx, vy, vz]$
+speed: sqrt(vx^2 + vy^2 + vz^2)$
+a: -(1/2)*B*rho*speed*vrel$   /* -1/2 B rho |v_rel| v_rel */
+J: jacobian(a, [vx, vy, vz])$
+tr: J[1,1] + J[2,2] + J[3,3]$
+print("drag trace identity: ", radcan(tr - (-2*B*rho*speed)))$

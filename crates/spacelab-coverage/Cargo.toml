@@ -1,0 +1,37 @@
+[package]
+name = "spacelab-coverage"
+description = "Access-window detection: sign-change bracketing and bracket-preserving root refinement."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["coverage", "access", "root-finding", "satellite", "visibility"]
+categories = ["aerospace", "science"]
+exclude.workspace = true
+
+[package.metadata.docs.rs]
+features = ["std"]
+
+[dependencies]
+spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+spacelab-sensors = { path = "../spacelab-sensors", version = "0.1.0" }
+libm = "0.2"
+
+[features]
+default = []
+std = []
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "coverage"
+harness = false
+required-features = ["std"]

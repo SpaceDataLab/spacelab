@@ -1,0 +1,27 @@
+assume(R>0, L>1, a>0, a<%pi/2)$
+declare(lam, real)$
+G:[0,0,R]$ S:L*R*[sin(lam),0,cos(lam)]$ d:S-G$ zen:[0,0,1]$
+nrm : sqrt(trigsimp(d.d))$
+
+/* ---- 1. mask-elevation footprint: our root vs SaVi's published form ---- */
+sol  : solve(ratsimp((trigsimp(d.zen/nrm))^2 - sin(a)^2), cos(lam))$
+cl   : rhs(sol[2])$
+rho_ours : sqrt(1 - cl^2)$
+rho_savi : cos(a)*(sqrt(1 - cos(a)^2/L^2) - sin(a)/L)$
+print("MASK  rho_ours^2 - rho_savi^2  simplifies to:",
+      ratsimp(radcan(rho_ours^2 - rho_savi^2)))$
+
+/* ---- 2. cone of half-angle a about nadir ---- */
+Sh   : [sin(lam),0,cos(lam)]$
+costh: trigsimp((d . Sh)/nrm)$
+solc : solve(ratsimp(costh^2 - cos(a)^2), cos(lam))$
+print("CONE cos(lam) roots:", solc)$
+rc   : rhs(solc[2])$
+rho_cone_ours : sqrt(1 - rc^2)$
+rho_cone_savi : sin(a)*(L*cos(a) - sqrt(1 - L^2*sin(a)^2))$
+print("CONE  rho_ours^2 - rho_savi^2  simplifies to:",
+      ratsimp(radcan(rho_cone_ours^2 - rho_cone_savi^2)))$
+
+/* ---- 3. the horizon branch: when does the cone root cease to exist? ---- */
+print("cone root is real iff 1 - L^2 sin(a)^2 >= 0, i.e. L <= 1/sin(a)")$
+print("horizon rho at cos(lam)=1/L:", ratsimp(sqrt(1-(1/L)^2)))$

@@ -1,0 +1,9 @@
+u := sqrt(L^2 - 1 + s^2)
+clOurs := (s*u + 1 - s^2)/L
+rhoSavi := sqrt(1-s^2) * (u/L - s/L)
+maskDiff := simplify((1 - clOurs^2) - rhoSavi^2)
+v := sqrt(1 - L^2*s^2)
+c := sqrt(1 - s^2)
+clCone := L - L*(1-s^2) + c*v
+coneDiff := simplify((1 - clCone^2) - (s*(L*c - v))^2)
+)quit

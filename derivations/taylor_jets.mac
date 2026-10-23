@@ -1,0 +1,44 @@
+/* Taylor-mode automatic differentiation (jets) — the recurrences the adaptive Taylor integrator
+ * uses to carry a truncated power series through arithmetic and elementary functions, verified to
+ * reproduce the true Taylor coefficients of the corresponding function, and the ODE bootstrap
+ * verified to reproduce a known solution's series.
+ *
+ * A jet is u(t) = Σ u_k t^k truncated at order N. For each operation the code computes the output
+ * coefficients w_k by a recurrence; this script confirms w_k = [f(u)]_k (the k-th Taylor coefficient)
+ * for f = 1/u, √u, u^p, and confirms the ODE step a_{k+1} = [f(y)]_k/(k+1) on a model problem.
+ *
+ *   maxima --very-quiet -b taylor_jets.mac
+ */
+
+N : 6$
+u : sum(concat('u, k) * t^k, k, 0, N)$    /* symbolic series u0 + u1 t + ... + uN t^N */
+coef(series, k) := ratcoef(series, t, k)$
+
+/* Reciprocal: w0 = 1/u0;  w_k = −(1/u0) Σ_{j=1}^k u_j w_{k−j}. */
+wr : makelist(0, N + 1)$  wr[1] : 1/concat('u, 0)$
+for k:1 thru N do wr[k + 1] : -1/concat('u, 0) * sum(coef(u, j) * wr[k - j + 1], j, 1, k)$
+print("recip: max |w_k − [1/u]_k| (=0?):",
+      ratsimp(apply(max, makelist(abs(wr[k + 1] - coef(taylor(1/u, t, 0, N), k)), k, 0, N))));
+
+/* Square root: w0 = √u0;  w_k = (u_k − Σ_{j=1}^{k−1} w_j w_{k−j}) / (2 w0). */
+ws : makelist(0, N + 1)$  ws[1] : sqrt(concat('u, 0))$
+for k:1 thru N do ws[k + 1] : (coef(u, k) - sum(ws[j + 1] * ws[k - j + 1], j, 1, k - 1)) / (2 * ws[1])$
+print("sqrt: max |w_k − [√u]_k| (=0?):",
+      ratsimp(apply(max, makelist(abs(ratsimp(ws[k + 1] - coef(taylor(sqrt(u), t, 0, N), k))), k, 0, N))));
+
+/* Real power (p = −3/2, the r⁻³ of gravity): w0 = u0^p;
+ * w_k = (1/(k u0)) Σ_{j=0}^{k−1} (p(k−j) − j) u_{k−j} w_j. */
+p : -3/2$
+wp : makelist(0, N + 1)$  wp[1] : concat('u, 0)^p$
+for k:1 thru N do wp[k + 1] : (1/(k * concat('u, 0))) * sum((p*(k - j) - j) * coef(u, k - j) * wp[j + 1], j, 0, k - 1)$
+print("powf: max |w_k − [u^p]_k| (=0?):",
+      ratsimp(apply(max, makelist(abs(ratsimp(wp[k + 1] - coef(taylor(u^p, t, 0, N), k))), k, 0, N))));
+
+/* ODE bootstrap on y' = y², y(0) = 1 (exact y = 1/(1−t), all Taylor coeffs 1):
+ * a_{k+1} = [y²]_k / (k+1), with [y²]_k the Cauchy product coefficient. */
+a : makelist(0, N + 1)$  a[1] : 1$
+for k:0 thru N - 1 do (
+    ysq : sum(a[i + 1] * a[k - i + 1], i, 0, k),
+    a[k + 2] : ysq / (k + 1)
+)$
+print("ode bootstrap y'=y^2: a_k − 1 for k=0..N (all =0?):", makelist(a[k + 1] - 1, k, 0, N));

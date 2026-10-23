@@ -1,0 +1,9 @@
+# Test threads default to a 2 MiB stack (libtest), but several force models here are large
+# fixed-size, no-alloc value types held on the stack by design — notably `GeoPotential` at the
+# degree-120 ceiling (~0.83 MB) plus its solid-harmonic scratch, and `OceanTide`'s degree-grid /
+# flattened-coefficient buffers. Building and evaluating these on a 2 MiB test thread overflows in
+# unoptimised (debug) builds. Production runs them on the 8 MiB main thread; this raises libtest's
+# per-thread stack to match with headroom. `RUST_MIN_STACK` only ever *increases* a thread's stack
+# reservation (threads with an explicit `stack_size` are unaffected), so it has no runtime effect.
+[env]
+RUST_MIN_STACK = "16777216"

@@ -1,0 +1,26 @@
+/* The outward normal of the WGS-84 ellipsoid, and why the cell grid need not store it.
+
+   Surface:  f(x,y,z) = x^2/a^2 + y^2/a^2 + z^2/b^2 - 1 = 0
+   Normal  :  grad f = 2*(x/a^2, y/a^2, z/b^2)  ∝  (x, y, z*a^2/b^2)
+
+   So with gamma = a^2/b^2 the *direction* of the zenith is (x, y, gamma*z): one multiply,
+   no storage. Only its squared length m^2 = x^2 + y^2 + gamma^2 z^2 is needed, and the
+   sqrt-free predicate never takes its root. */
+a : 'a$ b : 'b$
+f : x^2/a^2 + y^2/a^2 + z^2/b^2 - 1$
+gradf : [diff(f,x), diff(f,y), diff(f,z)]$
+print("grad f =", gradf)$
+print("scaled by a^2/2 =", ratsimp( (a^2/2) * gradf ))$
+print("  => zenith direction is (x, y, (a^2/b^2)*z); gamma = a^2/b^2")$
+
+/* the predicate, with the unnormalised normal n = (x, y, gamma*z), m = |n| */
+print("t = d.zhat = (d.n)/m, so   t >= s*sqrt(q)  <=>  (d.n) >= s*m*sqrt(q)")$
+print("                        <=>  (d.n) >= 0  and  (d.n)^2 >= s^2 * m^2 * q")$
+print("m^2 = x^2 + y^2 + gamma^2 z^2 : one fused expression, no square root anywhere")$
+
+/* numeric gamma for WGS-84 */
+aa : 6378137.0$
+ff : 1/298.257223563$
+bb : aa*(1-ff)$
+print("WGS-84 gamma = a^2/b^2 =", float(aa^2/bb^2))$
+print("check 1/(1-e^2) =", float(1/(1-(2*ff-ff^2))))$

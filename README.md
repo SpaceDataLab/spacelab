@@ -13,12 +13,29 @@ is being done about it.
 The claim it is organised around is not "fast" or "complete". It is that **every number it produces
 has been checked against something that did not come from here**, and that the check is written down
 — which oracle, which lineage, what residual, in which test — in
-[`docs/verification.md`](docs/verification.md), 1 026 rows of it.
+[`docs/verification.md`](docs/verification.md), one row per check.
+
+## Install
+
+```toml
+[dependencies]
+spacelab = "0.1"        # the assembled API, or any single crate, e.g. spacelab-sgp4
+```
+
+```sh
+pip install spacedatalab    # CPython 3.11+, and free-threaded 3.15t; `import spacelab`
+```
+
+The Python distribution is `spacedatalab` because `spacelab` on PyPI is an unrelated empty
+registration; the module is `spacelab` either way. The C ABI and its C++20 header build with
+CMake from [`crates/spacelab-capi`](crates/spacelab-capi).
+
+From a checkout:
 
 ```sh
 tools/fetch-eop.sh
 cargo run -p spacelab --example ground_track
-cargo test --workspace                 # 3 078 tests
+cargo test --workspace
 ```
 
 ## The number that matters most

@@ -56,6 +56,16 @@ _capi-matrix DIR CC CXX:
     cmake --build target/{{DIR}}
     ctest --test-dir target/{{DIR}} --output-on-failure
 
+# ── README figures ────────────────────────────────────────────────────────────
+
+# The README figures and the numbers their captions quote, regenerated through a freshly built wheel
+# against python-sgp4 and ERFA. `just figures --check` exits 1 if a quoted number has moved.
+figures *ARGS:
+    rm -rf target/figures-wheel
+    cd crates/spacelab-python && uvx maturin build --release -o ../../target/figures-wheel
+    uv run --no-project --with target/figures-wheel/*.whl --with numpy --with matplotlib \
+        --with sgp4 --with pyerfa python tools/gen-figures.py {{ARGS}}
+
 # ── Mutation campaign ─────────────────────────────────────────────────────────
 #
 # Every recipe below runs under two nested memory caps, because a mutated adaptive integrator is

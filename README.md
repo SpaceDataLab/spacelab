@@ -43,11 +43,23 @@ precise orbit** for 2025-01-01, post-fit residual in metres of real orbit.
 | DE440 kernel | 0.054 | 0.063 | 0.045 | **0.094 m** |
 | Orekit 13.1.7, its own fit of the same file | 0.053 | 0.062 | 0.065 | **0.105 m** |
 
-
 Earth orientation, the CIO frame chain, the geopotential, luni-solar attraction, solar pressure,
 relativity, the variational equations and the estimator all have to be right together for that to
 come out small. Two independent implementations agree within a centimetre
 ([`igs_orbit_fit.rs`](crates/spacelab/tests/igs_orbit_fit.rs)).
+
+Four more comparisons, each against something that did not come from here, regenerated through
+the Python bindings by [`tools/gen-figures.py`](tools/gen-figures.py):
+
+<!-- BEGIN GENERATED FIGURES — tools/gen-figures.py -->
+
+| ![SGP4 against python-sgp4](https://raw.githubusercontent.com/SpaceDataLab/spacelab/main/docs/figures/sgp4-reference.png) | ![GCRF to ITRF against ERFA](https://raw.githubusercontent.com/SpaceDataLab/spacelab/main/docs/figures/frames-erfa.png) |
+|:--:|:--:|
+| SGP4 against python-sgp4 over 24 h: at most **250 nm** (ISS) and **240 nm** (GPS); 3 % of the samples agree to the bit. Same lineage, so this pins units, epochs and frames. | The CIO chain against ERFA's identical route, 1900–2100: at most **0.012 µas**, 360 nm on the ground. ERFA's matrix route differs by up to 3.7 µas: two formulations of one model, not an error. |
+| ![Brute-force sampling against the event engine](https://raw.githubusercontent.com/SpaceDataLab/spacelab/main/docs/figures/access-windows.png) | ![Coverage map with the analytic reach](https://raw.githubusercontent.com/SpaceDataLab/spacelab/main/docs/figures/coverage-map.png) |
+| 108 cells, 24 h: at a 1 s step brute force finds **417 of 417** passes and agrees on coverage to **0.0045 %**; at 600 s it misses 79. The engine needs no step: it brackets every edge and refines it to 1 ms. | The engine's coverage of 10368 cells ends at **71.25°** latitude, the last cell inside the analytic reach of the 5° mask, **71.5°** (dashed). |
+
+<!-- END GENERATED FIGURES -->
 
 ## Why it is different
 

@@ -796,7 +796,7 @@ def test_vmf_grid_bindings():
         "fixtures",
         "vmf3_5x5_20181125.H00",
     )
-    with open(grid_path) as fh:
+    with open(grid_path, encoding="utf-8") as fh:
         grid_text = fh.read()
     ah, aw, zhd, zwd = sl.vmf_grid_coefficients(
         grid_text, math.radians(77.5), math.radians(2.5)
@@ -861,7 +861,7 @@ def test_density_data_bindings():
         "fixtures",
         "champ_density_sample.txt",
     )
-    with open(fixture) as fh:
+    with open(fixture, encoding="utf-8") as fh:
         text = fh.read()
     lats, lsts, ratios, weights = sl.density_data_samples(text)
     assert len(lats) == 30 == len(lsts) == len(ratios) == len(weights)
@@ -888,7 +888,7 @@ def test_space_weather_and_dynamics_bindings():
         "fixtures",
         "celestrak_sw_sample.csv",
     )
-    with open(sw) as fh:
+    with open(sw, encoding="utf-8") as fh:
         years, months, days, ap, f107, _f107c = sl.space_weather_days(fh.read())
     assert len(years) == 7
     i = next(k for k in range(7) if (years[k], months[k], days[k]) == (1957, 10, 1))
@@ -934,7 +934,7 @@ def test_space_weather_and_dynamics_bindings():
     )
 
     # Storm-time 7-element NRLMSISE-00 ap_array from the 3-hourly AP1..AP8 history (2000-08-01, sec=0).
-    with open(sw) as fh:
+    with open(sw, encoding="utf-8") as fh:
         sw_text = fh.read()
     apa = sl.space_weather_ap_array(sw_text, 2000, 8, 1, 0.0)
     expected = [12.0, 9.0, 48.0, 56.0, 15.0, 8.625, 10.5]
@@ -968,7 +968,7 @@ def test_space_weather_and_dynamics_bindings():
         "fixtures",
         "eigen6s2_lowdeg_timevariable.gfc",
     )
-    with open(fixture) as fh:
+    with open(fixture, encoding="utf-8") as fh:
         tvg = sl.TimeVariableGravity.parse(fh.read())
     assert len(tvg) == 2, len(tvg)  # (2,0) and (3,0)
     # C20 at three epochs in three different piecewise segments (a purely secular model would miss two),
@@ -1025,7 +1025,7 @@ def test_photogrammetry_bindings():
         "fixtures",
         "pleiades_reunion.rpb",
     )
-    with open(rpb) as fh:
+    with open(rpb, encoding="utf-8") as fh:
         rpc = sl.Rpc.parse_rpb(fh.read())
     row, col = rpc.forward(-21.2316081288, 55.7119698801, 1295.0)
     assert (

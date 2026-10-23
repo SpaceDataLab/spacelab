@@ -648,7 +648,7 @@ def test_rpc_block_adjust_removes_an_injected_bias():
         "fixtures",
         "pleiades_reunion.rpb",
     )
-    with open(fixture) as handle:
+    with open(fixture, encoding="utf-8") as handle:
         rpc = sl.Rpc.parse_rpb(handle.read())
 
     # Generate control points from the RPC's own forward map, displaced by a known constant. The
@@ -2007,7 +2007,7 @@ def test_every_export_is_named_by_a_test():
     here = os.path.dirname(__file__)
     sources = ""
     for name in ("smoke.py", "bindings.py"):
-        with open(os.path.join(here, name)) as handle:
+        with open(os.path.join(here, name), encoding="utf-8") as handle:
             sources += handle.read()
     unnamed = sorted(
         name for name in dir(sl) if not name.startswith("_") and name not in sources

@@ -17,3 +17,11 @@ added and against which independent lineage.
 ### Added
 
 - spacelab 0.1.0, the first public release (`d25e2cb`)
+
+### Fixed
+
+- **python**: publish the wheels as `spacedatalab` (`7c695b5`)
+
+### Documentation
+
+- **changelog**: project the first release (`1fc7914`)

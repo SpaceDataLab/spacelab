@@ -138,12 +138,11 @@ def releases() -> list[tuple[str, str | None]]:
 
 
 def in_span(
-    rows: list[tuple[str, str]], since: str | None, tip: str
+    rows: list[tuple[str, str]], since: str | None, until: str
 ) -> list[tuple[str, str]]:
-    if since is None:
-        return rows
+    """The rows reachable from `until` and not from `since`: a tag's section ends at the tag."""
     reachable = subprocess.run(
-        ["git", "rev-list", "--format=%h", f"{since}..{tip}"],
+        ["git", "rev-list", "--format=%h", f"{since}..{until}" if since else until],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -214,7 +213,7 @@ def build(tip: str = "HEAD") -> str:
     rows = commits(tip)
     out = [PREAMBLE.rstrip("\n")]
     for title, since in releases():
-        span = in_span(rows, since, tip)
+        span = in_span(rows, since, tip if title == "Unreleased" else title)
         if not span and title == "Unreleased":
             continue
         out += ["", f"## {title}"]

@@ -12,6 +12,33 @@ change the public API.
 by-product -- see [`docs/verification.md`](docs/verification.md) for what each of those commits
 added and against which independent lineage.
 
+## Unreleased
+
+### Fixed
+
+- **tools**: end each changelog section at its tag (`d3e4e58`)
+
+## v0.2.0
+
+### Added
+
+- **BREAKING** **python**: import the bindings as `spacedatalab` (`f25c20d`)
+
+### Changed
+
+- **python**: publish the bridge as a library the umbrella wheel links (`d48e88e`)
+
+### Documentation
+
+- **changelog**: project the first release with the test fix (`dd175ab`)
+- **readme**: say how to install it, and drop two hand-typed counts (`19f3531`)
+- **readme**: shorten the README and give the PyPI page one (`9c3da58`)
+- **readme**: show four figures checked against independent references (`0dfaf92`)
+
+### Internal
+
+- 1 commits that change neither the published crates nor what has been checked: 1 `chore`. Listed in `git log`, not here.
+
 ## v0.1.0
 
 ### Added

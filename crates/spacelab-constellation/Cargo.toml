@@ -24,8 +24,8 @@ std = []
 
 [dependencies]
 libm = "0.2"
-spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
-spacelab-elements = { path = "../spacelab-elements", version = "0.1.0" }
+spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
+spacelab-elements = { path = "../spacelab-elements", version = "0.2.0" }
 
 [dev-dependencies]
 spacelab-testkit = { path = "../spacelab-testkit" }

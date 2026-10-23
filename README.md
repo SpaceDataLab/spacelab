@@ -22,7 +22,7 @@
 
 ```toml
 [dependencies]
-spacelab = "0.1"    # the assembled API, or any single crate, e.g. spacelab-sgp4
+spacelab = "0.2"    # the assembled API, or any single crate, e.g. spacelab-sgp4
 ```
 
 ```sh

@@ -18,9 +18,9 @@ features = ["onnx"]
 
 [dependencies]
 libm = "0.2"
-spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
 # Cloud-mask ONNX inference (opt-in). Pulls spacelab-vision's `tract` runtime and forces `std`.
-spacelab-vision = { path = "../spacelab-vision", version = "0.1.0", optional = true }
+spacelab-vision = { path = "../spacelab-vision", version = "0.2.0", optional = true }
 
 [features]
 # The `cloud` module: run a segmentation CNN (ONNX via spacelab-vision's tract) over a tile. Std-only.

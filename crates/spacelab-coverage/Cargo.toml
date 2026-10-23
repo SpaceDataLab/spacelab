@@ -17,8 +17,8 @@ exclude.workspace = true
 features = ["std"]
 
 [dependencies]
-spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
-spacelab-sensors = { path = "../spacelab-sensors", version = "0.1.0" }
+spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
+spacelab-sensors = { path = "../spacelab-sensors", version = "0.2.0" }
 libm = "0.2"
 
 [features]

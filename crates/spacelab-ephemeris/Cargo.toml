@@ -17,9 +17,9 @@ exclude.workspace = true
 # ANISE (MPL-2.0) reads JPL DE SPK kernels; it is the only crate pulling this heavy tree, so the
 # core crates' build is unaffected. It is NOT nyx-space (AGPL) — see plans/13-deep-space.md.
 anise = "0.10"
-spacelab-core = { path = "../spacelab-core", version = "0.1.0" }
+spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
 # For the Ephemeris-trait bridge, so a DE440 body can feed ThirdBody / SolarRadiationPressure.
-spacelab-propagation = { path = "../spacelab-propagation", version = "0.1.0" }
+spacelab-propagation = { path = "../spacelab-propagation", version = "0.2.0" }
 
 [dev-dependencies]
 spacelab-astro = { path = "../spacelab-astro" }

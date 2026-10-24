@@ -16,6 +16,12 @@
 //! truncated `a/r³` expansion (Moon `a/r ≈ 0.018` vs Sun `5e-5`), while `da ≈ 0` reproduces the
 //! semimajor-axis theorem. This validates Orekit's own values, not merely that the port matches them.
 //!
+//! `derivations/dsst_third_body_average.mac` checks the expansion itself exactly, in Maxima. The
+//! kernel recurrence and its roots equal the definition K₀ⁿˢ = ⟨(r/a)ⁿ cos sf⟩/eˢ for s ≤ 6 and
+//! n ≤ s+8, and the derivative recurrence equals d/dχ. For n = 2..6 the Vₙₛ Qₙₛ K₀ⁿˢ Gₛ sum equals the
+//! orbit average of (r/a)ⁿ Pₙ(cos ψ), the degree-n term of the point-mass potential. Each partial
+//! `potential_derivatives` returns is the derivative of the returned U.
+//!
 //! # What differs from the zonal contribution
 //!
 //! The final `[da, dk, dh, dq, dp, dλ]` assembly (the equinoctial Lagrange brackets, Danielson

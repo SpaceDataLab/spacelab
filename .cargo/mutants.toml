@@ -1656,12 +1656,12 @@ exclude_re = [
     # `dq = -C/(2AB) * U_alphagamma * I`, with `I: f64 = 1.0` (the retrograde factor). `x * 1.0` and
     # `x / 1.0` are the same double for every `x` -- both are exact identity operations in IEEE-754,
     # agreeing on +-0, +-inf and NaN alike. Unconditional; no reachability argument needed.
-    "third_body\\.rs:328:45: replace \\* with / in DsstThirdBody::mean_element_rates_with_trunc",
+    "third_body\\.rs:334:45: replace \\* with / in DsstThirdBody::mean_element_rates_with_trunc",
     # The `n - s` even test in the `UAnddU` double sum. `n` and `s` are `usize` and the loop is
     # `for n in s.max(2)..=max_ar3_pow`, so `n >= s` (the subtraction cannot underflow) and
     # `n + s <= 2*MAX_POWER = 44` (the addition cannot overflow). `(n + s) - (n - s) = 2s`, so the two
     # expressions have the same parity for every reachable `(n, s)` and the branch is identical.
-    "third_body\\.rs:396:23: replace - with \\+ in DsstThirdBody::potential_derivatives",
+    "third_body\\.rs:402:23: replace - with \\+ in DsstThirdBody::potential_derivatives",
     # `if term < tol` in the truncation walk. `<` and `<=` differ only where the series bound T(n,m)
     # lands bit-exactly on `1.9e-6` or `1e-1`. NOT A PROOF, a bounded search: over the 440-state sweep
     # in `truncation_matches_the_series_bound_rule` (~112k lattice evaluations, a/R3 from 5e-5 to 0.4,
@@ -1669,7 +1669,7 @@ exclude_re = [
     # 5e11 ulps. A tie is attainable in principle -- T is continuous in R3 and e -- but only by
     # bisecting an input until the module's own rounded eight-factor product lands exactly on the
     # constant, which would make the code under test its own oracle. Every other mutant here dies.
-    "third_body\\.rs:247:21: replace < with <= in DsstThirdBody::truncation",
+    "third_body\\.rs:253:21: replace < with <= in DsstThirdBody::truncation",
     # --- DSST zonal short-period index arithmetic (`fourier_cj_sj`, `compute_cij_sij`). ---
     # `short_period_correction` is the only caller and always passes `sMax = min(4, N-1)` and
     # `jMax = 2N+1`, so `sMax <= N-1` is an invariant of every loop below. Each entry was patched in

@@ -559,6 +559,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima dsst_zonal_average.mac" "expected 4 checks to hold, found $holds"
     fi
 
+    out=$(macf dsst_third_body_average.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 5 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima dsst_third_body_average.mac: the third-body Hansen kernels are their definition, U is the point-mass orbit average for n = 2..6, its partials are U's"
+    else
+        bad "maxima dsst_third_body_average.mac" "expected 5 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

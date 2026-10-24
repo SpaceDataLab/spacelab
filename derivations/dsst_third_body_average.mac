@@ -1,0 +1,151 @@
+/* `spacelab-propagation::dsst::third_body`, the averaged third-body potential, against the orbit
+   average it stands for.
+
+   The module ports Orekit's DSSTThirdBody: U = mu3/R3 sum over n >= 2 and s of
+   (2 - delta_0s) (a/R3)^n V_ns Q_ns(gamma) K0^{n,s}(chi) G_s(k, h, alpha, beta), with the
+   third-body Hansen kernels from Collins 4-254's recurrence. It is checked bit-for-bit against
+   Orekit and numerically, to 3e-9, against a Python orbit average. Here, exactly:
+     (1) the shipped kernel recurrence and its roots are the kernels' definition
+         K0^{n,s} = <(r/a)^n cos(s f)>_M / e^s, averaged in the eccentric anomaly where
+         (r/a)^s exp(i s f) = (cos E - e + i B sin E)^s and dM = (1 - e cos E) dE, s = 0..6,
+         n = s..s+8; and the shipped chi-derivative recurrence is d/dchi of it;
+     (2) for n = 2..6 the shipped sum is the orbit average of (r/a)^n P_n(cos psi), the degree-n
+         term of the point-mass potential: exactly in the perifocal frame, where the solid
+         harmonic is a polynomial in cos E and sin E, and by quadrature at e = 0.6 from the
+         equinoctial position in the eccentric longitude;
+     (3) each of the six partials `potential_derivatives` returns is the shipped U's partial.  */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+NMAX : 6$
+leg(n, x) := subst(xx = x, ratsimp(diff((xx^2 - 1)^n, xx, n)/(2^n*n!)))$
+/* The mean of a trigonometric polynomial in t: its z^0 coefficient with z = exp(i t). */
+avg(e, t) := ratsimp(rectform(coeff(expand(subst([cos(t) = (z + 1/z)/2, sin(t) = (z - 1/z)/(2*%i)],
+                                                 e)), z, 0)))$
+
+/* ---- the shipped kernels, `HansenThirdBody::new`, at symbolic B --------------------------------- */
+hansen3(nmax, s) := block([v : makelist(0, i, 0, nmax), dv : makelist(0, i, 0, nmax), t1, t2, a, b],
+  t1 : (if evenp(s) then 1 else -1)*product((2*i + 1)/(i + 1), i, 1, s),
+  t2 : t1/(s + 2),
+  v[s + 1] : t1, dv[s + 1] : 0,
+  if s < nmax then (v[s + 2] : t2*(2*s + 3 - B^2), dv[s + 2] : 2*t2*B^3),
+  for n : s + 2 thru nmax do (
+    a : (2*n + 1)/(n + 1), b : -(n + s)*(n - s)/(n*(n + 1)),
+    v[n + 1] : expand(a*v[n] + b*B^2*v[n - 1]),
+    dv[n + 1] : expand(a*dv[n] + b*B^2*dv[n - 1] - 2*b*B^3*v[n - 1])),
+  [v, dv])$
+
+/* ---- (1) the kernels against their definition ----------------------------------------------- */
+xdef(n, s) := block([w : 1 - e*cos(E)],
+  avg(expand(w^(n - s)*realpart(expand((cos(E) - e + %i*B*sin(E))^s))*w), E))$
+kdef(n, s) := ratsimp(ratsubst(1 - B^2, e^2, ratsimp(xdef(n, s)/e^s)))$
+bad : 0$  badd : 0$  count : 0$
+for s : 0 thru 6 do block([r : hansen3(s + 8, s)],
+  for n : s thru s + 8 do block([kd : kdef(n, s)],
+    count : count + 1,
+    if ratsimp(r[1][n + 1] - kd) # 0 then bad : bad + 1,
+    /* dK/dchi = dK/dB dB/dchi = -B^2 dK/dB. */
+    if ratsimp(r[2][n + 1] + B^2*diff(kd, B)) # 0 then badd : badd + 1))$
+print("third-body kernels compared:", count, "  value mismatches:", bad, "  derivative mismatches:", badd)$
+must(is(count = 63 and bad = 0),
+     "(1) holds: the shipped roots and recurrence are <(r/a)^n cos sf>/e^s exactly, s = 0..6, n = s..s+8")$
+must(is(badd = 0),
+     "(1) holds: the shipped derivative recurrence is d/dchi = -B^2 d/dB of the definition on all 63")$
+
+/* ---- the shipped pieces shared with the zonal force --------------------------------------------- */
+vtab : block([o : NMAX + 1, v],
+  v : genmatrix(lambda([i, j], 0), o, o), v[1, 1] : 1,
+  for n : 0 thru o - 1 do for s : 0 thru n do
+    if mod(n - s, 2) = 0 then (
+      if n = s and s + 1 < o then v[s + 2, s + 2] : v[s + 1, s + 1]/(2*s + 2),
+      if n + 2 < o then v[n + 3, s + 1] : v[n + 1, s + 1]*(-n + s - 1)/(n + s + 2)),
+  v)$
+V(n, s) := vtab[n + 1, s + 1]$
+qtab : block([q : genmatrix(lambda([i, j], 0), NMAX + 1, NMAX + 2)],
+  q[1, 1] : 1,
+  for n : 1 thru NMAX do for s : 0 thru n do
+    q[n + 1, s + 1] : ratsimp(
+      if n - s = 0 then (2*s - 1)*q[s, s]
+      else if n - s = 1 then (2*s + 1)*ga*q[s + 1, s + 1]
+      else ((2*n - 1)*ga*q[n, s + 1] - (n + s - 1)*q[n - 1, s + 1])/(n - s)),
+  q)$
+Q(n, s) := if s > n then 0 else qtab[n + 1, s + 1]$
+/* `compute_gs_hs`: G_s + i H_s = (kaphb + i hamkb)^s, so G_s reads (k, h, alpha, beta) only
+   through these two. */
+gsh(kaphb, hamkb) := block([g : makelist(0, i, 0, NMAX), hh : makelist(0, i, 0, NMAX)],
+  g[1] : 1, hh[1] : 0,
+  for s : 1 thru NMAX do (
+    g[s + 1] : expand(kaphb*g[s] - hamkb*hh[s]), hh[s + 1] : expand(hamkb*g[s] + kaphb*hh[s])),
+  [g, hh])$
+gh : gsh(k*al + h*be, h*al - k*be)$
+G(s) := gh[1][s + 1]$
+Hs(s) := gh[2][s + 1]$
+htab : makelist(hansen3(NMAX, s), s, 0, NMAX)$
+K(n, s) := htab[s + 1][1][n + 1]$
+dK(n, s) := htab[s + 1][2][n + 1]$
+d0(s) := if s = 0 then 1 else 2$
+term_g(n, g) := sum(if mod(n - s, 2) = 0 then d0(s)*V(n, s)*Q(n, s)*K(n, s)*g[s + 1] else 0, s, 0, n)$
+term(n) := term_g(n, gh[1])$
+
+/* ---- (2) the orbit average of the degree-n term -------------------------------------------------
+   In the perifocal frame r/a = (cos E - e) P_hat + B sin E Q_hat, and with P = b_hat . P_hat,
+   W = b_hat . Q_hat the body direction there, k alpha + h beta = e P, h alpha - k beta = -e W and
+   alpha^2 + beta^2 = P^2 + W^2: (k, h, alpha, beta) reach the shipped sum only as (e, P, W). */
+ua : P*(cos(E) - e) + W*B*sin(E)$
+ra2 : (cos(E) - e)^2 + B^2*sin(E)^2$
+ra : 1 - e*cos(E)$
+/* (r/a)^n P_n(u/r) = sum_j c_j (u/a)^(n-2j) (r/a)^(2j): a polynomial, so the average is exact. */
+solid(n, ua, ra2) := block([P : expand(leg(n, tt))],
+  expand(sum(coeff(P, tt, n - 2*j)*ua^(n - 2*j)*ra2^j, j, 0, floor(n/2))))$
+gp : gsh(e*P, -e*W)[1]$
+deg_ok : []$
+for n : 2 thru NMAX do block([lhs, rhs],
+  rhs : avg(solid(n, ua, ra2)*ra, E),
+  lhs : ratsubst(1 - P^2 - W^2, ga^2, term_g(n, gp)),
+  if is(ratsimp(ratsubst(1 - e^2, B^2, lhs - rhs)) = 0) then deg_ok : endcons(n, deg_ok))$
+print("degrees where the shipped sum is the orbit average:", deg_ok)$
+must(is(deg_ok = [2, 3, 4, 5, 6]),
+     "(2) holds: for n = 2..6 the shipped V Q K G sum is <(r/a)^n P_n(cos psi)>_M, the point-mass term")$
+/* The same average by quadrature at one orbit, e = 0.6, from (k, h, alpha, beta) through the
+   equinoctial position in the eccentric longitude F and the angle itself:
+   X/a = (1 - h^2 b') cos F + h k b' sin F - k, Y/a = (1 - k^2 b') sin F + h k b' cos F - h,
+   b' = 1/(1 + B), dM = (1 - k cos F - h sin F) dF, cos psi = (alpha X + beta Y)/r. */
+pt : [k = 12/25, h = 9/25, B = 4/5, al = 2/7, be = 3/7, ga = 6/7]$
+bq : 1/(1 + 4/5)$
+Xq : (1 - h^2*bq)*cos(F) + h*k*bq*sin(F) - k$
+Yq : (1 - k^2*bq)*sin(F) + h*k*bq*cos(F) - h$
+worst : 0$
+for n : 2 thru NMAX do block([X : subst(pt, Xq), Y : subst(pt, Yq), q, sh],
+  q : quad_qags(float((X^2 + Y^2)^(n/2)*leg(n, subst(pt, al*X + be*Y)/sqrt(X^2 + Y^2))
+                      *subst(pt, 1 - k*cos(F) - h*sin(F))), F, 0, 2*float(%pi),
+                'epsrel = 1e-12)[1]/(2*float(%pi)),
+  sh : float(subst(pt, term(n))),
+  print("  n =", n, " shipped", sh, " quadrature", q),
+  worst : max(worst, abs(q - sh)))$
+must(is(worst < 1e-12),
+     "(2) holds: quadrature in the eccentric longitude at e = 0.6 agrees with the shipped sum to 1e-12, n = 2..6")$
+
+/* ---- (3) the partials ------------------------------------------------------------------------- */
+Ush : mu3/R3*sum((a/R3)^n*term(n), n, 2, NMAX)$
+/* B = sqrt(1 - k^2 - h^2) carries U's k and h dependence through the kernels: dB/dk = -k/B. */
+dk_B(e) := diff(e, k) + diff(e, B)*(-k/B)$
+dh_B(e) := diff(e, h) + diff(e, B)*(-h/B)$
+pd : block([u : 0, da : 0, dkk : 0, dhh : 0, dal : 0, dbe : 0, dga : 0, chi3 : 1/B^3],
+  for s : 0 thru NMAX do block([dgsdh : 0, dgsdk : 0, dgsdal : 0, dgsdbe : 0],
+    if s > 0 then (
+      dgsdh : be*s*G(s - 1) - al*s*Hs(s - 1), dgsdk : al*s*G(s - 1) + be*s*Hs(s - 1),
+      dgsdal : k*s*G(s - 1) - h*s*Hs(s - 1), dgsdbe : h*s*G(s - 1) + k*s*Hs(s - 1)),
+    for n : max(s, 2) thru NMAX do if mod(n - s, 2) = 0 then block([c0, c1, c2, dq],
+      c0 : d0(s)*(a/R3)^n*V(n, s), c1 : c0*Q(n, s), c2 : c1*K(n, s),
+      dq : if n = s then 0 else Q(n, s + 1),
+      u : u + c2*G(s), da : da + c2*n*G(s),
+      dhh : dhh + c1*(K(n, s)*dgsdh + h*chi3*G(s)*dK(n, s)),
+      dkk : dkk + c1*(K(n, s)*dgsdk + k*chi3*G(s)*dK(n, s)),
+      dal : dal + c2*dgsdal, dbe : dbe + c2*dgsdbe, dga : dga + c0*K(n, s)*dq*G(s))),
+  [u*mu3/R3, da*mu3/R3/a, dkk*mu3/R3, dhh*mu3/R3, dal*mu3/R3, dbe*mu3/R3, dga*mu3/R3])$
+ref : [Ush, diff(Ush, a), dk_B(Ush), dh_B(Ush), diff(Ush, al), diff(Ush, be), diff(Ush, ga)]$
+pd_ok : makelist(is(ratsimp(pd[i] - ref[i]) = 0), i, 1, 7)$
+print("[U, dU/da, dU/dk, dU/dh, dU/dalpha, dU/dbeta, dU/dgamma] match:", pd_ok)$
+must(every(identity, pd_ok),
+     "(3) holds: all six partials potential_derivatives returns are the shipped U's, n <= 6")$
+
+print("DONE")$

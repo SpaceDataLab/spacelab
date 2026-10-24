@@ -1,0 +1,53 @@
+/* `spacelab-propagation::time_variable_gravity::decimal_year`, against a second calendar, every day.
+
+   ICGEM epochs are YYYYMMDD, and the module turns them into a decimal year with a cumulative
+   month table, the Gregorian leap rule and a 365/366-day year:
+
+       year + (CUM[month] + day - 1 + [leap and month > 2] + frac) / (leap ? 366 : 365).
+
+   The test pins the Rust transcription at seven dates. Here the algorithm itself is compared, on
+   every day from 1900-01-01 to 2100-12-31, with day counts taken from the Julian Day Number of
+   Fliegel and Van Flandern (1968), an integer formula that shares nothing with a month table.
+   1900 and 2100 are the century years the 100 rule takes out, 2000 the one the 400 rule puts
+   back.                                                                                          */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+/* ---- (1) the table is the running sum of the month lengths ------------------------------------ */
+lengths : [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]$
+cum : makelist(sum(lengths[i], i, 1, k - 1), k, 1, 12)$
+must(is(cum = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]),
+     "(1) holds: CUM is the running sum of the non-leap month lengths")$
+
+/* ---- (2) the shipped day count against the Julian Day Number, every day of 201 years ---------- */
+jdn(y, m, d) := block([a, yy, mm],
+  a : floor((14 - m)/12), yy : y + 4800 - a, mm : m + 12*a - 3,
+  d + floor((153*mm + 2)/5) + 365*yy + floor(yy/4) - floor(yy/100) + floor(yy/400) - 32045)$
+must(is(jdn(2000, 1, 1) = 2451545 and jdn(1858, 11, 17) = 2400001),
+     "(2) holds: the JDN formula gives J2000's 2451545 and MJD 0's 2400001")$
+leap(y) := (mod(y, 4) = 0 and mod(y, 100) # 0) or mod(y, 400) = 0$
+shipped_elapsed(y, m, d) := cum[m] + d - 1 + (if leap(y) and m > 2 then 1 else 0)$
+shipped_length(y) := if leap(y) then 366 else 365$
+month_len(y, m) := jdn(if m = 12 then y + 1 else y, if m = 12 then 1 else m + 1, 1) - jdn(y, m, 1)$
+days : 0$
+bad : 0$
+for y : 1900 thru 2100 do (
+  if shipped_length(y) # jdn(y + 1, 1, 1) - jdn(y, 1, 1) then bad : bad + 1,
+  for m : 1 thru 12 do
+    for d : 1 thru month_len(y, m) do (
+      days : days + 1,
+      if shipped_elapsed(y, m, d) # jdn(y, m, d) - jdn(y, 1, 1) then bad : bad + 1))$
+print("days compared:", days, "  disagreements:", bad)$
+must(is(days = 73414 and bad = 0),
+     "(2) holds: the shipped day count and year length match the Julian Day Number on all 73414 days")$
+
+/* ---- (3) the rates as J_n, for comparison with sources that quote unnormalised values ---------
+   C_n0 = sqrt(2n + 1) * Cbar_n0 and J_n = -C_n0, so Table 6.2's normalised rates and values are
+   these. Printed, not asserted: no source for the J_n is checked here.                          */
+fpprec : 20$
+for row in [[2, -48416948/10^11, 116/10^13], [3, 9571612/10^13, 49/10^13],
+            [4, 5399659/10^13, 47/10^13]] do
+  print("  J", row[1], "=", bfloat(-sqrt(2*row[1] + 1)*row[2]),
+        "  dJ/dt =", bfloat(-sqrt(2*row[1] + 1)*row[3]), "per year")$
+
+print("DONE")$

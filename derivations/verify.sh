@@ -495,6 +495,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima shadow_lens.mac" "expected 8 identities to hold, found $holds"
     fi
 
+    out=$(macf decimal_year.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima decimal_year.mac: the ICGEM epoch day count matches the Julian Day Number on all 73414 days of 1900-2100"
+    else
+        bad "maxima decimal_year.mac" "expected 3 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

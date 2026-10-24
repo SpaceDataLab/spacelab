@@ -1072,12 +1072,12 @@ exclude_re = [
     # `EPOCH_TOL` is not one — an odd multiple of 2⁻⁷² cannot be a multiple of 2⁻⁵². The `==` mutant
     # at the same site is a real gap, not an equivalence, and is killed by
     # `a_trend_binds_to_the_segment_sharing_its_epoch_whatever_the_line_order`.
-    "time_variable_gravity\\.rs:276:65: replace < with <= in parse_icgem_time_variable",
+    "time_variable_gravity\\.rs:279:65: replace < with <= in parse_icgem_time_variable",
 
     # `(t.t0_year − pt0).abs() < EPOCH_TOL`, the same epoch test for an `acos`/`asin` term, and
     # unreachable for the same reason: the other operand can only be a parsed epoch or
     # `REFERENCE_YEAR`, so it is never below 1 either.
-    "time_variable_gravity\\.rs:294:56: replace < with <= in parse_icgem_time_variable",
+    "time_variable_gravity\\.rs:297:56: replace < with <= in parse_icgem_time_variable",
 
     # `(t.period_years − period).abs() < 1e-9`, which keys a periodic term by its period, tied to
     # `<=`. Every f64 of magnitude ≥ 2⁻²⁹ is an integer multiple of 2⁻⁸¹, so any difference of two
@@ -1085,7 +1085,7 @@ exclude_re = [
     # 59 ms against the 0.5 yr shortest period any published field carries — so this is a proof
     # modulo the bound, not an unconditional one: a term whose period column is absent gets `0.0`,
     # and a file pairing it with a period of exactly 1e-9 yr would separate the two forms.
-    "time_variable_gravity\\.rs:293:57: replace < with <= in parse_icgem_time_variable",
+    "time_variable_gravity\\.rs:296:57: replace < with <= in parse_icgem_time_variable",
 
     # --- crates/spacelab-propagation/src/nrlmsise00/ ---
     #

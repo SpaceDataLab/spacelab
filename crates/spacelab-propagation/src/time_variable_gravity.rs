@@ -23,6 +23,9 @@
 //! coefficient bends over the mission, it does not follow one global line) plus global periodic terms;
 //! [`TimeVariableCoefficient`] carries both. The full model file is a large external download (ICGEM,
 //! `icgem.gfz-potsdam.de`), not vendored; only a small real EIGEN-6S2 excerpt is kept as a fixture.
+//!
+//! `derivations/decimal_year.mac` compares the epoch conversion's day count and year length with
+//! the Julian Day Number on every day from 1900 to 2100. The tests pin its Rust transcription.
 
 // The Stokes-coefficient symbols (C̄ₙ₀) and the IERS primary-source values are quoted as printed; the
 // ICGEM parser casts small in-range integers from the YYYYMMDD epoch.

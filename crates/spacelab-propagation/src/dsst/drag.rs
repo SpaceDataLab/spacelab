@@ -29,6 +29,14 @@
 //! coupling is therefore the caller's responsibility, exactly as `propagator.rs` takes ephemeris and
 //! GMST as closures. The validation gate drives a constant-density, purely co-rotating atmosphere
 //! (`ρ = const`, `v_atm = ω·ẑ × r`) on both the Java and Rust sides.
+//!
+//! # Checked against the average that defines the rates
+//!
+//! `tests/dsst_short_period_identity.rs` checks [`DsstAtmosphericDrag::mean_element_rates`] against
+//! `(1/2π)∫F dλ`, taken by Simpson's rule in the mean longitude. F is Gauss's rate from a drag law and
+//! an exponential co-rotating atmosphere written in the test. The arc below `rbar` comes from a
+//! bisection on |r|, not from the conic. Measured 1.8e-10 for an orbit inside the atmosphere and
+//! 2.2e-10 for one with e = 0.07 that leaves it.
 
 use libm::{acos, atan2};
 

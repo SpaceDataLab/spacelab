@@ -27,8 +27,11 @@
 
 use core::f64::consts::TAU;
 
+use spacelab_propagation::dsst::drag::Atmosphere;
 use spacelab_propagation::dsst::gaussian::{NodeState, mean_element_rates, variational_matrix};
-use spacelab_propagation::dsst::{DsstAuxiliary, DsstTesseral, DsstThirdBody, DsstZonal};
+use spacelab_propagation::dsst::{
+    DsstAtmosphericDrag, DsstAuxiliary, DsstTesseral, DsstThirdBody, DsstZonal,
+};
 use spacelab_propagation::geopotential::GeoPotential;
 
 const MU: f64 = 3.986_004_415e14;
@@ -407,13 +410,29 @@ fn tesseral_short_periods_solve_their_defining_equation() {
     assert_verdicts("tesseral", &v, 5e-6);
 }
 
-/// A drag-like acceleration written here, not taken from `dsst::drag`: an exponential atmosphere
-/// turning with the Earth, `−½ (C_D A/m) ρ |v_r| v_r`.
+const CD: f64 = 2.2;
+const AREA_OVER_MASS: f64 = 0.01;
+
+/// An exponential atmosphere turning with the Earth.
+struct Exponential;
+
+impl Atmosphere for Exponential {
+    fn density(&self, r: [f64; 3]) -> f64 {
+        3.0e-12 * (-(dot(r, r).sqrt() - 7.0e6) / 7.0e4).exp()
+    }
+
+    fn velocity(&self, r: [f64; 3]) -> [f64; 3] {
+        let omega = 7.292_115e-5;
+        [-omega * r[1], omega * r[0], 0.0]
+    }
+}
+
+/// A drag law written here, not taken from `dsst::drag`: `−½ (C_D A/m) ρ |v_r| v_r` through
+/// [`Exponential`], with `v_r` the velocity relative to the air.
 fn drag_like(r: [f64; 3], v: [f64; 3]) -> [f64; 3] {
-    let omega = 7.292_115e-5;
-    let vr = [v[0] + omega * r[1], v[1] - omega * r[0], v[2]];
-    let rho = 3.0e-12 * (-(dot(r, r).sqrt() - 7.0e6) / 7.0e4).exp();
-    let c = -0.5 * 2.2 * 0.01 * rho * dot(vr, vr).sqrt();
+    let air = Exponential.velocity(r);
+    let vr = [v[0] - air[0], v[1] - air[1], v[2] - air[2]];
+    let c = -0.5 * CD * AREA_OVER_MASS * Exponential.density(r) * dot(vr, vr).sqrt();
     [c * vr[0], c * vr[1], c * vr[2]]
 }
 
@@ -424,6 +443,33 @@ fn srp_like(r: [f64; 3], _: [f64; 3]) -> [f64; 3] {
     let d = [r[0] - s[0], r[1] - s[1], r[2] - s[2]];
     let c = 4.56e-6 * 0.02 * au * au / dot(d, d).powf(1.5);
     [c * d[0], c * d[1], c * d[2]]
+}
+
+/// `(1/2π)∫F dλ` over `[m1, m2]` of mean longitude, by Simpson's rule on 4096 panels.
+fn mean_rate(
+    mean: [f64; 5],
+    m1: f64,
+    m2: f64,
+    force: &impl Fn([f64; 3], [f64; 3]) -> [f64; 3],
+) -> [f64; 6] {
+    let [a, k, h, q, p] = mean;
+    let panels = 4096;
+    let step = (m2 - m1) / f64::from(panels);
+    let mut rate = [0.0; 6];
+    for i in 0..=panels {
+        let weight = if i == 0 || i == panels {
+            1.0
+        } else if i % 2 == 1 {
+            4.0
+        } else {
+            2.0
+        };
+        let f = gauss_rates([a, k, h, q, p, m1 + step * f64::from(i)], force);
+        for (r, fi) in rate.iter_mut().zip(f) {
+            *r += weight * step / 3.0 * fi / TAU;
+        }
+    }
+    rate
 }
 
 /// The worst relative difference over the six rates, each against the largest of the six scaled
@@ -505,31 +551,53 @@ fn gaussian_mean_rates_are_the_orbit_average_of_gauss_rates() {
         ("srp, full turn", meo, full(meo), srp_like),
     ];
     for (label, mean, [l1, l2], force) in cases {
-        let [a, k, h, q, p] = mean;
+        let [_, k, h, ..] = mean;
         let got = mean_element_rates(&aux(mean, 0.5), l1, l2, |node: &NodeState| {
             force(node.pos, node.vel)
         });
         // The arc in mean longitude: λ − L is periodic, so the arc's length is exact.
         let offset = |lv: f64| wrap(mean_longitude(k, h, lv) - lv);
-        let m1 = l1 + offset(l1);
-        let m2 = l2 + offset(l2);
-        let panels = 4096;
-        let step = (m2 - m1) / f64::from(panels);
-        let mut want = [0.0; 6];
-        for i in 0..=panels {
-            let weight = if i == 0 || i == panels {
-                1.0
-            } else if i % 2 == 1 {
-                4.0
-            } else {
-                2.0
-            };
-            let rate = gauss_rates([a, k, h, q, p, m1 + step * f64::from(i)], &force);
-            for (w, r) in want.iter_mut().zip(rate) {
-                *w += weight * step / 3.0 * r / TAU;
-            }
+        let want = mean_rate(mean, l1 + offset(l1), l2 + offset(l2), &force);
+        let worst = worst_rate_difference(mean[0], got, want);
+        assert!(worst < 1e-9, "{label}: {worst:.3e}, {got:?} vs {want:?}");
+    }
+}
+
+/// The arc of mean longitude below `rbar`, centred on perigee, by bisection on |r|.
+fn arc_below(mean: [f64; 5], rbar: f64) -> [f64; 2] {
+    let [a, k, h, q, p] = mean;
+    let perigee = h.atan2(k);
+    let radius = |m: f64| {
+        let (r, _) = to_cartesian([a, k, h, q, p, perigee + m]);
+        dot(r, r).sqrt()
+    };
+    let (mut lo, mut hi) = (0.0, core::f64::consts::PI);
+    for _ in 0..100 {
+        let mid = 0.5 * (lo + hi);
+        if radius(mid) < rbar {
+            lo = mid;
+        } else {
+            hi = mid;
         }
-        let worst = worst_rate_difference(a, got, want);
+    }
+    [perigee - lo, perigee + lo]
+}
+
+/// `dsst::drag` end to end: its mean rates are `(1/2π)∫F dλ` of `drag_like` over the whole turn of
+/// an orbit inside the atmosphere, and over the arc below `rbar` of an orbit with e = 0.07 that leaves
+/// it — that arc by bisection on |r|, not from the conic. Measured 1.8e-10 and 2.2e-10, the central
+/// differences' own error.
+#[test]
+fn drag_mean_rates_are_the_average_over_the_atmospheric_arc() {
+    let drag = DsstAtmosphericDrag::new(CD, AREA_OVER_MASS, MU);
+    let eccentric = [7.4e6, 0.06, -0.04, 0.2, 0.15];
+    for (label, mean, [m1, m2]) in [
+        ("inside", LEO, [0.0, TAU]),
+        ("leaving", eccentric, arc_below(eccentric, drag.rbar)),
+    ] {
+        let got = drag.mean_element_rates(&aux(mean, 0.5), &Exponential);
+        let want = mean_rate(mean, m1, m2, &drag_like);
+        let worst = worst_rate_difference(mean[0], got, want);
         assert!(worst < 1e-9, "{label}: {worst:.3e}, {got:?} vs {want:?}");
     }
 }

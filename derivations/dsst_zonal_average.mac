@@ -1,0 +1,142 @@
+/* `spacelab-propagation::dsst::zonal`, the averaged zonal potential and its mean-element rates,
+   against the orbit average they stand for.
+
+   The module ports Orekit's DSSTZonal: U is a double sum over the degree n and the eccentricity
+   power s of (2 - delta_0s) (R/a)^n V_ns Q_ns(gamma) K0^{-n-1,s}(chi) G_s(k, h, alpha, beta)
+   J_n, assembled from `coefficients` and `hansen`, and the rates follow from its partials by
+   Danielson 3.1-(1). The tests compare the rates with Orekit, which runs the same formulas. Here:
+     (1) for J2..J6 the shipped sum is the orbit average of the zonal potential itself,
+         -(mu/r) J_n (R/r)^n P_n(sin phi), sin phi = alpha cos L + beta sin L, integrated over the
+         true longitude L with a/r = (1 + k cos L + h sin L)/B^2 and dM = (r/a)^2 dL / B;
+     (2) every partial `potential_derivatives` returns is the partial derivative of the shipped U,
+         and the G_s and Q_ns derivative rules it uses are the derivatives of their recurrences;
+     (3) at J2 the shipped rate assembly gives the classical first-order secular rates
+         (Kozai 1959): Omega' = -3/2 n J2 (R/P)^2 cos i, omega' = 3/4 n J2 (R/P)^2 (5 cos^2 i - 1),
+         M' - n = 3/4 n J2 (R/P)^2 B (3 cos^2 i - 1), P = a B^2, in equinoctial form.         */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+NMAX : 6$
+leg(n, x) := subst(xx = x, ratsimp(diff((xx^2 - 1)^n, xx, n)/(2^n*n!)))$
+
+/* ---- the shipped pieces, transcribed ---------------------------------------------------------- */
+/* `compute_vns`: V[n][s], 0-based in the Rust, 1-based here. */
+vtab : block([o : NMAX + 1, v],
+  v : genmatrix(lambda([i, j], 0), o, o), v[1, 1] : 1,
+  for n : 0 thru o - 1 do for s : 0 thru n do
+    if mod(n - s, 2) = 0 then (
+      if n = s and s + 1 < o then v[s + 2, s + 2] : v[s + 1, s + 1]/(2*s + 2),
+      if n + 2 < o then v[n + 3, s + 1] : v[n + 1, s + 1]*(-n + s - 1)/(n + s + 2)),
+  v)$
+V(n, s) := vtab[n + 1, s + 1]$
+/* `compute_qns` at a symbolic gamma, Q[n][s] for s <= n. */
+qtab : block([q : genmatrix(lambda([i, j], 0), NMAX + 1, NMAX + 2)],
+  q[1, 1] : 1,
+  for n : 1 thru NMAX do for s : 0 thru n do
+    q[n + 1, s + 1] : ratsimp(
+      if n - s = 0 then (2*s - 1)*q[s, s]
+      else if n - s = 1 then (2*s + 1)*ga*q[s + 1, s + 1]
+      else ((2*n - 1)*ga*q[n, s + 1] - (n + s - 1)*q[n - 1, s + 1])/(n - s)),
+  q)$
+Q(n, s) := if s > n then 0 else qtab[n + 1, s + 1]$
+/* `compute_gs_hs`. */
+gh : block([g : makelist(0, i, 0, NMAX), hh : makelist(0, i, 0, NMAX), hamkb, kaphb],
+  hamkb : h*al - k*be, kaphb : k*al + h*be, g[1] : 1, hh[1] : 0,
+  for s : 1 thru NMAX do (
+    g[s + 1] : expand(kaphb*g[s] - hamkb*hh[s]), hh[s + 1] : expand(hamkb*g[s] + kaphb*hh[s])),
+  [g, hh])$
+G(s) := gh[1][s + 1]$
+Hs(s) := gh[2][s + 1]$
+/* `HansenZonal::new`, value and derivative. */
+hansen(nmax, s) := block([v : makelist(0, i, 0, nmax), dv : makelist(0, i, 0, nmax), d, a, b],
+  if s < nmax then (v[s + 2] : chi^(2*s + 1)/2^s, dv[s + 2] : (2*s + 1)*chi^(2*s)/2^s),
+  for n : s + 2 thru nmax do (
+    d : (1 - n - s)*(1 - n + s), a : (1 - n)*(3 - 2*n)/d, b : -(1 - n)*(2 - n)/d,
+    v[n + 1] : ratsimp(a*chi^2*v[n] + b*chi^2*v[n - 1]),
+    dv[n + 1] : ratsimp(2/chi*v[n + 1] + chi^2*(a*dv[n] + b*dv[n - 1]))),
+  [v, dv])$
+htab : makelist(hansen(NMAX, s), s, 0, NMAX)$
+K(n, s) := htab[s + 1][1][n + 1]$
+dK(n, s) := htab[s + 1][2][n + 1]$
+d0(s) := if s = 0 then 1 else 2$
+/* One degree's term of the shipped U, without -(mu/a) (R/a)^n J_n. */
+term(n) := sum(if mod(n - s, 2) = 0 then d0(s)*V(n, s)*Q(n, s)*K(n, s)*G(s) else 0, s, 0, n - 2)$
+
+/* ---- (1) the orbit average ------------------------------------------------------------------- */
+/* The mean over L of a trigonometric polynomial: its z^0 coefficient with z = exp(i L). */
+avgL(e) := ratsimp(rectform(coeff(expand(subst([cos(L) = (z + 1/z)/2, sin(L) = (z - 1/z)/(2*%i)], e)),
+                                  z, 0)))$
+/* B^(2n-1) times the average; chi^(2n-1) K is a polynomial in 1/chi^2 = B^2 = 1 - k^2 - h^2. */
+average(n) := avgL((1 + k*cos(L) + h*sin(L))^(n - 1)*leg(n, al*cos(L) + be*sin(L)))$
+shipped_scaled(n) := block([t : ratsimp(subst(chi = 1/bb, term(n))*bb^(2*n - 1))],
+  ratsimp(ratsubst(1 - al^2 - be^2, ga^2, ratsubst(1 - k^2 - h^2, bb^2, t))))$
+deg_ok : []$
+for n : 2 thru NMAX do
+  if is(ratsimp(shipped_scaled(n) - average(n)) = 0) then deg_ok : endcons(n, deg_ok)$
+print("degrees where the shipped sum is the orbit average:", deg_ok)$
+must(is(deg_ok = [2, 3, 4, 5, 6]),
+     "(1) holds: for J2..J6 the shipped V Q K G sum is the orbit average of J_n (R/r)^n P_n(sin phi)")$
+
+/* ---- (2) the partials -------------------------------------------------------------------------- */
+must(every(lambda([s], is(expand(diff(G(s), k) - (al*s*G(s - 1) + be*s*Hs(s - 1))) = 0)
+                        and is(expand(diff(G(s), h) - (be*s*G(s - 1) - al*s*Hs(s - 1))) = 0)
+                        and is(expand(diff(G(s), al) - (k*s*G(s - 1) - h*s*Hs(s - 1))) = 0)
+                        and is(expand(diff(G(s), be) - (h*s*G(s - 1) + k*s*Hs(s - 1))) = 0)),
+           makelist(s, s, 1, NMAX))
+     and every(lambda([ns], is(ratsimp(diff(Q(ns[1], ns[2]), ga) - Q(ns[1], ns[2] + 1)) = 0)),
+               create_list([n, s], n, 0, NMAX, s, 0, n)),
+     "(2) holds: Danielson 3.1-(9)'s dG_s rules and dQ_ns/dgamma = Q_n,s+1 are the recurrences' derivatives")$
+/* U as a function of independent a, k, h, alpha, beta, gamma, chi = chi(k, h). */
+Jv : makelist(concat(J, n), n, 0, NMAX)$
+Ush : -mu/a*sum((R/a)^n*Jv[n + 1]*term(n), n, 2, NMAX)$
+chik : 1/sqrt(1 - k^2 - h^2)$
+dk_chi(e) := diff(e, k) + diff(e, chi)*diff(chik, k)$
+dh_chi(e) := diff(e, h) + diff(e, chi)*diff(chik, h)$
+/* `potential_derivatives`, as shipped. */
+pd : block([u : 0, da : 0, dkk : 0, dhh : 0, dal : 0, dbe : 0, dga : 0],
+  for s : 0 thru NMAX do block([dgsdh : 0, dgsdk : 0, dgsdal : 0, dgsdbe : 0],
+    if s > 0 then (
+      dgsdh : be*s*G(s - 1) - al*s*Hs(s - 1), dgsdk : al*s*G(s - 1) + be*s*Hs(s - 1),
+      dgsdal : k*s*G(s - 1) - h*s*Hs(s - 1), dgsdbe : h*s*G(s - 1) + k*s*Hs(s - 1)),
+    for n : s + 2 thru NMAX do if mod(n - s, 2) = 0 then block([c0, c1, c2, c3],
+      c0 : d0(s)*(R/a)^n*V(n, s)*Jv[n + 1], c1 : c0*Q(n, s), c2 : c1*K(n, s), c3 : c2*G(s),
+      u : u + c3, da : da + c3*(n + 1),
+      dkk : dkk + c1*(K(n, s)*dgsdk + k*chi^3*G(s)*dK(n, s)),
+      dhh : dhh + c1*(K(n, s)*dgsdh + h*chi^3*G(s)*dK(n, s)),
+      dal : dal + c2*dgsdal, dbe : dbe + c2*dgsdbe, dga : dga + c0*K(n, s)*Q(n, s + 1)*G(s))),
+  [-mu/a*u, da*mu/a/a, -mu/a*dkk, -mu/a*dhh, -mu/a*dal, -mu/a*dbe, -mu/a*dga])$
+ref : [Ush, diff(Ush, a), dk_chi(Ush), dh_chi(Ush), diff(Ush, al), diff(Ush, be), diff(Ush, ga)]$
+zero_at_chi(e) := is(ratsimp(subst(chi = chik, e)) = 0)$
+pd_ok : makelist(zero_at_chi(pd[i] - ref[i]), i, 1, 7)$
+print("[U, dU/da, dU/dk, dU/dh, dU/dalpha, dU/dbeta, dU/dgamma] match:", pd_ok)$
+must(every(identity, pd_ok),
+     "(2) holds: all six partials potential_derivatives returns are the shipped U's, J2..J6 with symbolic J_n")$
+
+/* ---- (3) the rates at J2 against Kozai ------------------------------------------------------- */
+assume(a > 0, mu > 0, bb > 0, bb < 1)$
+pqs : [al = -2*p/(1 + p^2 + q^2), be = 2*q/(1 + p^2 + q^2), ga = (1 - p^2 - q^2)/(1 + p^2 + q^2)]$
+j2only : [J3 = 0, J4 = 0, J5 = 0, J6 = 0]$
+Ud : subst(j2only, pd)$
+[Ua, Uk, Uh, Ual, Ube, Uga] : rest(Ud, 1)$
+AA : sqrt(mu*a)$  CC : 1 + p^2 + q^2$
+uag : al*Uga - ga*Ual$
+ubg : be*Uga - ga*Ube$
+pp : (p*uag - q*ubg)/(AA*bb)$
+rates : [-(bb/AA)*Uh - h*pp, (bb/AA)*Uk + k*pp, -CC/(2*AA*bb)*uag, -CC/(2*AA*bb)*ubg,
+         -(2*a/AA)*Ua + bb/(AA*(1 + bb))*(h*Uh + k*Uk) + pp]$
+n0 : sqrt(mu/a^3)$
+cosi : (1 - p^2 - q^2)/(1 + p^2 + q^2)$
+fac : n0*J2*(R/(a*bb^2))^2$
+Om : -3/2*fac*cosi$
+om : 3/4*fac*(5*cosi^2 - 1)$
+Mm : 3/4*fac*bb*(3*cosi^2 - 1)$
+kozai : [-h*(om + Om), k*(om + Om), -p*Om, q*Om, Mm + om + Om]$
+/* [dk, dh, dq, dp, dlambda - n] on the shipped side, with B = bb and chi = 1/bb. */
+/* k = e cos w, h = e sin w with e = sqrt(1 - B^2), so that k^2 + h^2 = 1 - B^2 is visible. */
+polar : [k = sqrt(1 - bb^2)*cos(w), h = sqrt(1 - bb^2)*sin(w)]$
+diffs : makelist(ratsimp(trigsimp(subst(polar, subst(pqs, subst(chi = 1/bb, rates[i])) - kozai[i]))),
+                 i, 1, 5)$
+print("shipped minus Kozai, [k, h, q, p, lambda]:", diffs)$
+must(is(diffs = [0, 0, 0, 0, 0]),
+     "(3) holds: at J2 the shipped rates are Kozai's secular Omega', omega' and M' in equinoctial form")$
+
+print("DONE")$

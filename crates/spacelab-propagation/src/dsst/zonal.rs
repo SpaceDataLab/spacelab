@@ -5,6 +5,12 @@
 //! `UAnddU` potential-derivative helper, restricted to the analytic **mean-element rates** — the
 //! short-period corrections are out of scope. Variable names (χ, Qₙₛ, Vₙₛ, the Hansen K, the U
 //! derivatives dU/da …) follow Orekit for auditability.
+//!
+//! The mean rates are compared with Orekit, which runs the same formulas.
+//! `derivations/dsst_zonal_average.mac` compares them with what they stand for instead. For J2..J6
+//! the `V Q K G` sum is the orbit average of `−(μ/r) Jₙ (R/r)ⁿ Pₙ(sin φ)` over the true longitude.
+//! The six partials of `potential_derivatives` are that sum's partial derivatives. At J2 the rate
+//! assembly gives Kozai's first-order secular rates.
 
 use std::vec::Vec;
 

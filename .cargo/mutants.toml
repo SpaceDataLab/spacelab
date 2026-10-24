@@ -1555,11 +1555,11 @@ exclude_re = [
     # `* I -> / I` on the retrograde-factor `I`, which this port fixes at `+1` (Orekit's `I` is
     # `+1` for the direct equinoctial set and the retrograde set is not built here). `x * 1.0` and
     # `x / 1.0` are the same double for every finite `x`, so the mutation is bit-identical.
-    "dsst/zonal\\.rs:146:45: replace \\* with / in DsstZonal::mean_element_rates_with_pow",
+    "dsst/zonal\\.rs:152:45: replace \\* with / in DsstZonal::mean_element_rates_with_pow",
     # `(n - s) % 2 -> (n + s) % 2` selecting the even-parity terms of the zonal s-sum. `n - s` and
     # `n + s` have the same parity for every integer pair, so the branch taken is identical at
     # every `(n, s)`; the loop bounds keep `n >= s`, so no sign question arises either.
-    "dsst/zonal\\.rs:199:23: replace - with \\+ in DsstZonal::potential_derivatives",
+    "dsst/zonal\\.rs:205:23: replace - with \\+ in DsstZonal::potential_derivatives",
     # --- `GHmsj`: the `sgn` identities on the |s| > m arm. 25 mutants, one proof. ---
     # All ten methods take their second arm under `s.abs() > m`, and `m` only ever arrives from
     # `resonant_orders`, whose loop is `for m in 1..=max_order` -- so `m >= 1` and `|s| > m >= 1` on

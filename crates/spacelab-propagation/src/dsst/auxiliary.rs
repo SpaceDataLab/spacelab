@@ -7,6 +7,10 @@
 //! so the transform to the pole is the identity and the direction cosines (α, β, γ) reduce to the
 //! z-components of the equinoctial f/g/w vectors — pure functions of `(p, q)`. Field names mirror
 //! Orekit for auditability.
+//!
+//! `derivations/dsst_zonal_average.mac` checks the direction cosines and the six rate factors.
+//! It runs them through the zonal rate assembly at J2 and compares the result with Kozai's secular
+//! rates. The full f/g/w vectors are checked only through their z-components there.
 
 use libm::sqrt;
 

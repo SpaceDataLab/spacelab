@@ -1,0 +1,115 @@
+/* `spacelab-propagation::variational` and `::stt`, the equations they integrate and the moments
+   they map.
+
+   Both modules integrate, beside the state, the first and second derivatives of the flow
+   x(t) = phi(t; x0):
+
+       Phi' = A Phi,                          A = df/dx,   Phi(0) = I,
+       Psi_ijk' = A_il Psi_ljk + H_ilm Phi_lj Phi_mk,     Psi(0) = 0,
+
+   and `stt::map_covariance` turns them into the mean shift and covariance of a Gaussian. The tests
+   check a two-body + J2 orbit numerically: Psi against a finite difference of Phi, and the moments
+   against Gauss-Hermite with a diagonal P0. Here:
+     (1) the equations hold for a nonlinear field whose flow is known in closed form, so the index
+         order of the H Phi Phi contraction and its factor of 1 are the calculus, not a convention;
+     (2) `map_deviation`'s half is the Taylor coefficient: its residual starts at eps^3;
+     (3) `packed_index` enumerates the j <= k triangle in order, and the augmented lengths;
+     (4) the mean shift and covariance equal the exact moments of the quadratic map for a full P0,
+         from the Gaussian's moment generating function, which shares nothing with Isserlis' sum;
+     (5) the test's 3-point Gauss-Hermite rule is exact through degree 5, enough for degree 4.  */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+zero(m) := is(m = zeromatrix(length(m), length(transpose(m))))$
+
+/* ---- (1) the variational equations on a closed-form flow -------------------------------------
+   Conjugate the rotation z' = L z by the polynomial map x = g(z) = (z1, z2 + z1^2). The field
+   f = Dg L g^-1 is cubic with a full Jacobian and a nonzero Hessian on both components, and its
+   flow is g(exp(L t) g^-1(x0)).                                                                    */
+f : [x2 - x1^2, -x1 + 2*x1*x2 - 2*x1^3]$
+L : matrix([0, 1], [-1, 0])$
+gz : [z1, z2 + z1^2]$
+must(zero(ratsimp(transpose(matrix(subst([x1 = z1, x2 = z2 + z1^2], f)))
+                  - jacobian(gz, [z1, z2]) . L . transpose(matrix([z1, z2])))),
+     "(1) holds: f = Dg L z on x = g(z), so f's flow is the rotation carried through g")$
+c : [y1, y2 - y1^2]$
+zt : [c[1]*cos(t) + c[2]*sin(t), -c[1]*sin(t) + c[2]*cos(t)]$
+xt : [zt[1], zt[2] + zt[1]^2]$
+at_xt(e) := subst([x1 = xt[1], x2 = xt[2]], e)$
+must(every(lambda([e], is(trigsimp(e) = 0)), diff(xt, t) - at_xt(f))
+     and is(trigsimp(subst(t = 0, xt) - [y1, y2]) = [0, 0]),
+     "(1) holds: x(t) solves x' = f(x) with x(0) = x0")$
+Phi : jacobian(xt, [y1, y2])$
+Psi : makelist(hessian(xt[i], [y1, y2]), i, 1, 2)$
+A : at_xt(jacobian(f, [x1, x2]))$
+H : makelist(at_xt(hessian(f[i], [x1, x2])), i, 1, 2)$
+must(zero(trigsimp(diff(Phi, t) - A . Phi)) and zero(subst(t = 0, Phi) - ident(2)),
+     "(1) holds: Phi' = A Phi, Phi(0) = I")$
+must(every(lambda([i], zero(trigsimp(diff(Psi[i], t) - sum(A[i, l]*Psi[l], l, 1, 2)
+                                    - transpose(Phi) . H[i] . Phi))
+                       and zero(subst(t = 0, Psi[i]))), [1, 2]),
+     "(1) holds: Psi_ijk' = A_il Psi_ljk + H_ilm Phi_lj Phi_mk, Psi(0) = 0")$
+/* The coupling term is symmetric in (j, k) because H is in (l, m): what lets `stt` integrate the
+   triangle only. */
+Hs : genmatrix(lambda([l, m], h[min(l, m), max(l, m)]), 3, 3)$
+Pg : genmatrix(lambda([l, j], q[l, j]), 3, 3)$
+must(zero(expand(transpose(Pg) . Hs . Pg - transpose(transpose(Pg) . Hs . Pg))),
+     "(1) holds: Phi^T H Phi is symmetric for every Phi when H is, so Psi' keeps Psi's symmetry")$
+
+/* ---- (2) map_deviation's half is the Taylor coefficient --------------------------------------- */
+dx : [d1, d2]$
+shifted : subst([y1 = y1 + eps*d1, y2 = y2 + eps*d2], xt)$
+resid : makelist(shifted[i] - xt[i] - eps*(row(Phi, i) . dx)
+                 - eps^2/2*(dx . Psi[i] . dx), i, 1, 2)$
+must(every(lambda([e], is(trigsimp(ratdisrep(taylor(e, eps, 0, 2))) = 0)), resid),
+     "(2) holds: x(x0 + eps d) - x(x0) - eps Phi d - eps^2/2 Psi[d, d] = O(eps^3)")$
+
+/* ---- (3) the packed triangle and the augmented lengths ----------------------------------------- */
+simpsum : true$
+must(is(ratsimp(sum(n - i, i, 0, j - 1) - (j*n - (j^2 - j)/2)) = 0),
+     "(3) holds: row j starts at sum_{i<j} (n - i) = j n - (j^2 - j)/2")$
+packed(j, k, n) := j*n - (j*j - j)/2 + (k - j)$
+in_order(n) := block([want : 0, ok : true],
+  for j : 0 thru n - 1 do for k : j thru n - 1 do (
+    if packed(j, k, n) # want then ok : false, want : want + 1),
+  ok and is(want = n*(n + 1)/2))$
+aug(n) := n + n^2 + n*n*(n + 1)/2$
+must(every(in_order, makelist(n, n, 1, 12))
+     and is(map(aug, [1, 2, 3, 4, 6]) = [3, 12, 30, 60, 168]) and is(6 + 6^2 = 42),
+     "(3) holds: packed_index enumerates j <= k as 0..T-1 for n = 1..12; M = 3, 12, 30, 60, 168; first order 42")$
+
+/* ---- (4) the Gaussian moments, for a full P0 in three dimensions ------------------------------
+   E[d^a] is the a-th derivative of exp(s.P0.s/2) at s = 0. The map is y = Phi d + Psi[d, d]/2 with
+   Psi symmetric in its last two indices.                                                          */
+P0 : genmatrix(lambda([a, b], p[min(a, b), max(a, b)]), 3, 3)$
+sv : [s1, s2, s3]$
+K : exp(sv . P0 . sv/2)$
+mom(a1, a2, a3) := subst([s1 = 0, s2 = 0, s3 = 0], diff(K, s1, a1, s2, a2, s3, a3))$
+expect(e) := block([poly : expand(e), r : 0],
+  for a1 : 0 thru 4 do for a2 : 0 thru 4 - a1 do for a3 : 0 thru 4 - a1 - a2 do
+    r : r + coeff(coeff(coeff(poly, g1, a1), g2, a2), g3, a3)*mom(a1, a2, a3),
+  r)$
+gv : [g1, g2, g3]$
+F : genmatrix(lambda([i, j], phi[i, j]), 3, 3)$
+S(i) := genmatrix(lambda([a, b], psi[i, min(a, b), max(a, b)]), 3, 3)$
+y : makelist(row(F, i) . gv + (gv . S(i) . gv)/2, i, 1, 3)$
+mean_shipped(i) := sum(sum(S(i)[a, b]*P0[a, b], b, 1, 3), a, 1, 3)/2$
+cov_shipped(i, j) := sum(sum(F[i, a]*F[j, cc]*P0[a, cc], cc, 1, 3), a, 1, 3)
+  + sum(sum(sum(sum(S(i)[a, b]*S(j)[cc, dd]*P0[a, cc]*P0[b, dd], dd, 1, 3), cc, 1, 3), b, 1, 3),
+        a, 1, 3)/2$
+Ey : makelist(expect(y[i]), i, 1, 3)$
+must(every(lambda([i], is(ratsimp(Ey[i] - mean_shipped(i)) = 0)), [1, 2, 3]),
+     "(4) holds: the mean shift is E[y] = Psi_iab P0_ab / 2 for a full P0")$
+bad : 0$
+for i : 1 thru 3 do for j : 1 thru 3 do
+  if ratsimp(expect(y[i]*y[j]) - Ey[i]*Ey[j] - cov_shipped(i, j)) # 0 then bad : bad + 1$
+must(is(bad = 0),
+     "(4) holds: the covariance is E[y y^T] - E[y] E[y]^T exactly, all nine entries, for a full P0")$
+
+/* ---- (5) the test's quadrature is exact for what it integrates -------------------------------- */
+gh(e) := (subst(u = -sqrt(3), e) + subst(u = sqrt(3), e))/6 + 2*subst(u = 0, e)/3$
+normal(k) := if oddp(k) then 0 else (k - 1)!!$
+must(every(lambda([k], is(ratsimp(gh(u^k) - normal(k)) = 0)), makelist(k, k, 0, 5))
+     and is(gh(u^6) # normal(6)),
+     "(5) holds: nodes 0, +-sqrt(3), weights 2/3, 1/6, 1/6 give E[u^k] exactly for k <= 5, not k = 6")$
+
+print("DONE")$

@@ -41,6 +41,12 @@
 //! pushes a Gaussian: with `δx₀ ~ N(0, P₀)`, the nonlinearity biases the mean by
 //! `μᵢ = ½ Ψᵢₐᵦ P₀ₐᵦ` and maps the covariance to `Pᵢⱼ = Φᵢₐ P₀ₐ𝒸 Φⱼ𝒸 + ½ Ψᵢₐᵦ Ψⱼ𝒸𝒹 P₀ₐ𝒸 P₀ᵦ𝒹`
 //! (Park & Scheeres 2006, the Gaussian second-order moment update via Isserlis' theorem).
+//!
+//! `derivations/stt_variational.mac` checks the equations on a cubic field whose flow is known in
+//! closed form, so the `H Φ Φ` contraction's index order is calculus, not convention. It checks
+//! `packed_index` against the enumeration of the triangle. It also derives both moment formulas
+//! from the Gaussian's moment generating function for a full `P₀`; `tests/stt.rs` uses a diagonal
+//! one.
 
 // The variational tensors index several packed arrays by hand; sequential-index iterators would
 // obscure the ODE. The moment sums run over the Greek indices (a, b, c, d) of the Park–Scheeres

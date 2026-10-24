@@ -511,6 +511,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima lunar_frames.mac" "expected 13 checks to hold, found $holds"
     fi
 
+    out=$(macf stt_variational.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 11 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima stt_variational.mac: the variational equations hold on a closed-form flow, and the STT moments are exact for a full P0"
+    else
+        bad "maxima stt_variational.mac" "expected 11 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

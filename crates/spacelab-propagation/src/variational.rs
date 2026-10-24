@@ -17,6 +17,9 @@
 //! augmented `[state (N); Φ (N×N, row-major)]` state has dimension `M = N + N²`; the caller supplies
 //! both (there is no stable const arithmetic to derive `M` from `N`), and a runtime assertion guards
 //! the pairing. For an orbit, `N = 6`, `M = 42`.
+//!
+//! `derivations/stt_variational.mac` checks `dΦ/dt = A Φ` against the exact derivative of a flow
+//! known in closed form, together with its second-order companion in [`crate::stt`].
 
 use spacelab_autodiff::{Scalar, jacobian};
 

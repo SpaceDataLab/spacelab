@@ -519,6 +519,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima stt_variational.mac" "expected 11 checks to hold, found $holds"
     fi
 
+    out=$(macf gravity_gradient.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 7 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima gravity_gradient.mac: 3 mu/R^5 (R x I R) is the second-order moment of the mass elements, and the slender body's pendulum is stable"
+    else
+        bad "maxima gravity_gradient.mac" "expected 7 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

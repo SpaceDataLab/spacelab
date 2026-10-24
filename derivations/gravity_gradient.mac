@@ -1,0 +1,71 @@
+/* `spacelab-propagation::torque::gravity_gradient`, T = 3 mu / R^5 (R x I R), from the mass elements.
+
+   The tests compare the expression with Wertz's sin(2 theta) law, Basilisk at five geometries and a
+   NASA 42 arc: all three start from the same textbook formula. Here the formula is derived from the
+   inverse-square force on one mass element at rho from the centre of mass, expanded in rho/R:
+     (1) the first-order term is linear in m rho and cancels over a body about its centre of mass;
+         the second-order term is 3 mu / R^5 (R x I_m R), I_m = m (|rho|^2 E - rho rho^T), so the
+         factor 3, the sign and the R^-3 scaling are the expansion's, not a citation's;
+     (2) on principal axes it is the familiar ((C - B) Ry Rz, ...), and the test's sin(2 theta) law
+         with its sign;
+     (3) the doc's properties: even in R, homogeneous of degree -3, perpendicular to R, zero for
+         I = lambda E;
+     (4) the test's pendulum: the minor axis hanging along the vertical is the stable equilibrium,
+         with the period it asserts.                                                              */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+cross(u, v) := [u[2]*v[3] - u[3]*v[2], u[3]*v[1] - u[1]*v[3], u[1]*v[2] - u[2]*v[1]]$
+dot(u, v) := u[1]*v[1] + u[2]*v[2] + u[3]*v[3]$
+mv(m, v) := makelist(sum(m[i, j]*v[j], j, 1, 3), i, 1, 3)$
+assume(X^2 + Y^2 + Z^2 > 0)$
+R : [X, Y, Z]$
+rr : sqrt(dot(R, R))$
+gg(I3, Rv) := 3*mu/sqrt(dot(Rv, Rv))^5*cross(Rv, mv(I3, Rv))$
+
+/* ---- (1) the expansion over one mass element --------------------------------------------------- */
+rho : [a, b, c]$
+pos : R + eps*rho$
+force : -mu*m*pos/sqrt(dot(pos, pos))^3$
+moment : cross(eps*rho, force)$
+ser : map(lambda([e], ratdisrep(taylor(e, eps, 0, 2))), moment)$
+order1 : map(lambda([e], coeff(expand(e), eps, 1)), ser)$
+order2 : map(lambda([e], coeff(expand(e), eps, 2)), ser)$
+must(every(lambda([e], is(ratsimp(e) = 0)), order1 + mu*m*cross(rho, R)/rr^3),
+     "(1) holds: the first-order moment is -mu (m rho) x R / R^3, which sums to zero about the centre of mass")$
+Im : m*(dot(rho, rho)*ident(3) - transpose(matrix(rho)) . matrix(rho))$
+must(every(lambda([e], is(ratsimp(radcan(e)) = 0)), order2 - gg(Im, R)),
+     "(1) holds: the second-order moment is 3 mu / R^5 (R x I_m R), with I_m = m (|rho|^2 E - rho rho^T)")$
+
+/* ---- (2) principal axes, and the test's sin(2 theta) law ---------------------------------------- */
+Ip : matrix([A, 0, 0], [0, B, 0], [0, 0, C])$
+must(is(ratsimp(gg(Ip, R) - 3*mu/rr^5*[(C - B)*Y*Z, (A - C)*Z*X, (B - A)*X*Y]) = [0, 0, 0]),
+     "(2) holds: on principal axes T = 3 mu / R^5 ((C - B) Ry Rz, (A - C) Rz Rx, (B - A) Rx Ry)")$
+assume(r > 0)$
+slender : matrix([Ix, 0, 0], [0, It, 0], [0, 0, It])$
+Tth : gg(slender, [r*cos(th), 0, r*sin(th)])$
+must(is(trigsimp(trigexpand(Tth - [0, 3*mu/r^3*(Ix - It)*sin(2*th)/2, 0])) = [0, 0, 0]),
+     "(2) holds: (Ix, It, It) with R at theta in the x-z plane gives T = (0, 3 mu / R^3 (Ix - It) sin(2 theta) / 2, 0)")$
+
+/* ---- (3) the properties the module doc states -------------------------------------------------- */
+Ig : genmatrix(lambda([i, j], q[min(i, j), max(i, j)]), 3, 3)$
+assume(k > 0)$
+must(is(ratsimp(gg(Ig, -R) - gg(Ig, R)) = [0, 0, 0])
+     and is(ratsimp(radcan(gg(Ig, k*R) - gg(Ig, R)/k^3)) = [0, 0, 0])
+     and is(ratsimp(dot(R, gg(Ig, R))) = 0)
+     and is(ratsimp(gg(lam*ident(3), R)) = [0, 0, 0]),
+     "(3) holds: T(-R) = T(R), T(k R) = T(R)/k^3, R . T = 0, and T = 0 for I = lambda E")$
+
+/* ---- (4) the pendulum ---------------------------------------------------------------------------
+   Turn the body by phi about its y axis with the vertical fixed. The vertical's body-frame
+   components are R_y(phi)^T times its inertial ones, so its body angle is theta0 + phi, and
+   It phi'' = T_y. Linearised about theta = 0 that is phi'' = -k phi.                             */
+Ry(al) := matrix([cos(al), 0, sin(al)], [0, 1, 0], [-sin(al), 0, cos(al)])$
+vb : transpose(Ry(phi)) . transpose(matrix([cos(th0), 0, sin(th0)]))$
+must(is(trigsimp(trigexpand(vb - transpose(matrix([cos(th0 + phi), 0, sin(th0 + phi)])))) = zeromatrix(3, 1)),
+     "(4) holds: turning the body by +phi about y moves the vertical to body angle theta0 + phi")$
+Ty : subst([mu = n^2*r^3], Tth[2])$
+kk : -subst(th = 0, diff(Ty, th))/It$
+must(is(ratsimp(kk - 3*n^2*(It - Ix)/It) = 0),
+     "(4) holds: phi'' = -3 n^2 (It - Ix)/It phi, stable for Ix < It, period 2 pi / (n sqrt(3 (It - Ix)/It))")$
+
+print("DONE")$

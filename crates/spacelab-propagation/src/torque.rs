@@ -27,6 +27,12 @@
 //! Sources: Wertz, *Spacecraft Attitude Determination and Control* (1978) §17.2–17.4; Markley &
 //! Crassidis, *Fundamentals of Spacecraft Attitude Determination and Control* (2014) §3.4; Hughes,
 //! *Spacecraft Attitude Dynamics* (1986) §7.
+//!
+//! `derivations/gravity_gradient.mac` derives the gravity-gradient expression from the
+//! inverse-square force on one mass element, expanded to second order about the centre of mass. The
+//! factor 3, the sign and `R⁻³` therefore come from the expansion, not from the textbook formula
+//! that the Wertz, Basilisk and NASA 42 comparisons all start from. It also checks the `sin 2θ` law
+//! and the pendulum the tests use.
 
 use crate::attitude::{Inertia, Vec3, cross};
 use crate::spacecraft::BoxWing;

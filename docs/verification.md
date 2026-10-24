@@ -7654,7 +7654,7 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 328 modules, 98 name a check, 230 do not** — 145 physics,
+(`plans/16` Ф17.B orders them). **Today: 328 modules, 99 name a check, 229 do not** — 144 physics,
 25 parsers, 6 generated and 54 infrastructure. The physics column is the one to watch, and it went
 *up* on 2026-10-24 for a reason worth keeping: the rule had counted any bare `§4.13` as a row of
 this file, and a bare section sign is also how a module cites a textbook or a standard. Twenty-eight
@@ -7890,7 +7890,6 @@ crates/spacelab-signal/src/tomosar.rs | physics | no re-runnable check named in 
 crates/spacelab-slr/src/blq.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-slr/src/crd.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-slr/src/dhf.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
-crates/spacelab-slr/src/displacement.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-slr/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-slr/src/loading.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-slr/src/range.rs | physics | no re-runnable check named in the module doc

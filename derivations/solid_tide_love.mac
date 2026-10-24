@@ -1,0 +1,133 @@
+/* `spacelab-slr::displacement`, the DEHANTTIDEINEL port against the equations it implements.
+
+   The port reproduces the reference routine's two published cases to 1e-12 m, which pins the
+   transcription and not the physics: a routine and its port can agree on a wrong equation. Here
+   each closed-form term, in the body-Cartesian arrangement the Fortran uses, is reduced to the
+   latitude-longitude form of IERS Conventions (2010) chapter 7, read as Orekit's
+   TidalDisplacement transcribes it (TN36 itself was not reachable here):
+     (1) the radial/north/east basis `Site::to_cartesian` uses is orthonormal and right-handed;
+     (2) the in-phase degree-2 and degree-3 terms are the Love and Shida response to the degree-n
+         tidal potential, h_n W_n/g radially and l_n r grad W_n/g across, and equal eqs (7.5), (7.6);
+         the latitude factor (1 - 3/2 cos^2 phi) is P2(sin phi), eq (7.2);
+     (3) the out-of-phase diurnal and semi-diurnal terms equal eqs (7.10), (7.11);
+     (4) the l^(1) latitude terms equal eqs (7.8), (7.9) with P21 = 3 sin cos, P22 = 3 cos^2;
+     (5) the pole tide: the centrifugal potential of an axis tilted to (m1, m2, 1) is eq (7.24) to
+         first order, its Love response in colatitude is eq (7.26), the shipped latitude-north form
+         is the same displacement, and h, l, Omega, a, g_e give the 33 and 9 mm it ships.          */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+z3(v) := is(v = [0, 0, 0])$
+/* Trigonometric polynomials compared through exp(i x), where a zero is a canonical zero. */
+ts(e) := ratsimp(exponentialize(e))$
+
+/* Station at geocentric latitude ph, east longitude la; body at Ph, lj, distance Rb. */
+up : [cos(ph)*cos(la), cos(ph)*sin(la), sin(ph)]$
+north : [-sin(ph)*cos(la), -sin(ph)*sin(la), cos(ph)]$
+east : [-sin(la), cos(la), 0]$
+body : Rb*[cos(Ph)*cos(lj), cos(Ph)*sin(lj), sin(Ph)]$
+dot(u, v) := u[1]*v[1] + u[2]*v[2] + u[3]*v[3]$
+cross(u, v) := [u[2]*v[3] - u[3]*v[2], u[3]*v[1] - u[1]*v[3], u[1]*v[2] - u[2]*v[1]]$
+/* `Site::to_cartesian(dr, dn, de)`, as shipped. */
+to_cart(dr, dn, de) := [dr*cos(la)*cos(ph) - de*sin(la) - dn*sin(ph)*cos(la),
+                        dr*sin(la)*cos(ph) + de*cos(la) - dn*sin(ph)*sin(la),
+                        dr*sin(ph) + dn*cos(ph)]$
+
+/* ---- (1) the local basis ------------------------------------------------------------------------- */
+must(z3(ts(to_cart(dr, dn, de) - (dr*up + dn*north + de*east)))
+     and is(ts([dot(up, up), dot(north, north), dot(east, east)]) = [1, 1, 1])
+     and is(ts([dot(up, north), dot(up, east), dot(north, east)]) = [0, 0, 0])
+     and z3(ts(cross(east, north) - up)),
+     "(1) holds: to_cartesian is dr up + dn north + de east, orthonormal, east x north = up")$
+
+/* ---- (2) the in-phase terms from the tidal potential ------------------------------------------
+   On the unit sphere the horizontal gradient of P_n(up . B) is P_n'(c) (B - c up), c = up . B.
+   With W_n/g = fac_n P_n(c) the displacement is fac_n [h_n P_n(c) up + l_n P_n'(c) (B - c up)]. */
+P2(x) := (3*x^2 - 1)/2$
+P3(x) := (5*x^3 - 3*x)/2$
+love(n, h, l) := block([P : if n = 2 then P2(x) else P3(x)],
+  [h*subst(x = c, P) - l*c*subst(x = c, diff(P, x)), l*subst(x = c, diff(P, x))])$
+/* The Fortran's per-body scalars: d = fac (x_n(c) B + p_n(c) up). */
+p2f : 3*(h2/2 - l2)*c^2 - h2/2$
+x2f : 3*l2*c$
+p3f : 5/2*(h3 - 3*l3)*c^3 + 3/2*(l3 - h3)*c$
+x3f : 3/2*l3*(5*c^2 - 1)$
+must(is(ratsimp(love(2, h2, l2) - [p2f, x2f]) = [0, 0])
+     and is(ratsimp(love(3, h3, l3) - [p3f, x3f]) = [0, 0]),
+     "(2) holds: the shipped p2/x2 and p3/x3 are h_n P_n up + l_n P_n' (B - c up), degree 2 and 3")$
+eq75 : [h2*(3/2*c^2 - 1/2) - 3*l2*c*c, 3*l2*c]$
+eq76 : [h3*(5/2*c^3 - 3/2*c) - l3*(15/2*c^2 - 3/2)*c, l3*(15/2*c^2 - 3/2)]$
+must(is(ratsimp([p2f, x2f] - eq75) = [0, 0]) and is(ratsimp([p3f, x3f] - eq76) = [0, 0])
+     and is(ts((1 - 3/2*cos(ph)^2) - P2(sin(ph))) = 0),
+     "(2) holds: the same scalars are eqs (7.5) and (7.6), and 1 - 3/2 cos^2 phi = P2(sin phi)")$
+
+/* ---- (3) the out-of-phase degree-2 terms ------------------------------------------------------- */
+X : body[1]$  Y : body[2]$  Z : body[3]$
+asym1 : Z*(X*sin(la) - Y*cos(la))/Rb^2$
+sym1 : Z*(X*cos(la) + Y*sin(la))/Rb^2$
+diu_f : [-3*hI*sin(ph)*cos(ph)*fac*asym1, -3*lI*(cos(ph)^2 - sin(ph)^2)*fac*asym1,
+         -3*lI*sin(ph)*fac*sym1]$
+diu_c : [-3/4*hI*fac*sin(2*Ph)*sin(2*ph)*sin(la - lj),
+         -3/2*lI*fac*sin(2*Ph)*cos(2*ph)*sin(la - lj),
+         -3/2*lI*fac*sin(2*Ph)*sin(ph)*cos(la - lj)]$
+must(z3(ts(diu_f - diu_c)),
+     "(3) holds: ST1IDIU's body-Cartesian terms are eq (7.10), radial, north and east")$
+quad : X^2 - Y^2$
+crs : 2*X*Y$
+asym2 : (quad*sin(2*la) - crs*cos(2*la))/Rb^2$
+sym2 : (quad*cos(2*la) + crs*sin(2*la))/Rb^2$
+sem_f : [-3/4*hI*cos(ph)^2*fac*asym2, 3/2*lI*sin(ph)*cos(ph)*fac*asym2,
+         -3/2*lI*cos(ph)*fac*sym2]$
+sem_c : [-3/4*hI*fac*cos(Ph)^2*cos(ph)^2*sin(2*(la - lj)),
+         3/4*lI*fac*cos(Ph)^2*sin(2*ph)*sin(2*(la - lj)),
+         -3/4*lI*fac*cos(Ph)^2*2*cos(ph)*cos(2*(la - lj))]$
+must(z3(ts(sem_f - sem_c)),
+     "(3) holds: ST1ISEM's body-Cartesian terms are eq (7.11), radial, north and east")$
+
+/* ---- (4) the l^(1) latitude dependence ---------------------------------------------------------- */
+P21 : 3*sin(Ph)*cos(Ph)$
+P22 : 3*cos(Ph)^2$
+l1d_f : [3*(-L1d*sin(ph)^2*fac*sym1), 3*(L1d*sin(ph)*(cos(ph)^2 - sin(ph)^2)*fac*asym1)]$
+l1d_c : [-L1d*fac*P21*sin(ph)^2*cos(la - lj), L1d*fac*P21*sin(ph)*cos(2*ph)*sin(la - lj)]$
+l1s_f : [3*(-1/2*L1s*sin(ph)*cos(ph)*fac*sym2), 3*(-1/2*L1s*sin(ph)^2*cos(ph)*fac*asym2)]$
+l1s_c : [-1/4*L1s*fac*P22*sin(2*ph)*cos(2*(la - lj)),
+         -1/4*L1s*fac*P22*sin(2*ph)*sin(ph)*sin(2*(la - lj))]$
+must(is(ts(l1d_f - l1d_c) = [0, 0]) and is(ts(l1s_f - l1s_c) = [0, 0]),
+     "(4) holds: ST1L1's diurnal and semi-diurnal north/east terms are eqs (7.8) and (7.9)")$
+
+/* ---- (5) the pole tide ---------------------------------------------------------------------------
+   th is colatitude. The rotation axis sits at (m1, m2, 1) to first order, m2 = -(yp - mean yp)
+   being the flip to a right-handed frame. V = |Omega x r|^2 / 2.                               */
+rv : r*[sin(th)*cos(la), sin(th)*sin(la), cos(th)]$
+w : [eps*m1, eps*m2, 1]/sqrt(1 + eps^2*(m1^2 + m2^2))$
+Vc : Om^2/2*(dot(rv, rv) - dot(rv, w)^2)$
+dV : ratdisrep(taylor(Vc, eps, 0, 1)) - subst(eps = 0, Vc)$
+eq724 : -eps*Om^2*r^2/2*sin(2*th)*(m1*cos(la) + m2*sin(la))$
+must(is(ts(dV - eq724) = 0),
+     "(5) holds: the first-order centrifugal potential is eq (7.24), -Omega^2 r^2/2 sin 2theta (m1 cos + m2 sin)")$
+/* Love response: S_r = h dV/g, S_theta = l/g dV/dtheta, S_lambda = l/(g sin theta) dV/dlambda. */
+Sr : h*dV/g$
+Sth : l/g*diff(dV, th)/1$
+Sla : l/(g*sin(th))*diff(dV, la)$
+k : eps*Om^2*r^2/g$
+must(is(ts(Sr - (-h*k/2*sin(2*th)*(m1*cos(la) + m2*sin(la)))) = 0)
+     and is(ts(Sth - (-l*k*cos(2*th)*(m1*cos(la) + m2*sin(la)))) = 0)
+     and is(ts(Sla - (l*k*cos(th)*(m1*sin(la) - m2*cos(la)))) = 0),
+     "(5) holds: the Love response is eq (7.26)'s pattern: -sin 2theta, -cos 2theta and cos theta")$
+/* Colatitude th = pi/2 - ph; north is minus the theta direction. */
+shipped : [-A*sin(2*ph)*(m1*cos(la) + m2*sin(la)), -B*cos(2*ph)*(m1*cos(la) + m2*sin(la)),
+           B*sin(ph)*(m1*sin(la) - m2*cos(la))]$
+conv : subst(th = %pi/2 - ph,
+             [-A*sin(2*th)*(m1*cos(la) + m2*sin(la)), -(-B*cos(2*th)*(m1*cos(la) + m2*sin(la))),
+              B*cos(th)*(m1*sin(la) - m2*cos(la))])$
+must(z3(ts(shipped - conv)),
+     "(5) holds: the shipped (dr, dn, de) is eq (7.26) with theta = pi/2 - phi and north = -S_theta")$
+fpprec : 30$
+asec : bfloat(%pi/(180*3600))$
+vals : [h = 6207/10^4, l = 836/10^4, Om = 7292115/10^11, r = 6378/10^3*10^6, g = 97803278/10^7]$
+coef_r : bfloat(subst(vals, h*Om^2*r^2/(2*g)))*asec$
+coef_t : bfloat(subst(vals, l*Om^2*r^2/g))*asec$
+print("pole tide per arcsecond of wander: radial", coef_r*1000, "mm, horizontal", coef_t*1000, "mm")$
+must(is(round(1000*coef_r) = 33) and is(round(1000*coef_t) = 9),
+     "(5) holds: h = 0.6207, l = 0.0836 give 33 mm radial and 9 mm horizontal per arcsecond")$
+
+print("DONE")$

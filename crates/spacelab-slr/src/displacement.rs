@@ -27,6 +27,13 @@
 //! internal leap-second table, so the caller's time scales are the caller's; and the permanent-tide
 //! term stays removed, matching the conventional tide-free frame that ITRF is realised in. None of
 //! those changes a number.
+//!
+//! The published cases pin the transcription, not the equations behind it.
+//! `derivations/solid_tide_love.mac` reduces each closed-form term of the body-Cartesian
+//! arrangement to the latitude-longitude form of the Conventions' equations (7.5)–(7.11). The
+//! in-phase terms come out as the Love and Shida response to the degree-2 and degree-3 tidal
+//! potential. The same file derives the pole tide's potential (7.24) from the tilted rotation axis,
+//! and its 33 mm and 9 mm from `h`, `l`, `Ω`, `a` and `g_e`.
 
 // `_s`/`_m` are Sun and Moon and `dr`/`dn`/`de` radial, north and east throughout — the
 // reference routine's own names for the same quantities, and the only ones the equations read

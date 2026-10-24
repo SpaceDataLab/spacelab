@@ -527,6 +527,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima gravity_gradient.mac" "expected 7 checks to hold, found $holds"
     fi
 
+    out=$(macf solid_tide_love.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 11 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima solid_tide_love.mac: the DEHANTTIDEINEL terms are the Conventions' eqs 7.5-7.11, and the pole tide's 33/9 mm follow from h and l"
+    else
+        bad "maxima solid_tide_love.mac" "expected 11 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

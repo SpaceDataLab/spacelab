@@ -1,0 +1,66 @@
+/* `spacelab-propagation::dsst::hansen`, the zonal Hansen kernels K0^{-n-1,s}(chi) against their
+   definition.
+
+   The module evaluates Collins 4-242's three-term recurrence, ported from Orekit, from the roots
+   K(s) = 0 and K(s+1) = chi^(2s+1)/2^s. Its tests check one closed form, K0^{-3,0} = chi^3, and
+   the DSST mean rates check the rest against Orekit, which runs the same recurrence. Here the
+   kernels come from the Hansen coefficient's definition instead, the orbit average
+       X0^{-n-1,s} = <(r/a)^(-n-1) cos(s f)>_M,   K0^{-n-1,s} = X0^{-n-1,s} / e^s,
+   which with dM = (r/a)^2 df / eta and r/a = eta^2/(1 + e cos f) is
+       X0^{-n-1,s} = eta^(1-2n) <(1 + e cos f)^(n-1) cos(s f)>_f,     eta = 1/chi = sqrt(1 - e^2),
+   a polynomial in e that Maxima integrates exactly:
+     (1) the shipped recurrence and roots equal it for s = 0..8 and n = s..s+10, except the root
+         K(0) = 0 at s = 0, which stands in for <a/r> = 1 where it is multiplied by zero;
+     (2) so does the shipped chain-rule derivative, against d/dchi of the definition;
+     (3) the substitution itself, by quadrature in the eccentric anomaly, where nothing above is
+         reused: (r/a) = 1 - e cos E, dM = (r/a) dE.                                              */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+assume(chi > 1, e > 0, e < 1)$
+
+/* ---- the definition ------------------------------------------------------------------------- */
+favg(n, s) := integrate(expand((1 + e*cos(f))^(n - 1)*cos(s*f)), f, 0, 2*%pi)/(2*%pi)$
+kdef(n, s) := block([q : ratsimp(favg(n, s)/e^s)],
+  ratsimp(chi^(2*n - 1)*subst(e = sqrt(1 - 1/chi^2), q)))$
+
+/* ---- the shipped recurrence, `HansenZonal::new` ---------------------------------------------- */
+shipped(nmax, s) := block([v : makelist(0, i, 0, nmax), dv : makelist(0, i, 0, nmax), d, a, b],
+  if s < nmax then (v[s + 2] : chi^(2*s + 1)/2^s, dv[s + 2] : (2*s + 1)*chi^(2*s)/2^s),
+  for n : s + 2 thru nmax do (
+    d : (1 - n - s)*(1 - n + s), a : (1 - n)*(3 - 2*n)/d, b : -(1 - n)*(2 - n)/d,
+    v[n + 1] : ratsimp(a*chi^2*v[n] + b*chi^2*v[n - 1]),
+    dv[n + 1] : ratsimp(2/chi*v[n + 1] + chi^2*(a*dv[n] + b*dv[n - 1]))),
+  [v, dv])$
+
+/* n = s = 0 is left out: the root there is 0, the kernel K0^{-1,0} = <a/r> = 1. It is read once,
+   by the n = 2 step, whose b is zero at s = 0; checked below. */
+bad : 0$  badd : 0$  count : 0$
+for s : 0 thru 8 do block([r : shipped(s + 10, s)],
+  for n : max(s, 1) thru s + 10 do block([k : kdef(n, s)],
+    count : count + 1,
+    if ratsimp(r[1][n + 1] - k) # 0 then bad : bad + 1,
+    if ratsimp(r[2][n + 1] - diff(k, chi)) # 0 then badd : badd + 1))$
+print("kernels compared:", count, "  value mismatches:", bad, "  derivative mismatches:", badd)$
+must(is(count = 98 and bad = 0),
+     "(1) holds: the recurrence gives the defining orbit average exactly, s = 0..8, n = s..s+10 but n = s = 0 (98 kernels)")$
+must(is(-(1 - 2)*(2 - 2)/((1 - 2 - 0)*(1 - 2 + 0)) = 0),
+     "(1) holds: at s = 0 the n = 2 step multiplies the root K(0) by b = 0, so its stand-in 0 for <a/r> = 1 is never read")$
+must(is(badd = 0),
+     "(2) holds: the chain-rule derivative is d/dchi of the definition on all 98")$
+
+/* ---- (3) the substitution, by quadrature in E ----------------------------------------------- */
+fpprec : 30$
+xe(n, s, ee) := block([w : 1 - ee*cos(E), cf, sf, ff],
+  cf : (cos(E) - ee)/w, sf : sqrt(1 - ee^2)*sin(E)/w,
+  quad_qags(w^(-n)*cos(s*atan2(sf, cf)), E, 0, 2*float(%pi), 'epsrel = 1e-11)[1]/(2*float(%pi)))$
+worst : 0$
+for c in [[5, 3, 0.3], [9, 2, 0.7], [4, 0, 0.05], [12, 7, 0.45]] do block([n : c[1], s : c[2],
+    ee : c[3], q, k],
+  q : xe(n, s, ee),
+  k : float(subst(chi = 1/sqrt(1 - ee^2), kdef(n, s))*ee^s),
+  print("  X0^{-", n + 1, ",", s, "}(e =", ee, "): quadrature", q, " definition", k),
+  worst : max(worst, abs(q/k - 1)))$
+must(is(worst < 1e-11),
+     "(3) holds: quadrature over the eccentric anomaly agrees with the f-form to 1e-11 at four (n, s, e)")$
+
+print("DONE")$

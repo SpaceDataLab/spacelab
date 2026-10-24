@@ -543,6 +543,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima ocean_loading.mac" "expected 12 checks to hold, found $holds"
     fi
 
+    out=$(macf hansen_zonal.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima hansen_zonal.mac: Collins' recurrence gives the zonal Hansen kernels' defining orbit average exactly, s <= 8"
+    else
+        bad "maxima hansen_zonal.mac" "expected 4 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

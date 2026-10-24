@@ -7654,7 +7654,7 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 328 modules, 100 name a check, 228 do not** — 143 physics,
+(`plans/16` Ф17.B orders them). **Today: 328 modules, 101 name a check, 227 do not** — 142 physics,
 25 parsers, 6 generated and 54 infrastructure. The physics column is the one to watch, and it went
 *up* on 2026-10-24 for a reason worth keeping: the rule had counted any bare `§4.13` as a row of
 this file, and a bare section sign is also how a module cites a textbook or a standard. Twenty-eight
@@ -7836,7 +7836,6 @@ crates/spacelab-propagation/src/dsst/coefficients.rs | generated | emitted by a 
 crates/spacelab-propagation/src/dsst/drag.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/gaussian.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/gaussian_short_period.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-propagation/src/dsst/hansen.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/mod.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/dsst/propagator.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/short_period.rs | physics | no re-runnable check named in the module doc

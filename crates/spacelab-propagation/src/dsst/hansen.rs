@@ -15,6 +15,11 @@
 //! The χ-derivative is the exact chain-rule derivative of that recurrence (equivalent to Orekit's
 //! separate `mpvecDeriv` polynomials): `K'(s+1) = (2s+1)·χ^(2s)/2^s`, and for n ≥ s+2
 //! `K'(n) = (2/χ)·K(n) + χ²·(a·K'(n-1) + b·K'(n-2))`.
+//!
+//! `derivations/hansen_zonal.mac` checks the recurrence against the kernel's definition rather than
+//! against Orekit, which runs the same recurrence. The definition is the orbit average
+//! `⟨(r/a)^(-n-1) cos sf⟩ / eˢ`, integrated exactly as a polynomial in `e`. The recurrence and its
+//! derivative match it for `s ≤ 8` and ten degrees above each `s`.
 
 use std::vec::Vec;
 
@@ -31,7 +36,9 @@ fn ipow(x: f64, n: u32) -> f64 {
 /// Zonal Hansen kernels for one `s`, evaluated at a fixed χ over the degrees `n = 0..=n_max`.
 ///
 /// `value(n)` returns K₀^{-n-1,s} and `derivative(n)` returns dK₀^{-n-1,s}/dχ; only `n ≥ s` are
-/// meaningful (lower degrees are left at zero).
+/// meaningful (lower degrees are left at zero). The one exception is `n = s = 0`: the root is 0,
+/// where K₀^{-1,0} = ⟨a/r⟩ = 1. It is harmless because the only step that reads it, `n = 2`,
+/// multiplies it by `b = 0`.
 #[derive(Debug, Clone)]
 pub struct HansenZonal {
     values: Vec<f64>,

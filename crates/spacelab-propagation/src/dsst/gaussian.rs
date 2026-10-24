@@ -20,6 +20,14 @@
 //! Naming (`GAUSS_ORDER`, `POINTS_*`/`WEIGHTS_*`, `ton2a`, `ooA`, `ooAB`, `co2AB`, `ooBpo`, `ooMu`,
 //! `naob`, `roa`, `getAoV`/`getKoV`/`getHoV`/`getQoV`/`getPoV`/`getLoV`) follows Orekit for
 //! auditability.
+//!
+//! # Checked against the average that defines the rates
+//!
+//! `tests/dsst_short_period_identity.rs` checks [`variational_matrix`] against central differences
+//! of a Cartesian → equinoctial conversion written in the test: 1.1e-9 at worst, the (δv/v)² error of
+//! the differences themselves. It checks [`mean_element_rates`] against `(1/2π)∫F dλ`, taken by
+//! Simpson's rule in the mean longitude, with F from a drag-like and an SRP-like force written in
+//! the test: 2.2e-10 at worst, over full turns and over an arc of an orbit with e = 0.07.
 
 use libm::{cos, sin, sqrt};
 

@@ -14,6 +14,10 @@
 //! `∂E/∂v · a_pert`: the perturbing acceleration of a force model outside `dsst`, and the velocity
 //! partials by central differences of a Cartesian → equinoctial conversion written in this file.
 //! `∂η/∂λ` and `∂η/∂θ` are spectral derivatives of η sampled on a uniform grid.
+//!
+//! The same `F` also defines the mean rates the Gaussian (drag, SRP) contributions integrate:
+//! `⟨F⟩` over an arc of the orbit is `(1/2π)∫F dλ`, which the last two tests take by Simpson's rule
+//! in the mean longitude while the shipped code takes Gauss–Legendre in the true longitude.
 
 #![allow(
     clippy::expect_used,
@@ -23,6 +27,7 @@
 
 use core::f64::consts::TAU;
 
+use spacelab_propagation::dsst::gaussian::{NodeState, mean_element_rates, variational_matrix};
 use spacelab_propagation::dsst::{DsstAuxiliary, DsstTesseral, DsstThirdBody, DsstZonal};
 use spacelab_propagation::geopotential::GeoPotential;
 
@@ -101,10 +106,15 @@ fn to_equinoctial(r: [f64; 3], v: [f64; 3]) -> [f64; 6] {
     let k = dot(ev, f);
     let h = dot(ev, g);
     let lv = dot(r, g).atan2(dot(r, f));
+    [a, k, h, q, p, mean_longitude(k, h, lv)]
+}
+
+/// True longitude → mean longitude, through the eccentric longitude.
+fn mean_longitude(k: f64, h: f64, lv: f64) -> f64 {
     let (sl, cl) = lv.sin_cos();
     let le = lv
         + 2.0 * ((h * cl - k * sl) / (1.0 + (1.0 - k * k - h * h).sqrt() + k * cl + h * sl)).atan();
-    [a, k, h, q, p, le - k * le.sin() + h * le.cos()]
+    le - k * le.sin() + h * le.cos()
 }
 
 fn wrap(x: f64) -> f64 {
@@ -395,4 +405,131 @@ fn tesseral_short_periods_solve_their_defining_equation() {
         },
     );
     assert_verdicts("tesseral", &v, 5e-6);
+}
+
+/// A drag-like acceleration written here, not taken from `dsst::drag`: an exponential atmosphere
+/// turning with the Earth, `−½ (C_D A/m) ρ |v_r| v_r`.
+fn drag_like(r: [f64; 3], v: [f64; 3]) -> [f64; 3] {
+    let omega = 7.292_115e-5;
+    let vr = [v[0] + omega * r[1], v[1] - omega * r[0], v[2]];
+    let rho = 3.0e-12 * (-(dot(r, r).sqrt() - 7.0e6) / 7.0e4).exp();
+    let c = -0.5 * 2.2 * 0.01 * rho * dot(vr, vr).sqrt();
+    [c * vr[0], c * vr[1], c * vr[2]]
+}
+
+/// An SRP-like acceleration from a Sun fixed at one astronomical unit, `P (A/m) AU² (r − s)/|r − s|³`.
+fn srp_like(r: [f64; 3], _: [f64; 3]) -> [f64; 3] {
+    let au = 1.495_978_707e11;
+    let s = [0.6 * au, -0.7 * au, 0.38 * au];
+    let d = [r[0] - s[0], r[1] - s[1], r[2] - s[2]];
+    let c = 4.56e-6 * 0.02 * au * au / dot(d, d).powf(1.5);
+    [c * d[0], c * d[1], c * d[2]]
+}
+
+/// The worst relative difference over the six rates, each against the largest of the six scaled
+/// alike: the semi-major axis by `1/a`, the rest as they are.
+fn worst_rate_difference(a: f64, got: [f64; 6], want: [f64; 6]) -> f64 {
+    let scaled = |x: [f64; 6]| -> [f64; 6] {
+        core::array::from_fn(|i| if i == 0 { x[0] / a } else { x[i] })
+    };
+    let (g, w) = (scaled(got), scaled(want));
+    let scale = w.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
+    g.iter()
+        .zip(w)
+        .fold(0.0_f64, |m, (x, y)| m.max((x - y).abs()))
+        / scale
+}
+
+/// `variational_matrix` is the velocity Jacobian of the elements, row by row, at twelve true
+/// longitudes on a near-circular LEO and on an inclined orbit with e = 0.25. Measured 1.1e-9 at
+/// worst, in the semi-major-axis row, the differences' own (δv/v)² error.
+#[test]
+fn the_gauss_matrix_is_the_velocity_jacobian_of_the_elements() {
+    for mean in [LEO, [2.6e7, 0.15, -0.2, 0.3, -0.25]] {
+        let [a, k, h, q, p] = mean;
+        let (f, g) = frame(q, p);
+        for i in 0..12 {
+            let lam = TAU * f64::from(i) / 12.0 + 0.1;
+            let (r, v) = to_cartesian([a, k, h, q, p, lam]);
+            let lv = dot(r, g).atan2(dot(r, f));
+            let b = variational_matrix(&aux(mean, lam), lv);
+            let dv = 0.05;
+            let mut fd = [[0.0; 3]; 6];
+            for axis in 0..3 {
+                let (mut vp, mut vm) = (v, v);
+                vp[axis] += dv;
+                vm[axis] -= dv;
+                let (ep, em) = (to_equinoctial(r, vp), to_equinoctial(r, vm));
+                for (el, row) in fd.iter_mut().enumerate() {
+                    let d = if el == 5 {
+                        wrap(ep[el] - em[el])
+                    } else {
+                        ep[el] - em[el]
+                    };
+                    row[axis] = d / (2.0 * dv);
+                }
+            }
+            for (el, (got, want)) in b.iter().zip(fd).enumerate() {
+                let scale = want.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
+                let worst = got
+                    .iter()
+                    .zip(want)
+                    .fold(0.0_f64, |m, (x, y)| m.max((x - y).abs()));
+                assert!(
+                    worst < 1e-8 * scale,
+                    "a = {a}, λ = {lam}, element {el}: {got:?} vs {want:?}"
+                );
+            }
+        }
+    }
+}
+
+/// `mean_element_rates` over an arc [L₁, L₂] of true longitude is `(1/2π)∫F dλ` over the matching
+/// arc of mean longitude: the drag-like force over the full turn of a LEO and over an arc of an
+/// eccentric orbit, the SRP-like force over the full turn of an inclined MEO. Measured 2.2e-10 at
+/// worst, the central differences' own error.
+#[test]
+fn gaussian_mean_rates_are_the_orbit_average_of_gauss_rates() {
+    type Force = fn([f64; 3], [f64; 3]) -> [f64; 3];
+    let full = |mean: [f64; 5]| -> [f64; 2] {
+        let (r, _) = to_cartesian([mean[0], mean[1], mean[2], mean[3], mean[4], 0.5]);
+        let (f, g) = frame(mean[3], mean[4]);
+        let lv = dot(r, g).atan2(dot(r, f));
+        [lv - core::f64::consts::PI, lv + core::f64::consts::PI]
+    };
+    let eccentric = [7.4e6, 0.06, -0.04, 0.2, 0.15];
+    let meo = [2.6e7, 0.15, -0.2, 0.3, -0.25];
+    let cases: [(&str, [f64; 5], [f64; 2], Force); 3] = [
+        ("drag, full turn", LEO, full(LEO), drag_like),
+        ("drag, arc", eccentric, [-0.9, 1.3], drag_like),
+        ("srp, full turn", meo, full(meo), srp_like),
+    ];
+    for (label, mean, [l1, l2], force) in cases {
+        let [a, k, h, q, p] = mean;
+        let got = mean_element_rates(&aux(mean, 0.5), l1, l2, |node: &NodeState| {
+            force(node.pos, node.vel)
+        });
+        // The arc in mean longitude: λ − L is periodic, so the arc's length is exact.
+        let offset = |lv: f64| wrap(mean_longitude(k, h, lv) - lv);
+        let m1 = l1 + offset(l1);
+        let m2 = l2 + offset(l2);
+        let panels = 4096;
+        let step = (m2 - m1) / f64::from(panels);
+        let mut want = [0.0; 6];
+        for i in 0..=panels {
+            let weight = if i == 0 || i == panels {
+                1.0
+            } else if i % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            let rate = gauss_rates([a, k, h, q, p, m1 + step * f64::from(i)], &force);
+            for (w, r) in want.iter_mut().zip(rate) {
+                *w += weight * step / 3.0 * r / TAU;
+            }
+        }
+        let worst = worst_rate_difference(a, got, want);
+        assert!(worst < 1e-9, "{label}: {worst:.3e}, {got:?} vs {want:?}");
+    }
 }

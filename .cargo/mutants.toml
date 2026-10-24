@@ -1643,7 +1643,7 @@ exclude_re = [
     # earlier order qualifies, the extra iteration is never reached and both return that order. (Even
     # for a non-positive `threshold`, where `0.0 < threshold` is false, both fall through to the same
     # 48.) The return value is identical for every input; only the number of `accel` calls differs.
-    "gaussian\\.rs:87:56: replace - with / in select_order",
+    "gaussian\\.rs:95:56: replace - with / in select_order",
     # `if low < high` in `mean_element_rates`, the same guard as the `short_period_correction` entry
     # above. The two differ only at `low == high` (NaN makes both false), where
     # `scale = (high - low) / 2.0 = +0.0`, so every `w = weights[i] * 0.0` is `+0.0` (the tabulated
@@ -1652,7 +1652,7 @@ exclude_re = [
     # integrand where the `<` branch returns `[+0.0; 6]`, and `-0.0 == 0.0`. NOT A FULL PROOF: at
     # `low == high == +-inf` the `<=` branch reaches `(inf - inf) / 2.0` and returns NaN. No in-crate
     # caller can produce that -- both `l_limits` return a finite arc -- but the function is public.
-    "gaussian\\.rs:59:12: replace < with <= in mean_element_rates",
+    "gaussian\\.rs:67:12: replace < with <= in mean_element_rates",
     # `dq = -C/(2AB) * U_alphagamma * I`, with `I: f64 = 1.0` (the retrograde factor). `x * 1.0` and
     # `x / 1.0` are the same double for every `x` -- both are exact identity operations in IEEE-754,
     # agreeing on +-0, +-inf and NaN alike. Unconditional; no reachability argument needed.

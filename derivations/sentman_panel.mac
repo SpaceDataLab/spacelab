@@ -1,0 +1,110 @@
+/* Sentman's flat-panel coefficients, integrated from the drifting Maxwellian rather than quoted.
+
+   `spacelab-propagation::drag_coefficient::sentman_panel` ships, with g = cos(delta), l = sin(delta),
+   z = 1 + erf(s g), e = exp(-s^2 g^2) and s the speed ratio V/c_mp,
+
+       c_p = (g^2 + 1/(2 s^2)) z + g e/(sqrt(pi) s) + (1/2) v_ratio (sqrt(pi) g z + e/s)
+       c_t = l g z + l e/(s sqrt(pi))
+       v_ratio = sqrt((1/2)(1 + alpha (2 T_w/(T_inf s^2) - 1)))
+
+   and cites Doornbos (2011) Eqs 3.55-3.59 and ADBSat for them. Here each term is the moment of the
+   ambient gas's velocity distribution it stands for, integrated over the molecules that reach the
+   panel, on both sides of it: the code claims to hold leeward too. The diffuse re-emission and
+   Koppenwallner's v_ratio follow from the half-range Maxwellian and the definition of the energy
+   accommodation coefficient. Then the limits, and the benchmark row at 45 degrees by quadrature.  */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+gamma_expand : true$
+noerfc(x) := subst(erfc = lambda([y], 1 - erf(y)), x)$
+z : 1 + erf(s*g)$
+e : exp(-s^2*g^2)$
+cp_inc : (g^2 + 1/(2*s^2))*z + g/(sqrt(%pi)*s)*e$
+ct_inc : l*g*z + l/(s*sqrt(%pi))*e$
+flux : (g*z + e/(s*sqrt(%pi)))/2$
+
+/* ---- (1) the tangential directions integrate out ----------------------------------------------
+   With beta = 1/c_mp, each Cartesian factor of the drifting Maxwellian is
+   (beta/sqrt(pi)) exp(-beta^2 (u - U)^2). Across the panel it integrates to 1, and its first
+   moment is its drift U = V l in the flow's tangential direction (0 in the other).                */
+assume(b > 0)$
+fac(u, U) := (b/sqrt(%pi))*exp(-b^2*(u - U)^2)$
+must(is(ratsimp(integrate(fac(u, U), u, minf, inf)) = 1)
+     and is(ratsimp(integrate(u*fac(u, U), u, minf, inf) - U) = 0),
+     "(1) holds: a tangential factor integrates to 1 and its first moment to its drift")$
+
+/* ---- (2) the incident moments, normalised by rho V and (1/2) rho V^2, on both sides -----------
+   The molecules that reach the panel have inward normal speed u > 0; the drift along the inward
+   normal is V g, negative on the leeward side.                                                    */
+for side in [1, -1] do block([I1, I2, M, P, T],
+  assume(V > 0),
+  if side = 1 then assume(g > 0) else assume(g < 0),
+  I1 : integrate(u*fac(u, V*g), u, 0, inf),
+  I2 : integrate(u^2*fac(u, V*g), u, 0, inf),
+  M : noerfc(subst(b = s/V, I1/V)),
+  P : noerfc(subst(b = s/V, 2*I2/V^2)),
+  T : noerfc(subst(b = s/V, 2*(V*l)*I1/V^2)),
+  must(is(ratsimp(radcan(M - flux)) = 0) and is(ratsimp(radcan(P - cp_inc)) = 0)
+       and is(ratsimp(radcan(T - ct_inc)) = 0),
+       if side = 1 then "(2) holds: number flux, incident pressure and shear, windward g > 0"
+       else "(2) holds: the same three closed forms leeward, g < 0"),
+  forget(g > 0), forget(g < 0))$
+
+/* ---- (3) diffuse re-emission: a half-range Maxwellian at c_r carries (sqrt(pi)/2) c_r of normal
+   momentum per unit mass, so the re-emitted pressure is the shipped third term with
+   v_ratio = c_r/V.                                                                               */
+assume(cr > 0)$
+per_mass : integrate(u^2*exp(-u^2/cr^2), u, 0, inf)/integrate(u*exp(-u^2/cr^2), u, 0, inf)$
+must(is(ratsimp(per_mass - sqrt(%pi)*cr/2) = 0),
+     "(3) holds: normal momentum per unit re-emitted mass is (sqrt(pi)/2) c_r")$
+cp_re : flux*per_mass/(V^2/2)*V$
+must(is(ratsimp(cp_re - (1/2)*(cr/V)*(sqrt(%pi)*g*z + e/s)) = 0),
+     "(3) holds: the re-emitted pressure is (1/2) (c_r/V) (sqrt(pi) g z + e/s)")$
+
+/* ---- (4) Koppenwallner's v_ratio is the energy accommodation coefficient solved for c_r --------
+   alpha = (E_i - E_r)/(E_i - E_w) per unit mass, with E_i = V^2/2 for the hyperthermal beam and
+   E_r = c_r^2, E_w = 2 R T_w/M for the diffuse gas (the flux-weighted energy of a half-range
+   Maxwellian is 2 k T per molecule). With s^2 = M V^2/(2 R T_inf), T_inf cancels: v_ratio depends
+   on V and T_w only, though the function takes T_inf.                                            */
+assume(R > 0, M > 0, Tw > 0, Ti > 0)$
+cr2 : rhs(solve(alpha = (V^2/2 - c2)/(V^2/2 - 2*R*Tw/M), c2)[1])$
+shipped_v2 : (1/2)*(1 + alpha*(2*Tw/(Ti*s^2) - 1))$
+must(is(ratsimp(subst(s = sqrt(M*V^2/(2*R*Ti)), shipped_v2) - cr2/V^2) = 0),
+     "(4) holds: v_ratio^2 = c_r^2/V^2 from alpha's definition, and T_inf cancels")$
+
+/* ---- (5) the drag and lift resolution is a rotation by delta ---------------------------------- */
+cd : cp*g + ct*l$
+cl : cp*l - ct*g$
+must(is(ratsimp(subst(l = sqrt(1 - g^2), cd^2 + cl^2 - cp^2 - ct^2)) = 0),
+     "(5) holds: C_d^2 + C_l^2 = c_p^2 + c_t^2")$
+
+/* ---- (6) limits: s -> inf at normal incidence ------------------------------------------------
+   Full accommodation gives the classical 2. alpha = 0 is not specular reflection, which would
+   give 4: Sentman re-emits diffusely at every alpha, and alpha = 0 keeps the incident energy, so
+   the limit is 2 + sqrt(pi/2).                                                                   */
+cp_full(al) := subst([g = 1], cp_inc + (1/2)*sqrt((1/2)*(1 + al*(2*Tw/(Ti*s^2) - 1)))
+                                     *(sqrt(%pi)*g*z + e/s))$
+lim1 : limit(cp_full(1), s, inf)$
+lim0 : limit(cp_full(0), s, inf)$
+print("c_p as s -> inf at g = 1: alpha = 1 ->", lim1, ", alpha = 0 ->", lim0, "=", float(lim0))$
+must(is(lim1 = 2) and is(ratsimp(lim0 - (2 + sqrt(%pi/2))) = 0),
+     "(6) holds: the hyperthermal limits are 2 at alpha = 1 and 2 + sqrt(pi/2), not 4, at alpha = 0")$
+
+/* ---- (7) the 45-degree benchmark row by quadrature of the moments themselves -------------------
+   s = 7.4549, alpha = 1, T_w = 300 K, T_inf = 1000 K; the test's table holds c_p 1.11008,
+   c_t 1.00000, C_d 1.49205, C_l 0.07784 to 1e-4.                                                 */
+sv : 7.4549$
+gv : cos(%pi/4)$
+lv : sin(%pi/4)$
+q1 : quad_qags(u*exp(-sv^2*(u - gv)^2), u, 0, 2)[1]*sv/sqrt(%pi)$
+q2 : quad_qags(u^2*exp(-sv^2*(u - gv)^2), u, 0, 2)[1]*sv/sqrt(%pi)$
+vr : sqrt((1/2)*(1 + 1*(2*300/(1000*sv^2) - 1)))$
+cpq : float(2*q2 + q1*(sqrt(%pi)/2)*vr*2)$
+ctq : float(2*lv*q1)$
+cdq : float(cpq*gv + ctq*lv)$
+clq : float(cpq*lv - ctq*gv)$
+print("quadrature at 45 deg: c_p", cpq, " c_t", ctq, " C_d", cdq, " C_l", clq)$
+must(abs(cpq - 1.11008) < 1e-4 and abs(ctq - 1.00000) < 1e-4 and abs(cdq - 1.49205) < 1e-4
+     and abs(clq - 0.07784) < 1e-4,
+     "(7) holds: quadrature of the moments reproduces the benchmark row to 1e-4")$
+
+print("DONE")$

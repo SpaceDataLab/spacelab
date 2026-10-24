@@ -471,6 +471,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima gpt3_reduction.mac" "expected 9 identities to hold, found $holds"
     fi
 
+    out=$(macf sentman_panel.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 9 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima sentman_panel.mac: the Maxwellian's moments are the shipped c_p and c_t on both sides, and v_ratio is alpha's definition"
+    else
+        bad "maxima sentman_panel.mac" "expected 9 identities and limits to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

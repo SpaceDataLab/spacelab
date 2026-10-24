@@ -14,6 +14,13 @@
 //! (Mostaza-Prieto et al.); both agree character-for-character. The re-emission uses Koppenwallner's
 //! (2009) `½` factor for `v_re/v_inc`. Feed [`sentman_panel`] per facet from the box-wing
 //! ([`crate::spacecraft::BoxWing::sentman_drag_acceleration`]).
+//!
+//! `derivations/sentman_panel.mac` integrates the drifting Maxwellian over the molecules that reach
+//! the panel and gets the incident pressure and shear in closed form, on both sides of the panel.
+//! It also derives the diffuse re-emission term from the half-range Maxwellian, and `v_re/v_inc`
+//! from the definition of `α`, in which `T_∞` cancels. Quadrature reproduces the 45° benchmark row.
+//! The model re-emits diffusely at every `α`: at `α = 0` the re-emitted gas keeps the incident
+//! energy, and normal incidence tends to `c_p = 2 + √(π/2)`, not specular reflection's 4.
 
 // The gas-dynamics symbols (s, γ, ℓ, cp, cτ, cd, cl) are one/two letters by universal convention; the
 // reference/tool names (ADBSat, Doornbos, Koppenwallner) are proper nouns, not code identifiers.
@@ -73,9 +80,9 @@ pub fn speed_ratio(relative_speed: f64, temperature: f64, mean_molar_mass: f64) 
 
 /// Sentman's free-molecular coefficients for a panel whose outward normal makes `cos_incidence`
 /// `= cos δ = −(v̂_inc · n̂)` with the flow (windward ⟺ `cos_incidence ≥ 0`), at speed ratio
-/// `speed_ratio`, energy accommodation `accommodation` (`α ∈ [0, 1]`; 1 = full diffuse re-emission at
-/// the wall temperature, 0 = specular), wall temperature `wall_temperature` (K) and ambient
-/// `atmosphere_temperature` (K).
+/// `speed_ratio`, energy accommodation `accommodation` (`α ∈ [0, 1]`; 1 = diffuse re-emission at the
+/// wall temperature, 0 = diffuse re-emission at the incident energy, never specular), wall
+/// temperature `wall_temperature` (K) and ambient `atmosphere_temperature` (K).
 ///
 /// Doornbos Eqs 3.55–3.59 / ADBSat `coeff_sentman.m`, with `v_re/v_inc = √(½(1 + α(2 T_w/(T_∞ s²) −
 /// 1)))` (Koppenwallner). Valid for `cos_incidence < 0` too (leeward thermal back-flux); the caller
@@ -167,10 +174,10 @@ mod tests {
     fn colder_walls_and_lower_accommodation_change_the_coefficient() {
         // Accommodation and wall temperature genuinely move C_d — the whole point over a fixed constant.
         let full = sentman_panel(7.4549, 1.0, 1.0, 300.0, 1000.0).drag;
-        let specularish = sentman_panel(7.4549, 1.0, 0.5, 300.0, 1000.0).drag;
+        let half = sentman_panel(7.4549, 1.0, 0.5, 300.0, 1000.0).drag;
         assert!(
-            (full - specularish).abs() > 1e-3,
-            "α should matter: {full} vs {specularish}"
+            (full - half).abs() > 1e-3,
+            "α should matter: {full} vs {half}"
         );
     }
 }

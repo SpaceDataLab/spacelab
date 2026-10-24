@@ -1,0 +1,86 @@
+/* Which cosine Lambert's law puts in the Knocke sum, and what Orekit's choice costs.
+
+   `spacelab-propagation::earth_radiation` sums, over elements dA of a sphere of radius R seen from a
+   satellite at r, the flux
+
+       dF = M dA cos(alpha) (r - p) / (pi |r - p|^3),    M = a Phi cos(theta_sun) + e Phi/4,
+
+   which is Lambert's law when alpha is the angle between the element's normal p/|p| and the ray
+   r - p it emits along. Orekit 13.1.7's `KnockeRediffusedForceModel.computeElementaryFlux` takes
+   cos(alpha) = p.r/(|p||r|) instead, the geocentric angle between the element and the satellite
+   (read from its bytecode with javap). The two agree only at the sub-satellite point.
+
+   A uniform Lambertian sphere settles which is right: a flat plate facing it at distance r receives
+   M (R/r)^2, the sphere's view factor, and at r -> R a plate on the surface receives the exitance M
+   itself, which nothing can exceed. Writing x = cos(gamma) for the element's angle from the
+   sub-satellite point, the radial flux is an integral over x from R/r (the horizon) to 1; it is
+   done here in the slant distance q, where both integrands are rational.                         */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+assume(r > R, R > 0, q > 0)$
+xq : (r^2 + R^2 - q^2)/(2*r*R)$
+dxdq : diff(xq, q)$
+/* d(Omega) R^2 dx over the azimuth, times the radial component (r - R x)/q of the ray. */
+emission : (r*x - R)/q$
+geocentric : x$
+radial(w, e) := block([A],
+  A : integrate(ratsimp(subst(x = xq, 2*R^2*e*w*(r - R*x)/q^3)*(-dxdq)), q),
+  subst(q = sqrt(r^2 - R^2), A) - subst(q = r - R, A))$
+
+/* ---- (1) the view factor ---------------------------------------------------------------------- */
+FL : radial(emission, 1)$
+FG : radial(geocentric, 1)$
+must(is(ratsimp(radcan(FL - R^2/r^2)) = 0),
+     "(1) holds: Lambert's cosine gives the view factor (R/r)^2 exactly")$
+print("Orekit's cosine gives", ratsimp(radcan(FG)))$
+ratio(h) := float(subst([R = 6378137, r = 6378137 + h], FG/FL))$
+print("  over the view factor: 500 km", ratio(500e3), " 2000 km", ratio(2000e3),
+      " 20200 km", ratio(20200e3))$
+must(is(ratsimp(limit(radcan(FG), r, R, plus)) = 2),
+     "(1) holds: at the surface Orekit's cosine gives 2M, twice the exitance")$
+must(is(limit(radcan(FL), r, R, plus) = 1),
+     "(1) holds: at the surface Lambert's cosine gives M")$
+
+/* ---- (2) the visibility gate ----------------------------------------------------------------- *
+   p.(r - p) > 0 is x > R/r: the emission cosine's sign is the horizon the crown walk stops at,
+   while Orekit's p.r > 0 is a hemisphere the walk never reaches.                                 */
+must(is(ratsimp(subst(x = R/r, r*x - R)) = 0),
+     "(2) holds: the emission cosine vanishes exactly on the horizon x = R/r")$
+
+/* ---- (3) the element areas are exact, not first-order ---------------------------------------- */
+assume(D > 0, D < %pi)$
+cap : integrate(integrate(R^2*sin(g), g, 0, D), f, 0, 2*%pi)$
+must(is(ratsimp(cap - 2*%pi*R^2*(1 - cos(D))) = 0),
+     "(3) holds: the central cap is 2 pi R^2 (1 - cos D)")$
+sector : D*R^2*(cos(g0 - D/2) - cos(g0 + D/2))$
+must(is(trigsimp(trigexpand(sector - R^2*2*D*sin(D/2)*sin(g0))) = 0),
+     "(3) holds: a sector of a crown is R^2 2 D sin(D/2) sin(g0)")$
+
+/* ---- (4) polar night, the test's closed forms ------------------------------------------------
+   500 km over the pole with the Sun beneath it: no albedo, and Knocke's emissivity
+   e = E0 + E1 P1(x) + E2 P2(x) with x the element's sine of latitude, E1 = K1 at the reference
+   epoch. Phi = ES_COEFF c at 1 AU; the flux carries the 1/c.                                     */
+fpprec : 30$
+ex : 68/100 - 7/100*x - 18/100*(3*x^2 - 1)/2$
+at_pole : [R = 637813646/100, r = 637813646/100 + 500000]$
+k : 45606/10^10/4$
+lambert_z : bfloat(k*subst(at_pole, radial(emission, ex)))$
+orekit_z : bfloat(k*subst(at_pole, radial(geocentric, ex)))$
+print("polar night, Lambert's cosine:", lambert_z)$
+print("polar night, Orekit's cosine: ", orekit_z, " ratio", orekit_z/lambert_z)$
+must(is(abs(lambert_z/4.2495742060546961b-7 - 1) < 10^-16)
+     and is(abs(orekit_z/8.4737886501643365b-7 - 1) < 10^-16),
+     "(4) holds: the test's LAMBERT and OREKIT constants are these two integrals")$
+
+/* The same two numbers by quadrature in x, so the closed forms are not trusted alone. */
+rho : sqrt(r^2 + R^2 - 2*r*R*x)$
+x_hor : float(subst(at_pole, R/r))$
+ql : k*quad_qags(float(subst(at_pole, 2*R^2*ex*(r*x - R)*(r - R*x)/rho^4)), x, x_hor, 1,
+                 'epsrel = 1e-13)[1]$
+qg : k*quad_qags(float(subst(at_pole, 2*R^2*ex*x*(r - R*x)/rho^3)), x, x_hor, 1,
+                 'epsrel = 1e-13)[1]$
+print("quadrature:", float(ql), float(qg))$
+must(is(abs(ql/lambert_z - 1) < 1e-10) and is(abs(qg/orekit_z - 1) < 1e-10),
+     "(4) holds: quadrature agrees with both closed forms to 1e-10")$
+
+print("DONE")$

@@ -1,6 +1,6 @@
 //! Knocke Earth-reradiated radiation pressure — albedo (reflected sunlight) and thermal-IR emission —
-//! a faithful port of Orekit's `KnockeRediffusedForceModel` (Knocke, Ries & Tapley, "Earth Radiation
-//! Pressure Effects on Satellites", 1988).
+//! a port of Orekit's `KnockeRediffusedForceModel` (Knocke, Ries & Tapley, "Earth Radiation Pressure
+//! Effects on Satellites", 1988), with Lambert's cosine where Orekit has another (below).
 //!
 //! # Why
 //!
@@ -26,10 +26,16 @@
 //!   ([`A0`]…[`E2`]).
 //! * **Solar flux at Earth.** `Φ = ES_COEFF · c / d²`, `d` the Earth–Sun distance in AU (JPL-SSD AU).
 //! * **Elementary flux.** An element of area `dA` at position `p` (on the sphere) contributes only if
-//!   the satellite sees it (`cosα = p̂·r̂ > 0`). Its outgoing irradiance is
+//!   the satellite is above its horizon, `cosα = p̂·(r − p)/|r − p| > 0`. Its outgoing irradiance is
 //!   `a·Φ·cosθ☉ + e·Φ/4` (albedo weighted by the solar incidence `cosθ☉ ≥ 0`, IR unconditional),
 //!   attenuated by the Lambert/inverse-square factor `dA·cosα / (π·|r−p|³)` and divided by `c`, along
 //!   the element→satellite direction `r − p`.
+//!
+//!   Orekit 13.1.7 takes `cosα = p̂·r̂`, the geocentric angle, instead. That is not Lambert's law: on
+//!   a uniform sphere it gives 1.97× the view factor `(R/r)²` at 500 km, and twice the exitance at
+//!   the surface. `derivations/knocke_lambert.mac` integrates both cosines in closed form, and
+//!   `a_polar_night_cap_matches_its_closed_form` holds the grid to each. The Orekit cosine is kept
+//!   for tests only, so the grid can still be compared with Orekit's element for element.
 //! * **Grid.** A central spherical cap of half-angle `Δ` (the angular resolution) about the
 //!   sub-satellite point, then concentric crowns at colatitudes `1.5Δ, 2.5Δ, …` out to the visible
 //!   horizon `acos(Rₑ/|r|)`, each crown swept in azimuth by steps of `Δ`. Ring/sector centres are
@@ -184,10 +190,14 @@ where
 
 impl<M, R, E: Ephemeris> KnockeEarthRadiation<M, R, E> {
     /// The total rediffused (albedo + IR) flux vector at the satellite, in the inertial frame — the
-    /// grid sum of Orekit's `KnockeRediffusedForceModel.acceleration`, before the spacecraft model is
-    /// applied. Exposed for validation.
+    /// grid sum of Orekit's `KnockeRediffusedForceModel.acceleration` with each element weighted by
+    /// its emission angle, before the spacecraft model is applied. Exposed for validation.
     #[must_use]
     pub fn rediffused_flux<S: Scalar>(&self, t: f64, r: &[S; 3]) -> [S; 3] {
+        self.grid_sum(t, r, Lambert::Emission)
+    }
+
+    fn grid_sum<S: Scalar>(&self, t: f64, r: &[S; 3], cosine: Lambert) -> [S; 3] {
         let re = self.equatorial_radius;
         let ares = self.angular_resolution.get();
 
@@ -233,6 +243,7 @@ impl<M, R, E: Ephemeris> KnockeEarthRadiation<M, R, E> {
             solar_flux,
             a1,
             e1,
+            cosine,
         );
 
         // Concentric crowns out to the visible horizon. The bound and every angle are taken from the
@@ -251,8 +262,17 @@ impl<M, R, E: Ephemeris> KnockeEarthRadiation<M, R, E> {
             while radial_off < TAU && sectors_left > 0 {
                 sectors_left -= 1;
                 let center = rotate_vector(&projected, radial_off, &first_center);
-                let df =
-                    elementary_flux(r, &center, &sun, sun_norm, sector_area, solar_flux, a1, e1);
+                let df = elementary_flux(
+                    r,
+                    &center,
+                    &sun,
+                    sun_norm,
+                    sector_area,
+                    solar_flux,
+                    a1,
+                    e1,
+                    cosine,
+                );
                 flux = [flux[0] + df[0], flux[1] + df[1], flux[2] + df[2]];
                 radial_off += ares;
             }
@@ -280,8 +300,20 @@ fn step_bound(start: f64, bound: f64, step: f64) -> usize {
     (libm::ceil((bound - start) / step) as usize).saturating_add(1)
 }
 
-/// The elementary rediffused flux from one Earth area — a direct port of Orekit's
-/// `computeElementaryFlux` (the `double` path). `sat` and `center` are inertial (satellite position
+/// Which cosine weighs an element in Lambert's law.
+#[derive(Clone, Copy)]
+enum Lambert {
+    /// Between the element's normal and the ray from it to the satellite: Lambert's law.
+    Emission,
+    /// Between the element's normal and the satellite's geocentric position: what Orekit 13.1.7's
+    /// `computeElementaryFlux` evaluates, kept so the grid can still be compared with Orekit's
+    /// element for element.
+    #[cfg(test)]
+    Geocentric,
+}
+
+/// The elementary rediffused flux from one Earth area — a port of Orekit's `computeElementaryFlux`
+/// (the `double` path), except for the cosine in Lambert's law (see [`Lambert`]). `sat` and `center` are inertial (satellite position
 /// and the element centre on the sphere); `sun`/`sun_norm` the inertial Sun; `area`, `solar_flux`,
 /// `a1`, `e1` the element area, solar flux at Earth, and the annual albedo/emissivity coefficients.
 /// Returns the flux contribution in the inertial frame, or zero if the satellite cannot see the area.
@@ -295,12 +327,18 @@ fn elementary_flux<S: Scalar>(
     solar_flux: f64,
     a1: f64,
     e1: f64,
+    cosine: Lambert,
 ) -> [S; 3] {
     let center_norm = dot3(center, center).sqrt();
-    let sat_norm = dot3(sat, sat).sqrt();
-    let cos_alpha = dot3(center, sat) / (center_norm * sat_norm);
+    let rv = [sat[0] - center[0], sat[1] - center[1], sat[2] - center[2]];
+    let rn = dot3(&rv, &rv).sqrt();
+    let cos_alpha = match cosine {
+        Lambert::Emission => dot3(center, &rv) / (center_norm * rn),
+        #[cfg(test)]
+        Lambert::Geocentric => dot3(center, sat) / (center_norm * dot3(sat, sat).sqrt()),
+    };
 
-    // Visibility gate on the value — a measure-zero boundary the STM is not defined across.
+    // Horizon gate on the value — a measure-zero boundary the STM is not defined across.
     if cos_alpha.value() <= 0.0 {
         return [S::from_f64(0.0); 3];
     }
@@ -323,9 +361,7 @@ fn elementary_flux<S: Scalar>(
     let sf = S::from_f64(solar_flux);
     let albedo_and_ir = albedo * sf * cos_sun + emissivity * sf * S::from_f64(0.25);
 
-    // r = sat − center; Lambert/inverse-square projected area, then /c, along r.
-    let rv = [sat[0] - center[0], sat[1] - center[1], sat[2] - center[2]];
-    let rn = dot3(&rv, &rv).sqrt();
+    // Lambert/inverse-square projected area, then /c, along r = sat − center.
     let proj = S::from_f64(area) * cos_alpha / (S::from_f64(PI) * rn * rn * rn);
     let scale = proj * (albedo_and_ir / S::from_f64(SPEED_OF_LIGHT));
     [rv[0] * scale, rv[1] * scale, rv[2] * scale]
@@ -453,13 +489,60 @@ mod tests {
             reference_epoch_offset: offset,
             attitude: |_t: f64| IDENTITY,
         };
-        let got = force.acceleration(0.0, &sat, &[0.0; 3]);
+        // Orekit's cosine, and the identity attitude `acceleration` would apply, so what is compared
+        // is the grid, the rotations, the coefficients and the flux law Orekit and this port share.
+        let flux = force.grid_sum(0.0, &sat, Lambert::Geocentric);
+        let got = force
+            .model
+            .radiation(&flux, &unit_sun_dir(&force.sun, 0.0, &sat));
         assert_close(label, got, want, tol)
     }
 
-    /// The Knocke acceleration matches Orekit's `KnockeRediffusedForceModel` across several LEO
-    /// geometries (varying satellite position, Sun position and epoch) to the reported tolerance —
-    /// the whole grid, the zonal + seasonal coefficients, and the Lambert/inverse-square flux.
+    /// Lambert's cosine against a closed form, and Orekit's against its own.
+    ///
+    /// A satellite 500 km over the pole with the Sun beneath it sees a cap in polar night: no
+    /// albedo, and an emissivity that depends on the element's colatitude alone. The flux is then a
+    /// one-dimensional integral, and `derivations/knocke_lambert.mac` evaluates it exactly for both
+    /// cosines: 4.2496e-7 under Lambert's law, 8.4738e-7 under Orekit's, a factor 1.994. The grid
+    /// converges on the first as `Δ²`, because the emission cosine vanishes at the horizon where the
+    /// last crown is cut. Orekit's weight does not vanish there, so its error stalls near 3e-4.
+    #[test]
+    fn a_polar_night_cap_matches_its_closed_form() {
+        const LAMBERT: f64 = 4.249_574_206_054_696_1e-7;
+        const OREKIT: f64 = 8.473_788_650_164_336_5e-7;
+        let r = AE + 500.0e3;
+        // A nanoradian off the pole, where the crown axis `east` is undefined.
+        let sat = [r * libm::sin(1.0e-9), 0.0, r * libm::cos(1.0e-9)];
+        let force = |n: f64| KnockeEarthRadiation {
+            model: model(),
+            sun: FixedBody([0.0, 0.0, -JPL_SSD_ASTRONOMICAL_UNIT]),
+            equatorial_radius: AE,
+            angular_resolution: step(TAU / n),
+            reference_epoch_offset: 0.0,
+            attitude: |_t: f64| IDENTITY,
+        };
+        let lambert = |n: f64| force(n).rediffused_flux(0.0, &sat)[2] / LAMBERT - 1.0;
+        let (coarse, fine) = (lambert(600.0).abs(), lambert(2000.0).abs());
+        assert!(
+            fine < 2e-4,
+            "Lambert's cosine: {fine:.3e} from the closed form"
+        );
+        assert!(
+            coarse / fine > 8.0,
+            "Δ²-convergence would cut the error 11×, not {:.1}×",
+            coarse / fine
+        );
+        let orekit = force(2000.0).grid_sum(0.0, &sat, Lambert::Geocentric)[2] / OREKIT - 1.0;
+        assert!(
+            orekit.abs() < 1e-3,
+            "Orekit's cosine: {orekit:.3e} from its closed form"
+        );
+    }
+
+    /// Under Orekit's cosine, the Knocke acceleration matches Orekit's `KnockeRediffusedForceModel`
+    /// across several LEO geometries (varying satellite position, Sun position and epoch) to the
+    /// reported tolerance — the whole grid, the zonal + seasonal coefficients, and the
+    /// inverse-square flux. The cosine itself is checked against a closed form above.
     #[test]
     fn knocke_matches_orekit() {
         let mut worst = 0.0_f64;
@@ -784,8 +867,11 @@ mod tests {
     ///
     /// The horizon `acos(Rₑ/|r|)` lands exactly on the fifth crown offset at this radius, so one
     /// ulp of altitude either side of it must not change the crown count; a `<=` puts a crown
-    /// between them. The azimuth wraps exactly onto `2π` at `Δ = 2π/28.5` — where `<=` sweeps the
-    /// zero sector twice — while one ulp more of `Δ` leaves the sector count where it was.
+    /// between them. Under Lambert's cosine that crown weighs nothing: every element centred on the
+    /// horizon emits at 90° to its normal, so this half now shows the horizon is where the weight
+    /// vanishes and can no longer tell `<` from `<=`. The azimuth wraps exactly onto `2π` at
+    /// `Δ = 2π/28.5` — where `<=` sweeps the zero sector twice — while one ulp more of `Δ` leaves
+    /// the sector count where it was.
     #[test]
     fn the_grid_loops_stop_before_their_bounds_not_on_them() {
         let on_the_crown = [
@@ -852,10 +938,13 @@ mod tests {
             &[Dual::<3>::constant(0.0); 3],
         );
         let a_f64 = coarse.acceleration(0.0, &sat, &[0.0; 3]);
+        // A few ulps, not bit equality: `Dual` divides as `u·(1/v)`, one rounding more than f64's
+        // `u/v`, so the two instantiations can part by an ulp per quotient (1.7e-16 measured here).
         for i in 0..3 {
             assert!(
-                (a[i].value() - a_f64[i]).abs() < 1e-24,
-                "value drift on axis {i}"
+                (a[i].value() - a_f64[i]).abs() < 4.0 * f64::EPSILON * a_f64[i].abs(),
+                "value drift on axis {i}: {:e} relative",
+                (a[i].value() - a_f64[i]) / a_f64[i]
             );
         }
 

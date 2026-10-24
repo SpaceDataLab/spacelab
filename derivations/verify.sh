@@ -479,6 +479,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima sentman_panel.mac" "expected 9 identities and limits to hold, found $holds"
     fi
 
+    out=$(macf knocke_lambert.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 8 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima knocke_lambert.mac: Lambert's cosine gives the view factor (R/r)^2 exactly; Orekit's gives 1.97x it at 500 km and 2M at the surface"
+    else
+        bad "maxima knocke_lambert.mac" "expected 8 identities to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

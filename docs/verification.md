@@ -254,7 +254,7 @@ convergence order + Hamiltonian conservation + cross-checks against independentl
 | Zonal J₂…J_{N+1} force | zonal-harmonic potential; classical J₂ node regression | analytic node-regression Ω̇; J₃ parity; energy/Lz | node < 3%; energy < 1e-9 rel; STM symplectic < 1e-6 | tests/zonal.rs, tests/forces.rs |
 | Time-variable gravity | IERS TN36 Table 6.2; ICGEM `.gfc` time-variable format | IERS 2010 Table 6.2 vendored rates; ICGEM parse vs hand series; `eigen6s2` excerpt | parse/eval < 1e-16…1e-18 | src/time_variable_gravity.rs |
 | Relativity (Schwarzschild / Lense-Thirring / de Sitter) | IERS TN36 §10.3 | closed-form Python golden **and** Orekit 13 golden CSV | Python < 1e-12; Orekit round-off (de Sitter < 1e-10) | src/relativity.rs |
-| Knocke Earth albedo/IR | Knocke, Ries & Tapley 1988 | Orekit 13 `KnockeRediffusedForceModel` golden, 4 LEO geometries | < 1e-12 | src/earth_radiation.rs |
+| Knocke Earth albedo/IR | Knocke, Ries & Tapley 1988; Lambert's law | Lambert's cosine: the polar-night closed form of `derivations/knocke_lambert.mac`. The grid under Orekit's cosine: Orekit 13 `KnockeRediffusedForceModel` golden, 4 LEO geometries | closed form < 2e-4 at Δ = 2π/2000, converging as Δ²; Orekit < 1e-12 | src/earth_radiation.rs |
 | Third-body force (Battin form) | Battin, *Astrodynamics* — f(q) indirect-term form | independent direct difference-of-terms; tidal-field limit | Battin≡direct < 1e-8; tidal < 1e-4 | tests/solar_perturbations.rs |
 | SRP force (direction / shadow / 1/d²) | cannonball SRP; solar irradiance at 1 AU | analytic geometry (1 AU ref 1.368e-7) | < 1e-10; near/far≈4 < 1e-3 | tests/solar_perturbations.rs |
 | Conical shadow (lighting ratio) | conical umbra/penumbra geometry (Montenbruck–Gill) | independent circle-intersection-area oracle; Orekit form | < 1e-12 | src/shadow.rs |
@@ -269,6 +269,20 @@ convergence order + Hamiltonian conservation + cross-checks against independentl
 | **Geocentric propagation vs a fourth propagator** | XGM2019e→70 in the true ITRF, Sun + Moon as point masses; drag, SRP, albedo, tides and relativity off on both sides | **NEPTUNE**, same initial state, *the same coefficients* (`make_gravity_overlay.py` writes the embedded table in NEPTUNE's own layout) and *its own EOP row* | \|Δr\| = 0.05 m @ 3 h, 0.25 m @ 12 h, 0.47 m @ 24 h, linear and monotone; the two fields alone differ by 18.4 m over the same day | spacelab/tests/neptune\_sentinel1b.rs |
 | **ITRF → GCRF, one epoch** | IAU 2006/2000A CIO chain on Sentinel-1B's POE state | **NEPTUNE**'s own reduction (libslam `slam_reduction.f90`) on **its own** EOP row for MJD 58659 | \|Δr\| = 1.3e-5 m, \|Δv\| = 1.6e-7 m/s — 0.4 µas of pole | spacelab-frames/tests/neptune\_frames.rs |
 | Sentman drag coefficient | Sentman 1961; Doornbos 2011 | ADBSat `coeff_sentman.m` + Doornbos 2011 benchmark table | table < 1e-4; s vs 7.4549 < 1e-3 | src/drag_coefficient.rs |
+
+**Orekit's Knocke model weighs each element by the wrong cosine** (found 2026-10-24). Lambert's law
+weighs an element by the cosine between its normal and the ray it emits along. Orekit 13.1.7's
+`computeElementaryFlux` uses the cosine of the geocentric angle between the element and the
+satellite (read from its bytecode with `javap`), and this port had copied it. A uniform Lambertian
+sphere decides between them, because a plate facing it receives exactly the view factor `(R/r)²`
+of the exitance. `derivations/knocke_lambert.mac` integrates both: Lambert's cosine gives `(R/r)²`
+exactly, and Orekit's gives **1.971×** it at 500 km, 1.852× at 2000 km and 1.305× at GNSS height.
+At the surface it gives twice the exitance, which no Lambertian surface can deliver. The port now
+uses the emission cosine. Orekit's is kept for tests only, so the four golden vectors still check
+the grid, the rotations and the coefficients element for element. At those four geometries, 614 to
+1029 km with albedo and IR together, Orekit's flux is 1.99 to 2.04 times Lambert's, so the
+rediffused acceleration halves. The grid also converges faster, as `Δ²`: the emission cosine
+vanishes on the horizon, where the last crown is cut.
 
 ### Atmospheres — exact ports of primary-source reference implementations
 
@@ -7639,7 +7653,7 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 328 modules, 91 name a check, 237 do not** — 152 physics,
+(`plans/16` Ф17.B orders them). **Today: 328 modules, 92 name a check, 236 do not** — 151 physics,
 25 parsers, 6 generated and 54 infrastructure. The physics column is the one to watch, and it went
 *up* on 2026-10-24 for a reason worth keeping: the rule had counted any bare `§4.13` as a row of
 this file, and a bare section sign is also how a module cites a textbook or a standard. Twenty-eight
@@ -7831,7 +7845,6 @@ crates/spacelab-propagation/src/dsst/tesseral_short_period.rs | physics | no re-
 crates/spacelab-propagation/src/dsst/third_body.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/third_body_short_period.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/zonal.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-propagation/src/earth_radiation.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/ephemeris.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/forces.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/gj.rs | physics | no re-runnable check named in the module doc

@@ -273,7 +273,7 @@ exclude_re = [
     # `let kind = if sign_next > 0 { Rising } else { Falling }`, reached only inside
     # `sign_prev != 0 && sign_next != 0 && sign_prev != sign_next`. `sign_of` returns `-1`, `0` or
     # `+1`, so `sign_next ∈ {−1, +1}` here and `> 0` and `>= 0` agree on both.
-    "event\\.rs:67:41: replace > with >= in find_events",
+    "event\\.rs:70:41: replace > with >= in find_events",
 
     # --- `brent`'s acceptance rule. Proved unreachable or provably indistinguishable. ---
 
@@ -283,25 +283,25 @@ exclude_re = [
     # Acceptance requires `2p < 3·xm·q − |tol1·q|` with `p = |p| ≥ 0`, which forces `xm·q > 0`; so
     # `q` carries the sign of `xm` and `d = p/q` does too. At `|d| == tol1` that makes `d` exactly
     # the `sign(xm)·tol1` the else branch adds.
-    "root\\.rs:197:20: replace > with >= in brent",
+    "root\\.rs:198:20: replace > with >= in brent",
 
     # `b += if xm > 0.0 { tol1 } else { -tol1 }`. `xm == 0.0` is unreachable: `xm` is not reassigned
     # after line 149, line 155 returns when `xm.abs() <= tol1`, and `tol1 = 2ε|b| + tol/2 > 0`
     # because `tol > 0` is checked on entry. So `|xm| > tol1 > 0` wherever this is evaluated.
-    "root\\.rs:200:24: replace > with >= in brent",
+    "root\\.rs:201:24: replace > with >= in brent",
 
     # `if (fb > 0.0) == (fc > 0.0)`, left operand. `fb == ±0` does reach here, but the block it
     # guards writes only `c`, `fc`, `d` and `e`. The next iteration cannot swap (`|fc| < |fb| = 0`
     # is false) and returns at `if fb == 0.0` with a bracket built from `b` and `evals` alone —
     # neither of which the block touches. The difference is real and unobservable.
-    "root\\.rs:211:16: replace > with >= in brent",
+    "root\\.rs:212:16: replace > with >= in brent",
 
     # Same test, right operand. `fc` is never ±0 here: it is written in exactly three places, and
     # each writes a value already known to be nonzero — before the loop (line 120 returned if
     # `fa == 0`); inside the swap, whose guard `fc.abs() < fb.abs()` forces `fb != 0` and whose body
     # sets `fc` to that `fb`; and at line 213, where `fa` is the `fb` that passed line 151's
     # `fb == 0.0` return.
-    "root\\.rs:211:30: replace > with >= in brent",
+    "root\\.rs:212:30: replace > with >= in brent",
 
     # --- The two below are NOT proofs. Each is a measure-zero tie whose reachable instances were
     # --- shown to produce the identical step, plus a bounded search that found no counterexample:
@@ -317,7 +317,7 @@ exclude_re = [
     # `p = −2·xm` and `q = 2`, and `p/q` comes out as exactly `xm` — with the sign flip for negative
     # `xm` and without it for positive — so an accepted step is the bisection step itself. Only
     # opposite signs in the inverse-quadratic branch are unproved.
-    "root\\.rs:160:40: replace > with >= in brent",
+    "root\\.rs:161:40: replace > with >= in brent",
 
     # NOT a proof. `if libm::fabs(dx) < 1e-14` in `Cr3bp::collinear_points`, the Newton break, tied
     # to `<=`. The two differ only when the correction is exactly `1e-14`, and `dx` is the quotient
@@ -552,7 +552,7 @@ exclude_re = [
     # which on the step where `e` is the current bracket width is exactly `xm` — again the bisection
     # step, so only `e` differs. When `min1` binds, the tie is an exact float coincidence between a
     # quotient and `3·xm·q − |tol1·q|`.
-    "root\\.rs:182:24: replace < with <= in brent",
+    "root\\.rs:183:24: replace < with <= in brent",
 
     # --- `optimal.rs`. Two provable no-ops, four tolerance ties, and a Newton that is
     # --- self-correcting in the same sense as `lambert`'s. Every measurement below is the worst
@@ -953,15 +953,15 @@ exclude_re = [
     # `π/2` is not an f64. The sibling `*` mutants are *not* on this list: `C2 / sin φ` is `0/0` at
     # `φ = 0`, and `the_season_is_finite_at_its_own_reference_epoch` evaluates exactly there.
     # Re-open both if Knocke's coefficients ever gain a sine amplitude.
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:212:35: replace \\+ with - in KnockeEarthRadiation<M, R, E>::rediffused_flux",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:213:35: replace \\+ with - in KnockeEarthRadiation<M, R, E>::rediffused_flux",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:222:35: replace \\+ with - in KnockeEarthRadiation<M, R, E>::grid_sum",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:223:35: replace \\+ with - in KnockeEarthRadiation<M, R, E>::grid_sum",
 
     # `if cos_sun.value() > 0.0` — the daylit gate on the albedo — tied to `>=`. Differs only at the
     # terminator, `cos θ☉` exactly zero, and there the two agree anyway: `albedo` is read in exactly
     # one place, `albedo · Φ · cos_sun`, so admitting the element multiplies the coefficient by zero
-    # and adds nothing. Provable, not measured. This is *not* true of the visibility gate at 235,
+    # and adds nothing. Provable, not measured. This is *not* true of the horizon gate above it,
     # which returns early and skips terms that do not carry `cos α` as a factor.
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:317:37: replace > with >= in elementary_flux",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:355:37: replace > with >= in elementary_flux",
 
     # The two grid walks' counted limits — the `crowns_left`/`sectors_left` guards, their decrements,
     # and the subtraction inside `step_bound` that sizes them. Seven mutants, one argument.
@@ -984,13 +984,13 @@ exclude_re = [
     # the counted limit buys termination in ℕ, not termination in time. Re-open all seven the day
     # `AngularResolution` gains a floor that makes the worst-case grid payable, because then the
     # counter becomes reachable and each of these becomes a live wrong answer.
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:245:51: replace > with >= in KnockeEarthRadiation<M, R, E>::rediffused_flux",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:246:25: replace -= with /= in KnockeEarthRadiation<M, R, E>::rediffused_flux",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:246:25: replace -= with \\+= in KnockeEarthRadiation<M, R, E>::rediffused_flux",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:251:52: replace > with >= in KnockeEarthRadiation<M, R, E>::rediffused_flux",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:252:30: replace -= with \\+= in KnockeEarthRadiation<M, R, E>::rediffused_flux",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:252:30: replace -= with /= in KnockeEarthRadiation<M, R, E>::rediffused_flux",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:280:24: replace - with \\+ in step_bound",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:256:51: replace > with >= in KnockeEarthRadiation<M, R, E>::grid_sum",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:257:25: replace -= with /= in KnockeEarthRadiation<M, R, E>::grid_sum",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:257:25: replace -= with \\+= in KnockeEarthRadiation<M, R, E>::grid_sum",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:262:52: replace > with >= in KnockeEarthRadiation<M, R, E>::grid_sum",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:263:30: replace -= with \\+= in KnockeEarthRadiation<M, R, E>::grid_sum",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:263:30: replace -= with /= in KnockeEarthRadiation<M, R, E>::grid_sum",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:300:24: replace - with \\+ in step_bound",
 
     # --- crates/spacelab-propagation/src/shadow.rs ---
 
@@ -1926,7 +1926,7 @@ exclude_re = [
     # `a_step_floor_above_the_controller_stops_mid_span_and_not_at_the_end`,
     # `the_controller_pays_what_its_constants_say_it_should` and
     # `the_first_step_is_capped_by_the_span_and_not_by_a_ratio_of_its_ends`.
-    "driver\\.rs:437:18: replace > with >= in integrate",
+    "driver\\.rs:438:18: replace > with >= in integrate",
 
     # --- crates/spacelab-propagation/src/gj.rs ---
 
@@ -2424,9 +2424,9 @@ exclude_re = [
     # `resize(n_epochs, ..)` on a vector already that long, which the standard library defines as a
     # no-op. Graded by a full run of the file after the parse tests were written: 154 caught, 3
     # unviable, and these three the only survivors.
-    "sp3\\.rs:298:21: replace < with <= in set_sample",
-    "sp3\\.rs:298:21: replace < with == in set_sample",
-    "sp3\\.rs:298:21: replace < with > in set_sample",
+    "sp3\\.rs:207:21: replace < with <= in set_sample",
+    "sp3\\.rs:207:21: replace < with == in set_sample",
+    "sp3\\.rs:207:21: replace < with > in set_sample",
 
     # `higher_order_iono::geomagnetic_dipole_field`'s `b0_nt`, the dipole moment magnitude. It cancels
     # out of the returned field identically, so every rearrangement of the radicand is equivalent.
@@ -3574,7 +3574,7 @@ exclude_re = [
     # row by `sqrt(0)` and then skips every column on `if a[k] == 0.0 { continue; }`: the information
     # matrix and the RHS are untouched. Negative `lambda` would distinguish them, through a `sqrt` of
     # a negative number, but the field's contract has no negative branch.
-    "gauss_newton\\.rs:110:23: replace > with >= in GaussNewton::solve",
+    "gauss_newton\\.rs:112:23: replace > with >= in GaussNewton::solve",
 
     # Whether a step that improves nothing counts as an improvement.
     #
@@ -3585,7 +3585,7 @@ exclude_re = [
     # it saturates at 1e12. Only `report.iterations` differs (1 against ~16), and pinning that would
     # be codifying the damping schedule's wasted work as a requirement. Noted as an inefficiency at
     # the optimum rather than excluded as unreachable.
-    "gauss_newton\\.rs:125:27: replace < with <= in GaussNewton::solve",
+    "gauss_newton\\.rs:127:27: replace < with <= in GaussNewton::solve",
 
     # A guard on a square root, at the one argument where the guard and the root agree.
     #
@@ -3629,8 +3629,8 @@ exclude_re = [
     # `i`th slot. Mutating `i + 1` to `i * 1` starts the sum at `j = i`, whose factor — `x[i]` in
     # `solve`, `rinv[i][col]` in `covariance` — is still the `0.0` the array was initialised with at
     # that moment. The extra term is exactly zero for every `i` and every column.
-    "srif\\.rs:135:25: replace \\+ with \\* in Srif<N>::solve",
-    "srif\\.rs:157:29: replace \\+ with \\* in Srif<N>::covariance",
+    "srif\\.rs:136:25: replace \\+ with \\* in Srif<N>::solve",
+    "srif\\.rs:158:29: replace \\+ with \\* in Srif<N>::covariance",
 
     # Negating the pre-array's left block leaves the triangularised factor where it was.
     #
@@ -3653,9 +3653,9 @@ exclude_re = [
     # second. The substantive behaviour — which days move, by how much, and that the anchor does not
     # — is pinned by `destep_dut1_removes_a_leap_jump_anchored_at_the_base` and
     # `destep_dut1_undoes_a_jump_below_the_base_by_moving_the_earlier_days`.
-    "finals\\.rs:236:23: replace > with >= in destep_dut1",
-    "finals\\.rs:243:23: replace > with >= in destep_dut1",
-    "finals\\.rs:430:31: replace > with >= in EopSeries::at_mjd",
+    "finals\\.rs:248:23: replace > with >= in destep_dut1",
+    "finals\\.rs:255:23: replace > with >= in destep_dut1",
+    "finals\\.rs:456:31: replace > with >= in EopSeries::at_mjd",
 
     # The same shape one level up: where the daily/hole boundary sits, between 1 and 2 days.
     #
@@ -3664,7 +3664,7 @@ exclude_re = [
     # exists to separate them; a series spaced exactly 1.5 days apart is not a thing the format can
     # produce, and at the tie interpolating and refusing are equally honest. That a 2-day hole *is*
     # refused is pinned by `a_hole_in_the_series_is_refused_not_interpolated`.
-    "finals\\.rs:374:28: replace > with >= in EopSeries::at_mjd",
+    "finals\\.rs:400:28: replace > with >= in EopSeries::at_mjd",
 
     # Range reductions in front of a sine, replaced by a shift of exactly one full turn.
     #
@@ -4025,7 +4025,7 @@ exclude_re = [
     # there — the step has reached the size the caller called converged — and the iteration has
     # already accepted the step and lowered the cost before the test runs, so the returned solution
     # is the same one either way; only whether one further step is attempted differs.
-    "gauss_newton\\.rs:132:30: replace < with <= in GaussNewton::solve",
+    "gauss_newton\\.rs:134:30: replace < with <= in GaussNewton::solve",
 
     # --- `gnss/dop.rs`. A gap in the reals, a self-comparison, and two ties.
     #
@@ -4086,7 +4086,7 @@ exclude_re = [
     # clamp is dead, and its doc comment says as much — "no clipping is needed against the eastern
     # edge". It is kept because it is what makes the invariant local to the one line that indexes
     # `wi + 1`, rather than a property of a sibling field.)
-    "gpt3\\.rs:250:59: replace - with \\+ in Gpt3Grid::west_index",
+    "gpt3\\.rs:257:59: replace - with \\+ in Gpt3Grid::west_index",
 
     # --- `gnss/rinex.rs`. Sakamoto's sum is never negative, so its wrap is never needed.
     #

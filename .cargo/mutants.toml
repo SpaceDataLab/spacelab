@@ -1006,8 +1006,8 @@ exclude_re = [
     # two correct formulas at a measure-zero input. The 1.7e-14 rad is `angle`'s worst case over all
     # inputs, and it reaches `λ` divided by `α_sun ≈ 4.7e-3`, i.e. 3.6e-12 — three orders under the
     # 1e-9 floor the lens formula itself has at that radius ratio.
-    "shadow\\.rs:46:10: replace < with <= in angle",
-    "shadow\\.rs:46:28: replace > with >= in angle",
+    "shadow\\.rs:50:10: replace < with <= in angle",
+    "shadow\\.rs:50:28: replace > with >= in angle",
 
     # --- crates/spacelab-propagation/src/space_weather.rs ---
 

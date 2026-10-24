@@ -7653,7 +7653,7 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 328 modules, 92 name a check, 236 do not** — 151 physics,
+(`plans/16` Ф17.B orders them). **Today: 328 modules, 93 name a check, 235 do not** — 150 physics,
 25 parsers, 6 generated and 54 infrastructure. The physics column is the one to watch, and it went
 *up* on 2026-10-24 for a reason worth keeping: the rule had counted any bare `§4.13` as a row of
 this file, and a bare section sign is also how a module cites a textbook or a standard. Twenty-eight
@@ -7860,7 +7860,6 @@ crates/spacelab-propagation/src/nrlmsise00/atmosphere.rs | physics | no re-runna
 crates/spacelab-propagation/src/rk4.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/rkn1210.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/rkn1210_consts.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
-crates/spacelab-propagation/src/shadow.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/space_weather.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/spacecraft.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/stt.rs | physics | no re-runnable check named in the module doc

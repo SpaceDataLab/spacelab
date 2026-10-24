@@ -487,6 +487,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima knocke_lambert.mac" "expected 8 identities to hold, found $holds"
     fi
 
+    out=$(macf shadow_lens.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 8 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima shadow_lens.mac: Orekit's lens formula is the circle-intersection area, continuous onto both plateaus"
+    else
+        bad "maxima shadow_lens.mac" "expected 8 identities to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

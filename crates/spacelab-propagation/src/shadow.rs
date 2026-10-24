@@ -8,6 +8,10 @@
 //! the penumbra. It is `no_std` so both the numerical force and the `std`-only DSST mean-element path
 //! can share one definition. `λ` is used as an f64 value gate — the penumbra boundary is a
 //! measure-zero set the STM is not defined across, so it stays out of the Jacobian.
+//!
+//! `derivations/shadow_lens.mac` shows that Orekit's lens arrangement is the textbook
+//! circle-intersection area for every pair of radii and separation, not only at the test's five
+//! points. It also shows that the penumbra meets both plateaus continuously, exactly 0 and exactly 1.
 
 // The penumbra area formula names paired Sun/Earth quantities (`a_s2`/`a_e2`, `alpha1`/`alpha2`)
 // that clippy flags as too similar — the pairing is the whole point, so keep the Orekit names.

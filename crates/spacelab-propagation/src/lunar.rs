@@ -33,6 +33,11 @@
 //! Sources: Lemoine et al. (2014), GRL **41**, doi:10.1002/2014GL060027 (GRGM1200A); Park et al.
 //! (2021), AJ **161**, 105 (DE440, and the PA→ME angles); Konopliv et al. (2001), Icarus **150**, 1
 //! (the PA/ME distinction and why gravity is quoted in PA).
+//!
+//! `derivations/lunar_frames.mac` checks the rotation for every three angles: `rot` is the frame
+//! rotation on each axis, the composition is orthogonal with determinant 1, and its transpose is the
+//! kernel's "inverse" sequence. It also rederives each number quoted here and in
+//! `docs/verification.md` §2.1 from the three angles.
 
 use alloc::vec::Vec;
 
@@ -74,9 +79,10 @@ const ARCSEC: f64 = core::f64::consts::PI / (180.0 * 3600.0);
 /// The fixed mean-Earth → principal-axis rotation, row-major: `r_PA = M · r_ME`.
 ///
 /// `M = R₁(a₃)·R₂(a₂)·R₃(a₁)` with the angles of [`ME_TO_PA_ANGLES`] and `Rₖ(θ)` the *frame* rotation
-/// about axis `k` — the matrix whose rows are the rotated axes, so `Rₖ(θ)ᵢⱼ` carries `+sin` above the
-/// diagonal. That is SPICE's `eul2m` convention, which is the convention the kernel's angles are
-/// listed in; assembling them as vector rotations instead transposes the result.
+/// about axis `k` — the matrix whose rows are the rotated axes, so `Rₖ(θ)` carries `+sin` in row
+/// `k+1`, column `k+2`, counted cyclically: above the diagonal for axes 1 and 3, below it for axis 2.
+/// That is SPICE's `eul2m` convention, which is the convention the kernel's angles are listed in;
+/// assembling them as vector rotations instead transposes the result.
 ///
 /// This is the one a caller usually wants: a position given in selenographic coordinates has to come
 /// *into* the principal axes before [`embedded`]'s field can be evaluated at it.
@@ -309,8 +315,8 @@ mod tests {
             );
         }
 
-        // The z-axis is the one the two frames disagree about least in *angle* and most in
-        // consequence: the pole moves by the 78.7-arcsecond y-rotation alone, 663 m.
+        // The pole's shift has a closed form: the y and x angles in quadrature, 663 m, nearly all
+        // of it the 78.7-arcsecond y-rotation. The x and y axis points move 875 m and 572 m.
         let pole = apply(&m, [0.0, 0.0, MOON_MEAN_RADIUS]);
         let polar_shift = norm([pole[0], pole[1], pole[2] - MOON_MEAN_RADIUS]);
         let expected = MOON_MEAN_RADIUS

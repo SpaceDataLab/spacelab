@@ -407,7 +407,8 @@ kernel cross-check itself, whose 2e-7 tolerance is four orders below a transpose
 `R₁(a₃)·R₂(a₂)·R₃(a₁)`, which is SPICE's documented `eul2m(ANGLES(3), ANGLES(2), ANGLES(1), AXES(3),
 AXES(2), AXES(1))` for a `TKFRAME` `ANGLES` spec; ANISE 0.10.4 (`naif::kpl::parser::convert_fk_items`)
 multiplies the axes in array order, giving `R₃(a₁)·R₂(a₂)·R₁(a₃)`. The two agree to first order and
-differ by exactly `a₁·a₂ = 1.255e-7` rad — 0.22 m on the lunar surface. Nothing in the data here
+differ at second order by `a₁·a₂ = 1.255e-7` rad — 0.22 m on the lunar surface
+(`derivations/lunar_frames.mac` derives the whole second-order term). Nothing in the data here
 separates them: the libration residual that fixes the *direction* is 2.8e-4 rad wide, three orders
 above this. So the tolerance admits the difference and the test names it, rather than being widened
 until the disagreement disappears.
@@ -7653,7 +7654,7 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 328 modules, 94 name a check, 234 do not** — 149 physics,
+(`plans/16` Ф17.B orders them). **Today: 328 modules, 95 name a check, 233 do not** — 148 physics,
 25 parsers, 6 generated and 54 infrastructure. The physics column is the one to watch, and it went
 *up* on 2026-10-24 for a reason worth keeping: the rule had counted any bare `§4.13` as a row of
 this file, and a bare section sign is also how a module cites a textbook or a standard. Twenty-eight
@@ -7854,7 +7855,6 @@ crates/spacelab-propagation/src/jb2008/atmosphere.rs | physics | no re-runnable 
 crates/spacelab-propagation/src/jb2008/mod.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/lifetime.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-propagation/src/lunar.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/maneuver.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/nrlmsise00/atmosphere.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/rk4.rs | physics | no re-runnable check named in the module doc

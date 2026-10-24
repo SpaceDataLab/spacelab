@@ -503,6 +503,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima decimal_year.mac" "expected 3 checks to hold, found $holds"
     fi
 
+    out=$(macf lunar_frames.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 13 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima lunar_frames.mac: the PA/ME rotation is the kernel's inverse sequence, and every quoted number follows from its three angles"
+    else
+        bad "maxima lunar_frames.mac" "expected 13 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

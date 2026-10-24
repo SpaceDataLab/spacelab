@@ -1,0 +1,110 @@
+/* `spacelab-propagation::lunar`, the fixed rotation between the Moon's two body-fixed frames.
+
+   `me_to_pa` composes M = R1(a3) R2(a2) R3(a1) from NAIF's TKFRAME_31009_ANGLES with `rot`, and
+   `pa_to_me` is its transpose. The tests check orthogonality, a round trip, the surface shift and
+   the sign of the prime meridian in f64. Here: `rot` is the frame rotation on every axis; M is a
+   rotation for all angles, and its transpose is the kernel's "inverse" (angles negated, sequence
+   reversed); the numbers the module doc and docs/verification.md section 2.1 quote follow from the
+   three angles; and the 1.255e-7 left against ANISE is the second-order term of the other ordering. */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+zero(m) := is(m = zeromatrix(3, 3))$
+
+rot(k, t) := if k = 1 then matrix([1, 0, 0], [0, cos(t), sin(t)], [0, -sin(t), cos(t)])
+  else if k = 2 then matrix([cos(t), 0, -sin(t)], [0, 1, 0], [sin(t), 0, cos(t)])
+  else matrix([cos(t), sin(t), 0], [-sin(t), cos(t), 0], [0, 0, 1])$
+
+/* ---- (1) `rot` is the frame rotation -----------------------------------------------------------
+   The right-handed rotation of a vector by t about the unit axis n is Rodrigues'
+   I + sin(t) K + (1 - cos(t)) K^2, K the cross-product matrix of n. Rotating the frame instead
+   rotates every coordinate by -t: the transpose.                                                  */
+rodrigues(n, t) := block([K],
+  K : matrix([0, -n[3], n[2]], [n[3], 0, -n[1]], [-n[2], n[1], 0]),
+  ident(3) + sin(t)*K + (1 - cos(t))*K . K)$
+unit(k) := makelist(if i = k then 1 else 0, i, 1, 3)$
+must(every(lambda([k], zero(expand(rot(k, t) - transpose(rodrigues(unit(k), t))))), [1, 2, 3]),
+     "(1) holds: rot(k, t) is Rodrigues' rotation by t about axis k, transposed, for k = 1, 2, 3")$
+must(every(lambda([k], is(rot(k, t)[mod(k, 3) + 1, mod(k + 1, 3) + 1] = sin(t))), [1, 2, 3]),
+     "(1) holds: +sin(t) sits at row k+1, column k+2, cyclically: above the diagonal for axes 1 and 3, below it for 2")$
+
+/* ---- (2) M is a rotation, and its transpose is the kernel's inverse --------------------------- */
+M : rot(1, a3) . rot(2, a2) . rot(3, a1)$
+must(zero(trigsimp(transpose(M) . M - ident(3))) and is(trigsimp(determinant(M)) = 1),
+     "(2) holds: M^T M = I and det M = 1 for every three angles")$
+must(zero(expand(transpose(M) - rot(3, -a1) . rot(2, -a2) . rot(1, -a3))),
+     "(2) holds: M^T = R3(-a1) R2(-a2) R1(-a3), the angles negated and the sequence reversed")$
+
+/* ---- (3) the closed forms the tests lean on ----------------------------------------------------
+   Row 1 of M is where `pa_to_me` sends +x; its longitude is a1 exactly. An axis point R e_i moves
+   by R sqrt(2 (1 - M_ii)) under M and under M^T alike.                                            */
+must(is(expand(row(M, 1) - matrix([cos(a1)*cos(a2), sin(a1)*cos(a2), -sin(a2)])) = zeromatrix(1, 3)),
+     "(3) holds: row 1 of M is (cos a1 cos a2, sin a1 cos a2, -sin a2), so pa_to_me puts +x at longitude a1")$
+v : unit(3)$
+w : transpose(M) . transpose(matrix(v))$
+must(is(trigsimp(sum((w[i, 1] - v[i])^2, i, 1, 3) - 2*(1 - M[3, 3])) = 0)
+     and is(M[3, 3] = cos(a2)*cos(a3)),
+     "(3) holds: the pole moves by sqrt(2 (1 - cos a2 cos a3)), the y and x angles in quadrature to leading order")$
+
+/* ---- (4) the quoted numbers, in 40-digit bigfloat ---------------------------------------------- */
+fpprec : 40$
+asec : bfloat(%pi/(180*3600))$
+ang : [a1 = 678526/10^4*asec, a2 = 786944/10^4*asec, a3 = 2785/10^4*asec]$
+Mn : bfloat(subst(ang, M))$
+R : 1737400$
+shift : makelist(R*sqrt(2*(1 - Mn[i, i])), i, 1, 3)$
+print("surface shift of the x, y, z axis points (m):", shift)$
+pole_small : bfloat(R*sqrt(subst(ang, a2^2 + a3^2)))$
+print("pole, exact minus small-angle (m):", shift[3] - pole_small)$
+must(every(lambda([s], is(s > 100 and s < 1200)), shift) and is(round(shift[3]) = 663)
+     and is(abs(shift[3] - pole_small) < 10^-5),
+     "(4) holds: the axis shifts are 875, 572 and 663 m, and the pole's is the small-angle form to 1e-5 m")$
+lon_me_x : atan2(Mn[2, 1], Mn[1, 1])/asec$
+print("ME +x in the principal axes, longitude (arcsec):", lon_me_x)$
+must(is(round(100*lon_me_x) = -6785) and is(round(atan2(Mn[1, 2], Mn[1, 1])/asec) = 68),
+     "(4) holds: me_to_pa puts ME +x at -67.85 arcsec, the transpose at +68")$
+theta : acos((Mn[1, 1] + Mn[2, 2] + Mn[3, 3] - 1)/2)$
+deg : theta*180/bfloat(%pi)$
+print("rotation angle", deg, "deg; largest surface shift", 2*R*sin(theta/2),
+      "m; doubled", 2*deg, "deg,", 2*R*sin(theta), "m")$
+must(is(round(100*deg) = 3) and is(round(2*R*sin(theta/2)/100) = 9)
+     and is(round(100*2*deg) = 6) and is(round(2*R*sin(theta)/100) = 18),
+     "(4) holds: 0.03 deg and 900 m once, 0.06 deg and 1.8 km for a transpose, as the docs round them")$
+big(m) := lmax(map(abs, flatten(args(m))))$
+off : sqrt(Mn[1, 2]^2 + Mn[1, 3]^2 + Mn[2, 3]^2)$
+print("largest |M - I|", big(Mn - ident(3)), " |M - M^T|", big(Mn - transpose(Mn)),
+      " off-diagonal norm", off)$
+must(is(big(Mn - ident(3)) < 4*10^-4) and is(round(10^7*big(Mn - transpose(Mn))) = 7630)
+     and is(off > 10^-4 and off < 10^-3),
+     "(4) holds: M is the identity to 4e-4, a transpose is 7.630e-4 off, the off-diagonal norm sits in (1e-4, 1e-3)")$
+
+/* ---- (5) ANISE's ordering --------------------------------------------------------------------
+   ANISE 0.10.4 multiplies the kernel's axes in array order, N = R3(a1) R2(a2) R1(a3). The two agree
+   to first order; the second-order difference is antisymmetric, its entries the products of pairs. */
+N : rot(3, a1) . rot(2, a2) . rot(1, a3)$
+second : matrixmap(lambda([e], ratdisrep(taylor(e, [a1, a2, a3], 0, 2))), M - N)$
+must(zero(expand(second - matrix([0, -a2*a3, -a1*a3], [a2*a3, 0, -a1*a2], [a1*a3, a1*a2, 0]))),
+     "(5) holds: M - N = [[0, -a2 a3, -a1 a3], [a2 a3, 0, -a1 a2], [a1 a3, a1 a2, 0]] to second order")$
+Nn : bfloat(subst(ang, N))$
+gap : big(Mn - Nn)$
+print("largest |M - N|", gap, " a1 a2", bfloat(subst(ang, a1*a2)), " on the surface (m)", R*gap)$
+must(is(abs(gap/subst(ang, a1*a2) - 1) < 10^-6) and is(round(1000*gap*10^7) = 1255)
+     and is(round(100*R*gap) = 22),
+     "(5) holds: the largest element of M - N is a1 a2 = 1.255e-7 to 1e-6, 0.22 m on the surface")$
+
+/* ---- (6) the section 2.1 table is one rotation of the measured direction ----------------------
+   Averaging the Earth's direction over DE440 gives (-71.042, +20.483) arcsec in the principal axes.
+   The other two rows must be that vector under M (the first, wrong pa_to_me) and under M^T. */
+lonlat(m) := [atan2(m[2, 1], m[1, 1])/asec, asin(m[3, 1])/asec]$
+lam : -71042/1000*asec$
+phi : 20483/1000*asec$
+u : bfloat(matrix([cos(phi)*cos(lam)], [cos(phi)*sin(lam)], [sin(phi)]))$
+wrong : lonlat(Mn . u)$
+fixed : lonlat(transpose(Mn) . u)$
+anise : lonlat(transpose(Nn) . u)$
+print("M u", wrong, "  M^T u", fixed, "  N^T u", anise)$
+r3(l) := map(lambda([x], round(1000*x)), l)$
+must(is(r3(wrong) = [-138894, 99178]) and is(r3(fixed) = [-3189, -58211])
+     and is(r3(anise) = [-3189, -58211]),
+     "(6) holds: (-138.894, +99.178) and (-3.189, -58.211) are the measured direction under M and M^T")$
+
+print("DONE")$

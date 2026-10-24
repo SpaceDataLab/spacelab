@@ -3,12 +3,14 @@
 
 Most of the tables listed below are transcribed from published models -- XGM2019e, FES2004,
 FES2014b, NRLMSISE-00, and the Niell/GMF/VMF3 mapping-function coefficients -- and are verified by
-provenance, not by anything an accuracy test can assert. `GOT_WAVES` is the exception and is sealed
-for a different reason: it is *computed* by `derivations/tide_to_stokes.py`, so the seal is what says
-the committed table is still the one that generator produced from the atlas it names. A single flipped sign at degree 85 of the gravity field moves the
-acceleration orders of magnitude below the agreement the field oracles already demand, so every
-existing test still passes over the corrupted table. Mutation testing makes that concrete: 8619 of
-the crate's mutants are `delete -` on a table entry, and nothing in the suite can see any of them.
+provenance, not by anything an accuracy test can assert. `GOT_WAVES` and `EOT20_WAVES` are the
+exceptions and are sealed for a different reason: they are *computed* by
+`derivations/tide_to_stokes.py`, so the seal is what says the committed table is still the one that
+generator produced from the atlas it names. A single flipped sign at degree 85 of the gravity
+field moves the acceleration orders of magnitude below the agreement the field oracles already
+demand, so every existing test still passes over the corrupted table. Mutation testing makes that
+concrete: 8619 of the crate's mutants are `delete -` on a table entry, and nothing in the suite can
+see any of them.
 
 What a test can see is that the bytes are not the ones the generator wrote. This script computes
 that seal by parsing the emitted Rust and reading every literal with Python's own float parser, so
@@ -39,6 +41,7 @@ TABLES: list[tuple[str, tuple[str, ...]]] = [
     ("spacelab-propagation/src/ocean_tide_fes2004.rs", ("FES2004_WAVES",)),
     ("spacelab-propagation/src/ocean_tide_fes2014_table.in", ("FES2014B_WAVES",)),
     ("spacelab-propagation/src/ocean_tide_got.rs", ("GOT_WAVES",)),
+    ("spacelab-propagation/src/ocean_tide_eot20.rs", ("EOT20_WAVES",)),
     (
         "spacelab-propagation/src/nrlmsise00/tables.rs",
         ("PT", "PD", "PS", "PDL", "PTM", "PDM", "PTL", "PMA", "SAM", "PAVGM"),

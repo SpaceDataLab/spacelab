@@ -95,7 +95,7 @@ density-calibration layer that already exists to absorb the residual those measu
 
 ### Re-deriving the generated tables from the file the agency publishes
 
-Nine of the coefficient tables are machine-generated transcriptions of a published model, and their
+Ten of the coefficient tables are machine-generated transcriptions of a published model, and their
 correctness is a matter of provenance rather than of anything an accuracy test can assert. A flipped
 sign at degree 85 of the gravity field moves the acceleration orders of magnitude below the agreement
 the field oracles already demand, so every existing test still passes over the corrupted table —
@@ -125,7 +125,7 @@ not been revised under us either. `tools/fetch-specs.sh` obtains the snapshots (
 overwritten, with a provenance sidecar, the same discipline as `tools/fetch-eop.sh`); `data/specs` is
 git-ignored because XGM2019e is 1.1 GB in full and neither it nor FES2014b is ours to redistribute.
 
-The other six of the nine are **not** covered, and the reason differs by table:
+The other seven of the ten are **not** covered, and the reason differs by table:
 
 | table | what the generator actually read | why not re-derived |
 |---|---|---|
@@ -134,6 +134,7 @@ The other six of the nine are **not** covered, and the reason differs by table:
 | `ocean_tide_fes2004.rs` — FES2004 to degree 6 | **Orekit's `orekit-data/fes2004_Cnm-Snm.dat`** ⚠ | deliberately so: this table exists to match the Orekit gate bit-for-bit, down to the summation order. It is a faithful copy of Orekit's copy, and re-deriving it from Orekit would not break that circle. FES2014b, which is the default, comes from the agency file |
 | `nrlmsise00/tables.rs` | **`nrlmsise00_sub.for`**, the NRL FORTRAN's `BLOCK DATA GTD7BK` | the model has no agency-published *table*; the reference program *is* the specification, so this is the definitional case above, not a gap. Re-based off Brodowski's C in `3143a74`, and the re-basing is a measurement: regenerating from the FORTRAN reproduces all 3 290 shipped values byte for byte |
 | `ocean_tide_got.rs` — GOT5.5, 31 waves to degree 6 | GOT5.5 **cotidal grids** (GSFC), analysed here | there is no coefficient file to re-derive from: this table is computed rather than transcribed, so the seal says only that the committed numbers are the generator's. The question a re-derivation would answer is answered instead by `tests/ocean_tide_atlas.rs`, which measures it against two published atlases (§10.8) |
+| `ocean_tide_eot20.rs` — EOT20, 16 waves to degree 6 | EOT20 **cotidal grids** (DGFI-TUM, SEANOE), analysed here | the same position as GOT: computed by the same generator, so the seal says only that the numbers are the generator's, and `tests/ocean_tide_atlas.rs` measures them against both FES tables. FES2014b is EOT20's reference model, which that test states (§10.8) |
 | `models.rs` — Niell / GMF / VMF3 mapping coefficients | the published papers | the coefficients appear in a paper's tables, not in a machine-readable distribution |
 | `tide_step2_tables.rs` — IERS 2010 Tables 6.5a/b/c | IERS Conventions 2010, chapter 6 | the tables live in the chapter PDF. The IERS site does publish `STEP2DIU.F`/`STEP2LON.F`, but those carry the *site-displacement* Step-2 coefficients — a different quantity from the geopotential ΔC̄/ΔS̄ this table holds |
 
@@ -322,6 +323,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Secular pole, the shipped default (Ch. 7 Eq. 21) | IERS TN36 Ch. 7 as amended 2018/02/01, Eq. (21) | `derivations/pole_wobble.py` at 50 dps, 7 epochs × 2 polar motions | rel < 1e-15 | src/solid_tide.rs |
 | FES2004 / FES2014b coeff tables | FES2004 via Orekit ⚠ / FES2014b aviso-fes file (re-derived) | vendored verbatim primary source | SCALE=1e-11 verbatim | src/ocean_tide_fes2004.rs, fes2014.rs |
 | Ocean tide ΔC̄/ΔS̄ from a cotidal grid (GOT5.5) | IERS TN36 §6.3 Eq. 6.18–6.21, conventions proved in Maxima | FES2004 **and** FES2014b, the spread between them as the floor | closer to FES2014b than FES2004 is on all 9 waves the three share; worst rms 0.228e-11 over 17 | derivations/tide_to_stokes.py, tests/ocean_tide_atlas.rs |
+| Ocean tide ΔC̄/ΔS̄ from a cotidal grid (EOT20) | IERS TN36 §6.3 Eq. 6.18–6.21, the same generator | FES2004 and FES2014b; FES2014b is EOT20's reference model | closer to FES2014b than FES2004 is on all 9 diurnal and semi-diurnal waves the three share; worst rms 0.157e-11 over 14 | derivations/tide_to_stokes.py, tests/ocean_tide_atlas.rs |
 | SH analysis quadrature and `P̄nm` | Driscoll & Healy (1994); 4π normalisation, no Condon–Shortley | Maxima at 25 digits (Rodrigues) and closed-form orthogonality | 4.4e-16 (incl. sign); synthetic field 1.0e-15 | tide_to_stokes.py --self-test |
 
 ### Spacecraft, maneuvers, DSST semi-analytical
@@ -5256,7 +5258,7 @@ answer; the rows that say **Fixed** or **Done** were upgrades, and each says wha
 |---|---|---|---|
 | Static field | XGM2019e to degree/order 120 | XGM2019e (2019) is current-generation; EGM2020 was announced in 2020 and is still unreleased, with NGA now indicating ~2028 | **Stay** — already the modern combined model. Revisit when EGM2020 ships |
 | Time-variable gravity | IERS TN36 Table 6.2 secular rates plus annual/semiannual, with an ICGEM `.gfc` reader for a full model | Unchanged | **Stay** |
-| Ocean tides | FES2004 (the Orekit-comparable gate), FES2014b (the default) to degree/order 100, and **GOT5.5 to degree 6, computed here from the cotidal grids** | FES2022b (LEGOS/NOVELTIS/CLS via AVISO) | **Partly closed.** GOT5.5 is in the tree: `derivations/tide_to_stokes.py` does the spherical-harmonic analysis and IERS Eq. 6.21 itself, so an atlas that publishes only elevation grids is now usable, and it lands closer to FES2014b than FES2004 does on every shared wave (§10.8). Degree 6 is where IERS publishes `k′n` (Ф6.B′). FES2022b stays deferred and is now *also* a licence question: the grids need an AVISO account, whose terms are accepted at registration |
+| Ocean tides | FES2004 (the Orekit-comparable gate), FES2014b (the default) to degree/order 100, and **GOT5.5 and EOT20 to degree 6, computed here from their cotidal grids** | FES2022b (LEGOS/NOVELTIS/CLS via AVISO); EOT20 (DGFI-TUM, CC BY 4.0) | **Stay on FES2014b — measured, §10.8.** GOT5.5 and EOT20 are in the tree: `derivations/tide_to_stokes.py` does the spherical-harmonic analysis and IERS Eq. 6.21 itself, and both land closer to FES2014b than FES2004 does on every shared diurnal and semi-diurnal wave. On a week of LAGEOS the waves GOT and EOT20 do not carry cost 11–34 mm and their coefficients 5–9 mm, so only FES2014b is complete; on GPS no atlas moves the orbit by 1.2 mm, so a GNSS fit cannot rank them. Ranking the coefficients needs a LAGEOS orbit determination from normal points at a millimetre floor. Degree 6 is where IERS publishes `k′n` (Ф6.B′). FES2022b stays deferred and is *also* a licence question: the grids need an AVISO account, whose terms are accepted at registration |
 | Solid Earth tide | IERS TN36 Ch. 6, Step 1 + Step 2 | Unchanged | **Stay** |
 | **Pole tide** (solid §6.4 and ocean §6.5) | **The secular pole of the Chapter 7 update published 2018/02/01**, Eq. (21): `x_s = 55.0 + 1.677 (t−2000)`, `y_s = 320.5 + 3.460 (t−2000)` mas — `MeanPole::Secular2018`, the default. The Table 7.7 mean pole of the 2010 printing stays available as `MeanPole::Iers2010` for reproducing an Orekit result | Eq. (21) is current | **Fixed** — was the 2010 printing; the defect and the repair are below |
 
@@ -6233,6 +6235,78 @@ truncation error grows with degree; an atlas difference does not. For M2 the dif
 the conventions are right is two groups disagreeing about the ocean, not this pipeline losing
 accuracy — so degree 6 is a limit on the published `k′n`, not on the analysis.
 
+**A second atlas through the same pipeline: EOT20.** EOT20 (DGFI-TUM, 2021, CC BY 4.0) ships the
+same kind of grid and nothing else, so it runs through `tide_to_stokes.py --atlas eot20`. Only the
+reader had to change. EOT20's variable names, unit spellings, file stems and fill value all differ
+from GOT's, and its 0° meridian is repeated at 360°. The repeat is not a copy: in all 17 grids it
+carries the land fill on 232 rows where 0° is ocean, every one of them poleward of 66°. The reader
+keeps 0° after checking that the repeat differs nowhere else. GOT regenerates byte-identical through
+the changed reader. Sixteen of the 17 constituents become waves; M4 is refused, like GOT's compounds.
+
+One fact changes what this comparison means. EOT20 is a residual analysis of altimetry *against
+FES2014b* between 66°S and 66°N, and FES2014b itself poleward of that, so its agreement with FES2014b
+is partly by construction. The comparison still tests the pipeline, because a convention error is an
+order-one miss whatever the grid was built from. It cannot rank EOT20 against FES2014b. In 10⁻¹¹:
+
+| Wave | EOT20 − FES2014b | GOT − FES2014b | FES2004 − FES2014b |
+|---|---|---|---|
+| M2 | 0.157 | 0.135 | 0.216 |
+| K1 | 0.085 | 0.093 | 0.247 |
+| S2 | 0.114 | 0.123 | 0.217 |
+| O1 | 0.042 | 0.061 | 0.185 |
+| N2 | 0.041 | 0.034 | 0.120 |
+| K2 | 0.044 | 0.040 | 0.182 |
+| P1 | 0.054 | 0.029 | 0.187 |
+| Q1 | 0.019 | 0.025 | 0.081 |
+| 2N2 | 0.030 | 0.032 | 0.053 |
+| Ssa | 0.035 | — | 0.227 |
+| Mm | 0.034 | — | **0.014** |
+| Mf | 0.029 | — | **0.021** |
+
+EOT20 is inside the FES spread on all nine diurnal and semi-diurnal waves, and as close to FES2014b
+as GOT is: the corrections EOT20 applies to its reference are the size of the GOT–FES2014b
+difference, not smaller. On Mm and Mf the order flips. The two hydrodynamic atlases agree with each
+other better than either agrees with an altimetric one, by half a percent of coefficients that peak
+near 6 and 10 × 10⁻¹¹; a wrong species-0 bias would miss by their whole size. M2's difference is
+flat in degree, 0.113 to 0.173. Over the 14 waves EOT20 shares with FES2014b the worst rms is 0.157
+(M2) and the worst single cell 0.533 (S2).
+
+**Which atlas is the default (`plans/16` D-4), and what an orbit can say about it.** D-4 makes the
+default the atlas that fits LAGEOS and GNSS orbits best. That criterion works only where the atlases
+move an orbit by more than the fit's floor, so the move is measured first:
+`crates/spacelab/tests/ocean_tide_orbit_sensitivity.rs` (`#[ignore]`, 2.5 min in release). Every
+run starts from the same state with the same forces, and only the tide table changes. The six
+epoch-state parameters then absorb what they can. "Missing waves" is FES2014b restricted to the
+waves the other atlas carries, against all of FES2014b; "coefficients" is the other atlas against
+that restriction. 3D RMS left after the fit, millimetres, with integration noise at 0.019 at worst:
+
+| | LAGEOS-1, 7 d | LAGEOS-2, 7 d | GPS G02, 1 d |
+|---|---|---|---|
+| no ocean tide | 323.5 | 375.3 | 9.67 |
+| FES2014b, degree 6 → 20 | 4.09 | 5.60 | 0.009 |
+| GOT5.5: missing waves | 22.6 | 11.4 | 1.03 |
+| GOT5.5: coefficients | 7.95 | 8.81 | 0.39 |
+| EOT20: missing waves | 23.7 | 34.1 | 0.34 |
+| EOT20: coefficients | 7.52 | 5.29 | 0.42 |
+| FES2004: missing waves | 27.0 | 31.1 | 0.19 |
+| FES2004: coefficients | 24.3 | 39.9 | 0.94 |
+
+**GNSS cannot rank atlases.** No atlas moves G02 by 1.2 mm, and `igs_orbit_fit.rs` reaches 94 mm
+with DE440. The GNSS half of D-4 is measured empty.
+
+**On LAGEOS, coverage outweighs coefficients.** The waves an atlas does not carry cost 11 to 34 mm
+over a week; the two modern atlases' coefficients differ from FES2014b's by 5 to 9 mm on the waves
+they share. GOT has no long-period wave, EOT20 has 16 of FES2014b's 35 waves, and both stop at
+degree 6, which costs another 4 to 6 mm. FES2004's coefficients are the outlier at 24 to 40 mm,
+the generation gap the coefficient comparison above shows too.
+
+**The default stays FES2014b,** and GOT5.5 and EOT20 ship beside it. It is the only table that is
+complete, and that is now a measured reason rather than an inherited one. Ranking the coefficients
+themselves is the open half of D-4. The 5 to 9 mm are a ceiling, because an analysis centre also
+estimates along-track and once-per-revolution accelerations, which absorb more. Seeing what is left
+needs a LAGEOS orbit determination from normal points at a millimetre floor, and
+`slr_range_residuals.rs` reaches 1.6 cm without ocean loading at the stations.
+
 | Component | Specification source | Oracle | Residual / tol | Where |
 |---|---|---|---|---|
 | Analysis integral, `(A⁺, A⁻)` ← grid | IERS 2010 Eq. 6.18–6.19 | **Maxima, Rodrigues + closed-form integrals** | residual 0, symbolic | derivations/ocean_tide_stokes.mac |
@@ -6241,7 +6315,9 @@ accuracy — so degree 6 is a limit on the published `k′n`, not on the analysi
 | Driscoll–Healy quadrature | Driscoll & Healy (1994) | Σw = 2; orthonormality; synthetic field | 0.0; 4.4e-16; 1.0e-15 | tide_to_stokes.py --self-test |
 | Cartwright–Edden amplitude signs | IERS Conventions Centre `ADMINT.F` | **aviso-fes `H_eq`**, already in the tree | ~1e-4 on every wave | derivations/tide_to_stokes.py |
 | The coefficients themselves | IERS 2010 Eq. 6.21 from GOT5.5 grids | **FES2004 and FES2014b**, spread between them as the floor | closer than FES2004 on all 9 shared; worst rms 0.228e-11 of 17 | tests/ocean_tide_atlas.rs |
-| The committed table is the generated one | — | `derivations/table_seals.py`, a second float parse | FNV-1a exact, 4681 values | tests/generated_tables.rs |
+| The same, from EOT20 grids | IERS 2010 Eq. 6.21 | FES2004 and FES2014b | closer than FES2004 on the 9 tidal-band waves shared; worst rms 0.157e-11 of 14 | tests/ocean_tide_atlas.rs |
+| What the atlas choice does to an orbit | `plans/16` D-4 | six-parameter fit of run-to-run differences; two tolerances as the noise floor | noise < 0.05 mm; GPS < 2 mm for every atlas; on LAGEOS missing waves > coefficients, 5–9 mm | crates/spacelab/tests/ocean_tide_orbit_sensitivity.rs |
+| The committed tables are the generated ones | — | `derivations/table_seals.py`, a second float parse | FNV-1a exact, 4681 (GOT) and 2416 (EOT20) values | tests/generated_tables.rs |
 
 ---
 

@@ -40,16 +40,32 @@ rather than asserting it, by analysing fields whose coefficients are known exact
 Land is zero, not missing. The integral in Eq. 6.21 is over the ocean; a fill value is the statement
 that there is no ocean there, which is the value zero for the mass that redistributes.
 
-    timeout 600 uv run --no-project --with numpy --with h5py python \
+TWO ATLASES
+
+GOT5.5 (R. D. Ray, NASA GSFC) and EOT20 (DGFI-TUM) ship the same quantity on the same 1/8-degree
+grid and differ in everything a reader could get wrong: the variable names, the spelling of the
+units, the file stems, the fill value, and whether the 0-degree meridian is repeated at 360.
+`ATLASES` states each atlas's conventions, and `read_grid` checks a file against them instead of
+guessing from it. EOT20's repeat is not a copy: in every one of its 17 grids it carries the land
+fill on 232 rows where 0 degrees is ocean, all of them poleward of 66 degrees, where FES2014b fills
+EOT20. The reader keeps 0 degrees and drops the repeat, after checking that it differs nowhere else.
+
+h5py has no wheel for Python 3.15 yet, hence the pinned interpreter.
+
+    timeout 600 uv run --no-project --python 3.14 --with numpy --with h5py python \
         derivations/tide_to_stokes.py --self-test
-    timeout 1800 uv run --no-project --with numpy --with h5py python \
-        derivations/tide_to_stokes.py ~/.cache/spacelab/tides/GOT5.5/ocean_tides \
+    timeout 1800 uv run --no-project --python 3.14 --with numpy --with h5py python \
+        derivations/tide_to_stokes.py --atlas got5.5 ~/.cache/spacelab/tides/GOT5.5 \
             crates/spacelab-propagation/src/ocean_tide_got.rs
+    timeout 1800 uv run --no-project --python 3.14 --with numpy --with h5py python \
+        derivations/tide_to_stokes.py --atlas eot20 ~/.cache/spacelab/tides/EOT20/ocean_tides_x \
+            crates/spacelab-propagation/src/ocean_tide_eot20.rs
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import pathlib
 import re
 import sys
@@ -254,25 +270,139 @@ def analyse(field: np.ndarray, sin_lat: np.ndarray, max_degree: int) -> np.ndarr
 
 
 # ── The atlas ──────────────────────────────────────────────────────────────────────────────────────
-def read_grid(path: pathlib.Path) -> tuple[np.ndarray, np.ndarray]:
-    """`(complex tide in metres [colatitude, longitude], sin(latitude))` from one GOT netCDF file."""
+@dataclasses.dataclass(frozen=True)
+class Atlas:
+    """What one atlas's files are called and what they state about themselves."""
+
+    short: str  # the name the generated docs use for the model
+    static: str  # the Rust table's name
+    latitude: str  # netCDF variable names
+    longitude: str
+    units: dict[str, str]  # amplitude, phase, latitude, longitude
+    title_attr: str  # the global attribute that names the product
+    title_mark: str  # text that attribute must contain
+    suffix: str  # file stem = constituent name + suffix
+    module_doc: str  # the generated module's `//!` block
+    spelled: str  # model names the `doc_markdown` allowance covers
+    wave_doc: str  # the table's `///` block, `{n}` = the wave count
+
+
+ATLASES = {
+    "got5.5": Atlas(
+        short="GOT",
+        static="GOT_WAVES",
+        latitude="latitude",
+        longitude="longitude",
+        units={"amplitude": "cm", "phase": "degrees",
+               "latitude": "degrees north", "longitude": "degrees east"},
+        title_attr="Title",
+        title_mark="GOT5.5 ocean tidal elevations",
+        suffix="",
+        module_doc="""//! GOT5.5 ocean-tide geopotential coefficients (IERS Conventions 2010, Eq. 6.21) --
+//! machine-computed by `derivations/tide_to_stokes.py` from the GSFC cotidal grids.
+//!
+//! [`crate::ocean_tide_fes2004`] and [`crate::ocean_tide_fes2014`] transcribe a coefficient file
+//! somebody else computed. These values are this repository's own spherical-harmonic analysis of
+//! published *elevation* grids, which is what an atlas actually ships; the three conventions that
+//! carry a sign are proved in `derivations/ocean_tide_stokes.mac` before the generator applies them.
+//! `tests/ocean_tide_atlas.rs` measures the result against both FES tables.
+//!
+//! Degree 6, because IERS 2010 section 6.3.1 publishes the load deformation coefficients `k'n` no
+//! further; the analysis itself is exact past degree 700 on this grid, so the cap is the physics
+//! input and not the quadrature. GOT's two quarter-diurnal compounds (M4, MS4) are absent because
+//! Table 6.6 has no phase bias for their species, and its four third-degree supplements (GOT5.6)
+//! because their conversion is not Eq. 6.21.
+//!
+//! The 10^-11 unit is [`SCALE`], applied at use. Regenerate, never hand-edit.""",
+        spelled="GOT5.5, FES2014b, MS4",
+        wave_doc="""/// The {n} GOT5.5 waves -- the explicitly solved diurnal and semi-diurnal constituents
+/// plus the ones GOT publishes as inferred -- to degree = order = 6, sorted by Doodson number so
+/// the accumulation order matches the FES tables.""",
+    ),
+    "eot20": Atlas(
+        short="EOT20",
+        static="EOT20_WAVES",
+        latitude="lat",
+        longitude="lon",
+        units={"amplitude": "cm", "phase": "degrees",
+               "latitude": "degrees_north", "longitude": "degrees_east"},
+        title_attr="title",
+        # The load-tide grids share the layout and say "load tide component" here.
+        title_mark="EOT20, ocean tide component",
+        suffix="_ocean_eot20",
+        module_doc="""//! EOT20 ocean-tide geopotential coefficients (IERS Conventions 2010, Eq. 6.21) --
+//! machine-computed by `derivations/tide_to_stokes.py` from the DGFI-TUM cotidal grids.
+//!
+//! EOT20 is an empirical atlas: a residual tidal analysis of eleven altimetry missions against
+//! FES2014b between 66°S and 66°N, with FES2014b itself filling the higher latitudes. Like
+//! [`crate::ocean_tide_got`], it ships elevation grids and no coefficients, so these values are
+//! this repository's own spherical-harmonic analysis of them. `tests/ocean_tide_atlas.rs` measures
+//! the result against both FES tables, and FES2014b is EOT20's reference model, not an independent
+//! atlas.
+//!
+//! Degree 6, because IERS 2010 section 6.3.1 publishes the load deformation coefficients `k'n` no
+//! further. EOT20's one compound tide, M4, is absent because Table 6.6 has no phase bias for its
+//! species.
+//!
+//! Hart-Davis, M., Piccioni, G., Dettmering, D., Schwatke, C., Passaro, M., Seitz, F. (2021):
+//! EOT20 - A global Empirical Ocean Tide model from multi-mission satellite altimetry. SEANOE,
+//! doi:10.17882/79489, CC BY 4.0. Article: ESSD 13, 3869-3884, doi:10.5194/essd-13-3869-2021.
+//!
+//! The 10^-11 unit is [`SCALE`], applied at use. Regenerate, never hand-edit.""",
+        spelled="EOT20, FES2014b, DGFI-TUM",
+        wave_doc="""/// The {n} EOT20 waves to degree = order = 6, sorted by Doodson number so the accumulation order
+/// matches the FES tables.""",
+    ),
+}
+"""The atlases `read_grid` knows, by `--atlas` name."""
+
+
+def read_grid(path: pathlib.Path, atlas: Atlas) -> tuple[np.ndarray, np.ndarray]:
+    """`(complex tide in metres [colatitude, longitude], sin(latitude))` from one atlas netCDF file."""
     import h5py
 
     with h5py.File(path, "r") as fh:
-        lat = np.asarray(fh["latitude"], dtype=float)
+        title = fh.attrs.get(atlas.title_attr, b"")
+        title = title.decode() if isinstance(title, bytes) else str(title)
+        lat = np.asarray(fh[atlas.latitude], dtype=float)
+        lon = np.asarray(fh[atlas.longitude], dtype=float)
         amp = np.asarray(fh["amplitude"], dtype=float)
         pha = np.asarray(fh["phase"], dtype=float)
         fill = float(fh["amplitude"].attrs["_FillValue"][0])
         # The units are read, not assumed: the centimetre and the degree below are conversions, and
         # a file that changed either would otherwise be scaled silently by the wrong factor.
-        units = {k: fh[k].attrs["units"].decode() for k in ("amplitude", "phase", "latitude")}
-    expected = {"amplitude": "cm", "phase": "degrees", "latitude": "degrees north"}
-    if units != expected:
-        raise SystemExit(f"{path.name}: units are {units}, expected {expected}")
-    land = (amp >= 0.1 * fill) | ~np.isfinite(amp) | ~np.isfinite(pha)
+        variables = {"amplitude": "amplitude", "phase": "phase",
+                     "latitude": atlas.latitude, "longitude": atlas.longitude}
+        units = {k: fh[v].attrs["units"].decode() for k, v in variables.items()}
+    if atlas.title_mark not in title:
+        raise SystemExit(f"{path.name}: {atlas.title_attr} is {title!r}, expected {atlas.title_mark!r} in it")
+    if units != atlas.units:
+        raise SystemExit(f"{path.name}: units are {units}, expected {atlas.units}")
+    # Equality, not a threshold: GOT's fill is 9.97e36 and EOT20's is 0, and a land cell carries it
+    # exactly in both.
+    land = (amp == fill) | ~np.isfinite(amp) | ~np.isfinite(pha)
     amp = np.where(land, 0.0, amp) / 100.0  # the file is in centimetres
     pha = np.where(land, 0.0, pha)
     h = amp * np.exp(-1j * np.deg2rad(pha))  # IERS Eq. 6.17: xi = Z cos(theta - psi)
+    # `analyse` takes column j to be longitude 360 j / nlon: a periodic grid that starts at 0.
+    nlon = round(360.0 / (lon[1] - lon[0]))
+    if lon[0] != 0.0 or np.max(np.abs(lon - 360.0 * np.arange(lon.size) / nlon)) > 1e-9:
+        raise SystemExit(f"{path.name}: longitudes are not a uniform grid from 0")
+    if lon.size == nlon + 1:  # the 0-degree meridian repeated at 360
+        differs = h[:, -1] != h[:, 0]
+        if np.any(differs & ~land[:, -1]):
+            raise SystemExit(f"{path.name}: the 360-degree column is ocean and differs from 0 degrees")
+        if np.any(differs):
+            rows = lat[differs]
+            print(
+                f"  {path.name}: 360-degree repeat dropped; it carries the land fill on {rows.size} rows"
+                f" ({rows[rows < 0].min():+.3f} to {rows[rows < 0].max():+.3f},"
+                f" {rows[rows > 0].min():+.3f} to {rows[rows > 0].max():+.3f} deg)",
+                file=sys.stderr,
+            )
+        h = h[:, :-1]
+    elif lon.size != nlon:
+        raise SystemExit(f"{path.name}: {lon.size} longitudes for a {360.0 / nlon} degree step")
     if lat[0] < lat[-1]:  # the file runs south to north; the quadrature runs from the north pole
         lat, h = lat[::-1], h[::-1]
     if abs(lat[-1] + 90.0) < 1e-6:  # drop the duplicate south pole: DH samples [0, pi)
@@ -280,9 +410,11 @@ def read_grid(path: pathlib.Path) -> tuple[np.ndarray, np.ndarray]:
     return h, np.sin(np.deg2rad(lat))
 
 
-def coefficients(path: pathlib.Path, chi: float) -> dict[tuple[int, int], tuple[float, float, float, float]]:
+def coefficients(
+    path: pathlib.Path, chi: float, atlas: Atlas
+) -> dict[tuple[int, int], tuple[float, float, float, float]]:
     """One constituent's `{(n, m): (C+, S+, C-, S-)}` in units of `SCALE`."""
-    h, sin_lat = read_grid(path)
+    h, sin_lat = read_grid(path, atlas)
     a = analyse(h, sin_lat, MAX_DEGREE)
     rot = np.exp(1j * chi)
     out: dict[tuple[int, int], tuple[float, float, float, float]] = {}
@@ -350,7 +482,7 @@ def self_test(nlat: int = 1440, nlon: int = 2880) -> int:
 
 
 # ── Emission ───────────────────────────────────────────────────────────────────────────────────────
-def emit(waves: dict[int, tuple[str, dict[tuple[int, int], tuple[float, float, float, float]]]]) -> str:
+def emit(waves: dict[int, tuple[str, dict[tuple[int, int], tuple[float, float, float, float]]]], atlas: Atlas) -> str:
     body = []
     for doodson in sorted(waves):
         name, cells = waves[doodson]
@@ -360,25 +492,10 @@ def emit(waves: dict[int, tuple[str, dict[tuple[int, int], tuple[float, float, f
             body.append(f"        ({n}, {m}, {v[0]:.5f}, {v[1]:.5f}, {v[2]:.5f}, {v[3]:.5f}),")
         body.append("    ] },")
     rows = "\n".join(body)
-    return f"""//! GOT5.5 ocean-tide geopotential coefficients (IERS Conventions 2010, Eq. 6.21) --
-//! machine-computed by `derivations/tide_to_stokes.py` from the GSFC cotidal grids.
-//!
-//! [`crate::ocean_tide_fes2004`] and [`crate::ocean_tide_fes2014`] transcribe a coefficient file
-//! somebody else computed. These values are this repository's own spherical-harmonic analysis of
-//! published *elevation* grids, which is what an atlas actually ships; the three conventions that
-//! carry a sign are proved in `derivations/ocean_tide_stokes.mac` before the generator applies them.
-//! `tests/ocean_tide_atlas.rs` measures the result against both FES tables.
-//!
-//! Degree 6, because IERS 2010 section 6.3.1 publishes the load deformation coefficients `k'n` no
-//! further; the analysis itself is exact past degree 700 on this grid, so the cap is the physics
-//! input and not the quadrature. GOT's two quarter-diurnal compounds (M4, MS4) are absent because
-//! Table 6.6 has no phase bias for their species, and its four third-degree supplements (GOT5.6)
-//! because their conversion is not Eq. 6.21.
-//!
-//! The 10^-11 unit is [`SCALE`], applied at use. Regenerate, never hand-edit.
+    return f"""{atlas.module_doc}
 
 // Computed coefficients carry many significant digits and several share leading ones, and the docs
-// spell the model names (GOT5.5, FES2014b, MS4) the way the conventions do.
+// spell the model names ({atlas.spelled}) the way the conventions do.
 #![allow(
     clippy::doc_markdown,
     clippy::excessive_precision,
@@ -387,14 +504,12 @@ def emit(waves: dict[int, tuple[str, dict[tuple[int, int], tuple[float, float, f
 
 use crate::ocean_tide_fes2004::OceanTideWave;
 
-/// GOT coefficient scale: values are in units of 10^-11, matching the FES tables.
+/// {atlas.short} coefficient scale: values are in units of 10^-11, matching the FES tables.
 pub const SCALE: f64 = {SCALE_LITERAL};
 
-/// The {len(waves)} GOT5.5 waves -- the explicitly solved diurnal and semi-diurnal constituents
-/// plus the ones GOT publishes as inferred -- to degree = order = 6, sorted by Doodson number so
-/// the accumulation order matches the FES tables.
+{atlas.wave_doc.format(n=len(waves))}
 #[rustfmt::skip]
-pub static GOT_WAVES: &[OceanTideWave] = &[
+pub static {atlas.static}: &[OceanTideWave] = &[
 {rows}
 ];
 """
@@ -415,7 +530,8 @@ def grids(root: pathlib.Path) -> list[pathlib.Path]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("atlas", nargs="?", help="directory of GOT ocean_tide netCDF files")
+    ap.add_argument("--atlas", choices=sorted(ATLASES), help="which atlas the files are")
+    ap.add_argument("root", nargs="?", help="atlas root, or a directory of its ocean-tide netCDF files")
     ap.add_argument("out", nargs="?", help="Rust module to write")
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument(
@@ -427,18 +543,19 @@ def main() -> int:
 
     if args.self_test:
         return self_test()
-    if not args.atlas or not args.out:
-        ap.error("atlas and out are required unless --self-test is given")
+    if not args.atlas or not args.root or not args.out:
+        ap.error("--atlas, root and out are required unless --self-test is given")
+    atlas = ATLASES[args.atlas]
 
     signs = cartwright_signs(admint_source(pathlib.Path(args.admint_cache)))
     waves: dict[int, tuple[str, dict[tuple[int, int], tuple[float, float, float, float]]]] = {}
-    for path in grids(pathlib.Path(args.atlas)):
+    for path in grids(pathlib.Path(args.root)):
         if path.name.startswith("._"):  # macOS resource forks travel in the tar
             continue
         # The stem is matched exactly, apostrophe and all: GOT marks the third-degree constituents
         # with a prime (l2', n2', m1'), and folding those onto the second-degree names would silently
         # overwrite a major wave with a supplement whose phase convention is a different one.
-        name = path.stem.lower()
+        name = path.stem.lower().removesuffix(atlas.suffix)
         if name not in DOODSON:
             print(f"  skipping {path.name}: no Doodson number recorded for '{name}'", file=sys.stderr)
             continue
@@ -451,12 +568,12 @@ def main() -> int:
         if chi is None:
             print(f"  skipping {path.name}: species {doodson // 100000} has no Table 6.6 bias", file=sys.stderr)
             continue
-        waves[doodson] = (path.stem, coefficients(path, chi))
-        print(f"  {path.stem:8s} Doodson {doodson}  H = {signs[doodson]:+.6f} m  chi = {np.rad2deg(chi):+7.1f} deg")
+        waves[doodson] = (name, coefficients(path, chi, atlas))
+        print(f"  {name:8s} Doodson {doodson}  H = {signs[doodson]:+.6f} m  chi = {np.rad2deg(chi):+7.1f} deg")
 
     if not waves:
-        raise SystemExit(f"no usable grids under {args.atlas}")
-    pathlib.Path(args.out).write_text(emit(waves), encoding="utf-8")
+        raise SystemExit(f"no usable grids under {args.root}")
+    pathlib.Path(args.out).write_text(emit(waves, atlas), encoding="utf-8")
     print(f"{len(waves)} waves -> {args.out}")
     return 0
 

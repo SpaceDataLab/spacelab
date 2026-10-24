@@ -19,6 +19,7 @@
 #![allow(clippy::cast_precision_loss)]
 
 use spacelab_propagation::geopotential_coeffs::MODEL_COEFFS;
+use spacelab_propagation::ocean_tide_eot20::EOT20_WAVES;
 use spacelab_propagation::ocean_tide_fes2004::{FES2004_WAVES, OceanTideWave};
 use spacelab_propagation::ocean_tide_fes2014::FES2014B_WAVES;
 use spacelab_propagation::ocean_tide_got::GOT_WAVES;
@@ -79,4 +80,19 @@ fn the_got_tide_table_is_the_one_the_generator_wrote() {
     assert_eq!(rows, 775, "GOT rows to degree/order 6");
     let seal = fnv1a_f64(tide_values(GOT_WAVES));
     assert_eq!(seal, 0x48b3_0d5a_3de3_3ddd, "GOT coefficients moved");
+}
+
+#[test]
+fn the_eot20_tide_table_is_the_one_the_generator_wrote() {
+    // Computed from EOT20's elevation grids by the same generator as GOT, so the seal answers the
+    // same narrower question; `tests/ocean_tide_atlas.rs` is what says the analysis is right.
+    assert_eq!(
+        EOT20_WAVES.len(),
+        16,
+        "EOT20 waves that Eq. 6.21 applies to"
+    );
+    let rows: usize = EOT20_WAVES.iter().map(|w| w.coeffs.len()).sum();
+    assert_eq!(rows, 400, "EOT20 rows to degree/order 6");
+    let seal = fnv1a_f64(tide_values(EOT20_WAVES));
+    assert_eq!(seal, 0xac3c_117a_5c9e_1c4f, "EOT20 coefficients moved");
 }

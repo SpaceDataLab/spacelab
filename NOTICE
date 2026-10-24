@@ -201,6 +201,15 @@ The following ask for attribution, and this is it. None of them restricts use.
   crates/spacelab-propagation/src/ocean_tide_got.rs are computed here from
   those grids.
 
+  EOT20 ocean-tide cotidal grids, DGFI-TUM, CC BY 4.0 -- Hart-Davis, M. G.,
+  Piccioni, G., Dettmering, D., Schwatke, C., Passaro, M. and Seitz, F.
+  (2021), EOT20 - A global Empirical Ocean Tide model from multi-mission
+  satellite altimetry, SEANOE, doi:10.17882/79489; Earth Syst. Sci. Data 13,
+  3869-3884, doi:10.5194/essd-13-3869-2021. The coefficients in
+  crates/spacelab-propagation/src/ocean_tide_eot20.rs are computed here from
+  those grids: a spherical-harmonic analysis to degree 6 and the IERS 2010
+  Eq. 6.21 conversion, which is the change CC BY 4.0 asks to be indicated.
+
   VMF3 / GPT3, TU Wien VMF Data Server, CC BY 4.0 for archived products --
   Landskron, D. & Boehm, J. (2018), J. Geod. 92, 349,
   doi:10.1007/s00190-017-1066-2. The GPT3 grid in

@@ -50,6 +50,7 @@ pub mod maneuver;
 pub mod nrlmsise00;
 pub mod ocean_tide;
 pub mod ocean_tide_admittance;
+pub mod ocean_tide_eot20;
 pub mod ocean_tide_fes2004;
 pub mod ocean_tide_fes2014;
 pub mod ocean_tide_got;

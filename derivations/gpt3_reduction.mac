@@ -1,0 +1,79 @@
+/* The height reduction `spacelab-gnss::gpt3` applies at each grid corner, re-derived.
+
+   `GridEntry::evaluate` takes a node's seasonal T0, qv (g/kg), dT/dh, p0 (Pa x 100) and lambda and
+   brings them from the node's height to the site's, Delta h = h - N - hs:
+
+       Tv     = T0 (1 + 0.6077 qv)
+       factor = -Delta h g0 M / (R Tv)
+       p      = p0 exp(factor)
+       e0     = qv p0 / (0.622 + 0.378 qv)
+       e      = e0 exp(factor (1 + lambda))
+       T      = T0 + dT/dh Delta h
+
+   Four of those lines are physics with a closed form, so each is derived here and the shipped line
+   subtracted: the barometric law for a layer at constant virtual temperature, specific humidity
+   inverted for vapour pressure, the Askne-Nordius vapour decrease, and where 0.6077 comes from.
+   The bilinear weights that follow the reduction are checked last.                             */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+assume(Tv > 0, R > 0, g0 > 0, M > 0, p0 > 0, qv >= 0)$
+
+/* ---- (1) hydrostatic balance with the ideal-gas density at Tv gives exp(factor) ---------------
+   dp/dh = -rho g0 and rho = p M / (R Tv), Tv held at its node value across the layer.           */
+sol : ode2('diff(p, h) = -p*M*g0/(R*Tv), p, h)$
+sol : ic1(sol, h = 0, p = p0)$
+factor_shipped : -dh*g0*M/(R*Tv)$
+must(is(radcan(subst(h = dh, rhs(sol)) - p0*exp(factor_shipped)) = 0),
+     "(1) holds: p0 exp(factor) solves dp/dh = -p g0 M/(R Tv) with p(0) = p0")$
+
+/* ---- (2) specific humidity q = eps e / (p - (1 - eps) e), solved for e --------------------------
+   eps = 0.622 is the ratio of the molar masses of water and dry air the model fixes; 0.378 is its
+   complement exactly, so the shipped denominator is eps + (1 - eps) q.                          */
+eps : 622/1000$
+e_of_q : solve(qv = eps*e/(p0 - (1 - eps)*e), e)$
+must(is(length(e_of_q) = 1), "(2) holds: one root")$
+must(is(ratsimp(rhs(e_of_q[1]) - qv*p0/(622/1000 + 378/1000*qv)) = 0),
+     "(2) holds: e0 = qv p0 / (0.622 + 0.378 qv) inverts the specific humidity")$
+
+/* ---- (3) the vapour decrease is (p/p0)^(1 + lambda), written through the same factor -----------
+   Askne & Nordius (1987) define lambda by e/e0 = (p/p0)^(lambda + 1); the code reuses factor.   */
+p_red : p0*exp(factor_shipped)$
+must(is(radcan(e0*(p_red/p0)^(1 + lambda) - e0*exp(factor_shipped*(1 + lambda))) = 0),
+     "(3) holds: e0 exp(factor (1 + lambda)) = e0 (p/p0)^(1 + lambda)")$
+
+/* ---- (4) Tv = T (1 + (1 - eps)/eps q): 0.6077 is that coefficient at eps = 0.622, to 4 places -- */
+mix : (1 - eps)/eps$
+print("(1 - eps)/eps at eps = 0.622:", float(mix))$
+must(is(abs(mix - 6077/10000) < 5/100000),
+     "(4) holds: 0.6077 is (1 - 0.622)/0.622 rounded to four places")$
+/* With q the specific humidity, Tv = T (1 + mix q) is not a first-order approximation: Dalton's
+   law gives the moist density p M (1 - (1 - eps) e/p) / (R T), and with e from (2) that is the
+   dry-air density at Tv exactly. (The 0.608 is approximate only for a mixing ratio.) So the one
+   approximation on this line is the rounding of mix, worth |0.6077 - mix| q relative in Tv.     */
+e_q : q*pp/(eps + (1 - eps)*q)$
+rho_exact : pp*M*(1 - (1 - eps)*e_q/pp)/(R*T)$
+rho_tv : pp*M/(R*T*(1 + mix*q))$
+must(is(ratsimp(rho_exact - rho_tv) = 0),
+     "(4) holds: the virtual-temperature density is the moist density exactly, at every q")$
+print("rounding mix to 0.6077 at q = 0.02 kg/kg, the moist tropics: relative Tv",
+      float(abs(6077/10000 - mix)*2/100))$
+
+/* ---- (5) R: the model's 8.3143 against CODATA 2018's 8.314462618 ------------------------------
+   The grid was fitted with 8.3143, so it stays; this prices the difference rather than calling it
+   an error. Delta h = 1 km at Tv = 288 K, a site 1 km above its node.                          */
+R_codata : 8314462618/10^9$
+f_at(r) := -1000*(980665/10^5)*(28965/10^6)/(r*288)$
+rel : bfloat(exp(f_at(83143/10^4))/exp(f_at(R_codata)) - 1)$
+print("1 km reduction, 8.3143 against CODATA R: relative pressure change", rel,
+      " =", bfloat(rel*101325), "Pa at 1013.25 hPa")$
+must(is(abs(rel) < 10^-5), "(5) holds: the constant moves a 1 km reduction by under 1e-5")$
+
+/* ---- (6) the bilinear weights: t along longitude, u along latitude --------------------------- */
+bil(f_sw, f_se, f_nw, f_ne) := (1 - t)*(1 - u)*f_sw + (1 - t)*u*f_nw + t*(1 - u)*f_se + t*u*f_ne$
+fld(t, u) := c0 + ct*t + cu*u + ctu*t*u$
+must(is(ratsimp(bil(fld(0, 0), fld(1, 0), fld(0, 1), fld(1, 1)) - fld(t, u)) = 0),
+     "(6) holds: the weights reproduce any field bilinear in (t, u), corners where the code puts them")$
+must(is(ratsimp(bil(fld(0, 0), fld(0, 1), fld(1, 0), fld(1, 1)) - fld(t, u)) # 0),
+     "(6) holds: exchanging se and nw is not an identity")$
+
+print("DONE")$

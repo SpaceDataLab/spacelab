@@ -15,6 +15,13 @@
 //! `θ = day_of_year/365.25·2π`. The four cell corners are each evaluated and pressure-reduced to the
 //! requested height (per Orekit's `EvaluatedGridEntry`) **before** a bilinear interpolation in
 //! latitude/longitude; `a_h`/`a_w` and the gradients are interpolated as-is (no height reduction).
+//!
+//! `derivations/gpt3_reduction.mac` re-derives that reduction. The pressure is the barometric law
+//! for a layer at the node's virtual temperature. The vapour pressure inverts the specific
+//! humidity, and its decrease is Askne and Nordius' `(p/p0)^(1+λ)`. With specific humidity, the
+//! virtual temperature is exact rather than first-order, so the only approximation is 0.6077's
+//! rounding of `(1 − 0.622)/0.622`. The file also prices the model's `R = 8.3143` against CODATA
+//! (2.3e-6 of the pressure over 1 km).
 
 // Grid-index/key arithmetic uses f64<->i64 casts on values that are always small and exact; the grid
 // geometry uses standard short names (lat/lon, si/wi, t/u) and the oracle literals stay byte-exact.

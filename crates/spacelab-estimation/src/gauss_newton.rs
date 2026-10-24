@@ -11,6 +11,8 @@
 //! with `λI` the damping parameter is compared against the information matrix's own entries, so it
 //! carries the units of the state and the weights and has to be retuned per problem, and a `λ`
 //! several decades too small is spent climbing the schedule rather than taking steps.
+//! `tests/gauss_newton.rs` measures that: the damping does not notice a rescaling of the state or
+//! of the weights.
 
 #![allow(clippy::needless_range_loop, clippy::many_single_char_names)] // matrix code indexes several arrays by one i/j/k
 

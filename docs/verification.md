@@ -7626,7 +7626,7 @@ realizations are interchangeable at the accuracy anything here works to.
 Every row above says what was *measured*. This section asks the complementary question of every
 module under `crates/*/src`: does the module's own documentation name the thing a reader can re-run
 to catch a wrong formula — a `derivations/*.mac` identity, a `spec_seals` / `table_seals` seal, a row
-of this file (`§4.13`), or an oracle test by path? `tools/check-derivations.py` sweeps the module
+of this file named as one (`docs/verification.md` §4.13), or an oracle test by path? `tools/check-derivations.py` sweeps the module
 docs with that rule, and the block below is the ledger of modules that name none, each with a
 category: **physics** (a formula or algorithm whose correctness is a mathematical claim, and the
 only category that matters for "every formula checked"), **parser** (a format reader or writer,
@@ -7639,8 +7639,18 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 323 modules, 112 name a check, 211 do not** — 132 physics,
-the same 22 parsers, 6 generated and 51 infrastructure. The physics column is the one to watch. The
+(`plans/16` Ф17.B orders them). **Today: 328 modules, 88 name a check, 240 do not** — 155 physics,
+25 parsers, 6 generated and 54 infrastructure. The physics column is the one to watch, and it went
+*up* on 2026-10-24 for a reason worth keeping: the rule had counted any bare `§4.13` as a row of
+this file, and a bare section sign is also how a module cites a textbook or a standard. Twenty-eight
+modules were passing on Curtis, Vallado, Danielson, Tapley and CCSDS section numbers alone —
+`drag_coefficient.rs`, `torque.rs`, `time_variable_gravity.rs` and `displacement.rs`, all four of
+them on Ф17.B's own list, among them. What exposed it was a documentation pass that replaced
+citations of untracked notes: four modules had named nothing but a `notes/… §3`, and failed the
+moment the citation went. Three of the four now name the test that holds their claim and the fourth,
+`spacelab-estimation`'s crate root, is infrastructure. A row now counts when the file is named with
+it. Of the twenty-eight, one had meant this file and says so now (`dtm2020/mod.rs`, §10.2); the other
+twenty-seven are in the ledger, 23 of them physics. The
 whole of `spacelab-frames` is off it — `rotation.rs`, `teme.rs`, `cio_fast.rs` and `polar_motion.rs`,
 retired by `derivations/frame_transform.mac`, `derivations/polar_motion_rate.py` and
 `derivations/cio_interpolation.{mac,py}` — and so are the two zonal mean-element propagators,
@@ -7654,13 +7664,17 @@ crates/spacelab/src/lib.rs | infra | types, traits, drivers or re-exports; nothi
 crates/spacelab-astro/src/cr3bp.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/cw.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/edl.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/kepler.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/lambert.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-astro/src/lowthrust.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/optimal.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/patched.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/periodic.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/powered.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/synodic.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/targeting.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-astro/src/transfer.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astrometry/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-astrometry/src/quads.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astrometry/src/reduce.rs | physics | no re-runnable check named in the module doc
@@ -7679,10 +7693,12 @@ crates/spacelab-constellation/src/shell.rs | physics | no re-runnable check name
 crates/spacelab-constellation/src/soc.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-constellation/src/symmetric.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-constellation/src/walker.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-control/src/attitude.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-control/src/closed_loop.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-control/src/latency.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-control/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-core/src/calendar.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-core/src/frame.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-core/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-core/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-core/src/time.rs | infra | types, traits, drivers or re-exports; nothing to derive
@@ -7695,6 +7711,8 @@ crates/spacelab-coverage/src/metrics.rs | physics | no re-runnable check named i
 crates/spacelab-coverage/src/observability.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-coverage/src/parallel.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-coverage/src/photometry.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-coverage/src/root.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earth/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-earth/src/wgs84.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-earthvision/src/atmospheric_correction.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-earthvision/src/camera.rs | physics | no re-runnable check named in the module doc
@@ -7725,13 +7743,21 @@ crates/spacelab-ephemeris/src/bridge.rs | infra | types, traits, drivers or re-e
 crates/spacelab-ephemeris/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-estimation/src/conjunction.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/conjunction_domain.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-estimation/src/consider.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/consistency.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/converter.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-estimation/src/ephemeris.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/hinf.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/iekf.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/imm.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/kalman.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-estimation/src/lie.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/mekf.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/mixture.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/modifier.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/multistatic.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/radiometric.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/rts.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/sampling.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/screening.rs | physics | no re-runnable check named in the module doc
@@ -7761,6 +7787,7 @@ crates/spacelab-gnss/src/glonass.rs | physics | no re-runnable check named in th
 crates/spacelab-gnss/src/gps.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-gnss/src/gpt3.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-gnss/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-gnss/src/models.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-gnss/src/ntrip.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-gnss/src/rinex.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-gnss/src/rinex_obs.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
@@ -7781,28 +7808,37 @@ crates/spacelab-ionosphere/src/parameters.rs | physics | no re-runnable check na
 crates/spacelab-ionosphere/src/ray.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-ionosphere/src/types.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-ndm/src/cdm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-ndm/src/kvn.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-ndm/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-ndm/src/oem.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-ndm/src/opm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/attitude_law.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/density_calibration.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/density_data.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/density_rom.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/drag_coefficient.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/driver.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-propagation/src/dsst/auxiliary.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/coefficients.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
 crates/spacelab-propagation/src/dsst/drag.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/gaussian.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/gaussian_short_period.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/hansen.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/mod.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/dsst/propagator.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/short_period.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/srp.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/tesseral.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/tesseral_short_period.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/third_body.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/dsst/third_body_short_period.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/zonal.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/earth_radiation.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/ephemeris.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/forces.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/gj.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/harris_priester/atmosphere.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/harris_priester/mod.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/jb2008/atmosphere.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/jb2008/mod.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/lifetime.rs | physics | no re-runnable check named in the module doc
@@ -7819,7 +7855,9 @@ crates/spacelab-propagation/src/spacecraft.rs | physics | no re-runnable check n
 crates/spacelab-propagation/src/stt.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/symplectic.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/taylor.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-propagation/src/time_variable_gravity.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/tolerance.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-propagation/src/torque.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/variational.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/wind_data.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-sensors/src/agile.rs | physics | no re-runnable check named in the module doc
@@ -7846,6 +7884,7 @@ crates/spacelab-signal/src/tomosar.rs | physics | no re-runnable check named in 
 crates/spacelab-slr/src/blq.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-slr/src/crd.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-slr/src/dhf.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
+crates/spacelab-slr/src/displacement.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-slr/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-slr/src/loading.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-slr/src/range.rs | physics | no re-runnable check named in the module doc

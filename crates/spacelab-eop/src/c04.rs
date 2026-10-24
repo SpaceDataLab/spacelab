@@ -15,6 +15,9 @@
 //! * the fourth names the precession-nutation model the celestial-pole offsets refer to. The IERS
 //!   publishes the same series against IAU 1980 too, where columns 63-86 are `dψ, dε` rather than
 //!   `dX, dY`. Read as `dX, dY` they are wrong by their whole size, so the line is required.
+//!
+//! `tests/c04_parse.rs` reads a committed excerpt with its header verbatim, against the published
+//! byte ranges and against Bulletin B's pole on the days both hold.
 
 use spacelab_core::{Angle, Itrs, ReferenceFrame};
 

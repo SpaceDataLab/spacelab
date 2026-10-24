@@ -17,6 +17,9 @@
 //! smallest peak `g` a reportable access must reach. Gpredict fits this step (`find_aos`), PreviSat
 //! asserts it, GMAT asks the user; here it comes from a bound, as in Orekit's
 //! `ElevationDetectionAdaptableIntervalFactory`.
+//!
+//! `tests/event.rs` holds the scanner to known roots and crossing directions, and to the limit the
+//! step bound states.
 
 #![allow(clippy::doc_markdown)] // program names and math notation, not identifiers
 

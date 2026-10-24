@@ -4,8 +4,9 @@
 `docs/verification.md` publishes what was measured. This script asks the complementary question of
 each module under `crates/*/src`: does its *own* documentation name the thing that would catch a
 wrong formula — a `derivations/*.mac` identity, a `spec_seals` / `table_seals` seal, a verification
-row (`§4.13`), or an oracle test by path? A module that names none is not wrong; it is unverified by
-anything a reader can re-run from the module itself, and the ledger in `docs/verification.md` (§12)
+row (`verification.md` §4.13), or an oracle test by path? A module that names none is not wrong; it
+is unverified by anything a reader can re-run from the module itself, and the ledger in
+`docs/verification.md` (§12)
 records each such module with a category, so that the number can only go down deliberately.
 
 Three failure modes, all mechanical:
@@ -36,14 +37,15 @@ MARKER = "## 12 · Formula provenance census"
 SKIP_CRATES = {"spacelab-capi", "spacelab-python", "spacelab-python-harness", "spacelab-gpu"}
 CATEGORIES = {"physics", "parser", "generated", "infra"}
 
-# What counts as naming a re-runnable check. `§4.13` is a verification row; a `tests/...rs` path is
+# What counts as naming a re-runnable check. A verification row counts when the file is named with
+# it: a bare `§4.13` is also how a module cites a textbook or a standard, and on 2026-10-24 28 modules
+# were passing on Curtis, Vallado, Danielson and CCSDS section numbers alone. A `tests/...rs` path is
 # an oracle test; the rest are the derivation and seal scripts by file name.
 NAMED = re.compile(
     r"derivations/[\w./-]+\.(?:mac|py|m|gp|input|sh)"
     r"|\b(?:spec_seals|table_seals)\b"
     r"|verify\.sh"
     r"|verification\.md"
-    r"|§\s?\d+(?:\.\d+)?"
     r"|tests/[\w/]+\.rs"
 )
 

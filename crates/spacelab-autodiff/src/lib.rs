@@ -19,6 +19,10 @@
 //! Write the geometry once, generic over [`Scalar`], and evaluate it in `f64` for the value or in
 //! [`Dual<N>`] for the value *and* the Jacobian — the type system guarantees they are the same
 //! function. This is Orekit's `Field`/`Gradient` idea, in a `Copy` type with no allocation.
+//!
+//! `tests/derivatives.rs` holds the derivatives to closed forms — the elementary functions, the chain,
+//! product and quotient rules, and the Kepler-acceleration Jacobian and Hessian — and sets them beside
+//! a finite difference.
 
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::needless_range_loop)] // the loops index several arrays by one i; iterators would obscure them

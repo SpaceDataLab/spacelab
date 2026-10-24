@@ -11,7 +11,8 @@
 //! about **one** correct digit while QR retains **nine**. `tests/srif.rs` measures the same effect
 //! one regime lower, where a Vandermonde can actually be taken: at `cond(H) = 3.4·10⁵` the two
 //! errors are 1.6e-5 and 6.1e-12. GMAT forms the normal equations and inverts them
-//! ([notes/14-estimation.md](../notes/14-estimation.md) §1); Orekit does not; nor do we.
+//! (`BatchEstimator.cpp`, after the GTDS mathematical specification, eq. 8-57); Orekit does not;
+//! nor do we.
 //!
 //! # What this maintains
 //!
@@ -22,8 +23,8 @@
 //! be added one at a time (sequential) or all at once (batch); the two give the same `R`.
 //!
 //! `R` is the Cholesky factor of the information matrix, so an *a priori* covariance `P₀` enters as
-//! `R = chol(P₀⁻¹)` — folded in as if it were another measurement block, exactly as
-//! [notes/14-estimation.md](../notes/14-estimation.md) §1 prescribes, never as a matrix addition.
+//! `R = chol(P₀⁻¹)` — folded in as if it were another measurement block, never as the matrix
+//! addition `information += Pdx0_inv` that GMAT's `BatchEstimator.cpp` uses.
 
 #![allow(clippy::needless_range_loop, clippy::many_single_char_names)] // matrix code indexes several arrays by one i/j/k
 

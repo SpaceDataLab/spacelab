@@ -2,9 +2,9 @@
 //!
 //! The one decision that governs the whole layer: **least squares by orthogonal factorisation, never
 //! by the normal equations.** Forming `HᵀWH` squares the condition number, and orbit-determination
-//! Jacobians are ill-conditioned enough that the difference is between eight correct digits and one
-//! ([notes/14-estimation.md](../notes/14-estimation.md) §1). Everything here is built on the
-//! square-root information filter [`Srif`], and the nonlinear solver [`GaussNewton`] wraps it.
+//! Jacobians are ill-conditioned enough that the difference is between eight correct digits and
+//! one. Everything here is built on the square-root information filter [`Srif`], and the nonlinear
+//! solver [`GaussNewton`] wraps it.
 //!
 //! This is the linear-algebra core. Wiring it to a measurement model (range, range-rate, angles) and
 //! the state transition matrix — which maps an observation's partials back to the epoch state — is

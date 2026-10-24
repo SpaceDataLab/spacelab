@@ -1,10 +1,10 @@
 //! High-fidelity planetary ephemerides over [ANISE](https://nyxspace.com) (MPL-2.0), the
 //! SPICE-replacement that reads JPL DE440 SPK kernels.
 //!
-//! This is Stage A of the deep-space pillar ([plans/13](../plans/13-deep-space.md)): the DE-grade
-//! body states that turn a [`spacelab_astro`](../spacelab_astro) transfer into a dated Moon or Mars
-//! trajectory. The analytic Sun/Moon of `spacelab-propagation` is a LEO perturbation; here the
-//! ephemeris *is* the answer. Only this crate depends on ANISE, so the core build is unaffected.
+//! This is the ephemeris stage of the deep-space pillar: the DE-grade body states that turn a
+//! [`spacelab_astro`](../spacelab_astro) transfer into a dated Moon or Mars trajectory. The
+//! analytic Sun/Moon of `spacelab-propagation` is a LEO perturbation; here the ephemeris *is* the
+//! answer. Only this crate depends on ANISE, so the core build is unaffected.
 //!
 //! The kernel is not committed (it is tens of MB); fetch it with `tools/fetch-ephemeris.sh`, which
 //! pulls the NyxSpace-hosted `de440s.bsp`.

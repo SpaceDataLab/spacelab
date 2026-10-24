@@ -8,9 +8,9 @@
 //! with a negative eigenvalue is a filter that has diverged and does not know it. Carrying the factor
 //! `S` with `P = S Sᵀ` makes `P` positive-semidefinite *by construction*: there is no arithmetic that
 //! can produce an indefinite covariance, so the stabilising `Symmetrize(P) = (P + Pᵀ)/2` that GMAT
-//! calls after every update ([notes/14-estimation.md](../notes/14-estimation.md) §2) is a no-op here
-//! and is absent. This is the same argument, and the same orthogonal machinery, as the batch
-//! [`Srif`](crate::Srif); the two are the information- and covariance-side duals of one method.
+//! calls after every update (`ExtendedKalmanFilter.cpp`) is a no-op here and is absent. This is the
+//! same argument, and the same orthogonal machinery, as the batch [`Srif`](crate::Srif); the two
+//! are the information- and covariance-side duals of one method.
 //!
 //! # Both updates are one LQ
 //!

@@ -65,8 +65,9 @@ pub trait Method<const N: usize> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum IntegrationError {
     /// The step size fell below `min_step` while still failing the tolerance — the problem is too
-    /// stiff or too discontinuous for this non-stiff method. Reported, never silently accepted (the
-    /// mistake `notes/15-integrators.md` §1 records in GMAT's shadow-boundary kludge).
+    /// stiff or too discontinuous for this non-stiff method. Reported, never silently accepted:
+    /// GMAT's `RungeKutta.cpp` turns error control off at its minimum step to cross the
+    /// cylindrical-shadow boundary, and accepts a step it knows is bad.
     StepUnderflow {
         /// The time at which the step collapsed.
         t: f64,

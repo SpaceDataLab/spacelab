@@ -24,7 +24,7 @@
 //! Each model takes its physical constants — `μ`, `Rₑ`, the zonal `J`, the ballistic coefficient —
 //! as explicit parameters rather than baking in one Earth model. Which gravity field or atmosphere
 //! is used is a convention the caller states, never a silent default: the wrong constant is a wrong
-//! answer that looks plausible ([notes/04-reference-and-code.md](../notes/04-reference-and-code.md)).
+//! answer that looks plausible.
 
 // Forces speak in single letters: (t, r, v) for the arguments, (x, y, z) for components, and
 // (a, b, c, d) for the accelerations a tuple superposes. These are the domain's names, not terse

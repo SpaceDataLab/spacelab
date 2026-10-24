@@ -14,9 +14,9 @@
 //!
 //! The right `h` is *derived*, not guessed: `h = g_swing / max_rate`, where `max_rate` bounds
 //! `|dg/dt|` (`spacelab_sensors::Constraint::max_rate`, falsification-tested) and `g_swing` is the
-//! smallest peak `g` a reportable access must reach. Gpredict fits this step, PreviSat asserts it,
-//! GMAT asks the user; here it comes from a bound ([notes/09-gpredict.md](../notes/09-gpredict.md)
-//! §3, [notes/13-orekit.md](../notes/13-orekit.md) §2).
+//! smallest peak `g` a reportable access must reach. Gpredict fits this step (`find_aos`), PreviSat
+//! asserts it, GMAT asks the user; here it comes from a bound, as in Orekit's
+//! `ElevationDetectionAdaptableIntervalFactory`.
 
 #![allow(clippy::doc_markdown)] // program names and math notation, not identifiers
 

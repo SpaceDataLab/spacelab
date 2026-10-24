@@ -1,8 +1,8 @@
 //! Two-body and conic mission design — the transfer layer for cislunar and interplanetary flight.
 //!
-//! This is the first slice of the deep-space pillar ([plans/13-deep-space.md](../plans/13-deep-space.md)):
-//! the *conic* primitives that need no ephemeris and are verifiable against textbook cases. The
-//! high-fidelity propagation they seed lives in `spacelab_propagation`; the planetary ephemerides
+//! This is the first slice of the deep-space pillar: the *conic* primitives that need no ephemeris
+//! and are verifiable against textbook cases. The high-fidelity propagation they seed lives in
+//! `spacelab_propagation`; the planetary ephemerides
 //! that turn a transfer into a dated launch window are Stage A (`anise`/DE440).
 //!
 //! * [`kepler`] — universal-variable two-body propagation (Stumpff formulation), the workhorse that

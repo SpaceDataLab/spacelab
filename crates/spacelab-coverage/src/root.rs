@@ -16,7 +16,7 @@
 //! detector that resumes exactly at the root re-detects the same event forever; it must resume on
 //! the far side, and it must know the sign there. So [`brent`] returns a [`Bracket`] — two abscissae
 //! straddling the root, narrower than the tolerance, with the sign at each — exactly as Orekit's
-//! `EventState.findRoot` does ([notes/13-orekit.md](../notes/13-orekit.md) §3).
+//! `EventState.findRoot` does.
 //!
 //! # The guarantees
 //!
@@ -27,8 +27,9 @@
 //!   bracket and beats bisection, so the interval never stops shrinking and the worst case is
 //!   bisection — `⌈log2((b−a)/tol)⌉` evaluations, bounded, no watchdog needed.
 //! * The tolerance is on the **abscissa** (the units of `x` — seconds, for a time root), never on
-//!   `f`. This is the dimension three other implementations get wrong
-//!   ([notes/13-orekit.md](../notes/13-orekit.md) §3).
+//!   `f`. This is the dimension three other implementations get wrong: GMAT compares its tolerance
+//!   with a difference in the stop parameter's own units, PreviSat applies a tolerance in days to a
+//!   dimensionless interpolation factor, and Gpredict converges on `|el| < 0.005°`.
 
 #![allow(clippy::doc_markdown)] // program names and math notation, not identifiers
 #![allow(clippy::float_cmp)] // exact `== 0.0` is the exact-root test; `a == c` is a zeroin invariant

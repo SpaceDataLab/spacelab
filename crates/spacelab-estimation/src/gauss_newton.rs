@@ -3,9 +3,9 @@
 //! Orbit determination is nonlinear: the predicted observation is a nonlinear function of the epoch
 //! state. Gauss–Newton linearises at the current estimate and solves for a correction; the linear
 //! solve is the [`Srif`], so the condition number is never squared. Levenberg–Marquardt damping —
-//! which GMAT's batch estimator lacks ([notes/14-estimation.md](../notes/14-estimation.md) §6) —
-//! degrades the step gracefully toward steepest descent when the Gauss–Newton step would overshoot,
-//! so a poor initial guess converges instead of diverging.
+//! which GMAT's batch estimator (`BatchEstimator.cpp`) lacks — degrades the step gracefully toward
+//! steepest descent when the Gauss–Newton step would overshoot, so a poor initial guess converges
+//! instead of diverging.
 //!
 //! The damping is Marquardt's `λ·diag(HᵀWH)`, not Levenberg's `λI`. The difference is not cosmetic:
 //! with `λI` the damping parameter is compared against the information matrix's own entries, so it

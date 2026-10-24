@@ -1,8 +1,7 @@
 //! Numerical ODE integration.
 //!
 //! SGP4 is analytic and needs no integrator; this crate is for what SGP4 cannot do — high-fidelity
-//! force models, deep space, manoeuvres, orbit determination, attitude. See
-//! [plans/09-integrators.md](../plans/09-integrators.md) for the staged method roadmap.
+//! force models, deep space, manoeuvres, orbit determination, attitude.
 //!
 //! Two rules govern everything here, and they come before any method:
 //!

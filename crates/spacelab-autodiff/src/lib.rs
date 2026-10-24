@@ -11,15 +11,14 @@
 //! fall out of sync with the model the moment either changes, and finite differences have a floor —
 //! the truncation error falls as `h` while the rounding error rises as `ε/h`, so the best achievable
 //! relative accuracy is `√ε ≈ 1e-8`, eight digits thrown away in the one matrix that decides how much
-//! to trust each observation ([notes/15-integrators.md](../notes/15-integrators.md) §4). Dual numbers
-//! have no such floor: the derivative is exact to the same rounding as the value.
+//! to trust each observation. Dual numbers have no such floor: the derivative is exact to the same
+//! rounding as the value.
 //!
 //! # The `Scalar` abstraction
 //!
 //! Write the geometry once, generic over [`Scalar`], and evaluate it in `f64` for the value or in
 //! [`Dual<N>`] for the value *and* the Jacobian — the type system guarantees they are the same
-//! function. This is Orekit's `Field`/`Gradient` idea, in a `Copy` type with no allocation
-//! ([notes/15-integrators.md](../notes/15-integrators.md) §4).
+//! function. This is Orekit's `Field`/`Gradient` idea, in a `Copy` type with no allocation.
 
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::needless_range_loop)] // the loops index several arrays by one i; iterators would obscure them

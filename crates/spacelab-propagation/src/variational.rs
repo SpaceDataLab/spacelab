@@ -1,9 +1,8 @@
 //! The state transition matrix, by integrating the variational equations with an AD Jacobian.
 //!
 //! The STM `Φ(t, t₀) = ∂y(t)/∂y(t₀)` is what a batch least-squares or a Kalman filter needs: it
-//! propagates the covariance and maps an observation's partials back to the epoch state
-//! ([notes/14-estimation.md](../notes/14-estimation.md)). It is the solution of the variational
-//! equation
+//! propagates the covariance and maps an observation's partials back to the epoch state. It is the
+//! solution of the variational equation
 //!
 //! ```text
 //! dΦ/dt = A(t) Φ,   Φ(t₀, t₀) = I,   A(t) = ∂f/∂y

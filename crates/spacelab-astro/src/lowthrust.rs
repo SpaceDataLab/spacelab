@@ -4,9 +4,8 @@
 //! This module supplies the equations of motion and a fixed-step propagator for the common steering
 //! laws (tangential for orbit raising/lowering, or a fixed inertial direction). It is the foundation
 //! for an optimal-control layer — indirect (Pontryagin costates) or direct (collocation) — which is a
-//! later extension ([plans/13-deep-space.md](../plans/13-deep-space.md), Stage D). Units are the
-//! caller's, consistent; the thrust is given as an acceleration `T/m` (constant here — a
-//! mass-depleting variant is a refinement).
+//! later extension. Units are the caller's, consistent; the thrust is given as an acceleration
+//! `T/m` (constant here — a mass-depleting variant is a refinement).
 
 #![allow(clippy::many_single_char_names, clippy::cast_precision_loss)]
 

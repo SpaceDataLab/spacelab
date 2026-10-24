@@ -348,7 +348,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Constant-thrust / impulse / parametric maneuvers | rocket equation; constant-thrust and impulsive definitions | Orekit `ConstantThrustManeuver`/`ImpulseManeuver`/`ParametricAcceleration` golden | r/v < 1e-12; AD vs FD | src/maneuver.rs |
 | DSST **drag** mean rates | Danielson et al. 1995 — Gaussian VOP averaging | Orekit `getMeanElementRate` **+** independent 200k-sample Gauss orbit-average | da bit-exact (0.0 rel); e/i ~4e-14; indep. 3.5e-15 rel | src/dsst/drag.rs |
 | DSST **drag** short-period | Danielson et al. 1995 — Gaussian short-period | Orekit OSCULATING `DSSTPropagator` | a < 5e-6 m; comps < 5e-11 | src/dsst/gaussian_short_period.rs |
-| DSST **SRP** mean rates | Danielson et al. 1995 — Gaussian VOP averaging; cylindrical shadow at the physical `ae` | **independent VOP orbit-average** (`experiments/dsst_srp_independent_verify.py`), with Orekit `getMeanElementRate` reduced to a bracket | vs VOP: da 1.044e-4, dk/dh 2.06e-5, dq/dp/dM 8.3e-5 (bound 1.5×) — vs Orekit 3.455e-4 … 5.3e-5, bracketed not bounded ⚠ | src/dsst/srp.rs |
+| DSST **SRP** mean rates | Danielson et al. 1995 — Gaussian VOP averaging; cylindrical shadow at the physical `ae` | the defining average `(1/2π)∫νF dλ` over the cylinder's arc and over the whole orbit (`tests/dsst_short_period_identity.rs`) **+** independent VOP orbit-average (`experiments/dsst_srp_independent_verify.py`), with Orekit `getMeanElementRate` reduced to a bracket | lit arc 3.8e-5 (bound 8e-5), the Gauss rule across the penumbra corner; whole orbit 1.6e-3, the cylinder cut ⚠ — vs VOP: da 1.044e-4, dk/dh 2.06e-5, dq/dp/dM 8.3e-5 (bound 1.5×) — vs Orekit 3.455e-4 … 5.3e-5, bracketed not bounded ⚠ | src/dsst/srp.rs |
 | DSST **SRP** short-period | Danielson et al. 1995 — Gaussian short-period | Orekit OSCULATING (~62 mm `a` swing) | a < 5e-6 m (meas 2.0e-6); comps < 5e-12 (meas 2.4e-12) | src/dsst/gaussian_short_period.rs |
 | DSST **zonal** mean rates + prop | Danielson et al. 1995 — zonal; Kaula 1966 | Orekit `getMeanElementRate` J₂…J₆ | rates < 1e-10 rel; along-track < 1 m | src/dsst/mod.rs |
 | DSST **zonal** short-period | Danielson et al. 1995 — zonal short-period | Orekit OSCULATING; numeric J2–J5 cross-check | da < 1e-2 m; comps < 1e-9 | src/dsst/short_period.rs |
@@ -372,7 +372,10 @@ force over a closed orbit is *entirely* shadow, so it is measured against cancel
 the conical penumbra rather than a binary cylinder — that last worth `3.2e-3 → 4.5e-4` on its own.
 Integrating the physical cone over the whole orbit instead of truncating it at the cylindrical
 limits moves `da` by `3.1e-3`, which is the size of the DSST scheme's own approximation and an
-order of magnitude above the implementation differences.
+order of magnitude above the implementation differences. The cut, not the cylinder, carries it:
+on the same fixture the binary cylinder, `ν = 1` on its arc, is `4.2e-5` from the whole-orbit
+conical average, because the deficit of the outer half of each penumbra and the light of the inner
+half nearly cancel, and the cut with a conical `ν` keeps the first and drops the second.
 
 ### 2.1 The lunar frame kernel's angles run the other way, and the tolerance is what caught it
 
@@ -7654,7 +7657,7 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 328 modules, 110 name a check, 218 do not** — 133 physics,
+(`plans/16` Ф17.B orders them). **Today: 328 modules, 111 name a check, 217 do not** — 132 physics,
 25 parsers, 6 generated and 54 infrastructure. The physics column is the one to watch, and it went
 *up* on 2026-10-24 for a reason worth keeping: the rule had counted any bare `§4.13` as a row of
 this file, and a bare section sign is also how a module cites a textbook or a standard. Twenty-eight
@@ -7835,7 +7838,6 @@ crates/spacelab-propagation/src/dsst/coefficients.rs | generated | emitted by a 
 crates/spacelab-propagation/src/dsst/gaussian_short_period.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/dsst/mod.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/dsst/propagator.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-propagation/src/dsst/srp.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/ephemeris.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/forces.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/gj.rs | physics | no re-runnable check named in the module doc

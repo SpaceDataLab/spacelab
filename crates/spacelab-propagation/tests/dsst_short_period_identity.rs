@@ -29,8 +29,10 @@ use core::f64::consts::TAU;
 
 use spacelab_propagation::dsst::drag::Atmosphere;
 use spacelab_propagation::dsst::gaussian::{NodeState, mean_element_rates, variational_matrix};
+use spacelab_propagation::dsst::srp::{D_REF, P_REF, SUN_RADIUS};
 use spacelab_propagation::dsst::{
-    DsstAtmosphericDrag, DsstAuxiliary, DsstTesseral, DsstThirdBody, DsstZonal,
+    DsstAtmosphericDrag, DsstAuxiliary, DsstSolarRadiationPressure, DsstTesseral, DsstThirdBody,
+    DsstZonal,
 };
 use spacelab_propagation::geopotential::GeoPotential;
 
@@ -600,4 +602,215 @@ fn drag_mean_rates_are_the_average_over_the_atmospheric_arc() {
         let worst = worst_rate_difference(mean[0], got, want);
         assert!(worst < 1e-9, "{label}: {worst:.3e}, {got:?} vs {want:?}");
     }
+}
+
+/// `dsst::srp`'s Orekit fixture: a cannonball with `C_R = 1.5` and `S/m = 0.01` on a 98° LEO, a
+/// spherical Earth, and the Sun at 2024-01-01T00:00:00 UTC in GCRF.
+const CR: f64 = 1.5;
+const AE_SRP: f64 = 6.378_136_46e6;
+const SRP_LEO: [f64; 5] = [
+    7.2e6,
+    3.090_169_943_749_474_7e-3,
+    9.510_565_162_951_536e-3,
+    8.548_903_292_189_65e-1,
+    7.697_467_098_598_68e-1,
+];
+const SRP_LAMBDA: f64 = 1.431_169_986_635_350_2;
+const SUN: [f64; 3] = [
+    2.481_305_780_627_556_2e10,
+    -1.330_331_266_958_346_6e11,
+    -5.766_796_523_600_236_5e10,
+];
+
+/// The fraction of the Sun's apparent disc a spherical Earth leaves visible from `r`: one minus the
+/// planar lens of the two discs over the Sun's, the radii and their separation as angles.
+///
+/// The lens is two circular segments `r²(x − sin x)/2` on the common chord, `x` the angle the chord
+/// subtends, `x/2 = atan2(4K, d² + r² − r'²)` with `4K` Heron's product of the triangle of the two
+/// centres and a crossing point. The product is taken in factored form and `x − sin x` by its series,
+/// so neither tangency loses digits: the `acos` form loses up to 3e-4 in `ν` near the outer one.
+fn lighting(sun: [f64; 3], r: [f64; 3]) -> f64 {
+    let to_sun = [sun[0] - r[0], sun[1] - r[1], sun[2] - r[2]];
+    let (ds, rn) = (dot(to_sun, to_sun).sqrt(), dot(r, r).sqrt());
+    let sep = (-dot(to_sun, r) / (ds * rn)).clamp(-1.0, 1.0).acos();
+    let (se, ss) = ((AE_SRP / rn).asin(), (SUN_RADIUS / ds).asin());
+    if sep >= se + ss {
+        return 1.0;
+    }
+    if sep <= se - ss {
+        return 0.0;
+    }
+    let heron = ((se + ss - sep) * (sep - (se - ss)) * (sep + se - ss) * (sep + se + ss)).sqrt();
+    let segment = |r: f64, other: f64| {
+        let x = 2.0 * heron.atan2(sep * sep + (r - other) * (r + other));
+        let x_minus_sin = if x < 1.0 {
+            let (mut term, mut sum) = (x * x * x / 6.0, 0.0);
+            for n in (2_u32..=10).map(|j| f64::from(2 * j)) {
+                sum += term;
+                term *= -x * x / (n * (n + 1.0));
+            }
+            sum
+        } else {
+            x - x.sin()
+        };
+        0.5 * r * r * x_minus_sin
+    };
+    1.0 - (segment(ss, se) + segment(se, ss)) / (core::f64::consts::PI * ss * ss)
+}
+
+/// The cannonball law written here, not taken from `dsst::srp`:
+/// `C_R (S/m) P_ref d_ref² ν (r − s)/|r − s|³`, with `nu` the fraction of the Sun's disc in view.
+fn cannonball(sun: [f64; 3], r: [f64; 3], nu: f64) -> [f64; 3] {
+    let d = [r[0] - sun[0], r[1] - sun[1], r[2] - sun[2]];
+    let d2 = dot(d, d);
+    let c = CR * AREA_OVER_MASS * P_REF * D_REF * D_REF * nu / (d2 * d2.sqrt());
+    [c * d[0], c * d[1], c * d[2]]
+}
+
+/// The roots of `f` on `[start, start + span]`, each bisected from a sign change of a 4096-point scan.
+fn roots(start: f64, span: f64, f: impl Fn(f64) -> f64) -> Vec<f64> {
+    let samples = 4096;
+    let mut out = Vec::new();
+    let (mut x0, mut f0) = (start, f(start));
+    for i in 1..=samples {
+        let x1 = start + span * f64::from(i) / f64::from(samples);
+        let f1 = f(x1);
+        if (f0 < 0.0) != (f1 < 0.0) {
+            let (mut lo, mut hi) = (x0, x1);
+            for _ in 0..100 {
+                let mid = 0.5 * (lo + hi);
+                if (f(mid) < 0.0) == (f0 < 0.0) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            out.push(0.5 * (lo + hi));
+        }
+        (x0, f0) = (x1, f1);
+    }
+    out
+}
+
+/// `dsst::srp` with the Sun on the orbit normal, where nothing is ever in shadow: the rates are
+/// `(1/2π)∫F dλ` of [`cannonball`] over the whole turn. Measured 1.9e-10, the floor of the test's
+/// own central differences.
+#[test]
+fn srp_mean_rates_are_the_average_over_a_sunlit_orbit() {
+    let srp = DsstSolarRadiationPressure::new(CR, AREA_OVER_MASS, MU, AE_SRP);
+    let (f, g) = frame(SRP_LEO[3], SRP_LEO[4]);
+    let w = cross(f, g);
+    let s = dot(SUN, SUN).sqrt();
+    let sun = [s * w[0], s * w[1], s * w[2]];
+    let got = srp.mean_element_rates(&aux(SRP_LEO, SRP_LAMBDA), sun);
+    let want = mean_rate(SRP_LEO, 0.0, TAU, &|r, _| {
+        cannonball(sun, r, lighting(sun, r))
+    });
+    let worst = worst_rate_difference(SRP_LEO[0], got, want);
+    assert!(worst < 1e-9, "{worst:.3e}, {got:?} vs {want:?}");
+}
+
+/// `sep − se − side·ss` on [`SRP_LEO`] at mean longitude `m`: zero where the penumbra begins for
+/// `side = 1` and where the umbra begins for `side = −1`.
+fn penumbra_edge(m: f64, side: f64) -> f64 {
+    let [a, k, h, q, p] = SRP_LEO;
+    let r = to_cartesian([a, k, h, q, p, m]).0;
+    let to_sun = [SUN[0] - r[0], SUN[1] - r[1], SUN[2] - r[2]];
+    let (ds, rn) = (dot(to_sun, to_sun).sqrt(), dot(r, r).sqrt());
+    let sep = (-dot(to_sun, r) / (ds * rn)).clamp(-1.0, 1.0).acos();
+    sep - (AE_SRP / rn).asin() - side * (SUN_RADIUS / ds).asin()
+}
+
+/// The fixture's shadow crossings in orbit order, in mean longitude: out of the umbra, out of the
+/// cylinder behind the Earth, out of the penumbra, then back into each. The cylinder's are bisected
+/// on the distance from the anti-Sun axis, the others on [`penumbra_edge`].
+fn shadow_crossings() -> [f64; 6] {
+    let [a, k, h, q, p] = SRP_LEO;
+    let sn = dot(SUN, SUN).sqrt();
+    let s_hat = [SUN[0] / sn, SUN[1] / sn, SUN[2] / sn];
+    let cylinder = |m: f64| {
+        let r = to_cartesian([a, k, h, q, p, m]).0;
+        let along = dot(r, s_hat);
+        if along < 0.0 {
+            (dot(r, r) - along * along).sqrt() - AE_SRP
+        } else {
+            dot(r, r).sqrt()
+        }
+    };
+    let found = roots(0.0, TAU, cylinder);
+    assert_eq!(found.len(), 2, "one entry and one exit: {found:?}");
+    let (exit, entry) = if cylinder(found[0] + 1e-6) > 0.0 {
+        (found[0], found[1])
+    } else {
+        (found[1], found[0] + TAU)
+    };
+    let edge = |start: f64, side: f64| {
+        let found = roots(start, 0.05, |m| penumbra_edge(m, side));
+        assert_eq!(found.len(), 1, "one edge after {start}: {found:?}");
+        found[0]
+    };
+    [
+        edge(exit - 0.05, -1.0),
+        exit,
+        edge(exit, 1.0),
+        edge(entry - 0.05, 1.0),
+        entry,
+        edge(entry, -1.0),
+    ]
+}
+
+/// [`mean_rate`] of the shadowed [`cannonball`] summed over the pieces `[c₀, c₁], [c₁, c₂], …`, so
+/// that Simpson's rule never steps across a corner of `ν`.
+fn piecewise_rate(cuts: &[f64]) -> [f64; 6] {
+    let force = |r: [f64; 3], _: [f64; 3]| cannonball(SUN, r, lighting(SUN, r));
+    let mut rate = [0.0; 6];
+    for piece in cuts.windows(2) {
+        for (w, r) in rate
+            .iter_mut()
+            .zip(mean_rate(SRP_LEO, piece[0], piece[1], &force))
+        {
+            *w += r;
+        }
+    }
+    rate
+}
+
+/// `dsst::srp` on its fixture, where the orbit crosses the shadow: the rates against `(1/2π)∫νF dλ`
+/// over the arc they integrate, the one outside the cylinder behind the Earth, with Simpson's rule
+/// split where the penumbra ends and `ν` has its corner. The shipped order-48 Gauss rule runs
+/// straight across that corner, and that is the residual: measured 3.8e-5, each rate within 3 % of
+/// the residual the VOP average in `dsst::srp`'s own tests finds.
+#[test]
+fn srp_mean_rates_are_the_average_over_the_lit_arc() {
+    let srp = DsstSolarRadiationPressure::new(CR, AREA_OVER_MASS, MU, AE_SRP);
+    let [_, exit, penumbra_exit, penumbra_entry, entry, _] = shadow_crossings();
+    let want = piecewise_rate(&[exit, penumbra_exit, penumbra_entry, entry]);
+    let got = srp.mean_element_rates(&aux(SRP_LEO, SRP_LAMBDA), SUN);
+    let worst = worst_rate_difference(SRP_LEO[0], got, want);
+    assert!(worst < 8e-5, "{worst:.3e}, {got:?} vs {want:?}");
+}
+
+/// The average that defines the rates runs over the whole orbit, and `ν` is not zero inside the
+/// cylinder: the inner half of each penumbra is lit. Cutting at the cylinder drops that light while
+/// the outer half is still weighted by `ν`, so the rates sit 1.6e-3 off the average over the conical
+/// shadow. The cylinder alone, `ν = 1` on its arc, sits 4.2e-5 off, because there the two halves
+/// nearly cancel. Asserted within a factor of two, so that only a change of the cut moves it.
+#[test]
+fn srp_mean_rates_drop_the_light_inside_the_cylinder() {
+    let srp = DsstSolarRadiationPressure::new(CR, AREA_OVER_MASS, MU, AE_SRP);
+    let [
+        umbra_exit,
+        exit,
+        penumbra_exit,
+        penumbra_entry,
+        entry,
+        umbra_entry,
+    ] = shadow_crossings();
+    let conical = piecewise_rate(&[umbra_exit, penumbra_exit, penumbra_entry, umbra_entry]);
+    let got = srp.mean_element_rates(&aux(SRP_LEO, SRP_LAMBDA), SUN);
+    let off = worst_rate_difference(SRP_LEO[0], got, conical);
+    assert!(off > 8e-4 && off < 3.2e-3, "the cut's own error {off:.3e}");
+    let cylinder = mean_rate(SRP_LEO, exit, entry, &|r, _| cannonball(SUN, r, 1.0));
+    let binary = worst_rate_difference(SRP_LEO[0], cylinder, conical);
+    assert!(binary < 1e-4, "the binary cylinder {binary:.3e}");
 }

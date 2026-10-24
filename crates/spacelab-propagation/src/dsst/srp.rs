@@ -31,6 +31,17 @@
 //! so the limb radius reduces to `ρ_occ = asin(ae / |r|)` and the whole ratio is computable directly
 //! from the inertial (GCRF) satellite and Sun positions — no Earth-orientation transform. This is the
 //! only deviation from the general model and it is what the oracle validates against.
+//!
+//! # Checked against the average that defines the rates
+//!
+//! `tests/dsst_short_period_identity.rs` checks [`DsstSolarRadiationPressure::mean_element_rates`]
+//! against `(1/2π)∫νF dλ`, taken by Simpson's rule in the mean longitude. F is Gauss's rate from a
+//! cannonball law and `ν` the lens of the two discs, both written in the test, and the shadow
+//! crossings are bisections, not the quartic. Measured 1.9e-10 with no shadow, and 3.8e-5 over the
+//! arc outside the cylinder, where the order-48 Gauss rule steps across the corner of `ν`. Against
+//! the average over the whole orbit the rates are 1.6e-3 off: the cylinder cut drops the light of
+//! the inner half of each penumbra and keeps the deficit of the outer half, where the cylinder
+//! alone, `ν = 1` on its arc, is 4.2e-5 off.
 
 use libm::{acos, asin, atan, atan2, cbrt, copysign, cos, fabs, floor, sin, sqrt};
 

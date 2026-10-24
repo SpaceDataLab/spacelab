@@ -26,6 +26,14 @@
 //!
 //! The `U`-potential value and the mean-element rates that feed the `Dᵢ` coefficients use
 //! `maxEccPowMeanElements` (the same truncation as the mean rates), exactly as Orekit's `UAnddU`.
+//!
+//! # The defining equation, checked
+//!
+//! `tests/dsst_short_period_identity.rs` checks the corrections against the equation that defines
+//! them: n·∂η/∂λ = F − ⟨F⟩, plus (3/2)(n/a)·η_a on the left for λ. Here F is Gauss's rate from the
+//! geopotential's own acceleration, and nothing in it comes from the DSST. For J2…J6 the residual is
+//! 1.6e-10 at e = 0.01 and 2.1e-7 at e = 0.05: the size of the e⁵ that the `s` cut drops. Every η
+//! has zero mean over λ.
 
 use std::vec::Vec;
 

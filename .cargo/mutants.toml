@@ -1679,59 +1679,59 @@ exclude_re = [
     # The parity filters `(n +- m) % 2 == 0`. `n + m` and `n - m` differ by `2m`, so the parity is the
     # same, and each loop guarantees `n >= m`, so the `usize` subtraction cannot wrap and no branch is
     # taken that was not taken before.
-    "dsst/short_period\\.rs:408:31: replace - with \\+ in fourier_cj_sj",
-    "dsst/short_period\\.rs:420:27: replace \\+ with - in fourier_cj_sj",
-    "dsst/short_period\\.rs:433:27: replace \\+ with - in fourier_cj_sj",
-    "dsst/short_period\\.rs:469:31: replace \\+ with - in fourier_cj_sj",
-    "dsst/short_period\\.rs:482:31: replace \\+ with - in fourier_cj_sj",
-    "dsst/short_period\\.rs:496:31: replace \\+ with - in fourier_cj_sj",
-    "dsst/short_period\\.rs:510:35: replace \\+ with - in fourier_cj_sj",
+    "dsst/short_period\\.rs:416:31: replace - with \\+ in fourier_cj_sj",
+    "dsst/short_period\\.rs:428:27: replace \\+ with - in fourier_cj_sj",
+    "dsst/short_period\\.rs:441:27: replace \\+ with - in fourier_cj_sj",
+    "dsst/short_period\\.rs:477:31: replace \\+ with - in fourier_cj_sj",
+    "dsst/short_period\\.rs:490:31: replace \\+ with - in fourier_cj_sj",
+    "dsst/short_period\\.rs:504:31: replace \\+ with - in fourier_cj_sj",
+    "dsst/short_period\\.rs:518:35: replace \\+ with - in fourier_cj_sj",
 
     # `HansenZonal::new(n_max, s, chi)` zero-initialises its arrays and writes only `s+1..=n_max` --
     # the recurrence root is `K_0^{-s-1,s} = 0` -- and all fourteen accumulations in `accumulate_hg`
     # and `accumulate_ij` carry a factor `kns` or `dkns`. Extending an `n` range down to `n <= s`
     # therefore adds exactly `0.0`, not a small term. The last entry widens `1..=(j-1).min(sMax)` to
     # `1..=j.min(sMax)`, whose added `s = j` is used at `n = j`.
-    "dsst/short_period\\.rs:407:29: replace \\+ with - in fourier_cj_sj",
-    "dsst/short_period\\.rs:407:29: replace \\+ with \\* in fourier_cj_sj",
-    "dsst/short_period\\.rs:481:33: replace \\+ with - in fourier_cj_sj",
-    "dsst/short_period\\.rs:481:33: replace \\+ with \\* in fourier_cj_sj",
-    "dsst/short_period\\.rs:495:33: replace \\+ with - in fourier_cj_sj",
-    "dsst/short_period\\.rs:495:33: replace \\+ with \\* in fourier_cj_sj",
-    "dsst/short_period\\.rs:449:29: replace - with / in fourier_cj_sj",
+    "dsst/short_period\\.rs:415:29: replace \\+ with - in fourier_cj_sj",
+    "dsst/short_period\\.rs:415:29: replace \\+ with \\* in fourier_cj_sj",
+    "dsst/short_period\\.rs:489:33: replace \\+ with - in fourier_cj_sj",
+    "dsst/short_period\\.rs:489:33: replace \\+ with \\* in fourier_cj_sj",
+    "dsst/short_period\\.rs:503:33: replace \\+ with - in fourier_cj_sj",
+    "dsst/short_period\\.rs:503:33: replace \\+ with \\* in fourier_cj_sj",
+    "dsst/short_period\\.rs:457:29: replace - with / in fourier_cj_sj",
 
     # `(N-1).min(sMax)`, `N.min(sMax)` and `(N+1).min(sMax)` are all `sMax`, because `sMax <= N-1`.
-    "dsst/short_period\\.rs:404:33: replace - with \\+ in fourier_cj_sj",
-    "dsst/short_period\\.rs:404:33: replace - with / in fourier_cj_sj",
+    "dsst/short_period\\.rs:412:33: replace - with \\+ in fourier_cj_sj",
+    "dsst/short_period\\.rs:412:33: replace - with / in fourier_cj_sj",
 
     # `is_between(j, 1, N-1)` -> `is_between(j, 1, N)`. At `j = N` all three double sums are empty:
     # the first runs `s` in `[N, sMax]` with `sMax <= N-1`, the second and third both run `n` in
     # `[N+1, N]`.
-    "dsst/short_period\\.rs:402:38: replace - with / in fourier_cj_sj",
+    "dsst/short_period\\.rs:410:38: replace - with / in fourier_cj_sj",
 
     # `(N-j).min(sMax)` -> `(N+j).min(sMax)`: every added `s` has `j + s > N`, so its inner range
     # `n` in `[max(j+s, j+1), N]` is empty.
-    "dsst/short_period\\.rs:417:33: replace - with \\+ in fourier_cj_sj",
+    "dsst/short_period\\.rs:425:33: replace - with \\+ in fourier_cj_sj",
 
     # `is_between(j, 3, 2N-1)` widened to `2N` or `2N+1`. At `j >= 2N` the window is `minjm1on = N`
     # and every arm's `s` range becomes `[N, <= sMax]` with `sMax <= N-1` (empty), except the odd
     # second sum, which its own `j` in `[5, 2N-3]` gate excludes.
-    "dsst/short_period\\.rs:461:42: replace - with \\+ in fourier_cj_sj",
-    "dsst/short_period\\.rs:461:42: replace - with / in fourier_cj_sj",
+    "dsst/short_period\\.rs:469:42: replace - with \\+ in fourier_cj_sj",
+    "dsst/short_period\\.rs:469:42: replace - with / in fourier_cj_sj",
 
     # The `s` lower bound `j - minjm1on` -> `j / minjm1on`. The quotient is never larger on the
     # reachable range (it is 1 when `minjm1on = j-1`, and <= 1 when `minjm1on = N < j-1`, since the
     # block caps `j <= 2N-1`), so the bound only drops -- and every added `s` has `j - s > minjm1on`,
     # emptying its inner range `n` in `[j-s, minjm1on]`.
-    "dsst/short_period\\.rs:465:29: replace - with / in fourier_cj_sj",
-    "dsst/short_period\\.rs:506:33: replace - with / in fourier_cj_sj",
+    "dsst/short_period\\.rs:473:29: replace - with / in fourier_cj_sj",
+    "dsst/short_period\\.rs:514:33: replace - with / in fourier_cj_sj",
 
     # The `s` upper bound `(minjm1on-1).min(sMax)` raised to `minjm1on.min(sMax)` or
     # `(minjm1on+1).min(sMax)`: every added `s` is >= `minjm1on`, emptying `n` in `[s+1, minjm1on]`.
-    "dsst/short_period\\.rs:478:46: replace - with \\+ in fourier_cj_sj",
-    "dsst/short_period\\.rs:478:46: replace - with / in fourier_cj_sj",
-    "dsst/short_period\\.rs:492:52: replace - with \\+ in fourier_cj_sj",
-    "dsst/short_period\\.rs:492:52: replace - with / in fourier_cj_sj",
+    "dsst/short_period\\.rs:486:46: replace - with \\+ in fourier_cj_sj",
+    "dsst/short_period\\.rs:486:46: replace - with / in fourier_cj_sj",
+    "dsst/short_period\\.rs:500:52: replace - with \\+ in fourier_cj_sj",
+    "dsst/short_period\\.rs:500:52: replace - with / in fourier_cj_sj",
 
     # --- The `if j % 2 == 0` selector of the `j` in `[3, 2N-1]` block: its two arms are the same
     # index set spelled two ways. For odd `j`, `j/2 == (j-1)/2` and `(j-3)/2 == j/2 - 1`, so the even
@@ -1741,35 +1741,35 @@ exclude_re = [
     # `(j+1) % 2 = 1`. The odd arm's extra `N >= 4 && j in [5, 2N-3]` gate is redundant: outside it
     # the range `[j - minjm1on, min((j-3)/2, sMax)]` is empty -- for `minjm1on = j-1` non-emptiness
     # needs `j >= 5`, for `minjm1on = N` it needs `j <= 2N-3`. ---
-    "dsst/short_period\\.rs:463:22: replace == with != in fourier_cj_sj",
-    "dsst/short_period\\.rs:463:18: replace % with / in fourier_cj_sj",
-    "dsst/short_period\\.rs:463:18: replace % with \\+ in fourier_cj_sj",
-    "dsst/short_period\\.rs:492:30: replace - with / in fourier_cj_sj",
-    "dsst/short_period\\.rs:505:31: replace && with \\|\\| in fourier_cj_sj",
-    "dsst/short_period\\.rs:505:64: replace - with \\+ in fourier_cj_sj",
+    "dsst/short_period\\.rs:471:22: replace == with != in fourier_cj_sj",
+    "dsst/short_period\\.rs:471:18: replace % with / in fourier_cj_sj",
+    "dsst/short_period\\.rs:471:18: replace % with \\+ in fourier_cj_sj",
+    "dsst/short_period\\.rs:500:30: replace - with / in fourier_cj_sj",
+    "dsst/short_period\\.rs:513:31: replace && with \\|\\| in fourier_cj_sj",
+    "dsst/short_period\\.rs:513:64: replace - with \\+ in fourier_cj_sj",
 
     # --- `compute_cij_sij`'s five window guards. With `jMax = 2N+1` and `j <= jMax`, the right
     # operands `j-1 < jMax`, `j-2 < jMax`, `j*1 < jMax` and `j/2 < jMax` are true for every reachable
     # `j`, so only the `is_between` window binds; and `C^j = S^j = 0` for `j > min(2N-1, N+sMax)`, in
     # particular the whole `cc[2N]` / `sc[2N]` row, which is where the widened windows reach. Both
     # facts are asserted by `coefficient_arrays_have_the_expected_frequency_content`. ---
-    "dsst/short_period\\.rs:629:47: replace && with \\|\\| in compute_cij_sij",
-    "dsst/short_period\\.rs:629:42: replace - with \\+ in compute_cij_sij",
-    "dsst/short_period\\.rs:629:56: replace < with <= in compute_cij_sij",
-    "dsst/short_period\\.rs:646:47: replace && with \\|\\| in compute_cij_sij",
-    "dsst/short_period\\.rs:646:42: replace - with \\+ in compute_cij_sij",
-    "dsst/short_period\\.rs:646:56: replace < with <= in compute_cij_sij",
-    "dsst/short_period\\.rs:646:52: replace \\+ with - in compute_cij_sij",
-    "dsst/short_period\\.rs:646:52: replace \\+ with \\* in compute_cij_sij",
-    "dsst/short_period\\.rs:663:43: replace && with \\|\\| in compute_cij_sij",
-    "dsst/short_period\\.rs:663:52: replace < with <= in compute_cij_sij",
-    "dsst/short_period\\.rs:663:48: replace - with / in compute_cij_sij",
-    "dsst/short_period\\.rs:680:56: replace < with <= in compute_cij_sij",
-    "dsst/short_period\\.rs:680:52: replace - with / in compute_cij_sij",
-    "dsst/short_period\\.rs:708:47: replace && with \\|\\| in compute_cij_sij",
-    "dsst/short_period\\.rs:708:42: replace - with \\+ in compute_cij_sij",
-    "dsst/short_period\\.rs:708:42: replace - with / in compute_cij_sij",
-    "dsst/short_period\\.rs:708:52: replace < with <= in compute_cij_sij",
+    "dsst/short_period\\.rs:637:47: replace && with \\|\\| in compute_cij_sij",
+    "dsst/short_period\\.rs:637:42: replace - with \\+ in compute_cij_sij",
+    "dsst/short_period\\.rs:637:56: replace < with <= in compute_cij_sij",
+    "dsst/short_period\\.rs:654:47: replace && with \\|\\| in compute_cij_sij",
+    "dsst/short_period\\.rs:654:42: replace - with \\+ in compute_cij_sij",
+    "dsst/short_period\\.rs:654:56: replace < with <= in compute_cij_sij",
+    "dsst/short_period\\.rs:654:52: replace \\+ with - in compute_cij_sij",
+    "dsst/short_period\\.rs:654:52: replace \\+ with \\* in compute_cij_sij",
+    "dsst/short_period\\.rs:671:43: replace && with \\|\\| in compute_cij_sij",
+    "dsst/short_period\\.rs:671:52: replace < with <= in compute_cij_sij",
+    "dsst/short_period\\.rs:671:48: replace - with / in compute_cij_sij",
+    "dsst/short_period\\.rs:688:56: replace < with <= in compute_cij_sij",
+    "dsst/short_period\\.rs:688:52: replace - with / in compute_cij_sij",
+    "dsst/short_period\\.rs:716:47: replace && with \\|\\| in compute_cij_sij",
+    "dsst/short_period\\.rs:716:42: replace - with \\+ in compute_cij_sij",
+    "dsst/short_period\\.rs:716:42: replace - with / in compute_cij_sij",
+    "dsst/short_period\\.rs:716:52: replace < with <= in compute_cij_sij",
 
     # `f12 = 2*f1` -> `f12 = 2 + f1` in the Danby step, the same shape as the `dsst/srp.rs:428:23`
     # entry above. `shift = f0*f12 / (f1*f12 - f0*f2)` has a numerator proportional to `f0`, so the
@@ -1778,7 +1778,7 @@ exclude_re = [
     # longitudes x 97 mean longitudes: identical worst Kepler residual (8.882e-16) and identical
     # agreement with a bisection solve (1.332e-15). Its three siblings at 782-783 do NOT share this --
     # they stop converging above e ~ 0.1, and the extended sweep now kills them.
-    "dsst/short_period\\.rs:782:23: replace \\* with \\+ in mean_to_eccentric",
+    "dsst/short_period\\.rs:790:23: replace \\* with \\+ in mean_to_eccentric",
 
     # The same Danby step, in the third-body module's own copy of the solver, and the same argument:
     # the numerator stays proportional to `f0`, so the root is untouched and only the convergence
@@ -1786,7 +1786,7 @@ exclude_re = [
     # once `mean_to_eccentric_inverts_the_equinoctial_kepler_equation` was extended from e = 0.813 to
     # e = 0.9 and 0.99 (two pericentre longitudes each, 97 mean longitudes), and that sweep now kills
     # it. This one is bit-identical there: worst residual 8.882e-16, mutated and unmutated alike.
-    "third_body_short_period\\.rs:697:23: replace \\* with \\+ in mean_to_eccentric",
+    "third_body_short_period\\.rs:704:23: replace \\* with \\+ in mean_to_eccentric",
 
     # `abs_s > abs_j` -> `>=` in the `Wnsj` factorial-ratio branch. At the tie the mutant evaluates
     # `fc = (n+s)!/(n+j)! * (n-s)!/(n-j)!` where the original returns 1.0, and the lower index is
@@ -1797,7 +1797,7 @@ exclude_re = [
     # `n_arg <= 23` (`MAX_POWER = 22`, plus one for the `n+1` argument) -- n_arg = 6, 10, 15, 18,
     # 19, 21, 22 -- each by a single ulp, and 40 do up to n_arg = 60, never by more. An
     # exact-arithmetic equivalence with a sub-ulp float departure.
-    "third_body_short_period\\.rs:290:39: replace > with >= in Wnsj::compute",
+    "third_body_short_period\\.rs:297:39: replace > with >= in Wnsj::compute",
 
     # `j < s` -> `j <= s` in `Abde::compute`, which differs only at `j == s`. There `m = |j - s| =
     # 0`, and every term `sign` multiplies carries a factor of `kh.sj(0)`, `kh.dsj_dk(0)` or
@@ -1807,12 +1807,12 @@ exclude_re = [
     # multiplications and sums alone -- production code in this module (lines 1..806) has no
     # `atan2`, `copysign`, `signum`, `to_bits` or division by them -- so `-0.0` never becomes
     # observable. The same shape as the `tesseral.rs:574:10` entry above.
-    "third_body_short_period\\.rs:351:25: replace < with <= in Abde::compute",
+    "third_body_short_period\\.rs:358:25: replace < with <= in Abde::compute",
 
     # `(n - s) % 2 == 0` -> `(n + s) % 2 == 0`. The two differ by `2s`, so they have equal parity
     # for every `n`, `s`: the predicate is unchanged on every input. `min_n = 2.max((j-1).max(s))`
     # keeps `n >= s`, so the unmutated subtraction cannot underflow either. A proof, not a sweep.
-    "third_body_short_period\\.rs:446:23: replace - with \\+ in fourier",
+    "third_body_short_period\\.rs:453:23: replace - with \\+ in fourier",
 
     # `n >= j && j < j_max` -> `n >= j && j <= j_max`. The loop is `for j in 1..=j_max`, so the
     # mutated half is a tautology and the only new work happens at `j == j_max`. What it
@@ -1820,27 +1820,27 @@ exclude_re = [
     # discards at exactly that `j`. The extra `wnsj.compute` calls are pure and cannot panic: the
     # `n >= j` half of the guard and `min_n >= s` keep both lower indices non-negative, and
     # `n_arg = n` indexes strictly below the `n + 1` the same iteration has already used.
-    "third_body_short_period\\.rs:475:36: replace < with <= in fourier",
+    "third_body_short_period\\.rs:482:36: replace < with <= in fourier",
 
     # `if j < j_max` -> `if j <= j_max` on the Cʲ·λ/Sʲ·λ store. The extra iteration is `j == j_max`,
     # where the unmutated guard above blocked every accumulation, so `cjl` and `sjl` still hold the
     # `0.0` they were initialised to. `cjlambda`/`sjlambda` are `vec![0.0; j_max + 1]`, so index
     # `j_max` is in bounds and already `+0.0`: the mutation writes `+0.0` over `+0.0`.
-    "third_body_short_period\\.rs:492:14: replace < with <= in fourier",
+    "third_body_short_period\\.rs:499:14: replace < with <= in fourier",
 
     # `Abde::new(&ctx, j_max + s_max, s_max)` -> `j_max * s_max`. The argument only sizes the
     # `CjSj(k, h)` recursion, and with `s_max = MAX_ECCPOWER_SP = 4` and `j_max = n_max + 1 >= 3`
     # the product is the larger of the two (`4·j_max >= j_max + 4` for `j_max >= 2`). `Abde::compute`
     # reads `kh` only at `|j - s|` and `j + s`, both at most `j_max + s_max`, so the extra entries
     # are computed and never read.
-    "third_body_short_period\\.rs:758:38: replace \\+ with \\* in short_period_correction",
+    "third_body_short_period\\.rs:765:38: replace \\+ with \\* in short_period_correction",
 
     # `sMax = 4.min(N-1)` -> `4.min(N+1)` / `4.min(N)`. The `4` binds for N >= 5, where all three
     # spellings give 4; below that every `s` loop is already capped at or under `N-1` by its other
     # bound, so raising `sMax` only adds `s` whose inner `n` range is empty. NOT A PROOF, a bounded
     # search: bit-identical over N = 2..8.
-    "dsst/short_period\\.rs:796:29: replace - with \\+ in short_period_correction",
-    "dsst/short_period\\.rs:796:29: replace - with / in short_period_correction",
+    "dsst/short_period\\.rs:804:29: replace - with \\+ in short_period_correction",
+    "dsst/short_period\\.rs:804:29: replace - with / in short_period_correction",
 
     # `cur_c[3..5] = cxo2n2a2 * (... +- q*coef4)`. `coef4` and `coef5` are the pole-rotation generator
     # applied to `C^j` and `S^j`, and a zonal field is axisymmetric, so they vanish identically --
@@ -1848,10 +1848,10 @@ exclude_re = [
     # asserted by `fourier_coefficients_are_annihilated_by_the_pole_rotation`. Flipping the sign
     # therefore perturbs the q/p corrections by `2*q*coef4`, i.e. by the round-off of a zero: measured
     # max relative departure 1.123e-15 / 1.321e-15 / 2.114e-15 / 2.510e-15, with da bit-identical.
-    "dsst/short_period\\.rs:734:51: replace \\+ with - in compute_cij_sij",
-    "dsst/short_period\\.rs:735:51: replace \\+ with - in compute_cij_sij",
-    "dsst/short_period\\.rs:736:47: replace \\+ with - in compute_cij_sij",
-    "dsst/short_period\\.rs:737:47: replace \\+ with - in compute_cij_sij",
+    "dsst/short_period\\.rs:742:51: replace \\+ with - in compute_cij_sij",
+    "dsst/short_period\\.rs:743:51: replace \\+ with - in compute_cij_sij",
+    "dsst/short_period\\.rs:744:47: replace \\+ with - in compute_cij_sij",
+    "dsst/short_period\\.rs:745:47: replace \\+ with - in compute_cij_sij",
 
     # --- crates/spacelab-propagation/src/abm.rs ---
 

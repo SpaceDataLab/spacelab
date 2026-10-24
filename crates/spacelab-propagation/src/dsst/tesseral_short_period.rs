@@ -52,6 +52,13 @@
 //! the coefficients directly at the output mean state — exact at every grid point, and what the
 //! interpolation approximates between them. The oracle compares against Orekit's OSCULATING
 //! `DSSTPropagator` output seeded from the identical mean state.
+//!
+//! # The defining equation, checked
+//!
+//! `tests/dsst_short_period_identity.rs` checks the corrections over the torus (λ, θ) against
+//! n·∂η/∂λ + θ̇·∂η/∂θ = F − ⟨F⟩. Here F is Gauss's rate from the geopotential's acceleration in a
+//! body frame turned by θ. For a degree-4 field on a non-resonant LEO with e = 0.01 the residual is
+//! 1.2e-6: the size of the e³ that the m-daily cut `min(4, d − 2)` drops.
 
 use std::collections::HashMap;
 

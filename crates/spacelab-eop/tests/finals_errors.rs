@@ -15,6 +15,10 @@ fn every_eop_error_prints_a_distinct_non_empty_message() {
             columns: 10..18,
         },
         EopError::Empty,
+        EopError::Header {
+            line: 4,
+            expected: "Reference Precession-Nutation Model: IAU 2000",
+        },
         EopError::NotMonotonic { line: 12 },
         EopError::Gap {
             after: 58_000.0,

@@ -18,6 +18,11 @@
 //! solution (columns 135–185). Most implementations read only the first. Before
 //! 2000 the two disagree by tens of milliarcseconds.
 //!
+//! **The frame is read, not assumed.** `finals2000A` has no header, so it cannot say which ITRF
+//! its pole coordinates are in. The IERS EOP 20 C04 series can, on its second line, and
+//! [`EopSeries::parse_c04`] reads it into [`EopSeries::frame`]: an orbit product's frame is then
+//! checked against the chain's with `ReferenceFrame::agrees_with` rather than stated in prose.
+//!
 //! # Interpolation and sub-daily corrections
 //!
 //! The daily series is interpolated with four-point Lagrange, as the IERS Conventions
@@ -30,6 +35,7 @@
 
 #![forbid(unsafe_code)]
 
+mod c04;
 mod finals;
 pub mod subdaily;
 mod subdaily_tables;

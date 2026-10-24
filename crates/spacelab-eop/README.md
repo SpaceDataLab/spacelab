@@ -6,7 +6,7 @@ IERS Earth-orientation parameters: parsing, provenance, interpolation.
 
 Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
 verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§1 Time, Earth orientation & geodesy](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#1--time-earth-orientation--geodesy) (5 rows).
+from the project. This crate is verified in [§1 Time, Earth orientation & geodesy](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#1--time-earth-orientation--geodesy) (7 rows).
 
 - API documentation: <https://docs.rs/spacelab-eop>
 - Homepage: <https://spacedatalab.org>

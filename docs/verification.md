@@ -192,6 +192,8 @@ an ancestor, and only the IERS tables would break that.
 | eop | Bulletin A vs Bulletin B same pole, post-2000 | IERS EOP products (`finals2000A`) | IERS finals2000A — two independent IERS solutions | < 1e-3 arcsec / < 1e-3 s | tests/finals_parse.rs |
 | eop | Sub-daily EOP: fundarg, ortho_eop, pmsdnut2, utlibr | IERS TN36 §5.5.1, Ch. 8 + the Conventions' own routines | IERS Conventions 2010 official routine self-tests | 1e-9 rad … 1e-3 µas/µs | src/subdaily.rs |
 | eop | Leap second does not smear across a day (dut1 step) | IERS Bulletin C (integer-second UTC step) | IERS finals (physical 1 s step) | ‖step‖−1 < 0.02 s | tests/finals_parse.rs |
+| eop | 20 C04 against Bulletin B, day by day: 1973, 1999–2000, 2016–17 | the C04 byte-by-byte description (`ReadMe.eopc04`); one 2017 row pinned digit for digit | IERS `finals2000A` Bulletin B, the same centre's earlier combination; through the 2017 leap second, the interpolated `ΔUT1` of both | 1973 < 25 mas, < 2 ms; 1999–2017 < 0.5 mas, < 50 µs, `dX, dY` < 0.3 mas; across the leap second < 20 µs | tests/c04_parse.rs |
+| eop | The ITRF a C04 file states and the nutation model it refers to | the C04 header, lines 2 and 4 | an IGS20 SP3 orbit fitted through the C04 chain: the frames agree, and the fit moves 0.3 mm against `finals2000A` | ITRF2020 read; IAU 1980 refused; a missing model line refused; a missing ITRF line `Unstated` | tests/c04_parse.rs |
 | eop | Full finals2000A parse *(ignored: needs snapshot)* | IERS `finals2000A` fixed-width format | real IERS 3.7 MB file: grid + A−B | gap−1 < 1e-9 d; ‖A−B‖ < 1e-3 arcsec | tests/finals_parse.rs |
 | eop | lagrange4 interpolation / destep_dut1 | polynomial-interpolation definition | analytic exact (degree-3 exact / base-anchored) | < 1e-9 / < 1e-12 | src/finals.rs |
 | earth | Vermeille geodetic↔ITRF, ≥500 pts LEO→GEO | Vermeille 2002/2011 closed form | pyerfa `gc2gd` (Fukushima iteration — different algorithm) | lat < 1e-10 rad, h < 1e-6 m (meas 1.5e-8) | tests/geodetic.rs |
@@ -5234,16 +5236,15 @@ building 244 pages in, naming a file no human wrote. It happened once, with the 
 keep this column to ASCII, the em dash and `§`, and write for a reader who has never seen the plan.
 
 Every row below is *implemented → current → decision*. **Stay** with a stated reason is a fine
-answer; the rows that matter are the two marked **upgrade**, and one of them is a live defect
-measured below.
+answer; the rows that say **Fixed** or **Done** were upgrades, and each says what closed it.
 
 ### Reference frames and time
 
 | Component | Implemented | Current | Decision |
 |---|---|---|---|
-| Terrestrial frame | **Named where a product names it** — `spacelab_gnss::{ReferenceFrame, Itrs}` reads SP3 line 1 columns 47–51, which the reader used to discard, and the four tests that difference an orbit against station coordinates assert agreement. The CIO chain's own realization is still whatever `finals2000A` realizes, and `finals2000A` has no header to say | ITRF2020 (2022), with the IGN updates ITRF2020-u2023 and u2024; IGS20 is the IGS realization of it; SLR stations live in SLRF2020 | **Half done — §9.1.** The half that closed is the half where the data speaks: `IGS20`, `IGc20`, `SLR20` are read from this repository's own fixtures, and `PZ90` — a different datum, decimetres from ITRF — no longer reads as ITRF. The half that cannot close from `finals2000A` needs the C04 reader in the row below |
+| Terrestrial frame | **Named where a product names it** — `spacelab_gnss::{ReferenceFrame, Itrs}` reads SP3 line 1 columns 47–51, which the reader used to discard, and the four tests that difference an orbit against station coordinates assert agreement. The CIO chain's realization is read too: an IERS EOP 20 C04 series states ITRF2020 on its second line and `EopSeries::frame` returns it, where `finals2000A` has no header and reads as `Unstated` | ITRF2020 (2022), with the IGN updates ITRF2020-u2023 and u2024; IGS20 is the IGS realization of it; SLR stations live in SLRF2020 | **Done — §9.1.** Both halves are read from the data: `IGS20`, `IGc20`, `SLR20` from this repository's own SP3 fixtures, with `PZ90` — a different datum, decimetres from ITRF — no longer read as ITRF; and the chain's ITRF from the C04 header, which `igs_orbit_fit` now checks against the orbit's instead of stating it |
 | Celestial frame | GCRF; no catalogue named | ICRF3 (IAU 2018, effective 2019-01-01) | **Stay** — the `dX, dY` we consume are aligned to ICRF3 by the IERS and nothing in the code fixes a radio-source position. Name it in the docs, as above |
-| EOP series | `finals2000A` only — Bulletin A columns and the Bulletin B combination, no C04 reader | IERS EOP 20 C04, in service since 2023-02-14 and consistent with ITRF2020; 14 C04 retired | **Upgrade candidate, and §9.1 gives it a second reason.** The Bulletin B columns of `finals2000A` *are* that combination and it is the only product carrying a prediction span, which is why this said Stay. But `finals2000A` has no header — measured, every line is a data row — so the terrestrial realization cannot be recovered from it at all, while C04 states it in its own second line: `# EOP (IERS) 20 C04 TIME SERIES  consistent with ITRF 2020`. Naming the *chain's* frame is not possible without it |
+| EOP series | `finals2000A` — Bulletin A columns and the Bulletin B combination — and the IERS EOP 20 C04 series, which states its ITRF | IERS EOP 20 C04, in service since 2023-02-14 and consistent with ITRF2020; 14 C04 retired | **Done — §9.1.** `EopSeries::parse_c04` reads the series and its second line, `# EOP (IERS) 20 C04 TIME SERIES  consistent with ITRF 2020`, which `finals2000A` has no header to carry. `finals2000A` stays for the prediction span C04 does not have. On shared days the two differ by their vintage, not by a reading error: under 0.05 mas in the pole and nothing in UT1 in 2025, under 0.5 mas and 50 microseconds around 2000 and 2017, 20 mas and 1.6 ms in 1973, where Bulletin B is an older combination |
 | Precession-nutation | IAU 2006/2000A — `X, Y` from tables 5.2a/5.2b, `s` from 5.2d | IAU 2006/2000A remains the IAU and IERS standard | **Stay** — current |
 | Free core nutation | Not modelled; carried by the observed `dX, dY` | IERS TN36 Ch. 5 empirical FCN model, re-fitted yearly | **Stay** — the observed offsets already contain the FCN and are the better input. The empirical model is the fallback for when `dX, dY` are unavailable, which is not our case |
 | Leap seconds | 28 transitions through the 2027 bulletin; none since 2016-12-31 | CGPM 2022 Resolution 4: the leap second is to be discontinued by 2035 | **Stay, watch** — nothing to change before the redefinition, and the table already refuses to extrapolate past its last entry |
@@ -5372,10 +5373,18 @@ reason differencing them is legitimate is exactly that both realize ITRF2020. SL
 *superset* — it carries pads that joined after ITRF2020's data cut-off — is handled separately, by
 those pads having no station coordinates at all.
 
-**What did not close, and why it cannot from here.** The CIO chain's own realization is still
-unnamed, because `finals2000A` cannot name it. That is not a gap to paper over with a caller-supplied
-constant; it is a reason to read the product that does say, which moves the "EOP series" row above
-from **Stay** to an upgrade candidate with a second motivation.
+**What `finals2000A` could not close, and the product that does.** `finals2000A` cannot name the CIO
+chain's realization, and that is not a gap to paper over with a caller-supplied constant; it is a
+reason to read the product that does say. `EopSeries::parse_c04` reads the IERS EOP 20 C04 series
+and its header, and `EopSeries::frame` returns the ITRF the second line names — ITRF2020 — or
+`Unstated` for a `finals2000A` series. The reader also requires the fourth line: the IERS publishes
+the same series against IAU 1980, where columns 63–86 are `dψ, dε`, and read as `dX, dY` they are
+wrong by their whole size, so a file that names another model, or names none, is refused.
+`ReferenceFrame` moved to `spacelab-core` for this, so an orbit's frame and an Earth-orientation
+series' frame are values of one type, and `igs_orbit_fit` asserts that the IGS20 orbit agrees with
+the C04 chain's ITRF2020 — and that it agrees with nothing on `finals2000A`. The same G02 arc fitted
+through each series moves the 3D RMS by **0.3 mm**, 0.3007 m against 0.3004 m: over these eleven days
+the two series differ by 0.05 mas in the pole and not at all in `ΔUT1`.
 
 SINEX is a third case again, and it was checked on the *full* file rather than on the excerpt:
 `data/slr/ITRF2020-ILRS-TRF.SNX` has one `+FILE/COMMENT` block reading "File created by CATREF

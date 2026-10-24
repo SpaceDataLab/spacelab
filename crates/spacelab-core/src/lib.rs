@@ -8,10 +8,12 @@
 #![cfg_attr(not(test), no_std)]
 
 pub mod calendar;
+pub mod frame;
 pub mod linalg;
 pub mod time;
 
 pub use calendar::{CalendarError, UtcDateTime};
+pub use frame::{Itrs, ReferenceFrame};
 pub use linalg::{Mat3, Vec3};
 pub use time::{Epoch, Tai, Tdb, TimeScale, Tt, Ut1};
 

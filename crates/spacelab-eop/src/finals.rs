@@ -14,7 +14,7 @@
 use core::fmt;
 use core::ops::Range;
 
-use spacelab_core::Angle;
+use spacelab_core::{Angle, ReferenceFrame};
 
 /// Zero-based, half-open column ranges of the `finals2000A` record.
 mod col {
@@ -101,9 +101,11 @@ pub struct Eop {
 pub struct EopSample {
     /// Modified Julian Date, at 0h UTC.
     pub mjd: f64,
-    /// The rapid-service (Bulletin A) values, always present.
+    /// The rapid-service (Bulletin A) values, always present. A C04 series has no rapid service,
+    /// and there this repeats `bulletin_b`.
     pub bulletin_a: Eop,
-    /// The final combined (Bulletin B) solution, where the IERS has published one.
+    /// The final combined (Bulletin B) solution, where the IERS has published one. Every row of a
+    /// C04 series is that solution.
     pub bulletin_b: Option<Eop>,
 }
 
@@ -119,7 +121,7 @@ impl EopSample {
     }
 }
 
-/// Why a `finals2000A` record could not be read, or a query answered.
+/// Why an EOP record could not be read, or a query answered.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EopError {
     /// A field did not parse as a number.
@@ -131,6 +133,14 @@ pub enum EopError {
     },
     /// The series held no usable rows.
     Empty,
+    /// A C04 header line the records depend on is missing, or names what this reader cannot use.
+    Header {
+        /// One-based line number: the offending header line, or the first record when the line
+        /// never appeared.
+        line: usize,
+        /// The header line the reader needed.
+        expected: &'static str,
+    },
     /// Rows were not in ascending order of MJD.
     NotMonotonic {
         /// One-based line number where the order broke.
@@ -169,6 +179,7 @@ impl fmt::Display for EopError {
                 )
             }
             Self::Empty => write!(f, "no usable rows"),
+            Self::Header { line, expected } => write!(f, "line {line}: expected `{expected}`"),
             Self::Gap { after, before } => {
                 write!(f, "no tabulated day between MJD {after} and {before}")
             }
@@ -185,10 +196,11 @@ impl fmt::Display for EopError {
 
 impl core::error::Error for EopError {}
 
-/// A parsed `finals2000A` series.
+/// A parsed `finals2000A` or C04 series.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EopSeries {
-    samples: Vec<EopSample>,
+    pub(crate) samples: Vec<EopSample>,
+    pub(crate) frame: ReferenceFrame,
 }
 
 /// Read a fixed-width field, returning `None` when it is blank.
@@ -198,7 +210,7 @@ fn field(line: &str, columns: Range<usize>) -> Option<&str> {
 }
 
 /// Read a required numeric field.
-fn number(line: &str, columns: Range<usize>, line_no: usize) -> Result<f64, EopError> {
+pub(crate) fn number(line: &str, columns: Range<usize>, line_no: usize) -> Result<f64, EopError> {
     field(line, columns.clone())
         .and_then(|t| t.parse().ok())
         .ok_or(EopError::Field {
@@ -322,7 +334,21 @@ impl EopSeries {
         if samples.is_empty() {
             return Err(EopError::Empty);
         }
-        Ok(Self { samples })
+        Ok(Self {
+            samples,
+            frame: ReferenceFrame::Unstated,
+        })
+    }
+
+    /// The terrestrial frame the series states its pole coordinates are in.
+    ///
+    /// [`ReferenceFrame::Unstated`] for `finals2000A`, which has no header to state one. A C04
+    /// series names its ITRF on its second line, and that ITRF holds for every row: the IERS
+    /// reprocessed the whole series, so it is a property of the file's vintage, not of a row's
+    /// epoch.
+    #[must_use]
+    pub const fn frame(&self) -> ReferenceFrame {
+        self.frame
     }
 
     /// Every tabulated day, in ascending order.

@@ -79,6 +79,9 @@ const SP3_EXCERPT: &str = include_str!("fixtures/igs20_g02_2025001.sp3");
 /// MJD 60673-60683 of the IERS `finals2000A` series — the arc plus margin, so the daily table can
 /// be interpolated at both ends without touching a boundary.
 const EOP_EXCERPT: &str = include_str!("fixtures/finals2000A_2025001.txt");
+/// The IERS EOP 20 C04 excerpt, header verbatim: it holds the same days and names the ITRF its
+/// pole is in.
+const C04_EXCERPT: &str = include_str!("../../spacelab-eop/tests/fixtures/eopc04_excerpt.txt");
 
 /// GPS time is steered to a constant 19 s behind TAI, by definition of the system.
 const GPS_MINUS_TAI: f64 = -19.0;
@@ -222,6 +225,11 @@ struct Arc {
     span: f64,
 }
 
+/// The `finals2000A` excerpt, the series every fit in this file is measured on.
+fn finals() -> EopSeries {
+    EopSeries::parse_finals2000a(EOP_EXCERPT).expect("the EOP excerpt parses")
+}
+
 /// Read an SP3, rotate one satellite's ITRF samples into GCRF with measured Earth orientation, and
 /// build the epoch-dependent context the force model needs.
 ///
@@ -231,7 +239,7 @@ struct Arc {
 /// the answer. The force model's Earth-fixed rotation goes through [`CioInterpolator`], which holds
 /// the EOP fixed over the span, because there it multiplies only the *tesseral* field: a metre of
 /// frame error moves a 10⁻¹² m/s² term, not the 0.57 m/s² central one.
-fn build_arc(sp3_text: &str, eop_text: &str, sat: SatId) -> Arc {
+fn build_arc(sp3_text: &str, series: &EopSeries, sat: SatId) -> Arc {
     let sp3 = Sp3::parse(sp3_text);
     assert_eq!(
         sp3.time_system(),
@@ -248,7 +256,6 @@ fn build_arc(sp3_text: &str, eop_text: &str, sat: SatId) -> Arc {
         "the IGS combination should realize ITRF2020; the file says {:?}",
         sp3.reference_frame()
     );
-    let series = EopSeries::parse_finals2000a(eop_text).expect("the EOP excerpt parses");
     let start_gps = sp3.start_epoch().expect("the file carries epochs");
     let epochs = sp3.epochs().to_vec();
     let samples = sp3
@@ -276,7 +283,7 @@ fn build_arc(sp3_text: &str, eop_text: &str, sat: SatId) -> Arc {
     for (&t, sample) in epochs.iter().zip(&samples) {
         let Some(itrf) = *sample else { continue };
         let utc = utc_at(t);
-        let e = earth_orientation_at(utc, EopSource::Series(&series))
+        let e = earth_orientation_at(utc, EopSource::Series(series))
             .expect("the arc is inside the EOP excerpt");
         let sd = subdaily_correction(utc.modified_julian_date());
         let ut1 = Epoch::<Ut1>::from_ns_since_j2000(
@@ -306,7 +313,7 @@ fn build_arc(sp3_text: &str, eop_text: &str, sat: SatId) -> Arc {
         observations.push(Observation { t, position });
     }
 
-    let epoch = earth_orientation_at(utc_at(0.0), EopSource::Series(&series))
+    let epoch = earth_orientation_at(utc_at(0.0), EopSource::Series(series))
         .expect("the epoch is in range");
     let cio = CioInterpolator::new(
         epoch.orientation.ut1,
@@ -471,7 +478,7 @@ fn fit_arc_with<Sun: Ephemeris + Copy, Moon: Ephemeris>(
 fn the_igs_final_orbit_is_fitted_to_decimetres_by_a_seven_parameter_arc() {
     let arc = build_arc(
         SP3_EXCERPT,
-        EOP_EXCERPT,
+        &finals(),
         SatId {
             system: 'G',
             prn: 2,
@@ -528,6 +535,44 @@ fn the_igs_final_orbit_is_fitted_to_decimetres_by_a_seven_parameter_arc() {
     );
 }
 
+/// The same arc on the IERS EOP 20 C04 series, which names its frame where `finals2000A` cannot.
+///
+/// The SP3 says IGS20 and the C04 header says ITRF2020, so the orbit and the Earth-orientation
+/// series that rotates it are now checked to be in one frame rather than said to be. Over these
+/// eleven days the two series differ by at most 0.05 mas in the pole and not at all in `ΔUT1` or
+/// `dX, dY` -- 6 mm at this radius -- so the fit must not move.
+#[test]
+fn the_c04_series_names_the_frame_the_orbit_is_in() {
+    let c04 = EopSeries::parse_c04(C04_EXCERPT).expect("the C04 excerpt parses");
+    let sp3 = Sp3::parse(SP3_EXCERPT);
+    assert!(
+        sp3.reference_frame().agrees_with(c04.frame()),
+        "orbit {:?}, Earth orientation {:?}",
+        sp3.reference_frame(),
+        c04.frame()
+    );
+    assert!(
+        !sp3.reference_frame().agrees_with(finals().frame()),
+        "finals2000A states no frame, so it agrees with none"
+    );
+
+    let sat = SatId {
+        system: 'G',
+        prn: 2,
+    };
+    let (_, _, on_c04, _) = fit_arc(&build_arc(SP3_EXCERPT, &c04, sat));
+    let (_, _, on_finals, _) = fit_arc(&build_arc(SP3_EXCERPT, &finals(), sat));
+    let moved = (on_c04.total - on_finals.total).abs();
+    println!(
+        "3D RMS on C04 {:.4} m, on finals2000A {:.4} m, moved {moved:.2e} m",
+        on_c04.total, on_finals.total
+    );
+    assert!(
+        moved < 1e-3,
+        "the fit moved {moved:.2e} m between the two series"
+    );
+}
+
 /// The whole 32-satellite product, when it has been fetched, on DE440 third bodies.
 ///
 /// One line per satellite, so the spread across the constellation — and any satellite in an eclipse
@@ -555,7 +600,7 @@ fn every_gps_satellite_in_the_daily_product() {
     let mut total = 0.0_f64;
     let mut fitted = 0_u32;
     for sat in sp3.satellites().collect::<Vec<_>>() {
-        let arc = build_arc(&text, EOP_EXCERPT, sat);
+        let arc = build_arc(&text, &finals(), sat);
         if arc.observations.len() < 90 {
             println!(
                 "{}{:02}  skipped, {} samples",
@@ -618,7 +663,7 @@ fn de440_third_bodies_are_worth_the_larger_half_of_the_residual() {
 
     let arc = build_arc(
         SP3_EXCERPT,
-        EOP_EXCERPT,
+        &finals(),
         SatId {
             system: 'G',
             prn: 2,

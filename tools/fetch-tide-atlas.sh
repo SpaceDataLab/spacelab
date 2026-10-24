@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Fetch the GOT ocean-tide atlas -- the cotidal grids `derivations/tide_to_stokes.py` analyses.
+# Fetch the GOT and EOT20 ocean-tide atlases -- the cotidal grids `derivations/tide_to_stokes.py`
+# analyses.
 #
 # WHY AN ATLAS AND NOT A COEFFICIENT FILE
 #
@@ -21,7 +22,13 @@
 # GOT5.6 is a *supplement* to GOT5.5, adding four third-degree constituents; its own README says to
 # combine the two. Both are fetched and unpacked into one tree for that reason.
 #
-# The atlas is ~1 GB and is never committed. It lands in the cache, outside the repository, and what
+# EOT20 (DGFI-TUM) is CC BY 4.0, read on its SEANOE page, and is fetched by default. SEANOE serves
+# one 2.3 GB archive holding both the ocean-tide and the load-tide grids; only the ocean-tide half is
+# unpacked, because the load tide is a different quantity on an identical grid. The digest is pinned:
+# SEANOE withdrew an earlier release of EOT20 whose netCDF conversion was corrupt, and a changed
+# archive must stop the script rather than reach the generator.
+#
+# The atlases are ~3.5 GB and are never committed. It lands in the cache, outside the repository, and what
 # this repository commits is the generator and the table it produces.
 #
 # Usage: tools/fetch-tide-atlas.sh [DEST]
@@ -78,11 +85,46 @@ fi
   echo "}"
 } >"$DEST/manifest.json"
 
+EOT20_DIR="$DEST/EOT20"
+EOT20_URL="https://www.seanoe.org/data/00683/79489/data/85762.zip"
+EOT20_SHA256="bced7af7eb7c34896d4fd04680a751cc9f5a4c7a3c03852997d9263d61e07018"
+mkdir -p "$EOT20_DIR"
+if [[ -s "$EOT20_DIR/85762.zip" ]]; then
+  echo "have 85762.zip (EOT20, final version)"
+else
+  echo "fetching 85762.zip -- EOT20 cotidal grids, DGFI-TUM, final version"
+  if ! curl -sS -L --fail --max-time 3600 -o "$EOT20_DIR/85762.zip" "$EOT20_URL"; then
+    echo "could not fetch $EOT20_URL" >&2
+    exit 1
+  fi
+fi
+if [[ "$(sha256sum "$EOT20_DIR/85762.zip" | cut -d' ' -f1)" != "$EOT20_SHA256" ]]; then
+  echo "85762.zip does not match the pinned digest; not unpacking it" >&2
+  exit 1
+fi
+if [[ ! -d "$EOT20_DIR/ocean_tides_x/ocean_tides" ]]; then
+  unzip -q -o "$EOT20_DIR/85762.zip" ocean_tides.zip -d "$EOT20_DIR"
+  unzip -q -o "$EOT20_DIR/ocean_tides.zip" -d "$EOT20_DIR/ocean_tides_x"
+  rm -f "$EOT20_DIR/ocean_tides.zip"
+fi
+{
+  echo "{"
+  echo "  \"retrieved_utc\": \"$(date -u -r "$EOT20_DIR/85762.zip" +%Y-%m-%dT%H:%M:%SZ)\","
+  echo "  \"license\": \"CC BY 4.0 (SEANOE dataset page); cite doi:10.17882/79489 and doi:10.5194/essd-13-3869-2021\","
+  echo "  \"role\": \"input to derivations/tide_to_stokes.py --atlas eot20\","
+  echo "  \"files\": {"
+  printf '    "85762.zip": {"url": "%s", "sha256": "%s", "bytes": %s}\n' \
+    "$EOT20_URL" "$EOT20_SHA256" "$(stat -c%s "$EOT20_DIR/85762.zip")"
+  echo "  }"
+  echo "}"
+} >"$EOT20_DIR/manifest.json"
+
 echo
 echo "atlas -> $DEST/GOT5.5/ocean_tides ($(find "$DEST/GOT5.5/ocean_tides" -name '*.nc' -not -name '._*' | wc -l) constituents)"
+echo "atlas -> $EOT20_DIR/ocean_tides_x/ocean_tides ($(find "$EOT20_DIR/ocean_tides_x/ocean_tides" -name '*.nc' -not -name '._*' | wc -l) constituents)"
 echo
 echo "FES2014b / FES2022b are not fetched here. They require an AVISO account"
 echo "(https://www.aviso.altimetry.fr/en/data/data-access.html) whose terms are accepted at"
 echo "registration, so obtaining them is the user's decision, not this script's. The generator"
-echo "reads the GOT grid layout only; a FES reader is deliberately unwritten until there are"
-echo "FES grids to test it against."
+echo "reads the GOT and EOT20 grid layouts only; a FES reader is deliberately unwritten until"
+echo "there are FES grids to test it against."

@@ -6,7 +6,7 @@ Multi-constellation GNSS: GPS, Galileo, BeiDou, QZSS, NavIC and GLONASS broadcas
 
 Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
 verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision) (23 rows).
+from the project. This crate is verified in [§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision) (22 rows).
 
 - API documentation: <https://docs.rs/spacelab-gnss>
 - Homepage: <https://spacedatalab.org>

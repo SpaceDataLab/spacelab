@@ -4219,7 +4219,7 @@ exclude_re = [
     #
     # The `j > 0` guard on the same line is *not* excluded: `>=` there indexes `frequency[-1]`
     # and panics, which every test in the module detects.
-    "loading\\.rs:351:41: replace > with >= in sort_by_frequency",
+    "loading\\.rs:356:41: replace > with >= in sort_by_frequency",
 
     # The predicate counts knots strictly below `y`, which is the index of the bracket above it.
     # `<=` counts knots at or below, which is the bracket one to the right. The two differ only
@@ -4234,7 +4234,7 @@ exclude_re = [
     # nothing at all and the rest by at most 1.4e-17 m — sixteen ULP on a value of a few
     # centimetres. No assertion this model can carry separates that from the original, and one
     # written to would be pinning a rounding artefact rather than the model.
-    "loading\\.rs:431:42: replace < with <= in spline_evaluate",
+    "loading\\.rs:438:42: replace < with <= in spline_evaluate",
     # --- `slr/dhf.rs`. Two fast paths that no line can reach past, and the century clause again.
 
     # `if block.is_empty() || line.starts_with('*') || line.trim().is_empty() { continue }` in

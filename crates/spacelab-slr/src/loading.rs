@@ -42,6 +42,11 @@
 //!   leap-second table to reach TT. Here the split arrives already made, as a UT day fraction and a
 //!   TT Julian century, matching [`solid_earth_tide_displacement`](crate::solid_earth_tide_displacement)
 //!   and leaving time scales to the caller.
+//!
+//! The published series pin the transcription at one epoch. `derivations/ocean_loading.mac` checks
+//! the parts behind it: the Delaunay polynomials against SOFA's, the rates as their derivatives,
+//! Darwin's relations and the textbook periods of the eleven specified constituents, and the end
+//! condition of `SPLINE`.
 
 // The Delaunay arguments are l, l', F, D and Omega and the spline's variables x, u and n, in
 // every source that defines either. Renaming them to pass a lint would make the equations
@@ -359,11 +364,12 @@ fn sort_by_frequency(
 
 /// Second derivatives of the interpolating cubic through `(x, u)`, written into `curvature`.
 ///
-/// The end conditions are the reference's: the third derivative at each end is taken from the
-/// quadratic through the three nearest points, which is the not-a-knot condition in the form
-/// `SPLINE` writes it. Four points are needed for that; with three or fewer the reference falls
-/// back to straight lines, and so does this — a station's long-period species is specified at
-/// exactly three constituents, so that branch is the one Mf, Mm and Ssa always take.
+/// The end conditions are the reference's: the slope at each end is that of the parabola through
+/// the three nearest points, so this is a clamped spline with estimated end slopes. It reproduces
+/// every quadratic but not a cubic, so it is not the not-a-knot spline. Four points are needed for
+/// that; with three or fewer the reference falls back to straight lines, and so does this — a
+/// station's long-period species is specified at exactly three constituents, so that branch is the
+/// one Mf, Mm and Ssa always take.
 fn spline_curvature(x: &[f64], u: &[f64], curvature: &mut [f64]) {
     let n = x.len();
     if n <= 3 {
@@ -371,7 +377,8 @@ fn spline_curvature(x: &[f64], u: &[f64], curvature: &mut [f64]) {
         return;
     }
 
-    // The reference's Q(u1, x1, u2, x2): the second difference implied by three points.
+    // The reference's Q(u1, x1, u2, x2): the slope at the anchor of the parabola through it and
+    // the two points offset from it by (x1, u1) and (x2, u2).
     let q = |u1: f64, x1: f64, u2: f64, x2: f64| {
         (u1 / (x1 * x1) - u2 / (x2 * x2)) / (1.0 / x1 - 1.0 / x2)
     };

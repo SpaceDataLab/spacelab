@@ -535,6 +535,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima solid_tide_love.mac" "expected 11 checks to hold, found $holds"
     fi
 
+    out=$(macf ocean_loading.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 12 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima ocean_loading.mac: HARDISP's arguments are SOFA's to 2.2e-6 arcsec, its constituents Darwin's, its spline clamped at parabolic slopes"
+    else
+        bad "maxima ocean_loading.mac" "expected 12 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

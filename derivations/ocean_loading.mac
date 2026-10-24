@@ -1,0 +1,157 @@
+/* `spacelab-slr::loading`, the HARDISP port: its arguments, its constituents and its spline.
+
+   The port reproduces the reference program's published 24-hour series at Onsala and Reykjavik to
+   its print resolution. That pins the transcription at one epoch and two stations. Here:
+     (1) TDFRPH's Delaunay polynomials, in degrees, are the IERS 2003/2010 ones that SOFA's
+         iauFal03, iauFalp03, iauFaf03, iauFad03 and iauFaom03 carry in arcseconds, to 2.2e-6
+         arcsec, and which three coefficients differ at the printed digit, and why;
+     (2) the rates, cycles per day, are the derivatives of those polynomials: the constant term and
+         the term linear in t, each to the printed digit, and none is missing;
+     (3) the Doodson rates are the derivatives of the Doodson values the module builds from them;
+     (4) the eleven specified constituents' multipliers give Darwin's relations exactly (S2 = 2 cpd,
+         K1 + P1 = 2, K2 = 2 K1, N2 = M2 - Mm, Q1 = O1 - Mm, Mf = K1 - O1) and the textbook
+         periods;
+     (5) the spline: SPLINE's Q is the end slope of the parabola through the three end points, so
+         the end condition is a clamped spline with parabolic slopes. It reproduces every
+         quadratic, and it does not reproduce a cubic, so it is not the not-a-knot spline.      */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+fpprec : 40$
+
+/* ---- (1) the Delaunay polynomials against SOFA --------------------------------------------------
+   Shipped: degrees, constant to t^4. SOFA: arcseconds. Each shipped coefficient must be SOFA's
+   divided by 3600 to within half a unit of its own last digit. */
+sofa : [[485868249036/10^6, 17179159232178/10^4, 318792/10^4, 51635/10^6, -24470/10^8],
+        [1287104793048/10^6, 1295965810481/10^4, -5532/10^4, 136/10^6, -1149/10^8],
+        [335779526232/10^6, 17395272628478/10^4, -127512/10^4, -1037/10^6, 417/10^8],
+        [1072260703692/10^6, 16029616012090/10^4, -63706/10^4, 6593/10^6, -3169/10^8],
+        [450160398036/10^6, -69628905431/10^4, 74722/10^4, 7702/10^6, -5939/10^8]]$
+/* [value, decimals printed] for l, l', F, D, Omega as `DoodsonArguments::new` writes them. */
+shipped : [[[13496340251/10^8, 8], [4771988675605/10^7, 7], [88553333/10^10, 10],
+            [143431/10^10, 10], [-680/10^10, 10]],
+           [[3575291091806/10^10, 10], [359990502911389/10^10, 10], [-1536667/10^10, 10],
+            [378/10^10, 10], [-32/10^10, 10]],
+           [[9327209062/10^8, 8], [4832020174577222/10^10, 10], [-35420000/10^10, 10],
+            [-2881/10^10, 10], [12/10^10, 10]],
+           [[2978501954694/10^10, 10], [4452671114469445/10^10, 10], [-17696111/10^10, 10],
+            [18314/10^10, 10], [-88/10^10, 10]],
+           [[12504455501/10^8, 8], [-19341362619722/10^10, 10], [20756111/10^10, 10],
+            [21394/10^10, 10], [-165/10^10, 10]]]$
+arcsec : lmax(makelist(lmax(makelist(abs(3600*shipped[a][k][1] - sofa[a][k]), k, 1, 5)), a, 1, 5))$
+print("largest |3600 shipped - SOFA|, arcsec:", bfloat(arcsec))$
+must(is(arcsec < 22/10^7),
+     "(1) holds: all 25 Delaunay coefficients are SOFA's to 2.2e-6 arcsec")$
+/* At the printed digit three differ: the l' and D constants are the five-decimal arcseconds IERS
+   prints, 1287104.79305 and 1072260.70369 (SOFA carries a sixth), and D's rate is rounded 0.56 of
+   its last digit high. Anything else moving is a transcription change. */
+off : []$
+for a : 1 thru 5 do for k : 1 thru 5 do block([v : shipped[a][k]],
+  if abs(v[1] - sofa[a][k]/3600)*10^v[2] > 1/2 then off : endcons([a, k], off))$
+five : [[2, 1, 128710479305/10^5], [4, 1, 107226070369/10^5]]$
+must(is(off = [[2, 1], [4, 1], [4, 2]])
+     and every(lambda([e], is(abs(shipped[e[1]][e[2]][1] - e[3]/3600)*10^shipped[e[1]][e[2]][2] <= 1/2)), five)
+     and is(abs(shipped[4][2][1] - sofa[4][2]/3600)*10^10 < 6/10),
+     "(1) holds: 22 of 25 round SOFA's at the printed digit; l' and D's constants are IERS's five-decimal values")$
+
+/* ---- (2) the rates are the derivatives ----------------------------------------------------------
+   A degree-per-century coefficient becomes cycles per day over 360 * 36525; the t^2 term of the
+   argument is the t term of the rate. Shipped: [constant, linear] at ten decimals, 0 where absent. */
+rates : [[362916471/10^10, 13/10^10], [27377786/10^10, 0], [367481951/10^10, -5/10^10],
+         [338631920/10^10, -3/10^10], [-1470938/10^10, 3/10^10]]$
+cpd : 1/(3600*360*36525)$
+worst : 0$
+for a : 1 thru 5 do block([c0, c1],
+  c0 : abs(rates[a][1] - sofa[a][2]*cpd)*10^10,
+  c1 : abs(rates[a][2] - 2*sofa[a][3]*cpd)*10^10,
+  worst : max(worst, c0, c1))$
+print("largest rate error in units of 1e-10 cycles/day:", bfloat(worst))$
+must(is(worst <= 1/2),
+     "(2) holds: the ten rate coefficients are the polynomials' derivatives at the tenth decimal, l' needing no t term")$
+
+/* ---- (3) the Doodson values and their rates ---------------------------------------------------- */
+args : [l, lp, F, D, Om]$
+lin : map(lambda([g], g = concat(g, 0) + 360*concat(d, g)*tau), args)$
+value(fr) := block([s : F + Om, h], h : s - D, [360*fr - D, s, h, s - l, -Om, h - lp])$
+rate : block([s : concat(d, F) + concat(d, Om), h], h : s - concat(d, D),
+  [1 - concat(d, D), s, h, s - concat(d, l), -concat(d, Om), h - concat(d, lp)])$
+must(is(ratsimp(diff(subst(lin, value(fr0 + tau)), tau)/360 - rate) = [0, 0, 0, 0, 0, 0]),
+     "(3) holds: each Doodson rate is its value's derivative, cycles per day, tau's included")$
+
+/* ---- (4) the eleven constituents --------------------------------------------------------------- */
+nu : subst([concat(d, l) = rates[1][1], concat(d, lp) = rates[2][1], concat(d, F) = rates[3][1],
+            concat(d, D) = rates[4][1], concat(d, Om) = rates[5][1]], rate)$
+fq(m) := sum(m[k]*nu[k], k, 1, 6)$
+M2 : fq([2, 0, 0, 0, 0, 0])$  S2 : fq([2, 2, -2, 0, 0, 0])$  N2 : fq([2, -1, 0, 1, 0, 0])$
+K2 : fq([2, 2, 0, 0, 0, 0])$  K1 : fq([1, 1, 0, 0, 0, 0])$   O1 : fq([1, -1, 0, 0, 0, 0])$
+P1 : fq([1, 1, -2, 0, 0, 0])$ Q1 : fq([1, -2, 0, 1, 0, 0])$  Mf : fq([0, 2, 0, 0, 0, 0])$
+Mm : fq([0, 1, 0, -1, 0, 0])$ Ssa : fq([0, 0, 2, 0, 0, 0])$
+must(is(S2 = 2) and is(K1 + P1 = 2) and is(K2 = 2*K1) and is(N2 = M2 - Mm) and is(Q1 = O1 - Mm)
+     and is(Mf = K1 - O1),
+     "(4) holds: S2 = 2, K1 + P1 = 2, K2 = 2 K1, N2 = M2 - Mm, Q1 = O1 - Mm, Mf = K1 - O1 exactly")$
+hours : map(lambda([f], 24/f), [M2, S2, N2, K2, K1, O1, P1, Q1])$
+days : map(lambda([f], 1/f), [Mf, Mm, Ssa])$
+print("periods, h:", map(lambda([p], float(p)), hours), " d:", map(lambda([p], float(p)), days))$
+must(is(map(lambda([p], round(1000*p)), hours)
+        = [12421, 12000, 12658, 11967, 23934, 25819, 24066, 26868])
+     and is(map(lambda([p], round(1000*p)), days) = [13661, 27555, 182621]),
+     "(4) holds: M2 S2 N2 K2 K1 O1 P1 Q1 Mf Mm Ssa have their textbook periods to 1e-3 h and 1e-3 d")$
+
+/* ---- (5) the spline ------------------------------------------------------------------------------
+   `spline_curvature` and `spline_evaluate` as shipped, lists 1-based. */
+qf(u1, x1, u2, x2) := (u1/x1^2 - u2/x2^2)/(1/x1 - 1/x2)$
+assume(x1 > 0, x2 > x1)$
+par : u0 + a*x + b*x^2$
+must(is(ratsimp(qf(subst(x = x1, par) - u0, x1, subst(x = x2, par) - u0, x2)
+                - subst(x = 0, diff(par, x))) = 0),
+     "(5) holds: Q(u1, x1, u2, x2) is the slope at the anchor of the parabola through the three points")$
+curv(x, u) := block([n : length(x), c, piv, q1, qn, cc, left, right],
+  c : makelist(0, i, 1, n), piv : makelist(0, i, 1, n),
+  q1 : qf(u[2] - u[1], x[2] - x[1], u[3] - u[1], x[3] - x[1]),
+  qn : qf(u[n - 1] - u[n], x[n - 1] - x[n], u[n - 2] - u[n], x[n - 2] - x[n]),
+  c[1] : 6*((u[2] - u[1])/(x[2] - x[1]) - q1),
+  for i : 2 thru n - 1 do (
+    left : x[i] - x[i - 1], right : x[i + 1] - x[i],
+    c[i] : 6*(u[i - 1]/left - u[i]*(1/left + 1/right) + u[i + 1]/right)),
+  c[n] : 6*(qn + (u[n - 1] - u[n])/(x[n] - x[n - 1])),
+  piv[1] : 2*(x[2] - x[1]),
+  piv[2] : 3/2*(x[2] - x[1]) + 2*(x[3] - x[2]),
+  c[2] : c[2] - c[1]/2,
+  for i : 3 thru n - 1 do (
+    cc : (x[i] - x[i - 1])/piv[i - 1],
+    piv[i] : 2*(x[i + 1] - x[i - 1]) - cc*(x[i] - x[i - 1]),
+    c[i] : c[i] - cc*c[i - 1]),
+  cc : (x[n] - x[n - 1])/piv[n - 1],
+  piv[n] : (2 - cc)*(x[n] - x[n - 1]),
+  c[n] : c[n] - cc*c[n - 1],
+  c[n] : c[n]/piv[n],
+  for i : n - 1 step -1 thru 1 do c[i] : (c[i] - (x[i + 1] - x[i])*c[i + 1])/piv[i],
+  map(ratsimp, c))$
+/* The piece on [x[k], x[k+1]], as a function of y. */
+piece(y, k, x, u, c) := block([above : x[k + 1] - y, below : y - x[k], w : x[k + 1] - x[k]],
+  (c[k]*above^3 + c[k + 1]*below^3)/(6*w) + below*(u[k + 1]/w - c[k + 1]*w/6)
+  + above*(u[k]/w - c[k]*w/6))$
+knots : [0, 3/10, 1/2, 6/5, 2]$
+quadratic(y) := 7 - 3*y + 5*y^2$
+cq : curv(knots, map(quadratic, knots))$
+must(every(lambda([m], is(m = 10)), cq)
+     and every(lambda([k], is(ratsimp(piece(y, k, knots, map(quadratic, knots), cq)
+                                      - quadratic(y)) = 0)), [1, 2, 3, 4]),
+     "(5) holds: on five unequal knots the shipped spline of a quadratic is that quadratic, curvature 2b everywhere")$
+uu : [v1, v2, v3, v4, v5]$
+cg : curv(knots, uu)$
+slope0 : subst(y = knots[1], diff(piece(y, 1, knots, uu, cg), y))$
+slope_end : subst(y = knots[5], diff(piece(y, 4, knots, uu, cg), y))$
+par_slope(xs, us, at) := block([p : lagrange_poly(xs, us)], subst(y = at, diff(p, y)))$
+lagrange_poly(xs, us) := sum(us[i]*product(if j = i then 1 else (y - xs[j])/(xs[i] - xs[j]), j, 1, 3),
+                             i, 1, 3)$
+must(is(ratsimp(slope0 - par_slope(rest(knots, -2), rest(uu, -2), knots[1])) = 0)
+     and is(ratsimp(slope_end - par_slope(rest(knots, 2), rest(uu, 2), knots[5])) = 0),
+     "(5) holds: for any data the spline's end slopes are those of the parabola through the three end points")$
+cube(y) := y^3$
+cc3 : curv(knots, map(cube, knots))$
+miss : ratsimp(piece(1/4, 2, knots, map(cube, knots), cc3) - cube(1/4))$
+print("shipped spline of y^3 at y = 1/4, minus 1/64:", miss, "=", float(miss))$
+must(is(miss # 0),
+     "(5) holds: it does not reproduce y^3, which a not-a-knot spline reproduces exactly")$
+
+print("DONE")$

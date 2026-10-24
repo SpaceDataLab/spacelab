@@ -17,9 +17,10 @@
 //!
 //! - **Nothing is vendored.** Tycho-2 is 2.5 million stars and Gaia DR3 is 1.8 *billion*; neither
 //!   belongs in a source repository, and both carry attribution terms that a silently-copied excerpt
-//!   would strip. Gaia's catalogue data is CC BY-SA 3.0 IGO with a required acknowledgement, and
-//!   Tycho-2 comes from the ESA Hipparcos mission with its own citation requirement. Implementing
-//!   the mathematics of a plate solve needs neither.
+//!   would strip. Gaia's catalogue data is CC BY-NC 3.0 IGO with the credit line "ESA, Gaia DPAC",
+//!   and any use that earns money, even indirectly, needs ESA's licence first; Tycho-2 comes from
+//!   the ESA Hipparcos mission with its own citation requirement. Implementing the mathematics of a
+//!   plate solve needs neither.
 //! - **The catalogue is a trait**, [`CatalogueStar`] plus [`StarCatalogue`], so the crate depends on
 //!   the *shape* of a catalogue query — stars near a direction, brighter than a limit — and not on
 //!   any particular one. An in-memory implementation is enough for a test; a real one is a fetch and

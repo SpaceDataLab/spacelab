@@ -1572,31 +1572,31 @@ exclude_re = [
     # (600:17, 600:25, 600:30 `* with +`, 600:43, 600:62 and their analogues on 612/626/639/652/
     # 665/677/690/703/716) are all caught. Note 600:25 `- with +` -- `sgn(s + j)` -- is caught while
     # 600:38 `- with +` survives, exactly the asymmetry the proof predicts: `s == j` does occur.
-    "tesseral\\.rs:600:30: replace \\* with / in GHmsj::gmsj",
-    "tesseral\\.rs:600:38: replace - with \\+ in GHmsj::gmsj",
-    "tesseral\\.rs:600:38: replace - with / in GHmsj::gmsj",
-    "tesseral\\.rs:612:20: replace - with \\+ in GHmsj::hmsj",
-    "tesseral\\.rs:612:20: replace - with / in GHmsj::hmsj",
-    "tesseral\\.rs:622:30: replace \\* with / in GHmsj::dgmsdk",
-    "tesseral\\.rs:626:38: replace - with \\+ in GHmsj::dgmsdk",
-    "tesseral\\.rs:626:38: replace - with / in GHmsj::dgmsdk",
-    "tesseral\\.rs:635:30: replace \\* with / in GHmsj::dgmsdh",
-    "tesseral\\.rs:639:38: replace - with \\+ in GHmsj::dgmsdh",
-    "tesseral\\.rs:639:38: replace - with / in GHmsj::dgmsdh",
-    "tesseral\\.rs:652:30: replace \\* with / in GHmsj::dgmsd_alpha",
-    "tesseral\\.rs:652:38: replace - with \\+ in GHmsj::dgmsd_alpha",
-    "tesseral\\.rs:652:38: replace - with / in GHmsj::dgmsd_alpha",
-    "tesseral\\.rs:665:30: replace \\* with / in GHmsj::dgmsd_beta",
-    "tesseral\\.rs:665:38: replace - with \\+ in GHmsj::dgmsd_beta",
-    "tesseral\\.rs:665:38: replace - with / in GHmsj::dgmsd_beta",
-    "tesseral\\.rs:677:20: replace - with \\+ in GHmsj::dhmsdk",
-    "tesseral\\.rs:677:20: replace - with / in GHmsj::dhmsdk",
-    "tesseral\\.rs:690:20: replace - with \\+ in GHmsj::dhmsdh",
-    "tesseral\\.rs:690:20: replace - with / in GHmsj::dhmsdh",
-    "tesseral\\.rs:703:20: replace - with \\+ in GHmsj::dhmsd_alpha",
-    "tesseral\\.rs:703:20: replace - with / in GHmsj::dhmsd_alpha",
-    "tesseral\\.rs:716:20: replace - with \\+ in GHmsj::dhmsd_beta",
-    "tesseral\\.rs:716:20: replace - with / in GHmsj::dhmsd_beta",
+    "tesseral\\.rs:610:30: replace \\* with / in GHmsj::gmsj",
+    "tesseral\\.rs:610:38: replace - with \\+ in GHmsj::gmsj",
+    "tesseral\\.rs:610:38: replace - with / in GHmsj::gmsj",
+    "tesseral\\.rs:622:20: replace - with \\+ in GHmsj::hmsj",
+    "tesseral\\.rs:622:20: replace - with / in GHmsj::hmsj",
+    "tesseral\\.rs:632:30: replace \\* with / in GHmsj::dgmsdk",
+    "tesseral\\.rs:636:38: replace - with \\+ in GHmsj::dgmsdk",
+    "tesseral\\.rs:636:38: replace - with / in GHmsj::dgmsdk",
+    "tesseral\\.rs:645:30: replace \\* with / in GHmsj::dgmsdh",
+    "tesseral\\.rs:649:38: replace - with \\+ in GHmsj::dgmsdh",
+    "tesseral\\.rs:649:38: replace - with / in GHmsj::dgmsdh",
+    "tesseral\\.rs:662:30: replace \\* with / in GHmsj::dgmsd_alpha",
+    "tesseral\\.rs:662:38: replace - with \\+ in GHmsj::dgmsd_alpha",
+    "tesseral\\.rs:662:38: replace - with / in GHmsj::dgmsd_alpha",
+    "tesseral\\.rs:675:30: replace \\* with / in GHmsj::dgmsd_beta",
+    "tesseral\\.rs:675:38: replace - with \\+ in GHmsj::dgmsd_beta",
+    "tesseral\\.rs:675:38: replace - with / in GHmsj::dgmsd_beta",
+    "tesseral\\.rs:687:20: replace - with \\+ in GHmsj::dhmsdk",
+    "tesseral\\.rs:687:20: replace - with / in GHmsj::dhmsdk",
+    "tesseral\\.rs:700:20: replace - with \\+ in GHmsj::dhmsdh",
+    "tesseral\\.rs:700:20: replace - with / in GHmsj::dhmsdh",
+    "tesseral\\.rs:713:20: replace - with \\+ in GHmsj::dhmsd_alpha",
+    "tesseral\\.rs:713:20: replace - with / in GHmsj::dhmsd_alpha",
+    "tesseral\\.rs:726:20: replace - with \\+ in GHmsj::dhmsd_beta",
+    "tesseral\\.rs:726:20: replace - with / in GHmsj::dhmsd_beta",
     # --- `cjsj_max` is an upper bound with slack, not a value. 7 mutants, measured. ---
     # Nothing reads the number; it only sizes the `CjSj` arrays, so a mutation is observable only
     # when it drops below the largest index actually requested. Measured by bisecting the returned
@@ -1608,23 +1608,23 @@ exclude_re = [
     # `max(max_degree + max_frequency, 2 * max_order)` and every survivor stays above it across the
     # module's documented envelope (`max_degree <= 5`, per the `hansen_tesseral` doc comment). NOT
     # A PROOF: a bounded check over that envelope, not a result for arbitrary degree.
-    "tesseral\\.rs:374:11: replace \\* with \\+ in DsstTesseral::cjsj_max",
-    "tesseral\\.rs:374:11: replace \\* with / in DsstTesseral::cjsj_max",
-    "tesseral\\.rs:374:28: replace \\+ with - in DsstTesseral::cjsj_max",
-    "tesseral\\.rs:374:28: replace \\+ with \\* in DsstTesseral::cjsj_max",
-    "tesseral\\.rs:374:46: replace \\+ with \\* in DsstTesseral::cjsj_max",
-    "tesseral\\.rs:374:67: replace \\+ with - in DsstTesseral::cjsj_max",
-    "tesseral\\.rs:374:67: replace \\+ with \\* in DsstTesseral::cjsj_max",
+    "tesseral\\.rs:384:11: replace \\* with \\+ in DsstTesseral::cjsj_max",
+    "tesseral\\.rs:384:11: replace \\* with / in DsstTesseral::cjsj_max",
+    "tesseral\\.rs:384:28: replace \\+ with - in DsstTesseral::cjsj_max",
+    "tesseral\\.rs:384:28: replace \\+ with \\* in DsstTesseral::cjsj_max",
+    "tesseral\\.rs:384:46: replace \\+ with \\* in DsstTesseral::cjsj_max",
+    "tesseral\\.rs:384:67: replace \\+ with - in DsstTesseral::cjsj_max",
+    "tesseral\\.rs:384:67: replace \\+ with \\* in DsstTesseral::cjsj_max",
     # `(n - s)` and `(n + s)` differ by `2s`, so they always agree mod 2. `x % 2 == 0` is
     # sign-agnostic (Rust's `%` keeps the dividend's sign, and zero has none) and `x & 1` is the
     # parity bit in two's complement for negatives as well. Equal for every pair of integers, not
     # merely for the reachable ones.
-    "tesseral\\.rs:285:19: replace - with \\+ in DsstTesseral::compute_n_sum",
-    "tesseral\\.rs:358:15: replace - with \\+ in DsstTesseral::vmns",
-    "tesseral\\.rs:410:22: replace - with \\+ in gamma_mns_value",
+    "tesseral\\.rs:295:19: replace - with \\+ in DsstTesseral::compute_n_sum",
+    "tesseral\\.rs:368:15: replace - with \\+ in DsstTesseral::vmns",
+    "tesseral\\.rs:420:22: replace - with \\+ in gamma_mns_value",
     # `powi`'s `if exp < 0 { 1.0 / acc } else { acc }`. `<` and `<=` differ only at `exp == 0`,
     # where the loop `for _ in 0..0` never runs, `acc == 1.0`, and `1.0 / 1.0 == 1.0 == acc`.
-    "tesseral\\.rs:405:12: replace < with <= in powi",
+    "tesseral\\.rs:415:12: replace < with <= in powi",
     # `sgn`'s `if i < 0 { -1.0 } else { 1.0 }`, i.e. `sgn(0) = -1.0` instead of `+1.0`. Two call
     # sites: `sgn(s - m)`, only inside the `|s| > m` arm where `s != m`, so never passed 0; and
     # `sgn(s - j)`, which can be, but there `s_mj = |s - j| = 0` and the factor it multiplies is
@@ -1634,7 +1634,7 @@ exclude_re = [
     # `-0.0`. Verified that the sign of that zero cannot escape: no `atan2`, `copysign`, `signum`,
     # `to_bits` or reciprocal consumes a mean rate, and `leo_no_resonance_is_zero` compares with
     # `==`, where `-0.0 == 0.0`.
-    "tesseral\\.rs:574:10: replace < with <= in sgn",
+    "tesseral\\.rs:584:10: replace < with <= in sgn",
     # `for &order in &GAUSS_ORDER[..GAUSS_ORDER.len() - 1]` in `select_order`. Mutating `- 1` to
     # `/ 1` widens the slice from six orders to seven, adding one iteration at order 48. That
     # iteration recomputes `current` with the identical `integrate(MAX_GAUSS_ORDER, ..)` call that

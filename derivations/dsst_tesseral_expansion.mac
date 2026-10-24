@@ -1,0 +1,221 @@
+/* `spacelab-propagation::dsst::tesseral`, the tesseral disturbing function, against the harmonic
+   it expands.
+
+   The module ports Orekit's DSSTTesseral: the degree-n, order-m term of the geopotential is
+       mu/a sum_j sum_s (R/a)^n V_mns Gamma^m_ns(gamma) P_l^{v,w}(gamma) K_j^{-n-1,s}(chi)
+           [(G C + H S) cos(j lambda - m theta) + (G S - H C) sin(j lambda - m theta)],
+   and the mean rates keep the resonant j only. Its tests match Orekit's rates, which run the same
+   expansion. Here the expansion is checked against what it stands for, layer by layer, then
+   whole:
+     (1) the shipped modified-Newcomb series is the Hansen coefficient's definition
+         X_j^{-n-1,s} = <(a/r)^(n+1) exp(i s f) exp(-i j M)>_M = e^|s-j| K_j^{-n-1,s}, expanded in e
+         through the eccentric anomaly: n <= 5, |s| <= n, j = 1..6, through e^(|s-j|+8); and the
+         shipped dK/de^2 is its derivative;
+     (2) the shipped G + iH factor as (k + i sgn(s-j) h)^|s-j| times an (alpha, beta) power, so
+         the j-sum of the first factor with K is sum_j X_j exp(i(s-j) varpi) exp(i j lambda)
+         = (a/r)^(n+1) exp(i s L); the shipped Jacobi recurrence is Rodrigues' P_l^{v,w}; and
+         P_n^m(sin phi) exp(i m lambda_inertial) = sum_s V_mns Gamma P_l^{v,w} A_ms exp(i s L),
+         A_ms = (alpha + i beta)^(m-s), or (alpha - i beta)^(s-m) for s > m, for every n <= 5,
+         m = 1..n, exactly in (p, q, L);
+     (3) end to end, at one orbit with e = 0.05, the truncated shipped double sum over j and s
+         equals the harmonic (a/r)^(n+1) P_n^m(sin phi)(C cos m lambda_b + S sin m lambda_b) at the
+         Kepler position to 1e-13 relative, n <= 5, m = 1..n, |j| <= n + 16;
+     (4) each of the seven shipped n-sum partials is the derivative of its own term.           */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+load("orthopoly")$
+NMAX : 5$
+
+/* ---- the shipped pieces --------------------------------------------------------------------- */
+/* `compute_vns`, the zonal V_ns table, and `vmns`. */
+vtab : block([o : NMAX + 1, v],
+  v : genmatrix(lambda([i, j], 0), o, o), v[1, 1] : 1,
+  for n : 0 thru o - 1 do for s : 0 thru n do
+    if mod(n - s, 2) = 0 then (
+      if n = s and s + 1 < o then v[s + 2, s + 2] : v[s + 1, s + 1]/(2*s + 2),
+      if n + 2 < o then v[n + 3, s + 1] : v[n + 1, s + 1]*(-n + s - 1)/(n + s + 2)),
+  v)$
+V(n, s) := vtab[n + 1, s + 1]$
+vmns(m, n, s) := if mod(n - s, 2) # 0 then 0
+  else (if s >= 0 then 1 else (-1)^s)*(n + abs(s))!/(n - m)!*V(n, abs(s))$
+/* `gamma_mns_value`, `gamma_ratio`, `gamma_mns_deriv`, I = +1. */
+gratio(m, n, s) := product((n + i)/(n - i + 1), i, 1, m)*product((n - a + 1)/(n + a), a, 1, abs(s))$
+gam(m, n, s, g) := block([sg : (-1)^(m - s), opig : 1 + g],
+  if s <= -m then sg*opig^(-m)*2^s
+  else if s <= m then sg*opig^s*2^(-m)*gratio(m, n, s)
+  else opig^m*2^(-s))$
+dgam(m, n, s, g) := if s <= -m then -m*gam(m, n, s, g)/(1 + g)
+  else if s >= m then m*gam(m, n, s, g)/(1 + g) else s*gam(m, n, s, g)/(1 + g)$
+/* `jacobi_value_deriv`: the Hipparchus three-term recurrence, then Horner for value and slope. */
+jacpoly(l, v, w, x) := block([P0 : 1, P1 : (v - w)/2 + (2 + v + w)/2*x, Pn, kk, kvw, t, den, a0, a1, a2],
+  if l = 0 then return(1),
+  for k : 1 thru l - 1 do (
+    kk : k + 1, kvw : kk + v + w, t : kvw + kk, den : 2*kk*kvw*(t - 2),
+    a0 : (t - 1)*(v^2 - w^2)/den, a1 : (t - 1)*t*(t - 2)/den, a2 : 2*(kk + v - 1)*(kk + w - 1)*t/den,
+    Pn : expand((a0 + a1*x)*P1 - a2*P0), P0 : P1, P1 : Pn),
+  P1)$
+jacvd(l, v, w, x) := block([c : makelist(coeff(expand(jacpoly(l, v, w, xx)), xx, i), i, 0, l), val, der],
+  val : c[l + 1], der : val*l,
+  for jj : l - 1 step -1 thru 1 do (val : val*x + c[jj + 1], der : der*x + c[jj + 1]*jj),
+  if l > 0 then val : val*x + c[1],
+  [val, der])$
+/* `newcomb` and `hansen_tesseral`, with e2 = e^2 left symbolic. */
+newc[rho, sigma, n, s] := if rho < 0 or sigma < 0 then 0 else if rho = 0 and sigma = 0 then 1 else
+  (2*(2*s - n)*newc[rho - 1, sigma, n, s + 1] + (s - n)*newc[rho - 2, sigma, n, s + 2]
+   - 2*(2*s + n)*newc[rho, sigma - 1, n, s - 1] - (s + n)*newc[rho, sigma - 2, n, s - 2]
+   + 2*(2*rho + 2*sigma + 2 + 3*n)*newc[rho - 1, sigma - 1, n, s])/(4*(rho + sigma))$
+hansen(nn, s, j, maxh, e2) := block([aht : max(j - s, 0), bht : max(s - j, 0), mnm1 : -nn - 1,
+    ser, dser, chi2, val],
+  ser : sum(newc[al + aht, al + bht, mnm1, s]*e2^al, al, 0, maxh),
+  dser : sum(newc[al + aht, al + bht, mnm1, s]*al*e2^(al - 1), al, 1, maxh),
+  chi2 : 1/(1 - e2),
+  val : chi2^(-mnm1 - 1)*ser*sqrt(1 - e2),
+  [val, -(mnm1 + 3/2)*chi2*val + chi2^(-mnm1 - 1)*dser*sqrt(1 - e2)])$
+/* `CjSj` and `GHmsj`: (x + i y)^j by the shipped recurrence, its x/y partials, and G, H. */
+cjsj(x, y, jmax) := block([c : makelist(0, i, 0, jmax), s : makelist(0, i, 0, jmax)],
+  c[1] : 1,
+  for jj : 1 thru jmax do (c[jj + 1] : expand(c[jj]*x - s[jj]*y), s[jj + 1] : expand(c[jj]*y + s[jj]*x)),
+  [c, s])$
+JMAX : 2*NMAX + 16 + 2$
+KH : cjsj(k, h, JMAX)$
+AB : cjsj(al, be, JMAX)$
+/* The value and the two partials of each series, as the shipped cj/sj, dcj_dk/dsj_dk,
+   dcj_dh/dsj_dh: d/dx gives (j c_{j-1}, j s_{j-1}), d/dy gives (-j s_{j-1}, j c_{j-1}). */
+ser_c(S, d, jj) := if d = 0 then S[1][jj + 1] else if jj = 0 then 0
+  else if d = 1 then jj*S[1][jj] else -jj*S[2][jj]$
+ser_s(S, d, jj) := if d = 0 then S[2][jj + 1] else if jj = 0 then 0
+  else if d = 1 then jj*S[2][jj] else jj*S[1][jj]$
+sgn(i) := if i < 0 then -1 else 1$
+/* dk, da: 0 for the value, 1 for d/dk (d/dalpha), 2 for d/dh (d/dbeta). */
+gmsj(m, s, j, dk, da) := block([smj : abs(s - j)],
+  if abs(s) <= m then block([mmis : m - s],
+    ser_c(KH, dk, smj)*ser_c(AB, da, mmis) - sgn(s - j)*ser_s(KH, dk, smj)*ser_s(AB, da, mmis))
+  else block([smim : abs(s - m)],
+    ser_c(KH, dk, smj)*ser_c(AB, da, smim)
+      + sgn(s - j)*sgn(s - m)*ser_s(KH, dk, smj)*ser_s(AB, da, smim)))$
+hmsj(m, s, j, dk, da) := block([smj : abs(s - j)],
+  if abs(s) <= m then block([mmis : m - s],
+    ser_c(KH, dk, smj)*ser_s(AB, da, mmis) + sgn(s - j)*ser_s(KH, dk, smj)*ser_c(AB, da, mmis))
+  else block([smim : abs(s - m)],
+    -sgn(s - m)*ser_c(KH, dk, smj)*ser_s(AB, da, smim)
+      + sgn(s - j)*ser_s(KH, dk, smj)*ser_c(AB, da, smim)))$
+
+/* ---- (1) the Hansen kernels against their definition ---------------------------------------- */
+/* X_j^{N,s} = <(r/a)^N exp(i s f) exp(-i j M)>_M with r/a = 1 - e cos E, dM = (r/a) dE,
+   (r/a) exp(+-i f) = cos E - e +- i eta sin E and exp(-i j M) = exp(-i j E) exp(i j e sin E). */
+xdef(nn, s, j, ord) := block([N : -nn - 1, sg : signum(s), as : abs(s), cE, sE, t],
+  cE : (uu + 1/uu)/2, sE : (uu - 1/uu)/(2*%i),
+  t : taylor((1 - e*cE)^(N + 1 - as)*(cE - e + %i*sg*sqrt(1 - e^2)*sE)^as*exp(%i*j*e*sE), e, 0, ord),
+  ratsimp(coeff(expand(ratdisrep(t)*uu^(-j)), uu, 0)))$
+MAXH : 4$
+bad : 0$  badd : 0$  cnt : 0$
+for nn : 2 thru NMAX do for s : -nn thru nn do if mod(nn - s, 2) = 0 then for j : 1 thru 6 do block(
+    [ord : abs(s - j) + 2*MAXH, hk, d],
+  hk : hansen(nn, s, j, MAXH, e2),
+  d : ratdisrep(taylor(xdef(nn, s, j, ord) - e^abs(s - j)*subst(e2 = e^2, hk[1]), e, 0, ord)),
+  cnt : cnt + 1,
+  if ratsimp(d) # 0 then bad : bad + 1,
+  if radcan(hk[2] - diff(hk[1], e2)) # 0 then badd : badd + 1)$
+print("Hansen kernels compared:", cnt, "  series mismatches:", bad, "  derivative mismatches:", badd)$
+must(is(cnt = 108 and bad = 0),
+     "(1) holds: the shipped Newcomb series is <(a/r)^(n+1) exp(isf) exp(-ijM)>/e^|s-j| through e^(|s-j|+8), 108 kernels")$
+must(is(badd = 0), "(1) holds: the shipped dK/de^2 is the derivative of the shipped K on all 108")$
+
+/* ---- (2) the inclination layer -------------------------------------------------------------- */
+fac_bad : 0$
+for m : 0 thru NMAX do for s : -NMAX thru NMAX do for j : 0 thru 8 do block(
+    [gi : gmsj(m, s, j, 0, 0) + %i*hmsj(m, s, j, 0, 0),
+     kh : (k + %i*sgn(s - j)*h)^abs(s - j),
+     abp : if s <= m then (al + %i*be)^(m - s) else (al - %i*be)^(s - m)],
+  if ratsimp(expand(gi - kh*abp)) # 0 then fac_bad : fac_bad + 1)$
+must(is(fac_bad = 0),
+     "(2) holds: G + iH = (k + i sgn(s-j) h)^|s-j| (alpha + i beta)^(m-s), or (alpha - i beta)^(s-m) for s > m, m <= 5, |s| <= 5, j <= 8")$
+jac_bad : 0$
+for l : 0 thru 6 do for v : 0 thru 10 do for w : 0 thru 10 do block([r : jacvd(l, v, w, x)],
+  if ratsimp(r[1] - jacobi_p(l, v, w, x)) # 0 or ratsimp(r[2] - diff(jacobi_p(l, v, w, x), x)) # 0
+  then jac_bad : jac_bad + 1)$
+must(is(jac_bad = 0),
+     "(2) holds: the shipped Jacobi recurrence and Horner slope are Rodrigues' P_l^{v,w} and its derivative, l <= 6, v, w <= 10")$
+/* The equinoctial frame of (p, q), I = +1, and the pole's direction cosines in it. */
+CC : 1 + p^2 + q^2$
+fv : [1 - p^2 + q^2, 2*p*q, -2*p]/CC$
+gv : [2*p*q, 1 + p^2 - q^2, 2*q]/CC$
+alpq : -2*p/CC$  bepq : 2*q/CC$  gapq : (1 - p^2 - q^2)/CC$
+/* u = exp(i L); r_hat = cos L f + sin L g. The unnormalised P_n^m(sin phi) exp(i m lambda) is
+   (x + i y)^m d^m P_n/dz^m on the unit sphere. */
+rh : ((u + 1/u)/2)*fv + ((u - 1/u)/(2*%i))*gv$
+harm(n, m) := (rh[1] + %i*rh[2])^m*subst(xx = rh[3], diff(legendre_p(n, xx), xx, m))$
+incl(n, m) := sum(if mod(n - s, 2) = 0 then
+    vmns(m, n, s)*gam(m, n, s, gapq)*jacvd(min(n - m, n - abs(s)), abs(m - s), abs(m + s), gapq)[1]
+    *(if s <= m then (alpq + %i*bepq)^(m - s) else (alpq - %i*bepq)^(s - m))*u^s
+  else 0, s, -n, n)$
+inc_ok : []$
+for n : 2 thru NMAX do for m : 1 thru n do
+  if ratsimp(harm(n, m) - incl(n, m)) = 0 then inc_ok : endcons([n, m], inc_ok)$
+must(is(length(inc_ok) = 14),
+     "(2) holds: P_n^m(sin phi) exp(i m lambda) = sum_s V_mns Gamma P_l^{v,w} A_ms exp(i s L), all 14 (n, m) with n <= 5")$
+
+/* ---- (3) end to end at one orbit ------------------------------------------------------------- */
+fpprintprec : 16$
+o : [k = 0.03, h = 0.04, p = 0.1, q = -0.2, lam = 1.1, th = 0.4, Cc = 0.7, Sc = -0.3]$
+ecc : sqrt(0.03^2 + 0.04^2)$
+varpi : atan2(0.04, 0.03)$
+Mm : 1.1 - varpi$
+Ek : block([E : Mm], for it : 1 thru 50 do E : E - (E - ecc*sin(E) - Mm)/(1 - ecc*cos(E)), E)$
+fk : 2*atan2(sqrt(1 + ecc)*sin(Ek/2), sqrt(1 - ecc)*cos(Ek/2))$
+roa : 1 - ecc*cos(Ek)$
+Lk : fk + varpi$
+rvec : float(subst(o, cos(Lk)*fv + sin(Lk)*gv))$
+sinphi : rvec[3]$
+lamb : atan2(rvec[2], rvec[1]) - 0.4$
+pnm(n, m, z) := float((1 - z^2)^(m/2)*subst(xx = z, diff(legendre_p(n, xx), xx, m)))$
+ab_o : [al = float(subst(o, alpq)), be = float(subst(o, bepq))]$
+ga_o : float(subst(o, gapq))$
+worst : 0$
+for n : 2 thru NMAX do for m : 1 thru n do block([direct, series : 0],
+  direct : roa^(-n - 1)*pnm(n, m, sinphi)*(0.7*cos(m*lamb) - 0.3*sin(m*lamb)),
+  for j : -(n + 16) thru n + 16 do for s : -n thru n do if mod(n - s, 2) = 0 then block(
+      [kk : hansen(n, s, j, 7, ecc^2)[1], g, hh, psi : j*1.1 - m*0.4],
+    g : float(subst(append(ab_o, o), gmsj(m, s, j, 0, 0))),
+    hh : float(subst(append(ab_o, o), hmsj(m, s, j, 0, 0))),
+    series : series + float(vmns(m, n, s)*gam(m, n, s, ga_o)
+                     *jacvd(min(n - m, n - abs(s)), abs(m - s), abs(m + s), ga_o)[1]*kk)
+                    *((g*0.7 + hh*(-0.3))*cos(psi) + (g*(-0.3) - hh*0.7)*sin(psi))),
+  worst : max(worst, abs(series - direct)/max(1, abs(direct))))$
+print("end to end, e = 0.05, n <= 5: worst |shipped sum - harmonic| / max(1, |harmonic|) =", worst)$
+must(is(worst < 1e-13),
+     "(3) holds: the shipped double sum over j and s is the degree-n, order-m harmonic at the Kepler position to 1e-13, all 14 (n, m)")$
+
+/* ---- (4) the partials of one term ---------------------------------------------------------- */
+/* K as a function of e^2 = k^2 + h^2 with K' = dK/de^2, as the shipped code reads it. */
+gradef(Kf(x), Kd(x))$
+part_bad : 0$  part_cnt : 0$
+for n : 2 thru NMAX do for m : 1 thru n do for s : -n thru n do if mod(n - s, 2) = 0 then
+  for j : 1 thru 3 do block([vm : vmns(m, n, s), gv_ : gam(m, n, s, ga), dgv : dgam(m, n, s, ga),
+      jv : jacvd(min(n - m, n - abs(s)), abs(m - s), abs(m + s), ga), K : Kf(k^2 + h^2),
+      dK : Kd(k^2 + h^2), psi : j*lam - m*th, cf0, cf1, cf2, gc, gs, U, sh, rf, c, sn],
+    c : cos(psi), sn : sin(psi),
+    cf0 : (R/a)^n*vm, cf1 : cf0*gv_*jv[1], cf2 : cf1*K,
+    gc : gmsj(m, s, j, 0, 0)*Cc + hmsj(m, s, j, 0, 0)*Sc,
+    gs : gmsj(m, s, j, 0, 0)*Sc - hmsj(m, s, j, 0, 0)*Cc,
+    U : mu/a*cf2*(gc*c + gs*sn),
+    /* Each shipped [cos, sin] pair, combined with the phase and scaled as `potential_derivatives`. */
+    sh : [-mu/a/a*(n + 1)*cf2*(gc*c + gs*sn),
+          mu/a*cf1*((K*(Cc*gmsj(m, s, j, 1, 0) + Sc*hmsj(m, s, j, 1, 0)) + k*2*dK*gc)*c
+                   + (K*(Sc*gmsj(m, s, j, 1, 0) - Cc*hmsj(m, s, j, 1, 0)) + k*2*dK*gs)*sn),
+          mu/a*cf1*((K*(Cc*gmsj(m, s, j, 2, 0) + Sc*hmsj(m, s, j, 2, 0)) + h*2*dK*gc)*c
+                   + (K*(Sc*gmsj(m, s, j, 2, 0) - Cc*hmsj(m, s, j, 2, 0)) + h*2*dK*gs)*sn),
+          mu/a*(j*cf2*gs*c - j*cf2*gc*sn),
+          mu/a*cf2*((gmsj(m, s, j, 0, 1)*Cc + hmsj(m, s, j, 0, 1)*Sc)*c
+                   + (gmsj(m, s, j, 0, 1)*Sc - hmsj(m, s, j, 0, 1)*Cc)*sn),
+          mu/a*cf2*((gmsj(m, s, j, 0, 2)*Cc + hmsj(m, s, j, 0, 2)*Sc)*c
+                   + (gmsj(m, s, j, 0, 2)*Sc - hmsj(m, s, j, 0, 2)*Cc)*sn),
+          mu/a*cf0*K*(jv[1]*dgv + gv_*jv[2])*(gc*c + gs*sn)],
+    rf : [diff(U, a), diff(U, k), diff(U, h), diff(U, lam), diff(U, al), diff(U, be), diff(U, ga)],
+    for i : 1 thru 7 do (part_cnt : part_cnt + 1,
+      if ratsimp(sh[i] - rf[i]) # 0 then part_bad : part_bad + 1))$
+print("partials compared:", part_cnt, "  mismatches:", part_bad)$
+must(is(part_cnt = 7*204 and part_bad = 0),
+     "(4) holds: dU/da, dU/dk, dU/dh, dU/dlambda, dU/dalpha, dU/dbeta, dU/dgamma are each term's derivatives, n <= 5, j <= 3")$
+
+print("DONE")$

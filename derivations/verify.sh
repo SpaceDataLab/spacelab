@@ -567,6 +567,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima dsst_third_body_average.mac" "expected 5 checks to hold, found $holds"
     fi
 
+    out=$(macf dsst_tesseral_expansion.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 7 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima dsst_tesseral_expansion.mac: the tesseral Hansen, G/H, Jacobi and inclination layers multiply out to the order-m harmonic, n <= 5; its partials are its terms'"
+    else
+        bad "maxima dsst_tesseral_expansion.mac" "expected 7 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then

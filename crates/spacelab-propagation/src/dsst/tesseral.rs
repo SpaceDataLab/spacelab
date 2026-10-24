@@ -32,6 +32,16 @@
 //! pure rotation of the orbit frame about its +Z equals the Greenwich sidereal angle. The port takes
 //! it as the `gmst` argument. The direction cosines α/β/γ are then the (p, q)-only equinoctial
 //! values `DsstAuxiliary` carries — identical to the zonal convention.
+//!
+//! # The expansion, checked against the harmonic
+//!
+//! `derivations/dsst_tesseral_expansion.mac` checks, in Maxima, that the expansion is the harmonic
+//! it stands for. The Newcomb series equals the Hansen coefficient's definition
+//! ⟨(a/r)ⁿ⁺¹ e^{isf} e^{−ijM}⟩ / e^{|s−j|} through e^{|s−j|+8}, for n ≤ 5 and j ≤ 6. Gᵐₛʲ + iHᵐₛʲ
+//! factors into an (k, h) power and an (α, β) power. With the Jacobi recurrence, Σₛ Vₘₙₛ Γᵐₙₛ
+//! Pₗ^{v,w} then equals Pₙᵐ(sin φ) e^{imλ} exactly, for all n ≤ 5. At one orbit with e = 0.05 the
+//! double sum over j and s gives the degree-n, order-m harmonic to 1e-13. Each of the seven
+//! partials is the derivative of its own term.
 
 use std::collections::HashMap;
 use std::vec::Vec;

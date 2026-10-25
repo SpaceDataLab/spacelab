@@ -33,6 +33,10 @@ confidence-threshold = 0.93
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Versionless path dependencies are allowed only where crates.io never sees them: dev-dependencies
+# (cargo publish strips them) and `publish = false` crates. A versionless path in [dependencies] of
+# a published crate still fails this check.
+allow-wildcard-paths = true
 
 # Crates whose licences make them unusable in this workspace, named explicitly
 # so the failure message says why rather than "unlicensed dependency".

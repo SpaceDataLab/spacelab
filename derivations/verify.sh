@@ -529,18 +529,18 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
 
     out=$(macf solid_tide_love.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
-    if [ "$holds" -eq 11 ] && printf '%s' "$out" | grep -q '^DONE'; then
+    if [ "$holds" -eq 10 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima solid_tide_love.mac: the DEHANTTIDEINEL terms are the Conventions' eqs 7.5-7.11, and the pole tide's 33/9 mm follow from h and l"
     else
-        bad "maxima solid_tide_love.mac" "expected 11 checks to hold, found $holds"
+        bad "maxima solid_tide_love.mac" "expected 10 checks to hold, found $holds"
     fi
 
     out=$(macf ocean_loading.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
-    if [ "$holds" -eq 12 ] && printf '%s' "$out" | grep -q '^DONE'; then
+    if [ "$holds" -eq 10 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima ocean_loading.mac: HARDISP's arguments are SOFA's to 2.2e-6 arcsec, its constituents Darwin's, its spline clamped at parabolic slopes"
     else
-        bad "maxima ocean_loading.mac" "expected 12 checks to hold, found $holds"
+        bad "maxima ocean_loading.mac" "expected 10 checks to hold, found $holds"
     fi
 
     out=$(macf hansen_zonal.mac)

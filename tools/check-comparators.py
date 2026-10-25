@@ -71,6 +71,7 @@ CODES = (
     "pyorbital",
     "pyspectral",
     "qhull",
+    "scipy",
     "skyfield",
     "sofa",
     "spiceypy",

@@ -7928,9 +7928,10 @@ The first sweep, on 2026-10-25, found **178 candidates among 3 279 tests** (name
 mathematics or against the crate itself: closed forms and limits, defining equations, symmetries,
 the IERS and ICD tables, an in-repo recomputation, a refusal — Orekit or ERFA appeared in their doc
 as the reason the test exists ("the Orekit fixture is fully immersed, so it pins nothing about the
-arc"), not as the value asserted. They carry their tag now. **Today: 127 comparator-decided tests** —
-name 92, file 18, fixture 4, doc 13; 74 of them Orekit's (60 by name), 50 in
-`spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+arc"), not as the value asserted. They carry their tag now. SciPy, missing from the first list of
+codes, adds three: a degree-70 geopotential, a DCT and a Bessel function. **Today: 130
+comparator-decided tests** — name 94, file 18, fixture 4, doc 14; 74 of them Orekit's (60 by name),
+51 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 
@@ -7946,6 +7947,7 @@ crates/spacelab-control/tests/nasa42_oracle.rs::the_gravity_gradient_arc_agrees_
 crates/spacelab-control/tests/nasa42_oracle.rs::the_orbit_42_propagated_is_the_circle_it_was_given | file:nasa42
 crates/spacelab-coverage/tests/twilight_hour_angle.rs::the_polar_branches_are_the_days_astropy_finds_no_crossing_on | name:astropy
 crates/spacelab-earth/tests/geodetic.rs::vermeille_agrees_with_fukushima | fixture:pyerfa
+crates/spacelab-earthvision/src/ice.rs::the_bessel_function_matches_an_independent_implementation | doc:scipy
 crates/spacelab-earthvision/tests/aeronet_measured_atmosphere.rs::correcting_with_an_assumed_atmosphere_biases_the_surface_reflectance | fixture:disort
 crates/spacelab-earthvision/tests/aeronet_measured_atmosphere.rs::the_coupling_terms_reproduce_disort_on_measured_atmospheres | name:disort
 crates/spacelab-earthvision/tests/phase_function_slab.rs::the_photon_slab_reproduces_disort | name:disort
@@ -8021,6 +8023,7 @@ crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_short_perio
 crates/spacelab-propagation/src/dsst/third_body_short_period.rs::truncation_matches_orekit | name:orekit
 crates/spacelab-propagation/src/earth_radiation.rs::knocke_matches_orekit | name:orekit
 crates/spacelab-propagation/src/ephemeris.rs::both_bodies_reach_erfa_at_the_documented_accuracy | name:erfa
+crates/spacelab-propagation/src/geopotential.rs::validated_against_scipy_at_degree_70 | name:scipy
 crates/spacelab-propagation/src/harris_priester/mod.rs::above_ceiling_is_zero | doc:orekit
 crates/spacelab-propagation/src/harris_priester/mod.rs::matches_orekit_reference | name:orekit
 crates/spacelab-propagation/src/jb2008/mod.rs::matches_fortran_reference | doc:orekit
@@ -8048,6 +8051,7 @@ crates/spacelab-sgp4/tests/catalogue_oracle.rs::a_changed_gravity_model_is_far_o
 crates/spacelab-sgp4/tests/catalogue_oracle.rs::neither_implementation_refused_a_propagation_the_other_completed | file:oracle
 crates/spacelab-sgp4/tests/catalogue_oracle.rs::the_worst_objects_of_the_catalogue_still_agree_with_the_oracle | file:oracle
 crates/spacelab-sgp4/tests/ground_track.rs::the_iss_ground_track_agrees_with_skyfield | name:skyfield
+crates/spacelab-signal/src/insar.rs::dct_matches_scipy_and_round_trips | name:scipy
 crates/spacelab/tests/access_oracle.rs::earth_orientation_is_worth_tens_of_milliseconds_on_a_pass_edge | file:oracle
 crates/spacelab/tests/access_oracle.rs::iss_pass_edges_agree_with_orekit_within_a_second | name:orekit
 crates/spacelab/tests/earth_orientation.rs::the_iss_ground_track_with_real_earth_orientation | fixture:skyfield

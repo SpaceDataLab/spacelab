@@ -29,9 +29,9 @@
 
 use core::fmt;
 
-use spacelab_core::{Angle, Epoch, Tai, UtcDateTime, time::tai_to_tt};
+use spacelab_core::{Angle, Epoch, UtcDateTime, time::tai_to_tt};
 use spacelab_eop::{EopError, EopQuality, EopSeries};
-use spacelab_fa::{LeapError, delta_at};
+use spacelab_fa::{LeapError, utc_to_tai};
 use spacelab_frames::{Itrf, Orientation, Teme, Transform, teme_to_itrf};
 
 pub use spacelab_core as core_types;
@@ -94,7 +94,9 @@ impl From<EopError> for EarthOrientationError {
 /// ```
 ///
 /// A `23:59:60` label lands 86400 s into its day, so a leap second needs no special
-/// case here either.
+/// case in TAI. It needs one in UT1: the label's MJD falls in the next day's row,
+/// whose `ΔUT1` is one second larger, so UT1 is taken from that row's naive
+/// coordinate, one second before the label's.
 #[must_use = "the quality of the answer is part of the answer"]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EarthOrientation {
@@ -172,7 +174,8 @@ pub enum EopSource<'a> {
 ///
 /// # Errors
 ///
-/// [`EarthOrientationError::Leap`] before the leap-second table's era, 1972-01-01;
+/// [`EarthOrientationError::Leap`] before the leap-second table's era, 1972-01-01, or on a
+/// `23:59:60` label of a day that had no leap second;
 /// [`EarthOrientationError::Eop`] outside the tabulated series, or inside a hole in it.
 /// We do not extrapolate the rotation of the Earth. [`EopSource::NoEop`] cannot raise the second.
 pub fn earth_orientation_at(
@@ -181,7 +184,7 @@ pub fn earth_orientation_at(
 ) -> Result<EarthOrientation, EarthOrientationError> {
     let naive = utc.naive_ns_since_j2000();
 
-    let tai = Epoch::<Tai>::from_ns_since_j2000(naive + i128::from(delta_at(utc)?) * 1_000_000_000);
+    let tai = utc_to_tai(utc)?;
     let tt = tai_to_tt(tai);
 
     let Some(eop) = (match source {
@@ -200,8 +203,13 @@ pub fn earth_orientation_at(
         });
     };
 
+    let row_naive = if utc.is_leap_second_label() {
+        naive - 1_000_000_000
+    } else {
+        naive
+    };
     #[allow(clippy::cast_possible_truncation)] // |ΔUT1| ≤ 3600 s, so the product is far inside i128
-    let ut1_ns = naive + (eop.dut1_seconds * NS_PER_SECOND).round() as i128;
+    let ut1_ns = row_naive + (eop.dut1_seconds * NS_PER_SECOND).round() as i128;
 
     Ok(EarthOrientation {
         orientation: Orientation {

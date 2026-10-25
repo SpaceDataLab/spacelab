@@ -13,7 +13,7 @@ use spacelab::{
 use spacelab_core::{Angle, Epoch, Ut1, UtcDateTime};
 use spacelab_earth::itrf_to_geodetic;
 use spacelab_eop::{EopQuality, EopSeries};
-use spacelab_fa::delta_at;
+use spacelab_fa::{LeapError, delta_at, utc_to_tai};
 use spacelab_frames::teme_to_itrf;
 use spacelab_sgp4::Satellite;
 use spacelab_testkit::nan_max;
@@ -274,6 +274,80 @@ fn teme_to_itrf_at_is_the_transform_from_the_measured_orientation() {
     );
     assert_eq!(quality, e.quality);
     assert_eq!(quality.tabulated(), Some(EopQuality::Final));
+}
+
+/// `UT1 − TAI` at the half seconds either side of a leap day's `23:59:60`, and inside it.
+fn ut1_minus_tai_ns(series: &EopSeries, year: i32, month: u8, day: u8) -> [i128; 3] {
+    let next = UtcDateTime::from_date(year, month, day)
+        .unwrap()
+        .days_from_civil()
+        + 1;
+    let (ny, nm, nd) = spacelab_core::calendar::civil_from_days(next);
+    [
+        UtcDateTime::new(year, month, day, 23, 59, 59.5).unwrap(),
+        UtcDateTime::new(year, month, day, 23, 59, 60.5).unwrap(),
+        UtcDateTime::new(ny, nm, nd, 0, 0, 0.5).unwrap(),
+    ]
+    .map(|utc| {
+        let e = earth_orientation_at(utc, EopSource::Series(series)).expect("tabulated");
+        e.orientation.ut1.ns_since_j2000() - utc_to_tai(utc).unwrap().ns_since_j2000()
+    })
+}
+
+/// UT1 runs through a leap second without a step. `UT1 − TAI` drifts at the rate the excess length
+/// of day sets, `−LOD/86400`: the worst second of the 26 cases moves it −37 ns, at 1977-12-31,
+/// where the excess was 3.3 ms. Inside the leap second the label's MJD falls in the next day's row,
+/// whose `ΔUT1` carries one more second of `ΔAT`; read on the label's own naive coordinate, UT1
+/// stood a whole second ahead for that second. The committed excerpt holds the 2016 leap second; a
+/// fetched snapshot adds the 25 from 1973-12-31 on.
+#[test]
+fn ut1_runs_through_a_leap_second_without_a_step() {
+    let excerpt = EopSeries::parse_finals2000a(EXCERPT).expect("the excerpt parses");
+    let full = full_series();
+    let mut cases = vec![(&excerpt, 2016, 12, 31)];
+    if let Some(full) = &full {
+        for year in 1973..=2016 {
+            for (month, day, next) in [(6_u8, 30_u8, (year, 7_u8)), (12, 31, (year + 1, 1))] {
+                let before = delta_at(UtcDateTime::from_date(year, month, day).unwrap()).unwrap();
+                let after = delta_at(UtcDateTime::from_date(next.0, next.1, 1).unwrap()).unwrap();
+                if after != before {
+                    cases.push((full, year, month, day));
+                }
+            }
+        }
+        assert_eq!(
+            cases.len(),
+            26,
+            "the snapshot spans 25 leap seconds from 1973-12-31"
+        );
+    }
+    for &(series, year, month, day) in &cases {
+        let [a, b, c] = ut1_minus_tai_ns(series, year, month, day);
+        for step in [b - a, c - b] {
+            assert!(
+                step.abs() < 1_000,
+                "{year}-{month:02}-{day:02}: UT1 − TAI moved {step} ns in one second"
+            );
+        }
+    }
+}
+
+/// A `23:59:60` on a day without a leap second is refused at the leap stage on both arms, before
+/// it can alias the next midnight in TAI and in UT1.
+#[test]
+fn a_spurious_leap_second_label_is_refused() {
+    let series = EopSeries::parse_finals2000a(EXCERPT).expect("parses");
+    let utc = UtcDateTime::new(2018, 12, 31, 23, 59, 60.0).unwrap();
+    for source in [EopSource::NoEop, EopSource::Series(&series)] {
+        let err = earth_orientation_at(utc, source).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EarthOrientationError::Leap(LeapError::SpuriousLeapSecond)
+            ),
+            "{err}"
+        );
+    }
 }
 
 /// Each stage of the chain reports its own failure, and each prints a message. The leap-second table

@@ -5559,4 +5559,15 @@ exclude_re = [
     # `the_storm_kernel_has_unit_gain_a_delayed_onset_and_the_peak_the_algebra_gives`.
     "crates/spacelab-propagation/src/sdtm/mod\\.rs:199:16: replace < with <= in StormKernel::weight",
 
+    # `self.heights.locate(height_km, 0, self.heights.count - 1)` in `WamIpeField::density`, the
+    # upper node rewritten to `count + 1` or `count / 1`. `density` has already returned `None`
+    # for a height above the last node, so the scaled position is at most `count - 1` either way;
+    # the mutants differ only at the last node itself, where they give the cell `count - 1` at
+    # fraction 0 instead of the cell `count - 2` at fraction 1. Both put the whole weight on the
+    # last node, and the corner of weight 0 above it is skipped, never read. The value is the same
+    # to the bit. The node bound itself is caught by
+    # `a_point_is_located_in_a_cell_that_has_both_its_nodes`.
+    "crates/spacelab-propagation/src/wam_ipe\\.rs:276:76: replace - with \\+ in WamIpeField::density",
+    "crates/spacelab-propagation/src/wam_ipe\\.rs:276:76: replace - with / in WamIpeField::density",
+
 ]

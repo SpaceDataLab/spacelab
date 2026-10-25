@@ -80,16 +80,18 @@
     clippy::cast_possible_truncation
 )]
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
 
 use spacelab_propagation::density_calibration::{DensityCorrection, DensitySample};
-use spacelab_propagation::density_data::{DensityObservation, parse_density};
+use spacelab_propagation::density_data::{DensityObservation, TimeScale, parse_density};
 use spacelab_propagation::ephemeris::{AnalyticSun, Ephemeris};
 use spacelab_propagation::sdtm::{self, DensityUncertainty, SdtmDrivers, SdtmPoint, coefficients};
 use spacelab_propagation::space_weather::{
     self, DstTemperatureDay, SolarIndexDay, SpaceWeatherDay,
 };
+use spacelab_propagation::wam_ipe::WamIpeField;
 use spacelab_propagation::{Nrlmsise00Flags, Nrlmsise00Input, gtd7d, jb2008};
 
 const GRACE_FO_QUIET: &str = include_str!("fixtures/gracefo_density_20190101.txt");
@@ -152,6 +154,8 @@ impl Model {
 #[derive(Clone, Copy, Debug)]
 struct Evaluation {
     latitude: f64,
+    /// Geodetic longitude, radians — where the observation sits in a gridded field.
+    longitude: f64,
     local_solar_time: f64,
     altitude_km: f64,
     measured: f64,
@@ -295,6 +299,7 @@ fn evaluate(
     }
     Some(Evaluation {
         latitude: o.latitude,
+        longitude: o.longitude,
         local_solar_time: o.local_solar_time,
         altitude_km,
         measured: o.density,
@@ -1624,6 +1629,545 @@ fn held_out_by_satellite_month(arcs: &[(String, Vec<Evaluation>)]) {
                 calibrated < base + 2.0,
                 "{} got worse out of sample: {base:.1}% -> {calibrated:.1}%",
                 m.name()
+            );
+        }
+    }
+}
+
+/// The satellite-months both the operational WAM-IPE archive (from 2023-07-01) and the density
+/// download cover.
+const WAM_IPE_MONTHS: [&str; 2] = ["2024_05", "2025_06"];
+/// GFS's Earth radius (`con_rerth`), the sphere WAM-IPE's heights are measured from if they are not
+/// measured from the ellipsoid.
+const WAM_SPHERE_KM: f64 = 6371.2;
+const WGS84_A_KM: f64 = 6378.137;
+/// The base models the nowcast is fitted over: the two public empirical models, and ours.
+const WAM_BASES: [Model; 3] = [Model::Nrlmsise00StormArray, Model::Jb2008, Model::Sdtm1];
+/// Every other ring and longitude of the 2° × 4° grid: 45 × 45 nodes for at most 25 coefficients.
+const WAM_STRIDE: usize = 2;
+/// The trailing window an hour's correction is taken relative to in the anomaly columns, and the
+/// fewest fitted hours it must hold. Chosen before the first run, not after it: three days is
+/// longer than a storm's main phase and short enough that the base model's own drift inside it is
+/// small.
+const WAM_ANOMALY_HOURS: i64 = 72;
+const WAM_ANOMALY_MIN_HOURS: usize = 48;
+
+/// The two readings of WAM-IPE's undocumented height coordinate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WamHeight {
+    /// Geodetic height over WGS84, with geodetic latitude.
+    Geodetic,
+    /// Radius minus [`WAM_SPHERE_KM`], with geocentric latitude.
+    Spherical,
+}
+
+impl WamHeight {
+    const BOTH: [Self; 2] = [Self::Geodetic, Self::Spherical];
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Geodetic => "geodetic",
+            Self::Spherical => "spherical",
+        }
+    }
+
+    /// A geodetic point's `(height km, latitude °)` in the product's coordinates.
+    fn of(self, altitude_km: f64, latitude: f64) -> (f64, f64) {
+        match self {
+            Self::Geodetic => (altitude_km, latitude.to_degrees()),
+            Self::Spherical => {
+                let (r, psi) = spherical_from_geodetic(altitude_km, latitude);
+                (r - WAM_SPHERE_KM, psi.to_degrees())
+            }
+        }
+    }
+}
+
+/// `(radius km, geocentric latitude rad)` of a WGS84 geodetic point.
+fn spherical_from_geodetic(altitude_km: f64, latitude: f64) -> (f64, f64) {
+    let e2 = FLATTENING * (2.0 - FLATTENING);
+    let n = WGS84_A_KM / (1.0 - e2 * latitude.sin().powi(2)).sqrt();
+    let p = (n + altitude_km) * latitude.cos();
+    let z = (n * (1.0 - e2) + altitude_km) * latitude.sin();
+    (p.hypot(z), z.atan2(p))
+}
+
+/// Civil date of a day number since 1970-01-01 (Howard Hinnant's `civil_from_days`).
+fn civil_from_days(days: i64) -> (i32, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    (
+        i32::try_from(year).unwrap(),
+        u32::try_from(month).unwrap(),
+        u32::try_from(day).unwrap(),
+    )
+}
+
+fn unix_seconds(e: &Evaluation) -> f64 {
+    (e.mjd - MJD_AT_UNIX_EPOCH) * 86_400.0
+}
+
+/// Mean local solar time, `UT + λ/15`, hours — the convention the calibration layer applies a
+/// correction in, which the product's own column need not share.
+fn mean_solar_time(unix: f64, longitude_deg: f64) -> f64 {
+    (unix.rem_euclid(86_400.0) / 3_600.0 + longitude_deg / 15.0).rem_euclid(24.0)
+}
+
+/// A grid node dressed as an observation, so the base models are evaluated there through the same
+/// [`evaluate`] every measured row goes through.
+fn node_observation(
+    unix: f64,
+    altitude_km: f64,
+    latitude: f64,
+    longitude_deg: f64,
+) -> DensityObservation {
+    let day = unix.div_euclid(86_400.0);
+    let (year, month, d) = civil_from_days(day as i64);
+    DensityObservation {
+        year,
+        month,
+        day: d,
+        seconds_of_day: unix - day * 86_400.0,
+        time_scale: TimeScale::Utc,
+        altitude: altitude_km * 1000.0,
+        longitude: longitude_deg.to_radians(),
+        latitude,
+        local_solar_time: mean_solar_time(unix, longitude_deg),
+        density: 1.0,
+        orbit_mean_density: None,
+        nominal: true,
+    }
+}
+
+/// The pinned nowcast files, by their valid hour in Unix seconds.
+fn wam_ipe_hours() -> BTreeMap<i64, PathBuf> {
+    let dir = std::env::var_os("WAM_IPE_DIR").map_or_else(
+        || PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cache/spacelab/wam-ipe"),
+        PathBuf::from,
+    );
+    let list = std::fs::read_to_string("../../tools/wam-ipe.sha256").unwrap();
+    list.lines()
+        .map(|line| {
+            let key = line.split_whitespace().nth(1).unwrap();
+            let stamp = key.rsplit('.').nth(1).unwrap();
+            let num = |a: usize, b: usize| stamp[a..b].parse::<u32>().unwrap();
+            let days = days_since_1970(i32::try_from(num(0, 4)).unwrap(), num(4, 6), num(6, 8));
+            let seconds = days * 86_400 + i64::from(num(9, 11) * 3600 + num(11, 13) * 60);
+            (seconds, dir.join(key))
+        })
+        .collect()
+}
+
+/// One fitted correction set: a scale, degree 2 and degree 4.
+#[derive(Clone, Copy, Debug)]
+struct Corrections {
+    scale: DensityCorrection<1>,
+    degree2: DensityCorrection<9>,
+    degree4: DensityCorrection<25>,
+}
+
+impl Corrections {
+    const DEGREES: [&str; 3] = ["scale", "degree 2", "degree 4"];
+
+    fn fit(samples: &[DensitySample]) -> Self {
+        Self {
+            scale: DensityCorrection::fit(samples).unwrap(),
+            degree2: DensityCorrection::fit(samples).unwrap(),
+            degree4: DensityCorrection::fit(samples).unwrap(),
+        }
+    }
+
+    fn log(&self, degree: usize, latitude_deg: f64, lst: f64) -> f64 {
+        let lat = latitude_deg.to_radians();
+        match degree {
+            0 => self.scale.log_correction(lat, lst),
+            1 => self.degree2.log_correction(lat, lst),
+            _ => self.degree4.log_correction(lat, lst),
+        }
+    }
+
+    /// This correction less the mean of `trailing`'s, coefficient by coefficient: what WAM-IPE
+    /// says has *changed* against the base model, with whatever it says always cancelled.
+    fn anomaly(&self, trailing: &[&Self]) -> Self {
+        fn less_mean<const K: usize>(
+            c: &DensityCorrection<K>,
+            all: impl Iterator<Item = [f64; K]>,
+            n: f64,
+        ) -> DensityCorrection<K> {
+            let mut out = *c.coefficients();
+            for coefficients in all {
+                for (o, x) in out.iter_mut().zip(coefficients) {
+                    *o -= x / n;
+                }
+            }
+            DensityCorrection::from_coefficients(out)
+        }
+        let n = trailing.len() as f64;
+        Self {
+            scale: less_mean(
+                &self.scale,
+                trailing.iter().map(|t| *t.scale.coefficients()),
+                n,
+            ),
+            degree2: less_mean(
+                &self.degree2,
+                trailing.iter().map(|t| *t.degree2.coefficients()),
+                n,
+            ),
+            degree4: less_mean(
+                &self.degree4,
+                trailing.iter().map(|t| *t.degree4.coefficients()),
+                n,
+            ),
+        }
+    }
+}
+
+/// What one hourly field contributes: `ln ρ` at every observation within an hour of it, under both
+/// height readings, and per satellite the corrections fitted on the shell it flew through — under
+/// the geodetic reading only, which is the one the latitude bands select.
+struct HourResult {
+    hour: i64,
+    /// `(satellite, row, [ln ρ geodetic, ln ρ spherical])`.
+    values: Vec<(usize, usize, [f64; 2])>,
+    /// `(satellite, one per base)`.
+    fits: Vec<(usize, [Corrections; 3])>,
+}
+
+fn wam_ipe_hour(
+    hour: i64,
+    path: &Path,
+    satellites: &[Vec<Evaluation>],
+    days: &[SpaceWeatherDay],
+    solar: &[SolarIndexDay],
+    dst: &[DstTemperatureDay],
+) -> HourResult {
+    let field = WamIpeField::parse(&std::fs::read(path).unwrap()).unwrap();
+    if field.holes() > 0 {
+        println!("{}: {} holes", path.display(), field.holes());
+    }
+    assert_eq!(
+        field.unix_seconds(),
+        hour as f64,
+        "{} is not valid at its hour",
+        path.display()
+    );
+    let t = hour as f64;
+    let stride = NonZeroUsize::new(WAM_STRIDE).unwrap();
+    let mut values = Vec::new();
+    let mut fits = Vec::new();
+    for (s, rows) in satellites.iter().enumerate() {
+        let from = rows.partition_point(|e| unix_seconds(e) <= t - 3600.0);
+        let to = rows.partition_point(|e| unix_seconds(e) < t + 3600.0);
+        for (n, e) in rows[from..to].iter().enumerate() {
+            let ln = WamHeight::BOTH.map(|c| {
+                let (h, lat) = c.of(e.altitude_km, e.latitude);
+                field
+                    .density(h, lat, e.longitude.to_degrees())
+                    .unwrap()
+                    .ln()
+            });
+            values.push((s, from + n, ln));
+        }
+        let near: Vec<&Evaluation> = rows[from..to]
+            .iter()
+            .filter(|e| (unix_seconds(e) - t).abs() <= 1800.0)
+            .collect();
+        if near.is_empty() {
+            continue;
+        }
+        let shell = near.iter().map(|e| e.altitude_km).sum::<f64>() / near.len() as f64;
+        // Each node is evaluated once for all three bases.
+        let mut cache: HashMap<(i64, i64), Option<Evaluation>> = HashMap::new();
+        let per_base = WAM_BASES.map(|m| {
+            let samples = field.calibration_samples(shell, stride, |lat, lon| {
+                let key = ((lat * 8.0).round() as i64, (lon * 8.0).round() as i64);
+                cache
+                    .entry(key)
+                    .or_insert_with(|| {
+                        let node = node_observation(t, shell, lat.to_radians(), lon);
+                        evaluate(&node, "", days, solar, dst)
+                    })
+                    .map_or(f64::NAN, |x| x.modelled[m.index()])
+            });
+            Corrections::fit(&samples)
+        });
+        fits.push((s, per_base));
+    }
+    HourResult { hour, values, fits }
+}
+
+/// The driver rows within `before` days ahead of and five days after a month, so that the linear
+/// searches every evaluation makes run over a season rather than seventy years.
+fn drivers_near(
+    year: i32,
+    month: u32,
+    before: i64,
+    (days, solar, dst): (&[SpaceWeatherDay], &[SolarIndexDay], &[DstTemperatureDay]),
+) -> (
+    Vec<SpaceWeatherDay>,
+    Vec<SolarIndexDay>,
+    Vec<DstTemperatureDay>,
+) {
+    let start = days_since_1970(year, month, 1) - before;
+    let end = days_since_1970(year, month, 1) + 36;
+    let inside = |d: i64| (start..end).contains(&d);
+    let doy = |y: i32, n: u32| days_since_1970(y, 1, 1) + i64::from(n) - 1;
+    (
+        days.iter()
+            .filter(|d| inside(days_since_1970(d.year, d.month, d.day)))
+            .copied()
+            .collect(),
+        solar
+            .iter()
+            .filter(|d| inside(doy(d.year, d.day_of_year)))
+            .copied()
+            .collect(),
+        dst.iter()
+            .filter(|d| inside(doy(d.year, d.day_of_year)))
+            .copied()
+            .collect(),
+    )
+}
+
+/// The columns every WAM-IPE table reports, in the order [`wam_ipe_row`] fills them: the bases,
+/// WAM-IPE under each height reading, then each base corrected to WAM-IPE's level and to its
+/// anomaly, at each degree.
+fn wam_ipe_columns() -> Vec<String> {
+    let mut columns: Vec<String> = WAM_BASES.iter().map(|m| m.name().to_string()).collect();
+    for c in WamHeight::BOTH {
+        columns.push(format!("WAM-IPE, {} height", c.name()));
+    }
+    for kind in ["level", "anomaly"] {
+        for m in WAM_BASES {
+            for d in Corrections::DEGREES {
+                columns.push(format!("{} + WAM-IPE {kind}, {d}", m.name()));
+            }
+        }
+    }
+    columns
+}
+
+/// One hour's contribution to a row: `ln ρ` under both readings, and per base the correction to
+/// WAM-IPE's level and to its anomaly.
+type HourValues<'a> = ([f64; 2], &'a [Corrections; 3], &'a [Corrections; 3]);
+
+/// One observation's `ρ/ρ_measured` in every column, a fraction `w` of the way from the hour
+/// `before` to the hour `after`.
+fn wam_ipe_row(e: &Evaluation, w: f64, before: HourValues<'_>, after: HourValues<'_>) -> Vec<f64> {
+    let t = unix_seconds(e);
+    let mut row: Vec<f64> = WAM_BASES.iter().map(|&m| e.ratio(m)).collect();
+    for c in 0..2 {
+        row.push(((1.0 - w) * before.0[c] + w * after.0[c]).exp() / e.measured);
+    }
+    let lst = mean_solar_time(t, e.longitude.to_degrees());
+    let latitude = e.latitude.to_degrees();
+    for (b0, b1) in [(before.1, after.1), (before.2, after.2)] {
+        for (b, &m) in WAM_BASES.iter().enumerate() {
+            for d in 0..Corrections::DEGREES.len() {
+                let log = (1.0 - w) * b0[b].log(d, latitude, lst) + w * b1[b].log(d, latitude, lst);
+                row.push(e.ratio(m) * log.exp());
+            }
+        }
+    }
+    row
+}
+
+type Drivers<'a> = (
+    &'a [SpaceWeatherDay],
+    &'a [SolarIndexDay],
+    &'a [DstTemperatureDay],
+);
+
+/// Every hour of a month, split across the machine's threads.
+fn wam_ipe_month_hours(
+    month_hours: &[(i64, &PathBuf)],
+    satellites: &[Vec<Evaluation>],
+    (days, solar, dst): Drivers<'_>,
+) -> Vec<HourResult> {
+    let threads = std::thread::available_parallelism().map_or(4, NonZeroUsize::get);
+    let chunk = month_hours.len().div_ceil(threads).max(1);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = month_hours
+            .chunks(chunk)
+            .map(|part| {
+                scope.spawn(move || {
+                    part.iter()
+                        .map(|(h, p)| wam_ipe_hour(*h, p, satellites, days, solar, dst))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect()
+    })
+}
+
+/// Hours from the run's cycle time to the hour a pinned file is valid at, from its key.
+fn wam_ipe_lead(hour: i64, path: &Path) -> i64 {
+    let key = path.to_string_lossy();
+    let at = key.find("wfs.").unwrap() + 4;
+    let num = |a: usize, b: usize| key[at + a..at + b].parse::<u32>().unwrap();
+    let cycle = days_since_1970(i32::try_from(num(0, 4)).unwrap(), num(4, 6), num(6, 8)) * 86_400
+        + i64::from(num(9, 11)) * 3600;
+    (hour - cycle) / 3600
+}
+
+/// Score one satellite-month pair, adding each row's ratios under its satellite-month, under
+/// `all`, under its geomagnetic level, its latitude band and the lead of the run it came from.
+fn score_wam_ipe_month(
+    month: &str,
+    dir: &Path,
+    all: Drivers<'_>,
+    hours: &BTreeMap<i64, PathBuf>,
+    ratios: &mut BTreeMap<(String, usize), Vec<f64>>,
+) {
+    // One row in six, as in the stratified campaign.
+    const DECIMATION: usize = 6;
+    let year: i32 = month[..4].parse().unwrap();
+    let mon: u32 = month[5..].parse().unwrap();
+    let (days, solar, dst) = drivers_near(year, mon, 120, all);
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("txt")))
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .filter(|n| n.contains("_DNS_") && n.contains(month))
+        .collect();
+    names.sort();
+    assert_eq!(
+        names.len(),
+        2,
+        "GRACE-FO C and Swarm A for {month}: {names:?}"
+    );
+    let satellites: Vec<Vec<Evaluation>> = names
+        .iter()
+        .map(|n| {
+            parse_density(&std::fs::read_to_string(dir.join(n)).unwrap())
+                .iter()
+                .step_by(DECIMATION)
+                .filter_map(|o| evaluate(o, satellite_of(n), &days, &solar, &dst))
+                .collect()
+        })
+        .collect();
+
+    let month_start = days_since_1970(year, mon, 1) * 86_400;
+    let month_end = days_since_1970(year + i32::from(mon == 12), mon % 12 + 1, 1) * 86_400;
+    let month_hours: Vec<(i64, &PathBuf)> = hours
+        .range(month_start..=month_end)
+        .map(|(h, p)| (*h, p))
+        .collect();
+    let mut at_hour: HashMap<(usize, usize, i64), [f64; 2]> = HashMap::new();
+    let mut fitted: HashMap<(usize, i64), [Corrections; 3]> = HashMap::new();
+    for r in wam_ipe_month_hours(&month_hours, &satellites, (&days, &solar, &dst)) {
+        for (s, n, v) in r.values {
+            at_hour.insert((s, n, r.hour), v);
+        }
+        for (s, f) in r.fits {
+            fitted.insert((s, r.hour), f);
+        }
+    }
+
+    // Each hour's correction less the mean of those fitted in the trailing window before it, where
+    // the window holds enough of them.
+    let mut anomaly: HashMap<(usize, i64), [Corrections; 3]> = HashMap::new();
+    for (&(s, hour), now) in &fitted {
+        let trailing: Vec<&[Corrections; 3]> = (1..=WAM_ANOMALY_HOURS)
+            .filter_map(|k| fitted.get(&(s, hour - k * 3600)))
+            .collect();
+        if trailing.len() >= WAM_ANOMALY_MIN_HOURS {
+            let per_base = std::array::from_fn(|b| {
+                now[b].anomaly(&trailing.iter().map(|t| &t[b]).collect::<Vec<_>>())
+            });
+            anomaly.insert((s, hour), per_base);
+        }
+    }
+
+    for (s, rows) in satellites.iter().enumerate() {
+        let group = format!("{} {month}", &names[s][..2]);
+        let (mut scored, mut unscored) = (0usize, 0usize);
+        for (n, e) in rows.iter().enumerate() {
+            let t = unix_seconds(e);
+            let h0 = (t / 3600.0).floor() as i64 * 3600;
+            let hour = |h: i64| {
+                Some((
+                    *at_hour.get(&(s, n, h))?,
+                    fitted.get(&(s, h))?,
+                    anomaly.get(&(s, h))?,
+                ))
+            };
+            let (Some(before), Some(after)) = (hour(h0), hour(h0 + 3600)) else {
+                unscored += 1;
+                continue;
+            };
+            scored += 1;
+            let row = wam_ipe_row(e, (t - h0 as f64) / 3600.0, before, after);
+            let storm = if e.ap >= 50.0 { "Ap >= 50" } else { "Ap < 50" };
+            let band = match e.latitude.to_degrees().abs() {
+                x if x < 30.0 => "|latitude| 0-30",
+                x if x < 60.0 => "|latitude| 30-60",
+                _ => "|latitude| 60-90",
+            };
+            let lead = format!("lead {:+} h", wam_ipe_lead(h0, &hours[&h0]));
+            for g in [group.as_str(), "all", storm, band, &lead] {
+                for (k, r) in row.iter().enumerate() {
+                    ratios.entry((g.to_string(), k)).or_default().push(*r);
+                }
+            }
+        }
+        println!(
+            "{group}: {scored} rows scored, {unscored} without both hourly fields and their \
+             trailing {WAM_ANOMALY_HOURS} h"
+        );
+    }
+}
+
+/// WAM-IPE, NOAA's public physics nowcast, against the same accelerometers — on its own, and as
+/// the input the calibration layer fits a correction to over each base model (`plans/16` Ф18.B).
+///
+/// No density measurement enters any fit: each hour's correction is fitted to WAM-IPE's own field
+/// on the shell the satellite flew through that hour, so every row scored here is held out from
+/// everything fitted on it. SDTM-1's numbers carry their usual caveat — its coefficients saw these
+/// two satellite-months (`docs/verification.md` §10.10).
+#[test]
+#[ignore = "needs tools/fetch-density-data.sh and tools/fetch-wam-ipe.sh (4.1 GB)"]
+fn wam_ipe_against_the_accelerometers_alone_and_as_a_calibration_input() {
+    let dir = Path::new("../../data/validation/density");
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+    let days = space_weather::parse_space_weather(&read("SW-All.csv"));
+    let solar = space_weather::parse_solfsmy(&read("SOLFSMY.TXT"));
+    let dst = space_weather::parse_dtcfile(&read("DTCFILE.TXT"));
+    let hours = wam_ipe_hours();
+    let mut ratios: BTreeMap<(String, usize), Vec<f64>> = BTreeMap::new();
+    for month in WAM_IPE_MONTHS {
+        score_wam_ipe_month(month, dir, (&days, &solar, &dst), &hours, &mut ratios);
+    }
+
+    let mut groups: Vec<String> = ratios.keys().map(|(g, _)| g.clone()).collect();
+    groups.dedup();
+    for g in &groups {
+        println!("\n== {g} ==");
+        // The bands and leads are diagnostics of WAM-IPE itself, so they stop at its two columns.
+        let shown = if g.starts_with('|') || g.starts_with("lead") {
+            WAM_BASES.len() + 2
+        } else {
+            usize::MAX
+        };
+        for (k, name) in wam_ipe_columns().iter().enumerate().take(shown) {
+            let f = fit(ratios[&(g.clone(), k)].iter().copied());
+            println!(
+                "{name:<44} n {:>6}  bias {:.3}  rms {:.3}  mape {:5.1}%",
+                f.n, f.bias, f.rms, f.mape
             );
         }
     }

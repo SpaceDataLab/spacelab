@@ -47,6 +47,7 @@ pub mod linalg;
 pub mod lunar;
 pub mod lunar_coeffs;
 pub mod maneuver;
+pub mod netcdf_classic;
 pub mod nrlmsise00;
 pub mod ocean_tide;
 pub mod ocean_tide_admittance;
@@ -70,6 +71,7 @@ pub mod time_variable_gravity;
 pub mod tolerance;
 pub mod torque;
 pub mod variational;
+pub mod wam_ipe;
 pub mod wind_data;
 pub mod wind_model;
 

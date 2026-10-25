@@ -7523,6 +7523,73 @@ should plan around.
 
 ---
 
+### 10.18 WAM-IPE, the public physics nowcast: 61 % too dense where the satellites fly, and no help as a calibration input
+
+NOAA's WAM-IPE is the one physics-based thermosphere that is open data and operational (`plans/16`
+Ф18.B). Two questions were asked of it: how close its nowcast is to the accelerometers, and whether
+fitting the calibration layer to its field each hour improves a base model. Neither answer is the one
+hoped for, and both are measured.
+
+**Setup.** One nowcast an hour, leads −2 h to +3 h, from the operational `v1.2/wfs` runs: 1 390 files
+for 2024-05 (the Gannon storm) and 2025-06, selected and pinned by `tools/fetch-wam-ipe.sh` and
+`tools/wam-ipe.sha256` (one hour is a 239-byte stub and is a gap). They are read by `wam_ipe.rs`,
+whose reading of NOAA's bytes agrees with SciPy's `netcdf_file` to 1e-14 at grid nodes
+(`tests/wam_ipe_product.rs`). Nine files, all on 2024-05-11/12, hold `0`, `±inf` or `NaN` at 120 and
+130 km south of 45° S; the reader keeps them as holes, none of which a satellite row touches. The
+measurements are GRACE-FO C (accelerometer) and Swarm A (precise orbit) for the same two months:
+96 532 rows, after 20 346 without both bracketing hourly fields and their trailing 72 h. For a row,
+`r = ρ_model / ρ_measured`; *bias* is the mean of `r`, *rms* and *MAPE* those of `r − 1`. Two ways of
+using the field are scored for each base model, each hour's correction fitted to WAM-IPE's field alone
+on the shell the satellite flew that hour, so no measurement enters a fit: **level**, the correction
+`ln(ρ_WAM / ρ_base)` itself; **anomaly**, that correction minus its mean over the trailing 72 h (at
+least 48 fitted hours), which keeps WAM-IPE's storm-time departures and drops its level. SDTM-1's
+coefficients saw these two satellite-months (§10.10), so its rows are in sample.
+
+| Model, all 96 532 rows | bias | rms | MAPE |
+|---|---|---|---|
+| NRLMSISE-00 (`ap[]`) | 1.412 | 0.535 | 42.5 % |
+| JB2008 | 1.006 | 0.267 | 20.9 % |
+| SDTM-1 (in sample) | 1.049 | 0.265 | 19.4 % |
+| **WAM-IPE, geodetic height** | **1.609** | 0.865 | 64.0 % |
+| WAM-IPE, spherical height | 1.710 | 0.984 | 73.6 % |
+| NRLMSISE-00 + WAM-IPE level, best of scale / degree 2 / degree 4 | 1.566 | 0.768 | 59.2 % |
+| JB2008 + WAM-IPE level, best | 1.603 | 0.823 | 62.9 % |
+| SDTM-1 + WAM-IPE level, best | 1.606 | 0.853 | 63.4 % |
+| NRLMSISE-00 + WAM-IPE anomaly, best | 1.434 | 0.595 | 45.4 % |
+| JB2008 + WAM-IPE anomaly, best | 1.043 | 0.294 | 21.4 % |
+| SDTM-1 + WAM-IPE anomaly, best | 1.075 | 0.314 | 20.4 % |
+
+**The nowcast is 61 % too dense at these heights, and twice as wrong in the storm month.** WAM-IPE's
+geodetic-height bias is 1.83 on GRACE-FO and 1.76 on Swarm A in 2024-05, 1.34 and 1.33 in 2025-06;
+over the 9 506 rows with `Ap ≥ 50` its MAPE is 84.8 %, against JB2008's 31.6 % and NRLMSISE-00's
+60.9 %. The lead does not matter: from −2 h to +3 h the MAPE stays between 63.1 % and 65.5 %. WAM's
+own top moves between 400 and 600 km with solar activity, and the product's levels above it are NOAA's
+offline extension (`wam_ipe.rs`), so some of these rows sit in the extension and some in WAM proper;
+this campaign scores the product as published and does not separate the two.
+
+**The height coordinate is geodetic.** NOAA does not say which surface its heights are measured from.
+Read as geodetic, the MAPE is flat in latitude — 60.9 %, 64.3 %, 66.7 % in |φ| 0–30°, 30–60°, 60–90°;
+read as the radius minus GFS's 6 371.2 km, it climbs from 51.0 % to 73.0 % to 96.5 %, the 21 km
+equator-to-pole swing of the sphere against the ellipsoid. The spherical reading wins only near the
+equator, where it puts the point about 7 km higher and so offsets part of the excess: that is the bias
+showing, not evidence for the sphere.
+
+**As a calibration input it buys nothing.** The level imports the excess into every base. The anomaly
+removes the level, and what remains — WAM-IPE's own hour-to-hour departures — makes every base slightly
+worse: +0.5 points of MAPE for JB2008 and +1.0 for SDTM-1 over all rows, +2.7 and +4.7 points with
+`Ap ≥ 50`, +2.9 for NRLMSISE-00. Ф18.B's question, "the WAM-IPE gain", is answered: none, on these two
+months and these two satellites. What would reopen it is a product whose levels at 400–550 km are WAM's
+own, or the `NON-OPERATIONAL_RESEARCH/` reruns, which the register keeps unread until the WAM-IPE team
+has been asked (`docs/provenance.md`, `noaa-wam-ipe`).
+
+Attribution: NOAA Space Weather Prediction Center, WAM-IPE, accessed from the NOAA Open Data
+Dissemination program on AWS (<https://registry.opendata.aws/noaa-nws-wam-ipe>). NOAA does not endorse
+this library. Reproduce with `tools/fetch-density-data.sh 2024-05 2025-06`, `tools/fetch-wam-ipe.sh` and
+`cargo test -p spacelab-propagation --release --test measured_density -- --ignored --exact
+wam_ipe_against_the_accelerometers_alone_and_as_a_calibration_input --nocapture`.
+
+---
+
 ## 11 · Published errata as a second opinion
 
 Celestrak publishes consolidated errata for all five editions of Vallado's *Fundamentals of
@@ -7670,7 +7737,7 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 326 modules, 111 name a check, 215 do not** — 131 physics,
+(`plans/16` Ф17.B orders them). **Today: 328 modules, 113 name a check, 215 do not** — 131 physics,
 25 parsers, 5 generated and 54 infrastructure. The physics column is the one to watch, and it went
 *up* on 2026-10-24 for a reason worth keeping: the rule had counted any bare `§4.13` as a row of
 this file, and a bare section sign is also how a module cites a textbook or a standard. Twenty-eight
@@ -7929,9 +7996,9 @@ mathematics or against the crate itself: closed forms and limits, defining equat
 the IERS and ICD tables, an in-repo recomputation, a refusal — Orekit or ERFA appeared in their doc
 as the reason the test exists ("the Orekit fixture is fully immersed, so it pins nothing about the
 arc"), not as the value asserted. They carry their tag now. SciPy, missing from the first list of
-codes, adds three: a degree-70 geopotential, a DCT and a Bessel function. **Today: 130
-comparator-decided tests** — name 94, file 18, fixture 4, doc 14; 74 of them Orekit's (60 by name),
-51 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+codes, adds three: a degree-70 geopotential, a DCT and a Bessel function; the WAM-IPE reader's
+product test (§10.18) adds a fourth. **Today: 131 comparator-decided tests of 3 305** — name 95,
+file 18, fixture 4, doc 14; 74 of them Orekit's (60 by name), 52 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 
@@ -8045,6 +8112,7 @@ crates/spacelab-propagation/src/spacecraft.rs::box_wing_matches_orekit | name:or
 crates/spacelab-propagation/tests/dsst_truncation.rs::the_eccentricity_truncation_order_matches_orekit | name:orekit
 crates/spacelab-propagation/tests/measured_density.rs::the_three_hourly_ap_array_is_what_carries_the_storm | doc:orekit
 crates/spacelab-propagation/tests/measured_wind.rs::hwm14_and_our_field_are_scored_on_the_same_held_out_rows | name:hwm14
+crates/spacelab-propagation/tests/wam_ipe_product.rs::a_noaa_file_reads_as_scipy_reads_it | name:scipy
 crates/spacelab-sensors/tests/pyorbital_geoloc.rs::the_catalogue_reproduces_pyorbitals_scan_angles_and_pixel_times | file:pyorbital
 crates/spacelab-sensors/tests/pyorbital_geoloc.rs::the_direct_sensor_model_reproduces_pyorbitals_ground_points | file:pyorbital
 crates/spacelab-sgp4/tests/catalogue_oracle.rs::a_changed_gravity_model_is_far_outside_the_bound_this_test_asserts | file:oracle

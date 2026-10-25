@@ -647,7 +647,9 @@ pub struct EarthOrientation {
     /// `ΔUT1`, `dΔUT1/dt`, `d²ΔUT1/dt²` — seconds, seconds/day, seconds/day².
     ///
     /// The specification warns that this is UT1−UTC for some constellations and ICD versions and
-    /// UT1−GPST for others, distinguishable only by magnitude, so the caller has to decide.
+    /// UT1−GPST for others, distinguishable only by magnitude, so the caller has to decide. The
+    /// magnitudes differ by `GPST − UTC`, 18 s, so magnitude separates them while `|UT1 − UTC|`
+    /// stays well below 9 s; from 2027-05-20 no leap second keeps it there.
     pub delta_ut1: [f64; 3],
 }
 

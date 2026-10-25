@@ -57,9 +57,11 @@ fn the_time_scales_are_offsets_on_the_naive_coordinate() {
     let dut1_ns = e.orientation.ut1.ns_since_j2000() - naive;
     #[allow(clippy::cast_precision_loss)]
     let dut1_seconds = dut1_ns as f64 / 1e9;
+    // Between the tabulated 2016-12-31 and 2016-12-30 values (`delta_ut1_carries_the_sign_…`
+    // below), widened by the sub-daily libration, which stays under 10 µs.
     assert!(
-        dut1_seconds.abs() < 0.9,
-        "|ΔUT1| must stay below 0.9 s; leap seconds exist to keep it there. Saw {dut1_seconds}"
+        (-0.407_760_1 - 5e-5..=-0.406_918_0 + 5e-5).contains(&dut1_seconds),
+        "ΔUT1 {dut1_seconds} s is not between the two tabulated days"
     );
 
     assert_eq!(
@@ -299,8 +301,8 @@ fn each_stage_refuses_with_its_own_error_and_message() {
     assert!(eop.to_string().contains("orientation"));
 }
 
-/// `|ΔUT1| < 0.9` is a bound, and a bound cannot see the sign or the size of what it bounds: a
-/// `ΔUT1` negated, or dropped to zero, satisfies it just as well. Both are worth 0.4 to 0.8 s of
+/// A bound cannot see the sign or the size of what it bounds: a `ΔUT1` negated, or dropped to
+/// zero, satisfies `|ΔUT1| < 0.9 s` just as well, and from 2027-05-20 no leap second keeps it. Both are worth 0.4 to 0.8 s of
 /// Earth rotation, 190 to 380 m at the equator. Pin the value instead, against the Bulletin A
 /// column of `finals2000A` itself rather than against our own parse of it.
 ///
@@ -318,7 +320,7 @@ fn delta_ut1_carries_the_sign_and_size_the_iers_bulletin_gives_it() {
         let utc = UtcDateTime::new(2016, 12, day, 0, 0, 0.0).expect("a real instant");
         let e = earth_orientation_at(utc, EopSource::Series(&series)).expect("in range");
         let got_ns = e.orientation.ut1.ns_since_j2000() - utc.naive_ns_since_j2000();
-        #[allow(clippy::cast_possible_truncation)] // |ΔUT1| < 0.9 s, so the product is tiny
+        #[allow(clippy::cast_possible_truncation)] // under a second, so the product is tiny
         let want_ns = (want_seconds * 1e9).round() as i128;
         assert!(
             (got_ns - want_ns).abs() < 50_000,

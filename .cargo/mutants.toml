@@ -3580,9 +3580,9 @@ exclude_re = [
     # second. The substantive behaviour — which days move, by how much, and that the anchor does not
     # — is pinned by `destep_dut1_removes_a_leap_jump_anchored_at_the_base` and
     # `destep_dut1_undoes_a_jump_below_the_base_by_moving_the_earlier_days`.
-    "finals\\.rs:248:23: replace > with >= in destep_dut1",
-    "finals\\.rs:255:23: replace > with >= in destep_dut1",
-    "finals\\.rs:456:31: replace > with >= in EopSeries::at_mjd",
+    "finals\\.rs:249:23: replace > with >= in destep_dut1",
+    "finals\\.rs:256:23: replace > with >= in destep_dut1",
+    "finals\\.rs:457:31: replace > with >= in EopSeries::at_mjd",
 
     # The same shape one level up: where the daily/hole boundary sits, between 1 and 2 days.
     #
@@ -3591,7 +3591,7 @@ exclude_re = [
     # exists to separate them; a series spaced exactly 1.5 days apart is not a thing the format can
     # produce, and at the tie interpolating and refusing are equally honest. That a 2-day hole *is*
     # refused is pinned by `a_hole_in_the_series_is_refused_not_interpolated`.
-    "finals\\.rs:400:28: replace > with >= in EopSeries::at_mjd",
+    "finals\\.rs:401:28: replace > with >= in EopSeries::at_mjd",
 
     # Range reductions in front of a sine, replaced by a shift of exactly one full turn.
     #

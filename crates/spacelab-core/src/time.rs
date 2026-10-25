@@ -87,7 +87,7 @@ time_scale!(
 /// The scale is a type parameter, erased at monomorphization. Passing an
 /// `Epoch<Utc>` where an `Epoch<Ut1>` is expected does not compile — and the gap
 /// between them reaches 0.9 seconds of Earth rotation, which is 400 metres at the
-/// equator.
+/// equator, while leap seconds hold it there. From 2027-05-20 none do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Epoch<S: TimeScale> {
     ns_since_j2000: i128,

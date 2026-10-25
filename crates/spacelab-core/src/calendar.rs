@@ -14,7 +14,8 @@
 //!
 //! So UTC is a *calendar*, not a scale. It is [`UtcDateTime`], it is converted to
 //! and from [`Epoch<Tai>`](crate::Epoch) with a leap-second table, and that
-//! conversion is fallible because the table is finite and the calendar is not.
+//! conversion is fallible: the table starts in 1972, and a `23:59:60` label needs
+//! a day that had a leap second.
 
 use core::fmt;
 

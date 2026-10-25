@@ -77,7 +77,8 @@ pub struct Eop {
     pub xp: Angle,
     /// Position of the pole, ninety degrees west.
     pub yp: Angle,
-    /// `UT1 - UTC`, in seconds. Kept below 0.9 s by leap seconds.
+    /// `UT1 - UTC`, in seconds. Leap seconds kept it below 0.9 s; from 2027-05-20 there are none,
+    /// and only the 3600 s of CGPM 2026 Resolution 5 bounds it.
     pub dut1_seconds: f64,
     /// Excess length of day, in seconds: how much the day exceeded 86400 SI seconds.
     /// Bulletin A only. The instantaneous Earth-rotation rate is `ω₀·(1 − LOD/86400)`.

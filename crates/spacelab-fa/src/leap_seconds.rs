@@ -6,7 +6,33 @@
 //! Bulletin C, and mirrored in `tai-utc.dat`. It is a list of measurements of the
 //! Earth's rotation — facts, not expression. It was cross-checked entry by entry
 //! against `pyerfa`, which found exactly these 28 transitions between 1972 and
-//! 2027.
+//! 2027. `tests/utc_properties.rs` holds the conversions to their definitions, to
+//! the nanosecond, across every leap second and past 2027-05-20.
+//!
+//! # The table is closed
+//!
+//! The last row, `TAI − UTC = 37 s` from 2017-01-01, holds for every later date.
+//! Three published facts close the table:
+//!
+//! 1. CGPM 2026 Resolution 5: "continuous UTC will become effective on 20 May
+//!    2027". From that date no leap second is inserted.
+//! 2. IERS Bulletin C 72 (2026-07-06): no leap second at the end of December 2026.
+//! 3. All 27 leap seconds fell at the end of June or December, the first
+//!    preference of ITU-R TF.460. The next such date, 2027-06-30, is after
+//!    continuity begins.
+//!
+//! One premise remains. TF.460 permits the end of any month, with second
+//! preference to March and September, and no other month end has ever been used.
+//! It also requires eight weeks' notice, so the last leap second before
+//! continuity, at the end of April 2027, would be announced by 2027-03-05. Check
+//! Bulletin C 73 (January 2027) and the IERS notices up to that date. Add a row only
+//! for a second actually announced, and re-run `derivations/leap_seconds.py`. A
+//! negative leap second would need code as well as a row: [`tai_to_utc`] assumes
+//! every step adds one second.
+//!
+//! After 2027-05-20, `UT1 − UTC` is no longer held below 0.9 s. The resolution
+//! bounds `|UT1 − UTC|` by 3600 s and expects the bound to hold for several
+//! centuries. It defines no adjustment after that, and this table has none.
 
 use core::fmt;
 
@@ -68,40 +94,11 @@ const TABLE: [Entry; 28] = [
     e(2017, 1, 37),
 ];
 
-/// The date beyond which this table cannot be trusted.
-///
-/// The IERS announces a leap second, or its absence, at least six months ahead in
-/// Bulletin C. Past that horizon we are extrapolating, and say so rather than
-/// silently returning the last known value — which is what almost every
-/// implementation does.
-///
-/// # Maintenance
-///
-/// Bump on each Bulletin C (issued early January and early July): set `HORIZON` to
-/// the first UTC date the newest bulletin does *not* yet cover — the day after the
-/// next still-undecided leap-second opportunity — and re-run
-/// `derivations/leap_seconds.py` to re-check the whole table against pyerfa. Add a
-/// `TABLE` row only when a bulletin actually inserts a second.
-///
-/// Current: **Bulletin C 72 (2026-07-06)** announces no leap second through
-/// 2026-12-31 and keeps `TAI − UTC = 37 s` until further notice. The next
-/// opportunity is 2027-06-30, so the table is trustworthy through it and refuses
-/// from 2027-07-01.
-const HORIZON: (i32, u8, u8) = (2027, 7, 1);
-
 /// Why a UTC instant could not be converted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeapError {
     /// Before 1972, `TAI - UTC` was fractional and drifting. Not modelled.
     BeforeIntegerSecondEra,
-    /// Past the horizon of the leap-second table.
-    ///
-    /// Carries the value we *would* have assumed, so a caller who accepts the
-    /// risk can proceed deliberately rather than by accident.
-    BeyondTableHorizon {
-        /// The last known value of `TAI - UTC`.
-        assumed_delta_at: i32,
-    },
     /// A `23:59:60` label on a day that had no leap second.
     SpuriousLeapSecond,
 }
@@ -112,11 +109,6 @@ impl fmt::Display for LeapError {
             Self::BeforeIntegerSecondEra => {
                 write!(f, "before 1972-01-01, TAI-UTC was fractional; not modelled")
             }
-            Self::BeyondTableHorizon { assumed_delta_at } => write!(
-                f,
-                "beyond the leap-second table horizon {}-{:02}-{:02}; would assume TAI-UTC = {assumed_delta_at} s",
-                HORIZON.0, HORIZON.1, HORIZON.2
-            ),
             Self::SpuriousLeapSecond => {
                 write!(f, "second 60 labelled on a day with no leap second")
             }
@@ -147,23 +139,17 @@ fn month_start_naive_ns(year: i32, month: u8) -> i128 {
 /// using the coordinate here would look up tomorrow's `ΔAT` and be wrong by
 /// exactly one second, once a year.
 ///
+/// Every date from 1972-01-01 on has an answer: the table is closed, and its last
+/// row holds past 2027-05-20, when UTC becomes continuous (module documentation).
+///
 /// # Errors
 ///
 /// [`LeapError::BeforeIntegerSecondEra`] before 1972-01-01.
-/// [`LeapError::BeyondTableHorizon`] past the table's validity, carrying the value
-/// that would have been assumed.
 pub fn delta_at(utc: UtcDateTime) -> Result<i32, LeapError> {
     let midnight = midnight_naive_ns(utc.year(), utc.month(), utc.day());
 
     if midnight < month_start_naive_ns(TABLE[0].year, TABLE[0].month) {
         return Err(LeapError::BeforeIntegerSecondEra);
-    }
-
-    let last = TABLE[TABLE.len() - 1].delta_at;
-    if midnight >= midnight_naive_ns(HORIZON.0, HORIZON.1, HORIZON.2) {
-        return Err(LeapError::BeyondTableHorizon {
-            assumed_delta_at: last,
-        });
     }
 
     let mut delta = TABLE[0].delta_at;
@@ -234,12 +220,6 @@ pub fn tai_to_utc(tai: Epoch<Tai>) -> Result<UtcDateTime, LeapError> {
         return Err(LeapError::BeforeIntegerSecondEra);
     };
 
-    if tai_ns >= midnight_naive_ns(HORIZON.0, HORIZON.1, HORIZON.2) {
-        return Err(LeapError::BeyondTableHorizon {
-            assumed_delta_at: TABLE[TABLE.len() - 1].delta_at,
-        });
-    }
-
     let naive = tai_ns - i128::from(entry.delta_at) * 1_000_000_000;
 
     // Are we inside the leap second itself? That is: has the naive coordinate
@@ -284,14 +264,43 @@ mod tests {
     }
 
     #[test]
-    fn the_horizon_refuses_rather_than_guesses() {
-        let err = delta_at(utc(2030, 1, 1, 0, 0, 0.0)).unwrap_err();
-        assert_eq!(
-            err,
-            LeapError::BeyondTableHorizon {
-                assumed_delta_at: 37
-            }
-        );
+    fn the_last_row_holds_past_the_start_of_continuous_utc() {
+        for (year, month, day) in [
+            (2027, 5, 19),
+            (2027, 5, 20),
+            (2027, 7, 1),
+            (2100, 1, 1),
+            (9999, 12, 31),
+        ] {
+            assert_eq!(
+                delta_at(utc(year, month, day, 0, 0, 0.0)),
+                Ok(37),
+                "{year}-{month:02}-{day:02}"
+            );
+        }
+        // Bulletin C 72 excluded the first; continuity excludes the second.
+        for (year, month, day) in [(2026, 12, 31), (2027, 6, 30)] {
+            assert_eq!(
+                utc_to_tai(utc(year, month, day, 23, 59, 60.0)),
+                Err(LeapError::SpuriousLeapSecond),
+                "{year}-{month:02}-{day:02}"
+            );
+        }
+    }
+
+    /// The premises the module documentation rests on: every step adds one second, and every
+    /// leap second ended June or December.
+    #[test]
+    fn every_leap_second_adds_one_second_at_the_end_of_june_or_december() {
+        for pair in TABLE.windows(2) {
+            let (before, after) = (pair[0], pair[1]);
+            assert_eq!(after.delta_at - before.delta_at, 1, "{after:?}");
+            assert!(matches!(after.month, 1 | 7), "{after:?}");
+            assert!(
+                (after.year, after.month) > (before.year, before.month),
+                "{after:?}"
+            );
+        }
     }
 
     #[test]

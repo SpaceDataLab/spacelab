@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0eac6d50bc6cc57292240e2d8f8713ec018a71af275df5f3c522a0f49e0f83b4 # shrinks to t = -867931189000000001, dt = 1
+cc f2145df1f6ae106009cc4d2bdc1822021a315e55803283f7282bced7c0f4aced # shrinks to label = UtcDateTime { year: 1972, month: 7, day: 1, hour: 0, minute: 0, second: 0.0 }, leap = UtcDateTime { year: 1972, month: 6, day: 30, hour: 23, minute: 59, second: 60.0 }

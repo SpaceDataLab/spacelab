@@ -8,7 +8,8 @@
 //! Until it existed, `teme_to_itrf` took `xp`, `yp` and a UT1 epoch that nothing
 //! supplied, and the example propagated the ISS with `xp = yp = 0` and `UT1 = UTC`.
 //! That is worth up to 0.9 seconds of Earth rotation — four hundred metres at the
-//! equator — and a comment saying "real work loads EOP" is not real work.
+//! equator — and more once leap seconds end on 2027-05-20; a comment saying "real
+//! work loads EOP" is not real work.
 //!
 //! ```no_run
 //! # use spacelab::{teme_to_itrf_at, EarthOrientationError, EopSource};
@@ -120,9 +121,9 @@ pub enum EarthOrientationQuality {
     },
     /// [`EopSource::NoEop`] was chosen: `UT1 = UTC`, `xp = yp = 0`, `LOD = 0`.
     ///
-    /// The error is then `ΔUT1` itself, which the leap-second rule keeps under 0.9 s and which
-    /// runs a few tenths of a second in practice — hundreds of metres of longitude, and tens of
-    /// milliseconds on the edge of a low-Earth-orbit pass.
+    /// The error is then `ΔUT1` itself: under 0.9 s while leap seconds held it there, a few tenths
+    /// of a second in practice, and growing without them from 2027-05-20 — hundreds of metres of
+    /// longitude, and tens of milliseconds on the edge of a low-Earth-orbit pass.
     Absent,
 }
 
@@ -171,7 +172,7 @@ pub enum EopSource<'a> {
 ///
 /// # Errors
 ///
-/// [`EarthOrientationError::Leap`] outside the leap-second table's era or horizon;
+/// [`EarthOrientationError::Leap`] before the leap-second table's era, 1972-01-01;
 /// [`EarthOrientationError::Eop`] outside the tabulated series, or inside a hole in it.
 /// We do not extrapolate the rotation of the Earth. [`EopSource::NoEop`] cannot raise the second.
 pub fn earth_orientation_at(
@@ -199,7 +200,7 @@ pub fn earth_orientation_at(
         });
     };
 
-    #[allow(clippy::cast_possible_truncation)] // |ΔUT1| < 0.9 s, so the product is tiny
+    #[allow(clippy::cast_possible_truncation)] // |ΔUT1| ≤ 3600 s, so the product is far inside i128
     let ut1_ns = naive + (eop.dut1_seconds * NS_PER_SECOND).round() as i128;
 
     Ok(EarthOrientation {

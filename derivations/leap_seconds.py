@@ -22,7 +22,10 @@ import sys
 import erfa
 import numpy as np
 
-FIXTURE = pathlib.Path(__file__).parent.parent / "crates/spacelab-fa/tests/fixtures/delta_at_pyerfa.csv"
+FIXTURE = (
+    pathlib.Path(__file__).parent.parent
+    / "crates/spacelab-fa/tests/fixtures/delta_at_pyerfa.csv"
+)
 
 FIRST_YEAR, LAST_YEAR = 1972, 2026
 
@@ -66,10 +69,14 @@ def main() -> int:
     args = parser.parse_args()
 
     found = transitions()
-    print(f"leap seconds: oracle reports {len(found)} transitions in [{FIRST_YEAR}, {LAST_YEAR + 1}]")
+    print(
+        f"leap seconds: oracle reports {len(found)} transitions in [{FIRST_YEAR}, {LAST_YEAR + 1}]"
+    )
     print(f"  first {found[0][0]}-{found[0][1]:02d} -> {found[0][2]} s")
     print(f"  last  {found[-1][0]}-{found[-1][1]:02d} -> {found[-1][2]} s")
-    print("  NOTE: the horizon in leap_seconds.rs must not outrun IERS Bulletin C.")
+    print(
+        "  NOTE: the table is closed; add a row only for a leap second announced by 2027-03-05."
+    )
 
     if args.check:
         return 0

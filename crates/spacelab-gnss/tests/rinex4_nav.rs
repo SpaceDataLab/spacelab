@@ -296,8 +296,8 @@ fn a_system_time_offset_names_the_two_scales_it_relates() {
 /// Broadcast Earth orientation, which RINEX 3 could not carry at all.
 ///
 /// The check is against the IERS: the pole wanders inside a circle of about 0.3 arc-seconds and
-/// `UT1 - UTC` is bounded by a leap second, so a value outside those is a column error rather than
-/// a satellite's opinion. The specification warns that some constellations broadcast `UT1 - GPST`
+/// `UT1 - UTC` was bounded by a leap second when the file was written, so a value outside those is
+/// a column error rather than a satellite's opinion. The specification warns that some constellations broadcast `UT1 - GPST`
 /// instead, which is larger than one second by construction, so the bound here is the leap-second
 /// count and not one second.
 #[test]

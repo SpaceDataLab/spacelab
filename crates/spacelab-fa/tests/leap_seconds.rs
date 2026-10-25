@@ -1,8 +1,8 @@
 //! UTC↔TAI conversion round-trips and the out-of-table refusals.
 //!
-//! `delta_at`/`utc_to_tai` are exercised by the umbrella crate, but the reverse `tai_to_utc` and its
-//! two refusals (before the 1972 integer-second era, past the table horizon) and the `LeapError`
-//! messages had no direct test. (The `const fn e` table builder runs only at compile time, so it is
+//! `delta_at`/`utc_to_tai` are exercised by the umbrella crate, but the reverse `tai_to_utc`, its
+//! refusal before the 1972 integer-second era, its answer past the end of leap seconds and the
+//! `LeapError` messages had no direct test. (The `const fn e` table builder runs only at compile time, so it is
 //! not reachable by runtime coverage.)
 
 #![allow(clippy::unwrap_used)]
@@ -26,7 +26,7 @@ fn utc_and_tai_round_trip() {
 }
 
 #[test]
-fn tai_to_utc_refuses_outside_the_table() {
+fn tai_to_utc_refuses_before_the_table_and_answers_after_it() {
     // Before the 1972 integer-second era: no entry applies.
     assert_eq!(
         tai_to_utc(Epoch::<Tai>::from_ns_since_j2000(
@@ -34,20 +34,21 @@ fn tai_to_utc_refuses_outside_the_table() {
         )),
         Err(LeapError::BeforeIntegerSecondEra),
     );
-    // Past the table horizon (2027-07): we decline to extrapolate the leap-second schedule.
-    assert!(matches!(
-        tai_to_utc(Epoch::<Tai>::from_ns_since_j2000(1_000_000_000_000_000_000)),
-        Err(LeapError::BeyondTableHorizon { .. }),
-    ));
+    // 2031-09, after UTC becomes continuous on 2027-05-20: exactly TAI - 37 s.
+    let tai_ns = 1_000_000_000_000_000_000;
+    assert_eq!(
+        tai_to_utc(Epoch::<Tai>::from_ns_since_j2000(tai_ns)),
+        Ok(UtcDateTime::from_naive_ns_since_j2000(
+            tai_ns - 37_000_000_000,
+            false
+        )),
+    );
 }
 
 #[test]
 fn each_leap_error_prints_a_distinct_non_empty_message() {
     let errors = [
         LeapError::BeforeIntegerSecondEra,
-        LeapError::BeyondTableHorizon {
-            assumed_delta_at: 37,
-        },
         LeapError::SpuriousLeapSecond,
     ];
     let messages: Vec<String> = errors.iter().map(ToString::to_string).collect();

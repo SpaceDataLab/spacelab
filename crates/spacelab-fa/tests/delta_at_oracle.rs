@@ -12,14 +12,13 @@
 #![allow(clippy::expect_used)]
 
 use spacelab_core::UtcDateTime;
-use spacelab_fa::{LeapError, delta_at};
+use spacelab_fa::delta_at;
 
 const FIXTURES: &str = include_str!("fixtures/delta_at_pyerfa.csv");
 
 #[test]
 fn delta_at_agrees_with_pyerfa_on_every_transition() {
     let mut checked = 0_usize;
-    let mut beyond_horizon = 0_usize;
 
     for (i, line) in FIXTURES.lines().enumerate() {
         let line = line.trim();
@@ -41,20 +40,12 @@ fn delta_at_agrees_with_pyerfa_on_every_transition() {
                 assert_eq!(got, expected, "{year}-{month:02}-{day:02}: TAI-UTC");
                 checked += 1;
             }
-            // The oracle knows leap seconds we have deliberately refused to guess
-            // at. Refusing is the behaviour under test, not a failure.
-            Err(LeapError::BeyondTableHorizon { assumed_delta_at }) => {
-                assert_eq!(assumed_delta_at, expected, "{year}-{month:02}-{day:02}");
-                beyond_horizon += 1;
-            }
             Err(e) => panic!("{year}-{month:02}-{day:02}: {e}"),
         }
     }
 
     assert!(checked >= 250, "thin fixture set: only {checked} dates");
-    println!(
-        "delta_at: {checked} dates agree; {beyond_horizon} correctly refused as beyond horizon"
-    );
+    println!("delta_at: {checked} dates agree");
 }
 
 #[test]

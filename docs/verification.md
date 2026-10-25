@@ -190,6 +190,7 @@ an ancestor, and only the IERS tables would break that.
 | fa | TDB−TT coefficient extraction, topocentric included | Fairhead–Bretagnon 1990 — SOFA `dtdb.c` in practice ⚠ | SOFA `t_dtdb` golden vector | < 1e-15 s | derivations/tdb_tables.py |
 | fa | GMST82 coefficients C0–C3 | Aoki et al. 1982 | mpmath 50-digit certified nearest-f64 | bit-exact `to_bits()` | src/earth_rotation.rs |
 | fa | UTC↔TAI round-trip + refusals | IERS Bulletin C / `tai-utc.dat` | IERS leap-second bulletin (vendored) + self-consistency | bit-exact | src/leap_seconds.rs, tests/leap_seconds.rs |
+| fa | UTC ↔ TAI ↔ TT on integer nanoseconds, across every leap second and past 2027-05-20 (G4) | ITU-R TF.460 (a leap second is `23:59:60`, the day 86 401 s); CGPM 2026 Res. 5 (continuous UTC from 2027-05-20); TT = TAI + 32.184 s | none — the definitions: both round trips, labels increasing with TAI, `TAI − UTC` = 10 s on 1972-01-01, every day through 2499 86 400 s except 27 of 86 401 (June 30 or December 31, none after 2016, the only days that accept `23:59:60`), the four edges of each leap second, UTC = TAI − 37 s from 2017; 4096 draws per property | exact, to the nanosecond | tests/utc_properties.rs |
 | frames | GCRF→ITRF full IAU 2006/2000A CIO pipeline | IERS TN36 §5.4–5.6 | pyerfa CIO pipeline, 5 epochs, element-wise | < 5e-13 (meas ~4.9e-14) | tests/cio_oracle.rs |
 | frames | Polar-motion matrix (pom00), ≥30 matrices | IERS TN36 §5.4.1 | pyerfa `pom00` | < 1e-15 | tests/frames.rs |
 | frames | The polar-motion ordering as algebra: the transpose identity, and why one wrong candidate nearly passes | IERS TN36 `W(t) = R₃(−s′)·R₂(x_p)·R₁(y_p)`; the shipped matrix claims to be its transpose | **Maxima**, `derivations/frame_transform.mac` — the identity at symbolic angles, then a Taylor expansion of the reversed product in a common small angle | `R₁(−y_p)·R₂(−x_p)·R₃(s′) − W(t)ᵀ` is the **zero matrix**, exactly and at every angle. The reversed product's **first-order term cancels identically**; the leading miss is `x_p·y_p`, with `±y_p·s′` and `x_p·s′` beside it — **9e-12 at 3 µrad**, which is what the fixture's measured 6.2e-12 is. The dangerous candidate is separated by a product of the two pole coordinates and not by `s′` at all | derivations/frame_transform.mac |
@@ -5279,7 +5280,7 @@ answer; the rows that say **Fixed** or **Done** were upgrades, and each says wha
 | EOP series | `finals2000A` — Bulletin A columns and the Bulletin B combination — and the IERS EOP 20 C04 series, which states its ITRF | IERS EOP 20 C04, in service since 2023-02-14 and consistent with ITRF2020; 14 C04 retired | **Done — §9.1.** `EopSeries::parse_c04` reads the series and its second line, `# EOP (IERS) 20 C04 TIME SERIES  consistent with ITRF 2020`, which `finals2000A` has no header to carry. `finals2000A` stays for the prediction span C04 does not have. On shared days the two differ by their vintage, not by a reading error: under 0.05 mas in the pole and nothing in UT1 in 2025, under 0.5 mas and 50 microseconds around 2000 and 2017, 20 mas and 1.6 ms in 1973, where Bulletin B is an older combination |
 | Precession-nutation | IAU 2006/2000A — `X, Y` from tables 5.2a/5.2b, `s` from 5.2d | IAU 2006/2000A remains the IAU and IERS standard | **Stay** — current |
 | Free core nutation | Not modelled; carried by the observed `dX, dY` | IERS TN36 Ch. 5 empirical FCN model, re-fitted yearly | **Stay** — the observed offsets already contain the FCN and are the better input. The empirical model is the fallback for when `dX, dY` are unavailable, which is not our case |
-| Leap seconds | 28 transitions through the 2027 bulletin; none since 2016-12-31 | CGPM 2022 Resolution 4: the leap second is to be discontinued by 2035 | **Stay, watch** — nothing to change before the redefinition, and the table already refuses to extrapolate past its last entry |
+| Leap seconds | 28 transitions; the table is closed, `TAI − UTC = 37 s` from 2017-01-01 for every later date | CGPM 2026 Resolution 5: "continuous UTC will become effective on 20 May 2027"; `\|UT1 − UTC\|` up to 3600 s | **Done — Ф20.A.** The table horizon and `LeapError::BeyondTableHorizon` are gone. Bulletin C 72 excludes 2026-12-31 and continuity excludes 2027-06-30; the one premise left, that no month end before May 2027 is used, closes on 2027-03-05, the last day TF.460's eight weeks' notice allows. No code assumes `\|UT1 − UTC\| < 0.9 s`. `tests/utc_properties.rs` holds the conversion to the definitions |
 | Ellipsoid | WGS-84 defining constants (`a`, `1/f`, `GM`, `ω`) from NIMA TR8350.2 | WGS 84 (G2296), effective 2024-01-07, aligned to ITRF2020 within 2 cm | **Stay** — a G-realization moves station coordinates, not the defining constants, and the defining constants are all we use |
 
 ### Geopotential and tides
@@ -7669,8 +7670,8 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 326 modules, 110 name a check, 216 do not** — 131 physics,
-25 parsers, 6 generated and 54 infrastructure. The physics column is the one to watch, and it went
+(`plans/16` Ф17.B orders them). **Today: 326 modules, 111 name a check, 215 do not** — 131 physics,
+25 parsers, 5 generated and 54 infrastructure. The physics column is the one to watch, and it went
 *up* on 2026-10-24 for a reason worth keeping: the rule had counted any bare `§4.13` as a row of
 this file, and a bare section sign is also how a module cites a textbook or a standard. Twenty-eight
 modules were passing on Curtis, Vallado, Danielson, Tapley and CCSDS section numbers alone —
@@ -7799,7 +7800,6 @@ crates/spacelab-estimation/src/srukf.rs | physics | no re-runnable check named i
 crates/spacelab-estimation/src/unscented.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-fa/src/cio_tables.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
 crates/spacelab-fa/src/earth_rotation.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-fa/src/leap_seconds.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
 crates/spacelab-fa/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-fa/src/nut_tables.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
 crates/spacelab-fa/src/tdb_tables.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc

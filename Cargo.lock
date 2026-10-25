@@ -2816,6 +2816,7 @@ name = "spacelab-fa"
 version = "0.2.0"
 dependencies = [
  "libm",
+ "proptest",
  "spacelab-core",
  "spacelab-testkit",
 ]

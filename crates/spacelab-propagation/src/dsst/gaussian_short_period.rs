@@ -16,9 +16,9 @@
 //! * `StoredCoefficients` — the stored Cᵢ⁰, Cᵢʲ, Sᵢʲ and the polynomial `(L − λ)·Dᵢ¹ + (L − λ)²·Dᵢ²`
 //!   (Danielson 2.5.3-(26)), and their sum at the mean state.
 //!
-//! Orekit's `AbstractGaussianContribution` has the same structure, and these names follow it
-//! (`JMAX`, `u1ij`/`v1ij`/`u2ij`/`v2ij`, `k20`, `to2an`/`to4an`). It is not a solution of the
-//! equation in five places, and this module departs from it there:
+//! A port of Orekit's `AbstractGaussianContribution` (Apache-2.0, in `NOTICE`): the structure and
+//! these names follow it (`JMAX`, `u1ij`/`v1ij`/`u2ij`/`v2ij`, `k20`, `to2an`/`to4an`). Orekit's
+//! is not a solution of the equation in five places, and this module departs from it there:
 //! * **U₁'s third sum** carries `+Cᵏσⱼ₊ₖ`: `cos kL·sin(j + k)L` gives `+½ sin jL`. Orekit's `−`.
 //! * **D¹ and D₆²** take the constant of `F − ⟨F⟩` in L, `𝒞⁰ = C⁰/2 − ⟨F⟩ = −Σⱼ(Cʲρⱼ + Sʲσⱼ)`.
 //!   Orekit takes `C⁰ = (1/π)∫F dL`, and a constant rate `F ≡ c` then gets `η = −(2c/n)(L − λ)`

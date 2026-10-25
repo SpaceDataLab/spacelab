@@ -575,6 +575,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima dsst_tesseral_expansion.mac" "expected 7 checks to hold, found $holds"
     fi
 
+    out=$(macf dsst_gaussian_short_period.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 7 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima dsst_gaussian_short_period.mac: rho_j + i sigma_j are the lambda-means of exp(ijL), U1/V1/U2/V2 are the product to sum, and the shipped assembly is F = cos L's closed form to its e^13 cut"
+    else
+        bad "maxima dsst_gaussian_short_period.mac" "expected 7 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then
@@ -657,6 +665,15 @@ sys.exit(0 if a == b else 1)
         ok "pari WGS84_GAMMA: the source literal is the nearest f64 to 1/(1-f)^2 (bit-identical)"
     else
         bad "pari WGS84_GAMMA" "source '$lit' is not the nearest f64 to PARI's '$exact'"
+    fi
+
+    # The DSST Gaussian short periods: the second engine beside dsst_gaussian_short_period.mac.
+    out=$(timeout 600 gp -q -f dsst_gaussian_short_period.gp </dev/null 2>&1)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 6 ] && ! printf '%s' "$out" | grep -qF '***' && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "pari dsst_gaussian_short_period.gp: rho_j + i sigma_j by residues, the product to sum at JMAX = 12 in exact rationals, F = cos L's closed forms for every ellipse"
+    else
+        bad "pari dsst_gaussian_short_period.gp" "expected 6 checks to hold and no error, found $holds"
     fi
 else
     skip "pari checks" gp

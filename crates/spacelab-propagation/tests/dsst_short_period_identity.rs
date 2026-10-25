@@ -16,8 +16,10 @@
 //! `∂η/∂λ` and `∂η/∂θ` are spectral derivatives of η sampled on a uniform grid.
 //!
 //! The same `F` also defines the mean rates the Gaussian (drag, SRP) contributions integrate:
-//! `⟨F⟩` over an arc of the orbit is `(1/2π)∫F dλ`, which the last two tests take by Simpson's rule
-//! in the mean longitude while the shipped code takes Gauss–Legendre in the true longitude.
+//! `⟨F⟩` over an arc of the orbit is `(1/2π)∫F dλ`, which the mean-rate tests take by Simpson's rule
+//! in the mean longitude while the shipped code takes Gauss–Legendre in the true longitude. The
+//! Gaussian contributions expose their short periods only through `osculating`, so those tests take
+//! η as `osc − mean`, with the force raised by [`LIFT`] above the rounding of that difference.
 
 #![allow(
     clippy::expect_used,
@@ -415,12 +417,15 @@ fn tesseral_short_periods_solve_their_defining_equation() {
 const CD: f64 = 2.2;
 const AREA_OVER_MASS: f64 = 0.01;
 
-/// An exponential atmosphere turning with the Earth.
-struct Exponential;
+/// An exponential atmosphere of scale height `.0`, 3e-12 kg/m³ at 7000 km, turning with the Earth.
+struct Exponential(f64);
+
+/// The atmosphere of the drag tests: a 70 km scale height.
+const AIR: Exponential = Exponential(7.0e4);
 
 impl Atmosphere for Exponential {
     fn density(&self, r: [f64; 3]) -> f64 {
-        3.0e-12 * (-(dot(r, r).sqrt() - 7.0e6) / 7.0e4).exp()
+        3.0e-12 * (-(dot(r, r).sqrt() - 7.0e6) / self.0).exp()
     }
 
     fn velocity(&self, r: [f64; 3]) -> [f64; 3] {
@@ -429,13 +434,18 @@ impl Atmosphere for Exponential {
     }
 }
 
-/// A drag law written here, not taken from `dsst::drag`: `−½ (C_D A/m) ρ |v_r| v_r` through
-/// [`Exponential`], with `v_r` the velocity relative to the air.
-fn drag_like(r: [f64; 3], v: [f64; 3]) -> [f64; 3] {
-    let air = Exponential.velocity(r);
-    let vr = [v[0] - air[0], v[1] - air[1], v[2] - air[2]];
-    let c = -0.5 * CD * AREA_OVER_MASS * Exponential.density(r) * dot(vr, vr).sqrt();
+/// A drag law written here, not taken from `dsst::drag`: `−½ (C_D A/m) ρ |v_r| v_r` through `air`,
+/// with `v_r` the velocity relative to the air.
+fn drag_through(air: &Exponential, area_over_mass: f64, r: [f64; 3], v: [f64; 3]) -> [f64; 3] {
+    let wind = air.velocity(r);
+    let vr = [v[0] - wind[0], v[1] - wind[1], v[2] - wind[2]];
+    let c = -0.5 * CD * area_over_mass * air.density(r) * dot(vr, vr).sqrt();
     [c * vr[0], c * vr[1], c * vr[2]]
+}
+
+/// [`drag_through`] [`AIR`] at the tests' `A/m`.
+fn drag_like(r: [f64; 3], v: [f64; 3]) -> [f64; 3] {
+    drag_through(&AIR, AREA_OVER_MASS, r, v)
 }
 
 /// An SRP-like acceleration from a Sun fixed at one astronomical unit, `P (A/m) AU² (r − s)/|r − s|³`.
@@ -597,7 +607,7 @@ fn drag_mean_rates_are_the_average_over_the_atmospheric_arc() {
         ("inside", LEO, [0.0, TAU]),
         ("leaving", eccentric, arc_below(eccentric, drag.rbar)),
     ] {
-        let got = drag.mean_element_rates(&aux(mean, 0.5), &Exponential);
+        let got = drag.mean_element_rates(&aux(mean, 0.5), &AIR);
         let want = mean_rate(mean, m1, m2, &drag_like);
         let worst = worst_rate_difference(mean[0], got, want);
         assert!(worst < 1e-9, "{label}: {worst:.3e}, {got:?} vs {want:?}");
@@ -813,4 +823,176 @@ fn srp_mean_rates_drop_the_light_inside_the_cylinder() {
     let cylinder = mean_rate(SRP_LEO, exit, entry, &|r, _| cannonball(SUN, r, 1.0));
     let binary = worst_rate_difference(SRP_LEO[0], cylinder, conical);
     assert!(binary < 1e-4, "the binary cylinder {binary:.3e}");
+}
+
+/// The factor the Gaussian short-period tests raise `A/m` by. At fixed mean elements both sides of the
+/// equation are linear in the force, and the raised η stands three digits further above the rounding
+/// of `osc − mean`, which the spectral derivative amplifies: at `A/m = 0.01` that rounding is the
+/// whole residual (`srp_short_periods_solve_their_defining_equation` measures it).
+const LIFT: f64 = 1000.0;
+
+/// [`assert_verdicts`] for η taken as `osc − mean`, which carries the rounding of the mean longitude,
+/// up to half an ulp of λ (4.4e-16 rad), into η's mean: measured up to 5.6e-12 of the amplitude, so
+/// the mean is held to 1e-10. Returns the worst residual and the worst mean.
+fn assert_lifted(label: &str, v: &[Verdict; 6], bound: f64) -> (f64, f64) {
+    for (i, e) in v.iter().enumerate() {
+        assert!(
+            e.residual < bound,
+            "{label}, element {i}: residual {:.3e} ≥ {bound:.0e}",
+            e.residual
+        );
+        assert!(
+            e.mean < 1e-10,
+            "{label}, element {i}: mean {:.3e} of the amplitude",
+            e.mean
+        );
+    }
+    v.iter().fold((0.0_f64, 0.0_f64), |(r, m), e| {
+        (r.max(e.residual), m.max(e.mean))
+    })
+}
+
+/// η of a Gaussian contribution as `osc − mean`, the mean longitude wrapped.
+fn eta_of(mean: [f64; 5], l: f64, osc: [f64; 6]) -> [f64; 6] {
+    let [a, k, h, q, p] = mean;
+    [
+        osc[0] - a,
+        osc[1] - k,
+        osc[2] - h,
+        osc[3] - q,
+        osc[4] - p,
+        wrap(osc[5] - l),
+    ]
+}
+
+/// A Sun at one astronomical unit and `beta` degrees from the orbit plane of `mean`.
+fn sun_at(mean: [f64; 5], beta: f64) -> [f64; 3] {
+    let (f, g) = frame(mean[3], mean[4]);
+    let w = cross(f, g);
+    let (sb, cb) = beta.to_radians().sin_cos();
+    core::array::from_fn(|i| 1.495_978_707e11 * (cb * (0.6 * f[i] + 0.8 * g[i]) + sb * w[i]))
+}
+
+/// The six worst residuals of `dsst::srp`'s short periods on `mean` with the Sun at `beta`, the
+/// cannonball raised by `lift`.
+fn srp_residuals(mean: [f64; 5], beta: f64, lift: f64) -> [Verdict; 6] {
+    let srp = DsstSolarRadiationPressure::new(CR, AREA_OVER_MASS * lift, MU, AE_SRP);
+    let sun = sun_at(mean, beta);
+    let [a, k, h, q, p] = mean;
+    verdicts(
+        mean,
+        1,
+        0.0,
+        |l, _| eta_of(mean, l, srp.osculating([a, k, h, q, p, l], sun)),
+        |_, r, _| cannonball(sun, r, 1.0).map(|x| lift * x),
+    )
+}
+
+/// `dsst::srp` on orbits that never enter the shadow, the Sun 75° and 85° from the orbit plane, at
+/// e = 1e-4, 0.008, 0.05 and 0.1. Measured 5.0e-9 at worst, the rounding of the test: unraised, the
+/// same check is 4.1e-6 on the e = 0.008 orbit, 1280 times more, near the factor the force went up by.
+#[test]
+fn srp_short_periods_solve_their_defining_equation() {
+    let orbits: [[f64; 5]; 4] = [
+        [7.2e6, 1.0e-4, 0.0, 0.3, 0.35],
+        [7.2e6, 0.006, -0.0053, 0.3, 0.35],
+        [7.6e6, 0.04, -0.03, 0.3, 0.35],
+        [8.0e6, 0.08, -0.06, 0.3, 0.35],
+    ];
+    for mean in orbits {
+        for beta in [75.0, 85.0] {
+            let e = mean[1].hypot(mean[2]);
+            let v = srp_residuals(mean, beta, LIFT);
+            let (r, m) = assert_lifted(&format!("srp, e = {e:.4}, β = {beta}°"), &v, 1e-8);
+            std::println!("srp, e = {e:.4}, β = {beta}°: residual {r:.2e}, mean {m:.1e}");
+        }
+    }
+    let mean = [7.2e6, 0.006, -0.0053, 0.3, 0.35];
+    let worst = |v: [Verdict; 6]| v.iter().map(|x| x.residual).fold(0.0, f64::max);
+    let (raised, unraised) = (
+        worst(srp_residuals(mean, 75.0, LIFT)),
+        worst(srp_residuals(mean, 75.0, 1.0)),
+    );
+    std::println!(
+        "srp, e = 0.008, β = 75°: {raised:.2e} raised, {unraised:.2e} not, ratio {:.0}",
+        unraised / raised
+    );
+    assert!(
+        unraised > 100.0 * raised,
+        "the floor at A/m = 0.01, {unraised:.3e}, is not the rounding of {raised:.3e}"
+    );
+}
+
+/// The six worst residuals of `dsst::drag`'s short periods on `mean` through `air`, its edge at `rbar`,
+/// the drag law raised by [`LIFT`] and cut off above `rbar` as the model cuts it.
+fn drag_residuals(mean: [f64; 5], air: &Exponential, rbar: f64) -> [Verdict; 6] {
+    let drag = DsstAtmosphericDrag::with_rbar(CD, AREA_OVER_MASS * LIFT, MU, rbar);
+    let [a, k, h, q, p] = mean;
+    verdicts(
+        mean,
+        1,
+        0.0,
+        |l, _| eta_of(mean, l, drag.osculating([a, k, h, q, p, l], air)),
+        |_, r, v| {
+            if dot(r, r).sqrt() < rbar {
+                drag_through(air, AREA_OVER_MASS * LIFT, r, v)
+            } else {
+                [0.0; 3]
+            }
+        },
+    )
+}
+
+/// `dsst::drag` on orbits inside the atmosphere. At e = 1e-4 and 0.01 the residual is the rounding of
+/// the test, 8.7e-9 at worst, at e = 1e-4 where η is smallest. At e = 0.05 it is 3.9e-6, the cut of
+/// the series at j = 12: the density along the orbit is `e^{z cos E}` in the eccentric anomaly, with
+/// `z = ae/H = 5`, and its 13th harmonic is I₁₃(5)/I₀(5) = 1.4e-6 of its mean
+/// ([`the_drag_residual_is_where_the_series_stops`]).
+#[test]
+fn drag_short_periods_solve_their_defining_equation() {
+    let drag = DsstAtmosphericDrag::new(CD, AREA_OVER_MASS, MU);
+    let orbits: [([f64; 5], f64); 3] = [
+        ([7.0e6, 1.0e-4, 0.0, 0.3, 0.35], 2e-8),
+        (LEO, 2e-8),
+        ([7.0e6, 0.04, -0.03, 0.3, 0.35], 1e-5),
+    ];
+    for (mean, bound) in orbits {
+        let e = mean[1].hypot(mean[2]);
+        let v = drag_residuals(mean, &AIR, drag.rbar);
+        let (r, m) = assert_lifted(&format!("drag, e = {e:.4}"), &v, bound);
+        std::println!("drag, e = {e:.4}: residual {r:.2e}, mean {m:.1e}");
+    }
+}
+
+/// Where the drag residual comes from. Inside the atmosphere at e = 0.05 it is the cut of the series
+/// at j = 12: doubling the scale height takes `z = ae/H` from 5 to 2.5 and the residual from 3.9e-6
+/// to 2.1e-9, the rounding, as I₁₃(z)/I₀(z) goes from 1.4e-6 to 9.9e-10. On an orbit that leaves the
+/// atmosphere, e = 0.072, it is the step the force takes at `rbar`, which twelve harmonics cannot
+/// follow: 1.7e-3, and raising `rbar` by 2H divides it by 8.4, near e² = 7.4, the step's own factor.
+/// With `rbar` above apogee the whole orbit is inside and the residual is the j cut again, 7.1e-5 at
+/// z = ae/H = 7.6, where I₁₃/I₀ = 5.1e-5.
+#[test]
+fn the_drag_residual_is_where_the_series_stops() {
+    let worst = |v: [Verdict; 6]| v.iter().map(|x| x.residual).fold(0.0, f64::max);
+    let rbar = DsstAtmosphericDrag::new(CD, AREA_OVER_MASS, MU).rbar;
+    let inside = [7.0e6, 0.04, -0.03, 0.3, 0.35];
+    let cut = worst(drag_residuals(inside, &AIR, rbar));
+    let smoother = worst(drag_residuals(inside, &Exponential(2.0 * AIR.0), rbar));
+    assert!(
+        cut > 1e-6 && smoother < 1e-8,
+        "the j cut: {cut:.3e} at H, {smoother:.3e} at 2H"
+    );
+    let leaving = [7.4e6, 0.06, -0.04, 0.2, 0.15];
+    let step = worst(drag_residuals(leaving, &AIR, rbar));
+    let lower = worst(drag_residuals(leaving, &AIR, rbar + 2.0 * AIR.0));
+    let whole = worst(drag_residuals(leaving, &AIR, 8.0e6));
+    std::println!(
+        "drag residual: j cut {cut:.2e} → {smoother:.2e}; step {step:.2e} → {lower:.2e}, ratio {:.2}; whole orbit {whole:.2e}",
+        step / lower
+    );
+    assert!(
+        (5.0..12.0).contains(&(step / lower)),
+        "raising rbar by 2H: {step:.3e} → {lower:.3e}"
+    );
+    assert!(whole < 1e-4, "the whole orbit inside: {whole:.3e}");
 }

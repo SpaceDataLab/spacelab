@@ -1,0 +1,232 @@
+/* `spacelab-propagation::dsst::gaussian_short_period`, the drag and SRP short periods, against the
+   equation that defines them.
+
+   The correction eta of an element is the zero-mean periodic solution of
+   n d(eta)/d(lambda) = F - <F>, with + (3/2)(n/a) eta_a on the left for the mean longitude. The
+   module takes F through its Fourier coefficients C^j, S^j in the true longitude L and integrates
+   in L through d(lambda)/dL. Here, exactly:
+     (1) d(lambda)/dL = 1 + 2 sum_k (rho_k cos kL + sigma_k sin kL), with
+         rho_k + i sigma_k = (1 + kB)(-b)^k (k + ih)^k: the generating function of the right side is
+         B^3/(1 + e cos v)^2, the Kepler d(M)/d(v), at every e;
+     (2) the shipped U1, V1 sums are the coefficients of (F - <F>) d(lambda)/dL by product to sum,
+         exactly, at JMAX = 4; the shipped U2, V2 sums are those of eta_a's series times
+         d(lambda)/dL up to terms of e^(JMAX+1), which is where the series stops; Orekit's sign in
+         U1's third sum changes every row, and its U2 slip is off at e^1;
+     (3) F = cos L has the closed-form solution eta = (P sin F + Q cos F + hB/2)/n in the eccentric
+         longitude F, P = 1 - k^2 - b h^2, Q = b B h k, of zero mean; driving the semi-major axis, it
+         drives the mean longitude by eta_lambda = -(3/2an)(G - (kP - 3hQ)/4), G the antiderivative
+         of n eta_a d(lambda)/dF, also of zero mean;
+     (4) the shipped assembly, run here at JMAX = 12 in 40-digit bfloat on the exact coefficients
+         of F = cos L, is that closed form to the e^13 the cut drops (2.5e-27 at e = 0.01, 2.7e-15
+         at e = 0.1), where Orekit's misses it at e^2; and a constant rate gets no short period, where
+         Orekit's D1 gives -(2c/n)(L - lambda).
+
+   `dsst_gaussian_short_period.gp` repeats (2) at JMAX = 12 in exact rationals and (1), (3) by
+   numerical quadrature in PARI/GP. The tests in the module and `tests/dsst_short_period_identity.rs`
+   check the f64 code against (3) and against the equation itself.  */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+/* ---- (1) d(lambda)/dL --------------------------------------------------------------------------- */
+/* Perifocal, varpi = 0, where (k + ih)^k (-b)^k = (-beta)^k with beta = b e = e/(1 + B). For any other
+   varpi the right side turns by e^{i k varpi}, which is the rotation L = v + varpi. Parametrised by
+   beta, e = 2 beta/(1 + beta^2) and B = (1 - beta^2)/(1 + beta^2) are rational. */
+block([e : 2*beta/(1 + beta^2), B : (1 - beta^2)/(1 + beta^2), S, lhs, rhs],
+  /* S(z) = sum_{k>=1} (1 + kB)(-beta z)^k in closed form. */
+  S : lambda([z], -beta*z/(1 + beta*z) - B*beta*z/(1 + beta*z)^2),
+  lhs : 1 + S(z) + S(1/z),
+  rhs : B^3/(1 + e*(z + 1/z)/2)^2,
+  must(is(ratsimp(lhs - rhs) = 0),
+       "(1) holds: 1 + 2 sum (1 + kB)(-beta)^k cos kv = B^3/(1 + e cos v)^2, the Kepler dM/dv"))$
+
+/* ---- (2) the product to sum --------------------------------------------------------------------- */
+/* The coefficient of cos mL and of sin mL in a Laurent polynomial in z = exp(iL). */
+cosco(p, m) := ratsimp(coeff(p, z, m) + coeff(p, z, -m))$
+sinco(p, m) := ratsimp(%i*(coeff(p, z, m) - coeff(p, z, -m)))$
+trig(c, s, j) := c*(z^j + z^(-j))/2 + s*(z^j - z^(-j))/(2*%i)$
+JM : 4$
+/* d(lambda)/dL to 3 JM, its rho_k, sigma_k of order eps^k. */
+W : 1 + sum(2*trig(eps^k*RH[k], eps^k*SG[k], k), k, 1, 3*JM)$
+G1 : sum(trig(CC[j], SS[j], j), j, 1, JM)$
+P1 : expand(G1*W)$
+rh(k) := eps^k*RH[k]$  sg(k) := eps^k*SG[k]$
+/* computeU1V1Coefficients before the 1/j: u is the sine coefficient, v the cosine. `osgn` is the sign
+   of the C^k sigma_{j+k} term: +1 shipped, -1 Orekit. */
+u1sum(m, osgn) := SS[m] + sum(CC[m - k]*sg(k) + SS[m - k]*rh(k), k, 1, m - 1)
+  + sum(-CC[m + k]*sg(k) + SS[m + k]*rh(k), k, 1, JM - m)
+  + sum(osgn*CC[k]*sg(m + k) - SS[k]*rh(m + k), k, 1, JM)$
+v1sum(m) := CC[m] + sum(CC[m - k]*rh(k) - SS[m - k]*sg(k), k, 1, m - 1)
+  + sum(CC[m + k]*rh(k) + SS[m + k]*sg(k), k, 1, JM - m)
+  + sum(CC[k]*rh(m + k) + SS[k]*sg(m + k), k, 1, JM)$
+/* The rows JM+1 .. 2 JM, kept for the semi-major axis only. */
+u1high(m, osgn) := sum(CC[m - k]*sg(k) + SS[m - k]*rh(k), k, m - JM, m - 1)
+  + sum(osgn*CC[k]*sg(m + k) - SS[k]*rh(m + k), k, 1, JM)$
+v1high(m) := sum(CC[m - k]*rh(k) - SS[m - k]*sg(k), k, m - JM, m - 1)
+  + sum(CC[k]*rh(m + k) + SS[k]*sg(m + k), k, 1, JM)$
+block([bad : 0, orekit : 0],
+  for m : 1 thru JM do (
+    if ratsimp(u1sum(m, 1) - sinco(P1, m)) # 0 then bad : bad + 1,
+    if ratsimp(v1sum(m) - cosco(P1, m)) # 0 then bad : bad + 1,
+    if ratsimp(u1sum(m, -1) - sinco(P1, m)) # 0 then orekit : orekit + 1),
+  for m : JM + 1 thru 2*JM do (
+    if ratsimp(u1high(m, 1) - sinco(P1, m)) # 0 then bad : bad + 1,
+    if ratsimp(v1high(m) - cosco(P1, m)) # 0 then bad : bad + 1),
+  print("U1/V1 rows that differ from the product:", bad, "  with Orekit's sign:", orekit, "of", JM),
+  must(is(bad = 0 and orekit = JM),
+       "(2) holds: U1, V1 are the product to sum of (F - <F>) dlambda/dL exactly, m = 1..2 JMAX"))$
+
+/* computeU2V2Coefficients: the same product for eta_a's series sum_{j <= 2 JM} (U_j cos + V_j sin),
+   whose rows past JM are of order eps^(j - JM). `slip` = 1 adds the cosine half to u, as Orekit does. */
+ord(j) := max(0, j - JM)$
+uu(j) := eps^ord(j)*U[j]$  vv(j) := eps^ord(j)*V[j]$
+P2 : expand(sum(trig(uu(j), vv(j), j), j, 1, 2*JM)*W)$
+u2sum(m, slip) := vv(m) + sum(uu(m - l)*sg(l) + vv(m - l)*rh(l), l, 1, m - 1)
+  + sum(-uu(m + l)*sg(l) + uu(l)*sg(m + l) + vv(m + l)*rh(l) - vv(l)*rh(m + l), l, 1, JM)
+  + slip*sum(uu(m + l)*rh(l) + uu(l)*rh(m + l) + vv(m + l)*sg(l) + vv(l)*sg(m + l), l, 1, JM)$
+v2sum(m, slip) := uu(m) + sum(uu(m - l)*rh(l) - vv(m - l)*sg(l), l, 1, m - 1)
+  + (1 - slip)*sum(uu(m + l)*rh(l) + uu(l)*rh(m + l) + vv(m + l)*sg(l) + vv(l)*sg(m + l), l, 1, JM)$
+block([low : 99, orekit : 99, d],
+  for m : 1 thru JM do (
+    for d in [u2sum(m, 0) - sinco(P2, m), v2sum(m, 0) - cosco(P2, m)] do
+      if expand(d) # 0 then low : min(low, lopow(expand(d), eps)),
+    for d in [u2sum(m, 1) - sinco(P2, m), v2sum(m, 1) - cosco(P2, m)] do
+      if expand(d) # 0 then orekit : min(orekit, lopow(expand(d), eps))),
+  print("U2/V2: lowest order of eps left:", low, "  with Orekit's slip:", orekit),
+  must(is(low >= JM + 1 and orekit = 1),
+       "(2) holds: U2, V2 are the product to sum of eta_a's series to e^(JMAX+1); Orekit's slip is off at e^1"))$
+
+/* ---- (3) the closed form of F = cos L ----------------------------------------------------------- */
+/* Rational in beta and t: e = 2 beta/(1 + beta^2), k + ih = e (1 + it)^2/(1 + t^2); the eccentric
+   longitude enters as w = exp(iF). The position in the orbit plane over a, through F. */
+block([e, B, b, k, h, cF, sF, X, ra, P, Q, R, eta, G, mean, dF, res, resl],
+  e : 2*beta/(1 + beta^2), B : (1 - beta^2)/(1 + beta^2), b : 1/(1 + B),
+  k : e*(1 - t^2)/(1 + t^2), h : e*2*t/(1 + t^2),
+  cF : (w + 1/w)/2, sF : (w - 1/w)/(2*%i),
+  X : (1 - h^2*b)*cF + h*k*b*sF - k,
+  ra : 1 - k*cF - h*sF,
+  P : 1 - k^2 - b*h^2, Q : b*B*h*k, R : h*B/2,
+  eta : P*sF + Q*cF + R,
+  /* d/dF = i w d/dw; the mean over lambda is the w^0 coefficient of g dlambda/dF = g ra, read off
+     the numerator once w is cleared from the denominator. */
+  dF : lambda([g], ratsimp(%i*w*diff(g, w))),
+  mean : lambda([g], block([r : ratsimp(g*ra*w^6)],
+    if not freeof(w, denom(r)) then error("w left in a denominator"),
+    ratsimp(coeff(ratexpand(num(r)), w, 6)/denom(r)))),
+  /* n deta/dlambda = cos L - rho_1, rho_1 = -k: times dlambda/dF = r/a, with cos L = X/(r/a). */
+  res : ratsimp(dF(eta) - (X + k*ra)),
+  must(is(res = 0 and mean(eta) = 0),
+       "(3) holds: eta = (P sin F + Q cos F + hB/2)/n solves n deta/dlambda = cos L - rho_1, mean 0"),
+  G : -P*cF + Q*sF - (k*P + h*Q)*sF^2/2 + (h*P - k*Q)*sF*cF/2 - k*R*sF + h*R*cF,
+  resl : ratsimp(dF(G) - eta*ra),
+  must(is(resl = 0 and ratsimp(mean(G) - (k*P - 3*h*Q)/4) = 0),
+       "(3) holds: eta_lambda = -(3/2an)(G - (kP - 3hQ)/4) solves deta_lambda/dlambda = -(3/2a) eta_a, mean 0"))$
+
+/* ---- (4) the shipped assembly in bfloat --------------------------------------------------------- */
+fpprec : 40$
+JMAX : 12$
+/* compute_rho_sigma */
+rhosig(k, h) := block([B : sqrt(1 - k^2 - h^2), cj : 1, sj : 0, c2, mb : 1, r : [], s : []],
+  for j : 1 thru 3*JMAX do (
+    c2 : cj*k - sj*h, sj : cj*h + sj*k, cj : c2, mb : -mb/(1 + B),
+    r : endcons((1 + j*B)*mb*cj, r), s : endcons((1 + j*B)*mb*sj, s)),
+  [r, s])$
+/* UijVij::new, the shipped sums; cc[i][j], ss[i][j] for elements i = 1..6 and j = 1..JMAX. `ok` = false
+   runs Orekit's two slips. */
+uv(cc, ss, rho, sig, ok) := block([u1, v1, u2, v2, u, v, sgn : if ok then 1 else -1,
+                                   c : lambda([i, j], if j <= JMAX then cc[i][j] else 0),
+                                   s : lambda([i, j], if j <= JMAX then ss[i][j] else 0)],
+  u1 : makelist(makelist(0, j, 1, 2*JMAX), i, 1, 6), v1 : copylist(u1), u10 : 0,
+  for j : 1 thru JMAX do for i : 1 thru 6 do (
+    u : s(i, j), v : c(i, j),
+    for k : 1 thru j - 1 do (u : u + c(i, j - k)*sig[k] + s(i, j - k)*rho[k],
+                             v : v + c(i, j - k)*rho[k] - s(i, j - k)*sig[k]),
+    for k : 1 thru JMAX - j do (u : u - c(i, j + k)*sig[k] + s(i, j + k)*rho[k],
+                                v : v + c(i, j + k)*rho[k] + s(i, j + k)*sig[k]),
+    for k : 1 thru JMAX do (u : u + sgn*c(i, k)*sig[j + k] - s(i, k)*rho[j + k],
+                            v : v + c(i, k)*rho[j + k] + s(i, k)*sig[j + k]),
+    u1[i][j] : -u/j, v1[i][j] : v/j,
+    if i = 1 then u10 : u10 - u1[1][j]*rho[j] - v1[1][j]*sig[j]),
+  for j : JMAX + 1 thru 2*JMAX do (
+    u : 0, v : 0,
+    for k : j - JMAX thru j - 1 do (u : u + c(1, j - k)*sig[k] + s(1, j - k)*rho[k],
+                                    v : v + c(1, j - k)*rho[k] - s(1, j - k)*sig[k]),
+    for k : 1 thru JMAX do (u : u + sgn*c(1, k)*sig[j + k] - s(1, k)*rho[j + k],
+                            v : v + c(1, k)*rho[j + k] + s(1, k)*sig[j + k]),
+    u1[1][j] : -u/j, v1[1][j] : v/j),
+  u2 : makelist(0, j, 1, JMAX), v2 : copylist(u2),
+  for j : 1 thru JMAX do (
+    u : v1[1][j], v : u1[1][j],
+    for l : 1 thru j - 1 do (u : u + u1[1][j - l]*sig[l] + v1[1][j - l]*rho[l],
+                             v : v + u1[1][j - l]*rho[l] - v1[1][j - l]*sig[l]),
+    for l : 1 thru JMAX do (
+      u : u - u1[1][j + l]*sig[l] + u1[1][l]*sig[j + l] + v1[1][j + l]*rho[l] - v1[1][l]*rho[j + l],
+      block([t : u1[1][j + l]*rho[l] + u1[1][l]*rho[j + l] + v1[1][j + l]*sig[l] + v1[1][l]*sig[j + l]],
+        if ok then v : v + t else u : u + t)),
+    u2[j] : -u/j, v2[j] : v/j),
+  [u1, v1, u2, v2, u10])$
+/* StoredCoefficients::new and value at the mean longitude lam; c0 = the constant of F - <F> in L,
+   or, for Orekit, C^0 = (1/pi) int F dL, which the caller passes as `c0orekit`. */
+assemble(k, h, a, n, lam, cc, ss, c0orekit, ok) := block([rs, rho, sig, q, u1, v1, u2, v2, u10, B, c0,
+    k20 : 0, to2an, to4an, di1, di2, cij0, cs, sn, L, Fe, center, out],
+  rs : rhosig(k, h), rho : rs[1], sig : rs[2], B : sqrt(1 - k^2 - h^2),
+  q : uv(cc, ss, rho, sig, ok), u1 : q[1], v1 : q[2], u2 : q[3], v2 : q[4], u10 : q[5],
+  for j : 1 thru JMAX do k20 : k20 + 2*(sig[j]^2 + rho[j]^2)/j^2,
+  to2an : 3/(2*a*n), to4an : to2an/2,
+  c0 : if ok then makelist(-sum(cc[i][j]*rho[j] + ss[i][j]*sig[j], j, 1, JMAX), i, 1, 6) else c0orekit,
+  di1 : makelist(-c0[i]/n, i, 1, 6), di1[6] : di1[6] + to2an*u10,
+  di2 : makelist(0, i, 1, 6), di2[6] : -to4an*c0[1],
+  /* the true longitude at lam, through the eccentric longitude */
+  Fe : lam, for it : 1 thru 60 do Fe : Fe - (Fe - k*sin(Fe) + h*cos(Fe) - lam)/(1 - k*cos(Fe) - h*sin(Fe)),
+  L : atan2((1 - k^2/(1 + B))*sin(Fe) + h*k/(1 + B)*cos(Fe) - h,
+            (1 - h^2/(1 + B))*cos(Fe) + h*k/(1 + B)*sin(Fe) - k),
+  L : L + 2*%pi*round((lam - L)/(2*%pi)),
+  center : L - lam,
+  out : makelist(0, i, 1, 6),
+  for i : 1 thru 6 do (
+    cij0 : -di2[i]*k20,
+    out[i] : center*di1[i] + center^2*di2[i],
+    for j : 1 thru JMAX do (
+      cs : u1[i][j]/n, sn : v1[i][j]/n,
+      if i = 6 then (
+        cs : cs - to2an*u2[j], sn : sn - to2an*v2[j],
+        if ok then (cs : cs + 2*to2an*c0[1]*rho[j]/j^2, sn : sn + 2*to2an*c0[1]*sig[j]/j^2)),
+      cij0 : cij0 - cs*rho[j] - sn*sig[j],
+      out[i] : out[i] + cs*cos(j*L) + sn*sin(j*L)),
+    out[i] : out[i] + cij0),
+  [bfloat(out), Fe])$
+zero6 : makelist(makelist(0, j, 1, JMAX), i, 1, 6)$
+unit(i) := block([c : copylist(zero6)], c[i] : append([1], makelist(0, j, 2, JMAX)), c)$
+closed(k, h, a, n, Fe) := block([B : sqrt(1 - k^2 - h^2), b, P, Q, R, sF : sin(Fe), cF : cos(Fe), G],
+  b : 1/(1 + B), P : 1 - k^2 - b*h^2, Q : b*B*h*k, R : h*B/2,
+  G : -P*cF + Q*sF - (k*P + h*Q)*sF^2/2 + (h*P - k*Q)*sF*cF/2 - k*R*sF + h*R*cF,
+  [bfloat((P*sF + Q*cF + R)/n), bfloat(-3/(2*a*n)*(G - (k*P - 3*h*Q)/4))])$
+block([worst : [0, 0], orekit : [0, 0], cnst : 0, cnsto : 0, a : 1, n : 1, row, eo],
+  for kh in [[bfloat(8/1000), bfloat(-6/1000)], [bfloat(8/100), bfloat(-6/100)]] do block([k : kh[1], h : kh[2], ix],
+    ix : if k < 1/20 then 1 else 2,
+    for lam in makelist(bfloat(1/10 + %pi*i/4), i, 0, 7) do block([cf, rk, ra, rko, rao, c, f],
+      /* F = cos L in k (element 2), then in a (element 1); C^1 = 1, C^0 = 0. */
+      rk : assemble(k, h, a, n, lam, unit(2), zero6, makelist(0, i, 1, 6), true),
+      ra : assemble(k, h, a, n, lam, unit(1), zero6, makelist(0, i, 1, 6), true),
+      rko : assemble(k, h, a, n, lam, unit(2), zero6, makelist(0, i, 1, 6), false),
+      rao : assemble(k, h, a, n, lam, unit(1), zero6, makelist(0, i, 1, 6), false),
+      cf : closed(k, h, a, n, rk[2]),
+      row : [rk[1][2] - cf[1], ra[1][1] - cf[1], ra[1][6] - cf[2],
+             rk[1][1], rk[1][3], rk[1][6], ra[1][2], ra[1][3]],
+      worst[ix] : max(worst[ix], lmax(map(abs, row))),
+      eo : [rko[1][2] - cf[1], rao[1][1] - cf[1], rao[1][6] - cf[2]],
+      orekit[ix] : max(orekit[ix], lmax(map(abs, eo))),
+      /* F = c in every element: no short period; Orekit passes C^0 = 2c. */
+      c : makelist(bfloat(i/7), i, 1, 6),
+      f : assemble(k, h, a, n, lam, zero6, zero6, 2*c, true),
+      cnst : max(cnst, lmax(map(abs, f[1]))),
+      f : assemble(k, h, a, n, lam, zero6, zero6, 2*c, false),
+      cnsto : max(cnsto, lmax(map(abs, f[1]))))),
+  print("F = cos L, shipped minus closed form: e = 0.01", worst[1], "  e = 0.1", worst[2]),
+  print("F = cos L, Orekit minus closed form: e = 0.01", orekit[1], "  e = 0.1", orekit[2]),
+  print("F = c: shipped", cnst, "  Orekit", cnsto),
+  must(is(worst[1] < 1b-26 and worst[2] < 1b-13 and orekit[1] > 1b-6),
+       "(4) holds: the shipped assembly is the closed form of F = cos L to the e^13 of its cut; Orekit is off at e^2"),
+  must(is(cnst < 1b-35 and cnsto > 1b-3),
+       "(4) holds: a constant rate gets no short period; Orekit's D1 gives -(2c/n)(L - lambda)"))$
+
+print("DONE")$

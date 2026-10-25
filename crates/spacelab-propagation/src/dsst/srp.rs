@@ -173,8 +173,8 @@ impl DsstSolarRadiationPressure {
 
     /// The osculating equinoctial state `mean + short-period` for a **mean** equinoctial state
     /// `[a, k, h, q, p, λ]` and this SRP model's Sun position `sun_pos` (m). Mirrors
-    /// [`super::third_body::DsstThirdBody::osculating`]: the same cylindrical-shadow limits and Gauss
-    /// order the mean rates use feed the shared Gaussian short-period engine
+    /// [`super::third_body::DsstThirdBody::osculating`]: the same cylindrical-shadow limits the mean
+    /// rates use feed the shared Gaussian short-period engine
     /// (`gaussian_short_period::short_period_correction`).
     #[must_use]
     pub fn osculating(&self, mean: [f64; 6], sun_pos: [f64; 3]) -> [f64; 6] {
@@ -182,13 +182,8 @@ impl DsstSolarRadiationPressure {
             mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], self.mu,
         );
         let ll = self.l_limits(&aux, sun_pos);
-        let order = self.gauss_order(&aux, sun_pos);
-        let sp = gaussian_short_period::short_period_correction(
-            &aux,
-            ll,
-            order,
-            self.acceleration(sun_pos),
-        );
+        let sp =
+            gaussian_short_period::short_period_correction(&aux, ll, self.acceleration(sun_pos));
         let mut osc = mean;
         for i in 0..6 {
             osc[i] += sp[i];

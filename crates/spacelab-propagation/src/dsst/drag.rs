@@ -143,8 +143,8 @@ impl DsstAtmosphericDrag {
 
     /// The osculating equinoctial state `mean + short-period` for a **mean** equinoctial state
     /// `[a, k, h, q, p, λ]` and the density + co-rotation law supplied by `atmosphere`. Mirrors
-    /// [`super::third_body::DsstThirdBody::osculating`]: the same atmospheric-arc limits and Gauss
-    /// order the mean rates use feed the shared Gaussian short-period engine
+    /// [`super::third_body::DsstThirdBody::osculating`]: the same atmospheric-arc limits the mean rates
+    /// use feed the shared Gaussian short-period engine
     /// (`gaussian_short_period::short_period_correction`).
     #[must_use]
     pub fn osculating<A: Atmosphere>(&self, mean: [f64; 6], atmosphere: &A) -> [f64; 6] {
@@ -152,13 +152,8 @@ impl DsstAtmosphericDrag {
             mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], self.mu,
         );
         let ll = self.l_limits(&aux);
-        let order = self.gauss_order(&aux, atmosphere);
-        let sp = gaussian_short_period::short_period_correction(
-            &aux,
-            ll,
-            order,
-            self.acceleration(atmosphere),
-        );
+        let sp =
+            gaussian_short_period::short_period_correction(&aux, ll, self.acceleration(atmosphere));
         let mut osc = mean;
         for i in 0..6 {
             osc[i] += sp[i];

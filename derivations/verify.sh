@@ -489,10 +489,10 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
 
     out=$(macf shadow_lens.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
-    if [ "$holds" -eq 8 ] && printf '%s' "$out" | grep -q '^DONE'; then
-        ok "maxima shadow_lens.mac: Orekit's lens formula is the circle-intersection area, continuous onto both plateaus"
+    if [ "$holds" -eq 15 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima shadow_lens.mac: the shipped segment form and Orekit's lens are the circle-intersection area, the series is x - sin x's, and dA/dd is minus the chord"
     else
-        bad "maxima shadow_lens.mac" "expected 8 identities to hold, found $holds"
+        bad "maxima shadow_lens.mac" "expected 15 identities to hold, found $holds"
     fi
 
     out=$(macf decimal_year.mac)
@@ -674,6 +674,35 @@ sys.exit(0 if a == b else 1)
         ok "pari dsst_gaussian_short_period.gp: rho_j + i sigma_j by residues, the product to sum at JMAX = 12 in exact rationals, F = cos L's closed forms for every ellipse"
     else
         bad "pari dsst_gaussian_short_period.gp" "expected 6 checks to hold and no error, found $holds"
+    fi
+
+    # The lens reference: every row the script prints is in the file gated on it, verbatim, and
+    # every value lies inside an Arb ball where a C compiler and FLINT are installed.
+    lens=$(timeout 300 gp -q -f shadow_lens.gp </dev/null 2>&1)
+    rows=$(printf '%s\n' "$lens" | grep -E '^    \(')
+    n=$(printf '%s\n' "$rows" | grep -c .)
+    if [ "$n" -eq 184 ] && ! printf '%s' "$lens" | grep -qF '***'; then
+        missing=$(printf '%s\n' "$rows" | grep -cvxF -f <(cat ../crates/spacelab-propagation/tests/shadow_lens.rs ../crates/spacelab-propagation/src/shadow.rs))
+        if [ "$missing" -eq 0 ]; then
+            ok "pari shadow_lens.gp: the 171 lens and 13 x - sin x reference rows, at 200 digits on exact doubles, are in the tests verbatim"
+        else
+            bad "pari shadow_lens.gp" "$missing printed rows are not in tests/shadow_lens.rs or src/shadow.rs"
+        fi
+    else
+        bad "pari shadow_lens.gp" "expected 184 rows and no error, found $n"
+    fi
+    if have cc && pkg-config --exists flint 2>/dev/null; then
+        tmp=$(mktemp -d)
+        # shellcheck disable=SC2046 # pkg-config prints separate flags
+        if cc -O2 shadow_lens_arb.c -o "$tmp/arb" $(pkg-config --cflags --libs flint) 2>"$tmp/cc.log" \
+            && cert=$(printf '%s\n' "$lens" | timeout 120 "$tmp/arb"); then
+            ok "arb shadow_lens_arb.c: $cert"
+        else
+            bad "arb shadow_lens_arb.c" "$(cat "$tmp/cc.log")${cert:-}"
+        fi
+        rm -rf "$tmp"
+    else
+        skip "arb shadow_lens_arb.c" "a C compiler and FLINT"
     fi
 else
     skip "pari checks" gp

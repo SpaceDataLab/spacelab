@@ -10,8 +10,9 @@
 //! * **Integration limits** (`getLLimits`) restrict the quadrature to the sunlit true-longitude arc
 //!   `[L_exit, L_entry]` using the **cylindrical** Earth-shadow (the quartic in `cos L`,
 //!   Danielson 3.5); and
-//! * **the acceleration** weights each node by the **conical** umbra/penumbra lighting ratio
-//!   (`SolarRadiationPressure.getLightingRatio` via `OccultationEngine`).
+//! * **the acceleration** weights each node by the **conical** umbra/penumbra lighting ratio,
+//!   [`crate::shadow::lighting_ratio`]: the lens without cancellation, where Orekit's `acos`
+//!   arrangement of the same area is up to 6.5e-7 off near a tangency (`shadow.rs`).
 //!
 //! # Independent validation
 //!
@@ -43,7 +44,7 @@
 //! the inner half of each penumbra and keeps the deficit of the outer half, where the cylinder
 //! alone, `ν = 1` on its arc, is 4.2e-5 off.
 
-use libm::{acos, asin, atan, atan2, cbrt, copysign, cos, fabs, floor, sin, sqrt};
+use libm::{atan, atan2, cbrt, copysign, cos, fabs, floor, sin, sqrt};
 
 use super::auxiliary::DsstAuxiliary;
 use super::gaussian::{self, NodeState};
@@ -60,9 +61,6 @@ pub const SUN_RADIUS: f64 = 6.957e8;
 
 /// Threshold for the shadow equation `|S| < S_ZERO` (`DSSTSolarRadiationPressure.S_ZERO`).
 const S_ZERO: f64 = 1.0e-6;
-
-/// Angular margin for the umbra/penumbra transition (`SolarRadiationPressure.ANGULAR_MARGIN`).
-const ANGULAR_MARGIN: f64 = 1.0e-10;
 
 /// Solar-radiation-pressure contribution to the DSST mean-element rates (cannonball spacecraft).
 ///
@@ -134,7 +132,7 @@ impl DsstSolarRadiationPressure {
 
     /// The per-node cannonball SRP acceleration closure `q(node) = scale·λ·k_ref·(r − r☉)/|r − r☉|³`,
     /// with `scale = cr·(S/m)`, `k_ref = P_ref·d_ref²` and `λ` the conical lighting ratio
-    /// ([`lighting_ratio`]) — Orekit's `SolarRadiationPressure.acceleration` +
+    /// ([`crate::shadow::lighting_ratio`]) — Orekit's `SolarRadiationPressure.acceleration` +
     /// `IsotropicRadiationSingleCoefficient`. Shared by the mean-rate averaging, the Gauss-order
     /// selection and the short-period Fourier quadrature so all three see the identical acceleration.
     fn acceleration(&self, sun_pos: [f64; 3]) -> impl Fn(&NodeState) -> [f64; 3] {
@@ -149,7 +147,7 @@ impl DsstSolarRadiationPressure {
                 node.pos[2] - sun_pos[2],
             ];
             let r2 = gaussian::dot(sun_sat, sun_sat);
-            let ratio = lighting_ratio(node.pos, sun_pos, sun_sat, r2, ae);
+            let ratio = crate::shadow::lighting_ratio(node.pos, sun_pos, ae);
             let raw_p = ratio * k_ref / r2;
             let flux_scalar = raw_p / sqrt(r2);
             let flux = [
@@ -316,87 +314,6 @@ impl DsstSolarRadiationPressure {
             }
         }
         ll
-    }
-}
-
-/// Conical lighting ratio `λ ∈ [0, 1]` (Sun visibility) for a single spherical occulting body of
-/// radius `ae` — Orekit's `SolarRadiationPressure.getLightingRatio` with `OccultationEngine.angles`
-/// reduced to a sphere. `sun_sat = pos − sun_pos`, `r2 = |sun_sat|²`.
-fn lighting_ratio(pos: [f64; 3], sun_pos: [f64; 3], sun_sat: [f64; 3], r2: f64, ae: f64) -> f64 {
-    // isSunCenteredFrame: never for a geocentric Sun (~1 AU); kept for faithfulness.
-    if gaussian::norm(sun_pos) < 2.0 * SUN_RADIUS {
-        return 1.0;
-    }
-    // OccultationEngine.angles (sphere): separation, occulting limb radius, occulted apparent radius.
-    let separation = angle(sun_sat, pos);
-    let occulted_apparent_radius = asin(SUN_RADIUS / sqrt(r2));
-    let limb_radius = asin(ae / gaussian::norm(pos));
-    masking_ratio(separation, limb_radius, occulted_apparent_radius)
-}
-
-/// Masking ratio for one occulted/occulting pair — Orekit's `SolarRadiationPressure.maskingRatio`.
-/// `0` in full umbra, `1` in full Sun, a lens-overlap fraction in penumbra.
-fn masking_ratio(separation: f64, alpha_central: f64, alpha_sun: f64) -> f64 {
-    use core::f64::consts::PI;
-    if separation - alpha_central + alpha_sun <= ANGULAR_MARGIN {
-        // Complete umbra.
-        0.0
-    } else if separation - alpha_central - alpha_sun < -ANGULAR_MARGIN {
-        // Penumbra: overlap area of the two apparent disks.
-        let s_ea2 = separation * separation;
-        let oo2s_ea = 1.0 / (2.0 * separation);
-        let a_s2 = alpha_sun * alpha_sun;
-        let a_e2 = alpha_central * alpha_central;
-        let a_e2m_a_s2 = a_e2 - a_s2;
-
-        let alpha1 = (s_ea2 - a_e2m_a_s2) * oo2s_ea;
-        let alpha2 = (s_ea2 + a_e2m_a_s2) * oo2s_ea;
-
-        // Protection against numerical inaccuracy at boundaries (Precision.SAFE_MIN, nextDown(1)).
-        let almost0 = f64::MIN_POSITIVE;
-        let almost1 = f64::from_bits(0x3FEF_FFFF_FFFF_FFFF);
-        let a1o_a_s = min_df(almost1, max_df(-almost1, alpha1 / alpha_sun));
-        let a_s2m_a12 = max_df(almost0, a_s2 - alpha1 * alpha1);
-        let a2o_a_e = min_df(almost1, max_df(-almost1, alpha2 / alpha_central));
-        let a_e2m_a22 = max_df(almost0, a_e2 - alpha2 * alpha2);
-
-        let p1 = a_s2 * acos(a1o_a_s) - alpha1 * sqrt(a_s2m_a12);
-        let p2 = a_e2 * acos(a2o_a_e) - alpha2 * sqrt(a_e2m_a22);
-
-        1.0 - (p1 + p2) / (PI * a_s2)
-    } else {
-        1.0
-    }
-}
-
-/// `min(d, f)` with Orekit's `SolarRadiationPressure.min(double, T)` tie-handling (returns `d` iff
-/// `f > d`).
-fn min_df(d: f64, f: f64) -> f64 {
-    if f > d { d } else { f }
-}
-
-/// `max(d, f)` with Orekit's `SolarRadiationPressure.max(double, T)` tie-handling (returns `d` iff
-/// `f ≤ d`).
-fn max_df(d: f64, f: f64) -> f64 {
-    if f <= d { d } else { f }
-}
-
-/// Angle between two 3-vectors — Hipparchus `Vector3D.angle` (sine branch near (anti)parallel, cosine
-/// branch otherwise).
-fn angle(u: [f64; 3], v: [f64; 3]) -> f64 {
-    use core::f64::consts::PI;
-    let norm_product = gaussian::norm(u) * gaussian::norm(v);
-    let d = gaussian::dot_ext(u, v);
-    let threshold = norm_product * 0.9999;
-    if d < -threshold || d > threshold {
-        let cross_norm = gaussian::norm(gaussian::cross(u, v));
-        if d >= 0.0 {
-            asin(cross_norm / norm_product)
-        } else {
-            PI - asin(cross_norm / norm_product)
-        }
-    } else {
-        acos(d / norm_product)
     }
 }
 
@@ -1208,54 +1125,6 @@ mod tests {
         assert!(!precision_equals(f64::INFINITY, smallest_nan));
     }
 
-    /// The angle between two vectors, against `atan2(|u×v|, u·v)`.
-    ///
-    /// That is a second construction, not a restatement: this port switches between `asin` of the
-    /// cross-product norm and `acos` of the dot product depending on how close to (anti)parallel the
-    /// pair is, and `atan2` needs no such split. Where they disagree, one of them is wrong.
-    #[test]
-    fn the_angle_agrees_with_the_atan2_form() {
-        let reference = |u: [f64; 3], v: [f64; 3]| {
-            atan2(
-                gaussian::norm(gaussian::cross(u, v)),
-                gaussian::dot_ext(u, v),
-            )
-        };
-        let mut worst = 0.0_f64;
-        // Nearly parallel, nearly antiparallel, and everything between: `t` sweeps the second
-        // vector from `+u` through orthogonal to `−u`, crossing both `0.9999` thresholds.
-        let u = [3.0, -4.0, 12.0];
-        let w = [12.0, 4.0, -1.5];
-        for i in 0..=2000_u32 {
-            let t = f64::from(i) / 1000.0 - 1.0;
-            let s = 1.0 - libm::fabs(t);
-            let v = [
-                t * u[0] + s * w[0],
-                t * u[1] + s * w[1],
-                t * u[2] + s * w[2],
-            ];
-            if gaussian::norm(v) < 1e-12 {
-                continue;
-            }
-            // `nan_max`, never a bare `>`: `asin` of an argument above one is NaN, and
-            // `NaN > worst` is false, so a hand-written running maximum silently reports the
-            // best case for the one sample that has no answer at all.
-            worst = nan_max(worst, libm::fabs(angle(u, v) - reference(u, v)));
-        }
-        assert!(worst < 1e-14, "worst angle disagreement {worst:.3e} rad");
-        // The three exact geometries, where the answer is known without any reference at all.
-        let eps = 1e-15;
-        assert!(
-            libm::fabs(angle([1.0, 0.0, 0.0], [0.0, 2.0, 0.0]) - core::f64::consts::FRAC_PI_2)
-                < eps
-        );
-        assert!(angle([1.0, 2.0, 3.0], [2.0, 4.0, 6.0]) < eps);
-        assert!(
-            libm::fabs(angle([1.0, 2.0, 3.0], [-2.0, -4.0, -6.0]) - core::f64::consts::PI) < eps
-        );
-        std::println!("angle vs atan2 form: worst {worst:.3e} rad");
-    }
-
     /// `normalize_angle` lands in `[center − π, center + π)` and moves by a whole number of turns.
     #[test]
     fn normalize_angle_shifts_by_whole_turns_into_the_window() {
@@ -1328,137 +1197,6 @@ mod tests {
             "worst true-longitude miss {worst_v:.3e} rad"
         );
         std::println!("equinoctial Kepler: worst L {worst_e:.3e} rad, worst Lv {worst_v:.3e} rad");
-    }
-
-    /// The penumbra fraction, against the closed-form area of a circular lens.
-    ///
-    /// The port computes the overlap as the sum of two circular segments, each written as
-    /// `r²·acos(x/r) − x·√(r²−x²)` about the radical line. The classical form below reaches the
-    /// same area through Heron's formula for the triangle of the two centres and an intersection
-    /// point, so it shares no expression with the code — and neither shares anything with the
-    /// propagated rate that was this file's only oracle.
-    #[test]
-    fn the_masking_ratio_matches_the_closed_form_lens_area() {
-        use core::f64::consts::PI;
-        // `1 − A(d, r_sun, r_body) / (π r_sun²)`, with `A` the standard two-circle overlap.
-        let sunlit_fraction = |d: f64, r_s: f64, r_c: f64| {
-            let seg = |r: f64, other: f64| {
-                let x = (d * d + r * r - other * other) / (2.0 * d * r);
-                r * r * acos(x.clamp(-1.0, 1.0))
-            };
-            let tri = ((-d + r_s + r_c) * (d + r_s - r_c) * (d - r_s + r_c) * (d + r_s + r_c))
-                .max(0.0)
-                .sqrt();
-            1.0 - (seg(r_s, r_c) + seg(r_c, r_s) - 0.5 * tri) / (PI * r_s * r_s)
-        };
-        // Both forms end in `acos`, whose derivative `−1/√(1−x²)` blows up as the disks approach
-        // tangency, so near either limit a one-ulp difference in the argument is amplified without
-        // bound and a flat tolerance would say more about the sweep's endpoints than about the
-        // code. The bound is therefore the geometry's own condition number: how far the ratio moves
-        // per ulp of each `acos` argument. Measured over the sweep below the disagreement never
-        // exceeds `3.02` of those units — this asserts `16`, and the loosest sample it admits is
-        // still `6.7e-8`, orders below anything a mutated operator produces.
-        let condition = |d: f64, r_s: f64, r_c: f64| {
-            let sens = |r: f64, other: f64| {
-                let x = ((d * d + r * r - other * other) / (2.0 * d * r)).clamp(-1.0, 1.0);
-                r * r / (1.0 - x * x).max(f64::MIN_POSITIVE).sqrt()
-            };
-            (sens(r_s, r_c) + sens(r_c, r_s)) / (PI * r_s * r_s)
-        };
-        // An Earth limb as seen from LEO and the Sun's disk at 1 AU, then three more shape ratios —
-        // including one where the occulting disk is the smaller of the two, an annular eclipse — so
-        // the result cannot come out right by a coincidence of one geometry.
-        let mut worst = 0.0_f64;
-        for &(r_c, r_s) in &[
-            (1.1478_f64, 0.004_653_f64),
-            (0.25, 0.1),
-            (0.3, 0.32),
-            (1.0, 0.9),
-            (2.0, 0.02),
-        ] {
-            let (lo, span) = ((r_c - r_s).abs(), 2.0 * r_s);
-            for i in 1..400_u32 {
-                let d = lo + span * f64::from(i) / 400.0;
-                let miss = libm::fabs(masking_ratio(d, r_c, r_s) - sunlit_fraction(d, r_s, r_c));
-                worst = nan_max(worst, miss / (f64::EPSILON * condition(d, r_s, r_c)));
-            }
-        }
-        assert!(worst < 16.0, "worst penumbra disagreement {worst:.3e} ulps");
-        std::println!("masking ratio vs closed-form lens area: worst {worst:.3e} condition ulps");
-
-        // The two regime boundaries, where the answer is exact rather than approximate. Inside the
-        // umbra the Sun's disk is wholly covered and the port must return a hard zero, not the
-        // `~1e-8` the segment formula leaves behind when its `acos` argument is clamped.
-        let (r_c, r_s) = (1.1478_f64, 0.004_653_f64);
-        assert!(
-            masking_ratio(r_c - r_s - 1e-6, r_c, r_s) == 0.0,
-            "deep umbra"
-        );
-        assert!(masking_ratio(0.0, r_c, r_s) == 0.0, "concentric umbra");
-        assert!(
-            masking_ratio(r_c + r_s, r_c, r_s) == 1.0,
-            "external tangency"
-        );
-        assert!(masking_ratio(PI, r_c, r_s) == 1.0, "antisolar");
-    }
-
-    /// The Sun-centred-frame guard in `lighting_ratio`, which nothing else can reach.
-    ///
-    /// Orekit short-circuits to full illumination when the "Sun" is closer than two solar radii,
-    /// because there the apparent-radius arcsine has no answer. In a geocentric frame the Sun is
-    /// never that close, so the guard is invisible to every physical case — and its three
-    /// mutations survived. Driven directly it is sharp: the same geometry returns `0` (the
-    /// satellite is in the umbra) the moment the guard does not fire.
-    #[test]
-    fn the_lighting_ratio_short_circuits_only_inside_two_solar_radii() {
-        let ae = 6_378_136.46;
-        let pos = [-7.0e6, 0.0, 0.0];
-        let at = |d: f64| {
-            let sun_pos = [d, 0.0, 0.0];
-            let sun_sat = [pos[0] - d, 0.0, 0.0];
-            lighting_ratio(pos, sun_pos, sun_sat, gaussian::dot(sun_sat, sun_sat), ae)
-        };
-        // Inside the guard: full Sun by fiat, even though the geometry is a total eclipse.
-        assert!(
-            at(1.0e9) == 1.0,
-            "inside two solar radii the guard must fire"
-        );
-        // Exactly at two solar radii the comparison is strict, so the guard must not fire.
-        assert!(
-            at(2.0 * SUN_RADIUS) == 0.0,
-            "the bound itself is outside the guard"
-        );
-        // And at a real Sun distance the umbra is an umbra.
-        assert!(
-            at(1.495_978_7e11) == 0.0,
-            "a geocentric Sun never trips the guard"
-        );
-    }
-
-    /// Orekit's `min`/`max` differ from `f64::min`/`f64::max` only in which argument a tie returns,
-    /// and that is observable through the sign of zero.
-    #[test]
-    fn the_orekit_min_max_return_the_documented_argument_on_a_tie() {
-        assert!(
-            min_df(-0.0, 0.0).is_sign_positive(),
-            "min_df must return f on a tie"
-        );
-        assert!(
-            max_df(-0.0, 0.0).is_sign_negative(),
-            "max_df must return d on a tie, and -0.0 ties with 0.0"
-        );
-        assert!(
-            max_df(0.0, -0.0).is_sign_positive(),
-            "max_df must return d on a tie"
-        );
-        assert!(
-            min_df(0.0, -0.0).is_sign_negative(),
-            "min_df must return f when f < d"
-        );
-        for (d, f) in [(1.0, 2.0), (2.0, 1.0), (-3.0, 4.0), (5.0, -6.0)] {
-            assert!(libm::fabs(min_df(d, f) - d.min(f)) < f64::EPSILON);
-            assert!(libm::fabs(max_df(d, f) - d.max(f)) < f64::EPSILON);
-        }
     }
 
     /// Classical true longitude for equinoctial `(k, h, λ)`, used as the full-orbit centre.

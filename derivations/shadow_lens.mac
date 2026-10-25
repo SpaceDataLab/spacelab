@@ -1,18 +1,27 @@
-/* The conical shadow's lens formula, against the textbook one, for every radius and separation.
+/* The conical shadow's lens: the shipped segment form and Orekit's arrangement, against the
+   textbook circle-intersection area, for every radius and separation.
 
-   `spacelab-propagation::shadow::masking_ratio` carries Orekit's arrangement of the overlap of two
-   apparent disks, the Sun's (radius s) and the occulter's (radius e), centres d apart:
+   The overlap of two discs, the Sun's (radius s) and the occulter's (radius e), centres d apart:
 
-       a1 = (d^2 - (e^2 - s^2))/(2 d),   a2 = (d^2 + (e^2 - s^2))/(2 d),
-       p1 = s^2 acos(a1/s) - a1 sqrt(s^2 - a1^2),   p2 = e^2 acos(a2/e) - a2 sqrt(e^2 - a2^2),
-       visible = 1 - (p1 + p2)/(pi s^2).
+     textbook   A = s^2 acos((d^2 + s^2 - e^2)/(2 d s)) + e^2 acos((d^2 + e^2 - s^2)/(2 d e))
+                    - sqrt(heron)/2,
+                heron = (-d + s + e)(d + s - e)(d - s + e)(d + s + e);
+     Orekit     a1 = (d^2 - (e^2 - s^2))/(2 d),   a2 = (d^2 + (e^2 - s^2))/(2 d),
+                A = s^2 acos(a1/s) - a1 sqrt(s^2 - a1^2) + e^2 acos(a2/e) - a2 sqrt(e^2 - a2^2);
+     shipped    A = (s^2 (x_s - sin x_s) + e^2 (x_e - sin x_e))/2,
+                x_s/2 = atan2(sqrt(heron), d^2 + s^2 - e^2),  x_e/2 = atan2(sqrt(heron), d^2 + e^2 - s^2),
+                heron = (sum - d)(d - diff)(d + diff)(d + sum),  sum = e + s,  diff = e - s,
+                x - sin x by its Taylor series below x = 2.
 
-   The test compares it with the circle-intersection area at five separations. Here the two are the
-   same expression: a1 and a2 are the distances from each centre to the common chord, so both
-   square roots are its half-length h, and d h is twice Heron's area of the triangle (d, s, e).
-   Then the formula meets the plateaus continuously: exactly 0 where the Sun's disk is internally
-   tangent, exactly 1 where the disks touch from outside. Last, the identity `angle` relies on near
-   0 and pi.                                                                                      */
+   Orekit's is the arrangement `shadow::lens_area` replaced (tests/shadow_lens.rs keeps it as a
+   comparator); the shipped one is `lens_area`. (1)-(3): Orekit's is the textbook area -- a1, a2
+   are the distances from each centre to the common chord, both square roots its half-length h,
+   d h twice Heron's area -- and meets both plateaus exactly. (4): the identity behind `angle`'s
+   atan2(|u x v|, u.v). (5): both arrangements against the textbook at 40 digits. (6)-(7): the
+   shipped form is the textbook area -- its atan2 is the acos of the law of cosines, its factored
+   product is Heron's, and r^2 (x - sin x)/2 at x = 2 theta is Orekit's segment. (8): the series,
+   its recurrence and its remainder. (9): dA/dd is minus the chord, sqrt(heron)/d, so the area's
+   condition number in d is kappa = sqrt(heron)/A, the bound tests/shadow_lens.rs is gated on.   */
 
 must(ok, what) := if ok then print(what) else error("FAILED:", what)$
 assume(d > 0, s > 0, e > s)$
@@ -52,18 +61,69 @@ cr : [u2*v3 - u3*v2, u3*v1 - u1*v3, u1*v2 - u2*v1]$
 must(is(ratsimp(cr.cr + (u.v)^2 - (u.u)*(v.v)) = 0),
      "(4) holds: |u x v|^2 + (u.v)^2 = |u|^2 |v|^2")$
 
-/* ---- (5) a numeric spot check, the test's own case, in 40-digit bigfloat ----------------------
-   In f64 the two forms part by 7e-14 here: e^2/s^2 = 100 amplifies the rounding of both. */
+/* ---- (5) the test's own case, in 40-digit bigfloat --------------------------------------------
+   In f64 the Orekit form and the textbook part by 7e-14 here: e^2/s^2 = 100 amplifies the rounding
+   of both. */
 fpprec : 40$
 ref(dd, big, small) := bfloat(1 - (small^2*acos((dd^2 + small^2 - big^2)/(2*dd*small))
                                  + big^2*acos((dd^2 + big^2 - small^2)/(2*dd*big))
                                  - sqrt(subst([d = dd, s = small, e = big], heron))/2)/(%pi*small^2))$
-ship(dd, big, small) := bfloat(subst([d = dd, s = small, e = big],
+orekit(dd, big, small) := bfloat(subst([d = dd, s = small, e = big],
                              1 - (s^2*acos(a1/s) - a1*sqrt(s^2 - a1^2)
                                   + e^2*acos(a2/e) - a2*sqrt(e^2 - a2^2))/(%pi*s^2)))$
-worst : lmax(makelist(abs(ship(dd, 1/10, 1/100) - ref(dd, 1/10, 1/100)), dd,
+worst : lmax(makelist(abs(orekit(dd, 1/10, 1/100) - ref(dd, 1/10, 1/100)), dd,
                       [91/1000, 95/1000, 1/10, 105/1000, 109/1000]))$
-print("shipped minus textbook at the test's five separations:", worst)$
+print("Orekit's form minus textbook at the test's five separations:", worst)$
 must(is(worst < 10^-35), "(5) holds: the two forms agree to 1e-35 at the test's separations")$
+
+/* ---- (6) the shipped half-angles are the law-of-cosines angles, its product Heron's -----------
+   (sqrt(heron), d^2 + s^2 - e^2) has length 2 d s, so its atan2 -- in [0, pi], the first argument
+   being >= 0 -- is the angle whose cosine is (d^2 + s^2 - e^2)/(2 d s) = a1/s: the acos of the
+   textbook and of Orekit. The same for e. */
+must(is(ratsimp(heron + (d^2 + s^2 - e^2)^2 - 4*d^2*s^2) = 0)
+     and is(ratsimp(heron + (d^2 + e^2 - s^2)^2 - 4*d^2*e^2) = 0),
+     "(6) holds: sqrt(heron)^2 + (d^2 + r^2 - r'^2)^2 = (2 d r)^2 for both discs")$
+shipped_heron : block([sum : e + s, diff : e - s], (sum - d)*(d - diff)*(d + diff)*(d + sum))$
+must(is(ratsimp(shipped_heron - heron) = 0),
+     "(6) holds: (sum - d)(d - diff)(d + diff)(d + sum) is Heron's product")$
+must(is(ratsimp((d^2 - (e - s)*(e + s)) - (d^2 + s^2 - e^2)) = 0)
+     and is(ratsimp((d^2 + (e - s)*(e + s)) - (d^2 + e^2 - s^2)) = 0),
+     "(6) holds: d^2 -+ diff sum are the two atan2 denominators")$
+
+/* ---- (7) the segment ---------------------------------------------------------------------------
+   With a = r cos(theta), theta in [0, pi] so sqrt(r^2 - a^2) = r sin(theta): Orekit's
+   r^2 acos(a/r) - a sqrt(r^2 - a^2) is r^2 (theta - sin theta cos theta) = r^2 (x - sin x)/2 at
+   x = 2 theta. */
+must(is(trigsimp(trigexpand(r^2*theta - r*cos(theta)*r*sin(theta)
+                            - r^2*(2*theta - sin(2*theta))/2)) = 0),
+     "(7) holds: r^2 theta - (r cos theta)(r sin theta) = r^2 (x - sin x)/2 at x = 2 theta")$
+
+/* ---- (8) x - sin x by its series ---------------------------------------------------------------
+   The code starts at x^3/6 and multiplies by -x^2/(n (n + 1)), n = 2k, for k = 2..12. */
+series_terms : block([term : x^3/6, out : [x^3/6]],
+  for k : 2 thru 12 do (term : -term*x^2/((2*k)*(2*k + 1)), out : endcons(term, out)),
+  out)$
+must(is(ratsimp(apply("+", series_terms) - taylor(x - sin(x), x, 0, 25)) = 0)
+     and is(ratsimp(apply("+", series_terms)
+                    - sum((-1)^(k + 1)*x^(2*k + 1)/(2*k + 1)!, k, 1, 12)) = 0),
+     "(8) holds: the recurrence builds x^3/3! - x^5/5! + ... + x^25/25!, the Taylor polynomial")$
+/* Below 2 the terms fall by x^2/((2k+2)(2k+3)) < 4/20 each, so the first one left out bounds the
+   remainder; it is largest against the sum at x = 2. Above 2, |sin x|/(x - sin x) falls on
+   [2, pi] (sin falls, x - sin x grows) and is at most 1/pi on [pi, 2 pi]. */
+rem : bfloat(2^27/27!/(2 - sin(2)))$
+ratio : bfloat(sin(2)/(2 - sin(2)))$
+print("remainder at x = 2:", rem, "  |sin x|/(x - sin x) at x = 2:", ratio)$
+must(is(rem < 12/10*10^-20) and is(ratio < 84/100),
+     "(8) holds: the remainder is under 1.2e-20 of the sum, and sin x is at most 0.84 of x - sin x above 2")$
+
+/* ---- (9) dA/dd is minus the chord ----------------------------------------------------------------
+   W = sqrt(heron) > 0 inside the penumbra, and by (6) sqrt(1 - c^2) = W/(2 d r) for each acos
+   argument c, so d(r^2 acos c)/dd = -r^2 c' (2 d r)/W. Then A' W is a rational function, and it
+   is -heron/d: A' = -W/d, the chord, and kappa = d |A'|/A = W/A. */
+cs : (d^2 + s^2 - e^2)/(2*d*s)$
+ce : (d^2 + e^2 - s^2)/(2*d*e)$
+a_prime_times_w : -s^2*diff(cs, d)*(2*d*s) - e^2*diff(ce, d)*(2*d*e) - diff(heron, d)/4$
+must(is(ratsimp(a_prime_times_w + heron/d) = 0),
+     "(9) holds: dA/dd = -sqrt(heron)/d, so kappa = sqrt(heron)/A")$
 
 print("DONE")$

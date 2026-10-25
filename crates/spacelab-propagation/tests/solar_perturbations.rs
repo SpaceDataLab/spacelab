@@ -212,8 +212,9 @@ fn srp_vanishes_in_the_cylindrical_shadow() {
 
 #[test]
 fn srp_follows_the_inverse_square_law() {
-    // Same sub-satellite geometry, Sun at 1 AU then 2 AU: the force must quarter.
-    let sat = [1000.0, 0.0, 0.0];
+    // Same sub-solar geometry, Sun at 1 AU then 2 AU: the force must quarter. 7000 km on the day
+    // side, outside the Earth, where the lighting ratio is exactly 1.
+    let sat = [7.0e6, 0.0, 0.0];
     let near = norm(srp([ASTRONOMICAL_UNIT, 0.0, 0.0]).acceleration::<f64>(0.0, &sat, &[0.0; 3]));
     let far =
         norm(srp([2.0 * ASTRONOMICAL_UNIT, 0.0, 0.0]).acceleration::<f64>(0.0, &sat, &[0.0; 3]));

@@ -1,29 +1,40 @@
-//! Conical umbra/penumbra shadow geometry for radiation forces — the smooth lighting ratio
-//! `λ ∈ [0, 1]` (fraction of the solar disk visible) past a spherical occulting body.
+//! Conical umbra/penumbra shadow geometry for radiation forces — the lighting ratio `ν ∈ [0, 1]`,
+//! the fraction of the solar disc a spherical occulting body leaves visible.
 //!
-//! The numerical (Cowell) [`crate::forces::SolarRadiationPressure`] previously gated illumination with
-//! a crude binary *cylindrical* Earth shadow (`ν ∈ {0, 1}`, no penumbra). This is the Orekit
-//! `SolarRadiationPressure.getLightingRatio` / `OccultationEngine` model reduced to a sphere: exact in
-//! the umbra (`0`) and full sun (`1`), and the lens-overlap area fraction of the two apparent disks in
-//! the penumbra. It is `no_std` so both the numerical force and the `std`-only DSST mean-element path
-//! can share one definition. `λ` is used as an f64 value gate — the penumbra boundary is a
-//! measure-zero set the STM is not defined across, so it stays out of the Jacobian.
+//! Seen from the satellite, the Sun and the occulter are discs of apparent radii `r_S` and `r_E`
+//! whose centres are `d` apart, all three angles. `ν` is one minus the area `A` the two discs share,
+//! taken as plane, over the Sun's `π r_S²`: exactly `0` in the umbra, `1` in full sun and the lens in
+//! between. It is `no_std` so the numerical force and the DSST mean-element path share one
+//! definition. `ν` is used as an f64 value gate — the penumbra boundary is a measure-zero set the STM
+//! is not defined across, so it stays out of the Jacobian.
 //!
-//! `derivations/shadow_lens.mac` shows that Orekit's lens arrangement is the textbook
-//! circle-intersection area for every pair of radii and separation, not only at the test's five
-//! points. It also shows that the penumbra meets both plateaus continuously, exactly 0 and exactly 1.
+//! # The lens without cancellation
+//!
+//! [`lens_area`] writes `A` as two circular segments on the common chord, `r²(x − sin x)/2` each, `x`
+//! the angle the chord subtends at that disc's centre: `x/2 = atan2(4K, d² + r² − r'²)`, where
+//! `4K = √((r + r' − d)(d − r + r')(d + r − r')(d + r + r'))` is four times Heron's area of the
+//! triangle of the two centres and a crossing point. The product is taken in factored form and
+//! `x − sin x` by its Taylor series below `x = 2`, so neither tangency cancels, and the plateaus are
+//! decided by comparing `d` with `r_E + r_S` and `|r_E − r_S|` — no angular margin.
+//!
+//! Orekit's arrangement — `acos` of each chord distance, less the chord's triangle — is the same area
+//! (`derivations/shadow_lens.mac`) and loses digits at both tangencies and in between: on the grid
+//! of `tests/shadow_lens.rs`, for a 400 km orbit, it is 6.5e-7 off in `ν` 1.1e-9 rad inside either
+//! tangency, where it returns `ν < 0`, and 1e-10 to 9e-10 off across the penumbra, because there the
+//! occulter's segment is the difference of two terms 1e5 times its size.
+//!
+//! # Checked against
+//!
+//! `tests/shadow_lens.rs`: on 171 exact binary64 inputs — seven radius pairs from a 400 km orbit's
+//! Earth (`r_E/r_S = 264`) to an occulter inside the Sun's disc, both tangencies to the last double,
+//! and `d → 0` — [`lens_area`] against `derivations/shadow_lens.gp`'s 200-digit values, each inside
+//! an Arb ball (`derivations/shadow_lens_arb.c`). The bound is `c₁ + c₂κ` ulp of `A`, `κ = 4K/A` its
+//! condition number in `d`; `derivations/shadow_lens.mac` shows the segment form is the textbook area.
 
-// The penumbra area formula names paired Sun/Earth quantities (`a_s2`/`a_e2`, `alpha1`/`alpha2`)
-// that clippy flags as too similar — the pairing is the whole point, so keep the Orekit names.
-#![allow(clippy::similar_names)]
-
-use libm::{acos, asin, sqrt};
+use libm::{asin, atan2, fabs, sin, sqrt};
 
 /// Sun radius (m) — Orekit `Constants.SUN_RADIUS`.
 pub const SUN_RADIUS: f64 = 6.957e8;
-
-/// Angular margin for the umbra/penumbra transition — Orekit `SolarRadiationPressure.ANGULAR_MARGIN`.
-const ANGULAR_MARGIN: f64 = 1.0e-10;
 
 fn norm(v: [f64; 3]) -> f64 {
     sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
@@ -41,68 +52,87 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-/// Angle between two vectors, Orekit `Vector3D.angle` (robust near 0 and π via the cross product).
+/// The angle between two vectors, `atan2(|u × v|, u·v)`: accurate over the whole range, where
+/// `acos` of the normalised dot product loses digits near 0 and π and `asin` of the cross product
+/// near π/2.
 fn angle(u: [f64; 3], v: [f64; 3]) -> f64 {
-    use core::f64::consts::PI;
-    let norm_product = norm(u) * norm(v);
-    let d = dot(u, v);
-    let threshold = norm_product * 0.9999;
-    if d < -threshold || d > threshold {
-        let cross_norm = norm(cross(u, v));
-        if d >= 0.0 {
-            asin(cross_norm / norm_product)
-        } else {
-            PI - asin(cross_norm / norm_product)
+    atan2(norm(cross(u, v)), dot(u, v))
+}
+
+/// `x − sin x` for `x ∈ [0, 2π]`. Below `x = 2` it is the alternating Taylor series
+/// `x³/3! − x⁵/5! + …` to `x²⁵/25!`, whose terms fall by at least `x²/20 < 1/5` each, so the first
+/// one left out, `x²⁷/27!`, bounds the remainder: under `1.2e-20` of the sum. Above it `|sin x|` is
+/// at most `0.84` of `x − sin x`, so the subtraction keeps its digits.
+fn x_minus_sin(x: f64) -> f64 {
+    if x < 2.0 {
+        let x2 = x * x;
+        let mut term = x * x2 / 6.0;
+        let mut sum = term;
+        for k in 2..=12_u32 {
+            let n = f64::from(2 * k);
+            term *= -x2 / (n * (n + 1.0));
+            sum += term;
         }
+        sum
     } else {
-        acos(d / norm_product)
+        x - sin(x)
     }
 }
 
-/// Fraction of the occulted (Sun) disk still visible, given the apparent angular `separation` of the
-/// two disk centres, the occulting body's apparent (`alpha_central`) and the Sun's apparent
-/// (`alpha_sun`) radii — Orekit `SolarRadiationPressure.maskingRatio`. `0` in full umbra, `1` in full
-/// sun, the lens-overlap fraction in penumbra.
+/// The area two discs share in the plane: radii `alpha_central` (the occulter) and `alpha_sun`, their
+/// centres `separation` apart — for [`masking_ratio`], apparent radii and separation in radians.
+///
+/// `0` when the discs are apart, `π·min(r)²` when one lies inside the other, and in between the two
+/// circular segments on the common chord, `r²(x − sin x)/2` each, with `x/2 = atan2(4K, d² + r² − r'²)`
+/// and `4K` Heron's product in factored form (module docs). Within `c₁ + c₂κ` ulp of the exact area
+/// of the given doubles, `κ = 4K/A`, on the grid of `tests/shadow_lens.rs`.
+#[must_use]
+pub fn lens_area(separation: f64, alpha_central: f64, alpha_sun: f64) -> f64 {
+    use core::f64::consts::PI;
+    let d = separation;
+    let sum = alpha_central + alpha_sun;
+    if d >= sum {
+        return 0.0;
+    }
+    let diff = alpha_central - alpha_sun;
+    if d <= fabs(diff) {
+        let inner = alpha_central.min(alpha_sun);
+        return PI * inner * inner;
+    }
+    let heron = sqrt((sum - d) * (d - diff) * (d + diff) * (d + sum));
+    // r_E² − r_S², factored: the two chord-angle denominators are d² ∓ it.
+    let squares = diff * sum;
+    let d2 = d * d;
+    let sun = alpha_sun * alpha_sun * x_minus_sin(2.0 * atan2(heron, d2 - squares));
+    let central = alpha_central * alpha_central * x_minus_sin(2.0 * atan2(heron, d2 + squares));
+    0.5 * (sun + central)
+}
+
+/// Fraction of the occulted (Sun) disc still visible, given the apparent angular `separation` of the
+/// two disc centres, the occulting body's apparent (`alpha_central`) and the Sun's apparent
+/// (`alpha_sun`) radii: `1 − A/(π α_sun²)` with `A` the [`lens_area`]. `0` in full umbra, `1` in full
+/// sun, the lens fraction in penumbra.
 #[must_use]
 pub fn masking_ratio(separation: f64, alpha_central: f64, alpha_sun: f64) -> f64 {
     use core::f64::consts::PI;
-    if separation - alpha_central + alpha_sun <= ANGULAR_MARGIN {
-        0.0
-    } else if separation - alpha_central - alpha_sun < -ANGULAR_MARGIN {
-        // Penumbra: overlap area of the two apparent disks.
-        let s_ea2 = separation * separation;
-        let oo2s_ea = 1.0 / (2.0 * separation);
-        let a_s2 = alpha_sun * alpha_sun;
-        let a_e2 = alpha_central * alpha_central;
-        let a_e2m_a_s2 = a_e2 - a_s2;
-
-        let alpha1 = (s_ea2 - a_e2m_a_s2) * oo2s_ea;
-        let alpha2 = (s_ea2 + a_e2m_a_s2) * oo2s_ea;
-
-        // Boundary protection (Orekit Precision.SAFE_MIN / nextDown(1)).
-        let almost0 = f64::MIN_POSITIVE;
-        let almost1 = f64::from_bits(0x3FEF_FFFF_FFFF_FFFF);
-        let a1o_a_s = (alpha1 / alpha_sun).clamp(-almost1, almost1);
-        let a_s2m_a12 = (a_s2 - alpha1 * alpha1).max(almost0);
-        let a2o_a_e = (alpha2 / alpha_central).clamp(-almost1, almost1);
-        let a_e2m_a22 = (a_e2 - alpha2 * alpha2).max(almost0);
-
-        let p1 = a_s2 * acos(a1o_a_s) - alpha1 * sqrt(a_s2m_a12);
-        let p2 = a_e2 * acos(a2o_a_e) - alpha2 * sqrt(a_e2m_a22);
-
-        1.0 - (p1 + p2) / (PI * a_s2)
-    } else {
-        1.0
-    }
+    let disc = PI * alpha_sun * alpha_sun;
+    let visible = 1.0 - lens_area(separation, alpha_central, alpha_sun) / disc;
+    // Rounding can carry a lens a hair past the whole disc next to the umbra; a NaN passes through.
+    if visible < 0.0 { 0.0 } else { visible }
 }
 
 /// Conical lighting ratio `λ ∈ [0, 1]` (Sun visibility) at geocentric position `pos` (m), for the Sun
 /// at `sun_pos` (m) and a single spherical occulting body of radius `occulting_radius` (m, e.g. the
-/// Earth). Orekit `SolarRadiationPressure.getLightingRatio` reduced to one sphere.
+/// Earth): the [`masking_ratio`] of the apparent discs. A position inside the occulting sphere, where
+/// its apparent radius has no value, sees no Sun: `0`.
 #[must_use]
 pub fn lighting_ratio(pos: [f64; 3], sun_pos: [f64; 3], occulting_radius: f64) -> f64 {
     if norm(sun_pos) < 2.0 * SUN_RADIUS {
         return 1.0; // degenerate (Sun-centred frame); kept for faithfulness.
+    }
+    let distance = norm(pos);
+    if distance < occulting_radius {
+        return 0.0;
     }
     let sun_sat = [
         pos[0] - sun_pos[0],
@@ -111,7 +141,7 @@ pub fn lighting_ratio(pos: [f64; 3], sun_pos: [f64; 3], occulting_radius: f64) -
     ];
     let separation = angle(sun_sat, pos);
     let occulted_apparent_radius = asin(SUN_RADIUS / norm(sun_sat));
-    let limb_radius = asin(occulting_radius / norm(pos));
+    let limb_radius = asin(occulting_radius / distance);
     masking_ratio(separation, limb_radius, occulted_apparent_radius)
 }
 
@@ -132,41 +162,46 @@ mod tests {
         assert!(masking_ratio(0.105, 0.1, 0.01) > p);
     }
 
-    /// Independent oracle: the textbook area of intersection of two circles (radii `small_r`, `big_r`,
-    /// centre distance `d`), as the fraction of the occulted (Sun) disk *not* covered. This is a
-    /// different algebraic arrangement of the same lens overlap than [`masking_ratio`]'s Orekit form,
-    /// so agreement proves the port carries no transcription error.
-    fn masking_ratio_reference(d: f64, big_r: f64, small_r: f64) -> f64 {
-        use core::f64::consts::PI;
-        if d >= big_r + small_r {
-            return 1.0; // disjoint disks → fully lit
-        }
-        if d <= big_r - small_r {
-            return 0.0; // Sun disk fully behind Earth disk → umbra
-        }
-        let t1 = small_r
-            * small_r
-            * acos((d * d + small_r * small_r - big_r * big_r) / (2.0 * d * small_r));
-        let t2 =
-            big_r * big_r * acos((d * d + big_r * big_r - small_r * small_r) / (2.0 * d * big_r));
-        let t3 = 0.5
-            * sqrt(
-                (-d + small_r + big_r)
-                    * (d + small_r - big_r)
-                    * (d - small_r + big_r)
-                    * (d + small_r + big_r),
-            );
-        1.0 - (t1 + t2 - t3) / (PI * small_r * small_r)
+    /// `x − sin x` from `derivations/shadow_lens.gp` at 200 digits, each value inside an Arb ball, as
+    /// `(x, hi, lo)`: both sides of the series' switch at 2, its far end, and the exact double next to
+    /// `2π`.
+    #[expect(
+        clippy::unreadable_literal,
+        clippy::approx_constant,
+        reason = "printed by the script and checked verbatim; the doubles nearest π and 2π are inputs"
+    )]
+    #[rustfmt::skip]
+    const X_MINUS_SIN: [(f64, f64, f64); 13] = [
+    (9.313225746154785e-10, 1.3463226115771934e-28, 7.467753066131004e-45),
+    (1e-8, 1.6666666666666668e-25, -6.143435497173705e-43),
+    (1e-3, 1.6666665833333355e-10, -5.6979554413661525e-27),
+    (5e-1, 2.0574461395796998e-2, 1.6345229086023983e-18),
+    (1e0, 1.585290151921035e-1, -1.776845092935536e-18),
+    (1.5e0, 5.025050133959456e-1, 1.4558643538840918e-17),
+    (1.9999999999999998e0, 1.090702573174318e0, -7.838225335409553e-17),
+    (2e0, 1.0907025731743183e0, 1.4020906557816256e-17),
+    (2.0000000000000004e0, 1.090702573174319e0, -2.321737854339134e-17),
+    (2.5e0, 1.9015278558960436e0, -5.580826912169191e-17),
+    (3.141592653589793e0, 3.141592653589793e0, -1.2246467991473532e-16),
+    (6e0, 6.279415498198926e0, 1.2659979684764697e-17),
+    (6.283185307179586e0, 6.283185307179586e0, 2.4492935982947064e-16),
+    ];
+
+    /// The spacing of doubles at `x > 0`.
+    fn ulp(x: f64) -> f64 {
+        f64::from_bits(x.to_bits() + 1) - x
     }
 
+    /// The series and the subtraction, each within its own error of the reference.
     #[test]
-    fn masking_ratio_matches_circle_intersection_oracle() {
-        let (big_r, small_r) = (0.1, 0.01);
-        for &d in &[0.091, 0.095, 0.10, 0.105, 0.109] {
-            let got = masking_ratio(d, big_r, small_r);
-            let want = masking_ratio_reference(d, big_r, small_r);
-            assert!((got - want).abs() < 1e-12, "d={d}: got {got}, want {want}");
+    fn x_minus_sin_is_within_two_ulp_of_the_reference() {
+        let mut worst = 0.0_f64;
+        for &(x, hi, lo) in &X_MINUS_SIN {
+            let err = fabs((x_minus_sin(x) - hi) - lo) / ulp(hi);
+            assert!(err <= 2.0, "x = {x:e}: {err:.2} ulp");
+            worst = worst.max(err);
         }
+        std::println!("x − sin x: worst {worst:.2} ulp");
     }
 
     #[test]
@@ -211,11 +246,9 @@ mod tests {
         assert_eq!(cross([1.0, 2.0, 3.0], [4.0, 5.0, 7.0]), [-1.0, 5.0, -3.0]);
     }
 
-    /// `angle` against the angle its inputs were *built* from, on both sides of the `0.9999`
-    /// threshold that selects between the `asin` and `acos` arms. The module's own geometry is
-    /// collinear, which is the one family where the two arms cannot be told apart; away from it
-    /// each is accurate only in its own half, so a wrong threshold shows up as lost digits rather
-    /// than as a wrong branch. `|u| = 7` and `|v| = 3` keep `norm_product` off 1.
+    /// `angle` against the angle its inputs were *built* from, from 1e-8 to π − 1e-8, where an
+    /// `acos` of the dot product would lose half its digits at either end and an `asin` of the cross
+    /// product all of them at π/2. `|u| = 7` and `|v| = 3` keep `norm_product` off 1.
     #[test]
     fn angle_recovers_the_angle_its_inputs_were_built_from() {
         use core::f64::consts::{FRAC_PI_2, PI};
@@ -236,27 +269,44 @@ mod tests {
         }
     }
 
-    /// Both plateaus are exact, not approximate. The lens formula is continuous into them but not
-    /// exact there — at external tangency it returns `1 − 4.8e-7`, because `acos` is evaluated at a
-    /// clamped argument — so `0` and `1` have to be asserted as equalities or the branch boundaries
-    /// carry no information.
+    /// Both plateaus are exact, not approximate, and so is their edge: at external tangency the lens
+    /// is empty, and just inside internal tangency the Sun's disc is wholly covered, so `0` and `1`
+    /// are asserted as equalities.
     #[test]
     fn masking_ratio_is_exact_on_both_plateaus() {
-        assert_eq!(masking_ratio(0.05, 0.1, 0.01), 0.0); // Sun disk well inside the Earth disk
+        assert_eq!(masking_ratio(0.05, 0.1, 0.01), 0.0); // Sun disc well inside the Earth disc
         assert_eq!(masking_ratio(0.089, 0.1, 0.01), 0.0); // just inside internal tangency
         assert_eq!(masking_ratio(0.11, 0.1, 0.01), 1.0); // external tangency
         assert_eq!(masking_ratio(0.2, 0.1, 0.01), 1.0);
     }
 
-    /// The one input family where `< -ANGULAR_MARGIN` and `<= -ANGULAR_MARGIN` part company: the
-    /// difference `separation − α_c − α_s` can only land *exactly* on `−1e-10` when the radii are
-    /// themselves of that order, and then both subtractions are exact. Here the occulting disk has
-    /// zero radius and blocks nothing, so full sun is the geometrically right answer; the inclusive
-    /// form takes the lens branch instead and returns `1 − 4.7e-9`.
+    /// An occulter of zero radius blocks nothing, wherever it stands on the Sun's disc: the lens is
+    /// the disc inside the other, `π·0²`.
     #[test]
-    fn a_zero_radius_occulter_at_the_angular_margin_blocks_nothing() {
-        assert_eq!((1.0e-10 - 0.0) - 2.0e-10, -ANGULAR_MARGIN);
+    fn a_zero_radius_occulter_blocks_nothing() {
         assert_eq!(masking_ratio(1.0e-10, 0.0, 2.0e-10), 1.0);
+        assert_eq!(masking_ratio(0.0, 0.0, 2.0e-10), 1.0);
+        assert_eq!(lens_area(1.0e-10, 0.0, 2.0e-10), 0.0);
+    }
+
+    /// Inside the occulting sphere `asin(R/|r|)` has no value, and the answer is no Sun, even on the
+    /// side that faces it; on the surface itself the geometry is evaluated, the body a hemisphere.
+    #[test]
+    fn a_position_inside_the_occulter_sees_no_sun() {
+        let sun = [1.496e11, 0.0, 0.0];
+        assert_eq!(lighting_ratio([1.0e3, 0.0, 0.0], sun, EARTH_RADIUS), 0.0);
+        assert_eq!(
+            lighting_ratio([EARTH_RADIUS - 1.0, 0.0, 0.0], sun, EARTH_RADIUS),
+            0.0
+        );
+        assert_eq!(
+            lighting_ratio([EARTH_RADIUS, 0.0, 0.0], sun, EARTH_RADIUS),
+            1.0
+        );
+        assert_eq!(
+            lighting_ratio([-EARTH_RADIUS, 0.0, 0.0], sun, EARTH_RADIUS),
+            0.0
+        );
     }
 
     /// The degenerate-Sun guard, whose threshold no other case reaches. Below it the geometry is
@@ -271,22 +321,20 @@ mod tests {
         assert!(lighting_ratio(pos, [1.6e9, 0.0, 0.0], EARTH_RADIUS) < 1e-12);
     }
 
-    /// A penumbra crossing with nothing on an axis, against the circle-intersection oracle at the
-    /// separation and apparent radii the geometry was *constructed* from. Every case above lies on
-    /// the shadow axis, where `λ` is pinned to a plateau and the entire vector path — the
-    /// `pos − sun_pos` difference, `angle`, `cross` — can be wrong without moving it.
-    ///
-    /// The bound is 3e-9 rather than the 1e-12 of the oracle test above because `α_c/α_s ≈ 246`
-    /// here instead of 10: a 60-digit evaluation of the same lens area puts *both* f64 arrangements
-    /// about 5e-10 off the truth at the worst sample, in opposite directions. That is the
-    /// cancellation in `s² ∓ (α_c² − α_s²)`, not a defect in either.
+    /// A penumbra crossing with nothing on an axis: `lighting_ratio` from the vectors against
+    /// `masking_ratio` at the separation and apparent radii the geometry was *constructed* from.
+    /// Every case above lies on the shadow axis, where `λ` is pinned to a plateau and the entire
+    /// vector path — the `pos − sun_pos` difference, `angle`, `cross` — can be wrong without moving
+    /// it. The two differ by what building the vectors and measuring the angle back cost, at most
+    /// `∂ν/∂d ≤ 2/(π α_s) = 137 rad⁻¹` times a few ulp of the 1.14 rad separation.
     #[test]
     fn lighting_ratio_crosses_the_penumbra_off_axis() {
         let d_sun = 1.496e11;
         let pos = at_angle(0.0, 7.0e6); // [2, 3, 6]·10⁶ m, |pos| = 7000 km exactly
         let alpha_c = asin(EARTH_RADIUS / 7.0e6);
         let alpha_s = asin(SUN_RADIUS / d_sun);
-        for k in -4..=4 {
+        let mut worst = 0.0_f64;
+        for k in -4_i32..=4 {
             let separation = alpha_c + f64::from(k) * 0.4 * alpha_s;
             let sun_sat = at_angle(separation, d_sun);
             let sun_pos = [
@@ -295,8 +343,13 @@ mod tests {
                 pos[2] - sun_sat[2],
             ];
             let got = lighting_ratio(pos, sun_pos, EARTH_RADIUS);
-            let want = masking_ratio_reference(separation, alpha_c, alpha_s);
-            assert!((got - want).abs() < 3e-9, "k={k}: got {got}, want {want}");
+            let want = masking_ratio(separation, alpha_c, alpha_s);
+            if k.abs() <= 2 {
+                assert!(got > 0.0 && got < 1.0, "k={k}: {got} is not a penumbra");
+            }
+            worst = worst.max((got - want).abs());
         }
+        std::println!("lighting_ratio vs masking_ratio off axis: worst {worst:.2e}");
+        assert!(worst < 1e-12, "{worst:.3e}");
     }
 }

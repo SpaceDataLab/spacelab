@@ -78,7 +78,7 @@ fn the_stec_matches_the_jrc_reference_in_every_month() {
     }
 }
 
-/// The ICD's printed Annex E values agree to the table's own departure from the reference.
+/// The ICD's printed Annex E values agree to the table's own departure from the reference. (G5)
 ///
 /// Annex E prints two decimals, but its values are not the reference implementation's rounded:
 /// 39 of the 108 differ from it by more than the 0.005 TECU rounding, up to 0.038 TECU (medium

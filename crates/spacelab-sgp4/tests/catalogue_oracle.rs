@@ -174,7 +174,7 @@ fn the_worst_objects_of_the_catalogue_still_agree_with_the_oracle() {
     );
 }
 
-/// The fixture's per-case worst is an upper bound on what these seven offsets can show.
+/// The fixture's per-case worst is an upper bound on what these seven offsets can show. (S2)
 ///
 /// The recorded number is the object's worst over the full 577-point sweep; the committed samples
 /// are seven of those points. So re-measuring on the subset must land at or below the record. A
@@ -200,7 +200,7 @@ fn the_recorded_worst_bounds_what_the_committed_offsets_reproduce() {
     }
 }
 
-/// Every SGP4 branch is represented, and the fixture says so in its own words.
+/// Every SGP4 branch is represented, and the fixture says so in its own words. (S2)
 ///
 /// A "whole catalogue" sweep that happened to commit 49 near-Earth objects would check one arm of a
 /// two-algorithm model. The generator forces in the worst object of each [`Regime`] for exactly this
@@ -261,7 +261,7 @@ fn neither_implementation_refused_a_propagation_the_other_completed() {
     assert!(compared > 9_000_000, "only {compared} samples compared");
 }
 
-/// The convention the sweep ran under is the one the oracle implements.
+/// The convention the sweep ran under is the one the oracle implements. (S2)
 ///
 /// satellite.js uses WGS-72 and the AFSPC sidereal expression; [`Convention::Reference`] selects
 /// exactly that, and it is the default. If the default ever changed, the committed residual would

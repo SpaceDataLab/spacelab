@@ -498,7 +498,7 @@ mod tests {
         assert_close(label, got, want, tol)
     }
 
-    /// Lambert's cosine against a closed form, and Orekit's against its own.
+    /// Lambert's cosine against a closed form, and Orekit's against its own. (G3)
     ///
     /// A satellite 500 km over the pole with the Sun beneath it sees a cap in polar night: no
     /// albedo, and an emissivity that depends on the element's colatitude alone. The flux is then a
@@ -803,7 +803,7 @@ mod tests {
     /// The seasonal phase reads `ω·(reference_epoch_offset + t)`, and every Orekit fixture calls at
     /// `t = 0`, where `offset + 0` and `offset − 0` are the same number and nothing distinguishes
     /// the two. Shifting the reference epoch and advancing the evaluation time must be the same
-    /// thing, and a quarter of a year apart the season must actually have moved.
+    /// thing, and a quarter of a year apart the season must actually have moved. (G4)
     #[test]
     fn only_the_sum_of_the_epoch_offset_and_the_elapsed_time_reaches_the_season() {
         let sat = [6.9e6, 1.1e6, 2.3e6];

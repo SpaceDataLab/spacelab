@@ -294,7 +294,7 @@ fn the_round_trip_is_the_identity() {
 }
 
 /// J2..J6 with Orekit's default cuts: `s ≤ min(4, n − 1)`, `j ≤ 2n + 1`. Measured 1.6e-10 at
-/// e = 0.01 and 2.1e-7 at e = 0.05, the size of the e⁵ the s-cut drops.
+/// e = 0.01 and 2.1e-7 at e = 0.05, the size of the e⁵ the s-cut drops. (G2)
 #[test]
 fn zonal_short_periods_solve_their_defining_equation() {
     let j = [

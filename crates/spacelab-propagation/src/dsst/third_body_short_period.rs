@@ -1427,7 +1427,7 @@ mod tests {
     /// `a` and `γ` dependence, `Wnsj` and `Abde` the `k`, `h`, `α`, `β` dependence, and no term of the
     /// accumulation mixes the two. Row 0 is what the Orekit fixtures pin, so its own numerical
     /// gradient is the one oracle for the six rows under it that is not those same accumulations
-    /// read back.
+    /// read back. (S1)
     #[test]
     fn fourier_derivative_rows_are_the_gradient_of_the_value_row() {
         let tb = moon();
@@ -1691,7 +1691,7 @@ mod tests {
     /// potential [Danielson 3.1-(1)]. The second is written out separately in `third_body.rs` and
     /// validated there against Orekit's own mean rates — a far tighter oracle than the 1e-12 residual
     /// the short-period fixtures leave — so feeding the bracket the potential's own gradient has to
-    /// reproduce those rates, times the mean motion the short-period factors divide out.
+    /// reproduce those rates, times the mean motion the short-period factors divide out. (S1)
     ///
     /// The one term the mean rates do not carry, `C/(2AB)·(q, p)·(h·U_k − k·U_h − U_αβ)`, is the
     /// generator of a simultaneous rotation of `(k, h)` and `(α, β)`. The third-body potential reaches

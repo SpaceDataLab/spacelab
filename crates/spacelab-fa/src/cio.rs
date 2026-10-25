@@ -201,7 +201,7 @@ mod tests {
         assert!((y - gy).abs() < 1e-15, "Y: got {y:.19e} want {gy:.19e}");
     }
 
-    /// The `X, Y` series carries the **full** IAU 2000A nutation, not a truncation.
+    /// The `X, Y` series carries the **full** IAU 2000A nutation, not a truncation. (S1)
     ///
     /// The classical (equinox-based) route builds `X, Y` from frame bias +
     /// precession + the complete 678+687-term IAU 2000A nutation ([`crate::nutation`])
@@ -309,7 +309,7 @@ mod tests {
         assert_eq!(reduce_turns_to_radians(-3.0), 0.0);
     }
 
-    /// The IAU 2006/2000A `X, Y, s` series coefficients, sealed.
+    /// The IAU 2006/2000A `X, Y, s` series coefficients, sealed. (G5)
     ///
     /// The SOFA golden vectors above agree to `1e-20` rad, but that agreement is carried by the
     /// first few of 4755 amplitudes; a sign deleted deep in the series moves `X` far below it.

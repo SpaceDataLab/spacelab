@@ -183,7 +183,7 @@ fn initial_state(samples: &[Sample]) -> (Vec3, Vec3) {
 }
 
 /// The quaternion-to-rotation conversion is the crate's own exponential, checked against the axis
-/// and angle that built the fixture's initial attitude — 40 degrees about `(1, 2, 3)/√14`.
+/// and angle that built the fixture's initial attitude — 40 degrees about `(1, 2, 3)/√14`. (G3)
 #[test]
 fn the_quaternion_convention_is_the_crates_own_exponential() {
     let axis = {

@@ -690,7 +690,7 @@ mod tests {
 
     /// Enabling admittance adds the minor waves to Eq. 6.15 (the wiring fires and is deterministic),
     /// while leaving the explicit-wave sum — the Orekit-exact default — untouched when `admittance`
-    /// is empty (guaranteed by [`delta_cs_matches_orekit`], which runs with `admittance: &[]`).
+    /// is empty (guaranteed by [`delta_cs_matches_orekit`], which runs with `admittance: &[]`). (S2)
     #[test]
     fn admittance_augments_delta_cs() {
         let base = fes2004_tide().delta_cs(GMST, DELAUNAY);
@@ -729,7 +729,7 @@ mod tests {
     }
 
     /// An admittance wave that infers a major from *itself* at unit weight contributes exactly what
-    /// that major already contributes, so the grid doubles cell for cell — to the last bit.
+    /// that major already contributes, so the grid doubles cell for cell — to the last bit. (G3)
     ///
     /// `add_admittance` restates IERS Eq. 6.15 for the inferred waves, and nothing asserted the
     /// restatement: `admittance_augments_delta_cs` only requires the grid to *move*, and to move
@@ -804,7 +804,7 @@ mod tests {
     }
 
     /// The Earth orientation must be transparent: the tidal field is body-fixed, so rotating the
-    /// satellite in and the acceleration out is the same computation whichever side does it.
+    /// satellite in and the acceleration out is the same computation whichever side does it. (G4)
     ///
     /// `acceleration_matches_orekit` passes the identity — the oracle's state is already in the ITRF
     /// — where every off-diagonal entry is an exact zero and every diagonal one an exact one, and

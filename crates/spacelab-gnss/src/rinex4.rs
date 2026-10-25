@@ -1893,7 +1893,7 @@ mod tests {
         assert!(nav.ionosphere.iter().all(|i| i.message != NavMessage::Lxoc));
     }
 
-    /// With no axis rate and no mean-motion rate, the CNAV algorithm *is* the legacy one.
+    /// With no axis rate and no mean-motion rate, the CNAV algorithm *is* the legacy one. (G3)
     ///
     /// The two differ in exactly two terms — `A(tₖ) = A₀ + Ȧ·tₖ` and the `Ȧ(1 − e·cos Eₖ)` in the
     /// radius rate — so setting both rates to zero has to reproduce

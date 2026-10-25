@@ -316,7 +316,7 @@ mod tests {
     /// fixture is fully immersed (`apogee = 7.07e6 < rbar = 7.378e6`), so it exercises the full-circle
     /// arm alone and pins nothing about the entry/exit arc or either branch boundary. The oracle is the
     /// polar equation `r(L) = a(1 − k² − h²)/(1 + k cos L + h sin L)`: whatever `f_b` is, the two
-    /// returned longitudes have to be where the radius crosses `rbar`, with the interior below it.
+    /// returned longitudes have to be where the radius crosses `rbar`, with the interior below it. (G2)
     ///
     /// Both boundaries are struck exactly — `rbar` is built from the fixture's own `a` and `e` — which
     /// is where the `acos` argument leaves `[-1, 1]` by 9e-16 and used to return NaN for both limits.

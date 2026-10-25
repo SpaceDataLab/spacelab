@@ -649,7 +649,7 @@ mod tests {
 
     /// The orders `truncation` selects equal, at every point of a 440-point sweep of the four numbers
     /// it reads (µ₃, R₃, a/R₃, e), the orders the series-bound rule prescribes: the highest degree and
-    /// eccentricity power whose Danielson upper bound Tₙₘ still reaches the truncation tolerance.
+    /// eccentricity power whose Danielson upper bound Tₙₘ still reaches the truncation tolerance. (G2)
     ///
     /// [`truncation_matches_orekit`] pins one fixture state per body, where the answer is (3, 2) and
     /// (4, 2) and every accept/reject decision is taken with orders of magnitude to spare. Nothing in

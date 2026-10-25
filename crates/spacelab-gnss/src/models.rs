@@ -5933,7 +5933,7 @@ mod tests {
         assert!((wet - 3.449589).abs() < 2e-6, "wet {wet}");
     }
 
-    /// GMF and VMF1 are affine in the cosine of the seasonal phase, on both hemispheres.
+    /// GMF and VMF1 are affine in the cosine of the seasonal phase, on both hemispheres. (G3)
     ///
     /// GMF's `a` coefficients are `mean + ampl·cos u` and both models' hydrostatic `c` is
     /// `c0h + [(cos u + 1)·c11h/2 + c10h]·(1 − cos φ)`, so every coefficient is affine in the same

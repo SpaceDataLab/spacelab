@@ -142,7 +142,7 @@ mod tests {
     /// tesseral coefficients), the combined right-hand side collapses to the zonal one, so the
     /// propagation must reproduce the Orekit-validated `DsstZonal::propagate_mean` to integrator
     /// round-off. This certifies the assembly (summation, the Keplerian term, the DOP853 driver)
-    /// independently of the individual force validations.
+    /// independently of the individual force validations. (G3)
     #[test]
     fn combined_reduces_to_zonal_when_only_zonal_active() {
         let z = zonal();
@@ -203,7 +203,7 @@ mod tests {
     /// The only-zonal OSCULATING propagation reproduces the Orekit-validated
     /// `DsstZonal::propagate_osculating` (mean + zonal short-period): the nulled Sun/Moon/SRP/tesseral
     /// add no short-period delta, so `osculating = zonal mean + zonal short-period`. Certifies the
-    /// short-period summation independently of the individual short-period force validations.
+    /// short-period summation independently of the individual short-period force validations. (G3)
     #[test]
     fn combined_osculating_reduces_to_zonal() {
         let z = zonal();
@@ -274,7 +274,7 @@ mod tests {
         OMEGA_EARTH * t
     }
 
-    /// The right-hand side is the sum of the five contributions, each entering once and with a plus.
+    /// The right-hand side is the sum of the five contributions, each entering once and with a plus. (G1)
     ///
     /// Every force is validated on its own against Orekit's `getMeanElementRate`, and the assembled
     /// propagation is validated against `DsstZonal` with the other four nulled — but that

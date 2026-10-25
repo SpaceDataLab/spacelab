@@ -1120,7 +1120,7 @@ mod tests {
     /// The six sides in Orekit's `buildBox` order, each with the product of the two lengths it does
     /// **not** span. The Orekit fixtures above use `1.5 × 2.0 × 3.0`, and there `1.5 * 3.0` and
     /// `1.5 + 3.0` are both `4.5`: the ±Y area cannot tell a product from a sum. These three
-    /// lengths avoid that curve (`b = a/(a−1)`) on all three pairs.
+    /// lengths avoid that curve (`b = a/(a−1)`) on all three pairs. (G3)
     #[test]
     fn box6_gives_each_side_the_product_of_its_two_transverse_lengths() {
         let (x, y, z) = (1.25, 3.5, 7.0);
@@ -1179,7 +1179,7 @@ mod tests {
     /// the definition rather than a second copy of the code: unit, perpendicular to the rotation
     /// axis, in the span of the Sun direction and the axis, and on the sunlit side. The Orekit
     /// fixtures put the axis on body `+Y`, where two of the three components are identically zero
-    /// and every arithmetic mutation in them is invisible; this axis is general.
+    /// and every arithmetic mutation in them is invisible; this axis is general. (G2)
     #[test]
     fn a_sun_pointing_array_turns_as_far_toward_the_sun_as_one_axis_allows() {
         let axis = normalize([1.0, 2.0, 3.0]);
@@ -1244,7 +1244,7 @@ mod tests {
     /// [`Cannonball`] as a [`DragModel`] / [`RadiationModel`] reproduces the closed-form isotropic
     /// drag `−½(C_d A/m)ρ|v|v` and SRP `(C_r A/m)·flux`, and is rotation-invariant (the "cannonball
     /// path"). Fed the Orekit relative-velocity convention `v_atm − v_sat = −v` (static atmosphere),
-    /// the drag opposes `v`.
+    /// the drag opposes `v`. (G3)
     #[test]
     fn cannonball_reduces_to_closed_form() {
         let c = Cannonball {
@@ -1341,7 +1341,7 @@ mod tests {
     /// [`PanelSrp`]'s own work is the inverse-square flux and the cylindrical shadow; the facet
     /// physics it delegates to is already pinned against Orekit above. Asserting the composition
     /// separates the two, and the flux is built here as *magnitude × direction* rather than the
-    /// `1/(d²√d²)` the code uses, so agreeing is evidence and not a transcription.
+    /// `1/(d²√d²)` the code uses, so agreeing is evidence and not a transcription. (S1)
     ///
     /// The existing wrapper test put the satellite on the Sun line with an isotropic model, where
     /// two components vanish identically, the shadow branch is unreachable, and the only assertion
@@ -1530,7 +1530,7 @@ mod tests {
     /// Orekit's two global multiplicative factors are `1.0` in every fixture, and `ρ · 1.0` cannot
     /// tell a product from a quotient. Both scale their acceleration linearly: the factor multiplies
     /// the drag coefficient outright, and for radiation it cancels out of the specular ratio
-    /// `d/psr` and out of the diffuse term, leaving the force proportional to it.
+    /// `d/psr` and out of the diffuse term, leaving the force proportional to it. (G4)
     #[test]
     fn the_global_factors_scale_their_acceleration_linearly() {
         let base = box_only();
@@ -1680,7 +1680,7 @@ mod tests {
     /// round must change nothing — that is the whole purpose of the flip in each facet loop. Exactly
     /// one of the two spellings takes the branch, so the pair pins the negation itself and not just
     /// its existence. A single-sided facet is the opposite: one spelling is windward, the other is
-    /// shadowed and contributes nothing. No Orekit fixture flips a facet.
+    /// shadowed and contributes nothing. No Orekit fixture flips a facet. (G4)
     #[test]
     fn a_double_sided_facet_does_not_care_which_way_its_normal_is_written() {
         let n = normalize([0.4, -0.7, 0.55]);

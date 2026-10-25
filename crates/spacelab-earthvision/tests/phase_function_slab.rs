@@ -355,7 +355,7 @@ fn every_member_conserves_energy_in_a_conservative_slab() {
     }
 }
 
-/// A finely tabulated Henyey–Greenstein produces the same slab as the analytic one.
+/// A finely tabulated Henyey–Greenstein produces the same slab as the analytic one. (S1)
 ///
 /// This is what carries the DISORT verification across to the tabulated members: the analytic path is
 /// checked against a second solver above, and this says the tabulated path is the same path. Both

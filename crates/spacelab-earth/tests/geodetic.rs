@@ -157,6 +157,7 @@ fn the_geocentric_singularity_is_refused_not_returned_as_nonsense() {
     assert_eq!(itrf_to_geodetic(centre), Err(GeodeticError::NearGeocentre));
 }
 
+/// The batch path gives every fixture position exactly what the scalar path gives it (S2).
 #[test]
 fn the_batch_path_agrees_with_the_scalar_path() {
     let positions: Vec<Position<Itrf>> = FIXTURES

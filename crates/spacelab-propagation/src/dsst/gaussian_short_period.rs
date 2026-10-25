@@ -598,7 +598,7 @@ mod tests {
     /// density profile of an exponential atmosphere along an orbit, `z = ae/H`, each element at its
     /// own `ϖ`. The shipped trapezoid is within 1.7e-15 of `2I₀(z)` up to z = 10. Gauss–Legendre at
     /// the same 48 nodes is 4.6e-10 off at z = 5 and 6.7e-7 at z = 10, and at the 12 nodes Orekit's
-    /// drag selects in LEO the coefficients are gone: 0.80 off at z = 1.
+    /// drag selects in LEO the coefficients are gone: 0.80 off at z = 1. (G3)
     #[test]
     fn fourier_coefficients_of_the_exponential_are_bessel_functions() {
         let worst = |(xs, ws): (Vec<f64>, Vec<f64>), z: f64, bessel: &[f64; JMAX + 1]| -> f64 {
@@ -645,7 +645,7 @@ mod tests {
     }
 
     /// A constant rate has no short period: `F ≡ c` is its own mean, at every element. Orekit's `D¹`
-    /// takes `C⁰ = 2c` and gives `η = −(2c/n)(L − λ)`, the equation of the centre times `2c/n`.
+    /// takes `C⁰ = 2c` and gives `η = −(2c/n)(L − λ)`, the equation of the centre times `2c/n`. (G3)
     #[test]
     fn a_constant_rate_has_no_short_period() {
         let rates = [3.0e-3, -2.0e-9, 1.5e-9, 4.0e-10, -7.0e-10, 2.5e-9];
@@ -708,7 +708,7 @@ mod tests {
         }
     }
 
-    /// `ρⱼ + iσⱼ = (1 + jB)(−b)ʲ(k + ih)ʲ`, `b = 1/(1 + B)` — Danielson 2.5.3-(4).
+    /// `ρⱼ + iσⱼ = (1 + jB)(−b)ʲ(k + ih)ʲ`, `b = 1/(1 + B)` — Danielson 2.5.3-(4). (G3)
     ///
     /// The port raises `k + ih` to the `j`-th power by the two-term real recursion Orekit uses, and
     /// nothing downstream can see one of its terms go wrong: the short-period corrections these feed

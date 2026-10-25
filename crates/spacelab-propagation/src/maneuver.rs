@@ -467,7 +467,7 @@ mod tests {
         }
     }
 
-    /// The burn window is the half-open interval `[t_start, t_end)` the doc comment states.
+    /// The burn window is the half-open interval `[t_start, t_end)` the doc comment states. (S2)
     ///
     /// Every fixture in this file fires across its whole arc — Orekit's window `[−100, 700]` brackets
     /// the integrated `[0, 600]` deliberately, so that both RK4 sequences see a smooth always-on
@@ -688,7 +688,7 @@ mod tests {
     /// The argument-of-latitude harmonic evaluates to its cosine amplitude at the ascending node
     /// (`u = 0`) and to its sine amplitude a quarter revolution later (`u = π/2`), for a polar orbit
     /// whose node is along `+x`. This is Orekit's `HarmonicAccelerationModel` sibling but in `u`, not
-    /// time, so it is anchored analytically rather than against Orekit.
+    /// time, so it is anchored analytically rather than against Orekit. (G3)
     #[test]
     fn harmonic_empirical_is_analytic() {
         let sig = HarmonicSignal {

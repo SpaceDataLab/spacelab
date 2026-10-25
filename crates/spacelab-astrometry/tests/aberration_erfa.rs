@@ -333,7 +333,7 @@ fn a_direction_along_the_motion_does_not_shift() {
 
 /// `diurnal` is `new(omega x r)` and nothing else, and the cross product is the place a sign or an
 /// axis order goes wrong silently. On the equator at longitude zero the station is `+x` and the
-/// velocity must be due east, `+y`, at exactly `omega * |r|`.
+/// velocity must be due east, `+y`, at exactly `omega * |r|`. (G3)
 #[test]
 fn the_diurnal_velocity_is_omega_cross_r() {
     let r = Vec3::new(6_378_137.0, 0.0, 0.0);
@@ -360,7 +360,7 @@ fn the_diurnal_velocity_is_omega_cross_r() {
 }
 
 /// The rate this file hard-codes is the workspace's, checked here rather than assumed. A test is the
-/// only thing that can hold two crates to one constant when neither depends on the other.
+/// only thing that can hold two crates to one constant when neither depends on the other. (S2)
 #[test]
 fn the_rotation_rate_is_the_frames_crates_rotation_rate() {
     assert_eq!(

@@ -1006,7 +1006,7 @@ mod tests {
 
     /// The theory has a regime where the fixed point simply does not converge, and returning the
     /// last iterate there is how a caller ends up propagating a negative eccentricity. Orekit's
-    /// `BrouwerLyddanePropagator` refuses the same inputs.
+    /// `BrouwerLyddanePropagator` refuses the same inputs. (S2)
     #[test]
     fn a_near_equatorial_near_circular_orbit_is_refused() {
         let c = [0.0, 0.0, C20, C30, C40, C50];

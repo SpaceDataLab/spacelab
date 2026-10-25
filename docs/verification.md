@@ -7908,6 +7908,158 @@ crates/spacelab-vision/src/nn.rs | infra | types, traits, drivers or re-exports;
 crates/spacelab-vision/src/onnx.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 ```
 
+### 12.1 · Comparator-decided tests
+
+The census above asks whether a module names its check. This ledger asks the question P0 adds of
+every `#[test]`: is what it asserts against still another implementation's output? Under P0 another
+code is a comparator — a distance for the benchmark, never the verdict — so a test that another code
+still decides is debt of the same kind as an unnamed derivation. `tools/check-comparators.py` finds
+them by four rules: a code's name as a word of the test's **name** (`orekit`, `pyerfa`, `sofa`, …), a
+`tests/` **file** named after a code or `oracle`, a **fixture** so named that the test reads, or the
+test's own **doc** comment naming a code. A test parked as a comparator
+(`#[ignore = "comparator: …"]`) is not counted. The last three rules only say where an expected value
+*may* have come from, so a test whose doc names its check kind of `plans/17` §1.2 — `(G1)` … `(G5)`,
+or a supporting `(S1)` / `(S2)` — is exempt from them; the tag is written after reading the test's
+body, never from its doc alone. A document is not a code: SGP4-VER, an ICD's tables and the IERS
+Conventions are specification, and agency products are data.
+
+The first sweep, on 2026-10-25, found **178 candidates among 3 279 tests** (name 92, file 24, fixture
+7, doc 55). Reading the bodies of the 86 that the last three rules caught, 51 assert against
+mathematics or against the crate itself: closed forms and limits, defining equations, symmetries,
+the IERS and ICD tables, an in-repo recomputation, a refusal — Orekit or ERFA appeared in their doc
+as the reason the test exists ("the Orekit fixture is fully immersed, so it pins nothing about the
+arc"), not as the value asserted. They carry their tag now. **Today: 127 comparator-decided tests** —
+name 92, file 18, fixture 4, doc 13; 74 of them Orekit's (60 by name), 50 in
+`spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
+in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
+
+```text
+crates/spacelab-astrometry/tests/aberration_erfa.rs::a_direction_along_the_motion_does_not_shift | file:erfa
+crates/spacelab-astrometry/tests/aberration_erfa.rs::the_boost_reproduces_erfa_ab_on_every_fixture_direction | name:erfa
+crates/spacelab-astrometry/tests/aberration_erfa.rs::the_diurnal_speed_is_cosine_of_latitude_and_the_shift_follows_it | file:erfa
+crates/spacelab-control/tests/basilisk_oracle.rs::basilisks_default_control_law_omits_the_gyroscopic_term_by_exactly_one_cross_product | file:basilisk
+crates/spacelab-control/tests/basilisk_oracle.rs::the_closed_loop_tracks_basilisk_once_the_actuator_lag_is_modelled | name:basilisk
+crates/spacelab-control/tests/basilisk_oracle.rs::the_gravity_gradient_torque_agrees_with_basilisk | name:basilisk
+crates/spacelab-control/tests/basilisk_oracle.rs::the_mrp_law_agrees_with_basilisk_and_differs_only_by_the_feedforward_it_says_it_omits | name:basilisk
+crates/spacelab-control/tests/nasa42_oracle.rs::the_gravity_gradient_arc_agrees_with_42_at_every_step_it_was_run_at | file:nasa42
+crates/spacelab-control/tests/nasa42_oracle.rs::the_orbit_42_propagated_is_the_circle_it_was_given | file:nasa42
+crates/spacelab-coverage/tests/twilight_hour_angle.rs::the_polar_branches_are_the_days_astropy_finds_no_crossing_on | name:astropy
+crates/spacelab-earth/tests/geodetic.rs::vermeille_agrees_with_fukushima | fixture:pyerfa
+crates/spacelab-earthvision/tests/aeronet_measured_atmosphere.rs::correcting_with_an_assumed_atmosphere_biases_the_surface_reflectance | fixture:disort
+crates/spacelab-earthvision/tests/aeronet_measured_atmosphere.rs::the_coupling_terms_reproduce_disort_on_measured_atmospheres | name:disort
+crates/spacelab-earthvision/tests/phase_function_slab.rs::the_photon_slab_reproduces_disort | name:disort
+crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::our_monte_carlo_and_disort_agree_on_the_angular_shape_to_better_than_two_percent | name:disort
+crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::the_absorber_fitted_at_low_air_mass_predicts_the_high_air_mass_half | file:pyspectral
+crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::without_the_ozone_the_six_hundred_nanometre_disagreement_is_an_order_of_magnitude_worse | file:pyspectral
+crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs::our_slab_reproduces_radcalnets_modtran_toa_on_measured_scenes | name:modtran
+crates/spacelab-elements/src/brouwer_lyddane.rs::matches_orekit_on_an_eccentric_orbit_over_eight_weeks | name:orekit
+crates/spacelab-elements/src/brouwer_lyddane.rs::matches_orekit_reference | name:orekit
+crates/spacelab-elements/src/brouwer_lyddane.rs::matches_orekit_with_drag | name:orekit
+crates/spacelab-elements/src/brouwer_lyddane.rs::the_converged_mean_elements_match_orekit | name:orekit
+crates/spacelab-elements/src/eckstein_hechler.rs::matches_orekit_reference | name:orekit
+crates/spacelab-ephemeris/tests/neptune_lro.rs::a_day_of_the_selenocentric_model_tracks_neptune | name:neptune
+crates/spacelab-ephemeris/tests/neptune_lro.rs::the_full_week_against_neptune | name:neptune
+crates/spacelab-estimation/src/conjunction.rs::chan_degrades_where_patera_stays_exact_for_extreme_ellipses | doc:orekit
+crates/spacelab-estimation/src/conjunction.rs::chan_reproduces_published_reference_values | doc:orekit
+crates/spacelab-fa/src/cio.rs::cio_locator_matches_sofa_golden | name:sofa
+crates/spacelab-fa/src/cio.rs::cip_xy_matches_sofa_golden | name:sofa
+crates/spacelab-fa/src/cio.rs::era_matches_pyerfa_at_other_day_fractions | name:pyerfa
+crates/spacelab-fa/src/cio.rs::era_matches_sofa_golden | name:sofa
+crates/spacelab-fa/src/fundamental.rs::matches_pyerfa_across_four_centuries | name:pyerfa
+crates/spacelab-fa/src/fundamental.rs::matches_pyerfa_at_the_sofa_epoch | name:pyerfa
+crates/spacelab-fa/src/nutation.rs::both_nutation_series_match_pyerfa_across_four_centuries | name:pyerfa
+crates/spacelab-fa/src/nutation.rs::nutation_00a_matches_sofa_golden | name:sofa
+crates/spacelab-fa/src/nutation.rs::nutation_06a_matches_sofa_golden | name:sofa
+crates/spacelab-fa/tests/dtdb_oracle.rs::tdb_minus_tt_matches_pyerfa_over_two_centuries | name:pyerfa
+crates/spacelab-fa/tests/gmst82_oracle.rs::agrees_with_pyerfa_across_ten_millennia | name:pyerfa
+crates/spacelab-frames/tests/cio_oracle.rs::each_celestial_pole_offset_moves_the_matrix_by_its_own_size | file:oracle
+crates/spacelab-frames/tests/cio_oracle.rs::gcrf_to_itrf_matches_pyerfa_cio_pipeline | name:pyerfa
+crates/spacelab-frames/tests/cio_oracle.rs::the_lod_scaling_matches_orekit | name:orekit
+crates/spacelab-frames/tests/frames.rs::polar_motion_matches_pyerfa_pom00 | name:pyerfa
+crates/spacelab-frames/tests/frames.rs::polar_motion_rejects_the_other_three_orderings | fixture:pyerfa
+crates/spacelab-frames/tests/neptune_frames.rs::the_gcrf_state_matches_neptunes_own_reduction | file:neptune
+crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_inside_a_leap_second_is_off_by_exactly_one_second_of_rotation | file:orekit
+crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_matches_orekit_iers1996_outside_leap_seconds | name:orekit
+crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_agrees_with_orekit_to_the_convention_floor | name:orekit
+crates/spacelab-geometry/tests/qhull_cross_check.rs::every_construction_agrees_with_qhull_on_the_same_points | name:qhull
+crates/spacelab-gnss/src/gpt3.rs::matches_orekit_matlab_ref_case1 | name:orekit
+crates/spacelab-gnss/src/gpt3.rs::matches_orekit_matlab_ref_case2 | name:orekit
+crates/spacelab-gnss/src/models.rs::gmf_matches_the_orekit_reference_values | name:orekit
+crates/spacelab-gnss/src/models.rs::niell_matches_the_orekit_reference_values | name:orekit
+crates/spacelab-gnss/src/models.rs::vmf1_matches_the_orekit_reference_values | name:orekit
+crates/spacelab-gnss/src/models.rs::vmf3_matches_the_orekit_reference_values | name:orekit
+crates/spacelab-gnss/src/vmf_grid.rs::parses_real_vmf3_5x5_and_matches_orekit_at_a_node | name:orekit
+crates/spacelab-ionosphere/src/modip.rs::the_orekit_reference_points_are_reproduced_on_the_galileo_grid | name:orekit
+crates/spacelab-ionosphere/tests/galileo_stec.rs::the_stec_matches_the_jrc_reference_in_every_month | name:jrc
+crates/spacelab-propagation/src/dsst/coefficients.rs::the_scalar_coefficients_and_upper_bounds_match_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/drag.rs::fixed_state_rates_match_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/drag.rs::gauss_order_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/drag.rs::integration_limits_match_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/mod.rs::fixed_state_rates_match_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/mod.rs::mean_propagation_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/mod.rs::osculating_short_period_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/mod.rs::truncation_order_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/short_period.rs::short_period_at_orekit_mean_state_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/tesseral.rs::geo_low_ecc_resonant_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/tesseral.rs::geo_resonant_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/tesseral.rs::gps_resonant_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/tesseral.rs::max_ecc_pow_matches_orekit_step_table | name:orekit
+crates/spacelab-propagation/src/dsst/tesseral.rs::resonance_window_is_one_part_in_ten_revolutions | doc:orekit
+crates/spacelab-propagation/src/dsst/tesseral.rs::zero_frequency_order_is_not_resonant | doc:orekit
+crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::osculating_adds_the_short_period_correction_to_the_mean | doc:orekit
+crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::tesseral_short_period_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::the_mdaily_eccentricity_bound_follows_the_degree | doc:orekit
+crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::the_resonant_term_is_excluded_from_the_short_period_sum | doc:orekit
+crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::truncation_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/third_body.rs::fixed_state_moon_rates_match_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/third_body.rs::fixed_state_sun_rates_match_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/third_body.rs::mean_propagation_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/third_body.rs::truncation_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_short_period_matches_orekit | name:orekit
+crates/spacelab-propagation/src/dsst/third_body_short_period.rs::truncation_matches_orekit | name:orekit
+crates/spacelab-propagation/src/earth_radiation.rs::knocke_matches_orekit | name:orekit
+crates/spacelab-propagation/src/ephemeris.rs::both_bodies_reach_erfa_at_the_documented_accuracy | name:erfa
+crates/spacelab-propagation/src/harris_priester/mod.rs::above_ceiling_is_zero | doc:orekit
+crates/spacelab-propagation/src/harris_priester/mod.rs::matches_orekit_reference | name:orekit
+crates/spacelab-propagation/src/jb2008/mod.rs::matches_fortran_reference | doc:orekit
+crates/spacelab-propagation/src/maneuver.rs::constant_thrust_matches_orekit | name:orekit
+crates/spacelab-propagation/src/maneuver.rs::impulse_matches_orekit | name:orekit
+crates/spacelab-propagation/src/maneuver.rs::polynomial_empirical_matches_orekit | name:orekit
+crates/spacelab-propagation/src/maneuver.rs::rtn_frame_matches_orekit | name:orekit
+crates/spacelab-propagation/src/ocean_tide.rs::acceleration_matches_orekit | name:orekit
+crates/spacelab-propagation/src/ocean_tide.rs::admittance_weights_match_pyfes | name:pyfes
+crates/spacelab-propagation/src/ocean_tide.rs::delta_cs_matches_orekit | name:orekit
+crates/spacelab-propagation/src/relativity.rs::matches_orekit | name:orekit
+crates/spacelab-propagation/src/solid_tide.rs::acceleration_matches_orekit | name:orekit
+crates/spacelab-propagation/src/solid_tide.rs::ocean_pole_tide_matches_orekit | name:orekit
+crates/spacelab-propagation/src/solid_tide.rs::pole_tide_matches_orekit | name:orekit
+crates/spacelab-propagation/src/solid_tide.rs::step2_matches_orekit | name:orekit
+crates/spacelab-propagation/src/spacecraft.rs::a_null_radiation_flux_returns_zero_and_the_threshold_is_strict | doc:orekit
+crates/spacelab-propagation/src/spacecraft.rs::an_array_edge_on_to_the_sun_falls_back_to_an_arbitrary_perpendicular | doc:orekit
+crates/spacelab-propagation/src/spacecraft.rs::box_wing_matches_orekit | name:orekit
+crates/spacelab-propagation/tests/dsst_truncation.rs::the_eccentricity_truncation_order_matches_orekit | name:orekit
+crates/spacelab-propagation/tests/measured_density.rs::the_three_hourly_ap_array_is_what_carries_the_storm | doc:orekit
+crates/spacelab-propagation/tests/measured_wind.rs::hwm14_and_our_field_are_scored_on_the_same_held_out_rows | name:hwm14
+crates/spacelab-sensors/tests/pyorbital_geoloc.rs::the_catalogue_reproduces_pyorbitals_scan_angles_and_pixel_times | file:pyorbital
+crates/spacelab-sensors/tests/pyorbital_geoloc.rs::the_direct_sensor_model_reproduces_pyorbitals_ground_points | file:pyorbital
+crates/spacelab-sgp4/tests/catalogue_oracle.rs::a_changed_gravity_model_is_far_outside_the_bound_this_test_asserts | file:oracle
+crates/spacelab-sgp4/tests/catalogue_oracle.rs::neither_implementation_refused_a_propagation_the_other_completed | file:oracle
+crates/spacelab-sgp4/tests/catalogue_oracle.rs::the_worst_objects_of_the_catalogue_still_agree_with_the_oracle | file:oracle
+crates/spacelab-sgp4/tests/ground_track.rs::the_iss_ground_track_agrees_with_skyfield | name:skyfield
+crates/spacelab/tests/access_oracle.rs::earth_orientation_is_worth_tens_of_milliseconds_on_a_pass_edge | file:oracle
+crates/spacelab/tests/access_oracle.rs::iss_pass_edges_agree_with_orekit_within_a_second | name:orekit
+crates/spacelab/tests/earth_orientation.rs::the_iss_ground_track_with_real_earth_orientation | fixture:skyfield
+crates/spacelab/tests/igs_orbit_fit.rs::every_gps_satellite_in_the_daily_product | doc:orekit
+crates/spacelab/tests/light_time_oracle.rs::the_down_leg_agrees_with_orekits_own_fixed_point | file:oracle
+crates/spacelab/tests/light_time_oracle.rs::the_modelled_range_agrees_with_orekit_and_the_instantaneous_one_does_not | name:orekit
+crates/spacelab/tests/light_time_oracle.rs::the_range_rate_at_the_emission_epoch_agrees_with_orekit | name:orekit
+crates/spacelab/tests/light_time_oracle.rs::the_two_keplerian_propagations_are_the_same_orbit | file:oracle
+crates/spacelab/tests/neptune_sentinel1b.rs::the_full_day_against_neptune | name:neptune
+crates/spacelab/tests/neptune_sentinel1b.rs::two_orbits_of_the_geocentric_model_track_neptune | name:neptune
+```
+
 ## Reproducing the oracles
 
 The oracle-generating code is vendored so every number here is regenerable:

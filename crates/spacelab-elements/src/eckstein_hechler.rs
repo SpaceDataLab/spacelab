@@ -936,7 +936,7 @@ mod tests {
     }
 
     /// Non-Orekit anchor: the model's secular nodal rate `Ω̇ = ommD·xnotDot` reproduces the classic
-    /// J2 nodal-regression formula `Ω̇ = −³⁄₂ n J2 (Rₑ/p)² cos i` to the J2²/J4 level (~10⁻³ rel).
+    /// J2 nodal-regression formula `Ω̇ = −³⁄₂ n J2 (Rₑ/p)² cos i` to the J2²/J4 level (~10⁻³ rel). (G3)
     #[test]
     fn secular_node_rate_matches_j2_formula() {
         let eh = EcksteinHechler::from_osculating(&initial(), RE, C20, C30, C40, C50, C60).unwrap();

@@ -982,7 +982,7 @@ mod tests {
     /// `−Σⱼ (Cᵢⱼ ρⱼ + Sᵢⱼ σⱼ)` precisely so that the short-period correction has **zero mean over one
     /// revolution** — it is a periodic correction, not a secular one. Sweeping λ over a full turn at a
     /// frozen (a, k, h, q, p) and averaging must therefore return zero for all six components; the
-    /// equation-of-centre term `(Lv − λ)·Dᵢ` carries zero mean of its own.
+    /// equation-of-centre term `(Lv − λ)·Dᵢ` carries zero mean of its own. (G2)
     ///
     /// This is the one property that ties ρ/σ to the assembly they are used in: the two Orekit
     /// comparisons only ever sample a single λ per state, where a wrong mean is indistinguishable from
@@ -1015,7 +1015,7 @@ mod tests {
     /// ρⱼ + i·σⱼ = (1 + jB)·(−b·(k + i·h))ʲ with b = 1/(1 + B) (Danielson 2.5.3-(4)). The port builds
     /// it from the Cartesian Cⱼ/Sⱼ recurrence and a running `(−b)ʲ`; the oracle here is the same
     /// complex number in **polar** form — modulus `(b·e)ʲ` and argument `j·(π + atan2(h, k))` — which
-    /// shares no operation with the recurrence.
+    /// shares no operation with the recurrence. (G3)
     ///
     /// The Orekit comparisons reach ρ/σ only through Cᵢ⁰, where the factor `(1 + jB)` is one term of a
     /// thirteen-term sum dominated by j = 1, so a wrong ρⱼ at large j is invisible to them.
@@ -1055,7 +1055,7 @@ mod tests {
     /// scaled by short-period amplitudes of 1e-3 or less, so a longitude error of ~1e-9 rad is below
     /// their thresholds. Swept over 97 mean longitudes and over e up to 0.99: at the LEO e = 0.01 of
     /// the fixtures the Danby step converges in two iterations from almost any update rule, and only
-    /// an eccentric orbit separates a second-order step from a merely convergent one.
+    /// an eccentric orbit separates a second-order step from a merely convergent one. (G2)
     #[test]
     fn longitude_conversions_match_the_classical_anomalies() {
         let (mut max_res, mut max_ecc_anom, mut max_true) = (0.0_f64, 0.0_f64, 0.0_f64);
@@ -1112,7 +1112,7 @@ mod tests {
 
     /// A zonal field is invariant under rotation about the pole, so the generator of that rotation
     /// annihilates every Fourier coefficient. In equinoctial variables the generator is
-    /// `h·∂/∂k − k·∂/∂h − (α·∂/∂β − β·∂/∂α) − ∂/∂L`, giving the pair of identities
+    /// `h·∂/∂k − k·∂/∂h − (α·∂/∂β − β·∂/∂α) − ∂/∂L`, giving the pair of identities (G4)
     ///
     /// * `h·∂Cʲ/∂k − k·∂Cʲ/∂h − α·∂Cʲ/∂β + β·∂Cʲ/∂α − j·Sʲ = 0`,
     /// * `h·∂Sʲ/∂k − k·∂Sʲ/∂h − α·∂Sʲ/∂β + β·∂Sʲ/∂α + j·Cʲ = 0`.

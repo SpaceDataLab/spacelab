@@ -371,7 +371,7 @@ mod tests {
     /// the lift is `ρ₀·exp((|r₀|−|r|)/H)` evaluated at `|r| = |r₀|`, so it is `exp(0) = 1` whatever `H`
     /// is. `H` is visible only through the derivative, and asserting merely that the derivative is
     /// finite and negative (the test above) is blind to its value. That is why every one of the 29
-    /// mutants in `density_pair` survived, and why so did the `−10 000/ln(ρ_up/ρ₀)` line itself.
+    /// mutants in `density_pair` survived, and why so did the `−10 000/ln(ρ_up/ρ₀)` line itself. (G2)
     ///
     /// The wrapper documents its `H`, so the oracle is the model's own log-slope over the same 10 km,
     /// evaluated by calling [`harris_priester`] directly — the function the Orekit golden sweep pins.

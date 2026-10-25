@@ -482,7 +482,7 @@ mod tests {
 
     /// `pole_wobble` against `derivations/pole_wobble.py`: IERS 2010 Table 7.7 at 50 digits in the
     /// form the Conventions print it — milliarcseconds, a polynomial in *years*, direct powers —
-    /// versus the code's Horner in *seconds* with the mas→radian factor pre-divided once per power.
+    /// versus the code's Horner in *seconds* with the mas→radian factor pre-divided once per power. (G5)
     ///
     /// Both Orekit pole-tide oracles above sit at one epoch, 2024, which takes the linear branch, so
     /// the whole pre-2010 cubic — both Horner nests, the `F2`/`F3` scale factors and the changeover
@@ -667,7 +667,7 @@ mod tests {
         println!("pole_wobble vs IERS Eq. (21) at 50 dps: {worst:.3e} worst relative");
     }
 
-    /// The two models are not interchangeable, and the pole tide is where it shows.
+    /// The two models are not interchangeable, and the pole tide is where it shows. (S2)
     ///
     /// They separate at 5.94 mas/yr in `x` and 4.09 mas/yr in `y`, so the epoch decides how bad it
     /// is: 28 mas apart at 2010.0, 111 mas at 2024.0. At the Orekit fixture's polar motion — an
@@ -974,7 +974,7 @@ mod tests {
         );
     }
 
-    /// Each Step-2 slot must reach the coefficient the layout comment names, with a `+`.
+    /// Each Step-2 slot must reach the coefficient the layout comment names, with a `+`. (S2)
     ///
     /// The Python oracle passes `[0.0; 5]`, where `+=` and `-=` are the same operation; the Orekit
     /// oracle's 1 % bar is set by the pole tide in ΔC̄21/ΔS̄21, and the other three Step-2 terms —

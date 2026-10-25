@@ -39,6 +39,7 @@ fn apply(m: &Matrix3, v: [f64; 3]) -> [f64; 3] {
     ]
 }
 
+/// The field against our own 60-digit Legendre summation of the same coefficients (S1).
 #[test]
 fn the_field_matches_a_sixty_digit_direct_summation_of_the_same_coefficients() {
     // The crate sums Gottlieb's solid harmonics and differentiates them in closed form; the oracle

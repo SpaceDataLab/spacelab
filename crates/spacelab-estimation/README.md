@@ -4,9 +4,10 @@
 
 Orbit determination and estimation: square-root information and Kalman-family filters, smoothers, and conjunction probability.
 
-Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
-verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§4 Estimation, control, sensors, coverage & constellations](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#4--estimation-control-sensors-coverage--constellations) (51 rows).
+Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
+decides — a derivation, an exact value, the equation that defines the quantity — and
+another code's output is a comparison, never the proof. This crate is verified in
+[§4 Estimation, control, sensors, coverage & constellations](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#4--estimation-control-sensors-coverage--constellations) (51 rows).
 
 - API documentation: <https://docs.rs/spacelab-estimation>
 - Homepage: <https://spacedatalab.org>

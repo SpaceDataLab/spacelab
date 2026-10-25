@@ -4,9 +4,10 @@
 
 The PyO3 bindings of the spacelab crates, added to a Python module by `register`; the `spacedatalab` wheel on PyPI is built from them.
 
-Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
-verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§7 The Python boundary](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#7--the-python-boundary).
+Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
+decides — a derivation, an exact value, the equation that defines the quantity — and
+another code's output is a comparison, never the proof. This crate is verified in
+[§7 The Python boundary](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#7--the-python-boundary).
 
 - API documentation: <https://docs.rs/spacelab-python>
 - Homepage: <https://spacedatalab.org>

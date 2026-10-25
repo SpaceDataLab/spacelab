@@ -17,8 +17,9 @@
 > **Astrodynamics in Rust, with the verification as the deliverable.** Time scales and reference
 > frames, SGP4, numerical and semi-analytical propagation with the full IERS 2010 force model, orbit
 > determination, GNSS, satellite laser ranging, coverage and constellation design, and
-> Earth-observation geometry. Every number it produces is checked against a lineage that did not
-> come from here, and each check is written down with its oracle and residual.
+> Earth-observation geometry. Mathematics decides what is correct — a derivation re-checked in a
+> second engine, an exact value, the equation that defines the quantity — and every check is written
+> down with its residual. Other codes are comparisons, never the proof.
 
 ```toml
 [dependencies]
@@ -55,7 +56,7 @@ the Python bindings by [`tools/gen-figures.py`](tools/gen-figures.py):
 
 | ![SGP4 against python-sgp4](https://raw.githubusercontent.com/SpaceDataLab/spacelab/main/docs/figures/sgp4-reference.png) | ![GCRF to ITRF against ERFA](https://raw.githubusercontent.com/SpaceDataLab/spacelab/main/docs/figures/frames-erfa.png) |
 |:--:|:--:|
-| SGP4 against python-sgp4 over 24 h: at most **250 nm** (ISS) and **240 nm** (GPS); 3 % of the samples agree to the bit. Same lineage, so this pins units, epochs and frames. | The CIO chain against ERFA's identical route, 1900–2100: at most **0.012 µas**, 360 nm on the ground. ERFA's matrix route differs by up to 3.7 µas: two formulations of one model, not an error. |
+| SGP4 against python-sgp4 over 24 h: at most **250 nm** (ISS) and **240 nm** (GPS); 3 % of the samples agree to the bit. Both run Vallado's SGP4, so this pins units, epochs and frames. | The CIO chain against ERFA's identical route, 1900–2100: at most **0.012 µas**, 360 nm on the ground. ERFA's matrix route differs by up to 3.7 µas: two formulations of one model, not an error. |
 | ![Brute-force sampling against the event engine](https://raw.githubusercontent.com/SpaceDataLab/spacelab/main/docs/figures/access-windows.png) | ![Coverage map with the analytic reach](https://raw.githubusercontent.com/SpaceDataLab/spacelab/main/docs/figures/coverage-map.png) |
 | 108 cells, 24 h: at a 1 s step brute force finds **417 of 417** passes and agrees on coverage to **0.0045 %**; at 600 s it misses 79. The engine needs no step: it brackets every edge and refines it to 1 ms. | The engine's coverage of 10368 cells ends at **71.25°** latitude, the last cell inside the analytic reach of the 5° mask, **71.5°** (dashed). |
 
@@ -71,8 +72,9 @@ the Python bindings by [`tools/gen-figures.py`](tools/gen-figures.py):
   committed in [`derivations/`](derivations/) and re-proved in Maxima on every run.
 - **Full-resolution models.** XGM2019e geopotential, FES2014b ocean tide to degree 100, the full
   IAU 2000A nutation. Truncation is the caller's choice, never the data's.
-- **Independent oracles, chosen by lineage.** Orekit, NEPTUNE, NASA's LRO trajectory and the IGS
-  combination; two SOFA descendants count as one oracle.
+- **Mathematics decides; other codes compare.** A formula is verified by its derivation, an exact
+  value or the equation that defines it. Orekit, ERFA and NEPTUNE are comparisons, published as
+  distances, and the ledger names the code behind every row that still rests on one.
 - **Mutation-tested.** Every crate has been through `cargo mutants`; each survivor is killed or
   argued equivalent in a ledger.
 - **Lean by design.** A `no_std`, stack-allocated core: a degree-120 geopotential propagation holds

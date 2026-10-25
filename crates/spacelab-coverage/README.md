@@ -4,9 +4,10 @@
 
 Access-window detection: sign-change bracketing and bracket-preserving root refinement.
 
-Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
-verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§3 Orbital mechanics & automatic differentiation](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#3--orbital-mechanics--automatic-differentiation) (12 rows).
+Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
+decides — a derivation, an exact value, the equation that defines the quantity — and
+another code's output is a comparison, never the proof. This crate is verified in
+[§3 Orbital mechanics & automatic differentiation](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#3--orbital-mechanics--automatic-differentiation) (12 rows).
 
 - API documentation: <https://docs.rs/spacelab-coverage>
 - Homepage: <https://spacedatalab.org>

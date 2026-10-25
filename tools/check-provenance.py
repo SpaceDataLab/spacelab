@@ -44,7 +44,14 @@ REGISTER = ROOT / "docs" / "provenance.md"
 MARKER = "## The covered set"
 RELEASE = "## Not for public release"
 DATA = "## The data register"
-VERDICTS = {"ship", "ship+attr", "oracle-only", "restricted", "user-decision", "unread"}
+VERDICTS = {
+    "ship",
+    "ship+attr",
+    "internal-only",
+    "restricted",
+    "user-decision",
+    "unread",
+}
 # Everything committed that is not code: test fixtures and the assets `include_str!` embeds.
 DATA_GLOBS = ("crates/*/tests/fixtures/**/*", "crates/*/assets/**/*")
 HOST = re.compile(r"https?://([A-Za-z0-9.-]+)")
@@ -58,7 +65,18 @@ HOST = re.compile(r"https?://([A-Za-z0-9.-]+)")
 SCAN = ("crates", "derivations", "tools", "docs", ".github", ".cargo")
 # The C ABI headers, their C/C++ tests and the Java oracles count too: a bridge that exports a
 # restricted model is coupled to it like any other file.
-SCAN_SUFFIXES = {".rs", ".toml", ".py", ".sh", ".md", ".yml", ".yaml", ".tex", ".in", ".csv"}
+SCAN_SUFFIXES = {
+    ".rs",
+    ".toml",
+    ".py",
+    ".sh",
+    ".md",
+    ".yml",
+    ".yaml",
+    ".tex",
+    ".in",
+    ".csv",
+}
 SCAN_SUFFIXES |= {".c", ".h", ".cpp", ".hpp", ".java"}
 
 # A claim of derivation, in any of the shapes the module docs actually use. `transcrib\w+` rather
@@ -166,15 +184,21 @@ def data_rows() -> list[dict]:
             continue
         parts = [p.strip() for p in line.split(" | ")]
         if len(parts) != 5:
-            raise SystemExit(f"malformed data-register row (want 5 ' | ' fields): {line}")
+            raise SystemExit(
+                f"malformed data-register row (want 5 ' | ' fields): {line}"
+            )
         key, verdict, read, hosts, paths = parts
         rows.append(
             {
                 "key": key,
                 "verdict": verdict,
                 "read": read.removeprefix("read").strip(),
-                "hosts": [] if hosts == "hosts -" else hosts.removeprefix("hosts").split(),
-                "paths": [] if paths == "paths -" else paths.removeprefix("paths").split(),
+                "hosts": []
+                if hosts == "hosts -"
+                else hosts.removeprefix("hosts").split(),
+                "paths": []
+                if paths == "paths -"
+                else paths.removeprefix("paths").split(),
             }
         )
     return rows
@@ -193,7 +217,9 @@ def data_check() -> int:
     problems = []
     for r in rows:
         if r["verdict"] not in VERDICTS:
-            problems.append(f"{r['key']}: verdict '{r['verdict']}' is not one of {sorted(VERDICTS)}")
+            problems.append(
+                f"{r['key']}: verdict '{r['verdict']}' is not one of {sorted(VERDICTS)}"
+            )
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", r["read"]):
             problems.append(f"{r['key']}: 'read' must be a date, got '{r['read']}'")
         if f"`{r['key']}`" not in prose:
@@ -201,7 +227,9 @@ def data_check() -> int:
     registered = {h for r in rows for h in r["hosts"]}
     for script, hosts in fetch_hosts().items():
         for h in sorted(hosts - registered):
-            problems.append(f"{script}: fetches from {h}, which has no data-register row")
+            problems.append(
+                f"{script}: fetches from {h}, which has no data-register row"
+            )
     files = {p for g in DATA_GLOBS for p in ROOT.glob(g) if p.is_file()}
     covered: set[pathlib.Path] = set()
     for r in rows:
@@ -210,7 +238,9 @@ def data_check() -> int:
             problems.append(f"{r['key']}: none of its paths matches a committed file")
         covered |= matched
     for f in sorted(files - covered):
-        problems.append(f"{f.relative_to(ROOT)}: committed data with no data-register row")
+        problems.append(
+            f"{f.relative_to(ROOT)}: committed data with no data-register row"
+        )
     unread = sorted(r["key"] for r in rows if r["verdict"] == "unread")
     if "--public" in sys.argv:
         # A row whose every file is cut from the public tree, and which no shipped script fetches,
@@ -220,7 +250,9 @@ def data_check() -> int:
             r["key"]
             for r in rows
             if r["verdict"] == "unread"
-            and (r["hosts"] or not all(p.startswith(tuple(excluded)) for p in r["paths"]))
+            and (
+                r["hosts"] or not all(p.startswith(tuple(excluded)) for p in r["paths"])
+            )
         ]
         problems += [f"{k}: terms unread -- not releasable until read" for k in shipped]
     for p in problems:
@@ -262,7 +294,9 @@ def main() -> int:
     for a in added:
         print(f"newly depends on a licence-restricted module: {a}")
     for g in gone:
-        print(f"recorded as depending on a licence-restricted module, no longer does: {g}")
+        print(
+            f"recorded as depending on a licence-restricted module, no longer does: {g}"
+        )
     if added or gone:
         print(
             f"\n{len(excluded)} restricted roots, {len(found)} dependent files against "

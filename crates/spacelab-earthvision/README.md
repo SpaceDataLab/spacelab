@@ -4,9 +4,10 @@
 
 Earth-observation foundations: viewing geometry (sun/sensor angles) and Monte Carlo atmospheric radiative transfer (Marchuk's method).
 
-Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
-verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision) (72 rows).
+Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
+decides — a derivation, an exact value, the equation that defines the quantity — and
+another code's output is a comparison, never the proof. This crate is verified in
+[§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision) (72 rows).
 
 - API documentation: <https://docs.rs/spacelab-earthvision>
 - Homepage: <https://spacedatalab.org>

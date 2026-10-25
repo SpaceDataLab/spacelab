@@ -4,9 +4,10 @@
 
 NeQuick-G (Galileo) ionospheric electron-density and slant-TEC model, verified against the JRC reference implementation.
 
-Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
-verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision) (2 rows).
+Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
+decides — a derivation, an exact value, the equation that defines the quantity — and
+another code's output is a comparison, never the proof. This crate is verified in
+[§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision) (2 rows).
 
 - API documentation: <https://docs.rs/spacelab-ionosphere>
 - Homepage: <https://spacedatalab.org>

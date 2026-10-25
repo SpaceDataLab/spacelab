@@ -4,9 +4,10 @@
 
 Fundamental astronomy: time scales, Earth rotation, reference frames.
 
-Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
-verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§1 Time, Earth orientation & geodesy](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#1--time-earth-orientation--geodesy) (12 rows).
+Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
+decides — a derivation, an exact value, the equation that defines the quantity — and
+another code's output is a comparison, never the proof. This crate is verified in
+[§1 Time, Earth orientation & geodesy](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#1--time-earth-orientation--geodesy) (12 rows).
 
 - API documentation: <https://docs.rs/spacelab-fa>
 - Homepage: <https://spacedatalab.org>

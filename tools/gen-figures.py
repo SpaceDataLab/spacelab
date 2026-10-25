@@ -144,7 +144,8 @@ def sgp4_reference() -> str:
     return (
         f"SGP4 against python-sgp4 over 24 h: at most **{length(worst['ISS, SGP4'])}** (ISS) "
         f"and **{length(worst['GPS, SDP4'])}** (GPS); {round(100 * identical / total)} % of the "
-        f"samples agree to the bit. Same lineage, so this pins units, epochs and frames."
+        f"samples agree to the bit. Both run Vallado's SGP4, so this pins units, epochs and "
+        "frames."
     )
 
 

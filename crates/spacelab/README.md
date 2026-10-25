@@ -4,9 +4,10 @@
 
 Space data computation: time, Earth orientation, frames, propagation, geodesy.
 
-Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
-verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision).
+Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
+decides — a derivation, an exact value, the equation that defines the quantity — and
+another code's output is a comparison, never the proof. This crate is verified in
+[§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision).
 
 - API documentation: <https://docs.rs/spacelab>
 - Homepage: <https://spacedatalab.org>

@@ -4,9 +4,10 @@
 
 Closed-loop guidance, navigation and control: feedback laws, and the sensor/compute/actuator latency the loop actually runs at.
 
-Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
-verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§4 Estimation, control, sensors, coverage & constellations](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#4--estimation-control-sensors-coverage--constellations) (26 rows).
+Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
+decides — a derivation, an exact value, the equation that defines the quantity — and
+another code's output is a comparison, never the proof. This crate is verified in
+[§4 Estimation, control, sensors, coverage & constellations](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#4--estimation-control-sensors-coverage--constellations) (26 rows).
 
 - API documentation: <https://docs.rs/spacelab-control>
 - Homepage: <https://spacedatalab.org>

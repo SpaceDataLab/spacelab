@@ -4,9 +4,10 @@
 
 Orbit propagation: verified integrators (Runge-Kutta, multistep, symplectic, Taylor), the IERS 2010 force model, atmospheric density models, DSST and attitude.
 
-Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust organised around independent
-verification: every published number is checked against a lineage that did not come
-from the project. This crate is verified in [§2 Numerical propagation, forces & DSST](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#2--numerical-propagation-forces--dsst).
+Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
+decides — a derivation, an exact value, the equation that defines the quantity — and
+another code's output is a comparison, never the proof. This crate is verified in
+[§2 Numerical propagation, forces & DSST](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#2--numerical-propagation-forces--dsst).
 
 - API documentation: <https://docs.rs/spacelab-propagation>
 - Homepage: <https://spacedatalab.org>

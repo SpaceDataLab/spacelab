@@ -1,84 +1,98 @@
-# Verification & oracle provenance
+# Verification & provenance
 
-Every algorithm in this workspace is verified against a **real external oracle** or an **exact
-analytic / behavioural property** — never a self-referential expectation. This document is the
+Every algorithm in this workspace answers to **mathematics**: an identity, the equation that defines
+the quantity, an exact value or limit, a conservation law, or — for a model a document defines —
+that document's own published test vectors. Another implementation's output is a **comparator**: the
+distance to it is measured and published, and it never decides what is correct. This document is the
 provenance map: for each component it names *what defines the answer*, *what it is checked against*
-and *to what residual* — the first two kept in separate columns, because they are not the same claim.
+and *to what residual* — the first two kept in separate columns, because they are not the same
+claim.
 
 The **Residual / tol** column is the bound the test suite actually enforces (reproducible with
 `cargo test --workspace`); where a doc-comment additionally records the *measured* residual, that
 tighter number is given in parentheses. Nothing here is aspirational — if a row claims `< 1e-9`, a
 test asserts it.
 
-The external oracles used, by lineage:
+What the checks are computed with, and what the comparisons run against:
 
-- **IAU/IERS standards** — SOFA / `pyerfa` golden vectors, the IERS Conventions 2010 routine
-  self-test cases, real IERS `finals2000A` Bulletin A/B, the published leap-second table.
-- **Orekit 13** (Hipparchus 4) — independent-lineage Java astrodynamics; a vendored
-  `tools/orekit-oracle` harness generates golden CSVs for forces, tides, DSST, event detection,
-  tropospheric mapping, conjunction Pc.
-- **Reference model implementations** — python-sgp4 (official SGP4-VER set), Skyfield, JPL DE440
-  (via `anise`) against Horizons, Brodowski's NRLMSISE-00 C, Bowman's JB2008 FORTRAN,
-  rpcm, OpenCV, PyTorch / onnxruntime / torchvision, ppigrf, the H3 library.
-- **Numerics libraries** — scipy, numpy, scikit-learn, PARI/GP (34-digit), mpmath (50-digit),
-  DelayDiffEq.jl (an independent method-of-steps DDE solver, reference track only).
-- **Computer-algebra systems** — Maxima and FriCAS symbolic derivations (`derivations/*.mac`,
-  `*.input`) for geopotential gradients, Richardson halo coefficients, sensor footprint edges.
+- **The engines of the checks** — Maxima, the computer-algebra system of record, and FriCAS for the
+  symbolic derivations (`derivations/*.mac`, `*.input`): geopotential gradients, Richardson halo
+  coefficients, sensor footprint edges, the DSST short periods. PARI/GP for exact arithmetic and
+  34-digit values; mpmath for 50-digit evaluation of a formula. Neither Maxima's `bfloat` nor mpmath
+  bounds its own error, so a reference asserted at round-off level comes from exact arithmetic or
+  from a ball with a radius.
+- **The documents that define a model, and the data they publish** — the IERS Conventions 2010 and
+  their routine self-test cases, real IERS `finals2000A` Bulletin A/B, the published leap-second
+  table, the WGS-84 defining constants, the agencies' coefficient files (each sealed against the
+  file the agency publishes, below).
+- **Comparators** — Orekit 13 (Hipparchus 4), whose vendored `tools/orekit-oracle` harness writes
+  CSVs for forces, tides, DSST, event detection, tropospheric mapping and conjunction Pc; SOFA /
+  `pyerfa`; python-sgp4, Skyfield, JPL DE440 (via `anise`) against Horizons; the reference model
+  programs — Brodowski's NRLMSISE-00 C, Bowman's JB2008 FORTRAN,
+  rpcm, OpenCV, PyTorch / onnxruntime / torchvision, ppigrf, the H3 library; scipy, numpy,
+  scikit-learn, DelayDiffEq.jl (an independent method-of-steps DDE solver, reference track only).
 
-## How to read the *Oracle* column
+Many rows below are still checked only against a comparator. Such a row's residual is a distance,
+not a proof of correctness; the rows are being re-based on mathematical checks one module at a time,
+and the gate kinds of the next section tell which a row already has.
 
-| Kind | Meaning |
-|---|---|
-| **External tool** | An independent library/tool computes the same quantity (pyerfa, Orekit, python-sgp4, OpenCV, PyTorch, scipy, PARI/GP, DE440, …). Strongest evidence. |
-| **Primary-source port / constant** | A numerically-exact reproduction of a reference implementation, or verbatim vendored primary-source constants (NRLMSISE-00, JB2008, IERS tables, WGS-84, FES tide grids). Here the oracle *is* the specification — see below for what that does and does not establish. |
-| **Independent recomputation** | A second, algorithmically-*different* in-repo method cross-checks the first (equinoctial VOP vs Gaussian averaging, Battin vs direct third-body, AD vs finite differences, SR-UKF vs SRIF). |
-| **Analytic closed-form** | Checked against a hand/textbook closed-form expression (Kepler period, J2 node regression, conic radii, dipole field, Beer–Lambert). |
-| **Self-consistency / property** | Round-trip, conservation law, symplecticity, bit-exact batch≡scalar, gauge-fixed recovery, degenerate-input guard. Honestly labelled where no external reference exists (common for the semi-analytic integrators and the Phase-8 pillars). |
+## How to read the *Check* column
 
-Hardware-gated GPU rows and network-snapshot rows are marked *(ignored)* — they are `#[ignore]`d in CI
-and run locally.
+| Kind | What it is | Decides? |
+|---|---|---|
+| **G1 Identity** | The shipped expression minus the derived one is 0, symbolically (`ratsimp`, `exponentialize` → 0) — `derivations/zonal_secular.mac`'s six residuals | yes |
+| **G2 Defining equation** | The quantity satisfies the equation that defines it, evaluated independently — the DSST short periods against n·∂η/∂λ = F − ⟨F⟩ | yes |
+| **G3 Exact value or limit** | A closed form, special case or asymptote, in exact or certified arithmetic — Kepler period, J2 node regression, conic radii, dipole field, Beer–Lambert, Knocke's pressure on a uniform sphere | yes |
+| **G4 Conservation or symmetry** | An invariant the mathematics guarantees — energy, the Jacobi constant, symplecticity, `fġ − ḟg = 1`, a frame inverse composing to the identity | yes |
+| **G5 Specification vectors** | For a model a document defines, that document's own published test vectors — SGP4-VER's `tcppver.out` (Vallado et al. 2006), the IERS 2010 routine self-tests, the Galileo NeQuick-G ICD's Annex E table | yes, for the document's own vectors only |
+| **S1 Independent recomputation** | A second, algorithmically different in-repo method — equinoctial VOP vs Gaussian averaging, Battin vs direct third-body, AD vs finite differences, SR-UKF vs SRIF | supports, never alone |
+| **S2 Property** | Round trip, bit-exact batch ≡ scalar, gauge-fixed recovery, refusal of degenerate input | supports, never alone |
+| **C Comparator** | Another implementation's output — Orekit, ERFA, python-sgp4, Skyfield, scipy, OpenCV, a reference model program | **no** — a distance, published for comparison |
 
-## Specification source vs oracle
+A **Check** cell that names another code is a comparator, whatever its residual; a row whose only
+check is a comparator is a row whose mathematics is not yet in place. Hardware-gated GPU rows and
+network-snapshot rows are marked *(ignored)* — they are `#[ignore]`d in CI and run locally.
 
-Two different things are being called an oracle in the tables below, and the distinction decides what
-a residual is entitled to claim:
+## Specification source vs check
 
-- the **specification source** is the artefact that *defines* the answer — Picone's NRLMSISE-00 C,
+Two different things decide what a residual is entitled to claim:
+
+- the **specification source** is the artefact that *defines* the answer — a standards document, a
+  paper, an agency data product, a mathematical definition — and, for the models that only a
+  program defines, that program: the NRL's NRLMSISE-00 FORTRAN,
   Bowman's `JB2008.for`,
-  Vallado's `SGP4.cpp` and its printed
-  `tcppver.out`, the IERS Conventions routine self-tests, the WGS-84 defining constants, the FES
-  coefficient grids;
-- the **oracle** is a value arrived at independently of the implementation under test.
+  Vallado's `SGP4.cpp` and its printed `tcppver.out`;
+- the **check** is what the residual is measured against, and only mathematics (G1–G5) decides.
 
 Every table below carries both, side by side. The **Specification** column names the artefact that
-fixes what the answer should be — a standards document, a paper, an agency data product, or a
-mathematical definition. The **Oracle** column names what the residual was actually measured
+fixes what the answer should be. The **Check** column names what the residual was actually measured
 against. A **⚠** marks a row where the specification is *in practice* another implementation: no
 standard or paper determines the number on its own, so we inherit someone else's reading of it. Two
 cells are neither: *mathematical definition* (SO(3), a group inverse, IEEE-754 exactness) where the
 answer follows from the definition, and *internal API contract* (batch ≡ scalar, a conservative cull
 bound, a dense-output budget) where the promise is ours and the test is what fixes it.
 
-Where a row's oracle *is* its specification source, the residual measures transcription fidelity and
-nothing more. That is worth having — agreement to 1e-5 across NRLMSISE-00's 17 canonical outputs
-rules out a large class of transcription errors — but it is a narrower claim than the size of the
-number suggests, and it does not compose: two ports of one source agreeing adds no information.
+Where a row's check is a run of its specification source, the residual measures transcription
+fidelity and nothing more. That is worth having — agreement to 1e-5 across NRLMSISE-00's 17
+canonical outputs rules out a large class of transcription errors — but it is a comparison: a
+narrower claim than the size of the number suggests, and one that does not compose, since two ports
+of one source agreeing adds no information.
 
 The rows where the two coincide split into two kinds, and only one of them is a gap.
 
-**Definitional.** For SGP4/SDP4 the reference implementation *is* the model: an SGP4 state has no
-meaning apart from the code that AFSPC and Vallado published, so transcription fidelity is the whole
-of correctness and `tcppver.out` is the right thing to be pinned to. The same holds for the vendored
-constant tables (WGS-84's defining constants, the leap-second list, the IERS 2010 routine self-test
-vectors, the FES2004/FES2014b grids): the primary source is the definition, and the only failure
-mode available is mis-transcription, which bit-exactness settles.
+**Defined by a document.** For SGP4/SDP4 the model has no meaning apart from the code that AFSPC and
+Vallado published, and Vallado et al. (2006) print its test vectors, so conformance to `tcppver.out`
+is a G5 check and transcription fidelity is the whole of correctness. The same holds for the
+vendored constant tables (WGS-84's defining constants, the leap-second list, the IERS 2010 routine
+self-test vectors, the FES2004/FES2014b grids): the primary source is the definition, and the only
+failure mode available is mis-transcription, which bit-exactness settles. Every formula inside such
+a model is still re-derived where it can be (G1–G4).
 
 **Physical.** The empirical atmospheres are not definitional. NRLMSISE-00, JB2008,
 and Harris-Priester each approximate a measurable quantity, so reproducing the reference program
-leaves the physical claim entirely untested — and for each of them, reproducing the reference program is all
-the evidence there is. JB2008's `vs Orekit < 1e-12` does not break the circle: Orekit's JB2008 has
-the same specification source, so the two are siblings and the tightness of the agreement is a
-property of shared lineage rather than independent confirmation.
+leaves the physical claim untested: the reproduction is a comparison. JB2008's `vs Orekit < 1e-12`
+does not change that: Orekit's JB2008 has the same specification source, so the two are siblings,
+and the tightness of their agreement is a property of shared descent, not a confirmation.
 
 Harris-Priester is a milder case and worth separating out: Orekit's implementation is written
 independently from the same published Montenbruck & Gill table rather than translated from a common
@@ -89,9 +103,10 @@ in that row is not evidence of independent agreement either — the half-angle c
 engineered on purpose. The honest reading of the row is "the table and the blending law transcribe
 correctly", not "the model is right to 1e-11".
 
-What would break the circle for all four is measured density
-(accelerometer-derived Swarm / GRACE-FO), which is tracker #216 and needs network data, and the
-density-calibration layer that already exists to absorb the residual those measurements would expose.
+What tests the physical claim is measured density: §10.2 scores the models against the
+accelerometer-derived GRACE-FO C and Swarm A densities, and SDTM-1 is fitted and scored on measured
+satellite-months (§10.9–§10.17), with the density-calibration layer to absorb the residual those
+measurements expose.
 
 ### Re-deriving the generated tables from the file the agency publishes
 
@@ -155,7 +170,7 @@ an ancestor, and only the IERS tables would break that.
 
 `spacelab-core`, `spacelab-fa`, `spacelab-frames`, `spacelab-eop`, `spacelab-earth`
 
-| Crate | Component | Specification | Oracle | Residual / tol | Test file |
+| Crate | Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|---|
 | core | Mat3 rot1/rot2/rot3 + products: orthonormality, det, frame-not-vector convention | SO(3) definition | analytic property (R·Rᵀ=I, det=1) | < 1e-15 | src/linalg.rs |
 | core | Vec3 cross/dot/norm | vector algebra | analytic right-hand rule | bit-exact / < 1e-15 | src/linalg.rs |
@@ -222,7 +237,7 @@ convergence order + Hamiltonian conservation + cross-checks against independentl
 
 ### Integrators
 
-| Component | Specification | Oracle | Residual / tol | Test file |
+| Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
 | DOP853 tableau | Hairer–Nørsett–Wanner I §II.5 (Dormand–Prince 8(5,3)) | scipy `dop853_coefficients` (machine-generated) + analytic Kepler + DOPRI5 cross-check | energy < 1e-9, Lz < 1e-10; vs DOPRI5 < 1e-8 | tests/dop853.rs |
 | DOPRI5 tableau | Dormand & Prince 1980; order conditions in `derivations/dopri5_order.mac` | Dormand–Prince 1980; order conditions symbolic in `derivations/dopri5_order.mac`; dense = Hairer contd5 | analytic < 1e-8; order 5 | tests/integrators.rs |
@@ -246,7 +261,7 @@ convergence order + Hamiltonian conservation + cross-checks against independentl
 
 ### Forces — gravity, third-body, SRP, relativity, radiation, drag coefficient
 
-| Component | Specification | Oracle | Residual / tol | Test file |
+| Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
 | GeoPotential gradient (XGM2019e) | ICGEM XGM2019e `.gfc` (re-derived, see above); spherical-harmonic potential | Maxima symbolic-gradient oracle (`derivations/geopotential.mac`) | rel < 1e-9 | src/geopotential.rs |
 | GeoPotential @ degree 70 | ICGEM XGM2019e `.gfc`; associated-Legendre definition | independent scipy assoc-Legendre + numerical gradient | ~1e-8 (assert < 1e-6) | src/geopotential.rs |
@@ -286,7 +301,7 @@ vanishes on the horizon, where the last crown is cut.
 
 ### Atmospheres — exact ports of primary-source reference implementations
 
-| Component | Specification | Oracle | Residual / tol | Test file |
+| Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
 | NRLMSISE-00 (gtd7/gtd7d) | Picone et al. 2002 — the released C is the specification in practice ⚠ | Brodowski reference C (Picone 2002), 17 canonical outputs | max_rel < 1e-5 | src/nrlmsise00/mod.rs |
 | NRLMSISE-00 drag wrapper | internal API contract (gtd7d + hydrostatic gradient) | underlying gtd7d value + analytic scale-height gradient | value < 1e-12 rel; gradient < 1e-6 | tests/nrlmsise00_atmosphere.rs |
@@ -301,7 +316,7 @@ that does and does not settle. The rows from **SDTM-1 under a storm** downward v
 field and the paths that reach it: Ф15.D has since run on the twelve satellite-months that were
 reachable, and §10.10 is its verdict, its splits and its envelope.
 
-| Component | Specification | Oracle | Residual / tol | Test file |
+| Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
 | SDTM-1 `I₁ = ∫₀^ζ dζ′/T` closed form | Bates (1959) temperature profile; form fixed in `plans/16` D-13 | `derivations/sdtm_bates.mac` — four identities at 0 — **and** Simpson on `1/T` at 7 heights to 900 km | < 1e-12 rel; the CAS's printed `0.328264435927652` to 1e-15 | src/sdtm/mod.rs |
 | SDTM-1 diffusive-equilibrium density | Jacchia (1971) §3: `nᵢ = nᵢ(0)(T₀/T)^{1+αᵢ} e^{−mᵢg₀I₁/k}` | Maxima: the residual of the barometric ODE for each species is 0 | exact (symbolic) | derivations/sdtm_bates.mac |
@@ -327,7 +342,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 
 ### Tides
 
-| Component | Specification | Oracle | Residual / tol | Test file |
+| Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
 | Ocean tide ΔC̄/ΔS̄ (FES2004) | IERS TN36 §6.3 — FES2004 grid taken from Orekit's data distribution ⚠ | Orekit 13 `OceanTides` FES2004 deg/order 6 | rel < 1e-9 | src/ocean_tide.rs |
 | Ocean tide acceleration (FES2004) | IERS TN36 §6.3 (same FES2004 provenance) ⚠ | Orekit 13 `OceanTides` (ITRF) | rel < 1e-7 (meas 5.2e-8, cancellation floor) | src/ocean_tide.rs |
@@ -342,7 +357,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 
 ### Spacecraft, maneuvers, DSST semi-analytical
 
-| Component | Specification | Oracle | Residual / tol | Test file |
+| Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
 | Box-wing drag + SRP | box-wing radiation model (Montenbruck–Gill); panel convention from Orekit ⚠ | Orekit 13 `BoxAndSolarArraySpacecraft` golden, 5 geometries | < 1e-9 | src/spacecraft.rs |
 | Constant-thrust / impulse / parametric maneuvers | rocket equation; constant-thrust and impulsive definitions | Orekit `ConstantThrustManeuver`/`ImpulseManeuver`/`ParametricAcceleration` golden | r/v < 1e-12; AD vs FD | src/maneuver.rs |
@@ -648,7 +663,7 @@ clear of US 10 641 925 B2's claims (`docs/provenance.md`).
 
 `spacelab-sgp4`, `spacelab-elements`, `spacelab-astro`, `spacelab-ephemeris`, `spacelab-autodiff`, `spacelab-ndm`
 
-| Crate | Component | Specification | Oracle | Residual / tol | Test file |
+| Crate | Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|---|
 | sgp4 | propagate_minutes, all 33 official SGP4-VER element sets | Hoots & Roehrich 1980 (Spacetrack 3) as revised by Vallado 2006 — the specification *is* a listing ⚠ | python-sgp4 → Vallado's `SGP4.cpp` via its compiled extension (AIAA 2006-6753) | < 1e-3 m / < 1e-6 m·s⁻¹; >700 states | tests/sgp4_verification.rs |
 | sgp4 | the same states vs the **published** 2006 artefact | Vallado 2006 `tcppver.out`, the printed reference output ⚠ | `tcppver.out`, Vallado's printed output (vendored) | < 1e-3 m; 90% inside the 8.7 µm print floor | tests/sgp4_primary_source.rs |
@@ -901,7 +916,7 @@ which is why the assertion is on the round trip and not on the metre.
 `spacelab-estimation`, `spacelab-sensors`, `spacelab-coverage`, `spacelab-constellation`,
 `spacelab-grid`, `spacelab-control`, `spacelab-geometry`, `spacelab-slr`, `spacelab-astrometry`
 
-| Crate | Component | Specification | Oracle | Residual / tol | Test file |
+| Crate | Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|---|
 | estimation | Conjunction Pc — Chan series | Chan 1997/2008 equivalent-area series | Chan 1997/2008 (via Orekit) + Alfano + operational CDM, Pc 1e-2…1e-28 | rel < 1e-3 | src/conjunction.rs |
 | estimation | Conjunction Pc — Foster/Patera 3-D | Foster & Estes 1992; Patera 2001 | NASA CARA "Alfano" CDM reference Pc (10 cases) | vs published rel < 3e-4; Foster vs Patera < 1e-8 | src/conjunction.rs |
@@ -1579,7 +1594,7 @@ further quadratures of an integral four methods already agree on to 1e-8, and to
 published CARA values, so a fifth buys a cross-check the suite has. `Laas2015`'s distinguishing
 feature is a computable truncation bound, which the other four lack and which would be worth having;
 we do not hold Serra et al. 2016, and deriving the recurrence in-repo while claiming its citation
-would be a provenance failure of exactly the kind §"Specification source vs oracle" exists to
+would be a provenance failure of exactly the kind §"Specification source vs check" exists to
 prevent.
 
 ### 4.10 The Pc oracle rested on a transcription, and a transcription is not a measurement
@@ -2380,7 +2395,7 @@ where a non-Rust caller would make it — the #319 drift pattern at crate granul
 `spacelab-gnss`, `spacelab-geomagnetism`, `spacelab-ionosphere`, `spacelab-earthvision`,
 `spacelab-signal`, `spacelab-vision`, `spacelab-gpu`, `spacelab` (umbrella)
 
-| Crate | Component | Specification | Oracle | Residual / tol | Test file |
+| Crate | Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|---|
 | gnss | GMF / VMF1 / VMF3 / Niell mapping functions | Niell 1996; Boehm et al. 2006 (GMF/VMF1); Landskron & Boehm 2018 (VMF3) | Orekit mapping-function tests (Green Bank etc.) | < 2e-6 (VMF) … < 2e-3 (Niell) | src/models.rs |
 | gnss | GPT3 ah/aw/T/P/e/Tm/λ/gradients | Landskron & Boehm 2018 — the TU Wien MATLAB is the specification in practice ⚠ | Orekit MATLAB GPT3 reference | < 1e-9 | src/gpt3.rs |
@@ -4074,7 +4089,7 @@ than two, unviable in both configurations, and the crate's total falls 269 → 2
 beside it stays a pair on purpose: nothing is emitted for the body of an `unsafe fn`, so it has no
 phantom to avoid — the blind spot of #260, convenient for once.
 
-| Component | Specification | Oracle | Residual / tol | Test file |
+| Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
 | Header constants (`SL_MU_EARTH`, `SL_RE_EARTH`, `SL_J2/J3_EARTH`, `SL_EARTH_ROTATION_RATE`, `SL_ABI_VERSION`) | the header is the contract | the value the library itself computes with | bit-exact (`to_bits`) | src/lib.rs |
 | Enum tags, struct field order and arity | `#[repr(C)]` layout | the header text, parsed | exact | src/lib.rs |
@@ -4247,7 +4262,7 @@ absent, and the distinction is the kind of thing that reads as coverage when it 
 
 
 
-| Component | Specification | Oracle | Residual / tol | Test file |
+| Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
 | Lambert | two-body flow — units and argument order | closure: fly the returned `v1` and arrive at `r2` | < 1e-6 m (swapped `r1`/`r2` gives 3.4e6) | tests/bindings.py |
 | Two-body / IAS15 dense ephemerides | Kepler solution; dense-output contract | the Kepler solution at an interior time | < 1e-3 m; `eval(t1)` ≡ `final_state()` | tests/bindings.py |
@@ -5466,7 +5481,7 @@ estimate ECOM once- and twice-per-revolution empirical accelerations on top of a
 is the difference between decimetres and the product's few centimetres. Nothing in the frames, time
 scales, integrator or estimator is left as a candidate — a fault in any of those is kilometres.
 
-| Component | Specification source | Oracle | Residual / tol | Where |
+| Component | Specification source | Check | Residual / tol | Where |
 |---|---|---|---|---|
 | Seven-parameter GNSS arc, 24 h | IGS final orbit combination (IGS20 / ITRF2020, centre of mass) | the IGS product itself | 3D post-fit RMS < 0.4 m, radial < 0.25 m, worst < 1.0 m | tests/igs_orbit_fit.rs |
 | Same arc on DE440 *(ignored: needs kernel)* | as above | the IGS product | 3D RMS < 0.15 m, and < ½ the analytic-ephemeris residual | tests/igs_orbit_fit.rs |
@@ -5728,7 +5743,7 @@ strictly stronger comparison than the table above. It is not done here because i
 dependency and a model-weight download, which is a dependency decision rather than a measurement.
 Recorded as available and unused.
 
-| Component | Specification source | Oracle | Residual / tol | Where |
+| Component | Specification source | Check | Residual / tol | Where |
 |---|---|---|---|---|
 | NRLMSISE-00 / JB2008 vs measurement, quiet + storm | the models' own primary sources (§2) | **TU Delft v02 GRACE-FO C accelerometer density** | bias > 1 on both days; JB2008 < 1.6, NRLMSISE-00 < 2.5 | tests/measured_density.rs |
 | Same days, same indices, independent lineage | — | **Orekit 13.1.7** `NRLMSISE00`/`JB2008`/`DTM2000`, its own loaders, frames, Sun and model code | ≤ 1e-3 relative in bias (NRLMSISE-00), ≤ 5e-3 (JB2008) | tools/orekit-oracle/DensityOracle.java |
@@ -5827,7 +5842,7 @@ an ILRS monthly file never receive their `h8` terminator, so a parser that only 
 `h8` loses those passes without a word. Together they had cost **half the normal points and one
 station** before the residuals were ever computed.
 
-| Component | Specification source | Oracle | Residual / tol | Where |
+| Component | Specification source | Check | Residual / tol | Where |
 |---|---|---|---|---|
 | Forward two-way range model, LAGEOS-1 + LAGEOS-2, one day | IERS Conventions (2010) §7.1.1, §7.1.4, §9, §11; ILRS CRD 2.01 | **ILRS normal points + ILRS combined orbit + ITRF2020** | 211 points, RMS < 3 cm, \|bias\| < 2 cm, worst station < 5 cm, worst single < 12 cm | tests/slr_range_residuals.rs |
 | Mendes–Pavlis zenith delay | *GRL* 31 L14602 (2004) | **IERS `FCULZD_HPA`**, compiled | 1 / 4 / 0 ULP on hydrostatic / non-hydrostatic / total (see below) | spacelab-slr/src/troposphere.rs |
@@ -5917,7 +5932,7 @@ into the same band. Separating them needs the per-station `BLQ` table §10.3 nam
 input to `slr::loading` — the campaign measures a term of the right size and says exactly what would
 attribute it.
 
-| Component | Specification source | Oracle | Residual / tol | Where |
+| Component | Specification source | Check | Residual / tol | Where |
 |---|---|---|---|---|
 | The §10.3 model over 8 days, 2 arcs, 26 pads | as §10.3 | **ILRS normal points + two ILRS combined arcs + ITRF2020** | 2158 points modelled or declined by reason; RMS < 3 cm on ≥30 returns, \|bias\| < 2 cm, worst station < 5 cm | tests/slr_range_residuals.rs |
 | Orbit-arc consistency across the weekly seam | — | **the network's own day-to-day step, within one arc** | seam RMS < 2× the within-arc RMS (measured 0.95 vs 0.88 cm) | tests/slr_range_residuals.rs |
@@ -6038,7 +6053,7 @@ and the density side has the same question open. So the two fields share the *co
 interval, the trailing mean — and not the kernel, and the reason is written on
 [`WindPoint::ap`](../crates/spacelab-propagation/src/wind_model.rs) rather than left to be rediscovered.
 
-| Component | Specification source | Oracle | Residual / tol | Where |
+| Component | Specification source | Check | Residual / tol | Where |
 |---|---|---|---|---|
 | Wind interface in `Drag` / `PanelDrag` | — | **the pre-change drag law, transplanted** | `NoWind` reproduces it **bit for bit** (`to_bits()`) | tests/drag.rs |
 | Crosswind product parse | TU Delft `*_WND_ACC_*` header | **a committed one-day GRACE-FO excerpt** | 30 rows, unit directions to 1e-6, 27/30 within 8° of zonal | src/wind_data.rs |
@@ -6107,7 +6122,7 @@ latency away; what this supports is narrower and more useful: **at these epoch a
 set of either origin is a kilometre-class product, and the epoch age dominates its origin.** Anyone
 reading a metre off an element set is reading noise.
 
-| Component | Specification source | Oracle | Residual / tol | Where |
+| Component | Specification source | Check | Residual / tol | Where |
 |---|---|---|---|---|
 | Operator fit vs catalogue fit, 5 sources × 3 horizons | — | **Celestrak SupGP against the standard GP catalogue** — two fits of one object from disjoint information | medians 0.400 km (+1 d) to 9210.155 km (+30 d); drag ordering asserted, not assumed | tests/supgp_divergence.rs |
 | Several ILRS centres on one laser target | — | **the analysis centres against each other**, at the latest epoch among them | 45 multi-provider objects, median spread **896.0 m**, worst 3020.9 m | tests/supgp_divergence.rs |
@@ -6162,7 +6177,7 @@ and reading an index no model here consumes is not one yet. The three `space_wea
 that are bridged all feed something. When a model specified on Hpo exists, the reader goes across with
 it.
 
-| Component | Specification source | Oracle | Residual / tol | Where |
+| Component | Specification source | Check | Residual / tol | Where |
 |---|---|---|---|---|
 | Hp30 and Hp60 parse, and agree about the week they cover | GFZ Hpo file format | **GFZ `Hp60_ap60` / `Hp30_ap30`, one week each, CC BY 4.0** | 168 and 336 rows; the two cadences bracket the same days | tests/hourly_geomagnetic_index.rs |
 | The published index saturates where the hourly one keeps reading | `ap` table top = 400, `Kp` = 9 | the two products over the same hours | 3-hourly peak **at** 400 exactly; `ap60` 456, `Hp60` 10.667 | tests/hourly_geomagnetic_index.rs |
@@ -6325,7 +6340,7 @@ estimates along-track and once-per-revolution accelerations, which absorb more. 
 needs a LAGEOS orbit determination from normal points at a millimetre floor, and
 `slr_range_residuals.rs` reaches 1.6 cm without ocean loading at the stations.
 
-| Component | Specification source | Oracle | Residual / tol | Where |
+| Component | Specification source | Check | Residual / tol | Where |
 |---|---|---|---|---|
 | Analysis integral, `(A⁺, A⁻)` ← grid | IERS 2010 Eq. 6.18–6.19 | **Maxima, Rodrigues + closed-form integrals** | residual 0, symbolic | derivations/ocean_tide_stokes.mac |
 | Eq. 6.20 packing and the χ_f rotation | IERS 2010 Eq. 6.20–6.21, Table 6.6 | **Maxima**, both pairings checked so the one in use is named | residual 0, symbolic | derivations/ocean_tide_stokes.mac |
@@ -6437,7 +6452,7 @@ these three sources as "US Government / NASA-funded / citation-only respectively
 assumed (redistribution without restriction, not merely government works), SDO/EVE is explicitly CC0,
 and the two composites state **no terms at all** — "citation-only" was an inference from the presence of
 a citation request. The row is now `noaa-goes-euvs`, `sdo-eve`, `lisird-composites` and `bremen-mgii`,
-each dated 2026-09-14, two of them **oracle-only**.
+each dated 2026-09-14, two of them **internal-only**.
 
 ### 10.10 SDTM-1's first fitted coefficients, and the three splits that disagree about them
 
@@ -7519,7 +7534,7 @@ Twenty-one of those items name an equation this workspace has some counterpart t
 
 **Why they are evidence and not a bug list.** Each item marks a place where the *most commonly
 published* form of an equation is wrong — which is exactly where a transcription with one source
-fails silently, and exactly what §0's "specification source vs oracle" split exists to expose. Where
+fails silently, and exactly what §0's "specification source vs check" split exists to expose. Where
 our form already differs, the errata confirm it independently; where it agrees with the *uncorrected*
 form, that is a finding. The licence position is clean: these are corrections to published
 mathematics, which `CONTRIBUTING.md` rules "fine". The AGPL-3.0 `CelesTrak/fundamentals-of-astrodynamics`
@@ -7630,7 +7645,7 @@ realizations are interchangeable at the accuracy anything here works to.
 | p. 802-803, RAZEL covariance: azimuth numerator and denominator switched, both `(3,3)` numerator terms squared | **No, and structurally cannot be** — the measurement partials come from `spacelab-autodiff`, so the matrix is never written down | **The class of error the erratum fixes cannot occur here**; `azimuth_and_elevation_partials_match_the_closed_form` pins the AD result |
 | p. 898-899, Eq. 11-44, a sign; the Danielson reference is 2003 | No — equinoctial DSST again | Not our formulation |
 
-| Component | Specification source | Oracle | Residual / tol | Where |
+| Component | Specification source | Check | Residual / tol | Where |
 |---|---|---|---|---|
 | Geopotential acceleration, degree 12 | Vallado 4th ed. Eq. 8-25/8-27 **as the errata correct them** | **the corrected published chain rule** — unnormalized Legendre partials against Gottlieb's normalized Cartesian recursion, same coefficients, no shared arithmetic | **9.98e-16** relative, worst of seven geometries; the published form goes `NaN` at 10⁻⁷° colatitude where the recursion does not | tests/vallado_errata.rs |
 | Analytic Sun, frame and aberration | Astronomical Almanac low-precision solar formulae; Vallado errata p. 277-281 | **ERFA `epv00`**, 2001 epochs over ±25 y and ±100 y | mean-of-date **45.77″** worst / 18.06″ RMS; the erratum's true-of-date reading is *worse* (56.61″); removing annual aberration is **34.23″ / 11.05″** — a 39 % RMS improvement, **applied** in the `κ/r` form, which measures 11.06″ against the `v_earth/c` form's 11.05″ (#306) | derivations/vallado_errata.py |

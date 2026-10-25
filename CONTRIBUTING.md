@@ -92,23 +92,27 @@ frame and time-scale algebra that justifies this crate's existence is reachable
 only by deriving from the mathematics. Port `sofars` and you have re-derived
 `sofars`, which is MIT-licensed and already exists.
 
-SOFA remains invaluable to us as a **black-box oracle** and as a source of
-**official test vectors** (`t_sofa_c.c`). Running a program and recording its
-output creates no derivative work and incurs no obligation. See
+SOFA remains useful to us as a **comparator**: its test program `t_sofa_c.c` and
+the values it prints are distances we publish, not a proof. Running a program and
+recording its output creates no derivative work and incurs no obligation. See
 [`tools/sofa-oracle/`](tools/sofa-oracle/).
 
-## Oracles are not independent just because they are in different languages
+## A second implementation is a comparison, not a proof
 
 `pyerfa` wraps ERFA. ERFA is a fork of SOFA. `sofars` is a transliteration of SOFA.
 Compiled and run over the same 45 epochs spanning ±5000 years, SOFA and ERFA agree
-**bit for bit**. They are one oracle wearing three hats.
+**bit for bit**: one program in three wrappers.
 
-Agreement with the SOFA lineage proves we transcribed correctly. It cannot prove
-SOFA is right. A genuinely independent check needs a different lineage — Vallado's
-(`SatelliteToolbox.jl`), or the IERS Conventions implemented directly (Orekit) —
-or reality.
+Agreement with any implementation shows a distance, not correctness — whether the
+other code descends from the same source or not. This document used to ask for a
+second, independent lineage to close that gap; it no longer does. What decides is
+the mathematics: the formula derived in Maxima and the shipped expression
+subtracted to zero, the same identity in a second engine (FriCAS, PARI/GP), and the
+code evaluated against exact or certified values at its limits and special cases —
+the gate kinds of `docs/verification.md`, "How to read the *Check* column". SOFA,
+ERFA, Orekit and Vallado's code are comparisons, published as distances.
 
-## Oracles under non-commercial terms
+## Comparators under non-commercial terms
 
 Several of the best references this workspace measures itself against are licensed for research
 or non-commercial use only: NRLMSIS 2.x and HWM14 (NRL), DTM2020 (CNES), the AER MT_CKD continuum,
@@ -119,17 +123,18 @@ for using them is fixed so that a paid product can never be found to have depend
   into `~/.cache/spacelab/` (gitignored, outside the tree); a test or a generator runs it and
   records the residual; no line of it and no table from it enters a crate. Where the reference's
   mathematics is published, our implementation is written from the paper with the citation, and the
-  reference is the check — the position `docs/provenance.md` §2 records for NRLMSISE-00.
+  reference is a comparison — the position `docs/provenance.md` §2 records for NRLMSISE-00.
 - **Its output is a number in `docs/verification.md`, dated.** A verification row may cite an
-  NC-licensed oracle's result with the date it was run. That row is a publication of a comparison,
-  which every such licence permits, and it is the *only* thing the oracle's output becomes.
+  NC-licensed comparator's result with the date it was run. That row is a publication of a
+  comparison, which every such licence permits, and it is the *only* thing the comparator's output
+  becomes.
 - **Nothing sold consumes it.** No default, no fallback, no calibration table and no shipped
   coefficient may be fitted to, initialised from or corrected by an NC-licensed reference. A model
   that needs a reference to be useful (a calibration layer, a learned corrector) is fitted to
   open data — TU Delft's densities, GFZ's indices, IGS products — with the NC reference cited as
   a comparison only. The reason is that a licence clause on a run-time input binds the product
   that consumes it, and excluding a file from a tree does not discharge it.
-- **A new NC oracle is a register row first.** Before the fetch script, the row in
+- **A new NC comparator is a register row first.** Before the fetch script, the row in
   `docs/provenance.md` with the clause quoted; `tools/check-provenance.py --data --check` fails on
   a fetch host without one.
 

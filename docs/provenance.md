@@ -350,7 +350,6 @@ agreement the user has to accept in person); **unread** (a claim, not a reading,
 | `sdo-eve` | SDO/EVE Level-3 merged daily product (LASP/CU for NASA): the ESP 27.16–33.8 nm band, the MEGS-P Lyman-α diode, the He II 30.4 nm line | `license` attribute of the file, read 2026-09-14: `CC0 1.0 https://creativecommons.org/publicdomain/zero/1.0/`; LISIRD's catalogue agrees. Acknowledgement asked for in the file (`Courtesy of NASA/SDO and the AIA, EVE, and HMI science teams.`) and given in `docs/verification.md` §10.9; it joins `NOTICE` when something derived from it ships, which is `NOTICE`'s own scope | **ship** |
 | `lisird-composites` | As served by LISIRD and **not** admitted: the Machol et al. (2019) composite Lyman-α, the Viereck composite Mg II, SORCE Mg II, SOHO/SEM, and the Penticton / NOAA / CLS radio-flux series | LISIRD publishes a machine-readable catalogue (`https://lasp.colorado.edu/lemr/lisird/lisird`) in which each dataset either names a licence or does not. Read 2026-09-14: these name **none** — 354 of the 420 datasets name none, against 41 CC0 and 25 CC BY 4.0. No licence is not a permissive licence, so they are read as oracles and nothing derived from them ships. (`lasp_filtered_drao_f107` *is* CC BY 4.0 and is the admissible alternative source of F10.7 if CelesTrak's ever closes) | **internal-only** |
 | `bremen-mgii` | The Bremen composite Mg II index (1978–) and its F30-extended form (1947–), IUP Bremen | The page (read 2026-09-14, moved to `https://www.iup.uni-bremen.de/UVSAT/data/`) and both data files carry citations and a contact address and **no terms of any kind**; LISIRD's catalogue also states none for its copy. Oracle only, and the letter asking IUP for a licence is in `plans/16` Ф14.G | **internal-only** |
-| `eot20` | EOT20 ocean-tide atlas (DGFI-TUM, SEANOE) | CC BY 4.0 (read 2026-09-06). Not yet fetched; `plans/16` Ф18.D | **ship+attr** |
 
 ```text
 tudelft-thermosphere | ship+attr | read 2026-10-24 | hosts thermosphere.tudelft.nl | paths crates/spacelab-propagation/tests/fixtures/champ_density_sample.txt crates/spacelab-propagation/tests/fixtures/gracefo_density_*.txt crates/spacelab-propagation/tests/fixtures/gracefo_crosswind_*.txt
@@ -401,7 +400,6 @@ noaa-goes-euvs | ship | read 2026-09-14 | hosts data.ngdc.noaa.gov www.ncei.noaa
 sdo-eve | ship | read 2026-09-14 | hosts lasp.colorado.edu | paths -
 lisird-composites | internal-only | read 2026-09-14 | hosts lasp.colorado.edu | paths -
 bremen-mgii | internal-only | read 2026-09-14 | hosts www.iup.uni-bremen.de | paths -
-eot20 | ship+attr | read 2026-09-06 | hosts - | paths -
 ```
 
 **The storm driver, decided by the rows above.** JB2008's storm term is Dst-driven and DTM2020's is

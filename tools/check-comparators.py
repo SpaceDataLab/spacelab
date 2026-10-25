@@ -49,6 +49,8 @@ from dataclasses import dataclass
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LEDGER_DOC = ROOT / "docs" / "verification.md"
 MARKER = "### 12.1 · Comparator-decided tests"
+# Spelled in two pieces: the public cut deletes every line that carries the whole token.
+PRIVATE = "<!-- @" + "private -->"
 
 # Other implementations, by the names our tests and fixtures give them.
 CODES = (

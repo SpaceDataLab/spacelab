@@ -122,24 +122,30 @@ pub fn integrate<F>(order: usize, aux: &DsstAuxiliary, low: f64, high: f64, acce
 where
     F: Fn(&NodeState) -> [f64; 3],
 {
-    let (points, weights) = nodes_weights(order);
+    integrate_rule(aux, gauss_nodes(order, low, high), accel)
+}
 
-    // GaussQuadrature.transform: map [-1, 1] → [low, high].
-    let scale = (high - low) / 2.0;
-    let shift = low + scale;
-
-    // basicIntegrate: compensated (Kahan) summation, first node seeds the running sum.
-    let x0 = points[0] * scale + shift;
-    let w0 = weights[0] * scale;
-    let v0 = value(aux, x0, accel);
+/// [`integrate`] over any rule given as `(L, weight)` pairs: the same integrand and the same
+/// compensated sum, the first node seeding it. An empty rule integrates to zero.
+pub(crate) fn integrate_rule<F>(
+    aux: &DsstAuxiliary,
+    mut rule: impl Iterator<Item = (f64, f64)>,
+    accel: &F,
+) -> [f64; 6]
+where
+    F: Fn(&NodeState) -> [f64; 3],
+{
     let mut s = [0.0_f64; 6];
+    let Some((x0, w0)) = rule.next() else {
+        return s;
+    };
+    // basicIntegrate: compensated (Kahan) summation, first node seeds the running sum.
+    let v0 = value(aux, x0, accel);
     for j in 0..6 {
         s[j] = w0 * v0[j];
     }
     let mut c = [0.0_f64; 6];
-    for i in 1..points.len() {
-        let x = points[i] * scale + shift;
-        let w = weights[i] * scale;
+    for (x, w) in rule {
         let v = value(aux, x, accel);
         for j in 0..6 {
             let y = w * v[j] - c[j];
@@ -149,6 +155,58 @@ where
         }
     }
     s
+}
+
+/// The `order`-point Gauss–Legendre rule on `[low, high]` as `(L, weight)` pairs, the `[-1, 1]`
+/// table mapped affinely (`GaussQuadrature.transform`).
+///
+/// # Panics
+///
+/// If `order` is not one of [`GAUSS_ORDER`].
+pub(crate) fn gauss_nodes(order: usize, low: f64, high: f64) -> impl Iterator<Item = (f64, f64)> {
+    let (points, weights) = nodes_weights(order);
+    let scale = (high - low) / 2.0;
+    let shift = low + scale;
+    points
+        .iter()
+        .zip(weights)
+        .map(move |(x, w)| (x * scale + shift, w * scale))
+}
+
+/// The `order`-point Gauss–Legendre rule on `[low, high]` after the substitution
+/// `L = low + (high − low)(3t² − 2t³)`, `t ∈ [0, 1]`, as `(L, weight)` pairs.
+///
+/// The lit fraction of the Sun's disc behaves like `(L − L₀)^{3/2}` at a shadow contact `L₀`: the
+/// lens area grows as the depth to the power 3/2, at both tangencies. Gauss–Legendre on such an end
+/// converges like `n⁻⁵`. Here `L − low = (high − low)t²(3 − 2t)` turns the power into
+/// `t³(3 − 2t)^{3/2}`, and `high − L = (high − low)(1 − t)²(1 + 2t)` does the same at the other end;
+/// the Jacobian `6(high − low)t(1 − t)` is a polynomial. The integrand is then analytic on `[0, 1]`,
+/// with branch points at `t = 3/2` and `t = −1/2`, and the rule converges like `(2 + √3)^{−2n}`
+/// (`derivations/dsst_srp_conical_shadow.mac`).
+///
+/// Each node is measured from the nearer end, `u = (1 − |x|)/2`, so a node close to a contact
+/// keeps its distance to it to full relative precision.
+///
+/// # Panics
+///
+/// If `order` is not one of [`GAUSS_ORDER`].
+pub(crate) fn smoothstep_nodes(
+    order: usize,
+    low: f64,
+    high: f64,
+) -> impl Iterator<Item = (f64, f64)> {
+    let (points, weights) = nodes_weights(order);
+    let width = high - low;
+    points.iter().zip(weights).map(move |(x, w)| {
+        let u = (1.0 - x.abs()) / 2.0;
+        let offset = width * u * u * (3.0 - 2.0 * u);
+        let node = if *x < 0.0 {
+            low + offset
+        } else {
+            high - offset
+        };
+        (node, 3.0 * width * w * u * (1.0 - u))
+    })
 }
 
 /// Orekit's `IntegrableFunction.value(L)` in mean mode: the six equinoctial rate integrands
@@ -592,6 +650,45 @@ mod tests {
     /// finding, only the exact integral of a polynomial. The degree-`2n` line is what makes the claim
     /// tight rather than vacuous — a rule that were exact there would be impossible, and a table that
     /// passed the `≤ 2n−1` half by accident would have to fail it.
+    /// The smoothstep rule on `∫₀¹ x^{3/2}(1 − x)^{3/2} dx = B(5/2, 5/2) = 3π/128`, the two
+    /// shadow contacts of a penumbra piece in their simplest form
+    /// (`derivations/dsst_srp_conical_shadow.mac`).
+    ///
+    /// The substitution leaves `t³(3 − 2t)^{3/2}` at one end and `(1 − t)³(1 + 2t)^{3/2}` at the
+    /// other, analytic on `[0, 1]` with branch points at `t = 3/2` and `−1/2`, whose Bernstein
+    /// ellipse has `ρ = 2 + √3`. Measured: 1.6e-14 off at order 12, where `ρ^{−24}` is 1.9e-14, and
+    /// within 5.7e-16 from order 16 up. Plain Gauss–Legendre on the same integrand is 8.4e-9 off at
+    /// order 48 and falls like `n⁻⁵`: 30.6 times from order 24 to 48, where `2⁵` is 32.
+    #[test]
+    fn the_smoothstep_rule_carries_the_contact_powers() {
+        let exact = 3.0 * core::f64::consts::PI / 128.0;
+        let f = |x: f64| libm::pow(x * (1.0 - x), 1.5);
+        let miss = |rule: &mut dyn Iterator<Item = (f64, f64)>| {
+            let sum: f64 = rule.map(|(x, w)| w * f(x)).sum();
+            ((sum - exact) / exact).abs()
+        };
+        let smoothstep = |order| miss(&mut smoothstep_nodes(order, 0.0, 1.0));
+        let plain = |order| miss(&mut gauss_nodes(order, 0.0, 1.0));
+        assert!(smoothstep(12) < 1e-13, "order 12: {:.3e}", smoothstep(12));
+        for &order in &GAUSS_ORDER[1..] {
+            assert!(
+                smoothstep(order) < 1e-15,
+                "order {order}: {:.3e}",
+                smoothstep(order)
+            );
+        }
+        let ratio = plain(24) / plain(48);
+        assert!(plain(48) > 1e-9, "plain order 48: {:.3e}", plain(48));
+        assert!((28.0..36.0).contains(&ratio), "plain 24 → 48: {ratio:.2}");
+        std::println!(
+            "3π/128: smoothstep 12 {:.3e}, 16 {:.3e}, 48 {:.3e}; plain 48 {:.3e}, 24 → 48 ×{ratio:.2}",
+            smoothstep(12),
+            smoothstep(16),
+            smoothstep(48),
+            plain(48)
+        );
+    }
+
     #[test]
     fn gauss_legendre_rules_are_exact_through_degree_two_n_minus_one() {
         let mut worst = 0.0_f64;

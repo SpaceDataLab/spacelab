@@ -1420,53 +1420,6 @@ exclude_re = [
     "dsst/coefficients\\.rs:311:48: replace - with \\+ in compute_max_ecc_pow",
     "dsst/coefficients\\.rs:325:29: replace - with \\+ in compute_max_ecc_pow",
     "dsst/coefficients\\.rs:325:29: replace - with / in compute_max_ecc_pow",
-    # `l_limits` builds the quartic only when the perigee can reach the shadow,
-    # `|gamma * a * (1 - e)| < ae`. Turning the product into a quotient leaves `|gamma (1-e) / a|`,
-    # never above `1/a`, so the test always passes and the quartic is always built -- and that
-    # changes no answer. `S` *is* the cylinder equation: a root with `S = 0` and `cos(phi) < 0` puts
-    # the satellite on the shadow surface, and an orbit that never reaches the cylinder has none, so
-    # the extra work finds nothing. The guard cuts cost, not wrong answers. Bit-identical over the
-    # 9408-state sweep and the Orekit fixture.
-    "dsst/srp\\.rs:213:23: replace \\* with / in DsstSolarRadiationPressure::l_limits",
-    # The same guard's comparison, at exact equality: the perigee touching the cylinder wall to the
-    # last bit. By the argument above, admitting it or skipping it changes nothing.
-    "dsst/srp\\.rs:213:52: replace < with <= in DsstSolarRadiationPressure::l_limits",
-    # `nb_roots` is a `usize`, so `>= 0` is always true and the block always runs. With no roots
-    # both loops are empty, `entry_found == exit_found == false` leaves the reset untaken, and
-    # `ll[0] = -pi + Lv < pi + Lv = ll[1]` leaves the wrap untaken: the default bounds come back
-    # either way. Bit-identical over the sweep.
-    "dsst/srp\\.rs:244:25: replace > with >= in DsstSolarRadiationPressure::l_limits",
-    # Newton's step floor, `|step| <= eps * pi`, tightened to `eps / pi`. A tighter floor can only
-    # spend more of the eight iterations, and the iteration is already at its fixed point when it
-    # trips: bit-identical over the sweep. The other two mutations of this line are not equivalent
-    # and are caught -- `eps + pi` cuts the loop to one step and costs `7.3e-8 rad`.
-    "dsst/srp\\.rs:278:59: replace \\* with / in DsstSolarRadiationPressure::l_limits",
-    # The basin guard `|L - seed| > 1e-3`, at exact equality. The threshold sits two orders above
-    # any real Newton correction (`sqrt(eps) ~ 1.5e-8` is the seed's own error) and well below the
-    # spacing of distinct roots, so landing exactly on it is a measure-zero tie either way.
-    "dsst/srp\\.rs:284:65: replace > with >= in DsstSolarRadiationPressure::l_limits",
-    # `cos(phi) < 0` -- the shadow-side test, Danielson 3.5-(3) -- at exact equality. `cos(phi) = 0`
-    # puts the satellite on the terminator plane, where `S = 1 - m^2 * range^2`, and `S = 0` then
-    # needs `r = ae` exactly: the satellite would be at the Earth's surface. Every test orbit clears
-    # the surface at perigee, which the sweep asserts.
-    "dsst/srp\\.rs:289:34: replace < with <= in DsstSolarRadiationPressure::l_limits",
-    # `|S| < S_ZERO` at exact equality, `S_ZERO = 1e-6`. After the Newton pass the accepted roots
-    # land at `|S| <~ 1e-16` and the rejected ones at `O(1)`, so the window's own edge is never
-    # touched.
-    "dsst/srp\\.rs:289:51: replace < with <= in DsstSolarRadiationPressure::l_limits",
-    # Entry or exit by the sign of `dS/dL`, at exact zero. A zero slope at an accepted root is the
-    # tangency, where the two crossings coincide and the eclipse has zero width; the sweep reaches
-    # that geometry only through the one-sided reset, which discards both roots before the sign is
-    # consulted.
-    "dsst/srp\\.rs:291:43: replace > with >= in DsstSolarRadiationPressure::l_limits",
-    # `ll[0] > ll[1]` at exact equality. Equal limits mean the exit and the entry landed on the same
-    # double -- a zero-width sunlit arc, which the quadrature integrates to zero either way.
-    "dsst/srp\\.rs:307:26: replace > with >= in DsstSolarRadiationPressure::l_limits",
-    # Which representative of the wrapped arc to emit, at `ll[1] == 0`: `[ll0 - 2pi, 0]` against
-    # `[ll0, 2pi]`. That is the same arc shifted by a whole turn, and the quadrature's integrand is
-    # `2pi`-periodic in `L`, so the integral is identical. Both branches stay reachable and both are
-    # asserted -- a slip in either turns the sunlit arc into its complement -- but not this tie.
-    "dsst/srp\\.rs:308:30: replace < with <= in DsstSolarRadiationPressure::l_limits",
     # Halley's step in the equinoctial Kepler solve, `shift = f0 * 2 f1 / (f1 * 2 f1 - f0 f2)`, with
     # the `2 f1` rebuilt as `2 + f1` or `2 / f1`. Every variant keeps the same fixed point: as
     # `f0 -> 0` the step collapses to `f0 / f1`, which is Newton, so all three converge to the root
@@ -1474,56 +1427,58 @@ exclude_re = [
     # so the standing error is the square of a `1e-11` step -- below the double either way. Measured
     # worst eccentric longitude over the 1368-state sweep: `1.421e-14` for Halley, `1.243e-14` for
     # both mutants, against the `1e-13` the test admits.
-    "dsst/srp\\.rs:351:23: replace \\* with \\+ in mean_to_eccentric",
-    "dsst/srp\\.rs:351:23: replace \\* with / in mean_to_eccentric",
+    "dsst/srp\\.rs:568:23: replace \\* with \\+ in mean_to_eccentric",
+    "dsst/srp\\.rs:568:23: replace \\* with / in mean_to_eccentric",
     # The iteration counter, `iter += 1 -> iter *= 1`, which pins it at zero and makes the
     # `iter >= 50` arm of the exit test dead. The shift arm still fires: the sweep to `e = 0.90`
     # converges at every state, and the answers are bit-identical with the counter dead. What the
     # cap protects against is an input that does not converge, which this solver is never handed --
     # `mean_to_eccentric` is called only with `|(k, h)| = e < 1`.
-    "dsst/srp\\.rs:357:14: replace \\+= with \\*= in mean_to_eccentric",
+    "dsst/srp\\.rs:574:14: replace \\+= with \\*= in mean_to_eccentric",
     # The same exit test's `||` turned into `&&`, so the loop always runs all 50 iterations. Past
     # convergence the shift is at the arithmetic floor and the extra passes move the last ulps only:
     # worst eccentric longitude `1.421e-14 -> 1.243e-14` over the sweep, both far below the `1e-13`
     # bound. The non-convergence risk is the one the entry above discusses.
-    "dsst/srp\\.rs:358:49: replace \\|\\| with && in mean_to_eccentric",
+    "dsst/srp\\.rs:575:49: replace \\|\\| with && in mean_to_eccentric",
     # `p < 0` and `p > 0` in the one-real-root arm of the cubic, each widened to admit `p == 0`. At
     # `p = 0` all three formulas coincide: `alpha = q + sign(q) sqrt(q^2) = 2q` and
     # `beta = p / cbrt(alpha) = 0`, so the `p < 0` form `b + 2q / (cbrt(alpha)^2 + cbrt(beta)^2 - p)`
     # is `b + 2q / (2q)^(2/3) = b + cbrt(2q)`, the `p > 0` form `b + cbrt(alpha) + cbrt(beta)` is
     # `b + cbrt(2q)`, and the `p == 0` form is `b + cbrt(alpha)` -- the same number. Bit-identical
     # across the suite.
-    "dsst/srp\\.rs:498:14: replace < with <= in real_cubic_roots",
-    "dsst/srp\\.rs:500:21: replace > with >= in real_cubic_roots",
+    "dsst/srp\\.rs:715:14: replace < with <= in real_cubic_roots",
+    "dsst/srp\\.rs:717:21: replace > with >= in real_cubic_roots",
     # `q < 0 -> q <= 0` in the double-root arm, which reorders the triple only at `q == 0`. A zero
     # discriminant with `q = 0` forces `p = 0` as well, so `cbrt(q) = 0` and `root1 = root2 = b`:
     # the triple is `[b, b, b]` and the two orderings are the same list. The `==` and `>` mutations
     # of this line do permute a genuine double root, and are caught.
-    "dsst/srp\\.rs:519:14: replace < with <= in real_cubic_roots",
+    "dsst/srp\\.rs:736:14: replace < with <= in real_cubic_roots",
     # `d > 0 -> d >= 0` in the quadratic. At `d == 0` the `fma` makes `c = b^2` exactly, so the
     # stable form gives `y0 = b + copysign(0, b) = b` and `y1 = c / y0 = b^2 / b = b` -- the pair
     # the double-root arm writes. The one exception is `b == 0`, where `y1` is `0 / 0 = NaN` and
     # `f64::max`/`min` return the other operand, so the pair is `[0, 0]` either way.
-    "dsst/srp\\.rs:558:17: replace > with >= in real_quadratic_roots",
+    "dsst/srp\\.rs:772:17: replace > with >= in real_quadratic_roots",
     # `x_int < y_int -> <=` inside `precision_equals`, reached only when the sign bits of `x` and
     # `y` differ. Differing sign bits make the two `i64` reinterpretations differ, so equality is
     # unreachable on this branch and the comparison cannot change.
-    "dsst/srp\\.rs:583:50: replace < with <= in precision_equals",
+    "dsst/srp\\.rs:797:50: replace < with <= in precision_equals",
     # `ll[0] < ll[1] -> <=` gating the whole Fourier integral. The two differ only on a zero-width
     # arc, which takes Gauss-Legendre, and its `scale = (ll[1] - ll[0]) / 2` is then zero, so every
     # node weight is zero, every Fourier coefficient is zero, and the assembled correction is the
     # same all-zero vector the skip returns.
-    "dsst/gaussian_short_period\\.rs:75:14: replace < with <= in short_periods",
+    "dsst/gaussian_short_period\\.rs:95:14: replace < with <= in short_periods",
     # The Kahan compensation subtracted from the next term, `... - cc[e]` / `... - sc[e]`, turned
     # into `+`. That does not change the sum, it changes the correction the compensation applies.
     # Measured against the module's exact references: the closed form of `F = cos L` at e = 0.01
     # moves from 1.24e-15 to 1.34e-15 (`cc`) and 1.28e-15 (`sc`), the Bessel coefficients at z = 5
-    # from 1.47e-15 to 1.49e-15, inside the 1e-14 and 4e-15 those tests assert, and the
-    # defining-equation tests do not move in their printed digits. NOT A PROOF: it says the
-    # compensation buys nothing measurable at these states, not that it never does. Nothing asserts
-    # the compensation's benefit; a double-double reference sum would be the way to.
-    "dsst/gaussian_short_period\\.rs:181:57: replace - with \\+ in fourier_coefficients",
-    "dsst/gaussian_short_period\\.rs:186:57: replace - with \\+ in fourier_coefficients",
+    # from 1.47e-15 to 1.49e-15, inside the 1e-14 and 4e-15 those tests assert; the SRP
+    # coefficients over the conical shadow move from 3.41e-15 to 3.44e-15 (`cc`) and not at all
+    # (`sc`) against the 80-digit average, inside 2e-14, and the defining-equation tests do not
+    # move in their printed digits. NOT A PROOF: it says the compensation buys nothing measurable at
+    # these states, not that it never does. Nothing asserts the compensation's benefit; a
+    # double-double reference sum would be the way to.
+    "dsst/gaussian_short_period\\.rs:214:57: replace - with \\+ in fourier_coefficients",
+    "dsst/gaussian_short_period\\.rs:219:57: replace - with \\+ in fourier_coefficients",
     # `* I -> / I` on the retrograde-factor `I`, which this port fixes at `+1` (Orekit's `I` is
     # `+1` for the direct equinoctial set and the retrograde set is not built here). `x * 1.0` and
     # `x / 1.0` are the same double for every finite `x`, so the mutation is bit-identical.

@@ -363,8 +363,8 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Constant-thrust / impulse / parametric maneuvers | rocket equation; constant-thrust and impulsive definitions | Orekit `ConstantThrustManeuver`/`ImpulseManeuver`/`ParametricAcceleration` golden | r/v < 1e-12; AD vs FD | src/maneuver.rs |
 | DSST **drag** mean rates | Danielson et al. 1995 — Gaussian VOP averaging | Orekit `getMeanElementRate` **+** independent 200k-sample Gauss orbit-average | da bit-exact (0.0 rel); e/i ~4e-14; indep. 3.5e-15 rel | src/dsst/drag.rs |
 | DSST **drag** short-period | Danielson et al. 1995 — Gaussian short-period: the zero-mean solution of `n·∂η/∂λ = F − ⟨F⟩`, with `(3/2)(n/a)η_a` on the left for λ | the defining equation on the shipped corrections, ∂/∂λ of osc − mean taken spectrally and the force raised ×1000 past the test's rounding (`tests/dsst_short_period_identity.rs`); `derivations/dsst_gaussian_short_period.{mac,gp}`: ρⱼ + iσⱼ, the product to sum at JMAX = 12, the closed form of `F = cos L`; the full-turn trapezoid against Arb's `2Iⱼ(z)`. Comparator: Orekit OSCULATING | 8.7e-9 at e = 1e-4 and 3.0e-9 in LEO (bound 2e-8); 3.9e-6 at e = 0.05 (bound 1e-5), the j ≤ 12 cut: 2.1e-9 at twice the scale height; 1.6e-3 on an arc that leaves the atmosphere, the step at `rbar`: ÷8.4 when `rbar` moves 2H out; closed form 1.9e-15 (bound 1e-14). Orekit is 4.4e-2 m away in `a`, from its D¹, which takes C⁰ where 𝒞⁰ = C⁰/2 − ⟨F⟩ belongs | src/dsst/gaussian_short_period.rs |
-| DSST **SRP** mean rates | Danielson et al. 1995 — Gaussian VOP averaging; cylindrical shadow at the physical `ae` | the defining average `(1/2π)∫νF dλ` over the cylinder's arc and over the whole orbit (`tests/dsst_short_period_identity.rs`) **+** independent VOP orbit-average (`experiments/dsst_srp_independent_verify.py`), with Orekit `getMeanElementRate` reduced to a bracket | lit arc 3.8e-5 (bound 8e-5), the Gauss rule across the penumbra corner; whole orbit 1.6e-3, the cylinder cut ⚠ — vs VOP: da 1.044e-4, dk/dh 2.06e-5, dq/dp/dM 8.3e-5 (bound 1.5×) — vs Orekit 3.455e-4 … 5.3e-5, bracketed not bounded ⚠ | src/dsst/srp.rs |
-| DSST **SRP** short-period | Danielson et al. 1995 — Gaussian short-period: the zero-mean solution of `n·∂η/∂λ = F − ⟨F⟩` | the defining equation on the shipped corrections at e = 1e-4, 0.008, 0.05, 0.1, the Sun 75° and 85° from the orbit plane, so never in shadow (`tests/dsst_short_period_identity.rs`); `derivations/dsst_gaussian_short_period.{mac,gp}`. The shadowed arc waits for the conical shadow. Comparator: Orekit OSCULATING (~62 mm `a` swing) | 5.0e-9 at worst (bound 1e-8) with the force ×1000; 4.1e-6 unraised, 1280× more: the test's rounding. Orekit is 6.6e-6 m away in `a`, 2.4e-10 in the others | src/dsst/gaussian_short_period.rs |
+| DSST **SRP** mean rates | Danielson et al. 1995 — Gaussian VOP averaging; the shadow function (3.5) carried from the cylinder to the penumbra and umbra cones of a spherical body | the defining average `(1/2π)∫νF dλ` over the whole orbit at 80 digits, by two routes, in the true and in the mean longitude (`derivations/dsst_srp_conical_average.gp`; `tests/dsst_srp_conical_reference.rs`: LEO, HEO, GEO, penumbra only, 1e-6 short of the umbra, sunlit) **+** the cone equations, their quartic, the precheck and the smoothstep in `derivations/dsst_srp_conical_shadow.mac` (25 checks) **+** the contacts against a bisection on the angles that define them, 2394 states, and the penumbra rule against the same piece in eight parts, 2048 pieces (`src/dsst/srp.rs`). Comparator: Orekit `getMeanElementRate`, a cylinder of radius `ae·B` and a cut at it | 4.0e-15 at worst, on the penumbra-only orbit, 1.0e-16 … 3.7e-16 on the others (bound 2e-14); the routes agree to 1.3e-46 of the rates' scale; contacts 6.2e-14 rad (bound 1e-12); penumbra rule 6.6e-14 (bound 2e-13); the average by the test's own quadrature 1.5e-11 (bound 1e-10). Orekit is 8.3e-4 (`dk`, `dh`) to 3.3e-3 (`dλ`) away, relative | src/dsst/srp.rs |
+| DSST **SRP** short-period | Danielson et al. 1995 — Gaussian short-period: the zero-mean solution of `n·∂η/∂λ = F − ⟨F⟩` | the defining equation on the shipped corrections at e = 1e-4, 0.008, 0.05, 0.1, the Sun 75° and 85° from the orbit plane, never in shadow (`tests/dsst_short_period_identity.rs`); the Fourier coefficients on the conical pieces against the 80-digit average (`derivations/dsst_srp_conical_average.gp`, `src/dsst/srp.rs`); `derivations/dsst_gaussian_short_period.{mac,gp}`. In shadow the equation is not a gate: a series cut at j ≤ 12 cannot follow the shadow's edges, and the residual there is 0.24 to 0.94 of the force. Comparator: Orekit OSCULATING (~62 mm `a` swing) | 5.0e-9 at worst (bound 1e-8) with the force ×1000; 4.1e-6 unraised, 1280× more: the test's rounding; Fourier coefficients 3.4e-15 (bound 2e-14). Orekit is 2.7e-5 m away in `a`, 2.5e-10 in the others | src/dsst/gaussian_short_period.rs, src/dsst/srp.rs |
 | DSST **zonal** mean rates + prop | Danielson et al. 1995 — zonal; Kaula 1966 | Orekit `getMeanElementRate` J₂…J₆ | rates < 1e-10 rel; along-track < 1 m | src/dsst/mod.rs |
 | DSST **zonal** short-period | Danielson et al. 1995 — zonal short-period | Orekit OSCULATING; numeric J2–J5 cross-check | da < 1e-2 m; comps < 1e-9 | src/dsst/short_period.rs |
 | DSST **tesseral** mean + short-period | Danielson et al. 1995 — resonant tesseral | Orekit (GEO 1:1 & GPS 2:1 resonance) | < 1e-9 rel (meas ~1e-14); non-resonant exact 0.0 | src/dsst/tesseral.rs, tesseral_short_period.rs |
@@ -372,25 +372,22 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | DSST Hansen kernels | Hansen coefficients; recurrences in Danielson et al. 1995 | analytic recurrence self-check | value < 1e-14; deriv < 1e-12 | src/dsst/hansen.rs |
 | DSST full propagator | Danielson et al. 1995 — mean + short-period composition | reproduces Orekit-validated DsstZonal mean/osculating | a < 1e-3 m; 24 h mean-a drift < 1e-2 rel | src/dsst/propagator.rs |
 
-**The SRP row is the one place where the oracle had to be replaced.** Orekit's `getLLimits` casts
-its shadow cylinder at `ae·B` rather than `ae` — Danielson's printed `M = ae²/(a²(1 − h² − k²))` is
-one power of `B²` short of his own eq. 2.1.4-6 — and `l_limits` casts the physical `ae`, so the two
-no longer agree to round-off and never will. Loosening the gate to `1e-3` would have let a real
-regression through, so the Orekit fixture was reduced to a *bracket* on a deviation that is now
-measured rather than bounded, and the accuracy statement moved to a third implementation:
-`experiments/dsst_srp_independent_verify.py`, a variation-of-parameters orbit-average that shares
-no algebra with the module. It lands between the two and 2.5× closer to this one — `1.04e-4` on
-`da` against Orekit's `3.455e-4`. Getting it there needed the shadow crossings bisected rather than
-scanned (`4e-8 rad` instead of `7.6e-6`), the quadrature split at the shadow boundary and again at
-the penumbra kink (a step integrand is `O(1/N)` on a uniform grid, and `⟨da/dt⟩` for a constant
-force over a closed orbit is *entirely* shadow, so it is measured against cancelling halves), and
-the conical penumbra rather than a binary cylinder — that last worth `3.2e-3 → 4.5e-4` on its own.
-Integrating the physical cone over the whole orbit instead of truncating it at the cylindrical
-limits moves `da` by `3.1e-3`, which is the size of the DSST scheme's own approximation and an
-order of magnitude above the implementation differences. The cut, not the cylinder, carries it:
-on the same fixture the binary cylinder, `ν = 1` on its arc, is `4.2e-5` from the whole-orbit
-conical average, because the deficit of the outer half of each penumbra and the light of the inner
-half nearly cancel, and the cut with a conical `ν` keeps the first and drops the second.
+**The SRP rows rest on the average that defines them.** Orekit's `getLLimits` cuts the average at
+a cylinder of radius `ae·B` — Danielson's printed `M = ae²/(a²(1 − h² − k²))` is one power of `B²`
+short of his own eq. 2.1.4-6 — and weights it by the conical `ν` inside, which drops the light of
+the inner half of each penumbra and keeps the deficit of the outer half. The module now averages
+over the whole orbit. The contacts with the penumbra and umbra cones are the roots of a quartic in
+`tan((L − L₀)/2)`, `L₀` the anti-Sun direction in the orbit plane, polished by Newton on the cone
+function. A lit piece takes Gauss–Legendre at order 48. A penumbra piece has `(L − L₀)^{3/2}` ends,
+where plain Gauss–Legendre converges like `n⁻⁵`; the smoothstep `L = low + W(3t² − 2t³)` makes the
+ends analytic, the rule then converges like `(2 + √3)^{−2n}`, and order 40 runs at the integrand's
+rounding. A penumbra piece between two penumbra contacts is cut again where it runs deepest: 1e-6
+short of the umbra cone, `ν` there is `|L − L*|³` to within the miss, and without the cut the same
+states are 1.9e-7 off. The reference shares no step with the module: the contacts by Brent's method
+on the angles between the discs, `ν` by the textbook lens, `F` by exact derivatives of a Cartesian →
+equinoctial conversion, the integral by double-exponential quadrature in two variables. The
+variation-of-parameters average `experiments/dsst_srp_independent_verify.py`, which stood in for an
+oracle while the cut was a cylinder, measured that cut and no longer describes the module.
 
 ### 2.1 The lunar frame kernel's angles run the other way, and the tolerance is what caught it
 

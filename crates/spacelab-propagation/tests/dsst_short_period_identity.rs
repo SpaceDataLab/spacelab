@@ -732,41 +732,27 @@ fn penumbra_edge(m: f64, side: f64) -> f64 {
 }
 
 /// The fixture's shadow crossings in orbit order, in mean longitude: out of the umbra, out of the
-/// cylinder behind the Earth, out of the penumbra, then back into each. The cylinder's are bisected
-/// on the distance from the anti-Sun axis, the others on [`penumbra_edge`].
-fn shadow_crossings() -> [f64; 6] {
-    let [a, k, h, q, p] = SRP_LEO;
-    let sn = dot(SUN, SUN).sqrt();
-    let s_hat = [SUN[0] / sn, SUN[1] / sn, SUN[2] / sn];
-    let cylinder = |m: f64| {
-        let r = to_cartesian([a, k, h, q, p, m]).0;
-        let along = dot(r, s_hat);
-        if along < 0.0 {
-            (dot(r, r) - along * along).sqrt() - AE_SRP
-        } else {
-            dot(r, r).sqrt()
-        }
-    };
-    let found = roots(0.0, TAU, cylinder);
-    assert_eq!(found.len(), 2, "one entry and one exit: {found:?}");
-    let (exit, entry) = if cylinder(found[0] + 1e-6) > 0.0 {
-        (found[0], found[1])
-    } else {
-        (found[1], found[0] + TAU)
-    };
-    let edge = |start: f64, side: f64| {
-        let found = roots(start, 0.05, |m| penumbra_edge(m, side));
-        assert_eq!(found.len(), 1, "one edge after {start}: {found:?}");
-        found[0]
-    };
-    [
-        edge(exit - 0.05, -1.0),
-        exit,
-        edge(exit, 1.0),
-        edge(entry - 0.05, 1.0),
-        entry,
-        edge(entry, -1.0),
-    ]
+/// penumbra, then back into each, each bisected on [`penumbra_edge`].
+fn shadow_crossings() -> [f64; 4] {
+    let mut found: Vec<(f64, f64)> = [-1.0, 1.0]
+        .into_iter()
+        .flat_map(|side| {
+            let edges = roots(0.0, TAU, |m| penumbra_edge(m, side));
+            assert_eq!(edges.len(), 2, "two crossings of side {side}: {edges:?}");
+            edges.into_iter().map(move |m| (m, side))
+        })
+        .collect();
+    found.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let exit = found
+        .iter()
+        .position(|&(m, side)| side < 0.0 && penumbra_edge(m + 1e-6, side) > 0.0)
+        .expect("an exit from the umbra");
+    found.rotate_left(exit);
+    let mut out = [0.0; 4];
+    for (i, (m, _)) in found.into_iter().enumerate() {
+        out[i] = if i > 0 && m < out[i - 1] { m + TAU } else { m };
+    }
+    out
 }
 
 /// [`mean_rate`] of the shadowed [`cannonball`] summed over the pieces `[c₀, c₁], [c₁, c₂], …`, so
@@ -785,44 +771,25 @@ fn piecewise_rate(cuts: &[f64]) -> [f64; 6] {
     rate
 }
 
-/// `dsst::srp` on its fixture, where the orbit crosses the shadow: the rates against `(1/2π)∫νF dλ`
-/// over the arc they integrate, the one outside the cylinder behind the Earth, with Simpson's rule
-/// split where the penumbra ends and `ν` has its corner. The shipped order-48 Gauss rule runs
-/// straight across that corner, and that is the residual: measured 3.8e-5, each rate within 3 % of
-/// the residual the VOP average in `dsst::srp`'s own tests finds.
+/// `dsst::srp` on its fixture, where the orbit crosses both cones: the rates against `(1/2π)∫νF dλ`
+/// over the whole orbit, Simpson's rule split where `ν` has its corners, at the four contacts, and
+/// 0.05 rad inside the lit arc from each, where `ν` still bends like `x^{3/2}`. Measured 1.5e-11,
+/// the test's own quadrature and central differences.
 #[test]
-fn srp_mean_rates_are_the_average_over_the_lit_arc() {
+fn srp_mean_rates_are_the_average_over_the_conical_shadow() {
     let srp = DsstSolarRadiationPressure::new(CR, AREA_OVER_MASS, MU, AE_SRP);
-    let [_, exit, penumbra_exit, penumbra_entry, entry, _] = shadow_crossings();
-    let want = piecewise_rate(&[exit, penumbra_exit, penumbra_entry, entry]);
+    let [umbra_exit, penumbra_exit, penumbra_entry, umbra_entry] = shadow_crossings();
+    let want = piecewise_rate(&[
+        umbra_exit,
+        penumbra_exit,
+        penumbra_exit + 0.05,
+        penumbra_entry - 0.05,
+        penumbra_entry,
+        umbra_entry,
+    ]);
     let got = srp.mean_element_rates(&aux(SRP_LEO, SRP_LAMBDA), SUN);
     let worst = worst_rate_difference(SRP_LEO[0], got, want);
-    assert!(worst < 8e-5, "{worst:.3e}, {got:?} vs {want:?}");
-}
-
-/// The average that defines the rates runs over the whole orbit, and `ν` is not zero inside the
-/// cylinder: the inner half of each penumbra is lit. Cutting at the cylinder drops that light while
-/// the outer half is still weighted by `ν`, so the rates sit 1.6e-3 off the average over the conical
-/// shadow. The cylinder alone, `ν = 1` on its arc, sits 4.2e-5 off, because there the two halves
-/// nearly cancel. Asserted within a factor of two, so that only a change of the cut moves it.
-#[test]
-fn srp_mean_rates_drop_the_light_inside_the_cylinder() {
-    let srp = DsstSolarRadiationPressure::new(CR, AREA_OVER_MASS, MU, AE_SRP);
-    let [
-        umbra_exit,
-        exit,
-        penumbra_exit,
-        penumbra_entry,
-        entry,
-        umbra_entry,
-    ] = shadow_crossings();
-    let conical = piecewise_rate(&[umbra_exit, penumbra_exit, penumbra_entry, umbra_entry]);
-    let got = srp.mean_element_rates(&aux(SRP_LEO, SRP_LAMBDA), SUN);
-    let off = worst_rate_difference(SRP_LEO[0], got, conical);
-    assert!(off > 8e-4 && off < 3.2e-3, "the cut's own error {off:.3e}");
-    let cylinder = mean_rate(SRP_LEO, exit, entry, &|r, _| cannonball(SUN, r, 1.0));
-    let binary = worst_rate_difference(SRP_LEO[0], cylinder, conical);
-    assert!(binary < 1e-4, "the binary cylinder {binary:.3e}");
+    assert!(worst < 1e-10, "{worst:.3e}, {got:?} vs {want:?}");
 }
 
 /// The factor the Gaussian short-period tests raise `A/m` by. At fixed mean elements both sides of the
@@ -891,6 +858,11 @@ fn srp_residuals(mean: [f64; 5], beta: f64, lift: f64) -> [Verdict; 6] {
 /// `dsst::srp` on orbits that never enter the shadow, the Sun 75° and 85° from the orbit plane, at
 /// e = 1e-4, 0.008, 0.05 and 0.1. Measured 5.0e-9 at worst, the rounding of the test: unraised, the
 /// same check is 4.1e-6 on the e = 0.008 orbit, 1280 times more, near the factor the force went up by.
+///
+/// In the shadow the check says nothing: the force falls to 0 across a penumbra 0.03 rad wide, which
+/// twelve harmonics cannot follow, and the residual is 0.24 to 0.94 of `F − ⟨F⟩` on the same orbits
+/// at β = 0°, 20° and 45°, the series' own cut. There the coefficients are held to the 80-digit average
+/// instead (`dsst::srp`'s `the_fourier_coefficients_are_the_conical_average`).
 #[test]
 fn srp_short_periods_solve_their_defining_equation() {
     let orbits: [[f64; 5]; 4] = [

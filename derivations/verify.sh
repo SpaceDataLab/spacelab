@@ -583,6 +583,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima dsst_gaussian_short_period.mac" "expected 7 checks to hold, found $holds"
     fi
 
+    out=$(macf dsst_srp_conical_shadow.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]+\) holds:')
+    if [ "$holds" -eq 25 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima dsst_srp_conical_shadow.mac: the shipped S is the conical shadow on the orbit, its quartic in tan((L - L0)/2) and the roots it keeps, the precheck, and the smoothstep of the penumbra rule"
+    else
+        bad "maxima dsst_srp_conical_shadow.mac" "expected 25 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_partials.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ]; then
@@ -674,6 +682,24 @@ sys.exit(0 if a == b else 1)
         ok "pari dsst_gaussian_short_period.gp: rho_j + i sigma_j by residues, the product to sum at JMAX = 12 in exact rationals, F = cos L's closed forms for every ellipse"
     else
         bad "pari dsst_gaussian_short_period.gp" "expected 6 checks to hold and no error, found $holds"
+    fi
+
+    # The DSST SRP rates over the conical shadow: the average at 80 digits by two routes, and every
+    # row it prints is in the file gated on it, verbatim.
+    out=$(timeout 600 gp -q -f dsst_srp_conical_average.gp </dev/null 2>&1)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    rows=$(printf '%s\n' "$out" | grep -E '^ +\(')
+    n=$(printf '%s\n' "$rows" | grep -c .)
+    if [ "$holds" -eq 5 ] && [ "$n" -eq 34 ] && ! printf '%s' "$out" | grep -qF '***' \
+        && printf '%s' "$out" | grep -q '^DONE'; then
+        missing=$(printf '%s\n' "$rows" | grep -cvxF -f <(cat ../crates/spacelab-propagation/tests/dsst_srp_conical_reference.rs ../crates/spacelab-propagation/src/dsst/srp.rs))
+        if [ "$missing" -eq 0 ]; then
+            ok "pari dsst_srp_conical_average.gp: the SRP mean rates and Fourier coefficients over the conical shadow, at 80 digits by two routes, are in the tests verbatim"
+        else
+            bad "pari dsst_srp_conical_average.gp" "$missing printed rows are not in tests/dsst_srp_conical_reference.rs or src/dsst/srp.rs"
+        fi
+    else
+        bad "pari dsst_srp_conical_average.gp" "expected 5 checks and 34 rows and no error, found $holds and $n"
     fi
 
     # The lens reference: every row the script prints is in the file gated on it, verbatim, and

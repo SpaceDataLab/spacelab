@@ -1,0 +1,171 @@
+/* The conical shadow of `dsst::srp`: the cone's equation on the orbit, the roots it keeps, the
+   quartic it solves, the bound that skips it, and the substitution its penumbra rule runs on.
+
+   Seen along the anti-Sun axis -s (s the unit Sun direction), a cone tangent to the central body
+   (radius ae) with half-angle theta has radius rho(x) = ae/cos(theta) + x tan(theta) at the axial
+   distance x = -(r.s): sin(theta) = (ae + R_sun)/D for the penumbra, (ae - R_sun)/D, negative, for
+   the umbra. On the orbit r = (p/w)(cos L f + sin L g), w = 1 + k cos L + h sin L, p = a B^2, and
+   with c = cos(Phi) = alpha cos L + beta sin L the cosine of the Sun's angle from the radius,
+   |r|^2 = (p/w)^2 and r.s = (p/w) c. The shipped shadow function is
+
+     S(L) = 1 - c^2 - (m w - tau c)^2,   m = ae/(p cos(theta)),   tau = tan(theta).
+
+   (1) S is (w/p)^2 (|r_perp|^2 - rho^2): zero on the cone, positive outside it.
+   (2) The cone touches the sphere: its generator is ae from the centre, at x_T = -ae sin(theta).
+   (3) On the cone, |r|^2 - (ae/cos(theta))^2 = x (x + 2 ae sin(theta))/cos(theta)^2, so a point
+       farther out than ae/cos(theta) lies on the anti-Sun side (x > 0, c < 0) or beyond the
+       tangency on the Sun's (x < -2 ae sin(theta)), which cos(Phi) < 0 rejects; ae (1/cos(theta) - 1)
+       is 70.2 m for the Earth. Inside the umbra cone's vertex rho > 0, so m w - tau c > 0 keeps the
+       nappe that holds the body.
+   (4) Measured from L0, the anti-Sun direction in the plane (cos L0, sin L0) = -(alpha, beta)/rho_s,
+       c = -rho_s cos u and w = 1 + k' cos u + h' sin u, and S is the shipped quadratic form in
+       (cos u, sin u).
+   (5) S (1 + t^2)^2 is the shipped quartic in t = tan(u/2); h' = 0 (a circular orbit, or the line of
+       apsides along the Sun) leaves it biquadratic.
+   (6) tau = 0 is Danielson's cylinder of radius ae; Orekit's m = ae/(a B) is the cylinder of
+       radius ae B.
+   (7) dS/dL/2 and d^2S/dL^2/2 are the shipped `at` and `half_curvature`.
+   (8) A point at the angle psi from the anti-Sun axis is outside the cone where r sin(psi - theta)
+       exceeds ae; over an orbit with the Sun at gamma out of its plane psi >= asin|gamma|, and
+       sin(psi_min - theta) is the shipped precheck's |gamma| cos(theta) - sqrt(1 - gamma^2) sin(theta).
+   (9) The smoothstep L = low + W (3 t^2 - 2 t^3): both ends' distances, its Jacobian, the node
+       measured from the nearer end and its weight.
+   (10) It turns (L - low)^(3/2) into W^(3/2) t^3 (3 - 2t)^(3/2), with its branch point at t = 3/2,
+        x = 2t - 1 = 2, where the Bernstein ellipse has rho = 2 + sqrt(3).
+   (11) int_0^1 x^(3/2) (1 - x)^(3/2) dx = B(5/2, 5/2) = 3 pi/128, the test integral of
+        `gaussian::tests::the_smoothstep_rule_carries_the_contact_powers`.
+
+       timeout 120 maxima --very-quiet -Q -b derivations/dsst_srp_conical_shadow.mac            */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+zero(e) := is(ratsimp(trigsimp(e)) = 0)$
+assume(p > 0, w > 0, ae > 0, ct > 0)$
+
+/* sin(theta) = st, cos(theta) = ct, st^2 + ct^2 = 1. */
+tan_t : st/ct$
+rho(x) := ae/ct + x*tan_t$
+m_ : ae/(p*ct)$
+S_ : 1 - c^2 - (m_*w - tan_t*c)^2$
+
+/* ---- (1) the cone's equation on the orbit --------------------------------------------------- */
+r2 : (p/w)^2$
+rs : (p/w)*c$
+rperp2 : r2 - rs^2$
+must(zero((w/p)^2*(rperp2 - rho(-rs)^2) - S_),
+     "(1) holds: S = (w/p)^2 (|r_perp|^2 - rho^2), with rho = ae/cos(theta) - tan(theta) (r.s)")$
+
+/* ---- (2) the generator is tangent to the sphere ---------------------------------------------- */
+dist2 : (ae/ct)^2/(1 + tan_t^2)$
+must(zero(subst(st^2 = 1 - ct^2, ratsimp(dist2 - ae^2))),
+     "(2) holds: the generator rho = ae/cos(theta) + x tan(theta) is ae from the centre")$
+xT : -(ae/ct)*tan_t/(1 + tan_t^2)$
+must(zero(subst(ct^2 = 1 - st^2, ratsimp(xT + ae*st))) and
+     zero(subst(ct^2 = 1 - st^2, ratsimp(rho(xT)^2 + xT^2 - ae^2))),
+     "(2) holds: it touches at x_T = -ae sin(theta), on the sphere")$
+
+/* ---- (3) which points of the cone are contacts ----------------------------------------------- */
+must(zero(subst(st^2 = 1 - ct^2, ratsimp(x^2 + rho(x)^2 - (ae/ct)^2 - x*(x + 2*ae*st)/ct^2))),
+     "(3) holds: on the cone |r|^2 - (ae/cos(theta))^2 = x (x + 2 ae sin(theta))/cos(theta)^2")$
+block([fpprec : 40, ae_e, rsun, au, s_p, gap],
+  ae_e : 637813646/100, rsun : 695700000, au : 149597870700,
+  s_p : (ae_e + rsun)/au,
+  gap : bfloat(ae_e*(1/sqrt(1 - s_p^2) - 1)),
+  print("  ae (1/cos(theta) - 1) for the Earth's penumbra at 1 au:", gap, "m"),
+  must(is(gap > 70) and is(gap < 71), "(3) holds: the band below which a contact can be missed is 70 m"))$
+
+/* ---- (4) the quadratic form in (cos u, sin u) ------------------------------------------------ */
+declare(rs_, constant)$
+kill(c)$
+L0c : -al/rs_$
+L0s : -be/rs_$
+cphi_u : al*(L0c*cos(u) - L0s*sin(u)) + be*(L0s*cos(u) + L0c*sin(u))$
+must(zero(subst(be^2 = rs_^2 - al^2, ratsimp(cphi_u + rs_*cos(u)))),
+     "(4) holds: from L0 = atan2(-beta, -alpha), cos(Phi) = -rho_s cos u")$
+w_u : 1 + k*(L0c*cos(u) - L0s*sin(u)) + h*(L0s*cos(u) + L0c*sin(u))$
+ku : k*L0c + h*L0s$
+hu : h*L0c - k*L0s$
+must(zero(ratsimp(w_u - (1 + ku*cos(u) + hu*sin(u)))),
+     "(4) holds: w = 1 + k' cos u + h' sin u, k' = k cos L0 + h sin L0, h' = h cos L0 - k sin L0")$
+mm : m$ tt : tau$
+mt : 2*mm*tt$ t1 : 1 + tt^2$
+sa : -mm^2*kk^2 - mt*kk*rs_ - t1*rs_^2$
+sb : -2*mm^2*kk*hh - mt*hh*rs_$
+sc : -mm^2*hh^2$
+sd : -2*mm^2*kk - mt*rs_$
+se : -2*mm^2*hh$
+sf : 1 - mm^2$
+S_u : 1 - (rs_*Cu)^2 - (mm*(1 + kk*Cu + hh*Su) + tt*rs_*Cu)^2$
+form : sa*Cu^2 + sb*Cu*Su + sc*Su^2 + sd*Cu + se*Su + sf$
+must(zero(expand(S_u - form)),
+     "(4) holds: S = a C^2 + b C Sigma + c Sigma^2 + d C + e Sigma + f with the shipped coefficients")$
+
+/* ---- (5) the quartic in t = tan(u/2) ---------------------------------------------------------- */
+quartic : (sa - sd + sf)*t^4 + 2*(se - sb)*t^3 + 2*(2*sc - sa + sf)*t^2 + 2*(sb + se)*t
+          + (sa + sd + sf)$
+must(zero(ratsimp(subst([Cu = (1 - t^2)/(1 + t^2), Su = 2*t/(1 + t^2)], form)*(1 + t^2)^2
+                  - quartic)),
+     "(5) holds: S (1 + t^2)^2 is the shipped quartic in t")$
+must(zero(subst(hh = 0, coeff(quartic, t, 3))) and zero(subst(hh = 0, coeff(quartic, t, 1))),
+     "(5) holds: h' = 0 leaves the quartic biquadratic")$
+half(e) := trigsimp(trigexpand(subst(u = 2*v, e)))$
+must(zero(half(subst(t = tan(u/2), (1 - t^2)/(1 + t^2)) - cos(u)))
+     and zero(half(subst(t = tan(u/2), 2*t/(1 + t^2)) - sin(u))),
+     "(5) holds: (1 - t^2)/(1 + t^2) and 2t/(1 + t^2) are cos u and sin u at t = tan(u/2)")$
+
+/* ---- (6) the cylinders ----------------------------------------------------------------------- */
+S_cyl : subst([st = 0, ct = 1], S_)$
+must(zero(ratsimp((w/p)^2*(rperp2 - ae^2) - subst(c = cc, S_cyl)) ) or
+     zero(ratsimp((w/p)^2*(subst(c = cc, rperp2) - ae^2) - subst(c = cc, S_cyl))),
+     "(6) holds: tau = 0 is the cylinder of radius ae, 1 - cos^2 Phi - (ae w/p)^2")$
+S_orekit : 1 - cc^2 - (ae/(a*B))^2*w^2$
+must(zero(ratsimp(subst(p = a*B^2, (w/p)^2*((p/w)^2*(1 - cc^2) - (ae*B)^2)) - S_orekit)),
+     "(6) holds: Orekit's m = ae/(a B) is the cylinder of radius ae B")$
+
+/* ---- (7) the slope and the curvature on the orbit ------------------------------------------- */
+cL : al*cos(L) + be*sin(L)$
+wL : 1 + k*cos(L) + h*sin(L)$
+RL : mm*wL - tt*cL$
+SL : 1 - cL^2 - RL^2$
+must(zero(diff(SL, L)/2 + (cL*diff(cL, L) + RL*diff(RL, L))),
+     "(7) holds: dS/dL / 2 = -(c c' + R R'), the shipped half slope")$
+must(zero(diff(SL, L, 2)/2 - (cL^2 - diff(cL, L)^2 - diff(RL, L)^2 - RL*(mm*(1 - wL) + tt*cL))),
+     "(7) holds: d2S/dL2 / 2 = c^2 - c'^2 - R'^2 - R (m (1 - w) + tau c), the shipped half curvature")$
+
+/* ---- (8) the precheck ------------------------------------------------------------------------ */
+must(zero(trigexpand((r*sin(psi) - ae/cos(th) - r*cos(psi)*tan(th))*cos(th)
+                     - (r*sin(psi - th) - ae))),
+     "(8) holds: outside the cone is r sin(psi - theta) > ae")$
+must(zero(trigsimp(subst([sin(ps) = g, cos(ps) = sqrt(1 - g^2)],
+                         trigexpand(sin(ps - th))) - (g*cos(th) - sqrt(1 - g^2)*sin(th)))),
+     "(8) holds: sin(psi_min - theta) = |gamma| cos(theta) - sqrt(1 - gamma^2) sin(theta)")$
+
+/* ---- (9) the smoothstep ---------------------------------------------------------------------- */
+Lt : lo + W*(3*tq^2 - 2*tq^3)$
+must(zero(Lt - lo - W*tq^2*(3 - 2*tq)) and zero(lo + W - Lt - W*(1 - tq)^2*(1 + 2*tq)),
+     "(9) holds: L - low = W t^2 (3 - 2t) and high - L = W (1 - t)^2 (1 + 2t)")$
+must(zero(diff(Lt, tq) - 6*W*tq*(1 - tq)),
+     "(9) holds: dL/dt = 6 W t (1 - t), a polynomial")$
+/* A Gauss node x < 0 has t = (1 + x)/2 = u, x > 0 has 1 - t = u, u = (1 - |x|)/2, dt = dx/2. */
+must(zero(subst(tq = 1 - uu, lo + W - Lt) - W*uu^2*(3 - 2*uu))
+     and zero(subst(tq = uu, Lt - lo) - W*uu^2*(3 - 2*uu)),
+     "(9) holds: each node is W u^2 (3 - 2u) from its nearer end")$
+must(zero(subst(tq = 1 - uu, diff(Lt, tq)/2) - 3*W*uu*(1 - uu))
+     and zero(subst(tq = uu, diff(Lt, tq)/2) - 3*W*uu*(1 - uu)),
+     "(9) holds: its weight is 3 W w u (1 - u)")$
+
+/* ---- (10) what the substitution leaves at the ends ------------------------------------------- */
+assume(tq > 0, tq < 1, W > 0)$
+must(zero(radcan((W*tq^2*(3 - 2*tq))^(3/2) - W^(3/2)*tq^3*(3 - 2*tq)^(3/2))),
+     "(10) holds: (L - low)^(3/2) = W^(3/2) t^3 (3 - 2t)^(3/2), analytic on [0, 1]")$
+must(is(solve(3 - 2*tq = 0, tq) = [tq = 3/2]) and is(solve(1 + 2*tq = 0, tq) = [tq = -1/2]),
+     "(10) holds: the branch points are t = 3/2 and t = -1/2, x = 2t - 1 = 2 and -2")$
+must(zero(radcan((2 + sqrt(2^2 - 1)) - (2 + sqrt(3)))) and is(2 + sqrt(3) > 3.7),
+     "(10) holds: the Bernstein ellipse through x = 2 has rho = 2 + sqrt(3)")$
+
+/* ---- (11) the test integral ------------------------------------------------------------------ */
+kill(x)$
+must(is(ratsimp(beta(5/2, 5/2) - 3*%pi/128) = 0)
+     and is(ratsimp(integrate(x^(3/2)*(1 - x)^(3/2), x, 0, 1) - 3*%pi/128) = 0),
+     "(11) holds: int_0^1 x^(3/2) (1 - x)^(3/2) dx = B(5/2, 5/2) = 3 pi/128")$
+
+print("DONE")$

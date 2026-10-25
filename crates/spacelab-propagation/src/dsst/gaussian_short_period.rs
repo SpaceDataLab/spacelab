@@ -7,8 +7,9 @@
 //! `(δaᵢ/δv)·q` on the Keplerian orbit of the mean elements and `⟨Fᵢ⟩` its mean over λ. The force
 //! is known only at quadrature nodes, so `F` enters through its Fourier series in the **true**
 //! longitude L, and the equation is integrated in L through `dλ/dL = 1 + 2Σₖ(ρₖ cos kL + σₖ sin kL)`:
-//! * `fourier_coefficients` — `Cᵢʲ, Sᵢʲ = (1/π)∫Fᵢ·(cos jL, sin jL) dL` over the drag arc or the lit
-//!   arc the mean rates integrate, at `SHORT_PERIOD_ORDER` nodes of `quadrature`;
+//! * `fourier_coefficients` — `Cᵢʲ, Sᵢʲ = (1/π)∫Fᵢ·(cos jL, sin jL) dL` over the drag arc at
+//!   `SHORT_PERIOD_ORDER` nodes of `quadrature`, or for SRP on the pieces and the rule of its mean
+//!   rates;
 //! * `compute_rho_sigma` — `ρⱼ + iσⱼ = (1 + jB)(−b)ʲ(k + ih)ʲ`, the means of `cos jL`, `sin jL` over λ
 //!   (Danielson 2.5.3-(4)), `j = 1 … 3·JMAX`;
 //! * `UijVij` — U₁ʲ, V₁ʲ: the product to sum of `(F − ⟨F⟩)·dλ/dL`, integrated term by term (Danielson
@@ -27,7 +28,8 @@
 //! * **The λ correction** carries `(3/an)·𝒞₀⁰·Σⱼ(ρⱼ cos jL + σⱼ sin jL)/j²`, the periodic part of
 //!   `∫(L − λ) dλ` that `−(3/2a)∫η_a dλ` brings in. Orekit has only its `(L − λ)²` part.
 //! * **The quadrature** runs at `SHORT_PERIOD_ORDER` nodes and is the periodic trapezoid on a full
-//!   turn. Orekit runs Gauss–Legendre at the order its mean rates select, which is 12 for drag in LEO.
+//!   turn; SRP's pieces take the rule of its mean rates. Orekit runs Gauss–Legendre at the order its
+//!   mean rates select, which is 12 for drag in LEO.
 //!
 //! `tests/dsst_short_period_identity.rs` holds the equation on drag and SRP to the round-off of the
 //! test and to the two cuts of the series, which it measures.
@@ -60,8 +62,8 @@ const SHORT_PERIOD_ORDER: usize = gaussian::MAX_GAUSS_ORDER;
 /// Gaussian contribution at the given **mean** state, for the true-longitude integration window `ll`
 /// (`getLLimits`) and the per-node perturbing acceleration `accel`.
 ///
-/// Returns zeros when `ll[0] ≥ ll[1]`: the whole orbit is eclipsed, for SRP, or above the atmosphere,
-/// for drag, so `F` vanishes.
+/// Returns zeros when `ll[0] ≥ ll[1]`: for drag, the whole orbit is above the atmosphere, so `F`
+/// vanishes.
 #[must_use]
 pub(crate) fn short_period_correction<F>(aux: &DsstAuxiliary, ll: [f64; 2], accel: F) -> [f64; 6]
 where
@@ -70,17 +72,48 @@ where
     short_periods(aux, ll, |l| gaussian::element_derivatives(aux, l, &accel).0)
 }
 
+/// [`short_period_correction`] with the Fourier coefficients taken on a given rule, true longitudes
+/// `nodes` and their `weights`, instead of on a window. `F` is zero away from the nodes' support:
+/// for SRP, the umbra between the lit pieces of the orbit. An empty rule returns zeros.
+#[must_use]
+pub(crate) fn short_period_correction_on<F>(
+    aux: &DsstAuxiliary,
+    nodes: &[f64],
+    weights: &[f64],
+    accel: F,
+) -> [f64; 6]
+where
+    F: Fn(&NodeState) -> [f64; 3],
+{
+    short_periods_on(aux, nodes, weights, |l| {
+        gaussian::element_derivatives(aux, l, &accel).0
+    })
+}
+
 /// [`short_period_correction`] of the six rates `rates(L)` at true longitude `L`, zero outside `ll`.
 fn short_periods(aux: &DsstAuxiliary, ll: [f64; 2], rates: impl Fn(f64) -> [f64; 6]) -> [f64; 6] {
     if ll[0] < ll[1] {
-        let (rho, sigma) = compute_rho_sigma(aux);
         let (nodes, weights) = quadrature(ll);
-        let (ccoef, scoef) = fourier_coefficients(&nodes, &weights, rates);
-        let uv = UijVij::new(&ccoef, &scoef, &rho, &sigma);
-        StoredCoefficients::new(aux, &ccoef, &scoef, &uv, &rho, &sigma).value(aux)
+        short_periods_on(aux, &nodes, &weights, rates)
     } else {
         [0.0; 6]
     }
+}
+
+/// [`short_periods`] on the rule `nodes`, `weights`.
+fn short_periods_on(
+    aux: &DsstAuxiliary,
+    nodes: &[f64],
+    weights: &[f64],
+    rates: impl Fn(f64) -> [f64; 6],
+) -> [f64; 6] {
+    if nodes.is_empty() {
+        return [0.0; 6];
+    }
+    let (rho, sigma) = compute_rho_sigma(aux);
+    let (ccoef, scoef) = fourier_coefficients(nodes, weights, rates);
+    let uv = UijVij::new(&ccoef, &scoef, &rho, &sigma);
+    StoredCoefficients::new(aux, &ccoef, &scoef, &uv, &rho, &sigma).value(aux)
 }
 
 /// The ρⱼ = (1+jB)(−b)ʲCⱼ(k,h) and σⱼ = (1+jB)(−b)ʲSⱼ(k,h) coefficients for j = 0 … 3·JMAX, where
@@ -150,7 +183,7 @@ fn gauss_legendre(ll: [f64; 2], order: usize) -> (Vec<f64>, Vec<f64>) {
 /// quadrature `xs`, `ws` and divided by π. The six `Fᵢ = rates(L)` are evaluated once per node and
 /// reused across all `j`. The compensated (Kahan) accumulation and the `w·(cos(jL)·Fᵢ)`
 /// multiplication order are those of Orekit's `GaussQuadrature.integrate`.
-fn fourier_coefficients(
+pub(super) fn fourier_coefficients(
     xs: &[f64],
     ws: &[f64],
     rates: impl Fn(f64) -> [f64; 6],
@@ -504,10 +537,9 @@ mod tests {
         })
     }
 
-    /// The distance to Orekit's SRP short periods on its fixture: 6.6e-6 m in `a`, of a ~62 mm swing,
-    /// and 2.4e-10 in the other elements, from the departures the module doc lists. Before them it was
-    /// 2.0e-6 m and 2.4e-12, from the radius of the shadow cylinder alone
-    /// (`srp::tests::integration_limits_match_orekit`).
+    /// The distance to Orekit's SRP short periods on its fixture: 2.7e-5 m in `a`, of a ~62 mm swing,
+    /// and 2.5e-10 in the other elements, from the departures the module doc lists and from Orekit's
+    /// shadow cylinder (the `srp` module doc).
     #[test]
     #[ignore = "comparator: the distance to Orekit, not a verdict"]
     fn srp_short_period_distance_to_orekit() {

@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run --quiet --with pyerfa --with numpy python
-"""Fixture generation for the leap-second table.
+"""Comparator fixture for the leap-second table.
 
 Run:
     ./derivations/leap_seconds.py            # regenerate fixtures
@@ -7,10 +7,11 @@ Run:
 
 Provenance
 ----------
-The leap-second record is published by the IERS in Bulletin C and mirrored in
-`tai-utc.dat`. It is a list of measurements of the Earth's rotation: facts, not
-expression. This script recovers the transitions from `pyerfa` by scanning, so
-the table in `leap_seconds.rs` is never typed from memory.
+The table in `leap_seconds.rs` is the IERS's own `leap-seconds.list`, vendored in
+`crates/spacelab-fa/tests/fixtures/` and held to the table by
+`tests/leap_second_list.rs`. This script writes what `pyerfa` reports for the
+same dates, for the comparator `tests/delta_at_oracle.rs`: benchmark material,
+not a gate.
 """
 
 from __future__ import annotations
@@ -22,10 +23,7 @@ import sys
 import erfa
 import numpy as np
 
-FIXTURE = (
-    pathlib.Path(__file__).parent.parent
-    / "crates/spacelab-fa/tests/fixtures/delta_at_pyerfa.csv"
-)
+FIXTURE = pathlib.Path(__file__).parent.parent / "crates/spacelab-fa/tests/fixtures/delta_at_pyerfa.csv"
 
 FIRST_YEAR, LAST_YEAR = 1972, 2026
 
@@ -69,14 +67,10 @@ def main() -> int:
     args = parser.parse_args()
 
     found = transitions()
-    print(
-        f"leap seconds: oracle reports {len(found)} transitions in [{FIRST_YEAR}, {LAST_YEAR + 1}]"
-    )
+    print(f"leap seconds: pyerfa reports {len(found)} transitions in [{FIRST_YEAR}, {LAST_YEAR + 1}]")
     print(f"  first {found[0][0]}-{found[0][1]:02d} -> {found[0][2]} s")
     print(f"  last  {found[-1][0]}-{found[-1][1]:02d} -> {found[-1][2]} s")
-    print(
-        "  NOTE: the table is closed; add a row only for a leap second announced by 2027-03-05."
-    )
+    print("  NOTE: the table is closed; the IERS list is valid past 2027-05-20.")
 
     if args.check:
         return 0

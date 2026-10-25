@@ -1,4 +1,5 @@
-//! Differential test of the leap-second table against an external oracle.
+//! Comparator: the leap-second table against `pyerfa`. Benchmark material, not a
+//! gate — the gate is `tests/leap_second_list.rs`, against the IERS's own list.
 //!
 //! Fixtures are generated offline by `derivations/leap_seconds.py` from `pyerfa`.
 //! They cover every transition boundary and the day either side of it, plus random
@@ -17,6 +18,7 @@ use spacelab_fa::delta_at;
 const FIXTURES: &str = include_str!("fixtures/delta_at_pyerfa.csv");
 
 #[test]
+#[ignore = "comparator: pyerfa's leap-second table, not a verdict"]
 fn delta_at_agrees_with_pyerfa_on_every_transition() {
     let mut checked = 0_usize;
 
@@ -49,6 +51,7 @@ fn delta_at_agrees_with_pyerfa_on_every_transition() {
 }
 
 #[test]
+#[ignore = "comparator: pyerfa's leap-second table, not a verdict"]
 fn every_transition_boundary_is_sharp() {
     // The fixtures contain the day before, the day of, and the day after each
     // transition. If our table were off by a day anywhere, the pairs would not

@@ -2,31 +2,26 @@
 //!
 //! # Provenance
 //!
-//! The table below is the record of leap seconds published by the IERS in
-//! Bulletin C, and mirrored in `tai-utc.dat`. It is a list of measurements of the
-//! Earth's rotation — facts, not expression. It was cross-checked entry by entry
-//! against `pyerfa`, which found exactly these 28 transitions between 1972 and
-//! 2027. `tests/utc_properties.rs` holds the conversions to their definitions, to
-//! the nanosecond, across every leap second and past 2027-05-20.
+//! The table below is the IERS's own list of leap seconds, `leap-seconds.list`
+//! (Earth Orientation Centre, Paris Observatory; in the public domain), updated
+//! through Bulletin C 72 and valid until 2027-06-28. It is a list of measurements
+//! of the Earth's rotation — facts, not expression. `tests/leap_second_list.rs`
+//! holds the table to the list on every day from 1972-01-01 to its expiry.
+//! `tests/utc_properties.rs` holds the conversions to their definitions, to the
+//! nanosecond, across every leap second and past 2027-05-20.
 //!
 //! # The table is closed
 //!
 //! The last row, `TAI − UTC = 37 s` from 2017-01-01, holds for every later date.
-//! Three published facts close the table:
+//! Two documents close the table:
 //!
-//! 1. CGPM 2026 Resolution 5: "continuous UTC will become effective on 20 May
+//! 1. The IERS list has no leap second after 2016 and is valid until 2027-06-28.
+//! 2. CGPM 2026 Resolution 5: "continuous UTC will become effective on 20 May
 //!    2027". From that date no leap second is inserted.
-//! 2. IERS Bulletin C 72 (2026-07-06): no leap second at the end of December 2026.
-//! 3. All 27 leap seconds fell at the end of June or December, the first
-//!    preference of ITU-R TF.460. The next such date, 2027-06-30, is after
-//!    continuity begins.
 //!
-//! One premise remains. TF.460 permits the end of any month, with second
-//! preference to March and September, and no other month end has ever been used.
-//! It also requires eight weeks' notice, so the last leap second before
-//! continuity, at the end of April 2027, would be announced by 2027-03-05. Check
-//! Bulletin C 73 (January 2027) and the IERS notices up to that date. Add a row only
-//! for a second actually announced, and re-run `derivations/leap_seconds.py`. A
+//! The list is valid past the start of continuity, so no date is left open. If
+//! the IERS issues a list with a later row, replace the fixture:
+//! `tests/leap_second_list.rs` then fails until the table has that row. A
 //! negative leap second would need code as well as a row: [`tai_to_utc`] assumes
 //! every step adds one second.
 //!
@@ -288,8 +283,8 @@ mod tests {
         }
     }
 
-    /// The premises the module documentation rests on: every step adds one second, and every
-    /// leap second ended June or December.
+    /// Every step adds one second, which [`tai_to_utc`] assumes, and every leap second ended
+    /// June or December.
     #[test]
     fn every_leap_second_adds_one_second_at_the_end_of_june_or_december() {
         for pair in TABLE.windows(2) {

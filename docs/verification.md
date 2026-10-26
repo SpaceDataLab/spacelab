@@ -7562,10 +7562,75 @@ coefficients saw these two satellite-months (§10.10), so its rows are in sample
 **The nowcast is 61 % too dense at these heights, and twice as wrong in the storm month.** WAM-IPE's
 geodetic-height bias is 1.83 on GRACE-FO and 1.76 on Swarm A in 2024-05, 1.34 and 1.33 in 2025-06;
 over the 9 506 rows with `Ap ≥ 50` its MAPE is 84.8 %, against JB2008's 31.6 % and NRLMSISE-00's
-60.9 %. The lead does not matter: from −2 h to +3 h the MAPE stays between 63.1 % and 65.5 %. WAM's
-own top moves between 400 and 600 km with solar activity, and the product's levels above it are NOAA's
-offline extension (`wam_ipe.rs`), so some of these rows sit in the extension and some in WAM proper;
-this campaign scores the product as published and does not separate the two.
+60.9 %. The lead does not matter: from −2 h to +3 h the MAPE stays between 63.1 % and 65.5 %.
+
+**The excess is WAM's own, not the extension's.** The product's levels above WAM's top are NOAA's
+offline extension, a smooth closed form; below it, WAM's pressure grid interpolated onto fixed heights
+leaves a level-to-level ripple in `ln ρ`. `WamIpeField::extension_start` finds the lowest level of each
+column from which the fourth difference of `ln ρ` stays within `EXTENSION_TOLERANCE`; on a Bates–Walker
+column joined to its isothermal tail it returns the join exactly (G3, `wam_ipe.rs`). Above the rows it
+sits at a median 580 km in 2024-05 (10th–90th percentile 510–660 km, 970 km at most, in the storm) and
+480 km in 2025-06 (440–520 km). 79 201 rows (82 %) fly below it, in WAM proper: bias 1.646, MAPE
+66.9 %. The 17 323 above it, in the extension, have 1.439 and 50.8 %, and the error falls with height
+above the top:
+
+| Satellite height against WAM's top | rows | JB2008 MAPE | WAM-IPE bias | WAM-IPE MAPE |
+|---|---|---|---|---|
+| 50–100 km above | 2 107 | 24.8 % | 1.111 | 31.5 % |
+| 0–50 km above | 15 214 | 21.9 % | 1.485 | 53.4 % |
+| 0–50 km below | 31 785 | 18.8 % | 1.610 | 64.7 % |
+| 50–100 km below | 22 314 | 18.5 % | 1.678 | 69.8 % |
+| 100–150 km below | 13 728 | 22.4 % | 1.597 | 60.2 % |
+| 150–200 km below | 7 892 | 24.9 % | 1.505 | 50.8 % |
+| 200–250 km below | 1 343 | 32.3 % | 1.967 | 98.4 % |
+
+Further below, 250 to 500 km under the top, the 2 139 rows have biases from 2.39 to 3.36. Whether that
+is depth or the storm, whose days raise the top, this table does not separate. Two rows sit 100–150 km
+above the top, and 8 rows have no top: their column crosses one of the holes above.
+
+**WAM-IPE is wrong in its level and in its structure.** Group the rows by satellite and hour, so that
+each group is one hourly field on one shell (2 431 groups). The *level* is a group's mean `ln r`; the
+*structure* is what is left inside the group, the error along two thirds of an orbit in latitude and
+local time. With the level known each hour, the structure alone leaves this MAPE:
+
+| Model, 96 524 rows with a top | mean `ln r` | sd of the level | sd of the structure | MAPE with the level known |
+|---|---|---|---|---|
+| NRLMSISE-00 (`ap[]`) | +0.318 | 0.190 | 0.132 | 10.0 % |
+| JB2008 | −0.029 | 0.232 | 0.132 | 10.1 % |
+| SDTM-1 (in sample) | +0.019 | 0.204 | 0.126 | 9.6 % |
+| WAM-IPE, geodetic height | +0.414 | 0.295 | 0.186 | 14.9 % |
+
+WAM-IPE's structure is 41 % wider than any empirical model's, and its level varies 27 % more than
+JB2008's from hour to hour. This is why the anomaly correction below cannot help: what
+it keeps of WAM-IPE is the hour-to-hour level and the in-hour shape, and both are worse than the base
+already has.
+
+**What the drivers carry.** `ln r` is fitted by least squares on ten drivers: an intercept, F10.7
+of the day and its trailing 81-day mean, Ap, |φ|, the cosine and sine of the local time, the height,
+the height against the top, and which satellite. The fit's residual is orthogonal to each driver (G2,
+`density_rom.rs`). The intervals are 95 % from 200 bootstrap replicates that resample the 55 days
+whole, so that the hours of one day stay together. The drivers explain 39.5 % of WAM-IPE's variance
+and 39.2 % of JB2008's.
+
+| Driver, per unit | WAM-IPE | JB2008 |
+|---|---|---|
+| F10.7, per 100 sfu | −0.38 [−0.70, −0.06] | +0.45 [+0.31, +0.56] |
+| F10.7 81-day, per 100 sfu | −0.69 [−1.73, +0.72] | −1.88 [−2.53, −0.98] |
+| Ap, per 100 | −0.27 [−0.83, −0.06] | +0.02 [−0.10, +0.62] |
+| \|φ\|, per 90° | −0.31 [−0.38, −0.21] | +0.00 [−0.06, +0.06] |
+| height, per 100 km | +1.74 [+1.03, +2.18] | −0.04 [−0.41, +0.30] |
+| height above the top, per 100 km | −0.33 [−0.51, −0.03] | +0.13 [+0.02, +0.26] |
+| Swarm A against GRACE-FO C | +0.20 [+0.12, +0.25] | −0.01 [−0.05, +0.03] |
+
+Within one satellite and at a fixed top, WAM-IPE's ratio grows with height by `e^1.41` per 100 km,
+and JB2008's shows no height term. Read at face value, WAM-IPE's density falls more slowly with height
+than the measured one: its scale height at these heights is too large. A satellite's height changes along the
+orbit with the eccentricity and the ellipsoid, and so with latitude, so the height and |φ| terms
+share that signal. The excess also grows with depth below the top, and at a given depth it falls
+with Ap and with F10.7. With two months, the 81-day mean is in effect the month, and its intervals
+are wide. These coefficients describe the two campaigns; they do not isolate a cause. S10 is not in the fit:
+it comes in SET's index files, which the release cannot carry. Day of year is not in it either: in
+two months it is the month again.
 
 **The height coordinate is geodetic.** NOAA does not say which surface its heights are measured from.
 Read as geodetic, the MAPE is flat in latitude — 60.9 %, 64.3 %, 66.7 % in |φ| 0–30°, 30–60°, 60–90°;
@@ -7578,8 +7643,9 @@ showing, not evidence for the sphere.
 removes the level, and what remains — WAM-IPE's own hour-to-hour departures — makes every base slightly
 worse: +0.5 points of MAPE for JB2008 and +1.0 for SDTM-1 over all rows, +2.7 and +4.7 points with
 `Ap ≥ 50`, +2.9 for NRLMSISE-00. Ф18.B's question, "the WAM-IPE gain", is answered: none, on these two
-months and these two satellites. What would reopen it is a product whose levels at 400–550 km are WAM's
-own, or the `NON-OPERATIONAL_RESEARCH/` reruns, which the register keeps unread until the WAM-IPE team
+months and these two satellites. Most rows already fly in WAM proper, so a product with more of WAM's
+own levels would not reopen it; a WAM release without the excess would, or the
+`NON-OPERATIONAL_RESEARCH/` reruns, which the register keeps unread until the WAM-IPE team
 has been asked (`docs/provenance.md`, `noaa-wam-ipe`).
 
 Attribution: NOAA Space Weather Prediction Center, WAM-IPE, accessed from the NOAA Open Data
@@ -7956,7 +8022,7 @@ crates/spacelab-propagation/src/spacecraft.rs | physics | no re-runnable check n
 crates/spacelab-propagation/src/symplectic.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/taylor.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/tolerance.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-propagation/src/wam_ipe.rs | physics | names only a measurement against data, no G1-G5 test
+crates/spacelab-propagation/src/wam_ipe.rs | physics | the extension detector's (G3) test is inline, which the rule does not read; the reader's interpolation has no gate
 crates/spacelab-propagation/src/wind_data.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/wind_model.rs | physics | names only a measurement against data, no G1-G5 test
 crates/spacelab-sensors/src/agile.rs | physics | no re-runnable check named in the module doc

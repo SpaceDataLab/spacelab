@@ -86,6 +86,7 @@ use std::path::{Path, PathBuf};
 
 use spacelab_propagation::density_calibration::{DensityCorrection, DensitySample};
 use spacelab_propagation::density_data::{DensityObservation, TimeScale, parse_density};
+use spacelab_propagation::density_rom::ReducedDynamics;
 use spacelab_propagation::sdtm::{self, DensityUncertainty, SdtmDrivers, SdtmPoint, coefficients};
 use spacelab_propagation::space_weather::{self, SpaceWeatherDay};
 use spacelab_propagation::wam_ipe::WamIpeField;
@@ -1830,8 +1831,9 @@ impl Corrections {
 /// the geodetic reading only, which is the one the latitude bands select.
 struct HourResult {
     hour: i64,
-    /// `(satellite, row, [ln ρ geodetic, ln ρ spherical])`.
-    values: Vec<(usize, usize, [f64; 2])>,
+    /// `(satellite, row, [ln ρ geodetic, ln ρ spherical], top)`, the top being where the extension
+    /// starts above the row's geodetic point, km.
+    values: Vec<(usize, usize, [f64; 2], Option<f64>)>,
     /// `(satellite, one per base)`.
     fits: Vec<(usize, [Corrections; WAM_BASE_COUNT])>,
 }
@@ -1867,7 +1869,8 @@ fn wam_ipe_hour(
                     .unwrap()
                     .ln()
             });
-            values.push((s, from + n, ln));
+            let top = field.extension_start(e.latitude.to_degrees(), e.longitude.to_degrees());
+            values.push((s, from + n, ln, top));
         }
         let near: Vec<&Evaluation> = rows[from..to]
             .iter()
@@ -1996,14 +1999,19 @@ fn wam_ipe_lead(hour: i64, path: &Path) -> i64 {
     (hour - cycle) / 3600
 }
 
+/// `(satellite, row, hour)` → `ln ρ` under both readings, and the field's top above the row.
+type AtHour = HashMap<(usize, usize, i64), ([f64; 2], Option<f64>)>;
+
 /// Score one satellite-month pair, adding each row's ratios under its satellite-month, under
-/// `all`, under its geomagnetic level, its latitude band and the lead of the run it came from.
+/// `all`, under its geomagnetic level, its latitude band, the lead of the run it came from, and
+/// which side of WAM-IPE's own top it flew on.
 fn score_wam_ipe_month(
-    month: &str,
+    month: &'static str,
     dir: &Path,
     all: Drivers<'_>,
     hours: &BTreeMap<i64, PathBuf>,
     ratios: &mut BTreeMap<(String, usize), Vec<f64>>,
+    records: &mut Vec<WamRecord>,
 ) {
     // One row in six, as in the stratified campaign.
     const DECIMATION: usize = 6;
@@ -2042,11 +2050,11 @@ fn score_wam_ipe_month(
         .range(month_start..=month_end)
         .map(|(h, p)| (*h, p))
         .collect();
-    let mut at_hour: HashMap<(usize, usize, i64), [f64; 2]> = HashMap::new();
+    let mut at_hour: AtHour = HashMap::new();
     let mut fitted: HashMap<(usize, i64), [Corrections; WAM_BASE_COUNT]> = HashMap::new();
     for r in wam_ipe_month_hours(&month_hours, &satellites, d) {
-        for (s, n, v) in r.values {
-            at_hour.insert((s, n, r.hour), v);
+        for (s, n, v, top) in r.values {
+            at_hour.insert((s, n, r.hour), (v, top));
         }
         for (s, f) in r.fits {
             fitted.insert((s, r.hour), f);
@@ -2071,12 +2079,13 @@ fn score_wam_ipe_month(
     for (s, rows) in satellites.iter().enumerate() {
         let group = format!("{} {month}", &names[s][..2]);
         let (mut scored, mut unscored) = (0usize, 0usize);
+        let mut tops: Vec<f64> = Vec::new();
         for (n, e) in rows.iter().enumerate() {
             let t = unix_seconds(e);
             let h0 = (t / 3600.0).floor() as i64 * 3600;
             let hour = |h: i64| {
                 Some((
-                    *at_hour.get(&(s, n, h))?,
+                    at_hour.get(&(s, n, h))?.0,
                     fitted.get(&(s, h))?,
                     anomaly.get(&(s, h))?,
                 ))
@@ -2086,15 +2095,18 @@ fn score_wam_ipe_month(
                 continue;
             };
             scored += 1;
-            let row = wam_ipe_row(e, (t - h0 as f64) / 3600.0, before, after);
+            let w = (t - h0 as f64) / 3600.0;
+            let row = wam_ipe_row(e, w, before, after);
+            // The nearer field's top: where the extension starts is not interpolated in time.
+            let nearer = if w < 0.5 { h0 } else { h0 + 3600 };
+            let top = at_hour[&(s, n, nearer)].1;
+            tops.extend(top);
+            let [side, offset] = wam_top_groups(e.altitude_km, top);
+            records.extend(top.map(|top| WamRecord::new(e, &row, top, (s, month, h0))));
             let storm = if e.ap >= 50.0 { "Ap >= 50" } else { "Ap < 50" };
-            let band = match e.latitude.to_degrees().abs() {
-                x if x < 30.0 => "|latitude| 0-30",
-                x if x < 60.0 => "|latitude| 30-60",
-                _ => "|latitude| 60-90",
-            };
+            let band = latitude_band(e.latitude.to_degrees());
             let lead = format!("lead {:+} h", wam_ipe_lead(h0, &hours[&h0]));
-            for g in [group.as_str(), "all", storm, band, &lead] {
+            for g in [group.as_str(), "all", storm, band, &lead, &side, &offset] {
                 for (k, r) in row.iter().enumerate() {
                     ratios.entry((g.to_string(), k)).or_default().push(*r);
                 }
@@ -2104,7 +2116,202 @@ fn score_wam_ipe_month(
             "{group}: {scored} rows scored, {unscored} without both hourly fields and their \
              trailing {WAM_ANOMALY_HOURS} h"
         );
+        print_wam_tops(&group, &mut tops);
     }
+}
+
+fn latitude_band(latitude_deg: f64) -> &'static str {
+    match latitude_deg.abs() {
+        x if x < 30.0 => "|latitude| 0-30",
+        x if x < 60.0 => "|latitude| 30-60",
+        _ => "|latitude| 60-90",
+    }
+}
+
+/// One scored row as the regression and the level/structure split read it.
+struct WamRecord {
+    /// `(satellite, month, hour)`: the rows one hourly field and one shell share.
+    hour: (usize, &'static str, i64),
+    /// `ln r` for each base, then for WAM-IPE at geodetic height.
+    log_ratio: Vec<f64>,
+    drivers: [f64; WamRecord::DRIVERS.len()],
+}
+
+impl WamRecord {
+    const DRIVERS: [&str; 10] = [
+        "intercept",
+        "(F10.7 - 150)/100",
+        "(F10.7 81-day - 150)/100",
+        "Ap/100",
+        "|latitude|/90",
+        "cos LST",
+        "sin LST",
+        "(h - 450 km)/100 km",
+        "(h - top)/100 km",
+        "Swarm A",
+    ];
+
+    fn new(e: &Evaluation, row: &[f64], top: f64, hour: (usize, &'static str, i64)) -> Self {
+        let lst = e.local_solar_time * std::f64::consts::TAU / 24.0;
+        Self {
+            hour,
+            log_ratio: row[..=WAM_BASES.len()].iter().map(|r| r.ln()).collect(),
+            drivers: [
+                1.0,
+                (e.f107 - 150.0) / 100.0,
+                (e.sdtm.f107a - 150.0) / 100.0,
+                e.ap / 100.0,
+                e.latitude.to_degrees().abs() / 90.0,
+                lst.cos(),
+                lst.sin(),
+                (e.altitude_km - 450.0) / 100.0,
+                (e.altitude_km - top) / 100.0,
+                if hour.0 == 1 { 1.0 } else { 0.0 },
+            ],
+        }
+    }
+}
+
+/// The least-squares coefficients of every column on the drivers, `[driver][column]`.
+fn wam_coefficients(records: &[&WamRecord]) -> Vec<Vec<f64>> {
+    let x: Vec<Vec<f64>> = records.iter().map(|r| r.drivers.to_vec()).collect();
+    let y: Vec<Vec<f64>> = records.iter().map(|r| r.log_ratio.clone()).collect();
+    let model = ReducedDynamics::fit(&x, &y).unwrap();
+    (0..WamRecord::DRIVERS.len())
+        .map(|a| {
+            let mut unit = [0.0; WamRecord::DRIVERS.len()];
+            unit[a] = 1.0;
+            model.predict(&unit)
+        })
+        .collect()
+}
+
+/// `ln r` regressed on the drivers, per column: the coefficients with 95 % intervals from a
+/// bootstrap that resamples whole days, so that the hours of one day stay together, and the share of
+/// the variance the drivers explain.
+fn print_wam_regression(records: &[WamRecord], names: &[String]) {
+    const REPLICATES: usize = 200;
+    let all: Vec<&WamRecord> = records.iter().collect();
+    let coefficients = wam_coefficients(&all);
+    let mut by_day: BTreeMap<i64, Vec<&WamRecord>> = BTreeMap::new();
+    for r in records {
+        by_day
+            .entry(r.hour.2.div_euclid(86_400))
+            .or_default()
+            .push(r);
+    }
+    let days: Vec<&Vec<&WamRecord>> = by_day.values().collect();
+    // SplitMix64: a fixed, dependency-free stream, so the intervals reproduce.
+    let mut state = 0x5DEE_CE66_D1CE_4E5B_u64;
+    let mut next = || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+    let replicates: Vec<Vec<Vec<f64>>> = (0..REPLICATES)
+        .map(|_| {
+            let sample: Vec<&WamRecord> = (0..days.len())
+                .flat_map(|_| days[usize::try_from(next() % days.len() as u64).unwrap()].iter())
+                .copied()
+                .collect();
+            wam_coefficients(&sample)
+        })
+        .collect();
+    println!(
+        "\n== ln r regressed on the drivers, {} rows, {} days, 95 % day-block bootstrap ==",
+        records.len(),
+        days.len()
+    );
+    for (c, name) in names.iter().enumerate() {
+        let n = records.len() as f64;
+        let mean = records.iter().map(|r| r.log_ratio[c]).sum::<f64>() / n;
+        let (mut total, mut residual) = (0.0, 0.0);
+        for r in records {
+            let fitted: f64 = r
+                .drivers
+                .iter()
+                .zip(&coefficients)
+                .map(|(x, w)| x * w[c])
+                .sum();
+            total += (r.log_ratio[c] - mean).powi(2);
+            residual += (r.log_ratio[c] - fitted).powi(2);
+        }
+        println!("{name}: R^2 {:.3}", 1.0 - residual / total);
+        for (a, driver) in WamRecord::DRIVERS.iter().enumerate() {
+            let mut draws: Vec<f64> = replicates.iter().map(|w| w[a][c]).collect();
+            draws.sort_by(f64::total_cmp);
+            println!(
+                "    {driver:<26} {:+.3}  [{:+.3}, {:+.3}]",
+                coefficients[a][c],
+                draws[REPLICATES * 25 / 1000],
+                draws[REPLICATES * 975 / 1000 - 1]
+            );
+        }
+    }
+}
+
+/// `ln r` split into each hour-shell's mean, the level, and what is left inside it, the structure.
+fn print_wam_split(records: &[WamRecord], names: &[String]) {
+    let mut by_hour: HashMap<(usize, &str, i64), Vec<&WamRecord>> = HashMap::new();
+    for r in records {
+        by_hour.entry(r.hour).or_default().push(r);
+    }
+    println!(
+        "\n== ln r split into level and structure, {} hour-shells ==",
+        by_hour.len()
+    );
+    for (c, name) in names.iter().enumerate() {
+        let (mut level, mut structure, mut sum, mut flat) = (0.0, 0.0, 0.0, 0.0);
+        for rows in by_hour.values() {
+            let mean = rows.iter().map(|r| r.log_ratio[c]).sum::<f64>() / rows.len() as f64;
+            for r in rows {
+                level += mean * mean;
+                structure += (r.log_ratio[c] - mean).powi(2);
+                sum += mean;
+                flat += ((r.log_ratio[c] - mean).exp() - 1.0).abs();
+            }
+        }
+        let n = records.len() as f64;
+        let mean = sum / n;
+        println!(
+            "{name:<28} mean ln r {mean:+.3}  sd level {:.3}  sd structure {:.3}  \
+             MAPE with the level known {:5.1}%",
+            (level / n - mean * mean).sqrt(),
+            (structure / n).sqrt(),
+            100.0 * flat / n
+        );
+    }
+}
+
+/// The two groups a row's height against WAM-IPE's top puts it in: the side, and the 50 km bin.
+fn wam_top_groups(altitude_km: f64, top: Option<f64>) -> [String; 2] {
+    let Some(top) = top else {
+        return ["WAM top: none".to_string(), "WAM h - top: none".to_string()];
+    };
+    let lower = ((altitude_km - top) / 50.0).floor() * 50.0;
+    let side = if altitude_km < top { "below" } else { "above" };
+    [
+        format!("WAM top: {side}"),
+        format!("WAM h - top in [{lower:+.0}, {:+.0}) km", lower + 50.0),
+    ]
+}
+
+fn print_wam_tops(group: &str, tops: &mut [f64]) {
+    if tops.is_empty() {
+        return;
+    }
+    tops.sort_by(f64::total_cmp);
+    let q = |percent: usize| tops[(tops.len() - 1) * percent / 100];
+    println!(
+        "{group}: WAM top over {} rows: p10 {} km, median {} km, p90 {} km, max {} km",
+        tops.len(),
+        q(10),
+        q(50),
+        q(90),
+        q(100)
+    );
 }
 
 /// WAM-IPE, NOAA's public physics nowcast, against the same accelerometers — on its own, and as
@@ -2124,16 +2331,20 @@ fn wam_ipe_against_the_accelerometers_alone_and_as_a_calibration_input() {
     };
     let hours = wam_ipe_hours();
     let mut ratios: BTreeMap<(String, usize), Vec<f64>> = BTreeMap::new();
+    let mut records = Vec::new();
     for month in WAM_IPE_MONTHS {
-        score_wam_ipe_month(month, dir, series.view(), &hours, &mut ratios);
+        score_wam_ipe_month(month, dir, series.view(), &hours, &mut ratios, &mut records);
     }
+    let names = &wam_ipe_columns()[..=WAM_BASES.len()];
+    print_wam_regression(&records, names);
+    print_wam_split(&records, names);
 
     let mut groups: Vec<String> = ratios.keys().map(|(g, _)| g.clone()).collect();
     groups.dedup();
     for g in &groups {
         println!("\n== {g} ==");
         // The bands and leads are diagnostics of WAM-IPE itself, so they stop at its two columns.
-        let shown = if g.starts_with('|') || g.starts_with("lead") {
+        let shown = if g.starts_with('|') || g.starts_with("lead") || g.starts_with("WAM") {
             WAM_BASES.len() + 2
         } else {
             usize::MAX

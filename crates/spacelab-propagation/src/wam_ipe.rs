@@ -344,6 +344,54 @@ impl WamIpeField {
         }
         samples
     }
+
+    /// The lowest product height from which the column at `latitude_deg`, `longitude_deg` is
+    /// NOAA's extension rather than WAM's own model, km, by [`extension_start_index`] at
+    /// [`EXTENSION_TOLERANCE`]. `None` where the column touches a hole, or where no part of it is
+    /// rough enough to be WAM's.
+    #[must_use]
+    pub fn extension_start(&self, latitude_deg: f64, longitude_deg: f64) -> Option<f64> {
+        let column: Option<Vec<f64>> = (0..self.heights.count)
+            .map(|k| {
+                self.density(self.heights.value(k), latitude_deg, longitude_deg)
+                    .map(libm::log)
+            })
+            .collect();
+        extension_start_index(&column?, EXTENSION_TOLERANCE).map(|k| self.heights.value(k))
+    }
+}
+
+/// The fourth difference of `ln ρ`, at the product's 10 km spacing, above which a column is WAM's
+/// own model rather than NOAA's extension.
+///
+/// WAM's levels are interpolated from its pressure grid onto fixed heights, which leaves a ripple
+/// in `ln ρ` from level to level; the extension above WAM's top is a smooth closed form. Measured
+/// on every tenth of the 1 390 pinned files: away from the Gannon storm, the fourth differences
+/// above 800 km reach 2.4e-5 at the 99.9th percentile, and below 350 km half of them exceed 2e-3.
+/// The extension start this gives sits on a plateau: its quiet-time median is 530–540 km for any
+/// tolerance from 5e-5 to 2e-4, and 660–670 km in the storm days, where WAM's top rises.
+pub const EXTENSION_TOLERANCE: f64 = 1e-4;
+
+/// The index of the lowest level from which `log_density`, sampled on a uniform grid, is smooth:
+/// one below the centre of the highest fourth difference larger than `tolerance` in magnitude.
+///
+/// Both ways a column can change character land on the same level. A join at level `m` where the
+/// value is continuous and the slope or the curvature jumps adds `(z − m)₊` or `(z − m)²₊` to a
+/// smooth column, and the last fourth difference that sees either is centred at `m + 1`. A ripple
+/// confined to the levels up to `t` reaches the fourth differences centred up to `t + 2`. The
+/// answer is `m` in the first case and `t + 1` in the second: the first level of the smooth part.
+///
+/// `None` for fewer than five levels, for a value that is not finite, and for a column whose
+/// fourth differences are all within `tolerance`.
+#[must_use]
+pub fn extension_start_index(log_density: &[f64], tolerance: f64) -> Option<usize> {
+    if !log_density.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    log_density
+        .windows(5)
+        .rposition(|w| (w[0] - 4.0 * w[1] + 6.0 * w[2] - 4.0 * w[3] + w[4]).abs() > tolerance)
+        .map(|first| first + 1)
 }
 
 #[cfg(test)]
@@ -383,8 +431,19 @@ mod tests {
         longitudes: &[f32],
         hole: Option<(usize, f32)>,
     ) -> Vec<u8> {
+        file_with(latitudes, &HEIGHTS, den_units, longitudes, hole, log_rho)
+    }
+
+    fn file_with(
+        latitudes: &[f32],
+        heights: &[f32],
+        den_units: &str,
+        longitudes: &[f32],
+        hole: Option<(usize, f32)>,
+        log_rho: impl Fn(f64, f64, usize) -> f64,
+    ) -> Vec<u8> {
         let mut den = Vec::new();
-        for &h in &HEIGHTS {
+        for &h in heights {
             for &lat in latitudes {
                 for column in 0..longitudes.len() {
                     den.push(if lat.abs() == 90.0 {
@@ -404,7 +463,7 @@ mod tests {
             &[
                 ("lon", u32::try_from(longitudes.len()).unwrap()),
                 ("lat", u32::try_from(latitudes.len()).unwrap()),
-                ("hlevs", 3),
+                ("hlevs", u32::try_from(heights.len()).unwrap()),
                 ("time", 0),
             ],
             &[
@@ -424,7 +483,7 @@ mod tests {
                     name: "hlevs",
                     dims: &[2],
                     units: Some("km"),
-                    values: Values::Float(&HEIGHTS),
+                    values: Values::Float(heights),
                 },
                 Var {
                     name: "time",
@@ -730,5 +789,114 @@ mod tests {
                 libm::exp(log_rho(100.0, lat, 0))
             ));
         }
+    }
+
+    /// The product's heights, 100 to 1000 km every 10 km.
+    fn product_heights() -> Vec<f64> {
+        (0..91).map(|k| 100.0 + 10.0 * f64::from(k)).collect()
+    }
+
+    /// `ln n` of atomic oxygen in a Bates–Walker thermosphere up to `join_km`, and above it in the
+    /// isothermal diffusive tail at the temperature the profile reached there:
+    /// `n/n₁₂₀ = (T₁₂₀/T)^(1+γ) e^(−σγζ)` with `T = T∞ − (T∞ − T₁₂₀) e^(−σζ)`, `γ = m g₁₂₀/(σ k T∞)`
+    /// and `ζ = (z − 120)(R + 120)/(R + z)` the geopotential height above 120 km; the tail is
+    /// `ln n(z₀) − m g₁₂₀ (ζ − ζ₀)/(k T₀)`. Value continuous at the join, slope not: the profile
+    /// still warms there and the tail does not.
+    fn bates_walker_then_isothermal(join_km: f64) -> Vec<f64> {
+        const R_KM: f64 = 6371.0;
+        const T_INF: f64 = 1000.0;
+        const T_120: f64 = 400.0;
+        const SIGMA_PER_KM: f64 = 0.005;
+        const MASS: f64 = 15.999 * 1.660_539_066_6e-27;
+        const BOLTZMANN: f64 = 1.380_649e-23;
+        let g120 = 9.806_65 * (R_KM / (R_KM + 120.0)).powi(2);
+        let zeta = |z: f64| (z - 120.0) * (R_KM + 120.0) / (R_KM + z);
+        let gamma = MASS * g120 / (SIGMA_PER_KM * 1e-3 * BOLTZMANN * T_INF);
+        let temperature = |z: f64| T_INF - (T_INF - T_120) * libm::exp(-SIGMA_PER_KM * zeta(z));
+        let bates = |z: f64| {
+            (1.0 + gamma) * libm::log(T_120 / temperature(z)) - SIGMA_PER_KM * gamma * zeta(z)
+        };
+        let (at_join, t_join) = (bates(join_km), temperature(join_km));
+        product_heights()
+            .into_iter()
+            .map(|z| {
+                if z <= join_km {
+                    bates(z)
+                } else {
+                    at_join - MASS * g120 * (zeta(z) - zeta(join_km)) * 1e3 / (BOLTZMANN * t_join)
+                }
+            })
+            .collect()
+    }
+
+    /// A Bates–Walker column joined to its isothermal tail at a known level: the extension starts
+    /// exactly there, at the product's own tolerance. (G3)
+    #[test]
+    fn the_extension_starts_exactly_where_a_thermosphere_meets_its_isothermal_tail() {
+        for join_km in [400.0, 450.0, 530.0, 600.0, 700.0] {
+            let column = bates_walker_then_isothermal(join_km);
+            let start = extension_start_index(&column, EXTENSION_TOLERANCE).unwrap();
+            assert_eq!(product_heights()[start], join_km);
+        }
+    }
+
+    /// The other two shapes the doc names: a curvature jump at `m`, and a ripple up to `t`. (S2)
+    #[test]
+    fn a_curvature_jump_and_a_ripple_mark_the_first_smooth_level() {
+        let tail: Vec<f64> = product_heights().iter().map(|z| -20.0 - z / 60.0).collect();
+        let m = 45;
+        let bent: Vec<f64> = tail
+            .iter()
+            .enumerate()
+            .map(|(k, v)| v + 1e-3 * (k.saturating_sub(m) as f64).powi(2))
+            .collect();
+        assert_eq!(extension_start_index(&bent, EXTENSION_TOLERANCE), Some(m));
+        let t = 38;
+        let rippled: Vec<f64> = tail
+            .iter()
+            .enumerate()
+            .map(|(k, v)| {
+                if k <= t {
+                    v + 1e-3 * if k % 2 == 0 { 1.0 } else { -1.0 }
+                } else {
+                    *v
+                }
+            })
+            .collect();
+        assert_eq!(
+            extension_start_index(&rippled, EXTENSION_TOLERANCE),
+            Some(t + 1)
+        );
+    }
+
+    #[test]
+    fn a_column_that_is_smooth_short_or_holed_has_no_extension_start() {
+        let smooth: Vec<f64> = product_heights().iter().map(|z| -20.0 - z / 60.0).collect();
+        assert_eq!(extension_start_index(&smooth, EXTENSION_TOLERANCE), None);
+        assert_eq!(extension_start_index(&smooth[..4], 0.0), None);
+        // Exactly zero fourth differences are within a zero tolerance.
+        assert_eq!(extension_start_index(&[-20.0; 9], 0.0), None);
+        let mut holed = bates_walker_then_isothermal(500.0);
+        holed[3] = f64::NAN;
+        assert_eq!(extension_start_index(&holed, EXTENSION_TOLERANCE), None);
+        // The synthetic product has three levels, too few for a fourth difference.
+        assert_eq!(field().extension_start(0.0, 0.0), None);
+    }
+
+    #[test]
+    fn a_field_finds_the_extension_start_in_the_column_above_a_point() {
+        let heights: Vec<f32> = product_heights().iter().map(|&h| h as f32).collect();
+        let column = bates_walker_then_isothermal(530.0);
+        let bytes = file_with(
+            &LATITUDES,
+            &heights,
+            "kg m^-3",
+            &[0.0, 90.0, 180.0, 270.0],
+            None,
+            |h, _, _| column[product_heights().iter().position(|&z| z == h).unwrap()],
+        );
+        let f = WamIpeField::parse(&bytes).unwrap();
+        assert_eq!(f.extension_start(0.0, 0.0), Some(530.0));
+        assert_eq!(f.extension_start(15.0, 45.0), Some(530.0));
     }
 }

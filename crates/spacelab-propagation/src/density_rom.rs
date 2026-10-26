@@ -694,6 +694,48 @@ mod tests {
         );
     }
 
+    /// Least squares on data no linear map fits: the residual is orthogonal to every driver column,
+    /// the defining equation `Dᵀ(y − D w) = 0`. (G2)
+    #[test]
+    fn reduced_dynamics_leaves_a_residual_orthogonal_to_every_driver() {
+        let drivers: Vec<Vec<f64>> = (0..200)
+            .map(|k| {
+                let t = f64::from(k);
+                vec![
+                    1.0,
+                    libm::sin(0.3 * t),
+                    libm::cos(1.1 * t),
+                    (t / 200.0).powi(2),
+                ]
+            })
+            .collect();
+        // A term outside the span: the fit cannot reach it, so the residual is not zero.
+        let coords: Vec<Vec<f64>> = drivers
+            .iter()
+            .enumerate()
+            .map(|(k, d)| vec![0.5 - 2.0 * d[1] + 3.0 * d[3] + libm::sin(7.3 * k as f64)])
+            .collect();
+        let model = ReducedDynamics::fit(&drivers, &coords).unwrap();
+        let residual: Vec<f64> = drivers
+            .iter()
+            .zip(&coords)
+            .map(|(d, c)| c[0] - model.predict(d)[0])
+            .collect();
+        assert!(residual.iter().map(|r| r * r).sum::<f64>() > 1.0);
+        for a in 0..4 {
+            let along: f64 = drivers.iter().zip(&residual).map(|(d, r)| d[a] * r).sum();
+            let scale: f64 = drivers
+                .iter()
+                .zip(&coords)
+                .map(|(d, c)| (d[a] * c[0]).abs())
+                .sum();
+            assert!(
+                along.abs() <= 1e-12 * scale,
+                "column {a}: {along:e} of {scale:e}"
+            );
+        }
+    }
+
     #[test]
     fn dmdc_recovers_a_known_linear_system() {
         // aₖ₊₁ = A aₖ + B uₖ, A = [[0.9, 0.1], [-0.2, 0.8]], B = [[0.5], [-0.3]], driven by sin(0.6k).

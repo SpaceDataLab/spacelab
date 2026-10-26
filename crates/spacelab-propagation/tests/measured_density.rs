@@ -128,6 +128,9 @@ impl Model {
         Self::Sdtm1,
     ];
     const COUNT: usize = Self::ALL.len();
+    /// The models whose column may be empty: a NaN there is "no answer", not a bad row. JB2008 is
+    /// one, because its program is built outside the workspace.
+    const OPTIONAL: &[Self] = &[];
 
     const fn index(self) -> usize {
         self as usize
@@ -274,7 +277,12 @@ fn evaluate(o: &DensityObservation, satellite: &'static str, d: Drivers<'_>) -> 
     );
 
     let modelled = [rho_msis_array, rho_msis_daily, rho_ours];
-    if modelled.iter().any(|r| !r.is_finite() || *r <= 0.0) {
+    let empty = |m: &Model, r: f64| r.is_nan() && Model::OPTIONAL.contains(m);
+    if Model::ALL
+        .iter()
+        .zip(modelled)
+        .any(|(m, r)| !empty(m, r) && (!r.is_finite() || r <= 0.0))
+    {
         return None;
     }
     Some(Evaluation {
@@ -332,6 +340,11 @@ fn fit(ratios: impl Iterator<Item = f64>) -> Fit {
 
 fn fit_of(model: Model, e: &[Evaluation]) -> Fit {
     fit(e.iter().map(|x| x.ratio(model)))
+}
+
+/// Whether `model` answered anywhere in `e`; only a [`Model::OPTIONAL`] column can be empty.
+fn answered(model: Model, e: &[Evaluation]) -> bool {
+    e.iter().any(|x| !x.modelled[model.index()].is_nan())
 }
 
 /// Parse a density file and evaluate every usable row of it.
@@ -396,6 +409,9 @@ fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storm
     // 1.235 storm, which is a statement about the fit and not about the thermosphere.
     for (label, set) in [("quiet", &quiet), ("storm", &storm)] {
         for m in [Model::Nrlmsise00StormArray, Model::Nrlmsise00DailyAp] {
+            if !answered(m, set) {
+                continue;
+            }
             let f = fit_of(m, set);
             assert!(f.bias > 1.0, "{} is not high on the {label} day", m.name());
         }
@@ -421,6 +437,7 @@ fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storm
             .iter()
             .copied()
             .filter(|m| !matches!(m, Model::Nrlmsise00StormArray | Model::Nrlmsise00DailyAp))
+            .filter(|&m| answered(m, set))
         {
             let other = fit_of(m, set).mape;
             assert!(
@@ -615,6 +632,7 @@ fn the_sun_fixed_calibration_removes_the_bias_out_of_sample() {
             .iter()
             .copied()
             .filter(|m| !matches!(m, Model::Nrlmsise00DailyAp | Model::Sdtm1))
+            .filter(|&m| answered(m, &all))
         {
             let samples: Vec<DensitySample> = train
                 .iter()
@@ -1547,6 +1565,9 @@ fn held_out_by_satellite_month(arcs: &[(String, Vec<Evaluation>)]) {
         arcs.len()
     );
     for m in [Model::Nrlmsise00StormArray, Model::Sdtm1] {
+        if !arcs.iter().all(|(_, rows)| answered(m, rows)) {
+            continue;
+        }
         let (mut base_abs, mut cal_abs, mut n) = (0.0_f64, 0.0_f64, 0usize);
         for (held, rows) in arcs {
             let train: Vec<DensitySample> = arcs

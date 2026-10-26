@@ -90,9 +90,10 @@ a model is still re-derived where it can be (G1–G4).
 
 **Physical.** The empirical atmospheres are not definitional. NRLMSISE-00, JB2008,
 and Harris-Priester each approximate a measurable quantity, so reproducing the reference program
-leaves the physical claim untested: the reproduction is a comparison. JB2008's `vs Orekit < 1e-12`
-does not change that: Orekit's JB2008 has the same specification source, so the two are siblings,
-and the tightness of their agreement is a property of shared descent, not a confirmation.
+leaves the physical claim untested: the reproduction is a comparison. JB2008 is now SET's own
+program, and its agreement with Orekit's JB2008 does not change that: the two have the same
+specification source, so they are siblings, and the tightness of their agreement is a property of
+shared descent, not a confirmation.
 
 Harris-Priester is a milder case and worth separating out: Orekit's implementation is written
 independently from the same published Montenbruck & Gill table rather than translated from a common
@@ -7736,8 +7737,8 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 328 modules, 113 name a check, 215 do not** — 131 physics,
-25 parsers, 5 generated and 54 infrastructure. The physics column is the one to watch, and it went
+(`plans/16` Ф17.B orders them). **Today: 325 modules, 112 name a check, 213 do not** — 130 physics,
+25 parsers, 5 generated and 53 infrastructure. The physics column is the one to watch, and it went
 *up* on 2026-10-24 for a reason worth keeping: the rule had counted any bare `§4.13` as a row of
 this file, and a bare section sign is also how a module cites a textbook or a standard. Twenty-eight
 modules were passing on Curtis, Vallado, Danielson, Tapley and CCSDS section numbers alone —
@@ -7994,8 +7995,8 @@ the IERS and ICD tables, an in-repo recomputation, a refusal — Orekit or ERFA 
 as the reason the test exists ("the Orekit fixture is fully immersed, so it pins nothing about the
 arc"), not as the value asserted. They carry their tag now. SciPy, missing from the first list of
 codes, adds three: a degree-70 geopotential, a DCT and a Bessel function; the WAM-IPE reader's
-product test (§10.18) adds a fourth. **Today: 131 comparator-decided tests of 3 305** — name 95,
-file 18, fixture 4, doc 14; 74 of them Orekit's (60 by name), 52 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+product test (§10.18) adds a fourth. **Today: 130 comparator-decided tests of 3 293** — name 95,
+file 18, fixture 4, doc 13; 73 of them Orekit's (60 by name), 51 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 

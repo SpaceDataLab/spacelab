@@ -13,8 +13,8 @@
 # LICENSING, READ BEFORE USING ANOTHER ATLAS
 #
 # GOT is produced by R. D. Ray at NASA Goddard and served from `earth.gsfc.nasa.gov` with no stated
-# terms, no registration and no click-through -- the same position as JB2008, and recorded on the
-# same row of `docs/provenance.md`. The FES family is *not* in that position: `swami-h2020-eu/mcm`
+# terms, no registration and no click-through, and that finding is recorded on its row of
+# `docs/provenance.md`. The FES family is *not* in that position: `swami-h2020-eu/mcm`
 # taught this workspace what an academic-non-commercial clause costs, and the FES grids require an
 # AVISO account whose terms are accepted at registration. So this script fetches GOT and only prints
 # instructions for FES -- a registration is a decision for the user, not a curl invocation.

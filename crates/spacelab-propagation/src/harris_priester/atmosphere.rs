@@ -12,8 +12,8 @@
 //! state-transition matrix, but the empirical model is defined only in f64. The value is therefore
 //! evaluated in f64 and lifted to `S` through a **local exponential** `ρ = ρ₀·exp(−(|r|−|r₀|)/H)`,
 //! with the scale height `H` read from a second model evaluation 10 km higher (radially, so the
-//! diurnal-bulge angle is unchanged) — identical to the JB2008 and NRLMSISE-00 wrappers, giving a
-//! uniform drag-path treatment of all three empirical models. The lift captures the dominant radial
+//! diurnal-bulge angle is unchanged) — identical to the NRLMSISE-00 wrapper, giving a uniform
+//! drag-path treatment of the empirical models. The lift captures the dominant radial
 //! density gradient that decay depends on; the far smaller horizontal (bulge) gradient is not
 //! propagated into the STM, a deliberate omission on a mean-activity model good only to a factor.
 

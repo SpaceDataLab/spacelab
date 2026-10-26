@@ -1026,7 +1026,7 @@ exclude_re = [
     # it are real gaps and are killed by
     # `the_set_index_parsers_reject_every_shape_of_line_that_is_not_a_row`: `< 11` is the bounds
     # proof for `t[10]`, `<= 11` drops the narrowest legal row, and `== 11` admits short ones.
-    "space_weather\\.rs:659:28: replace \\|\\| with && in parse_solfsmy",
+    "space_weather\\.rs:661:28: replace \\|\\| with && in parse_solfsmy",
 
     # `parse_hpo`'s guard is the third instance of the same shape, and the argument closes the same
     # way. `&&` is unsatisfiable -- the empty string does not start with `#` -- so both classes fall
@@ -1040,7 +1040,7 @@ exclude_re = [
     # Identical `Vec` on every input. The width guard below it is the real bounds proof and is
     # killed by `parse_hpo_keeps_the_row_it_can_use_and_drops_every_shape_that_is_not_data`, whose
     # fixture text carries a nine-field row: `< 9` keeps it and `<= 9` drops it.
-    "space_weather\\.rs:545:28: replace \\|\\| with && in parse_hpo",
+    "space_weather\\.rs:547:28: replace \\|\\| with && in parse_hpo",
 
     # --- crates/spacelab-propagation/src/time_variable_gravity.rs ---
     # --- Three floating tolerance ties, each unreachable on the binary grid its operands live on.
@@ -2185,9 +2185,9 @@ exclude_re = [
     # two paths is 1.637e-16 -- under one ULP. Everywhere off a node the branch is the same one.
     "harris_priester/mod\\.rs:123:45: replace > with >= in harris_priester",
 
-    # DTM2020 and JB2008, the same five guards of the same local-exponential lift, for a reason
-    # Harris-Priester's proof does not cover: neither model has a table ceiling, so neither can
-    # return a zero density at the top of its range the way the Harris-Priester table can.
+    # DTM2020, the same five guards of the same local-exponential lift, for a reason Harris-Priester's
+    # proof does not cover: the model has no table ceiling, so it cannot return a zero density at the
+    # top of its range the way the Harris-Priester table can.
     #
     # `density` computes `H = -10 000 / ln(rho_up/rho0)` and falls back to 50 km when
     # `!(rho0 > 0 && rho_up > 0)` or when `!(hh.is_finite() && hh > 1000)`. Each entry below weakens
@@ -2196,16 +2196,15 @@ exclude_re = [
     # disagree, which for a pair that is always both-true is nowhere.
     #
     # Both premises are swept, not assumed, by
-    # `dtm2020::tests::neither_lift_guard_comes_near_its_boundary_anywhere_in_the_models_range` and
-    # its JB2008 twin: every 10 km of each model's valid range, at three latitude/local-time points,
-    # under both a quiet Sun and a severe storm. Measured floors --
-    #   DTM2020, 120-1500 km: min rho = 1.582e-16 kg/m^3, min H = 9318.3 m
-    #   JB2008,   90-2500 km: min rho = 1.505e-16 kg/m^3, min H = 4854.1 m
-    # Density is a sum of positive exponentials of per-constituent number densities, so it reaches
-    # zero only by underflow, and 1.5e-16 is 292 orders above f64's 5e-324. `H` is `kT/mg`, tens of
-    # kilometres through the thermosphere and 4.9 km at its coldest, heaviest point -- the 1000 m
-    # boundary is never approached, let alone landed on. Both tests assert a bound at roughly half
-    # the measured floor, so the premise stays checked without becoming a change detector.
+    # `dtm2020::tests::neither_lift_guard_comes_near_its_boundary_anywhere_in_the_models_range`:
+    # every 10 km of the model's valid range, at three latitude/local-time points, under both a quiet
+    # Sun and a severe storm. Measured floor -- 120-1500 km: min rho = 1.582e-16 kg/m^3,
+    # min H = 9318.3 m. Density is a sum of positive exponentials of per-constituent number
+    # densities, so it reaches zero only by underflow, and 1.6e-16 is 307 orders above f64's 5e-324.
+    # `H` is `kT/mg`, tens of kilometres through the thermosphere and 9.3 km at its coldest, heaviest
+    # point -- the 1000 m boundary is never approached, let alone landed on. The test asserts a bound
+    # at roughly half the measured floor, so the premise stays checked without becoming a change
+    # detector.
 
     # `exp_so3`'s small-angle branch: the threshold itself and the two Taylor corrections inside it.
     # All four are unrepresentable-difference equivalences, verified in f64 rather than argued.

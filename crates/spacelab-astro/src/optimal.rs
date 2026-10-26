@@ -14,6 +14,14 @@
 //! costate, integrate, and Newton-correct on the terminal-state error with a finite-difference
 //! Jacobian. Direct (collocation / pseudospectral) transcription is an alternative that needs an NLP
 //! solver; the indirect method here is self-contained and satisfies the optimality conditions exactly.
+//!
+//! Gate: `derivations/optimal_pmp.mac` shows that the minimum condition gives `u* = −λ_v` with a
+//! strict minimum, that the augmented field is Hamilton's equations for `H(u*)` with `J̇ = ½|u*|²`,
+//! that `H` is conserved, that the costate rate is the symmetric gravity gradient acting on `λ_v` so
+//! the primer vector obeys Lawden's `p̈ = G p`, and that at `μ = 0` the field integrates to the
+//! closed-form costate and cost; `derivations/optimal_pmp.gp` evaluates the references at 100
+//! digits. The module tests `the_dynamics_are_hamiltons_equations_to_rounding` (G1) and
+//! `the_double_integrator_transfer_is_its_closed_form` (G3) hold the code to them.
 
 #![allow(
     clippy::many_single_char_names,
@@ -214,7 +222,7 @@ fn norm6(v: [f64; 6]) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::excessive_precision, clippy::expect_used)]
+    #![allow(clippy::excessive_precision, clippy::expect_used, clippy::float_cmp)]
     use super::*;
 
     const MU_EARTH: f64 = 3.986_004_418e14; // m³/s²
@@ -329,6 +337,40 @@ mod tests {
         }
     }
 
+    /// (G1) The augmented field is Hamilton's equations for the PMP Hamiltonian, to rounding:
+    /// `derivations/optimal_pmp.mac` shows the identity symbolically, and
+    /// `derivations/optimal_pmp.gp` evaluates `(∂H/∂λ_r, ∂H/∂λ_v, −∂H/∂r, −∂H/∂v)` at
+    /// `AUGMENTED` by differentiating the scalar `H` alone at 100 digits. `ṙ = v` and `λ̇_v = −λ_r`
+    /// are copies and asserted exactly; the velocity and position-costate rates, which carry the
+    /// gravity and its gradient, are held to 8 ulps of their largest term (measured: at most 0.6).
+    /// The finite-difference test above checks the same identity to `1e-7`.
+    #[test]
+    fn the_dynamics_are_hamiltons_equations_to_rounding() {
+        let d = deriv(AUGMENTED, MU_EARTH);
+        for i in 0..3 {
+            assert!(d[i] == AUGMENTED[3 + i], "ṙ[{i}] = {}", d[i]);
+            assert!(d[9 + i] == -AUGMENTED[6 + i], "λ̇_v[{i}] = {}", d[9 + i]);
+        }
+        let r = libm::sqrt(AUGMENTED[..3].iter().map(|x| x * x).sum());
+        // |μ r/|r|³| for the velocity rate; μ|λ_v|/|r|³ (both gradient terms share it) for λ̇_r.
+        let gravity = MU_EARTH / (r * r);
+        let lv = libm::sqrt(AUGMENTED[9..12].iter().map(|x| x * x).sum());
+        let gradient = 3.0 * MU_EARTH * lv / (r * r * r);
+        for (i, want, scale) in [
+            (3, -6.122_701_787_884_325_022_996_414, gravity),
+            (4, 2.069_206_942_383_433_810_610_829, gravity),
+            (5, -1.638_701_746_053_551_766_731_362, gravity),
+            (6, 6.536_437_345_663_205_721_460_750e-10, gradient),
+            (7, 1.574_086_070_670_416_386_914_619e-10, gradient),
+            (8, 3.752_119_511_509_803_033_194_804e-10, gradient),
+            (12, 1.896_999_999_999_999_927_840_708e-7, lv * lv),
+        ] {
+            let ulps = (d[i] - want).abs() / (f64::EPSILON * scale);
+            println!("rate {i}: {:.17e}, {ulps:.2} ulps of its scale", d[i]);
+            assert!(ulps <= 8.0, "rate {i}: {:.17e}, want {want:.17e}", d[i]);
+        }
+    }
+
     /// Four Runge-Kutta stages weighted `1, 2, 2, 1` are fourth order, so halving the step must cut
     /// the gap between consecutive solutions by sixteen. Nothing weaker pins the individual stage
     /// weights: any consistent one-step method reaches the same limit, only more slowly. The cost is
@@ -388,9 +430,11 @@ mod tests {
         );
     }
 
-    /// On the double integrator the minimum-energy problem has a closed form, so the shooter can be
-    /// held to it rather than to its own residual: the optimal costate, the energy cost and the
-    /// control at five points of the trajectory all follow from the controllability Gramian. The
+    /// (G3) On the double integrator the minimum-energy problem has a closed form, so the shooter
+    /// can be held to it rather than to its own residual: the optimal costate, the energy cost and
+    /// the control at five points of the trajectory all follow from the controllability Gramian,
+    /// and `derivations/optimal_pmp.mac` re-derives them by integrating the coded field at `μ = 0`
+    /// and imposing the endpoints; `derivations/optimal_pmp.gp` checks every reference. The
     /// whole augmented system is polynomial of degree three in time there, so the integrator is
     /// exact and what is left is the shooter itself.
     #[test]

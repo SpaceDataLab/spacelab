@@ -139,7 +139,10 @@ pub(crate) fn universal_anomaly(r: Vec3, v: Vec3, mu: f64, dt: f64) -> (f64, u32
     let alpha = 2.0 / r0 - v0 * v0 / mu; // reciprocal semi-major axis, 1/a
     let sqmu = libm::sqrt(mu);
 
-    let guess = if alpha < -1e-9 {
+    // The hyperbolic guess is a logarithm of a multiple of `dt`, so `dt = 0` is outside its domain:
+    // there it is `−∞`, and the bracket and the Newton step below carry `±∞` and NaN from it. The
+    // elliptic branch gives `0` there, which is the exact root, `F(0) = −√μ·dt = 0`.
+    let guess = if alpha < -1e-9 && dt != 0.0 {
         // Hyperbolic guess: a = 1/alpha < 0.
         let a = 1.0 / alpha;
         let s = if dt >= 0.0 { 1.0 } else { -1.0 };
@@ -284,6 +287,24 @@ mod tests {
     // The references below are carried at the precision they were computed to, so that
     // regenerating one is a copy rather than a rounding decision.
     #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
+
+    /// (G3) At `dt = 0` the root of the universal Kepler equation is `χ = 0` on every conic, so the
+    /// Lagrange coefficients are `f = ġ = 1`, `g = ḟ = 0` and the state comes back bit for bit. The
+    /// hyperbolic initial guess, `ln` of a multiple of `dt`, returned NaN there.
+    #[test]
+    fn a_zero_span_returns_the_state_on_every_conic() {
+        let mu = 398_600.441_8;
+        let r = Vec3::new(7000.0, -1200.0, 300.0);
+        let escape = libm::sqrt(2.0 * mu / r.norm());
+        for speed in [0.7 * escape, escape, 1.6 * escape] {
+            let k = speed / libm::sqrt(0.91);
+            let v = Vec3::new(0.3 * k, 0.9 * k, 0.1 * k);
+            for dt in [0.0, -0.0] {
+                assert_eq!(universal_anomaly(r, v, mu, dt).0, 0.0, "speed {speed}");
+                assert_eq!(propagate(r, v, mu, dt), (r, v), "speed {speed}");
+            }
+        }
+    }
 
     use proptest::prelude::*;
 

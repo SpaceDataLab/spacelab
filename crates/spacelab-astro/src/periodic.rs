@@ -8,6 +8,16 @@
 //! Lo, Marsden & Ross, *Dynamical Systems, the Three-Body Problem and Space Mission Design*, §4;
 //! Howell (1984). Verified here by orbit closure — a corrected orbit, propagated a full period,
 //! returns to its start.
+//!
+//! Gate: `derivations/cr3bp_variational.mac` shows that the coded Jacobian is the derivative of the
+//! vector field, that it is traceless and infinitesimally symplectic for the synodic form
+//! `Ω = [[G, I], [−I, 0]]`, that the flow direction solves the variational equation, that the field
+//! is time-reversible (the basis of perpendicular-crossing shooting), that the linear seed's `ω`
+//! and `ẏ₀` solve the linearised equations at a collinear point, and that the corrector's
+//! free-final-time derivatives are the coded ones; `derivations/cr3bp_variational.gp` differentiates
+//! the field at 100 digits. The module tests `the_jacobian_is_the_derivative_of_the_vector_field`
+//! (G1) and `the_monodromy_is_symplectic_with_the_flow_on_its_unit_multiplier` (G4) hold the code
+//! to them.
 
 #![allow(
     clippy::many_single_char_names,
@@ -321,8 +331,12 @@ pub fn halo_family<F: FnMut(PeriodicOrbit)>(
 /// *stable* direction of `M`.
 #[must_use]
 pub fn monodromy(sys: Cr3bp, orbit: &PeriodicOrbit, forward: bool) -> Stm {
-    let h = if forward { 2.5e-4 } else { -2.5e-4 };
-    let steps = libm::round(orbit.period / 2.5e-4) as i64;
+    // The step divides the period exactly. `Φ(T + δ) = Φ(δ)·M` is not the monodromy: half a step
+    // of `δ` moves the flow direction off its unit multiplier by `|δ|·|ḟ|/|f|`, 5e-5 to 9e-5 on
+    // Earth–Moon Lyapunov and halo orbits.
+    let steps = libm::round(orbit.period / 2.5e-4).max(1.0);
+    let h = if forward { 1.0 } else { -1.0 } * orbit.period / steps;
+    let steps = steps as i64;
     let mut s = orbit.state;
     let mut phi = identity();
     for _ in 0..steps {
@@ -397,7 +411,11 @@ mod tests {
         clippy::expect_used,
         clippy::unwrap_used,
         clippy::cast_possible_truncation,
-        clippy::cast_sign_loss
+        clippy::cast_sign_loss,
+        // The 100-digit references are carried at the precision they were computed to, and the
+        // structurally exact Jacobian entries are compared exactly.
+        clippy::excessive_precision,
+        clippy::float_cmp
     )]
     use super::*;
 
@@ -570,6 +588,54 @@ mod tests {
         }
     }
 
+    /// (G1) The variational Jacobian is the derivative of the vector field: every entry against
+    /// `derivations/cr3bp_variational.gp`, which differentiates the equations of motion numerically
+    /// at 100 digits and writes no Hessian formula of its own, at the same f64 state and mass ratio.
+    /// `derivations/cr3bp_variational.mac` shows the same identity symbolically.
+    ///
+    /// The finite-difference test above holds the entries to `1e-5`, and the Newton corrections
+    /// that consume them converge from anything close. This holds them to rounding, in units of
+    /// `10ε` — the size of the largest term any entry sums here: the worst is measured at 1.6, and
+    /// the bound is 16.
+    #[test]
+    fn the_jacobian_is_the_derivative_of_the_vector_field() {
+        let s = [0.85, 0.05, 0.03, 0.01, 0.12, -0.02];
+        let a = jacobian(Cr3bp::EARTH_MOON.mu, s);
+        let u = [
+            ((3, 0), 9.638_559_609_583_915_392_978_275_348_440_459),
+            ((4, 1), -2.926_146_930_576_241_736_170_383_571_809_447),
+            ((5, 2), -4.712_412_679_007_673_656_807_891_776_631_011),
+            ((3, 1), -3.079_524_149_747_066_833_308_874_141_883_823),
+            ((3, 2), -1.847_714_489_848_239_929_037_393_688_210_201),
+            ((4, 2), 0.737_124_139_154_467_280_677_588_399_969_313_0),
+        ];
+        for ((i, j), want) in u {
+            // The Hessian is symmetric; both triangles are asserted.
+            for (r, c) in [(i, j), (j + 3, i - 3)] {
+                let ulps = (a[r][c] - want).abs() / (f64::EPSILON * 10.0);
+                println!("A[{r}][{c}] = {:.17e}, {ulps:.2} ulps of 10", a[r][c]);
+                assert!(
+                    ulps <= 16.0,
+                    "A[{r}][{c}] = {:.17e}, want {want:.17e}",
+                    a[r][c]
+                );
+            }
+        }
+        let exact = |r: usize, c: usize| match (r, c) {
+            (0, 3) | (1, 4) | (2, 5) => 1.0,
+            (3, 4) => 2.0,
+            (4, 3) => -2.0,
+            _ => 0.0,
+        };
+        for r in 0..6 {
+            for c in 0..6 {
+                if r < 3 || c >= 3 {
+                    assert!(a[r][c] == exact(r, c), "A[{r}][{c}] = {}", a[r][c]);
+                }
+            }
+        }
+    }
+
     /// Propagate `s0` for `steps` of `h` under the Earth–Moon dynamics, discarding the STM.
     fn flow(sys: Cr3bp, s0: State, h: f64, steps: i64) -> State {
         let mut s = s0;
@@ -610,18 +676,19 @@ mod tests {
     ///
     /// The multiplier has a meaning outside the eigensolver: it is the growth of a small displacement
     /// along the eigenvector under the *nonlinear* flow, over one period. Measured at Earth–Moon L1
-    /// with `Ax = 0.01` and `ε = 1e-8`, `‖φ_T(x₀ + εv) − φ_T(x₀)‖/ε` is 2561.363 against a reported
-    /// λ of 2561.276 — 3.4e-5 relative, the nonlinear remainder. Nothing that gets the eigenpair
+    /// with `Ax = 0.01` and `ε = 1e-8`, `‖φ_T(x₀ + εv) − φ_T(x₀)‖/ε` is 2561.229 against a reported
+    /// λ of 2561.142 — 3.4e-5 relative, the nonlinear remainder. Nothing that gets the eigenpair
     /// wrong can match that, and the flow used to check it shares no code with `dominant_eigen`.
     #[test]
     fn the_unstable_multiplier_is_the_manifolds_actual_growth() {
         let sys = Cr3bp::EARTH_MOON;
-        let h = 2.5e-4;
         for li in 0..2 {
             let orbit = lyapunov_orbit(sys, li, 0.01).expect("converges");
             let m = monodromy(sys, &orbit, true);
             let (lambda, v) = dominant_eigen(&m);
-            let steps = libm::round(orbit.period / h) as i64;
+            let steps = libm::round(orbit.period / 2.5e-4);
+            let h = orbit.period / steps;
+            let steps = steps as i64;
 
             // A saddle, not a rounding error: the Earth–Moon collinear Lyapunov multipliers are in
             // the thousands, so `> 1` is the wrong bar by three orders of magnitude.
@@ -675,9 +742,10 @@ mod tests {
     #[test]
     fn stable_and_unstable_multipliers_are_reciprocal() {
         let sys = Cr3bp::EARTH_MOON;
-        let h = 2.5e-4;
         let orbit = lyapunov_orbit(sys, 0, 0.01).expect("converges");
-        let steps = libm::round(orbit.period / h) as i64;
+        let steps = libm::round(orbit.period / 2.5e-4);
+        let h = orbit.period / steps;
+        let steps = steps as i64;
         let eps = 1e-8;
         let u = unstable_manifold_seed(sys, &orbit, eps).eigenvalue;
         let stable = stable_manifold_seed(sys, &orbit, eps);
@@ -756,6 +824,83 @@ mod tests {
             "orbit is not 3D (z0 = {})",
             orbit.state[2]
         );
+    }
+
+    /// The symplectic form of the CR3BP in the synodic `(position, velocity)` coordinates,
+    /// `Ω = [[G, I], [−I, 0]]` with `G = [[0, −2, 0], [2, 0, 0], [0, 0, 0]]` — the canonical `J`
+    /// pulled back through `p = v + (−y, x, 0)`. `derivations/cr3bp_variational.mac` derives it
+    /// and shows `AᵀΩ + ΩA = 0` for the coded Jacobian, so every STM keeps `ΦᵀΩΦ = Ω`.
+    fn synodic_symplectic_form() -> Stm {
+        let mut o = [[0.0; 6]; 6];
+        o[0][1] = -2.0;
+        o[1][0] = 2.0;
+        for i in 0..3 {
+            o[i][3 + i] = 1.0;
+            o[3 + i][i] = -1.0;
+        }
+        o
+    }
+
+    /// (G4) The monodromy is symplectic, `MᵀΩM = Ω`, and carries the unit multiplier of the flow
+    /// direction, `M·f(x₀) = f(x₀)` — the two statements Floquet theory makes about the period map
+    /// of an autonomous Hamiltonian system, derived in `derivations/cr3bp_variational.mac`.
+    ///
+    /// The second is the regression gate for `monodromy` stepping a fixed `2.5e-4` and so stopping
+    /// up to half a step off the period: `Φ(T + δ) f(x₀) = f(x(δ))`, and the miss was `8.6e-5`,
+    /// `5.6e-5` and `4.7e-5` of `|f|` on the three orbits below. With the step dividing the period
+    /// it is `8e-11`, `1.2e-10` and `7e-12`: what is left is the corrector's own `1e-11` acceptance
+    /// on the crossing, amplified by the unstable multiplier (≈ 2.6e3 at L1). The bound sits two
+    /// orders above that and three below the defect.
+    ///
+    /// `MᵀΩM − Ω` is measured against `‖M‖²`, the size of the products it cancels; RK4 is not a
+    /// symplectic integrator, so the residual is its truncation error: measured 0.9e-16 to 1.8e-16,
+    /// asserted below 1e-14.
+    #[test]
+    fn the_monodromy_is_symplectic_with_the_flow_on_its_unit_multiplier() {
+        let sys = Cr3bp::EARTH_MOON;
+        let omega = synodic_symplectic_form();
+        for (name, orbit) in [
+            (
+                "L1 Lyapunov",
+                lyapunov_orbit(sys, 0, 0.01).expect("converges"),
+            ),
+            (
+                "L2 Lyapunov",
+                lyapunov_orbit(sys, 1, 0.01).expect("converges"),
+            ),
+            (
+                "L1 halo",
+                halo_orbit(sys, [0.823, 0.0, 0.08, 0.0, 0.15, 0.0]).expect("converges"),
+            ),
+        ] {
+            let m = monodromy(sys, &orbit, true);
+            let f = state_dot(sys, orbit.state);
+            let unit = separation(apply(&m, &f), f) / norm6(&f);
+
+            let mut mt = [[0.0; 6]; 6];
+            for i in 0..6 {
+                for j in 0..6 {
+                    mt[i][j] = m[j][i];
+                }
+            }
+            let form = matmul(&mt, &matmul(&omega, &m));
+            let size: f64 = m.iter().flatten().map(|x| x * x).sum();
+            let mut symplectic = 0.0_f64;
+            for i in 0..6 {
+                for j in 0..6 {
+                    symplectic = symplectic.max((form[i][j] - omega[i][j]).abs() / size);
+                }
+            }
+            println!("{name}: |Mf - f|/|f| {unit:.3e}, |MᵀΩM - Ω|/‖M‖² {symplectic:.3e}");
+            assert!(
+                unit < 1e-8,
+                "{name}: the flow direction misses the unit multiplier by {unit:.3e}"
+            );
+            assert!(
+                symplectic < 1e-14,
+                "{name}: MᵀΩM − Ω is {symplectic:.3e} of ‖M‖²"
+            );
+        }
     }
 
     /// Continuation traces a halo family of increasing out-of-plane amplitude, each member closing.

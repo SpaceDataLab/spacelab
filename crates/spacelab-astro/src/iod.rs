@@ -62,6 +62,17 @@
 //! the two-body problem rather than approximating it. That floor is not flat: it is worst on the
 //! shortest arc, where a 1e-13 rad angular residual divides by a 6.3e-3 rad arc to leave 3.2e-4 m of
 //! range. Even there it beats Gauss by four orders of magnitude, and by eleven at 10 %.
+//!
+//! Gate: `derivations/iod_classical.mac` proves Gibbs exact on every conic, Herrick–Gibbs exact on
+//! trajectory polynomials to degree four and in closed form on a circle, the coded Gauss ranges
+//! and Laplace range and range rate exact solutions of their own truncated models, and both octics
+//! the range equations they claim to be. `derivations/iod_classical.gp` builds sightings that
+//! satisfy each model exactly and solves them at 100 digits by a different route. The module tests
+//! `gibbs_is_exact_on_a_closed_form_conic` (G3), `herrick_gibbs_on_a_circle_is_its_closed_form`
+//! (G3), `gauss_is_exact_on_its_own_truncated_model` (G3), `laplace_is_exact_on_its_own_model` (G3)
+//! and `gooding_passes_through_every_line_of_sight_and_recovers_the_conic` (G2) hold the code to
+//! them; the round trips through `propagate` in `tests/initial_orbit_determination.rs` measure the
+//! truncation errors.
 
 // The IOD literature's symbols (D, A, B, E, N, S, r, v, τ) are one letter by universal convention,
 // and the matrix code indexes several arrays by one i/j/k.
@@ -717,7 +728,15 @@ pub fn orbit_from_angles(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
+    // The 100-digit references are carried at the precision they were computed to, so that
+    // regenerating one is a copy rather than a rounding decision.
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::float_cmp,
+        clippy::excessive_precision,
+        clippy::unreadable_literal
+    )]
 
     use super::*;
 
@@ -754,6 +773,265 @@ mod tests {
         );
         let observer = Vec3::new(4_000_000.0, 4_500_000.0, 1_500_000.0);
         (r, v, observer)
+    }
+
+    /// `µ` in km³/s², for the model fixtures of `derivations/iod_classical.gp`.
+    const MU_KM: f64 = 398_600.0;
+
+    /// Epochs of the model fixtures, s.
+    const MODEL_EPOCHS: [f64; 3] = [0.0, 300.0, 700.0];
+
+    fn sightings_from(rows: &[([f64; 3], [f64; 3]); 3]) -> [Sighting; 3] {
+        core::array::from_fn(|i| Sighting {
+            time: MODEL_EPOCHS[i],
+            line_of_sight: Vec3::new(rows[i].0[0], rows[i].0[1], rows[i].0[2]),
+            observer: Vec3::new(rows[i].1[0], rows[i].1[1], rows[i].1[2]),
+        })
+    }
+
+    /// The largest component difference between `got` and `want`, as a fraction of `|want|`.
+    fn relative(got: Vec3, want: [f64; 3]) -> f64 {
+        let want = Vec3::new(want[0], want[1], want[2]);
+        (got - want).norm() / want.norm()
+    }
+
+    /// (G3) Gibbs is exact on every conic (`derivations/iod_classical.mac`, symbolically, through
+    /// `N = pD`). On the closed-form ellipse `µ = 1`, `e = 1/2`, `p = 3/2` at true anomalies 0°, 90°
+    /// and 120° — `(1, 0, 0)`, `(0, 3/2, 0)`, `(−1, √3, 0)` — the velocity at the middle point is
+    /// `√(2/3)·(−1, 1/2, 0)`. The positions are 90° apart, where `D` and `N` do not cancel, so the
+    /// bound is 16 ulps of the speed.
+    #[test]
+    fn gibbs_is_exact_on_a_closed_form_conic() {
+        let v = gibbs(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.5, 0.0),
+            Vec3::new(-1.0, 3.0_f64.sqrt(), 0.0),
+            1.0,
+        )
+        .expect("three points of one conic");
+        let k = (2.0_f64 / 3.0).sqrt();
+        let want = Vec3::new(-k, 0.5 * k, 0.0);
+        let d = (v - want).norm();
+        assert!(
+            d <= 16.0 * f64::EPSILON * want.norm(),
+            "Gibbs {v:?} against {want:?}: off by {d:.3e}"
+        );
+    }
+
+    /// (G3) Herrick–Gibbs on a circle, three equally spaced points `h` apart, is tangent with speed
+    /// `nR·(sin x/x)(1 + x²/6)`, `x = nh` — the closed form `derivations/iod_classical.mac` derives
+    /// from the coded coefficients, whose error starts `−7x⁴/360`. Exact, so the bound is the
+    /// rounding of the positions through the three-point derivative: a few ulps of `R` divided by
+    /// `2h`, i.e. `8ε/x` of the speed, plus 8 ulps for the rest.
+    #[test]
+    fn herrick_gibbs_on_a_circle_is_its_closed_form() {
+        let radius = 7_000_000.0;
+        let n = (MU / (radius * radius * radius)).sqrt();
+        for x in [0.3, 0.1, 0.03, 0.01, 0.003] {
+            let h = x / n;
+            let at = |t: f64| Vec3::new(radius * (n * t).cos(), radius * (n * t).sin(), 0.0);
+            let v =
+                herrick_gibbs(at(-h), at(0.0), at(h), -h, 0.0, h, MU).expect("advancing epochs");
+            let speed = n * radius * x.sin() / x * (1.0 + x * x / 6.0);
+            let tol = (8.0 / x + 8.0) * f64::EPSILON * speed;
+            assert!(
+                (v.y - speed).abs() <= tol && v.x.abs() <= tol && v.z == 0.0,
+                "x = {x}: {v:?}, closed form (0, {speed:.17e}, 0), bound {tol:.3e}"
+            );
+        }
+    }
+
+    /// (G3) Gauss's method is exact on sightings that satisfy its own truncated model —
+    /// `r₂ = c₁r₁ + c₃r₃` with the series `c₁`, `c₃` — which `derivations/iod_classical.gp`
+    /// constructs, from three separated stations, and then solves at 100 digits for these doubles
+    /// by a 3×3 linear solve and a root in `r`, without the coded determinants or octic.
+    /// `derivations/iod_classical.mac` proves the coded ranges solve that model identically. The
+    /// model has one root on the scan window, and it is physical.
+    ///
+    /// The bound, 32 ulps, is the conditioning of the ranges on these lines of sight: the octic is
+    /// bisected to its last bit in `r`, and `ρ` is a quotient of triple products of unit vectors
+    /// whose `D₀` is 0.62 here, so nothing cancels. Measured: 0.6 ulps in position, 2.2 in velocity.
+    #[test]
+    fn gauss_is_exact_on_its_own_truncated_model() {
+        const SIGHTINGS: [([f64; 3], [f64; 3]); 3] = [
+            (
+                [
+                    0.6202481488992694913520154,
+                    0.4801921152768537925936698,
+                    -0.6202481488992694913520154,
+                ],
+                [4000.0, -2000.0, 4300.0],
+            ),
+            (
+                [
+                    0.9385819061190930900906437,
+                    -0.2815745718357279270271931,
+                    -0.1994486550503072885831557,
+                ],
+                [-1500.0, 5200.0, 3600.0],
+            ),
+            (
+                [
+                    0.2866293980948187991586451,
+                    0.1697076836158003254606541,
+                    0.9428907096103775753448417,
+                ],
+                [3000.0, 4500.0, -3500.0],
+            ),
+        ];
+        const POSITION: [f64; 3] = [
+            6500.000000000000054547840,
+            2799.999999999999983635648,
+            1899.999999999999929264943,
+        ];
+        const VELOCITY: [f64; 3] = [
+            -2.955280424471341796049177,
+            7.730105120331900399021360,
+            2.100727374482814079642923,
+        ];
+        let (r, v) =
+            gauss(&sightings_from(&SIGHTINGS), MU_KM).expect("the model has a physical root");
+        let (dr, dv) = (relative(r, POSITION), relative(v, VELOCITY));
+        assert!(
+            dr <= 32.0 * f64::EPSILON && dv <= 32.0 * f64::EPSILON,
+            "position off by {dr:.3e}, velocity by {dv:.3e}"
+        );
+    }
+
+    /// (G3) Laplace's method is exact on sightings that satisfy its own model — the observer's
+    /// acceleration chosen so that the projected equation of motion holds exactly for the
+    /// quadratic's `L̇`, `L̈` — which `derivations/iod_classical.gp` constructs and then solves at 100
+    /// digits for these doubles as a 3×3 linear system in `(ρ, ρ̇, ρ̈)` and a root in `r`.
+    /// `derivations/iod_classical.mac` proves the coded `ρ`, `ρ̇` solve the projected equation
+    /// identically.
+    ///
+    /// The bound is 32 ulps on the position and 512 on the velocity. The velocity carries `L̇`, a
+    /// difference quotient over the arc, and the observer's `Ṙ` likewise; how far that amplifies an
+    /// ulp shows in what rounding the sightings to doubles does to the model's own answer, 6e-16 of
+    /// the position and 7e-15 of the velocity (the `.gp` prints both). Measured: 3.0 and 41 ulps.
+    #[test]
+    fn laplace_is_exact_on_its_own_model() {
+        const SIGHTINGS: [([f64; 3], [f64; 3]); 3] = [
+            (
+                [
+                    0.3333333333333333148296163,
+                    0.6666666666666666296592325,
+                    0.6666666666666666296592325,
+                ],
+                [
+                    5594.523416714772793056909,
+                    556.1827562205148751672823,
+                    1961.294083869601081460132,
+                ],
+            ),
+            (
+                [
+                    0.2857142857142856984253854,
+                    0.4285714285714285476380780,
+                    0.8571428571428570952761561,
+                ],
+                [6000.0, 1000.0, 2000.0],
+            ),
+            (
+                [
+                    0.4444444444444444197728217,
+                    0.4444444444444444197728217,
+                    0.7777777777777777901135892,
+                ],
+                [
+                    5185.819407492928803549148,
+                    584.3248999475820255611325,
+                    2117.856149101512983179418,
+                ],
+            ),
+        ];
+        const POSITION: [f64; 3] = [
+            6714.285714285712896482443,
+            2071.428571428569344723664,
+            4142.857142857138689447328,
+        ];
+        const VELOCITY: [f64; 3] = [
+            0.4698412698412647104946800,
+            -0.1341269841269881203358256,
+            2.008730158730145188355592,
+        ];
+        let (r, v) =
+            laplace(&sightings_from(&SIGHTINGS), MU_KM).expect("the model has a physical root");
+        let (dr, dv) = (relative(r, POSITION), relative(v, VELOCITY));
+        assert!(
+            dr <= 32.0 * f64::EPSILON && dv <= 512.0 * f64::EPSILON,
+            "position off by {dr:.3e}, velocity by {dv:.3e}"
+        );
+    }
+
+    /// (G2) Gooding's answer satisfies the constraint that defines it — the orbit passes through all
+    /// three lines of sight — and on a closed-form conic it is that conic (G3).
+    ///
+    /// The conic is the ellipse of the Gibbs gate, `µ = 1`, `e = 1/2`, seen at true anomalies 0°,
+    /// 90° and 120°, which `derivations/iod_classical.mac` puts at `t = 0`, `2√2(π/3 − √3/4)` and
+    /// `2√2(π/2 − 1/2)`; the middle state is `(0, 3/2, 0)`, `√(2/3)(−1, 1/2, 0)`. Three observers
+    /// off the orbit plane. Propagated back and forward with `kepler::propagate` — gated against its
+    /// 100-digit root — the returned state must lie on every line of sight to within the angular
+    /// tolerance Newton stops at, 1e-13 rad, with a decade for the propagation; and it must equal
+    /// the conic to that tolerance carried through ranges of order one, 1e-12 relative with a
+    /// decade spare. Measured: 1.6e-15 in position, 2.7e-15 in velocity.
+    #[test]
+    fn gooding_passes_through_every_line_of_sight_and_recovers_the_conic() {
+        let pi = core::f64::consts::PI;
+        let root2 = core::f64::consts::SQRT_2;
+        let third = 3.0_f64.sqrt();
+        let times = [
+            0.0,
+            2.0 * root2 * (pi / 3.0 - third / 4.0),
+            2.0 * root2 * (pi / 2.0 - 0.5),
+        ];
+        let truth = [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.5, 0.0),
+            Vec3::new(-1.0, third, 0.0),
+        ];
+        let observers = [
+            Vec3::new(0.3, -0.4, 0.5),
+            Vec3::new(-0.2, 0.1, 0.6),
+            Vec3::new(0.4, 0.3, -0.5),
+        ];
+        let sightings: [Sighting; 3] = core::array::from_fn(|i| {
+            let line = truth[i] - observers[i];
+            Sighting {
+                time: times[i],
+                line_of_sight: line.scale(1.0 / line.norm()),
+                observer: observers[i],
+            }
+        });
+        // Seeded from the true ranges perturbed by a few per cent — the catalogue-prior use the
+        // signature invites. From Gauss's own seed, on a third of a period, Newton converges instead
+        // to a second, hyperbolic orbit (energy +3.61) through the same three lines of sight to
+        // 2.5e-15 rad: the angles alone do not decide between the two, as the method's doc says.
+        let ranges: [f64; 3] = core::array::from_fn(|i| (truth[i] - observers[i]).norm());
+        let (r2, v2) = gooding(&sightings, 1.0, true, (1.03 * ranges[0], 0.97 * ranges[2]))
+            .expect("Gooding converges from a nearby seed");
+        for (i, sighting) in sightings.iter().enumerate() {
+            let r = if i == 1 {
+                r2
+            } else {
+                kepler::propagate(r2, v2, 1.0, sighting.time - times[1]).0
+            };
+            let line = r - sighting.observer;
+            let miss = line.cross(sighting.line_of_sight).norm() / line.norm();
+            assert!(
+                miss <= 1e-12,
+                "sighting {i}: the orbit misses the line of sight by {miss:.3e} rad"
+            );
+        }
+        let k = (2.0_f64 / 3.0).sqrt();
+        let (dr, dv) = (
+            relative(r2, [0.0, 1.5, 0.0]),
+            relative(v2, [-k, 0.5 * k, 0.0]),
+        );
+        assert!(
+            dr <= 1e-12 && dv <= 1e-12,
+            "position off by {dr:.3e}, velocity by {dv:.3e}"
+        );
     }
 
     #[test]

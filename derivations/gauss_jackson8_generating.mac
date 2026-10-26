@@ -1,0 +1,101 @@
+/* Gauss-Jackson 8 -- spacelab-propagation/src/gj.rs -- its Stormer, Cowell and Adams-Moulton
+ * ordinate weights from their generating functions, in exact rationals, against the literals the
+ * crate ships.
+ *
+ * With the backward difference nabla = 1 - E^-1, E = 1/(1 - nabla) and h D = -log(1 - nabla):
+ *   Stormer  (explicit)  x_{n+1} - 2 x_n + x_{n-1} = h^2 sum_k sigma_k  nabla^k a_n,
+ *            E nabla^2 = sigma(nabla) (h D)^2      =>  sigma(t)  = t^2 / ((1 - t) log(1 - t)^2);
+ *   Cowell   (implicit)  the same left side       = h^2 sum_k sigmas_k nabla^k a_{n+1},
+ *            E nabla^2 = sigmas(nabla) E (h D)^2   =>  sigmas(t) = t^2 / log(1 - t)^2;
+ *   Adams-Moulton, the velocity companion  v_{n+1} - v_n = h sum_k gams_k nabla^k a_{n+1},
+ *            E nabla = gams(nabla) E (h D)         =>  gams(t)   = -t / log(1 - t).
+ * Truncated after k = 7 (eight back values) and expanded with nabla^k a_m = sum_j (-1)^j C(k, j)
+ * a_{m-j}, the ordinate weights are w_j = (-1)^j sum_{k=j}^{7} coeff_k C(k, j), j = 0..7, on
+ * a_n, ..., a_{n-7} (Stormer) and a_{n+1}, ..., a_{n-6} (Cowell, Adams-Moulton).
+ *
+ * Shown, each line printing `<name>: 0`:
+ *   1. the moment (exactness) conditions of each weight set, the defining property derived
+ *      independently in derivations/gauss_jackson_coeffs.mac: Stormer and Cowell exact for
+ *      x = t^m, m = 2..9, Adams-Moulton for v = t^m, m = 1..8 (lower powers hold trivially);
+ *   2. each shipped literal -- STORMER and COWELL in gj.rs, AM8 in abm.rs, read from the source --
+ *      is the exact weight correctly rounded at its own last decimal place
+ *      (round(w 10^k) - lit 10^k with k the literal's fractional digits).
+ * The truncation terms sigma_8, sigmas_8, gams_8 are printed and must be nonzero, so the
+ * formulas are exactly of order 8, and the exact weights are printed as Rust rationals for the test
+ * `gj::tests::the_shipped_weights_are_the_generating_function_rationals`.
+ * Second engine: derivations/gauss_jackson8_generating.gp (moment systems solved exactly).
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/gauss_jackson8_generating.mac </dev/null
+ */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* --- The shipped literals ---------------------------------------------------------------- */
+srcfile(rel) := if block([errormsg : false], errcatch(close(openr(rel)))) # [] then rel
+                else sconcat("../", rel)$
+/* A decimal literal as [exact rational, number of fractional digits]. */
+dec2rat(s) := block([sg : 1, e : 0, p, q, ip, fp],
+  if charat(s, 1) = "-" then (sg : -1, s : substring(s, 2)),
+  p : ssearch("e", s),
+  if p # false then (e : parse_string(substring(s, p + 1)), s : substring(s, 1, p)),
+  q : ssearch(".", s),
+  if q # false then (ip : substring(s, 1, q), fp : substring(s, q + 1)) else (ip : s, fp : ""),
+  [sg * parse_string(sconcat(ip, fp)) * 10^(e - slength(fp)), slength(fp) - e])$
+rust_const(file, name) := block([st : openr(file), line, out : [], inside : false, done : false],
+  while not done and (line : readline(st)) # false do (
+    if inside then (
+      if strim(" ", line) = "];" then done : true
+      else for tok in split(line, ",") do block([w : strim(" []", tok)],
+        if w # "" then out : cons(dec2rat(w), out)))
+    else if ssearch(sconcat("const ", name, ":"), line) # false then inside : true),
+  close(st),
+  if not done then error("constant not found:", name),
+  reverse(out))$
+
+/* --- Generating functions ---------------------------------------------------------------- */
+K : 8$
+gen(f) := makelist(ratcoef(taylor(f, t, 0, K), t, k), k, 0, K)$
+sigma : gen(t^2 / ((1 - t) * log(1 - t)^2))$
+sigmas : gen(t^2 / log(1 - t)^2)$
+gams : gen(-t / log(1 - t))$
+ordinates(co) := makelist((-1)^j * sum(co[k + 1] * binomial(k, j), k, j, K - 1), j, 0, K - 1)$
+stormer : ordinates(sigma)$
+cowell : ordinates(sigmas)$
+am8 : ordinates(gams)$
+
+/* Moment conditions, h = 1, t_n = 0. Stormer nodes 0..-7, Cowell and AM nodes 1..-6. */
+pw(x, m) := if m = 0 then 1 else x^m$
+for m : 2 thru 9 do (
+  zero(sconcat("gj_stormer_exact_for_t^", m),
+    pw(1, m) - 2*pw(0, m) + pw(-1, m) - m*(m - 1)*sum(stormer[j + 1]*pw(-j, m - 2), j, 0, 7)),
+  zero(sconcat("gj_cowell_exact_for_t^", m),
+    pw(1, m) - 2*pw(0, m) + pw(-1, m) - m*(m - 1)*sum(cowell[j + 1]*pw(1 - j, m - 2), j, 0, 7)))$
+for m : 1 thru 8 do
+  zero(sconcat("gj_adams_moulton_exact_for_t^", m),
+    pw(1, m) - pw(0, m) - m*sum(am8[j + 1]*pw(1 - j, m - 1), j, 0, 7))$
+
+/* The shipped literals are the exact weights, correctly rounded at their last digit. */
+src : srcfile("crates/spacelab-propagation/src/gj.rs")$
+abm : srcfile("crates/spacelab-propagation/src/abm.rs")$
+literal(tag, exact, lits) := block([],
+  if length(lits) # 8 then error("expected 8 literals:", tag),
+  for j : 1 thru 8 do block([v : lits[j][1], k : lits[j][2]],
+    zero(sconcat("gj_", tag, "_w", j - 1, "_literal_is_the_exact_weight_rounded"),
+      round(exact[j] * 10^k) - v * 10^k)))$
+literal("stormer", stormer, rust_const(src, "STORMER"))$
+literal("cowell", cowell, rust_const(src, "COWELL"))$
+literal("adams_moulton", am8, rust_const(abm, "AM8"))$
+
+/* Exactly order 8: the first neglected coefficient of each series is not zero. */
+printf(true, "truncation coefficients sigma_8 = ~a, sigmas_8 = ~a, gams_8 = ~a~%",
+  sigma[K + 1], sigmas[K + 1], gams[K + 1])$
+if sigma[K + 1] = 0 or sigmas[K + 1] = 0 or gams[K + 1] = 0 then error("a formula is of higher order")$
+
+rustpairs(l) := simplode(map(lambda([x], sconcat("(", num(x), ", ", denom(x), ")")), l), ", ")$
+printf(true, "STORMER_EXACT = [~a]~%", rustpairs(stormer))$
+printf(true, "COWELL_EXACT = [~a]~%", rustpairs(cowell))$
+printf(true, "AM8_EXACT = [~a]~%", rustpairs(am8))$

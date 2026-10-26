@@ -1,0 +1,165 @@
+/* The Taylor-mode jets of spacelab-propagation/src/taylor.rs -- every coefficient recurrence the
+ * `Jet` implements, and the bootstrap that turns them into the solution's series -- in exact
+ * arithmetic.
+ *
+ * A jet is u(tau) = sum_{k<=N} u_k tau^k, with symbolic u_0 .. u_N here (N = 6). Each recurrence is
+ * written exactly as taylor.rs computes it and compared, coefficient by coefficient, with the Taylor
+ * series Maxima expands for the same function of u:
+ *   product   (u v)_k = sum_{j<=k} u_j v_{k-j};
+ *   quotient  w_k = (u_k - sum_{1<=j<=k} v_j w_{k-j}) / v_0;
+ *   recip     w_0 = 1/u_0,  w_k = -(sum_{1<=j<=k} u_j w_{k-j}) / u_0;
+ *   sqrt      w_0 = sqrt u_0,  w_k = (u_k - sum_{1<=j<k} w_j w_{k-j}) / (2 w_0);
+ *   powf      w_0 = u_0^p,  w_k = sum_{j<k} (p (k - j) - j) u_{k-j} w_j / (k u_0),  p symbolic;
+ *   exp       w_0 = e^u_0,  w_k = sum_{1<=j<=k} j u_j w_{k-j} / k;
+ *   ln        w_0 = log u_0,  w_k = (k u_k - sum_{1<=j<k} j w_j u_{k-j}) / (k u_0);
+ *   sin, cos  s_k = sum_{1<=j<=k} j u_j c_{k-j} / k,  c_k = -sum_{1<=j<=k} j u_j s_{k-j} / k;
+ *   atan2     w_0 = atan2(y_0, x_0),  w_k = d_{k-1} / k  with d the jet of (x y' - y x')/(x^2 + y^2)
+ *             formed from the jets' own derivatives (u')_k = (k + 1) u_{k+1}.
+ * Each line `jet_<op>_coefficients_off_the_series: 0` is the number of coefficients k = 0..N on
+ * which the recurrence and the series differ.
+ *
+ * Then the bootstrap a_{k+1} = [f(y(.))]_k / (k + 1), with the clock carried as the jet t + tau,
+ * against two exact series:
+ *   1. the planar two-body problem x'' = -x/|x|^3 (mu = 1) from x = (3/5, 4/5), v = (-1/2, 1),
+ *      where every coefficient is rational because |x| = 1: the bootstrap's coefficients through
+ *      tau^7 equal the Lie series L^k(x)/k!, L = v.d/dx + a(x).d/dv, an independent route;
+ *   2. y' = cos(t) y from y(0) = 1, whose solution exp(sin t) is non-autonomous: the coefficients
+ *      through tau^7 equal its Taylor series, which a clock frozen at t_0 would not reproduce.
+ * The coefficients are printed as Rust rationals for the test
+ * `taylor::tests::the_solution_jets_are_the_exact_series`. Second engine:
+ * derivations/taylor_jet_recurrences.gp (PARI's own power series).
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/taylor_jet_recurrences.mac </dev/null
+ */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+N : 6$
+jet(sym) := makelist(concat(sym, k), k, 0, N)$
+poly(w) := sum(w[k + 1] * tau^k, k, 0, N)$
+series(f) := makelist(ratcoef(taylor(f, tau, 0, N), tau, k), k, 0, N)$
+/* Number of coefficients on which w differs from the series ref (lists of N + 1). */
+off(w, ref, simpf) := length(sublist(makelist(simpf(w[k] - ref[k]), k, 1, N + 1), lambda([d], d # 0)))$
+assume(u0 > 0, v0 > 0, x0 > 0)$
+
+u : jet('u)$  v : jet('v)$  x : jet('x)$  y : jet('y)$
+U : poly(u)$  V : poly(v)$  X : poly(x)$  Y : poly(y)$
+/* Index helper: the code's c[k] is the list entry k + 1. */
+at(w, k) := w[k + 1]$
+
+/* Product (Cauchy). */
+prod_jet(a, b) := makelist(sum(at(a, j) * at(b, k - j), j, 0, k), k, 0, N)$
+zero("jet_product_coefficients_off_the_series", off(prod_jet(u, v), series(U * V), ratsimp))$
+
+/* Quotient. */
+quot_jet(a, b) := block([w : makelist(0, N + 1)],
+  for k : 0 thru N do w[k + 1] : (at(a, k) - sum(at(b, j) * w[k - j + 1], j, 1, k)) / at(b, 0),
+  w)$
+zero("jet_quotient_coefficients_off_the_series", off(quot_jet(u, v), series(U / V), ratsimp))$
+
+/* Reciprocal. */
+recip_jet(a) := block([w : makelist(0, N + 1)],
+  w[1] : 1 / at(a, 0),
+  for k : 1 thru N do w[k + 1] : -sum(at(a, j) * w[k - j + 1], j, 1, k) / at(a, 0),
+  w)$
+zero("jet_recip_coefficients_off_the_series", off(recip_jet(u), series(1 / U), ratsimp))$
+
+/* Square root. */
+sqrt_jet(a) := block([w : makelist(0, N + 1)],
+  w[1] : sqrt(at(a, 0)),
+  for k : 1 thru N do w[k + 1] : (at(a, k) - sum(w[j + 1] * w[k - j + 1], j, 1, k - 1)) / (2 * w[1]),
+  w)$
+zero("jet_sqrt_coefficients_off_the_series", off(sqrt_jet(u), series(sqrt(U)), radcan))$
+
+/* Real power, p symbolic. */
+pow_jet(a, p) := block([w : makelist(0, N + 1)],
+  w[1] : at(a, 0)^p,
+  for k : 1 thru N do
+    w[k + 1] : sum((p * (k - j) - j) * at(a, k - j) * w[j + 1], j, 0, k - 1) / (k * at(a, 0)),
+  w)$
+zero("jet_powf_coefficients_off_the_series", off(pow_jet(u, p), series(U^p), radcan))$
+
+/* Exponential. */
+exp_jet(a) := block([w : makelist(0, N + 1)],
+  w[1] : exp(at(a, 0)),
+  for k : 1 thru N do w[k + 1] : sum(j * at(a, j) * w[k - j + 1], j, 1, k) / k,
+  w)$
+zero("jet_exp_coefficients_off_the_series", off(exp_jet(u), series(exp(U)), radcan))$
+
+/* Logarithm. */
+ln_jet(a) := block([w : makelist(0, N + 1)],
+  w[1] : log(at(a, 0)),
+  for k : 1 thru N do
+    w[k + 1] : (k * at(a, k) - sum(j * w[j + 1] * at(a, k - j), j, 1, k - 1)) / (k * at(a, 0)),
+  w)$
+zero("jet_ln_coefficients_off_the_series", off(ln_jet(u), series(log(U)), radcan))$
+
+/* Sine and cosine, coupled. */
+sincos_jet(a) := block([s : makelist(0, N + 1), c : makelist(0, N + 1)],
+  s[1] : sin(at(a, 0)), c[1] : cos(at(a, 0)),
+  for k : 1 thru N do (
+    s[k + 1] : sum(j * at(a, j) * c[k - j + 1], j, 1, k) / k,
+    c[k + 1] : -sum(j * at(a, j) * s[k - j + 1], j, 1, k) / k),
+  [s, c])$
+sc : sincos_jet(u)$
+trig(e) := ratsimp(trigexpand(trigsimp(e)))$
+zero("jet_sin_coefficients_off_the_series", off(sc[1], series(sin(U)), trig))$
+zero("jet_cos_coefficients_off_the_series", off(sc[2], series(cos(U)), trig))$
+
+/* atan2 through the jets' derivatives; x0 > 0, so atan2(y, x) = atan(y/x) near tau = 0. */
+deriv_jet(a) := append(makelist((k + 1) * at(a, k + 1), k, 0, N - 1), [0])$
+atan2_jet(b, a) := block([d, w : makelist(0, N + 1)],
+  d : quot_jet(prod_jet(a, deriv_jet(b)) - prod_jet(b, deriv_jet(a)),
+               prod_jet(a, a) + prod_jet(b, b)),
+  w[1] : atan2(at(b, 0), at(a, 0)),
+  for k : 1 thru N do w[k + 1] : at(d, k - 1) / k,
+  w)$
+/* The reference is atan(y/x) itself: its constant term, and for k >= 1 the coefficients of the
+ * series of Maxima's own derivative of atan(Y/X), divided by k -- term-wise integration of a
+ * rational function, which is cheap where expanding atan of two symbolic series is not. */
+atan_series() := block([dser : taylor(diff(atan(Y / X), tau), tau, 0, N - 1)],
+  cons(atan(at(y, 0) / at(x, 0)), makelist(ratcoef(dser, tau, k - 1) / k, k, 1, N)))$
+zero("jet_atan2_coefficients_off_the_series", off(atan2_jet(y, x), atan_series(), ratsimp))$
+
+/* --- The bootstrap against exact solution series ---------------------------------------- */
+K : 7$
+/* Bootstrap an n-component system y' = f(t, y) through tau^K: f maps (t series, state series). */
+bootstrap(f, t0, y0) := block([n : length(y0), a, ys, ts, fs],
+  a : makelist([y0[i]], i, 1, n),
+  for k : 0 thru K - 1 do (
+    ys : makelist(sum(a[i][m + 1] * tau^m, m, 0, k), i, 1, n),
+    ts : t0 + tau,
+    fs : f(ts, ys),
+    for i : 1 thru n do a[i] : endcons(ratcoef(taylor(fs[i], tau, 0, k), tau, k) / (k + 1), a[i])),
+  a)$
+
+/* 1. Planar two-body, mu = 1. */
+kep(ts, s) := [s[3], s[4], -s[1] / (s[1]^2 + s[2]^2)^(3/2), -s[2] / (s[1]^2 + s[2]^2)^(3/2)]$
+s0 : [3/5, 4/5, -1/2, 1]$
+boot : bootstrap(kep, 0, s0)$
+vars : [qx, qy, px, py]$
+field : kep(0, vars)$
+lie(g) := sum(field[i] * diff(g, vars[i]), i, 1, 4)$
+liecoef(i) := block([g : vars[i], out : []],
+  for k : 0 thru K do (
+    out : endcons(ratsimp(subst(map("=", vars, s0), g)) / k!, out),
+    g : lie(g)),
+  out)$
+for i : 1 thru 4 do
+  zero(sconcat("two_body_bootstrap_component", i, "_off_the_lie_series"),
+       length(sublist(boot[i] - liecoef(i), lambda([d], ratsimp(d) # 0))))$
+
+/* 2. y' = cos(t) y, y(0) = 1: exp(sin t). */
+bootc : bootstrap(lambda([ts, s], [cos(ts) * s[1]]), 0, [1])$
+exact : makelist(ratcoef(taylor(exp(sin(tau)), tau, 0, K), tau, k), k, 0, K)$
+zero("cos_t_bootstrap_off_the_series_of_exp(sin(t))", length(sublist(bootc[1] - exact, lambda([d], d # 0))))$
+frozen : bootstrap(lambda([ts, s], [cos(0) * s[1]]), 0, [1])$
+if frozen[1] = exact then error("a frozen clock reproduces the series: the check cannot see it")$
+
+rustpairs(l) := simplode(map(lambda([q], sconcat("(", num(q), ", ", denom(q), ")")), l), ", ")$
+for i : 1 thru 4 do printf(true, "TWO_BODY_JET[~a] = [~a]~%", i - 1, rustpairs(boot[i]))$
+printf(true, "EXP_SIN_JET = [~a]~%", rustpairs(bootc[1]))$

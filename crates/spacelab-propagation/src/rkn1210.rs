@@ -15,8 +15,16 @@
 //! # Coefficients
 //!
 //! The tableau is `crate::rkn1210_consts`, machine-generated from a ~30-digit primary listing
-//! (`tools/gen_rkn1210.py`) so no constant is truncated by hand. The order-12 verification test is
-//! the proof they transcribed correctly: a wrong coefficient drops the measured order.
+//! (`tools/gen_rkn1210.py`) so no constant is truncated by hand. The gate below is the proof they
+//! transcribed correctly: a wrong coefficient fails an order condition.
+//!
+//! Gate: `derivations/rkn1210_order.mac` parses those literals into exact rationals and shows that
+//! they meet every special Runge–Kutta–Nyström order condition — 563 position and 1104 velocity
+//! conditions through order 12 for `b̂`, `b̂'`, 151 and 288 through order 10 for the embedded `b`,
+//! `b'` — to `1.0e-28` of each condition's scale, the 30-digit transcription, while conditions of
+//! order 13 and 11 fail; `derivations/rkn1210_order.gp` re-checks all of them. The module test
+//! `the_shipped_tableau_meets_the_nystrom_order_conditions` (G1) reads the same conditions off the
+//! shipped `step` through each tree's polynomial system, in `f64`.
 
 #![allow(
     clippy::needless_range_loop,
@@ -493,5 +501,257 @@ mod tests {
                 "t1 = {t1}, h0 = {h0}, max_steps = {cap} was accepted"
             );
         }
+    }
+
+    /// A special-Nyström tree: the children of an `f` vertex, each the velocity leaf or a subtree.
+    #[derive(Clone)]
+    enum Child {
+        Vel,
+        Sub(FTree),
+    }
+
+    #[derive(Clone)]
+    struct FTree(Vec<Child>);
+
+    impl Child {
+        fn weight(&self) -> usize {
+            match self {
+                Child::Vel => 1,
+                Child::Sub(s) => s.size() + 2,
+            }
+        }
+    }
+
+    impl FTree {
+        /// `|T|`: the power of `h` the tree carries in `f(Rᵢ)`.
+        fn size(&self) -> usize {
+            self.0.iter().map(Child::weight).sum()
+        }
+
+        /// `q(T) = ∏ q(S)/((|S|+1)(|S|+2))` over the subtrees: the exact weight is `θ^{|T|} q(T)`.
+        fn q(&self) -> f64 {
+            self.0
+                .iter()
+                .map(|c| match c {
+                    Child::Vel => 1.0,
+                    Child::Sub(s) => s.q() / ((s.size() + 1) * (s.size() + 2)) as f64,
+                })
+                .product()
+        }
+
+        /// The elementary weight `Φᵢ(T)` from the shipped table, and the same with `|A|`, `|c|`.
+        fn phi(&self) -> ([f64; STAGES], [f64; STAGES]) {
+            let (mut p, mut m) = ([1.0; STAGES], [1.0; STAGES]);
+            for child in &self.0 {
+                let (w, wm) = match child {
+                    Child::Vel => (C, C.map(f64::abs)),
+                    Child::Sub(s) => {
+                        let (sp, sm) = s.phi();
+                        let mut w = [0.0; STAGES];
+                        let mut wm = [0.0; STAGES];
+                        for i in 0..STAGES {
+                            for j in 0..i {
+                                w[i] += A[i][j] * sp[j];
+                                wm[i] += A[i][j].abs() * sm[j];
+                            }
+                        }
+                        (w, wm)
+                    }
+                };
+                for i in 0..STAGES {
+                    p[i] *= w[i];
+                    m[i] *= wm[i];
+                }
+            }
+            (p, m)
+        }
+    }
+
+    /// Every special-Nyström tree of size `0..=n`, by size: an `f` vertex over each multiset of
+    /// velocity leaves and smaller trees whose weights sum to the size, taken in pool order — the
+    /// enumeration `derivations/rkn1210_order.gp` uses.
+    fn ftrees(n: usize) -> Vec<Vec<FTree>> {
+        fn multisets(
+            pool: &[Child],
+            from: usize,
+            left: usize,
+            cur: &mut Vec<Child>,
+            out: &mut Vec<FTree>,
+        ) {
+            if left == 0 {
+                out.push(FTree(cur.clone()));
+                return;
+            }
+            for i in from..pool.len() {
+                let w = pool[i].weight();
+                if w <= left {
+                    cur.push(pool[i].clone());
+                    multisets(pool, i, left - w, cur, out);
+                    cur.pop();
+                }
+            }
+        }
+        let mut by_size = vec![vec![FTree(Vec::new())]];
+        for m in 1..=n {
+            let mut pool = vec![Child::Vel];
+            for smaller in by_size.iter().take(m.saturating_sub(1)) {
+                pool.extend(smaller.iter().cloned().map(Child::Sub));
+            }
+            let mut out = Vec::new();
+            multisets(&pool, 0, m, &mut Vec::new(), &mut out);
+            by_size.push(out);
+        }
+        by_size
+    }
+
+    /// Components of the tree system: up to 12 vertices for the trees of size `<= 11` read here.
+    const TREE_DIM: usize = 12;
+
+    /// The Nyström tree system of `t`: one component per vertex, from `r = 0`. A velocity leaf has
+    /// `r'' = 0, v(0) = 1`, so `r(τ) = τ`; an `f` vertex has `r'' = ∏` of its children and
+    /// `v(0) = 0`. The system is polynomial and nilpotent, so the step truncates nothing: from
+    /// `t = 0` with `h = 1` the root holds `Σ b̂ᵢ Φᵢ(T)` in position and `Σ b̂'ᵢ Φᵢ(T)` in velocity,
+    /// up to rounding. With `clock` set every velocity leaf is read from the stage time
+    /// `t + cᵢh` instead — the leaf's exact solution is the clock itself.
+    struct NystromTreeSystem {
+        children: Vec<Vec<usize>>,
+        vel: Vec<bool>,
+        clock: bool,
+    }
+
+    impl NystromTreeSystem {
+        fn new(t: &FTree, clock: bool) -> Self {
+            fn walk(t: &FTree, sys: &mut NystromTreeSystem) -> usize {
+                let me = sys.children.len();
+                sys.children.push(Vec::new());
+                sys.vel.push(false);
+                for child in &t.0 {
+                    let id = match child {
+                        Child::Vel => {
+                            sys.children.push(Vec::new());
+                            sys.vel.push(true);
+                            sys.children.len() - 1
+                        }
+                        Child::Sub(s) => walk(s, sys),
+                    };
+                    sys.children[me].push(id);
+                }
+                me
+            }
+            let mut sys = Self {
+                children: Vec::new(),
+                vel: Vec::new(),
+                clock,
+            };
+            walk(t, &mut sys);
+            assert!(sys.children.len() <= TREE_DIM, "tree system too large");
+            sys
+        }
+
+        fn accel(&self, t: f64, r: &[f64; TREE_DIM]) -> [f64; TREE_DIM] {
+            let mut a = [0.0; TREE_DIM];
+            for (k, kids) in self.children.iter().enumerate() {
+                if !self.vel[k] {
+                    a[k] = kids
+                        .iter()
+                        .map(|&u| if self.clock && self.vel[u] { t } else { r[u] })
+                        .product();
+                }
+            }
+            a
+        }
+
+        fn v0(&self) -> [f64; TREE_DIM] {
+            let mut v = [0.0; TREE_DIM];
+            for (k, &is_vel) in self.vel.iter().enumerate() {
+                v[k] = if is_vel { 1.0 } else { 0.0 };
+            }
+            v
+        }
+    }
+
+    /// `|residual| / scale` of one condition, the scale being `Σ |bᵢ| |Φᵢ| + |target|` with `|Φ|`
+    /// formed from `|A|` and `|c|` — the magnitude every rounding in the sum is relative to.
+    fn rel(got: f64, target: f64, w: &[f64; STAGES], phi_abs: &[f64; STAGES]) -> f64 {
+        let scale: f64 = (0..STAGES).map(|i| w[i].abs() * phi_abs[i]).sum::<f64>() + target.abs();
+        (got - target).abs() / scale
+    }
+
+    /// (G1) The shipped step and table meet every special Runge–Kutta–Nyström order condition the
+    /// pair claims, and fail at the next order — the conditions `derivations/rkn1210_order.mac`
+    /// evaluates in exact rationals on the same literals (worst relative residual `1.0e-28`, the
+    /// 30-digit transcription), re-checked by `derivations/rkn1210_order.gp`.
+    ///
+    /// The twelfth-order solution is read off the shipped `step` through each tree's system, with
+    /// the velocity leaves from their components (the `cᵢ h v` term) and again from the stage time
+    /// (the `t + cᵢ h` passed to `accel`): position conditions through order 12 (563 trees),
+    /// velocity through order 12 (1104). The embedded tenth-order weights `b`, `b'`, which `step`
+    /// only returns inside an error norm, are checked from the table: 151 and 288 conditions. Each
+    /// residual is held to `16 ε` of its scale, which bounds the rounding of sums over at most 17
+    /// stages nested five deep with room to spare (measured worst: `1.25 ε`). At order `p + 1` some
+    /// condition of every weight vector fails by more than `1e-6` of that scale: 9, 16, 17 and 25
+    /// of them for `b̂`, `b̂'`, `b`, `b'` (the derivation's scale, `Σ |bᵢ Φᵢ|`, is smaller and
+    /// counts more).
+    #[test]
+    fn the_shipped_tableau_meets_the_nystrom_order_conditions() {
+        let forest = ftrees(12);
+        let counts: Vec<usize> = forest.iter().map(Vec::len).collect();
+        assert_eq!(counts, [1, 1, 2, 3, 6, 10, 20, 36, 72, 137, 275, 541, 1098]);
+        let bar = 16.0 * f64::EPSILON;
+        let mut worst = 0.0_f64;
+        let mut fails = [0_usize; 4];
+        for (n, ts) in forest.iter().enumerate() {
+            for t in ts {
+                let (phi, phi_abs) = t.phi();
+                let q = t.q();
+                let pos_target = q / ((n + 1) * (n + 2)) as f64;
+                let vel_target = q / (n + 1) as f64;
+                if n <= 11 {
+                    for clock in [false, true] {
+                        let sys = NystromTreeSystem::new(t, clock);
+                        let accel = |tt: f64, r: &[f64; TREE_DIM]| sys.accel(tt, r);
+                        let (r1, v1, _, _) = step(&accel, 0.0, &[0.0; TREE_DIM], &sys.v0(), 1.0);
+                        let rv = rel(v1[0], vel_target, &BPHAT, &phi_abs);
+                        let rp = rel(r1[0], pos_target, &BHAT, &phi_abs);
+                        if n <= 10 {
+                            assert!(rp <= bar, "b̂ position, size {n}, clock {clock}: {rp:e}");
+                        } else if !clock && rp > 1e-6 {
+                            fails[0] += 1;
+                        }
+                        assert!(rv <= bar, "b̂' velocity, size {n}, clock {clock}: {rv:e}");
+                        worst = worst.max(rv);
+                        if n <= 10 {
+                            worst = worst.max(rp);
+                        }
+                    }
+                }
+                let dot = |w: &[f64; STAGES]| (0..STAGES).map(|i| w[i] * phi[i]).sum::<f64>();
+                if n == 12 && rel(dot(&BPHAT), vel_target, &BPHAT, &phi_abs) > 1e-6 {
+                    fails[1] += 1;
+                }
+                let rp = rel(dot(&B), pos_target, &B, &phi_abs);
+                let rv = rel(dot(&BP), vel_target, &BP, &phi_abs);
+                match n {
+                    0..=8 => {
+                        assert!(rp <= bar && rv <= bar, "b, b' size {n}: {rp:e}, {rv:e}");
+                        worst = worst.max(rp).max(rv);
+                    }
+                    9 => {
+                        assert!(rv <= bar, "b' size 9: {rv:e}");
+                        fails[2] += usize::from(rp > 1e-6);
+                    }
+                    10 => fails[3] += usize::from(rv > 1e-6),
+                    _ => {}
+                }
+            }
+        }
+        println!(
+            "RKN12(10) order conditions in f64: worst {:.3} ε of scale; p+1 failures {fails:?}",
+            worst / f64::EPSILON
+        );
+        assert!(
+            fails.iter().all(|&f| f > 0),
+            "a weight vector is of higher order: {fails:?}"
+        );
     }
 }

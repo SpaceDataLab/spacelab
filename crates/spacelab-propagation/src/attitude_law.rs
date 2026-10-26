@@ -22,6 +22,14 @@
 //!   `CelestialBodyPointed`);
 //! * [`SpinStabilized`] — a base orientation spun at a constant rate about a fixed inertial axis
 //!   (Orekit `SpinStabilized`).
+//!
+//! Gate: `derivations/attitude_law_frames.mac` proves that each of the three row shapes the laws use
+//! — `(x, z×x, z)`, `(x, y, x×y)`, `(y×z, y, z)` — is orthonormal with determinant `+1` exactly when
+//! its two input vectors are an orthonormal pair, that every law feeds it one, and that Rodrigues'
+//! exponential is a one-parameter group fixing its axis; `derivations/attitude_law_frames.gp` builds
+//! every law at 100 digits on 200 states. The module tests
+//! `every_law_is_an_orthonormal_right_handed_frame_to_rounding` (G1) and
+//! `the_spin_law_composes_as_a_one_parameter_group` (G4) hold the code to them.
 
 // The single letters (r, v, h, x, y, z, s) are the notation of orbital-frame geometry.
 #![allow(clippy::many_single_char_names)]
@@ -173,8 +181,11 @@ impl AttitudeProvider for YawSteering {
         if norm(s_perp) < 1e-9 {
             return LocalOrbitalFrame::nadir().matrix(position, velocity);
         }
-        let x = normalize(s_perp);
-        frame(x, cross(z, x), z)
+        // `s_perp` is a cancellation whose rounding is `ε/‖s_perp‖` of its length, and that much of
+        // it lies along `z`: kept as the axis, it would leave the frame `ε/‖s_perp‖` off
+        // orthogonal. `z × ŝ⊥` is near unit length, so the cross products complete an exact frame.
+        let y = normalize(cross(z, normalize(s_perp)));
+        frame(cross(y, z), y, z)
     }
 }
 
@@ -192,8 +203,10 @@ impl AttitudeProvider for SunPointing {
         if norm(y) < 1e-9 {
             y = cross(z, normalize(position));
         }
-        let y = normalize(y);
-        frame(cross(y, z), y, z)
+        // A short `ẑ × v̂` carries `ε/‖ẑ × v̂‖` of its length along `ẑ`; taking `x̂` from it and `ŷ`
+        // back from `ẑ × x̂` makes both cross products of near-orthogonal unit vectors.
+        let x = normalize(cross(normalize(y), z));
+        frame(x, cross(z, x), z)
     }
 }
 
@@ -384,6 +397,127 @@ mod tests {
         for i in 0..3 {
             for j in 0..3 {
                 assert!((mp[i][j] - base[i][j]).abs() < 1e-9);
+            }
+        }
+    }
+
+    /// (G1) Every law's matrix is orthonormal with determinant `+1` to rounding, on 500 states
+    /// spread over every direction — the identity `derivations/attitude_law_frames.mac` proves for
+    /// each row shape. A unit vector from [`normalize`] is within an ulp of unit length and a cross
+    /// product of two adds a few more, so `16 ε` bounds `‖MMᵀ − I‖∞` and `|det M − 1|`; a frame with a
+    /// wrong cross-product order or a missed normalisation is off at order one.
+    #[test]
+    fn every_law_is_an_orthonormal_right_handed_frame_to_rounding() {
+        let mut seed = 0x2026_1026_u64;
+        let mut next = move || {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            #[allow(clippy::cast_precision_loss)] // 53 of the 64 bits are all a uniform draw needs
+            let u = (seed >> 11) as f64 / (1_u64 << 53) as f64;
+            u - 0.5
+        };
+        let bound = 16.0 * f64::EPSILON;
+        let mut worst = 0.0_f64;
+        for _ in 0..500 {
+            let r = [1.4e7 * next(), 1.4e7 * next(), 1.4e7 * next()];
+            let v = [1.6e4 * next(), 1.6e4 * next(), 1.6e4 * next()];
+            let sun = [3e11 * next(), 3e11 * next(), 3e11 * next()];
+            let laws: [(&str, Mat3); 6] = [
+                ("qsw", LocalOrbitalFrame::new(LofType::Qsw).matrix(r, v)),
+                ("tnw", LocalOrbitalFrame::new(LofType::Tnw).matrix(r, v)),
+                ("vnc", LocalOrbitalFrame::new(LofType::Vnc).matrix(r, v)),
+                ("lvlh", LocalOrbitalFrame::nadir().matrix(r, v)),
+                ("yaw", YawSteering.inertial_to_body(0.0, r, v, sun)),
+                ("sun", SunPointing.inertial_to_body(0.0, r, v, sun)),
+            ];
+            for (name, m) in laws {
+                let (off, det) = orthonormality(&m);
+                let miss = off.max((det - 1.0).abs());
+                assert!(miss <= bound, "{name} at r {r:?}, v {v:?}: {miss:e}");
+                worst = worst.max(miss / f64::EPSILON);
+            }
+        }
+        println!("attitude frames: worst {worst:.2} ε");
+    }
+
+    /// (G1) The same bound where the Sun-referenced laws are worst conditioned: the Sun a few
+    /// nanoradians off nadir for [`YawSteering`] and off the velocity for [`SunPointing`], just above
+    /// each fallback threshold. There the reference direction is a near-cancellation (`s − (s·z)z`, or
+    /// `ẑ × v̂`), whose rounding is `ε/sin` of the angle relative to its own length, so a frame that
+    /// keeps it as an axis is off orthogonality by the same `ε/sin`. Both laws did, and this test
+    /// measured them at `4.3e-9` (yaw, 1e-8 rad) and `5.9e-10` (Sun pointing, 3e-9 rad); completed
+    /// by cross products of the two well-conditioned axes, as they now are, both stay under `2 ε`.
+    #[test]
+    fn the_sun_referenced_laws_stay_orthonormal_next_to_their_degeneracy() {
+        let position = [4.1e6, -3.3e6, 5.2e6];
+        let rn = norm(position);
+        let nadir = scale(position, -1.0 / rn);
+        let side = normalize(cross(nadir, [0.0, 0.0, 1.0]));
+        let velocity = [-5.0e3, 1.0e3, 6.0e3];
+        let vhat = normalize(velocity);
+        let vside = normalize(cross(vhat, [1.0, 0.0, 0.0]));
+        let bound = 16.0 * f64::EPSILON;
+        let mut worst = 0.0_f64;
+        for angle in [3e-9, 1e-8, 1e-6, 1e-3] {
+            let sun_near_nadir = [
+                1.5e11 * (nadir[0] + angle * side[0]),
+                1.5e11 * (nadir[1] + angle * side[1]),
+                1.5e11 * (nadir[2] + angle * side[2]),
+            ];
+            let yaw = YawSteering.inertial_to_body(0.0, position, velocity, sun_near_nadir);
+            let sun_near_velocity = [
+                1.5e11 * (vhat[0] + angle * vside[0]),
+                1.5e11 * (vhat[1] + angle * vside[1]),
+                1.5e11 * (vhat[2] + angle * vside[2]),
+            ];
+            let pointing = SunPointing.inertial_to_body(0.0, position, velocity, sun_near_velocity);
+            for (name, m) in [("yaw", yaw), ("sun", pointing)] {
+                let (off, det) = orthonormality(&m);
+                let miss = off.max((det - 1.0).abs());
+                println!("{name} at {angle:e} rad: {miss:.3e}");
+                worst = worst.max(miss);
+            }
+        }
+        assert!(
+            worst <= bound,
+            "orthonormality lost next to the degeneracy: {worst:e}"
+        );
+    }
+
+    /// (G4) The spin law is a one-parameter group over its own epoch:
+    /// `M(t₀ + t₁ + t₂) = M(t₀ + t₁)·baseᵀ·M(t₀ + t₂)`, and the inertial spin axis has the constant
+    /// body representation `base·â` — `derivations/attitude_law_frames.mac` (`spin_composition`,
+    /// `spin_fixes_the_inertial_axis`) and `.gp`. A non-trivial base and axis, so that neither
+    /// identity holds by a coincidence of coordinates; the bound is a few ulps of the products.
+    #[test]
+    fn the_spin_law_composes_as_a_one_parameter_group() {
+        let base = exp_so3([0.3, -1.1, 0.7]);
+        let axis = [1.0 / 3.0, 2.0 / 3.0, -2.0 / 3.0];
+        let (t0, rate) = (3.0, 0.5);
+        let law = SpinStabilized::new(base, t0, axis, rate);
+        let at = |t: f64| law.inertial_to_body(t, [0.0; 3], [0.0; 3], [0.0; 3]);
+        let transpose = |m: &Mat3| {
+            let mut t = [[0.0; 3]; 3];
+            for i in 0..3 {
+                for j in 0..3 {
+                    t[i][j] = m[j][i];
+                }
+            }
+            t
+        };
+        for (t1, t2) in [(1.25, 4.5), (-2.0, 0.375), (10.0, -7.5)] {
+            let whole = at(t0 + t1 + t2);
+            let composed = matmul(&matmul(&at(t0 + t1), &transpose(&base)), &at(t0 + t2));
+            let miss = max_abs_diff(&whole, &composed);
+            assert!(miss < 64.0 * f64::EPSILON, "t1 {t1}, t2 {t2}: {miss:e}");
+            let fixed = apply(&at(t0 + t1), axis);
+            let want = apply(&base, axis);
+            for k in 0..3 {
+                assert!(
+                    (fixed[k] - want[k]).abs() < 16.0 * f64::EPSILON,
+                    "axis moved at t1 {t1}"
+                );
             }
         }
     }

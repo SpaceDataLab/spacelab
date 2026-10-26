@@ -14,6 +14,13 @@
 //! with drag `D/m = ½ ρ V² / β` (`β = m/(C_D A)` the ballistic coefficient), lift `L/m = (L/D)·D/m`,
 //! `g = μ/r²`, and `ρ = ρ₀ exp(−(r−R)/H)`. SI units. Guidance (bank-angle steering, parachute and
 //! powered phases) is a later extension; this is the ballistic/lifting hypersonic arc.
+//!
+//! Gate: `derivations/edl_allen_eggers.mac` reduces these equations, without lift or gravity on a
+//! straight path, to Allen and Eggers' closed form `V(h) = V_e exp(−(ρ(h) − ρ_e) H/(2β sin|γ|))`
+//! and derives its peak deceleration as the exact maximum, at `ρ = β sin|γ|/H`;
+//! `derivations/edl_allen_eggers.gp` evaluates the peak at 100 digits for the test's entry. The
+//! module test `a_vertical_ballistic_entry_peaks_where_allen_and_eggers_put_it` (G3) flies that entry
+//! through [`propagate_entry`].
 
 #![allow(clippy::many_single_char_names, clippy::cast_precision_loss)]
 
@@ -747,6 +754,76 @@ mod tests {
                 "the commanded bank {bank:.6} flies {flown:.0} m, not the {target:.0} m asked for"
             );
         }
+    }
+
+    /// (G3) Allen and Eggers' entry, flown by the propagator. With `µ = 0` and a vertical path the
+    /// module's equations are exactly the Allen–Eggers model: `γ̇ = V cos γ / r` is 6e-17 of `V/r`
+    /// for the double nearest `−π/2`, and `sin γ` rounds to `−1`. `derivations/edl_allen_eggers.mac`
+    /// derives the speed `V(h)` in closed form and its peak deceleration as the exact maximum, at
+    /// `h* = H ln(ρ₀H/β)`; `derivations/edl_allen_eggers.gp` evaluates it at 100 digits for this
+    /// entry — Mars atmosphere, `β = 100 kg/m²`, 6 km/s from 120 km.
+    ///
+    /// The propagator samples the drag at the start of each step, so the reported peak is the
+    /// largest sample, within one step of the true maximum: within `V*·dt` of `h*` in altitude,
+    /// and, as `d² ln D/dh² = −1/H²` there, below `D*` by at most `(V*·dt/H)²/2` relative. The RK4
+    /// error at `dt = 1 ms` on a 2-second time scale is far below either. The speed at touchdown
+    /// is held to the closed form `V(h)` at the altitude where the run stopped, 1e-12 relative.
+    #[test]
+    fn a_vertical_ballistic_entry_peaks_where_allen_and_eggers_put_it() {
+        const PEAK_ALTITUDE: f64 = 8_852.329_874_314_487_887_370_117;
+        const PEAK_SPEED: f64 = 3_639.265_476_811_942_643_139_040;
+        const PEAK_G: f64 = 60.835_043_818_699_680_002_959_86;
+        let atm = Atmosphere {
+            mu: 0.0,
+            ..Atmosphere::MARS
+        };
+        let vehicle = EntryVehicle {
+            ballistic_coefficient: 100.0,
+            lift_to_drag: 0.0,
+        };
+        let entry_altitude = 120_000.0;
+        let (entry_speed, dt) = (6_000.0, 1e-3);
+        let initial = [
+            entry_speed,
+            -core::f64::consts::FRAC_PI_2,
+            atm.radius + entry_altitude,
+            0.0,
+        ];
+        let out = propagate_entry(initial, vehicle, atm, dt, 0.0, 200_000);
+
+        let step = PEAK_SPEED * dt;
+        assert!(
+            (out.peak_altitude - PEAK_ALTITUDE).abs() <= step,
+            "peak at {:.3} m, Allen–Eggers {PEAK_ALTITUDE:.3} m, one step {step:.3} m",
+            out.peak_altitude
+        );
+        let deficit = 0.5 * (step / atm.scale_height).powi(2);
+        let rel = out.peak_deceleration_g / PEAK_G - 1.0;
+        assert!(
+            rel <= 1e-12 && rel >= -deficit - 1e-12,
+            "peak {:.15} g, Allen–Eggers {PEAK_G:.15} g: {rel:.3e} relative, allowed down to {:.3e}",
+            out.peak_deceleration_g,
+            -deficit
+        );
+
+        let [speed, _, radius, _] = out.final_state;
+        println!(
+            "Allen–Eggers: peak {:.3} m off h*, {rel:.3e} relative off D*, touchdown at {speed:.6} m/s",
+            out.peak_altitude - PEAK_ALTITUDE
+        );
+        assert!(
+            radius <= atm.radius,
+            "the run stopped above the surface at {radius} m"
+        );
+        let density = |h: f64| atm.surface_density * (-h / atm.scale_height).exp();
+        let closed = entry_speed
+            * (-(density(radius - atm.radius) - density(entry_altitude)) * atm.scale_height
+                / (2.0 * vehicle.ballistic_coefficient))
+                .exp();
+        assert!(
+            (speed / closed - 1.0).abs() <= 1e-12,
+            "touchdown speed {speed:.12} m/s, closed form {closed:.12} m/s"
+        );
     }
 
     /// A ballistic Mars entry decelerates through a peak and slows from hypersonic to subsonic, with

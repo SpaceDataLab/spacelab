@@ -1,0 +1,71 @@
+/* ZEM/ZEV powered-descent guidance -- crates/spacelab-astro/src/powered.rs -- as the minimum-energy
+   landing law, and its zero-order-hold closed loop as a deadbeat controller.
+
+   Per axis (the law is separable), position x, velocity v, constant gravity g, thrust acceleration
+   a: x'' = a + g, from (x0, v0) at t = 0 to (xf, vf) at t = T, minimising J = int_0^T a^2 dt.
+   The coded command at time-to-go tg is
+       ZEM = xf - (x + v tg + g tg^2/2),  ZEV = vf - (v + g tg),  a = 6 ZEM/tg^2 - 2 ZEV/tg.
+
+   Printed `<name>: 0`:
+     1-2.  Pontryagin: H = a^2 + lx v + lv (a + g); lv = l0 - lx t solves the costate equation
+           lv' = -dH/dv (lx' = -dH/dx = 0), and dH/da = 0 gives a = -lv/2, whose second time
+           derivative vanishes: the optimal command is affine, a = A + B t;
+     3-4.  the A, B that meet the four boundary conditions are solved for here: x(T) - xf and
+           v(T) - vf vanish;
+     5.    optimality: any admissible variation da keeps x(T), v(T), i.e. int da = 0 and
+           int (T - t) da = 0, and A + B t = (A + B T) - B (T - t) lies in the span of 1 and
+           (T - t), so int (A + B t) da = 0 and J(a + da) = J(a) + int da^2: the affine command is
+           the unique minimum (the decomposition's residual is printed);
+     6.    the feedback law evaluated at every point (t, x(t), v(t)) of the optimal trajectory, with
+           tg = T - t, IS the open-loop optimum A + B t -- identically in t (G2);
+     7-10. the coded loop -- the command held over each step h = T/n with tg = (n - k) h, the
+           state advanced by the exact uniform-acceleration step -- lands on (xf, 0) exactly for
+           n = 3, 4, 5, 6 (G3): position;
+     11-14. and velocity;
+     15.   for n = 1 and n = 2 it does not (the 1- and 2-step residuals are nonzero; their values
+           are in derivations/powered_zem_zev.gp); the line prints 0 once both position misses
+           are confirmed not identically zero.
+
+   Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/powered_zem_zev.mac </dev/null */
+
+display2d : false$
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+assume(T > 0, h > 0)$
+
+cmd(x, v, xf, vf, g, tg) := 6*(xf - (x + v*tg + g*tg^2/2))/tg^2 - 2*(vf - (v + g*tg))/tg$
+
+/* 1-2 */
+block([H : a^2 + lx*v + lv*(a + g), lvt : l0 - lx*t, astar],
+  zero("costate_solves_its_equation", ratsimp(diff(lvt, t) + subst(lv = lvt, diff(H, v)))),
+  astar : rhs(solve(diff(H, a) = 0, a)[1]),
+  zero("stationary_command_is_affine_in_time", diff(subst(lv = lvt, astar), t, 2)))$
+
+/* 3-4 */
+xt(t) := x0 + v0*t + (g*t^2)/2 + A*t^2/2 + B*t^3/6$
+vt(t) := v0 + g*t + A*t + B*t^2/2$
+sol : solve([xt(T) = xf, vt(T) = vf], [A, B])[1]$
+zero("optimum_reaches_the_target_position", ratsimp(subst(sol, xt(T)) - xf))$
+zero("optimum_reaches_the_target_velocity", ratsimp(subst(sol, vt(T)) - vf))$
+
+/* 5 */
+zero("affine_command_is_in_the_constraint_span",
+     ratsimp((A + B*t) - ((A + B*T) - B*(T - t))))$
+
+/* 6 */
+zero("feedback_is_the_open_loop_optimum_along_its_trajectory",
+     ratsimp(subst(sol, cmd(xt(t), vt(t), xf, vf, g, T - t) - (A + B*t))))$
+
+/* 7-15: the closed loop of `powered_descent`, v_target = 0. */
+loop(n) := block([x : x0, v : v0, a, k],
+  for k : 0 thru n - 1 do (
+    a : cmd(x, v, xf, 0, g, (n - k)*h) + g,
+    x : ratsimp(x + (v + a*h/2)*h),
+    v : ratsimp(v + a*h)),
+  [x, v])$
+ends : makelist(loop(n), n, 1, 6)$
+for n : 3 thru 6 do zero(sconcat("deadbeat_position_", n, "_steps"), ratsimp(ends[n][1] - xf))$
+for n : 3 thru 6 do zero(sconcat("deadbeat_velocity_", n, "_steps"), ratsimp(ends[n][2]))$
+zero("one_and_two_steps_are_not_deadbeat",
+     if ratsimp(ends[1][1] - xf) # 0 and ratsimp(ends[2][1] - xf) # 0 then 0 else 1)$

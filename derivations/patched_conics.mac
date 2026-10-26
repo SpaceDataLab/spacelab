@@ -1,0 +1,64 @@
+/* The patched-conic pieces of crates/spacelab-astro/src/patched.rs, from their definitions.
+
+   Printed `<name>: 0`:
+     1.    Laplace's sphere of influence. Planet-centred, the planet pulls with m/r^2 and the Sun
+           perturbs with its tidal M r/D^3; Sun-centred, the Sun pulls with M/D^2 and the planet
+           perturbs with m/r^2. Equal ratios, (M r/D^3)/(m/r^2) = (m/r^2)/(M/D^2), is
+           M^2 r^5 = m^2 D^5, whose positive root is r = D (m/M)^(2/5) (G2);
+     2.    a = -mu/v_inf^2: vis-viva v^2 = mu (2/r - 1/a) as r -> infinity;
+     3.    e = 1 + r_p v_inf^2/mu: the periapsis r_p = a (1 - e) of that a;
+     4.    v_p = sqrt(v_inf^2 + 2 mu/r_p): vis-viva at r_p;
+     5.    the asymptote's true anomaly nu_inf = acos(-1/e) turns the path by
+           delta = 2 nu_inf - pi, and sin(delta/2) = 1/e;
+     6.    the coded mu/(mu + r_p v_inf^2) is 1/e;
+     7.    the impact parameter |a| sqrt(e^2 - 1) is h/v_inf, h = sqrt(mu p), p = a (1 - e^2) (G1);
+     8-9.  the coded incoming asymptote S = (e_hat + sqrt(e^2 - 1) h_hat x e_hat)/e is the
+           direction of the velocity sqrt(mu/p) (-sin nu, e + cos nu) at nu = -nu_inf, and is a
+           unit vector;
+     10.   the coded B = |B| (S x h_hat) is the limit of the position's component perpendicular to
+           S, r - (r.S) S, as nu -> -nu_inf: the B-plane is the aiming plane of the incoming
+           asymptote (G3).
+   Perifocal frame: e_hat = (1, 0, 0), h_hat = (0, 0, 1), h_hat x e_hat = (0, 1, 0).
+   derivations/patched_conics.gp evaluates the same limit at 100 digits on the test states.
+
+   Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/patched_conics.mac </dev/null */
+
+display2d : false$
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+assume(M > 0, m > 0, D > 0, mu > 0, vi > 0, rp > 0, e > 1)$
+
+block([sols, pos],
+  sols : solve((M*r/D^3)/(m/r^2) = (m/r^2)/(M/D^2), r),
+  pos : sublist(map(rhs, sols), lambda([x], is(ratsimp(imagpart(rectform(x))) = 0) and x # 0)),
+  zero("laplace_sphere_of_influence", radcan(pos[1] - D*(m/M)^(2/5))))$
+
+a : -mu/vi^2$
+zero("semi_major_axis_from_vis_viva", limit(vi^2 - mu*(2/r - 1/a), r, inf))$
+ecc : 1 + rp*vi^2/mu$
+zero("eccentricity_from_the_periapsis", ratsimp(a*(1 - ecc) - rp))$
+zero("periapsis_speed_is_vis_viva", ratsimp((vi^2 + 2*mu/rp) - mu*(2/rp - 1/a)))$
+zero("turn_angle_half_sine", ratsimp(trigexpand(sin(acos(-1/e) - %pi/2)) - 1/e))$
+zero("coded_turn_angle_argument", ratsimp(mu/(mu + rp*vi^2) - 1/ecc))$
+block([A : -mu/vi^2, h],
+  h : sqrt(mu*A*(1 - e^2)),
+  zero("impact_parameter_is_h_over_v_inf", radcan(h/vi - abs(A)*sqrt(e^2 - 1))))$
+
+block([ninf : acos(-1/e), S, v, vn],
+  S : [1/e, sqrt(e^2 - 1)/e, 0],
+  v : [-sin(-ninf), e + cos(-ninf), 0],
+  vn : sqrt(v.v),
+  zero("asymptote_is_the_limiting_velocity_direction", radcan(lsum(q^2, q, v/vn - S))),
+  zero("asymptote_is_a_unit_vector", radcan(S.S - 1)))$
+
+/* 10: r(nu) = p/(1 + e cos nu) (cos nu, sin nu); n = S x h_hat = (S_y, -S_x, 0). The coded B is
+   |a| sqrt(e^2 - 1) n with p = |a| (e^2 - 1). Expand about nu = -nu_inf + t. */
+block([S, n, ninf : acos(-1/e), rv, perp, lim],
+  S : [1/e, sqrt(e^2 - 1)/e, 0],
+  n : [S[2], -S[1], 0],
+  rv : p/(1 + e*cos(nu))*[cos(nu), sin(nu), 0],
+  perp : rv.n,
+  lim : limit(ratsimp(trigexpand(subst(nu = -ninf + t, perp))), t, 0, plus),
+  zero("b_vector_is_the_limit_of_the_incoming_aiming_offset",
+       radcan(lim - (p/(e^2 - 1))*sqrt(e^2 - 1))))$

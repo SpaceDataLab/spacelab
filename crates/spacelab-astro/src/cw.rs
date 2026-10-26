@@ -7,6 +7,17 @@
 //! workhorse of formation flying and close proximity operations; it is exact only in the linear,
 //! circular-chief limit, so it is used for design and short-horizon prediction, with a full nonlinear
 //! propagation for truth.
+//!
+//! Gate: `derivations/cw.mac` shows that the coded transition matrix solves `Φ̇ = AΦ` from `Φ(0) =
+//! I`, has determinant one and composes, that the CW system is the first-order term of exact
+//! relative two-body motion about a circular chief, that `ẏ₀ = −2n x₀` removes every secular term,
+//! that `relative_lvlh_state` is the transport theorem and that the curvilinear velocities are the
+//! derivatives of their coordinates; `derivations/cw.gp` sums `exp(A·dt)` at 100 digits. The module
+//! tests `the_relative_state_is_the_projection_onto_the_triad_less_the_frame_rotation` (G1),
+//! `the_propagated_trajectory_solves_the_clohessy_wiltshire_equations` (G2),
+//! `every_entry_of_the_transition_matrix_is_the_published_closed_form` (G3),
+//! `the_transition_matrix_has_unit_determinant` (G4) and
+//! `propagating_in_two_steps_is_propagating_in_one` (G4) hold the code to them.
 
 // The LVLH axes (x, y, z), the state (r, v), the angular momentum (h) and the mean motion (n) are
 // single letters here because that is exactly the notation of the equations.
@@ -192,7 +203,11 @@ pub fn cw_propagate(state: [f64; 6], n: f64, dt: f64) -> [f64; 6] {
 mod tests {
     // The references below are carried at the precision they were computed to, so that
     // regenerating one is a copy rather than a rounding decision.
-    #![allow(clippy::excessive_precision, clippy::float_cmp)]
+    #![allow(
+        clippy::excessive_precision,
+        clippy::float_cmp,
+        clippy::needless_range_loop
+    )]
     use spacelab_testkit::assert_within_ulps;
 
     use super::*;
@@ -214,7 +229,10 @@ mod tests {
     const CHIEF_R: Vec3 = Vec3::new(3000e3, 4000e3, 5000e3);
     const CHIEF_V: Vec3 = Vec3::new(-4200.0, 1300.0, 1500.0);
 
-    /// Every entry of the transition matrix, against the published closed form.
+    /// (G3) Every entry of the transition matrix, against `exp(A·dt)·s₀` summed as the power series
+    /// of the CW system matrix at 100 digits in `derivations/cw.gp` — no trigonometric closed form
+    /// is written there — at the test's f64 `(n, dt, s₀)`. `derivations/cw.mac` shows the coded
+    /// closed form is that exponential: `Φ(0) = I` and `Φ̇ = AΦ`.
     ///
     /// The three tests that were here compare the propagator against a nonlinear two-body oracle
     /// and are the right check on the *model* — but the linearisation error is the signal there, so
@@ -240,7 +258,9 @@ mod tests {
         }
     }
 
-    /// The propagated trajectory solves `ẍ − 2nẏ − 3n²x = 0`, `ÿ + 2nẋ = 0`, `z̈ + n²z = 0`.
+    /// (G2) The propagated trajectory solves `ẍ − 2nẏ − 3n²x = 0`, `ÿ + 2nẋ = 0`, `z̈ + n²z = 0`
+    /// — the defining equation `derivations/cw.mac` shows the closed form satisfies symbolically,
+    /// and shows to be the first-order term of exact relative two-body motion.
     ///
     /// This is the one check on the transition matrix that needs no reference at all: it asks
     /// whether the closed form is a solution of the equations it claims to solve, by differentiating
@@ -278,7 +298,8 @@ mod tests {
         }
     }
 
-    /// `Φ(t₂)Φ(t₁) = Φ(t₁+t₂)`: propagating in two steps is propagating in one. A transition matrix
+    /// (G4) `Φ(t₂)Φ(t₁) = Φ(t₁+t₂)` (`phi_composes` in `derivations/cw.mac`): propagating in two
+    /// steps is propagating in one. A transition matrix
     /// that is not the exponential of a constant system matrix fails this for almost any pair of
     /// spans, and it holds for every state at once rather than for one chosen sample.
     #[test]
@@ -296,6 +317,47 @@ mod tests {
                 let d = (two[i] - one[i]).abs();
                 assert!(d < 1e-11, "({t1}, {t2}) component {i}: {d:.3e}");
             }
+        }
+    }
+
+    /// (G4) The transition matrix has determinant one at every span: `tr A = 0`, so the flow keeps
+    /// phase-space volume (`phi_determinant_is_one` in `derivations/cw.mac`). Its columns are
+    /// `cw_propagate` of the six unit states; the determinant is taken by elimination with partial
+    /// pivoting, whose own rounding is the floor: measured, the worst of the five spans is `7ε`
+    /// (at `dt`), and the bound is `64ε`. A wrong coefficient in any entry moves it by O(1).
+    #[test]
+    fn the_transition_matrix_has_unit_determinant() {
+        for &t in &[0.0, 300.0, DT, -4321.0, 3.0 * TAU / N] {
+            let mut m = [[0.0; 6]; 6];
+            for (j, col) in (0..6).map(|j| {
+                let mut e = [0.0; 6];
+                e[j] = 1.0;
+                (j, cw_propagate(e, N, t))
+            }) {
+                for i in 0..6 {
+                    m[i][j] = col[i];
+                }
+            }
+            let mut det = 1.0;
+            for k in 0..6 {
+                let p = (k..6)
+                    .max_by(|&a, &b| m[a][k].abs().total_cmp(&m[b][k].abs()))
+                    .unwrap_or(k);
+                if p != k {
+                    m.swap(p, k);
+                    det = -det;
+                }
+                det *= m[k][k];
+                for i in (k + 1)..6 {
+                    let f = m[i][k] / m[k][k];
+                    for j in k..6 {
+                        m[i][j] -= f * m[k][j];
+                    }
+                }
+            }
+            let miss = (det - 1.0).abs() / f64::EPSILON;
+            println!("t {t}: det {det:.17}, |det - 1| = {miss:.2} ε");
+            assert!(miss <= 64.0, "t {t}: det Φ = {det:.17e}");
         }
     }
 
@@ -348,7 +410,8 @@ mod tests {
         );
     }
 
-    /// The relative state is the projection onto the triad, less the frame rotation, at 60 digits.
+    /// (G1) The relative state is the projection onto the triad, less the frame rotation — the
+    /// transport theorem `derivations/cw.mac` shows — against `derivations/cw.gp` at 100 digits.
     #[test]
     fn the_relative_state_is_the_projection_onto_the_triad_less_the_frame_rotation() {
         let got = relative_lvlh_state(

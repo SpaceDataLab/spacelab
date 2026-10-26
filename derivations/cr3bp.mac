@@ -1,0 +1,87 @@
+/* The circular restricted three-body problem -- spacelab-astro/src/cr3bp.rs -- as identities.
+ *
+ * Synodic frame, unit separation and mean motion, primaries at (-mu, 0, 0) and (1-mu, 0, 0):
+ *     Omega = (x^2 + y^2)/2 + (1-mu)/r1 + mu/r2,
+ *     r1 = |(x+mu, y, z)|,  r2 = |(x-1+mu, y, z)|,
+ *     C = 2 Omega - |v|^2,
+ * and the code's acceleration, transcribed from `Cr3bp::acceleration`,
+ *     ax = x + 2 vy - (1-mu)(x+mu)/r1^3 - mu(x-1+mu)/r2^3,
+ *     ay = y - 2 vx - (1-mu) y/r1^3 - mu y/r2^3,
+ *     az = -(1-mu) z/r1^3 - mu z/r2^3.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the coded acceleration is grad Omega plus the Coriolis term (2 vy, -2 vx, 0)       (G1);
+ *   2. the Coriolis term does no work, v . (a - grad Omega) = 0, so dC/dt = 0 along the
+ *      equations of motion (G4);
+ *   3. the two on-axis closures of `collinear_points` are dOmega/dx and d2Omega/dx2 at
+ *      y = z = 0, on each of the three axis intervals (G1);
+ *   4. dOmega/dx = 0 at the three collinear points is, after clearing denominators, exactly the
+ *      classical quintic in the distance gamma from the nearer primary (G2) -- the polynomials
+ *      derivations/cr3bp.gp roots at 100 digits;
+ *   5. grad Omega vanishes identically in mu at (1/2 - mu, +-sqrt(3)/2, 0): L4/L5 are exact (G3).
+ * The mass ratio of `Cr3bp::SUN_EARTH` (Sun to Earth+Moon) from the IAU 2009 best estimates is
+ * computed in derivations/cr3bp.gp.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/cr3bp.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+r1 : sqrt((x + mu)^2 + y^2 + z^2)$
+r2 : sqrt((x - 1 + mu)^2 + y^2 + z^2)$
+Om : (x^2 + y^2)/2 + (1 - mu)/r1 + mu/r2$
+
+ax : x + 2*vy - (1 - mu)*(x + mu)/r1^3 - mu*(x - 1 + mu)/r2^3$
+ay : y - 2*vx - (1 - mu)*y/r1^3 - mu*y/r2^3$
+az : -(1 - mu)*z/r1^3 - mu*z/r2^3$
+
+/* 1. Equations of motion. */
+zero("eom_x_is_grad_omega_plus_coriolis", ratsimp(ax - (diff(Om, x) + 2*vy)))$
+zero("eom_y_is_grad_omega_plus_coriolis", ratsimp(ay - (diff(Om, y) - 2*vx)))$
+zero("eom_z_is_grad_omega", ratsimp(az - diff(Om, z)))$
+
+/* 2. The Jacobi integral. */
+C : 2*Om - (vx^2 + vy^2 + vz^2)$
+dCdt : diff(C, x)*vx + diff(C, y)*vy + diff(C, z)*vz
+     + diff(C, vx)*ax + diff(C, vy)*ay + diff(C, vz)*az$
+zero("coriolis_does_no_work", ratsimp(vx*(ax - diff(Om, x)) + vy*(ay - diff(Om, y))
+                                      + vz*(az - diff(Om, z))))$
+zero("jacobi_rate_vanishes", ratsimp(dCdt))$
+
+/* 3. The on-axis closures, with |x+mu| and |x-1+mu| replaced by their sign on each interval:
+      s1 = sign(x+mu), s2 = sign(x-1+mu); L3 has (-,-), L1 (+,-), L2 (+,+). */
+d_omega_code(s1, s2)  := x - (1 - mu)*(x + mu)/(s1*(x + mu))^3 - mu*(x - 1 + mu)/(s2*(x - 1 + mu))^3$
+d2_omega_code(s1, s2) := 1 + 2*(1 - mu)/(s1*(x + mu))^3 + 2*mu/(s2*(x - 1 + mu))^3$
+/* Omega's x-derivatives in (x, y, z), then put on the axis. */
+gradx  : diff(Om, x)$
+gradxx : diff(Om, x, 2)$
+on_axis(e, s1, s2) := ratsimp(subst([sqrt((x + mu)^2) = s1*(x + mu),
+                                     sqrt((x - 1 + mu)^2) = s2*(x - 1 + mu)],
+                                    subst([y = 0, z = 0], e)))$
+for c in [["L3", -1, -1], ["L1", 1, -1], ["L2", 1, 1]] do block([s1 : c[2], s2 : c[3]],
+  zero(sconcat(c[1], "_interval_d_omega_is_dOmega_dx"),
+       ratsimp(on_axis(gradx, s1, s2) - d_omega_code(s1, s2))),
+  zero(sconcat(c[1], "_interval_d2_omega_is_d2Omega_dx2"),
+       ratsimp(on_axis(gradxx, s1, s2) - d2_omega_code(s1, s2))))$
+
+/* 4. The collinear quintics, gamma > 0 the distance to the nearer primary. */
+q1 : g^5 - (3 - mu)*g^4 + (3 - 2*mu)*g^3 - mu*g^2 + 2*mu*g - mu$
+q2 : g^5 + (3 - mu)*g^4 + (3 - 2*mu)*g^3 - mu*g^2 - 2*mu*g - mu$
+q3 : g^5 + (2 + mu)*g^4 + (1 + 2*mu)*g^3 - (1 - mu)*g^2 - 2*(1 - mu)*g - (1 - mu)$
+/* L1: x = 1 - mu - g, so x + mu = 1 - g > 0 and x - 1 + mu = -g < 0. */
+zero("L1_root_is_the_quintic",
+     ratsimp(subst(x = 1 - mu - g, d_omega_code(1, -1))*g^2*(1 - g)^2 + q1))$
+/* L2: x = 1 - mu + g, x + mu = 1 + g, x - 1 + mu = g. */
+zero("L2_root_is_the_quintic",
+     ratsimp(subst(x = 1 - mu + g, d_omega_code(1, 1))*g^2*(1 + g)^2 - q2))$
+/* L3: x = -mu - g, x + mu = -g, x - 1 + mu = -(1 + g). */
+zero("L3_root_is_the_quintic",
+     ratsimp(subst(x = -mu - g, d_omega_code(-1, -1))*g^2*(1 + g)^2 + q3))$
+
+/* 5. The triangular points, for every mu. */
+for c in [["L4", 1], ["L5", -1]] do block([pt : [x = 1/2 - mu, y = c[2]*sqrt(3)/2, z = 0]],
+  zero(sconcat(c[1], "_dOmega_dx"), ratsimp(radcan(subst(pt, diff(Om, x))))),
+  zero(sconcat(c[1], "_dOmega_dy"), ratsimp(radcan(subst(pt, diff(Om, y))))),
+  zero(sconcat(c[1], "_dOmega_dz"), ratsimp(radcan(subst(pt, diff(Om, z))))))$

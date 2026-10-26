@@ -1,0 +1,112 @@
+/* The attitude laws -- spacelab-propagation/src/attitude_law.rs -- as identities.
+ *
+ * Every law returns the inertial->body matrix whose rows are the body axes, built in one of three
+ * shapes from two unit vectors:
+ *     (x, z cross x, z)   Qsw (x = r^, z = h^), Tnw (x = v^, z = h^),
+ *                         SunPointing (x = ((z cross v^)^ cross z)^, z = sun^);
+ *     (x, y, x cross y)   Vnc (x = v^, y = h^);
+ *     (y cross z, y, z)   Lvlh (y = -h^, z = -r^), YawSteering (y = (z cross s_perp^)^, z = -r^);
+ * and SpinStabilized is base . exp([-a]x theta), exp by Rodrigues R = I + A K + B K^2 with
+ * A = sin(theta)/theta and B = 2 sin^2(theta/2)/theta^2 (the series 1 - theta^2/6, 1/2 - theta^2/24
+ * below theta = 1e-8).
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. for each shape, every entry of M M' - I and det M - 1 is a polynomial in the constraint
+ *      residuals |u|^2 - 1, |w|^2 - 1 and u.w of its two input vectors -- so an orthonormal pair
+ *      gives an orthonormal right-handed frame exactly (G1);
+ *   2. the pairs the laws feed in are orthogonal by construction: r.(r x v) = v.(r x v) = 0,
+ *      z.(z x w) = 0 and (w x z).z = 0 for any w -- the cross-product completion YawSteering and
+ *      SunPointing use, which stays orthogonal to rounding even where s_perp = s - (s.z) z, whose
+ *      own s_perp . z = (s.z)(1 - z.z) is a cancellation, is short (G1);
+ *   3. YawSteering's array axis y = z x x is perpendicular to the Sun for any sun vector (G1);
+ *   4. Rodrigues' exp is orthogonal with determinant 1, fixes its axis, and is a one-parameter
+ *      group, R(t1) R(t2) = R(t1 + t2) (G4); its half-angle B is (1 - cos theta)/theta^2 and the
+ *      small-angle branch is its Taylor series to the order kept (G1);
+ *   5. hence the spin law fixes the inertial axis in the body, M(t) a = base a, and
+ *      M(t0 + t1 + t2) = M(t0 + t1) base' M(t0 + t2) (G4).
+ * derivations/attitude_law_frames.gp builds every law at 100 digits on 200 pseudo-random states and
+ * checks orthonormality, handedness, the axis claims and the spin composition there.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/attitude_law_frames.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+ratprint : false$
+
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+u : [u1, u2, u3]$
+w : [w1, w2, w3]$
+/* The ideal of an orthonormal pair: e1 = |u|^2 - 1, e2 = |w|^2 - 1, e3 = u.w. */
+uu : u . u$  ww : w . w$  uw : u . w$
+
+/* Each Gram entry and the determinant are stated as an explicit polynomial in uu, ww, uw and
+   checked by expansion; an orthonormal pair (uu = ww = 1, uw = 0) then gives I and +1. */
+check_shape(tag, M, want_gram, want_det) := block([G : M . transpose(M)],
+  for i : 1 thru 3 do for j : i thru 3 do
+    zero(sconcat(tag, "_gram_", i, j), expand(G[i, j] - want_gram[i][j])),
+  zero(sconcat(tag, "_det"), expand(determinant(M) - want_det)))$
+/* (x, z x x, z) with x = u, z = w. */
+check_shape("rows_x_zx_z", matrix(u, cross(w, u), w),
+  [[uu, 0, uw], [0, uu*ww - uw^2, 0], [uw, 0, ww]], uu*ww - uw^2)$
+/* (x, y, x x y) with x = u, y = w. */
+check_shape("rows_x_y_xy", matrix(u, w, cross(u, w)),
+  [[uu, uw, 0], [uw, ww, 0], [0, 0, uu*ww - uw^2]], uu*ww - uw^2)$
+/* (y x z, y, z) with y = u, z = w. */
+check_shape("rows_yz_y_z", matrix(cross(u, w), u, w),
+  [[uu*ww - uw^2, 0, 0], [0, uu, uw], [0, uw, ww]], uu*ww - uw^2)$
+/* With uu = ww = 1 and uw = 0 each target is I and 1. */
+zero("orthonormal_pair_gives_identity", subst([UU = 1, WW = 1, UW = 0], UU*WW - UW^2) - 1)$
+
+/* 2. The input pairs. */
+r : [r1, r2, r3]$  v : [v1, v2, v3]$  sv : [s1, s2, s3]$  z : [z1, z2, z3]$
+zero("radius_perpendicular_to_normal", expand(r . cross(r, v)))$
+zero("velocity_perpendicular_to_normal", expand(v . cross(r, v)))$
+sperp : sv - (sv . z)*z$
+zero("sun_projection_perpendicular_to_nadir", expand(sperp . z - (sv . z)*(1 - z . z)))$
+zero("sun_pointing_roll_axis_perpendicular", expand(z . cross(z, v)))$
+zero("completion_left_cross_perpendicular", expand(z . cross(z, w)))$
+zero("completion_right_cross_perpendicular", expand(cross(w, z) . z))$
+
+/* 3. YawSteering: y = z x s_perp (normalisation aside) is perpendicular to the Sun. */
+zero("yaw_array_axis_perpendicular_to_sun", expand(cross(z, sperp) . sv))$
+
+/* 4. Rodrigues on a unit axis a, with (C, S) = (cos theta, sin theta). Polynomial algebra: the
+   unit constraints are applied by eliminating a3^2 = 1 - a1^2 - a2^2 and S^2 = 1 - C^2 (and the
+   same for every other axis and angle), which keeps every check a finite rational reduction. */
+skew(q) := matrix([0, -q[3], q[2]], [q[3], 0, -q[1]], [-q[2], q[1], 0])$
+rod(q, C, S) := ident(3) + S*skew(q) + (1 - C)*(skew(q) . skew(q))$
+ax : [a1, a2, a3]$
+bx : [b1, b2, b3]$
+units : [a3^2 = 1 - a1^2 - a2^2, b3^2 = 1 - b1^2 - b2^2,
+         S^2 = 1 - C^2, S1^2 = 1 - C1^2, S2^2 = 1 - C2^2, Sg^2 = 1 - Cg^2]$
+red(e) := block([f : ratexpand(e)],
+  for u in units do f : ratexpand(ratsubst(rhs(u), lhs(u), f)),
+  ratsimp(f))$
+mzero(tag, Mx) := for i : 1 thru 3 do for j : 1 thru 3 do
+  zero(sconcat(tag, "_", i, j), red(Mx[i, j]))$
+R : rod(ax, C, S)$
+mzero("rodrigues_orthogonal", R . transpose(R) - ident(3))$
+zero("rodrigues_det", red(determinant(R) - 1))$
+fixv : R . transpose(matrix(ax)) - transpose(matrix(ax))$
+for i : 1 thru 3 do zero(sconcat("rodrigues_fixes_axis_", i), red(fixv[i, 1]))$
+/* The addition formulas carry the angles: R(t1) R(t2) = R(t1 + t2). */
+mzero("rodrigues_group", rod(ax, C1, S1) . rod(ax, C2, S2) - rod(ax, C1*C2 - S1*S2, S1*C2 + C1*S2))$
+/* The coded coefficients, omega = theta a, K_omega = theta K: A K_omega = sin(theta) K and
+   B K_omega^2 = (1 - cos theta) K^2 with the half-angle B. */
+zero("half_angle_b", trigsimp(trigexpand(2*sin(hh)^2/(2*hh)^2 - (1 - cos(2*hh))/(2*hh)^2)))$
+zero("small_angle_a_series", ratsimp(taylor(sin(th)/th, th, 0, 3) - (1 - th^2/6)))$
+zero("small_angle_b_series", ratsimp(taylor((1 - cos(th))/th^2, th, 0, 3) - (1/2 - th^2/24)))$
+
+/* 5. The spin law M = base R(-rate (t - t0)) with base itself a rotation, about bx by (Cg, Sg).
+   The angle -rate (t - t0) at t0 + t1 is carried by (C1, S1), at t0 + t2 by (C2, S2), and at
+   t0 + t1 + t2 by their sum. */
+base : rod(bx, Cg, Sg)$
+mzero("base_is_orthogonal", transpose(base) . base - ident(3))$
+fixb : base . R . transpose(matrix(ax)) - base . transpose(matrix(ax))$
+for i : 1 thru 3 do zero(sconcat("spin_fixes_the_inertial_axis_", i), red(fixb[i, 1]))$
+mzero("spin_composition",
+      base . rod(ax, C1*C2 - S1*S2, S1*C2 + C1*S2)
+      - (base . rod(ax, C1, S1)) . transpose(base) . (base . rod(ax, C2, S2)))$
+

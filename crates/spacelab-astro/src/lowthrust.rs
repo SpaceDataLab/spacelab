@@ -6,6 +6,16 @@
 //! for an optimal-control layer — indirect (Pontryagin costates) or direct (collocation) — which is a
 //! later extension. Units are the caller's, consistent; the thrust is given as an acceleration
 //! `T/m` (constant here — a mass-depleting variant is a refinement).
+//!
+//! Gate: `derivations/lowthrust.mac` shows that along the coded field the specific energy changes
+//! at exactly the thrust power `a_T v·û`, that tangential steering is the energy-optimal unit
+//! direction, that coasting conserves energy and angular momentum, and that a quasi-circular
+//! tangential spiral loses circular speed at exactly `a_T` (Edelbaum's `Δv = v₀ − v₁`);
+//! `derivations/lowthrust.gp` evaluates the accelerations at 100 digits. The module tests
+//! `the_acceleration_is_its_closed_form_under_every_steering_law` (G1),
+//! `the_energy_rate_is_the_thrust_power` (G1) and
+//! `a_tangential_spiral_falls_in_circular_speed_at_the_thrust_acceleration` (G3) hold the code to
+//! them.
 
 #![allow(clippy::many_single_char_names, clippy::cast_precision_loss)]
 
@@ -127,8 +137,9 @@ mod tests {
         ],
     ];
 
-    /// Every steering law against the closed form, at a state with no symmetry to hide behind.
-    /// `Inertial` is the one the spiral tests never reach at all.
+    /// (G1) Every steering law against the closed form, at a state with no symmetry to hide behind,
+    /// the references evaluated at 100 digits in `derivations/lowthrust.gp`. `Inertial` is the one
+    /// the spiral tests never reach at all.
     #[test]
     fn the_acceleration_is_its_closed_form_under_every_steering_law() {
         let laws = [
@@ -176,6 +187,83 @@ mod tests {
             (scaled - plain).norm() < 8.0 * f64::EPSILON,
             "an inertial command is not scale invariant"
         );
+    }
+
+    /// (G1) The specific energy changes at exactly the thrust power, `dE/dt = a_T v·û`, along the
+    /// shipped field (`energy_rate_is_thrust_power` in `derivations/lowthrust.mac`): `+a_T|v|`
+    /// tangential, `−a_T|v|` retrograde, `a_T v·d̂` inertial. The rate is formed from `acceleration`
+    /// alone as `v·a + μ(r·v)/|r|³`, so gravity has to cancel out of it to rounding — a few ulps of
+    /// `|v||g|`, the size of the two terms that cancel, against a thrust power four decades below.
+    #[test]
+    fn the_energy_rate_is_the_thrust_power() {
+        let rn = R.norm();
+        let gravity = MU_EARTH_KM / (rn * rn * rn);
+        let floor = 8.0 * f64::EPSILON * V.norm() * gravity * rn;
+        for (law, want) in [
+            (Steering::Tangential, THRUST * V.norm()),
+            (Steering::Retrograde, -THRUST * V.norm()),
+            (
+                Steering::Inertial(DIRECTION),
+                THRUST * V.dot(DIRECTION) / DIRECTION.norm(),
+            ),
+        ] {
+            let a = acceleration(R, V, MU_EARTH_KM, THRUST, law);
+            let rate = V.dot(a) + gravity * R.dot(V);
+            let miss = (rate - want).abs();
+            println!(
+                "{law:?}: dE/dt {rate:.17e}, want {want:.17e}, miss {miss:.3e} (floor {floor:.3e})"
+            );
+            assert!(
+                miss <= floor,
+                "{law:?}: dE/dt = {rate:.17e}, want {want:.17e}"
+            );
+        }
+    }
+
+    /// (G3) Edelbaum's quasi-circular limit: under tangential thrust a circular orbit spirals with
+    /// its circular speed `√(μ/a)` falling at exactly `a_T`, so after `t` the speed is `v₀ − a_T t`
+    /// and the spiral costs `Δv = a_T t` (`circular_speed_falls_at_the_thrust_acceleration` in
+    /// `derivations/lowthrust.mac`). The limit is `ε = a_T r²/μ → 0`, the thrust against gravity;
+    /// at finite `ε` the orbit carries a forced eccentricity of order `ε`, and `|v|/√(μ/a)`
+    /// oscillates about one by as much, so the miss is bounded by `ε` of the Δv — with `ε` taken
+    /// on the final, widest orbit, since `ε` grows as `r²` along the spiral. Measured over a day
+    /// from 7000 km at three thrust levels, the miss is 0.04 to 0.07 of `ε·Δv`, and as a fraction
+    /// of `Δv` it falls from 4.3e-3 to 7.8e-5 as `a_T` halves twice; the bound is a half.
+    #[test]
+    fn a_tangential_spiral_falls_in_circular_speed_at_the_thrust_acceleration() {
+        let r0 = Vec3::new(7000.0, 0.0, 0.0);
+        let v0 = (MU_EARTH_KM / 7000.0).sqrt();
+        let span = 86_400.0;
+        let mut previous = f64::INFINITY;
+        for thrust in [4e-5, 2e-5, 1e-5] {
+            let (r, v) = propagate_lowthrust(
+                r0,
+                Vec3::new(0.0, v0, 0.0),
+                MU_EARTH_KM,
+                thrust,
+                Steering::Tangential,
+                span,
+                8640,
+            );
+            let speed = (-2.0 * (v.dot(v) / 2.0 - MU_EARTH_KM / r.norm())).sqrt();
+            let a = MU_EARTH_KM / (speed * speed);
+            let eps = thrust * a * a / MU_EARTH_KM;
+            let dv = thrust * span;
+            let miss = (speed - (v0 - dv)).abs() / dv;
+            println!(
+                "a_T {thrust:e}: final ε {eps:.3e}, √(μ/a) {speed:.9}, miss {miss:.3e} of Δv, {:.3e} of ε·Δv",
+                miss / eps
+            );
+            assert!(
+                miss < 0.5 * eps,
+                "a_T {thrust:e}: miss {miss:.3e} of Δv at ε {eps:.3e}"
+            );
+            assert!(
+                miss < previous,
+                "a_T {thrust:e}: the miss did not fall with ε"
+            );
+            previous = miss;
+        }
     }
 
     /// Runge-Kutta is fourth order, so halving the step over a fixed span must cut the difference

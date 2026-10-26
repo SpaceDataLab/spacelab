@@ -1,0 +1,45 @@
+/* The Allen-Eggers ballistic entry, the closed-form limit of the entry equations of
+   crates/spacelab-astro/src/edl.rs.
+
+   With no lift, no gravity (mu = 0) and a straight path (gamma constant; exactly so for a vertical
+   entry, where the curvature term (V^2/r) cos(gamma) vanishes with cos gamma), the equations of
+   the module header reduce to
+       dV/dt = -rho V^2/(2 beta),   dh/dt = V sin(gamma) = -V s,   s = -sin(gamma) > 0,
+       rho(h) = rho0 exp(-h/H),
+   and the sensed deceleration is D = rho V^2/(2 beta). Entering at altitude he with speed Ve
+   (rho_e = rho(he)), printed `<name>: 0`:
+     1.  V(h) = Ve exp(-(rho(h) - rho_e) H/(2 beta s)) solves dV/dh = (dV/dt)/(dh/dt) (G2);
+     2.  and V(he) = Ve;
+     3.  the deceleration is stationary in h where rho = beta s/H, i.e. at the altitude
+         h* = H log(rho0 H/(beta s)) (G3);
+     4.  there d^2 log(D)/dh^2 = -1/H^2 < 0: a maximum, the only one (dlogD/dh = -1/H + rho/(beta s)
+         is strictly monotone in h);
+     5.  the speed there is V* = Ve exp(-1/2 + rho_e H/(2 beta s));
+     6.  the peak is D* = s Ve^2/(2 H) exp(-1 + rho_e H/(beta s)) -- Allen and Eggers' s Ve^2/(2 e H)
+         when the entry starts above the atmosphere (rho_e -> 0) (G3);
+     7.  that limit itself.
+   derivations/edl_allen_eggers.gp evaluates h*, V* and D* at 100 digits for the test's entry.
+
+   Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/edl_allen_eggers.mac </dev/null */
+
+display2d : false$
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+assume(rho0 > 0, H > 0, beta > 0, s > 0, Ve > 0)$
+
+rho(h) := rho0*exp(-h/H)$
+V(h) := Ve*exp(-(rho(h) - rho(he))*H/(2*beta*s))$
+D(h) := rho(h)*V(h)^2/(2*beta)$
+
+zero("speed_solves_the_entry_equation",
+     radcan(diff(V(h), h) - (-rho(h)*V(h)^2/(2*beta))/(-V(h)*s)))$
+zero("speed_at_the_interface", radcan(V(he) - Ve))$
+hstar : H*log(rho0*H/(beta*s))$
+dlogD : diff(log(D(h)), h)$
+zero("peak_is_where_rho_is_beta_s_over_h", radcan(subst(h = hstar, dlogD)))$
+zero("peak_is_a_maximum", radcan(subst(h = hstar, diff(dlogD, h)) + 1/H^2))$
+zero("speed_at_the_peak", radcan(V(hstar) - Ve*exp(-1/2 + rho(he)*H/(2*beta*s))))$
+zero("peak_deceleration", radcan(D(hstar) - s*Ve^2/(2*H)*exp(-1 + rho(he)*H/(beta*s))))$
+zero("allen_eggers_limit",
+     radcan(limit(s*Ve^2/(2*H)*exp(-1 + r_e*H/(beta*s)), r_e, 0) - s*Ve^2/(2*%e*H)))$

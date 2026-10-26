@@ -1,0 +1,68 @@
+/* The synodic <-> inertial map of crates/spacelab-astro/src/synodic.rs, from its definition.
+
+   The synodic frame turns about z at the nondimensional mean motion 1, so at rotation angle
+   theta = t an inertial position is r_I(t) = Rz(t) r_S(t). The inertial velocity is its time
+   derivative,
+
+       v_I = d/dt [Rz(t) r_S(t)] = Rz(t) (v_S + z x r_S),    z x r_S = [-y, x, 0],
+
+   which is what `synodic_to_inertial` codes, and `inertial_to_synodic` removes the same term after
+   rotating back. Shown here, each line printing `<name>: 0`:
+     1-3. the coded velocity IS d/dt of the inertial position along an arbitrary synodic path
+          (x(t), y(t), z(t)) -- the defining equation (G2), all three components;
+     4-9. inertial_to_synodic(synodic_to_inertial(s, th), th) = s, all six components (G1);
+     10.  the speed identity |v_I|^2 = |v_S|^2 + 2 (x vy - y vx) + x^2 + y^2 -- the rotation
+          preserves length, so the inertial speed is the synodic one plus the frame term (G4);
+     11-13. a synodic state moving as v_S = -z x r_S is inertially at rest: v_I = 0 (G3);
+     14.  a synodic rest point moves on a circle at unit rate: v_I = z x r_I, so v_I . r_I = 0
+          and |v_I|^2 = x_I^2 + y_I^2 (printed as the two residuals summed in quadrature).
+
+   Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/synodic_frame.mac </dev/null */
+
+display2d : false$
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+tsimp(x) := ratsimp(trigsimp(ratsimp(x)))$
+
+rotz(th, a, b) := [cos(th)*a - sin(th)*b, sin(th)*a + cos(th)*b]$
+to_inertial(s, th) := block([p, v],
+  p : rotz(th, s[1], s[2]),
+  v : rotz(th, s[4] - s[2], s[5] + s[1]),
+  [p[1], p[2], s[3], v[1], v[2], s[6]])$
+to_synodic(s, th) := block([p, v],
+  p : rotz(-th, s[1], s[2]),
+  v : rotz(-th, s[4], s[5]),
+  [p[1], p[2], s[3], v[1] + p[2], v[2] - p[1], s[6]])$
+
+/* 1-3: along an arbitrary synodic path with theta = t. */
+depends([x, y, z], t)$
+path : [x, y, z, diff(x, t), diff(y, t), diff(z, t)]$
+inert : to_inertial(path, t)$
+zero("velocity_x_is_the_derivative_of_position", tsimp(diff(inert[1], t) - inert[4]))$
+zero("velocity_y_is_the_derivative_of_position", tsimp(diff(inert[2], t) - inert[5]))$
+zero("velocity_z_is_the_derivative_of_position", tsimp(diff(inert[3], t) - inert[6]))$
+remove([x, y, z], dependency)$
+
+/* 4-9: round trip. */
+s : [x, y, z, vx, vy, vz]$
+back : to_synodic(to_inertial(s, th), th)$
+for i : 1 thru 6 do
+  zero(sconcat("round_trip_component_", i), tsimp(back[i] - s[i]))$
+
+/* 10: speed. */
+si : to_inertial(s, th)$
+zero("inertial_speed_identity",
+     tsimp(si[4]^2 + si[5]^2 + si[6]^2 - (vx^2 + vy^2 + vz^2 + 2*(x*vy - y*vx) + x^2 + y^2)))$
+
+/* 11-13: inertially fixed point, v_S = -z x r = [y, -x, 0]. */
+fixed : to_inertial([x, y, z, y, -x, 0], th)$
+zero("inertially_fixed_vx", tsimp(fixed[4]))$
+zero("inertially_fixed_vy", tsimp(fixed[5]))$
+zero("inertially_fixed_vz", tsimp(fixed[6]))$
+
+/* 14: synodic rest point. */
+rest : to_inertial([x, y, z, 0, 0, 0], th)$
+zero("rest_point_circles_at_unit_rate",
+     tsimp((rest[1]*rest[4] + rest[2]*rest[5])^2
+           + (rest[4]^2 + rest[5]^2 - rest[1]^2 - rest[2]^2)^2))$

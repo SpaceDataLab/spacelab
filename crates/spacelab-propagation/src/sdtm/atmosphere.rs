@@ -32,9 +32,14 @@
 //! the lift degenerates to that constant rather than to an infinity — `1/H`, not `H`, is what the
 //! expression carries, and it is zero there.
 //!
-//! What checks it: the eight tests below, whose residuals `docs/verification.md` §10.16 publishes —
+//! What checks it: eight of the tests below, whose residuals `docs/verification.md` §10.16 publishes —
 //! the value bit-equal to the field at the named point, the dual gradient against the analytic
 //! `dρ/dz·r̂` to 1e-14 relative, the boundary degeneracy, and a 6015-point positivity sweep.
+//!
+//! Gate: `derivations/atmosphere_lift.mac` shows that with `1/H = −ρ'/ρ` the lift's gradient at `r₀`
+//! is `ρ'·r̂` and that on a spherical geodetic map the radial chain rule gives the same vector. The
+//! module tests `the_gradient_the_stm_reads_is_the_fields_own_analytic_one` (G1) and
+//! `the_lift_gradient_is_the_radial_derivative_of_the_density` (G2) hold the shipped wrapper to it.
 
 use spacelab_autodiff::Scalar;
 
@@ -227,11 +232,12 @@ mod tests {
         }
     }
 
-    /// The gradient the state-transition matrix reads is the field's **own** `dρ/dz`, projected on
+    /// (G1) The gradient the state-transition matrix reads is the field's **own** `dρ/dz`, projected on
     /// `r̂` — not a 10 km finite difference of it, which is what the other three wrappers in this crate
     /// have to use. With `1/H = −(dρ/dz)/ρ` the lift's derivative at `r = r₀` is `ρ·(−1/H) = dρ/dz`
     /// identically, so this pins the sign of the exponent, the direction of `r₀ − ‖r‖` and the
-    /// reciprocal together against a number the wrapper did not compute.
+    /// reciprocal together against a number the wrapper did not compute. The identity is
+    /// `derivations/atmosphere_lift.mac`'s `analytic_lift_gradient_1..3`.
     #[test]
     fn the_gradient_the_stm_reads_is_the_fields_own_analytic_one() {
         use spacelab_autodiff::Dual;
@@ -256,6 +262,54 @@ mod tests {
                 let want = dz * (R_REF[i] / r0);
                 let miss = libm::fabs(grad[i] - want) / libm::fabs(want);
                 assert!(miss < 1e-14, "alt {alt_km}, axis {i}: {miss:.3e}");
+            }
+        }
+    }
+
+    /// (G2) The gradient the STM reads is the derivative of the density the wrapper returns, measured
+    /// on the wrapper alone.
+    ///
+    /// With a spherical geodetic map `z = |r| − R` the f64 value does move with the radius, so the
+    /// derivative it defines can be taken by a central difference of the wrapper's own output and
+    /// compared with its dual gradient — no call to `density_gradient` in the reference.
+    /// `derivations/atmosphere_lift.mac` (`spherical_chain_rule_1..3`) is the chain rule this rests
+    /// on: `∂ρ(|r| − R)/∂xᵢ = ρ'·xᵢ/|r|`. A 1 m step leaves a truncation of `(δ/H)²/6 < 3e-9` against
+    /// the tightest 8 km layer and a rounding of `ε·H/δ < 2e-12`, so 1e-7 relative is a bound on
+    /// the wrong-derivative case, which would be off at order one.
+    #[test]
+    fn the_lift_gradient_is_the_radial_derivative_of_the_density() {
+        use spacelab_autodiff::Dual;
+
+        const EARTH: f64 = 6_371_000.0;
+        let spherical = |_t: f64, r: [f64; 3]| {
+            let alt_km = (libm::sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]) - EARTH) / 1_000.0;
+            (alt_km, 33.0, -118.0)
+        };
+        let atm = SdtmAtmosphere {
+            field: coefficients::FIELD,
+            drivers: drivers(),
+            doy0: DOY0,
+            sec0: SEC0,
+            geodetic: spherical,
+        };
+        let dir = [0.6, -0.48, 0.64];
+        for alt_km in [125.0, 250.0, 420.0, 800.0, 1_500.0] {
+            let radius = EARTH + alt_km * 1_000.0;
+            let at = |dr: f64| dir.map(|c| c * (radius + dr));
+            let step = 1.0;
+            let slope = (atm.density::<f64>(0.0, &at(step)) - atm.density::<f64>(0.0, &at(-step)))
+                / (2.0 * step);
+            let r = at(0.0);
+            let rd = [
+                Dual::<3>::variable(r[0], 0),
+                Dual::<3>::variable(r[1], 1),
+                Dual::<3>::variable(r[2], 2),
+            ];
+            let grad = atm.density(0.0, &rd).grad();
+            for i in 0..3 {
+                let want = slope * dir[i];
+                let miss = libm::fabs(grad[i] - want) / libm::fabs(want);
+                assert!(miss < 1e-7, "alt {alt_km} km, axis {i}: {miss:.3e}");
             }
         }
     }

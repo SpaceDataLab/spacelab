@@ -31,6 +31,14 @@
 //! the force's own time dependence: one that reaches an `f64`-only subsystem (an ephemeris, a
 //! density table, the frame rotation — see [`ScalarSystem::eval`]) is flat in `t` under
 //! differentiation, and its series still truncates after the first order.
+//!
+//! Gate: `derivations/taylor_jet_recurrences.mac` shows, on symbolic jets, that every recurrence
+//! here — product, quotient, `recip`, `sqrt`, `powf`, `exp`, `ln`, `sin`, `cos`, `atan2` — yields
+//! the Taylor coefficients of its function, and that the clocked bootstrap reproduces the exact
+//! series of the two-body problem (against its Lie series) and of `y′ = cos(t)·y`;
+//! `derivations/taylor_jet_recurrences.gp` re-checks the recurrences against PARI's power series and
+//! the two solutions by Picard iteration. The module test `the_solution_jets_are_the_exact_series`
+//! (G2) holds [`solution_jets`] to those exact rationals.
 
 #![allow(
     clippy::needless_range_loop,
@@ -702,6 +710,130 @@ mod tests {
             assert_eq!(da.c[k], (k as f64 + 1.0) * a.c[k + 1]);
         }
         assert_eq!(da.c[M - 1], 0.0);
+    }
+
+    /// The planar two-body problem, `μ = 1`, with `|r|⁻³` formed as `(r²)^{−3/2}` through `powf`
+    /// (`POWF`) or as `1/(√r² · r²)` through `sqrt` and `recip`, the force models' spelling.
+    struct TwoBody<const POWF: bool>;
+    impl<const POWF: bool> ScalarSystem<4> for TwoBody<POWF> {
+        fn eval<S: Scalar>(&self, _t: S, y: &[S; 4]) -> [S; 4] {
+            let r2 = y[0] * y[0] + y[1] * y[1];
+            let k = if POWF {
+                r2.powf(-1.5)
+            } else {
+                (r2.sqrt() * r2).recip()
+            };
+            [y[2], y[3], -(y[0] * k), -(y[1] * k)]
+        }
+    }
+
+    /// `y′ = cos(t)·y`: the right-hand side reads the clock, so its jet needs `t + τ`, not `t`.
+    struct CosClock;
+    impl ScalarSystem<1> for CosClock {
+        fn eval<S: Scalar>(&self, t: S, y: &[S; 1]) -> [S; 1] {
+            [t.cos() * y[0]]
+        }
+    }
+
+    /// The bootstrap's coefficients through `τ⁷` as exact rationals, printed by
+    /// `derivations/taylor_jet_recurrences.mac` for the two-body state `x = (3/5, 4/5)`,
+    /// `v = (−1/2, 1)` and for `exp(sin t)`.
+    const TWO_BODY_JET: [[(i32, i32); M]; 4] = [
+        [
+            (3, 5),
+            (-1, 2),
+            (-3, 10),
+            (7, 30),
+            (-9, 80),
+            (1, 30),
+            (7, 800),
+            (-149, 6300),
+        ],
+        [
+            (4, 5),
+            (1, 1),
+            (-2, 5),
+            (1, 30),
+            (7, 120),
+            (-1, 15),
+            (167, 3600),
+            (-1081, 50400),
+        ],
+        [
+            (-1, 2),
+            (-3, 5),
+            (7, 10),
+            (-9, 20),
+            (1, 6),
+            (21, 400),
+            (-149, 900),
+            (5989, 33600),
+        ],
+        [
+            (1, 1),
+            (-4, 5),
+            (1, 10),
+            (7, 30),
+            (-1, 3),
+            (167, 600),
+            (-1081, 7200),
+            (953, 50400),
+        ],
+    ];
+    const EXP_SIN_JET: [(i32, i32); M] = [
+        (1, 1),
+        (1, 1),
+        (1, 2),
+        (0, 1),
+        (-1, 8),
+        (-1, 15),
+        (-1, 240),
+        (1, 90),
+    ];
+
+    /// (G2) `solution_jets` returns the solution's own Taylor series: the coefficients the
+    /// bootstrap `a_{k+1} = [f(y(·))]ₖ/(k+1)` must produce by its defining equation, which
+    /// `derivations/taylor_jet_recurrences.mac` derives in exact rationals — every jet recurrence
+    /// against Maxima's series, the two-body bootstrap against the Lie series `Lᵏx/k!`, the
+    /// clocked one against `exp(sin t)` — and `derivations/taylor_jet_recurrences.gp` re-derives by
+    /// Picard iteration on PARI's power series.
+    ///
+    /// The two-body state is the nearest double to `(3/5, 4/5, −1/2, 1)`, so `|r| = 1` only to an
+    /// ulp; the coefficients are `O(1)` and come out of at most eight nested recurrences, and the bar
+    /// is `64 ε`. `exp(sin t)` from `t = 0` is the case a clock frozen at `t₀` gets wrong from `τ²`
+    /// on (it gives `1/k!`).
+    #[test]
+    fn the_solution_jets_are_the_exact_series() {
+        let bar = 64.0 * f64::EPSILON;
+        let state = [0.6, 0.8, -0.5, 1.0];
+        for (name, jets) in [
+            ("powf", solution_jets::<4, M>(&TwoBody::<true>, 0.0, &state)),
+            (
+                "sqrt·recip",
+                solution_jets::<4, M>(&TwoBody::<false>, 0.0, &state),
+            ),
+        ] {
+            for (i, row) in TWO_BODY_JET.iter().enumerate() {
+                for (k, &(num, den)) in row.iter().enumerate() {
+                    let want = f64::from(num) / f64::from(den);
+                    let d = (jets[i][k] - want).abs();
+                    assert!(
+                        d <= bar,
+                        "two-body ({name}) y{i} c[{k}] = {:.17e}, want {num}/{den}",
+                        jets[i][k]
+                    );
+                }
+            }
+        }
+        let jets = solution_jets::<1, M>(&CosClock, 0.0, &[1.0]);
+        for (k, &(num, den)) in EXP_SIN_JET.iter().enumerate() {
+            let want = f64::from(num) / f64::from(den);
+            assert!(
+                (jets[0][k] - want).abs() <= bar,
+                "exp(sin t) c[{k}] = {:.17e}, want {num}/{den}",
+                jets[0][k]
+            );
+        }
     }
 
     /// `y′ = -y` — exponential decay, for a real integration and the dense/bad-argument paths.

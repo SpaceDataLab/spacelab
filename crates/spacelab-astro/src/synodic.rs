@@ -6,6 +6,12 @@
 //! motion 1, so at rotation angle `θ` the map is a rotation `Rz(θ)` on position and, on velocity, the
 //! same rotation applied to the synodic velocity plus the frame's `ω × r` term (`ω = ẑ`). Units are
 //! nondimensional CR3BP; scale to physical units with the system's length and time.
+//!
+//! Gate: `derivations/synodic_frame.mac` shows that the coded inertial velocity is the time
+//! derivative of `Rz(t)·r_S(t)` along an arbitrary synodic path, that the two maps are inverse, the
+//! speed identity `|v_I|² = |v_S|² + 2(x v_y − y v_x) + x² + y²`, and that `v_S = −ẑ × r_S` is
+//! inertial rest. The module tests `an_inertially_fixed_point_is_at_rest_in_the_inertial_frame` (G3)
+//! and `the_inertial_speed_is_the_synodic_speed_plus_the_frame_term` (G4) hold the code to it.
 
 #![allow(clippy::many_single_char_names, clippy::similar_names)]
 
@@ -50,6 +56,65 @@ mod tests {
                 assert!(
                     (back[i] - s[i]).abs() < 1e-13,
                     "component {i} drifted at θ={theta}"
+                );
+            }
+        }
+    }
+
+    /// A state with no zero component and no symmetry: neither identity below can hold by accident.
+    const GENERIC: State = [0.83, -0.27, 0.11, -0.043, 0.19, 0.067];
+
+    /// (G3) A point at rest in the inertial frame moves in the synodic frame as `v_S = −ẑ × r_S`;
+    /// `derivations/synodic_frame.mac` shows that the map then returns `v_I = 0` exactly and leaves
+    /// `|r|` and `z` untouched. The bound is the rounding of `v_S ± r` and of the rotation: each
+    /// inertial component is a sum of two products of `O(|r|)` terms, so a few ulps of `|r|`.
+    #[test]
+    fn an_inertially_fixed_point_is_at_rest_in_the_inertial_frame() {
+        let (x, y, z) = (GENERIC[0], GENERIC[1], GENERIC[2]);
+        let radius = (x * x + y * y).sqrt();
+        for &theta in &[0.0, 0.7, 2.4, -1.3, 6.0, 31.0] {
+            let i = synodic_to_inertial([x, y, z, y, -x, 0.0], theta);
+            let tol = 4.0 * f64::EPSILON * radius;
+            for (k, v) in [i[3], i[4], i[5]].iter().enumerate() {
+                assert!(
+                    v.abs() <= tol,
+                    "θ={theta}: inertial velocity component {k} is {v:e}, bound {tol:e}"
+                );
+            }
+            let r = (i[0] * i[0] + i[1] * i[1]).sqrt();
+            assert!(
+                (r - radius).abs() <= tol,
+                "θ={theta}: |r| moved by {:e}",
+                r - radius
+            );
+            assert_eq!(i[2], z, "θ={theta}: the out-of-plane coordinate changed");
+        }
+    }
+
+    /// (G4) The rotation preserves length, so the inertial speed is the synodic speed plus the
+    /// frame-rotation term, `|v_I|² = |v_S|² + 2(x v_y − y v_x) + x² + y²`, the identity
+    /// `derivations/synodic_frame.mac` proves. Every term on either side is an `O(1)` square or
+    /// product and the sum does not cancel on this state, so the bound is 16 ulps of the larger
+    /// side.
+    #[test]
+    fn the_inertial_speed_is_the_synodic_speed_plus_the_frame_term() {
+        let [x, y, z, vx, vy, vz] = GENERIC;
+        let want = vx * vx + vy * vy + vz * vz + 2.0 * (x * vy - y * vx) + x * x + y * y;
+        for &theta in &[0.0, 0.7, 2.4, -1.3, 6.0, 31.0] {
+            let i = synodic_to_inertial(GENERIC, theta);
+            let got = i[3] * i[3] + i[4] * i[4] + i[5] * i[5];
+            let tol = 16.0 * f64::EPSILON * want.max(got);
+            assert!(
+                (got - want).abs() <= tol,
+                "θ={theta}: |v_I|² {got:.17e}, identity {want:.17e}"
+            );
+            assert_eq!(i[2], z);
+            let back = inertial_to_synodic(i, theta);
+            for k in 0..6 {
+                assert!(
+                    (back[k] - GENERIC[k]).abs() <= 8.0 * f64::EPSILON,
+                    "θ={theta}: round trip component {k} off by {:e}",
+                    back[k] - GENERIC[k]
                 );
             }
         }

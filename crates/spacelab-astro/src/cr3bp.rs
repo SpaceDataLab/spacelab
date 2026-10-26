@@ -11,6 +11,15 @@
 //! This slice covers the invariants and equilibria — pseudo-potential, Jacobi constant, the five
 //! libration points, the equations of motion. Periodic orbits (halo/Lyapunov by differential
 //! correction) and their manifolds build on the equations of motion here.
+//!
+//! Gate: `derivations/cr3bp.mac` shows that the coded acceleration is `∇Ω` plus the Coriolis term,
+//! that the Jacobi constant has zero rate along it, that the collinear points are the roots of the
+//! three classical quintics and that L4/L5 are exact for every μ; `derivations/cr3bp.gp` roots the
+//! quintics and evaluates the closed forms at 100 digits. The module tests
+//! `the_synodic_acceleration_is_its_closed_form_in_all_three_components` (G1),
+//! `the_collinear_points_are_the_correctly_rounded_roots_of_the_gradient` (G2),
+//! `the_triangular_points_are_the_exact_equilateral_solution` (G3) and
+//! `the_jacobi_constant_has_zero_rate_along_the_vector_field` (G4) hold the code to them.
 
 // r1/r2, L1..L5, a1/a2 are the standard notation of the three-body problem.
 #![allow(clippy::similar_names, clippy::many_single_char_names)]
@@ -27,8 +36,12 @@ pub struct Cr3bp {
 impl Cr3bp {
     /// Earth–Moon mass ratio.
     pub const EARTH_MOON: Self = Self { mu: 0.012_150_585 };
-    /// Sun–(Earth+Moon) mass ratio.
-    pub const SUN_EARTH: Self = Self { mu: 3.003_480_6e-6 };
+    /// Sun–Earth mass ratio, the Earth alone: `1/(1 + GM_S/GM_E)` with the IAU 2009 best estimate
+    /// `GM_S/GM_E = 332 946.0487` (Luzum et al. 2011), correctly rounded from the exact ratio in
+    /// `derivations/cr3bp.gp`. Sun to Earth+Moon, the other common choice, is `3.040_423_4e-6`.
+    pub const SUN_EARTH: Self = Self {
+        mu: 3.003_480_595_201_323_4e-6,
+    };
 
     /// Distances to the primary (at `−μ`) and the secondary (at `1−μ`).
     fn radii(self, p: Vec3) -> (f64, f64) {
@@ -169,9 +182,11 @@ mod tests {
         );
     }
 
-    /// All three components of the synodic acceleration against the closed form. `z̈` carries no
-    /// rotation term at all, so a Coriolis or centrifugal error that survives `ẍ` and `ÿ` has to
-    /// be caught by the two of them agreeing with different arithmetic, not by the third.
+    /// (G1) All three components of the synodic acceleration against `∇Ω + (2ẏ, −2ẋ, 0)`, the
+    /// identity `derivations/cr3bp.mac` shows the coded expression to be, evaluated at 100 digits
+    /// in `derivations/cr3bp.gp` at the f64 field point. `z̈` carries no rotation term at all, so
+    /// a Coriolis or centrifugal error that survives `ẍ` and `ÿ` has to be caught by the two of
+    /// them agreeing with different arithmetic, not by the third.
     #[test]
     fn the_synodic_acceleration_is_its_closed_form_in_all_three_components() {
         let a = Cr3bp::EARTH_MOON.acceleration(P, V);
@@ -180,8 +195,9 @@ mod tests {
         assert_closed_form(a.z, -0.983_722_728_284_938_472_218_223_5, "a.z");
     }
 
-    /// L4 and L5 close an equilateral triangle with the primaries, so they are exact: `x = ½−μ`
-    /// and `y = ±√3/2`, with no iteration and no truncation. Both points are asserted in full —
+    /// (G3) L4 and L5 close an equilateral triangle with the primaries, so they are exact — `∇Ω`
+    /// vanishes there identically in μ (`derivations/cr3bp.mac`): `x = ½−μ` and `y = ±√3/2`,
+    /// with no iteration and no truncation. Both points are asserted in full —
     /// `l5.x` and the two `z` components included, since a sign or a component dropped there is
     /// invisible to an assertion that only reads `l4.x`, `l4.y` and `l5.y`.
     #[test]
@@ -199,7 +215,10 @@ mod tests {
         assert!(l4.z == 0.0 && l5.z == 0.0, "L4 {l4:?}, L5 {l5:?}");
     }
 
-    /// The collinear points to the last bit, at three mass ratios spanning six orders of magnitude.
+    /// (G2) The collinear points to the last bit, at three mass ratios spanning six orders of
+    /// magnitude: the references are the real roots of the three quintics
+    /// `derivations/cr3bp.mac` derives from `dΩ/dx = 0`, solved at 100 digits in
+    /// `derivations/cr3bp.gp` for the f64 mass ratios the systems carry.
     ///
     /// Newton is self-correcting: the second derivative sets only the step length, so corrupting
     /// it changes how many iterations the loop needs and not where it lands — an assertion at
@@ -216,15 +235,15 @@ mod tests {
     /// reaches the correctly rounded root in all three points, so the assertion stays a statement
     /// about the mathematics rather than a photograph of the current arithmetic.
     ///
-    /// The one-ulp allowance is for Sun–Earth L3 alone, at `x ≈ −1 − 1.25e-6`, where the root is
-    /// a part in 8e5 away from a cancellation against the `−1` in `x − 1 + μ`. The other eight are
-    /// exact and asserted as exact. That is the algorithm's behaviour at these three, not its
-    /// guarantee: the error is bounded in absolute terms, near `1e-16`, so where a root approaches
+    /// All nine are correctly rounded and asserted as exact. (Sun–Earth L3, at `x ≈ −1 − 1.25e-6`
+    /// and a part in 8e5 from a cancellation against the `−1` in `x − 1 + μ`, was one ulp off at
+    /// the mass ratio's former eight-digit rounding and is exact at the full-precision one.) That is
+    /// the algorithm's behaviour at these three, not its guarantee: the error is bounded in absolute terms, near `1e-16`, so where a root approaches
     /// the origin — `L1 → 0` as `μ → ½` — the same absolute error is hundreds of ulps. The bound
     /// that holds everywhere is the residual one, asserted over the whole μ range below.
     #[test]
     fn the_collinear_points_are_the_correctly_rounded_roots_of_the_gradient() {
-        // Roots of dΩ/dx at 60 digits, from the f64 mass ratios the constants carry.
+        // Roots of the quintics at 100 digits (derivations/cr3bp.gp), from the f64 mass ratios.
         for (name, sys, want, tol) in [
             (
                 "Earth-Moon",
@@ -240,11 +259,11 @@ mod tests {
                 "Sun-Earth",
                 Cr3bp::SUN_EARTH,
                 [
-                    0.990_026_593_864_725_562_576_386_318_566_859_5,
-                    1.010_034_116_428_304_343_369_175_028_379_294,
-                    -1.000_001_251_450_249_998_527_459_955_970_970,
+                    0.990_026_593_870_022_409_736_302_340_399_785_0,
+                    1.010_034_116_422_946_031_576_144_465_434_425,
+                    -1.000_001_251_450_247_999_078_835_863_664_773,
                 ],
-                [0, 0, 1],
+                [0, 0, 0],
             ),
             (
                 "near equal mass",
@@ -325,6 +344,44 @@ mod tests {
                     a.norm()
                 );
             }
+        }
+    }
+
+    /// (G4) The Jacobi constant has zero rate along the shipped vector field, `∇C·(v, a) = 0`,
+    /// which `derivations/cr3bp.mac` shows symbolically (`jacobi_rate_vanishes`): the gyroscopic
+    /// `(2ẏ, −2ẋ, 0)` does no work and the rest of `a` is `∇Ω`.
+    ///
+    /// Two independent readings of that rate. The first is exact algebra on `acceleration` alone,
+    /// with `∇Ω = acceleration(p, 0)`: `2∇Ω·v − 2v·a` cancels to rounding, a few ulps of `|v||a|`.
+    /// The second differences `jacobi` itself along the direction `(v, a)` in state space, by a
+    /// fourth-order central difference at `h = 1e-3`; truncation (`h⁴`) and cancellation
+    /// (`ε·C/h`) both sit near `1e-12` there, and the measured worst is below `2e-12`. A Coriolis
+    /// sign, a dropped centrifugal term or a wrong factor in `jacobi` moves either by O(1).
+    #[test]
+    fn the_jacobi_constant_has_zero_rate_along_the_vector_field() {
+        let sys = Cr3bp::EARTH_MOON;
+        for (p, v) in [
+            (P, V),
+            (Vec3::new(0.82, 0.01, 0.02), Vec3::new(0.003, 0.12, -0.04)),
+            (Vec3::new(-0.6, 0.75, -0.1), Vec3::new(0.4, 0.2, 0.15)),
+        ] {
+            let a = sys.acceleration(p, v);
+            let grad = sys.acceleration(p, Vec3::ZERO);
+            let rate = 2.0 * grad.dot(v) - 2.0 * v.dot(a);
+            let floor = 8.0 * f64::EPSILON * v.norm() * (a.norm() + grad.norm());
+            assert!(
+                rate.abs() <= floor,
+                "{p:?}: 2∇Ω·v − 2v·a = {rate:.3e} (floor {floor:.3e})"
+            );
+
+            let h = 1e-3;
+            let at = |k: f64| sys.jacobi(p + v.scale(k * h), v + a.scale(k * h));
+            let fd = (at(-2.0) - 8.0 * at(-1.0) + 8.0 * at(1.0) - at(2.0)) / (12.0 * h);
+            println!("{p:?}: algebraic rate {rate:.3e} (floor {floor:.3e}), differenced {fd:.3e}");
+            assert!(
+                fd.abs() < 1e-10,
+                "{p:?}: dC/dt by differencing `jacobi` = {fd:.3e}"
+            );
         }
     }
 

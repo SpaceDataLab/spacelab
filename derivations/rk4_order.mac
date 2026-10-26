@@ -1,0 +1,66 @@
+/* Classical fourth-order Runge-Kutta -- spacelab-propagation/src/rk4.rs -- against the Butcher
+ * order conditions, in exact rationals.
+ *
+ * `rk4_step` forms k1 = f(t, y), k2 = f(t + h/2, y + h/2 k1), k3 = f(t + h/2, y + h/2 k2),
+ * k4 = f(t + h, y + h k3) and y1 = y + h/6 (k1 + 2 k2 + 2 k3 + k4): the tableau
+ *     c = (0, 1/2, 1/2, 1),  a21 = a32 = 1/2,  a43 = 1,  b = (1/6, 1/3, 1/3, 1/6).
+ * A method has order p iff, for every rooted tree t with rho(t) <= p vertices,
+ *     sum_i b_i Phi_i(t) = 1/gamma(t),
+ * with the elementary weight Phi_i(t) = prod over the root's subtrees u of sum_j a_ij Phi_j(u)
+ * (Phi = 1 on the one-vertex tree) and the density gamma(t) = rho(t) prod gamma(u)
+ * (Hairer, Norsett & Wanner, Solving ODEs I, Thm II.2.13). The trees are generated here, not listed:
+ * a tree is the sorted list of its root's subtrees, enumerated as multisets of smaller trees.
+ *
+ * Shown, each line printing `<name>: 0`:
+ *   1. the row sums of A are the nodes c, the stage times `rk4_step` passes to f;
+ *   2. all 8 trees with rho <= 4 (1 + 1 + 2 + 4 per order) satisfy their condition exactly.
+ * Then the residuals of the 9 order-5 trees are printed; the script errors if every one vanishes,
+ * and none does, so the order is exactly 4.
+ * The test `rk4::tests::the_shipped_step_meets_every_order_condition_through_four` runs the shipped
+ * `rk4_step` on the tree systems of the same trees and recovers these residuals in f64.
+ * Second engine: derivations/rk4_order.gp.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/rk4_order.mac </dev/null
+ */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+s : 4$
+c : [0, 1/2, 1/2, 1]$
+a : matrix([0, 0, 0, 0], [1/2, 0, 0, 0], [0, 1/2, 0, 0], [0, 0, 1, 0])$
+b : [1/6, 1/3, 1/3, 1/6]$
+
+/* Rooted trees of order n, each the sorted list of its root's subtrees ([] is the single vertex). */
+order(t) := block([n : 1], for u in t do n : n + order(u), n)$
+multisets(m, k, pool) := if m = 0 then [[]] else
+  block([out : []],
+    for i : k thru length(pool) do
+      if order(pool[i]) <= m then
+        out : append(out, map(lambda([f], cons(pool[i], f)), multisets(m - order(pool[i]), i, pool))),
+    out)$
+trees[n] := if n = 1 then [[]] else
+  block([pool : apply(append, makelist(trees[j], j, 1, n - 1))],
+    map(sort, multisets(n - 1, 1, pool)))$
+
+gam(t) := block([g : order(t)], for u in t do g : g * gam(u), g)$
+phi(t) := block([p : makelist(1, i, 1, s)],
+  for u in t do block([w : phi(u)],
+    p : makelist(p[i] * sum(a[i, j] * w[j], j, 1, s), i, 1, s)),
+  p)$
+residual(t) := sum(b[i] * phi(t)[i], i, 1, s) - 1/gam(t)$
+
+zero("rk4_row_sums_are_the_nodes", lmax(makelist(abs(sum(a[i, j], j, 1, s) - c[i]), i, 1, s)))$
+for n : 1 thru 4 do
+  for k : 1 thru length(trees[n]) do
+    zero(sconcat("rk4_order", n, "_tree", k, "_", string(trees[n][k])), residual(trees[n][k]))$
+
+r5 : map(residual, trees[5])$
+printf(true, "rk4_order5_residuals ~a~%", r5)$
+held : length(sublist(r5, lambda([x], x = 0)))$
+printf(true, "rk4_order5_trees_satisfied ~a of ~a~%", held, length(r5))$
+if held = length(r5) then error("RK4 satisfies every order-5 condition: it would not be order 4")$
+if length(trees[5]) # 9 then error("there are 9 rooted trees of order 5, generated", length(trees[5]))$

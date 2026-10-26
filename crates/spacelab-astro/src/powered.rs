@@ -15,6 +15,14 @@
 //! (bounded `|T|`, minimise propellant) is solved to global optimum by **lossless convexification**
 //! (Açıkmeşe–Ploen) as a second-order cone program — the production SOTA — which requires a conic
 //! solver and is a further increment. SI units.
+//!
+//! Gate: `derivations/powered_zem_zev.mac` derives the affine minimum-energy command from
+//! Pontryagin's principle, shows the ZEM/ZEV feedback reproduces it identically along its own
+//! trajectory, and shows the held-command loop of [`powered_descent`] is deadbeat — exact landing in
+//! position and velocity — from three steps on. `derivations/powered_zem_zev.gp` recomputes every
+//! reference value of the tests in exact rationals. The module tests
+//! `the_command_is_the_open_loop_optimum_at_every_point_of_its_own_trajectory` (G2) and
+//! `the_closed_loop_reproduces_the_analytic_outcome_step_for_step` (G3) hold the code to them.
 
 #![allow(
     clippy::many_single_char_names,
@@ -140,7 +148,8 @@ mod tests {
     /// The minimum-energy solution of the landing boundary-value problem, evaluated at 60 decimal
     /// digits: `(t_go, r, v, a)` at five points of the optimal trajectory from `R_START`/`V_START`
     /// to `R_PAD`/`V_ARRIVAL`. The command is the affine `A + B t` the terminal conditions imply,
-    /// derived independently of the feedback form the code implements.
+    /// derived independently of the feedback form the code implements; recomputed in exact
+    /// rationals by `derivations/powered_zem_zev.gp`, which agrees to the 25 digits written.
     const OPTIMAL_TRAJECTORY: [OptimalSample; 5] = [
         (
             42.0,
@@ -196,6 +205,7 @@ mod tests {
 
     /// `(steps, position error, velocity error, Δv)` of the closed loop, at 60 decimal digits. One
     /// and two steps are too few for the guidance to null the state; three already land exactly.
+    /// Recomputed in exact rationals by `derivations/powered_zem_zev.gp`.
     const DESCENT_OUTCOME: [(usize, f64, f64, f64); 4] = [
         (
             1,
@@ -213,10 +223,11 @@ mod tests {
         (5, 0.0, 0.0, 342.579_904_624_153_023_115_878_1),
     ];
 
-    /// Under constant gravity the minimum-energy thrust is affine in time and its two coefficients
+    /// (G2) Under constant gravity the minimum-energy thrust is affine in time and its two coefficients
     /// are fixed by the terminal conditions alone. The feedback law must reproduce that open-loop
     /// optimum at every point of the trajectory it generates, not only at the start — which is what
-    /// makes it optimal rather than merely convergent.
+    /// makes it optimal rather than merely convergent. `derivations/powered_zem_zev.mac` proves the
+    /// identity symbolically, for every point of every optimal trajectory.
     #[test]
     fn the_command_is_the_open_loop_optimum_at_every_point_of_its_own_trajectory() {
         let pad = [R_PAD.x, R_PAD.y, R_PAD.z];
@@ -252,10 +263,11 @@ mod tests {
         }
     }
 
-    /// The command is held across the step, so the acceleration is constant there and the step is the
+    /// (G3) The command is held across the step, so the acceleration is constant there and the step is the
     /// uniform-acceleration closed form. One and two steps leave the state far from the pad, which is
     /// where an error in the step is large enough to see; from three steps on the discrete controller
-    /// is deadbeat and nulls position and velocity outright.
+    /// is deadbeat and nulls position and velocity outright — the exact landing
+    /// `derivations/powered_zem_zev.mac` proves for 3 to 6 steps in symbolic arithmetic.
     #[test]
     fn the_closed_loop_reproduces_the_analytic_outcome_step_for_step() {
         let scale = (R_START - R_PAD).norm() + DESCENT_TIME * V_START.norm();

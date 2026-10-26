@@ -1,0 +1,90 @@
+/* Minimum-energy low-thrust optimal control by Pontryagin's principle --
+ * spacelab-astro/src/optimal.rs -- as identities.
+ *
+ * Cost J = 1/2 int |u|^2 dt, dynamics r' = v, v' = g(r) + u, g = -mu r/|r|^3. The control
+ * Hamiltonian H(r, v, lr, lv, u) = lr.v + lv.(g + u) + |u|^2/2, and the coded augmented field
+ * (`deriv`), transcribed:
+ *     r' = v,  v' = g - lv,  lr' = mu/|r|^3 lv - 3 mu/|r|^5 (r.lv) r,  lv' = -lr,  J' = |lv|^2/2.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the minimum condition dH/du = 0 gives u* = -lv, with Hessian I (a strict minimum), and
+ *      H(u*) is the Hamiltonian the tests write, lr.v - mu (lv.r)/|r|^3 - |lv|^2/2 (G2);
+ *   2. the coded field is Hamilton's equations for H(u*): r' = dH/dlr, v' = dH/dlv,
+ *      lr' = -dH/dr, lv' = -dH/dv, and J' = |u*|^2/2 (G1);
+ *   3. H(u*) is constant along the coded field (autonomous problem) (G4);
+ *   4. the gravity gradient G = dg/dr is symmetric, so lr' = -G' lv = -G lv, and the primer
+ *      vector p = -lv = u* obeys Lawden's primer equation p'' = G p (G1);
+ *   5. at mu = 0 the coded field integrates in closed form, and the costate that meets
+ *      r(T) = rf, v(T) = vf is lr = -12 dr/T^3 + 6 dv/T^2, lv(0) = -6 dr/T^2 + 2 dv/T with
+ *      dr = rf - r0 - v0 T, dv = vf - v0, cost J = (12 dr^2/T^3 - 12 dr dv/T^2 + 4 dv^2/T)/2 --
+ *      the oracle the double-integrator test holds the shooter to (G3).
+ * The test's 100-digit references are in derivations/optimal_pmp.gp;
+ * derivations/min_energy_double_integrator.mac derives item 5 from the controllability Gramian.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/optimal_pmp.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+vsum(l) := apply("+", map(lambda([q], abs(ratsimp(q))), l))$
+
+R : [x, y, z]$  V : [vx, vy, vz]$  LR : [p1, p2, p3]$  LV : [q1, q2, q3]$  U : [u1, u2, u3]$
+rn : sqrt(R . R)$
+g : -mu*R/rn^3$
+Hu : LR . V + LV . (g + U) + (U . U)/2$
+
+/* 1. Minimum condition. */
+ustar : -LV$
+zero("minimum_condition_gives_minus_lambda_v",
+     vsum(subst(map("=", U, ustar), makelist(diff(Hu, U[i]), i, 1, 3))))$
+zero("minimum_is_strict_hessian_is_identity",
+     vsum(flatten(args(genmatrix(lambda([i, j], diff(Hu, U[i], 1, U[j], 1)), 3, 3) - ident(3)))))$
+H : ratsimp(subst(map("=", U, ustar), Hu))$
+zero("optimal_hamiltonian_is_the_tests_hamiltonian",
+     ratsimp(H - (LR . V - mu*(LV . R)/rn^3 - (LV . LV)/2)))$
+
+/* 2. The coded field against Hamilton's equations. */
+rlv : R . LV$
+code_r : V$
+code_v : g - LV$
+code_lr : makelist(mu/rn^3*LV[i] - 3*mu/rn^5*rlv*R[i], i, 1, 3)$
+code_lv : -LR$
+code_J : (LV . LV)/2$
+grad(f, X) := makelist(diff(f, X[i]), i, 1, 3)$
+zero("position_rate_is_dH_dlambda_r", vsum(code_r - grad(H, LR)))$
+zero("velocity_rate_is_dH_dlambda_v", vsum(code_v - grad(H, LV)))$
+zero("lambda_r_rate_is_minus_dH_dr", vsum(code_lr + grad(H, R)))$
+zero("lambda_v_rate_is_minus_dH_dv", vsum(code_lv + grad(H, V)))$
+zero("cost_rate_is_half_u_squared", ratsimp(code_J - (ustar . ustar)/2))$
+
+/* 3. Conservation of H along the coded field. */
+dHdt : grad(H, R) . code_r + grad(H, V) . code_v + grad(H, LR) . code_lr + grad(H, LV) . code_lv$
+zero("hamiltonian_is_conserved", ratsimp(dHdt))$
+
+/* 4. Gravity gradient and the primer equation. The time derivative of a function of the
+      state along the coded field is the directional derivative below. */
+G : genmatrix(lambda([i, j], diff(g[i], R[j])), 3, 3)$
+zero("gravity_gradient_is_symmetric", vsum(flatten(args(G - transpose(G)))))$
+zero("lambda_r_rate_is_minus_gravity_gradient_times_lambda_v",
+     vsum(code_lr + list_matrix_entries(G . transpose(matrix(LV)))))$
+along(f) := grad(f, R) . code_r + grad(f, V) . code_v + grad(f, LR) . code_lr + grad(f, LV) . code_lv$
+primer : -LV$
+pdd : makelist(along(along(primer[i])), i, 1, 3)$
+zero("primer_obeys_lawdens_equation",
+     vsum(pdd - list_matrix_entries(G . transpose(matrix(primer)))))$
+
+/* 5. The double integrator, per axis: lr constant, lv(t) = lv0 - lr t, and v, r integrated. */
+assume(T > 0)$
+lvt : lv0 - lr*t$
+vt : v0 + integrate(-subst(t = s, lvt), s, 0, t)$
+rt : r0 + integrate(subst(t = s, vt), s, 0, t)$
+sol : solve([subst(t = T, rt) = rf, subst(t = T, vt) = vf], [lr, lv0])$
+dr : rf - r0 - v0*T$  dv : vf - v0$
+zero("double_integrator_lambda_r", ratsimp(rhs(sol[1][1]) - (-12*dr/T^3 + 6*dv/T^2)))$
+zero("double_integrator_lambda_v0", ratsimp(rhs(sol[1][2]) - (-6*dr/T^2 + 2*dv/T)))$
+Jc : ratsimp(subst(sol[1], integrate(lvt^2, t, 0, T)/2))$
+zero("double_integrator_cost", ratsimp(Jc - (12*dr^2/T^3 - 12*dr*dv/T^2 + 4*dv^2/T)/2))$
+/* The control the test asserts: u = -lv = (T - t)(12 dr/T^3 - 6 dv/T^2) + (-6 dr/T^2 + 4 dv/T). */
+zero("double_integrator_control", ratsimp(subst(sol[1], -lvt)
+     - ((T - t)*(12*dr/T^3 - 6*dv/T^2) + (-6*dr/T^2 + 4*dv/T))))$

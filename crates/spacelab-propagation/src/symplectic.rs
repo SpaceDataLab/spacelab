@@ -15,6 +15,15 @@
 //!
 //! The force is supplied as a closure `x ↦ a(x)`; wrap a conservative [`crate::forces::Acceleration`]
 //! by evaluating it at any velocity (it will ignore one).
+//!
+//! Gate: `derivations/symplectic_composition.mac` proves the orders in the free associative algebra
+//! of drift and kick, exactly — leapfrog symmetric of order 2, `yoshida4` of order 4 with `2^{1/3}`
+//! carried as an algebraic number, and the triple jump `S(z)S(1−2z)S(z)` leaving only the
+//! `2z^q + (1−2z)^q` error that the closed-form `z` cancels for `q = 3, 5, 7`;
+//! `derivations/symplectic_composition.gp` checks the fraction lists `triple_jump` builds at 100
+//! digits, exact through words of length 2, 4, 6, 8 and off at the next. The module tests
+//! `one_step_on_the_oscillator_is_the_composition_map` (G3) and
+//! `the_oscillator_map_preserves_area_and_reverses` (G4) hold the shipped functions to that map.
 
 #![allow(
     clippy::needless_range_loop,
@@ -306,6 +315,146 @@ pub fn leapfrog_dense<const D: usize, const N2: usize, F: Fn(&[f64; D]) -> [f64;
         steps as u32,
         0,
     )
+}
+
+#[cfg(test)]
+mod gate_tests {
+    #![allow(
+        clippy::excessive_precision,
+        clippy::unreadable_literal,
+        // the force must match the integrators' `Fn(&[f64; D]) -> [f64; D]` bound, by reference
+        // for every D including the 8-byte D = 1
+        clippy::trivially_copy_pass_by_ref
+    )]
+    use super::{leapfrog, yoshida4, yoshida6, yoshida8, yoshida8_scalar};
+
+    /// A method applied to the unit oscillator: `(x, v, h, steps)`.
+    type Method = fn(&mut [f64; 1], &mut [f64; 1], f64, usize);
+
+    const H: f64 = 0.5;
+
+    /// Each method's one-step map on `x'' = −x` at `h = 1/2`, `[M₁₁, M₂₁, M₁₂, M₂₂]` with the state
+    /// as the column `(x, v)`: the product of its sub-steps' kick `[1, 0; −c, 1]` and drift
+    /// `[1, c; 0, 1]` matrices over the closed-form fractions, printed by
+    /// `derivations/symplectic_composition.gp` at 100 digits. `yoshida8_scalar` at `f64` shares
+    /// `yoshida8`'s fractions and so its map.
+    const MAPS: [(&str, Method, [f64; 4]); 5] = [
+        (
+            "leapfrog",
+            |x, v, h, n| leapfrog(&oscillator, x, v, h, n),
+            [0.875, -0.46875, 0.5, 0.875],
+        ),
+        (
+            "yoshida4",
+            |x, v, h, n| yoshida4(&oscillator, x, v, h, n),
+            [
+                8.786159510339272549762827080942643433e-1,
+                -4.788905408028607908718282675172684088e-1,
+                4.761714654176466816225425435445030733e-1,
+                8.786159510339272549762827080942643433e-1,
+            ],
+        ),
+        (
+            "yoshida6",
+            |x, v, h, n| yoshida6(&oscillator, x, v, h, n),
+            [
+                8.774876305656666264944384095623673788e-1,
+                -4.792408996882825510283214577621631432e-1,
+                4.799579049990587584129801261416828851e-1,
+                8.774876305656666264944384095623673788e-1,
+            ],
+        ),
+        (
+            "yoshida8",
+            |x, v, h, n| yoshida8(&oscillator, x, v, h, n),
+            [
+                8.775925384322334959986094926583486593e-1,
+                -4.794031425322119290067027665582868374e-1,
+                4.794114099338137066703058211311134073e-1,
+                8.775925384322334959986094926583486593e-1,
+            ],
+        ),
+        (
+            "yoshida8_scalar",
+            |x, v, h, n| yoshida8_scalar(&oscillator, x, v, h, n),
+            [
+                8.775925384322334959986094926583486593e-1,
+                -4.794031425322119290067027665582868374e-1,
+                4.794114099338137066703058211311134073e-1,
+                8.775925384322334959986094926583486593e-1,
+            ],
+        ),
+    ];
+
+    fn oscillator(x: &[f64; 1]) -> [f64; 1] {
+        [-x[0]]
+    }
+
+    /// The map `method` applies over one step of `h`, read off its two unit columns.
+    fn one_step(method: Method, h: f64) -> [f64; 4] {
+        let mut out = [0.0; 4];
+        for (k, (x0, v0)) in [(1.0, 0.0), (0.0, 1.0)].into_iter().enumerate() {
+            let (mut x, mut v) = ([x0], [v0]);
+            method(&mut x, &mut v, h, 1);
+            out[2 * k] = x[0];
+            out[2 * k + 1] = v[0];
+        }
+        out
+    }
+
+    /// (G3) One step of each shipped method on the unit oscillator is the exact one-step map of its
+    /// composition: the fractions `[w₁, w₀, w₁]` and the two triple jumps, whose orders 2, 4, 6, 8
+    /// `derivations/symplectic_composition.mac` proves in the free algebra and
+    /// `derivations/symplectic_composition.gp` confirms on the very fraction lists `triple_jump`
+    /// lays out (exact through words of length `p`, off at `p + 1`).
+    ///
+    /// The map depends on every fraction, so a wrong `z`, a sub-step out of place or a lost kick
+    /// moves it by far more than the bar: at `h = 1/2` the four maps sit `2.1e-2`, `3.3e-3`,
+    /// `5.3e-4` and `2.2e-5` from the rotation they approximate, and the shipped steps must land on
+    /// the composition, not on the rotation, to `16 ε` — the rounding of at most 81 sub-step
+    /// products of numbers below one.
+    #[test]
+    fn one_step_on_the_oscillator_is_the_composition_map() {
+        for (name, method, want) in MAPS {
+            let got = one_step(method, H);
+            for k in 0..4 {
+                let d = (got[k] - want[k]).abs();
+                assert!(
+                    d <= 16.0 * f64::EPSILON,
+                    "{name} entry {k}: {:.17e} vs {:.17e}",
+                    got[k],
+                    want[k]
+                );
+            }
+        }
+    }
+
+    /// (G4) Each shipped method is symplectic and time-symmetric on the oscillator: its one-step map
+    /// has determinant one (area preservation, the one-degree-of-freedom form of `MᵀJM = J`), and a
+    /// step of `h` followed by a step of `−h` returns the start. Both are identities of the
+    /// composition — every sub-step is a shear, and `Ψ(h)Ψ(−h) = 1`
+    /// (`derivations/symplectic_composition.mac`) — so the bar is rounding alone.
+    #[test]
+    fn the_oscillator_map_preserves_area_and_reverses() {
+        for (name, method, _) in MAPS {
+            let m = one_step(method, H);
+            let det = m[0] * m[3] - m[2] * m[1];
+            assert!(
+                (det - 1.0).abs() <= 16.0 * f64::EPSILON,
+                "{name}: det {det:.17e}"
+            );
+            let (mut x, mut v) = ([0.3], [-0.8]);
+            method(&mut x, &mut v, H, 1);
+            method(&mut x, &mut v, -H, 1);
+            assert!(
+                (x[0] - 0.3).abs() <= 16.0 * f64::EPSILON
+                    && (v[0] + 0.8).abs() <= 16.0 * f64::EPSILON,
+                "{name}: returned to ({}, {})",
+                x[0],
+                v[0]
+            );
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,160 @@
+/* The analytic Sun and Moon -- spacelab-propagation/src/ephemeris.rs -- against the printed series
+ * they cite, and the frame algebra around them as identities.
+ *
+ * Sun (Astronomical Almanac low-precision formulae, T Julian centuries TT from J2000):
+ *     L = 280.460 + 36000.771 T,  g = 357.528 + 35999.050 T                       (degrees)
+ *     lambda = L + 1.915 sin g + 0.020 sin 2g + kappa/R,  kappa = 20.49552"       (aberration removed)
+ *     R = 1.00014 - 0.01671 cos g - 0.00014 cos 2g  AU,   eps = 23.439291 - 0.0130042 T
+ * in the mean equator and equinox of date, then precessed to J2000 by the transpose of
+ *     P = R3(-z_A) R2(theta_A) R3(-zeta_A)     (IAU 2006, Capitaine, Wallace & Chapront 2003).
+ * Moon (Montenbruck & Gill, "Satellite Orbits" sec. 3.3.2): fourteen longitude, seven latitude and
+ * nine distance terms in the Delaunay arguments, rotated by the J2000 obliquity 23.43929111 deg.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the module's expanded matrix `p` is the product R3(-z) R2(theta) R3(-zeta), entry by entry,
+ *      and is orthogonal with determinant 1 (G1, G4);
+ *   2. at J2000 zeta_A = -z_A and theta_A = 0, so P = I exactly (G3);
+ *   3. the Sun of date has zero ecliptic latitude: its equatorial (y, z) are (cos eps, sin eps) R
+ *      sin(lambda), and its length is R (G1, G4); the lunar rotation keeps the Moon's length r (G4);
+ *   4. the series, written in the printed arrangement -- degrees and arcseconds, sums spelled out,
+ *      the precession applied as the matrix product -- evaluated at 50 digits at the thirteen
+ *      golden epochs of the module's tests, reproduces the goldens' `series` column (written there
+ *      by derivations/analytic_ephemeris.py from mpmath) to 1e-20 relative: the CAS of record
+ *      confirms them (G2).
+ * derivations/analytic_ephemeris.gp evaluates the same series at 60 digits as the second engine.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/analytic_ephemeris.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+ratprint : false$
+
+/* Frame rotations: R1, R2, R3 rotate the axes (not the vector) by +a. */
+R1(a) := matrix([1, 0, 0], [0, cos(a), sin(a)], [0, -sin(a), cos(a)])$
+R2(a) := matrix([cos(a), 0, -sin(a)], [0, 1, 0], [sin(a), 0, cos(a)])$
+R3(a) := matrix([cos(a), sin(a), 0], [-sin(a), cos(a), 0], [0, 0, 1])$
+
+/* 1. The coded p against the product. */
+coded : matrix(
+  [cos(ze)*cos(th)*cos(zz) - sin(ze)*sin(zz), -sin(ze)*cos(th)*cos(zz) - cos(ze)*sin(zz), -sin(th)*cos(zz)],
+  [cos(ze)*cos(th)*sin(zz) + sin(ze)*cos(zz), -sin(ze)*cos(th)*sin(zz) + cos(ze)*cos(zz), -sin(th)*sin(zz)],
+  [cos(ze)*sin(th), -sin(ze)*sin(th), cos(th)])$
+product : R3(-zz) . R2(th) . R3(-ze)$
+for i : 1 thru 3 do for j : 1 thru 3 do
+  zero(sconcat("precession_entry_", i, j), trigsimp(expand(coded[i, j] - product[i, j])))$
+G : coded . transpose(coded) - ident(3)$
+for i : 1 thru 3 do for j : i thru 3 do
+  zero(sconcat("precession_orthogonal_", i, j), trigsimp(expand(G[i, j])))$
+zero("precession_det", trigsimp(expand(determinant(coded) - 1)))$
+
+/* 2. The IAU 2006 angles at T = 0, in arcseconds. */
+/* The printed coefficients as exact decimals. */
+zeta_A(T) := 2650545/10^6 + 2306083227/10^6*T + 2988499/10^7*T^2 + 1801828/10^8*T^3
+             - 5971/10^9*T^4 - 3173/10^10*T^5$
+z_A(T) := -2650545/10^6 + 2306077181/10^6*T + 10927348/10^7*T^2 + 1826837/10^8*T^3
+          - 28596/10^9*T^4 - 2904/10^10*T^5$
+theta_A(T) := 2004191903/10^6*T - 4294934/10^7*T^2 - 4182264/10^8*T^3 - 7089/10^9*T^4
+              - 1274/10^10*T^5$
+zero("zeta_and_z_cancel_at_j2000", zeta_A(0) + z_A(0))$
+zero("theta_vanishes_at_j2000", theta_A(0))$
+P0 : R3(-zz) . R2(0) . R3(zz) - ident(3)$
+for i : 1 thru 3 do for j : 1 thru 3 do
+  zero(sconcat("precession_is_identity_at_j2000_", i, j), trigsimp(P0[i, j]))$
+
+/* 3. The Sun's ecliptic-to-equatorial step and the Moon's rotation. */
+sun_of_date : [R*cos(lam), R*cos(eps)*sin(lam), R*sin(eps)*sin(lam)]$
+ecl : R1(eps) . transpose(matrix(sun_of_date))$
+zero("sun_has_zero_ecliptic_latitude", trigsimp(ecl[3, 1]))$
+zero("sun_length_is_R", trigsimp(sun_of_date . sun_of_date - R^2))$
+moon_ec : [r*cos(lo)*cos(la), r*sin(lo)*cos(la), r*sin(la)]$
+moon_eq : [moon_ec[1], cos(eps)*moon_ec[2] - sin(eps)*moon_ec[3], sin(eps)*moon_ec[2] + cos(eps)*moon_ec[3]]$
+zero("moon_rotation_keeps_its_length", trigsimp(expand(moon_eq . moon_eq - r^2)))$
+zero("moon_rotation_is_r1_minus_eps",
+     trigsimp(expand(moon_eq[2] - (R1(-eps) . transpose(matrix(moon_ec)))[2, 1])))$
+
+/* The goldens of ephemeris.rs (time in s past J2000, the series column in metres), copied verbatim;
+   read at 50 digits, since a bigfloat literal takes the precision in force when it is read. */
+fpprec : 50$
+sun_goldens : [
+  [-3.15576b9, [28167214741.63290835148b0, -132450499569.6860145069b0, -57459459572.14703589479b0]],
+  [-1.5b9, [964832862.7099257047885b0, 139475457346.0690153248b0, 60487896645.34318882052b0]],
+  [-7.84308258b8, [134120844712.8546511573b0, -57488695256.12007082724b0, -24927520071.87101081167b0]],
+  [0.0b0, [26507662136.61559315173b0, -132752709207.3643176294b0, -57555343056.05256580437b0]],
+  [8.64b7, [-149539728435.5121784151b0, -10023243602.41699522406b0, -4345443030.76398841894b0]],
+  [7.57339269184b8, [24822312238.47691160337b0, -133031282404.948326894b0, -57667652027.77624930643b0]],
+  [1.5b9, [-55619282989.15422226305b0, 129860653831.5653686855b0, 56285458376.84220154416b0]],
+  [2.698761487b9, [-43225880879.06620477007b0, 133799567147.1962361929b0, 57979259628.74010544351b0]],
+  [3.019895577b9, [-147448907803.9539196681b0, 28214613873.855541376b0, 12228531979.32650501963b0]],
+  [3.069300822b9, [144231034442.832146172b0, 36628399290.19972918678b0, 15867514260.85501836b0]],
+  [3.15576b9, [24843208688.79265441104b0, -133038320794.846832528b0, -57643937671.95756632546b0]],
+  [-9.46728b9, [31470786476.8273681387b0, -131796627677.1325973102b0, -57245988825.89662595244b0]],
+  [9.46728b9, [21500442602.51787138119b0, -133559421747.0977010895b0, -57799104154.66687922954b0]]]$
+moon_goldens : [
+  [-3.15576b9, [-21368234.87458305534443b0, -340402532.9456722445757b0, -144319777.1507238897981b0]],
+  [-1.5b9, [153129535.581166244392b0, 319161587.0032233632897b0, 175536815.071663627464b0]],
+  [-7.84308258b8, [-199850876.2886467097804b0, 284890752.0610037635742b0, 94530875.69176748632204b0]],
+  [0.0b0, [-291492224.1600419237295b0, -266630266.9123104876023b0, -76098486.23612924421203b0]],
+  [8.64b7, [144249721.2888966671794b0, 341598778.3845721997048b0, 146715213.7042406616861b0]],
+  [7.57339269184b8, [-368023857.5828822338311b0, 142542502.5717727254829b0, 89256829.97011934228666b0]],
+  [1.5b9, [383386385.8694832701789b0, 93266400.03211139968867b0, 80793931.5841832280627b0]],
+  [2.698761487b9, [235103362.928682364346b0, -258197564.7110772860935b0, -88683629.15761513318337b0]],
+  [3.019895577b9, [278027634.72473453821b0, -205701759.3326994193897b0, -121291981.1366689654601b0]],
+  [3.069300822b9, [168326746.7535158537375b0, -317119623.0768393133642b0, -175680198.6037669867506b0]],
+  [3.15576b9, [-355109676.1545417439696b0, 98066972.62595107937489b0, 45866094.09125699259836b0]],
+  [-9.46728b9, [383529615.9667456047297b0, 75747562.70271492963971b0, 19353103.47426703702529b0]],
+  [9.46728b9, [197646453.1899011536489b0, 284825344.2749009289985b0, 109603266.0788945640927b0]]]$
+
+/* 4. The series in the printed arrangement, at 50 digits. */
+fpprec : 50$
+AU : 149597870700$
+JC : 86400*36525$
+dg : bfloat(%pi)/180$
+as : dg/3600$
+frac(x) := x - floor(x)$
+cosd(x) := cos(x*dg)$  sind(x) := sin(x*dg)$
+precess_to_j2000(T, v) := block([P],
+  P : R3(-z_A(T)*as) . R2(theta_A(T)*as) . R3(-zeta_A(T)*as),
+  transpose(P) . transpose(matrix(v)))$
+
+sun_series(sec) := block([T, L, g, Rau, lambda, eps],
+  T : bfloat(sec)/JC,
+  L : 280.460b0 + 36000.771b0*T,
+  g : 357.528b0 + 35999.050b0*T,
+  Rau : 1.00014b0 - 0.01671b0*cosd(g) - 0.00014b0*cosd(2*g),
+  lambda : L + 1.915b0*sind(g) + 0.020b0*sind(2*g) + 20.49552b0/3600/Rau,
+  eps : 23.439291b0 - 0.0130042b0*T,
+  precess_to_j2000(T, AU*Rau*[cosd(lambda), cosd(eps)*sind(lambda), sind(eps)*sind(lambda)]))$
+
+moon_series(sec) := block([T, L0, l, lp, D, F, dL, S, h, N, lon, lat, r, eps, ec],
+  T : bfloat(sec)/JC,
+  L0 : frac(0.606433b0 + 1336.851344b0*T),
+  l : 360*frac(0.374897b0 + 1325.552410b0*T),
+  lp : 360*frac(0.993133b0 + 99.997361b0*T),
+  D : 360*frac(0.827361b0 + 1236.853086b0*T),
+  F : 360*frac(0.259086b0 + 1342.227825b0*T),
+  dL : 22640*sind(l) - 4586*sind(l - 2*D) + 2370*sind(2*D) + 769*sind(2*l) - 668*sind(lp)
+       - 412*sind(2*F) - 212*sind(2*l - 2*D) - 206*sind(l + lp - 2*D) + 192*sind(l + 2*D)
+       - 165*sind(lp - 2*D) - 125*sind(D) - 110*sind(l + lp) + 148*sind(l - lp)
+       - 55*sind(2*F - 2*D),
+  lon : 360*frac(L0 + dL/1296000),
+  S : F + (dL + 412*sind(2*F) + 541*sind(lp))/3600,
+  h : F - 2*D,
+  N : -526*sind(h) + 44*sind(l + h) - 31*sind(-l + h) - 23*sind(lp + h) + 11*sind(-lp + h)
+      - 25*sind(-2*l + F) + 21*sind(-l + F),
+  lat : (18520*sind(S) + N)/3600,
+  r : 1000*(385000 - 20905*cosd(l) - 3699*cosd(2*D - l) - 2956*cosd(2*D) - 570*cosd(2*l)
+            + 246*cosd(2*l - 2*D) - 205*cosd(lp - 2*D) - 171*cosd(l + 2*D) - 152*cosd(l + lp - 2*D)),
+  ec : r*[cosd(lon)*cosd(lat), sind(lon)*cosd(lat), sind(lat)],
+  R1(-23.43929111b0*dg) . transpose(matrix(ec)))$
+
+rel_miss(got, want) := block([d : 0],
+  for i : 1 thru 3 do d : d + (got[i, 1] - want[i])^2,
+  sqrt(d/(want . want)))$
+check_goldens(tag, goldens, series) := block([worst : 0b0],
+  for g in goldens do worst : max(worst, rel_miss(series(g[1]), g[2])),
+  printf(true, "~a worst relative miss: ~a~%", tag, bfloat(worst)),
+  zero(sconcat(tag, "_series_reproduces_the_goldens"), if worst < 1b-20 then 0 else worst))$
+check_goldens("sun", sun_goldens, sun_series)$
+check_goldens("moon", moon_goldens, moon_series)$

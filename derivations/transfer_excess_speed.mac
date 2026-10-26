@@ -1,0 +1,50 @@
+/* The excess speeds and launch energy of crates/spacelab-astro/src/transfer.rs on transfers whose
+   answer is a closed form.
+
+   A transfer conic of parameter p and eccentricity e leaves r1 at periapsis, tangent to a circular
+   departure orbit, and meets a circular arrival orbit at true anomaly nu. Under mu the conic's
+   velocity is sqrt(mu/p) (-sin nu, e + cos nu) in the perifocal frame, i.e. radial
+   sqrt(mu/p) e sin nu and transverse sqrt(mu/p) (1 + e cos nu); a circular body at radius r moves
+   transversely at sqrt(mu/r). So, with r1 = p/(1 + e),
+       v_inf_dep = sqrt(mu/p) (1 + e) - sqrt(mu/r1) = sqrt(mu/r1) (sqrt(1 + e) - 1),
+       v_inf_arr^2 = (mu/p) e^2 sin^2 nu + (sqrt(mu/p) (1 + e cos nu) - sqrt(mu/r2))^2,
+       C3 = v_inf_dep^2.
+   Printed `<name>: 0`:
+     1.    the departure excess speed in closed form;
+     2.    the arrival speed^2 is vis-viva at r2 (the decomposition loses nothing);
+     3-5.  the exact ellipse of derivations/lambert_universal.mac (mu = 1, r1 = 1, e = 1/2,
+           nu = 90 deg, r2 = 3/2): v_inf_dep = sqrt(3/2) - 1, v_inf_arr = 1/sqrt(6),
+           C3 = 5/2 - sqrt(6);
+     6-8.  the exact hyperbola (e = 2, r2 = 3): v_inf_dep = sqrt(3) - 1, v_inf_arr = 2/sqrt(3),
+           C3 = 4 - 2 sqrt(3);
+     9-10. the same arrival excess speeds from the velocity vectors the Lambert gate uses,
+           v2 - v_body2 with v_body2 = (-sqrt(mu/r2), 0, 0) at (0, r2, 0).
+
+   Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/transfer_excess_speed.mac </dev/null */
+
+display2d : false$
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+assume(mu > 0, p > 0, e > 0)$
+
+r1 : p/(1 + e)$
+vdep(e, p, mu) := sqrt(mu/p)*(1 + e) - sqrt(mu*(1 + e)/p)$
+varr2(e, p, mu, nu) := (mu/p)*e^2*sin(nu)^2 + (sqrt(mu/p)*(1 + e*cos(nu)) - sqrt(mu*(1 + e*cos(nu))/p))^2$
+zero("departure_excess_speed", radcan(vdep(e, p, mu) - sqrt(mu/r1)*(sqrt(1 + e) - 1)))$
+zero("arrival_speed_is_vis_viva",
+     ratsimp(trigsimp((mu/p)*e^2*sin(nu)^2 + (mu/p)*(1 + e*cos(nu))^2
+             - mu*(2*(1 + e*cos(nu))/p - (1 - e^2)/p))))$
+
+exact(tag, e, p, dep, arr, c3) := (
+  zero(sconcat(tag, "_departure_excess_speed"), radcan(vdep(e, p, 1) - dep)),
+  zero(sconcat(tag, "_arrival_excess_speed"), radcan(varr2(e, p, 1, %pi/2) - arr^2)),
+  zero(sconcat(tag, "_launch_energy"), radcan(expand(vdep(e, p, 1)^2) - c3)))$
+exact("ellipse", 1/2, 3/2, sqrt(3/2) - 1, 1/sqrt(6), 5/2 - sqrt(6))$
+exact("hyperbola", 2, 3, sqrt(3) - 1, 2/sqrt(3), 4 - 2*sqrt(3))$
+
+vec_arr(v2, r2) := block([d : v2 - [-sqrt(1/r2), 0, 0]], d.d)$
+zero("ellipse_arrival_from_the_lambert_vectors",
+     radcan(vec_arr(sqrt(2/3)*[-1, 1/2, 0], 3/2) - 1/6))$
+zero("hyperbola_arrival_from_the_lambert_vectors",
+     radcan(vec_arr([-1/sqrt(3), 2/sqrt(3), 0], 3) - 4/3))$

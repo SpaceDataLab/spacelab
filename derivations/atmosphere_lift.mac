@@ -1,0 +1,77 @@
+/* The drag-path lift of the empirical atmospheres -- spacelab-propagation/src/nrlmsise00/atmosphere.rs,
+ * sdtm/atmosphere.rs and the other wrappers that share it -- as identities.
+ *
+ * An f64-only density model is evaluated at the point r0 and lifted into the autodiff scalar as
+ *     rho(r) = rho0 exp((|r0| - |r|) k),
+ * with k = 1/H. Two wrappers choose k differently:
+ *   a. a tabulated or transcribed model reads H from a second evaluation dh higher,
+ *      H = -dh / ln(rho_up/rho0)                                    (the NRLMSISE-00 wrapper);
+ *   b. a closed-form model returns its own d rho/dz, and k = -(d rho/dz)/rho   (the SDTM wrapper).
+ * The epoch and the elapsed time are split into a day count and a time of day by floor(), and the
+ * local solar time is wrapped into [0, 24) h the same way.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the lift is rho0 at r = r0, whatever k is (the value the STM lift must not move);
+ *   2. its gradient at r0 is -rho0 k r0/|r0|, component by component;
+ *   3. (a) on an exactly exponential layer the 10 km quotient H is the layer's own scale height, for
+ *      any step; and the quotient is the reciprocal of the mean of 1/H over the step, for any layer;
+ *   4. (b) with k = -rho'/rho the gradient is rho' r0/|r0|: the field's own analytic derivative
+ *      projected on the radius, with no finite difference left in it;
+ *   5. on a spherical geodetic map z = |r| - R, the chain rule gives d rho(z(r))/dx_i = rho' x_i/|r|,
+ *      which is what the lift's gradient in (4) must equal;
+ *   6. the day split total = 86400 floor(total/86400) + sec with 0 <= sec < 86400, and the hour wrap
+ *      into [0, 24), at the instants the wrappers' tests step across (exact rationals).
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/atmosphere_lift.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+assume(rho0 > 0, H > 0, dh > 0, R > 0)$
+
+r : [x, y, z]$
+r0 : [x0, y0, z0]$
+nrm(v) := sqrt(v . v)$
+at0(e) := subst([x = x0, y = y0, z = z0], e)$
+
+/* 1-2. The lift and its gradient at r0. */
+lift : rho0*exp((nrm(r0) - nrm(r))*k)$
+zero("lift_value_at_r0", radcan(at0(lift) - rho0))$
+for i : 1 thru 3 do
+  zero(sconcat("lift_gradient_", i),
+       radcan(at0(diff(lift, r[i])) + rho0*k*r0[i]/nrm(r0)))$
+
+/* 3. The finite-difference scale height. On rho(h) = A exp(-h/H) it is H for any step dh. */
+layer(h) := A*exp(-h/H)$
+assume(A > 0)$
+zero("quotient_scale_height_is_the_layers", radcan(-dh/log(layer(h + dh)/layer(h)) - H))$
+/* For any positive layer, ln(rho_up/rho0) is the integral of rho'/rho over the step, so the quotient
+   is dh / int (1/H(s)) ds -- the harmonic mean of the local scale height, never a value outside it. */
+ln_rho(h) := -'integrate(invH(s), s, 0, h)$
+zero("quotient_is_the_harmonic_mean",
+     ratsimp(diff(ln_rho(h + dh) - ln_rho(h), dh) + invH(h + dh)))$
+
+/* 4. k = -rho'/rho: the lift's gradient is rho' r0/|r0|. */
+for i : 1 thru 3 do
+  zero(sconcat("analytic_lift_gradient_", i),
+       radcan(subst(k = -drho/rho0, at0(diff(lift, r[i]))) - drho*r0[i]/nrm(r0)))$
+
+/* 5. The spherical chain rule: rho(|r| - R) differentiated through the radius, on a profile with an
+   exponential and a polynomial part so that neither term is special. */
+prof(u) := c1*exp(-u/H) + c2*u^3$
+for i : 1 thru 3 do
+  zero(sconcat("spherical_chain_rule_", i),
+       radcan(diff(prof(nrm(r) - R), r[i]) - subst(u = nrm(r) - R, diff(prof(u), u))*r[i]/nrm(r)))$
+
+/* 6. The day split and the hour wrap, exactly. The instants are the wrappers' fixtures: one second
+   either side of midnight from a 29000 s epoch, a whole day, three days and ten minutes, and a
+   negative total. */
+day_split(total) := block([days : floor(total/86400), sec],
+  sec : total - 86400*days,
+  if sec < 0 or sec >= 86400 then 1 else total - (86400*days + sec))$
+for total in [29000 + 57399, 29000 + 57401, 29000 + 86400, 29000 + 3*86400 + 600, -1, 0, 86400]
+  do zero(sconcat("day_split_", total), day_split(total))$
+wrap(hours) := block([w : hours - 24*floor(hours/24)], if w < 0 or w >= 24 then 1 else 0)$
+for hours in [-5/2, 8600/3600 - 5/2, 24, 47/2, 0, -24] do zero(sconcat("hour_wrap_", hours), wrap(hours))$

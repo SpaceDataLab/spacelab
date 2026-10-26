@@ -1,0 +1,136 @@
+/* The RKN12(10)17 pair of Dormand, El-Mikkawy & Prince (1987) -- spacelab-propagation/src/rkn1210.rs --
+ * against the Runge-Kutta-Nystrom order conditions, in exact rational arithmetic on the literals
+ * the crate ships.
+ *
+ * The tableau is read from crates/spacelab-propagation/src/rkn1210_consts.rs, not retyped: every
+ * literal there (30 significant digits) is converted to the exact rational it denotes. For the
+ * special second-order system r'' = f(t, r) the step is
+ *     R_i = r + c_i h v + h^2 sum_j a_ij f(R_j),
+ *     r1  = r + h v + h^2 sum_i bhat_i f(R_i),     v1 = v + h sum_i bphat_i f(R_i),
+ * and the time enters only as t + c_i h, which is what an extra component t'' = 0, t'(0) = 1 would
+ * give; the autonomous conditions therefore cover it.
+ *
+ * The conditions. Expanding f(R_i) about r, each slot of f^(m) receives either c_i h v or
+ * h^2 sum_j a_ij f(R_j). An elementary term is a tree T: a list of children, each either the
+ * velocity leaf `vel` (weight 1) or a subtree S (weight |S| + 2), |T| the sum of its children's
+ * weights. Its weight in stage i is
+ *     Phi_i(T) = prod_{vel} c_i * prod_{S} sum_j a_ij Phi_j(S).
+ * The exact solution has the same expansion with c_i -> theta and sum_j a_ij g_j -> the double
+ * integral int_0^theta (theta - s) g(s) ds, so Phi becomes theta^|T| q(T) with
+ *     q(T) = prod_{S} q(S) / ((|S| + 1)(|S| + 2)).
+ * Matching h^(|T|+2) in r1 and h^(|T|+1) in v1 gives, for order p,
+ *     position:  sum_i bhat_i Phi_i(T)  = q(T) / ((|T| + 1)(|T| + 2))   for |T| + 2 <= p,
+ *     velocity:  sum_i bphat_i Phi_i(T) = q(T) / (|T| + 1)              for |T| + 1 <= p
+ * (Hairer, Norsett & Wanner, Solving ODEs I, Sec. II.14, in the special-Nystrom form). Distinct
+ * trees give independent elementary differentials, so a failed condition at |T| + 2 = p + 1 shows
+ * the order is not higher.
+ *
+ * The literals are 30-digit decimals of irrational solutions of the order equations, so a satisfied
+ * condition does not vanish exactly: its exact residual is the 30-digit transcription error carried
+ * through the sum. A condition counts as violated when |residual| exceeds 1e-26 of the condition's
+ * own scale, sum_i |b_i Phi_i(T)| + |target| -- four decades above the 5e-30 relative rounding of
+ * one literal, and far below any failed condition (the failures at p + 1 sit above 1e-6).
+ *
+ * Printed, each `<name>: 0` line being a count of violated conditions:
+ *   the 12th-order solution (bhat, bphat): position orders 2..12, velocity orders 1..12;
+ *   the embedded 10th-order solution (b, bp): position orders 2..10, velocity orders 1..10.
+ * Then the worst relative residual of each set, and the number of conditions of order p + 1 that
+ * fail for each of the four weight vectors: the script errors if any count is not as stated.
+ * The test `rkn1210::tests::the_shipped_tableau_meets_the_nystrom_order_conditions` reads the same
+ * conditions off the shipped `step` and table in f64. Second engine: derivations/rkn1210_order.gp.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/rkn1210_order.mac </dev/null
+ */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* --- The shipped literals, as the exact rationals they denote ------------------------------- */
+srcfile(rel) := if block([errormsg : false], errcatch(close(openr(rel)))) # [] then rel
+                else sconcat("../", rel)$
+dec2rat(s) := block([sg : 1, e : 0, p, q, ip, fp],
+  if charat(s, 1) = "-" then (sg : -1, s : substring(s, 2)),
+  p : ssearch("e", s),
+  if p # false then (e : parse_string(substring(s, p + 1)), s : substring(s, 1, p)),
+  q : ssearch(".", s),
+  if q # false then (ip : substring(s, 1, q), fp : substring(s, q + 1)) else (ip : s, fp : ""),
+  sg * parse_string(sconcat(ip, fp)) * 10^(e - slength(fp)))$
+rust_const(file, name) := block([st : openr(file), line, out : [], inside : false, done : false],
+  while not done and (line : readline(st)) # false do (
+    if inside then (
+      if strim(" ", line) = "];" then done : true
+      else for tok in split(line, ",") do block([w : strim(" []", tok)],
+        if w # "" then out : cons(dec2rat(w), out)))
+    else if ssearch(sconcat("pub const ", name, ":"), line) # false then inside : true),
+  close(st),
+  if not done then error("constant not found:", name),
+  reverse(out))$
+
+consts : srcfile("crates/spacelab-propagation/src/rkn1210_consts.rs")$
+s : 17$
+c : rust_const(consts, "C")$
+bhat : rust_const(consts, "BHAT")$
+bphat : rust_const(consts, "BPHAT")$
+b : rust_const(consts, "B")$
+bp : rust_const(consts, "BP")$
+aflat : rust_const(consts, "A")$
+if map(length, [c, bhat, bphat, b, bp, aflat]) # [s, s, s, s, s, s^2] then
+  error("unexpected table shape", map(length, [c, bhat, bphat, b, bp, aflat]))$
+a : genmatrix(lambda([i, j], aflat[(i - 1)*s + j]), s, s)$
+zero("rkn1210_a_is_strictly_lower_triangular", sum(sum(abs(a[i, j]), j, i, s), i, 1, s))$
+
+/* --- Special-Nystrom trees ---------------------------------------------------------------- */
+wt(x) := if x = 'vel then 1 else size(x) + 2$
+size(t) := block([n : 0], for u in t do n : n + wt(u), n)$
+multisets(m, k, pool) := if m = 0 then [[]] else
+  block([out : []],
+    for i : k thru length(pool) do
+      if wt(pool[i]) <= m then
+        out : append(out, map(lambda([f], cons(pool[i], f)), multisets(m - wt(pool[i]), i, pool))),
+    out)$
+ftrees[n] := if n = 0 then [[]] else
+  block([pool : cons('vel, apply(append, makelist(ftrees[j], j, 0, n - 2)))],
+    map(sort, multisets(n, 1, pool)))$
+q(t) := block([r : 1], for u in t do if u # 'vel then r : r * q(u) / ((size(u) + 1)*(size(u) + 2)), r)$
+phi[t] := block([p : makelist(1, i, 1, s)],
+  for u in t do
+    if u = 'vel then p : makelist(p[i] * c[i], i, 1, s)
+    else block([w : phi[u]], p : makelist(p[i] * sum(a[i, j] * w[j], j, 1, s), i, 1, s)),
+  p)$
+
+/* Relative residual of one condition: weights w, target value. */
+relres(w, t, target) := block([ph : phi[t]],
+  abs(sum(w[i] * ph[i], i, 1, s) - target) / (sum(abs(w[i] * ph[i]), i, 1, s) + abs(target)))$
+pos(w, t) := relres(w, t, q(t) / ((size(t) + 1)*(size(t) + 2)))$
+vel(w, t) := relres(w, t, q(t) / (size(t) + 1))$
+tol : 10^-26$
+
+worst : 0$
+check(tag, w, kind, ord) := block([n : if kind = "position" then ord - 2 else ord - 1, rs, bad],
+  rs : map(lambda([t], if kind = "position" then pos(w, t) else vel(w, t)), ftrees[n]),
+  worst : max(worst, lmax(rs)),
+  bad : length(sublist(rs, lambda([r], r > tol))),
+  zero(sconcat("rkn1210_", tag, "_", kind, "_order", ord, "_violations_of_", length(rs)), bad))$
+failing(w, kind, ord) := block([n : if kind = "position" then ord - 2 else ord - 1],
+  length(sublist(map(lambda([t], if kind = "position" then pos(w, t) else vel(w, t)), ftrees[n]),
+                 lambda([r], r > 10^-6))))$
+
+for ord : 2 thru 12 do check("bhat", bhat, "position", ord)$
+for ord : 1 thru 12 do check("bphat", bphat, "velocity", ord)$
+printf(true, "rkn1210 12th-order pair: worst relative residual ~,3e~%", float(worst))$
+worst : 0$
+for ord : 2 thru 10 do check("b", b, "position", ord)$
+for ord : 1 thru 10 do check("bp", bp, "velocity", ord)$
+printf(true, "rkn1210 embedded 10th-order pair: worst relative residual ~,3e~%", float(worst))$
+
+f13 : failing(bhat, "position", 13)$
+f13v : failing(bphat, "velocity", 13)$
+f11 : failing(b, "position", 11)$
+f11v : failing(bp, "velocity", 11)$
+printf(true, "rkn1210 conditions of order p+1 failing above 1e-6: bhat position 13 ~a of ~a, bphat velocity 13 ~a of ~a, b position 11 ~a of ~a, bp velocity 11 ~a of ~a~%",
+  f13, length(ftrees[11]), f13v, length(ftrees[12]), f11, length(ftrees[9]), f11v, length(ftrees[10]))$
+if f13 = 0 or f13v = 0 or f11 = 0 or f11v = 0 then error("a weight vector is of higher order than claimed")$
+printf(true, "special-Nystrom trees per size 0..12: ~a~%", makelist(length(ftrees[n]), n, 0, 12))$

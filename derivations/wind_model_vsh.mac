@@ -1,0 +1,142 @@
+/* The horizontal-wind model -- spacelab-propagation/src/wind_model.rs -- as identities.
+ *
+ * The field is a vector-spherical-harmonic expansion in (latitude phi, local-time angle lam):
+ *     spheroidal  S_nm = (dY/dlam / cos phi,  dY/dphi),   toroidal  T_nm = (-dY/dphi,  dY/dlam / cos phi),
+ * components (east, north), Y_nm = Pbar_nm(sin phi) {cos, sin}(m lam), fully normalised over 4 pi.
+ * `angular_basis` builds Pbar_nm, its phi-derivative and Pbar_nm / cos phi by three recursions:
+ *     p_11 = sqrt3 s, p_10 = sqrt3 x, p_nn = c_n s p_{n-1,n-1}, p_nm = a x p_{n-1,m} - b p_{n-2,m},
+ *     dp_nn = c_n (s dp_{n-1,n-1} - x p_{n-1,n-1}), dp_nm = a (x dp_{n-1,m} + s p_{n-1,m}) - b dp_{n-2,m},
+ *     q_11 = sqrt3, q_nn = c_n s q_{n-1,n-1},  q_nm = a x q_{n-1,m} - b q_{n-2,m}
+ * (x = sin phi, s = cos phi, c_n = sqrt((2n+1)/(2n)), a and b the usual Holmes-Featherstone factors).
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. to degree 5: p is Rodrigues' Pbar_nm (no Condon-Shortley phase), dp is d p/d phi, and for
+ *      m >= 1 q is p / cos phi -- a polynomial, which is what keeps the basis finite at the poles (G1);
+ *   2. the coded pair (m q dtrig, dp trig) is (dY/dlam / cos phi, dY/dphi) (G1);
+ *   3. to degree 4, every toroidal term is divergence-free and every spheroidal term curl-free on the
+ *      sphere, and div S_nm = -n(n+1) Y_nm: Y is the Laplacian eigenfunction it is meant to be (G2);
+ *   4. the high-latitude window w = x^2 (3 - 2x) is 0 and 1 at its ends with zero slope at both,
+ *      and 1/2 in the middle (G3);
+ *   5. the activity driver ln(1 + ap/15) is ln 2 at the reference ap (G3);
+ *   6. the solar declination asin(sin eps sin L) is the obliquity rotation of the ecliptic unit
+ *      vector at longitude L (G1);
+ *   7. the magnetic rotation: velocity() turns (u_m, v_m) by (c, s) and fit() turns the measured
+ *      direction by the transpose, and d . (R w) = (R' d) . w, so the two agree (G1);
+ *   8. the force adapter's east (-y, x, 0)/h and north r^ x e^ are d r^/d lam / cos phi and
+ *      d r^/d phi for r^ = (cos phi cos lam, cos phi sin lam, sin phi), and orthonormal (G1);
+ *   9. angular_terms(deg) = 2 deg (deg + 2) is two vector terms per real harmonic of degree >= 1 (G3).
+ * derivations/wind_model_vsh.gp prints the basis at 40 digits from Rodrigues for the Rust gate.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/wind_model_vsh.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+ratprint : false$
+
+/* 1. The three recursions, transcribed from angular_basis. */
+nmax : 5$
+array(p, nmax, nmax)$  array(dp, nmax, nmax)$  array(q, nmax, nmax)$
+fillarray(p, makelist(0, (nmax + 1)^2))$
+fillarray(dp, makelist(0, (nmax + 1)^2))$
+fillarray(q, makelist(0, (nmax + 1)^2))$
+p[0, 0] : 1$
+p[1, 1] : sqrt(3)*s$  dp[1, 1] : -sqrt(3)*x$  q[1, 1] : sqrt(3)$
+p[1, 0] : sqrt(3)*x$  dp[1, 0] : sqrt(3)*s$
+for n : 2 thru nmax do (
+  sect : sqrt((2*n + 1)/(2*n)),
+  p[n, n] : sect*s*p[n - 1, n - 1],
+  dp[n, n] : sect*(s*dp[n - 1, n - 1] - x*p[n - 1, n - 1]),
+  q[n, n] : sect*s*q[n - 1, n - 1],
+  for m : 0 thru n - 1 do (
+    a : sqrt((2*n - 1)*(2*n + 1)/((n - m)*(n + m))),
+    if m + 2 <= n then (
+      b : sqrt((2*n + 1)*(n - m - 1)*(n + m - 1)/((2*n - 3)*(n - m)*(n + m))),
+      [p2, dp2, q2] : [p[n - 2, m], dp[n - 2, m], q[n - 2, m]])
+    else [b, p2, dp2, q2] : [0, 0, 0, 0],
+    p[n, m] : expand(a*x*p[n - 1, m] - b*p2),
+    dp[n, m] : expand(a*(x*dp[n - 1, m] + s*p[n - 1, m]) - b*dp2),
+    q[n, m] : expand(a*x*q[n - 1, m] - b*q2)))$
+
+leg(n, t0) := subst(t = t0, diff((t^2 - 1)^n/(2^n*n!), t, n))$
+nfac(n, m) := sqrt((if m = 0 then 1 else 2)*(2*n + 1)*(n - m)!/(n + m)!)$
+rodrigues(n, m) := nfac(n, m)*s^m*subst(t = x, diff(leg(n, t), t, m))$
+on_circle(e) := subst([x = sin(ph), s = cos(ph)], e)$
+trig0(e) := trigsimp(trigreduce(trigexpand(e)))$
+for n : 1 thru nmax do for m : 0 thru n do (
+  zero(sconcat("p_is_rodrigues_", n, "_", m), radcan(expand(p[n, m] - rodrigues(n, m)))),
+  zero(sconcat("dp_is_the_phi_derivative_", n, "_", m),
+       radcan(trig0(on_circle(dp[n, m]) - diff(on_circle(rodrigues(n, m)), ph)))),
+  if m >= 1 then
+    zero(sconcat("q_is_p_over_cos_", n, "_", m), radcan(expand(q[n, m]*s - p[n, m]))))$
+
+/* 2-3. The vector terms on the sphere, as functions of (ph, lam). */
+Y(n, m, f) := on_circle(rodrigues(n, m))*f(m*lam)$
+spheroidal(n, m, f) := [diff(Y(n, m, f), lam)/cos(ph), diff(Y(n, m, f), ph)]$
+toroidal(n, m, f) := [-diff(Y(n, m, f), ph), diff(Y(n, m, f), lam)/cos(ph)]$
+div(w) := (diff(w[1], lam) + diff(w[2]*cos(ph), ph))/cos(ph)$
+curl(w) := (diff(w[2], lam) - diff(w[1]*cos(ph), ph))/cos(ph)$
+red(e) := radcan(trigsimp(trigexpand(e)))$
+/* dtrig for the coded pair: d/dlam cos(m lam) = -m sin, d/dlam sin(m lam) = m cos. */
+for n : 1 thru nmax do for m : 0 thru n do for f in (if m = 0 then [cos] else [cos, sin]) do block(
+  [coded, dtrig],
+  dtrig : if f = cos then -sin(m*lam) else cos(m*lam),
+  coded : [m*on_circle(q[n, m])*dtrig, on_circle(dp[n, m])*f(m*lam)],
+  zero(sconcat("coded_pair_east_", n, "_", m, "_", f), red(coded[1] - spheroidal(n, m, f)[1])),
+  zero(sconcat("coded_pair_north_", n, "_", m, "_", f), red(coded[2] - spheroidal(n, m, f)[2])))$
+for n : 1 thru 4 do for m : 0 thru n do for f in (if m = 0 then [cos] else [cos, sin]) do (
+  zero(sconcat("toroidal_divergence_free_", n, "_", m, "_", f), red(div(toroidal(n, m, f)))),
+  zero(sconcat("spheroidal_curl_free_", n, "_", m, "_", f), red(curl(spheroidal(n, m, f)))),
+  zero(sconcat("spheroidal_divergence_is_the_eigenvalue_", n, "_", m, "_", f),
+       red(div(spheroidal(n, m, f)) + n*(n + 1)*Y(n, m, f))))$
+
+/* 4. The smoothstep window. */
+win(u) := u^2*(3 - 2*u)$
+zero("window_closed_at_onset", win(0))$
+zero("window_open_at_full", win(1) - 1)$
+zero("window_flat_at_onset", subst(u = 0, diff(win(u), u)))$
+zero("window_flat_at_full", subst(u = 1, diff(win(u), u)))$
+zero("window_half_in_the_middle", win(1/2) - 1/2)$
+
+/* 5. The activity driver at the reference index. */
+zero("activity_driver_at_reference", radcan(log(1 + 15/15) - log(2)))$
+
+/* 6. The obliquity rotation: R1(-eps) (cos L, sin L, 0) has z = sin eps sin L. */
+rot1(e) := matrix([1, 0, 0], [0, cos(e), -sin(e)], [0, sin(e), cos(e)])$
+sun_eq : rot1(eps) . transpose(matrix([cos(L), sin(L), 0]))$
+zero("declination_is_the_obliquity_rotation", trigsimp(sun_eq[3, 1] - sin(eps)*sin(L)))$
+zero("rotated_sun_is_a_unit_vector", trigsimp(sun_eq[1, 1]^2 + sun_eq[2, 1]^2 + sun_eq[3, 1]^2 - 1))$
+
+/* 7. The magnetic rotation in velocity() and its transpose in fit(). c^2 + s^2 = 1 is not even
+   needed: d . (R w) = (R' d) . w for any matrix. */
+Rm : matrix([cr, sr], [-sr, cr])$
+wm : matrix([um], [vm])$
+dv : matrix([de], [dn])$
+zero("velocity_rotation_east", expand((Rm . wm)[1, 1] - (cr*um + sr*vm)))$
+zero("velocity_rotation_north", expand((Rm . wm)[2, 1] - (cr*vm - sr*um)))$
+dm : transpose(Rm) . dv$
+zero("fit_direction_east", expand(dm[1, 1] - (cr*de - sr*dn)))$
+zero("fit_direction_north", expand(dm[2, 1] - (sr*de + cr*dn)))$
+zero("projection_is_rotation_invariant", expand((transpose(dv) . (Rm . wm)) - (transpose(dm) . wm)))$
+
+/* 8. The adapter's local frame. r = rr (cos ph cos lam, cos ph sin lam, sin ph). */
+assume(cos(ph) > 0, rr > 0)$
+rv : rr*[cos(ph)*cos(lam), cos(ph)*sin(lam), sin(ph)]$
+h : sqrt(rv[1]^2 + rv[2]^2)$
+east : [-rv[2], rv[1], 0]/h$
+up : rv/rr$
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+north : cross(up, east)$
+rhat : rv/rr$
+for i : 1 thru 3 do (
+  zero(sconcat("east_is_the_longitude_tangent_", i), red(east[i] - diff(rhat[i], lam)/cos(ph))),
+  zero(sconcat("north_is_the_latitude_tangent_", i), red(north[i] - diff(rhat[i], ph))))$
+zero("east_unit", red(east . east - 1))$
+zero("north_unit", red(north . north - 1))$
+zero("east_north_orthogonal", red(east . north))$
+zero("east_horizontal", red(east . up))$
+zero("north_horizontal", red(north . up))$
+
+/* 9. The term count. */
+zero("angular_terms_count", expand(2*((deg + 1)^2 - 1) - 2*deg*(deg + 2)))$

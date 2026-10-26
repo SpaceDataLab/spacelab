@@ -1,0 +1,105 @@
+/* The symplectic compositions of spacelab-propagation/src/symplectic.rs, in the free associative
+ * algebra, exactly.
+ *
+ * A method's one-step map is a product of exponentials: velocity Verlet over a fraction g of the
+ * step is exp(g B/2) exp(g A) exp(g B/2), A the drift (x += h v) and B the kick (v += h a(x)), and
+ * the exact flow is exp(A + B) (h = 1; a word of length d carries h^d). A method is of order p iff
+ * its product agrees with exp(A + B), whose coefficient on every word of length d is 1/d!, on all
+ * words of length <= p. Time symmetry is Psi(h) Psi(-h) = 1, with Psi(-h) the product with every
+ * length-d coefficient multiplied by (-1)^d. A product of exponentials of Lie elements is
+ * symplectic for a Hamiltonian splitting, so what is left to show is the order.
+ *
+ * Shown, each line printing `<name>: 0` (a count of words on which two sides differ, or a residual):
+ *   1. leapfrog: exact through length 2, not at length 3, and Psi(h) Psi(-h) = 1 through length 7;
+ *   2. yoshida4 = S(w1) S(w0) S(w1), w1 = 1/(2 - r), w0 = -r w1, r = 2^(1/3) carried exactly as an
+ *      algebraic number: exact through length 4, not at length 5, and time-symmetric through 5;
+ *   3. the triple jump that builds yoshida6 and yoshida8 (`triple_jump`). If a symmetric S has
+ *      log S(g) = g P + g^q Q + (weight >= q + 2), q = 2k + 1 -- P the flow, Q its leading error --
+ *      then, symbolically in z,
+ *          S(z) S(1 - 2z) S(z) = exp(P + (2 z^q + (1 - 2z)^q) Q)   on every word of weight <= q + 1,
+ *      shown for q = 3, 5, 7 with P, Q free generators of weights 1 and q: the composite is
+ *      symmetric (no weight-(q+1) term) and its only error below weight q + 2 is the Q term;
+ *   4. z = 1/(2 - 2^(1/q)) annihilates that coefficient, 2 z^q + (1 - 2z)^q = 0, exactly, for
+ *      q = 3, 5, 7.
+ * So leapfrog is symmetric of order 2; one jump with q = 3 (the yoshida4 of item 2) gives a
+ * symmetric order-4 method, q = 5 order 6 (yoshida6), q = 7 order 8 (yoshida8). That the order is
+ * not higher, and the same orders on the 9- and 27-fraction lists the code actually builds, is
+ * checked in derivations/symplectic_composition.gp at 100 digits through length 9.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/symplectic_composition.mac </dev/null
+ */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* --- Free associative algebra: an element is a list of [word, coefficient] ----------------- */
+gw(g) := if g = 'Q then qq else 1$
+wt(word) := block([n : 0], for g in word do n : n + gw(g), n)$
+csimp(e) := ratsimp(e)$
+fa_collect(l) := block([srt, out : [], cur : false],
+  srt : sort(l, lambda([x, y], orderlessp(x[1], y[1]))),
+  for e in srt do
+    if cur # false and cur[1] = e[1] then cur : [cur[1], cur[2] + e[2]]
+    else (if cur # false then out : cons(cur, out), cur : e),
+  if cur # false then out : cons(cur, out),
+  sublist(map(lambda([e], [e[1], csimp(e[2])]), out), lambda([e], e[2] # 0)))$
+fa_mul(x, y, wmax) := block([out : []],
+  for a in x do for b in y do
+    if wt(a[1]) + wt(b[1]) <= wmax then out : cons([append(a[1], b[1]), a[2]*b[2]], out),
+  fa_collect(out))$
+fa_exp(x, wmax) := block([term : [[[], 1]], acc : [[[], 1]]],
+  for n : 1 thru wmax do (
+    term : map(lambda([e], [e[1], e[2]/n]), fa_mul(term, x, wmax)),
+    acc : append(acc, term)),
+  fa_collect(acc))$
+fa_sub(x, y) := fa_collect(append(x, map(lambda([e], [e[1], -e[2]]), y)))$
+reversed(x) := map(lambda([e], [e[1], (-1)^wt(e[1])*e[2]]), x)$
+letter(g, c, wmax) := fa_exp([[[g], c]], wmax)$
+substeps(fracs, wmax) := block([psi : [[[], 1]]],
+  for g in fracs do
+    for f in [letter('B, g/2, wmax), letter('A, g, wmax), letter('B, g/2, wmax)] do
+      psi : fa_mul(psi, f, wmax),
+  psi)$
+/* Words of length d on which psi differs from the exact flow exp(A + B). */
+off_at(psi, d, wmax) := length(sublist(fa_sub(psi, fa_exp([[['A], 1], [['B], 1]], wmax)),
+                                       lambda([e], length(e[1]) = d)))$
+asymmetry(psi, wmax) := length(fa_sub(fa_mul(psi, reversed(psi), wmax), [[[], 1]]))$
+
+/* --- 1. Leapfrog ---------------------------------------------------------------------------- */
+qq : 1$
+lf : substeps([1], 7)$
+for d : 1 thru 2 do zero(sconcat("leapfrog_words_of_length_", d, "_off_the_flow"), off_at(lf, d, 7))$
+lf3 : off_at(lf, 3, 7)$
+printf(true, "leapfrog words of length 3 off the flow ~a~%", lf3)$
+if lf3 = 0 then error("leapfrog is of order 3")$
+zero("leapfrog_psi(h)_psi(-h)_minus_1_through_length_7", asymmetry(lf, 7))$
+
+/* --- 2. Yoshida4 with r = 2^(1/3) exact ----------------------------------------------------- */
+algebraic : true$
+tellrat(r^3 - 2)$
+w1 : 1/(2 - r)$
+w0 : -r*w1$
+y4 : substeps([w1, w0, w1], 5)$
+for d : 1 thru 4 do zero(sconcat("yoshida4_words_of_length_", d, "_off_the_flow"), off_at(y4, d, 5))$
+y45 : off_at(y4, 5, 5)$
+printf(true, "yoshida4 words of length 5 off the flow ~a~%", y45)$
+if y45 = 0 then error("yoshida4 is of order 5")$
+zero("yoshida4_psi(h)_psi(-h)_minus_1_through_length_5", asymmetry(y4, 5))$
+untellrat(r)$
+algebraic : false$
+
+/* --- 3. The triple-jump lemma, symbolic in z ------------------------------------------------ */
+for q in [3, 5, 7] do block([base, psi, want],
+  qq : q,
+  base(g) := fa_exp([[['P], g], [['Q], g^qq]], qq + 1),
+  psi : fa_mul(fa_mul(base(z), base(1 - 2*z), qq + 1), base(z), qq + 1),
+  want : fa_exp([[['P], 1], [['Q], 2*z^qq + (1 - 2*z)^qq]], qq + 1),
+  zero(sconcat("triple_jump_q", q, "_words_off_exp(P+c(z)Q)_through_weight_", q + 1),
+       length(fa_sub(psi, want))))$
+
+/* --- 4. The closed-form z cancels the leading error exactly ------------------------------- */
+for q in [3, 5, 7] do block([zq : 1/(2 - 2^(1/q))],
+  zero(sconcat("triple_jump_q", q, "_closed_form_z_cancels"), radcan(2*zq^q + (1 - 2*zq)^q)))$

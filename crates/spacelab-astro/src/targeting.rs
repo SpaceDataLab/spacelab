@@ -50,6 +50,13 @@
 //!   many tolerances it missed, and the controls come back so the run can be continued or plotted.
 //!   A targeter that throws away twenty propagations because the twenty-first would have made it is
 //!   not being careful, it is being wasteful.
+//!
+//! Gate: `derivations/targeting_hohmann.mac` solves the apoapsis constraint of a prograde burn in
+//! closed form — Hohmann's burn is its root, with the slope that turns a converged tolerance into a
+//! bound on the control — and the scaled least-squares point of two incompatible goals;
+//! `derivations/targeting_hohmann.gp` finds the same root at 60 digits by `solve()`. The module tests
+//! `a_scalar_burn_reaches_the_apoapsis_hohmann_predicts` (G2) and
+//! `an_overdetermined_system_settles_at_the_least_squares_point` (G2) hold the corrector to them.
 
 // Matrix code indexes several arrays by one i/j/k, and the Jacobian is `J` by universal convention.
 #![allow(clippy::needless_range_loop, clippy::many_single_char_names)]
@@ -476,7 +483,8 @@ fn damped_step<const C: usize, const G: usize>(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used)]
+    // The 60-digit references are carried at the precision they were computed to.
+    #![allow(clippy::expect_used, clippy::excessive_precision)]
 
     use spacelab_core::Vec3;
 
@@ -485,8 +493,16 @@ mod tests {
 
     const MU_EARTH: f64 = 3.986_004_418e14;
 
+    /// (G2) The converged burn satisfies the constraint it was driven to, and the constraint's root
+    /// is Hohmann's burn: `derivations/targeting_hohmann.mac` derives `r_a(Δv)` and its root in
+    /// closed form, `derivations/targeting_hohmann.gp` solves it at 60 digits — `HOHMANN_DV` — with
+    /// the slope `dr_a/dΔv = 60 755.27 m per m/s` there. Convergence means `|r_a − r2| ≤ 1 m`, so
+    /// the burn is within `1 m / slope = 1.6e-5 m/s` of the root to first order; the bound adds the
+    /// rounding of the f64 apoapsis, a few ulps of `r2`, over the same slope.
     #[test]
     fn a_scalar_burn_reaches_the_apoapsis_hohmann_predicts() {
+        const HOHMANN_DV: f64 = 2_425.769_028_306_858_919_636_876_099_531;
+        const APOAPSIS_SLOPE: f64 = 60_755.271_207_521_200_006_192_807;
         // The canonical mission-design question, and the one case where the answer is on paper:
         // from a circular orbit at r1, how large a prograde impulse puts apoapsis at r2? Hohmann
         // says Δv = √(μ/r1)·(√(2r2/(r1+r2)) − 1), and the targeter is told none of that — it sees a
@@ -508,6 +524,17 @@ mod tests {
         .expect("the sequence is evaluable everywhere on this line");
 
         assert!(report.converged, "{report:?}");
+        let achieved = apoapsis_radius(&[r1, 0.0, 0.0, 0.0, v1 + solution[0], 0.0]);
+        assert!(
+            (achieved - r2).abs() <= 1.0,
+            "converged with apoapsis {achieved} m against the goal {r2} m"
+        );
+        let bound = (1.0 + 16.0 * f64::EPSILON * r2) / APOAPSIS_SLOPE;
+        assert!(
+            (solution[0] - HOHMANN_DV).abs() <= bound,
+            "targeted {} m/s, root of the constraint {HOHMANN_DV} m/s, bound {bound:.3e}",
+            solution[0]
+        );
         assert!(
             (solution[0] - closed_form).abs() < 1e-6,
             "targeted {} against Hohmann {closed_form}",
@@ -680,6 +707,8 @@ mod tests {
         );
     }
 
+    /// (G2) The point the corrector settles at is the stationary point of the scaled least-squares
+    /// objective, `x = 3/2` (`derivations/targeting_hohmann.mac`).
     #[test]
     fn an_overdetermined_system_settles_at_the_least_squares_point() {
         // Two goals, one control, and no value of the control satisfies both. The corrector must

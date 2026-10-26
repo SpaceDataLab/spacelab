@@ -326,7 +326,7 @@ exclude_re = [
     # produced no difference in any of the three returned doubles, bit for bit. The other five
     # mutants of this iteration's private state do separate somewhere in that range and are killed
     # by the `μ = 0.4639` row of `the_collinear_points_are_the_correctly_rounded_roots_of_the_gradient`.
-    "cr3bp\\.rs:96:35: replace < with <= in Cr3bp::collinear_points",
+    "cr3bp\\.rs:109:35: replace < with <= in Cr3bp::collinear_points",
 
     # --- `lambert.rs`. Tolerance ties, an unreachable runaway guard, and a scan that cannot see a
     # sample landing exactly on its root.
@@ -352,19 +352,19 @@ exclude_re = [
     # 2.4492935982947064e-16} ∪ [1.49e-8, 1]`, and the threshold sits in an empty gap four decades
     # wide on either side: no input can make the two comparisons disagree. The `==` and `>` ties on
     # the same site are ordinary survivors and are killed.
-    "lambert\\.rs:92:22: replace < with <= in lambert",
+    "lambert\\.rs:101:22: replace < with <= in lambert",
 
     # `let a = 1.0 / (1.0 - x * x); if a > 0.0`. `a == 0` needs `1 − x²` infinite, and `izzo_tof` is
     # private and only ever called on the scan domain `x ∈ [−1 + 1e-6, 20]`, where `1 − x²` lies in
     # `[−399, 2e-6]`. At `x = ±1` exactly `a` is `±∞` and both forms agree.
-    "lambert\\.rs:364:10: replace > with >= in izzo_tof",
+    "lambert\\.rs:373:10: replace > with >= in izzo_tof",
 
     # `let beta = if lambda < 0.0 { -beta0 } else { beta0 }`, on both conics. At `λ == 0` we have
     # `β₀ = 0`, and `β − sin β` is `+0.0` for `−0.0` as well as `+0.0` (likewise `β − sinh β`), so
     # the two branches compute the same double. `λ = 0` is unreachable besides: it needs `c == s`,
     # a collinear geometry the `|r1 × r2|` guard has already refused.
-    "lambert\\.rs:368:30: replace < with <= in izzo_tof",
     "lambert\\.rs:377:30: replace < with <= in izzo_tof",
+    "lambert\\.rs:386:30: replace < with <= in izzo_tof",
 
     # The two sign tests of the scan and the bisection, `fa * fb < 0.0` and `fx * f(a) < 0.0`,
     # rewritten as quotients or tied to `<=`. For finite nonzero `b`, `a·b < 0` and `a/b < 0` are
@@ -374,16 +374,16 @@ exclude_re = [
     # constructed, and the mutant moves none of the 24 sweep arcs. In the bisection `f(a)` does
     # reach `±0`, but only once `a` is already the correctly rounded root: measured, 4 of the 24
     # arcs move and by at most 5.2 ulps of `v1`.
-    "lambert\\.rs:448:15: replace \\* with / in lambert_multirev",
-    "lambert\\.rs:448:20: replace < with <= in lambert_multirev",
-    "lambert\\.rs:467:17: replace \\* with / in lambert_multirev",
-    "lambert\\.rs:467:24: replace < with <= in lambert_multirev",
+    "lambert\\.rs:457:15: replace \\* with / in lambert_multirev",
+    "lambert\\.rs:457:20: replace < with <= in lambert_multirev",
+    "lambert\\.rs:476:17: replace \\* with / in lambert_multirev",
+    "lambert\\.rs:476:24: replace < with <= in lambert_multirev",
 
     # `if fa * fb < 0.0 && nb < 2`, tied to `nb <= 2` — which would index `brackets[2]` and panic on
     # a third sign change. The same 1 300 325-scan search never saw more than two: `T(x)` is
     # monotone in `x` for `n_rev = 0` and unimodal for `n_rev ≥ 1`, so `T − T_target` has at most
     # two roots. Not a proof of that structure, a bounded search over it.
-    "lambert\\.rs:448:32: replace < with <= in lambert_multirev",
+    "lambert\\.rs:457:32: replace < with <= in lambert_multirev",
 
     # --- `lambert.rs` again, the single-revolution solver as #290 and #292 left it. Twelve survivors,
     # three kinds, and the measurement that separates them is `examples/lambert_domain_probe.rs`:
@@ -404,8 +404,8 @@ exclude_re = [
     # `+∞`. `no_transfer_is_solved_in_no_time` already presents 5 000 of those and the probe another
     # 5 616; every one is refused either way, because `y(z)` cannot reach a root that does not exist
     # and the arc the search settles on misses `r2` by a full radius.
-    "lambert\\.rs:72:26: replace && with \\|\\| in lambert",
-    "lambert\\.rs:72:33: replace > with >= in lambert",
+    "lambert\\.rs:81:26: replace && with \\|\\| in lambert",
+    "lambert\\.rs:81:33: replace > with >= in lambert",
 
     # `sin_dnu.abs() < 1e-12`, rewritten as `== 1e-12` — the same site as the `<=` tie above, from the
     # other side: it admits everything below the threshold except the threshold itself. The reachable
@@ -413,36 +413,36 @@ exclude_re = [
     # exactly 0, π or 2π. At 0, `1 − cos Δν` is `0` and `A = 0·∞` is `NaN`; at π and 2π `A` is 1e-16
     # small and the transfer plane is undefined, so the velocity is normal to nothing in particular.
     # All 432 exact-degenerate calls of the probe are refused either way.
-    "lambert\\.rs:92:22: replace < with == in lambert",
+    "lambert\\.rs:101:22: replace < with == in lambert",
 
     # `!yz.is_finite() || yz <= 0.0`, weakened to `&&`, which lets a non-positive `y` through. It
     # cannot survive the arithmetic below it: `lg = A√(y/µ)` is `NaN` for `y < 0` and exactly `0` for
     # `y = 0`, so `v1` is `NaN` or `±∞`, `propagate` returns the same, and the closure check refuses a
     # non-finite miss. `Arc::solve` refuses these first in any case — at `y = 0` the residual is
     # `−√µ·tof`, a full scale from zero.
-    "lambert\\.rs:105:24: replace \\|\\| with && in lambert",
+    "lambert\\.rs:114:24: replace \\|\\| with && in lambert",
 
     # Two exact identities in the Stumpff-free `y`.
     #
     # `if z > 0.0 { cos(√z/2) } else { cosh(√z/2) }`, tied to `>=`. The branches part only at `z == 0`,
     # where `√0 = 0`, `cos 0 = cosh 0 = 1` — the same double. `z == −0.0` goes the other way and lands
     # on `cosh(−0.0) = 1` against `cos(−0.0) = 1`, also the same double.
-    "lambert\\.rs:173:25: replace > with >= in Arc::y",
+    "lambert\\.rs:182:25: replace > with >= in Arc::y",
 
     # `!(self.y(z) > 0.0 && (value >= 0.0 || value.is_nan()))`, tied to `y(z) >= 0.0`. They can part
     # only at `y(z) == 0`, and there `tof_err` is `(0/C)^1.5·S + A·√0 − √µ·tof = −√µ·tof` exactly —
     # strictly negative for the `tof > 0` the entry gate enforces and never `NaN`. So the inner
     # disjunction is false, the conjunction is false, and `below` is `true` under both spellings.
-    "lambert\\.rs:217:33: replace > with >= in Arc::probe",
+    "lambert\\.rs:226:33: replace > with >= in Arc::probe",
 
     # Three ties on an exact equality between two independently computed doubles, in the safeguarded
     # Newton loop. `newton > lo && newton < hi` parts from `>=`/`<=` only when the Newton iterate lands
     # bit-exactly on a bracket endpoint, which needs `residual/F′` to equal `z − lo` to the last bit;
     # `|residual| > 1e-8·√µ·tof` parts only when the two sides are the same double. Bounded search:
     # 38 890 solves across the probe and the long-way sweep, no tie.
-    "lambert\\.rs:327:55: replace > with >= in Arc::solve",
-    "lambert\\.rs:327:70: replace < with <= in Arc::solve",
-    "lambert\\.rs:353:58: replace > with >= in Arc::solve",
+    "lambert\\.rs:336:55: replace > with >= in Arc::solve",
+    "lambert\\.rs:336:70: replace < with <= in Arc::solve",
+    "lambert\\.rs:362:58: replace > with >= in Arc::solve",
 
     # --- `iod.rs`. One redundant screen and one exact equality.
     #
@@ -453,14 +453,14 @@ exclude_re = [
     # `N = |r1|(r2×r3) + |r2|(r3×r1) + |r3|(r1×r2)` carries a factor that vanishes with it, so
     # `|N| == 0` and the `D`/`N` check returns it. `gibbs_refuses_positions_that_are_not_one_orbit`
     # presents exactly that input and gets the same answer through the longer path.
-    "crates/spacelab-astro/src/iod\\.rs:202:18: replace \\|\\| with && in gibbs",
+    "crates/spacelab-astro/src/iod\\.rs:213:18: replace \\|\\| with && in gibbs",
 
     # `rho1 - damping * step1 > 0.0 && rho3 - damping * step3 > 0.0`, both tied to `>=`. They part only
     # when a damped Newton step lands a range at exactly zero — the object exactly at the observer,
     # which is the case the halving exists to step around. `damping` is a power of two, so that needs
     # `step == rho·2^k` bit for bit between two doubles computed from different Jacobian entries.
-    "crates/spacelab-astro/src/iod\\.rs:684:39: replace > with >= in gooding",
-    "crates/spacelab-astro/src/iod\\.rs:684:71: replace > with >= in gooding",
+    "crates/spacelab-astro/src/iod\\.rs:695:39: replace > with >= in gooding",
+    "crates/spacelab-astro/src/iod\\.rs:695:71: replace > with >= in gooding",
 
     # --- `laplace`'s degeneracy guard and range scan: the five `seal-laplace3` leaves behind.
     #
@@ -473,7 +473,7 @@ exclude_re = [
     # `shape.abs() < 1e-12`, tied to `<=`. They part only where the normalised triple product is
     # exactly the double nearest 1e-12 — one specific double out of a quotient of two cross-product
     # norms. No geometry can be aimed at it.
-    "crates/spacelab-astro/src/iod\\.rs:387:42: replace < with <= in laplace",
+    "crates/spacelab-astro/src/iod\\.rs:398:42: replace < with <= in laplace",
 
     # `previous * value <= 0.0 && previous != 0.0`, the product turned into a quotient. It is the
     # same sign test: the conjunct already rules out `previous == 0.0`, and `previous * value` and
@@ -482,12 +482,12 @@ exclude_re = [
     # consecutive values stays finite. They part only where `value` is exactly `0.0`, a sampled
     # abscissa landing on a root of the octic: the product form brackets it, the quotient form gets
     # `±inf` and does not.
-    "crates/spacelab-astro/src/iod\\.rs:419:21: replace \\* with / in laplace",
+    "crates/spacelab-astro/src/iod\\.rs:430:21: replace \\* with / in laplace",
 
     # `rho > 0.0`, tied to `>=`. The filter drops a range behind the observer; the two part only at
     # `rho == 0.0` exactly, the object *at* the observer, where the line of sight that produced the
     # sighting would have had to be a zero vector.
-    "crates/spacelab-astro/src/iod\\.rs:425:20: replace > with >= in laplace",
+    "crates/spacelab-astro/src/iod\\.rs:436:20: replace > with >= in laplace",
 
     # Both ends of the scan bracket `[0.01|R|, 1000|R|]`, each *widened* rather than narrowed:
     # `0.01 * scale -> 0.01 / scale` drops the bottom from `0.01|R|` to `0.01/|R|` — 6.2e4 m to
@@ -502,8 +502,8 @@ exclude_re = [
     # and nothing here exhibits a Laplace octic with more than one positive root — that would need
     # the multiple-solution geometry Gauss's method is also known for. The *narrowing* counterpart,
     # `0.01 * scale -> 0.01 + scale`, is caught, by `laplace_is_given_a_target_below_the_observer`.
-    "crates/spacelab-astro/src/iod\\.rs:413:26: replace \\* with / in laplace",
-    "crates/spacelab-astro/src/iod\\.rs:414:43: replace / with \\* in laplace",
+    "crates/spacelab-astro/src/iod\\.rs:424:26: replace \\* with / in laplace",
+    "crates/spacelab-astro/src/iod\\.rs:425:43: replace / with \\* in laplace",
 
     # --- `edl.rs`. The FNPEG corrector's acceptance test.
 
@@ -514,7 +514,7 @@ exclude_re = [
     # tie that `a_guidance_cycle_matched_to_the_predictor_flies_exactly_what_it_predicted` actually
     # hits: the banks differ by exactly 1.819e-12 and the range they fly by 9.9e-8 m on a 525.7 km
     # arc — 1.9e-13 relative, four orders below the guidance's own resolution.
-    "edl\\.rs:253:18: replace < with <= in fnpeg_bank_command_within",
+    "edl\\.rs:260:18: replace < with <= in fnpeg_bank_command_within",
 
     # Both halves of the outer guidance loop's stop test, `budget spent OR no longer flying`, are
     # equivalent for the same reason: the inner flight loop carries the flight condition too and is
@@ -525,8 +525,8 @@ exclude_re = [
     # mutant, `306:40`, is caught, because there nothing stops the vehicle flying past the terminal
     # condition. `290:23`, the `==` of the budget test, is caught for the opposite reason: it makes
     # the outer loop break before it has flown anything.
-    "edl\\.rs:290:28: replace \\|\\| with && in guided_entry",
-    "edl\\.rs:290:55: replace && with \\|\\| in guided_entry",
+    "edl\\.rs:297:28: replace \\|\\| with && in guided_entry",
+    "edl\\.rs:297:55: replace && with \\|\\| in guided_entry",
 
     # The same masking covers the *strictness* of the outer guard's two comparisons — and only the
     # outer one. `>` and `>=` part exactly where a state sits on a boundary; at the top of a cycle
@@ -544,8 +544,8 @@ exclude_re = [
     # reads one off a bank-independent ballistic vehicle, and `..._at_the_surface_and_not_one_step_
     # below_it` moves the surface onto a step endpoint under a zero-density atmosphere. Both now
     # kill their mutant and leave this pair equivalent, so the two guards are separated here.
-    "edl\\.rs:290:38: replace > with >= in guided_entry",
-    "edl\\.rs:290:63: replace > with >= in guided_entry",
+    "edl\\.rs:297:38: replace > with >= in guided_entry",
+    "edl\\.rs:297:63: replace > with >= in guided_entry",
 
     # `if 2.0 * p < min1.min(min2)`. It ties at `2p == min(min1, min2)`, admitting a step the
     # baseline rejects. When `min2 = |e·q|` is the binding bound, the tie gives `d = p/q = ±e/2`,
@@ -564,27 +564,27 @@ exclude_re = [
     # `a[col][col]` with itself, which `>` rejects, so `piv` is unchanged. The back-substitution over
     # `(i*1)..6` adds `s -= a[i][i] * x[i]` at a point where `x[i]` is still its initial `0.0`, so `s`
     # is unchanged bit for bit. Measured move on the probe: exactly zero, every state.
-    "optimal\\.rs:84:25: replace \\+ with \\* in solve6",
-    "optimal\\.rs:95:21: replace \\+ with \\* in solve6",
+    "optimal\\.rs:92:25: replace \\+ with \\* in solve6",
+    "optimal\\.rs:103:21: replace \\+ with \\* in solve6",
 
     # The pivot comparison `|a[row][col]| > |a[piv][col]|`, tied to `>=`, which keeps the *last*
     # maximal row instead of the first. Partial pivoting's error bound depends on the magnitude of
     # the pivot, not on which of several equally large rows supplies it. Measured: zero move.
-    "optimal\\.rs:75:40: replace > with >= in solve6",
+    "optimal\\.rs:83:40: replace > with >= in solve6",
 
     # Three tolerance tests tied to `<=`: the singular-pivot refusal `|a[piv][col]| < 1e-18`, the
     # shooter's early exit `err < 1e-9`, and the reported `converged: err < 1e-6`. Each compares a
     # computed double against a constant it would have to equal bit for bit. Measured: zero move.
-    "optimal\\.rs:79:36: replace < with <= in solve6",
-    "optimal\\.rs:153:16: replace < with <= in min_energy_transfer",
-    "optimal\\.rs:179:24: replace < with <= in min_energy_transfer",
+    "optimal\\.rs:87:36: replace < with <= in solve6",
+    "optimal\\.rs:161:16: replace < with <= in min_energy_transfer",
+    "optimal\\.rs:187:24: replace < with <= in min_energy_transfer",
 
     # `if err < 1e-9 { break }` rewritten as `err == 1e-9`, which never fires, so the shooter runs
     # all sixty iterations instead of stopping at four. Newton is at its fixed point by then and the
     # extra steps reproduce it: measured worst relative move 7.4e-12, three orders below the 1e-6
     # convergence the API promises. What the mutation costs is iterations, and unlike `kepler` there
     # is no count on this function's surface for a test to assert.
-    "optimal\\.rs:153:16: replace < with == in min_energy_transfer",
+    "optimal\\.rs:161:16: replace < with == in min_energy_transfer",
 
     # --- The four below are NOT proofs. Each perturbs a step-size or resolution heuristic that the
     # --- surrounding iteration then corrects, and each was measured over the probe rather than
@@ -595,16 +595,16 @@ exclude_re = [
     # move 1.6e-10 and 2.1e-10. The `-` form is the more fragile of the two — a costate component
     # near `1.0` in the caller's units collapses `1.0 - |p[j]|` toward zero and the Jacobian column
     # with it. The probe's costates are `O(1e-3)`, so it cannot see that; nothing here rules it out.
-    "optimal\\.rs:159:28: replace \\* with / in min_energy_transfer",
-    "optimal\\.rs:159:35: replace \\+ with - in min_energy_transfer",
+    "optimal\\.rs:167:28: replace \\* with / in min_energy_transfer",
+    "optimal\\.rs:167:35: replace \\+ with - in min_energy_transfer",
 
     # The step count of `optimal_control_at`, `400.max((t.abs() * 4.0) as usize)`, with the `*` tied
     # to `+` and `/`. All three resolutions integrate the same costate dynamics to convergence over
     # the spans the probe covers: worst relative move 2.8e-13 and 1.5e-11. For `t` far beyond the
     # probe the three diverge — `*` grows the count linearly and `/` collapses it to the `400` floor
     # — so this is a bounded measurement over the tested spans, not a statement about the function.
-    "optimal\\.rs:207:45: replace \\* with \\+ in optimal_control_at",
-    "optimal\\.rs:207:45: replace \\* with / in optimal_control_at",
+    "optimal\\.rs:215:45: replace \\* with \\+ in optimal_control_at",
+    "optimal\\.rs:215:45: replace \\* with / in optimal_control_at",
 
     # --- `periodic.rs`. Convergence tolerances, a power iteration that forgets where it started,
     # --- and a manifold branch the API does not name. 56 survivors before the eigen-analysis was
@@ -617,9 +617,9 @@ exclude_re = [
     # the sign test rejects it anyway. `s[1] * sn[1] < 0` and `s[1] / sn[1] < 0` are the same
     # predicate for finite nonzero operands and part only where `sn[1]` is exactly `±0`, which is a
     # sample landing on the crossing to the bit; `<=` ties there too.
-    "periodic\\.rs:123:14: replace > with >= in to_crossing",
-    "periodic\\.rs:123:32: replace \\* with / in to_crossing",
-    "periodic\\.rs:123:40: replace < with <= in to_crossing",
+    "periodic\\.rs:133:14: replace > with >= in to_crossing",
+    "periodic\\.rs:133:32: replace \\* with / in to_crossing",
+    "periodic\\.rs:133:40: replace < with <= in to_crossing",
 
     # The Newton-on-`y` refinement's exit, `|y| < 1e-13`, tied to `<=` and to `==`. The `==` form
     # never fires, so the refinement runs all forty steps instead of two; Newton is at its fixed
@@ -628,8 +628,8 @@ exclude_re = [
     # the mutation costs is thirty-eight RK4 steps, and `to_crossing` is private with no count on it.
     # `assert_perpendicular_crossing` is what kills the third mutant of this line, `< with >`, which
     # leaves a single refinement and `|y| ≈ 1e-9`.
-    "periodic\\.rs:134:32: replace < with <= in to_crossing",
-    "periodic\\.rs:134:32: replace < with == in to_crossing",
+    "periodic\\.rs:144:32: replace < with <= in to_crossing",
+    "periodic\\.rs:144:32: replace < with == in to_crossing",
 
     # `if vx1.abs() < 1e-12` in `lyapunov_shoot` and `if det.abs() < 1e-14` in `halo_orbit`, tied to
     # `<=`, plus that determinant test tied to `==`. The first two are measure-zero ties on computed
@@ -639,13 +639,13 @@ exclude_re = [
     # did would divide by a determinant at the rounding floor and hand a non-finite state to
     # `to_crossing`, which would then walk its whole 200 000-step bound before returning `None`
     # instead of refusing at once.
-    "periodic\\.rs:210:22: replace < with <= in lyapunov_shoot",
-    "periodic\\.rs:260:22: replace < with <= in halo_orbit",
-    "periodic\\.rs:245:22: replace < with == in halo_orbit",
+    "periodic\\.rs:220:22: replace < with <= in lyapunov_shoot",
+    "periodic\\.rs:270:22: replace < with <= in halo_orbit",
+    "periodic\\.rs:255:22: replace < with == in halo_orbit",
 
     # `halo_orbit`'s acceptance, `|ẋ₁| < 1e-11 && |ż₁| < 1e-11`, both comparisons tied to `<=`.
-    "periodic\\.rs:245:22: replace < with <= in halo_orbit",
-    "periodic\\.rs:245:43: replace < with <= in halo_orbit",
+    "periodic\\.rs:255:22: replace < with <= in halo_orbit",
+    "periodic\\.rs:255:43: replace < with <= in halo_orbit",
 
     # --- `dominant_eigen`'s starting vector. All six are the same proof.
 
@@ -659,12 +659,12 @@ exclude_re = [
     # `the_unstable_multiplier_is_the_manifolds_actual_growth` requires the returned pair to satisfy
     # `‖Mv − λv‖/‖Mv‖ < 1e-12` with the product written out in the test, and `|λ|` to match the
     # growth of the nonlinear flow to 1e-3.
-    "periodic\\.rs:346:28: delete - in dominant_eigen",
-    "periodic\\.rs:346:39: delete - in dominant_eigen",
-    "periodic\\.rs:347:20: replace / with \\* in dominant_eigen",
-    "periodic\\.rs:347:20: replace / with % in dominant_eigen",
-    "periodic\\.rs:348:39: replace \\* with \\+ in dominant_eigen",
-    "periodic\\.rs:348:39: replace \\* with / in dominant_eigen",
+    "periodic\\.rs:360:28: delete - in dominant_eigen",
+    "periodic\\.rs:360:39: delete - in dominant_eigen",
+    "periodic\\.rs:361:20: replace / with \\* in dominant_eigen",
+    "periodic\\.rs:361:20: replace / with % in dominant_eigen",
+    "periodic\\.rs:362:39: replace \\* with \\+ in dominant_eigen",
+    "periodic\\.rs:362:39: replace \\* with / in dominant_eigen",
 
     # `orbit.state[i] + epsilon * v[i]` in both manifold seeds, `+` tied to `-`. This picks the other
     # branch of the same manifold, and which branch is not a property either function has: an
@@ -673,8 +673,8 @@ exclude_re = [
     # without naming a side. Both branches are seeds, both depart (or approach) at `|λ|`, and the
     # growth assertion measures the same number for either. The `*` mutants of the same expressions
     # are killed, by the assertion that the seed is exactly `epsilon` from the orbit.
-    "periodic\\.rs:376:56: replace \\+ with - in unstable_manifold_seed",
-    "periodic\\.rs:389:56: replace \\+ with - in stable_manifold_seed",
+    "periodic\\.rs:390:56: replace \\+ with - in unstable_manifold_seed",
+    "periodic\\.rs:403:56: replace \\+ with - in stable_manifold_seed",
 
     # --- `cw.rs`.
 
@@ -686,7 +686,7 @@ exclude_re = [
     # and neither does anything `cw_propagate` does with the value. The subtraction is kept because
     # it is one component of the vector expression `Rᵀ v_rel − ω × r_lvlh`, and splitting the third
     # component out to save an addition of zero would hide that.
-    "cw\\.rs:49:55: replace - with \\+ in relative_lvlh_state",
+    "cw\\.rs:60:55: replace - with \\+ in relative_lvlh_state",
 
     # --- `patched.rs`.
 
@@ -696,7 +696,7 @@ exclude_re = [
     # for bit is a measure-zero coincidence. The exactly-parallel case, `sxn_norm == 0`, is asserted
     # by `a_reference_along_the_asymptote_has_no_aiming_plane`, which is what kills the mutants of
     # the constant itself.
-    "patched\\.rs:100:17: replace < with <= in b_plane",
+    "patched\\.rs:110:17: replace < with <= in b_plane",
 
     # --- `richardson.rs`.
 
@@ -746,21 +746,21 @@ exclude_re = [
     # `if alpha < -1e-9`, the hyperbolic/elliptic split of the initial guess, tied to `<=`. It ties
     # at `alpha == -1e-9` exactly, on a reciprocal semi-major axis computed as `2/r0 − v0²/μ`.
     # Measured over the budget test's nine conics and twelve spans: not one step of difference.
-    "kepler\\.rs:142:26: replace < with <= in universal_anomaly",
+    "kepler\\.rs:145:26: replace < with <= in universal_anomaly",
 
     # `if dir * kepler(outer).0 >= 0.0`, the bracket walk's sign test, rewritten as a quotient. For
     # finite nonzero `F` the two predicates are the same; they part only at `F == ±0`, where the
     # product gives `0 >= 0` and the quotient gives `±∞` — which needs a doubling to land exactly on
     # the root. Measured: one call in the budget test costs one extra step, 8.29 against 8.28 mean,
     # and no propagated state moves.
-    "kepler\\.rs:178:16: replace \\* with / in universal_anomaly",
+    "kepler\\.rs:181:16: replace \\* with / in universal_anomaly",
 
     # `if f < 0.0 { lo = chi } else { hi = chi }`, tied to `<=`. Provable, not measured. The two
     # differ only at `f == 0`, and there `chi` is the root: the baseline assigns `hi = chi` and the
     # mutant `lo = chi`, so either way `chi` remains an endpoint of a bracket that still contains it,
     # and the Newton step on the next line is `chi − 0/fp = chi`, which sets `settled` and returns.
     # Same double, same iteration count — which the budget test confirms.
-    "kepler\\.rs:203:14: replace < with <= in universal_anomaly",
+    "kepler\\.rs:206:14: replace < with <= in universal_anomaly",
 
     # --- crates/spacelab-elements/src/brouwer_lyddane.rs ---
 
@@ -1315,7 +1315,7 @@ exclude_re = [
     # `the_scale_height_floor_is_far_below_any_layer_the_model_produces` asserts that band so a
     # coefficient change that brings a real layer near the floor fails a test instead of quietly
     # switching arms.
-    "nrlmsise00/atmosphere\\.rs:83:47: replace > with >= in <impl Atmosphere for Nrlmsise00Atmosphere<G>>::density",
+    "nrlmsise00/atmosphere\\.rs:90:47: replace > with >= in <impl Atmosphere for Nrlmsise00Atmosphere<G>>::density",
 
     # ── dsst/coefficients.rs ───────────────────────────────────────────────────────────────────
     # `n − s` and `n + s` differ by `2s`, so they have the same parity and the branch picks the
@@ -1865,8 +1865,8 @@ exclude_re = [
     # `h0 > 0.0` checks, and the `?` propagates the identical `IntegrationError::BadArguments` the
     # unmutated guard would have returned two lines earlier, still before any `sys.derivative`. The
     # extra `N.is_multiple_of(2)` conjunct is evaluated first and is unaffected either way.
-    "gj\\.rs:107:36: replace > with >= in integrate_gj8",
-    "gj\\.rs:214:36: replace > with >= in integrate_gj8_dense",
+    "gj\\.rs:115:36: replace > with >= in integrate_gj8",
+    "gj\\.rs:222:36: replace > with >= in integrate_gj8_dense",
 
     # The `h > 0.0` conjunct of the same guard, equivalent for the reason `abm.rs:74:23` is: `>=`
     # differs only at `h == ±0.0`, and with `t1 > t0` that reaches `step_count(t0, t1, ±0.0, 7)`,
@@ -1874,8 +1874,8 @@ exclude_re = [
     # `asked.is_finite()` test rejects it, and the `?` propagates the identical
     # `IntegrationError::BadArguments` two lines below where the unmutated guard would have raised
     # it — still before the DOP853 startup and before any `sys.derivative`.
-    "gj\\.rs:107:46: replace > with >= in integrate_gj8",
-    "gj\\.rs:214:46: replace > with >= in integrate_gj8_dense",
+    "gj\\.rs:115:46: replace > with >= in integrate_gj8",
+    "gj\\.rs:222:46: replace > with >= in integrate_gj8_dense",
 
     # --- crates/spacelab-propagation/src/mercurius.rs ---
 
@@ -2000,10 +2000,10 @@ exclude_re = [
     # never above ½, and `(x + c).to_bits() == x.to_bits()` and `(x − c).to_bits() == x.to_bits()`
     # held in every one. A difference needs `|c|` exactly at the ½-ulp tie *and* an odd last bit, so
     # that round-half-to-even pushes the two directions apart; nothing in the campaign has reached it.
-    "symplectic\\.rs:95:14: replace \\+= with -= in leapfrog",
-    "symplectic\\.rs:96:14: replace \\+= with -= in leapfrog",
-    "symplectic\\.rs:139:14: replace \\+= with -= in compose",
-    "symplectic\\.rs:140:14: replace \\+= with -= in compose",
+    "symplectic\\.rs:104:14: replace \\+= with -= in leapfrog",
+    "symplectic\\.rs:105:14: replace \\+= with -= in leapfrog",
+    "symplectic\\.rs:148:14: replace \\+= with -= in compose",
+    "symplectic\\.rs:149:14: replace \\+= with -= in compose",
 
     # --- crates/spacelab-propagation/src/whfast.rs ---
 
@@ -2241,7 +2241,7 @@ exclude_re = [
     # `== 0.0` are the same predicate on every input -- NaN included, since NaN takes the else branch
     # under both. The `==` form is *not* equivalent and is killed by
     # `normalize_leaves_a_vector_whose_norm_underflows_alone`.
-    "attitude_law\\.rs:63:10: replace < with <= in normalize",
+    "attitude_law\\.rs:71:10: replace < with <= in normalize",
 
     # `linalg::lu_factor`'s pivot search, `for r in (col + 1)..K` -> `(col * 1)..K`. The mutant adds
     # exactly one iteration, `r == col`, at a point where `p == col` -- the line above initialises
@@ -2460,8 +2460,8 @@ exclude_re = [
     # and `n+m = 2n-1 >= 3`, so the quotient is a true zero rather than 0/0, and `sqrt(0) * p` is 0
     # for any finite `p`. The read `p[n-2][n-1]` stays inside the array. The guard is a
     # short-circuit over a term the recursion already annihilates.
-    "density_calibration\\.rs:114:39: replace && with \\|\\| in DensityCorrection<K>::basis",
-    "density_calibration\\.rs:114:49: replace - with \\+ in DensityCorrection<K>::basis",
+    "density_calibration\\.rs:124:39: replace && with \\|\\| in DensityCorrection<K>::basis",
+    "density_calibration\\.rs:124:49: replace - with \\+ in DensityCorrection<K>::basis",
 
     # --- `dop853.rs`. The error estimate only ever squares its two accumulators.
     #
@@ -3248,8 +3248,8 @@ exclude_re = [
     # bit-for-bit `-(sum)`. Squaring erases the sign. Measured over 200 000 random 17-term runs
     # spanning 1e-20..1e20 with mixed signs: the negation was exact in 200 000 of 200 000 and the
     # squared error norm bit-identical in 200 000 of 200 000.
-    "rkn1210\\.rs:68:18: replace \\+= with -= in step",
-    "rkn1210\\.rs:69:19: replace \\+= with -= in step",
+    "rkn1210\\.rs:76:18: replace \\+= with -= in step",
+    "rkn1210\\.rs:77:19: replace \\+= with -= in step",
 
     # The endpoint clamp `if t + h > t1 { h = t1 - t }` becomes `>=`, so it also fires on the tie
     # where `t + h` rounds to exactly `t1`. There the clamp replaces `h` with `t1 - t`, and
@@ -3257,7 +3257,7 @@ exclude_re = [
     # interval of `h` that rounds to `t1`, at magnitudes 2^-20 .. 2^43 (131 008 samples), the worst
     # was 0.499512 ulp(t1). That is the same magnitude the `t += h` update itself rounds by, so a
     # test that told the two apart would be pinning which side of a tie the platform lands on.
-    "rkn1210\\.rs:131:18: replace > with >= in integrate",
+    "rkn1210\\.rs:139:18: replace > with >= in integrate",
 
     # --- spacelab-gnss: models.rs ---------------------------------------------------------------
     #
@@ -3675,8 +3675,8 @@ exclude_re = [
     # asserted at the head of `basis` — both loops stop at the same `i`: `(j−1)·j = j² − j <= j²`
     # holds and `j·(j+1) = j² + j > j²` does not, exactly as `j² <= j²` holds and `(j+1)² > j²` does
     # not. `degree()` is the same function on every legal input.
-    "density_calibration\\.rs:55:14: replace \\+ with \\* in isqrt",
-    "density_calibration\\.rs:55:24: replace \\+ with \\* in isqrt",
+    "density_calibration\\.rs:65:14: replace \\+ with \\* in isqrt",
+    "density_calibration\\.rs:65:24: replace \\+ with \\* in isqrt",
 
     # --- `propagation/density_calibration.rs`. Whole-day shifts of a quantity read modulo one day.
     #
@@ -3696,11 +3696,11 @@ exclude_re = [
     # equivalent by the same argument but evaluates the wrap near `7e14 s`, where one f64 ulp is
     # 0.06 s, and the cancellation moves the local solar time by 3.4e-6 h — 9e-8 in the factor, which
     # `local_solar_time_crosses_the_day_boundary_and_wraps_a_negative_longitude` catches.
-    "density_calibration\\.rs:240:29: replace - with \\+ in <impl Atmosphere for CalibratedAtmosphere<A, G, K>>::density",
-    "density_calibration\\.rs:240:64: replace / with % in <impl Atmosphere for CalibratedAtmosphere<A, G, K>>::density",
-    "density_calibration\\.rs:242:13: replace -= with \\+= in <impl Atmosphere for CalibratedAtmosphere<A, G, K>>::density",
-    "density_calibration\\.rs:242:39: replace / with % in <impl Atmosphere for CalibratedAtmosphere<A, G, K>>::density",
-    "density_calibration\\.rs:242:39: replace / with \\* in <impl Atmosphere for CalibratedAtmosphere<A, G, K>>::density",
+    "density_calibration\\.rs:250:29: replace - with \\+ in <impl Atmosphere for CalibratedAtmosphere<A, G, K>>::density",
+    "density_calibration\\.rs:250:64: replace / with % in <impl Atmosphere for CalibratedAtmosphere<A, G, K>>::density",
+    "density_calibration\\.rs:252:13: replace -= with \\+= in <impl Atmosphere for CalibratedAtmosphere<A, G, K>>::density",
+    "density_calibration\\.rs:252:39: replace / with % in <impl Atmosphere for CalibratedAtmosphere<A, G, K>>::density",
+    "density_calibration\\.rs:252:39: replace / with \\* in <impl Atmosphere for CalibratedAtmosphere<A, G, K>>::density",
 
     # --- `propagation/density_rom.rs`. A guard whose only differing input is refused further down.
     #
@@ -4166,7 +4166,7 @@ exclude_re = [
     # `fl(2π)` is not the true period of `sin`/`cos`, and it is measured rather than assumed:
     # `the_magnetic_coordinates_track_the_dipole_and_the_sun` walks 96 points and reports a worst
     # |MLT(lst) − MLT(lst + 24 h)| of 7.1e-15 h. The expansion it feeds resolves 24/(2·degree) h.
-    "wind_model\\.rs:349:51: replace - with \\+ in magnetic_point",
+    "wind_model\\.rs:360:51: replace - with \\+ in magnetic_point",
 
     # `let idx = |n, m| n·w + m`, the scratch layout of the Legendre tables inside `angular_basis`,
     # tied to `n·w − m`. It is a *permutation* of the same storage, not a different answer: every
@@ -4178,7 +4178,7 @@ exclude_re = [
     # `n·w − m ≤ (w−1)·w < w²`. The values are therefore identical, which
     # `the_basis_is_the_gradient_of_its_harmonic` confirms empirically against an evaluator that
     # does not share the layout.
-    "wind_model\\.rs:397:42: replace \\+ with - in angular_basis",
+    "wind_model\\.rs:408:42: replace \\+ with - in angular_basis",
 
     # The two short-circuits in `velocity` that skip the high-latitude block, each tied to `>=`. Both
     # guards exist to save work, not to change the answer, and `>=` is exactly the mutation that
@@ -4201,20 +4201,20 @@ exclude_re = [
     # Both arguments are over finite coefficients and a finite point; on a non-finite `ap` the added
     # `inf · 0` would be NaN, which is a distinction without a difference for a model whose drivers
     # are polynomials in that same input.
-    "wind_model\\.rs:548:36: replace > with >= in HorizontalWindField::velocity",
-    "wind_model\\.rs:551:23: replace > with >= in HorizontalWindField::velocity",
+    "wind_model\\.rs:559:36: replace > with >= in HorizontalWindField::velocity",
+    "wind_model\\.rs:562:23: replace > with >= in HorizontalWindField::velocity",
 
     # `jd_max > 0` → `>=` in `fit`, the same short-circuit as the two above and equivalent for the
     # same reason: at disturbance degree zero `angular_terms` is zero, so `angular_basis` returns an
     # empty vector, `for j in 0..0` writes nothing, and the design row the mutant spends the extra
     # `magnetic_point` call on is byte for byte the row it would have had.
-    "wind_model\\.rs:628:23: replace > with >= in HorizontalWindField::fit",
+    "wind_model\\.rs:639:23: replace > with >= in HorizontalWindField::fit",
 
     # `for j in i + 1..k` → `i * 1..k` in the loop that mirrors the upper triangle of the normal
     # equations into the lower one. The extra iteration it admits is `j == i`, whose body is
     # `ata[i·k + i] = ata[i·k + i]` — a self-assignment, and the only one, since `i * 1 == i`
     # exactly for every `usize`.
-    "wind_model\\.rs:674:24: replace \\+ with \\* in HorizontalWindField::fit",
+    "wind_model\\.rs:685:24: replace \\+ with \\* in HorizontalWindField::fit",
 
     # `for k in i + 1..n` → `i..n` in the back-substitution of the Cholesky solve. The extra
     # iteration reads `c[i]`, which the loop is about to write and which `vec![0.0; n]` left at
@@ -4222,7 +4222,7 @@ exclude_re = [
     # and every finite pivot, and the pivot is finite: `l = sqrt(d)` is only reached once `d` has
     # passed `d.is_nan() || d <= 0.0`, and the only way past that with a non-finite `d` is an input
     # matrix that was already non-finite.
-    "wind_model\\.rs:724:20: replace \\+ with \\* in solve_symmetric_positive_definite",
+    "wind_model\\.rs:735:20: replace \\+ with \\* in solve_symmetric_positive_definite",
 
     # `sec = total_sec − 86 400·days` → `+` in the drag adapter. `sec` has exactly one consumer,
     # `lst_raw`, which is reduced to `[0, 24)` before it reaches the model; the mutant differs from
@@ -4230,13 +4230,13 @@ exclude_re = [
     # number of days and the reduction removes it. Keeping the subtraction is still the right code:
     # reducing before the division to hours is what stops `sec / 3 600` from being a large number
     # that the wrap then cancels against, and the mutant's precision degrades as `t` grows.
-    "wind_model\\.rs:810:29: replace - with \\+ in <impl Wind for EmpiricalWind<G>>::velocity",
+    "wind_model\\.rs:821:29: replace - with \\+ in <impl Wind for EmpiricalWind<G>>::velocity",
 
     # `up[2]·ê[0] − up[0]·ê[2]` → `+` in the north direction. `ê[2]` is constructed as
     # `S::from_f64(0.0)` two lines above, so the subtrahend is an exact `±0.0`, and `x − 0.0` and
     # `x + 0.0` agree on every input including the infinities and NaN. They differ only in the sign
     # of the result when `x` is itself `−0.0`, which compares equal and is returned by value.
-    "wind_model\\.rs:841:33: replace - with \\+ in <impl Wind for EmpiricalWind<G>>::velocity",
+    "wind_model\\.rs:852:33: replace - with \\+ in <impl Wind for EmpiricalWind<G>>::velocity",
 
     # `if row > norm { norm = row }` in the infinity-norm loop → `>=`. On a tie the mutant assigns
     # `norm = row` where `row == norm` already, which is the identity, and there is no other
@@ -4446,7 +4446,7 @@ exclude_re = [
     # so `|ρ̂| − 1.0` is exact by Sterbenz and is an integer multiple of `2⁻⁵³`. `fl(1e-9)` is not one:
     # `1e-9·2⁵³ = 9007199.254740993` is not an integer, so `fl(1e-9) = m·2⁻⁸²` with `m` odd, and no
     # multiple of `2⁻⁵³` equals it. The comparison has no tie to make.
-    "crates/spacelab-astro/src/iod\\.rs:179:67: replace > with >= in validate",
+    "crates/spacelab-astro/src/iod\\.rs:190:67: replace > with >= in validate",
 
     # `n1 == 0.0 || n2 == 0.0 || n3 == 0.0` -> `&&`, the zero-length screen in `gibbs`. Each disjunct
     # is a shortcut for a check below it that returns the *same* `IodError::Degenerate`, so weakening
@@ -4457,8 +4457,8 @@ exclude_re = [
     # the reasoning `gibbs_refuses_three_points_on_a_line` already sets out, and
     # `gibbs_refuses_positions_that_are_not_one_orbit` asserts the later check answers for the
     # zero vector.
-    "crates/spacelab-astro/src/iod\\.rs:219:18: replace \\|\\| with && in gibbs",
-    "crates/spacelab-astro/src/iod\\.rs:202:31: replace \\|\\| with && in gibbs",
+    "crates/spacelab-astro/src/iod\\.rs:230:18: replace \\|\\| with && in gibbs",
+    "crates/spacelab-astro/src/iod\\.rs:213:31: replace \\|\\| with && in gibbs",
 
     # The scan that brackets the 8th-degree polynomial — its lower bound `0.01·|R₂|`, the geometric
     # sample spacing `lo·(hi/lo)^(i/N)`, and the sign-change test. Six mutants, one proof: the scan
@@ -4475,18 +4475,18 @@ exclude_re = [
     # `f64`s. That pin was widened from `1e-12` relative to bit-exact for this block: a tolerance
     # sees none of these, because `ρ₁` cancels `r₂³` between numerator and denominator and `r₂`
     # reaches the ranges only through corrections of order `μτ²/r₂³`, 1e-5 on the shortest triple.
-    "crates/spacelab-astro/src/iod\\.rs:491:26: replace \\* with / in gauss_ranges",
-    "crates/spacelab-astro/src/iod\\.rs:492:43: replace / with \\* in gauss_ranges",
-    "crates/spacelab-astro/src/iod\\.rs:492:58: replace / with % in gauss_ranges",
-    "crates/spacelab-astro/src/iod\\.rs:499:21: replace \\* with / in gauss_ranges",
-    "crates/spacelab-astro/src/iod\\.rs:499:36: replace && with \\|\\| in gauss_ranges",
-    "crates/spacelab-astro/src/iod\\.rs:499:55: replace && with \\|\\| in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:502:26: replace \\* with / in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:503:43: replace / with \\* in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:503:58: replace / with % in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:510:21: replace \\* with / in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:510:36: replace && with \\|\\| in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:510:55: replace && with \\|\\| in gauss_ranges",
 
     # `ranges.iter().all(|&rho| rho > 0.0)` -> `>=`, the physical filter. The two differ only for a
     # slant range of exactly `0.0`, which puts the object exactly at its observer — and there the
     # unit line of sight `validate` requires cannot have been formed, because the direction from a
     # point to itself has no norm. There is no input behind the case the mutant decides differently.
-    "crates/spacelab-astro/src/iod\\.rs:502:63: replace > with >= in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:513:63: replace > with >= in gauss_ranges",
 
     # `first == 0.0 || third == 0.0 || tau1 == 0.0 || tau3 == 0.0` -> `&&`, the divide-by-zero screen
     # in `ranges_at`. Every disjunct is redundant with the `is_finite` filter the function ends on:
@@ -4494,15 +4494,15 @@ exclude_re = [
     # whichever is zero makes its quotient `±∞` for a nonzero numerator or `NaN` for a zero one, and
     # `[ρ₁, ρ₂, ρ₃].all(is_finite)` then returns the same `None`. Two of the four cannot arise at
     # all: `validate` has already required `t₁ < t₂ < t₃`, so `tau1` and `tau3` are nonzero.
-    "crates/spacelab-astro/src/iod\\.rs:522:21: replace \\|\\| with && in ranges_at",
-    "crates/spacelab-astro/src/iod\\.rs:522:37: replace \\|\\| with && in ranges_at",
-    "crates/spacelab-astro/src/iod\\.rs:522:52: replace \\|\\| with && in ranges_at",
+    "crates/spacelab-astro/src/iod\\.rs:533:21: replace \\|\\| with && in ranges_at",
+    "crates/spacelab-astro/src/iod\\.rs:533:37: replace \\|\\| with && in ranges_at",
+    "crates/spacelab-astro/src/iod\\.rs:533:52: replace \\|\\| with && in ranges_at",
 
     # `let low_side = f(lo) < 0.0` -> `<=` in `bisect`. `bisect` has exactly one call site, and the
     # condition guarding it requires `previous != 0.0`, where `previous` *is* `f(lo)` — the same
     # deterministic closure at the same argument. `f(lo) == 0.0` is unreachable, so the two spellings
     # agree at every call the function receives.
-    "crates/spacelab-astro/src/iod\\.rs:548:26: replace < with <= in bisect",
+    "crates/spacelab-astro/src/iod\\.rs:559:26: replace < with <= in bisect",
 
     # `axis.x.abs() <= axis.y.abs() && …` -> `>`, the seed choice in `perpendicular_basis`. The
     # function's contract is *an* orthonormal basis of the plane perpendicular to `axis`, and the
@@ -4514,13 +4514,13 @@ exclude_re = [
     # and the Newton step solves `J δ = f`, so a common rotation gives `(RJ)⁻¹(Rf) = J⁻¹f`. Measured
     # with the converged state pinned bit for bit at three seeds in
     # `gooding_survives_seeds_that_are_not_gausss`: the mutant returns the identical `f64`s.
-    "crates/spacelab-astro/src/iod\\.rs:567:32: replace <= with > in perpendicular_basis",
+    "crates/spacelab-astro/src/iod\\.rs:578:32: replace <= with > in perpendicular_basis",
 
     # `residual < 1e-13` -> `<=`, Newton's convergence test. The two differ only where `residual` —
     # `hypot` of two differences of projected directions — is bit-exactly `fl(1e-13)`, and nothing in
     # the domain produces that value by construction. Where it did, the mutant would accept an
     # iterate the original refines once more from a point already at the tolerance.
-    "crates/spacelab-astro/src/iod\\.rs:656:21: replace < with <= in gooding",
+    "crates/spacelab-astro/src/iod\\.rs:667:21: replace < with <= in gooding",
 
     # `determinant == 0.0 || !determinant.is_finite()` -> `&&`, the singular-Jacobian escape. `0.0`
     # is finite, so the mutant's conjunction is never true and the guard is gone — and every path it
@@ -4531,7 +4531,7 @@ exclude_re = [
     # zero-valued steps instead, leaving the iterate unmoved, so the loop repeats identically and
     # returns that same residual after its 60 passes. What the guard buys is how long it takes, not
     # what it answers.
-    "crates/spacelab-astro/src/iod\\.rs:669:31: replace \\|\\| with && in gooding",
+    "crates/spacelab-astro/src/iod\\.rs:680:31: replace \\|\\| with && in gooding",
 
     # `!rho1.is_finite() || !rho3.is_finite()` -> `&&`, the post-step finiteness check. For the two
     # to disagree exactly one range must be non-finite, and the guard above has already taken the way
@@ -4540,7 +4540,7 @@ exclude_re = [
     # earlier. What is left is a numerator that overflows `f64` while the determinant does not, which
     # needs an observer within a few orders of `1.8e308` — `validate` asks only that it be finite, so
     # it is expressible — and there both branches return an error, differing only in which one.
-    "crates/spacelab-astro/src/iod\\.rs:691:30: replace \\|\\| with && in gooding",
+    "crates/spacelab-astro/src/iod\\.rs:702:30: replace \\|\\| with && in gooding",
     # --- `seal-robust-vector`: the vector-measurement robust updates (#283) ---------------------
     #
     # `prior + noise` -> `prior - noise` in `huber_weight`. `nominal` is read in exactly one place, the
@@ -5331,8 +5331,8 @@ exclude_re = [
     # array was initialised with — `delta[i]` is assigned on the line *after* the sum is formed. The
     # extra term is therefore `l[i][i] * 0.0 = 0.0` at every `i`, including `i = C-1` where the
     # unmutated range is empty. Same sum, same quotient, bit for bit, at every dimension.
-    "crates/spacelab-astro/src/targeting\\.rs:446:31: replace \\|\\| with && in damped_step",
-    "crates/spacelab-astro/src/targeting\\.rs:466:21: replace \\+ with \\* in damped_step",
+    "crates/spacelab-astro/src/targeting\\.rs:453:31: replace \\|\\| with && in damped_step",
+    "crates/spacelab-astro/src/targeting\\.rs:473:21: replace \\+ with \\* in damped_step",
 
     # Six `|` -> `^` mutants across the RTCM bit reader, the RTCM frame scanner and the NTRIP base64
     # encoder. All six are the same identity: `a | b` and `a ^ b` differ only where `a` and `b` share

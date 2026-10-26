@@ -14,6 +14,16 @@
 //! This is our own model — no NRLMSIS 2.x code, data, or patented method is used. The correction is a
 //! plain weighted least-squares regression on an orthogonal-ish spherical-harmonic basis, so it is
 //! exact and verifiable (a known coefficient set round-trips through [`DensityCorrection::fit`]).
+//!
+//! Gate: `derivations/density_calibration_ridge.mac` proves the recursion in [`DensityCorrection::basis`]
+//! is Rodrigues' fully-normalised `P̄ₙₘ` to degree 6, that the packed basis is orthogonal over the
+//! sphere with mean square 1 for the zonal and **2** for every `m ≥ 1` term (the extra `√2` the
+//! packing carries, which a plain fit absorbs into the coefficient and a ridge does not), and solves a
+//! degree-2 ridge fit exactly in rationals; `derivations/density_calibration_ridge.gp` solves the same
+//! system exactly and by a Cholesky factorisation at 100 digits. The module tests
+//! `the_basis_is_the_fully_normalised_real_harmonic_at_that_sun_fixed_point` (G1),
+//! `the_ridge_fit_is_the_exact_solution_of_its_normal_equations` (G2) and
+//! `the_degree_zero_ridge_fit_is_the_shrunk_weighted_mean` (G3) hold the code to them.
 
 // Spherical-harmonic index maths uses short symbols (n, m, x, s) and index-parallel loops over the
 // coefficient/basis vectors; the WLS normal equations reuse the crate's const-generic LU solver, so
@@ -258,7 +268,7 @@ mod tests {
 
     use super::*;
 
-    /// The basis against fully-normalised real spherical harmonics built from Rodrigues' formula in
+    /// (G1) The basis against fully-normalised real spherical harmonics built from Rodrigues' formula in
     /// `tools/gen_shbasis_oracle.mac`, which shares no arithmetic with the recursion here — the
     /// oracle differentiates `(x²−1)ⁿ` and applies `N_nm` directly, the code walks a three-term
     /// recursion. Every other test reaches `basis` only through `fit`, which asks whether a fitted
@@ -267,6 +277,8 @@ mod tests {
     ///
     /// Degrees 1, 4 and 5: the loop that never runs, the smallest degree that exercises both sides
     /// of the `m <= n - 2` guard, and the first degree at which that bound and `n / 2` disagree.
+    /// `derivations/density_calibration_ridge.mac` proves the recursion equals Rodrigues' formula
+    /// symbolically to degree 6 (`recursion_is_rodrigues_n_m`).
     #[test]
     #[allow(clippy::too_many_lines)] // the length is the reference table, not logic
     fn the_basis_is_the_fully_normalised_real_harmonic_at_that_sun_fixed_point() {
@@ -435,6 +447,118 @@ mod tests {
         let f0 = c.factor(0.3, 5.0);
         let f1 = c.factor(-1.1, 19.0);
         assert!((f0 - f1).abs() < 1e-12 && (f0 - libm::exp(0.5)).abs() < 1e-12);
+    }
+
+    /// The 49 samples of `derivations/density_calibration_ridge.{mac,gp}` and the one they drop:
+    /// latitudes and local times at Pythagorean angles, so that every basis value is a rational
+    /// times a square root and the ridge system can be solved exactly. Weights cycle 1, 3/2, 2 and
+    /// `y = ((7i mod 11) − 5)/20`; the last sample has weight −1 and must not reach the fit.
+    fn pythagorean_samples() -> alloc::vec::Vec<DensitySample> {
+        const LATS: [(f64, f64); 7] = [
+            (0.0, 1.0),
+            (3.0, 4.0),
+            (-3.0, 4.0),
+            (5.0, 12.0),
+            (-12.0, 5.0),
+            (4.0, 3.0),
+            (-7.0, 24.0),
+        ];
+        const LSTS: [(f64, f64); 7] = [
+            (1.0, 0.0),
+            (3.0, 4.0),
+            (0.0, 1.0),
+            (-5.0, 12.0),
+            (-1.0, 0.0),
+            (-4.0, -3.0),
+            (8.0, -15.0),
+        ];
+        let hours = |(c, s): (f64, f64)| {
+            let h = libm::atan2(s, c) * (12.0 / core::f64::consts::PI);
+            if h < 0.0 { h + 24.0 } else { h }
+        };
+        let mut out = alloc::vec::Vec::new();
+        let mut idx = 0_u32;
+        for (x, s) in LATS {
+            for lst in LSTS {
+                idx += 1;
+                out.push(DensitySample {
+                    latitude: libm::atan2(x, s),
+                    local_solar_time: hours(lst),
+                    log_ratio: (f64::from((7 * idx) % 11) - 5.0) / 20.0,
+                    weight: 1.0 + f64::from(idx % 3) / 2.0,
+                });
+            }
+        }
+        out.push(DensitySample {
+            latitude: libm::atan2(3.0, 4.0),
+            local_solar_time: 0.0,
+            log_ratio: 100.0,
+            weight: -1.0,
+        });
+        out
+    }
+
+    /// (G2) `fit_ridge` is the solution of its normal equations `(BᵀWB + λI)c = BᵀWy`, solved exactly
+    /// in rationals by `derivations/density_calibration_ridge.mac` (which also shows that solution
+    /// is the stationary point of `Σw(y − Bc)² + λ|c|²`) and again by exact rationals and a
+    /// 100-digit Cholesky in `derivations/density_calibration_ridge.gp`; the digits below are the
+    /// PARI ones, which agree with Maxima's to 4.5e-42.
+    ///
+    /// The sample latitudes and local times are `atan2` of exact integers, so their `f64` values sit
+    /// within an ulp of the exact angles, and the measured worst miss is 1.7e-17 — under 1e-13 of
+    /// the smallest coefficient's 4e-4. The 1e-14 bound leaves room for a different summation
+    /// order; a missing weight, a lost ridge or the dropped sample let back in moves a coefficient by
+    /// orders more.
+    #[test]
+    fn the_ridge_fit_is_the_exact_solution_of_its_normal_equations() {
+        #[expect(
+            clippy::excessive_precision,
+            reason = "verbatim derivations/density_calibration_ridge.gp digits"
+        )]
+        const EXACT: [f64; 9] = [
+            3.9918860663396954797856509e-4,
+            6.7412868639557683121361701e-3,
+            -1.5132626975989615995597311e-2,
+            -1.2117577955749400549432349e-2,
+            -1.1835723935121592451169842e-2,
+            2.2966167597640130931225902e-2,
+            -9.9866500003217668283166107e-3,
+            -1.7559208589588945749240076e-2,
+            -9.7483571572580558051970732e-3,
+        ];
+        let fitted = DensityCorrection::<9>::fit_ridge(&pythagorean_samples(), 0.125).unwrap();
+        let mut worst = 0.0_f64;
+        for (k, (got, want)) in fitted.coefficients().iter().zip(EXACT).enumerate() {
+            assert!(
+                (got - want).abs() < 1e-14,
+                "coefficient {k}: {got:e} against the exact {want:e}"
+            );
+            worst = worst.max((got - want).abs());
+        }
+        println!("ridge fit against the exact solution: worst {worst:.3e}");
+    }
+
+    /// (G3) At degree 0 the basis is the constant 1 and the normal equation is one line, so the fit
+    /// is `Σwy / (Σw + λ)` (`derivations/density_calibration_ridge.mac`,
+    /// `degree_zero_is_the_shrunk_weighted_mean`): the classical density scale factor, shrunk.
+    #[test]
+    fn the_degree_zero_ridge_fit_is_the_shrunk_weighted_mean() {
+        let samples = pythagorean_samples();
+        let (mut swy, mut sw) = (0.0, 0.0);
+        for s in samples.iter().filter(|s| s.weight > 0.0) {
+            swy += s.weight * s.log_ratio;
+            sw += s.weight;
+        }
+        for ridge in [0.0, 0.125, 7.5] {
+            let got = DensityCorrection::<1>::fit_ridge(&samples, ridge)
+                .unwrap()
+                .coefficients()[0];
+            let want = swy / (sw + ridge);
+            assert!(
+                (got - want).abs() <= 4.0 * f64::EPSILON * want.abs(),
+                "ridge {ridge}: {got:e} against {want:e}"
+            );
+        }
     }
 
     #[test]

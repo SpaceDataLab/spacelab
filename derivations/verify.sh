@@ -870,6 +870,31 @@ if have maxima; then
     mac_zeros analysis_alpha_closed_form.mac 7 "the alpha figure on small configurations in closed form"
     mac_zeros mozhaev_point_groups.mac 12 "Mozhaev point groups are the rotation groups of their polyhedra"
     mac_zeros symmetric_regularity.mac 6 "orbit-stabilizer plane counts and staggered-arm regularity"
+    mac_zeros rk4_order.mac 9 "RK4 meets every order condition through 4 and none of order 5"
+    mac_zeros rkn1210_order.mac 43 "the shipped RKN12(10) tableau meets the Nystrom conditions through 12 and 10"
+    mac_zeros gauss_jackson8_generating.mac 48 "Stormer, Cowell and AM8 weights from their generating functions"
+    mac_zeros symplectic_composition.mac 14 "leapfrog and the Yoshida compositions: order and time symmetry"
+    mac_zeros taylor_jet_recurrences.mac 15 "the Taylor jet recurrences are the exact series"
+    mac_zeros cr3bp.mac 20 "CR3BP field as grad Omega plus Coriolis, Jacobi constant, the Lagrange points"
+    mac_zeros cr3bp_variational.mac 33 "the variational equations, symplectic form and the collinear Hessian"
+    mac_zeros cw.mac 19 "Clohessy-Wiltshire: closed form, unit determinant, limit of exact relative motion"
+    mac_zeros lowthrust.mac 12 "low-thrust energy rate, tangential steering, Edelbaum's quasi-circular rate"
+    mac_zeros optimal_pmp.mac 16 "minimum-energy PMP: optimal control, Hamilton's equations, primer equation"
+    mac_zeros lambert_universal.mac 30 "Lambert in universal variables: y(z), dF/dz, Kepler's equation, the Wronskian"
+    mac_zeros iod_classical.mac 29 "Gibbs, Herrick-Gibbs, Gauss and Laplace on their own models"
+    mac_zeros transfer_excess_speed.mac 10 "hyperbolic excess speed and C3 on exact conics"
+    mac_zeros patched_conics.mac 10 "sphere of influence, flyby hyperbola and the B-plane"
+    mac_zeros synodic_frame.mac 14 "the rotating-frame map, its inverse and the transport theorem"
+    mac_zeros targeting_hohmann.mac 6 "the apoapsis constraint's root is Hohmann's burn; least-squares point"
+    mac_zeros powered_zem_zev.mac 15 "ZEM/ZEV guidance is the open-loop optimum along its own trajectory"
+    mac_zeros edl_allen_eggers.mac 7 "Allen-Eggers ballistic entry and its peak deceleration"
+    mac_zeros atmosphere_lift.mac 25 "the density lift to SI and its radial gradient -rho/H"
+    mac_zeros sdtm_uncertainty.mac 14 "the shipped interval's normal quantiles and log symmetry"
+    mac_zeros density_calibration_ridge.mac 104 "the ridge calibration fit solves its normal equations exactly"
+    mac_zeros wind_model_vsh.mac 222 "the vector spherical harmonic basis by Rodrigues' formula; the ridge stationarity"
+    mac_zeros attitude_law_frames.mac 75 "every attitude law is an orthonormal right-handed frame"
+    mac_zeros analytic_ephemeris.mac 33 "the analytic Sun and Moon series and their precession to J2000"
+    mac_zeros thermosphere_legendre_terms.mac 30 "Legendre and local-time terms of a thermosphere expansion"
 else
     skip "Ф17.B Maxima gates" maxima
 fi
@@ -877,7 +902,11 @@ if have gp; then
     for f in access_horizon_crossing root_reference_roots photometry_closed_forms observability_diurnal_arc \
         elevation_footprint cone_footprint comms_link_budget sar_incidence scan_catalogue \
         wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay harris_priester_law \
-        soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form; do
+        soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form \
+        rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
+        cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal iod_classical patched_conics \
+        targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty density_calibration_ridge \
+        wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms; do
         second_engine "$f.gp" "second engine for $f.mac"
     done
 else

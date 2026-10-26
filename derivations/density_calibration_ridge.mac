@@ -1,0 +1,145 @@
+/* The density-calibration layer -- spacelab-propagation/src/density_calibration.rs -- as identities
+ * and an exactly solved ridge fit.
+ *
+ * The correction is ln(rho_obs/rho_base) = sum_k c_k b_k(phi, lambda), lambda = 2 pi lst/24, with the
+ * packed basis b = [P00, P10, sqrt2 P11 cos, sqrt2 P11 sin, P20, ...] built from Pbar_nm(sin phi) by
+ *     Pbar_11 = sqrt3 cos phi,  Pbar_10 = sqrt3 sin phi,
+ *     Pbar_nn = sqrt((2n+1)/(2n)) cos phi Pbar_{n-1,n-1},
+ *     Pbar_nm = a_nm sin phi Pbar_{n-1,m} - b_nm Pbar_{n-2,m},
+ *     a_nm = sqrt((2n-1)(2n+1)/((n-m)(n+m))),  b_nm = sqrt((2n+1)(n-m-1)(n+m-1)/((2n-3)(n-m)(n+m))),
+ * and fitted by ridge least squares (B'WB + ridge I) c = B'Wy, samples of non-positive weight dropped.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the recursion is Rodrigues' Pbar_nm = N_nm cos^m(phi) d^m P_n/dx^m, x = sin phi,
+ *      N_nm = sqrt((2 - delta_m0)(2n+1)(n-m)!/(n+m)!), no Condon-Shortley phase, for n <= 6 (G1);
+ *   2. the packed basis is orthogonal over the sphere with mean square 1 for the zonal and 2 for
+ *      every m >= 1 term -- the module's extra sqrt 2, which a plain fit absorbs into the
+ *      coefficient but a ridge does not (G4);
+ *   3. degree 0 is the scale factor: c = sum w y / (sum w + ridge) (G3);
+ *   4. a degree-2 fit on 49 samples at Pythagorean latitudes and local times, where every basis
+ *      value is a rational times sqrt(D_k^2) with D_k^2 rational, solved EXACTLY: the scaled system
+ *      (Bt'W Bt + ridge D^-2) ct = Bt'W y in rationals, c = D^-1 ct. The algebraic c is then checked
+ *      against the unscaled normal equations and against the stationarity of the ridge objective
+ *      sum w (y - B c)^2 + ridge |c|^2 -- the defining equation (G2) -- and printed to 30 digits.
+ * derivations/density_calibration_ridge.gp solves the same system by exact rationals and by a
+ * Cholesky factorisation at 100 digits; the gate test holds `fit_ridge` to those digits.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/density_calibration_ridge.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+ratprint : false$
+
+/* 1. The coded recursion against Rodrigues. x = sin phi, s = cos phi kept symbolic. */
+nmax : 6$
+array(p, nmax, nmax)$
+fillarray(p, makelist(0, (nmax + 1)^2))$
+p[0, 0] : 1$
+p[1, 1] : sqrt(3)*s$
+p[1, 0] : sqrt(3)*x$
+for n : 2 thru nmax do (
+  p[n, n] : sqrt((2*n + 1)/(2*n))*s*p[n - 1, n - 1],
+  for m : 0 thru n - 1 do (
+    a : sqrt((2*n - 1)*(2*n + 1)/((n - m)*(n + m))),
+    b : if m <= n - 2 then sqrt((2*n + 1)*(n - m - 1)*(n + m - 1)/((2*n - 3)*(n - m)*(n + m))) else 0,
+    p[n, m] : expand(a*x*p[n - 1, m] - (if m <= n - 2 then b*p[n - 2, m] else 0))))$
+leg_p(n, x0) := subst(t = x0, diff((t^2 - 1)^n/(2^n*n!), t, n))$
+nfac(n, m) := sqrt((if m = 0 then 1 else 2)*(2*n + 1)*(n - m)!/(n + m)!)$
+rodrigues(n, m) := nfac(n, m)*s^m*subst(t = x, diff(leg_p(n, t), t, m))$
+for n : 0 thru nmax do for m : 0 thru n do
+  zero(sconcat("recursion_is_rodrigues_", n, "_", m), radcan(expand(p[n, m] - rodrigues(n, m))))$
+
+/* The packed basis at degree deg, as an expression in x, s and lambda. */
+packed(deg) := block([out : []],
+  for n : 0 thru deg do (
+    out : endcons(p[n, 0], out),
+    for m : 1 thru n do
+      out : append(out, [sqrt(2)*p[n, m]*cos(m*lam), sqrt(2)*p[n, m]*sin(m*lam)])),
+  out)$
+
+/* 2. The Gram matrix over the sphere, dOmega = dx dlambda, s = sqrt(1 - x^2): the lambda integral
+   first (it kills every m_i # m_j pair), then x, on which only even powers of s survive. */
+deg2 : packed(2)$
+mean_square(e) := block([v],
+  v : integrate(expand(trigreduce(e)), lam, 0, 2*%pi),
+  v : ratsubst(1 - x^2, s^2, expand(v)),
+  integrate(expand(v), x, -1, 1)/(4*%pi))$
+gram_want(i, j) := if i # j then 0 else (if member(i, [1, 2, 5]) then 1 else 2)$
+for i : 1 thru 9 do for j : i thru 9 do
+  zero(sconcat("gram_", i - 1, "_", j - 1), radcan(mean_square(deg2[i]*deg2[j]) - gram_want(i, j)))$
+
+/* 3. Degree 0: the basis is 1, the normal equation is one line. */
+c0 : (sum(w[i]*y[i], i, 1, N))/(sum(w[i], i, 1, N) + ridge)$
+zero("degree_zero_is_the_shrunk_weighted_mean",
+     ratsimp((sum(w[i], i, 1, N) + ridge)*c0 - sum(w[i]*y[i], i, 1, N)))$
+
+/* 4. The exact degree-2 ridge fit. Latitudes and local times at Pythagorean angles, so that
+   (sin phi, cos phi) and (cos lambda, sin lambda) are rational; weights 1, 3/2, 2 in turn, one
+   sample of weight -1 (dropped by the code, and so dropped here), ridge 1/8. */
+lats : [[0, 1], [3/5, 4/5], [-3/5, 4/5], [5/13, 12/13], [-12/13, 5/13], [4/5, 3/5], [-7/25, 24/25]]$
+lsts : [[1, 0], [3/5, 4/5], [0, 1], [-5/13, 12/13], [-1, 0], [-4/5, -3/5], [8/17, -15/17]]$
+ridge_value : 1/8$
+samples : []$
+idx : 0$
+for la in lats do for lo in lsts do (
+  idx : idx + 1,
+  samples : endcons([la[1], la[2], lo[1], lo[2], 1 + mod(idx, 3)/2, (mod(7*idx, 11) - 5)/20], samples))$
+samples : endcons([3/5, 4/5, 1, 0, -1, 100], samples)$
+kept : sublist(samples, lambda([q], q[5] > 0))$
+zero("one_sample_is_dropped", length(samples) - length(kept) - 1)$
+
+/* Each packed column is D_k times a rational-coefficient function: by (1), Pbar_nm = N_nm s^m
+   d^m P_n/dx^m, so with the packing's sqrt 2 on m >= 1, D_k^2 = (2 if m >= 1 else 1) N_nm^2. */
+scaled : []$
+dsq : []$
+for n : 0 thru 2 do (
+  scaled : endcons(leg_p(n, x), scaled),
+  dsq : endcons(nfac(n, 0)^2, dsq),
+  for m : 1 thru n do (
+    scaled : append(scaled, [s^m*subst(t = x, diff(leg_p(n, t), t, m))*cos(m*lam),
+                             s^m*subst(t = x, diff(leg_p(n, t), t, m))*sin(m*lam)]),
+    dsq : append(dsq, [2*nfac(n, m)^2, 2*nfac(n, m)^2])))$
+for k : 1 thru 9 do
+  zero(sconcat("column_scaling_", k - 1), radcan(expand(deg2[k] - sqrt(dsq[k])*scaled[k])))$
+
+/* A function of (x, s, lambda) at a sample: lambda only through cos(m lambda), sin(m lambda),
+   expanded by the multiple-angle formulas into the sample's rational (cos lambda, sin lambda). */
+at_point(e, q) := ratsimp(subst([x = q[1], s = q[2], cl = q[3], sl = q[4]],
+    subst([cos(lam) = cl, sin(lam) = sl], trigexpand(e))))$
+rows : map(lambda([q], map(lambda([e], at_point(e, q)), scaled)), kept)$
+zero("scaled_rows_are_rational", length(sublist(flatten(rows), lambda([v], not ratnump(v)))))$
+
+/* The scaled normal equations in rationals: (Bt'W Bt + ridge D^-2) ct = Bt'W y, c = D^-1 ct. */
+At : zeromatrix(9, 9)$
+rt : zeromatrix(9, 1)$
+for i : 1 thru length(kept) do block([b : transpose(matrix(rows[i])), wq : kept[i][5], yq : kept[i][6]],
+  At : At + wq*(b . transpose(b)),
+  rt : rt + wq*yq*b)$
+At : At + ridge_value*apply(diag_matrix, map(lambda([d], 1/d), dsq))$
+ct : invert(At) . rt$
+zero("scaled_solution_is_rational", length(sublist(flatten(args(ct)), lambda([v], not ratnump(v)))))$
+coef : makelist(ct[k, 1]/sqrt(dsq[k]), k, 1, 9)$
+
+/* The unscaled system the code assembles, with the algebraic basis values themselves. */
+real_rows : map(lambda([q], map(lambda([e], radcan(at_point(e, q))), deg2)), kept)$
+A : zeromatrix(9, 9)$
+r : zeromatrix(9, 1)$
+for i : 1 thru length(kept) do block([b : transpose(matrix(real_rows[i])), wq : kept[i][5], yq : kept[i][6]],
+  A : A + wq*(b . transpose(b)),
+  r : r + wq*yq*b)$
+res : (A + ridge_value*ident(9)) . transpose(matrix(coef)) - r$
+for k : 1 thru 9 do zero(sconcat("normal_equation_", k - 1), radcan(res[k, 1]))$
+
+/* The defining equation: c is the stationary point of the ridge objective. */
+cc : makelist(concat(cv, k), k, 1, 9)$
+J : sum(kept[i][5]*(kept[i][6] - sum(real_rows[i][k]*cc[k], k, 1, 9))^2, i, 1, length(kept))
+    + ridge_value*sum(cc[k]^2, k, 1, 9)$
+for k : 1 thru 9 do
+  zero(sconcat("ridge_objective_is_stationary_", k - 1),
+       radcan(subst(map("=", cc, coef), diff(J, cc[k]))))$
+
+fpprec : 40$
+for k : 1 thru 9 do printf(true, "ridge_coefficient_~a = ~a~%", k - 1, bfloat(coef[k]))$
+

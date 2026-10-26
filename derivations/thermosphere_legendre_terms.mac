@@ -1,0 +1,116 @@
+/* The structural terms of a semi-empirical spherical-harmonic thermosphere whose correction
+ * function is assembled from unnormalised associated Legendre functions of latitude and of a
+ * dipole geomagnetic latitude, local-time harmonics, and a Bates-Walker / diffusive-equilibrium
+ * vertical profile above a 120 km boundary -- as identities. The model's coefficients are
+ * document-defined and are not gated here; the formulas they are assembled through are.
+ *
+ * With c = sin(phi), s = cos(phi), the coded set is
+ *     p10 = c, p20 = 1.5c^2 - 0.5, p30 = c(2.5c^2 - 1.5), p40 = 4.375c^4 - 3.75c^2 + 0.375,
+ *     p50 = c(7.875c^4 - 8.75c^2 + 1.875), p60 = (5.5 c p50 - 2.5 p40)/3,
+ *     p11 = s, p21 = 3cs, p31 = s(7.5c^2 - 1.5), p41 = cs(17.5c^2 - 7.5),
+ *     p51 = s(39.375c^4 - 26.25c^2 + 1.875), p22 = 3s^2, p32 = 15cs^2, p42 = s^2(52.5c^2 - 7.5),
+ *     p52 = 3c p42 - 2 p32, p62 = 2.75c p52 - 1.75 p42, p33 = 15s^3;
+ * the geomagnetic sine sp = s cpmg cos(lon - lmg) + c spmg, with p10mg, p20mg, p40mg the same
+ * polynomials in sp; the harmonics c2h = ch^2 - sh^2, s2h = 2 ch sh, c3h = c2h ch - s2h sh,
+ * s3h = s2h ch + c2h sh; and the profile
+ *     T = Tinf - (Tinf - T120) exp(-sigma zeta),  zeta = (z - zlb)(re + zlb)/(re + z),
+ *     sigma = tp120/(Tinf - T120),
+ *     n_i/n_i(zlb) = (T120/T)^(1 + alpha_i + gamma_i) exp(-sigma zeta gamma_i),
+ *     gamma_i = m_i glb/(sigma rgas Tinf),  glb = gsurf/(1 + zlb/re)^2.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. every coded p_nm is P_n^m(sin phi) = cos^m(phi) d^m P_n/dx^m, no Condon-Shortley phase (G1);
+ *   2. sp is the sine of the angular distance from the dipole equator: the dot product of the
+ *      point's unit vector with a pole at latitude asin(spmg), longitude lmg, when cpmg = cos and
+ *      spmg = sin of that latitude (G1); the five-digit constants cpmg = 0.19081, spmg = 0.98163 are
+ *      printed with cpmg^2 + spmg^2 - 1 = 5.9e-6, the document's own rounding;
+ *   3. the four harmonics are cos 2h, sin 2h, cos 3h, sin 3h (G1);
+ *   4. T solves dT/dz = sigma (Tinf - T) (d zeta/dz), is T120 at the boundary with slope tp120
+ *      there -- which is what sigma is defined by -- and tends to Tinf (G2, G3);
+ *   5. the density factor solves diffusive equilibrium,
+ *      d ln n/dz = -(1 + alpha) d ln T/dz - m g(z)/(rgas T),  g(z) = gsurf/(1 + z/re)^2,
+ *      and is 1 at the boundary (G2, G3);
+ *   6. the mean molecular mass sum(n_i v_i)/(v_1 sum n_i) is the number-weighted mean of v_i/v_1 (G1).
+ * derivations/thermosphere_legendre_terms.gp evaluates the set from Rodrigues at 40 digits.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/thermosphere_legendre_terms.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+ratprint : false$
+
+/* 1. The coded set, with exact decimals, against Rodrigues. */
+p10 : c$
+p20 : 3/2*c^2 - 1/2$
+p30 : c*(5/2*c^2 - 3/2)$
+p40 : 35/8*c^4 - 15/4*c^2 + 3/8$
+p50 : c*(63/8*c^4 - 35/4*c^2 + 15/8)$
+p60 : (11/2*c*p50 - 5/2*p40)/3$
+p11 : s$
+p21 : 3*c*s$
+p31 : s*(15/2*c^2 - 3/2)$
+p41 : c*s*(35/2*c^2 - 15/2)$
+p51 : s*(315/8*c^4 - 105/4*c^2 + 15/8)$
+p22 : 3*s^2$
+p32 : 15*c*s^2$
+p42 : s^2*(105/2*c^2 - 15/2)$
+p52 : 3*c*p42 - 2*p32$
+p62 : 11/4*c*p52 - 7/4*p42$
+p33 : 15*s^3$
+/* The decimals as printed are dyadic, so each double is its rational exactly. */
+zero("decimals_are_the_rationals",
+     lsum(abs(rationalize(q[1]) - q[2]), q,
+          [[4.375, 35/8], [3.75, 15/4], [0.375, 3/8], [7.875, 63/8], [8.75, 35/4], [1.875, 15/8],
+           [39.375, 315/8], [26.25, 105/4], [52.5, 105/2], [17.5, 35/2], [2.75, 11/4], [1.75, 7/4],
+           [5.5, 11/2], [2.5, 5/2], [1.5, 3/2], [7.5, 15/2]]))$
+leg(n, x0) := subst(t = x0, diff((t^2 - 1)^n/(2^n*n!), t, n))$
+assoc(n, m) := s^m*subst(t = c, diff(leg(n, t), t, m))$
+for term in [[p10, 1, 0], [p20, 2, 0], [p30, 3, 0], [p40, 4, 0], [p50, 5, 0], [p60, 6, 0],
+             [p11, 1, 1], [p21, 2, 1], [p31, 3, 1], [p41, 4, 1], [p51, 5, 1],
+             [p22, 2, 2], [p32, 3, 2], [p42, 4, 2], [p52, 5, 2], [p62, 6, 2], [p33, 3, 3]] do
+  zero(sconcat("p", term[2], term[3], "_is_the_associated_legendre_function"),
+       expand(term[1] - assoc(term[2], term[3])))$
+
+/* 2. The geomagnetic sine as a dot product. */
+point : [cos(phi)*cos(lon), cos(phi)*sin(lon), sin(phi)]$
+pole : [cos(beta)*cos(lmg), cos(beta)*sin(lmg), sin(beta)]$
+sp : cos(phi)*cos(beta)*cos(lon - lmg) + sin(phi)*sin(beta)$
+zero("geomagnetic_sine_is_the_pole_dot_product", trigsimp(trigexpand(point . pole - sp)))$
+printf(true, "printed pole constants: cpmg^2 + spmg^2 - 1 = ~a~%", 19081^2/10^10 + 98163^2/10^10 - 1)$
+
+/* 3. Local-time harmonics. */
+ch : cos(h)$  sh : sin(h)$
+c2h : ch^2 - sh^2$  s2h : 2*ch*sh$
+c3h : c2h*ch - s2h*sh$  s3h : s2h*ch + c2h*sh$
+zero("c2h_is_cos_2h", trigsimp(trigexpand(c2h - cos(2*h))))$
+zero("s2h_is_sin_2h", trigsimp(trigexpand(s2h - sin(2*h))))$
+zero("c3h_is_cos_3h", trigsimp(trigexpand(c3h - cos(3*h))))$
+zero("s3h_is_sin_3h", trigsimp(trigexpand(s3h - sin(3*h))))$
+
+/* 4. The Bates-Walker profile. */
+assume(re > 0, z > zlb, zlb > 0, Tinf > T120, T120 > 0, tp120 > 0)$
+zeta : (z - zlb)*(re + zlb)/(re + z)$
+sigma : tp120/(Tinf - T120)$
+T : Tinf - (Tinf - T120)*exp(-sigma*zeta)$
+zero("bates_ode", radcan(diff(T, z) - sigma*(Tinf - T)*diff(zeta, z)))$
+zero("bates_boundary_value", radcan(subst(z = zlb, T) - T120))$
+zero("bates_boundary_slope_is_tp120", radcan(subst(z = zlb, diff(T, z)) - tp120))$
+zero("bates_tends_to_tinf_in_zeta", limit(Tinf - (Tinf - T120)*exp(-sigma*u), u, inf) - Tinf)$
+
+/* 5. Diffusive equilibrium of the coded density factor. */
+glb : gsurf/(1 + zlb/re)^2$
+gam : m*glb/(sigma*rgas*Tinf)$
+lnfz : (1 + alpha + gam)*(log(T120) - log(T)) - sigma*zeta*gam$
+gz : gsurf/(1 + z/re)^2$
+zero("diffusive_equilibrium",
+     radcan(diff(lnfz, z) + (1 + alpha)*diff(log(T), z) + m*gz/(rgas*T)))$
+zero("density_factor_is_one_at_the_boundary", radcan(exp(subst(z = zlb, lnfz)) - 1))$
+
+/* 6. The mean molecular mass. */
+nn : makelist(concat(n, i), i, 1, 6)$
+vv : makelist(concat(v, i), i, 1, 6)$
+zero("mean_molecular_mass_is_the_number_weighted_mean",
+     ratsimp(sum(nn[i]*vv[i], i, 1, 6)/(v1*sum(nn[i], i, 1, 6))
+             - sum(nn[i]*(vv[i]/v1), i, 1, 6)/sum(nn[i], i, 1, 6)))$

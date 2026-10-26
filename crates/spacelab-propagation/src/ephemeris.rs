@@ -8,6 +8,16 @@
 //! **not** for pointing, eclipse timing to the second, or anything where the body position is the
 //! answer rather than a perturbation — that is what a JPL/SPICE kernel is for, and where a future
 //! `spacelab-ephemeris` over `anise` would go.
+//!
+//! Gate: `derivations/analytic_ephemeris.mac` proves the coded precession matrix is
+//! `R3(−z_A)·R2(θ_A)·R3(−ζ_A)`, orthogonal, and the identity at J2000, that the Sun of date has
+//! zero ecliptic latitude and the lunar rotation keeps its length, and evaluates both printed series
+//! at 50 digits at the thirteen golden epochs below, reproducing the goldens' series column to
+//! 2.9e-22; `derivations/analytic_ephemeris.gp` does the same at 60 digits with the precession in the
+//! inverse arrangement. The module tests `the_solar_series_is_the_almanac_series_precessed_to_j2000`
+//! and `the_lunar_series_is_the_brown_series` (G2), `the_precession_is_the_identity_at_its_own_epoch`
+//! (G3) and `the_precession_is_an_isometry` (G4) hold the code to them; the ERFA columns are
+//! comparators.
 
 // Astronomy speaks in single letters — L (mean longitude), g (mean anomaly), λ (ecliptic
 // longitude), ε (obliquity), r, x, y, z. These are the sources' names. The lunar-series amplitudes
@@ -283,7 +293,8 @@ mod tests {
     use spacelab_testkit::nan_max;
 
     /// `(seconds past J2000, the series' position, ERFA's position)`, metres, from
-    /// `derivations/analytic_ephemeris.py` at 50 decimal digits.
+    /// `derivations/analytic_ephemeris.py` at 50 decimal digits. The series column is reproduced to
+    /// 2.9e-22 by `derivations/analytic_ephemeris.mac` (50 digits) and `.gp` (60 digits).
     ///
     /// Two columns because they answer two different questions. The **series** column is a
     /// transcription pin: the derivation writes the published arrangement — degrees and
@@ -737,11 +748,14 @@ mod tests {
         }
     }
 
+    /// (G2) The code is the printed solar series, precessed: the goldens' series column, which
+    /// `derivations/analytic_ephemeris.mac` and `.gp` reproduce from the printed expressions.
     #[test]
     fn the_solar_series_is_the_almanac_series_precessed_to_j2000() {
         assert_is_the_series("Sun", &sun());
     }
 
+    /// (G2) The code is the printed lunar series, against the same CAS-reproduced column.
     #[test]
     fn the_lunar_series_is_the_brown_series() {
         assert_is_the_series("Moon", &moon());
@@ -769,8 +783,9 @@ mod tests {
         assert_reaches_erfa("Moon", &moon(), 280.0, 460e3);
     }
 
-    /// `ζ_A` and `z_A` are exact negatives at `t = 0` and `θ_A` is zero there, so the rotation
-    /// collapses to `R3(0)`: a vector referred to the mean equinox of J2000 *is* a J2000 vector.
+    /// (G3) `ζ_A` and `z_A` are exact negatives at `t = 0` and `θ_A` is zero there, so the rotation
+    /// collapses to `R3(0)`: a vector referred to the mean equinox of J2000 *is* a J2000 vector
+    /// (`derivations/analytic_ephemeris.mac`, `precession_is_identity_at_j2000`).
     #[test]
     fn the_precession_is_the_identity_at_its_own_epoch() {
         let v = [1.234e11, -5.678e10, 9.012e10];
@@ -781,8 +796,9 @@ mod tests {
         );
     }
 
-    /// A frame change preserves lengths and angles; nothing in the goldens would separate a
-    /// rotation from a general linear map that happens to agree along the ecliptic.
+    /// (G4) A frame change preserves lengths and angles; nothing in the goldens would separate a
+    /// rotation from a general linear map that happens to agree along the ecliptic. The matrix is
+    /// orthogonal as an identity (`derivations/analytic_ephemeris.mac`, `precession_orthogonal`).
     #[test]
     fn the_precession_is_an_isometry() {
         let (u, v) = ([1.234e11, -5.678e10, 9.012e10], [-3.3e10, 7.7e10, -1.1e11]);

@@ -1,0 +1,115 @@
+/* Clohessy-Wiltshire relative motion -- spacelab-astro/src/cw.rs -- as identities.
+ *
+ * LVLH frame of a circular chief of radius r0 and mean motion n, n^2 = mu/r0^3: x radial,
+ * y along-track, z cross-track. The CW system s' = A s, s = (x, y, z, vx, vy, vz),
+ *     x'' - 2 n y' - 3 n^2 x = 0,   y'' + 2 n x' = 0,   z'' + n^2 z = 0,
+ * and the closed-form transition matrix Phi(t) transcribed from `cw_propagate`.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. Phi(0) = I and Phi' = A Phi: the coded matrix is the solution of the defining equation, so
+ *      by uniqueness it is exp(A t) (G2);
+ *   2. det Phi(t) = 1 (tr A = 0) and Phi(t1) Phi(t2) = Phi(t1 + t2) (G4);
+ *   3. the CW system is the first-order term of the exact relative two-body equations in the
+ *      rotating frame, expanded in the separation about a circular chief (G3, limit);
+ *   4. the drift-free condition vy0 = -2 n x0 removes every secular term from Phi s0 (G3);
+ *   5. `relative_lvlh_state`: for a frame turning at n about z, R' v_rel - n z x rho_lvlh is
+ *      the rotating-frame velocity (the transport theorem) (G1);
+ *   6. the curvilinear coordinates: the velocity formulas of `curvilinear_from_lvlh` are the time
+ *      derivatives of (r, lambda, phi) along the position `lvlh_from_curvilinear` builds, the
+ *      inverse's velocity is the derivative of its position, and to first order in the
+ *      separation the curvilinear state is the rectilinear one (G1, G3).
+ * Phi(t) s0 at the test's (n, dt, s0) is evaluated at 100 digits by its matrix-exponential series
+ * in derivations/cw.gp.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/cw.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+zero_matrix(name, M) := zero(name,
+  apply("+", map(lambda([e], abs(e)), flatten(args(M)))))$
+tsimp(e) := ratsimp(trigsimp(trigreduce(trigexpand(ratsimp(e)))))$
+
+assume(n > 0, r0 > 0, rc > 0)$
+
+/* The coded transition matrix: column j is the response to the j-th unit state. */
+Phi(t) := block([s : sin(n*t), c : cos(n*t), nt : n*t],
+  matrix([4 - 3*c,       0, 0, s/n,           2/n*(1 - c),       0],
+         [6*(s - nt),    1, 0, 2/n*(c - 1),   (4*s - 3*nt)/n,    0],
+         [0,             0, c, 0,             0,                 s/n],
+         [3*n*s,         0, 0, c,             2*s,               0],
+         [6*n*(c - 1),   0, 0, -2*s,          4*c - 3,           0],
+         [0,             0, -n*s, 0,          0,                 c]))$
+A : matrix([0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 1],
+           [3*n^2, 0, 0, 0, 2*n, 0], [0, 0, 0, -2*n, 0, 0], [0, 0, -n^2, 0, 0, 0])$
+
+/* 1. Defining equation. */
+zero_matrix("phi_at_zero_is_identity", ratsimp(Phi(0) - ident(6)))$
+zero_matrix("phi_solves_the_cw_system", tsimp(diff(Phi(t), t) - A . Phi(t)))$
+
+/* 2. Determinant and the group property. */
+zero("phi_determinant_is_one", tsimp(determinant(Phi(t)) - 1))$
+zero("system_matrix_is_traceless", mat_trace(A))$
+zero_matrix("phi_composes", map(tsimp, Phi(t1) . Phi(t2) - Phi(t1 + t2)))$
+
+/* 3. Linearisation of exact relative two-body motion. In the frame rotating at n about z, the
+      deputy at (r0 + x, y, z) obeys rho'' + 2 w x rho' + w x (w x rho) = -mu rho/|rho|^3, and
+      the chief, at rest at (r0, 0, 0), is the solution n^2 r0 = mu/r0^2. */
+rho : [r0 + e*x, e*y, e*z]$
+rr : sqrt(rho . rho)$
+g : -mu*rho/rr^3$
+/* minus the centrifugal and Coriolis terms, for w = n z-hat */
+nl : [e*xdd - 2*n*e*ydot - n^2*(r0 + e*x) - g[1],
+      e*ydd + 2*n*e*xdot - n^2*e*y - g[2],
+      e*zdd - g[3]]$
+nl1 : map(lambda([q], ratsimp(subst(mu = n^2*r0^3, coeff(taylor(q, e, 0, 1), e, 1)))), nl)$
+nl0 : map(lambda([q], ratsimp(subst(mu = n^2*r0^3, subst(e = 0, q)))), nl)$
+zero("chief_is_a_circular_solution", abs(nl0[1]) + abs(nl0[2]) + abs(nl0[3]))$
+zero("radial_first_order_is_cw", ratsimp(nl1[1] - (xdd - 2*n*ydot - 3*n^2*x)))$
+zero("along_track_first_order_is_cw", ratsimp(nl1[2] - (ydd + 2*n*xdot)))$
+zero("cross_track_first_order_is_cw", ratsimp(nl1[3] - (zdd + n^2*z)))$
+
+/* 4. Drift-free relative orbit. */
+sb : Phi(t) . transpose(matrix([x0, y0, z0, vx0, -2*n*x0, vz0]))$
+zero_matrix("drift_free_has_no_secular_term",
+            map(lambda([q], ratsimp(coeff(expand(trigexpand(q)), t, 1))), sb))$
+zero_matrix("drift_free_is_periodic", map(tsimp, subst(t = 2*%pi/n, sb)
+            - transpose(matrix([x0, y0, z0, vx0, -2*n*x0, vz0]))))$
+
+/* 5. The transport theorem behind `relative_lvlh_state`. */
+Rz : matrix([cos(n*t), -sin(n*t), 0], [sin(n*t), cos(n*t), 0], [0, 0, 1])$
+rl : transpose(matrix([X(t), Y(t), Z(t)]))$
+vrel : diff(Rz . rl, t)$
+wl : transpose(matrix([-n*Y(t), n*X(t), 0]))$
+zero_matrix("lvlh_velocity_subtracts_the_frame_rotation",
+            map(tsimp, transpose(Rz) . vrel - wl - diff(rl, t)))$
+
+/* 6. Curvilinear coordinates. The inverse map's position, with r, lambda, phi functions of t. */
+P : [r(t)*cos(ph(t))*cos(la(t)), r(t)*cos(ph(t))*sin(la(t)), r(t)*sin(ph(t))]$
+Pd : diff(P, t)$
+/* the coded inverse velocity */
+coded_Pd : [rd*cos(ph(t))*cos(la(t)) - r(t)*sin(ph(t))*phd*cos(la(t)) - r(t)*cos(ph(t))*sin(la(t))*lad,
+            rd*cos(ph(t))*sin(la(t)) - r(t)*sin(ph(t))*phd*sin(la(t)) + r(t)*cos(ph(t))*cos(la(t))*lad,
+            rd*sin(ph(t)) + r(t)*cos(ph(t))*phd]$
+dsub : [diff(r(t), t) = rd, diff(la(t), t) = lad, diff(ph(t), t) = phd]$
+zero("inverse_velocity_is_the_derivative_of_its_position",
+     apply("+", map(lambda([q], abs(tsimp(q))), subst(dsub, Pd) - coded_Pd)))$
+/* the coded forward velocity formulas, applied to that position and velocity (r > 0, cos phi > 0) */
+Pv : subst(dsub, Pd)$
+rn : r(t)$
+rdot_code : (P . Pv)/rn$
+ladot_code : (P[1]*Pv[2] - P[2]*Pv[1])/(P[1]^2 + P[2]^2)$
+phdot_code : (Pv[3]*rn - P[3]*rdot_code)/(rn^2*cos(ph(t)))$
+zero("forward_rdot_is_the_radial_rate", tsimp(rdot_code - rd))$
+zero("forward_lambda_dot_is_the_longitude_rate", tsimp(ladot_code - lad))$
+zero("forward_phi_dot_is_the_latitude_rate", tsimp(phdot_code - phd))$
+zero("forward_radius_is_the_norm", tsimp(subst(r(t) = rc, sqrt(P . P)) - rc))$
+/* first order in the separation: P = (rc + e x, e y, e z), lambda = atan(P_y/P_x) near the chief */
+Pe : [rc + e*x, e*y, e*z]$
+curv : [sqrt(Pe . Pe) - rc, rc*atan(Pe[2]/Pe[1]), rc*asin(Pe[3]/sqrt(Pe . Pe))]$
+zero("curvilinear_is_rectilinear_to_first_order",
+     apply("+", map(lambda([q, w], abs(ratsimp(coeff(taylor(q, e, 0, 1), e, 1) - w))),
+                    curv, [x, y, z])))$
+zero("curvilinear_at_the_chief_is_zero",
+     apply("+", map(lambda([q], abs(ratsimp(subst(e = 0, q)))), curv)))$

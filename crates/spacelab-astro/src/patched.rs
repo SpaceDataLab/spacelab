@@ -7,6 +7,16 @@
 //! pieces: the SOI radius that bounds the patch, the hyperbola an excess velocity implies at a
 //! planet, and the B-plane parameters that aim a flyby or arrival. See Curtis, *Orbital Mechanics
 //! for Engineering Students*, §8, §11; Vallado, §12.
+//!
+//! Gate: `derivations/patched_conics.mac` derives the sphere of influence from Laplace's criterion,
+//! the four hyperbolic-arc closed forms from vis-viva and the asymptote, the impact parameter
+//! `|a|√(e²−1) = h/v∞`, and the coded `B` as the limit of the aiming offset along the incoming
+//! asymptote. `derivations/patched_conics.gp` re-evaluates every reference value of the tests at 100
+//! digits by other routes (energy and angular momentum for the arcs, the conic followed out to
+//! `1e40` periapsis radii for the B-plane). The module tests
+//! `the_sphere_of_influence_solves_laplace_s_criterion` (G2), `the_hyperbolic_arc_is_its_closed_form`
+//! (G1), `the_impact_parameter_is_the_angular_momentum_over_the_excess_speed` (G1) and
+//! `the_b_plane_is_the_aiming_plane_of_the_incoming_asymptote` (G3) hold the code to them.
 
 #![allow(clippy::many_single_char_names, clippy::similar_names)]
 
@@ -114,6 +124,45 @@ mod tests {
     #![allow(clippy::excessive_precision, clippy::expect_used)]
     use super::*;
 
+    /// (G2) The radius returned is the root of Laplace's criterion `M² r⁵ = m² a⁵`, the equation
+    /// `derivations/patched_conics.mac` solves: `(r/a)⁵ = (m/M)²`. `pow` is correctly rounded to
+    /// within an ulp or so and the fifth power multiplies its error by five, so 16 ulps.
+    #[test]
+    fn the_sphere_of_influence_solves_laplace_s_criterion() {
+        let au = 1.495_978_707e8;
+        for (a, ratio) in [
+            (au, 3.003_5e-6),
+            (1.524 * au, 3.227e-7),
+            (5.2 * au, 9.547_9e-4),
+            (1.0, 1e-12),
+        ] {
+            let r = sphere_of_influence(a, ratio);
+            let lhs = (r / a).powi(5);
+            let rhs = ratio * ratio;
+            assert!(
+                (lhs / rhs - 1.0).abs() <= 16.0 * f64::EPSILON,
+                "a {a}, m/M {ratio}: (r/a)^5 = {lhs:e}, (m/M)^2 = {rhs:e}"
+            );
+        }
+    }
+
+    /// (G1) The impact parameter the B-plane reports is the angular momentum over the excess speed,
+    /// `|B| = |a|√(e²−1) = |r × v|/v∞` with `v∞² = v² − 2µ/r` (`derivations/patched_conics.mac`).
+    /// Neither side cancels on these states, so 64 ulps.
+    #[test]
+    fn the_impact_parameter_is_the_angular_momentum_over_the_excess_speed() {
+        for &(r, v, mu, north, ..) in &AIMING {
+            let bp = b_plane(r, v, mu, north).expect("hyperbolic");
+            let v_inf = (v.dot(v) - 2.0 * mu / r.norm()).sqrt();
+            let want = r.cross(v).norm() / v_inf;
+            assert!(
+                (bp.b_magnitude - want).abs() <= 64.0 * f64::EPSILON * want,
+                "|B| {:.17e}, h/v_inf {want:.17e}",
+                bp.b_magnitude
+            );
+        }
+    }
+
     /// The Laplace SOI reproduces the published Earth and Mars values.
     #[test]
     fn sphere_of_influence_matches_earth_and_mars() {
@@ -219,8 +268,11 @@ mod tests {
         z: 0.058_753_633_746_446_041_075_0,
     };
 
-    /// Every field of the arc is a closed form in `(v_∞, μ, r_p)`, and every one of them was free:
-    /// the sign and range checks below hold for a wide family of wrong expressions.
+    /// (G1) Every field of the arc is a closed form in `(v_∞, μ, r_p)`, and every one of them was
+    /// free: the sign and range checks below hold for a wide family of wrong expressions. The four
+    /// closed forms are derived in `derivations/patched_conics.mac`; `derivations/patched_conics.gp`
+    /// recomputes `ARCS` at 100 digits from the energy and angular momentum instead and agrees to the
+    /// 25 digits written.
     #[test]
     fn the_hyperbolic_arc_is_its_closed_form() {
         for &(v_inf, mu, r_p, a, e, v_p, turn) in &ARCS {
@@ -243,6 +295,11 @@ mod tests {
     /// `B` is built as `|B|(Ŝ × ĥ)` and `T̂`, `R̂` span the plane perpendicular to Ŝ by construction.
     /// So the identity cannot tell the arrival aiming plane from the departure one, and the values
     /// have to be pinned against the asymptote itself.
+    ///
+    /// (G3) `derivations/patched_conics.mac` shows the coded `B` is the limit of the aiming offset
+    /// `r − (r·Ŝ)Ŝ` as the conic runs out along its incoming asymptote, and
+    /// `derivations/patched_conics.gp` takes that limit at 100 digits on these states, matching `AIMING`
+    /// to the 25 digits written; rounding the decimal inputs to doubles moves it by 3e-17 of `|B|`.
     #[test]
     fn the_b_plane_is_the_aiming_plane_of_the_incoming_asymptote() {
         for &(r, v, mu, north, b_dot_t, b_dot_r, b_magnitude) in &AIMING {

@@ -1,0 +1,65 @@
+/* The regime-dependent uncertainty of SDTM -- spacelab-propagation/src/sdtm/uncertainty.rs -- as
+ * identities and exact quantiles.
+ *
+ * The residual u = ln(rho_model/rho_measured) is taken as N(0, sigma^2) in a regime, and the interval
+ * on a density is (rho e^{-z sigma}, rho e^{+z sigma}) for the two-sided standard-normal quantile
+ *     z_p = sqrt(2) erf^{-1}(p),   p = 0.90, 0.95, 0.99.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the probability that |u| <= z sigma is erf(z/sqrt 2), from the Gaussian density integrated
+ *      in closed form -- so z_p is the coverage the interval claims, for every sigma;
+ *   2. the interval is symmetric in the logarithm: its geometric mean is rho, and ln(high/rho) =
+ *      ln(rho/low) = z sigma;
+ *   3. at 60 digits, erf(z_p/sqrt 2) - p vanishes (to 1e-55) for the three quantiles;
+ *   4. each shipped f64 literal (NORMAL_90/95/99), read back as the exact binary rational it
+ *      denotes, is within half an ulp of z_p -- it is the nearest double, not merely a close one;
+ *   5. the regime index flux*(storm edges + 1) + storm maps the 3 x 2 cells one-to-one onto 0..5,
+ *      and each edge belongs to the cell above it (a closed-below bin).
+ * derivations/sdtm_uncertainty.gp recomputes the quantiles at 100 digits by root-finding erfc.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/sdtm_uncertainty.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+assume(sigma > 0, zz > 0, rho > 0)$
+
+/* 1. Coverage of the log-symmetric interval under the Gaussian residual. */
+gauss(u) := exp(-u^2/(2*sigma^2))/(sigma*sqrt(2*%pi))$
+coverage : integrate(gauss(u), u, -zz*sigma, zz*sigma)$
+zero("gaussian_coverage_is_erf", radcan(coverage - erf(zz/sqrt(2))))$
+
+/* 2. The interval's shape. */
+low : rho*exp(-zz*sigma)$
+high : rho*exp(zz*sigma)$
+zero("geometric_mean_is_the_density", radcan(sqrt(low*high) - rho))$
+zero("upper_log_half_width", radcan(log(high/rho) - zz*sigma))$
+zero("lower_log_half_width", radcan(log(rho/low) - zz*sigma))$
+
+/* 3-4. The quantiles at 60 digits and the shipped doubles. A double in [1, 2) has ulp 2^-52 and
+   one in [2, 4) has ulp 2^-51; the literal is the nearest double when |literal - z| <= ulp/2. */
+fpprec : 60$
+ratprint : false$
+small(x, tol) := if abs(x) < tol then 0 else x$
+check(tag, p, literal) := block([zp, exact, ulp],
+  zp : bfloat(sqrt(2)*inverse_erf(p)),
+  zero(sconcat(tag, "_quantile_residual"), small(bfloat(erf(zp/sqrt(2))) - p, 1b-55)),
+  printf(true, "~a: z = ~a~%", tag, zp),
+  exact : rationalize(literal),
+  ulp : if exact < 2 then 2^-52 else 2^-51,
+  zero(sconcat(tag, "_literal_is_the_nearest_double"),
+       if abs(bfloat(exact) - zp) <= bfloat(ulp/2) then 0 else bfloat(exact) - zp))$
+check("normal_90", 9/10, 1.6448536269514727)$
+check("normal_95", 95/100, 1.9599639845400543)$
+check("normal_99", 99/100, 2.575829303548901)$
+
+/* 5. The regime index over the edges FLUX_EDGES = [100, 150], STORM_EDGES = [15]. */
+bin(v, edges) := length(sublist(edges, lambda([e], v >= e)))$
+regime(f, s) := bin(f, [100, 150])*2 + bin(s, [15])$
+cells : create_list(regime(f, s), f, [69.8, 100, 149.9, 150, 400], s, [0, 14.999, 15, 400])$
+zero("every_regime_is_reached", length(unique(cells)) - 6)$
+zero("regimes_stay_in_the_table", lmax(cells) - 5 + lmin(cells))$
+zero("flux_edge_belongs_above", regime(100, 0) - 2)$
+zero("storm_edge_belongs_above", regime(99.999, 15) - 1)$

@@ -17,6 +17,14 @@
 //! difference `Δ = xₙ − xₙ₋₁` and updates `Δ ← Δ + h²·(corrector·a)`, `x ← x + Δ`, both
 //! Kahan-compensated: this is the summed form that gives the method its low round-off floor.
 //!
+//! Gate: `derivations/gauss_jackson8_generating.mac` derives the Störmer, Cowell and Adams–Moulton
+//! weights from their generating functions in exact rationals, shows them exact on `t^m` through
+//! degree nine (eight for the velocity) and not beyond, and checks every shipped literal is the
+//! exact weight correctly rounded at its last digit; `derivations/gauss_jackson8_generating.gp`
+//! solves the moment systems instead and agrees. The module test
+//! `the_shipped_weights_are_the_generating_function_rationals` (G3) holds each `f64` weight to
+//! the correctly rounded rational, bit for bit.
+//!
 //! # Constraint
 //!
 //! Like the [symplectic](crate::symplectic) methods, the acceleration must be a function of
@@ -48,7 +56,7 @@ const ORDER: usize = 8;
 /// 40933/10080, −300227/60480, 9857/2520, −39017/20160, 3319/6048, −275/4032`).
 const STORMER: [f64; ORDER] = [
     1.46038359788359788359788359788359788,
-    -2.01383928571428571428571428571428572,
+    -2.01383928571428571428571428571428571,
     4.06081349206349206349206349206349206,
     -4.9640707671957671957671957671957672,
     3.91150793650793650793650793650793651,
@@ -450,6 +458,69 @@ mod tests {
 
     fn max_abs_diff<const N: usize>(a: &[f64; N], b: &[f64; N]) -> f64 {
         (0..N).map(|i| (a[i] - b[i]).abs()).fold(0.0, f64::max)
+    }
+
+    /// The ordinate weights as exact rationals `(numerator, denominator)`, printed by
+    /// `derivations/gauss_jackson8_generating.mac` from the generating functions
+    /// `t²/((1 − t) log²(1 − t))`, `t²/log²(1 − t)` and `−t/log(1 − t)`.
+    const STORMER_EXACT: [(i32, i32); ORDER] = [
+        (22081, 15120),
+        (-4511, 2240),
+        (40933, 10080),
+        (-300_227, 60480),
+        (9857, 2520),
+        (-39017, 20160),
+        (3319, 6048),
+        (-275, 4032),
+    ];
+    const COWELL_EXACT: [(i32, i32); ORDER] = [
+        (275, 4032),
+        (13831, 15120),
+        (-2099, 20160),
+        (811, 3360),
+        (-11477, 60480),
+        (29, 315),
+        (-517, 20160),
+        (19, 6048),
+    ];
+    const AM8_EXACT: [(i32, i32); ORDER] = [
+        (5257, 17280),
+        (139_849, 120_960),
+        (-4511, 4480),
+        (123_133, 120_960),
+        (-88547, 120_960),
+        (1537, 4480),
+        (-11351, 120_960),
+        (275, 24192),
+    ];
+
+    /// (G3) Every Störmer, Cowell and Adams–Moulton weight the scheme multiplies by is the exact
+    /// rational of its generating function, rounded once to `f64`.
+    ///
+    /// `derivations/gauss_jackson8_generating.mac` derives the weights from the generating
+    /// functions, shows they are exact on `t^m` through degree nine (eight for the velocity) and on
+    /// nothing further, and that each 34–37-digit literal in this file and in `abm.rs` is the exact
+    /// value correctly rounded at its last digit; `derivations/gauss_jackson8_generating.gp`
+    /// solves the moment systems instead and lands on the same rationals. What is left for `f64` is
+    /// the compiler's rounding of the literal, which must agree with the rounding of the rational:
+    /// numerator and denominator are exact doubles and IEEE division rounds correctly, so
+    /// `num / den` is the nearest double to the weight, bit for bit.
+    #[test]
+    fn the_shipped_weights_are_the_generating_function_rationals() {
+        for (name, shipped, exact) in [
+            ("Störmer", STORMER, STORMER_EXACT),
+            ("Cowell", COWELL, COWELL_EXACT),
+            ("Adams–Moulton", AM8, AM8_EXACT),
+        ] {
+            for (j, (&w, (num, den))) in shipped.iter().zip(exact).enumerate() {
+                let want = f64::from(num) / f64::from(den);
+                assert_eq!(
+                    w.to_bits(),
+                    want.to_bits(),
+                    "{name} w{j}: {w:e} vs {num}/{den}"
+                );
+            }
+        }
     }
 
     #[test]

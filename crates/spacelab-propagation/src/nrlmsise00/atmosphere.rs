@@ -13,6 +13,13 @@
 //! with the scale height `H` read from a second model evaluation 10 km higher. The STM then sees the
 //! correct local `dρ/d|r|` without differentiating the whole empirical model — the same device
 //! operational orbit determination uses for tabulated density.
+//!
+//! Gate: `derivations/atmosphere_lift.mac` shows the lift is `ρ₀` at `r₀` with gradient
+//! `−(ρ₀/H)·r̂`, that the 10 km quotient is the layer's own `H` on an exponential layer (and the
+//! harmonic mean of the local `H` on any other), and that the day split and hour wrap land where the
+//! tests below step. The module tests `the_density_at_the_named_point_is_the_model_converted_to_si`
+//! (G3) and `the_gradient_the_stm_reads_is_minus_rho_over_the_scale_height` (G1) hold the shipped
+//! wrapper to it; the model's own structure is gated in `super`.
 
 #![allow(clippy::cast_possible_truncation)] // day-of-year advance is a small, in-range integer
 
@@ -141,8 +148,9 @@ mod tests {
         gtd7d(&input, &Nrlmsise00Flags::default()).d[5] * 1_000.0
     }
 
-    /// At the point the geodetic closure names, the exponential lift is `exp(0)`, so the wrapper's
-    /// answer is the model's — exactly, not approximately. That makes this one assertion cover the
+    /// (G3) At the point the geodetic closure names, the exponential lift is `exp(0)`
+    /// (`derivations/atmosphere_lift.mac`, `lift_value_at_r0`), so the wrapper's answer is the
+    /// model's — exactly, not approximately. That makes this one assertion cover the
     /// whole input assembly (day, UT seconds, local solar time, the three space-weather fields) and
     /// the `g/cm³ → kg/m³` factor of 1000, none of which the crate tested anywhere before.
     #[test]
@@ -212,8 +220,9 @@ mod tests {
         }
     }
 
-    /// The whole point of the exponential lift is that the state-transition matrix sees a gradient
-    /// the empirical model cannot supply. `∂ρ/∂r = −(ρ/H)·r̂` in closed form, with `H` rebuilt here
+    /// (G1) The whole point of the exponential lift is that the state-transition matrix sees a
+    /// gradient the empirical model cannot supply. `∂ρ/∂r = −(ρ/H)·r̂` in closed form
+    /// (`derivations/atmosphere_lift.mac`, `lift_gradient_1..3`), with `H` rebuilt here
     /// from two direct model calls 10 km apart — so the exponent's sign, its `10 km` base and the
     /// direction of `r₀ − ‖r‖` are pinned against something the wrapper did not compute.
     ///

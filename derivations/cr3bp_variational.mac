@@ -1,0 +1,130 @@
+/* CR3BP variational equations and periodic-orbit shooting -- spacelab-astro/src/periodic.rs --
+ * as identities.
+ *
+ * State s = (x, y, z, vx, vy, vz), vector field f(s) = (v, a(s)) with the acceleration of
+ * derivations/cr3bp.mac; the STM obeys Phi' = A Phi, A = df/ds. Transcribed from `jacobian`:
+ *     Uxx = 1 - m1/r1^3 - m2/r2^3 + 3 m1 dx1^2/r1^5 + 3 m2 dx2^2/r2^5,   (Uyy, Uzz likewise)
+ *     Uxy = 3 m1 dx1 y/r1^5 + 3 m2 dx2 y/r2^5,                            (Uxz, Uyz likewise)
+ *     A = [[0, I], [U, K]],  K = [[0, 2, 0], [-2, 0, 0], [0, 0, 0]],
+ * m1 = 1 - mu, m2 = mu, dx1 = x + mu, dx2 = x - 1 + mu.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. every entry of the coded Jacobian is the derivative of the vector field (G1);
+ *   2. tr A = 0, so det Phi = 1 for every span (Liouville) (G4);
+ *   3. the synodic symplectic form Omega = P' J P, pulled back through p = v + (-y, x, 0), is
+ *      [[G, I], [-I, 0]] with G = [[0, -2, 0], [2, 0, 0], [0, 0, 0]], and A' Omega + Omega A = 0,
+ *      so Phi' Omega Phi = Omega -- the monodromy is symplectic, its multipliers come in
+ *      reciprocal pairs (G4);
+ *   4. A f = (Df) f is the variational equation's own solution: d/dt f(s(t)) = A f, so the
+ *      monodromy maps f(x0) to f(x(T)) = f(x0) -- the unit multiplier pair (G4);
+ *   5. the time-reversal symmetry f(R s) = -R f(s), R = diag(1, -1, 1, -1, 1, -1), on which a
+ *      perpendicular x-z-plane crossing closing a periodic orbit rests (G4);
+ *   6. at a collinear point, with c2 = (1-mu)/|dx1|^3 + mu/|dx2|^3, the Hessian is
+ *      diag(1 + 2 c2, 1 - c2, -c2); the coded omega^2 = (2 - c2 + sqrt(9 c2^2 - 8 c2))/2 is a root
+ *      of the in-plane characteristic polynomial; the coded Lindstedt seed
+ *      x = A cos(w t), y = B sin(w t), B = -(w^2 + Uxx) A/(2 w), vy0 = B w, solves both linear
+ *      in-plane equations (G1);
+ *   7. the free-final-time Newton derivatives of `lyapunov_shoot` and `halo_orbit`: holding the
+ *      crossing y = 0, d(vx1)/d(p) = Phi[3][p] - (ax1/vy1) Phi[1][p] and likewise for vz1 (G1).
+ * The 100-digit Jacobian at the test state is in derivations/cr3bp_variational.gp.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/cr3bp_variational.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+/* A matrix reduces to zero when every entry does. */
+zero_matrix(name, M) := zero(name,
+  apply("+", map(lambda([e], abs(ratsimp(e))), flatten(args(M)))))$
+
+S : [x, y, z, vx, vy, vz]$
+r1 : sqrt((x + mu)^2 + y^2 + z^2)$
+r2 : sqrt((x - 1 + mu)^2 + y^2 + z^2)$
+ax : x + 2*vy - (1 - mu)*(x + mu)/r1^3 - mu*(x - 1 + mu)/r2^3$
+ay : y - 2*vx - (1 - mu)*y/r1^3 - mu*y/r2^3$
+az : -(1 - mu)*z/r1^3 - mu*z/r2^3$
+F : [vx, vy, vz, ax, ay, az]$
+A : genmatrix(lambda([i, j], diff(F[i], S[j])), 6, 6)$
+
+/* 1. The coded Jacobian. */
+m1 : 1 - mu$  m2 : mu$  dx1 : x + mu$  dx2 : x - 1 + mu$
+uxx : 1 - m1/r1^3 - m2/r2^3 + 3*m1*dx1^2/r1^5 + 3*m2*dx2^2/r2^5$
+uyy : 1 - m1/r1^3 - m2/r2^3 + 3*m1*y^2/r1^5 + 3*m2*y^2/r2^5$
+uzz : -m1/r1^3 - m2/r2^3 + 3*m1*z^2/r1^5 + 3*m2*z^2/r2^5$
+uxy : 3*m1*dx1*y/r1^5 + 3*m2*dx2*y/r2^5$
+uxz : 3*m1*dx1*z/r1^5 + 3*m2*dx2*z/r2^5$
+uyz : 3*m1*y*z/r1^5 + 3*m2*y*z/r2^5$
+code_U : matrix([uxx, uxy, uxz], [uxy, uyy, uyz], [uxz, uyz, uzz])$
+code_K : matrix([0, 2, 0], [-2, 0, 0], [0, 0, 0])$
+block_(M, i0, j0) := genmatrix(lambda([i, j], M[i0 + i, j0 + j]), 3, 3)$
+zero_matrix("jacobian_position_block_is_zero", block_(A, 0, 0))$
+zero_matrix("jacobian_velocity_coupling_is_identity", block_(A, 0, 3) - ident(3))$
+zero("jacobian_uxx", ratsimp(A[4, 1] - uxx))$
+zero("jacobian_uyy", ratsimp(A[5, 2] - uyy))$
+zero("jacobian_uzz", ratsimp(A[6, 3] - uzz))$
+zero("jacobian_uxy", abs(ratsimp(A[4, 2] - uxy)) + abs(ratsimp(A[5, 1] - uxy)))$
+zero("jacobian_uxz", abs(ratsimp(A[4, 3] - uxz)) + abs(ratsimp(A[6, 1] - uxz)))$
+zero("jacobian_uyz", abs(ratsimp(A[5, 3] - uyz)) + abs(ratsimp(A[6, 2] - uyz)))$
+zero_matrix("jacobian_coriolis_block", block_(A, 3, 3) - code_K)$
+
+/* 2. Liouville. */
+zero("jacobian_trace_vanishes", ratsimp(mat_trace(A)))$
+
+/* 3. The symplectic form. */
+Pq : jacobian([x, y, z, vx - y, vy + x, vz], S)$
+J : matrix([0,0,0,1,0,0],[0,0,0,0,1,0],[0,0,0,0,0,1],[-1,0,0,0,0,0],[0,-1,0,0,0,0],[0,0,-1,0,0,0])$
+Om : transpose(Pq) . J . Pq$
+code_Om : matrix([0,-2,0,1,0,0],[2,0,0,0,1,0],[0,0,0,0,0,1],
+                 [-1,0,0,0,0,0],[0,-1,0,0,0,0],[0,0,-1,0,0,0])$
+zero_matrix("symplectic_form_is_the_pullback_of_J", Om - code_Om)$
+zero_matrix("jacobian_is_infinitesimally_symplectic", transpose(A) . Om + Om . A)$
+
+/* 4. The flow direction solves the variational equation: d/dt f(s(t)) = (df/ds) f = A f. */
+fvec : transpose(matrix(F))$
+dfdt : transpose(matrix(makelist(sum(diff(F[i], S[j])*F[j], j, 1, 6), i, 1, 6)))$
+zero_matrix("flow_direction_solves_the_variational_equation", dfdt - A . fvec)$
+
+/* 5. Time reversal. */
+Rsub : [y = -y, vx = -vx, vz = -vz]$
+R : matrix([1,0,0,0,0,0],[0,-1,0,0,0,0],[0,0,1,0,0,0],[0,0,0,-1,0,0],[0,0,0,0,1,0],[0,0,0,0,0,-1])$
+fR : transpose(matrix(subst(Rsub, F)))$
+zero_matrix("vector_field_is_time_reversible", fR + R . fvec)$
+
+/* 6. Linearisation at a collinear point (y = z = 0); s1, s2 the signs of dx1, dx2 there. */
+for c in [["L1", 1, -1], ["L2", 1, 1], ["L3", -1, -1]] do block(
+  [s1 : c[2], s2 : c[3], c2, ax_, H, lam2, w2, B],
+  c2 : (1 - mu)/(s1*(x + mu))^3 + mu/(s2*(x - 1 + mu))^3,
+  ax_ : lambda([e], ratsimp(subst([sqrt((x + mu)^2) = s1*(x + mu),
+                                    sqrt((x - 1 + mu)^2) = s2*(x - 1 + mu)],
+                                   subst([y = 0, z = 0], e)))),
+  zero(sconcat(c[1], "_hessian_xx_is_1_plus_2c2"), ratsimp(ax_(uxx) - (1 + 2*c2))),
+  zero(sconcat(c[1], "_hessian_yy_is_1_minus_c2"), ratsimp(ax_(uyy) - (1 - c2))),
+  zero(sconcat(c[1], "_hessian_zz_is_minus_c2"), ratsimp(ax_(uzz) + c2)),
+  zero(sconcat(c[1], "_hessian_off_diagonal_vanishes"),
+       abs(ratsimp(ax_(uxy))) + abs(ratsimp(ax_(uxz))) + abs(ratsimp(ax_(uyz)))))$
+/* In-plane linear system x'' - 2 y' - (1 + 2 c2) x = 0, y'' + 2 x' - (1 - c2) y = 0. */
+Ap : matrix([0, 0, 1, 0], [0, 0, 0, 1], [1 + 2*c2, 0, 0, 2], [0, 1 - c2, -2, 0])$
+charp : expand(determinant(Ap - lam*ident(4)))$
+zero("inplane_characteristic_polynomial",
+     ratsimp(charp - (lam^4 + (2 - c2)*lam^2 + (1 + 2*c2)*(1 - c2))))$
+w2 : (2 - c2 + sqrt(9*c2^2 - 8*c2))/2$
+zero("coded_omega_is_a_characteristic_root", ratsimp(expand(subst(lam = %i*sqrt(w2), charp))))$
+xs : Ax*cos(w*t)$
+B : -(w^2 + 1 + 2*c2)*Ax/(2*w)$
+ys : B*sin(w*t)$
+zero("lindstedt_seed_solves_the_x_equation",
+     ratsimp(diff(xs, t, 2) - 2*diff(ys, t) - (1 + 2*c2)*xs))$
+/* The y equation holds exactly when w^2 is a characteristic root. */
+yres : ratsimp((diff(ys, t, 2) + 2*diff(xs, t) - (1 - c2)*ys)/(Ax*sin(w*t)))$
+zero("lindstedt_seed_solves_the_y_equation", ratsimp(expand(subst(w = sqrt(w2), yres*w))))$
+zero("lindstedt_seed_velocity_is_coded_vy0",
+     ratsimp(subst(t = 0, diff(ys, t)) - (-(w^2 + 1 + 2*c2)/(2*w)*Ax*w)))$
+
+/* 7. Free-final-time Newton derivatives: perturb p, let the crossing time move by dt so that
+      y1 stays 0, and read the change in vx1, vz1. Phi[i][p] are the STM entries d s_i/d p. */
+sol : solve(Phi1p*dp + vy1*dtc = 0, dtc)$
+dvx1 : Phi3p*dp + ax1*rhs(sol[1])$
+dvz1 : Phi5p*dp + az1*rhs(sol[1])$
+zero("free_time_dvx1_dp", ratsimp(dvx1/dp - (Phi3p - ax1/vy1*Phi1p)))$
+zero("free_time_dvz1_dp", ratsimp(dvz1/dp - (Phi5p - az1/vy1*Phi1p)))$

@@ -5,6 +5,11 @@
 //! velocities gives the hyperbolic excess speeds — the launch energy `C3` and the arrival `v∞` that
 //! a porkchop plot maps over a grid of departure and arrival dates. See Curtis, *Orbital Mechanics
 //! for Engineering Students*, §8.
+//!
+//! Gate: `derivations/transfer_excess_speed.mac` derives the excess speeds and `C3` of a
+//! periapsis-tangent departure from one circular orbit to another in closed form, on the exact
+//! ellipse and hyperbola of `derivations/lambert_universal.mac`; the module test
+//! `the_metrics_are_the_closed_form_excess_speeds_of_an_exact_conic` (G3) holds the code to them.
 
 use spacelab_core::Vec3;
 
@@ -64,6 +69,57 @@ mod tests {
 
     const MU_SUN_KM: f64 = 1.327_124_400_18e11; // km³/s²
     const AU: f64 = 1.495_978_707e8; // km
+
+    /// (G3) Two transfers whose metrics are closed forms (`derivations/transfer_excess_speed.mac`):
+    /// `µ = 1`, departure from a circular orbit at `r1 = 1` on a conic tangent at its periapsis,
+    /// arrival at a circular orbit 90° on. On the ellipse `e = 1/2`, `r2 = 3/2`:
+    /// `v∞ = √(3/2) − 1`, `C3 = 5/2 − √6`, arrival `v∞ = 1/√6`. On the hyperbola `e = 2`, `r2 = 3`:
+    /// `v∞ = √3 − 1`, `C3 = 4 − 2√3`, arrival `v∞ = 2/√3`.
+    ///
+    /// Each excess speed is a difference of two `O(1)` velocities, so its absolute error is a few
+    /// ulps of the heliocentric speed whatever its own size: the bound is 16 ulps of `|v1|` for the
+    /// speeds and twice `v∞` that for `C3`. The Lambert arc is gated to 16 ulps on the same two conics.
+    #[test]
+    fn the_metrics_are_the_closed_form_excess_speeds_of_an_exact_conic() {
+        let third = 3.0_f64.sqrt();
+        let two_thirds = (2.0_f64 / 3.0).sqrt();
+        // (r2, tof, arrival body velocity, departure v∞, C3, arrival v∞, heliocentric speed)
+        let cases = [
+            (
+                Vec3::new(0.0, 1.5, 0.0),
+                2.0 * core::f64::consts::SQRT_2 * (core::f64::consts::PI / 3.0 - third / 4.0),
+                Vec3::new(-two_thirds, 0.0, 0.0),
+                1.5_f64.sqrt() - 1.0,
+                2.5 - 6.0_f64.sqrt(),
+                1.0 / 6.0_f64.sqrt(),
+                1.5_f64.sqrt(),
+            ),
+            (
+                Vec3::new(0.0, 3.0, 0.0),
+                2.0 * third - (2.0 + third).ln(),
+                Vec3::new(-1.0 / third, 0.0, 0.0),
+                third - 1.0,
+                4.0 - 2.0 * third,
+                2.0 / third,
+                third,
+            ),
+        ];
+        let (r1, v_body1) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        for (r2, tof, v_body2, dep, c3, arr, speed) in cases {
+            let t = transfer(r1, v_body1, r2, v_body2, tof, 1.0, true).expect("a 90° arc");
+            let tol = 16.0 * f64::EPSILON * speed;
+            for (name, got, want, bound) in [
+                ("departure v∞", t.v_inf_departure, dep, tol),
+                ("C3", t.c3, c3, 2.0 * dep * tol),
+                ("arrival v∞", t.v_inf_arrival, arr, tol),
+            ] {
+                assert!(
+                    (got - want).abs() <= bound,
+                    "to {r2:?}: {name} {got:.17e}, closed form {want:.17e}"
+                );
+            }
+        }
+    }
 
     /// The three metrics are exactly what they claim to be: the excess speeds of the very arc the
     /// call returns, and `C3` its square. The geometry is inclined, so no component of the velocity

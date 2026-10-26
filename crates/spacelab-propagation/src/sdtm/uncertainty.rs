@@ -24,6 +24,12 @@
 //! it: the interval is `ρ · exp(±z σ)`, multiplicative, and never negative. That is a property of the
 //! parameterisation and not a fitted claim about the tails — [`DensityUncertainty::coverage`] is what
 //! measures whether the claim holds, and `tests/measured_density.rs` runs it against measured density.
+//!
+//! Gate: `derivations/sdtm_uncertainty.mac` derives the coverage `P(|u| ≤ zσ) = erf(z/√2)` of the
+//! log-symmetric interval and holds each quantile literal to half an ulp of `√2·erf⁻¹(p)` at 60
+//! digits, and `derivations/sdtm_uncertainty.gp` recomputes the quantiles at 100 digits by
+//! root-finding `erfc`. The module tests `the_normal_quantiles_are_the_ones_the_cas_printed` (G3) and
+//! `the_interval_is_log_symmetric_and_monotone_in_the_quantile` (G1) tie the code to them.
 
 use super::SdtmDrivers;
 
@@ -43,18 +49,18 @@ pub const REGIMES: usize = (FLUX_EDGES.len() + 1) * (STORM_EDGES.len() + 1);
 
 /// Two-sided standard-normal 90 % quantile, `√2 · erf⁻¹(0.9)`.
 ///
-/// Maxima at 30 digits — `fpprec:30$ bfloat(sqrt(2)*inverse_erf(9/10));` —
-/// `1.64485362695147271486384890798`, whose nearest `f64` this is, 7.9e-17 away.
+/// Maxima at 60 digits — `fpprec:60$ bfloat(sqrt(2)*inverse_erf(9/10));`, cut here to 30 —
+/// `1.64485362695147271486384890799`, whose nearest `f64` this is, 7.9e-17 (0.355 ulp) away.
 pub const NORMAL_90: f64 = 1.644_853_626_951_472_7;
 
 /// Two-sided standard-normal 95 % quantile, `√2 · erf⁻¹(0.95)`.
 ///
-/// Maxima, same form: `1.95996398454005423552459443052`.
+/// Maxima, same form: `1.95996398454005423552459443052`, 0.162 ulp from this `f64`.
 pub const NORMAL_95: f64 = 1.959_963_984_540_054_3;
 
 /// Two-sided standard-normal 99 % quantile, `√2 · erf⁻¹(0.99)`.
 ///
-/// Maxima, same form: `2.57582930354890076097857674861`.
+/// Maxima, same form: `2.57582930354890076097857674860`, 0.151 ulp from this `f64`.
 pub const NORMAL_99: f64 = 2.575_829_303_548_901;
 
 /// The spread of `ln(ρ_model/ρ_measured)` by regime.
@@ -176,7 +182,9 @@ mod tests {
         );
     }
 
-    /// The interval is multiplicative, centred on the density in the logarithm, and widens with `z`.
+    /// (G1) The interval is multiplicative, centred on the density in the logarithm, and widens with
+    /// `z`: the geometric mean of its ends is `ρ` and `ln(high/ρ) = zσ`, the identities
+    /// `derivations/sdtm_uncertainty.mac` proves.
     #[test]
     fn the_interval_is_log_symmetric_and_monotone_in_the_quantile() {
         let u = DensityUncertainty::from_log_sigma([0.78, 0.60, 0.32, 0.36, 0.31, 0.42])
@@ -230,13 +238,15 @@ mod tests {
         assert!(u.coverage(&[], NORMAL_90).is_none());
     }
 
-    /// The two quantiles against Maxima's own digits, which is what the doc comments claim.
+    /// (G3) The three quantiles against the CAS's own digits, which is what the doc comments claim:
+    /// `derivations/sdtm_uncertainty.mac` (60 digits) and `.gp` (100 digits) put each literal within
+    /// half an ulp of `√2·erf⁻¹(p)`, so it is the nearest `f64`.
     #[test]
     fn the_normal_quantiles_are_the_ones_the_cas_printed() {
-        // fpprec:30$ bfloat(sqrt(2)*inverse_erf(9/10)); and the same at 95 % and 99 %.
-        assert_eq!(NORMAL_90, 1.644_853_626_951_472_714_863_848_907_98_f64);
+        // fpprec:60$ bfloat(sqrt(2)*inverse_erf(9/10)); and the same at 95 % and 99 %, cut to 30.
+        assert_eq!(NORMAL_90, 1.644_853_626_951_472_714_863_848_907_99_f64);
         assert_eq!(NORMAL_95, 1.959_963_984_540_054_235_524_594_430_52_f64);
-        assert_eq!(NORMAL_99, 2.575_829_303_548_900_760_978_576_748_61_f64);
+        assert_eq!(NORMAL_99, 2.575_829_303_548_900_760_978_576_748_60_f64);
         // And each is the point where the Gaussian CDF reaches its coverage, to `erf`'s own accuracy.
         for (z, p) in [(NORMAL_90, 0.90), (NORMAL_95, 0.95), (NORMAL_99, 0.99)] {
             let covered = libm::erf(z / core::f64::consts::SQRT_2);

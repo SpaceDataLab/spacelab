@@ -1,0 +1,178 @@
+/* The initial-orbit-determination methods of crates/spacelab-astro/src/iod.rs, from their
+   definitions: Gibbs exact on any conic, Herrick-Gibbs as a three-point Taylor formula, Gauss and
+   Laplace as exact solutions of their own truncated models.
+
+   Printed `<name>: 0`:
+   Gibbs (three coplanar positions, D = r2 x r3 + r3 x r1 + r1 x r2, N = |r1| r2 x r3 + ...,
+   S = r1 (|r2| - |r3|) + r2 (|r3| - |r1|) + r3 (|r1| - |r2|), v2 = sqrt(mu/(|N||D|)) (D x r2/|r2| + S)):
+     1.    on the conic r = p/(1 + e cos nu) in its own plane, N = p D (z components), so
+           |N||D| = p D^2 -- with the true anomalies parametrised rationally, t = tan(nu/2);
+     2-3.  and (D x r2/|r2| + S)/D is sqrt(p/mu) times the true velocity sqrt(mu/p)
+           (-sin nu2, e + cos nu2): Gibbs is exact on every conic (G1);
+     4.    Gibbs' coplanarity: r1 . (r2 x r3) = 0 for three points of one orbit plane (G1);
+   Herrick-Gibbs (the coded c1 r1 + c2 r2 + c3 r3, with mu/|ri|^3 ri = -ri''):
+     5.    it is the three-point derivative plus (d32 r1'' - (d32 - d21) r2'' - d21 r3'')/12;
+     6-10. exact for every trajectory polynomial of degree 0..4, unequal spacing (G3);
+     11.   and not for degree 5 (printed 0 once that error is confirmed nonzero);
+     12.   on a circle of radius R at mean motion n with equal spacing h, x = n h, the formula is
+           tangent with speed n R (sin x/x)(1 + x^2/6) exactly (G3), whose expansion starts
+           1 - 7 x^4/360;
+     13.   and it has no radial component;
+   Gauss (r2 = c1 r1 + c3 r3 with c1 = tau3/tau (1 + mu (tau^2 - tau3^2)/(6 r^3)),
+   c3 = -tau1/tau (1 + mu (tau^2 - tau1^2)/(6 r^3)), ri = Ri + rhoi Li):
+     14-16. the coded rho1, rho2, rho3 (Curtis Eqs. 5.112-5.114, with rho2 = A + mu B/r^3) solve
+           that vector equation identically, for symbolic L, R (G1);
+     17.   with rho2 = A + mu B/r^3, r^2 = rho2^2 + 2 rho2 (R2.L2) + R2^2 is the coded octic times
+           r^-6;
+     18.   the velocity (f1 r3 - f3 r1)/(f1 g3 - f3 g1) is what r1 = f1 r2 + g1 v2,
+           r3 = f3 r2 + g3 v2 leave for v2;
+     19.   the two-body jerk is r''' = -u v + 3 u w r, u = mu/r^3, w = (r.v)/r^2;
+     20.   so the coded f = 1 - u tau^2/2 and g = tau - u tau^3/6 are the Taylor series of the
+           two-body f and g to the orders the code claims -- f drops (u w/2) tau^3, g drops
+           O(tau^4);
+   Laplace (the quadratic through three samples differentiated at t2; the projected equation of
+   motion (L'' + mu L/r^3) rho + 2 L' rho' + L rho'' = -R'' - mu R/r^3):
+     21-22. the coded first- and second-derivative weights are exact on quadratics;
+     23-25. with the coded rho = p + q/r^3 and rho' = (d3 + mu d4/r^3)/d, the residual of that
+           equation is parallel to L -- it is L rho'' for some rho'' -- so the pair solves it (G1),
+           all three components of residual x L;
+     26.   the coded octic is r^2 = rho^2 + 2 rho (L.R) + R^2 times r^6.
+   The exact conic of the Gibbs and Gooding gates: mu = 1, e = 1/2, p = 3/2, true anomalies
+   0, 90, 120 deg at r1 = (1, 0, 0), r2 = (0, 3/2, 0), r3 = (-1, sqrt 3, 0):
+     27-28. E(120 deg) = pi/2 and t3 = 2 sqrt 2 (pi/2 - 1/2) (and r3 is on the conic, or the
+           run stops);
+     29.   Gibbs on those three gives v2 = sqrt(2/3) (-1, 1/2, 0).
+
+   Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/iod_classical.mac </dev/null */
+
+display2d : false$
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+assume(p > 0, mu > 0, e >= 0)$
+
+/* 1-4: Gibbs on the conic, rational parametrisation. */
+block([pt, rad, r, n, D, N, S, w, cosn, sinn],
+  cosn(t) := (1 - t^2)/(1 + t^2), sinn(t) := 2*t/(1 + t^2),
+  rad(t) := p/(1 + e*cosn(t)),
+  pt(t) := rad(t)*[cosn(t), sinn(t), 0],
+  r : [pt(t1), pt(t2), pt(t3)], n : [rad(t1), rad(t2), rad(t3)],
+  D : cross(r[2], r[3]) + cross(r[3], r[1]) + cross(r[1], r[2]),
+  N : n[1]*cross(r[2], r[3]) + n[2]*cross(r[3], r[1]) + n[3]*cross(r[1], r[2]),
+  S : r[1]*(n[2] - n[3]) + r[2]*(n[3] - n[1]) + r[3]*(n[1] - n[2]),
+  zero("gibbs_n_is_p_d", ratsimp(N[3] - p*D[3])),
+  w : (cross(D, r[2])/n[2] + S)/D[3],
+  zero("gibbs_velocity_x_is_the_conic_velocity", ratsimp(w[1] + sinn(t2))),
+  zero("gibbs_velocity_y_is_the_conic_velocity", ratsimp(w[2] - (e + cosn(t2)))),
+  zero("gibbs_coplanarity", ratsimp(r[1] . cross(r[2], r[3]))))$
+
+/* 5-13: Herrick-Gibbs. Times t2 - d21, t2, t2 + d32 with t2 = 0. */
+hg(R1, R2, R3, A1, A2, A3) := block([d31 : d21 + d32],
+  /* The coded coefficients with mu/|ri|^3 ri replaced by -ri''. */
+  -d32*(1/(d21*d31))*R1 + (d32 - d21)*(1/(d21*d32))*R2 + d21*(1/(d32*d31))*R3
+  + (-d32*(-A1) + (d32 - d21)*(-A2) + d21*(-A3))/12)$
+assume(d21 > 0, d32 > 0)$
+block([L],
+  L : -d32/(d21*(d21 + d32))*q1 + (d32 - d21)/(d21*d32)*q2 + d21/(d32*(d21 + d32))*q3,
+  zero("herrick_gibbs_is_the_three_point_derivative_plus_a_curvature_term",
+       ratsimp(hg(q1, q2, q3, a1, a2, a3) - (L + (d32*a1 - (d32 - d21)*a2 - d21*a3)/12))))$
+for k : 0 thru 5 do block([x, err],
+  define(x(t), t^k),
+  err : ratsimp(hg(x(-d21), x(0), x(d32),
+                   subst(t = -d21, diff(x(t), t, 2)), subst(t = 0, diff(x(t), t, 2)),
+                   subst(t = d32, diff(x(t), t, 2)))
+                - subst(t = 0, diff(x(t), t))),
+  if k <= 4 then zero(sconcat("herrick_gibbs_exact_on_degree_", k), err)
+  else zero("herrick_gibbs_not_exact_on_degree_5", if err # 0 then 0 else 1))$
+block([x : n*h, pos, acc, v],
+  pos(t) := RR*[cos(n*t), sin(n*t), 0], acc(t) := -n^2*pos(t),
+  v : ev(subst([d21 = h, d32 = h], hg(pos(-h), pos(0), pos(h), acc(-h), acc(0), acc(h)))),
+  zero("herrick_gibbs_on_a_circle_is_its_closed_form",
+       ratsimp(trigsimp(v[2] - n*RR*sin(x)/x*(1 + x^2/6)))),
+  zero("herrick_gibbs_on_a_circle_has_no_radial_component", ratsimp(trigsimp(v[1]))),
+  if ratsimp(taylor(sin(y)/y*(1 + y^2/6), y, 0, 4) - (1 - 7*y^4/360)) # 0 then
+    error("herrick_gibbs leading error is not -7 x^4/360"))$
+
+/* 14-20: Gauss, with symbolic lines of sight and observers. */
+block([L1 : [l11, l12, l13], L2 : [l21, l22, l23], L3 : [l31, l32, l33],
+       R1 : [s11, s12, s13], R2 : [s21, s22, s23], R3 : [s31, s32, s33],
+       tau, c1, c3, P, D0, Dm, A, B, rho1, rho2, rho3, res, E, poly],
+  tau : tau3 - tau1,
+  c1 : tau3/tau*(1 + mu*(tau^2 - tau3^2)/(6*r^3)),
+  c3 : -tau1/tau*(1 + mu*(tau^2 - tau1^2)/(6*r^3)),
+  P : [cross(L2, L3), cross(L1, L3), cross(L1, L2)],
+  D0 : L1 . P[1],
+  Dm : genmatrix(lambda([i, j], [R1, R2, R3][i] . P[j]), 3, 3),
+  rho1 : ((6*(Dm[3, 1]*tau1/tau3 + Dm[2, 1]*tau/tau3)*r^3
+          + mu*Dm[3, 1]*(tau^2 - tau1^2)*tau1/tau3)/(6*r^3 + mu*(tau^2 - tau3^2)) - Dm[1, 1])/D0,
+  A : (-Dm[1, 2]*tau3/tau + Dm[2, 2] + Dm[3, 2]*tau1/tau)/D0,
+  B : (Dm[1, 2]*(tau3^2 - tau^2)*tau3/tau + Dm[3, 2]*(tau^2 - tau1^2)*tau1/tau)/(6*D0),
+  rho2 : A + mu*B/r^3,
+  rho3 : ((6*(Dm[1, 3]*tau3/tau1 - Dm[2, 3]*tau/tau1)*r^3
+          + mu*Dm[1, 3]*(tau^2 - tau3^2)*tau3/tau1)/(6*r^3 + mu*(tau^2 - tau1^2)) - Dm[3, 3])/D0,
+  res : c1*(R1 + rho1*L1) - (R2 + rho2*L2) + c3*(R3 + rho3*L3),
+  for i : 1 thru 3 do zero(sconcat("gauss_ranges_solve_the_model_component_", i), ratsimp(res[i])),
+  E : R2 . L2,
+  poly : r^8 - (A^2 + 2*A*E + R2 . R2)*r^6 - 2*mu*B*(A + E)*r^3 - mu^2*B^2,
+  zero("gauss_octic_is_the_range_equation",
+       ratsimp(poly - r^6*(r^2 - (rho2^2 + 2*rho2*E + R2 . R2)))))$
+block([sol],
+  sol : solve([q1 = f1*q2 + g1*w, q3 = f3*q2 + g3*w], [q2, w]),
+  zero("gauss_velocity_is_the_lagrange_elimination",
+       ratsimp(rhs(sol[1][2]) - (f1*q3 - f3*q1)/(f1*g3 - f3*g1))))$
+/* 19-20: the two-body jerk, then the Taylor series of r(t2 + tau) in r2 and v2 through tau^3. */
+block([X : [x(t), y(t), z(t)], acc, jerk, u, w, ser],
+  depends([x, y, z], t),
+  acc : -mu*X/sqrt(X . X)^3,
+  jerk : diff(acc, t),
+  u : mu/sqrt(X . X)^3, w : (X . diff(X, t))/(X . X),
+  zero("two_body_jerk_is_minus_u_v_plus_3_u_w_r",
+       ratsimp(lsum(q^2, q, jerk - (-u*diff(X, t) + 3*u*w*X)))),
+  remove([x, y, z], dependency),
+  /* r(tau) = r2 + v2 tau + acc tau^2/2 + jerk tau^3/6, acc = -U r2, jerk = -U v2 + 3 U W r2. */
+  ser : r2 + v2*tau + (-U*r2)*tau^2/2 + (-U*v2 + 3*U*W*r2)*tau^3/6,
+  zero("gauss_f_and_g_are_the_series_to_second_and_third_order",
+       ratsimp((coeff(expand(ser), v2) - (tau - U*tau^3/6))^2
+               + (coeff(expand(ser), r2) - (1 - U*tau^2/2) - U*W*tau^3/2)^2)))$
+
+/* 21-26: Laplace. */
+block([w1, w2, w0, x, k],
+  w1 : [(t2 - t3)/((t1 - t2)*(t1 - t3)), ((t2 - t1) + (t2 - t3))/((t2 - t1)*(t2 - t3)),
+        (t2 - t1)/((t3 - t1)*(t3 - t2))],
+  w2 : [2/((t1 - t2)*(t1 - t3)), 2/((t2 - t1)*(t2 - t3)), 2/((t3 - t1)*(t3 - t2))],
+  x(t) := k0 + k1*t + k2*t^2,
+  zero("laplace_first_derivative_weights",
+       ratsimp(w1 . [x(t1), x(t2), x(t3)] - subst(t = t2, diff(x(t), t)))),
+  zero("laplace_second_derivative_weights",
+       ratsimp(w2 . [x(t1), x(t2), x(t3)] - subst(t = t2, diff(x(t), t, 2)))))$
+block([L : [l1, l2, l3], Ld : [m1, m2, m3], Ldd : [n1, n2, n3], R : [s1, s2, s3],
+       Rdd : [u1, u2, u3], d, d1, d2, d3, d4, rho, rhod, res, k, lr, rr, poly],
+  d : 2*(L . cross(Ld, Ldd)),
+  d1 : L . cross(Ld, Rdd), d2 : L . cross(Ld, R),
+  d3 : L . cross(Ldd, Rdd), d4 : L . cross(Ldd, R),
+  rho : -2*d1/d - 2*mu*d2/d/r^3,
+  rhod : (d3 + mu*d4/r^3)/d,
+  res : (Ldd + mu*L/r^3)*rho + 2*Ld*rhod + Rdd + mu*R/r^3,
+  k : cross(res, L),
+  for i : 1 thru 3 do zero(sconcat("laplace_solves_the_projected_equation_component_", i),
+                           ratsimp(k[i])),
+  lr : L . R, rr : R . R,
+  block([pp : -2*d1/d, qq : -2*mu*d2/d],
+    poly : r^8 - (pp^2 + 2*lr*pp + rr)*r^6 - 2*qq*(pp + lr)*r^3 - qq^2,
+    zero("laplace_octic_is_the_range_equation",
+         ratsimp(poly - r^6*(r^2 - ((pp + qq/r^3)^2 + 2*(pp + qq/r^3)*lr + rr))))))$
+
+/* 27-29: the exact conic. */
+block([e : 1/2, E3, r3, v2, r, n, D, N, S],
+  E3 : 2*atan(sqrt((1 - e)/(1 + e))*tan(%pi/3)),
+  zero("eccentric_anomaly_at_120_deg", E3 - %pi/2),
+  zero("time_to_120_deg", radcan(sqrt(2^3)*(E3 - e*sin(E3)) - 2*sqrt(2)*(%pi/2 - 1/2))),
+  r : [[1, 0, 0], [0, 3/2, 0], [-1, sqrt(3), 0]],
+  n : map(lambda([q], radcan(sqrt(q . q))), r),
+  if radcan(n[3] - (3/2)/(1 + e*cos(2*%pi/3))) # 0 then error("r3 is not on the conic"),
+  D : cross(r[2], r[3]) + cross(r[3], r[1]) + cross(r[1], r[2]),
+  N : n[1]*cross(r[2], r[3]) + n[2]*cross(r[3], r[1]) + n[3]*cross(r[1], r[2]),
+  S : r[1]*(n[2] - n[3]) + r[2]*(n[3] - n[1]) + r[3]*(n[1] - n[2]),
+  v2 : sqrt(1/(sqrt(N . N)*sqrt(D . D)))*(cross(D, r[2])/n[2] + S),
+  zero("gibbs_on_the_exact_conic", radcan(lsum(q^2, q, v2 - sqrt(2/3)*[-1, 1/2, 0]))))$

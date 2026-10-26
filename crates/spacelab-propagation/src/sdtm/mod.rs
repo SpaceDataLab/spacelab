@@ -69,7 +69,7 @@
 //!
 //! # What the caller owns
 //!
-//! The indices, exactly as [`mod@crate::jb2008`] and [`crate::nrlmsise00`] do: nothing here reads a data
+//! The indices, exactly as JB2008 and [`crate::nrlmsise00`] do: nothing here reads a data
 //! file. The one piece of state a memoryless index cannot express is the storm response, because the
 //! thermosphere's reaction to geomagnetic forcing rises over hours and decays over most of a day.
 //! [`StormKernel`] is that convolution, with both time constants fitted; it is a property of the
@@ -249,7 +249,7 @@ pub struct SdtmPoint {
     pub day_of_year: f64,
 }
 
-/// The indices the model consumes, in the caller's hands exactly as [`mod@crate::jb2008`]'s are.
+/// The indices the model consumes, in the caller's hands exactly as JB2008's are.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SdtmDrivers {
     /// 10.7 cm solar flux of the previous day, 1e-22 W/(m²·Hz), at the Earth's actual distance from

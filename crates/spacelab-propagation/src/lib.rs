@@ -40,7 +40,6 @@ pub mod forces;
 pub mod geopotential;
 pub mod geopotential_coeffs;
 pub mod harris_priester;
-pub mod jb2008;
 pub mod lifetime;
 pub mod lightcurve;
 pub mod linalg;
@@ -130,7 +129,6 @@ pub use dsst::{
 pub use earth_radiation::{AngularResolution, KnockeEarthRadiation};
 pub use geopotential::GeoPotential;
 pub use harris_priester::{HarrisPriester, HarrisPriesterAtmosphere, harris_priester};
-pub use jb2008::{Jb2008Atmosphere, Jb2008Input, Jb2008Output, jb2008};
 pub use maneuver::{
     AccelerationSignal, ConstantThrust, EmpiricalAcceleration, Frame, HarmonicSignal,
     ImpulsiveManeuver, PolynomialSignal,

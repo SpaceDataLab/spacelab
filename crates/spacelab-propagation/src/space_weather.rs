@@ -238,12 +238,6 @@ const fn civil_from_days(z: i64) -> (i32, u32, u32) {
     (year as i32, month as u32, day as u32)
 }
 
-/// Day number since 1970-01-01 from a year and a day of year — the key the SET series are ordered
-/// and searched by.
-const fn ordinal_of(year: i32, day_of_year: u32) -> i64 {
-    days_from_civil(year, 1, 1) + day_of_year as i64 - 1
-}
-
 /// One of a day's eight 3-hourly indices, addressed by a global interval index
 /// (day ordinal × 8 + subinterval) so that a look-back crosses month and year boundaries by
 /// integer arithmetic. `days` must be ascending by date. `None` when the day is not in the feed.
@@ -349,7 +343,7 @@ pub fn sdtm_ap_history<const N: usize>(
 /// same day, and the storm kernel's response over the `ap` history ending at the interval before the
 /// sample.
 ///
-/// The conventions belong here rather than at the call site for the same reason [`jb2008_drivers`]'s
+/// The conventions belong here rather than at the call site for the same reason the JB2008 drivers'
 /// lags do: each of the three is part of the model definition, and every one of them has a plausible
 /// wrong answer in the same file. The centred 81-day mean is the quantity NRLMSISE-00 asks for and it
 /// is *not* this model's — `tools/gen_sdtm_coefficients.py` fitted the trailing one, because it is the
@@ -733,60 +727,6 @@ pub fn parse_dtcfile(text: &str) -> Vec<DstTemperatureDay> {
     out
 }
 
-/// The nine JB2008 drivers at the instant `sec` UT seconds into `year`/`day_of_year`, with the
-/// index lags the model was fitted with applied: F10 and S10 sampled one day earlier, M10 two days,
-/// Y10 five days, and each 81-day centred mean at the same lag as its daily value. `ΔTc` is taken at
-/// the UT hour containing the instant, not lagged — it is already the response, not the cause.
-///
-/// The lags belong here rather than at the call site because they are part of the model definition:
-/// JB2008 evaluated on same-day indices is a different model, and one that reads as spuriously good
-/// on a storm's rising edge.
-///
-/// Returns `None` if any lagged day, or the `ΔTc` day, is missing from the series.
-#[must_use]
-pub fn jb2008_drivers(
-    solar: &[SolarIndexDay],
-    dst: &[DstTemperatureDay],
-    year: i32,
-    day_of_year: u32,
-    sec: f64,
-) -> Option<crate::jb2008::Jb2008Input> {
-    let ordinal = days_from_civil(year, 1, 1) + i64::from(day_of_year) - 1;
-    // Both series are published ascending and are decades long, so the lookup is a binary search:
-    // a linear scan here is the difference between seconds and hours over a multi-month campaign.
-    let solar_at = |lag_days: i64| -> Option<&SolarIndexDay> {
-        solar
-            .binary_search_by(|d| ordinal_of(d.year, d.day_of_year).cmp(&(ordinal - lag_days)))
-            .ok()
-            .map(|i| &solar[i])
-    };
-    let one = solar_at(1)?;
-    let two = solar_at(2)?;
-    let five = solar_at(5)?;
-
-    let hour = if sec.is_finite() {
-        (sec / 3600.0).floor().clamp(0.0, 23.0) as usize
-    } else {
-        0
-    };
-    let today = dst
-        .binary_search_by(|d| ordinal_of(d.year, d.day_of_year).cmp(&ordinal))
-        .ok()
-        .map(|i| &dst[i])?;
-
-    Some(crate::jb2008::Jb2008Input {
-        f10: one.f10,
-        f10b: one.f81c,
-        s10: one.s10,
-        s10b: one.s81c,
-        xm10: two.m10,
-        xm10b: two.m81c,
-        y10: five.y10,
-        y10b: five.y81c,
-        dstdtc: today.dtc[hour],
-    })
-}
-
 /// Nonlinear space-weather driver features for thermospheric-density regression (feed a
 /// [`crate::density_rom::ReducedDynamics`]): `[(F + F̄)/2, Ap, ((F + F̄)/2)², √Ap, 1]`, with `F` the
 /// observed F10.7 and `F̄` its 81-day centred mean. The combined flux and its square capture the
@@ -806,8 +746,6 @@ mod tests {
     use super::*;
 
     const FIXTURE: &str = include_str!("../tests/fixtures/celestrak_sw_sample.csv");
-    const SOLFSMY: &str = include_str!("../tests/fixtures/solfsmy_validation.txt");
-    const DTCFILE: &str = include_str!("../tests/fixtures/dtcfile_validation.txt");
 
     #[test]
     fn parses_known_celestrak_rows() {
@@ -1096,44 +1034,7 @@ mod tests {
         );
     }
 
-    /// The JB2008 index files, and the lags that make them the model's drivers rather than merely
-    /// the day's numbers.
-    #[test]
-    fn the_jb2008_drivers_are_lagged_the_way_the_model_was_fitted() {
-        let solar = parse_solfsmy(SOLFSMY);
-        let dst = parse_dtcfile(DTCFILE);
-        assert!(!solar.is_empty() && !dst.is_empty());
-
-        // 2024-05-10 is day 131. F10/S10 come from day 130, M10 from 129, Y10 from 126.
-        let at = |doy: u32| {
-            solar
-                .iter()
-                .find(|d| d.year == 2024 && d.day_of_year == doy)
-                .unwrap()
-        };
-        let drivers = jb2008_drivers(&solar, &dst, 2024, 131, 7.5 * 3600.0).unwrap();
-        assert_eq!(drivers.f10, at(130).f10);
-        assert_eq!(drivers.f10b, at(130).f81c);
-        assert_eq!(drivers.s10, at(130).s10);
-        assert_eq!(drivers.s10b, at(130).s81c);
-        assert_eq!(drivers.xm10, at(129).m10);
-        assert_eq!(drivers.xm10b, at(129).m81c);
-        assert_eq!(drivers.y10, at(126).y10);
-        assert_eq!(drivers.y10b, at(126).y81c);
-
-        // ΔTc is hourly and not lagged: 07:30 UT is hour 7 of the evaluation day itself.
-        let today = dst
-            .iter()
-            .find(|d| d.year == 2024 && d.day_of_year == 131)
-            .unwrap();
-        assert_eq!(drivers.dstdtc, today.dtc[7]);
-
-        // A day whose five-day look-back runs off the front of the file has no drivers at all,
-        // rather than drivers assembled from whatever was nearest.
-        assert!(jb2008_drivers(&solar, &dst, 2018, 359, 0.0).is_none());
-    }
-
-    /// What the two JB2008 index parsers do with a line that is not a data row.
+    /// What the two Space Environment Technologies index parsers do with a line that is not a data row.
     ///
     /// Both read a file nobody in this repository writes, and both index `t[3 + i]` --- to 10 in one
     /// and to 26 in the other --- without a second bounds check, so a guard that lets a short line
@@ -1141,7 +1042,7 @@ mod tests {
     /// every `SOLFSMY` row in them carries the optional twelfth `Ssrc` field, every `DTCFILE` row
     /// carries exactly twenty-seven, and the only comment lines are prose rather than data.
     #[test]
-    fn the_jb2008_index_parsers_reject_every_shape_of_line_that_is_not_a_row() {
+    fn the_set_index_parsers_reject_every_shape_of_line_that_is_not_a_row() {
         // A commented-out data row is a comment. The `#` disqualifies it, not the field count ---
         // which is the difference between the two tests in the guard being `||` and being `&&`.
         let commented =

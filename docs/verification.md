@@ -306,7 +306,6 @@ vanishes on the horizon, where the last crown is cut.
 |---|---|---|---|---|
 | NRLMSISE-00 (gtd7/gtd7d) | Picone et al. 2002 — the released C is the specification in practice ⚠ | Brodowski reference C (Picone 2002), 17 canonical outputs | max_rel < 1e-5 | src/nrlmsise00/mod.rs |
 | NRLMSISE-00 drag wrapper | internal API contract (gtd7d + hydrostatic gradient) | underlying gtd7d value + analytic scale-height gradient | value < 1e-12 rel; gradient < 1e-6 | tests/nrlmsise00_atmosphere.rs |
-| JB2008 | Bowman et al. 2008 — the SET `JB2008.for` is the specification in practice ⚠ | canonical FORTRAN JB2008.for (Bowman/SET) + Orekit cross-check | density < 1e-6 rel; vs Orekit < 1e-12 | src/jb2008/mod.rs |
 | Harris-Priester | Harris & Priester 1962 table (Montenbruck–Gill appendix) | Orekit reference density (Montenbruck–Gill table) | max_rel < 1e-11 | src/harris_priester/mod.rs |
 | Atmospheric drag force | drag-equation definition; King-Hele Δa | King-Hele Δa; co-rotation; dissipative STM detΦ<1 | energy monotone; detΦ < 1−1e-6 | tests/drag.rs |
 
@@ -7923,8 +7922,6 @@ crates/spacelab-propagation/src/forces.rs | infra | types, traits, drivers or re
 crates/spacelab-propagation/src/gj.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/harris_priester/atmosphere.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/harris_priester/mod.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-propagation/src/jb2008/atmosphere.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-propagation/src/jb2008/mod.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/lifetime.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/maneuver.rs | physics | no re-runnable check named in the module doc
@@ -8093,7 +8090,6 @@ crates/spacelab-propagation/src/ephemeris.rs::both_bodies_reach_erfa_at_the_docu
 crates/spacelab-propagation/src/geopotential.rs::validated_against_scipy_at_degree_70 | name:scipy
 crates/spacelab-propagation/src/harris_priester/mod.rs::above_ceiling_is_zero | doc:orekit
 crates/spacelab-propagation/src/harris_priester/mod.rs::matches_orekit_reference | name:orekit
-crates/spacelab-propagation/src/jb2008/mod.rs::matches_fortran_reference | doc:orekit
 crates/spacelab-propagation/src/maneuver.rs::constant_thrust_matches_orekit | name:orekit
 crates/spacelab-propagation/src/maneuver.rs::impulse_matches_orekit | name:orekit
 crates/spacelab-propagation/src/maneuver.rs::polynomial_empirical_matches_orekit | name:orekit

@@ -292,11 +292,15 @@ best model finds the answer instead of a gap. `docs/provenance.md` holds the rea
   software" without AER's written consent, and the clause reaches "any modified version" — so even
   our own re-interpolated coefficients could not ship. Substitute: our band model fitted to HITRAN
   lines (free with citation), with the MT_CKD gap measured and recorded.
-- **SET's solar indices and HASDM.** `SOLFSMY.TXT` / `DTCFILE.TXT` carry no stated terms and the
-  project page is behind a login; the HASDM database is "for research purposes only" with
-  commercial use "only through an explicit agreement with SET". Substitute: JB2008's indices rebuilt
-  from open series to the published definitions (`plans/16` Ф18.A), and NOAA's public WAM-IPE
-  nowcast as the assimilative feed (Ф18.B); SET's files become the oracle.
+- **JB2008, SET's solar indices and HASDM.** SET's JB2008 License Agreement (2026-10-15) covers the
+  code and the index files `SOLFSMY.TXT` / `DTCFILE.TXT`: the licensee's own research and internal use
+  only, no translation except to compile and interface, no redistribution of the index files. So the
+  public tree carries no JB2008 port and no excerpt of those files, and every JB2008 number in these
+  documents was measured in the development tree. The HASDM database is "for research purposes only"
+  with commercial use "only through an explicit agreement with SET". Substitute: SDTM-1 and
+  NRLMSISE-00 with the calibration layer, and JB2008's indices rebuilt from open series to the
+  published definitions (`plans/16` Ф18.A). NOAA's public WAM-IPE nowcast, measured as a feed, does
+  not help as it stands (`docs/verification.md` §10.18).
 - **Kyoto Dst, and forecast troposphere products.** WDC Kyoto "does not allow commercial
   applications" of its indices; TU Wien's VMF *forecast* products are non-commercial. Substitute:
   GFZ's Hp30 / Hp60 (CC BY 4.0) as the storm driver, and GPT3 for a troposphere without a grid.

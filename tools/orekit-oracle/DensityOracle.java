@@ -14,10 +14,8 @@ import org.orekit.frames.Frame;
 import org.orekit.frames.FramesFactory;
 import org.orekit.models.earth.atmosphere.Atmosphere;
 import org.orekit.models.earth.atmosphere.DTM2000;
-import org.orekit.models.earth.atmosphere.JB2008;
 import org.orekit.models.earth.atmosphere.NRLMSISE00;
 import org.orekit.models.earth.atmosphere.data.CssiSpaceWeatherData;
-import org.orekit.models.earth.atmosphere.data.JB2008SpaceEnvironmentData;
 import org.orekit.time.AbsoluteDate;
 import org.orekit.time.TimeScale;
 import org.orekit.time.TimeScalesFactory;
@@ -70,16 +68,15 @@ public final class DensityOracle {
         // Same publishers, separately parsed — a driver disagreement would show up as one.
         final CssiSpaceWeatherData cssi =
                 new CssiSpaceWeatherData(CssiSpaceWeatherData.DEFAULT_SUPPORTED_NAMES);
-        final JB2008SpaceEnvironmentData set = new JB2008SpaceEnvironmentData(
-                JB2008SpaceEnvironmentData.DEFAULT_SUPPORTED_NAMES_SOLFSMY,
-                JB2008SpaceEnvironmentData.DEFAULT_SUPPORTED_NAMES_DTC);
 
         final Atmosphere[] models = {
             new NRLMSISE00(cssi, sun, earth),
-            new JB2008(set, sun, earth),
             new DTM2000(cssi, sun, earth),
         };
-        final String[] names = {"NRLMSISE-00", "JB2008", "DTM2000"};
+        final String[] names = {
+            "NRLMSISE-00",
+            "DTM2000",
+        };
 
         for (final String file : args) {
             final List<Row> rows = read(file);

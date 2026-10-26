@@ -22,7 +22,7 @@ is a finding, not a footnote.
 |---|---|---|---|
 | `spacelab-propagation/src/dtm2020/{mod,tables}.rs` | CNES `dtm2020_F107_Kp-subr.f90` and `DTM_2020_F107_Kp.dat`, from `swami-h2020-eu/mcm` | **Proprietary.** `LICENSE` in that repository: academic and non-commercial only; no modification; no dissemination "or any of its supporting data"; use is acceptance | **Must not ship as it stands.** See §1 |
 | `spacelab-propagation/src/nrlmsise00/**` | **`nrlmsise00_sub.for`**, the NRL FORTRAN by Picone, Hedin & Drob | **US Government work**, not subject to domestic copyright (17 U.S.C. §105) | **Ship. Re-based, and the re-basing is measured.** It descended from Brodowski's C, which carries **no grant of any kind** — warranty disclaimer only, GitHub `license: null`. See §2 |
-| `spacelab-propagation/src/jb2008/**` | Bruce R. Bowman's `JB2008.for`, Space Environment Technologies | **No stated terms.** The file carries no copyright, licence or distribution notice; the project page is now behind a login wall | **Ship, with the finding recorded.** See §3 |
+| `spacelab-propagation/src/jb2008/**` | Bruce R. Bowman's `JB2008.for`, Space Environment Technologies | **SET's JB2008 License Agreement** (the PDF dated 2026-10-15, read 2026-10-25): own research, educational, engineering and internal use only; no modification or translation except to compile and interface; no embedding in a library given to others | **Must not ship.** Excluded from the public tree. See §3 |
 | **28 files** — all 14 of `spacelab-propagation/src/dsst/`, `spacelab-propagation/src/{earth_radiation,spacecraft}.rs`, all 8 of `spacelab-ionosphere/src/` (the NeQuick chain), `spacelab-gnss/src/{gpt3,itu834_mapping}.rs`, `spacelab-elements/src/{brouwer_lyddane,eckstein_hechler}.rs` | Orekit (CS GROUP, formerly CS-SI) | **Apache-2.0** — `LICENSE.txt` at `CS-SI/Orekit`; copyright line read from `DSSTPropagator.java` | **Ship, with attribution owed.** See §4. The full list is in `NOTICE`, and it is 28 rather than the 15 a first pass counted — the NeQuick and GPT3 chains say "Ported from Orekit's …" in their own module docs and had not been counted |
 | `spacelab-sensors/src/{geoloc,scan}.rs` | `pyorbital.geoloc` and `pyorbital.geoloc_instrument_definitions` (pytroll) | **Apache-2.0** — GitHub licence API | **Ship, with attribution owed.** Same conditions as Orekit; in `NOTICE` |
 | `spacelab-earthvision/src/image_quality.rs` | the metric core of Satellogic's `iquaflow` | **MIT** — GitHub licence API | **Ship, with attribution owed.** In `NOTICE` |
@@ -158,18 +158,25 @@ Nothing else changed: the code is untouched, and the 17 canonical vectors pass a
 The zero-based indexing is the remaining trace of the C's convention, and an array base is not
 expression — Rust has no other option.
 
-## 3 · JB2008 — no terms either way
+## 3 · JB2008 — a licence agreement that forbids the port
 
-`JB2008.for` as served from `sol.spacenvironment.net/JB2008/code/` carries no copyright line, no
-licence, and no distribution restriction; the model is fully described in Bowman et al. (2008,
-AIAA 2008-6438). The project's index page now redirects to a login, so the terms cannot be read from
-the page that used to carry them — which is itself worth recording, because a term that appears later
-applies from the moment it is accepted, and the driver files `SOLFSMY.TXT` and `DTCFILE.TXT` that
-`tools/fetch-density-data.sh` retrieves come from the same host.
+Space Environment Technologies now serves a *JB2008 License Agreement* (the PDF on spacewx.com dated
+2026-10-15, read 2026-10-25). It covers the "Software": the source code and the index files
+`SOLFSMY.TXT` and `DTCFILE.TXT` "and any successor". It allows use only for the licensee's own
+research, educational, engineering and internal purposes (§3); forbids embedding "any portion" of it
+in a library given to third parties (§4); forbids modification or translation except to compile and
+interface (§5); and forbids redistributing the index files "in whole or in part" (§6). Outputs may be
+published with the acknowledgement it gives; commercial Outputs need a licence (§7).
 
-The position is therefore: an unencumbered file, a fully published model, and no stated grant. That is
-weaker than an explicit permissive licence and much stronger than §1. It ships, the finding is recorded
-here, and if SET publishes terms the row is revisited rather than rediscovered.
+`jb2008/` is a translation of `JB2008.for` into Rust, so §5 forbids it and §4 forbids shipping it;
+`derivations/jb2008_tables.py` extracts its tables from that file; and the two validation fixtures are
+excerpts of the index files, which §6 forbids redistributing. All four are excluded from the public
+tree (below). The earlier reading of this section — the file states no terms, so it ships — read the
+file alone, and no stated grant was never a permission.
+
+The model itself is published (Bowman et al. 2008, AIAA 2008-6438). An implementation written from the
+papers alone, with every number taken from a printed source, is a different piece of work from this
+code and is not in this repository.
 
 ## 4 · Orekit and `sgp4` — permissive, and the obligation is paperwork
 
@@ -306,7 +313,7 @@ agreement the user has to accept in person); **unread** (a claim, not a reading,
 | `celestrak` | CelesTrak: `SW-All.csv` space-weather series, GP and SupGP element sets, the ISS ground-track TLE, satellite.js | Usage policy (read 2026-09-06): rate limits — GP no more than every two hours, directories hourly, stop on a non-200 — and nothing about reuse or redistribution; no licence text exists | **ship** |
 | `vallado-sgp4-verification` | The AIAA 2006-6753 verification element sets and `tcppver.out`, Vallado's own SGP4 distribution as served by CelesTrak, plus python-sgp4's rendering of them | Published test cases of a public-domain algorithm; python-sgp4 is MIT | **ship** |
 | `gfz-hpo` | GFZ Hp30 / Hp60 / ap30 / ap60 — the Gannon-storm excerpts committed as fixtures, the **complete hourly series** (`Hp60_ap60_complete_series.txt`, 1985-01-01 →, 365 544 rows) fetched into the git-ignored cache for the `--ap60` fit of `verification.md` §10.15, and the Kp/ap feed `fetch-density-data.sh` reads | `# LICENSE: CC BY 4.0` in the file header; citation lines in the same header (Matzka et al. 2024, doi:10.5880/Hpo.0003; Yamazaki et al. 2024) | **ship+attr** |
-| `set-jb2008-indices` | Space Environment Technologies `SOLFSMY.TXT` (F10/S10/M10/Y10) and `DTCFILE.TXT` (Dst-derived ΔTc): JB2008's drivers; 25-day excerpts committed as fixtures | **No stated terms**, and the project page is behind a login (§3). The excerpts stay for the parser and the JB2008 validation tests; nothing sold consumes them — the default drivers move to open series rebuilt to the published definitions (`plans/16` Ф18.A), and SET's files become the oracle those are checked against | **restricted** |
+| `set-jb2008-indices` | Space Environment Technologies `SOLFSMY.TXT` (F10/S10/M10/Y10) and `DTCFILE.TXT` (Dst-derived ΔTc): JB2008's drivers; 25-day excerpts committed as fixtures in the development tree | SET's JB2008 License Agreement (2026-10-15, read 2026-10-25, §3): the index files are part of the licensed Software, for the licensee's own research, educational, engineering and internal use, and §6 forbids redistributing them "in whole or in part". The excerpts are excluded from the public tree, and its fetch script does not retrieve the files. Open series rebuilt to the published definitions replace them as drivers (`plans/16` Ф18.A) | **restricted** |
 | `iers-eop` | `finals2000A.all` and its excerpts (five fixtures), IERS Earth Orientation Centre; an excerpt of the EOP 20 C04 series `eopc04.1962-now`, EOP Product Centre (Paris Observatory), header verbatim — cut on 2026-10-24 from the copy `astropy-iers-data` 0.2026.10.19 ships, which its `ReadMe.eopc04` says was taken from hpiers.obspm.fr, because that host timed out and datacenter.iers.org refused the request that day | IERS products are published for free use with no licence text; attribution is by citation (IERS EOP 20 C04, Bulletin A) | **ship** |
 | `iers-leap-seconds` | `leap-seconds.list`, the IERS Earth Orientation Centre's list of leap seconds (Paris Observatory), updated through Bulletin C 72 and valid until 2027-06-28, vendored as `crates/spacelab-fa/tests/fixtures/leap-seconds.list`. Taken on 2026-10-25 from the copy the IANA time-zone database serves (`data.iana.org/time-zones/data/leap-seconds.list`), byte-identical to Fedora's `tzdata-2026e`, because hpiers.obspm.fr timed out that day. sha256 `db5a895f16853b03bfc865e8d68f9fc8710ef1740e3400c701cd46a5bbbc3433`; the file's own SHA-1 line (`#h`, over the digits of its `#$`, `#@` and data lines) matches its data | The file's own words: "COPYRIGHT STATUS OF THIS FILE … This file is in the public domain." | **ship** |
 | `naif-spice` | DE440 / DE442 short-span kernels, lunar PA kernels, the LRO SPK, from NAIF | NASA/JPL, a US Government work; fetched, never vendored | **ship** |
@@ -357,7 +364,7 @@ sdtm-reference | ship+attr | read 2026-09-14 | hosts - | paths crates/spacelab-p
 celestrak | ship | read 2026-09-06 | hosts celestrak.org | paths crates/spacelab-propagation/tests/fixtures/celestrak_sw_*.csv crates/spacelab-sgp4/tests/fixtures/omm_stations.* crates/spacelab-sgp4/tests/fixtures/supgp_paired.tle crates/spacelab/tests/fixtures/supgp_gps_paired.tle crates/spacelab-sgp4/tests/fixtures/sgp4_catalogue_oracle.txt crates/spacelab-sgp4/tests/fixtures/iss_groundtrack_skyfield.csv crates/spacelab/tests/fixtures/iss_groundtrack_eop_skyfield.csv
 vallado-sgp4-verification | ship | read 2026-09-06 | hosts - | paths crates/spacelab-sgp4/tests/fixtures/sgp4_ver_*.* crates/spacelab-sgp4/tests/fixtures/tcppver.out
 gfz-hpo | ship+attr | read 2026-09-06 | hosts kp.gfz.de | paths crates/spacelab-propagation/tests/fixtures/gfz_hp*_gannon.txt
-set-jb2008-indices | restricted | read 2026-09-06 | hosts sol.spacenvironment.net | paths crates/spacelab-propagation/tests/fixtures/solfsmy_validation.txt crates/spacelab-propagation/tests/fixtures/dtcfile_validation.txt
+set-jb2008-indices | restricted | read 2026-10-25 | hosts sol.spacenvironment.net | paths -
 iers-eop | ship | read 2026-09-06 | hosts datacenter.iers.org | paths crates/spacelab/tests/fixtures/finals2000A_*.txt crates/spacelab-eop/tests/fixtures/finals2000A_excerpt.txt crates/spacelab-eop/tests/fixtures/eopc04_excerpt.txt
 iers-leap-seconds | ship | read 2026-10-25 | hosts - | paths crates/spacelab-fa/tests/fixtures/leap-seconds.list
 naif-spice | ship | read 2026-09-06 | hosts naif.jpl.nasa.gov | paths -
@@ -411,13 +418,15 @@ a Dst-driven ΔTc rebuilt from Kyoto data (Ф18.A) is a *validation* input and n
 
 ## Not for public release
 
-Three models are kept in the development tree and are not part of the public release. The public
+Four models are kept in the development tree and are not part of the public release. The public
 tree is cut from the development tree by a script, never edited by hand.
 
 * **DTM2020.** §1's licence forbids dissemination of the code and of its coefficients, and asking
   CNES cannot fix that: the licence on offer is non-transferable, and a permissive crate is a
   sub-licence to everyone who downloads it. Commercial use is a separate question and is **not**
   resolved by excluding the module: "academic, non-commercial purposes only" binds our own use too.
+* **JB2008.** §3: SET's licence agreement forbids the translation and its distribution, and the
+  validation fixtures are excerpts of index files it forbids redistributing.
 * **NeQuick-ITU and the ITU-R P.834 mapping function.** Their data, the ITU 1°×2° MODIP grid and the
   P.834 coefficient grid (`itu-r-grids` in the data register), carry ITU copyright and no grant.
   NeQuick-G does not need them: its CCIR maps and MODIP grid are the Galileo ICD's own.
@@ -472,7 +481,6 @@ crates/spacelab-propagation/src/dsst/zonal.rs
 crates/spacelab-propagation/src/earth_radiation.rs
 crates/spacelab-propagation/src/geopotential.rs
 crates/spacelab-propagation/src/ias15.rs
-crates/spacelab-propagation/src/jb2008/mod.rs
 crates/spacelab-propagation/src/lib.rs
 crates/spacelab-propagation/src/nrlmsise00/mod.rs
 crates/spacelab-propagation/src/ocean_tide_got.rs

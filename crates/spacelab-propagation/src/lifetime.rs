@@ -4,7 +4,6 @@
 //! mission-feasibility study is bought to answer, and every ingredient for it was already in this
 //! crate: the DSST drag mean-element rates that make a decade of decay affordable to integrate
 //! ([`crate::dsst::drag`]), the empirical atmospheres ([`crate::nrlmsise00`],
-//! [`crate::jb2008`](mod@crate::jb2008),
 //! [`crate::harris_priester`](mod@crate::harris_priester)), the space-weather drivers
 //! ([`crate::space_weather`]) and the calibrated-density layer ([`crate::density_calibration`]).
 //! Nothing joined them. This does.

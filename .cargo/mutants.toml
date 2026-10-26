@@ -1024,9 +1024,9 @@ exclude_re = [
     #
     # Identical `Vec` on every input, not merely on the fixtures. The two width-guard mutants below
     # it are real gaps and are killed by
-    # `the_jb2008_index_parsers_reject_every_shape_of_line_that_is_not_a_row`: `< 11` is the bounds
+    # `the_set_index_parsers_reject_every_shape_of_line_that_is_not_a_row`: `< 11` is the bounds
     # proof for `t[10]`, `<= 11` drops the narrowest legal row, and `== 11` admits short ones.
-    "space_weather\\.rs:667:28: replace \\|\\| with && in parse_solfsmy",
+    "space_weather\\.rs:659:28: replace \\|\\| with && in parse_solfsmy",
 
     # `parse_hpo`'s guard is the third instance of the same shape, and the argument closes the same
     # way. `&&` is unsatisfiable -- the empty string does not start with `#` -- so both classes fall
@@ -1040,7 +1040,7 @@ exclude_re = [
     # Identical `Vec` on every input. The width guard below it is the real bounds proof and is
     # killed by `parse_hpo_keeps_the_row_it_can_use_and_drops_every_shape_that_is_not_data`, whose
     # fixture text carries a nine-field row: `< 9` keeps it and `<= 9` drops it.
-    "space_weather\\.rs:553:28: replace \\|\\| with && in parse_hpo",
+    "space_weather\\.rs:545:28: replace \\|\\| with && in parse_hpo",
 
     # --- crates/spacelab-propagation/src/time_variable_gravity.rs ---
     # --- Three floating tolerance ties, each unreachable on the binary grid its operands live on.
@@ -2206,83 +2206,6 @@ exclude_re = [
     # kilometres through the thermosphere and 4.9 km at its coldest, heaviest point -- the 1000 m
     # boundary is never approached, let alone landed on. Both tests assert a bound at roughly half
     # the measured floor, so the premise stays checked without becoming a change detector.
-    "jb2008/atmosphere\\.rs:65:31: replace > with >= in <impl Atmosphere for Jb2008Atmosphere<G, S>>::density",
-    "jb2008/atmosphere\\.rs:65:47: replace > with >= in <impl Atmosphere for Jb2008Atmosphere<G, S>>::density",
-    "jb2008/atmosphere\\.rs:65:37: replace && with \\|\\| in <impl Atmosphere for Jb2008Atmosphere<G, S>>::density",
-    "jb2008/atmosphere\\.rs:67:31: replace && with \\|\\| in <impl Atmosphere for Jb2008Atmosphere<G, S>>::density",
-    "jb2008/atmosphere\\.rs:67:37: replace > with >= in <impl Atmosphere for Jb2008Atmosphere<G, S>>::density",
-
-    # --- crates/spacelab-propagation/src/jb2008/mod.rs ---
-    #
-    # Fourteen of the model's own survivors. Each was applied mechanically and the whole model
-    # re-evaluated over 233 280 states -- 8 epochs across a solar cycle x 3 driver sets (quiet, mean,
-    # solar-max) x 9 latitudes x 8 right ascensions x 135 altitudes, the last being a 18.5 km grid
-    # over 90-2310 km *plus* every branch boundary hit exactly (105, 120, 200, 240, 300, 500, 600,
-    # 800, 1000, 1500, 2000). Sampling the ties is the whole point: a `>`-to-`>=` mutant can differ
-    # nowhere else, so a grid that steps over them measures nothing. Twelve of the fourteen are
-    # bit-identical on all 233 280; the two that are not are quoted with their worst residual.
-    #
-    # (a) IDEMPOTENT CLAMPS -- the mutation only widens a comparison to include the value at which
-    #     the assignment is a no-op.
-    #     `semian08`: `if fzz < 1e-6 { fzz = 1e-6 }`; `jb2008`: `if fnw > 1.0 { fnw = 1.0 }`.
-    "jb2008/mod\\.rs:175:12: replace < with <= in semian08",
-    "jb2008/mod\\.rs:330:12: replace > with >= in jb2008",
-    #
-    # (b) UNREACHABLE BRANCH BOUNDARIES. `dtsub`'s five altitude bands are tested in order and each
-    #     `else if` opens with the value the *preceding* arm already claimed: `zht > 200` is reached
-    #     only when `zht <= 200` was false, so `zht == 200` never arrives there and `>=` cannot
-    #     differ from `>`. Same for 240, 300 and 600.
-    "jb2008/mod\\.rs:258:19: replace > with >= in dtsub",
-    "jb2008/mod\\.rs:261:19: replace > with >= in dtsub",
-    "jb2008/mod\\.rs:270:19: replace > with >= in dtsub",
-    "jb2008/mod\\.rs:272:19: replace > with >= in dtsub",
-    #
-    # (c) DEAD GUARD. `semian08` returns `fzz` only after clamping it to `>= 1e-6`, so the caller's
-    #     `if fzz < 0.0` is false at every call, and so are `== 0.0` and `<= 0.0`. The guard is the
-    #     FORTRAN's and is kept for lineage, not because it can fire.
-    "jb2008/mod\\.rs:520:16: replace < with == in jb2008",
-    "jb2008/mod\\.rs:520:16: replace < with <= in jb2008",
-    #
-    # (d) EXACT ALGEBRAIC IDENTITIES.
-    #     504:9 -- `* sgn` -> `/ sgn` where `sgn` is literally `if lat >= 0 { 1.0 } else { -1.0 }`;
-    #     both x/1 == x*1 and x/(-1) == x*(-1) are exact in IEEE-754, for every x including zeros,
-    #     infinities and NaN payloads.
-    #     497:24 -- `capphi = trash - trunc(trash)` -> `+`. The two differ by `2*trunc(trash)`, always
-    #     an even integer, and `capphi` is used only as `sin(2*pi*capphi + 1.72)`, which is invariant
-    #     under a whole number of turns. Exact in R; in f64 the argument reduction is not, and it
-    #     shows: 5470 of 233 280 densities differ, worst 1.463e-14 relative -- 66 times inside the
-    #     1e-12 band `matches_fortran_reference` already holds the model to against Orekit.
-    "jb2008/mod\\.rs:504:9: replace \\* with / in jb2008",
-    "jb2008/mod\\.rs:497:24: replace - with \\+ in jb2008",
-    #
-    # (e) NEGLIGIBLE-TERM AND DEGENERATE-INTERVAL EQUIVALENCES, each measured rather than argued.
-    #     423:25 -- below 105 km hydrogen is set 25 e-folds under helium, so `aln[4] - 25.0`
-    #     -> `aln[4] / 25.0` moves a species whose share of the total mass density is ~1e-19. Zero of
-    #     233 280 densities change by even one ulp.
-    #     451:31 -- picks the Newton-Cotes stride for the 500 km-to-altitude leg, `R3` above 500 km
-    #     and `R2` at or below. At exactly 500 km that leg is empty: `al = ln(500/500) = 0`, so
-    #     `n_steps(0, r) = 1` for either stride, `zr = e^0 = 1`, `dz = 0`, and the sum is 0 either
-    #     way. Confirmed with 500.0 km sampled exactly -- 0 of 233 280 differ.
-    #     510:10 -- `z` is the last Newton-Cotes node, a product of `exp(al/n)` factors, and the gate
-    #     `z < 2000` can only differ at `z == 2000.0` exactly. 0 of 233 280 differ with 2000.0 km
-    #     sampled exactly; the node lands on the round number at none of them.
-    #     545:35 -- the 1000-1500 km cubic is built to meet the >=1500 km linear fit in value at
-    #     1500 km, so `< 1500` -> `<= 1500` swaps two spellings of the same number. This one is *not*
-    #     bit-identical: 1152 of 233 280 differ (all of them at exactly 1500.0 km), worst 7.342e-16
-    #     relative -- about 3 ulp, the cost of a different association order.
-    "jb2008/mod\\.rs:423:25: replace - with / in jb2008",
-    "jb2008/mod\\.rs:451:31: replace > with >= in jb2008",
-    "jb2008/mod\\.rs:510:10: replace < with <= in jb2008",
-    "jb2008/mod\\.rs:545:35: replace < with <= in density_correction",
-
-    # `CDT[1]`, the one slot of the C block that `jb2008` never reads. The FORTRAN `DTSUB` takes the
-    # second term of the DTC200DZ sum from `B(2)`, not `C(2)`, and `mod.rs:205` follows it literally
-    # with `BDT[1] * f`; the two carry the same value (`-0.512114909e+01`) and the table keeps the
-    # `C` slot only so its indices stay 1:1 with the FORTRAN array. `CDT[1]` therefore occurs in the
-    # crate exactly once, inside the comment at `mod.rs:196` that records this. No input can reach
-    # it, so no test can separate its sign — closing it means reading `CDT[1]` where the reference
-    # reads `B(2)`, which would be the wrong model.
-    "jb2008/tables\\.rs:30:48: delete -",
 
     # `exp_so3`'s small-angle branch: the threshold itself and the two Taylor corrections inside it.
     # All four are unrepresentable-difference equivalences, verified in f64 rather than argued.
@@ -5191,7 +5114,7 @@ exclude_re = [
     # Neither endpoint moves again, so the returned `Lifetime` is identical and only the cost is
     # not: 2 100 propagations where the guard needs about 50. Termination is bounded either way by
     # the counted loop, which is what makes this a cost mutant and not a hang.
-    "lifetime\\.rs:465:23: replace \\|\\| with && in refine",
+    "lifetime\\.rs:464:23: replace \\|\\| with && in refine",
 
     # --- `sgp4/tle.rs`. A sign test on a value two early returns have already made finite and
     # non-zero.

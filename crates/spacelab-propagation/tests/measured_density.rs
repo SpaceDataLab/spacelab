@@ -86,21 +86,16 @@ use std::path::{Path, PathBuf};
 
 use spacelab_propagation::density_calibration::{DensityCorrection, DensitySample};
 use spacelab_propagation::density_data::{DensityObservation, TimeScale, parse_density};
-use spacelab_propagation::ephemeris::{AnalyticSun, Ephemeris};
 use spacelab_propagation::sdtm::{self, DensityUncertainty, SdtmDrivers, SdtmPoint, coefficients};
-use spacelab_propagation::space_weather::{
-    self, DstTemperatureDay, SolarIndexDay, SpaceWeatherDay,
-};
+use spacelab_propagation::space_weather::{self, SpaceWeatherDay};
 use spacelab_propagation::wam_ipe::WamIpeField;
-use spacelab_propagation::{Nrlmsise00Flags, Nrlmsise00Input, gtd7d, jb2008};
+use spacelab_propagation::{Nrlmsise00Flags, Nrlmsise00Input, gtd7d};
 
 const GRACE_FO_QUIET: &str = include_str!("fixtures/gracefo_density_20190101.txt");
 const GRACE_FO_STORM: &str = include_str!("fixtures/gracefo_density_20240510.txt");
 const CELESTRAK: &str = include_str!("fixtures/celestrak_sw_validation.csv");
-const SOLFSMY: &str = include_str!("fixtures/solfsmy_validation.txt");
-const DTCFILE: &str = include_str!("fixtures/dtcfile_validation.txt");
 
-/// WGS84 flattening, for the geodetic → geocentric latitude JB2008 wants.
+/// WGS84 flattening, for geodetic → geocentric conversions.
 const FLATTENING: f64 = 1.0 / 298.257_223_563;
 /// Both committed fixture days are GRACE-FO C.
 const GRACE_FO: &str = "GRACE-FO C (accelerometer)";
@@ -122,7 +117,6 @@ const MJD_AT_UNIX_EPOCH: f64 = 40587.0;
 enum Model {
     Nrlmsise00StormArray,
     Nrlmsise00DailyAp,
-    Jb2008,
     Sdtm1,
 }
 
@@ -131,7 +125,6 @@ impl Model {
     const ALL: &[Self] = &[
         Self::Nrlmsise00StormArray,
         Self::Nrlmsise00DailyAp,
-        Self::Jb2008,
         Self::Sdtm1,
     ];
     const COUNT: usize = Self::ALL.len();
@@ -144,7 +137,6 @@ impl Model {
         match self {
             Self::Nrlmsise00StormArray => "NRLMSISE-00 ap[]",
             Self::Nrlmsise00DailyAp => "NRLMSISE-00 Ap",
-            Self::Jb2008 => "JB2008",
             Self::Sdtm1 => "SDTM-1 (in sample)",
         }
     }
@@ -183,6 +175,23 @@ impl Evaluation {
     }
 }
 
+/// The space-weather series the models read, borrowed for one campaign.
+#[derive(Clone, Copy)]
+struct Drivers<'a> {
+    days: &'a [SpaceWeatherDay],
+}
+
+/// The series a [`Drivers`] borrows.
+struct DriverSeries {
+    days: Vec<SpaceWeatherDay>,
+}
+
+impl DriverSeries {
+    fn view(&self) -> Drivers<'_> {
+        Drivers { days: &self.days }
+    }
+}
+
 /// Proleptic-Gregorian day number since 1970-01-01 (Howard Hinnant's `days_from_civil`) — the key
 /// the space-weather feed is searched on and the base of the modified Julian date.
 fn days_since_1970(year: i32, month: u32, day: u32) -> i64 {
@@ -198,16 +207,11 @@ fn days_since_1970(year: i32, month: u32, day: u32) -> i64 {
 /// Evaluate all four model configurations at one observation, or `None` when a driver the instant
 /// needs is not in the feed — the boundary at which a missing index becomes a missing row rather
 /// than a fabricated one.
-fn evaluate(
-    o: &DensityObservation,
-    satellite: &'static str,
-    days: &[SpaceWeatherDay],
-    solar: &[SolarIndexDay],
-    dst: &[DstTemperatureDay],
-) -> Option<Evaluation> {
+fn evaluate(o: &DensityObservation, satellite: &'static str, d: Drivers<'_>) -> Option<Evaluation> {
     if !o.nominal || o.density <= 0.0 {
         return None;
     }
+    let days = d.days;
     let sw = space_weather::find(days, o.year, o.month, o.day)?;
     // Every model takes yesterday's flux, so the previous day has to be in the feed too.
     let previous = {
@@ -218,7 +222,6 @@ fn evaluate(
     let ap_array =
         space_weather::nrlmsise_ap_array(days, o.year, o.month, o.day, o.seconds_of_day)?;
     let doy = o.day_of_year();
-    let jb_drivers = space_weather::jb2008_drivers(solar, dst, o.year, doy, o.seconds_of_day)?;
 
     let altitude_km = o.altitude / 1000.0;
     let mjd = MJD_AT_UNIX_EPOCH
@@ -247,29 +250,6 @@ fn evaluate(
     let rho_msis_array = gtd7d(&msis_input, &storm_flags).d[5] * 1000.0;
     let rho_msis_daily = gtd7d(&msis_input, &Nrlmsise00Flags::default()).d[5] * 1000.0;
 
-    // JB2008. Only the hour angle `sat_ra − sun_ra` and the solar declination enter, so the hour
-    // angle is taken straight from the product's own local solar time (12 h at the sub-solar
-    // meridian) and the Sun's right ascension is left at zero — no sidereal-time chain, and no way
-    // to disagree with the local solar time the measurement is filed under.
-    let sun = AnalyticSun {
-        epoch_j2000_seconds: (mjd - 51_544.5) * 86_400.0,
-    }
-    .position(0.0);
-    let sun_dec = (sun[2] / (sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]).sqrt()).asin();
-    let hour_angle = (o.local_solar_time - 12.0) * (std::f64::consts::PI / 12.0);
-    let one_minus_f = 1.0 - FLATTENING;
-    let geocentric_latitude = (one_minus_f * one_minus_f * o.latitude.tan()).atan();
-    let rho_jb = jb2008(
-        mjd,
-        0.0,
-        sun_dec,
-        hour_angle,
-        geocentric_latitude,
-        altitude_km,
-        &jb_drivers,
-    )
-    .rho;
-
     // SDTM-1, ours — through the same entry point an operational caller uses, so that this campaign
     // scores the conventions the library applies rather than a second copy of them. Those are
     // yesterday's F10.7, the *trailing* 81-day mean, and the kernel's response to the `ap` history
@@ -293,7 +273,7 @@ fn evaluate(
         &sdtm_drivers,
     );
 
-    let modelled = [rho_msis_array, rho_msis_daily, rho_jb, rho_ours];
+    let modelled = [rho_msis_array, rho_msis_daily, rho_ours];
     if modelled.iter().any(|r| !r.is_finite() || *r <= 0.0) {
         return None;
     }
@@ -355,16 +335,10 @@ fn fit_of(model: Model, e: &[Evaluation]) -> Fit {
 }
 
 /// Parse a density file and evaluate every usable row of it.
-fn evaluations(
-    density: &str,
-    satellite: &'static str,
-    days: &[SpaceWeatherDay],
-    solar: &[SolarIndexDay],
-    dst: &[DstTemperatureDay],
-) -> Vec<Evaluation> {
+fn evaluations(density: &str, satellite: &'static str, d: Drivers<'_>) -> Vec<Evaluation> {
     parse_density(density)
         .iter()
-        .filter_map(|o| evaluate(o, satellite, days, solar, dst))
+        .filter_map(|o| evaluate(o, satellite, d))
         .collect()
 }
 
@@ -379,16 +353,10 @@ fn satellite_of(file_name: &str) -> &'static str {
     }
 }
 
-fn fixture_drivers() -> (
-    Vec<SpaceWeatherDay>,
-    Vec<SolarIndexDay>,
-    Vec<DstTemperatureDay>,
-) {
-    (
-        space_weather::parse_space_weather(CELESTRAK),
-        space_weather::parse_solfsmy(SOLFSMY),
-        space_weather::parse_dtcfile(DTCFILE),
-    )
+fn fixture_drivers() -> DriverSeries {
+    DriverSeries {
+        days: space_weather::parse_space_weather(CELESTRAK),
+    }
 }
 
 fn report(label: &str, set: &[Evaluation]) {
@@ -413,9 +381,10 @@ fn report(label: &str, set: &[Evaluation]) {
 /// wrong index lag or a dropped driver moves a number out of its band.
 #[test]
 fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storming() {
-    let (days, solar, dst) = fixture_drivers();
-    let quiet = evaluations(GRACE_FO_QUIET, GRACE_FO, &days, &solar, &dst);
-    let storm = evaluations(GRACE_FO_STORM, GRACE_FO, &days, &solar, &dst);
+    let series = fixture_drivers();
+    let d = series.view();
+    let quiet = evaluations(GRACE_FO_QUIET, GRACE_FO, d);
+    let storm = evaluations(GRACE_FO_STORM, GRACE_FO, d);
     assert_eq!(quiet.len(), 720, "every fixture row is usable");
     assert_eq!(storm.len(), 720);
     report("quiet 2019-01-01", &quiet);
@@ -426,11 +395,7 @@ fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storm
     // make. SDTM-1 is excluded because it was fitted on these files: its bias is 0.925 quiet and
     // 1.235 storm, which is a statement about the fit and not about the thermosphere.
     for (label, set) in [("quiet", &quiet), ("storm", &storm)] {
-        for m in [
-            Model::Nrlmsise00StormArray,
-            Model::Nrlmsise00DailyAp,
-            Model::Jb2008,
-        ] {
+        for m in [Model::Nrlmsise00StormArray, Model::Nrlmsise00DailyAp] {
             let f = fit_of(m, set);
             assert!(f.bias > 1.0, "{} is not high on the {label} day", m.name());
         }
@@ -445,26 +410,18 @@ fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storm
         "NRLMSISE-00 quiet bias {}",
         msis_quiet.bias
     );
-    assert!(
-        (1.25..1.45).contains(&by(Model::Jb2008, &quiet).bias),
-        "JB2008 quiet bias {}",
-        by(Model::Jb2008, &quiet).bias
-    );
-
-    // The storm day. JB2008 is the only one of the three whose geomagnetic driver is derived from
-    // Dst rather than from a planetary range index, and it is the only one that stays within 15 %.
-    assert!(
-        (1.05..1.25).contains(&by(Model::Jb2008, &storm).bias),
-        "JB2008 storm bias {}",
-        by(Model::Jb2008, &storm).bias
-    );
 
     // The same two days on the metric the density-modelling literature reports. The ordering is the
     // gated claim, not the individual values: whatever a refit does to the biases, a model whose bias
     // is a factor of two cannot have the smaller mean absolute error.
     for (label, set) in [("quiet", &quiet), ("storm", &storm)] {
         let msis = fit_of(Model::Nrlmsise00StormArray, set).mape;
-        for m in [Model::Jb2008, Model::Sdtm1] {
+        // Every model but NRLMSISE-00 itself, in either configuration.
+        for m in Model::ALL
+            .iter()
+            .copied()
+            .filter(|m| !matches!(m, Model::Nrlmsise00StormArray | Model::Nrlmsise00DailyAp))
+        {
             let other = fit_of(m, set).mape;
             assert!(
                 other < msis,
@@ -517,9 +474,10 @@ fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storm
 /// generator's, on a mission held out entirely (`docs/verification.md` §10.12).
 #[test]
 fn the_shipped_interval_covers_what_it_says_it_covers() {
-    let (days, solar, dst) = fixture_drivers();
-    let quiet = evaluations(GRACE_FO_QUIET, GRACE_FO, &days, &solar, &dst);
-    let storm = evaluations(GRACE_FO_STORM, GRACE_FO, &days, &solar, &dst);
+    let series = fixture_drivers();
+    let d = series.view();
+    let quiet = evaluations(GRACE_FO_QUIET, GRACE_FO, d);
+    let storm = evaluations(GRACE_FO_STORM, GRACE_FO, d);
     let sample = |set: &[Evaluation]| -> Vec<(f64, f64, SdtmDrivers)> {
         set.iter()
             .map(|e| (e.modelled[Model::Sdtm1.index()], e.measured, e.sdtm))
@@ -571,9 +529,10 @@ fn the_shipped_interval_covers_what_it_says_it_covers() {
 /// storm, against 2.019 / 1.235 and 2.087 / 1.346 here.
 #[test]
 fn the_three_hourly_ap_array_is_what_carries_the_storm() {
-    let (days, solar, dst) = fixture_drivers();
-    let quiet = evaluations(GRACE_FO_QUIET, GRACE_FO, &days, &solar, &dst);
-    let storm = evaluations(GRACE_FO_STORM, GRACE_FO, &days, &solar, &dst);
+    let series = fixture_drivers();
+    let d = series.view();
+    let quiet = evaluations(GRACE_FO_QUIET, GRACE_FO, d);
+    let storm = evaluations(GRACE_FO_STORM, GRACE_FO, d);
 
     // A quiet day has no storm history, so the two drivers must agree there. They differ by 0.7 %,
     // which is the 3-hourly `ap` wandering between 2 and 5 around a daily average of 5.
@@ -645,12 +604,18 @@ fn the_three_hourly_ap_array_is_what_carries_the_storm() {
 /// the quiet day — fitting four coefficients to half a day costs more in variance than it recovers.
 #[test]
 fn the_sun_fixed_calibration_removes_the_bias_out_of_sample() {
-    let (days, solar, dst) = fixture_drivers();
+    let series = fixture_drivers();
+    let d = series.view();
     for (label, text) in [("quiet", GRACE_FO_QUIET), ("storm", GRACE_FO_STORM)] {
-        let all = evaluations(text, GRACE_FO, &days, &solar, &dst);
+        let all = evaluations(text, GRACE_FO, d);
         let (train, test) = all.split_at(all.len() / 2);
 
-        for m in [Model::Nrlmsise00StormArray, Model::Jb2008] {
+        // The models fitted elsewhere, NRLMSISE-00 once.
+        for m in Model::ALL
+            .iter()
+            .copied()
+            .filter(|m| !matches!(m, Model::Nrlmsise00DailyAp | Model::Sdtm1))
+        {
             let samples: Vec<DensitySample> = train
                 .iter()
                 .map(|e| DensitySample {
@@ -1379,13 +1344,11 @@ fn every_downloaded_month_stratified_by_flux_and_storm_level() {
     const DECIMATION: usize = 6;
 
     let dir = Path::new("../../data/validation/density");
-    let days = space_weather::parse_space_weather(
-        &std::fs::read_to_string(dir.join("SW-All.csv")).unwrap(),
-    );
-    let solar =
-        space_weather::parse_solfsmy(&std::fs::read_to_string(dir.join("SOLFSMY.TXT")).unwrap());
-    let dst =
-        space_weather::parse_dtcfile(&std::fs::read_to_string(dir.join("DTCFILE.TXT")).unwrap());
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+    let series = DriverSeries {
+        days: space_weather::parse_space_weather(&read("SW-All.csv")),
+    };
+    let d = series.view();
 
     let mut files: Vec<_> = std::fs::read_dir(dir)
         .unwrap()
@@ -1427,7 +1390,7 @@ fn every_downloaded_month_stratified_by_flux_and_storm_level() {
         let one: Vec<Evaluation> = observations
             .iter()
             .step_by(DECIMATION)
-            .filter_map(|o| evaluate(o, satellite, &days, &solar, &dst))
+            .filter_map(|o| evaluate(o, satellite, d))
             .collect();
         print!("{name:<28} {:>7}", one.len());
         for &m in Model::ALL {
@@ -1475,7 +1438,7 @@ fn every_downloaded_month_stratified_by_flux_and_storm_level() {
     mape_against_the_published_band(&all);
     held_out_by_satellite_month(&arcs);
     the_interval_covers_every_regime(&all);
-    the_storm_assessment(&all, &days);
+    the_storm_assessment(&all, d.days);
 }
 
 /// The shipped interval's coverage, per regime, over the whole campaign.
@@ -1583,7 +1546,7 @@ fn held_out_by_satellite_month(arcs: &[(String, Vec<Evaluation>)]) {
         "\n== held-out calibration, MAPE (leave-one-out over {} satellite-months) ==",
         arcs.len()
     );
-    for m in [Model::Nrlmsise00StormArray, Model::Jb2008, Model::Sdtm1] {
+    for m in [Model::Nrlmsise00StormArray, Model::Sdtm1] {
         let (mut base_abs, mut cal_abs, mut n) = (0.0_f64, 0.0_f64, 0usize);
         for (held, rows) in arcs {
             let train: Vec<DensitySample> = arcs
@@ -1642,7 +1605,18 @@ const WAM_IPE_MONTHS: [&str; 2] = ["2024_05", "2025_06"];
 const WAM_SPHERE_KM: f64 = 6371.2;
 const WGS84_A_KM: f64 = 6378.137;
 /// The base models the nowcast is fitted over: the two public empirical models, and ours.
-const WAM_BASES: [Model; 3] = [Model::Nrlmsise00StormArray, Model::Jb2008, Model::Sdtm1];
+const WAM_BASE_LIST: &[Model] = &[Model::Nrlmsise00StormArray, Model::Sdtm1];
+const WAM_BASE_COUNT: usize = WAM_BASE_LIST.len();
+/// [`WAM_BASE_LIST`] as an array, so that a per-base result is a fixed-size value.
+const WAM_BASES: [Model; WAM_BASE_COUNT] = {
+    let mut bases = [Model::Sdtm1; WAM_BASE_COUNT];
+    let mut i = 0;
+    while i < WAM_BASE_COUNT {
+        bases[i] = WAM_BASE_LIST[i];
+        i += 1;
+    }
+    bases
+};
 /// Every other ring and longitude of the 2° × 4° grid: 45 × 45 nodes for at most 25 coefficients.
 const WAM_STRIDE: usize = 2;
 /// The trailing window an hour's correction is taken relative to in the anomaly columns, and the
@@ -1838,16 +1812,14 @@ struct HourResult {
     /// `(satellite, row, [ln ρ geodetic, ln ρ spherical])`.
     values: Vec<(usize, usize, [f64; 2])>,
     /// `(satellite, one per base)`.
-    fits: Vec<(usize, [Corrections; 3])>,
+    fits: Vec<(usize, [Corrections; WAM_BASE_COUNT])>,
 }
 
 fn wam_ipe_hour(
     hour: i64,
     path: &Path,
     satellites: &[Vec<Evaluation>],
-    days: &[SpaceWeatherDay],
-    solar: &[SolarIndexDay],
-    dst: &[DstTemperatureDay],
+    d: Drivers<'_>,
 ) -> HourResult {
     let field = WamIpeField::parse(&std::fs::read(path).unwrap()).unwrap();
     if field.holes() > 0 {
@@ -1893,7 +1865,7 @@ fn wam_ipe_hour(
                     .entry(key)
                     .or_insert_with(|| {
                         let node = node_observation(t, shell, lat.to_radians(), lon);
-                        evaluate(&node, "", days, solar, dst)
+                        evaluate(&node, "", d)
                     })
                     .map_or(f64::NAN, |x| x.modelled[m.index()])
             });
@@ -1906,35 +1878,18 @@ fn wam_ipe_hour(
 
 /// The driver rows within `before` days ahead of and five days after a month, so that the linear
 /// searches every evaluation makes run over a season rather than seventy years.
-fn drivers_near(
-    year: i32,
-    month: u32,
-    before: i64,
-    (days, solar, dst): (&[SpaceWeatherDay], &[SolarIndexDay], &[DstTemperatureDay]),
-) -> (
-    Vec<SpaceWeatherDay>,
-    Vec<SolarIndexDay>,
-    Vec<DstTemperatureDay>,
-) {
+fn drivers_near(year: i32, month: u32, before: i64, all: Drivers<'_>) -> DriverSeries {
     let start = days_since_1970(year, month, 1) - before;
     let end = days_since_1970(year, month, 1) + 36;
     let inside = |d: i64| (start..end).contains(&d);
-    let doy = |y: i32, n: u32| days_since_1970(y, 1, 1) + i64::from(n) - 1;
-    (
-        days.iter()
+    DriverSeries {
+        days: all
+            .days
+            .iter()
             .filter(|d| inside(days_since_1970(d.year, d.month, d.day)))
             .copied()
             .collect(),
-        solar
-            .iter()
-            .filter(|d| inside(doy(d.year, d.day_of_year)))
-            .copied()
-            .collect(),
-        dst.iter()
-            .filter(|d| inside(doy(d.year, d.day_of_year)))
-            .copied()
-            .collect(),
-    )
+    }
 }
 
 /// The columns every WAM-IPE table reports, in the order [`wam_ipe_row`] fills them: the bases,
@@ -1957,7 +1912,11 @@ fn wam_ipe_columns() -> Vec<String> {
 
 /// One hour's contribution to a row: `ln ρ` under both readings, and per base the correction to
 /// WAM-IPE's level and to its anomaly.
-type HourValues<'a> = ([f64; 2], &'a [Corrections; 3], &'a [Corrections; 3]);
+type HourValues<'a> = (
+    [f64; 2],
+    &'a [Corrections; WAM_BASE_COUNT],
+    &'a [Corrections; WAM_BASE_COUNT],
+);
 
 /// One observation's `ρ/ρ_measured` in every column, a fraction `w` of the way from the hour
 /// `before` to the hour `after`.
@@ -1980,17 +1939,11 @@ fn wam_ipe_row(e: &Evaluation, w: f64, before: HourValues<'_>, after: HourValues
     row
 }
 
-type Drivers<'a> = (
-    &'a [SpaceWeatherDay],
-    &'a [SolarIndexDay],
-    &'a [DstTemperatureDay],
-);
-
 /// Every hour of a month, split across the machine's threads.
 fn wam_ipe_month_hours(
     month_hours: &[(i64, &PathBuf)],
     satellites: &[Vec<Evaluation>],
-    (days, solar, dst): Drivers<'_>,
+    d: Drivers<'_>,
 ) -> Vec<HourResult> {
     let threads = std::thread::available_parallelism().map_or(4, NonZeroUsize::get);
     let chunk = month_hours.len().div_ceil(threads).max(1);
@@ -2000,7 +1953,7 @@ fn wam_ipe_month_hours(
             .map(|part| {
                 scope.spawn(move || {
                     part.iter()
-                        .map(|(h, p)| wam_ipe_hour(*h, p, satellites, days, solar, dst))
+                        .map(|(h, p)| wam_ipe_hour(*h, p, satellites, d))
                         .collect::<Vec<_>>()
                 })
             })
@@ -2035,7 +1988,8 @@ fn score_wam_ipe_month(
     const DECIMATION: usize = 6;
     let year: i32 = month[..4].parse().unwrap();
     let mon: u32 = month[5..].parse().unwrap();
-    let (days, solar, dst) = drivers_near(year, mon, 120, all);
+    let near = drivers_near(year, mon, 120, all);
+    let d = near.view();
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .filter_map(Result::ok)
@@ -2056,7 +2010,7 @@ fn score_wam_ipe_month(
             parse_density(&std::fs::read_to_string(dir.join(n)).unwrap())
                 .iter()
                 .step_by(DECIMATION)
-                .filter_map(|o| evaluate(o, satellite_of(n), &days, &solar, &dst))
+                .filter_map(|o| evaluate(o, satellite_of(n), d))
                 .collect()
         })
         .collect();
@@ -2068,8 +2022,8 @@ fn score_wam_ipe_month(
         .map(|(h, p)| (*h, p))
         .collect();
     let mut at_hour: HashMap<(usize, usize, i64), [f64; 2]> = HashMap::new();
-    let mut fitted: HashMap<(usize, i64), [Corrections; 3]> = HashMap::new();
-    for r in wam_ipe_month_hours(&month_hours, &satellites, (&days, &solar, &dst)) {
+    let mut fitted: HashMap<(usize, i64), [Corrections; WAM_BASE_COUNT]> = HashMap::new();
+    for r in wam_ipe_month_hours(&month_hours, &satellites, d) {
         for (s, n, v) in r.values {
             at_hour.insert((s, n, r.hour), v);
         }
@@ -2080,9 +2034,9 @@ fn score_wam_ipe_month(
 
     // Each hour's correction less the mean of those fitted in the trailing window before it, where
     // the window holds enough of them.
-    let mut anomaly: HashMap<(usize, i64), [Corrections; 3]> = HashMap::new();
+    let mut anomaly: HashMap<(usize, i64), [Corrections; WAM_BASE_COUNT]> = HashMap::new();
     for (&(s, hour), now) in &fitted {
-        let trailing: Vec<&[Corrections; 3]> = (1..=WAM_ANOMALY_HOURS)
+        let trailing: Vec<&[Corrections; WAM_BASE_COUNT]> = (1..=WAM_ANOMALY_HOURS)
             .filter_map(|k| fitted.get(&(s, hour - k * 3600)))
             .collect();
         if trailing.len() >= WAM_ANOMALY_MIN_HOURS {
@@ -2144,13 +2098,13 @@ fn score_wam_ipe_month(
 fn wam_ipe_against_the_accelerometers_alone_and_as_a_calibration_input() {
     let dir = Path::new("../../data/validation/density");
     let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
-    let days = space_weather::parse_space_weather(&read("SW-All.csv"));
-    let solar = space_weather::parse_solfsmy(&read("SOLFSMY.TXT"));
-    let dst = space_weather::parse_dtcfile(&read("DTCFILE.TXT"));
+    let series = DriverSeries {
+        days: space_weather::parse_space_weather(&read("SW-All.csv")),
+    };
     let hours = wam_ipe_hours();
     let mut ratios: BTreeMap<(String, usize), Vec<f64>> = BTreeMap::new();
     for month in WAM_IPE_MONTHS {
-        score_wam_ipe_month(month, dir, (&days, &solar, &dst), &hours, &mut ratios);
+        score_wam_ipe_month(month, dir, series.view(), &hours, &mut ratios);
     }
 
     let mut groups: Vec<String> = ratios.keys().map(|(g, _)| g.clone()).collect();

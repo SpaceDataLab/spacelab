@@ -124,8 +124,6 @@ done
 # and cover the whole span, so re-fetching them is how they stay in step with the data above.
 drivers=(
   "SW-All.csv|https://celestrak.org/SpaceData/SW-All.csv|F10.7 and 3-hourly ap, CelesTrak"
-  "SOLFSMY.TXT|https://sol.spacenvironment.net/JB2008/indices/SOLFSMY.TXT|F10/S10/M10/Y10 solar indices, Space Environment Technologies"
-  "DTCFILE.TXT|https://sol.spacenvironment.net/JB2008/indices/DTCFILE.TXT|hourly Dst-derived exospheric temperature change, Space Environment Technologies"
   "Hp30_ap30_complete_series.txt|https://kp.gfz.de/app/files/Hp30_ap30_complete_series.txt|Hp30/ap30 since 1985, GFZ Helmholtz Centre for Geosciences"
   "Hp60_ap60_complete_series.txt|https://kp.gfz.de/app/files/Hp60_ap60_complete_series.txt|Hp60/ap60 since 1985, GFZ Helmholtz Centre for Geosciences"
 )

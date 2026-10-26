@@ -28,7 +28,7 @@ timeout=$(grep -c . "$out/timeout.txt" 2>/dev/null || echo 0)"
 }
 
 # Phase 2 -- the never-run numerical blocks, cheapest first so a result arrives early.
-run atmospheres $SRC/harris_priester/*.rs $SRC/jb2008/*.rs
+run atmospheres $SRC/harris_priester/*.rs
 run nrlmsise $SRC/nrlmsise00/*.rs
 run density $SRC/density_calibration.rs $SRC/density_data.rs $SRC/density_rom.rs $SRC/space_weather.rs
 run models $SRC/spacecraft.rs $SRC/drag_coefficient.rs $SRC/maneuver.rs $SRC/attitude.rs \
@@ -36,8 +36,7 @@ run models $SRC/spacecraft.rs $SRC/drag_coefficient.rs $SRC/maneuver.rs $SRC/att
 
 # Class A -- machine-generated tables. One run each for the record; the justification is the
 # generator's own oracle, not this count.
-run tables_small $SRC/rkn1210_consts.rs $SRC/dop853_consts.rs $SRC/tide_step2_tables.rs \
-    $SRC/jb2008/tables.rs
+run tables_small $SRC/rkn1210_consts.rs $SRC/dop853_consts.rs $SRC/tide_step2_tables.rs
 run tables_tides $SRC/ocean_tide_fes2004.rs
 run tables_nrlmsise $SRC/nrlmsise00/tables.rs
 run tables_geopotential $SRC/geopotential_coeffs.rs

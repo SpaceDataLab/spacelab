@@ -1070,7 +1070,7 @@ def main() -> None:
     parser.add_argument(
         "--centred-mean",
         action="store_true",
-        help="fit on the 81-day *centred* F10.7 mean (the NRLMSISE-00 / JB2008 convention) instead of "
+        help="fit on the 81-day *centred* F10.7 mean (NRLMSISE-00's convention) instead of "
         "the trailing one, which is the only one an operational caller has",
     )
     parser.add_argument(

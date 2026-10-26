@@ -180,7 +180,14 @@ grant was never a permission.
 
 The model itself is published (Bowman et al. 2008, AIAA 2008-6438). An implementation written from the
 papers alone, with every number taken from a printed source, is a different piece of work from this
-code and is not in this repository.
+code. `spacelab-propagation/src/jacchia_bowman/` is that implementation (`plans/17` Ф18.A′, 2026-10-26):
+a census mapped every number the model needs to the page that prints it, or marked it "code only"
+without recording its value; a fresh agent whose only inputs were the five papers (Jacchia 1970 and
+1971, Bowman et al. 2008 ×2, Tobiska et al. 2008) and that census wrote the model, with no access to
+SET's file, the deleted translation or any other implementation. The code-only items are left out.
+`PROVENANCE.md` beside the module gives every number's document, page and equation. It is held out of
+the public tree (below) until it is measured against the TU Delft densities; that measurement, not
+this paragraph, decides whether it ships.
 
 ## 4 · Orekit and `sgp4` — permissive, and the obligation is paperwork
 

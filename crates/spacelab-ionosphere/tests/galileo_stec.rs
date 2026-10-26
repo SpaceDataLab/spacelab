@@ -84,6 +84,11 @@ fn the_stec_matches_the_jrc_reference_in_every_month() {
 /// 39 of the 108 differ from it by more than the 0.005 TECU rounding, up to 0.038 TECU (medium
 /// solar activity, receiver at 40.19 E, 3.00 S). This is a check on the fixture's April rows
 /// against the publication, not a tighter claim than the JRC oracle above.
+///
+/// The table is Annex E of issue 1.2, pp. 49–51: E.1 high solar activity on pp. 49–50, E.2
+/// medium on pp. 50–51, E.3 low on p. 51, 36 rows each (PDF sha256 `15d22708…be334c9b2`). All
+/// 108 rows of the fixture's `icd_table_stec_tecu` column, inputs and printed STEC, equal the
+/// print (measured 2026-10-26 against the PDF's text layer).
 #[test]
 fn the_april_rows_reproduce_the_published_annex_e_table() {
     let april: Vec<Case> = cases()

@@ -7,7 +7,7 @@
 # September 2016" (© European Union, reused with attribution), each repeated for all twelve
 # months; then two geometries of Orekit's NeQuickGalileoTest (anti-meridian, zenith).
 # icd_table_stec_tecu is the Annex E printed value (2 decimals) for the month it was published
-# with (April), "-" elsewhere.
+# with (April), "-" elsewhere: tables E.1-E.3 on pp. 49-51 of issue 1.2.
 case	a0	a1	a2	month	ut_hours	sta_lon_deg	sta_lat_deg	sta_h_m	sat_lon_deg	sat_lat_deg	sat_h_m	jrc_stec_tecu	icd_table_stec_tecu
 annex_e_high	236.831641	-0.39362878	0.00402826613	1	0	297.66	82.49	78.11	8.23	54.29	20281546.18	22.335696870532942	-
 annex_e_high	236.831641	-0.39362878	0.00402826613	2	0	297.66	82.49	78.11	8.23	54.29	20281546.18	22.496160799384352	-

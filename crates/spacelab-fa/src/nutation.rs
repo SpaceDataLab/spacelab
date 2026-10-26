@@ -286,7 +286,9 @@ mod tests {
         }
     }
 
-    /// The IAU 2000A series coefficients, sealed. (G5)
+    /// The IAU 2000A series coefficients, sealed. (S1)
+    ///
+    /// A second parse of our own generated file, not a document's vector.
     ///
     /// The SOFA golden vectors above agree to `1e-13` rad, which the handful of largest terms
     /// dominate; deleting the sign of a coefficient far down the 1365-term series moves `Δψ` by

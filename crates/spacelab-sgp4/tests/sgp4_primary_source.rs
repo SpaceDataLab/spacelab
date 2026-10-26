@@ -21,7 +21,14 @@
 //! implementation is, and the test says so rather than pretending to a tighter bound.
 //!
 //! Source: `tcppver.out`, redistributed under MIT with `python-sgp4`, which carries
-//! Vallado's published output verbatim.
+//! Vallado's published output verbatim (sha256 `687bf28d…fbe3833b`). The paper prints
+//! it as Appendix E, "Test Case Results Listing", pp. 37–46 of AIAA 2006-6753
+//! (August 2006): all 518 position/velocity rows printed there are in this file
+//! character for character (measured 2026-10-26 against the paper's text layer). The
+//! file adds satellites 33333–33335 and later rows of 20413, which the 2006 printing
+//! omits. Rev. 3 of the paper (2017) prints all 667 rows from a later code version:
+//! sixteen rows of 23599 differ at the kilometre level and three rows elsewhere in the
+//! last digit, so this file is the 2006 run plus the additions, not the 2017 print.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -156,6 +163,7 @@ fn the_published_file_and_the_element_sets_are_the_same_run() {
     );
 }
 
+/// (G5) The document's own vectors: AIAA 2006-6753 Appendix E, pp. 37–46.
 #[test]
 fn we_reproduce_the_published_output_to_the_precision_it_was_printed_at() {
     let sections = published_sections();

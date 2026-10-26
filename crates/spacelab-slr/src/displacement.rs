@@ -502,7 +502,8 @@ mod tests {
             + (tai_minus_utc + 32.184) / (3600.0 * 24.0 * 36_525.0)
     }
 
-    /// Test case 1 of `DEHANTTIDEINEL`: 2009 April 13, 0 h.
+    /// (G5) Test case 1 of `DEHANTTIDEINEL.F`'s header, IERS Conventions (2010) chapter 7
+    /// software: 2009 April 13, 0 h.
     #[test]
     fn the_solid_tide_reproduces_the_first_iers_reference_case() {
         check(
@@ -527,7 +528,7 @@ mod tests {
         );
     }
 
-    /// Test case 2: 2012 July 13, 0 h, USNO.
+    /// (G5) Test case 2 of the same header: 2012 July 13, 0 h, USNO.
     #[test]
     fn the_solid_tide_reproduces_the_second_iers_reference_case() {
         check(

@@ -482,7 +482,9 @@ mod tests {
 
     /// `pole_wobble` against `derivations/pole_wobble.py`: IERS 2010 Table 7.7 at 50 digits in the
     /// form the Conventions print it — milliarcseconds, a polynomial in *years*, direct powers —
-    /// versus the code's Horner in *seconds* with the mas→radian factor pre-divided once per power. (G5)
+    /// versus the code's Horner in *seconds* with the mas→radian factor pre-divided once per power. (G3)
+    ///
+    /// The document's formula evaluated exactly, not a vector the document prints.
     ///
     /// Both Orekit pole-tide oracles above sit at one epoch, 2024, which takes the linear branch, so
     /// the whole pre-2010 cubic — both Horner nests, the `F2`/`F3` scale factors and the changeover

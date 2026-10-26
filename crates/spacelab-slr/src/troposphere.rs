@@ -220,8 +220,8 @@ mod tests {
         assert_within_ulps(z.total(), 1.935_229_724_967_973_2, 4, "zenith total delay");
     }
 
-    /// The test case published in the header of the IERS routine `FCUL_A`: same site, 2009
-    /// August 12, 15° elevation.
+    /// (G5) The test case published in the header of the IERS routine `FCUL_A.F`, IERS
+    /// Conventions (2010) chapter 9 software: same site, 2009 August 12, 15° elevation.
     #[test]
     fn the_mapping_function_reproduces_the_iers_reference_routine() {
         let m = fcul_a_mapping(radians(30.671_666_67), 2075.0, 300.15, radians(15.0));

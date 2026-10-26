@@ -309,7 +309,9 @@ mod tests {
         assert_eq!(reduce_turns_to_radians(-3.0), 0.0);
     }
 
-    /// The IAU 2006/2000A `X, Y, s` series coefficients, sealed. (G5)
+    /// The IAU 2006/2000A `X, Y, s` series coefficients, sealed. (S1)
+    ///
+    /// A second parse of our own generated file, not a document's vector.
     ///
     /// The SOFA golden vectors above agree to `1e-20` rad, but that agreement is carried by the
     /// first few of 4755 amplitudes; a sign deleted deep in the series moves `X` far below it.

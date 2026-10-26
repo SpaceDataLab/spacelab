@@ -88,6 +88,20 @@ self-test vectors, the FES2004/FES2014b grids): the primary source is the defini
 failure mode available is mis-transcription, which bit-exactness settles. Every formula inside such
 a model is still re-derived where it can be (G1–G4).
 
+Each such vector is cited where its test lives, by page, table or file, and was compared against the
+document itself on 2026-10-26 (`plans/17` Ф19.E):
+
+| Model | Document vector | Measured against the document |
+|---|---|---|
+| SGP4/SDP4 | AIAA 2006-6753 (2006), Appendix E "Test Case Results Listing", pp. 37–46 | all 518 printed rows are in `tcppver.out` verbatim; the file adds 33333–33335 and later rows of 20413. Rev. 3 (2017) prints a later code's run: 16 rows of 23599 differ at the km level |
+| NeQuick-G | Galileo ionospheric ICD issue 1.2, Annex E tables E.1–E.3, pp. 49–51 | all 108 rows, inputs and printed STEC, equal the fixture's column |
+| NeQuick-ITU | Rec. ITU-R P.531-16, Part 1 Supplement, `validation/in/alrt_ne_in.dat` and `out_ref/alrt_ne_out_{063,128,193}.dat`, line 1 | inputs digit for digit, outputs 4.36189 / 11.83090 / 20.85232. Orekit's 14.607 case is not in this set: comparator |
+| IERS routines | the "Test case" block of `FUNDARG`, `ORTHO_EOP`, `PMSDNUT2`, `UTLIBR`, `DEHANTTIDEINEL` (cases 1–2), `FCUL_A` | tagged `(G5)`; the routine files were not re-read: the IERS Conventions Centre host refused connections on 2026-10-26 |
+
+Three tests carried a `(G5)` that was not a document's vector and were relabelled: the IAU 2000A and
+2006 series seals are `(S1)`, a second parse of our own generated file, and the Table 7.7 mean-pole
+check is `(G3)`, the document's formula evaluated exactly.
+
 **Physical.** The empirical atmospheres are not definitional. NRLMSISE-00, JB2008,
 and Harris-Priester each approximate a measurable quantity, so reproducing the reference program
 leaves the physical claim untested: the reproduction is a comparison. JB2008 is now SET's own
@@ -1034,7 +1048,7 @@ which is why the assertion is on the round trip and not on the metre.
 | coverage, sensors | An apparent elevation mask, converted once (§4.18) | a station's "visible above 10°" is an *apparent* elevation; `ElevationMask`/`ElevationDetector` measure the geometric one, and the two differ by 5.3′ at 10° and 34′ at the horizon | the identity the shift rests on, asserted rather than assumed: `h ↦ h + R(h)` swept at 0.001° from the fit's −1° floor to the zenith, 91 001 samples; then the mask against `Refraction::geometric` directly, and the two non-physical ends | strictly increasing at **every** sample; the mask equals `sin(geometric(mask))` **bit-for-bit**; refused below the horizon and refused at the zenith, where both published fits return a *negative* bend and the geometric mask lands 3.9e-7 rad past `π/2` | coverage/src/observability.rs |
 | coverage, sensors | The bias the conversion removes (§4.18) | the pass edge moves by `R(mask)/(dε/dt)`, so the *pass* sets the size as much as the atmosphere does | the ISS day `access_oracle.rs` validates against Orekit, with the shifted mask measured against refracting every sample | **0.81–1.18 s** at a 10° mask, **2.0–8.6 s** at 5°, **9.3–20.3 s** at the horizon, one-signed on every edge of every pass; the two routes agree to **< 6″** of elevation, which is the Sæmundsson/Bennett disagreement and not an approximation in the shift | spacelab/tests/refraction\_in\_access.rs |
 | capi, python | The conversion exists on every bridge (§4.18) | before this, neither bridge exposed refraction at all, so a Python or C caller could not correct the bias even knowing it was there | each bridge against the other's numbers and against the crate's: Bennett's 5.3′ at 10°, the round trip, both domain refusals, the null pointer | C and C++: bend **5.3′ ± 0.1′**, round trip **< 6″**, `SL_ERR_DOMAIN` below the horizon and on a non-positive pressure, `SL_ERR_INVALID_ARGUMENT` on a null out-pointer. Python: the same bend to **2e-2 ′**, `None` outside each domain, `ValueError` from the mask constructor — and the corrected mask measurably lengthens the coverage fraction | capi/tests/{c/smoke.c, cpp/smoke.cpp, cpp/nothrow.cpp}, python/tests/smoke.py |
-| slr | Mendes–Pavlis zenith delay | Mendes & Pavlis 2004, *GRL* **31** L14602; IERS Conventions (2010) ch. 9 | the IERS routine `FCULZD_HPA` itself, rebuilt by `tools/iers-oracle` with `gfortran -fdefault-real-8`, at its own published test point — McDonald Observatory, 2009 Aug 14, the 532 nm second harmonic | measured **1 / 4 / 0 ULP** on hydrostatic, non-hydrostatic and total, against a 4 ULP gate. The routine's *header comment* disagrees with its own code by **3.8 µm**, a constant ratio across all three outputs — the `f` gravity factor that divides them, stale in the IERS distribution's documentation. The compiled value is the oracle; a default `gfortran` build differs from the double one by 1.6e-12 m, six orders below the gap, so the build flag is not the cause | src/troposphere.rs |
+| slr | Mendes–Pavlis zenith delay | Mendes & Pavlis 2004, *GRL* **31** L14602; IERS Conventions (2010) ch. 9 | the IERS routine `FCULZD_HPA` itself, rebuilt by `tools/iers-oracle` with `gfortran -fdefault-real-8`, at its own published test point — McDonald Observatory, 2009 Aug 14, the 532 nm second harmonic | measured **1 / 4 / 0 ULP** on hydrostatic, non-hydrostatic and total, against a 4 ULP gate. The routine's *header comment* disagrees with its own code by **3.8 µm**, a constant ratio across all three outputs — the `f` gravity factor that divides them, stale in the IERS distribution's documentation. The compiled value is a comparator, and the header's printed value is the document's vector: the 3.8 µm between them is an erratum to trace, not settled by matching either (`plans/17` D-18 a). A default `gfortran` build differs from the double one by 1.6e-12 m, six orders below the gap, so the build flag is not the cause | src/troposphere.rs |
 | slr | `FCUL_A` elevation mapping | Mendes et al. 2002, *GRL* **29**(10) 1414 | the same rebuilt routine at *its* published point (30.67° N, 2009 Aug 12, 15° elevation), which does agree with its own header | **0 ULP** — bit-exact against the compiled routine, against the same 4 ULP gate; exactly 1 at the zenith to **2 ULP** — the continued fraction collapsing to its own numerator, which is what makes a zenith delay a zenith delay; monotone over 5°–80° | src/troposphere.rs |
 | slr | Water-vapour pressure | the saturation and enhancement relations as IERS Conventions ch. 9 states them | an independent 60-digit evaluation of the same relations in `tools/gen_slr_vapour_oracle.mac`, at two points straddling the 273.15 K offset and at different pressures, so neither the Celsius term nor the enhancement factor can silently drop out | **16 ULP** asserted; measured **9 / 7 / 9 ULP**, worst at ISA sea level. The four extra bits over this file's usual 1 are the exponent's own: its terms are each an order above their sum (33.94 and −22.01 against ≈2.8), so `f64` gives up ~4 bits to cancellation before `exp` amplifies the remainder | src/troposphere.rs |
 | slr | Ocean tide loading displacement | IERS Conventions ch. 7.1.2; Scherneck's harmonic development, as implemented by `HARDISP` | the reference program's own published 24-hour series at Onsala and Reykjavik, 2009 June 25 0h UTC — Reykjavik included because its radial term reaches 3.8 cm against Onsala's 0.9 cm, so a proportional error shows an order more clearly | worst **4.915e-7 m** (Onsala) and **4.980e-7 m** (Reykjavik) over 72 published values each. The bound is the reference's `3F14.6` print resolution and nothing looser: a value it prints is defined to ±5e-7 m, so every digit it committed to is reproduced | src/loading.rs |
@@ -7846,12 +7860,13 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 325 modules, 102 name a check, 223 do not** — 136 physics,
+(`plans/16` Ф17.B orders them). **Today: 325 modules, 103 name a check, 222 do not** — 135 physics,
 28 parsers, 6 generated and 53 infrastructure. Later on 2026-10-26 the rule also read each module's own
 test module, where a gate sits beside the formula it decides: eight modules had a gate-tagged test
 there and left the ledger, seven of them physics (`dsst/propagator.rs`, `spacecraft.rs`,
 `harris_priester/mod.rs`, `maneuver.rs`, `density_rom.rs`, `wam_ipe.rs`, the GNSS `models.rs`) and the
-RINEX 4 reader, whose CNAV-equals-legacy limit is a `(G3)`. It had gone up by eighteen earlier that day, when the rule
+RINEX 4 reader, whose CNAV-equals-legacy limit is a `(G3)`. The spec-vector audit (Ф19.E) took one more out
+the same day: `slr/troposphere.rs`, whose `FCUL_A` header test case is now a tagged `(G5)`. It had gone up by eighteen earlier that day, when the rule
 stopped accepting a bare test path or a mention of this file: either can name a comparison with
 another code, or a measurement, and neither decides a formula (`plans/17` §1.2). The 32 modules that
 had passed on nothing else were read again. Nine name a test that is a gate, and the test's doc now
@@ -8092,7 +8107,6 @@ crates/spacelab-slr/src/dhf.rs | parser | format reader/writer; conformance is t
 crates/spacelab-slr/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-slr/src/range.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-slr/src/sinex.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
-crates/spacelab-slr/src/troposphere.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-testkit/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-vision/src/detect.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-vision/src/graph.rs | infra | types, traits, drivers or re-exports; nothing to derive

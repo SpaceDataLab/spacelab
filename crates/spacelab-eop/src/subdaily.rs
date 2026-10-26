@@ -224,6 +224,8 @@ mod tests {
     // port is certified against the same oracle as the generated tables. The libration
     // residual (~5e-7) is the benign GMST-path artifact documented in derivations/eop_subdaily.py.
 
+    /// (G5) The "Test case" block of `FUNDARG.F`'s header, IERS Conventions (2010) chapter
+    /// 5 software.
     #[test]
     fn fundarg_matches_the_iers_test_case() {
         let [l, lp, f, d, om] = fundarg(0.079_958_932_238_193_02);
@@ -238,6 +240,8 @@ mod tests {
         }
     }
 
+    /// (G5) The "Test case" block of `ORTHO_EOP.F`'s header, IERS Conventions (2010) chapter
+    /// 8 software.
     #[test]
     fn ortho_eop_matches_the_iers_test_case() {
         let (dx, dy, dut1) = ortho_eop(47100.0);
@@ -246,6 +250,8 @@ mod tests {
         assert!((dut1 - -23.390_923_706_098_082).abs() < 1e-6, "dut1 {dut1}");
     }
 
+    /// (G5) The "Test case" block of `PMSDNUT2.F`'s header, IERS Conventions (2010) chapter
+    /// 5 software.
     #[test]
     fn pmsdnut2_matches_the_iers_test_case() {
         let (dx, dy) = pmsdnut2_terms(54335.0);
@@ -253,6 +259,8 @@ mod tests {
         assert!((dy - -14.092_406_920_418_377).abs() < 1e-3, "dy {dy}");
     }
 
+    /// (G5) The "Test case" block of `UTLIBR.F`'s header, IERS Conventions (2010) chapter
+    /// 5 software.
     #[test]
     fn utlibr_matches_the_iers_test_cases() {
         for (rmjd, wu, wl) in [

@@ -3,9 +3,9 @@
 
 `docs/verification.md` publishes what was measured. This script asks the complementary question of
 each module under `crates/*/src`: does its *own* documentation name the thing that would catch a
-wrong formula — a `derivations/*.mac` identity, a `spec_seals` / `table_seals` seal, or a test file
-holding a test whose own doc names its gate, `(G1)` ... `(G5)` (`plans/17` §1.2)? A module that
-names none is not wrong; it
+wrong formula — a `derivations/*.mac` identity, a `spec_seals` / `table_seals` seal, or a test whose
+own doc names its gate, `(G1)` ... `(G5)` (`plans/17` §1.2), in a test file the doc names or in the
+module's own test module? A module that names none is not wrong; it
 is unverified by anything a reader can re-run from the module itself, and the ledger in
 `docs/verification.md` (§12)
 records each such module with a category, so that the number can only go down deliberately.
@@ -35,11 +35,17 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LEDGER_DOC = ROOT / "docs" / "verification.md"
 MARKER = "## 12 · Formula provenance census"
-SKIP_CRATES = {"spacelab-capi", "spacelab-python", "spacelab-python-harness", "spacelab-gpu"}
+SKIP_CRATES = {
+    "spacelab-capi",
+    "spacelab-python",
+    "spacelab-python-harness",
+    "spacelab-gpu",
+}
 CATEGORIES = {"physics", "parser", "generated", "infra"}
 
-# What counts as naming a re-runnable check: a derivation or seal script by name, or a `tests/...rs`
-# file with at least one `#[test]` whose own doc carries a gate tag. A bare test path is not enough,
+# What counts as naming a re-runnable check: a derivation or seal script by name, or a `#[test]` whose
+# own doc carries a gate tag, in a `tests/...rs` file the doc names or in the module's own file, where
+# the gate sits beside the formula it decides. A bare test path is not enough,
 # nor is a `verification.md` mention: either can name a comparison with another code or a
 # measurement, which reports agreement and decides nothing. Supporting checks, `(S1)` and `(S2)`, do
 # not count on their own (`plans/17` §1.2). The derivation pattern is check-comparators.py's `GATE`.
@@ -53,15 +59,61 @@ FN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+|async\s+|unsafe\s+)*f
 
 # Guesses for `--ledger` only; the committed ledger is edited by hand.
 PARSER_NAMES = {
-    "finals", "rinex", "rinex_obs", "sp3", "sinex", "sinex_bias", "rtcm", "ntrip", "crd", "blq",
-    "dhf", "omm", "tle", "cdm", "wind_data", "density_data", "space_weather", "vmf_grid", "output",
-    "onnx", "ccir", "modip",
+    "finals",
+    "rinex",
+    "rinex_obs",
+    "sp3",
+    "sinex",
+    "sinex_bias",
+    "rtcm",
+    "ntrip",
+    "crd",
+    "blq",
+    "dhf",
+    "omm",
+    "tle",
+    "cdm",
+    "wind_data",
+    "density_data",
+    "space_weather",
+    "vmf_grid",
+    "output",
+    "onnx",
+    "ccir",
+    "modip",
 }
-GENERATED_NAMES = {"cio_tables", "nut_tables", "tdb_tables", "rkn1210_consts", "coefficients", "leap_seconds"}
+GENERATED_NAMES = {
+    "cio_tables",
+    "nut_tables",
+    "tdb_tables",
+    "rkn1210_consts",
+    "coefficients",
+    "leap_seconds",
+}
 INFRA_NAMES = {
-    "lib", "dual", "hyperdual", "scalar", "calendar", "linalg", "time", "combine", "detectors",
-    "parallel", "latency", "converter", "bridge", "math", "types", "driver", "tolerance", "forces",
-    "satellite", "graph", "model", "nn", "mod",
+    "lib",
+    "dual",
+    "hyperdual",
+    "scalar",
+    "calendar",
+    "linalg",
+    "time",
+    "combine",
+    "detectors",
+    "parallel",
+    "latency",
+    "converter",
+    "bridge",
+    "math",
+    "types",
+    "driver",
+    "tolerance",
+    "forces",
+    "satellite",
+    "graph",
+    "model",
+    "nn",
+    "mod",
 }
 
 
@@ -108,9 +160,11 @@ def test_files(module: str, rel: str) -> list[pathlib.Path]:
 
 def names_a_check(module: str) -> bool:
     doc = module_doc(ROOT / module)
-    if GATE.search(doc):
+    if GATE.search(doc) or gated(ROOT / module):
         return True
-    return any(gated(f) for rel in TEST_PATH.findall(doc) for f in test_files(module, rel))
+    return any(
+        gated(f) for rel in TEST_PATH.findall(doc) for f in test_files(module, rel)
+    )
 
 
 def modules() -> list[str]:
@@ -163,8 +217,12 @@ def main() -> int:
         return 0
 
     book = ledger() if MARKER in LEDGER_DOC.read_text(encoding="utf-8") else {}
-    by_cat = {c: sorted(m for m, (cat, _) in book.items() if cat == c) for c in CATEGORIES}
-    print(f"{len(mods)} modules; {len(mods) - len(missing)} name a re-runnable check in their own doc")
+    by_cat = {
+        c: sorted(m for m, (cat, _) in book.items() if cat == c) for c in CATEGORIES
+    }
+    print(
+        f"{len(mods)} modules; {len(mods) - len(missing)} name a re-runnable check in their own doc"
+    )
     for c in ("physics", "parser", "generated", "infra"):
         print(f"  ledger {c:9s} {len(by_cat[c])}")
     if "--check" not in sys.argv:
@@ -175,7 +233,11 @@ def main() -> int:
     for m in new:
         print(f"names no check and is not in the ledger: {m}")
     for m in stale:
-        why = "file is gone" if not (ROOT / m).exists() else "now names a check -- remove it from the ledger"
+        why = (
+            "file is gone"
+            if not (ROOT / m).exists()
+            else "now names a check -- remove it from the ledger"
+        )
         print(f"stale ledger entry: {m} ({why})")
     if new or stale:
         print(
@@ -184,7 +246,9 @@ def main() -> int:
             "module doc, or add the module to the ledger with a category -- but not silently."
         )
         return 1
-    print(f"ledger consistent: {len(book)} entries, {len(by_cat['physics'])} of them physics")
+    print(
+        f"ledger consistent: {len(book)} entries, {len(by_cat['physics'])} of them physics"
+    )
     return 0
 
 

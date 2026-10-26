@@ -1,0 +1,41 @@
+/* The four reference roots crates/spacelab-coverage/tests/root.rs holds `brent` to, re-derived.
+
+   sqrt(2) and the real root of x^3 - 2x - 5 (Cardano) are closed forms, so their defining
+   residuals reduce to 0 exactly; the omega constant W(1) and the Dottie number (cos x = x) have no
+   elementary form and are solved by Newton at 80 digits, residual shown below 1e-70. Each 34-digit
+   literal in the test file must then sit within 1e-33 of the derived root. */
+
+ratprint : false$
+fpprec : 80$
+near(x, ref, eps) := if abs(bfloat(x - ref)) < eps then 0 else bfloat(x - ref)$
+
+/* (1) sqrt(2) */
+print("sqrt2_residual:", ratsimp(sqrt(2)^2 - 2))$
+
+/* (2) Cardano: p = -2, q = -5, discriminant (q/2)^2 + (p/3)^3 = 643/108. */
+u : (5/2 + sqrt(643/108))^(1/3)$
+v : (5/2 - sqrt(643/108))^(1/3)$
+/* u v is the real cube root of (5/2)^2 - 643/108 = 8/27, both radicands being positive, so 2/3. */
+print("cardano_uv_cubed_is_8_27:", ratsimp((5/2)^2 - 643/108 - 8/27))$
+print("cardano_radicands_positive:", is(5/2 - sqrt(643/108) > 0))$
+print("cardano_u3_plus_v3_is_minus_q:", radcan(u^3 + v^3 - 5))$
+/* (U+V)^3 - 2(U+V) - 5 = (U^3+V^3-5) + (U+V)(3UV-2) as polynomials, so the cubic's residual at
+   u + v is zero by the two lines above. */
+print("cubic_residual_decomposition:", expand((U+V)^3 - 2*(U+V) - 5 - ((U^3+V^3-5) + (U+V)*(3*U*V-2))))$
+print("cubic_residual_numeric_below_1e-70:", near((u+v)^3 - 2*(u+v) - 5, 0, 10^-70))$
+cubic : bfloat(u + v)$
+
+/* (3), (4) Newton at 80 digits. */
+newton(f, x0) := block([x : bfloat(x0), df : diff(f(z), z)],
+  for i thru 200 do x : x - bfloat(f(x) / subst(z = x, df)), x)$
+omega : newton(lambda([x], x - exp(-x)), 0.5)$
+dottie : newton(lambda([x], cos(x) - x), 0.7)$
+print("omega_residual_below_1e-70:", near(omega - exp(-omega), 0, 10^-70))$
+print("dottie_residual_below_1e-70:", near(cos(dottie) - dottie, 0, 10^-70))$
+print("omega_is_lambert_w_1:", near(omega, lambert_w(1b0), 10^-70))$
+
+/* The 34-digit literals of tests/root.rs. */
+print("ROOT_CUBIC_literal:", near(2.094551481542326591482386540579303b0, cubic, 10^-33))$
+print("ROOT_DOTTIE_literal:", near(0.7390851332151606416553120876738734b0, dottie, 10^-33))$
+print("ROOT_OMEGA_literal:", near(0.5671432904097838729999686622103555b0, omega, 10^-33))$
+print("ROOT_SQRT2_literal:", near(1.414213562373095048801688724209698b0, sqrt(2), 10^-33))$

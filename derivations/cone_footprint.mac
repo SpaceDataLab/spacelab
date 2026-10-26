@@ -1,0 +1,80 @@
+/* The nadir cone of crates/spacelab-sensors/src/cone.rs (and the agile slew cone of agile.rs,
+   which is the same cone and the horizon), from its defining vectors.
+
+   Sphere of radius R (lengths in units of R), ground cell G = (0, 0, 1), satellite
+   S = L (sin lam, 0, cos lam), L > 1, line of sight w = G - S, nadir bhat = -S/L. The off-nadir
+   angle theta is cos(theta) = (w . bhat)/|w|. sa = sin(alpha), ca = cos(alpha), ca^2 = 1 - sa^2,
+   sigma = L sa, k = sqrt(1 - sigma^2) (real while the cone edge is in front of the limb).
+
+   The near-side cone edge is lam = asin(L sin alpha) - alpha, in closed form
+
+     cos(lam) = k ca + sigma sa,   sin(lam) = sigma ca - k sa,
+
+   and on it |w| = L ca - k and w . bhat = ca (L ca - k): theta = alpha exactly. The cell's own
+   elevation there is sin(eps) = k, i.e. cos(eps) = L sin(alpha) (the law of sines), so the local
+   incidence is theta_inc = alpha + lam (sar.rs). At the horizon tangency sigma = 1 the edge is
+   lam = pi/2 - alpha, the cell sits on its horizon (t = 0), and the cone edge meets the horizon
+   edge cos(lam_h) = 1/L: the agile footprint min(cone edge, horizon edge) is continuous there.
+
+   (1)-(2) the closed form; (3)-(4) theta = alpha on it; (5) the division-free u~ = n2 - c.r is
+   |r| (w . bhat) for any vectors; (6)-(7) the edge elevation; (8)-(10) the tangency; (11) the
+   nadir turn rate |d bhat/dt| = |v_perp|/|r| the rate bound uses; (12) dg/dt for g = w . bhat -
+   ca |w| at a frozen bhat; (13) 1 - e^2 = (1 - f)^2, the constant INVERSE_ONE_MINUS_E2 inverts.
+
+   Every residual prints as `<name>: 0`, 13 of them.                                             */
+
+display2d : false$
+red(e) := ratsimp(ratsubst(1 - L^2*sa^2, k^2, ratsubst(1 - sa^2, ca^2, ratsimp(e))))$
+
+cl : k*ca + L*sa*sa$
+sl : L*sa*ca - k*sa$
+
+/* (1)-(2) lam = asin(L sin alpha) - alpha, expanded */
+trig(f) := ratsubst(k, sqrt(1 - L^2*sa^2),
+                    subst([sin(a) = sa, cos(a) = ca], trigexpand(f(asin(L*sin(a)) - a))))$
+print("cone_edge_cosine:", red(cl - trig(cos)))$
+print("cone_edge_sine:", red(sl - trig(sin)))$
+
+S : L*[sl, 0, cl]$
+G : [0, 0, 1]$
+w : G - S$
+bhat : -S/L$
+wb : w . bhat$
+
+/* (3)-(4) |w| = L ca - k and w . bhat = ca |w| */
+print("cone_edge_range_squared:", red(w . w - (L*ca - k)^2))$
+print("cone_edge_off_nadir:", red(wb - ca*(L*ca - k)))$
+
+/* (5) u~ = |r| (w . bhat) = r . r - c . r, for arbitrary r and c */
+rv : [r1, r2, r3]$
+cv : [c1, c2, c3]$
+nr : sqrt(rv . rv)$
+print("utilde_identity:", ratsimp(nr*((cv - rv) . (-rv/nr)) - (rv . rv - cv . rv)))$
+
+/* (6)-(7) the cell's rise t = d . zhat, d = S - G: t = k |w|, so sin(eps) = k = cos(alpha + lam) */
+t : (S - G) . [0, 0, 1]$
+print("cone_edge_elevation:", red(t - k*(L*ca - k)))$
+print("cone_edge_incidence_is_alpha_plus_lam:",
+      red(k - (ca*cl - sa*sl)))$
+
+/* (8)-(10) the tangency sigma = 1: k = 0, L = 1/sa */
+tan_sub(e) := ratsimp(subst([k = 0, L = 1/sa], e))$
+print("tangency_edge_is_pi2_minus_alpha:", tan_sub(cl - sa))$
+print("tangency_cell_on_horizon:", tan_sub(t))$
+print("tangency_cone_edge_meets_horizon_edge:", tan_sub(cl - 1/L))$
+
+/* (11) bhat = -r/|r| turns at |v_perp|/|r|: |d bhat/dt|^2 |r|^4 = |v|^2 |r|^2 - (r . v)^2 */
+rt : [x1(tau), x2(tau), x3(tau)]$
+vt : diff(rt, tau)$
+bt : -rt/sqrt(rt . rt)$
+bd : diff(bt, tau)$
+print("nadir_turn_rate:", ratsimp((bd . bd)*(rt . rt)^2 - ((vt . vt)*(rt . rt) - (rt . vt)^2)))$
+
+/* (12) at a frozen bhat = b, g = (c - r) . b - ca |c - r| has dg/dt = -v . b + ca ((c - r) . v)/|c - r| */
+wt : cv - rt$
+gt : wt . [b1, b2, b3] - ca*sqrt(wt . wt)$
+print("cone_rate_identity:",
+      ratsimp(diff(gt, tau) - (-(vt . [b1, b2, b3]) + ca*((wt . vt)/sqrt(wt . wt)))))$
+
+/* (13) e^2 = f (2 - f), so 1/(1 - e^2) = 1/(1 - f)^2 */
+print("one_minus_e2:", ratsimp(1 - f*(2 - f) - (1 - f)^2))$

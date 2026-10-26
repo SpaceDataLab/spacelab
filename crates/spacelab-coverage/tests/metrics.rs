@@ -1,6 +1,9 @@
-//! Coverage metrics, checked against hand-computed gaps.
+//! Coverage metrics, checked against hand-computed gaps and, for a periodic pattern, against the exact
+//! rationals of `derivations/metrics_periodic_gaps.mac`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+// `float_cmp`: on integer-second windows every sum is exact in f64, so each metric is one correctly
+// rounded quotient and equals the f64 nearest the exact rational bit for bit.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
 
 use spacelab_coverage::{Window, metrics};
 
@@ -148,4 +151,32 @@ fn uneven_passes_report_the_extremes() {
     );
     // gaps: 5 (lead), 14, 50, 5 (trail) → max 50
     assert!((m.max_gap - 50.0).abs() < 1e-12, "max gap {}", m.max_gap);
+}
+
+/// (G3) A periodic access pattern — 16 ten-minute passes every 90 minutes, the first 1000 s in, over
+/// one day — against the exact rationals derived from the metrics' definitions (the mean response
+/// as the time-average of the wait to the next pass) in `derivations/metrics_periodic_gaps.mac` and
+/// enumerated in `derivations/metrics_periodic_gaps.g`: coverage 1/9, max gap 4800, mean gap
+/// 76800/17, mean response 112825/54.
+///
+/// On an absolute epoch (t0 = 8.64e8 s) every window edge and every sum is an integer below 2^53,
+/// so each metric is a single correctly rounded quotient: the bound is 0 ulps.
+#[test]
+fn a_periodic_pattern_has_the_exact_rational_metrics() {
+    let t0 = 8.64e8_f64;
+    let windows: Vec<Window> = (0..16)
+        .map(|i| {
+            let rise = t0 + 1000.0 + 5400.0 * f64::from(i);
+            w(rise, rise + 600.0)
+        })
+        .collect();
+    let m = metrics(&windows, t0, t0 + 86_400.0);
+    assert_eq!(m.passes, 16);
+    assert_eq!(m.covered_seconds, 9600.0);
+    assert_eq!(m.coverage_fraction, 1.0 / 9.0);
+    assert_eq!(m.max_gap, 4800.0);
+    assert_eq!(m.mean_gap, 76_800.0 / 17.0);
+    assert_eq!(m.mean_response_time, 112_825.0 / 54.0);
+    assert_eq!(m.longest_pass, 600.0);
+    assert_eq!(m.shortest_pass, 600.0);
 }

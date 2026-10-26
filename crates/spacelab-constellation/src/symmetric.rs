@@ -6,13 +6,21 @@
 //! group `{R_k}`: satellite `k` is `R_k · s₀` (optionally advanced in mean anomaly). Because the
 //! two-body flow commutes with rotations — the central field is isotropic, so `φ_t(R·s) = R·φ_t(s)` —
 //! the set `{R_k · φ_τ(s₀)}` is carried to `{R_k · φ_{t+τ}(s₀)}` as time advances, i.e. it stays the
-//! orbit of the group at *every* time. Regularity is therefore automatic, not a phasing constraint.
+//! orbit of the group at *every* time. For a pure rotation group regularity is therefore automatic.
+//! A mean-anomaly stagger is a phasing constraint: the staggered cyclic and dihedral arms are the
+//! orbit of a group of rotations × time shifts only when that group closes (see [`Symmetry`]).
 //!
 //! Where this sits relative to the other families: the cyclic group `C_n` about the polar axis just
 //! shifts right ascension, so [`Symmetry::CyclicPolar`] is a single-axis Walker (verified below). The
 //! genuinely distinct cases are the **dihedral** `D_n` (a 180° equatorial flip added — a north/south
 //! symmetry Walker lattices cannot impose) and the **polyhedral** groups
 //! ([`Symmetry::Tetrahedral`]), whose orbit-plane symmetry no `T/P/F` lattice expresses.
+//!
+//! The equivariance of the two-body flow, the rotation of the orbit normal and the Walker
+//! equivalence are derived in `derivations/symmetric_regularity.mac`;
+//! `derivations/symmetric_regularity.g` (GAP) gives the orbit–stabilizer plane counts and the
+//! regularity condition on the stagger. The gates are `the_seed_orbit_has_the_orbit_stabilizer_plane_counts`
+//! and `a_staggered_arm_is_regular_exactly_when_the_group_closes` below.
 
 use spacelab_core::{Angle, Mat3};
 use spacelab_elements::KeplerianElements;
@@ -43,7 +51,9 @@ const TETRA_SIGNS: [Mat3; 4] = [
 #[derive(Clone, Copy, Debug)]
 pub enum Symmetry {
     /// Cyclic `C_n` about the polar axis, satellite `k` staggered by `k·stagger` in mean anomaly.
-    /// This only shifts right ascension, so it is a single-axis Walker of `order` planes.
+    /// The rotation only shifts right ascension; with `stagger = 2π·F/n` this is the Walker
+    /// `n/n/F`, and it is kinematically regular exactly when `n·stagger` is a whole number of
+    /// turns.
     CyclicPolar {
         /// Group order `n` (number of satellites).
         order: u32,
@@ -52,7 +62,10 @@ pub enum Symmetry {
     },
     /// Dihedral `D_n`: the `C_n` copies plus their images under a 180° flip about the equatorial
     /// x-axis — `2n` satellites with a north/south symmetry the cyclic (Walker) families cannot
-    /// impose.
+    /// impose. The flip is a symmetry of the whole set, and the set kinematically regular, only
+    /// when both `n·stagger` and `2·stagger` are whole numbers of turns (`stagger` 0, or π with `n`
+    /// even); otherwise each satellite still has its flipped partner, but the set is no group
+    /// orbit.
     DihedralPolar {
         /// Cyclic order `n`; the constellation has `2n` satellites.
         order: u32,
@@ -391,6 +404,145 @@ mod tests {
                     "not invariant under a generator at t={t}"
                 );
             }
+        }
+    }
+
+    /// The seed whose orbit normal is the unit vector along `n`, eccentric so that no rotation
+    /// about its own normal fixes it.
+    fn seed_with_normal(n: Vec3) -> KeplerianElements {
+        let n = Vec3::new(n.x / n.norm(), n.y / n.norm(), n.z / n.norm());
+        // normal = (sin i sin Ω, −sin i cos Ω, cos i)
+        KeplerianElements {
+            inclination: Angle::from_radians(libm::acos(n.z)),
+            raan: Angle::from_radians(libm::atan2(n.x, -n.y)),
+            ..seed()
+        }
+    }
+
+    /// (G4) The seed's orbit plane is carried to `|G|/|Stab(n)|` planes of `|Stab(n)|` satellites.
+    ///
+    /// Orbit–stabilizer for the group acting on the seed's orbit normal, which rotates with the
+    /// state (`derivations/symmetric_regularity.mac`). `derivations/symmetric_regularity.g` (GAP,
+    /// exact over ℚ(√5)) counts the orbits: a normal on a three-fold axis of `T` reaches 4 planes,
+    /// a generic one 12; `O` takes a three-fold axis to 8 and a two-fold to 12; `Y` takes a
+    /// five-fold axis to 12 and a three-fold to 20. Counted here from `r × v` of the emitted states.
+    #[test]
+    fn the_seed_orbit_has_the_orbit_stabilizer_plane_counts() {
+        let phi = 1.0_f64.midpoint(libm::sqrt(5.0));
+        for (symmetry, normal, planes) in [
+            (Symmetry::Tetrahedral, Vec3::new(1.0, 1.0, 1.0), 4),
+            (
+                Symmetry::Group(PointGroup::Tetrahedral),
+                Vec3::new(1.0, 1.0, 1.0),
+                4,
+            ),
+            (
+                Symmetry::Group(PointGroup::Tetrahedral),
+                Vec3::new(1.0, 2.0, 5.0),
+                12,
+            ),
+            (
+                Symmetry::Group(PointGroup::Octahedral),
+                Vec3::new(1.0, 1.0, 1.0),
+                8,
+            ),
+            (
+                Symmetry::Group(PointGroup::Octahedral),
+                Vec3::new(1.0, 1.0, 0.0),
+                12,
+            ),
+            (
+                Symmetry::Group(PointGroup::Icosahedral),
+                Vec3::new(0.0, 1.0, phi),
+                12,
+            ),
+            (
+                Symmetry::Group(PointGroup::Icosahedral),
+                Vec3::new(1.0, 1.0, 1.0),
+                20,
+            ),
+        ] {
+            let kr = KinematicallyRegular {
+                seed: seed_with_normal(normal),
+                symmetry,
+            };
+            let mut normals: Vec<(Vec3, u32)> = Vec::new();
+            for e in collect(&kr) {
+                let (r, v) = e.to_state();
+                let h = r.cross(v);
+                let h = Vec3::new(h.x / h.norm(), h.y / h.norm(), h.z / h.norm());
+                match normals.iter_mut().find(|(m, _)| (*m - h).norm() < 1e-9) {
+                    Some((_, count)) => *count += 1,
+                    None => normals.push((h, 1)),
+                }
+            }
+            let per_plane = kr.total() / planes;
+            assert_eq!(
+                normals.len(),
+                planes as usize,
+                "{symmetry:?} about {normal:?}"
+            );
+            assert!(
+                normals.iter().all(|(_, c)| *c == per_plane),
+                "{symmetry:?}: {normals:?}"
+            );
+        }
+    }
+
+    /// (G4) A staggered cyclic or dihedral arm is kinematically regular exactly when the group
+    /// closes.
+    ///
+    /// `derivations/symmetric_regularity.g` (GAP) shows the emitted set is a group orbit iff
+    /// `n·stagger` is a whole number of turns, and for the dihedral arm also `2·stagger`. Then the
+    /// generator — advance by the stagger, turn by `2π/n` — and, for the dihedral arm, the bare
+    /// flip carry the set onto itself at every instant, because the flow commutes with rotations;
+    /// with any other stagger they do not. Checked on propagated positions at three instants.
+    #[test]
+    fn a_staggered_arm_is_regular_exactly_when_the_group_closes() {
+        let flip = Mat3::rot1(PI);
+        let period = TAU * (seed().semi_major_axis.powi(3) / MU).sqrt();
+        let invariant = |sats: &[KeplerianElements], g: Mat3, shift: f64| {
+            [0.0, 0.17 * period, 0.6 * period].iter().all(|&t| {
+                let moved: Vec<[f64; 3]> = dir_set(sats, t + shift)
+                    .iter()
+                    .map(|d| {
+                        let r = g * Vec3::new(d[0], d[1], d[2]);
+                        [r.x, r.y, r.z]
+                    })
+                    .collect();
+                sets_match(&moved, &dir_set(sats, t))
+            })
+        };
+        for (order, stagger, regular) in [(5_u32, TAU * 2.0 / 5.0, true), (5, 0.2, false)] {
+            let kr = KinematicallyRegular {
+                seed: seed(),
+                symmetry: Symmetry::CyclicPolar {
+                    order,
+                    stagger: Angle::from_radians(stagger),
+                },
+            };
+            let g = Mat3::rot3(-TAU / f64::from(order));
+            let shift = stagger / TAU * period;
+            assert_eq!(
+                invariant(&collect(&kr), g, shift),
+                regular,
+                "C{order}, stagger {stagger}"
+            );
+        }
+        for (order, stagger, regular) in [(4_u32, PI, true), (4, 0.37, false), (4, PI / 2.0, false)]
+        {
+            let kr = KinematicallyRegular {
+                seed: seed(),
+                symmetry: Symmetry::DihedralPolar {
+                    order,
+                    stagger: Angle::from_radians(stagger),
+                },
+            };
+            let sats = collect(&kr);
+            let g = Mat3::rot3(-TAU / f64::from(order));
+            let shift = stagger / TAU * period;
+            let closes = invariant(&sats, g, shift) && invariant(&sats, flip, 0.0);
+            assert_eq!(closes, regular, "D{order}, stagger {stagger}");
         }
     }
 }

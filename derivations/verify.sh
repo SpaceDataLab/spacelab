@@ -815,5 +815,82 @@ else
     skip "nrlmsise00_tables.py" "tools/fetch-nrlmsise00-fortran.sh output"
 fi
 
+# ---------------------------------------------------------------------------------------------
+# 7. Ф17.B: each module's gate, derived in Maxima and checked by a second engine. A Maxima file
+# prints one `<name>: 0` line per identity and the count is pinned; a PARI or GAP file must run
+# without an error and print no `false`, `FAIL` or `not ok`.
+# ---------------------------------------------------------------------------------------------
+mac_zeros() { # file count what
+    local out zeros
+    out=$(timeout 300 maxima --very-quiet --suppress-input-echo -Q -b "$1" </dev/null 2>&1)
+    zeros=$(printf '%s\n' "$out" | grep -cE ': +0 *$')
+    if [ "$zeros" -eq "$2" ] && ! printf '%s' "$out" | grep -q 'Lisp error'; then
+        ok "maxima $1: $3 ($2 identities)"
+    else
+        bad "maxima $1" "expected $2 identities reducing to 0, found $zeros"
+    fi
+}
+second_engine() { # file what
+    local out rc
+    case "$1" in
+        *.gp) out=$(timeout 300 gp -q -f "$1" </dev/null 2>&1); rc=$? ;;
+        *.g) out=$(timeout 300 gap -q -A --quitonbreak "$1" 2>&1); rc=$? ;;
+    esac
+    if [ "$rc" -eq 0 ] && [ -n "$out" ] && ! printf '%s' "$out" | grep -qF '***' \
+        && ! printf '%s' "$out" | grep -qiE '\bfalse\b|\bfail|not ok|^Error|Syntax error'; then
+        ok "${1##*.} $1: $2"
+    else
+        bad "${1##*.} $1" "an error, or a check printed false/FAIL (exit $rc)"
+    fi
+}
+if have maxima; then
+    mac_zeros access_horizon_crossing.mac 4 "a circular pass rises and sets at acos(Re cos e / r) - e"
+    mac_zeros root_reference_roots.mac 12 "Cardano, Dottie and W(1) roots the root finder is gated on"
+    mac_zeros metrics_periodic_gaps.mac 8 "coverage metrics of a periodic pass pattern in exact rationals"
+    mac_zeros fom_weighted_grid.mac 7 "weighted figures of merit on an exact grid, and their weight-scaling invariance"
+    mac_zeros photometry_closed_forms.mac 17 "the diffuse-sphere phase law, V zero point, air mass and limiting magnitude"
+    mac_zeros observability_diurnal_arc.mac 13 "the diurnal arc solves the altitude equation; air-mass values; refraction monotone"
+    mac_zeros elevation_footprint.mac 8 "the elevation footprint edge from its defining vectors"
+    mac_zeros cone_footprint.mac 13 "the cone footprint edge, its tangency with the horizon, 1 - e^2 = (1 - f)^2"
+    mac_zeros comms_link_budget.mac 7 "slant range, free-space loss and the dB link budget"
+    mac_zeros sar_incidence.mac 7 "SAR incidence, band edges and look side"
+    mac_zeros scan_catalogue.mac 12 "scan-angle catalogue end points, antisymmetry and VIIRS extent"
+    mac_zeros wgs84_geodesy.mac 13 "WGS 84 derived constants and both geodetic maps"
+    mac_zeros keplerian_elements.mac 31 "element <-> state maps invert each other on every branch; Kepler's equation"
+    mac_zeros design_orbit.mac 5 "repeat-ground-track and sun-synchronous conditions, critical inclination"
+    mac_zeros kepler_universal.mac 9 "universal-variable Kepler equation and f gdot - fdot g = 1"
+    mac_zeros lifetime_exponential_decay.mac 5 "the exact erfi decay epoch solves the circular decay ODE"
+    mac_zeros harris_priester_law.mac 16 "the Harris-Priester law: exponential brackets, half-angle power, apex values"
+    mac_zeros soc_street_geometry.mac 18 "street-of-coverage widths, co- and counter-rotating node steps, seam and stagger"
+    mac_zeros walker_phasing.mac 5 "Walker T/P/F relative phasing as an exact lattice"
+    mac_zeros lattice_flower.mac 6 "the lattice flower's Hermite-normal-form system"
+    mac_zeros flower_phasing.mac 6 "flower time phasing along the common track and its semi-major axis"
+    mac_zeros draim_tetrahedral.mac 5 "Draim's tetrahedral elements, semi-major axis and symmetries"
+    mac_zeros shell_surveillance.mac 4 "surveillance-shell characteristic velocity and elevation"
+    mac_zeros analysis_alpha_closed_form.mac 7 "the alpha figure on small configurations in closed form"
+    mac_zeros mozhaev_point_groups.mac 12 "Mozhaev point groups are the rotation groups of their polyhedra"
+    mac_zeros symmetric_regularity.mac 6 "orbit-stabilizer plane counts and staggered-arm regularity"
+else
+    skip "Ф17.B Maxima gates" maxima
+fi
+if have gp; then
+    for f in access_horizon_crossing root_reference_roots photometry_closed_forms observability_diurnal_arc \
+        elevation_footprint cone_footprint comms_link_budget sar_incidence scan_catalogue \
+        wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay harris_priester_law \
+        soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form; do
+        second_engine "$f.gp" "second engine for $f.mac"
+    done
+else
+    skip "Ф17.B PARI gates" gp
+fi
+if have gap; then
+    for f in metrics_periodic_gaps fom_weighted_grid kernel_lattice walker_phasing lattice_flower flower_phasing \
+        mozhaev_point_groups symmetric_regularity; do
+        second_engine "$f.g" "exact counts for the $f gate"
+    done
+else
+    skip "Ф17.B GAP gates" gap
+fi
+
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ] || exit 1

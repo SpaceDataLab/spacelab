@@ -1,0 +1,93 @@
+/* WGS-84: the derived constants and both directions of the geodetic map, as identities in the two
+ * defining parameters of the ellipsoid, a and f = 1/298.257223563 (NIMA TR8350.2, §3).
+ *
+ * spacelab-earth/src/wgs84.rs codes
+ *     b  = a(1 - f),        e^2 = f(2 - f),
+ *     N  = a / sqrt(1 - e^2 sin^2 phi),
+ *     (x, y, z) = ((N + h) cos phi cos lam, (N + h) cos phi sin lam, (N(1 - e^2) + h) sin phi),
+ * and inverts the last line by Vermeille's closed form (J. Geodesy 76, 2002): with
+ *     P = (x^2 + y^2)/a^2,  Q = (1 - e^2) z^2/a^2,
+ * the auxiliary k satisfies the quartic  P/(k + e^2)^2 + Q/k^2 = 1, and then
+ *     D = k sqrt(x^2 + y^2)/(k + e^2),  phi = atan2(z, D),  h = (k + e^2 - 1)/k * sqrt(D^2 + z^2).
+ *
+ * Shown here, every line printing `<name>: 0`:
+ *   1. e^2 = f(2 - f) is the eccentricity of the ellipse with semi-axes a, b = a(1 - f);
+ *   2. the forward map at h = 0 lies on the ellipsoid, and its outward normal there is
+ *      (cos phi cos lam, cos phi sin lam, sin phi) -- phi is the geodetic latitude;
+ *   3. the forward map satisfies the defining equation of the latitude that
+ *      derivations/wgs84_geodesy.gp solves independently,
+ *          rho sin phi - z cos phi = e^2 N sin phi cos phi,   rho = sqrt(x^2 + y^2),
+ *      and h = rho cos phi + z sin phi - a sqrt(1 - e^2 sin^2 phi) recovers the height;
+ *   4. the forward map's k = 1 - e^2 + h/N is a root of Vermeille's quartic, and Vermeille's
+ *      (phi, h) formulas evaluated at that k return the phi and h the point was built from;
+ *   5. Vermeille's cube-root solution of the quartic is that root, at three sample points, at
+ *      60 digits (bfloat): |k_closed - k_forward| < 1e-50 prints as 0.
+ *
+ * Run: timeout 120 maxima --very-quiet -Q -b derivations/wgs84_geodesy.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* sin/cos are carried as s and c with c^2 = 1 - s^2 imposed by substitution. */
+cs(x) := ratsimp(subst(1 - s^2, c^2, ratsimp(x)))$
+
+b : a*(1 - f)$
+e2 : f*(2 - f)$
+zero("e2_is_one_minus_b2_over_a2", ratsimp(e2 - (1 - b^2/a^2)))$
+
+/* W = sqrt(1 - e^2 s^2), so N = a/W, carried as a symbol with W^2 imposed. */
+N : a/W$
+wsub(x) := ratsimp(subst(1 - e2*s^2, W^2, ratsimp(x)))$
+X : (N + h)*c*cl$
+Y : (N + h)*c*sl$
+Z : (N*(1 - e2) + h)*s$
+
+/* 2. On the surface, and the normal. cos^2 lam + sin^2 lam = 1 by substitution as well. */
+lam1(x) := ratsimp(subst(1 - sl^2, cl^2, ratsimp(x)))$
+surface : subst(0, h, (X^2 + Y^2)/a^2 + Z^2/b^2 - 1)$
+zero("forward_h0_on_ellipsoid", cs(wsub(lam1(ratsimp(surface*W^2)))))$
+/* grad of x^2/a^2 + y^2/a^2 + z^2/b^2 at the surface point, against (c cl, c sl, s): parallel iff
+   the cross product vanishes. */
+gx : subst(0, h, X)/a^2$  gy : subst(0, h, Y)/a^2$  gz : subst(0, h, Z)/b^2$
+zero("normal_cross_x", ratsimp(gy*s - gz*c*sl))$
+zero("normal_cross_y", ratsimp(gz*c*cl - gx*s))$
+zero("normal_cross_z", ratsimp(gx*c*sl - gy*c*cl))$
+
+/* 3. The defining equation of phi, and the height. rho = (N + h) c for c >= 0. */
+rho : (N + h)*c$
+zero("latitude_defining_equation", ratsimp(rho*s - Z*c - e2*N*s*c))$
+zero("height_recovery", cs(wsub(rho*c + Z*s - a*W - h)))$
+
+/* 4. Vermeille's quartic at the forward map's k, and his phi and h formulas at that k. */
+P : (X^2 + Y^2)/a^2$
+Q : (1 - e2)*Z^2/a^2$
+k : 1 - e2 + h/N$
+quartic : P/(k + e2)^2 + Q/k^2 - 1$
+zero("vermeille_quartic_at_forward_k", cs(wsub(lam1(quartic))))$
+/* D = k rho/(k + e2) must be (N(1 - e2) + h) c, the meridian-plane abscissa whose ratio with z is
+   tan phi; and sqrt(D^2 + z^2) = N(1 - e2) + h, so the height formula returns h. */
+D : k*rho/(k + e2)$
+zero("vermeille_d_is_scaled_cos", ratsimp(D - (N*(1 - e2) + h)*c))$
+zero("vermeille_height", ratsimp((k + e2 - 1)/k*(N*(1 - e2) + h) - h))$
+
+/* 5. The closed-form root, at 60 digits, at three points (deg latitude, metres height). */
+fpprec : 60$
+av : 6378137b0$
+fv : 1b0/298.257223563b0$
+e2v : fv*(2 - fv)$
+vermeille_k(xx, zz) := block([pp, qq, r, ss, t, u, v, w],
+  pp : xx^2/av^2, qq : (1 - e2v)*zz^2/av^2, r : (pp + qq - e2v^2)/6,
+  ss : e2v^2*pp*qq/(4*r^3), t : (1 + ss + sqrt(ss*(2 + ss)))^(1/3),
+  u : r*(1 + t + 1/t), v : sqrt(u^2 + e2v^2*qq), w : e2v*(u + v - qq)/(2*v),
+  sqrt(u + v + w^2) - w)$
+check_point(latdeg, hv) := block([ph, sv, cv, nv, xx, zz, kf, kc],
+  ph : bfloat(latdeg*%pi/180), sv : sin(ph), cv : cos(ph),
+  nv : av/sqrt(1 - e2v*sv^2),
+  xx : (nv + hv)*cv, zz : (nv*(1 - e2v) + hv)*sv,
+  kf : 1 - e2v + hv/nv, kc : vermeille_k(xx, zz),
+  if abs(kc - kf) < 1b-50 then 0 else kc - kf)$
+zero("vermeille_root_lat10_h0", check_point(10, 0b0))$
+zero("vermeille_root_lat45_h550km", check_point(45, 550000b0))$
+zero("vermeille_root_lat80_hgeo", check_point(80, 35786000b0))$

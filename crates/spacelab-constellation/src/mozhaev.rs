@@ -18,6 +18,11 @@
 //! `H_R ∈ {Cₙ, Dₙ}` (Table 1 of the classification): `T/O/Y` components give non-equatorial or
 //! unstable systems, and third-type groups pair satellites antipodally with opposed velocities. This
 //! module gives the point groups (order and rotation elements) and a value for the symbol itself.
+//!
+//! The Rodrigues matrix and the icosahedral generators are proved exact over ℚ(√5) in
+//! `derivations/mozhaev_point_groups.mac`; `derivations/mozhaev_point_groups.g` (GAP) gives each
+//! group's order, isomorphism type, polyhedron and trace histogram; the gate is
+//! `every_point_group_is_the_rotation_group_of_its_polyhedron` below.
 
 use spacelab_core::{Mat3, Vec3};
 
@@ -498,5 +503,137 @@ mod tests {
             ..sym
         };
         assert_eq!(std::format!("{second}"), "24' D6 C6 2");
+    }
+
+    /// The vertices of the tetrahedron, the cube and the icosahedron `(0, ±1, ±φ)`.
+    fn polyhedra(phi: f64) -> (Vec<Vec3>, Vec<Vec3>, Vec<Vec3>) {
+        let mut tetra = Vec::new();
+        for s in [
+            [1.0, 1.0, 1.0],
+            [1.0, -1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+        ] {
+            tetra.push(Vec3::new(s[0], s[1], s[2]));
+        }
+        let mut cube = Vec::new();
+        let mut ico = Vec::new();
+        for a in [1.0, -1.0] {
+            for b in [1.0, -1.0] {
+                for c in [1.0, -1.0] {
+                    cube.push(Vec3::new(a, b, c));
+                }
+                ico.push(Vec3::new(0.0, a, b * phi));
+                ico.push(Vec3::new(b * phi, 0.0, a));
+                ico.push(Vec3::new(a, b * phi, 0.0));
+            }
+        }
+        (tetra, cube, ico)
+    }
+
+    /// A regular n-gon in the equator plus both poles.
+    fn ngon(n: u32) -> Vec<Vec3> {
+        let mut v: Vec<Vec3> = (0..n)
+            .map(|k| {
+                let t = TAU * f64::from(k) / f64::from(n);
+                Vec3::new(libm::cos(t), libm::sin(t), 0.0)
+            })
+            .collect();
+        v.push(Vec3::new(0.0, 0.0, 1.0));
+        v.push(Vec3::new(0.0, 0.0, -1.0));
+        v
+    }
+
+    /// A group, its polyhedron, the vertex tolerance and the trace histogram.
+    type GroupCase = (PointGroup, Vec<Vec3>, f64, Vec<(f64, usize)>);
+
+    /// (G4) Every point group is the full rotation group of its polyhedron, with the traces of the
+    /// abstract group.
+    ///
+    /// `derivations/mozhaev_point_groups.g` (GAP, exact over ℤ and ℚ(√5)) shows that the proper
+    /// rotations preserving the tetrahedron are a group of 12 ≅ A₄, those preserving the cube 24
+    /// ≅ S₄, that the code's icosahedral generators generate 60 ≅ A₅ preserving the icosahedron
+    /// `(0, ±1, ±φ)`, and that `Cₙ`, `Dₙ` (n ≤ 8) are cyclic and dihedral and preserve the
+    /// equatorial n-gon; `derivations/mozhaev_point_groups.mac` proves the generators exact. Here
+    /// each emitted matrix must carry its polyhedron onto itself, the emitted set must have the
+    /// group's order with no repeats — so it *is* that group — and the trace histogram must be the
+    /// GAP one (it separates the 72° from the 144° turns). `T` and `O` are signed permutations and
+    /// are checked exactly; the rest to 1e-14.
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn every_point_group_is_the_rotation_group_of_its_polyhedron() {
+        let phi = 1.0_f64.midpoint(libm::sqrt(5.0));
+        let (tetra, cube, ico) = polyhedra(phi);
+        let inv_phi = 1.0 / phi;
+        let cases: [GroupCase; 7] = [
+            (
+                PointGroup::Tetrahedral,
+                tetra,
+                0.0,
+                vec![(3.0, 1), (-1.0, 3), (0.0, 8)],
+            ),
+            (
+                PointGroup::Octahedral,
+                cube,
+                0.0,
+                vec![(3.0, 1), (-1.0, 9), (0.0, 8), (1.0, 6)],
+            ),
+            (
+                PointGroup::Icosahedral,
+                ico,
+                1e-14,
+                vec![(3.0, 1), (-1.0, 15), (0.0, 20), (phi, 12), (-inv_phi, 12)],
+            ),
+            (
+                PointGroup::Cyclic(5),
+                ngon(5),
+                1e-14,
+                vec![(3.0, 1), (phi, 2), (-inv_phi, 2)],
+            ),
+            (PointGroup::Cyclic(7), ngon(7), 1e-14, vec![(3.0, 1)]),
+            (
+                PointGroup::Dihedral(3),
+                ngon(3),
+                1e-14,
+                vec![(3.0, 1), (-1.0, 3), (0.0, 2)],
+            ),
+            (
+                PointGroup::Dihedral(4),
+                ngon(4),
+                1e-14,
+                vec![(3.0, 1), (-1.0, 5), (1.0, 2)],
+            ),
+        ];
+        for (group, solid, tol, traces) in cases {
+            let ms = collect(group);
+            assert_eq!(ms.len() as u32, group.order(), "{group}");
+            for m in &ms {
+                assert!(is_proper_rotation(m), "{group}: improper");
+                for v in &solid {
+                    let w = *m * *v;
+                    assert!(
+                        solid.iter().any(|u| (w - *u).norm() <= tol),
+                        "{group} moves a vertex off the solid"
+                    );
+                }
+            }
+            for i in 0..ms.len() {
+                for j in (i + 1)..ms.len() {
+                    assert!(!approx_eq(&ms[i], &ms[j]), "{group}: repeated element");
+                }
+            }
+            for (trace, count) in traces {
+                let seen = ms
+                    .iter()
+                    .filter(|m| {
+                        let t = (**m * Vec3::new(1.0, 0.0, 0.0)).x
+                            + (**m * Vec3::new(0.0, 1.0, 0.0)).y
+                            + (**m * Vec3::new(0.0, 0.0, 1.0)).z;
+                        (t - trace).abs() <= tol.max(1e-15)
+                    })
+                    .count();
+                assert_eq!(seen, count, "{group}: trace {trace}");
+            }
+        }
     }
 }

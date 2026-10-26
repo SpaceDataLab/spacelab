@@ -1,0 +1,53 @@
+/* The elevation mask of crates/spacelab-sensors/src/elevation.rs, from its defining vectors.
+
+   Sphere of radius R (lengths in units of R below), ground cell G = (0, 0, 1) with zenith
+   zhat = (0, 0, 1), satellite S = L (sin lam, 0, cos lam) at Earth-central angle lam, L > 1.
+   d = S - G, t = d . zhat, q = d . d, s = sin(eps), c = cos(eps), c^2 = 1 - s^2.
+
+   The footprint edge, lam = pi/2 - eps - eta with the nadir angle sin(eta) = c/L (law of sines
+   in the triangle centre-cell-satellite), is in closed form
+
+     cos(lam) = (s w + c^2)/L,   sin(lam) = c (w - s)/L,   w = sqrt(L^2 - c^2) >= s,
+
+   and on it the line of sight has length |d| = w - s and rises t = s (w - s): the mask's g =
+   t - s |d| vanishes there identically, for every L > 1 and every eps in (-pi/2, pi/2). That is
+   also comms.rs's slant range d(eps) = sqrt(r_s^2 - (R cos eps)^2) - R sin eps, and it closes
+   the triangle by the law of cosines. (1)-(5) are those facts; (6) is the square-root-free
+   factorisation the predicate rests on; (7) is the derivative step_bound.mac bounds.
+
+   Every residual prints as `<name>: 0`, 8 of them.                                             */
+
+display2d : false$
+c2 : 1 - s^2$
+red(e) := ratsimp(ratsubst(L^2 - c2, w^2, ratsimp(e)))$
+
+cl : (s*w + c2)/L$
+sl : c*(w - s)/L$
+redc(e) := ratsimp(ratsubst(c2, c^2, red(e)))$
+
+S : L*[sl, 0, cl]$
+G : [0, 0, 1]$
+d : S - G$
+t : d . [0, 0, 1]$
+q : d . d$
+
+/* (1) the closed form is a point of the circle */
+print("edge_unit_circle:", redc(sl^2 + cl^2 - 1))$
+/* (2) the closed form is lam = pi/2 - eps - asin(cos(eps)/L), expanded; cos(eta) = w/L */
+trig(f) := ratsubst(w/L, sqrt(1 - c^2/L^2),
+                    subst([sin(e) = s, cos(e) = c], trigexpand(f(%pi/2 - e - asin(cos(e)/L)))))$
+print("edge_cosine_is_pi2_minus_eps_minus_eta:", redc(cl - trig(cos)))$
+print("edge_sine_is_pi2_minus_eps_minus_eta:", redc(sl - trig(sin)))$
+/* (3) |d|^2 = (w - s)^2 and t = s (w - s): the mask's g = t - s |d| vanishes on the edge */
+print("edge_range_squared:", redc(q - (w - s)^2))$
+print("edge_rise:", redc(t - s*(w - s)))$
+/* (4)-(5) the slant range R (w - s) closes the triangle: d^2 + 2 R d sin(eps) = r_s^2 - R^2 */
+print("slant_range_law_of_cosines:", red((w - s)^2 + 2*(w - s)*s - (L^2 - 1)))$
+/* (6) t^2 - s^2 q = (t - s sqrt(q)) (t + s sqrt(q)): for s, t >= 0 the second factor is >= 0,
+       so the sign of t - s sqrt(q) is the sign of t^2 - s^2 q -- the predicate's squaring */
+print("square_root_free_factorisation:", ratsimp(tt^2 - s^2*qq - (tt - s*sqrt(qq))*(tt + s*sqrt(qq))))$
+/* (7) along a trajectory r(t), g = d.zhat - s|d| has dg/dt = v.zhat - s (d.v)/|d|          */
+dv : [d1(tau), d2(tau), d3(tau)]$
+gt : dv . [z1, z2, z3] - s*sqrt(dv . dv)$
+vel : diff(dv, tau)$
+print("rate_identity:", ratsimp(diff(gt, tau) - (vel . [z1, z2, z3] - s*(dv . vel)/sqrt(dv . dv))))$

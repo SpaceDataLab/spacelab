@@ -4,6 +4,9 @@
 //! The headline is the **max gap**: the longest interval the target is *not* covered, counting the
 //! stretches before the first pass and after the last. A revisit requirement ("no worse than two
 //! hours of latency", `notes/06-coverage-source-material.md`) is a bound on exactly this number.
+//!
+//! Gate: `tests/metrics.rs::a_periodic_pattern_has_the_exact_rational_metrics` holds every metric to
+//! the exact rationals of `derivations/metrics_periodic_gaps.mac`.
 
 // The pass count is a `usize` slice length that comfortably fits `u32` (tens of passes a day).
 #![allow(clippy::cast_possible_truncation)]

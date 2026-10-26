@@ -8,6 +8,9 @@
 //! cannot cross, because `max_rate` bounds `|dg/dt|` — so **no pass, however short, is stepped over**.
 //! Each sign change is then bracketed and refined to `tol` seconds by Brent. This is the consumer the
 //! sensors' [`max_rate`](spacelab_sensors::Constraint::max_rate) bound was built for.
+//!
+//! Gate: `tests/access.rs::a_circular_pass_rises_and_sets_at_the_exact_crossings` holds the windows
+//! of a circular pass to the closed-form crossings of `derivations/access_horizon_crossing.mac`.
 
 // The scan driver's arguments are each a distinct, named quantity (the sensor, the orbit bound, the
 // frame rotation, the cell geometry, the trajectory, the scan interval, the sink); grouping them

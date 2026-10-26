@@ -20,6 +20,13 @@
 //! which satisfies the compatibility relation exactly for every `k`. (The later 2-D / 3-D *lattice*
 //! Flower theory, Davis–Avendaño–Mortari 2013, generalises this to several interleaved tracks and
 //! subsumes Walker; only the single-track form is built here.)
+//!
+//! The repeat condition, the time-shift phasing and the compatibility relation are derived in
+//! `derivations/flower_phasing.mac`; `derivations/flower_phasing.gp` gives the semi-major axis at
+//! 60 digits and `derivations/flower_phasing.g` (GAP) the orbit counts. The gates are
+//! `every_satellite_is_the_reference_time_shifted_along_the_track`,
+//! `the_semi_major_axis_matches_the_derived_value` and
+//! `distinct_satellites_and_nodes_are_the_group_orbit_counts` below.
 
 use spacelab_core::Angle;
 use spacelab_elements::KeplerianElements;
@@ -75,7 +82,8 @@ impl FlowerConstellation {
     /// Emit the `Ns` satellites' elements. Every set shares `(a, e, i, ω)`; satellite `k` sits at
     /// `Ω_k = Ω_0 − 2π·k·Nd/Ns` with mean anomaly `M_k = M_0 + 2π·k·Np/Ns`, converted to a true
     /// anomaly via [`KeplerianElements::at_mean_anomaly`]. A degenerate design (any of `Np`, `Nd`,
-    /// `Ns` zero) emits nothing.
+    /// `Ns` zero) emits nothing. The `Ns` satellites fill `Ns/gcd(Np, Nd, Ns)` distinct positions:
+    /// an unreduced `(Np, Nd)` sharing a factor with `Ns` emits coincident satellites.
     pub fn generate<E: FnMut(KeplerianElements)>(&self, mut emit: E) {
         let (np, nd, ns) = (self.petals, self.days, self.satellites);
         if np == 0 || nd == 0 || ns == 0 {
@@ -105,6 +113,7 @@ impl FlowerConstellation {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     use super::*;
     use spacelab_core::Vec3;
     use spacelab_testkit::nan_max;
@@ -288,6 +297,116 @@ mod tests {
             let resid = np * d_raan + nd * d_m; // ≡ 0 (mod 2π)
             let wrapped = resid - TAU * libm::round(resid / TAU);
             assert!(wrapped.abs() < 1e-9, "compatibility residual {wrapped:.2e}");
+        }
+    }
+
+    /// (G2) Satellite `k` is the reference satellite time-shifted by `k·T_rep/Ns`.
+    ///
+    /// The defining property of a single-track Flower: a time shift `τ` moves the node relative to
+    /// the rotating frame by `−ω·τ` and the mean anomaly by `n·τ`
+    /// (`derivations/flower_phasing.mac`, 6 identities). The expected angles are built here from
+    /// `τ_k`, `ω` and `n` — not from the `2π·k·Nd/Ns` closed form — and read back from the elements,
+    /// the mean anomaly through the elements' own Kepler inversion. Bound: 2e-14 rad, the round-off
+    /// of angles up to `2π·Np` plus the Kepler round trip at `e = 0.2`.
+    #[test]
+    fn every_satellite_is_the_reference_time_shifted_along_the_track() {
+        for (np, nd, ns, m0) in [
+            (3, 1, 6, 0.0),
+            (14, 3, 8, 0.9),
+            (4, 2, 6, 0.3),
+            (2, 4, 8, 5.0),
+        ] {
+            let fc = FlowerConstellation {
+                petals: np,
+                days: nd,
+                satellites: ns,
+                mean_anomaly: Angle::from_radians(m0),
+                raan: Angle::from_radians(0.7),
+                ..example()
+            };
+            let n = fc.mean_motion();
+            let t_rep = f64::from(nd) * TAU / OMEGA_EARTH;
+            for (k, s) in collect(&fc).iter().enumerate() {
+                let tau = t_rep * k as f64 / f64::from(ns);
+                for (got, want, what) in [
+                    (s.raan.radians(), 0.7 - OMEGA_EARTH * tau, "node"),
+                    (s.mean_anomaly().radians(), m0 + n * tau, "mean anomaly"),
+                ] {
+                    let d = (got - want).rem_euclid(TAU);
+                    let d = d.min(TAU - d);
+                    assert!(
+                        d < 2e-14,
+                        "({np},{nd},{ns}) sat {k} {what}: {d:.2e} rad off"
+                    );
+                }
+            }
+        }
+    }
+
+    /// (G3) The repeating-orbit semi-major axis against `derivations/flower_phasing.gp`.
+    ///
+    /// `a = (μ/n²)^(1/3)` with `n = (Np/Nd)·ω`, at 60 digits in PARI/GP for the module's fixtures,
+    /// Kepler's third law re-checked there at that precision. Bound: 4 ulp relative — five
+    /// correctly rounded operations, a third of the error of `μ/n²` surviving the cube root.
+    #[test]
+    fn the_semi_major_axis_matches_the_derived_value() {
+        for (np, nd, want) in [
+            (3, 1, 2.027_041_982_595_185e7),
+            (14, 3, 1.509_868_273_243_782_3e7),
+            (2, 1, 2.656_176_415_793_235_1e7),
+            (13, 1, 7.626_313_928_017_769e6),
+        ] {
+            let fc = FlowerConstellation {
+                petals: np,
+                days: nd,
+                ..example()
+            };
+            let got = fc.semi_major_axis();
+            assert!(
+                (got - want).abs() <= 4.0 * f64::EPSILON * want,
+                "({np},{nd}): a = {got} against {want}"
+            );
+        }
+    }
+
+    /// (G4) The satellites occupy exactly the positions the cyclic time-shift group predicts.
+    ///
+    /// Scaled by `Ns`, satellite `k` is the point `(−k·Nd, k·Np) mod Ns` of the node/mean-anomaly
+    /// torus. `derivations/flower_phasing.g` (GAP) checks for every `Np, Nd, Ns ≤ 10` that this
+    /// orbit has `Ns/gcd(Np, Nd, Ns)` distinct points on `Ns/gcd(Nd, Ns)` distinct nodes, so an
+    /// unreduced `(Np, Nd)` sharing a factor with `Ns` stacks satellites on one another. Counted
+    /// here from the emitted elements, rounded to that grid.
+    #[test]
+    fn distinct_satellites_and_nodes_are_the_group_orbit_counts() {
+        for (np, nd, ns, sats, nodes) in [
+            (3_u32, 1_u32, 6_u32, 6, 6),
+            (14, 3, 8, 8, 8),
+            (4, 2, 6, 3, 3),
+            (2, 4, 8, 4, 2),
+            (5, 3, 9, 9, 3),
+        ] {
+            let fc = FlowerConstellation {
+                petals: np,
+                days: nd,
+                satellites: ns,
+                ..example()
+            };
+            let grid = |angle: f64| {
+                (libm::round(angle * f64::from(ns) / TAU) as i64).rem_euclid(i64::from(ns))
+            };
+            let mut points: Vec<(i64, i64)> = collect(&fc)
+                .iter()
+                .map(|s| (grid(s.raan.radians()), grid(s.mean_anomaly().radians())))
+                .collect();
+            points.sort_unstable();
+            points.dedup();
+            let mut node_set: Vec<i64> = points.iter().map(|p| p.0).collect();
+            node_set.dedup();
+            assert_eq!(
+                (points.len(), node_set.len()),
+                (sats, nodes),
+                "({np},{nd},{ns})"
+            );
         }
     }
 }

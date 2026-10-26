@@ -1,0 +1,103 @@
+/* The Keplerian element conversions of spacelab-elements/src/keplerian.rs, as identities.
+ *
+ * `to_state` builds (r, v) in the perifocal frame and rotates by R = R3(-Omega) R1(-i) R3(-omega)
+ * (spacelab-core's frame rotations); `from_state` reads every element back as a two-argument arctangent
+ * of a sine numerator and a cosine numerator. from_state o to_state = id holds exactly when each
+ * pair of numerators is the sine and cosine of the element times one common POSITIVE factor -- the
+ * factor drops out of atan2 and the quadrant survives. Shown here, each line printing `<name>: 0`:
+ *
+ *   1. h = r x v = sqrt(mu p) (sin Omega sin i, -cos Omega sin i, cos i), the node vector
+ *      zhat x h = sqrt(mu p) sin i (cos Omega, sin Omega, 0), -mu/(2 energy) = a, and the
+ *      eccentricity vector [(v^2 - mu/r) r - (r.v) v]/mu = e R xhat;
+ *   2. the (sin, cos) numerators of i, omega and nu in the general branch are K (sin, cos) of the
+ *      element, with K = sqrt(mu p) for i, e sqrt(mu p) sin i for omega, e r for nu -- the
+ *      cross term vanishes and the projection equals K;
+ *   3. the substitute angles of the singular branches: the argument of latitude u = omega + nu for
+ *      a circular orbit, and the longitude of periapsis measured in the direction of motion,
+ *      sense = sign(h_z), at i = 0 and at i = pi with Omega = 0;
+ *   4. the anomaly maps: E = atan2(sqrt(1-e^2) sin nu, e + cos nu) with common factor
+ *      1/(1 + e cos nu), its inverse nu = atan2(sqrt(1-e^2) sin E, cos E - e) with factor
+ *      (1 - e^2)/(1 + e cos nu) once E is substituted, and r = a(1 - e cos E);
+ *   5. Kepler's equation M = E - e sin E has derivative 1 - e cos E, the Newton denominator.
+ *
+ * Kepler's equation itself is solved at 60 digits in derivations/keplerian_elements.gp, which also
+ * evaluates to_state at 60 digits for the Rust tests.
+ *
+ * Run: timeout 120 maxima --very-quiet -Q -b derivations/keplerian_elements.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* sqrt(mu p) appears as a symbol hh with hh^2 = mu p, so no radical simplification is needed. */
+ksimp(x) := ratsimp(subst(mu*p, hh^2, trigsimp(trigexpand(ratsimp(x)))))$
+ksimpv(x) := map(ksimp, x)$
+
+rot1(t) := matrix([1, 0, 0], [0, cos(t), sin(t)], [0, -sin(t), cos(t)])$
+rot3(t) := matrix([cos(t), sin(t), 0], [-sin(t), cos(t), 0], [0, 0, 1])$
+R : rot3(-W) . rot1(-inc) . rot3(-w)$
+
+rr : p/(1 + e*cos(nu))$
+rpf : matrix([rr*cos(nu)], [rr*sin(nu)], [0])$
+/* sqrt(mu/p) = hh/p */
+vpf : (hh/p)*matrix([-sin(nu)], [e + cos(nu)], [0])$
+r : R . rpf$
+v : R . vpf$
+col(m) := [m[1, 1], m[2, 1], m[3, 1]]$
+cross(u, q) := [u[2]*q[3] - u[3]*q[2], u[3]*q[1] - u[1]*q[3], u[1]*q[2] - u[2]*q[1]]$
+dot(u, q) := u[1]*q[1] + u[2]*q[2] + u[3]*q[3]$
+rv : col(r)$  vv : col(v)$
+
+/* 1. Angular momentum, node, energy, eccentricity vector. */
+hvec : cross(rv, vv)$
+hwant : hh*[sin(W)*sin(inc), -cos(W)*sin(inc), cos(inc)]$
+dh : ksimpv(hvec - hwant)$
+zero("h_x", dh[1])$  zero("h_y", dh[2])$  zero("h_z", dh[3])$
+node : [-hvec[2], hvec[1], 0]$
+dn : ksimpv(node - hh*sin(inc)*[cos(W), sin(W), 0])$
+zero("node_x", dn[1])$  zero("node_y", dn[2])$
+rmag : rr$
+zero("radius_is_conic", ksimp(dot(rv, rv) - rmag^2))$
+v2 : ksimp(dot(vv, vv))$
+energy : v2/2 - mu/rmag$
+zero("semi_major_axis", ratsimp(subst(a*(1 - e^2), p, -mu/(2*energy)) - a))$
+rdotv : ksimp(dot(rv, vv))$
+evec : ((v2 - mu/rmag)*rv - rdotv*vv)/mu$
+ewant : e*col(R . matrix([1], [0], [0]))$
+de : ksimpv(evec - ewant)$
+zero("evec_x", de[1])$  zero("evec_y", de[2])$  zero("evec_z", de[3])$
+
+/* 2. The atan2 numerator pairs, general branch. hmag = hh; |node| = hh sin i (0 < i < pi). */
+pair(name, sn, cn, ang, K) := (
+  zero(sconcat(name, "_cross"), ksimp(sn*cos(ang) - cn*sin(ang))),
+  zero(sconcat(name, "_scale"), ksimp(sn*sin(ang) + cn*cos(ang) - K)))$
+pair("inclination", hh*sin(inc), hwant[3], inc, hh)$
+pair("arg_periapsis", ewant[3]*hh, dot(node, ewant), w, e*hh*sin(inc))$
+pair("true_anomaly", rdotv*hh/mu, dot(ewant, rv), nu, e*rr)$
+
+/* 3. Singular branches. Circular inclined: u = omega + nu from (r_z |h|, node . r). */
+pair("argument_of_latitude", rv[3]*hh, dot(node, rv), w + nu, rr*hh*sin(inc))$
+/* Equatorial: Omega = 0, and the longitude of periapsis is atan2(sense e_y, e_x), sense = sign h_z. */
+eq0 : subst([inc = 0, W = 0], ewant)$
+pair("periapsis_longitude_prograde", eq0[2], eq0[1], w, e)$
+eqpi : subst([inc = %pi, W = 0], ewant)$
+pair("periapsis_longitude_retrograde", -eqpi[2], eqpi[1], w, e)$
+/* Circular equatorial: the true longitude from (sense r_y, r_x), at e = 0. */
+c0 : subst([inc = 0, W = 0, w = 0, e = 0], rv)$
+pair("true_longitude_prograde", c0[2], c0[1], nu, p)$
+cpi : subst([inc = %pi, W = 0, w = 0, e = 0], rv)$
+pair("true_longitude_retrograde", -cpi[2], cpi[1], nu, p)$
+
+/* 4. Anomalies. s1 = sqrt(1 - e^2) as a symbol with s1^2 = 1 - e^2. */
+asimp(x) := ratsimp(subst(1 - e^2, s1^2, trigsimp(ratsimp(x))))$
+cE : (e + cos(nu))/(1 + e*cos(nu))$
+sE : s1*sin(nu)/(1 + e*cos(nu))$
+zero("eccentric_anomaly_unit_circle", asimp(cE^2 + sE^2 - 1))$
+zero("eccentric_anomaly_radius", asimp(a*(1 - e*cE) - a*(1 - e^2)/(1 + e*cos(nu))))$
+/* nu back from E: the numerators (s1 sin E, cos E - e) are (1 - e^2)/(1 + e cos nu) (sin nu, cos nu). */
+zero("true_from_eccentric_cross", asimp(s1*sE*cos(nu) - (cE - e)*sin(nu)))$
+zero("true_from_eccentric_scale", asimp(s1*sE*sin(nu) + (cE - e)*cos(nu) - (1 - e^2)/(1 + e*cos(nu))))$
+
+/* 5. Kepler's equation and its Newton derivative. */
+zero("kepler_newton_derivative", ratsimp(diff(EE - e*sin(EE), EE) - (1 - e*cos(EE))))$

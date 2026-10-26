@@ -44,6 +44,12 @@
 //! Short-period corrections are not applied. The stopping test is on the **mean** perigee altitude,
 //! which is the right variable: the osculating perigee oscillates by tens of kilometres over one
 //! revolution and a threshold crossing on it is a crossing of the oscillation, not of the decay.
+//!
+//! The gate is the exact special case: `derivations/lifetime_exponential_decay.mac` solves the
+//! circular decay through a static exponential atmosphere in closed form (an `erfi`), and the module
+//! tests `the_reentry_epoch_is_the_exact_solution_of_the_decay_law` (G3) and
+//! `the_lifetime_scales_exactly_as_the_inverse_ballistic_coefficient` (G4) hold the whole assembly
+//! to it.
 
 use alloc::vec::Vec;
 
@@ -866,7 +872,9 @@ mod tests {
         );
     }
 
-    /// Doubling the ballistic coefficient halves the lifetime, and the model has to know it exactly.
+    /// (G4) Doubling the ballistic coefficient halves the lifetime, and the model has to know it
+    /// exactly — the scaling symmetry `derivations/lifetime_exponential_decay.mac` shows the exact
+    /// solution carries, `d ln t/d ln B = −1`.
     ///
     /// With no field and a time-invariant atmosphere the mean-element rate is `B·f(y)`, so `y(t)`
     /// depends on `B` and `t` only through `B·t` and every epoch on the trajectory — the re-entry one
@@ -1540,6 +1548,80 @@ mod tests {
             seconds,
             0.5 * chunk,
             "the tie at the midpoint was read as still flying"
+        );
+    }
+
+    /// `(threshold altitude m, t s)`: the epoch a 400 km circular orbit through the static
+    /// exponential atmosphere of [`air`] falls to each threshold, from the exact solution
+    /// `t(a) = √(πH)·e^{−r₀/H}/(ρ₀B√µ)·[erfi(√(a₀/H)) − erfi(√(a/H))]` of `da/dt = −ρ(a)·B·√(µa)` at 60
+    /// digits (`derivations/lifetime_exponential_decay.gp`, erfi and quadrature agreeing to 7e-76).
+    #[expect(
+        clippy::excessive_precision,
+        reason = "carried at the 25 digits the derivation printed"
+    )]
+    const EXACT_DECAY: [(f64, f64); 6] = [
+        (350_000.0, 742_838.623_165_262_754_172_413_1),
+        (300_000.0, 1_066_876.164_598_053_638_267_806),
+        (250_000.0, 1_208_230.212_787_904_121_462_035),
+        (200_000.0, 1_269_894.458_719_414_533_194_845),
+        (150_000.0, 1_296_795.620_597_614_280_178_140),
+        (120_000.0, 1_304_957.946_737_290_233_346_750),
+    ];
+
+    /// (G3) The re-entry epoch of a circular orbit through a static exponential atmosphere is the
+    /// closed form `derivations/lifetime_exponential_decay.mac` derives — the exact solution of the
+    /// decay ODE, not King-Hele's constant-`√a` approximation — at six thresholds from 350 km to the
+    /// default 120 km.
+    ///
+    /// No field and no co-rotation, the configuration the closed form describes, so the whole
+    /// assembly — the DSST Gauss average of the drag, the mean-element integration, the chunk scan
+    /// and the bisection — is measured against mathematics that shares none of it. The bisection is
+    /// asked for 1 µs and reports the far end of its bracket, so the epoch lies at or after the exact
+    /// one by at most that, give or take the integration: 1e-11 of the epoch, against the 4.7e-13
+    /// measured beyond the bracket, which is what a 1e-14 relative step tolerance accumulates over the ~10⁵ steps and
+    /// the last orbits, where `dt/da` collapses as the density climbs.
+    #[test]
+    fn the_reentry_epoch_is_the_exact_solution_of_the_decay_law() {
+        #[derive(Clone, Copy)]
+        struct Static(Exponential);
+        impl Atmosphere for Static {
+            fn density(&self, position: [f64; 3]) -> f64 {
+                self.0.density(position)
+            }
+            fn velocity(&self, _position: [f64; 3]) -> [f64; 3] {
+                [0.0, 0.0, 0.0]
+            }
+        }
+
+        let field = zonal(false);
+        let atmosphere = Frozen(Static(air().0));
+        let mut spacecraft = model(&field, 0.02);
+        let start = circular(400_000.0);
+        let tolerance = 1e-6;
+        let mut worst = 0.0_f64;
+        for (threshold, want) in EXACT_DECAY {
+            spacecraft.reentry_altitude = threshold;
+            let Lifetime::Reentry { seconds, .. } = lifetime(
+                &spacecraft,
+                &atmosphere,
+                start,
+                20.0 * 86_400.0,
+                86_400.0,
+                tolerance,
+            )
+            .unwrap() else {
+                unreachable!("this orbit falls below {threshold} m inside 20 days")
+            };
+            let late = seconds - want;
+            let integration = 1e-11 * want;
+            assert!(
+                (-integration..=tolerance + integration).contains(&late),
+                "to {threshold} m: {seconds:.7} s against the exact {want:.7} s ({late:.2e} s late)"
+            );
+            worst = worst.max((late.abs() - tolerance).max(0.0) / want);
+        }
+        std::println!(
+            "decay to each threshold vs the exact solution: worst {worst:.2e} relative beyond the bracket"
         );
     }
 }

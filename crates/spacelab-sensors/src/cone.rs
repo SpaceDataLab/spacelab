@@ -1,4 +1,8 @@
 //! Conical field of view, about the geocentric nadir or an explicit boresight.
+//!
+//! The footprint edge `asin(L sin alpha) - alpha`, its tangency with the horizon, the
+//! division-free `u~` and the rate-bound terms are derived in `derivations/cone_footprint.mac`
+//! (120-digit values: `derivations/cone_footprint.gp`) and gated in `tests/cone_gates.rs`.
 
 use spacelab_core::Vec3;
 

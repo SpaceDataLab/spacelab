@@ -30,6 +30,9 @@
 //! 4.7 M doubles before any orbit has been evaluated. Here [`Instrument::sample`] computes one pixel
 //! on demand from the same closed forms, so a caller who wants the swath edges pays for two pixels.
 //! That is also what lets this be `no_std`.
+//!
+//! The closed forms are checked in `derivations/scan_catalogue.mac` (edge angles at 120 digits:
+//! `derivations/scan_catalogue.gp`) and gated in `tests/scan_gates.rs`.
 
 use libm::atan2;
 
@@ -65,7 +68,8 @@ pub enum Instrument {
     ///
     /// The averaging is what moves the swath edge: GAC samples run `..1111.2222.----.NNNN..`, so the
     /// outermost *pixel centre* sits at `55.37 · (1023.5 − 3.5)/1023.5`, not at 55.37°. Getting that
-    /// factor wrong displaces the swath edge by about a kilometre.
+    /// factor wrong displaces the swath edge on the ground by about 16 km (15.7 km at 833 km
+    /// altitude, `derivations/scan_catalogue.gp`).
     ///
     /// Source: NOAA KLM User's Guide, Appendix J.
     AvhrrGac,

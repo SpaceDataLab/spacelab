@@ -1,0 +1,22 @@
+/* Draim's four-satellite constellation (`crates/spacelab-constellation/src/draim.rs`; US patent
+   4,854,527, Table I). The period-to-axis map and the symmetry of the tabulated pattern. Every
+   identity prints `<name>: 0`.
+   Run: timeout 120 maxima --very-quiet -Q -b derivations/draim_tetrahedral.mac </dev/null */
+
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+assume(mu > 0, P > 0)$
+/* from_period: a = (mu (P/2 pi)^2)^(1/3) has period 2 pi sqrt(a^3/mu) = P. */
+a: (mu*(P/(2*%pi))^2)^(1/3)$
+chk("from_period_inverts_keplers_third_law", radcan(2*%pi*sqrt(a^3/mu) - P))$
+
+/* Table I, degrees: [omega, node, mean anomaly] of satellites 1..4 (omega -90 written as 270). */
+table1: [[270, 0, 0], [90, 90, 270], [270, 180, 180], [90, 270, 90]]$
+canon(s) := sort(map(lambda([x], map(lambda([y], mod(y, 360)), x)), s))$
+/* A half-turn about the polar axis and half a period map the table onto itself (1<->3, 2<->4):
+   the pattern is invariant under that element of rotation x time-shift, at every instant. */
+chk("half_turn_with_half_period_is_a_symmetry",
+    if canon(map(lambda([x], [x[1], x[2] + 180, x[3] + 180]), table1)) = canon(table1) then 0 else 1)$
+/* Nodes 90 degrees apart, perigees alternating south/north, mean anomalies a quarter turn apart. */
+chk("nodes_quarter_turn_apart", apply("+", makelist(mod(table1[k+1][2] - table1[k][2], 360) - 90, k, 1, 3)))$
+chk("perigees_alternate", apply("+", makelist(mod(table1[k+1][1] - table1[k][1], 360) - 180, k, 1, 3)))$
+chk("mean_anomalies_quarter_turn_apart", apply("+", makelist(mod(table1[k][3] - table1[k+1][3], 360) - 90, k, 1, 3)))$

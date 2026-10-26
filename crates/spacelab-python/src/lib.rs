@@ -359,8 +359,9 @@ impl Sensor {
         })
         .ok_or_else(|| {
             PyValueError::new_err(format!(
-                "{min_elevation_deg}° is outside Bennett's domain, or the geometric mask it \
-                 converts to is not one an elevation mask accepts"
+                "{min_elevation_deg}° is below the apparent horizon or beyond what the refraction \
+                 fit reaches, or the geometric mask it converts to is not one an elevation mask \
+                 accepts"
             ))
         })
     }
@@ -2331,7 +2332,8 @@ fn flower_constellation(
 /// right-ascension slots × `sats_per_orbit` per slot, placed by configuration number `config`; every
 /// satellite shares the orbit `(semi_major_axis, eccentricity, inclination, arg_periapsis)`. Returns
 /// the inertial states `(r, v)` (SI). A circular lattice with `config = F` reproduces a Walker
-/// `i: T/P/F`. Angles radians.
+/// `i: T/P/F`; the literature's `Nc′` (Avendaño et al. 2013) is `config = −Nc′ mod orbits`
+/// (`docs/adr/0002-lattice-configuration-number.md`). Angles radians.
 #[pyfunction]
 #[pyo3(signature = (
     orbits, sats_per_orbit, config, semi_major_axis, eccentricity, inclination,
@@ -6708,50 +6710,55 @@ mod tests {
     /// the same order of magnitude — the shape where a reordering is invisible to any assertion
     /// weaker than the values themselves.
     ///
-    /// The reference is not the Rust: the SMAD relations in `SocGeometry`'s own documentation were
-    /// re-evaluated at 50 decimal digits (`mpmath`) for this configuration, and the seventeen
-    /// significant figures below are that computation rounded to `f64`. A 800 km, 80°, 10° street
-    /// was chosen because it makes every field distinguishable — `planes` 8 and `per_plane` 10 are
-    /// both above the `0`/`1` a whole-function replacement can produce, and no angle lands on `0`,
-    /// `1` or another field's value.
-    ///
-    /// The second call is what pins the *argument* order: 90° differs from 80° only through
-    /// `sin i`, which enters both node spacings and nothing else, so a bridge that passed the
-    /// inclination where the elevation belongs would not reproduce both.
+    /// The reference is the crate's own [`StreetOfCoverage::geometry`], field by field and bit for
+    /// bit; its values are gated against `derivations/soc_street_geometry.mac` in `soc.rs`, so this
+    /// test pins only what the bridge adds: the order of the arguments and of the nine fields. 87°
+    /// and 90° differ only through the inclination, so an argument swap would not reproduce both.
+    /// 80° at 10° elevation is refused: its street half-width is below `π/2 − i`, where the
+    /// counter-rotating seam cannot close.
     #[test]
     fn the_street_of_coverage_bridge_returns_nine_geometry_fields_in_the_documented_order() {
-        let (inc, eps) = (80.0_f64.to_radians(), 10.0_f64.to_radians());
-        let g = street_of_coverage_geometry(inc, 800e3, eps, 6_378_137.0, MU_EARTH, None)
-            .expect("a 800 km 80-degree street at 10 degrees elevation is feasible");
-
-        assert_eq!((g.0, g.1), (8, 10), "plane and per-plane counts");
-        for (got, want, name) in [
-            (g.2, 0.330_721_421_894_526_15, "footprint_half_angle"),
-            (g.3, 0.105_103_348_540_504_93, "street_half_width"),
-            (g.4, 0.442_659_150_413_819_06, "raan_step_co"),
-            (g.5, 0.213_461_748_757_419_73, "raan_step_counter"),
-            (g.6, 0.418_304_414_976_053_36, "raan_step"),
-            (g.7, 2.928_130_904_832_373_5, "raan_span"),
-            (g.8, 0.236_051_797_663_794_1, "inter_plane_phase"),
-        ] {
-            assert!((got - want).abs() < 1e-14, "{name}: {got} vs {want}");
+        let eps = 10.0_f64.to_radians();
+        for inc_deg in [87.0_f64, 90.0] {
+            let inc = inc_deg.to_radians();
+            let got = street_of_coverage_geometry(inc, 800e3, eps, 6_378_137.0, MU_EARTH, None)
+                .expect("a 800 km street at 10 degrees elevation is feasible at 87 and 90 degrees");
+            let want = StreetOfCoverage {
+                inclination: Angle::from_radians(inc),
+                altitude: 800e3,
+                min_elevation: Angle::from_radians(eps),
+                earth_radius: 6_378_137.0,
+                mu: MU_EARTH,
+                per_plane: None,
+            }
+            .geometry()
+            .expect("the same street through the crate");
+            assert_eq!(
+                (got.0, got.1),
+                (want.planes, want.per_plane),
+                "{inc_deg}°: counts"
+            );
+            for (got, want, name) in [
+                (got.2, want.footprint_half_angle, "footprint_half_angle"),
+                (got.3, want.street_half_width, "street_half_width"),
+                (got.4, want.raan_step_co, "raan_step_co"),
+                (got.5, want.raan_step_counter, "raan_step_counter"),
+                (got.6, want.raan_step, "raan_step"),
+                (got.7, want.raan_span, "raan_span"),
+                (got.8, want.inter_plane_phase, "inter_plane_phase"),
+            ] {
+                assert_eq!(got.to_bits(), want.to_bits(), "{inc_deg}°: {name}");
+            }
         }
 
-        let polar = street_of_coverage_geometry(FRAC_PI_2, 800e3, eps, 6_378_137.0, MU_EARTH, None)
-            .expect("the polar street is feasible too");
+        let inc = 80.0_f64.to_radians();
         assert!(
-            (polar.4 - 0.435_824_770_435_031_1).abs() < 1e-14
-                && (polar.5 - 0.210_206_697_081_009_86).abs() < 1e-14,
-            "the inclination did not reach sin i: {polar:?}"
+            street_of_coverage_geometry(inc, 800e3, eps, 6_378_137.0, MU_EARTH, None).is_none(),
+            "an 80-degree street of half-width 6 degrees cannot close its counter-rotating seam"
         );
-        assert_eq!(
-            (polar.2, polar.3),
-            (g.2, g.3),
-            "footprint and street width do not depend on inclination"
-        );
-
         assert!(
-            street_of_coverage_geometry(inc, 800e3, eps, 6_378_137.0, MU_EARTH, Some(2)).is_none(),
+            street_of_coverage_geometry(FRAC_PI_2, 800e3, eps, 6_378_137.0, MU_EARTH, Some(2))
+                .is_none(),
             "two satellites per plane are below the pi/theta continuity floor and must be refused"
         );
     }

@@ -1007,7 +1007,7 @@ which is why the assertion is on the round trip and not on the metre.
 | coverage | Coverage & constellation-union metrics | revisit / gap metric definitions | analytic hand-computed gaps + union-shrink property | < 1e-12 | tests/metrics.rs, src/combine.rs |
 | coverage | Parallel revisit_map ≡ serial | internal API contract | self-consistency (bit-for-bit) | exact == | src/parallel.rs |
 | constellation | Draim tetrahedral | Draim 1987 patent Table I | Draim 1987 patent Table I + time-sampled Fibonacci-sphere coverage oracle (600×400) | period < 1.0 s; worst margin > 0 | src/draim.rs |
-| constellation | Street-of-Coverage | Lüders 1961; Adams & Rider 1987 | Adams/Rider/Lüders geometry + Fibonacci-sphere oracle (700×120) | θ < 1e-9; cos λ < 1e-12; margin > −2e-3 | src/soc.rs |
+| constellation | Street-of-Coverage | Lüders 1961; Adams & Rider 1987 | `derivations/soc_street_geometry.mac` + `.gp` (G1, G2); Fibonacci-sphere coverage (700×120) as S1 | θ < 1e-9; cos λ < 1e-12; derived widths within 8 ulp; sampled margin > −1e-12 | src/soc.rs |
 | constellation | Walker Delta/Star | Walker 1984 (i:T/P/F) | Walker i:T/P/F plane spacing + hand phasing | count/RAAN exact; u < 1e-9 | src/walker.rs |
 | constellation | Flower constellation | Mortari et al. 2004 | Mortari theory (single-track compatibility) + Kepler | Kepler < 1e-12; one-track < 1 m | src/flower.rs |
 | constellation | Mozhaev point groups | Mozhaev 1972/73; icosahedral group A₅ | icosahedral Y≅A₅ conjugacy profile (1/15/20/24) | class counts exact | src/mozhaev.rs |
@@ -1045,7 +1045,7 @@ which is why the assertion is on the round trip and not on the metre.
 | sensors | A cone about an explicit boresight (§4.19) | `θ ≤ α ⟺ w·b̂ ≥ 0 ∧ (w·b̂)² ≥ cos²α (w·w)` — the same square-root-free predicate, with the `n2` that existed only to avoid normalising `r` gone | the arm it generalises: `Boresight::Fixed(−r/\|r\|)` against `GeocentricNadir`, over three orbits × four half-angles × four cells; then the batch kernel against the scalar predicate over a 121×121 grid straddling the cone edge | `covered` **exactly equal** in every case; `g` **1.863e-9 m** worst against a *derived* `4·\|r\|·ε` bound — the cancellation in the old form's `\|r\|² − c·r`, which is why the pointed arm is better conditioned as well as one multiply cheaper; kernel and scalar agree on **14 641** cells with the grid measured to straddle the edge | crates/spacelab-sensors/tests/boresight.rs |
 | sensors | The footprint the deflection moves (§4.19) | swapping the axis turns the cone by exactly the deflection | the two axes' separation against the derivation at 550 and 700 km, then the consequence: a geodetic cone opened by the deflection must contain every cell the geocentric cone does, and the un-opened one must not | axes **0.177 125°** / **0.173 366°** apart to **1e-6 °**; **1.70 km** of ground displacement at 550 km to **10 m**; opening by the deflection leaves **0** cells outside, not opening leaves **> 0** — so identical footprints fail the test rather than passing it | crates/spacelab-sensors/tests/boresight.rs |
 | sensors | The rate bound a turning boresight needs (§4.19) | the event search rests on `\|dg/dt\| ≤ max_rate`; a re-supplied geodetic axis turns faster than the geocentric one | `derivations/nadir_deflection.mac`: `d(φ′)/d(φ)` runs from `1−e²` at the equator to `1/(1−e²)` in the limit at the pole, so the factor is `1/(1−e²)`; checked against a sweep over latitude and seven heights in the same run | the sweep's worst **6.739 486e-3** against the analytic **6.739 497e-3** — under it, so the bound holds; the pointed cone's whole-bound ratio measured strictly inside **(1, 1.006 739 5)** | crates/spacelab-sensors/tests/boresight.rs |
-| coverage, sensors | An apparent elevation mask, converted once (§4.18) | a station's "visible above 10°" is an *apparent* elevation; `ElevationMask`/`ElevationDetector` measure the geometric one, and the two differ by 5.3′ at 10° and 34′ at the horizon | the identity the shift rests on, asserted rather than assumed: `h ↦ h + R(h)` swept at 0.001° from the fit's −1° floor to the zenith, 91 001 samples; then the mask against `Refraction::geometric` directly, and the two non-physical ends | strictly increasing at **every** sample; the mask equals `sin(geometric(mask))` **bit-for-bit**; refused below the horizon and refused at the zenith, where both published fits return a *negative* bend and the geometric mask lands 3.9e-7 rad past `π/2` | coverage/src/observability.rs |
+| coverage, sensors | An apparent elevation mask, converted once (§4.18) | a station's "visible above 10°" is an *apparent* elevation; `ElevationMask`/`ElevationDetector` measure the geometric one, and the two differ by 5.3′ at 10° and 34′ at the horizon | the identity the shift rests on, asserted rather than assumed: `h ↦ h + R(h)` swept at 0.001° from the fit's −1° floor to the zenith, 91 001 samples; then the mask's threshold `h*` against its defining equation `apparent(h*) = mask` (G2), and the two non-physical ends | strictly increasing at **every** sample; `apparent(h*)` reaches the mask and `apparent` one float below `h*` does not, and the mask equals `sin(h*)` **bit-for-bit** (Bennett's `geometric`, a separate fit, lies within 4″); refused below the horizon and refused at the zenith, where both published fits return a *negative* bend and the geometric mask lands 3.9e-7 rad past `π/2` | coverage/src/observability.rs |
 | coverage, sensors | The bias the conversion removes (§4.18) | the pass edge moves by `R(mask)/(dε/dt)`, so the *pass* sets the size as much as the atmosphere does | the ISS day `access_oracle.rs` validates against Orekit, with the shifted mask measured against refracting every sample | **0.81–1.18 s** at a 10° mask, **2.0–8.6 s** at 5°, **9.3–20.3 s** at the horizon, one-signed on every edge of every pass; the two routes agree to **< 6″** of elevation, which is the Sæmundsson/Bennett disagreement and not an approximation in the shift | spacelab/tests/refraction\_in\_access.rs |
 | capi, python | The conversion exists on every bridge (§4.18) | before this, neither bridge exposed refraction at all, so a Python or C caller could not correct the bias even knowing it was there | each bridge against the other's numbers and against the crate's: Bennett's 5.3′ at 10°, the round trip, both domain refusals, the null pointer | C and C++: bend **5.3′ ± 0.1′**, round trip **< 6″**, `SL_ERR_DOMAIN` below the horizon and on a non-positive pressure, `SL_ERR_INVALID_ARGUMENT` on a null out-pointer. Python: the same bend to **2e-2 ′**, `None` outside each domain, `ValueError` from the mask constructor — and the corrected mask measurably lengthens the coverage fraction | capi/tests/{c/smoke.c, cpp/smoke.cpp, cpp/nothrow.cpp}, python/tests/smoke.py |
 | slr | Mendes–Pavlis zenith delay | Mendes & Pavlis 2004, *GRL* **31** L14602; IERS Conventions (2010) ch. 9 | the IERS routine `FCULZD_HPA` itself, rebuilt by `tools/iers-oracle` with `gfortran -fdefault-real-8`, at its own published test point — McDonald Observatory, 2009 Aug 14, the 532 nm second harmonic | measured **1 / 4 / 0 ULP** on hydrostatic, non-hydrostatic and total, against a 4 ULP gate. The routine's *header comment* disagrees with its own code by **3.8 µm**, a constant ratio across all three outputs — the `f` gravity factor that divides them, stale in the IERS distribution's documentation. The compiled value is a comparator, and the header's printed value is the document's vector: the 3.8 µm between them is an erratum to trace, not settled by matching either (`plans/17` D-18 a). A default `gfortran` build differs from the double one by 1.6e-12 m, six orders below the gap, so the build flag is not the cause | src/troposphere.rs |
@@ -2142,7 +2142,7 @@ bridges. The fix is an additional constructor that *names* the convention, not a
 the old one.
 
 **What makes the shift exact rather than approximate is a property, and it is now measured as one.**
-`apparent(h) ≥ mask` and `h ≥ geometric(mask)` are the same condition only if `h ↦ h + R(h)` is
+`apparent(h) ≥ mask` and `h ≥ h*`, with `apparent(h*) = mask`, are the same condition only if `h ↦ h + R(h)` is
 strictly increasing; if it were not, one apparent threshold would answer to an *interval* of geometric
 ones. The sweep runs at 0.001° from the fit's −1° floor to the zenith, 91 001 samples, and the count is
 asserted so that a sample falling silently outside the domain fails rather than shrinking the claim.
@@ -2629,15 +2629,13 @@ the *pass* sets it as much as the atmosphere does: the 20.27 s belongs to a pass
 which crosses the horizon almost tangentially, against 9.34 s for one peaking at 47.8°.
 
 **The fix is a constant, and that is worth stating precisely.** `h ↦ h + R(h)` is strictly increasing,
-so "apparent elevation ≥ mask" and "geometric elevation ≥ `Refraction::geometric(mask)`" are the same
-condition — an apparent mask is exactly one geometric mask. Nothing needs to reach the batch kernel,
-no per-sample transform is required, and no API had to grow: the conversion is the `Refraction` method
-that already existed. `refraction_in_access.rs` measures both routes rather than asserting the
-identity, and what separates them is **3.7″ of elevation** at every mask — the Sæmundsson/Bennett
-round-trip difference, since the two fits are not exact inverses of each other, and not an
-approximation in the shift. The scale-free form is the one the test asserts: in seconds the same
-difference is 1.3e-2 s at a 10° mask and 2.6e-2 s at the horizon, because the elevation rate that
-divides it is a property of the pass.
+so "apparent elevation ≥ mask" and "geometric elevation ≥ `h*`" are the same condition, `h*` the
+root of `apparent(h*) = mask` — an apparent mask is exactly one geometric mask. Nothing needs to reach
+the batch kernel and no per-sample transform is required. `h*` is Sæmundsson inverted by bisection
+(`Refraction::elevation_mask`, Ф17.B): the conversion first used Bennett's `geometric`, a separate fit
+and not Sæmundsson's inverse, so the two routes in `refraction_in_access.rs` stood **3.7″ of
+elevation** apart (1.3e-2 s at a 10° mask, 2.6e-2 s at the horizon). With the exact inverse they agree
+to the root finder's tolerance, ≤ 7.7e-5 s at every mask, and the test asserts `2·TOL`.
 
 What is *not* closed: refraction is still not applied by default, because which of the two elevations
 a coverage product wants is the caller's question and not this crate's. What changed is that the
@@ -7877,8 +7875,12 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 325 modules, 103 name a check, 222 do not** — 135 physics,
-28 parsers, 6 generated and 53 infrastructure. Later on 2026-10-26 the rule also read each module's own
+(`plans/16` Ф17.B orders them). **Today: 325 modules, 131 name a check, 194 do not** — 107 physics,
+28 parsers, 6 generated and 53 infrastructure. Ф17.B batch 1 (2026-10-26) took out the 28 physics
+modules on the mission-feasibility path, each with a Maxima derivation and a second engine (PARI or
+GAP) re-run in `derivations/verify.sh` §7 and a gate-tagged test against it; two defects in
+`constellation/soc.rs` (the counter-rotating seam and the retrograde stagger) and the Boltzmann term
+of `sensors/comms.rs` were wrong and are fixed. Later on 2026-10-26 the rule also read each module's own
 test module, where a gate sits beside the formula it decides: eight modules had a gate-tagged test
 there and left the ledger, seven of them physics (`dsst/propagator.rs`, `spacecraft.rs`,
 `harris_priester/mod.rs`, `maneuver.rs`, `density_rom.rs`, `wam_ipe.rs`, the GNSS `models.rs`) and the
@@ -7917,7 +7919,6 @@ crates/spacelab-astro/src/cr3bp.rs | physics | no re-runnable check named in the
 crates/spacelab-astro/src/cw.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/edl.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/iod.rs | physics | names only a round trip through the in-repo `propagate` (S2), no G1-G5 test
-crates/spacelab-astro/src/kepler.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/lambert.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-astro/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-astro/src/lowthrust.rs | physics | no re-runnable check named in the module doc
@@ -7936,16 +7937,7 @@ crates/spacelab-astrometry/src/wcs.rs | physics | no re-runnable check named in 
 crates/spacelab-autodiff/src/dual.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-autodiff/src/hyperdual.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-autodiff/src/scalar.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-constellation/src/analysis.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-constellation/src/draim.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-constellation/src/flower.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-constellation/src/lattice.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-constellation/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-constellation/src/mozhaev.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-constellation/src/shell.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-constellation/src/soc.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-constellation/src/symmetric.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-constellation/src/walker.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-control/src/attitude.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-control/src/closed_loop.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-control/src/latency.rs | infra | types, traits, drivers or re-exports; nothing to derive
@@ -7955,18 +7947,11 @@ crates/spacelab-core/src/frame.rs | infra | types, traits, drivers or re-exports
 crates/spacelab-core/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-core/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-core/src/time.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-coverage/src/access.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-coverage/src/combine.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-coverage/src/detectors.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-coverage/src/fom.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-coverage/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-coverage/src/metrics.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-coverage/src/observability.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-coverage/src/parallel.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-coverage/src/photometry.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-coverage/src/root.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-earth/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-earth/src/wgs84.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-earthvision/src/atmospheric_correction.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-earthvision/src/camera.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-earthvision/src/cloud.rs | physics | no re-runnable check named in the module doc
@@ -7987,8 +7972,6 @@ crates/spacelab-earthvision/src/rpc_adjust.rs | physics | no re-runnable check n
 crates/spacelab-earthvision/src/sfm.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-earthvision/src/stereo.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-earthvision/src/swath.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-elements/src/design.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-elements/src/keplerian.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-elements/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-eop/src/c04.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-eop/src/finals.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
@@ -8079,8 +8062,6 @@ crates/spacelab-propagation/src/dsst/mod.rs | infra | types, traits, drivers or 
 crates/spacelab-propagation/src/ephemeris.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/forces.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/gj.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-propagation/src/harris_priester/atmosphere.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-propagation/src/lifetime.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-propagation/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/netcdf_classic.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/nrlmsise00/atmosphere.rs | physics | no re-runnable check named in the module doc
@@ -8096,15 +8077,8 @@ crates/spacelab-propagation/src/taylor.rs | physics | no re-runnable check named
 crates/spacelab-propagation/src/tolerance.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/wind_data.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/wind_model.rs | physics | names only a measurement against data, no G1-G5 test
-crates/spacelab-sensors/src/agile.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-sensors/src/comms.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-sensors/src/cone.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-sensors/src/elevation.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-sensors/src/geoloc.rs | physics | names only a comparator test (C), no G1-G5 test
 crates/spacelab-sensors/src/grid.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-sensors/src/kernel.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-sensors/src/sar.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-sensors/src/scan.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-sgp4/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-sgp4/src/omm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-sgp4/src/satellite.rs | infra | types, traits, drivers or re-exports; nothing to derive
@@ -8157,8 +8131,10 @@ arc"), not as the value asserted. They carry their tag now. SciPy, missing from 
 codes, adds three: a degree-70 geopotential, a DCT and a Bessel function; the WAM-IPE reader's
 product test (§10.18) adds a fourth. The spec-vector audit (Ф19.E, 2026-10-26) adds three the rules had missed: the
 `FCULZD_HPA` zenith delay, `TDFRPH`'s arguments and `HARDISP`'s spline, whose expected values the compiled IERS routines printed
-through `tools/iers-oracle` — no code's name in them, so the doc rule now reads that harness too. **Today: 133 comparator-decided tests of 3 301** — name 95,
-file 18, fixture 4, doc 16; 73 of them Orekit's (60 by name), 51 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+through `tools/iers-oracle` — no code's name in them, so the doc rule now reads that harness too. Ф17.B batch 1 removes two: Harris–Priester's density law is gated in Maxima and PARI, its Orekit
+reference test is parked and its ceiling test asserts the model's definition. **Today: 131
+comparator-decided tests of 3 339** — name 94, file 18, fixture 4, doc 15; 71 of them Orekit's (59 by
+name), 49 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 
@@ -8251,8 +8227,6 @@ crates/spacelab-propagation/src/dsst/third_body_short_period.rs::truncation_matc
 crates/spacelab-propagation/src/earth_radiation.rs::knocke_matches_orekit | name:orekit
 crates/spacelab-propagation/src/ephemeris.rs::both_bodies_reach_erfa_at_the_documented_accuracy | name:erfa
 crates/spacelab-propagation/src/geopotential.rs::validated_against_scipy_at_degree_70 | name:scipy
-crates/spacelab-propagation/src/harris_priester/mod.rs::above_ceiling_is_zero | doc:orekit
-crates/spacelab-propagation/src/harris_priester/mod.rs::matches_orekit_reference | name:orekit
 crates/spacelab-propagation/src/maneuver.rs::constant_thrust_matches_orekit | name:orekit
 crates/spacelab-propagation/src/maneuver.rs::impulse_matches_orekit | name:orekit
 crates/spacelab-propagation/src/maneuver.rs::polynomial_empirical_matches_orekit | name:orekit

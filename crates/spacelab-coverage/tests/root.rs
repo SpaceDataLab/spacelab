@@ -1,6 +1,7 @@
 //! Brent against roots computed to 34 digits in PARI/GP, and the failure modes Orekit names.
 //!
-//! The reference roots are `derivations/*` PARI/GP `solve` outputs. A root finder that only agrees
+//! The reference roots are derived in `derivations/root_reference_roots.mac` (Maxima) and
+//! re-solved in `derivations/root_reference_roots.gp` (PARI/GP). A root finder that only agrees
 //! with itself proves nothing; these compare against an independent high-precision oracle, and
 //! against the conformance cases (`RootPlusToleranceHasWrongSign`, double roots, endpoint roots)
 //! that `notes/13-orekit.md` §9 lists as the ones a detector must not fail.
@@ -38,6 +39,9 @@ fn assert_valid_bracket(b: &spacelab_coverage::Bracket, tol: f64) {
     );
 }
 
+/// (G3) Brent's bracket contains, and its estimate lies within `tol + 8·ε·max(|x|, 1)` of, the exact
+/// roots of `x³ − 2x − 5` (Cardano), `cos x − x`, `x − e⁻ˣ` (`W(1)`) and `x² − 2`, derived in
+/// `derivations/root_reference_roots.mac` and re-solved in `derivations/root_reference_roots.gp`.
 #[test]
 fn matches_pari_reference_roots_to_near_machine_precision() {
     let cases: &[(fn(f64) -> f64, f64, f64, f64)] = &[

@@ -1,0 +1,35 @@
+/* Coverage metrics of crates/spacelab-coverage/src/metrics.rs from their definitions, and the exact
+   rational values of a periodic access pattern that tests/metrics.rs holds `metrics` to.
+
+   Mean response time is *defined* as the time-average over [t0, t1] of the wait w(t) until the next
+   pass: w = 0 while covered, w = b - t inside a gap [a, b] (the trailing gap's wait running down to
+   0 at t1, the module's stated convention). The integral over one gap is (b - a)^2/2, so the
+   average is sum(gap^2)/(2 span), the shipped expression.
+
+   The pattern: N passes of length d every period P, the first rising a seconds after t0, on a span
+   T. Gaps: a (leading), N - 1 interior gaps P - d, and T - a - (N-1) P - d (trailing). */
+
+ratprint : false$
+print("response_integral_over_a_gap:", ratsimp(integrate(b - t, t, a, b) - (b - a)^2/2))$
+
+lead : a$
+inner : P - d$
+trail : T - a - (N - 1)*P - d$
+print("gaps_plus_passes_tile_the_span:", ratsimp(lead + (N - 1)*inner + trail + N*d - T))$
+/* The sum over the N - 1 interior gaps, done as a sum rather than assumed. */
+sq : lead^2 + sum(inner^2, i, 1, N - 1) + trail^2$
+print("interior_sum_is_N_minus_1_copies:", ratsimp(ev(sq, simpsum) - (lead^2 + (N - 1)*inner^2 + trail^2)))$
+
+/* The instance tests/metrics.rs uses: a 90-minute period, 10-minute passes, first rise 1000 s in,
+   16 passes over one day. */
+inst : [P = 5400, d = 600, a = 1000, N = 16, T = 86400]$
+fr : subst(inst, N*d/T)$
+mg : subst(inst, (T - N*d)/(N + 1))$
+mr : subst(inst, ev(sq, simpsum)/(2*T))$
+tr : subst(inst, trail)$
+print("instance: trailing", tr, " coverage", fr, " mean gap", mg, " mean response", mr)$
+print("instance_trailing_gap:", tr - 3800)$
+print("instance_coverage_fraction:", fr - 1/9)$
+print("instance_mean_gap:", mg - 76800/17)$
+print("instance_mean_response:", mr - 112825/54)$
+print("instance_max_gap:", lmax(subst(inst, [lead, inner, trail])) - 4800)$

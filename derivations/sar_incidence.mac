@@ -1,0 +1,51 @@
+/* The side-looking SAR of crates/spacelab-sensors/src/sar.rs, from its defining vectors.
+
+   d = r_sat - r_cell, zhat the cell's zenith, t = d . zhat, q = d . d; the local incidence is
+   cos(theta_inc) = t/sqrt(q). On a sphere (lengths in units of R, cell G = (0, 0, 1), satellite
+   S = L (sin lam, 0, cos lam)) with the satellite's off-nadir look angle eta, sa = sin(eta),
+   ca = cos(eta), k = sqrt(1 - L^2 sa^2), the cell the look reaches sits at lam = asin(L sa) - eta.
+
+   (1)-(2) there, cos(theta_inc) = k = cos(eta + lam): the incidence exceeds the look angle by
+   exactly the Earth-central angle, theta_inc = eta + lam; (3) and theta_inc = pi/2 - eps, the
+   complement of the elevation (sin(eps) = k as well). (4) Each band edge t - cos(theta) sqrt(q)
+   factors as the elevation edge does, so with cos(theta) > 0 and t >= 0 its sign is that of
+   t^2 - cos(theta)^2 q: the square-root-free `covered`. (5) dg/dt of an edge is the elevation
+   one with s = cos(theta), so (1 + cos(theta)) v_rel bounds it. (6) look_side is
+   (c - r) . (dhat x vhat) = -c . (r x v)/(|r| |v|) for any r, v, c; (7) Lagrange's identity
+   |r x v|^2 = |r|^2 |v|^2 - (r . v)^2, so on a circular orbit (r . v = 0) look_side is minus the
+   cell's signed distance along the orbit normal r x v/|r x v|.
+
+   Every residual prints as `<name>: 0`, 7 of them.                                              */
+
+display2d : false$
+red(e) := ratsimp(ratsubst(1 - L^2*sa^2, k^2, ratsubst(1 - sa^2, ca^2, ratsimp(e))))$
+
+cl : k*ca + L*sa*sa$
+sl : L*sa*ca - k*sa$
+S : L*[sl, 0, cl]$
+G : [0, 0, 1]$
+d : S - G$
+t : d . [0, 0, 1]$
+q : d . d$
+range : L*ca - k$
+
+print("incidence_range:", red(q - range^2))$
+print("incidence_is_look_plus_central_angle:", red(t - range*(ca*cl - sa*sl)))$
+print("incidence_is_complement_of_elevation:",
+      ratsimp(trigexpand(cos(%pi/2 - eps)) - sin(eps)))$
+
+print("band_edge_factorisation:", ratsimp(tt^2 - ct^2*qq - (tt - ct*sqrt(qq))*(tt + ct*sqrt(qq))))$
+
+dv : [d1(tau), d2(tau), d3(tau)]$
+vel : diff(dv, tau)$
+edge : dv . [z1, z2, z3] - ct*sqrt(dv . dv)$
+print("band_edge_rate_identity:",
+      ratsimp(diff(edge, tau) - (vel . [z1, z2, z3] - ct*(dv . vel)/sqrt(dv . dv))))$
+
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+rv : [r1, r2, r3]$ vv : [v1, v2, v3]$ cv : [c1, c2, c3]$
+nr : sqrt(rv . rv)$ nv : sqrt(vv . vv)$
+print("look_side_identity:",
+      ratsimp((cv - rv) . cross(-rv/nr, vv/nv) + (cv . cross(rv, vv))/(nr*nv)))$
+h : cross(rv, vv)$
+print("lagrange_identity:", ratsimp(h . h - ((rv . rv)*(vv . vv) - (rv . vv)^2)))$

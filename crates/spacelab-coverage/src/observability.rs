@@ -24,6 +24,12 @@
 //!
 //! The detectors follow [`crate::detectors`]: `g > 0` when the gate is *open* (dark enough, far
 //! enough from the Moon), `g < 0` when it is shut, and [`crate::find_events`] brackets the crossing.
+//!
+//! # Gates
+//!
+//! `derivations/observability_diurnal_arc.mac` derives the diurnal arc from the altitude equation,
+//! the sidereal rate, the air-mass fits at their exact points, and a proof that Sæmundsson's
+//! `h ↦ h + R(h)` is strictly increasing; the tests below tagged `(G2)`/`(G3)` hold the code to them.
 
 use spacelab_core::Vec3;
 use spacelab_sensors::ElevationMask;
@@ -42,7 +48,8 @@ use crate::detectors::ElevationDetector;
 /// In the units these calculations are usually quoted in it is **15.041 067 178 670 °/h**, and that
 /// is the number to divide an hour angle by. Dividing by 15 °/h instead — the mean *solar* rate —
 /// is the classic rise/set bug: it is right only for a body whose right ascension advances at the
-/// Sun's own mean rate of 0.0411 °/h, and wrong by 4 s per hour of hour angle for anything else.
+/// Sun's own mean rate of 0.0411 °/h, and wrong by 9.83 s per hour of hour angle for anything else
+/// (`3600 (1 − 1/1.002 737 811 911 354 48)` s, `derivations/observability_diurnal_arc.mac`).
 // The rate is kept at the width the IAU published it, not at the width `f64` distinguishes.
 #[allow(clippy::excessive_precision)]
 pub const SIDEREAL_ROTATION_RATE: f64 =
@@ -178,14 +185,47 @@ impl Refraction {
     /// **9.3–20.3 s** at the horizon, with the same sign on every edge of every pass
     /// (`spacelab/tests/refraction_in_access.rs`). This is the conversion that closes it, and it is
     /// exact rather than an approximation: `h ↦ h + R(h)` is strictly increasing, so
-    /// `apparent(h) ≥ mask` and `h ≥ geometric(mask)` are the same condition and one apparent mask is
-    /// exactly one geometric mask. The batch kernel never sees the atmosphere and costs nothing.
+    /// `apparent(h) ≥ mask` and `h ≥ h*` are the same condition, where `h*` solves
+    /// `apparent(h*) = mask`, and one apparent mask is exactly one geometric mask. The batch kernel
+    /// never sees the atmosphere and costs nothing.
     ///
-    /// `None` when the apparent mask is outside [`Refraction::geometric`]'s domain, or when the
-    /// geometric mask it converts to is not one [`ElevationMask::new`] accepts.
+    /// `h*` is Sæmundsson inverted by bisection, not [`Refraction::geometric`]: Bennett is a separate
+    /// fit, not Sæmundsson's inverse, and the two disagree by up to 4″.
+    ///
+    /// `None` below the apparent horizon, when no altitude up to the zenith reaches the mask (both
+    /// fits bend the zenith *down*), or when [`ElevationMask::new`] refuses `h*`.
     #[must_use]
     pub fn elevation_mask(self, mask: ApparentAltitude) -> Option<ElevationMask> {
-        ElevationMask::new(self.geometric(mask)?.0).ok()
+        ElevationMask::new(self.true_threshold(mask)?.0).ok()
+    }
+
+    /// The least `f64` true altitude whose [`Refraction::apparent`] reaches `mask`.
+    ///
+    /// Bisection on the monotone map keeps `apparent(below) < mask ≤ apparent(above)` and stops when
+    /// the two are adjacent floats, so the result is exact to the last ulp the map resolves.
+    pub(crate) fn true_threshold(self, mask: ApparentAltitude) -> Option<TrueAltitude> {
+        if mask.0.is_nan() || mask.0 < 0.0 {
+            return None;
+        }
+        let reaches = |h: f64| {
+            self.apparent(TrueAltitude(h))
+                .is_some_and(|a| a.0 >= mask.0)
+        };
+        let (mut below, mut above) = (REFRACTION_FLOOR, core::f64::consts::FRAC_PI_2);
+        if reaches(below) || !reaches(above) {
+            return None;
+        }
+        loop {
+            let mid = 0.5 * (below + above);
+            if mid <= below || mid >= above {
+                return Some(TrueAltitude(above));
+            }
+            if reaches(mid) {
+                above = mid;
+            } else {
+                below = mid;
+            }
+        }
     }
 }
 
@@ -508,8 +548,8 @@ mod tests {
     }
 
     /// The property the mask conversion rests on: `h ↦ h + R(h)` is strictly increasing, so
-    /// `apparent(h) ≥ mask` and `h ≥ geometric(mask)` are the same condition and one apparent mask is
-    /// exactly one geometric mask. If it were not monotone, a single apparent threshold would
+    /// `apparent(h) ≥ mask` and `h ≥ h*`, with `apparent(h*) = mask`, are the same condition and one
+    /// apparent mask is exactly one geometric mask. If it were not monotone, a single apparent threshold would
     /// correspond to an *interval* of geometric ones and shifting the mask would be an approximation
     /// rather than an identity — which is what `Refraction::elevation_mask` claims it is not.
     ///
@@ -544,26 +584,42 @@ mod tests {
         );
     }
 
-    /// The conversion is the Bennett bend applied to the threshold and nothing else — asserted
-    /// against `geometric` directly rather than against a recomputed formula, because the claim is
-    /// that the mask *is* that value and not that it is close to it.
+    /// (G2) The mask's threshold `h*` solves the equation that defines it, `apparent(h*) = mask`:
+    /// `apparent(h*)` reaches the mask and `apparent` of the float just below `h*` does not, so
+    /// `apparent(h) ≥ mask ⇔ h ≥ h*` holds on every float. `elevation_mask` carries exactly `h*`.
+    /// Bennett's `geometric` is a separate fit, not this inverse; it lands within 4″ (S1).
     #[test]
-    fn an_apparent_mask_converts_to_exactly_the_geometric_one() {
+    fn an_apparent_mask_converts_to_the_root_of_the_refraction_map() {
         let r = Refraction::STANDARD;
-        for deg in [0.0_f64, 1.0, 5.0, 10.0, 30.0, 80.0] {
+        for deg in [0.0_f64, 0.25, 1.0, 5.0, 10.0, 30.0, 80.0, 89.9] {
+            let threshold = r.true_threshold(a(deg)).expect("inside the domain");
+            let at = r.apparent(threshold).expect("inside the domain").0;
+            let below = r
+                .apparent(TrueAltitude(threshold.0.next_down()))
+                .expect("inside the domain")
+                .0;
+            assert!(
+                below < deg * DEG && deg * DEG <= at,
+                "{deg}°: apparent is {below} one float below h* and {at} at h*"
+            );
             let mask = r.elevation_mask(a(deg)).expect("inside the domain");
-            let geometric = r.geometric(a(deg)).expect("above the horizon");
             assert_eq!(
                 mask.sin_min(),
-                libm::sin(geometric.0),
-                "the {deg}° apparent mask is not the geometric one"
+                libm::sin(threshold.0),
+                "{deg}°: the mask is not h*"
             );
-            // And it is *below* the apparent one, by the bend: the atmosphere lifts the satellite,
-            // so a geometric mask that reproduces an apparent one has to sit lower.
+            // The atmosphere lifts the satellite, so the geometric threshold sits below the mask —
+            // except past 89.89°, where the fit's bend turns negative (documented on `Refraction`).
+            assert_eq!(
+                threshold.0 < deg * DEG,
+                deg < 89.89,
+                "{deg}°: h* on the wrong side"
+            );
+            let bennett = r.geometric(a(deg)).expect("above the horizon").0;
             assert!(
-                geometric.0 < deg * DEG,
-                "the geometric mask {} is not below the apparent {deg}°",
-                geometric.0
+                (bennett - threshold.0).abs() < 4.0 * ARCMIN / 60.0,
+                "{deg}°: Bennett is {:.2}″ from the exact inverse",
+                (bennett - threshold.0).abs() / ARCMIN * 60.0
             );
         }
     }
@@ -593,6 +649,117 @@ mod tests {
             "the zenith bend is not negative, so this boundary is no longer the one being tested"
         );
         assert!(r.elevation_mask(zenith).is_none(), "at the zenith");
+    }
+
+    /// (G2) Every arc `diurnal_arc` reports satisfies the equation that defines it,
+    /// `sin h₀ = sin φ sin δ + cos φ cos δ cos H` (residual ≤ 8·ε over a 5° grid of latitude,
+    /// declination and threshold), and three arcs are the exact ones of
+    /// `derivations/observability_diurnal_arc.mac`, re-solved in `derivations/observability_diurnal_arc.gp`:
+    /// `π/2` on the equator at the equinox, `acos(1/3)` at φ = δ = h₀ = 30°, `acos(−1/√3)` at
+    /// φ = 45°, δ = 30° on the horizon (bound 8·ε absolute: `sin H ≥ 0.8` there, so `acos` does not
+    /// amplify the quotient's few ulps).
+    #[test]
+    // The derived values are kept at the derivation's width, not at the width f64 distinguishes.
+    #[allow(clippy::excessive_precision)]
+    fn the_diurnal_arc_solves_the_altitude_equation() {
+        let mut rises = 0_u32;
+        for lat in (-85..=85).step_by(5) {
+            for dec in (-85..=85).step_by(5) {
+                for alt in (-18..=30).step_by(6) {
+                    let (phi, delta, h0) = (
+                        f64::from(lat) * DEG,
+                        f64::from(dec) * DEG,
+                        f64::from(alt) * DEG,
+                    );
+                    if let DiurnalArc::Rises { hour_angle } = diurnal_arc(phi, delta, h0) {
+                        let residual = libm::sin(h0)
+                            - (libm::sin(phi) * libm::sin(delta)
+                                + libm::cos(phi) * libm::cos(delta) * libm::cos(hour_angle));
+                        assert!(
+                            residual.abs() <= 8.0 * f64::EPSILON,
+                            "φ {lat}, δ {dec}, h₀ {alt}: residual {residual:e}"
+                        );
+                        rises += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            rises > 5000,
+            "the grid must exercise the rising branch: {rises}"
+        );
+        for (lat, dec, alt, exact) in [
+            (0.0, 0.0, 0.0, core::f64::consts::FRAC_PI_2),
+            (
+                30.0,
+                30.0,
+                30.0,
+                1.230_959_417_340_774_682_134_929_178_247_987,
+            ),
+            (
+                45.0,
+                30.0,
+                0.0,
+                2.186_276_035_465_283_960_298_786_280_763_745,
+            ),
+        ] {
+            let DiurnalArc::Rises { hour_angle } = diurnal_arc(lat * DEG, dec * DEG, alt * DEG)
+            else {
+                panic!("φ {lat}, δ {dec}, h₀ {alt} must rise")
+            };
+            assert!(
+                (hour_angle - exact).abs() <= 8.0 * f64::EPSILON,
+                "φ {lat}, δ {dec}, h₀ {alt}: {hour_angle} against {exact}"
+            );
+        }
+    }
+
+    /// (G3) The sidereal hour-angle rate is exactly 15.041 067 178 670 317 2 °/h, and the error of
+    /// dividing by 15 °/h is exactly `3600 (1 − 1/k)` = 9.829 212 346 235 372 s per hour of hour
+    /// angle (`derivations/observability_diurnal_arc.mac`, `.gp`). Bound 4 ulps relative on the rate;
+    /// on the error, `4·ε/(1 − 1/k)` relative, because `1 − ratio` amplifies the two rates' own
+    /// rounding by `1/0.00273`.
+    #[test]
+    // The derived values are kept at the derivation's width, not at the width f64 distinguishes.
+    #[allow(clippy::excessive_precision)]
+    fn the_sidereal_rate_is_the_exact_rational() {
+        let deg_per_hour = SIDEREAL_ROTATION_RATE.to_degrees() * 3600.0;
+        let exact = 15.041_067_178_670_317_2;
+        assert!(
+            ((deg_per_hour - exact) / exact).abs() <= 4.0 * f64::EPSILON,
+            "{deg_per_hour}"
+        );
+        let per_hour = 3600.0 * (1.0 - SOLAR_ROTATION_RATE / SIDEREAL_ROTATION_RATE);
+        let exact = 9.829_212_346_235_372_282_562_786_829_845;
+        assert!(
+            ((per_hour - exact) / exact).abs()
+                <= 4.0 * f64::EPSILON / (1.0 - 1.0 / 1.002_737_811_911_354_5),
+            "{per_hour} s per hour of hour angle"
+        );
+    }
+
+    /// (G3) The air-mass fits at their exact points (`derivations/observability_diurnal_arc.mac`,
+    /// `.gp`): Young (1994) is the rational 4823350/151989 on the true horizon and
+    /// 580232350/580232139 at the zenith, Kasten & Young (1989) 37.919 608 377 836 325 on the
+    /// apparent horizon. Bound 8 ulps relative (`cos(π/2)` is 6e-17, not 0, which moves Young's
+    /// horizon value by 1e-16 relative).
+    #[test]
+    // The derived values are kept at the derivation's width, not at the width f64 distinguishes.
+    #[allow(clippy::excessive_precision)]
+    fn the_air_mass_fits_have_their_exact_values() {
+        for (got, exact) in [
+            (airmass_young_1994(t(0.0)), 4_823_350.0 / 151_989.0),
+            (airmass_young_1994(t(90.0)), 580_232_350.0 / 580_232_139.0),
+            (
+                airmass_kasten_young_1989(a(0.0)),
+                37.919_608_377_836_325_302_180_122_737_278_88,
+            ),
+        ] {
+            assert!(
+                ((got - exact) / exact).abs() <= 8.0 * f64::EPSILON,
+                "{got} against {exact}"
+            );
+        }
     }
 
     #[test]
@@ -772,7 +939,7 @@ mod tests {
             (deg_per_hour - 15.041_067_178_670).abs() < 1e-11,
             "{deg_per_hour}"
         );
-        // The mean solar rate is exactly 15, and the difference over a 6 h hour angle is 24 s —
+        // The mean solar rate is exactly 15, and the difference over a 6 h hour angle is 59 s —
         // the "off by a few seconds" a rise/set routine written with 15 °/h carries.
         assert!((SOLAR_ROTATION_RATE.to_degrees() * 3600.0 - 15.0).abs() < 1e-13);
         let drift = 6.0 * 3600.0 * (1.0 - SOLAR_ROTATION_RATE / SIDEREAL_ROTATION_RATE);

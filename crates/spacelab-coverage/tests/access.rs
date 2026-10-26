@@ -2,6 +2,7 @@
 //!
 //! * A bare `sin` switching function yields windows at its analytic zeros.
 //! * A circular pass over a ground cell opens and closes at `±acos(Rₑ/r)/ω` — the horizon crossings.
+//! * The same pass behind a 10° mask, to `tol` against the exact `t_c ∓ (acos(Rₑ cos ε/r) − ε)/ω`.
 //! * A higher elevation mask shortens the window; its edges are genuine zeros of `g`.
 //! * A window far narrower than the natural scan step is still found — the adaptive step shrinks to
 //!   it, the whole point of stepping by `|g|/max_rate`.
@@ -319,4 +320,70 @@ fn a_scan_that_starts_mid_pass_clamps_the_window_to_t0() {
         ws[0].rise
     );
     assert!((ws[0].set - (t_c + half)).abs() < 5e-3, "set {}", ws[0].set);
+}
+
+/// (G3) The rise and set of a circular pass at the horizon and behind a 10° mask, against the
+/// closed-form crossings `t_c ∓ λ(ε)/ω`, `λ(ε) = acos(Rₑ cos ε / r) − ε`, derived in
+/// `derivations/access_horizon_crossing.mac` and re-solved from `g(θ) = 0` directly in
+/// `derivations/access_horizon_crossing.gp`, 34 digits.
+///
+/// The bound is the bracket's own, `tol + 4·ε·|t|`, plus 1e-11 s for the f64 trajectory: the
+/// rounding of `ω`, `cos θ` and `g` (metres at ~7e6, slope ~ km/s) moves the f64 root by ~1e-13 s.
+#[test]
+// The derived values are kept at the derivation's width, not at the width f64 distinguishes.
+#[allow(clippy::excessive_precision)]
+fn a_circular_pass_rises_and_sets_at_the_exact_crossings() {
+    // tests: t_c = 3000 s; (mask °, rise, set) from the derivation.
+    const EXACT: [(f64, f64, f64); 2] = [
+        (
+            0.0,
+            2_606.032_557_723_478_284_894_240_376_453_039,
+            3_393.967_442_276_521_715_105_759_623_546_961,
+        ),
+        (
+            10.0,
+            2_737.845_889_576_740_566_872_505_080_234_553,
+            3_262.154_110_423_259_433_127_494_919_765_447,
+        ),
+    ];
+    let r = 7_000e3;
+    let omega = (MU / (r * r * r)).sqrt();
+    let cell = Vec3::new(RE, 0.0, 0.0);
+    let zenith = Vec3::new(1.0, 0.0, 0.0);
+    let orbit = OrbitBound {
+        semi_major_axis: r,
+        eccentricity: 0.0,
+        mu: MU,
+    };
+    let tol = 1e-9;
+    for (mask_deg, rise, set) in EXACT {
+        let mask = ElevationMask::new(mask_deg.to_radians()).unwrap();
+        let mut ws = Vec::new();
+        access_windows(
+            &mask,
+            &orbit,
+            0.0,
+            cell,
+            zenith,
+            circular_pass(r, omega, 3_000.0),
+            0.0,
+            6_000.0,
+            tol,
+            |w| ws.push(w),
+        );
+        assert_eq!(ws.len(), 1, "mask {mask_deg}°: {ws:?}");
+        let bound = tol + 4.0 * f64::EPSILON * set + 1e-11;
+        assert!(
+            (ws[0].rise - rise).abs() <= bound,
+            "mask {mask_deg}°: rise {} against {rise}, error {:.3e} > {bound:.3e}",
+            ws[0].rise,
+            (ws[0].rise - rise).abs()
+        );
+        assert!(
+            (ws[0].set - set).abs() <= bound,
+            "mask {mask_deg}°: set {} against {set}, error {:.3e} > {bound:.3e}",
+            ws[0].set,
+            (ws[0].set - set).abs()
+        );
+    }
 }

@@ -1,0 +1,50 @@
+/* Universal-variable two-body propagation -- spacelab-astro/src/kepler.rs -- as identities, on all
+ * three conics. With sqrt(mu) = sm, the universal anomaly chi, alpha = 1/a and z = alpha chi^2,
+ *     C(z) = (1 - cos sqrt z)/z,   S(z) = (sqrt z - sin sqrt z)/sqrt(z)^3          (alpha > 0),
+ *     C(z) = (cosh sqrt(-z) - 1)/(-z),  S(z) = (sinh sqrt(-z) - sqrt(-z))/sqrt(-z)^3  (alpha < 0),
+ *     C = 1/2, S = 1/6                                                               (alpha = 0),
+ * the code solves the universal Kepler equation
+ *     F(chi) = (r0 vr0/sm) chi^2 C + (1 - alpha r0) chi^3 S + r0 chi - sm dt = 0
+ * by safeguarded Newton with the derivative `fp`, and forms the Lagrange coefficients
+ *     f = 1 - chi^2 C/r0,  g = dt - chi^3 S/sm,  fdot = sm/(r r0) (alpha chi^3 S - chi),
+ *     gdot = 1 - chi^2 C/r.
+ *
+ * Shown here on each conic, each line printing `<name>: 0`:
+ *   1. dF/dchi is the coded `fp`;
+ *   2. |f r0vec + g v0vec|^2 = fp^2, with r0vec.v0vec = r0 vr0 and |v0|^2 = mu (2/r0 - alpha) --
+ *      the derivative of the Kepler function IS the new radius, so F is strictly increasing and its
+ *      root unique (the claim the bracket in `universal_anomaly` rests on);
+ *   3. f gdot - fdot g = 1 at the root (dt eliminated through F = 0), with r = fp -- the Lagrange
+ *      coefficients preserve the Wronskian, i.e. angular momentum (G4).
+ * The Stumpff quartering identities are derived in derivations/stumpff_quartering.mac; the root of
+ * F itself is computed at 100 digits in derivations/kepler_universal.gp.
+ *
+ * Run: timeout 120 maxima --very-quiet -Q -b derivations/kepler_universal.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+conic(tag, al, C, S, simpf) := block([z, F, fp, f, g, fd, gd, dt, rn2],
+  F : (r0*vr0/sm)*chi^2*C + (1 - al*r0)*chi^3*S + r0*chi - sm*dt0,
+  fp : (r0*vr0/sm)*chi*(1 - al*chi^2*S) + (1 - al*r0)*chi^2*C + r0,
+  zero(sconcat(tag, "_kepler_derivative_is_fp"), simpf(diff(F, chi) - fp)),
+  /* dt at the root of F. */
+  dt : ((r0*vr0/sm)*chi^2*C + (1 - al*r0)*chi^3*S + r0*chi)/sm,
+  f : 1 - chi^2*C/r0,
+  g : dt - chi^3*S/sm,
+  rn2 : f^2*r0^2 + 2*f*g*r0*vr0 + g^2*sm^2*(2/r0 - al),
+  zero(sconcat(tag, "_new_radius_is_fp"), simpf(rn2 - fp^2)),
+  fd : sm/(fp*r0)*(al*chi^3*S - chi),
+  gd : 1 - chi^2*C/fp,
+  zero(sconcat(tag, "_lagrange_wronskian"), simpf(f*gd - fd*g - 1)))$
+
+/* Ellipse: alpha = sa^2, sqrt z = sa chi. */
+ell(x) := ratsimp(trigsimp(trigreduce(ratsimp(x))))$
+conic("ellipse", sa^2, (1 - cos(sa*chi))/(sa*chi)^2, (sa*chi - sin(sa*chi))/(sa*chi)^3, ell)$
+/* Hyperbola: alpha = -sa^2, sqrt(-z) = sa chi. */
+hyp(x) := ratsimp(exponentialize(ratsimp(x)))$
+conic("hyperbola", -sa^2, (cosh(sa*chi) - 1)/(sa*chi)^2, (sinh(sa*chi) - sa*chi)/(sa*chi)^3, hyp)$
+/* Parabola. */
+conic("parabola", 0, 1/2, 1/6, ratsimp)$

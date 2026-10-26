@@ -2,6 +2,14 @@
 //! orbit already flown. The inverse direction to the rest of the crate — and the reason the verified
 //! `J₂` secular rates ([`KeplerianElements::nodal_regression_rate`]) matter beyond analysis.
 //!
+//! `derivations/design_orbit.mac` shows each solver's answer satisfies the condition that defines it
+//! — the coded fixed point closes the repeat-ground-track resonance exactly — and computes 40-digit
+//! roots that `derivations/design_orbit.gp` reproduces in a second engine; the gates are the module
+//! tests `the_repeat_ground_track_axis_is_the_root_of_the_resonance` (G2),
+//! `the_sun_synchronous_inclination_is_the_root_of_the_node_rate` (G2) and
+//! `the_frozen_eccentricity_matches_the_solved_j2_j3_balance` (G2, from
+//! `derivations/j2_secular_rates.mac`).
+//!
 //! [`KeplerianElements::nodal_regression_rate`]: crate::KeplerianElements::nodal_regression_rate
 
 // The design formulae are single letters — n (mean motion), a, e, i, p, q — as every reference
@@ -292,6 +300,9 @@ mod tests {
         ),
     ];
 
+    /// (G2) The frozen eccentricity against the root of `ω̇ = 0` at `ω = 90°` that
+    /// `derivations/j2_secular_rates.mac` solves for the summed `J₂ + J₃` disturbing function.
+    ///
     /// The frozen eccentricity is asserted above only to lie in a band two hundred times wider than
     /// the value's own precision, which admits a 23 % error in the `Rₑ/a` factor and a 2 % one in
     /// `sin i`. The CAS derivation pins it instead.
@@ -302,5 +313,161 @@ mod tests {
             let rel = (got - want).abs() / want;
             assert!(rel < 5e-15, "a={a}, i={i_deg}°: e_frozen off by {rel:.3e}");
         }
+    }
+
+    // The repeat-ground-track semi-major axis as the root of `Ṁ + ω̇ = (revs/days)(ω⊕ − Ω̇)`, found by
+    // bisection on the rates themselves in derivations/design_orbit.mac and by PARI's `solve` in
+    // derivations/design_orbit.gp, agreeing to 1.5e-40. Columns: revs, days, e, i (rad), a (m).
+    const GOLDEN_RGT: [(u32, u32, f64, f64, f64); 7] = [
+        (
+            233,
+            16,
+            0.0,
+            1.713_867_187_5,
+            7_077_740.718_304_228_457_322_960_926_755_511_792_865,
+        ),
+        (
+            233,
+            16,
+            0.000_976_562_5,
+            1.713_867_187_5,
+            7_077_740.733_383_850_964_951_490_328_493_072_397_903,
+        ),
+        (
+            233,
+            16,
+            0.0625,
+            1.713_867_187_5,
+            7_077_802.863_724_393_745_586_247_823_771_917_425_021,
+        ),
+        (
+            233,
+            16,
+            0.125,
+            1.713_867_187_5,
+            7_077_993.951_498_357_218_928_617_346_359_076_227_893,
+        ),
+        (
+            15,
+            1,
+            0.0,
+            0.75,
+            6_868_598.118_923_256_556_684_730_974_066_775_492_612,
+        ),
+        (
+            43,
+            3,
+            0.0,
+            1.700_195_312_5,
+            7_151_347.576_037_380_331_300_768_835_620_952_423_845,
+        ),
+        (
+            2,
+            1,
+            0.718_75,
+            1.106_445_312_5,
+            26_554_431.496_738_372_523_311_920_194_193_028_389_05,
+        ),
+    ];
+
+    /// (G2) The repeat-ground-track solver returns the root of the resonance that defines it, solved
+    /// at 40 digits by bisection on the `J₂` rates — not by the `n = qω⊕/(C + qD)` fixed point the
+    /// solver iterates, which `derivations/design_orbit.mac` shows closes the same resonance.
+    ///
+    /// The bound is 4 ulps relative: the last step is `a = ∛(μ/n²)`, whose two roundings and one cube
+    /// root are all that should be left once the fixed point has converged. Sun-synchronous Landsat
+    /// at four eccentricities, a 15-revolution daily repeat, a 43-in-3, and a Molniya-like 2-per-day.
+    #[test]
+    fn the_repeat_ground_track_axis_is_the_root_of_the_resonance() {
+        let mut worst = 0.0_f64;
+        for (revs, days, e, i, want) in GOLDEN_RGT {
+            let got = repeat_ground_track_sma(
+                revs,
+                days,
+                e,
+                Angle::from_radians(i),
+                MU,
+                RE,
+                J2,
+                EARTH_RATE,
+            );
+            let ulps = (got - want).abs() / (want * f64::EPSILON);
+            assert!(
+                ulps <= 4.0,
+                "{revs}/{days}, e={e}: a = {got} is {ulps:.2} ulp from {want}"
+            );
+            worst = worst.max(ulps);
+        }
+        std::eprintln!("repeat ground track vs the 40-digit root: worst {worst:.2} ulp");
+    }
+
+    // acos(−Ω̇☉ / (3/2 n J₂ (Rₑ/p)²)) at 40 digits, design_orbit.mac and design_orbit.gp agreeing
+    // to 2.2e-40, with Ω̇☉ = 2π/(365.2422 · 86400 s) exactly. Columns: altitude (m), e, i (rad).
+    const GOLDEN_SSO: [(f64, f64, f64); 5] = [
+        (
+            300_000.0,
+            0.0,
+            1.687_244_913_105_786_831_811_427_295_084_030_264_679,
+        ),
+        (
+            600_000.0,
+            0.0,
+            1.706_716_801_071_948_569_342_336_811_167_370_340_927,
+        ),
+        (
+            600_000.0,
+            0.007_812_5,
+            1.706_700_106_810_268_414_267_368_064_116_952_871_387,
+        ),
+        (
+            900_000.0,
+            0.203_125,
+            1.715_623_680_818_809_792_688_484_998_300_690_713_182,
+        ),
+        (
+            5_000_000.0,
+            0.0,
+            2.418_979_587_254_147_953_576_282_926_677_113_868_961,
+        ),
+    ];
+
+    /// (G2) The Sun-synchronous inclination is the root of `Ω̇(i) = Ω̇☉`, against the closed-form
+    /// root at 40 digits.
+    ///
+    /// The bound is 8 ulps of `π` absolute: the root is `acos` of a quotient of a handful of
+    /// roundings, `acos` amplifies the quotient's error by `1/sin i`, which is at most 1.5 here, and
+    /// the rate constant itself is the double nearest `2π/(365.2422 · 86400)`.
+    #[test]
+    fn the_sun_synchronous_inclination_is_the_root_of_the_node_rate() {
+        let mut worst = 0.0_f64;
+        for (alt, e, want) in GOLDEN_SSO {
+            let got =
+                sun_synchronous_inclination(RE + alt, e, MU, RE, J2, SUN_SYNCHRONOUS_NODE_RATE)
+                    .expect("each golden row has a Sun-synchronous inclination")
+                    .radians();
+            let ulps = (got - want).abs() / (core::f64::consts::PI * f64::EPSILON);
+            assert!(
+                ulps <= 8.0,
+                "alt={alt}, e={e}: i = {got} is {ulps:.2} ulp of π from {want}"
+            );
+            worst = worst.max(ulps);
+        }
+        std::eprintln!(
+            "Sun-synchronous inclination vs the 40-digit root: worst {worst:.2} ulp of π"
+        );
+    }
+
+    /// (G3) The critical inclination is `acos(1/√5)`, where `derivations/design_orbit.mac` shows
+    /// `ω̇ ∝ 5 cos²i − 1` vanishes, against its 40-digit value from `derivations/design_orbit.gp`,
+    /// to 1 ulp.
+    #[test]
+    fn the_critical_inclination_is_acos_of_one_over_root_five() {
+        let want = 1.107_148_717_794_090_503_017_065_460_178_537_040_070;
+        let got = critical_inclination().radians();
+        let ulps = (got - want).abs() / (want * f64::EPSILON);
+        assert!(
+            ulps <= 1.0,
+            "critical inclination {got} is {ulps:.2} ulp from {want}"
+        );
     }
 }

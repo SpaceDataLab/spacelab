@@ -1,0 +1,28 @@
+/* Constellation figures of merit of crates/spacelab-coverage/src/fom.rs on a grid whose per-point
+   metrics are exact rationals: the values the `fom.rs` gate test holds `constellation_fom` to.
+
+   Each point is a periodic access pattern (N passes of length d every P seconds, first rise a
+   seconds after t0, over T = 86400 s), whose metrics follow from their definitions
+   (derivations/metrics_periodic_gaps.mac): coverage N d / T, gaps a, (N - 1) x (P - d) and the
+   trailing T - a - (N - 1) P - d, mean response sum(gap^2)/(2 T). The figures of merit are then the
+   definitions in fom.rs: weighted means sum(w_i m_i)/sum(w_i), and the weight-free extremes. */
+
+ratprint : false$
+T : 86400$
+pt(P, d, a, N) := block([tr : T - a - (N - 1)*P - d, gaps],
+  gaps : append([a], makelist(P - d, i, 1, N - 1), [tr]),
+  [N*d/T, lmax(gaps), lsum(g^2, g, gaps)/(2*T)])$
+/* [coverage, max gap, mean response] per point; the third is one window over the whole span. */
+pts : [pt(5400, 600, 1000, 16), pt(5400, 600, 0, 16), [1, 0, 0], pt(10800, 900, 3000, 8)]$
+w : [1, 2, 3, 4]$
+wmean(k) := sum(w[i]*pts[i][k], i, 1, 4)/lsum(x, x, w)$
+print("points:", pts)$
+print("mean coverage", wmean(1), " mean max gap", wmean(2), " mean response", wmean(3))$
+print("mean_coverage:", wmean(1) - 11/30)$
+print("mean_max_gap:", wmean(2) - 5400)$
+print("mean_response:", wmean(3) - 254315/108)$
+print("min_coverage:", lmin(map(first, pts)) - 1/12)$
+print("worst_max_gap:", lmax(map(second, pts)) - 9900)$
+print("worst_response:", lmax(map(third, pts)) - 51575/12)$
+/* Weight invariance (G4): scaling every weight by c leaves each weighted mean unchanged. */
+print("weight_scaling_invariance:", ratsimp(sum(c*w[i]*pts[i][3], i, 1, 4)/lsum(c*x, x, w) - wmean(3)))$

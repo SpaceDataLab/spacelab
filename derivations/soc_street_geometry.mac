@@ -1,0 +1,128 @@
+/* Street-of-Coverage geometry (`crates/spacelab-constellation/src/soc.rs`), derived from vectors on
+   the unit sphere rather than from the spherical-trigonometry formulas the code ships, so each
+   shipped relation is checked against the geometry it claims to describe. Every identity prints
+   `<name>: 0`; derivations/verify.sh counts them.
+
+   Orbit plane with ascending node W and inclination i: position r(W,u) at argument of latitude u,
+   unit normal n(W). The street of one plane is the band of half-width lambda around its great
+   circle that is covered at every instant; two planes' bands close the gap between them iff the
+   largest distance between their great circles - the dihedral angle - is at most the sum of what
+   each side contributes (theta + lambda co-rotating, 2 lambda for the counter-rotating seam).
+
+   Run: timeout 120 maxima --very-quiet -Q -b derivations/soc_street_geometry.mac </dev/null */
+
+/* A list residual prints 0 only when every component is 0. */
+chk(name, e) := printf(true, "~a: ~a~%", name,
+                       if listp(e) and every(lambda([x], is(x = 0)), e) then 0 else e)$
+dot3(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+r(W, u) := [cos(W)*cos(u) - sin(W)*sin(u)*cos(i), sin(W)*cos(u) + cos(W)*sin(u)*cos(i), sin(u)*sin(i)]$
+n(W) := [sin(W)*sin(i), -cos(W)*sin(i), cos(i)]$
+
+/* The normal is the plane's: r(W,u).n(W) = 0 for every u, and |n| = 1. */
+chk("normal_is_orthogonal_to_the_orbit", trigsimp(dot3(r(W, u), n(W))))$
+chk("normal_is_unit", trigsimp(dot3(n(W), n(W)) - 1))$
+
+/* 1. Footprint. Ground point G = (1,0,0), satellite S = (cos t, sin t, 0)/rho at central angle t,
+   rho = Re/(Re+h). The elevation el of S above G's horizon has sin el = (S-G).G/|S-G|. At the
+   shipped t = acos(rho cos eps) - eps, i.e. t = p - eps with cos p = rho cos eps, sin el = sin eps:
+   the residual of (L.G)^2 - sin^2(eps) |L|^2 vanishes (L.G >= 0 for eps in [0, pi/2)). */
+block([t, rh, L, G],
+  rh: cos(p)/cos(eps), t: p - eps, G: [1, 0, 0],
+  L: [cos(t)/rh - 1, sin(t)/rh, 0],
+  chk("footprint_edge_elevation_is_eps",
+      trigsimp(trigexpand(dot3(L, G)^2 - sin(eps)^2*dot3(L, L)))))$
+/* and the code's form theta = acos(rho cos eps) - eps is the same t: cos(theta + eps) = rho cos eps */
+chk("footprint_relation", cos(acos(rho*cos(eps))) - rho*cos(eps))$
+
+/* 2. Street half-width. Track = equator, adjacent sub-points at longitudes +-h, h = pi/S; a point
+   P at cross-track distance lam (latitude lam). The sub-point at along-track phase f is
+   A(f) = (cos f, sin f, 0); cos(dist(P, A(f))) = cos lam cos f, which decreases on [0, h], so the
+   worst instant is f = h, and P is just covered then iff cos lam cos h = cos theta: the shipped
+   cos lambda = cos theta / cos(pi/S). */
+block([P, A],
+  P: [cos(lam), 0, sin(lam)], A: [cos(f), sin(f), 0],
+  chk("street_distance_to_a_subpoint", trigsimp(dot3(P, A) - cos(lam)*cos(f))),
+  chk("street_distance_decreases_with_phase", diff(cos(lam)*cos(f), f) + cos(lam)*sin(f)),
+  chk("street_half_width_relation",
+      ratsimp(subst(f = h, subst(cos(lam) = cos(theta)/cos(h), dot3(P, A))) - cos(theta))))$
+
+/* 3. Largest distance between two great circles = their dihedral angle a, sin a = |r1(u).n2| at
+   its maximum over u. r1(u).n2 = A cos u + B sin u with A^2 + B^2 = 1 - (n1.n2)^2. */
+block([A, B],
+  A: dot3(r(W1, 0), n(W2)), B: dot3(r(W1, %pi/2), n(W2)),
+  chk("track_to_plane_distance_is_harmonic",
+      trigsimp(dot3(r(W1, u), n(W2)) - (A*cos(u) + B*sin(u)))),
+  chk("its_amplitude_is_the_dihedral_sine",
+      trigsimp(trigexpand(A^2 + B^2 + dot3(n(W1), n(W2))^2 - 1))))$
+
+/* 4. Co-rotating neighbours, nodes D apart: cos a = n(0).n(D) = 1 - 2 sin^2 i sin^2(D/2), i.e.
+   sin(a/2) = sin i sin(D/2). The shipped D_co = 2 asin(sin((theta+lambda)/2)/sin i) makes a =
+   theta + lambda exactly. */
+chk("co_rotating_dihedral",
+    trigsimp(trigexpand(dot3(n(0), n(2*d)) - (1 - 2*sin(i)^2*sin(d)^2))))$
+chk("co_rotating_spacing_gives_theta_plus_lambda",
+    ratsimp(subst(sin(D/2) = sin(c/2)/sin(i), 1 - 2*sin(i)^2*sin(D/2)^2) - (1 - 2*sin(c/2)^2)))$
+
+/* 5. The counter-rotating seam: the last plane's ascending pass (node pi - Dc) against plane 0's
+   descending pass (node pi). As point sets these are the circles with normals n(pi - Dc) and n(0),
+   and the acute dihedral angle a has cos a = -n(0).n(pi - Dc) = sin^2 i cos Dc - cos^2 i, so
+       sin^2(a/2) = cos^2 i + sin^2 i sin^2(Dc/2)
+   - the co-rotating form plus cos^2 i: the two passes cross at an angle 2(pi/2 - i) at the
+   equator and diverge toward mid-latitude. The seam closes (a = 2 lambda) at
+       sin(Dc/2) = sqrt(sin^2 lambda - cos^2 i)/sin i,
+   real only while lambda >= pi/2 - i. */
+chk("seam_dihedral",
+    trigsimp(trigexpand((1 + dot3(n(0), n(%pi - 2*dc)))/2 - (cos(i)^2 + sin(i)^2*sin(dc)^2))))$
+chk("seam_spacing_gives_two_lambda",
+    ratsimp(subst(sin(Dc/2) = sqrt(sin(lam)^2 - cos(i)^2)/sin(i),
+                  cos(i)^2 + sin(i)^2*sin(Dc/2)^2) - sin(lam)^2))$
+printf(true, "the former seam form sin(Dc/2) = sin(lambda)/sin(i) leaves sin^2(a/2) - sin^2(lambda) = ~a~%",
+       ratsimp(subst(sin(Dc/2) = sin(lam)/sin(i), cos(i)^2 + sin(i)^2*sin(Dc/2)^2) - sin(lam)^2))$
+
+/* 6. Inter-plane stagger. Nodes W1 = m - D/2, W2 = m + D/2; the half-turn about E = r(m, 0) on the
+   equator maps plane 1 at u onto plane 2 at -u. The foot of the perpendicular from E onto plane 1
+   is at u = b with tan b = cos i tan(D/2), at distance a/2 from E, and cos b = cos(D/2)/cos(a/2):
+   the code's acos(cos(D_co/2)/cos((theta+lambda)/2)). Plane 2's satellite sits at its own foot
+   (u = -b) when plane 1's gap - midway between two of its satellites - is at +b, so
+   u2 - u1 = -b - (b - pi/S) = pi/S - 2b. The sign of b is the sign of cos i: the arccosine form
+   gives |b|, which is the wrong stagger for a retrograde (i > pi/2) design. */
+block([E, R, Ed],
+  E: [cos(m), sin(m), 0],
+  R: 2*transpose(matrix(E)) . matrix(E) - ident(3),
+  Ed: dot3(E, r(m - D/2, u)),
+  chk("half_turn_maps_plane_1_onto_plane_2_reversed",
+      trigsimp(trigexpand(list_matrix_entries(R . transpose(matrix(r(m - D/2, u))))
+                          - r(m + D/2, -u)))),
+  chk("distance_to_E_along_plane_1", trigsimp(trigexpand(Ed - (cos(D/2)*cos(u) + sin(D/2)*cos(i)*sin(u))))),
+  chk("its_stationary_point", trigsimp(subst(u = atan(cos(i)*tan(D/2)), diff(cos(D/2)*cos(u) + sin(D/2)*cos(i)*sin(u), u)))),
+  chk("foot_distance_is_half_the_dihedral",
+      trigsimp(cos(D/2)^2 + sin(D/2)^2*cos(i)^2 - (1 - sin(i)^2*sin(D/2)^2))),
+  chk("cos_b_is_the_code_ratio",
+      trigsimp(1/(1 + cos(i)^2*tan(D/2)^2) - cos(D/2)^2/(1 - sin(i)^2*sin(D/2)^2))))$
+
+/* Reference values at 60 digits for the Rust gate, from the relations above (seam as in 5). */
+fpprec: 60$
+re : 6378137b0$
+soc(alt, inc_deg, eps_deg, s_override) := block(
+  [ratio, eps, inc, theta, s, half_du, lambda, dco, dct, span, planes, dw, du],
+  eps: bfloat(eps_deg*%pi/180), inc: bfloat(inc_deg*%pi/180),
+  ratio: re/(re + alt),
+  theta: acos(ratio*cos(eps)) - eps,
+  s: if s_override = false then ceiling(bfloat(%pi/theta)) else s_override,
+  half_du: bfloat(%pi/s),
+  lambda: acos(cos(theta)/cos(half_du)),
+  dco: 2*asin(sin((theta + lambda)/2)/sin(inc)),
+  dct: 2*asin(sqrt(sin(lambda)^2 - cos(inc)^2)/sin(inc)),
+  span: bfloat(%pi) - dct,
+  planes: ceiling(span/dco) + 1,
+  dw: span/(planes - 1),
+  du: half_du - 2*atan(cos(inc)*tan(dco/2)),
+  printf(true, "case alt=~a inc=~a eps=~a S=~a P=~a~%", alt, inc_deg, eps_deg, s, planes),
+  for v in [["theta", theta], ["lambda", lambda], ["raan_step_co", dco], ["raan_step_counter", dct],
+            ["raan_step", dw], ["raan_span", span], ["inter_plane_phase", du]] do
+    printf(true, "  ~a ~a~%", v[1], v[2]))$
+soc(780000, 86.4b0, 8.2b0, false)$
+soc(780000, 86.4b0, 8.2b0, 12)$
+soc(600000, 88, 5, false)$
+soc(1200000, 90, 10, false)$
+soc(780000, 98, 8.2b0, false)$

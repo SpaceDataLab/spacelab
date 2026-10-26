@@ -15,9 +15,15 @@
 //! adapts it to a [`crate::forces::Atmosphere`] for the drag path.
 //!
 //! The 30° bulge lag is taken at full precision (`π/6`, not a 7-digit `toRadians(30)` literal),
-//! matching this crate's constant policy. The density table and the interpolation/cosine algorithm
-//! are validated against Orekit 13.1.7's `HarrisPriester.getDensity` — an independent Java lineage of
-//! the same Montenbruck & Gill model — to a few ULP (see the module tests).
+//! matching this crate's constant policy.
+//!
+//! The model is its definition — the table and three rules — and `derivations/harris_priester_law.mac`
+//! states each rule as an identity: the radial altitude above the ellipsoid, the exponential between
+//! nodes, the half-angle power, the apex rotation and the wrapper's scale height. The gates are the
+//! module tests `the_density_is_the_law_at_50_digits` (G1), against
+//! `derivations/harris_priester_law.gp`'s evaluation of the law from its definition, and
+//! `the_night_side_scale_height_is_the_bracket_s_own` (G3). Orekit 13.1.7's
+//! `HarrisPriester.getDensity` is a comparator, `matches_orekit_reference`, parked for the benchmark.
 
 #![allow(
     clippy::excessive_precision,
@@ -141,7 +147,7 @@ mod tests {
     use spacelab_autodiff::Dual;
     use spacelab_testkit::nan_max;
 
-    /// WGS84, the ellipsoid the Orekit oracle was built with.
+    /// WGS84, the ellipsoid every case below is evaluated on.
     const WGS84_A: f64 = 6_378_137.0;
     const WGS84_F: f64 = 1.0 / 298.257_223_563;
 
@@ -184,6 +190,7 @@ mod tests {
     /// (libm vs Hipparchus). A wrong table or a mis-transcribed cosine law would miss by orders of
     /// magnitude, not `1e-12`.
     #[test]
+    #[ignore = "comparator: Orekit HarrisPriester, Ф19.C"]
     fn matches_orekit_reference() {
         let mut max_rel = 0.0_f64;
         for &(pos, n, rho_ref) in &GOLDEN {
@@ -201,7 +208,8 @@ mod tests {
         );
     }
 
-    /// Above the 1000 km table ceiling the density is exactly zero (Orekit returns 0 there too).
+    /// (G3) Above the 1000 km table ceiling the density is exactly zero: the model defines no
+    /// atmosphere past its last row, and returns the exact value `0.0` rather than an extrapolation.
     #[test]
     fn above_ceiling_is_zero() {
         let model = HarrisPriester {
@@ -265,11 +273,11 @@ mod tests {
         );
     }
 
-    /// The [`HarrisPriesterAtmosphere`] wrapper, evaluated in f64 at exactly a reference point, returns
-    /// the bare model density (the local-exponential lift factor is `exp(0) = 1` there).
+    /// (G3) The [`HarrisPriesterAtmosphere`] wrapper, evaluated at exactly the model's own point,
+    /// returns the bare model density: the local-exponential lift factor is `exp(0) = 1` there.
     #[test]
     fn wrapper_reduces_to_model_at_point() {
-        let (pos, n, rho_ref) = GOLDEN[6]; // ~400 km, off-equator, apex-side
+        let (pos, n, _) = GOLDEN[6]; // ~400 km, off-equator, apex-side
         let model = HarrisPriester {
             equatorial_radius: WGS84_A,
             flattening: WGS84_F,
@@ -283,7 +291,11 @@ mod tests {
         // Place the inertial position at |pos| so the lift exponent is exactly zero.
         let r_mag = libm::sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
         let rho = atmo.density(0.0, &[r_mag, 0.0, 0.0]);
-        assert!(((rho - rho_ref) / rho_ref).abs() < 1.0e-11);
+        let bare = harris_priester(SUN, pos, &model);
+        assert!(
+            ((rho - bare) / bare).abs() <= 4.0 * f64::EPSILON,
+            "wrapper {rho} against the bare model {bare}"
+        );
     }
 
     /// The wrapper's `Scalar`-generic density produces a finite, negative radial gradient in `Dual`
@@ -374,7 +386,7 @@ mod tests {
     /// mutants in `density_pair` survived, and why so did the `−10 000/ln(ρ_up/ρ₀)` line itself. (G2)
     ///
     /// The wrapper documents its `H`, so the oracle is the model's own log-slope over the same 10 km,
-    /// evaluated by calling [`harris_priester`] directly — the function the Orekit golden sweep pins.
+    /// evaluated by calling [`harris_priester`] directly — the function `the_density_is_the_law_at_50_digits` pins.
     /// The lift then has to reproduce `∂ρ/∂r = −ρ₀/H` exactly.
     #[test]
     fn the_local_scale_height_is_the_models_own_log_slope() {
@@ -429,5 +441,128 @@ mod tests {
                 got[i]
             );
         }
+    }
+
+    /// `(position m, n, ρ kg/m³)`: the law evaluated from its definition at 50 digits by
+    /// `derivations/harris_priester_law.gp` — radial altitude above the exact WGS-84 ellipsoid,
+    /// exponential between the bracketing nodes of the table, `cosⁿ(ψ/2)` about the apex 30° east of
+    /// the Sun. Integer-metre positions; the equatorial ones sit at tabulated altitudes (the floor,
+    /// 400 km, the ceiling), between nodes, above the ceiling and below the floor; then both
+    /// hemispheres, both poles, and the apex and its antipode at three heights. The Sun is
+    /// [`SUN_INTEGER`].
+    #[rustfmt::skip]
+    const LAW: [([f64; 3], f64, f64); 23] = [
+        ([6478137.0, 0.0, 0.0], 4.0, 4.974000000000000000000000e-7),
+        ([6778137.0, 0.0, 0.0], 4.0, 5.692692421353486643194662e-12),
+        ([0.0, 6798137.0, 0.0], 2.0, 5.147500576421708816720825e-12),
+        ([-7178137.0, 0.0, 0.0], 6.0, 7.569764803423536895254269e-15),
+        ([7378137.0, 0.0, 0.0], 4.0, 1.228305102840770524549867e-14),
+        ([0.0, -6688137.0, 0.0], 4.0, 1.397214447709124557615598e-11),
+        ([7428137.0, 0.0, 0.0], 4.0, 0.0),
+        ([6468137.0, 0.0, 0.0], 4.0, 2.223099995799851825643928e-6),
+        ([4100000.0, 4900000.0, 1100000.0], 4.0, 2.171166798082933349446264e-7),
+        ([-4400000.0, 3700000.0, 3300000.0], 6.0, 5.172902133446521005432815e-11),
+        ([-3100000.0, -3700000.0, 4800000.0], 2.0, 1.310197801258994219376422e-12),
+        ([3600000.0, -6200000.0, 1300000.0], 4.0, 5.590579909484692981623163e-15),
+        ([0.0, 0.0, 6856752.0], 4.0, 6.182643458020354245456239e-13),
+        ([1.0, 1.0, -7056752.0], 2.0, 1.450976434631395007476576e-13),
+        ([4115312.0, 4904438.0, -1715488.0], 4.0, 9.032561139902642104974524e-11),
+        ([-4115312.0, -4904438.0, 1715488.0], 4.0, 5.499463179753728050560129e-11),
+        ([4115312.0, 4904438.0, -1715488.0], 6.0, 9.032561139902641349231316e-11),
+        ([4301577.0, 5126420.0, -1793134.0], 4.0, 1.109770905964337926799443e-12),
+        ([-4301577.0, -5126420.0, 1793134.0], 4.0, 1.703887316808594016478555e-13),
+        ([4301577.0, 5126420.0, -1793134.0], 6.0, 1.109770905964337372556904e-12),
+        ([4549931.0, 5422397.0, -1896661.0], 4.0, 2.507028148426291009103896e-14),
+        ([-4549931.0, -5422397.0, 1896661.0], 4.0, 1.680740542787748117320091e-15),
+        ([4549931.0, 5422397.0, -1896661.0], 6.0, 2.507028148426289386613687e-14),
+    ];
+
+    /// Right ascension 20°, declination −15°, one astronomical unit, rounded to integer metres so the
+    /// 50-digit evaluation sees the same double.
+    const SUN_INTEGER: [f64; 3] = [135_786_003_622.0, 49_422_063_548.0, -38_718_778_044.0];
+
+    /// (G1) The density is the Harris-Priester law, evaluated from its definition at 50 digits.
+    ///
+    /// The bound is the law's conditioning in `f64`, not a measured margin: the altitude is a
+    /// difference of two numbers the size of `|r|`, so it is known to `ε|r|`, and the density moves
+    /// by `1/H` of that per metre, with `H ≥ 6.6 km` the steepest bracket of the table (100–120 km);
+    /// `cosⁿ(ψ/2)` moves by `n` ulps of the bulge term for one ulp of `cos ψ`, and the bulge term
+    /// `ρ_max − ρ_min` is at most 15 times `ρ_min`. So `|Δρ| ≤ ε·ρ·(8 + 4|r|/6600 m + 16n)` — 1e-12
+    /// relative at the ceiling — and a wrong table row, bracket or exponent misses by orders.
+    #[test]
+    fn the_density_is_the_law_at_50_digits() {
+        let mut worst = 0.0_f64;
+        for (pos, n, want) in LAW {
+            let model = HarrisPriester {
+                equatorial_radius: WGS84_A,
+                flattening: WGS84_F,
+                n,
+            };
+            let got = harris_priester(SUN_INTEGER, pos, &model);
+            let r = libm::sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
+            let tol = f64::EPSILON * want * (8.0 + 4.0 * r / 6_600.0 + 16.0 * n);
+            let d = (got - want).abs();
+            assert!(
+                d <= tol,
+                "{pos:?}, n = {n}: ρ = {got:e} against {want:e}, off by {d:.3e} (allowed {tol:.3e})"
+            );
+            if want > 0.0 {
+                worst = nan_max(worst, d / tol);
+            }
+        }
+        println!("Harris-Priester vs the law at 50 digits: worst {worst:.3} of the bound");
+    }
+
+    /// (G3) On the night side the density is the bracket's own exponential, so the drag wrapper's
+    /// local scale height is that bracket's `H_i = (h_{i+1} − h_i)/ln(ρ_i/ρ_{i+1})` exactly
+    /// (`derivations/harris_priester_law.mac`, `wrapper_scale_height_is_the_bracket_s`), and the lift's
+    /// radial gradient is `−ρ₀/H_i`.
+    ///
+    /// The Sun on `+ẑ` puts the apex on `+ẑ` exactly — the 30° turn about `+ẑ` leaves it there — and
+    /// the satellite on `−ẑ` is its exact antipode, where `cos ψ = −1` and the bulge term is exactly
+    /// zero. Each fixture and the point 10 km above it share one bracket. The bound is the
+    /// conditioning of a scale height read over a 10 km step: both altitudes are differences of
+    /// numbers the size of `|r|`, so each is known to a few `ε|r|`, and `H = −Δ/ln(ρ_up/ρ₀)` turns
+    /// that into a relative error of order `ε|r|/Δ` — 16 of those, 2.4e-12 here.
+    #[test]
+    fn the_night_side_scale_height_is_the_bracket_s_own() {
+        type Polar = HarrisPriesterAtmosphere<fn(f64, [f64; 3]) -> [f64; 3], fn(f64) -> [f64; 3]>;
+        let atmo: Polar = HarrisPriesterAtmosphere {
+            model: HarrisPriester {
+                equatorial_radius: WGS84_A,
+                flattening: WGS84_F,
+                n: 4.0,
+            },
+            geometry: |_t: f64, r: [f64; 3]| r,
+            sun: |_t: f64| [0.0, 0.0, 1.5e11],
+        };
+        let polar_radius = WGS84_A * (1.0 - WGS84_F);
+        let mut worst = 0.0_f64;
+        for (alt, bracket) in [(305_000.0, 19), (405_000.0, 24), (705_000.0, 39)] {
+            let r0 = polar_radius + alt;
+            let (lo, hi) = (ALT_RHO[bracket], ALT_RHO[bracket + 1]);
+            let h_alt = height([0.0, 0.0, -r0], WGS84_A, WGS84_F);
+            assert!(
+                lo[0] < h_alt && h_alt + 10_000.0 < hi[0],
+                "the fixture at {h_alt} m and 10 km above it leave the bracket {lo:?}..{hi:?}"
+            );
+            let h_i = (hi[0] - lo[0]) / libm::log(lo[1] / hi[1]);
+            let rho0 = harris_priester([0.0, 0.0, 1.5e11], [0.0, 0.0, -r0], &atmo.model);
+            let r: [Dual<3>; 3] = [
+                Dual::variable(0.0, 0),
+                Dual::variable(0.0, 1),
+                Dual::variable(-r0, 2),
+            ];
+            // ∂ρ/∂z at −ẑ: the density falls outward, and outward is −z.
+            let want = rho0 / h_i;
+            let got = atmo.density(0.0, &r).grad()[2];
+            let rel = ((got - want) / want).abs();
+            assert!(
+                rel <= 16.0 * f64::EPSILON * r0 / 10_000.0,
+                "at {alt} m: ∂ρ/∂z = {got:e} against ρ₀/H_i = {want:e} ({rel:.2e})"
+            );
+            worst = nan_max(worst, rel / (16.0 * f64::EPSILON * r0 / 10_000.0));
+        }
+        println!("night-side lift vs the bracket scale height: worst {worst:.3} of the bound");
     }
 }

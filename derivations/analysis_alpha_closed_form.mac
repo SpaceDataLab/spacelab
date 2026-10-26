@@ -1,0 +1,35 @@
+/* Closed forms of the sampled alpha-characteristic (`crates/spacelab-constellation/src/analysis.rs`)
+   for configurations small enough to evaluate by hand. alpha_L is the worst, over the sampled
+   directions and instants, of the L-th smallest angular distance to a satellite.
+   Every identity prints `<name>: 0`.
+   Run: timeout 120 maxima --very-quiet -Q -b derivations/analysis_alpha_closed_form.mac </dev/null */
+
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+fpprec: 50$
+
+/* Equatorial circular satellites, one sampled direction +x (the 1-point Fibonacci grid: z = 0,
+   azimuth 0), instants t_i = i/n_t of a period. Satellite s of S sits at 2 pi (i/n_t + s/S); in
+   units of 2 pi/N, N = lcm(n_t, S), it is at m = N (i/n_t + s/S) mod N, at distance
+   2 pi min(m, N - m)/N from +x. */
+alpha_ring(S, nt, L) := block([N: nt*S/gcd(nt, S), worst: 0, d],
+  for i: 0 thru nt - 1 do (
+    d: sort(makelist(block([m: mod(N*i/nt + N*s/S, N)], min(m, N - m)), s, 0, S - 1)),
+    worst: max(worst, d[L])),
+  2*%pi*worst/N)$
+/* The geometric step: for a direction at angle x in [0, pi] from +x, acos of the dot product is x. */
+chk("equatorial_distance_is_the_angle", trigsimp(acos(cos(4*%pi/15)) - 4*%pi/15))$
+chk("one_satellite_five_instants", alpha_ring(1, 5, 1) - 4*%pi/5)$
+chk("three_satellites_five_instants_fold_1", alpha_ring(3, 5, 1) - 4*%pi/15)$
+chk("three_satellites_five_instants_fold_2", alpha_ring(3, 5, 2) - 2*%pi/3)$
+chk("three_satellites_five_instants_fold_3", alpha_ring(3, 5, 3) - 14*%pi/15)$
+
+/* One polar satellite (i = pi/2), four instants: positions (1,0,0), (0,0,1), (-1,0,0), (0,0,-1).
+   The 2-point Fibonacci grid: z = +-1/2, azimuths 0 and the golden angle g = pi (3 - sqrt 5). */
+block([g: %pi*(3 - sqrt(5)), sats, grid, dots, worst, best],
+  sats: [[1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 0, -1]],
+  grid: [[sqrt(3)/2, 0, 1/2], [sqrt(3)/2*cos(g), sqrt(3)/2*sin(g), -1/2]],
+  dots: create_list(s . p, s, sats, p, grid),
+  /* the worst distance has the smallest dot product: (-1,0,0).(sqrt 3/2, 0, 1/2) = -sqrt(3)/2 */
+  best: lmin(map(bfloat, dots)),
+  chk("polar_worst_dot_is_minus_root3_over_2", if abs(bfloat(best + sqrt(3)/2)) < 1b-45 then 0 else best),
+  chk("polar_alpha", acos(-sqrt(3)/2) - 5*%pi/6))$

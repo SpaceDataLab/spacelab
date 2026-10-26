@@ -1,0 +1,75 @@
+/* The closed forms of crates/spacelab-coverage/src/observability.rs, from their definitions.
+
+   (1) The diurnal arc. The altitude of a body of declination d at hour angle H, seen from latitude
+       p, is sin h = sin p sin d + cos p cos d cos H (the spherical triangle pole-zenith-body).
+       Solving it for cos H gives the shipped (sin h0 - sin p sin d)/(cos p cos d); exact arcs at
+       three points follow, and nautical twilight at the equator at the equinox is exactly 48 min of
+       mean solar rotation past the horizon crossing.
+   (2) The sidereal hour-angle rate: 1.00273781191135448 revolutions per UT1 day is exactly
+       15.0410671786703172 deg/h, and the error of dividing by 15 deg/h instead is exactly
+       3600 (1 - 1/1.00273781191135448) s per hour of hour angle.
+   (3) Young (1994) at the true horizon and zenith, exact rationals, and the real root of its
+       denominator; Kasten & Young (1989) at the apparent horizon and zenith.
+   (4) Saemundsson's h -> h + R(h) is strictly increasing on the whole domain [-1 deg, 90 deg]: a
+       bound on |R'| below 1 (the property `Refraction::elevation_mask` rests on, proven here rather
+       than only sampled).
+   (5) The separation angle atan2(|a x b|, a.b) is the angle between a and b. */
+
+ratprint : false$
+fpprec : 40$
+
+/* ---- (1) ---- */
+alt_eq : sin(h0) = sin(p)*sin(d) + cos(p)*cos(d)*cosH$
+sol : rhs(first(solve(alt_eq, cosH)))$
+print("diurnal_arc_cos_h_from_altitude_equation:",
+      ratsimp(sol - (sin(h0) - sin(p)*sin(d))/(cos(p)*cos(d))))$
+cosHof(pp, dd, hh) := (sin(hh) - sin(pp)*sin(dd))/(cos(pp)*cos(dd))$
+print("arc_equator_equinox_horizon:", ratsimp(cosHof(0, 0, 0)))$
+print("arc_lat30_dec30_alt30:", ratsimp(cosHof(%pi/6, %pi/6, %pi/6) - 1/3))$
+print("arc_lat45_dec30_horizon:", radcan(cosHof(%pi/4, %pi/6, 0) + 1/sqrt(3)))$
+print("  H(0,0,0) = pi/2;  H(30,30,30) = acos(1/3) =", bfloat(acos(1/3)),
+      ";  H(45,30,0) = acos(-1/sqrt 3) =", bfloat(acos(-1/sqrt(3))))$
+/* Nautical: cos H = sin(-12 deg) at p = d = 0, so H = pi/2 + 12 deg; at 15 deg/h that is 48 min
+   past the horizon crossing (H = pi/2). */
+print("nautical_hour_angle:", trigsimp(trigexpand(cos(%pi/2 + x) - sin(-x))))$
+print("nautical_minutes_past_sunset:", ratsimp((%pi/15)/(2*%pi/86400)/60 - 48))$
+
+/* ---- (2) ---- */
+k_era : 100273781191135448/10^17$
+print("  sidereal rate =", k_era*360/24, "=", bfloat(k_era*360/24), "deg/h")$
+print("sidereal_rate_deg_per_hour:", k_era*360/24 - 150410671786703172/10^16)$
+print("  solar-rate error per hour of hour angle =", bfloat(3600*(1 - 1/k_era)), "s;  over 6 h",
+      bfloat(6*3600*(1 - 1/k_era)), "s")$
+print("  sidereal semi-day 43200/k =", bfloat(43200/k_era), "s")$
+
+/* ---- (3) ---- */
+ynum(c) := 1002432/10^6*c^2 + 148386/10^6*c + 96467/10^7$
+yden(c) := c^3 + 149864/10^6*c^2 + 102963/10^7*c + 303978/10^9$
+print("  Young 1994 horizon =", ynum(0)/yden(0), "=", bfloat(ynum(0)/yden(0)),
+      ";  zenith =", ynum(1)/yden(1), "=", bfloat(ynum(1)/yden(1)))$
+print("young_horizon_is_31.73486_to_1e-4:", if abs(bfloat(ynum(0)/yden(0)) - 31.73486b0) < 10^-4 then 0 else bfloat(ynum(0)/yden(0)))$
+print("young_zenith_is_1.000000364_to_1e-9:", if abs(bfloat(ynum(1)/yden(1)) - 1.000000364b0) < 10^-9 then 0 else bfloat(ynum(1)/yden(1)))$
+print("  Young 1994 denominator real roots:", realroots(yden(c), 10^-12))$
+ky(deg) := 1/(sin(deg*%pi/180) + 50572/10^5*(deg + 607995/10^5)^(-16364/10^4))$
+print("  Kasten-Young 1989 apparent horizon =", bfloat(ky(0)), ";  zenith =", bfloat(ky(90)))$
+print("ky_horizon_is_37.919608_to_1e-5:", if abs(bfloat(ky(0)) - 37.919608b0) < 10^-5 then 0 else bfloat(ky(0)))$
+
+/* ---- (4) ---- */
+/* R(h) = rho (1.02/60) cot(u) degrees, u = h + 10.3/(h + 5.11) degrees, h in degrees. On
+   [-1, 90]: u' = 1 - 10.3/(h + 5.11)^2 lies in (0, 1) (h + 5.11 >= 4.11 > sqrt(10.3)), so u is
+   increasing, u(-1) = 1.506 deg <= u <= u(90) = 90.108 deg, and sin u >= sin u(-1) there. Then
+   |dR/dh| = rho (1.02/60)(pi/180) u' / sin^2 u < rho (1.02/60)(pi/180)/sin^2 u(-1). */
+u(hd) := hd + 103/10/(hd + 511/100)$
+print("  u(-1) =", bfloat(u(-1)), " u(90) =", bfloat(u(90)), " deg;  u'(-1) =",
+      bfloat(1 - 103/10/(-1 + 511/100)^2))$
+slope_bound : bfloat((102/100/60)*(%pi/180)/sin(u(-1)*%pi/180)^2)$
+print("  |R'| < ", slope_bound, " x density ratio, so h + R(h) increases for density ratio <",
+      bfloat(1/slope_bound))$
+print("saemundsson_monotone_at_standard_density:", if slope_bound < 1 then 0 else slope_bound)$
+/* sin u >= sin u(-1) on [u(-1), u(90)]: sin is increasing to 90 deg and sin(90.108 deg) > sin(1.506 deg). */
+print("sin_floor_holds_past_90deg:", if bfloat(sin(u(90)*%pi/180)) > bfloat(sin(u(-1)*%pi/180)) then 0 else 1)$
+
+/* ---- (5) ---- */
+/* a = |a| (1, 0, 0), b = |b| (cos t, sin t, 0): |a x b| = |a||b| sin t, a.b = |a||b| cos t. */
+assume(t > 0, t < %pi, na > 0, nb > 0)$
+print("separation_is_the_angle:", ratsimp(trigsimp(sin(atan2(na*nb*sin(t), na*nb*cos(t)) - t))))$

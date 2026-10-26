@@ -10,6 +10,12 @@
 //!
 //! This is design-time analysis (it allocates and propagates), so it lives behind the crate's `std`
 //! feature; the generators stay `no_std`.
+//!
+//! [`alpha_characteristic`] is a sampled estimate — a maximum over a subset, so never above the
+//! true value — and its gate is its own definition on small configurations whose sampled value has
+//! a closed form: `derivations/analysis_alpha_closed_form.mac`, re-evaluated in
+//! `derivations/analysis_alpha_closed_form.gp`, checked by
+//! `alpha_equals_its_closed_form_on_small_configurations` below.
 
 use spacelab_core::{Angle, Vec3};
 use spacelab_elements::KeplerianElements;
@@ -353,6 +359,49 @@ mod tests {
             assert!(
                 w.total() <= tight.total(),
                 "looser footprint needs more satellites"
+            );
+        }
+    }
+
+    /// (G3) The sampled α-characteristic equals its closed form on configurations small enough to
+    /// evaluate exactly.
+    ///
+    /// `derivations/analysis_alpha_closed_form.mac` derives each value — equatorial rings on the
+    /// one-point grid reduce to integer arithmetic in units of `2π/lcm(n_t, S)`, the polar case to
+    /// `acos(−√3/2)` — and `derivations/analysis_alpha_closed_form.gp` re-evaluates the definition
+    /// on vectors at 60 digits. One satellite: `4π/5`; three equatorial satellites over five
+    /// instants: `4π/15`, `2π/3`, `14π/15` for one-, two- and three-fold; one polar satellite on the
+    /// two-point grid over four instants: `5π/6`. Every value is away from 0 and π, where `acos`
+    /// would amplify round-off. Bound: 1e-14 rad.
+    #[test]
+    fn alpha_equals_its_closed_form_on_small_configurations() {
+        let pi = core::f64::consts::PI;
+        let ring = |planes: u32, per_plane: u32, inclination: f64| {
+            let w = Walker {
+                pattern: WalkerPattern::Delta,
+                inclination: Angle::from_radians(inclination),
+                planes,
+                per_plane,
+                phasing: 0,
+                semi_major_axis: RE + 20_000e3,
+                mu: MU,
+            };
+            let mut v = Vec::new();
+            w.generate(|e| v.push(e));
+            v
+        };
+        for (sats, fold, grid, times, want) in [
+            (ring(1, 1, 0.0), 1, 1, 5, 4.0 * pi / 5.0),
+            (ring(1, 3, 0.0), 1, 1, 5, 4.0 * pi / 15.0),
+            (ring(1, 3, 0.0), 2, 1, 5, 2.0 * pi / 3.0),
+            (ring(1, 3, 0.0), 3, 1, 5, 14.0 * pi / 15.0),
+            (ring(1, 1, 0.5 * pi), 1, 2, 4, 5.0 * pi / 6.0),
+        ] {
+            let got = alpha_characteristic(&sats, fold, grid, times);
+            assert!(
+                (got - want).abs() < 1e-14,
+                "{} sats, fold {fold}: {got} against {want}",
+                sats.len()
             );
         }
     }

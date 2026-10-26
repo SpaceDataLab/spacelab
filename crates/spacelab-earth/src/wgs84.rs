@@ -1,4 +1,10 @@
 //! WGS-84 geometry.
+//!
+//! `derivations/wgs84_geodesy.mac` derives `b`, `e²`, the forward map and Vermeille's inverse as
+//! identities in `a` and `f`; the gates are `the_derived_constants_are_the_exact_functions_of_a_and_f`
+//! (G1) and `the_inverse_solves_the_defining_equation_of_the_geodetic_latitude` (G2) in
+//! `tests/wgs84.rs`, against `derivations/wgs84_geodesy.gp`'s 80-digit solution of the defining
+//! equation.
 
 use core::fmt;
 

@@ -1,0 +1,93 @@
+/* Orbit design under J2 -- spacelab-elements/src/design.rs -- as identities in the secular rates
+ * that derivations/j2_secular_rates.mac derives from the averaged disturbing function:
+ *     Mdot = n [1 + 3/4 J2 (Re/p)^2 sqrt(1-e^2) (3 cos^2 i - 1)],
+ *     wdot = 3/4 n J2 (Re/p)^2 (5 cos^2 i - 1),     Wdot = -3/2 n J2 (Re/p)^2 cos i.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. sun_synchronous_inclination: Wdot = rate solved for cos i is -rate/(3/2 n J2 (Re/p)^2);
+ *   2. repeat_ground_track_sma: Mdot + wdot = n C and Wdot = n D with the coded C and D, and at the
+ *      coded fixed point n = q w_E/(C + q D) the defining resonance Mdot + wdot = q (w_E - Wdot)
+ *      holds exactly -- the iteration's fixed point is the root of the defining equation;
+ *   3. critical_inclination: wdot vanishes at cos^2 i = 1/5, the coded acos(1/sqrt 5);
+ *   4. golden values at 40 digits: the repeat-ground-track semi-major axis as the root of the
+ *      defining resonance (bf_find_root on the rates themselves, not on the C/D fixed point), and
+ *      the Sun-synchronous inclination. derivations/design_orbit.gp computes the same rows
+ *      independently; the Rust test in design.rs asserts against them.
+ * The frozen eccentricity is solved in derivations/j2_secular_rates.mac.
+ *
+ * Run: timeout 120 maxima --very-quiet -Q -b derivations/design_orbit.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+s2 : J2*(Re/p)^2$
+Mdot : n*(1 + 3/4*s2*s1*(3*ci^2 - 1))$
+wdot : 3/4*n*s2*(5*ci^2 - 1)$
+Wdot : -3/2*n*s2*ci$
+
+/* 1. Sun-synchronous: the coded cos i = -node_rate/factor, factor = 1.5 n j2 (re/p)^2. */
+sol : rhs(first(solve(Wdot = rate, ci)))$
+zero("sso_cos_i", ratsimp(sol - (-rate/(3/2*n*J2*(Re/p)^2))))$
+
+/* 2. Repeat ground track. Coded: c = 1 + 0.75 scale (root_1_e2 (3c^2-1) + (5c^2-1)), d = -1.5 scale c. */
+C : 1 + 3/4*s2*(s1*(3*ci^2 - 1) + (5*ci^2 - 1))$
+D : -3/2*s2*ci$
+zero("rgt_nodal_rate_is_n_c", ratsimp(Mdot + wdot - n*C))$
+zero("rgt_node_rate_is_n_d", ratsimp(Wdot - n*D))$
+fixed : q*wE/(C + q*D)$
+zero("rgt_fixed_point_closes_the_resonance",
+     ratsimp(subst(fixed, n, (Mdot + wdot) - q*(wE - Wdot))))$
+
+/* 3. Critical inclination. */
+zero("critical_inclination_freezes_perigee", ratsimp(subst(1/sqrt(5), ci, wdot)))$
+
+/* 4. Golden values. Inputs are the doubles the Rust test passes: mu, Re are exact integers; J2 and
+   w_E are the doubles nearest their decimals, written here as those exact dyadic rationals. */
+fpprec : 40$
+dbl(x) := block([r : bfloat(x), ex],
+  ex : floor(log(abs(r))/log(2b0)),
+  round(r*2^(52 - ex))*2^(ex - 52))$
+mu_v : 398600441800000$
+Re_v : 6378137$
+J2_v : dbl(108262668/10^11)$
+wE_v : dbl(72921151467/10^15)$
+rates(av, ev, iv) := block([pv, nv, sv, c],
+  pv : av*(1 - ev^2), nv : sqrt(mu_v/av^3), sv : J2_v*(Re_v/pv)^2, c : cos(iv),
+  [nv*(1 + 3/4*sv*sqrt(1 - ev^2)*(3*c^2 - 1)), 3/4*nv*sv*(5*c^2 - 1), -3/2*nv*sv*c])$
+/* Bisection: 160 halvings of a 4 % bracket around the Keplerian guess leave it 1e-50 wide. The
+   resonance residual is increasing in a (both rates fall as a^(-3/2)), checked at the ends. */
+resonance(revs, days, av, ev, iv) := block([rr : rates(av, ev, iv)],
+  rr[1] + rr[2] - (revs/days)*(wE_v - rr[3]))$
+rgt(revs, days, ev, iv) := block([a0, lo, hi, mid],
+  a0 : bfloat((mu_v/((revs/days)*wE_v)^2)^(1/3)),
+  lo : a0*0.98b0, hi : a0*1.02b0,
+  if resonance(revs, days, lo, ev, iv) < 0 or resonance(revs, days, hi, ev, iv) > 0
+    then error("the resonance is not bracketed"),
+  for k : 1 thru 160 do (
+    mid : (lo + hi)/2,
+    if resonance(revs, days, mid, ev, iv) > 0 then lo : mid else hi : mid),
+  (lo + hi)/2)$
+emit_rgt(revs, days, ev, iv) := block([av : rgt(revs, days, ev, iv), rr],
+  rr : rates(av, ev, iv),
+  printf(true, "RGT ~d ~d ~a ~a ~a  residual ~a~%", revs, days, bfloat(ev), bfloat(iv), av,
+         bfloat((rr[1] + rr[2] - (revs/days)*(wE_v - rr[3]))/rr[1])))$
+emit_rgt(233, 16, 0, 1755/1024)$
+emit_rgt(233, 16, 1/1024, 1755/1024)$
+emit_rgt(233, 16, 1/16, 1755/1024)$
+emit_rgt(233, 16, 1/8, 1755/1024)$
+emit_rgt(15, 1, 0, 3/4)$
+emit_rgt(43, 3, 0, 1741/1024)$
+emit_rgt(2, 1, 23/32, 1133/1024)$
+
+sun_rate : bfloat(2*%pi/(3652422/10000*86400))$
+emit_sso(av, ev) := block([pv, nv],
+  pv : av*(1 - ev^2), nv : sqrt(mu_v/av^3),
+  printf(true, "SSO ~a ~a ~a~%", bfloat(av), bfloat(ev),
+         bfloat(acos(-sun_rate/(3/2*nv*J2_v*(Re_v/pv)^2)))))$
+emit_sso(Re_v + 300000, 0)$
+emit_sso(Re_v + 600000, 0)$
+emit_sso(Re_v + 600000, 1/128)$
+emit_sso(Re_v + 900000, 13/64)$
+emit_sso(Re_v + 5000000, 0)$

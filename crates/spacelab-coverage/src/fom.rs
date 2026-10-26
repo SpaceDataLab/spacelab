@@ -6,6 +6,9 @@
 //! respected). This reduces that grid to the standard scalars: mean and worst-case coverage, the
 //! worst point's revisit gap, and the response-time statistics — the numbers the Walker/flower/street
 //! generators are tuned against.
+//!
+//! Gate: `tests::a_weighted_periodic_grid_has_the_exact_rational_figures_of_merit` below holds the
+//! aggregation to the exact rationals of `derivations/fom_weighted_grid.mac`.
 
 // The point count is a grid size (thousands of cells) that comfortably fits `u32`.
 #![allow(clippy::cast_possible_truncation)]
@@ -224,5 +227,51 @@ mod tests {
             uneven.mean_response_time,
             even.mean_response_time
         );
+    }
+
+    /// `rises` passes of length `d` every `p` seconds, the first `a` seconds in, over one day.
+    fn periodic(p: f64, d: f64, a: f64, rises: u32) -> CoverageMetrics {
+        let ws: Vec<(f64, f64)> = (0..rises)
+            .map(|i| {
+                let rise = a + p * f64::from(i);
+                (rise, rise + d)
+            })
+            .collect();
+        point(&ws, 0.0, 86_400.0)
+    }
+
+    /// (G3) A four-point grid of periodic access patterns, weighted 1:2:3:4, against the exact
+    /// rationals of `derivations/fom_weighted_grid.mac` (re-enumerated in
+    /// `derivations/fom_weighted_grid.g`): mean coverage 11/30, mean max gap 5400, mean response
+    /// 254315/108, min coverage 1/12, worst max gap 9900, worst response 51575/12.
+    ///
+    /// The extremes are picks of a single correctly rounded quotient, so they are exact; the weighted
+    /// means carry four products and sums of rounded inputs, bound 8·ε relative.
+    #[test]
+    fn a_weighted_periodic_grid_has_the_exact_rational_figures_of_merit() {
+        let points = [
+            periodic(5400.0, 600.0, 1000.0, 16),
+            periodic(5400.0, 600.0, 0.0, 16),
+            point(&[(0.0, 86_400.0)], 0.0, 86_400.0),
+            periodic(10_800.0, 900.0, 3000.0, 8),
+        ];
+        let fom = constellation_fom(&points, Some(&[1.0, 2.0, 3.0, 4.0]));
+        let close = |got: f64, exact: f64| (got - exact).abs() <= 8.0 * f64::EPSILON * exact;
+        assert!(
+            close(fom.mean_coverage, 11.0 / 30.0),
+            "{}",
+            fom.mean_coverage
+        );
+        assert!(close(fom.mean_max_gap, 5400.0), "{}", fom.mean_max_gap);
+        assert!(
+            close(fom.mean_response_time, 254_315.0 / 108.0),
+            "{}",
+            fom.mean_response_time
+        );
+        assert_eq!(fom.min_coverage, 1.0 / 12.0);
+        assert_eq!(fom.worst_max_gap, 9900.0);
+        assert_eq!(fom.worst_response_time, 51_575.0 / 12.0);
+        assert_eq!(fom.fully_covered_points, 1);
+        assert_eq!(fom.point_count, 4);
     }
 }

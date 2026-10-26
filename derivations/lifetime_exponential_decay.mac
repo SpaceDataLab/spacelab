@@ -1,0 +1,47 @@
+/* The decay of a circular orbit through a static exponential atmosphere, in closed form -- the exact
+ * special case spacelab-propagation/src/lifetime.rs is gated on.
+ *
+ * Drag on a circular orbit is antiparallel to v = sqrt(mu/a), so dE/dt = -(1/2) rho B v^3 with
+ * B = Cd S/m, and E = -mu/(2a) gives
+ *     da/dt = -rho(a) B sqrt(mu a),     rho(a) = rho0 exp(-(a - r0)/H).
+ * The ODE separates. Substituting a = H u^2 turns the integral of exp(a/H)/sqrt(a) into
+ * 2 sqrt(H) times the integral of exp(u^2), which is sqrt(pi H) erfi(u), so the time to fall from a0 to a is
+ *     t(a) = sqrt(pi H) exp(-r0/H)/(rho0 B sqrt(mu)) [erfi(sqrt(a0/H)) - erfi(sqrt(a/H))]  -- exact,
+ * not King-Hele's constant-sqrt(a) approximation. Shown here, each line printing `<name>: 0`:
+ *   1. the circular decay rate follows from the energy equation;
+ *   2. dt/da of the closed form is 1/(da/dt): it solves the ODE, and t(a0) = 0;
+ *   3. every epoch scales as 1/B: d ln t/d ln B = -1, the identity `ballistic_log_sensitivity`
+ *      reports and `the_lifetime_scales_exactly_as_the_inverse_ballistic_coefficient` asserts;
+ *   4. Maxima's own antiderivative of exp(a/H)/sqrt(a) differs from sqrt(pi H) erfi(sqrt(a/H)) by
+ *      a constant (its derivative difference is 0).
+ * derivations/lifetime_exponential_decay.gp evaluates t at 60 digits, twice: from erfi and by
+ * numerical quadrature of the ODE's reciprocal.
+ *
+ * Run: timeout 120 maxima --very-quiet -Q -b derivations/lifetime_exponential_decay.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+assume(a > 0, a0 > 0, H > 0, mu > 0, rho0 > 0, B > 0)$
+
+/* 1. Energy equation. */
+v : sqrt(mu/a)$
+E : -mu/(2*a)$
+dEdt : -1/2*rho*B*v^3$
+zero("circular_decay_rate", radcan(dEdt/diff(E, a) - (-rho*B*sqrt(mu*a))))$
+
+/* 2. The closed form. */
+rate(x) := -rho0*exp(-(x - r0)/H)*B*sqrt(mu*x)$
+t(x) := sqrt(%pi*H)*exp(-r0/H)/(rho0*B*sqrt(mu))*(erfi(sqrt(a0/H)) - erfi(sqrt(x/H)))$
+zero("closed_form_solves_the_decay_ode", radcan(diff(t(a), a) - 1/rate(a)))$
+zero("closed_form_starts_at_zero", t(a0))$
+
+/* 3. 1/B scaling. */
+zero("lifetime_scales_as_inverse_b", radcan(B*diff(t(a), B)/t(a) + 1))$
+
+/* 4. Maxima's antiderivative against the erfi form. */
+anti : integrate(exp(x/H)/sqrt(x), x)$
+zero("antiderivative_is_erfi_up_to_a_constant",
+     radcan(diff(anti - sqrt(%pi*H)*erfi(sqrt(x/H)), x)))$

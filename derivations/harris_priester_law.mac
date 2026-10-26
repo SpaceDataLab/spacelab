@@ -1,0 +1,73 @@
+/* The modified Harris-Priester law -- spacelab-propagation/src/harris_priester/{mod,atmosphere}.rs --
+ * as identities. The model (Montenbruck & Gill, "Satellite Orbits", Springer 2005, §3.5) is a table of
+ * (h_i, rho_min_i, rho_max_i) and three rules:
+ *   a. the altitude is the radial distance above the ellipsoid, h = r - R(phi'), with
+ *      R(phi') = a sqrt((1 - e^2)/(1 - e^2 cos^2 phi')) at geocentric latitude phi';
+ *   b. between nodes each density is exponential in h, coded as rho_i (rho_{i+1}/rho_i)^dh with
+ *      dh = (h_i - h)/(h_i - h_{i+1});
+ *   c. rho = rho_min + (rho_max - rho_min) cos^n(psi/2), psi the angle from the bulge apex, which is
+ *      the Sun direction turned 30 deg east about +z; cos^n(psi/2) coded as c2 sqrt(c2)^(n-2),
+ *      c2 = (1 + cos psi)/2.
+ * The drag wrapper lifts the f64 value to rho0 exp(-(|r| - |r0|)/H) with H = -dh/ln(rho_up/rho0)
+ * over a radial step dh = 10 km.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. R(phi') is on the ellipse (x/a)^2 + (z/b)^2 = 1, b^2 = a^2 (1 - e^2); R = a on the equator
+ *      and b at the pole;
+ *   2. the coded interpolation is rho_i exp(-(h - h_i)/H_i), H_i = (h_{i+1} - h_i)/ln(rho_i/rho_{i+1}),
+ *      and returns rho_i and rho_{i+1} at the nodes;
+ *   3. c2 = cos^2(psi/2), and c2 sqrt(c2)^(n-2) = cos^n(psi/2) where cos(psi/2) >= 0;
+ *   4. the apex rotation puts the bulge at right ascension alpha_sun + 30 deg, declination unchanged;
+ *   5. the law gives rho_max at the apex, rho_min at the antipode, and
+ *      rho_min + (rho_max - rho_min) 2^(-n/2) at 90 deg from it;
+ *   6. the lift's slope at r0 is -rho0/H, and inside one bracket on the night side (rho = rho_min)
+ *      the wrapper's H is the bracket's own scale height H_i exactly.
+ * derivations/harris_priester_law.gp evaluates the law at 50 digits for the Rust tests.
+ *
+ * Run: timeout 120 maxima --very-quiet -Q -b derivations/harris_priester_law.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+assume(a > 0, e2 > 0, e2 < 1, rho_i > 0, rho_j > 0, H > 0, k >= 0)$
+
+/* 1. The radial distance to the ellipsoid. With c = cos phi', s = sin phi', c^2 + s^2 = 1. */
+R : a*sqrt((1 - e2)/(1 - e2*c^2))$
+b2 : a^2*(1 - e2)$
+zero("radius_on_the_ellipse", ratsimp(subst(1 - c^2, s^2, ratsimp((R*c)^2/a^2 + (R*s)^2/b2 - 1))))$
+zero("radius_on_the_equator", radcan(subst(1, c, R) - a))$
+zero("radius_at_the_pole", radcan(subst(0, c, R)^2 - b2))$
+
+/* 2. Exponential interpolation between nodes (h_i, rho_i) and (h_j, rho_j). */
+dh : (h_i - h)/(h_i - h_j)$
+coded : rho_i*(rho_j/rho_i)^dh$
+H_i : (h_j - h_i)/log(rho_i/rho_j)$
+zero("interpolation_is_exponential", radcan(log(coded) - log(rho_i*exp(-(h - h_i)/H_i))))$
+zero("interpolation_at_lower_node", radcan(subst(h_i, h, coded) - rho_i))$
+zero("interpolation_at_upper_node", radcan(subst(h_j, h, coded) - rho_j))$
+
+/* 3. The half-angle power. c2 = (1 + cos psi)/2; with k = cos(psi/2) >= 0, sqrt(c2) = k. */
+zero("half_angle_square", trigsimp(trigexpand((1 + cos(2*q))/2 - cos(q)^2)))$
+zero("half_angle_power", radcan(subst(k^2, c2, c2*sqrt(c2)^(n - 2)) - k^n))$
+
+/* 4. The apex: the Sun direction turned by lag about +z. */
+sun : [cos(dec)*cos(ra), cos(dec)*sin(ra), sin(dec)]$
+apex : [sun[1]*cos(lag) - sun[2]*sin(lag), sun[1]*sin(lag) + sun[2]*cos(lag), sun[3]]$
+want : [cos(dec)*cos(ra + lag), cos(dec)*sin(ra + lag), sin(dec)]$
+d4 : map(lambda([x], trigsimp(trigexpand(x))), apex - want)$
+zero("apex_x", d4[1])$  zero("apex_y", d4[2])$  zero("apex_z", d4[3])$
+
+/* 5. The bulge law at three angles from the apex. */
+law(psi, nn) := rmin + (rmax - rmin)*cos(psi/2)^nn$
+zero("law_at_the_apex", ratsimp(law(0, n) - rmax))$
+zero("law_at_the_antipode", ratsimp(subst(4, n, law(%pi, n)) - rmin))$
+zero("law_at_ninety_degrees", radcan(law(%pi/2, n) - (rmin + (rmax - rmin)*2^(-n/2))))$
+
+/* 6. The wrapper's local exponential and its scale height. */
+lift : rho0*exp(-(rr - r0)/H)$
+zero("lift_slope", ratsimp(subst(r0, rr, diff(lift, rr)) + rho0/H))$
+rho_night(x) := rho_i*exp(-(x - h_i)/H_i)$
+H_wrapper : -dstep/log(rho_night(h + dstep)/rho_night(h))$
+zero("wrapper_scale_height_is_the_bracket_s", radcan(H_wrapper - H_i))$

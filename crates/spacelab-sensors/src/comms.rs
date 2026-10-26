@@ -13,13 +13,20 @@
 //! The slant range uses a reference altitude (a spherical `d(ε)`); for a near-circular orbit that
 //! is the operating altitude. Eccentric orbits vary it, which shifts `ε_link` by the margin's slope
 //! there — a documented approximation, not a hidden one.
+//!
+//! `derivations/comms_link_budget.mac` derives the slant range from the triangle, the sign of
+//! `dd/dε` that makes the margin monotone (for `L_atm ≥ 0`), and the dB budget as the log of the
+//! linear one; `derivations/comms_link_budget.gp` evaluates them at 120 digits for the gates in
+//! `tests/comms_gates.rs`.
 
 use crate::{AccessGeometry, Constraint, ElevationMask, OrbitBound, SensorError};
 
 /// Speed of light, m/s.
 const C_LIGHT: f64 = 299_792_458.0;
-/// `−10·log₁₀(k)` with `k = 1.380649e−23 J/K`: the Boltzmann term of the C/N₀ equation, dBW/(K·Hz).
-const BOLTZMANN_DB: f64 = 228.6;
+/// `−10·log₁₀(k)` with the exact SI `k = 1.380649e−23 J/K`: the Boltzmann term of the C/N₀
+/// equation, dBW/(K·Hz), at the 40 digits `derivations/comms_link_budget.mac` prints. The
+/// customary `228.6` is this rounded to a tenth, 8.3e-4 dB high.
+const BOLTZMANN_DB: f64 = 228.599_167_173_217_665_290_149_523_363_082_850_124_6;
 /// WGS-84 equatorial radius, m — the reference sphere for the slant-range model.
 const EARTH_RADIUS: f64 = 6_378_137.0;
 
@@ -54,7 +61,7 @@ impl CommsBudget {
     }
 
     /// Received `C/N₀` at elevation `eps`, dBHz:
-    /// `EIRP + G/T − FSPL(d, f) − L_atm/sin ε + 228.6`.
+    /// `EIRP + G/T − FSPL(d, f) − L_atm/sin ε − 10·log₁₀(k)`.
     #[must_use]
     pub fn cn0_dbhz(&self, eps: f64) -> f64 {
         let d = self.slant_range(eps);

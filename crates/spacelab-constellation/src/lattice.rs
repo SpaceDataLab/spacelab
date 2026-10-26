@@ -13,6 +13,14 @@
 //! for `i = 0…No−1`, `j = 0…Nso−1` (`No·Nso` satellites, slot-major). Every satellite shares one
 //! orbit shape `(a, e, i, ω)`.
 //!
+//! This `Nc` has the opposite sign to the paper's. Avendaño et al. define the lattice as the
+//! solutions of `[No 0; Nc′ Nso]·[ΔΩ; ΔM] = 2π·[i; j]` (restated in Casanova, Avendaño & Mortari,
+//! IEEE Trans. AES 50(2), 2014, p. 1348, eqs. 3–4), i.e. `M_ij = 2π·(j/Nso − Nc′·i/(No·Nso))`, so a
+//! configuration taken from the literature is `Nc = −Nc′ mod No` here. Derived in
+//! `derivations/lattice_flower.mac`; `derivations/lattice_flower.g` (GAP) checks the point set
+//! against the paper's system; the gate is
+//! `the_emitted_satellites_solve_the_hermite_normal_form_system` below.
+//!
 //! This subsumes the other families. A circular lattice (`e = 0`, `ω = 0`) with
 //! `(No, Nso, Nc) = (P, S, F)` is a Walker-Delta `i: T/P/F`, satellite for satellite (`M ≡ ν`); the
 //! `Nso = 1` case on a repeating orbit is a Flower (nodes tiling the RAAN circle, `Nc` setting the
@@ -32,7 +40,8 @@ pub struct LatticeFlower {
     pub orbits: u32,
     /// `Nso` — satellites per slot.
     pub sats_per_orbit: u32,
-    /// `Nc` — configuration number, used mod `orbits`; the inter-slot along-track shift.
+    /// `Nc` — configuration number, used mod `orbits`; the inter-slot along-track shift. The
+    /// literature's `Nc′` (Avendaño et al. 2013) is `−Nc mod No`.
     pub config: u32,
     /// Common semi-major axis, metres.
     pub semi_major_axis: f64,
@@ -91,7 +100,11 @@ impl LatticeFlower {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::float_cmp, clippy::unwrap_used)]
+    #![allow(
+        clippy::float_cmp,
+        clippy::unwrap_used,
+        clippy::cast_possible_truncation
+    )]
     use super::*;
     use crate::{Walker, WalkerPattern};
 
@@ -224,5 +237,71 @@ mod tests {
         raans.sort_by(f64::total_cmp);
         raans.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
         assert_eq!(raans.len(), 3);
+    }
+
+    /// (G2) The emitted satellites solve the Hermite-normal-form system that defines the lattice.
+    ///
+    /// Avendaño, Davis & Mortari (2013) define a 2-D lattice as the solutions of
+    /// `[No 0; Nc' Nso]·[ΔΩ; ΔM] = 2π·[i; j]` (restated in Casanova, Avendaño & Mortari, IEEE
+    /// Trans. AES 50(2), 2014, p. 1348, eq. 4). This module's `Nc` is `Nc' = −Nc mod No`
+    /// (`derivations/lattice_flower.mac`); `derivations/lattice_flower.g` shows for every
+    /// `No, Nso ≤ 8` that the module's points are exactly that system's `No·Nso` solutions. Read
+    /// back from the emitted elements — `M` through the elements' own mean anomaly, so the
+    /// eccentric cases also cross the Kepler solve — both rows must be whole turns. Bound: 1e-13
+    /// turn per row, the round-off of an angle of a few radians times a coefficient below 10, plus
+    /// the Kepler round trip at `e ≤ 0.3`.
+    #[test]
+    fn the_emitted_satellites_solve_the_hermite_normal_form_system() {
+        for (no, nso, nc, e) in [
+            (5_u32, 4_u32, 3_u32, 0.0),
+            (6, 9, 2, 0.0),
+            (4, 6, 7, 0.0),
+            (3, 4, 1, 0.3),
+            (7, 3, 0, 0.1),
+        ] {
+            let l = LatticeFlower {
+                orbits: no,
+                sats_per_orbit: nso,
+                config: nc,
+                semi_major_axis: RE + 20_000e3,
+                eccentricity: e,
+                inclination: Angle::from_radians(1.1),
+                arg_periapsis: Angle::from_radians(0.4),
+                raan0: Angle::from_radians(0.25),
+                mu: MU,
+            };
+            let paper_nc = f64::from((no - nc % no) % no);
+            let sats = collect_lattice(&l);
+            assert_eq!(sats.len() as u32, no * nso);
+            let m0 = sats[0].mean_anomaly().radians();
+            let mut points = Vec::new();
+            for s in &sats {
+                let d_raan = (s.raan.radians() - 0.25) / TAU;
+                let d_mean = (s.mean_anomaly().radians() - m0) / TAU;
+                let rows = [
+                    f64::from(no) * d_raan,
+                    paper_nc * d_raan + f64::from(nso) * d_mean,
+                ];
+                for (k, row) in rows.iter().enumerate() {
+                    let off = (row - libm::round(*row)).abs();
+                    assert!(
+                        off < 1e-13,
+                        "{l:?}: row {k} is {off:.2e} turn off a whole number"
+                    );
+                }
+                let t = f64::from(no * nso);
+                points.push((
+                    libm::round(d_raan * t) as i64,
+                    libm::round(d_mean * t).rem_euclid(t) as i64,
+                ));
+            }
+            points.sort_unstable();
+            points.dedup();
+            assert_eq!(
+                points.len() as u32,
+                no * nso,
+                "{l:?}: coincident satellites"
+            );
+        }
     }
 }

@@ -678,7 +678,7 @@ typedef struct sl_flower_params {
 typedef struct sl_lattice_params {
     uint32_t orbits;         /* N_o right-ascension slots */
     uint32_t sats_per_orbit; /* N_so in each slot */
-    uint32_t config;         /* the configuration number N_c */
+    uint32_t config;         /* N_c = Walker's F; the literature's N_c' is -N_c mod N_o */
     double semi_major_axis_m;
     double eccentricity;
     double inclination_rad;
@@ -2728,8 +2728,8 @@ sl_status sl_latency_steps(const sl_latency *latency, double step, size_t *out);
  * body axes, rad/s.
  */
 sl_status sl_attitude_error_mrp(const double rotation[9], const double reference[9],
-                            const sl_vec3 *rate, const sl_vec3 *rate_reference, sl_vec3 *out_mrp,
-                            double *out_angle_rad);
+                                const sl_vec3 *rate, const sl_vec3 *rate_reference,
+                                sl_vec3 *out_mrp, double *out_angle_rad);
 
 /*
  * The same error as the error quaternion `(q0, q1, q2, q3)`, with `q0 >= 0`.

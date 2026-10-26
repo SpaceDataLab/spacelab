@@ -148,7 +148,7 @@ impl ElevationDetector {
     /// optional for a station whose spec is written the usual way. It is exact and not an
     /// approximation, for the reason given on [`Refraction::elevation_mask`].
     ///
-    /// `None` when the apparent mask is outside [`Refraction::geometric`]'s domain.
+    /// `None` when [`Refraction::elevation_mask`] refuses the mask.
     #[must_use]
     pub fn apparent(
         station: Vec3,
@@ -156,7 +156,7 @@ impl ElevationDetector {
         mask: ApparentAltitude,
         refraction: Refraction,
     ) -> Option<Self> {
-        Some(Self::new(station, up, refraction.geometric(mask)?.0))
+        Some(Self::new(station, up, refraction.true_threshold(mask)?.0))
     }
 
     /// The elevation `g` for a satellite at body-fixed `sat`. `g > 0` above the mask.

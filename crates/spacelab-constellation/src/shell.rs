@@ -14,6 +14,11 @@
 //! the sum over the tiers of the per-satellite launch ΔV (Earth-rotation assist `ω Rₑ cos i`
 //! subtracted). This module provides the space-visibility test and the cost; the tier sizing is the
 //! optimisation the caller drives with them.
+//!
+//! The cost's energy balance and the elevation and cone tests are derived in
+//! `derivations/shell_surveillance.mac`, the cost at 60 digits in `derivations/shell_surveillance.gp`;
+//! the gates are `characteristic_velocity_matches_the_derived_values` and
+//! `the_elevation_gate_is_an_angle_and_not_merely_a_sign` below.
 
 use spacelab_core::{Angle, Vec3};
 
@@ -155,6 +160,9 @@ mod tests {
         (up, east)
     }
 
+    /// (G3) The elevation gate at geometries whose elevation is exact by construction, either side
+    /// of the mask (`derivations/shell_surveillance.mac`: the code's `sin_el` is the sine of that
+    /// angle).
     #[test]
     fn the_elevation_gate_is_an_angle_and_not_merely_a_sign() {
         // The existing coverage test uses `min_elevation = 0`, which reduces the gate to a sign
@@ -293,6 +301,8 @@ mod tests {
         );
     }
 
+    /// (G2) The characteristic velocity satisfies the energy balance that defines `ΔV*`, evaluated
+    /// independently in `f64` (derived in `derivations/shell_surveillance.mac`).
     #[test]
     fn characteristic_velocity_matches_the_energy_balance() {
         // ΔV* is defined by equating launch-pad and orbit energy:
@@ -309,6 +319,32 @@ mod tests {
             characteristic_velocity(1, 2_000e3, inc, MU, RE, OMEGA_E)
                 > characteristic_velocity(1, 500e3, inc, MU, RE, OMEGA_E)
         );
+    }
+
+    /// (G3) The characteristic velocity against `derivations/shell_surveillance.gp`, which evaluates
+    /// the closed form at 60 digits with these constants (Nguyen's mean radius and rates). Bound:
+    /// 8 ulp relative — a square root of a three-term quotient less a term thirty times smaller.
+    #[test]
+    fn characteristic_velocity_matches_the_derived_values() {
+        for (n, h, inc_deg, want) in [
+            (12, 1_000e3, 60.0_f64, 9.836_389_213_801_578e4),
+            (12, 3_000e3, 65.0, 1.067_014_737_498_713_2e5),
+            (12, 8_000e3, 65.0, 1.160_695_006_204_232_4e5),
+            (1, 500e3, 60.0, 7.960_244_856_361_561e3),
+        ] {
+            let got = characteristic_velocity(
+                n,
+                h,
+                Angle::from_radians(inc_deg.to_radians()),
+                MU,
+                RE,
+                OMEGA_E,
+            );
+            assert!(
+                (got - want).abs() <= 8.0 * f64::EPSILON * want,
+                "N={n} H={h} i={inc_deg}: {got} against {want}"
+            );
+        }
     }
 
     #[test]
@@ -366,6 +402,7 @@ mod tests {
         v
     }
 
+    /// (S1) Sampled shell coverage; supporting only.
     #[test]
     fn two_tiers_continuously_watch_a_space_shell() {
         // Two dense delta-tiers above a shell, both looking down, together keep every point of the

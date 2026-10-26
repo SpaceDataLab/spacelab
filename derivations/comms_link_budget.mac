@@ -1,0 +1,47 @@
+/* The link budget of crates/spacelab-sensors/src/comms.rs, from its defining equations.
+
+   Reference sphere R, satellite radius r_s = R + h, elevation e at the station:
+
+     slant range   d(e) = sqrt(r_s^2 - (R cos e)^2) - R sin e
+     C/N0 [dBHz]   = EIRP + G/T - FSPL(d, f) - L_atm/sin e - 10 log10(k)
+     FSPL [dB]     = 20 log10(4 pi d f / c) = 10 log10((4 pi d / lambda)^2),  lambda = c/f
+
+   (1) d closes the triangle centre-station-satellite (law of cosines, interior angle 90 deg + e
+   at the station); (2)-(3) its exact values at the zenith (d = h) and the horizon tangency
+   (d^2 = r_s^2 - R^2); (4) dd/de = -R d cos(e)/(d + R sin(e)) < 0 on (0, pi/2), and (5) the
+   slant atmosphere L_atm/sin e falls too, so the margin is strictly increasing in e and the
+   break-even elevation is unique -- the claim the whole module rests on; (6) FSPL is the
+   free-space (4 pi d/lambda)^2 in dB; (7) the dB sum is 10 log10 of the linear budget
+   C/N0 = EIRP (G/T) (lambda/(4 pi d))^2 / (k L_atm^(1/sin e)). (8) prints -10 log10(k) for
+   the exact SI k = 1.380649e-23 J/K at 40 digits: 228.599 167..., not 228.6.
+
+   Every residual prints as `<name>: 0`, 7 of them, then the Boltzmann term.                    */
+
+display2d : false$
+logexpand : super$
+assume(R > 0, h > 0)$
+D(e) := sqrt(rs^2 - R^2*cos(e)^2) - R*sin(e)$
+W : sqrt(rs^2 - R^2*c^2)$
+dc : W - R*s$
+red(x) := ratsimp(ratsubst(rs^2 - R^2*c^2, W^2, ratsubst(1 - s^2, c^2, ratsimp(x))))$
+
+print("slant_range_law_of_cosines:", red(dc^2 + 2*R*dc*s - (rs^2 - R^2)))$
+print("slant_range_zenith:", radcan(subst([rs = R + h], D(%pi/2)) - h))$
+print("slant_range_horizon:", ratsimp(D(0)^2 - (rs^2 - R^2)))$
+
+dD : diff(D(e), e)$
+print("slant_range_derivative:",
+      ratsimp(radcan(dD - (-R*D(e)*cos(e)/(D(e) + R*sin(e))))))$
+print("slant_atmosphere_derivative:", ratsimp(diff(La/sin(e), e) + La*cos(e)/sin(e)^2))$
+
+log10(x) := log(x)/log(10)$
+db(x) := 10*log10(x)$
+lambda_ : cl/f$
+print("fspl_is_free_space_loss:",
+      radcan(20*log10(4*%pi*d*f/cl) - db((4*%pi*d/lambda_)^2)))$
+lin : eirp*gt*(lambda_/(4*%pi*d))^2/(kb*latm^(1/sin(e)))$
+print("cn0_db_is_the_linear_budget:",
+      radcan(db(lin) - (db(eirp) + db(gt) - 20*log10(4*%pi*d*f/cl) - db(latm)/sin(e) - db(kb))))$
+
+fpprec : 40$
+print("boltzmann_db:", bfloat(-10*log(1380649/10^29)/log(10)))$

@@ -1,0 +1,34 @@
+/* Kinematically-regular constellations (`crates/spacelab-constellation/src/symmetric.rs`). The
+   two-body flow commutes with rotations, so a rotated seed's orbit is the rotated orbit; a
+   rotation carries the orbit normal with it; and the cyclic arm with stagger 2 pi F/n is Walker
+   n/n/F. Every identity prints `<name>: 0`.
+   Run: timeout 120 maxima --very-quiet -Q -b derivations/symmetric_regularity.mac </dev/null */
+
+chk(name, e) := block([l: if matrixp(e) then list_matrix_entries(e) else flatten([e])],
+  printf(true, "~a: ~a~%", name, if every(lambda([y], is(y = 0)), l) then 0 else e))$
+cross3(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+mv(m, v) := list_matrix_entries(m . transpose(matrix(v)))$
+Rz(a) := matrix([cos(a), -sin(a), 0], [sin(a), cos(a), 0], [0, 0, 1])$
+Rx(a) := matrix([1, 0, 0], [0, cos(a), -sin(a)], [0, sin(a), cos(a)])$
+/* A general proper rotation, z-x-z Euler angles. */
+R: Rz(p1) . Rx(p2) . Rz(p3)$
+x: [x1, x2, x3]$ v: [v1, v2, v3]$
+
+chk("rotation_is_orthogonal", trigsimp(transpose(R) . R - ident(3)))$
+chk("rotation_preserves_the_radius", trigsimp(expand(mv(R, x) . mv(R, x) - x . x)))$
+/* Two-body acceleration -mu r/|r|^3 is equivariant: a(R r) = R a(r), so phi_t(R s) = R phi_t(s). */
+chk("two_body_field_commutes_with_rotations",
+    block([rr: trigsimp(expand(mv(R, x) . mv(R, x)))],
+      trigsimp(-mu*mv(R, x)/rr^(3/2) - mv(R, -mu*x/(x . x)^(3/2)))))$
+/* Angular momentum, hence the orbit normal, rotates with the state. */
+chk("orbit_normal_rotates_with_the_state",
+    trigsimp(expand(cross3(mv(R, x), mv(R, v)) - mv(R, cross3(x, v)))))$
+
+/* Circular orbit at node W, argument of latitude u, inclination i. */
+pos(W, u) := [cos(W)*cos(u) - sin(W)*sin(u)*cos(i), sin(W)*cos(u) + cos(W)*sin(u)*cos(i), sin(u)*sin(i)]$
+/* A rotation about the pole moves the node and nothing else ... */
+chk("polar_rotation_moves_only_the_node", trigsimp(trigexpand(mv(Rz(b), pos(W, u)) - pos(W + b, u))))$
+/* ... so satellite k of the cyclic arm with stagger 2 pi F/n is Walker n/n/F's satellite k:
+   node 2 pi k/n, argument of latitude u0 + 2 pi k F/n (T = P = n, S = 1). */
+chk("cyclic_arm_is_walker_n_n_f",
+    trigsimp(trigexpand(mv(Rz(2*%pi*k/n), pos(0, u0 + 2*%pi*k*F/n)) - pos(2*%pi*k/n, u0 + k*F*2*%pi/n))))$

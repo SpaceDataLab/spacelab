@@ -1,0 +1,24 @@
+/* Walker i: T/P/F phasing (`crates/spacelab-constellation/src/walker.rs`), in turns (2 pi = 1).
+   Satellite s of plane p sits at node W(p) = p/P (Delta; p/(2P) Star) and argument of latitude
+   u(p,s) = s/S + p F/T, T = P S. Every identity prints `<name>: 0`; verify.sh counts them. The
+   finite-group statements (order T, F mod P, P distinct patterns) are in walker_phasing.g.
+   Run: timeout 120 maxima --very-quiet -Q -b derivations/walker_phasing.mac </dev/null */
+
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+T: P*S$
+u(p, s, F) := s/S + p*F/T$
+
+/* In-plane spacing 1/S and the inter-plane relative phase F/T - Walker's definition. */
+chk("in_plane_spacing", ratsimp(u(p, s + 1, F) - u(p, s, F) - 1/S))$
+chk("relative_phase_between_adjacent_planes", ratsimp(u(p + 1, s, F) - u(p, s, F) - F/T))$
+
+/* The Walker generator g: (W, u) -> (W + 1/P, u + F/T). Applied to the last plane it lands back
+   on plane 0 (W = 1 = 0) at slot s + F: the pattern is closed under g, so it is a group orbit. */
+chk("generator_wraps_the_last_plane_onto_plane_0", ratsimp((u(P - 1, s, F) + F/T) - u(0, s + F, F)))$
+
+/* F is used mod P: replacing F by F + P moves plane p by p/S, a whole number p of slots, so the
+   plane's set of slots is unchanged (slot s of the new pattern is slot s + p of the old). */
+chk("phasing_is_taken_mod_P", ratsimp(u(p, s, F + P) - u(p, s + p, F)))$
+
+/* Star: the planes span half the node circle, the last one at (P-1)/(2P) = 1/2 - 1/(2P). */
+chk("star_last_plane_node", ratsimp((P - 1)/(2*P) - (1/2 - 1/(2*P))))$

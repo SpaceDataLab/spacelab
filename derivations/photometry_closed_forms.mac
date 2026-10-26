@@ -1,0 +1,87 @@
+/* The closed forms of crates/spacelab-coverage/src/photometry.rs, derived from their definitions.
+
+   (1) The diffuse-sphere phase law. A Lambertian sphere's brightness toward the observer is the
+       integral of cos(i) cos(e) over the part of the surface both lit and visible. In photometric
+       coordinates (latitude b, longitude l, observer at l = 0, Sun at l = alpha in the equator)
+       cos e = cos b cos l and cos i = cos b cos(l - alpha), and the lit-visible lune is
+       l in [alpha - pi/2, pi/2], b in [-pi/2, pi/2], for 0 <= alpha <= pi. Normalised to
+       opposition it must be the shipped [sin a + (pi - a) cos a]/pi.
+   (2) The V-band zero point: F_lambda d_lambda lambda/(h c), exact in rationals from the SI and
+       Bessell constants.
+   (3) Krisciunas & Schaefer's air mass (1 - 0.96 sin^2 Z)^(-1/2) at exact angles.
+   (4) The nanolambert <-> V conversion is its own inverse, and the Moon's illuminance ratio is the
+       published phase law (identities).
+   (5) The lunar phase law at quarter and new Moon, exact rationals.
+   (6) The limiting magnitude: the CCD equation SNR = S/sqrt(S + n N) solved for S in closed form,
+       the root `limiting_magnitude` bisects for.
+   (7) The two branches of the scattering function at their 10-degree boundary. */
+
+ratprint : false$
+fpprec : 40$
+
+/* ---- (1) ---- */
+lat_int : integrate(cos(b)^3, b, -%pi/2, %pi/2)$
+L : integrate(cos(l)*cos(l - a), l)$
+lon_int : subst(l = %pi/2, L) - subst(l = a - %pi/2, L)$
+F(x) := subst(a = x, lat_int*lon_int)$
+shipped(x) := (sin(x) + (%pi - x)*cos(x))/%pi$
+print("diffuse_sphere_lambert_integral:", trigsimp(trigreduce(F(a)/F(0) - shipped(a))))$
+print("diffuse_sphere_opposition:", ratsimp(shipped(0) - 1))$
+print("diffuse_sphere_quadrature:", ratsimp(shipped(%pi/2) - 1/%pi))$
+print("diffuse_sphere_conjunction:", ratsimp(shipped(%pi)))$
+print("diffuse_sphere_sixty_degrees:", ratsimp(shipped(%pi/3) - (1/3 + sqrt(3)/(2*%pi))))$
+for k in [0, 1, 2, 3, 4, 5, 6] do
+  print("  Phi(", k, "pi/6) =", bfloat(shipped(k*%pi/6)))$
+
+/* ---- (2) ---- */
+h_planck : 662607015/10^42$
+c_light : 299792458$
+Z : (363/10^4) * (84/10^9) * (545/10^9) / (h_planck * c_light)$
+print("  V-band zero point =", Z, "=", bfloat(Z), "photons/s/m^2")$
+print("zero_point_is_8.366e9_to_the_stated_2e6:", if abs(Z - 8366*10^6) < 2*10^6 then 0 else Z)$
+
+/* ---- (3) ---- */
+ks(z) := (1 - 24/25*sin(z)^2)^(-1/2)$
+print("ks_airmass_horizon:", ratsimp(ks(%pi/2) - 5))$
+print("ks_airmass_60deg:", radcan(ks(%pi/3) - 5/sqrt(7)))$
+print("ks_airmass_30deg:", radcan(ks(%pi/6) - 5/sqrt(19)))$
+print("ks_airmass_zenith:", ratsimp(ks(0) - 1))$
+
+/* ---- (4) ---- */
+c0 : 207233/10^4$ c1 : 92104/10^5$ b0 : 3408/100$
+to_nl(v) := b0*exp(c0 - c1*v)$
+to_v(nl) := (c0 - log(nl/b0))/c1$
+print("nanolambert_round_trip:", ratsimp(radcan(to_v(to_nl(v)) - v)))$
+dmag(deg) := 26/1000*abs(deg) + 4/10^9*deg^4$
+istar(deg) := 10^(-2/5*(384/100 + dmag(deg)))$
+assume(deg > 0)$
+print("moon_illuminance_ratio_is_phase_law:", radcan(istar(deg)/istar(0) - 10^(-2/5*dmag(deg))))$
+
+/* ---- (5) ---- */
+vmoon(deg) := -1273/100 + dmag(deg)$
+print("lunar_full:", vmoon(0) + 1273/100)$
+print("lunar_quarter:", vmoon(90) - (-1012756/10^5))$
+print("lunar_new_minus_full:", dmag(180) - 887904/10^5)$
+print("  new Moon / full Moon flux ratio = 10^(-0.4 x 8.87904) =", bfloat(10^(-2/5*887904/10^5)))$
+
+/* ---- (6) ---- */
+/* SNR^2 (S + n N) = S^2, positive root; n N is the aperture's per-read noise budget. */
+S_root : (s^2 + sqrt(s^4 + 4*s^2*nN))/2$
+print("ccd_equation_residual:", ratsimp(expand(S_root^2 - s^2*(S_root + nN))))$
+/* The metre_class sensor of photometry.rs's tests, over a 21.8 V/arcsec^2 sky. */
+lim(sky, snr) := block([area, rate, pixels, nN, S],
+  area : %pi*1^2*(1 - 3/10*3/10)/4,
+  rate : Z*area*(6/10)*(85/100)*30,
+  pixels : %pi*(2/1)^2,
+  nN : pixels*(rate*10^(-2/5*sky)*1^2 + 1/100*30 + 5^2),
+  S : (snr^2 + sqrt(snr^4 + 4*snr^2*nN))/2,
+  -5/2*log(S/rate)/log(10))$
+for p in [[21.8b0, 5], [19, 5], [21.8b0, 10], [21.8b0, 3]] do
+  print("  limiting magnitude at sky", p[1], "SNR", p[2], "=", bfloat(lim(rationalize(p[1]), p[2])))$
+print("limiting_magnitude_is_21.352476_to_1e-5:",
+      if abs(bfloat(lim(218/10, 5)) - 21.352476b0) < 10^-5 then 0 else bfloat(lim(218/10, 5)))$
+
+/* ---- (7) ---- */
+ray10 : 10^(536/100)*(106/100 + cos(%pi/18)^2)$
+print("  f(10 deg): aureole", bfloat(ray10 + 62*10^6/100), " Mie", bfloat(ray10 + 10^(59/10)))$
+print("  f(10 deg) Rayleigh", bfloat(ray10), " aureole term", 62*10^6/100, " Mie term", bfloat(10^(59/10)))$

@@ -1,4 +1,8 @@
 //! Side-looking SAR: access is the ground incidence-angle band.
+//!
+//! The incidence `eta + lam` of an off-nadir look, the band edges and [`look_side`] are derived
+//! in `derivations/sar_incidence.mac` (120-digit values: `derivations/sar_incidence.gp`) and
+//! gated in `tests/sar_gates.rs`.
 
 use spacelab_core::Vec3;
 

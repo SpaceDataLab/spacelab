@@ -1,0 +1,51 @@
+/* The rise and set of a circular pass over a cell, in closed form: the exact roots
+   crates/spacelab-coverage/tests/access.rs holds `access_windows` to.
+
+   Cell at C = (R, 0, 0) with zenith z = (1, 0, 0); the satellite on a circle of radius r in the
+   x-y plane, S = r (cos th, sin th, 0), th = w (t - t_c). The elevation-mask switching function of
+   `spacelab_sensors::ElevationMask` is
+
+       g(th) = (S - C).z - sin(e) |S - C| = r cos th - R - sin(e) sqrt(r^2 + R^2 - 2 r R cos th).
+
+   Claim: g = 0 at the Earth central angle
+
+       th = lam(e) = acos(k) - e,   k = R cos(e) / r,
+
+   so the window is t_c -/+ lam(e)/w. Writing s = sqrt(1 - k^2) (s > 0), the two identities below
+   show that at th = lam the line-of-sight length is A = r s - R sin e and that r cos th - R = A sin e;
+   then g = sin(e) (A - |A|) = 0 whenever A > 0, which is the visible branch (the elevation is e, not
+   pi - e). The last block gives the 34-digit rise/set times for the test's orbit. */
+
+ratprint : false$
+k : R*cos(e)/r$
+/* cos(acos k - e) and sin(acos k - e), with sin(acos k) = s. */
+c_lam : k*cos(e) + s*sin(e)$
+A : r*s - R*sin(e)$
+on_s(x) := ratsimp(subst(s^2 = 1 - k^2, expand(x)))$
+
+los2 : r^2 + R^2 - 2*r*R*c_lam$
+print("line_of_sight_squared_is_A_squared:", trigsimp(ratsubst(1 - k^2, s^2, expand(los2 - A^2))))$
+print("vertical_component_is_A_sin_e:", trigsimp(ratsubst(1 - k^2, s^2, expand(r*c_lam - R - A*sin(e)))))$
+
+/* Defining-equation check of the closed form, independent of the algebra above: g evaluated at
+   th = lam to 60 digits for the test's orbit, at e = 0 and e = 10 degrees. */
+fpprec : 60$
+RE : 6378137$
+MU : 3986004418*10^5$
+rr : 7000*10^3$
+w : sqrt(MU/rr^3)$
+g(th, el) := rr*cos(th) - RE - sin(el)*sqrt(rr^2 + RE^2 - 2*rr*RE*cos(th))$
+lam(el) := acos(RE*cos(el)/rr) - el$
+for el in [0, 10*%pi/180] do (
+  res : bfloat(g(lam(el), el)),
+  print("g_at_closed_form_root_below_1e-50:", if abs(res) < 10^-50 then 0 else res))$
+/* The visible branch: A > 0 at both masks, so g = sin(e)(A - |A|) is the root and not the
+   below-horizon twin. */
+for el in [0, 10*%pi/180] do
+  print("visible branch A > 0:", is(bfloat(rr*sqrt(1 - (RE*cos(el)/rr)^2) - RE*sin(el)) > 0))$
+
+/* Half-widths lam/w in seconds; the windows of tests/access.rs sit at t_c = 3000 s. */
+fpprec : 40$
+for el in [0, 10] do (
+  hw : bfloat(lam(el*%pi/180)/w),
+  print("mask", el, "deg: half-width", hw, " rise", bfloat(3000 - hw), " set", bfloat(3000 + hw)))$

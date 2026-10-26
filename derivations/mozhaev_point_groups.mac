@@ -1,0 +1,53 @@
+/* The finite rotation groups of `crates/spacelab-constellation/src/mozhaev.rs`: the Rodrigues
+   matrix `axis_angle` builds, and the icosahedral generators in exact arithmetic over Q(sqrt 5).
+   Every identity prints `<name>: 0`; group orders and isomorphism types are in
+   mozhaev_point_groups.g.
+   Run: timeout 120 maxima --very-quiet -Q -b derivations/mozhaev_point_groups.mac </dev/null */
+
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+zero_matrix_p(m) := every(lambda([x], is(x = 0)), list_matrix_entries(m))$
+chkm(name, m) := printf(true, "~a: ~a~%", name, if zero_matrix_p(m) then 0 else m)$
+
+/* axis_angle: the expanded entries in the code against R = c I + s [k]x + (1 - c) k k^T, |k| = 1. */
+block([K, code, vec],
+  K: matrix([0, -kz, ky], [kz, 0, -kx], [-ky, kx, 0]),
+  code: matrix([c + kx*kx*t, kx*ky*t - kz*s, kx*kz*t + ky*s],
+               [ky*kx*t + kz*s, c + ky*ky*t, ky*kz*t - kx*s],
+               [kz*kx*t - ky*s, kz*ky*t + kx*s, c + kz*kz*t]),
+  vec: c*ident(3) + s*K + t*matrix([kx], [ky], [kz]) . matrix([kx, ky, kz]),
+  chkm("axis_angle_is_rodrigues", ratsimp(code - vec)),
+  /* with t = 1 - c, c^2 + s^2 = 1 and |k| = 1 it is a rotation: R^T R = I */
+  chkm("rodrigues_is_orthogonal",
+       ratsimp(subst([t = 1 - c], ratsubst(1 - c^2, s^2, ratsubst(1 - kx^2 - ky^2, kz^2,
+         expand(transpose(vec) . vec)))) - ident(3))))$
+
+/* The icosahedral generators. phi = (1 + sqrt 5)/2, vertices the cyclic permutations of
+   (0, +-1, +-phi). r3 is the coordinate cycle; r5 is 72 degrees about the vertex (0, 1, phi):
+   cos 72 = (sqrt 5 - 1)/4, and sin 72 / |(0,1,phi)| = 1/2 exactly, so r5 has entries in Q(sqrt 5). */
+phi: (1 + sqrt(5))/2$
+verts: block([v: []],
+  for a in [1, -1] do for b in [phi, -phi] do
+    v: append(v, [[0, a, b], [b, 0, a], [a, b, 0]]),
+  v)$
+chk("twelve_vertices", length(verts) - 12)$
+chk("sin72_over_axis_norm_is_one_half", radcan(sqrt(10 + 2*sqrt(5))/4/sqrt(1 + phi^2) - 1/2))$
+r3: matrix([0, 0, 1], [1, 0, 0], [0, 1, 0])$
+r5: block([c: (sqrt(5) - 1)/4, k: [0, 1, phi]/sqrt(1 + phi^2), sk: [0, 1, phi]/2],
+  c*ident(3) + matrix([0, -sk[3], sk[2]], [sk[3], 0, -sk[1]], [-sk[2], sk[1], 0])
+    + (1 - c)*transpose(matrix(k)) . matrix(k))$
+r5: ratsimp(radcan(r5))$
+/* algebraic: true rationalises denominators, so equal elements of Q(sqrt 5) print identically. */
+algebraic: true$
+simpv(v) := map(lambda([x], ratsimp(radcan(x))), v)$
+maps_onto_vertices(m) := block([img],
+  img: map(lambda([v], simpv(list_matrix_entries(m . transpose(matrix(v))))), verts),
+  if setify(img) = setify(map(simpv, verts)) then 0 else 1)$
+chk("r3_permutes_the_vertices", maps_onto_vertices(r3))$
+chk("r5_permutes_the_vertices", maps_onto_vertices(r5))$
+chkm("r5_is_orthogonal", ratsimp(radcan(transpose(r5) . r5 - ident(3))))$
+chk("r5_is_proper", ratsimp(radcan(determinant(r5) - 1)))$
+chkm("r5_has_order_five", ratsimp(radcan(r5^^5 - ident(3))))$
+chk("r5_fixes_its_axis", apply("+", map(abs, simpv(list_matrix_entries(r5 . matrix([0], [1], [phi])) - [0, 1, phi]))))$
+/* 1 + 2 cos 72 = phi and 1 + 2 cos 144 = -1/phi: the traces the 24 fifth-turns split into. */
+chk("trace_of_r5_is_phi", ratsimp(radcan(mat_trace(r5) - phi)))$
+chk("trace_of_r5_squared_is_minus_inverse_phi", ratsimp(radcan(mat_trace(r5^^2) + 1/phi)))$

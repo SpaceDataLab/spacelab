@@ -30,6 +30,9 @@
 //!   `f`. This is the dimension three other implementations get wrong: GMAT compares its tolerance
 //!   with a difference in the stop parameter's own units, PreviSat applies a tolerance in days to a
 //!   dimensionless interpolation factor, and Gpredict converges on `|el| < 0.005°`.
+//!
+//! Gate: `tests/root.rs::matches_pari_reference_roots_to_near_machine_precision` holds the bracket
+//! to the exact roots of `derivations/root_reference_roots.mac`.
 
 #![allow(clippy::doc_markdown)] // program names and math notation, not identifiers
 #![allow(clippy::float_cmp)] // exact `== 0.0` is the exact-root test; `a == c` is a zeroin invariant

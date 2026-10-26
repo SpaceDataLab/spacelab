@@ -24,6 +24,13 @@
 //! Magnitudes are magnitudes: larger is fainter, and a difference of 5 is a factor of 100 in flux.
 //! [`DetectabilityDetector`]'s `g` follows [`crate::detectors`] — positive when the object is above
 //! the required signal-to-noise.
+//!
+//! # Gates
+//!
+//! `derivations/photometry_closed_forms.mac` derives the diffuse-sphere phase law from its Lambert
+//! integral, the V-band zero point, the Krisciunas & Schaefer air mass and lunar phase law at exact
+//! points, and the closed-form root of the CCD equation; the tests below named `(G2)`/`(G3)` hold
+//! the shipped code to them.
 
 use spacelab_core::Vec3;
 
@@ -109,8 +116,9 @@ pub fn moon_illuminance(alpha: f64) -> f64 {
 ///
 /// `f(ρ) = 10^5.36 (1.06 + cos²ρ) + 10^(6.15 − ρ/40)` with `ρ` in degrees, and the aureole form
 /// `6.2e7/ρ²` replacing the Mie term inside 10°, where the exponential no longer describes the
-/// forward-scattering peak. The two branches do not meet — 1.24e6 against 8.9e5 at 10° — and that
-/// step is the paper's, kept rather than smoothed, because smoothing it would be a different model.
+/// forward-scattering peak. The two branches do not meet — `f` is 1.09e6 at 10°, which the aureole
+/// owns, and 1.26e6 just past it — and that step is the paper's, kept rather than smoothed, because
+/// smoothing it would be a different model.
 #[must_use]
 pub fn moon_scattering(rho: f64) -> f64 {
     let deg = libm::fabs(rho.to_degrees());
@@ -491,6 +499,103 @@ mod tests {
         }
     }
 
+    /// (G2) The diffuse-sphere phase law against the integral that defines it, `∫ cos i cos e` over
+    /// the lit and visible lune normalised to opposition, derived in closed form in
+    /// `derivations/photometry_closed_forms.mac` and integrated numerically in
+    /// `derivations/photometry_closed_forms.gp`; the values are the derivation's, at `α = kπ/6`.
+    ///
+    /// Bound 4·ε absolute (`Φ ≤ 1`): `sin α` and `(π − α) cos α` are each within an ulp or two, and
+    /// near conjunction they cancel, so the error is absolute rather than relative there.
+    #[test]
+    // The derived values are kept at the derivation's width, not at the width f64 distinguishes.
+    // Φ(π/2) = 1/π is one of them, deliberately the derivation's literal and not `FRAC_1_PI`.
+    #[allow(clippy::excessive_precision, clippy::approx_constant)]
+    fn the_diffuse_sphere_phase_law_is_the_lambert_integral() {
+        const EXACT: [f64; 7] = [
+            1.0,
+            0.880_842_779_578_927_541_405_319_738_999_961_2,
+            0.608_997_781_044_229_358_088_996_582_489_818_1,
+            0.318_309_886_183_790_671_537_767_526_745_028_7,
+            0.108_997_781_044_229_358_088_996_582_489_818_1,
+            0.014_817_375_794_488_894_641_596_568_247_025,
+            0.0,
+        ];
+        for (k, exact) in EXACT.into_iter().enumerate() {
+            #[allow(clippy::cast_precision_loss)] // k <= 6
+            let alpha = k as f64 * core::f64::consts::PI / 6.0;
+            let got = PhaseFunction::DiffuseSphere.at(alpha);
+            assert!(
+                (got - exact).abs() <= 4.0 * f64::EPSILON,
+                "Φ({k}π/6) = {got:e} against {exact:e}, error {:e}",
+                (got - exact).abs()
+            );
+        }
+    }
+
+    /// (G3) The V-band zero point against its exact rational `F_λ Δλ λ/(hc)` =
+    /// 7913400000000000000000000/945926598642347 photons·s⁻¹·m⁻², from
+    /// `derivations/photometry_closed_forms.mac` (and `.gp`). Bound 4 ulps: three products and a
+    /// quotient of correctly rounded decimal constants.
+    #[test]
+    // The derived values are kept at the derivation's width, not at the width f64 distinguishes.
+    #[allow(clippy::excessive_precision)]
+    fn the_v_band_zero_point_is_the_exact_rational() {
+        let exact = 8.365_765_389_574_419_916_357_019_585_559_658e9;
+        let err = (V_BAND_ZERO_POINT_PHOTONS - exact).abs() / exact;
+        assert!(
+            err <= 4.0 * f64::EPSILON,
+            "{V_BAND_ZERO_POINT_PHOTONS:e}: relative {err:e}"
+        );
+    }
+
+    /// (G3) Krisciunas & Schaefer's air mass at exact angles: 1 at the zenith, `5/√19` at 60° and
+    /// `5/√7` at 30° elevation, 5 on the horizon (`derivations/photometry_closed_forms.mac`). Bound
+    /// 4 ulps relative.
+    #[test]
+    fn the_krisciunas_schaefer_air_mass_has_its_exact_values() {
+        let pi = core::f64::consts::PI;
+        for (z, exact) in [
+            (0.0, 1.0),
+            (pi / 6.0, 5.0 / libm::sqrt(19.0)),
+            (pi / 3.0, 5.0 / libm::sqrt(7.0)),
+            (pi / 2.0, 5.0),
+        ] {
+            let got = krisciunas_schaefer_airmass(z);
+            let err = (got - exact).abs() / exact;
+            assert!(
+                err <= 4.0 * f64::EPSILON,
+                "X({z}) = {got} against {exact}: {err:e}"
+            );
+        }
+    }
+
+    /// (G2) `limiting_magnitude` against the closed-form root of the CCD equation it inverts:
+    /// `SNR² (S + nN) = S²` gives `S = (s² + √(s⁴ + 4s²nN))/2` and `V = −2.5 log₁₀(S/rate)`, derived
+    /// in `derivations/photometry_closed_forms.mac` and re-solved from `SNR(V) = s` in
+    /// `derivations/photometry_closed_forms.gp`, for the metre-class sensor at four (sky, SNR).
+    ///
+    /// Bound 1e-13 mag: the bisection resolves its interval to an ulp of `V` (3.6e-15 at 21), and the
+    /// f64 SNR it compares, a few ulps off, moves the crossing by `δSNR/|dSNR/dV|`, ~1e-15.
+    #[test]
+    // The derived values are kept at the derivation's width, not at the width f64 distinguishes.
+    #[allow(clippy::excessive_precision)]
+    fn the_limiting_magnitude_is_the_root_of_the_ccd_equation() {
+        let s = metre_class();
+        for (sky, snr, exact) in [
+            (21.8, 5.0, 21.352_475_800_487_403_109_614_656_579_009_28),
+            (19.0, 5.0, 20.058_393_222_308_139_460_639_913_520_528_36),
+            (21.8, 10.0, 20.545_861_780_002_524_021_563_358_788_274_08),
+            (21.8, 3.0, 21.928_758_371_223_762_274_871_995_827_629_50),
+        ] {
+            let got = s.limiting_magnitude(sky, snr);
+            assert!(
+                (got - exact).abs() <= 1e-13,
+                "sky {sky}, SNR {snr}: {got} against {exact}, error {:e}",
+                (got - exact).abs()
+            );
+        }
+    }
+
     #[test]
     fn the_v_band_zero_point_is_the_published_flux_turned_into_photons() {
         // 8.366e9 photons/s/m², and the "about 1e10" every summary quotes is the same number at the
@@ -522,7 +627,7 @@ mod tests {
         // Quarter Moon, α = 90°: −12.73 + 2.34 + 0.2624, and that quartic quarter-magnitude is
         // the term a linear phase law has no way to produce.
         assert!((lunar_v_magnitude(90.0 * DEG) + 10.127_56).abs() < 1e-5);
-        // The new Moon is 11.6 magnitudes fainter than the full Moon, a factor of 4.5e4.
+        // The new Moon is 8.88 magnitudes fainter than the full Moon, a factor of 3.56e3.
         assert!((lunar_v_magnitude(180.0 * DEG) - lunar_v_magnitude(0.0) - 8.88).abs() < 0.01);
     }
 

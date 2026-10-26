@@ -16,6 +16,9 @@
 //! machine cannot execute — the host is Zen 3 (AVX2, no AVX-512) and QEMU's TCG does not
 //! implement AVX-512 either, so it could never be run, let alone tested. One source, compiled per
 //! target feature, is one thing to test. See `plans/08-parallelism.md`.
+//!
+//! `tests/kernel_gates.rs` decides every kernel against the defining inequalities in exact integer
+//! arithmetic on a lattice whose counts `derivations/kernel_lattice.g` computes in GAP.
 
 use spacelab_core::Vec3;
 

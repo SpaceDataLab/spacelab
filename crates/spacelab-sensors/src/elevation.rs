@@ -1,4 +1,8 @@
 //! Elevation-mask constraint: the satellite must rise at least `eps_min` above the local horizon.
+//!
+//! The footprint edge, the slant range and the square-root-free predicate are derived in
+//! `derivations/elevation_footprint.mac` (120-digit values: `derivations/elevation_footprint.gp`)
+//! and gated in `tests/elevation_gates.rs`; `tests/kernel_gates.rs` decides `covered` exactly.
 
 use spacelab_core::Vec3;
 

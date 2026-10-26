@@ -1,0 +1,36 @@
+/* The scan geometry closed forms of crates/spacelab-sensors/src/scan.rs, in exact arithmetic.
+
+   A cross-track member of n samples puts sample p at roll(p) = (p/((n-1)/2) - 1) (-H), H the
+   half-swath; a push-broom member ramps from A to B over n samples, ramp(i) = A + i (B - A)/(n-1);
+   VIIRS's 32 detector rows sit at pitch(l) = -(l/((32-1)/2) - 1) E, E = atan2(11.87/2, 824).
+
+   (1)-(2) the normalisation runs from exactly -1 to exactly +1, so sample 0 looks to +H and
+   sample n-1 to -H; (3) the swath is antisymmetric, roll(n-1-p) = -roll(p), for every n and p;
+   (4)-(5) the ramp meets both of its limits; (6)-(7) the VIIRS rows are +-E at the two ends;
+   (8) GAC samples are five full-resolution intervals apart, 0.000125 = 5 x 0.000025 s;
+   (9) 6400 VIIRS columns of 85.4/(48 x 6400) s fill one 85.4/48 s scan exactly; (10)-(11) the
+   two VIIRS literals ported from pyorbital, 1.779166667 s and 0.0002779947917 s, are those two
+   quotients rounded to their printed 9 and 13 decimals -- the stated 85.4 s granule of 48 scans
+   over 6400 columns, not some other rate; (12) the two ASCAT fans of 21 fill its 42 samples.
+   The swath-edge displacement the GAC factor (1023.5 - 3.5)/1023.5 makes is evaluated in
+   scan_catalogue.gp, with the reference angles the Rust gate is held to.
+
+   Every residual prints as `<name>: 0`, 12 of them.                                            */
+
+display2d : false$
+roll(p, n, H) := (p/((n - 1)/2) - 1)*(-H)$
+ramp(i, n, A, B) := A + i*(B - A)/(n - 1)$
+pitch(l, E) := -(l/((32 - 1)/2) - 1)*E$
+
+print("roll_first_sample:", ratsimp(roll(0, n, H) - H))$
+print("roll_last_sample:", ratsimp(roll(n - 1, n, H) + H))$
+print("roll_antisymmetry:", ratsimp(roll(n - 1 - p, n, H) + roll(p, n, H)))$
+print("ramp_first_sample:", ratsimp(ramp(0, n, A, B) - A))$
+print("ramp_last_sample:", ratsimp(ramp(n - 1, n, A, B) - B))$
+print("viirs_first_row:", ratsimp(pitch(0, E) - E))$
+print("viirs_last_row:", ratsimp(pitch(31, E) + E))$
+print("gac_sample_interval:", 125/10^6 - 5*25/10^6)$
+print("viirs_columns_fill_a_scan:", 6400*(854/10)/(48*6400) - (854/10)/48)$
+print("viirs_scan_literal:", round((854/10)/48*10^9)/10^9 - 1779166667/10^9)$
+print("viirs_column_literal:", round((854/10)/(48*6400)*10^13)/10^13 - 2779947917/10^13)$
+print("ascat_fans_fill_the_line:", 21 + 21 - 42)$

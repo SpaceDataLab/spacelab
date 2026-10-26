@@ -1,0 +1,28 @@
+/* Two-tier shell surveillance (`crates/spacelab-constellation/src/shell.rs`): the launch
+   characteristic velocity from the energy balance, and the elevation and cone tests of `observes`
+   from their geometric definitions. Every identity prints `<name>: 0`.
+   Run: timeout 120 maxima --very-quiet -Q -b derivations/shell_surveillance.mac </dev/null */
+
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+dot3(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+assume(mu > 0, Re > 0, H > 0, d > 0, L > 0, B > 0)$
+
+/* dV*: launch-pad kinetic energy minus the surface potential equals the circular-orbit energy at
+   Re + H: dV^2/2 - mu/Re = VH^2/2 - mu/(Re+H), VH^2 = mu/(Re+H). The shipped closed form is
+   dV^2 = mu/Re (Re + 2H)/(Re + H). */
+dv2: 2*((mu/(Re + H))/2 - mu/(Re + H) + mu/Re)$
+chk("energy_balance_closed_form", ratsimp(dv2 - mu/Re*(Re + 2*H)/(Re + H)))$
+/* H = 0 leaves the circular speed at the surface, sqrt(mu/Re). */
+chk("zero_height_is_surface_circular_speed", ratsimp(subst(H = 0, mu/Re*(Re + 2*H)/(Re + H)) - mu/Re))$
+
+/* Elevation: target at rho t, t = (1,0,0); satellite along the look direction at elevation el,
+   S = rho t + d (sin el t + cos el e), e = (0,1,0). The code's sin_el = (S - target).t/|S - target|. */
+block([t, e, Tg, S, dd],
+  t: [1, 0, 0], e: [0, 1, 0], Tg: rho*t,
+  S: Tg + d*(sin(el)*t + cos(el)*e), dd: S - Tg,
+  chk("elevation_sine", trigsimp(dot3(dd, t)/sqrt(trigsimp(dot3(dd, dd))) - sin(el))))$
+/* Cone: target at L (cos g, sin g, 0) from the sensor, boresight B (1,0,0); the code's test
+   d.b >= cos(beta) |d| |b| is cos g >= cos beta, i.e. g <= beta on [0, pi]. */
+block([dd, bb],
+  dd: L*[cos(g), sin(g), 0], bb: [B, 0, 0],
+  chk("cone_cosine", trigsimp(dot3(dd, bb) - cos(g)*sqrt(trigsimp(dot3(dd, dd)))*sqrt(dot3(bb, bb)))))$

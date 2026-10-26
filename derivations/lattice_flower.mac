@@ -1,0 +1,24 @@
+/* 2-D Lattice Flower (`crates/spacelab-constellation/src/lattice.rs`), in turns (2 pi = 1).
+   The code places slot i, satellite j at W = i/No, M = Nc i/(No Nso) + j/Nso. Avendano, Davis &
+   Mortari (2013) define the lattice as the solutions of the Hermite-normal-form system
+       [No 0; Nc' Nso] [dW; dM] = [i; j]   (integers),
+   as restated in Casanova, Avendano & Mortari, IEEE Trans. AES 50(2), 2014, p. 1348, eqs. (3)-(4),
+   and Arnas et al., Celest. Mech. Dyn. Astr. 121 (2015) 83-100, eq. (3), which give M = j/Nso - Nc' i/(No Nso).
+   So the module's Nc is the paper's Nc' = -Nc (mod No). Every identity prints `<name>: 0`.
+   Run: timeout 120 maxima --very-quiet -Q -b derivations/lattice_flower.mac </dev/null */
+
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+W(i) := i/No$
+M(i, j) := Nc*i/(No*Nso) + j/Nso$
+
+/* The first HNF row: No dW = i, an integer. */
+chk("hnf_first_row", ratsimp(No*W(i) - i))$
+/* The second row with the paper's Nc' = No - Nc: (No - Nc) dW + Nso dM = i + j, an integer. */
+chk("hnf_second_row_with_the_paper_configuration_number", ratsimp((No - Nc)*W(i) + Nso*M(i, j) - (i + j)))$
+/* Adding No to Nc' changes the second row by i, still an integer: Nc' is defined mod No. */
+chk("paper_configuration_number_is_taken_mod_No", ratsimp((No - Nc + No)*W(i) + Nso*M(i, j) - (2*i + j)))$
+/* Circular (M = u) with (No, Nso, Nc) = (P, S, F) is Walker's u = s/S + p F/(P S) slot for slot. */
+chk("circular_lattice_is_walker_delta", ratsimp(subst([No = P, Nso = S, Nc = F], M(p, s)) - (s/S + p*F/(P*S))))$
+/* Within a slot the satellites are 1/Nso apart; between slots the shift is Nc/(No Nso). */
+chk("in_slot_spacing", ratsimp(M(i, j + 1) - M(i, j) - 1/Nso))$
+chk("inter_slot_shift", ratsimp(M(i + 1, j) - M(i, j) - Nc/(No*Nso)))$

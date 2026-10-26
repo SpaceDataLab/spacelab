@@ -16,6 +16,10 @@
 //! drag-path treatment of the empirical models. The lift captures the dominant radial
 //! density gradient that decay depends on; the far smaller horizontal (bulge) gradient is not
 //! propagated into the STM, a deliberate omission on a mean-activity model good only to a factor.
+//!
+//! `derivations/harris_priester_law.mac` shows the lift's slope is `−ρ₀/H` and that on the night side
+//! `H` is the table bracket's own scale height; the gate is `the_night_side_scale_height_is_the_bracket_s_own`
+//! (G3) in the parent module's tests.
 
 use spacelab_autodiff::Scalar;
 

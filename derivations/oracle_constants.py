@@ -57,7 +57,6 @@ GENERATORS = [
     "tools/gen_se3_oracle.mac",
     "tools/gen_shbasis_oracle.mac",
     "tools/gen_slr_vapour_oracle.mac",
-    "tools/gen_soc_oracle.mac",
 ]
 
 SOURCE_SUFFIXES = {".rs", ".py", ".c", ".cpp", ".h", ".hpp", ".md", ".txt"}

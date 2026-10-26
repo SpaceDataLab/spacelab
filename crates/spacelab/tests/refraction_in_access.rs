@@ -21,10 +21,10 @@
 //! two is the *best* case at a 10° mask, and nothing about it averages out.
 //!
 //! **② The equivalence.** `h ↦ h + R(h)` is strictly increasing, so `apparent(h) ≥ mask` and
-//! `h ≥ geometric(mask)` are the same condition. Refraction applied once to the *mask* therefore
+//! `h ≥ h*` are the same condition, `h*` the root of `apparent(h*) = mask`. Refraction applied once to the *mask* therefore
 //! gives the same edges as refraction applied to every sample, which is why the correction costs
-//! nothing at runtime and the batch kernel never has to see it: it is `Refraction::geometric` on the
-//! threshold, and `ElevationMask::new` on the result.
+//! nothing at runtime and the batch kernel never has to see it: it is `Refraction::elevation_mask`,
+//! Sæmundsson inverted on the threshold.
 
 #![allow(
     clippy::expect_used,
@@ -120,7 +120,8 @@ enum Ray {
     Straight,
     /// The refracted elevation against the mask as given — the expensive, obviously-correct form.
     Bent,
-    /// The geometric elevation against the mask `Refraction::geometric` moves it to — the cheap form.
+    /// The geometric elevation against the mask `Refraction::elevation_mask` moves it to — the cheap
+    /// form.
     ShiftedMask,
 }
 
@@ -132,12 +133,11 @@ fn passes(mask: f64, ray: Ray) -> Vec<Window> {
 
     // `min_elevation = 0` makes `g` the elevation itself, in the well-conditioned `atan2` form.
     let threshold = match ray {
-        Ray::ShiftedMask => {
-            refraction
-                .geometric(ApparentAltitude(mask))
-                .expect("an apparent mask above the horizon has a geometric counterpart")
-                .0
-        }
+        Ray::ShiftedMask => refraction
+            .elevation_mask(ApparentAltitude(mask))
+            .expect("an apparent mask above the horizon has a geometric counterpart")
+            .sin_min()
+            .asin(),
         Ray::Straight | Ray::Bent => mask,
     };
     let detector = ElevationDetector::new(cell, zenith, 0.0);
@@ -280,15 +280,12 @@ fn a_refracted_mask_is_the_same_answer_as_a_refracted_elevation() {
              {worst_arcsec:.2}\" of elevation"
         );
 
-        // The two conditions are the same condition, so the gap is not an approximation error to be
-        // bounded — it is the *threshold* difference between the two published fits, which are not
-        // exact inverses of each other. In seconds it is whatever the pass's elevation rate makes of
-        // it, so the scale-free form is the one to assert: converted back through `dε/dt` it is a few
-        // arcseconds at every mask, matching the round-trip residual `observability.rs` documents.
+        // The two conditions are the same condition and the mask is the exact root of the refraction
+        // map, so the only gap left is the root finder's: each edge is located to `TOL`.
         assert!(
-            worst_arcsec < 6.0,
-            "the two routes disagree by {worst_arcsec:.2}\" at {mask_deg}°, which is more than the \
-             Saemundsson/Bennett round trip: the mask shift is not reproducing the pointwise answer"
+            worst <= 2.0 * TOL,
+            "the two routes disagree by {worst:.2e} s ({worst_arcsec:.2}\") at {mask_deg}°, more than \
+             the root finder's 2·TOL: the mask shift is not reproducing the pointwise answer"
         );
     }
 }

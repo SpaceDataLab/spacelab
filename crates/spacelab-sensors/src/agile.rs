@@ -1,4 +1,8 @@
 //! Agile optical instrument: a boresight that can slew off-nadir up to a limit.
+//!
+//! Its footprint ends at the nearer of the cone and horizon edges, which meet at the tangency
+//! `L sin(max_off_nadir) = 1` (`derivations/cone_footprint.mac`); the gate is
+//! `the_agile_footprint_edge_is_the_nearer_of_the_cone_and_the_horizon` in `tests/cone_gates.rs`.
 
 use crate::cull::{CullBody, Reach};
 use crate::{

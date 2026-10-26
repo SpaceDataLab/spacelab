@@ -15,6 +15,11 @@
 //!
 //! achieves a minimum global look angle of 2.1°, i.e. every point on Earth always sees at least one
 //! satellite at least 2.1° above the horizon.
+//!
+//! The table is the gate (`the_emitted_elements_are_the_patent_table`, G5); the period-to-axis map
+//! and the table's half-turn symmetry are derived in `derivations/draim_tetrahedral.mac`, with the
+//! axis at 60 digits in `derivations/draim_tetrahedral.gp`. The 2.1° look angle is the patent's
+//! claim; the sampled coverage test below supports it without a proven error bound.
 
 use spacelab_core::Angle;
 use spacelab_elements::KeplerianElements;
@@ -145,6 +150,7 @@ mod tests {
         assert_eq!(north, 2);
     }
 
+    /// (S1) Sampled continuous coverage; supporting only.
     #[test]
     fn four_satellites_give_continuous_global_coverage() {
         // The defining Draim property: at every instant every point on Earth sees at least one
@@ -176,5 +182,69 @@ mod tests {
             worst > 0.0,
             "coverage gap: worst (s·ĝ − Re) = {worst:.3e} m"
         );
+    }
+
+    /// (G5) The emitted elements are the patent's Table I.
+    ///
+    /// US 4,854,527 (Draim), "Description of the Preferred Embodiment", Table I: common period,
+    /// `i = 33°`, `e = 0.28`; argument of perigee −90/+90/−90/+90°, node 0/90/180/270°, mean anomaly
+    /// 0/270/180/90°. Transcribed here from the patent, not from the module's constants, and read
+    /// back from what `generate` emits — the mean anomaly through the elements' own Kepler inversion.
+    /// Bound: 1e-12 rad.
+    #[test]
+    fn the_emitted_elements_are_the_patent_table() {
+        const TABLE_I: [[f64; 3]; 4] = [
+            [-90.0, 0.0, 0.0],
+            [90.0, 90.0, 270.0],
+            [-90.0, 180.0, 180.0],
+            [90.0, 270.0, 90.0],
+        ];
+        let d = DraimTetrahedral::nominal(MU);
+        let sats = collect(&d);
+        assert_eq!(sats.len(), 4);
+        let off = |got: f64, want_deg: f64| {
+            let r = (got - want_deg.to_radians()).rem_euclid(TAU);
+            r.min(TAU - r)
+        };
+        for (s, [argp, node, mean]) in sats.iter().zip(TABLE_I) {
+            assert!((s.inclination.radians() - 33.0_f64.to_radians()).abs() < 1e-15);
+            assert!((s.eccentricity - 0.28).abs() < f64::EPSILON);
+            assert!(off(s.arg_periapsis.radians(), argp) < 1e-12, "ω {s:?}");
+            assert!(off(s.raan.radians(), node) < 1e-12, "Ω {s:?}");
+            assert!(off(s.mean_anomaly().radians(), mean) < 1e-12, "M {s:?}");
+        }
+    }
+
+    /// (G3) The 48-hour semi-major axis against `derivations/draim_tetrahedral.gp`.
+    ///
+    /// `a = (μ (T/2π)²)^(1/3)` at 60 digits in PARI/GP, its period re-derived there; the identity
+    /// is `derivations/draim_tetrahedral.mac`. Bound: 4 ulp relative.
+    #[test]
+    fn the_semi_major_axis_matches_the_derived_value() {
+        let want = 6.705_355_970_960_569e7;
+        let got = DraimTetrahedral::nominal(MU).semi_major_axis;
+        assert!((got - want).abs() <= 4.0 * f64::EPSILON * want, "a = {got}");
+    }
+
+    /// (G4) A half-turn about the pole after half a period carries the four satellites onto
+    /// themselves (1 ↔ 3, 2 ↔ 4) — the symmetry `derivations/draim_tetrahedral.mac` reads off
+    /// Table I, checked here on propagated positions. Bound: 1e-6 m on 67 000 km orbits.
+    #[test]
+    fn half_a_period_and_a_half_turn_map_the_pattern_onto_itself() {
+        let d = DraimTetrahedral::nominal(MU);
+        let sats = collect(&d);
+        let half = core::f64::consts::PI * (d.semi_major_axis.powi(3) / MU).sqrt();
+        for t in [0.0, 1_234.5, 40_000.0] {
+            for (k, s) in sats.iter().enumerate() {
+                let r = s.propagate(t + half).to_state().0;
+                let turned = Vec3::new(-r.x, -r.y, r.z);
+                let partner = sats[(k + 2) % 4].propagate(t).to_state().0;
+                assert!(
+                    (turned - partner).norm() < 1e-6,
+                    "t={t} sat {k}: {}",
+                    (turned - partner).norm()
+                );
+            }
+        }
     }
 }

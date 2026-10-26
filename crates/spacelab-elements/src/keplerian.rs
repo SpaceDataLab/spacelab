@@ -15,6 +15,12 @@
 //!
 //! Elliptical orbits only (`0 ≤ e < 1`). The geometry (`a, e, i, Ω, ω, ν`) is defined for any conic,
 //! but the mean-anomaly machinery below assumes a bound orbit; hyperbolic anomaly is not modelled.
+//!
+//! `derivations/keplerian_elements.mac` proves `from_state` inverts `to_state` branch by branch and
+//! derives the anomaly maps; `derivations/j2_secular_rates.mac` derives the `J₂` rates. The gates
+//! are `kepler_s_equation_is_solved_to_its_conditioning` (G2) and
+//! `the_conversions_match_the_element_map_at_60_digits` (G1) in `tests/keplerian.rs`, against
+//! `derivations/keplerian_elements.gp`.
 
 // The classical elements are single letters (a, e, i, r, v, h, n, m, p, w) in every reference on
 // the subject; they are the ubiquitous language of the domain, not terse local names.
@@ -468,6 +474,9 @@ mod tests {
         ),
     ];
 
+    /// (G1) The anomalistic mean motion against the closed form `derivations/j2_secular_rates.mac`
+    /// derives from the averaged disturbing function, evaluated there at 40 digits.
+    ///
     /// The `√(1−e²)` factor in the anomalistic mean motion is invisible to every numerical oracle in
     /// this crate: the trajectory-based check runs at the inclination where the `Ṁ` and `ω̇`
     /// corrections cancel, and even off it the O(J₂) osculating-versus-mean floor of a propagated

@@ -2187,6 +2187,10 @@ fn wam_ipe_month_rows(
     (names, satellites)
 }
 
+/// `(satellite, hour)` → per base, the log of WAM-IPE's scale correction less its trailing mean: the
+/// scalar `A_WAM` of `plans/17` Ф18.B-4's storm gain. A scale is one constant, so any point reads it.
+type ScaleAnomaly = BTreeMap<(usize, i64), [f64; WAM_BASE_COUNT]>;
+
 /// `(satellite, row, hour)` → `ln ρ` under both readings, and the field's top above the row.
 type AtHour = HashMap<(usize, usize, i64), ([f64; 2], Option<f64>)>;
 
@@ -2200,6 +2204,7 @@ fn score_wam_ipe_month(
     hours: &BTreeMap<i64, PathBuf>,
     ratios: &mut BTreeMap<(String, usize), Vec<f64>>,
     records: &mut Vec<WamRecord>,
+    scale_anomaly: &mut ScaleAnomaly,
 ) {
     let year: i32 = month[..4].parse().unwrap();
     let mon: u32 = month[5..].parse().unwrap();
@@ -2235,6 +2240,7 @@ fn score_wam_ipe_month(
             let per_base = std::array::from_fn(|b| {
                 now[b].anomaly(&trailing.iter().map(|t| &t[b]).collect::<Vec<_>>())
             });
+            scale_anomaly.insert((s, hour), per_base.map(|c| c.log(0, 0.0, 0.0)));
             anomaly.insert((s, hour), per_base);
         }
     }
@@ -2295,6 +2301,8 @@ fn latitude_band(latitude_deg: f64) -> &'static str {
 struct WamRecord {
     /// `(satellite, month, hour)`: the rows one hourly field and one shell share.
     hour: (usize, &'static str, i64),
+    /// Modified Julian date of the row, which places it in or out of a storm's window.
+    mjd: f64,
     /// `ln r` for each base, then for WAM-IPE at geodetic height.
     log_ratio: Vec<f64>,
     drivers: [f64; WamRecord::DRIVERS.len()],
@@ -2318,6 +2326,7 @@ impl WamRecord {
         let lst = e.local_solar_time * std::f64::consts::TAU / 24.0;
         Self {
             hour,
+            mjd: e.mjd,
             log_ratio: row[..=WAM_BASES.len()].iter().map(|r| r.ln()).collect(),
             drivers: [
                 1.0,
@@ -2448,6 +2457,157 @@ fn print_wam_split(records: &[WamRecord], names: &[String]) {
     }
 }
 
+/// Each month after the first with the months before it, the only ones its fit may see: the rolling
+/// origin of `plans/17` Ф18.B-4. Months are `YYYY_MM`, so their string order is their time order.
+fn rolling_origin<'a>(months: &[&'a str]) -> Vec<(&'a str, Vec<&'a str>)> {
+    let mut sorted = months.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    (1..sorted.len())
+        .map(|i| (sorted[i], sorted[..i].to_vec()))
+        .collect()
+}
+
+/// The MOS driver sets of Ф18.B-4, as indices into [`WamRecord::DRIVERS`], fixed before the first
+/// run: all ten, and the eight left without the two flux terms, because one training month cannot
+/// tell its 81-day mean from the intercept and a fit that tries extrapolates the flux a year ahead.
+const WAM_MOS_SETS: [(&str, &[usize]); 2] = [
+    ("MOS, ten drivers", &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+    ("MOS, no flux terms", &[0, 3, 4, 5, 6, 7, 8, 9]),
+];
+
+/// Ф18.B-4's model-output statistics: `ln r = βᵀx` fitted on the earlier months, removed from the
+/// next one, and scored there — pooled and at `Ap ≥ 50` — beside the uncorrected columns.
+fn print_wam_mos(records: &[WamRecord], names: &[String]) {
+    let months: Vec<&str> = records.iter().map(|r| r.hour.1).collect();
+    for (test, train) in rolling_origin(&months) {
+        let fitted: Vec<&WamRecord> = records
+            .iter()
+            .filter(|r| train.contains(&r.hour.1))
+            .collect();
+        let scored: Vec<&WamRecord> = records.iter().filter(|r| r.hour.1 == test).collect();
+        println!(
+            "\n== MOS, fitted on {train:?} ({} rows), scored on {test} ({} rows): MAPE all | Ap >= 50 ==",
+            fitted.len(),
+            scored.len()
+        );
+        for (c, name) in names.iter().enumerate() {
+            let line = |label: &str, ratio: &dyn Fn(&WamRecord) -> f64| {
+                let all = fit(scored.iter().map(|r| ratio(r)));
+                let storm = fit(scored
+                    .iter()
+                    .filter(|r| r.drivers[3] >= 0.5)
+                    .map(|r| ratio(r)));
+                println!(
+                    "{name:<22} {label:<20} {:5.1}% (n {:>6}) | {:5.1}% (n {:>5})",
+                    all.mape, all.n, storm.mape, storm.n
+                );
+            };
+            line("as is", &|r| r.log_ratio[c].exp());
+            for (label, set) in WAM_MOS_SETS {
+                let x = |r: &WamRecord| set.iter().map(|&a| r.drivers[a]).collect::<Vec<f64>>();
+                let model = ReducedDynamics::fit(
+                    &fitted.iter().map(|r| x(r)).collect::<Vec<_>>(),
+                    &fitted
+                        .iter()
+                        .map(|r| vec![r.log_ratio[c]])
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
+                line(label, &|r| (r.log_ratio[c] - model.predict(&x(r))[0]).exp());
+            }
+        }
+    }
+}
+
+/// The lags `τ`, hours, Ф18.B-4's storm gain is searched over: WAM-IPE's response is "delayed"
+/// (Wang & Bai, arXiv:2608.00352, §3.4), and half a day bounds any delay a storm's main phase allows.
+const WAM_GAIN_LAGS: std::ops::RangeInclusive<i64> = 0..=12;
+
+/// `γ` minimising `Σ (y + γA)²` over `(y, A)` pairs: `γ = −Σ yA / Σ A²`, the root of the normal
+/// equation `Σ (y + γA) A = 0`.
+fn storm_gain(pairs: impl Iterator<Item = (f64, f64)>) -> f64 {
+    let (mut ya, mut aa) = (0.0, 0.0);
+    for (y, a) in pairs {
+        ya += y * a;
+        aa += a * a;
+    }
+    -ya / aa
+}
+
+/// Ф18.B-4's storm gain: `ln r = ln r_base + γ·A_WAM(t − τ)`, with `γ` and `τ` fitted on every storm
+/// but one and scored on the one left out, for each base.
+fn print_wam_storm_gain(
+    records: &[WamRecord],
+    anomaly: &ScaleAnomaly,
+    storms: &[Storm],
+    names: &[String],
+) {
+    let at = |r: &WamRecord, tau: i64, b: usize| anomaly[&(r.hour.0, r.hour.2 - tau * 3600)][b];
+    // Rows inside a storm's four phases with the anomaly known at every lag, so that each lag is
+    // scored on the same rows.
+    let rows: Vec<(usize, &WamRecord)> = records
+        .iter()
+        .filter(|r| {
+            WAM_GAIN_LAGS
+                .clone()
+                .all(|tau| anomaly.contains_key(&(r.hour.0, r.hour.2 - tau * 3600)))
+        })
+        .filter_map(|r| {
+            storms
+                .iter()
+                .position(|s| (1..=4).any(|p| s.contains(p, r.mjd)))
+                .map(|k| (k, r))
+        })
+        .collect();
+    let mut present: Vec<usize> = rows.iter().map(|(k, _)| *k).collect();
+    present.sort_unstable();
+    present.dedup();
+    println!(
+        "\n== storm gain ln r + gamma A(t - tau), leave one storm out: {} rows in {} storms ==",
+        rows.len(),
+        present.len()
+    );
+    for (b, name) in names.iter().enumerate().take(WAM_BASE_COUNT) {
+        for &k in &present {
+            let train: Vec<&WamRecord> = rows
+                .iter()
+                .filter(|(j, _)| *j != k)
+                .map(|(_, r)| *r)
+                .collect();
+            let held: Vec<&WamRecord> = rows
+                .iter()
+                .filter(|(j, _)| *j == k)
+                .map(|(_, r)| *r)
+                .collect();
+            if train.is_empty() {
+                continue;
+            }
+            let (tau, gamma, _) = WAM_GAIN_LAGS
+                .clone()
+                .map(|tau| {
+                    let g = storm_gain(train.iter().map(|r| (r.log_ratio[b], at(r, tau, b))));
+                    let sse: f64 = train
+                        .iter()
+                        .map(|r| (r.log_ratio[b] + g * at(r, tau, b)).powi(2))
+                        .sum();
+                    (tau, g, sse)
+                })
+                .min_by(|x, y| x.2.total_cmp(&y.2))
+                .unwrap();
+            let base = fit(held.iter().map(|r| r.log_ratio[b].exp()));
+            let gained = fit(held
+                .iter()
+                .map(|r| (r.log_ratio[b] + gamma * at(r, tau, b)).exp()));
+            println!(
+                "{name:<22} held out t0 MJD {:.3} (peak ap {:>3})  n {:>5}  gamma {gamma:+.3}  tau {tau:>2} h  \
+                 MAPE {:5.1}% -> {:5.1}%",
+                storms[k].t0, storms[k].peak_ap, base.n, base.mape, gained.mape
+            );
+        }
+    }
+}
+
 /// The two groups a row's height against WAM-IPE's top puts it in: the side, and the 50 km bin.
 fn wam_top_groups(altitude_km: f64, top: Option<f64>) -> [String; 2] {
     let Some(top) = top else {
@@ -2495,12 +2655,23 @@ fn wam_ipe_against_the_accelerometers_alone_and_as_a_calibration_input() {
     let hours = wam_ipe_hours();
     let mut ratios: BTreeMap<(String, usize), Vec<f64>> = BTreeMap::new();
     let mut records = Vec::new();
+    let mut scale_anomaly = ScaleAnomaly::new();
     for month in WAM_IPE_MONTHS {
-        score_wam_ipe_month(month, dir, series.view(), &hours, &mut ratios, &mut records);
+        score_wam_ipe_month(
+            month,
+            dir,
+            series.view(),
+            &hours,
+            &mut ratios,
+            &mut records,
+            &mut scale_anomaly,
+        );
     }
     let names = &wam_ipe_columns()[..=WAM_BASES.len()];
     print_wam_regression(&records, names);
     print_wam_split(&records, names);
+    print_wam_mos(&records, names);
+    print_wam_storm_gain(&records, &scale_anomaly, &storms(&series.days), names);
 
     let mut groups: Vec<String> = ratios.keys().map(|(g, _)| g.clone()).collect();
     groups.dedup();
@@ -2520,4 +2691,36 @@ fn wam_ipe_against_the_accelerometers_alone_and_as_a_calibration_input() {
             );
         }
     }
+}
+
+#[test]
+fn the_rolling_origin_never_fits_on_its_test_month_or_a_later_one() {
+    let months = ["2025_06", "2024_05", "2025_06", "2023_04", "2024_05"];
+    let folds = rolling_origin(&months);
+    assert_eq!(
+        folds,
+        vec![
+            ("2024_05", vec!["2023_04"]),
+            ("2025_06", vec!["2023_04", "2024_05"]),
+        ]
+    );
+    for (test, train) in folds {
+        assert!(
+            train.iter().all(|m| *m < test),
+            "{test} trains on {train:?}"
+        );
+    }
+}
+
+/// The storm gain, a harness helper and no module's gate, is the root of its normal equation `Σ (y + γA) A = 0`, and recovers an exact
+/// gain where `y = −γA` holds with no noise.
+#[test]
+fn the_storm_gain_solves_its_normal_equation() {
+    let a = [0.3, -0.1, 0.7, 0.05, -0.4];
+    let y = [0.2, 0.1, -0.5, 0.3, 0.0];
+    let g = storm_gain(y.iter().copied().zip(a));
+    let normal: f64 = y.iter().zip(a).map(|(y, a)| (y + g * a) * a).sum();
+    assert!(normal.abs() < 1e-15, "normal equation residual {normal:e}");
+    let exact = storm_gain(a.iter().map(|a| (-1.25 * a, *a)));
+    assert!((exact - 1.25).abs() < 1e-15, "{exact}");
 }

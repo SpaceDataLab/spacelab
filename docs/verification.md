@@ -7702,6 +7702,32 @@ own levels would not reopen it; a WAM release without the excess would, or the
 `NON-OPERATIONAL_RESEARCH/` reruns, which the register keeps unread until the WAM-IPE team
 has been asked (`docs/provenance.md`, `noaa-wam-ipe`).
 
+**Corrected by statistics, it still loses (Ф18.B-4, refuted).** Two corrections, each fitted only on
+data its score never sees. *Model-output statistics:* `ln r = βᵀx` on the ten drivers above, fitted
+on 2024-05 and removed from 2025-06, the only rolling-origin fold two months allow; a second set
+without the two flux terms was fixed before the run, because one month cannot tell its 81-day mean
+from the intercept. On 2025-06's 41 806 rows (3 794 at `Ap ≥ 50`):
+
+| | MAPE, all | MAPE, `Ap ≥ 50` |
+|---|---|---|
+| JB2008 as is | **18.3 %** | 32.2 % |
+| WAM-IPE as is | 37.4 % | 27.4 % |
+| WAM-IPE, MOS on ten drivers | 27.9 % | **22.9 %** |
+| WAM-IPE, MOS without the flux terms | 58.0 % | 48.2 % |
+| JB2008, MOS on ten drivers | 29.3 % | 26.1 % |
+
+The ten-driver MOS beats JB2008 at `Ap ≥ 50` and loses 9.6 points of pooled MAPE to it, so the plan's
+two-sided bar fails. The two driver sets differ by 30 points, and the same MOS makes JB2008 itself 11
+points worse: a correction fitted on one month does not carry to the same month a year later. That
+is a statement about one fold; the research reruns across the solar cycle (Ф18.B-5) are the test with
+more than one. *Storm gain:* `ln r = ln r_base + γ·A(t − τ)`, where `A` is WAM-IPE's scale
+correction less its trailing 72 h mean, with `γ` and `τ ∈ 0…12 h` fitted on four storms and scored on
+the fifth (31 046 rows in five storms). For JB2008 every fold picks `τ = 0` and `γ` between +0.22 and
++0.47; the held-out MAPE moves by −2.3 to +0.9 points, −0.4 points over all five, and is worse in
+the Gannon storm (28.7 → 29.4 %). The best lag is zero, not the delay §3.4 of Wang & Bai describes at
+their cadence: at one hour, WAM-IPE's anomaly carries no response that the bases are late to. The
+gain is a weak shrinkage toward WAM-IPE's departures, not a storm model.
+
 Attribution: NOAA Space Weather Prediction Center, WAM-IPE, accessed from the NOAA Open Data
 Dissemination program on AWS (<https://registry.opendata.aws/noaa-nws-wam-ipe>). NOAA does not endorse
 this library. Reproduce with `tools/fetch-density-data.sh 2024-05 2025-06`, `tools/fetch-wam-ipe.sh` (both pin

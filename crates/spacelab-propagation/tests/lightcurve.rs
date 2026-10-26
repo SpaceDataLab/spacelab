@@ -65,6 +65,7 @@ fn the_magnitude_zero_point_agrees_with_the_photometric_route() {
     );
 }
 
+/// One Lambertian facet against `I = E·A·C_d/π` and the magnitude worked by hand. (G3)
 #[test]
 fn a_lambertian_plate_at_a_thousand_kilometres_is_fourth_magnitude() {
     // The whole chain on one facet, against arithmetic done by hand:
@@ -125,6 +126,8 @@ fn reflected_power(body: &PhotometricBoxWing<1>, sun: [f64; 3], theta_steps: usi
     total
 }
 
+/// The reflected power, integrated over the hemisphere, equals `E·A·(C_d + C_s)` at normal
+/// incidence for every specular exponent. (G4)
 #[test]
 fn the_reflectance_model_reflects_exactly_what_its_coefficients_claim() {
     // The property that makes the specular exponent a *distribution* parameter and not a brightness
@@ -287,6 +290,8 @@ fn nothing_reflects_from_umbra_or_from_a_face_that_is_turned_away() {
     );
 }
 
+/// A cube spun about a body axis, Sun and observer equatorial: the curve repeats every quarter
+/// turn to rounding. (G4)
 #[test]
 fn a_box_spinning_about_a_body_axis_has_a_four_fold_light_curve() {
     // The end-to-end geometry test, and the one structural claim a box's light curve makes: spin a

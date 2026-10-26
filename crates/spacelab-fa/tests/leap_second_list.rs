@@ -77,7 +77,7 @@ fn delta_at_on(day: i64) -> i32 {
 }
 
 /// The list is the table: every day from 1972-01-01 to the list's expiry, `TAI − UTC` changes on
-/// exactly the days the list has a row for, to exactly the row's value.
+/// exactly the days the list has a row for, to exactly the row's value. (G5)
 #[test]
 fn the_table_is_the_iers_list_until_it_expires() {
     let list = parse();

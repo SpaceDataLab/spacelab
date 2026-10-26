@@ -76,11 +76,15 @@ jobs:
       # with its terms as read. A licence on a table binds the crate that embeds it.
       - name: Provenance register covers every data source
         run: python3 tools/check-provenance.py --data --check
-      # Every module names the derivation, seal, row or oracle test that would catch a wrong
+      # Every module names the derivation, seal or gate-tagged test that would catch a wrong
       # formula, or sits in the ledger of docs/verification.md section 12 with a category. The
       # ledger can only shrink deliberately.
       - name: Formula provenance ledger is consistent
         run: python3 tools/check-derivations.py --check
+      # The tests whose expected value another code supplies are listed in section 12.1. A new one,
+      # or an entry that stopped being one, fails here, so the count can only fall.
+      - name: Comparator-decided tests are all in the ledger
+        run: python3 tools/check-comparators.py --check
 
       # Same argument one file over, with one honest limit. A generated changelog cannot describe
       # the commit that adds it, so "byte-identical to the projection of HEAD" is a fixed point no

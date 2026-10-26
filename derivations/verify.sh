@@ -322,6 +322,14 @@ if have maxima; then
         bad "maxima dde_method_of_steps.mac" "expected 16 continuity zeros and 8 residual zeros, found $cont and $resid"
     fi
 
+    out=$(macf kepler_acceleration_partials.mac)
+    if printf '%s' "$out" | grep -q 'jacobian: 9 of 9 residuals are 0' \
+       && printf '%s' "$out" | grep -q 'hessian: 27 of 27 residuals are 0'; then
+        ok "maxima kepler_acceleration_partials.mac: the two-body Jacobian and Hessian closed forms, 36 residuals 0"
+    else
+        bad "maxima kepler_acceleration_partials.mac" "a closed form of the two-body partials no longer reduces to 0"
+    fi
+
     out=$(macf delay_margin.mac)
     # the third entry of each [w_c, tau_max, |char. eq.|] triple: the residual, not the margin
     worst=$(tozero ',[0-9.]+b-[0-9]+\] *$' "$out")

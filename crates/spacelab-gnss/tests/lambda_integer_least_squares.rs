@@ -207,6 +207,7 @@ fn brute_force(
 /// replace — was *not* the optimum on **315** of the 548, which is what says the trials are hard
 /// enough to be worth running: a test where rounding always wins cannot distinguish LAMBDA from
 /// rounding.
+/// LAMBDA against every integer vector in a box that provably holds the optimum. (G3)
 #[test]
 fn lambda_returns_the_exhaustive_optimum() {
     const BUDGET: u128 = 400_000;
@@ -284,6 +285,7 @@ fn lambda_returns_the_exhaustive_optimum() {
 ///
 /// Measured over 600 trials in dimensions 2 to 5: the worst `||det Z| − 1|` is **8.8818e-16**, one
 /// ulp — the entries really are integers and the determinant really is ±1.
+/// Every decorrelating transformation is an integer matrix of determinant ±1. (G4)
 #[test]
 fn every_transformation_is_unimodular() {
     let mut rng = SplitMix(0x5EED_1234_ABCD_0002);

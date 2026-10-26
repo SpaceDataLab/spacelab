@@ -52,10 +52,10 @@
 //! the first breakpoint sees a solution that is `C¹` and not `C²` there, so its local error is
 //! `O(h³)` however high the method's order — and worse, the dense interpolant it stores is then a
 //! cubic fitted across a kink, which the next interval reads back as its history. The measured
-//! consequence is in the tests and in `docs/verification.md`: the same RK4 driver on the same
-//! problem holds order **4.00** on a mesh that lands on the breakpoints and falls to **1.91** on one
-//! that does not. Two orders, and nothing complains — a fixed-step run has no error estimate to
-//! notice, and an adaptive one is looking at a step it took, not at a kink it stepped over.
+//! consequence is in the tests, against `derivations/dde_method_of_steps.mac`'s exact solution: the
+//! same RK4 driver holds order **4.00** on a mesh that lands on the breakpoints and **1.91** on one
+//! that does not (`docs/verification.md`). Two orders, and nothing complains — a fixed-step run has
+//! no error estimate to notice, and an adaptive one is looking at a step it took, not a kink.
 //!
 //! # What commensurability does and does not buy
 //!

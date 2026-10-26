@@ -211,6 +211,8 @@ fn samples() -> Vec<Sample> {
     out
 }
 
+/// The range error against its first-order closed form `(v_sat·ρ̂)τ`; the term it drops,
+/// `½ρ̈τ²`, is sub-millimetre at a LEO transit. (G3)
 #[test]
 fn the_range_error_is_the_satellites_own_radial_speed_times_the_transit() {
     let samples = samples();
@@ -277,6 +279,7 @@ fn the_range_error_is_the_satellites_own_radial_speed_times_the_transit() {
     );
 }
 
+/// The angular error against its closed form `v⊥/c`, in which the range cancels. (G3)
 #[test]
 fn light_time_leaves_every_line_of_sight_behind_the_satellite() {
     let samples = samples();

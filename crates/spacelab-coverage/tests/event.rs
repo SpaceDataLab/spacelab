@@ -11,6 +11,7 @@ fn collect<F: FnMut(f64) -> f64>(g: F, t0: f64, t1: f64, step: f64, tol: f64) ->
     v
 }
 
+/// The zeros of `sin` on `[0.5, 7]` are π and 2π exactly. (G3)
 #[test]
 fn finds_the_zeros_of_a_sine_with_the_right_direction() {
     // sin(t) on [0.5, 7]: a falling zero at π, a rising zero at 2π.
@@ -42,6 +43,7 @@ fn finds_the_zeros_of_a_sine_with_the_right_direction() {
     }
 }
 
+/// The roots of `A − (t − t_c)²` are `t_c ± √A` exactly. (G3)
 #[test]
 fn a_parabolic_pass_opens_then_closes_at_the_exact_roots() {
     // g(t) = A - (t - tc)²: a single access, opening at tc - √A, closing at tc + √A.

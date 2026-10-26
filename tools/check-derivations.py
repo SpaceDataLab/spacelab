@@ -3,8 +3,9 @@
 
 `docs/verification.md` publishes what was measured. This script asks the complementary question of
 each module under `crates/*/src`: does its *own* documentation name the thing that would catch a
-wrong formula — a `derivations/*.mac` identity, a `spec_seals` / `table_seals` seal, a verification
-row (`verification.md` §4.13), or an oracle test by path? A module that names none is not wrong; it
+wrong formula — a `derivations/*.mac` identity, a `spec_seals` / `table_seals` seal, or a test file
+holding a test whose own doc names its gate, `(G1)` ... `(G5)` (`plans/17` §1.2)? A module that
+names none is not wrong; it
 is unverified by anything a reader can re-run from the module itself, and the ledger in
 `docs/verification.md` (§12)
 records each such module with a category, so that the number can only go down deliberately.
@@ -37,17 +38,18 @@ MARKER = "## 12 · Formula provenance census"
 SKIP_CRATES = {"spacelab-capi", "spacelab-python", "spacelab-python-harness", "spacelab-gpu"}
 CATEGORIES = {"physics", "parser", "generated", "infra"}
 
-# What counts as naming a re-runnable check. A verification row counts when the file is named with
-# it: a bare `§4.13` is also how a module cites a textbook or a standard, and on 2026-10-24 28 modules
-# were passing on Curtis, Vallado, Danielson and CCSDS section numbers alone. A `tests/...rs` path is
-# an oracle test; the rest are the derivation and seal scripts by file name.
-NAMED = re.compile(
-    r"derivations/[\w./-]+\.(?:mac|py|m|gp|input|sh)"
-    r"|\b(?:spec_seals|table_seals)\b"
-    r"|verify\.sh"
-    r"|verification\.md"
-    r"|tests/[\w/]+\.rs"
+# What counts as naming a re-runnable check: a derivation or seal script by name, or a `tests/...rs`
+# file with at least one `#[test]` whose own doc carries a gate tag. A bare test path is not enough,
+# nor is a `verification.md` mention: either can name a comparison with another code or a
+# measurement, which reports agreement and decides nothing. Supporting checks, `(S1)` and `(S2)`, do
+# not count on their own (`plans/17` §1.2). The derivation pattern is check-comparators.py's `GATE`.
+GATE = re.compile(
+    r"derivations/[\w./-]+\.(?:mac|py|m|gp|input|sh|jl|c|g)|\b(?:spec_seals|table_seals)\b"
 )
+TEST_PATH = re.compile(r"tests/[\w/]+\.rs")
+GATE_TAG = re.compile(r"\(G[1-5]\)")
+TEST_ATTR = re.compile(r"^\s*#\[(?:\w+::)*test\]")
+FN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+|async\s+|unsafe\s+)*fn\s")
 
 # Guesses for `--ledger` only; the committed ledger is edited by hand.
 PARSER_NAMES = {
@@ -77,6 +79,40 @@ def module_doc(path: pathlib.Path) -> str:
     return " ".join(lines)
 
 
+def gated(path: pathlib.Path) -> bool:
+    """Whether a test file holds a `#[test]` whose doc comment, above its attributes, names a gate."""
+    doc: list[str] = []
+    is_test = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("///"):
+            doc.append(stripped)
+        elif stripped.startswith("#["):
+            is_test = is_test or bool(TEST_ATTR.match(line))
+        elif FN.match(line):
+            if is_test and GATE_TAG.search(" ".join(doc)):
+                return True
+            doc, is_test = [], False
+        elif not stripped.startswith("//"):
+            doc, is_test = [], False
+    return False
+
+
+def test_files(module: str, rel: str) -> list[pathlib.Path]:
+    """The file a module doc means by `tests/x.rs`: its own crate's, else the one crate that has it."""
+    own = ROOT.joinpath(*pathlib.PurePosixPath(module).parts[:2], rel)
+    if own.exists():
+        return [own]
+    return sorted(ROOT.glob(f"crates/*/{rel}"))
+
+
+def names_a_check(module: str) -> bool:
+    doc = module_doc(ROOT / module)
+    if GATE.search(doc):
+        return True
+    return any(gated(f) for rel in TEST_PATH.findall(doc) for f in test_files(module, rel))
+
+
 def modules() -> list[str]:
     out = []
     for path in sorted(ROOT.glob("crates/*/src/**/*.rs")):
@@ -87,7 +123,7 @@ def modules() -> list[str]:
 
 
 def uncovered() -> list[str]:
-    return [m for m in modules() if not NAMED.search(module_doc(ROOT / m))]
+    return [m for m in modules() if not names_a_check(m)]
 
 
 def ledger() -> dict[str, tuple[str, str]]:
@@ -144,7 +180,7 @@ def main() -> int:
     if new or stale:
         print(
             "\nThe ledger in docs/verification.md §12 is the list of modules whose formulas nothing "
-            "named in the module re-runs. Name the derivation, seal, row or oracle test in the "
+            "named in the module re-runs. Name the derivation, seal or gate-tagged test in the "
             "module doc, or add the module to the ledger with a category -- but not silently."
         )
         return 1

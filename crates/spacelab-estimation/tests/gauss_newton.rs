@@ -211,6 +211,7 @@ fn a_solve_that_starts_at_the_answer_saturates_the_damping_and_reports_convergen
     );
 }
 
+/// A consistent, noise-free linear system: its least-squares solution is the truth exactly. (G3)
 #[test]
 fn a_linear_problem_converges_in_one_step() {
     let x_true = [2.0, -3.0, 1.5];
@@ -249,6 +250,7 @@ fn a_linear_problem_converges_in_one_step() {
     assert!(report.cost < 1e-20, "noiseless fit should have ~zero cost");
 }
 
+/// Noise-free samples of `a·e^(bt)`: the cost's minimum is 0, at the generating `(a, b)`. (G3)
 #[test]
 fn recovers_the_true_parameters_of_an_exponential_fit() {
     let (a_true, b_true) = (2.5, -0.7);

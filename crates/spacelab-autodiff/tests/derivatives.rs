@@ -23,6 +23,7 @@ fn d(y: Dual<1>) -> f64 {
     y.grad()[0]
 }
 
+/// Each elementary rule against its derivative from calculus, at one point. (G3)
 #[test]
 fn elementary_derivatives_match_calculus() {
     let x = var(1.7);
@@ -43,6 +44,7 @@ fn elementary_derivatives_match_calculus() {
     assert!((d(x.powi(3)) - 3.0 * 1.7 * 1.7).abs() < 1e-13);
 }
 
+/// Three compositions against their derivatives worked by hand. (G3)
 #[test]
 fn the_chain_rule_composes() {
     let x = var(0.9);
@@ -61,6 +63,7 @@ fn the_chain_rule_composes() {
     assert!((got - want).abs() < 1e-15, "{got} vs {want}");
 }
 
+/// Both partials of `x²y / (x + y)` against the quotient rule worked by hand. (G3)
 #[test]
 fn product_and_quotient_rules_are_exact() {
     // f(x,y) = x²y / (x + y); check both partials against calculus at (2, 3).
@@ -101,6 +104,8 @@ fn kepler_accel<S: Scalar>(r: &[S; 3], mu: f64) -> [S; 3] {
     ]
 }
 
+/// The Jacobian against its closed form, which `derivations/kepler_acceleration_partials.mac`
+/// differentiates from the acceleration and subtracts to 0 in all 9 entries. (G3)
 #[test]
 fn the_kepler_acceleration_jacobian_matches_the_closed_form() {
     // This is the force-model partial the STM and orbit determination need. The analytic Jacobian is
@@ -215,6 +220,7 @@ fn atan2_partials_are_correct() {
     assert!((jac[1][0] - (-1.5 / denom)).abs() < 1e-15, "d/dx");
 }
 
+/// Every unary rule's first and second derivatives against calculus, at one point. (G3)
 #[test]
 fn hyperdual_second_derivatives_match_calculus() {
     // One independent variable, so the Hessian block is the scalar second derivative.
@@ -287,6 +293,8 @@ fn hyperdual_second_derivatives_match_calculus() {
     assert!((d2(one / (one + x * x)) - want).abs() < 1e-12, "1/(1+x²)");
 }
 
+/// The Hessian against its closed form, which `derivations/kepler_acceleration_partials.mac`
+/// differentiates from the acceleration and subtracts to 0 in all 27 entries. (G3)
 #[test]
 fn the_kepler_acceleration_hessian_matches_the_closed_form() {
     // The force Hessian the STT needs: ∂²aᵢ/∂rⱼ∂rₖ for a = -μr/|r|³. Since a = -∇Φ, this is the (fully

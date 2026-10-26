@@ -11,8 +11,9 @@
 //!
 //! - [`solid_earth_tide_displacement`] — §7.1.1, the elastic response of the solid Earth to the
 //!   luni-solar tidal potential. Decimetres. Ported from the IERS Conventions Center reference
-//!   routine `DEHANTTIDEINEL` and its five helpers, term for term, and checked against the four
-//!   test cases published in that routine's header.
+//!   routine `DEHANTTIDEINEL` and its five helpers, term for term, and checked against three of
+//!   the four test cases published in that routine's header. The fourth is an erratum: its printed
+//!   output is the third case's, digit for digit, and its Sun sits at 0.097 au.
 //! - [`pole_tide_displacement`] — §7.1.4, the elastic response to the centrifugal potential of
 //!   polar motion, referred to the IERS 2018 secular pole. Centimetres.
 //!
@@ -545,6 +546,33 @@ mod tests {
                 -0.203_683_147_959_207_583_3e-1,
                 0.565_825_477_622_597_244_9e-1,
                 -0.759_767_967_687_174_222_7e-1,
+            ],
+        );
+    }
+
+    /// (G5) Test case 3 of the same header: 2015 July 15, 0 h, TAI−UTC = 36 s after the leap second
+    /// of 2015-07-01.
+    ///
+    /// The header's case 4 (2017 January 15) is not a vector: its printed output repeats case 3's
+    /// to the last digit, and its Sun is at `|XSUN| = 1.45e10 m`, a tenth of an astronomical unit,
+    /// where this port gives 12 to 24 m per component, a thousand times a real solid tide, for an
+    /// input no ephemeris produces. Both are the document's erratum, recorded in `docs/verification.md` §11.
+    #[test]
+    fn the_solid_tide_reproduces_the_third_iers_reference_case() {
+        check(
+            [1_112_200.569_6, -4_842_957.851_1, 3_985_345.912_2],
+            [
+                100_210_282_451.627_9,
+                103_055_630_398.316_0,
+                56_855_096_480.447_5,
+            ],
+            [369_817_604.434_8, 1_897_917.525_8, 120_804_980.828_4],
+            0.0,
+            centuries(2_457_218.5, 36.0),
+            [
+                0.005_095_708_691_723_638_45,
+                0.082_866_302_598_352_870_0,
+                -0.063_663_492_540_418_961_7,
             ],
         );
     }

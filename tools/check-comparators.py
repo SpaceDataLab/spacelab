@@ -13,7 +13,7 @@ A `#[test]` is comparator-decided when one of these holds and it is not parked:
   * **file** -- it is in `tests/` in a file whose name has one, or the word `oracle`;
   * **fixture** -- it reads a fixture whose file name has one, or `oracle`: by path, through a
     constant the file binds to the fixture, or through a helper in the same file that does;
-  * **doc** -- its own doc comment names one.
+  * **doc** -- its own doc comment names one, or a `tools/*-oracle` harness, which runs one.
 
 The last three say where an expected value may have come from, and a test they catch can still
 check mathematics: a test whose own doc comment names its check kind -- a gate `(G1)` ... `(G5)`,
@@ -82,6 +82,10 @@ CODES = (
 )
 CODE = re.compile(r"(?<![a-z0-9])(" + "|".join(CODES) + r")(?![a-z0-9])")
 ORACLE = re.compile(r"(?<![a-z0-9])oracle(?![a-z0-9])")
+# A harness under tools/ that builds and runs another implementation: `tools/iers-oracle` compiles
+# the IERS Fortran, so a test whose expected values it printed is decided by that code.
+# `tools/gen_*_oracle.mac` are our own Maxima evaluations, not another code, and stay out.
+HARNESS = re.compile(r"tools/([a-z0-9]+(?:-[a-z0-9]+)*-oracle)(?![\w.])")
 GATE_TAG = re.compile(r"\((?:G[1-5]|S[12])\)")
 # What a module doc names when its formulas have a math gate of their own: a derivation, a seal.
 GATE = re.compile(
@@ -261,7 +265,7 @@ def scan(
             found.append(Test(path, name, line, "file", file_code))
         elif code := reads(chunk, helpers):
             found.append(Test(path, name, line, "fixture", code))
-        elif m := CODE.search(doc.lower()):
+        elif (m := CODE.search(doc.lower())) or (m := HARNESS.search(doc.lower())):
             found.append(Test(path, name, line, "doc", m.group(1)))
     return found, every
 

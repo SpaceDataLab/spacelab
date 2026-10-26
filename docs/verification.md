@@ -96,7 +96,7 @@ document itself on 2026-10-26 (`plans/17` Ф19.E):
 | SGP4/SDP4 | AIAA 2006-6753 (2006), Appendix E "Test Case Results Listing", pp. 37–46 | all 518 printed rows are in `tcppver.out` verbatim; the file adds 33333–33335 and later rows of 20413. Rev. 3 (2017) prints a later code's run: 16 rows of 23599 differ at the km level |
 | NeQuick-G | Galileo ionospheric ICD issue 1.2, Annex E tables E.1–E.3, pp. 49–51 | all 108 rows, inputs and printed STEC, equal the fixture's column |
 | NeQuick-ITU | Rec. ITU-R P.531-16, Part 1 Supplement, `validation/in/alrt_ne_in.dat` and `out_ref/alrt_ne_out_{063,128,193}.dat`, line 1 | inputs digit for digit, outputs 4.36189 / 11.83090 / 20.85232. Orekit's 14.607 case is not in this set: comparator |
-| IERS routines | the "Test case" block of `FUNDARG`, `ORTHO_EOP`, `PMSDNUT2`, `UTLIBR`, `DEHANTTIDEINEL` (cases 1–2), `FCUL_A` | tagged `(G5)`; the routine files were not re-read: the IERS Conventions Centre host refused connections on 2026-10-26 |
+| IERS routines | the "Test case" block of `FUNDARG`, `ORTHO_EOP`, `PMSDNUT2`, `UTLIBR`, `DEHANTTIDEINEL` (cases 1–3), `HARDISP` (144 values), `FCUL_A` | read from the PRIDE-PPPAR copies (`ae5537e`; the IERS host refused connections) and equal to the tests' values, `FCUL_A` excepted (no copy found). `DEHANTTIDEINEL` case 4 and `FCULZD_HPA`'s header are errata, §11.3 |
 
 Three tests carried a `(G5)` that was not a document's vector and were relabelled: the IAU 2000A and
 2006 series seals are `(S1)`, a second parse of our own generated file, and the Table 7.7 mean-pole
@@ -7840,6 +7840,23 @@ realizations are interchangeable at the accuracy anything here works to.
 | Analytic Moon, light time | Montenbruck & Gill §3.3.2 (Brown series) | **ERFA `moon98`** (abridged ELP2000), 512 epochs over ±1 century | the series is **geometric**: the 0.758″ light-time shift its own 1.28 s range implies moves the residual the wrong way, 278.3″ → 279.0″, so the Sun's aberration correction has no counterpart here (#306) | derivations/analytic_ephemeris.py |
 | Delaunay arguments, realization currency | IERS Conventions (2003) / Simon et al. (1994) vs the errata's 1996 values | **the two polynomial sets against each other**, ±1 century | worst 5.177″ (`l′`); ≤ **1.17e-5″** of nutation in longitude through the `−17.2″ sin Ω` term | derivations/vallado_errata.py |
 
+
+### 11.3 Errata in the documents' own vectors (Ф19.E)
+
+Under `plans/17` D-18 a document's printed vector is G5, and a disagreement between the document's
+equations and its vector is an erratum to trace, never settled by matching either. The audit found two
+in the IERS routines' headers, read on 2026-10-26 from the copies vendored in PRIDE-PPPAR (commit
+`ae5537e`), because the IERS Conventions Centre host refused connections:
+
+| Routine | The erratum | What the port does |
+|---|---|---|
+| `DEHANTTIDEINEL` (rev. 2016-12-19) | Test case 4 (2017-01-15) prints case 3's output to the last digit, and its Sun is 1.45e10 m from the geocentre, 0.097 au: the inputs and the output belong to no single case | gated by cases 1–3, which it reproduces to 1e-12 m; case 4 is not asserted |
+| `FCULZD_HPA` | the header's zenith delays are a constant 2 × 10⁻⁶ above what its own code computes (3.8 µm on 1.93 m), the `f` gravity factor | the test asserts the compiled routine and is a comparator in §12.1; the formula still wants its own math gate |
+
+`HARDISP`'s header prints its test output in full — 24 hours × 3 components at Onsala and Reykjavik —
+and all 144 values equal the port's arrays in order, so that pair of tests is G5. The four sub-daily
+routines (`FUNDARG`, `ORTHO_EOP`, `PMSDNUT2`, `UTLIBR`) print the values their tests assert.
+
 ---
 
 ## 12 · Formula provenance census
@@ -8124,7 +8141,7 @@ code is a comparator — a distance for the benchmark, never the verdict — so 
 still decides is debt of the same kind as an unnamed derivation. `tools/check-comparators.py` finds
 them by four rules: a code's name as a word of the test's **name** (`orekit`, `pyerfa`, `sofa`, …), a
 `tests/` **file** named after a code or `oracle`, a **fixture** so named that the test reads, or the
-test's own **doc** comment naming a code. A test parked as a comparator
+test's own **doc** comment naming a code or a `tools/*-oracle` harness that runs one. A test parked as a comparator
 (`#[ignore = "comparator: …"]`) is not counted. The last three rules only say where an expected value
 *may* have come from, so a test whose doc names its check kind of `plans/17` §1.2 — `(G1)` … `(G5)`,
 or a supporting `(S1)` / `(S2)` — is exempt from them; the tag is written after reading the test's
@@ -8138,8 +8155,10 @@ the IERS and ICD tables, an in-repo recomputation, a refusal — Orekit or ERFA 
 as the reason the test exists ("the Orekit fixture is fully immersed, so it pins nothing about the
 arc"), not as the value asserted. They carry their tag now. SciPy, missing from the first list of
 codes, adds three: a degree-70 geopotential, a DCT and a Bessel function; the WAM-IPE reader's
-product test (§10.18) adds a fourth. **Today: 130 comparator-decided tests of 3 293** — name 95,
-file 18, fixture 4, doc 13; 73 of them Orekit's (60 by name), 51 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+product test (§10.18) adds a fourth. The spec-vector audit (Ф19.E, 2026-10-26) adds three the rules had missed: the
+`FCULZD_HPA` zenith delay, `TDFRPH`'s arguments and `HARDISP`'s spline, whose expected values the compiled IERS routines printed
+through `tools/iers-oracle` — no code's name in them, so the doc rule now reads that harness too. **Today: 133 comparator-decided tests of 3 301** — name 95,
+file 18, fixture 4, doc 16; 73 of them Orekit's (60 by name), 51 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 
@@ -8260,6 +8279,9 @@ crates/spacelab-sgp4/tests/catalogue_oracle.rs::neither_implementation_refused_a
 crates/spacelab-sgp4/tests/catalogue_oracle.rs::the_worst_objects_of_the_catalogue_still_agree_with_the_oracle | file:oracle
 crates/spacelab-sgp4/tests/ground_track.rs::the_iss_ground_track_agrees_with_skyfield | name:skyfield
 crates/spacelab-signal/src/insar.rs::dct_matches_scipy_and_round_trips | name:scipy
+crates/spacelab-slr/src/loading.rs::the_spline_matches_the_reference_routine_away_from_four_knots | doc:iers-oracle
+crates/spacelab-slr/src/loading.rs::the_tidal_arguments_match_the_reference_routine | doc:iers-oracle
+crates/spacelab-slr/src/troposphere.rs::the_zenith_delay_reproduces_the_iers_reference_routine | doc:iers-oracle
 crates/spacelab/tests/access_oracle.rs::earth_orientation_is_worth_tens_of_milliseconds_on_a_pass_edge | file:oracle
 crates/spacelab/tests/access_oracle.rs::iss_pass_edges_agree_with_orekit_within_a_second | name:orekit
 crates/spacelab/tests/earth_orientation.rs::the_iss_ground_track_with_real_earth_orientation | fixture:skyfield

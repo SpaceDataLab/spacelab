@@ -4051,8 +4051,8 @@ exclude_re = [
     # The sibling operators on the same line are *not* excluded: the three `+` at columns 27, 42
     # and 57 and the three `*` at 21, 36 and 51 all carry live multipliers and are killed by the
     # two `DEHANTTIDEINEL` reference cases.
-    "displacement\\.rs:343:75: replace \\+ with - in step2_long_period",
-    "displacement\\.rs:343:84: replace \\* with / in step2_long_period",
+    "displacement\\.rs:344:75: replace \\+ with - in step2_long_period",
+    "displacement\\.rs:344:84: replace \\* with / in step2_long_period",
 
     # Insertion sort, and the comparison decides only what happens to *equal* keys: with `>` the
     # sort is stable and equal frequencies keep the order `SPECIFIED` lists them in, with `>=` it

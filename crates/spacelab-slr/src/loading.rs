@@ -547,7 +547,9 @@ mod tests {
         worst
     }
 
-    /// The whole model, against the reference program's own published output.
+    /// (G5) The whole model, against the reference program's own published output: the "expected
+    /// output" block of `HARDISP.F`'s header, IERS Conventions (2010) chapter 7 software (test
+    /// case revised 2015 June 09), all 144 values equal to the arrays above in order.
     ///
     /// The bound is the reference's print resolution and nothing looser: it writes `3F14.6`, so a
     /// value it prints is only defined to +/- 5e-7 m, and a port that lands inside that has
@@ -562,7 +564,7 @@ mod tests {
         );
     }
 
-    /// The same at the station with the large signal, where a proportional error would show up an
+    /// (G5) The same at the station with the large signal, where a proportional error would show up an
     /// order of magnitude more clearly: Reykjavik's radial term reaches 3.8 cm against Onsala's
     /// 0.9 cm. Measured worst over its 72 published values: 4.980e-7 m.
     #[test]

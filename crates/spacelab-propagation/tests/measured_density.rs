@@ -961,14 +961,16 @@ fn recovery_half_time(series: &[(f64, f64)], quiet: f64, peak: usize) -> Option<
 /// step: debias on phase 1, then the three statistics per phase, plus the three timing numbers
 /// `plans/16` Ф15.H asks for.
 ///
+/// `rows` are `(MJD, measured, modelled)`, so that a model need not be one of [`Model`]'s.
+///
 /// Returns `None` when any of the four phases is empty, which is the paper's own rejection rule — a
 /// storm whose pre-storm window is missing has no debiasing factor, and one whose recovery is missing
 /// is not a storm that was observed.
-fn assess(rows: &[&Evaluation], storm: &Storm, model: Model) -> Option<StormVerdict> {
-    let phase_rows: Vec<Vec<&Evaluation>> = (1..=4)
+fn assess(rows: &[(f64, f64, f64)], storm: &Storm) -> Option<StormVerdict> {
+    let phase_rows: Vec<Vec<(f64, f64, f64)>> = (1..=4)
         .map(|which| {
             rows.iter()
-                .filter(|e| storm.contains(which, e.mjd))
+                .filter(|r| storm.contains(which, r.0))
                 .copied()
                 .collect()
         })
@@ -982,19 +984,17 @@ fn assess(rows: &[&Evaluation], storm: &Storm, model: Model) -> Option<StormVerd
     // either responds to the storm.
     let log_scale = phase_rows[0]
         .iter()
-        .map(|e| libm::log(1.0 / e.ratio(model)))
+        .map(|r| libm::log(1.0 / (r.2 / r.1)))
         .sum::<f64>()
         / phase_rows[0].len() as f64;
     let scale = libm::exp(log_scale);
-    let pairs = |set: &[&Evaluation]| -> Vec<(f64, f64)> {
-        set.iter()
-            .map(|e| (e.measured, scale * e.modelled[model.index()]))
-            .collect()
+    let pairs = |set: &[(f64, f64, f64)]| -> Vec<(f64, f64)> {
+        set.iter().map(|r| (r.1, scale * r.2)).collect()
     };
     // "All four phases together" is the union of the windows and not everything the caller handed in:
     // `rows` is a generous slice around `t0` so that the phase filters have something to select from,
     // and scoring the whole slice would put days of quiet time into a storm statistic.
-    let inside: Vec<&Evaluation> = phase_rows.iter().flatten().copied().collect();
+    let inside: Vec<(f64, f64, f64)> = phase_rows.iter().flatten().copied().collect();
     let whole = storm_fit(&pairs(&inside));
     let per_phase = [
         storm_fit(&pairs(&phase_rows[0])),
@@ -1007,8 +1007,8 @@ fn assess(rows: &[&Evaluation], storm: &Storm, model: Model) -> Option<StormVerd
     // quiet level it fixes is what the enhancement is measured against.
     let window: Vec<(f64, f64, f64)> = rows
         .iter()
-        .filter(|e| (1..=3).any(|which| storm.contains(which, e.mjd)))
-        .map(|e| (e.mjd, e.measured, scale * e.modelled[model.index()]))
+        .filter(|r| (1..=3).any(|which| storm.contains(which, r.0)))
+        .map(|r| (r.0, r.1, scale * r.2))
         .collect();
     let bins = orbit_bins(&window);
     let quiet_of = |pick: fn(&(f64, f64, f64)) -> f64| -> Option<f64> {
@@ -1107,7 +1107,11 @@ fn the_storm_assessment(all: &[Evaluation], days: &[SpaceWeatherDay]) {
                 rows.len()
             );
             for &model in Model::ALL {
-                let Some(v) = assess(&rows, storm, model) else {
+                let series: Vec<(f64, f64, f64)> = rows
+                    .iter()
+                    .map(|e| (e.mjd, e.measured, e.modelled[model.index()]))
+                    .collect();
+                let Some(v) = assess(&series, storm) else {
                     println!("    {:<18} rejected: a phase has no data", model.name());
                     continue;
                 };
@@ -1744,11 +1748,16 @@ fn node_observation(
 
 /// The pinned nowcast files, by their valid hour in Unix seconds.
 fn wam_ipe_hours() -> BTreeMap<i64, PathBuf> {
+    wam_ipe_pinned("../../tools/wam-ipe.sha256")
+}
+
+/// The files a pin list names, by their valid time in Unix seconds.
+fn wam_ipe_pinned(list: &str) -> BTreeMap<i64, PathBuf> {
     let dir = std::env::var_os("WAM_IPE_DIR").map_or_else(
         || PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cache/spacelab/wam-ipe"),
         PathBuf::from,
     );
-    let list = std::fs::read_to_string("../../tools/wam-ipe.sha256").unwrap();
+    let list = std::fs::read_to_string(list).unwrap();
     list.lines()
         .map(|line| {
             let key = line.split_whitespace().nth(1).unwrap();
@@ -1999,26 +2008,158 @@ fn wam_ipe_lead(hour: i64, path: &Path) -> i64 {
     (hour - cycle) / 3600
 }
 
-/// `(satellite, row, hour)` → `ln ρ` under both readings, and the field's top above the row.
-type AtHour = HashMap<(usize, usize, i64), ([f64; 2], Option<f64>)>;
+/// `(MJD, measured, WAM-IPE)` for each row inside `storm`'s four phases that two files of `files`
+/// at most an hour apart bracket: `ln ρ` at geodetic height, linear in time between them, as the
+/// hourly campaign interpolates it. The rows are in time order, so two fields are held at once.
+fn wam_ipe_storm_series(
+    rows: &[Evaluation],
+    storm: &Storm,
+    files: &BTreeMap<i64, PathBuf>,
+) -> Vec<(f64, f64, f64)> {
+    let mut held: Vec<(i64, WamIpeField)> = Vec::new();
+    let mut out = Vec::new();
+    for e in rows
+        .iter()
+        .filter(|e| (1..=4).any(|which| storm.contains(which, e.mjd)))
+    {
+        let t = unix_seconds(e);
+        let (Some((&a, pa)), Some((&b, pb))) = (
+            files.range(..=t.floor() as i64).next_back(),
+            files.range(t.floor() as i64 + 1..).next(),
+        ) else {
+            continue;
+        };
+        if b - a > 3600 {
+            continue;
+        }
+        held.retain(|(k, _)| *k == a || *k == b);
+        for (k, path) in [(a, pa), (b, pb)] {
+            if !held.iter().any(|(h, _)| *h == k) {
+                held.push((
+                    k,
+                    WamIpeField::parse(&std::fs::read(path).unwrap()).unwrap(),
+                ));
+            }
+        }
+        let ln = |k: i64| {
+            let field = &held.iter().find(|(h, _)| *h == k).unwrap().1;
+            field
+                .density(
+                    e.altitude_km,
+                    e.latitude.to_degrees(),
+                    e.longitude.to_degrees(),
+                )
+                .map(f64::ln)
+        };
+        let (Some(la), Some(lb)) = (ln(a), ln(b)) else {
+            continue;
+        };
+        let w = (t - a as f64) / (b - a) as f64;
+        out.push((e.mjd, e.measured, ((1.0 - w) * la + w * lb).exp()));
+    }
+    out
+}
 
-/// Score one satellite-month pair, adding each row's ratios under its satellite-month, under
-/// `all`, under its geomagnetic level, its latitude band, the lead of the run it came from, and
-/// which side of WAM-IPE's own top it flew on.
-fn score_wam_ipe_month(
-    month: &'static str,
+fn print_storm_verdict(name: &str, v: &StormVerdict) {
+    println!(
+        "    {name:<26}{:6.3}{:8.3}{:7.1}{:7.3}{:7}  {:6.3} {:6.3} {:6.3}{:8.1}{:10.3}{:9.1}",
+        v.scale,
+        v.whole.mean_ratio,
+        v.whole.scatter,
+        v.whole.correlation,
+        v.whole.n,
+        v.per_phase[1].mean_ratio,
+        v.per_phase[2].mean_ratio,
+        v.per_phase[3].mean_ratio,
+        v.onset_error,
+        v.peak_ratio,
+        v.recovery_error
+    );
+}
+
+/// WAM-IPE through the storms of its two months, on the protocol of Bruinsma & Laurens (2024) that
+/// §10.14 scores SDTM-1 with: debiased on the pre-storm phase, then scored phase by phase (`plans/17`
+/// Ф18.B-3 (4)). The bases are scored on exactly the rows WAM-IPE has, and the Gannon storm a second
+/// time from the product's 10-minute files, so that the cadence is measured rather than assumed.
+#[test]
+#[ignore = "needs tools/fetch-density-data.sh and tools/fetch-wam-ipe.sh (6 GB)"]
+fn wam_ipe_through_the_storms_on_the_bruinsma_laurens_protocol() {
+    let dir = Path::new("../../data/validation/density");
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+    let series = DriverSeries {
+        days: space_weather::parse_space_weather(&read("SW-All.csv")),
+    };
+    let hourly = wam_ipe_hours();
+    let mut ten_minute = hourly.clone();
+    ten_minute.extend(wam_ipe_pinned("../../tools/wam-ipe-storm.sha256"));
+    let storms = storms(&series.days);
+    let mut wam_assessed = 0;
+    for month in WAM_IPE_MONTHS {
+        let year: i32 = month[..4].parse().unwrap();
+        let mon: u32 = month[5..].parse().unwrap();
+        let near = drivers_near(year, mon, 120, series.view());
+        let (names, satellites) = wam_ipe_month_rows(month, dir, near.view());
+        let first = satellites
+            .iter()
+            .flatten()
+            .map(|e| e.mjd)
+            .fold(f64::MAX, f64::min);
+        let last = satellites
+            .iter()
+            .flatten()
+            .map(|e| e.mjd)
+            .fold(f64::MIN, f64::max);
+        for storm in storms.iter().filter(|s| (first..last).contains(&s.t0)) {
+            println!(
+                "\n== storm t0 MJD {:.3}, peak ap {:.0}, phase 3 ends t0+{:.0} h ==\n    \
+                 model                     scale   <O/C>  StD %   R      n      P2     P3     P4  \
+                 onset h  peak M/O  d(half) h",
+                storm.t0, storm.peak_ap, storm.phase3_end
+            );
+            for (s, rows) in satellites.iter().enumerate() {
+                println!("  {}", &names[s][..2]);
+                let wam = wam_ipe_storm_series(rows, storm, &hourly);
+                let dense = wam_ipe_storm_series(rows, storm, &ten_minute);
+                // The bases on WAM-IPE's hourly rows, so that every line scores the same instants.
+                let kept: Vec<f64> = wam.iter().map(|r| r.0).collect();
+                for &m in &WAM_BASES {
+                    let base: Vec<(f64, f64, f64)> = rows
+                        .iter()
+                        .filter(|e| kept.binary_search_by(|x| x.total_cmp(&e.mjd)).is_ok())
+                        .map(|e| (e.mjd, e.measured, e.modelled[m.index()]))
+                        .collect();
+                    match assess(&base, storm) {
+                        Some(v) => print_storm_verdict(m.name(), &v),
+                        None => println!("    {:<26}rejected: a phase has no data", m.name()),
+                    }
+                }
+                for (name, set) in [("WAM-IPE, hourly", &wam), ("WAM-IPE, 10-minute", &dense)] {
+                    if name.ends_with("10-minute") && dense.len() == wam.len() && dense == wam {
+                        continue;
+                    }
+                    match assess(set, storm) {
+                        Some(v) => {
+                            wam_assessed += 1;
+                            print_storm_verdict(name, &v);
+                        }
+                        None => println!("    {name:<26}rejected: a phase has no data"),
+                    }
+                }
+            }
+        }
+    }
+    assert!(wam_assessed > 0, "no storm of the two months was assessed");
+}
+
+/// One row in six, as in the stratified campaign.
+const WAM_DECIMATION: usize = 6;
+
+/// GRACE-FO C's and Swarm A's rows for a month, one in [`WAM_DECIMATION`], with their file names.
+fn wam_ipe_month_rows(
+    month: &str,
     dir: &Path,
-    all: Drivers<'_>,
-    hours: &BTreeMap<i64, PathBuf>,
-    ratios: &mut BTreeMap<(String, usize), Vec<f64>>,
-    records: &mut Vec<WamRecord>,
-) {
-    // One row in six, as in the stratified campaign.
-    const DECIMATION: usize = 6;
-    let year: i32 = month[..4].parse().unwrap();
-    let mon: u32 = month[5..].parse().unwrap();
-    let near = drivers_near(year, mon, 120, all);
-    let d = near.view();
+    d: Drivers<'_>,
+) -> (Vec<String>, Vec<Vec<Evaluation>>) {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .filter_map(Result::ok)
@@ -2038,11 +2179,33 @@ fn score_wam_ipe_month(
         .map(|n| {
             parse_density(&std::fs::read_to_string(dir.join(n)).unwrap())
                 .iter()
-                .step_by(DECIMATION)
+                .step_by(WAM_DECIMATION)
                 .filter_map(|o| evaluate(o, satellite_of(n), d))
                 .collect()
         })
         .collect();
+    (names, satellites)
+}
+
+/// `(satellite, row, hour)` → `ln ρ` under both readings, and the field's top above the row.
+type AtHour = HashMap<(usize, usize, i64), ([f64; 2], Option<f64>)>;
+
+/// Score one satellite-month pair, adding each row's ratios under its satellite-month, under
+/// `all`, under its geomagnetic level, its latitude band, the lead of the run it came from, and
+/// which side of WAM-IPE's own top it flew on.
+fn score_wam_ipe_month(
+    month: &'static str,
+    dir: &Path,
+    all: Drivers<'_>,
+    hours: &BTreeMap<i64, PathBuf>,
+    ratios: &mut BTreeMap<(String, usize), Vec<f64>>,
+    records: &mut Vec<WamRecord>,
+) {
+    let year: i32 = month[..4].parse().unwrap();
+    let mon: u32 = month[5..].parse().unwrap();
+    let near = drivers_near(year, mon, 120, all);
+    let d = near.view();
+    let (names, satellites) = wam_ipe_month_rows(month, dir, d);
 
     let month_start = days_since_1970(year, mon, 1) * 86_400;
     let month_end = days_since_1970(year + i32::from(mon == 12), mon % 12 + 1, 1) * 86_400;

@@ -17,6 +17,10 @@
 # run at a longer lead, so every selected file is a nowcast and a gap is a gap. Listed 2026-10-24,
 # 2024-05 has 740 of its 744 hours and 2025-06 has 651 of 720, before the stubs `--pin` drops.
 #
+# A storm is also taken at the product's own 10-minute cadence, by the same rule (`--select-span`),
+# over the window the storm protocol scores: the Gannon storm from 30 h before its first `ap` peak
+# (2024-05-10 19:30) to 12 h after its phase 3 ends, `tools/wam-ipe-storm.sha256`.
+#
 # TERMS
 #
 # The AWS Open Data registry page (read 2026-10-24): "NOAA data disseminated through NODD are open
@@ -35,6 +39,7 @@
 #
 # Usage: tools/fetch-wam-ipe.sh [DEST]
 #        tools/fetch-wam-ipe.sh --select YYYY-MM ... > keys
+#        tools/fetch-wam-ipe.sh --select-span YYYY-MM-DDTHH:MM YYYY-MM-DDTHH:MM > keys
 #        tools/fetch-wam-ipe.sh --pin keys > tools/wam-ipe.sha256
 
 set -euo pipefail
@@ -42,6 +47,7 @@ set -euo pipefail
 BUCKET="https://noaa-nws-wam-ipe-pds.s3.amazonaws.com"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PINNED="$HERE/wam-ipe.sha256"
+PINNED_STORM="$HERE/wam-ipe-storm.sha256"
 # Four transfers at once. Measured 2026-10-24 the link to the bucket gave one transfer anything
 # from 0.05 to 0.75 MB/s, and eight together no more than four.
 PARALLEL=4
@@ -74,13 +80,12 @@ fetch_all() {
   xargs -r -P "$PARALLEL" -I{} bash -c 'fetch "$1" "$2"' _ {} "$dest"
 }
 
-# The hours of a month, each as the key of the newest run that covers it, where that run has it.
-select_month() {
-  local month="$1" listing="$2"
-  local start end t c day cycle valid key
-  start="$(date -u -d "${month}-01" +%s)"
-  end="$(date -u -d "${month}-01 +1 month" +%s)"
-  for ((t = start; t < end; t += 3600)); do
+# The instants from START to before END, STEP seconds apart, each as the key of the newest run that
+# covers it, where that run has it.
+select_span() {
+  local start="$1" end="$2" step="$3" listing="$4"
+  local t c day cycle valid key
+  for ((t = start; t < end; t += step)); do
     c=$(((t + 10200) / 21600 * 21600))
     day="$(date -u -d "@$c" +%Y%m%d)"
     cycle="$(date -u -d "@$c" +%H)"
@@ -108,8 +113,21 @@ if [[ "${1:-}" == "--select" ]]; then
       echo "month must be YYYY-MM with MM in 01..12, got '$m'" >&2
       exit 2
     fi
-    select_month "$m" "$listing"
+    select_span "$(date -u -d "${m}-01" +%s)" "$(date -u -d "${m}-01 +1 month" +%s)" 3600 "$listing"
   done
+  exit 0
+fi
+
+if [[ "${1:-}" == "--select-span" ]]; then
+  for s in "$2" "$3"; do
+    if [[ ! "$s" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]0$ ]]; then
+      echo "a span end must be YYYY-MM-DDTHH:M0, got '$s'" >&2
+      exit 2
+    fi
+  done
+  listing="$(mktemp -d)"
+  trap 'rm -rf "$listing"' EXIT
+  select_span "$(date -u -d "${2/T/ } UTC" +%s)" "$(date -u -d "${3/T/ } UTC" +%s)" 600 "$listing"
   exit 0
 fi
 
@@ -132,6 +150,8 @@ fi
 
 dest="${1:-${WAM_IPE_DIR:-$HOME/.cache/spacelab/wam-ipe}}"
 mkdir -p "$dest"
-cut -d' ' -f3 "$PINNED" | fetch_all "$dest"
-(cd "$dest" && sha256sum --quiet -c "$PINNED")
-echo "$(wc -l <"$PINNED") WAM-IPE files -> $dest, digests match $PINNED"
+for pin in "$PINNED" "$PINNED_STORM"; do
+  cut -d' ' -f3 "$pin" | fetch_all "$dest"
+  (cd "$dest" && sha256sum --quiet -c "$pin")
+  echo "$(wc -l <"$pin") WAM-IPE files -> $dest, digests match $pin"
+done

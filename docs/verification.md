@@ -7632,6 +7632,48 @@ are wide. These coefficients describe the two campaigns; they do not isolate a c
 it comes in SET's index files, which the release cannot carry. Day of year is not in it either: in
 two months it is the month again.
 
+**Through a storm, debiased: too slow and too weak.** The storm protocol of §10.14 (Bruinsma & Laurens
+2024) scores the four storms of the two months whose pre-storm phase has data (the one at 2025-06-01
+07:30 has none). Each model is first scaled to the measurements on its pre-storm phase, `[−30, −18] h`
+from the first `ap` peak; the statistics below are over all four phases. The bases are scored on the
+same rows as WAM-IPE. The Gannon storm is scored twice, from the hourly files and from every one of the
+product's 10-minute files over its window (667 files, `tools/wam-ipe-storm.sha256`).
+
+| storm `t0`, peak `ap` | model | GRACE-FO C `⟨O/C⟩` | StD % | R | Swarm A `⟨O/C⟩` | StD % | R |
+|---|---|---|---|---|---|---|---|
+| 2024-05-02 16:30, 111 | NRLMSISE-00 | 0.872 | 18.9 | 0.929 | 0.884 | 18.6 | 0.851 |
+| | JB2008 | 0.866 | 21.2 | 0.901 | 0.877 | 18.3 | 0.867 |
+| | SDTM-1 | 0.884 | 18.4 | 0.931 | 0.895 | 16.1 | 0.905 |
+| | WAM-IPE | 0.901 | 21.3 | 0.927 | 0.895 | 17.4 | 0.884 |
+| **2024-05-10 19:30, 400** | NRLMSISE-00 | 0.999 | 32.9 | 0.807 | 1.010 | 30.6 | 0.790 |
+| | JB2008 | 0.961 | 34.4 | 0.824 | 0.975 | 33.4 | 0.772 |
+| | SDTM-1 | 0.985 | 31.2 | 0.822 | 1.000 | 29.8 | 0.811 |
+| | WAM-IPE, hourly | **1.302** | **63.1** | 0.718 | **1.313** | **60.2** | 0.696 |
+| | WAM-IPE, 10-minute | 1.297 | 64.3 | 0.699 | 1.310 | 61.5 | 0.667 |
+| 2024-05-16 07:30, 80 | NRLMSISE-00 | 1.235 | 16.2 | 0.969 | 1.251 | 15.2 | 0.926 |
+| | JB2008 | 1.136 | 18.6 | 0.947 | 1.141 | 17.4 | 0.897 |
+| | SDTM-1 | 1.237 | 18.5 | 0.958 | 1.241 | 16.8 | 0.913 |
+| | WAM-IPE | 1.068 | 22.5 | 0.933 | 1.072 | 21.8 | 0.836 |
+| 2025-06-13 01:30, 111 | NRLMSISE-00 | 1.017 | 23.9 | 0.913 | 1.019 | 18.2 | 0.878 |
+| | JB2008 | 0.931 | 18.2 | 0.943 | 0.931 | 14.9 | 0.925 |
+| | SDTM-1 | 1.055 | 20.5 | 0.922 | 1.043 | 15.6 | 0.913 |
+| | WAM-IPE | 0.908 | 26.0 | 0.897 | 0.903 | 22.3 | 0.828 |
+
+In the Gannon storm the measured density is 1.30 times the debiased WAM-IPE's, and 1.41 and 1.48
+times in phases 3 and 4 (GRACE-FO C), where the bases stay within 0.85–1.09. WAM-IPE's scatter is
+twice any empirical model's. The pre-storm scale is 0.49: the same nowcast that is 61 % too
+dense on average is twice too dense before the storm and then does not rise with it. That agrees with
+"delayed and attenuated responses to rapid density enhancements" in May 2024 (Wang & Bai,
+arXiv:2608.00352, §3.4). In two of the three smaller storms WAM-IPE's `⟨O/C⟩` is the closest to 1 or tied for it; its
+scatter is the largest in five of their six satellite comparisons. In the 2024-05-16 storm, whose pre-storm phase lies in the Gannon
+recovery, WAM-IPE's level is the closest of all (1.07), yet its post-storm phase falls to 0.80.
+
+**The cadence is not the cause.** The 10-minute files change the Gannon statistics by less than 1.5
+points of StD and 0.03 of R. They do move the onset error, from +10.5 h to +30 h, because WAM-IPE's
+orbit-averaged series has two maxima of nearly the same height, and the 10-minute detail changes which
+one is larger. So the timing numbers are not reported for WAM-IPE: they are a choice between two peaks,
+not a measurement.
+
 **The height coordinate is geodetic.** NOAA does not say which surface its heights are measured from.
 Read as geodetic, the MAPE is flat in latitude — 60.9 %, 64.3 %, 66.7 % in |φ| 0–30°, 30–60°, 60–90°;
 read as the radius minus GFS's 6 371.2 km, it climbs from 51.0 % to 73.0 % to 96.5 %, the 21 km
@@ -7650,9 +7692,10 @@ has been asked (`docs/provenance.md`, `noaa-wam-ipe`).
 
 Attribution: NOAA Space Weather Prediction Center, WAM-IPE, accessed from the NOAA Open Data
 Dissemination program on AWS (<https://registry.opendata.aws/noaa-nws-wam-ipe>). NOAA does not endorse
-this library. Reproduce with `tools/fetch-density-data.sh 2024-05 2025-06`, `tools/fetch-wam-ipe.sh` and
-`cargo test -p spacelab-propagation --release --test measured_density -- --ignored --exact
-wam_ipe_against_the_accelerometers_alone_and_as_a_calibration_input --nocapture`.
+this library. Reproduce with `tools/fetch-density-data.sh 2024-05 2025-06`, `tools/fetch-wam-ipe.sh` (both pin
+lists, 6 GB) and `cargo test -p spacelab-propagation --release --test measured_density -- --ignored
+--nocapture --exact` with `wam_ipe_against_the_accelerometers_alone_and_as_a_calibration_input`, then
+with `wam_ipe_through_the_storms_on_the_bruinsma_laurens_protocol`.
 
 ---
 

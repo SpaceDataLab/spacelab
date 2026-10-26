@@ -1,0 +1,79 @@
+/* NRLMSISE-00's thermosphere is three closed forms (Picone, Hedin & Drob 2002, eqs. A12-A15;
+   Hedin 1987 eqs. A3-A8; Hedin 1991 for the turbopause blend), and `nrlmsise00/mod.rs` codes them
+   in `zeta`, `densu` and `dnet`. This file proves each one satisfies the equation it is the
+   solution of, so the code is checked against mathematics and not against another program.
+   Every check prints `<name>: 0`; `verify.sh` counts them. Units are the code's: R_gas = 831.4,
+   heights in km, g in cm/s^2. */
+
+assume(R > 0, z > zl, zl > -R, sigma > 0, Tinf > Tl, Tl > 0)$
+
+/* zeta: the geopotential-like height above zl, whose derivative is the inverse-square law. */
+xi(z) := (z - zl)*(R + zl)/(R + z)$
+dxi: diff(xi(z), z)$
+print("zeta slope is ((R+zl)/(R+z))^2: ", ratsimp(dxi - ((R + zl)/(R + z))^2))$
+print("zeta vanishes at zl: ", xi(zl))$
+
+/* Bates-Walker temperature: T = Tinf - (Tinf - Tl) exp(-sigma xi) solves dT/dxi = sigma (Tinf - T)
+   with T(0) = Tl and tends to Tinf. */
+Tb(s) := Tinf - (Tinf - Tl)*exp(-sigma*s)$
+print("Bates ODE dT/dxi - sigma (Tinf - T): ", ratsimp(diff(Tb(s), s) - sigma*(Tinf - Tb(s))))$
+print("Bates T(0) - Tl: ", Tb(0) - Tl)$
+print("Bates T(inf) - Tinf: ", limit(Tb(s), s, inf) - Tinf)$
+
+/* densu's join slope `dta = (tinf - ta) s2 ((re+zlb)/(re+za))^2` is dT/dz of the Bates profile. */
+Tz: Tb(xi(z))$
+print("Bates join slope dT/dz: ",
+      ratsimp(diff(Tz, z) - (Tinf - Tz)*sigma*((R + zl)/(R + z))^2))$
+
+/* Diffusive equilibrium: n/nl = (Tl/T)^(1+alpha+gamma) exp(-sigma gamma xi), with
+   gamma = m gl/(sigma R_gas Tinf), solves
+   d ln n/dz = -(1+alpha) d ln T/dz - m g(z)/(R_gas T),  g(z) = gl ((R+zl)/(R+z))^2. */
+gam: m*gl/(sigma*Rgas*Tinf)$
+lnn: log(nl) + (1 + alpha + gam)*(log(Tl) - log(Tz)) - sigma*gam*xi(z)$
+gz: gl*((R + zl)/(R + z))^2$
+print("diffusive equilibrium residual: ",
+      ratsimp(diff(lnn, z) + (1 + alpha)*diff(log(Tz), z) + m*gz/(Rgas*Tz)))$
+print("diffusive n(zl) - nl: ", ratsimp(radcan(exp(subst(z = zl, lnn)) - nl)))$
+
+/* Below za densu integrates the same equation over the spline T(x), x = xi1/zgdif, xi1 = zeta from
+   z1: ln n = ln n1 - (1+alpha) ln(T/T1) - (m g1 zgdif/R_gas) int_0^x dx'/T. Its xi1-derivative is
+   the hydrostatic law in xi1, which is the z-law because g(z) dz = g1 dxi1. */
+lns: log(n1) - (1 + alpha)*(log(Ts(x)) - log(T1)) - m*g1*zgdif/Rgas*'integrate(1/Ts(u), u, 0, x)$
+/* d/dxi1 = (1/zgdif) d/dx */
+print("spline hydrostatic residual: ",
+      ratsimp(diff(lns, x)/zgdif + (1 + alpha)*diff(Ts(x), x)/(zgdif*Ts(x)) + m*g1/(Rgas*Ts(x))))$
+xi1(z) := (z - z1)*(R + z1)/(R + z)$
+print("g dz = g1 dxi1: ",
+      ratsimp(g1*((R + z1)/(R + z))^2 - g1*diff(xi1(z), z)))$
+
+/* The spline carries 1/T on x, so its end slopes are d(1/T)/dx = -(dT/dz)/T^2 * dz/dx with
+   dz/dx = zgdif ((R+z)/(R+z1))^2: densu's yd1 at z = z1 and yd2 at z = z2. */
+dzdx: zgdif/diff(xi1(z), z)$
+print("spline end slope yd1: ", ratsimp(subst(z = z1, dzdx) - zgdif))$
+print("spline end slope yd2: ", ratsimp(subst(z = z2, dzdx) - zgdif*((R + z2)/(R + z1))^2))$
+
+/* dnet: n = dd (1 + exp(y))^(1/a), y = a ln(dm/dd), the power mean of the diffusive and mixed
+   densities. It is dd exactly in (dd^a + dm^a)^(1/a) form and tends to each pure profile at its
+   end, for either sign of a = zhm/(xmm - xm). */
+assume(dd > 0, dm > 0, a > 0)$
+blend: dd*(1 + exp(a*log(dm/dd)))^(1/a)$
+print("dnet is the power mean: ", radcan(blend^a - (dd^a + dm^a)))$
+/* (1 + exp(y))^(1/a) written as exp(log(1 + exp(y))/a), its value for the positive base, so the
+   limit does not ask whether 1/a is an integer. */
+yb: dd*exp(log(1 + exp(y))/a)$
+print("dnet -> dd as y -> -inf: ", limit(yb, y, minf) - dd)$
+print("dnet/dm -> 1 as y -> +inf (a>0): ", limit(yb/(dd*exp(y/a)), y, inf) - 1)$
+forget(a > 0)$ assume(a < 0)$
+print("dnet -> dd as y -> -inf (a<0): ", limit(yb, y, minf) - dd)$
+print("dnet/dm -> 1 as y -> +inf (a<0): ", limit(yb/(dd*exp(y/a)), y, inf) - 1)$
+
+/* ccor: exp(r/(1 + exp((z - zh)/h))) is the chemistry factor exp(r) far below zh and 1 far above. */
+assume(h > 0)$
+cc: exp(r/(1 + exp((z - zh)/h)))$
+print("ccor -> exp(r) below: ", limit(cc, z, minf) - exp(r))$
+print("ccor -> 1 above: ", limit(cc, z, inf) - 1)$
+
+/* scalh: H = R_gas T/(m g) with g = gs/(1 + z/R)^2 is the e-folding height of the isothermal
+   hydrostatic law d ln n/dz = -m g/(R_gas T). */
+gs_z: gs/(1 + z/R)^2$
+print("scale height: ", ratsimp(Rgas*T/(m*gs_z) - 1/(m*gs_z/(Rgas*T))))$

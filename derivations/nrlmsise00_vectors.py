@@ -7,9 +7,10 @@ relative. That is four orders coarser than the agreement two IEEE-754 implementa
 algorithm actually reach, and the gap is where wrong arithmetic hides: a term of `globe7` worth
 1e-6 of the answer is invisible at 1e-5 and glaring at 1e-12.
 
-This script asks the same C — Dominik Brodowski's public-domain port, the source
-`derivations/nrlmsise00_tables.py` already reads the coefficient tables from, wrapped by the
-`nrlmsise00` PyPI package — for `%.17e` output over a sweep built to move every term:
+This script asks the same C — Dominik Brodowski's port, wrapped by the `nrlmsise00` PyPI package
+and used as a comparator only: it carries no licence grant, and the coefficient tables come from
+the NRL FORTRAN (`derivations/nrlmsise00_tables.py`), not from it — for `%.17e` output over a sweep
+built to move every term:
 
 * **Altitude is stratified by regime**, not drawn uniformly. The model is three models stitched
   together — `densm`/`glob7s` below 72.5 km, the mesospheric blend to 120 km, `gts7`'s diffusive

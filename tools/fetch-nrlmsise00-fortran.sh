@@ -33,20 +33,12 @@
 
 set -euo pipefail
 
-COMMIT="${1:-${NRLMSISE00_COMMIT:-}}"
+# The snapshot the tables were regenerated from; `derivations/verify.sh` pins the same SHA-256.
+PINNED_COMMIT=b08ac61ca1c472f6fdb19329d1b3ead327283ca9
+PINNED_SHA256=5fc43b10dbd88bdbfbb7c3cf49b9a10ce1016f6183fd3b7396205d43d4ae9f0e
+COMMIT="${1:-${NRLMSISE00_COMMIT:-$PINNED_COMMIT}}"
 DEST="${NRLMSISE00_DIR:-data/oracles/nrlmsise00}"
 REPO="${NRLMSISE00_REPO:-raabrp/nrlmsise00}"
-
-if [[ -z "$COMMIT" ]]; then
-  COMMIT="$(curl -sS -L --fail --max-time 60 \
-    "https://api.github.com/repos/${REPO}/commits?path=src_f&per_page=1" |
-    sed -n 's/.*"sha": "\([0-9a-f]\{40\}\)".*/\1/p' | head -1)"
-  if [[ -z "$COMMIT" ]]; then
-    echo "could not resolve the latest commit touching src_f; pass one explicitly" >&2
-    exit 1
-  fi
-  echo "no commit given; using the newest that touched src_f: $COMMIT" >&2
-fi
 
 if [[ ! "$COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
   echo "COMMIT must be a full 40-character git object id, got '$COMMIT'" >&2
@@ -67,6 +59,10 @@ done
 
 sha="$(sha256sum "$DEST/nrlmsise00_sub.for" | cut -d' ' -f1)"
 bytes="$(stat -c%s "$DEST/nrlmsise00_sub.for")"
+if [[ "$COMMIT" == "$PINNED_COMMIT" && "$sha" != "$PINNED_SHA256" ]]; then
+  echo "nrlmsise00_sub.for at $COMMIT has sha256 $sha, pinned $PINNED_SHA256" >&2
+  exit 1
+fi
 
 cat >"$DEST/manifest.json" <<EOF
 {

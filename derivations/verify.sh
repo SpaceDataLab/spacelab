@@ -104,6 +104,14 @@ if have maxima; then
         bad "maxima drag_dissipation.mac" "the drag Jacobian trace did not match"
     fi
 
+    out=$(timeout 120 maxima --very-quiet -Q -b nrlmsise00_structure.mac 2>&1 </dev/null)
+    zeros=$(printf '%s\n' "$out" | grep -cE ': +0 *$')
+    if [ "$zeros" -eq 20 ] && ! printf '%s' "$out" | grep -q 'Lisp error'; then
+        ok "maxima nrlmsise00_structure.mac: Bates-Walker, diffusive equilibrium, spline slopes, dnet and ccor limits (20 identities)"
+    else
+        bad "maxima nrlmsise00_structure.mac" "expected 20 identities reducing to 0, found $zeros"
+    fi
+
     out=$(timeout 120 maxima --very-quiet -b adams_coeffs.mac 2>&1)
     if printf '%s' "$out" | grep -qE 'AB8 sum .*: +1' && printf '%s' "$out" | grep -qE 'AM8 sum .*: +1' && [ "$(printf '%s' "$out" | grep -cE 'leading.*: +0')" -ge 2 ]; then
         ok "maxima adams_coeffs.mac: AB8/AM8 sum to 1 and the leading coefficients derive correctly"
@@ -780,6 +788,31 @@ if have maxima && have python3; then
     fi
 else
     skip "oracle_constants.py" "maxima and python3"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# 6. NRLMSISE-00's coefficient tables are NRL's own DATA statements. `tables.rs` claims to be
+# generated from BLOCK DATA GTD7BK of `nrlmsise00_sub.for`; this re-runs the generator on the pinned
+# file and compares every byte. The pin is the file's SHA-256, so a source that moved fails here
+# instead of passing against something else. `tools/fetch-nrlmsise00-fortran.sh` fetches it.
+# ---------------------------------------------------------------------------------------------
+NRL_FOR="${NRLMSISE00_DIR:-../data/oracles/nrlmsise00}/nrlmsise00_sub.for"
+NRL_SHA256=5fc43b10dbd88bdbfbb7c3cf49b9a10ce1016f6183fd3b7396205d43d4ae9f0e
+if [ -f "$NRL_FOR" ] && have python3; then
+    sha=$(sha256sum "$NRL_FOR" | cut -d' ' -f1)
+    regenerated=$(mktemp)
+    if [ "$sha" != "$NRL_SHA256" ]; then
+        bad "nrlmsise00_tables.py" "$NRL_FOR has sha256 $sha, not the pinned $NRL_SHA256"
+    elif ! timeout 300 python3 -I nrlmsise00_tables.py "$NRL_FOR" "$regenerated" >/dev/null 2>&1; then
+        bad "nrlmsise00_tables.py" "the generator failed on the pinned NRL FORTRAN"
+    elif cmp -s "$regenerated" ../crates/spacelab-propagation/src/nrlmsise00/tables.rs; then
+        ok "nrlmsise00_tables.py: tables.rs is byte for byte BLOCK DATA GTD7BK of the pinned NRL FORTRAN"
+    else
+        bad "nrlmsise00_tables.py" "tables.rs differs from what the pinned NRL FORTRAN regenerates"
+    fi
+    rm -f "$regenerated"
+else
+    skip "nrlmsise00_tables.py" "tools/fetch-nrlmsise00-fortran.sh output"
 fi
 
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"

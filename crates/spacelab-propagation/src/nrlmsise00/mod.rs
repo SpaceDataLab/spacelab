@@ -33,8 +33,11 @@
 //! total mass density for drag, including anomalous oxygen) and [`gts7`] (thermospheric part). The
 //! tables index 1:1 with the FORTRAN arrays, zero-based rather than one-based because Rust is.
 //!
-//! Validated against the model authors' 17 canonical test vectors to a relative error below 1e-5
-//! (see the module tests).
+//! Gated by its data and its structure: `derivations/verify.sh` regenerates the tables from the
+//! pinned FORTRAN and compares them byte for byte, and `derivations/nrlmsise00_structure.mac`
+//! proves the Bates–Walker profile, the diffusive closed form and the turbopause blend against the
+//! equations they solve. The authors' 17 printed outputs and the 496-point sweep of the C are
+//! comparators (see the module tests).
 
 #![allow(
     clippy::many_single_char_names,
@@ -2323,8 +2326,8 @@ mod tests {
     /// of the answer can be negated without one reference digit moving.
     ///
     /// `derivations/nrlmsise00_vectors.py` closes that gap by asking the same C — Brodowski's
-    /// public-domain port, the source the coefficient tables themselves are machine-extracted from —
-    /// for `%.17e` over a sweep built to move every term:
+    /// port, a comparator (it carries no licence grant; the coefficient tables come from the NRL
+    /// FORTRAN, not from it) — for `%.17e` over a sweep built to move every term:
     ///
     /// * **Altitude is stratified over the model's four regimes** rather than drawn uniformly. This
     ///   is three models stitched together — `densm`/`glob7s` below `72.5 km`, the mesospheric spline
@@ -2373,6 +2376,10 @@ mod tests {
     /// where the reference reads a file-scope `static` its previous call wrote — see
     /// [`switching_off_the_turbopause_still_leaves_a_density_below_it`], which pins what this port
     /// does there instead.
+    ///
+    /// This is a comparator kept as a tripwire (`plans/17` D-22): `globe7`'s and `glob7s`'s
+    /// harmonic expansions have no math gate of their own yet, and this is what would see a change
+    /// in them. A failure means "check the mathematics", not "match the C again".
     ///
     /// `gtd7d` is here because nothing else calls it: it is what
     /// [`super::atmosphere::Nrlmsise00Atmosphere`] uses for drag, and the published cases exercise
@@ -2860,6 +2867,64 @@ mod tests {
             dens_spline.is_finite() && dens_spline > 0.0,
             "densu's spline branch saturated to {dens_spline:e}"
         );
+    }
+
+    /// (G2) `densu` solves the diffusive-equilibrium law it integrates,
+    /// `d ln n/dz = −(1+α) d ln T/dz − m g(z)/(R T)` with `g(z) = g_s/(1 + z/R_e)²`, on both of its
+    /// branches: the Bates–Walker closed form above `za` and the `1/T` spline below it.
+    ///
+    /// `derivations/nrlmsise00_structure.mac` proves the closed forms satisfy that equation; this
+    /// measures that the code is those closed forms. The residual is taken by central differences
+    /// at `h = 1e-3 km`, whose truncation (`h² ∂³/6`, scale heights of tens of km) and rounding
+    /// (`ε ln n / h`) are both below `1e-9` of the gravity term, so the `1e-7` bound fails on any
+    /// wrong exponent, sign or gravity law rather than on the stencil. The probe heights avoid the
+    /// spline nodes, where the cubic's third derivative jumps.
+    #[test]
+    fn densu_solves_the_diffusive_equilibrium_law_on_both_branches() {
+        let (gsurf, re) = glatf(45.0);
+        let rgas = 831.4;
+        let zn1 = [120.0, 110.0, 100.0, 90.0, 72.5];
+        let (tinf, tlb, zlb, s2) = (1000.0, 360.0, 120.0, 0.02);
+        for (xm, alpha) in [(4.0, -0.38), (16.0, 0.0), (28.0, 0.0)] {
+            let profile = |z: f64| {
+                let mut tn1 = [0.0, 250.0, 190.0, 185.0, 210.0];
+                let mut tgn1 = [0.0, -1.0];
+                let mut held = false;
+                let (n, t) = densu(
+                    gsurf,
+                    re,
+                    z,
+                    1.0e10,
+                    tinf,
+                    tlb,
+                    xm,
+                    alpha,
+                    zlb,
+                    s2,
+                    zn1.len(),
+                    &zn1,
+                    &mut tn1,
+                    &mut tgn1,
+                    &mut held,
+                );
+                assert!(!held, "the bounds bit at {z} km");
+                (libm::log(n), libm::log(t), t)
+            };
+            for z in [80.0, 95.0, 105.0, 115.0, 150.0, 300.0, 600.0] {
+                let h = 1.0e-3;
+                let ((n_hi, t_hi, _), (n_lo, t_lo, _), (_, _, t)) =
+                    (profile(z + h), profile(z - h), profile(z));
+                let g = gsurf / libm::pow(1.0 + z / re, 2.0);
+                let gravity = xm * g / (rgas * t);
+                let residual =
+                    (n_hi - n_lo) / (2.0 * h) + (1.0 + alpha) * (t_hi - t_lo) / (2.0 * h) + gravity;
+                assert!(
+                    libm::fabs(residual / gravity) < 1.0e-7,
+                    "m = {xm} at {z} km: residual {:e} of the gravity term",
+                    residual / gravity
+                );
+            }
+        }
     }
     /// The longitude sentinel is a closed boundary: `-1000` itself asks for longitude off.
     ///
@@ -6762,7 +6827,11 @@ mod tests {
         assert!(gtd7d(&at(400.0, -90.0, 300.0, 250.0, 105), &flags).d[8] > 1.0e3);
     }
 
+    /// Comparator: the authors' 17 printed outputs are what NRL's code prints, and no document
+    /// declares them normative (`plans/17` D-18 b). The full-precision sweep above, against the
+    /// same C at `1e-14` rather than `1e-5`, is the tripwire that stays.
     #[test]
+    #[ignore = "comparator: NRL's printed output, not a verdict"]
     fn gtd7_matches_reference_vectors() {
         let mut inputs = [base_input(); 17];
         inputs[1].doy = 81;

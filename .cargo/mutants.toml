@@ -1107,118 +1107,118 @@ exclude_re = [
     # `re + z2` with `z2 = ZN3[ZN3.len() - 1]`, which the shipped node table sets to exactly
     # `0.0`, so `re + z2` and `re - z2` are the same double. Pinned by
     # `the_node_tables_carry_the_invariants_the_equivalences_rest_on`.
-    "nrlmsise00/mod\\.rs:579:56: replace \\+ with - in densm",
+    "nrlmsise00/mod\\.rs:582:56: replace \\+ with - in densm",
     # `plg[2][6]` and `plg[2][7]`, the degree-6 and degree-7 associated Legendre functions of
     # order 2. The reference fills them and this port follows, but the only expression that
     # reads either is `p[78] * plg[2][7]`, and `p[78]` is `0.0` in every array — so the whole
     # chain is dead arithmetic. Kept rather than deleted because the fill is the reference's
     # recursion and a coefficient set that uses the term would need it back; the invariant that
     # makes it dead is asserted instead.
-    "nrlmsise00/mod\\.rs:744:25: replace \\* with \\+ in globe7",
-    "nrlmsise00/mod\\.rs:744:29: replace \\* with \\+ in globe7",
-    "nrlmsise00/mod\\.rs:744:43: replace - with \\+ in globe7",
-    "nrlmsise00/mod\\.rs:744:43: replace - with / in globe7",
-    "nrlmsise00/mod\\.rs:744:49: replace \\* with \\+ in globe7",
-    "nrlmsise00/mod\\.rs:744:49: replace \\* with / in globe7",
-    "nrlmsise00/mod\\.rs:744:64: replace / with % in globe7",
-    "nrlmsise00/mod\\.rs:744:64: replace / with \\* in globe7",
-    "nrlmsise00/mod\\.rs:745:25: replace \\* with \\+ in globe7",
-    "nrlmsise00/mod\\.rs:745:29: replace \\* with \\+ in globe7",
-    "nrlmsise00/mod\\.rs:745:29: replace \\* with / in globe7",
-    "nrlmsise00/mod\\.rs:745:43: replace - with \\+ in globe7",
-    "nrlmsise00/mod\\.rs:745:43: replace - with / in globe7",
-    "nrlmsise00/mod\\.rs:745:49: replace \\* with \\+ in globe7",
-    "nrlmsise00/mod\\.rs:745:64: replace / with % in globe7",
-    "nrlmsise00/mod\\.rs:745:64: replace / with \\* in globe7",
+    "nrlmsise00/mod\\.rs:747:25: replace \\* with \\+ in globe7",
+    "nrlmsise00/mod\\.rs:747:29: replace \\* with \\+ in globe7",
+    "nrlmsise00/mod\\.rs:747:43: replace - with \\+ in globe7",
+    "nrlmsise00/mod\\.rs:747:43: replace - with / in globe7",
+    "nrlmsise00/mod\\.rs:747:49: replace \\* with \\+ in globe7",
+    "nrlmsise00/mod\\.rs:747:49: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:747:64: replace / with % in globe7",
+    "nrlmsise00/mod\\.rs:747:64: replace / with \\* in globe7",
+    "nrlmsise00/mod\\.rs:748:25: replace \\* with \\+ in globe7",
+    "nrlmsise00/mod\\.rs:748:29: replace \\* with \\+ in globe7",
+    "nrlmsise00/mod\\.rs:748:29: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:748:43: replace - with \\+ in globe7",
+    "nrlmsise00/mod\\.rs:748:43: replace - with / in globe7",
+    "nrlmsise00/mod\\.rs:748:49: replace \\* with \\+ in globe7",
+    "nrlmsise00/mod\\.rs:748:64: replace / with % in globe7",
+    "nrlmsise00/mod\\.rs:748:64: replace / with \\* in globe7",
     # `p[22]` is `0.0` in all eleven arrays `globe7` is called with, so this term is `±0.0` and
     # the operator that combines it cannot be seen.
     # `the_node_tables_carry_the_invariants_the_equivalences_rest_on` pins the coefficient; a
     # table that gives it a value re-opens the mutant.
-    "nrlmsise00/mod\\.rs:776:53: replace \\+ with - in globe7",
-    "nrlmsise00/mod\\.rs:776:61: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:779:53: replace \\+ with - in globe7",
+    "nrlmsise00/mod\\.rs:779:61: replace \\* with / in globe7",
     # `p[111]` is `0.0` in all eleven arrays `globe7` is called with, so this term is `±0.0` and
     # the operator that combines it cannot be seen.
     # `the_node_tables_carry_the_invariants_the_equivalences_rest_on` pins the coefficient; a
     # table that gives it a value re-opens the mutant.
-    "nrlmsise00/mod\\.rs:877:72: replace \\+ with - in globe7",
-    "nrlmsise00/mod\\.rs:877:81: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:880:72: replace \\+ with - in globe7",
+    "nrlmsise00/mod\\.rs:880:81: replace \\* with / in globe7",
     # `p[114]` is `0.0` in all eleven arrays `globe7` is called with, so this term is `±0.0` and
     # the operator that combines it cannot be seen.
     # `the_node_tables_carry_the_invariants_the_equivalences_rest_on` pins the coefficient; a
     # table that gives it a value re-opens the mutant.
-    "nrlmsise00/mod\\.rs:889:33: replace \\+ with - in globe7",
-    "nrlmsise00/mod\\.rs:889:42: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:892:33: replace \\+ with - in globe7",
+    "nrlmsise00/mod\\.rs:892:42: replace \\* with / in globe7",
     # `p[81]` is `0.0` in all eleven arrays `globe7` is called with, so this term is `±0.0` and
     # the operator that combines it cannot be seen.
     # `the_node_tables_carry_the_invariants_the_equivalences_rest_on` pins the coefficient; a
     # table that gives it a value re-opens the mutant.
-    "nrlmsise00/mod\\.rs:897:17: replace \\* with / in globe7",
-    "nrlmsise00/mod\\.rs:897:24: replace \\+ with - in globe7",
+    "nrlmsise00/mod\\.rs:900:17: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:900:24: replace \\+ with - in globe7",
     # `p[137]` is `0.0` in all eleven arrays `globe7` is called with, so this term is `±0.0` and
     # the operator that combines it cannot be seen.
     # `the_node_tables_carry_the_invariants_the_equivalences_rest_on` pins the coefficient; a
     # table that gives it a value re-opens the mutant.
-    "nrlmsise00/mod\\.rs:904:17: replace \\* with / in globe7",
-    "nrlmsise00/mod\\.rs:904:24: replace \\+ with - in globe7",
+    "nrlmsise00/mod\\.rs:907:17: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:907:24: replace \\+ with - in globe7",
     # `p[78]` is `0.0` in all eleven arrays `globe7` is called with, so this term is `±0.0` and
     # the operator that combines it cannot be seen.
     # `the_node_tables_carry_the_invariants_the_equivalences_rest_on` pins the coefficient; a
     # table that gives it a value re-opens the mutant.
-    "nrlmsise00/mod\\.rs:902:62: replace \\+ with - in globe7",
+    "nrlmsise00/mod\\.rs:905:62: replace \\+ with - in globe7",
     # `p[134` and `p[135]` is `0.0` in all eleven arrays `globe7` is called with, so this term
     # is `±0.0` and the operator that combines it cannot be seen.
     # `the_node_tables_carry_the_invariants_the_equivalences_rest_on` pins the coefficient; a
     # table that gives it a value re-opens the mutant.
-    "nrlmsise00/mod\\.rs:919:53: replace \\+ with - in globe7",
-    "nrlmsise00/mod\\.rs:919:62: replace \\* with / in globe7",
-    "nrlmsise00/mod\\.rs:919:76: replace \\+ with \\* in globe7",
-    "nrlmsise00/mod\\.rs:919:76: replace \\+ with - in globe7",
-    "nrlmsise00/mod\\.rs:919:85: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:922:53: replace \\+ with - in globe7",
+    "nrlmsise00/mod\\.rs:922:62: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:922:76: replace \\+ with \\* in globe7",
+    "nrlmsise00/mod\\.rs:922:76: replace \\+ with - in globe7",
+    "nrlmsise00/mod\\.rs:922:85: replace \\* with / in globe7",
     # `p[116` and `p[117]` is `0.0` in all eleven arrays `globe7` is called with, so this term
     # is `±0.0` and the operator that combines it cannot be seen.
     # `the_node_tables_carry_the_invariants_the_equivalences_rest_on` pins the coefficient; a
     # table that gives it a value re-opens the mutant.
-    "nrlmsise00/mod\\.rs:936:49: replace \\+ with - in globe7",
-    "nrlmsise00/mod\\.rs:936:58: replace \\* with / in globe7",
-    "nrlmsise00/mod\\.rs:936:72: replace \\+ with \\* in globe7",
-    "nrlmsise00/mod\\.rs:936:72: replace \\+ with - in globe7",
-    "nrlmsise00/mod\\.rs:936:81: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:939:49: replace \\+ with - in globe7",
+    "nrlmsise00/mod\\.rs:939:58: replace \\* with / in globe7",
+    "nrlmsise00/mod\\.rs:939:72: replace \\+ with \\* in globe7",
+    "nrlmsise00/mod\\.rs:939:72: replace \\+ with - in globe7",
+    "nrlmsise00/mod\\.rs:939:81: replace \\* with / in globe7",
     # `p99` is `pset` when `p[99]` is zero and `p[99]` otherwise, and `p[99]` is `2.0` — which
     # is `pset` — in all fourteen arrays `glob7s` is called with. Both arms therefore produce
     # `2.0`.
-    "nrlmsise00/mod\\.rs:960:24: replace == with != in glob7s",
+    "nrlmsise00/mod\\.rs:963:24: replace == with != in glob7s",
     # The wrong-parameter-set escape. It is unreachable for the same reason: `p99` always equals
     # `pset`, so the guard above it never fires and the sign of the value it would return is not
     # observable. Kept because it is the reference's own refusal, and a future table that reuses
     # `glob7s` with a different `p[99]` would need it.
-    "nrlmsise00/mod\\.rs:963:16: delete - in glob7s",
+    "nrlmsise00/mod\\.rs:966:16: delete - in glob7s",
     # `t71` and `t72` are `p[11]` and `p[12]` times a product, and both coefficients are `0.0`
     # in all fourteen `glob7s` arrays, so the product is `±0.0` either way. The one input that
     # would separate them is `cd14` being exactly zero, which needs `cos` of a multiple of the
     # day angle to be exactly `0.0` — not an f64.
-    "nrlmsise00/mod\\.rs:990:39: replace \\* with / in glob7s",
-    "nrlmsise00/mod\\.rs:991:39: replace \\* with / in glob7s",
+    "nrlmsise00/mod\\.rs:993:39: replace \\* with / in glob7s",
+    "nrlmsise00/mod\\.rs:994:39: replace \\* with / in glob7s",
     # `+ t71` and `+ t72`, which are exactly zero by the entry above, so adding and subtracting
     # them are the same operation.
-    "nrlmsise00/mod\\.rs:992:57: replace \\+ with - in glob7s",
-    "nrlmsise00/mod\\.rs:993:56: replace \\+ with - in glob7s",
+    "nrlmsise00/mod\\.rs:995:57: replace \\+ with - in glob7s",
+    "nrlmsise00/mod\\.rs:996:56: replace \\+ with - in glob7s",
     # A scale factor read from `PDL`, which is exactly `1.0` at these three entries, so
     # multiplying by it and dividing by it are the same operation.
-    "nrlmsise00/mod\\.rs:1178:27: replace \\* with / in gts7_impl",
-    "nrlmsise00/mod\\.rs:1293:30: replace \\* with / in gts7_impl",
-    "nrlmsise00/mod\\.rs:1661:25: replace \\* with / in gts7_impl",
+    "nrlmsise00/mod\\.rs:1181:27: replace \\* with / in gts7_impl",
+    "nrlmsise00/mod\\.rs:1296:30: replace \\* with / in gts7_impl",
+    "nrlmsise00/mod\\.rs:1664:25: replace \\* with / in gts7_impl",
     # A scale factor read from `PDM`, exactly `1.0` at `PDM[5][1]` and `PDM[6][1]`, as above.
-    "nrlmsise00/mod\\.rs:1576:32: replace \\* with / in gts7_impl",
-    "nrlmsise00/mod\\.rs:1648:32: replace \\* with / in gts7_impl",
+    "nrlmsise00/mod\\.rs:1579:32: replace \\* with / in gts7_impl",
+    "nrlmsise00/mod\\.rs:1651:32: replace \\* with / in gts7_impl",
     # The total mass density below the turbopause, where `gtd7` has already set atomic oxygen,
     # hydrogen, nitrogen and anomalous oxygen to exactly zero. The terms carrying them are
     # `±0.0` and the operator joining them is not observable.
     # `the_total_mass_density_is_the_molar_sum_of_the_species` is what pins the identity the
     # rest of the expression has to satisfy, in both regimes and at the exact `72.5 km` join.
-    "nrlmsise00/mod\\.rs:1904:13: replace \\+ with - in gtd7",
-    "nrlmsise00/mod\\.rs:1908:13: replace \\+ with - in gtd7",
-    "nrlmsise00/mod\\.rs:1909:13: replace \\+ with \\* in gtd7",
-    "nrlmsise00/mod\\.rs:1909:13: replace \\+ with - in gtd7",
+    "nrlmsise00/mod\\.rs:1907:13: replace \\+ with - in gtd7",
+    "nrlmsise00/mod\\.rs:1911:13: replace \\+ with - in gtd7",
+    "nrlmsise00/mod\\.rs:1912:13: replace \\+ with \\* in gtd7",
+    "nrlmsise00/mod\\.rs:1912:13: replace \\+ with - in gtd7",
     #
     # === (b) unreachable while the input contract holds ===
     # `exp1 > 0.99999` — the magnetic-activity saturation. `exp1` is `exp(-10800·|p[51]| / (1 +
@@ -1228,17 +1228,17 @@ exclude_re = [
     # `the_input_domain_is_reported_at_every_edge`; the numeric bound is computed from the
     # tables rather than quoted, in
     # `the_node_tables_carry_the_invariants_the_equivalences_rest_on`.
-    "nrlmsise00/mod\\.rs:825:21: replace > with == in globe7",
-    "nrlmsise00/mod\\.rs:825:21: replace > with >= in globe7",
+    "nrlmsise00/mod\\.rs:828:21: replace > with == in globe7",
+    "nrlmsise00/mod\\.rs:828:21: replace > with >= in globe7",
     # `p[24] < 1e-4` — a floor under a coefficient that the shipped tables never approach:
     # `p[24]` is between `0.0538` and `0.0867` in all eleven arrays, five hundred times the
     # floor.
-    "nrlmsise00/mod\\.rs:828:32: replace < with <= in globe7",
-    "nrlmsise00/mod\\.rs:828:32: replace < with == in globe7",
+    "nrlmsise00/mod\\.rs:831:32: replace < with <= in globe7",
+    "nrlmsise00/mod\\.rs:831:32: replace < with == in globe7",
     # `p44 < 0.0` — the same shape. `p[43]` is between `0.0641` and `0.0982` in all eleven
     # arrays and never reaches zero, let alone crosses it.
-    "nrlmsise00/mod\\.rs:848:16: replace < with <= in globe7",
-    "nrlmsise00/mod\\.rs:848:16: replace < with == in globe7",
+    "nrlmsise00/mod\\.rs:851:16: replace < with <= in globe7",
+    "nrlmsise00/mod\\.rs:851:16: replace < with == in globe7",
     #
     # === (c) equivalent by exact floating-point arithmetic ===
     # `ccor`'s two saturating arms are exact, not approximate. `e^70` is `2.5e30`, so above the
@@ -1250,36 +1250,36 @@ exclude_re = [
     # `the_chemistry_corrections_are_logistics_with_the_landmarks_to_prove_it` asserts that bit
     # for bit against the continuous form at the cut, past it, at an infinite exponent and over
     # five orders of `r`.
-    "nrlmsise00/mod\\.rs:274:10: replace > with == in ccor",
-    "nrlmsise00/mod\\.rs:274:10: replace > with >= in ccor",
-    "nrlmsise00/mod\\.rs:277:10: replace < with <= in ccor",
-    "nrlmsise00/mod\\.rs:277:10: replace < with == in ccor",
+    "nrlmsise00/mod\\.rs:277:10: replace > with == in ccor",
+    "nrlmsise00/mod\\.rs:277:10: replace > with >= in ccor",
+    "nrlmsise00/mod\\.rs:280:10: replace < with <= in ccor",
+    "nrlmsise00/mod\\.rs:280:10: replace < with == in ccor",
     # `||` versus `&&` on `ccor2`'s upper cut. They differ only when exactly one exponent is
     # past `+70`, and there the fall-through still returns `1.0`: half of `e^70` in the
     # denominator leaves the quotient below an ulp of zero whatever the other exponent does. The
     # test drives that asymmetric case directly — five pairs of disagreeing scale heights, one
     # exponent past a cut and the other short of it — rather than inferring it from the
     # symmetric one.
-    "nrlmsise00/mod\\.rs:289:20: replace \\|\\| with && in ccor2",
+    "nrlmsise00/mod\\.rs:292:20: replace \\|\\| with && in ccor2",
     # `ccor2`'s arms, for the same reason as `ccor`'s above. The denominator is the mean of two
     # exponentials rather than one, which moves the break-even to `1.4e14` but changes nothing
     # else.
-    "nrlmsise00/mod\\.rs:289:12: replace > with == in ccor2",
-    "nrlmsise00/mod\\.rs:289:12: replace > with >= in ccor2",
-    "nrlmsise00/mod\\.rs:289:27: replace > with == in ccor2",
-    "nrlmsise00/mod\\.rs:289:27: replace > with >= in ccor2",
-    "nrlmsise00/mod\\.rs:292:12: replace < with <= in ccor2",
-    "nrlmsise00/mod\\.rs:292:12: replace < with == in ccor2",
-    "nrlmsise00/mod\\.rs:292:28: replace < with <= in ccor2",
-    "nrlmsise00/mod\\.rs:292:28: replace < with == in ccor2",
+    "nrlmsise00/mod\\.rs:292:12: replace > with == in ccor2",
+    "nrlmsise00/mod\\.rs:292:12: replace > with >= in ccor2",
+    "nrlmsise00/mod\\.rs:292:27: replace > with == in ccor2",
+    "nrlmsise00/mod\\.rs:292:27: replace > with >= in ccor2",
+    "nrlmsise00/mod\\.rs:295:12: replace < with <= in ccor2",
+    "nrlmsise00/mod\\.rs:295:12: replace < with == in ccor2",
+    "nrlmsise00/mod\\.rs:295:28: replace < with <= in ccor2",
+    "nrlmsise00/mod\\.rs:295:28: replace < with == in ccor2",
     # `splint`'s bisection bracket, at a query that lands exactly on a node. Both brackets then
     # return `ya[k]` bit for bit: the normalised distances come out `1.0` and `0.0`, which
     # annihilate the two cubic terms exactly.
-    "nrlmsise00/mod\\.rs:420:18: replace > with >= in splint",
+    "nrlmsise00/mod\\.rs:423:18: replace > with >= in splint",
     # `splini`'s accumulation bounds, at a query exactly on a node. The extra iteration the
     # mutant takes integrates over an interval of zero width and contributes exactly `+0.0`.
-    "nrlmsise00/mod\\.rs:475:14: replace > with >= in splini",
-    "nrlmsise00/mod\\.rs:478:23: replace < with <= in splini",
+    "nrlmsise00/mod\\.rs:478:14: replace > with >= in splini",
+    "nrlmsise00/mod\\.rs:481:23: replace < with <= in splini",
     # `if alt > node { alt } else { node }` — a maximum written as a branch, so at the tie both
     # arms evaluate to the same double and nothing downstream can tell which one produced it.
     # The sweep does put cases exactly on every node altitude, which is why the *other* altitude
@@ -1287,27 +1287,27 @@ exclude_re = [
     # input that separates the bit patterns is `alt = -0.0` against a node of `+0.0`, and `zeta`
     # reads `z` only through `re + z` and `z - zlb`, where the two signed zeros give identical
     # results.
-    "nrlmsise00/mod\\.rs:528:20: replace > with >= in densm",
-    "nrlmsise00/mod\\.rs:622:20: replace > with >= in densu",
-    "nrlmsise00/mod\\.rs:636:24: replace > with >= in densu",
+    "nrlmsise00/mod\\.rs:531:20: replace > with >= in densm",
+    "nrlmsise00/mod\\.rs:625:20: replace > with >= in densu",
+    "nrlmsise00/mod\\.rs:639:24: replace > with >= in densu",
     # The barometric exponent's clamp, tied at exactly `50.0`. Both arms then compute `exp(-50)`
     # from the same double. The clamp itself is not dead code and not excluded:
     # `the_barometric_exponent_clamps_keep_the_density_finite` drives all four through the
     # private helpers' own node arguments, which kills the `>` -> `==` half of the family.
-    "nrlmsise00/mod\\.rs:555:17: replace > with >= in densm",
-    "nrlmsise00/mod\\.rs:589:17: replace > with >= in densm",
-    "nrlmsise00/mod\\.rs:667:13: replace > with >= in densu",
-    "nrlmsise00/mod\\.rs:683:13: replace > with >= in densu",
+    "nrlmsise00/mod\\.rs:558:17: replace > with >= in densm",
+    "nrlmsise00/mod\\.rs:592:17: replace > with >= in densm",
+    "nrlmsise00/mod\\.rs:670:13: replace > with >= in densu",
+    "nrlmsise00/mod\\.rs:686:13: replace > with >= in densu",
     # `altt` is `max(alt, zn2[0])` written as a branch, so the two arms return the same double
     # at the tie and no test can separate `>` from `>=` there. The sweep drives that altitude
     # exactly — `72.5 km` is one of its node cases — which is what makes this an equivalence
     # rather than an untested boundary.
-    "nrlmsise00/mod\\.rs:1754:29: replace > with >= in gtd7",
+    "nrlmsise00/mod\\.rs:1757:29: replace > with >= in gtd7",
     # The mixing weight below the turbopause. At `alt == zmix` the guarded assignment computes
     # `1.0 - (zn2[0] - zmix) / (zn2[0] - zmix)`, and `x / x` is exactly `1.0` for every finite
     # non-zero `x`, so it stores exactly the `0.0` the variable already holds. The sweep drives
     # `62.5 km`.
-    "nrlmsise00/mod\\.rs:1854:18: replace > with >= in gtd7",
+    "nrlmsise00/mod\\.rs:1857:18: replace > with >= in gtd7",
     # The `1 km` floor under the measured local scale height, tied at exactly `1000.0`. Reaching
     # it needs a layer whose density falls by exactly `e^-10` over `10 km`; swept over `0..1500
     # km`, every 15° of latitude and three activity levels — `11 739` points — the tightest

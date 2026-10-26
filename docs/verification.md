@@ -73,8 +73,8 @@ answer follows from the definition, and *internal API contract* (batch ≡ scala
 bound, a dense-output budget) where the promise is ours and the test is what fixes it.
 
 Where a row's check is a run of its specification source, the residual measures transcription
-fidelity and nothing more. That is worth having — agreement to 1e-5 across NRLMSISE-00's 17
-canonical outputs rules out a large class of transcription errors — but it is a comparison: a
+fidelity and nothing more. That is worth having — agreement to 1e-14 across NRLMSISE-00's
+496-point sweep rules out a large class of transcription errors — but it is a comparison: a
 narrower claim than the size of the number suggests, and one that does not compose, since two ports
 of one source agreeing adds no information.
 
@@ -305,7 +305,7 @@ vanishes on the horizon, where the last crown is cut.
 
 | Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
-| NRLMSISE-00 (gtd7/gtd7d) | Picone et al. 2002 — the released C is the specification in practice ⚠ | Brodowski reference C (Picone 2002), 17 canonical outputs | max_rel < 1e-5 | src/nrlmsise00/mod.rs |
+| NRLMSISE-00 (gtd7/gtd7d) | Picone et al. 2002 and Hedin 1987/1991 for the structure; NRL's `nrlmsise00_sub.for` `BLOCK DATA GTD7BK` for the coefficients. The harmonic expansions in `globe7`/`glob7s` are still the program's in practice ⚠ | **data:** `tables.rs` regenerated from the pinned FORTRAN (sha256) is byte-identical, 3 290 values (`derivations/verify.sh`). **(G2/G3) structure:** `derivations/nrlmsise00_structure.mac` — 20 identities: Bates–Walker ODE and limits, the diffusive closed form solves `d ln n/dz = −(1+α) d ln T/dz − m g/(R T)`, the spline end slopes, `dnet` and `ccor` limits; `densu` solves the same law by central differences on both branches. **Comparators:** Brodowski's C over 496 points (tripwire for the harmonics, D-22) and NRL's 17 printed outputs (parked, Ф19.C) | 20 identities = 0; ODE residual < 1e-7 of the gravity term; sweep < 1e-14 | derivations/, src/nrlmsise00/mod.rs |
 | NRLMSISE-00 drag wrapper | internal API contract (gtd7d + hydrostatic gradient) | underlying gtd7d value + analytic scale-height gradient | value < 1e-12 rel; gradient < 1e-6 | tests/nrlmsise00_atmosphere.rs |
 | Harris-Priester | Harris & Priester 1962 table (Montenbruck–Gill appendix) | Orekit reference density (Montenbruck–Gill table) | max_rel < 1e-11 | src/harris_priester/mod.rs |
 | Atmospheric drag force | drag-equation definition; King-Hele Δa | King-Hele Δa; co-rotation; dissipative STM detΦ<1 | energy monotone; detΦ < 1−1e-6 | tests/drag.rs |

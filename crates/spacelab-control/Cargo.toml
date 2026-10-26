@@ -19,7 +19,7 @@ std = ["spacelab-propagation/std"]
 
 [dependencies]
 libm = "0.2"
-spacelab-propagation = { path = "../spacelab-propagation", version = "0.2.0", default-features = false }
+spacelab-propagation = { path = "../spacelab-propagation", version = "0.3.0", default-features = false }
 
 [dev-dependencies]
 spacelab-testkit = { path = "../spacelab-testkit" }

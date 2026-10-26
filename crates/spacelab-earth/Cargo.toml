@@ -17,6 +17,6 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
-spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
-spacelab-frames = { path = "../spacelab-frames", version = "0.2.0" }
+spacelab-core = { path = "../spacelab-core", version = "0.3.0" }
+spacelab-frames = { path = "../spacelab-frames", version = "0.3.0" }
 libm = "0.2"

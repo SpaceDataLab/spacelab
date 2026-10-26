@@ -16,8 +16,8 @@ publish = false
 workspace = true
 
 [dependencies]
-spacelab-astro = { path = "../spacelab-astro", version = "0.2.0" }
-spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
+spacelab-astro = { path = "../spacelab-astro", version = "0.3.0" }
+spacelab-core = { path = "../spacelab-core", version = "0.3.0" }
 sgp4 = "2.4"
 wgpu = "30"
 pollster = "1.0"

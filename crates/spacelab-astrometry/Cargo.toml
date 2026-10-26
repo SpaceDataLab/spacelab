@@ -15,11 +15,11 @@ exclude.workspace = true
 
 [dependencies]
 libm = "0.2"
-spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
+spacelab-core = { path = "../spacelab-core", version = "0.3.0" }
 # For `Refraction` and the altitude newtypes only. The alternative was a second copy of the
 # Sæmundsson and Bennett fits, and two implementations of one formula is how they drift apart.
 # The edge is acyclic: spacelab-coverage depends on core and sensors, neither of which is here.
-spacelab-coverage = { path = "../spacelab-coverage", version = "0.2.0" }
+spacelab-coverage = { path = "../spacelab-coverage", version = "0.3.0" }
 
 [dev-dependencies]
 # Tests only, and deliberately not a real dependency: `Aberration::diurnal` takes the rotation as a

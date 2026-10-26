@@ -23,28 +23,28 @@ name = "spacelab_python"
 # PyO3's `#[pyclass]` expansion requires. This crate is the FFI boundary; the pure Rust core stays unsafe-free.
 
 [dependencies]
-spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
-spacelab-earth = { path = "../spacelab-earth", version = "0.2.0" }
-spacelab-astro = { path = "../spacelab-astro", version = "0.2.0" }
-spacelab-astrometry = { path = "../spacelab-astrometry", version = "0.2.0" }
-spacelab-elements = { path = "../spacelab-elements", version = "0.2.0" }
-spacelab-constellation = { path = "../spacelab-constellation", version = "0.2.0", features = ["std"] }
-spacelab-control = { path = "../spacelab-control", version = "0.2.0", features = ["std"] }
-spacelab-estimation = { path = "../spacelab-estimation", version = "0.2.0" }
-spacelab-ephemeris = { path = "../spacelab-ephemeris", version = "0.2.0" }
-spacelab-propagation = { path = "../spacelab-propagation", version = "0.2.0" }
-spacelab-autodiff = { path = "../spacelab-autodiff", version = "0.2.0" }
-spacelab-sgp4 = { path = "../spacelab-sgp4", version = "0.2.0" }
-spacelab-frames = { path = "../spacelab-frames", version = "0.2.0", features = ["std"] }
-spacelab-fa = { path = "../spacelab-fa", version = "0.2.0" }
-spacelab-sensors = { path = "../spacelab-sensors", version = "0.2.0" }
-spacelab-coverage = { path = "../spacelab-coverage", version = "0.2.0", features = ["std"] }
-spacelab-geomagnetism = { path = "../spacelab-geomagnetism", version = "0.2.0", features = ["std"] }
-spacelab-gnss = { path = "../spacelab-gnss", version = "0.2.0", features = ["std"] }
-spacelab-ionosphere = { path = "../spacelab-ionosphere", version = "0.2.0" }
-spacelab-earthvision = { path = "../spacelab-earthvision", version = "0.2.0" }
-spacelab-signal = { path = "../spacelab-signal", version = "0.2.0" }
-spacelab-vision = { path = "../spacelab-vision", version = "0.2.0", features = ["std"] }
+spacelab-core = { path = "../spacelab-core", version = "0.3.0" }
+spacelab-earth = { path = "../spacelab-earth", version = "0.3.0" }
+spacelab-astro = { path = "../spacelab-astro", version = "0.3.0" }
+spacelab-astrometry = { path = "../spacelab-astrometry", version = "0.3.0" }
+spacelab-elements = { path = "../spacelab-elements", version = "0.3.0" }
+spacelab-constellation = { path = "../spacelab-constellation", version = "0.3.0", features = ["std"] }
+spacelab-control = { path = "../spacelab-control", version = "0.3.0", features = ["std"] }
+spacelab-estimation = { path = "../spacelab-estimation", version = "0.3.0" }
+spacelab-ephemeris = { path = "../spacelab-ephemeris", version = "0.3.0" }
+spacelab-propagation = { path = "../spacelab-propagation", version = "0.3.0" }
+spacelab-autodiff = { path = "../spacelab-autodiff", version = "0.3.0" }
+spacelab-sgp4 = { path = "../spacelab-sgp4", version = "0.3.0" }
+spacelab-frames = { path = "../spacelab-frames", version = "0.3.0", features = ["std"] }
+spacelab-fa = { path = "../spacelab-fa", version = "0.3.0" }
+spacelab-sensors = { path = "../spacelab-sensors", version = "0.3.0" }
+spacelab-coverage = { path = "../spacelab-coverage", version = "0.3.0", features = ["std"] }
+spacelab-geomagnetism = { path = "../spacelab-geomagnetism", version = "0.3.0", features = ["std"] }
+spacelab-gnss = { path = "../spacelab-gnss", version = "0.3.0", features = ["std"] }
+spacelab-ionosphere = { path = "../spacelab-ionosphere", version = "0.3.0" }
+spacelab-earthvision = { path = "../spacelab-earthvision", version = "0.3.0" }
+spacelab-signal = { path = "../spacelab-signal", version = "0.3.0" }
+spacelab-vision = { path = "../spacelab-vision", version = "0.3.0", features = ["std"] }
 # Two stable ABIs, chosen by the interpreter maturin builds against: from 3.11 to 3.14 the wheel is
 # `cp311-abi3`; from 3.15 it is `cp315-abi3.abi3t` (PEP 803), which also loads on the free-threaded
 # build, which plain abi3 cannot. Shipping both wheels covers 3.11 onwards and 3.15t.

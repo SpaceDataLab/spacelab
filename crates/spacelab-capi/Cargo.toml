@@ -25,27 +25,27 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # the pure Rust core stays unsafe-free.
 
 [dependencies]
-spacelab-astro = { path = "../spacelab-astro", version = "0.2.0" }
-spacelab-astrometry = { path = "../spacelab-astrometry", version = "0.2.0" }
-spacelab-autodiff = { path = "../spacelab-autodiff", version = "0.2.0" }
-spacelab-constellation = { path = "../spacelab-constellation", version = "0.2.0", features = ["std"] }
-spacelab-control = { path = "../spacelab-control", version = "0.2.0", features = ["std"] }
-spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
-spacelab-coverage = { path = "../spacelab-coverage", version = "0.2.0", features = ["std"] }
-spacelab-earth = { path = "../spacelab-earth", version = "0.2.0" }
-spacelab-elements = { path = "../spacelab-elements", version = "0.2.0" }
-spacelab-fa = { path = "../spacelab-fa", version = "0.2.0" }
-spacelab-estimation = { path = "../spacelab-estimation", version = "0.2.0" }
-spacelab-earthvision = { path = "../spacelab-earthvision", version = "0.2.0" }
-spacelab-geomagnetism = { path = "../spacelab-geomagnetism", version = "0.2.0", features = ["std"] }
-spacelab-gnss = { path = "../spacelab-gnss", version = "0.2.0", features = ["std"] }
-spacelab-ionosphere = { path = "../spacelab-ionosphere", version = "0.2.0" }
-spacelab-frames = { path = "../spacelab-frames", version = "0.2.0", features = ["std"] }
-spacelab-propagation = { path = "../spacelab-propagation", version = "0.2.0" }
-spacelab-sensors = { path = "../spacelab-sensors", version = "0.2.0" }
-spacelab-sgp4 = { path = "../spacelab-sgp4", version = "0.2.0" }
-spacelab-signal = { path = "../spacelab-signal", version = "0.2.0" }
-spacelab-vision = { path = "../spacelab-vision", version = "0.2.0" }
+spacelab-astro = { path = "../spacelab-astro", version = "0.3.0" }
+spacelab-astrometry = { path = "../spacelab-astrometry", version = "0.3.0" }
+spacelab-autodiff = { path = "../spacelab-autodiff", version = "0.3.0" }
+spacelab-constellation = { path = "../spacelab-constellation", version = "0.3.0", features = ["std"] }
+spacelab-control = { path = "../spacelab-control", version = "0.3.0", features = ["std"] }
+spacelab-core = { path = "../spacelab-core", version = "0.3.0" }
+spacelab-coverage = { path = "../spacelab-coverage", version = "0.3.0", features = ["std"] }
+spacelab-earth = { path = "../spacelab-earth", version = "0.3.0" }
+spacelab-elements = { path = "../spacelab-elements", version = "0.3.0" }
+spacelab-fa = { path = "../spacelab-fa", version = "0.3.0" }
+spacelab-estimation = { path = "../spacelab-estimation", version = "0.3.0" }
+spacelab-earthvision = { path = "../spacelab-earthvision", version = "0.3.0" }
+spacelab-geomagnetism = { path = "../spacelab-geomagnetism", version = "0.3.0", features = ["std"] }
+spacelab-gnss = { path = "../spacelab-gnss", version = "0.3.0", features = ["std"] }
+spacelab-ionosphere = { path = "../spacelab-ionosphere", version = "0.3.0" }
+spacelab-frames = { path = "../spacelab-frames", version = "0.3.0", features = ["std"] }
+spacelab-propagation = { path = "../spacelab-propagation", version = "0.3.0" }
+spacelab-sensors = { path = "../spacelab-sensors", version = "0.3.0" }
+spacelab-sgp4 = { path = "../spacelab-sgp4", version = "0.3.0" }
+spacelab-signal = { path = "../spacelab-signal", version = "0.3.0" }
+spacelab-vision = { path = "../spacelab-vision", version = "0.3.0" }
 
 [features]
 # Cloud-mask ONNX inference (`sl_cloud_masker_*`, `sl_cloud_mask`) via earthvision -> spacelab-vision

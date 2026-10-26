@@ -14,7 +14,7 @@ categories = ["aerospace", "aerospace::space-protocols", "parser-implementations
 exclude.workspace = true
 
 [dependencies]
-spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
+spacelab-core = { path = "../spacelab-core", version = "0.3.0" }
 
 [dev-dependencies]
 spacelab-testkit = { path = "../spacelab-testkit" }

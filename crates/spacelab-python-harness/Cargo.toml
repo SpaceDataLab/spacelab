@@ -21,7 +21,7 @@ doctest = false
 # NB: like spacelab-python, does NOT inherit `[workspace.lints]`: the module-init macro needs `unsafe_code`.
 
 [dependencies]
-spacelab-python = { path = "../spacelab-python", version = "0.2.0" }
+spacelab-python = { path = "../spacelab-python", version = "0.3.0" }
 pyo3 = { version = "0.30", features = ["abi3-py311", "abi3t-py315"] }
 
 [features]

@@ -14,7 +14,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(
     spacelab
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "C ABI and C++20 header for the spacelab space-data computation core"
     LANGUAGES C CXX)
 

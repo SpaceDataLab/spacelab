@@ -15,9 +15,9 @@ exclude.workspace = true
 
 [dependencies]
 libm = "0.2"
-spacelab-autodiff = { path = "../spacelab-autodiff", version = "0.2.0" }
-spacelab-core = { path = "../spacelab-core", version = "0.2.0" }
-spacelab-geomagnetism = { path = "../spacelab-geomagnetism", version = "0.2.0" }
+spacelab-autodiff = { path = "../spacelab-autodiff", version = "0.3.0" }
+spacelab-core = { path = "../spacelab-core", version = "0.3.0" }
+spacelab-geomagnetism = { path = "../spacelab-geomagnetism", version = "0.3.0" }
 
 [dev-dependencies]
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }

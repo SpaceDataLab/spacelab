@@ -33,6 +33,17 @@
 //! biasing the MTF downward by an amount that depends on the window rather than on the image. The
 //! caller crops the region of interest to the edge instead, which is the same tail suppression
 //! without the bias.
+//!
+//! # Gate
+//!
+//! `derivations/edge_mtf.mac` derives the Gaussian PSF's MTF `exp(−2π²σ²f²)`, the `sinc(fh)` each
+//! of the analysis's two box filters puts on it, the edge's antiderivative, the Gaussian FWHM and
+//! RER, and the WGS-84 meridian radius as the arc rate of the meridian ellipse;
+//! `derivations/edge_mtf.gp` recomputes them by quadrature. The module tests
+//! `the_mtf_of_a_gaussian_edge_is_the_gaussian_closed_form` (G3) and
+//! `the_local_scale_is_the_wgs84_radii_of_curvature_at_forty_digits` (G2) hold the code to them.
+//! The SNR estimators and the degradations are measured, not derived: their module tests state
+//! their arithmetic.
 
 // Short names (x, y, d, f) are the ISO 12233 notation. Every `as f64` below is applied to a pixel
 // count or an index, exact for any image that fits in memory; every `as usize` is applied to a
@@ -2016,5 +2027,102 @@ mod tests {
             quantise(&image, 5, 8.0),
             [0.0, 0.0, 2.0, 4.0, 8.0, 8.0, 0.0]
         );
+    }
+
+    /// The MTF of a Gaussian edge is `exp(−2π²σ²f²)` once the analysis's own two box filters are
+    /// divided out, as `derivations/edge_mtf.mac` derives. (G3)
+    ///
+    /// The profile is built the way the analysis builds one, but exactly: each ESF bin is the
+    /// average of the Gaussian edge `Φ(x/σ)` over the bin, from its antiderivative
+    /// `σ(uΦ(u) + φ(u))`, and the LSF is the adjacent difference. Its transform is then
+    /// `G(f)·sinc²(fh)` up to aliasing, which at `σ = 1.5` and `h = 1/4` is `exp(−2π²σ²(4 − f)²)`,
+    /// below `e⁻⁴⁰⁰`, and the profile's ±13σ reach truncates nothing an `f64` can hold. So `mtf`
+    /// must return the Gaussian closed form to rounding — and without the `sinc²` division it
+    /// would be 3 % low at 0.4 cycles per pixel.
+    #[test]
+    fn the_mtf_of_a_gaussian_edge_is_the_gaussian_closed_form() {
+        let (sigma, h) = (1.5, 0.25);
+        let psi = |w: f64| {
+            w * 0.5 * libm::erfc(-w / core::f64::consts::SQRT_2)
+                + libm::exp(-0.5 * w * w) / libm::sqrt(TAU)
+        };
+        // The antiderivative of the edge, split at the edge so that neither side cancels.
+        let antiderivative = |t: f64| {
+            if t <= 0.0 {
+                sigma * psi(t / sigma)
+            } else {
+                t + sigma * psi(-t / sigma)
+            }
+        };
+        let bins = 160;
+        let start = -20.0;
+        let esf: Vec<f64> = (0..bins)
+            .map(|i| {
+                let a = start + f64::from(i) * h;
+                (antiderivative(a + h) - antiderivative(a)) / h
+            })
+            .collect();
+        let lsf: Vec<f64> = esf.windows(2).map(|p| (p[1] - p[0]) / h).collect();
+        let edge = SlantedEdge {
+            angle_degrees: 0.0,
+            bin_width: h,
+            esf,
+            lsf,
+            centre: 79.5,
+        };
+        for frequency in [0.05, 0.1, 0.25, 0.4, 0.5, 0.6] {
+            let pi = core::f64::consts::PI;
+            let want = libm::exp(-2.0 * pi * pi * sigma * sigma * frequency * frequency);
+            let got = edge.mtf(frequency);
+            assert!(
+                (got - want).abs() < 1e-13,
+                "MTF({frequency}) = {got}, want {want}"
+            );
+        }
+    }
+
+    /// Metres per degree are the WGS-84 meridian radius `a(1 − e²)/W³` — the arc rate of the
+    /// meridian ellipse — and the parallel radius `a cos φ/W`, against the 40-digit values of
+    /// `derivations/edge_mtf.mac`. (G2)
+    #[test]
+    #[allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    fn the_local_scale_is_the_wgs84_radii_of_curvature_at_forty_digits() {
+        let want = [
+            (
+                0.0,
+                110574.2758215943614803342870362612553044,
+                111319.4907932735726477133826705565482628,
+            ),
+            (
+                30.0,
+                110852.4424956170990679559492678767970814,
+                96486.28025089651228022381061278254040082,
+            ),
+            (
+                45.0,
+                111131.7774141756347865022310313295226385,
+                78846.83509397810759420340430640034798517,
+            ),
+            (
+                60.0,
+                111412.2874577794398659627403507355177838,
+                55800.00157243612871400347129539486135276,
+            ),
+        ];
+        for (latitude, meridian, parallel) in want {
+            let (lat, lon) = local_scale(latitude);
+            assert!(
+                ((lat - meridian) / meridian).abs() < 1e-15,
+                "{latitude}°: {lat}"
+            );
+            assert!(
+                ((lon - parallel) / parallel).abs() < 1e-15,
+                "{latitude}°: {lon}"
+            );
+        }
+        // At the pole the meridian radius is a/(1 − f) and the parallel has collapsed.
+        let (lat, lon) = local_scale(90.0);
+        assert!(((lat - 111693.9795591275024527158027545731241728) / lat).abs() < 1e-15);
+        assert!(lon.abs() < 1e-11, "{lon}");
     }
 }

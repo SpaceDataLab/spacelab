@@ -1,0 +1,78 @@
+/* The Chirp-Scaling Algorithm of crates/spacelab-signal/src/csa.rs focuses a point target: its
+   phase multiplies compose to a pure delay and a constant phase, to the order the algorithm is
+   stated at (Raney et al. 1994; Cumming & Wong 2005, Ch. 7).
+
+   The stated approximations: the 2-D spectrum phase is kept to second order in the range
+   frequency (derivations/sar_range_doppler.mac, items 4-6), and the modified FM rate Km is taken at
+   the reference range. A target at closest range R0 = Rref + dR, after the azimuth FFT, is then the
+   range-Doppler signal
+       s(tau) = exp(i pi Km (tau - tau_d)^2) exp(-4 pi i R0 D/lambda),
+       tau_d = 2 R0/(c D) - 2 Rref/c        (tau measured from the reference delay, as `range_time`)
+   with D = 1/(1 + alpha) the migration factor. Each line prints `<name>: 0`:
+     1. step 2, the chirp scaling exp(i pi Km alpha (tau - tau_ref)^2), tau_ref = 2 Rref alpha/c,
+        turns the chirp into exp(i pi Km (1 + alpha)(tau - tau_c)^2) exp(i Phi_res) with
+        tau_c = tau_ref + 2 dR/c -- every range now migrates like the reference -- and
+        Phi_res = 4 pi Km alpha (1 + alpha) dR^2/c^2 (G2);
+     2. step 3, the range FFT of exp(i pi Ks (tau - tau_c)^2): completing the square,
+        pi Ks (tau - tau_c)^2 - 2 pi f tau = pi Ks (tau - tau_c - f/Ks)^2 - pi f^2/Ks - 2 pi f tau_c,
+        so up to a constant the spectrum is exp(-i pi f^2/Ks - 2 pi i f tau_c) (G1);
+     3. step 4, `compression_and_bulk_phase` = pi f^2/Ks + 2 pi tau_ref f, leaves
+        exp(-2 pi i f 2 dR/c): a pure delay of 2 dR/c whatever f_eta -- range compression, SRC and
+        the bulk migration correction at once (G2). Step 5's IFFT puts the target in the bin whose
+        `range_offset` is dR;
+     4. step 6 at that bin must cancel what is left, -4 pi R0 D/lambda + Phi_res, for every f_eta.
+        The residual term -4 pi Km (1 + alpha) alpha dR^2/c^2 cancels Phi_res; the azimuth matched
+        filter has to be 4 pi (Rref + dR) D/lambda, the range of the bin it is applied to (G2).
+        A filter at the reference range alone, 4 pi Rref D/lambda, leaves -4 pi dR D/lambda, whose
+        f_eta-dependent part is -4 pi dR (D - 1)/lambda = pi lambda dR f_eta^2/(2 V^2) + O(f_eta^4):
+        the azimuth-FM-rate mismatch 1/Ka(R0) - 1/Ka(Rref) = lambda dR/(2 V^2), an uncompensated
+        azimuth chirp that defocuses every target off the reference range -- the defect this file
+        found in the shipped filter.
+   The Rust gates are `the_phase_multiplies_compose_to_a_pure_delay` (1, 3, 4 on the shipped
+   phase functions) and `a_target_off_the_reference_range_focuses_in_azimuth` (the defect).
+
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/csa_point_target.mac </dev/null          */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+D : 1/(1 + al)$
+R0 : Rref + dR$
+tau_d : 2*R0/(c*D) - 2*Rref/c$
+tau_ref : 2*Rref*al/c$
+
+/* 1. Chirp scaling. */
+tau_c : tau_ref + 2*dR/c$
+Phi_res : 4*%pi*Km*al*(1 + al)*dR^2/c^2$
+zero("scaled_chirp_rate_and_centre",
+     ratsimp(%pi*Km*(tau - tau_d)^2 + %pi*Km*al*(tau - tau_ref)^2
+             - (%pi*Km*(1 + al)*(tau - tau_c)^2 + Phi_res)))$
+
+/* 2. The range spectrum of a chirp, by completing the square. */
+Ks : Km*(1 + al)$
+zero("range_spectrum_of_the_scaled_chirp",
+     ratsimp(%pi*Ks*(tau - tau_c)^2 - 2*%pi*f*tau
+             - (%pi*Ks*(tau - tau_c - f/Ks)^2 - %pi*f^2/Ks - 2*%pi*f*tau_c)))$
+
+/* 3. Step 4. */
+compress : %pi*f^2/Ks + 2*%pi*(2*Rref/c)*al*f$
+zero("step_4_leaves_a_pure_delay",
+     ratsimp((-%pi*f^2/Ks - 2*%pi*f*tau_c) + compress - (-2*%pi*f*2*dR/c)))$
+
+/* 4. Step 6. */
+target_phase : -4*%pi*R0*D/lam + Phi_res$
+residual_term : -4*%pi/c^2*Km*(1 + al)*al*dR^2$
+range_variant : 4*%pi*(Rref + dR)*D/lam$
+zero("range_variant_azimuth_filter_cancels_the_target_phase",
+     ratsimp(target_phase + range_variant + residual_term))$
+reference_only : 4*%pi*Rref*D/lam$
+left : ratsimp(target_phase + reference_only + residual_term)$
+zero("reference_range_filter_leaves_minus_4_pi_dR_D_over_lambda", ratsimp(left + 4*%pi*dR*D/lam))$
+/* Its f_eta dependence, with D = sqrt(1 - (lam f/(2 V))^2). */
+Df : sqrt(1 - (lam*fe/(2*V))^2)$
+zero("which_is_the_azimuth_fm_rate_mismatch",
+     ratsimp(coeff(taylor(-4*%pi*dR*(Df - 1)/lam, fe, 0, 2), fe, 2)
+             - %pi*(lam*R0/(2*V^2) - lam*Rref/(2*V^2))))$

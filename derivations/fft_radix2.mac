@@ -1,0 +1,72 @@
+/* The radix-2 FFT of crates/spacelab-signal/src/fft.rs, from the definition of the DFT.
+
+   `fft` claims the forward DFT X_k = sum_n x_n w^(n k), w = exp(-2 pi i/N), and `ifft` its inverse
+   with the 1/N on the way back. Here, on N = 8, where every power of w is a closed radical
+   (w = (1 - i)/sqrt 2), each line printing `<name>: 0`:
+     1. the Danielson-Lanczos split the butterflies carry out: X_k = E_k + w^k O_k and
+        X_(k+N/2) = E_k - w^k O_k, with E and O the N/2-point DFTs of the even and odd samples --
+        applied twice it is the whole radix-2 transform, so F_8 = butterfly(F_4, F_4) and
+        F_4 = butterfly(F_2, F_2) entry by entry;
+     2. the inverse: conj(F_8) F_8 = 8 I, so ifft(fft(x)) = x with the 1/N scale (G1);
+     3. Parseval for a symbolic complex input, sum |X_k|^2 = N sum |x_n|^2 (G4);
+     4. the bit-reversal order the in-place transform starts from: the radix-2 recursion reads
+        sample rev_3(j) into slot j.
+   Then the DFT of the Gaussian-integer input x_n = ((n mod 5) - 2) + i((3n mod 7) - 3), N = 16, at
+   40 digits: the reference the G2 gate `the_fft_is_the_dft_of_an_exact_gaussian_integer_input`
+   in fft.rs holds the shipped transform to. derivations/fft_radix2.gp computes the same values in
+   exact cyclotomic arithmetic (Q(zeta_16)) and re-checks 1-3 for N = 2 .. 64.
+
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/fft_radix2.mac </dev/null             */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+simp(e) := ratsimp(radcan(rectform(e)))$
+
+dft(n) := genmatrix(lambda([j, k], rectform(exp(-2*%pi*%i*(j - 1)*(k - 1)/n))), n, n)$
+
+/* The butterfly built from the half-length DFT: rows k and k + n/2 of the full transform, as a
+   matrix acting on the original sample order. */
+butterfly(n) := block([h : n/2, half : dft(n/2), m],
+  m : zeromatrix(n, n),
+  for k : 1 thru h do
+    for j : 1 thru h do block([tw : rectform(exp(-2*%pi*%i*(k - 1)/n))],
+      /* even sample 2(j-1) -> column 2j-1, odd sample 2(j-1)+1 -> column 2j */
+      m[k, 2*j - 1] : half[k, j],
+      m[k, 2*j]     : tw*half[k, j],
+      m[k + h, 2*j - 1] : half[k, j],
+      m[k + h, 2*j]     : -tw*half[k, j]),
+  m)$
+
+maxabs(m) := lmax(map(lambda([r], lmax(map(lambda([e], abs(simp(e))), r))), args(m)))$
+
+zero("danielson_lanczos_n8", maxabs(dft(8) - butterfly(8)))$
+zero("danielson_lanczos_n4", maxabs(dft(4) - butterfly(4)))$
+
+F8 : dft(8)$
+zero("inverse_dft_n8", maxabs(map(conjugate, F8) . F8 - 8*ident(8)))$
+
+declare([a0, a1, a2, a3, a4, a5, a6, a7, b0, b1, b2, b3, b4, b5, b6, b7], real)$
+xs : transpose(matrix([a0 + %i*b0, a1 + %i*b1, a2 + %i*b2, a3 + %i*b3,
+                       a4 + %i*b4, a5 + %i*b5, a6 + %i*b6, a7 + %i*b7]))$
+X : F8 . xs$
+energy(v) := expand(sum(rectform(v[i, 1]*conjugate(v[i, 1])), i, 1, length(v)))$
+zero("parseval_n8", ratsimp(energy(X) - 8*energy(xs)))$
+
+/* Bit reversal: the radix-2 recursion on 8 samples visits them in the order of the leaves of its
+   even/odd tree; the in-place transform's swap loop must produce that order. */
+leaves(l) := if length(l) = 1 then l
+  else append(leaves(makelist(l[2*i - 1], i, 1, length(l)/2)),
+              leaves(makelist(l[2*i], i, 1, length(l)/2)))$
+rev3(j) := 4*mod(j, 2) + 2*mod(floor(j/2), 2) + mod(floor(j/4), 2)$
+zero("bit_reversal_n8", lsum(abs(e), e, leaves(makelist(i, i, 0, 7)) - makelist(rev3(j), j, 0, 7)))$
+
+/* The reference transform, N = 16. */
+fpprec : 40$
+N : 16$
+x(n) := (mod(n, 5) - 2) + %i*(mod(3*n, 7) - 3)$
+for k : 0 thru N - 1 do block([s : bfloat(rectform(sum(x(n)*exp(-2*%pi*%i*n*k/N), n, 0, N - 1)))],
+  printf(true, "X[~d] = ~a  ~a~%", k, realpart(s), imagpart(s)))$

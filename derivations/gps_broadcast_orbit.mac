@@ -1,0 +1,122 @@
+/* The IS-GPS-200 broadcast-ephemeris user algorithm -- spacelab-gnss/src/gps.rs -- from the ICD's
+ * equations (Table 20-IV), with the BDS-SIS-ICD GEO variant.
+ *
+ * With A = (sqrt A)^2, n = sqrt(mu/A^3) + dn, M = M0 + n tk, Kepler's equation M = E - e sin E, the
+ * true anomaly in the ICD's half-angle form nu = 2 atan(sqrt((1 + e)/(1 - e)) tan(E/2)),
+ * Phi = nu + omega, the second-harmonic corrections du, dr, di in sin 2 Phi and cos 2 Phi,
+ *     u = Phi + du,  r = A (1 - e cos E) + dr,  i = i0 + di + IDOT tk,
+ *     Omega = Omega0 + (Omega_dot - Omega_e_dot) tk - Omega_e_dot toe,
+ *     [x, y, z] = [x' cos Omega - y' cos i sin Omega, x' sin Omega + y' cos i cos Omega, y' sin i],
+ * shown here, each line printing `<name>: 0`:
+ *   1. the code's atan2 form of nu has the half-angle form's sine and cosine (G1), and
+ *      dnu/dE = sqrt(1 - e^2)/(1 - e cos E), the code's `nu_dot` over `ek_dot` (G1);
+ *   2. the code's analytic (Remondi) velocity, all three components, is the time derivative of the
+ *      ICD position, with E(t) carried implicitly by dE/dt = n/(1 - e cos E) (G2);
+ *   3. F = -2 sqrt(mu)/c^2 rounds to the -4.442807633e-10 IS-GPS-200 20.3.3.3.3.1 prints, and the
+ *      relativistic clock term's amplitude F e sqrt A for the module's sample ephemeris;
+ * then the ECEF position and velocity of the module's sample ephemeris (GPS, and a BeiDou GEO
+ * through Rz(Omega_e_dot tk) Rx(-5 deg)) at 40 digits, from the f64 inputs exactly -- the reference the
+ * gate `the_broadcast_orbit_is_the_icd_algorithm_evaluated_exactly` (G2) asserts, re-computed by
+ * PARI/GP in derivations/gps_broadcast_orbit.gp.
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/gps_broadcast_orbit.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. The true anomaly, in T = tan(E/2) and k = sqrt((1 + e)/(1 - e)), so that tan(nu/2) = k T:
+      sin E = 2T/(1 + T^2), cos E = (1 - T^2)/(1 + T^2), and likewise for nu with k T;
+      sqrt(1 - e^2) = k (1 - e). */
+assume(e > 0, e < 1)$
+kk : sqrt((1 + e)/(1 - e))$
+sE : 2*T/(1 + T^2)$  cE : (1 - T^2)/(1 + T^2)$
+snu : 2*kk*T/(1 + kk^2*T^2)$  cnu : (1 - kk^2*T^2)/(1 + kk^2*T^2)$
+zero("sqrt_one_minus_e2_is_k_times_one_minus_e", radcan(sqrt(1 - e^2) - kk*(1 - e)))$
+zero("sin_nu_is_the_atan2_numerator_over_one_minus_e_cos_e",
+     radcan(snu - sqrt(1 - e^2)*sE/(1 - e*cE)))$
+zero("cos_nu_is_the_atan2_denominator_over_one_minus_e_cos_e",
+     radcan(cnu - (cE - e)/(1 - e*cE)))$
+/* nu = 2 atan(k T), dT/dE = (1 + T^2)/2. */
+zero("dnu_de_is_root_one_minus_e2_over_one_minus_e_cos_e",
+     radcan(2*kk/(1 + kk^2*T^2)*(1 + T^2)/2 - sqrt(1 - e^2)/(1 - e*cE)))$
+
+/* 2. The Remondi velocity against d/dt of the ICD position. E is a function of t through
+      Kepler's equation; every other time dependence is explicit. */
+depends(EE, t)$
+gradef(EE, t, n/(1 - e*cos(EE)))$
+nu : atan2(sqrt(1 - e^2)*sin(EE), cos(EE) - e)$
+gradef(nuf(EE), sqrt(1 - e^2)/(1 - e*cos(EE)))$
+Phi : nuf(EE) + w$
+du : cus*sin(2*Phi) + cuc*cos(2*Phi)$
+dr : crs*sin(2*Phi) + crc*cos(2*Phi)$
+di : cis*sin(2*Phi) + cic*cos(2*Phi)$
+u : Phi + du$  r : A*(1 - e*cos(EE)) + dr$  inc : i0 + idot*t + di$
+xp : r*cos(u)$  yp : r*sin(u)$
+Om : Om0 + (Omd - Oe)*t - Oe*toe$
+pos : [xp*cos(Om) - yp*cos(inc)*sin(Om), xp*sin(Om) + yp*cos(inc)*cos(Om), yp*sin(inc)]$
+/* The code's chain, transcribed from position_velocity_ecef. */
+ek_dot : n/(1 - e*cos(EE))$
+nu_dot : ek_dot*sqrt(1 - e^2)/(1 - e*cos(EE))$
+u_dot : nu_dot*(1 + 2*(cus*cos(2*Phi) - cuc*sin(2*Phi)))$
+r_dot : A*e*sin(EE)*ek_dot + 2*nu_dot*(crs*cos(2*Phi) - crc*sin(2*Phi))$
+i_dot : idot + 2*nu_dot*(cis*cos(2*Phi) - cic*sin(2*Phi))$
+xp_dot : r_dot*cos(u) - yp*u_dot$  yp_dot : r_dot*sin(u) + xp*u_dot$
+omk_dot : Omd - Oe$
+vel : [xp_dot*cos(Om) - yp_dot*cos(inc)*sin(Om) + yp*sin(inc)*sin(Om)*i_dot - pos[2]*omk_dot,
+       xp_dot*sin(Om) + yp_dot*cos(inc)*cos(Om) - yp*sin(inc)*cos(Om)*i_dot + pos[1]*omk_dot,
+       yp_dot*sin(inc) + yp*cos(inc)*i_dot]$
+for k : 1 thru 3 do
+  zero(sconcat("remondi_velocity_", ["x", "y", "z"][k], "_is_the_derivative_of_the_icd_position"),
+       ratsimp(trigsimp(diff(pos[k], t) - vel[k])))$
+
+/* 3. The relativistic clock constant. */
+fpprec : 50$
+cc : 299792458$
+mu_gps : 398600500000000$
+F_exact : -2*sqrt(mu_gps)/cc^2$
+printf(true, "F = -2 sqrt(mu)/c^2 = ~a s/sqrt(m)~%", bfloat(F_exact))$
+zero("f_rounds_to_the_ten_digits_is_gps_200_prints", round(bfloat(F_exact)*10^19) + 4442807633)$
+
+/* Numbers. Every input is the f64 the Rust test passes, as its exact binary rational. */
+ex(x) := rationalize(x)$
+kepler(M, ecc) := block([E : bfloat(M)],
+  for k : 1 thru 60 do E : E - (E - ecc*sin(E) - M)/(1 - ecc*cos(E)),
+  E)$
+broadcast(sys, eph, tk) := block([mu, oe, sma, nn, M, Ek, vals, P, V, geo, R],
+  mu : if sys = gps then mu_gps else ex(3.986004418e14),
+  oe : if sys = gps then ex(7.2921151467e-5) else ex(7.292115e-5),
+  sma : eph[1]^2, nn : sqrt(mu/sma^3) + eph[8],
+  M : eph[6] + nn*tk, Ek : kepler(bfloat(M), bfloat(eph[2])),
+  vals : [EE = Ek, t = tk, A = sma, e = eph[2], n = nn, i0 = eph[3], Om0 = eph[4], w = eph[5],
+          idot = eph[9], Omd = eph[10], cuc = eph[11], cus = eph[12], crc = eph[13],
+          crs = eph[14], cic = eph[15], cis = eph[16], toe = eph[17], Oe = oe],
+  if sys = beidou_geo then (
+    /* BDS-SIS-ICD GEO: the node without -Omega_e_dot tk, then Rz(Omega_e_dot tk) Rx(-5 deg). */
+    geo : block([Og : Om0 + Omd*t - Oe*toe], [xp*cos(Og) - yp*cos(inc)*sin(Og),
+                                            xp*sin(Og) + yp*cos(inc)*cos(Og), yp*sin(inc)]),
+    R : matrix([cos(Oe*t), sin(Oe*t), 0], [-sin(Oe*t), cos(Oe*t), 0], [0, 0, 1])
+        . matrix([1, 0, 0], [0, cos(-5*%pi/180), sin(-5*%pi/180)],
+                 [0, -sin(-5*%pi/180), cos(-5*%pi/180)]),
+    P : list_matrix_entries(R . transpose(matrix(geo))),
+    P : bfloat(subst(vals, subst(nuf(EE) = nu, P))),
+    [P, ["-", "-", "-"]])
+  else (
+    P : bfloat(subst(vals, subst(nuf(EE) = nu, pos))),
+    V : bfloat(subst(vals, subst(nuf(EE) = nu, vel))),
+    [P, V]))$
+
+/* [sqrt_a, e, i0, omega0, omega, m0, (unused), delta_n, idot, omega_dot, cuc, cus, crc, crs, cic,
+   cis, toe] -- the module's `sample()`. */
+sample : map(ex, [5153.65, 0.0062, 0.9599, -1.234, 0.567, 0.321, 0.0, 4.5e-9, -2.1e-10, -8.1e-9,
+                  1.2e-6, 8.3e-6, 210.0, 35.0, -1.1e-7, 9.0e-8, 216000.0])$
+fpprintprec : 40$
+for tk in [0, 1800, -7200] do block([o : broadcast(gps, sample, tk)],
+  printf(true, "GPS sample, tk = ~a:~%  position ~a~%  velocity ~a~%", tk, o[1], o[2]))$
+printf(true, "relativistic amplitude F e sqrt A = ~a s~%",
+       bfloat(round(bfloat(F_exact)*10^19)/10^19 * sample[2] * sample[1]))$
+geo_sample : map(ex, [6493.4, 0.0004, 0.02, -1.234, 0.567, 0.321, 0.0, 4.5e-9, -2.1e-10, -8.1e-9,
+                      1.2e-6, 8.3e-6, 210.0, 35.0, -1.1e-7, 9.0e-8, 216000.0])$
+block([o : broadcast(beidou_geo, geo_sample, 300)],
+  printf(true, "BeiDou GEO sample, tk = 300:~%  position ~a~%", o[1]))$

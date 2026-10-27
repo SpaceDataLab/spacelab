@@ -15,6 +15,14 @@
 //!
 //! [`semi_global_match`] runs all three; [`depth_from_disparity`] turns disparity into depth for a
 //! rectified pinhole pair (`Z = f·B/d`), the DSM elevation. `no_std` + `alloc`.
+//!
+//! Gate: `derivations/stereo_disparity.mac` shows that for two cameras sharing a rotation, with the
+//! baseline along the camera `x` axis, a point stays on one row and its disparity is `f·B/z_c`, and
+//! that the sub-pixel step is the vertex of the parabola through the three costs;
+//! `derivations/stereo_disparity.gp` recomputes the vertices by interpolation. The module tests
+//! `depth_from_disparity_inverts_the_disparity_of_a_rotated_rectified_pair` (G1) and
+//! `the_subpixel_refinement_is_the_vertex_of_the_interpolating_parabola` (G3) hold the shipped code
+//! to them.
 
 // Raster indices cast usize↔isize/f64 in range; single letters (p, d, y, x, r) are the SGM notation.
 #![allow(
@@ -383,6 +391,75 @@ mod tests {
             assert!((tri.z - z).abs() < 1e-6, "triangulate Z {} vs {z}", tri.z);
         }
     }
+    /// (G1) `Z = f·B/d` inverts the disparity of a rectified pair: two cameras sharing a generic
+    /// rotation `R`, the right centre moved by `B Rᵀ e_x`, image a point on one row and `f·B/z_c`
+    /// apart — the identity `derivations/stereo_disparity.mac` proves for any `R`. The bound is the
+    /// rounding of the two pixels the disparity subtracts, relative to the disparity itself.
+    #[test]
+    fn depth_from_disparity_inverts_the_disparity_of_a_rotated_rectified_pair() {
+        let (focal, baseline) = (1000.0, 5.0);
+        let rotation = Mat3::rot1(0.3) * Mat3::rot3(-0.7);
+        let left = PinholeCamera {
+            rotation,
+            center: Vec3::new(1.5, -2.0, 0.25),
+            focal,
+            principal: [320.0, 240.0],
+        };
+        let right = PinholeCamera {
+            center: left.center + rotation.transpose() * Vec3::new(baseline, 0.0, 0.0),
+            ..left
+        };
+        for world in [
+            Vec3::new(3.0, 4.0, 60.0),
+            Vec3::new(-20.0, 7.5, 140.0),
+            Vec3::new(0.5, -9.0, 25.0),
+            Vec3::new(40.0, 30.0, 900.0),
+        ] {
+            let zc = left.camera_coordinates(world).z;
+            assert!(zc > 0.0, "point behind the pair");
+            let (ul, ur) = (left.project(world), right.project(world));
+            let row_tol = 8.0 * f64::EPSILON * (ul[1].abs() + ur[1].abs());
+            assert!(
+                (ul[1] - ur[1]).abs() <= row_tol,
+                "rows {} vs {}",
+                ul[1],
+                ur[1]
+            );
+            let d = ul[0] - ur[0];
+            let depth = depth_from_disparity(d, focal, baseline);
+            let tol = 8.0 * f64::EPSILON * (1.0 + (ul[0].abs() + ur[0].abs()) / d);
+            assert!(
+                (depth / zc - 1.0).abs() <= tol,
+                "depth {depth} vs z_c {zc} (disparity {d})"
+            );
+        }
+    }
+
+    /// (G3) The refinement returns the vertex of the parabola through the three costs around the
+    /// integer winner, exactly as `derivations/stereo_disparity.mac` computes it in rationals and
+    /// `derivations/stereo_disparity.gp` re-derives by interpolating: `33/26`, `283/42` and `163/14`.
+    /// The costs are dyadic, so the only rounding is the closed form's own: a few ulps of the answer.
+    #[test]
+    fn the_subpixel_refinement_is_the_vertex_of_the_interpolating_parabola() {
+        // (integer winner, costs at winner − 1, winner, winner + 1, exact vertex)
+        let rows: [(usize, [f64; 3], f64); 3] = [
+            (1, [1.5, 0.25, 0.625], 33.0 / 26.0),
+            (7, [5.125, 4.5, 6.5], 283.0 / 42.0),
+            (12, [1.0 / 1024.0, 0.0, 3.0 / 512.0], 163.0 / 14.0),
+        ];
+        for (winner, costs, vertex) in rows {
+            // Every other disparity costs more than the three, so the winner is the one intended.
+            let d_max = winner + 2;
+            let mut volume = vec![100.0; d_max];
+            volume[winner - 1..=winner + 1].copy_from_slice(&costs);
+            let got = disparity_wta(&volume, 1, 1, d_max)[0];
+            assert!(
+                (got - vertex).abs() <= 4.0 * f64::EPSILON * vertex,
+                "winner {winner}: {got} vs {vertex}"
+            );
+        }
+    }
+
     // A 3x3 patch of nine distinct brightnesses, chosen so every census bit below is decided by a
     // different neighbour and no two rows or columns are interchangeable.
     const PATCH: [f64; 9] = [1.0, 9.0, 2.0, 8.0, 5.0, 7.0, 3.0, 0.0, 6.0];

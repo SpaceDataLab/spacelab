@@ -1,0 +1,86 @@
+/* The tomographic steering vector, Bartlett and Capon spectra and the l1 proximal step of
+   crates/spacelab-signal/src/tomosar.rs, from their definitions.
+
+   Each line prints `<name>: 0`:
+     1. the steering phase. An antenna displaced by b across the line of sight and a scatterer at
+        elevation s across it, both at range r: R(b, s) = sqrt(r^2 + (s - b)^2). The double
+        difference R(b, s) - R(b, 0) - R(0, s) + R(0, 0), which removes the s^2 and b^2
+        curvature terms every acquisition shares or the deramping takes out, is -b s/r to leading
+        order (G3), so the two-way phase 4 pi R/lambda carries 4 pi b s/(lambda r) = xi s,
+        xi = 4 pi b/(lambda r). The module's model y_n = sum gamma(s) exp(-i xi_n s) fixes the sign;
+        the magnitude is what the geometry decides;
+     2. Bartlett on one unit scatterer at s0 over N uniform baselines b_n = n d: R = a0 a0^H,
+        P(s) = |a^H a0|^2/N and |sum_n exp(i n u)|^2 = sin^2(N u/2)/sin^2(u/2),
+        u = 4 pi d (s - s0)/(lambda r) (G2): N at the scatterer, zero at s - s0 = k lambda r/(2 N d),
+        k = 1 .. N-1 -- the first of them the Rayleigh resolution lambda r/(2 Delta b),
+        Delta b = N d (G3) -- and periodic with the ambiguity height lambda r/(2 d) (G4);
+     3. Capon with diagonal loading on the same scatterer: (delta I + a0 a0^H)^-1
+        = (I - a0 a0^H/(delta + N))/delta (Sherman-Morrison, checked for a symbolic complex 3-vector
+        with N = a0^H a0), so P(s) = 1/(a^H (R + delta I)^-1 a) = delta/(N - |a^H a0|^2/(delta + N))
+        (G2): (delta + N)/N on the scatterer, delta/N on a Rayleigh null;
+     4. the soft threshold is the proximal map of kappa |w|: with w = rho exp(i psi), z = |z| exp(i
+        phi), 1/2 |z - w|^2 + kappa rho = 1/2 (rho^2 - 2 rho |z| cos(psi - phi) + |z|^2) + kappa rho
+        is least at psi = phi and, for |z| > kappa, at the stationary rho = |z| - kappa, where the
+        second derivative is 1 > 0; so prox(z) = z max(1 - kappa/|z|, 0) (G2). FISTA's fixed points
+        are then the LASSO minimisers, whose optimality condition c = A^H (y - A gamma) with
+        |c_j| <= lambda, c_j = lambda gamma_j/|gamma_j| on the support is what
+        `fista_returns_a_point_that_satisfies_the_lasso_optimality_conditions` checks.
+   derivations/tomosar_beamforming.gp re-checks 1-3 numerically at 60 digits.
+
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/tomosar_beamforming.mac </dev/null       */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. Steering phase. Scale b = e B, s = e S and expand in e. */
+assume(r > 0)$
+R(b, s) := sqrt(r^2 + (s - b)^2)$
+dd : R(e*B, e*S) - R(e*B, 0) - R(0, e*S) + R(0, 0)$
+ser : taylor(dd, e, 0, 3)$
+zero("double_difference_leading_term", ratsimp(coeff(ser, e, 2) + B*S/r))$
+zero("double_difference_has_no_cubic_term", ratsimp(coeff(ser, e, 3)))$
+zero("steering_frequency", ratsimp(4*%pi/lam*coeff(ser, e, 2)*e^2 + 4*%pi*(e*B)*(e*S)/(lam*r)))$
+
+/* 2. Bartlett: the Dirichlet kernel, its nulls and its period. */
+declare([u, NN], real)$
+hs(x) := ratsimp(trigreduce(ratsimp(trigsimp(rectform(x)))))$
+zero("bartlett_dirichlet_kernel",
+     hs((exp(%i*NN*u) - 1)*conjugate(exp(%i*NN*u) - 1)/((exp(%i*u) - 1)*conjugate(exp(%i*u) - 1))
+        - sin(NN*u/2)^2/sin(u/2)^2))$
+zero("bartlett_n8_matches_the_sum",
+     hs(sum(exp(%i*n*u), n, 0, 7)*conjugate(sum(exp(%i*n*u), n, 0, 7)) - sin(4*u)^2/sin(u/2)^2))$
+uu(s) := 4*%pi*d*(s - s0)/(lam*r)$
+zero("rayleigh_null_is_lambda_r_over_2_n_d",
+     ratsimp(uu(s0 + lam*r/(2*NN*d))*NN/2 - %pi))$
+zero("ambiguity_height_is_lambda_r_over_2_d", ratsimp(uu(s0 + lam*r/(2*d)) - 2*%pi))$
+declare(k, integer)$
+zero("bartlett_vanishes_at_every_null",
+     ratsimp(trigsimp(sin(NN*uu(s0 + k*lam*r/(2*NN*d))/2))))$
+
+/* 3. Capon / Sherman-Morrison on a symbolic complex 3-vector. */
+declare([x1, x2, x3, y1, y2, y3, dl], real)$
+a0 : matrix([x1 + %i*y1], [x2 + %i*y2], [x3 + %i*y3])$
+herm(v) := transpose(map(conjugate, v))$
+n0 : ratsimp(rectform((herm(a0) . a0)))$
+M : dl*ident(3) + a0 . herm(a0)$
+Minv : (ident(3) - a0 . herm(a0)/(dl + n0))/dl$
+zero("sherman_morrison_inverse",
+     lmax(map(lambda([row], lmax(map(lambda([z], abs(ratsimp(rectform(z)))), row))),
+              args(M . Minv - ident(3)))))$
+/* P(s) = 1/(a^H Minv a) with |a|^2 = N and g = |a^H a0|^2. */
+P(g, N) := 1/((N - g/(dl + N))/dl)$
+zero("capon_on_the_scatterer", ratsimp(P(NN^2, NN) - (dl + NN)/NN))$
+zero("capon_on_a_rayleigh_null", ratsimp(P(0, NN) - dl/NN))$
+
+/* 4. The proximal step. */
+assume(kap > 0, zm > kap)$
+obj : (rho^2 - 2*rho*zm*cos(psi - phi) + zm^2)/2 + kap*rho$
+zero("prox_phase_is_stationary_at_the_phase_of_z", ratsimp(subst(psi = phi, diff(obj, psi))))$
+zero("prox_phase_is_a_minimum", ratsimp(subst(psi = phi, diff(obj, psi, 2)) - rho*zm))$
+zero("prox_radius_is_stationary_at_the_shrunk_modulus",
+     ratsimp(subst([psi = phi, rho = zm - kap], diff(obj, rho))))$
+zero("prox_radius_is_a_minimum", ratsimp(diff(obj, rho, 2) - 1))$
+zero("prox_is_the_soft_threshold", ratsimp((zm - kap) - zm*(1 - kap/zm)))$

@@ -37,6 +37,13 @@
 //! the fit and never a line parameter. That fixture carries, per channel and per gas, one shared
 //! weight vector and one rate vector per surface-pressure node, plus the column `u_max` past which the
 //! channel is opaque and must be refused rather than extrapolated.
+//!
+//! Gate: `derivations/gas_k_distribution.mac` shows the multiplication rule is the product of the
+//! two transmittances, that an air mass multiplies the column, and that the resort's merge keeps
+//! the zeroth and first moments and — Jensen — can only lose transmittance;
+//! `derivations/gas_k_distribution.gp` recomputes its literals and samples the sign. The module test
+//! `the_band_transmittance_is_its_defining_sum` (G2) holds the shipped sums to that file's 40-digit
+//! values.
 
 use alloc::vec::Vec;
 use core::num::NonZeroUsize;
@@ -294,7 +301,13 @@ fn resort(mut terms: Vec<(f64, f64)>, bins: usize) -> Vec<(f64, f64)> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::float_cmp, clippy::unwrap_used, clippy::expect_used)]
+    #![allow(
+        clippy::float_cmp,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::excessive_precision,
+        clippy::unreadable_literal
+    )]
 
     use super::*;
 
@@ -337,7 +350,7 @@ mod tests {
         );
     }
 
-    /// The multiplication rule is exactly the product of the two direct transmittances.
+    /// (G1) The multiplication rule is exactly the product of the two direct transmittances.
     ///
     /// This is what "weights multiply, depths add" *means*, and it is the identity that says the
     /// composition in [`gas_optical_depths`] is arithmetic rather than a model. Asserted at several
@@ -461,6 +474,50 @@ mod tests {
         }
     }
 
+    /// (G2) The band transmittance is its defining exponential sum.
+    ///
+    /// `T(u) = Σ wⱼ exp(−kⱼ u)` at `u = column × air mass`, and the product of two gases the product
+    /// of their sums, against `derivations/gas_k_distribution.mac`'s 40-digit values for the
+    /// four-term stand-in and the two-term oxygen band; `derivations/gas_k_distribution.gp`
+    /// recomputes them. The same file shows the product's mean depth is the sum of the two means,
+    /// `3317/1000` here, which is the first moment the resort is held to.
+    #[test]
+    fn the_band_transmittance_is_its_defining_sum() {
+        let band = KDistribution::new(&BAND, 1.3).unwrap();
+        for (got, want) in [
+            (
+                band.transmittance(1.6),
+                8.007503692183774790270023815564327570129e-1,
+            ),
+            (
+                KDistribution::new(&BAND, 1.0).unwrap().transmittance(1.0),
+                8.515753853937098157215998250902171928408e-1,
+            ),
+        ] {
+            assert!(
+                (got - want).abs() < 4.0 * f64::EPSILON,
+                "{got:e} against {want:e}"
+            );
+        }
+        let water = KDistribution::new(&BAND, 2.0).unwrap();
+        let oxygen = KDistribution::new(&[(0.7, 0.02), (0.3, 5.0)], 0.9).unwrap();
+        let joint = gas_optical_depths(&[water, oxygen]);
+        let (summed, mean): (f64, f64) = joint
+            .iter()
+            .fold((0.0, 0.0), |(t, first), &(weight, depth)| {
+                (t + weight * libm::exp(-depth), first + weight * depth)
+            });
+        let want = 5.55091411363238279191508539011546061539e-1;
+        assert!(
+            (summed - want).abs() < 4.0 * f64::EPSILON,
+            "{summed:e} against {want:e}"
+        );
+        assert!(
+            (mean - 3.317).abs() < 8.0 * f64::EPSILON * 3.317,
+            "mean depth {mean}"
+        );
+    }
+
     /// No absorber is unit transmittance, and no column is too.
     #[test]
     fn a_transparent_channel_and_a_zero_column_both_transmit_everything() {
@@ -474,7 +531,7 @@ mod tests {
         );
     }
 
-    /// Every rejection names its own precondition.
+    /// (G4) The resort keeps the zeroth and first moments and can only lose transmittance.
     ///
     /// A term list that is not a distribution is not a worse fit — it is a channel that gains or
     /// loses photons at zero absorber, which nothing downstream can distinguish from a real band.

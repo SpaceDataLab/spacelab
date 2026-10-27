@@ -18,6 +18,18 @@
 //!   **estimation reconstruction** ([`refit_amplitudes`]) that debiases the amplitudes.
 //!
 //! `R` is the `N×N` sample covariance of the stack ([`sample_covariance`]). `alloc` for the matrices.
+//!
+//! Gate: `derivations/tomosar_beamforming.mac` derives the steering frequency `4πb/(λr)` from the
+//! two-way path difference, Bartlett on one scatterer as a Dirichlet kernel with its nulls at the
+//! Rayleigh resolution `λr/(2Δb)` and its period at `λr/(2d)`, Capon's loaded inverse by
+//! Sherman–Morrison, and the soft threshold as the proximal map of `κ|w|`;
+//! `derivations/tomosar_beamforming.gp` re-checks the first three at 60 digits. The module tests
+//! `the_steering_phase_is_the_two_way_path_difference_to_first_order` (G3),
+//! `the_bartlett_spectrum_is_the_dirichlet_kernel_with_its_rayleigh_nulls` (G2),
+//! `capon_is_its_sherman_morrison_closed_form_off_the_peak_too` (G2),
+//! `soft_thresholding_shrinks_the_magnitude_and_keeps_the_phase` (G2) and
+//! `fista_returns_a_point_that_satisfies_the_lasso_optimality_conditions` (G2) hold the shipped code
+//! to them.
 
 // Physical single letters (b, r, s, a, n) mirror the tomography literature; casts are in range.
 #![allow(
@@ -790,7 +802,8 @@ mod tests {
         }
     }
 
-    /// Soft-thresholding shrinks the magnitude by `κ` and leaves the phase alone.
+    /// (G2) Soft-thresholding shrinks the magnitude by `κ` and leaves the phase alone — the proximal
+    /// map of `κ|w|`, minimised in polar form in `derivations/tomosar_beamforming.mac`.
     ///
     /// Nothing tested the proximal operator directly. State the closed form —
     /// `|S_κ(z)| = max(|z| − κ, 0)`, `arg S_κ(z) = arg z` — which is the operator's definition rather
@@ -816,7 +829,8 @@ mod tests {
         assert_eq!(soft_threshold(Complex::ZERO, 0.0), Complex::ZERO);
     }
 
-    /// FISTA returns a LASSO minimiser, checked against the optimality conditions.
+    /// (G2) FISTA returns a LASSO minimiser, checked against the optimality conditions that define
+    /// one.
     ///
     /// The existing SL1MMER tests ask where the peaks are and that the ℓ₁ magnitudes are biased low;
     /// both hold for any iterate close enough to the answer, so the step size and the momentum
@@ -971,6 +985,125 @@ mod tests {
         for i in 0..2 {
             let want = r[i * 2] * v[0] + r[i * 2 + 1] * v[1];
             assert!((rv[i] - want).abs() < 1e-15, "(Rv)[{i}]");
+        }
+    }
+
+    /// The uniform stack of the two gates below: `N = 8` baselines `b_n = n·d`, `d = 20 m`, at
+    /// `λ = 3.1 cm` and `r = 600 km`, one unit scatterer at `s₀ = 12 m`.
+    const UNIFORM: (usize, f64, f64, f64, f64) = (8, 20.0, 0.031, 600e3, 12.0);
+
+    /// (G2) Bartlett on one scatterer is the Dirichlet kernel, and (G3) it vanishes at every multiple
+    /// of the Rayleigh resolution `λr/(2Δb)`, `Δb = N·d`, repeating at the ambiguity height
+    /// `λr/(2d)`.
+    ///
+    /// `derivations/tomosar_beamforming.mac` reduces `aᴴ(a₀a₀ᴴ)a/aᴴa` over uniform baselines to
+    /// `sin²(Nu/2)/(N sin²(u/2))`, `u = 4πd(s − s₀)/(λr)`, with its nulls at `s − s₀ = kλr/(2Nd)`;
+    /// `derivations/tomosar_beamforming.gp` evaluates the definition at 60 digits against it. The
+    /// first null is the Rayleigh limit the module doc quotes, so a steering frequency off by any
+    /// factor — `2π` for `4π`, `r` for `λr` — moves every null.
+    #[test]
+    fn the_bartlett_spectrum_is_the_dirichlet_kernel_with_its_rayleigh_nulls() {
+        let (n, d, lam, r, s0) = UNIFORM;
+        let baselines: Vec<f64> = (0..n).map(|k| k as f64 * d).collect();
+        let cov = ideal_covariance(&baselines, lam, r, &[s0]);
+        let dirichlet = |s: f64| {
+            let u = 4.0 * core::f64::consts::PI * d * (s - s0) / (lam * r);
+            let den = (u / 2.0).sin();
+            if den.abs() < 1e-12 {
+                n as f64
+            } else {
+                let num = (n as f64 * u / 2.0).sin();
+                num * num / (n as f64 * den * den)
+            }
+        };
+        let grid: Vec<f64> = (0..200).map(|k| -40.0 + 0.53 * f64::from(k)).collect();
+        let spec = bartlett_spectrum(&cov, &baselines, lam, r, &grid);
+        for (s, p) in grid.iter().zip(&spec) {
+            assert!(
+                (p - dirichlet(*s)).abs() < 1e-12 * n as f64,
+                "s {s}: {p} vs {}",
+                dirichlet(*s)
+            );
+        }
+        let rayleigh = lam * r / (2.0 * n as f64 * d);
+        let nulls: Vec<f64> = (1..n).map(|k| s0 + k as f64 * rayleigh).collect();
+        for (k, p) in bartlett_spectrum(&cov, &baselines, lam, r, &nulls)
+            .iter()
+            .enumerate()
+        {
+            assert!(p.abs() < 1e-12 * n as f64, "null {}: {p}", k + 1);
+        }
+        let ambiguity = [s0, s0 + lam * r / (2.0 * d)];
+        for p in bartlett_spectrum(&cov, &baselines, lam, r, &ambiguity) {
+            assert!(
+                (p - n as f64).abs() < 1e-12 * n as f64,
+                "peak {p}, want {n}"
+            );
+        }
+    }
+
+    /// (G2) Capon with diagonal loading on one scatterer is the Sherman–Morrison closed form
+    /// `δ/(N − |aᴴa₀|²/(δ + N))` at every elevation, not only on the scatterer.
+    ///
+    /// `derivations/tomosar_beamforming.mac` inverts `δI + a₀a₀ᴴ` symbolically and
+    /// `derivations/tomosar_beamforming.gp` solves it at 60 digits. On a Rayleigh null, where
+    /// `aᴴa₀ = 0`, the spectrum is `δ/N`: the loading alone, which the pivoting solver must return
+    /// from a matrix whose off-diagonal entries are as large as its diagonal.
+    #[test]
+    fn capon_is_its_sherman_morrison_closed_form_off_the_peak_too() {
+        let (n, d, lam, r, s0) = UNIFORM;
+        let delta = 0.1;
+        let baselines: Vec<f64> = (0..n).map(|k| k as f64 * d).collect();
+        let cov = ideal_covariance(&baselines, lam, r, &[s0]);
+        let a0 = steering_vector(&baselines, lam, r, s0);
+        let mut grid: Vec<f64> = (0..200).map(|k| -40.0 + 0.53 * f64::from(k)).collect();
+        grid.push(s0 + lam * r / (2.0 * n as f64 * d));
+        let spec = capon_spectrum(&cov, &baselines, lam, r, &grid, delta);
+        for (s, p) in grid.iter().zip(&spec) {
+            let g = inner(&steering_vector(&baselines, lam, r, *s), &a0).norm_sqr();
+            let want = delta / (n as f64 - g / (delta + n as f64));
+            assert!((p / want - 1.0).abs() < 1e-10, "s {s}: {p} vs {want}");
+        }
+        let null = spec[spec.len() - 1];
+        assert!(
+            (null / (delta / n as f64) - 1.0).abs() < 1e-10,
+            "null {null}"
+        );
+    }
+
+    /// (G3) The steering phase is the exact two-way path difference to first order.
+    ///
+    /// For an antenna `b` across the line of sight and a scatterer at elevation `s`, the double
+    /// difference `R(b, s) − R(b, 0) − R(0, s) + R(0, 0)` of `R = √(r² + (s − b)²)` is `−bs/r` to
+    /// leading order (`derivations/tomosar_beamforming.mac`), with a remainder of `0.87·(b² + s²)/r²`
+    /// relative (`derivations/tomosar_beamforming.gp`); `4π/λ` times it is the phase the steering
+    /// vector carries, `ξs = 4πbs/(λr)`, entering the model `exp(−jξs)` with the module's sign.
+    #[test]
+    fn the_steering_phase_is_the_two_way_path_difference_to_first_order() {
+        let (lam, r) = (0.031, 600e3);
+        let baselines = [-150.0, 20.0, 75.0, 300.0];
+        for s in [-60.0, 3.0, 17.0, 60.0] {
+            let a = steering_vector(&baselines, lam, r, s);
+            for (b, z) in baselines.iter().zip(&a) {
+                // R(b, s) − R(0, 0) = ((s − b)²)/(R(b, s) + r), without the 600 km cancelling.
+                let excess = |b: f64, s: f64| {
+                    let q = (s - b) * (s - b);
+                    q / ((r * r + q).sqrt() + r)
+                };
+                let dd = excess(*b, s) - excess(*b, 0.0) - excess(0.0, s);
+                let path_phase = 4.0 * core::f64::consts::PI / lam * dd;
+                let rel = (b * b + s * s) / (r * r);
+                // The steering vector is exp(−jξs) and ξs = −(4π/λ)·dd to first order; `arg`
+                // returns it wrapped, so compare modulo 2π.
+                let tau = core::f64::consts::TAU;
+                let gap = z.arg() - path_phase;
+                let gap = gap - tau * (gap / tau).round();
+                assert!(
+                    gap.abs() <= rel * path_phase.abs() + 1e-12,
+                    "b {b}, s {s}: arg a = {}, path phase {path_phase}",
+                    z.arg()
+                );
+            }
         }
     }
 }

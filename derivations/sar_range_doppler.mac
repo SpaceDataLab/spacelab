@@ -1,0 +1,113 @@
+/* The chirp, the matched filter and the Range-Doppler model of crates/spacelab-signal/src/sar.rs,
+   from the point-target echo.
+
+   A point target at closest-approach range R0, seen from a platform at speed V, is at range
+   R(eta) = sqrt(R0^2 + V^2 eta^2); its echo is s(tau, eta) = exp(i pi Kr (tau - 2R(eta)/c)^2)
+   exp(-4 pi i f0 R(eta)/c), f0 = c/lambda -- the conventions of `lfm_chirp` (exp(+i pi K t^2)) and
+   of the azimuth replica exp(-i pi Ka eta^2) in `range_doppler_focus`. Each line prints
+   `<name>: 0`:
+     1. the discrete matched filter. For lfm_chirp's samples c_i = exp(i pi K dt^2 (i - h)^2), the
+        lag-m product c_(i+m) conj(c_i) is exp(i pi K dt^2 (2 m (i - h) + m^2)), geometric in i,
+        so |sum_(i=0)^(N-1-m) c_(i+m) conj(c_i)| = |sin(pi K m dt^2 (N - m))/sin(pi K m dt^2)|
+        exactly (G2) -- the Dirichlet kernel `the_matched_filter_of_a_chirp_is_its_dirichlet_kernel`
+        holds `matched_filter` to;
+     2. for a long chirp this is (N - m) sinc(B t (1 - |t|/T)), B = K T, whose main lobe tends to
+        sinc(B t): the -3 dB width is 2 x0/B with sin(pi x0)/(pi x0) = 1/sqrt 2, 0.88589.../B, and
+        the first sidelobe sits at the root of tan(pi x) = pi x in (1, 3/2), -13.26 dB (G3); both
+        roots at 40 digits below (derivations/sar_range_doppler.gp at 100). The slant-range
+        resolution is c/2 times that width, 0.886 c/(2B);
+     3. the azimuth FM rate: d/deta of the instantaneous Doppler (1/2 pi) d/deta(-4 pi R/lambda) at
+        eta = 0 is -2V^2/(lambda R0) = -Ka (G2);
+     4. the principle of stationary phase on Phi(eta) = -4 pi F R(eta)/c - 2 pi f_eta eta, any
+        carrier F: the stationary point is eta* = -c R0 f_eta/(2 V^2 F D_F), D_F =
+        sqrt(1 - (c f_eta/(2 V F))^2), where R(eta*) = R0/D_F and Phi(eta*) = -4 pi R0 F D_F/c (G2);
+     5. so the range-Doppler range of the target is R0/D, and the range-cell migration
+        R0 (1/D - 1) = lambda^2 R0 f_eta^2/(8 V^2) (1 + (3/4) m^2 + O(m^4)), m = lambda f_eta/(2V):
+        `range_migration` is its leading term (G3);
+     6. with F = f0 + f_tau the 2-D spectrum phase is -4 pi R0 sqrt((f0 + f_tau)^2 - c^2 f_eta^2/
+        (4 V^2))/c - pi f_tau^2/Kr; to second order in f_tau its coefficients are the azimuth phase
+        -4 pi R0 f0 D/c, the delay 2 R0/(c D), and -pi (1/Kr - 1/Ksrc) with
+        Ksrc = 2 V^2 (f0 D)^3/(R0 c f_eta^2) -- the coded `src_fm_rate` (G2) and the
+        1/Km = 1/Kr - R lambda^3 f_eta^2/(2 V^2 c^2 D^3) of csa.rs. After range compression
+        (exp(+i pi f_tau^2/Kr)) the residual is exp(+i pi f_tau^2/Ksrc), which
+        `secondary_range_compression`'s exp(-i pi f_tau^2/Ksrc) removes;
+     7. `apply_chirp_scaling`: K (t - c)^2 + K q (t - t_ref)^2 = K (1 + q) (t - (c + q t_ref)/
+        (1 + q))^2 + K q (c - t_ref)^2/(1 + q) -- the rate K(1 + q) and the new centre its doc
+        claims, with a constant phase and no resampling (G1).
+
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/sar_range_doppler.mac </dev/null         */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. The discrete matched filter. */
+ph(i) := %pi*K*dt^2*(i - h)^2$
+zero("lag_product_phase_is_linear_in_i",
+     ratsimp(ph(i + m) - ph(i) - %pi*K*dt^2*(2*m*(i - h) + m^2)))$
+/* |sum_(i=0)^(L-1) q^i|^2 = |q^L - 1|^2/|q - 1|^2 with q = exp(i th), th = 2 pi K m dt^2, and
+   |exp(i x) - 1|^2 = 2 - 2 cos x = 4 sin^2(x/2). */
+declare([x, th, L], real)$
+hs(e) := ratsimp(trigreduce(ratsimp(trigsimp(rectform(e)))))$
+zero("unit_phasor_chord", hs((exp(%i*x) - 1)*conjugate(exp(%i*x) - 1) - 4*sin(x/2)^2))$
+zero("geometric_sum", ratsimp(sum(q^i, i, 0, 4) - (q^5 - 1)/(q - 1)))$
+zero("dirichlet_kernel_squared",
+     hs((exp(%i*L*th) - 1)*conjugate(exp(%i*L*th) - 1)/((exp(%i*th) - 1)*conjugate(exp(%i*th) - 1))
+        - sin(L*th/2)^2/sin(th/2)^2))$
+
+/* 2. The sinc constants. */
+fpprec : 40$
+x0 : bf_find_root(sin(%pi*x)/(%pi*x) - 1/sqrt(2), x, 0.3b0, 0.6b0)$
+x1 : bf_find_root(tan(%pi*x) - %pi*x, x, 1.2b0, 1.49b0)$
+printf(true, "half-power width x B = 2 x0 = ~a~%", 2*x0)$
+printf(true, "first sidelobe at x = ~a, level ~a dB~%", x1,
+       bfloat(20*log(abs(sin(%pi*x1)/(%pi*x1)))/log(10)))$
+zero("half_power_root_residual_below_1e-38",
+     if abs(bfloat(sin(%pi*x0)/(%pi*x0) - 1/sqrt(2))) < 1b-38 then 0 else x0)$
+zero("sidelobe_root_is_a_turning_point_of_the_sinc",
+     if abs(bfloat(subst(x = x1, diff(sin(%pi*x)/(%pi*x), x)))) < 1b-38 then 0 else x1)$
+
+/* 3. The azimuth FM rate. */
+assume(R0 > 0, V > 0, lam > 0, c > 0, F > 0)$
+R(eta) := sqrt(R0^2 + V^2*eta^2)$
+fdop(eta) := diff(-4*%pi*R(eta)/lam, eta)/(2*%pi)$
+zero("azimuth_fm_rate", ratsimp(subst(eta = 0, diff(fdop(eta), eta)) + 2*V^2/(lam*R0)))$
+
+/* 4. Stationary phase, carrier F. Inside the Doppler band u = c f/(2 V F) lies in (-1, 1); the
+   identities are checked for u in (0, 1) and are odd or even in u, so the sign of f is free.
+   Writing f through u keeps radcan off sqrt(f^2), which it does not take to abs(f). */
+assume(u > 0, u < 1)$
+DF : sqrt(1 - (c*f/(2*V*F))^2)$
+Phi : -4*%pi*F*R(eta)/c - 2*%pi*f*eta$
+eta_star : -c*R0*f/(2*V^2*F*DF)$
+onu(e) := ratsimp(radcan(subst(f = 2*V*F*u/c, e)))$
+zero("stationary_point", onu(subst(eta = eta_star, diff(Phi, eta))))$
+zero("range_at_the_stationary_point", onu(subst(eta = eta_star, R(eta)) - R0/DF))$
+zero("phase_at_the_stationary_point", onu(subst(eta = eta_star, Phi) + 4*%pi*R0*F*DF/c))$
+
+/* 5. Range-cell migration, carrier f0 = c/lam: D = sqrt(1 - mm^2), mm = lam f/(2V). */
+D : sqrt(1 - mm^2)$
+zero("carrier_migration_factor", ratsimp(radcan(subst(F = c/lam, DF) - subst(mm = lam*f/(2*V), D))))$
+rcm : taylor(R0*(1/D - 1), mm, 0, 4)$
+zero("rcm_series", ratsimp(rcm - (R0*mm^2/2)*(1 + 3*mm^2/4)))$
+zero("rcm_leading_term_is_range_migration",
+     ratsimp(subst(mm = lam*f/(2*V), R0*mm^2/2) - lam^2*R0*f^2/(8*V^2)))$
+
+/* 6. The 2-D spectrum to second order in the range frequency ft. */
+theta2d : -4*%pi*R0*sqrt((f0 + ft)^2 - c^2*f^2/(4*V^2))/c - %pi*ft^2/Kr$
+assume(f0 > 0, f0^2 - c^2*f^2/(4*V^2) > 0)$
+D0 : sqrt(1 - (c*f/(2*V*f0))^2)$
+ser : taylor(theta2d, ft, 0, 2)$
+Ksrc : 2*V^2*(f0*D0)^3/(R0*c*f^2)$
+zero("spectrum_order_0_is_the_azimuth_phase", ratsimp(radcan(coeff(ser, ft, 0) + 4*%pi*R0*f0*D0/c)))$
+zero("spectrum_order_1_is_the_migrated_delay", ratsimp(radcan(coeff(ser, ft, 1) + 2*%pi*2*R0/(c*D0))))$
+zero("spectrum_order_2_is_kr_and_src", ratsimp(radcan(coeff(ser, ft, 2) + %pi*(1/Kr - 1/Ksrc))))$
+zero("src_is_the_csa_correction_term",
+     ratsimp(radcan(subst(f0 = c/lam, 1/Ksrc) - R0*lam^3*f^2/(2*V^2*c^2*subst(f0 = c/lam, D0)^3))))$
+
+/* 7. Chirp scaling completes the square. */
+lhs7 : K*(t - c0)^2 + K*q*(t - tr)^2$
+rhs7 : K*(1 + q)*(t - (c0 + q*tr)/(1 + q))^2 + K*q*(c0 - tr)^2/(1 + q)$
+zero("chirp_scaling_completes_the_square", ratsimp(lhs7 - rhs7))$

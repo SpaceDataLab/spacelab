@@ -1,0 +1,64 @@
+/* Dilution of precision -- spacelab-gnss/src/dop.rs -- on exact geometry.
+ *
+ * Each satellite contributes the design row [e, n, u, 1] of its unit line of sight in East/North/Up,
+ * and Q = (G^T G)^-1 gives HDOP = sqrt(Q_EE + Q_NN), VDOP = sqrt Q_UU, PDOP = sqrt(Q_EE + Q_NN + Q_UU),
+ * TDOP = sqrt Q_TT and GDOP = sqrt tr Q. Shown here, each line printing `<name>: 0`:
+ *   1. a sky of six rational unit vectors (Pythagorean quadruples): Q in exact rationals, and the
+ *      five DOPs at 40 digits -- the reference the module gate
+ *      `dop_is_the_root_of_the_cofactor_traces_on_rational_geometry` (G1) asserts, re-computed in
+ *      exact rationals by GAP in derivations/gnss_dop.g;
+ *   2. the regular tetrahedron -- zenith plus three at sin el = -1/3, 120 degrees apart: since
+ *      sum e_i = 0 and sum e_i e_i^T = (4/3) I, Q = diag(3/4, 3/4, 3/4, 1/4) exactly, so
+ *      GDOP = sqrt(10)/2, PDOP = 3/2, HDOP = sqrt(3/2), VDOP = sqrt(3)/2, TDOP = 1/2 -- the module
+ *      gate `the_regular_tetrahedron_has_its_closed_form_dops` (G3);
+ *   3. zenith plus a ring of m at elevation el, m = 3, 4, 6, 8, 12 (the rings whose azimuths Maxima
+ *      writes in radicals), with s = sin el and the azimuth origin a symbolic:
+ *      Q_EE = Q_NN = 2/(m c^2), Q_UU = (1 + m)/D, Q_TT = (1 + m s^2)/D, D = m (1 - s)^2 -- the
+ *      closed form the module's `dop_matches_the_closed_form_for_a_zenith_plus_ring_sky` uses (G3).
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/gnss_dop.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+normal(los) := block([G : apply(matrix, map(lambda([l], [l[1], l[2], l[3], 1]), los))],
+  transpose(G) . G)$
+
+/* 1. Rational geometry. */
+sky : [[0, 0, 1], [2, 2, 1]/3, [-6, 2, 3]/7, [3, -4, 0]/5, [-2, -6, 9]/11, [12, -4, 3]/13]$
+for k : 1 thru length(sky) do
+  zero(sconcat("line_of_sight_", k, "_is_a_unit_vector"), sky[k] . sky[k] - 1)$
+Q : invert(normal(sky))$
+zero("q_is_the_inverse_of_the_normal_matrix", apply("+", map(abs, list_matrix_entries(
+     ratsimp(Q . normal(sky) - ident(4))))))$
+fpprec : 40$
+printf(true, "rational sky: Q_EE = ~a, Q_NN = ~a, Q_UU = ~a, Q_TT = ~a~%", Q[1,1], Q[2,2], Q[3,3], Q[4,4])$
+report(Q) := (
+  printf(true, "  gdop = ~a~%", bfloat(sqrt(Q[1,1] + Q[2,2] + Q[3,3] + Q[4,4]))),
+  printf(true, "  pdop = ~a~%", bfloat(sqrt(Q[1,1] + Q[2,2] + Q[3,3]))),
+  printf(true, "  hdop = ~a~%", bfloat(sqrt(Q[1,1] + Q[2,2]))),
+  printf(true, "  vdop = ~a~%", bfloat(sqrt(Q[3,3]))),
+  printf(true, "  tdop = ~a~%", bfloat(sqrt(Q[4,4]))))$
+report(Q)$
+
+/* 2. The regular tetrahedron. */
+ring_los(m, s, c, az0) := makelist([c*sin(az0 + 2*%pi*k/m), c*cos(az0 + 2*%pi*k/m), s], k, 0, m - 1)$
+tetra : cons([0, 0, 1], ring_los(3, -1/3, 2*sqrt(2)/3, 0))$
+Qt : ratsimp(invert(normal(tetra)))$
+zero("tetrahedron_q_is_diag_3_4_3_4_3_4_1_4",
+     apply("+", map(abs, list_matrix_entries(ratsimp(Qt - diag_matrix(3/4, 3/4, 3/4, 1/4))))))$
+zero("tetrahedron_gdop_squared_is_5_2", Qt[1,1] + Qt[2,2] + Qt[3,3] + Qt[4,4] - 5/2)$
+zero("tetrahedron_pdop_squared_is_9_4", Qt[1,1] + Qt[2,2] + Qt[3,3] - 9/4)$
+zero("tetrahedron_hdop_squared_is_3_2", Qt[1,1] + Qt[2,2] - 3/2)$
+
+/* 3. Zenith plus a ring of m, symbolic in s = sin el, c = sqrt(1 - s^2) and the azimuth origin a. */
+assume(s > -1, s < 1)$
+for m in [3, 4, 6, 8, 12] do block([Qr, D : m*(1 - s)^2, c : sqrt(1 - s^2)],
+  Qr : invert(map(lambda([x], ratsimp(trigsimp(ratsimp(trigexpand(x))))),
+                  normal(cons([0, 0, 1], ring_los(m, s, c, a))))),
+  zero(sconcat("ring_", m, "_q_ee"), ratsimp(Qr[1,1] - 2/(m*c^2))),
+  zero(sconcat("ring_", m, "_q_nn"), ratsimp(Qr[2,2] - 2/(m*c^2))),
+  zero(sconcat("ring_", m, "_q_uu"), ratsimp(Qr[3,3] - (1 + m)/D)),
+  zero(sconcat("ring_", m, "_q_tt"), ratsimp(Qr[4,4] - (1 + m*s^2)/D)))$

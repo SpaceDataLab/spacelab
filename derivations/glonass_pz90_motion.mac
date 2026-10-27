@@ -1,0 +1,74 @@
+/* The GLONASS ICD equations of motion in PZ-90 -- spacelab-gnss/src/glonass.rs -- derived from the
+ * potential and the rotating frame, rather than transcribed.
+ *
+ * The ICD (Edition 5.1, A.3.1.2) integrates, in the Earth-fixed PZ-90 frame rotating at omega about
+ * z, the central term plus the J2 zonal term, the Coriolis and centrifugal terms, and a luni-solar
+ * acceleration held constant over the interval. With the J2 geopotential
+ *     U = mu/r - mu J2 ae^2 (3 z^2 - r^2)/(2 r^5)
+ * the acceleration in the rotating frame is
+ *     dv/dt = grad U - 2 Omega x v - Omega x (Omega x r) + a_ls,   Omega = (0, 0, omega).
+ * The module factors it as a = (3/2) J2 mu ae^2/r^5, c = -mu/r^3 - a (1 - 5 z^2/r^2), and rows
+ *     (c + omega^2) x + 2 omega vy + ax,   (c + omega^2) y - 2 omega vx + ay,   (c - 2a) z + az.
+ * Shown here, each line printing `<name>: 0`:
+ *   1. each of the module's three rows is that derivative (G1), and equals the ICD's own grouping
+ *      with (5 z^2/r^2 - 1) on the x and y rows and (5 z^2/r^2 - 3) on the z row;
+ *   2. the rotating-frame Jacobi integral less the luni-solar work,
+ *          K = |v|^2/2 - omega^2 (x^2 + y^2)/2 - U - a_ls . r,
+ *      has dK/dt = 0 along the module's right-hand side (G4) -- the conserved quantity the gate
+ *      `the_jacobi_integral_less_the_luni_solar_work_is_conserved` integrates;
+ *   3. the PZ-90.02 constants of ICD Table 3.2: J2 = 1082625.75e-9 is the defining value; the
+ *      1082625.7e-9 printed under A.3.1.2 is it truncated to eight digits, and -sqrt(5) C20bar
+ *      with the Table 3.2 note's C20bar = -484165.0e-9 agrees with it to that note's resolution.
+ *
+ * The numeric right-hand side at the module test's state is printed at 60 digits by
+ * tools/gen_glonass_oracle.mac.
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/glonass_pz90_motion.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+assume(r > 0)$
+rr : sqrt(x^2 + y^2 + z^2)$
+U : mu/rr - mu*J2*ae^2*(3*z^2 - rr^2)/(2*rr^5)$
+Om : [0, 0, om]$
+cross(p, q) := [p[2]*q[3] - p[3]*q[2], p[3]*q[1] - p[1]*q[3], p[1]*q[2] - p[2]*q[1]]$
+R : [x, y, z]$ V : [vx, vy, vz]$ ACC : [ax, ay, az]$
+derived : [diff(U, x), diff(U, y), diff(U, z)] - 2*cross(Om, V) - cross(Om, cross(Om, R)) + ACC$
+
+/* The module's factoring, from `deriv`. */
+a_ : (3/2)*J2*mu*ae^2/rr^5$
+c_ : -mu/rr^3 - a_*(1 - 5*z^2/rr^2)$
+coded : [(c_ + om^2)*x + 2*om*vy + ax, (c_ + om^2)*y - 2*om*vx + ay, (c_ - 2*a_)*z + az]$
+/* The ICD's grouping. */
+icd : [-mu*x/rr^3 + a_*x*(5*z^2/rr^2 - 1) + om^2*x + 2*om*vy + ax,
+       -mu*y/rr^3 + a_*y*(5*z^2/rr^2 - 1) + om^2*y - 2*om*vx + ay,
+       -mu*z/rr^3 + a_*z*(5*z^2/rr^2 - 3) + az]$
+for k : 1 thru 3 do (
+  zero(sconcat("row_", ["x", "y", "z"][k], "_is_grad_u_plus_the_rotating_frame_terms"),
+       radcan(coded[k] - derived[k])),
+  zero(sconcat("row_", ["x", "y", "z"][k], "_is_the_icd_grouping"), radcan(coded[k] - icd[k])))$
+
+/* 2. The Jacobi integral less the work of the constant luni-solar acceleration. */
+K : (vx^2 + vy^2 + vz^2)/2 - om^2*(x^2 + y^2)/2 - U - ACC . R$
+dK : diff(K, x)*vx + diff(K, y)*vy + diff(K, z)*vz
+     + diff(K, vx)*coded[1] + diff(K, vy)*coded[2] + diff(K, vz)*coded[3]$
+zero("jacobi_integral_less_luni_solar_work_is_constant", radcan(dK))$
+/* Coriolis does no work, so K is blind to its sign; it is pinned by step 1 alone. */
+zero("coriolis_does_no_work", radcan(V . (-2*cross(Om, V))))$
+
+/* 3. The constants. */
+fpprec : 30$
+J2_table : 108262575/10^11$
+J2_appendix : 10826257/10^10$
+C20bar : -4841650/10^10$
+zero("appendix_j2_is_the_table_value_truncated_to_eight_digits",
+     floor(J2_table*10^10) - J2_appendix*10^10)$
+printf(true, "J2 table - appendix = ~a (~a of J2)~%", J2_table - J2_appendix,
+       bfloat((J2_table - J2_appendix)/J2_table))$
+printf(true, "-sqrt(5) C20bar = ~a, table J2 = ~a~%", bfloat(-sqrt(5)*C20bar), bfloat(J2_table))$
+/* C20bar is printed to 0.1e-9, so -sqrt(5) C20bar is known to sqrt(5) 0.05e-9 = 0.112e-9. */
+zero("c20bar_agrees_with_table_j2_within_its_rounding",
+     if abs(bfloat(-sqrt(5)*C20bar - J2_table)) <= bfloat(sqrt(5)*5/10^11) then 0 else 1)$

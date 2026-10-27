@@ -1,0 +1,132 @@
+/* Frame-camera photogrammetry -- spacelab-earthvision/src/camera.rs -- as identities.
+ *
+ * The camera maps a world point X to x_c = R (X - C) and the pixel
+ *     (u, v) = (f x/z + cx, f y/z + cy),   x_c = (x, y, z).
+ * Poses are perturbed on the left, R <- exp([dw]x) R, C <- C + dC, with exp given by Rodrigues,
+ *     exp([w]x) = I + sin(t) K + (1 - cos(t)) K^2,   t = |w|, K = [w/t]x,
+ * and its first-order form I + [w]x below t = 1e-12. Shown here, each line printing `<name>: 0`:
+ *   1. d_pixel_d_cam is the Jacobian of (u, v) in x_c;
+ *   2. hat(v) w = v x w, and hat(x) w = -hat(w) x, so d/d(dw) of exp([dw]x) x_c at 0 is -[x_c]x --
+ *      with d/dC x_c = -R and d/dX x_c = R the code's pose and point Jacobians (G1);
+ *   3. Rodrigues is the exponential: R(0) = I and dR/dt = K R (the defining ODE), R^T R = I,
+ *      det R = 1 and R k = k, for any unit axis k;
+ *   4. the small-angle branch: exp([e w]x) - (I + e [w]x) = O(e^2) (G3), so below 1e-12 rad the
+ *      first-order form is exact to rounding;
+ *   5. inv3's cofactors: M inv3(M) = I for a generic M;
+ *   6. the DLT rows: (r_k - a r_3).(X - C) = x_k - a z, zero exactly when a = x_k/z, so the stacked
+ *      rows vanish at the true point (G2);
+ *   7. the Tukey weight w(e) = (1 - (e/c)^2)^2 is rho'(e)/e for rho = c^2/6 (1 - (1 - (e/c)^2)^3), the
+ *      biweight loss, and rho' vanishes at e = c (G2);
+ *   8. the Schur step: for [U W; W^T V] [dc; dp] = [-ec; -ep], (U - W V^-1 W^T) dc = -ec + W V^-1 ep
+ *      and dp = V^-1 (-ep - W^T dc), for generic 2x2 blocks (G1);
+ *   9. the reference values the Rust gate reads: R, the pixel and both Jacobians at one camera, at
+ *      40 digits, the Jacobians by differentiating the projection of the exponential itself rather
+ *      than from item 2's closed form. derivations/pinhole_collinearity.gp re-derives them with the
+ *      exponential as a power series.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/pinhole_collinearity.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+/* A matrix residual counts as zero only when every entry is. */
+mres(M) := block([e : flatten(args(ratsimp(M)))], if every(lambda([x], x = 0), e) then 0 else M)$
+
+hat(v) := matrix([0, -v[3], v[2]], [v[3], 0, -v[1]], [-v[2], v[1], 0])$
+cv(v) := transpose(matrix(v))$
+cross(u, v) := [u[2]*v[3] - u[3]*v[2], u[3]*v[1] - u[1]*v[3], u[1]*v[2] - u[2]*v[1]]$
+
+/* 1. */
+pixel : [f*x/z + cx, f*y/z + cy]$
+J : jacobian(pixel, [x, y, z])$
+code_jxc : matrix([f/z, 0, -f*x/z^2], [0, f/z, -f*y/z^2])$
+zero("d_pixel_d_cam_is_the_jacobian", mres(J - code_jxc))$
+
+/* 2. */
+V : [v1, v2, v3]$ W : [w1, w2, w3]$ Xc : [x, y, z]$
+zero("hat_is_the_cross_product", mres(hat(V) . cv(W) - cv(cross(V, W))))$
+zero("hat_anticommutes", mres(hat(Xc) . cv(W) + hat(W) . cv(Xc)))$
+/* exp to second order is enough for a first derivative at 0. */
+E2(w) := ident(3) + hat(w) + hat(w) . hat(w)/2$
+rotated : E2([d1, d2, d3]) . cv(Xc)$
+Jrot : subst([d1 = 0, d2 = 0, d3 = 0], jacobian(flatten(args(rotated)), [d1, d2, d3]))$
+zero("left_perturbation_jacobian_is_minus_hat_xc", mres(Jrot + hat(Xc)))$
+
+/* 3. Unit axis k with kz^2 = 1 - kx^2 - ky^2. */
+K : hat([kx, ky, kz])$
+Rod(t) := ident(3) + sin(t)*K + (1 - cos(t))*K . K$
+unit(e) := ratsimp(ratsubst(1 - kx^2 - ky^2, kz^2, ratexpand(e)))$
+tr(e) := trigsimp(unit(trigsimp(unit(e))))$
+zero("rodrigues_at_zero_is_identity", mres(Rod(0) - ident(3)))$
+zero("rodrigues_solves_the_exponential_ode", mres(tr(diff(Rod(t), t) - K . Rod(t))))$
+zero("rodrigues_is_orthogonal", mres(tr(transpose(Rod(t)) . Rod(t) - ident(3))))$
+zero("rodrigues_has_unit_determinant", tr(determinant(Rod(t)) - 1))$
+zero("rodrigues_fixes_its_axis", mres(tr(Rod(t) . cv([kx, ky, kz]) - cv([kx, ky, kz]))))$
+
+/* 4. With w = e (a, b, c) and t = e |w|: the expansion in e starts at e^2. */
+assume(e > 0)$
+nw : sqrt(a^2 + b^2 + c^2)$
+Kw : hat([a, b, c]/nw)$
+Rsmall : ident(3) + sin(e*nw)*Kw + (1 - cos(e*nw))*Kw . Kw$
+lead : ratsimp(taylor(Rsmall - (ident(3) + e*hat([a, b, c])), e, 0, 1))$
+zero("small_angle_branch_error_is_second_order", mres(lead))$
+
+/* 5. inv3, its cofactors exactly as coded (row-major m[0..8] = m0..m8). */
+m : [m0, m1, m2, m3, m4, m5, m6, m7, m8]$
+c00 : m4*m8 - m5*m7$ c01 : m5*m6 - m3*m8$ c02 : m3*m7 - m4*m6$
+det3 : m0*c00 + m1*c01 + m2*c02$
+inv : matrix([c00, m2*m7 - m1*m8, m1*m5 - m2*m4],
+             [c01, m0*m8 - m2*m6, m2*m3 - m0*m5],
+             [c02, m1*m6 - m0*m7, m0*m4 - m1*m3])/det3$
+M3 : matrix([m0, m1, m2], [m3, m4, m5], [m6, m7, m8])$
+zero("inv3_is_the_inverse", mres(M3 . inv - ident(3)))$
+zero("inv3_determinant_is_the_determinant", ratsimp(det3 - determinant(M3)))$
+
+/* 6. Rows r_1..r_3 of a generic R, the DLT constraint. */
+Rg : genmatrix(lambda([i, j], concat(r, i, j)), 3, 3)$
+Xw : cv([X1, X2, X3])$ Cw : cv([C1, C2, C3])$
+xcg : Rg . (Xw - Cw)$
+for kk : 1 thru 2 do block([a : concat(alpha, kk), rw],
+  rw : row(Rg, kk) - a*row(Rg, 3),
+  zero(sconcat("dlt_row_", kk, "_is_the_collinearity_residual"),
+    ratsimp((rw . (Xw - Cw)) - (xcg[kk, 1] - a*xcg[3, 1]))),
+  zero(sconcat("dlt_row_", kk, "_vanishes_at_the_true_point"),
+    ratsimp(subst(a = xcg[kk, 1]/xcg[3, 1], rw . (Xw - Cw)))))$
+
+/* 7. Tukey. */
+rho(s) := cc^2/6*(1 - (1 - (s/cc)^2)^3)$
+zero("tukey_weight_is_rho_prime_over_e", ratsimp(diff(rho(s), s)/s - (1 - (s/cc)^2)^2))$
+zero("tukey_rho_prime_vanishes_at_the_scale", ratsimp(subst(s = cc, diff(rho(s), s))))$
+
+/* 8. Schur complement on generic 2x2 blocks. */
+g2(s) := genmatrix(lambda([i, j], concat(s, i, j)), 2, 2)$
+U : g2(u)$ Vb : g2(p)$ Wb : g2(w)$
+ec : cv([e1, e2])$ ep : cv([q1, q2])$
+Vi : invert(Vb)$
+dc : invert(U - Wb . Vi . transpose(Wb)) . (-ec + Wb . Vi . ep)$
+dp : Vi . (-ep - transpose(Wb) . dc)$
+zero("schur_camera_rows_solve_the_full_system", mres(U . dc + Wb . dp + ec))$
+zero("schur_point_rows_solve_the_full_system", mres(transpose(Wb) . dc + Vb . dp + ep))$
+
+/* 9. Reference values: w = (0.3125, -0.1875, 0.125), C = (1.5, -2.25, 0.5), f = 1000,
+   (cx, cy) = (320, 240), X = (3.25, 4.5, 60). Dyadic, so these are the doubles the gate passes. */
+fpprec : 40$
+w0 : [5/16, -3/16, 1/8]$
+t0 : sqrt(w0 . w0)$
+K0 : hat(w0/t0)$
+R0 : ident(3) + sin(t0)*K0 + (1 - cos(t0))*K0 . K0$
+C0 : cv([3/2, -9/4, 1/2])$ X0 : cv([13/4, 9/2, 60])$
+f0 : 1000$ cx0 : 320$ cy0 : 240$
+proj(Rm, Cm, Xm) := block([xc : Rm . (Xm - Cm)],
+  [f0*xc[1, 1]/xc[3, 1] + cx0, f0*xc[2, 1]/xc[3, 1] + cy0])$
+/* Pose [dw, dC], point dX: differentiate the projection of exp([dw]x) R0 (X - C - dC). */
+pert : proj(E2([d1, d2, d3]) . R0, C0 + cv([d4, d5, d6]), X0 + cv([d7, d8, d9]))$
+Jall : subst([d1 = 0, d2 = 0, d3 = 0, d4 = 0, d5 = 0, d6 = 0, d7 = 0, d8 = 0, d9 = 0],
+  jacobian(pert, [d1, d2, d3, d4, d5, d6, d7, d8, d9]))$
+pr(label, M) := for i : 1 thru length(M) do
+  printf(true, "~a[~a] = ~{~a~^, ~}~%", label, i - 1, map(lambda([v], bfloat(v)), M[i]))$
+pr("rotation", args(R0))$
+printf(true, "pixel = ~{~a~^, ~}~%", map(lambda([v], bfloat(v)), proj(R0, C0, X0)))$
+pr("pose_jacobian", args(submatrix(Jall, 7, 8, 9)))$
+pr("point_jacobian", args(submatrix(Jall, 1, 2, 3, 4, 5, 6)))$

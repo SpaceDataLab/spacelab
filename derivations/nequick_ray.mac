@@ -1,0 +1,148 @@
+/* The NeQuick slant-ray geometry -- spacelab-ionosphere/src/ray.rs, ICD "Ionospheric Correction
+ * Algorithm for Galileo Single Frequency Users" issue 1.2, Eq. 153 to 187 -- as identities.
+ *
+ * The ICD parameterises the receiver-to-satellite straight line on a spherical Earth by its
+ * distance s from the ray perigee: the foot P of the perpendicular from the Earth's centre, at
+ * radius rp, latitude phip, longitude lamp, with the satellite seen from P at azimuth sigp.
+ * Eq. 178 to 187 map s back to (h, phi, lambda); Eq. 153 to 177 build (rp, phip, lamp, sigp, s1,
+ * s2) from the end points. Each line prints `<name>: 0`:
+ *
+ *   1. (symbolic) P, the local north N and east E at P are orthonormal, and with the direction
+ *      A = cos(sigp) N + sin(sigp) E, Eq. 179 to 181 give r cos(ds) = rp and r sin(ds) = s for
+ *      r = sqrt(s^2 + rp^2): the point of Eq. 178 to 187 is r u(ds), u = cos(ds) P + sin(ds) A,
+ *      i.e. rp P + s A -- a straight line through P along A, at height |rp P + s A| - RE (Eq. 178);
+ *   2. (symbolic) Eq. 182 is the z component of u, and the atan2 pairs of Eq. 185/186 are
+ *      cos(phip) times the (y, x) components of u in the frame where lamp = 0 -- the common
+ *      positive factor does not move atan2, so phi and lambda are u's own;
+ *   3. (symbolic) the zenith angle of Eq. 155, atan2(sin d, cos d - r1/r2), is the angle between
+ *      the receiver's vertical and the line of sight, and rp = r1 sin(zeta) (Eq. 156) is the
+ *      line's distance from the centre;
+ *   4. (numeric, 60 digits) on four geometries -- low latitude, high latitude, across the
+ *      anti-meridian, and the far south looking east -- Eq. 153 to 177 evaluated as printed put
+ *      rp P + s1 A on the receiver and rp P + s2 A on the satellite to 1e-40 of the radius.
+ *
+ * The 40-digit (rp, phip, lamp, sin sigp, cos sigp, s1, s2) printed at the end are the literals in
+ * ray.rs's gate test.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/nequick_ray.mac </dev/null
+ */
+
+ratprint : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+small(name, d, tol) := zero(name, if abs(d) < tol then 0 else d)$
+dot(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+simp(e) := ratsimp(trigsimp(e))$
+
+/* 1. The frame at the perigee, and the point of Eq. 178 to 187. */
+P : [cos(fp)*cos(lp), cos(fp)*sin(lp), sin(fp)]$
+N : [-sin(fp)*cos(lp), -sin(fp)*sin(lp), cos(fp)]$
+E : [-sin(lp), cos(lp), 0]$
+zero("perigee_unit", simp(dot(P, P) - 1))$
+zero("north_unit", simp(dot(N, N) - 1))$
+zero("east_unit", simp(dot(E, E) - 1))$
+zero("perigee_north_orthogonal", simp(dot(P, N)))$
+zero("perigee_east_orthogonal", simp(dot(P, E)))$
+zero("north_east_orthogonal", simp(dot(N, E)))$
+A : cos(sg)*N + sin(sg)*E$
+zero("direction_unit", simp(dot(A, A) - 1))$
+zero("direction_orthogonal_to_perigee", simp(dot(A, P)))$
+
+assume(rp > 0, s >= 0)$
+r : sqrt(s^2 + rp^2)$
+tands : s/rp$                              /* Eq. 179 */
+cosds : 1/sqrt(1 + tands^2)$               /* Eq. 180 */
+sinds : tands*cosds$                       /* Eq. 181 */
+zero("eq_180_r_cos_ds_is_rp", radcan(r*cosds - rp))$
+zero("eq_181_r_sin_ds_is_s", radcan(r*sinds - s))$
+zero("eq_178_height_is_the_line_radius",
+  radcan(sqrt(simp(dot(rp*P + s*A, rp*P + s*A))) - r))$
+
+/* 2. Eq. 182 to 187 against u = cos(ds) P + sin(ds) A, in the frame lamp = 0. */
+u : subst(lp = 0, cos(ds)*P + sin(ds)*A)$
+sinfs : sin(fp)*cos(ds) + cos(fp)*sin(ds)*cos(sg)$          /* Eq. 182 */
+zero("eq_182_is_the_z_component", simp(sinfs - u[3]))$
+y185 : sin(ds)*sin(sg)*cos(fp)$                              /* Eq. 185 */
+x186 : cos(ds) - sin(fp)*sinfs$                              /* Eq. 186 */
+zero("eq_185_is_cos_phip_times_the_y_component", simp(y185 - cos(fp)*u[2]))$
+zero("eq_186_is_cos_phip_times_the_x_component", simp(x186 - cos(fp)*u[1]))$
+zero("u_is_a_unit_vector", simp(dot(u, u) - 1))$
+/* lamp enters only as a rotation about z: the point at lamp is the point at 0 rotated by lamp. */
+ul : cos(ds)*P + sin(ds)*A$
+zero("longitude_is_a_rotation_about_z",
+  block([w : ul - [cos(lp)*u[1] - sin(lp)*u[2], sin(lp)*u[1] + cos(lp)*u[2], u[3]]],
+    simp(dot(w, w))))$
+
+/* 3. The zenith angle and the perigee radius, in the plane of the centre, receiver and satellite:
+ * the receiver at r1 (0, 1), the satellite at r2 (sin d, cos d). */
+assume(r1 > 0, r2 > r1)$
+los : [r2*sin(d), r2*cos(d) - r1]$
+/* atan2(sin d, cos d - r1/r2) = atan2(r2 sin d, r2 cos d - r1): the same angle for r2 > 0, which is
+ * the scaled form ray.rs evaluates. Its cosine against the vertical (0, 1) and its sine: */
+zero("eq_155_zenith_is_the_line_of_sight_angle",
+  ratsimp(los[2]/los[1] - (cos(d) - r1/r2)/sin(d)))$
+/* Squared distance of the line rec + t los from the centre, |rec|^2 - (rec.los)^2/|los|^2, against
+ * (r1 sin zeta)^2 with sin zeta = los_x/|los|. */
+zero("eq_156_rp_is_the_line_distance",
+  trigsimp(ratsimp(r1^2 - (r1*los[2])^2/(los[1]^2 + los[2]^2)
+    - r1^2*los[1]^2/(los[1]^2 + los[2]^2))))$
+
+/* 4. Eq. 153 to 177 as printed, numerically. */
+fpprec : 60$
+RE : 6371200$
+deg(x) := bfloat(x*%pi/180)$
+ray(lat1, lon1, h1, lat2, lon2, h2) := block(
+  [r1, r2, f1, l1, f2, l2, cd, sd, z, rp, ss, cs, dp, sfp, cfp, fp, sl, cl, lp, cpsi, spsi,
+   ssp, csp, s1, s2],
+  r1 : bfloat(RE + h1), r2 : bfloat(RE + h2),
+  f1 : deg(lat1), l1 : deg(lon1), f2 : deg(lat2), l2 : deg(lon2),
+  cd : sin(f1)*sin(f2) + cos(f1)*cos(f2)*cos(l2 - l1),             /* Eq. 153 */
+  sd : sqrt(1 - cd^2),                                              /* Eq. 154 */
+  z : atan2(sd, cd - r1/r2),                                        /* Eq. 155 */
+  rp : r1*sin(z),                                                   /* Eq. 156 */
+  ss : sin(l2 - l1)*cos(f2)/sd,                                     /* Eq. 158 */
+  cs : (sin(f2) - cd*sin(f1))/(sd*cos(f1)),                         /* Eq. 159 */
+  dp : bfloat(%pi/2) - z,                                           /* Eq. 160 */
+  sfp : sin(f1)*cos(dp) - cos(f1)*sin(dp)*cs,                       /* Eq. 161 */
+  cfp : sqrt(1 - sfp^2),                                            /* Eq. 162 */
+  fp : atan2(sfp, cfp),                                             /* Eq. 163 */
+  sl : -ss*sin(dp)/cfp,                                             /* Eq. 165 */
+  cl : (cos(dp) - sin(f1)*sfp)/(cos(f1)*cfp),                       /* Eq. 166 */
+  lp : atan2(sl, cl) + l1,                                          /* Eq. 167 */
+  cpsi : sfp*sin(f2) + cfp*cos(f2)*cos(l2 - lp),                    /* Eq. 169 */
+  spsi : sqrt(1 - cpsi^2),                                          /* Eq. 170 */
+  ssp : cos(f2)*sin(l2 - lp)/spsi,                                  /* Eq. 174 */
+  csp : (sin(f2) - sfp*cpsi)/(cfp*spsi),                            /* Eq. 175 */
+  s1 : sqrt(r1^2 - rp^2),                                           /* Eq. 176 */
+  s2 : sqrt(r2^2 - rp^2),                                           /* Eq. 177 */
+  [rp, fp, lp, ssp, csp, s1, s2, r1, f1, l1, r2, f2, l2])$
+cart(r, f, l) := r*[cos(f)*cos(l), cos(f)*sin(l), sin(f)]$
+norm(v) := sqrt(dot(v, v))$
+check(tag, g) := block([q : apply(ray, g), Pn, Nn, En, An, rec, sat],
+  Pn : [cos(q[2])*cos(q[3]), cos(q[2])*sin(q[3]), sin(q[2])],
+  Nn : [-sin(q[2])*cos(q[3]), -sin(q[2])*sin(q[3]), cos(q[2])],
+  En : [-sin(q[3]), cos(q[3]), 0],
+  An : q[5]*Nn + q[4]*En,
+  rec : q[1]*Pn + q[6]*An,
+  sat : q[1]*Pn + q[7]*An,
+  small(sconcat(tag, "_perigee_and_s1_reach_the_receiver"),
+    norm(rec - cart(q[8], q[9], q[10]))/q[8], 1b-40),
+  small(sconcat(tag, "_perigee_and_s2_reach_the_satellite"),
+    norm(sat - cart(q[11], q[12], q[13]))/q[11], 1b-40),
+  small(sconcat(tag, "_azimuth_is_a_unit_pair"), q[4]^2 + q[5]^2 - 1, 1b-40),
+  q)$
+
+/* (lat, lon, h) in degrees and metres, receiver then satellite. */
+geometries : [
+  ["low_latitude", [-3.0, 40.19, 0, 25.0, 97.5, 20281546.18]],
+  ["high_latitude", [82.49, -62.34, 78.1, 54.45, -118.47, 20370730.85]],
+  ["anti_meridian", [-31.8, -179.99, 12.78, -14.31, 177.43, 20100697.9]],
+  ["far_south_east", [-77.84, 166.67, 98.0, -23.45, -99.29, 20089134.77]]]$
+/* The inputs as the exact values of the doubles the Rust test passes. */
+geometries : map(lambda([g], [g[1], map(rationalize, g[2])]), geometries)$
+fpprintprec : 40$
+for g in geometries do block([q : check(g[1], g[2])],
+  printf(true, "~a: rp ~a  phip ~a  lamp ~a  sin_sigp ~a  cos_sigp ~a  s1 ~a  s2 ~a~%",
+    g[1], q[1], q[2], q[3], q[4], q[5], q[6], q[7]))$

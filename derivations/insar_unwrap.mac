@@ -1,0 +1,108 @@
+/* Coherence, residues and the least-squares unwrap of crates/spacelab-signal/src/insar.rs.
+
+   Each line prints `<name>: 0`:
+     1. coherence gamma = |sum s1 conj(s2)|/sqrt(sum|s1|^2 sum|s2|^2) of s2 = s1 + b n, with
+        unit-modulus s1 and n and the noise orthogonal to the signal over the window
+        (sum s1 conj(n) = 0), is 1/sqrt(1 + |b|^2) (G3); a window of N pixels with
+        n_k = s1_k exp(2 pi i k/N) is such a noise, because the N-th roots of unity sum to zero.
+        For |b| = 3/4 that is exactly 4/5;
+     2. the Goldstein residue of the phase vortex phi = atan2(r - r0, c - c0) around the loop
+        (r,c) -> (r,c+1) -> (r+1,c+1) -> (r+1,c) -> (r,c) that `residues` walks, centred on
+        (r0, c0) = (r + 1/2, c + 1/2): each wrapped step is pi/2, the sum 2 pi, the residue +1 (G3);
+        and on a field sampled finely enough that every step is below pi the loop sum telescopes to
+        zero -- the discrete curl of a gradient (G4);
+     3. the least-squares unwrap is the minimiser of E = sum over grid edges (phi_q - phi_p - g_pq)^2;
+        on a 3 x 4 grid with symbolic phases and wrapped gradients, dE/dphi = -2 (L phi - rho) with
+        L the Neumann five-point Laplacian and rho = (gx_c - gx_(c-1)) + (gy_r - gy_(r-1)), zero
+        gradients past the edge: the discrete Poisson equation `unwrap_phase_2d_lstsq` solves is the
+        normal equation of the fit (G2);
+     4. the DCT-II basis v_n = cos(pi k (2n+1)/(2N)) is an eigenvector of the 1-D Neumann second
+        difference, v_(n+1) - 2 v_n + v_(n-1) = (2 cos(pi k/N) - 2) v_n in the interior and at both
+        mirrored ends (v_(-1) = v_0, v_N = v_(N-1)) for integer k, so on the separable grid the
+        eigenvalue is 2 cos(pi i/M) + 2 cos(pi j/N) - 4 -- the divisor the code uses (G2);
+     5. the coded inverse x_n = (1/N)[F_0 + 2 sum_(k>=1) F_k cos(pi k (2n+1)/(2N))] undoes the coded
+        forward F_k = sum_n x_n cos(pi k (2n+1)/(2N)) for N = 1 .. 8, as a 60-digit matrix product
+        (G1; exact for N = 1, 2, 3, whose cosines Maxima has in closed form).
+   derivations/insar_unwrap.gp re-checks 4 and 5 numerically at 100 digits for N up to 16.
+
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/insar_unwrap.mac </dev/null             */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. Coherence. Pixel k of the window: s1 = exp(i a_k), n = s1 w^k with w = exp(2 pi i/N), so
+   s1 conj(s2) = 1 + conj(b) w^-k and |s2|^2 = 1 + |b|^2 + b w^k + conj(b) w^-k; the window sums
+   then need only W = sum_k w^k and its conjugate, both zero by the geometric series. */
+declare([br, bi], real)$
+b : br + %i*bi$
+nn : 9$
+w : exp(2*%pi*%i/nn)$
+W : (w^nn - 1)/(w - 1)$
+Wc : (w^(-nn) - 1)/(w^(-1) - 1)$
+zero("window_roots_of_unity_sum_to_zero", ratsimp(rectform(W)) + ratsimp(rectform(Wc)))$
+cross : nn + conjugate(b)*Wc$
+p1 : nn$
+p2 : nn*(1 + b*conjugate(b)) + b*W + conjugate(b)*Wc$
+gamma : abs(rectform(cross))/sqrt(rectform(p1*p2))$
+zero("coherence_of_orthogonal_noise", ratsimp(rectform(gamma^2 - 1/(1 + br^2 + bi^2))))$
+zero("coherence_at_three_quarters", ratsimp(subst([br = 3/4, bi = 0], gamma) - 4/5))$
+
+/* 2. Residues. */
+wrap(x) := x - 2*%pi*floor((x + %pi)/(2*%pi))$
+vortex(r, c) := atan2(r - 1/2, c - 1/2)$
+loop : [[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]$
+steps : makelist(wrap(apply(vortex, loop[i + 1]) - apply(vortex, loop[i])), i, 1, 4)$
+zero("vortex_steps_are_quarter_turns", lsum(abs(st - %pi/2), st, steps))$
+zero("vortex_residue_is_plus_one", ratsimp(lsum(st, st, steps)/(2*%pi) - 1))$
+/* A gradient field: the four true steps around any cell telescope. */
+zero("gradient_loop_telescopes",
+     ratsimp((f(r, c + 1) - f(r, c)) + (f(r + 1, c + 1) - f(r, c + 1))
+             + (f(r + 1, c) - f(r + 1, c + 1)) + (f(r, c) - f(r + 1, c))))$
+
+/* 3. Least squares on a 3 x 4 grid. */
+M : 3$ N : 4$
+E : sum(sum((ph[r, c + 1] - ph[r, c] - gx[r, c])^2, c, 0, N - 2), r, 0, M - 1)
+  + sum(sum((ph[r + 1, c] - ph[r, c] - gy[r, c])^2, c, 0, N - 1), r, 0, M - 2)$
+dxf(r, c) := if c + 1 < N then ph[r, c + 1] - ph[r, c] else 0$
+dyf(r, c) := if r + 1 < M then ph[r + 1, c] - ph[r, c] else 0$
+gxf(r, c) := if c >= 0 and c + 1 < N then gx[r, c] else 0$
+gyf(r, c) := if r >= 0 and r + 1 < M then gy[r, c] else 0$
+lap(r, c) := dxf(r, c) - (if c > 0 then dxf(r, c - 1) else 0)
+           + dyf(r, c) - (if r > 0 then dyf(r - 1, c) else 0)$
+rho(r, c) := (gxf(r, c) - gxf(r, c - 1)) + (gyf(r, c) - gyf(r - 1, c))$
+zero("least_squares_normal_equation_is_neumann_poisson",
+     lsum(abs(ratsimp(diff(E, ph[rc[1], rc[2]]) + 2*(lap(rc[1], rc[2]) - rho(rc[1], rc[2])))), rc,
+          create_list([r, c], r, 0, M - 1, c, 0, N - 1)))$
+
+/* 4. DCT-II eigenvectors of the Neumann second difference. */
+declare(k, integer)$
+v(n) := cos(%pi*k*(2*n + 1)/(2*NN))$
+/* v(n +- 1) = cos(x +- t) with x the argument of v(n) and t = pi k/NN, so the second difference
+   is the sum-to-product identity cos(x + t) + cos(x - t) = 2 cos t cos x. */
+zero("dct_neighbour_argument_shift",
+     ratsimp(args(v(n + 1))[1] - args(v(n))[1] - %pi*k/NN)
+     + ratsimp(args(v(n))[1] - args(v(n - 1))[1] - %pi*k/NN))$
+zero("dct_interior_eigen",
+     ratsimp(trigexpand(cos(x + t) - 2*cos(x) + cos(x - t) - (2*cos(t) - 2)*cos(x))))$
+zero("dct_left_mirror", ratsimp(trigsimp(v(-1) - v(0))))$
+/* v(NN) and v(NN - 1) sit at pi k + y and pi k - y, y = pi k/(2 NN), and
+   cos(pi k + y) - cos(pi k - y) = -2 sin(pi k) sin y vanishes for integer k. */
+zero("dct_right_mirror_arguments",
+     ratsimp(args(v(NN))[1] - (%pi*k + %pi*k/(2*NN)))
+     + ratsimp(args(v(NN - 1))[1] - (%pi*k - %pi*k/(2*NN))))$
+zero("dct_right_mirror", ratsimp(trigexpand(cos(%pi*k + y) - cos(%pi*k - y))))$
+
+/* 5. The coded inverse undoes the coded forward. */
+fwd(n) := genmatrix(lambda([kk, j], cos(%pi*(kk - 1)*(2*(j - 1) + 1)/(2*n))), n, n)$
+inv(n) := genmatrix(lambda([j, kk], (if kk = 1 then 1 else 2)*cos(%pi*(kk - 1)*(2*(j - 1) + 1)/(2*n))/n),
+                    n, n)$
+mzero(m) := lmax(map(lambda([row], lmax(map(abs, row))), args(m)))$
+zero("dct_inverse_exact_n1_2_3",
+     lsum(mzero(ratsimp(radcan(inv(n) . fwd(n) - ident(n)))), n, [1, 2, 3]))$
+fpprec : 60$
+worst : lmax(makelist(mzero(bfloat(inv(n) . fwd(n) - ident(n))), n, 1, 8))$
+printf(true, "dct inverse, N = 1 .. 8, 60 digits: worst entry ~a~%", worst)$
+zero("dct_inverse_n1_to_8_below_1e-55", if worst < 1b-55 then 0 else worst)$

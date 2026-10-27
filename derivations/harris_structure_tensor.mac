@@ -1,0 +1,75 @@
+/* The Harris detector and the NCC patch of spacelab-earthvision/src/features.rs, from their
+ * definitions, with the exact reference responses of the gates in its test module.
+ *
+ * The code forms Sobel gradients
+ *     gx = -p(-1,-1) + p(-1,1) - 2 p(0,-1) + 2 p(0,1) - p(1,-1) + p(1,1),   gy likewise in rows,
+ * with a replicated border, sums M = [[Sxx, Sxy], [Sxy, Syy]] over a (2r+1)^2 box window, and reports
+ * R = det M - k tr(M)^2. A patch is centred and scaled to unit length; a match score is a dot product.
+ *
+ * Shown here, every line printing `<name>: 0`:
+ *   1. R = l1 l2 - k (l1 + l2)^2 for the eigenvalues l1, l2 of M -- the response is the Harris
+ *      function of the structure tensor's spectrum (G1);
+ *   2. on a generic 5 x 5 neighbourhood, the window-1 response at its centre is unchanged by a
+ *      quarter turn, a transpose and a mirror of the neighbourhood: the Sobel pair maps into itself
+ *      up to sign and swap, so det and trace survive -- the symmetries of the square (G4);
+ *   3. a zero-mean unit patch is unchanged by an intensity change a I + b with a > 0, so the NCC
+ *      score is too (G4), shown on a generic 4-pixel patch;
+ *   4. the exact responses at k = 1/16, window 1, on the integer pattern
+ *      mod(7y + 13x + 3xy, 19) of 12 x 12, at ten pixels including all four corners, where the
+ *      replicated border is what decides them (G2).
+ * derivations/harris_structure_tensor.gp recomputes 4 from the tensor's eigenvalues.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b \
+ *          derivations/harris_structure_tensor.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. */
+M : matrix([sxx, sxy], [sxy, syy])$
+ev : eigenvalues(M)[1]$
+l1 : ev[1]$  l2 : if length(ev) > 1 then ev[2] else ev[1]$
+zero("response_is_the_harris_function_of_the_spectrum",
+     radcan(expand(l1*l2 - k*(l1 + l2)^2 - (determinant(M) - k*mat_trace(M)^2))))$
+
+/* 2. Neighbourhood n(i, j), rows i and columns j in 0..4, centre (2, 2). */
+gx(f, i, j) := -f(i-1, j-1) + f(i-1, j+1) - 2*f(i, j-1) + 2*f(i, j+1) - f(i+1, j-1) + f(i+1, j+1)$
+gy(f, i, j) := -f(i-1, j-1) - 2*f(i-1, j) - f(i-1, j+1) + f(i+1, j-1) + 2*f(i+1, j) + f(i+1, j+1)$
+response(f) := block([a : 0, b : 0, c : 0],
+  for i : 1 thru 3 do for j : 1 thru 3 do
+    (a : a + gx(f, i, j)^2, b : b + gy(f, i, j)^2, c : c + gx(f, i, j)*gy(f, i, j)),
+  rat(a*b - c^2 - k*(a + b)^2))$
+nb(i, j) := concat(n, i, j)$
+quarter(i, j) := nb(j, 4 - i)$
+transposed(i, j) := nb(j, i)$
+mirrored(i, j) := nb(i, 4 - j)$
+R0 : response(nb)$
+zero("response_survives_a_quarter_turn", ratsimp(response(quarter) - R0))$
+zero("response_survives_a_transpose", ratsimp(response(transposed) - R0))$
+zero("response_survives_a_mirror", ratsimp(response(mirrored) - R0))$
+
+/* 3. */
+assume(alpha > 0)$
+unitpatch(v) := block([m : apply("+", v)/length(v), c], c : v - m, c/sqrt(c . c))$
+u : [u1, u2, u3, u4]$
+diff_ : radcan(unitpatch(alpha*u + beta) - unitpatch(u))$
+zero("unit_patch_ignores_gain_and_offset", lmax(abs(diff_)))$
+
+/* 4. The pattern image with the replicated border. */
+H : 12$  W : 12$
+pat(y, x) := mod(7*y + 13*x + 3*x*y, 19)$
+img(y, x) := pat(max(0, min(H - 1, y)), max(0, min(W - 1, x)))$
+sob(y, x) := [-img(y-1, x-1) + img(y-1, x+1) - 2*img(y, x-1) + 2*img(y, x+1) - img(y+1, x-1)
+               + img(y+1, x+1),
+              -img(y-1, x-1) - 2*img(y-1, x) - img(y-1, x+1) + img(y+1, x-1) + 2*img(y+1, x)
+               + img(y+1, x+1)]$
+/* The gradient image is itself sampled with a replicated border by the window sum. */
+gclamp(y, x) := sob(max(0, min(H - 1, y)), max(0, min(W - 1, x)))$
+harris(y, x, kk) := block([a : 0, b : 0, c : 0, g],
+  for dy : -1 thru 1 do for dx : -1 thru 1 do
+    (g : gclamp(y + dy, x + dx), a : a + g[1]^2, b : b + g[2]^2, c : c + g[1]*g[2]),
+  a*b - c^2 - kk*(a + b)^2)$
+pixels : [[0, 0], [0, 11], [11, 0], [11, 11], [3, 3], [5, 7], [6, 6], [8, 4], [2, 9], [9, 9]]$
+for p in pixels do printf(true, "harris_~a_~a: ~a~%", p[1], p[2], harris(p[1], p[2], 1/16))$

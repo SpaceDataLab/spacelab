@@ -1,0 +1,69 @@
+/* Gaseous band absorption as a k-distribution -- spacelab-earthvision/src/gas.rs -- from its
+ * definitions.
+ *
+ * A channel's transmittance is the exponential sum T(u) = sum_j w_j exp(-k_j u), sum w_j = 1.
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the multiplication rule of `gas_optical_depths` -- weights multiply, depths add -- is the
+ *      product of the two transmittances term for term, on a 4 x 2 product with symbolic weights,
+ *      rates and columns (G1); the product's weights sum to 1 when each factor's do (G4); a window,
+ *      one unit-weight term at zero rate, is the identity of the product (G1);
+ *   2. an air mass multiplies the column: T at column c and air mass a is T at column c a and air
+ *      mass 1 (G1);
+ *   3. the resort's merge of a bin into (sum w, sum w tau / sum w) keeps the zeroth and first moments
+ *      exactly (G4), and Jensen's sign: for two terms the transmittance lost by the merge,
+ *      f(d) = w1 + w2 e^(-d) - W e^(-w2 d/W) (scaled by e^(tau1), d = tau2 - tau1 >= 0, W = w1 + w2),
+ *      has f(0) = 0 and f'(d) = w2 (e^(-w2 d/W) - e^(-d)), which is >= 0 because w2/W <= 1 -- so a
+ *      merge can only transmit less (G4).
+ * The numbers below are the literals of the module test `the_band_transmittance_is_its_defining_sum`
+ * (G2), at 40 digits; derivations/gas_k_distribution.gp recomputes them and samples f >= 0.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/gas_k_distribution.mac </dev/null
+ */
+
+display2d : false$
+ratprint : false$
+fpprec : 40$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* ---- 1 ---- */
+T(ws, ks, c) := sum(ws[j]*exp(-ks[j]*c), j, 1, length(ws))$
+wa : [wa1, wa2, wa3, 1 - wa1 - wa2 - wa3]$ ka : [ka1, ka2, ka3, ka4]$
+wb : [wb1, 1 - wb1]$ kb : [kb1, kb2]$
+product : sum(sum(wa[i]*wb[j]*exp(-(ka[i]*ca + kb[j]*cb)), j, 1, 2), i, 1, 4)$
+zero("product_is_product_of_transmittances", radcan(product - T(wa, ka, ca)*T(wb, kb, cb)))$
+zero("product_weights_sum_to_one", ratsimp(sum(sum(wa[i]*wb[j], j, 1, 2), i, 1, 4) - 1))$
+zero("window_is_the_identity",
+  radcan(sum(wa[i]*1*exp(-(ka[i]*ca + 0*cb)), i, 1, 4) - T(wa, ka, ca)))$
+
+/* ---- 2 ---- */
+zero("air_mass_multiplies_the_column", radcan(T(wa, ka, c*a) - T(wa, ka*a, c)))$
+
+/* ---- 3 ---- */
+bin_w : [w1, w2, w3]$ bin_t : [t1, t2, t3]$
+W : sum(bin_w[i], i, 1, 3)$
+tbar : sum(bin_w[i]*bin_t[i], i, 1, 3)/W$
+zero("merge_keeps_the_weight", ratsimp(W - (w1 + w2 + w3)))$
+zero("merge_keeps_the_mean_depth", ratsimp(W*tbar - (w1*t1 + w2*t2 + w3*t3)))$
+f(d) := w1 + w2*exp(-d) - (w1 + w2)*exp(-w2*d/(w1 + w2))$
+zero("jensen_merge_loss_at_zero", ratsimp(f(0)))$
+zero("jensen_merge_loss_derivative",
+  radcan(diff(f(d), d) - w2*(exp(-w2*d/(w1 + w2)) - exp(-d))))$
+/* f(d) e^(-tau1) is the loss itself: w1 e^(-tau1) + w2 e^(-tau2) - W e^(-tbar). */
+zero("jensen_merge_loss_is_the_lost_transmittance",
+  radcan(f(t2 - t1)*exp(-t1)
+    - (w1*exp(-t1) + w2*exp(-t2) - (w1 + w2)*exp(-(w1*t1 + w2*t2)/(w1 + w2)))))$
+
+/* ---- the module test's literals ---- */
+band_w : [55/100, 30/100, 12/100, 3/100]$ band_k : [4/1000, 9/100, 14/10, 26]$
+print("  BAND at column 13/10, air mass 8/5: T =", bfloat(T(band_w, band_k, 13/10*8/5)))$
+print("  BAND at column 1: T =", bfloat(T(band_w, band_k, 1)))$
+ox_w : [7/10, 3/10]$ ox_k : [2/100, 5]$
+joint : T(band_w, band_k, 2)*T(ox_w, ox_k, 9/10)$
+print("  BAND at column 2 times oxygen at column 9/10: T =", bfloat(joint))$
+first_moment : sum(sum(band_w[i]*ox_w[j]*(band_k[i]*2 + ox_k[j]*9/10), j, 1, 2), i, 1, 4)$
+print("  their product's mean depth =", first_moment, "=", bfloat(first_moment))$
+zero("product_mean_depth_is_the_sum_of_the_means",
+  first_moment - (sum(band_w[i]*band_k[i]*2, i, 1, 4) + sum(ox_w[j]*ox_k[j]*9/10, j, 1, 2)))$

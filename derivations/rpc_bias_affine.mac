@@ -1,0 +1,47 @@
+/* RPC bias compensation by an image-space affine -- spacelab-earthvision/src/rpc_adjust.rs --
+ * as the least-squares problem it solves.
+ *
+ * Grodecki & Dial (2003): row_adj = row + a0 + a1 col + a2 row, col_adj = col + b0 + b1 col + b2 row,
+ * the two axes independent linear models on the design x_i = [1, col_i, row_i] with targets
+ * t_i = measured - projected. fit_axis forms A^T A and A^T t and solves the normal equations; the
+ * Shift model takes the mean target. Shown here on four observations, each line printing `<name>: 0`:
+ *   1. the gradient of S(a) = sum (t_i - x_i . a)^2 is -2 A^T (t - A a), so the stationary point of
+ *      the least-squares cost is exactly the solution of the normal equations A^T A a = A^T t (G2);
+ *   2. S is minimised there: its Hessian 2 A^T A is the Gram matrix, so S(a* + e) - S(a*) = |A e|^2
+ *      >= 0 for every e (G2);
+ *   3. for noiseless targets t = A a_true the normal equations return a_true (G1);
+ *   4. with the design reduced to the single column [1] (the Shift model) the normal equation is
+ *      n a0 = sum t_i: the least-squares offset is the mean (G2).
+ * derivations/rpc_bias_affine.gp solves the Rust gate's six-point system exactly in rationals.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/rpc_bias_affine.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+mres(M) := block([e : flatten(args(ratsimp(M)))], if every(lambda([x], x = 0), e) then 0 else M)$
+
+n : 4$
+A : genmatrix(lambda([i, j], if j = 1 then 1 else if j = 2 then concat(c, i) else concat(r, i)), n, 3)$
+T : genmatrix(lambda([i, j], concat(y, i)), n, 1)$
+a : matrix([a0], [a1], [a2])$
+res : T - A . a$
+S : ratexpand(transpose(res) . res)$
+grad : matrix([diff(S, a0)], [diff(S, a1)], [diff(S, a2)])$
+zero("cost_gradient_is_minus_twice_the_normal_residual", mres(grad + 2*transpose(A) . res))$
+
+astar : invert(transpose(A) . A) . transpose(A) . T$
+e : matrix([e0], [e1], [e2])$
+Sat(x) := block([rr : T - A . x], ratsimp(transpose(rr) . rr))$
+zero("cost_rise_from_the_normal_solution_is_the_squared_image_of_the_step",
+  ratsimp(Sat(astar + e) - Sat(astar) - ratexpand(transpose(A . e) . (A . e))))$
+
+atrue : matrix([p0], [p1], [p2])$
+zero("noiseless_targets_return_the_true_affine",
+  mres(invert(transpose(A) . A) . transpose(A) . (A . atrue) - atrue))$
+
+/* A single-column design: Maxima reduces its 1x1 Gram matrix and right-hand side to scalars. */
+A1 : genmatrix(lambda([i, j], 1), n, 1)$
+zero("shift_normal_equation_is_the_mean",
+  ratsimp((transpose(A1) . T)/(transpose(A1) . A1) - sum(concat(y, i), i, 1, n)/n))$

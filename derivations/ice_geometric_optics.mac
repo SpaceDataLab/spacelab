@@ -1,0 +1,152 @@
+/* Geometric optics of a hexagonal ice prism -- spacelab-earthvision/src/ice.rs -- from its
+ * definitions.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the Fresnel amplitudes `refract` writes in eta = n1/n2 are the two-index forms (r_p with the
+ *      opposite sign convention, which R = (r_s^2 + r_p^2)/2 does not see), its refracted
+ *      vector t = eta d + (eta cos_i - cos_t) n is a unit vector whose tangential part is eta times
+ *      the incident one (Snell), and at normal incidence R = ((n - 1)/(n + 1))^2 (G1, G3);
+ *   2. the internal path's intensity attenuation per unit circumradius, 4 pi k a/lambda, is the
+ *      code's 2 k x (G1);
+ *   3. minimum deviation through a wedge of apex A is at the symmetric path, where
+ *      D = 2 asin(n sin(A/2)) - A: 21.8 deg at A = 60 and 45.7 deg at A = 90 for n = 1.3105 (G3);
+ *   4. Duff's branchless frame is orthonormal and orthogonal to w on both branches (G1);
+ *   5. Cauchy: a convex polyhedron's projected area along u is (1/2) sum A_f |n_f . u|, whose
+ *      orientation mean is S/4; the unit-circumradius prism of half-length h has S = 12 h + 3 sqrt 3,
+ *      and the aperture size parameter is x sqrt(S/(4 pi)) (G3);
+ *   6. J_1: the series' coefficients satisfy the recurrence J_(n-1) = (2n/x) J_n - J_(n+1) the code
+ *      runs downward; the code's Hankel recurrence a_k = a_(k-1) (mu - (2k-1)^2)/(8 k x), split by
+ *      parity with sign (-1)^floor(k/2), is A&S 9.2.9-9.2.10 term for term to k = 8; the
+ *      small-argument cutoff's dropped term x^3/16 (G1);
+ *   7. `reconstruct` keeps every interval's mass under the trapezoid rule, and `moments` is the exact
+ *      zeroth and first moment of the piecewise-linear interpolant (G4, G1);
+ *   8. the combined table `add_diffraction` builds integrates to 1 (G4).
+ * The numbers at the end are the literals, at 40 digits, of the module test
+ * `the_geometric_optics_reproduces_its_derivation` (G2); derivations/ice_geometric_optics.gp
+ * recomputes them with PARI's own besselj.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/ice_geometric_optics.mac </dev/null
+ */
+
+display2d : false$
+ratprint : false$
+fpprec : 40$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* ---- 1 ---- */
+assume(n1 > 0, n2 > 0, ci > 0, ct > 0)$
+eta : n1/n2$
+zero("fresnel_s_is_the_two_index_form",
+  ratsimp((eta*ci - ct)/(eta*ci + ct) - (n1*ci - n2*ct)/(n1*ci + n2*ct)))$
+/* The code's r_p is the two-index one with the opposite sign convention; only r_p^2 enters R. */
+zero("fresnel_p_is_the_two_index_form_up_to_sign",
+  ratsimp((ci - eta*ct)/(ci + eta*ct) + (n1*ct - n2*ci)/(n1*ct + n2*ci)))$
+/* Incidence in the x-z plane on the face z = 0 with n = (0, 0, 1) facing the ray: d = (si, 0, -ci). */
+d : [si, 0, -ci]$
+nrm : [0, 0, 1]$
+cost : sqrt(1 - e^2*si^2)$
+t : e*d + (e*ci - cost)*nrm$
+unit_incidence(x) := ratsimp(subst(si^2 = 1 - ci^2, expand(x)))$
+zero("refracted_vector_is_unit", unit_incidence(ratsubst(1 - ci^2, si^2, expand(t . t)) - 1))$
+zero("refracted_vector_obeys_snell", ratsimp(t[1] - e*d[1]) + ratsimp(t[2] - e*d[2]))$
+zero("refracted_vector_points_through", ratsimp(t[3] + cost))$
+rs0 : subst([ci = 1, ct = 1], (e*ci - ct)/(e*ci + ct))$
+rp0 : subst([ci = 1, ct = 1], (ci - e*ct)/(ci + e*ct))$
+zero("normal_incidence_reflectance",
+  ratsimp(subst(e = 1/nn, (rs0^2 + rp0^2)/2) - ((nn - 1)/(nn + 1))^2))$
+
+/* ---- 2 ---- */
+zero("absorption_per_circumradius",
+  ratsimp(subst(lam = 2*%pi*a/x, 4*%pi*k*a/lam) - 2*k*x))$
+
+/* ---- 3 ---- D(i) = i + asin(n sin(A - asin(sin(i)/n))) - A; symmetric path r = A/2. */
+dev(i, n, A) := i + asin(n*sin(A - asin(sin(i)/n))) - A$
+assume(nr > 1, apex > 0, apex < %pi/2)$
+i0 : asin(nr*sin(apex/2))$
+zero("symmetric_path_is_stationary",
+  ratsimp(trigsimp(subst(i = i0, diff(dev(i, nr, apex), i)))))$
+zero("minimum_deviation_value", ratsimp(trigsimp(dev(i0, nr, apex) - (2*i0 - apex))))$
+md(A) := bfloat((2*asin(13105/10000*sin(A/2)) - A)*180/%pi)$
+print("  minimum deviation at A = 60 and 90 deg, n = 1.3105:", md(%pi/3), md(%pi/2))$
+/* And it is a minimum: D is larger either side of i0 at the 22-degree halo's wedge. */
+d60(i) := bfloat(dev(i, 13105/10000, %pi/3))$
+i60 : bfloat(asin(13105/10000*sin(%pi/6)))$
+zero("the_stationary_point_is_a_minimum",
+  if d60(i60 - 1/100) > d60(i60) and d60(i60 + 1/100) > d60(i60) then 0 else 1)$
+
+/* ---- 4 ---- w = (w0, w1, w2) with w0^2 + w1^2 = 1 - w2^2, on each sign branch. */
+frame(w0, w1, w2, sg) := block([a : -1/(sg + w2), b],
+  b : w0*w1*a,
+  [[1 + sg*w0^2*a, sg*b, -sg*w0], [b, sg + w1^2*a, -w1]])$
+on_sphere(x) := ratsimp(ratsubst(1 - w1^2 - w2^2, w0^2, ratsimp(x)))$
+for sg in [1, -1] do block([f : frame(w0, w1, w2, sg), w : [w0, w1, w2]],
+  zero(printf(false, "duff_frame_orthonormal_sign_~a", sg),
+    on_sphere(f[1] . f[1] - 1)^2 + on_sphere(f[2] . f[2] - 1)^2 + on_sphere(f[1] . f[2])^2
+      + on_sphere(f[1] . w)^2 + on_sphere(f[2] . w)^2))$
+
+/* ---- 5 ---- */
+assume(hl > 0)$
+zero("mean_of_abs_cosine_over_the_sphere",
+  integrate(integrate(abs(cos(th))*sin(th), th, 0, %pi), ph, 0, 2*%pi)/(4*%pi) - 1/2)$
+hexagon_area : 6*(sqrt(3)/4)$
+surface : 6*1*(2*hl) + 2*hexagon_area$
+zero("prism_surface", ratsimp(surface - (12*hl + 3*sqrt(3))))$
+xeq(x, h) := x*sqrt(subst(hl = h, surface)/4/%pi)$
+
+/* ---- 6 ---- J_n = sum c(n, k) x^(n + 2k), c(n, k) = (-1)^k/(2^(n + 2k) k! (n + k)!). */
+c(n, k) := (-1)^k/(2^(n + 2*k)*k!*(n + k)!)$
+/* x^(n - 1 + 2k): from J_(n-1) the k-th term, from (2n/x) J_n the k-th, from J_(n+1) the (k-1)-th. */
+zero("series_obeys_the_three_term_recurrence",
+  ratsimp(minfactorial(makefact(c(n - 1, k) - (2*n*c(n, k) - c(n + 1, k - 1))))))$
+zero("small_argument_dropped_term", c(1, 0) - 1/2 + (c(1, 1) + 1/16))$
+mu : 4$
+coded : block([term : 1, p : 1, q : 0, sgn],
+  for k : 1 thru 8 do (
+    term : term*(mu - (2*k - 1)^2)/(8*k*z),
+    sgn : if mod(floor(k/2), 2) = 0 then term else -term,
+    if mod(k, 2) = 0 then p : p + sgn else q : q + sgn),
+  [p, q])$
+hankel_p : 1 + sum((-1)^j*prod(mu - (2*i - 1)^2, i, 1, 2*j)/((2*j)!*(8*z)^(2*j)), j, 1, 4)$
+hankel_q : sum((-1)^j*prod(mu - (2*i - 1)^2, i, 1, 2*j + 1)/((2*j + 1)!*(8*z)^(2*j + 1)), j, 0, 3)$
+zero("hankel_p_is_abramowitz_stegun_9_2_9", ratsimp(coded[1] - hankel_p))$
+zero("hankel_q_is_abramowitz_stegun_9_2_10", ratsimp(coded[2] - hankel_q))$
+
+/* ---- 7 ---- six nodes, general spacings. */
+h : makelist(concat(hh, i), i, 1, 5)$
+iv : makelist(concat(ii, i), i, 1, 5)$
+node : append([iv[1]],
+  makelist((iv[i - 1]*h[i - 1] + iv[i]*h[i])/(h[i - 1] + h[i]), i, 2, 5), [iv[5]])$
+trapezoid : append([h[1]/2], makelist((h[i - 1] + h[i])/2, i, 2, 5), [h[5]/2])$
+zero("reconstruct_keeps_the_interval_masses",
+  ratsimp(sum(node[i]*trapezoid[i], i, 1, 6) - sum(iv[i]*h[i], i, 1, 5)))$
+lin(m) := pa + (pb - pa)*(m - ma)/(mb - ma)$
+zero("moments_zeroth_is_exact",
+  ratsimp(integrate(lin(m), m, ma, mb) - (mb - ma)*(pa + pb)/2))$
+zero("moments_first_is_exact",
+  ratsimp(integrate(m*lin(m), m, ma, mb) - (mb - ma)*(pa*(2*ma + mb) + pb*(ma + 2*mb))/6))$
+
+/* ---- 8 ---- */
+zero("combined_table_integrates_to_one",
+  ratsimp(((lobe_int/lobe_int) + om*(ray_int/ray_int))/(1 + om) - 1))$
+
+/* ---- the module test's literals ---- */
+/* J_1 by its series in bigfloat, at a working precision that carries the series' largest term
+ * (about e^x/(pi x)) with 40 digits to spare. */
+j1(x) := block([fpprec : 60 + ceiling(bfloat(x)/log(10.0)), s : 0, term, k : 0, xb],
+  xb : bfloat(x),
+  term : xb/2,
+  while abs(term) > 10^(-fpprec) * max(1, abs(s)) or k < 3 do (
+    s : s + term,
+    k : k + 1,
+    term : -term*(xb/2)^2/(k*(k + 1))),
+  s)$
+args : [1/1000000, 25/1000000, 1/2, 1, 2, 5, 8, 10, 20, 50, 100, 400, 1000]$
+for x in args do print("  J1(", x, ") =", bfloat(j1(x)))$
+fpprec : 60$
+zero_j11 : bf_find_root(lambda([v], j1(v)), 38b-1, 39b-1)$
+fpprec : 40$
+print("  first zero of J1:", bfloat(zero_j11))$
+print("  aperture size parameter at x = 200, half-length 2:", bfloat(xeq(200, 2)))$

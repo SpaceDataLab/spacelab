@@ -7901,8 +7901,21 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 333 modules, 201 name a check, 132 do not** — 44 physics,
-28 parsers, 6 generated and 54 infrastructure. Ф17.B batch 3 (2026-10-27) took out 35 estimation,
+(`plans/16` Ф17.B orders them). **Today: 333 modules, 243 name a check, 90 do not** — no physics
+module, 28 parsers, 6 generated and 56 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
+the last 42 — GNSS, SLR, the NeQuick ionosphere, earthvision, signal, vision, sensors and
+astrometry (`earthvision/sfm.rs` and `cloud.rs` hold no formula of their own and moved to
+infrastructure) — and fixed what the gates found: the GLONASS `J2` was the ICD's 8-digit
+truncation, not Table 3.2's PZ-90.02 value (3e-12 m/s²); NeQuick-ITU floored the E layer at 0.05
+under an F1 layer and not at all without one, where P.531 floors at 0.005 in both (up to 2.57 TECU,
+1.0 %), and started the integration below the receiver's zero height (0.118 TECU); the CSA azimuth
+filter used the reference range in every bin, so a target 40 m off it kept 18 rad of quadratic
+phase (−3 dB width 33.8 cells against 1.4); `mie::coefficients` ran the recessive upward
+recurrence past n = x (the asymmetry of a 1e-4 sphere a factor 29 off); and `MAD_TO_SIGMA` and
+the 6S Gauss nodes were stored one to three ulps from their correctly rounded doubles. Doc figures
+corrected: the narrow-lane noise factor (0.7125, not ½), the L1−L2 slip sizes, the LAGEOS Shapiro
+delay (9.52 mm one way, not 7), the GPS relativistic amplitude literal, and the ice-halo minimum
+deviations. Ф17.B batch 3 (2026-10-27) took out 35 estimation,
 geometry, geomagnetism, control and Earth-rotation modules (`estimation/ephemeris.rs` reads a state
 slot and moved to infrastructure) and fixed what the gates found: the IMM bank went NaN with every
 `step` returning `Ok` once a model with no inflow underflowed to probability 0 (0/0 mixing weights);
@@ -7963,10 +7976,6 @@ a provenance strengthening.
 crates/spacelab/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-astro/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-astrometry/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-astrometry/src/quads.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-astrometry/src/reduce.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-astrometry/src/sources.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-astrometry/src/wcs.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-autodiff/src/dual.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-autodiff/src/hyperdual.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-autodiff/src/scalar.rs | infra | types, traits, drivers or re-exports; nothing to derive
@@ -7983,26 +7992,9 @@ crates/spacelab-coverage/src/detectors.rs | infra | types, traits, drivers or re
 crates/spacelab-coverage/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-coverage/src/parallel.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-earth/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-earthvision/src/atmospheric_correction.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/camera.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/cloud.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/features.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/gas.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/geometry.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/ice.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/image_quality.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/cloud.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-earthvision/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-earthvision/src/mie.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/mvs.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/ortho.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/pansharpen.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/phase.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/radiative_transfer.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/rpc.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/rpc_adjust.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/sfm.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/stereo.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-earthvision/src/swath.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-earthvision/src/sfm.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-elements/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-eop/src/c04.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-eop/src/finals.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
@@ -8021,11 +8013,6 @@ crates/spacelab-frames/src/lib.rs | infra | types, traits, drivers or re-exports
 crates/spacelab-geomagnetism/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-geometry/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-gnss/src/almanac.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
-crates/spacelab-gnss/src/combinations.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-gnss/src/cycle_slip.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-gnss/src/dop.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-gnss/src/glonass.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-gnss/src/gps.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-gnss/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-gnss/src/ntrip.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-gnss/src/rinex.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
@@ -8037,14 +8024,10 @@ crates/spacelab-gnss/src/vmf_grid.rs | parser | format reader/writer; conformanc
 crates/spacelab-grid/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-grid/src/output.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-ionosphere/src/ccir.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
-crates/spacelab-ionosphere/src/fourier.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-ionosphere/src/galileo.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-ionosphere/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-ionosphere/src/math.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-ionosphere/src/model.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-ionosphere/src/modip.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
-crates/spacelab-ionosphere/src/parameters.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-ionosphere/src/ray.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-ionosphere/src/types.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-ndm/src/cdm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-ndm/src/kvn.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
@@ -8063,29 +8046,18 @@ crates/spacelab-propagation/src/sdtm/coefficients.rs | generated | fitted by too
 crates/spacelab-propagation/src/space_weather.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/tolerance.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/wind_data.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
-crates/spacelab-sensors/src/geoloc.rs | physics | names only a comparator test (C), no G1-G5 test
 crates/spacelab-sensors/src/grid.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-sgp4/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-sgp4/src/omm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-sgp4/src/satellite.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-sgp4/src/tle.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
-crates/spacelab-signal/src/csa.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-signal/src/fft.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-signal/src/insar.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-signal/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-signal/src/polsar.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-signal/src/psinsar.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-signal/src/radon.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-signal/src/sar.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-signal/src/tomosar.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-slr/src/blq.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-slr/src/crd.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-slr/src/dhf.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-slr/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-slr/src/range.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-slr/src/sinex.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-testkit/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-vision/src/detect.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-vision/src/graph.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-vision/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-vision/src/model.rs | infra | types, traits, drivers or re-exports; nothing to derive

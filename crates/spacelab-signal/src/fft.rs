@@ -1,5 +1,13 @@
 //! Complex arithmetic and a radix-2 Cooley–Tukey FFT — the spectral backbone of SAR focusing,
 //! interferometry and tomography. `alloc` for scratch; power-of-two lengths only (callers zero-pad).
+//!
+//! Gate: `derivations/fft_radix2.mac` shows on `N = 8`, in closed radicals, that the butterflies are
+//! the Danielson–Lanczos split of the DFT `X_k = Σ x_n e^{−2πink/N}`, that `conj(F)·F = N·I` and
+//! Parseval hold, and that the swap loop is the bit-reversal order; `derivations/fft_radix2.gp`
+//! re-checks the split, the inverse and Parseval in exact `Q(ζ_N)` arithmetic for `N = 4 … 64` and
+//! computes the reference transform. The module tests
+//! `the_fft_is_the_dft_of_an_exact_gaussian_integer_input` (G2), `ifft_inverts_fft` (G1) and
+//! `the_fft_keeps_parseval_s_energy` (G4) hold the shipped code to them.
 
 // The butterfly's single-char names (a, u, v, w, i, j, k) are the standard FFT notation; `n as f64` is
 // in range for any realistic transform size.
@@ -151,7 +159,11 @@ fn transform(a: &mut [Complex], inverse: bool) {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unreadable_literal, clippy::float_cmp)]
+    #![allow(
+        clippy::unreadable_literal,
+        clippy::float_cmp,
+        clippy::excessive_precision
+    )]
     use super::*;
 
     fn close(a: Complex, b: Complex, tol: f64) -> bool {
@@ -178,6 +190,8 @@ mod tests {
         }
     }
 
+    /// (G1) `ifft` undoes `fft`: `conj(F)·F = N·I` (`derivations/fft_radix2.mac`, exact in
+    /// `Q(ζ_N)` in `derivations/fft_radix2.gp`), so the `1/N` belongs on the inverse alone.
     #[test]
     fn ifft_inverts_fft() {
         let orig: Vec<Complex> = (0..16)
@@ -193,6 +207,79 @@ mod tests {
         ifft(&mut x);
         for (a, b) in x.iter().zip(&orig) {
             assert!(close(*a, *b, 1e-12), "round-trip {a:?} vs {b:?}");
+        }
+    }
+
+    /// The input of the gate below: `x_n = ((n mod 5) − 2) + i((3n mod 7) − 3)`, Gaussian
+    /// integers, so every reference value is an exact element of `Q(ζ₁₆)`.
+    fn gaussian_integer_input() -> Vec<Complex> {
+        (0..16)
+            .map(|n: i32| Complex::new(f64::from(n % 5 - 2), f64::from((3 * n) % 7 - 3)))
+            .collect()
+    }
+
+    /// (G2) The shipped radix-2 transform is the DFT `X_k = Σ x_n e^{−2πink/16}` of an exact input.
+    ///
+    /// The references are the definition summed in exact cyclotomic arithmetic by
+    /// `derivations/fft_radix2.gp` and in 40-digit bigfloats by `derivations/fft_radix2.mac`, which
+    /// agree to 1e-39. Sixteen points take the butterflies through four stages, so the twiddle
+    /// recurrence `w ← w·w_len` runs up to `w⁷` — the numpy fixture above, at eight real points,
+    /// never transforms a complex input.
+    #[test]
+    fn the_fft_is_the_dft_of_an_exact_gaussian_integer_input() {
+        const DFT: [(f64, f64); 16] = [
+            (-2.0, -3.0),
+            (-0.3529701345641262719275, -2.986330253937075947743),
+            (6.656854249492380195207, -2.828427124746190097603),
+            (-14.65867108169942197248, 0.2483028813327445088006),
+            (6.0, -5.0),
+            (-4.906749931920417084326, -5.165910681040350540001),
+            (-1.343145750507619804793, -8.828427124746190097603),
+            (-14.25471763208691681834, -0.4005438163101709965442),
+            (2.0, -3.0),
+            (20.73774644541436190635, -5.599456183689829003456),
+            (-4.656854249492380195207, 2.828427124746190097603),
+            (4.901311768818707118884, -0.8340893189596494599989),
+            (-2.0, -1.0),
+            (-11.47802637892981855010, -6.248302881332744508801),
+            (-12.65685424949238019521, -3.171572875253809902397),
+            (-3.987923055032368328061, -3.013669746062924052257),
+        ];
+        let mut x = gaussian_integer_input();
+        let scale: f64 = x.iter().map(|z| z.abs()).sum();
+        fft(&mut x);
+        let mut worst = 0.0_f64;
+        for (k, (got, &(re, im))) in x.iter().zip(&DFT).enumerate() {
+            let d = (*got - Complex::new(re, im)).abs();
+            // log2(16) butterfly stages, each rounding relative to the input's L1 norm.
+            assert!(
+                d <= 16.0 * f64::EPSILON * scale,
+                "X[{k}] = {got:?}, want ({re}, {im}): off by {d:e}"
+            );
+            worst = worst.max(d);
+        }
+        println!("fft vs exact DFT: worst {worst:.3e} against an L1 norm of {scale}");
+    }
+
+    /// (G4) Parseval, `Σ|X_k|² = N·Σ|x_n|²` (`derivations/fft_radix2.mac` for a symbolic input,
+    /// exact in `Q(ζ_N)` up to `N = 64` in `derivations/fft_radix2.gp`), for the shipped transform.
+    #[test]
+    fn the_fft_keeps_parseval_s_energy() {
+        for len in [2usize, 4, 16, 64, 256] {
+            let x: Vec<Complex> = (0..len)
+                .map(|n| {
+                    let t = n as f64;
+                    Complex::new(libm::sin(0.7 * t) + 0.25, libm::cos(1.3 * t * t))
+                })
+                .collect();
+            let before: f64 = x.iter().map(|z| z.norm_sqr()).sum();
+            let mut y = x.clone();
+            fft(&mut y);
+            let after: f64 = y.iter().map(|z| z.norm_sqr()).sum::<f64>() / len as f64;
+            assert!(
+                (after / before - 1.0).abs() < 1e-14,
+                "N = {len}: sum |x|^2 = {before}, sum |X|^2 / N = {after}"
+            );
         }
     }
 }

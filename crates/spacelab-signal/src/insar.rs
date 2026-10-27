@@ -16,6 +16,17 @@
 //! by the discrete cosine transform. [`unwrap_phase_2d_branch_cut`] is the other classic residue-aware
 //! unwrapper — Goldstein's: join opposite residues with branch cuts, then flood-fill the phase without
 //! crossing one, so no integration path can loop a residue. `alloc` for the output buffers.
+//!
+//! Gate: `derivations/insar_unwrap.mac` derives the coherence of a signal in orthogonal noise
+//! (`1/√(1 + |b|²)`), the `+1` residue of a phase vortex around the loop [`residues`] walks and the
+//! zero loop sum of any gradient field, that the Neumann Poisson equation is the normal equation of
+//! the least-squares fit, that the DCT-II basis diagonalises the Neumann Laplacian with the divisor
+//! the code uses, and that the coded inverse DCT undoes the forward one;
+//! `derivations/insar_unwrap.gp` re-checks the last two and the vortex at 100 digits. The module
+//! tests `the_coherence_of_a_signal_in_orthogonal_noise_is_its_closed_form` (G3),
+//! `residues_vanish_on_a_smooth_field_and_ring_a_singularity` (G3),
+//! `lstsq_solves_the_discrete_poisson_equation` (G2) and
+//! `the_inverse_dct_undoes_the_forward_one_at_every_length` (G1) hold the shipped code to them.
 
 // Grid indices cast usize↔isize/f64 in range; short names (r, c) are the standard raster notation.
 #![allow(
@@ -433,6 +444,33 @@ mod tests {
         }
     }
 
+    /// (G3) The coherence of a signal in noise orthogonal to it over the window is `1/√(1 + |b|²)`.
+    ///
+    /// `s₂ = s₁ + b·n` with unit-modulus `s₁` and `n = s₁·e^{2πik/9}` over the nine pixels of a 3 × 3
+    /// window: the ninth roots of unity sum to zero, so `Σ s₁ n̄ = 0` and
+    /// `derivations/insar_unwrap.mac` gives `γ = 1/√(1 + |b|²)` exactly — `4/5` for `|b| = 3/4`,
+    /// whatever the phase of `b` or of `s₁`. Only the centre pixel of a 3 × 3 image has its whole
+    /// window inside, so it alone carries the closed form.
+    #[test]
+    fn the_coherence_of_a_signal_in_orthogonal_noise_is_its_closed_form() {
+        let s1: Vec<Complex> = (0..9).map(|k| unit(0.7 * f64::from(k * k) - 1.1)).collect();
+        for b in [
+            Complex::from_polar(0.75, 0.0),
+            Complex::from_polar(0.75, 2.3),
+        ] {
+            let s2: Vec<Complex> = s1
+                .iter()
+                .enumerate()
+                .map(|(k, &z)| {
+                    let n = z * unit(core::f64::consts::TAU * k as f64 / 9.0);
+                    z + b * n
+                })
+                .collect();
+            let gamma = coherence(&s1, &s2, 3, 3, 1)[4];
+            assert!((gamma - 0.8).abs() < 1e-15, "b = {b:?}: coherence {gamma}");
+        }
+    }
+
     #[test]
     fn coherence_is_one_for_identical_and_low_for_random() {
         let mut seed = 1u64;
@@ -723,6 +761,21 @@ mod tests {
         }
     }
 
+    /// (G1) The coded DCT-III undoes the coded DCT-II at every length up to 16, the identity
+    /// `derivations/insar_unwrap.mac` proves for `N ≤ 3` in closed form and checks to 60 digits for
+    /// `N ≤ 8` (the `.gp` to 100 digits for `N ≤ 16`). Odd and even lengths both, since the cosines
+    /// of an odd `N` include `cos(π/2)`.
+    #[test]
+    fn the_inverse_dct_undoes_the_forward_one_at_every_length() {
+        for n in 1..=16u32 {
+            let x: Vec<f64> = (0..n).map(|k| (f64::from(k) * 0.91).cos() - 0.3).collect();
+            let rt = dct1_inverse(&dct1_forward(&x));
+            for (k, (a, b)) in rt.iter().zip(&x).enumerate() {
+                assert!((a - b).abs() < 1e-14, "N = {n}, sample {k}: {a} vs {b}");
+            }
+        }
+    }
+
     #[test]
     fn dct_matches_scipy_and_round_trips() {
         // dct1_forward = scipy.fft.dct(x, type=2)/2 (our forward drops scipy's factor-2 convention).
@@ -739,6 +792,9 @@ mod tests {
         }
     }
 
+    /// (G3) A smooth field has no residues — the four steps around a cell of a gradient telescope —
+    /// and the vortex `atan2(r − r₀, c − c₀)` has exactly one, `+1` on the loop the code walks:
+    /// four quarter turns (`derivations/insar_unwrap.mac`, re-checked in the `.gp`).
     #[test]
     fn residues_vanish_on_a_smooth_field_and_ring_a_singularity() {
         let (rows, cols) = (12usize, 12usize);
@@ -763,9 +819,13 @@ mod tests {
             5 * (cols - 1) + 5,
             "residue not at the singularity"
         );
-        assert_eq!(res[nonzero[0]].abs(), 1);
+        assert_eq!(res[nonzero[0]], 1, "the vortex winds the positive way");
     }
 
+    /// (G2) The least-squares unwrap satisfies its defining equation. `derivations/insar_unwrap.mac`
+    /// shows that the Neumann Poisson equation `∇²φ = ρ` checked here is the normal equation of
+    /// `min Σ (φ_q − φ_p − g_pq)²`, and that the DCT-II basis diagonalises that Laplacian with the
+    /// divisor `2cos(πi/M) + 2cos(πj/N) − 4` the solver uses.
     #[test]
     fn lstsq_solves_the_discrete_poisson_equation() {
         // On a field WITH a residue (where path-following is ambiguous), the LS unwrap must satisfy

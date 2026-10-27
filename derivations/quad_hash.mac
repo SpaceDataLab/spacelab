@@ -1,0 +1,89 @@
+/* The geometric hash of a four-star quad -- spacelab-astrometry/src/quads.rs, after Lang et al.
+ * (2010), AJ 139, 1782 -- as identities, and the exact code of the quad the Rust gate uses.
+ *
+ * The code maps a star at r relative to A, with d = B - A, to
+ *     along = (r.d)/|d|^2,  across = (r_y d_x - r_x d_y)/|d|^2,  code = (along - across, along + across).
+ *
+ * Shown here, every line printing `<name>: 0`:
+ *   1. that is the complex similarity w(z) = (1 + i)(z - a)/(b - a): A -> (0, 0), B -> (1, 1), the
+ *      defining normalisation (G2);
+ *   2. w is unchanged by any similarity of the plane, z -> alpha z + beta, alpha # 0 complex: the
+ *      field's position, rotation and scale cancel (G4);
+ *   3. swapping A and B sends w to (1 + i) - w, every coordinate t -> 1 - t (G1);
+ *   4. |w - (1 + i)/2|^2 - 1/2 = 2 (|z - (a + b)/2|^2 - |b - a|^2/4)/|b - a|^2: the coded circle test
+ *      is the circle on AB as diameter (G1);
+ *   5. the code of the integer quad of the Rust gate, exactly, after the canonical ordering, and
+ *      the same code from its image under z -> (3 + 4i) z + (17 - 5i) (G4, G2).
+ * derivations/quad_hash.gp recomputes 5 with PARI's exact complex rationals.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/quad_hash.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. */
+coded(ax, ay, bx, by, px, py) := block([dx : bx - ax, dy : by - ay, rx : px - ax, ry : py - ay, sq,
+                                        al, ac],
+  sq : dx^2 + dy^2, al : (rx*dx + ry*dy)/sq, ac : (ry*dx - rx*dy)/sq, [al - ac, al + ac])$
+w(a, b, z) := (1 + %i)*(z - a)/(b - a)$
+cw : coded(ax, ay, bx, by, px, py)$
+wz : rectform(w(ax + %i*ay, bx + %i*by, px + %i*py))$
+zero("code_is_the_complex_similarity_x", ratsimp(realpart(wz) - cw[1]))$
+zero("code_is_the_complex_similarity_y", ratsimp(imagpart(wz) - cw[2]))$
+zero("a_maps_to_origin_x", ratsimp(coded(ax, ay, bx, by, ax, ay)[1]))$
+zero("a_maps_to_origin_y", ratsimp(coded(ax, ay, bx, by, ax, ay)[2]))$
+zero("b_maps_to_one_one_x", ratsimp(coded(ax, ay, bx, by, bx, by)[1] - 1))$
+zero("b_maps_to_one_one_y", ratsimp(coded(ax, ay, bx, by, bx, by)[2] - 1))$
+
+/* 2. alpha = al1 + i al2, beta = be1 + i be2. */
+sim(z) := (al1 + %i*al2)*z + (be1 + %i*be2)$
+zero("similarity_invariance",
+     ratsimp(rectform(w(sim(a), sim(b), sim(z)) - w(a, b, z))))$
+
+/* 3. */
+zero("ab_swap_is_one_minus", ratsimp(w(b, a, z) - ((1 + %i) - w(a, b, z))))$
+
+/* 4. With m = (a + b)/2 and everything real-coordinate. */
+cabs2(u) := realpart(u)^2 + imagpart(u)^2$
+A_ : ax + %i*ay$  B_ : bx + %i*by$  Z_ : px + %i*py$
+lhs : cabs2(rectform(w(A_, B_, Z_) - (1 + %i)/2)) - 1/2$
+rhs : 2*(cabs2(rectform(Z_ - (A_ + B_)/2)) - cabs2(rectform(B_ - A_))/4)/cabs2(rectform(B_ - A_))$
+zero("circle_test_is_the_thales_circle", ratsimp(lhs - rhs))$
+
+/* 5. The canonical code of a concrete quad, mirroring quad_code's three conventions. */
+canonical(P) := block([best : -1, ia, ib, rest, c, d, cc, cd, ab],
+  for i : 1 thru 4 do for j : i + 1 thru 4 do block([s : (P[i][1] - P[j][1])^2 + (P[i][2] - P[j][2])^2],
+    if s > best then (best : s, ia : i, ib : j)),
+  rest : sublist([1, 2, 3, 4], lambda([k], k # ia and k # ib)),
+  c : rest[1], d : rest[2],
+  code(a_, b_, k) := coded(P[a_][1], P[a_][2], P[b_][1], P[b_][2], P[k][1], P[k][2]),
+  cc : code(ia, ib, c), cd : code(ia, ib, d),
+  if cc[1] > cd[1] then ([c, d] : [d, c], [cc, cd] : [cd, cc]),
+  if cc[1] + cd[1] > 1 then (
+    [ia, ib] : [ib, ia], cc : code(ia, ib, c), cd : code(ia, ib, d),
+    if cc[1] > cd[1] then ([c, d] : [d, c], [cc, cd] : [cd, cc])),
+  [[cc[1], cc[2], cd[1], cd[2]], [ia - 1, ib - 1, c - 1, d - 1]])$
+quad : [[0, 0], [37, 11], [14, 19], [21, -4]]$
+res : canonical(quad)$
+print("quad_code:", res[1])$
+print("quad_stars:", res[2])$
+inside(x, y) := (x - 1/2)^2 + (y - 1/2)^2 <= 1/2$
+zero("quad_inner_stars_inside_the_circle",
+     if is(inside(res[1][1], res[1][2])) and is(inside(res[1][3], res[1][4])) then 0 else 1)$
+moved : map(lambda([p], block([z : rectform((3 + 4*%i)*(p[1] + %i*p[2]) + 17 - 5*%i)],
+                              [realpart(z), imagpart(z)])), quad)$
+print("moved_quad:", moved)$
+resm : canonical(moved)$
+zero("moved_quad_has_the_same_code", lsum(abs(e), e, resm[1] - res[1]))$
+zero("moved_quad_has_the_same_roles", lsum(abs(e), e, resm[2] - res[2]))$
+/* Listed with B first, the widest pair comes out as (B, A): the codes sum past 1 and the swap
+   restores A at the origin, so the code is the same and only the roles' indices move. */
+swapped : canonical([quad[2], quad[1], quad[3], quad[4]])$
+print("swapped_quad_stars:", swapped[2])$
+zero("swapped_quad_has_the_same_code", lsum(abs(e), e, swapped[1] - res[1]))$
+fpprec : 40$
+printf(true, "quad_code_digits:")$
+for x in res[1] do printf(true, " ~h", bfloat(x))$
+printf(true, "~%")$

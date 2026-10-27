@@ -2320,8 +2320,8 @@ exclude_re = [
     # last bit, i.e. asserting the rounding. It is listed as measured-unobservable on that ground and
     # on no other; if `kepler_solve` ever gains a documented iteration budget, this becomes testable
     # and the entry should go.
-    "gps\\.rs:75:26: replace < with <= in kepler_solve",
-    "gps\\.rs:75:26: replace < with == in kepler_solve",
+    "gps\\.rs:83:26: replace < with <= in kepler_solve",
+    "gps\\.rs:83:26: replace < with == in kepler_solve",
 
     # --- `earthvision/camera.rs`. One pivot tie in the private dense solver.
 
@@ -2338,7 +2338,7 @@ exclude_re = [
     # maximum. The tie fixture is in
     # `solve_dense_returns_the_solution_it_was_given_and_refuses_a_singular_system`, which kills the
     # `==` and `<` mutants of the same test and every mutant of the `best < 1e-14` singularity guard.
-    "camera\\.rs:138:18: replace > with >= in solve_dense",
+    "camera\\.rs:149:18: replace > with >= in solve_dense",
 
     # --- `gbs.rs`, the driver loop. Two proofs and two ties, from the run that confirmed the
     # --- progress invariant of #222. The fifth survivor of that run, `113:41`, was a real gap — a
@@ -2394,9 +2394,9 @@ exclude_re = [
     # --- off-diagonal magnitude exactly `1e-300`. All three constants are guards against a
     # --- logarithm of zero, a division by zero and a rotation of nothing; none is a boundary the
     # --- physics can land on.
-    "polsar\\.rs:157:27: replace > with >= in cloude_pottier",
-    "polsar\\.rs:160:28: replace > with >= in cloude_pottier",
-    "polsar\\.rs:88:36: replace < with <= in jacobi_symmetric",
+    "polsar\\.rs:165:27: replace > with >= in cloude_pottier",
+    "polsar\\.rs:168:28: replace > with >= in cloude_pottier",
+    "polsar\\.rs:96:36: replace < with <= in jacobi_symmetric",
 
     # `if p[1] + p[2] > 1e-30`, the anisotropy guard, with the sum turned into a difference. The two
     # agree on every input that is not a coincidence, and the proof is that the guarded expression
@@ -2407,7 +2407,7 @@ exclude_re = [
     # to differ by under 1e-30 of the trace while their sum is comparable to it: two shares
     # indistinguishable at 1e-30 and a third that is not. That is below the noise of any coherency
     # matrix a receiver produces.
-    "polsar\\.rs:160:21: replace \\+ with - in cloude_pottier",
+    "polsar\\.rs:168:21: replace \\+ with - in cloude_pottier",
 
     # `t = sign(θ) / (|θ| + sqrt(θ² + 1))`, with the `+ 1.0` under the root turned into `* 1.0`,
     # giving `sign(θ) / (2|θ|)` — the large-|θ| asymptote of the same formula. Equivalent by
@@ -2418,7 +2418,7 @@ exclude_re = [
     # converge inside the 100-sweep cap on all 200 matrices of
     # `jacobi_returns_an_orthogonal_basis_that_diagonalises_the_matrix`, 50 of them with a
     # deliberately near-degenerate diagonal pair, which is where `θ` is largest.
-    "polsar\\.rs:93:69: replace \\+ with \\* in jacobi_symmetric",
+    "polsar\\.rs:101:69: replace \\+ with \\* in jacobi_symmetric",
 
     # --- The last three are NOT proofs. The `off` block (lines 76–84) computes the squared
     # --- off-diagonal norm and compares it to `1e-30`; it decides only whether to stop before the
@@ -2429,10 +2429,10 @@ exclude_re = [
     # --- stop early with a wrong answer. `79:37` is the one that could — it reads `a[q]` from row 0
     # --- against `a[p*n+q]`, a cross term with no sign — and the bounded search that found no such
     # --- case is the 200 matrices above. Treat all three as open if the loop is ever restructured.
-    "polsar\\.rs:86:25: replace \\+ with \\* in jacobi_symmetric",
-    "polsar\\.rs:79:37: replace \\* with / in jacobi_symmetric",
-    "polsar\\.rs:82:16: replace < with <= in jacobi_symmetric",
-    "polsar\\.rs:82:16: replace < with == in jacobi_symmetric",
+    "polsar\\.rs:94:25: replace \\+ with \\* in jacobi_symmetric",
+    "polsar\\.rs:87:37: replace \\* with / in jacobi_symmetric",
+    "polsar\\.rs:90:16: replace < with <= in jacobi_symmetric",
+    "polsar\\.rs:90:16: replace < with == in jacobi_symmetric",
 
     # --- `earthvision/rpc.rs`. One of the file's 88 survivors; the other 87 are killed by the
     # --- Richardson gradient oracle, the exact Newton iteration counts and the mixed-axis camera
@@ -2444,7 +2444,7 @@ exclude_re = [
     # applied, so the two forms differ only in whether one further iteration runs, and that iteration
     # moves the answer by under `1e-12` in normalised units — under a nanopixel at the 512-pixel
     # scales this camera uses.
-    "rpc\\.rs:257:21: replace < with <= in RationalPolynomialCamera::inverse",
+    "rpc\\.rs:263:21: replace < with <= in RationalPolynomialCamera::inverse",
 
     # --- `density_calibration.rs`. The recursion's own coefficient vanishes where the guard fires.
     #
@@ -2552,8 +2552,8 @@ exclude_re = [
     # --- `sc` is the mirror image: it differs only when `c == tc`, i.e. `dc == 0`, where `err == dr`
     # --- throughout and the column steps on `2·dr <= dr`, i.e. `dr <= 0`, and `dr = |tr - r| >= 0`
     # --- leaves only `dr == 0`, the same one-pixel cut.
-    "insar\\.rs:278:26: replace < with <= in draw_cut",
-    "insar\\.rs:278:55: replace < with <= in draw_cut",
+    "insar\\.rs:289:26: replace < with <= in draw_cut",
+    "insar\\.rs:289:55: replace < with <= in draw_cut",
 
     # `libm::fmod(phi + PI, TAU)`, the wrap into (-pi, pi], with the shift negated. Proved: the two
     # arguments differ by exactly one period, and `fmod` followed by `if x <= 0.0 { x + TAU }` maps
@@ -2564,20 +2564,20 @@ exclude_re = [
     # figures are large because the subtraction of PI at the end cancels, not because either form is
     # wrong -- reported separately: `libm::remainder(phi, TAU)` halves the worst absolute error and
     # drops the branch, at the cost of the (-pi, pi] convention becoming [-pi, pi]).
-    "insar\\.rs:42:28: replace \\+ with - in wrap_phase",
+    "insar\\.rs:53:28: replace \\+ with - in wrap_phase",
 
     # The two boxcar window offsets in `coherence`, `(r + dr, c + dc)`, each negated. Proved: `dr` and
     # `dc` run over `-hw..=hw`, so `{r + dr}` and `{r - dr}` are the same set of rows and `{c + dc}`
     # the same set of columns -- the window is the same rectangle, visited in the opposite order, and
     # the border test admits the same pixels of it. Only the summation order of `cross`, `p1` and `p2`
     # changes, which no assertion short of a bit-level snapshot can see.
-    "insar\\.rs:71:48: replace \\+ with - in coherence",
-    "insar\\.rs:71:65: replace \\+ with - in coherence",
+    "insar\\.rs:82:48: replace \\+ with - in coherence",
+    "insar\\.rs:82:65: replace \\+ with - in coherence",
 
     # `cross = cross + s1 * conj(s2)` turned into a subtraction. Proved: the running total becomes the
     # exact negation (negation is exact in binary floating point, and `fl(-a - b) == -fl(a + b)`), and
     # the only thing read from it is `cross.abs()`.
-    "insar\\.rs:74:39: replace \\+ with - in coherence",
+    "insar\\.rs:85:39: replace \\+ with - in coherence",
 
     # `if rows == 0 || cols == 0 { return Vec::new(); }` in `unwrap_phase_2d_lstsq`, read as a
     # conjunction. Proved by removing the guard and measuring: with either side zero every
@@ -2585,7 +2585,7 @@ exclude_re = [
     # columns, and the final Vec of length rows*cols -- so the early return is a fast path and not a
     # behavioural guard. Its two neighbours in this file are not: `unwrap_phase_2d` indexes `out[0]`
     # immediately after, and `unwrap_phase_2d_branch_cut` falls through into its flood fill.
-    "insar\\.rs:225:18: replace \\|\\| with && in unwrap_phase_2d_lstsq",
+    "insar\\.rs:236:18: replace \\|\\| with && in unwrap_phase_2d_lstsq",
 
     # `(0..rows * cols).find(|&i| !barrier[i])`, the branch-cut seed search, over `rows + cols`
     # pixels instead. Proved: `draw_cut` is only ever called with endpoints that are a residue
@@ -2596,7 +2596,7 @@ exclude_re = [
     # every `rows >= 2` that reaches this line. Both ranges find the same pixel, for every input.
     # The `*`-to-`/` form of the same mutant is not equivalent and is caught: it searches
     # `0..rows/cols`, which is empty whenever a cut reaches pixel 0.
-    "insar\\.rs:315:25: replace \\* with \\+ in unwrap_phase_2d_branch_cut",
+    "insar\\.rs:326:25: replace \\* with \\+ in unwrap_phase_2d_branch_cut",
 
     # `nc < cols` in the cut-pixel fill, tied to `<=`, which would index one column past the grid.
     # Proved unreachable: the guard differs only at `nc == cols`, i.e. the fourth candidate `(r, c+1)`
@@ -2609,7 +2609,7 @@ exclude_re = [
     # first candidate does, the pixel above having just been filled. The `<=` on the row test one
     # column left is a different matter -- the fill reaches `nr == rows` for a bottom row cut off
     # from the seed, and that mutant is caught.
-    "insar\\.rs:397:36: replace < with <= in unwrap_phase_2d_branch_cut",
+    "insar\\.rs:408:36: replace < with <= in unwrap_phase_2d_branch_cut",
 
     # --- `signal/sar.rs`. One of the file's 47 survivors; the other 46 are killed by the chirp
     # --- centring, the correlation length, the write-back order, the -3 dB and PSLR fixtures, the
@@ -2622,7 +2622,7 @@ exclude_re = [
     # `libm::sin` ports, takes its `|x| < 2^-26` fast path and returns the argument). The quotient is
     # then `pi*x / pi*x`, exactly 1.0, which is what the guard returns. Checked: `sin(pi*1e-12)` and
     # `pi*1e-12` are the same double.
-    "sar\\.rs:274:22: replace < with <= in sinc",
+    "sar\\.rs:286:22: replace < with <= in sinc",
 
     # --- `earthvision/camera.rs`. What is left of the file's 152 survivors after the DLT seed, the
     # --- Gauss--Newton refinement, the two reprojection scores, the RANSAC sampler, the three
@@ -2634,19 +2634,19 @@ exclude_re = [
     # the general arm's second term is `m_scale(kx2, 0.0)` and its first is `hat(w/theta) * theta`,
     # which is `hat(w)` -- the same matrix the small-angle arm returns. Measured: `==` and `>` are
     # both caught, so only the tie is unobservable.
-    "camera\\.rs:75:14: replace < with <= in so3_exp",
+    "camera\\.rs:86:14: replace < with <= in so3_exp",
 
     # `if libm::fabs(det) < 1e-300`, the 3x3 singularity test, tied to `<=`. A determinant of
     # exactly `1e-300` -- itself not representable, so the comparison is against the nearest double
     # -- would have to come out of three products and two subtractions. `==` and `>` are caught by
     # the rank-2, rank-1 and zero matrices.
-    "camera\\.rs:91:24: replace < with <= in inv3",
+    "camera\\.rs:102:24: replace < with <= in inv3",
 
     # `for r in (col + 1)..n`, the partial-pivot search, mutated to `(col * 1)..n` = `col..n`. A
     # no-op: `best` is initialised to `|m[col*n + col]|` before the loop and the test inside is the
     # strict `v > best`, so visiting row `col` again compares a value against itself and changes
     # neither `best` nor `piv`. The `-` form is caught -- it underflows at `col == 0`.
-    "camera\\.rs:136:23: replace \\+ with \\* in solve_dense",
+    "camera\\.rs:147:23: replace \\+ with \\* in solve_dense",
 
     # --- The Gauss--Newton break test in `triangulate`,
     # --- `if step[0].abs() + step[1].abs() + step[2].abs() < 1e-12`. NOT proved -- bounded search.
@@ -2663,11 +2663,11 @@ exclude_re = [
     # --- These stop being equivalent the moment the cap is lowered or the geometry needs more than
     # --- ten iterations, and `a + b*c` / `a*b + c` are not norms at all -- they stop on a partial
     # --- step. Treat all five as open if the iteration count changes.
-    "camera\\.rs:440:58: replace < with <= in triangulate",
-    "camera\\.rs:440:58: replace < with == in triangulate",
-    "camera\\.rs:440:42: replace \\+ with - in triangulate",
-    "camera\\.rs:440:42: replace \\+ with \\* in triangulate",
-    "camera\\.rs:440:26: replace \\+ with \\* in triangulate",
+    "camera\\.rs:451:58: replace < with <= in triangulate",
+    "camera\\.rs:451:58: replace < with == in triangulate",
+    "camera\\.rs:451:42: replace \\+ with - in triangulate",
+    "camera\\.rs:451:42: replace \\+ with \\* in triangulate",
+    "camera\\.rs:451:26: replace \\+ with \\* in triangulate",
 
     # `hd[i * 6 + i] *= 1.0 + lambda`, the Marquardt diagonal scaling, with the index mutated to
     # `i / 6 + i`. NOT proved -- bounded search. Integer division makes `i / 6` zero for every
@@ -2676,14 +2676,14 @@ exclude_re = [
     # resection ladders every accepted step is taken at `lambda <= 1e-3`, so the perturbation is a
     # part in a thousand of one row and the Gauss--Newton direction is unchanged to every rung. The
     # `i + 6 + i` form is caught. Treat as open if a fixture ever drives `lambda` above ~1.
-    "camera\\.rs:316:22: replace \\* with / in resection",
+    "camera\\.rs:327:22: replace \\* with / in resection",
 
     # `if trial_cost < cost`, the Levenberg--Marquardt accept test, tied to `<=`. NOT proved --
     # bounded search. The tie does occur: once the run reaches the double-precision floor the trial
     # reproduces the cost exactly, and `<=` then accepts it, halves `lambda` and spends the rest of
     # the budget re-deriving the same pose. Measured on both ladders in
     # `resection_pays_a_measured_price_for_its_damping_schedule`: every rung is identical.
-    "camera\\.rs:325:27: replace < with <= in resection",
+    "camera\\.rs:336:27: replace < with <= in resection",
 
     # `lambda *= 10.0` inside `let Some(delta) = solve_dense(..) else { .. }`, tied to `+=` and `/=`.
     # Proved: on the one input that reaches the arm, lambda cannot change the outcome. `solve_dense`
@@ -2697,8 +2697,8 @@ exclude_re = [
     # `with_no_controls_at_all_the_solver_refuses_every_step_and_returns_the_initial_pose`. The
     # absolute threshold is the thing to fix (scale it by the matrix norm); it is a primitive shared
     # with `triangulate`, `dlt_seed` and the Schur step, so it is reported rather than changed here.
-    "camera\\.rs:320:24: replace \\*= with \\+= in resection",
-    "camera\\.rs:320:24: replace \\*= with /= in resection",
+    "camera\\.rs:331:24: replace \\*= with \\+= in resection",
+    "camera\\.rs:331:24: replace \\*= with /= in resection",
 
     # `if trial < cost`, the same Levenberg--Marquardt accept test one level up in
     # `bundle_adjust_inner`, tied to `<=`, and equivalent for the same reason as `resection:304`. An
@@ -2706,7 +2706,7 @@ exclude_re = [
     # bit for bit; `<=` then accepts a zero step, halves `lambda` and spends the remaining budget
     # re-deriving the same cameras and points. Measured on every rung of
     # `bundle_adjustment_pays_a_measured_price_for_its_damping_schedule`: identical to the last digit.
-    "camera\\.rs:829:26: replace < with <= in bundle_adjust_inner",
+    "camera\\.rs:840:26: replace < with <= in bundle_adjust_inner",
 
     # --- `signal/psinsar.rs`. Two of the nine survivors; the other seven are killed by the closed
     # --- form for `D_A`, the exclusive-threshold boundary at exactly zero, and writing the two-way
@@ -2717,8 +2717,8 @@ exclude_re = [
     # constant that is not itself representable, so the comparison is against the nearest double and
     # the tie needs a mean of `n` amplitudes, or a 2x2 determinant of four accumulated products, to
     # land on it exactly. The `==` and `>` forms of both are caught.
-    "psinsar\\.rs:37:27: replace < with <= in amplitude_dispersion",
-    "psinsar\\.rs:86:24: replace < with <= in sbas_invert",
+    "psinsar\\.rs:47:27: replace < with <= in amplitude_dispersion",
+    "psinsar\\.rs:96:24: replace < with <= in sbas_invert",
 
     # --- `signal/radon.rs`, `radon_forward`. Four of the forty-four survivors; the other forty are
     # --- killed by hand-computed projection and back-projection fixtures whose `size`/`detectors`
@@ -2734,8 +2734,8 @@ exclude_re = [
     #
     # The ray step is therefore hard-wired to one pixel and cannot be oversampled -- reported, not
     # changed here, since it is a signature question (`radon_forward` takes no sampling parameter).
-    "radon\\.rs:65:51: replace \\* with / in radon_forward",
-    "radon\\.rs:70:48: replace \\* with / in radon_forward",
+    "radon\\.rs:75:51: replace \\* with / in radon_forward",
+    "radon\\.rs:80:48: replace \\* with / in radon_forward",
 
     # The same `dt == 1.0`, now as a shift of the whole ray-parameter grid: `(k + 0.5) * dt` tied to
     # `(k + 0.5) + dt` shifts every sample by +1, and `(k - 0.5) * dt` by -1. The grid is the unit
@@ -2746,8 +2746,8 @@ exclude_re = [
     # endpoints have |t| >= size - 0.5, so each contributes an unconditional zero either way.
     # Brute-forced over sizes 3..13, detectors 3..size+1 and 37 angles: the set of in-image sample
     # positions is bit-identical under both shifts.
-    "radon\\.rs:65:51: replace \\* with \\+ in radon_forward",
-    "radon\\.rs:65:44: replace \\+ with - in radon_forward",
+    "radon\\.rs:75:51: replace \\* with \\+ in radon_forward",
+    "radon\\.rs:75:44: replace \\+ with - in radon_forward",
 
     # --- `signal/tomosar.rs`. Nine of the thirty survivors; the other twenty-one are killed by
     # --- Cramer's rule and a forced pivot swap for `solve_complex`, the closed forms `P(s₀) = N` for
@@ -2760,20 +2760,20 @@ exclude_re = [
     # initialised from, and `v > best` is false for every f64 -- NaN included, where both forms skip.
     # The loop body is unreachable on that first step, so the two ranges leave `best` and `piv`
     # identical.
-    "tomosar\\.rs:101:23: replace \\+ with \\* in solve_complex",
+    "tomosar\\.rs:113:23: replace \\+ with \\* in solve_complex",
 
     # `if v > best` tied to `>=`: the tie-break of partial pivoting. Both forms select a row whose
     # leading entry has maximal modulus -- `>` the first such row, `>=` the last -- and Gaussian
     # elimination on any of them produces the same solution in exact arithmetic. The two differ only
     # in which rounding path a tie takes, and the function documents no tie-break; a fixture pinning
     # one would be asserting an arithmetic path rather than the contract.
-    "tomosar\\.rs:103:18: replace > with >= in solve_complex",
+    "tomosar\\.rs:115:18: replace > with >= in solve_complex",
 
     # `if best < 1e-300` tied to `<=`, the singularity refusal. `best` is a `norm_sqr`, so the two
     # differ only when a sum of two squares lands exactly on the double nearest 1e-300; every
     # singular fixture reaches it as exactly 0.0 and every non-singular one is many orders above.
     # The `==` and `>` forms are caught by the rank-deficient system.
-    "tomosar\\.rs:108:17: replace < with <= in solve_complex",
+    "tomosar\\.rs:120:17: replace < with <= in solve_complex",
 
     # `if m <= kappa || m < 1e-300` -- the second clause, tied to `<=` and to `==`. It is dead code:
     # `Complex::abs` is `sqrt(re² + im²)`, so `re² + im²` underflows to zero long before the root
@@ -2781,13 +2781,13 @@ exclude_re = [
     # `sqrt(5e-324)`, about 2.2e-162; below that `abs` returns exactly 0.0, which the *first* clause
     # already catches for every `kappa >= 0`. No input reaches the comparison in a state where its
     # operator matters. (Reported: the guard cannot fire and could go.)
-    "tomosar\\.rs:213:24: replace < with <= in soft_threshold",
-    "tomosar\\.rs:213:24: replace < with == in soft_threshold",
+    "tomosar\\.rs:225:24: replace < with <= in soft_threshold",
+    "tomosar\\.rs:225:24: replace < with == in soft_threshold",
 
     # `if norm < 1e-300` in the power iteration, tied to `<=`, and dead for the same reason: `norm`
     # is a `sqrt` of a sum of `norm_sqr`, so it is either exactly 0.0 (caught by both forms) or above
     # 2.2e-162 (caught by neither). The `==` form is killed by the all-zero sensing matrix.
-    "tomosar\\.rs:252:17: replace < with <= in lipschitz",
+    "tomosar\\.rs:264:17: replace < with <= in lipschitz",
 
     # The FISTA step size and momentum schedule. `1/(1.01 L)` tied to `1.01/L`, `t' = (1+√(1+4t²))/2`
     # tied to `t + 1/2`, and `(t−1)/t'` tied to `t/t'`. Prox-gradient descent converges to the same
@@ -2802,9 +2802,9 @@ exclude_re = [
     # pins the arithmetic path rather than the contract. The variants that do change the order --
     # dropping the `1` from the recurrence, and a momentum above one -- cost factors of 1000 and
     # 17 000 and are caught.
-    "tomosar\\.rs:275:46: replace \\* with / in fista_lasso",
-    "tomosar\\.rs:286:49: replace \\+ with \\* in fista_lasso",
-    "tomosar\\.rs:287:22: replace - with / in fista_lasso",
+    "tomosar\\.rs:287:46: replace \\* with / in fista_lasso",
+    "tomosar\\.rs:298:49: replace \\+ with \\* in fista_lasso",
+    "tomosar\\.rs:299:22: replace - with / in fista_lasso",
 
     # --- `earthvision/ortho.rs`. Six of the twenty-six survivors, all in the bisection loop of
     # --- `ray_dem_intersection`; the other twenty are killed by a DEM whose origin, steps and shape
@@ -2814,7 +2814,7 @@ exclude_re = [
     # `if gm > 0.0` tied to `>=`. Unreachable: the two forms differ only at `gm == 0.0`, and the line
     # above breaks out of the loop when `libm::fabs(gm) < 1e-6`, which zero satisfies. Line 205 is
     # never evaluated in the one state where its operator matters.
-    "ortho\\.rs:205:15: replace > with >= in ray_dem_intersection",
+    "ortho\\.rs:212:15: replace > with >= in ray_dem_intersection",
 
     # The stopping rule `libm::fabs(gm) < 1e-6 || (hi - lo) < 1e-9`, in five variants. Each of them
     # weakens the condition, so the loop stops no earlier than it should and never later than the
@@ -2824,11 +2824,11 @@ exclude_re = [
     # bracket -- an answer at least as close to the surface as the one the unmutated code gives, and
     # in the fixtures here 1e-9 m rather than 1e-6 m. Every property the function documents still
     # holds; separating them means asserting the result is *less* accurate than it is.
-    "ortho\\.rs:202:27: replace < with <= in ray_dem_intersection",
-    "ortho\\.rs:202:27: replace < with == in ray_dem_intersection",
-    "ortho\\.rs:202:34: replace \\|\\| with && in ray_dem_intersection",
-    "ortho\\.rs:202:47: replace < with <= in ray_dem_intersection",
-    "ortho\\.rs:202:47: replace < with == in ray_dem_intersection",
+    "ortho\\.rs:209:27: replace < with <= in ray_dem_intersection",
+    "ortho\\.rs:209:27: replace < with == in ray_dem_intersection",
+    "ortho\\.rs:209:34: replace \\|\\| with && in ray_dem_intersection",
+    "ortho\\.rs:209:47: replace < with <= in ray_dem_intersection",
+    "ortho\\.rs:209:47: replace < with == in ray_dem_intersection",
 
     # --- `earthvision/pansharpen.rs`. Four of the seventeen survivors; the other thirteen are killed
     # --- by stating the two moment helpers as moments, and by the single-band closed form
@@ -2841,20 +2841,20 @@ exclude_re = [
     # therefore unchanged, so every later component and every other φ is unchanged too. On the other
     # side, `sim_sg` scales by α, so the histogram-matching `scale` does, so the substituted GS₀ does
     # -- and the inverse pass adds back `(c/α)·(α GS₀) = c·GS₀`. The α cancels exactly.
-    "pansharpen\\.rs:66:61: replace / with \\* in gram_schmidt_pan_sharpen",
+    "pansharpen\\.rs:74:61: replace / with \\* in gram_schmidt_pan_sharpen",
 
     # `if psg > 1e-300` tied to `>=`. Unreachable: `psg` is a `libm::sqrt` of a mean of squares, so it
     # is either exactly 0.0 -- the square underflowed -- or at least `sqrt(5e-324)`, about 2.2e-162.
     # It cannot take the one value at which the two operators disagree.
-    "pansharpen\\.rs:94:24: replace > with >= in gram_schmidt_pan_sharpen",
+    "pansharpen\\.rs:102:24: replace > with >= in gram_schmidt_pan_sharpen",
 
     # `if sum.abs() > 1e-300` and `if norm > 1e-300`, each tied to `>=`. Unlike `psg` these two are
     # reachable at exactly 1e-300 -- one band pixel of 1e-300, or deviations whose squares sum to it --
     # but 1e-300 is an arbitrary "treat as zero" threshold guarding a division, not a documented
     # boundary: `brovey_pan_sharpen` promises only that a pixel whose bands sum *to zero* stays zero.
     # Pinning which side of that single double the comparison falls on asserts the arithmetic path.
-    "pansharpen\\.rs:35:22: replace > with >= in brovey_pan_sharpen",
-    "pansharpen\\.rs:82:29: replace > with >= in gram_schmidt_pan_sharpen",
+    "pansharpen\\.rs:43:22: replace > with >= in brovey_pan_sharpen",
+    "pansharpen\\.rs:90:29: replace > with >= in gram_schmidt_pan_sharpen",
 
     # --- `earthvision/rpc_adjust.rs`. Four of the eighteen survivors, all in `solve_sym3`'s pivot
     # --- search; the other fourteen are killed by Cramer's rule on four 3x3 systems, two singular
@@ -2863,13 +2863,13 @@ exclude_re = [
     # `for r in (col + 1)..3` tied to `(col * 1)..3`, i.e. starting the search at `col` itself. The
     # extra iteration compares `a[col*3 + col]` with itself and `>` is false for every f64, NaN
     # included, so the loop body is unreachable on that step and `piv` is unchanged.
-    "rpc_adjust\\.rs:100:23: replace \\+ with \\* in solve_sym3",
+    "rpc_adjust\\.rs:106:23: replace \\+ with \\* in solve_sym3",
 
     # `if fabs(...) > fabs(...)` tied to `>=`: the tie-break. Both forms select a row of maximal
     # modulus in the column -- `>` the first, `>=` the last -- and Gaussian elimination on any such row
     # gives the same solution in exact arithmetic. The function documents partial pivoting, which is a
     # statement about the modulus, not about which of two equal rows wins.
-    "rpc_adjust\\.rs:101:43: replace > with >= in solve_sym3",
+    "rpc_adjust\\.rs:107:43: replace > with >= in solve_sym3",
 
     # `a[r * 3 + col]` tied to `a[r * 3 - col]`, the candidate's cell. At `col = 0` the two indices are
     # equal; at `col = 2` the loop is empty; so the only step that can differ is `col = 1, r = 2`, where
@@ -2878,13 +2878,13 @@ exclude_re = [
     # were. Driving `a[4]` small enough for the wrong choice to matter needs `q − p·s ≈ 0` in the
     # reduced block, which is the same condition that sends `det(A)` to ~1e-16: at that point Cramer's
     # rule is no more trustworthy than the code under test, so there is no oracle left to compare with.
-    "rpc_adjust\\.rs:101:35: replace \\+ with - in solve_sym3",
+    "rpc_adjust\\.rs:107:35: replace \\+ with - in solve_sym3",
 
     # `if fabs(pivot) < 1e-300` tied to `<=`, the singularity refusal. The two differ only on the one
     # double equal to 1e-300; every singular fixture reaches the test at exactly 0.0 and every
     # non-singular one is many orders above. The `==` and `>` forms are caught by the rank-deficient
     # systems.
-    "rpc_adjust\\.rs:105:41: replace < with <= in solve_sym3",
+    "rpc_adjust\\.rs:111:41: replace < with <= in solve_sym3",
 
     # --- `earthvision/features.rs`. One of the twenty-three survivors; the other twenty-two are killed
     # --- by the Sobel kernels on a linear field, the normalised patch in raster order, the threshold
@@ -2898,25 +2898,25 @@ exclude_re = [
     # there is nowhere else the sign could be observed. (The same evenness is why flipping a sample
     # offset in `sobel` survived; that one is killed by testing `sobel` against its kernels directly,
     # which this cannot be -- `sxy` is a local.)
-    "features\\.rs:136:25: replace \\+= with -= in harris_response",
+    "features\\.rs:144:25: replace \\+= with -= in harris_response",
 
     # `else if score > second { second = score }` tied to `>=`. Exactly equivalent: the branch body
     # assigns the very value being compared, so the case the two forms disagree on -- `score == second`
     # -- writes `second = second`.
-    "features\\.rs:240:29: replace > with >= in match_ncc",
+    "features\\.rs:248:29: replace > with >= in match_ncc",
 
     # `if score > best` tied to `>=`: which of two equally good candidates is reported. Both forms end
     # the loop with the same `best` and the same `second`, so the accept/reject decision is identical;
     # only `b` differs, and `match_ncc` documents no tie-break. It could not matter in practice either:
     # a tie at the top means `second == best`, which fails `second <= max_ratio · best` for every
     # `max_ratio < 1` and throws the match away under both forms.
-    "features\\.rs:236:22: replace > with >= in match_ncc",
+    "features\\.rs:244:22: replace > with >= in match_ncc",
 
     # `if norm > 1e-12` tied to `>=`, the flat-patch guard. The two differ only on the single double
     # equal to 1e-12, which is an arbitrary "no variance here" threshold guarding a division, not a
     # documented boundary -- the doc comment says a *flat* patch returns zeros, and a flat patch
     # reaches this with norm exactly 0.0 under both forms.
-    "features\\.rs:205:13: replace > with >= in normalized_patch",
+    "features\\.rs:213:13: replace > with >= in normalized_patch",
 
     # --- `vision/nn.rs`. One of the nineteen survivors; the other eighteen all had one cause -- every
     # --- convolution in the suite ran at stride 1 and pad 0 and the only `pad2d` fixture was 1x1x1, so
@@ -2942,7 +2942,7 @@ exclude_re = [
     # where `fabs(fabs(lat_p) - FRAC_PI_2)` is bit-equal to 1e-10. (The neighbourhood *around* the
     # threshold is a different matter and is now pinned: see
     # `the_polar_branch_of_the_great_circle_angle_is_the_co_latitude`.)
-    "ray\\.rs:188:50: replace < with <= in great_circle_angle",
+    "ray\\.rs:195:50: replace < with <= in great_circle_angle",
 
     # `rp < ZENITH_RADIUS` tied to `<=`, the switch to the pure-zenith sampling. Same shape: one
     # exact f64, `rp` bit-equal to 1.0 m. The sample height is computed before the branch and is
@@ -2950,7 +2950,7 @@ exclude_re = [
     # of one metre the path passes within a metre of the geocentre, where longitude carries no
     # information at all. Nothing physical reaches `rp = 1 m` either -- `rp = r1*sin_z` with
     # `r1 >= 6.37e6`, so it needs `sin_z` to land on 1.5696e-7 to the last bit.
-    "ray\\.rs:160:15: replace < with <= in Ray::point_at",
+    "ray\\.rs:167:15: replace < with <= in Ray::point_at",
 
     # --- `ionosphere/parameters.rs`. A reflection the cosine cannot see, and a clamp nothing reads.
     #
@@ -2960,7 +2960,7 @@ exclude_re = [
     # at the fixture epochs. In floating point the two differ by `2·sin(u)·sin(12·delta)` where
     # `delta = fl(pi/12) - pi/12` is at most half an ulp, i.e. at most 2.6e-16 absolute in
     # `c_zenith` -- under the ulp of `c_zenith` itself.
-    "parameters\\.rs:152:36: replace - with \\+ in compute_effective_solar_angle",
+    "parameters\\.rs:162:36: replace - with \\+ in compute_effective_solar_angle",
 
     # `if value < 1e-6 { 0.0 } else { value }` (Eq. 39) is dead in its entirety today, so both
     # mutants substitute an unread value. `value` is a convex combination of `temp2` and
@@ -2971,8 +2971,8 @@ exclude_re = [
     # every substituted value takes the no-F1 arm, where `nm_f1` is never read, and neither
     # `fo_f1` nor `nm_f1` is stored in `NeQuickParameters`. The clamp becomes load-bearing the
     # moment anything reads either for its own sake, which is why it stays.
-    "parameters\\.rs:269:14: replace < with <= in compute_fo_f1",
-    "parameters\\.rs:269:14: replace < with == in compute_fo_f1",
+    "parameters\\.rs:279:14: replace < with <= in compute_fo_f1",
+    "parameters\\.rs:279:14: replace < with == in compute_fo_f1",
 
     # --- `ionosphere/model.rs`. Eq. 127's two forms are the same number where the guard chooses.
     #
@@ -3004,9 +3004,9 @@ exclude_re = [
     # `|K15 - G7|`; `/ 1e-3` for `* 1e-3` moves the threshold between 1e-6 and 10 m^-2, a band no
     # electron content of a non-empty interval falls in. NeQuick's density is a sum of Epstein
     # layers, positive wherever the profile is defined.
-    "galileo\\.rs:198:23: replace \\+ with - in kronrod",
-    "galileo\\.rs:208:75: replace \\* with / in kronrod",
-    "galileo\\.rs:208:69: replace - with \\+ in kronrod",
+    "galileo\\.rs:206:23: replace \\+ with - in kronrod",
+    "galileo\\.rs:216:75: replace \\* with / in kronrod",
+    "galileo\\.rs:216:69: replace - with \\+ in kronrod",
 
     # --- `ionosphere/modip.rs`. Plus or minus pi is the same meridian.
     #
@@ -3058,7 +3058,7 @@ exclude_re = [
     # 100 there and gives arguments near -4 for any profile with foF2 > 0, and `amplitude[0]` is
     # `4*NmF2 > 0` by construction. Equivalent on every reachable profile; not equivalent as a total
     # function on `NeQuickParameters`.
-    "galileo\\.rs:227:17: replace < with <= in <impl Variant for GalileoVariant>::apply_chapman_parameters",
+    "galileo\\.rs:235:17: replace < with <= in <impl Variant for GalileoVariant>::apply_chapman_parameters",
 
     # --- `vision/detect.rs`. Three survivors, one of them equivalent. The other two were the two
     # --- boundaries the published torchvision fixture cannot reach: `union == 0` needs *both* boxes
@@ -3074,7 +3074,7 @@ exclude_re = [
     # steps ran before the write. The returned `keep` is therefore bit-identical for every input,
     # whatever `iou(a, a)` and the threshold happen to be, NaN included. One redundant `iou` call per
     # kept box is the whole difference.
-    "detect\\.rs:98:28: replace \\+ with \\* in nms",
+    "detect\\.rs:106:28: replace \\+ with \\* in nms",
 
     # --- `estimation/conjunction.rs`. Twenty-nine survivors, one of them a real gap: the removable
     # --- singularity in Patera's contour weight, `h(x) = (1 − e^{−x/2})/x` for `x = r²`, was never
@@ -3546,9 +3546,9 @@ exclude_re = [
     # the second produce the same permutation; admitting `i == j` adds only `a.swap(i, i)`. Checked
     # exhaustively for every power-of-two length from 2 to 4096: all three variants and the original
     # produce the identical permutation.
-    "fft\\.rs:125:11: replace \\^= with \\|= in transform",
-    "fft\\.rs:126:14: replace < with > in transform",
-    "fft\\.rs:126:14: replace < with <= in transform",
+    "fft\\.rs:133:11: replace \\^= with \\|= in transform",
+    "fft\\.rs:134:14: replace < with > in transform",
+    "fft\\.rs:134:14: replace < with <= in transform",
 
     # Two feasibility guards testing the same condition, so each makes the other unreachable.
     #
@@ -3643,7 +3643,7 @@ exclude_re = [
     # disagreement is 1.78e-15 (2 ulp of 2π), rising to 3.6e-14 at |a| = 1e3 purely because an ulp
     # of `a` grows. No angular assertion can name a tolerance that rejects that and still accepts
     # the original.
-    "geometry\\.rs:32:26: replace \\+ with - in wrap_pi",
+    "geometry\\.rs:39:26: replace \\+ with - in wrap_pi",
 
     # --- `earthvision/sfm.rs`. Union-find balancing, which decides nothing the caller can see.
     #
@@ -3666,7 +3666,7 @@ exclude_re = [
     # `census_at` accumulates `bits = (bits << 1) | u64::from(neighbour > center)`. The left shift
     # always leaves bit 0 clear, and the right operand is 0 or 1, so `|` and `^` agree on every bit
     # of every iteration: `0 | b == 0 ^ b == b`. The descriptor is identical for every input.
-    "stereo\\.rs:74:32: replace \\| with \\^ in census_at",
+    "stereo\\.rs:82:32: replace \\| with \\^ in census_at",
 
     # --- `propagation/density_calibration.rs`. An integer square root under its own precondition.
     #
@@ -3876,10 +3876,10 @@ exclude_re = [
     # bases give the same numbers whenever both are orthonormal. At the boundary the fallback East
     # is perpendicular to Up to within 1e-9; measured at the receiver where `norm(east)` is bit
     # exactly `1e-9` (`[1e-9, 0, 1]·Rₑ`), all five DOPs agree to the last bit.
-    "dop\\.rs:19:10: replace < with <= in normalize",
-    "dop\\.rs:49:23: replace \\+ with \\* in invert4",
-    "dop\\.rs:50:38: replace > with >= in invert4",
-    "dop\\.rs:103:19: replace < with <= in dop",
+    "dop\\.rs:25:10: replace < with <= in normalize",
+    "dop\\.rs:55:23: replace \\+ with \\* in invert4",
+    "dop\\.rs:56:38: replace > with >= in invert4",
+    "dop\\.rs:109:19: replace < with <= in dop",
 
     # --- `gnss/igrf.rs`. The `n == 1` arm of the Legendre recursion runs exactly once.
     #
@@ -4287,14 +4287,14 @@ exclude_re = [
     # or `+∞`, so every size parameter `x = k r` is non-positive or non-finite, `coefficients`
     # refuses all of them, `any` stays false and the function returns `None` at the terminal guard
     # anyway. The mismatched-length arm is unaffected and is killed by `unphysical_inputs_are_refused`.
-    "mie\\.rs:339:57: replace \\|\\| with && in phase_on_grid",
+    "mie\\.rs:396:57: replace \\|\\| with && in phase_on_grid",
 
     # `r_min <= 0.0 || r_max <= r_min` → `&&`. The mutant lets through exactly the two cases the
     # original blocks. If `r_min <= 0` then `ln r_min` is `−∞` or `NaN`, every node radius is `NaN`
     # and every size is refused. If `r_max <= r_min` with `r_min > 0` then `log_step <= 0`, and since
     # both densities are non-negative every quadrature weight is non-positive, so `number <= 0.0`
     # fires at the terminal guard. Either way the return value is the same `None`.
-    "mie\\.rs:343:21: replace \\|\\| with && in phase_on_grid",
+    "mie\\.rs:400:21: replace \\|\\| with && in phase_on_grid",
 
     # `!any || number <= 0.0 || scattering <= 0.0` → `&&` on the *first* `||`. `number` is only
     # accumulated on the same iterations that set `any`, so `!any` implies `number == 0.0` and the
@@ -4304,7 +4304,7 @@ exclude_re = [
     # established `log_step > 0` — in which case `scattering == 0.0` and the third disjunct fires in
     # both. (The `&&` on the *second* `||` is *not* equivalent and is killed by
     # `a_distribution_whose_scattering_underflows_is_refused`.)
-    "mie\\.rs:382:13: replace \\|\\| with && in phase_on_grid",
+    "mie\\.rs:439:13: replace \\|\\| with && in phase_on_grid",
 
     # `n_max.max(|y|) + 25 + ⌊1.5√|y|⌋`, the start of the downward recurrence for `Dₙ` → the two
     # mutants that leave the margin *wider* than it needs to be (`* 25`, and `1.5 + √|y|` in place of
@@ -4314,8 +4314,8 @@ exclude_re = [
     # not equivalent: `− 25` and `− ⌊1.5√|y|⌋` are both killed by
     # `the_series_reproduces_an_independent_mie_implementation`, whose eight cases run to `x = 2000`
     # for exactly this reason (see #288).
-    "mie\\.rs:229:49: replace \\+ with \\* in coefficients",
-    "mie\\.rs:229:61: replace \\* with \\+ in coefficients",
+    "mie\\.rs:249:49: replace \\+ with \\* in coefficients",
+    "mie\\.rs:249:61: replace \\* with \\+ in coefficients",
 
     # `ice.rs` — the eight-face slab intersection, the micro-facet acceptance tests, the ray tally and
     # Miller's downward recurrence for `J₁`. Each entry states either a structural reason the mutant
@@ -4331,11 +4331,11 @@ exclude_re = [
     # against comparisons that have already accepted it, and both are strict (`t > t_in`, `t < t_out`),
     # so neither `t_in`/`face_in` nor `t_out`/`face_out` can be rewritten. The near-parallel branch
     # sees the same `numerator` and has already returned `None` at `k == 7` if it is going to.
-    "ice\\.rs:145:29: replace \\+ with \\* in intersect",
+    "ice\\.rs:152:29: replace \\+ with \\* in intersect",
 
     # `if denominator < 0.0` -> `<= 0.0`, reachable only past `if denominator.abs() < 1e-15`, which
     # excludes `denominator == 0.0`. The two comparisons agree on every value that reaches this one.
-    "ice\\.rs:156:24: replace < with <= in intersect",
+    "ice\\.rs:163:24: replace < with <= in intersect",
 
     # The two acceptance tests in `facet`, mutated so they differ only where a dot product is exactly
     # +-0.0. `side` is +-1, so `side * d` and `side / d` carry the same sign for every `d != 0`, and
@@ -4344,9 +4344,9 @@ exclude_re = [
     # and the face it sits on. All three are bit-identical under the 60 000-ray comparison. (The match
     # guard on the same line is *not* equivalent and is killed by
     # `the_ray_tracer_reproduces_its_own_measured_optics`.)
-    "ice\\.rs:252:17: replace \\* with / in facet",
-    "ice\\.rs:258:44: replace \\* with / in facet",
-    "ice\\.rs:258:72: replace > with >= in facet",
+    "ice\\.rs:259:17: replace \\* with / in facet",
+    "ice\\.rs:265:44: replace \\* with / in facet",
+    "ice\\.rs:265:72: replace > with >= in facet",
 
     # `1.0 / crystal.refractive_index` -> `1.0 % …`, the `eta` handed to `facet` for the *entry*
     # interaction. For `n > 1`, which the guard above enforces, `1.0 % n` is `1.0`, so the mutant runs
@@ -4358,23 +4358,23 @@ exclude_re = [
     # never returns `None`; and `factor = eta·cos_i - cos_t <= 0` exactly when `eta <= 1`, so
     # `dot(transmitted, outward) = eta·dot(d, outward) + factor·dot(unit, outward) < 0` and the draw is
     # accepted. Both values of `eta` accept every draw that reaches the test.
-    "ice\\.rs:376:17: replace / with % in trace_on_grid",
+    "ice\\.rs:383:17: replace / with % in trace_on_grid",
 
     # The tally inside the `else` of `let Some(…) = refract(incident, normal, 1/n)`, which is
     # unreachable: entering the crystal `eta = 1/n < 1`, so `sin²_t = eta²(1 - cos²_i) <= eta² < 1` and
     # `refract` cannot return `None`. The branch exists because "cannot happen" is a claim about the
     # mathematics and the code should not fall through it silently; four mutants of a dead tally are
     # what that costs.
-    "ice\\.rs:392:21: replace \\+= with -= in trace_on_grid",
-    "ice\\.rs:392:21: replace \\+= with \\*= in trace_on_grid",
-    "ice\\.rs:393:24: replace \\+= with -= in trace_on_grid",
-    "ice\\.rs:393:24: replace \\+= with \\*= in trace_on_grid",
+    "ice\\.rs:399:21: replace \\+= with -= in trace_on_grid",
+    "ice\\.rs:399:21: replace \\+= with \\*= in trace_on_grid",
+    "ice\\.rs:400:24: replace \\+= with -= in trace_on_grid",
+    "ice\\.rs:400:24: replace \\+= with \\*= in trace_on_grid",
 
     # `if rng.unit() < reflectance` -> `<=`, which differs only when the draw lands bit-exactly on the
     # reflectance. `reflectance` is strictly positive here — `r_s` vanishes only at `eta == 1` and the
     # guard requires `n > 1` — so the mutant does not pick up the `unit() == 0.0` end of the range
     # either. Bit-identical under the 60 000-ray comparison.
-    "ice\\.rs:390:23: replace < with <= in trace_on_grid",
+    "ice\\.rs:397:23: replace < with <= in trace_on_grid",
 
     # Normalising the exit direction, `transmitted[i] / norm` -> `* norm` or `% norm`. `refract` returns
     # `eta·d + (eta·cos_i - cos_t)·n`, whose squared norm is identically
@@ -4384,19 +4384,19 @@ exclude_re = [
     # components are bit-identical, and the widest departure of any of the six is 1.95e-16 relative. A
     # pin tight enough to see that would be freezing the rounding of a Monte-Carlo estimate, not its
     # value.
-    "ice\\.rs:433:40: replace / with \\* in trace_on_grid",
-    "ice\\.rs:433:40: replace / with % in trace_on_grid",
-    "ice\\.rs:434:40: replace / with \\* in trace_on_grid",
-    "ice\\.rs:434:40: replace / with % in trace_on_grid",
-    "ice\\.rs:435:40: replace / with \\* in trace_on_grid",
-    "ice\\.rs:435:40: replace / with % in trace_on_grid",
+    "ice\\.rs:440:40: replace / with \\* in trace_on_grid",
+    "ice\\.rs:440:40: replace / with % in trace_on_grid",
+    "ice\\.rs:441:40: replace / with \\* in trace_on_grid",
+    "ice\\.rs:441:40: replace / with % in trace_on_grid",
+    "ice\\.rs:442:40: replace / with \\* in trace_on_grid",
+    "ice\\.rs:442:40: replace / with % in trace_on_grid",
 
     # `if x < 1e-8` -> `<=`, the series cutoff. The two branches meet at the cutoff: measured,
     # `bessel_j1(1e-8)` is `0x3e35798ee2308c3a` out of the recurrence and the same bits out of
     # `0.5 * x`, so the mutant returns an identical `f64` at the only argument where it takes a
     # different path. (`<` -> `==` is *not* equivalent: below the cutoff the two part company at
     # `1e-17`, and the domain-guard test now says so.)
-    "ice\\.rs:475:10: replace < with <= in bessel_j1",
+    "ice\\.rs:482:10: replace < with <= in bessel_j1",
 
     # The order the downward recurrence starts at, `2·(⌊(x + 10√x + 40)/2⌋ + 1)`. Miller's algorithm
     # converges from any start above the turning point and forgets its seed geometrically below it, so
@@ -4409,12 +4409,12 @@ exclude_re = [
     # to a start of 2 at `x = 1e-8`, is still exact there because `J_{n+1}/J_n ≈ x/2(n+1)` puts every
     # order above the second under rounding. This is the class #288 was found in, so the direction that
     # would matter was measured rather than assumed.
-    "ice\\.rs:517:26: replace \\+ with \\* in bessel_j1",
-    "ice\\.rs:517:49: replace \\+ with \\* in bessel_j1",
-    "ice\\.rs:517:57: replace \\* with \\+ in bessel_j1",
-    "ice\\.rs:517:57: replace \\* with / in bessel_j1",
-    "ice\\.rs:517:73: replace \\+ with - in bessel_j1",
-    "ice\\.rs:517:73: replace \\+ with \\* in bessel_j1",
+    "ice\\.rs:524:26: replace \\+ with \\* in bessel_j1",
+    "ice\\.rs:524:49: replace \\+ with \\* in bessel_j1",
+    "ice\\.rs:524:57: replace \\* with \\+ in bessel_j1",
+    "ice\\.rs:524:57: replace \\* with / in bessel_j1",
+    "ice\\.rs:524:73: replace \\+ with - in bessel_j1",
+    "ice\\.rs:524:73: replace \\+ with \\* in bessel_j1",
 
     # `if current.abs() > 1e250` -> `>=`, the overflow rescale. The two differ only when `|current|` is
     # bit-exactly the double nearest 10²⁵⁰. `current` is the running value of a recurrence seeded at 1
@@ -4424,13 +4424,13 @@ exclude_re = [
     # difference would be the rounding of that scaling and not a different answer. What the rescale
     # does to `j1` is pinned separately: `x = 2.5e-5` in the reference table sits in the only measured
     # band where it fires at `n = 2`, after `j1` has been assigned.
-    "ice\\.rs:531:26: replace > with >= in bessel_j1",
+    "ice\\.rs:538:26: replace > with >= in bessel_j1",
 
     # `if v < 1e-8` -> `<=` in the diffraction integrand, whose branches are `sin θ` and
     # `[2J₁(v)/v]² sin θ`. At `v == 1e-8` the second factor is bit-exactly `1.0` — measured,
     # `2·bessel_j1(1e-8)/1e-8 == 1.0`, and its square with it — so both branches return the identical
     # `f64` at the only argument where the mutant takes a different path.
-    "ice\\.rs:652:14: replace < with <= in diffraction_on_grid",
+    "ice\\.rs:659:14: replace < with <= in diffraction_on_grid",
 
     # --- iod.rs
     #
@@ -4761,9 +4761,9 @@ exclude_re = [
     # angle `tilt` is asked for is a refraction, at most about 35 arcmin, so `1 − cos <= 5.2e-5` and
     # `1/cos <= 1 + 6e-8`; the largest any of the three mutations can make that term is therefore
     # 1.93e-14 of a unit direction, 4e-9 arcsec. The reduction reports arcseconds.
-    "reduce\\.rs:62:45: replace \\+ with - in rotate",
-    "reduce\\.rs:62:77: replace - with \\+ in rotate",
-    "reduce\\.rs:62:77: replace - with / in rotate",
+    "reduce\\.rs:72:45: replace \\+ with - in rotate",
+    "reduce\\.rs:72:77: replace - with \\+ in rotate",
+    "reduce\\.rs:72:77: replace - with / in rotate",
 
     # `sky_to_pixel`'s Newton loop: the initial guess, `solve(xi − xi[0], eta − eta[0])`, read with
     # the constant term added instead of subtracted. That is a worse starting point for the same
@@ -4777,8 +4777,8 @@ exclude_re = [
     # 4.6e-4 px, both round-trip to the same worst error of 2.8e-4 px, and there is **no** case in
     # which the mutated start leaves the round trip above 1e-3 px while the unmutated one is below
     # it. The loop's own documented tolerance is a hundredth of a pixel, forty times that spread.
-    "wcs\\.rs:206:39: replace - with \\+ in TanSip::sky_to_pixel",
-    "wcs\\.rs:206:57: replace - with \\+ in TanSip::sky_to_pixel",
+    "wcs\\.rs:217:39: replace - with \\+ in TanSip::sky_to_pixel",
+    "wcs\\.rs:217:57: replace - with \\+ in TanSip::sky_to_pixel",
 
     # The convergence test's `< 1e-2` read as `<= 1e-2`, on each axis. The two differ only when a
     # correction is *exactly* 0.01 pixels, which the same 360 000-case sweep never produced: zero
@@ -4788,8 +4788,8 @@ exclude_re = [
     # The `&&` on that same line is **not** listed and is not equivalent: stopping when either axis
     # has converged returns 9.8e-2 px out where waiting for both gives 9.3e-6, and
     # `the_inverse_map_converges_on_both_axes_before_it_reports_a_pixel` is the test that says so.
-    "wcs\\.rs:213:31: replace < with <= in TanSip::sky_to_pixel",
-    "wcs\\.rs:213:56: replace < with <= in TanSip::sky_to_pixel",
+    "wcs\\.rs:224:31: replace < with <= in TanSip::sky_to_pixel",
+    "wcs\\.rs:224:56: replace < with <= in TanSip::sky_to_pixel",
 
     # The widest-pair search's inner bound, `for j in (i + 1)..4` read as `(i * 1)..4`, which lets
     # `j == i`. The pair `(i, i)` has a separation of exactly zero, so it can never beat a positive
@@ -4797,7 +4797,7 @@ exclude_re = [
     # already refused, by `best.0 <= 0.0`, under both forms. The accumulator's initial `−∞` is what
     # makes this hold: the mutated first iteration sets `best = (0.0, 0, 0)`, and every real pair
     # after it overwrites that.
-    "quads\\.rs:59:21: replace \\+ with \\* in quad_code",
+    "quads\\.rs:68:21: replace \\+ with \\* in quad_code",
 
     # One factor of a squared deviation in the second moment, `(x − cx)` read as `(x + cx)`, in each
     # of the four places. Algebraically identical, and not by a bound:
@@ -4811,10 +4811,10 @@ exclude_re = [
     #
     # cargo-mutants mutates one operator at a time, which is what makes this an equivalence: both
     # factors turned to `+` would give `(x + cx)²` and would be a different number.
-    "sources\\.rs:208:31: replace - with \\+ in centroid",
-    "sources\\.rs:208:42: replace - with \\+ in centroid",
-    "sources\\.rs:208:53: replace - with \\+ in centroid",
-    "sources\\.rs:208:64: replace - with \\+ in centroid",
+    "sources\\.rs:223:31: replace - with \\+ in centroid",
+    "sources\\.rs:223:42: replace - with \\+ in centroid",
+    "sources\\.rs:223:53: replace - with \\+ in centroid",
+    "sources\\.rs:223:64: replace - with \\+ in centroid",
 
     # The same identity again, in the two Monte-Carlo estimators (#273). Every one of these is one
     # factor of a product summed over a sample, with the *other* factor taken about that sample's own
@@ -4881,11 +4881,11 @@ exclude_re = [
     # same |F(f)| for every f, and the MTF is a magnitude by definition: a slanted-edge measurement
     # has no phase reference, because where the edge sits in the patch is not a property of the
     # camera.
-    "image_quality\\.rs:141:31: replace \\+ with - in SlantedEdge::mtf",
-    "image_quality\\.rs:141:37: replace - with \\+ in SlantedEdge::mtf",
-    "image_quality\\.rs:143:16: replace \\+= with -= in SlantedEdge::mtf",
-    "image_quality\\.rs:144:16: replace -= with \\+= in SlantedEdge::mtf",
-    "image_quality\\.rs:145:16: replace \\+= with -= in SlantedEdge::mtf",
+    "image_quality\\.rs:152:31: replace \\+ with - in SlantedEdge::mtf",
+    "image_quality\\.rs:152:37: replace - with \\+ in SlantedEdge::mtf",
+    "image_quality\\.rs:154:16: replace \\+= with -= in SlantedEdge::mtf",
+    "image_quality\\.rs:155:16: replace -= with \\+= in SlantedEdge::mtf",
+    "image_quality\\.rs:156:16: replace \\+= with -= in SlantedEdge::mtf",
 
     # --- `earthvision/image_quality.rs`. A scan that cannot reach the sample the guard is about.
     #
@@ -4898,8 +4898,8 @@ exclude_re = [
     # and so on up to `v[len−1] <= level`, contradicting the peak. So the walk only ever tests the
     # comparison at indices where the two operators agree. The forward branch is the same argument
     # read the other way, with `v[0]` the peak.
-    "image_quality\\.rs:220:52: replace > with >= in crossing",
-    "image_quality\\.rs:227:30: replace > with >= in crossing",
+    "image_quality\\.rs:231:52: replace > with >= in crossing",
+    "image_quality\\.rs:238:30: replace > with >= in crossing",
 
     # --- `earthvision/image_quality.rs`. Three algebraic identities in the edge fit and the binning.
     #
@@ -4915,9 +4915,9 @@ exclude_re = [
     # `span` — and the normalisation `(v − start)/span` is `(−v − (−start))/(−span)`, the same
     # number. The contrast test upstream reads `|span|`. The ESF is the only thing that leaves the
     # function, so the sign of what it was built from is not observable anywhere.
-    "image_quality\\.rs:264:65: replace \\* with / in fit_edge_line",
-    "image_quality\\.rs:280:24: replace - with \\+ in fit_edge_line",
-    "image_quality\\.rs:347:29: replace \\+= with -= in analyse_slanted_edge",
+    "image_quality\\.rs:275:65: replace \\* with / in fit_edge_line",
+    "image_quality\\.rs:291:24: replace - with \\+ in fit_edge_line",
+    "image_quality\\.rs:358:29: replace \\+= with -= in analyse_slanted_edge",
 
     # --- `earthvision/image_quality.rs`. A window with no deviation is a window that was rejected.
     #
@@ -4927,7 +4927,7 @@ exclude_re = [
     # equal, so all eight ring comparisons `ring[i] >= centre` are true, so the walk around the ring
     # has zero transitions, so `transitions <= 2` skips it before it can contribute. Every deviation
     # in the list is therefore positive, and so is any median of them.
-    "image_quality\\.rs:526:23: replace > with >= in snr_homogeneous_area",
+    "image_quality\\.rs:537:23: replace > with >= in snr_homogeneous_area",
 
     # --- `earthvision/image_quality.rs`. Four exact-boundary comparisons, on quantities that are
     # fitted rather than chosen.
@@ -4944,10 +4944,10 @@ exclude_re = [
     # `367:25 <`→`<=`/`==` by `a_step_at_exactly_the_contrast_floor_is_measured`, which does sit on
     # its boundary exactly — the contrast floor is a config field, so a step edge can be built to
     # equal it in f64.
-    "image_quality\\.rs:151:33: replace < with <= in SlantedEdge::mtf",
-    "image_quality\\.rs:297:17: replace > with >= in fit_edge_line",
-    "image_quality\\.rs:331:14: replace < with <= in analyse_slanted_edge",
-    "image_quality\\.rs:342:22: replace < with <= in analyse_slanted_edge",
+    "image_quality\\.rs:162:33: replace < with <= in SlantedEdge::mtf",
+    "image_quality\\.rs:308:17: replace > with >= in fit_edge_line",
+    "image_quality\\.rs:342:14: replace < with <= in analyse_slanted_edge",
+    "image_quality\\.rs:353:22: replace < with <= in analyse_slanted_edge",
 
     # --- `earthvision/image_quality.rs`. Resampling at unit factor, and a clamp that only binds
     # where the two taps it feeds are the same pixel.
@@ -4966,11 +4966,11 @@ exclude_re = [
     # `h + 1` or `h / 1` cannot index past the end. And the clamp binds only when `sy > h_src − 1`,
     # where `y0 = h_src − 1` and `y1 = min(y0 + 1, h_src − 1) = y0`: the two taps are the same
     # pixel, and `top·(1 − ty) + top·ty = top` for whatever `ty` the clamp left behind.
-    "image_quality\\.rs:620:40: replace < with <= in resample",
-    "image_quality\\.rs:633:87: replace - with \\+ in resample",
-    "image_quality\\.rs:633:87: replace - with / in resample",
-    "image_quality\\.rs:634:87: replace - with \\+ in resample",
-    "image_quality\\.rs:634:87: replace - with / in resample",
+    "image_quality\\.rs:631:40: replace < with <= in resample",
+    "image_quality\\.rs:644:87: replace - with \\+ in resample",
+    "image_quality\\.rs:644:87: replace - with / in resample",
+    "image_quality\\.rs:645:87: replace - with \\+ in resample",
+    "image_quality\\.rs:645:87: replace - with / in resample",
 
     # --- `earthvision/image_quality.rs`. Which side the one-pixel step is taken to.
     #
@@ -4982,8 +4982,8 @@ exclude_re = [
     # is quoted against a product specification, where the interesting disagreement is the 1.6 %
     # between the measured 0.5078 m and the nominal 0.5 m; a tolerance that rejected a step in the
     # other direction would have to be five decades tighter than the quantity it is checking.
-    "image_quality\\.rs:700:45: replace \\+ with - in ground_sample_distance",
-    "image_quality\\.rs:701:36: replace \\+ with - in ground_sample_distance",
+    "image_quality\\.rs:711:45: replace \\+ with - in ground_sample_distance",
+    "image_quality\\.rs:712:36: replace \\+ with - in ground_sample_distance",
 
     # --- `earthvision/radiative_transfer.rs`. A threshold with nothing on the other side of it.
     #
@@ -5002,7 +5002,7 @@ exclude_re = [
     # harmless, and a test asserting the branches agree at the threshold would be asserting
     # something false. `the_pole_threshold_is_unreachable_from_below` walks the `f64` neighbourhood
     # of `|d_z| = 1` and pins the emptiness instead.
-    "radiative_transfer\\.rs:316:19: replace < with <= in scatter_direction",
+    "radiative_transfer\\.rs:325:19: replace < with <= in scatter_direction",
 
     # --- `earthvision/radiative_transfer.rs`. The mirror image of a mirror-symmetric problem.
     #
@@ -5031,7 +5031,7 @@ exclude_re = [
     # over both hemispheres and eight azimuths, which is what makes the ensemble contain `mirror(d)`
     # with exactly the weight it gives `d`. Without that step the mutant is `d · mirror(view)` and
     # nothing says the walk visits the mirrored path.
-    "radiative_transfer\\.rs:450:46: replace \\+ with - in estimate",
+    "radiative_transfer\\.rs:459:46: replace \\+ with - in estimate",
 
     # --- `estimation/process_noise.rs`. A pivot search that re-examines the row it started from.
     #
@@ -5187,7 +5187,7 @@ exclude_re = [
     # 1e-20 to 1e20 with both signs and with exact zeros, infinities and NaNs drawn deliberately.
     # 14 900 of them differ between the two forms, and all 14 900 differ only in the sign bit of a
     # component that is zero in both.
-    "crates/spacelab-gnss/src/cycle_slip\\.rs:359:20: replace \\+ with \\* in solve",
+    "crates/spacelab-gnss/src/cycle_slip\\.rs:368:20: replace \\+ with \\* in solve",
 
     # `span` is `max |t - t_ref|` and `scale` is `span` where that is positive and `1.0` where it is
     # not. Both mutants change only which positive, finite number `scale` ends up being: `- -> +`
@@ -5220,8 +5220,8 @@ exclude_re = [
     # separated one would be pinning which scale the platform's arithmetic rounds best under. At the
     # order 2 fit the module is written for, that departure is 1.5e-14 of a geometry-free series of
     # about 0.1 m, i.e. 1e-15 m against a threshold in centimetres.
-    "crates/spacelab-gnss/src/cycle_slip\\.rs:300:27: replace - with \\+ in predict",
-    "crates/spacelab-gnss/src/cycle_slip\\.rs:302:25: replace > with < in predict",
+    "crates/spacelab-gnss/src/cycle_slip\\.rs:309:27: replace - with \\+ in predict",
+    "crates/spacelab-gnss/src/cycle_slip\\.rs:311:25: replace > with < in predict",
 
     # `conjunction_domain.rs`'s curvilinear search (#322), eight mutants across three private
     # helpers. They are one family: every one is a **tie-break or a convergence tolerance**, and

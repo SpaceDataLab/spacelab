@@ -28,6 +28,15 @@
 //! `C(n,4)` — 70 at `n = 8`, 210 at 10, 4845 at 20. The caller chooses `n`, and the cost of choosing
 //! it too large is quadratic in the matching step that follows. Eight to twelve is the usual range;
 //! astrometry.net's index files are built the same way and for the same reason.
+//!
+//! # Gate
+//!
+//! `derivations/quad_hash.mac` shows the code is the complex similarity `(1 + i)(z − a)/(b − a)`,
+//! invariant under every similarity of the plane, that the A-B swap is `t → 1 − t` and the circle
+//! test the circle on AB as diameter; `derivations/quad_hash.gp` recomputes its exact code in
+//! complex rationals. The gates are in `tests/derivation_gates.rs`:
+//! `the_quad_code_is_the_similarity_that_puts_a_and_b_at_the_unit_corners` (G2) and
+//! `a_similarity_of_the_field_leaves_the_code_bit_for_bit` (G4).
 
 use alloc::vec::Vec;
 

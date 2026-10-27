@@ -20,6 +20,18 @@
 //! [`apply_chirp_scaling`] is the interpolation-free differential-RCMC primitive of the Chirp-Scaling
 //! Algorithm: a phase multiply that re-scales a range chirp and shifts its compressed position without
 //! resampling. `alloc` for the FFT buffers.
+//!
+//! Gate: `derivations/sar_range_doppler.mac` derives, from the point-target echo, the matched
+//! filter of a sampled chirp as an exact Dirichlet kernel, the sinc limit's −3 dB width
+//! `0.88589…/B` and −13.26 dB sidelobe, `K_a` as the curvature of the azimuth phase, the
+//! stationary-phase range `R₀/D` with `range_migration` its leading term, `K_src` as the curvature of
+//! the 2-D spectrum, and the completed square behind `apply_chirp_scaling`;
+//! `derivations/sar_range_doppler.gp` re-derives the roots, `K_src` and the kernel at 100 digits. The
+//! module tests `the_matched_filter_of_a_chirp_is_its_dirichlet_kernel` (G2),
+//! `the_compressed_chirp_tends_to_the_sinc_of_its_bandwidth` (G3),
+//! `the_rda_geometry_terms_are_the_stationary_phase_values` (G2),
+//! `the_src_rate_matches_the_stationary_phase_value_where_the_migration_factor_bites` (G2) and
+//! `chirp_scaling_completes_the_square` (G1) hold the shipped code to them.
 
 // n·dt casts and SAR/LFM/PSLR/FFT doc terms are intentional; short physical names mirror the literature.
 #![allow(
@@ -458,7 +470,8 @@ mod tests {
         clippy::cast_sign_loss,
         clippy::similar_names,
         clippy::unwrap_used,
-        clippy::expect_used
+        clippy::expect_used,
+        clippy::excessive_precision
     )]
     use super::*;
 
@@ -984,13 +997,17 @@ mod tests {
         assert_eq!(s[15].re, 0.0);
     }
 
-    /// `K_src` against an independent evaluation, where the migration factor is large enough to see.
+    /// (G2) `K_src` is the range-frequency curvature of the 2-D point-target spectrum, where the
+    /// migration factor is large enough to see.
     ///
     /// `src_fm_rate_vanishes_at_zero_doppler_and_matches_the_formula` runs at a spaceborne geometry
     /// where `lambda*f_eta/(2V)` is 0.012 and `D0` is 1 to within 1e-4, so its 1e-3 relative tolerance
     /// cannot see any factor of `D0` at all -- eight mutants of the radicand, of `f0*D0` and of the
     /// migration factor outlived it. Here the factor is 0.75, 0.50 and −0.90, so `D0^3` is 0.29, 0.65
-    /// and 0.083. References from `derivations/src_fm_rate.mac` at 60 digits.
+    /// and 0.083. `derivations/sar_range_doppler.mac` derives `K_src` as the second-order coefficient
+    /// of the spectrum phase `−4πR₀√((f₀+f_τ)² − c²f_η²/4V²)/c` found by stationary phase, and
+    /// `derivations/sar_range_doppler.gp` differentiates that phase numerically at 100 digits for
+    /// these three cases, reproducing the references `derivations/src_fm_rate.mac` printed at 60.
     #[test]
     fn the_src_rate_matches_the_stationary_phase_value_where_the_migration_factor_bites() {
         fn params(wavelength: f64, velocity: f64, r0_slant: f64) -> RdaParams {
@@ -1090,6 +1107,156 @@ mod tests {
                     want.im
                 );
             }
+        }
+    }
+
+    /// (G2) The matched filter of a chirp against itself is the Dirichlet kernel, at every lag.
+    ///
+    /// `derivations/sar_range_doppler.mac` shows that for `lfm_chirp`'s samples the lag-`m` product
+    /// `c_{i+m} c̄_i` is geometric in `i`, so the correlation is exactly
+    /// `|sin(πKm·dt²·(N − m)) / sin(πKm·dt²)|` (`derivations/sar_range_doppler.gp` re-sums it term by
+    /// term at 100 digits). That is the whole compressed pulse — main lobe, sidelobes, the fall-off to
+    /// the ends — so a matched filter that conjugated the wrong spectrum, dropped the zero padding
+    /// into a circular correlation, or put the lags in the wrong bins is a different curve.
+    #[test]
+    fn the_matched_filter_of_a_chirp_is_its_dirichlet_kernel() {
+        let (n, k, fs) = (200usize, 3.7e13, 1.0e8);
+        let chirp = lfm_chirp(n, k, fs);
+        let out = matched_filter(&chirp, &chirp);
+        assert_eq!(out.len(), 512);
+        let dt = 1.0 / fs;
+        let mut worst = 0.0_f64;
+        for m in 0..n {
+            let want = if m == 0 {
+                n as f64
+            } else {
+                let x = core::f64::consts::PI * k * m as f64 * dt * dt;
+                (libm::sin(x * (n - m) as f64) / libm::sin(x)).abs()
+            };
+            // Positive lag m at bin m, negative lag at bin 512 − m; the same magnitude.
+            for bin in [m, (out.len() - m) % out.len()] {
+                let err = (out[bin].abs() - want).abs();
+                assert!(
+                    err < 1e-11 * n as f64,
+                    "lag {m}, bin {bin}: |out| = {}, want {want}",
+                    out[bin].abs()
+                );
+                worst = worst.max(err);
+            }
+        }
+        // Lags beyond the chirp's length have no overlap at all.
+        for (bin, z) in out.iter().enumerate().take(512 - n + 1).skip(n) {
+            assert!(z.abs() < 1e-11 * n as f64, "bin {bin} holds {}", z.abs());
+        }
+        println!("matched filter vs Dirichlet kernel: worst {worst:.3e}");
+    }
+
+    /// (G3) A long, finely sampled chirp compresses to the sinc of its bandwidth: −3 dB width
+    /// `0.88589…/B` and first sidelobe `−13.2615 dB`, the roots `derivations/sar_range_doppler.mac`
+    /// finds at 40 digits (and the `.gp` at 100).
+    ///
+    /// `range_compression_matches_impulse_response_theory` samples the pulse 4× and its two numbers
+    /// sit 2.3 % and 0.2 dB off the limit — linear interpolation across a narrow main lobe, and a
+    /// sidelobe peak that falls between samples. At 16× and a time-bandwidth product of 1000 both
+    /// discretisation errors are small enough to hold the shipped compression to the limit itself.
+    #[test]
+    fn the_compressed_chirp_tends_to_the_sinc_of_its_bandwidth() {
+        const WIDTH_TIMES_B: f64 = 0.8858929413789046806167399848256803354143;
+        const FIRST_SIDELOBE_DB: f64 = -13.26145888404828597295021584811088745087;
+        let (fs, bw, tp) = (16.0e6, 1.0e6, 1.0e-3);
+        let n = (tp * fs) as usize;
+        let chirp = lfm_chirp(n, bw / tp, fs);
+        let mag = magnitude(&matched_filter(&chirp, &chirp));
+        // The pulse sits at lag 0; rotate it to the middle so both walks have room.
+        let half = mag.len() / 2;
+        let centred: Vec<f64> = (0..mag.len())
+            .map(|i| mag[(i + half) % mag.len()])
+            .collect();
+        let width = resolution_3db_samples(&centred) * bw / fs;
+        let pslr = peak_sidelobe_ratio_db(&centred);
+        println!("compressed chirp: width x B = {width}, PSLR = {pslr} dB");
+        assert!(
+            (width / WIDTH_TIMES_B - 1.0).abs() < 2e-3,
+            "width x B = {width}, want {WIDTH_TIMES_B}"
+        );
+        assert!(
+            (pslr - FIRST_SIDELOBE_DB).abs() < 0.02,
+            "PSLR {pslr} dB, want {FIRST_SIDELOBE_DB}"
+        );
+    }
+
+    /// (G2) The azimuth FM rate and (G3) the range-cell migration are the stationary-phase values of
+    /// the exact range history `R(η) = √(R₀² + V²η²)`.
+    ///
+    /// `derivations/sar_range_doppler.mac` derives both: `K_a` is minus the slope of the Doppler
+    /// `(1/2π)·d/dη(−4πR/λ)` at broadside, and the range-Doppler range is `R₀/D`, whose migration
+    /// `R₀(1/D − 1) = (λ²R₀f_η²/8V²)(1 + 3m²/4 + O(m⁴))` with `m = λf_η/2V` has `range_migration`
+    /// as its leading term. The first is checked against a second difference of the exact phase,
+    /// written without cancellation; the second against the exact migration, by the size of the
+    /// remainder — the relative gap must be `3m²/4` to within `m⁴`, which says the coded term is the
+    /// leading one with the right coefficient and nothing more.
+    #[test]
+    fn the_rda_geometry_terms_are_the_stationary_phase_values() {
+        let p = RdaParams {
+            prf: 1600.0,
+            velocity: 7000.0,
+            wavelength: 0.24,
+            r0_slant: 850e3,
+            range_spacing: 0.5,
+        };
+        let (v, r0, lam) = (p.velocity, p.r0_slant, p.wavelength);
+        // φ(η) − φ(0) = −4π(R − R₀)/λ = −4πV²η²/((R + R₀)λ).
+        let dphi = |eta: f64| {
+            let r = (r0 * r0 + v * v * eta * eta).sqrt();
+            -4.0 * core::f64::consts::PI * v * v * eta * eta / ((r + r0) * lam)
+        };
+        // The step leaves an O((Vh/R₀)²) truncation, 2e-15 here.
+        let h = 1e-5;
+        let second = (dphi(h) + dphi(-h)) / (h * h);
+        let ka = -second / (2.0 * core::f64::consts::PI);
+        assert!(
+            (ka / azimuth_fm_rate(&p) - 1.0).abs() < 1e-12,
+            "K_a {} vs the curvature of the exact phase {ka}",
+            azimuth_fm_rate(&p)
+        );
+
+        for f_eta in [50.0, 200.0, 800.0, 3000.0, -6000.0] {
+            let m = lam * f_eta / (2.0 * v);
+            let d = (1.0 - m * m).sqrt();
+            // R₀(1/D − 1) = R₀ m²/(D (1 + D)), free of the cancellation in 1/D − 1.
+            let exact = r0 * m * m / (d * (1.0 + d));
+            let gap = range_migration(f_eta, &p) / exact - 1.0;
+            assert!(
+                (gap + 0.75 * m * m).abs() < 2.0 * m.powi(4),
+                "f_eta {f_eta}: m = {m}, relative gap {gap:e}, want {:e}",
+                -0.75 * m * m
+            );
+        }
+    }
+
+    /// (G1) `apply_chirp_scaling` completes the square: a chirp of rate `K` centred on `c` times
+    /// `exp(jπKq(t − t_ref)²)` is a chirp of rate `K(1 + q)` centred on `(c + q·t_ref)/(1 + q)`,
+    /// times the constant `exp(jπKq(c − t_ref)²/(1 + q))` (`derivations/sar_range_doppler.mac`).
+    ///
+    /// Checked sample by sample as a phasor, so the claim holds exactly rather than through where a
+    /// matched filter happens to peak, which is all
+    /// `chirp_scaling_shifts_the_compressed_position_without_interpolation` can see.
+    #[test]
+    fn chirp_scaling_completes_the_square() {
+        let (n, fs, k, q, tau_ref) = (256usize, 1.0e8, 5.0e13, 0.05, 100.0);
+        let c0 = (n as f64 - 1.0) / 2.0; // lfm_chirp centres its own samples
+        let chirp = lfm_chirp(n, k, fs);
+        let scaled = apply_chirp_scaling(&chirp, k, q, tau_ref, fs);
+        let dt = 1.0 / fs;
+        let centre = (c0 + q * tau_ref) / (1.0 + q);
+        let constant = core::f64::consts::PI * k * q * ((c0 - tau_ref) * dt).powi(2) / (1.0 + q);
+        for (m, z) in scaled.iter().enumerate() {
+            let t = (m as f64 - centre) * dt;
+            let want = Complex::from_polar(
+                1.0,
+                core::f64::consts::PI * k * (1.0 + q) * t * t + constant,
+            );
+            assert!((*z - want).abs() < 1e-11, "sample {m}: {z:?} vs {want:?}");
         }
     }
 }

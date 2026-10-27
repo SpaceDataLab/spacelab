@@ -6,6 +6,14 @@
 //! harmonic corrections to the argument of latitude, radius and inclination. The receiver evaluates it
 //! at a time `tk` seconds from the ephemeris reference epoch [`BroadcastEphemeris::toe`] (already
 //! reduced for the GPS-week rollover).
+//!
+//! Gate: `derivations/gps_broadcast_orbit.mac` shows that the atan2 true anomaly used here is the
+//! ICD's half-angle form, that the Remondi velocity is the time derivative of the ICD position,
+//! and that `F_RELATIVITY` is `−2√μ/c²` to the ten digits IS-GPS-200 prints; it evaluates the
+//! algorithm exactly on the module's sample ephemeris, re-computed independently by
+//! `derivations/gps_broadcast_orbit.gp`. The module test
+//! `the_broadcast_orbit_is_the_icd_algorithm_evaluated_exactly` (G2) holds the shipped position
+//! and velocity, GPS and BeiDou GEO, to those values.
 
 // The single letters (a, e, i, n, r, u, x, y, z) are the IS-GPS-200 orbit notation; the doc allow is
 // for constellation/spec proper nouns (BeiDou, IS-GPS-200, RINEX), not identifiers.
@@ -298,6 +306,8 @@ impl BroadcastEphemeris {
 
 #[cfg(test)]
 mod tests {
+    // The references are carried at the precision Maxima printed them to.
+    #![allow(clippy::excessive_precision)]
     use super::*;
     use spacelab_core::{Angle, Vec3};
     use spacelab_elements::KeplerianElements;
@@ -528,6 +538,106 @@ mod tests {
         );
     }
 
+    /// (G2) Position and velocity are the IS-GPS-200 Table 20-IV algorithm evaluated exactly: the
+    /// references are `derivations/gps_broadcast_orbit.mac` at 40 digits, from this sample's doubles
+    /// as exact binary rationals, and agree with the independent PARI/GP route of
+    /// `derivations/gps_broadcast_orbit.gp` to 1e-30. The same derivation shows the code's atan2
+    /// true anomaly is the ICD's half-angle form and that the Remondi velocity is the symbolic time
+    /// derivative of the ICD position, so the velocity references are that derivative, not a
+    /// difference quotient.
+    ///
+    /// Three epochs a quarter-orbit or more apart put every harmonic factor at a different phase,
+    /// and the BeiDou GEO case carries the BDS-SIS-ICD `Rz(Ω̇ₑ·tk)·Rx(−5°)` path. The residual is
+    /// the f64 evaluation: Kepler's equation is solved to a step below 1e-14 rad, which is 3e-7 m at
+    /// these radii, and each trigonometric call rounds at 1e-16 relative.
+    #[test]
+    fn the_broadcast_orbit_is_the_icd_algorithm_evaluated_exactly() {
+        let eph = sample();
+        for (tk, want_p, want_v) in [
+            (
+                0.0,
+                [
+                    -1.608_349_047_629_949_522_608_307_177_496_015_129_125e7,
+                    1.245_509_414_443_383_025_514_302_169_956_380_305_266e7,
+                    1.683_329_974_311_097_511_202_157_632_207_521_635_224e7,
+                ],
+                [
+                    4.386_156_686_763_534_240_872_302_271_518_575_758_199e2,
+                    -2.132_868_891_403_938_462_852_896_741_488_921_059_079e3,
+                    2.009_134_984_342_218_859_848_980_124_961_002_776_766e3,
+                ],
+            ),
+            (
+                1800.0,
+                [
+                    -1.541_415_114_366_485_200_684_389_006_242_593_955_029e7,
+                    8.228_261_553_544_978_826_839_208_835_223_353_847_592e6,
+                    1.982_090_795_702_325_132_508_994_429_627_142_134_235e7,
+                ],
+                [
+                    2.838_977_683_361_724_098_871_682_382_161_423_540_394e2,
+                    -2.535_947_046_765_945_106_357_328_123_330_572_673_875e3,
+                    1.291_283_960_177_011_331_596_598_677_536_856_884_211e3,
+                ],
+            ),
+            (
+                -7200.0,
+                [
+                    -1.727_221_023_687_484_819_761_309_720_069_030_491_116e7,
+                    1.967_569_356_933_729_596_983_169_688_362_624_037_098e7,
+                    -3.674_667_302_932_292_817_188_733_379_826_896_841_437e6,
+                ],
+                [
+                    -5.396_257_837_432_511_153_667_658_796_995_594_911_98e2,
+                    9.182_671_115_107_704_676_621_603_652_503_407_311_922e1,
+                    3.144_095_093_111_117_689_203_125_539_001_010_362_227e3,
+                ],
+            ),
+        ] {
+            let (p, v) = eph.position_velocity_ecef(tk);
+            for k in 0..3 {
+                assert!(
+                    (p[k] - want_p[k]).abs() < 1e-6,
+                    "tk = {tk}, axis {k}: position {} vs {}, |d| = {:.2e} m",
+                    p[k],
+                    want_p[k],
+                    (p[k] - want_p[k]).abs()
+                );
+                assert!(
+                    (v[k] - want_v[k]).abs() < 1e-9,
+                    "tk = {tk}, axis {k}: velocity {} vs {}, |d| = {:.2e} m/s",
+                    v[k],
+                    want_v[k],
+                    (v[k] - want_v[k]).abs()
+                );
+            }
+        }
+
+        let geo = BroadcastEphemeris {
+            system: GnssSystem::Beidou,
+            prn: 1,
+            sqrt_a: 6493.4,
+            e: 0.000_4,
+            i0: 0.02,
+            ..sample()
+        };
+        let want = [
+            -3.899_982_835_142_000_127_548_946_848_277_510_675_753e7,
+            1.586_104_032_190_708_188_350_330_687_563_835_373_037e7,
+            1.980_797_178_700_234_885_081_610_668_226_004_636_799e6,
+        ];
+        let p = geo.position_ecef(300.0);
+        for k in 0..3 {
+            assert!(
+                (p[k] - want[k]).abs() < 1e-6,
+                "GEO axis {k}: {} vs {}, |d| = {:.2e} m",
+                p[k],
+                want[k],
+                (p[k] - want[k]).abs()
+            );
+        }
+    }
+
     #[test]
     fn kepler_newton_converges_where_a_fixed_point_iteration_would_not() {
         // At GPS eccentricities the Newton denominator `1 − e·cos E` is within 2 % of one, so dropping
@@ -614,7 +724,8 @@ mod tests {
         };
         let amplitude = rel_only.clock_correction(0.0, core::f64::consts::FRAC_PI_2);
         assert!(
-            (amplitude.abs() - 1.419_597e-8).abs() < 1e-13,
+            (amplitude.abs() - 1.419_593_884_584_247_749_902_824_751_776_936_381_639e-8).abs()
+                < 1e-22,
             "relativistic amplitude {amplitude} s"
         );
         assert!(amplitude < 0.0, "F < 0, so the term is negative at E = π/2");

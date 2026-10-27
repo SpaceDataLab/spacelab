@@ -1,0 +1,182 @@
+/* The NeQuick profile parameters -- spacelab-ionosphere/src/parameters.rs (and the Galileo
+ * topside shape factor in galileo.rs) -- from ICD "Ionospheric Correction Algorithm for Galileo
+ * Single Frequency Users" issue 1.2, section 2.5.4.6 to 2.5.5.11 (Eq. 20 to 106), its Annex F
+ * pseudo-code where the code follows that, and, for the ITU variant's amplitudes, `prepmdgr` in
+ * ITU-R P.531's NeQuick_2.for.
+ *
+ * Each line prints `<name>: 0`:
+ *   1. the smoothed switches are NeqJoin, join(f1, f2, a, x) = (f1 e^(a x) + f2)/(e^(a x) + 1):
+ *      Eq. 29 (chi_eff), 84 (rho), 95 (A2a), 98 (A3), 101 (kb) and 102 (k) exactly;
+ *   2. Eq. 34's latitude factor is tanh(0.15 phi); Eq. 26's local-time cosine is -cos(pi LT/12)
+ *      and 24 h periodic (so the code needs no mod 24); Eq. 85's B2bot is ITU's
+ *      38.5 NmF2/(e^-3.467 foF2^1.714 M^2.02); Eq. 87's B1bot = 0.5 (hmF1 - hmE) is ITU's
+ *      0.5 (hmF2 - hmF1) once Eq. 79 holds;
+ *   3. chi0 = 86.23292796211615 deg (Eq. 28) is the double nearest the fixed point of
+ *      chi = 90 - 0.24 e^(20 - 0.2 chi), the angle at which Eq. 29's two branches meet;
+ *   4. the 0.124 of Eq. 36/39/77, N[1e11 m^-3] = 0.124 f[MHz]^2, is the plasma-frequency
+ *      relation N = 4 pi^2 eps0 me f^2/e^2 (CODATA 2018) rounded to three digits;
+ *   5. the existing reference values in parameters.rs's tests (the effective solar zenith angle at
+ *      two epochs, foE at the equator) are these equations' values to 1e-15;
+ *   6. the full parameter set -- Eq. 20 to 98 at three profiles, two rule sets -- printed at
+ *      30 digits, the literals of the gate test, together with an F1 layer the iteration drives
+ *      negative, which the ITU rset replace by the no-F1 branch.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/nequick_parameters.mac </dev/null
+ */
+
+ratprint : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+small(name, d, tol) := zero(name, if abs(d) < tol then 0 else d)$
+
+/* 1. The joins. */
+join(f1, f2, a, x) := (f1*exp(a*x) + f2)/(exp(a*x) + 1)$
+zero("eq_29_effective_zenith_angle_is_a_join", ratsimp(
+  (chi + (90 - 24/100*exp(20 - chi/5))*exp(12*(chi - chi0)))/(1 + exp(12*(chi - chi0)))
+  - join(90 - 24/100*exp(20 - chi/5), chi, 12, chi - chi0)))$
+zero("eq_84_rho_is_a_join", ratsimp(
+  (q*exp(20*(q - 175/100)) + 175/100)/(exp(20*(q - 175/100)) + 1)
+  - join(q, 175/100, 20, q - 175/100)))$
+zero("eq_95_a2a_is_a_join", ratsimp(
+  (a2*exp(a2 - 8/10*n1) + 8/10*n1)/(1 + exp(a2 - 8/10*n1)) - join(a2, 8/10*n1, 1, a2 - 8/10*n1)))$
+zero("eq_98_a3_is_a_join", ratsimp(
+  (a3*exp(60*(a3 - 5/1000)) + 5/100)/(1 + exp(60*(a3 - 5/1000)))
+  - join(a3, 5/100, 60, a3 - 5/1000)))$
+zero("eq_101_kb_is_a_join", ratsimp(
+  (ka*exp(ka - 2) + 2)/(1 + exp(ka - 2)) - join(ka, 2, 1, ka - 2)))$
+zero("eq_102_k_is_a_join", ratsimp(
+  (8*exp(kb - 8) + kb)/(1 + exp(kb - 8)) - join(8, kb, 1, kb - 8)))$
+
+/* 2. Equivalent forms. */
+zero("eq_34_latitude_factor_is_tanh", ratsimp(exponentialize(
+  (exp(3/10*phi) - 1)/(exp(3/10*phi) + 1) - tanh(15/100*phi))))$
+zero("eq_26_local_time_cosine", trigsimp(trigexpand(cos(expand(%pi/12*(12 - lt))) + cos(%pi*lt/12))))$
+zero("eq_26_is_24_hour_periodic", trigsimp(trigexpand(
+  cos(expand(%pi/12*(12 - (lt + 24)))) - cos(expand(%pi/12*(12 - lt))))))$
+assume(f > 0, m > 0)$
+zero("eq_85_b2bot_is_the_itu_form", radcan(
+  385/1000*nm/(1/100*exp(-3467/1000 + 857/1000*log(f^2) + 202/100*log(m)))
+  - 385/10*nm/(exp(-3467/1000)*f^(1714/1000)*m^(202/100))))$
+zero("eq_87_b1bot_is_the_itu_form", ratsimp(
+  subst(hf1 = (hf2 + he)/2, 5/10*(hf1 - he) - 5/10*(hf2 - hf1))))$
+
+/* 3. chi0 as the fixed point, by Newton at 50 digits. */
+fpprec : 50$
+g(c) := 90 - 24/100*exp(20 - c/5) - c$
+chi0_root : block([c : 86b0, dg], dg(y) := subst(x = y, diff(g(x), x)),
+  for i : 1 thru 60 do c : c - g(c)/dg(c), c)$
+/* The printed 86.23292796211615 is 5.4e-15 above the root, more than half a unit of its last
+ * digit: it is the shortest decimal of the double nearest the root, within half an ulp (2^-47). */
+small("eq_28_chi0_is_the_double_nearest_the_fixed_point",
+  bfloat(rationalize(86.23292796211615)) - chi0_root, bfloat(2^-47))$
+fpprintprec : 30$
+printf(true, "chi0 fixed point: ~a~%", chi0_root)$
+fpprintprec : 0$
+
+/* 4. The density coefficient: N = 4 pi^2 eps0 me f^2/e^2, f in MHz, N in 1e11 m^-3. */
+eps0 : 8.8541878128b-12$ me : 9.1093837015b-31$ qe : 1.602176634b-19$
+plasma : 4*bfloat(%pi)^2*eps0*me/qe^2 * 1b12 / 1b11$
+small("eq_77_0_124_is_the_plasma_frequency_constant_to_three_digits", plasma - 0.124b0, 5b-4)$
+
+/* The model, in bfloat, with the reference's clipped exponential. */
+DR : bfloat(%pi/180)$
+clipexp(x) := if x > 80 then 5.5406b34 else if x < -80 then 1.8049b-35 else exp(bfloat(x))$
+bjoin(f1, f2, a, x) := block([ee : clipexp(a*x)], (f1*ee + f2)/(ee + 1))$
+epst(x, y, z, w) := block([ex : clipexp((w - y)/z)], x*ex/(1 + ex)^2)$
+
+/* Eq. 20 to 29: chi_eff in radians, as compute_effective_solar_angle returns it. */
+xeff(mth, ut, lat, lon) := block([lt, dy, t, am, al, sd, cd, cz, x],
+  lt : ut + lon/(15*DR),
+  dy : 30.5b0*mth - 15, t : dy + (18 - ut)/24,
+  am : (0.9856b0*t - 3.289b0)*DR,
+  al : am + (1.916b0*sin(am) + 0.020b0*sin(2*am) + 282.634b0)*DR,
+  sd : 0.39782b0*sin(al), cd : sqrt(1 - sd^2),
+  cz : sin(lat)*sd + cos(lat)*cd*cos(bfloat(%pi)/12*(12 - lt)),
+  x : atan2(sqrt(1 - cz^2), cz)/DR,
+  bjoin(90 - 0.24b0*clipexp(20 - 0.2b0*x), x, 12, x - 86.23292796211615b0)*DR)$
+/* Eq. 30 to 35. */
+foe(mth, az, xe, lat) := block([seas, ee, seasp],
+  seas : if member(mth, [1, 2, 11, 12]) then -1 else if member(mth, [3, 4, 9, 10]) then 0 else 1,
+  ee : clipexp(0.3b0*lat/DR),
+  seasp : seas*(ee - 1)/(ee + 1),
+  sqrt((1.112b0 - 0.019b0*seasp)^2*sqrt(bfloat(az))*cos(xe)^0.6b0 + 0.49b0))$
+
+/* 5. The values parameters.rs's tests already assert. */
+small("solar_angle_mid_sky_reference", xeff(4, 12, 0.6b0, 0.3b0) - 0.5006722981392121b0, 1b-15)$
+small("solar_angle_saturated_reference", xeff(1, 0, 0, 0) - 1.5707962954285055b0, 1b-15)$
+small("foe_equator_reference", foe(6, 100, 0.5b0, 0) - 3.453054218930359b0, 1b-15)$
+
+/* Eq. 52 to 76, with the ICD's index offsets K and H; Eq. 69 reads m_k for its printed c_k. */
+legendre_sum(c, q, mu, lat, lon) := block([mm, kk, total, n, k],
+  mm : makelist(sin(mu*DR)^(k - 1), k, 1, 12),                       /* Eq. 56, 57 */
+  total : sum(c[k]*mm[k], k, 1, q[1]),                                /* Eq. 61 / 69 */
+  kk : -q[1],                                                         /* Eq. 65 / 73 */
+  for n : 2 thru length(q) do (
+    kk : kk + 2*q[n - 1],                                             /* Eq. 66 / 74 */
+    total : total + sum((c[kk + 2*k - 1]*cos((n - 1)*lon) + c[kk + 2*k]*sin((n - 1)*lon))
+      * mm[k]*cos(lat)^(n - 1), k, 1, q[n])),                         /* Eq. 67 / 75 */
+  total)$
+
+/* The full parameter set; rset = galileo or itu. */
+params(mth, ut, lat, lon, mu, az, cf2, cm3, rset) := block(
+  [xe, fe, nme, fof2, mf2, nmf2, hmf2, rho, dm, fof1, nmf1, hme : 120, hmf1, b2bot, b1top, b1bot,
+   betop, bebot : 5, a1, a2, a3, a2a, a3a, nof1, floor, azr],
+  azr : sqrt(167273 + (az - 63.7b0)*1123.6b0) - 408.99b0,
+  xe : xeff(mth, ut, lat, lon),
+  fe : foe(mth, az, xe, lat), nme : 0.124b0*fe^2,                     /* Eq. 35, 36 */
+  fof2 : legendre_sum(cf2, [12, 12, 9, 5, 2, 1, 1, 1, 1], mu, lat, lon),
+  mf2 : legendre_sum(cm3, [7, 8, 6, 3, 2, 1, 1], mu, lat, lon),
+  nmf2 : 0.124b0*fof2^2,                                              /* Eq. 77 */
+  rho : bjoin(fof2/fe, 1.75b0, 20, fof2/fe - 1.75b0),                 /* Eq. 84 */
+  dm : if fe < 1b-30 then -0.012b0 else 0.253b0/(rho - 1.215b0) - 0.012b0,  /* Eq. 82, 83 */
+  hmf2 : 1490*mf2*sqrt((0.0196b0*mf2^2 + 1)/(1.2967b0*mf2^2 - 1))/(mf2 + dm) - 176,  /* Eq. 80 */
+  /* Eq. 37 as Annex F (and ITU's ef1r) smooth it. */
+  fof1 : bjoin(1.4b0*fe, 0, 1000, fe - 2),
+  fof1 : bjoin(0, fof1, 1000, fe - fof1),
+  fof1 : bjoin(fof1, 0.85b0*fof1, 60, 0.85b0*fof2 - fof1),
+  if fof1 < 1b-6 then fof1 : 0,
+  nmf1 : if fof1 <= 0 and fe > 2 then 0.124b0*(fe + 0.5b0)^2 else 0.124b0*fof1^2,  /* Eq. 38, 39 */
+  hmf1 : (hmf2 + hme)/2,                                              /* Eq. 79 */
+  b2bot : 0.385b0*nmf2/(0.01b0*clipexp(-3.467b0 + 0.857b0*log(fof2^2) + 2.02b0*log(mf2))),
+  b1top : 0.3b0*(hmf2 - hmf1), b1bot : 0.5b0*(hmf1 - hme),            /* Eq. 86, 87 */
+  betop : max(b1bot, 7),                                              /* Eq. 88 */
+  [a1, a2, a3] : amplitudes(nme, nmf1, fof1, nmf2, hmf2, hme, hmf1, b2bot, betop, b1bot, rset),
+  [azr, fof2, nmf2, hmf2, hmf1, hme, b2bot, b1top, b1bot, betop, bebot, a1, a2, a3])$
+
+/* Eq. 90 to 98 under the Galileo rset (ICD Annex F); prepmdgr's under the ITU rset. */
+amplitudes(nme, nmf1, fof1, nmf2, hmf2, hme, hmf1, b2bot, betop, b1bot, rset) := block(
+  [a1, a2, a3, a2a, a3a, nof1, floor],
+  a1 : 4*nmf2,                                                        /* Eq. 90 */
+  nof1 : [0, 4*(nme - epst(a1, hmf2, b2bot, hme))],                   /* Eq. 91, 92 */
+  if (if rset = galileo then fof1 < 0.5b0 else fof1 <= 0.5b0) then [a2, a3] : nof1
+  else (
+    a3a : 4*nme,                                                      /* Eq. 93 */
+    for i : 1 thru 5 do (
+      a2a : 4*(nmf1 - epst(a1, hmf2, b2bot, hmf1) - epst(a3a, hme, betop, hmf1)),  /* Eq. 94 */
+      a2a : bjoin(a2a, 0.8b0*nmf1, 1, a2a - 0.8b0*nmf1),              /* Eq. 95 */
+      a3a : 4*(nme - epst(a2a, hmf1, b1bot, hme) - epst(a1, hmf2, b2bot, hme))),   /* Eq. 96 */
+    [a2, a3] : if rset = itu and a2a < 0 then nof1 else [a2a, a3a]),
+  floor : if rset = galileo then 0.05b0 else 0.005b0,
+  [a1, a2, bjoin(a3, floor, 60, a3 - 0.005b0)])$                      /* Eq. 98 */
+
+/* 6. The gate's profiles: synthetic CCIR series cf2_1 = 7, cf2_l = (-1)^l 3/(10 l), and
+ * cm3_1 = 3, cm3_l = (-1)^l/(20 l), which keep foF2 near 7 MHz and M(3000)F2 near 3. */
+cf2 : makelist(if l = 1 then 7 else (-1)^l*3/(10*l), l, 1, 76)$
+cm3 : makelist(if l = 1 then 3 else (-1)^l/(20*l), l, 1, 49)$
+fpprintprec : 30$
+show(tag, v) := printf(true, "~a: ~{~a~^ ~}~%", tag, map(bfloat, v))$
+/* (month, UT, lat rad, lon rad, MODIP deg, Az): a June noon with an F1 layer, and a November
+ * night with none, under both rule sets. */
+show("june_noon_galileo", params(6, 12, 0.6b0, 0.3b0, 40, 150, cf2, cm3, galileo))$
+show("november_night_galileo", params(11, 2, 0.1b0, -1.0b0, 5, 180, cf2, cm3, galileo))$
+show("november_night_itu", params(11, 2, 0.1b0, -1.0b0, 5, 180, cf2, cm3, itu))$
+/* An F1 layer the iteration drives negative (A2 = -0.0428...): NmE = 0, NmF1 = 0.01,
+ * NmF2 = 1/12, foF1 = 0.6, hmF2 = 300, hmF1 = 210, hmE = 120, B2bot = BEtop = B1bot = 45. */
+neg_g : amplitudes(0, 0.01b0, 0.6b0, 1/12, 300, 120, 210, 45, 45, 45, galileo)$
+neg_i : amplitudes(0, 0.01b0, 0.6b0, 1/12, 300, 120, 210, 45, 45, 45, itu)$
+zero("galileo_rules_keep_the_negative_f1_amplitude", if neg_g[2] < 0 then 0 else neg_g[2])$
+zero("itu_rules_drop_the_negative_f1_amplitude", neg_i[2])$
+show("negative_f1_galileo", neg_g)$
+show("negative_f1_itu", neg_i)$

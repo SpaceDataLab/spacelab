@@ -1,0 +1,117 @@
+/* The Gauss G7 / Kronrod K15 pair of the NeQuick-G slant-TEC quadrature --
+ * spacelab-ionosphere/src/galileo.rs, ICD "Ionospheric Correction Algorithm for Galileo Single
+ * Frequency Users" issue 1.2, Annex F.2.6 -- from its defining equations on [-1, 1]:
+ *
+ *   G7 nodes      the roots of the Legendre polynomial P7;
+ *   G7 weights    w = 2/((1 - x^2) P7'(x)^2);
+ *   K15 nodes     the G7 nodes and the roots of the Stieltjes polynomial E8, the monic degree-8
+ *                 polynomial with  integrate(E8 P7 x^k, x, -1, 1) = 0  for k = 0..7;
+ *   K15 weights   those of the interpolatory rule on the 15 nodes, w_i = integral of the i-th
+ *                 Lagrange basis polynomial.
+ *
+ * Each line prints `<name>: 0`:
+ *   1. E8 has the orthogonality that defines it (exact, rational coefficients);
+ *   2. K15 integrates x^k exactly for k = 0..22 (degree 3n + 1 for n = 7) and G7 for k = 0..13,
+ *      and both fail at the next even degree (so the claimed degrees are the true ones);
+ *   3. the centre G7 weight is 512/1225 exactly;
+ *   4. every node and weight the ICD prints at 33 digits is the defined value rounded to its
+ *      printed digits: |printed - defined| < 5e-34.
+ * The 40-digit values printed at the end are the literals in galileo.rs's gate test. The second
+ * engine is derivations/kronrod_g7k15.gp.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/kronrod_g7k15.mac </dev/null
+ */
+
+fpprec : 60$
+ratprint : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+/* A numerical residual, printed as 0 when it is below `tol`. */
+small(name, d, tol) := zero(name, if abs(d) < tol then 0 else d)$
+
+P7 : expand(diff((x^2 - 1)^7, x, 7) / (2^7 * 7!))$
+E8 : x^8 + c6*x^6 + c4*x^4 + c2*x^2 + c0$
+sol : linsolve(makelist(integrate(E8*P7*x^k, x, -1, 1), k, [1, 3, 5, 7]), [c0, c2, c4, c6])$
+E8 : expand(subst(sol, E8))$
+for k : 0 thru 7 do
+  zero(sconcat("stieltjes_e8_orthogonal_to_p7_x", k), integrate(E8*P7*x^k, x, -1, 1))$
+
+/* Roots in bfloat, refined by Newton from the double-precision seeds. */
+newton(p, x0) := block([y : bfloat(x0), dp : diff(p, x)],
+  for i : 1 thru 40 do y : y - subst(x = y, p) / subst(x = y, dp),
+  y)$
+roots_of(p) := sort(map(lambda([r], newton(p, rhs(r))), allroots(p)))$
+g7_nodes : roots_of(P7)$
+e8_nodes : roots_of(E8)$
+k15_nodes : sort(append(g7_nodes, e8_nodes))$
+
+dP7 : diff(P7, x)$
+g7_weights : map(lambda([y], 2 / ((1 - y^2) * subst(x = y, dP7)^2)), g7_nodes)$
+lagrange_weight(i) := block([l : 1],
+  for j : 1 thru 15 do
+    if j # i then l : l * (x - k15_nodes[j]) / (k15_nodes[i] - k15_nodes[j]),
+  l : expand(bfloat(l)),
+  bfloat(subst(x = 1, integrate(l, x)) - subst(x = -1, integrate(l, x))))$
+k15_weights : makelist(lagrange_weight(i), i, 1, 15)$
+
+/* The odd-indexed K15 nodes are the G7 nodes, as the code's `i % 2 == 1` assumes. */
+for i : 1 thru 7 do
+  small(sconcat("k15_node_", 2*i, "_is_g7_node_", i), k15_nodes[2*i] - g7_nodes[i], 1b-50)$
+
+moment(k) := if oddp(k) then 0 else 2 / (k + 1)$
+/* x^0 = 1 at the centre node too, where bfloat 0^0 is undefined. */
+pw(y, k) := if k = 0 then 1 else y^k$
+for k : 0 thru 22 do
+  small(sconcat("k15_exact_x", k),
+    sum(k15_weights[i] * pw(k15_nodes[i], k), i, 1, 15) - moment(k), 1b-50)$
+for k : 0 thru 13 do
+  small(sconcat("g7_exact_x", k),
+    sum(g7_weights[i] * pw(g7_nodes[i], k), i, 1, 7) - moment(k), 1b-50)$
+/* Sharpness: the next even degree is not integrated exactly. */
+zero("k15_not_exact_x24", if abs(sum(k15_weights[i]*k15_nodes[i]^24, i, 1, 15) - 2/25) > 1b-10
+  then 0 else 1)$
+zero("g7_not_exact_x14", if abs(sum(g7_weights[i]*g7_nodes[i]^14, i, 1, 7) - 2/15) > 1b-6
+  then 0 else 1)$
+small("g7_centre_weight_is_512_over_1225", g7_weights[4] - 512/1225, 1b-50)$
+
+/* ICD Annex F.2.6, as printed (and as galileo.rs stores them). */
+icd_k15_nodes : [
+  -0.991455371120812639206854697526329b0, -0.949107912342758524526189684047851b0,
+  -0.864864423359769072789712788640926b0, -0.741531185599394439863864773280788b0,
+  -0.586087235467691130294144838258730b0, -0.405845151377397166906606412076961b0,
+  -0.207784955007898467600689403773245b0, 0b0,
+  0.207784955007898467600689403773245b0, 0.405845151377397166906606412076961b0,
+  0.586087235467691130294144838258730b0, 0.741531185599394439863864773280788b0,
+  0.864864423359769072789712788640926b0, 0.949107912342758524526189684047851b0,
+  0.991455371120812639206854697526329b0]$
+icd_k15_weights : [
+  0.022935322010529224963732008058970b0, 0.063092092629978553290700663189204b0,
+  0.104790010322250183839876322541518b0, 0.140653259715525918745189590510238b0,
+  0.169004726639267902826583426598550b0, 0.190350578064785409913256402421014b0,
+  0.204432940075298892414161999234649b0, 0.209482141084727828012999174891714b0,
+  0.204432940075298892414161999234649b0, 0.190350578064785409913256402421014b0,
+  0.169004726639267902826583426598550b0, 0.140653259715525918745189590510238b0,
+  0.104790010322250183839876322541518b0, 0.063092092629978553290700663189204b0,
+  0.022935322010529224963732008058970b0]$
+icd_g7_weights : [
+  0.129484966168869693270611432679082b0, 0.279705391489276667901467771423780b0,
+  0.381830050505118944950369775488975b0, 0.417959183673469387755102040816327b0,
+  0.381830050505118944950369775488975b0, 0.279705391489276667901467771423780b0,
+  0.129484966168869693270611432679082b0]$
+for i : 1 thru 15 do
+  small(sconcat("icd_k15_node_", i, "_is_the_root_to_33_digits"),
+    icd_k15_nodes[i] - k15_nodes[i], 5b-34)$
+for i : 1 thru 15 do
+  small(sconcat("icd_k15_weight_", i, "_is_the_weight_to_33_digits"),
+    icd_k15_weights[i] - k15_weights[i], 5b-34)$
+for i : 1 thru 7 do
+  small(sconcat("icd_g7_weight_", i, "_is_the_weight_to_33_digits"),
+    icd_g7_weights[i] - g7_weights[i], 5b-34)$
+
+/* 40-digit values for the Rust gate (nodes and weights for x >= 0). */
+fpprintprec : 40$
+for i : 8 thru 15 do printf(true, "k15 node ~d: ~a  weight: ~a~%", i,
+  bfloat(k15_nodes[i]), bfloat(k15_weights[i]))$
+for i : 4 thru 7 do printf(true, "g7 weight ~d: ~a~%", i, bfloat(g7_weights[i]))$

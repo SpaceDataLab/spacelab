@@ -13,11 +13,20 @@
 //! 3. range FFT → 2-D frequency domain;
 //! 4. range compression + SRC + bulk RCMC: `exp(jπ·D/K_m·f_τ²)·exp(j·4π/c·(1/D−1)·R_ref·f_τ)`;
 //! 5. range IFFT → range-Doppler domain;
-//! 6. azimuth compression + residual phase correction;
+//! 6. azimuth compression, matched to each range bin's own range, + residual phase correction;
 //! 7. azimuth IFFT → focused image.
 //!
 //! The modified FM rate `K_m` and factors `D(f_η) = √(1−(λf_η/2V)²)`, `α = 1/D − 1` are derived by the
 //! principle of stationary phase. `na` (azimuth) and `nr` (range) must be powers of two. `alloc`.
+//!
+//! Gate: `derivations/csa_point_target.mac` takes the range-Doppler signal of a target at
+//! `R_ref + ΔR` through the phase multiplies and shows they compose to a pure delay `2ΔR/c`
+//! independent of `f_η` and a cancelled phase, to the stated order (2-D spectrum quadratic in `f_τ`,
+//! `K_m` at the reference range); `K_m` itself is the spectrum curvature derived in
+//! `derivations/sar_range_doppler.mac`. The module tests
+//! `the_phase_multiplies_compose_to_a_pure_delay` (G2) and
+//! `a_target_off_the_reference_range_focuses_in_azimuth` (its regression) hold the shipped phase
+//! functions and the focus to them.
 
 // Physical single letters and SAR doc terms mirror the literature; casts are in range.
 #![allow(
@@ -105,10 +114,13 @@ fn compression_and_bulk_phase(km: f64, alpha: f64, f_tau: f64, p: &CsaParams) ->
     comp + bulk
 }
 
-/// Step 6's azimuth matched filter `4π·R_ref·D/λ`, plus the residual phase the chirp scaling leaves
-/// at a range `dr` off the reference, `−4π·K_m(1+α)·α·dr²/c²` (C&W Eq. 7.29, 7.31).
+/// Step 6's azimuth matched filter `4π·R₀·D/λ` at the range `R₀ = R_ref + dr` of the bin it is
+/// applied to, plus the residual phase the chirp scaling leaves there, `−4π·K_m(1+α)·α·dr²/c²`
+/// (C&W Eq. 7.29, 7.31). The filter is range-variant: at `R_ref` alone it leaves a target at `dr`
+/// the azimuth chirp `πλ·dr·f_η²/(2V²)`, the FM-rate mismatch `1/K_a(R₀) − 1/K_a(R_ref)`
+/// (`derivations/csa_point_target.mac`).
 fn azimuth_and_residual_phase(km: f64, alpha: f64, d: f64, dr: f64, p: &CsaParams) -> f64 {
-    let az = 4.0 * PI * p.r_ref * d / p.wavelength;
+    let az = 4.0 * PI * (p.r_ref + dr) * d / p.wavelength;
     let resid = -4.0 * PI / (C * C) * km * (1.0 + alpha) * alpha * dr * dr;
     az + resid
 }
@@ -176,8 +188,8 @@ pub fn chirp_scaling_focus(raw: &[Complex], na: usize, nr: usize, p: &CsaParams)
         rd[k * nr..k * nr + nr].copy_from_slice(&line);
     }
 
-    // Step 6 — azimuth compression (matched to the azimuth phase −4π·r_ref·D/λ) plus the residual
-    // phase from chirp scaling, then step 7 azimuth IFFT.
+    // Step 6 — azimuth compression (matched to the azimuth phase −4π·R₀·D/λ of the bin's own range
+    // R₀ = r_ref + dr) plus the residual phase from chirp scaling, then step 7 azimuth IFFT.
     for r in 0..nr {
         let dr = range_offset(r, nr, dt);
         for k in 0..na {
@@ -195,7 +207,11 @@ pub fn chirp_scaling_focus(raw: &[Complex], na: usize, nr: usize, p: &CsaParams)
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unreadable_literal, clippy::float_cmp)]
+    #![allow(
+        clippy::unreadable_literal,
+        clippy::float_cmp,
+        clippy::excessive_precision
+    )]
     use super::*;
 
     // A raw point-target echo at the reference range (broadside): the two-way delay curves as
@@ -541,12 +557,10 @@ mod tests {
     /// The four phase terms of the algorithm, against an independent evaluation.
     ///
     /// A focused image cannot separate the factors of these products. At the spaceborne fixture the
-    /// scaling factor is 7e-5, so every term that carries it is a microradian; at a beam wide enough
-    /// for them to matter, the single-reference azimuth matched filter no longer focuses anything off
-    /// the reference range -- and the residual phase is zero *at* the reference range by construction,
-    /// so it has nowhere left to show itself. Twenty-eight mutants lived in that gap. The terms were
-    /// given names so they could be asked directly; references from `derivations/csa_phases.mac` at
-    /// 60 digits.
+    /// scaling factor is 7e-5, so every term that carries it is a microradian -- and the residual
+    /// phase is zero *at* the reference range by construction, so a target there gives it nowhere to
+    /// show itself. Twenty-eight mutants lived in that gap. The terms were given names so they could
+    /// be asked directly; references from `derivations/csa_phases.mac` at 60 digits.
     #[test]
     fn the_four_phase_terms_match_their_closed_forms() {
         let p = phase_params();
@@ -570,9 +584,28 @@ mod tests {
             ),
             ("azimuth phase", az_only, 80_801.763_050_329_48),
             (
-                // The residual is the whole of the range-offset dependence: at dr = 0 it vanishes.
+                // In the bin dr off the reference: the filter at that bin's range plus the residual.
+                "azimuth + residual at dr",
+                azimuth_and_residual_phase(km, alpha, d, dr, &p),
+                279_471.350_928_263_864_530_047_894_378_279_33,
+            ),
+            (
+                // The filter alone at that bin's range: the part odd in dr is 4 pi dr D / lambda,
+                // the range variation a filter fixed at R_ref would not carry.
+                "azimuth filter at dr",
+                az_only
+                    + (azimuth_and_residual_phase(km, alpha, d, dr, &p)
+                        - azimuth_and_residual_phase(km, alpha, d, -dr, &p))
+                        / 2.0,
+                282_806.170_676_153_187_326_407_157_362_820_85,
+            ),
+            (
+                // The residual alone is the even part in dr; at dr = 0 it vanishes.
                 "residual phase",
-                azimuth_and_residual_phase(km, alpha, d, dr, &p) - az_only,
+                f64::midpoint(
+                    azimuth_and_residual_phase(km, alpha, d, dr, &p),
+                    azimuth_and_residual_phase(km, alpha, d, -dr, &p),
+                ) - az_only,
                 -3_334.819_747_889_322_6,
             ),
             (
@@ -674,8 +707,9 @@ mod tests {
 
     /// The exponents of step 6 and of the range axis it is indexed by.
     ///
-    /// Same split: the azimuth matched filter does not depend on the range offset at all, so
-    /// subtracting the value at `dr = 0` leaves the residual phase alone.
+    /// Split by parity in the range offset: the residual phase is even in `dr` and the
+    /// range-variant part of the azimuth filter, `4π·dr·D/λ`, is odd, so the two halves of
+    /// `f(dr) ± f(−dr)` each recover one of them alone.
     #[test]
     fn the_azimuth_and_residual_phases_carry_the_exponents_they_should() {
         let p = phase_params();
@@ -685,22 +719,49 @@ mod tests {
             r_ref: 2.0 * p.r_ref,
             ..p
         };
+        let f =
+            |km: f64, d: f64, dr: f64, p: &CsaParams| azimuth_and_residual_phase(km, a, d, dr, p);
         let resid = |km: f64, dr: f64| {
-            azimuth_and_residual_phase(km, a, d, dr, &p)
-                - azimuth_and_residual_phase(km, a, d, 0.0, &p)
+            f64::midpoint(f(km, d, dr, &p), f(km, d, -dr, &p)) - f(km, d, 0.0, &p)
         };
         let base = resid(km, 5000.0);
         assert!(
             base < 0.0,
             "the residual phase should subtract, not add: {base}"
         );
-        assert_eq!(
-            resid(km, -5000.0),
-            base,
-            "the residual phase is even in the range offset"
-        );
         ratio(resid(km, 10000.0), base, 4.0, "the offset in the residual");
         ratio(resid(2.0 * km, 5000.0), base, 2.0, "K_m in the residual");
+
+        // The filter's range-variant half: the offset and D linearly, the wavelength inversely, and
+        // not the reference range at all -- it is the bin's own distance from it.
+        let odd =
+            |km: f64, d: f64, dr: f64, p: &CsaParams| (f(km, d, dr, p) - f(km, d, -dr, p)) / 2.0;
+        let base = odd(km, d, 5000.0, &p);
+        assert!(base > 0.0, "a farther bin needs more filter phase: {base}");
+        ratio(
+            odd(km, d, 10000.0, &p),
+            base,
+            2.0,
+            "the offset in the filter",
+        );
+        ratio(
+            odd(km, 2.0 * d, 5000.0, &p),
+            base,
+            2.0,
+            "D in the range-variant filter",
+        );
+        ratio(
+            odd(2.0 * km, d, 5000.0, &p),
+            base,
+            1.0,
+            "K_m in the range-variant filter",
+        );
+        ratio(
+            odd(km, d, 5000.0, &far),
+            base,
+            1.0,
+            "R_ref in the range-variant filter",
+        );
 
         // The azimuth filter itself: R_ref and D linearly, the wavelength inversely.
         let az = |d: f64, p: &CsaParams| azimuth_and_residual_phase(km, a, d, 0.0, p);
@@ -733,6 +794,117 @@ mod tests {
             C / 2.0,
             "the range offset against the range time",
         );
+    }
+
+    /// (G2) The shipped phase functions compose to a pure delay and a cancelled phase, for a target
+    /// off the reference range, at every azimuth frequency of a wide beam.
+    ///
+    /// `derivations/csa_point_target.mac` takes the range-Doppler signal of a target at
+    /// `R₀ = R_ref + ΔR`, `exp(jπK_m(τ − τ_d)²)·exp(−j4πR₀D/λ)`, through the algorithm: the chirp
+    /// scaling makes it `exp(jπK_m(1+α)(τ − τ_c)²)·exp(jΦ_res)` with `τ_c = τ_ref + 2ΔR/c`; step 4
+    /// leaves `exp(−j2πf_τ·2ΔR/c)`, a delay that no longer depends on `f_η`; and step 6 must cancel
+    /// `−4πR₀D/λ + Φ_res` in the bin at `ΔR`. Each of the three is asserted here on the functions the
+    /// focus calls, with the target phase written from the derivation, so a phase term that is right
+    /// only at the reference range — `ΔR = 0` is the one place every focusing test before this one
+    /// looked — is a residual of radians, not microradians.
+    #[test]
+    fn the_phase_multiplies_compose_to_a_pure_delay() {
+        let p = phase_params();
+        for f_eta in [-170.0, -60.0, 15.0, 120.0] {
+            let d = migration_factor(f_eta, &p);
+            let alpha = scaling_factor(d);
+            let tau_ref = reference_migration_delay(alpha, &p);
+            let km = modified_fm_rate(f_eta, d, &p);
+            for dr in [-300.0, 7.5, 40.0, 900.0] {
+                let r0 = p.r_ref + dr;
+                let tau_d = 2.0 * r0 / (C * d) - 2.0 * p.r_ref / C;
+                let tau_c = tau_ref + 2.0 * dr / C;
+                let phi_res = 4.0 * PI * km * alpha * (1.0 + alpha) * dr * dr / (C * C);
+
+                // Step 2: the scaled chirp, at range times across the migration.
+                for tau in [-1.0e-6, 3.0e-7, 2.2e-6, 6.1e-6] {
+                    let got = PI * km * (tau - tau_d) * (tau - tau_d)
+                        + scaling_phase(km, alpha, tau, tau_ref);
+                    let want = PI * km * (1.0 + alpha) * (tau - tau_c) * (tau - tau_c) + phi_res;
+                    assert!(
+                        (got - want).abs() < 1e-9 * want.abs().max(1.0),
+                        "step 2, f_eta {f_eta}, dR {dr}, tau {tau:e}: {got} vs {want}"
+                    );
+                }
+
+                // Step 4: what is left of the scaled chirp's spectrum is a pure delay of 2 dR/c.
+                let ks = km * (1.0 + alpha);
+                for f_tau in [-60.0e6, -1.0e6, 25.0e6, 70.0e6] {
+                    let spectrum = -PI * f_tau * f_tau / ks - 2.0 * PI * f_tau * tau_c;
+                    let got = spectrum + compression_and_bulk_phase(km, alpha, f_tau, &p);
+                    let want = -2.0 * PI * f_tau * 2.0 * dr / C;
+                    assert!(
+                        (got - want).abs() < 1e-9 * spectrum.abs().max(1.0),
+                        "step 4, f_eta {f_eta}, dR {dr}, f_tau {f_tau:e}: {got} vs {want}"
+                    );
+                }
+
+                // Step 6, in the bin at dR: nothing is left.
+                let target = -4.0 * PI * r0 * d / p.wavelength + phi_res;
+                let left = target + azimuth_and_residual_phase(km, alpha, d, dr, &p);
+                assert!(
+                    left.abs() < 1e-9 * target.abs(),
+                    "step 6, f_eta {f_eta}, dR {dr}: {left} rad left of {target}"
+                );
+            }
+        }
+    }
+
+    /// A target off the reference range focuses in azimuth as sharply as one on it.
+    ///
+    /// Regression: the azimuth matched filter was `4π·R_ref·D/λ` in every range bin. A target at
+    /// `R_ref + ΔR` carries `−4π(R_ref + ΔR)D/λ`, so the filter left `−4πΔR·D/λ`, whose `f_η` part is
+    /// the azimuth chirp `πλΔR f_η²/(2V²)` — the FM-rate mismatch `1/K_a(R₀) − 1/K_a(R_ref)`
+    /// (`derivations/csa_point_target.mac`). At this wide-beam geometry and 40 m off the reference
+    /// that is 18 rad across the Doppler band: the target smeared over about 30 azimuth cells and
+    /// kept a sixth of its peak. With the filter at the range of its bin it focuses to the sinc
+    /// width the Doppler bandwidth allows.
+    #[test]
+    fn a_target_off_the_reference_range_focuses_in_azimuth() {
+        let (na, nr) = (2048usize, 512usize);
+        let p = phase_params();
+        let pulse_dur = 2.0e-6;
+        let range_bin = C / (2.0 * p.range_sample_rate);
+        let offset = 40usize;
+        let r0 = p.r_ref + offset as f64 * range_bin;
+
+        let focus_peak = |r0: f64| {
+            let mut raw = vec![Complex::ZERO; na * nr];
+            add_target(&mut raw, na, nr, &p, pulse_dur, 0.0, r0);
+            let img = chirp_scaling_focus(&raw, na, nr, &p);
+            img.iter().map(|c| c.abs()).collect::<Vec<f64>>()
+        };
+        let on = focus_peak(p.r_ref);
+        let off = focus_peak(r0);
+        let col = nr / 2 + offset;
+        let cut: Vec<f64> = (0..na).map(|a| off[a * nr + col]).collect();
+        let mut brightest = 0;
+        for i in 1..off.len() {
+            if off[i] > off[brightest] {
+                brightest = i;
+            }
+        }
+        let ka = 2.0 * p.velocity * p.velocity / (p.wavelength * r0);
+        let theory = 0.886 * p.prf * p.prf / (ka * na as f64);
+        let width = crate::sar::resolution_3db_samples(&cut);
+        let kept = off[brightest] / on[(na / 2) * nr + nr / 2];
+        println!(
+            "off-reference target: peak at ({}, {}), azimuth width {width:.3} vs {theory:.3}, \
+             kept {kept:.4} of the on-reference peak",
+            brightest / nr,
+            brightest % nr
+        );
+        assert_eq!((brightest / nr, brightest % nr), (na / 2, col));
+        assert!(
+            (width / theory - 1.0).abs() < 0.2,
+            "azimuth -3 dB width {width} cells against a theoretical {theory}"
+        );
+        assert!(kept > 0.9, "kept {kept} of the on-reference peak");
     }
 
     /// The whole pipeline is unitary: FFTs and unit-modulus phase multiplies, nothing else.

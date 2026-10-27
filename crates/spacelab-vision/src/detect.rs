@@ -8,6 +8,14 @@
 //! the highest-scoring boxes while discarding those that overlap a kept box by more than an
 //! [`BBox::iou`] threshold. `alloc` for the box lists (built on the `std`/`test` side, like
 //! [`crate::model`]).
+//!
+//! Gate: `derivations/detection_box_geometry.mac` works the IoUs and the greedy NMS of the test
+//! fixture in exact rationals, and shows the anchor area and aspect and that decoding inverts the
+//! Faster-R-CNN encoding; `derivations/detection_box_geometry.gp` recounts the IoUs cell by cell.
+//! The module tests `iou_is_the_exact_rational_of_its_definition`,
+//! `nms_is_the_greedy_rule_on_the_exact_ious`,
+//! `an_anchor_has_the_scale_as_its_root_area_and_the_ratio_as_its_aspect` and
+//! `a_decoded_box_is_the_faster_rcnn_parameterisation_at_forty_digits` (G2) hold the code to them.
 
 // doc names detector families (Faster-R-CNN, RetinaNet); single letters are box-geometry notation;
 // feature-map indices cast to f64 for pixel centres.
@@ -235,5 +243,81 @@ mod tests {
         assert_eq!(nms(&[a, b], &[0.9, 0.8], 0.5), vec![0, 1]);
         // And a hair below the cut it *is* suppressed, so the line above is not vacuous.
         assert_eq!(nms(&[a, b], &[0.9, 0.8], 0.499), vec![0]);
+    }
+
+    /// The IoU of every fixture pair is the exact rational of its definition, `inter/union` with
+    /// extents `x2 − x1`, as `derivations/detection_box_geometry.mac` prints them and
+    /// `derivations/detection_box_geometry.gp` counts them cell by cell. (G2)
+    ///
+    /// Integer corners make `inter` and `union` exact, so the quotient is the correctly rounded
+    /// rational and equals it bit for bit; a `+1` on the extents moves every one of them.
+    #[test]
+    fn iou_is_the_exact_rational_of_its_definition() {
+        let b = boxes();
+        let want = [
+            (0, 1, 741.0, 859.0),
+            (0, 4, 1.0, 7.0),
+            (1, 4, 231.0, 1369.0),
+            (2, 3, 1104.0, 1273.0),
+        ];
+        for i in 0..6 {
+            for j in i + 1..6 {
+                let expected = want
+                    .iter()
+                    .find(|w| (w.0, w.1) == (i, j))
+                    .map_or(0.0, |w| w.2 / w.3);
+                assert_eq!(b[i].iou(&b[j]), expected, "IoU({i}, {j})");
+                assert_eq!(b[j].iou(&b[i]), expected, "IoU({j}, {i})");
+            }
+        }
+    }
+
+    /// Greedy NMS is the rule as defined, worked through on the exact IoUs: at the threshold
+    /// `1/7`, which is exactly `IoU(0, 4)`, strict suppression keeps box 0, and at `1/8` it does
+    /// not. (G2)
+    #[test]
+    fn nms_is_the_greedy_rule_on_the_exact_ious() {
+        let b = boxes();
+        let scores = [0.9, 0.75, 0.8, 0.6, 0.95, 0.5];
+        assert_eq!(nms(&b, &scores, 1.0 / 7.0), vec![4, 0, 2, 5]);
+        assert_eq!(nms(&b, &scores, 1.0 / 8.0), vec![4, 2, 5]);
+    }
+
+    /// An anchor has area `scale²` and aspect `h/w = ratio`. (G2)
+    #[test]
+    fn an_anchor_has_the_scale_as_its_root_area_and_the_ratio_as_its_aspect() {
+        let scales = [8.0, 32.0, 181.0];
+        let ratios = [0.5, 1.0, 2.0, 3.0];
+        let anchors = generate_anchors(1, 1, 16.0, &scales, &ratios);
+        for (k, anchor) in anchors.iter().enumerate() {
+            let (scale, ratio) = (scales[k / ratios.len()], ratios[k % ratios.len()]);
+            let area = anchor.width() * anchor.height();
+            assert!(
+                (area - scale * scale).abs() < 1e-12 * scale * scale,
+                "{anchor:?}"
+            );
+            assert!(
+                (anchor.height() / anchor.width() - ratio).abs() < 1e-14 * ratio,
+                "{anchor:?}"
+            );
+        }
+    }
+
+    /// A decoded box against the 40-digit value of the parameterisation, whose encoding
+    /// `derivations/detection_box_geometry.mac` shows it inverts. (G2)
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn a_decoded_box_is_the_faster_rcnn_parameterisation_at_forty_digits() {
+        let anchor = BBox::new(20.0, 40.0, 60.0, 100.0);
+        let got = decode_box(&anchor, [0.3, -0.2, 0.7, -0.4]);
+        let want = [
+            11.72494585059046956750901222833869459965,
+            37.89039861893082097766701224556521784189,
+            92.27505414940953043249098777166130540035,
+            78.10960138106917902233298775443478215811,
+        ];
+        for (g, w) in [got.x1, got.y1, got.x2, got.y2].into_iter().zip(want) {
+            assert!((g - w).abs() < 1e-13, "{got:?} vs {want:?}");
+        }
     }
 }

@@ -16,6 +16,12 @@
 //! design `[1, col_rpc, row_rpc]`, the fit is two small normal-equation solves.
 //!
 //! [`estimate_adjustment`] fits the correction; [`forward_adjusted`] applies it. `no_std` + `alloc`.
+//!
+//! Gate: `derivations/rpc_bias_affine.mac` shows that the normal equations are the stationary point
+//! and unique minimum of the least-squares cost, that noiseless targets return the true affine, and
+//! that the Shift model's mean is its least-squares offset; `derivations/rpc_bias_affine.gp` solves a
+//! six-point fit exactly in rationals. The module test `the_affine_fit_solves_the_normal_equations`
+//! (G2) holds the shipped solve to it.
 
 // Short affine names (a0/a1/a2, r0/c0) mirror the Grodecki–Dial equations; casts are in range.
 #![allow(
@@ -556,6 +562,55 @@ mod tests {
         assert!(solve_sym3([2.0, 4.0, 6.0, 4.0, 8.0, 12.0, 6.0, 12.0, 18.0], b).is_none());
         // Rank two: the failure is in the *last* column, after two eliminations have already run.
         assert!(solve_sym3([1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 2.0], b).is_none());
+    }
+
+    /// (G2) `fit_axis` solves the normal equations `AᵀA a = Aᵀt` of the affine model, which
+    /// `derivations/rpc_bias_affine.mac` shows to be the stationary point and the unique minimum of
+    /// the least-squares cost. Six control points at the fixture's image coordinates, against the
+    /// exact rational solution of `derivations/rpc_bias_affine.gp`.
+    ///
+    /// The raw Gram matrix has condition number 7.96e12, because the columns `1, col, row` are nearly
+    /// parallel at `col ≈ 20000`. Gaussian elimination does not see a column scaling, so the bound
+    /// uses the equilibrated one, 4.64e4: `‖D(a − a*)‖ ≤ 8 κ_D ε ‖D a*‖`, `D = √diag(AᵀA)`. The second
+    /// assertion is the backward form: the residual is orthogonal to the design to a few ulps of the
+    /// products it sums.
+    #[test]
+    fn the_affine_fit_solves_the_normal_equations() {
+        const KAPPA_EQUILIBRATED: f64 = 4.636688094278135189499661791290e4;
+        let cols = [19620.0, 20380.5, 19750.25, 20240.0, 19999.5, 20111.75];
+        let rows = [19150.0, 19660.5, 19900.75, 19040.25, 19403.5, 19555.0];
+        let targets = [12.5, 13.25, 11.875, 12.0625, 12.75, 13.5];
+        let design: Vec<[f64; 3]> = cols.iter().zip(&rows).map(|(c, r)| [1.0, *c, *r]).collect();
+        let exact = [
+            -6685204184425249.0 / 486420186655584.0,
+            62798848019.0 / 60802523331948.0,
+            5468707480.0 / 18578548795873.0,
+        ];
+        let got = fit_axis(&design, &targets);
+        let d: [f64; 3] =
+            core::array::from_fn(|k| libm::sqrt(design.iter().map(|x| x[k] * x[k]).sum()));
+        let norm = |v: [f64; 3]| libm::sqrt(v.iter().map(|x| x * x).sum());
+        let err = norm(core::array::from_fn(|k| d[k] * (got[k] - exact[k])));
+        let tol = 8.0
+            * KAPPA_EQUILIBRATED
+            * f64::EPSILON
+            * norm(core::array::from_fn(|k| d[k] * exact[k]));
+        assert!(
+            err <= tol,
+            "scaled error {err:.3e} (allowed {tol:.3e}), fit {got:?}"
+        );
+        for k in 0..3 {
+            let (mut g, mut scale) = (0.0, 0.0);
+            for (x, &t) in design.iter().zip(&targets) {
+                let terms = [got[0] * x[0], got[1] * x[1], got[2] * x[2]];
+                g += x[k] * (t - terms[0] - terms[1] - terms[2]);
+                scale += x[k].abs() * (t.abs() + terms.iter().map(|v| v.abs()).sum::<f64>());
+            }
+            assert!(
+                g.abs() <= 16.0 * f64::EPSILON * scale,
+                "column {k}: Aᵀr = {g:.3e} (scale {scale:.3e})"
+            );
+        }
     }
 
     #[test]

@@ -1,0 +1,117 @@
+/* The TAN plate of spacelab-astrometry/src/wcs.rs, against FITS WCS Paper II (Calabretta & Greisen
+ * 2002, A&A 395, 1077) and the SIP convention (Shupe et al. 2005), and the least-squares fit on
+ * exact data. Reference values for crates/spacelab-astrometry/tests/derivation_gates.rs.
+ *
+ * The code projects with the standard coordinates
+ *     den = sin d sin d0 + cos d cos d0 cos(a - a0),
+ *     xi  = cos d sin(a - a0)/den,   eta = (sin d cos d0 - cos d sin d0 cos(a - a0))/den,
+ * deprojects with
+ *     d = asin((sin d0 + eta cos d0)/sqrt(1 + xi^2 + eta^2)),  a = a0 + atan2(xi, cos d0 - eta sin d0),
+ * and fits xi = sum a_pq u^p v^q, eta = sum b_pq u^p v^q by the normal equations.
+ *
+ * Shown here, every line printing `<name>: 0`:
+ *   1. Paper II's route -- native coordinates by its eq. (2) with (alpha_p, delta_p) = (a0, d0) and
+ *      phi_p = 180 deg (the zenithal default LONPOLE), then TAN's R_theta = cot(theta) (eq. 54, in
+ *      radians) and x = R sin(phi), y = -R cos(phi) (eqs. 12-13) -- gives exactly the coded xi, eta
+ *      (G2). sin, cos of each angle are symbols with s^2 + c^2 = 1 imposed;
+ *   2. deproject(project(a, d)) = (a, d): the sine of the recovered declination is sin d and the
+ *      atan2 arguments are cos d sin(a - a0) and cos d cos(a - a0), both over the same positive
+ *      sin(theta) (G1);
+ *   3. a SIP plate, CD (u + f(u, v), v + g(u, v)) with f, g of degree 2..order, is the coded
+ *      polynomial with xi coefficients CD11 [1, A] + CD12 [., B] in monomial order
+ *      1, u, v, u^2, uv, v^2 -- the coded basis carries every SIP plate of the same order (G1);
+ *   4. the least-squares coefficients of a seven-star order-1 plate on exact binary-fraction data,
+ *      their (A^T A)^-1, the residual variances with n - m degrees of freedom, and the propagated
+ *      position variance, all exact rationals printed at 40 digits (G2).
+ * derivations/gnomonic_tan_plate.gp recomputes 1 by tangent-plane vectors and 4 by matsolve.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b \
+ *          derivations/gnomonic_tan_plate.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+fpprec : 40$
+show(name, vec) := (printf(true, "~a:", name), for x in vec do printf(true, " ~h", x),
+                    printf(true, "~%"))$
+
+/* 1. sd, cd = sin, cos of d; s0, c0 of d0; sa, ca of a - a0. */
+trig(x) := ratsimp(ratsubst(1 - sd^2, cd^2, ratsubst(1 - s0^2, c0^2,
+                                                     ratsubst(1 - sa^2, ca^2, ratsimp(x)))))$
+den : sd*s0 + cd*c0*ca$
+xi : cd*sa/den$
+eta : (sd*c0 - cd*s0*ca)/den$
+/* Paper II eq. (2): phi = phi_p + arg(X, Y), sin(theta) = den. */
+X : sd*c0 - cd*s0*ca$
+Y : -cd*sa$
+/* cos(theta) = rho = sqrt(X^2 + Y^2), positive; rho^2 = 1 - sin^2(theta). */
+zero("paper2_cos_theta_squared", trig(X^2 + Y^2 - (1 - den^2)))$
+/* phi = pi + arg(X, Y): sin(phi) = -Y/rho, cos(phi) = -X/rho. R = cot(theta) = rho/den. */
+x_tan : (rho/den)*(-Y/rho)$
+y_tan : -(rho/den)*(-X/rho)$
+zero("paper2_tan_x_is_xi", ratsimp(x_tan - xi))$
+zero("paper2_tan_y_is_eta", ratsimp(y_tan - eta))$
+
+/* 2. Round trip. With r2 = 1 + xi^2 + eta^2, r2 den^2 = 1. */
+zero("deproject_norm_is_one_over_sin_theta", trig(expand((1 + xi^2 + eta^2)*den^2) - 1))$
+/* so sqrt(1 + xi^2 + eta^2) = 1/den for den > 0, and */
+zero("deproject_recovers_sin_dec", trig((s0 + eta*c0)*den - sd))$
+zero("deproject_ra_numerator", trig(xi*den - cd*sa))$
+zero("deproject_ra_denominator", trig((c0 - eta*s0)*den - cd*ca))$
+
+/* 3. SIP of order 2 in the coded monomial basis. */
+basis : [1, u, v, u^2, u*v, v^2]$
+f : A20*u^2 + A11*u*v + A02*v^2$
+g : B20*u^2 + B11*u*v + B02*v^2$
+xi_sip : CD11*(u + f) + CD12*(v + g)$
+eta_sip : CD21*(u + f) + CD22*(v + g)$
+xi_coef : [0, CD11, CD12, CD11*A20 + CD12*B20, CD11*A11 + CD12*B11, CD11*A02 + CD12*B02]$
+eta_coef : [0, CD21, CD22, CD21*A20 + CD22*B20, CD21*A11 + CD22*B11, CD21*A02 + CD22*B02]$
+zero("sip_xi_in_the_coded_basis", ratsimp(xi_sip - xi_coef . basis))$
+zero("sip_eta_in_the_coded_basis", ratsimp(eta_sip - eta_coef . basis))$
+/* A dyadic SIP plate at a pixel, exactly: the value the Rust gate evaluates through TanSip. */
+sipvals : [CD11 = 3/2^17, CD12 = -1/2^19, CD21 = 1/2^18, CD22 = 5/2^18,
+           A20 = 1/2^14, A11 = -3/2^16, A02 = 1/2^15, B20 = -1/2^15, B11 = 1/2^13, B02 = 3/2^16]$
+sip_at : subst(append(sipvals, [u = 37 - 512, v = -21 - 384]), [xi_sip, eta_sip])$
+show("sip_plate_at_pixel", bfloat(sip_at))$
+print("sip_plate_at_pixel_exact:", sip_at)$
+show("sip_xi_coefficients", bfloat(subst(sipvals, xi_coef)))$
+show("sip_eta_coefficients", bfloat(subst(sipvals, eta_coef)))$
+
+/* Paper II reference values for the project gate: (a0, d0) = (5/4, 1/2), three stars. */
+a0 : 5/4$  d0 : 1/2$
+stars : [[161/128, 127/256], [79/64, 33/64], [41/32, 61/128]]$
+for k : 1 thru length(stars) do block([a_ : stars[k][1], d_ : stars[k][2], th, ph],
+  th : asin(sin(d_)*sin(d0) + cos(d_)*cos(d0)*cos(a_ - a0)),
+  ph : %pi + atan2(-cos(d_)*sin(a_ - a0), sin(d_)*cos(d0) - cos(d_)*sin(d0)*cos(a_ - a0)),
+  show(sconcat("paper2_tan_", k), bfloat([cot(th)*sin(ph), -cot(th)*cos(ph)])))$
+
+/* 4. The least-squares plate. Pixels relative to crpix; dyadic targets with a dyadic scatter. */
+uv : [[-40, -30], [50, -20], [10, 45], [-25, 35], [60, 55], [-55, -50], [5, -5]]$
+nxi : [3, -2, 1, 4, -5, 2, -3]$
+neta : [-1, 2, -4, 3, 1, -2, 1]$
+xis : makelist((3*uv[i][1] - uv[i][2])/2^18 + 1/2^12 + nxi[i]/2^24, i, 1, 7)$
+etas : makelist((uv[i][1] + 2*uv[i][2])/2^18 - 1/2^13 + neta[i]/2^24, i, 1, 7)$
+show("fit_xi_targets", bfloat(xis))$
+show("fit_eta_targets", bfloat(etas))$
+Am : apply(matrix, makelist([1, uv[i][1], uv[i][2]], i, 1, 7))$
+Ninv : invert(transpose(Am) . Am)$
+cxi : Ninv . transpose(Am) . transpose(matrix(xis))$
+ceta : Ninv . transpose(Am) . transpose(matrix(etas))$
+rxi : transpose(matrix(xis)) - Am . cxi$
+reta : transpose(matrix(etas)) - Am . ceta$
+/* The normal equations hold exactly: A^T r = 0. */
+zero("fit_xi_normal_equations", lmax(abs(list_matrix_entries(ratsimp(transpose(Am) . rxi)))))$
+zero("fit_eta_normal_equations", lmax(abs(list_matrix_entries(ratsimp(transpose(Am) . reta)))))$
+vxi : (transpose(rxi) . rxi)/(7 - 3)$
+veta : (transpose(reta) . reta)/(7 - 3)$
+show("fit_xi_coefficients", bfloat(list_matrix_entries(cxi)))$
+show("fit_eta_coefficients", bfloat(list_matrix_entries(ceta)))$
+show("fit_normal_inverse", bfloat(list_matrix_entries(Ninv)))$
+show("fit_variances", bfloat([vxi, veta]))$
+rms : sqrt((transpose(rxi) . rxi + transpose(reta) . reta)/(2*7))$
+show("fit_rms", [bfloat(rms)])$
+m : matrix([1, 30, -12])$
+q : (m . Ninv . transpose(m))$
+show("fit_position_variance_at_30_-12", bfloat([q*vxi, q*veta]))$

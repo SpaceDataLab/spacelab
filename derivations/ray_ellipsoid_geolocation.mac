@@ -1,0 +1,125 @@
+/* Direct geolocation -- spacelab-sensors/src/geoloc.rs -- as identities, and the reference values
+ * the gates in crates/spacelab-sensors/tests/geoloc_gates.rs are held to.
+ *
+ * The code
+ *   - intersects o + t d with x^2/a^2 + y^2/a^2 + z^2/b^2 = 1 by stretching to the unit sphere:
+ *         r = (dx/a, dy/a, dz/b),  c = -(ox/a, oy/a, oz/b),
+ *         disc = (r.c)^2 - (r.r)(c.c - 1),   t = (r.c - sqrt(disc))/(r.r);
+ *   - iterates the geodetic latitude phi <- atan2(z + a e^2 sin(phi)/W, p),  W = sqrt(1 - e^2 sin^2),
+ *     p = sqrt(x^2 + y^2);
+ *   - places the subpoint at (N cos phi cos lam, N cos phi sin lam, (1 - e^2) N sin phi), N = a/W;
+ *   - rotates by v c - (u x v) s + u (u.v)(1 - c), "pyorbital's sense".
+ *
+ * Shown here, every line printing `<name>: 0`:
+ *   1. the coded t is a root of the defining quadratic -- o + t d is on the ellipsoid -- and it is
+ *      the smaller of the two roots, the near side of the ellipsoid (G2);
+ *   2. disc < 0 is exactly the case with no real point of the line on the ellipsoid (G2);
+ *   3. the point at geodetic (phi, h) is a fixed point of the coded latitude iteration (G1), and
+ *      the subpoint formula lies on the ellipsoid with normal (cos phi cos lam, cos phi sin lam,
+ *      sin phi) (G2);
+ *   4. the coded rotation is the right-handed Rodrigues rotation by -theta, and it is orthogonal
+ *      (G1, G4);
+ *   5. at 40 digits, the hits, latitude points and rotation that geoloc_gates.rs holds the code to;
+ *      derivations/ray_ellipsoid_geolocation.gp recomputes them by root-finding and compares.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b \
+ *          derivations/ray_ellipsoid_geolocation.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. The ray-ellipsoid root. S stands for sqrt(disc), with S^2 = disc imposed. */
+r : [dx/a, dy/a, dz/b]$
+c : -[ox/a, oy/a, oz/b]$
+rc : r . c$  rr : r . r$  cc : c . c$
+disc : rc^2 - rr*(cc - 1)$
+sq(x) := ratsimp(subst(disc, S^2, ratsimp(x)))$
+t : (rc - S)/rr$
+P : [ox, oy, oz] + t*[dx, dy, dz]$
+on_surface : P[1]^2/a^2 + P[2]^2/a^2 + P[3]^2/b^2 - 1$
+zero("ray_hit_on_ellipsoid", sq(expand(on_surface*rr^2)))$
+/* The quadratic in t is rr t^2 - 2 rc t + (cc - 1); its roots are (rc -+ S)/rr. */
+quad(tt) := rr*tt^2 - 2*rc*tt + (cc - 1)$
+PT : [ox, oy, oz] + T*[dx, dy, dz]$
+zero("ray_quadratic_is_the_surface_equation",
+     ratsimp(quad(T) - (PT[1]^2/a^2 + PT[2]^2/a^2 + PT[3]^2/b^2 - 1)))$
+zero("ray_coded_root_is_the_near_root", ratsimp(((rc + S)/rr - t) - 2*S/rr))$
+/* 2. Discriminant: quad(T) = rr (T - rc/rr)^2 - disc/rr, so with rr > 0 a real root needs disc >= 0. */
+zero("ray_discriminant_completes_the_square", ratsimp(quad(T) - (rr*(T - rc/rr)^2 - disc/rr)))$
+
+/* 3. Latitude fixed point and subpoint. s, cp = sin phi, cos phi; W^2 = 1 - e2 s^2. */
+N : a/W$
+wsub(x) := ratsimp(subst(1 - e2*s^2, W^2, ratsimp(x)))$
+pp : (N + h)*cp$
+zz : (N*(1 - e2) + h)*s$
+/* atan2(Y, X) = phi with X > 0 iff Y cp - X s = 0. */
+zero("latitude_iteration_fixed_point", ratsimp((zz + a*e2*s/W)*cp - pp*s))$
+b2 : a^2*(1 - e2)$
+sub : [N*cp*cl, N*cp*sl, (1 - e2)*N*s]$
+lam(x) := ratsimp(subst(1 - sl^2, cl^2, ratsimp(x)))$
+phs(x) := ratsimp(subst(1 - s^2, cp^2, ratsimp(x)))$
+zero("subpoint_on_ellipsoid",
+     phs(wsub(lam(ratsimp((sub[1]^2/a^2 + sub[2]^2/a^2 + sub[3]^2/b2 - 1)*W^2)))))$
+grad : [sub[1]/a^2, sub[2]/a^2, sub[3]/b2]$
+nrm : [cp*cl, cp*sl, s]$
+crs(u, v) := [u[2]*v[3] - u[3]*v[2], u[3]*v[1] - u[1]*v[3], u[1]*v[2] - u[2]*v[1]]$
+gxn : crs(grad, nrm)$
+zero("subpoint_normal_is_geodetic_vertical_x", ratsimp(gxn[1]))$
+zero("subpoint_normal_is_geodetic_vertical_y", ratsimp(gxn[2]))$
+zero("subpoint_normal_is_geodetic_vertical_z", ratsimp(gxn[3]))$
+
+/* 4. Rotation. u unit (u3^2 = 1 - u1^2 - u2^2), cs^2 + sn^2 = 1. */
+u : [u1, u2, u3]$
+v : [v1, v2, v3]$
+coded(vv, th_c, th_s) := vv*th_c - crs(u, vv)*th_s + u*(u . vv)*(1 - th_c)$
+K : matrix([0, -u3, u2], [u3, 0, -u1], [-u2, u1, 0])$
+rodrigues(th) := ident(3) + sin(th)*K + (1 - cos(th))*K . K$
+right_minus : rodrigues(-th) . transpose(v)$
+coded_v : coded(v, cos(th), sin(th))$
+unit(x) := ratsimp(ratsubst(1 - u1^2 - u2^2, u3^2, ratsimp(expand(x))))$
+for i : 1 thru 3 do
+  zero(sconcat("rotation_is_rodrigues_by_minus_theta_", i),
+       unit(trigsimp(right_minus[i][1] - coded_v[i])))$
+Mc : transpose(matrix(coded([1,0,0], cs, sn), coded([0,1,0], cs, sn), coded([0,0,1], cs, sn)))$
+orth : Mc . transpose(Mc) - ident(3)$
+for i : 1 thru 3 do for j : 1 thru 3 do
+  zero(sconcat("rotation_orthogonal_", i, j),
+       ratsimp(ratsubst(1 - sn^2, cs^2, unit(orth[i][j]))))$
+
+/* 5. Reference values at 40 digits. The WGS-84 axes of geoloc.rs, in km. */
+fpprec : 40$
+A : 6378137/1000$
+B : 6356752314245/10^9$
+E2 : (A^2 - B^2)/A^2$
+hit(o, d) := block([rv, cv, rcv, rrv, ccv, dv, tv],
+  rv : [d[1]/A, d[2]/A, d[3]/B], cv : -[o[1]/A, o[2]/A, o[3]/B],
+  rcv : rv . cv, rrv : rv . rv, ccv : cv . cv, dv : rcv^2 - rrv*(ccv - 1),
+  if dv < 0 then [] else (tv : bfloat((rcv - sqrt(dv))/rrv), bfloat(o + tv*d)))$
+show(name, vec) := (printf(true, "~a:", name), for x in vec do printf(true, " ~h", x),
+                    printf(true, "~%"))$
+cases : [[[5120, 3584, 2304], [-3/4, -1/2, -1/4]],
+         [[7168, 0, 0], [-1, 1/4, 1/2]],
+         [[1024, -2048, 6656], [-1/8, 1/4, -1]]]$
+for k : 1 thru length(cases) do block([h_ : hit(cases[k][1], cases[k][2])],
+  show(sconcat("hit_", k), h_),
+  zero(sconcat("hit_", k, "_residual_below_1e-35"),
+       if abs(h_[1]^2/A^2 + h_[2]^2/A^2 + h_[3]^2/B^2 - 1) < 1b-35 then 0 else 1))$
+/* A ray past the limb: tangent direction from 7168 km on the equator. */
+zero("miss_has_negative_discriminant", if hit([7168, 0, 0], [0, 1, 0]) = [] then 0 else 1)$
+
+/* Geodetic points: (phi, lam, h) in rad, rad, km, all exact binary fractions. */
+pts : [[11/16, 3/8, 830], [-39/32, -5/2, 0], [3/2, 1, 35786], [0, 1/4, 500]]$
+for k : 1 thru length(pts) do block([ph : pts[k][1], la : pts[k][2], hh : pts[k][3], nn, w],
+  w : sqrt(1 - E2*sin(ph)^2), nn : A/w,
+  show(sconcat("point_", k), bfloat([(nn + hh)*cos(ph)*cos(la), (nn + hh)*cos(ph)*sin(la),
+                                       (nn*(1 - E2) + hh)*sin(ph)])),
+  show(sconcat("subpoint_", k), bfloat([nn*cos(ph)*cos(la), nn*cos(ph)*sin(la),
+                                          (1 - E2)*nn*sin(ph)])))$
+
+/* The rotation of (1/2, -1, 2) about (1, 2, 2) by theta = 3/4 in the coded sense. */
+uu : [1, 2, 2]/3$
+rot : bfloat(subst([u1 = uu[1], u2 = uu[2], u3 = uu[3], v1 = 1/2, v2 = -1, v3 = 2, th = 3/4],
+                   coded_v))$
+show("rotation", rot)$

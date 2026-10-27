@@ -9,6 +9,14 @@
 //!
 //! The Hermitian eigen-problem is solved by embedding `T₃` in a real symmetric `6×6` and running a
 //! cyclic Jacobi sweep. `alloc` for the matrices.
+//!
+//! Gate: `derivations/polsar_decomposition.mac` shows symbolically that the diagonal of `k_P k_Pᴴ`
+//! is the Pauli powers and its trace the span, and derives the exact `(H, A, ᾱ)` of the sphere,
+//! dihedral, horizontal dipole and a randomly oriented dipole cloud (`H = 3 ln 2/(2 ln 3)`, `A = 0`,
+//! `ᾱ = π/4`); `derivations/polsar_decomposition.gp` re-derives them through an independent eigen
+//! solver at 60 digits. The module tests
+//! `the_canonical_scatterers_have_their_exact_entropy_anisotropy_and_alpha` (G3) and
+//! `coherency_matrix_is_hermitian_and_averages` (G4) hold the shipped code to them.
 
 // Physical single letters (h, v, a, s) mirror the polarimetry literature; the doc uses SAR terms;
 // the Jacobi rotation's akp/akq bindings only look alike.
@@ -168,7 +176,11 @@ pub fn cloude_pottier(t3: &[Complex]) -> (f64, f64, f64) {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::float_cmp)]
+    #![allow(
+        clippy::float_cmp,
+        clippy::unreadable_literal,
+        clippy::excessive_precision
+    )]
     use super::*;
 
     fn c(re: f64) -> Complex {
@@ -372,6 +384,8 @@ mod tests {
         );
     }
 
+    /// (G4) The coherency matrix is Hermitian, averages its looks, and keeps the received power: its
+    /// trace is the span `|S_hh|² + 2|S_hv|² + |S_vv|²` (`derivations/polsar_decomposition.mac`).
     #[test]
     fn coherency_matrix_is_hermitian_and_averages() {
         // A single look gives a rank-1 T₃ (entropy 0); its trace equals the total Pauli power.
@@ -408,7 +422,56 @@ mod tests {
         let trace = t[0].re + t[4].re + t[8].re;
         let total: f64 = pauli_powers(hh, hv, vv).iter().sum();
         assert!((trace - total).abs() < 1e-9, "{trace} vs {total}");
+        let span = hh.norm_sqr() + 2.0 * hv.norm_sqr() + vv.norm_sqr();
+        assert!((trace - span).abs() < 1e-14, "trace {trace} vs span {span}");
         let (h, _, _) = cloude_pottier(&t);
         assert!(h < 1e-6, "single-look entropy {h}");
+    }
+
+    /// (G3) `(H, A, ᾱ)` of the canonical scatterers, from their scattering matrices, against the
+    /// exact values `derivations/polsar_decomposition.mac` derives (and the `.gp` re-derives).
+    ///
+    /// The fixtures above hand `cloude_pottier` a `T₃` written by hand; these go through
+    /// `coherency_matrix` from `S`. The horizontal dipole is rank one with its eigenvector off every
+    /// axis, `(1, 1, 0)/√2`, so `α = π/4` comes out of a rotation the sweep has to make. The dipole
+    /// cloud — six looks at `ψ = mπ/6` of `S_hh = cos²ψ`, `S_hv = cos ψ sin ψ`, `S_vv = sin²ψ` — is
+    /// the random-volume model: `T₃ = diag(1/2, 1/4, 1/4)` exactly, a degenerate pair whose
+    /// eigenvectors the embedding may return in any basis, and `H = 3 ln 2/(2 ln 3)`.
+    #[test]
+    fn the_canonical_scatterers_have_their_exact_entropy_anisotropy_and_alpha() {
+        const CLOUD_ENTROPY: f64 = 0.9463946303571861556492906715141412814493;
+        let half_pi = core::f64::consts::FRAC_PI_2;
+        let quarter_pi = core::f64::consts::FRAC_PI_4;
+        let cloud: Vec<(Complex, Complex, Complex)> = (0..6)
+            .map(|m| {
+                let psi = f64::from(m) * core::f64::consts::PI / 6.0;
+                let (s, co) = (psi.sin(), psi.cos());
+                (c(co * co), c(co * s), c(s * s))
+            })
+            .collect();
+        for (name, looks, want) in [
+            ("sphere", vec![(c(1.0), c(0.0), c(1.0))], (0.0, 0.0, 0.0)),
+            (
+                "dihedral",
+                vec![(c(1.0), c(0.0), c(-1.0))],
+                (0.0, 0.0, half_pi),
+            ),
+            (
+                "horizontal dipole",
+                vec![(c(1.0), c(0.0), c(0.0))],
+                (0.0, 0.0, quarter_pi),
+            ),
+            ("dipole cloud", cloud, (CLOUD_ENTROPY, 0.0, quarter_pi)),
+        ] {
+            let (h, a, alpha) = cloude_pottier(&coherency_matrix(&looks));
+            println!("polsar {name}: H = {h}, A = {a}, alpha = {alpha}");
+            assert!((h - want.0).abs() < 1e-12, "{name}: H {h} vs {}", want.0);
+            assert!((a - want.1).abs() < 1e-12, "{name}: A {a} vs {}", want.1);
+            assert!(
+                (alpha - want.2).abs() < 1e-12,
+                "{name}: alpha {alpha} vs {}",
+                want.2
+            );
+        }
     }
 }

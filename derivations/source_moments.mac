@@ -1,0 +1,83 @@
+/* Background, detection and centroid moments of spacelab-astrometry/src/sources.rs on an exact frame,
+ * and the MAD-to-sigma factor at full precision. Reference values for
+ * crates/spacelab-astrometry/tests/derivation_gates.rs.
+ *
+ * The code estimates the background as (median, K MAD) with K = 1/Phi^-1(3/4), keeps 8-connected
+ * blobs above median + threshold K MAD, and reports for each blob, with w = value - median,
+ *     flux = sum w,  centroid = sum w (x, y)/flux,  width = sqrt(sum w |r - centroid|^2/(2 flux)),
+ *     Q = flux/(K MAD sqrt(n)),  position_sigma = width/Q.
+ *
+ * Shown here, every line printing `<name>: 0`:
+ *   1. K: Phi(1/K) = 3/4 at 40 digits, i.e. the MAD of a unit Gaussian is 1/K (G3);
+ *   2. the centroid of a profile symmetric about a point is that point, exactly (G3), shown
+ *      symbolically for a 4 x 4 block with the D4-symmetric weights of an outer product;
+ *   3. the frame of the Rust gate -- 16 x 16, background 10 + ((x + 2y) mod 3) - 1, a 3 x 3
+ *      asymmetric blob at x 3..5, y 4..6 and a 4 x 4 symmetric blob at x 10..13, y 9..12 -- has
+ *      median 10 and MAD 1, and every blob pixel and no background pixel clears the cut at
+ *      threshold 3 (G2);
+ *   4. each blob's flux, centroid, width and position sigma, exact or at 40 digits (G2).
+ * derivations/source_moments.gp recomputes K by root-finding erfc and the moments by matrix sums.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b \
+ *          derivations/source_moments.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+fpprec : 45$
+show(name, vec) := (printf(true, "~a:", name), for x in vec do printf(true, " ~h", x),
+                    printf(true, "~%"))$
+
+/* 1. K. Phi(x) = (1 + erf(x/sqrt 2))/2 = 3/4 at x = 1/K. */
+q75 : bf_find_root(erf(x/sqrt(2b0)) - 1/2, x, 0.5b0, 1b0)$
+K : 1/q75$
+show("mad_to_sigma", [K])$
+zero("mad_to_sigma_quantile_residual_below_1e-40",
+     if abs(bfloat((1 + erf(1/(K*sqrt(2))))/2) - 3/4) < 1b-40 then 0 else 1)$
+
+/* 2. Symmetric centroid, symbolically: weights w(i) w(j) with w = [p, q, q, p] about (1.5, 1.5). */
+w : [p, q, q, p]$
+M : sum(sum(w[i+1]*w[j+1], i, 0, 3), j, 0, 3)$
+zero("symmetric_centroid_x", ratsimp(sum(sum(w[i+1]*w[j+1]*i, i, 0, 3), j, 0, 3)/M - 3/2))$
+zero("symmetric_centroid_y", ratsimp(sum(sum(w[i+1]*w[j+1]*j, i, 0, 3), j, 0, 3)/M - 3/2))$
+
+/* 3. The frame. */
+PA : matrix([20, 40, 10], [60, 100, 30], [20, 50, 10])$
+PB : 10*transpose(matrix([1, 3, 3, 1])) . matrix([1, 3, 3, 1])$
+pix(x, y) :=
+  if x >= 3 and x <= 5 and y >= 4 and y <= 6 then 10 + PA[y - 3, x - 2]
+  else if x >= 10 and x <= 13 and y >= 9 and y <= 12 then 10 + PB[y - 8, x - 9]
+  else 10 + mod(x + 2*y, 3) - 1$
+frame : makelist(pix(mod(i, 16), floor(i/16)), i, 0, 255)$
+med(L) := block([s : sort(L), n : length(L)],
+  if evenp(n) then (s[n/2] + s[n/2 + 1])/2 else s[(n + 1)/2])$
+level : med(frame)$
+mad : med(map(lambda([v], abs(v - level)), frame))$
+zero("frame_median_is_10", level - 10)$
+zero("frame_mad_is_1", mad - 1)$
+cut : bfloat(level + 3*K*mad)$
+inblob(x, y) := (x >= 3 and x <= 5 and y >= 4 and y <= 6) or (x >= 10 and x <= 13 and y >= 9 and y <= 12)$
+above : makelist(if is(bfloat(pix(mod(i, 16), floor(i/16))) > cut) then 1 else 0, i, 0, 255)$
+expected : makelist(if inblob(mod(i, 16), floor(i/16)) then 1 else 0, i, 0, 255)$
+zero("cut_selects_exactly_the_blob_pixels", lsum(abs(e), e, above - expected))$
+
+/* 4. Moments. */
+moments(P, x0, y0) := block([rows : length(P), cols : length(P[1]), fl, sx, sy, cx, cy, m2, wd, n, Q],
+  fl : sum(sum(P[r, c], c, 1, cols), r, 1, rows),
+  sx : sum(sum(P[r, c]*(x0 + c - 1), c, 1, cols), r, 1, rows),
+  sy : sum(sum(P[r, c]*(y0 + r - 1), c, 1, cols), r, 1, rows),
+  cx : sx/fl, cy : sy/fl,
+  m2 : sum(sum(P[r, c]*((x0 + c - 1 - cx)^2 + (y0 + r - 1 - cy)^2), c, 1, cols), r, 1, rows),
+  n : rows*cols,
+  wd : sqrt(m2/(2*fl)),
+  Q : fl/(K*mad*sqrt(n)),
+  [fl, cx, cy, m2/(2*fl), bfloat(wd), bfloat(wd/Q), bfloat(Q)])$
+mA : moments(PA, 3, 4)$
+mB : moments(PB, 10, 9)$
+print("blob_a_exact (flux, cx, cy, width^2):", [mA[1], mA[2], mA[3], mA[4]])$
+show("blob_a", append([mA[1]], bfloat([mA[2], mA[3]]), [mA[5], mA[6], mA[7]]))$
+print("blob_b_exact (flux, cx, cy, width^2):", [mB[1], mB[2], mB[3], mB[4]])$
+show("blob_b", append([mB[1]], bfloat([mB[2], mB[3]]), [mB[5], mB[6], mB[7]]))$
+zero("blob_b_centroid_is_its_centre_x", mB[2] - 23/2)$
+zero("blob_b_centroid_is_its_centre_y", mB[3] - 21/2)$

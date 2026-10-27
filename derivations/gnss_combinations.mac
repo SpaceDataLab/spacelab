@@ -1,0 +1,104 @@
+/* Dual-frequency GNSS linear combinations -- spacelab-gnss/src/combinations.rs -- as identities in
+ * the carrier frequencies, and the wavelengths of the ICD carriers as exact rationals.
+ *
+ * With the observation equations (metres, lambda_i = c/f_i)
+ *     P_i = rho + I/f_i^2,          L_i = rho - I/f_i^2 + lambda_i N_i,
+ * the module's combinations are
+ *     IF(x1, x2) = (f1^2 x1 - f2^2 x2)/(f1^2 - f2^2),   GF(x1, x2) = x1 - x2,
+ *     WL(x1, x2) = (f1 x1 - f2 x2)/(f1 - f2),           NL(x1, x2) = (f1 x1 + f2 x2)/(f1 + f2),
+ *     MW = WL(L1, L2) - NL(P1, P2),                     GRAPHIC(P, L) = (P + L)/2.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. IF keeps rho with unit coefficient and cancels the 1/f^2 ionosphere exactly, on code and phase;
+ *   2. GF cancels rho; WL and NL keep rho with unit coefficient;
+ *   3. the WL phase carries the ambiguity lambda_WL (N1 - N2), lambda_WL = c/(f1 - f2), and the
+ *      ionospheric residual +I/(f1 f2); the NL code carries the same +I/(f1 f2);
+ *   4. MW is exactly lambda_WL (N1 - N2): geometry, clocks, troposphere and first-order ionosphere
+ *      all cancel, for every f1 > f2;
+ *   5. GRAPHIC is rho + lambda N/2;
+ *   6. the noise gains for equal, independent noise on both inputs: IF sqrt(f1^4 + f2^4)/(f1^2 - f2^2)
+ *      (2.978 on GPS L1/L2, the module doc's "roughly threefold") and NL sqrt(f1^2 + f2^2)/(f1 + f2)
+ *      (0.7125, about 1/sqrt 2 -- not a halving);
+ *   7. the hand values of the module's `the_combinations_match_values_computed_by_hand` as exact
+ *      rationals of 154 and 120.
+ * Then the carriers as multiples k/10 of f0 = 10.23 MHz, and the wavelengths the gate
+ * `the_wavelengths_are_the_exact_rationals_of_the_icd_carriers` (G3) asserts, at 40 digits.
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/gnss_combinations.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+IF(x1, x2) := (f1^2*x1 - f2^2*x2)/(f1^2 - f2^2)$
+GF(x1, x2) := x1 - x2$
+WL(x1, x2) := (f1*x1 - f2*x2)/(f1 - f2)$
+NL(x1, x2) := (f1*x1 + f2*x2)/(f1 + f2)$
+GRAPHIC(p, l) := (p + l)/2$
+
+P1 : rho + I/f1^2$  P2 : rho + I/f2^2$
+L1 : rho - I/f1^2 + (c/f1)*N1$  L2 : rho - I/f2^2 + (c/f2)*N2$
+
+zero("if_code_is_rho", ratsimp(IF(P1, P2) - rho))$
+zero("if_phase_has_no_ionosphere", ratsimp(diff(IF(L1, L2), I)))$
+zero("if_phase_keeps_rho", ratsimp(diff(IF(L1, L2), rho) - 1))$
+zero("gf_has_no_rho", ratsimp(diff(GF(L1, L2), rho)))$
+zero("gf_code_is_the_differential_ionosphere", ratsimp(GF(P1, P2) - (I/f1^2 - I/f2^2)))$
+zero("wl_keeps_rho", ratsimp(diff(WL(L1, L2), rho) - 1))$
+zero("nl_keeps_rho", ratsimp(diff(NL(P1, P2), rho) - 1))$
+zero("wl_phase_is_rho_plus_ionosphere_plus_lambda_wl_n_wl",
+     ratsimp(WL(L1, L2) - (rho + I/(f1*f2) + c/(f1 - f2)*(N1 - N2))))$
+zero("wl_ionosphere_is_plus_i_over_f1_f2", ratsimp(diff(WL(L1, L2), I) - 1/(f1*f2)))$
+zero("nl_ionosphere_is_plus_i_over_f1_f2", ratsimp(diff(NL(P1, P2), I) - 1/(f1*f2)))$
+zero("mw_is_the_wide_lane_ambiguity", ratsimp(WL(L1, L2) - NL(P1, P2) - c/(f1 - f2)*(N1 - N2)))$
+zero("graphic_is_rho_plus_half_the_ambiguity", ratsimp(GRAPHIC(P1, L1) - (rho + (c/f1)*N1/2)))$
+
+/* Noise gains: the root of the sum of the squared coefficients. */
+gif : sqrt(f1^4 + f2^4)/(f1^2 - f2^2)$
+gnl : sqrt(f1^2 + f2^2)/(f1 + f2)$
+zero("if_gain_squared_is_the_coefficient_sum",
+     ratsimp(gif^2 - ((f1^2/(f1^2 - f2^2))^2 + (f2^2/(f1^2 - f2^2))^2)))$
+zero("nl_gain_squared_is_the_coefficient_sum",
+     ratsimp(gnl^2 - ((f1/(f1 + f2))^2 + (f2/(f1 + f2))^2)))$
+fpprec : 40$
+printf(true, "GPS L1/L2 noise gain: IF ~a, NL ~a~%",
+       bfloat(subst([f1 = 154, f2 = 120], gif)), bfloat(subst([f1 = 154, f2 = 120], gnl)))$
+/* gnl^2 = 1/2 + (f1 - f2)^2/(2 (f1 + f2)^2): the narrow lane never beats 1/sqrt 2. */
+zero("nl_gain_is_at_least_one_over_root_two",
+     ratsimp(gnl^2 - (1/2 + (f1 - f2)^2/(2*(f1 + f2)^2))))$
+
+/* The hand-computed epoch, exactly. */
+hand : [f1 = 154, f2 = 120]$
+p1 : 20000000$ p2 : 20000002$ l1 : 19999999$ l2 : 19999997$
+zero("hand_if", subst(hand, IF(p1, p2)) - (p1 - 14400/9316*(p2 - p1)))$
+zero("hand_wl", subst(hand, WL(l1, l2)) - (l1 + 120/34*(l1 - l2)))$
+zero("hand_nl", subst(hand, NL(p1, p2)) - (p1 + 120/274*(p2 - p1)))$
+printf(true, "hand values: IF ~a, WL ~a, NL ~a, MW ~a~%",
+       bfloat(subst(hand, IF(p1, p2))), bfloat(subst(hand, WL(l1, l2))),
+       bfloat(subst(hand, NL(p1, p2))), bfloat(subst(hand, WL(l1, l2) - NL(p1, p2))))$
+
+/* The ICD carriers: k/10 times f0 = 10.23 MHz, and the MHz figure each ICD prints. */
+f0 : 10230000$
+cc : 299792458$
+carriers : [["L1", 1540, 157542/100], ["L2", 1200, 122760/100], ["L5", 1150, 117645/100],
+            ["E6", 1250, 127875/100], ["E5b", 1180, 120714/100], ["E5", 1165, 1191795/1000],
+            ["B1I", 1526, 1561098/1000], ["B3I", 1240, 126852/100], ["NavIC_S", 2436, 2492028/1000],
+            ["G3", 1175, 1202025/1000], ["G1a", 1565, 1600995/1000], ["G2a", 1220, 124806/100]]$
+for k in carriers do
+  zero(sconcat("carrier_", k[1], "_is_its_multiple_of_f0"), k[2]/10*f0 - k[3]*10^6)$
+zero("b1c_minus_b1i_is_14_322_mhz", (1540 - 1526)/10*f0 - 14322000)$
+
+/* Wavelengths, exact rationals of c and the ICD frequencies, printed at 40 digits. */
+fL1 : 154*f0$ fL2 : 120*f0$ fL5 : 115*f0$
+show(name, x) := printf(true, "~a = ~a~%", name, bfloat(x))$
+show("lambda1  (L1)       ", cc/fL1)$
+show("lambda2  (L2)       ", cc/fL2)$
+show("lambda5  (L5)       ", cc/fL5)$
+show("lambda_WL (L1/L2)   ", cc/(fL1 - fL2))$
+show("lambda_NL (L1/L2)   ", cc/(fL1 + fL2))$
+show("lambda_WL (L1/L5)   ", cc/(fL1 - fL5))$
+show("lambda_NL (L1/L5)   ", cc/(fL1 + fL5))$
+/* The wide-lane wavelength is c/(34 f0) exactly: the difference of two carriers is itself a
+   multiple of f0, which is why the constants are written as multiples. */
+zero("lambda_wl_l1_l2_is_c_over_34_f0", cc/(fL1 - fL2) - cc/(34*f0))$

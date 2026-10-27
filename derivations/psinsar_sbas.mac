@@ -1,0 +1,74 @@
+/* The persistent-scatterer and SBAS model of crates/spacelab-signal/src/psinsar.rs.
+
+   `sbas_invert` fits phi_i = kv dt_i v + kh B_perp_i dh, kv = 4 pi/lambda,
+   kh = 4 pi/(lambda r sin theta), by least squares, returning
+       v = (s11 b0 - s01 b1)/det,  dh = (s00 b1 - s01 b0)/det,  det = s00 s11 - s01^2,
+   with s_jk = sum c_j c_k and b_j = sum c_j phi over the design columns c0 = kv dt, c1 = kh B_perp.
+   Each line prints `<name>: 0`:
+     1. that pair solves the normal equations [s00 s01; s01 s11][v; dh] = [b0; b1] (G2);
+     2. on noise-free phases built from any (V, H) it returns exactly (V, H), for a symbolic stack
+        of three acquisitions (G3) -- the claim `sbas_recovers_velocity_and_dem_error_exactly`
+        tests;
+     3. where the two coefficients come from, in a flat-earth geometry. Antenna 1 at (0, Hp), antenna
+        2 displaced by eps (Bh, Bv), the target in range cell r at look angle theta from the vertical,
+        T = (r sin theta, Hp - r cos theta). With phi = (4 pi/lambda)(R1 - R2):
+          a. to first order in eps, R1 - R2 = B_par = Bh sin theta - Bv cos theta;
+          b. moving the target up by dz inside its range cell turns theta by dz/(r sin theta), so
+             d(R1 - R2)/dz = B_perp/(r sin theta), B_perp = Bh cos theta + Bv sin theta, to first
+             order in eps (G3) -- the 4 pi B_perp/(lambda r sin theta) of the DEM-error column;
+          c. a line-of-sight displacement d of the target towards the radar between the two passes
+             shortens the two-way path by 2 d, so phi = 4 pi d/lambda and with d = v dt the velocity
+             column is (4 pi/lambda) dt (G1);
+     4. the amplitude dispersion D_A = sigma/mu (population sigma) of the stack m(1 -+ r),
+        m(1 -+ r/2) is r sqrt(5/8) for every m (G3) -- the closed form
+        `amplitude_dispersion_is_its_closed_form_and_keeps_its_digits` tests.
+   derivations/psinsar_sbas.gp re-checks 1 and 3b numerically at 60 digits.
+
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/psinsar_sbas.mac </dev/null             */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+det : s00*s11 - s01^2$
+v_hat : (s11*b0 - s01*b1)/det$
+h_hat : (s00*b1 - s01*b0)/det$
+zero("normal_equation_row_1", ratsimp(s00*v_hat + s01*h_hat - b0))$
+zero("normal_equation_row_2", ratsimp(s01*v_hat + s11*h_hat - b1))$
+
+c0 : [p1, p2, p3]$ c1 : [q1, q2, q3]$
+phi : V*c0 + H*c1$
+sub : [s00 = c0 . c0, s01 = c0 . c1, s11 = c1 . c1, b0 = c0 . phi, b1 = c1 . phi]$
+zero("noise_free_velocity", ratsimp(subst(sub, v_hat) - V))$
+zero("noise_free_dem_error", ratsimp(subst(sub, h_hat) - H))$
+
+assume(r > 0, Hp > 0, th > 0, th < %pi/2)$
+A1 : [0, Hp]$
+A2 : A1 + eps*[Bh, Bv]$
+T : A1 + r*[sin(th), -cos(th)]$
+dist(P, Q) := sqrt((P - Q) . (P - Q))$
+dR : dist(T, A1) - dist(T, A2)$
+first_order(e) := ratsimp(trigsimp(coeff(taylor(e, eps, 0, 1), eps, 1)))$
+zero("path_difference_is_the_parallel_baseline",
+     ratsimp(trigsimp(first_order(dR) - (Bh*sin(th) - Bv*cos(th)))))$
+zero("path_difference_vanishes_with_the_baseline", ratsimp(trigsimp(subst(eps = 0, dR))))$
+/* z = Hp - r cos(theta) at fixed r, so dz/dtheta = r sin(theta). */
+z : T[2]$
+zero("height_turns_the_look_angle", ratsimp(diff(z, th) - r*sin(th)))$
+dphase_dz : first_order(diff(dR, th)/diff(z, th))$
+zero("height_sensitivity_is_b_perp_over_r_sin_theta",
+     ratsimp(trigsimp(dphase_dz - (Bh*cos(th) + Bv*sin(th))/(r*sin(th)))))$
+/* A displacement d towards the radar along the line of sight u = (T - A)/|T - A|. */
+u : (T - A1)/r$
+zero("line_of_sight_is_a_unit_vector", ratsimp(trigsimp(u . u - 1)))$
+zero("two_way_path_change_is_twice_the_displacement",
+     ratsimp(trigsimp(coeff(taylor(2*(dist(T - d*u, A1) - dist(T, A1)), d, 0, 1), d, 1) + 2)))$
+
+assume(m > 0, rr > 0)$
+amps : m*[1 - rr, 1 + rr, 1 - rr/2, 1 + rr/2]$
+mu : lsum(x, x, amps)/4$
+var : lsum((x - mu)^2, x, amps)/4$
+zero("amplitude_dispersion_mean", ratsimp(mu - m))$
+zero("amplitude_dispersion_closed_form", ratsimp(var/mu^2 - 5*rr^2/8))$

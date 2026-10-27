@@ -26,6 +26,12 @@
 //!
 //! [`PhaseFunction::Tabulated`] is the way out: any angular structure at all, sampled by exact
 //! inversion of the CDF of the *interpolant*. See [`TabulatedPhase`] for what that trades.
+//!
+//! Gate: `derivations/phase_functions.mac` derives the Henyey–Greenstein CDF, its first moment and
+//! its Legendre moments `gˡ`, the exact inverse of both samplers, the Rayleigh CDF and Cardano root,
+//! and the segment moments the table uses; `derivations/phase_functions.gp` re-derives them by
+//! quadrature. The module test `the_phase_functions_reproduce_their_derivation` (G2) holds the
+//! shipped arithmetic to that file's 40-digit values.
 
 // The grid's endpoints are a contract — `mu[0]` is exactly `−1` and `mu[n−1]` exactly `1`, because a
 // tolerance there would silently accept a table that does not span the sphere — and the Legendre and
@@ -459,12 +465,70 @@ mod tests {
         clippy::unwrap_used,
         clippy::expect_used,
         clippy::unreadable_literal,
+        clippy::excessive_precision,
         clippy::items_after_statements
     )]
 
     use super::*;
     use alloc::vec;
     use alloc::vec::Vec;
+
+    /// (G2) The densities and samplers reproduce, at 40-digit points, the definitions
+    /// `derivations/phase_functions.mac` derives them from.
+    ///
+    /// That file shows that the coded HG CDF has `F' = p` and `F(±1) = 0, 1`, that the HG sampler is
+    /// its exact inverse, and that Cardano's root `a − 1/a` solves the Rayleigh CDF's cubic. The
+    /// points here are where those closed forms come out exact or algebraic, so the shipped
+    /// arithmetic is held to the rounding of one evaluation rather than to a quadrature:
+    /// `μ = 1147/1352` at `g = 3/4, ξ = 3/8`, `μ = −5/16` at `g = −5/8, ξ = 13/16`, and the real
+    /// root of `μ³ + 3μ + 4 − 8ξ` at three deviates on both sides of the branch at `u = 0`.
+    /// `derivations/phase_functions.gp` re-derives each literal by quadrature and `polroots`. The
+    /// tabulated member is pinned through its exact first moment: the five-node ramp `k/6` has
+    /// `g = 2/9`.
+    #[test]
+    fn the_phase_functions_reproduce_their_derivation() {
+        let hg = PhaseFunction::HenyeyGreenstein { asymmetry: 0.75 };
+        let close = |got: f64, want: f64, what: &str| {
+            assert!(
+                (got - want).abs() <= 4.0 * f64::EPSILON * want.abs().max(0.25),
+                "{what}: {got:e} against {want:e}"
+            );
+        };
+        close(
+            hg.value(0.5),
+            2.986847210443541426252609333999227411096e-1,
+            "HG p(1/2) at g = 3/4",
+        );
+        close(
+            hg.sample(0.375),
+            8.483727810650887573964497041420118343195e-1,
+            "HG μ(3/8) at g = 3/4, 1147/1352",
+        );
+        close(
+            PhaseFunction::HenyeyGreenstein { asymmetry: -0.625 }.sample(0.8125),
+            -0.3125,
+            "HG μ(13/16) at g = −5/8",
+        );
+        for (xi, want) in [
+            (0.25, -5.960716379833215231128054143996818281133e-1),
+            (0.3125, -4.662205239107734273913577876420742203745e-1),
+            (0.875, 8.177316738868235060940870704093553698711e-1),
+        ] {
+            close(PhaseFunction::Rayleigh.sample(xi), want, "Rayleigh μ(ξ)");
+        }
+
+        let mu = [-1.0, -0.5, 0.0, 0.5, 1.0];
+        let mut value = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let mut cumulative = [0.0; 5];
+        TabulatedPhase::prepare(&mu, &mut value, &mut cumulative).unwrap();
+        let table =
+            PhaseFunction::Tabulated(TabulatedPhase::new(&mu, &value, &cumulative).unwrap());
+        close(
+            table.asymmetry(),
+            2.222222222222222222222222222222222222222e-1,
+            "table g, 2/9",
+        );
+    }
 
     /// An angle grid fine enough to resolve a halo: 0.25° in scattering angle.
     fn angle_grid(nodes: usize) -> Vec<f64> {
@@ -515,7 +579,7 @@ mod tests {
         total
     }
 
-    /// Every member is a probability density on the sphere: `∫ p dΩ = 1`.
+    /// (G4) Every member is a probability density on the sphere: `∫ p dΩ = 1`.
     ///
     /// Written in the solid-angle form the ticket states, `2π ∫₋₁¹ p(μ)/2π dμ`, so the check pins the
     /// convention and not just the normalisation constant — a member that integrated to `4π` or to
@@ -593,7 +657,7 @@ mod tests {
         assert_eq!(PhaseFunction::Rayleigh.sample(0.5), 0.0);
     }
 
-    /// Every member reports the asymmetry parameter its own density has: `g = ∫ μ p dμ`.
+    /// (G3) Every member reports the asymmetry parameter its own density has: `g = ∫ μ p dμ`.
     #[test]
     fn every_member_reports_the_asymmetry_of_its_own_density() {
         for g in [-0.8, -0.3, 0.0, 0.3, 0.85, 0.95] {
@@ -766,7 +830,7 @@ mod tests {
         );
     }
 
-    /// A Legendre expansion of a Henyey–Greenstein reproduces it — the moments of HG are `gˡ`, so
+    /// (G1) A Legendre expansion of a Henyey–Greenstein reproduces it — the moments of HG are `gˡ`, so
     /// this is an identity the constructor either satisfies or does not, with no fitting involved.
     #[test]
     fn a_legendre_expansion_reproduces_the_function_whose_moments_it_holds() {

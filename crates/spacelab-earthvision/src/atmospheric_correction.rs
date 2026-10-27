@@ -26,6 +26,13 @@
 //! bidirectional reflectance distribution function. [`brdf_reflectance`] is the MODIS MCD43
 //! semi-empirical **RTLSR** model `ρ = f_iso + f_vol·K_vol + f_geo·K_geo` with the RossThick volumetric
 //! ([`ross_thick_kernel`]) and LiSparse-Reciprocal geometric ([`li_sparse_reciprocal_kernel`]) kernels.
+//!
+//! Gate: `derivations/six_s_coupling_brdf.mac` shows the coded inverse undoes the coupling both ways,
+//! derives the four-node Gauss–Legendre rule on `[0, 1]` and the proportional photon split, and
+//! evaluates both kernels with their nadir, reciprocity and hotspot identities;
+//! `derivations/six_s_coupling_brdf.gp` recomputes the rule and the kernels at 50 digits. The tests
+//! `the_coupling_constants_and_kernels_are_their_definitions` and
+//! `six_s_inversion_exactly_round_trips` tie the code to it.
 
 // ρ/TOA/BOA/RossThick/LiSparse/6S/MODIS are domain terms; short angle names mirror the BRDF literature.
 #![allow(
@@ -73,12 +80,26 @@ impl AtmosphericCoupling {
 }
 
 /// Four-node Gauss–Legendre quadrature on `[0, 1]` — `(node, weight)` — for the spherical-albedo flux
-/// integral `∫₀¹ R(μ) 2μ dμ`.
+/// integral `∫₀¹ R(μ) 2μ dμ`. Nodes `(1 ∓ √(3/7 ± (2/7)√(6/5)))/2`, weights `(18 ∓ √30)/72`, at the
+/// 40 digits of `derivations/six_s_coupling_brdf.mac`.
+#[allow(clippy::excessive_precision)]
 const GAUSS_01: [(f64, f64); 4] = [
-    (0.06943184420297367, 0.1739274225687269),
-    (0.33000947820757185, 0.32607257743127305),
-    (0.6699905217924281, 0.32607257743127305),
-    (0.9305681557970263, 0.1739274225687269),
+    (
+        6.943184420297371238802675555359524745214e-2,
+        1.739274225687269286865319746109997036177e-1,
+    ),
+    (
+        3.300094782075718675986671204483776563997e-1,
+        3.260725774312730713134680253890002963823e-1,
+    ),
+    (
+        6.699905217924281324013328795516223436003e-1,
+        3.260725774312730713134680253890002963823e-1,
+    ),
+    (
+        9.305681557970262876119732444464047525479e-1,
+        1.739274225687269286865319746109997036177e-1,
+    ),
 ];
 
 /// Derive the [`AtmosphericCoupling`] from the Monte-Carlo slab radiative transfer: path reflectance
@@ -374,6 +395,7 @@ pub fn correlated_k_coupling(
 mod tests {
     #![allow(
         clippy::unreadable_literal,
+        clippy::excessive_precision,
         clippy::float_cmp,
         clippy::unwrap_used,
         clippy::expect_used
@@ -462,6 +484,99 @@ mod tests {
         );
     }
 
+    /// (G2) The quadrature constants and both BRDF kernels are their definitions, at 40 digits.
+    ///
+    /// `derivations/six_s_coupling_brdf.mac` derives the four-node Gauss–Legendre rule on `[0, 1]` in
+    /// closed form — nodes `(1 ∓ √(3/7 ± (2/7)√(6/5)))/2`, weights `(18 ∓ √30)/72`, exact to degree
+    /// 7 — and evaluates RossThick and LiSparse-Reciprocal from their printed formulas (Lucht et al.
+    /// 2000), with the reciprocity and hotspot identities they must keep; `.gp` recomputes every
+    /// literal. The rule's constants must be the correctly rounded doubles of the closed form, and
+    /// the kernels must sit on the 40-digit values to the rounding of the degree conversion.
+    #[test]
+    fn the_coupling_constants_and_kernels_are_their_definitions() {
+        const RULE: [(f64, f64); 4] = [
+            (
+                6.943184420297371238802675555359524745214e-2,
+                1.739274225687269286865319746109997036177e-1,
+            ),
+            (
+                3.300094782075718675986671204483776563997e-1,
+                3.260725774312730713134680253890002963823e-1,
+            ),
+            (
+                6.699905217924281324013328795516223436003e-1,
+                3.260725774312730713134680253890002963823e-1,
+            ),
+            (
+                9.305681557970262876119732444464047525479e-1,
+                1.739274225687269286865319746109997036177e-1,
+            ),
+        ];
+        assert_eq!(
+            GAUSS_01, RULE,
+            "the rule's constants are not the rounded closed form"
+        );
+
+        // (θs, θv, φ) in degrees, then K_vol and K_geo.
+        let cases: [(f64, f64, f64, f64, f64); 5] = [
+            (
+                45.0,
+                30.0,
+                60.0,
+                6.123861247758755675933171403581419327336e-2,
+                -9.552160455924883580595985280167486233678e-1,
+            ),
+            (
+                20.0,
+                40.0,
+                120.0,
+                -8.625877784687792235715933519234383905726e-2,
+                -1.224820988564084733545341968275913626576,
+            ),
+            (
+                60.0,
+                50.0,
+                180.0,
+                1.413533729268955512947118444333786980095e-1,
+                -2.532088886237956070404785301110833347872,
+            ),
+            (
+                30.0,
+                0.0,
+                0.0,
+                -3.144289608768314041759405532093950762116e-2,
+                -6.982224735605751537087532896575439271428e-1,
+            ),
+            (
+                10.0,
+                55.0,
+                270.0,
+                -3.830821916517112579576787872560044201614e-2,
+                -1.373702271166547775758579478927805015513,
+            ),
+        ];
+        for (ts, tv, phi, kvol, kgeo) in cases {
+            let (s, v, p) = (ts.to_radians(), tv.to_radians(), phi.to_radians());
+            for (name, got, want) in [
+                ("K_vol", ross_thick_kernel(s, v, p), kvol),
+                ("K_geo", li_sparse_reciprocal_kernel(s, v, p), kgeo),
+                // Reciprocity: the two kernels are symmetric in the two zeniths.
+                ("K_vol reciprocal", ross_thick_kernel(v, s, p), kvol),
+                (
+                    "K_geo reciprocal",
+                    li_sparse_reciprocal_kernel(v, s, p),
+                    kgeo,
+                ),
+            ] {
+                assert!(
+                    (got - want).abs() < 2e-15,
+                    "{name} at ({ts}, {tv}, {phi}): {got:e} against {want:e}"
+                );
+            }
+        }
+    }
+
+    /// (G1) The 6S inversion is the exact algebraic inverse of the forward coupling.
     #[test]
     fn six_s_inversion_exactly_round_trips() {
         let atm = AtmosphericCoupling {

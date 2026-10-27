@@ -1,0 +1,58 @@
+/* Orthorectification over a DEM -- spacelab-earthvision/src/ortho.rs -- as identities.
+ *
+ * DemGrid::height_at and sample_bilinear interpolate a cell with corner values h00, h01 (next
+ * column), h10 (next row), h11 at fractional offsets wc (column) and wr (row) as
+ *     top = h00 (1 - wc) + h01 wc,  bot = h10 (1 - wc) + h11 wc,  h = top (1 - wr) + bot wr,
+ * with fr = (lat - min_lat)/d_lat, fc = (lon - min_lon)/d_lon. Indirect orthorectification maps a
+ * map point to forward(lat, lon, DEM(lat, lon)); ray_dem_intersection finds, for a pixel, the root of
+ * g(h) = h - DEM(inverse(row, col, h)). Shown here, each line printing `<name>: 0`:
+ *   1. the coded formula is the unique interpolant a + b wc + c wr + d wc wr through the four corners
+ *      (G2): it matches every corner, and the four coefficients are what the corner system solves to;
+ *   2. it reproduces every bilinear function of (lat, lon) exactly, through the affine index map --
+ *      in particular a planar DEM, which is the one the Rust gate uses (G1);
+ *   3. at the root h* of g the ground point (lat, lon) = inverse(row, col, h*) satisfies both
+ *      forward(lat, lon, h*) = (row, col) and h* = DEM(lat, lon), so the root is the point indirect
+ *      orthorectification maps back to the pixel -- the two operations are inverse (G1). Here as the
+ *      composition on a symbolic forward map F with inverse G at fixed height: G(F(x, h), h) = x.
+ * derivations/ortho_bilinear_dem.gp solves the ray-DEM system on the Pleiades RPC at 60 digits.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/ortho_bilinear_dem.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+code(h00, h01, h10, h11, wc, wr) := block([top, bot],
+  top : h00*(1 - wc) + h01*wc, bot : h10*(1 - wc) + h11*wc, top*(1 - wr) + bot*wr)$
+b(wc, wr) := k0 + k1*wc + k2*wr + k3*wc*wr$
+sol : solve([b(0, 0) = h00, b(1, 0) = h01, b(0, 1) = h10, b(1, 1) = h11], [k0, k1, k2, k3])$
+zero("bilinear_is_the_corner_interpolant",
+  ratsimp(subst(sol[1], b(wc, wr)) - code(h00, h01, h10, h11, wc, wr)))$
+zero("bilinear_matches_corner_00", ratsimp(code(h00, h01, h10, h11, 0, 0) - h00))$
+zero("bilinear_matches_corner_01", ratsimp(code(h00, h01, h10, h11, 1, 0) - h01))$
+zero("bilinear_matches_corner_10", ratsimp(code(h00, h01, h10, h11, 0, 1) - h10))$
+zero("bilinear_matches_corner_11", ratsimp(code(h00, h01, h10, h11, 1, 1) - h11))$
+
+/* A bilinear function of (lat, lon), sampled at the corners of the cell (r0, c0). */
+q(la, lo) := e0 + e1*la + e2*lo + e3*la*lo$
+latr(r) := min_lat + r*d_lat$ lonc(c) := min_lon + c*d_lon$
+la : latr(r0 + wr)$ lo : lonc(c0 + wc)$
+zero("bilinear_reproduces_a_bilinear_dem",
+  ratsimp(code(q(latr(r0), lonc(c0)), q(latr(r0), lonc(c0 + 1)), q(latr(r0 + 1), lonc(c0)),
+    q(latr(r0 + 1), lonc(c0 + 1)), wc, wr) - q(la, lo)))$
+zero("index_map_inverts_the_grid", ratsimp((la - min_lat)/d_lat - (r0 + wr)))$
+
+/* The round trip: with G the inverse of F at fixed height and h* = DEM(G(p, h*)), F(G(p, h*), h*) = p
+   and DEM at that ground point is h*. An invertible affine stand-in for the RPC at a fixed height. */
+F(x, y, h) := [a11*x + a12*y + s1*h + o1, a21*x + a22*y + s2*h + o2]$
+G(u, v, h) := block([M : matrix([a11, a12], [a21, a22]), w],
+  w : invert(M) . matrix([u - s1*h - o1], [v - s2*h - o2]), [w[1, 1], w[2, 1]])$
+gp : G(pu, pv, hs)$
+zero("inverse_then_forward_returns_the_pixel_u", ratsimp(F(gp[1], gp[2], hs)[1] - pu))$
+zero("inverse_then_forward_returns_the_pixel_v", ratsimp(F(gp[1], gp[2], hs)[2] - pv))$
+fx : F(x0, y0, q(x0, y0))$
+gx : G(fx[1], fx[2], q(x0, y0))$
+zero("ortho_then_ray_returns_the_map_point_lat", ratsimp(gx[1] - x0))$
+zero("ortho_then_ray_returns_the_map_point_lon", ratsimp(gx[2] - y0))$
+zero("ortho_then_ray_root_of_g", ratsimp(q(x0, y0) - q(gx[1], gx[2])))$

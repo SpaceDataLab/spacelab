@@ -1,0 +1,88 @@
+/* The polarimetric decompositions of crates/spacelab-signal/src/polsar.rs, from the scattering
+   matrix.
+
+   The Pauli vector k = (1/sqrt 2)[S_hh + S_vv, S_hh - S_vv, 2 S_hv] and the coherency matrix
+   T = <k k^H>; Cloude-Pottier takes T's eigenvalues l_i and eigenvectors e_i to
+   p_i = l_i/sum l, H = -sum p_i log_3 p_i, A = (p_2 - p_3)/(p_2 + p_3), alpha_i = acos|e_i[1]|,
+   alpha_bar = sum p_i alpha_i. Each line prints `<name>: 0`:
+     1. the diagonal of k k^H is the three Pauli powers |S_hh+S_vv|^2/2, |S_hh-S_vv|^2/2,
+        2|S_hv|^2 (G1), and its trace is the span |S_hh|^2 + 2|S_hv|^2 + |S_vv|^2: the eigenvalues
+        carry the whole received power (G4);
+     2. k k^H is Hermitian;
+     3. the canonical scatterers, exactly (G3): a sphere/trihedral (S_hh = S_vv) has H = 0,
+        alpha = 0; a dihedral (S_hh = -S_vv) H = 0, alpha = pi/2; a horizontal dipole (S_hv = S_vv
+        = 0) H = 0, alpha = pi/4;
+     4. a cloud of dipoles at uniformly random orientation psi -- S_hh = cos^2 psi,
+        S_hv = cos psi sin psi, S_vv = sin^2 psi -- averages to T = diag(1/2, 1/4, 1/4), both as the
+        integral over psi and as the mean over the six looks psi_m = m pi/6 the Rust fixture uses
+        (any M >= 3 equally spaced looks cancel cos 4 psi), so p = (1/2, 1/4, 1/4),
+        H = 3 log 2/(2 log 3), A = 0 and alpha_bar = pi/4 (G3).
+   The second engine is derivations/polsar_decomposition.gp; the gate is
+   `the_canonical_scatterers_have_their_exact_entropy_anisotropy_and_alpha` in polsar.rs.
+
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/polsar_decomposition.mac </dev/null      */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+pauli(hh, hv, vv) := (1/sqrt(2))*[hh + vv, hh - vv, 2*hv]$
+outer(k) := genmatrix(lambda([i, j], k[i]*conjugate(k[j])), 3, 3)$
+cabs2(z) := rectform(z*conjugate(z))$
+
+declare([a, b, c, d, e, f], real)$
+hh : a + %i*b$ hv : c + %i*d$ vv : e + %i*f$
+T : outer(pauli(hh, hv, vv))$
+zero("pauli_power_odd", ratsimp(rectform(T[1, 1] - cabs2(hh + vv)/2)))$
+zero("pauli_power_even", ratsimp(rectform(T[2, 2] - cabs2(hh - vv)/2)))$
+zero("pauli_power_volume", ratsimp(rectform(T[3, 3] - 2*cabs2(hv))))$
+zero("trace_is_the_span", ratsimp(rectform(mat_trace(T) - (cabs2(hh) + 2*cabs2(hv) + cabs2(vv)))))$
+zero("coherency_is_hermitian",
+     lmax(map(lambda([r], lmax(map(lambda([x], abs(ratsimp(rectform(x)))), r))),
+              args(T - map(conjugate, transpose(T))))))$
+
+/* H, A, alpha_bar from an exact eigen-decomposition: eigenvectors() gives [[values, mults],
+   [vectors per value]]; every vector is normalised before its first component is read. */
+log3(x) := log(x)/log(3)$
+haalpha(t) := block([ev, ls : [], as : [], tot, p, h, an],
+  ev : eigenvectors(t),
+  for i : 1 thru length(ev[1][1]) do
+    for v in ev[2][i] do block([n : sqrt(ratsimp(rectform(sum(cabs2(v[j]), j, 1, 3))))],
+      ls : endcons(ev[1][1][i], ls),
+      as : endcons(acos(radcan(sqrt(cabs2(v[1]))/n)), as)),
+  /* sorted by decreasing eigenvalue, as the code does */
+  block([idx : sort(makelist(i, i, 1, 3), lambda([i, j], is(ls[i] > ls[j])))],
+    ls : makelist(ls[i], i, idx), as : makelist(as[i], i, idx)),
+  tot : lsum(l, l, ls),
+  p : ls/tot,
+  h : -lsum(if q = 0 then 0 else q*log3(q), q, p),
+  an : if p[2] + p[3] = 0 then 0 else (p[2] - p[3])/(p[2] + p[3]),
+  [radcan(h), ratsimp(an), ratsimp(sum(p[i]*as[i], i, 1, 3))])$
+
+canon(name, s, h, an, al) := block([r : haalpha(outer(pauli(s[1], s[2], s[3])))],
+  zero(sconcat(name, "_entropy"), radcan(r[1] - h)),
+  zero(sconcat(name, "_anisotropy"), ratsimp(r[2] - an)),
+  zero(sconcat(name, "_alpha"), ratsimp(r[3] - al)))$
+
+canon("sphere", [1, 0, 1], 0, 0, 0)$
+canon("dihedral", [1, 0, -1], 0, 0, %pi/2)$
+/* A single horizontal dipole is rank one, so A = (0 - 0)/(0 + 0) takes the code's guard: 0. */
+canon("horizontal_dipole", [1, 0, 0], 0, 0, %pi/4)$
+
+dip(psi) := outer(pauli(cos(psi)^2, cos(psi)*sin(psi), sin(psi)^2))$
+cloud : diag_matrix(1/2, 1/4, 1/4)$
+mzero(m) := lmax(map(lambda([r], lmax(map(lambda([x], abs(x)), r))), args(m)))$
+zero("dipole_cloud_integral",
+     mzero(ratsimp(map(lambda([x], integrate(trigreduce(rectform(x)), psi, 0, %pi)/%pi), dip(psi))
+                   - cloud)))$
+zero("dipole_cloud_six_looks",
+     mzero(ratsimp(radcan(rectform(sum(dip(m*%pi/6), m, 0, 5)/6 - cloud)))))$
+r : haalpha(cloud)$
+zero("dipole_cloud_entropy", radcan(r[1] - 3*log(2)/(2*log(3))))$
+zero("dipole_cloud_anisotropy", r[2])$
+zero("dipole_cloud_alpha", ratsimp(r[3] - %pi/4))$
+
+fpprec : 40$
+printf(true, "dipole cloud H = 3 log 2/(2 log 3) = ~a~%", bfloat(3*log(2)/(2*log(3))))$

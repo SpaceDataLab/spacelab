@@ -11,6 +11,14 @@
 //! Earth-fixed frame is rotating, and the light-time iteration in it would have to carry the
 //! rotation of the frame during the flight as a fictitious term. Rotating the station and the
 //! satellite into GCRF first, at their own epochs, is the same computation done once and openly.
+//!
+//! Gate: `derivations/slr_two_way_range.mac` squares both light-time equations into quadratics,
+//! shows their closed-form roots solve them, and prints the legs of a moving-station,
+//! moving-satellite geometry at 40 digits, re-solved by fixed-point iteration in
+//! `derivations/slr_two_way_range.gp`; `derivations/shapiro_delay.mac` derives the Shapiro closed
+//! form from its integral. The module tests `the_legs_are_the_roots_of_the_light_time_equations`
+//! (G2) and `the_shapiro_delay_is_the_closed_form_of_its_integral` (G2) hold the shipped code to
+//! them.
 
 /// Speed of light in vacuum, m/s — the defining constant of the SI metre, so exact.
 pub const SPEED_OF_LIGHT: f64 = 299_792_458.0;
@@ -110,8 +118,9 @@ where
 /// endpoints and `path` the straight-line distance between them, all in metres; `gm` is the
 /// Earth's gravitational parameter, m³/s².
 ///
-/// It is about 7 mm one-way to LAGEOS and 14 mm on the round trip — small, but ten times the
-/// precision of a normal point, so it is not optional at this level.
+/// It is 9.5 mm one-way to LAGEOS at the zenith, its shortest leg, and 19 mm on the round trip,
+/// more at low elevation — small, but ten times the precision of a normal point, so it is not
+/// optional at this level.
 #[must_use]
 pub fn shapiro_delay(r_emitter: f64, r_receiver: f64, path: f64, gm: f64) -> f64 {
     let sum = r_emitter + r_receiver;
@@ -284,6 +293,81 @@ mod tests {
             calls.get() <= 9,
             "{} evaluations is past the cap",
             calls.get()
+        );
+    }
+
+    /// (G2) Both legs are the positive roots of the light-time equations they solve, against
+    /// `derivations/slr_two_way_range.mac` at 40 digits (re-solved by fixed-point iteration at 60
+    /// digits in `derivations/slr_two_way_range.gp`).
+    ///
+    /// The station and the satellite both move, along directions with no zero or repeated
+    /// component, so the two legs differ and every component of both motions reaches the answer;
+    /// the references are the closed-form roots of the two quadratics the equations square into.
+    /// Every input is an integer, so the doubles the closures return at the iterates are the
+    /// geometry to the last bit and the residual is the iteration's own rounding. Measured: 0 ulps
+    /// on the up leg, 1 on the down leg and 1 on the range.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn the_legs_are_the_roots_of_the_light_time_equations() {
+        let station = |t: f64| {
+            [
+                4_075_580.0 - 68.0 * t,
+                931_854.0 + 297.0 * t,
+                4_801_568.0 + t,
+            ]
+        };
+        let satellite = |t: f64| {
+            Some([
+                -1_541_300.0 - 4127.0 * t,
+                7_124_900.0 + 2213.0 * t,
+                9_918_400.0 - 1712.0 * t,
+            ])
+        };
+        let r = two_way_light_time(0.0, station, satellite, 1e-17, 20).expect("converges");
+        for (got, want, name, ulps) in [
+            (
+                r.up_leg,
+                3.269_727_376_084_914_192_625_678_246_738_186_294_558e-2,
+                "up leg",
+                2,
+            ),
+            (
+                r.down_leg,
+                3.269_722_421_616_863_371_440_928_445_809_383_783_869e-2,
+                "down leg",
+                2,
+            ),
+            (
+                r.range,
+                9.802_388_644_103_093_234_503_902_480_390_431_578_695e6,
+                "range",
+                2,
+            ),
+        ] {
+            assert_within_ulps(got, want, ulps, name);
+        }
+    }
+
+    /// (G2) The Shapiro delay is `(2GM/c²)·ln((r₁ + r₂ + p)/(r₁ + r₂ − p))`, the closed form
+    /// `derivations/shapiro_delay.mac` derives from `(2GM/c²)∫dl/r` by differentiating the
+    /// antiderivative, and which `derivations/slr_two_way_range.gp` re-integrates by quadrature at
+    /// 60 digits. The references are those files' 40-digit values: a general triangle, and the
+    /// LAGEOS zenith leg the doc comment quotes.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn the_shapiro_delay_is_the_closed_form_of_its_integral() {
+        assert_within_ulps(
+            shapiro_delay(7_000_000.0, 7_500_000.0, 900_000.0, EARTH_GM),
+            1.102_527_717_326_717_568_931_198_240_043_126_469_883e-3,
+            2,
+            "the (7000, 7500, 900) km triangle",
+        );
+        let ground = 6_378_137.0;
+        assert_within_ulps(
+            shapiro_delay(ground, ground + 12_270_000.0, 12_270_000.0, EARTH_GM),
+            9.516_418_837_725_942_153_383_911_638_749_454_181_935e-3,
+            2,
+            "the LAGEOS zenith leg",
         );
     }
 

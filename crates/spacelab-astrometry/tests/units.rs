@@ -26,10 +26,11 @@ use spacelab_astrometry::wcs::{
 
 const ARCSEC: f64 = core::f64::consts::PI / (180.0 * 3600.0);
 
-/// `1.4826`, the factor that makes a median absolute deviation agree with a Gaussian sigma. Written
-/// out rather than imported so that a change to the constant in the crate shows up here as a
-/// failure instead of propagating silently into every expectation below.
-const MAD_TO_SIGMA: f64 = 1.482_602_218_505_602;
+/// `1.4826`, the factor that makes a median absolute deviation agree with a Gaussian sigma:
+/// `1/Φ⁻¹(3/4)` as `derivations/source_moments.mac` prints it. Written out rather than imported so
+/// that a change to the constant in the crate shows up here as a failure instead of propagating
+/// silently into every expectation below.
+const MAD_TO_SIGMA: f64 = 1.482_602_218_505_601_860_547_076_529_360_423_431_326_703_2;
 
 /// xorshift64, so the jitter is the same on every machine and every run.
 struct Xorshift(u64);

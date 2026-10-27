@@ -6,6 +6,15 @@
 //! integrates the equations of motion (central term + `J₂` + the Earth-rotation Coriolis/centrifugal
 //! terms of the rotating PZ-90 frame + the broadcast luni-solar acceleration, held constant over the
 //! ≤15-minute validity) with a 4th-order Runge–Kutta step. This module does exactly that.
+//!
+//! Gate: `derivations/glonass_pz90_motion.mac` derives the ICD right-hand side as the gradient of
+//! the J₂ potential plus the Coriolis and centrifugal terms of the rotating frame, shows it is
+//! both the ICD's grouping and this module's factoring, and shows the Jacobi integral less the
+//! luni-solar work is conserved along it; `derivations/glonass_pz90_motion.gp` re-forms the
+//! right-hand side from PARI's own derivative of the potential. The module tests
+//! `the_icd_right_hand_side_matches_the_published_equations` (G2) and
+//! `the_jacobi_integral_less_the_luni_solar_work_is_conserved` (G4) hold `deriv` and the
+//! propagator to them. The ICD prints no worked ephemeris example to gate against.
 
 // The single letters (a, b, c, r, x, y, z) are the ICD A.3.1.2 integration notation; the sub-step
 // count is a small non-negative integer from a bounded interval.
@@ -21,8 +30,10 @@ pub const MU: f64 = 3.986_004_418e14;
 /// PZ-90 Earth equatorial radius `aₑ`, m (GLONASS ICD).
 pub const EARTH_RADIUS: f64 = 6_378_136.0;
 
-/// Second zonal harmonic `J₂ = −C̄₂₀·√5` in unnormalised form (GLONASS ICD), dimensionless.
-pub const J2: f64 = 1.082_625_7e-3;
+/// Second zonal harmonic `J₂ = −C̄₂₀·√5` in unnormalised form, dimensionless: `1082625.75e-9`, the
+/// PZ-90.02 value of GLONASS ICD Edition 5.1 Table 3.2. The `1082625.7e-9` printed under A.3.1.2
+/// is that value truncated to eight digits.
+pub const J2: f64 = 1.082_625_75e-3;
 
 /// PZ-90 Earth-rotation rate `Ω̇ₑ`, rad/s (GLONASS ICD).
 pub const EARTH_ROTATION_RATE: f64 = 7.292_115e-5;
@@ -235,17 +246,19 @@ mod tests {
         assert!(diff < 1.0, "two-body RK4 vs Kepler: {diff} m");
     }
 
-    /// The full ICD right-hand side, against the published equations evaluated in Maxima.
+    /// (G2) The full ICD right-hand side, against the published equations evaluated in Maxima.
     ///
-    /// The Kepler test above is the only external oracle `deriv` has, and it reaches it through
-    /// `j2 = 0, omega = 0, acc = 0` — so the oblateness term, both rotating-frame terms and the
-    /// broadcast luni-solar acceleration are switched off in the one place they could be checked.
-    /// The reference here is `tools/gen_glonass_oracle.mac` at 60 digits, which transcribes ICD
-    /// A.3.1.2 in the ICD's own grouping (an explicit `5z²/r² − 3` on the `z` row) rather than the
-    /// `c − 2a` factoring this module uses, so the two share no arithmetic. The state has no zero
-    /// or repeated coordinate and the three luni-solar components differ in sign and size, so no
-    /// term is annihilated. Tolerance is set by the rounding of the decimal constants into doubles
-    /// (~1e-16 relative), not by the formula.
+    /// The Kepler test above reaches `deriv` only through `j2 = 0, omega = 0, acc = 0` — so the
+    /// oblateness term, both rotating-frame terms and the broadcast luni-solar acceleration are
+    /// switched off there. `derivations/glonass_pz90_motion.mac` derives the three rows from the
+    /// J₂ potential and the rotating frame and shows they are the ICD A.3.1.2 grouping (an explicit
+    /// `5z²/r² − 3` on the `z` row) as well as this module's `c − 2a` factoring; the reference
+    /// numbers are that ICD grouping evaluated in exact rationals by `tools/gen_glonass_oracle.mac`,
+    /// so they share no arithmetic with `deriv`. The state has no zero or repeated coordinate and
+    /// the three luni-solar components differ in sign and size, so no term is annihilated.
+    /// Tolerance is set by the rounding of the decimal constants into doubles (~1e-16 relative),
+    /// not by the formula; it also resolves `J₂` to its last printed digit, which moves the rows
+    /// by 2e-11 relative.
     #[test]
     // The first three rows are copied out of the state, so equality there is exact by construction.
     #[allow(clippy::float_cmp)]
@@ -253,9 +266,9 @@ mod tests {
         const STATE: [f64; 6] = [1.5e7, -8.0e6, 1.9e7, 1500.0, 3000.0, -900.0];
         const ACC: [f64; 3] = [1.0e-6, -2.0e-6, 3.0e-6];
         const WANT: [f64; 3] = [
-            1.565_617_251_861_625_7e-1,
-            -6.891_682_343_262_004e-2,
-            -4.570_127_719_221_374_6e-1,
+            1.565_617_251_891_718_6e-1,
+            -6.891_682_343_422_499e-2,
+            -4.570_127_719_226_161e-1,
         ];
         let d = deriv(STATE, MU, J2, EARTH_ROTATION_RATE, ACC);
         assert_eq!([d[0], d[1], d[2]], [STATE[3], STATE[4], STATE[5]]);
@@ -265,6 +278,53 @@ mod tests {
                 "row {k}: {got:.17e} vs Maxima {want:.17e}",
             );
         }
+    }
+
+    /// The PZ-90.02 constants are the GLONASS ICD Edition 5.1 Table 3.2 values, at the precision
+    /// that table prints them. `J₂` was `1.0826257e-3`, the eight-digit truncation A.3.1.2 prints
+    /// beside its rounded `μ = 398600.44e9`; this module already took `μ` from the table, and the
+    /// two now come from the same place (`derivations/glonass_pz90_motion.mac`, step 3).
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn the_pz90_constants_are_the_icd_table_values() {
+        assert_eq!(J2, 1_082_625.75e-9);
+        assert_eq!(MU, 398_600.441_8e9);
+        assert_eq!(EARTH_RADIUS, 6_378_136.0);
+        assert_eq!(EARTH_ROTATION_RATE, 7.292_115e-5);
+    }
+
+    /// (G4) The rotating-frame Jacobi integral less the work of the luni-solar acceleration,
+    /// `K = |v|²/2 − ω²(x² + y²)/2 − U − a·r` with the J₂ potential
+    /// `U = μ/r − μJ₂aₑ²(3z² − r²)/(2r⁵)`, is constant along the ICD equations of motion —
+    /// `derivations/glonass_pz90_motion.mac` shows `dK/dt = 0` on this module's right-hand side.
+    ///
+    /// This is the full shipped dynamics, every term switched on, through the public propagator:
+    /// a sign error in the centrifugal, oblateness or luni-solar term, or a wrong `J₂` factor,
+    /// drifts `K` at the scale of that term over the interval. Coriolis does no work and is pinned
+    /// by the right-hand-side test instead. Measured: over 15 min at a 10 s step, `K` holds to
+    /// 1.1e-14 of itself; dropping the centrifugal term moves it by 2.3e-3.
+    #[test]
+    fn the_jacobi_integral_less_the_luni_solar_work_is_conserved() {
+        let eph = sample();
+        let k = |p: [f64; 3], v: [f64; 3]| {
+            let r2 = p[0] * p[0] + p[1] * p[1] + p[2] * p[2];
+            let r = libm::sqrt(r2);
+            let u = MU / r
+                - MU * J2 * EARTH_RADIUS * EARTH_RADIUS * (3.0 * p[2] * p[2] - r2)
+                    / (2.0 * r2 * r2 * r);
+            let a = eph.luni_solar;
+            (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) / 2.0
+                - EARTH_ROTATION_RATE * EARTH_ROTATION_RATE * (p[0] * p[0] + p[1] * p[1]) / 2.0
+                - u
+                - (a[0] * p[0] + a[1] * p[1] + a[2] * p[2])
+        };
+        let k0 = k(eph.position, eph.velocity);
+        let mut worst = 0.0_f64;
+        for dt in [300.0, 600.0, 900.0, -900.0] {
+            let (p, v) = eph.position_velocity_pz90_with_step(dt, 10.0);
+            worst = worst.max(((k(p, v) - k0) / k0).abs());
+        }
+        assert!(worst < 1e-13, "K drifted by {worst:.2e} of itself");
     }
 
     /// The sub-step count is `⌈|dt|/max_step⌉` — a division, and a bound the caller sets.

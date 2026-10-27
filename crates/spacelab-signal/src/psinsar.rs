@@ -14,6 +14,16 @@
 //!
 //! so a two-parameter least squares over the temporal (`Δtᵢ`) and perpendicular (`B⊥ᵢ`) baselines
 //! recovers `(v, Δh)` — the core of the Small-BAseline-Subset method. `alloc` for the buffers.
+//!
+//! Gate: `derivations/psinsar_sbas.mac` shows that the coded pair solves the normal equations and
+//! returns any noise-free `(v, Δh)` exactly, derives both design columns from a flat-earth geometry
+//! — the height sensitivity `∂(R₁ − R₂)/∂h = B⊥/(r sinθ)` to first order in the baseline, the
+//! two-way `4π/λ` of a line-of-sight displacement — and the closed-form dispersion of the test
+//! stack; `derivations/psinsar_sbas.gp` re-checks the normal equations and the geometry at 60
+//! digits. The module tests `sbas_recovers_velocity_and_dem_error_exactly` (G3),
+//! `sbas_inverts_phases_from_the_exact_two_antenna_geometry` (G3) and
+//! `amplitude_dispersion_is_its_closed_form_and_keeps_its_digits` (G3) hold the shipped code to
+//! them.
 
 // Short physical names (v, r, θ) and the SAR terms in the docs mirror the InSAR literature.
 #![allow(
@@ -115,7 +125,8 @@ mod tests {
         assert_eq!(select_persistent_scatterers(&da, 0.0), [] as [usize; 0]);
     }
 
-    /// `D_A` against its closed form, on a stack whose dispersion is known exactly.
+    /// (G3) `D_A` against its closed form, on a stack whose dispersion is known exactly
+    /// (`derivations/psinsar_sbas.mac`).
     ///
     /// Six mutants of `amplitude_dispersion` survived, because the fixture above only ever compares
     /// the answer to a band. For amplitudes `m(1 ± r)` and `m(1 ± r/2)` the mean is `m`, the
@@ -162,6 +173,8 @@ mod tests {
         (0.056, 800e3, 38.0_f64.to_radians()) // C-band, 800 km slant range, 38° incidence
     }
 
+    /// (G3) Noise-free phases invert back to the velocity and DEM error that built them — exact for
+    /// the least-squares pair, as `derivations/psinsar_sbas.mac` shows symbolically.
     #[test]
     fn sbas_recovers_velocity_and_dem_error_exactly() {
         // Noise-free phases built from a known velocity and DEM error must invert back to them.
@@ -213,6 +226,52 @@ mod tests {
         assert!((v - v_true).abs() < 0.1 * v_true.abs(), "v {v} vs {v_true}");
         assert!(
             (dh - dh_true).abs() < 0.1 * dh_true.abs(),
+            "dem {dh} vs {dh_true}"
+        );
+    }
+
+    /// (G3) Phases from the exact two-antenna geometry, not from the model, invert to the right
+    /// velocity and DEM error.
+    ///
+    /// The other fixtures build their phases from the same `4π/λ` and `4πB⊥/(λ r sinθ)` the
+    /// inversion uses, so a wrong coefficient cancels on both sides. Here the phase is the path
+    /// difference itself: the first antenna at height `H = r cosθ` over a flat earth, the second
+    /// displaced by `(b_h, b_v)`, the scatterer raised by `Δh` inside its range cell, the flat-earth
+    /// phase of `Δh = 0` removed, and a line-of-sight motion `v·Δt` towards the radar shortening the
+    /// two-way path by `2vΔt`. `derivations/psinsar_sbas.mac` shows that to first order in `B/r` the
+    /// height derivative of `R₁ − R₂` is `B⊥/(r sinθ)` with `B⊥ = b_h cosθ + b_v sinθ`, and
+    /// `derivations/psinsar_sbas.gp` that the remainder is `0.97·B/r` relative — 4e-4 at these
+    /// 300 m baselines, which is the tolerance's scale.
+    #[test]
+    fn sbas_inverts_phases_from_the_exact_two_antenna_geometry() {
+        let (lam, r, theta) = geometry();
+        let hp = r * theta.cos();
+        let (v_true, dh_true) = (0.02, 15.0);
+        // R1 - R2 for the scatterer at height z in range cell r, formed as (R1² − R2²)/(R1 + R2)
+        // so the 800 km ranges do not cancel.
+        let path_difference = |bh: f64, bv: f64, z: f64| {
+            let c = (hp - z) / r;
+            let (x, y) = (r * (1.0 - c * c).sqrt(), hp - r * c);
+            let (dx, dy) = (x - bh, y - hp - bv);
+            let r1 = (x * x + (y - hp) * (y - hp)).sqrt();
+            let r2 = (dx * dx + dy * dy).sqrt();
+            (2.0 * x * bh + 2.0 * (y - hp) * bv - bh * bh - bv * bv) / (r1 + r2)
+        };
+        let tb: Vec<f64> = (0..14).map(|i| 0.25 * f64::from(i) - 1.5).collect();
+        let (mut pb, mut phases) = (Vec::new(), Vec::new());
+        for (i, &dt) in tb.iter().enumerate() {
+            let angle = 0.9 * i as f64;
+            let (bh, bv) = (300.0 * angle.cos(), 300.0 * angle.sin());
+            pb.push(bh * theta.cos() + bv * theta.sin());
+            let topo = path_difference(bh, bv, dh_true) - path_difference(bh, bv, 0.0);
+            let four_pi = 4.0 * core::f64::consts::PI;
+            phases.push(four_pi / lam * (topo + v_true * dt));
+        }
+        let (v, dh) = sbas_invert(&phases, &tb, &pb, lam, r, theta);
+        println!("sbas from exact geometry: v = {v}, dem error = {dh}");
+        assert!(((v - v_true) / v_true).abs() < 4e-4, "v {v} vs {v_true}");
+        assert!(
+            ((dh - dh_true) / dh_true).abs() < 4e-4,
             "dem {dh} vs {dh_true}"
         );
     }

@@ -7,6 +7,13 @@
 //! sines, `sin η = (re/(re+h))·cos ε`; a line of sight steeper than the limb (`sin η = re/(re+h)`)
 //! misses the Earth entirely. [`swath_geometry`] solves that triangle; [`ground_point_at`] walks a
 //! great-circle arc to trace footprint edges and ground tracks.
+//!
+//! Gate: `derivations/swath_sphere.mac` shows that the coded slant range is the near root of the
+//! line-of-sight/sphere quadratic `ρ² − 2 r_s cos η ρ + r_s² − r_e² = 0`, that the central angle and
+//! elevation are those of the point it reaches, and that the great-circle walk is the rotated unit
+//! vector; `derivations/swath_sphere.gp` computes both from the geometry at 60 digits. The module
+//! tests `the_swath_is_the_root_of_the_line_of_sight_quadratic` (G2) and
+//! `the_walk_arrives_where_the_rotated_unit_vector_points` (G1) hold the shipped code to those values.
 
 // The single letters (h, λ, η, ε) are the standard swath-geometry notation.
 #![allow(clippy::many_single_char_names)]
@@ -74,11 +81,133 @@ pub fn ground_point_at(lat: f64, lon: f64, central_angle: f64, azimuth: f64) -> 
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    #![allow(
+        clippy::unwrap_used,
+        clippy::excessive_precision,
+        clippy::unreadable_literal
+    )]
     use super::*;
 
     const RE: f64 = 6_378_137.0;
     const PI: f64 = core::f64::consts::PI;
+
+    /// `(altitude, look angle, central angle, elevation, slant range)` from
+    /// `derivations/swath_sphere.gp`: the near root of the line-of-sight quadratic and the point it
+    /// reaches, at 60 digits, for dyadic look angles.
+    const SWATH_ROOTS: [(f64, f64, f64, f64, f64); 5] = [
+        (
+            550000.0,
+            0.0625,
+            5.397471159274181866665030596879e-3,
+            1.502898855635622437364656661043e0,
+            5.511690576215663590457907804894e5,
+        ),
+        (
+            550000.0,
+            0.4375,
+            4.073255548317759323776038359836e-2,
+            1.092563771311719025993561308041e0,
+            6.130293604360249118946488549019e5,
+        ),
+        (
+            700000.0,
+            0.25,
+            2.812847151475837662945910238311e-2,
+            1.292667855280138242601862589257e0,
+            7.250635286378530726355676955841e5,
+        ),
+        (
+            700000.0,
+            1.09375,
+            3.086325190448010536417081209006e-1,
+            1.684138077500955655896135707391e-1,
+            2.180882341222800635418683068366e6,
+        ),
+        (
+            35786000.0,
+            0.125,
+            8.437720112789820960804671737920e-1,
+            6.020243155159145231508545178477e-1,
+            3.822314250037663553443508276015e7,
+        ),
+    ];
+
+    /// (G2) The swath geometry is the near root of `|S + ρu|² = r_e²` and the ground point it reaches,
+    /// solved from the geometry at 60 digits by `derivations/swath_sphere.gp`.
+    ///
+    /// The bounds are each formula's own conditioning. `asin k` amplifies an ulp of `k` by
+    /// `1/√(1 − k²)`, which is the elevation's floor and the central angle's, the latter also carrying
+    /// the cancellation of `asin k − η`. The slant range is a law-of-cosines difference, so its floor is
+    /// an ulp of `(r_e + r_s)²` divided by `2ρ`.
+    #[test]
+    fn the_swath_is_the_root_of_the_line_of_sight_quadratic() {
+        let mut worst = 0.0_f64;
+        for (h, eta, lambda, elevation, slant) in SWATH_ROOTS {
+            let g = swath_geometry(RE, h, eta).unwrap();
+            let rs = RE + h;
+            let k = rs / RE * libm::sin(eta);
+            let amp = 1.0 / libm::sqrt(1.0 - k * k);
+            let tol_angle = 8.0 * f64::EPSILON * (1.0 + amp) * (1.0 + eta);
+            let tol_slant = 8.0 * f64::EPSILON * (RE + rs) * (RE + rs) / (2.0 * slant);
+            for (got, want, tol, what) in [
+                (g.earth_central_angle, lambda, tol_angle, "central angle"),
+                (g.elevation, elevation, tol_angle, "elevation"),
+                (g.ground_range, RE * lambda, RE * tol_angle, "ground range"),
+                (g.slant_range, slant, tol_slant, "slant range"),
+            ] {
+                let d = (got - want).abs();
+                assert!(
+                    d <= tol,
+                    "h {h} η {eta}: {what} off by {d:.3e} (allowed {tol:.3e})"
+                );
+                worst = worst.max(d / tol);
+            }
+        }
+        println!("swath vs 60 digits: worst {worst:.3} of the conditioning bound");
+    }
+
+    /// `(lat, lon, central angle, azimuth, lat2, lon2)` from `derivations/swath_sphere.gp`: the start
+    /// rotated along the great circle, read back as latitude and longitude, at 60 digits.
+    const WALKS: [(f64, f64, f64, f64, f64, f64); 3] = [
+        (
+            0.59375,
+            -1.1875,
+            0.40625,
+            0.6875,
+            8.742565506941572952042285405535e-1,
+            -7.859122756041119413331303405993e-1,
+        ),
+        (
+            -0.34375,
+            2.90625,
+            1.3125,
+            -1.90625,
+            -3.960133043806902617308392593109e-1,
+            1.480360468182736245533905732415e0,
+        ),
+        (
+            1.40625,
+            0.125,
+            0.015625,
+            3.0,
+            1.390767985419831560351296635965e0,
+            1.373142938104364756326684924791e-1,
+        ),
+    ];
+
+    /// (G1) `ground_point_at` is the rotation of the start point through the central angle along the
+    /// initial bearing, `X = cos d P + sin d (cos az N + sin az E)` — the identity
+    /// `derivations/swath_sphere.mac` proves for the code's two formulas, held here at 60-digit values.
+    /// The bound is a few ulps of `π`, scaled by `1/cos lat2` where `asin` reads a sine near the pole.
+    #[test]
+    fn the_walk_arrives_where_the_rotated_unit_vector_points() {
+        for (lat, lon, d, az, lat2, lon2) in WALKS {
+            let (got_lat, got_lon) = ground_point_at(lat, lon, d, az);
+            let tol = 16.0 * f64::EPSILON * PI / libm::cos(lat2);
+            assert!((got_lat - lat2).abs() <= tol, "lat2 {got_lat} vs {lat2}");
+            assert!((got_lon - lon2).abs() <= tol, "lon2 {got_lon} vs {lon2}");
+        }
+    }
 
     #[test]
     fn nadir_look_is_directly_below_at_full_elevation() {

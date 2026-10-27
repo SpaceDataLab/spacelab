@@ -10,7 +10,7 @@
 
 use crate::fourier::FourierTimeSeries;
 use crate::math::clip_exp;
-use crate::parameters::NeQuickParameters;
+use crate::parameters::{AmplitudeRules, NeQuickParameters};
 use crate::types::GeodeticPoint;
 
 /// Converts the 10¹¹ m⁻³ profile densities to m⁻³.
@@ -30,8 +30,8 @@ pub(crate) trait Variant {
     /// Topside thickness parameter H0 (km). `month` is consumed by the Galileo variant.
     fn compute_h0(&self, params: &NeQuickParameters, month: u32) -> f64;
 
-    /// Whether the Eq. 98 floor on the E-layer amplitude also applies when there is no F1 layer.
-    const FLOORS_E_WITHOUT_F1: bool;
+    /// The variant's reading of the E- and F1-layer amplitudes (Eq. 91 to 98).
+    const AMPLITUDE_RULES: AmplitudeRules;
 }
 
 /// Electron density at a point, m⁻³ (Orekit `NeQuickModel.electronDensity`).
@@ -52,7 +52,7 @@ pub(crate) fn electron_density<V: Variant>(
         hours,
         (gp.latitude, gp.longitude),
         modip,
-        V::FLOORS_E_WITHOUT_F1,
+        V::AMPLITUDE_RULES,
     );
     let h_km = gp.altitude / 1000.0;
     if h_km <= params.hm_f2 {
@@ -138,7 +138,7 @@ mod tests {
     }
 
     impl Variant for Fixed {
-        const FLOORS_E_WITHOUT_F1: bool = true;
+        const AMPLITUDE_RULES: AmplitudeRules = AmplitudeRules::Galileo;
 
         fn apply_chapman_parameters(&self, _h_km: f64) -> bool {
             self.chapman

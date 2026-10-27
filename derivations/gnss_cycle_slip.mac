@@ -1,0 +1,75 @@
+/* Cycle-slip test statistics -- spacelab-gnss/src/cycle_slip.rs -- from their definitions.
+ *
+ * The polynomial-fit detector fits a degree-p polynomial by least squares to the last N samples
+ * (t_i, y_i), in the reparametrised time tau = (t - t_N)/s with s the window's span, and tests
+ * |y - yhat(t*)|. Its prediction is linear in the samples,
+ *     yhat(t*) = w . y,   w = e(tau*)^T (V^T V)^-1 V^T,   V_ik = tau_i^k,  e(tau*)_k = tau*^k,
+ * and shown here, each line printing `<name>: 0`:
+ *   1. the weights do not depend on the time origin or the scale s -- the shift-and-scale the code
+ *      applies for conditioning changes nothing in exact arithmetic (G4);
+ *   2. the weights reproduce every polynomial of degree <= p exactly: sum w_i t_i^k = t*^k (G1),
+ *      which is why a clean quadratic leaves no residual;
+ *   3. the predictions the module gate asserts, as exact rationals: a uniform 30 s window (order 2,
+ *      N = 6, predicting the next epoch) and an irregular window (orders 1 and 2), on dyadic data;
+ *   4. the geometry-free blind spot: dN1 lambda1 = dN2 lambda2 has the smallest solution
+ *      (77, 60) on GPS L1/L2 (lambda_i = c/f_i, f1/f2 = 154/120 = 77/60 in lowest terms), and the
+ *      one-cycle moves of L1 - L2: lambda1, lambda2 and, for a simultaneous slip, lambda2 - lambda1.
+ * The first-difference detector's statistic is |x_k - x_{k-1}| by definition; it has nothing to
+ * derive. Neither detector derives its threshold from a noise distribution: the caller sets it.
+ * The predictions are re-computed in exact rationals by GAP in derivations/gnss_cycle_slip.g.
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/gnss_cycle_slip.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* x^k with x^0 = 1 for every x, zero included. */
+pw(x, k) := if k = 0 then 1 else x^k$
+
+/* Least-squares prediction weights for times ts, degree p, at tstar, origin t0, scale s. */
+weights(ts, p, tstar, t0, s) := block([tau, V, e],
+  tau : map(lambda([t], (t - t0)/s), ts),
+  V : genmatrix(lambda([i, k], pw(tau[i], k - 1)), length(ts), p + 1),
+  e : genmatrix(lambda([i, k], pw((tstar - t0)/s, k - 1)), 1, p + 1),
+  map(ratsimp, list_matrix_entries(e . invert(transpose(V) . V) . transpose(V))))$
+
+/* 1. Invariance under origin and scale, on symbolic sample times t1..t5 and prediction time tp. */
+tsym : [t1, t2, t3, t4, t5]$
+w_raw : weights(tsym, 2, tp, 0, 1)$
+w_scaled : weights(tsym, 2, tp, t5, s)$
+for i : 1 thru 5 do
+  zero(sconcat("weight_", i, "_does_not_depend_on_origin_or_scale"), ratsimp(w_raw[i] - w_scaled[i]))$
+
+/* 2. Polynomial reproduction. */
+for k : 0 thru 2 do
+  zero(sconcat("weights_reproduce_t_to_the_", k),
+       ratsimp(sum(w_raw[i]*tsym[i]^k, i, 1, 5) - tp^k))$
+
+/* 3. The module gate's windows, exactly. The data are dyadic so the f64 test inputs are exact. */
+ys : [1/4, -9/8, 11/4, 3/8, 21/4, -7/8]$
+show(name, w, y) := block([v : ratsimp(w . y)],
+  printf(true, "~a = ~a = ~a~%", name, v, bfloat(v)))$
+fpprec : 40$
+uniform : [0, 30, 60, 90, 120, 150]$
+w_uniform : weights(uniform, 2, 180, 150, 150)$
+printf(true, "uniform order-2 weights at the next epoch: ~a~%", w_uniform)$
+zero("uniform_weights_sum_to_one", ratsimp(apply("+", w_uniform) - 1))$
+show("uniform order 2, t* = 180", w_uniform, ys)$
+irregular : [0, 25, 55, 90, 130, 175]$
+show("irregular order 2, t* = 230", weights(irregular, 2, 230, 175, 175), ys)$
+show("irregular order 1, t* = 230", weights(irregular, 1, 230, 175, 175), ys)$
+/* Prediction epoch inside the window, and the same window under a different origin and scale. */
+show("irregular order 2, t* = 70", weights(irregular, 2, 70, 175, 175), ys)$
+zero("irregular_prediction_is_origin_free",
+     ratsimp(weights(irregular, 2, 230, 175, 175) . ys - weights(irregular, 2, 230, 0, 1) . ys))$
+
+/* 4. The blind spot of L1 - L2 on GPS L1/L2, and the one-cycle moves. */
+f0 : 10230000$ cc : 299792458$
+lam1 : cc/(154*f0)$ lam2 : cc/(120*f0)$
+zero("ratio_of_the_blind_pair_is_f1_over_f2", 77/60 - 154/120)$
+zero("blind_pair_is_in_lowest_terms", gcd(77, 60) - 1)$
+zero("slip_77_60_leaves_l1_minus_l2_unmoved", 77*lam1 - 60*lam2)$
+printf(true, "one-cycle moves of L1 - L2: L1 ~a m, L2 ~a m, both ~a m~%",
+       bfloat(lam1), bfloat(lam2), bfloat(lam2 - lam1))$

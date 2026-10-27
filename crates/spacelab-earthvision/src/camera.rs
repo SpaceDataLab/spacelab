@@ -18,6 +18,17 @@
 //!
 //! The analytic pose/point Jacobians are checked against finite differences, and the whole stack is
 //! verified end-to-end by recovering a known synthetic bundle and cross-checked against OpenCV.
+//!
+//! Gate: `derivations/pinhole_collinearity.mac` shows that the coded Jacobians are the derivatives of
+//! the collinearity equations under the left perturbation, that Rodrigues' formula solves the
+//! exponential's defining ODE, that the DLT rows vanish at the true point, that the Tukey weight is
+//! `ρ'(e)/e` of the biweight loss and that the Schur step solves the full normal system;
+//! `derivations/pinhole_collinearity.gp` rebuilds one camera's rotation, pixel and Jacobians at 60
+//! digits from the exponential's power series. The module tests
+//! `the_projection_and_its_jacobians_are_the_collinearity_equations_and_their_derivatives` (G1),
+//! `the_tukey_biweight_is_its_closed_form` (G2) and
+//! `the_schur_step_produces_the_same_update_as_a_dense_solve_of_the_full_system` (G1) hold the
+//! shipped code to them.
 
 // Index loops read most clearly for these small fixed-size blocks; single/short names mirror the
 // photogrammetric algebra (U, V, W, ε, δc, δp).
@@ -848,6 +859,7 @@ mod tests {
     #![allow(
         clippy::unwrap_used,
         clippy::cast_precision_loss,
+        clippy::excessive_precision,
         clippy::unreadable_literal
     )]
     use super::*;
@@ -2072,7 +2084,138 @@ mod tests {
         assert!(solve_dense(2, &[1.0, 0.0, 0.0, below], &[1.0, floor]).is_none());
     }
 
-    /// The Tukey biweight against its closed form, at points chosen so no two of them agree.
+    /// `(G1)` reference camera from `derivations/pinhole_collinearity.mac`, re-derived by
+    /// `derivations/pinhole_collinearity.gp`: `R = exp([w]×)` for `w = (5/16, −3/16, 1/8)`, the pixel
+    /// of `X = (13/4, 9/2, 60)` seen from `C = (3/2, −9/4, 1/2)` with `f = 1000`, `(c_x, c_y) = (320,
+    /// 240)`, and the 2×9 Jacobian `[δω, δC, δX]` of that pixel, all at 40 digits.
+    const REF_ROTATION: [[f64; 3]; 3] = [
+        [
+            9.749219018284145320270860560471980652292e-1,
+            -1.508666900165644021627740348222757284052e-1,
+            -1.636047895958829333118761923514087556807e-1,
+        ],
+        [
+            9.299415577444409145604954877734818662639e-2,
+            9.440565502326170329834996634899033762805e-1,
+            -3.164005640871846791648743767085154021452e-1,
+        ],
+        [
+            2.021864790906298071163591830480271168666e-1,
+            2.932515503903365548821845822905443854337e-1,
+            9.344111278589303145323789158157487859841e-1,
+        ],
+    ];
+    const REF_PIXEL: [f64; 2] = [
+        1.638355461915735686847878807002294085584e2,
+        2.783780704457788293607718969421699611154e1,
+    ];
+    const REF_POSE_JACOBIAN: [[f64; 6]; 2] = [
+        [
+            -3.313219298168147280635081037884214605692e1,
+            1.024387336633284152527717637227888213202e3,
+            2.121621929554221170639228103057830038885e2,
+            -1.737413168304442149448431993252603243042e1,
+            1.813738756498192212010265446706195798816e0,
+            3.052435939321838686433322372546846237182e-1,
+        ],
+        [
+            -1.045012796119653766195956356881458447261e3,
+            3.313219298168147280635081037884214605692e1,
+            -1.561644538084264313152121192997705914416e2,
+            -2.345740637574449039917259002830445337031e0,
+            -1.737028569961928457229154569496665828023e1,
+            2.039571001482108515677699776402995340022e0,
+        ],
+    ];
+    const REF_POINT_JACOBIAN: [[f64; 3]; 2] = [
+        [
+            1.737413168304442149448431993252603243042e1,
+            -1.813738756498192212010265446706195798816e0,
+            -3.052435939321838686433322372546846237182e-1,
+        ],
+        [
+            2.345740637574449039917259002830445337031e0,
+            1.737028569961928457229154569496665828023e1,
+            -2.039571001482108515677699776402995340022e0,
+        ],
+    ];
+
+    /// (G1) The camera model is the collinearity equations and its Jacobians are their derivatives:
+    /// `so3_exp`, `project` and `reprojection_jacobians` against the reference camera, whose Jacobian
+    /// was obtained by differentiating the projection of `exp([δω]×) R (X − C − δC)` itself —
+    /// `derivations/pinhole_collinearity.mac` proves the coded `−[x_c]×`, `−R`, `R` equal to that, and
+    /// the `.gp` rebuilds every value with the exponential as a power series. Each entry is held to a
+    /// few ulps of its row's largest entry, the scale every product in that row is rounded at.
+    #[test]
+    fn the_projection_and_its_jacobians_are_the_collinearity_equations_and_their_derivatives() {
+        let camera = PinholeCamera {
+            rotation: so3_exp(Vec3::new(0.3125, -0.1875, 0.125)),
+            center: Vec3::new(1.5, -2.25, 0.5),
+            focal: 1000.0,
+            principal: [320.0, 240.0],
+        };
+        let world = Vec3::new(3.25, 4.5, 60.0);
+        let near = |got: f64, want: f64, scale: f64, what: &str| {
+            let tol = 16.0 * f64::EPSILON * scale;
+            assert!(
+                (got - want).abs() <= tol,
+                "{what}: {got} vs {want} (allowed {tol:.3e})"
+            );
+        };
+        for i in 0..3 {
+            for j in 0..3 {
+                near(
+                    camera.rotation.rows[i][j],
+                    REF_ROTATION[i][j],
+                    1.0,
+                    "rotation",
+                );
+            }
+        }
+        let pixel = camera.project(world);
+        let (a, b, predicted) = reprojection_jacobians(&camera, world);
+        for k in 0..2 {
+            near(
+                pixel[k],
+                REF_PIXEL[k],
+                REF_PIXEL[k].abs() + camera.focal,
+                "pixel",
+            );
+            near(
+                predicted[k],
+                REF_PIXEL[k],
+                REF_PIXEL[k].abs() + camera.focal,
+                "predicted pixel",
+            );
+            let pose_scale = REF_POSE_JACOBIAN[k]
+                .iter()
+                .fold(0.0_f64, |m, v| m.max(v.abs()));
+            for j in 0..6 {
+                near(
+                    a[k][j],
+                    REF_POSE_JACOBIAN[k][j],
+                    pose_scale,
+                    "pose Jacobian",
+                );
+            }
+            let point_scale = REF_POINT_JACOBIAN[k]
+                .iter()
+                .fold(0.0_f64, |m, v| m.max(v.abs()));
+            for j in 0..3 {
+                near(
+                    b[k][j],
+                    REF_POINT_JACOBIAN[k][j],
+                    point_scale,
+                    "point Jacobian",
+                );
+            }
+        }
+    }
+
+    /// (G2) The Tukey biweight against its closed form, at points chosen so no two of them agree.
+    /// `derivations/pinhole_collinearity.mac` shows that closed form is `ρ'(e)/e` of the biweight loss
+    /// `ρ = c²/6 (1 − (1 − (e/c)²)³)`, the IRLS weight of that M-estimator, and that `ρ'` vanishes at
+    /// `e = c`, where the weight is cut to zero.
     ///
     /// `robust_weights` feeds this into an IRLS loop and the loop converges to much the same answer
     /// for any weight function that falls off, which is why every arithmetic mutant in these three
@@ -2157,7 +2300,8 @@ mod tests {
         (dim, a, rhs)
     }
 
-    /// The Schur complement against a dense factorisation of the same normal equations.
+    /// (G1) The Schur complement against a dense factorisation of the same normal equations — the
+    /// elimination `derivations/pinhole_collinearity.mac` proves exact on generic blocks.
     ///
     /// `schur_step` reduces `[[U, W], [Wᵀ, V]] [δc; δp] = [−ε_c; −ε_p]` to a `6·n_free` system by
     /// eliminating the points, then back-substitutes them. That is exact algebra, so forming the

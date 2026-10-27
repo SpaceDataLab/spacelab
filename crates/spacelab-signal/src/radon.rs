@@ -4,6 +4,16 @@
 //! `angles.len() × detectors`, row `a` holding the projection at `angles[a]`. Detector offsets are in
 //! pixel units, centred: detector `d` samples the line at signed offset `d − (detectors−1)/2` from the
 //! image centre. Angles are radians.
+//!
+//! Gate: `derivations/radon_transform.mac` derives the projection of a disc (the chord
+//! `2√(r² − s²)`) and of an anisotropic Gaussian, the projection-slice theorem on it, the Ram-Lak
+//! taps as the band-limited ramp `∫|ν| e^{2πiνn} dν`, and the inversion `f(0) = ∫₀^π ∫|ν| P_θ dν dθ`;
+//! `derivations/radon_transform.gp` re-checks the taps and the inversion at 60 digits and bounds the
+//! sampling errors the gates rely on. The module tests
+//! `the_projection_of_a_sampled_gaussian_is_its_closed_form` (G3),
+//! `the_ramp_filter_convolves_each_projection_with_the_ram_lak_kernel` (G2) and
+//! `filtered_back_projection_inverts_the_analytic_sinogram_of_a_gaussian` (G2) hold the shipped
+//! code to them.
 
 // Grid indices are small non-negative integer-valued f64s; the single letters (s, t, x, y, d) are the
 // notation of the Radon geometry.
@@ -268,7 +278,8 @@ mod tests {
         assert!(recon[peak] > 8.0 * mean.abs().max(1e-9));
     }
 
-    /// The ramp filter is a convolution with the Ram-Lak kernel, tap for tap.
+    /// (G2) The ramp filter is a convolution with the Ram-Lak kernel, tap for tap — the band-limited
+    /// ramp `h[n] = ∫_{−1/2}^{1/2} |ν| e^{2πiνn} dν`, derived in `derivations/radon_transform.mac`.
     ///
     /// A unit impulse in a projection comes back *as* the kernel, so the whole of `ramlak` is on
     /// display at once: `1/4` at zero lag, nothing at even lags, `-1/(pi^2 n^2)` at odd ones. Two rows
@@ -446,5 +457,103 @@ mod tests {
             }
         }
         assert!(inside > 200 && outside > 3000, "{inside} in, {outside} out");
+    }
+
+    /// The anisotropic Gaussian `exp(−x²/(2a²) − y²/(2b²))` of the two gates below, `a = 3`, `b = 4`.
+    const GAUSS_A: f64 = 3.0;
+    const GAUSS_B: f64 = 4.0;
+
+    /// `σ_θ² = a² cos²θ + b² sin²θ`, the variance of the Gaussian's projection at angle `θ`.
+    fn gauss_sig2(theta: f64) -> f64 {
+        let (c, s) = (theta.cos(), theta.sin());
+        GAUSS_A * GAUSS_A * c * c + GAUSS_B * GAUSS_B * s * s
+    }
+
+    /// Its Radon transform, `√(2π)·a·b/σ_θ·exp(−s²/(2σ_θ²))` (`derivations/radon_transform.mac`).
+    fn gauss_projection(s: f64, theta: f64) -> f64 {
+        let sig2 = gauss_sig2(theta);
+        (2.0 * PI).sqrt() * GAUSS_A * GAUSS_B / sig2.sqrt() * (-s * s / (2.0 * sig2)).exp()
+    }
+
+    /// (G3) The projections of a sampled anisotropic Gaussian at 0 and 90 degrees are its closed-form
+    /// Radon transform, to rounding.
+    ///
+    /// At these two angles, with an odd image and as many detectors as columns, every ray runs along
+    /// a pixel column (row) and its samples fall half-way between rows (columns), so the bilinear
+    /// interpolation and the midpoint rule together sum the column at unit spacing. For a Gaussian of
+    /// width 3 or 4 pixels that sum is the integral to 3.8e-16 relative (Poisson aliasing and the
+    /// image edge, bounded in `derivations/radon_transform.gp`), so the gate can ask for 1e-12 —
+    /// where the disk test, with a discontinuous indicator, can only ask for two pixels. The two
+    /// angles see different widths (`σ_0 = a`, `σ_90 = b`) and so different heights, `√(2π)·b` and
+    /// `√(2π)·a`, which a projection taken along the wrong axis would swap.
+    #[test]
+    fn the_projection_of_a_sampled_gaussian_is_its_closed_form() {
+        let (size, detectors) = (65usize, 65usize);
+        let c = (size as f64 - 1.0) / 2.0;
+        let img: Vec<f64> = (0..size * size)
+            .map(|k| {
+                let (x, y) = ((k % size) as f64 - c, (k / size) as f64 - c);
+                (-x * x / (2.0 * GAUSS_A * GAUSS_A) - y * y / (2.0 * GAUSS_B * GAUSS_B)).exp()
+            })
+            .collect();
+        let angles = [0.0, PI / 2.0];
+        let mut sino = vec![0.0; angles.len() * detectors];
+        radon_forward(&img, size, &angles, detectors, &mut sino);
+        let det_center = (detectors as f64 - 1.0) / 2.0;
+        let mut worst = 0.0_f64;
+        for (ai, &theta) in angles.iter().enumerate() {
+            let peak = gauss_projection(0.0, theta);
+            for d in 0..detectors {
+                let s = d as f64 - det_center;
+                let (got, want) = (sino[ai * detectors + d], gauss_projection(s, theta));
+                let err = (got - want).abs() / peak;
+                assert!(err < 1e-12, "theta {theta}, s {s}: {got} vs {want}");
+                worst = worst.max(err);
+            }
+        }
+        println!("radon of a sampled Gaussian: worst error {worst:.3e} of the peak");
+    }
+
+    /// (G2) Filtered back-projection of the Gaussian's analytic sinogram returns the Gaussian's
+    /// centre value, 1, to rounding.
+    ///
+    /// `derivations/radon_transform.mac` shows `f(0) = ∫₀^π ∫|ν| P_θ(ν) dν dθ = 1` for this
+    /// Gaussian: the ramp integral is `ab/(πσ_θ²)` at each angle and the angle integral of that is
+    /// one. `filtered_back_projection` discretises both — the Ram-Lak convolution on unit-spaced
+    /// detectors, and `π/n` times the sum over `n` equispaced angles. For a projection this smooth
+    /// the first is exact to 1e-17 and the second to 4e-51 (`derivations/radon_transform.gp`), and
+    /// at the centre pixel every ray lands on a detector exactly, so the back-projection does not
+    /// interpolate. What is left is the shipped code: the taps, the sum over angles and the scale.
+    /// The sinogram varies with the angle (`σ_θ` runs from 3 to 4), so an angle sum that dropped
+    /// or repeated a row, or a scale off by any factor, is a different number.
+    #[test]
+    fn filtered_back_projection_inverts_the_analytic_sinogram_of_a_gaussian() {
+        let (size, detectors, n_angles) = (65usize, 65usize, 60u32);
+        let angles: Vec<f64> = (0..n_angles)
+            .map(|k| PI * f64::from(k) / f64::from(n_angles))
+            .collect();
+        let det_center = (detectors as f64 - 1.0) / 2.0;
+        let mut sino: Vec<f64> = angles
+            .iter()
+            .flat_map(|&theta| {
+                (0..detectors).map(move |d| gauss_projection(d as f64 - det_center, theta))
+            })
+            .collect();
+        let mut recon = vec![0.0; size * size];
+        let mut scratch = vec![0.0; detectors];
+        filtered_back_projection(
+            &mut sino,
+            &angles,
+            detectors,
+            size,
+            &mut recon,
+            &mut scratch,
+        );
+        let centre = recon[(size / 2) * size + size / 2];
+        println!("FBP of the analytic Gaussian sinogram: centre {centre}");
+        assert!(
+            (centre - 1.0).abs() < 1e-12,
+            "centre reconstructs to {centre}"
+        );
     }
 }

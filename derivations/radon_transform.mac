@@ -1,0 +1,92 @@
+/* The Radon transform, the Ram-Lak filter and filtered back-projection of
+   crates/spacelab-signal/src/radon.rs, from their definitions.
+
+   R f(s, theta) = integral f(s cos theta - t sin theta, s sin theta + t cos theta) dt, the line at
+   signed offset s whose normal is at angle theta. Each line prints `<name>: 0`:
+     1. the disc of radius r: the line meets the circle at t = +-sqrt(r^2 - s^2), so the projection
+        of its indicator is the chord 2 sqrt(r^2 - s^2) (G3);
+     2. the anisotropic Gaussian f = exp(-x^2/(2a^2) - y^2/(2b^2)) projects to
+        sqrt(2 pi) a b/sig exp(-s^2/(2 sig^2)), sig^2 = a^2 cos^2 theta + b^2 sin^2 theta (G3);
+     3. the projection-slice theorem on it: the 1-D Fourier transform of R f(., theta) at nu is the
+        2-D transform F(u, v) = 2 pi a b exp(-2 pi^2 (a^2 u^2 + b^2 v^2)) at (nu cos theta,
+        nu sin theta) (G1);
+     4. the Ram-Lak kernel `ramlak` codes is the band-limited ramp sampled at unit spacing:
+        h[n] = integral_{-1/2}^{1/2} |nu| exp(2 pi i nu n) dnu = 1/4 at n = 0 and
+        ((-1)^n - 1)/(2 pi^2 n^2) otherwise -- zero at even n, -1/(pi^2 n^2) at odd n;
+     5. filtered back-projection inverts the transform: f(0) = integral_0^pi integral |nu|
+        P_theta(nu) dnu dtheta = 1 for the Gaussian, where the inner integral is
+        a b/(pi sig^2) and the outer one integral_0^pi d theta/sig^2 = pi/(a b) (G2) -- the
+        integral `filtered_back_projection` discretises as (pi/n_angles) sum over the angles of the
+        ramp-filtered projection.
+   derivations/radon_transform.gp checks 4 and 5 numerically at 60 digits, and bounds the two
+   discretisation errors the Rust gates rely on (Poisson aliasing of a sampled Gaussian, and the
+   equispaced angle sum), which is why those gates can hold the shipped f64 code to 1e-12.
+
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/radon_transform.mac </dev/null           */
+
+display2d : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+assume(r > 0, s > 0, r > s, a > 0, b > 0)$
+
+/* 1. The chord. */
+line_x : s*cos(th) - t*sin(th)$
+line_y : s*sin(th) + t*cos(th)$
+roots : solve(trigsimp(expand(line_x^2 + line_y^2)) = r^2, t)$
+chord : abs(rhs(roots[2]) - rhs(roots[1]))$
+zero("disc_chord", ratsimp(radcan(chord^2 - 4*(r^2 - s^2))))$
+
+/* 2. The Gaussian's projection. */
+sig2 : a^2*cos(th)^2 + b^2*sin(th)^2$
+g(x, y) := exp(-x^2/(2*a^2) - y^2/(2*b^2))$
+proj_closed : sqrt(2*%pi)*a*b/sqrt(sig2)*exp(-s^2/(2*sig2))$
+/* The exponent is quadratic in t: -(p t^2 + q t + w), so the integral is sqrt(pi/p) e^(q^2/(4p)-w). */
+ex : expand(-log(g(line_x, line_y)))$
+pp : ratsimp(coeff(ex, t, 2))$
+qq : ratsimp(coeff(ex, t, 1))$
+ww : ratsimp(coeff(ex, t, 0))$
+zero("gaussian_exponent_is_quadratic_in_t", ratsimp(ex - (pp*t^2 + qq*t + ww)))$
+proj : sqrt(%pi/pp)*exp(qq^2/(4*pp) - ww)$
+zero("gaussian_projection_prefactor",
+     ratsimp(trigsimp(radcan((sqrt(%pi/pp)/(sqrt(2*%pi)*a*b/sqrt(sig2)))^2 - 1))))$
+zero("gaussian_projection_exponent",
+     ratsimp(trigsimp(qq^2/(4*pp) - ww + s^2/(2*sig2))))$
+/* The same integral done by Maxima directly, at one angle, so the completing-the-square above is
+   not the only route. */
+zero("gaussian_projection_integrate_at_pi_over_6",
+     ratsimp(radcan(log(integrate(subst(th = %pi/6, g(line_x, line_y)), t, minf, inf)
+                        / subst(th = %pi/6, proj_closed)))))$
+
+/* 3. Projection-slice. */
+F(u, v) := 2*%pi*a*b*exp(-2*%pi^2*(a^2*u^2 + b^2*v^2))$
+assume(sg > 0)$
+ft_proj : integrate(sqrt(2*%pi)*a*b/sg*exp(-s^2/(2*sg^2))*exp(-2*%pi*%i*nu*s), s, minf, inf)$
+zero("projection_slice",
+     ratsimp(radcan(trigsimp(subst(sg = sqrt(sig2), ft_proj) - F(nu*cos(th), nu*sin(th))))))$
+
+/* 4. Ram-Lak. */
+h(n) := 2*integrate(f*cos(2*%pi*f*n), f, 0, 1/2)$
+ramlak(n) := if n = 0 then 1/4 else if evenp(n) then 0 else -1/(%pi^2*n^2)$
+zero("ram_lak_zero_lag", ratsimp(h(0) - 1/4))$
+zero("ram_lak_lags_1_to_12", lsum(abs(ratsimp(h(n) - ramlak(n))), n, makelist(k, k, 1, 12)))$
+declare(m, integer)$ assume(m > 0)$
+zero("ram_lak_general_lag",
+     ratsimp(trigsimp(subst(cos(%pi*m) = (-1)^m, subst(sin(%pi*m) = 0, h(m)))
+                      - ((-1)^m - 1)/(2*%pi^2*m^2))))$
+
+/* 5. FBP at the origin. */
+/* F along the ray is 2 pi a b exp(-2 pi^2 sig^2 nu^2) (line 3), even in nu. */
+zero("fbp_slice_is_radial", ratsimp(trigsimp(log(F(nu*cos(th), nu*sin(th))/(2*%pi*a*b))
+                                             + 2*%pi^2*sig2*nu^2)))$
+inner : 2*integrate(nu*2*%pi*a*b*exp(-2*%pi^2*sg^2*nu^2), nu, 0, inf)$
+zero("fbp_inner_ramp_integral", ratsimp(subst(sg = sqrt(sig2), inner) - a*b/(%pi*sig2)))$
+/* integral_0^pi dth/sig2: by symmetry twice the integral over [0, pi/2], where u = tan th maps it
+   to integral_0^inf du/(a^2 + b^2 u^2). */
+zero("fbp_tan_substitution",
+     ratsimp(trigsimp(subst(th = atan(u), 1/sig2)*diff(atan(u), u) - 1/(a^2 + b^2*u^2))))$
+outer : 2*integrate(1/(a^2 + b^2*u^2), u, 0, inf)$
+zero("fbp_angle_integral", ratsimp(outer - %pi/(a*b)))$
+zero("fbp_reconstructs_f_at_the_origin", ratsimp(a*b/%pi*outer - 1))$

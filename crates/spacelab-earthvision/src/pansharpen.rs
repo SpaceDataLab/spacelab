@@ -12,6 +12,14 @@
 //!
 //! Bands are equal-length row-major `f64` slices (any pixel count); the multispectral bands are taken
 //! already upsampled to the pan grid. `no_std` + `alloc`.
+//!
+//! Gate: `derivations/pansharpen_component_substitution.mac` shows that Brovey keeps the pan as the
+//! band sum and every band ratio, and that the coded Gram–Schmidt round trip is the detail
+//! injection `MSₖ + cov(MSₖ, S)/var(S)·(λ(PAN − mean PAN) − (S − mean S))`, so it keeps each band
+//! mean and is the identity when the pan adds nothing;
+//! `derivations/pansharpen_component_substitution.gp` evaluates that closed form on the
+//! example. The module tests `gram_schmidt_is_the_detail_injection_at_forty_digits` and
+//! `brovey_is_its_defining_ratio_on_exact_bands` (G2) hold the code to it.
 
 // Short names (b, k, j, p) index bands/pixels; the doc names methods (Brovey, Gram–Schmidt).
 #![allow(
@@ -239,6 +247,98 @@ mod tests {
                 checker(&out[k]).abs() > 0.05,
                 "no pan detail injected, band {k}"
             );
+        }
+    }
+
+    /// The three-band example of `derivations/pansharpen_component_substitution.mac`.
+    const B1: [f64; 6] = [0.5, 0.75, 0.625, 1.0, 0.875, 0.375];
+    const B2: [f64; 6] = [0.25, 0.5, 0.75, 0.625, 0.5, 0.25];
+    const B3: [f64; 6] = [0.375, 0.25, 0.5, 0.875, 0.75, 0.625];
+    const PAN: [f64; 6] = [0.625, 0.25, 0.875, 0.75, 1.0, 0.5];
+
+    /// Gram–Schmidt is the detail injection `MSₖ + gₖ·(λ(PAN − mean PAN) − (S − mean S))` with
+    /// `gₖ = cov(MSₖ, S)/var(S)`, which `derivations/pansharpen_component_substitution.mac` derives
+    /// from the coded round trip and `.gp` evaluates without orthogonalising anything. (G2)
+    #[test]
+    #[allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    fn gram_schmidt_is_the_detail_injection_at_forty_digits() {
+        let want = [
+            [
+                0.7039941959533993291507205629459281660903,
+                0.5182676476073877869200496661565293673245,
+                0.7286528734440125285583237907749463255121,
+                0.7629978466253114334416781401631895393791,
+                0.9773354231984934401887309092766113685257,
+                0.4337520131713954817404969306827952331684,
+            ],
+            [
+                0.398446480623365709006392897918398430723,
+                0.331368475958427732265763841569305408147,
+                0.8254281473418870512983107397658060115229,
+                0.4525336442578557379505169564567811202055,
+                0.5744694394167440527194990184876749395375,
+                0.2927538124017197167595165458020340898643,
+            ],
+            [
+                0.5445163036795853580266551156874614337933,
+                0.05743367899768844265187225779204553059363,
+                0.5861340779323484392245225867003075099326,
+                0.6780545486041320362402677502764532792024,
+                0.8350392953339593376216214598214094470848,
+                0.6738220954522863862350608297223227993934,
+            ],
+        ];
+        let out = gram_schmidt_pan_sharpen(&[&B1, &B2, &B3], &PAN);
+        for (k, band) in want.iter().enumerate() {
+            for (p, w) in band.iter().enumerate() {
+                assert!(
+                    (out[k][p] - w).abs() < 1e-15,
+                    "band {k} px {p}: {}",
+                    out[k][p]
+                );
+            }
+        }
+    }
+
+    /// Brovey on the same bands is the exact rational `MSₖ·PAN/ΣMS`, to the two roundings the
+    /// code makes. (G2)
+    #[test]
+    fn brovey_is_its_defining_ratio_on_exact_bands() {
+        let want = [
+            [
+                5.0 / 18.0,
+                1.0 / 8.0,
+                7.0 / 24.0,
+                3.0 / 10.0,
+                7.0 / 17.0,
+                3.0 / 20.0,
+            ],
+            [
+                5.0 / 36.0,
+                1.0 / 12.0,
+                7.0 / 20.0,
+                3.0 / 16.0,
+                4.0 / 17.0,
+                1.0 / 10.0,
+            ],
+            [
+                5.0 / 24.0,
+                1.0 / 24.0,
+                7.0 / 30.0,
+                21.0 / 80.0,
+                6.0 / 17.0,
+                1.0 / 4.0,
+            ],
+        ];
+        let out = brovey_pan_sharpen(&[&B1, &B2, &B3], &PAN);
+        for (k, band) in want.iter().enumerate() {
+            for (p, w) in band.iter().enumerate() {
+                assert!(
+                    (out[k][p] - w).abs() < 4e-16 * w,
+                    "band {k} px {p}: {}",
+                    out[k][p]
+                );
+            }
         }
     }
 }

@@ -1,0 +1,63 @@
+/* Stellar aberration as spacelab-astrometry/src/reduce.rs codes it,
+ *     n' ∝ g n + beta (1 + (n.beta)/(1 + g)),   g = 1/gamma = sqrt(1 - beta^2),
+ * against special relativity's aberration law, and the reference directions
+ * crates/spacelab-astrometry/tests/derivation_gates.rs holds `Aberration::apply` to.
+ *
+ * Shown here, every line printing `<name>: 0`:
+ *   1. |n'|^2 = (1 + n.beta)^2 for any unit n and any beta, so the normalised n' is n'/(1 + n.beta);
+ *   2. its component along beta-hat is (cos t + b)/(1 + b cos t), cos t = n.beta-hat -- the
+ *      relativistic aberration formula -- and its component across beta is g times n's, so n' stays
+ *      in the plane of n and beta (G1);
+ *   3. the map with -beta sends n'/|n'| back to n: the coded inverse is exact (G1);
+ *   4. at 40 digits, the apparent directions for beta = (0.36, 0.48, 0), |beta| = 3/5, g = 4/5, and
+ *      for an Earth-like beta = (12000, -25000, 3000) m/s / c; derivations/relativistic_aberration.gp
+ *      recomputes them as a Lorentz boost of the photon four-momentum.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b \
+ *          derivations/relativistic_aberration.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+fpprec : 40$
+show(name, vec) := (printf(true, "~a:", name), for x in vec do printf(true, " ~h", x),
+                    printf(true, "~%"))$
+
+/* 1. p = n.beta, |n| = 1, |beta|^2 = 1 - g^2. */
+k : 1 + p/(1 + g)$
+norm2 : g^2 + 2*g*p*k + (1 - g^2)*k^2$
+zero("apparent_norm_is_one_plus_n_dot_beta", ratsimp(norm2 - (1 + p)^2))$
+
+/* 2. Along beta-hat (|beta| = b, p = b C): (g p + b^2 k)/b over (1 + p). */
+along : (g*b*C + b^2*subst(b*C, p, k))/b$
+gsub(x) := ratsimp(ratsubst(1 - b^2, g^2, ratsimp(x)))$
+zero("along_component_is_c_plus_b", gsub(along - (C + b)))$
+zero("along_over_norm_is_the_aberration_law",
+     gsub(along/(1 + b*C) - (C + b)/(1 + b*C)))$
+/* Across: beta has no transverse part, so n' across is g S; with 1 the two complete the circle. */
+zero("across_and_along_complete_the_unit_circle",
+     ratsimp(ratsubst(1 - C^2, S^2, gsub((g*S)^2 + (C + b)^2 - (1 + b*C)^2))))$
+
+/* 3. Inverse. In the plane: n = (S, C) across/along, beta = b along. */
+apply_(nx, nz, bb) := block([pp : nz*bb, kk], kk : 1 + pp/(1 + g),
+  [g*nx, g*nz + bb*kk])$
+fwd : apply_(S, C, b)$
+fwd_unit : fwd/(1 + b*C)$
+back : apply_(fwd_unit[1], fwd_unit[2], -b)$
+/* back is parallel to (S, C): its cross product with (S, C) vanishes, and its projection on n is
+   positive for b < 1, so normalising it returns n. */
+both(x) := ratsimp(ratsubst(1 - C^2, S^2, gsub(x)))$
+zero("inverse_is_parallel_to_n", both(back[1]*C - back[2]*S))$
+zero("inverse_scale_is_positive_one_minus_b2_over_one_plus_bc",
+     both(back[1]*S + back[2]*C - (1 - b^2)/(1 + b*C)))$
+
+/* 4. Reference directions. */
+apply3(n, beta) := block([nn : n/sqrt(n . n), gg : sqrt(1 - beta . beta), pp, v],
+  pp : nn . beta, v : gg*nn + beta*(1 + pp/(1 + gg)), bfloat(v/sqrt(v . v)))$
+dirs : [[1, 2, 2]/3, [-3/5, 0, 4/5], [2, -3, 6]/7]$
+fast : [36/100, 48/100, 0]$
+c_light : 299792458$
+earth : [12000, -25000, 3000]/c_light$
+for k : 1 thru length(dirs) do show(sconcat("fast_", k), apply3(dirs[k], fast))$
+for k : 1 thru length(dirs) do show(sconcat("earth_", k), apply3(dirs[k], earth))$

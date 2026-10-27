@@ -1,0 +1,66 @@
+/* The two-way SLR range -- spacelab-slr/src/range.rs -- from its defining light-time equations.
+ *
+ * A pulse leaves the station x(t) at t = 0, reflects off the satellite s(t) at tau_u and returns to
+ * the station at tau_u + tau_d, in a geocentric inertial frame:
+ *     c tau_u = |s(tau_u) - x(0)|,     c tau_d = |s(tau_u) - x(tau_u + tau_d)|,
+ * and the range is c (tau_u + tau_d)/2. For uniformly moving endpoints, x = X0 + Vs t and
+ * s = S0 + Vt t, both equations are quadratics with one positive root, so the legs have a closed
+ * form the iteration in `two_way_light_time` must converge to. Shown here, each line printing
+ * `<name>: 0`:
+ *   1. squaring each light-time equation gives the quadratic
+ *          (c^2 - |Vt|^2) tau_u^2 - 2 (D . Vt) tau_u - |D|^2 = 0,           D = S0 - X0,
+ *          (c^2 - |Vs|^2) tau_d^2 + 2 (G . Vs) tau_d - |G|^2 = 0,           G = s(tau_u) - x(tau_u),
+ *      and the closed-form positive roots satisfy them (G2);
+ *   2. the legs and range at a rational 3D geometry -- no zero or repeated component, station and
+ *      satellite both moving -- at 40 digits: the references of the gate
+ *      `the_legs_are_the_roots_of_the_light_time_equations` (G2), re-solved by fixed-point
+ *      iteration in PARI/GP in derivations/slr_two_way_range.gp;
+ *   3. the Shapiro delay: derivations/shapiro_delay.mac derives (2GM/c^2) log((r1 + r2 + p)/
+ *      (r1 + r2 - p)) from the integral (2GM/c^2) int dl/r; here, its value at the LAGEOS zenith
+ *      geometry, the shortest LAGEOS leg and so the smallest LAGEOS delay.
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/slr_two_way_range.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. The quadratics and their roots, on symbolic vectors. */
+D : [d1, d2, d3]$ Vt : [w1, w2, w3]$ Vs : [v1, v2, v3]$ G : [g1, g2, g3]$
+up_eq(t) := (D + Vt*t) . (D + Vt*t) - c^2*t^2$
+down_eq(t) := (G - Vs*t) . (G - Vs*t) - c^2*t^2$
+zero("up_leg_squared_is_the_quadratic",
+     expand(up_eq(tau) + ((c^2 - Vt . Vt)*tau^2 - 2*(D . Vt)*tau - D . D)))$
+zero("down_leg_squared_is_the_quadratic",
+     expand(down_eq(tau) + ((c^2 - Vs . Vs)*tau^2 + 2*(G . Vs)*tau - G . G)))$
+root_up : ((D . Vt) + sqrt((D . Vt)^2 + (c^2 - Vt . Vt)*(D . D)))/(c^2 - Vt . Vt)$
+root_down : (-(G . Vs) + sqrt((G . Vs)^2 + (c^2 - Vs . Vs)*(G . G)))/(c^2 - Vs . Vs)$
+zero("up_root_solves_the_up_equation", ratsimp(expand(up_eq(root_up))))$
+zero("down_root_solves_the_down_equation", ratsimp(expand(down_eq(root_down))))$
+
+/* 2. Numbers. The down leg's G is the bounce point less the station at the bounce epoch: the
+      station keeps moving during the down leg, which is the -Vs tau_d inside the norm. */
+fpprec : 40$
+cc : 299792458$
+X0 : [4075580, 931854, 4801568]$  VS : [-68, 297, 1]$
+S0 : [-1541300, 7124900, 9918400]$  VT : [-4127, 2213, -1712]$
+tu : block([d : S0 - X0], ((d . VT) + sqrt((d . VT)^2 + (cc^2 - VT . VT)*(d . d)))/(cc^2 - VT . VT))$
+B : S0 + VT*tu$
+Gn : B - (X0 + VS*tu)$
+td : (-(Gn . VS) + sqrt((Gn . VS)^2 + (cc^2 - VS . VS)*(Gn . Gn)))/(cc^2 - VS . VS)$
+/* The defining equations themselves, at 40 digits. */
+printf(true, "up-leg residual   c tau_u - |s(tau_u) - x(0)|            = ~a m~%",
+       bfloat(cc*tu - sqrt((B - X0) . (B - X0))))$
+printf(true, "down-leg residual c tau_d - |s(tau_u) - x(tau_u + tau_d)| = ~a m~%",
+       bfloat(cc*td - sqrt((B - X0 - VS*(tu + td)) . (B - X0 - VS*(tu + td)))))$
+printf(true, "tau_up   = ~a s~%", bfloat(tu))$
+printf(true, "tau_down = ~a s~%", bfloat(td))$
+printf(true, "range    = ~a m~%", bfloat(cc*(tu + td)/2))$
+
+/* 3. Shapiro delay at the LAGEOS zenith, metres, with the IERS 2010 GM. */
+gm : 398600441800000$
+shapiro(r1, r2, p) := 2*gm/cc^2*log((r1 + r2 + p)/(r1 + r2 - p))$
+re : 6378137$
+printf(true, "Shapiro, LAGEOS zenith one-way = ~a m~%", bfloat(shapiro(re, re + 12270000, 12270000)))$
+printf(true, "Shapiro, (7000000, 7500000, 900000) = ~a m~%", bfloat(shapiro(7000000, 7500000, 900000)))$

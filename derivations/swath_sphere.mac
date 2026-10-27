@@ -1,0 +1,65 @@
+/* Swath and footprint geometry on the sphere -- spacelab-earthvision/src/swath.rs -- as identities.
+ *
+ * Satellite S at distance rs = re + h from the centre O, off-nadir look angle eta, line of sight
+ * u = (sin eta, -cos eta) in the plane of O, S and nadir, S = (0, rs). The ground point T = S + rho u
+ * lies on the sphere |T| = re, so rho is a root of the defining quadratic
+ *     q(rho) = rho^2 - 2 rs cos(eta) rho + rs^2 - re^2 = 0,
+ * the near root rho = rs cos(eta) - Q with Q = sqrt(re^2 - rs^2 sin(eta)^2) (Q real exactly when the
+ * look angle is inside the limb, sin eta <= re/rs). The code instead forms
+ *     k = (rs/re) sin(eta),  lambda + eta = asin k,  eps = pi/2 - asin k,
+ *     rho_code^2 = re^2 + rs^2 - 2 re rs cos(lambda).
+ * With s = sin eta, c = cos eta, asin k in [0, pi/2] has cos(asin k) = sqrt(1 - k^2) = Q/re, so
+ *     cos(lambda) = cos(asin k - eta) = (Q/re) c + k s,   sin(lambda) = k c - (Q/re) s.
+ * Shown here, each line printing `<name>: 0`:
+ *   1. rho_code^2 is the square of the near root, and the near root solves q -- the slant range is the
+ *      defining quadratic's root (G2);
+ *   2. T = S + rho u is the point at Earth-central angle lambda: T = re (sin lambda, cos lambda);
+ *   3. the elevation of S above T's horizon, sin(eps) = (S - T).T/(re rho), is cos(asin k) = Q/re;
+ *   4. at the limb (Q = 0) the elevation is zero and cos(lambda) = re/rs (G3);
+ *   5. ground_point_at: the point a great-circle arc d from (phi, 0) on azimuth az reaches is
+ *      X = cos(d) P + sin(d) (cos(az) N + sin(az) E); the code's sin(lat2) is X_z and its atan2
+ *      arguments are cos(phi) (X_y, X_x) -- the same angle for |phi| < pi/2 -- and |X| = 1.
+ * The 60-digit reference values the Rust gate reads are derivations/swath_sphere.gp's.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/swath_sphere.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* Reduce with s^2 + c^2 = 1 and Q^2 = re^2 - rs^2 s^2. */
+red(x) := ratsimp(ratsubst(1 - s^2, c^2, ratsubst(re^2 - rs^2*s^2, Q^2, ratexpand(x))))$
+red2(x) := red(red(x))$
+
+k : rs*s/re$
+cl : (Q/re)*c + k*s$
+sl : k*c - (Q/re)*s$
+rho_near : rs*c - Q$
+zero("near_root_solves_the_quadratic", red2(rho_near^2 - 2*rs*c*rho_near + rs^2 - re^2))$
+zero("code_slant_range_is_the_near_root", red2((re^2 + rs^2 - 2*re*rs*cl) - rho_near^2))$
+zero("central_angle_is_a_rotation", red2(cl^2 + sl^2 - 1))$
+
+T : [rho_near*s, rs - rho_near*c]$
+zero("ground_point_x_is_re_sin_lambda", red2(T[1] - re*sl))$
+zero("ground_point_y_is_re_cos_lambda", red2(T[2] - re*cl))$
+S : [0, rs]$
+zero("elevation_sine_is_cos_asin_k", red2(((S - T) . T)/re - rho_near*(Q/re)))$
+
+/* The limb: Q = 0, i.e. rs^2 s^2 = re^2. */
+limb(x) := ratsimp(subst([Q = 0], x))$
+zero("limb_elevation_is_zero", limb(Q/re))$
+zero("limb_central_angle_cosine", ratsimp(subst([s = re/rs, c = sqrt(rs^2 - re^2)/rs],
+  limb(cl)) - re/rs))$
+
+/* ground_point_at, with the start at longitude 0 (the code adds lon afterwards). */
+P : [cos(phi), 0, sin(phi)]$
+N : [-sin(phi), 0, cos(phi)]$
+E : [0, 1, 0]$
+X : cos(d)*P + sin(d)*(cos(az)*N + sin(az)*E)$
+tr(x) := trigsimp(trigexpand(x))$
+zero("great_circle_point_is_unit", tr(X . X - 1))$
+sinlat2 : sin(phi)*cos(d) + cos(phi)*sin(d)*cos(az)$
+zero("code_sin_lat2_is_x_z", tr(sinlat2 - X[3]))$
+zero("code_atan2_y_is_cos_phi_x_y", tr(sin(az)*sin(d)*cos(phi) - cos(phi)*X[2]))$
+zero("code_atan2_x_is_cos_phi_x_x", tr((cos(d) - sin(phi)*sinlat2) - cos(phi)*X[1]))$

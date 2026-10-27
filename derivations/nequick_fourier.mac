@@ -1,0 +1,102 @@
+/* The CCIR Fourier-in-time collapse of NeQuick -- spacelab-ionosphere/src/fourier.rs, ICD
+ * "Ionospheric Correction Algorithm for Galileo Single Frequency Users" issue 1.2, Eq. 19 and 40
+ * to 51 -- from the coefficient files themselves, in exact arithmetic.
+ *
+ * ccirXX.asc holds F2(13, 76, 2) then FM3(9, 49, 2) in Fortran order, harmonic index fastest (the
+ * reference's `read(77,'(4e16.8)') F2,FM3`); each printed decimal is read here as the exact
+ * rational it spells. With AzR from Eq. 19, T from Eq. 49 and the coefficients of Eq. 44/46,
+ *
+ *   cf2_i = af2_{i,1} + sum_{k=1..6} [af2_{i,2k} sin(kT) + af2_{i,2k+1} cos(kT)]     (Eq. 50)
+ *   cm3_i = am3_{i,1} + sum_{k=1..4} [am3_{i,2k} sin(kT) + am3_{i,2k+1} cos(kT)]     (Eq. 51)
+ *
+ * Each line prints `<name>: 0`:
+ *   1. Eq. 49's T = (15 UT - 180) DR is 15 UT DR - pi, the form the code evaluates;
+ *   2. the code's flat harmonic walk -- slot d = 1..2n-2 against [sin T, cos T, sin 2T, ...][d-1]
+ *      -- is Eq. 50/51's index pattern, for generic coefficients;
+ *   3. on April's and November's files, blending the two solar-activity rows first (Eq. 44/46)
+ *      and summing the series after is the same as summing each row's series and blending after,
+ *      which is the split `EpochSeries` makes (exact, AzR symbolic, all 76 + 49 columns);
+ *   4. Eq. 19 is the positive root of (AzR + 408.99)^2 = 167273 + (Az - 63.7) 1123.6.
+ * The 30-digit values printed at the end -- cf2 and cm3 at two epochs -- are the literals in
+ * fourier.rs's gate test.
+ *
+ * Run from derivations/, as verify.sh does:
+ *   timeout 300 maxima --very-quiet --suppress-input-echo -Q -b nequick_fourier.mac </dev/null
+ */
+
+ratprint : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* A Fortran E-format token, "-0.81572428E-01", as the exact rational it spells. */
+parse_dec(tok) := block([pe, m, e, sgn : 1, pd, digits],
+  pe : ssearch("E", tok),
+  m : substring(tok, 1, pe),
+  e : parse_string(substring(tok, pe + 1)),
+  if charat(m, 1) = "-" then (sgn : -1, m : substring(m, 2)),
+  pd : ssearch(".", m),
+  digits : sconcat(substring(m, 1, pd), substring(m, pd + 1)),
+  sgn * parse_string(digits) / 10^(slength(m) - pd) * 10^e)$
+read_ccir(month) := block([s, l, out : []],
+  s : openr(sconcat("../crates/spacelab-ionosphere/assets/ccir", month + 10, ".asc")),
+  while (l : readline(s)) # false do
+    for t in sublist(split(l, " "), lambda([u], slength(u) > 0)) do out : cons(parse_dec(t), out),
+  close(s),
+  if length(out) # 2858 then error("not a CCIR file:", month),
+  reverse(out))$
+
+/* 1. Eq. 49. */
+zero("eq_49_time_argument", ratsimp((15*ut - 180)*%pi/180 - (15*ut*%pi/180 - %pi)))$
+
+/* 2. The flat walk against Eq. 50/51, for n harmonics plus the constant. */
+walk(n) := a[1] + sum(a[d + 1] * (if oddp(d) then sin(((d + 1)/2)*t) else cos((d/2)*t)),
+  d, 1, 2*n)$
+icd(n) := a[1] + sum(a[2*k]*sin(k*t) + a[2*k + 1]*cos(k*t), k, 1, n)$
+zero("eq_50_index_pattern_six_harmonics", ratsimp(walk(6) - icd(6)))$
+zero("eq_51_index_pattern_four_harmonics", ratsimp(walk(4) - icd(4)))$
+
+/* Eq. 50/51 as printed: the series of row-blended coefficients. */
+series(c, j, depth, tt) := c(j, 1)
+  + sum(c(j, 2*k)*sin(k*tt) + c(j, 2*k + 1)*cos(k*tt), k, 1, (depth - 1)/2)$
+f2(tok, i, j, k) := tok[k + 13*(j - 1) + 13*76*(i - 1)]$
+fm3(tok, i, j, k) := tok[1976 + k + 9*(j - 1) + 9*49*(i - 1)]$
+collapse(tok, x, tt) := block([af2, am3],
+  af2(j, k) := f2(tok, 1, j, k)*(1 - x) + f2(tok, 2, j, k)*x,           /* Eq. 44 */
+  am3(j, k) := fm3(tok, 1, j, k)*(1 - x) + fm3(tok, 2, j, k)*x,         /* Eq. 46 */
+  [makelist(series(af2, j, 13, tt), j, 1, 76), makelist(series(am3, j, 9, tt), j, 1, 49)])$
+/* The code's order: each row's harmonic sum, blended after. */
+split_form(tok, x, tt) := block([lo2, hi2, lo3, hi3],
+  lo2(j, k) := f2(tok, 1, j, k), hi2(j, k) := f2(tok, 2, j, k),
+  lo3(j, k) := fm3(tok, 1, j, k), hi3(j, k) := fm3(tok, 2, j, k),
+  [makelist((1 - x)*series(lo2, j, 13, tt) + x*series(hi2, j, 13, tt), j, 1, 76),
+   makelist((1 - x)*series(lo3, j, 9, tt) + x*series(hi3, j, 9, tt), j, 1, 49)])$
+
+/* 3. The split, exactly, at T = pi/6 (UT = 14) on April and T = -17 pi/24 (UT = 3.5) on November. */
+apr : read_ccir(4)$
+nov : read_ccir(11)$
+for c in [["april", apr, %pi/6], ["november", nov, -17*%pi/24]] do block(
+  [icd_c : collapse(c[2], x, c[3]), code_c : split_form(c[2], x, c[3])],
+  zero(sconcat(c[1], "_f2_blend_then_series_is_series_then_blend"),
+    ratsimp(sum((icd_c[1][j] - code_c[1][j])^2, j, 1, 76))),
+  zero(sconcat(c[1], "_fm3_blend_then_series_is_series_then_blend"),
+    ratsimp(sum((icd_c[2][j] - code_c[2][j])^2, j, 1, 49))))$
+
+/* 4. Eq. 19, with Az = 637/10 + w. */
+azr(az) := sqrt(167273 + (az - 637/10)*11236/10) - 40899/100$
+assume(w > -1672730/11236)$
+zero("eq_19_is_the_root_of_its_quadratic",
+  ratsimp((azr(637/10 + w) + 40899/100)^2 - (167273 + w*11236/10)))$
+
+/* The gate's reference values: the collapse at (month, UT, Az). */
+fpprec : 50$
+fpprintprec : 30$
+for c in [["april", apr, 14, 120], ["november", nov, 7/2, 200]] do block(
+  [r : azr(c[4]), v],
+  v : collapse(c[2], r/100, (15*c[3] - 180)*%pi/180),
+  printf(true, "~a azr: ~a~%", c[1], bfloat(r)),
+  for j in [1, 2, 12, 13, 14, 40, 75, 76] do
+    printf(true, "~a cf2 ~d: ~a~%", c[1], j, bfloat(v[1][j])),
+  for j in [1, 2, 7, 8, 9, 30, 49] do
+    printf(true, "~a cm3 ~d: ~a~%", c[1], j, bfloat(v[2][j])))$

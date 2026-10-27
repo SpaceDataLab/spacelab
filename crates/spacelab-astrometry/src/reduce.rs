@@ -41,6 +41,16 @@
 //! *centroid* against the shutter-open time is a 5 s error, which is 35 km, which is larger than
 //! anything else in the reduction by three orders of magnitude. [`Streak`] exists so that the epoch
 //! cannot be separated from the endpoint it belongs to.
+//!
+//! # Gate
+//!
+//! `derivations/relativistic_aberration.mac` shows the coded boost obeys
+//! `cos θ' = (cos θ + β)/(1 + β cos θ)` in the plane of the direction and the motion, and that the
+//! boost by `−β` inverts it exactly; `derivations/relativistic_aberration.gp` recomputes its
+//! directions as a Lorentz boost of the photon four-momentum. The gate is
+//! `the_boost_is_the_relativistic_aberration_law` (G2) in `tests/derivation_gates.rs`. The
+//! refraction removed here is `spacelab-coverage`'s fit; the tilt that applies it is pinned by
+//! `tests/reduction.rs`.
 
 use spacelab_core::{Epoch, Tt, Vec3};
 use spacelab_coverage::observability::{ApparentAltitude, Refraction, TrueAltitude};

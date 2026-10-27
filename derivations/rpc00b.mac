@@ -1,0 +1,49 @@
+/* The RPC00B rational polynomial camera -- spacelab-earthvision/src/rpc.rs -- as identities.
+ *
+ * With normalised ground coordinates P, L, H the camera is row = NumL/DenL, col = NumS/DenS (then
+ * de-normalised), each polynomial c . terms(P, L, H) over the 20 RPC00B monomials in the order
+ *     1, L, P, H, LP, LH, PH, L^2, P^2, H^2, PLH, L^3, LP^2, LH^2, L^2P, P^3, PH^2, L^2H, P^2H, H^3.
+ * The inverse solves (row, col) = (rn, cn) at a fixed H by Newton, with the coded gradient
+ * poly_grad_pl, the quotient rule, and the 2x2 step
+ *     dp = (dc_dl fr - dr_dl fc)/det,  dl = (dr_dp fc - dc_dp fr)/det,  det = dr_dp dc_dl - dr_dl dc_dp.
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the 20 monomials are distinct and are every monomial of degree <= 3 in three variables, so the
+ *      order is a permutation of the full cubic basis (G3: 20 = binomial(6, 3));
+ *   2. poly_grad_pl, transcribed term by term from the code, is (d/dP, d/dL) of the polynomial (G1);
+ *   3. the coded quotient-rule entries are the derivatives of the ratios (G1);
+ *   4. the coded step is J^-1 (fr, fc): J (dp, dl) = (fr, fc) for a generic Jacobian (G1), so a
+ *      fixed point of the iteration is a root of the defining equations (G2).
+ * derivations/rpc00b_inverse.gp solves those equations at 60 digits on the Pleiades fixture.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/rpc00b.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+terms : [1, L, P, H, L*P, L*H, P*H, L^2, P^2, H^2, P*L*H, L^3, L*P^2, L*H^2, L^2*P, P^3, P*H^2,
+  L^2*H, P^2*H, H^3]$
+cubic_basis : setify(flatten(makelist(makelist(makelist(
+  if i + j + k <= 3 then P^i*L^j*H^k else [], k, 0, 3), j, 0, 3), i, 0, 3)))$
+zero("rpc00b_terms_are_distinct", length(terms) - cardinality(setify(terms)))$
+zero("rpc00b_terms_are_the_cubic_basis", cardinality(symmdifference(setify(terms), cubic_basis)))$
+
+cs : makelist(concat(c, i), i, 0, 19)$
+poly : cs . terms$
+dl_code : c1 + c4*P + c5*H + 2*c7*L + c10*P*H + 3*c11*L^2 + c12*P^2 + c13*H^2 + 2*c14*L*P
+  + 2*c17*L*H$
+dp_code : c2 + c4*L + c6*H + 2*c8*P + c10*L*H + 2*c12*L*P + c14*L^2 + 3*c15*P^2 + c16*H^2
+  + 2*c18*P*H$
+zero("poly_grad_pl_is_d_by_dl", ratsimp(diff(poly, L) - dl_code))$
+zero("poly_grad_pl_is_d_by_dp", ratsimp(diff(poly, P) - dp_code))$
+
+depends([N, D], [P, L])$
+zero("quotient_rule_dp", ratsimp(diff(N/D, P) - (diff(N, P)*D - N*diff(D, P))/D^2))$
+zero("quotient_rule_dl", ratsimp(diff(N/D, L) - (diff(N, L)*D - N*diff(D, L))/D^2))$
+
+det : drdp*dcdl - drdl*dcdp$
+dp : (dcdl*fr - drdl*fc)/det$
+dl : (drdp*fc - dcdp*fr)/det$
+zero("newton_step_row_equation", ratsimp(drdp*dp + drdl*dl - fr))$
+zero("newton_step_col_equation", ratsimp(dcdp*dp + dcdl*dl - fc))$

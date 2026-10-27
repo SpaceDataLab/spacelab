@@ -4,6 +4,13 @@
 //! from the ground point toward the sun and the satellite, `zenith` is the local outward normal (up)
 //! and `north` a horizontal reference. The caller builds these from an ephemeris; keeping the
 //! geometry frame-agnostic keeps it dependency-light and exactly testable.
+//!
+//! Gate: `derivations/observation_geometry.mac` shows that the code's dot products and `atan2` read
+//! back the zenith and azimuth of a direction in the right-handed ENU triad `E = N × U`, that the
+//! scattering cosine is the spherical law of cosines in the azimuth difference, and prints the
+//! Kasten–Young air mass at 40 digits; `derivations/observation_geometry.gp` recomputes those at 60.
+//! The module tests `the_angles_are_the_ones_the_enu_directions_were_built_from` (G1) and
+//! `the_air_mass_is_kasten_young_s_formula` (G2) hold the shipped code to them.
 
 use spacelab_core::{Angle, Vec3};
 
@@ -72,7 +79,11 @@ pub fn observation_geometry(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::float_cmp)]
+    #![allow(
+        clippy::float_cmp,
+        clippy::excessive_precision,
+        clippy::unreadable_literal
+    )]
     use super::*;
 
     const DEG: f64 = PI / 180.0;
@@ -169,6 +180,98 @@ mod tests {
         // Kasten–Young at the solar zenith, written out rather than read back from `air_mass`.
         let ky = 1.0 / (libm::cos(zs) + 0.50572 * libm::pow(96.079_95 - 35.0, -1.6364));
         assert!(approx(g.air_mass, ky, 1e-15), "air mass {}", g.air_mass);
+    }
+
+    /// (G1) Every angle is the one the direction was built from: for `d(z, a) = sin z cos a N +
+    /// sin z sin a E + cos z U` the code returns `z`, the wrapped `a_v − a_s`, and the scattering
+    /// cosine `−(cos z_s cos z_v + sin z_s sin z_v cos(a_v − a_s))` — the identities
+    /// `derivations/observation_geometry.mac` proves, on a grid that crosses every quadrant and the
+    /// `±π` seam of the relative azimuth. Cosines are compared rather than angles where `acos` would
+    /// amplify an ulp near `0` or `π`; the bounds are a few ulps of the quantities summed.
+    #[test]
+    fn the_angles_are_the_ones_the_enu_directions_were_built_from() {
+        let up = Vec3::new(0.0, 0.0, 1.0);
+        let north = Vec3::new(1.0, 0.0, 0.0);
+        // E = N × U = x̂ × ẑ = −ŷ.
+        let dir = |zen: f64, az: f64| {
+            let (sz, cz) = (libm::sin(zen), libm::cos(zen));
+            Vec3::new(sz * libm::cos(az), -sz * libm::sin(az), cz)
+        };
+        let zeniths = [0.05, 0.4, 0.9, 1.3, 1.55];
+        let azimuths = [-3.0, -1.7, -0.2, 0.6, 1.9, 3.1];
+        for &zs in &zeniths {
+            for &azs in &azimuths {
+                for &zv in &zeniths {
+                    for &azv in &azimuths {
+                        let g = observation_geometry(dir(zs, azs), dir(zv, azv), up, north);
+                        let tol = 16.0 * f64::EPSILON;
+                        assert!(
+                            (libm::cos(g.solar_zenith.radians()) - libm::cos(zs)).abs() <= tol,
+                            "solar zenith {} vs {zs}",
+                            g.solar_zenith.radians()
+                        );
+                        assert!(
+                            (libm::cos(g.view_zenith.radians()) - libm::cos(zv)).abs() <= tol,
+                            "view zenith {} vs {zv}",
+                            g.view_zenith.radians()
+                        );
+                        // The relative azimuth is a difference of two atan2's, each good to an ulp
+                        // of π over the horizontal component sin z.
+                        let dphi = g.relative_azimuth.radians() - (azv - azs);
+                        let turns = dphi / TAU;
+                        let tol_az =
+                            8.0 * f64::EPSILON * PI * (1.0 / libm::sin(zs) + 1.0 / libm::sin(zv));
+                        assert!(
+                            (turns - libm::round(turns)).abs() * TAU <= tol_az,
+                            "relative azimuth {} vs {}",
+                            g.relative_azimuth.radians(),
+                            azv - azs
+                        );
+                        assert!((-PI..PI).contains(&g.relative_azimuth.radians()));
+                        let cos_scat = -(libm::cos(zs) * libm::cos(zv)
+                            + libm::sin(zs) * libm::sin(zv) * libm::cos(azv - azs));
+                        assert!(
+                            (libm::cos(g.scattering_angle.radians()) - cos_scat).abs() <= tol,
+                            "scattering cosine {} vs {cos_scat}",
+                            libm::cos(g.scattering_angle.radians())
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// `(zenith, m)`: Kasten & Young (1989) at 40 digits from `derivations/observation_geometry.mac`,
+    /// re-checked at 60 by `derivations/observation_geometry.gp`, for dyadic zeniths and the double
+    /// nearest `π/2`.
+    const KASTEN_YOUNG: [(f64, f64); 7] = [
+        (0.0, 9.997119918558381315393438355106013890384e-1),
+        (0.5, 1.138826624854773829714342718122949757378),
+        (1.0, 1.846471199582342699878539262176237955795),
+        (1.375, 5.017246978829234931212123394087344332953),
+        (1.53125, 1.810269069650286168852866930954648170836e1),
+        (1.5625, 3.163415279610748979292860300654418652789e1),
+        (
+            core::f64::consts::FRAC_PI_2,
+            3.791960837783627306248202055583037736895e1,
+        ),
+    ];
+
+    /// (G2) `air_mass` is Kasten & Young's formula `1/(cos z + 0.50572 (96.07995° − z)^−1.6364)` with
+    /// the constants as printed, evaluated in Maxima and PARI/GP. The bound is relative and carries the
+    /// power's conditioning `c·z/(b − z)`, which grows toward the horizon where `b − z` is 6°.
+    #[test]
+    fn the_air_mass_is_kasten_young_s_formula() {
+        for (z, want) in KASTEN_YOUNG {
+            let got = air_mass(Angle::from_radians(z));
+            let z_deg = z * (180.0 / PI);
+            let tol = 64.0 * f64::EPSILON * (1.0 + 1.6364 * z_deg / (96.079_95 - z_deg));
+            let rel = (got / want - 1.0).abs();
+            assert!(
+                rel <= tol,
+                "air mass at {z}: {got} vs {want} (rel {rel:.3e}, allowed {tol:.3e})"
+            );
+        }
     }
 
     #[test]

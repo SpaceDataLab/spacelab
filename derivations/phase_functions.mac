@@ -1,0 +1,133 @@
+/* Scattering phase functions -- spacelab-earthvision/src/phase.rs -- from their definitions.
+ *
+ * Convention of the module: p(mu) is the density of the scattering cosine, int_{-1}^{1} p dmu = 1,
+ * and the asymmetry parameter is g = int mu p dmu.
+ *
+ *   1. Henyey-Greenstein p = (1 - g^2)/(2 (1 + g^2 - 2 g mu)^(3/2)): the coded CDF
+ *      F = (1 - g^2)/(2g) [(1 + g^2 - 2 g mu)^(-1/2) - 1/(1 + g)] has F' = p, F(-1) = 0, F(1) = 1, so
+ *      p is normalised (G4); its first moment is g (G3); its Legendre expansion is
+ *      p = sum (2l + 1)/2 g^l P_l(mu), the generating function of the Legendre polynomials, so the
+ *      l-th moment is g^l (G1) -- the identity `tabulate_legendre` is tested against;
+ *   2. the HG sampler t = (1 - g^2)/(1 - g + 2 g xi), mu = (1 + g^2 - t^2)/(2g) is the exact inverse
+ *      of F: F(mu(xi)) = xi (G1);
+ *   3. Rayleigh p = 3/8 (1 + mu^2): normalised, g = 0, F = (mu^3 + 3 mu + 4)/8, and Cardano's root
+ *      mu = a - 1/a with a^3 = u + s, u = 4 xi - 2, s = sqrt(u^2 + 1) solves F(mu) = xi (G1); the
+ *      cancellation-free branch 1/(s - u) equals u + s (G1);
+ *   4. a linear segment p0 -> p1 on [a, b] carries mass h (p0 + p1)/2 and first moment
+ *      h (p0 (2a + b) + p1 (a + 2b))/6 -- the coded `asymmetry_of` (G2); its quadratic CDF is
+ *      inverted by the stable root t = 2d/(p0 + sqrt(p0^2 + 4 A d)), A = (p1 - p0)/(2h) (G1);
+ *   5. Bonnet's recursion (l + 1) P_{l+1} = (2l + 1) mu P_l - l P_{l-1} is Legendre's (G1).
+ * Each line prints `<name>: 0`. The numbers below them are the literals of the module test
+ * `the_phase_functions_reproduce_their_derivation` (G2), at 40 digits; derivations/phase_functions.gp
+ * re-derives the integrals by quadrature and the samples by root-finding.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/phase_functions.mac </dev/null
+ */
+
+display2d : false$
+ratprint : false$
+fpprec : 40$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* ---- 1. Henyey-Greenstein ---- */
+assume(g > 0, g < 1)$
+hg(mu) := (1 - g^2)/(2*(1 + g^2 - 2*g*mu)^(3/2))$
+/* `factor` first, so that at mu = +-1 the radicand is the square (1 -+ g)^2 and the root resolves
+ * through the sign assumptions rather than being left as an abs. */
+hg_cdf(mu) := (1 - g^2)/(2*g)*(factor(1 + g^2 - 2*g*mu)^(-1/2) - 1/(1 + g))$
+zero("hg_cdf_derivative_is_density", radcan(diff(hg_cdf(mu), mu) - hg(mu)))$
+zero("hg_cdf_at_minus_one", ratsimp(hg_cdf(-1)))$
+zero("hg_cdf_at_plus_one", ratsimp(hg_cdf(1) - 1))$
+/* So int p = F(1) - F(-1) = 1. The first moment by parts, int mu p = [mu F] - int F = 1 - int F,
+ * with the antiderivative G = -(1/g) sqrt(1 + g^2 - 2 g mu) of the radical (Maxima's own definite
+ * integral of these radicals picks the wrong branch, so the antiderivative is checked by
+ * differentiation and evaluated at the factored endpoints instead). */
+G(mu) := -(1/g)*factor(1 + g^2 - 2*g*mu)^(1/2)$
+zero("hg_radical_antiderivative",
+  radcan(diff(-(1/g)*(1 + g^2 - 2*g*mu)^(1/2), mu) - (1 + g^2 - 2*g*mu)^(-1/2)))$
+hg_first_moment : 1 - (1 - g^2)/(2*g)*(G(1) - G(-1) - 2/(1 + g))$
+zero("hg_first_moment_is_g", ratsimp(hg_first_moment - g))$
+/* The generating function of P_l, to order 14 in g. */
+L : 14$
+zero("hg_legendre_expansion_to_g14",
+  ratsimp(taylor(hg(mu) - sum((2*l + 1)/2*g^l*legendre_p(l, mu), l, 0, L), g, 0, L)))$
+/* With int P_l P_k = 2/(2l + 1) delta_lk the l-th moment of the expansion is g^l. */
+for l : 0 thru 6 do
+  zero(sconcat("hg_legendre_moment_", l),
+    ratsimp(integrate(expand(legendre_p(l, mu)*sum((2*k + 1)/2*g^k*legendre_p(k, mu), k, 0, L)),
+      mu, -1, 1) - g^l))$
+forget(g > 0, g < 1)$
+/* The negative-g half: F(-1) = 0 and F(1) = 1 hold for -1 < g < 0 as well. */
+assume(g > -1, g < 0)$
+zero("hg_cdf_at_minus_one_backward", ratsimp(hg_cdf(-1)))$
+zero("hg_cdf_at_plus_one_backward", ratsimp(hg_cdf(1) - 1))$
+hg_first_moment : 1 - (1 - g^2)/(2*g)*(G(1) - G(-1) - 2/(1 + g))$
+zero("hg_first_moment_is_g_backward", ratsimp(hg_first_moment - g))$
+forget(g > -1, g < 0)$
+
+/* ---- 2. the HG sampler ---- */
+t_of(xi) := (1 - g^2)/(1 - g + 2*g*xi)$
+mu_of(t) := (1 + g^2 - t^2)/(2*g)$
+/* 1 + g^2 - 2 g mu(t) = t^2, and t > 0 on xi in [0, 1] for |g| < 1, so its square root is t. */
+zero("hg_sampler_radicand_is_t_squared", ratsimp(1 + g^2 - 2*g*mu_of(t) - t^2))$
+zero("hg_sampler_inverts_cdf",
+  ratsimp((1 - g^2)/(2*g)*(1/t_of(xi) - 1/(1 + g)) - xi))$
+zero("hg_sampler_xi0_is_backscatter", ratsimp(mu_of(t_of(0)) + 1))$
+zero("hg_sampler_xi1_is_forward", ratsimp(mu_of(t_of(1)) - 1))$
+
+/* ---- 3. Rayleigh ---- */
+ray(mu) := 3/8*(1 + mu^2)$
+zero("rayleigh_normalisation", integrate(ray(mu), mu, -1, 1) - 1)$
+zero("rayleigh_first_moment", integrate(mu*ray(mu), mu, -1, 1))$
+zero("rayleigh_cdf", ratsimp(integrate(ray(m), m, -1, mu) - (mu^3 + 3*mu + 4)/8))$
+zero("rayleigh_forward_to_side_ratio", ray(1)/ray(0) - 2)$
+/* mu = a - 1/a with a^3 = u + s: mu^3 + 3 mu = a^3 - 1/a^3, then 1/(u + s) = s - u by s^2 = u^2 + 1. */
+zero("rayleigh_cardano_cube", ratsimp((a - 1/a)^3 + 3*(a - 1/a) - (a^3 - 1/a^3)))$
+cube_minus_inverse : (u + s) - 1/(u + s)$
+zero("rayleigh_cardano_root",
+  ratsimp(ratsubst(u^2 + 1, s^2, ratsimp(num(ratsimp(cube_minus_inverse - 2*u))))))$
+/* So mu^3 + 3 mu + 4 - 8 xi = 2u + 4 - 8 xi, which u = 4 xi - 2 makes zero. */
+zero("rayleigh_root_solves_cubic", ratsimp(subst(u = 4*xi - 2, 2*u) + 4 - 8*xi))$
+zero("rayleigh_stable_branch", ratsimp(ratsubst(u^2 + 1, s^2, num(ratsimp(1/(s - u) - (u + s))))))$
+
+/* ---- 4. a linear segment of a table ---- */
+lin(m) := p0 + (p1 - p0)*(m - a)/(b - a)$
+zero("segment_mass", ratsimp(integrate(lin(m), m, a, b) - (b - a)*(p0 + p1)/2))$
+zero("segment_first_moment",
+  ratsimp(integrate(m*lin(m), m, a, b) - (b - a)*(p0*(2*a + b) + p1*(a + 2*b))/6))$
+/* F(t) - F_i = p0 t + A t^2 with A = (p1 - p0)/(2h); the stable root, r = sqrt(p0^2 + 4 A d). */
+A : (p1 - p0)/(2*h)$
+zero("segment_cdf", ratsimp(integrate(subst([a = 0, b = h], lin(m)), m, 0, t) - (p0*t + A*t^2)))$
+troot : 2*d/(p0 + r)$
+zero("segment_stable_root",
+  ratsimp(ratsubst(p0^2 + 4*A*d, r^2, num(ratsimp(A*troot^2 + p0*troot - d)))))$
+
+/* ---- 5. Bonnet ---- */
+zero("bonnet_recursion_to_degree_20",
+  sum(ratsimp((l + 1)*legendre_p(l + 1, x) - (2*l + 1)*x*legendre_p(l, x) + l*legendre_p(l - 1, x))^2,
+      l, 1, 20))$
+
+/* ---- the module test's literals ---- */
+print("  HG g = 3/4, mu = 1/2:  p =", bfloat(subst(g = 3/4, hg(1/2))))$
+print("  HG g = 3/4, xi = 3/8: mu =", ratsimp(subst(g = 3/4, mu_of(t_of(3/8)))), "=",
+  bfloat(subst(g = 3/4, mu_of(t_of(3/8)))))$
+print("  HG g = -5/8, xi = 13/16: mu =",
+  ratsimp(subst(g = -5/8, mu_of(t_of(13/16)))), "=", bfloat(subst(g = -5/8, mu_of(t_of(13/16)))))$
+rsample(x) := block([uu : 4*x - 2, ss, aa],
+  ss : sqrt(uu^2 + 1), aa : (uu + ss)^(1/3), bfloat(aa - 1/aa))$
+print("  Rayleigh xi = 1/4: mu =", rsample(1/4))$
+print("  Rayleigh xi = 7/8: mu =", rsample(7/8))$
+print("  Rayleigh xi = 5/16: mu =", rsample(5/16))$
+/* The 5-node table of `the_table_interpolates_linearly_between_its_knots`, normalised by its
+ * trapezoid integral 6: g = sum of the segment first moments. */
+nodes : [-1, -1/2, 0, 1/2, 1]$
+vals : [1, 2, 3, 4, 5]/6$
+gtab : sum((nodes[i+1] - nodes[i])*(vals[i]*(2*nodes[i] + nodes[i+1]) + vals[i+1]*(nodes[i] + 2*nodes[i+1]))/6,
+  i, 1, 4)$
+print("  table g =", gtab, "=", bfloat(gtab))$
+zero("table_g_is_the_exact_integral",
+  gtab - sum(integrate(m*(vals[i] + (vals[i+1] - vals[i])*(m - nodes[i])/(nodes[i+1] - nodes[i])), m,
+    nodes[i], nodes[i+1]), i, 1, 4))$

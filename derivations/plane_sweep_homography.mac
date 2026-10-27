@@ -1,0 +1,67 @@
+/* Plane-sweep multi-view stereo -- spacelab-earthvision/src/mvs.rs -- as identities.
+ *
+ * A pinhole camera maps world X to x_c = R (X - C) and the pixel (f x_c/z_c + cx, f y_c/z_c + cy),
+ * i.e. K = [f, 0, cx; 0, f, cy; 0, 0, 1]. The sweep back-projects a reference pixel (u, v) to depth d
+ * in the reference camera frame,
+ *     x_r = d ((u - cx)/f, (v - cy)/f, 1) = d K_r^-1 (u, v, 1),   X = C_r + R_r^-1 x_r,
+ * (the code writes R_r^-1 as R_r^T, the same matrix for a rotation) and projects X into a neighbour.
+ * All depth hypotheses at one d form the fronto-parallel plane n^T x_r = d, n = (0, 0, 1), so the
+ * reference-to-neighbour map is the homography that plane induces,
+ *     H = K_n (R_n R_r^-1 + t n^T / d) K_r^-1,   t = R_n (C_r - C_n)
+ * (Hartley & Zisserman's H = K'(R - t' n^T/d)K^-1 with t' = -t the neighbour's translation).
+ * Photo-consistency is the zero-mean normalised cross-correlation: each patch p is centred and
+ * scaled to unit length, z(p) = (p - mean p)/|p - mean p|, and the score of two patches is z(p).z(q).
+ * Shown here, each line printing `<name>: 0`:
+ *   1. back-projecting at depth d and projecting into the same camera returns (u, v), with camera z
+ *      equal to d (G1), for a generic invertible R and any C;
+ *   2. projecting the back-projected point into a neighbour equals applying H, for generic matrices
+ *      R_r, R_n, generic centres and focal lengths (G1);
+ *   3. the score is invariant under an affine brightness change a p + b, a > 0, of either patch,
+ *      symmetric in its two patches, and equal to the Pearson correlation cov/(sigma_p sigma_q) (G4).
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/plane_sweep_homography.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+gen(s) := genmatrix(lambda([i, j], concat(s, i, j)), 3, 3)$
+Rr : gen(r)$ Rn : gen(q)$
+Cr : matrix([cr1], [cr2], [cr3])$ Cn : matrix([cn1], [cn2], [cn3])$
+Kr : matrix([fr, 0, ar], [0, fr, br], [0, 0, 1])$
+Kn : matrix([fn, 0, an], [0, fn, bn], [0, 0, 1])$
+pix(K, xc) := [K[1, 1]*xc[1, 1]/xc[3, 1] + K[1, 3], K[2, 2]*xc[2, 1]/xc[3, 1] + K[2, 3]]$
+
+xr : d*matrix([(u - ar)/fr], [(v - br)/fr], [1])$
+X : Cr + invert(Rr) . xr$
+back_in_ref : ratsimp(Rr . (X - Cr))$
+zero("back_projection_has_depth_d", ratsimp(back_in_ref[3, 1] - d))$
+zero("back_projection_returns_its_pixel_u", ratsimp(pix(Kr, back_in_ref)[1] - u))$
+zero("back_projection_returns_its_pixel_v", ratsimp(pix(Kr, back_in_ref)[2] - v))$
+
+xn : Rn . (X - Cn)$
+t : Rn . (Cr - Cn)$
+nT : matrix([0, 0, 1])$
+H : Kn . (Rn . invert(Rr) + t . nT / d) . invert(Kr)$
+hp : H . matrix([u], [v], [1])$
+sweep : pix(Kn, xn)$
+zero("sweep_u_is_the_plane_homography", ratsimp(sweep[1] - hp[1, 1]/hp[3, 1]))$
+zero("sweep_v_is_the_plane_homography", ratsimp(sweep[2] - hp[2, 1]/hp[3, 1]))$
+/* The textbook sign: t' = R_n (C_n - C_r) = -t. */
+H2 : Kn . (Rn . invert(Rr) - (Rn . (Cn - Cr)) . nT / d) . invert(Kr)$
+/* A matrix residual counts as zero only when every entry is. */
+mres(M) := block([e : flatten(args(ratsimp(M)))], if every(lambda([x], x = 0), e) then 0 else M)$
+zero("textbook_sign_is_the_same_map", mres(H2 - H))$
+
+/* ZNCC on four taps. */
+assume(a > 0)$
+P : [p1, p2, p3, p4]$ Qp : [q1, q2, q3, q4]$
+centre(x) := x - apply("+", x)/4$
+z(x) := centre(x)/sqrt(centre(x) . centre(x))$
+score(x, y) := z(x) . z(y)$
+zero("score_invariant_under_affine_brightness", radcan(score(a*P + b, Qp) - score(P, Qp)))$
+zero("score_is_symmetric", radcan(score(Qp, P) - score(P, Qp)))$
+cov : centre(P) . centre(Qp)/4$
+sp : sqrt(centre(P) . centre(P)/4)$ sq : sqrt(centre(Qp) . centre(Qp)/4)$
+zero("score_is_the_pearson_correlation", radcan(score(P, Qp) - cov/(sp*sq)))$

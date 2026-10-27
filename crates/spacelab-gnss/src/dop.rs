@@ -6,6 +6,12 @@
 //! design-matrix row `[êᵢ·E, êᵢ·N, êᵢ·U, 1]` in the local East/North/Up frame (the trailing `1` is the
 //! receiver-clock unknown). The cofactor matrix `Q = (GᵀG)⁻¹` gives, from its diagonal, the standard
 //! DOPs: `HDOP=√(Q_EE+Q_NN)`, `VDOP=√Q_UU`, `PDOP=√(Q_EE+Q_NN+Q_UU)`, `TDOP=√Q_TT`, `GDOP=√tr Q`.
+//!
+//! Gate: `derivations/gnss_dop.mac` inverts `GᵀG` exactly on a sky of rational unit vectors and on
+//! the regular tetrahedron, and derives the zenith-plus-ring closed form for rings of 3, 4, 6, 8
+//! and 12; `derivations/gnss_dop.g` re-inverts both over ℚ in GAP. The module tests
+//! `dop_is_the_root_of_the_cofactor_traces_on_rational_geometry` (G1) and
+//! `the_regular_tetrahedron_has_its_closed_form_dops` (G3) hold the shipped `dop` to them.
 
 // The single letters (e, n, u, p, s) are the East/North/Up and point notation.
 #![allow(clippy::many_single_char_names, clippy::needless_range_loop)]
@@ -248,6 +254,115 @@ mod tests {
             (d.gdop, libm::sqrt(2.0 * q_ee + q_uu + q_tt), "gdop"),
         ] {
             assert!((got - want).abs() < 1e-12 * want, "{name}: {got} vs {want}");
+        }
+    }
+
+    /// A receiver at latitude 45°, longitude 30° — no zero coordinate — and a function placing a
+    /// satellite along a given East/North/Up direction from it, with the ENU basis written out in
+    /// trigonometry rather than borrowed from `cross`/`normalize`.
+    fn sky_at_45_30(directions: &[[f64; 3]]) -> ([f64; 3], Vec<[f64; 3]>) {
+        let (lat, lon) = (45.0_f64.to_radians(), 30.0_f64.to_radians());
+        let (sp, cp) = (libm::sin(lat), libm::cos(lat));
+        let (sl, cl) = (libm::sin(lon), libm::cos(lon));
+        let up = [cp * cl, cp * sl, sp];
+        let east = [-sl, cl, 0.0];
+        let north = [-sp * cl, -sp * sl, cp];
+        let rx = [RE * up[0], RE * up[1], RE * up[2]];
+        let sats = directions
+            .iter()
+            .map(|d| {
+                core::array::from_fn(|k| {
+                    rx[k] + R_GPS * (d[0] * east[k] + d[1] * north[k] + d[2] * up[k])
+                })
+            })
+            .collect();
+        (rx, sats)
+    }
+
+    /// (G1) Every DOP is the root of its trace of `(GᵀG)⁻¹`, against the exact rationals of
+    /// `derivations/gnss_dop.mac` (re-inverted over ℚ by GAP in `derivations/gnss_dop.g`).
+    ///
+    /// Six lines of sight that are rational unit vectors — Pythagorean quadruples `(2,2,1)/3`,
+    /// `(−6,2,3)/7`, `(3,−4,0)/5`, `(−2,−6,9)/11`, `(12,−4,3)/13` and the zenith — so `Q` is a
+    /// matrix of rationals and each DOP the square root of a rational: `Q_EE = 170814343/278268670`,
+    /// `Q_NN = 196061117/278268670`, `Q_UU = 106318505/55653734`, `Q_TT = 199779533/278268670`.
+    /// No two rows are related by a symmetry, so `Q` has no zero off-diagonal entry to hide an
+    /// index error, and the receiver sits on no axis. The residual is the rounding of the ENU
+    /// basis and of the line-of-sight normalisation, a few parts in 1e16.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn dop_is_the_root_of_the_cofactor_traces_on_rational_geometry() {
+        let directions: [[f64; 3]; 6] = [
+            [0.0, 0.0, 1.0],
+            [2.0 / 3.0, 2.0 / 3.0, 1.0 / 3.0],
+            [-6.0 / 7.0, 2.0 / 7.0, 3.0 / 7.0],
+            [3.0 / 5.0, -4.0 / 5.0, 0.0],
+            [-2.0 / 11.0, -6.0 / 11.0, 9.0 / 11.0],
+            [12.0 / 13.0, -4.0 / 13.0, 3.0 / 13.0],
+        ];
+        let (rx, sats) = sky_at_45_30(&directions);
+        let d = dop(rx, &sats).expect("full-rank geometry");
+        for (got, want, name) in [
+            (
+                d.gdop,
+                1.986_634_435_484_349_926_596_203_094_111_732_894_561,
+                "gdop",
+            ),
+            (
+                d.pdop,
+                1.796_880_299_113_656_518_942_895_229_090_418_949_024,
+                "pdop",
+            ),
+            (
+                d.hdop,
+                1.148_225_467_974_813_111_790_756_685_810_648_289_647,
+                "hdop",
+            ),
+            (
+                d.vdop,
+                1.382_156_678_541_476_045_744_268_645_032_337_023_783,
+                "vdop",
+            ),
+            (
+                d.tdop,
+                8.473_119_678_780_879_761_251_500_658_696_976_273_513e-1,
+                "tdop",
+            ),
+        ] {
+            assert!(
+                (got - want).abs() < 1e-14 * want,
+                "{name}: {got:.17} vs {want:.17}, rel {:.2e}",
+                (got - want).abs() / want
+            );
+        }
+    }
+
+    /// (G3) The regular tetrahedron — the zenith and three directions at `sin el = −1/3`, 120°
+    /// apart in azimuth — has `Σeᵢ = 0` and `Σeᵢeᵢᵀ = (4/3)I`, so `Q = diag(3/4, 3/4, 3/4, 1/4)` and
+    /// the DOPs are `GDOP = √10/2`, `PDOP = 3/2`, `HDOP = √(3/2)`, `VDOP = √3/2`, `TDOP = 1/2`
+    /// (`derivations/gnss_dop.mac`, `derivations/gnss_dop.g`). Three of the four are below the
+    /// horizon, which `dop` does not ask about and the closed form does not need.
+    #[test]
+    fn the_regular_tetrahedron_has_its_closed_form_dops() {
+        let (s, c) = (-1.0 / 3.0, 2.0 * core::f64::consts::SQRT_2 / 3.0);
+        let mut directions = vec![[0.0, 0.0, 1.0]];
+        for k in 0..3 {
+            let az = core::f64::consts::TAU * f64::from(k) / 3.0;
+            directions.push([c * libm::sin(az), c * libm::cos(az), s]);
+        }
+        let (rx, sats) = sky_at_45_30(&directions);
+        let d = dop(rx, &sats).expect("the tetrahedron is full rank");
+        for (got, want, name) in [
+            (d.gdop, libm::sqrt(10.0) / 2.0, "gdop"),
+            (d.pdop, 1.5, "pdop"),
+            (d.hdop, libm::sqrt(1.5), "hdop"),
+            (d.vdop, libm::sqrt(3.0) / 2.0, "vdop"),
+            (d.tdop, 0.5, "tdop"),
+        ] {
+            assert!(
+                (got - want).abs() < 1e-14 * want,
+                "{name}: {got:.17} vs {want:.17}"
+            );
         }
     }
 

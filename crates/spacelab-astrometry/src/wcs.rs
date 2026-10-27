@@ -33,6 +33,17 @@
 //!
 //! FITS WCS is Greisen & Calabretta (2002), A&A **395**, 1061 and Calabretta & Greisen (2002), A&A
 //! **395**, 1077; the distortion convention is SIP, Shupe et al. (2005), ASP Conf. Ser. **347**.
+//!
+//! # Gate
+//!
+//! `derivations/gnomonic_tan_plate.mac` shows that Paper II's TAN route (eq. 2 with `φ_p = 180°`,
+//! `R_θ = cot θ`) is exactly [`project`], that [`deproject`] inverts it, that a SIP plate is the
+//! coded polynomial in the coded monomial order, and solves a seven-star plate exactly;
+//! `derivations/gnomonic_tan_plate.gp` recomputes it by tangent-plane vectors and `matsolve`. The
+//! gates are in `tests/derivation_gates.rs`:
+//! `the_projection_is_paper_ii_tan_and_deprojection_inverts_it`,
+//! `the_plate_fit_is_the_least_squares_solution_on_exact_data` (G2) and
+//! `a_sip_plate_is_the_coded_polynomial_in_the_coded_monomial_order` (G1).
 
 use alloc::vec;
 use alloc::vec::Vec;

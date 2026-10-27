@@ -7,6 +7,15 @@
 //! what lets a cirrus layer scatter like cirrus. Tallying where photons leave gives the **reflectance**
 //! (back to space), **transmittance** (down to the surface) and **absorptance** — the path-radiance
 //! core of atmospheric correction. Deterministic: a seeded `xoshiro256**` stream.
+//!
+//! Gate: `derivations/slab_single_scattering.mac` derives the next-event estimator's
+//! first-collision expectation — the single-scattering reflectance, with the module's `2` against
+//! the literature's `4` — its hemispheric integral as the first-order plane albedo, the direct
+//! beam, the two scattering rotations as the spherical law of cosines and a unit vector at `cos θ`,
+//! and the scattering depth `with_absorber` holds fixed; `derivations/slab_single_scattering.gp`
+//! redoes the integrals by quadrature. The module test
+//! `the_first_collision_estimate_has_the_single_scattering_expectation` (G2) holds the shipped
+//! estimator's mean to that file's 40-digit value.
 
 // Photon counters cast to f64 for the final fractions (values ≤ photon count, exact well past 2⁵³);
 // the single-letter locals (μ, τ, g, s, …) are the notation of radiative transfer.
@@ -462,7 +471,11 @@ fn estimate(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::float_cmp)]
+    #![allow(
+        clippy::float_cmp,
+        clippy::excessive_precision,
+        clippy::unreadable_literal
+    )]
     use super::*;
 
     const PI: f64 = core::f64::consts::PI;
@@ -619,6 +632,32 @@ mod tests {
         );
     }
 
+    /// (G2) The next-event estimator's first-collision term has the single-scattering expectation.
+    ///
+    /// `derivations/slab_single_scattering.mac` integrates the estimator's first-collision term
+    /// `ω p(cos Θ) e^{−t/μᵥ}/(2μᵥ)` against the collision-depth density `e^{−t/μₛ}/μₛ` and gets the
+    /// closed form `ρ¹ = ω p (1 − e^{−τ(1/μₛ + 1/μᵥ)})/(2(μₛ + μᵥ))`, which is the transfer
+    /// literature's `π I/(μₛ F)` with `P = 2p`; `derivations/slab_single_scattering.gp` redoes the
+    /// integral by quadrature. At `ω → 0` the later collisions carry `O(ω)` of the answer and drop
+    /// out, so the Monte Carlo mean divided by `ω` must sit on that file's 40-digit `ρ¹/ω` to within
+    /// its sampling error alone — at `μₛ = 4/5`, `μᵥ = 3/5`, relative azimuth `π`, where
+    /// `cos Θ = −24/25` exactly. The same file puts the per-photon relative standard deviation at
+    /// 0.8016, so two million photons carry 5.7e-4; the tolerance is five of those.
+    ///
+    /// Unlike the test above this does not difference two runs: a wrong constant in the estimator,
+    /// a wrong collision density or a wrong attenuation to the sensor all move the mean itself.
+    #[test]
+    fn the_first_collision_estimate_has_the_single_scattering_expectation() {
+        const RHO1_OVER_OMEGA: f64 = 7.14792150410902061369450414069634477139e-2;
+        let omega = 1e-6;
+        let atmosphere = slab(1.0, omega, 0.3);
+        let got = path_reflectance(&atmosphere, 0.8, 0.6, PI, 2_000_000, 20_261_027) / omega;
+        assert!(
+            (got / RHO1_OVER_OMEGA - 1.0).abs() < 2.8e-3,
+            "first-collision estimate {got:e} against ρ¹/ω = {RHO1_OVER_OMEGA:e}"
+        );
+    }
+
     /// The two estimators are the same physics: the flux-weighted hemispheric integral of the
     /// directional reflectance is the plane albedo the photon count gives.
     ///
@@ -722,6 +761,8 @@ mod tests {
         assert!((census - 1.0).abs() < 1e-12, "census {census}");
     }
 
+    /// (G3) With `ω = 0` the slab is a Beer–Lambert absorber: transmittance `e^{−τ/μ₀}`, the
+    /// direct-beam probability `derivations/slab_single_scattering.mac` integrates.
     #[test]
     fn pure_absorption_gives_beer_lambert_transmission() {
         // ω = 0: the only way through is to miss every interaction — direct transmission
@@ -742,6 +783,7 @@ mod tests {
         }
     }
 
+    /// (G4) A conservative slab sends every photon out through one of its two faces.
     #[test]
     fn conservative_scattering_conserves_energy() {
         // ω = 1: no absorption, so every photon leaves and R + T = 1 exactly. Six hundred photons,
@@ -914,7 +956,7 @@ mod tests {
         [0, 1, 2].map(|i| v[i] * c + cross[i] * s + k[i] * kv * (1.0 - c))
     }
 
-    /// [`scatter_direction`] against a rotation built a different way.
+    /// (G1) [`scatter_direction`] against a rotation built a different way.
     ///
     /// The slab never reads this function at all and the path estimator reads it only through a
     /// Monte Carlo average over a **uniform** azimuth, which is precisely the average that cannot
@@ -1077,7 +1119,7 @@ mod tests {
         }
     }
 
-    /// Scattering rotates the direction, checked against an explicit rotation matrix.
+    /// (G1) Scattering rotates the direction, checked against an explicit rotation matrix.
     ///
     /// The slab only ever sees the vertical cosine, and a wrong rotation still produces a random
     /// walk whose reflectance and transmittance stay plausible — eleven mutants of this one line

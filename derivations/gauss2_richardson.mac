@@ -1,0 +1,66 @@
+/* The doubling two-point Gauss rule with Richardson extrapolation of the NeQuick 2 slant-TEC
+ * integration -- `gint` in ITU-R P.531's NeQuick 2 code, and Eq. 194 to 202 of the Galileo ICD
+ * ("Ionospheric Correction Algorithm for Galileo Single Frequency Users", issue 1.2) -- as
+ * defining equations. With n intervals of width h = (b - a)/n, g = 0.5773502691896 h and
+ * y = a + (h - g)/2, the rule samples y + i h and y + i h + g, i = 0..n-1, and
+ *
+ *   G_n = (h/2) sum_i [f(y + i h) + f(y + i h + g)],   result = G_2n + (G_2n - G_n)/15.
+ *
+ * Each line prints `<name>: 0`:
+ *   1. +-1/sqrt(3) are the roots of P2, so the two samples are the Gauss-Legendre nodes of each
+ *      interval: y + i h and y + i h + g are its midpoint -+ h/(2 sqrt 3) for g = h/sqrt(3);
+ *   2. the printed 0.5773502691896 is 1/sqrt(3) rounded to 13 decimals (|c - 1/sqrt 3| < 5e-14);
+ *   3. with g = h/sqrt(3), for every n (symbolic), G_n is exact for x^k, k = 0..3, and its error
+ *      on x^4 and x^5 is a multiple of 1/n^4 alone, so the Richardson combination of n and 2n is
+ *      exact for k = 0..5 -- the factor 15 is 2^4 - 1 -- and not for k = 6.
+ * The second engine is derivations/gauss2_richardson.gp.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/gauss2_richardson.mac </dev/null
+ */
+
+ratprint : false$
+simpsum : true$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. The nodes. */
+P2 : (3*x^2 - 1)/2$
+zero("p2_root_plus", ratsimp(subst(x = 1/sqrt(3), P2)))$
+zero("p2_root_minus", ratsimp(subst(x = -1/sqrt(3), P2)))$
+g : h/sqrt(3)$
+y : a + (h - g)/2$
+zero("first_sample_is_the_midpoint_minus_the_node", ratsimp(y - (a + h/2 - h/(2*sqrt(3)))))$
+zero("second_sample_is_the_midpoint_plus_the_node", ratsimp(y + g - (a + h/2 + h/(2*sqrt(3)))))$
+
+/* 2. The printed constant. */
+fpprec : 40$
+zero("printed_constant_is_one_over_sqrt3_to_13_decimals",
+  if abs(bfloat(5773502691896/10^13 - 1/sqrt(3))) < 5b-14 then 0 else 1)$
+
+/* 3. The composite rule on [0, 1] (the width scales out), symbolic in n. */
+declare(n, integer)$
+assume(n > 0)$
+gn(k, nn) := block([hh : 1/nn, yy],
+  yy : (hh - hh/sqrt(3))/2,
+  ratsimp(hh/2 * sum((yy + i*hh)^k + (yy + i*hh + hh/sqrt(3))^k, i, 0, nn - 1)))$
+for k : 0 thru 3 do
+  zero(sconcat("gauss2_exact_on_x", k), ratsimp(gn(k, n) - 1/(k + 1)))$
+for k : 4 thru 5 do
+  zero(sconcat("gauss2_error_on_x", k, "_is_c_over_n4"),
+    if freeof(n, ratsimp((gn(k, n) - 1/(k + 1))*n^4)) then 0 else 1)$
+richardson(k, nn) := ratsimp(gn(k, 2*nn) + (gn(k, 2*nn) - gn(k, nn))/15)$
+for k : 0 thru 5 do
+  zero(sconcat("richardson_exact_on_x", k), ratsimp(richardson(k, n) - 1/(k + 1)))$
+zero("richardson_not_exact_on_x6", if ratsimp(richardson(6, n) - 1/7) # 0 then 0 else 1)$
+
+/* Values for the Rust tests in crates/spacelab-ionosphere/src/itu.rs, at 40 significant
+ * figures: the two sample offsets of an interval as fractions of its width, and the Richardson
+ * error on x^6 over [0, 1] from 8 and 16 intervals, where the doubling loop stops on a sextic. */
+fpprec : 40$
+printf(true, "first sample offset (3 - sqrt 3)/6 = ~a~%", bfloat((3 - sqrt(3))/6))$
+printf(true, "second sample offset (3 + sqrt 3)/6 = ~a~%", bfloat((3 + sqrt(3))/6))$
+printf(true, "Gauss error on x^6 relative to 1/7, n = 8 and 16 = ~a ~a~%",
+  bfloat(7*gn(6, 8) - 1), bfloat(7*gn(6, 16) - 1))$
+printf(true, "Richardson error on x^6, n = 8 = ~a~%", bfloat(richardson(6, 8) - 1/7))$

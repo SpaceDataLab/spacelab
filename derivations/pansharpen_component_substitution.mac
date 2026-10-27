@@ -1,0 +1,76 @@
+/* Brovey and Gram-Schmidt pan-sharpening as spacelab-earthvision/src/pansharpen.rs codes them,
+ * from their defining algebra, with the reference values of the gates in its test module.
+ *
+ * Brovey: out_k = MS_k PAN / sum_j MS_j. Gram-Schmidt (Laben & Brower): with the simulated pan
+ * S = mean_k MS_k, GS_0 = S - mean(S), each centred band orthogonalised against the earlier GS
+ * components with coefficients phi_kj, GS_0 replaced by lambda (PAN - mean(PAN)),
+ * lambda = sigma(S)/sigma(PAN), and the forward pass inverted.
+ *
+ * Shown here, every line printing `<name>: 0`:
+ *   1. Brovey keeps the pan as the band sum and every band ratio (G4);
+ *   2. the coded Gram-Schmidt round trip, run literally on symbolic data (two bands, four pixels,
+ *      lambda a symbol), is the detail injection
+ *          out_k = MS_k + g_k (lambda (PAN - mean PAN) - (S - mean S)),
+ *          g_k = <MS_k - mean MS_k, S - mean S>/<S - mean S, S - mean S>,
+ *      i.e. cov(MS_k, S)/var(S) times the pan's new detail -- the closed form of GS sharpening
+ *      (G1); hence
+ *   3. every band keeps its mean (G4), and with PAN = S (so lambda = 1) the method is the identity
+ *      (G1);
+ *   4. a three-band, six-pixel example, Gram-Schmidt at 40 digits and Brovey exactly (G2).
+ * derivations/pansharpen_component_substitution.gp recomputes 4 from the closed form of 2.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b \
+ *          derivations/pansharpen_component_substitution.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+display2d : false$
+fpprec : 40$
+show(name, vec) := (printf(true, "~a:", name), for x in vec do printf(true, " ~h", x),
+                    printf(true, "~%"))$
+mean(v) := apply("+", v)/length(v)$
+centre(v) := v - mean(v)$
+
+/* 1. Brovey on one pixel of three bands. */
+bro : [a1, a2, a3]*P/(a1 + a2 + a3)$
+zero("brovey_band_sum_is_the_pan", ratsimp(apply("+", bro) - P))$
+zero("brovey_keeps_band_ratios", ratsimp(bro[1]/bro[2] - a1/a2) + ratsimp(bro[3]/bro[2] - a3/a2))$
+
+/* 2. The coded algorithm, literally. */
+gs_sharpen(bands, pan, lam) := block([n : length(bands), sim, gs, phi, comp, c, out],
+  sim : apply("+", bands)/n,
+  gs : [centre(sim)], phi : [],
+  for k : 1 thru n do (
+    comp : centre(bands[k]), c : [],
+    for g in gs do block([cc : (comp . g)/(g . g)], c : endcons(cc, c), comp : comp - cc*g),
+    phi : endcons(c, phi), gs : endcons(comp, gs)),
+  gs[1] : lam*centre(pan),
+  makelist(gs[k + 1] + mean(bands[k]) + sum(phi[k][j]*gs[j], j, 1, k), k, 1, n))$
+m1 : [x1, x2, x3, x4]$  m2 : [y1, y2, y3, y4]$  pn : [p1, p2, p3, p4]$
+out : gs_sharpen([m1, m2], pn, lam)$
+s0 : centre((m1 + m2)/2)$
+inject(m) := m + ((centre(m) . s0)/(s0 . s0))*(lam*centre(pn) - s0)$
+zero("gram_schmidt_band_1_is_the_detail_injection", lmax(abs(ratsimp(out[1] - inject(m1)))))$
+zero("gram_schmidt_band_2_is_the_detail_injection", lmax(abs(ratsimp(out[2] - inject(m2)))))$
+
+/* 3. */
+zero("gram_schmidt_keeps_band_1_mean", ratsimp(mean(out[1]) - mean(m1)))$
+zero("gram_schmidt_keeps_band_2_mean", ratsimp(mean(out[2]) - mean(m2)))$
+same : gs_sharpen([m1, m2], (m1 + m2)/2, 1)$
+zero("gram_schmidt_identity_band_1", lmax(abs(ratsimp(same[1] - m1))))$
+zero("gram_schmidt_identity_band_2", lmax(abs(ratsimp(same[2] - m2))))$
+
+/* 4. */
+b1 : [1/2, 3/4, 5/8, 1, 7/8, 3/8]$
+b2 : [1/4, 1/2, 3/4, 5/8, 1/2, 1/4]$
+b3 : [3/8, 1/4, 1/2, 7/8, 3/4, 5/8]$
+pan : [5/8, 1/4, 7/8, 3/4, 1, 1/2]$
+sd(v) := sqrt(mean(centre(v)^2))$
+sim4 : (b1 + b2 + b3)/3$
+lam4 : sd(sim4)/sd(pan)$
+gs4 : gs_sharpen([b1, b2, b3], pan, lam4)$
+for k : 1 thru 3 do show(sconcat("gram_schmidt_band_", k), bfloat(gs4[k]))$
+bro4 : makelist(makelist([b1, b2, b3][k][p]*pan[p]/(b1[p] + b2[p] + b3[p]), p, 1, 6), k, 1, 3)$
+for k : 1 thru 3 do print(sconcat("brovey_band_", k, ":"), bro4[k])$

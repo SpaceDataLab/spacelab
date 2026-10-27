@@ -33,6 +33,17 @@
 //! `np.allclose`'s default `rtol = 1e-5`, where [`geodetic_latitude`] here runs to the `f64` fixed
 //! point. The whole difference between the two codes is that this one iterates further.
 //! `tests/pyorbital_geoloc.rs` holds the measurement.
+//!
+//! # Gate
+//!
+//! `derivations/ray_ellipsoid_geolocation.mac` proves the hit is the near root of the ray's
+//! ellipsoid quadratic, the geodetic point a fixed point of the latitude iteration, the subpoint on
+//! the ellipsoid under the geodetic vertical and the rotation Rodrigues' by `−θ`;
+//! `derivations/ray_ellipsoid_geolocation.gp` recomputes its 40-digit values by root-finding. The
+//! gates are in `tests/geoloc_gates.rs`: `the_ray_hit_is_the_near_root_of_the_ellipsoid_quadratic`,
+//! `the_geodetic_latitude_is_the_root_of_its_defining_equation`,
+//! `the_subpoint_is_the_foot_of_the_geodetic_vertical` (G2) and
+//! `rotate_about_is_the_rodrigues_rotation_by_minus_the_angle` (G1).
 
 use crate::scan::ScanSample;
 use libm::{atan2, cos, sin, sqrt};

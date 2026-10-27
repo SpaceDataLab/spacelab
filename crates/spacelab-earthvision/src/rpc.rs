@@ -19,6 +19,12 @@
 //!
 //! Units are the RPC convention: latitude/longitude in **degrees**, height and offsets in **metres**,
 //! image coordinates in **pixels** (`row` = line, `col` = sample). `no_std`, no allocation.
+//!
+//! Gate: `derivations/rpc00b.mac` shows that the twenty terms are the full cubic basis, that the
+//! hand-written gradient is the polynomial's derivative and that the Newton step is `J⁻¹F`;
+//! `derivations/rpc00b_inverse.gp` solves the RPC equations at 60 digits on the Pléiades fixture.
+//! The module test `the_inverse_is_the_root_of_the_rpc_equations` (G2) holds the shipped inverse to
+//! those roots.
 
 // Single-letter P/L/H are the standard RPC normalised-coordinate names; the numerator/denominator and
 // their derivative bindings (ln_n/ld_n/…) mirror the rational-function algebra; the module doc quotes
@@ -338,7 +344,12 @@ fn vector(text: &str, key: &str, out: &mut [f64]) -> Option<()> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unreadable_literal, clippy::float_cmp, clippy::unwrap_used)]
+    #![allow(
+        clippy::unreadable_literal,
+        clippy::float_cmp,
+        clippy::unwrap_used,
+        clippy::excessive_precision
+    )]
     use super::*;
 
     // A real RPC (RPC00B), Pléiades over Réunion Island — coefficients extracted from the public s2p
@@ -584,6 +595,84 @@ mod tests {
             InverseError::Singular { iterations: 4 }.to_string(),
             "RPC inverse hit a singular Jacobian at iteration 4"
         );
+    }
+
+    /// `(row, col, height, latitude, longitude)` from `derivations/rpc00b_inverse.gp`: the root of
+    /// the RPC00B equations for the fixture's camera, solved at 60 digits with PARI's own polynomial
+    /// derivatives after rounding every fixture value to the double it parses to.
+    const RPC_ROOTS: [(f64, f64, f64, f64, f64); 5] = [
+        (
+            19403.5,
+            19999.5,
+            1295.0,
+            -2.131916072552630990937423630761e1,
+            5.574577016548363170061062134390e1,
+        ),
+        (
+            5000.0,
+            8000.0,
+            1595.0,
+            -2.125239828214131955235100892956e1,
+            5.568707736118836504842441152456e1,
+        ),
+        (
+            30000.0,
+            32000.0,
+            795.0,
+            -2.136884259468818979614969844290e1,
+            5.580482793891648726624951334009e1,
+        ),
+        (
+            19403.5,
+            19999.5,
+            2295.0,
+            -2.131780866575942820779899334821e1,
+            5.574519026048746351658582153936e1,
+        ),
+        (
+            19150.25,
+            20311.75,
+            1043.5,
+            -2.131835903983073324720912747178e1,
+            5.574744692592110660888244346599e1,
+        ),
+    ];
+
+    /// (G2) `inverse` returns the root of the RPC00B equations `NumL/DenL = r̂`, `NumS/DenS = ĉ` —
+    /// the Newton step `derivations/rpc00b.mac` proves to be `J⁻¹F` with the exact gradient, solved
+    /// independently at 60 digits. The bound is the floor of evaluating the cubics in `f64`: an ulp
+    /// of the sum of their term magnitudes, carried to the ground by the scale, plus an ulp of the
+    /// de-normalised coordinate itself.
+    #[test]
+    fn the_inverse_is_the_root_of_the_rpc_equations() {
+        let cam = RationalPolynomialCamera::parse_rpb(RPB).unwrap();
+        let magnitude = |c: &[f64; 20], p: f64, l: f64, h: f64| {
+            terms(p, l, h)
+                .iter()
+                .zip(c)
+                .map(|(t, ci)| (t * ci).abs())
+                .sum::<f64>()
+        };
+        let mut worst = 0.0_f64;
+        for (row, col, height, lat, lon) in RPC_ROOTS {
+            let g = cam.inverse(row, col, height).unwrap();
+            let p = (lat - cam.lat_offset) / cam.lat_scale;
+            let l = (lon - cam.lon_offset) / cam.lon_scale;
+            let h = (height - cam.height_offset) / cam.height_scale;
+            let floor = magnitude(&cam.line_num, p, l, h)
+                + magnitude(&cam.line_den, p, l, h)
+                + magnitude(&cam.samp_num, p, l, h)
+                + magnitude(&cam.samp_den, p, l, h);
+            let tol_lat = 16.0 * f64::EPSILON * (lat.abs() + cam.lat_scale * floor);
+            let tol_lon = 16.0 * f64::EPSILON * (lon.abs() + cam.lon_scale * floor);
+            let (dlat, dlon) = ((g.latitude - lat).abs(), (g.longitude - lon).abs());
+            assert!(
+                dlat <= tol_lat && dlon <= tol_lon,
+                "({row}, {col}, {height}): off by ({dlat:.3e}, {dlon:.3e})° (allowed ({tol_lat:.3e}, {tol_lon:.3e}))"
+            );
+            worst = worst.max(dlat / tol_lat).max(dlon / tol_lon);
+        }
+        println!("rpc inverse vs 60 digits: worst {worst:.3} of the evaluation floor");
     }
 
     #[test]

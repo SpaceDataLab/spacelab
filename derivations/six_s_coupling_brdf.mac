@@ -1,0 +1,89 @@
+/* The 6S coupling and the RTLSR surface BRDF -- spacelab-earthvision/src/atmospheric_correction.rs
+ * -- from their definitions.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the forward model rho_TOA = rho_atm + Td Tu rho_s/(1 - s rho_s) and the coded inverse
+ *      y = (rho_TOA - rho_atm)/(Td Tu), rho_s = y/(1 + s y) undo each other both ways (G1), and
+ *      d rho_TOA/d rho_s = Td Tu/(1 - s rho_s)^2 > 0, so a weight-sum of couplings is strictly
+ *      increasing and the bisection's root is unique (G1);
+ *   2. the four-node Gauss-Legendre rule on [0, 1] the spherical albedo uses: its nodes are the
+ *      roots of the shifted P_4, nodes (1 -+ sqrt(3/7 +- (2/7) sqrt(6/5)))/2 and weights
+ *      (18 -+ sqrt 30)/72 integrate every monomial to degree 7 exactly, and so sum w 2 mu = 1 (G3);
+ *   3. the photon split: minimising the weighted sum's variance sum w_j^2/n_j at fixed sum n_j gives
+ *      n_j proportional to w_j (Lagrange), whose variance is (sum w)^2/N, and the equal split's is
+ *      m sum w_j^2 / N -- the factor `term_photons` documents, >= 1 by Cauchy-Schwarz (G1);
+ *   4. RossThick, K_vol = [(pi/2 - xi) cos xi + sin xi]/(cos ts + cos tv) - pi/4, and
+ *      LiSparse-Reciprocal with h/b = 2, b/r = 1 (Lucht et al. 2000): both vanish at nadir-nadir,
+ *      both are reciprocal in (ts, tv) (G4), and at the hotspot ts = tv, phi = 0 they are
+ *      pi/(4 cos t) - pi/4 and sec^2 t - sec t (G3).
+ * The numbers below are the literals, at 40 digits, of the module test
+ * `the_coupling_constants_and_kernels_are_their_definitions` (G2);
+ * derivations/six_s_coupling_brdf.gp recomputes them.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/six_s_coupling_brdf.mac </dev/null
+ */
+
+display2d : false$
+ratprint : false$
+fpprec : 40$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* ---- 1 ---- */
+toa(rs) := ra + td*tu*rs/(1 - s*rs)$
+surface(rt) := block([y : (rt - ra)/(td*tu)], y/(1 + s*y))$
+zero("inverse_undoes_forward", ratsimp(surface(toa(rs)) - rs))$
+zero("forward_undoes_inverse", ratsimp(toa(surface(rt)) - rt))$
+zero("forward_slope", ratsimp(diff(toa(rs), rs) - td*tu/(1 - s*rs)^2))$
+
+/* ---- 2 ---- */
+nodes : [(1 - sqrt(3/7 + 2/7*sqrt(6/5)))/2, (1 - sqrt(3/7 - 2/7*sqrt(6/5)))/2,
+         (1 + sqrt(3/7 - 2/7*sqrt(6/5)))/2, (1 + sqrt(3/7 + 2/7*sqrt(6/5)))/2]$
+weights : [(18 - sqrt(30))/72, (18 + sqrt(30))/72, (18 + sqrt(30))/72, (18 - sqrt(30))/72]$
+zero("nodes_are_roots_of_shifted_p4",
+  sum(radcan(expand(legendre_p(4, 2*nodes[i] - 1)))^2, i, 1, 4))$
+zero("rule_is_exact_to_degree_7",
+  sum(radcan(expand(sum(weights[i]*nodes[i]^k, i, 1, 4) - 1/(k + 1)))^2, k, 0, 7))$
+zero("flux_weights_sum_to_one", radcan(expand(sum(weights[i]*2*nodes[i], i, 1, 4) - 1)))$
+for i : 1 thru 4 do
+  print("  node", i, "=", bfloat(nodes[i]), " weight =", bfloat(weights[i]))$
+
+/* ---- 3 ---- n_j = N w_j/sum(w) is the stationary point of sum w_j^2/n_j + lambda (sum n_j - N). */
+ws : [w1, w2, w3]$
+L : sum(ws[j]^2/n[j], j, 1, 3) + lambda*(sum(n[j], j, 1, 3) - NN)$
+proportional : makelist(n[j] = NN*ws[j]/sum(ws[i], i, 1, 3), j, 1, 3)$
+lam : (sum(ws[i], i, 1, 3)/NN)^2$
+zero("proportional_split_is_stationary",
+  sum(ratsimp(subst(append(proportional, [lambda = lam]), diff(L, n[j])))^2, j, 1, 3))$
+zero("proportional_variance",
+  ratsimp(subst(proportional, sum(ws[j]^2/n[j], j, 1, 3)) - sum(ws[i], i, 1, 3)^2/NN))$
+zero("equal_split_factor",
+  ratsimp(subst(makelist(n[j] = NN/3, j, 1, 3), sum(ws[j]^2/n[j], j, 1, 3))
+    / (sum(ws[i], i, 1, 3)^2/NN) - 3*sum(ws[j]^2, j, 1, 3)/sum(ws[i], i, 1, 3)^2))$
+
+/* ---- 4 ---- */
+ross(ts, tv, ph) := block([cx : cos(ts)*cos(tv) + sin(ts)*sin(tv)*cos(ph), x],
+  x : acos(cx), ((%pi/2 - x)*cx + sin(x))/(cos(ts) + cos(tv)) - %pi/4)$
+li(ts, tv, ph) := block([hb : 2, br : 1, a, b, cx, d2, sec, ct, t],
+  a : atan(br*tan(ts)), b : atan(br*tan(tv)),
+  cx : cos(a)*cos(b) + sin(a)*sin(b)*cos(ph),
+  d2 : tan(a)^2 + tan(b)^2 - 2*tan(a)*tan(b)*cos(ph),
+  sec : 1/cos(a) + 1/cos(b),
+  ct : hb*sqrt(d2 + (tan(a)*tan(b)*sin(ph))^2)/sec,
+  /* Past cos t = 1 the two shadows do not overlap at all: t = 0, the clamp the code makes. */
+  if numberp(float(ct)) and float(ct) > 1 then ct : 1,
+  t : acos(ct),
+  (t - sin(t)*ct)*sec/%pi - sec + (1 + cx)/(2*cos(a)*cos(b)))$
+zero("ross_thick_nadir", ratsimp(ross(0, 0, 0)))$
+zero("li_sparse_nadir", ratsimp(li(0, 0, 0)))$
+zero("ross_thick_reciprocal", trigsimp(ross(ts, tv, ph) - ross(tv, ts, ph)))$
+zero("li_sparse_reciprocal", trigsimp(li(ts, tv, ph) - li(tv, ts, ph)))$
+assume(th > 0, th < %pi/2)$
+zero("ross_thick_hotspot", trigsimp(ross(th, th, 0) - (%pi/(4*cos(th)) - %pi/4)))$
+zero("li_sparse_hotspot", trigsimp(li(th, th, 0) - (1/cos(th)^2 - 1/cos(th))))$
+deg : %pi/180$
+for c in [[45, 30, 60], [20, 40, 120], [60, 50, 180], [30, 0, 0], [10, 55, 270]] do
+  print("  (ts, tv, phi) =", c, " K_vol =", bfloat(ross(c[1]*deg, c[2]*deg, c[3]*deg)),
+        " K_geo =", bfloat(li(c[1]*deg, c[2]*deg, c[3]*deg)))$

@@ -1,0 +1,92 @@
+/* Monte Carlo slab transport -- spacelab-earthvision/src/radiative_transfer.rs -- what its
+ * estimators are expected to return, and the geometry they move photons with.
+ *
+ * Optical depth t is measured down from the top; a photon entering at cos(zenith) mu_s collides
+ * first at vertical depth t with density (1/mu_s) exp(-t/mu_s) on (0, tau). Shown here, each line
+ * printing `<name>: 0`:
+ *   1. the next-event estimator's first-collision term omega p(cos Theta) exp(-t/mu_v)/(2 mu_v) has
+ *      the expectation rho1 = omega p (1 - exp(-tau (1/mu_s + 1/mu_v)))/(2 (mu_s + mu_v)), the
+ *      single-scattering bidirectional reflectance (G2), and that is the transfer literature's
+ *      pi I/(mu_s F) with I = F omega P mu_s/(4 pi (mu_s + mu_v)) (1 - ...) and P = 2p -- the `2`
+ *      of the module's normalisation (G1);
+ *   2. its flux-weighted hemispheric integral (1/pi) int int rho1 mu dmu dphi is the first-order
+ *      plane albedo counted photon by photon, for an isotropic scatterer (G1);
+ *   3. the direct beam: no collision before the bottom has probability exp(-tau/mu_0) (G3);
+ *   4. `scatter_mu` is the z row of R_y(-a) applied to (sin b cos phi, sin b sin phi, cos b) --
+ *      the spherical law of cosines (G1); `scatter_direction` returns a unit vector at cos_t from
+ *      a unit d, and its z component is minus `scatter_mu` at mu = -d_z (G1), and its pole branch
+ *      is a unit vector at cos_t from +-z (G1);
+ *   5. `with_absorber` holds the scattering depth omega tau fixed (G4).
+ * The number at the end is the literal of the module test
+ * `the_first_collision_estimate_has_the_single_scattering_expectation` (G2);
+ * derivations/slab_single_scattering.gp recomputes it by quadrature over the collision depth.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/slab_single_scattering.mac </dev/null
+ */
+
+display2d : false$
+ratprint : false$
+fpprec : 40$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+assume(mus > 0, muv > 0, tau > 0, mu > 0)$
+
+/* ---- 1 ---- */
+expectation : integrate((1/mus)*exp(-t/mus)*omega*p*exp(-t/muv)/(2*muv), t, 0, tau)$
+rho1 : omega*p*(1 - exp(-tau*(1/mus + 1/muv)))/(2*(mus + muv))$
+zero("next_event_first_collision_expectation", radcan(expectation - rho1))$
+intensity : F*omega*(2*p)*mus/(4*%pi*(mus + muv))*(1 - exp(-tau*(1/mus + 1/muv)))$
+zero("normalisation_two_is_the_literature_four", radcan(%pi*intensity/(mus*F) - rho1))$
+
+/* ---- 2 ---- isotropic: p = 1/2 in every direction. */
+hemispheric_integrand : 2*mu*subst([p = 1/2, muv = mu], rho1)$
+counted : (omega/2)*integrate((1/mus)*exp(-t/mus)*exp(-t/mu), t, 0, tau)$
+zero("hemispheric_integral_is_the_first_order_albedo", radcan(hemispheric_integrand - counted))$
+
+/* ---- 3 ---- */
+zero("direct_beam", radcan(1 - integrate((1/mu0)*exp(-t/mu0), t, 0, tau) - exp(-tau/mu0)))$
+
+/* ---- 4 ---- */
+assume(a > 0, a < %pi)$
+v : [sin(b)*cos(phi), sin(b)*sin(phi), cos(b)]$
+ry_row3 : [sin(a), 0, cos(a)]$
+scatter_mu(m, ct, ph) := m*ct + sqrt(1 - m^2)*sqrt(1 - ct^2)*cos(ph)$
+assume(b > 0, b < %pi)$
+zero("scatter_mu_is_the_rotation", trigsimp(ry_row3 . v - scatter_mu(cos(a), cos(b), phi)))$
+/* d on the unit sphere: d = (s cos q, s sin q, dz) with s = sqrt(1 - dz^2) = horizontal. */
+assume(s > 0)$
+d : [s*cos(q), s*sin(q), dz]$
+st : sqrt(1 - ct^2)$
+k : st/s$
+out : [k*(d[1]*d[3]*cos(ph) - d[2]*sin(ph)) + d[1]*ct,
+       k*(d[2]*d[3]*cos(ph) + d[1]*sin(ph)) + d[2]*ct,
+       -s*st*cos(ph) + d[3]*ct]$
+unit_sphere(e) := ratsimp(ratsubst(1 - dz^2, s^2, trigsimp(expand(e))))$
+zero("scatter_direction_is_a_unit_vector", unit_sphere(out . out - 1))$
+zero("scatter_direction_is_at_cos_t_from_d", unit_sphere(out . d - ct))$
+zero("scatter_direction_z_is_scatter_mu",
+  ratsimp(subst(s = sqrt(1 - dz^2), -out[3]) - scatter_mu(-dz, ct, ph)))$
+pole(sg) := [st*cos(ph), st*sin(ph), sg*ct]$
+zero("pole_branch_up", ratsimp(trigsimp(pole(1) . pole(1) - 1)^2 + (pole(1) . [0, 0, 1] - ct)^2))$
+zero("pole_branch_down", ratsimp(trigsimp(pole(-1) . pole(-1) - 1)^2 + (pole(-1) . [0, 0, -1] - ct)^2))$
+
+/* ---- 5 ---- */
+zero("absorber_holds_the_scattering_depth", ratsimp((tau + ab)*(omega/(1 + ab/tau)) - omega*tau))$
+
+/* ---- the module test's literal ---- */
+hg(g, m) := (1 - g^2)/(2*(1 + g^2 - 2*g*m)^(3/2))$
+/* mu_s = 4/5, mu_v = 3/5, relative azimuth pi: cos Theta = (3/5)(4/5) cos(pi) - (4/5)(3/5) = -24/25. */
+cos_theta : (3/5)*(4/5)*cos(%pi) - (4/5)*(3/5)$
+zero("test_geometry_scattering_cosine", cos_theta + 24/25)$
+literal : subst([omega = 1, p = hg(3/10, cos_theta), tau = 1, mus = 4/5, muv = 3/5], rho1)$
+print("  rho1 / omega at tau = 1, mu_s = 4/5, mu_v = 3/5, HG g = 3/10, cos Theta = -24/25:",
+  bfloat(literal))$
+/* The test's tolerance: at omega -> 0 a photon contributes X = K exp(-t/mu_v) at its first
+ * collision and nothing after, so its relative standard deviation is sqrt(E X^2/(E X)^2 - 1). */
+m1 : integrate((1/mus)*exp(-t/mus)*exp(-t/muv), t, 0, tau)$
+m2 : integrate((1/mus)*exp(-t/mus)*exp(-2*t/muv), t, 0, tau)$
+print("  relative standard deviation per photon:",
+  bfloat(sqrt(subst([tau = 1, mus = 4/5, muv = 3/5], m2/m1^2) - 1)))$

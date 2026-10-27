@@ -23,7 +23,11 @@
 //!   Mie code produces plausible nonsense.
 //! * The series is truncated at Wiscombe's `nₘₐₓ = x + 4x^{1/3} + 2`, which is where the terms have
 //!   fallen below `f64` significance rather than an arbitrary round number.
-//! * `ψₙ` and `χₙ` go **upward**, which is stable for them.
+//! * `χₙ` goes **upward**, which is stable for it. `ψₙ` goes upward only while `n ≤ x`: past that it
+//!   is the recessive solution of the same recurrence, upward loses `ε/x²` of it per order, and it
+//!   is carried down its ratio `ψₙ₋₁/ψₙ = Dₙ(x) + n/x` instead — with the numerators written in
+//!   `Dₙ − (n+1)/z`, so that the `(n+1)/x` both logarithmic derivatives carry cancels in closed form
+//!   rather than in rounding.
 //!
 //! # Bulk quantities
 //!
@@ -36,6 +40,16 @@
 //! deliberately *not* by quadrature over the tabulated phase function. The two are then independent,
 //! and their agreement is a real check on the angular grid rather than a restatement of it — which
 //! is what `the_tabulated_asymmetry_reproduces_the_mie_series_value` measures.
+//!
+//! Gate: `derivations/mie_lorenz.mac` shows the Riccati–Bessel recurrences and the downward
+//! logarithmic-derivative recurrence from the functions themselves, that the coded `aₙ, bₙ` are
+//! Bohren & Huffman (4.53) rearranged, the Rayleigh limit of (4.53), the optical theorem behind
+//! `Q_ext`, and that the `Q_sca` and `g Q_sca` sums are the angular integrals of `|S₁|² + |S₂|²`;
+//! `derivations/mie_lorenz.gp` recomputes its 120-digit coefficients from PARI's Bessel functions.
+//! The module tests `the_coefficients_are_the_boundary_value_solution` (G2),
+//! `a_small_sphere_keeps_its_relative_accuracy` (G2) and
+//! `the_rayleigh_extinction_of_an_absorbing_sphere_is_four_x_im_k` (G3) tie the shipped series to
+//! that file.
 
 // The Mie recurrences are written in their textbook notation (x, m, n, a, b, D, ψ, χ, ξ), index
 // arithmetic on the series moves between `usize` and `f64` at every term, and the Wiscombe
@@ -225,40 +239,83 @@ fn coefficients(x: f64, m: Complex) -> Option<(Vec<Complex>, Vec<Complex>)> {
     // 3.3.0, `+16` leaves `Q_ext` 5.7e-8 high at `x = 100` and 1.6e-4 high at `x = 1000`, where this
     // margin puts both inside 1.4e-13. The `|y|` term underneath is what makes either hold for an
     // absorbing sphere.
+    //
+    // It is run for `Eₙ = Dₙ − (n+1)/z` rather than for `Dₙ`: the same recurrence, shifted, as
+    // `Eₙ₋₁ = −1/(Eₙ + (2n+1)/z)`. Near `z = 0` the logarithmic derivative is `(n+1)/z` plus a
+    // remainder of order `z`, and that remainder is the whole of `b_n` — `m Dₙ(mx) − Dₙ(x)` is
+    // `m Eₙ(mx) − Eₙ(x)` exactly, because the two `(n+1)/x` cancel in closed form. Subtracting the
+    // `Dₙ` themselves loses it to rounding at `ε/x²`.
     let magnitude = libm::sqrt(y.norm_squared());
     let n_start = n_max.max(magnitude as usize) + 25 + (1.5 * libm::sqrt(magnitude)) as usize;
-    let mut d = vec![Complex::new(0.0, 0.0); n_start + 1];
+    let y_inverse = y.inverse();
+    let mut e = vec![Complex::new(0.0, 0.0); n_start + 1];
     for n in (1..=n_start).rev() {
-        let n_over_y = y.inverse().scale(n as f64);
-        d[n - 1] = n_over_y.sub(d[n].add(n_over_y).inverse());
+        e[n - 1] = e[n]
+            .add(y_inverse.scale((2 * n + 1) as f64))
+            .inverse()
+            .scale(-1.0);
+    }
+
+    // The same recurrence at the real argument, for `ψₙ(x)` itself past `n = x`. There `ψₙ` is the
+    // recessive solution of its three-term recurrence and running it upward cancels `O(x²)` of the
+    // significand per order — `ψ₁ = sin x/x − cos x` — which left a sphere at `x = 1e-4` with
+    // `Q_sca` 5.6e-8 low and `g` out by a factor of 29. The ratio `ψₙ₋₁/ψₙ = Eₙ(x) + (2n+1)/x`
+    // carries `ψₙ` down from `ψ₀ = sin x` without subtracting anything.
+    let n_start_real = n_max.max(x as usize) + 25 + (1.5 * libm::sqrt(x)) as usize;
+    let mut e_real = vec![0.0_f64; n_start_real + 1];
+    for n in (1..=n_start_real).rev() {
+        e_real[n - 1] = -1.0 / (e_real[n] + (2 * n + 1) as f64 / x);
     }
 
     let (mut psi_previous, mut psi) = (libm::cos(x), libm::sin(x));
     let (mut chi_previous, mut chi) = (-libm::sin(x), libm::cos(x));
+    let one_over_m_squared_minus_one = m.mul(m).inverse().sub(Complex::new(1.0, 0.0));
     let mut a = Vec::with_capacity(n_max);
     let mut b = Vec::with_capacity(n_max);
-    for (n, &d_n) in d.iter().enumerate().take(n_max + 1).skip(1) {
+    for (n, &e_n) in e.iter().enumerate().take(n_max + 1).skip(1) {
         let degree = n as f64;
-        let psi_next = (2.0 * degree - 1.0) / x * psi - psi_previous;
+        // Upward while `ψₙ` is oscillatory (`n ≤ x`), where the recurrence is stable for it.
+        let recessive = degree > x;
+        let psi_next = if recessive {
+            psi / (e_real[n] + (2.0 * degree + 1.0) / x)
+        } else {
+            (2.0 * degree - 1.0) / x * psi - psi_previous
+        };
         let chi_next = (2.0 * degree - 1.0) / x * chi - chi_previous;
         let (psi_n, psi_n_minus_1) = (psi_next, psi);
         let (chi_n, chi_n_minus_1) = (chi_next, chi);
-        let xi_n = Complex::new(psi_n, -chi_n);
-        let xi_n_minus_1 = Complex::new(psi_n_minus_1, -chi_n_minus_1);
 
+        let d_n = e_n.add(y_inverse.scale(degree + 1.0));
         let n_over_x = Complex::new(degree / x, 0.0);
         let da = d_n.div(m).add(n_over_x);
         let db = m.mul(d_n).add(n_over_x);
-        a.push(
-            da.scale(psi_n)
-                .sub(Complex::new(psi_n_minus_1, 0.0))
-                .div(da.mul(xi_n).sub(xi_n_minus_1)),
-        );
-        b.push(
-            db.scale(psi_n)
-                .sub(Complex::new(psi_n_minus_1, 0.0))
-                .div(db.mul(xi_n).sub(xi_n_minus_1)),
-        );
+        // The coefficients are `N/(N − iC)` with `N = (Dₙ/m + n/x) ψₙ − ψₙ₋₁` (`m Dₙ` for `bₙ`) and
+        // `C` the same in `χ`: that is `(D ξₙ − ξₙ₋₁)` split into its `ψ` and `χ` parts. Where
+        // `ψₙ` came down the ratio, `ψₙ₋₁ = ψₙ (Dₙ(x) + n/x)` makes `N = ψₙ (Dₙ(mx)/m − Dₙ(x))` and
+        // `ψₙ (m Dₙ(mx) − Dₙ(x))`, written in `E` so that nothing of size `(n+1)/x` is subtracted.
+        let (numerator_a, numerator_b) = if recessive {
+            let e_x = Complex::new(e_real[n], 0.0);
+            (
+                e_n.div(m)
+                    .sub(e_x)
+                    .add(one_over_m_squared_minus_one.scale((degree + 1.0) / x))
+                    .scale(psi_n),
+                m.mul(e_n).sub(e_x).scale(psi_n),
+            )
+        } else {
+            let psi_n_minus_1 = Complex::new(psi_n_minus_1, 0.0);
+            (
+                da.scale(psi_n).sub(psi_n_minus_1),
+                db.scale(psi_n).sub(psi_n_minus_1),
+            )
+        };
+        let chi_n_minus_1 = Complex::new(chi_n_minus_1, 0.0);
+        let c_a = da.scale(chi_n).sub(chi_n_minus_1);
+        let c_b = db.scale(chi_n).sub(chi_n_minus_1);
+        // N − iC.
+        let minus_i_times = |n: Complex, c: Complex| Complex::new(n.re + c.im, n.im - c.re);
+        a.push(numerator_a.div(minus_i_times(numerator_a, c_a)));
+        b.push(numerator_b.div(minus_i_times(numerator_b, c_b)));
 
         psi_previous = psi;
         psi = psi_next;
@@ -396,6 +453,7 @@ mod tests {
         clippy::unwrap_used,
         clippy::expect_used,
         clippy::unreadable_literal,
+        clippy::excessive_precision,
         clippy::float_cmp,
         clippy::items_after_statements
     )]
@@ -485,7 +543,9 @@ mod tests {
         ];
         // A few times the worst residual measured over these eight cases: `Q_ext` 1.6e-10, at
         // `x = 100` with `k = 0.1`, where it is a sum of nearly cancelling terms; `Q_sca` 1.4e-13;
-        // and `g` 2.4e-11, at `x = 0.1`, where the Rayleigh regime cancels it the same way.
+        // and `g` 8.4e-14, at `x = 1000`. At `x = 0.1` `g` was 2.4e-11 out while `ψₙ` ran upward
+        // through its recessive orders (see `a_small_sphere_keeps_its_relative_accuracy`); it is
+        // 1.9e-14 now, which is `miepython`'s own distance from `derivations/mie_lorenz.mac` there.
         const EXTINCTION_TOLERANCE: f64 = 1e-9;
         const SCATTERING_TOLERANCE: f64 = 1e-12;
         const ASYMMETRY_TOLERANCE: f64 = 1e-10;
@@ -508,7 +568,218 @@ mod tests {
         }
     }
 
-    /// The Rayleigh limit, which is a closed form and not another code.
+    /// (G2) The coefficients are the boundary-value solution, evaluated without any recurrence.
+    ///
+    /// `derivations/mie_lorenz.mac` evaluates Bohren & Huffman (4.53) at 120 digits from the
+    /// closed-form spherical Bessel functions — no upward `ψ`/`χ` recurrence and no logarithmic
+    /// derivative, the two things this module's arithmetic is built from — and
+    /// `derivations/mie_lorenz.gp` recomputes every literal from PARI's half-integer-order Bessel
+    /// functions. The same file shows the coded `aₙ, bₙ` are (4.53) rearranged, so a residual here
+    /// is numerical, not a different formula. Every coefficient of the absorbing `x = 1` sphere is
+    /// pinned, and the efficiencies of all three, each summed over Wiscombe's own term count.
+    ///
+    /// Measured: the worst coefficient is `b₁` at 2.3e-15 of `|b₁|`, the worst efficiency `g` at
+    /// `x = 1` at 1.4e-15 relative; the tolerance is just above both.
+    #[test]
+    fn the_coefficients_are_the_boundary_value_solution() {
+        // Re aₙ, Im aₙ, Re bₙ, Im bₙ at x = 1, m = 1.5 + 0.1i.
+        const UNIT_SPHERE: [(f64, f64, f64, f64); 8] = [
+            (
+                6.822878214940854529671702661349803431442e-2,
+                -1.70689482731169675510217451666626157795e-1,
+                8.645127037251827218505701425344018307072e-3,
+                -2.724240214766308824453175525054760386545e-2,
+            ),
+            (
+                1.85253225010891833511469460628782109319e-3,
+                -1.028082198647984756910987277260470520464e-2,
+                1.940922311216759497587424001760844448581e-4,
+                -7.472281645931739808086966352088453000179e-4,
+            ),
+            (
+                4.335528250806798396592866178072082067205e-5,
+                -2.725641232637771413372574626317233214349e-4,
+                2.958703242123532084193877718350719217128e-6,
+                -1.178554021113851207793511010128478253229e-5,
+            ),
+            (
+                6.490500241840226344467641682395354311679e-7,
+                -4.192034067428293149808488304162845509571e-6,
+                2.955973645226807324073269041604407449154e-8,
+                -1.193304410630347377272350649533884897316e-7,
+            ),
+            (
+                6.3607114440700325330851751792606212191e-9,
+                -4.16341980394566827912492849743178333484e-8,
+                2.060767550834079428752144219013084954053e-10,
+                -8.378556774219795863816175008281215119335e-10,
+            ),
+            (
+                4.365110264790403146406092533374551041065e-11,
+                -2.881065009089519581864905226561582772947e-10,
+                1.056593085456596458266832968895503441488e-12,
+                -4.31429761024456837799010895470778073013e-12,
+            ),
+            (
+                2.209972659979816035439997572537611428674e-13,
+                -1.466975805610503021071647972512166824309e-12,
+                4.147422195053385608492838680721814349753e-15,
+                -1.698222005260371392392385540079963382011e-14,
+            ),
+            (
+                8.586366816494422498040614005711972330141e-16,
+                -5.723382484057758577693058189432596423259e-15,
+                1.285821357740354390009860802773109379875e-17,
+                -5.275138878343651552772196845749492156815e-17,
+            ),
+        ];
+        let (a, b) = coefficients(1.0, Complex::new(1.5, 0.1)).unwrap();
+        assert_eq!(a.len(), UNIT_SPHERE.len());
+        for (n, (want, (an, bn))) in UNIT_SPHERE.iter().zip(a.iter().zip(b.iter())).enumerate() {
+            let want_a = Complex::new(want.0, want.1);
+            let want_b = Complex::new(want.2, want.3);
+            for (name, got, want) in [("a", an, want_a), ("b", bn, want_b)] {
+                let error = libm::sqrt(got.sub(want).norm_squared() / want.norm_squared());
+                assert!(error < 4e-15, "{name}_{}: {got:?} against {want:?}", n + 1);
+            }
+        }
+
+        // x, n, k, then Q_ext, Q_sca, g from (4.53) summed over the same term count.
+        const SPHERES: [(f64, f64, f64, f64, f64, f64); 3] = [
+            (
+                0.5,
+                1.33,
+                0.01,
+                1.898900230788619622198877035550983860237e-2,
+                6.77304915876172539561562560263994031668e-3,
+                4.548781043082292048171390077827678689735e-2,
+            ),
+            (
+                1.0,
+                1.5,
+                0.1,
+                4.823704563469867543128063883347878338484e-1,
+                2.087400183148371884772383855723707853731e-1,
+                2.05596688540911285177197605561667599302e-1,
+            ),
+            (
+                2.0,
+                1.33,
+                0.0,
+                7.129483218556672454396288473165154152089e-1,
+                7.129483218556672454396288473165154152089e-1,
+                6.697216915102514766978693410096632258098e-1,
+            ),
+        ];
+        for (x, n, k, want_ext, want_sca, want_g) in SPHERES {
+            let (a, b) = coefficients(x, Complex::new(n, k)).unwrap();
+            let (q_ext, q_sca, g_q_sca) = efficiencies(x, &a, &b);
+            for (name, got, want) in [
+                ("Q_ext", q_ext, want_ext),
+                ("Q_sca", q_sca, want_sca),
+                ("g", g_q_sca / q_sca, want_g),
+            ] {
+                assert!(
+                    (got - want).abs() < 4e-15 * want,
+                    "x = {x}: {name} {got:e} against {want:e}"
+                );
+            }
+        }
+    }
+
+    /// (G2) A small sphere keeps the relative accuracy of a large one.
+    ///
+    /// For every order `n > x` the Riccati–Bessel `ψₙ(x)` is the *recessive* solution of its
+    /// three-term recurrence — it falls as `xⁿ⁺¹/(2n+1)!!` while `χₙ` grows as `(2n−1)!!/xⁿ` — so
+    /// running the recurrence upward for it subtracts two numbers that agree to `1 − O(x²)`:
+    /// `ψ₁ = sin x/x − cos x` keeps only `x²/3` of its significand. Every coefficient of a sphere
+    /// with `x < 1` came out with a relative error of about `ε/x²`, which `derivations/mie_lorenz.mac`
+    /// measures directly: against its 120-digit boundary-value solution the upward recurrence put
+    /// `Q_sca` 5.6e-8 low at `x = 1e-4` and the asymmetry parameter out by a factor of 29 (2.4e-9
+    /// relative at `x = 0.01`, 2.4e-11 at `x = 0.1`), where the same series is good to 1e-15 at
+    /// `x = 1`. Carrying `ψₙ` down its ratio fixes `Q_sca`; `g` needs `bₙ`'s numerator written in
+    /// `Eₙ = Dₙ − (n+1)/z` as well, since `m Dₙ(mx) − Dₙ(x)` subtracts two copies of `(n+1)/x` —
+    /// with the ratio alone `g` was still 6.9e-8 off at `x = 1e-4`. Measured now: 6.1e-16 worst
+    /// over the three spheres. The literals are that file's.
+    #[test]
+    fn a_small_sphere_keeps_its_relative_accuracy() {
+        // x, n, k, then Q_ext, Q_sca, g.
+        const SMALL: [(f64, f64, f64, f64, f64, f64); 3] = [
+            (
+                0.1,
+                1.33,
+                0.0,
+                1.109062536221213798971358117517967959684e-5,
+                1.109062536221213798971358117517967959684e-5,
+                1.831958820868816689355682580573641540171e-3,
+            ),
+            (
+                0.01,
+                1.5,
+                0.1,
+                1.992631527112282904067067523815691613133e-3,
+                2.402255032440820824089908856263848357975e-9,
+                1.979734930406252039669228491118198020031e-5,
+            ),
+            (
+                1e-4,
+                1.5,
+                0.1,
+                1.992517002971068547785535160238893378334e-5,
+                2.402237524551816671003100228779473204165e-17,
+                1.97975090290429701015269619170028040118e-9,
+            ),
+        ];
+        for (x, n, k, want_ext, want_sca, want_g) in SMALL {
+            let (a, b) = coefficients(x, Complex::new(n, k)).unwrap();
+            let (q_ext, q_sca, g_q_sca) = efficiencies(x, &a, &b);
+            for (name, got, want) in [
+                ("Q_ext", q_ext, want_ext),
+                ("Q_sca", q_sca, want_sca),
+                ("g", g_q_sca / q_sca, want_g),
+            ] {
+                assert!(
+                    (got - want).abs() < 2e-15 * want,
+                    "x = {x}: {name} {got:e} against {want:e}"
+                );
+            }
+        }
+    }
+
+    /// (G3) The Rayleigh limit of the extinction carries the absorption, with the sign of the
+    /// convention.
+    ///
+    /// `derivations/mie_lorenz.mac` expands (4.53) in `x` with `m` symbolic: `a₁ = −(2i/3) K x³ +
+    /// O(x⁵)` with `K = (m² − 1)/(m² + 2)`, while `b₁` and `a₂` start at `x⁵`. So
+    /// `Q_ext → 4x Im K` and `Q_sca → (8/3)x⁴|K|²`, and an absorbing sphere's extinction is linear
+    /// in `x` where its scattering is quartic. The test below checks the scattering half; this one
+    /// is the half a wrong sign of `ξₙ = ψₙ − iχₙ` or of `k` would flip, since `Im K` changes sign
+    /// with either and `Q_ext` would come out negative.
+    #[test]
+    fn the_rayleigh_extinction_of_an_absorbing_sphere_is_four_x_im_k() {
+        let m = Complex::new(1.5, 0.1);
+        let m2 = m.mul(m);
+        let k_ratio = m2
+            .sub(Complex::new(1.0, 0.0))
+            .div(m2.add(Complex::new(2.0, 0.0)));
+        for x in [1e-4, 1e-3, 1e-2] {
+            let (a, b) = coefficients(x, m).unwrap();
+            let (q_ext, q_sca, _) = efficiencies(x, &a, &b);
+            let want = 4.0 * x * k_ratio.im;
+            // The next terms are O(x³) relative (from a₁'s x⁵ and the x⁴ scattering).
+            assert!(
+                (q_ext - want).abs() < x * x * want,
+                "x = {x}: Q_ext {q_ext:e} against 4x Im K = {want:e}"
+            );
+            let rayleigh = 8.0 / 3.0 * libm::pow(x, 4.0) * k_ratio.norm_squared();
+            assert!(
+                (q_sca - rayleigh).abs() < 2.0 * x * x * rayleigh,
+                "x = {x}: Q_sca {q_sca:e} against {rayleigh:e}"
+            );
+        }
+    }
+
+    /// (G3) The Rayleigh limit, which is a closed form and not another code.
     ///
     /// As `x → 0` the series must collapse to `Q_sca = (8/3) x⁴ |(m²−1)/(m²+2)|²` and `g → 0`. That
     /// is the one regime where the answer is known analytically, and it exercises the whole chain —
@@ -539,7 +810,7 @@ mod tests {
         }
     }
 
-    /// The angular series and the efficiency series agree on how much light is scattered.
+    /// (G1) The angular series and the efficiency series agree on how much light is scattered.
     ///
     /// `∫ (|S₁|² + |S₂|²)/2k² dΩ = C_sca` couples two code paths that share no arithmetic: the
     /// `π/τ` recursion with the amplitude sums on one side, the `Σ(2n+1)(|aₙ|²+|bₙ|²)` efficiency on

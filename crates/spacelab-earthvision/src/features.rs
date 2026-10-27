@@ -10,6 +10,14 @@
 //! ambiguous matches. The resulting `(pixel_a, pixel_b)` pairs are the observations of a shared 3-D
 //! point in two views — exactly what [`crate::camera::triangulate`] / [`crate::camera::bundle_adjust`]
 //! take. `no_std` + `alloc`.
+//!
+//! Gate: `derivations/harris_structure_tensor.mac` shows the response is the Harris function of the
+//! structure tensor's eigenvalues, survives the symmetries of the square on a generic
+//! neighbourhood, and that the unit patch ignores gain and offset; it works out exact responses on
+//! an integer image, which `derivations/harris_structure_tensor.gp` reaches from the eigenvalues.
+//! The module tests `the_harris_response_is_its_definition_on_an_exact_image` (G2),
+//! `the_harris_response_has_the_symmetries_of_the_square` and
+//! `the_normalised_patch_ignores_gain_and_offset` (G4) hold the code to them.
 
 // Physical/tensor single letters (Ix, Iy, M, R, k) and raster casts mirror the vision literature.
 #![allow(
@@ -664,5 +672,101 @@ mod tests {
             &cfg,
         );
         assert!(matches.is_empty(), "{matches:?}");
+    }
+
+    /// The response on the integer pattern is `det M − k·tr(M)²` of the Sobel structure tensor,
+    /// exactly, at the ten pixels `derivations/harris_structure_tensor.mac` works out — the four
+    /// corners among them, where only the replicated border decides the value. (G2)
+    ///
+    /// At `k = 1/16` every intermediate is an integer or a quarter below `2⁵³`, so the comparison
+    /// is equality; `derivations/harris_structure_tensor.gp` reaches the same numbers from the
+    /// tensor's eigenvalues.
+    #[test]
+    fn the_harris_response_is_its_definition_on_an_exact_image() {
+        let (h, w) = (12usize, 12usize);
+        let data = pattern(h, w);
+        let resp = harris_response(Image { data: &data, h, w }, 0.0625, 1);
+        let exact = [
+            (0, 0, 81_271_807.0 / 4.0),
+            (0, 11, 5_636_567.0 / 4.0),
+            (11, 0, -1_469_020.0),
+            (11, 11, 2_388_343.0 / 4.0),
+            (3, 3, 14_053_503.0 / 4.0),
+            (5, 7, 1_302_176.0),
+            (6, 6, 4_149_183.0),
+            (8, 4, 29_572_783.0 / 4.0),
+            (2, 9, 36_422_887.0 / 4.0),
+            (9, 9, 12_361_671.0 / 4.0),
+        ];
+        for (y, x, r) in exact {
+            assert_eq!(resp[y * w + x], r, "R[{y},{x}]");
+        }
+    }
+
+    /// A quarter turn, a transpose or a mirror of the image carries the response map with it:
+    /// the Sobel pair maps into itself up to sign and order, so `det M` and `tr M` survive, as
+    /// `derivations/harris_structure_tensor.mac` shows on a generic neighbourhood. (G4)
+    ///
+    /// The image is not square, so the turn also exchanges the two clamps of the border. Integer
+    /// pixels keep every window sum exact, so the maps agree bit for bit whatever order the sums
+    /// run in.
+    #[test]
+    fn the_harris_response_has_the_symmetries_of_the_square() {
+        // Each map sends output pixel (r, c) of the moved image back to the source pixel it shows.
+        type Source = fn(usize, usize, usize, usize) -> (usize, usize);
+        let (h, w) = (9usize, 13usize);
+        let data = pattern(h, w);
+        let original = harris_response(Image { data: &data, h, w }, 0.04, 1);
+        let moves: [(usize, usize, Source); 3] = [
+            (w, h, |r, c, h, _| (h - 1 - c, r)),
+            (w, h, |r, c, _, _| (c, r)),
+            (h, w, |r, c, _, w| (r, w - 1 - c)),
+        ];
+        for (mh, mw, source) in moves {
+            let moved: Vec<f64> = (0..mh * mw)
+                .map(|i| {
+                    let (y, x) = source(i / mw, i % mw, h, w);
+                    data[y * w + x]
+                })
+                .collect();
+            let resp = harris_response(
+                Image {
+                    data: &moved,
+                    h: mh,
+                    w: mw,
+                },
+                0.04,
+                1,
+            );
+            for (i, r) in resp.iter().enumerate() {
+                let (y, x) = source(i / mw, i % mw, h, w);
+                assert_eq!(*r, original[y * w + x], "moved pixel {i}");
+            }
+        }
+    }
+
+    /// A zero-mean unit patch, and with it every NCC score, ignores a change of gain and offset
+    /// `a·I + b` with `a > 0`, as `derivations/harris_structure_tensor.mac` shows. (G4)
+    #[test]
+    fn the_normalised_patch_ignores_gain_and_offset() {
+        let (h, w) = (12usize, 12usize);
+        let data = pattern(h, w);
+        let brighter: Vec<f64> = data.iter().map(|v| 3.0 * v - 7.0).collect();
+        for (cy, cx) in [(0, 0), (5, 7), (11, 4)] {
+            let p = normalized_patch(Image { data: &data, h, w }, cy, cx, 2);
+            let q = normalized_patch(
+                Image {
+                    data: &brighter,
+                    h,
+                    w,
+                },
+                cy,
+                cx,
+                2,
+            );
+            for (a, b) in p.iter().zip(&q) {
+                assert!((a - b).abs() < 1e-15, "({cy},{cx}): {a} vs {b}");
+            }
+        }
     }
 }

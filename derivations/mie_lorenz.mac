@@ -1,0 +1,177 @@
+/* Lorenz-Mie scattering by a sphere -- spacelab-earthvision/src/mie.rs -- from the Riccati-Bessel
+ * functions themselves.
+ *
+ * With psi_n(z) = z j_n(z), chi_n(z) = -z y_n(z) and xi_n = psi_n - i chi_n (Bohren & Huffman,
+ * *Absorption and Scattering of Light by Small Particles*, sections 4.4 and 4.8; m = n + ik with
+ * k >= 0 absorbing), shown here, each line printing `<name>: 0`:
+ *   1. psi_n and chi_n obey the upward recurrence the code runs, from the code's seeds
+ *      psi_0 = sin, psi_-1 = cos, chi_0 = cos, chi_-1 = -sin, and the Riccati-Bessel equation (G2);
+ *   2. psi_n' = psi_{n-1} - (n/z) psi_n and psi_{n-1}' = (n/z) psi_{n-1} - psi_n, hence the
+ *      downward recurrence D_{n-1} = n/z - 1/(D_n + n/z) for D_n = psi_n'/psi_n (G1);
+ *   3. the coded a_n = [(D_n/m + n/x) psi_n - psi_{n-1}]/[(D_n/m + n/x) xi_n - xi_{n-1}] and
+ *      b_n = [(m D_n + n/x) psi_n - psi_{n-1}]/[(m D_n + n/x) xi_n - xi_{n-1}] are B&H (4.53),
+ *      the boundary-condition solution, rearranged (G1);
+ *   4. the Rayleigh limit: a_1 = -(2i/3) K x^3 + O(x^5) with K = (m^2 - 1)/(m^2 + 2), and b_1, a_2
+ *      are O(x^5), so Q_sca -> (8/3) x^4 |K|^2 and Q_ext -> 4 x Im K (G3);
+ *   5. the angular functions: the coded pi_n recurrence is P_n'(mu), the coded tau_n is
+ *      mu pi_n - (1 - mu^2) pi_n', and pi_n(1) = tau_n(1) = n(n + 1)/2, so the forward amplitude is
+ *      S(0) = sum (2n + 1)/2 (a_n + b_n) and the coded Q_ext is the optical theorem
+ *      (4/x^2) Re S(0) (G1);
+ *   6. for arbitrary complex coefficients truncated at N = 4, (1/x^2) int (|S1|^2 + |S2|^2) dmu is
+ *      the coded Q_sca and (1/x^2) int mu (|S1|^2 + |S2|^2) dmu the coded g Q_sca (G1).
+ *   7. the shifted form the code runs past n = x: with E_n = D_n - (n+1)/z the recurrence of 2 is
+ *      E_{n-1} = -1/(E_n + (2n+1)/z), psi_{n-1}/psi_n = E_n(x) + (2n+1)/x, and the numerators of 3
+ *      are psi_n (E_n(mx)/m - E_n(x) + (n+1)(1/m^2 - 1)/x) and psi_n (m E_n(mx) - E_n(x)), with the
+ *      denominators N - iC, C the same expression in chi (G1).
+ * Then a_n, b_n and (Q_ext, Q_sca, g) at six spheres, evaluated at 120 digits from the closed-form
+ * spherical Bessel functions and B&H (4.53) -- no recurrence, no logarithmic derivative -- the
+ * literals of the module tests `the_coefficients_are_the_boundary_value_solution` and
+ * `a_small_sphere_keeps_its_relative_accuracy` (G2).
+ * derivations/mie_lorenz.gp recomputes them from PARI's half-integer-order Bessel functions.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/mie_lorenz.mac </dev/null
+ */
+
+display2d : false$
+linel : 400$
+ratprint : false$
+load(orthopoly)$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+psi(n, z) := ratsimp(z*spherical_bessel_j(n, z))$
+chi(n, z) := ratsimp(-z*spherical_bessel_y(n, z))$
+NMAX : 10$
+
+/* ---- 1 ---- */
+zero("psi_seed_0", ratsimp(psi(0, z) - sin(z)))$
+zero("chi_seed_0", ratsimp(chi(0, z) - cos(z)))$
+zero("psi_first_step_from_seeds", ratsimp(psi(1, z) - ((1/z)*sin(z) - cos(z))))$
+zero("chi_first_step_from_seeds", ratsimp(chi(1, z) - ((1/z)*cos(z) - (-sin(z)))))$
+zero("psi_upward_recurrence",
+  sum(ratsimp(psi(n + 1, z) - ((2*n + 1)/z*psi(n, z) - psi(n - 1, z)))^2, n, 1, NMAX - 1))$
+zero("chi_upward_recurrence",
+  sum(ratsimp(chi(n + 1, z) - ((2*n + 1)/z*chi(n, z) - chi(n - 1, z)))^2, n, 1, NMAX - 1))$
+zero("riccati_bessel_equation",
+  sum(ratsimp(diff(psi(n, z), z, 2) + (1 - n*(n + 1)/z^2)*psi(n, z))^2
+    + ratsimp(diff(chi(n, z), z, 2) + (1 - n*(n + 1)/z^2)*chi(n, z))^2, n, 0, NMAX))$
+
+/* ---- 2 ---- */
+zero("psi_derivative_down",
+  sum(ratsimp(diff(psi(n, z), z) - (psi(n - 1, z) - n/z*psi(n, z)))^2, n, 1, NMAX))$
+zero("psi_derivative_up",
+  sum(ratsimp(diff(psi(n - 1, z), z) - (n/z*psi(n - 1, z) - psi(n, z)))^2, n, 1, NMAX))$
+zero("chi_derivative_down",
+  sum(ratsimp(diff(chi(n, z), z) - (chi(n - 1, z) - n/z*chi(n, z)))^2, n, 1, NMAX))$
+/* D_{n-1} = psi'_{n-1}/psi_{n-1} = n/z - psi_n/psi_{n-1}, and psi_{n-1}/psi_n = D_n + n/z. */
+zero("logarithmic_derivative_downward",
+  sum(ratsimp(diff(psi(n - 1, z), z)/psi(n - 1, z)
+    - (n/z - 1/(diff(psi(n, z), z)/psi(n, z) + n/z)))^2, n, 1, 6))$
+
+/* ---- 3 ---- B&H (4.53), divided through by psi_n(mx), with psi_n'(x) = P1 - (n/x) P etc. */
+psid : P1 - nn/x*P$  xid : X1 - nn/x*X$
+bh_a : (m*psid - Dn*P)/(m*xid - Dn*X)$
+bh_b : (psid - m*Dn*P)/(xid - m*Dn*X)$
+code_a : ((Dn/m + nn/x)*P - P1)/((Dn/m + nn/x)*X - X1)$
+code_b : ((m*Dn + nn/x)*P - P1)/((m*Dn + nn/x)*X - X1)$
+zero("coded_a_is_bohren_huffman_4_53", ratsimp(bh_a - code_a))$
+zero("coded_b_is_bohren_huffman_4_53", ratsimp(bh_b - code_b))$
+
+/* ---- 4 ---- the Rayleigh limit, from (4.53) with symbolic m. */
+xi(n, z) := psi(n, z) - %i*chi(n, z)$
+/* psi_n'(mx) is the derivative in the argument, so d/dx of psi_n(mx) is divided by m. */
+coef_a(n, mm, xx) := block([pm : psi(n, mm*xx), px : psi(n, xx), qx : xi(n, xx), dpm],
+  dpm : diff(pm, xx)/mm,
+  (mm*pm*diff(px, xx) - px*dpm)/(mm*pm*diff(qx, xx) - qx*dpm))$
+coef_b(n, mm, xx) := block([pm : psi(n, mm*xx), px : psi(n, xx), qx : xi(n, xx), dpm],
+  dpm : diff(pm, xx)/mm,
+  (pm*diff(px, xx) - mm*px*dpm)/(pm*diff(qx, xx) - mm*qx*dpm))$
+K : (m^2 - 1)/(m^2 + 2)$
+zero("rayleigh_a1_leading", ratsimp(taylor(coef_a(1, m, x), x, 0, 4) + 2*%i/3*K*x^3))$
+zero("rayleigh_b1_is_fifth_order", ratsimp(taylor(coef_b(1, m, x), x, 0, 4)))$
+zero("rayleigh_a2_is_fifth_order", ratsimp(taylor(coef_a(2, m, x), x, 0, 4)))$
+/* Q_sca = (2/x^2) 3 |a_1|^2 + O(x^6) and Q_ext = (2/x^2) 3 Re a_1 + O(x^3) with a_1 as above. */
+zero("rayleigh_q_sca", ratsimp((2/x^2)*3*(2/3*x^3)^2*kk - 8/3*x^4*kk))$
+zero("rayleigh_q_ext", ratsimp((2/x^2)*3*realpart(-2*%i/3*(kr + %i*ki)*x^3) - 4*x*ki))$
+
+/* ---- 5 ---- */
+pis[n] := if n = 0 then 0 elseif n = 1 then 1
+  else ratsimp(((2*(n - 1) + 1)*mu*pis[n - 1] - n*pis[n - 2])/(n - 1))$
+taus(n) := ratsimp(n*mu*pis[n] - (n + 1)*pis[n - 1])$
+zero("pi_is_legendre_derivative",
+  sum(ratsimp(pis[n] - diff(legendre_p(n, mu), mu))^2, n, 1, 12))$
+zero("tau_is_d_theta_of_associated_legendre",
+  sum(ratsimp(taus(n) - (mu*pis[n] - (1 - mu^2)*diff(pis[n], mu)))^2, n, 1, 12))$
+zero("forward_pi", sum((subst(mu = 1, pis[n]) - n*(n + 1)/2)^2, n, 1, 12))$
+zero("forward_tau", sum((subst(mu = 1, taus(n)) - n*(n + 1)/2)^2, n, 1, 12))$
+/* S1(0) = S2(0) = sum (2n+1)/(n(n+1)) (a_n + b_n) n(n+1)/2; optical theorem Q_ext = 4/x^2 Re S(0). */
+N : 4$
+forward : sum((2*n + 1)/(n*(n + 1))*(ar[n] + br[n])*n*(n + 1)/2, n, 1, N)$
+zero("optical_theorem_is_coded_q_ext",
+  ratsimp(4/x^2*forward - 2/x^2*sum((2*n + 1)*(ar[n] + br[n]), n, 1, N)))$
+
+/* ---- 6 ---- arbitrary coefficients a_n = ar + i ai, b_n = br + i bi, truncated at N. */
+s1re : sum((2*n + 1)/(n*(n + 1))*(ar[n]*pis[n] + br[n]*taus(n)), n, 1, N)$
+s1im : sum((2*n + 1)/(n*(n + 1))*(ai[n]*pis[n] + bi[n]*taus(n)), n, 1, N)$
+s2re : sum((2*n + 1)/(n*(n + 1))*(ar[n]*taus(n) + br[n]*pis[n]), n, 1, N)$
+s2im : sum((2*n + 1)/(n*(n + 1))*(ai[n]*taus(n) + bi[n]*pis[n]), n, 1, N)$
+intensity : expand(s1re^2 + s1im^2 + s2re^2 + s2im^2)$
+q_sca_coded : 2*sum((2*n + 1)*(ar[n]^2 + ai[n]^2 + br[n]^2 + bi[n]^2), n, 1, N)$
+/* Re(a_n conj a_{n+1}) = ar_n ar_{n+1} + ai_n ai_{n+1}; Re(a_n conj b_n) = ar br + ai bi. */
+gq_coded : 4*(sum(n*(n + 2)/(n + 1)*(ar[n]*ar[n + 1] + ai[n]*ai[n + 1] + br[n]*br[n + 1] + bi[n]*bi[n + 1]),
+    n, 1, N - 1)
+  + sum((2*n + 1)/(n*(n + 1))*(ar[n]*br[n] + ai[n]*bi[n]), n, 1, N))$
+zero("angular_integral_is_coded_q_sca", ratsimp(integrate(intensity, mu, -1, 1) - q_sca_coded))$
+zero("angular_first_moment_is_coded_g_q_sca", ratsimp(integrate(mu*intensity, mu, -1, 1) - gq_coded))$
+
+/* ---- 7 ---- */
+Dz : Ez + (nn + 1)/z$
+/* D_{n-1} = n/z - 1/(D_n + n/z), and D_{n-1} = E_{n-1} + n/z. */
+zero("shifted_recurrence", ratsimp((nn/z - 1/(Dz + nn/z)) - (-1/(Ez + (2*nn + 1)/z) + nn/z)))$
+zero("shifted_ratio",
+  sum(ratsimp(psi(n - 1, z)/psi(n, z)
+    - ((diff(psi(n, z), z)/psi(n, z) - (n + 1)/z) + (2*n + 1)/z))^2, n, 1, 6))$
+/* psi_{n-1} = psi_n (D_n(x) + n/x); D(mx) = Em + (n+1)/(m x), D(x) = Ex + (n+1)/x. */
+Dm : Em + (nn + 1)/(m*x)$  Dx : Ex + (nn + 1)/x$
+P1r : P*(Dx + nn/x)$
+zero("shifted_numerator_a",
+  ratsimp(((Dm/m + nn/x)*P - P1r) - P*(Em/m - Ex + (nn + 1)/x*(1/m^2 - 1))))$
+zero("shifted_numerator_b", ratsimp(((m*Dm + nn/x)*P - P1r) - P*(m*Em - Ex)))$
+/* (D xi_n - xi_{n-1}) with xi = psi - i chi is N - i C. */
+zero("denominator_split",
+  ratsimp(expand((dd*(P - %i*Q) - (P1 - %i*Q1)) - ((dd*P - P1) - %i*(dd*Q - Q1)))))$
+
+/* ---- the module test's literals ---- */
+/* 120 digits: at x = 1e-4 the closed form of psi_3 cancels some 30 of them. */
+fpprec : 120$
+numeric(xx, mm, nterms) := block([as : [], bs : [], qe : 0, qs : 0, gq : 0, a, b, an, bn],
+  for n : 1 thru nterms do (
+    a : rectform(bfloat(ev(subst([m = mm, x = xx], coef_a(n, m, x)), diff))),
+    b : rectform(bfloat(ev(subst([m = mm, x = xx], coef_b(n, m, x)), diff))),
+    as : endcons(a, as), bs : endcons(b, bs)),
+  for n : 1 thru nterms do (
+    an : as[n], bn : bs[n],
+    qe : qe + (2*n + 1)*realpart(an + bn),
+    qs : qs + (2*n + 1)*(cabs(an)^2 + cabs(bn)^2),
+    gq : gq + (2*n + 1)/(n*(n + 1))*realpart(an*conjugate(bn)),
+    if n < nterms then
+      gq : gq + n*(n + 2)/(n + 1)*realpart(an*conjugate(as[n + 1]) + bn*conjugate(bs[n + 1]))),
+  qe : bfloat(2/xx^2*qe), qs : bfloat(2/xx^2*qs), gq : bfloat(4/xx^2*gq),
+  fpprec : 40,
+  for n : 1 thru nterms do
+    print("  n =", n, " a =", bfloat(realpart(as[n])), bfloat(imagpart(as[n])),
+                     " b =", bfloat(realpart(bs[n])), bfloat(imagpart(bs[n]))),
+  print("  Q_ext =", bfloat(qe), " Q_sca =", bfloat(qs), " g =", bfloat(gq/qs)),
+  fpprec : 120)$
+/* Wiscombe's count floor(x + 4 x^(1/3) + 2) + 1: 6 terms at x = 1/2, 8 at 1, 10 at 2, 4 at 1/10
+ * and 3 at both 1/100 and 1/10000. The last three are the small spheres, where psi_n(x) is the
+ * recessive solution of its recurrence for every n > x and an upward recurrence for it loses
+ * ~ eps/x^2 of relative accuracy. */
+print("x = 1/2, m = 1.33 + 0.01i")$ numeric(1/2, 133/100 + %i/100, 6)$
+print("x = 1, m = 1.5 + 0.1i")$ numeric(1, 3/2 + %i/10, 8)$
+print("x = 2, m = 1.33")$ numeric(2, 133/100, 10)$
+print("x = 1/10, m = 1.33")$ numeric(1/10, 133/100, 4)$
+print("x = 1/100, m = 1.5 + 0.1i")$ numeric(1/100, 3/2 + %i/10, 3)$
+print("x = 1/10000, m = 1.5 + 0.1i")$ numeric(1/10000, 3/2 + %i/10, 3)$

@@ -52,6 +52,13 @@
 //! So the feature is already most of the way gone at *moderate* roughening and completely gone at
 //! severe, where the phase function decreases monotonically through the halo angles. That is the
 //! result the published models encode, reproduced from the geometry rather than read out of a table.
+//!
+//! Gate: `derivations/ice_geometric_optics.mac` derives the Fresnel split and the refracted vector,
+//! minimum deviation, Duff's frame, Cauchy's mean projected area, the `J₁` recurrence, Hankel
+//! coefficients and series values, and the mass and moment identities of `reconstruct` and
+//! `moments`; `derivations/ice_geometric_optics.gp` recomputes the numbers with PARI's `besselj`.
+//! The tests `the_geometric_optics_reproduces_its_derivation` and
+//! `the_reconstruction_keeps_every_interval_mass_and_the_moments_are_exact` tie the code to it.
 
 // Ray tracing is written in the notation of optics (n, d, o, t, R), and the histogram bin counts
 // become densities through an f64 divide. The Simpson panel counts are a real-valued span rounded
@@ -755,7 +762,8 @@ mod tests {
         clippy::expect_used,
         clippy::float_cmp,
         clippy::cast_lossless,
-        clippy::unreadable_literal
+        clippy::unreadable_literal,
+        clippy::excessive_precision
     )]
 
     use super::*;
@@ -798,12 +806,13 @@ mod tests {
         (mu, value, optics)
     }
 
-    /// The 22° halo stands where minimum deviation through a 60° ice wedge puts it, and no
+    /// (G3) The 22° halo stands where minimum deviation through a 60° ice wedge puts it, and no
     /// Henyey–Greenstein of the same asymmetry parameter has anything there.
     ///
     /// This is the discriminating measurement of the whole phase-function abstraction. Minimum
-    /// deviation through a prism of apex `A` and index `n` is `2 asin(n sin(A/2)) − A`, which for
-    /// `A = 60°` and `n = 1.3105` is **21.8°** — a number that comes from Snell's law and is never
+    /// deviation through a prism of apex `A` and index `n` is `2 asin(n sin(A/2)) − A`
+    /// (`derivations/ice_geometric_optics.mac` shows it is the symmetric path's), which for
+    /// `A = 60°` and `n = 1.3105` is **21.88°** — a number that comes from Snell's law and is never
     /// written into the code. Measured on the traced table: `p` rises from `0.241` at 21° to `7.52`
     /// at 22°, a factor of **31 across one degree**, then decays outward (7.41 at 23°, 4.45 at 25°,
     /// 1.59 at 30°) — the sharp inner edge and diffuse outer skirt that make a halo a halo.
@@ -817,7 +826,7 @@ mod tests {
         let minimum_deviation =
             2.0 * libm::asin(cirrus().refractive_index * libm::sin(0.5 * apex)) - apex;
         assert!(
-            (minimum_deviation / DEGREE - 21.8).abs() < 0.1,
+            (minimum_deviation / DEGREE - 21.87721799402075648137179703994621629527).abs() < 1e-12,
             "minimum deviation {} deg",
             minimum_deviation / DEGREE
         );
@@ -841,9 +850,9 @@ mod tests {
         );
     }
 
-    /// The 46° halo is there too, from the 90° wedge between a prism face and a basal face.
+    /// (G3) The 46° halo is there too, from the 90° wedge between a prism face and a basal face.
     ///
-    /// Minimum deviation for `A = 90°` and `n = 1.3105` is 45.7°. It is a weaker feature than the
+    /// Minimum deviation for `A = 90°` and `n = 1.3105` is 45.84°. It is a weaker feature than the
     /// 22° halo — measured `p` goes 0.274 at 45°, 0.695 at 46°, 0.717 at 47° — because a ray must
     /// find both a side and an end of the column, and that is a smaller share of the entry apertures.
     #[test]
@@ -853,7 +862,7 @@ mod tests {
         let minimum_deviation =
             2.0 * libm::asin(cirrus().refractive_index * libm::sin(0.5 * apex)) - apex;
         assert!(
-            (minimum_deviation / DEGREE - 45.7).abs() < 0.2,
+            (minimum_deviation / DEGREE - 45.84107772585809094403802709225234137759).abs() < 1e-12,
             "minimum deviation {} deg",
             minimum_deviation / DEGREE
         );
@@ -903,7 +912,7 @@ mod tests {
         assert!(previous < 0.8, "strong absorption left omega = {previous}");
     }
 
-    /// Total internal reflection starts exactly at the critical angle, and normal-incidence
+    /// (G3) Total internal reflection starts exactly at the critical angle, and normal-incidence
     /// reflectance is the textbook `((n−1)/(n+1))²`.
     ///
     /// Both are closed forms, and both are what the halo depends on: the critical angle decides
@@ -1030,7 +1039,7 @@ mod tests {
         assert_eq!(face(PRISM_FACES + 1, 2.0), ([0.0, 0.0, -1.0], 2.0));
     }
 
-    /// Duff's branchless frame is orthonormal on both sides of the axis it is built to avoid.
+    /// (G1) Duff's branchless frame is orthonormal on both sides of the axis it is built to avoid.
     #[test]
     fn the_branchless_frame_is_orthonormal_on_both_sides_of_its_singular_axis() {
         for w in [
@@ -1051,7 +1060,7 @@ mod tests {
         }
     }
 
-    /// The unpolarised Fresnel reflectance away from normal incidence.
+    /// (G1) The unpolarised Fresnel reflectance away from normal incidence.
     ///
     /// At normal incidence `cos θₜ = 1` and the `p` branch's denominator is insensitive to how `η`
     /// and `cos θₜ` are combined, so a case at `0°` says nothing about it. These run to 80°, and the
@@ -1474,6 +1483,84 @@ mod tests {
         }
     }
 
+    /// (G2) `J₁`, its first zero and the aperture size parameter are their derivation's numbers.
+    ///
+    /// `derivations/ice_geometric_optics.mac` sums the series `J₁ = Σ (−1)ᵏ (x/2)^{2k+1}/(k!(k+1)!)`
+    /// in bigfloat, at a precision that carries its largest term, and finds the first zero on it; it
+    /// also shows the three-term recurrence and the Hankel coefficients the code runs on are the
+    /// series' and A&S 9.2.9–9.2.10's. `.gp` recomputes every value with PARI's own `besselj`. The
+    /// arguments are the thirteen of the comparator test below. The bound is absolute, as there,
+    /// because near a zero of `J₁` no method keeps relative accuracy. The aperture is
+    /// `x √(S/4π)` with Cauchy's `S/4` for the mean projected area and `S = 12h + 3√3`.
+    #[test]
+    fn the_geometric_optics_reproduces_its_derivation() {
+        const J1: [(f64, f64); 13] = [
+            (1e-6, 4.999999999999375000000000026041666666666e-7),
+            (2.5e-5, 1.249999999902343750002543131510383552975e-5),
+            (0.5, 2.422684576748738863839545761415316408006e-1),
+            (1.0, 4.400505857449335159596822037189149131274e-1),
+            (2.0, 5.767248077568733872024482422691370869203e-1),
+            (5.0, -3.275791375914652220377343219101691327609e-1),
+            (8.0, 2.346363468539146243812766515904546115488e-1),
+            (10.0, 4.347274616886143666974876802585928830627e-2),
+            (20.0, 6.6833124175850045578992974193646719983e-2),
+            (50.0, -9.751182812517513766145895387370161404049e-2),
+            (100.0, -7.714535201411215803268549492723447021161e-2),
+            (400.0, -9.222058428586351254235216748846469409394e-3),
+            (1000.0, 4.728311907089523917576071901216916285418e-3),
+        ];
+        const FIRST_ZERO: f64 = 3.831705970207512315614435886308160766565;
+        const APERTURE: f64 = 3.048511760626216161463692935850979915572e2;
+        // Measured: at most 1.2e-16 below x = 100, and 7.9e-16 at x = 400 on the asymptotic branch,
+        // whose floor is the argument reduction in `cos(x − 3π/4)`.
+        for (x, want) in J1 {
+            let got = bessel_j1(x);
+            assert!(
+                (got - want).abs() < 1e-15,
+                "J1({x}) = {got:e} against {want:e}"
+            );
+        }
+        // The double nearest the zero is within half an ulp, 2.2e-16, of it, and |J₁′| there is 0.40.
+        assert!(bessel_j1(FIRST_ZERO).abs() < 2e-16);
+        let x_eq = aperture_size_parameter(&cirrus());
+        assert!(
+            (x_eq - APERTURE).abs() <= 4.0 * f64::EPSILON * APERTURE,
+            "x_eq {x_eq} against {APERTURE}"
+        );
+    }
+
+    /// (G4) `reconstruct` keeps every interval's mass under the trapezoid rule, and `moments` is
+    /// exact on the piecewise-linear interpolant.
+    ///
+    /// `derivations/ice_geometric_optics.mac` shows both for general spacings: a node holding the
+    /// width-weighted mean of its two intervals, weighted by the trapezoid's `(hᵢ₋₁ + hᵢ)/2`, puts
+    /// back exactly `Σ Iᵢ hᵢ`, and the two segment formulas are the integrals of the linear
+    /// interpolant. A linear density `a + bμ` is its own interpolant, so its moments are `2a` and
+    /// `2b/3` on any grid.
+    #[test]
+    fn the_reconstruction_keeps_every_interval_mass_and_the_moments_are_exact() {
+        let mu = angle_grid();
+        let interval: Vec<f64> = (0..mu.len() - 1)
+            .map(|i| 1.0 + libm::sin(0.37 * i as f64) * libm::sin(0.37 * i as f64))
+            .collect();
+        let mut node = vec![0.0_f64; mu.len()];
+        reconstruct(&mu, &interval, &mut node);
+        let want: f64 = (0..interval.len())
+            .map(|i| interval[i] * (mu[i + 1] - mu[i]))
+            .sum();
+        let (got, _) = moments(&mu, &node);
+        assert!(
+            (got - want).abs() <= 1e-14 * want,
+            "trapezoid mass {got} against the interval mass {want}"
+        );
+
+        let (a, b) = (0.3, 1.4);
+        let linear: Vec<f64> = mu.iter().map(|m| a + b * m).collect();
+        let (zeroth, first) = moments(&mu, &linear);
+        assert!((zeroth - 2.0 * a).abs() < 1e-14, "zeroth {zeroth}");
+        assert!((first - 2.0 * b / 3.0).abs() < 1e-14, "first {first}");
+    }
+
     /// `J₁` against an independent implementation, and against its own defining zero.
     ///
     /// The reference values are `scipy.special.j1` at arguments spanning nine decades — `2.5e-5` is
@@ -1542,17 +1629,17 @@ mod tests {
         );
     }
 
-    /// The lobe is the Airy pattern of the crystal's **mean projected area**, and its first zero says
-    /// so.
+    /// (G3) The lobe is the Airy pattern of the crystal's **mean projected area**, and its first zero
+    /// says so.
     ///
     /// Cauchy's theorem puts the orientation-averaged projected area of a convex body at a quarter of
     /// its surface. For the aspect-2 prism of unit circumradius that is `(12·2 + 3√3)/4 = 7.29904`,
     /// an equal-area disc of radius `1.524256`, and at `x = 200` an aperture size parameter of
-    /// `304.851`. The Airy pattern's first zero sits at `v = 3.8317`, so the dark ring must land at
-    /// `asin(3.8317/304.899) = 0.72004°`. Nothing in the code contains that angle; it follows from
-    /// the crystal's geometry and the zero of `J₁`, and it is the one measurement that would catch a
-    /// lobe built from the wrong cross-section — a waist cut rather than the orientation average would
-    /// misplace it by a factor of order one.
+    /// `304.851`. The Airy pattern's first zero sits at `v = 3.8317`, and the lobe is written in
+    /// `v = x θ`, so the dark ring must land at `3.8317/304.851 rad = 0.72016°`. Nothing in the code
+    /// contains that angle; it follows from the crystal's geometry and the zero of `J₁`, and it is
+    /// the one measurement that would catch a lobe built from the wrong cross-section — a waist cut
+    /// rather than the orientation average would misplace it by a factor of order one.
     #[test]
     fn the_diffraction_lobe_is_the_airy_pattern_of_the_mean_projected_area() {
         let crystal = cirrus();
@@ -1809,7 +1896,7 @@ mod tests {
         }
     }
 
-    /// A transparent crystal returns everything it intercepts **at every roughness**.
+    /// (G4) A transparent crystal returns everything it intercepts **at every roughness**.
     ///
     /// The regression this pins: a micro-facet tilted far enough can reflect a ray straight through
     /// the face it is sitting on, or refract one back the way it came. Those rays leave the geometry

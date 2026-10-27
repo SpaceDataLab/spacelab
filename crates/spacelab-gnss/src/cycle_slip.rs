@@ -22,6 +22,14 @@
 //!
 //! Neither replaces the receiver's own loss-of-lock indicator
 //! ([`crate::rinex_obs::Observation::lost_lock`]); they catch the slips it does not report.
+//!
+//! Gate: `derivations/gnss_cycle_slip.mac` writes the polynomial detector's prediction as the
+//! least-squares weights `e(τ*)ᵀ(VᵀV)⁻¹Vᵀ`, shows they are free of the time origin and scale the
+//! code reparametrises by and reproduce every polynomial of the fitted degree, prints the gate's
+//! predictions as exact rationals (re-solved in raw time by GAP in
+//! `derivations/gnss_cycle_slip.g`), and derives the `(77, 60)` blind pair and the one-cycle moves
+//! of `L1 − L2`. The module test `the_prediction_is_the_least_squares_extrapolation` (G2) holds
+//! `predict` and the detector's statistic to those rationals.
 
 use std::fmt;
 
@@ -109,7 +117,8 @@ fn check_limits(threshold: f64, max_gap: f64) -> Result<(), DetectorError> {
 /// The threshold is on the raw difference, not on a rate, so it has to be chosen for the sampling
 /// interval the arc is observed at — on the geometry-free combination at 30 s, real ionospheric
 /// change is at the centimetre level and a threshold of a few centimetres separates it from the
-/// 0.05–0.11 m a one-cycle L1 or L2 slip moves it by.
+/// 0.190 m or 0.244 m a one-cycle L1 or L2 slip moves it by — `λ1` or `λ2` — and from the 0.054 m,
+/// `λ2 − λ1`, of a one-cycle slip on both at once.
 ///
 /// What it cannot see: a slip whose size is under the threshold, and the pair of L1/L2 slips
 /// `(ΔN1, ΔN2)` with `ΔN1·λ1 = ΔN2·λ2`. On GPS L1/L2 the smallest such pair is `(77, 60)`, which no
@@ -372,7 +381,7 @@ fn solve(a: &mut [f64], b: &mut [f64], n: usize) -> Option<Vec<f64>> {
 mod tests {
     // The boundary tests below stand exactly on a tie and the solver fixtures reduce exactly, so
     // equality is the assertion and a tolerance would be the weaker statement.
-    #![allow(clippy::float_cmp, clippy::unwrap_used)]
+    #![allow(clippy::float_cmp, clippy::unwrap_used, clippy::excessive_precision)]
     use super::*;
 
     /// A clean 30 s geometry-free arc: a linear ionospheric trend, no slip anywhere.
@@ -485,6 +494,73 @@ mod tests {
         assert_eq!(restarted, vec![0, 1, 2, 3, 4, 5, 13, 14, 15, 16, 17]);
         // The prediction residual on the clean quadratic, which is the detector's own noise floor.
         assert!(worst_clean < 1e-9, "clean residual {worst_clean:.3e}");
+    }
+
+    /// (G2) The prediction is the least-squares extrapolation its definition names, against the
+    /// exact rationals of `derivations/gnss_cycle_slip.mac` (re-solved by GAP in raw time in
+    /// `derivations/gnss_cycle_slip.g`).
+    ///
+    /// The samples are dyadic and the times integers, so the f64 inputs are the rational inputs
+    /// exactly and the whole residual is the solver's rounding. The data are not a polynomial of
+    /// the fitted degree — a polynomial is reproduced by any exact interpolant and would not tell
+    /// the least-squares weights from another set — and one window is irregular, so the weights
+    /// are not the symmetric ones a uniform grid gives. The uniform window goes through
+    /// [`PolynomialFitDetector::update`], whose statistic is `|y − ŷ|` at the next epoch.
+    #[test]
+    fn the_prediction_is_the_least_squares_extrapolation() {
+        const YS: [f64; 6] = [0.25, -1.125, 2.75, 0.375, 5.25, -0.875];
+        // Normal equations square the Vandermonde conditioning: cond(VᵀV) is 303 on the uniform
+        // window and 328 on the irregular one, so ε·cond·max|y| bounds the rounding at 3.8e-13.
+        // Measured: 2.0e-14 on the uniform window, below 1e-14 on the irregular ones.
+        const TOLERANCE: f64 = 4e-13;
+        let window = |times: [f64; 6]| -> Vec<(f64, f64)> { times.into_iter().zip(YS).collect() };
+        let irregular = window([0.0, 25.0, 55.0, 90.0, 130.0, 175.0]);
+        for (order, at, want, name) in [
+            (
+                2,
+                230.0,
+                -4.115_232_542_630_293_163_837_038_416_924_210_031_611,
+                "order 2, past the window",
+            ),
+            (
+                1,
+                230.0,
+                2.230_124_014_612_574_504_902_903_287_829_263_603_153,
+                "order 1, past the window",
+            ),
+            (
+                2,
+                70.0,
+                2.317_282_581_065_804_315_638_668_605_938_870_559_811,
+                "order 2, inside the window",
+            ),
+        ] {
+            let got = predict(&irregular, order, at).unwrap();
+            assert!(
+                (got - want).abs() < TOLERANCE,
+                "{name}: {got:.17} vs {want:.17}, |d| = {:.2e}",
+                (got - want).abs()
+            );
+        }
+
+        // The uniform 30 s window: weights (1/2, −3/10, −3/5, −2/5, 3/10, 3/2), prediction −43/40.
+        let uniform = window([0.0, 30.0, 60.0, 90.0, 120.0, 150.0]);
+        let uniform_prediction = predict(&uniform, 2, 180.0).unwrap();
+        assert!(
+            (uniform_prediction + 1.075).abs() < TOLERANCE,
+            "uniform: {uniform_prediction:.17} vs -1.075"
+        );
+        let mut detector = PolynomialFitDetector::new(2, 6, 10.0, 60.0).unwrap();
+        for &(t, y) in &uniform {
+            assert_eq!(detector.update(t, y), SlipVerdict::ArcStart);
+        }
+        let SlipVerdict::Continuous { statistic } = detector.update(180.0, 0.5) else {
+            panic!("a 1.575 residual under a threshold of 10 is continuous");
+        };
+        assert!(
+            (statistic - 1.575).abs() < TOLERANCE,
+            "statistic {statistic}"
+        );
     }
 
     /// The curvature the first difference charges as noise and the polynomial fit follows.

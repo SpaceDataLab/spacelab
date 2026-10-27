@@ -4,6 +4,17 @@
 //! coefficients and the local geometry this derives the critical frequencies
 //! (foE, foF2, foF1), the M(3000)F2 factor, the layer peak densities and heights
 //! (hmE, hmF1, hmF2), the layer thicknesses, and the three Epstein-layer amplitudes.
+//!
+//! Gate: `derivations/nequick_parameters.mac` shows that the smoothed switches of Eq. 29, 84, 95,
+//! 98, 101 and 102 are `NeqJoin`, that the latitude factor, local-time cosine and layer-thickness
+//! forms are the ones the code evaluates, that χ0 = 86.23292796211615° (Eq. 28) is the double
+//! nearest the fixed point where Eq. 29's two branches meet, and that 0.124 is the
+//! plasma-frequency constant (CODATA 2018) to three digits; it evaluates Eq. 20 to 29 at the
+//! tests' reference epochs and prints Eq. 20 to 98 at 30 digits for three profiles. The module
+//! tests
+//! `the_solar_declination_carries_the_second_harmonic_of_the_mean_anomaly` (G2),
+//! `chi0_is_the_double_nearest_the_day_night_fixed_point` (G2) and
+//! `the_profile_parameters_are_the_icd_equations_evaluated` (G2) hold the code to them.
 
 use std::f64::consts::PI;
 
@@ -43,15 +54,14 @@ pub(crate) struct NeQuickParameters {
 impl NeQuickParameters {
     /// Derive the profile parameters at `(latitude, longitude)` (radians) with the given
     /// MODIP (degrees), effective ionisation series, calendar month and universal time.
-    /// `floor_e_without_f1` selects whether the Eq. 98 E-layer floor also applies without an F1
-    /// layer.
+    /// `rules` selects the variant's reading of the E- and F1-layer amplitudes (Eq. 91 to 98).
     pub(crate) fn new(
         fourier: &FourierTimeSeries,
         month: u32,
         hours: f64,
         (latitude, longitude): (f64, f64),
         modip: f64,
-        floor_e_without_f1: bool,
+        rules: AmplitudeRules,
     ) -> Self {
         let azr = fourier.azr;
         let xeff = compute_effective_solar_angle(month, hours, latitude, longitude);
@@ -97,7 +107,7 @@ impl NeQuickParameters {
             b2_bot,
             be_top,
             b1_bot,
-            floor_e_without_f1,
+            rules,
         });
 
         Self {
@@ -281,33 +291,53 @@ struct LayerInputs {
     b2_bot: f64,
     be_top: f64,
     b1_bot: f64,
-    floor_e_without_f1: bool,
+    rules: AmplitudeRules,
 }
 
-/// F2, F1 and E layer Epstein amplitudes (Eq. 90 to 98).
+/// The two readings of the E- and F1-layer amplitudes (Eq. 91 to 98) the variants follow.
 ///
 /// The section 2.5.5 equations place the Eq. 98 floor inside the `foF1 >= 0.5` branch only, but
-/// the ICD's own pseudo-code (Annex F), the JRC reference implementation that produced the Annex E
-/// verification data apply it after both branches. Without it a night-time E layer under a dense
-/// F2 peak goes negative: -2.54 against the reference's 0.05 at (5.25 N, 307.19 E), April,
-/// 00 UT, high solar activity. `floor_e_without_f1` keeps the section 2.5.5 reading for the ITU
-/// variant, which follows Orekit's port and is validated against it.
-fn compute_layer_amplitudes(p: &LayerInputs) -> [f64; 3] {
-    let mut amplitude = [0.0; 3];
+/// both reference implementations apply a floor after both branches. Without one a night-time E
+/// layer under a dense F2 peak goes negative: -2.54 against the Galileo reference's 0.05 at
+/// (5.25 N, 307.19 E), April, 00 UT, high solar activity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AmplitudeRules {
+    /// The Galileo ICD's pseudo-code (Annex F) and the JRC implementation that produced the Annex E
+    /// data: no F1 layer below foF1 = 0.5, and Eq. 98's floor of 0.05 after either branch.
+    Galileo,
+}
 
+impl AmplitudeRules {
+    /// Whether a profile with this foF1 (MHz) carries an F1 layer (Eq. 91, 93).
+    fn has_f1_layer(self, fo_f1: f64) -> bool {
+        match self {
+            Self::Galileo => fo_f1 >= 0.5,
+        }
+    }
+
+    /// Whether a negative F1 amplitude out of the Eq. 94 to 96 iteration stands.
+    fn keeps_a_negative_f1_amplitude(self) -> bool {
+        match self {
+            Self::Galileo => true,
+        }
+    }
+
+    /// The value the E-layer amplitude is floored to (Eq. 98).
+    fn e_floor(self) -> f64 {
+        match self {
+            Self::Galileo => 0.05,
+        }
+    }
+}
+
+/// F2, F1 and E layer Epstein amplitudes (Eq. 90 to 98), under the variant's [`AmplitudeRules`].
+fn compute_layer_amplitudes(p: &LayerInputs) -> [f64; 3] {
     // F2 layer amplitude (Eq. 90).
     let a1 = 4.0 * p.nm_f2;
-    amplitude[0] = a1;
+    // No F1 layer (Eq. 91, 92).
+    let without_f1 = (0.0, 4.0 * (p.nm_e - epst(a1, p.hm_f2, p.b2_bot, p.hm_e)));
 
-    if p.fo_f1 < 0.5 {
-        amplitude[1] = 0.0;
-        let a3 = 4.0 * (p.nm_e - epst(a1, p.hm_f2, p.b2_bot, p.hm_e));
-        amplitude[2] = if p.floor_e_without_f1 {
-            join(a3, 0.05, 60.0, a3 - 0.005)
-        } else {
-            a3
-        };
-    } else {
+    let (a2, a3) = if p.rules.has_f1_layer(p.fo_f1) {
         let mut a2a = 0.0;
         let mut a3a = 4.0 * p.nm_e;
         for _ in 0..5 {
@@ -321,11 +351,17 @@ fn compute_layer_amplitudes(p: &LayerInputs) -> [f64; 3] {
                     - epst(a2a, p.hm_f1, p.b1_bot, p.hm_e)
                     - epst(a1, p.hm_f2, p.b2_bot, p.hm_e));
         }
-        amplitude[1] = a2a;
-        amplitude[2] = join(a3a, 0.05, 60.0, a3a - 0.005);
-    }
+        if a2a < 0.0 && !p.rules.keeps_a_negative_f1_amplitude() {
+            without_f1
+        } else {
+            (a2a, a3a)
+        }
+    } else {
+        without_f1
+    };
 
-    amplitude
+    // Eq. 98: the smoothing argument is centred on 0.005 under both rules.
+    [a1, a2, join(a3, p.rules.e_floor(), 60.0, a3 - 0.005)]
 }
 
 /// Epstein basis function (reference section 2.5.1).
@@ -351,7 +387,7 @@ mod tests {
             b2_bot: 45.0,
             be_top: 45.0,
             b1_bot: 45.0,
-            floor_e_without_f1: true,
+            rules: AmplitudeRules::Galileo,
         }
     }
 
@@ -388,9 +424,10 @@ mod tests {
     ///
     /// Its full swing is 0.04°, which propagates to about 1.5e-4 relative on foE and so to ~1.5e-4
     /// TECU of a twenty-TECU column — an order under the 1e-3 the end-to-end fixtures assert. The
-    /// references are an independent evaluation of Eq. 20–28 in mpmath at 200 bits; the second
-    /// point is where the mutant `sin(2 + am)` shows most, and the first is a saturated one, where
-    /// `join` pins xeff at the day/night transition and the harmonic cannot be seen at all.
+    /// references are Eq. 20–29 evaluated at 50 digits in `derivations/nequick_parameters.mac`
+    /// (to 1e-15); the second point is where the mutant `sin(2 + am)` shows most, and the first is
+    /// a saturated one, where `join` pins xeff at the day/night transition and the harmonic cannot
+    /// be seen at all. (G2)
     #[test]
     fn the_solar_declination_carries_the_second_harmonic_of_the_mean_anomaly() {
         let mid_sky = compute_effective_solar_angle(4, 12.0, 0.6, 0.3);
@@ -413,8 +450,9 @@ mod tests {
     /// stays at `tanh(0.15)`.
     #[test]
     fn the_seasonal_latitude_factor_vanishes_at_the_equator() {
-        // Eq. 35 with seasp = 0: foE = sqrt(1.112²·sqrt(Az)·cos(xeff)^0.6 + 0.49), evaluated in
-        // mpmath at 200 bits. `0.3 + φ` gives seasp = tanh(0.15) = 0.1489 and foE = 3.4446314271.
+        // Eq. 35 with seasp = 0: foE = sqrt(1.112²·sqrt(Az)·cos(xeff)^0.6 + 0.49), evaluated at 50
+        // digits in derivations/nequick_parameters.mac (to 1e-15). `0.3 + φ` gives
+        // seasp = tanh(0.15) = 0.1489 and foE = 3.4446314271.
         let got = compute_fo_e(6, 100.0, 0.5, 0.0);
         assert!(
             (got - 3.453_054_218_930_359).abs() < 1.0e-12,
@@ -476,7 +514,6 @@ mod tests {
     /// (5.25 N, 307.19 E), April, 00 UT, high solar activity, where the F2 tail at 120 km exceeds
     /// `NmE` and the raw Eq. 92 amplitude is negative.
     #[test]
-    #[allow(clippy::float_cmp)] // the unfloored arm returns Eq. 92 itself
     fn the_e_layer_floor_applies_when_there_is_no_f1_layer() {
         let mut inputs = layer_inputs(0.065, 0.0, 0.0, 39.6);
         inputs.hm_f2 = 454.4;
@@ -486,8 +523,128 @@ mod tests {
         assert!(raw < -1.0, "the fixture must drive Eq. 92 negative: {raw}");
         let a = compute_layer_amplitudes(&inputs);
         assert!((a[2] - 0.05).abs() < 1.0e-12, "E amplitude {}", a[2]);
-        // The ITU variant keeps the unfloored Eq. 92.
-        inputs.floor_e_without_f1 = false;
-        assert_eq!(compute_layer_amplitudes(&inputs)[2], raw);
+    }
+
+    /// (G2) χ0 of Eq. 28 is the double nearest the angle at which Eq. 29's two branches meet.
+    ///
+    /// `derivations/nequick_parameters.mac` solves `χ = 90 − 0.24·exp(20 − 0.2·χ)` at 50 digits:
+    /// the root is 5.4e-15 below the printed 86.23292796211615 -- more than half a unit of its last
+    /// digit, so the print is not the root rounded to 16 digits but the shortest decimal of the
+    /// double nearest it, which is what `X0` stores.
+    #[test]
+    #[allow(clippy::float_cmp)] // nearest double is the claim
+    fn chi0_is_the_double_nearest_the_day_night_fixed_point() {
+        const ROOT: f64 = 86.232_927_962_116_144_636_705_101_678_2;
+        assert_eq!(X0, ROOT);
+    }
+
+    /// (G2) The whole parameter set is ICD Eq. 20 to 98 evaluated as printed.
+    ///
+    /// The references are `derivations/nequick_parameters.mac`'s 50-digit evaluation of Eq. 20 to
+    /// 98 -- the ICD's own Legendre index offsets K and H (Eq. 65/66, 73/74), Annex F's smoothed
+    /// foF1, the clipped exponential of F.2.12.2 -- on synthetic CCIR series that keep foF2 near
+    /// 7 MHz and M(3000)F2 near 3: `cf2₁ = 7`, `cf2ₗ = (−1)ˡ·0.3/l`, `cm3₁ = 3`, `cm3ₗ = (−1)ˡ/(20·l)`.
+    /// A June noon carries an F1 layer through the five-pass amplitude iteration; a November
+    /// night has none, and its E-layer floor tells the two rule sets apart.
+    #[test]
+    #[expect(
+        clippy::excessive_precision,
+        reason = "the derivation's 30-digit values, kept whole"
+    )]
+    fn the_profile_parameters_are_the_icd_equations_evaluated() {
+        // (azr, foF2, NmF2, hmF2, hmF1, hmE, B2bot, B1top, B1bot, BEtop, BEbot, A1, A2, A3).
+        const JUNE_NOON: [f64; 14] = [
+            105.052_488_516_270_413_559_146_165_446,
+            7.043_495_994_349_224_462_687_737_501_02,
+            6.151_743_641_979_282_710_258_197_385_15,
+            258.176_853_980_994_448_878_864_560_195,
+            189.088_426_990_497_224_439_432_280_098,
+            120.0,
+            28.705_055_760_744_563_039_020_836_398_2,
+            20.726_528_097_149_167_331_829_684_029_3,
+            34.544_213_495_248_612_219_716_140_048_8,
+            34.544_213_495_248_612_219_716_140_048_8,
+            5.0,
+            24.606_974_567_917_130_841_032_789_540_6,
+            4.646_821_197_616_198_222_508_240_059_28,
+            4.532_633_015_406_554_047_443_021_166_59,
+        ];
+        const NOVEMBER_NIGHT: [f64; 14] = [
+            136.855_839_042_490_091_234_527_659_509,
+            6.978_507_609_248_058_021_530_396_166_25,
+            6.038_746_488_089_297_761_351_022_221_77,
+            314.628_453_835_405_347_412_176_671_682,
+            217.314_226_917_702_673_706_088_335_841,
+            120.0,
+            28.812_384_488_624_776_953_969_107_835_4,
+            29.194_268_075_310_802_111_826_500_752_3,
+            48.657_113_458_851_336_853_044_167_920_6,
+            48.657_113_458_851_336_853_044_167_920_6,
+            5.0,
+            24.154_985_952_357_191_045_404_088_887_1,
+            0.0,
+            0.131_448_870_509_403_342_359_589_165_719,
+        ];
+        let cf2: Vec<f64> = (1..=76_u32)
+            .map(|l| {
+                if l == 1 {
+                    7.0
+                } else {
+                    sign(l) * 0.3 / f64::from(l)
+                }
+            })
+            .collect();
+        let cm3: Vec<f64> = (1..=49_u32)
+            .map(|l| {
+                if l == 1 {
+                    3.0
+                } else {
+                    sign(l) / (20.0 * f64::from(l))
+                }
+            })
+            .collect();
+        let profile = |month, hours, at, modip, az: f64, rules| {
+            let fourier = FourierTimeSeries {
+                az,
+                azr: libm::sqrt(167_273.0 + (az - 63.7) * 1123.6) - 408.99,
+                cf2: cf2.clone(),
+                cm3: cm3.clone(),
+            };
+            NeQuickParameters::new(&fourier, month, hours, at, modip, rules)
+        };
+        let check = |p: &NeQuickParameters, want: &[f64; 14], tag: &str| {
+            let got = [
+                p.azr,
+                want[1],
+                p.nm_f2,
+                p.hm_f2,
+                p.hm_f1,
+                p.hm_e,
+                p.b2_bot,
+                p.b1_top,
+                p.b1_bot,
+                p.be_top,
+                p.be_bot,
+                p.amplitudes[0],
+                p.amplitudes[1],
+                p.amplitudes[2],
+            ];
+            for (k, (&x, &y)) in got.iter().zip(want).enumerate() {
+                assert!(
+                    (x - y).abs() <= 1.0e-12 * y.abs().max(1.0),
+                    "{tag}, quantity {k}: {x} vs {y}"
+                );
+            }
+        };
+        let galileo = AmplitudeRules::Galileo;
+        let june = profile(6, 12.0, (0.6, 0.3), 40.0, 150.0, galileo);
+        check(&june, &JUNE_NOON, "june noon");
+        let night = profile(11, 2.0, (0.1, -1.0), 5.0, 180.0, galileo);
+        check(&night, &NOVEMBER_NIGHT, "november night");
+    }
+
+    /// `(−1)ˡ` for the synthetic CCIR series.
+    fn sign(l: u32) -> f64 {
+        if l.is_multiple_of(2) { 1.0 } else { -1.0 }
     }
 }

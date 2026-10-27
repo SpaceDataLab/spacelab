@@ -17,7 +17,8 @@
 //!   amplifying noise roughly threefold on the GPS L1/L2 pair.
 //! * **Wide-lane** `(f1·L1 − f2·L2)/(f1 − f2)` keeps `ρ` with an 86 cm wavelength on GPS L1/L2 — a
 //!   long enough wavelength for the ambiguity to be resolvable from noisy data.
-//! * **Narrow-lane** `(f1·X1 + f2·X2)/(f1 + f2)` keeps `ρ` and *halves* the noise, at a 10.7 cm
+//! * **Narrow-lane** `(f1·X1 + f2·X2)/(f1 + f2)` keeps `ρ` and scales equal input noise by
+//!   `√(f1² + f2²)/(f1 + f2)` — 0.71 on GPS L1/L2, and never below `1/√2` — at a 10.7 cm
 //!   wavelength.
 //! * **Melbourne–Wübbena** is the wide-lane phase minus the narrow-lane code. Geometry, clocks,
 //!   troposphere and the ionosphere all cancel — the ionosphere because both combinations carry the
@@ -30,6 +31,13 @@
 //! Every function here takes and returns **metres**. RINEX reports carrier phase in cycles
 //! ([`crate::rinex_obs`]), so a phase observable needs [`FrequencyPair::wavelength1`] /
 //! [`FrequencyPair::wavelength2`] applied before it arrives.
+//!
+//! Gate: `derivations/gnss_combinations.mac` shows, for every `f1 > f2`, that each combination
+//! cancels what the list above says it cancels (Melbourne–Wübbena leaves exactly
+//! `c/(f1 − f2)·(N1 − N2)`), derives the two noise gains, and prints the ICD carriers and
+//! wavelengths as exact rationals; `derivations/gnss_combinations.gp` re-checks both in PARI/GP.
+//! The module test `the_wavelengths_are_the_exact_rationals_of_the_icd_carriers` (G3) holds the
+//! shipped constants and wavelengths to those values bit for bit.
 
 // The doc allow is for spec proper nouns (RINEX, GLONASS, BeiDou, QZSS, NavIC, GRAPHIC).
 #![allow(clippy::doc_markdown)]
@@ -39,10 +47,10 @@ const SPEED_OF_LIGHT: f64 = 299_792_458.0;
 
 /// The GNSS fundamental frequency, Hz.
 ///
-/// Every CDMA GNSS carrier is an exact integer or half-integer multiple of 10.23 MHz, which is why
-/// the frequencies below are written as that multiple rather than as a rounded MHz figure: the
-/// products `154 × 10.23e6` and `1575.42e6` differ in the last bits, and a wide-lane wavelength
-/// divides by the difference of two of them.
+/// Every CDMA GNSS carrier is an exact multiple of a tenth of 10.23 MHz — `154` for L1, `116.5`
+/// for E5, `152.6` for B1I — which is how the ICDs define them and why the frequencies below are
+/// written as that multiple. Each product rounds onto its integer number of hertz, so the
+/// difference a wide-lane wavelength divides by is exact as well.
 const FUNDAMENTAL_HZ: f64 = 10.23e6;
 
 /// GPS L1 / Galileo E1 / QZSS L1 / BeiDou B1C carrier, Hz (`154 × 10.23 MHz`).
@@ -267,7 +275,8 @@ pub fn graphic(p: f64, l: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    // The references are carried at the precision Maxima printed them to.
+    #![allow(clippy::unwrap_used, clippy::excessive_precision)]
     use super::*;
 
     /// Every carrier is its exact multiple of 10.23 MHz, checked against the MHz figure the ICDs
@@ -445,6 +454,80 @@ mod tests {
             assert!(
                 (got - want).abs() < 1e-12,
                 "{name}: {got:.12} vs {want:.12}"
+            );
+        }
+    }
+
+    /// (G3) Every carrier is an exact integer number of hertz, and every wavelength is the correctly
+    /// rounded double of its exact rational `c/f`, against `derivations/gnss_combinations.mac` at
+    /// 40 digits (re-checked as exact rationals in `derivations/gnss_combinations.gp`).
+    ///
+    /// The carriers are products of an integer or a tenth-multiple and 10.23e6, each of which rounds
+    /// back onto its integer, so the comparison is equality. Each wavelength is then one IEEE
+    /// division of exact operands — `f1 ± f2` is exact too — so it is the double nearest the true
+    /// quotient, and the literal below parses to that same double. A rounded MHz figure, a carrier
+    /// formed some other way or a wrong multiplier all move at least the last bit.
+    #[test]
+    fn the_wavelengths_are_the_exact_rationals_of_the_icd_carriers() {
+        for (got, hz, name) in [
+            (L1_HZ, 1_575_420_000.0, "L1"),
+            (L2_HZ, 1_227_600_000.0, "L2"),
+            (L5_HZ, 1_176_450_000.0, "L5"),
+            (E6_HZ, 1_278_750_000.0, "E6"),
+            (E5B_HZ, 1_207_140_000.0, "E5b"),
+            (E5_HZ, 1_191_795_000.0, "E5"),
+            (B1I_HZ, 1_561_098_000.0, "B1I"),
+            (B3I_HZ, 1_268_520_000.0, "B3I"),
+            (NAVIC_S_HZ, 2_492_028_000.0, "NavIC S"),
+            (GLONASS_G3_HZ, 1_202_025_000.0, "G3"),
+            (GLONASS_G1A_HZ, 1_600_995_000.0, "G1a"),
+            (GLONASS_G2A_HZ, 1_248_060_000.0, "G2a"),
+        ] {
+            assert_eq!(got.to_bits(), f64::to_bits(hz), "{name}: {got} vs {hz}");
+        }
+
+        let (l1l2, l1l5) = (FrequencyPair::GPS_L1_L2, FrequencyPair::GPS_L1_L5);
+        for (got, want, name) in [
+            (
+                l1l2.wavelength1(),
+                1.902_936_727_983_648_804_763_174_264_640_540_300_364e-1,
+                "λ1",
+            ),
+            (
+                l1l2.wavelength2(),
+                2.442_102_134_245_682_632_779_406_972_955_360_052_134e-1,
+                "λ2",
+            ),
+            (
+                l1l5.wavelength2(),
+                2.548_280_487_908_538_399_421_989_884_822_984_402_227e-1,
+                "λ5",
+            ),
+            (
+                l1l2.wide_lane_wavelength(),
+                8.619_184_003_220_056_350_986_142_257_489_506_066_356e-1,
+                "λ_WL L1/L2",
+            ),
+            (
+                l1l2.narrow_lane_wavelength(),
+                1.069_533_781_421_466_846_472_732_980_856_362_066_628e-1,
+                "λ_NL L1/L2",
+            ),
+            (
+                l1l5.wide_lane_wavelength(),
+                7.514_160_413_063_638_870_090_482_993_708_800_160_413e-1,
+                "λ_WL L1/L5",
+            ),
+            (
+                l1l5.narrow_lane_wavelength(),
+                1.089_413_591_485_062_884_511_259_616_188_264_707_272e-1,
+                "λ_NL L1/L5",
+            ),
+        ] {
+            assert_eq!(
+                got.to_bits(),
+                f64::to_bits(want),
+                "{name}: {got:e} vs {want:e}"
             );
         }
     }

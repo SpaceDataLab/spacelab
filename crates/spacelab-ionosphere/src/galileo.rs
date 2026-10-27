@@ -6,13 +6,21 @@
 //! at the receiver to the effective ionisation level Az; the model then integrates the
 //! electron density along the receiver-to-satellite ray with the ICD's adaptive Kronrod
 //! G7-K15 quadrature (Annex F.2.6), the method that produced the Annex E verification data.
+//!
+//! Gate: `derivations/kronrod_g7k15.mac` builds the G7 rule from P7 and the K15 extension from
+//! the Stieltjes polynomial E8, shows that they integrate polynomials to degrees 13 and 22 and no
+//! further, that the centre G7 weight is 512/1225, and that every node and weight the ICD prints
+//! is the defined value rounded to its 33 digits; `derivations/kronrod_g7k15.gp` repeats all of
+//! it at 80 digits. The module tests `the_kronrod_nodes_and_weights_are_their_defining_values`
+//! (G2) and `the_all_zero_alpha_sentinel_is_the_only_thing_that_yields_the_default_az` (G2, Eq. 17
+//! and 18 with the section 3.3 clamp) hold the code to them.
 
 use crate::ccir::{self};
 use crate::fourier::{EpochSeries, FourierTimeSeries};
 use crate::math::{clip_exp, join};
 use crate::model::{self, Variant};
 use crate::modip::ModipGrid;
-use crate::parameters::NeQuickParameters;
+use crate::parameters::{AmplitudeRules, NeQuickParameters};
 use crate::ray::Ray;
 use crate::types::{DateTimeComponents, GeodeticPoint};
 
@@ -220,7 +228,7 @@ fn kronrod(f: &impl Fn(f64) -> f64, a: f64, b: f64, tolerance: f64, level: u32) 
 struct GalileoVariant;
 
 impl Variant for GalileoVariant {
-    const FLOORS_E_WITHOUT_F1: bool = true;
+    const AMPLITUDE_RULES: AmplitudeRules = AmplitudeRules::Galileo;
 
     /// Whether the Chapman correction applies at height `h_in_km` (Galileo: below 100 km).
     fn apply_chapman_parameters(&self, h_in_km: f64) -> bool {
@@ -267,6 +275,8 @@ impl Variant for GalileoVariant {
 mod tests {
     use super::*;
 
+    /// (G2) Eq. 17/18 and the section 3.3 clamp: Az = 63.7 for the all-zero triple, else
+    /// a0 + a1·μ + a2·μ² clamped to [0, 400].
     #[test]
     #[allow(clippy::float_cmp)] // the sentinel substitutes a literal, so exactness is the claim
     fn the_all_zero_alpha_sentinel_is_the_only_thing_that_yields_the_default_az() {
@@ -286,6 +296,68 @@ mod tests {
         let sloped = NeQuickGalileo::new([0.0, 2.0, 0.0]);
         assert_eq!(sloped.effective_ionization_level(12.0), 24.0);
         assert_eq!(sloped.effective_ionization_level(-45.0), 0.0); // clamped from -90
+        // Section 3.3's upper bound: 100 + 2·75 + 0.04·75² = 475 is clamped to 400, while
+        // 100 + 2·50 + 0.04·50² = 300 is inside the operational range and stands.
+        let quadratic = NeQuickGalileo::new([100.0, 2.0, 0.04]);
+        assert_eq!(quadratic.effective_ionization_level(75.0), 400.0);
+        assert!((quadratic.effective_ionization_level(50.0) - 300.0).abs() < 1.0e-12);
+    }
+
+    /// (G2) The Kronrod K15 nodes and weights and the embedded Gauss G7 weights are the values their
+    /// definitions give: the G7 nodes are the roots of P7 and its weights `2/((1 − x²)·P7'(x)²)`,
+    /// the eight further K15 nodes are the roots of the Stieltjes polynomial E8 orthogonal to
+    /// `P7·xᵏ` for k = 0..7, and the K15 weights those of the interpolatory rule on all fifteen.
+    ///
+    /// The literals are the 40-digit values `derivations/kronrod_g7k15.mac` prints for x ≥ 0, where
+    /// it also shows K15 exact through degree 22 and G7 through 13, and every one of the ICD's
+    /// 33-digit Annex F.2.6 values within 5e-34 of the definition; `derivations/kronrod_g7k15.gp`
+    /// recomputes all of it at 80 digits. Both literal sets round to the same doubles, so the
+    /// stored tables are equal to the defined values bit for bit, mirrored about zero.
+    #[test]
+    #[expect(
+        clippy::excessive_precision,
+        reason = "the derivation's 40-digit values, kept whole"
+    )]
+    #[allow(clippy::float_cmp)] // equal to the nearest double is the claim
+    fn the_kronrod_nodes_and_weights_are_their_defining_values() {
+        const NODES: [f64; 8] = [
+            0.0,
+            0.207_784_955_007_898_467_600_689_403_773_244_913_479_8,
+            0.405_845_151_377_397_166_906_606_412_076_961_463_347_4,
+            0.586_087_235_467_691_130_294_144_838_258_729_598_436_8,
+            0.741_531_185_599_394_439_863_864_773_280_788_407_074_1,
+            0.864_864_423_359_769_072_789_712_788_640_926_201_211,
+            0.949_107_912_342_758_524_526_189_684_047_851_262_400_8,
+            0.991_455_371_120_812_639_206_854_697_526_328_516_642,
+        ];
+        const K15: [f64; 8] = [
+            0.209_482_141_084_727_828_012_999_174_891_714_263_697_8,
+            0.204_432_940_075_298_892_414_161_999_234_649_084_716_5,
+            0.190_350_578_064_785_409_913_256_402_421_013_682_826_1,
+            0.169_004_726_639_267_902_826_583_426_598_550_284_106_2,
+            0.140_653_259_715_525_918_745_189_590_510_237_920_399_9,
+            0.104_790_010_322_250_183_839_876_322_541_518_017_443_8,
+            0.063_092_092_629_978_553_290_700_663_189_204_286_665_07,
+            0.022_935_322_010_529_224_963_732_008_058_969_591_993_56,
+        ];
+        const G7: [f64; 4] = [
+            0.417_959_183_673_469_387_755_102_040_816_326_530_612_2,
+            0.381_830_050_505_118_944_950_369_775_488_975_133_878_4,
+            0.279_705_391_489_276_667_901_467_771_423_779_582_486_9,
+            0.129_484_966_168_869_693_270_611_432_679_082_018_328_6,
+        ];
+        for i in 0..8 {
+            assert_eq!(K15_NODES[7 + i], NODES[i], "K15 node {}", 7 + i);
+            assert_eq!(K15_NODES[7 - i], -NODES[i], "K15 node {}", 7 - i);
+            assert_eq!(K15_WEIGHTS[7 + i], K15[i], "K15 weight {}", 7 + i);
+            assert_eq!(K15_WEIGHTS[7 - i], K15[i], "K15 weight {}", 7 - i);
+        }
+        for i in 0..4 {
+            assert_eq!(G7_WEIGHTS[3 + i], G7[i], "G7 weight {}", 3 + i);
+            assert_eq!(G7_WEIGHTS[3 - i], G7[i], "G7 weight {}", 3 - i);
+        }
+        // The centre G7 weight is 512/1225 exactly (G3).
+        assert_eq!(G7_WEIGHTS[3], 512.0 / 1225.0);
     }
 
     /// Eq. 99/100 select the summer form of `ka` for April to September, and March and October are

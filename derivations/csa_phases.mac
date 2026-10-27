@@ -3,16 +3,15 @@
    Cumming & Wong, "Digital Processing of Synthetic Aperture Radar Data" (2005), Ch. 7. The
    Chirp-Scaling Algorithm applies four phase functions, and each is a product whose factors the
    focused image cannot separate: at a spaceborne geometry the scaling factor alpha = 1/D - 1 is 7e-5,
-   so the terms that carry it contribute microradians, and at a geometry wide enough for them to
-   matter the single-reference azimuth matched filter no longer focuses anything off the reference
-   range. The terms are therefore checked directly, against these values and against the exponents
-   restated as doubling ratios.
+   so the terms that carry it contribute microradians. The terms are therefore checked directly,
+   against these values and against the exponents restated as doubling ratios; that they compose
+   to a focused point target is derivations/csa_point_target.mac.
 
        alpha    = 1/D - 1                                        (Eq. 7.20)
        tau_ref  = (2*R_ref/c)*alpha                              the reference migration delay
        scaling  = pi*K_m*alpha*(tau - tau_ref)^2                 (Eq. 7.24, step 2)
        compress = pi*f_tau^2/(K_m*(1+alpha)) + 2*pi*tau_ref*f_tau   (Eq. 7.26/7.27, step 4)
-       azimuth  = 4*pi*R_ref*D/lambda                            (Eq. 7.29, step 6)
+       azimuth  = 4*pi*(R_ref + dR)*D/lambda, the bin's own range (Eq. 7.29, step 6)
        residual = -4*pi/c^2 * K_m*(1+alpha)*alpha*dR^2           (Eq. 7.31, step 6)
 
    The arguments below are a wide-beam collection (D = 0.9645, so alpha = 0.0368) with a 5 km range
@@ -39,6 +38,11 @@ print("scaling      ", bfloat(%pi*km*alpha*(tau - tau_ref)^2))$
 print("compress     ", bfloat(%pi*f_tau^2/(km*(1+alpha)) + 2*%pi*tau_ref*f_tau))$
 print("azimuth      ", bfloat(4*%pi*r_ref*d/lam))$
 print("residual     ", bfloat(-4*%pi/c^2 * km*(1+alpha)*alpha*dr^2))$
+/* Step 6 in the bin dr off the reference: the range-variant azimuth filter 4*pi*(R_ref + dr)*D/lambda
+   plus the residual (derivations/csa_point_target.mac shows a filter at R_ref alone leaves
+   -4*pi*dr*D/lambda behind). */
+print("azimuth_at_dr", bfloat(4*%pi*(r_ref + dr)*d/lam))$
+print("step6_at_dr  ", bfloat(4*%pi*(r_ref + dr)*d/lam - 4*%pi/c^2 * km*(1+alpha)*alpha*dr^2))$
 
 /* The range axis: bin r of nr, at range-frequency sample rate fs. */
 r : 300$ nr : 512$ fs : 15*10^7$

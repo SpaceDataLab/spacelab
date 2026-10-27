@@ -1,0 +1,73 @@
+/* The slanted-edge MTF and the ground scale of spacelab-earthvision/src/image_quality.rs, from
+ * their definitions, with the reference values of the gates in its test module.
+ *
+ * `SlantedEdge::mtf` takes the DFT of the LSF -- the difference of adjacent ESF bins over the bin
+ * width h -- normalises it by its DC term and divides by sinc(f h)^2 for the two box filters of the
+ * analysis: the bin average and the adjacent-bin difference. `local_scale` gives metres per degree
+ * from the WGS-84 meridian radius a(1 - e^2)/W^3 and the parallel radius N cos(phi) = a cos(phi)/W,
+ * W = sqrt(1 - e^2 sin^2 phi).
+ *
+ * Shown here, every line printing `<name>: 0`:
+ *   1. the transform of the unit Gaussian LSF of width s is exp(-2 pi^2 s^2 f^2), the Gaussian
+ *      PSF <-> MTF closed form (G3);
+ *   2. a box of width h transforms to sinc(f h) (G1), and the adjacent difference
+ *      (E(x + h) - E(x))/h of an edge E with E' = L transforms to e^(i pi f h) sinc(f h) L^(f) -- so
+ *      binning and differencing multiply the MTF by sinc(f h)^2 exactly, and the coded division
+ *      removes it (G1);
+ *   3. F(t) = s (u Phi(u) + phi(u)), u = t/s, is an antiderivative of the Gaussian edge Phi(t/s):
+ *      the bin average of the edge, which the Rust gate builds its profile from, is
+ *      (F(b) - F(a))/h (G1);
+ *   4. the Gaussian's FWHM is 2 sqrt(2 ln 2) s and its RER, Phi(1/(2s)) - Phi(-1/(2s)), is
+ *      erf(1/(2 sqrt(2) s)) (G3);
+ *   5. ds/dphi along the meridian ellipse (N cos phi, N (1 - e^2) sin phi) is a(1 - e^2)/W^3 (G1),
+ *      and the metres per degree at five latitudes, at 40 digits (G2).
+ * derivations/edge_mtf.gp recomputes 1, 2 and 5 by quadrature.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/edge_mtf.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+display2d : false$
+assume(s > 0, f > 0, h > 0)$
+
+/* 1. The sine part vanishes by oddness; the cosine part is the transform. */
+gauss : exp(-x^2/(2*s^2))/(s*sqrt(2*%pi))$
+zero("gaussian_lsf_has_unit_area", radcan(integrate(gauss, x, minf, inf) - 1))$
+zero("gaussian_mtf_closed_form",
+     radcan(integrate(gauss*cos(2*%pi*f*x), x, minf, inf) - exp(-2*%pi^2*s^2*f^2)))$
+
+/* 2. */
+zero("box_transforms_to_sinc",
+     ratsimp(integrate(cos(2*%pi*f*x), x, -h/2, h/2)/h - sin(%pi*f*h)/(%pi*f*h)))$
+/* The difference operator's multiplier on the transform: (e^(2 pi i f h) - 1)/(2 pi i f h). */
+mult : (exp(2*%pi*%i*f*h) - 1)/(2*%pi*%i*f*h)$
+zero("difference_is_a_shifted_box",
+     trigsimp(trigexpand(rectform(mult - exp(%i*%pi*f*h)*sin(%pi*f*h)/(%pi*f*h)))))$
+
+/* 3. */
+Phi(u) := (1 + erf(u/sqrt(2)))/2$
+phi(u) := exp(-u^2/2)/sqrt(2*%pi)$
+F : s*((t/s)*Phi(t/s) + phi(t/s))$
+zero("edge_antiderivative", radcan(diff(F, t) - Phi(t/s)))$
+
+/* 4. */
+zero("fwhm_is_the_half_maximum", radcan(subst(x = sqrt(2*log(2))*s, gauss) - subst(x = 0, gauss)/2))$
+zero("rer_is_erf", radcan(Phi(1/(2*s)) - Phi(-1/(2*s)) - erf(1/(2*sqrt(2)*s))))$
+
+/* 5. sn, cs = sin, cos phi; dsn/dphi = cs, dcs/dphi = -sn. */
+N : a/sqrt(1 - e2*sn^2)$
+dN : diff(N, sn)*cs$
+pp : N*cs$  zz : N*(1 - e2)*sn$
+dp : dN*cs - N*sn$  dz : (1 - e2)*(dN*sn + N*cs)$
+merid : a*(1 - e2)/(1 - e2*sn^2)^(3/2)$
+zero("meridian_radius_is_the_arc_rate",
+     ratsimp(ratsubst(1 - sn^2, cs^2, ratsimp((dp^2 + dz^2) - merid^2))))$
+fpprec : 40$
+A : 6378137$
+FF : 1/(298257223563/10^9)$
+E2 : FF*(2 - FF)$
+for deg in [0, 30, 45, 60, 90] do block([ph : deg*%pi/180, w, m, n],
+  w : 1 - E2*sin(ph)^2, m : A*(1 - E2)/w^(3/2), n : A/sqrt(w),
+  printf(true, "local_scale_~a: ~h ~h~%", deg, bfloat(m*%pi/180), bfloat(n*cos(ph)*%pi/180)))$

@@ -24,6 +24,15 @@
 //! its second moment and `Q` from the flux against the noise in the pixels the flux was summed over.
 //! No PSF model, no assumed gain, and no floor: an under-sampled source reports a small `σ_psf`
 //! honestly, and it is the plate residual that will disagree with it.
+//!
+//! # Gate
+//!
+//! `derivations/source_moments.mac` evaluates the MAD factor `1/Φ⁻¹(3/4)` at 40 digits, shows a
+//! symmetric profile centroids exactly on its centre, and works out the background and blob
+//! moments of an exact frame; `derivations/source_moments.gp` recomputes them from the frame. The
+//! gates are in `tests/derivation_gates.rs`:
+//! `the_mad_to_sigma_factor_is_the_inverse_gaussian_upper_quartile` (G3) and
+//! `the_blob_moments_are_their_definitions_and_a_symmetric_blob_centroids_exactly` (G2, G3).
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -84,6 +93,12 @@ impl Frame<'_> {
     }
 }
 
+/// `1/Φ⁻¹(3/4)`: the MAD of a Gaussian of unit σ is `Φ⁻¹(3/4)`, so this turns a MAD into a σ.
+/// Carried at the precision `derivations/source_moments.mac` prints it: sixteen digits are not
+/// enough, since the nearest 16-digit decimal, `1.482_602_218_505_602`, rounds one ulp high.
+#[allow(clippy::excessive_precision)]
+const MAD_TO_SIGMA: f64 = 1.482_602_218_505_601_860_547_076_529_360_423_431_326_703_2;
+
 /// Median and Gaussian-equivalent noise of a frame: `(median, 1.4826 × MAD)`.
 ///
 /// `None` for an empty frame. The two passes cost a sort each; on a frame large enough for that to
@@ -106,7 +121,7 @@ pub fn background(pixels: &[f64]) -> Option<(f64, f64)> {
     let centre = median(&mut sorted);
     let mut deviations: Vec<f64> = pixels.iter().map(|p| libm::fabs(p - centre)).collect();
     let mad = median(&mut deviations);
-    Some((centre, 1.482_602_218_505_602 * mad))
+    Some((centre, MAD_TO_SIGMA * mad))
 }
 
 /// Detect and centroid every source above `threshold` sigmas of the background noise, keeping blobs

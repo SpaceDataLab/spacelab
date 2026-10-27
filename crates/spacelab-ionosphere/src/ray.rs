@@ -3,6 +3,13 @@
 //! Ported from Orekit's `Ray`. The ray-perigee frame turns the slant path into an arc
 //! parameterised by distance `s` from the perigee, and `Ray::point_at` maps a distance
 //! back to the geodetic point where the electron density is evaluated.
+//!
+//! Gate: `derivations/nequick_ray.mac` shows that the point of Eq. 178 to 187 at distance `s` is
+//! `rp·P + s·A`, a straight line through the perigee `P` along the azimuth `A`, that Eq. 155 and
+//! 156 are the zenith angle and the line's distance from the centre, and, at 60 digits on four
+//! geometries, that Eq. 153 to 177 put `s1` on the receiver and `s2` on the satellite. The module
+//! tests `the_ray_perigee_is_the_one_the_icd_equations_define` (G2) and
+//! `the_ray_is_a_straight_line_through_both_end_points` (G1) hold the code to them.
 
 use std::f64::consts::{FRAC_PI_2, PI};
 
@@ -114,7 +121,7 @@ impl Ray {
             )
         };
 
-        // Integration end points (Eq. 176, 177).
+        // Integration end point at the satellite (Eq. 177); `distance_at` gives Eq. 176's.
         let s2 = libm::sqrt(r2 * r2 - rp * rp);
 
         Self {
@@ -197,6 +204,150 @@ fn great_circle_angle(lat_p: f64, sc_lat_p: SinCos, sc_lat: SinCos, sc_lon: SinC
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The four geometries of `derivations/nequick_ray.mac`, (lat°, lon°, h m) receiver then
+    /// satellite: low latitude, high latitude, across the anti-meridian, the far south looking east.
+    const GEOMETRIES: [[f64; 6]; 4] = [
+        [-3.0, 40.19, 0.0, 25.0, 97.5, 20_281_546.18],
+        [82.49, -62.34, 78.1, 54.45, -118.47, 20_370_730.85],
+        [-31.8, -179.99, 12.78, -14.31, 177.43, 20_100_697.9],
+        [-77.84, 166.67, 98.0, -23.45, -99.29, 20_089_134.77],
+    ];
+
+    fn ray_of(g: &[f64; 6]) -> Ray {
+        let at = |i: usize| GeodeticPoint::new(g[i].to_radians(), g[i + 1].to_radians(), g[i + 2]);
+        Ray::new(at(0), at(3))
+    }
+
+    fn cartesian(p: GeodeticPoint) -> [f64; 3] {
+        let r = RE + p.altitude;
+        let (sf, cf) = libm::sincos(p.latitude);
+        let (sl, cl) = libm::sincos(p.longitude);
+        [r * cf * cl, r * cf * sl, r * sf]
+    }
+
+    fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+        [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+    }
+
+    fn norm(a: [f64; 3]) -> f64 {
+        libm::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
+    }
+
+    /// (G2) The ray perigee is the one ICD Eq. 153 to 177 define.
+    ///
+    /// The references are those equations evaluated as printed at 60 digits on the exact doubles
+    /// below, by `derivations/nequick_ray.mac`, which also shows there that the perigee, `s1` and
+    /// `s2` put the line on both end points to 1e-40 of the radius. The code takes the stabilised
+    /// forms (the zenith angle from `atan2(r2 sin d, r2 cos d − r1)`, the perigee latitude from
+    /// `sin ζ` and `cos ζ` in place of `cos δp` and `sin δp`), so agreement here is agreement of two
+    /// routes to the same quantities, not a transcription read back.
+    #[test]
+    #[expect(
+        clippy::excessive_precision,
+        reason = "the derivation's 40-digit values, kept whole"
+    )]
+    fn the_ray_perigee_is_the_one_the_icd_equations_define() {
+        // (rp, phip, lamp, sin sigp, cos sigp, s1, s2) per geometry.
+        const WANT: [[f64; 7]; 4] = [
+            [
+                6.170_064_480_660_431_341_273_279_198_868_267_716_331e6,
+                -1.776_212_153_869_023_903_615_156_507_798_022_484_75e-1,
+                4.812_441_411_175_583_263_558_011_282_486_940_561_571e-1,
+                8.750_234_445_582_013_906_571_182_512_983_017_243_45e-1,
+                4.840_805_423_413_548_617_443_974_799_335_434_210_842e-1,
+                1.588_236_048_102_586_569_365_938_016_768_208_795_779e6,
+                2.592_873_277_350_817_810_677_840_923_698_505_972_304e7,
+            ],
+            [
+                4.168_811_189_316_068_485_381_703_874_123_476_920_564e6,
+                7.599_673_258_894_928_461_694_520_204_634_992_577_32e-1,
+                7.902_595_373_813_304_420_944_903_345_045_741_581_532e-1,
+                -1.647_244_008_921_167_725_340_685_083_876_019_390_136e-1,
+                9.863_396_330_629_390_251_972_894_787_167_731_273_07e-1,
+                4.818_111_444_889_247_951_706_142_151_901_037_617_51e6,
+                2.641_499_344_792_678_438_644_601_033_878_165_259_202e7,
+            ],
+            [
+                2.495_294_437_846_357_470_276_921_707_567_480_027_508e6,
+                -1.371_699_135_963_349_488_190_297_762_181_823_380_491e0,
+                -7.330_830_925_639_697_478_314_111_652_153_778_184_054e-1,
+                -6.182_146_267_313_907_551_514_665_696_585_694_357_621e-1,
+                -7.860_093_353_741_844_707_311_336_116_107_819_433_174e-1,
+                5.862_240_011_846_014_417_300_953_360_040_120_921_524e6,
+                2.635_402_975_061_835_513_908_279_969_567_595_887_665e7,
+            ],
+            [
+                6.305_141_427_352_208_834_102_246_823_161_159_427_586e6,
+                -1.296_479_651_090_909_944_726_492_008_927_239_693_616e0,
+                2.357_539_091_211_262_488_436_096_190_424_053_823_874e0,
+                7.677_527_574_186_963_343_892_458_806_122_555_564_268e-1,
+                -6.407_462_083_196_344_757_581_868_588_240_585_824_778e-1,
+                9.157_673_208_249_738_855_545_060_443_674_152_568_315e5,
+                2.569_814_210_641_613_445_375_530_581_557_136_333_161e7,
+            ],
+        ];
+        for (g, w) in GEOMETRIES.iter().zip(&WANT) {
+            let ray = ray_of(g);
+            let got = [
+                ray.rp,
+                ray.lat_p,
+                ray.lon_p,
+                ray.sin_az_p,
+                ray.cos_az_p,
+                ray.distance_at(ray.rec_h()),
+                ray.s2(),
+            ];
+            for (k, (&x, &y)) in got.iter().zip(w).enumerate() {
+                // Lengths relative to themselves, angles and their sines absolutely.
+                let scale = if matches!(k, 0 | 5 | 6) { y.abs() } else { 1.0 };
+                assert!(
+                    (x - y).abs() < 1.0e-12 * scale,
+                    "geometry {g:?}, quantity {k}: {x} vs {y}"
+                );
+            }
+        }
+    }
+
+    /// (G1) `point_at` traces a straight line, through the receiver at `s1` and the satellite at
+    /// `s2`, at arc length equal to the change in `s`.
+    ///
+    /// `derivations/nequick_ray.mac` shows symbolically that Eq. 178 to 187 map `s` to
+    /// `rp·P + s·A`, with P the perigee and A the unit direction there. This checks the shipped map
+    /// against that consequence in Cartesian coordinates, which the code never forms.
+    #[test]
+    fn the_ray_is_a_straight_line_through_both_end_points() {
+        for g in &GEOMETRIES {
+            let ray = ray_of(g);
+            let rec = GeodeticPoint::new(g[0].to_radians(), g[1].to_radians(), g[2]);
+            let sat = GeodeticPoint::new(g[3].to_radians(), g[4].to_radians(), g[5]);
+            let s1 = ray.distance_at(ray.rec_h());
+            let s2 = ray.s2();
+            let x1 = cartesian(ray.point_at(s1));
+            let x2 = cartesian(ray.point_at(s2));
+            assert!(norm(sub(x1, cartesian(rec))) < 1.0e-6, "receiver, {g:?}");
+            assert!(norm(sub(x2, cartesian(sat))) < 1.0e-6, "satellite, {g:?}");
+            let chord = sub(x2, x1);
+            for f in [0.1, 0.35, 0.5, 0.8] {
+                let s = s1 + f * (s2 - s1);
+                let d = sub(cartesian(ray.point_at(s)), x1);
+                // Distance along the line equals the change in s ...
+                assert!(
+                    (norm(d) - (s - s1)).abs() < 1.0e-6,
+                    "arc length at {f}, {g:?}: {} vs {}",
+                    norm(d),
+                    s - s1
+                );
+                // ... and the point is on the chord: d = f·chord.
+                let off = sub(d, [f * chord[0], f * chord[1], f * chord[2]]);
+                assert!(
+                    norm(off) < 1.0e-6,
+                    "off the line by {} m at {f}, {g:?}",
+                    norm(off)
+                );
+            }
+        }
+    }
 
     /// Great-circle angle from `(lat_p, 0)` to `(lat, lon)` by the haversine formula — a different
     /// route to the same arc than the law of cosines the production code takes.

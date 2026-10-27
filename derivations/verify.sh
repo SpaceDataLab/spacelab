@@ -927,6 +927,48 @@ if have maxima; then
     mac_zeros attitude_control.mac 18 "attitude error kinematics, the Lyapunov derivative and the PD loop"
     mac_zeros gmst82.mac 10 "GMST 1982 as the exact rational polynomial"
     mac_zeros cio_rotation.mac 8 "the CIO-based rotation as the IERS closed form in X, Y, s"
+    mac_zeros gnss_combinations.mac 32 "IF, GF, wide/narrow-lane and MW combinations as exact rationals of the ICD carriers"
+    mac_zeros gnss_cycle_slip.mac 13 "the slip predictor is the least-squares polynomial extrapolation"
+    mac_zeros gnss_dop.mac 31 "DOP from the cofactor traces; closed forms for zenith-plus-ring geometries"
+    mac_zeros gps_broadcast_orbit.mac 8 "the IS-GPS-200 user algorithm, its velocity and the relativistic term"
+    mac_zeros glonass_pz90_motion.mac 10 "the PZ-90 equations of motion as the J2 gradient plus rotating-frame terms"
+    mac_zeros slr_two_way_range.mac 4 "the SLR legs as roots of the light-time equations"
+    mac_zeros kronrod_g7k15.mac 92 "the ICD's Gauss-Kronrod G7/K15 nodes and weights from their defining equations"
+    mac_zeros nequick_ray.mac 30 "the NeQuick ray perigee and slant geometry"
+    mac_zeros nequick_fourier.mac 8 "the CCIR Fourier collapse of the ICD maps"
+    mac_zeros nequick_parameters.mac 18 "the NeQuick profile parameters and the solar declination"
+    mac_zeros gauss2_richardson.mac 18 "the two-point Gauss rule and its Richardson extrapolation"
+    mac_zeros swath_sphere.mac 12 "the swath edge as the near root of the line-of-sight quadratic"
+    mac_zeros observation_geometry.mac 11 "ENU sun/sensor angles, the scattering angle and Kasten-Young air mass"
+    mac_zeros stereo_disparity.mac 11 "disparity f B / z on a rectified pair and the sub-pixel parabola vertex"
+    mac_zeros plane_sweep_homography.mac 9 "the plane-induced homography and the gain-invariant patch score"
+    mac_zeros pinhole_collinearity.mac 20 "the collinearity equations, their Jacobians and the Schur step"
+    mac_zeros rpc00b.mac 8 "the RPC00B cubic basis, its gradient and the Newton inverse"
+    mac_zeros rpc_bias_affine.mac 4 "the RPC bias-compensation normal equations"
+    mac_zeros ortho_bilinear_dem.mac 12 "bilinear DEM interpolation and the ray-DEM root"
+    mac_zeros ray_ellipsoid_geolocation.mac 25 "the ray-ellipsoid hit, geodetic latitude and the subpoint"
+    mac_zeros gnomonic_tan_plate.mac 11 "the TAN projection of Paper II, the plate fit and SIP"
+    mac_zeros quad_hash.mac 13 "the quad code and its similarity invariance"
+    mac_zeros source_moments.mac 8 "the MAD-to-sigma factor and the blob moments"
+    mac_zeros relativistic_aberration.mac 6 "relativistic aberration as a Lorentz boost"
+    mac_zeros detection_box_geometry.mac 10 "IoU, greedy NMS, anchors and the box parameterisation"
+    mac_zeros harris_structure_tensor.mac 5 "the Harris response from the structure tensor"
+    mac_zeros edge_mtf.mac 8 "the MTF of a Gaussian edge and the WGS 84 radii of curvature"
+    mac_zeros pansharpen_component_substitution.mac 8 "Gram-Schmidt and Brovey component substitution"
+    mac_zeros fft_radix2.mac 5 "the radix-2 FFT as the DFT, its inverse and Parseval"
+    mac_zeros polsar_decomposition.mac 19 "coherency matrix and H/A/alpha of the canonical scatterers"
+    mac_zeros radon_transform.mac 14 "the Ram-Lak filter, the Gaussian projection and filtered back-projection"
+    mac_zeros psinsar_sbas.mac 12 "the SBAS normal equations and the height sensitivity"
+    mac_zeros insar_unwrap.mac 14 "coherence, residues and the DCT Poisson unwrapping"
+    mac_zeros sar_range_doppler.mac 18 "the chirp matched filter, its sinc limit and the range-Doppler terms"
+    mac_zeros csa_point_target.mac 6 "the chirp-scaling phase multiplies compose to a pure delay"
+    mac_zeros tomosar_beamforming.mac 16 "Bartlett and Capon spectra and the tomographic steering phase"
+    mac_zeros phase_functions.mac 34 "phase-function normalisation, asymmetry and Legendre moments"
+    mac_zeros mie_lorenz.mac 30 "the Lorenz-Mie coefficients and efficiencies, Rayleigh limits"
+    mac_zeros gas_k_distribution.mac 10 "the k-distribution band transmittance and its merge rule"
+    mac_zeros slab_single_scattering.mac 12 "the slab's first-collision expectation and conservation"
+    mac_zeros six_s_coupling_brdf.mac 15 "the 6S coupling inverse, Gauss-Legendre on [0, 1] and the BRDF kernels"
+    mac_zeros ice_geometric_optics.mac 22 "the ice-crystal geometric optics: Fresnel, halos, J1 and Airy"
 else
     skip "Ф17.B Maxima gates" maxima
 fi
@@ -961,18 +1003,26 @@ if have gp; then
         chi_square_quantiles robust_weights se3_exponential particle_resampling sampling_transforms \
         conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \
         hull_delaunay spherical_triangle igrf_synthesis geomagnetic_dipole attitude_control gmst82 \
-        cio_rotation; do
+        cio_rotation gnss_combinations gps_broadcast_orbit glonass_pz90_motion slr_two_way_range \
+        kronrod_g7k15 nequick_fourier gauss2_richardson swath_sphere observation_geometry \
+        stereo_disparity pinhole_collinearity rpc_bias_affine ortho_bilinear_dem \
+        ray_ellipsoid_geolocation gnomonic_tan_plate quad_hash source_moments \
+        relativistic_aberration detection_box_geometry harris_structure_tensor edge_mtf \
+        pansharpen_component_substitution fft_radix2 polsar_decomposition radon_transform \
+        psinsar_sbas insar_unwrap sar_range_doppler tomosar_beamforming phase_functions mie_lorenz \
+        gas_k_distribution slab_single_scattering six_s_coupling_brdf ice_geometric_optics; do
         second_engine "$f.gp" "second engine for $f.mac"
     done
     second_engine linear_filters.gp "second engine for the Kalman, RTS, consider, H-infinity and UT fixtures"
     second_engine multistatic_observables.gp "multistatic rates as numerical derivatives of the separation"
     second_engine radiometric_corona.gp "the corona electron column in arc length against its closed form"
+    second_engine rpc00b_inverse.gp "the RPC inverse roots on the Pleiades fixture at 60 digits"
 else
     skip "Ф17.B PARI gates" gp
 fi
 if have gap; then
     for f in metrics_periodic_gaps fom_weighted_grid kernel_lattice walker_phasing lattice_flower flower_phasing \
-        mozhaev_point_groups symmetric_regularity; do
+        mozhaev_point_groups symmetric_regularity gnss_cycle_slip gnss_dop; do
         second_engine "$f.g" "exact counts for the $f gate"
     done
 else

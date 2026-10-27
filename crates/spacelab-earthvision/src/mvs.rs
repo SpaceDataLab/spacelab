@@ -8,6 +8,13 @@
 //! consistency (summed over neighbours) wins. This is the same collinearity model as
 //! [`crate::camera::PinholeCamera`], swept over depth instead of triangulated from correspondences.
 //!
+//! Gate: `derivations/plane_sweep_homography.mac` shows, for generic matrices, that back-projecting
+//! to depth `d` and projecting into a neighbour is the homography the plane `z_r = d` induces,
+//! `H = K_n (R_n R_rᵀ + t nᵀ/d) K_r⁻¹` with `t = R_n (C_r − C_n)`, and that the score is the Pearson
+//! correlation, symmetric and blind to an affine brightness change. The module tests
+//! `the_sweep_maps_a_reference_pixel_through_the_homography_of_its_depth_plane` (G1) and
+//! `the_consistency_score_ignores_gain_and_offset_and_is_symmetric` (G4) hold the shipped code to them.
+//!
 //! `no_std` + `alloc`.
 
 // Raster indices cast usize↔isize/f64; single letters (u, v, x, y, d) are image/geometry notation;
@@ -250,6 +257,109 @@ mod tests {
             for x in 24..w - 2 {
                 assert_eq!(dm[y * w + x], 500.0, "at ({x}, {y})");
             }
+        }
+    }
+
+    /// (G1) For every depth hypothesis the sweep reads the neighbour where the homography of the
+    /// fronto-parallel plane `z_r = d` sends the reference pixel: `H = K_n (R_n R_rᵀ + t nᵀ/d) K_r⁻¹`,
+    /// `t = R_n (C_r − C_n)`, `n = e_z`, the identity `derivations/plane_sweep_homography.mac` proves.
+    /// `H` is built here as a matrix from that formula, not from the code's back-projection. Two
+    /// rotated cameras with different intrinsics; the bound is a few ulps of the pixel magnitudes
+    /// each route rounds through.
+    #[test]
+    fn the_sweep_maps_a_reference_pixel_through_the_homography_of_its_depth_plane() {
+        let reference = PinholeCamera {
+            rotation: Mat3::rot1(0.2) * Mat3::rot3(-0.4),
+            center: Vec3::new(1.0, -2.0, 0.5),
+            focal: 900.0,
+            principal: [310.0, 250.0],
+        };
+        let neighbour = PinholeCamera {
+            rotation: Mat3::rot2(0.3) * Mat3::rot1(-0.1),
+            center: Vec3::new(6.0, 1.0, -0.5),
+            focal: 1100.0,
+            principal: [330.0, 230.0],
+        };
+        let k_n = Mat3::from_rows([
+            [neighbour.focal, 0.0, neighbour.principal[0]],
+            [0.0, neighbour.focal, neighbour.principal[1]],
+            [0.0, 0.0, 1.0],
+        ]);
+        let (f, cx, cy) = (
+            reference.focal,
+            reference.principal[0],
+            reference.principal[1],
+        );
+        let k_r_inv = Mat3::from_rows([
+            [1.0 / f, 0.0, -cx / f],
+            [0.0, 1.0 / f, -cy / f],
+            [0.0, 0.0, 1.0],
+        ]);
+        let r_rel = neighbour.rotation * reference.rotation.transpose();
+        let t = neighbour.rotation * (reference.center - neighbour.center);
+        for depth in [40.0, 75.0, 300.0] {
+            // R_rel + t nᵀ/d with n = e_z adds t/d to the third column.
+            let mut m = r_rel.rows;
+            for (row, ti) in m.iter_mut().zip([t.x, t.y, t.z]) {
+                row[2] += ti / depth;
+            }
+            let h = k_n * Mat3::from_rows(m) * k_r_inv;
+            for (u, v) in [(0.0, 0.0), (310.0, 250.0), (37.5, 412.25), (600.0, 90.0)] {
+                let world = back_project(&reference, u, v, depth);
+                let got = neighbour.project(world);
+                let hp = h * Vec3::new(u, v, 1.0);
+                let want = [hp.x / hp.z, hp.y / hp.z];
+                for k in 0..2 {
+                    let tol = 64.0 * f64::EPSILON * (want[k].abs() + neighbour.focal);
+                    assert!(
+                        (got[k] - want[k]).abs() <= tol,
+                        "d {depth} ({u}, {v}) axis {k}: sweep {} vs homography {}",
+                        got[k],
+                        want[k]
+                    );
+                }
+                // Back-projection is the inverse of projection into its own camera.
+                let own = reference.project(world);
+                assert!((own[0] - u).abs() <= 64.0 * f64::EPSILON * (u.abs() + f));
+                assert!((own[1] - v).abs() <= 64.0 * f64::EPSILON * (v.abs() + f));
+                assert!((reference.camera_coordinates(world).z / depth - 1.0).abs() <= 1e-14);
+            }
+        }
+    }
+
+    /// (G4) The photo-consistency of two patches is their Pearson correlation: unchanged by a gain
+    /// `a > 0` and an offset `b` on either patch, symmetric in the two, and `1` for a patch against
+    /// itself — the symmetries `derivations/plane_sweep_homography.mac` proves for `zmn_patch`'s
+    /// centre-and-scale. Gains and offsets are powers of two so the only rounding is the mean's.
+    #[test]
+    fn the_consistency_score_ignores_gain_and_offset_and_is_symmetric() {
+        let p_tap = |dx: isize, dy: isize| {
+            f64::from(i32::try_from((7 * dx + 3 * dy * dy + dx * dy) % 11).unwrap())
+        };
+        let q_tap = |dx: isize, dy: isize| {
+            f64::from(i32::try_from((5 * dy - 2 * dx * dx + 4) % 13).unwrap())
+        };
+        let score = |p: &[f64], q: &[f64]| p.iter().zip(q).map(|(a, b)| a * b).sum::<f64>();
+        let p = zmn_patch(2, |dx, dy| Some(p_tap(dx, dy))).unwrap();
+        let q = zmn_patch(2, |dx, dy| Some(q_tap(dx, dy))).unwrap();
+        let s = score(&p, &q);
+        assert!(
+            s.abs() < 1.0,
+            "a correlation of two different patches is inside (−1, 1): {s}"
+        );
+        assert!((score(&q, &p) - s).abs() <= 4.0 * f64::EPSILON);
+        assert!((score(&p, &p) - 1.0).abs() <= 8.0 * f64::EPSILON);
+        for (a, b) in [(4.0, -3.0), (0.125, 100.0), (2.0, 0.5)] {
+            let pa = zmn_patch(2, |dx, dy| Some(a * p_tap(dx, dy) + b)).unwrap();
+            let qa = zmn_patch(2, |dx, dy| Some(a * q_tap(dx, dy) + b)).unwrap();
+            assert!(
+                (score(&pa, &q) - s).abs() <= 64.0 * f64::EPSILON,
+                "gain {a} offset {b}"
+            );
+            assert!(
+                (score(&p, &qa) - s).abs() <= 64.0 * f64::EPSILON,
+                "gain {a} offset {b}"
+            );
         }
     }
 

@@ -1,0 +1,60 @@
+/* Rectified-stereo disparity and the sub-pixel refinement -- spacelab-earthvision/src/stereo.rs --
+ * as identities.
+ *
+ * Two pinhole cameras share the rotation R (world -> camera), focal length f and principal point
+ * (cx, cy); the right centre is the left one moved by the baseline B along the camera x axis,
+ * C_R = C_L + B R^T e_x. With camera coordinates x_c = R (X - C) the pixels are
+ * u = f x_c/z_c + cx, v = f y_c/z_c + cy. The code's depth_from_disparity is Z = f B / d, and its
+ * winner-take-all refinement moves the integer minimum d by
+ *     d* = d - (1/2) (c2 - c0) / (c0 + c2 - 2 c1)
+ * for the costs c0, c1, c2 at d - 1, d, d + 1.
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the right camera sees the point at x_c - B, y_c, z_c: rectification keeps a point on the same
+ *      row, v_L = v_R, and the disparity u_L - u_R is f B / z_c -- so Z = f B / d recovers the depth
+ *      (G1), for any R (a rotation by two generic angles here);
+ *   2. the refinement is the vertex of the parabola through the three samples: that parabola
+ *      interpolates (-1, c0), (0, c1), (1, c2) and its derivative vanishes at d* - d (G2);
+ *   3. three samples of any parabola a (t - v)^2 + k return its vertex v exactly (G3);
+ *   4. the vertices the Rust gate reads, exact, for three dyadic cost triples.
+ * derivations/stereo_disparity.gp recomputes item 4 by interpolating and minimising.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/stereo_disparity.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+rot1(a) := matrix([1, 0, 0], [0, cos(a), sin(a)], [0, -sin(a), cos(a)])$
+rot3(a) := matrix([cos(a), sin(a), 0], [-sin(a), cos(a), 0], [0, 0, 1])$
+R : rot1(al) . rot3(be)$
+X : matrix([x], [y], [z])$
+CL : matrix([cxw], [cyw], [czw])$
+CR : CL + B * transpose(R) . matrix([1], [0], [0])$
+tr(e) := trigsimp(trigreduce(trigsimp(e)))$
+xl : R . (X - CL)$
+xr : R . (X - CR)$
+zero("right_camera_x_is_left_minus_baseline", tr(xr[1, 1] - (xl[1, 1] - B)))$
+zero("right_camera_y_is_left", tr(xr[2, 1] - xl[2, 1]))$
+zero("right_camera_z_is_left", tr(xr[3, 1] - xl[3, 1]))$
+/* With xr = (xc - B, yc, zc): */
+uL : f*xc/zc + cx$ uR : f*(xc - B)/zc + cx$
+vL : f*yc/zc + cy$ vR : f*yc/zc + cy$
+zero("rectified_rows_agree", ratsimp(vL - vR))$
+zero("disparity_is_f_b_over_z", ratsimp((uL - uR) - f*B/zc))$
+zero("depth_from_disparity_is_z", ratsimp(f*B/(uL - uR) - zc))$
+
+p(t) := c1 + (c2 - c0)/2*t + (c0 + c2 - 2*c1)/2*t^2$
+zero("parabola_interpolates_left", ratsimp(p(-1) - c0))$
+zero("parabola_interpolates_centre", ratsimp(p(0) - c1))$
+zero("parabola_interpolates_right", ratsimp(p(1) - c2))$
+tstar : -(1/2)*(c2 - c0)/(c0 + c2 - 2*c1)$
+zero("refinement_is_the_vertex", ratsimp(subst(t = tstar, diff(p(t), t))))$
+q(t) := a*(t - v)^2 + k$
+zero("a_sampled_parabola_returns_its_vertex",
+  ratsimp(subst([c0 = q(-1), c1 = q(0), c2 = q(1)], tstar) - v))$
+
+fpprec : 40$
+vertex(d, c0v, c1v, c2v) := d - (1/2)*(c2v - c0v)/(c0v + c2v - 2*c1v)$
+for row in [[1, 3/2, 1/4, 5/8], [7, 41/8, 9/2, 13/2], [12, 1/1024, 0, 3/512]] do
+  printf(true, "vertex(~a) = ~a = ~a~%", row, apply(vertex, row), bfloat(apply(vertex, row)))$

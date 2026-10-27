@@ -14,6 +14,13 @@
 //!
 //! The two compose to the identity — a map point projected to the image and ray-traced back through the
 //! DEM returns to itself — which is exactly how the module is verified (on the real Pléiades RPC).
+//!
+//! Gate: `derivations/ortho_bilinear_dem.mac` shows that the coded bilinear formula is the unique
+//! corner interpolant, that it reproduces any bilinear (so any planar) DEM exactly, and that the root
+//! of `g` is the ground point indirect orthorectification sends back to the pixel;
+//! `derivations/ortho_bilinear_dem.gp` solves the ray–DEM system on the Pléiades RPC at 60 digits.
+//! The module test `the_ray_meets_the_dem_where_the_rpc_and_the_terrain_agree` (G2) holds the
+//! shipped search and the indirect map to those roots.
 
 // Grid/image indices are small; the usize↔f64 casts in the bilinear interpolators stay in range.
 #![allow(
@@ -213,7 +220,12 @@ pub fn ray_dem_intersection(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::cast_precision_loss)]
+    #![allow(
+        clippy::unwrap_used,
+        clippy::cast_precision_loss,
+        clippy::excessive_precision,
+        clippy::unreadable_literal
+    )]
     use super::*;
 
     const RPB: &str = include_str!("../tests/fixtures/pleiades_reunion.rpb");
@@ -259,6 +271,105 @@ mod tests {
             rows: 1,
             cols: 1,
             heights: vec![height],
+        }
+    }
+
+    /// The planar DEM of `derivations/ortho_bilinear_dem.gp`, `h = 1300 + 2048 (lat + 21.3125) +
+    /// 1024 (lon − 55.75)`, on a 1/256° grid. Every node coordinate and node height is dyadic, so the
+    /// grid holds the plane exactly, and bilinear interpolation reproduces a plane.
+    fn planar_dem() -> DemGrid {
+        let (rows, cols) = (33usize, 33usize);
+        let (min_lat, min_lon, step) = (-21.375, 55.6875, 1.0 / 256.0);
+        let mut heights = vec![0.0; rows * cols];
+        for r in 0..rows {
+            for c in 0..cols {
+                let lat = min_lat + r as f64 * step;
+                let lon = min_lon + c as f64 * step;
+                heights[r * cols + c] = 1300.0 + 2048.0 * (lat + 21.3125) + 1024.0 * (lon - 55.75);
+            }
+        }
+        DemGrid {
+            min_lat,
+            min_lon,
+            d_lat: step,
+            d_lon: step,
+            rows,
+            cols,
+            heights,
+        }
+    }
+
+    /// (G2) `ray_dem_intersection` returns the root of `forward(lat, lon, h) = (row, col)`,
+    /// `h = DEM(lat, lon)` — the ground point a pixel's line of sight pierces the terrain at, solved at
+    /// 60 digits on the real Pléiades RPC by `derivations/ortho_bilinear_dem.gp`; and
+    /// `orthorectify_point` sends that point back to its pixel, the inverse pair
+    /// `derivations/ortho_bilinear_dem.mac` proves (G1). Rows are `(row, col, lat, lon, h, dlat/dh,
+    /// dlon/dh)`.
+    ///
+    /// The search stops at `|g| < 1e-6` m with `g' = 1 − dDEM/dh ≈ 0.998` along these rays, so the
+    /// height is good to 1.01e-6 m, and the ground point to that times the ray's drift per metre, plus
+    /// the RPC inverse's own evaluation floor.
+    #[test]
+    fn the_ray_meets_the_dem_where_the_rpc_and_the_terrain_agree() {
+        const ROOTS: [(f64, f64, f64, f64, f64, f64, f64); 3] = [
+            (
+                19403.5,
+                19999.5,
+                -2.131917830621997951746896734453e1,
+                5.574577770599167030851981258275e1,
+                1.281999199796952344147842963146e3,
+                1.352280613038673145031273168725e-6,
+                -5.800046420646233353065717194216e-7,
+            ),
+            (
+                19150.25,
+                20311.75,
+                -2.131803122506841356954092780608e1,
+                5.574730583100819084892990591240e1,
+                1.285913222012276438884403507439e3,
+                1.352245187594062170185138263481e-6,
+                -5.820193253511093325773666145139e-7,
+            ),
+            (
+                19650.5,
+                19700.25,
+                -2.132029718605356916555117356201e1,
+                5.574431316776713845872149531466e1,
+                1.278208046755840130682007747210e3,
+                1.352315318349669350313456420377e-6,
+                -5.780807603048003686050066761954e-7,
+            ),
+        ];
+        let rpc = RationalPolynomialCamera::parse_rpb(RPB).unwrap();
+        let dem = planar_dem();
+        for (row, col, lat, lon, h, dlat_dh, dlon_dh) in ROOTS {
+            let (got_lat, got_lon, got_h) =
+                ray_dem_intersection(&rpc, &dem, row, col, 800.0, 1800.0).unwrap();
+            let tol_h = 1.01e-6;
+            // The inverse's floor: a few ulps of the coordinate plus its scale times the ~1e2 sum of
+            // term magnitudes this camera's cubics carry near the centre (see the rpc gate).
+            let floor_lat = 16.0 * f64::EPSILON * (lat.abs() + rpc.lat_scale * 128.0);
+            let floor_lon = 16.0 * f64::EPSILON * (lon.abs() + rpc.lon_scale * 128.0);
+            assert!(
+                (got_h - h).abs() <= tol_h,
+                "({row}, {col}): h {got_h} vs {h}"
+            );
+            assert!(
+                (got_lat - lat).abs() <= dlat_dh.abs() * tol_h + floor_lat,
+                "({row}, {col}): lat {got_lat} vs {lat}"
+            );
+            assert!(
+                (got_lon - lon).abs() <= dlon_dh.abs() * tol_h + floor_lon,
+                "({row}, {col}): lon {got_lon} vs {lon}"
+            );
+            // The DEM reproduces the plane at the root, and ortho maps the root back to the pixel.
+            assert!((dem.height_at(lat, lon) - h).abs() <= 64.0 * f64::EPSILON * h);
+            let (r, c) = orthorectify_point(&rpc, &dem, lat, lon);
+            let tol_px = 16.0 * f64::EPSILON * (row.abs() + rpc.line_scale * 128.0);
+            assert!(
+                (r - row).abs() <= tol_px && (c - col).abs() <= tol_px,
+                "({row}, {col}): ortho returned ({r}, {c})"
+            );
         }
     }
 

@@ -1,0 +1,96 @@
+/* The sequential square-root Kalman filter -- spacelab-estimation/src/kalman.rs -- as identities, on
+ * a general 3-state covariance, and its exact values on a rational fixture.
+ *
+ * The measurement update lower-triangularises the pre-array [[sqrt R, h S], [0, S]] to
+ * [[sqrt f, 0], [sqrt f K, S+]] by orthogonal rotations, so Post Post^T = Pre Pre^T. With
+ * P = S S^T, f = h P h^T + R and K = P h^T / f, each line printing `<name>: 0`:
+ *   1. the post-array the code reads off is the one whose Gram matrix is the pre-array's, block by
+ *      block, when S+ S+^T = P - K f K^T: the array form computes the Kalman update (G2);
+ *   2. the Joseph form (I - K h) P (I - K h)^T + K R K^T equals P - K f K^T and (I - K h) P at the
+ *      optimal gain (G1);
+ *   3. the gain is the stationary point of tr P+(K) over every gain, with Hessian 2 f I > 0, so the
+ *      minimum-variance gain (G2);
+ *   4. the information form (P^-1 + h^T h / R)^-1 is the same P+ (G1);
+ *   5. the time update's Gram identity [Phi S | S_Q][Phi S | S_Q]^T = Phi P Phi^T + Q is invariant
+ *      under the Givens rotation of any two columns (G1).
+ * Then the fixture of `tests/kalman.rs::the_filter_reproduces_the_exact_rational_kalman_recursion`:
+ * one time update and two scalar measurement updates in exact rationals, printed at 25 digits. The
+ * second engine is derivations/linear_filters.gp, which recomputes the same fixture.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/kalman_square_root.mac
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+/* The number of entries of a matrix that do not simplify to zero. */
+nonzero(m) := length(sublist(flatten(args(ratsimp(m))), lambda([e], e # 0)))$
+rnum(x) := ssubst("e", "b", string(bfloat(x)))$
+fpprec : 25$
+
+s : matrix([s11, 0, 0], [s21, s22, 0], [s31, s32, s33])$
+p : s . transpose(s)$
+h : matrix([h1, h2, h3])$
+f : (h . p . transpose(h)) + r$
+k : (p . transpose(h)) / f$
+pplus : p - k . transpose(k) * f$
+id : ident(3)$
+
+/* 1. Block Gram identity of the measurement post-array, S+ standing for any factor of pplus. */
+zero("measurement_post_array_top_left", ratsimp((sqrt(f))^2 - (r + h . s . transpose(h . s))))$
+zero("measurement_post_array_cross", nonzero(sqrt(f) * k * sqrt(f) - s . transpose(h . s)))$
+zero("measurement_post_array_bottom_right", nonzero((sqrt(f) * k) . transpose(sqrt(f) * k) + pplus - s . transpose(s)))$
+
+/* 2. Joseph form at the optimal gain. */
+ikh : id - k . h$
+zero("joseph_equals_p_minus_k_f_kt", nonzero(ikh . p . transpose(ikh) + k . transpose(k) * r - pplus))$
+zero("joseph_equals_i_minus_kh_p", nonzero(ikh . p . transpose(ikh) + k . transpose(k) * r - ikh . p))$
+
+/* 3. tr P+(G) over an arbitrary gain G: gradient zero at G = K, Hessian 2 f I. */
+g : matrix([g1], [g2], [g3])$
+igh : id - g . h$
+cost : mat_trace(igh . p . transpose(igh) + g . transpose(g) * r)$
+grad : [diff(cost, g1), diff(cost, g2), diff(cost, g3)]$
+zero("trace_gradient_vanishes_at_the_kalman_gain",
+  length(sublist(ratsimp(subst([g1 = k[1,1], g2 = k[2,1], g3 = k[3,1]], grad)), lambda([e], e # 0))))$
+hess : genmatrix(lambda([i, j], diff(grad[i], [g1, g2, g3][j])), 3, 3)$
+zero("trace_hessian_is_2f_identity", nonzero(hess - 2 * f * id))$
+
+/* 4. Information form. */
+zero("information_form_is_the_same_posterior", nonzero((invert(p) + transpose(h) . h / r) . pplus - id))$
+
+/* 5. A Givens rotation of columns i and j of the 3 x 6 time-update pre-array leaves its Gram matrix. */
+phi : genmatrix(lambda([i, j], f_[i, j]), 3, 3)$
+sq : matrix([q11, 0, 0], [q21, q22, 0], [q31, q32, q33])$
+pre : addcol(phi . s, sq)$
+givens(i, j) := block([t : ident(6)],
+  t[i, i] : c, t[j, j] : c, t[i, j] : -sn, t[j, i] : sn, t)$
+rot(m) := ratsimp(subst(sn^2 = 1 - c^2, ratsimp(m)))$
+zero("givens_rotation_keeps_the_gram_matrix", sum(sum(nonzero(rot(
+  (pre . givens(i, j)) . transpose(pre . givens(i, j)) - pre . transpose(pre))), j, i + 1, 6), i, 1, 5))$
+zero("time_update_gram_is_phi_p_phit_plus_q", nonzero(pre . transpose(pre) - (phi . p . transpose(phi) + sq . transpose(sq))))$
+
+/* The rational fixture. Every input is a dyadic rational, so the f64 inputs in the test are exact. */
+l0 : matrix([2, 0, 0], [1, 3, 0], [-1, 4, 5])$
+fx : matrix([1, 1/2, 0], [0, 1, 1/4], [0, 0, 1])$
+fq : matrix([1/2, 0, 0], [1/4, 1/2, 0], [0, 1/8, 1/4])$
+x : matrix([1], [-2], [1/2])$
+cov : l0 . transpose(l0)$
+cov : fx . cov . transpose(fx) + fq . transpose(fq)$
+x : fx . x$
+update(hh, rr, nu) := block([ff, kk],
+  ff : (hh . cov . transpose(hh)) + rr,
+  kk : cov . transpose(hh) / ff,
+  x : x + kk * nu,
+  cov : cov - kk . transpose(kk) * ff,
+  ff)$
+show(tag) := (printf(true, "~a x = [~a, ~a, ~a]~%", tag, rnum(x[1,1]), rnum(x[2,1]), rnum(x[3,1])),
+  for i : 1 thru 3 do printf(true, "~a P row ~a = [~a, ~a, ~a]~%", tag, i,
+    rnum(cov[i,1]), rnum(cov[i,2]), rnum(cov[i,3])))$
+show("predicted")$
+f1 : update(matrix([1, -1/2, 1/4]), 3/4, 5/4)$
+printf(true, "f1 = ~a~%", rnum(f1))$
+show("first update")$
+f2 : update(matrix([0, 1, 1/2]), 1/2, -3/8)$
+printf(true, "f2 = ~a~%", rnum(f2))$
+show("second update")$

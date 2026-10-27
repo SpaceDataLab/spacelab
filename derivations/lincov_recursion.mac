@@ -1,0 +1,171 @@
+/* Linear covariance analysis -- spacelab-estimation/src/lincov.rs -- derived from the definition of
+ * the error and checked against the recursion the code runs. The truth x (N) is propagated by
+ * x+ = Phi x + w, w ~ (0, Q); the filter's estimate xh (M) by xh+ = Phih xh and, on a scalar
+ * measurement z = H x + v, v ~ (0, R), by xh+ = xh + K (z - Hh xh) with the filter's own gain
+ * K = Ph Hh'/(Hh Ph Hh' + Rh). The error is e = T x - xh. Every statement is shown for N = 3,
+ * M = 2 with every matrix entry a free symbol, so nothing rests on a special structure.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the error dynamics follow from the definition: e+ = D x + Phih e + T w, D = T Phi - Phih T,
+ *      and on a measurement e+ = (I - K Hh) e - K Delta x - K v, Delta = H - Hh T;
+ *   2. the covariance of [x; e] after each step, L Sigma L' with L the Jacobian of 1. and Sigma the
+ *      block-diagonal covariance of [x; e; noise], equals block by block the sequence of products
+ *      `time_update` and `measurement_update` form (Cxx, Cex, Cee) -- the defining equation (G2);
+ *   3. the filter's Joseph update A Ph A' + K Rh K' equals the short form (I - K Hh) Ph at its own
+ *      optimal gain, and differs from it for any other gain;
+ *   4. a filter whose models are the truth's (Phih = Phi, T = I, Hh = H, Qh = Q, Rh = R) carries Cee
+ *      through both updates exactly as its own Ph, so Cee = Ph is an identity, not a tolerance;
+ *      Cex stays at zero through a time update only when Q = 0;
+ *   5. one time update and one measurement update on a rational N = 3, M = 2 scenario, exactly --
+ *      the values `lincov_matches_the_exact_rational_recursion` asserts.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/lincov_recursion.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  if matrixp(d) then d : (if every(lambda([e], is(e = 0)), flatten(args(d))) then 0 else d),
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+N : 3$ M : 2$
+gen(name, r, c) := genmatrix(lambda([i, j], concat(name, i, j)), r, c)$
+sym(name, n) := genmatrix(lambda([i, j], concat(name, min(i, j), max(i, j))), n, n)$
+colv(name, n) := genmatrix(lambda([i, j], concat(name, i)), n, 1)$
+blockv(a, b) := addrow(a, b)$
+I_M : ident(M)$
+
+Phi : gen(f, N, N)$ Phih : gen(g, M, M)$ T : gen(t, M, N)$
+Q : sym(q, N)$ Qh : sym(p, M)$
+Cxx : sym(x, N)$ Cex : gen(c, M, N)$ Cee : sym(e, M)$ Ph : sym(h, M)$
+H : gen(a, 1, N)$ Hh : gen(b, 1, M)$
+
+/* 1. Error dynamics, from e = T x - xh with xh = T x - e. */
+X : colv(X, N)$ E : colv(E, M)$ Wn : colv(W, N)$
+xp : Phi . X + Wn$
+xhp : Phih . (T . X - E)$
+ep : T . xp - xhp$
+D : T . Phi - Phih . T$
+zero("time_error_dynamics", expand(ep - (D . X + Phih . E + T . Wn)))$
+
+Kv : colv(k, M)$ Vn : vn$
+z : H . X + Vn$
+xhm : (T . X - E) + Kv * (z - Hh . (T . X - E))$
+em : T . X - xhm$
+Delta : H - Hh . T$
+zero("measurement_error_dynamics",
+  expand(em - ((I_M - Kv . Hh) . E - Kv * (Delta . X) - Kv * Vn)))$
+
+/* 2. The covariance of [x; e] from the Jacobian of the linear maps. */
+vars_t : append(flatten(args(X)), flatten(args(E)), flatten(args(Wn)))$
+Lt : jacobian(append(flatten(args(xp)), flatten(args(ep))), vars_t)$
+Sig_t : zeromatrix(N + M + N, N + M + N)$
+P0 : addcol(addrow(Cxx, Cex), addrow(transpose(Cex), Cee))$
+for i : 1 thru N + M do for j : 1 thru N + M do Sig_t[i, j] : P0[i, j]$
+for i : 1 thru N do for j : 1 thru N do Sig_t[N + M + i, N + M + j] : Q[i, j]$
+Pt : expand(Lt . Sig_t . transpose(Lt))$
+blk(P, r0, r1, c0, c1) := genmatrix(lambda([i, j], P[r0 + i - 1, c0 + j - 1]), r1 - r0 + 1, c1 - c0 + 1)$
+
+/* The code's sequence of products in time_update. */
+inner : D . Cxx + Phih . Cex$
+code_cxx : Phi . Cxx . transpose(Phi) + Q$
+code_cex : inner . transpose(Phi) + T . Q$
+code_cee : inner . transpose(D) + transpose(Phih . (Cex . transpose(D)))
+         + Phih . Cee . transpose(Phih) + (T . Q) . transpose(T)$
+zero("time_update_dispersion_block", expand(blk(Pt, 1, N, 1, N) - code_cxx))$
+zero("time_update_cross_block", expand(blk(Pt, N + 1, N + M, 1, N) - code_cex))$
+zero("time_update_error_block", expand(blk(Pt, N + 1, N + M, N + 1, N + M) - code_cee))$
+zero("time_update_cross_is_the_transpose_of_the_upper_block",
+  expand(blk(Pt, 1, N, N + 1, N + M) - transpose(code_cex)))$
+
+vars_m : append(flatten(args(X)), flatten(args(E)), [vn])$
+Lm : jacobian(append(flatten(args(X)), flatten(args(em))), vars_m)$
+Sig_m : zeromatrix(N + M + 1, N + M + 1)$
+for i : 1 thru N + M do for j : 1 thru N + M do Sig_m[i, j] : P0[i, j]$
+Sig_m[N + M + 1, N + M + 1] : Rt$
+Pm : expand(Lm . Sig_m . transpose(Lm))$
+/* The code's sequence of products in measurement_update. */
+A : I_M - Kv . Hh$
+code_cex_m : -Kv . Delta . Cxx + A . Cex$
+dcd : Delta . Cxx . transpose(Delta)$
+acd : A . Cex . transpose(Delta)$
+code_cee_m : A . Cee . transpose(A) + Kv . transpose(Kv) * dcd - Kv . transpose(acd)
+           - acd . transpose(Kv) + Kv . transpose(Kv) * Rt$
+zero("measurement_update_dispersion_untouched", expand(blk(Pm, 1, N, 1, N) - Cxx))$
+zero("measurement_update_cross_block", expand(blk(Pm, N + 1, N + M, 1, N) - code_cex_m))$
+zero("measurement_update_error_block", expand(blk(Pm, N + 1, N + M, N + 1, N + M) - code_cee_m))$
+
+/* 3. Joseph against the short form. */
+fh : Hh . Ph . transpose(Hh) + Rh$
+Kopt : Ph . transpose(Hh) / fh$
+joseph(K) := (I_M - K . Hh) . Ph . transpose(I_M - K . Hh) + K . transpose(K) * Rh$
+zero("joseph_is_the_short_form_at_the_optimal_gain",
+  ratsimp(joseph(Kopt) - (I_M - Kopt . Hh) . Ph))$
+block([gap : ratsimp(joseph(2*Kopt) - (I_M - 2*Kopt . Hh) . Ph)],
+  zero("joseph_differs_from_the_short_form_off_the_optimal_gain",
+    if every(lambda([e], is(e = 0)), flatten(args(gap))) then 1 else 0))$
+
+/* 4. A filter that is right. */
+perfect : [g11 = f11, g12 = f12, g21 = f21, g22 = f22]$
+Phi2 : matrix([f11, f12], [f21, f22])$ Q2 : sym(q, 2)$ H2 : matrix([a1, a2])$
+Ce2 : sym(h, 2)$ Cx2 : sym(x, 2)$ Cc2 : gen(c, 2, 2)$
+/* D = 0, Delta = 0 with T = I, so the Cee recursion is P's own. */
+cee_t : Phi2 . Ce2 . transpose(Phi2) + Q2$
+p_t : Phi2 . Ce2 . transpose(Phi2) + Q2$
+zero("perfect_filter_time_update_cee_is_p", expand(cee_t - p_t))$
+fh2 : H2 . p_t . transpose(H2) + Rr$
+K2 : p_t . transpose(H2) / fh2$
+A2 : ident(2) - K2 . H2$
+cee_m : A2 . cee_t . transpose(A2) + K2 . transpose(K2) * Rr$
+p_m : A2 . p_t . transpose(A2) + K2 . transpose(K2) * Rr$
+zero("perfect_filter_measurement_update_cee_is_p", ratsimp(cee_m - p_m))$
+/* Cex after a time update with D = 0 from Cex = 0 is T Q: zero exactly when Q is. */
+zero("perfect_filter_cross_is_t_q", expand((zeromatrix(2, 2) . Cx2 + Phi2 . zeromatrix(2, 2))
+  . transpose(Phi2) + ident(2) . Q2 - Q2))$
+
+/* 5. A rational scenario, every model mismatched. */
+fpprec : 40$
+num_phi : matrix([1, 1/2, 1/8], [0, 1, 1/4], [0, 0, 99/100])$
+num_phih : matrix([1, 51/100], [0, 1])$
+num_t : matrix([1, 0, 0], [0, 1, 1/2])$
+num_q : matrix([1/1000, 0, 1/5000], [0, 2/1000, 0], [1/5000, 0, 3/1000])$
+num_qh : matrix([1/2000, 0], [0, 1/1000])$
+num_cxx : matrix([16, 1, 0], [1, 4, 1/2], [0, 1/2, 1])$
+num_p0 : matrix([9, 1/2], [1/2, 2])$
+num_h : matrix([1, 1/10, 1/20])$
+num_hh : matrix([1, 0])$
+num_r : 9/100$ num_rh : 4/100$
+/* Seeded as LinearCovariance::new: Cex = 0, Cee = Ph = P0. */
+D5 : num_t . num_phi - num_phih . num_t$
+in5 : D5 . num_cxx$
+cxx1 : num_phi . num_cxx . transpose(num_phi) + num_q$
+cex1 : in5 . transpose(num_phi) + num_t . num_q$
+cee1 : in5 . transpose(D5) + num_phih . num_p0 . transpose(num_phih) + num_t . num_q . transpose(num_t)$
+ph1 : num_phih . num_p0 . transpose(num_phih) + num_qh$
+/* The same step through the Jacobian construction of 2., as a check on the transcription. */
+/* Entry substitutions for gen() (sy = false) and sym() (sy = true) symbol names. */
+eqs(name, Mx, sy) := flatten(makelist(makelist(
+  if sy then concat(name, min(i, j), max(i, j)) = Mx[i, j] else concat(name, i, j) = Mx[i, j],
+  j, 1, length(transpose(Mx))), i, 1, length(Mx)))$
+sub5 : append(eqs(f, num_phi, false), eqs(g, num_phih, false), eqs(t, num_t, false),
+  eqs(q, num_q, true), eqs(x, num_cxx, true), eqs(c, zeromatrix(2, 3), false),
+  eqs(e, num_p0, true))$
+zero("rational_scenario_time_update_matches_the_definition",
+  ratsimp(subst(sub5, blk(Pt, N + 1, N + M, N + 1, N + M)) - cee1))$
+fh5 : num_hh . ph1 . transpose(num_hh) + num_rh$
+K5 : ph1 . transpose(num_hh) / fh5$
+A5 : ident(2) - K5 . num_hh$
+Dl5 : num_h - num_hh . num_t$
+cex2 : -K5 . Dl5 . cxx1 + A5 . cex1$
+acd5 : A5 . cex1 . transpose(Dl5)$
+cee2 : A5 . cee1 . transpose(A5) + K5 . transpose(K5) * (Dl5 . cxx1 . transpose(Dl5))
+     - K5 . transpose(acd5) - acd5 . transpose(K5) + K5 . transpose(K5) * num_r$
+ph2 : A5 . ph1 . transpose(A5) + K5 . transpose(K5) * num_rh$
+fpprintprec : 40$
+show(name, Mx) := for i : 1 thru length(Mx) do
+  for j : 1 thru length(transpose(Mx)) do
+    printf(true, "~a[~a][~a] = ~a~%", name, i - 1, j - 1, bfloat(Mx[i, j]))$
+printf(true, "innovation variance = ~a~%", bfloat(fh5))$
+show("dispersion", cxx1)$
+show("cross", cex2)$
+show("error", cee2)$
+show("filter", ph2)$

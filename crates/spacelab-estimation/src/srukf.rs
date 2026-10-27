@@ -21,6 +21,12 @@
 //!   center residual is folded in with a rank-1 Cholesky update whose sign follows `W₀ᶜ`. The
 //!   measurement update likewise *downdates* `S` by the columns of `K S_y`, giving `P⁻ − K P_y Kᵀ`
 //!   without ever forming that difference as a matrix.
+//!
+//! Gate: `derivations/srukf_square_root.mac` restates `cholupdate` and `fold_row` step for step
+//! on a general 3 × 3 factor and shows each adds (or subtracts) exactly one outer product and keeps
+//! the factor triangular. The module tests `the_square_root_moves_add_and_subtract_exactly_one_outer_product`
+//! (G1) and `the_srukf_is_the_exact_rational_kalman_step` (G3) — the linear-Gaussian step against
+//! `derivations/kalman_square_root.mac`'s exact recursion — tie the shipped code to it.
 
 // Matrix code indexes several arrays by one i/j/k, and the filter symbols (S, P, K, Q, R, χ) are one
 // letter by convention; the paper's locals (xm, yb, ry, sy, w0c) read as its notation.
@@ -953,5 +959,126 @@ mod tests {
             (density - expected).abs() < 1e-15 * expected,
             "density {density:.17e}, expected {expected:.17e}"
         );
+    }
+
+    /// (G1) The two square-root moves keep the identities `derivations/srukf_square_root.mac`
+    /// proves for them on a general 3 × 3 factor: `cholupdate(L, v, ±1)` is a lower factor of
+    /// `L Lᵀ ± v vᵀ`, and `fold_row(R, a)` an upper factor `R'` with `R'ᵀR' = RᵀR + a aᵀ`. On dyadic
+    /// inputs both Gram sums are exact in f64, so the bound is 8 ulps of the largest entry, 42.
+    #[test]
+    fn the_square_root_moves_add_and_subtract_exactly_one_outer_product() {
+        let l = [[2.0, 0.0, 0.0], [1.0, 3.0, 0.0], [-1.0, 4.0, 5.0]];
+        let v = [1.0, 0.5, -0.25];
+        let tol = 8.0 * f64::EPSILON * 42.0;
+        for sign in [1.0, -1.0] {
+            let mut factor = l;
+            cholupdate(&mut factor, &v, sign);
+            for i in 0..3 {
+                for j in 0..3 {
+                    let want = (0..3).map(|k| l[i][k] * l[j][k]).sum::<f64>() + sign * v[i] * v[j];
+                    let got = (0..3).map(|k| factor[i][k] * factor[j][k]).sum::<f64>();
+                    assert!(
+                        (got - want).abs() <= tol,
+                        "sign {sign}: [{i}][{j}] {got} vs {want}"
+                    );
+                    if j > i {
+                        assert_eq!(
+                            factor[i][j], 0.0,
+                            "sign {sign}: [{i}][{j}] above the diagonal"
+                        );
+                    }
+                }
+            }
+        }
+
+        let r = [[2.0, 1.0, -1.0], [0.0, 3.0, 4.0], [0.0, 0.0, 5.0]];
+        let mut folded = r;
+        fold_row(&mut folded, &v);
+        for i in 0..3 {
+            for j in 0..3 {
+                let want = (0..3).map(|k| r[k][i] * r[k][j]).sum::<f64>() + v[i] * v[j];
+                let got = (0..3).map(|k| folded[k][i] * folded[k][j]).sum::<f64>();
+                assert!(
+                    (got - want).abs() <= tol,
+                    "fold_row [{i}][{j}] {got} vs {want}"
+                );
+                if i > j {
+                    assert_eq!(folded[i][j], 0.0, "fold_row [{i}][{j}] below the diagonal");
+                }
+            }
+        }
+    }
+
+    /// (G3) On a linear-Gaussian step the unscented transform is exact
+    /// (`derivations/unscented_transform.mac`), so one predict and one update must land on the exact
+    /// rational Kalman recursion of `derivations/kalman_square_root.mac` — the same fixture as
+    /// `tests/kalman.rs::the_filter_reproduces_the_exact_rational_kalman_recursion`, whose first
+    /// update these literals are. Run at a positive centre weight `(1, 2, 0)` and a negative one
+    /// `(0.9, 0, 0)`, where the measurement downdate meets a negative `W₀ᶜ`. The bound is 64 ulps of
+    /// the largest entry, 42: the weights are of order one but the cloud is summed twice.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn the_srukf_is_the_exact_rational_kalman_step() {
+        let x1 = [
+            1.379_046_159_739_513_503_160_314,
+            -8.522_074_315_265_274_851_561_004e-1,
+            1.293_909_212_794_483_815_361_042,
+        ];
+        let p1 = [
+            [
+                2.544_292_281_172_189_235_778_587,
+                3.397_433_441_869_373_683_202_452,
+                -7.259_145_757_517_716_912_468_876e-2,
+            ],
+            [
+                3.397_433_441_869_373_683_202_452,
+                1.502_392_980_271_978_548_170_849e1,
+                1.891_282_800_229_841_026_623_252e1,
+            ],
+            [
+                -7.259_145_757_517_716_912_468_876e-2,
+                1.891_282_800_229_841_026_623_252e1,
+                4.002_140_394_560_429_036_583_03e1,
+            ],
+        ];
+        let phi = [[1.0, 0.5, 0.0], [0.0, 1.0, 0.25], [0.0, 0.0, 1.0]];
+        let sq = [[0.5, 0.0, 0.0], [0.25, 0.5, 0.0], [0.0, 0.125, 0.25]];
+        let h = [1.0, -0.5, 0.25];
+        let tol = 64.0 * f64::EPSILON * 42.0;
+        for params in [
+            UnscentedParams::new(1.0, 2.0, 0.0),
+            UnscentedParams::new(0.9, 0.0, 0.0),
+        ] {
+            let l0 = [[2.0, 0.0, 0.0], [1.0, 3.0, 0.0], [-1.0, 4.0, 5.0]];
+            let mut ukf = SquareRootUnscentedKalman::<3, 7>::new([1.0, -2.0, 0.5], l0, params);
+            ukf.predict(|x| matvec(&phi, x), &sq);
+            // The predicted measurement is h·(Φ x₀) = 1.0625; the innovation is 5/4.
+            let outcome = ukf.update_robust(
+                |x| [dot(&h, x)],
+                &[2.3125],
+                &[[libm::sqrt(0.75)]],
+                RobustPolicy::Plain,
+            );
+            assert!(
+                (outcome.innovation_variance - 5.098_632_812_5).abs() <= tol,
+                "{params:?}: f = {}",
+                outcome.innovation_variance
+            );
+            let p = ukf.covariance();
+            for i in 0..3 {
+                assert!(
+                    (ukf.x[i] - x1[i]).abs() <= tol,
+                    "{params:?}: x[{i}] = {}",
+                    ukf.x[i]
+                );
+                for j in 0..3 {
+                    assert!(
+                        (p[i][j] - p1[i][j]).abs() <= tol,
+                        "{params:?}: P[{i}][{j}] = {}",
+                        p[i][j]
+                    );
+                }
+            }
+        }
     }
 }

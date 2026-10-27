@@ -1,0 +1,80 @@
+/* Gaussian-mixture moments -- spacelab-estimation/src/mixture.rs -- from the mixture density.
+ *
+ * The code collapses a mixture sum_j w_j N(m_j, S_j S_j^T), sum_j w_j = 1, to
+ *     mu = sum_j w_j m_j,   P = sum_j w_j (S_j S_j^T + (m_j - mu)(m_j - mu)^T),
+ * normalises weights by their total, and propagates every component on its own.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. a component x = m + S z, z ~ N(0, I) in two dimensions, has E[x] = m and E[x x^T] = m m^T + S S^T,
+ *      by integrating against the standard normal density (any square root S does);
+ *   2. hence the mixture density's mean is mu and its covariance E[x x^T] - mu mu^T is the coded P:
+ *      the collapse preserves the first two moments of the density (G4), and merging any two
+ *      components by it leaves the mixture's moments unchanged;
+ *   3. a linear map x -> A x + noise of covariance Q commutes with the collapse: collapsing the
+ *      propagated components gives A mu and A P A^T + Q (G1);
+ *   4. normalised weights sum to one.
+ * Then it prints the collapsed moments of the fixture of `the_collapse_has_the_moments_of_the_mixture_density`
+ * in mixture.rs, exactly.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/gaussian_mixture_moments.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$
+colv(u) := transpose(matrix(u))$
+
+/* 1. Expectation against the 2-d standard normal density. */
+phi2 : exp(-(z1^2 + z2^2)/2)/(2*%pi)$
+expect(f) := integrate(integrate(f*phi2, z1, minf, inf), z2, minf, inf)$
+zero("standard_normal_is_normalised", ratsimp(expect(1) - 1))$
+m : [n1, n2]$
+S : matrix([s11, s12], [s21, s22])$
+x : m + list_matrix_entries(S . colv([z1, z2]))$
+Ex : map(expect, x)$
+Exx : genmatrix(lambda([a, b], expect(expand(x[a]*x[b]))), 2, 2)$
+zero("component_mean", lmax(map(abs, ratsimp(Ex - m))))$
+zero("component_second_moment", zmax(ratsimp(Exx - (colv(m) . transpose(colv(m)) + S . transpose(S)))))$
+
+/* 2. Three components with general weights normalised to one. */
+ws : [w1, w2, 1 - w1 - w2]$
+ms : [[a1, a2], [b1, b2], [c1, c2]]$
+Ps : [matrix([p11, p12], [p12, p22]), matrix([q11, q12], [q12, q22]), matrix([r11, r12], [r12, r22])]$
+secondm(j) := Ps[j] + colv(ms[j]) . transpose(colv(ms[j]))$        /* E[x x^T] of component j */
+mu : sum(ws[j]*ms[j], j, 1, 3)$
+density_cov : sum(ws[j]*secondm(j), j, 1, 3) - colv(mu) . transpose(colv(mu))$
+collapse_cov : sum(ws[j]*(Ps[j] + colv(ms[j] - mu) . transpose(colv(ms[j] - mu))), j, 1, 3)$
+zero("collapse_is_the_density_covariance", zmax(ratsimp(collapse_cov - density_cov)))$
+/* merging components 1 and 2 into one moment-matched Gaussian */
+wm : ws[1] + ws[2]$
+mm : (ws[1]*ms[1] + ws[2]*ms[2])/wm$
+Pm : (ws[1]*(Ps[1] + colv(ms[1] - mm) . transpose(colv(ms[1] - mm)))
+    + ws[2]*(Ps[2] + colv(ms[2] - mm) . transpose(colv(ms[2] - mm))))/wm$
+mu_merged : wm*mm + ws[3]*ms[3]$
+cov_merged : wm*(Pm + colv(mm - mu_merged) . transpose(colv(mm - mu_merged)))
+           + ws[3]*(Ps[3] + colv(ms[3] - mu_merged) . transpose(colv(ms[3] - mu_merged)))$
+zero("merge_preserves_the_mean", lmax(map(abs, ratsimp(mu_merged - mu))))$
+zero("merge_preserves_the_covariance", zmax(ratsimp(cov_merged - collapse_cov)))$
+
+/* 3. */
+A : matrix([e11, e12], [e21, e22])$
+Q : matrix([g11, g12], [g12, g22])$
+mA : makelist(list_matrix_entries(A . colv(ms[j])), j, 1, 3)$
+PA : makelist(A . Ps[j] . transpose(A) + Q, j, 1, 3)$
+muA : sum(ws[j]*mA[j], j, 1, 3)$
+covA : sum(ws[j]*(PA[j] + colv(mA[j] - muA) . transpose(colv(mA[j] - muA))), j, 1, 3)$
+zero("linear_flow_commutes_with_collapse_mean", lmax(map(abs, ratsimp(muA - list_matrix_entries(A . colv(mu))))))$
+zero("linear_flow_commutes_with_collapse_covariance", zmax(ratsimp(covA - (A . collapse_cov . transpose(A) + Q))))$
+
+/* 4. */
+zero("normalised_weights_sum_to_one", ratsimp(sum(u[j]/sum(u[k], k, 1, 3), j, 1, 3) - 1))$
+
+/* The fixture: w = (3/5, 2/5), m = (1, -1), (-1/2, 2), P0 = [[2/5, 1/20], [1/20, 3/10]],
+   P1 = [[1/5, -1/50], [-1/50, 1/2]]. */
+fix : [w1 = 3/5, w2 = 2/5, a1 = 1, a2 = -1, b1 = -1/2, b2 = 2,
+       p11 = 2/5, p12 = 1/20, p22 = 3/10, q11 = 1/5, q12 = -1/50, q22 = 1/2]$
+for a : 1 thru 2 do printf(true, "mean[~d] = ~a~%", a - 1, subst(fix, mu[a]))$
+for a : 1 thru 2 do for b : 1 thru 2 do
+  printf(true, "cov[~d][~d] = ~a~%", a - 1, b - 1, ratsimp(subst(fix, density_cov[a, b])))$

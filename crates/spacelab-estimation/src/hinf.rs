@@ -77,6 +77,12 @@
 //! its `update` is this whole recursion and its `predict` applies `F` again — which is one of the
 //! reasons its own author marked it "I do not believe this code is correct". Nothing here is ported
 //! from it; the mathematics is Simon's.)
+//!
+//! Gate: `derivations/hinf_riccati.mac` proves `P L = M⁻¹` — so the symmetric form above is Simon's
+//! gain and Riccati recursion — and that at `γ = 0` it is the Kalman posterior and predictor gain;
+//! `derivations/linear_filters.gp` re-runs its fixture in Simon's form. The module tests
+//! `the_recursion_is_the_exact_rational_riccati_recursion` (G2) and
+//! `the_bound_is_refused_exactly_where_the_prior_loses_definiteness` (G3) tie the code to it.
 
 // Matrix algebra over const-generic dimensions, indexed by one i/j/k as the rest of the crate does;
 // the filter symbols (F, H, K, P, M, V, W, γ) are one letter by universal convention.
@@ -504,6 +510,99 @@ mod tests {
             m[i][i] = 1.0;
         }
         m
+    }
+
+    /// (G2) Two steps of the recursion against the Riccati recursion evaluated in exact rationals by
+    /// `derivations/hinf_riccati.mac`, which also shows that this symmetric form is Simon's
+    /// `L = [I − γ Q̄ P + Hᵀ V⁻¹ H P]⁻¹` form (`P L = M⁻¹`). The fixture has a correlated
+    /// two-channel `V`, a γ of 1/8 with `Q̄ = I` and dyadic inputs throughout, so only the filter
+    /// rounds; the bound is 16 ulps of the prior's scale, 4.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn the_recursion_is_the_exact_rational_riccati_recursion() {
+        let f = [[1.0, 0.5], [0.0, 1.0]];
+        let h = [[1.0, 0.25], [0.0, 1.0]];
+        let v = [[0.5, 0.125], [0.125, 0.25]];
+        let sw = [[0.25, 0.0], [0.125, 0.5]];
+        let mut filter =
+            HInfinityFilter::new([0.5, -1.0], [[2.0, 0.0], [0.5, 1.0]], identity(), 0.125).unwrap();
+        let exact = [
+            (
+                [0.75, 0.5],
+                [0.5, 1.5],
+                [
+                    8.129_339_039_467_427_484_545_887e-1,
+                    2.545_886_828_340_466_000_951_022e-1,
+                ],
+                [
+                    [
+                        6.127_615_311_459_819_305_753_685e-1,
+                        2.066_185_211_602_472_658_107_466e-1,
+                    ],
+                    [
+                        2.066_185_211_602_472_658_107_466e-1,
+                        4.763_715_525_439_847_836_424_156e-1,
+                    ],
+                ],
+            ),
+            (
+                [1.75, -0.25],
+                [
+                    8.734_189_253_447_456_015_216_358e-1,
+                    -5.045_886_828_340_466_000_951_022e-1,
+                ],
+                [
+                    1.321_976_336_106_491_573_864_834,
+                    -4.177_421_395_864_781_145_500_628e-2,
+                ],
+                [
+                    [
+                        4.268_644_552_841_899_385_016_474e-1,
+                        1.720_205_549_559_947_494_042_773e-1,
+                    ],
+                    [
+                        1.720_205_549_559_947_494_042_773e-1,
+                        4.324_307_212_715_680_222_427_528e-1,
+                    ],
+                ],
+            ),
+        ];
+        let tol = 16.0 * f64::EPSILON * 4.0;
+        for (k, (z, nu, x, p)) in exact.iter().enumerate() {
+            let innovation = filter.step::<2>(&f, &h, z, &v, &sw).unwrap();
+            let got = filter.covariance();
+            for i in 0..2 {
+                assert!((innovation[i] - nu[i]).abs() <= tol, "step {k}: ν[{i}]");
+                assert!(
+                    (filter.x[i] - x[i]).abs() <= tol,
+                    "step {k}: x[{i}] = {}",
+                    filter.x[i]
+                );
+                for j in 0..2 {
+                    assert!(
+                        (got[i][j] - p[i][j]).abs() <= tol,
+                        "step {k}: P[{i}][{j}] = {}",
+                        got[i][j]
+                    );
+                }
+            }
+        }
+    }
+
+    /// (G3) The existence condition at the prior is `P₀⁻¹ − γ Q̄ ≻ 0`, which for `Q̄ = I` holds
+    /// exactly while `γ < 1/λ_max(P₀)`. `derivations/hinf_riccati.mac` puts that threshold at
+    /// 0.2312040466020173954678145 for `P₀ = [[4, 1], [1, 5/4]]`; the construction has to accept a
+    /// γ a part in 1e9 below it and refuse one a part in 1e9 above it.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn the_bound_is_refused_exactly_where_the_prior_loses_definiteness() {
+        let threshold = 2.312_040_466_020_173_954_678_145e-1;
+        let s0 = [[2.0, 0.0], [0.5, 1.0]];
+        assert!(HInfinityFilter::new([0.0; 2], s0, identity(), threshold * (1.0 - 1e-9)).is_ok());
+        assert_eq!(
+            HInfinityFilter::new([0.0; 2], s0, identity(), threshold * (1.0 + 1e-9)).unwrap_err(),
+            HInfinityError::UnattainableBound { direction: 1 }
+        );
     }
 
     /// A deterministic measurement stream: a linear-congruential jitter, so the comparison below is

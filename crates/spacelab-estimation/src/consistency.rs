@@ -16,6 +16,12 @@
 //! this crate, so the condition number is not squared. Averaged over a run, `χ²ᵥ = mean / dof` is the
 //! factor that rescales an over/under-confident covariance back to realism, and
 //! [`chi_square_mean_interval`] gives the acceptance band that decides whether the deviation is real.
+//!
+//! Gate: `derivations/chi_square_quantiles.mac` shows the forward substitution is `rᵀ(L Lᵀ)⁻¹r`, and
+//! `derivations/chi_square_quantiles.gp` computes the exact χ² quantiles at 60 digits (re-derived by
+//! series in the .mac) and the Wilson–Hilferty error envelope documented below. The module tests
+//! `the_normalized_squared_error_is_the_quadratic_form` (G1) and
+//! `the_mean_interval_is_the_cube_of_the_exact_quantile_within_its_envelope` (G3) tie the code to it.
 
 // The math symbols (P, L, S, ν, z, k) are one letter by convention; `as f64` on small dimensions.
 #![allow(clippy::many_single_char_names, clippy::cast_precision_loss)]
@@ -63,8 +69,15 @@ pub fn chi_square_scale_factor(mean_normalized: f64, dof: usize) -> f64 {
 /// `dof`.
 ///
 /// The sum of `runs` independent χ²(dof) is χ²(runs·dof); its quantiles use the Wilson–Hilferty cube
-/// approximation `χ²ₚ(k) ≈ k(1 − 2/9k + zₚ√(2/9k))³` (accurate to `<0.01` on the bounds), divided by
-/// `runs` to give the interval for the mean.
+/// approximation `χ²ₚ(k) ≈ k(1 − 2/9k + zₚ√(2/9k))³`, divided by `runs` to give the interval for
+/// the mean.
+///
+/// Against the exact quantiles (`derivations/chi_square_quantiles.gp`, 60 digits, k = 1…400) the
+/// cube is off by at most 0.27 in the quantile of the sum for `|z| ≤ 3`, and 0.10 at `z = 1.96`,
+/// so the bounds of the mean are within `0.27/runs`: below 0.01 from 27 runs, not at every count.
+/// The error falls with `k` — 1.2e-4 on either bound at `dof = 2, runs = 50, z = 1.96` — but at
+/// `k = 1` the lower bound is negative for `z > 7/(3√2) ≈ 1.65`, where the exact quantile is small
+/// and positive (9.8e-4 at `z = 1.96`).
 #[must_use]
 pub fn chi_square_mean_interval(dof: usize, runs: usize, z: f64) -> (f64, f64) {
     let k = (dof * runs) as f64;
@@ -107,6 +120,71 @@ mod tests {
         // rᵀ P⁻¹ r = (10 - 2 - 2 + 4)/36 = 10/36.
         let expected = 10.0 / 36.0;
         assert!((normalized_squared(&l, &r) - expected).abs() < 1e-12);
+    }
+
+    /// (G1) The forward substitution is the quadratic form `rᵀ(L Lᵀ)⁻¹r` that
+    /// `derivations/chi_square_quantiles.mac` shows it equals on a general 3 × 3 factor; on
+    /// `L = [[2,0,0],[1,3,0],[−1,4,5]]`, `r = (1, −2, ½)` that is 763/450, rounded once.
+    #[test]
+    fn the_normalized_squared_error_is_the_quadratic_form() {
+        let l = [[2.0, 0.0, 0.0], [1.0, 3.0, 0.0], [-1.0, 4.0, 5.0]];
+        let got = normalized_squared(&l, &[1.0, -2.0, 0.5]);
+        let exact = 763.0 / 450.0;
+        assert!(
+            (got / exact - 1.0).abs() <= 4.0 * f64::EPSILON,
+            "{got} against {exact}"
+        );
+    }
+
+    /// (G3) The acceptance band is the Wilson–Hilferty cube of the two quantiles, to rounding, and
+    /// that cube sits where the documentation says against the exact quantiles of χ²(k):
+    /// `derivations/chi_square_quantiles.gp` at 60 digits (cross-derived in
+    /// `derivations/chi_square_quantiles.mac`), divided by `runs`. At `dof = 2, runs = 50` the bounds
+    /// are within 1.2e-4 of the exact ones; at one sample of one degree of freedom the upper bound is
+    /// 0.096 low and the lower one is negative where the exact is 9.8e-4 — inside the 0.27/runs
+    /// envelope, and the reason that envelope is stated per run.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn the_mean_interval_is_the_cube_of_the_exact_quantile_within_its_envelope() {
+        for (dof, runs, cube, exact, envelope) in [
+            (
+                2,
+                50,
+                (
+                    1.484_315_666_121_386_441_104_170,
+                    2.591_291_898_871_754_848_333_416,
+                ),
+                (
+                    1.484_430_215_023_646_332_532_425,
+                    2.591_236_034_543_314_253_648_493,
+                ),
+                1.2e-4,
+            ),
+            (
+                1,
+                1,
+                (
+                    -0.003_123_345_637_774_382_519_105_020,
+                    4.928_019_916_282_493_175_386_046,
+                ),
+                (
+                    9.819_037_012_087_134_823_160_270e-4,
+                    5.024_031_992_629_765_320_376_545,
+                ),
+                0.097,
+            ),
+        ] {
+            let (lo, hi) = chi_square_mean_interval(dof, runs, 1.96);
+            for (got, want) in [(lo, cube.0), (hi, cube.1)] {
+                assert!(
+                    (got - want).abs() <= 8.0 * f64::EPSILON * want.abs().max(1.0),
+                    "dof {dof}, runs {runs}: {got} against the cube {want}"
+                );
+            }
+            assert!((lo - exact.0).abs() < envelope && (hi - exact.1).abs() < envelope);
+            assert!((hi - exact.1).abs() <= 0.27 / runs as f64);
+        }
+        assert!(chi_square_mean_interval(1, 1, 1.96).0 < 0.0);
     }
 
     #[test]

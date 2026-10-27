@@ -42,6 +42,18 @@
 //! rather than over `f64` on purpose — a delay evaluated at `f64` would enter the filter with a
 //! zero partial, and the tropospheric mapping function's own elevation derivative is metres per
 //! degree at low elevation, not a rounding term.
+//!
+//! # Gate
+//!
+//! `derivations/shapiro_delay.mac` reduces the Shapiro integral to the IERS closed form, and
+//! `derivations/measurement_modifiers.mac` shows the PPN form is that formula at `γ = 1`, its
+//! `γ` partial is `Δρ/(1 + γ)`, its position gradient is the closed form the AD is held to,
+//! and the bias and drift columns are `1` and `Δt`; `derivations/measurement_modifiers.gp`
+//! evaluates the defining integral along the module's leg. The gates are the module tests
+//! `the_shapiro_modifier_is_the_path_integral_along_the_leg` (G2),
+//! `the_shapiro_delay_matches_the_maxima_closed_form` (G3),
+//! `the_shapiro_partials_are_the_closed_form_derivative` (G1) and
+//! `an_estimated_gamma_is_the_delay_divided_by_one_plus_gamma` (G1).
 
 use spacelab_autodiff::{Dual, Scalar, jacobian};
 
@@ -794,7 +806,7 @@ mod tests {
         assert_within_ulps(chained, by_hand, 0, "the chained composition");
     }
 
-    /// The closed form against Maxima at 40 digits.
+    /// The closed form against Maxima at 40 digits (G3).
     ///
     /// `derivations/shapiro_delay.mac` proves the antiderivative and the reduction to the IERS form
     /// symbolically (both residuals exactly 0) and then evaluates it as a bigfloat at
@@ -823,6 +835,27 @@ mod tests {
         );
     }
 
+    /// The modifier on the module's three-dimensional leg is the defining integral (G2):
+    /// `(2GM/c²) ∫ dl/r` along the straight station–satellite line, taken by `intnum` at 60
+    /// digits in `derivations/measurement_modifiers.gp` with no logarithm in it, and equal to the
+    /// closed form of `derivations/measurement_modifiers.mac` to 1e-79 m. Measured: 2 ulps, the
+    /// rounding of the ratio and the logarithm.
+    #[test]
+    #[allow(clippy::unreadable_literal)]
+    fn the_shapiro_modifier_is_the_path_integral_along_the_leg() {
+        let none: [f64; 0] = [];
+        let modifier = ShapiroDelay {
+            station: station().position,
+            gm: EARTH_GM,
+        };
+        assert_within_ulps(
+            modifier.delta(&satellite(), &none),
+            2.3082308593837045843267125633210189848631e-3,
+            2,
+            "the Shapiro modifier against the path integral",
+        );
+    }
+
     /// The modifier is the closed form evaluated at the leg's own geometry, to the bit: the two
     /// geocentric distances and the straight-line path, and no fourth quantity.
     #[test]
@@ -844,7 +877,8 @@ mod tests {
         );
     }
 
-    /// The correction is differentiated, not pasted on.
+    /// The correction is differentiated, not pasted on (G1): the closed-form gradient below is
+    /// `derivations/measurement_modifiers.mac` identity 3.
     ///
     /// `∂D/∂rᵢ = k[(∂s + ∂p)/(s + p) − (∂s − ∂p)/(s − p)]` with `s = r_sat + r_sta`,
     /// `∂s/∂rᵢ = rᵢ/r_sat`, `∂p/∂rᵢ = (rᵢ − stationᵢ)/p` and `k = 2GM/c²`. The AD partial of the
@@ -1104,7 +1138,8 @@ mod tests {
         }
     }
 
-    /// `γ` scales the delay and nothing else: the value is linear in `1 + γ` and the partial is the
+    /// `γ` scales the delay and nothing else (G1, `derivations/measurement_modifiers.mac`
+    /// identity 2): the value is linear in `1 + γ` and the partial is the
     /// slope of that line, `Δρ/(1 + γ)`, which is what makes a tracking arc a measurement of `γ`.
     ///
     /// The geometry is Cassini's 2002 superior conjunction — 1 AU to 8.43 AU with the ray passing

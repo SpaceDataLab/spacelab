@@ -13,6 +13,13 @@
 //! (the constant `[[0,0,0],[[g]×,0,0],[0,I,0]]`); the IMU biases break that structure — the "imperfect"
 //! IEKF — so the bias columns of the transition carry the current estimate. Consistency is shown by an
 //! ensemble NEES on a simulated trajectory.
+//!
+//! Gate: `derivations/se23_invariant_navigation.mac` proves the `SE₂(3)` exponential's columns and
+//! the 9×9 adjoint as identities on the 5×5 algebra, shows the strapdown field is group-affine, and
+//! derives the 15×15 error transition `A` and the three measurement Jacobians by substituting
+//! `X = Exp(ξ) X̂`, `b = b̂ + β` into the true dynamics; the module tests
+//! `the_error_transition_is_the_linearised_invariant_error_dynamics` (G2) and
+//! `adjoint_matches_conjugation` (G1) tie the shipped filter and group to it.
 
 // Index loops are clearest for the small fixed-size matrices; single-char names mirror the algebra.
 #![allow(clippy::needless_range_loop, clippy::many_single_char_names)]
@@ -499,7 +506,8 @@ mod tests {
         assert!(max_se23(&id, &Se23::identity()) < 1e-12, "inverse wrong");
     }
 
-    /// The defining adjoint identity `g Exp(ξ) g⁻¹ = Exp(Ad_g ξ)`.
+    /// The defining adjoint identity `g Exp(ξ) g⁻¹ = Exp(Ad_g ξ)` (G1), proved on the 5×5 algebra in
+    /// `derivations/se23_invariant_navigation.mac`.
     #[test]
     fn adjoint_matches_conjugation() {
         let g = Se23::exp(XI[1].0, XI[1].1, XI[1].2);
@@ -869,5 +877,94 @@ mod tests {
             (admitted - expected).abs() < 1e-9 * expected,
             "admitted {admitted:.17e}, expected {expected:.17e}"
         );
+    }
+
+    /// The covariance transition is `I + A dt`, with `A` the first-order dynamics of the
+    /// right-invariant error (G2).
+    ///
+    /// Reference: `derivations/se23_invariant_navigation.mac` substitutes `X = Exp(ξ) X̂`,
+    /// `b = b̂ + β` into the true strapdown dynamics, reads off the first-order rates and evaluates
+    /// `Φ = I + A dt` at this state — `R̂` from the quaternion `(1, 2, 2, 4)/5`, `v = (3, −1, 2)`,
+    /// `p = (−5/2, 2, 7/2)`, `g = (0, 0, −9.81)`, `dt = 1/4`. The listed entries are every one that
+    /// differs from the identity. A rank-one prior `e_k e_kᵀ` with no process noise propagates to
+    /// `(Φ e_k)(Φ e_k)ᵀ`, and `A` has a zero diagonal, so row `k` of the result is column `k` of `Φ`.
+    /// The gyro, accelerometer and bias inputs are arbitrary and must not matter: the derivation
+    /// shows the transition depends only on `R̂, v̂, p̂` and `g`.
+    #[test]
+    fn the_error_transition_is_the_linearised_invariant_error_dynamics() {
+        const NOT_IDENTITY: [(usize, usize, f64); 39] = [
+            (0, 9, 0.15),
+            (0, 11, -0.2),
+            (1, 9, -0.16),
+            (1, 10, 0.15),
+            (1, 11, -0.12),
+            (2, 9, -0.12),
+            (2, 10, -0.2),
+            (2, 11, -0.09),
+            (3, 1, 2.4525),
+            (3, 9, 0.44),
+            (3, 10, -0.1),
+            (3, 11, 0.33),
+            (3, 12, 0.15),
+            (3, 14, -0.2),
+            (4, 0, -2.4525),
+            (4, 9, 0.66),
+            (4, 10, 0.6),
+            (4, 11, -0.13),
+            (4, 12, -0.16),
+            (4, 13, 0.15),
+            (4, 14, -0.12),
+            (5, 9, -0.33),
+            (5, 10, 0.45),
+            (5, 11, -0.56),
+            (5, 12, -0.12),
+            (5, 13, -0.2),
+            (5, 14, -0.09),
+            (6, 3, 0.25),
+            (6, 9, 0.32),
+            (6, 10, -0.925),
+            (6, 11, 0.24),
+            (7, 4, 0.25),
+            (7, 9, 0.225),
+            (7, 10, -0.5),
+            (7, 11, -0.925),
+            (8, 5, 0.25),
+            (8, 9, 0.1),
+            (8, 10, -0.375),
+            (8, 11, 0.7),
+        ];
+        let r = [[-0.6, 0.0, 0.8], [0.64, -0.6, 0.48], [0.48, 0.8, 0.36]];
+        let pose = Se23::from_parts(r, [3.0, -1.0, 2.0], [-2.5, 2.0, 3.5]);
+        let quiet = ImuNoise {
+            gyro: 0.0,
+            accel: 0.0,
+            gyro_bias: 0.0,
+            accel_bias: 0.0,
+        };
+        let mut phi = eye::<15>();
+        for (i, j, value) in NOT_IDENTITY {
+            phi[i][j] = value;
+        }
+        for k in 0..15 {
+            let mut prior = [[0.0; 15]; 15];
+            prior[k][k] = 1.0;
+            let mut ekf = NavigationEkf::new(
+                pose,
+                [0.01, -0.02, 0.03],
+                [0.1, 0.2, -0.3],
+                prior,
+                [0.0, 0.0, -9.81],
+            );
+            ekf.predict([0.4, -0.3, 0.2], [1.5, -0.5, 9.0], 0.25, quiet);
+            let cov = ekf.covariance();
+            for i in 0..15 {
+                assert!(
+                    (cov[k][i] - phi[i][k]).abs() < 1e-15,
+                    "Φ[{i}][{k}] = {:.17e}, derivation says {:.17e}",
+                    cov[k][i],
+                    phi[i][k]
+                );
+            }
+        }
     }
 }

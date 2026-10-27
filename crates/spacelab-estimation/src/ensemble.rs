@@ -39,6 +39,13 @@
 //!
 //! `P_yy` is factored once per update and each member's innovation is back-substituted through that
 //! factor, so the `N×D` gain is never assembled either.
+//!
+//! Gate: `derivations/ensemble_kalman_gain.mac` shows that for a linear measurement the ensemble gain
+//! is the Kalman gain of the sample covariance, that the member update moves the anomalies by
+//! `(I − KH)` plus the perturbation anomalies, and that the unperturbed spread falls short of the
+//! Kalman posterior by exactly `K R Kᵀ`; the module test
+//! `the_ensemble_gain_is_the_kalman_gain_of_the_sample_covariance` (G1) reads the shipped gain against
+//! its exact fixture.
 
 // The recursion's symbols (A, B, P, K, R, z, h) are Evensen's, one letter each.
 // `M as f64` is the ensemble size, an array length bounded by the stack — exact in f64.
@@ -364,5 +371,51 @@ mod tests {
         assert_eq!(filter.mean()[0], 3.0);
         // Σ(x−3)² = 4 + 1 + 0 + 9 = 14, over M−1 = 3.
         assert!((filter.covariance()[0][0] - 14.0 / 3.0).abs() < 1e-12);
+    }
+
+    /// For a linear measurement the ensemble gain is the Kalman gain of the sample covariance (G1).
+    ///
+    /// Reference: `derivations/ensemble_kalman_gain.mac` proves `P_xy = P̂ Hᵀ`, `P_yy = H P̂ Hᵀ + R` and
+    /// prints `K = P̂ Hᵀ (H P̂ Hᵀ + R)⁻¹` for this ensemble exactly. Two updates with the same seed
+    /// replay the same perturbations, so shifting one observation component by `Δ` moves the mean by
+    /// `K Δ` in that column and nothing else: the response is the gain, column by column. A
+    /// two-component measurement with a correlated `R` reads the off-diagonal of `P_yy` and of
+    /// `S_R S_Rᵀ`, which the scalar test above cannot.
+    #[test]
+    fn the_ensemble_gain_is_the_kalman_gain_of_the_sample_covariance() {
+        let members = [
+            [1.0, 0.5, -1.0],
+            [2.0, -0.5, 0.0],
+            [3.0, 1.5, 2.0],
+            [6.0, 2.5, -1.0],
+        ];
+        let r_sqrt = [[0.5, 0.0], [0.25, 1.0]];
+        let gain = [
+            [1283.0 / 1349.0, -6.0 / 1349.0],
+            [1079.0 / 2698.0, 233.0 / 1349.0],
+            [-839.0 / 2698.0, 759.0 / 1349.0],
+        ];
+        let analysed = |observation: [f64; 2]| {
+            let mut filter = EnsembleKalman::<3, 4>::from_members(members);
+            let mut rng = Rng::new(77);
+            filter
+                .update(&observation, |x| [x[0], x[1] + x[2]], &r_sqrt, &mut rng)
+                .expect("R is positive definite");
+            filter.mean()
+        };
+        let base = analysed([2.0, 1.0]);
+        for k in 0..2 {
+            let mut shifted = [2.0, 1.0];
+            shifted[k] += 4.0;
+            let moved = analysed(shifted);
+            for i in 0..3 {
+                let response = (moved[i] - base[i]) / 4.0;
+                assert!(
+                    (response - gain[i][k]).abs() < 1e-14,
+                    "K[{i}][{k}] = {response:.17e}, derivation says {:.17e}",
+                    gain[i][k]
+                );
+            }
+        }
     }
 }

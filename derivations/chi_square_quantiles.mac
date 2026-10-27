@@ -1,0 +1,77 @@
+/* Filter consistency diagnostics -- spacelab-estimation/src/consistency.rs -- and the chi-square
+ * quantiles its acceptance band and the gate of src/robust.rs approximate.
+ *
+ * Each line printing `<name>: 0`:
+ *   1. `normalized_squared`'s forward substitution L y = r, transcribed step for step on a general
+ *      lower-triangular 3 x 3 L, returns |y|^2 = r^T (L L^T)^-1 r (G1) -- the NEES / NIS without
+ *      forming P^-1; its fixture value is printed;
+ *   2. the Wilson-Hilferty cube k (1 - a + z sqrt a)^3, a = 2/(9k), is the quantile of a chi^2(k)
+ *      whose cube root (X/k)^(1/3) is taken as normal with mean 1 - a and variance a, and the
+ *      cube root's exact mean (2/k)^(1/3) Gamma(k/2 + 1/3)/Gamma(k/2) is 1 - a to O(1/k^2) (G1);
+ *   3. the exact quantiles q(k, Phi(+-z)) -- the roots of the regularized incomplete gamma
+ *      function -- recomputed here at 45 digits, by series and bisection, agree with
+ *      derivations/chi_square_quantiles.gp's 60-digit roots at the test fixture points to 1e-22
+ *      (G3). The literals the tests assert are the .gp's.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/chi_square_quantiles.mac
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. */
+l : matrix([l11, 0, 0], [l21, l22, 0], [l31, l32, l33])$
+r : [r1, r2, r3]$
+y : [0, 0, 0]$
+acc : 0$
+for i : 1 thru 3 do block([s : r[i]],
+  for k : 1 thru i - 1 do s : s - l[i, k] * y[k],
+  y[i] : s / l[i, i],
+  acc : acc + y[i]^2)$
+rv : transpose(matrix(r))$
+zero("forward_substitution_is_the_quadratic_form",
+  ratsimp(acc - (transpose(rv) . invert(l . transpose(l)) . rv)))$
+/* The fixture of `consistency.rs::the_normalized_squared_error_is_the_quadratic_form`. */
+printf(true, "fixture r^T (L L^T)^-1 r = ~a~%", subst([l11 = 2, l21 = 1, l22 = 3, l31 = -1, l32 = 4,
+  l33 = 5, r1 = 1, r2 = -2, r3 = 1/2], transpose(rv) . invert(l . transpose(l)) . rv))$
+
+/* 2. The cube: solve (x/k)^(1/3) = 1 - a + z sqrt(a) for x. */
+a : 2 / (9 * k)$
+zero("wilson_hilferty_cube_inverts_the_normal_cube_root",
+  ratsimp(k * (1 - a + z * sqrt(a))^3 / k - (1 - a + z * sqrt(a))^3))$
+/* Exact E[(X/k)^(1/3)] for X ~ chi^2(k), expanded at large k. */
+cube_root_mean : (2 / k)^(1/3) * gamma(k / 2 + 1/3) / gamma(k / 2)$
+fpprec : 40$
+zero("cube_root_mean_is_one_minus_a_to_second_order",
+  if every(lambda([kk], abs(bfloat(subst(k = kk, cube_root_mean - (1 - a)))) * kk^2 < 1/10),
+           [1000, 10000, 100000])
+  then 0 else 1)$
+
+/* 3. Exact quantiles at the test fixture points, against the .gp's 60-digit values. */
+fpprec : 45$
+phi(z) := (1 + erf(bfloat(z) / sqrt(2b0))) / 2$
+/* P(a, x) = x^a e^-x sum_n x^n / Gamma(a + n + 1): every term positive, so nothing cancels.
+   (gamma_incomplete_regularized was measured 1.2e-15 relative off at k = 1 against PARI and against
+   the erf closed form, so it is not used.) */
+lower_p(a, x) := block([t : bfloat(1 / gamma(a + 1)), s : 0b0, n : 0],
+  while abs(t) > 10b0^(-fpprec - 5) * s or n < 2 do (s : s + t, n : n + 1, t : t * x / (a + n)),
+  x^a * exp(-x) * s)$
+quantile(kk, p) := block([lo : 0b0, hi : bfloat(20 * kk + 200), mid],
+  for i : 1 thru 140 do (
+    mid : (lo + hi) / 2,
+    if lower_p(kk / 2, mid / 2) < p then lo : mid else hi : mid),
+  (lo + hi) / 2)$
+pari : [
+  [1, 1.96b0, 9.819037012087134823160270b-4, 5.024031992629765320376545b0],
+  [1, 2.576b0, 3.923166847796558171458332b-5, 7.880331336650503895045567b0],
+  [1, 3b0, 2.862346589763218032615685b-6, 1.027301806503955364765879b1],
+  [3, 1.96b0, 2.157826307509492372612925b-1, 9.348588506110887177696599b0],
+  [3, 2.576b0, 7.169783250822266207901337b-2, 1.283921573128796658799993b1],
+  [3, 3b0, 2.970980543198486581178628b-2, 1.563056349845006114338916b1],
+  [100, 1.96b0, 7.42215107511823166266212b1, 1.295618017271657126824247b2]]$
+zero("exact_quantiles_agree_with_pari",
+  length(sublist(pari, lambda([row], block([lo, hi],
+    lo : quantile(row[1], 1 - phi(row[2])),
+    hi : quantile(row[1], phi(row[2])),
+    abs(lo - row[3]) > 1b-22 * max(1, row[3]) or abs(hi - row[4]) > 1b-22 * row[4])))))$

@@ -1,0 +1,85 @@
+/* Closest-approach screening -- spacelab-estimation/src/screening.rs -- as identities. The search
+ * brackets sign changes of g(t) = dr . dv and bisects them; the radial filter discards a pair when
+ * one perigee clears the other apogee by more than the threshold.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. g is the derivative of f = |dr|^2/2, so a minimum of the separation is a zero of g, and
+ *      g' = |dv|^2 + dr . da -- at a zero where g goes negative to positive, f'' = g' > 0 (minimum);
+ *   2. the rectilinear pass dr = (v t - x0, b, 0): g = v (v t - x0), root t = x0/v, separation b;
+ *   3. two circular coplanar orbits (the module's fixture): |dr|^2 = r1^2 + r2^2 - 2 r1 r2 cos(D),
+ *      D = (n2 - n1) t + phase, so g = r1 r2 (n2 - n1) sin D and f'' = r1 r2 (n2 - n1)^2 cos D at a
+ *      zero: minima exactly at D = 2 pi k, distance |r2 - r1| -- the closed form
+ *      t_j = (phase + 2 pi j)/(n1 - n2) the .gp file checks its roots against;
+ *   4. the inclined fixture: g computed from the coded dr, dv equals the derivative of |dr|^2/2,
+ *      and |dr|^2 = r1^2 + r2^2 - 2 r1 r2 (c1 c2 + s1 s2 cos i);
+ *   5. the radial filter's bound is exact: |a - b|^2 - (|a| - |b|)^2 = 2 |a| |b| (1 - cos th) >= 0,
+ *      zero when collinear -- so two objects confined to shells [pa, Aa] and [pb, Ab] are never
+ *      closer than max(pa - Ab, pb - Aa), and they reach it when aligned.
+ * Numbers: derivations/screening_tca.gp finds every negative-to-positive zero of g in the module
+ * tests' spans at 60 digits.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/screening_tca.mac </dev/null
+ */
+
+/* A vector identity reduces to 0 when every component does. */
+zero(name, expr) := block([d : expr],
+  if listp(d) and every(lambda([e], is(e = 0)), d) then d : 0,
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. Generic motion. */
+depends([x, y, z], t)$
+dr : [x, y, z]$
+dv : diff(dr, t)$
+f : (dr . dr)/2$
+g : dr . dv$
+zero("range_rate_is_the_derivative_of_half_the_squared_separation", ratsimp(diff(f, t) - g))$
+zero("second_derivative_is_speed_squared_plus_position_dot_acceleration",
+  ratsimp(diff(g, t) - (dv . dv + dr . diff(dv, t))))$
+remove([x, y, z], dependency)$
+
+/* 2. Rectilinear pass. */
+drl : [v*t - x0, b, 0]$ dvl : diff(drl, t)$
+gl : drl . dvl$
+zero("rectilinear_range_rate", ratsimp(gl - v*(v*t - x0)))$
+zero("rectilinear_root_is_offset_over_speed", ratsimp(rhs(solve(gl = 0, t)[1]) - x0/v))$
+zero("rectilinear_minimum_distance_is_the_offset", ratsimp(subst(t = x0/v, drl . drl) - b^2))$
+
+/* 3. Coplanar circular orbits, exactly as the module's `co_planar` fixture builds them. */
+ts(e) := trigsimp(trigreduce(trigsimp(ratsimp(e))))$
+c1 : cos(n1*t)$ s1 : sin(n1*t)$ c2 : cos(n2*t + ph)$ s2 : sin(n2*t + ph)$
+drc : [r2*c2 - r1*c1, r2*s2 - r1*s1, 0]$
+dvc : [-r2*n2*s2 + r1*n1*s1, r2*n2*c2 - r1*n1*c1, 0]$
+zero("coplanar_velocity_is_the_derivative_of_position", ts(diff(drc, t) - dvc))$
+D : (n2 - n1)*t + ph$
+zero("coplanar_squared_separation", ts(drc . drc - (r1^2 + r2^2 - 2*r1*r2*cos(D))))$
+gc : drc . dvc$
+zero("coplanar_range_rate_is_r1_r2_dn_sin", ts(gc - r1*r2*(n2 - n1)*sin(D)))$
+zero("coplanar_rate_slope_is_r1_r2_dn2_cos", ts(diff(gc, t) - r1*r2*(n2 - n1)^2*cos(D)))$
+/* At D = 2 pi k the slope is r1 r2 (n2 - n1)^2 > 0 (a minimum) and the separation |r2 - r1|;
+ * at D = pi + 2 pi k the slope is negative (a maximum). */
+declare(kk, integer)$
+tk : (2*%pi*kk - ph)/(n2 - n1)$
+zero("coplanar_minimum_phase_is_a_multiple_of_two_pi", ts(subst(t = tk, D) - 2*%pi*kk))$
+zero("coplanar_root_at_the_closed_form_time", ts(subst(t = tk, gc)))$
+zero("coplanar_slope_at_the_root_is_positive",
+  ts(subst(t = tk, diff(gc, t)) - r1*r2*(n2 - n1)^2))$
+zero("coplanar_distance_at_the_root_is_the_radius_gap",
+  ts(subst(t = tk, drc . drc) - (r2 - r1)^2))$
+zero("coplanar_closed_form_matches_the_gp_parametrisation",
+  ratsimp(subst(kk = -j, tk) - (ph + 2*%pi*j)/(n1 - n2)))$
+
+/* 4. The inclined fixture `inclined(r1, r2, inc, phase)`. */
+dri : [r2*c2 - r1*c1, r2*s2*ci - r1*s1, r2*s2*si]$
+dvi : [-r2*n2*s2 + r1*n1*s1, r2*n2*c2*ci - r1*n1*c1, r2*n2*c2*si]$
+zero("inclined_velocity_is_the_derivative_of_position", ts(diff(dri, t) - dvi))$
+zero("inclined_squared_separation",
+  ts(subst(si = sqrt(1 - ci^2), dri . dri) - (r1^2 + r2^2 - 2*r1*r2*(c1*c2 + s1*s2*ci))))$
+zero("inclined_range_rate_is_the_derivative", ts(diff((dri . dri)/2, t) - dri . dvi))$
+
+/* 5. The radial filter: two position vectors at radii ra, rb with angle th between them. */
+assume(ra > 0, rb > 0)$
+A : [ra, 0, 0]$ B : [rb*cos(th), rb*sin(th), 0]$
+zero("separation_exceeds_radius_difference_by_the_angle_term",
+  ts((A - B) . (A - B) - (ra - rb)^2 - 2*ra*rb*(1 - cos(th))))$
+zero("collinear_separation_is_the_radius_difference", ts(subst(th = 0, (A - B) . (A - B)) - (ra - rb)^2))$

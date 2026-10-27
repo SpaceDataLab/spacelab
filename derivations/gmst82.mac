@@ -1,0 +1,78 @@
+/* GMST (IAU 1982) of spacelab-fa/src/earth_rotation.rs, in exact rational arithmetic.
+ *
+ * Aoki et al. (1982), Vallado Eq. 3-47, theta in seconds of time, T Julian centuries of UT1 from J2000:
+ *     theta = 67310.54841 + (876600 h + 8640184.812866 s) T + 0.093104 T^2 - 6.2e-6 T^3,
+ * and the code evaluates C0 + 86400 frac + ((C3 T + C2) T + C1) T, reduced modulo one day, with
+ * D = day + frac the UT1 days since J2000 and T = D/36525.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. 876600 h = 86400 s x 36525 exactly, so the whole-day term is 86400 D and the printed
+ *      polynomial and the coded one differ by 86400 day -- a whole number of days, nothing modulo
+ *      one (G1);
+ *   2. a day of UT1 advances GMST by 86400 + C1/36525 s plus the T^2, T^3 terms' share, the
+ *      sidereal rate 1 + C1/(36525 x 86400) = 1.00273790935... at J2000 (G3);
+ *   3. the four coefficients' bit patterns asserted in the module are the nearest doubles to the
+ *      published decimals -- each within half an ulp, decided in exact rationals (G3);
+ *   4. GMST at J2000 is C0 = 67310.54841 s = 280.460618375 deg exactly (G3);
+ *   5. reference values: the exact rational GMST, reduced to [0, 2 pi) and printed at 40 digits, at
+ *      five UT1 epochs given as whole nanoseconds from J2000 -- J2000 itself, 1992 Aug 20 12:14
+ *      (Vallado's Example 3-5 epoch), 9000.75 days, a century and twelve seconds after J2000 and
+ *      fifty centuries before it. `gmst_is_the_exact_rational_polynomial_reduced_to_a_turn` asserts
+ *      them; derivations/gmst82.gp evaluates the same epochs independently.
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/gmst82.mac </dev/null
+ */
+
+load("stringproc")$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+holds(name, claim) := zero(name, if is(claim) then 0 else 1)$
+
+C0 : 6731054841/100000$
+C1 : 8640184812866/1000000$
+C2 : 93104/1000000$
+C3 : -62/10000000$
+
+/* ---- 1. the whole-day term ---------------------------------------------------------------- */
+
+zero("whole_day_term_is_exact", 876600*3600 - 86400*36525)$
+printed(T) := C0 + (876600*3600 + C1)*T + C2*T^2 + C3*T^3$
+coded(day, frac) := block([T : (day + frac)/36525], C0 + 86400*frac + ((C3*T + C2)*T + C1)*T)$
+zero("printed_and_coded_differ_by_whole_days", ratsimp(printed((day + frac)/36525) - coded(day, frac) - 86400*day))$
+
+/* ---- 2. the sidereal rate ------------------------------------------------------------------ */
+
+rate : diff(printed(D/36525), D)$
+zero("one_day_advance_at_j2000", subst(D = 0, rate) - (86400 + C1/36525))$
+zero("sidereal_rate_at_j2000", subst(D = 0, rate)/86400 - (1 + C1/(36525*86400)))$
+printf(true, "sidereal rate at J2000: ~a~%", bfloat(subst(D = 0, rate)/86400))$
+
+/* ---- 3. the coefficients are the nearest doubles -------------------------------------------- */
+
+hexval(h) := block([v : 0], for ch in charlist(h) do
+  if ch # "_" then v : 16*v + (ssearch(ch, "0123456789ABCDEF") - 1), v)$
+double(bits) := block([sgn : floor(bits/2^63), ex : mod(floor(bits/2^52), 2^11), man : mod(bits, 2^52)],
+  (-1)^sgn * (2^52 + man) * 2^(ex - 1075))$
+ulp(bits) := 2^(mod(floor(bits/2^52), 2^11) - 1075)$
+for c in [["C0", C0, "40F0_6EE8_C649_906D"], ["C1", C1, "4160_7AD7_1A02_FF8F"],
+          ["C2", C2, "3FB7_D5A9_EB20_74EB"], ["C3", C3, "BEDA_0133_05E6_C9CE"]] do
+  block([b : hexval(c[3])],
+    holds(sconcat(c[1], "_bits_are_the_nearest_double"), abs(double(b) - c[2]) < ulp(b)/2))$
+
+/* ---- 4. J2000 ------------------------------------------------------------------------------- */
+
+zero("gmst_at_j2000_is_c0", coded(0, 0) - C0)$
+zero("gmst_at_j2000_in_degrees", C0/240 - 280460618375/1000000000)$
+
+/* ---- 5. reference values -------------------------------------------------------------------- */
+
+fpprec : 40$
+nsday : 86400*10^9$
+gmst_rad(ns) := block([day : floor(ns/nsday), frac, th],
+  frac : (ns - day*nsday)/nsday,
+  th : coded(day, frac),
+  bfloat(2*%pi*(th - 86400*floor(th/86400))/86400))$
+epochs : [0, -232415160*10^9, 900075*nsday/100, 36525*nsday + 12*10^9, -(1826250*86400 + 25920)*10^9]$
+for e in epochs do printf(true, "epoch ~a T ~a gmst ~a~%", e, bfloat(e/nsday/36525), gmst_rad(e))$

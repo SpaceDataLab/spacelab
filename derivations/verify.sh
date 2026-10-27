@@ -895,6 +895,38 @@ if have maxima; then
     mac_zeros attitude_law_frames.mac 75 "every attitude law is an orthonormal right-handed frame"
     mac_zeros analytic_ephemeris.mac 33 "the analytic Sun and Moon series and their precession to J2000"
     mac_zeros thermosphere_legendre_terms.mac 30 "Legendre and local-time terms of a thermosphere expansion"
+    mac_zeros kalman_square_root.mac 10 "the square-root Kalman array: Joseph, information form, the trace-minimising gain"
+    mac_zeros rts_smoother.mac 5 "RTS and fixed-lag smoothing equal the joint-Gaussian conditional"
+    mac_zeros consider_covariance.mac 4 "the consider covariance is the error covariance and reduces at Pcc = 0"
+    mac_zeros srukf_square_root.mac 5 "Cholesky update and downdate add or remove exactly one outer product"
+    mac_zeros unscented_transform.mac 9 "sigma points reproduce mean and covariance; exactness on quadratics"
+    mac_zeros hinf_riccati.mac 6 "the H-infinity Riccati recursion, Kalman at gamma = 0, the prior's threshold"
+    mac_zeros chi_square_quantiles.mac 4 "NEES/NIS quadratic forms and exact chi-square quantiles"
+    mac_zeros robust_weights.mac 22 "Huber and Student-t weights from their defining equations, limits and efficiency"
+    mac_zeros lie_quaternion.mac 12 "quaternion product, passive Rodrigues matrix, exp and log"
+    mac_zeros se3_exponential.mac 22 "SE(3) exponential, both Jacobians and the adjoint from their series"
+    mac_zeros se23_invariant_navigation.mac 19 "SE2(3) group-affine strapdown and the invariant error dynamics"
+    mac_zeros iekf_attitude.mac 8 "invariant EKF: state-independent error transition and H = [r]x"
+    mac_zeros mekf_attitude.mac 8 "multiplicative EKF: error kinematics, H, Q and the norm-preserving reset"
+    mac_zeros imm_mixing.mac 9 "IMM mixing weights are distributions and conserve the bank's moments"
+    mac_zeros gaussian_mixture_moments.mac 9 "mixture collapse and merging preserve the first two moments"
+    mac_zeros particle_resampling.mac 14 "systematic, stratified and residual resampling are unbiased"
+    mac_zeros ensemble_kalman_gain.mac 5 "the ensemble gain is the Kalman gain of the sample covariance"
+    mac_zeros sampling_transforms.mac 13 "Box-Muller, Cholesky sampling and the xoshiro256++ recurrences"
+    mac_zeros conjunction_pc.mac 32 "Foster, Patera and Chan collision probability against the defining integral"
+    mac_zeros screening_tca.mac 19 "closest approach as the root of the range rate; the radial filter bound"
+    mac_zeros lincov_recursion.mac 15 "linear covariance analysis from the error dynamics"
+    mac_zeros measurement_modifiers.mac 8 "Shapiro delay in PPN form and its partials"
+    mac_zeros multistatic_fdoa.mac 5 "FDOA as the first-order term of the relativistic Doppler law"
+    mac_zeros radiometric_observables.mac 18 "Moyer's ramped Doppler and range, the corona delay and the plasma coefficient"
+    mac_zeros exact_predicates.mac 18 "orient and in-sphere predicates as exact determinants; the filter bound"
+    mac_zeros hull_delaunay.mac 10 "Delaunay and convex hull against their brute-force definitions"
+    mac_zeros spherical_triangle.mac 14 "spherical excess as the solid angle of a triangle"
+    mac_zeros igrf_synthesis.mac 37 "IGRF field as minus the gradient of the Schmidt-normalised potential"
+    mac_zeros geomagnetic_dipole.mac 22 "the centred dipole's pole, moment and field"
+    mac_zeros attitude_control.mac 18 "attitude error kinematics, the Lyapunov derivative and the PD loop"
+    mac_zeros gmst82.mac 10 "GMST 1982 as the exact rational polynomial"
+    mac_zeros cio_rotation.mac 8 "the CIO-based rotation as the IERS closed form in X, Y, s"
 else
     skip "Ф17.B Maxima gates" maxima
 fi
@@ -925,9 +957,16 @@ if have gp; then
         rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
         cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal iod_classical patched_conics \
         targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty density_calibration_ridge \
-        wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms; do
+        wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms \
+        chi_square_quantiles robust_weights se3_exponential particle_resampling sampling_transforms \
+        conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \
+        hull_delaunay spherical_triangle igrf_synthesis geomagnetic_dipole attitude_control gmst82 \
+        cio_rotation; do
         second_engine "$f.gp" "second engine for $f.mac"
     done
+    second_engine linear_filters.gp "second engine for the Kalman, RTS, consider, H-infinity and UT fixtures"
+    second_engine multistatic_observables.gp "multistatic rates as numerical derivatives of the separation"
+    second_engine radiometric_corona.gp "the corona electron column in arc length against its closed form"
 else
     skip "Ф17.B PARI gates" gp
 fi

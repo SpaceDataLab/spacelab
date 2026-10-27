@@ -109,6 +109,16 @@
 //! the working one, because a state drifting linearly under a covariance growing quadratically stays
 //! superficially calibrated. Only the run length showed it, at 299.
 //!
+//! # Gate
+//!
+//! `derivations/robust_weights.mac` derives the Huber weight from its loss `ρ` and the fixed-point
+//! cubic from that weight, the Student-t quadratic from its E-step, continuity at the Huber knee,
+//! the four influence limits in the table above, and the 95 % efficiency of `c = 1.345`;
+//! `derivations/robust_weights.gp` computes the roots at 60 digits and both asymptotes. The module
+//! tests `the_weights_are_the_roots_of_their_defining_equations` (G2) and
+//! `the_gate_threshold_is_the_tabulated_chi_square_quantile` (G3, against
+//! `derivations/chi_square_quantiles.gp`) tie the code to them.
+//!
 // The estimation symbols (P, S, K, H, R, p, f, w, ν) are one letter by convention.
 #![allow(clippy::many_single_char_names)]
 
@@ -174,15 +184,17 @@ pub enum RobustPolicy {
     },
 }
 
-/// The χ² gate threshold for `dof` degrees of freedom at standard-normal quantile `z` (1.96 → 95%,
-/// 2.576 → 99%, 3.0 → 99.7%).
+/// The χ² gate threshold for `dof` degrees of freedom at standard-normal quantile `z`: the `Φ(z)`
+/// quantile of χ²(dof), so a clean observation passes with probability `Φ(z)` — 97.5 % at 1.96,
+/// 99.5 % at 2.576, 99.87 % at 3.0. The gate is one-sided: it is the upper end of the two-sided
+/// interval whose coverage `2Φ(z) − 1` is the 95 / 99 / 99.7 % those `z` usually stand for.
 ///
 /// This is [`chi_square_mean_interval`] with a single sample — the same Wilson–Hilferty cube the
 /// consistency diagnostics use, so the gate and the NIS test that audits it cannot disagree about
 /// what χ² means. That reuse costs some accuracy at one degree of freedom, where the cube-root
-/// approximation is at its worst: measured against the tables it returns 4.93, 7.91 and 10.53 for
-/// those three quantiles against the exact 5.02, 7.88 and 10.28 — −1.9 %, +0.3 %, +2.5 %. By
-/// `dof = 3` it is within 0.3 %.
+/// approximation is at its worst: against the exact quantiles of `derivations/chi_square_quantiles.gp`
+/// it returns 4.93, 7.91 and 10.53 for those three against 5.02, 7.88 and 10.27 — −1.9 %, +0.3 %,
+/// +2.5 %. At `dof = 3` it is −0.26 %, +0.64 % and +1.5 %: better, but not uniformly.
 ///
 /// For the scalar case there is an exact alternative that needs no table at all: rejecting when
 /// `|ν| > k√f` is `threshold = k²`, with two-sided coverage `2Φ(k) − 1` — a 3σ gate is `9.0`. Prefer
@@ -510,21 +522,70 @@ mod tests {
 
     use super::*;
 
+    /// (G3) The gate is the Wilson–Hilferty cube of the `Φ(z)` quantile, and that cube is off the
+    /// exact quantile by what [`chi_square_gate`] documents. Both columns are
+    /// `derivations/chi_square_quantiles.gp`'s at 60 digits (the exact one re-derived by series in
+    /// `derivations/chi_square_quantiles.mac`): the code has to reproduce the cube to rounding, and
+    /// the cube has to sit at the documented relative error from the root of `P(k/2, x/2) = Φ(z)`.
+    /// For one degree of freedom that root is `(Φ⁻¹((1 + Φ(z))/2))²`.
     #[test]
+    #[allow(clippy::excessive_precision)]
     fn the_gate_threshold_is_the_tabulated_chi_square_quantile() {
-        // The upper edge of the interval is the Φ(z)-quantile, so for one degree of freedom the exact
-        // value is `(Φ⁻¹((1 + Φ(z))/2))²`: 5.0239, 7.8794, 10.2766 at these three `z`. Wilson–Hilferty
-        // is a cube-root approximation and one degree of freedom is where it is weakest, so the
-        // tolerance below is its accuracy, not the code's — and it is documented on the function.
-        for (z, exact) in [(1.96, 5.023_886), (2.576, 7.879_400), (3.0, 10.276_618)] {
-            let gate = chi_square_gate(1, z);
+        for (dof, z, cube, exact, documented) in [
+            (
+                1,
+                1.96,
+                4.928_019_916_282_493_175_386_046,
+                5.024_031_992_629_765_320_376_545,
+                -0.019,
+            ),
+            (
+                1,
+                2.576,
+                7.905_762_351_393_442_427_891_180,
+                7.880_331_336_650_503_895_045_567,
+                0.003,
+            ),
+            (
+                1,
+                3.0,
+                10.532_137_060_301_203_471_491_76,
+                10.273_018_065_039_553_647_658_79,
+                0.025,
+            ),
+            (
+                3,
+                1.96,
+                9.324_333_919_916_329_925_554_140,
+                9.348_588_506_110_887_177_696_599,
+                -0.0026,
+            ),
+            (
+                3,
+                2.576,
+                12.921_216_142_638_937_890_658_89,
+                12.839_215_731_287_966_587_999_93,
+                0.0064,
+            ),
+            (
+                3,
+                3.0,
+                15.870_173_379_728_662_004_053_36,
+                15.630_563_498_450_061_143_389_16,
+                0.015,
+            ),
+        ] {
+            let gate = chi_square_gate(dof, z);
             assert!(
-                (gate / exact - 1.0).abs() < 0.03,
-                "χ²₁ at z = {z}: {gate} against {exact}"
+                (gate / cube - 1.0).abs() < 8.0 * f64::EPSILON,
+                "dof {dof}, z = {z}: {gate} against the cube {cube}"
+            );
+            let error = gate / exact - 1.0;
+            assert!(
+                (error - documented).abs() < 5e-4,
+                "dof {dof}, z = {z}: relative error {error:.5} against the documented {documented}"
             );
         }
-        // Three degrees of freedom at the 0.975 quantile: 9.3484, and the approximation is 40× better.
-        assert!((chi_square_gate(3, 1.96) / 9.348_404 - 1.0).abs() < 0.005);
         // Monotone in both arguments, which a gate has to be to mean anything.
         assert!(chi_square_gate(1, 1.96) < chi_square_gate(1, 3.0));
         assert!(chi_square_gate(1, 1.96) < chi_square_gate(3, 1.96));
@@ -683,6 +744,45 @@ mod tests {
             assert!(
                 (lambda / expected - 1.0).abs() < 1e-12,
                 "ν = {innovation}: λ = {lambda}, (n+1)/(n+δ²) = {expected}"
+            );
+        }
+    }
+
+    /// (G2) The two continuous policies return the roots of the equations that define them, at the
+    /// values `derivations/robust_weights.gp` computes at 60 digits: Huber's fixed-point weight,
+    /// the root in `(0, 1)` of `w³ν² − c²pw − c²R = 0` that `derivations/robust_weights.mac` derives
+    /// from `w = ψ(δ)/δ = c/|δ|` with `δ` measured against `p + R/w`; and the Student-t effective
+    /// noise `f − p`, `f` the positive root of the quadratic the variational E-step eliminates to.
+    /// Inputs are the f64 values the .gp converts exactly. The Huber bisection resolves its bracket
+    /// below an ulp and every root here is simple (`h′(w) = 3w²ν² − c²p` is at least 1.1), so both
+    /// bounds are 4 ulps relative. (G3) The Student-t row at `ν = 0` is the
+    /// closed form `R n/(n + 1)` = 5/11.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn the_weights_are_the_roots_of_their_defining_equations() {
+        for (prior, noise, innovation, tuning, root) in [
+            (4.0, 1.0, 10.0, 1.345, 0.351_823_220_916_692_840_332_514_7),
+            (0.25, 4.0, 6.0, 1.0, 0.485_564_706_228_962_735_507_367_8),
+            (10.0, 0.1, 50.0, 2.5, 0.162_894_850_651_471_735_641_663_4),
+            (0.5, 0.25, 3.0, 0.5, 0.214_937_316_914_176_832_012_418_5),
+            (0.0, 0.25, 5.0, 1.0, 0.215_443_469_003_188_372_175_929_4),
+        ] {
+            let w = huber_weight(prior, noise, innovation, tuning);
+            assert!(
+                (w / root - 1.0).abs() <= 4.0 * f64::EPSILON,
+                "p = {prior}, R = {noise}, ν = {innovation}, c = {tuning}: {w} against {root}"
+            );
+        }
+        for (prior, noise, innovation, dof, variance) in [
+            (4.0, 1.0, 5.0, 5.0, 1.580_042_149_350_384_446_075_215),
+            (0.25, 4.0, 100.0, 4.0, 90.934_351_802_927_792_061_150_55),
+            (1.0, 0.5, 0.0, 10.0, 0.454_545_454_545_454_545_454_545_5),
+            (0.1, 2.0, 1e3, 3.0, 707.807_233_734_742_668_412_382_4),
+        ] {
+            let got = student_t_variance(prior, noise, innovation, dof);
+            assert!(
+                (got / variance - 1.0).abs() <= 4.0 * f64::EPSILON,
+                "p = {prior}, R = {noise}, ν = {innovation}, n = {dof}: {got} against {variance}"
             );
         }
     }

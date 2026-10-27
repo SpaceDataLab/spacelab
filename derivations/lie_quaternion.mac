@@ -1,0 +1,99 @@
+/* Unit quaternions and SO(3) -- spacelab-estimation/src/lie.rs -- as identities.
+ *
+ * The code carries a Hamilton, scalar-first quaternion q = (w, v) with the product
+ *     p (x) q = (pw qw - pv.qv,  pw qv + qw pv + pv x qv)
+ * and the attitude (passive, inertial -> body) matrix
+ *     A(q) = (w^2 - |v|^2) I + 2 v v^T - 2 w [v]x .
+ * Its exponential is q = exp(phi) = (cos(th/2), (sin(th/2)/th) phi), th = |phi|, with a second-order
+ * series (1 - th^2/8, phi/2), renormalised, below th = 1e-8; its logarithm is
+ *     log(q) = 2 atan2(|v|, w) v/|v|,  after replacing q by -q when w < 0.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. A(q)^T A(q) = |q|^4 I and det A(q) = |q|^6 -- a unit quaternion gives a rotation;
+ *   2. A(p (x) q) = A(q) A(p) -- the product order the multiplicative and invariant filters assume;
+ *   3. |p (x) q|^2 = |p|^2 |q|^2 -- composition keeps a unit quaternion on the unit sphere (G4), the
+ *      reason the MEKF/IEKF multiplicative reset preserves the norm;
+ *   4. A(-q) = A(q) -- the short-way flip in the logarithm changes no rotation;
+ *   5. A(exp(th n)) = I - sin(th) [n]x + (1 - cos th) [n]x^2 for a unit axis n -- the passive
+ *      Rodrigues rotation exp(-th [n]x), so A(exp(dth)) = I - [dth]x + O(dth^2), the sign the
+ *      filters linearise with;
+ *   6. exp(log q) = q for a unit quaternion with w >= 0 -- the logarithm inverts the exponential;
+ *   7. the small-angle series agrees with the closed form through the orders the code keeps:
+ *      w to O(th^3) and the vector part to O(th) relative.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/lie_quaternion.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$
+
+hat(u) := matrix([0, -u[3], u[2]], [u[3], 0, -u[1]], [-u[2], u[1], 0])$
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+dot3(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+
+/* Quaternions as [w, x, y, z]. */
+qmul(p, q) := block([pw : p[1], pv : rest(p), qw : q[1], qv : rest(q)],
+  cons(pw*qw - dot3(pv, qv), pw*qv + qw*pv + cross(pv, qv)))$
+qnorm2(q) := q[1]^2 + q[2]^2 + q[3]^2 + q[4]^2$
+attitude(q) := block([w : q[1], v : rest(q)],
+  (w^2 - dot3(v, v))*ident(3) + 2*transpose(matrix(v)) . matrix(v) - 2*w*hat(v))$
+
+p : [p0, p1, p2, p3]$
+q : [q0, q1, q2, q3]$
+
+/* 1. a rotation, scaled by |q|^2 */
+A : attitude(q)$
+zero("attitude_orthogonal", zmax(ratsimp(transpose(A) . A - qnorm2(q)^2*ident(3))))$
+zero("attitude_determinant", ratsimp(determinant(A) - qnorm2(q)^3))$
+
+/* 2. product order */
+zero("attitude_of_product_is_reversed_product",
+     zmax(ratsimp(attitude(qmul(p, q)) - attitude(q) . attitude(p))))$
+
+/* 3. the norm is multiplicative */
+zero("product_norm_is_multiplicative", ratsimp(qnorm2(qmul(p, q)) - qnorm2(p)*qnorm2(q)))$
+
+/* 4. q and -q */
+zero("antipodal_quaternions_are_one_rotation", zmax(ratsimp(attitude(-q) - attitude(q))))$
+
+/* 5. passive Rodrigues; the unit axis is parametrised rationally so |n| = 1 identically. */
+nax : [2*a, 2*b, 1 - a^2 - b^2]/(1 + a^2 + b^2)$
+zero("unit_axis", ratsimp(dot3(nax, nax) - 1))$
+qexp : cons(cos(th/2), sin(th/2)*nax)$
+rodrigues_passive : ident(3) - sin(th)*hat(nax) + (1 - cos(th))*hat(nax) . hat(nax)$
+zero("attitude_of_exp_is_passive_rodrigues",
+     zmax(ratsimp(trigsimp(trigreduce(attitude(qexp) - rodrigues_passive)))))$
+/* first order: A(exp(t phi)) = I - t [phi]x + O(t^2) */
+phi : [f1, f2, f3]$
+qexp_t : cons(cos(t*sqrt(dot3(phi, phi))/2),
+              sin(t*sqrt(dot3(phi, phi))/2)/sqrt(dot3(phi, phi))*phi)$
+zero("attitude_first_order_is_minus_hat",
+     zmax(ratsimp(coeff(taylor(attitude(qexp_t), t, 0, 1), t, 1) + hat(phi))))$
+
+/* 6. exp(log q) = q. With s = |v| > 0 and w >= 0 the logarithm's angle is al = 2 atan2(s, w), so
+   cos(al/2) = w/sqrt(s^2 + w^2) and sin(al/2) = s/sqrt(s^2 + w^2); for a unit quaternion the
+   radical is 1 and exp(log q) = (w, v). */
+assume(s > 0, w0 >= 0)$
+al : 2*atan2(s, w0)$
+zero("exp_log_scalar", ratsimp(cos(al/2) - w0/sqrt(s^2 + w0^2)))$
+zero("exp_log_vector", ratsimp(sin(al/2) - s/sqrt(s^2 + w0^2)))$
+forget(s > 0, w0 >= 0)$
+
+/* 7. the small-angle series (1 - th^2/8, phi/2), renormalised, against the closed form */
+small_w : (1 - th^2/8)/sqrt((1 - th^2/8)^2 + th^2/4)$
+small_v : (1/2)/sqrt((1 - th^2/8)^2 + th^2/4)$
+zero("small_angle_scalar_through_th3", ratdisrep(taylor(small_w - cos(th/2), th, 0, 3)))$
+zero("small_angle_vector_through_th1", ratdisrep(taylor(small_v - sin(th/2)/th, th, 0, 1)))$
+
+/* The fixture of `the_attitude_matrix_is_the_passive_rodrigues_rotation_and_composes_in_reverse_order`
+   in lie.rs: phi = (3/10, -7/10, 11/10), A(exp phi) = exp(-[phi]x), at 40 digits. */
+fpprec : 40$
+phit : [3/10, -7/10, 11/10]$
+tht : sqrt(dot3(phit, phit))$
+Kt : hat(phit)$
+Afix : ident(3) - (sin(tht)/tht)*Kt + ((1 - cos(tht))/tht^2)*Kt . Kt$
+for i : 1 thru 3 do for j : 1 thru 3 do
+  printf(true, "A(exp phi)[~d][~d] = ~a~%", i - 1, j - 1, bfloat(Afix[i, j]))$

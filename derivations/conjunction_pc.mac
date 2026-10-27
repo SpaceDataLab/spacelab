@@ -1,0 +1,156 @@
+/* The short-encounter collision probability -- spacelab-estimation/src/conjunction.rs -- from its
+ * definition. With m the B-plane miss, C the projected combined covariance and R the combined
+ * hard-body radius,
+ *     Pc = 1/(2 pi sqrt(det C)) * integral over |x| <= R of exp(-(x - m)' C^-1 (x - m)/2) dx.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   Foster (polar about the disc centre, x = rho u, u = (cos phi, sin phi)):
+ *     1. the exponent completes the square, (rho u - m)'C^-1(rho u - m)
+ *        = aa (rho - mu)^2 + cc - bb^2/aa, aa = u'C^-1 u, bb = u'C^-1 m, mu = bb/aa, cc = m'C^-1 m;
+ *     2. the coded radial closed form differentiates to rho exp(-aa (rho - mu)^2/2) and vanishes at
+ *        rho = 0, so it IS the radial integral (erf pair);
+ *        on either side of zero the erf pair is formed as an erfc difference (2');
+ *   Patera (whitened contour, Green's theorem):
+ *     3. the coded whitening W = L^-1 (C = L L') gives W C W' = I;
+ *     4. with h(r) = (1 - exp(-r^2/2))/r^2 the field h(s) s has divergence exp(-r^2/2), so the
+ *        contour integral of h (s1 ds2 - s2 ds1) over 2 pi is the whitened area integral; the
+ *        1/r^2 part of h is divergence-free, so outside the disc the tail weight alone is Pc (4');
+ *     5. the coded series 1/2 - r^2/8 + r^4/48 is h's Taylor polynomial (remainder O(r^6));
+ *   Chan (circular covariance s^2 I, d = |m|), as the exact Poisson mixture:
+ *     6. (1/2 pi) int cos^n phi dphi over a period is the I0-series coefficient (n even) or 0 (n odd),
+ *        n = 0..16;
+ *     7. int_0^R rho^(2k+1) exp(-rho^2/2) drho = 2^k k! (1 - exp(-R^2/2) sum_{j<=k} (R^2/2)^j/j!),
+ *        k = 0..8 -- together, Pc = sum_k Pois(k; d^2/2s^2) P(Pois(R^2/2s^2) >= k+1) = P(I > J),
+ *        the series `probability_chan` sums, exact (not approximate) for a circular covariance;
+ *   Closed forms:
+ *     8. centred isotropic encounter: Pc = 1 - exp(-R^2/2s^2) (G3);
+ *     9. dilution maximum of the far-field law Pc(k) = R^2/(2k sqrt det C) exp(-v/2k) over the scale
+ *        k: stationary at k = v/2, maximum R^2/(e v sqrt det C), and R^2/(e d^2) for circular C (G3);
+ *   Projection:
+ *    10. the coded B-plane basis e1 = (uv x h)/|uv x h|, e2 = uv x e1 is orthonormal and
+ *        perpendicular to uv for any unit velocity direction;
+ *    11. |B'r|^2 = |r|^2 - (uv.r)^2 -- the projected miss keeps exactly the component of r
+ *        perpendicular to the velocity; trace(B'CB) = trace C - uv'C uv.
+ * Numbers: derivations/conjunction_pc.gp evaluates the defining double integral at 60 digits (two
+ * integration orders) and checks the Poisson mixture and the centred closed form against it.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/conjunction_pc.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+/* A matrix identity: zero when every entry is. */
+mzero(name, M) := zero(name,
+  if every(lambda([e], is(e = 0)), flatten(args(M))) then 0 else M)$
+
+assume(dd > 0, c00 > 0, c11 > 0, c00*c11 - c01^2 > 0, rho >= 0, R > 0, s > 0, aa > 0, k > 0, v > 0)$
+Cm : matrix([c00, c01], [c01, c11])$
+Ci : invert(Cm)$
+u : matrix([cos(phi)], [sin(phi)])$
+mv : matrix([m1], [m2])$
+
+/* 1. Completing the square. */
+q2(a, b) := ratsimp((transpose(a) . Ci . b))$
+aaf : q2(u, u)$ bbf : q2(u, mv)$ ccf : q2(mv, mv)$
+dvec : rho*u - mv$
+zero("foster_exponent_completes_the_square",
+  trigsimp(ratsimp(q2(dvec, dvec) - (aaf*(rho - bbf/aaf)^2 + ccf - bbf^2/aaf))))$
+
+/* 2. The radial closed form, as coded in probability_foster (s = sqrt(aa/2)). */
+radial(rr) := (exp(-aa*mu^2/2) - exp(-aa*(rr - mu)^2/2))/aa
+  + mu*(1/2)*sqrt(2*%pi/aa)*(erf(sqrt(aa/2)*(rr - mu)) + erf(sqrt(aa/2)*mu))$
+zero("foster_radial_derivative_is_the_integrand",
+  ratsimp(radcan(diff(radial(rr), rr) - rr*exp(-aa*(rr - mu)^2/2))))$
+zero("foster_radial_vanishes_at_the_centre", ratsimp(radial(0)))$
+
+/* 2'. The erf pair erf(x1) - erf(x0), x0 = -s mu < x1 = s (R - mu), as the code forms it on
+ * either side of zero, where both erf values sit near +-1: erfc(x0) - erfc(x1) and
+ * erfc(-x1) - erfc(-x0). */
+zero("foster_erf_pair_as_upper_tail_erfc", ratsimp(expand(subst(lambda([x], 1 - erf(x)), erfc,
+  (erf(x1) - erf(x0)) - (erfc(x0) - erfc(x1))))))$
+zero("foster_erf_pair_as_lower_tail_erfc", ratsimp(expand(subst(lambda([x], 1 - erf(x)), erfc,
+  (erf(x1) - erf(x0)) - (erfc(-x1) - erfc(-x0))))))$
+
+/* 3. Whitening, as coded in probability_patera. */
+l00 : sqrt(c00)$ l10 : c01/l00$ l11 : sqrt(c11 - l10^2)$
+W : matrix([1/l00, 0], [-l10/(l00*l11), 1/l11])$
+mzero("patera_whitening_is_the_inverse_cholesky",
+  ratsimp(radcan(W . Cm . transpose(W) - ident(2))))$
+
+/* 4. Divergence of h(r) s in the plane: d/ds1 (h s1) + d/ds2 (h s2), r^2 = s1^2 + s2^2. */
+hf : (1 - exp(-(s1^2 + s2^2)/2))/(s1^2 + s2^2)$
+zero("patera_contour_field_divergence_is_the_gaussian",
+  ratsimp(diff(hf*s1, s1) + diff(hf*s2, s2) - exp(-(s1^2 + s2^2)/2)))$
+
+/* 4'. The split h = 1/r^2 - exp(-r^2/2)/r^2 the code takes when the Gaussian's centre is outside
+ * the disc: the field s/r^2 is divergence-free away from the origin, so its contour integral is
+ * 2 pi times the winding number -- zero outside -- and -exp(-r^2/2)/r^2 alone carries Pc. */
+zero("patera_inverse_square_field_is_divergence_free",
+  ratsimp(diff(s1/(s1^2 + s2^2), s1) + diff(s2/(s1^2 + s2^2), s2)))$
+zero("patera_tail_weight_is_h_minus_the_winding_weight",
+  ratsimp(hf - (1/(s1^2 + s2^2) - exp(-(s1^2 + s2^2)/2)/(s1^2 + s2^2))))$
+
+/* 5. The removable singularity's series, x = r^2. */
+zero("patera_weight_series_is_the_taylor_polynomial",
+  ratsimp(taylor((1 - exp(-x/2))/x, x, 0, 2) - (1/2 - x/8 + x^2/48)))$
+
+/* 6. Angular moments: (1/2 pi) int_0^{2pi} cos^n, against binomial(n, n/2)/2^n for even n. */
+angular_bad : 0$
+for n : 0 thru 16 do block([got, want],
+  got : integrate(cos(phi)^n, phi, 0, 2*%pi)/(2*%pi),
+  want : if evenp(n) then binomial(n, n/2)/2^n else 0,
+  if ratsimp(got - want) # 0 then angular_bad : angular_bad + 1)$
+zero("chan_angular_moments_off_the_bessel_series_n_0_to_16", angular_bad)$
+
+/* 7. Radial moments of the isotropic Gaussian. */
+radial_bad : 0$
+for kk : 0 thru 8 do block([got, want],
+  got : integrate(rho^(2*kk + 1)*exp(-rho^2/2), rho, 0, R),
+  want : 2^kk*kk!*(1 - exp(-R^2/2)*sum((R^2/2)^j/j!, j, 0, kk)),
+  if ratsimp(radcan(got - want)) # 0 then radial_bad : radial_bad + 1)$
+zero("chan_radial_moments_off_the_poisson_tail_k_0_to_8", radial_bad)$
+/* The two combine term by term: (d rho/2)^(2k)/(k!)^2 * 2^k k! P(I >= k+1) e^(-d^2/2)
+ * = Pois(k; d^2/2) P(I >= k+1); shown for symbolic k. */
+zero("chan_term_is_the_poisson_product",
+  ratsimp(minfactorial(makefact(((dd/2)^(2*k)/(k!)^2)*2^k*k!
+    - (dd^2/2)^k/k!))))$
+
+/* 8. Centred isotropic encounter. */
+zero("centred_isotropic_pc_is_one_minus_exp",
+  ratsimp(integrate(rho*exp(-rho^2/(2*s^2))/s^2, rho, 0, R) - (1 - exp(-R^2/(2*s^2)))))$
+
+/* 9. Dilution maximum. */
+pck : R^2/(2*k*sdet)*exp(-v/(2*k))$
+kstar : solve(diff(pck, k) = 0, k)$
+zero("dilution_stationary_scale_is_half_the_mahalanobis_square", ratsimp(rhs(kstar[1]) - v/2))$
+zero("dilution_maximum_is_r2_over_e_v_sqrt_det",
+  ratsimp(subst(k = v/2, pck) - R^2/(%e*v*sdet)))$
+zero("dilution_second_derivative_is_negative_at_the_peak",
+  ratsimp(sign(subst([k = v/2, R = 1, sdet = 1], diff(pck, k, 2))) - neg) )$
+zero("dilution_maximum_circular_is_r2_over_e_d2",
+  ratsimp(subst([v = d^2/s^2, sdet = s^2], R^2/(%e*v*sdet)) - R^2/(%e*d^2)))$
+
+/* 10. The B-plane basis for uv = (sin t cos p, sin t sin p, cos t), helper h = x axis. */
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+dotp(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+qf(a, G) := sum(sum(a[i]*G[i, j]*a[j], j, 1, 3), i, 1, 3)$
+uv : [sin(t)*cos(p), sin(t)*sin(p), cos(t)]$
+for hx in [["x", [1, 0, 0]], ["y", [0, 1, 0]]] do block([hh : hx[2], tag : hx[1], c1, e1, e2, ts],
+  ts : lambda([x], trigsimp(ratsimp(x))),
+  c1 : cross(uv, hh),
+  e1 : c1/sqrt(dotp(c1, c1)),
+  e2 : cross(uv, e1),
+  zero(sconcat("bplane_e1_unit_helper_", tag), ts(dotp(e1, e1) - 1)),
+  zero(sconcat("bplane_e2_unit_helper_", tag), ts(dotp(e2, e2) - 1)),
+  zero(sconcat("bplane_e1_perpendicular_to_velocity_helper_", tag), ts(dotp(e1, uv))),
+  zero(sconcat("bplane_e2_perpendicular_to_velocity_helper_", tag), ts(dotp(e2, uv))),
+  zero(sconcat("bplane_e1_perpendicular_to_e2_helper_", tag), ts(dotp(e1, e2))),
+  /* 11. The projected miss and the projected covariance trace. */
+  block([r : [r1, r2, r3], Cg, tr2],
+    zero(sconcat("bplane_miss_is_the_perpendicular_component_helper_", tag),
+      ts(dotp(e1, r)^2 + dotp(e2, r)^2 - (dotp(r, r) - dotp(uv, r)^2))),
+    Cg : matrix([g11, g12, g13], [g12, g22, g23], [g13, g23, g33]),
+    tr2 : qf(e1, Cg) + qf(e2, Cg),
+    zero(sconcat("bplane_covariance_trace_drops_the_velocity_direction_helper_", tag),
+      ts(tr2 - (g11 + g22 + g33 - qf(uv, Cg))))))$

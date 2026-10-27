@@ -1,0 +1,99 @@
+/* Deep-space radiometric observables -- spacelab-estimation/src/radiometric.rs -- as identities.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the ramp segment's integral: int_a^b (f0 + r (t - t0)) dt = D (f(a) + r D/2), D = b - a, and
+ *      its derivatives in the endpoints are f(b) and -f(a) (the partials the dual arithmetic carries);
+ *   2. the range conversion 221/(2d) is Moyer's three cases 1/2, 221/1498, 221/7198;
+ *   3. over a flat exciter f = f_ref, averaged Doppler + measured frequency = M f_ref exactly, with
+ *      the transmit-time ratio dt_T/dt_R = (t_end - t_start)/T_c;
+ *   4. the corona substitution: along a line at perpendicular distance p from the Sun, s = p tan(th)
+ *      gives r = p/cos(th) and c (r/R)^-k ds = c R^k p^(1-k) cos(th)^(k-2) dth;
+ *   5. the bounds: with the Sun at the origin and the line y = p, a point at angle th from the
+ *      perpendicular makes the receiver-side angle alpha = th + pi/2 and the Sun-side angle beta
+ *      = th_t - th_r, so th runs over [alpha - pi/2, beta + alpha - pi/2] -- and p = |r_r| sin(alpha);
+ *   6. the cosine-power recursion: d/dth [cos^(n-1) sin / n] + (n-1)/n cos^(n-2) = cos^n, so
+ *      int cos^n = [cos^(n-1) sin]/n + (n-1)/n int cos^(n-2), walked from int cos^0 = D th and
+ *      int cos^1 = D sin; checked symbolically in n and against direct integration for n = 0..8;
+ *   7. Delta-DOR: (rho_2 - rho_1) + B.s_q -> B.(s_q - s_sc) as the spacecraft range L -> infinity
+ *      (rho_i = |L s_sc - r_i|, B = r_2 - r_1), and it vanishes when s_sc = s_q;
+ *   8. the plasma coefficient e^2/(8 pi^2 eps0 m_e), CODATA 2018 at 40 digits, is the stored
+ *      PLASMA_DELAY_COEFFICIENT, and is not the three-digit 40.3.
+ * Numbers: derivations/radiometric_corona.gp integrates the electron column in arc length at 60
+ * digits and checks it against the closed form of 4-6.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/radiometric_observables.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. */
+fr(t) := f0 + r*(t - t0)$
+seg(a, b) := (b - a)*(fr(a) + r*(b - a)/2)$
+zero("ramp_segment_integral_is_the_trapezoid", ratsimp(integrate(fr(t), t, a, b) - seg(a, b)))$
+zero("ramp_integral_upper_endpoint_partial_is_the_frequency", ratsimp(diff(seg(a, b), b) - fr(b)))$
+zero("ramp_integral_lower_endpoint_partial_is_minus_the_frequency", ratsimp(diff(seg(a, b), a) + fr(a)))$
+
+/* 2. */
+zero("range_conversion_s_band", 221/(2*221) - 1/2)$
+zero("range_conversion_x_band", 221/(2*749) - 221/1498)$
+zero("range_conversion_ka_band", 221/(2*3599) - 221/7198)$
+
+/* 3. M the turnaround ratio, f the flat exciter = reference, Tc the count interval. */
+averaged : M*f - (M/Tc)*f*(te - ts)$
+measured : M*f*((te - ts)/Tc)$
+zero("doppler_count_plus_measured_frequency_is_the_reference", ratsimp(averaged + measured - M*f))$
+
+/* 4. */
+assume(p > 0, R > 0, k > 0, cos(th) > 0)$
+rr : p/cos(th)$ ss : p*tan(th)$
+zero("corona_radius_along_the_line", trigsimp(rr^2 - (p^2 + ss^2)))$
+zero("corona_substitution_integrand",
+  ratsimp(radcan(trigsimp(c*(rr/R)^(-k)*diff(ss, th) - c*R^k*p^(1 - k)*cos(th)^(k - 2)))))$
+
+/* 5. Receiver at angle thr, transmitter at angle tht (tht > thr), both on y = p. */
+Pr : [p*tan(thr), p]$ Pt : [p*tan(tht), p]$
+unit(v) := v/sqrt(v . v)$
+ts(e) := trigsimp(trigexpand(ratsimp(e)))$
+/* The angle at the receiver between the Sun direction and the transmitter direction (+x):
+ * cos(alpha) = unit(-Pr) . [1, 0] = -sin(thr), i.e. alpha = thr + pi/2. */
+assume(cos(thr) > 0, cos(tht) > 0)$
+zero("corona_receiver_angle_cosine", ts(radcan(unit(-Pr) . [1, 0] - cos(thr + %pi/2))))$
+/* The angle at the Sun between the two endpoints: cos(beta) = unit(Pr).unit(Pt) = cos(tht - thr). */
+zero("corona_sun_angle_cosine", ts(radcan(unit(Pr) . unit(Pt) - cos(tht - thr))))$
+zero("corona_impact_parameter_is_receiver_distance_times_sin_alpha",
+  ts(radcan(sqrt(Pr . Pr)*sin(thr + %pi/2) - p)))$
+
+/* 6. */
+zero("cosine_power_recursion_symbolic_n",
+  ratsimp(trigsimp(diff(cos(th)^(n - 1)*sin(th)/n, th) + (n - 1)/n*cos(th)^(n - 2) - cos(th)^n)))$
+cosint(n, lo, hi) := if n = 0 then hi - lo else if n = 1 then sin(hi) - sin(lo)
+  else (cos(hi)^(n - 1)*sin(hi) - cos(lo)^(n - 1)*sin(lo))/n + (n - 1)/n*cosint(n - 2, lo, hi)$
+recursion_bad : 0$
+for n : 0 thru 8 do
+  if ratsimp(trigsimp(trigreduce(cosint(n, lo, hi) - integrate(cos(x)^n, x, lo, hi)))) # 0
+  then recursion_bad : recursion_bad + 1$
+zero("cosine_power_recursion_off_direct_integration_n_0_to_8", recursion_bad)$
+
+/* 7. Delta-DOR far-field limit, s_sc = (a1, a2, a3) unit, s_q = (q1, q2, q3). */
+Ssc : [a1, a2, a3]$ Sq : [q1, q2, q3]$
+X1 : [x1, y1, z1]$ X2 : [x2, y2, z2]$
+rho(Lr, X) := sqrt((Lr*Ssc - X) . (Lr*Ssc - X))$
+assume(Lr > 0)$
+ddor : (rho(Lr, X2) - rho(Lr, X1)) + (X2 - X1) . Sq$
+far : ratsimp(subst([a1^2 = 1 - a2^2 - a3^2], taylor(subst(Lr = 1/eps, ddor), eps, 0, 0)))$
+zero("delta_dor_far_field_is_the_baseline_on_the_angular_offset",
+  ratsimp(subst(a1^2 = 1 - a2^2 - a3^2, expand(far - (X2 - X1) . (Sq - Ssc)))))$
+zero("delta_dor_far_field_vanishes_in_the_quasar_direction",
+  ratsimp(subst([q1 = a1, q2 = a2, q3 = a3], (X2 - X1) . (Sq - Ssc))))$
+
+/* 8. CODATA 2018: e exact, m_e and eps0 at their published digits. */
+fpprec : 45$ fpprintprec : 40$
+qe : 1602176634/10^28$ me : 91093837015/10^41$ eps0 : 88541878128/10^22$
+K : bfloat(qe^2/(8*%pi^2*eps0*me))$
+printf(true, "e^2/(8 pi^2 eps0 m_e) = ~a m^3/s^2~%", K)$
+zero("plasma_coefficient_is_the_stored_full_precision_value",
+  if abs(K - 40.308193022001689553246118861883828473752b0) < 1b-38 then 0 else K)$
+zero("plasma_coefficient_is_not_the_three_digit_rounding",
+  if abs(K - 40.3b0) > 1b-3 then 0 else K)$

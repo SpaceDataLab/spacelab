@@ -5,6 +5,13 @@
 //! and a point is a vertex only when it is strictly extreme. Points that lie exactly on a face — the
 //! interior of a coplanar facet, or the interior of a hull edge — are not vertices, which is the same
 //! convention qhull reports.
+//!
+//! Gate: `derivations/hull_delaunay.mac` finds both hulls of a 14-point integer set by brute force
+//! from their definitions — every oriented triangle with all other points strictly behind it, every
+//! edge with all other points strictly to its left — in exact arithmetic, and checks Euler's
+//! `F = 2V − 4`; `derivations/hull_delaunay.gp` repeats the search. The module tests
+//! `the_hull_is_the_brute_force_set_of_supporting_planes` (G2) and
+//! `the_planar_hull_is_the_brute_force_supporting_cycle` (G2) compare the constructions with it.
 
 use crate::GeometryError;
 use crate::predicates::{orient2d, orient3d};
@@ -555,5 +562,86 @@ mod tests {
             convex_hull_2d(&[[0.0, f64::NAN]]).err(),
             Some(GeometryError::NonFiniteCoordinate { point: 0 })
         );
+    }
+
+    /// A triangle with its smallest index first, its cyclic order kept.
+    fn smallest_first(t: [usize; 3]) -> [usize; 3] {
+        let m = t
+            .iter()
+            .position(|&v| v == *t.iter().min().unwrap())
+            .unwrap();
+        [t[m], t[(m + 1) % 3], t[(m + 2) % 3]]
+    }
+
+    /// (G2) The hull is the set of supporting planes by definition: on 14 integer points with no four
+    /// coplanar, `derivations/hull_delaunay.mac` keeps every oriented triangle with all other points
+    /// strictly behind it (`orient3d > 0` in exact integers), and `derivations/hull_delaunay.gp`
+    /// repeats the search in PARI. Its 16 faces on 10 vertices are `F = 2V − 4`.
+    #[test]
+    fn the_hull_is_the_brute_force_set_of_supporting_planes() {
+        let points = alloc::vec![
+            [-142.0, -184.0, 433.0],
+            [-888.0, 345.0, 702.0],
+            [-71.0, -467.0, 244.0],
+            [-1001.0, 358.0, 189.0],
+            [-401.0, -503.0, -953.0],
+            [-1005.0, -285.0, 285.0],
+            [70.0, -199.0, 94.0],
+            [-264.0, -284.0, -949.0],
+            [393.0, 387.0, 94.0],
+            [-143.0, -710.0, 786.0],
+            [212.0, -882.0, -1003.0],
+            [-23.0, 742.0, -485.0],
+            [-624.0, -76.0, 498.0],
+            [-945.0, 502.0, -707.0]
+        ];
+        let brute_force: [[usize; 3]; 16] = [
+            [1, 3, 5],
+            [1, 5, 9],
+            [1, 8, 11],
+            [1, 9, 8],
+            [1, 11, 13],
+            [1, 13, 3],
+            [3, 13, 5],
+            [4, 5, 13],
+            [4, 7, 10],
+            [4, 10, 5],
+            [4, 13, 7],
+            [5, 10, 9],
+            [7, 11, 10],
+            [7, 13, 11],
+            [8, 9, 10],
+            [8, 10, 11],
+        ];
+        let hull = ConvexHull::new(&points).unwrap();
+        let mut got: Vec<[usize; 3]> = hull.faces().iter().map(|&t| smallest_first(t)).collect();
+        got.sort_unstable();
+        assert_eq!(got, brute_force);
+        assert_eq!(hull.vertices(), &[1, 3, 4, 5, 7, 8, 9, 10, 11, 13]);
+    }
+
+    /// (G2) The planar hull is the cycle of edges with every other point strictly to their left,
+    /// found by brute force in `derivations/hull_delaunay.mac` and `derivations/hull_delaunay.gp` on
+    /// the 14 planar points of the Delaunay gate, listed counter-clockwise from the lexicographically
+    /// smallest point.
+    #[test]
+    fn the_planar_hull_is_the_brute_force_supporting_cycle() {
+        let points = alloc::vec![
+            [592.0, 351.0],
+            [379.0, 241.0],
+            [82.0, 89.0],
+            [575.0, 1001.0],
+            [247.0, 109.0],
+            [1009.0, 661.0],
+            [706.0, 585.0],
+            [906.0, 503.0],
+            [304.0, 539.0],
+            [388.0, 863.0],
+            [954.0, 397.0],
+            [263.0, 368.0],
+            [89.0, 482.0],
+            [308.0, 897.0]
+        ];
+        assert_eq!(convex_hull_2d(&points).unwrap(), [2, 4, 10, 5, 3, 13, 12]);
     }
 }

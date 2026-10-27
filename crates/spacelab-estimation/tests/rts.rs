@@ -14,7 +14,12 @@
 //! * **Refusal**: a singular predicted covariance is reported, not papered over.
 
 #![allow(clippy::needless_range_loop, clippy::many_single_char_names)]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::cast_precision_loss)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::cast_precision_loss,
+    clippy::excessive_precision
+)]
 
 use proptest::prelude::*;
 use spacelab_estimation::consistency::{is_consistent, normalized_squared};
@@ -551,4 +556,98 @@ proptest! {
             }
         }
     }
+}
+
+/// The joint posterior of the four-epoch arc of `derivations/rts_smoother.mac`, from the inverse of
+/// its block-tridiagonal information matrix in exact rationals: `(x̂, P̂)` at epochs 1 and 0.
+const JOINT_EPOCH_1: ([f64; 2], [[f64; 2]; 2]) = (
+    [
+        8.522_036_876_279_131_786_144_677e-1,
+        6.814_801_548_688_902_322_293_66e-1,
+    ],
+    [
+        [
+            1.166_256_804_073_796_065_676_383e-1,
+            -8.211_563_153_291_958_509_734_778e-2,
+        ],
+        [
+            -8.211_563_153_291_958_509_734_778e-2,
+            2.742_566_761_824_024_071_608_762e-1,
+        ],
+    ],
+);
+const JOINT_EPOCH_0: ([f64; 2], [[f64; 2]; 2]) = (
+    [
+        6.684_961_323_778_554_565_379_192e-1,
+        3.149_556_632_598_205_730_376_299e-1,
+    ],
+    [
+        [
+            2.097_033_427_242_537_922_125_578e-1,
+            -1.647_966_084_820_253_359_673_447e-1,
+        ],
+        [
+            -1.647_966_084_820_253_359_673_447e-1,
+            3.305_303_941_963_770_943_361_815e-1,
+        ],
+    ],
+);
+
+/// (G2) The smoother computes what a smoother is defined to be: the mean and covariance of each
+/// state conditioned on every measurement of the arc. `derivations/rts_smoother.mac` forms that
+/// conditional directly — the joint Gaussian over `(x₀ … x₃)`, its information matrix inverted in
+/// exact rationals — and shows the array form's blocks are the textbook recursion's. Dyadic inputs,
+/// measurement first at every epoch; the bound is 16 ulps of the prior's scale, 4.
+#[test]
+fn the_smoother_is_the_joint_gaussian_conditional() {
+    let stm = [[1.0, 0.5], [0.0, 1.0]];
+    let sq = [[0.25, 0.0], [0.125, 0.5]];
+    let h = [1.0, 0.25];
+    let mut kf = SquareRootKalman::new([0.5, -1.0], [[2.0, 0.0], [0.5, 1.0]]);
+    let mut record = Vec::new();
+    for (k, z) in [0.75, 0.5, 1.75, 2.5].into_iter().enumerate() {
+        let innovation = z - (h[0] * kf.x[0] + h[1] * kf.x[1]);
+        kf.measurement_update(&h, innovation, 0.25);
+        if k == 3 {
+            break;
+        }
+        let filtered = kf.x;
+        kf.x = [
+            stm[0][0] * filtered[0] + stm[0][1] * filtered[1],
+            filtered[1],
+        ];
+        record.push(SmoothingStep {
+            filtered,
+            filtered_sqrt: kf.covariance_sqrt(),
+            stm,
+            process_noise_sqrt: sq,
+            predicted: kf.x,
+        });
+        kf.time_update(&stm, &sq);
+    }
+    let mut smoother = RtsSmoother::new(kf.x, kf.covariance_sqrt());
+    let tol = 16.0 * f64::EPSILON * 4.0;
+    let mut worst = 0.0_f64;
+    smoother.step(&record[2]).unwrap();
+    for (back, want) in [(1, &JOINT_EPOCH_1), (0, &JOINT_EPOCH_0)] {
+        smoother.step(&record[back]).unwrap();
+        let (x, p) = (smoother.state(), smoother.covariance());
+        for i in 0..2 {
+            worst = worst.max((x[i] - want.0[i]).abs());
+            assert!(
+                (x[i] - want.0[i]).abs() <= tol,
+                "epoch {back}: x̂[{i}] = {}",
+                x[i]
+            );
+            for j in 0..2 {
+                worst = worst.max((p[i][j] - want.1[i][j]).abs());
+                assert!(
+                    (p[i][j] - want.1[i][j]).abs() <= tol,
+                    "epoch {back}: P̂[{i}][{j}] = {}",
+                    p[i][j]
+                );
+            }
+        }
+    }
+    println!("RTS vs the exact joint conditional: worst {worst:.2e}");
 }

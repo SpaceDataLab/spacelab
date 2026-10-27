@@ -25,6 +25,12 @@
 //!   coordinate comparison, exact by construction. Without it the cone would build a zero-area triangle
 //!   from three collinear points; with a non-strict half-plane test instead, a point on the *extension*
 //!   of a hull edge would build one.
+//!
+//! Gate: `derivations/hull_delaunay.mac` finds the Delaunay triangulation of 14 integer points in
+//! general position by brute force — every counter-clockwise triple with no other point strictly
+//! inside its circumcircle, by the exact lifted determinant — and checks the `2n − 2 − h` count
+//! Euler's formula gives; `derivations/hull_delaunay.gp` repeats the search. The module test
+//! `the_triangulation_is_the_brute_force_delaunay_set` (G2) compares the insertion's output with it.
 
 use crate::GeometryError;
 use crate::predicates::{in_circle, orient2d};
@@ -573,5 +579,70 @@ mod tests {
             Triangulation::new(&[[0.0, 0.0], [1.0, 0.0], [f64::INFINITY, 0.0]]).err(),
             Some(GeometryError::NonFiniteCoordinate { point: 2 })
         );
+    }
+
+    /// A triangle with its smallest index first, its cyclic order kept.
+    fn smallest_first(t: [usize; 3]) -> [usize; 3] {
+        let m = t
+            .iter()
+            .position(|&v| v == *t.iter().min().unwrap())
+            .unwrap();
+        [t[m], t[(m + 1) % 3], t[(m + 2) % 3]]
+    }
+
+    /// (G2) The triangulation is the Delaunay triangulation by definition: on 14 integer points in
+    /// general position — no three collinear, no four cocircular, so the answer is unique —
+    /// `derivations/hull_delaunay.mac` tests every counter-clockwise triple against every other point
+    /// with the exact lifted determinant and keeps those with no point strictly inside, and
+    /// `derivations/hull_delaunay.gp` repeats the search in PARI. The 19 triangles are `2n − 2 − h`
+    /// with `h = 7`. The insertion order of Bowyer–Watson must not matter, so the set is compared,
+    /// each triangle with its smallest index first.
+    #[test]
+    fn the_triangulation_is_the_brute_force_delaunay_set() {
+        let points = alloc::vec![
+            [592.0, 351.0],
+            [379.0, 241.0],
+            [82.0, 89.0],
+            [575.0, 1001.0],
+            [247.0, 109.0],
+            [1009.0, 661.0],
+            [706.0, 585.0],
+            [906.0, 503.0],
+            [304.0, 539.0],
+            [388.0, 863.0],
+            [954.0, 397.0],
+            [263.0, 368.0],
+            [89.0, 482.0],
+            [308.0, 897.0]
+        ];
+        let brute_force: [[usize; 3]; 19] = [
+            [0, 1, 4],
+            [0, 4, 10],
+            [0, 6, 8],
+            [0, 7, 6],
+            [0, 8, 11],
+            [0, 10, 7],
+            [0, 11, 1],
+            [1, 11, 4],
+            [2, 4, 11],
+            [2, 11, 12],
+            [3, 6, 5],
+            [3, 9, 6],
+            [3, 13, 9],
+            [5, 6, 7],
+            [5, 7, 10],
+            [6, 9, 8],
+            [8, 9, 13],
+            [8, 12, 11],
+            [8, 13, 12],
+        ];
+        let mut got: Vec<[usize; 3]> = Triangulation::new(&points)
+            .unwrap()
+            .triangles()
+            .iter()
+            .map(|&t| smallest_first(t))
+            .collect();
+        got.sort_unstable();
+        assert_eq!(got, brute_force);
     }
 }

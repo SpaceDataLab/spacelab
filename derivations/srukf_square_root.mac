@@ -1,0 +1,71 @@
+/* The two square-root moves of the square-root UKF -- spacelab-estimation/src/srukf.rs -- as the
+ * code writes them, on a general 3 x 3 factor.
+ *
+ *   `cholupdate(l, v, sign)`: for k = 1..M, r = sqrt(l_kk^2 + sign v_k^2), c = r/l_kk,
+ *   s = v_k/l_kk, l_kk = r, then for i > k: l_ik = (l_ik + sign s v_i)/c, v_i = c v_i - s l_ik.
+ *   `fold_row(r, a)`: for k = 1..M a Givens rotation of (r_kk, a_k) onto r_kk = hypot(r_kk, a_k),
+ *   carried along row k of r and the remaining entries of a.
+ *
+ * Each line printing `<name>: 0`, the algorithms transcribed step for step with symbolic entries:
+ *   1. cholupdate with sign +1 returns a factor of L L^T + v v^T (G1);
+ *   2. cholupdate with sign -1 returns a factor of L L^T - v v^T, wherever that is positive
+ *      definite (G1) -- the downdate the negative centre weight and the measurement update need;
+ *   3. both keep the factor lower-triangular (G1);
+ *   4. fold_row returns an upper-triangular R' with R'^T R' = R^T R + a a^T (G1), so the QR of the
+ *      weighted residuals is the Cholesky factor of their Gram sum.
+ * The linear-Gaussian SRUKF step is checked against the exact rational Kalman recursion of
+ * derivations/kalman_square_root.mac in `srukf.rs::the_srukf_is_the_exact_rational_kalman_step`.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/srukf_square_root.mac
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+algebraic : true$
+nonzero(m) := length(sublist(flatten(args(ratsimp(m))), lambda([e], e # 0)))$
+
+cholupdate(l, v, sg) := block([x : copymatrix(v), dk, rr, r, c, s, m : length(l)],
+  l : copymatrix(l),
+  for k : 1 thru m do (
+    dk : l[k, k],
+    rr : dk^2 + sg * x[k, 1]^2,
+    r : sqrt(rr),
+    l[k, k] : r,
+    c : r / dk,
+    s : x[k, 1] / dk,
+    for i : k + 1 thru m do (
+      l[i, k] : (l[i, k] + sg * s * x[i, 1]) / c,
+      x[i, 1] : c * x[i, 1] - s * l[i, k])),
+  l)$
+
+fold_row(r, a) := block([a : copymatrix(a), m : length(r), rkk, den, c, s, t],
+  r : copymatrix(r),
+  for k : 1 thru m do (
+    rkk : r[k, k],
+    den : sqrt(rkk^2 + a[1, k]^2),
+    c : rkk / den,
+    s : a[1, k] / den,
+    r[k, k] : den,
+    for j : k + 1 thru m do (
+      t : c * r[k, j] + s * a[1, j],
+      a[1, j] : c * a[1, j] - s * r[k, j],
+      r[k, j] : t)),
+  r)$
+
+assume(l11 > 0, l22 > 0, l33 > 0)$
+l : matrix([l11, 0, 0], [l21, l22, 0], [l31, l32, l33])$
+v : matrix([v1], [v2], [v3])$
+up : cholupdate(l, v, 1)$
+zero("cholupdate_adds_v_vt", nonzero(up . transpose(up) - (l . transpose(l) + v . transpose(v))))$
+down : cholupdate(l, v, -1)$
+zero("cholupdate_downdate_subtracts_v_vt", nonzero(down . transpose(down) - (l . transpose(l) - v . transpose(v))))$
+zero("cholupdate_keeps_the_factor_lower_triangular",
+  length(sublist([up[1, 2], up[1, 3], up[2, 3], down[1, 2], down[1, 3], down[2, 3]], lambda([e], e # 0))))$
+
+r : matrix([r11, r12, r13], [0, r22, r23], [0, 0, r33])$
+a : matrix([a1, a2, a3])$
+folded : fold_row(r, a)$
+zero("fold_row_adds_the_row_gram", nonzero(transpose(folded) . folded - (transpose(r) . r + transpose(a) . a)))$
+zero("fold_row_keeps_the_factor_upper_triangular",
+  length(sublist([folded[2, 1], folded[3, 1], folded[3, 2]], lambda([e], e # 0))))$

@@ -49,6 +49,18 @@
 //! satellite's ephemeris is *held fixed*, the link is not a new observable: it is
 //! [`Range`](crate::modifier::Range) over a [`Station`] carrying the remote's position and velocity,
 //! bit for bit, which the unit tests assert rather than assume.
+//!
+//! # Gate
+//!
+//! `derivations/multistatic_observables.mac` shows the rate form with both endpoints moving and
+//! the bistatic and TDOA gradients exactly, and evaluates every observable on the fixture at 40
+//! digits; `derivations/multistatic_observables.gp` re-derives those numbers with each rate a
+//! numerical derivative of the separation; `derivations/multistatic_fdoa.mac` shows the coded
+//! FDOA is the first-order term of the relativistic Doppler law, the emitter's transverse
+//! Doppler cancelling through second order. The gates are the module tests
+//! `every_observable_matches_the_maxima_closed_form` (G3),
+//! `the_bistatic_gradient_is_the_sum_of_the_two_unit_vectors` (G1) and
+//! `the_tdoa_gradient_is_the_difference_of_the_two_unit_vectors` (G1).
 
 use spacelab_autodiff::{Dual, Scalar, jacobian};
 
@@ -676,7 +688,11 @@ mod tests {
     }
 
     /// Each observable against the closed form Maxima evaluated at 40 digits on this geometry
-    /// (`derivations/multistatic_observables.mac`). Measured agreement: **0 ulp** on five of the
+    /// (`derivations/multistatic_observables.mac`) (G3), re-derived by
+    /// `derivations/multistatic_observables.gp` with every rate taken as a numerical derivative
+    /// of the separation (agreement 1e-29 relative), and the FDOA shown by
+    /// `derivations/multistatic_fdoa.mac` to be the first-order term of the relativistic Doppler
+    /// law, 0.559 Hz from the exact law on this fixture. Measured agreement: **0 ulp** on five of the
     /// six, and **1 ulp** on the TDOA — which is the only one that differences two nearly equal
     /// lengths, 1.427 Mm against 1.736 Mm, and so is the only one that loses a digit to
     /// cancellation before the division by `c`.
@@ -721,7 +737,7 @@ mod tests {
         );
     }
 
-    /// The bistatic gradient is the sum of the two unit line-of-sight vectors, which Maxima
+    /// The bistatic gradient is the sum of the two unit line-of-sight vectors (G1), which Maxima
     /// establishes symbolically (residual exactly `[0, 0, 0]`) and evaluates at this geometry.
     /// Measured: the AD partials reproduce those three numbers to **1 ulp** each, and give exactly
     /// zero for the three velocity partials a range cannot have.
@@ -743,7 +759,7 @@ mod tests {
         }
     }
 
-    /// The TDOA gradient is `(ρ̂_second − ρ̂_first)/c`, so it can never exceed `2/c` and it vanishes
+    /// The TDOA gradient is `(ρ̂_second − ρ̂_first)/c` (G1), so it can never exceed `2/c` and it vanishes
     /// along the baseline — the reason one pair cannot geolocate. Checked against the closed form at
     /// the fixture, where it measures 3.94e-9 s/m against the 6.67e-9 ceiling.
     #[test]

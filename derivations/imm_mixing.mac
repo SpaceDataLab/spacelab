@@ -1,0 +1,85 @@
+/* The interacting-multiple-model recursion -- spacelab-estimation/src/imm.rs -- as identities.
+ *
+ * With model probabilities mu_i, a row-stochastic transition matrix pi_ij = P(j now | i before),
+ * model estimates x_i and covariances P_i, the code forms (Bar-Shalom, Estimation with Applications
+ * to Tracking and Navigation, sec. 11.6)
+ *     cbar_j = sum_i pi_ij mu_i,   mu_i|j = pi_ij mu_i / cbar_j,
+ *     x0_j = sum_i mu_i|j x_i,     P0_j = sum_i mu_i|j [P_i + (x_i - x0_j)(x_i - x0_j)^T],
+ *     mu_j' = cbar_j exp(l_j - lmax) / sum_k cbar_k exp(l_k - lmax),
+ * and the combined estimate xbar = sum mu_j x_j, Pbar = sum mu_j [P_j + (x_j - xbar)(x_j - xbar)^T].
+ *
+ * Shown here for M = 3 models, each line printing `<name>: 0`:
+ *   1. the predicted probabilities and every column of mixing weights are distributions (G4);
+ *   2. subtracting lmax changes no posterior probability, and the posterior sums to one (G1, G4);
+ *   3. the moment match sum w [P + (x - xbar)(x - xbar)^T] = sum w (P + x x^T) - xbar xbar^T for a
+ *      2-dimensional state (G1);
+ *   4. mixing conserves the first two moments of the bank: sum_j cbar_j x0_j = xbar and
+ *      sum_j cbar_j [P0_j + (x0_j - xbar)(x0_j - xbar)^T] = Pbar -- the mixed priors, weighted by the
+ *      predicted probabilities, are the same distribution as the posteriors they were mixed from (G4).
+ * Then it prints the mixed priors of the fixture of `the_mixed_priors_are_their_definitions_and_conserve_the_moments`
+ * in imm.rs, exactly.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/imm_mixing.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$
+colv(u) := transpose(matrix(u))$
+
+/* Row-stochastic transition matrix and a distribution, by construction. */
+Pi : matrix([a11, a12, 1 - a11 - a12], [a21, a22, 1 - a21 - a22], [a31, a32, 1 - a31 - a32])$
+mu : [m1, m2, 1 - m1 - m2]$
+cbar : makelist(sum(Pi[i, j]*mu[i], i, 1, 3), j, 1, 3)$
+wmix : makelist(makelist(Pi[i, j]*mu[i]/cbar[j], i, 1, 3), j, 1, 3)$
+
+/* 1. */
+zero("predicted_probabilities_sum_to_one", ratsimp(sum(cbar[j], j, 1, 3) - 1))$
+for j : 1 thru 3 do
+  zero(sconcat("mixing_weights_into_", j - 1, "_sum_to_one"), ratsimp(sum(wmix[j][i], i, 1, 3) - 1))$
+
+/* 2. */
+lk : [l1, l2, l3]$
+post(shift) := makelist(cbar[j]*exp(lk[j] - shift), j, 1, 3)/sum(cbar[k]*exp(lk[k] - shift), k, 1, 3)$
+zero("log_shift_changes_no_posterior", lmax(map(abs, ratsimp(post(lm) - post(0)))))$
+zero("posterior_sums_to_one", ratsimp(sum(post(lm)[j], j, 1, 3) - 1))$
+
+/* 3. 2-dimensional moment match with general weights */
+wts : [w1, w2, w3]$
+xs : [[x11, x12], [x21, x22], [x31, x32]]$
+Ps : [matrix([p111, p112], [p112, p122]), matrix([p211, p212], [p212, p222]),
+      matrix([p311, p312], [p312, p322])]$
+wsum : sum(wts[i], i, 1, 3)$
+xbarw : sum(wts[i]*xs[i], i, 1, 3)/wsum$
+spread_form : sum(wts[i]*(Ps[i] + colv(xs[i] - xbarw) . transpose(colv(xs[i] - xbarw))), i, 1, 3)/wsum$
+raw_form : sum(wts[i]*(Ps[i] + colv(xs[i]) . transpose(colv(xs[i]))), i, 1, 3)/wsum
+           - colv(xbarw) . transpose(colv(xbarw))$
+zero("moment_match_spread_form_is_raw_form", zmax(ratsimp(spread_form - raw_form)))$
+
+/* 4. scalar state (the identity is entrywise bilinear, so a scalar shows it) */
+xv : [y1, y2, y3]$  Pv : [v1, v2, v3]$
+xbar : sum(mu[i]*xv[i], i, 1, 3)$
+Pbar : sum(mu[i]*(Pv[i] + (xv[i] - xbar)^2), i, 1, 3)$
+x0 : makelist(sum(wmix[j][i]*xv[i], i, 1, 3), j, 1, 3)$
+P0 : makelist(sum(wmix[j][i]*(Pv[i] + (xv[i] - x0[j])^2), i, 1, 3), j, 1, 3)$
+zero("mixing_conserves_the_mean", ratsimp(sum(cbar[j]*x0[j], j, 1, 3) - xbar))$
+zero("mixing_conserves_the_covariance",
+     ratsimp(sum(cbar[j]*(P0[j] + (x0[j] - xbar)^2), j, 1, 3) - Pbar))$
+
+/* The fixture: mu = (1/2, 1/4, 1/4), pi below, x_i, and P_i = S_i S_i^T. */
+Pif : matrix([8/10, 1/10, 1/10], [2/10, 7/10, 1/10], [1/10, 3/10, 6/10])$
+muf : [1/2, 1/4, 1/4]$
+xf : [[1, 2], [5, 6], [-3, 1/2]]$
+Sf : [matrix([2, 0], [1/2, 1]), matrix([1, 0], [0, 3]), matrix([1/2, 0], [-1, 2])]$
+Pf : makelist(Sf[i] . transpose(Sf[i]), i, 1, 3)$
+cf : makelist(sum(Pif[i, j]*muf[i], i, 1, 3), j, 1, 3)$
+for j : 1 thru 3 do block([wj, xm, Pm],
+  wj : makelist(Pif[i, j]*muf[i]/cf[j], i, 1, 3),
+  xm : sum(wj[i]*xf[i], i, 1, 3),
+  Pm : sum(wj[i]*(Pf[i] + colv(xf[i] - xm) . transpose(colv(xf[i] - xm))), i, 1, 3),
+  printf(true, "cbar[~d] = ~a~%", j - 1, cf[j]),
+  for a : 1 thru 2 do printf(true, "x0[~d][~d] = ~a~%", j - 1, a - 1, xm[a]),
+  for a : 1 thru 2 do for b : 1 thru 2 do
+    printf(true, "P0[~d][~d][~d] = ~a~%", j - 1, a - 1, b - 1, Pm[a, b]))$

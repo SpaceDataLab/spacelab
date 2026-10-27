@@ -62,6 +62,12 @@
 //!
 //! At `LAG = 0` this is filtering, exactly and by construction, which is the boundary case a lag
 //! sweep needs at one end.
+//!
+//! Gate: `derivations/rts_smoother.mac` evaluates "epoch `k − L` conditioned on `z₀…z_k`" as a
+//! joint-Gaussian conditional in exact rationals, and `derivations/linear_filters.gp` recomputes it.
+//! The test `tests/fixed_lag_smoothing.rs::the_fixed_lag_estimate_is_the_conditional_on_the_data_so_far`
+//! (G2) holds a lag-2 smoother to it at two epochs and (G3) a lag longer than the arc to the
+//! fixed-interval answer.
 
 // Matrix code indexes several arrays by one i/j/k, and the Kalman symbols are one letter by
 // universal convention.

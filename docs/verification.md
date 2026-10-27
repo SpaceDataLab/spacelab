@@ -7901,8 +7901,21 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 333 modules, 166 name a check, 167 do not** — 80 physics,
-28 parsers, 6 generated and 53 infrastructure. Ф17.B batch 2 (2026-10-26) took out 27 dynamics modules
+(`plans/16` Ф17.B orders them). **Today: 333 modules, 201 name a check, 132 do not** — 44 physics,
+28 parsers, 6 generated and 54 infrastructure. Ф17.B batch 3 (2026-10-27) took out 35 estimation,
+geometry, geomagnetism, control and Earth-rotation modules (`estimation/ephemeris.rs` reads a state
+slot and moved to infrastructure) and fixed what the gates found: the IMM bank went NaN with every
+`step` returning `Ok` once a model with no inflow underflowed to probability 0 (0/0 mixing weights);
+Foster's and Patera's Pc returned exactly 0 at 3.2e-27 and 2.3e-20 and were 1e-11 off at 2.7e-7,
+from an `erf` difference near ±1 and an O(1) contour sum; the plasma delay coefficient held the
+three-digit 40.3 where its defining `e²/(8π²ε₀mₑ)` is 40.308 (every corona delay 2.0e-4 low);
+`spherical_excess` took the triple product of unit vectors, `ε/ℓ²` relative (9.7e-5 at ℓ = 1.6e-6
+rad); and `AttitudeError` composed `[NB][NR]ᵀ`, right only at an identity reference — toward a 90°
+reference the closed loop was still 39° off after 200 s, now 0.07°. Documentation fixes: the
+one-sided χ² gate's coverage labels (97.5/99.5/99.87 %, not 95/99/99.7 %), the Wilson–Hilferty
+accuracy claim, the robust gate's "exact" quantiles (3.6e-3 off), IEKF's `H` sign, and the Python and
+C bindings, which named the attitude inputs inertial→body where the crate takes inertial-from-body.
+Ф17.B batch 2 (2026-10-26) took out 27 dynamics modules
 the same way — the integrators by their order conditions in exact rationals, the two-body and CR3BP
 modules by their defining equations, the atmosphere wrappers, calibration, wind and attitude modules by
 identities — and fixed what the gates found: `periodic::monodromy` stopped up to half a step off the
@@ -7958,8 +7971,6 @@ crates/spacelab-autodiff/src/dual.rs | infra | types, traits, drivers or re-expo
 crates/spacelab-autodiff/src/hyperdual.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-autodiff/src/scalar.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-constellation/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-control/src/attitude.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-control/src/closed_loop.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-control/src/latency.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-control/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-core/src/calendar.rs | infra | types, traits, drivers or re-exports; nothing to derive
@@ -7998,50 +8009,17 @@ crates/spacelab-eop/src/finals.rs | parser | format reader/writer; conformance i
 crates/spacelab-eop/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-ephemeris/src/bridge.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-ephemeris/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-estimation/src/conjunction.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/conjunction_domain.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-estimation/src/consider.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/consistency.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-estimation/src/converter.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-estimation/src/ensemble.rs | physics | names only tests against another in-repo method (S1/S2), no G1-G5 test
-crates/spacelab-estimation/src/ephemeris.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/fixed_lag.rs | physics | names only tests against another in-repo method (S1/S2), no G1-G5 test
-crates/spacelab-estimation/src/hinf.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/iekf.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/imm.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/kalman.rs | physics | no re-runnable check named in the module doc
+crates/spacelab-estimation/src/ephemeris.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-estimation/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-estimation/src/lie.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/lincov.rs | physics | names only tests against another in-repo method (S1/S2), no G1-G5 test
-crates/spacelab-estimation/src/mekf.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/mixture.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/modifier.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/multistatic.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/particle.rs | physics | names only tests against another in-repo method (S1/S2), no G1-G5 test
-crates/spacelab-estimation/src/radiometric.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/robust.rs | physics | names only measurements on synthetic data, no G1-G5 test
-crates/spacelab-estimation/src/rts.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/sampling.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/screening.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/se23.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/se3.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/srukf.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-estimation/src/unscented.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-fa/src/cio_tables.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
-crates/spacelab-fa/src/earth_rotation.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-fa/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-fa/src/nut_tables.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
 crates/spacelab-fa/src/tdb_tables.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
-crates/spacelab-frames/src/cio.rs | physics | names only a comparator test (C), no G1-G5 test
 crates/spacelab-frames/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-geomagnetism/src/dipole.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-geomagnetism/src/igrf.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-geomagnetism/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-geometry/src/delaunay.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-geometry/src/hull.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-geometry/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-geometry/src/predicates.rs | physics | no re-runnable check named in the module doc
-crates/spacelab-geometry/src/sphere.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-gnss/src/almanac.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-gnss/src/combinations.rs | physics | no re-runnable check named in the module doc
 crates/spacelab-gnss/src/cycle_slip.rs | physics | no re-runnable check named in the module doc

@@ -1,0 +1,78 @@
+/* Resampling and the effective sample size -- spacelab-estimation/src/particle.rs -- from their
+ * definitions.
+ *
+ * With normalised weights w_i and cumulative weights C_i = w_1 + ... + w_i (C_0 = 0), the code draws
+ *     systematic:  u_k = (k + U)/M,      one U ~ U[0, 1);
+ *     stratified:  u_k = (k + U_k)/M,    independent U_k ~ U[0, 1);
+ *     multinomial: M independent u ~ U[0, 1);
+ *     residual:    floor(M w_i) copies, the remainder multinomially from r_i = M w_i - floor(M w_i),
+ * and gives particle i every u that lands in [C_(i-1), C_i). Kish's ESS is 1/sum w_i^2.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. int_0^1 ceiling(a - u) du = a for every real a (a = n + f, f in [0, 1));
+ *   2. the systematic count is n_i(U) = ceiling(M C_i - U) - ceiling(M C_(i-1) - U), so by 1
+ *      E[n_i] = M (C_i - C_(i-1)) = M w_i (G2);
+ *   3. a stratified point u_k has the systematic point's marginal, U[k/M, (k+1)/M), and the counts are
+ *      sums over points, so the stratified E[n_i] is the systematic one (G2);
+ *   4. the residual scheme's E[n_i] = floor(M w_i) + (M - sum floor) r_i/sum r = M w_i (G2);
+ *   5. sum w^2 - 1/M = sum (w - 1/M)^2 when sum w = 1, so 1 <= ESS <= M with equality at the uniform
+ *      weights (G3);
+ *   6. on the fixture of `the_low_variance_schemes_are_exactly_unbiased` in particle.rs, the expected
+ *      systematic counts summed exactly over the breakpoints of n_i(U), with each count taken from
+ *      the definition (counting the k with u_k in [C_(i-1), C_i)), equal M w_i.
+ * derivations/particle_resampling.gp repeats 6 in exact rationals on that and two further weight vectors.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/particle_resampling.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. a = n + f: ceiling(a - u) = n + 1 on [0, f) and n on (f, 1]; f = 0 is the second piece alone. */
+zero("ceiling_integral_fractional", ratsimp(integrate(n + 1, u, 0, f) + integrate(n, u, f, 1) - (n + f)))$
+zero("ceiling_integral_integer", ratsimp(integrate(n, u, 0, 1) - n))$
+
+/* 2. the count is a difference of ceilings: #{k in 0..M-1 : k + U >= M C} = M - ceiling(M C - U) for
+   M C - U in (-1, M], so the count in [C_(i-1), C_i) is the difference. Checked by enumeration on a
+   grid of C and U below, then the expectation follows from 1 by linearity. */
+countk(c, uu, MM) := length(sublist(makelist(k, k, 0, MM - 1), lambda([k], (k + uu)/MM >= c)))$
+mismatch : 0$
+for MM : 1 thru 6 do
+  for ci : 0 thru 4*MM do
+    for ui : 0 thru 6 do block([c : ci/(4*MM), uu : (2*ui + 1)/14],
+      if countk(c, uu, MM) # MM - ceiling(MM*c - uu) then mismatch : mismatch + 1)$
+zero("systematic_count_is_a_difference_of_ceilings", mismatch)$
+
+/* 3. point k of either scheme is uniform on [k/M, (k+1)/M): systematic u_k = (k + U)/M with
+   U ~ U[0, 1) has density M there, as does (k + U_k)/M. */
+zero("stratified_marginal_is_systematic_marginal",
+     ratsimp(integrate(M, u, k/M, (k + 1)/M) - integrate(1, U, 0, 1)))$
+
+/* 4. */
+Mw : [mw1, mw2, mw3, mw4]$  fl : [g1, g2, g3, g4]$          /* fl = floor(M w), symbolic */
+r : Mw - fl$
+Mtot : sum(Mw[i], i, 1, 4)$
+for i : 1 thru 4 do
+  zero(sconcat("residual_expectation_", i - 1),
+       ratsimp(fl[i] + (Mtot - sum(fl[j], j, 1, 4))*r[i]/sum(r[j], j, 1, 4) - Mw[i]))$
+
+/* 5. */
+ws : [v1, v2, v3, 1 - v1 - v2 - v3]$
+zero("ess_bound_identity", ratsimp(sum(ws[i]^2, i, 1, 4) - 1/4 - sum((ws[i] - 1/4)^2, i, 1, 4)))$
+
+/* 6. the fixture, by definition */
+expected_systematic(w) := block([MM : length(w), C, cuts, e],
+  C : cons(0, makelist(sum(w[j], j, 1, i), i, 1, length(w))),
+  cuts : sort(unique(append([0, 1], makelist(MM*C[i] - floor(MM*C[i]), i, 1, MM + 1)))),
+  e : makelist(0, i, 1, MM),
+  for s : 1 thru length(cuts) - 1 do block([uu : (cuts[s] + cuts[s + 1])/2, len : cuts[s + 1] - cuts[s]],
+    for k : 0 thru MM - 1 do block([pt : (k + uu)/MM],
+      for i : 1 thru MM do
+        if pt >= C[i] and pt < C[i + 1] then e[i] : e[i] + len)),
+  e)$
+wfix : [1/8, 3/16, 5/16, 1/4, 1/8]$
+efix : expected_systematic(wfix)$
+for i : 1 thru 5 do
+  zero(sconcat("fixture_systematic_expected_count_", i - 1), efix[i] - 5*wfix[i])$
+printf(true, "expected systematic counts: ~a~%", efix)$

@@ -23,6 +23,14 @@
 //! interpolation error at all. [`crate::Latency::steps`] refuses a delay that is not, and the loop
 //! refuses to be built on one — the machinery for a non-commensurate delay is dense output plus
 //! breakpoint tracking, and it is deliberately elsewhere.
+//!
+//! Gate: `derivations/attitude_control.mac` shows the error the loop closes on has the body-rate
+//! kinematics the laws assume, that the Schaub–Junkins loop has `V̇ = −P‖ω‖²`, and that the
+//! critically damped PD loop's small-angle response is `δθ₀(1 + ωₙt)e^{−ωₙt}`. The module tests
+//! `the_lyapunov_function_never_rises_from_a_large_tumbling_error` (G2),
+//! `the_lyapunov_function_never_rises_toward_a_rotated_reference` (G2) and
+//! `a_critically_damped_small_slew_matches_the_analytic_second_order_response` (G2) run the loop
+//! against those statements.
 
 use crate::attitude::{AttitudeError, ControlLaw};
 use crate::latency::{History, Latency};
@@ -35,7 +43,7 @@ use spacelab_propagation::attitude::{Inertia, Mat3, Vec3, integrate_attitude_tor
 /// positions is an argument order waiting to be swapped silently.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AttitudeState {
-    /// Inertial→body change of basis.
+    /// Inertial-from-body rotation `[NB]`, the matrix the plant evolves by `Ṙ = R[ω]×`.
     pub rotation: Mat3,
     /// Body rate in body axes, rad/s.
     pub rate: Vec3,
@@ -190,7 +198,7 @@ mod tests {
         Inertia::principal([10.0, 12.0, 8.0]).expect("positive definite")
     }
 
-    /// The verdict the module exists for, and it is measured rather than derived. Schaub–Junkins
+    /// (G2) The verdict the module exists for, and it is measured rather than derived. Schaub–Junkins
     /// promises `V̇ = −P‖δω‖² ≤ 0` for *any* positive gains and *any* initial error; the test starts
     /// 120° away with a tumble on all three axes — far outside anything a linearisation covers — and
     /// asserts that the measured `V` never rises.
@@ -240,7 +248,7 @@ mod tests {
         );
     }
 
-    /// The sharp check on the PD law: at small angles the closed loop *is* `I δθ̈ + P δθ̇ + (K/2)δθ = 0`,
+    /// (G2) The sharp check on the PD law: at small angles the closed loop *is* `I δθ̈ + P δθ̇ + (K/2)δθ = 0`,
     /// so a critically damped design has the closed-form response `δθ(t) = δθ₀(1 + ωₙt)e^{−ωₙt}` and
     /// the simulation has to reproduce it pointwise. This is an identity, not a tolerance: the only
     /// discrepancies are the `sin(δθ/2) ≈ δθ/2` truncation and the integrator's own error.
@@ -360,6 +368,59 @@ mod tests {
         let latency = Latency::new(0.025, 0.0, 0.0).expect("valid");
         assert!(AttitudeLoop::new(law, latency, 0.01).is_none());
         assert!(AttitudeLoop::new(law, Latency::none(), 0.0).is_none());
+    }
+
+    /// (G2) The Lyapunov decrease toward a reference that is not the identity. Every other loop test
+    /// regulates to the identity, where `[NR]ᵀ[NB]` and `[NB][NR]ᵀ` are the same matrix, so they could
+    /// not tell which error the loop closes on. `derivations/attitude_control.mac` shows only the
+    /// first has the body-rate kinematics `Ė = E[ω]×` that make `V̇ = −P‖ω‖²`; the second's axis is
+    /// rotated by the reference. Here the reference is 90° about `ẑ` and the body starts 60° about
+    /// the reference's `x̂`.
+    ///
+    /// Measured: with `[NR]ᵀ[NB]`, `V` falls from 0.0693 to 1.03e-7 and the error from 60° to 0.07°
+    /// in 200 s, the largest single-step rise 1.9e-11 — the integrator's local error, 3e-10 of `V₀`.
+    /// With `[NB][NR]ᵀ`, `V` rose by 5.8e-5 in a single step and the error was still 39.1° at the end.
+    #[test]
+    fn the_lyapunov_function_never_rises_toward_a_rotated_reference() {
+        let law = MrpLyapunov::new(0.5, 4.0).expect("valid");
+        let i = inertia();
+        let reference = exp_so3([0.0, 0.0, 90.0_f64.to_radians()]);
+        let offset = exp_so3([60.0_f64.to_radians(), 0.0, 0.0]);
+        let mut start = [[0.0; 3]; 3];
+        for r in 0..3 {
+            for c in 0..3 {
+                start[r][c] = (0..3).map(|k| reference[r][k] * offset[k][c]).sum();
+            }
+        }
+        let loop_ = AttitudeLoop::new(law, Latency::none(), 0.05).expect("commensurate");
+
+        let mut values = alloc_vec();
+        let end = loop_
+            .run::<4>(
+                AttitudeState::new(start, [0.0; 3]),
+                AttitudeState::new(start, [0.0; 3]),
+                &reference,
+                &i,
+                4000,
+                |s| values.push(law.lyapunov(&s.error, &i)),
+            )
+            .expect("capacity exceeds the zero lag");
+
+        let mut worst_rise = 0.0_f64;
+        for pair in values.windows(2) {
+            worst_rise = worst_rise.max(pair[1] - pair[0]);
+        }
+        let remaining = AttitudeError::new(&end.rotation, &reference, [0.0; 3], [0.0; 3]).angle();
+        assert!(
+            worst_rise < 1e-8 * values[0],
+            "V rose by {worst_rise} from {}",
+            values[0]
+        );
+        assert!(
+            remaining < 0.1_f64.to_radians(),
+            "still {:.3} deg from the reference",
+            remaining.to_degrees()
+        );
     }
 
     fn alloc_vec<T>() -> std::vec::Vec<T> {

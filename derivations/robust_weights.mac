@@ -1,0 +1,94 @@
+/* Outlier-robust measurement updates -- spacelab-estimation/src/robust.rs -- the weights from their
+ * defining loss and E-step, and the influence limits the module documentation states.
+ *
+ * Scalar update: prior p = h P h^T, nominal noise R, innovation nu, nominal d0^2 = nu^2/(p + R).
+ * Each line printing `<name>: 0`:
+ *   1. Huber's rho = d^2/2 (|d| <= c), c|d| - c^2/2 (|d| > c) has psi = rho' = d and c sign d, so
+ *      the IRLS weight psi(d)/d is min(1, c/|d|) (G2); rho, psi and the weight are continuous at
+ *      the knee d = c (G2);
+ *   2. the weight at its own fixed point, w = c/|d| with d^2 = nu^2/(p + R/w), is the positive root
+ *      of w^3 nu^2 - c^2 p w - c^2 R = 0 (G2); that cubic is c^2 (p + R)(d0^2/c^2 - 1) at w = 1, so
+ *      it vanishes there exactly when the observation sits on the knee -- the fixed-point weight is
+ *      continuous at the knee too (G2);
+ *   3. as |nu| -> infinity the Huber root is w ~ (c^2 R)^(1/3) |nu|^(-2/3), so the state increment
+ *      K nu = p nu/(p + R/w) grows as p c^(2/3) R^(-2/3) |nu|^(1/3): unbounded (G3);
+ *   4. the Student-t E-step lambda = (n + 1)/(n + nu^2/f), f = p + R/lambda, eliminates to
+ *      (n + 1) f^2 - [(n + 1) p + n R] f - R nu^2 = 0, whose root the code takes (G2); at nu = 0 the
+ *      effective noise is R n/(n + 1) (G3); as |nu| -> infinity f/|nu| -> sqrt(R/(n + 1)) and the
+ *      increment K nu -> p sqrt((n + 1)/R): bounded (G3);
+ *   5. chi-square inflation R_eff = R d0^2/tau has nu K nu -> p tau (p + R)/R: the increment falls
+ *      as 1/|nu|, redescending (G3);
+ *   6. the vector Student-t scale (n + d^2)/(n + dim) is the reciprocal of the multivariate E-step,
+ *      equals 1 at d^2 = dim, and is the scalar E-step's at dim = 1 (G1);
+ *   7. the Gaussian efficiency of the Huber estimator, (2 Phi(c) - 1)^2 / E[psi^2], is 0.9500 at
+ *      c = 1.345 -- the "95 %" of the RobustPolicy::Huber doc (G3); E[psi^2] by integration.
+ * derivations/robust_weights.gp is the second engine: the Huber roots and Student-t variances at
+ * 60 digits that `robust.rs::the_weights_are_the_roots_of_their_defining_equations` asserts, the
+ * efficiency, and both influence asymptotes.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/robust_weights.mac
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+assume(c > 0, p >= 0, r > 0, nu > 0, n > 0, tau > 0, w > 0)$
+
+/* 1. */
+rho_in(d) := d^2 / 2$
+rho_out(d) := c * d - c^2 / 2$
+zero("huber_psi_inside_is_d", ratsimp(diff(rho_in(d), d) - d))$
+zero("huber_psi_outside_is_c", ratsimp(diff(rho_out(d), d) - c))$
+zero("huber_weight_outside_is_c_over_d", ratsimp(diff(rho_out(d), d) / d - c / d))$
+zero("huber_rho_continuous_at_the_knee", ratsimp(rho_in(c) - rho_out(c)))$
+zero("huber_psi_continuous_at_the_knee", ratsimp(subst(d = c, diff(rho_in(d), d) - diff(rho_out(d), d))))$
+zero("huber_weight_continuous_at_the_knee", ratsimp(subst(d = c, c / d) - 1))$
+
+/* 2. w = c/d with d^2 = nu^2/(p + R/w): w^2 nu^2/(p + R/w) = c^2, times w (p + R/w). */
+cubic : w^3 * nu^2 - c^2 * p * w - c^2 * r$
+zero("fixed_point_is_the_cubic", ratsimp((w^2 * nu^2 / (p + r / w) - c^2) * (p + r / w) * w - cubic))$
+zero("cubic_at_one_is_the_knee_distance",
+  ratsimp(subst(w = 1, cubic) - c^2 * (p + r) * (nu^2 / ((p + r) * c^2) - 1)))$
+zero("fixed_point_weight_is_one_on_the_knee", ratsimp(subst([w = 1, nu = c * sqrt(p + r)], cubic)))$
+
+/* 3. w = u t with t = nu^(-2/3): the cubic over nu^0 is u^3 - c^2 p u t - c^2 R. */
+zero("huber_root_scaling", ratsimp(subst([w = u * nu^(-2/3)], cubic) - (u^3 - c^2 * p * u * nu^(-2/3) - c^2 * r)))$
+u0 : (c^2 * r)^(1/3)$
+zero("huber_increment_grows_as_the_cube_root",
+  ratsimp(limit(subst(w = u0 * nu^(-2/3), p * nu / (p + r / w)) / nu^(1/3), nu, inf)
+          - p * c^(2/3) * r^(-2/3)))$
+
+/* 4. */
+quad : (n + 1) * f^2 - ((n + 1) * p + n * r) * f - r * nu^2$
+zero("student_t_e_step_is_the_quadratic",
+  ratsimp(((n + 1) / (n + nu^2 / f) - r / (f - p)) * (n + nu^2 / f) * (f - p) * f - quad))$
+aa : n + 1$
+bb : aa * p + r * n$
+froot : (bb + sqrt(bb^2 + 4 * aa * r * nu^2)) / (2 * aa)$
+zero("student_t_code_root_solves_the_quadratic", ratsimp(expand(subst(f = froot, quad))))$
+zero("student_t_at_zero_innovation_is_r_n_over_n_plus_1",
+  ratsimp(subst(nu = 0, froot) - p - r * n / (n + 1)))$
+zero("student_t_variance_grows_linearly", radcan(limit(froot / nu, nu, inf) - sqrt(r / (n + 1))))$
+zero("student_t_increment_saturates", radcan(limit(p * nu / froot, nu, inf) - p * sqrt((n + 1) / r)))$
+
+/* 5. */
+reff : r * nu^2 / ((p + r) * tau)$
+zero("inflation_increment_redescends",
+  ratsimp(limit(nu * p * nu / (p + reff), nu, inf) - p * tau * (p + r) / r))$
+
+/* 6. */
+lam(nn, dd, dim) := (nn + dim) / (nn + dd)$
+zero("vector_scale_is_the_reciprocal_e_step", ratsimp((n + dd) / (n + dim) - 1 / lam(n, dd, dim)))$
+zero("vector_scale_is_one_at_its_expectation", ratsimp(subst(dd = dim, (n + dd) / (n + dim)) - 1))$
+zero("vector_e_step_at_one_dimension_is_the_scalar_one", ratsimp(lam(n, nu^2 / f, 1) - (n + 1) / (n + nu^2 / f)))$
+
+/* 7. psi'(d) = 1 inside, 0 outside; E[psi'] = 2 Phi(c) - 1; E[psi^2] by integration. */
+phi_d(x) := exp(-x^2 / 2) / sqrt(2 * %pi)$
+cdf(x) := (1 + erf(x / sqrt(2))) / 2$
+epsi2 : integrate(x^2 * phi_d(x), x, -c, c) + 2 * c^2 * (1 - cdf(c))$
+zero("huber_psi_square_closed_form",
+  ratsimp(radcan(epsi2 - ((2 * cdf(c) - 1) - 2 * c * phi_d(c) + 2 * c^2 * (1 - cdf(c))))))$
+fpprec : 30$
+eff : bfloat(subst(c = 1345/1000, (2 * cdf(c) - 1)^2 / epsi2))$
+printf(true, "Huber Gaussian efficiency at c = 1.345: ~a~%", eff)$
+zero("huber_1345_is_95_percent_efficient", if abs(eff - 0.95b0) < 5b-4 then 0 else 1)$

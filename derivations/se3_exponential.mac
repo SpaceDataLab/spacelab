@@ -1,0 +1,128 @@
+/* The SO(3)/SE(3) exponential, left Jacobian and adjoint -- spacelab-estimation/src/se3.rs -- against
+ * their series definitions.
+ *
+ * With K = [phi]x and th = |phi| the code evaluates
+ *     Exp(phi) = I + a K + b K^2,           a = sin th/th,  b = (1 - cos th)/th^2,
+ *     V(phi)   = I + b K + c K^2,           c = (th - sin th)/th^3,
+ *     V(phi)^-1 = I - K/2 + d K^2,          d = 1/th^2 - (1 + cos th)/(2 th sin th),
+ * with the series I + K + K^2/2, I + K/2 + K^2/6 and I - K/2 + K^2/12 below th = 1e-8, and
+ *     Log(R) = th/(2 sin th) vee(R - R^T),  th = acos((tr R - 1)/2),
+ *     SE(3): Exp(rho, phi) = (Exp(phi), V(phi) rho),   Ad_g = [[R, [t]x R], [0, R]].
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. Cayley-Hamilton for a skew matrix, K^3 = -th^2 K, which folds every power series in K onto
+ *      {I, K, K^2}: K^(2m+1) = (-th^2)^m K, K^(2m+2) = (-th^2)^m K^2;
+ *   2. the folded series sum_k K^k/k! has coefficients a and b, and V = sum_k K^k/(k+1)! has b and c,
+ *      to order th^40 -- the closed forms ARE the defining series (G1);
+ *   3. the SE(3) exponential of [[K, rho], [0, 0]] has translation V rho: its k-th power is
+ *      [[K^k, K^(k-1) rho], [0, 0]];
+ *   4. V V^-1 = I exactly, so d is the inverse's coefficient, and its th -> 0 limit is the 1/12 the
+ *      series branch uses (with a -> 1, b -> 1/2, c -> 1/6);
+ *   5. tr Exp(th n) = 1 + 2 cos th and vee(Exp - Exp^T) = 2 sin th n, so the logarithm inverts the
+ *      exponential on th in (0, pi);
+ *   6. g xi^ g^-1 = (Ad_g xi)^ on the 4x4 algebra, for a rotation parametrised by a quaternion so
+ *      that R^T R = I identically -- the adjoint identity g Exp(xi) g^-1 = Exp(Ad_g xi) term by term.
+ * Then it prints the fixture of `the_exponential_and_both_jacobians_are_their_series_definitions` in
+ * se3.rs: Exp, V and V^-1 at phi = (3/10, -7/10, 11/10), and Exp(rho, phi)'s translation at
+ * rho = (1, -2, 1/2), summed from the series to k = 80 at 50 digits. derivations/se3_exponential.gp
+ * sums the same series at 100 digits and compares them with the closed forms.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/se3_exponential.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$
+hat(u) := matrix([0, -u[3], u[2]], [u[3], 0, -u[1]], [-u[2], u[1], 0])$
+vee(M) := [M[3, 2], M[1, 3], M[2, 1]]$
+
+phi : [f1, f2, f3]$
+K : hat(phi)$
+th2 : f1^2 + f2^2 + f3^2$
+
+/* 1. */
+zero("skew_cayley_hamilton", zmax(ratsimp(K . K . K + th2*K)))$
+
+/* 2. The folded coefficients, as power series in th to order 40. */
+order : 40$
+/* sum_k K^k/k! folds onto K with sum_m (-th^2)^m/(2m+1)! and onto K^2 with sum_m (-th^2)^m/(2m+2)!;
+   sum_k K^k/(k+1)! folds onto K with sum_m (-th^2)^m/(2m+2)! and onto K^2 with ../(2m+3)!. */
+exp_odd : sum((-th^2)^i/(2*i + 1)!, i, 0, order)$
+exp_even : sum((-th^2)^i/(2*i + 2)!, i, 0, order)$
+jac_odd : sum((-th^2)^i/(2*i + 2)!, i, 0, order)$
+jac_even : sum((-th^2)^i/(2*i + 3)!, i, 0, order)$
+a : sin(th)/th$  b : (1 - cos(th))/th^2$  c : (th - sin(th))/th^3$
+d : 1/th^2 - (1 + cos(th))/(2*th*sin(th))$
+series0(e) := ratdisrep(taylor(e, th, 0, order))$
+zero("exp_coefficient_of_K", series0(a - exp_odd))$
+zero("exp_coefficient_of_K2", series0(b - exp_even))$
+zero("left_jacobian_coefficient_of_K", series0(b - jac_odd))$
+zero("left_jacobian_coefficient_of_K2", series0(c - jac_even))$
+
+/* 3. powers of the SE(3) algebra matrix */
+rho : [r1, r2, r3]$
+X : matrix([0, -f3, f2, r1], [f3, 0, -f1, r2], [-f2, f1, 0, r3], [0, 0, 0, 0])$
+for k : 1 thru 6 do
+  zero(sconcat("se3_algebra_power_", k),
+       zmax(ratsimp(submatrix(4, X^^k, 1, 2, 3) - K^^(k - 1) . transpose(matrix(rho)))))$
+
+/* 4. V V^-1 = I. Multiply the two {I, K, K^2} forms and fold K^3, K^4 with step 1. */
+/* The product (I + bK + cK^2)(I - K/2 + dK^2) = I + (b - 1/2)K + (c + d - b/2)K^2
+   + (bd - c/2)K^3 + cd K^4, with K^3 = -th^2 K and K^4 = -th^2 K^2. */
+cK : b - 1/2 - th^2*(b*d - c/2)$
+cK2 : c + d - b/2 - th^2*c*d$
+zero("jacobian_times_inverse_K", ratsimp(trigsimp(trigreduce(ratsimp(cK)))))$
+zero("jacobian_times_inverse_K2", ratsimp(trigsimp(trigreduce(ratsimp(cK2)))))$
+zero("small_angle_exp_a", limit(a, th, 0) - 1)$
+zero("small_angle_exp_b", limit(b, th, 0) - 1/2)$
+zero("small_angle_jacobian_c", limit(c, th, 0) - 1/6)$
+zero("small_angle_inverse_d", limit(d, th, 0) - 1/12)$
+
+/* 5. the logarithm, on a rationally parametrised unit axis */
+nax : [2*u, 2*v, 1 - u^2 - v^2]/(1 + u^2 + v^2)$
+Kn : hat(nax)$
+Rn : ident(3) + sin(th)*Kn + (1 - cos(th))*Kn . Kn$
+zero("log_trace", ratsimp(trigsimp(mat_trace(Rn) - 1 - 2*cos(th))))$
+zero("log_axis", lmax(map(abs, ratsimp(vee(Rn - transpose(Rn)) - 2*sin(th)*nax))))$
+
+/* 6. adjoint as conjugation on the algebra */
+quat_rotation(w, x, y, z) := block([n2 : w^2 + x^2 + y^2 + z^2],
+  matrix([w^2 + x^2 - y^2 - z^2, 2*(x*y - w*z), 2*(x*z + w*y)],
+         [2*(x*y + w*z), w^2 - x^2 + y^2 - z^2, 2*(y*z - w*x)],
+         [2*(x*z - w*y), 2*(y*z + w*x), w^2 - x^2 - y^2 + z^2])/n2)$
+Rg : quat_rotation(q0, q1, q2, q3)$
+zero("quaternion_rotation_is_orthogonal", zmax(ratsimp(transpose(Rg) . Rg - ident(3))))$
+tg : [t1, t2, t3]$
+blk4(R, t) := matrix([R[1,1], R[1,2], R[1,3], t[1]], [R[2,1], R[2,2], R[2,3], t[2]],
+                     [R[3,1], R[3,2], R[3,3], t[3]], [0, 0, 0, 1])$
+G : blk4(Rg, tg)$
+Ginv : blk4(transpose(Rg), -list_matrix_entries(transpose(Rg) . transpose(matrix(tg))))$
+zero("se3_inverse", zmax(ratsimp(G . Ginv - ident(4))))$
+conj : G . X . Ginv$
+xi : transpose(matrix(append(rho, phi)))$
+Ad : zeromatrix(6, 6)$
+TR : hat(tg) . Rg$
+for i : 1 thru 3 do for j : 1 thru 3 do (
+  Ad[i, j] : Rg[i, j], Ad[i, j + 3] : TR[i, j], Ad[i + 3, j + 3] : Rg[i, j])$
+adxi : list_matrix_entries(Ad . xi)$
+Xad : matrix([0, -adxi[6], adxi[5], adxi[1]], [adxi[6], 0, -adxi[4], adxi[2]],
+             [-adxi[5], adxi[4], 0, adxi[3]], [0, 0, 0, 0])$
+zero("se3_adjoint_is_conjugation", zmax(ratsimp(conj - Xad)))$
+
+/* The fixture, from the series alone. */
+fpprec : 50$
+phif : [3/10, -7/10, 11/10]$
+rhof : [1, -2, 1/2]$
+Kf : hat(phif)$
+kmax : 80$
+expS : bfloat(sum(Kf^^k/k!, k, 0, kmax))$
+jacS : bfloat(sum(Kf^^k/(k + 1)!, k, 0, kmax))$
+/* V^-1 = sum_k B_k/k! K^k, B_1 = -1/2 (the generating function x/(e^x - 1)). */
+jinvS : bfloat(ident(3) - Kf/2 + sum(bern(k)/k!*Kf^^k, k, 2, kmax))$
+transS : jacS . transpose(matrix(bfloat(rhof)))$
+for i : 1 thru 3 do for j : 1 thru 3 do printf(true, "Exp[~d][~d] = ~a~%", i - 1, j - 1, expS[i, j])$
+for i : 1 thru 3 do for j : 1 thru 3 do printf(true, "V[~d][~d] = ~a~%", i - 1, j - 1, jacS[i, j])$
+for i : 1 thru 3 do for j : 1 thru 3 do printf(true, "Vinv[~d][~d] = ~a~%", i - 1, j - 1, jinvS[i, j])$
+for i : 1 thru 3 do printf(true, "t[~d] = ~a~%", i - 1, transS[i, 1])$

@@ -42,6 +42,15 @@
 //! - H. Schaub and J. L. Junkins, *Analytical Mechanics of Space Systems*, 4th ed., AIAA, §8.4.
 //! - S. P. Bhat and D. S. Bernstein, *A topological obstruction to continuous global stabilization
 //!   of rotational motion*, Systems & Control Letters 39(1), 2000.
+//!
+//! Gate: `derivations/attitude_control.mac` derives Shepperd's branches, the body-rate kinematics
+//! of the error `[NR]ᵀ[NB]`, the MRP kinematics, `V̇ = −P‖ω‖²` for the Schaub–Junkins law with any
+//! symmetric inertia, and the small-angle gains and second-order loop of the PD law;
+//! `derivations/attitude_control.gp` re-checks the first four in exact rationals. The module tests
+//! `the_error_is_the_body_rotation_relative_to_the_reference` (G1),
+//! `the_lyapunov_derivative_along_the_body_kinematics_is_minus_the_rate_damping` (G2),
+//! `the_quaternion_of_a_rodrigues_rotation_is_the_half_angle_pair` (G1) and
+//! `the_mrp_law_linearises_to_a_quarter_of_its_nominal_stiffness` (G3) tie the code to it.
 
 use spacelab_propagation::attitude::{Inertia, Mat3, Vec3};
 
@@ -59,13 +68,13 @@ fn dot(a: Vec3, b: Vec3) -> f64 {
     a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
 }
 
-/// `a · Bᵀ`, the composition that expresses "how far `a` is from `b`" for two change-of-basis
-/// rotations sharing an inertial reference.
-fn mul_transpose(a: &Mat3, b: &Mat3) -> Mat3 {
+/// `Aᵀ · B`, the composition that expresses "how far `b` is from `a`" for two inertial-from-body
+/// rotations sharing an inertial reference: `[NR]ᵀ[NB] = [RB]`.
+fn transpose_mul(a: &Mat3, b: &Mat3) -> Mat3 {
     let mut out = [[0.0; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
-            out[i][j] = a[i][0].mul_add(b[j][0], a[i][1].mul_add(b[j][1], a[i][2] * b[j][2]));
+            out[i][j] = a[0][i].mul_add(b[0][j], a[1][i].mul_add(b[1][j], a[2][i] * b[2][j]));
         }
     }
     out
@@ -139,12 +148,21 @@ pub struct AttitudeError {
 }
 
 impl AttitudeError {
-    /// `actual` and `reference` are inertial→body and inertial→reference change-of-basis rotations,
-    /// the convention [`spacelab_propagation::attitude_law::AttitudeProvider`] returns. `omega` is
-    /// the body rate and `omega_reference` the reference's, both in body axes.
+    /// `actual` and `reference` are the inertial-from-body rotations `[NB]` and `[NR]` — the matrix
+    /// [`spacelab_propagation::attitude::integrate_attitude_torqued`] evolves by `Ṙ = R[ω]×`, and the
+    /// transpose of the inertial→body matrix an
+    /// [`spacelab_propagation::attitude_law::AttitudeProvider`] returns. `omega` is the body rate and
+    /// `omega_reference` the reference's, both in body axes.
+    ///
+    /// The error rotation is `[RB] = [NR]ᵀ[NB]`, the body relative to the reference: it is the one
+    /// whose kinematics are `Ė = E[ω]×` in the body rate, which is what both laws and their Lyapunov
+    /// function assume. `[NB][NR]ᵀ` agrees with it only when the reference is the identity; for any
+    /// other reference its axis is the body error rotated by `[NR]`, and a loop closed on it
+    /// commands torque about the wrong axis — with a 90° reference and a 60° error it was still
+    /// 39° off after 200 s where the right error converges to 0.07°.
     #[must_use]
     pub fn new(actual: &Mat3, reference: &Mat3, omega: Vec3, omega_reference: Vec3) -> Self {
-        let error_rotation = mul_transpose(actual, reference);
+        let error_rotation = transpose_mul(reference, actual);
         Self {
             quaternion: quaternion_of(&error_rotation),
             rate: [
@@ -361,7 +379,7 @@ mod tests {
         Inertia::principal([10.0, 12.0, 8.0]).expect("positive definite")
     }
 
-    /// The quaternion convention is pinned against the crate's own verified exponential rather than
+    /// (G1) The quaternion convention is pinned against the crate's own verified exponential rather than
     /// asserted from a formula: `exp_so3(θ n̂)` is the rotation by `θ` about `n̂`, so its quaternion
     /// must be `(cos(θ/2), sin(θ/2) n̂)`. Getting this wrong flips the sign of every torque.
     #[test]
@@ -588,12 +606,97 @@ mod tests {
         );
     }
 
-    /// `σ = q_v/(1 + q₀) → δθ/4` makes the MRP law's linearised stiffness a *quarter* of its
+    /// (G3) `σ = q_v/(1 + q₀) → δθ/4` makes the MRP law's linearised stiffness a *quarter* of its
     /// nominal gain, and the rate gain passes through untouched. A quotient in place of the product
     /// would agree at `K = ½` and nowhere else, so the fixture avoids it.
     #[test]
     fn the_mrp_law_linearises_to_a_quarter_of_its_nominal_stiffness() {
         let law = MrpLyapunov::new(8.0, 3.0).expect("valid");
         assert_eq!(law.small_angle_gains(), (2.0, 3.0));
+    }
+
+    /// `a · b` for two rotations, row by column.
+    fn compose(a: &Mat3, b: &Mat3) -> Mat3 {
+        let mut out = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                out[i][j] = (0..3).map(|k| a[i][k] * b[k][j]).sum();
+            }
+        }
+        out
+    }
+
+    /// (G1) The error is the body's rotation relative to the reference, `[RB] = [NR]ᵀ[NB]`: a body
+    /// at `[NR]·exp(b)` is `exp(b)` from its reference, so the error quaternion is
+    /// `(cos(|b|/2), sin(|b|/2) b̂)` whatever the reference. `derivations/attitude_control.mac` shows
+    /// this is the composition with body-rate kinematics; `[NB][NR]ᵀ`, the one used before, returns
+    /// the axis `[NR] b̂` instead and passes only at an identity reference.
+    #[test]
+    fn the_error_is_the_body_rotation_relative_to_the_reference() {
+        let reference = exp_so3([0.3, -0.7, 1.1]);
+        let b = [0.4, 0.2, -0.5];
+        let angle = libm::sqrt(dot(b, b));
+        let actual = compose(&reference, &exp_so3(b));
+        let q = AttitudeError::new(&actual, &reference, [0.0; 3], [0.0; 3]).quaternion();
+        let (c, s) = (libm::cos(angle / 2.0), libm::sin(angle / 2.0));
+        assert!((q[0] - c).abs() < 1e-15, "scalar part {}", q[0]);
+        for k in 0..3 {
+            assert!(
+                (q[1 + k] - s * b[k] / angle).abs() < 1e-15,
+                "vector part {k}: {} against {}",
+                q[1 + k],
+                s * b[k] / angle
+            );
+        }
+    }
+
+    /// (G2) `V̇ = −P‖ω‖²` along the true dynamics, for the shipped law, error and Lyapunov function,
+    /// by a central difference of `V` along `R(h) = R·exp(hω)` — the exact flow of `Ṙ = R[ω]×` at a
+    /// frozen rate — and `ω(h) = ω + h·I⁻¹(u − ω × Iω)`. `derivations/attitude_control.mac` derives
+    /// the identity for any symmetric inertia and any gains, and `derivations/attitude_control.gp`
+    /// re-checks it in exact rationals. The reference is a general rotation, so the composition of
+    /// the error is part of what is checked.
+    ///
+    /// The bound is the difference's own error, `h²/6·V‴` and `ε·V/h` at `h = 1e-4`: measured
+    /// 1.5e-13 against `P‖ω‖² = 3.0e-2`. With the old composition `[NB][NR]ᵀ` the same difference
+    /// is off by the `Kσᵀ([NR] − I)ω` that composition leaves in `V̇`.
+    #[test]
+    fn the_lyapunov_derivative_along_the_body_kinematics_is_minus_the_rate_damping() {
+        let moments = [10.0, 12.0, 8.0];
+        let i = inertia();
+        let law = MrpLyapunov::new(0.7, 1.3).expect("valid");
+        let reference = exp_so3([-0.4, 0.9, 0.25]);
+        let actual = compose(&reference, &exp_so3([1.1, -0.6, 0.8]));
+        let omega = [0.05, -0.12, 0.08];
+
+        let u = law.torque(
+            &AttitudeError::new(&actual, &reference, omega, [0.0; 3]),
+            &i,
+        );
+        let gyro = cross(omega, i.apply(omega));
+        let omega_dot = [
+            (u[0] - gyro[0]) / moments[0],
+            (u[1] - gyro[1]) / moments[1],
+            (u[2] - gyro[2]) / moments[2],
+        ];
+        let v_at = |h: f64| {
+            let r = compose(
+                &actual,
+                &exp_so3([h * omega[0], h * omega[1], h * omega[2]]),
+            );
+            let w = [
+                omega[0] + h * omega_dot[0],
+                omega[1] + h * omega_dot[1],
+                omega[2] + h * omega_dot[2],
+            ];
+            law.lyapunov(&AttitudeError::new(&r, &reference, w, [0.0; 3]), &i)
+        };
+        let h = 1e-4;
+        let v_dot = (v_at(h) - v_at(-h)) / (2.0 * h);
+        let want = -1.3 * dot(omega, omega);
+        assert!(
+            (v_dot - want).abs() < 1e-9,
+            "V' = {v_dot:e} against -P|w|^2 = {want:e}"
+        );
     }
 }

@@ -6,6 +6,12 @@
 //! `A(q)` — the map that resolves an inertial vector in the body frame, `v_body = A(q) v_inertial`.
 //! For a small rotation vector `δθ`, `A(exp(δθ)) ≈ I − [δθ]×`, which is the sign the multiplicative
 //! and invariant filters here assume (verified end-to-end by the Wahba/QUEST convergence test).
+//!
+//! Gate: `derivations/lie_quaternion.mac` derives the product order `A(p ⊗ q) = A(q) A(p)`, the norm
+//! multiplicativity `|p ⊗ q| = |p| |q|`, `A(−q) = A(q)`, the passive Rodrigues form of `A(exp φ)`,
+//! `exp ∘ log = id` and the orders the small-angle series keeps; the module test
+//! `the_attitude_matrix_is_the_passive_rodrigues_rotation_and_composes_in_reverse_order` (G1) ties
+//! the shipped exponential, product and attitude matrix to its 40-digit fixture.
 
 // Single-char names (w, x, y, z, a, b) mirror the quaternion algebra; index loops are clearest for
 // the small fixed-size matrix helpers.
@@ -450,6 +456,60 @@ mod tests {
                     "|φ| = {theta:e}, component {i}: got {}, want {}",
                     got[i],
                     phi[i]
+                );
+            }
+        }
+    }
+
+    /// The attitude matrix of `exp(φ)` is the passive Rodrigues rotation `exp(−[φ]×)`, and the
+    /// Hamilton product composes attitude matrices in reverse order, `A(p ⊗ q) = A(q) A(p)`, without
+    /// leaving the unit sphere (G1).
+    ///
+    /// Reference: `derivations/lie_quaternion.mac`, which proves all three as identities and prints
+    /// `A(exp φ)` for `φ = (3/10, −7/10, 11/10)` at 40 digits; the literals are those values rounded
+    /// once to f64. A flipped `−2w[v]×` transposes the matrix, and a product written in the other
+    /// order composes the rotations the other way round — both move every off-diagonal entry by
+    /// order one.
+    #[test]
+    // Machine-generated at full f64 precision from the derivation; grouping the digits would mean
+    // hand-editing numbers whose whole point is that nobody edits them.
+    #[allow(clippy::unreadable_literal)]
+    fn the_attitude_matrix_is_the_passive_rodrigues_rotation_and_composes_in_reverse_order() {
+        const A_EXP_PHI: M3 = [
+            [0.26946350302809186, 0.7097403652688549, 0.6508901861634281],
+            [
+                -0.8902258527560322,
+                0.44135444349207026,
+                -0.11271284884431015,
+            ],
+            [-0.3672701343978637, -0.5490672719420067, 0.7507581363272313],
+        ];
+        let p = UnitQuaternion::from_rotation_vector([0.3, -0.7, 1.1]);
+        let got = p.attitude_matrix();
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!(
+                    (got[i][j] - A_EXP_PHI[i][j]).abs() < 1e-15,
+                    "A(exp φ)[{i}][{j}] = {:.17e}, derivation says {:.17e}",
+                    got[i][j],
+                    A_EXP_PHI[i][j]
+                );
+            }
+        }
+
+        let q = UnitQuaternion::from_rotation_vector([-1.2, 0.4, 0.9]);
+        let pq = p.mul(q);
+        let norm2 = pq.w * pq.w + pq.x * pq.x + pq.y * pq.y + pq.z * pq.z;
+        assert!((norm2 - 1.0).abs() < 1e-15, "|p ⊗ q|² = {norm2:.17e}");
+        let composed = pq.attitude_matrix();
+        let reversed = matmul(&q.attitude_matrix(), &p.attitude_matrix());
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!(
+                    (composed[i][j] - reversed[i][j]).abs() < 1e-15,
+                    "A(p ⊗ q)[{i}][{j}] = {:.17e}, A(q) A(p) = {:.17e}",
+                    composed[i][j],
+                    reversed[i][j]
                 );
             }
         }

@@ -1,0 +1,100 @@
+/* The invariant EKF on SO(3) -- spacelab-estimation/src/iekf.rs -- derived from the group.
+ *
+ * The filter carries q (inertial -> body, A(q) as in derivations/lie_quaternion.mac) and a covariance
+ * on the world-frame invariant error xi with R = Exp(xi) Rhat, R = A(q)^T the body -> world rotation.
+ * It predicts q <- q (x) exp(w dt) with Phi = I, takes the innovation in the reference frame,
+ *     nu = A(qhat)^T b - r = A(conj qhat) b - r,   H = [r]x,
+ * and resets q <- exp(K nu) (x) qhat, with a Joseph covariance update.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the attitude kinematics f(R) = R [w]x are group-affine, f(R1 R2) = f(R1) R2 + R1 f(R2)
+ *      - R1 f(I) R2 (G1);
+ *   2. q (x) e right-multiplies R by A(e)^T = Exp(w dt), so truth and estimate share the increment,
+ *      and the invariant error R Rhat^T is unchanged by it at every order -- Phi = I is exact, not a
+ *      linearisation (G1);
+ *   3. exp(xi) (x) qhat left-multiplies Rhat by Exp(xi): the reset is the error definition (G1);
+ *   4. A(conj q) = A(q)^T, so `conjugate().rotate(b)` is Rhat b;
+ *   5. with b = A(q) r, q = exp(t xi) (x) qhat, the innovation is exactly Exp(-t xi) r - r, and its
+ *      first-order term is [r]x xi -- H = +[r]x, independent of qhat (G2).
+ * Then it prints one update at 40 digits, the fixture of `one_update_is_the_invariant_kalman_step` in
+ * iekf.rs.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/iekf_attitude.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$
+hat(u) := matrix([0, -u[3], u[2]], [u[3], 0, -u[1]], [-u[2], u[1], 0])$
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+dot3(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+colv(u) := transpose(matrix(u))$
+qmul(p, q) := block([pw : p[1], pv : rest(p), qw : q[1], qv : rest(q)],
+  cons(pw*qw - dot3(pv, qv), pw*qv + qw*pv + cross(pv, qv)))$
+qnorm2(q) := q[1]^2 + q[2]^2 + q[3]^2 + q[4]^2$
+qconj(q) := [q[1], -q[2], -q[3], -q[4]]$
+attitude(q) := block([w : q[1], v : rest(q)],
+  (w^2 - dot3(v, v))*ident(3) + 2*transpose(matrix(v)) . matrix(v) - 2*w*hat(v))$
+/* A unit quaternion and its rotation, rational in the parameters so |q| = 1 identically. */
+unitq(a, b, c) := [1 - a^2 - b^2 - c^2, 2*a, 2*b, 2*c]/(1 + a^2 + b^2 + c^2)$
+
+w : [w1, w2, w3]$
+R1 : transpose(attitude(unitq(a1, a2, a3)))$
+R2 : transpose(attitude(unitq(c1, c2, c3)))$
+zero("unit_quaternion_parametrisation", ratsimp(qnorm2(unitq(a1, a2, a3)) - 1))$
+
+/* 1. */
+f(R) := R . hat(w)$
+zero("attitude_kinematics_are_group_affine",
+     zmax(ratsimp(f(R1 . R2) - f(R1) . R2 - R1 . f(R2) + R1 . f(ident(3)) . R2)))$
+
+/* 2. */
+qh : unitq(a1, a2, a3)$  e : unitq(c1, c2, c3)$  qt : unitq(d1, d2, d3)$
+zero("predict_right_multiplies_the_rotation",
+     zmax(ratsimp(transpose(attitude(qmul(qh, e))) - transpose(attitude(qh)) . transpose(attitude(e)))))$
+Rt : transpose(attitude(qt))$  Rh : transpose(attitude(qh))$  E : transpose(attitude(e))$
+zero("invariant_error_is_unchanged_by_a_common_increment",
+     zmax(ratsimp((Rt . E) . transpose(Rh . E) - Rt . transpose(Rh))))$
+
+/* 3. */
+zero("reset_left_multiplies_the_rotation",
+     zmax(ratsimp(transpose(attitude(qmul(e, qh))) - transpose(attitude(e)) . transpose(attitude(qh)))))$
+
+/* 4. */
+zero("conjugate_rotates_by_the_transpose", zmax(ratsimp(attitude(qconj(qh)) - transpose(attitude(qh)))))$
+
+/* 5. */
+r : [r1, r2, r3]$
+xi : [x1, x2, x3]$
+xn : sqrt(dot3(xi, xi))$
+ex : cons(cos(t*xn/2), sin(t*xn/2)/xn*xi)$
+truth : qmul(ex, qh)$
+innovation : list_matrix_entries(attitude(qconj(qh)) . attitude(truth) . colv(r)) - r$
+/* attitude(exp(t xi)) is exp(-t [xi]x), so the innovation is Exp(-t xi) r - r */
+exact : list_matrix_entries((ident(3) - sin(t*xn)/xn*hat(xi) + (1 - cos(t*xn))/xn^2*hat(xi) . hat(xi)) . colv(r)) - r$
+zero("innovation_is_exp_minus_xi_r_minus_r",
+     lmax(map(abs, ratsimp(trigsimp(trigreduce(ratsimp(innovation - exact)))))))$
+zero("innovation_first_order_is_hat_r_xi",
+     lmax(map(abs, ratsimp(map(lambda([u], coeff(ratdisrep(taylor(u, t, 0, 1)), t, 1)), innovation)
+                         - list_matrix_entries(hat(r) . colv(xi))))))$
+
+/* The update fixture. qhat = exp(0.2, 0.7, -0.4), P, r = (2/7, -3/7, 6/7), b = (3/5, 0, 4/5),
+   sigma = 1/10, all exact; evaluated at 40 digits. */
+fpprec : 40$
+qexp_b(phi) := block([n : sqrt(dot3(phi, phi))], bfloat(cons(cos(n/2), sin(n/2)/n*phi)))$
+qhf : qexp_b([2/10, 7/10, -4/10])$
+P0 : matrix([4/100, 1/100, 0], [1/100, 9/100, -2/100], [0, -2/100, 625/10000])$
+rf : [2/7, -3/7, 6/7]$  bf : [3/5, 0, 4/5]$  sig2 : 1/100$
+nuf : list_matrix_entries(bfloat(attitude(qconj(qhf)) . colv(bf))) - rf$
+H : hat(rf)$
+S : H . P0 . transpose(H) + sig2*ident(3)$
+Kg : P0 . transpose(H) . invert(S)$
+xif : list_matrix_entries(bfloat(Kg . colv(nuf)))$
+qn : qmul(qexp_b(xif), qhf)$
+qn : bfloat(qn/sqrt(qnorm2(qn)))$
+IKH : ident(3) - Kg . H$
+Pn : bfloat(IKH . P0 . transpose(IKH) + sig2*Kg . transpose(Kg))$
+for i : 1 thru 3 do for j : 1 thru 3 do printf(true, "P[~d][~d] = ~a~%", i - 1, j - 1, Pn[i, j])$
+for i : 1 thru 4 do printf(true, "q[~d] = ~a~%", i - 1, qn[i])$

@@ -10,7 +10,7 @@
 //!   guarantee.
 
 #![allow(clippy::needless_range_loop, clippy::many_single_char_names)]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::excessive_precision)]
 
 use spacelab_estimation::kalman::SquareRootKalman;
 use spacelab_estimation::srif::Srif;
@@ -291,4 +291,84 @@ fn both_updates_leave_the_factor_lower_triangular_with_a_non_negative_diagonal()
     check(&kf, "time update");
     kf.measurement_update(&[1.0, -0.5, 0.25], 0.7, 0.04);
     check(&kf, "measurement update");
+}
+
+/// One time update and two scalar measurement updates on a rational fixture, as
+/// `derivations/kalman_square_root.mac` evaluates them in exact rationals (25 digits printed;
+/// `derivations/linear_filters.gp` recomputes them).
+const EXACT_PREDICTED_P: [[f64; 3]; 3] = [
+    [8.75, 8.0, 3.5],
+    [8.0, 18.4375, 21.5625],
+    [3.5, 21.5625, 42.078_125],
+];
+const EXACT_F1: f64 = 5.098_632_812_5;
+const EXACT_X1: [f64; 3] = [
+    1.379_046_159_739_513_503_160_314,
+    -8.522_074_315_265_274_851_561_004e-1,
+    1.293_909_212_794_483_815_361_042,
+];
+const EXACT_F2: f64 = 4.444_210_879_141_926_833_939_858e1;
+const EXACT_X2: [f64; 3] = [
+    1.350_685_069_847_914_382_779_419,
+    -1.058_771_187_750_069_686_725_063,
+    9.654_746_686_740_005_635_716_894e-1,
+];
+const EXACT_P2: [[f64; 3]; 3] = [
+    [
+        2.290_090_870_988_838_835_980_774,
+        1.545_995_492_005_960_378_352_578,
+        -3.016_361_410_967_656_435_689_435,
+    ],
+    [
+        1.545_995_492_005_960_378_352_578,
+        1.539_258_416_664_062_861_951_302,
+        -2.527_680_150_065_346_519_718_703,
+    ],
+    [
+        -3.016_361_410_967_656_435_689_435,
+        -2.527_680_150_065_346_519_718_703,
+        5.931_185_751_118_648_377_542_346,
+    ],
+];
+
+/// (G2) The array-form updates compute the Kalman recursion `P⁻ = Φ P Φᵀ + Q`, `f = h P⁻ hᵀ + R`,
+/// `x⁺ = x + P⁻hᵀ ν/f`, `P⁺ = P⁻ − K f Kᵀ` — the posterior `derivations/kalman_square_root.mac`
+/// shows the post-array encodes, and equals the Joseph and information forms — against that
+/// recursion run in exact rationals. Every input is dyadic, so only the filter rounds. The bound is
+/// 16 ulps of the largest covariance entry, 42.
+#[test]
+fn the_filter_reproduces_the_exact_rational_kalman_recursion() {
+    let l0 = [[2.0, 0.0, 0.0], [1.0, 3.0, 0.0], [-1.0, 4.0, 5.0]];
+    let phi = [[1.0, 0.5, 0.0], [0.0, 1.0, 0.25], [0.0, 0.0, 1.0]];
+    let sq = [[0.5, 0.0, 0.0], [0.25, 0.5, 0.0], [0.0, 0.125, 0.25]];
+    let mut kf = SquareRootKalman::new(matvec(&phi, &[1.0, -2.0, 0.5]), l0);
+    kf.time_update(&phi, &sq);
+    let tol = 16.0 * f64::EPSILON * 42.0;
+    let mut worst = 0.0_f64;
+    let mut close = |got: f64, want: f64, what: &str| {
+        let d = (got - want).abs();
+        worst = worst.max(d);
+        assert!(d <= tol, "{what}: {got:e} vs {want:e}, off {d:.2e}");
+    };
+    let p = kf.covariance();
+    for i in 0..3 {
+        for j in 0..3 {
+            close(p[i][j], EXACT_PREDICTED_P[i][j], &format!("P⁻[{i}][{j}]"));
+        }
+    }
+    let f1 = kf.measurement_update(&[1.0, -0.5, 0.25], 1.25, 0.75);
+    close(f1, EXACT_F1, "f₁");
+    for i in 0..3 {
+        close(kf.x[i], EXACT_X1[i], &format!("x₁[{i}]"));
+    }
+    let f2 = kf.measurement_update(&[0.0, 1.0, 0.5], -0.375, 0.5);
+    close(f2, EXACT_F2, "f₂");
+    let p = kf.covariance();
+    for i in 0..3 {
+        close(kf.x[i], EXACT_X2[i], &format!("x₂[{i}]"));
+        for j in 0..3 {
+            close(p[i][j], EXACT_P2[i][j], &format!("P₂[{i}][{j}]"));
+        }
+    }
+    println!("square-root Kalman vs exact rationals: worst {worst:.2e}");
 }

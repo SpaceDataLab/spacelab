@@ -62,6 +62,18 @@
 //! The filter side is the covariance form with the **Joseph** update rather than `(I − KĤ)P̂`,
 //! because the point of the exercise is a filter whose gain is not optimal for the truth, and the
 //! short form is only valid for the gain that is.
+//!
+//! # Gate
+//!
+//! `derivations/lincov_recursion.mac` derives the error dynamics from `e = T x − x̂` and shows,
+//! for free symbolic `N = 3`, `M = 2` matrices, that the covariance of `[x; e]` after each
+//! update equals block by block the products [`time_update`](LinearCovariance::time_update) and
+//! [`measurement_update`](LinearCovariance::measurement_update) form, that Joseph is the short
+//! form only at the optimal gain, and that a right filter has `Cee = P̂`;
+//! `derivations/lincov_recursion.gp` re-derives a mismatched rational scenario as one
+//! augmented-matrix congruence. The gates are the module tests
+//! `lincov_matches_the_exact_rational_recursion` (G2) and
+//! `the_two_covariances_are_identical_when_the_filter_is_right` (G1).
 
 // Matrix algebra over const-generic dimensions, with the single-letter names (P, K, H, Q, R, T, D)
 // that the estimation literature uses universally.
@@ -427,6 +439,91 @@ mod tests {
         t
     }
 
+    /// One time update and one measurement update against the exact rational answer (G2). The
+    /// recursion is derived from `e = T x − x̂` in `derivations/lincov_recursion.mac` — the covariance
+    /// of `[x; e]` through the Jacobian of the error dynamics equals, block by block and for free
+    /// symbolic `N = 3`, `M = 2` matrices, the products these two methods form — and the values are
+    /// that recursion on a rational scenario with every model mismatched (`Φ̂ ≠ Φ`, `T` mixing two
+    /// truth states, `Q̂ ≠ Q`, `Ĥ ≠ H`, `R̂ ≠ R`), re-derived as one augmented-matrix congruence in
+    /// exact rationals by `derivations/lincov_recursion.gp`.
+    #[test]
+    #[allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    fn lincov_matches_the_exact_rational_recursion() {
+        let mut analysis = LinearCovariance::<3, 2>::new(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.5]],
+            [[16.0, 1.0, 0.0], [1.0, 4.0, 0.5], [0.0, 0.5, 1.0]],
+            [[9.0, 0.5], [0.5, 2.0]],
+        );
+        analysis.time_update(
+            &[[1.0, 0.5, 0.125], [0.0, 1.0, 0.25], [0.0, 0.0, 0.99]],
+            &[[1e-3, 0.0, 2e-4], [0.0, 2e-3, 0.0], [2e-4, 0.0, 3e-3]],
+            &[[1.0, 0.51], [0.0, 1.0]],
+            &[[5e-4, 0.0], [0.0, 1e-3]],
+        );
+        let innovation = analysis.measurement_update(&[1.0, 0.1, 0.05], &[1.0, 0.0], 0.09, 0.04);
+
+        let dispersion = [
+            [18.079125, 3.15625, 0.37145],
+            [3.15625, 4.3145, 0.7425],
+            [0.37145, 0.7425, 0.9831],
+        ];
+        let cross = [
+            [
+                -3.331813938703367193938852314139037008351e-1,
+                -4.672649619688800182708252653738071832147e-1,
+                -1.234448979216936260637294329093310296206e-1,
+            ],
+            [
+                5.336296707279533696763879372834063173364e-2,
+                1.359685548174406942913600842046729621576e-1,
+                2.455661210243577904217184505545791255821e-1,
+            ],
+        ];
+        let error = [
+            [
+                1.422149419746660870423272900927262942843e-1,
+                -1.234850701363867313417009073839060743026e-2,
+            ],
+            [
+                -1.234850701363867313417009073839060743026e-2,
+                1.835866321618709469076320002220917218209e0,
+            ],
+        ];
+        let filter = [
+            [
+                3.984112325856196689405900284985154954472e-2,
+                6.037316174645258025757891705641117300684e-3,
+            ],
+            [
+                6.037316174645258025757891705641117300684e-3,
+                1.771581985363480195021200115185637542574e0,
+            ],
+        ];
+        let close = |got: f64, want: f64, what: &str| {
+            assert!(
+                (got - want).abs() <= 1e-14 * want.abs().max(1.0),
+                "{what}: {got:e} against the exact {want:e}"
+            );
+        };
+        close(innovation, 10.0707, "innovation variance");
+        for i in 0..3 {
+            for j in 0..3 {
+                close(analysis.dispersion()[i][j], dispersion[i][j], "Cxx");
+            }
+        }
+        for i in 0..2 {
+            for j in 0..3 {
+                close(analysis.cross_covariance()[i][j], cross[i][j], "Cex");
+            }
+            for j in 0..2 {
+                close(analysis.true_covariance()[i][j], error[i][j], "Cee");
+                close(analysis.filter_covariance()[i][j], filter[i][j], "P̂");
+            }
+        }
+    }
+
+    /// A filter whose models are the truth's carries `Cee` exactly as its own `P̂` (G1):
+    /// `derivations/lincov_recursion.mac` identity 4, through both updates.
     #[test]
     fn the_two_covariances_are_identical_when_the_filter_is_right() {
         // Truth and filter share a state, dynamics, process noise, partials and noise variance, so

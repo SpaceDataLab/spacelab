@@ -49,7 +49,8 @@
 #![allow(
     clippy::unwrap_used,
     clippy::needless_range_loop,
-    clippy::cast_precision_loss
+    clippy::cast_precision_loss,
+    clippy::excessive_precision
 )]
 
 use spacelab_estimation::{
@@ -472,5 +473,126 @@ fn a_lag_that_reaches_the_arcs_end_is_the_fixed_interval_smoother() {
                 reference.covariance_sqrt()[i][j]
             );
         }
+    }
+}
+
+/// `(x̂, P̂)` of the four-epoch arc of `derivations/rts_smoother.mac`, each the joint-Gaussian
+/// conditional in exact rationals: epoch 0 given `z₀…z₂`, epoch 1 given `z₀…z₃`, epoch 0 given
+/// `z₀…z₃`.
+const EPOCH_0_GIVEN_Z2: ([f64; 2], [[f64; 2]; 2]) = (
+    [
+        8.095_648_548_712_416_228_023_548e-1,
+        4.188_414_104_940_134_996_456_812e-2,
+    ],
+    [
+        [
+            2.271_170_282_646_867_382_189_181e-1,
+            -1.985_048_716_162_756_098_722_616e-1,
+        ],
+        [
+            -1.985_048_716_162_756_098_722_616e-1,
+            3.957_806_251_649_791_765_079_919e-1,
+        ],
+    ],
+);
+const EPOCH_1_GIVEN_Z3: ([f64; 2], [[f64; 2]; 2]) = (
+    [
+        8.522_036_876_279_131_786_144_677e-1,
+        6.814_801_548_688_902_322_293_66e-1,
+    ],
+    [
+        [
+            1.166_256_804_073_796_065_676_383e-1,
+            -8.211_563_153_291_958_509_734_778e-2,
+        ],
+        [
+            -8.211_563_153_291_958_509_734_778e-2,
+            2.742_566_761_824_024_071_608_762e-1,
+        ],
+    ],
+);
+const EPOCH_0_GIVEN_Z3: ([f64; 2], [[f64; 2]; 2]) = (
+    [
+        6.684_961_323_778_554_565_379_192e-1,
+        3.149_556_632_598_205_730_376_299e-1,
+    ],
+    [
+        [
+            2.097_033_427_242_537_922_125_578e-1,
+            -1.647_966_084_820_253_359_673_447e-1,
+        ],
+        [
+            -1.647_966_084_820_253_359_673_447e-1,
+            3.305_303_941_963_770_943_361_815e-1,
+        ],
+    ],
+);
+
+/// (G2) A lag-`L` smoother reports epoch `k − L` conditioned on `z₀…z_k` — that sentence is its
+/// definition, and `derivations/rts_smoother.mac` evaluates both sides of it as joint-Gaussian
+/// conditionals in exact rationals. Run at lag 2 on the four-epoch arc it must give epoch 0 from
+/// three measurements and epoch 1 from four; and (G3) at a lag longer than the arc it is the
+/// fixed-interval smoother, epoch 0 from all four. Dyadic inputs; the bound is 16 ulps of the
+/// prior's scale, 4.
+#[test]
+fn the_fixed_lag_estimate_is_the_conditional_on_the_data_so_far() {
+    let stm = [[1.0, 0.5], [0.0, 1.0]];
+    let sq = [[0.25, 0.0], [0.125, 0.5]];
+    let h = [1.0, 0.25];
+    let mut kf = SquareRootKalman::new([0.5, -1.0], [[2.0, 0.0], [0.5, 1.0]]);
+    let mut lag_two = FixedLagSmoother::<2, 2>::new();
+    let mut lag_eight = FixedLagSmoother::<2, 8>::new();
+    let tol = 16.0 * f64::EPSILON * 4.0;
+    let check = |got: ([f64; 2], [[f64; 2]; 2]), want: &([f64; 2], [[f64; 2]; 2]), what: &str| {
+        let s = got.1;
+        for i in 0..2 {
+            assert!(
+                (got.0[i] - want.0[i]).abs() <= tol,
+                "{what}: x̂[{i}] = {}",
+                got.0[i]
+            );
+            for j in 0..2 {
+                let p = s[i][0] * s[j][0] + s[i][1] * s[j][1];
+                assert!((p - want.1[i][j]).abs() <= tol, "{what}: P̂[{i}][{j}] = {p}");
+            }
+        }
+    };
+    for (k, z) in [0.75, 0.5, 1.75, 2.5].into_iter().enumerate() {
+        let innovation = z - (h[0] * kf.x[0] + h[1] * kf.x[1]);
+        kf.measurement_update(&h, innovation, 0.25);
+        let s = kf.covariance_sqrt();
+        match k {
+            2 => check(
+                lag_two.smooth(&kf.x, &s).unwrap(),
+                &EPOCH_0_GIVEN_Z2,
+                "lag 2 at epoch 2",
+            ),
+            3 => {
+                check(
+                    lag_two.smooth(&kf.x, &s).unwrap(),
+                    &EPOCH_1_GIVEN_Z3,
+                    "lag 2 at epoch 3",
+                );
+                check(
+                    lag_eight.smooth(&kf.x, &s).unwrap(),
+                    &EPOCH_0_GIVEN_Z3,
+                    "lag 8 at epoch 3",
+                );
+                break;
+            }
+            _ => {}
+        }
+        let filtered = kf.x;
+        kf.x = [filtered[0] + stm[0][1] * filtered[1], filtered[1]];
+        let step = SmoothingStep {
+            filtered,
+            filtered_sqrt: s,
+            stm,
+            process_noise_sqrt: sq,
+            predicted: kf.x,
+        };
+        lag_two.push(step);
+        lag_eight.push(step);
+        kf.time_update(&stm, &sq);
     }
 }

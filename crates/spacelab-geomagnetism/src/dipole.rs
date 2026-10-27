@@ -18,6 +18,13 @@
 //! it over the South Atlantic). Quasi-dipole coordinates, which HWM14's disturbance model uses, trace
 //! real field lines and need the full field plus an apex solver. The error is quantified in this
 //! module's own tests rather than asserted away.
+//!
+//! Gate: `derivations/geomagnetic_dipole.mac` shows the degree-1 potential is the point dipole the
+//! axis is built from, that its field is twice as strong at the poles as on the equator and dips
+//! as `tan I = 2 tan λₘ`, and that the meridian rotation and the magnetic-longitude frame are what
+//! they claim; it evaluates the pole, moment and coordinates at 40 digits from the IAGA decimals,
+//! re-derived from spherical-trigonometric closed forms by `derivations/geomagnetic_dipole.gp`. The
+//! module test `the_pole_moment_and_coordinates_are_the_dipole_s_own` (G3) ties the code to it.
 
 // The geomagnetism symbols (g, h, m, n̂, θ, φ) are one/two letters by universal convention.
 #![allow(clippy::many_single_char_names, clippy::similar_names)]
@@ -616,5 +623,87 @@ mod tests {
             (0.01..1.0).contains(&moved),
             "the pole should drift a fraction of a degree over five years, got {moved:.3}°"
         );
+    }
+
+    /// (G3) The pole, the moment and the magnetic coordinates are the dipole's own.
+    /// `derivations/geomagnetic_dipole.mac` shows the degree-1 potential is a point dipole along
+    /// `(g₁¹, h₁¹, g₁⁰)` whose field is `2M` at `−m̂`, into the ground, and `M` on the equator — so
+    /// `moment_nt` is the equatorial surface field and the pole is where the field is vertical — and
+    /// that the meridian rotation is the azimuth of the pole; it evaluates all of them at 40 digits
+    /// from the IAGA decimals, and `derivations/geomagnetic_dipole.gp` re-derives them from
+    /// spherical-trigonometric closed forms, agreeing to 5e-40. The inputs are doubles, so these are
+    /// the values at exactly what the code is given.
+    #[test]
+    #[allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    fn the_pole_moment_and_coordinates_are_the_dipole_s_own() {
+        for (year, lat, lon, moment) in [
+            (
+                2025.0,
+                1.410040345385084652804351241132443450879,
+                -1.269950826609024893067310314044349777553,
+                2.973336537191846368005532461373558571173e4,
+            ),
+            (
+                2028.5,
+                1.412537568442043365173371321476978231379,
+                -1.272330406576405612981672275427979592967,
+                2.967676464782675732974950516204943686405e4,
+            ),
+        ] {
+            let d = CentredDipole::at_year(year);
+            let (got_lat, got_lon) = d.pole();
+            assert!(
+                (got_lat - lat).abs() < 1e-15,
+                "{year}: pole latitude {got_lat}"
+            );
+            assert!(
+                (got_lon - lon).abs() < 1e-15,
+                "{year}: pole longitude {got_lon}"
+            );
+            assert!(
+                (d.moment_nt() - moment).abs() < 1e-15 * moment,
+                "{year}: moment {}",
+                d.moment_nt()
+            );
+        }
+        let d = CentredDipole::at_year(2025.0);
+        for (lat, lon, want) in [
+            (
+                0.75,
+                -1.25,
+                [
+                    9.107179692664895196843757699506943027127e-1,
+                    2.380742697044007398825410601065239014113e-2,
+                    9.999864402122356710807482700401141474398e-1,
+                    -5.207628218374812599097992029044542426162e-3,
+                ],
+            ),
+            (
+                -0.5,
+                2.0,
+                [
+                    -6.592931672066791639928741206656271586312e-1,
+                    -2.99898909685567668133232270057321063092,
+                    9.99663974844294220462510269811763792182e-1,
+                    2.592175531298549970164206857204437974011e-2,
+                ],
+            ),
+        ] {
+            let (c, s) = d.meridian_rotation(lat, lon);
+            let got = [
+                d.magnetic_latitude(lat, lon),
+                d.magnetic_longitude(lat, lon),
+                c,
+                s,
+            ];
+            for k in 0..4 {
+                assert!(
+                    (got[k] - want[k]).abs() < 1e-15,
+                    "({lat}, {lon}) value {k}: {} against {}",
+                    got[k],
+                    want[k]
+                );
+            }
+        }
     }
 }

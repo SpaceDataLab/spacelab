@@ -19,6 +19,13 @@
 //! Normal deviates come from the **Box–Muller** transform, which is exact rather than approximate
 //! (unlike a sum-of-uniforms) and needs no tables (unlike the ziggurat). Its cost is two logarithms
 //! and a sine-cosine pair per *pair* of deviates, so the second value is cached.
+//!
+//! Gate: `derivations/sampling_transforms.mac` shows Box–Muller is exact (its Jacobian makes the image
+//! density two independent standard normals) and how it inverts, that `A ξ` has covariance `A Aᵀ` for
+//! any square root, the endpoints of both uniform maps, and recomputes the SplitMix64/xoshiro256++
+//! stream from the published recurrences, as does `derivations/sampling_transforms.gp`. The module
+//! tests `the_generator_reproduces_the_published_xoshiro256pp_stream` (G2) and
+//! `a_normal_pair_inverts_to_the_uniforms_it_was_drawn_from` (G2) tie the shipped generator to them.
 
 // Every `as f64` below is applied to a value the preceding shift or mask has already reduced below
 // 2⁵³, so the conversion is exact rather than rounded.
@@ -172,7 +179,8 @@ mod tests {
     /// map over it looks random at four moments. The stream is the one thing about the generator
     /// that is exactly specified. The fixture comes from `tools/gen_xoshiro_oracle.py`, written from
     /// Blackman & Vigna's algorithm rather than from this code, and it is integer arithmetic
-    /// throughout, so it is bit-exact.
+    /// throughout, so it is bit-exact. `derivations/sampling_transforms.mac` and `.gp` recompute it
+    /// from the recurrences in Maxima and PARI/GP and agree on all twelve draws (G2).
     #[test]
     fn the_generator_reproduces_the_published_xoshiro256pp_stream() {
         const STREAM: [(u64, [u64; 4]); 3] = [
@@ -315,6 +323,39 @@ mod tests {
                     (got - want[i][j]).abs() < 0.08,
                     "cov[{i}][{j}] = {got}, want {}",
                     want[i][j]
+                );
+            }
+        }
+    }
+
+    /// A Box–Muller pair inverts to the two uniforms it was drawn from (G2).
+    ///
+    /// Reference: `derivations/sampling_transforms.mac` derives the inverse of the transform,
+    /// `u₁ = exp(−(x² + y²)/2)` and `u₂ = atan2(y, x)/2π mod 1`, and shows its Jacobian makes `(x, y)`
+    /// two independent standard normals; `.gp` checks the inverse at 100 digits. Replaying the same
+    /// seed gives the uniforms `standard_normal` consumed, in its order — `(0, 1]` for the radius,
+    /// `[0, 1)` for the angle — and the pair it returned, cosine first, must map back onto them. A
+    /// missing factor of two in the radius, a swapped sine and cosine, or the radius drawn from the
+    /// half-open end the logarithm cannot survive all break the round trip.
+    #[test]
+    fn a_normal_pair_inverts_to_the_uniforms_it_was_drawn_from() {
+        for seed in [3, 1_234_567, 20_260_814] {
+            let mut replay = Rng::new(seed);
+            let mut rng = Rng::new(seed);
+            for _ in 0..2000 {
+                let (u1, u2) = (replay.open_unit(), replay.unit());
+                let (x, y) = (rng.standard_normal(), rng.standard_normal());
+                let radius = libm::exp(-0.5 * (x * x + y * y));
+                assert!(
+                    (radius - u1).abs() <= 1e-13 * u1,
+                    "seed {seed}: exp(−r²/2) = {radius:.17e}, u₁ = {u1:.17e}"
+                );
+                let turn = libm::atan2(y, x) / core::f64::consts::TAU;
+                let turn = if turn < 0.0 { turn + 1.0 } else { turn };
+                let gap = (turn - u2).abs();
+                assert!(
+                    gap.min(1.0 - gap) < 1e-15,
+                    "seed {seed}: atan2(y, x)/2π = {turn:.17e}, u₂ = {u2:.17e}"
                 );
             }
         }

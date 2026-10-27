@@ -1,0 +1,149 @@
+/* The centred dipole of spacelab-geomagnetism/src/dipole.rs: the degree-1 part of the IGRF
+ * potential as a point dipole, its field, and the magnetic coordinates built on its axis.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the degree-1 Schmidt potential a (a/r)^2 [g10 cos t + (g11 cos p + h11 sin p) sin t] is
+ *      a^3 (m.r)/r^3 with m = (g11, h11, g10) in Earth-fixed Cartesian components -- the moment
+ *      direction the module states (G1);
+ *   2. B = -grad V = a^3 (3 (m.r) r - r^2 m)/r^5 (G1); on the sphere r = a it is 2|m| along m at
+ *      -m^ (the north geomagnetic pole), pointing into the ground, and |m| on the dipole equator, so
+ *      the poles carry exactly twice the equatorial field and `moment_nt` is that equatorial field
+ *      (G3); the inclination obeys tan I = 2 tan(magnetic latitude) (G1);
+ *   3. the horizontal part of B is |m| (a/r)^3 (n^ - (n^.r^) r^), n^ = -m^ the axis, which is
+ *      `meridian_rotation`'s magnetic north r^ x (n^ x r^)/|n^ x r^|; its components on geographic
+ *      north and east are the spherical-trigonometric azimuth of the pole,
+ *        cos A |n^ x r^| = cos(lat) sin(lat_p) - sin(lat) cos(lat_p) cos(lon_p - lon),
+ *        sin A |n^ x r^| = cos(lat_p) sin(lon_p - lon),
+ *      and (cos A, sin A) is a unit pair (G1);
+ *   4. the magnetic-longitude frame x = y x n^, y = z^ x n^/|z^ x n^| is orthonormal and right-handed
+ *      about n^, and puts the geographic south pole at magnetic longitude 0 (G1);
+ *   5. reference values at 40 digits from the IAGA decimals of g10, g11, h11 and their secular
+ *      variation (crates/spacelab-gnss/tests/fixtures/igrf14coeffs.txt): the pole and moment at
+ *      2025.0 and 2028.5, and the magnetic latitude, longitude and meridian rotation at two points.
+ *      `the_pole_moment_and_coordinates_are_the_dipole_s_own` asserts them;
+ *      derivations/geomagnetic_dipole.gp re-derives them from the closed forms in (3).
+ *
+ * Run (from derivations/, as verify.sh does):
+ *   timeout 300 maxima --very-quiet -Q -b geomagnetic_dipole.mac </dev/null
+ */
+
+load("stringproc")$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+holds(name, claim) := zero(name, if is(claim) then 0 else 1)$
+cross3(u, v) := [u[2]*v[3] - u[3]*v[2], u[3]*v[1] - u[1]*v[3], u[1]*v[2] - u[2]*v[1]]$
+sq(v) := v . v$
+
+/* ---- 1. the degree-1 potential is a point dipole ------------------------------------------- */
+
+assume(r > 0, a > 0)$
+xyz : [r*sin(t)*cos(p), r*sin(t)*sin(p), r*cos(t)]$
+mvec : [g11, h11, g10]$
+V1 : a*(a/r)^2*(g10*cos(t) + (g11*cos(p) + h11*sin(p))*sin(t))$
+zero("degree_one_potential_is_a_point_dipole", trigsimp(V1 - a^3*(mvec . xyz)/r^3))$
+
+/* ---- 2. its field --------------------------------------------------------------------------- */
+
+X : [x1, x2, x3]$
+rr : sqrt(X . X)$
+Vc : a^3*(mvec . X)/rr^3$
+Bc : -[diff(Vc, x1), diff(Vc, x2), diff(Vc, x3)]$
+zero("dipole_field_is_minus_grad_v", radcan(sq(Bc - a^3*(3*(mvec . X)*X - rr^2*mvec)/rr^5)))$
+/* A moment of magnitude M along the unit vector u; the pole is at -a u, the equator at a w, u.w = 0. */
+dip(M, u, pos) := block([q : sqrt(pos . pos)], a^3*(3*(M*u . pos)*pos - q^2*M*u)/q^5)$
+uz : [0, 0, 1]$ wx : [1, 0, 0]$
+assume(M > 0)$
+Bpole : dip(M, uz, -a*uz)$
+Beq : dip(M, uz, a*wx)$
+zero("pole_field_is_twice_the_moment_along_m", radcan(sq(Bpole - 2*M*uz)))$
+holds("pole_field_points_into_the_ground", is(radcan(Bpole . (-uz)) < 0))$
+zero("equator_field_is_minus_the_moment", radcan(sq(Beq + M*uz)))$
+zero("pole_is_twice_the_equator", radcan(sqrt(sq(Bpole)) - 2*sqrt(sq(Beq))))$
+/* Inclination at magnetic latitude L: position a (cos L w - sin L u) is at latitude L about -u. */
+posL : a*(cos(L)*wx - sin(L)*uz)$
+BL : dip(M, uz, posL)$
+Bvert : trigsimp(BL . posL / a)$
+/* Toward magnetic north, d(posL)/dL / a; the dip is downward, so tan I = -B_vertical/B_northward. */
+Bhor : trigsimp(BL . (-sin(L)*wx - cos(L)*uz))$
+zero("inclination_tan_is_twice_tan_latitude", trigsimp(-Bvert*cos(L) - 2*Bhor*sin(L)))$
+
+/* ---- 3. magnetic north ---------------------------------------------------------------------- */
+
+unitll(la, lo) := [cos(la)*cos(lo), cos(la)*sin(lo), sin(la)]$
+rhat : unitll(f, l)$
+nax : unitll(fp, lp)$
+north : [-sin(f)*cos(l), -sin(f)*sin(l), cos(f)]$
+east : [-sin(l), cos(l), 0]$
+/* The code: east = z x r/|z x r|, east_m = n x r/|n x r|, north_m = r x east_m. */
+zero("geographic_east_is_z_cross_r_over_cos_lat", trigsimp(sq(cross3(uz, rhat) - cos(f)*east)))$
+zero("geographic_north_is_r_cross_east", trigsimp(sq(cross3(rhat, east) - north)))$
+northm_scaled : cross3(rhat, cross3(nax, rhat))$
+zero("magnetic_north_is_the_axis_less_its_radial_part",
+  trigsimp(sq(northm_scaled - (nax - (nax . rhat)*rhat))))$
+/* The field on the sphere r = a at the unit vector rh, the moment -M n^ (the axis is -m^). */
+Bsurf : a^3*(3*((-M*nax) . (a*rhat))*(a*rhat) - a^2*(-M*nax))/a^5$
+zero("horizontal_dipole_field_is_along_magnetic_north",
+  trigsimp(trigreduce(sq((Bsurf - (Bsurf . rhat)*rhat) - M*(nax - (nax . rhat)*rhat)))))$
+zero("cos_azimuth_closed_form",
+  trigsimp(trigreduce(northm_scaled . north - (cos(f)*sin(fp) - sin(f)*cos(fp)*cos(lp - l)))))$
+zero("sin_azimuth_closed_form", trigsimp(trigreduce(northm_scaled . east - cos(fp)*sin(lp - l))))$
+zero("azimuth_pair_is_a_unit_pair",
+  trigsimp(expand(trigexpand((cos(f)*sin(fp) - sin(f)*cos(fp)*cos(lp - l))^2 + (cos(fp)*sin(lp - l))^2
+                             - sq(cross3(nax, rhat))))))$
+
+/* ---- 4. the magnetic-longitude frame -------------------------------------------------------- */
+
+yv : cross3(uz, nax)/cos(fp)$
+xv : cross3(yv, nax)$
+zero("frame_y_is_unit", trigsimp(sq(yv) - 1))$
+zero("frame_x_is_unit", trigsimp(sq(xv) - 1))$
+zero("frame_is_orthogonal", trigsimp((xv . yv)^2 + (xv . nax)^2 + (yv . nax)^2))$
+zero("frame_is_right_handed", trigsimp(sq(cross3(xv, yv) - nax)))$
+zero("geographic_pole_is_on_the_magnetic_prime_meridian", trigsimp(uz . yv))$
+/* (-z^).x = cos(lat_p) > 0 and (-z^).y = 0: magnetic longitude 0 is the half-meridian through the
+   geographic south pole, the standard geomagnetic convention, and the north pole sits at pi. */
+holds("geographic_south_pole_is_at_magnetic_longitude_zero", is(trigsimp((-uz) . xv) = cos(fp)))$
+
+/* ---- 5. reference values -------------------------------------------------------------------- */
+
+decimal(tk) := block([neg : is(charat(tk, 1) = "-"), u, parts, v],
+  u : if neg then substring(tk, 2) else tk,
+  parts : split(u, "."),
+  v : if length(parts) = 1 then parse_string(parts[1])
+      else parse_string(parts[1]) + parse_string(parts[2]) / 10^slength(parts[2]),
+  if neg then -v else v)$
+coef : []$
+block([fh : openr("../crates/spacelab-gnss/tests/fixtures/igrf14coeffs.txt"), ln, tk, i25, isv],
+  while (ln : readline(fh)) # false do (
+    tk : split(ln),
+    if length(tk) > 3 and tk[1] = "g/h" then (
+      i25 : first(sublist_indices(tk, lambda([w], w = "2025.0"))),
+      isv : first(sublist_indices(tk, lambda([w], w = "2025-30")))),
+    if length(tk) > 3 and tk[2] = "1" then
+      coef : endcons([sconcat(tk[1], tk[2], tk[3]), decimal(tk[i25]), decimal(tk[isv])], coef)),
+  close(fh))$
+cv(name, k) := block([hit : sublist(coef, lambda([e], e[1] = name))], first(hit)[k + 1])$
+zero("g10_2025_is_minus_29350", cv("g10", 1) + 29350)$
+zero("h11_2025_is_4545_5", cv("h11", 1) - 45455/10)$
+
+fpprec : 40$
+axis_at(year) := block([dt : year - 2025, g10, g11, h11, mm],
+  g10 : cv("g10", 1) + dt*cv("g10", 2),
+  g11 : cv("g11", 1) + dt*cv("g11", 2),
+  h11 : cv("h11", 1) + dt*cv("h11", 2),
+  mm : sqrt(g10^2 + g11^2 + h11^2),
+  [bfloat(-[g11, h11, g10]/mm), bfloat(mm)])$
+for year in [2025, 57/2 + 2000] do block([am : axis_at(year), ax],
+  ax : am[1],
+  printf(true, "pole ~a lat ~a lon ~a moment ~a~%", year, asin(ax[3]), atan2(ax[2], ax[1]), am[2]))$
+ax25 : axis_at(2025)[1]$
+for pt in [[3/4, -5/4], [-1/2, 2]] do block([la : pt[1], lo : pt[2], rv, y, x, sc, nm, c, s],
+  rv : bfloat(unitll(la, lo)),
+  y : cross3([0, 0, 1], ax25), y : y/sqrt(y . y),
+  x : cross3(y, ax25),
+  nm : cross3(rv, cross3(ax25, rv)), nm : nm/sqrt(nm . nm),
+  c : nm . bfloat([-sin(la)*cos(lo), -sin(la)*sin(lo), cos(la)]),
+  s : nm . bfloat([-sin(lo), cos(lo), 0]),
+  printf(true, "point ~a mlat ~a mlon ~a cos ~a sin ~a~%", pt, asin(rv . ax25), atan2(rv . y, rv . x), c, s))$

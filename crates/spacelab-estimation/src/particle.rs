@@ -46,6 +46,13 @@
 //! [`Resampling::Systematic`] is the default in the tracking literature because it is `O(M)` with one
 //! random draw and the lowest variance of the four; the comparison is measured, not asserted, in
 //! `tests/ensemble_particle.rs`.
+//!
+//! Gate: `derivations/particle_resampling.mac` proves the systematic count is a difference of
+//! ceilings whose expectation is `M wᵢ`, that a stratified point has the systematic point's
+//! marginal, that the residual scheme's expectation is `M wᵢ`, and `1 ≤ N_eff ≤ M`;
+//! `derivations/particle_resampling.gp` sums the expected counts exactly on three weight vectors.
+//! The module test `the_low_variance_schemes_are_exactly_unbiased` (G2) integrates the shipped
+//! comb's counts exactly over the offset.
 
 // The recursion's symbols (w, x, z, M) are Gordon–Salmond–Smith's.
 // `M as f64` is the particle count, an array length bounded by the stack — exact in f64.
@@ -679,5 +686,41 @@ mod tests {
                 "a zero-weight particle survived: {particle:?}"
             );
         }
+    }
+
+    /// Systematic resampling is exactly unbiased, `E[nᵢ] = M wᵢ`, and so is stratified resampling,
+    /// whose point `k` has the same `U[k/M, (k+1)/M)` marginal (G2).
+    ///
+    /// No sampling: the counts are piecewise constant in the offset `U`, breaking only where a comb
+    /// tooth crosses a cumulative weight, at `U = frac(M Cᵢ)`. Reading the shipped comb at the
+    /// midpoint of every piece and weighting by its length is the expectation, exactly — the weights
+    /// are dyadic, so every product and sum here is exact in binary and the comparison is equality.
+    /// Reference: `derivations/particle_resampling.mac` and `.gp`, which do the same sum from the
+    /// definition and get `M w = (5/8, 15/16, 25/16, 5/4, 5/8)`. A comb that hands a point to its
+    /// neighbour moves a whole piece's length of count between the two. Which side of an edge a point
+    /// exactly on it goes to is invisible here — the offset lands on a breakpoint with probability
+    /// zero — and is not part of the unbiasedness claim.
+    #[test]
+    fn the_low_variance_schemes_are_exactly_unbiased() {
+        const W: [f64; 5] = [0.125, 0.1875, 0.3125, 0.25, 0.125];
+        let mut cuts = [0.0; 7];
+        cuts[6] = 1.0;
+        let mut running = 0.0;
+        for (slot, w) in cuts.iter_mut().zip(W) {
+            running += w;
+            let tooth = 5.0 * running;
+            *slot = tooth - libm::floor(tooth);
+        }
+        cuts.sort_by(f64::total_cmp);
+
+        let mut expected = [0.0; 5];
+        for piece in cuts.windows(2) {
+            let offset = 0.5 * (piece[0] + piece[1]);
+            let points: [f64; 5] = core::array::from_fn(|k| (k as f64 + offset) / 5.0);
+            for index in comb(&W, &points) {
+                expected[index] += piece[1] - piece[0];
+            }
+        }
+        assert_eq!(expected, [0.625, 0.9375, 1.5625, 1.25, 0.625]);
     }
 }

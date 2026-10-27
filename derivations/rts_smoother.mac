@@ -1,0 +1,111 @@
+/* The Rauch-Tung-Striebel smoother -- spacelab-estimation/src/rts.rs -- and the fixed-lag smoother
+ * built on it -- src/fixed_lag.rs -- as identities and as the joint-Gaussian conditional they
+ * claim to compute.
+ *
+ * The backward step lower-triangularises [[Phi S+, S_Q], [S+, 0]] to [[S-, 0], [X, Y]], so
+ * S- S-^T = Phi P+ Phi^T + Q = P-, X S-^T = P+ Phi^T and X X^T + Y Y^T = P+; the smoothed factor
+ * is the triangular factor of [Y | C Shat']. Each line printing `<name>: 0`, on a general 2-state
+ * prior and a general factor T of the prediction:
+ *   1. the smoother gain read off the array, X T^-1, is C = P+ Phi^T (P-)^-1 (G1);
+ *   2. Y Y^T = P+ - C P- C^T (G1);
+ *   3. Y Y^T + C Phat' C^T is the textbook P+ + C (Phat' - P-) C^T for any smoothed Phat' (G1).
+ * Then the defining equation (G2): on a 2-state, 4-epoch linear-Gaussian arc with one scalar
+ * measurement per epoch, in exact rationals, the joint posterior of (x0, ..., x3) -- the inverse
+ * of the block-tridiagonal information matrix -- has the smoothed means and covariances the RTS
+ * recursion produces, at every epoch; and the fixed-lag estimate of epoch k - L given z0..zk is
+ * that conditional on the shortened arc. The values the tests assert are printed at 25 digits
+ * (tests/rts.rs::the_smoother_is_the_joint_gaussian_conditional,
+ * tests/fixed_lag_smoothing.rs::the_fixed_lag_estimate_is_the_conditional_on_the_data_so_far).
+ * derivations/linear_filters.gp recomputes the same conditionals as a second engine.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/rts_smoother.mac
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+nonzero(m) := length(sublist(flatten(args(ratsimp(m))), lambda([e], e # 0)))$
+rnum(x) := ssubst("e", "b", string(bfloat(x)))$
+fpprec : 25$
+
+/* 1-3. The array-form block identities. */
+sp : matrix([a11, 0], [a21, a22])$
+pplus : sp . transpose(sp)$
+phi : matrix([f11, f12], [f21, f22])$
+t : matrix([t11, 0], [t21, t22])$
+pminus : t . transpose(t)$
+c : pplus . transpose(phi) . invert(pminus)$
+x : pplus . transpose(phi) . invert(transpose(t))$
+zero("array_gain_is_the_smoother_gain", nonzero(x . invert(t) - c))$
+yyt : pplus - x . transpose(x)$
+zero("y_gram_is_p_plus_minus_c_pminus_ct", nonzero(yyt - (pplus - c . pminus . transpose(c))))$
+phat : matrix([b11, b12], [b12, b22])$
+zero("array_covariance_is_the_textbook_recursion",
+  nonzero(yyt + c . phat . transpose(c) - (pplus + c . (phat - pminus) . transpose(c))))$
+
+/* The arc. Dyadic inputs, so the f64 fixture in the tests is exact. */
+fx : matrix([1, 1/2], [0, 1])$
+sq : matrix([1/4, 0], [1/8, 1/2])$
+qq : sq . transpose(sq)$
+l0 : matrix([2, 0], [1/2, 1])$
+p0 : l0 . transpose(l0)$
+m0 : matrix([1/2], [-1])$
+hh : matrix([1, 1/4])$
+rr : 1/4$
+zs : [3/4, 1/2, 7/4, 5/2]$
+
+/* Joint posterior of x0..x(n-1) given z0..z(n-1): information J and vector b. */
+joint(n) := block([jm : zeromatrix(2 * n, 2 * n), bv : zeromatrix(2 * n, 1), qi : invert(qq),
+                   blk, put],
+  put(i, j, m) := for a : 1 thru 2 do for b : 1 thru 2 do
+    jm[2 * i + a, 2 * j + b] : jm[2 * i + a, 2 * j + b] + m[a, b],
+  put(0, 0, invert(p0)),
+  for a : 1 thru 2 do bv[a, 1] : (invert(p0) . m0)[a, 1],
+  for k : 0 thru n - 2 do (
+    put(k, k, transpose(fx) . qi . fx),
+    put(k, k + 1, -transpose(fx) . qi),
+    put(k + 1, k, -qi . fx),
+    put(k + 1, k + 1, qi)),
+  for k : 0 thru n - 1 do (
+    put(k, k, transpose(hh) . hh / rr),
+    for a : 1 thru 2 do bv[2 * k + a, 1] : bv[2 * k + a, 1] + hh[1, a] * zs[k + 1] / rr),
+  blk : invert(jm),
+  [blk . bv, blk])$
+block_mean(sol, k) := matrix([sol[1][2 * k + 1, 1]], [sol[1][2 * k + 2, 1]])$
+block_cov(sol, k) := genmatrix(lambda([a, b], sol[2][2 * k + a, 2 * k + b]), 2, 2)$
+
+/* The RTS recursion in covariance form, exactly: forward filter, then the backward pass. */
+rts(n) := block([xf : [], pf : [], xp, pp : p0, xm : m0, ff, kk, xs, ps, cc, out : []],
+  xp : m0,
+  for k : 0 thru n - 1 do (
+    ff : (hh . pp . transpose(hh)) + rr,
+    kk : pp . transpose(hh) / ff,
+    xm : xp + kk * (zs[k + 1] - (hh . xp)),
+    pm : pp - kk . transpose(kk) * ff,
+    xf : endcons(xm, xf), pf : endcons(pm, pf),
+    xp : fx . xm, pp : fx . pm . transpose(fx) + qq),
+  xs : last(xf), ps : last(pf),
+  out : [[xs, ps]],
+  for k : n - 1 step -1 thru 1 do block([pminus : fx . pf[k] . transpose(fx) + qq],
+    cc : pf[k] . transpose(fx) . invert(pminus),
+    xs : xf[k] + cc . (xs - fx . xf[k]),
+    ps : pf[k] + cc . (ps - pminus) . transpose(cc),
+    out : cons([xs, ps], out)),
+  out)$
+
+sol4 : joint(4)$
+r4 : rts(4)$
+zero("rts_is_the_joint_conditional_on_the_whole_arc", sum(
+  nonzero(r4[k + 1][1] - block_mean(sol4, k)) + nonzero(r4[k + 1][2] - block_cov(sol4, k)), k, 0, 3))$
+sol3 : joint(3)$
+r3 : rts(3)$
+zero("fixed_lag_two_at_epoch_two_is_the_conditional_on_z0_to_z2", sum(
+  nonzero(r3[k + 1][1] - block_mean(sol3, k)) + nonzero(r3[k + 1][2] - block_cov(sol3, k)), k, 0, 2))$
+
+show(tag, mean, cov) := (
+  printf(true, "~a x = [~a, ~a]~%", tag, rnum(mean[1,1]), rnum(mean[2,1])),
+  printf(true, "~a P = [[~a, ~a], [~a, ~a]]~%", tag, rnum(cov[1,1]), rnum(cov[1,2]),
+    rnum(cov[2,1]), rnum(cov[2,2])))$
+show("smoothed epoch 0 | z0..z3", block_mean(sol4, 0), block_cov(sol4, 0))$
+show("smoothed epoch 1 | z0..z3", block_mean(sol4, 1), block_cov(sol4, 1))$
+show("smoothed epoch 0 | z0..z2", block_mean(sol3, 0), block_cov(sol3, 0))$

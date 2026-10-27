@@ -1,0 +1,66 @@
+/* The measurement-modifier layer -- spacelab-estimation/src/modifier.rs -- as identities. The
+ * corrections it owns are the Shapiro delay of one leg, in GR and with the PPN gamma written out,
+ * the estimated bias and the estimated clock drift; the integral-to-closed-form derivation of the
+ * Shapiro delay itself is derivations/shapiro_delay.mac.
+ *
+ * With rs = |S| the satellite's geocentric distance, rt = |St| the station's, p = |S - St| the leg,
+ * k = GM/c^2:
+ *     D(gamma) = (1 + gamma) k log((rs + rt + p)/(rs + rt - p)),   D_GR = 2 k log(...).
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. D(1) = D_GR, so `shapiro_delay_ppn(.., 1)` and `shapiro_delay` are one formula;
+ *   2. dD/dgamma = D/(1 + gamma) -- the Jacobian column EstimatedShapiroDelay contributes, and
+ *      D(-1) = 0;
+ *   3. the gradient of D_GR with respect to the satellite position is
+ *      2k [(ds + dp)/(s + p) - (ds - dp)/(s - p)], s = rs + rt, ds = S/rs, dp = (S - St)/p -- the
+ *      closed form the AD partial is held to -- and D does not depend on the velocity;
+ *   4. the drift modifier b + r dt has partials 1 and dt; the bias modifier has partial 1;
+ *   5. the closed form at the module tests' leg (station (4075530, 931781, 4801618) m, satellite
+ *      (3961000, 2614000, 5215000) m, GM = 3.986004418e14) and at the 7000/7500/900 km triple, at
+ *      40 digits -- derivations/measurement_modifiers.gp takes the same two numbers from the
+ *      defining integral (2GM/c^2) int dl/r along the straight leg.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/measurement_modifiers.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  if listp(d) and every(lambda([e], is(e = 0)), d) then d : 0,
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+assume(rs > 0, rt > 0, p > 0, rs + rt - p > 0, k > 0)$
+Dppn(g) := (1 + g)*k*log((rs + rt + p)/(rs + rt - p))$
+Dgr : 2*k*log((rs + rt + p)/(rs + rt - p))$
+
+/* 1-2. */
+zero("ppn_delay_at_unit_gamma_is_general_relativity", ratsimp(Dppn(1) - Dgr))$
+zero("ppn_delay_gamma_partial_is_the_delay_over_one_plus_gamma",
+  ratsimp(diff(Dppn(g), g) - Dppn(g)/(1 + g)))$
+zero("ppn_delay_vanishes_at_gamma_minus_one", ratsimp(Dppn(-1)))$
+
+/* 3. The position gradient, with S = (sx, sy, sz), St = (tx, ty, tz). */
+S : [sx, sy, sz]$ St : [tx, ty, tz]$
+rsf : sqrt(S . S)$ rtf : sqrt(St . St)$ pf : sqrt((S - St) . (S - St))$
+Dfull : 2*k*log((rsf + rtf + pf)/(rsf + rtf - pf))$
+sum_ : rsf + rtf$
+want : makelist(2*k*((S[i]/rsf + (S[i] - St[i])/pf)/(sum_ + pf)
+                   - (S[i]/rsf - (S[i] - St[i])/pf)/(sum_ - pf)), i, 1, 3)$
+got : [diff(Dfull, sx), diff(Dfull, sy), diff(Dfull, sz)]$
+zero("shapiro_position_gradient_is_the_closed_form", ratsimp(radcan(got - want)))$
+zero("shapiro_delay_has_no_velocity_dependence",
+  [diff(Dfull, vx), diff(Dfull, vy), diff(Dfull, vz)])$
+
+/* 4. The additive modifiers. */
+zero("drift_bias_partial_is_one", diff(b + r*dt, b) - 1)$
+zero("drift_rate_partial_is_the_elapsed_time", diff(b + r*dt, r) - dt)$
+zero("bias_partial_is_one", diff(rho + b, b) - 1)$
+
+/* 5. Numbers. c is exact by the SI definition of the metre; GM is the IERS 2010 value. */
+fpprec : 45$ fpprintprec : 40$
+c : 299792458$ gm : 3986004418b5$
+shapiro(a, bb, path) := (2*gm/c^2)*log((a + bb + path)/(a + bb - path))$
+Sn : [3961000, 2614000, 5215000]$ Tn : [4075530, 931781, 4801618]$
+leg : shapiro(sqrt(bfloat(Sn . Sn)), sqrt(bfloat(Tn . Tn)), sqrt(bfloat((Sn - Tn) . (Sn - Tn))))$
+printf(true, "module-test leg: one-way Shapiro delay = ~a m~%", leg)$
+printf(true, "(7000000, 7500000, 900000) m: one-way Shapiro delay = ~a m~%",
+  shapiro(7000000b0, 7500000b0, 900000b0))$

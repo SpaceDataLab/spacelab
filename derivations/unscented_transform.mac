@@ -1,0 +1,93 @@
+/* The scaled unscented transform -- spacelab-estimation/src/unscented.rs -- as identities in the
+ * scaling parameters alpha, beta, kappa, on a general 2-state Gaussian and a general factor S.
+ *
+ * lambda = alpha^2 (N + kappa) - N, c = N + lambda, gamma = sqrt(c); sigma points xbar and
+ * xbar +- gamma S e_k; weights W0m = lambda/c, W0c = W0m + 1 - alpha^2 + beta, Wi = 1/(2c).
+ * Each line printing `<name>: 0`:
+ *   1. the mean weights sum to one, and the centred accumulation M0 + sum Wi (Mi - M0) the code
+ *      uses is the weighted mean sum Wm Mi (G1);
+ *   2. gamma = alpha sqrt(N + kappa) (G1);
+ *   3. the sigma points reproduce the mean and the covariance S S^T exactly, for every alpha, beta,
+ *      kappa (G1), hence any affine map exactly;
+ *   4. for any quadratic map f(x) = x^T A x + b^T x + d the transformed mean is E f = f(xbar) +
+ *      tr(A P), exactly, for every parameter choice (G3);
+ *   5. for the scalar quadratic f = a x^2 + b x of x ~ N(mu, sigma^2) the transformed variance is
+ *      (b + 2 a mu)^2 sigma^2 + (alpha^2 kappa + beta) a^2 sigma^4, against the exact
+ *      (b + 2 a mu)^2 sigma^2 + 2 a^2 sigma^4: exact precisely when alpha^2 kappa + beta = 2 (G3) --
+ *      which is the sense in which beta = 2 is optimal for a Gaussian as alpha -> 0.
+ * The fixture values of `unscented.rs::the_transform_is_exact_for_a_quadratic_where_its_algebra_says`
+ * are printed at the end; derivations/linear_filters.gp recomputes them.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/unscented_transform.mac
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+nonzero(m) := length(sublist(flatten(args(ratsimp(m))), lambda([e], e # 0)))$
+rnum(x) := ssubst("e", "b", string(bfloat(x)))$
+fpprec : 25$
+assume(alpha > 0, nk > 0)$
+
+/* Sigma points and weights of N(xbar, S S^T) in dimension n, as lists. */
+cloud(n, xbar, s, al, be, ka) := block([lam, c, gam, pts, wm, wc],
+  lam : al^2 * (n + ka) - n,
+  c : n + lam,
+  gam : sqrt(c),
+  pts : [xbar],
+  for k : 1 thru n do pts : endcons(xbar + gam * col(s, k), pts),
+  for k : 1 thru n do pts : endcons(xbar - gam * col(s, k), pts),
+  wm : cons(lam / c, makelist(1 / (2 * c), 2 * n)),
+  wc : cons(lam / c + 1 - al^2 + be, makelist(1 / (2 * c), 2 * n)),
+  [pts, wm, wc])$
+
+/* 1, 2. */
+[pts, wm, wc] : cloud(2, matrix([m1], [m2]), matrix([s11, 0], [s21, s22]), alpha, beta, kappa)$
+zero("mean_weights_sum_to_one", ratsimp(apply("+", wm) - 1))$
+ms : makelist(concat(y, i), i, 0, 4)$
+zero("centred_accumulation_is_the_weighted_mean",
+  ratsimp(ms[1] + sum(wm[i] * (ms[i] - ms[1]), i, 2, 5) - sum(wm[i] * ms[i], i, 1, 5)))$
+zero("spread_is_alpha_times_the_unscaled_spread",
+  radcan(sqrt(2 + (alpha^2 * (2 + kappa) - 2)) - alpha * sqrt(2 + kappa)))$
+
+/* 3. */
+xbar : matrix([m1], [m2])$
+s : matrix([s11, 0], [s21, s22])$
+mean : sum(wm[i] * pts[i], i, 1, 5)$
+zero("sigma_points_reproduce_the_mean", nonzero(mean - xbar))$
+cov : sum(wc[i] * (pts[i] - mean) . transpose(pts[i] - mean), i, 1, 5)$
+zero("sigma_points_reproduce_the_covariance", nonzero(cov - s . transpose(s)))$
+
+/* 4. */
+a : matrix([a11, a12], [a12, a22])$
+b : matrix([b1], [b2])$
+fq(x) := (transpose(x) . a . x) + (transpose(b) . x) + d$
+zero("quadratic_mean_is_exact",
+  ratsimp(sum(wm[i] * fq(pts[i]), i, 1, 5) - (fq(xbar) + mat_trace(a . s . transpose(s)))))$
+
+/* 5. Scalar quadratic, N = 1. Exact Gaussian moments from E[(x - mu)^4] = 3 sigma^4. */
+[p1, w1m, w1c] : cloud(1, matrix([mu]), matrix([sg]), alpha, beta, kappa)$
+f1(x) := aq * x[1,1]^2 + bq * x[1,1]$
+ybar : sum(w1m[i] * f1(p1[i]), i, 1, 3)$
+zero("scalar_quadratic_mean_is_exact", ratsimp(ybar - (aq * mu^2 + bq * mu + aq * sg^2)))$
+vut : sum(w1c[i] * (f1(p1[i]) - ybar)^2, i, 1, 3)$
+zero("scalar_quadratic_variance_closed_form",
+  ratsimp(vut - ((bq + 2 * aq * mu)^2 * sg^2 + (alpha^2 * kappa + beta) * aq^2 * sg^4)))$
+exact_var : (bq + 2 * aq * mu)^2 * sg^2 + 2 * aq^2 * sg^4$
+zero("scalar_quadratic_variance_exact_iff_alpha2_kappa_plus_beta_is_2",
+  ratsimp(subst(beta = 2 - alpha^2 * kappa, vut) - exact_var))$
+
+/* The fixture: mu = 3/4, sigma = 1/2, a = 3/2, b = -1/4. */
+fix : [mu = 3/4, sg = 1/2, aq = 3/2, bq = -1/4]$
+printf(true, "scalar fixture mean = ~a~%", rnum(subst(fix, aq * mu^2 + bq * mu + aq * sg^2)))$
+printf(true, "scalar fixture variance at alpha = 1, beta = 0, kappa = 2 (exact) = ~a~%",
+  rnum(subst(fix, exact_var)))$
+printf(true, "scalar fixture variance at alpha = 1/2, beta = 2, kappa = 2 = ~a~%",
+  rnum(subst(append(fix, [alpha = 1/2, beta = 2, kappa = 2]),
+    (bq + 2 * aq * mu)^2 * sg^2 + (alpha^2 * kappa + beta) * aq^2 * sg^4)))$
+/* A 2-state quadratic mean: xbar = (1, -1/2), S = [[1/2, 0], [1/4, 1]], A = [[1, 1/2], [1/2, -2]],
+   b = (1/4, 1), d = 3. */
+fix2 : [m1 = 1, m2 = -1/2, s11 = 1/2, s21 = 1/4, s22 = 1, a11 = 1, a12 = 1/2, a22 = -2,
+        b1 = 1/4, b2 = 1, d = 3]$
+printf(true, "two-state quadratic mean = ~a~%",
+  rnum(subst(fix2, fq(xbar) + mat_trace(a . s . transpose(s)))))$

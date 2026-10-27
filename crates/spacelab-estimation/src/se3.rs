@@ -12,6 +12,13 @@
 //! column, so the `Exp`/`Log`/`Adjoint` here are the reusable core. Everything is validated by the
 //! group axioms themselves (associativity, inverse, `Exp`/`Log` round-trip, and the adjoint identity
 //! `g Exp(ξ) g⁻¹ = Exp(Ad_g ξ)`) — group theory is its own oracle, no external reference needed.
+//!
+//! Gate: `derivations/se3_exponential.mac` folds the defining series `Σ Kᵏ/k!` and `Σ Kᵏ/(k+1)!`
+//! through `K³ = −θ²K` onto the closed forms coded here, proves `V V⁻¹ = I`, the small-angle
+//! coefficients `1/2, 1/6, 1/12`, the logarithm's trace and axis identities and `g ξ^ g⁻¹ = (Ad_g ξ)^`;
+//! `derivations/se3_exponential.gp` re-sums the series at 100 digits. The module tests
+//! `the_exponential_and_both_jacobians_are_their_series_definitions` (G1) and
+//! `adjoint_matches_conjugation` (G1) tie the shipped maps to them.
 
 // Index loops are clearest for the small fixed-size matrices; single-char names mirror the algebra.
 #![allow(clippy::needless_range_loop, clippy::many_single_char_names)]
@@ -376,7 +383,8 @@ mod tests {
         }
     }
 
-    /// The defining adjoint identity `g Exp(ξ) g⁻¹ = Exp(Ad_g ξ)`.
+    /// The defining adjoint identity `g Exp(ξ) g⁻¹ = Exp(Ad_g ξ)` (G1), proved on the algebra in
+    /// `derivations/se3_exponential.mac`.
     #[test]
     fn adjoint_matches_conjugation() {
         let g = Se3::exp(TWISTS[1].0, TWISTS[1].1);
@@ -482,5 +490,58 @@ mod tests {
             1e-14,
             "V-inv large",
         );
+    }
+
+    /// `Exp`, `V`, `V⁻¹` and the SE(3) translation `V ρ` against their defining series (G1).
+    ///
+    /// Reference: `derivations/se3_exponential.mac` sums `Σ Kᵏ/k!`, `Σ Kᵏ/(k+1)!` and the Bernoulli
+    /// series `Σ Bₖ/k! Kᵏ` to `k = 80` at 50 digits for `φ = (3/10, −7/10, 11/10)`, `ρ = (1, −2, 1/2)`
+    /// — no closed form enters — and `derivations/se3_exponential.gp` agrees with the closed forms
+    /// there to 1e-90. The literals are those sums rounded once to f64.
+    #[test]
+    // Machine-generated at full f64 precision from the derivation; grouping the digits would mean
+    // hand-editing numbers whose whole point is that nobody edits them.
+    #[allow(clippy::unreadable_literal)]
+    fn the_exponential_and_both_jacobians_are_their_series_definitions() {
+        const PHI: V3 = [0.3, -0.7, 1.1];
+        const RHO: V3 = [1.0, -2.0, 0.5];
+        const EXP: M3 = [
+            [
+                0.26946350302809186,
+                -0.8902258527560322,
+                -0.3672701343978637,
+            ],
+            [0.7097403652688549, 0.44135444349207026, -0.5490672719420067],
+            [0.6508901861634281, -0.11271284884431015, 0.7507581363272313],
+        ];
+        const V: M3 = [
+            [0.7409706883296872, -0.5046978247763909, -0.2505269853112544],
+            [
+                0.44070234777549017,
+                0.8019187616638784,
+                -0.24624324651630197,
+            ],
+            [
+                0.35109130631266994,
+                0.011593164179665607,
+                0.9116252936654227,
+            ],
+        ];
+        const V_INV: M3 = [
+            [0.8539183775499095, 0.5319546231091065, 0.37835702082854694],
+            [-0.5680453768908935, 0.8882905240087544, 0.08383361806672374],
+            [-0.321642979171453, -0.21616638193327625, 0.950160387634675],
+        ];
+        const TRANSLATION: V3 = [1.625102845226842, -1.2862567988104177, 0.7837176247860501];
+
+        let d = max_m3_diff(&so3_exp(PHI), &EXP);
+        assert!(d < 1e-15, "Exp against its series: {d:.3e}");
+        let d = max_m3_diff(&left_jacobian(PHI), &V);
+        assert!(d < 1e-15, "V against its series: {d:.3e}");
+        let d = max_m3_diff(&left_jacobian_inv(PHI), &V_INV);
+        assert!(d < 1e-15, "V⁻¹ against its Bernoulli series: {d:.3e}");
+        let g = Se3::exp(RHO, PHI);
+        let d = max_m3_diff(&g.rotation(), &EXP).max(max_v3_diff(g.translation(), TRANSLATION));
+        assert!(d < 4e-15, "SE(3) Exp against its series: {d:.3e}");
     }
 }

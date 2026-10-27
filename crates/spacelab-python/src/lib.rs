@@ -4309,7 +4309,7 @@ fn delta_dor(
 
 /// Solar-corona range correction along one leg, **metres**.
 ///
-/// `±(40.3/f²)∫n_e ds` along the straight line between the two **heliocentric** positions, with the
+/// `±(40.308/f²)∫n_e ds` along the straight line between the two **heliocentric** positions, with the
 /// electron density an inverse power series `Σ c_i (r/R☉)^-k_i`. `series` is
 /// `[(coefficient, exponent), …]`; omitting it takes Aksim & Pavlov (2022), which is Tudat's
 /// default. `group_delay` selects the sign: a ranging observable arrives late, a carrier-phase or
@@ -5455,7 +5455,8 @@ fn latency_steps(sensor: f64, compute: f64, actuator: f64, step: f64) -> PyResul
 
 /// The attitude error between `rotation` and `reference`, as `(mrp, angle)`.
 ///
-/// Both matrices are nine numbers, row-major, inertial→body. `mrp` is the modified Rodrigues
+/// Both matrices are nine numbers, row-major, inertial-from-body `[NB]` (body vectors to inertial;
+/// the transpose of an attitude law's inertial→body matrix), and the error is `[NR]ᵀ[NB]`. `mrp` is the modified Rodrigues
 /// vector of the error rotation and `angle` its principal angle in radians. The rates are body
 /// rates in body axes, rad/s, and enter through the reference frame the error is measured in.
 #[pyfunction]

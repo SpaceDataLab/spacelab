@@ -1,0 +1,151 @@
+/* The IGRF-14 synthesis of spacelab-geomagnetism/src/igrf.rs: Schmidt quasi-normalised Legendre
+ * functions by the Wertz recursion, and the geocentric field as minus the gradient of the potential
+ *
+ *     V = a sum_{n=1}^{13} sum_{m=0}^{n} (a/r)^(n+1) P_n^m(cos theta) (g_n^m cos m phi + h_n^m sin m phi).
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the code's recursion -- p, dp built degree by degree with Wertz's
+ *      K = ((n-1)^2 - m^2)/((2n-1)(2n-3)) and the Schmidt factors S accumulated alongside -- times S
+ *      is, for every n <= 13 and m <= n, the Schmidt quasi-normalised function
+ *          P_n^m(x) = sqrt((2 - delta_m0) (n-m)!/(n+m)!) (1 - x^2)^(m/2) d^m/dx^m P_n(x),
+ *      P_n by Rodrigues' formula, no Condon-Shortley phase; and dp S is its theta-derivative.
+ *      Exact, as polynomials in c = cos theta, s = sin theta reduced by s^2 = 1 - c^2 (G1);
+ *   2. d^m P_n/dx^m solves the associated Legendre equation
+ *          (1 - x^2) Q'' - 2(m+1) x Q' + (n(n+1) - m(m+1)) Q = 0,
+ *      so each term of V is a solid harmonic -- Laplace's equation, the defining property of a
+ *      potential field in a source-free region (G2);
+ *   3. the coded B_r, B_theta, B_phi are -dV/dr, -(1/r) dV/dtheta, -(1/(r sin theta)) dV/dphi of a
+ *      generic term, for any degree n (G1);
+ *   4. field_ecef's rotation is B_r r^ + B_theta theta^ + B_phi phi^ with theta^ = dr^/dtheta and
+ *      phi^ = (1/sin theta) dr^/dphi, an orthonormal right-handed triad (G1);
+ *   5. reference fields: -grad V from the definition at 40 digits, with the epoch-2025.0 coefficients
+ *      and their 2025-2030 secular variation read as exact decimals from the IAGA file
+ *      crates/spacelab-gnss/tests/fixtures/igrf14coeffs.txt, at three points and three epochs. These
+ *      are what `the_field_is_minus_the_gradient_of_the_schmidt_potential` asserts;
+ *      derivations/igrf_synthesis.gp re-evaluates them from PARI's own Legendre polynomials.
+ *
+ * Run (from derivations/, as verify.sh does):
+ *   timeout 300 maxima --very-quiet -Q -b igrf_synthesis.mac </dev/null
+ */
+
+load("stringproc")$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+holds(name, claim) := zero(name, if is(claim) then 0 else 1)$
+
+N : 13$
+
+/* ---- 1. the recursion is the Schmidt definition -------------------------------------------- */
+
+legendre(n) := expand(diff((x^2 - 1)^n, x, n) / (2^n * n!))$
+schmidt(n, m) := sqrt((if m = 0 then 1 else 2) * (n - m)! / (n + m)!) * s^m
+                 * subst(x = c, diff(legendre(n), x, m))$
+dtheta(f) := -s*diff(f, c) + c*diff(f, s)$
+reduce(e) := ratsimp(radcan(ratsubst(1 - c^2, s^2, ratexpand(radcan(e)))))$
+
+array(p, N, N)$ array(dp, N, N)$ array(sf, N, N)$
+for n : 0 thru N do for m : 0 thru N do (p[n, m] : 0, dp[n, m] : 0, sf[n, m] : 0)$
+p[0, 0] : 1$ sf[0, 0] : 1$
+for n : 1 thru N do for m : 0 thru n do (
+  if n = m then (
+    p[n, n] : s*p[n - 1, m - 1],
+    dp[n, n] : s*dp[n - 1, m - 1] + c*p[n - 1, n - 1])
+  else if n = 1 then (
+    p[n, m] : c*p[n - 1, m],
+    dp[n, m] : c*dp[n - 1, m] - s*p[n - 1, m])
+  else block([k : ((n - 1)^2 - m^2) / ((2*n - 1)*(2*n - 3))],
+    p[n, m] : expand(c*p[n - 1, m] - k*p[n - 2, m]),
+    dp[n, m] : expand(c*dp[n - 1, m] - s*p[n - 1, m] - k*dp[n - 2, m])),
+  if m = 0 then sf[n, 0] : sf[n - 1, 0] * (2*n - 1) / n
+  else sf[n, m] : sf[n, m - 1] * sqrt((n - m + 1) * (if m = 1 then 2 else 1) / (n + m)))$
+
+for n : 1 thru N do block([bad_p : 0, bad_dp : 0],
+  for m : 0 thru n do block([want : schmidt(n, m)],
+    if reduce(p[n, m]*sf[n, m] - want) # 0 then bad_p : bad_p + 1,
+    if reduce(dp[n, m]*sf[n, m] - dtheta(want)) # 0 then bad_dp : bad_dp + 1),
+  zero(sconcat("schmidt_recursion_degree_", n), bad_p),
+  zero(sconcat("schmidt_derivative_recursion_degree_", n), bad_dp))$
+
+/* ---- 2. Laplace ------------------------------------------------------------------------------ */
+
+block([bad : 0],
+  for n : 1 thru N do for m : 0 thru n do block([q : diff(legendre(n), x, m)],
+    if expand((1 - x^2)*diff(q, x, 2) - 2*(m + 1)*x*diff(q, x) + (n*(n + 1) - m*(m + 1))*q) # 0
+    then bad : bad + 1),
+  zero("associated_legendre_equation_through_degree_13", bad))$
+
+/* ---- 3. B = -grad V for a generic term ------------------------------------------------------- */
+
+depends(P, th)$
+Vt : a * (a/r)^(n + 1) * P * (g*cos(m*ph) + h*sin(m*ph))$
+zero("b_r_is_minus_dv_dr",
+  radcan(-diff(Vt, r) - (a/r)^(n + 2) * (n + 1) * P * (g*cos(m*ph) + h*sin(m*ph))))$
+zero("b_theta_is_minus_dv_dtheta_over_r",
+  radcan(-diff(Vt, th)/r - (-(a/r)^(n + 2) * diff(P, th) * (g*cos(m*ph) + h*sin(m*ph)))))$
+zero("b_phi_is_minus_dv_dphi_over_r_sin_theta",
+  radcan(-diff(Vt, ph)/(r*sin(th)) - (a/r)^(n + 2) * (m/sin(th)) * P * (g*sin(m*ph) - h*cos(m*ph))))$
+remove(P, dependency)$
+
+/* ---- 4. the ECEF triad ----------------------------------------------------------------------- */
+
+rhat : [sin(th)*cos(la), sin(th)*sin(la), cos(th)]$
+thhat : [cos(th)*cos(la), cos(th)*sin(la), -sin(th)]$
+phhat : [-sin(la), cos(la), 0]$
+cross3(u, v) := [u[2]*v[3] - u[3]*v[2], u[3]*v[1] - u[1]*v[3], u[1]*v[2] - u[2]*v[1]]$
+zero("theta_hat_is_d_rhat_d_theta", trigsimp((diff(rhat, th) - thhat) . (diff(rhat, th) - thhat)))$
+zero("phi_hat_is_d_rhat_d_phi_over_sin_theta",
+  trigsimp((diff(rhat, la)/sin(th) - phhat) . (diff(rhat, la)/sin(th) - phhat)))$
+zero("triad_is_right_handed", trigsimp((cross3(rhat, thhat) - phhat) . (cross3(rhat, thhat) - phhat)))$
+zero("triad_is_orthonormal",
+  trigsimp((rhat.rhat - 1)^2 + (thhat.thhat - 1)^2 + (phhat.phhat - 1)^2 + (rhat.thhat)^2 + (rhat.phhat)^2))$
+code_ecef : [br*sin(th)*cos(la) + bt*cos(th)*cos(la) - bp*sin(la),
+             br*sin(th)*sin(la) + bt*cos(th)*sin(la) + bp*cos(la),
+             br*cos(th) - bt*sin(th)]$
+zero("field_ecef_is_the_spherical_components_on_the_triad",
+  expand((code_ecef - (br*rhat + bt*thhat + bp*phhat)) . (code_ecef - (br*rhat + bt*thhat + bp*phhat))))$
+
+/* ---- 5. reference fields ---------------------------------------------------------------------- */
+
+/* An IAGA decimal such as "-1410.3" as the exact rational it denotes. */
+decimal(t) := block([neg : is(charat(t, 1) = "-"), u, parts, v],
+  u : if neg then substring(t, 2) else t,
+  parts : split(u, "."),
+  v : if length(parts) = 1 then parse_string(parts[1])
+      else parse_string(parts[1]) + parse_string(parts[2]) / 10^slength(parts[2]),
+  if neg then -v else v)$
+array(G, N, N)$ array(H, N, N)$ array(GS, N, N)$ array(HS, N, N)$
+for n : 0 thru N do for m : 0 thru N do (G[n, m] : 0, H[n, m] : 0, GS[n, m] : 0, HS[n, m] : 0)$
+block([f : openr("../crates/spacelab-gnss/tests/fixtures/igrf14coeffs.txt"), l, t, i25, isv, count : 0],
+  while (l : readline(f)) # false do (
+    t : split(l),
+    if length(t) > 3 and t[1] = "g/h" then (
+      i25 : first(sublist_indices(t, lambda([w], w = "2025.0"))),
+      isv : first(sublist_indices(t, lambda([w], w = "2025-30")))),
+    if length(t) > 3 and (t[1] = "g" or t[1] = "h") then block([n : parse_string(t[2]), m : parse_string(t[3])],
+      count : count + 1,
+      if t[1] = "g" then (G[n, m] : decimal(t[i25]), GS[n, m] : decimal(t[isv]))
+      else (H[n, m] : decimal(t[i25]), HS[n, m] : decimal(t[isv])))),
+  close(f),
+  zero("iaga_file_has_195_coefficient_rows", count - 195))$
+zero("g10_2025_is_minus_29350", G[1, 0] + 29350)$
+
+fpprec : 40$
+aref : 63712/10$
+/* -grad V at a geocentric (colatitude, longitude, radius km, year); exact inputs, 40-digit output. */
+field(theta, lam, rad, year) := block([dt : year - 2025, br : 0, bt : 0, bp : 0, ct, st],
+  ct : bfloat(cos(theta)), st : bfloat(sin(theta)),
+  for n : 1 thru N do for m : 0 thru n do block([g, h, w, pp, dpp, cm, sm],
+    g : G[n, m] + dt*GS[n, m], h : H[n, m] + dt*HS[n, m],
+    w : bfloat((aref/rad)^(n + 2)),
+    pp : bfloat(subst([c = ct, s = st], schmidt(n, m))),
+    dpp : bfloat(subst([c = ct, s = st], dtheta(schmidt(n, m)))),
+    cm : bfloat(cos(m*lam)), sm : bfloat(sin(m*lam)),
+    br : br + w*(n + 1)*pp*(g*cm + h*sm),
+    bt : bt - w*dpp*(g*cm + h*sm),
+    bp : bp + w*m*pp*(g*sm - h*cm)/st),
+  [br, bt, bp])$
+/* Doubles in radians and kilometres, so the reference is the field at the very inputs the test passes. */
+points : [[1, 1/2, 27085/4, 2025], [7/4, 7/2, 13143/2, 2030], [21/8, 21/4, 7000, 55/2 + 2000]]$
+for q in points do printf(true, "field ~a ~a~%", q, apply(field, q))$

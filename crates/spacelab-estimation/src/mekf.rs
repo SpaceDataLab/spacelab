@@ -16,6 +16,13 @@
 //! multiplicative error `q = q̂ ⊗ δq` gives the clean measurement Jacobian `H_θ = [b̂]×` and the
 //! propagation above. The transition's sign is pinned by a second-order-accuracy measurement
 //! against the nonlinear step, not by a convention argument.
+//!
+//! Gate: `derivations/mekf_attitude.mac` derives the error rate `δθ̇ = −[ω]× δθ − δb` from the
+//! quaternion kinematics of truth and estimate, `H = [b̂]×` from `A(q̂ ⊗ δq) = A(δq) A(q̂)`, the
+//! discrete `Q` as the transition integral of the gyro model, and the norm-preserving reset; the
+//! module tests `one_update_is_the_multiplicative_kalman_step` (G2) and
+//! `the_process_noise_is_the_integral_of_the_continuous_model_through_the_transition` (G2) tie the
+//! shipped filter to it.
 
 // Small fixed-size dense linear algebra; index arithmetic is the clearest form here.
 #![allow(
@@ -400,7 +407,8 @@ mod tests {
     /// gyro model is derived for — and `G Q_c Gᵀ = diag(σ_v² I, σ_u² I)`. That makes the integrand
     /// blocks `σ_v² + s²σ_u²`, `−s σ_u²` and `σ_u²`, all of degree ≤ 2, on which Simpson is exact:
     /// the quadrature is the closed form's own definition evaluated a different way, not a second
-    /// copy of it. A zero prior kills the `Φ P Φᵀ` term, so one step returns `Q` alone.
+    /// copy of it. A zero prior kills the `Φ P Φᵀ` term, so one step returns `Q` alone. The integral
+    /// itself is done in closed form in `derivations/mekf_attitude.mac` (G2).
     #[test]
     fn the_process_noise_is_the_integral_of_the_continuous_model_through_the_transition() {
         let (sigma_v, sigma_u, dt) = (1e-3, 3e-3, 2.0);
@@ -542,5 +550,115 @@ mod tests {
             (admitted - expected).abs() < 1e-9 * expected,
             "admitted {admitted:.17e}, expected {expected:.17e}"
         );
+    }
+
+    /// One update from a known prior is the multiplicative Kalman step (G2).
+    ///
+    /// Reference: `derivations/mekf_attitude.mac` evaluates the step from its definition at 40 digits —
+    /// `b̂ = A(q̂) r`, `H = [[b̂]×, 0]`, `K = P Hᵀ (H P Hᵀ + σ² I)⁻¹`, reset `q̂ ⊗ exp(δθ)` renormalised,
+    /// additive bias, Joseph covariance — for `q̂ = exp(0.2, 0.7, −0.4)`, `b̂ = (1, −2, 1.5)·1e-3`, a
+    /// prior with attitude–bias cross terms, `r = (2, −3, 6)/7`, `b = (3/5, 0, 4/5)` and `σ = 1/10`.
+    /// The cross terms make the bias correction non-zero, so the bias column of the gain is read too.
+    #[test]
+    fn one_update_is_the_multiplicative_kalman_step() {
+        const Q: [f64; 4] = [
+            0.9806136608098285,
+            0.0752046415794639,
+            -0.022185292767924896,
+            -0.17957985104919894,
+        ];
+        const BIAS: V3 = [
+            0.005193319808037312,
+            0.006808304947552294,
+            -0.0006041431843203827,
+        ];
+        const P: [[f64; 6]; 6] = [
+            [
+                0.01071695984292646,
+                0.0036066958675321846,
+                -0.011520505391170978,
+                0.00027642925445285984,
+                3.4021033518793384e-05,
+                -0.00039042963396949905,
+            ],
+            [
+                0.0036066958675321846,
+                0.013083282446199244,
+                -0.01452250031750008,
+                6.694172351408707e-05,
+                -9.290269269687019e-05,
+                -0.0004052622868340057,
+            ],
+            [
+                -0.011520505391170978,
+                -0.01452250031750008,
+                0.057121702039916594,
+                -0.0003084706208553101,
+                -8.18319443041427e-05,
+                0.0018802669096319824,
+            ],
+            [
+                0.00027642925445285984,
+                6.694172351408707e-05,
+                -0.0003084706208553101,
+                8.145104020464094e-05,
+                -1.8387646267222301e-06,
+                -8.694250506267697e-06,
+            ],
+            [
+                3.4021033518793384e-05,
+                -9.290269269687019e-05,
+                -8.18319443041427e-05,
+                -1.8387646267222301e-06,
+                8.924283814123174e-05,
+                4.2659613718791195e-06,
+            ],
+            [
+                -0.00039042963396949905,
+                -0.0004052622868340057,
+                0.0018802669096319824,
+                -8.694250506267697e-06,
+                4.2659613718791195e-06,
+                9.34383258302208e-05,
+            ],
+        ];
+        let prior = [
+            [0.04, 0.01, 0.0, 1e-3, 0.0, 0.0],
+            [0.01, 0.09, -0.02, 0.0, -1e-3, 0.0],
+            [0.0, -0.02, 0.0625, 0.0, 0.0, 2e-3],
+            [1e-3, 0.0, 0.0, 1e-4, 0.0, 0.0],
+            [0.0, -1e-3, 0.0, 0.0, 1e-4, 0.0],
+            [0.0, 0.0, 2e-3, 0.0, 0.0, 1e-4],
+        ];
+        let mut ekf = MultiplicativeEkf::new(
+            UnitQuaternion::from_rotation_vector([0.2, 0.7, -0.4]),
+            [1e-3, -2e-3, 1.5e-3],
+            prior,
+        );
+        assert!(ekf.update([0.6, 0.0, 0.8], [2.0 / 7.0, -3.0 / 7.0, 6.0 / 7.0], 0.1));
+        let q = ekf.attitude();
+        for (got, want) in [q.w, q.x, q.y, q.z].into_iter().zip(Q) {
+            assert!(
+                (got - want).abs() < 2e-15,
+                "q: {got:.17e}, derivation says {want:.17e}"
+            );
+        }
+        for (got, want) in ekf.bias().into_iter().zip(BIAS) {
+            assert!(
+                (got - want).abs() < 2e-17,
+                "bias: {got:.17e}, derivation says {want:.17e}"
+            );
+        }
+        let cov = ekf.covariance();
+        for i in 0..6 {
+            for j in 0..6 {
+                assert!(
+                    (cov[i][j] - P[i][j]).abs() < 2e-15,
+                    "P[{i}][{j}] = {:.17e}, derivation says {:.17e}",
+                    cov[i][j],
+                    P[i][j]
+                );
+            }
+        }
     }
 }

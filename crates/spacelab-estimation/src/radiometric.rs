@@ -53,6 +53,19 @@
 //! table and the endpoints share; keeping them the same scale is the caller's job, and a caller who
 //! mixes them gets an error proportional to `f_T × ΔTDB−UTC`, which at 7 GHz and 32 s is 2.2e11
 //! cycles rather than a rounding term.
+//!
+//! # Gate
+//!
+//! `derivations/radiometric_observables.mac` shows the ramp trapezoid and its endpoint partials,
+//! Moyer's three range conversions, the Doppler-count/measured-frequency identity, the corona
+//! substitution `r = p/cos θ` with its bounds and the cosine-power recursion, the ΔDOR far-field
+//! limit, and the plasma coefficient `e²/(8π²ε₀mₑ)` at 40 digits;
+//! `derivations/radiometric_corona.gp` integrates the electron column in arc length at 60
+//! digits. The gates are the module tests `the_corona_delay_is_the_defining_path_integral` (G2),
+//! `the_integrals_derivative_is_the_frequency_at_the_moving_endpoint` (G1),
+//! `the_measured_frequency_and_the_doppler_count_add_up_to_the_reference` (G1),
+//! `the_far_field_limit_is_the_baseline_projected_on_the_angular_offset` (G3) and
+//! `every_turnaround_ratio_is_moyers_table` (G5).
 
 use spacelab_autodiff::Scalar;
 
@@ -638,11 +651,17 @@ pub fn delta_dor<S: Scalar>(satellite: &[S; 6], geometry: &TdoaGeometry, quasar:
 /// `(R☉)^k` and so matters at `k = 6`. The model's constant travels with the model.
 pub const SOLAR_RADIUS: f64 = 696e6;
 
-/// `40.3 m³/s²` — the coefficient that turns a column of electrons into a range delay.
+/// `e²/(8π² ε₀ mₑ) = 40.308 m³/s²` — the coefficient that turns a column of electrons into a range
+/// delay.
 ///
-/// `1 / (2 ε₀ mₑ (2π)² / e²)`, so `delay = 40.3 · TEC / f²` metres with TEC in electrons per square
-/// metre and `f` in hertz. The same constant the two-frequency ionospheric correction uses.
-pub const PLASMA_DELAY_COEFFICIENT: f64 = 40.3;
+/// `1 / (2 ε₀ mₑ (2π)² / e²)`, so `delay = 40.308 · TEC / f²` metres with TEC in electrons per
+/// square metre and `f` in hertz — the first-order term of Appleton–Hartree, the constant usually
+/// quoted as 40.3. Stored at the precision CODATA 2018 gives it (`e` exact by the 2019 SI;
+/// `derivations/radiometric_corona.gp` and `derivations/radiometric_observables.mac` evaluate the
+/// formula at 40 digits). The quoted `40.3` is a three-digit rounding of it and was what this
+/// constant used to hold, which put every corona delay 2.03e-4 low — 2 cm on a 100 m delay.
+#[allow(clippy::excessive_precision)]
+pub const PLASMA_DELAY_COEFFICIENT: f64 = 40.308_193_022_001_689_553_246_118_861_883_828_473_752;
 
 /// The astronomical unit, metres — IAU 2012 Resolution B2, an exact defining constant.
 ///
@@ -748,7 +767,7 @@ impl<'a> CoronaSeries<'a> {
 /// The solar-corona range correction along one leg, metres.
 ///
 /// ```text
-/// Δρ = ± (40.3 / f²) ∫ n_e ds
+/// Δρ = ± (40.308 / f²) ∫ n_e ds
 /// ```
 ///
 /// with the sign from [`PlasmaSignature`] and the integral taken along the straight line from the
@@ -1039,6 +1058,7 @@ mod tests {
         assert_eq!(table.segments().len(), 4);
     }
 
+    /// Moyer (2000) table 13-1, entry by entry (G5).
     #[test]
     fn every_turnaround_ratio_is_moyers_table() {
         // Moyer (2000) table 13-1: the downlink supplies the numerator, the uplink the denominator.
@@ -1131,6 +1151,8 @@ mod tests {
         );
     }
 
+    /// `∂/∂b ∫ₐᵇ f_T = f_T(b)` and `∂/∂a = −f_T(a)` (G1, `derivations/radiometric_observables.mac`
+    /// identity 1), carried by the dual arithmetic through the walk.
     #[test]
     fn the_integrals_derivative_is_the_frequency_at_the_moving_endpoint() {
         // The whole reason the endpoints are `Scalar` rather than `f64`: `d/dt ∫_a^t f = f(t)`, so
@@ -1524,6 +1546,126 @@ mod tests {
         }
     }
 
+    /// The delay against its defining integral (G2): `(e²/8π²ε₀mₑ)/f² · ∫ n_e ds` along the
+    /// straight leg, taken in arc length by `intnum` at 60 digits in
+    /// `derivations/radiometric_corona.gp` with no substitution, recursion or tanh–sinh in it, and
+    /// equal there to the `r = p/cos θ` closed form of `derivations/radiometric_observables.mac` to
+    /// 1e-58 or better. Integer-metre endpoints in no coordinate plane, 10 and 3 solar radii off the
+    /// Sun; integer exponents through the recursion, `k = 2.7` through the quadrature, and a
+    /// three-term series through both. With the plasma coefficient at its old `40.3` every one of
+    /// these is 2.03e-4 low.
+    #[test]
+    #[allow(
+        clippy::excessive_precision,
+        clippy::unreadable_literal,
+        clippy::too_many_lines
+    )]
+    fn the_corona_delay_is_the_defining_path_integral() {
+        let receiver = [42742248771.0, 64113373157.0, 128226746314.0];
+        let ten = [-57422602848.0, -82788519117.0, -201261146550.0];
+        let three = [-62108120287.0, -92159553995.0, -195013789965.0];
+        let single = |exponent: f64| {
+            [CoronaTerm {
+                coefficient: 1e14,
+                exponent,
+            }]
+        };
+        let (k2, k3, k6, k27) = (single(2.0), single(3.0), single(6.0), single(2.7));
+        let mixed = [
+            CoronaTerm {
+                coefficient: 1e14,
+                exponent: 2.0,
+            },
+            CoronaTerm {
+                coefficient: 3e15,
+                exponent: 6.0,
+            },
+            CoronaTerm {
+                coefficient: 1e14,
+                exponent: 2.7,
+            },
+        ];
+        let cases: [(&[CoronaTerm], [f64; 3], f64, &str); 10] = [
+            (
+                &k2,
+                ten,
+                1.2182885285251907724826809320160137370359e4,
+                "10 R☉, k = 2",
+            ),
+            (
+                &k3,
+                ten,
+                7.9457495240173238149368334465447691887964e2,
+                "10 R☉, k = 3",
+            ),
+            (
+                &k6,
+                ten,
+                4.6840887957939943568910127078931384681567e-1,
+                "10 R☉, k = 6",
+            ),
+            (
+                &k27,
+                ten,
+                1.7515362019718045518130492501513151788274e3,
+                "10 R☉, k = 2.7",
+            ),
+            (
+                &mixed,
+                ten,
+                1.3948473753611094259710531608435131964591e4,
+                "10 R☉, three terms",
+            ),
+            (
+                &k2,
+                three,
+                4.1328070005023464702776148705053038714636e4,
+                "3 R☉, k = 2",
+            ),
+            (
+                &k3,
+                three,
+                8.8348856839827623615816865938669535234887e3,
+                "3 R☉, k = 3",
+            ),
+            (
+                &k6,
+                three,
+                1.9276086393374971633715119468277908839276e2,
+                "3 R☉, k = 6",
+            ),
+            (
+                &k27,
+                three,
+                1.3587303280543241720659501012921255235299e4,
+                "3 R☉, k = 2.7",
+            ),
+            (
+                &mixed,
+                three,
+                6.0698199203579197913550185558457666601718e4,
+                "3 R☉, three terms",
+            ),
+        ];
+        for (terms, transmitter, exact, label) in cases {
+            let series = CoronaSeries::new(terms).unwrap();
+            let delay: f64 = solar_corona_delay(
+                &series,
+                &transmitter,
+                &receiver,
+                8.4e9,
+                PlasmaSignature::GroupDelay,
+            )
+            .unwrap();
+            let rel = (delay - exact).abs() / exact;
+            println!("{label:20}: {delay:.17e} m, rel {rel:.2e}");
+            assert!(
+                rel < 2e-14,
+                "{label}: {delay:.17e} m against the path integral {exact:.17e} m"
+            );
+        }
+    }
+
     #[test]
     fn the_column_does_not_depend_on_which_end_is_called_the_receiver() {
         // The closed form is written around the *receiver's* distance and the angle at the
@@ -1716,6 +1858,8 @@ mod tests {
         assert_eq!(series.terms().len(), 1);
     }
 
+    /// Averaged Doppler plus measured frequency is `M · f_reference` over a flat exciter (G1,
+    /// `derivations/radiometric_observables.mac` identity 3).
     #[test]
     fn the_measured_frequency_and_the_doppler_count_add_up_to_the_reference() {
         // Two observables of one link, and the identity between them is exact over a flat exciter:
@@ -1868,6 +2012,8 @@ mod tests {
         );
     }
 
+    /// The far-field limit `ΔDOR → B·(ŝ_q − ŝ_sc)/c` (G3, `derivations/radiometric_observables.mac`
+    /// identity 7).
     #[test]
     fn the_far_field_limit_is_the_baseline_projected_on_the_angular_offset() {
         // ΔDOR → B·(ŝ_quasar − ŝ_spacecraft)/c. The code forms it from two finite ranges; this

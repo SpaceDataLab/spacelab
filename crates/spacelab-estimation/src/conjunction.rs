@@ -45,6 +45,19 @@
 //! [`probability_max`](EncounterPlane::probability_max) adds the dilution-of-precision safety metric:
 //! the maximum `Pc` over an isotropic scaling of the covariance (Alfriend/Frisbee-style), the
 //! worst-case probability when the covariance magnitude is itself uncertain.
+//!
+//! # Gate
+//!
+//! `derivations/conjunction_pc.mac` derives each reduction from the defining integral — Foster's
+//! completed square and `erf` radial primitive, Patera's whitening and contour field, the exact
+//! Poisson mixture Chan's series is for a circular covariance, the centred `1 − e^{−R²/2σ²}`, the
+//! dilution maximum `R²/(e·v·√det C)` and the B-plane basis — and `derivations/conjunction_pc.gp`
+//! evaluates the defining double integral at 60 digits in two integration orders. The gates are
+//! the module tests `foster_and_patera_reproduce_the_defining_integral` (G3), from circular to
+//! 4764:1 and down to a 3.2e-27 tail, `chan_is_the_exact_integral_for_a_circular_covariance` (G1),
+//! `the_dilution_maximum_is_the_closed_form_r_squared_over_e_d_squared` (G3),
+//! `patera_takes_the_series_where_its_contour_weight_would_cancel` (G3) and
+//! `the_encounter_basis_survives_a_velocity_along_each_axis` (G1).
 
 // Matrix code indexes 2- and 3-vectors by one i/j/k, and the domain symbols (C, R, Pc, σ, u, v) are one
 // letter by convention; the quadrature locals (aa, bb, mu) read as the method derivations' notation.
@@ -268,12 +281,30 @@ impl EncounterPlane {
             let bb = bilinear2(&inv, &u, &m); // uᵀC⁻¹m
             let mu = bb / aa;
             let s = libm::sqrt(aa * 0.5);
-            // ∫₀^R ρ exp(−½ aa (ρ−μ)²) dρ in closed form.
-            let radial = (libm::exp(-0.5 * aa * mu * mu)
-                - libm::exp(-0.5 * aa * (rr - mu) * (rr - mu)))
+            // exp(−½ (cc − bb²/aa)) times ∫₀^R ρ exp(−½ aa (ρ−μ)²) dρ in closed form, with the
+            // perpendicular factor folded into each term: exp(−½ aa μ²) times it is exp(−½ cc).
+            //
+            // The erf pair is erf(x₁) − erf(x₀) over x₀ = −sμ < x₁ = s(R − μ). Once the disc lies
+            // more than a few sigma along u, both are within an ulp of ±1 and their difference — the
+            // whole signal — is lost: at Pc = 2.7e-7 Foster carried 1.1e-11 relative, and below
+            // ~1e-17 it returned 0 (3.2e-27 and 2.3e-20 against the double integral of
+            // `derivations/conjunction_pc.gp`). On one side of zero the pair is written as the
+            // difference of two erfc values instead, each of which keeps its digits in the tail.
+            // What remains is the closed form's own cancellation between `μ∫e` and `∫(ρ − μ)e`, a
+            // factor μ/R: 5.9e-12 relative at μ/R = 10³ and Pc = 3.2e-27.
+            let (x0, x1) = (-s * mu, s * (rr - mu));
+            let erf_span = if x0 >= 0.0 {
+                libm::erfc(x0) - libm::erfc(x1)
+            } else if x1 <= 0.0 {
+                libm::erfc(-x1) - libm::erfc(-x0)
+            } else {
+                libm::erf(x1) - libm::erf(x0)
+            };
+            let perpendicular = -0.5 * (cc - bb * bb / aa);
+            acc += (libm::exp(-0.5 * cc)
+                - libm::exp(perpendicular - 0.5 * aa * (rr - mu) * (rr - mu)))
                 / aa
-                + mu * 0.5 * libm::sqrt(TAU / aa) * (libm::erf(s * (rr - mu)) + libm::erf(s * mu));
-            acc += libm::exp(-0.5 * (cc - bb * bb / aa)) * radial;
+                + mu * 0.5 * libm::sqrt(TAU / aa) * libm::exp(perpendicular) * erf_span;
         }
         clamp_unit(acc * dphi * inv_sqrt_det / TAU)
     }
@@ -281,7 +312,9 @@ impl EncounterPlane {
     /// Collision probability by Patera 2005: Green's theorem turns the area integral into a contour
     /// integral around the hard-body circle, evaluated in whitened coordinates where the Gaussian is
     /// isotropic. The `(1 − e^{−r²/2})/r²` weight is smooth through the origin, so a single integral
-    /// covers the disk-centre-inside and -outside cases alike. Fast for elongated covariances.
+    /// covers the disk-centre-inside and -outside cases alike; when the Gaussian's centre is outside
+    /// the disc its `1/r²` part has winding number zero and the `−e^{−r²/2}/r²` part alone is summed,
+    /// which keeps relative accuracy in the far tail. Fast for elongated covariances.
     #[must_use]
     pub fn probability_patera(&self) -> f64 {
         if self.radius <= 0.0 {
@@ -301,7 +334,17 @@ impl EncounterPlane {
 
         let n = self.angular_samples();
         let dt = TAU / usize_as_f64(n);
+        // The weight splits as 1/r² − e^{−r²/2}/r², and the first part integrates to 2π times the
+        // contour's winding number about the origin: 1 when the Gaussian's centre is inside the disc,
+        // 0 when it is outside. Outside, `acc` is then a sum of O(1) terms whose total is Pc, so its
+        // rounding floor is absolute — 3.2e-27 and 2.3e-20 came back as exactly 0, and 2.7e-7 with
+        // 1.3e-11 relative. `tail` carries the second part alone, whose terms are of the size of the
+        // answer, and is used when the centre is outside and the contour stays a unit away from it,
+        // where 1/r² ≤ 1 is as smooth as `h`.
+        let outside = self.miss[0] * self.miss[0] + self.miss[1] * self.miss[1] > rr * rr;
         let mut acc = 0.0;
+        let mut tail = 0.0;
+        let mut closest = f64::INFINITY;
         for k in 0..n {
             let t = (usize_as_f64(k) + 0.5) * dt;
             let (ct, st) = (libm::cos(t), libm::sin(t));
@@ -310,15 +353,20 @@ impl EncounterPlane {
             let s1p = -rr * w00 * st;
             let s2p = rr * (-w10 * st + w11 * ct);
             let r2 = s1 * s1 + s2 * s2;
+            let flux = s1 * s2p - s2 * s1p;
+            let gauss = libm::exp(-0.5 * r2);
             // h(r) = (1 − e^{−r²/2})/r², with its removable r→0 limit ½ − r²/8 + r⁴/48.
             let h = if r2 < 1e-8 {
                 0.5 - r2 / 8.0 + r2 * r2 / 48.0
             } else {
-                (1.0 - libm::exp(-0.5 * r2)) / r2
+                (1.0 - gauss) / r2
             };
-            acc += h * (s1 * s2p - s2 * s1p);
+            acc += h * flux;
+            tail -= gauss / r2 * flux;
+            closest = closest.min(r2);
         }
-        clamp_unit(acc * dt / TAU)
+        let contour = if outside && closest >= 1.0 { tail } else { acc };
+        clamp_unit(contour * dt / TAU)
     }
 
     /// Collision probability by Chan's analytic series (Chan 1997/2008): the equal-area circle
@@ -1032,7 +1080,7 @@ mod tests {
         assert!((foster - grid).abs() / foster < 5e-4);
     }
 
-    /// The removable singularity in Patera's contour weight. `h(x) = (1 − e^{−x/2})/x` loses every
+    /// The removable singularity in Patera's contour weight (G3). `h(x) = (1 − e^{−x/2})/x` loses every
     /// digit to cancellation as `x = r² → 0`, so the code switches to the series `½ − x/8 + x²/48`
     /// below `x = 10⁻⁸`. A hard body far inside one sigma of a *centred* conjunction puts every contour
     /// point at `x = (R/σ)²`, so the whole quadrature runs in that branch and `Pc` collapses to
@@ -1113,7 +1161,8 @@ mod tests {
         }
     }
 
-    /// The B-plane basis stays well conditioned whichever way the relative velocity points. The helper
+    /// The B-plane basis stays well conditioned whichever way the relative velocity points (G1): the
+    /// projected covariance and miss are `derivations/conjunction_pc.mac`'s identities 10–11. The helper
     /// axis is chosen *against* the velocity's x-alignment, so a velocity along +y — where the guard's
     /// two branches disagree — is the case that tells a working rule from a broken one: pick the wrong
     /// helper and the cross product is zero, the basis is NaN, and the projection reports a covariance
@@ -1238,7 +1287,7 @@ mod tests {
         assert!(pmax > nominal, "expected an interior maximum above nominal");
     }
 
-    /// The dilution maximum has a closed form for a circular covariance, and it is the one the
+    /// The dilution maximum has a closed form for a circular covariance (G3), and it is the one the
     /// literature quotes: with the hard body far outside the covariance the probability is the
     /// Gaussian density at the miss times the disc area,
     ///
@@ -1452,6 +1501,168 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Foster and Patera against the defining double integral itself (G3). The references are
+    /// `derivations/conjunction_pc.gp`'s 60-digit quadratures of
+    /// `∬_{|x|≤R} N(x; m, C) dx` — inner integral the conditional normal in closed form, outer by
+    /// `intnum` — which agree with the same integral taken in the other order to 1e-49 or better,
+    /// and use neither method's reduction. The reductions themselves (completed square, `erf`
+    /// radial primitive, whitening, the contour field's divergence) are the identities of
+    /// `derivations/conjunction_pc.mac`. The geometries run from circular to the 4764:1 Alfano 5
+    /// ellipse, a correlated covariance and a 3.2e-27 tail; the bound is the `~10⁻¹²` the angular
+    /// sample law documents.
+    #[test]
+    fn foster_and_patera_reproduce_the_defining_integral() {
+        // (miss, covariance, radius, Pc from the double integral, label)
+        let diag = |sx: f64, sy: f64| [[sx * sx, 0.0], [0.0, sy * sy]];
+        let cases = [
+            (
+                [0.0, 0.0],
+                diag(50.0, 50.0),
+                20.0,
+                7.6883653613364217089240150427611189956417e-2,
+                "circular, centred",
+            ),
+            (
+                [30.0, 40.0],
+                diag(50.0, 50.0),
+                20.0,
+                4.7558618960073884903063705054276446729548e-2,
+                "circular, off-centre",
+            ),
+            (
+                [10.0, 25.0],
+                diag(30.0, 90.0),
+                15.0,
+                3.6779255566300929736662534373457844293300e-2,
+                "3:1 elongated",
+            ),
+            (
+                [14.9, 0.0],
+                diag(20.0, 60.0),
+                15.0,
+                6.8274065467229364317275681091916647827282e-2,
+                "grazing",
+            ),
+            (
+                [100.0, 0.0],
+                diag(40.0, 120.0),
+                10.0,
+                4.7608202792825029642893626472773149116552e-4,
+                "far off-centre",
+            ),
+            (
+                [-3.8872073, 0.1591646],
+                diag(1.4101830, 114.2585190),
+                15.0,
+                1.0038295012567774197917971988345168920937e-1,
+                "Alfano 3, 81:1",
+            ),
+            (
+                [-1.2217895, 2.1230067],
+                diag(0.0373279, 177.8109003),
+                10.0,
+                4.4509859522920124935224895793070288608893e-2,
+                "Alfano 5, 4764:1",
+            ),
+            (
+                [10000.0, 0.0],
+                diag(1000.0, 3000.0),
+                10.0,
+                3.2185582327309600734443507368121995438698e-27,
+                "Chan 08, deep tail",
+            ),
+            (
+                [-692.362272, 4475.456261],
+                diag(193.454603, 562.027293),
+                13.2,
+                2.2795770544066878639026441321907401518829e-20,
+                "CDM 2, deep tail",
+            ),
+            (
+                [150.0, 200.0],
+                diag(40.0, 90.0),
+                5.0,
+                2.6687013159614108020514921994990182795686e-7,
+                "mid tail",
+            ),
+            (
+                [30.0, -20.0],
+                [[900.0, 350.0], [350.0, 400.0]],
+                10.0,
+                1.1041711849375086102631804435780682871454e-2,
+                "correlated",
+            ),
+        ];
+        let mut failures = Vec::new();
+        for (miss, cov, radius, exact, label) in cases {
+            let plane = EncounterPlane::new(miss, cov, radius).unwrap();
+            let (foster, patera) = (plane.probability_foster(), plane.probability_patera());
+            let (ef, ep) = (
+                (foster - exact).abs() / exact,
+                (patera - exact).abs() / exact,
+            );
+            println!("{label:20}: exact {exact:.16e}  Foster {ef:.2e}  Patera {ep:.2e}");
+            // Foster's closed form keeps one cancellation of its own: the two parts of the radial
+            // integral, `μ∫e` and `∫(ρ − μ)e`, cancel to `∫ρe` by a factor μ/R, which is 10³ on the
+            // 3.2e-27 case and measured there at 5.9e-12. Patera has no such term.
+            let foster_bound = if exact < 1e-25 { 1e-11 } else { 1e-12 };
+            if ef >= foster_bound {
+                failures.push(format!("{label}: Foster {foster:.17e} vs {exact:.17e}"));
+            }
+            if ep >= 1e-12 {
+                failures.push(format!("{label}: Patera {patera:.17e} vs {exact:.17e}"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// For a circular covariance Chan's series is not an approximation (G1): with `C = σ²I` the
+    /// angular integral is `I₀` and the radial moments are Poisson tails
+    /// (`derivations/conjunction_pc.mac`, identities 6–7), so `Pc = P(I > J)`,
+    /// `I ∼ Poisson(R²/2σ²)`, `J ∼ Poisson(d²/2σ²)` — the sum the method evaluates. The references
+    /// are the double integral of `derivations/conjunction_pc.gp`, which also matches the Poisson
+    /// mixture there to 60 digits; the centred one is `1 − exp(−R²/2σ²)` (G3).
+    #[test]
+    fn chan_is_the_exact_integral_for_a_circular_covariance() {
+        let r1200 = libm::sqrt(1200.0);
+        for (miss, sigma, radius, exact) in [
+            (
+                0.0,
+                50.0,
+                20.0,
+                7.6883653613364217089240150427611189956417e-2,
+            ),
+            (
+                50.0,
+                50.0,
+                20.0,
+                4.7558618960073884903063705054276446729548e-2,
+            ),
+            (1.0, 1.0, 1.0, 2.6712019620317978174904923521839500063357e-1),
+            (
+                r1200,
+                1.0,
+                r1200,
+                4.9424116407783778451010664855215127466861e-1,
+            ),
+        ] {
+            let plane = EncounterPlane::from_diagonal(miss, 0.0, sigma, sigma, radius).unwrap();
+            let chan = plane.probability_chan();
+            let rel = (chan - exact).abs() / exact;
+            println!("d = {miss}, σ = {sigma}, R = {radius}: Chan {chan:.17e}, rel {rel:.2e}");
+            // The log-domain walk to a Poisson mean of 600 commits ~10³ roundings of `ln q`, measured
+            // here at 5.2e-13 relative; the three short series are at the last few ulps.
+            let bound = if radius > 30.0 { 1e-12 } else { 1e-14 };
+            assert!(
+                rel < bound,
+                "d = {miss}, σ = {sigma}, R = {radius}: Chan {chan:.17e} vs {exact:.17e}"
+            );
+        }
+        let want = -libm::expm1(-400.0 / 5000.0);
+        let centred = EncounterPlane::from_diagonal(0.0, 0.0, 50.0, 50.0, 20.0).unwrap();
+        assert!((centred.probability_chan() - want).abs() < 1e-15 * want);
     }
 
     /// A symmetric 3×3 covariance with equal diagonal `d` and zero off-diagonal.

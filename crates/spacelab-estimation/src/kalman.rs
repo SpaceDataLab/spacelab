@@ -23,6 +23,13 @@
 //!
 //! The array form is taken over Potter / Carlson / U-D deliberately (notes/14 §2): it is the modern
 //! equivalent and it keeps `S` triangular.
+//!
+//! Gate: `derivations/kalman_square_root.mac` shows the post-array's blocks are `√f`, `√f K` and a
+//! factor of `P⁻ − K f Kᵀ`, that this equals the Joseph and information forms at the optimal gain,
+//! and that the gain is the stationary point of `tr P⁺`; `derivations/linear_filters.gp` recomputes
+//! its rational fixture in Joseph form. The test
+//! `tests/kalman.rs::the_filter_reproduces_the_exact_rational_kalman_recursion` (G2) holds the
+//! filter to that recursion in exact rationals.
 
 // Matrix code indexes several arrays by one i/j/k, and the Kalman symbols (P, S, K, H, Q, f) are one
 // letter by universal convention.

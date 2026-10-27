@@ -249,7 +249,7 @@ exclude_re = [
     # non-negative, so `>` and `>=` differ only at `r2 == 0` — where `d = atan(√(r2/(1−r2))) = 0`,
     # `R₂(d) = I`, and the rotation collapses to `R₃(−(E+s))·R₃(E) = R₃(−s)`: `E` cancels, whichever
     # value the branch picked. Both halves proved in `derivations/cio_frame_branch.mac`.
-    "cio\\.rs:36:19: replace > with >= in gcrf_to_cirs",
+    "cio\\.rs:42:19: replace > with >= in gcrf_to_cirs",
 
     # The Lagrange stencil origin in `CioInterpolator::interpolate`, `− STENCIL/2 + 1`. Mutating the
     # `+ 1` to `− 1` or `* 1` slides the stencil by two nodes and one node. Measured over the whole
@@ -3090,7 +3090,7 @@ exclude_re = [
     # The module documents the choice as free: "any two orthonormal in-plane axes suffice (the disk is
     # rotationally symmetric)", and every observable -- all four probabilities, `|miss|`, `det C`,
     # `tr C` -- is invariant to it. Pinning an orientation in a test would contradict that contract.
-    "conjunction\\.rs:125:43: replace < with <= in ConjunctionGeometry::project",
+    "conjunction\\.rs:138:43: replace < with <= in ConjunctionGeometry::project",
 
     # Both angular quadratures are periodic midpoint rules, `φ_k = (k + ½)·2π/n` over `k < n`.
     # Shifting the grid by one whole step maps it onto itself modulo `2π`: the mutated set
@@ -3098,22 +3098,22 @@ exclude_re = [
     # `−½dφ` against `2π − ½dφ`, which is the same angle. What changes is the argument reduction of
     # one `cos` and one `sin`, and the position of that term in the sum -- a few ulps in one of at
     # least 1024 samples.
-    "conjunction\\.rs:265:40: replace \\+ with - in EncounterPlane::probability_foster",
-    "conjunction\\.rs:306:38: replace \\+ with - in EncounterPlane::probability_patera",
+    "conjunction\\.rs:278:40: replace \\+ with - in EncounterPlane::probability_foster",
+    "conjunction\\.rs:349:38: replace \\+ with - in EncounterPlane::probability_patera",
 
     # `r2 < 1e-8` tied to `<=`, the switch onto the series form of `h`. `1e-8` is a tolerance, not a
     # boundary: at `x = 1e-8` the series `½ − x/8 + x²/48` truncates at `x³/192 = 5e-27` relative,
     # while the direct `(1 − e^{−x/2})/x` loses `2u/x = 2e-8` of it to cancellation. The mutant moves
     # exactly one point -- `x` bit-equal to `1e-8` -- onto the *more* accurate branch, and no test can
     # demand the less accurate value.
-    "conjunction\\.rs:314:27: replace < with <= in EncounterPlane::probability_patera",
+    "conjunction\\.rs:359:27: replace < with <= in EncounterPlane::probability_patera",
 
     # The `x²/48` term of that series is at most `2.1e-18` over the branch (`x < 1e-8`), under a
     # quarter of an ulp of the `½ − x/8` it corrects, so flipping its sign is *bit-identical*:
     # measured over 200k `x` drawn from the branch plus both endpoints, not one sample changed a
     # single bit. (Which also says the term is dead weight at its own coefficient; it stays because it
     # is the series the doc comment quotes.)
-    "conjunction\\.rs:315:32: replace \\+ with - in EncounterPlane::probability_patera",
+    "conjunction\\.rs:360:32: replace \\+ with - in EncounterPlane::probability_patera",
 
     # The same term with its divisor mutated is no longer below an ulp, but is still below the noise
     # floor of what consumes it. Over the same 200k samples: `/48 → %48` is a no-op on `x² < 48`, so
@@ -3121,8 +3121,8 @@ exclude_re = [
     # by at most 86 ulp, `1.9e-14`. The quadrature that sums 1024 such terms accumulates `2.2e-14` of
     # its own rounding against the closed form (the test above prints it), so separating either
     # mutant would mean asserting that accumulation.
-    "conjunction\\.rs:315:42: replace / with % in EncounterPlane::probability_patera",
-    "conjunction\\.rs:315:42: replace / with \\* in EncounterPlane::probability_patera",
+    "conjunction\\.rs:360:42: replace / with % in EncounterPlane::probability_patera",
+    "conjunction\\.rs:360:42: replace / with \\* in EncounterPlane::probability_patera",
 
     # Chan's early exit, `if fi > b && term < 1e-18·pc { break }`, in all five mutated forms. Two
     # facts settle them. (1) `term_i = Poisson(b)(i) · P(J ≤ i−1)` is a product of two factors both
@@ -3134,11 +3134,11 @@ exclude_re = [
     # the running total and decaying super-exponentially past the mode. That is the code's own
     # documented justification for having the break at all, so the mutant computes the *more*
     # complete sum. `<` → `<=` differs only at exact equality and drops the same tail.
-    "conjunction\\.rs:369:19: replace > with >= in EncounterPlane::probability_chan",
-    "conjunction\\.rs:369:19: replace > with < in EncounterPlane::probability_chan",
-    "conjunction\\.rs:369:19: replace > with == in EncounterPlane::probability_chan",
-    "conjunction\\.rs:369:31: replace < with <= in EncounterPlane::probability_chan",
-    "conjunction\\.rs:369:31: replace < with == in EncounterPlane::probability_chan",
+    "conjunction\\.rs:417:19: replace > with >= in EncounterPlane::probability_chan",
+    "conjunction\\.rs:417:19: replace > with < in EncounterPlane::probability_chan",
+    "conjunction\\.rs:417:19: replace > with == in EncounterPlane::probability_chan",
+    "conjunction\\.rs:417:31: replace < with <= in EncounterPlane::probability_chan",
+    "conjunction\\.rs:417:31: replace < with == in EncounterPlane::probability_chan",
 
     # `if f > best_f` tied to `>=` in the 48-point coarse scan: which of two equally good grid points
     # is handed to the refinement. `best_f` is identical either way, and so is the answer, because the
@@ -3147,27 +3147,27 @@ exclude_re = [
     # tie is a saturation rather than a coincidence between two samples of a smooth unimodal
     # function: every sample underflowed to `0.0`, or the flat top is `clamp_unit`'s `1.0` (a centred
     # conjunction at small `k`), and golden section on a constant returns `best_f` unchanged.
-    "conjunction\\.rs:405:18: replace > with >= in EncounterPlane::probability_max",
+    "conjunction\\.rs:453:18: replace > with >= in EncounterPlane::probability_max",
 
     # `width = (hi − lo)/steps` tied to `%`: `50 % 48 = 2` instead of `50/48 = 1.0417`. `width` only
     # sets the bracket `[best_x − width, best_x + width]` handed to the golden section, whose one
     # requirement is to contain the peak -- and the peak is within one grid step of the coarse argmax,
     # so a wider bracket is as valid as the exact one. Golden section on a unimodal `eval` converges
     # from either to the same peak within the same `1e-10` in `log k`, where `Pc` is stationary.
-    "conjunction\\.rs:411:31: replace / with % in EncounterPlane::probability_max",
+    "conjunction\\.rs:459:31: replace / with % in EncounterPlane::probability_max",
 
     # `if fc > fd` tied to `>=`, the golden-section branch. On a tie both retained brackets, `[a, d]`
     # and `[c, b]`, contain `[c, d]` and hence the peak, so both stay valid golden brackets and
     # converge to it. Ties arise only where `eval` is flat -- the same two saturations as above.
-    "conjunction\\.rs:417:19: replace > with >= in EncounterPlane::probability_max",
+    "conjunction\\.rs:465:19: replace > with >= in EncounterPlane::probability_max",
 
     # The convergence test `|b − a| < 1e-10`, tied to `<=` (accepting a bracket of exactly the
     # declared convergence width, at most one iteration earlier) and to `==` (never true, so all 64
     # iterations run). The loop is bounded at 64 either way and running it out only narrows the
     # bracket further, to `2.08·0.618⁶⁴ ≈ 9e-14`, so `max(fc, fd)` moves by `O(Δ²·f″)` at a
     # stationary point.
-    "conjunction\\.rs:430:34: replace < with <= in EncounterPlane::probability_max",
-    "conjunction\\.rs:430:34: replace < with == in EncounterPlane::probability_max",
+    "conjunction\\.rs:478:34: replace < with <= in EncounterPlane::probability_max",
+    "conjunction\\.rs:478:34: replace < with == in EncounterPlane::probability_max",
 
     # The same test with `b − a` mutated to `b + a`: a test on the bracket's *midpoint* rather than
     # its width. Write `a = best_x + width·α`, `b = best_x + width·β` with `α, β ∈ [−1, 1]` (the
@@ -3178,7 +3178,7 @@ exclude_re = [
     # `α + β → 2(p − best_x)/width`: the break fires only once the bracket has centred on the peak
     # `p ≈ best_x`, which is the state the original break detects, and where the coarse point *is* the
     # peak so `best_f` already equals the maximum. Otherwise it never fires and all 64 iterations run.
-    "conjunction\\.rs:430:29: replace - with \\+ in EncounterPlane::probability_max",
+    "conjunction\\.rs:478:29: replace - with \\+ in EncounterPlane::probability_max",
 
     # `poisson_terms` is a safety margin -- "the mean plus a wide margin in standard deviations" --
     # whose contract is to be an upper bound, not a formula, and every mutated form is still one.
@@ -3188,9 +3188,9 @@ exclude_re = [
     # `(mean + 50√(mean+1))·64` by ≥ 3194. Past `b ≈ 1e6` the `1 << 20` cap binds for every form
     # including the original. A test that told them apart would be asserting the size of the margin,
     # which is the one thing about it that carries no meaning.
-    "conjunction\\.rs:512:18: replace \\+ with \\* in poisson_terms",
-    "conjunction\\.rs:512:43: replace \\+ with \\* in poisson_terms",
-    "conjunction\\.rs:512:50: replace \\+ with \\* in poisson_terms",
+    "conjunction\\.rs:560:18: replace \\+ with \\* in poisson_terms",
+    "conjunction\\.rs:560:43: replace \\+ with \\* in poisson_terms",
+    "conjunction\\.rs:560:50: replace \\+ with \\* in poisson_terms",
 
     # --- spacelab-estimation: rts.rs ------------------------------------------------------------
     #
@@ -3204,7 +3204,7 @@ exclude_re = [
     #
     # Measured over 200 random systems, N = 2..6: the gain matrix agreed in every entry to 0.0e0,
     # not to a tolerance.
-    "rts\\.rs:182:29: replace \\+ with \\* in RtsSmoother<N>::step",
+    "rts\\.rs:188:29: replace \\+ with \\* in RtsSmoother<N>::step",
 
     # `right[i][j] = Σ gain[i][k] · Ŝₖ₊₁[k][j]` accumulated with `-=` yields exactly `−C Ŝₖ₊₁`, and
     # that block enters only as the right half of `[ Y | C Ŝ ]`, which the sweep below triangularises
@@ -3217,7 +3217,7 @@ exclude_re = [
     # invariant holds bit-for-bit and `self.s = left` is unreachable from `right`'s sign.
     #
     # Measured over the same 200 random systems: the smoothed factor agreed to 0.0e0 relative.
-    "rts\\.rs:146:25: replace \\+= with -= in RtsSmoother<N>::step",
+    "rts\\.rs:152:25: replace \\+= with -= in RtsSmoother<N>::step",
 
     # --- spacelab-propagation: density_data.rs --------------------------------------------------
     #
@@ -3382,8 +3382,8 @@ exclude_re = [
     # so its sum is either exactly zero or larger than 1e-11 in magnitude. `-1e-13` and its
     # neighbours reach the *high* half, which is what
     # `the_reduction_puts_a_day_boundary_at_the_start_of_the_day_not_the_end` pins.
-    "earth_rotation\\.rs:98:17: replace \\+= with -= in reduce_seconds_to_radians",
-    "earth_rotation\\.rs:98:17: replace \\+= with \\*= in reduce_seconds_to_radians",
+    "earth_rotation\\.rs:105:17: replace \\+= with -= in reduce_seconds_to_radians",
+    "earth_rotation\\.rs:105:17: replace \\+= with \\*= in reduce_seconds_to_radians",
 
     # The sign of a second-order term that rounding erases before anyone can read it.
     #
@@ -3393,7 +3393,7 @@ exclude_re = [
     # divides by `sqrt(1 + |φ|²/4) = 1.0` exactly, so no downstream value carries the sign either.
     # `the_exponential_matches_the_half_angle_closed_form_across_the_small_angle_threshold` pins the
     # whole branch at zero ulps, including `|φ| = 9.999999e-9`, and still cannot see this one.
-    "lie\\.rs:264:24: replace - with \\+ in UnitQuaternion::from_rotation_vector",
+    "lie\\.rs:270:24: replace - with \\+ in UnitQuaternion::from_rotation_vector",
 
     # The two small-angle thresholds, at the single argument where `<` and `<=` disagree.
     #
@@ -3402,8 +3402,8 @@ exclude_re = [
     # branches return the same bits. Symmetrically in the log: at `|v| = 1e-8` on a unit quaternion
     # `w` rounds to 1, `2·atan2(1e-8, 1)` to `2e-8`, and the scale factor to exactly 2.0, which is
     # what the series branch applies. Both were checked against the branch each mutant selects.
-    "lie\\.rs:261:18: replace < with <= in UnitQuaternion::from_rotation_vector",
-    "lie\\.rs:298:21: replace < with <= in UnitQuaternion::to_rotation_vector",
+    "lie\\.rs:267:18: replace < with <= in UnitQuaternion::from_rotation_vector",
+    "lie\\.rs:304:21: replace < with <= in UnitQuaternion::to_rotation_vector",
 
     # Which of the two logs of a half-turn to return, at the one quaternion that has two.
     #
@@ -3413,7 +3413,7 @@ exclude_re = [
     # representative of a rotation the function's contract does not order. Every `w != 0` is
     # unaffected, and `the_logarithm_takes_the_short_way_round_from_a_negative_scalar_part` covers
     # the reachable half.
-    "lie\\.rs:285:27: replace < with <= in UnitQuaternion::to_rotation_vector",
+    "lie\\.rs:291:27: replace < with <= in UnitQuaternion::to_rotation_vector",
 
     # Whether to add damping rows of weight zero, which are not rows.
     #
@@ -3469,8 +3469,8 @@ exclude_re = [
     # `2 (Σw − 1) μᵢ μⱼ`, so the mutants are distinguishable only outside the invariant that
     # `GaussianComponent::weight` documents and `normalize` restores — and outside it neither form
     # is a covariance. Equivalent on the domain the function has.
-    "mixture\\.rs:120:45: replace - with \\+ in GaussianMixture<N, C, L>::collapse",
-    "mixture\\.rs:120:69: replace - with \\+ in GaussianMixture<N, C, L>::collapse",
+    "mixture\\.rs:126:45: replace - with \\+ in GaussianMixture<N, C, L>::collapse",
+    "mixture\\.rs:126:69: replace - with \\+ in GaussianMixture<N, C, L>::collapse",
 
     # The same back-substitution off-by-one as `srukf.rs:384`, twice more.
     #
@@ -3490,7 +3490,7 @@ exclude_re = [
     # lower-triangular factor of the same matrix, which is unique. Its shape is pinned by
     # `both_updates_leave_the_factor_lower_triangular_with_a_non_negative_diagonal`; the covariance it
     # multiplies out to, by `the_time_update_reproduces_phi_p_phi_transpose_plus_q`.
-    "kalman\\.rs:92:25: replace \\+= with -= in SquareRootKalman<N>::time_update",
+    "kalman\\.rs:99:25: replace \\+= with -= in SquareRootKalman<N>::time_update",
 
     # Where a leap-second classifier's boundary sits, in a gap no ΔUT1 series can land in.
     #
@@ -3811,10 +3811,10 @@ exclude_re = [
     # decades under the 1e-11 this module's own adjoint test carries. `so3_log` is the same
     # statement arithmetically: at `θ = 1e-8`, `sin θ == θ` exactly in f64, so `0.5·θ/sin θ` is the
     # `0.5` the small branch uses.
-    "se3\\.rs:61:15: replace < with <= in so3_exp",
-    "se3\\.rs:80:14: replace < with <= in so3_log",
-    "se3\\.rs:95:15: replace < with <= in left_jacobian",
-    "se3\\.rs:120:15: replace < with <= in left_jacobian_inv",
+    "se3\\.rs:68:15: replace < with <= in so3_exp",
+    "se3\\.rs:87:14: replace < with <= in so3_log",
+    "se3\\.rs:102:15: replace < with <= in left_jacobian",
+    "se3\\.rs:127:15: replace < with <= in left_jacobian_inv",
 
     # `EPS * EPS` → `EPS + EPS` widens `left_jacobian_inv`'s series band from `θ < 1e-8` to
     # `θ < 1.4e-4`, and over that band the series is the *better* of the two. Measured relative
@@ -3826,7 +3826,7 @@ exclude_re = [
     # stays at 1e-16 absolute on a matrix of order one for both. Recorded rather than adopted —
     # `EPS` is shared with `so3_exp`, whose third-order series does *not* hold to 1.4e-4 (widening
     # its band is caught), so moving this split is a separate change with its own constant.
-    "se3\\.rs:120:21: replace \\* with \\+ in left_jacobian_inv",
+    "se3\\.rs:127:21: replace \\* with \\+ in left_jacobian_inv",
 
     # --- `estimation/srukf.rs`. A rank-one downdate does not see the sign of its vector.
     #
@@ -3895,10 +3895,10 @@ exclude_re = [
     #
     # Both `+0.0` reads are multiplied by `costh`, giving the same signed zero the original does, so
     # the two tables are bit-identical and nothing downstream can differ.
-    "igrf\\.rs:60:33: replace \\* with / in schmidt_legendre",
-    "igrf\\.rs:61:41: replace - with \\+ in schmidt_legendre",
-    "igrf\\.rs:61:41: replace - with / in schmidt_legendre",
-    "igrf\\.rs:66:57: replace \\* with / in schmidt_legendre",
+    "igrf\\.rs:68:33: replace \\* with / in schmidt_legendre",
+    "igrf\\.rs:69:41: replace - with \\+ in schmidt_legendre",
+    "igrf\\.rs:69:41: replace - with / in schmidt_legendre",
+    "igrf\\.rs:74:57: replace \\* with / in schmidt_legendre",
 
     # --- `gnss/gpt3.rs`. The eastern clamp cannot bind.
     #
@@ -4552,39 +4552,39 @@ exclude_re = [
     # branch, and the returned `0.5(lo + hi)` is `1 − 2⁻⁶¹`, which rounds to exactly `1.0`. Searched
     # 300 000 draws over `p, R ∈ [1e-8, 1e4]`, `ν ∈ ±[1e-4, 1e3]` and `c ∈ {0.5, 1.345, 2, 3}`: zero
     # differing results, worst `|Δw| = 0`.
-    "robust\\.rs:294:25: replace \\+ with - in huber_weight",
+    "robust\\.rs:306:25: replace \\+ with - in huber_weight",
 
     # `normalized > threshold` -> `>=` in `ChiSquareInflation`. The two branches differ only where
     # `normalized == threshold`, and there the taken branch computes `normalized / threshold`, which is
     # `1.0` — the same factor the `else` supplies. The mutant is the same function.
-    "robust\\.rs:368:37: replace > with >= in RobustPolicy::effective_variance",
+    "robust\\.rs:380:37: replace > with >= in RobustPolicy::effective_variance",
 
     # `*component += weight * value` -> `-=` while accumulating `projected = Sᵀh`. The only consumer is
     # `prior = Σ projected²` on the next line, so negating every component leaves it identical.
-    "robust\\.rs:477:24: replace \\+= with -= in robust_update",
+    "robust\\.rs:489:24: replace \\+= with -= in robust_update",
 
     # `acc += k[a][c] * sy[c][j]` -> `-=` while forming `U = K S_y`. Each column of `U` is passed to
     # `cholupdate(&mut self.s, &col, -1.0)`, whose effect is the rank-1 downdate `S Sᵀ − col colᵀ`:
     # invariant under `col -> −col`, since `rr = dk² + sign·x[k]²` is even in `x` and the off-diagonal
     # term `sign · s · x[i]` carries `s = x[k]/dk`, so both factors flip together.
-    "srukf\\.rs:237:25: replace \\+= with -= in SquareRootUnscentedKalman<N, L>::fold",
+    "srukf\\.rs:243:25: replace \\+= with -= in SquareRootUnscentedKalman<N, L>::fold",
 
     # `w.w0c < 0.0` -> `<=`, twice: the sign handed to the center `cholupdate` in `unscented_predict`
     # and in `innovation_factor`. The two differ only at `w0c == 0.0`, and there the vector being
     # updated with is `mag * (…)` with `mag = sqrt(|w0c|) = 0`, i.e. all zeros. `cholupdate` on a zero
     # vector leaves `l` unchanged for either sign: `rr = dk²`, `r = dk`, `c = 1`, `s = 0`.
-    "srukf\\.rs:343:42: replace < with <= in unscented_predict",
-    "srukf\\.rs:398:41: replace < with <= in innovation_factor",
+    "srukf\\.rs:349:42: replace < with <= in unscented_predict",
+    "srukf\\.rs:404:41: replace < with <= in innovation_factor",
 
     # `rr > 0.0` -> `>=` in `cholupdate`. At `rr == 0.0` the taken branch is `sqrt(0.0) = 0.0`, which is
     # what the `else` returns.
-    "srukf\\.rs:450:23: replace > with >= in cholupdate",
+    "srukf\\.rs:456:23: replace > with >= in cholupdate",
 
     # `for c in (j + 1)..D` -> `(j * 1)..D` in `solve_gain`'s back-substitution. The extra iteration is
     # `c == j`, and it subtracts `k[n][j] * sy[j][j]` — but `j` runs in `.rev()` and `k[n][j]` is
     # written on the line *after* the loop, so at that point it is still the `0.0` the array was
     # initialised with. The extra term is exactly zero.
-    "srukf\\.rs:485:25: replace \\+ with \\* in solve_gain",
+    "srukf\\.rs:491:25: replace \\+ with \\* in solve_gain",
 
     # --- `reseal-srukf-origin`: the centred sigma-cloud accumulation (#295) ---------------------
     #
@@ -4596,7 +4596,7 @@ exclude_re = [
     # off-centre residuals, which *are* sign-sensitive, are written on the line above and are not
     # touched by this mutant; `the_residuals_are_taken_about_the_transformed_mean_not_the_center`
     # catches that one (11.13 against 5.27 on the fixture's `cov[0][0]`).
-    "unscented\\.rs:189:23: delete - in centered_residuals",
+    "unscented\\.rs:195:23: delete - in centered_residuals",
 
     # --- `seal-hinf`: the H-infinity pre-array's own sign (#271) ---------------------------------
     #
@@ -4612,7 +4612,7 @@ exclude_re = [
     # gamma = 0.1: `P` and `S` identical to the last bit, so no assertion on the filter's output can
     # separate the two. The other three survivors of `seal-hinf` were a genuine blind spot and are
     # closed by `the_recursion_holds_in_three_dimensions_with_no_symmetry_to_hide_behind`.
-    "hinf\\.rs:342:25: replace \\+= with -= in HInfinityFilter<N>::step",
+    "hinf\\.rs:348:25: replace \\+= with -= in HInfinityFilter<N>::step",
 
     # --- `seal-imm`: the model bank's log-domain maximum (#272) -----------------------------------
     #
@@ -4620,7 +4620,7 @@ exclude_re = [
     # *value*, not an index, and the mutant differs only on a tie — where it assigns the value that is
     # already there. Every consumer reads `exp(log_likelihood[j] - best)`, so the two are the same
     # function of the same numbers, not two functions that agree on the fixture.
-    "imm\\.rs:324:34: replace > with >= in InteractingMultipleModel<N, M, L>::reweigh",
+    "imm\\.rs:336:34: replace > with >= in InteractingMultipleModel<N, M, L>::reweigh",
 
     # `(x̂ⱼ[a] − x̄[a]) · (x̂ⱼ[b] − x̄[b])` -> `+` on either factor, in the combination and in the mixing.
     # Both are the moment-matched sum `Σ wⱼ [Pⱼ + spreadⱼ]` with weights that sum to one, and there the
@@ -4635,10 +4635,10 @@ exclude_re = [
     # `the_combination_and_the_mixing_are_the_same_moment_match` still matches its hand-computed matrix
     # to the last bit. Away from a fixture of exact binary fractions the two differ by the rounding of
     # the cancelled term, which is below any tolerance a covariance can be asserted at.
-    "imm\\.rs:271:55: replace - with \\+ in InteractingMultipleModel<N, M, L>::combined",
-    "imm\\.rs:271:89: replace - with \\+ in InteractingMultipleModel<N, M, L>::combined",
-    "imm\\.rs:312:55: replace - with \\+ in InteractingMultipleModel<N, M, L>::mix_into",
-    "imm\\.rs:312:89: replace - with \\+ in InteractingMultipleModel<N, M, L>::mix_into",
+    "imm\\.rs:283:55: replace - with \\+ in InteractingMultipleModel<N, M, L>::combined",
+    "imm\\.rs:283:89: replace - with \\+ in InteractingMultipleModel<N, M, L>::combined",
+    "imm\\.rs:324:55: replace - with \\+ in InteractingMultipleModel<N, M, L>::mix_into",
+    "imm\\.rs:324:89: replace - with \\+ in InteractingMultipleModel<N, M, L>::mix_into",
 
     # --- `seal-geometry`: predicate calls whose sign is already decided (#275) --------------------
     #
@@ -4647,34 +4647,34 @@ exclude_re = [
     # and the two predicates agree everywhere `seed` is reachable. `initial_tetrahedron` is the same
     # argument one dimension up: `d` is chosen by `orient3d(a, b, c, d) != 0` and the line below
     # re-evaluates that very call.
-    "delaunay\\.rs:107:73: replace > with >= in Mesh<'a>::seed",
-    "hull\\.rs:185:81: replace > with >= in initial_tetrahedron",
+    "delaunay\\.rs:113:73: replace > with >= in Mesh<'a>::seed",
+    "hull\\.rs:192:81: replace > with >= in initial_tetrahedron",
 
     # `(axis + 1) % 3` -> `axis % 3` in `collinear`'s projection pair. The three pairs become
     # {(0,2), (1,0), (2,1)} where they were {(1,2), (2,0), (0,1)} — the same three coordinate planes
     # with their two columns swapped. A column swap negates a 2×2 determinant and the test applied to it
     # is `== 0`, so all three comparisons are unchanged. The other two mutants on this pair of lines do
     # drop a plane, and `collinearity_in_one_projection_is_not_collinearity_in_space` catches them.
-    "hull\\.rs:198:38: replace \\+ with \\* in collinear",
+    "hull\\.rs:205:38: replace \\+ with \\* in collinear",
 
     # `component > 0.0` -> `>= 0.0` and `component < 0.0` -> `<= 0.0` in `sign_of`. No expansion ever
     # holds a zero component: `grow` and `scale` push a component only under a `!= 0.0` test, so an
     # expansion whose value is exactly zero is the *empty* one and the loop falls through to `0` without
     # evaluating either comparison. On a non-empty expansion the leading component is nonzero by the
     # same argument, so the strict and non-strict forms decide identically.
-    "predicates\\.rs:123:22: replace > with >= in sign_of",
-    "predicates\\.rs:126:22: replace < with <= in sign_of",
+    "predicates\\.rs:131:22: replace > with >= in sign_of",
+    "predicates\\.rs:134:22: replace < with <= in sign_of",
 
     # `total += excess` -> `-=` in `cell_area`, which returns `|total|`. Round-to-nearest is symmetric
     # under negation, so accumulating `−excess` produces the exact negation of every intermediate and
     # `fabs` erases the difference — bit for bit, not to a tolerance.
-    "sphere\\.rs:113:15: replace \\+= with -= in cell_area",
+    "sphere\\.rs:122:15: replace \\+= with -= in cell_area",
 
     # `orient3d(ring[0], ring[1], ring[2], witness) < 0` -> `<= 0`, deciding whether the fan is reversed.
     # The witness is a point with `orient3d(a, b, c, witness) > 0`, so it is strictly off the facet's
     # plane, and `ring[0..3]` are three consecutive vertices of a 2-D convex hull, hence not collinear
     # and spanning that same plane. The determinant is therefore never zero and the two forms agree.
-    "hull\\.rs:328:11: replace < with <= in fan_over_facet",
+    "hull\\.rs:335:11: replace < with <= in fan_over_facet",
 
     # `orient3d(face, p) < 0` -> `<= 0`, which makes a face *coplanar* with the new point count as
     # visible. The faces it then deletes are exactly one flat facet, and coning them to a point in their
@@ -4684,7 +4684,7 @@ exclude_re = [
     # vertex set and the set of faces are identical under both forms; only the order in which faces are
     # emitted differs. The strictness stays because it is what keeps a zero-area face from ever being
     # constructed in the first place, which no output can show.
-    "hull\\.rs:343:78: replace < with <= in insert",
+    "hull\\.rs:350:78: replace < with <= in insert",
 
     # --- `reseal4-predicates`: filter mutants that can only send work to the exact path (#296) -----
     #
@@ -4692,24 +4692,24 @@ exclude_re = [
     # becomes `64/ε ≈ 2.9e17`; either way it is at least 64, so `FILTER * permanent` exceeds the
     # permanent, which is already an upper bound on `|determinant|`. The comparison is then never true
     # and every input takes the exact path — slower, and identical in every answer.
-    "predicates\\.rs:157:26: replace \\* with \\+",
-    "predicates\\.rs:157:26: replace \\* with /",
+    "predicates\\.rs:165:26: replace \\* with \\+",
+    "predicates\\.rs:165:26: replace \\* with /",
 
     # `FILTER * bound` -> `FILTER + bound`, in each of the three predicates. The second operand is the
     # permanent — the determinant's own expression with every subtraction turned into an addition and
     # every factor into its absolute value — so `|determinant| <= permanent` holds term by term, and
     # rounding to nearest is monotone, so it survives every intermediate. Adding `FILTER` to it can only
     # make it larger, so the strict comparison is never true and the exact path always runs.
-    "predicates\\.rs:166:24: replace \\* with \\+ in orient2d",
-    "predicates\\.rs:209:41: replace \\* with \\+ in in_circle",
-    "predicates\\.rs:256:41: replace \\* with \\+ in orient3d",
+    "predicates\\.rs:174:24: replace \\* with \\+ in orient2d",
+    "predicates\\.rs:217:41: replace \\* with \\+ in in_circle",
+    "predicates\\.rs:264:41: replace \\* with \\+ in orient3d",
 
     # `determinant > 0.0` -> `>= 0.0` in the certified branch of each predicate. That line is reached
     # only when `|determinant| > FILTER * permanent >= 0`, so the determinant is not zero there and the
     # two forms decide identically. The zero case has already left through the exact path.
-    "predicates\\.rs:168:31: replace > with >= in orient2d",
-    "predicates\\.rs:210:31: replace > with >= in in_circle",
-    "predicates\\.rs:257:31: replace > with >= in orient3d",
+    "predicates\\.rs:176:31: replace > with >= in orient2d",
+    "predicates\\.rs:218:31: replace > with >= in in_circle",
+    "predicates\\.rs:265:31: replace > with >= in orient3d",
 
     # --- `reseal-torque`: the first of Sylvester's three minors (#268) ----------------------------
     #
@@ -4828,13 +4828,13 @@ exclude_re = [
     # forecast measurement sample, and it feeds `P_xy` and `P_yy` alike — in both the companion factor
     # is centred, so both sums are unchanged. What separates the mutant in `f64` is the rounding of
     # the mean pass, which enters the unmutated sum at the same size.
-    "ensemble\\.rs:135:36: replace - with \\+ in EnsembleKalman<N, M>::covariance",
-    "ensemble\\.rs:137:50: replace - with \\+ in EnsembleKalman<N, M>::covariance",
-    "ensemble\\.rs:206:31: replace - with \\+ in EnsembleKalman<N, M>::update",
-    "ensemble\\.rs:208:45: replace - with \\+ in EnsembleKalman<N, M>::update",
-    "ensemble\\.rs:211:45: replace - with \\+ in EnsembleKalman<N, M>::update",
-    "particle\\.rs:302:38: replace - with \\+ in ParticleFilter<N, M>::covariance",
-    "particle\\.rs:304:56: replace - with \\+ in ParticleFilter<N, M>::covariance",
+    "ensemble\\.rs:142:36: replace - with \\+ in EnsembleKalman<N, M>::covariance",
+    "ensemble\\.rs:144:50: replace - with \\+ in EnsembleKalman<N, M>::covariance",
+    "ensemble\\.rs:213:31: replace - with \\+ in EnsembleKalman<N, M>::update",
+    "ensemble\\.rs:215:45: replace - with \\+ in EnsembleKalman<N, M>::update",
+    "ensemble\\.rs:218:45: replace - with \\+ in EnsembleKalman<N, M>::update",
+    "particle\\.rs:309:38: replace - with \\+ in ParticleFilter<N, M>::covariance",
+    "particle\\.rs:311:56: replace - with \\+ in ParticleFilter<N, M>::covariance",
 
     # A symmetric draw, negated, is the same draw. `ξ ~ N(0, I)` gives `−ξ ~ N(0, I)`, and the draws
     # are independent across members and independent of the state they are added to, so the mutated
@@ -4847,28 +4847,28 @@ exclude_re = [
     # output — `Rng::correlated_normal` — and there it is pinned by
     # `the_correlated_draw_is_the_factor_times_the_standard_draws`, so a flipped factor is caught at
     # the source even though it is invisible at every consumer.
-    "ensemble\\.rs:96:37: replace \\+ with - in EnsembleKalman<N, M>::from_mean_and_covariance_sqrt",
-    "ensemble\\.rs:166:43: replace \\+ with - in EnsembleKalman<N, M>::predict",
-    "ensemble\\.rs:239:48: replace \\+ with - in EnsembleKalman<N, M>::update",
-    "particle\\.rs:140:39: replace \\+ with - in ParticleFilter<N, M>::from_mean_and_covariance_sqrt",
-    "particle\\.rs:176:45: replace \\+ with - in ParticleFilter<N, M>::predict",
+    "ensemble\\.rs:103:37: replace \\+ with - in EnsembleKalman<N, M>::from_mean_and_covariance_sqrt",
+    "ensemble\\.rs:173:43: replace \\+ with - in EnsembleKalman<N, M>::predict",
+    "ensemble\\.rs:246:48: replace \\+ with - in EnsembleKalman<N, M>::update",
+    "particle\\.rs:147:39: replace \\+ with - in ParticleFilter<N, M>::from_mean_and_covariance_sqrt",
+    "particle\\.rs:183:45: replace \\+ with - in ParticleFilter<N, M>::predict",
 
     # `if value > peak { peak = value }` with `>=` assigns the value that is already there. The NaN
     # case, where the two forms could differ, is consumed by the `is_nan` test two lines above.
-    "particle\\.rs:209:22: replace > with >= in ParticleFilter<N, M>::update",
+    "particle\\.rs:216:22: replace > with >= in ParticleFilter<N, M>::update",
 
     # A back substitution's extra iteration, reading a not-yet-written zero: `(i + 1)..D` mutated to
     # `(i * 1)..D` adds the term `factor[i][i] · u[i]`, and `u[i]` is still its initialised `0.0` at
     # that point, so `sum -= 0.0` — bit-identical, not close. The same shape as the `srukf.rs` entry
     # `reseal-robust-vector` argued.
-    "ensemble\\.rs:270:21: replace \\+ with \\* in solve_spd",
+    "ensemble\\.rs:277:21: replace \\+ with \\* in solve_spd",
 
     # `cumulative` pins `cdf[M−1]` to exactly 1, and every comb point is `(i + u)/M` with `u < 1` and
     # `i ≤ M−1`, hence strictly below 1. So the `take_while` stops at the last edge whether the slice
     # ends at `M − 1` or at `M`, and the cursor cannot leave the particle set either way. The bound is
     # still load-bearing — without it a point of exactly 1 would index one past the end — but no draw
     # this generator produces reaches it.
-    "particle\\.rs:335:33: replace - with / in comb",
+    "particle\\.rs:342:33: replace - with / in comb",
 
     # --- `earthvision/image_quality.rs`. A modulus cannot see the phase, or the sign, of its sum.
     #
@@ -5074,7 +5074,7 @@ exclude_re = [
     # `f64` bits. Measured over four chained backward steps on a 3-state chain with a full,
     # asymmetric seed factor: `state()` and `covariance_sqrt()` agree bit for bit, all twelve
     # words. No assertion on any observable can separate them.
-    "rts\\.rs:210:25: replace \\+= with -= in RtsSmoother<N>::step",
+    "rts\\.rs:216:25: replace \\+= with -= in RtsSmoother<N>::step",
 
     # `if mid <= low || mid >= high { break }` in `lifetime::refine` — the guard that stops the
     # bisection when the bracket has run out of `f64` rather than out of tolerance. With `&&` the
@@ -5312,8 +5312,8 @@ exclude_re = [
     # five exponents (0, 0.7, 2.7, 4.3, 5) the worst relative difference between the two orders is
     # **5.909e-16**, three orders of magnitude inside the 1e-14 the closed-form cross-check asserts.
     # An assertion that separated them would be pinning a summation order, not an integral.
-    "crates/spacelab-estimation/src/radiometric\\.rs:376:77: replace < with <= in RampTable<'a>::integral",
-    "crates/spacelab-estimation/src/radiometric\\.rs:931:28: replace \\+ with - in tanh_sinh_cosine_power_integral",
+    "crates/spacelab-estimation/src/radiometric\\.rs:389:77: replace < with <= in RampTable<'a>::integral",
+    "crates/spacelab-estimation/src/radiometric\\.rs:950:28: replace \\+ with - in tanh_sinh_cosine_power_integral",
 
     # `damped_step`'s Cholesky pivot guard, `sum <= 0.0 || sum.is_nan()` -> `&&`. The guard is an
     # early exit, not the only exit: the function's last act is `delta.iter().any(|d| !d.is_finite())
@@ -5373,7 +5373,7 @@ exclude_re = [
     # candidates 1 and 2 are both `2` and both branches return `(0, 1/√2, 1/√2, 0)`. What differs is
     # which of `0.5·√2` and `2·(0.5/√2)` lands in which slot, and those agree to the last ulp. A
     # test that separated them would be pinning the rounding of `√2`, not the branch rule.
-    "crates/spacelab-control/src/attitude\\.rs:89:14: replace > with >= in quaternion_of",
+    "crates/spacelab-control/src/attitude\\.rs:98:14: replace > with >= in quaternion_of",
 
     # `*m = c / norm` over a Jacobi eigenvector column, with `norm` its own Frobenius length.
     #

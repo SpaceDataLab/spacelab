@@ -59,6 +59,12 @@
 //! join needs an information-to-covariance inversion at every step and it carries a second full
 //! filter's state; the array form costs one extra `N × N` triangular solve per step and no second
 //! filter.
+//!
+//! Gate: `derivations/rts_smoother.mac` proves the three block readings above and that the array
+//! recursion is the textbook one, then shows on a four-epoch rational arc that it computes the
+//! joint-Gaussian conditional of every state on every measurement; `derivations/linear_filters.gp`
+//! recomputes that conditional in covariance form. The test
+//! `tests/rts.rs::the_smoother_is_the_joint_gaussian_conditional` (G2) holds the smoother to it.
 
 // Matrix code indexes several arrays by one i/j/k, and the Kalman symbols (P, S, C, X, Y, Q) are one
 // letter by universal convention.

@@ -36,6 +36,17 @@
 //! extrema of the separation — for two low-Earth orbits that is a few minutes, and for a co-orbiting
 //! pair with a slow relative drift it can be much longer. `a_step_too_coarse_to_resolve_two_minima_
 //! reports_one` pins the failure mode rather than pretending it is absent.
+//!
+//! # Gate
+//!
+//! `derivations/screening_tca.mac` shows that `Δr · Δv` is the derivative of `½|Δr|²`, that on
+//! the coplanar circular fixture its negative-to-positive zeros are `(phase + 2πj)/(n₁ − n₂)` at
+//! distance `|r₂ − r₁|`, and that the radial filter's bound is the shells' exact closest
+//! distance; `derivations/screening_tca.gp` finds every such zero of the coplanar and the
+//! 63.4°-inclined fixture at 60 digits. The gates are the module tests
+//! `every_closest_approach_is_the_root_of_the_range_rate` (G2),
+//! `a_rectilinear_pass_is_found_where_the_closed_form_puts_it` (G3) and
+//! `the_radial_filter_never_drops_a_pair_that_could_conjunct` (G3).
 
 /// One closest approach: when, how close, and how fast.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -338,7 +349,8 @@ mod tests {
         Ok(out)
     }
 
-    /// A geometry with a closed-form answer, to the refinement tolerance and no worse.
+    /// A geometry with a closed-form answer, to the refinement tolerance and no worse (G3):
+    /// `t = x₀/v` and the offset `b`, `derivations/screening_tca.mac` identity 2.
     #[test]
     fn a_rectilinear_pass_is_found_where_the_closed_form_puts_it() {
         let (closest, speed, offset) = (1_500.0, 12_000.0, 600_000.0);
@@ -524,6 +536,82 @@ mod tests {
                 c.relative_speed,
                 separation(&dv)
             );
+        }
+    }
+
+    /// Every reported TCA is the root of its defining equation `Δr · Δv = 0` (G2), against
+    /// `derivations/screening_tca.gp`'s 60-digit roots for both fixtures — found there by bracketing
+    /// and `solve`, and for the coplanar pair also equal to the closed form
+    /// `(phase + 2πj)/(n₁ − n₂)` of `derivations/screening_tca.mac` to 1e-71 s. Refined to a
+    /// nanosecond, the bisection lands within 1e-8 s of each root: the rate function's own `f64`
+    /// rounding at `t ~ 10⁴ s` moves the zero by ~1e-9 s, and the bracket by half its width.
+    #[test]
+    #[allow(clippy::unreadable_literal, clippy::excessive_precision)]
+    fn every_closest_approach_is_the_root_of_the_range_rate() {
+        let (r1, r2) = (7_000_000.0_f64, 7_500_000.0_f64);
+        let coplanar = [
+            (
+                9.4354218670352426058885362843425348310256e3,
+                5.0000000000000000000000000000000000000000e5,
+            ),
+            (
+                6.8719925909032060769792449923725679806299e4,
+                5.0000000000000000000000000000000000000000e5,
+            ),
+        ];
+        let inclined_roots = [
+            (
+                2.6208869132350397883093677246973521134988e3,
+                4.3980727602879593264684420990878909719510e6,
+            ),
+            (
+                5.6677604005698032884871739712022854621531e3,
+                2.5039620872073022240860801215894125003317e6,
+            ),
+            (
+                8.7120299743995419899117520498921000130110e3,
+                6.8908334471539223905552161740778914161901e5,
+            ),
+            (
+                1.1755789251315146736691887758014835668289e4,
+                1.5976790330830187261311451494314740592132e6,
+            ),
+            (
+                1.4801173619825771414046408603549989213674e4,
+                3.5057096677496224934478107814990302103870e6,
+            ),
+            (
+                1.7850183461553879822895935330511437398677e4,
+                5.3560344705264782699330176744253306670609e6,
+            ),
+            (
+                2.0904498389848473123263924361215582690967e4,
+                7.0749034488644479457643868105362138545155e6,
+            ),
+        ];
+        let span = 2.0 * beat(r1, r2);
+        let found = collect(co_planar(r1, r2, 1.0), 0.0, span, 30.0, 1e-9).expect("well-formed");
+        let inc = 63.4_f64.to_radians();
+        let span_inclined = 4.0 * core::f64::consts::TAU / mean_motion(r1);
+        let found_inclined = collect(inclined(r1, r2, inc, 1.0), 0.0, span_inclined, 15.0, 1e-9)
+            .expect("well-formed");
+        for (found, roots, label) in [
+            (&found, &coplanar[..], "coplanar"),
+            (&found_inclined, &inclined_roots[..], "inclined"),
+        ] {
+            assert_eq!(found.len(), roots.len(), "{label}: {found:?}");
+            for (c, &(tca, distance)) in found.iter().zip(roots) {
+                assert!(
+                    libm::fabs(c.tca - tca) < 1e-8,
+                    "{label}: TCA {} s against the root {tca} s",
+                    c.tca
+                );
+                assert!(
+                    libm::fabs(c.distance - distance) < 1e-12 * distance,
+                    "{label}: {} m against {distance} m at the root",
+                    c.distance
+                );
+            }
         }
     }
 
@@ -905,7 +993,9 @@ mod tests {
         assert!(libm::fabs(found[0].tca - exact) < 1e-9);
     }
 
-    /// The radial filter discards only what it is entitled to, checked against the exact answer.
+    /// The radial filter discards only what it is entitled to, checked against the exact answer (G3):
+    /// `|a − b|² − (|a| − |b|)² = 2|a||b|(1 − cos θ) ≥ 0` (`derivations/screening_tca.mac`,
+    /// identity 5) makes `max(p_a − A_b, p_b − A_a)` the shells' exact closest distance.
     ///
     /// For two concentric circular orbits the closest approach over *all* time is `|r₂ − r₁|`
     /// exactly, reached whenever the two align. That closed form is the oracle here rather than a

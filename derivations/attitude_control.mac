@@ -1,0 +1,129 @@
+/* Attitude error, the two control laws and their closed loops -- spacelab-control/src/attitude.rs
+ * and closed_loop.rs.
+ *
+ * Conventions, as the plant integrates them: the attitude R is the inertial-from-body rotation [NB],
+ * with R' = R [w]x and w the body rate in body axes (spacelab_propagation::attitude); the reference
+ * Rr = [NR] is fixed. A unit quaternion q = (q0, v) stands for the active rotation
+ *     R(q) = (q0^2 - v.v) I + 2 v v^T + 2 q0 [v]x,
+ * the matrix quaternion_of inverts.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. R(cos(t/2), sin(t/2) n) is Rodrigues' exp(t [n]x), the exp_so3 the tests build from (G1);
+ *   2. Shepperd's four candidates on R(q) are 4 q0^2, 4 q1^2, 4 q2^2, 4 q3^2, and each branch's
+ *      numerators are 4 q_k q_i, so branch k returns sign(q_k) q -- one of the two quaternions of
+ *      the matrix, made unique by q0 >= 0 (G1);
+ *   3. R' = R [w]x is q' = 1/2 q (x) (0, w) (G1);
+ *   4. the error rotation must be Rr^T R = [RB]: it obeys E' = E [w]x, the kinematics in the body
+ *      rate the laws assume. The composition R Rr^T obeys E' = E [(Rr w)]x instead, by
+ *      A [w]x A^T = [A w]x for a rotation A, so its axis is the body error rotated by Rr -- the
+ *      composition AttitudeError::new used before, correct only at Rr = I (G1);
+ *   5. the MRP sigma = v/(1 + q0) obeys sigma' = 1/4 [(1 - sigma.sigma) I + 2 [sigma]x + 2 sigma sigma^T] w,
+ *      and 1 - sigma.sigma = 2 q0/(1 + q0), so |sigma| <= 1 exactly when q0 >= 0 (G1);
+ *   6. with I w' = u - w x I w, any symmetric inertia, and the Schaub-Junkins law
+ *      u = -K sigma - P w + w x I w, the Lyapunov function V = 1/2 w.I w + 2K ln(1 + sigma.sigma)
+ *      has V' = -P w.w (G2);
+ *   7. small angles: v = sin(t/2) n -> t n/2 and sigma = tan(t/4) n -> t n/4, so the PD law's
+ *      stiffness is K/2 and the MRP law's K/4 (G3); the PD loop I t'' + P t' + (K/2) t = 0 has
+ *      w_n = sqrt(K/(2I)), zeta = P/sqrt(2 I K), critical damping at P = sqrt(2 I K), and then
+ *      t(s) = t0 (1 + w_n s) exp(-w_n s) is its solution from rest (G2).
+ * derivations/attitude_control.gp re-checks (2), (5) and (6) in exact rationals at random states.
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/attitude_control.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+skew(a) := matrix([0, -a[3], a[2]], [a[3], 0, -a[1]], [-a[2], a[1], 0])$
+colv(a) := transpose(matrix(a))$
+vec(m) := [m[1, 1], m[2, 1], m[3, 1]]$
+sumsq(m) := block([t : 0], for i : 1 thru 3 do for j : 1 thru 3 do t : t + m[i, j]^2, t)$
+id3 : ident(3)$
+rq(q0, v) := (q0^2 - v . v)*id3 + 2*colv(v) . transpose(colv(v)) + 2*q0*skew(v)$
+/* Reduce on the unit sphere: q0^2 = 1 - q1^2 - q2^2 - q3^2. */
+unit(e) := ratsimp(ratsubst(1 - q1^2 - q2^2 - q3^2, q0^2, ratexpand(e)))$
+
+/* ---- 1. the half-angle quaternion is Rodrigues' exponential --------------------------------- */
+
+nn : [n1, n2, n3]$
+rod : id3 + sin(t)*skew(nn) + (1 - cos(t))*skew(nn) . skew(nn)$
+half : rq(cos(t/2), sin(t/2)*nn)$
+zero("half_angle_quaternion_is_rodrigues",
+  trigsimp(trigreduce(ratsubst(1 - n1^2 - n2^2, n3^2, expand(sumsq(half - rod))))))$
+
+/* ---- 2. Shepperd's branches ----------------------------------------------------------------- */
+
+v : [q1, q2, q3]$
+M : rq(q0, v)$
+tr : M[1, 1] + M[2, 2] + M[3, 3]$
+cands : [1 + tr, 1 + 2*M[1, 1] - tr, 1 + 2*M[2, 2] - tr, 1 + 2*M[3, 3] - tr]$
+qs : [q0, q1, q2, q3]$
+zero("shepperd_candidates_are_four_q_squared", sum(unit(cands[k] - 4*qs[k]^2)^2, k, 1, 4))$
+/* The off-diagonal numerators each branch divides by 2 sqrt(candidate) = 4 |q_k|. */
+num : [[M[3, 2] - M[2, 3], 4*q0*q1], [M[1, 3] - M[3, 1], 4*q0*q2], [M[2, 1] - M[1, 2], 4*q0*q3],
+       [M[1, 2] + M[2, 1], 4*q1*q2], [M[1, 3] + M[3, 1], 4*q1*q3], [M[2, 3] + M[3, 2], 4*q2*q3]]$
+zero("shepperd_numerators_are_four_q_i_q_k", lsum(expand(e[1] - e[2])^2, e, num))$
+
+/* ---- 3. kinematics -------------------------------------------------------------------------- */
+
+w : [w1, w2, w3]$
+/* q (x) (0, w) = (-v.w, q0 w + v x w). */
+cross3(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+q0dot : -(v . w)/2$
+vdot : (q0*w + cross3(v, w))/2$
+Mdot : 2*q0*q0dot*id3 - 2*(v . vdot)*id3 + 2*(colv(vdot) . transpose(colv(v)) + colv(v) . transpose(colv(vdot)))
+       + 2*q0dot*skew(v) + 2*q0*skew(vdot)$
+zero("body_rate_kinematics_is_half_q_times_w", unit(sumsq(Mdot - M . skew(w))))$
+
+/* ---- 4. the error rotation ------------------------------------------------------------------ */
+
+/* A [w]x A^T = [A w]x, for A = R(p) with p a unit quaternion. */
+A : rq(p0, [p1, p2, p3])$
+punit(e) := ratsimp(ratsubst(1 - p1^2 - p2^2 - p3^2, p0^2, ratexpand(e)))$
+zero("conjugated_skew_is_skew_of_rotated_vector",
+  punit(sumsq(A . skew(w) . transpose(A) - skew(vec(A . colv(w))))))$
+/* With Rr fixed and R' = R [w]x: (Rr^T R)' = (Rr^T R)[w]x, but (R Rr^T)' = (R Rr^T) Rr [w]x Rr^T. */
+zero("reference_transpose_times_attitude_has_body_rate_kinematics",
+  punit(sumsq(transpose(A) . (M . skew(w)) - (transpose(A) . M) . skew(w))))$
+zero("attitude_times_reference_transpose_has_rotated_rate_kinematics",
+  punit(sumsq((M . skew(w)) . transpose(A) - (M . transpose(A)) . skew(vec(A . colv(w))))))$
+
+/* ---- 5. modified Rodrigues parameters ------------------------------------------------------- */
+
+sig : v/(1 + q0)$
+sigdot : vdot/(1 + q0) - v*q0dot/(1 + q0)^2$
+B : (1 - sig . sig)*id3 + 2*skew(sig) + 2*colv(sig) . transpose(colv(sig))$
+zero("mrp_kinematics", block([d : sigdot - vec(B . colv(w))/4], unit(ratsimp(d . d))))$
+zero("one_minus_sigma_squared_is_two_q0_over_one_plus_q0", unit(ratsimp(1 - sig . sig - 2*q0/(1 + q0))))$
+zero("mrp_of_the_half_angle_pair_is_tan_quarter",
+  trigsimp(trigexpand(sin(2*uq)/(1 + cos(2*uq)) - tan(uq))))$
+
+/* ---- 6. the Lyapunov derivative ------------------------------------------------------------- */
+
+Iner : matrix([i11, i12, i13], [i12, i22, i23], [i13, i23, i33])$
+s : [s1, s2, s3]$
+Iw : vec(Iner . colv(w))$
+u : -K*s - P*w + cross3(w, Iw)$
+wdot : vec(invert(Iner) . colv(u - cross3(w, Iw)))$
+sdot : vec(((1 - s . s)*id3 + 2*skew(s) + 2*colv(s) . transpose(colv(s))) . colv(w))/4$
+Vdot : (w . vec(Iner . colv(wdot))) + 2*K*(2*(s . sdot))/(1 + s . s)$
+zero("mrp_law_lyapunov_derivative_is_minus_p_w_squared", ratsimp(Vdot + P*(w . w)))$
+
+/* ---- 7. small angles and the second-order loop ---------------------------------------------- */
+
+zero("quaternion_vector_is_half_the_angle", limit(sin(t/2)/t, t, 0) - 1/2)$
+zero("mrp_is_a_quarter_of_the_angle", limit(tan(t/4)/t, t, 0) - 1/4)$
+assume(Ia > 0, K > 0, P > 0, wn > 0)$
+charpoly : expand(Ia*(x^2 + 2*zeta*wn*x + wn^2))$
+zsol : solve([coeff(charpoly, x, 1) = P, coeff(charpoly, x, 0) = K/2], [wn, zeta])$
+zsol : sublist(zsol, lambda([e], is(rhs(e[1]) > 0)))[1]$
+zero("natural_frequency_is_sqrt_k_over_2i", radcan(rhs(zsol[1]) - sqrt(K/(2*Ia))))$
+zero("damping_ratio_is_p_over_sqrt_2ik", radcan(rhs(zsol[2]) - P/sqrt(2*Ia*K)))$
+zero("critical_damping_at_p_sqrt_2ik", radcan(subst(P = sqrt(2*Ia*K), rhs(zsol[2])) - 1))$
+th : t0*(1 + wn*tt)*exp(-wn*tt)$
+/* At critical damping P = sqrt(2 I K) and K = 2 I wn^2. */
+zero("critically_damped_response_solves_the_loop",
+  radcan(subst([K = 2*Ia*wn^2], subst([P = sqrt(2*Ia*K)], Ia*diff(th, tt, 2) + P*diff(th, tt) + (K/2)*th))))$
+zero("critically_damped_response_starts_at_rest",
+  subst(tt = 0, th) - t0 + subst(tt = 0, diff(th, tt)))$

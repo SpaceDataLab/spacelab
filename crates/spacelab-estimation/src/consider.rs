@@ -20,6 +20,11 @@
 //! parameters and the measurement noise together produce, so `Pc ⪰ P` always — the consider covariance
 //! never claims to be tighter than the estimated one. `Pcc` is an input and is never modified, matching
 //! the Schmidt filter's rule that the considered block is not updated.
+//!
+//! Gate: `derivations/consider_covariance.mac` derives `S` as `∂x̂/∂c̄` and `Pc` as `E[e eᵀ]` from
+//! the estimator itself, with `Pc = P` at `Pcc = 0`; `derivations/linear_filters.gp` recomputes the
+//! fixture. The module test `the_consider_covariance_is_the_error_covariance_of_the_fixture` (G2)
+//! holds both functions to it.
 
 // Matrix algebra over const-generic dimensions: `X` estimated states, `C` considered parameters, with
 // single-letter index and dimension names as is universal for linear algebra.
@@ -82,7 +87,62 @@ pub fn consider_covariance<const X: usize, const C: usize>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::excessive_precision)]
+
     use super::*;
+
+    /// (G2) On a three-measurement, two-state, two-parameter fixture the sensitivity and the
+    /// consider covariance are the derivative of the estimate and the covariance of its error —
+    /// `derivations/consider_covariance.mac` derives both from the estimator and evaluates them in
+    /// exact rationals (25 digits below). `Hx = [[1,0],[1,1],[1,2]]`, `Hc = [[1,0],[½,1],[¼,−1]]`,
+    /// `R = diag(¼, ½, 1)`, `Pcc = [[2,½],[½,1]]`, so `Λxc = [[21/4, 1], [3/2, 0]]` is exact in f64
+    /// and `P = [[3/13, −2/13], [−2/13, 7/26]]` is rounded once on input. The bound is 8 ulps of the
+    /// largest entry, 2.4.
+    #[test]
+    fn the_consider_covariance_is_the_error_covariance_of_the_fixture() {
+        let p = [[3.0 / 13.0, -2.0 / 13.0], [-2.0 / 13.0, 7.0 / 26.0]];
+        let cross = [[5.25, 1.0], [1.5, 0.0]];
+        let pcc = [[2.0, 0.5], [0.5, 1.0]];
+        let s_exact = [
+            [
+                -9.807_692_307_692_307_692_307_692e-1,
+                -2.307_692_307_692_307_692_307_692e-1,
+            ],
+            [
+                4.038_461_538_461_538_461_538_462e-1,
+                1.538_461_538_461_538_461_538_462e-1,
+            ],
+        ];
+        let pc_exact = [
+            [
+                2.434_171_597_633_136_094_674_556,
+                -1.103_550_295_857_988_165_680_473,
+            ],
+            [
+                -1.103_550_295_857_988_165_680_473,
+                6.812_130_177_514_792_899_408_284e-1,
+            ],
+        ];
+        let s = consider_sensitivity(&p, &cross);
+        let pc = consider_covariance(&p, &s, &pcc);
+        let tol = 8.0 * f64::EPSILON * 2.4;
+        for i in 0..2 {
+            for j in 0..2 {
+                assert!(
+                    (s[i][j] - s_exact[i][j]).abs() <= tol,
+                    "S[{i}][{j}] {}",
+                    s[i][j]
+                );
+                assert!(
+                    (pc[i][j] - pc_exact[i][j]).abs() <= tol,
+                    "Pc[{i}][{j}] {}",
+                    pc[i][j]
+                );
+            }
+        }
+        // (G3) With nothing considered the consider covariance is the estimated-only one, exactly.
+        assert_eq!(consider_covariance(&p, &s, &[[0.0; 2]; 2]), p);
+    }
 
     #[test]
     fn scalar_consider_matches_the_closed_form_error_variance() {

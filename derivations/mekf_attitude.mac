@@ -1,0 +1,112 @@
+/* The multiplicative EKF -- spacelab-estimation/src/mekf.rs -- derived from the quaternion kinematics.
+ *
+ * The filter carries q (inertial -> body, A(q) as in derivations/lie_quaternion.mac), a gyro bias b
+ * and a covariance on the body-side error q = qhat (x) dq, dq = (1, dth/2) to first order, and the
+ * bias error db = b - bhat. It predicts q <- q (x) exp((w_m - bhat) dt) with Phi = I + F dt,
+ *     F = [[-[w]x, -I], [0, 0]],   Q = [[sv^2 dt + su^2 dt^3/3, -su^2 dt^2/2], [-su^2 dt^2/2, su^2 dt]],
+ * measures b = A(q) r with bhat = A(qhat) r and H = [[bhat]x, 0], and resets q <- qhat (x) exp(dth).
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the propagation q (x) exp(w dt) solves qdot = q (x) (0, w)/2;
+ *   2. with qhat and q both obeying it, at rates w_m - bhat and w_m - bhat - db, the error
+ *      dq = conj(qhat) (x) q has first-order rate dthdot = -[w]x dth - db, the F of the code (G2);
+ *   3. b = A(dq) bhat, and its first-order term is [bhat]x dth: H = +[bhat]x (G2);
+ *   4. Q = int_0^dt Phi(s) diag(sv^2 I, su^2 I) Phi(s)^T ds with Phi(s) = exp(F s) at w = 0, the
+ *      gyro model the code's Q is written for (G2);
+ *   5. the multiplicative reset keeps |q| = 1: |qhat (x) e|^2 = |qhat|^2 |e|^2 (G4).
+ * Then it prints one update at 40 digits, the fixture of `one_update_is_the_multiplicative_kalman_step`
+ * in mekf.rs.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/mekf_attitude.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$
+hat(u) := matrix([0, -u[3], u[2]], [u[3], 0, -u[1]], [-u[2], u[1], 0])$
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+dot3(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+colv(u) := transpose(matrix(u))$
+qmul(p, q) := block([pw : p[1], pv : rest(p), qw : q[1], qv : rest(q)],
+  cons(pw*qw - dot3(pv, qv), pw*qv + qw*pv + cross(pv, qv)))$
+qnorm2(q) := q[1]^2 + q[2]^2 + q[3]^2 + q[4]^2$
+qconj(q) := [q[1], -q[2], -q[3], -q[4]]$
+attitude(q) := block([w : q[1], v : rest(q)],
+  (w^2 - dot3(v, v))*ident(3) + 2*transpose(matrix(v)) . matrix(v) - 2*w*hat(v))$
+pure(u) := cons(0, u)$
+
+/* 1. */
+w : [w1, w2, w3]$
+wn : sqrt(dot3(w, w))$
+q : [q0, q1, q2, q3]$
+stepq : qmul(q, cons(cos(wn*t/2), sin(wn*t/2)/wn*w))$
+zero("propagation_solves_the_kinematics",
+     lmax(map(abs, ratsimp(trigsimp(diff(stepq, t) - qmul(stepq, pure(w))/2)))))$
+
+/* 2. The error rate, with qhat and q given at one instant and dq = conj(qhat) (x) q = (1, eps dth/2). */
+dth : [e1, e2, e3]$  db : [h1, h2, h3]$
+qh : [s0, s1, s2, s3]$
+dq : cons(1, eps*dth/2)$
+qt : qmul(qh, dq)$
+what : [wm1, wm2, wm3]$                          /* w_m - bhat */
+wtrue : what - eps*db$                           /* w_m - b */
+qhdot : qmul(qh, pure(what))/2$
+qtdot : qmul(qt, pure(wtrue))/2$
+/* d/dt dq = conj(qhdot) (x) qt + conj(qh) (x) qtdot, divided by |qh|^2 for a non-unit symbol */
+dqdot : (qmul(qconj(qhdot), qt) + qmul(qconj(qh), qtdot))/qnorm2(qh)$
+rate : map(lambda([u], ratsimp(coeff(expand(u), eps, 1))), rest(dqdot))*2$
+zero("error_rate_is_minus_hat_w_dth_minus_db",
+     lmax(map(abs, ratsimp(rate - (list_matrix_entries(-hat(what) . colv(dth)) - db)))))$
+zero("error_scalar_part_is_second_order", ratsimp(coeff(expand(first(dqdot)), eps, 1)))$
+
+/* 3. */
+r : [r1, r2, r3]$
+bhat : list_matrix_entries(attitude(qh) . colv(r))$
+zero("body_side_error_composes_on_the_left",
+     zmax(ratsimp(attitude(qmul(qh, dq)) - attitude(dq) . attitude(qh))))$
+bmeas : list_matrix_entries(attitude(qt) . colv(r))$
+zero("measurement_jacobian_is_hat_bhat",
+     lmax(map(abs, ratsimp(map(lambda([u], coeff(expand(u), eps, 1)), bmeas)
+                         - list_matrix_entries(hat(bhat) . colv(dth))))))$
+
+/* 4. Per axis the error state is [dth_i, db_i] with F = [[0, -1], [0, 0]] at w = 0. */
+F1 : matrix([0, -1], [0, 0])$
+Phis : ident(2) + F1*s$                         /* F1^2 = 0: the exponential is exact */
+zero("transition_exponential_is_exact", zmax(F1 . F1))$
+Qint : integrate(Phis . matrix([sv^2, 0], [0, su^2]) . transpose(Phis), s, 0, dt)$
+Qcode : matrix([sv^2*dt + su^2*dt^3/3, -su^2*dt^2/2], [-su^2*dt^2/2, su^2*dt])$
+zero("process_noise_is_the_transition_integral", zmax(ratsimp(Qint - Qcode)))$
+
+/* 5. */
+zero("reset_preserves_the_norm", ratsimp(qnorm2(qmul(qh, q)) - qnorm2(qh)*qnorm2(q)))$
+
+/* The update fixture: qhat = exp(0.2, 0.7, -0.4), bhat = (1e-3, -2e-3, 1.5e-3), P below,
+   r = (2/7, -3/7, 6/7), b = (3/5, 0, 4/5), sigma = 1/10; 40 digits. */
+fpprec : 40$
+qexp_b(phi) := block([n : sqrt(dot3(phi, phi))], bfloat(cons(cos(n/2), sin(n/2)/n*phi)))$
+qhf : qexp_b([2/10, 7/10, -4/10])$
+biasf : [1/1000, -2/1000, 15/10000]$
+P0 : matrix([4/100, 1/100, 0, 1/1000, 0, 0],
+            [1/100, 9/100, -2/100, 0, -1/1000, 0],
+            [0, -2/100, 625/10000, 0, 0, 2/1000],
+            [1/1000, 0, 0, 1/10000, 0, 0],
+            [0, -1/1000, 0, 0, 1/10000, 0],
+            [0, 0, 2/1000, 0, 0, 1/10000])$
+rf : [2/7, -3/7, 6/7]$  bf : [3/5, 0, 4/5]$  sig2 : 1/100$
+bh : list_matrix_entries(bfloat(attitude(qhf) . colv(rf)))$
+nuf : bf - bh$
+Hb : hat(bh)$
+H : addcol(Hb, zeromatrix(3, 3))$
+S : H . P0 . transpose(H) + sig2*ident(3)$
+Kg : P0 . transpose(H) . invert(S)$
+dx : list_matrix_entries(bfloat(Kg . colv(nuf)))$
+qn : qmul(qhf, qexp_b(makelist(dx[i], i, 1, 3)))$
+qn : bfloat(qn/sqrt(qnorm2(qn)))$
+bn : bfloat(biasf + makelist(dx[i], i, 4, 6))$
+IKH : ident(6) - Kg . H$
+Pn : bfloat(IKH . P0 . transpose(IKH) + sig2*Kg . transpose(Kg))$
+for i : 1 thru 4 do printf(true, "q[~d] = ~a~%", i - 1, qn[i])$
+for i : 1 thru 3 do printf(true, "bias[~d] = ~a~%", i - 1, bn[i])$
+for i : 1 thru 6 do for j : 1 thru 6 do printf(true, "P[~d][~d] = ~a~%", i - 1, j - 1, Pn[i, j])$

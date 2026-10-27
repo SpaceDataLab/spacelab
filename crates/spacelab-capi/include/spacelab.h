@@ -2724,8 +2724,9 @@ sl_status sl_latency_steps(const sl_latency *latency, double step, size_t *out);
 
 /*
  * The attitude error between two frames: the modified Rodrigues vector of the error rotation and
- * its principal angle. Both matrices are row-major inertial->body; both rates are body rates in
- * body axes, rad/s.
+ * its principal angle. Both matrices are row-major inertial-from-body [NB] (body vectors to
+ * inertial; the transpose of an attitude law's inertial->body matrix), and the error is
+ * [NR]^T [NB]; both rates are body rates in body axes, rad/s.
  */
 sl_status sl_attitude_error_mrp(const double rotation[9], const double reference[9],
                                 const sl_vec3 *rate, const sl_vec3 *rate_reference,

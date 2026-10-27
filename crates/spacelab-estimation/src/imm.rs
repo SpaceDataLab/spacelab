@@ -52,6 +52,17 @@
 //!   ago, that is a bug and not a saving. The floor is `2.2e-308`, so a model held down by it needs a
 //!   log-likelihood deficit of ~708 nats before the floor binds at all — a depth no measurement noise
 //!   reaches by accident, and one a real manoeuvre passes in a single epoch.
+//! * **So is the probability itself, prior and posterior.** The ratio floor keeps `μⱼ` positive only
+//!   while other models feed `c̄ⱼ`. A model whose column has no inflow from a probable one decays as
+//!   `μⱼ ← πⱼⱼ μⱼ · 2.2e-308`, which underflows to zero in two epochs, and a zero prior starts there.
+//!   At `c̄ⱼ = 0` the mixing weights are `0/0`, and the NaN reaches every other model through
+//!   `0 · NaN`. With every `μᵢ ≥ 2.2e-308`, a column that is not all zero has `c̄ⱼ > 0`.
+//!
+//! Gate: `derivations/imm_mixing.mac` proves the predicted probabilities and every column of mixing
+//! weights are distributions, that the log shift changes no posterior, the moment-match identity, and
+//! that mixing conserves the bank's first two moments; the module test
+//! `the_mixed_priors_are_their_definitions_and_conserve_the_moments` (G2, G4) ties the shipped mixing
+//! to its exact fixture.
 
 // Matrix code indexes several arrays by one i/j/k, and the bank's symbols (μ, π, c̄, P, S) follow
 // Bar-Shalom's notation.
@@ -137,7 +148,8 @@ pub struct InteractingMultipleModel<const N: usize, const M: usize, const L: usi
 
 impl<const N: usize, const M: usize, const L: usize> InteractingMultipleModel<N, M, L> {
     /// Seed every model with the same estimate and covariance, the prior model probabilities, and the
-    /// Markov transition matrix.
+    /// Markov transition matrix. A zero prior probability is held at [`f64::MIN_POSITIVE`], the floor
+    /// every posterior probability is kept above (see the module documentation).
     ///
     /// `transition[i][j]` is `P(model j at this epoch | model i at the last)`. Its diagonal encodes how
     /// long a mode is expected to persist: for a mean sojourn time `τ` at step `Δt`, `πᵢᵢ ≈ 1 − Δt/τ`.
@@ -175,7 +187,7 @@ impl<const N: usize, const M: usize, const L: usize> InteractingMultipleModel<N,
         Ok(Self {
             estimate: [estimate; M],
             sqrt_cov: [seed.covariance_sqrt(); M],
-            probability,
+            probability: probability.map(|p| p.max(f64::MIN_POSITIVE)),
             transition,
             params,
         })
@@ -335,7 +347,7 @@ impl<const N: usize, const M: usize, const L: usize> InteractingMultipleModel<N,
             total += unnormalized[j];
         }
         for j in 0..M {
-            self.probability[j] = unnormalized[j] / total;
+            self.probability[j] = (unnormalized[j] / total).max(f64::MIN_POSITIVE);
         }
     }
 }
@@ -718,5 +730,175 @@ mod tests {
         // 2e-15 is inside 8 ε M = 5.3e-15 for M = 3, and outside it for any M that divides instead.
         assert!(validate_distribution(&[0.5, 0.25, 0.25 + 2e-15]).is_ok());
         assert!(validate_distribution(&[0.5, 0.25, 0.25 + 1e-13]).is_err());
+    }
+
+    /// The mixed priors are their definitions, and mixing conserves the bank's first two moments (G2,
+    /// G4).
+    ///
+    /// Reference: `derivations/imm_mixing.mac`, which proves that `Σⱼ c̄ⱼ = 1`, that every column of
+    /// mixing weights is a distribution, and that `Σⱼ c̄ⱼ x⁰ⱼ = x̄` and
+    /// `Σⱼ c̄ⱼ [P⁰ⱼ + (x⁰ⱼ − x̄)(x⁰ⱼ − x̄)ᵀ] = P̄` — the mixed priors, weighted by the predicted
+    /// probabilities, are the same distribution as the posteriors they were mixed from. It prints the
+    /// fixture's `c̄` and mixed priors as exact rationals, written here as quotients.
+    #[test]
+    fn the_mixed_priors_are_their_definitions_and_conserve_the_moments() {
+        let params = UnscentedParams::gaussian();
+        let mut bank = InteractingMultipleModel::<2, 3, 5>::new(
+            [0.0, 0.0],
+            &P0,
+            [0.5, 0.25, 0.25],
+            [[0.8, 0.1, 0.1], [0.2, 0.7, 0.1], [0.1, 0.3, 0.6]],
+            params,
+        )
+        .unwrap();
+        bank.estimate = [[1.0, 2.0], [5.0, 6.0], [-3.0, 0.5]];
+        bank.sqrt_cov = [
+            [[2.0, 0.0], [0.5, 1.0]],
+            [[1.0, 0.0], [0.0, 3.0]],
+            [[0.5, 0.0], [-1.0, 2.0]],
+        ];
+        let predicted_want = [19.0 / 40.0, 3.0 / 10.0, 9.0 / 40.0];
+        let mean_want = [
+            [23.0 / 19.0, 89.0 / 38.0],
+            [7.0 / 3.0, 95.0 / 24.0],
+            [-11.0 / 9.0, 13.0 / 9.0],
+        ];
+        let cov_want = [
+            [
+                [8619.0 / 1444.0, 1981.0 / 722.0],
+                [1981.0 / 722.0, 2851.0 / 722.0],
+            ],
+            [
+                [1853.0 / 144.0, 595.0 / 72.0],
+                [595.0 / 72.0, 7355.0 / 576.0],
+            ],
+            [[1405.0 / 162.0, 359.0 / 81.0], [359.0 / 81.0, 614.0 / 81.0]],
+        ];
+
+        let predicted = bank.predicted_probabilities();
+        let (bank_mean, bank_cov) = bank.combined();
+        let mut conserved_mean = [0.0; 2];
+        let mut conserved_cov = [[0.0; 2]; 2];
+        for j in 0..3 {
+            assert!(
+                (predicted[j] - predicted_want[j]).abs() < 1e-16,
+                "c̄[{j}] = {:.17e}",
+                predicted[j]
+            );
+            let (mean, cov) = bank.mix_into(j, &predicted);
+            for a in 0..2 {
+                assert!(
+                    (mean[a] - mean_want[j][a]).abs() < 1e-15,
+                    "x⁰[{j}][{a}] = {:.17e}, derivation says {:.17e}",
+                    mean[a],
+                    mean_want[j][a]
+                );
+                conserved_mean[a] += predicted[j] * mean[a];
+                for b in 0..2 {
+                    assert!(
+                        (cov[a][b] - cov_want[j][a][b]).abs() < 1e-14,
+                        "P⁰[{j}][{a}][{b}] = {:.17e}, derivation says {:.17e}",
+                        cov[a][b],
+                        cov_want[j][a][b]
+                    );
+                }
+            }
+        }
+        for j in 0..3 {
+            let (mean, cov) = bank.mix_into(j, &predicted);
+            for a in 0..2 {
+                for b in 0..2 {
+                    let spread = (mean[a] - conserved_mean[a]) * (mean[b] - conserved_mean[b]);
+                    conserved_cov[a][b] += predicted[j] * (cov[a][b] + spread);
+                }
+            }
+        }
+        for a in 0..2 {
+            assert!(
+                (conserved_mean[a] - bank_mean[a]).abs() < 1e-14,
+                "Σ c̄ⱼ x⁰ⱼ[{a}] = {:.17e}, x̄ = {:.17e}",
+                conserved_mean[a],
+                bank_mean[a]
+            );
+            for b in 0..2 {
+                assert!(
+                    (conserved_cov[a][b] - bank_cov[a][b]).abs() < 1e-13,
+                    "mixed second moment [{a}][{b}] = {:.17e}, P̄ = {:.17e}",
+                    conserved_cov[a][b],
+                    bank_cov[a][b]
+                );
+            }
+        }
+    }
+
+    fn every_number_is_finite(bank: &InteractingMultipleModel<2, 2, 5>) -> bool {
+        let (mean, cov) = bank.combined();
+        (0..2).all(|j| {
+            let (x, s) = bank.model(j);
+            x.iter().chain(s.iter().flatten()).all(|v| v.is_finite())
+        }) && mean
+            .iter()
+            .chain(cov.iter().flatten())
+            .all(|v| v.is_finite())
+    }
+
+    /// A model that only its own row can enter survives being ruled out.
+    ///
+    /// Regression. Column 1 of `[[1, 0], [½, ½]]` is not all zero, so the bank is valid, but once
+    /// the quiet model is refuted nothing flows back into it: `c̄₁ = ½ μ₁`. The likelihood floor alone
+    /// then gives `μ₁ ← ½ μ₁ · 2.2e-308`, which underflowed to exactly zero at the second epoch;
+    /// at the third `c̄₁ = 0`, the mixing weights `πᵢ₁ μᵢ / c̄₁` were `0/0`, model 1 became NaN, and
+    /// the next mix carried it into model 0 through `0 · NaN` — the whole bank NaN, every step still
+    /// reporting `Ok`. The probability floor keeps `μ₁ ≥ 2.2e-308`, so `c̄₁` stays positive.
+    #[test]
+    fn a_model_with_no_inflow_survives_being_ruled_out() {
+        let params = UnscentedParams::gaussian();
+        let loud = [[30.0, 0.0], [0.0, 30.0]];
+        let mut bank = InteractingMultipleModel::<2, 2, 5>::new(
+            [0.0, 1.0],
+            &P0,
+            [0.5, 0.5],
+            [[1.0, 0.0], [0.5, 0.5]],
+            params,
+        )
+        .unwrap();
+        for epoch in 1..=6 {
+            let jump = 100.0 * f64::from(epoch);
+            let probabilities = bank
+                .step(dynamics, &[loud, Q], measure, &[jump], &R)
+                .unwrap();
+            assert!(
+                probabilities[1] > 0.0,
+                "epoch {epoch}: the refuted model hit zero: {probabilities:?}"
+            );
+            assert!(
+                every_number_is_finite(&bank),
+                "epoch {epoch}: the bank went non-finite"
+            );
+        }
+    }
+
+    /// A zero prior probability is held at the floor, not carried as an absorbing zero.
+    ///
+    /// Regression. `[1, 0]` passes validation, and under the identity transition `c̄₁ = μ₁ = 0`: the
+    /// first step's mixing weights for model 1 were `0/0`, and the second carried the NaN into model
+    /// 0. A prior of zero is the floor, like a posterior that has been ruled out.
+    #[test]
+    fn a_zero_prior_probability_is_held_at_the_floor() {
+        let params = UnscentedParams::gaussian();
+        let mut bank = InteractingMultipleModel::<2, 2, 5>::new(
+            [0.0, 0.0],
+            &P0,
+            [1.0, 0.0],
+            [[1.0, 0.0], [0.0, 1.0]],
+            params,
+        )
+        .unwrap();
+        assert_eq!(bank.probabilities(), [1.0, f64::MIN_POSITIVE]);
+        for z in observations(3) {
+            let probabilities = bank.step(dynamics, &[Q, Q], measure, &[z], &R).unwrap();
+            assert!(probabilities[1] > 0.0, "{probabilities:?}");
+            assert!(every_number_is_finite(&bank), "the bank went non-finite");
+        }
     }
 }

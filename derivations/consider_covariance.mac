@@ -1,0 +1,59 @@
+/* Consider covariance -- spacelab-estimation/src/consider.rs -- from its defining expression.
+ *
+ * Measurements y = Hx x + Hc c + n, n ~ (0, R), considered parameters c ~ (cbar, Pcc) held at
+ * cbar and never estimated. The weighted least-squares estimate is
+ *     xhat(cbar) = P Hx^T R^-1 (y - Hc cbar),   P = (Hx^T R^-1 Hx)^-1,
+ * and its error e = P Hx^T R^-1 (Hc (c - cbar) + n). Each line printing `<name>: 0`, on a general
+ * 3-measurement, 2-state, 2-parameter problem:
+ *   1. the sensitivity dxhat/dcbar is the coded S = -P Lambda_xc, Lambda_xc = Hx^T R^-1 Hc (G2);
+ *   2. the error covariance E[e e^T] is the coded Pc = P + S Pcc S^T (G2);
+ *   3. at Pcc = 0 the consider covariance is the estimated-only P (G3);
+ *   4. Pc - P = S Pcc S^T, so v^T (Pc - P) v = (S^T v)^T Pcc (S^T v) >= 0: never tighter (G1).
+ * Then the fixture of `consider.rs::the_consider_covariance_is_the_error_covariance_of_the_fixture`
+ * at 25 digits; derivations/linear_filters.gp recomputes it.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/consider_covariance.mac
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+nonzero(m) := length(sublist(flatten(args(ratsimp(m))), lambda([e], e # 0)))$
+rnum(x) := ssubst("e", "b", string(bfloat(x)))$
+fpprec : 25$
+
+consider(hx, hc, rm, pcc) := block([ri : invert(rm), p, lxc],
+  p : invert(transpose(hx) . ri . hx),
+  lxc : transpose(hx) . ri . hc,
+  [p, -p . lxc, p + (-p . lxc) . pcc . transpose(-p . lxc)])$
+
+hx : genmatrix(lambda([i, j], u[i, j]), 3, 2)$
+hc : genmatrix(lambda([i, j], v[i, j]), 3, 2)$
+rm : matrix([r1, 0, 0], [0, r2, 0], [0, 0, r3])$
+pcc : matrix([c11, c12], [c12, c22])$
+[p, s, pc] : consider(hx, hc, rm, pcc)$
+
+cb : matrix([cb1], [cb2])$
+y : matrix([y1], [y2], [y3])$
+xhat : p . transpose(hx) . invert(rm) . (y - hc . cb)$
+zero("sensitivity_is_dxhat_dcbar",
+  nonzero(addcol(diff(xhat, cb1), diff(xhat, cb2)) - s))$
+/* E[e e^T] with c - cbar ~ (0, Pcc) independent of n ~ (0, R). */
+g : p . transpose(hx) . invert(rm)$
+zero("consider_covariance_is_the_error_covariance",
+  nonzero(g . (hc . pcc . transpose(hc) + rm) . transpose(g) - pc))$
+zero("zero_considered_covariance_is_the_plain_covariance",
+  nonzero(subst([c11 = 0, c12 = 0, c22 = 0], pc) - p))$
+w : matrix([w1], [w2])$
+zero("inflation_is_a_pcc_quadratic_form",
+  ratsimp((transpose(w) . (pc - p) . w) - (transpose(transpose(s) . w) . pcc . (transpose(s) . w))))$
+
+/* The fixture: dyadic Hx, Hc, R and Pcc. */
+[fp, fs, fpc] : consider(matrix([1, 0], [1, 1], [1, 2]), matrix([1, 0], [1/2, 1], [1/4, -1]),
+  matrix([1/4, 0, 0], [0, 1/2, 0], [0, 0, 1]), matrix([2, 1/2], [1/2, 1]))$
+printf(true, "Lambda_xc = ~a~%", transpose(matrix([1, 0], [1, 1], [1, 2])) . invert(matrix([1/4, 0, 0], [0, 1/2, 0], [0, 0, 1])) . matrix([1, 0], [1/2, 1], [1/4, -1]))$
+show(tag, m) := for i : 1 thru 2 do
+  printf(true, "~a row ~a = [~a, ~a]~%", tag, i, rnum(m[i, 1]), rnum(m[i, 2]))$
+show("P", fp)$
+show("S", fs)$
+show("Pc", fpc)$

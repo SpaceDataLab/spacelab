@@ -1,0 +1,72 @@
+/* The stochastic ensemble Kalman filter -- spacelab-estimation/src/ensemble.rs -- against the Kalman
+ * update.
+ *
+ * With members x_i, i = 1..M, forecast measurements y_i = h(x_i), anomalies about the ensemble means,
+ *     P_xy = sum (x_i - xbar)(y_i - ybar)^T/(M-1),   P_yy = sum (y_i - ybar)(y_i - ybar)^T/(M-1) + R,
+ * every member is moved by  x_i <- x_i + P_xy P_yy^-1 (z + eps_i - y_i),  eps_i ~ N(0, R).
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. for a linear h(x) = H x, P_xy = Phat H^T and P_yy = H Phat H^T + R with Phat the sample
+ *      covariance, so the ensemble gain IS the Kalman gain of the sample covariance (G1), for M = 4
+ *      members of a 3-state with a 2-component measurement;
+ *   2. the member update moves the anomalies by x_i' - xbar' = (I - K H)(x_i - xbar) + K (eps_i - epsbar),
+ *      so the posterior sample covariance is (I - KH) Phat (I - KH)^T + K C_eps K^T plus cross terms
+ *      linear in the perturbations (G1);
+ *   3. with the Kalman gain, (I - KH) P (I - KH)^T + K R K^T = (I - KH) P -- so with E[C_eps] = R
+ *      and the cross terms zero in expectation the perturbed ensemble carries the Kalman posterior,
+ *      and without the perturbations it falls short of it by exactly K R K^T, the module's claim (G1).
+ * Then it prints K for the fixture of `the_ensemble_gain_is_the_kalman_gain_of_the_sample_covariance`
+ * in ensemble.rs, exactly.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/ensemble_kalman_gain.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$
+colv(u) := transpose(matrix(u))$
+
+/* 1. */
+Mn : 4$
+X : genmatrix(lambda([a, i], x[a, i]), 3, Mn)$             /* member i is column i */
+H : genmatrix(lambda([k, a], hh[k, a]), 2, 3)$
+Y : H . X$
+mean_cols(Z) := (Z . genmatrix(lambda([i, j], 1), Mn, 1))/Mn$
+anom(Z) := Z - mean_cols(Z) . genmatrix(lambda([i, j], 1), 1, Mn)$
+Phat : anom(X) . transpose(anom(X))/(Mn - 1)$
+Pxy : anom(X) . transpose(anom(Y))/(Mn - 1)$
+Pyy_sample : anom(Y) . transpose(anom(Y))/(Mn - 1)$
+zero("cross_covariance_is_sample_covariance_times_Ht", zmax(ratsimp(Pxy - Phat . transpose(H))))$
+zero("measurement_covariance_is_H_sample_covariance_Ht", zmax(ratsimp(Pyy_sample - H . Phat . transpose(H))))$
+
+/* 2. the anomaly update, for any gain K and perturbations E (column i is eps_i) */
+K : genmatrix(lambda([a, k], kk[a, k]), 3, 2)$
+E : genmatrix(lambda([k, i], ee[k, i]), 2, Mn)$
+Z : genmatrix(lambda([k, i], zz[k]), 2, Mn)$
+Xpost : X + K . (Z + E - H . X)$
+zero("anomaly_update",
+     zmax(ratsimp(anom(Xpost) - ((ident(3) - K . H) . anom(X) + K . anom(E)))))$
+
+/* 3. the Joseph identity at the Kalman gain, for a general SPD-shaped P (2x2), H (1x2), R (1x1) */
+P2 : matrix([p11, p12], [p12, p22])$
+H2 : matrix([h1, h2])$
+R2 : rr$
+S2 : h1^2*p11 + 2*h1*h2*p12 + h2^2*p22 + R2$   /* H P H^T + R */
+K2 : P2 . transpose(H2)/S2$
+IKH : ident(2) - K2 . H2$
+zero("joseph_equals_kalman_posterior",
+     zmax(ratsimp(IKH . P2 . transpose(IKH) + R2*K2 . transpose(K2) - IKH . P2)))$
+zero("unperturbed_shortfall_is_KRKt",
+     zmax(ratsimp(IKH . P2 - IKH . P2 . transpose(IKH) - R2*K2 . transpose(K2))))$
+
+/* The fixture: members (1, 1/2, -1), (2, -1/2, 0), (3, 3/2, 2), (6, 5/2, -1); h(x) = (x1, x2 + x3);
+   R = S_R S_R^T with S_R = [[1/2, 0], [1/4, 1]]. */
+Xf : transpose(matrix([1, 1/2, -1], [2, -1/2, 0], [3, 3/2, 2], [6, 5/2, -1]))$
+Hf : matrix([1, 0, 0], [0, 1, 1])$
+SR : matrix([1/2, 0], [1/4, 1])$
+Rf : SR . transpose(SR)$
+Pf : ratsimp(subst(flatten(makelist(makelist(x[a, i] = Xf[a, i], i, 1, Mn), a, 1, 3)), Phat))$
+Kf : ratsimp(Pf . transpose(Hf) . invert(Hf . Pf . transpose(Hf) + Rf))$
+for a : 1 thru 3 do for k : 1 thru 2 do printf(true, "K[~d][~d] = ~a~%", a - 1, k - 1, Kf[a, k])$

@@ -1,0 +1,149 @@
+/* The extended-pose group SE_2(3) and the bias-augmented right-invariant navigation EKF --
+ * spacelab-estimation/src/se23.rs -- derived from the strapdown dynamics.
+ *
+ * An element X = (R, v, p) is the 5x5 matrix [[R, v, p], [0, 1, 0], [0, 0, 1]], the algebra element
+ * xi = [phi; nu_v; nu_p] is [[K, nu_v, nu_p], [0, 0, 0], [0, 0, 0]] with K = [phi]x, and the code
+ * uses Exp(xi) = (Exp(phi), V(phi) nu_v, V(phi) nu_p) and Ad_X = [[R, 0, 0], [[v]x R, R, 0],
+ * [[p]x R, 0, R]]. The filter's state is X with gyro and accelerometer biases b_g, b_a; the truth
+ * obeys  Rdot = R [w_m - b_g]x,  vdot = R (a_m - b_a) + g,  pdot = v,  bdot = 0,  and the error is
+ * right-invariant, X = Exp(xi) Xhat, b = bhat + beta. The code propagates the 15-dim error
+ * [dth, dv, dp, beta_g, beta_a] with Phi = I + A dt,
+ *     A = [[0, 0, 0, -R, 0], [[g]x, 0, 0, -[v]x R, -R], [0, I, 0, -[p]x R, 0], 0, 0],
+ * and updates with H_p = [-[p]x, 0, I, 0, 0], H_v = [-[v]x, I, 0, 0, 0], H_r = [R^T [r]x, 0, 0, 0, 0].
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the k-th power of the algebra matrix carries K^(k-1) nu in both translation columns, so
+ *      Exp's columns are V nu_v, V nu_p (G1);
+ *   2. X xi^ X^-1 = (Ad_X xi)^ -- the 9x9 adjoint the code builds (G1);
+ *   3. the bias-free strapdown field f(X) = [[R [w]x, R a + g, v], 0, 0] is group-affine,
+ *      f(X1 X2) = f(X1) X2 + X1 f(X2) - X1 f(I) X2 -- the property that makes the pose block of the
+ *      error dynamics trajectory-independent (G1);
+ *   4. A is the first-order dynamics of the right-invariant error, obtained by substituting
+ *      X = (I + eps xi^) Xhat, b = bhat + eps beta into the true dynamics and reading off eps^1 (G2);
+ *   5. H_p, H_v and H_r are the eps^1 terms of p, v and R^T r under the same substitution (G2).
+ * Then it prints Phi = I + A dt at the state of `the_error_transition_is_the_linearised_invariant_error_dynamics`
+ * in se23.rs, every entry that differs from the identity.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/se23_invariant_navigation.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$
+hat(u) := matrix([0, -u[3], u[2]], [u[3], 0, -u[1]], [-u[2], u[1], 0])$
+vee(M) := [M[3, 2], M[1, 3], M[2, 1]]$
+colv(u) := transpose(matrix(u))$
+quat_rotation(w, x, y, z) := block([n2 : w^2 + x^2 + y^2 + z^2],
+  matrix([w^2 + x^2 - y^2 - z^2, 2*(x*y - w*z), 2*(x*z + w*y)],
+         [2*(x*y + w*z), w^2 - x^2 + y^2 - z^2, 2*(y*z - w*x)],
+         [2*(x*z - w*y), 2*(y*z + w*x), w^2 - x^2 - y^2 + z^2])/n2)$
+
+/* 5x5 embeddings */
+se23elem(R, v, p) := block([X : ident(5)],
+  for i : 1 thru 3 do (for j : 1 thru 3 do X[i, j] : R[i, j], X[i, 4] : v[i], X[i, 5] : p[i]), X)$
+alg(K, a, b) := block([X : zeromatrix(5, 5)],
+  for i : 1 thru 3 do (for j : 1 thru 3 do X[i, j] : K[i, j], X[i, 4] : a[i], X[i, 5] : b[i]), X)$
+
+phi : [f1, f2, f3]$  nv : [n1, n2, n3]$  np : [m1, m2, m3]$
+K : hat(phi)$
+
+/* 1. */
+Xi : alg(K, nv, np)$
+for k : 1 thru 5 do block([P : Xi^^k, Kk : K^^(k - 1)],
+  zero(sconcat("se23_algebra_power_", k, "_velocity"),
+       lmax(map(abs, ratsimp(makelist(P[i, 4], i, 1, 3) - list_matrix_entries(Kk . colv(nv)))))),
+  zero(sconcat("se23_algebra_power_", k, "_position"),
+       lmax(map(abs, ratsimp(makelist(P[i, 5], i, 1, 3) - list_matrix_entries(Kk . colv(np)))))))$
+
+/* 2. */
+R : quat_rotation(q0, q1, q2, q3)$
+v : [v1, v2, v3]$  p : [p1, p2, p3]$
+X : se23elem(R, v, p)$
+Xinv : se23elem(transpose(R), -list_matrix_entries(transpose(R) . colv(v)),
+            -list_matrix_entries(transpose(R) . colv(p)))$
+zero("se23_inverse", zmax(ratsimp(X . Xinv - ident(5))))$
+Ad : zeromatrix(9, 9)$
+VR : hat(v) . R$  PR : hat(p) . R$
+for i : 1 thru 3 do for j : 1 thru 3 do (
+  Ad[i, j] : R[i, j], Ad[i + 3, j] : VR[i, j], Ad[i + 3, j + 3] : R[i, j],
+  Ad[i + 6, j] : PR[i, j], Ad[i + 6, j + 6] : R[i, j])$
+adxi : list_matrix_entries(Ad . colv(append(phi, nv, np)))$
+conj : X . Xi . Xinv$
+Xad : alg(hat(makelist(adxi[i], i, 1, 3)), makelist(adxi[i], i, 4, 6), makelist(adxi[i], i, 7, 9))$
+zero("se23_adjoint_is_conjugation", zmax(ratsimp(conj - Xad)))$
+
+/* 3. group-affine strapdown field, with body inputs w, a and world gravity g */
+w : [w1, w2, w3]$  acc : [a1, a2, a3]$  g : [g1, g2, g3]$
+field(R, v, p) := alg(R . hat(w), list_matrix_entries(R . colv(acc)) + g, v)$
+R2 : quat_rotation(s0, s1, s2, s3)$
+vb : [u1, u2, u3]$  pb : [k1, k2, k3]$
+X2 : se23elem(R2, vb, pb)$
+X12 : X . X2$
+f12 : field(submatrix(4, 5, X12, 4, 5), makelist(X12[i, 4], i, 1, 3), makelist(X12[i, 5], i, 1, 3))$
+fI : field(ident(3), [0, 0, 0], [0, 0, 0])$
+zero("strapdown_field_is_group_affine",
+     zmax(ratsimp(f12 - field(R, v, p) . X2 - X . field(R2, vb, pb) + X . fI . X2)))$
+
+/* 4. right-invariant error dynamics. Estimate (R, v, p) with biases bg, ba; error th, nu, pi, beta. */
+th : [e1, e2, e3]$  nu : [c1, c2, c3]$  ps : [d1, d2, d3]$
+betag : [h1, h2, h3]$  betaa : [j1, j2, j3]$
+bg : [bg1, bg2, bg3]$  ba : [ba1, ba2, ba3]$
+wm : [wm1, wm2, wm3]$  am : [am1, am2, am3]$
+Th : hat(th)$
+first(e) := ratsimp(coeff(expand(e), eps, 1))$
+/* Rdot = R [wm - bg - eps betag]x with R = (I + eps Th) Rhat, and Rhat-dot = Rhat [wm - bg]x */
+Rhatdot : R . hat(wm - bg)$
+Rtrue : (ident(3) + eps*Th) . R$
+thdot_hat : first((Rtrue . hat(wm - bg - eps*betag) - (ident(3) + eps*Th) . Rhatdot) . transpose(R))$
+thdot : vee(thdot_hat)$
+zero("attitude_error_rate_is_skew", zmax(ratsimp(thdot_hat + transpose(thdot_hat))))$
+/* vdot = Rtrue (am - ba - eps betaa) + g, and v = vhat + eps (Th vhat + nu) */
+vhatdot : list_matrix_entries(R . colv(am - ba)) + g$
+vtrue_dot : list_matrix_entries(Rtrue . colv(am - ba - eps*betaa)) + g$
+nudot : first(vtrue_dot - vhatdot - eps*(list_matrix_entries(hat(thdot) . colv(v) + Th . colv(vhatdot))))$
+/* pdot = v, p = phat + eps (Th phat + ps) */
+psdot : first(v + eps*(list_matrix_entries(Th . colv(v)) + nu) - v
+              - eps*(list_matrix_entries(hat(thdot) . colv(p) + Th . colv(v))))$
+err : append(th, nu, ps, betag, betaa)$
+Aderived : jacobian(append(thdot, nudot, psdot, [0, 0, 0, 0, 0, 0]), err)$
+Acode : zeromatrix(15, 15)$
+GX : hat(g)$
+for i : 1 thru 3 do (
+  for j : 1 thru 3 do (
+    Acode[3 + i, j] : GX[i, j],
+    Acode[i, 9 + j] : -R[i, j],
+    Acode[3 + i, 9 + j] : -VR[i, j],
+    Acode[3 + i, 12 + j] : -R[i, j],
+    Acode[6 + i, 9 + j] : -PR[i, j]),
+  Acode[6 + i, 3 + i] : 1)$
+zero("invariant_error_transition_is_the_coded_A", zmax(ratsimp(Aderived - Acode)))$
+pose_block : genmatrix(lambda([i, j], Aderived[i, j]), 9, 9)$
+zero("pose_block_is_trajectory_independent",
+     zmax(ratsimp(jacobian(flatten(args(pose_block)), append([q0, q1, q2, q3], v, p, wm, am, bg, ba)))))$
+
+/* 5. measurement Jacobians */
+ptrue : p + eps*(list_matrix_entries(Th . colv(p)) + ps)$
+vtrue : v + eps*(list_matrix_entries(Th . colv(v)) + nu)$
+rw : [r1, r2, r3]$
+ytrue : list_matrix_entries(transpose(Rtrue) . colv(rw))$
+blockrow(B1, B2, B3) := block([H : zeromatrix(3, 15)],
+  for i : 1 thru 3 do for j : 1 thru 3 do (H[i, j] : B1[i, j], H[i, 3 + j] : B2[i, j], H[i, 6 + j] : B3[i, j]),
+  H)$
+zero("position_jacobian", zmax(ratsimp(jacobian(first(ptrue), err)
+     - blockrow(-hat(p), zeromatrix(3, 3), ident(3)))))$
+zero("velocity_jacobian", zmax(ratsimp(jacobian(first(vtrue), err)
+     - blockrow(-hat(v), ident(3), zeromatrix(3, 3)))))$
+zero("attitude_vector_jacobian", zmax(ratsimp(jacobian(first(ytrue), err)
+     - blockrow(transpose(R) . hat(rw), zeromatrix(3, 3), zeromatrix(3, 3)))))$
+
+/* The fixture: Rhat from the quaternion (1, 2, 2, 4)/5, v = (3, -1, 2), p = (-5/2, 2, 7/2),
+   g = (0, 0, -981/100), dt = 1/4. */
+fix : [q0 = 1, q1 = 2, q2 = 2, q3 = 4, v1 = 3, v2 = -1, v3 = 2, p1 = -5/2, p2 = 2, p3 = 7/2,
+       g1 = 0, g2 = 0, g3 = -981/100]$
+Phi : ident(15) + subst(fix, Aderived)/4$
+for i : 1 thru 15 do for j : 1 thru 15 do
+  if Phi[i, j] # ident(15)[i, j] then
+    printf(true, "Phi[~d][~d] = ~a~%", i - 1, j - 1, bfloat(Phi[i, j]))$
+printf(true, "Rhat = ~a~%", subst(fix, R))$

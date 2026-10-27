@@ -1,0 +1,115 @@
+/* Convex hulls and the Delaunay triangulation -- spacelab-geometry/src/{hull,delaunay}.rs -- by
+ * their defining properties, decided in exact arithmetic on small point sets.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. Euler's formula fixes the counts: a closed triangulated surface of genus 0 has V - E + F = 2
+ *      and 2E = 3F, so F = 2V - 4 and E = 3V - 6 (G4); a triangulation of n points in the plane
+ *      with h of them on the hull boundary has T = 2n - 2 - h triangles and E = 3n - 3 - h edges,
+ *      from V - E + (T + 1) = 2 and 3T + h = 2E (G4);
+ *   2. the Delaunay triangulation of 14 integer points in general position (no three collinear,
+ *      no four cocircular -- checked here, so the triangulation is unique) is the set of
+ *      counter-clockwise triangles whose circumcircle holds no other point strictly inside (G2):
+ *      found by testing every triple against every point with the exact lifted determinant;
+ *   3. the convex hull of 14 integer points in space, no four coplanar, is the set of oriented
+ *      triangles with every other point strictly behind them (G2), and it satisfies (1);
+ *   4. the planar hull of the same 2-D points is the cycle of edges with every other point strictly
+ *      to their left, listed counter-clockwise from the lexicographically smallest point (G2).
+ * The tables printed at the end are what the Rust tests
+ * `the_triangulation_is_the_brute_force_delaunay_set` (delaunay.rs),
+ * `the_hull_is_the_brute_force_set_of_supporting_planes` and
+ * `the_planar_hull_is_the_brute_force_supporting_cycle` (hull.rs) compare against;
+ * derivations/hull_delaunay.gp rebuilds the point sets and the tables independently.
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/hull_delaunay.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+holds(name, claim) := zero(name, if is(claim) then 0 else 1)$
+
+/* ---- 1. Euler ------------------------------------------------------------------------------- */
+
+s1 : solve([V - E + F = 2, 2*E = 3*F], [E, F])[1]$
+zero("closed_surface_faces_are_2v_minus_4", ratsimp(subst(s1, F) - (2*V - 4)))$
+zero("closed_surface_edges_are_3v_minus_6", ratsimp(subst(s1, E) - (3*V - 6)))$
+s2 : solve([n - E + (T + 1) = 2, 3*T + h = 2*E], [E, T])[1]$
+zero("planar_triangles_are_2n_minus_2_minus_h", ratsimp(subst(s2, T) - (2*n - 2 - h)))$
+zero("planar_edges_are_3n_minus_3_minus_h", ratsimp(subst(s2, E) - (3*n - 3 - h)))$
+
+/* ---- point sets ------------------------------------------------------------------------------ */
+
+lcg : 987654321$
+rnext() := (lcg : mod(lcg * 6364136223846793005 + 1442695040888963407, 2^61), lcg)$
+/* An integer in [lo, lo + width), from the top bits of the stream. */
+rint(lo, width) := lo + floor(rnext() * width / 2^61)$
+
+npts : 14$
+P2 : makelist([rint(0, 1024), rint(0, 1024)], i, 1, npts)$
+P3 : makelist([rint(-1024, 2048), rint(-1024, 2048), rint(-1024, 2048)], i, 1, npts)$
+
+o2(a, b, c) := (a[1] - c[1])*(b[2] - c[2]) - (a[2] - c[2])*(b[1] - c[1])$
+lift(v) := v[1]^2 + v[2]^2$
+ic(a, b, c, d) := determinant(matrix(append(a - d, [lift(a - d)]), append(b - d, [lift(b - d)]),
+                                     append(c - d, [lift(c - d)])))$
+cross3(u, v) := [u[2]*v[3] - u[3]*v[2], u[3]*v[1] - u[1]*v[3], u[1]*v[2] - u[2]*v[1]]$
+o3(a, b, c, d) := (a - d) . cross3(b - d, c - d)$
+
+/* Index triples i < j < k (and quadruples), 0-based in the tables to match Rust. */
+triples : create_list([i, j, k], i, 1, npts, j, i + 1, npts, k, j + 1, npts)$
+quads : create_list([i, j, k, l], i, 1, npts, j, i + 1, npts, k, j + 1, npts, l, k + 1, npts)$
+
+holds("planar_points_have_no_three_collinear",
+  every(lambda([t], o2(P2[t[1]], P2[t[2]], P2[t[3]]) # 0), triples))$
+holds("planar_points_have_no_four_cocircular",
+  every(lambda([q], ic(P2[q[1]], P2[q[2]], P2[q[3]], P2[q[4]]) # 0), quads))$
+holds("spatial_points_have_no_four_coplanar",
+  every(lambda([q], o3(P3[q[1]], P3[q[2]], P3[q[3]], P3[q[4]]) # 0), quads))$
+
+/* ---- 2. Delaunay ------------------------------------------------------------------------------ */
+
+others(t) := sublist(makelist(i, i, 1, npts), lambda([i], not member(i, t)))$
+ccw(t) := if o2(P2[t[1]], P2[t[2]], P2[t[3]]) > 0 then t else [t[1], t[3], t[2]]$
+delaunay : sublist(map(ccw, triples),
+  lambda([t], every(lambda([p], ic(P2[t[1]], P2[t[2]], P2[t[3]], P2[p]) < 0), others(t))))$
+/* Each triangle with its smallest index first, keeping its counter-clockwise order. */
+rotmin(t) := block([m : lmin(t)], if t[1] = m then t else if t[2] = m then [t[2], t[3], t[1]]
+                                  else [t[3], t[1], t[2]])$
+delaunay : sort(map(rotmin, delaunay))$
+
+/* ---- 4. planar hull ------------------------------------------------------------------------- */
+
+pairs : create_list([i, j], i, 1, npts, j, 1, npts)$
+hull_edges : sublist(pairs, lambda([e], e[1] # e[2] and
+  every(lambda([p], o2(P2[e[1]], P2[e[2]], P2[p]) > 0), others(e))))$
+lexless(a, b) := a[1] < b[1] or (a[1] = b[1] and a[2] < b[2])$
+start : 1$
+for i : 2 thru npts do if lexless(P2[i], P2[start]) then start : i$
+cycle : [start]$
+block([cur : start, nxt],
+  do (nxt : first(sublist(hull_edges, lambda([e], e[1] = cur)))[2],
+      if nxt = start then return(done),
+      cycle : endcons(nxt, cycle), cur : nxt))$
+hv : length(cycle)$
+zero("delaunay_triangle_count_is_2n_minus_2_minus_h", length(delaunay) - (2*npts - 2 - hv))$
+holds("planar_hull_is_one_cycle_through_every_hull_edge", length(hull_edges) = hv)$
+
+/* ---- 3. spatial hull ------------------------------------------------------------------------ */
+
+/* The orientation with every other point behind: orient3d(a, b, c, p) > 0 for each p. */
+behind(t) := every(lambda([p], o3(P3[t[1]], P3[t[2]], P3[t[3]], P3[p]) > 0), others(t))$
+infront(t) := every(lambda([p], o3(P3[t[1]], P3[t[2]], P3[t[3]], P3[p]) < 0), others(t))$
+hull : append(sublist(triples, behind), map(lambda([t], [t[1], t[3], t[2]]), sublist(triples, infront)))$
+hull : sort(map(rotmin, hull))$
+hull_vertices : sort(unique(flatten(hull)))$
+zero("hull_faces_are_2v_minus_4", length(hull) - (2*length(hull_vertices) - 4))$
+
+/* ---- tables (0-based) ------------------------------------------------------------------------ */
+
+z(l) := map(lambda([i], i - 1), l)$
+printf(true, "planar points ~a~%", P2)$
+printf(true, "spatial points ~a~%", P3)$
+printf(true, "delaunay ~a ~a~%", length(delaunay), map(z, delaunay))$
+printf(true, "planar hull ~a~%", z(cycle))$
+printf(true, "hull ~a ~a~%", length(hull), map(z, hull))$
+printf(true, "hull vertices ~a~%", z(hull_vertices))$

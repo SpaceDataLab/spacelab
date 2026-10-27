@@ -17,6 +17,12 @@
 //! advances every component through the same square-root unscented time update; `collapse` moment-
 //! matches the whole mixture back to a single mean and covariance by the law of total covariance.
 //! Adaptive splitting is deliberately out of scope — hold, propagate, collapse is the core.
+//!
+//! Gate: `derivations/gaussian_mixture_moments.mac` integrates each component against the standard
+//! normal density, shows the collapse is the mixture density's mean and covariance (so merging
+//! components preserves the first two moments) and that a linear flow commutes with it; the module
+//! test `the_collapse_has_the_moments_of_the_mixture_density` (G4) checks the shipped collapse
+//! against its exact fixture.
 
 // Matrix code indexes several arrays by one i/j/k, and the mixture symbols (S, P, μ, w) follow the
 // domain's notation.
@@ -290,6 +296,45 @@ mod tests {
                 assert!(
                     (cov_after[i][j] - cov_ref[i][j]).abs() < 1e-10,
                     "cov[{i}][{j}]"
+                );
+            }
+        }
+    }
+
+    /// The collapse is the mean and covariance of the mixture density (G4).
+    ///
+    /// Reference: `derivations/gaussian_mixture_moments.mac` integrates `x` and `x xᵀ` against each
+    /// component's density, so the moments below are the density's, not a second copy of the
+    /// collapse formula; for this fixture they are the exact rationals `(2/5, 1/5)` and
+    /// `[[43/50, −529/500], [−529/500, 127/50]]`. A collapse that dropped the spread of the means
+    /// would return `[[0.32, 0.022], [0.022, 0.38]]`.
+    #[test]
+    fn the_collapse_has_the_moments_of_the_mixture_density() {
+        let mix = GaussianMixture::<2, 2, 5>::new(
+            [
+                component(0.6, [1.0, -1.0], &[[0.4, 0.05], [0.05, 0.3]]),
+                component(0.4, [-0.5, 2.0], &[[0.2, -0.02], [-0.02, 0.5]]),
+            ],
+            UnscentedParams::gaussian(),
+        );
+        let (mean, cov) = mix.collapse();
+        let mean_want = [2.0 / 5.0, 1.0 / 5.0];
+        let cov_want = [
+            [43.0 / 50.0, -529.0 / 500.0],
+            [-529.0 / 500.0, 127.0 / 50.0],
+        ];
+        for i in 0..2 {
+            assert!(
+                (mean[i] - mean_want[i]).abs() < 1e-15,
+                "mean[{i}] = {:.17e}",
+                mean[i]
+            );
+            for j in 0..2 {
+                assert!(
+                    (cov[i][j] - cov_want[i][j]).abs() < 1e-15,
+                    "cov[{i}][{j}] = {:.17e}, derivation says {:.17e}",
+                    cov[i][j],
+                    cov_want[i][j]
                 );
             }
         }

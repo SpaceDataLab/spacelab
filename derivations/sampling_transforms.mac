@@ -1,0 +1,97 @@
+/* The sampling primitives -- spacelab-estimation/src/sampling.rs -- from their definitions.
+ *
+ * The generator is xoshiro256++ seeded by SplitMix64 (Blackman & Vigna 2018); uniforms are
+ * (bits >> 11) 2^-53 on [0, 1) and ((bits >> 11) + 1) 2^-53 on (0, 1]; normals come in Box-Muller
+ * pairs x = r cos(2 pi u2), y = r sin(2 pi u2), r = sqrt(-2 ln u1), u1 in (0, 1]; a correlated draw is
+ * A xi with xi ~ N(0, I).
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. Box-Muller is exact: the map (u1, u2) -> (x, y) has |det d(x, y)/d(u1, u2)| = 2 pi/u1, and
+ *      u1 = exp(-(x^2 + y^2)/2) on its image, so the density of (x, y) is
+ *      exp(-x^2/2)/sqrt(2 pi) . exp(-y^2/2)/sqrt(2 pi) -- two independent standard normals (G2);
+ *      and the map inverts by u1 = exp(-(x^2 + y^2)/2), u2 = atan2(y, x)/(2 pi) mod 1;
+ *   2. E[(A xi)(A xi)^T] = A A^T by integration against the standard normal density, and any other
+ *      square root A Q, Q orthogonal, gives the same covariance (G1);
+ *   3. the two uniform maps send 0 and 2^53 - 1 to 0, 1 - 2^-53 and 2^-53, 1: the open interval
+ *      excludes 0, so ln u1 is finite (G3);
+ *   4. SplitMix64 and xoshiro256++ evaluated from their published recurrences reproduce the stream
+ *      the module test pins, for seeds 0, 1 and 42, four draws each (G2).
+ * derivations/sampling_transforms.gp evaluates the same recurrences in PARI/GP.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/sampling_transforms.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+zmax(M) := lmax(map(abs, flatten(args(M))))$
+colv(u) := transpose(matrix(u))$
+
+/* 1. */
+assume(u1 > 0, u1 < 1)$
+rr : sqrt(-2*log(u1))$
+bx : rr*cos(2*%pi*u2)$  by : rr*sin(2*%pi*u2)$
+J : determinant(jacobian([bx, by], [u1, u2]))$
+zero("box_muller_jacobian", ratsimp(trigsimp(J + 2*%pi/u1)))$
+zero("box_muller_radius_inverts", radcan(exp(-trigsimp(bx^2 + by^2)/2) - u1))$
+/* density of (x, y) = 1/|J| with u1 = exp(-(x^2 + y^2)/2) */
+zero("box_muller_density_is_two_standard_normals",
+     ratsimp(subst(u1 = exp(-(x^2 + y^2)/2), u1/(2*%pi))
+             - exp(-x^2/2)/sqrt(2*%pi)*exp(-y^2/2)/sqrt(2*%pi)))$
+/* the angle, in the first quadrant; atan2 covers the others up to the mod-1 shift */
+assume(u2 > 0, u2 < 1/4)$
+zero("box_muller_angle_inverts", ratsimp(atan2(by, bx)/(2*%pi) - u2))$
+forget(u2 > 0, u2 < 1/4)$
+
+/* 2. */
+phi2 : exp(-(z1^2 + z2^2)/2)/(2*%pi)$
+expect(f) := integrate(integrate(f*phi2, z1, minf, inf), z2, minf, inf)$
+A : matrix([a11, 0], [a21, a22])$
+d : list_matrix_entries(A . colv([z1, z2]))$
+C : genmatrix(lambda([i, j], expect(expand(d[i]*d[j]))), 2, 2)$
+zero("correlated_draw_covariance", zmax(ratsimp(C - A . transpose(A))))$
+Q : matrix([(1 - t^2)/(1 + t^2), -2*t/(1 + t^2)], [2*t/(1 + t^2), (1 - t^2)/(1 + t^2)])$
+zero("any_square_root_gives_the_same_covariance", zmax(ratsimp((A . Q) . transpose(A . Q) - A . transpose(A))))$
+
+/* 3. */
+unit(bits) := bits*2^-53$
+open_unit(bits) := (bits + 1)*2^-53$
+zero("unit_at_zero_bits", unit(0))$
+zero("unit_below_one", unit(2^53 - 1) - (1 - 2^-53))$
+zero("open_unit_at_zero_bits", open_unit(0) - 2^-53)$
+zero("open_unit_at_all_bits", open_unit(2^53 - 1) - 1)$
+
+/* 4. 64-bit words as integers in [0, 2^64). */
+W : 2^64$
+xor(a, b) := ?logxor(a, b)$
+shr(a, k) := floor(a/2^k)$
+shl(a, k) := mod(a*2^k, W)$
+rotl(a, k) := mod(shl(a, k) + shr(a, 64 - k), W)$
+splitmix_state(seed) := block([z : seed, s : [], x],
+  for i : 1 thru 4 do (
+    z : mod(z + 11400714819323198485, W),
+    x : z,
+    x : mod(xor(x, shr(x, 30))*13787848793156543929, W),
+    x : mod(xor(x, shr(x, 27))*10723151780598845931, W),
+    s : endcons(xor(x, shr(x, 31)), s)),
+  s)$
+xoshiro_stream(seed, n) := block([s : splitmix_state(seed), out : [], result, t],
+  for i : 1 thru n do (
+    result : mod(rotl(mod(s[1] + s[4], W), 23) + s[1], W),
+    t : shl(s[2], 17),
+    s[3] : xor(s[3], s[1]),
+    s[4] : xor(s[4], s[2]),
+    s[2] : xor(s[2], s[3]),
+    s[1] : xor(s[1], s[4]),
+    s[3] : xor(s[3], t),
+    s[4] : rotl(s[4], 45),
+    out : endcons(result, out)),
+  out)$
+/* the stream `the_generator_reproduces_the_published_xoshiro256pp_stream` pins, in hexadecimal */
+pinned : [[0, ["53175d61490b23df", "61da6f3dc380d507", "5c0fdf91ec9a7bfc", "02eebf8c3bbe5e1a"]],
+          [1, ["cfc5d07f6f03c29b", "bf424132963fe08d", "19a37d5757aaf520", "bf08119f05cd56d6"]],
+          [42, ["d0764d4f4476689f", "519e4174576f3791", "fbe07cfb0c24ed8c", "b37d9f600cd835b8"]]]$
+for c in pinned do block([got : xoshiro_stream(c[1], 4), want],
+  want : map(lambda([h], block([v], ibase : 16, v : parse_string(sconcat("0", h)), ibase : 10, v)), c[2]),
+  zero(sconcat("xoshiro256pp_stream_seed_", c[1]), lmax(map(abs, got - want))))$

@@ -27,6 +27,12 @@
 //! (`κ = 0`, or `κ = 3 − N` to match the fourth moment of a Gaussian along each axis). For an *affine*
 //! map the transform is exact for **any** valid choice: the sigma cloud reproduces `P` by construction,
 //! so `Σ Wᵢᶜ (A χᵢ − A x̄)(·)ᵀ = A P Aᵀ` identically — the property the linear-Gaussian oracle checks.
+//!
+//! Gate: `derivations/unscented_transform.mac` shows, for every `α, β, κ`, that the sigma points
+//! reproduce the mean and `S Sᵀ` exactly, that the mean of any quadratic is exact, and that a scalar
+//! quadratic's variance is `(b + 2aμ)²σ² + (α²κ + β)a²σ⁴` — exact precisely when `α²κ + β = 2`;
+//! `derivations/linear_filters.gp` recomputes the fixture. The module test
+//! `the_transform_is_exact_for_a_quadratic_where_its_algebra_says` (G3) holds the transform to it.
 
 // Matrix code indexes several arrays by one i/j/k, and the sigma-point symbols (S, P, χ, γ) are one
 // letter by universal convention; the scaled-weight locals (w0m, w0c, wi) read as the paper's symbols.
@@ -533,6 +539,42 @@ mod tests {
             }
         }
         assert!(worst < 1e-2, "worst covariance departure {worst:e}");
+    }
+
+    /// (G3) On a quadratic the transform is exact where `derivations/unscented_transform.mac` says
+    /// it is and off by exactly what it says otherwise. For `f = a x² + b x` of `x ~ N(μ, σ²)` the
+    /// mean is `aμ² + bμ + aσ²` for every parameter choice and the variance is
+    /// `(b + 2aμ)²σ² + (α²κ + β) a²σ⁴`, the Gaussian's own `2a²σ⁴` precisely when `α²κ + β = 2`:
+    /// at `(1, 0, 2)` that is 1.28125, at `(½, 2, 2)` it is 1.3515625. A two-state quadratic
+    /// `xᵀAx + bᵀx + d` has the mean `f(x̄) + tr(A P)`, here 1. Every value is dyadic; the bound is
+    /// 8 ulps of 2.
+    #[test]
+    fn the_transform_is_exact_for_a_quadratic_where_its_algebra_says() {
+        let tol = 8.0 * f64::EPSILON * 2.0;
+        let scalar = |x: &[f64; 1]| [1.5 * x[0] * x[0] - 0.25 * x[0]];
+        for ((alpha, beta, kappa), variance) in
+            [((1.0, 0.0, 2.0), 1.281_25), ((0.5, 2.0, 2.0), 1.351_562_5)]
+        {
+            let params = UnscentedParams::new(alpha, beta, kappa);
+            let (mean, cov) = unscented_transform::<1, 1, 3>(&params, &[0.75], &[[0.5]], scalar);
+            assert!(
+                (mean[0] - 1.031_25).abs() <= tol,
+                "α = {alpha}: mean {}",
+                mean[0]
+            );
+            assert!(
+                (cov[0][0] - variance).abs() <= tol,
+                "α = {alpha}: variance {}",
+                cov[0][0]
+            );
+        }
+
+        let params = UnscentedParams::new(0.5, 2.0, 1.0);
+        let s = [[0.5, 0.0], [0.25, 1.0]];
+        let (mean, _) = unscented_transform::<2, 1, 5>(&params, &[1.0, -0.5], &s, |x| {
+            [x[0] * x[0] + x[0] * x[1] - 2.0 * x[1] * x[1] + 0.25 * x[0] + x[1] + 3.0]
+        });
+        assert!((mean[0] - 1.0).abs() <= tol, "two-state mean {}", mean[0]);
     }
 
     /// The Cholesky helper round-trips: `L Lᵀ` reconstructs the input, and an indefinite matrix is

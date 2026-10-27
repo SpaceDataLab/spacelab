@@ -19,6 +19,14 @@
 //! geocentric radius. The coefficients are the machine-generated epoch-2025.0 values plus the
 //! 2025-2030 secular variation (`crate::igrf14_coeffs`); `gⁿₘ(t) = gⁿₘ(2025) + (t − 2025)·ġⁿₘ`, so
 //! the model is valid roughly 2025-2030. Earlier epochs would need the full DGRF time series.
+//!
+//! Gate: `derivations/igrf_synthesis.mac` proves the recursion is the Schmidt quasi-normalised
+//! definition and its `θ`-derivative for every degree and order to 13, that each term solves
+//! Laplace's equation, that the three components are `−∇V` and that the ECEF rotation is the
+//! spherical triad; it evaluates `−∇V` at 40 digits from the IAGA file's exact decimals, re-derived
+//! from PARI's Legendre polynomials by `derivations/igrf_synthesis.gp`. The module test
+//! `the_field_is_minus_the_gradient_of_the_schmidt_potential` (G2) ties the shipped synthesis to it;
+//! `field_matches_ppigrf_geocentric_oracle` is a comparator.
 
 // The geomagnetism symbols (n, m, g, h, θ, φ, P, S, B_r/θ/φ) are one/two letters by universal
 // convention; IGRF/IAGA/Schmidt/DGRF are proper nouns.
@@ -292,6 +300,69 @@ mod tests {
                 + (b2030[2] - b2025[2]).powi(2),
         );
         assert!(d > 1e-9, "secular variation should move B: {d} T");
+    }
+
+    /// (G2) The field is minus the gradient of the Schmidt potential. `derivations/igrf_synthesis.mac`
+    /// proves that the Wertz recursion times its accumulated factors is the Schmidt quasi-normalised
+    /// `Pⁿₘ` and its `θ`-derivative for every `n, m ≤ 13`, and that the three coded components are
+    /// `−∂V/∂r`, `−(1/r)∂V/∂θ` and `−(1/(r sin θ))∂V/∂φ`; it then evaluates `−∇V` from the definition at
+    /// 40 digits, with the coefficients read as exact decimals from the IAGA file, at these three
+    /// points — one at the coefficient epoch, one at the end of the secular-variation window, one
+    /// between, in both hemispheres. `derivations/igrf_synthesis.gp` re-evaluates them from PARI's own
+    /// Legendre polynomials and agrees to 6e-36 nT. The inputs are doubles (radians, kilometres), so
+    /// the reference is the field at exactly what the test passes.
+    ///
+    /// The bound is the sum's rounding: about a hundred terms of up to 3e4 nT, each a few roundings
+    /// deep, against an ulp of 3.6e-12 nT at that size; measured 1.5e-11 nT, four ulps, at worst.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn the_field_is_minus_the_gradient_of_the_schmidt_potential() {
+        let cases: [(f64, f64, f64, f64, [f64; 3]); 3] = [
+            (
+                1.0,
+                0.5,
+                6771.25,
+                2025.0,
+                [
+                    -2.745691301632609806507634325022553533148e4,
+                    -2.437751823657892777948550313259657607389e4,
+                    1.810361034812790661533836797608695878954e3,
+                ],
+            ),
+            (
+                1.75,
+                3.5,
+                6571.5,
+                2030.0,
+                [
+                    1.085958398417876417948311373642412659937e4,
+                    -2.889611203608967979272386856787747651347e4,
+                    5.757108496833010019237629378447388139413e3,
+                ],
+            ),
+            (
+                2.625,
+                5.25,
+                7000.0,
+                2027.5,
+                [
+                    2.221308232454103436252749632446625474901e4,
+                    -1.386195549581576320968095115259524339195e4,
+                    1.912815784310201997253132608934219810885e3,
+                ],
+            ),
+        ];
+        for (colatitude, longitude, radius, year, want) in cases {
+            let got = field_geocentric(colatitude, longitude, radius, year);
+            for k in 0..3 {
+                assert!(
+                    (got[k] - want[k]).abs() < 1e-10,
+                    "colatitude {colatitude}, component {k}: {} against {}",
+                    got[k],
+                    want[k]
+                );
+            }
+        }
     }
 
     /// The IGRF-14 Gauss coefficients, sealed.

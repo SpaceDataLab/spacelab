@@ -1,4 +1,11 @@
 //! Rotation of the Earth about its axis.
+//!
+//! Gate: `derivations/gmst82.mac` shows the coded GMST82 split differs from the printed polynomial
+//! by whole days only, derives the sidereal rate, certifies the four coefficients' bit patterns as
+//! the nearest doubles in exact rationals, and evaluates GMST in exact rationals at five epochs that
+//! `derivations/gmst82.gp` re-derives from the printed polynomial. The module tests
+//! `gmst_is_the_exact_rational_polynomial_reduced_to_a_turn` (G2) and
+//! `coefficients_are_the_certified_nearest_f64` (G3) tie the code to it.
 
 use spacelab_core::{
     Angle,
@@ -121,6 +128,9 @@ mod tests {
     /// The coefficients are the nearest `f64` to the published decimals — the exact
     /// bit patterns `derivations/gmst82.py` emits (50-digit mpmath, < 0.5 ulp each).
     /// A mistyped digit changes a bit pattern and fails here, not silently in orbit.
+    ///
+    /// (G3) `derivations/gmst82.mac` decodes the four patterns and certifies each within half an
+    /// ulp of its published decimal in exact rationals; `derivations/gmst82.gp` repeats it.
     #[test]
     fn coefficients_are_the_certified_nearest_f64() {
         assert_eq!(C0.to_bits(), 0x40F0_6EE8_C649_906D);
@@ -217,5 +227,52 @@ mod tests {
         assert!(just_under < Angle::TAU && just_under > Angle::TAU - 1e-9);
         assert!(reduce_seconds_to_radians(SECONDS_PER_DAY).abs() < 1e-12);
         assert!(reduce_seconds_to_radians(-1.0) > Angle::TAU - 1e-3);
+    }
+
+    /// (G2) GMST is the defining polynomial, reduced to a turn. `derivations/gmst82.mac` shows the
+    /// coded split differs from the printed Eq. 3-47 by whole days only, and evaluates the coded form
+    /// in exact rationals at these UT1 epochs (whole nanoseconds from J2000, so the epoch is exactly
+    /// what the test passes); `derivations/gmst82.gp` evaluates the printed polynomial itself, whole-day
+    /// term and all, and agrees to 5e-40 rad. The epochs span fifty centuries before J2000 to a
+    /// century after it, through Vallado's Example 3-5 epoch, 1992 Aug 20 12:14 UT1.
+    ///
+    /// The bound is the conditioning the function's own documentation derives, a few `1.4e-13·|T|` rad
+    /// from the linear term plus an ulp of the turn: measured 0 at J2000, 3.1e-15 and 4.9e-15 rad
+    /// within a quarter century, 2.1e-13 rad at one century and 3.9e-12 rad at fifty — 1.5 and 0.56
+    /// of `1.4e-13·|T|`, so four of them is the bound.
+    #[test]
+    #[allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    fn gmst_is_the_exact_rational_polynomial_reduced_to_a_turn() {
+        let cases: [(i128, f64, f64); 5] = [
+            (0, 0.0, 4.894961212823058751375704431175952857581),
+            (
+                -232_415_160_000_000_000,
+                -7.364791999391588713970644155449083580501e-2,
+                2.663002216713348436839310469824036728281,
+            ),
+            (
+                777_664_800_000_000_000,
+                2.464271047227926078028747433264887063655e-1,
+                1.082560959309939194850505924209108106535,
+            ),
+            (
+                3_155_760_012_000_000_000,
+                1.000000003802570537683474028443227621872,
+                4.909283007871094720178042192396826163741,
+            ),
+            (
+                -157_788_025_920_000_000_000,
+                -5.000000821355236139630390143737166324435e1,
+                2.349829389055239016345653714577592776064,
+            ),
+        ];
+        for (ns, centuries, want) in cases {
+            let got = gmst82(Epoch::<Ut1>::from_ns_since_j2000(ns)).radians();
+            let bound = 4.0 * 1.4e-13 * centuries.abs() + 1e-15;
+            assert!(
+                (got - want).abs() < bound,
+                "T = {centuries}: {got} against {want}"
+            );
+        }
     }
 }

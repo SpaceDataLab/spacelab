@@ -19,6 +19,12 @@
 //! Attitude-only (no gyro bias) to keep the group-affine structure exact and the demonstration
 //! clean; the bias-augmented "imperfect IEKF" and an `SE₂(3)` extended-pose navigation filter
 //! (attitude + velocity + position) are the documented extensions.
+//!
+//! Gate: `derivations/iekf_attitude.mac` shows the kinematics are group-affine, that a shared body
+//! increment leaves `R R̂ᵀ` unchanged at every order (so `Φ = I` is exact), that the reset is the
+//! error definition, and that the reference-frame innovation is exactly `Exp(−ξ) r − r` with
+//! first-order term `[r]× ξ`; the module test `one_update_is_the_invariant_kalman_step` (G2) checks
+//! the shipped update against the 40-digit step it prints.
 
 // Diagonal covariance updates read clearest with an explicit index.
 #![allow(clippy::needless_range_loop)]
@@ -287,7 +293,7 @@ mod tests {
         }
     }
 
-    /// The measurement Jacobian `H = −[r]×` depends only on the reference direction, not on the
+    /// The measurement Jacobian `H = [r]×` depends only on the reference direction, not on the
     /// attitude estimate — the source of the invariant filter's consistency. Two wildly different
     /// estimates yield the identical `H`.
     #[test]
@@ -401,5 +407,64 @@ mod tests {
             (admitted - expected).abs() < 1e-9 * expected,
             "admitted {admitted:.17e}, expected {expected:.17e}"
         );
+    }
+
+    /// One update from a known prior is the invariant Kalman step (G2).
+    ///
+    /// Reference: `derivations/iekf_attitude.mac` evaluates the step from its definition at 40 digits —
+    /// innovation `R̂ b − r`, `H = [r]×`, `K = P Hᵀ (H P Hᵀ + σ² I)⁻¹`, reset `exp(K ν) ⊗ q̂`
+    /// renormalised, Joseph covariance — for `q̂ = exp(0.2, 0.7, −0.4)`, `r = (2, −3, 6)/7`,
+    /// `b = (3/5, 0, 4/5)`, `σ = 1/10`. A flipped `H` turns the correction round, a reset applied on
+    /// the body side moves it into the other frame, and an innovation taken in the body frame
+    /// changes it outright; each moves the posterior far outside the tolerance.
+    #[test]
+    fn one_update_is_the_invariant_kalman_step() {
+        const Q: [f64; 4] = [
+            0.9769416684096967,
+            0.08122812085998998,
+            -0.0191327658428674,
+            -0.19652202466297533,
+        ];
+        const P: [[f64; 3]; 3] = [
+            [
+                0.011961336106692769,
+                -0.006990089318487704,
+                0.013451608956319588,
+            ],
+            [
+                -0.006990089318487704,
+                0.021886700110118684,
+                -0.02439740609323382,
+            ],
+            [
+                0.013451608956319588,
+                -0.02439740609323382,
+                0.05332313715893797,
+            ],
+        ];
+        let prior = [[0.04, 0.01, 0.0], [0.01, 0.09, -0.02], [0.0, -0.02, 0.0625]];
+        let mut ekf = InvariantEkf::new(
+            UnitQuaternion::from_rotation_vector([0.2, 0.7, -0.4]),
+            prior,
+        );
+        assert!(ekf.update([0.6, 0.0, 0.8], [2.0 / 7.0, -3.0 / 7.0, 6.0 / 7.0], 0.1));
+        let q = ekf.attitude();
+        for (got, want) in [q.w, q.x, q.y, q.z].into_iter().zip(Q) {
+            assert!(
+                (got - want).abs() < 2e-15,
+                "q: {got:.17e}, derivation says {want:.17e}"
+            );
+        }
+        let cov = ekf.covariance();
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!(
+                    (cov[i][j] - P[i][j]).abs() < 2e-15,
+                    "P[{i}][{j}] = {:.17e}, derivation says {:.17e}",
+                    cov[i][j],
+                    P[i][j]
+                );
+            }
+        }
     }
 }

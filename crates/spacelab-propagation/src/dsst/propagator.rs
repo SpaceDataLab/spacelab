@@ -41,6 +41,34 @@ pub struct DsstMeanPropagator<'a, E, G> {
     pub mu: f64,
 }
 
+/// Passes [`DsstMeanPropagator::mean_from_osculating`] takes before it reports no convergence.
+pub const MEAN_FROM_OSCULATING_PASSES: usize = 50;
+
+/// The last correction at which [`DsstMeanPropagator::mean_from_osculating`] stops: relative in
+/// `a`, absolute in `k, h, q, p, λ`.
+pub const MEAN_FROM_OSCULATING_TOLERANCE: f64 = 1e-14;
+
+/// [`DsstMeanPropagator::mean_from_osculating`] did not converge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MeanFromOsculatingError {
+    /// The last pass's largest correction (relative in `a`, absolute elsewhere); NaN when a
+    /// correction was not finite.
+    pub step: f64,
+}
+
+impl core::fmt::Display for MeanFromOsculatingError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "the mean state did not converge: after {MEAN_FROM_OSCULATING_PASSES} passes the last \
+             correction was {:e}, above {MEAN_FROM_OSCULATING_TOLERANCE:e}",
+            self.step
+        )
+    }
+}
+
+impl core::error::Error for MeanFromOsculatingError {}
+
 impl<E, G> DsstMeanPropagator<'_, E, G>
 where
     E: Fn(f64) -> ([f64; 3], [f64; 3]),
@@ -72,9 +100,61 @@ where
     /// short-period is not included (drag is not a mean-rate contribution of this propagator).
     #[must_use]
     pub fn propagate_osculating(&self, initial: [f64; 6], dt: f64) -> [f64; 6] {
-        let mean = self.propagate(initial, dt);
-        let (sun_pos, moon_pos) = (self.ephemeris)(dt);
-        let gmst = (self.gmst)(dt);
+        self.osculating_at(self.propagate(initial, dt), dt)
+    }
+
+    /// The MEAN state whose osculating image at `t` seconds since the epoch is `osculating`: the
+    /// fixed point of `mean ← osculating − η(mean)`, `η` the summed short-period correction of
+    /// [`Self::osculating_at`]. Each pass shrinks the error by the size of `η`'s derivative, `O(J₂)`,
+    /// so a handful of passes reach the tolerance.
+    ///
+    /// # Errors
+    ///
+    /// [`MeanFromOsculatingError`] when [`MEAN_FROM_OSCULATING_PASSES`] passes leave a last
+    /// correction above [`MEAN_FROM_OSCULATING_TOLERANCE`], or a non-finite one: a state so close
+    /// to the central body, or so eccentric, that the short-period map is no contraction there.
+    ///
+    /// # Panics
+    ///
+    /// As [`Self::osculating_at`] does, on a state with no Kepler solution (non-finite, or `e`
+    /// at 1).
+    pub fn mean_from_osculating(
+        &self,
+        osculating: [f64; 6],
+        t: f64,
+    ) -> Result<[f64; 6], MeanFromOsculatingError> {
+        let mut mean = osculating;
+        let mut step = f64::INFINITY;
+        for _ in 0..MEAN_FROM_OSCULATING_PASSES {
+            let image = self.osculating_at(mean, t);
+            step = 0.0;
+            for i in 0..6 {
+                let delta = osculating[i] - image[i];
+                mean[i] += delta;
+                let change = libm::fabs(delta)
+                    / if i == 0 {
+                        libm::fabs(osculating[0])
+                    } else {
+                        1.0
+                    };
+                // A NaN change becomes the step and fails the test below.
+                if change > step || change.is_nan() {
+                    step = change;
+                }
+            }
+            if step <= MEAN_FROM_OSCULATING_TOLERANCE {
+                return Ok(mean);
+            }
+        }
+        Err(MeanFromOsculatingError { step })
+    }
+
+    /// The OSCULATING equinoctial state of the MEAN state `mean` at `t` seconds since the epoch:
+    /// `mean` plus the sum of each contribution's short-period correction.
+    #[must_use]
+    pub fn osculating_at(&self, mean: [f64; 6], t: f64) -> [f64; 6] {
+        let (sun_pos, moon_pos) = (self.ephemeris)(t);
+        let gmst = (self.gmst)(t);
         let contributions = [
             self.zonal.osculating(mean),
             self.sun.osculating(mean, sun_pos),
@@ -425,5 +505,136 @@ mod tests {
         let da_rel = (got[0] - a0).abs() / a0;
         assert!(da_rel < 1e-2, "mean a drifted {da_rel:.3e} over 24 h");
         std::println!("GEO all-forces 24 h: a drift {da_rel:.3e} rel, state {got:?}");
+    }
+
+    /// The five forces at full strength, a 2×2 tesseral term included.
+    fn all_forces() -> Forces {
+        let mut cnm = vec![vec![0.0; 3]; 3];
+        let mut snm = vec![vec![0.0; 3]; 3];
+        cnm[2][2] = 1.5e-6;
+        snm[2][2] = -9.0e-7;
+        (
+            zonal(),
+            DsstThirdBody::new(MU, 1.32712440018e20),
+            DsstThirdBody::new(MU, 4.902800066e12),
+            DsstSolarRadiationPressure::new(1.5, 0.02, MU, AE),
+            DsstTesseral::new(MU, AE, OMEGA_EARTH, cnm, snm),
+        )
+    }
+
+    // The LEO mean state of the zonal fixture, and a near-geostationary one.
+    const LEO: [f64; 6] = [
+        7.20000000000000000e+06,
+        3.09016994374947470e-03,
+        9.51056516295153600e-03,
+        8.54890329218965000e-01,
+        7.69746709859868000e-01,
+        1.43116998663535020e+00,
+    ];
+    const GEO: [f64; 6] = [4.2164172e7, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 0.5];
+
+    type Forces = (
+        DsstZonal,
+        DsstThirdBody,
+        DsstThirdBody,
+        DsstSolarRadiationPressure,
+        DsstTesseral,
+    );
+    type FullPropagator<'a> =
+        DsstMeanPropagator<'a, fn(f64) -> ([f64; 3], [f64; 3]), fn(f64) -> f64>;
+
+    fn full_propagator(forces: &Forces) -> FullPropagator<'_> {
+        DsstMeanPropagator {
+            zonal: &forces.0,
+            sun: &forces.1,
+            moon: &forces.2,
+            srp: &forces.3,
+            tesseral: &forces.4,
+            ephemeris: eph,
+            gmst,
+            mu: MU,
+        }
+    }
+
+    /// (G4) `mean_from_osculating` inverts `osculating_at`: mean → osculating → mean returns the
+    /// mean state, and its osculating image is the osculating state, to the iteration's round-off.
+    ///
+    /// All five forces act, on a LEO and a near-geostationary orbit, at three epochs. The
+    /// short-period corrections there are 2e-5 to 9e-4 (relative in `a`), so an inverse that
+    /// returned its input, or one pass of the fixed point, would miss by that much. Measured:
+    /// 3.5e-18 worst, a few ulps of `k` and `h`.
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn mean_to_osculating_to_mean_is_the_identity() {
+        let forces = all_forces();
+        let prop = full_propagator(&forces);
+        let (mut worst_back, mut worst_image, mut least_eta) = (0.0f64, 0.0f64, f64::INFINITY);
+        for mean in [LEO, GEO] {
+            for &t in &[0.0, 3600.0, 21600.0] {
+                let osc = prop.osculating_at(mean, t);
+                let back = prop
+                    .mean_from_osculating(osc, t)
+                    .expect("the short-period map is a contraction here");
+                let image = prop.osculating_at(back, t);
+                let mut eta = 0.0f64;
+                for i in 0..6 {
+                    let scale = if i == 0 { mean[0] } else { 1.0 };
+                    worst_back = nan_max(worst_back, libm::fabs(back[i] - mean[i]) / scale);
+                    worst_image = nan_max(worst_image, libm::fabs(image[i] - osc[i]) / scale);
+                    eta = nan_max(eta, libm::fabs(osc[i] - mean[i]) / scale);
+                }
+                least_eta = least_eta.min(eta);
+            }
+        }
+        std::println!(
+            "mean -> osculating -> mean: back {worst_back:.3e}, image {worst_image:.3e}, smallest short period {least_eta:.3e}"
+        );
+        assert!(
+            least_eta > 1e-5,
+            "short period {least_eta:.3e} too small to test the inverse"
+        );
+        assert!(
+            worst_back < 1e-16,
+            "mean state recovered to {worst_back:.3e}"
+        );
+        assert!(
+            worst_image < 1e-16,
+            "osculating state reproduced to {worst_image:.3e}"
+        );
+    }
+
+    /// (G2) The propagated mean elements solve the ODE whose right-hand side is the summed mean
+    /// rates: their central difference over `±h` equals `derivative` at the propagated state.
+    ///
+    /// The bound is the integrator's own error budget, `(1e-12 + 1e-14·|y|)/h`, its absolute and
+    /// relative tolerances spread over the `2h` of the difference; the truncation `h²|y‴|/6` is
+    /// below it at `h` = 600 s, where every element moves on periods of days or longer. Measured:
+    /// 0.23 of the budget at worst (LEO `q`, `p`).
+    #[test]
+    fn finite_difference_rates_are_the_summed_mean_rates() {
+        const H: f64 = 600.0;
+        let forces = all_forces();
+        let prop = full_propagator(&forces);
+        let mut worst = 0.0f64;
+        for mean in [LEO, GEO] {
+            for &t in &[7200.0, 43200.0] {
+                let at = prop.propagate(mean, t);
+                let (ahead, behind) = (prop.propagate(mean, t + H), prop.propagate(mean, t - H));
+                let mut rate = [0.0; 6];
+                prop.derivative(t, &at, &mut rate);
+                for i in 0..6 {
+                    let difference = (ahead[i] - behind[i]) / (2.0 * H);
+                    let budget = (1e-12 + 1e-14 * libm::fabs(at[i])) / H;
+                    let share = libm::fabs(difference - rate[i]) / budget;
+                    worst = nan_max(worst, share);
+                    assert!(
+                        share <= 1.0,
+                        "t={t} element {i}: difference {difference:e}, rate {:e}, {share:.2} of the budget",
+                        rate[i]
+                    );
+                }
+            }
+        }
+        std::println!("finite-difference rates: worst {worst:.3} of the integrator's budget");
     }
 }

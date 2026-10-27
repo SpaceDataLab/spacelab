@@ -59,7 +59,10 @@ pub mod zonal;
 
 pub use auxiliary::DsstAuxiliary;
 pub use drag::DsstAtmosphericDrag;
-pub use propagator::DsstMeanPropagator;
+pub use propagator::{
+    DsstMeanPropagator, MEAN_FROM_OSCULATING_PASSES, MEAN_FROM_OSCULATING_TOLERANCE,
+    MeanFromOsculatingError,
+};
 pub use srp::DsstSolarRadiationPressure;
 pub use tesseral::DsstTesseral;
 pub use third_body::DsstThirdBody;

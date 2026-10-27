@@ -393,7 +393,10 @@ short of his own eq. 2.1.4-6 — and weights it by the conical `ν` inside, whic
 the inner half of each penumbra and keeps the deficit of the outer half. The module now averages
 over the whole orbit. The contacts with the penumbra and umbra cones are the roots of a quartic in
 `tan((L − L₀)/2)`, `L₀` the anti-Sun direction in the orbit plane, polished by Newton on the cone
-function. A lit piece takes Gauss–Legendre at order 48. A penumbra piece has `(L − L₀)^{3/2}` ends,
+function. A lit piece takes Gauss–Legendre at order 48. Every order's nodes and weights are the
+nearest doubles to the roots of `Pₙ` and to `2/((1 − x²)Pₙ′(x)²)`, generated at 80 digits in PARI and
+checked by Newton's method in Maxima (`derivations/gauss_legendre_tables.{gp,mac}`); Orekit's
+constants, held until 2026-10-27, were 1 ulp off in the nodes and up to 3.9e-14 in the weights. A penumbra piece has `(L − L₀)^{3/2}` ends,
 where plain Gauss–Legendre converges like `n⁻⁵`; the smoothstep `L = low + W(3t² − 2t³)` makes the
 ends analytic, the rule then converges like `(2 + √3)^{−2n}`, and order 40 runs at the integrand's
 rounding. A penumbra piece between two penumbra contacts is cut again where it runs deepest: 1e-6

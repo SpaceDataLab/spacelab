@@ -1,0 +1,74 @@
+/* The Gauss–Legendre tables of spacelab-propagation/src/dsst/gaussian.rs, checked against their
+ * definition independently of derivations/gauss_legendre_tables.gp (which generates them).
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. for every order n in GAUSS_ORDER, Newton's method on P_n (the three-term recurrence, at
+ *      fpprec 80, from the Chebyshev-like seeds cos(pi (i - 1/4)/(n + 1/2))) converges to n distinct
+ *      roots in (-1, 1) (G3);
+ *   2. each shipped `POINTS_n` / `WEIGHTS_n` literal, read from gaussian.rs as the exact double it
+ *      parses to, is the nearest double to the root x_i and to w_i = 2/((1 - x_i^2) P_n'(x_i)^2):
+ *      within half an ulp (G3);
+ *   3. the rule integrates x^(2k) over [-1, 1] exactly, 2/(2k + 1), for k = 0 .. n - 1, the degree
+ *      2n - 1 that defines an n-point Gauss rule, to 1e-70 (G3).
+ *
+ * Run (from derivations/, as verify.sh does):
+ *   timeout 300 maxima --very-quiet -Q -b gauss_legendre_tables.mac </dev/null
+ */
+
+load("stringproc")$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+fpprec : 80$
+orders : [12, 16, 20, 24, 32, 40, 48]$
+
+/* P_n(x) and P_n'(x) by the three-term recurrence. */
+legendre_pd(n, x) := block([p0 : 1, p1 : x, p2],
+  for k : 2 thru n do (p2 : ((2*k - 1)*x*p1 - (k - 1)*p0)/k, p0 : p1, p1 : p2),
+  [p1, n*(x*p1 - p0)/(x^2 - 1)])$
+
+root_of(n, i) := block([x : bfloat(cos(%pi*(i - 1/4)/(n + 1/2))), pd, dx : 1],
+  for it : 1 thru 200 while abs(dx) > 10^(-78) do (
+    pd : legendre_pd(n, x), dx : pd[1]/pd[2], x : x - dx),
+  x)$
+
+/* The exact rational value of the double a decimal literal such as "-0.98156" parses to. */
+decimal(t) := block([neg : is(charat(t, 1) = "-"), u, parts, v],
+  u : if neg then substring(t, 2) else t,
+  parts : split(u, "."),
+  v : if length(parts) = 1 then parse_string(parts[1])
+      else parse_string(parts[1]) + parse_string(parts[2]) / 10^slength(parts[2]),
+  if neg then -v else v)$
+ilog2(q) := block([e : 0], while 2^(e + 1) <= q do e : e + 1, while 2^e > q do e : e - 1, e)$
+as_double(q) := if q = 0 then 0 else block([e : ilog2(abs(q))], round(q*2^(52 - e))*2^(e - 52))$
+half_ulp(d) := 2^(ilog2(abs(d)) - 53)$
+
+shipped : []$
+block([fh : openr("../crates/spacelab-propagation/src/dsst/gaussian.rs"), ln, body, name],
+  while (ln : readline(fh)) # false do
+    if ssearch("const POINTS_", ln) = 1 or ssearch("const WEIGHTS_", ln) = 1 then (
+      name : substring(ln, 7, ssearch(":", ln)),
+      body : substring(ln, ssearch("= [", ln) + 3, ssearch("];", ln)),
+      shipped : endcons([name, map(lambda([s], as_double(decimal(strim(" ", s)))), split(body, ","))],
+                        shipped)),
+  close(fh))$
+table(name) := second(first(sublist(shipped, lambda([e], e[1] = name))))$
+zero("fourteen_tables_read_from_gaussian_rs", length(shipped) - 14)$
+
+for n in orders do block([xs, ws, pts, wts, far_x : 0, far_w : 0, worst : 0],
+  xs : sort(makelist(root_of(n, i), i, 1, n)),
+  ws : map(lambda([x], 2/((1 - x^2)*legendre_pd(n, x)[2]^2)), xs),
+  zero(sconcat("newton_finds_", n, "_distinct_roots_in_the_open_interval"),
+    length(unique(map(lambda([x], round(x*10^12)), xs))) - n
+    + length(sublist(xs, lambda([x], abs(x) >= 1)))),
+  pts : table(sconcat("POINTS_", n)), wts : table(sconcat("WEIGHTS_", n)),
+  for i : 1 thru n do (
+    if abs(pts[i] - xs[i]) >= half_ulp(pts[i]) then far_x : far_x + 1,
+    if abs(wts[i] - ws[i]) >= half_ulp(wts[i]) then far_w : far_w + 1),
+  zero(sconcat("points_", n, "_not_the_nearest_double"), far_x),
+  zero(sconcat("weights_", n, "_not_the_nearest_double"), far_w),
+  for k : 0 thru n - 1 do
+    worst : max(worst, abs(sum(ws[i]*xs[i]^(2*k), i, 1, n) - 2/(2*k + 1))),
+  zero(sconcat("rule_", n, "_integrates_degree_", 2*n - 1, "_exactly"), if worst < 10^(-70) then 0 else worst))$

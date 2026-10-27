@@ -815,6 +815,20 @@ else
     skip "nrlmsise00_tables.py" "tools/fetch-nrlmsise00-fortran.sh output"
 fi
 
+# The DSST's Gauss-Legendre tables: gauss_legendre_tables.gp generates them from P_n and prints the
+# Rust text; the block in gaussian.rs must be that output byte for byte.
+if have gp; then
+    fresh=$(timeout 120 gp -q -f gauss_legendre_tables.gp </dev/null 2>&1)
+    held=$(grep -B1 -E '^const (POINTS|WEIGHTS)_[0-9]+:' ../crates/spacelab-propagation/src/dsst/gaussian.rs | grep -v '^--$')
+    if [ -n "$fresh" ] && [ "$fresh" = "$held" ]; then
+        ok "pari gauss_legendre_tables.gp: gaussian.rs holds the nearest doubles to the Gauss-Legendre nodes and weights"
+    else
+        bad "pari gauss_legendre_tables.gp" "gaussian.rs differs from the regenerated Gauss-Legendre tables"
+    fi
+else
+    skip "pari gauss_legendre_tables.gp" gp
+fi
+
 # ---------------------------------------------------------------------------------------------
 # 7. Ф17.B: each module's gate, derived in Maxima and checked by a second engine. A Maxima file
 # prints one `<name>: 0` line per identity and the count is pinned; a PARI or GAP file must run
@@ -844,6 +858,7 @@ second_engine() { # file what
     fi
 }
 if have maxima; then
+    mac_zeros gauss_legendre_tables.mac 29 "the DSST Gauss-Legendre tables are the nearest doubles to the roots of P_n and their weights; each rule is exact to degree 2n - 1"
     mac_zeros access_horizon_crossing.mac 4 "a circular pass rises and sets at acos(Re cos e / r) - e"
     mac_zeros root_reference_roots.mac 12 "Cardano, Dottie and W(1) roots the root finder is gated on"
     mac_zeros metrics_periodic_gaps.mac 8 "coverage metrics of a periodic pass pattern in exact rationals"

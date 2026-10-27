@@ -898,6 +898,25 @@ if have maxima; then
 else
     skip "Ф17.B Maxima gates" maxima
 fi
+if have maxima; then
+    out=$(timeout 300 maxima --very-quiet --suppress-input-echo -Q -b jacchia_bowman_quartic.mac </dev/null 2>&1)
+    zeros=$(printf '%s\n' "$out" | grep -cE '= +0 *$')
+    if [ "$zeros" -eq 5 ] && ! printf '%s' "$out" | grep -q 'Lisp error'; then
+        ok "maxima jacchia_bowman_quartic.mac: Jacchia's quartic below 125 km solves eqs. (10)-(11) (5 residuals)"
+    else
+        bad "maxima jacchia_bowman_quartic.mac" "expected 5 residuals reducing to 0, found $zeros"
+    fi
+    mac_zeros jacchia_bowman_hermite.mac 4 "the 1000-1500 km density factor meets its four end conditions"
+    mac_zeros jacchia_bowman_diurnal.mac 6 "eq. (17) in one bracket, the diurnal extremes, Boole's weights"
+    for f in jacchia_bowman_static_reference jacchia_bowman_full_model_terms; do
+        out=$(timeout 600 maxima --very-quiet --suppress-input-echo -Q -b "$f.mac" </dev/null 2>&1)
+        if [ $? -eq 0 ] && ! printf '%s' "$out" | grep -qE 'Lisp error|incorrect syntax'; then
+            ok "maxima $f.mac: the independent reference the Jacchia-Bowman tests compare against"
+        else
+            bad "maxima $f.mac" "the reference generator failed"
+        fi
+    done
+fi
 if have gp; then
     for f in access_horizon_crossing root_reference_roots photometry_closed_forms observability_diurnal_arc \
         elevation_footprint cone_footprint comms_link_budget sar_incidence scan_catalogue \

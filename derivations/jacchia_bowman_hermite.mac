@@ -1,0 +1,34 @@
+/* B06 p. 789-790, eqs. (10)-(11): high-altitude density factor.
+   Above 1500 km (eq. 10, Table 5): Frho(z) = C1 + C2*Fb + C3*z + C4*z*Fb, z in km, Fb = 81-day F10.
+   Between 1000 and 1500 km: a cubic in H = (z - 1000)/500 with
+     f(0) = 1, f'(0) = 0 (factor 1.0 at 1000 km, B06 p. 789),
+     f(1) = F1500, f'(1) = dFrho/dH at 1500 km  ("value and slope equal at the boundary", B06 p. 789).
+   dFrho/dH = (dz/dH) * dFrho/dz = 500*(C3 + C4*Fb).  The factor 500 enters exactly once. */
+display2d: false$
+fpprec: 30$
+f(H) := 1 + a2*H^2 + a3*H^3$
+s: first(solve([subst(H=1, f(H)) = F1500, subst(H=1, diff(f(H),H)) = Dh], [a2, a3]))$
+print("a2 =", subst(s, a2), "   a3 =", subst(s, a3))$
+print("f(0) =", subst(H=0, f(H)), "  f'(0) =", subst(H=0, diff(f(H),H)))$
+/* The four end conditions, symbolically: each residual is 0. */
+print("hermite f(0) - 1:", ratsimp(subst(s, subst(H=0, f(H))) - 1))$
+print("hermite f'(0):", ratsimp(subst(s, subst(H=0, diff(f(H),H)))))$
+print("hermite f(1) - F1500:", ratsimp(subst(s, subst(H=1, f(H))) - F1500))$
+print("hermite f'(1) - Dh:", ratsimp(subst(s, subst(H=1, diff(f(H),H))) - Dh))$
+/* B06 eq. (11) as printed: Dh = 500 * dF1500/dz with the printed dF1500/dz = 500*(C3+C4*Fb),
+   i.e. 250000*(C3+C4*Fb).  Slope mismatch of the printed form at H = 1: */
+C1: 2.200b-1$ C2: -2.000b-3$ C3: 1.150b-3$ C4: -2.110b-6$
+fr(z, Fb) := C1 + C2*Fb + C3*z + C4*z*Fb$
+fpprec: 30$
+for Fb in [70, 150, 230] do block([F15, Dz, Dh1, fh, fp],
+  F15: fr(1500, Fb),
+  Dh1: 500*(C3 + C4*Fb),
+  fh: subst(append([F1500=F15, Dh=Dh1]), subst(s, f(H))),
+  print("Fb =", Fb, " F1500 =", F15, " dF/dH =", Dh1,
+        " a2 =", subst([F1500=F15, Dh=Dh1], subst(s, a2)),
+        " a3 =", subst([F1500=F15, Dh=Dh1], subst(s, a3))),
+  print("   check f(1) - F1500 =", subst(H=1, fh) - F15,
+        "  f'(1) - dF/dH =", subst(H=1, diff(fh, H)) - Dh1),
+  fp: subst([F1500=F15, Dh=500*Dh1], subst(s, f(H))),
+  print("   printed eq. (11) (500 twice): f'(1) =", subst(H=1, diff(fp, H)),
+        " vs the slope of eq. (10) in H:", Dh1))$

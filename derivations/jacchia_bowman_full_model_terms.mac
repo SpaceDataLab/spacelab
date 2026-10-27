@@ -1,0 +1,38 @@
+/* Independent evaluation of the full-model terms for one input, in Maxima, as a cross-check of
+   the Rust evaluate(). Formulas: B08 eqs. (1)-(7), Tables 1-2; B06 eq. (7), Table 4, and
+   omega (p. 780); SR313 eqs. (15)-(17) and (24); SR332 eqs. (23)-(24).
+   Input: MJD 54800.25 (day of year 335.25 of 2008), sun dec -20 deg, hour angle +40 deg,
+   latitude +30 deg, z = 400 km, F10 150, F10bar 140, S10 135, S10bar 126, M10 142.5,
+   M10bar 133, Y10 157.5, Y10bar 147, dTc_storm 25 K. */
+display2d: false$
+fpprec: 30$
+batchload("jacchia_bowman_static_reference.mac")$
+f10: 150$ f10b: 140$ s10: 135$ s10b: 126$ m10: 142.5$ m10b: 133$ y10: 157.5$ y10b: 147$
+mjd: 54800.25$ doy: 335.25$ z: 400$ lat: 30*%pi/180$ dec: -20*%pi/180$ ha: 40*%pi/180$
+dtcs: 25$
+wt: (f10b/240)^(1/4)$
+fsb: f10b*wt + s10b*(1 - wt)$
+tc: 392.4 + 3.227*fsb + 0.298*(f10 - f10b) + 2.259*(s10 - s10b) + 0.312*(m10 - m10b) + 0.178*(y10 - y10b)$
+lst: 12 + ha*12/%pi$
+th: lst/24$ F: (f10 - 100)/100$ ph: cos(lat)$ H: z/100$
+B: [-0.457512297e+01, -0.512114909e+01, -0.693003609e+02, 0.203716701e+03, 0.703316291e+03,
+    -0.194349234e+04, 0.110651308e+04, -0.174378996e+03, 0.188594601e+04, -0.709371517e+04,
+    0.922454523e+04, -0.384508073e+04, -0.645841789e+01, 0.409703319e+02, -0.482006560e+03,
+    0.181870931e+04, -0.237389204e+04, 0.996703815e+03, 0.361416936e+02]$
+dtc6: B[1] + F*(B[2] + B[3]*th + B[4]*th^2 + B[5]*th^3 + B[6]*th^4 + B[7]*th^5)
+      + ph*(B[8]*th + B[9]*th^2 + B[10]*th^3 + B[11]*th^4 + B[12]*th^5)
+      + ph*H*(B[13] + B[14]*th + B[15]*th^2 + B[16]*th^3 + B[17]*th^4 + B[18]*th^5) + B[19]*ph$
+eta: abs(lat - dec)/2$ the: abs(lat + dec)/2$
+tau: ha - 37*%pi/180 + 6*%pi/180*sin(ha + 43*%pi/180)$
+ratio: 1 + 0.31*(sin(the)^(5/2) + (cos(eta)^(5/2) - sin(the)^(5/2))*cos(tau/2)^3)$
+tinf: (tc + dtc6)*ratio + dtcs$
+fsmj: f10b - 0.70*s10b - 0.04*m10b$ zk: z/1000$
+fz: 0.269 - 0.0118*fsmj + 0.0278*zk*fsmj - 0.0278*zk^2*fsmj + 3.47e-4*zk*fsmj^2$
+fsm: f10b - 0.75*s10b - 0.37*m10b$ w: 2*%pi*(doy - 1)/365$
+gt: -0.363 + 0.0851*sin(w) + 0.240*cos(w) - 0.190*sin(2*w) - 0.255*cos(2*w)
+    + fsm*(-0.0179 + 5.65e-4*sin(w) - 6.41e-4*cos(w) - 3.42e-3*sin(2*w) - 1.25e-3*cos(2*w))$
+sa: fz*gt$
+sl: 0.02*(z-90)*exp(-0.045*(z-90))*sin(lat)^2*sin(2*%pi*(mjd - 36204)/365.2422 + 1.72)$
+st: static(z, float(tinf))$
+print("TERMS", float(tc), float(dtc6), float(ratio), float(tinf), float(sa), float(sl), st[7],
+      st[7] + float(sa) + float(sl))$

@@ -1,0 +1,50 @@
+/* Independent reference for the static model (SR313 sec. 2-4, eqs. (1)-(13)) in Maxima,
+   with adaptive quadrature (quad_qags), for comparison with the Rust composite Boole rule.
+   Units: z in km, g in m s^-2, M in kg mol^-1, n in m^-3, rho in kg m^-3. */
+display2d: false$
+fpprec: 30$
+ratprint: false$
+/* SR313 p. 3 */
+q0n2: 0.78110$ q0o2: 0.20955$ q0ar: 0.00934$ q0he: 0.00001289$
+mn2: 28.0134e-3$ mo2: 31.9988e-3$ mar: 39.948e-3$ mhe: 4.0026e-3$ mo: mo2/2$
+mbar0: 28.960e-3$
+/* SR313 p. 4-5 eq. (1) */
+cm: [28.15204, -0.085586, 1.2840e-4, -1.0056e-5, -1.0210e-5, 1.5044e-6, 9.9826e-8]$
+mbar(z) := 1e-3*(cm[1] + sum(cm[k+1]*(z-100)^k, k, 1, 6))$
+/* SR313 p. 5, 7, 8 */
+avog: 6.02257e23$ rstar: 8.31432$ rho0: 3.46e-9*1e3$ t0: 183.0$
+g(z) := 9.80665*(1 + z/6356.766)^(-2)$
+/* SR313 p. 9-10 eqs. (9)-(13) */
+txf(ti) := 444.3807 + 0.02385*ti - 392.8292*exp(-0.0021357*ti)$
+tlow(z, ti) := block([tx, gx, d], tx: txf(ti), gx: 1.90*(tx - t0)/35, d: z - 125,
+  tx + gx*d - (17/23275)*gx*d^3 - (8/814625)*gx*d^4)$
+thigh(z, ti) := block([tx, gx, a, d], tx: txf(ti), gx: 1.90*(tx - t0)/35, d: z - 125,
+  a: 2/float(%pi)*(ti - tx), tx + a*atan(gx/a*d*(1 + 4.5e-6*d^2.5)))$
+tprof(z, ti) := if z <= 125 then tlow(z, ti) else thigh(z, ti)$
+quad(f, a, b) := first(quad_qags(f, zz, a, b, epsrel=1e-13, limit=2000))$
+static(z, ti) := block([zb, rho, nb, nn2, no2, no, nar, nhe, ih, nh, t5, ex, ih5],
+  zb: min(z, 105),
+  rho: rho0*(mbar(zb)/mbar(90))*(t0/tprof(zb, ti))
+       *exp(-1000/rstar*quad(mbar(zz)*g(zz)/tlow(zz, ti), 90, zb)),
+  nb: avog*rho/mbar(zb),
+  nn2: q0n2*mbar(zb)/mbar0*nb, nar: q0ar*mbar(zb)/mbar0*nb, nhe: q0he*mbar(zb)/mbar0*nb,
+  no: 2*nb*(1 - mbar(zb)/mbar0), no2: nb*(mbar(zb)/mbar0*(1 + q0o2) - 1),
+  nh: 0,
+  if z > 105 then (
+    ih: 1000/rstar*(if z > 125 then quad(g(zz)/tlow(zz, ti), 105, 125) + quad(g(zz)/thigh(zz, ti), 125, z)
+                    else quad(g(zz)/tlow(zz, ti), 105, z)),
+    ex: tprof(105, ti)/tprof(z, ti),
+    nn2: nn2*ex*exp(-mn2*ih), no2: no2*ex*exp(-mo2*ih), no: no*ex*exp(-mo*ih),
+    nar: nar*ex*exp(-mar*ih), nhe: nhe*ex^(1 - 0.38)*exp(-mhe*ih)),
+  if z >= 500 then (
+    t5: tprof(500, ti),
+    nh: 10^(73.13 - 39.40*log(t5)/log(10.0) + 5.5*(log(t5)/log(10.0))^2 + 6),
+    ih5: if z > 500 then 1000/rstar*quad(g(zz)/thigh(zz, ti), 500, z) else 0,
+    nh: nh*(t5/tprof(z, ti))*exp(-1.00797e-3*ih5)),
+  [log(nn2)/log(10.0), log(no2)/log(10.0), log(no)/log(10.0), log(nar)/log(10.0), log(nhe)/log(10.0),
+   if nh > 0 then log(nh)/log(10.0) else 0,
+   log((nn2*mn2 + no2*mo2 + no*mo + nar*mar + nhe*mhe + nh*1.00797e-3)/avog)/log(10.0)])$
+for ti in [600, 1000, 1900] do
+  for z in [95, 100, 110, 150, 400, 800, 2000] do
+    block([r], r: static(z, ti),
+      print("REF", ti, z, r[1], r[2], r[3], r[4], r[5], r[6], r[7]))$

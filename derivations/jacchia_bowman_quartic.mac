@@ -1,0 +1,40 @@
+/* SR313 p. 9-10, eqs. (10)-(11): quartic temperature profile on z0 <= z <= zx.
+   d = z - zx, D = zx - z0 = 125 - 90 = 35 km (SR313 p. 9).
+   Conditions (11): T(-D) = T0, T'(-D) = 0, T'(0) = Gx, T''(0) = 0,
+   with Gx = 1.90 (Tx - T0)/D.  T(0) = Tx holds by the form of (10). */
+display2d: false$
+fpprec: 30$
+T(d) := Tx + c1*d + c2*d^2 + c3*d^3 + c4*d^4$
+D: 35$
+eqs: [subst(d=-D, T(d)) = T0,
+      subst(d=-D, diff(T(d),d)) = 0,
+      subst(d=0, diff(T(d),d)) = G,
+      subst(d=0, diff(T(d),d,2)) = 0,
+      G = (19/10)*(Tx - T0)/D]$
+s: first(solve(eqs, [c1, c2, c3, c4, T0]))$
+print("c1/G =", ratsimp(subst(s, c1)/G))$
+print("c2/G =", ratsimp(subst(s, c2)/G))$
+print("c3/G =", ratsimp(subst(s, c3)/G))$
+print("c4/G =", ratsimp(subst(s, c4)/G))$
+print("(Tx-T0)/G =", ratsimp((Tx - subst(s, T0))/G))$
+fpprec: 30$
+print("c3/G bfloat =", bfloat(ratsimp(subst(s, c3)/G)))$
+print("c4/G bfloat =", bfloat(ratsimp(subst(s, c4)/G)))$
+/* residual check of all four conditions with the solved coefficients, T0 eliminated */
+Tq(d) := Tx + G*d - (17/23275)*G*d^3 - (8/814625)*G*d^4$
+print("residual T(-35) - (Tx - 35*G/1.9) =", ratsimp(Tq(-35) - (Tx - 35*G*10/19)))$
+print("residual T'(-35) =", ratsimp(subst(d=-35, diff(Tq(d),d))))$
+print("residual T'(0) - G =", ratsimp(subst(d=0, diff(Tq(d),d)) - G))$
+print("residual T''(0) =", ratsimp(subst(d=0, diff(Tq(d),d,2))))$
+/* SR313 p. 10 eq. (12): no inflection in (z0, zx) iff 4/3 < D*Gx/(Tx-T0) < 2; here it is 1.90 */
+print("D*G/(Tx-T0) =", ratsimp(D*G/(Tx - subst(s, T0))))$
+/* T''(d) sign on (-35, 0): -(6*17/23275)*d - (12*8/814625)*d^2 times G */
+d2: ratsimp(diff(Tq(d), d, 2)/G)$
+print("T''/G =", factor(d2), " roots:", solve(d2 = 0, d))$
+/* sample value: Tinf = 600 K, SR313 eq. (9) Tx, then T(100 km) for Table 5 (192.0) */
+Txf(Ti) := 444.3807b0 + 0.02385b0*Ti - 392.8292b0*exp(-0.0021357b0*Ti)$
+tx600: Txf(600)$
+g600: 1.90b0*(tx600 - 183)/35$
+print("Tx(600) =", tx600, " Gx(600) =", g600)$
+print("T(100 km, 600 K) =", subst([Tx=tx600, G=g600], Tq(-25)))$
+print("Tx(183) =", Txf(183), " (constraint Tx = T0 = 183 when Tinf = T0; SR313 p. 9)")$

@@ -185,9 +185,9 @@ a census mapped every number the model needs to the page that prints it, or mark
 without recording its value; a fresh agent whose only inputs were the five papers (Jacchia 1970 and
 1971, Bowman et al. 2008 ×2, Tobiska et al. 2008) and that census wrote the model, with no access to
 SET's file, the deleted translation or any other implementation. The code-only items are left out.
-`PROVENANCE.md` beside the module gives every number's document, page and equation. It is held out of
-the public tree (below) until it is measured against the TU Delft densities; that measurement, not
-this paragraph, decides whether it ships.
+`PROVENANCE.md` beside the module gives every number's document, page and equation. It was held out
+of the public tree until it was measured against the TU Delft accelerometer densities: over the
+campaign's rows its MAPE is 25.5 %. It ships.
 
 ## 4 · Orekit and `sgp4` — permissive, and the obligation is paperwork
 

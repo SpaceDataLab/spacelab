@@ -40,6 +40,7 @@ pub mod forces;
 pub mod geopotential;
 pub mod geopotential_coeffs;
 pub mod harris_priester;
+pub mod jacchia_bowman;
 pub mod lifetime;
 pub mod lightcurve;
 pub mod linalg;

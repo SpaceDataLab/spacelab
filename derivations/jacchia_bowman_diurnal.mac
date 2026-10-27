@@ -1,0 +1,29 @@
+/* SR313 p. 18-19, eqs. (15)-(17), J70 parameters m = 2.5, n = 3, beta = -37 deg, p = 6 deg,
+   gamma = 43 deg, R = 0.31 ("good average", p. 19). */
+display2d: false$
+fpprec: 30$
+/* eq. (17) product form equals the single-bracket form used in the code */
+print("eq17 residual:", ratsimp(Tc*(1+R*sm)*(1+R*(cm-sm)/(1+R*sm)*k) - Tc*(1+R*(sm+(cm-sm)*k))))$
+deg: %pi/180$
+m: 5/2$ n: 3$ R: 31/100$
+beta: -37*deg$ p: 6*deg$ gam: 43*deg$
+ratio(phi, dec, H) := block([eta, th, tau],
+  eta: abs(phi - dec)/2, th: abs(phi + dec)/2,
+  tau: H + beta + p*sin(H + gam),
+  1 + R*(sin(th)^m + (cos(eta)^m - sin(th)^m)*cos(tau/2)^n))$
+/* SR313 Sec. 15 (p. 35): phi = +45 deg, 11h00m LST -> H = -15 deg, dec = -20.0 deg: Table 1 gives 1.154 */
+print("ratio(45, -20, 11h) =", bfloat(ratio(45*deg, -20*deg, -15*deg)))$
+/* Table 1 first panel (dec = +23 deg 44 min): phi = +90 -> 1198 at every hour; phi = -90 -> 1069 */
+dec1: (23 + 44/60)*deg$
+print("ratio(+90, 23d44m, any) =", bfloat(ratio(90*deg, dec1, 0)), bfloat(ratio(90*deg, dec1, 2)))$
+print("ratio(-90, 23d44m, any) =", bfloat(ratio(-90*deg, dec1, 0)))$
+/* hours of extreme temperature: tau = 0 (maximum) and tau = -pi (minimum); printed 14h08 and 2h87 (p. 19) */
+hmax: find_root(H + beta + p*sin(H + gam), H, -%pi/2, %pi/2)$
+hmin: find_root(H + beta + p*sin(H + gam) + %pi, H, -%pi, 0)$
+print("LST of tau = 0 (h):", 12 + hmax*12/float(%pi), "   LST of tau = -pi (h):", 12 + hmin*12/float(%pi))$
+/* Boole's rule weights on 4 subintervals of width h, divided by h (Newton-Cotes, closed, 5 points) */
+w: makelist(integrate(product(if j=i then 1 else (x-j)/(i-j), j, 0, 4), x, 0, 4), i, 0, 4)$
+print("Boole weights / h:", w)$
+/* Boole's rule is exact for polynomials of degree <= 5 and not for degree 6 (k = 0: sum of weights) */
+print("sum of weights:", apply("+", w))$
+for k: 1 thru 6 do print("x^", k, " exact - Boole:", integrate(x^k, x, 0, 4) - sum(w[i+1]*i^k, i, 0, 4))$

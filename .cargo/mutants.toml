@@ -326,7 +326,7 @@ exclude_re = [
     # produced no difference in any of the three returned doubles, bit for bit. The other five
     # mutants of this iteration's private state do separate somewhere in that range and are killed
     # by the `μ = 0.4639` row of `the_collinear_points_are_the_correctly_rounded_roots_of_the_gradient`.
-    "cr3bp\\.rs:109:35: replace < with <= in Cr3bp::collinear_points",
+    "cr3bp\\.rs:113:35: replace < with <= in Cr3bp::collinear_points",
 
     # --- `lambert.rs`. Tolerance ties, an unreachable runaway guard, and a scan that cannot see a
     # sample landing exactly on its root.

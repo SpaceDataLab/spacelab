@@ -282,7 +282,7 @@ def synodic_guess(co, mu_val, point, Az, northern=True, sx=1.0):
 
 
 def main():
-    mu_em = 0.012_150_585  # Cr3bp::EARTH_MOON
+    mu_em = 0.012_150_584_460_351  # Cr3bp::EARTH_MOON
 
     print("=" * 92)
     print("STEP 2  Linear characteristic and frequencies (DERIVED from det = 0, not memorised)")

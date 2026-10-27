@@ -34,8 +34,12 @@ pub struct Cr3bp {
 }
 
 impl Cr3bp {
-    /// Earth–Moon mass ratio.
-    pub const EARTH_MOON: Self = Self { mu: 0.012_150_585 };
+    /// Earth–Moon mass ratio, `r/(1 + r)` with the IAU 2009 best estimate `r = M_M/M_E =
+    /// 0.012 300 0371` (Luzum et al. 2011), correctly rounded from the exact ratio in
+    /// `derivations/cr3bp.gp`. The common eight-digit `0.012 150 585` is 4.4e-8 above it.
+    pub const EARTH_MOON: Self = Self {
+        mu: 0.012_150_584_460_351,
+    };
     /// Sun–Earth mass ratio, the Earth alone: `1/(1 + GM_S/GM_E)` with the IAU 2009 best estimate
     /// `GM_S/GM_E = 332 946.0487` (Luzum et al. 2011), correctly rounded from the exact ratio in
     /// `derivations/cr3bp.gp`. Sun to Earth+Moon, the other common choice, is `3.040_423_4e-6`.
@@ -166,7 +170,7 @@ mod tests {
     fn the_pseudo_potential_is_its_closed_form_at_a_point_with_no_symmetry() {
         assert_closed_form(
             Cr3bp::EARTH_MOON.pseudo_potential(P),
-            1.780_317_786_337_605_229_493_051,
+            1.780_317_787_318_750_078_456_715_328_779_219,
             "Omega",
         );
     }
@@ -177,7 +181,7 @@ mod tests {
     fn the_jacobi_constant_is_twice_the_potential_less_the_squared_speed() {
         assert_closed_form(
             Cr3bp::EARTH_MOON.jacobi(P, V),
-            3.279_535_572_675_210_486_453_020,
+            3.279_535_574_637_500_184_380_348_286_784_810,
             "C",
         );
     }
@@ -190,9 +194,9 @@ mod tests {
     #[test]
     fn the_synodic_acceleration_is_its_closed_form_in_all_three_components() {
         let a = Cr3bp::EARTH_MOON.acceleration(P, V);
-        assert_closed_form(a.x, -1.628_505_362_675_667_743_825_632, "a.x");
-        assert_closed_form(a.y, 1.200_216_009_973_569_722_415_373, "a.y");
-        assert_closed_form(a.z, -0.983_722_728_284_938_472_218_223_5, "a.z");
+        assert_closed_form(a.x, -1.628_505_363_613_640_063_773_917_538_670_481, "a.x");
+        assert_closed_form(a.y, 1.200_216_013_413_323_035_419_682_785_396_339, "a.y");
+        assert_closed_form(a.z, -0.983_722_729_968_222_008_369_268_859_907_687_4, "a.z");
     }
 
     /// (G3) L4 and L5 close an equilateral triangle with the primaries, so they are exact — `∇Ω`
@@ -205,7 +209,7 @@ mod tests {
         let (l4, l5) = Cr3bp::EARTH_MOON.triangular_points();
         // ½ − μ at the f64 μ the constant carries, and √3/2, both to 34 digits.
         let (x, y) = (
-            0.487_849_414_999_999_999_795_199_379_093_446_6,
+            0.487_849_415_539_649_000_628_230_623_988_201_8,
             0.866_025_403_784_438_646_763_723_170_752_936_2,
         );
         assert_closed_form(l4.x, x, "L4 x");
@@ -249,9 +253,9 @@ mod tests {
                 "Earth-Moon",
                 Cr3bp::EARTH_MOON,
                 [
-                    0.836_915_128_772_026_531_989_983_841_667_568_1,
-                    1.155_682_163_100_215_440_687_235_755_280_646,
-                    -1.005_062_645_556_282_641_487_076_419_307_562,
+                    0.836_915_131_427_382_160_046_693_265_085_142_7,
+                    1.155_682_161_024_676_951_248_163_210_236_372,
+                    -1.005_062_645_331_442_005_708_330_094_870_261,
                 ],
                 [0, 0, 0],
             ),

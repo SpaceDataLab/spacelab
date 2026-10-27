@@ -236,31 +236,31 @@ mod tests {
         let co = Coefficients::new(Cr3bp::EARTH_MOON, 0).unwrap();
         let close =
             |a: f64, b: f64, name: &str| assert!((a - b).abs() < 1e-9, "{name}: {a} vs {b}");
-        close(co.gamma, 0.150934286228, "gamma");
-        close(co.c2, 5.1475945155, "c2");
+        close(co.gamma, 0.15093428411227, "gamma");
+        close(co.c2, 5.1475944959308, "c2");
         close(
             c_n(Cr3bp::EARTH_MOON.mu, co.gamma, 0, 3),
-            3.2468421867,
+            3.246842185041,
             "c3",
         );
         close(
             c_n(Cr3bp::EARTH_MOON.mu, co.gamma, 0, 4),
-            3.5847296922,
+            3.5847296817926,
             "c4",
         );
-        close(co.lambda, 2.334385880330, "lambda");
-        close(co.k, 3.586499260960, "k");
-        close(co.a21, 2.341950966941, "a21");
-        close(co.a23, -0.9573660341050, "a23");
-        close(co.b21, -0.4831630737764, "b21");
-        close(co.d21, -0.2979105539904, "d21");
-        close(co.a31, 0.9109199003834, "a31");
-        close(co.b31, 1.206602980792, "b31");
-        close(co.d32, 0.4463079758350, "d32");
-        close(co.s1, -1.749109673946, "s1");
-        close(co.s2, 0.08277770152554, "s2");
-        close(co.l1, -28.79766725973, "l1");
-        close(co.l2, 2.413764477677, "l2");
+        close(co.lambda, 2.3343858761192, "lambda");
+        close(co.k, 3.586499254854, "k");
+        close(co.a21, 2.3419509644271, "a21");
+        close(co.a23, -0.95736603384915, "a23");
+        close(co.b21, -0.4831630742647, "b21");
+        close(co.d21, -0.29791055491643, "d21");
+        close(co.a31, 0.91091989825629, "a31");
+        close(co.b31, 1.2066029741134, "b31");
+        close(co.d32, 0.4463079747574, "d32");
+        close(co.s1, -1.7491096536491, "s1");
+        close(co.s2, 0.0827777022562, "s2");
+        close(co.l1, -28.797666980759, "l1");
+        close(co.l2, 2.4137644642201, "l2");
     }
 
     /// Earth-Moon L2 coefficients against the same Maxima oracle (c3 < 0 there — a sign-handling check).
@@ -269,16 +269,16 @@ mod tests {
         let co = Coefficients::new(Cr3bp::EARTH_MOON, 1).unwrap();
         let close =
             |a: f64, b: f64, name: &str| assert!((a - b).abs() < 1e-9, "{name}: {a} vs {b}");
-        close(co.gamma, 0.167832748100, "gamma");
+        close(co.gamma, 0.16783274548503, "gamma");
         close(
             c_n(Cr3bp::EARTH_MOON.mu, co.gamma, 1, 3),
-            -2.6593351947,
+            -2.6593352001473,
             "c3",
         );
-        close(co.lambda, 1.862645865425, "lambda");
-        close(co.k, 2.912604127276, "k");
-        close(co.l1, -8.889506839411, "l1");
-        close(co.l2, 1.287156978370, "l2");
+        close(co.lambda, 1.8626458683003, "lambda");
+        close(co.k, 2.9126041312933, "k");
+        close(co.l1, -8.8895069090636, "l1");
+        close(co.l2, 1.2871569833434, "l2");
     }
 
     /// The synodic guess matches the Maxima oracle's emitted state for Earth-Moon L1, Az = 0.05.
@@ -287,9 +287,9 @@ mod tests {
         let g = richardson_halo_guess(Cr3bp::EARTH_MOON, 0, 0.05, true).unwrap();
         let close =
             |a: f64, b: f64, name: &str| assert!((a - b).abs() < 1e-8, "{name}: {a} vs {b}");
-        close(g[0], 0.823807542, "x0");
-        close(g[2], 0.008047180, "z0");
-        close(g[4], 0.125947553, "vy0");
+        close(g[0], 0.82380754524059, "x0");
+        close(g[2], 0.0080471803163051, "z0");
+        close(g[4], 0.12594755162933, "vy0");
     }
 
     /// End-to-end: the Richardson seed converges under the differential corrector to a genuine halo

@@ -268,7 +268,7 @@ fn lambert(
 /// `[x, 0, z, 0, vy, 0]` for collinear point `li` (0 = L1, 1 = L2), γ-normalized out-of-plane amplitude
 /// `az`, class `northern`, and mass ratio `mu` (default Earth–Moon). Raises `ValueError` if invalid.
 #[pyfunction]
-#[pyo3(signature = (li, az, northern=true, mu=0.012_150_585))]
+#[pyo3(signature = (li, az, northern=true, mu=0.012_150_584_460_351))]
 fn richardson_halo(li: usize, az: f64, northern: bool, mu: f64) -> PyResult<[f64; 6]> {
     richardson_halo_guess(Cr3bp { mu }, li, az, northern)
         .ok_or_else(|| PyValueError::new_err("invalid libration point index or amplitude"))
@@ -287,7 +287,7 @@ fn geopotential_acceleration(degree: usize, r: [f64; 3]) -> PyResult<[f64; 3]> {
 /// The five libration points of the circular restricted three-body problem for mass ratio `mu`, each
 /// as `[x, y, z]` in synodic nondimensional coordinates: `[L1, L2, L3, L4, L5]`.
 #[pyfunction]
-#[pyo3(signature = (mu=0.012_150_585))]
+#[pyo3(signature = (mu=0.012_150_584_460_351))]
 fn libration_points(mu: f64) -> [[f64; 3]; 5] {
     Cr3bp { mu }.libration_points().map(arr)
 }
@@ -6544,7 +6544,7 @@ mod tests {
     /// residual of the synodic equilibrium `x − (1−μ)(x+μ)/|x+μ|³ − μ(x−1+μ)/|x−1+μ|³`.
     #[test]
     fn the_libration_points_come_back_in_order_and_satisfy_their_own_equilibrium() {
-        let mu = 0.012_150_585;
+        let mu = 0.012_150_584_460_351;
         let l = libration_points(mu);
 
         for (i, p) in l.iter().enumerate() {

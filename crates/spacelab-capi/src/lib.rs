@@ -14957,7 +14957,7 @@ mod tests {
     /// would catch a binding that wrote them out in the wrong order.
     #[test]
     fn the_libration_points_are_the_five_in_the_documented_order() {
-        let mu = 0.012_150_585;
+        let mu = 0.012_150_584_460_351;
         let mut got = [SlVec3 {
             x: 0.0,
             y: 0.0,
@@ -14996,7 +14996,7 @@ mod tests {
     /// Richardson's guess is the crate's, and an impossible libration point is a domain error.
     #[test]
     fn the_richardson_halo_binding_is_its_crate_function() {
-        let mu = 0.012_150_585;
+        let mu = 0.012_150_584_460_351;
         let mut got = state([0.0; 3], [0.0; 3]);
         // SAFETY: a local out pointer.
         assert_eq!(

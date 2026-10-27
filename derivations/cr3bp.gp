@@ -33,6 +33,10 @@ mu_sun_emb = (1 + mme) / (1 + mme + mse);
 printf("SUN_EARTH mu (Sun : Earth), exact: %.40g\n", mu_sun_earth);
 printf("  as a double: %.25g\n", f64(mu_sun_earth));
 check("SUN_EARTH literal", f64(3.0034805952013234e-6), f64(mu_sun_earth), 0);
+mu_earth_moon = mme / (1 + mme);
+printf("EARTH_MOON mu (Moon : Earth+Moon), exact: %.40g\n", mu_earth_moon);
+printf("  as a double: %.25g\n", f64(mu_earth_moon));
+check("EARTH_MOON literal", f64(0.012150584460351), f64(mu_earth_moon), 0);
 printf("  Sun : Earth+Moon would be %.25g\n", mu_sun_emb);
 {printf("  the former constant 3.0034806e-6 is %.3e from Sun:Earth and %.3e from Sun:Earth+Moon\n",
        3.0034806e-6 / mu_sun_earth - 1, 3.0034806e-6 / mu_sun_emb - 1)};
@@ -49,9 +53,9 @@ unit_root(p) = {
 collinear(m) = [1 - m - unit_root(q1(m)), 1 - m + unit_root(q2(m)), -m - unit_root(q3(m))];
 
 {systems = [
-  ["Earth-Moon", f64(0.012150585),
-   [0.8369151287720265319899838416675681, 1.155682163100215440687235755280646,
-    -1.005062645556282641487076419307562]],
+  ["Earth-Moon", f64(mu_earth_moon),
+   [0.8369151314273821600466932650851427, 1.155682161024676951248163210236372,
+    -1.005062645331442005708330094870261]],
   ["Sun-Earth", f64(mu_sun_earth),
    [0.9900265938700224097363023403997850, 1.010034116422946031576144465434425,
     -1.000001251450247999078835863664773]],
@@ -68,17 +72,17 @@ collinear(m) = [1 - m - unit_root(q1(m)), 1 - m + unit_root(q2(m)), -m - unit_ro
 
 /* 3. The field point. */
 P = [f64(0.31), f64(-0.47), f64(0.23)]; V = [f64(0.17), f64(-0.29), f64(0.41)];
-m = f64(0.012150585);
+m = f64(mu_earth_moon);
 r1 = sqrt((P[1] + m)^2 + P[2]^2 + P[3]^2); r2 = sqrt((P[1] - 1 + m)^2 + P[2]^2 + P[3]^2);
 Om = (P[1]^2 + P[2]^2) / 2 + (1 - m) / r1 + m / r2;
-check("Omega(P)", Om, 1.780317786337605229493051, 1e-24);
-check("C(P, V)", 2 * Om - V * V~, 3.279535572675210486453020, 1e-24);
+check("Omega(P)", Om, 1.780317787318750078456715328779219, 1e-24);
+check("C(P, V)", 2 * Om - V * V~, 3.279535574637500184380348286784810, 1e-24);
 {acc = [P[1] + 2 * V[2] - (1 - m) * (P[1] + m) / r1^3 - m * (P[1] - 1 + m) / r2^3,
        P[2] - 2 * V[1] - (1 - m) * P[2] / r1^3 - m * P[2] / r2^3,
        -(1 - m) * P[3] / r1^3 - m * P[3] / r2^3]};
-check("a.x", acc[1], -1.628505362675667743825632, 1e-24);
-check("a.y", acc[2], 1.200216009973569722415373, 1e-24);
-check("a.z", acc[3], -0.9837227282849384722182235, 1e-24);
+check("a.x", acc[1], -1.628505363613640063773917538670481, 1e-24);
+check("a.y", acc[2], 1.200216013413323035419682785396339, 1e-24);
+check("a.z", acc[3], -0.9837227299682220083692688599076874, 1e-24);
 
 /* 4. L4/L5. */
 gradOmega(m, x, y) = {

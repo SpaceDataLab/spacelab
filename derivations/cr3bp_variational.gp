@@ -18,7 +18,7 @@ check(name, got, want, tol) = {
                printf("%s: ok (|d| = %.3e)\n", name, d));
 }
 
-mu = f64(0.012150585);
+mu = f64(123000371 / 10123000371);  /* Cr3bp::EARTH_MOON, derivations/cr3bp.gp */
 field(s) = {
   my(x = s[1], y = s[2], z = s[3], r1 = sqrt((x + mu)^2 + y^2 + z^2),
      r2 = sqrt((x - 1 + mu)^2 + y^2 + z^2));

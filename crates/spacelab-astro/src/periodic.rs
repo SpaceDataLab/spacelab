@@ -602,12 +602,12 @@ mod tests {
         let s = [0.85, 0.05, 0.03, 0.01, 0.12, -0.02];
         let a = jacobian(Cr3bp::EARTH_MOON.mu, s);
         let u = [
-            ((3, 0), 9.638_559_609_583_915_392_978_275_348_440_459),
-            ((4, 1), -2.926_146_930_576_241_736_170_383_571_809_447),
-            ((5, 2), -4.712_412_679_007_673_656_807_891_776_631_011),
-            ((3, 1), -3.079_524_149_747_066_833_308_874_141_883_823),
-            ((3, 2), -1.847_714_489_848_239_929_037_393_688_210_201),
-            ((4, 2), 0.737_124_139_154_467_280_677_588_399_969_313_0),
+            ((3, 0), 9.638_559_323_494_089_704_440_850_183_558_392),
+            ((4, 1), -2.926_146_811_200_682_593_947_446_147_093_034),
+            ((5, 2), -4.712_412_512_293_407_110_493_404_036_465_358),
+            ((3, 1), -3.079_523_957_955_120_387_093_215_976_238_976),
+            ((3, 2), -1.847_714_374_773_072_061_308_009_435_415_037),
+            ((4, 2), 0.737_124_094_774_429_089_341_768_704_439_649_4),
         ];
         for ((i, j), want) in u {
             // The Hessian is symmetric; both triangles are asserted.
@@ -780,26 +780,7 @@ mod tests {
     #[test]
     fn a_three_dimensional_halo_orbit_closes() {
         let sys = Cr3bp::EARTH_MOON;
-        // Search a few guesses near L1; halos exist above a minimum out-of-plane amplitude.
-        let guesses = [
-            (0.823, 0.08, 0.15),
-            (0.85, 0.10, 0.18),
-            (0.82, 0.06, 0.13),
-            (0.84, 0.12, 0.20),
-            (0.855, 0.04, 0.17),
-            (0.80, 0.10, 0.10),
-            (0.87, 0.08, 0.22),
-        ];
-        let mut found = None;
-        for &(x0, z0, vy0) in &guesses {
-            if let Some(orbit) = halo_orbit(sys, [x0, 0.0, z0, 0.0, vy0, 0.0])
-                && orbit.state[2].abs() > 0.02
-            {
-                found = Some(orbit);
-                break;
-            }
-        }
-        let orbit = found.expect("a halo converged");
+        let orbit = l1_halo(sys);
         let mut s = orbit.state;
         let mut phi = identity();
         let h = 2.5e-4;
@@ -826,6 +807,23 @@ mod tests {
         );
     }
 
+    /// A northern Earth–Moon L1 halo from Richardson's seed at `Az = 0.2` (`z0 ≈ 0.03`).
+    ///
+    /// A hand-picked `(x0, z0, ẏ0)` is no seed: the corrector is an undamped Newton, and from
+    /// `(0.823, 0.08, 0.15)` it wandered for twenty steps and landed on whatever orbit it reached —
+    /// at `μ = 0.012 150 585` one at `x0 = 0.962` beside the Moon, at the IAU 2009 mass ratio none.
+    /// The orbit returned here is checked to lie at L1.
+    fn l1_halo(sys: Cr3bp) -> PeriodicOrbit {
+        let orbit = richardson_halo(sys, 0, 0.2, true).expect("the Richardson seed converges");
+        let l1 = sys.collinear_points()[0].x;
+        assert!(
+            (orbit.state[0] - l1).abs() < 0.05,
+            "the halo starts at x0 = {}, not at L1 (x = {l1})",
+            orbit.state[0]
+        );
+        orbit
+    }
+
     /// The symplectic form of the CR3BP in the synodic `(position, velocity)` coordinates,
     /// `Ω = [[G, I], [−I, 0]]` with `G = [[0, −2, 0], [2, 0, 0], [0, 0, 0]]` — the canonical `J`
     /// pulled back through `p = v + (−y, x, 0)`. `derivations/cr3bp_variational.mac` derives it
@@ -846,9 +844,10 @@ mod tests {
     /// of an autonomous Hamiltonian system, derived in `derivations/cr3bp_variational.mac`.
     ///
     /// The second is the regression gate for `monodromy` stepping a fixed `2.5e-4` and so stopping
-    /// up to half a step off the period: `Φ(T + δ) f(x₀) = f(x(δ))`, and the miss was `8.6e-5`,
-    /// `5.6e-5` and `4.7e-5` of `|f|` on the three orbits below. With the step dividing the period
-    /// it is `8e-11`, `1.2e-10` and `7e-12`: what is left is the corrector's own `1e-11` acceptance
+    /// up to half a step off the period: `Φ(T + δ) f(x₀) = f(x(δ))`, and the miss was `8.6e-5` and
+    /// `5.6e-5` of `|f|` on the two Lyapunov orbits below (`4.7e-5` on the halo the test used
+    /// then). With the step dividing the period it is `8e-11`, `1.2e-10` and, on the halo, `1.2e-11`:
+    /// what is left is the corrector's own `1e-11` acceptance
     /// on the crossing, amplified by the unstable multiplier (≈ 2.6e3 at L1). The bound sits two
     /// orders above that and three below the defect.
     ///
@@ -868,10 +867,7 @@ mod tests {
                 "L2 Lyapunov",
                 lyapunov_orbit(sys, 1, 0.01).expect("converges"),
             ),
-            (
-                "L1 halo",
-                halo_orbit(sys, [0.823, 0.0, 0.08, 0.0, 0.15, 0.0]).expect("converges"),
-            ),
+            ("L1 halo", l1_halo(sys)),
         ] {
             let m = monodromy(sys, &orbit, true);
             let f = state_dot(sys, orbit.state);
@@ -907,7 +903,7 @@ mod tests {
     #[test]
     fn halo_family_continues_by_amplitude() {
         let sys = Cr3bp::EARTH_MOON;
-        let seed = halo_orbit(sys, [0.823, 0.0, 0.08, 0.0, 0.15, 0.0]).expect("seed halo");
+        let seed = l1_halo(sys);
         let mut family = std::vec::Vec::new();
         halo_family(sys, seed, 0.002, 10, |o| family.push(o));
         assert!(family.len() >= 3, "family too short: {}", family.len());

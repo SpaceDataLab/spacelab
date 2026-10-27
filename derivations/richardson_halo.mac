@@ -102,7 +102,7 @@ build(mu, li) := block(
 names : ["gamma","c2","c3","c4","lambda","k","a21","a22","a23","a24","b21","b22","d21",
          "a31","a32","b31","b32","d31","d32","s1","s2","l1","l2"]$
 
-mu_em : 0.012150585$
+mu_em : float(123000371/10123000371)$  /* Cr3bp::EARTH_MOON, IAU 2009 */
 for li : 1 thru 2 do block([v : build(mu_em, li)],
   print("==== Earth-Moon L", li, " (maxima, independent of sympy) ===="),
   for i : 1 thru length(names) do

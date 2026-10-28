@@ -348,6 +348,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Storm peak, five models | whether missing a storm's peak is ours or everyone's | peak *enhancement* over the pre-storm level, orbit-averaged, all five configurations on the same eight storms | four of five miss it by 33–63 % on average; **JB2008 alone reaches 23.7 %**, and it is the only one driven by hourly `Dst` rather than 3-hourly `ap` | tests/measured_density.rs |
 | The storm driver, three hypotheses | which of the driver's cadence, the loss, or the regressor's *scale* caps the peak — the first was the obvious answer and it is wrong | GFZ hourly `ap60` (365 544-row contiguous series) against 3-hourly `ap`; a fit on nothing but the 3130 storm-window rows; four candidate regressor forms, all held out by calendar month | `ap60` **worse** (spread 14.8 → 18.0 %); storm-only fit **worse** (peak error 0.38 → 0.46); `ln(1 + storm/15)` at the same 35 coefficients **better on every aggregate** — spread → 9.4 %, mean peak error 0.58 → 0.36, worst 1.95 → 0.61 | tools/gen_sdtm_coefficients.py, src/sdtm/mod.rs |
 | The storm kernel's memory | whether a longer memory is what the storm peak is short of — the remedy §10.15 named, tested before it was built | eight kernels pinned with `--pin-kernel` at the shipped operating point against the free fit, all held out by calendar month; and the sixteen comparisons split on Bruinsma & Laurens's own multiple-peak label | **no.** The peak error is uncorrelated with activity (r = **−0.19** against `ln(peak ap)`) and the split is **multiple-peak against single-peak**: 0.619 against 1.127, and **all ten MP comparisons under-reach at every one of the eight rungs**. Unit DC gain means a longer kernel lowers every modelled peak, helping the storms that over-reach and hurting the ten that do not | tools/gen_sdtm_coefficients.py |
+| USGS Dst as the storm driver | whether the open `Dst` is what JB2008's 23.7 % is made of — JB2008 is the only `Dst`-driven model (Ф23.B, first step) | `--dst`: the screened hourly Dst4 depression drives the kernel, against the same fit on `ap`, held out by calendar month | **no.** Worse on every aggregate: held-out spread 10.8 → 13.3 %, mean peak error 0.35 → **0.64**, LOSMO 21.9 → 23.4 %; the kernel collapses to 0.02 / 1.02 h because `Dst` already carries the ring current's memory (§10.15) | tools/gen_sdtm_coefficients.py |
 | SDTM-1 on the drag path | a fitted field is not a force model: the `Atmosphere` the STM reads must be the field, and its gradient the field's own | the wrapper against the field at the named point, the dual gradient against the analytic `dρ/dz`, the boundary degeneracy, a 6015-point positivity sweep, and `CalibratedAtmosphere` over it | bit-equal value; gradient < **1e-14** relative; `1/H` finite and positive everywhere, smallest ρ **9.0e-33 kg/m³**; no second model evaluation and no fallback arm, unlike the other three wrappers | src/sdtm/atmosphere.rs |
 | SDTM-1's altitude convention | the conventions of the file a model was fitted to are part of its parameters, and nothing that round-trips a model against itself checks them | the fit's own input column against the docstring: TU Delft column 4 is "Altitude (m), GRS80" | the docstring said a spherical datum; the fit used geodetic height. **21.371 km** apart at the equator, a factor of **1.44** in density at 400 km. Corrected, and `SdtmAtmosphere` removes the choice from the caller | src/sdtm/mod.rs |
 | SDTM-1 in both bridges | #319's defect is a capability that reaches one bridge and not the other | the same four names defined, registered and exercised on both sides, enforced by a test that reads both files | 4 of 4 name-for-name; `just capi` **12/12** across C99–C23 × C++20–C++26 × throw/nothrow × `-fshort-enums`; the kernel's unit gain and the interval's multiplicativity pinned as exact equalities in C, C++ and Python | tests/bridge_parity.rs, tests/c/smoke.c, tests/bindings.py |
@@ -7227,6 +7228,24 @@ to `Kp` 9 is what the 10.5 h late peak looked like it was measuring. **§10.17 m
 before building it and it is wrong**: the peak error does not correlate with activity at all, the
 kernel's memory is not what the peak is short of, and the deficit belongs to the storms that
 reintensify.
+
+**USGS Dst as the kernel's driver, Ф23.B's first step: refuted (2026-10-28).** JB2008 is the one model
+at 23.7 % and the only one driven by `Dst`, so the open `Dst` was the next driver to try. `--dst` feeds
+the kernel the hourly depression `max(0, 5.72 − Dst4)` nT — 5.72 being Dst4's quiet-hour median — from
+the screened USGS series (§10.7; 87 383 of 97 896 hours kept, the rest held at the last kept value),
+at the shipped operating point (`--degree 2 --caps storm-log1`), against the same run on `ap`:
+
+| driver | LOSMO MAPE | kernel onset / recovery | held-out spread | mean R | mean \|peak M/O − 1\| | within ±25 % | mean \|onset\| |
+|---|---|---|---|---|---|---|---|
+| 3-hourly `ap` (shipped) | **21.9 %** | 0.99 / 2.81 h | **10.8 %** | **0.884** | **0.35** | **3 / 16** | **6.5 h** |
+| USGS Dst4 depression | 23.4 % | 0.02 / 1.02 h | 13.3 % | 0.828 | 0.64 | 2 / 16 | 8.0 h |
+
+Worse on every column, and the shape says why: the kernel collapses to almost no memory, because `Dst`
+already integrates the ring current and lags the thermosphere's heating, and the modelled peak
+enhancement then reaches 0.13–0.83 of the measured one. So `Dst` as an *amplitude* input in place of
+`ap` is not what JB2008's 23.7 % is made of; what remains of Ф23.B is the heating/NO-cooling state
+equations, whose heating term needs a proxy for the *input* rather than for the ring current's
+accumulated state.
 
 ---
 

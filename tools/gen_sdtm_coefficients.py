@@ -128,6 +128,16 @@ STORM_SCALE = 100.0
 REFERENCE_AP = 15.0
 AP_CADENCE = 3.0 * 3600.0  # the CelesTrak ap series' own cadence
 AP60_CADENCE = 3600.0  # the GFZ Hp60/ap60 series' own cadence
+# The USGS hourly Dst screen (`docs/verification.md` §10.7): the `variation` product carries fill
+# values averaged into hours, multi-week offsets and spikes to 1e4 nT, none of them geomagnetic. An
+# hour is kept when Dst4 lies inside the bounds and, where Dst3 exists, the two agree to within
+# DST_AGREEMENT; the 99th percentile of |Dst4 - Dst3| over in-range hours is 66 nT. A rejected or
+# missing hour holds the last kept value, the zero-order hold the kernel already assumes.
+DST_BOUNDS = (-600.0, 100.0)
+DST_AGREEMENT = 150.0
+# Dst4's median over quiet hours (Hp60 <= 1), 2015-09 to 2026-10: USGS's zero is near zero, Kyoto's
+# is not. The disturbance the kernel is driven by is the depression below it, never negative.
+DST_QUIET = 5.72
 EPOCH = dt.date(1957, 10, 1)  # the first day of SW-All.csv
 
 
@@ -338,7 +348,39 @@ def load_ap60() -> tuple[np.ndarray, pd.Timestamp]:
     return frame.ap60.to_numpy().astype(float), start.iloc[0]
 
 
-def load(trailing_mean: bool = True, hourly_storm: bool = False) -> pd.DataFrame:
+def load_dst() -> tuple[np.ndarray, pd.Timestamp]:
+    """The USGS hourly Dst4 depression `max(0, DST_QUIET - Dst4)`, screened, and its first hour.
+
+    `tools/fetch-usgs-dst.sh` writes one row per hour, stamped at the hour's centre; the grid is
+    rebuilt from the stamps and checked contiguous, so the sample's interval is an index.
+    """
+    path = DENSITY / "usgs_dst_hourly.txt"
+    if not path.exists():
+        sys.exit(f"no {path.name}; run tools/fetch-usgs-dst.sh")
+    frame = pd.read_csv(
+        path,
+        sep=r"\s+",
+        comment="#",
+        header=None,
+        names=["t", "dst4", "dst3"],
+        na_values=["null"],
+        engine="c",
+    )
+    start = pd.to_datetime(frame.t.str.slice(0, 13) + ":00:00")
+    step = start.diff().iloc[1:].unique()
+    if step.size != 1 or step[0] != pd.Timedelta(hours=1):
+        sys.exit(f"{path.name} is not a contiguous hourly grid: steps {step}")
+    dst4, dst3 = frame.dst4.to_numpy(), frame.dst3.to_numpy()
+    keep = (dst4 > DST_BOUNDS[0]) & (dst4 < DST_BOUNDS[1])
+    keep &= ~(np.abs(dst4 - dst3) > DST_AGREEMENT)
+    held = pd.Series(np.where(keep, dst4, np.nan)).ffill().fillna(DST_QUIET).to_numpy()
+    print(
+        f"{path.name}: {keep.sum()} of {keep.size} hours kept by the screen", flush=True
+    )
+    return np.maximum(DST_QUIET - held, 0.0), start.iloc[0]
+
+
+def load(trailing_mean: bool = True, storm_driver: str = "ap") -> pd.DataFrame:
     files = sorted(glob.glob(f"{DENSITY}/GC_DNS_ACC_*_v02c.txt")) + sorted(
         glob.glob(f"{DENSITY}/SA_DNS_POD_*_v02.txt")
     )
@@ -399,12 +441,12 @@ def load(trailing_mean: bool = True, hourly_storm: bool = False) -> pd.DataFrame
     rows.attrs["ap_epoch"] = flux.index[0]
 
     # And the kernel's own driver, with each row's *previous* interval in it.
-    if hourly_storm:
-        driver, driver_epoch = load_ap60()
+    if storm_driver in ("ap60", "dst"):
+        driver, driver_epoch = load_ap60() if storm_driver == "ap60" else load_dst()
         elapsed = (rows.t - driver_epoch).dt.total_seconds().to_numpy()
         offset = np.floor(elapsed / AP60_CADENCE).astype(int)
         if offset.min() < 1 or offset.max() >= driver.size:
-            sys.exit("the ap60 series does not span the corpus")
+            sys.exit(f"the {storm_driver} series does not span the corpus")
         rows.attrs["driver_cadence"] = AP60_CADENCE
     else:
         driver, driver_epoch = ap, flux.index[0]
@@ -793,14 +835,14 @@ def recovery_half_time(
     return float(hours[after[0]] - hours[peak]) if after.size else float("nan")
 
 
-def storm_window_rows(centred_mean: bool, hourly_storm: bool) -> pd.DataFrame | None:
+def storm_window_rows(centred_mean: bool, storm_driver: str) -> pd.DataFrame | None:
     """The corpus at its own cadence, restricted to the storm windows.
 
     `load` thins the 10 s and 30 s products to 120 s, which is about 45 samples to an orbit -- enough
     to average one. The `--thin` of the fit is *not* applied: a fit needs decorrelated rows and an
     orbit average needs all of them, and those are different requirements on the same data.
     """
-    rows = load(trailing_mean=not centred_mean, hourly_storm=hourly_storm)
+    rows = load(trailing_mean=not centred_mean, storm_driver=storm_driver)
     time = rows.t.to_numpy()
     inside = np.zeros(len(rows), dtype=bool)
     for storm in storm_onsets(rows.attrs["ap"], rows.attrs["ap_epoch"]):
@@ -1101,11 +1143,20 @@ def main() -> None:
         action="store_true",
         help="report LOSMO over a ladder of ridge strengths and cap sets, then stop",
     )
+    parser.add_argument(
+        "--dst",
+        action="store_true",
+        help="drive the storm kernel from the USGS hourly Dst4 depression below its quiet level, "
+        "screened (DST_BOUNDS, DST_AGREEMENT); storms are still detected on the 3-hourly ap",
+    )
     argument = parser.parse_args()
+    if argument.ap60 and argument.dst:
+        sys.exit("--ap60 and --dst choose the same driver; give one")
+    driver = "ap60" if argument.ap60 else "dst" if argument.dst else "ap"
 
     began = time.time()
     rows = (
-        load(trailing_mean=not argument.centred_mean, hourly_storm=argument.ap60)
+        load(trailing_mean=not argument.centred_mean, storm_driver=driver)
         .iloc[:: argument.thin]
         .reset_index(drop=True)
     )
@@ -1332,7 +1383,7 @@ def main() -> None:
     # 64 minutes, which cannot average an orbit, and every timing number below is read off an orbit
     # average. The parameters are the ones already fitted -- the whole set for the in-sample pass, and
     # each calendar month's own leave-one-out fold for the held-out pass.
-    storm_rows = storm_window_rows(argument.centred_mean, argument.ap60)
+    storm_rows = storm_window_rows(argument.centred_mean, driver)
     if storm_rows is not None:
         storm_arg = fit_arguments(storm_rows, argument.degree)
         storm_model = Model(

@@ -9,7 +9,7 @@
 
 use spacelab_core::{
     Angle,
-    time::{Epoch, SECONDS_PER_DAY, Ut1},
+    time::{Epoch, SECONDS_PER_DAY, Tt, Ut1},
 };
 
 // GMST(IAU 1982) coefficients, seconds of time, from Aoki et al. (1982) / Vallado Eq. 3-47.
@@ -91,6 +91,29 @@ pub fn gmst82(t: Epoch<Ut1>) -> Angle {
     let seconds = C0 + SECONDS_PER_DAY * frac + ((C3 * c + C2) * c + C1) * c;
 
     Angle::from_radians(reduce_seconds_to_radians(seconds))
+}
+
+/// Arcseconds in one revolution.
+const ARCSEC_PER_TURN: f64 = 1_296_000.0;
+
+/// The kinematic terms of the IAU 1982 equation of the equinoxes,
+/// `0.00264″ sin Ω + 0.000063″ sin 2Ω`.
+///
+/// `Ω` is the IAU 1980 mean longitude of the Moon's ascending node,
+/// `125°02′40.280″ − (5ʳ + 134°08′10.539″)·T + 7.455″·T² + 0.008″·T³`, `T` in Julian centuries of
+/// TT from J2000.
+///
+/// TEME needs these and nothing else of the equation of the equinoxes: Eq. (C-1) of Vallado et al.,
+/// AIAA 2006-6753, rotates TEME into the pseudo-Earth-fixed frame by `GMST1982 + EqEquinox1982_kin`,
+/// and the authors confirmed (2026-10-28) that (C-1), not the paper's Eq. (1), is the intended
+/// transform. `derivations/teme_c1.mac` evaluates both at 40 digits on the paper's example: the
+/// angle is 0.001 850″ there, and it moves the example's position by 7.1 cm.
+#[must_use]
+pub fn equinox_kinematic_1982(tt: Epoch<Tt>) -> Angle {
+    let t = tt.julian_centuries();
+    let node = ((0.008 * t + 7.455) * t - (5.0 * ARCSEC_PER_TURN + 482_890.539)) * t + 450_160.280;
+    let node = Angle::from_arcseconds(libm::fmod(node, ARCSEC_PER_TURN)).radians();
+    Angle::from_arcseconds(0.002_64 * libm::sin(node) + 0.000_063 * libm::sin(2.0 * node))
 }
 
 /// Reduce an angle expressed in seconds of time into `[0, 2π)` radians.
@@ -274,5 +297,17 @@ mod tests {
                 "T = {centuries}: {got} against {want}"
             );
         }
+    }
+
+    /// `derivations/teme_c1.mac` at 40 digits, at the AIAA 2006-6753 Appendix C epoch
+    /// (2004-04-06 07:51:28.386 UTC, TT = UTC + 64.184 s): `Ω` = 42.604 613 979 722°, and the
+    /// kinematic terms 0.001 849 888 944 514 253″. The tolerance is the epoch's own: a day count
+    /// near 1557 in `f64` resolves 2e-11 days, which moves `Ω` by 1e-12 rad.
+    #[test]
+    fn kinematic_equinox_terms_match_the_cas_at_the_appendix_c_epoch() {
+        let tt = Epoch::<Tt>::from_days_since_j2000(1556.5 + (28_288.386 + 64.184) / 86_400.0);
+        let got = equinox_kinematic_1982(tt).arcseconds();
+        let want = 1.849_888_944_514_253e-3;
+        assert!((got - want).abs() < 1e-15, "{got:.18e} against {want:.18e}");
     }
 }

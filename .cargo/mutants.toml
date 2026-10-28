@@ -3391,8 +3391,8 @@ exclude_re = [
     # so its sum is either exactly zero or larger than 1e-11 in magnitude. `-1e-13` and its
     # neighbours reach the *high* half, which is what
     # `the_reduction_puts_a_day_boundary_at_the_start_of_the_day_not_the_end` pins.
-    "earth_rotation\\.rs:105:17: replace \\+= with -= in reduce_seconds_to_radians",
-    "earth_rotation\\.rs:105:17: replace \\+= with \\*= in reduce_seconds_to_radians",
+    "earth_rotation\\.rs:128:17: replace \\+= with -= in reduce_seconds_to_radians",
+    "earth_rotation\\.rs:128:17: replace \\+= with \\*= in reduce_seconds_to_radians",
 
     # The sign of a second-order term that rounding erases before anyone can read it.
     #

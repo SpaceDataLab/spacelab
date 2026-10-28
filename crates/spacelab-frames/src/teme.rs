@@ -6,7 +6,7 @@
 //! series. See [`teme_to_itrf`]'s "What is neglected".
 
 use spacelab_core::{Angle, Epoch, Mat3, Tt, Ut1, Vec3};
-use spacelab_fa::gmst82;
+use spacelab_fa::{equinox_kinematic_1982, gmst82};
 
 use crate::polar_motion::{pef_to_itrf, tio_locator};
 use crate::rotation::{Itrf, Pef, Rotation, Teme, Transform};
@@ -22,18 +22,25 @@ pub const EARTH_ROTATION_RATE: f64 = 7.292_115_146_706_979e-5;
 
 /// Sidereal rotation from TEME into the pseudo-Earth-fixed frame.
 ///
-/// A single rotation about the pole, by Greenwich Mean Sidereal Time. TEME is not
-/// defined by any standards body — it is whatever SGP4 emits — and this is the
-/// transform the literature attaches to it.
+/// A single rotation about the pole, by Greenwich Mean Sidereal Time 1982 plus the kinematic
+/// terms of the 1982 equation of the equinoxes ([`equinox_kinematic_1982`]): Eq. (C-1) of Vallado,
+/// Crawford, Hujsak and Kelso, "Revisiting Spacetrack Report #3", AIAA 2006-6753. TEME is not
+/// defined by any standards body — it is whatever SGP4 emits — and that paper is the definition
+/// the literature attaches to it.
+///
+/// The same paper's Eq. (1) rotates by GMST alone, and its Appendix C example follows (C-1); the
+/// authors confirmed (2026-10-28) that (C-1) is the intended transform. The two differ by
+/// 0.0027″ at most, 8 cm at LEO radius. `tt` is the time argument of the lunar node in those terms.
 #[must_use]
-pub fn teme_to_pef(ut1: Epoch<Ut1>) -> Rotation<Teme, Pef> {
-    Rotation::from_matrix(Mat3::rot3(gmst82(ut1).radians()))
+pub fn teme_to_pef(ut1: Epoch<Ut1>, tt: Epoch<Tt>) -> Rotation<Teme, Pef> {
+    let angle = gmst82(ut1).radians() + equinox_kinematic_1982(tt).radians();
+    Rotation::from_matrix(Mat3::rot3(angle))
 }
 
 /// The full TEME to ITRF transform, rotation and angular velocity together.
 ///
 /// ```text
-/// TEME ──GMST82──▶ PEF ──polar motion──▶ ITRF
+/// TEME ──GMST82 + EqEq82_kin──▶ PEF ──polar motion──▶ ITRF
 /// ```
 ///
 /// The angular velocity is `ω·ẑ` expressed in TEME. Because the first rotation is
@@ -67,7 +74,7 @@ pub fn teme_to_itrf(
     lod_seconds: f64,
 ) -> Transform<Teme, Itrf> {
     let sp = tio_locator(tt);
-    let rotation: Rotation<Teme, Itrf> = pef_to_itrf(xp, yp, sp) * teme_to_pef(ut1);
+    let rotation: Rotation<Teme, Itrf> = pef_to_itrf(xp, yp, sp) * teme_to_pef(ut1, tt);
     // LOD is the day's excess over 86400 SI seconds, so that is the exact denominator.
     let omega = EARTH_ROTATION_RATE * (1.0 - lod_seconds / 86_400.0);
     Transform::new(rotation, Vec3::new(0.0, 0.0, omega))

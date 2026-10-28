@@ -905,6 +905,7 @@ if have maxima; then
     mac_zeros edl_allen_eggers.mac 7 "Allen-Eggers ballistic entry and its peak deceleration"
     mac_zeros atmosphere_lift.mac 25 "the density lift to SI and its radial gradient -rho/H"
     mac_zeros sdtm_uncertainty.mac 14 "the shipped interval's normal quantiles and log symmetry"
+    mac_zeros teme_c1.mac 3 "TEME to ITRF by AIAA 2006-6753 Eq. (C-1): ROT3 composes and fixes the pole; the Appendix C example at 40 digits"
     mac_zeros sdtm_no_cooling.mac 12 "the heating and nitric-oxide cooling step: exact N step and mean, frozen D step, fixed points, local error from h^3"
     mac_zeros density_calibration_ridge.mac 104 "the ridge calibration fit solves its normal equations exactly"
     mac_zeros wind_model_vsh.mac 222 "the vector spherical harmonic basis by Rodrigues' formula; the ridge stationarity"

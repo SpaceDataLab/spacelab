@@ -2975,6 +2975,7 @@ dependencies = [
  "spacelab-core",
  "spacelab-earth",
  "spacelab-estimation",
+ "spacelab-fa",
  "spacelab-frames",
  "spacelab-testkit",
 ]

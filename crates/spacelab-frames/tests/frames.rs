@@ -107,7 +107,7 @@ fn the_tio_locator_is_minus_47_microarcseconds_per_century() {
     assert!(tio_locator(Epoch::<Tt>::J2000).arcseconds().abs() < 1e-30);
 }
 
-/// `R = pef_to_itrf(xp, yp, sp) · teme_to_pef(ut1)` must stay orthonormal, and must stay a
+/// `R = pef_to_itrf(xp, yp, sp) · teme_to_pef(ut1, tt)` must stay orthonormal, and must stay a
 /// *rotation* rather than a reflection. `det R = 1` is necessary and not sufficient: a matrix can
 /// have unit determinant and not be orthogonal, so `R Rᵀ = I` is asserted too.
 ///
@@ -206,7 +206,10 @@ fn the_pole_is_left_alone_by_sidereal_rotation() {
     // teme_to_pef turns about ẑ, so ẑ is its fixed axis. This is what makes the
     // angular velocity vector the same in both frames, and hence the velocity
     // transform correct at the PEF stage.
-    let r = teme_to_pef(Epoch::<Ut1>::from_days_since_j2000(77.7));
+    let r = teme_to_pef(
+        Epoch::<Ut1>::from_days_since_j2000(77.7),
+        Epoch::<Tt>::from_days_since_j2000(77.7),
+    );
     let pole = r * Position::<Teme>::new(Vec3::new(0.0, 0.0, 1.0));
     assert!((pole.vector.z - 1.0).abs() < 1e-15);
     assert!(pole.vector.x.abs() < 1e-15 && pole.vector.y.abs() < 1e-15);

@@ -30,6 +30,7 @@ spacelab-testkit = { path = "../spacelab-testkit" }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 sgp4 = "2.4"
 spacelab-earth = { path = "../spacelab-earth" }
+spacelab-fa = { path = "../spacelab-fa" }
 
 [[bench]]
 name = "sgp4"

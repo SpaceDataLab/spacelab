@@ -1,0 +1,70 @@
+/* TEME to ITRF by Eq. (C-1) of Vallado, Crawford, Hujsak and Kelso, "Revisiting Spacetrack Report
+   #3", AIAA 2006-6753 (Rev 3, p. 32):
+
+     r_ITRF = W ROT3(theta_GMST1982) ROT3(EqEquinox1982_kin) r_TEME,
+
+   EqEquinox1982_kin = 0.00264" sin(Omega) + 0.000063" sin(2 Omega), Omega the IAU 1980 mean
+   longitude of the Moon's ascending node. Vallado confirmed (2026-10-28) that (C-1), not Eq. (1),
+   is the intended transform. This file proves the composition the code relies on and evaluates
+   the paper's own example at 40 digits, once by Eq. (1) and once by (C-1). The (C-1) ITRF state
+   printed last is what `crates/spacelab-frames/tests/teme_vallado_2006.rs` holds the
+   double-precision transform to. */
+
+ratprint : false$
+
+/* 1. Frame rotations, the same matrices as spacelab-core's Mat3. */
+R1(a) := matrix([1, 0, 0], [0, cos(a), sin(a)], [0, -sin(a), cos(a)])$
+R2(a) := matrix([cos(a), 0, -sin(a)], [0, 1, 0], [sin(a), 0, cos(a)])$
+R3(a) := matrix([cos(a), sin(a), 0], [-sin(a), cos(a), 0], [0, 0, 1])$
+zero(m) := apply("+", map(lambda([row], apply("+", map(abs, row))), args(m)))$
+print("ROT3(a) ROT3(b) - ROT3(a + b):", zero(trigsimp(trigreduce(R3(a) . R3(b) - R3(a + b)))))$
+print("ROT3 fixes the pole:", zero(R3(a) . matrix([0], [0], [1]) - matrix([0], [0], [1])))$
+
+/* 2. The example's epoch, in days from J2000.0 (2000-01-01 12:00), exact rationals.
+   2004-04-06 00:00 is 1557 days after 2000-01-01 00:00. */
+utc_day : 1557 - 1/2 + (7*3600 + 51*60 + 28386/1000)/86400$
+ut1_day : utc_day + (-439961/1000000)/86400$
+tt_day : utc_day + (32 + 32184/1000)/86400$
+print("UT1 days since J2000, check:", ratsimp(ut1_day - (utc_day - 439961/86400000000)))$
+
+fpprec : 40$
+T_ut1 : ut1_day/36525$
+T_tt : tt_day/36525$
+
+/* GMST 1982 (Aoki et al. 1982), seconds of time, reduced to a day, then radians. */
+gmst_s : 67310.54841b0 + (876600*3600 + 8640184.812866b0)*T_ut1 + 0.093104b0*T_ut1^2 - 6.2b-6*T_ut1^3$
+gmst_s : gmst_s - 86400*floor(gmst_s/86400)$
+gmst : bfloat(gmst_s*2*%pi/86400)$
+
+/* IAU 1980 lunar node, arcseconds: 125 deg 02' 40.280" - (5 rev + 134 deg 08' 10.539") T
+   + 7.455" T^2 + 0.008" T^3, T in Julian centuries of TT. */
+asec : bfloat(%pi/(180*3600))$
+node_as : 450160.280b0 - (5*1296000 + 482890.539b0)*T_tt + 7.455b0*T_tt^2 + 0.008b0*T_tt^3$
+node : bfloat(node_as*asec)$
+kin : bfloat((0.00264b0*sin(node) + 0.000063b0*sin(2*node))*asec)$
+print("lunar node, deg:", bfloat(node*180/%pi - 360*floor(node*180/%pi/360)))$
+print("kinematic terms, arcsec:", bfloat(kin/asec))$
+
+/* Polar motion as spacelab-frames' pef_to_itrf: ROT1(-yp) ROT2(-xp) ROT3(s'). */
+xp : bfloat(-0.140682b0*asec)$
+yp : bfloat(0.333309b0*asec)$
+sp : bfloat(-47b-6*T_tt*asec)$
+W : bfloat(R1(-yp) . R2(-xp) . R3(sp))$
+omega : bfloat(7.292115146706979b-5*(1 - 0.0015563b0/86400))$
+
+r_teme : matrix([5094180.10720b0], [6127644.70520b0], [6380344.53270b0])$
+v_teme : matrix([-4746.131494b0], [785.817998b0], [5531.931288b0])$
+r_want : matrix([-1033479.38300b0], [7901295.27540b0], [6380356.59580b0])$
+v_want : matrix([-3225.636520b0], [-2872.451450b0], [5531.924446b0])$
+cross(a, b) := matrix([a[2,1]*b[3,1] - a[3,1]*b[2,1]], [a[3,1]*b[1,1] - a[1,1]*b[3,1]], [a[1,1]*b[2,1] - a[2,1]*b[1,1]])$
+norm(c) := bfloat(sqrt(c[1,1]^2 + c[2,1]^2 + c[3,1]^2))$
+to_itrf(theta) := block([R : bfloat(W . R3(theta)), w : matrix([0], [0], [omega])],
+    [R . r_teme, R . (v_teme - cross(w, r_teme))])$
+
+eq1 : to_itrf(gmst)$
+c1 : to_itrf(gmst + kin)$
+print("Eq. (1) position gap, m:", norm(eq1[1] - r_want))$
+print("Eq. (C-1) position gap, m:", norm(c1[1] - r_want))$
+print("Eq. (C-1) velocity gap, m/s:", norm(c1[2] - v_want))$
+print("Eq. (C-1) ITRF r, m:", c1[1][1,1], c1[1][2,1], c1[1][3,1])$
+print("Eq. (C-1) ITRF v, m/s:", c1[2][1,1], c1[2][2,1], c1[2][3,1])$

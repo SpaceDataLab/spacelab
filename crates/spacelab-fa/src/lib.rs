@@ -27,7 +27,7 @@ pub mod tdb;
 mod tdb_tables;
 
 pub use cio::{cio_locator_s, cip_xy, era};
-pub use earth_rotation::gmst82;
+pub use earth_rotation::{equinox_kinematic_1982, gmst82};
 pub use leap_seconds::{LeapError, delta_at, tai_to_utc, utc_to_tai};
 pub use nutation::{nutation_00a, nutation_06a};
 pub use tdb::{tdb_minus_tt, tdb_to_tt, tt_to_tdb};

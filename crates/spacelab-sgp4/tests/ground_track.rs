@@ -1,7 +1,7 @@
 //! The whole chain, end to end, against an implementation that shares none of it.
 //!
 //! ```text
-//! TLE ──SGP4──▶ TEME ──GMST82──▶ PEF ──polar motion──▶ ITRF ──Vermeille──▶ lat, lon, h
+//! TLE ──SGP4──▶ TEME ──GMST82 + EqEq82_kin──▶ PEF ──polar motion──▶ ITRF ──Vermeille──▶ lat, lon, h
 //! ```
 //!
 //! The oracle is Skyfield. It is of the Vallado lineage for SGP4 — as is the `sgp4`
@@ -13,11 +13,18 @@
 //! Skyfield had no polar-motion table loaded, so the fixtures were produced with
 //! `xp = yp = 0` and we match that. The residual difference is the TIO locator,
 //! `2e-11` rad in 2008, which is 0.14 mm at the surface.
+//!
+//! Skyfield rotates TEME by GMST82 alone, AIAA 2006-6753's Eq. (1); ours is the paper's Eq. (C-1),
+//! which adds the kinematic terms of the 1982 equation of the equinoxes and which its authors
+//! confirmed is the intended transform. The two differ by exactly that rotation about the pole,
+//! 0.0019″ in 2008 (5.3e-7° of longitude, 6 cm on the surface), so it is removed from our
+//! longitude before the comparison; everything else must still agree to 1e-7°.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use spacelab_core::{Angle, Epoch, Tt, Ut1, UtcDateTime};
 use spacelab_earth::itrf_to_geodetic;
+use spacelab_fa::equinox_kinematic_1982;
 use spacelab_frames::teme_to_itrf;
 use spacelab_sgp4::Satellite;
 
@@ -89,7 +96,10 @@ fn the_iss_ground_track_agrees_with_skyfield() {
 
         let dlat = (geo.latitude.degrees() - lat).abs();
         let dlon = {
-            let d = (geo.longitude.degrees() - lon).rem_euclid(360.0);
+            // Eq. (C-1) turns the Earth-fixed frame further east by the kinematic terms, so our
+            // longitude is smaller than Eq. (1)'s by exactly that angle.
+            let eq1_longitude = geo.longitude.degrees() + equinox_kinematic_1982(tt).degrees();
+            let d = (eq1_longitude - lon).rem_euclid(360.0);
             d.min(360.0 - d)
         };
         let dh = (geo.height.metres() - h).abs();

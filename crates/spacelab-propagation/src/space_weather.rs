@@ -1445,7 +1445,10 @@ XXXX 05 10 19.0 19.50 33733.79167 33733.81250  9.000  154 0
     /// driver assembler rather than as a wrong date.
     #[test]
     fn the_calendar_round_trip_is_exact_over_four_centuries() {
-        for ordinal in days_from_civil(1800, 1, 1)..days_from_civil(2200, 1, 1) {
+        // The second range is the era before year 0, the branch a negative day number takes.
+        for ordinal in (days_from_civil(1800, 1, 1)..days_from_civil(2200, 1, 1))
+            .chain(days_from_civil(-401, 1, 1)..days_from_civil(1, 1, 1))
+        {
             let (y, m, d) = civil_from_days(ordinal);
             assert_eq!(days_from_civil(y, m, d), ordinal, "{y}-{m}-{d}");
         }
@@ -1512,6 +1515,40 @@ XXXX 05 10 19.0 19.50 33733.79167 33733.81250  9.000  154 0
         assert_eq!(out[127].f107_observed, days[73].f107_observed);
         assert_eq!(out[100].year, 2024);
         assert_eq!((out[100].month, out[100].day), (4, 10));
+    }
+
+    /// The measured prefix comes back as it went in: only synthesised days get recomputed means.
+    #[test]
+    fn the_measured_days_are_returned_unchanged() {
+        let days = ramp(100);
+        let out = extend_forecast(&days, ForecastMethod::Persistence, 2024, 5, 9).unwrap();
+        assert_eq!(out[..100], days[..]);
+    }
+
+    /// A forecast across a new year before 1970 — a negative day number — carries the dates the
+    /// calendar gives, not the last measured day's year.
+    #[test]
+    fn a_forecast_across_a_year_boundary_before_1970_carries_its_own_dates() {
+        let start = days_from_civil(1959, 12, 25) - 99;
+        let days: Vec<SpaceWeatherDay> = ramp(100)
+            .into_iter()
+            .zip(start..)
+            .map(|(d, ordinal)| {
+                let (year, month, day) = civil_from_days(ordinal);
+                SpaceWeatherDay {
+                    year,
+                    month,
+                    day,
+                    ..d
+                }
+            })
+            .collect();
+        let out = extend_forecast(&days, ForecastMethod::Persistence, 1960, 1, 5).unwrap();
+        assert_eq!(out.len(), 111);
+        for (d, ordinal) in out.iter().zip(start..) {
+            assert_eq!(days_from_civil(d.year, d.month, d.day), ordinal, "{d:?}");
+        }
+        assert_eq!((out[110].year, out[110].month, out[110].day), (1960, 1, 5));
     }
 
     /// The refusals, each of which would otherwise produce a mean over a window that is not there.

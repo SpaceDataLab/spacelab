@@ -1042,6 +1042,15 @@ exclude_re = [
     # fixture text carries a nine-field row: `< 9` keeps it and `<= 9` drops it.
     "space_weather\\.rs:547:28: replace \\|\\| with && in parse_hpo",
 
+    # `extend_forecast`'s `horizon = through + FLUX_WINDOW / 2` with `/` -> `*` synthesises to
+    # `through + 162` instead of `through + 40`. Every returned day `i <= through` reads only its
+    # trailing window `i - 80 ..= i` and its centred window `i - 40 ..= i + 40`, both inside
+    # `..= through + 40`; each synthesised day depends only on earlier ones (persistence copies the
+    # last measured day, recurrence the day 27 earlier), so those values are the same under either
+    # horizon. Both `horizon - origin` and `horizon - through` stay positive, so neither `?`
+    # changes. Identical `Vec` on every input; the mutant only synthesises 122 days more.
+    "space_weather\\.rs:452:41: replace / with \\* in extend_forecast",
+
     # --- crates/spacelab-propagation/src/time_variable_gravity.rs ---
     # --- Three floating tolerance ties, each unreachable on the binary grid its operands live on.
     # --- Proofs, not measurements; the two numerator facts are exact-integer results, checked as

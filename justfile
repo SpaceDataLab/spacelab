@@ -188,7 +188,7 @@ mutants NAME +FILES:
     mkdir -p "$out" "{{MUTANTS_CACHE}}/tmp" "$snap"
     args=(); for f in {{FILES}}; do args+=(--file "$f"); just mutants-anchors "$f" || exit 1; done
     rm -rf "$snap"; mkdir -p "$snap"
-    tar -cf - --exclude=./target --exclude=./.claude . | tar -xf - -C "$snap" || exit 1
+    tar -cf - --exclude=./target --exclude=./.claude --exclude=./data/validation/tudelft-v02 . | tar -xf - -C "$snap" || exit 1
     just _tree-stamp "$snap" > "$out/tree.stamp"
     just LANE={{LANE}} MEM_BATCH={{MEM_BATCH}} _capped-batch cargo mutants -d "$snap" --jobs {{JOBS}} --test-tool {{TEST_TOOL}} \
         --timeout {{MUTANTS_TIMEOUT}} "${args[@]}" --output "$out" \
@@ -227,7 +227,7 @@ mutants-pkg NAME PACKAGES *EXTRA:
     args=(); for p in {{PACKAGES}}; do args+=(-p "$p"); done
     for f in {{MUTANTS_SKIP}}; do args+=(--exclude "$f"); done
     rm -rf "$snap"; mkdir -p "$snap"
-    tar -cf - --exclude=./target --exclude=./.claude . | tar -xf - -C "$snap" || exit 1
+    tar -cf - --exclude=./target --exclude=./.claude --exclude=./data/validation/tudelft-v02 . | tar -xf - -C "$snap" || exit 1
     just _tree-stamp "$snap" > "$out/tree.stamp"
     just LANE={{LANE}} MEM_BATCH={{MEM_BATCH}} _capped-batch cargo mutants -d "$snap" --jobs {{JOBS}} --test-tool {{TEST_TOOL}} \
         --iterate "${args[@]}" {{EXTRA}} --output "$out" \
@@ -248,6 +248,8 @@ mutants-pkg NAME PACKAGES *EXTRA:
 # So a run no longer reads the live tree at all: it works on a snapshot taken at the instant it
 # starts. 75 MB and 0.13 s buys back the ability to edit source while a block runs, which is most of
 # the campaign's wall clock. The stamp is then a check that nothing wrote into the snapshot itself.
+# The TU Delft archive and its corpus (23 GB, read only by tools/, never by a crate) stay out of
+# it: copied into every snapshot they filled /home once.
 _tree-stamp DIR=".":
     @cd {{DIR}} && find crates -name '*.rs' -type f -print0 | sort -z | xargs -0 sha256sum | \
         cat - .cargo/mutants.toml | sha256sum | cut -d' ' -f1

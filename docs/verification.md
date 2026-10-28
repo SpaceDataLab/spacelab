@@ -349,6 +349,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | The storm driver, three hypotheses | which of the driver's cadence, the loss, or the regressor's *scale* caps the peak — the first was the obvious answer and it is wrong | GFZ hourly `ap60` (365 544-row contiguous series) against 3-hourly `ap`; a fit on nothing but the 3130 storm-window rows; four candidate regressor forms, all held out by calendar month | `ap60` **worse** (spread 14.8 → 18.0 %); storm-only fit **worse** (peak error 0.38 → 0.46); `ln(1 + storm/15)` at the same 35 coefficients **better on every aggregate** — spread → 9.4 %, mean peak error 0.58 → 0.36, worst 1.95 → 0.61 | tools/gen_sdtm_coefficients.py, src/sdtm/mod.rs |
 | The storm kernel's memory | whether a longer memory is what the storm peak is short of — the remedy §10.15 named, tested before it was built | eight kernels pinned with `--pin-kernel` at the shipped operating point against the free fit, all held out by calendar month; and the sixteen comparisons split on Bruinsma & Laurens's own multiple-peak label | **no.** The peak error is uncorrelated with activity (r = **−0.19** against `ln(peak ap)`) and the split is **multiple-peak against single-peak**: 0.619 against 1.127, and **all ten MP comparisons under-reach at every one of the eight rungs**. Unit DC gain means a longer kernel lowers every modelled peak, helping the storms that over-reach and hurting the ten that do not | tools/gen_sdtm_coefficients.py |
 | USGS Dst as the storm driver | whether the open `Dst` is what JB2008's 23.7 % is made of — JB2008 is the only `Dst`-driven model (Ф23.B, first step) | `--dst`: the screened hourly Dst4 depression drives the kernel, against the same fit on `ap`, held out by calendar month | **no.** Worse on every aggregate: held-out spread 10.8 → 13.3 %, mean peak error 0.35 → **0.64**, LOSMO 21.9 → 23.4 %; the kernel collapses to 0.02 / 1.02 h because `Dst` already carries the ring current's memory (§10.15) | tools/gen_sdtm_coefficients.py |
+| SDTM-1 on held-out missions | Ф15.E's gate: a model fitted on some missions must transfer to a mission it never saw, and beat NRLMSISE-00 in every bin | the shipped form refitted on the whole TU Delft archive (§10.20), one mission family held out at a time, against NRLMSISE-00 `ap[]` on the same 365 211 rows | pooled **23.5 %** (bar 25.5 %), worst edge 36.5 % (bar 40 %); **fails one bin**: `Ap` ≥ 50, 36.5 % against NRLMSISE-00's 35.4 % (§10.21) | tools/fit-sdtm-corpus.py |
 | SDTM-1 on the drag path | a fitted field is not a force model: the `Atmosphere` the STM reads must be the field, and its gradient the field's own | the wrapper against the field at the named point, the dual gradient against the analytic `dρ/dz`, the boundary degeneracy, a 6015-point positivity sweep, and `CalibratedAtmosphere` over it | bit-equal value; gradient < **1e-14** relative; `1/H` finite and positive everywhere, smallest ρ **9.0e-33 kg/m³**; no second model evaluation and no fallback arm, unlike the other three wrappers | src/sdtm/atmosphere.rs |
 | SDTM-1's altitude convention | the conventions of the file a model was fitted to are part of its parameters, and nothing that round-trips a model against itself checks them | the fit's own input column against the docstring: TU Delft column 4 is "Altitude (m), GRS80" | the docstring said a spherical datum; the fit used geodetic height. **21.371 km** apart at the equator, a factor of **1.44** in density at 400 km. Corrected, and `SdtmAtmosphere` removes the choice from the caller | src/sdtm/mod.rs |
 | SDTM-1 in both bridges | #319's defect is a capability that reaches one bridge and not the other | the same four names defined, registered and exercised on both sides, enforced by a test that reads both files | 4 of 4 name-for-name; `just capi` **12/12** across C99–C23 × C++20–C++26 × throw/nothrow × `-fshort-enums`; the kernel's unit gain and the interval's multiplicativity pinned as exact equalities in C, C++ and Python | tests/bridge_parity.rs, tests/c/smoke.c, tests/bindings.py |
@@ -6683,6 +6684,8 @@ or the registered ESA Swarm fallback — is what changes it.
 
 ### 10.11 The gate SDTM-1 does not pass, and which half of it fails
 
+*Rerun on held-out missions in §10.21, on the whole archive.*
+
 `plans/16` Ф15.E set the bar before the fit ran: **pooled held-out-mission MAPE ≤ 25.5 %** (JB2008's
 published figure), **below NRLMSISE-00 in every bin**, and **no regime-edge bin above 40 %**, with
 20.2 % (DTM2020's) as the stretch. This is that gate, evaluated, and the verdict is **not passed** —
@@ -7847,6 +7850,78 @@ as the archive's members. So the 348 693-row campaign of §10.2 is a subset of t
 numbers — the pilot's NRLMSISE-00 baseline among them — hold on it unchanged by construction rather
 than by a rerun. All three storms §10.14 could not run are now in it: 2003-10 (CHAMP, GRACE-A/B),
 2015-03 (GRACE-A/B, Swarm A/B/C) and 2017-09 (Swarm A/B/C, and GRACE-A for a third of the month).
+
+### 10.21 The gate on held-out missions, rerun on the whole archive (Ф15.E)
+
+§10.11 could not compute the number Ф15.E asks for: two missions in two altitude bands. §10.20's corpus
+holds five mission families from 250 to 540 km, so the split exists now. `tools/fit-sdtm-corpus.py`
+refits SDTM-1's shipped form — same drivers, same caps (`storm-log1`, degree 2), same kernel, same
+ridge, imported from `tools/gen_sdtm_coefficients.py` — on every 60th corpus row (one per two hours,
+365 214 rows), and holds out one **mission family** at a time: CHAMP, GRACE (A+B), GOCE, GRACE-FO,
+Swarm (A+B+C). Twins share a fold because they fly together; holding out one of a pair would score
+the model on its sibling. Each training satellite but the first carries its own log scale (bound
+±0.3, as in §10.10); a held-out family's scales are not fitted, so the raw column is the transfer of
+the absolute level. NRLMSISE-00 is the library's own, on the same rows, with §10.2's drivers
+(storm-time `ap[]`, `gtd7d`), through `examples/nrlmsise00_rows.rs`.
+
+**The Bates shape is fitted.** The pilot held `σ` at 0.020 /km because one altitude band could not
+identify it (§10.10). This corpus can, and fitting it is worth what §10.11 predicted: the GOCE fold
+falls from 24.0 % to 13.2 % raw, and the GOCE log scale the fixed-`σ` fit needed (1.29, at the
+bound) returns to 1.04. The fitted value is 0.034–0.037 /km on four folds and 0.022 /km on the fold
+that holds out GRACE. Pooled, fixed `σ` reads 23.9 % and fitted `σ` 23.5 %.
+
+| held-out family | rows | SDTM-1 raw | SDTM-1 debiased | bias | NRLMSISE-00 | NRLMSISE-00 debiased | fitted `σ` (/km) |
+|---|---|---|---|---|---|---|---|
+| CHAMP | 40 884 | 21.5 % | 20.9 % | 1.027 | 43.9 % | 20.0 % | 0.0368 |
+| GOCE | 15 280 | **13.2 %** | 12.3 % | 0.926 | 30.4 % | 18.3 % | 0.0338 |
+| GRACE A+B | 114 692 | 25.4 % | 26.2 % | 0.916 | 53.3 % | 34.0 % | 0.0219 |
+| GRACE-FO | 34 506 | 25.9 % | 25.2 % | 1.023 | 56.3 % | 28.2 % | 0.0345 |
+| Swarm A+B+C | 159 849 | 23.1 % | 23.4 % | 0.987 | 49.9 % | 27.4 % | 0.0368 |
+| **pooled** | 365 211 | **23.5 %** | 23.7 % | — | 50.1 % | 28.4 % | — |
+
+| bin (all folds pooled) | rows | SDTM-1 raw | NRLMSISE-00 raw | NRLMSISE-00 debiased |
+|---|---|---|---|---|
+| F10.7a < 100 | 179 543 | 26.3 % | 64.8 % | 31.0 % |
+| 100 ≤ F10.7a < 150 | 116 073 | 22.0 % | 40.7 % | 29.6 % |
+| F10.7a ≥ 150 | 69 595 | 18.9 % | 27.8 % | 19.4 % |
+| Ap < 15 | 302 115 | 22.9 % | 53.2 % | 29.7 % |
+| 15 ≤ Ap < 50 | 58 797 | 25.5 % | 34.9 % | 21.9 % |
+| **Ap ≥ 50** | 4 299 | **36.5 %** | **35.4 %** | 25.4 % |
+
+**Verdict, criterion by criterion:**
+
+1. **Pooled held-out-mission MAPE ≤ 25.5 %: passes**, at 23.5 % raw. Every fold but GRACE-FO is
+   under the bar on its own, and GRACE-FO is 0.4 points over. The stretch target, 20.2 %, is not
+   reached.
+2. **Below NRLMSISE-00 in every bin: fails in one bin**, `Ap` ≥ 50, by 1.1 points (36.5 % against
+   35.4 %). Every other bin passes by 9 to 39 points. The storm bin is 1.2 % of the rows. Debiased,
+   NRLMSISE-00 reads 25.4 % there: its storm *shape* is better than SDTM-1's, and what keeps the two
+   level raw is NRLMSISE-00's high bias at quiet times. This is the peak under-reach §10.14 and §10.17
+   measured on eight storms, now on a held-out corpus.
+3. **No regime-edge bin above 40 %: passes.** The worst edge is `Ap` ≥ 50 at 36.5 %; the solar-minimum
+   bin that failed §10.11 at 169.8 % is 26.3 %.
+
+**The gate is not passed**, and the failing criterion is now the storm response only. The level and
+the altitude transfer pass. The next work is the storm term: Ф15.H runs the full storm list on this
+corpus, and Ф23.B tests a state equation for the storm response against it.
+
+**How robust each number is.** The other half-phase of the thinning (rows 30, 90, …) reads 23.6 %
+pooled and 36.6 % against 35.8 % at `Ap` ≥ 50, so the storm-bin gap is 0.8–1.1 points and its sign
+holds. The boundary scale sits on its lower bound (`e^−0.7` = 0.497) in every fold. Widened to ±1.4,
+it moves to 0.25–0.33 and `σ` moves to its own upper bound (0.060 /km): the two trade along a ridge,
+and the pooled MAPE moves 0.1 point (23.4 %), the storm bin 1.4 points (35.1 %, still not below
+35.4 %). So the bound does not decide the verdict, and the ridge says the lower-thermosphere boundary
+(fixed 380 K at 120 km) is the part of the form this corpus does not constrain.
+
+**What is not in it.** JB2008-open is not run on these rows: its solar and geomagnetic indices are
+SET's products, not open data. NRLMSIS 2.1 is not run (oracle only). The coefficients are
+not re-emitted: the shipped `coefficients.rs` is still the pilot fit, because the gate that would
+promote a corpus fit has not passed.
+
+**NRLMSISE-00 has no answer on three rows.** On 2005-09-10 and 2006-12-07 the previous day's
+observed F10.7 is 707.6 and 573.4 sfu — the 2005-09-09 and 2006-12-06 X-class flares in Penticton's
+noon measurement. At 2–3 rows of those days the model returns NaN; at 500 sfu the same row is finite.
+Those rows are dropped from both models. Whether the reference C does the same is not checked here.
 
 ---
 

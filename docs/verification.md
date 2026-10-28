@@ -7788,6 +7788,68 @@ with `wam_ipe_through_the_storms_on_the_bruinsma_laurens_protocol`.
 
 ---
 
+### 10.20 The whole TU Delft archive as one corpus (Ф15.A)
+
+Every campaign above reads twelve satellite-months. Christian Siemes sent TU Delft's complete
+version 02 archive on 2026-10-25 (`docs/provenance.md`, `tudelft-thermosphere`): `Archive.zip`,
+23 035 131 104 bytes, sha256 `f84072afbb007d4e286a1fe56b0e517abe1d0e9bd4d6fd87da06312f02c73a6f`, one
+nested zip per satellite-month. `tools/build-density-corpus.py` reads it in place — unpacked it would
+need 29.8 GB the disk does not have — and writes `data/validation/tudelft-v02/corpus/` (git-ignored,
+730 MB): the density products only, the newest reprocessing of each month, nominal rows, one row per
+120 s of the product's own clock, time converted to UTC with `spacelab-fa`'s leap-second table, and a
+manifest with every member's sha256.
+
+What the archive holds besides the products, and what is not read: `GRACE_data_v02/nrtdm_output/`
+repeats 349 GRACE months with the header `change_header_density.sh` later replaced; GOCE's `all.zip`
+and `GO.zip` bundle months present one by one; 66 GRACE-FO months exist at two or three reprocessing
+levels (`v02`, `v02b`, `v02c`) and the newest is taken; 9 months carry a loose `.txt` beside their
+`.zip`, and in every case the two are the same bytes (a tenth copy, `CH_DNS_ACC_2010-09_v02 2.txt`,
+is named outside the pattern and not read). The anomaly flag (column 11 of the
+accelerometer products) marks under 0.1 % of the grid rows (GRACE-B 0.10 %, every other satellite
+≤ 0.01 %), so the earlier loaders, which never read it, lost nothing measurable.
+
+**21 912 607 rows, 1051 satellite-months, eight satellites, 2000-07 → 2026-04:**
+
+| year | CHAMP | GRACE-A | GRACE-B | GOCE | GRACE-FO C | Swarm A | Swarm B | Swarm C |
+|---|---|---|---|---|---|---|---|---|
+| 2000 | 72 614 | | | | | | | |
+| 2001 | 241 950 | | | | | | | |
+| 2002 | 250 844 | 134 003 | 135 081 | | | | | |
+| 2003 | 261 805 | 257 101 | 226 407 | | | | | |
+| 2004 | 260 260 | 257 240 | 258 929 | | | | | |
+| 2005 | 159 822 | 261 170 | 245 553 | | | | | |
+| 2006 | 256 350 | 258 124 | 257 845 | | | | | |
+| 2007 | 260 536 | 261 037 | 254 100 | | | | | |
+| 2008 | 256 775 | 261 329 | 256 302 | | | | | |
+| 2009 | 256 057 | 261 287 | 258 363 | 43 740 | | | | |
+| 2010 | 176 056 | 260 618 | 243 857 | 185 524 | | | | |
+| 2011 | | 215 804 | 190 311 | 244 887 | | | | |
+| 2012 | | 206 292 | 203 936 | 252 031 | | | | |
+| 2013 | | 207 926 | 201 326 | 190 608 | | | | |
+| 2014 | | 220 736 | 217 734 | | | 255 537 | 255 189 | 255 802 |
+| 2015 | | 183 082 | 173 975 | | | 261 758 | 262 251 | 262 181 |
+| 2016 | | 206 032 | 148 994 | | | 262 252 | 261 623 | 262 177 |
+| 2017 | | 144 623 | 12 431 | | | 262 086 | 262 199 | 262 100 |
+| 2018 | | | | | 153 381 | 262 259 | 262 328 | 262 022 |
+| 2019 | | | | | 261 085 | 261 050 | 261 478 | 259 174 |
+| 2020 | | | | | 258 611 | 253 835 | 261 553 | 262 195 |
+| 2021 | | | | | 262 645 | 261 994 | 261 997 | 260 893 |
+| 2022 | | | | | 260 750 | 260 331 | 261 691 | 260 538 |
+| 2023 | | | | | 262 041 | 260 092 | 261 939 | 261 817 |
+| 2024 | | | | | 262 737 | 263 257 | 263 410 | 262 570 |
+| 2025 | | | | | 262 658 | 262 489 | 262 230 | 262 445 |
+| 2026 | | | | | 86 400 | 64 030 | 64 040 | 64 080 |
+| **total** | 2 453 069 | 3 596 404 | 3 285 144 | 916 790 | 2 070 308 | 3 190 970 | 3 201 928 | 3 197 994 |
+
+**The old corpus is inside the new one, byte for byte.** The twelve satellite-months every earlier
+campaign read were fetched from `thermosphere.tudelft.nl` in 2026-08; all twelve have the same sha256
+as the archive's members. So the 348 693-row campaign of §10.2 is a subset of this corpus, and its
+numbers — the pilot's NRLMSISE-00 baseline among them — hold on it unchanged by construction rather
+than by a rerun. All three storms §10.14 could not run are now in it: 2003-10 (CHAMP, GRACE-A/B),
+2015-03 (GRACE-A/B, Swarm A/B/C) and 2017-09 (Swarm A/B/C, and GRACE-A for a third of the month).
+
+---
+
 ## 11 · Published errata as a second opinion
 
 Celestrak publishes consolidated errata for all five editions of Vallado's *Fundamentals of

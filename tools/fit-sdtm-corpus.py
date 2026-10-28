@@ -177,6 +177,8 @@ class Packing:
     free_sigma: bool
     cooling: bool
     """The storm response is `cooling_grid`'s two-state equation, with a third kernel slot."""
+    free_excess: bool = False
+    """The daily flux excess's saturation scale is fitted, in the last slot (Ф23.G)."""
 
     @property
     def i_onset(self) -> int:
@@ -209,8 +211,22 @@ class Packing:
         return self.i_scale + len(self.scaled) if self.free_sigma else -1
 
     @property
+    def i_excess(self) -> int:
+        """`ln D` of `D tanh(d/D)`, after `sigma`, and absent when the excess is not fitted."""
+        return (
+            self.i_scale + len(self.scaled) + int(self.free_sigma)
+            if self.free_excess
+            else -1
+        )
+
+    @property
     def size(self) -> int:
-        return self.i_scale + len(self.scaled) + int(self.free_sigma)
+        return (
+            self.i_scale
+            + len(self.scaled)
+            + int(self.free_sigma)
+            + int(self.free_excess)
+        )
 
 
 def cooling_grid(
@@ -260,10 +276,14 @@ class CorpusModel:
         ridge: float,
         sigma: float | None,
         cooling: bool = False,
+        excess: float | str | None = None,
     ):
+        """`excess` saturates the daily flux excess: `None` keeps it linear, a number is a fixed
+        scale `D`, `"fit"` fits `D` with the other nonlinear parameters."""
         self.a = arg
         self.sat = sat
         self.sigma = sigma
+        self.excess_scale = excess if isinstance(excess, float) else None
         self.pairs = np.argwhere(
             g.harmonic_mask(caps, arg["k"]).reshape(g.DRIVERS, arg["k"])
         )
@@ -272,6 +292,7 @@ class CorpusModel:
             scaled=train[1:],
             free_sigma=sigma is None,
             cooling=cooling,
+            free_excess=excess == "fit",
         )
         # 120 days before the first sample: the slowest admitted state (480 h) has forgotten its
         # start by e^-6 there.
@@ -282,10 +303,11 @@ class CorpusModel:
             else np.zeros((sat.size, 0))
         )
         self.ridge = ridge
-        self._design_key: tuple[float, ...] | None = None
+        self._design_key: tuple[float | None, ...] | None = None
         self._design: np.ndarray | None = None
         reference = self.design(
-            *((6.0, 20.0, 300.0) if cooling else (3.0 * 3600.0, 18.0 * 3600.0))
+            *((6.0, 20.0, 300.0) if cooling else (3.0 * 3600.0, 18.0 * 3600.0)),
+            excess=0.5 if self.pack.free_excess else self.excess_scale,
         )
         self.penalty = np.sqrt(ridge) * np.sqrt(np.mean(reference**2, axis=0))
         self.penalty[0] = 0.0
@@ -301,25 +323,38 @@ class CorpusModel:
         onset = np.exp(p[pk.i_onset]) * 3600.0
         return onset, onset + np.exp(p[pk.i_gap]) * 3600.0
 
-    def design(self, *kernel: float) -> np.ndarray:
-        if self._design_key == kernel and self._design is not None:
+    def excess(self, p: np.ndarray) -> float | None:
+        """The saturation scale `D` of the daily flux excess, or `None` where it is linear."""
+        return (
+            float(np.exp(p[self.pack.i_excess]))
+            if self.pack.free_excess
+            else self.excess_scale
+        )
+
+    def design(self, *kernel: float, excess: float | None = None) -> np.ndarray:
+        key = (*kernel, excess)
+        if self._design_key == key and self._design is not None:
             return self._design
         if self.pack.cooling:
             grid = cooling_grid(self.a["ap"], *kernel, self.a["cadence"], self.first)
         else:
             grid = g.storm_grid(self.a["ap"], *kernel, self.a["cadence"])
         storm = grid[self.a["interval"]]
-        drivers = g.driver_matrix(self.a["f107"], self.a["f107a"], storm, self.a["doy"])
+        f107, f107a = self.a["f107"], self.a["f107a"]
+        if excess is not None:
+            span = g.F107_SCALE * excess
+            f107 = f107a + span * np.tanh((f107 - f107a) / span)
+        drivers = g.driver_matrix(f107, f107a, storm, self.a["doy"])
         out = np.empty((drivers.shape[0], len(self.pairs)))
         for j, (d, k) in enumerate(self.pairs):
             out[:, j] = drivers[:, d] * self.a["harmonics"][:, k]
-        self._design_key, self._design = kernel, out
+        self._design_key, self._design = key, out
         return out
 
     def score(self, p: np.ndarray, index: np.ndarray, design: np.ndarray | None = None):
         """`(ln(model/measured), d/d coefficients factor)` on `index`."""
         if design is None:
-            design = self.design(*self.kernel(p))
+            design = self.design(*self.kernel(p), excess=self.excess(p))
         exponent = design[index] @ p[: self.pack.n_c]
         t_inf = g.BOUNDARY_TEMPERATURE + np.exp(np.clip(exponent, -50.0, 50.0))
         ln_rho, d_ln = g.profile(t_inf, self.shape(p), self.a["zeta"][index])
@@ -339,18 +374,20 @@ class CorpusModel:
     def jacobian(self, p: np.ndarray, index: np.ndarray) -> np.ndarray:
         n, pk = index.size, self.pack
         out = np.zeros((n + pk.n_c, pk.size))
-        design = self.design(*self.kernel(p))
+        design = self.design(*self.kernel(p), excess=self.excess(p))
         base, chain = self.score(p, index, design)
         out[:n, : pk.n_c] = design[index] * chain[:, None]
         out[:n, pk.i_boundary] = 1.0
         out[:n, pk.i_scale : pk.i_scale + len(pk.scaled)] = self.indicator[index]
         step = 1.0e-4
         slots = (pk.i_onset, pk.i_gap) + ((pk.i_cool,) if pk.cooling else ())
-        for j in slots + ((pk.i_sigma,) if pk.free_sigma else ()):
+        slots += (pk.i_sigma,) if pk.free_sigma else ()
+        for j in slots + ((pk.i_excess,) if pk.free_excess else ()):
             shifted = p.copy()
             shifted[j] += step
             out[:n, j] = (self.score(shifted, index)[0] - base) / step
-        self.design(*self.kernel(p))  # restore the cache to the unshifted kernel
+        # restore the cache to the unshifted kernel
+        self.design(*self.kernel(p), excess=self.excess(p))
         out[n:, : pk.n_c] = np.diag(np.sqrt(n) * self.penalty)
         return out
 
@@ -380,6 +417,10 @@ class CorpusModel:
         if pk.free_sigma:
             start[pk.i_sigma] = 2.0
             lower[pk.i_sigma], upper[pk.i_sigma] = 0.5, 6.0
+        if pk.free_excess:
+            # 2 to 1000 sfu: from a term that is a sign to one that is linear across the corpus.
+            start[pk.i_excess] = np.log(0.5)
+            lower[pk.i_excess], upper[pk.i_excess] = np.log(0.02), np.log(10.0)
         out = least_squares(
             self.residual,
             start,
@@ -503,6 +544,14 @@ def emit(
         f"coefficients, ridge {argument.ridge:g}, the Bates shape fitted, the boundary scale fitted"
         f"{at_bound}.",
         "The storm driver is heating with nitric-oxide cooling (`derivations/sdtm_no_cooling.mac`).",
+        *(
+            [
+                "The daily flux excess saturates as D tanh(d/D), D fitted "
+                "(`derivations/sdtm_flux_excess.mac`)."
+            ]
+            if model.excess(p) is not None
+            else []
+        ),
         f"Held out by mission family, MAPE {g.mape(held):.1f} % pooled.",
         "",
         "The uncertainty table below is that held-out residual's spread about zero, per regime. A",
@@ -521,11 +570,11 @@ def emit(
         + (
             "//!\n"
             "//! The fit's own verdict, the folds it was scored on and what it does not claim are in\n"
-            "//! `docs/verification.md` §10.21-§10.25.\n"
+            "//! `docs/verification.md` §10.21-§10.26.\n"
             "#![allow(clippy::unreadable_literal)]\n\n"
             "use super::{\n"
-            "    DRIVERS, DensityUncertainty, FLUX_EDGES, NitricOxideCooling, STORM_EDGES, StormResponse,\n"
-            "    Thermosphere,\n"
+            "    DRIVERS, DensityUncertainty, FLUX_EDGES, FluxExcess, NitricOxideCooling, STORM_EDGES,\n"
+            "    StormResponse, Thermosphere,\n"
             "};\n\n"
             "/// Degree of the sun-fixed spherical-harmonic expansion this fit used.\n"
             f"pub const DEGREE: usize = {argument.degree};\n"
@@ -540,8 +589,8 @@ def emit(
             "/// The fitted field.\n"
             "///\n"
             "/// Built by the unchecked constructor because every argument is a literal in this file;\n"
-            "/// `sdtm_reference.rs` puts the same four through `Thermosphere::from_coefficients` and\n"
-            "/// asserts it accepts them, which is where the refusals bind.\n"
+            "/// `sdtm_reference.rs` puts the same five through `Thermosphere::from_coefficients` and\n"
+            "/// `with_flux_excess` and asserts they accept them, which is where the refusals bind.\n"
             "pub const FIELD: Thermosphere<HARMONICS> = Thermosphere::from_fitted(\n"
             "    COEFFICIENTS,\n"
             f"    {g.literal(model.shape(p))},\n"
@@ -551,7 +600,14 @@ def emit(
             f"        nitric_oxide: {g.literal(nitric * 3600.0)},\n"
             f"        saturation: {g.literal(saturation)},\n"
             "    }),\n"
-            ");\n\n"
+            + (
+                "    FluxExcess::Saturated {\n"
+                f"        scale: {g.literal(model.excess(p))},\n"
+                "    },\n"
+                if model.excess(p) is not None
+                else "    FluxExcess::Linear,\n"
+            )
+            + ");\n\n"
             "/// Number of 3-hourly `ap` intervals the storm state is to be run over: the shortest whole\n"
             "/// number of days whose truncation moves the driver by less than a hundredth of an `ap` at\n"
             f"/// every interval of the corpus span (worst {worst:.2g}).\n"
@@ -582,7 +638,10 @@ def emit(
     print(f"wrote {OUT_RS.relative_to(g.ROOT)}")
 
     index = np.linspace(0, len(rows) - 1, 64).astype(int)
-    exponent = model.design(heating, nitric, saturation)[index] @ p[: pk.n_c]
+    exponent = (
+        model.design(heating, nitric, saturation, excess=model.excess(p))[index]
+        @ p[: pk.n_c]
+    )
     t_inf = g.BOUNDARY_TEMPERATURE + np.exp(exponent)
     ln_rho, _ = g.profile(t_inf, model.shape(p), arg["zeta"][index])
     lines = [
@@ -666,6 +725,16 @@ def report(
         "15-50": (ap_daily >= 15) & (ap_daily < 50),
         "Ap >= 50": ap_daily >= 50,
     }
+    # The daily excess enters `T∞` linearly (`driver_matrix`'s `d`); these bins are where that
+    # linearity is tested (Ф23.G), so they also print the median O/C, which says which way it errs.
+    excess = (rows.f107.to_numpy() - f107a) / g.F107_SCALE
+    excess_bins = {
+        "d < 0": excess < 0.0,
+        "0 <= d < 0.3": (excess >= 0.0) & (excess < 0.3),
+        "0.3 <= d < 0.7": (excess >= 0.3) & (excess < 0.7),
+        "d >= 0.7": excess >= 0.7,
+    }
+    bins.update(excess_bins)
     for fam in sorted(set(rows.family)):
         bins[fam] = rows.family.to_numpy() == fam
     print("== held out by mission family, MAPE")
@@ -674,6 +743,19 @@ def report(
         if mask.any():
             cells = "".join(f" {g.mape(r[mask]):15.1f}%" for r in columns.values())
             print(f"{name:<14} {mask.sum():8d}{cells}")
+    print("== by daily flux excess, median model/measured")
+    for name, mask in excess_bins.items():
+        if mask.any():
+            cells = "".join(
+                f" {np.exp(np.median(r[mask])):16.3f}" for r in columns.values()
+            )
+            print(f"{name:<14} {mask.sum():8d}{cells}")
+
+
+def excess_option(argument: argparse.Namespace) -> float | str | None:
+    """`--excess-saturation` as `CorpusModel` takes it."""
+    value = argument.excess_saturation
+    return value if value in (None, "fit") else float(value)
 
 
 def main() -> None:
@@ -710,7 +792,17 @@ def main() -> None:
         help="drive the storm term by heating with nitric-oxide cooling (Ф23.B) instead of the "
         "two-constant kernel",
     )
+    parser.add_argument(
+        "--excess-saturation",
+        metavar="D|fit",
+        help="saturate the daily flux excess as D tanh(d/D) (Ф23.G), D fixed or fitted in every "
+        "fold; the comparator and the bins read the raw flux",
+    )
     argument = parser.parse_args()
+    if argument.emit and argument.excess_saturation not in (None, "fit"):
+        sys.exit(
+            "a fixed --excess-saturation is a measurement, not a shippable field: fit it"
+        )
     if argument.emit and (argument.folds or not argument.cooling):
         sys.exit(
             "--emit writes the cooling field and its held-out table: give --cooling, no --folds"
@@ -728,6 +820,7 @@ def main() -> None:
         flush=True,
     )
     arg = g.fit_arguments(rows, argument.degree)
+    excess = excess_option(argument)
     sat = rows.sat.to_numpy()
     caps = g.CAPS[argument.caps]
 
@@ -738,7 +831,7 @@ def main() -> None:
         test = rows.family.to_numpy() == fam
         train_sats = tuple(s for s in SATELLITES if s in set(sat[~test]))
         model = CorpusModel(
-            arg, sat, train_sats, caps, argument.ridge, sigma, argument.cooling
+            arg, sat, train_sats, caps, argument.ridge, sigma, argument.cooling, excess
         )
         t0 = time.time()
         p = model.fit(np.where(~test)[0])
@@ -762,7 +855,12 @@ def main() -> None:
                 else f"kernel {kernel[0] / 3600:.2f}/{kernel[1] / 3600:.2f} h  "
             )
             + f"boundary {np.exp(p[pk.i_boundary]):.3f}  sigma {model.shape(p) * 1e3:.4f}/km  "
-            f"scales vs {train_sats[0]}: {scales}  {time.time() - t0:.0f}s",
+            + (
+                f"excess D {model.excess(p):.3f}  "
+                if model.excess(p) is not None
+                else ""
+            )
+            + f"scales vs {train_sats[0]}: {scales}  {time.time() - t0:.0f}s",
             flush=True,
         )
     msis = np.full(len(rows), np.nan)
@@ -789,7 +887,7 @@ def main() -> None:
     if argument.emit:
         print("\nthe shipped field, fitted on every satellite", flush=True)
         model = CorpusModel(
-            arg, sat, SATELLITES, caps, argument.ridge, sigma, argument.cooling
+            arg, sat, SATELLITES, caps, argument.ridge, sigma, argument.cooling, excess
         )
         p = model.fit(np.arange(len(rows)))
         r, _ = model.score(p, np.arange(len(rows)))
@@ -838,13 +936,14 @@ def storms(
         f"{len(window_rows)} rows at 120 s inside their windows",
         flush=True,
     )
+    excess = excess_option(argument)
     arg = g.fit_arguments(window_rows, argument.degree)
     sat = window_rows.sat.to_numpy()
     caps = g.CAPS[argument.caps]
     held = np.full(len(window_rows), np.nan)
     for fam, (train_sats, p) in fitted.items():
         model = CorpusModel(
-            arg, sat, train_sats, caps, argument.ridge, sigma, argument.cooling
+            arg, sat, train_sats, caps, argument.ridge, sigma, argument.cooling, excess
         )
         here = np.where(window_rows.family.to_numpy() == fam)[0]
         held[here] = model.score(p, here)[0]

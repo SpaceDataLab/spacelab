@@ -325,6 +325,59 @@ impl StormResponse {
     }
 }
 
+/// How the daily flux excess `d = (F10.7 − F10.7a)/100` of [`driver_terms`] enters `T∞`.
+///
+/// Linear, a day 200 sfu over its 81-day mean weighs eight times a day 25 over it, and the corpus
+/// says the thermosphere does not (`docs/verification.md` §10.26): the 0.8 % of rows with `d ≥ 0.7`
+/// — flare-contaminated radio flux, and the first weeks of a rising active region, where the
+/// trailing mean lags — carried a held-out error of 167 % under the linear form and 25 % saturated.
+/// `F10.7` is a proxy for the EUV that heats, and its daily excess over the mean outruns the EUV's.
+///
+/// Derived in `derivations/sdtm_flux_excess.mac`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FluxExcess {
+    /// `d` itself.
+    Linear,
+    /// `D·tanh(d/D)`: `d` where `|d| ≪ D`, bounded by `±D`. `scale` is `D`, in units of
+    /// [`F107_SCALE`], and fitted.
+    Saturated {
+        /// `D`, in units of [`F107_SCALE`].
+        scale: f64,
+    },
+}
+
+impl FluxExcess {
+    /// The excess `T∞` sees for a raw excess `d`.
+    #[must_use]
+    pub fn excess(&self, d: f64) -> f64 {
+        match *self {
+            Self::Linear => d,
+            Self::Saturated { scale } => scale * libm::tanh(d / scale),
+        }
+    }
+
+    /// `drivers` with `F10.7` moved to the flux whose raw excess is [`Self::excess`] — the form the
+    /// generator fits, so [`driver_terms`] stays the one definition of the regressors.
+    fn drivers(&self, drivers: &SdtmDrivers) -> SdtmDrivers {
+        match self {
+            Self::Linear => *drivers,
+            Self::Saturated { .. } => SdtmDrivers {
+                f107: drivers.f107a
+                    + F107_SCALE * self.excess((drivers.f107 - drivers.f107a) / F107_SCALE),
+                ..*drivers
+            },
+        }
+    }
+
+    /// Whether this is a form: a saturation scale finite and positive.
+    fn usable(&self) -> bool {
+        match *self {
+            Self::Linear => true,
+            Self::Saturated { scale } => scale.is_finite() && scale > 0.0,
+        }
+    }
+}
+
 /// Where and when to evaluate the model.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SdtmPoint {
@@ -398,7 +451,7 @@ pub const KERNEL_SEPARATION: f64 = 1.0e-3;
 ///
 /// The quadratic in `f` is there because the exospheric temperature saturates at high activity; the
 /// daily excess `d` is separate from the mean because the response to a flare-day flux is not the
-/// response to a cycle-high mean. The last four are the seasonal terms multiplied by activity,
+/// response to a cycle-high mean, and a field may saturate it before it gets here ([`FluxExcess`]). The last four are the seasonal terms multiplied by activity,
 /// because the amplitude of the semiannual density variation is itself a function of the cycle —
 /// Bowman et al. (2008) make the semiannual term explicitly activity-dependent for that reason, and
 /// a form with only additive seasonal terms cannot represent it at either end of a cycle.
@@ -464,6 +517,7 @@ pub struct Thermosphere<const K: usize> {
     sigma: f64,
     boundary_scale: f64,
     storm: StormResponse,
+    flux_excess: FluxExcess,
 }
 
 impl<const K: usize> Thermosphere<K> {
@@ -505,6 +559,18 @@ impl<const K: usize> Thermosphere<K> {
             sigma,
             boundary_scale,
             storm,
+            flux_excess: FluxExcess::Linear,
+        })
+    }
+
+    /// The same field with the daily flux excess entering as `flux_excess` says;
+    /// [`Self::from_coefficients`] makes it [`FluxExcess::Linear`]. `None` unless a saturation scale
+    /// is finite and positive.
+    #[must_use]
+    pub fn with_flux_excess(self, flux_excess: FluxExcess) -> Option<Self> {
+        flux_excess.usable().then_some(Self {
+            flux_excess,
+            ..self
         })
     }
 
@@ -521,12 +587,14 @@ impl<const K: usize> Thermosphere<K> {
         sigma: f64,
         boundary_scale: f64,
         storm: StormResponse,
+        flux_excess: FluxExcess,
     ) -> Self {
         Self {
             coeffs,
             sigma,
             boundary_scale,
             storm,
+            flux_excess,
         }
     }
 
@@ -560,12 +628,18 @@ impl<const K: usize> Thermosphere<K> {
         &self.storm
     }
 
+    /// How the fitted field takes the daily flux excess.
+    #[must_use]
+    pub const fn flux_excess(&self) -> &FluxExcess {
+        &self.flux_excess
+    }
+
     /// Exospheric temperature `T∞`, K — at or above [`BOUNDARY_TEMPERATURE`] by construction, and
     /// equal to it only where the exponent underflows, which is the isothermal limit.
     #[must_use]
     pub fn exospheric_temperature(&self, point: &SdtmPoint, drivers: &SdtmDrivers) -> f64 {
         let angular = DensityCorrection::<K>::basis(point.latitude, point.local_solar_time);
-        let g = driver_terms(point, drivers);
+        let g = driver_terms(point, &self.flux_excess.drivers(drivers));
         let mut sum = 0.0;
         for (row, gi) in self.coeffs.iter().zip(g) {
             for (c, y) in row.iter().zip(angular) {
@@ -1356,6 +1430,81 @@ mod tests {
             ] {
                 assert!(build(c).is_none(), "{c:?} accepted");
             }
+        }
+    }
+
+    /// The saturation is the one Maxima proved: at `D` = 0.27 the four excesses of
+    /// `sdtm_flux_excess.mac` reach its 30-digit values (and `sdtm_flux_excess.gp` confirms at 60),
+    /// and the linear form is the identity.
+    #[test]
+    #[expect(
+        clippy::excessive_precision,
+        reason = "the CAS's digits as it printed them"
+    )]
+    fn the_flux_excess_reproduces_the_cas_reference_values() {
+        let saturated = FluxExcess::Saturated { scale: 0.27 };
+        for (d, want) in [
+            (8.236, 0.269_999_999_999_999_999_999_999_998_273),
+            (0.712, 0.267_247_841_689_291_188_733_474_356_195),
+            (-0.13, -0.120_805_909_547_456_328_426_797_669_961),
+            (0.001, 0.000_999_995_427_551_380_603_497_317_931_118),
+        ] {
+            let got = saturated.excess(d);
+            assert!(
+                (got - want).abs() <= 1e-15 * want.abs(),
+                "d = {d}: {got} against the CAS's {want}"
+            );
+            assert_eq!(FluxExcess::Linear.excess(d), d);
+        }
+    }
+
+    /// The field reads the excess through its own form and nowhere else: a saturated field at a raw
+    /// flux is the linear field at the flux whose raw excess is the saturated one, a linear field is
+    /// unchanged by the rewrite, and the saturation is what the field reports.
+    #[test]
+    fn the_field_takes_the_daily_excess_through_its_form() {
+        let linear = field();
+        let excess = FluxExcess::Saturated { scale: 0.27 };
+        let saturated = linear.with_flux_excess(excess).expect("a usable scale");
+        assert_eq!(*linear.flux_excess(), FluxExcess::Linear);
+        assert_eq!(*saturated.flux_excess(), excess);
+        let raw = SdtmDrivers {
+            f107: 233.2,
+            f107a: 162.0,
+            storm: 0.0,
+        };
+        let moved = SdtmDrivers {
+            f107: 162.0 + F107_SCALE * excess.excess((233.2 - 162.0) / F107_SCALE),
+            ..raw
+        };
+        let here = point(400_000.0);
+        let want = linear.exospheric_temperature(&here, &moved);
+        let got = saturated.exospheric_temperature(&here, &raw);
+        assert!((got - want).abs() < 1e-12 * want, "{got} against {want}");
+        // The saturated excess is three-eighths of the raw one here, so the two fields cannot agree.
+        let unsaturated = linear.exospheric_temperature(&here, &raw);
+        assert!(
+            (got - unsaturated).abs() > 1.0,
+            "{got} against {unsaturated}"
+        );
+        assert_eq!(
+            FluxExcess::Linear.drivers(&raw),
+            raw,
+            "the linear form rewrites the flux"
+        );
+    }
+
+    /// A saturation scale that is not finite and positive is not a form.
+    #[test]
+    fn the_constructor_refuses_a_flux_excess_that_is_not_a_form() {
+        assert!(field().with_flux_excess(FluxExcess::Linear).is_some());
+        for bad in [0.0, -0.27, f64::NAN, f64::INFINITY] {
+            assert!(
+                field()
+                    .with_flux_excess(FluxExcess::Saturated { scale: bad })
+                    .is_none(),
+                "scale {bad} accepted"
+            );
         }
     }
 

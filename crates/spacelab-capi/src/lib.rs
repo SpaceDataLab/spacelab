@@ -5381,7 +5381,7 @@ fn sdtm1_storm_response(history: &[f64], cadence_s: f64) -> f64 {
 /// `cadence_s` is that series' step — 10 800 s for CelesTrak's 3-hourly `ap`, which is what the fit
 /// used. The three constants belong to the fitted field, so a caller cannot build this driver
 /// itself. Nitric oxide remembers a storm for days, and a truncated history reads as a different
-/// storm: pass twelve days, 96 intervals (`sdtm::coefficients::HISTORY` in Rust).
+/// storm: pass eleven days, 88 intervals (`sdtm::coefficients::HISTORY` in Rust).
 ///
 /// `n = 0` answers `0`, the response of a state with nothing to respond to, which is what the Python
 /// bridge answers for an empty list. A null pointer answers NaN: in C that is a different thing from

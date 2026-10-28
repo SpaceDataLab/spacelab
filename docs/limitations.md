@@ -121,16 +121,17 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
 - **SDTM-1's shipped field is fitted on eight satellites, and its envelope is theirs.**
   `sdtm::coefficients` was fitted on 365 214 rows of the TU Delft v02 corpus — CHAMP, GRACE A/B, GOCE,
   GRACE-FO C and Swarm A/B/C, 2000-07 to 2026-04, **225 to 545 km**, F10.7a **65.8 to 231.9**
-  (`docs/verification.md` §10.25). With each mission family held out it holds **23.1 %** MAPE pooled,
-  against NRLMSISE-00's 50.1 % on the same rows, and is below NRLMSISE-00 in every flux and storm bin
-  (§10.24). Outside 225–545 km the profile is an extrapolation of the Bates form. The boundary scale
-  sits on its fit bound, as in every fold. The levels of the eight instruments differ by up to 9.5 %
-  (`SATELLITE_SCALE`); the field is GRACE-FO C's. `sdtm::coefficients::UNCERTAINTY` is the width that
-  goes with this — `σ` of `ln(model/measured)` 0.23 to 0.46 by regime, whose 90 % interval covers 88.6
-  to 99.7 % of each family held out. **One driver regime is known to be poor: a large daily flux
-  excess.** When the previous day's F10.7 exceeds its 81-day trailing mean by 70 sfu or more (0.76 %
-  of the corpus rows), the linear excess term over-heats the model: on 2024-05-10 (233 against 163
-  sfu) it is 1.31–1.45 times too dense before the storm begins and 55.2 % MAPE over the day. SDTM-1 is
+  (`docs/verification.md` §10.25–§10.26). With each mission family held out it holds **21.5 %** MAPE
+  pooled, against NRLMSISE-00's 50.1 % on the same rows, and is below NRLMSISE-00 in every flux and
+  storm bin (§10.26). Outside 225–545 km the profile is an extrapolation of the Bates form. The boundary
+  scale sits on its fit bound, as in every fold. The levels of the eight instruments differ by up to
+  9.4 % (`SATELLITE_SCALE`); the field is GRACE-FO C's. `sdtm::coefficients::UNCERTAINTY` is the width
+  that goes with this — `σ` of `ln(model/measured)` 0.24 to 0.37 by regime, whose 90 % interval covers
+  87.4 to 99.6 % of each family held out. The daily flux excess saturates at about 27 sfu
+  (`sdtm::FluxExcess`, §10.26), which took the 0.76 % of rows with an excess of 70 sfu or more from
+  167 % to 25 % MAPE. **One regime is still known to be poor: high flux in storm time.** There the 90 %
+  interval covers 83.5 % of the §10.2 campaign, and on 2024-05-10 (233 against 163 sfu) the model is
+  1.22–1.43 times too dense before the storm begins and 46.3 % MAPE over the day. SDTM-1 is
   not the default model; the calibrated NRLMSISE-00 is, until the storm peak of minor storms (below)
   is fixed (D-5).
   One convention is load-bearing and easy to get wrong: `SdtmPoint::altitude` is **geodetic** height
@@ -141,11 +142,11 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   density at 400 km. `sdtm::SdtmAtmosphere` takes the same geodetic closure the NRLMSISE-00 wrapper
   does, which is the way to avoid deciding this by hand.
 - **SDTM-1 overshoots the peak of a typical storm.** Its storm driver is heating with nitric-oxide
-  cooling (§10.24), driven by 3-hourly `ap` over twelve days of history (`coefficients::HISTORY`).
+  cooling (§10.24), driven by 3-hourly `ap` over eleven days of history (`coefficients::HISTORY`).
   Scored on Bruinsma & Laurens (2024)'s protocol over the 204 storms the corpus covers since 2000,
   each satellite by the fit that held its family out (630 comparisons), the onset is within ±3 h on
-  69 % of comparisons and the recovery within ±6 h on 80 %, and the largest storms (`ap` ≥ 300) reach
-  0.97 of the observed peak enhancement. The peak is within ±25 % on 40 % only: the median
+  70 % of comparisons and the recovery within ±6 h on 81 %, and the largest storms (`ap` ≥ 300) reach
+  0.96 of the observed peak enhancement (§10.26). The peak is within ±25 % on 39 % only: the median
   peak ratio is 1.13, and 1.21 for single-peak storms. **A drag prediction through a moderate storm
   should be expected to run high at the peak by 10 to 20 %.** JB2008, driven by hourly `Dst`, remains
   the reference on storm peaks in the published assessment (23.7 % mean error). Hourly `ap60` and USGS

@@ -1,0 +1,43 @@
+/* The saturated daily flux excess of SDTM-1 (plans/17 Ф23.G): S(d) = D tanh(d/D), with
+   d = (F10.7 - F10.7a)/100 the raw daily excess and D > 0 a fitted scale in the same units.
+
+   The shipped code does not evaluate S on its own: it moves F10.7 to the flux whose raw excess
+   is S(d), F' = F10.7a + 100 S(d), and lets the unchanged regressor read (F' - F10.7a)/100.
+   What is proved here: that rewrite returns S; S is odd, passes through 0 with unit slope and
+   no curvature, is d to O(d^3) with the next term -d^3/(3 D^2), is bounded by D, tends to the
+   linear form as D -> infinity, and is monotone. Every identity prints 0. The numeric block
+   gives the reference values the Rust implementation is checked against. */
+
+ratprint : false$
+fpprintprec : 0$
+
+S(d) := D*tanh(d/D)$
+
+/* 1. The flux rewrite the code makes returns S exactly. */
+Fprime : Fa + 100*S((F - Fa)/100)$
+print("flux rewrite returns S:", ratsimp((Fprime - Fa)/100 - S((F - Fa)/100)))$
+
+/* 2. Odd, through the origin, unit slope, no curvature there. */
+print("odd:", trigsimp(S(-d) + S(d)))$
+print("S(0):", S(0))$
+print("unit slope at 0:", ratsimp(subst(d = 0, diff(S(d), d)) - 1))$
+print("no curvature at 0:", ratsimp(subst(d = 0, diff(S(d), d, 2))))$
+
+/* 3. The series: d - d^3/(3 D^2) + 2 d^5/(15 D^4) + O(d^7). */
+print("series to d^5:", ratsimp(taylor(S(d), d, 0, 5) - (d - d^3/(3*D^2) + 2*d^5/(15*D^4))))$
+
+/* 4. Bounded by D, and linear again as D -> infinity. */
+assume(D > 0)$
+print("bound as d -> +inf:", limit(S(d), d, inf) - D)$
+print("bound as d -> -inf:", limit(S(d), d, minf) + D)$
+print("linear limit as D -> inf:", limit(S(d) - d, D, inf))$
+
+/* 5. Monotone: dS/dd = sech(d/D)^2 = 1 - tanh(d/D)^2, which is positive. */
+print("slope is 1 - tanh^2:", trigsimp(diff(S(d), d) - (1 - tanh(d/D)^2)))$
+
+/* 6. Reference values, 30 digits, at D = 27/100 (the corpus's fitted scale, rounded), for the
+   flare day 2011-03-07 (d = 8.236), the 2024-05-09 excess against the trailing mean (0.712),
+   a quiet day below the mean (-0.13) and a small excess (1/1000). */
+fpprec : 30$
+for x in [8.236b0, 0.712b0, -0.13b0, 0.001b0] do
+    print("reference S at D = 0.27, d =", x, ":", bfloat(subst(D = 27/100, S(x))))$

@@ -141,7 +141,7 @@ fn the_fitted_band_is_the_one_the_verdict_names() {
         field.sigma()
     );
     // The generated table is built by the unchecked constructor, so this is where the checked one's
-    // refusals bind: the same four arguments, and it has to accept them.
+    // refusals bind: the same five arguments, and they have to accept them.
     assert!(
         sdtm::Thermosphere::from_coefficients(
             *field.coefficients(),
@@ -149,6 +149,7 @@ fn the_fitted_band_is_the_one_the_verdict_names() {
             field.boundary_scale(),
             *field.storm(),
         )
+        .and_then(|f| f.with_flux_excess(*field.flux_excess()))
         .is_some(),
         "the generated literals are not a field the checked constructor accepts"
     );

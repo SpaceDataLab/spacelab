@@ -9,23 +9,24 @@
 //! Degree 2, harmonic caps `storm-log1`: 35 of the 144 possible
 //! coefficients, ridge 0.001, the Bates shape fitted, the boundary scale fitted (on its bound).
 //! The storm driver is heating with nitric-oxide cooling (`derivations/sdtm_no_cooling.mac`).
-//! Held out by mission family, MAPE 23.1 % pooled.
+//! The daily flux excess saturates as D tanh(d/D), D fitted (`derivations/sdtm_flux_excess.mac`).
+//! Held out by mission family, MAPE 21.5 % pooled.
 //!
 //! The uncertainty table below is that held-out residual's spread about zero, per regime. A
 //! table built without one family's rows has a 90 % interval that covers, of that family:
-//! CHAMP 92.9 %,
-//! GOCE 99.7 %,
-//! GRACE 88.6 %,
-//! GRACE-FO 89.1 %,
-//! Swarm 92.2 %,
+//! CHAMP 92.7 %,
+//! GOCE 99.6 %,
+//! GRACE 87.4 %,
+//! GRACE-FO 88.1 %,
+//! Swarm 91.7 %,
 //!
 //! The fit's own verdict, the folds it was scored on and what it does not claim are in
-//! `docs/verification.md` §10.21-§10.25.
+//! `docs/verification.md` §10.21-§10.26.
 #![allow(clippy::unreadable_literal)]
 
 use super::{
-    DRIVERS, DensityUncertainty, FLUX_EDGES, NitricOxideCooling, STORM_EDGES, StormResponse,
-    Thermosphere,
+    DRIVERS, DensityUncertainty, FLUX_EDGES, FluxExcess, NitricOxideCooling, STORM_EDGES,
+    StormResponse, Thermosphere,
 };
 
 /// Degree of the sun-fixed spherical-harmonic expansion this fit used.
@@ -37,18 +38,18 @@ pub const HARMONICS: usize = 9;
 /// fit did not admit, not a pair that came out small.
 #[rustfmt::skip]
 const COEFFICIENTS: [[f64; HARMONICS]; DRIVERS] = [
-    [6.491013055746754, 0.00012412723967390263, -0.08546978738872266, -0.062149061695960066, 0.013603265954203853, 0.00023817465990457083, 0.00048742992025738337, 0.0028052854830090653, 0.006740415174946433],
-    [0.5343247285920277, 0.006461807830321633, 0.009544044016913628, 0.006025842848475375, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [-0.44766971398274163, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.18932788460969074, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [6.4928503316396915, 4.473887214667355e-05, -0.0857003650201695, -0.062331762552124914, 0.013647697087084798, 0.00024902985725368905, 0.0004899273713827735, 0.0028807638898504695, 0.00660634767971263],
+    [0.5370070861397458, 0.006389585603911756, 0.009515740855114358, 0.006002151920755746, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [-0.4549187070302868, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.40679915961862834, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.3675776641025757, 0.0042177338987474155, 0.0449818858523931, 0.0313232025548126, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.37205009182618726, 0.0042525017306376135, 0.045519978321935904, 0.031688103132239374, 0.0, 0.0, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.04444263310026129, -0.049428683195629965, 0.0033084440125015135, 0.0005668441174018053, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.000709275615429191, 0.007357113182132005, 0.0004135169710041421, 0.00025606717210828873, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [-0.05469871703619609, -0.001844144561952965, -0.0016660703336515042, 0.002927977568414371, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [-0.0328284814894759, 0.00023135244871716874, -0.003283079845255645, -0.002691662394255552, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.04416710106700575, -0.04947753736189118, 0.0033631384446859225, 0.0006131437295028399, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0028283933745735313, 0.007334046645297735, 0.0004175308449180056, 0.0002677284322399715, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [-0.05560195062251936, -0.0018073447155278555, -0.0017008824801006284, 0.0028805080249490384, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [-0.03144452806712174, 0.00022664271106624136, -0.003275878188666712, -0.002681930833631605, 0.0, 0.0, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -58,45 +59,48 @@ const COEFFICIENTS: [[f64; HARMONICS]; DRIVERS] = [
 /// The fitted field.
 ///
 /// Built by the unchecked constructor because every argument is a literal in this file;
-/// `sdtm_reference.rs` puts the same four through `Thermosphere::from_coefficients` and
-/// asserts it accepts them, which is where the refusals bind.
+/// `sdtm_reference.rs` puts the same five through `Thermosphere::from_coefficients` and
+/// `with_flux_excess` and asserts they accept them, which is where the refusals bind.
 pub const FIELD: Thermosphere<HARMONICS> = Thermosphere::from_fitted(
     COEFFICIENTS,
-    3.27388050265752e-05,
+    3.293084750062421e-05,
     0.4965853037914096,
     StormResponse::Cooling(NitricOxideCooling {
-        heating: 80161.05323360574,
-        nitric_oxide: 104807.65176255429,
-        saturation: 16.172248992452378,
+        heating: 80417.70414749965,
+        nitric_oxide: 95897.8017674507,
+        saturation: 16.522733241798235,
     }),
+    FluxExcess::Saturated {
+        scale: 0.26722990701421573,
+    },
 );
 
 /// Number of 3-hourly `ap` intervals the storm state is to be run over: the shortest whole
 /// number of days whose truncation moves the driver by less than a hundredth of an `ap` at
-/// every interval of the corpus span (worst 0.0094).
-pub const HISTORY: usize = 96;
+/// every interval of the corpus span (worst 0.007).
+pub const HISTORY: usize = 88;
 
 /// Log-scale offset of each satellite's densities against GRACE-FO C's, reported rather
 /// than applied: the model is the physics, and these are what the calibrations disagree by.
 pub const SATELLITE_SCALE: [(&str, f64); 7] = [
-    ("Swarm A", 0.006108912228579874),
-    ("Swarm B", 0.013860239189762822),
-    ("Swarm C", 0.006730225269984506),
-    ("GRACE A", 0.05791207115694286),
-    ("GRACE B", 0.06363629865682831),
-    ("CHAMP", -0.0003565959980916166),
-    ("GOCE", 0.09100780170386313),
+    ("Swarm A", 0.01064344235659223),
+    ("Swarm B", 0.019224063178035714),
+    ("Swarm C", 0.011141451437718181),
+    ("GRACE A", 0.06912774253377625),
+    ("GRACE B", 0.0747891743428648),
+    ("CHAMP", 0.01259351121456712),
+    ("GOCE", 0.09002996813230911),
 ];
 
 /// Spread of `ln(rho_model/rho_measured)` by regime, from the residual each row had with its
 /// mission family held out -- see `DensityUncertainty` for why a held-out split.
 pub const UNCERTAINTY: DensityUncertainty = DensityUncertainty::from_fitted([
-    0.31412579452523237,
-    0.45573878259547723,
-    0.2695795722319351,
-    0.3028612802286909,
-    0.23168523005920055,
-    0.3387992677318595,
+    0.2998874019250239,
+    0.37090944397976017,
+    0.24540299903742402,
+    0.2968395579087343,
+    0.23751539509825806,
+    0.3340844327672703,
 ]);
 
 // The regime edges the table above was measured on. If the crate's edges move and this

@@ -9,15 +9,16 @@
 //! Three choices make it honest, and each was measured rather than assumed (`docs/verification.md`
 //! §10.12):
 //!
-//! * **the spread comes from the calendar-month split, not the satellite-month one.** The leaky split
-//!   (§10.10) gives a σ 1.6 to 2.3 times smaller in the solar-minimum cell, and an interval built from
-//!   it covers only part of what it claims when the month is genuinely new. An interval that does not
-//!   cover is worse than no interval;
+//! * **the spread comes from a split the fit could not see.** Each row's residual is the one it had in
+//!   the fit that held its whole mission family out (§10.25). On the twelve-month pilot a leaky split
+//!   (satellite-month, §10.10) gave a σ 1.6 to 2.3 times smaller in the solar-minimum cell, and an
+//!   interval built from it covered only part of what it claimed when the month was genuinely new. An
+//!   interval that does not cover is worse than no interval;
 //! * **the spread is taken about zero, not about each cell's mean.** A caller handed an interval wants
 //!   it to contain the measurement, so a cell whose residual is biased must carry that bias as part of
 //!   its width;
 //! * **it is a function of the model's own inputs.** The regime is decided by the 81-day mean flux and
-//!   by the storm kernel's response — both already in hand to evaluate the model at all, so asking for
+//!   by the storm state's response — both already in hand to evaluate the model at all, so asking for
 //!   the uncertainty costs a caller nothing it has not already fetched.
 //!
 //! The distribution is log-normal because the fit's own residual is a log residual and is symmetric in
@@ -40,8 +41,12 @@ use super::SdtmDrivers;
 /// 165.7.
 pub const FLUX_EDGES: [f64; 2] = [100.0, 150.0];
 
-/// Upper edges of the storm regimes, in units of the kernel's `ap` response — the literature's
-/// quiet/active boundary at `Ap` 15.
+/// Upper edges of the storm regimes, in units of the storm state's `ap` response — set at the
+/// literature's quiet/active boundary, `Ap` 15.
+///
+/// The shipped state cools, and its steady response `H/(1 + H/H_s)` saturates near `H_s` ≈ 16, so
+/// 15 is now crossed only in sustained storm time: 2.1 % of the corpus rows (`docs/verification.md`
+/// §10.25), the cells whose spread is the largest.
 pub const STORM_EDGES: [f64; 1] = [15.0];
 
 /// Number of regimes: `(FLUX_EDGES + 1) × (STORM_EDGES + 1)`.

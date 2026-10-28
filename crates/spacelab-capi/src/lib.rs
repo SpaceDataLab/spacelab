@@ -5371,18 +5371,19 @@ fn sdtm1_storm_response(history: &[f64], cadence_s: f64) -> f64 {
     if !cadence_s.is_finite() || cadence_s <= 0.0 {
         return f64::NAN;
     }
-    SDTM1_FIELD.kernel().response(history, cadence_s)
+    SDTM1_FIELD.storm().response(history, cadence_s)
 }
 
-/// SDTM-1's geomagnetic storm driver: the shipped kernel's response to an index history.
+/// SDTM-1's geomagnetic storm driver: the shipped heating and nitric-oxide cooling state run over an
+/// index history.
 ///
 /// `history` is the `ap` series oldest first, ending at the interval **before** the sample, and
 /// `cadence_s` is that series' step — 10 800 s for CelesTrak's 3-hourly `ap`, which is what the fit
-/// used. The two time constants belong to the fitted field, so a caller cannot build this driver
-/// itself; a truncated history reads as a quieter storm, so pass the whole window the response has
-/// support on, about a day and a half.
+/// used. The three constants belong to the fitted field, so a caller cannot build this driver
+/// itself. Nitric oxide remembers a storm for days, and a truncated history reads as a different
+/// storm: pass twelve days, 96 intervals (`sdtm::coefficients::HISTORY` in Rust).
 ///
-/// `n = 0` answers `0`, the response of a kernel with nothing to respond to, which is what the Python
+/// `n = 0` answers `0`, the response of a state with nothing to respond to, which is what the Python
 /// bridge answers for an empty list. A null pointer answers NaN: in C that is a different thing from
 /// an empty array, and the only honest answer a function returning a double can give.
 ///
@@ -17401,16 +17402,26 @@ mod tests {
         assert!(at(100.0) > quiet, "{} against {quiet}", at(100.0));
     }
 
-    /// The kernel has unit DC gain by construction — both internal states are seeded at the first
-    /// sample — so a constant history answers that constant exactly, at any cadence. That is an exact
-    /// property of the shipped filter rather than a tolerance, which makes it the right thing to check
-    /// across a language boundary.
+    /// The shipped storm state cools, so a constant history answers its steady state
+    /// `H/(1 + H/H_s)` from the first step, at any cadence — the field's own fixed point, which is
+    /// the property worth checking across a language boundary.
     #[test]
-    fn the_sdtm1_storm_kernel_passes_a_constant_history_through_unchanged() {
+    fn the_sdtm1_storm_state_holds_a_constant_history_at_its_steady_state() {
         let flat = [5.0_f64; 16];
-        assert_eq!(sdtm1_storm_response(&flat, 10_800.0), 5.0);
-        assert_eq!(sdtm1_storm_response(&flat, 3_600.0), 5.0);
-        // A cadence that is not a positive duration is not a history the kernel can read.
+        let spacelab_propagation::sdtm::StormResponse::Cooling(cooling) = SDTM1_FIELD.storm()
+        else {
+            panic!("the shipped field's storm state is the cooling one");
+        };
+        let steady = cooling.steady_state(5.0);
+        assert!(steady < 5.0);
+        for cadence in [10_800.0, 3_600.0] {
+            let got = sdtm1_storm_response(&flat, cadence);
+            assert!(
+                (got - steady).abs() < 1e-12 * steady,
+                "{got} at {cadence} s"
+            );
+        }
+        // A cadence that is not a positive duration is not a history the state can read.
         assert!(sdtm1_storm_response(&flat, 0.0).is_nan());
         assert!(sdtm1_storm_response(&flat, -10_800.0).is_nan());
         assert!(sdtm1_storm_response(&flat, f64::NAN).is_nan());
@@ -17418,7 +17429,7 @@ mod tests {
         let mut surge = [5.0_f64; 16];
         surge[12..].fill(300.0);
         let response = sdtm1_storm_response(&surge, 10_800.0);
-        assert!((5.0..300.0).contains(&response), "{response}");
+        assert!((steady..300.0).contains(&response), "{response}");
 
         // At the C boundary an empty array and a null pointer are different questions: `n = 0` is a
         // history with nothing in it, a null pointer is no history at all.
@@ -17429,7 +17440,7 @@ mod tests {
         assert!(unsafe { sl_sdtm1_storm_response(core::ptr::null(), 16, 10_800.0) }.is_nan());
         assert_eq!(
             unsafe { sl_sdtm1_storm_response(flat.as_ptr(), flat.len(), 10_800.0) },
-            5.0
+            sdtm1_storm_response(&flat, 10_800.0)
         );
     }
 
@@ -17472,8 +17483,8 @@ mod tests {
         );
         assert_eq!(collapsed, [density, density]);
 
-        // Low flux is the widest of the six regimes by a factor of two, so moving `f107a` across the
-        // 100 edge has to move the width.
+        // The quiet low-flux cell is wider than the quiet high-flux one, so moving `f107a` across the
+        // edges has to move the width.
         let mut quiet_sun = [f64::MIN; SL_SDTM1_INTERVAL];
         assert_eq!(
             unsafe {
@@ -17489,7 +17500,7 @@ mod tests {
             SL_OK
         );
         assert!(
-            quiet_sun[1] / quiet_sun[0] > 2.0 * (upper / lower),
+            quiet_sun[1] / quiet_sun[0] > upper / lower,
             "{:?} against {:?}",
             quiet_sun,
             out

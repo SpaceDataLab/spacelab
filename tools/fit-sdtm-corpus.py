@@ -27,6 +27,13 @@ and CHAMP at 300-450 km can.
 (`cooling_grid`, `derivations/sdtm_no_cooling.mac`), the Ф23.B state equation. `--storms` then
 scores every archived storm on Bruinsma & Laurens (2024)'s protocol (Ф15.H).
 
+`--emit` (with `--cooling`, every fold) writes the shipped field: the same form fitted on all eight
+satellites, GRACE-FO C the reference, into `crates/spacelab-propagation/src/sdtm/coefficients.rs`,
+and the Rust test's fixture. Its uncertainty table is the held-out-family residual's spread; its
+storm-history length is the shortest whole number of days whose truncation moves the driver by
+less than `HISTORY_TOLERANCE` anywhere in the corpus span. Nothing from the density files is in
+either output: the coefficients are ours, the fixture is our own model's values.
+
 Run:
 
     cargo build -p spacelab-propagation --release --example nrlmsise00_rows
@@ -61,7 +68,29 @@ FAMILY = {
     "SB": "Swarm",
     "SC": "Swarm",
 }
+NAME = {
+    "CH": "CHAMP",
+    "GA": "GRACE A",
+    "GB": "GRACE B",
+    "GO": "GOCE",
+    "GC": "GRACE-FO C",
+    "SA": "Swarm A",
+    "SB": "Swarm B",
+    "SC": "Swarm C",
+}
 EPOCH_2000 = pd.Timestamp("2000-01-01")
+OUT_RS = g.ROOT / "crates" / "spacelab-propagation" / "src" / "sdtm" / "coefficients.rs"
+OUT_FIXTURE = (
+    g.ROOT
+    / "crates"
+    / "spacelab-propagation"
+    / "tests"
+    / "fixtures"
+    / "sdtm_reference.csv"
+)
+HISTORY_TOLERANCE = 0.01
+"""Largest change in the storm driver, in `ap`, that the shipped history length may make: a
+hundredth of the index's own resolution."""
 
 
 def load_corpus(
@@ -364,6 +393,220 @@ class CorpusModel:
         return out.x
 
 
+def truncated_cooling(
+    ap: np.ndarray,
+    heating: float,
+    nitric: float,
+    saturation: float,
+    cadence: float,
+    ends: np.ndarray,
+    length: int,
+) -> np.ndarray:
+    """`NitricOxideCooling::response` over the `length` intervals ending at each of `ends`.
+
+    The Rust's convention, not `cooling_grid`'s: each window starts in steady state at its own first
+    value instead of from rest far back, so the difference between the two is what a finite history
+    costs.
+    """
+    window = ap[ends[:, None] - length + 1 + np.arange(length)]
+    h = cadence / 3600.0
+    decay = np.exp(-h / nitric)
+    mean_weight = nitric / h * (1.0 - decay)
+    first = window[:, 0]
+    d, n = first / (1.0 + first / saturation), first.copy()
+    for j in range(length):
+        drive = window[:, j]
+        n_mean = drive + (n - drive) * mean_weight
+        rate = (1.0 + n_mean / saturation) / heating
+        target = drive / (heating * rate)
+        d = target + (d - target) * np.exp(-rate * h)
+        n = drive + (n - drive) * decay
+    return d
+
+
+def history_length(model: CorpusModel, p: np.ndarray) -> tuple[int, float]:
+    """The shortest whole-day history whose response is within `HISTORY_TOLERANCE` of the fit's own.
+
+    Scored on every 3-hour interval from the corpus's first row to its last, against `cooling_grid`
+    warmed up from rest 120 days before the first.
+    """
+    kernel = model.kernel(p)
+    ap, cadence = model.a["ap"], model.a["cadence"]
+    reference = cooling_grid(ap, *kernel, cadence, model.first)
+    interval = model.a["interval"]
+    ends = np.arange(int(interval.min()), int(interval.max()) + 1)
+    for days in range(1, 61):
+        worst = float(
+            np.abs(
+                truncated_cooling(ap, *kernel, cadence, ends, 8 * days)
+                - reference[ends]
+            ).max()
+        )
+        print(
+            f"  history {days:2d} d: worst storm-driver change {worst:.3g} ap",
+            flush=True,
+        )
+        if worst < HISTORY_TOLERANCE:
+            return 8 * days, worst
+    sys.exit("no history up to 60 days reaches HISTORY_TOLERANCE")
+
+
+def emit(
+    model: CorpusModel,
+    p: np.ndarray,
+    rows: pd.DataFrame,
+    argument: argparse.Namespace,
+    held: np.ndarray,
+) -> None:
+    """Write the shipped field and the fixture: `p` fitted on every satellite, `held` the residual
+    each row had in the fold that held its family out."""
+    pk, arg = model.pack, model.a
+    heating, nitric, saturation = model.kernel(p)
+    grid = np.zeros((g.DRIVERS, arg["k"]))
+    for (d, k), c in zip(model.pairs, p[: pk.n_c], strict=True):
+        grid[d, k] = c
+    storm = cooling_grid(
+        arg["ap"], heating, nitric, saturation, arg["cadence"], model.first
+    )[arg["interval"]]
+    f107a = arg["f107a"]
+
+    sigma, count = g.uncertainty(held, f107a, storm)
+    if not (count > 0).all():
+        sys.exit(f"an uncertainty cell has no held-out rows: {count}")
+    cells = g.regime(f107a, storm)
+    family = rows.family.to_numpy()
+    coverage = {}
+    for fam in sorted(set(family)):
+        here = family == fam
+        table, _ = g.uncertainty(held[~here], f107a[~here], storm[~here])
+        coverage[fam] = 100.0 * float(
+            (np.abs(held[here]) <= g.NORMAL_90 * table[cells[here]]).mean()
+        )
+        print(
+            f"  the 90 % interval built without {fam} covers {coverage[fam]:.1f} % of it"
+        )
+    history, worst = history_length(model, p)
+
+    scales = p[pk.i_scale : pk.i_scale + len(pk.scaled)]
+    boundary = p[pk.i_boundary]
+    at_bound = " (on its bound)" if abs(abs(boundary) - 0.7) < 1e-9 else ""
+    note = [
+        f"Fitted {pd.Timestamp.today():%Y-%m-%d} by `tools/fit-sdtm-corpus.py` on {len(rows)} rows,",
+        f"every {argument.step}th of the TU Delft v02 corpus (`docs/verification.md` §10.20):",
+        "CHAMP, GRACE A/B, GOCE, GRACE-FO C and Swarm A/B/C, "
+        f"{rows.t.min():%Y-%m} to {rows.t.max():%Y-%m}, from TU Delft,",
+        "Siemes et al. (2023), CC BY 4.0 -- which is the attribution that licence asks of adapted",
+        "material, and `docs/provenance.md` (`sdtm-reference`) is the rest of it.",
+        "",
+        f"Degree {argument.degree}, harmonic caps `{argument.caps}`: {pk.n_c} of the "
+        f"{g.DRIVERS * arg['k']} possible",
+        f"coefficients, ridge {argument.ridge:g}, the Bates shape fitted, the boundary scale fitted"
+        f"{at_bound}.",
+        "The storm driver is heating with nitric-oxide cooling (`derivations/sdtm_no_cooling.mac`).",
+        f"Held out by mission family, MAPE {g.mape(held):.1f} % pooled.",
+        "",
+        "The uncertainty table below is that held-out residual's spread about zero, per regime. A",
+        "table built without one family's rows has a 90 % interval that covers, of that family:",
+        *(f"{k} {v:.1f} %," for k, v in coverage.items()),
+    ]
+    satellite_rows = "".join(
+        f'    ("{NAME[s]}", {g.literal(v)}),\n'
+        for s, v in zip(pk.scaled, scales, strict=True)
+    )
+    rows_rs = ["    [" + ", ".join(g.literal(c) for c in row) + "]," for row in grid]
+    OUT_RS.write_text(
+        "//! Fitted SDTM-1 coefficients -- generated by `tools/fit-sdtm-corpus.py`, do not edit.\n"
+        "//!\n"
+        + "".join(f"//! {line}\n".replace("//! \n", "//!\n") for line in note)
+        + (
+            "//!\n"
+            "//! The fit's own verdict, the folds it was scored on and what it does not claim are in\n"
+            "//! `docs/verification.md` §10.21-§10.25.\n"
+            "#![allow(clippy::unreadable_literal)]\n\n"
+            "use super::{\n"
+            "    DRIVERS, DensityUncertainty, FLUX_EDGES, NitricOxideCooling, STORM_EDGES, StormResponse,\n"
+            "    Thermosphere,\n"
+            "};\n\n"
+            "/// Degree of the sun-fixed spherical-harmonic expansion this fit used.\n"
+            f"pub const DEGREE: usize = {argument.degree};\n"
+            "/// Number of harmonics, `(DEGREE + 1)^2`.\n"
+            f"pub const HARMONICS: usize = {arg['k']};\n\n"
+            "/// `ln(T_inf - T_0)` coefficients, driver-major: `[driver][harmonic]`. A zero is a pair the\n"
+            "/// fit did not admit, not a pair that came out small.\n"
+            "#[rustfmt::skip]\n"
+            "const COEFFICIENTS: [[f64; HARMONICS]; DRIVERS] = [\n"
+            + "\n".join(rows_rs)
+            + "\n];\n\n"
+            "/// The fitted field.\n"
+            "///\n"
+            "/// Built by the unchecked constructor because every argument is a literal in this file;\n"
+            "/// `sdtm_reference.rs` puts the same four through `Thermosphere::from_coefficients` and\n"
+            "/// asserts it accepts them, which is where the refusals bind.\n"
+            "pub const FIELD: Thermosphere<HARMONICS> = Thermosphere::from_fitted(\n"
+            "    COEFFICIENTS,\n"
+            f"    {g.literal(model.shape(p))},\n"
+            f"    {g.literal(np.exp(boundary))},\n"
+            "    StormResponse::Cooling(NitricOxideCooling {\n"
+            f"        heating: {g.literal(heating * 3600.0)},\n"
+            f"        nitric_oxide: {g.literal(nitric * 3600.0)},\n"
+            f"        saturation: {g.literal(saturation)},\n"
+            "    }),\n"
+            ");\n\n"
+            "/// Number of 3-hourly `ap` intervals the storm state is to be run over: the shortest whole\n"
+            "/// number of days whose truncation moves the driver by less than a hundredth of an `ap` at\n"
+            f"/// every interval of the corpus span (worst {worst:.2g}).\n"
+            f"pub const HISTORY: usize = {history};\n\n"
+            "/// Log-scale offset of each satellite's densities against GRACE-FO C's, reported rather\n"
+            "/// than applied: the model is the physics, and these are what the calibrations disagree by.\n"
+            f"pub const SATELLITE_SCALE: [(&str, f64); {len(pk.scaled)}] = [\n"
+            + satellite_rows
+            + "];\n\n"
+            "/// Spread of `ln(rho_model/rho_measured)` by regime, from the residual each row had with its\n"
+            "/// mission family held out -- see `DensityUncertainty` for why a held-out split.\n"
+            "pub const UNCERTAINTY: DensityUncertainty = DensityUncertainty::from_fitted([\n"
+            + "".join(f"    {g.literal(x)},\n" for x in sigma)
+            + "]);\n\n"
+            "// The regime edges the table above was measured on. If the crate's edges move and this\n"
+            "// file is not regenerated, every entry is indexed by a bin it was not measured in -- and\n"
+            "// silently, because the table would still be the right length. So it is a compile error.\n"
+            + "".join(
+                f"const _: () = assert!(FLUX_EDGES[{i}] == {g.literal(e)});\n"
+                for i, e in enumerate(g.UNCERTAINTY_FLUX)
+            )
+            + "".join(
+                f"const _: () = assert!(STORM_EDGES[{i}] == {g.literal(e)});\n"
+                for i, e in enumerate(g.UNCERTAINTY_STORM)
+            )
+        )
+    )
+    print(f"wrote {OUT_RS.relative_to(g.ROOT)}")
+
+    index = np.linspace(0, len(rows) - 1, 64).astype(int)
+    exponent = model.design(heating, nitric, saturation)[index] @ p[: pk.n_c]
+    t_inf = g.BOUNDARY_TEMPERATURE + np.exp(exponent)
+    ln_rho, _ = g.profile(t_inf, model.shape(p), arg["zeta"][index])
+    lines = [
+        "# SDTM-1 reference values -- generated by tools/fit-sdtm-corpus.py.",
+        "# Our own model evaluated at our own sample of geometries: nothing here is measured data.",
+        "# altitude_m,latitude_rad,local_solar_time_h,day_of_year,f107,f107a,storm_ap,t_inf_K,density_kg_m3",
+    ]
+    for j, i in enumerate(index):
+        field = [
+            rows.altitude.iat[i],
+            np.deg2rad(rows.latitude.iat[i]),
+            rows.lst.iat[i],
+            arg["doy"][i],
+            arg["f107"][i],
+            f107a[i],
+            storm[i],
+            t_inf[j],
+            np.exp(ln_rho[j] + boundary),
+        ]
+        lines.append(",".join(g.literal(x) for x in field))
+    OUT_FIXTURE.write_text("\n".join(lines) + "\n")
+    print(f"wrote {OUT_FIXTURE.relative_to(g.ROOT)} ({index.size} rows)")
+
+
 def debias(residual: np.ndarray, sat: np.ndarray) -> np.ndarray:
     """Each satellite's mean log residual removed: what is left when only the structure transfers."""
     out = residual.copy()
@@ -456,12 +699,22 @@ def main() -> None:
         "each satellite by the fold that held its family out (Ф15.H)",
     )
     parser.add_argument(
+        "--emit",
+        action="store_true",
+        help="then fit on every satellite and write coefficients.rs and the fixture; needs "
+        "--cooling and every fold",
+    )
+    parser.add_argument(
         "--cooling",
         action="store_true",
         help="drive the storm term by heating with nitric-oxide cooling (Ф23.B) instead of the "
         "two-constant kernel",
     )
     argument = parser.parse_args()
+    if argument.emit and (argument.folds or not argument.cooling):
+        sys.exit(
+            "--emit writes the cooling field and its held-out table: give --cooling, no --folds"
+        )
     sigma = None if argument.fit_sigma else argument.sigma
 
     began = time.time()
@@ -533,6 +786,24 @@ def main() -> None:
             "MSIS debiased": debias(msis[done], sat[done]),
         },
     )
+    if argument.emit:
+        print("\nthe shipped field, fitted on every satellite", flush=True)
+        model = CorpusModel(
+            arg, sat, SATELLITES, caps, argument.ridge, sigma, argument.cooling
+        )
+        p = model.fit(np.arange(len(rows)))
+        r, _ = model.score(p, np.arange(len(rows)))
+        print(
+            f"  in sample MAPE {g.mape(r):.1f}%  "
+            + "  ".join(
+                f"{name} {v:.4g}"
+                for name, v in zip(
+                    ("heating h", "NO h", "saturation ap"), model.kernel(p), strict=True
+                )
+            ),
+            flush=True,
+        )
+        emit(model, p, rows, argument, held)
     if argument.storms:
         storms(rows, fitted, argument, sigma)
 

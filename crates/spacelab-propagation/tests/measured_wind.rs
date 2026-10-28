@@ -23,7 +23,6 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use spacelab_propagation::sdtm::StormKernel;
-use spacelab_propagation::sdtm::coefficients::FIELD as SDTM1_FIELD;
 use spacelab_propagation::space_weather::{
     SpaceWeatherDay, THREE_HOURLY_CADENCE, find, parse_space_weather, sdtm_ap_history,
 };
@@ -461,6 +460,14 @@ fn score_storm_filter(arcs: &[Arc], filter: StormFilter) -> (f64, f64, f64) {
     )
 }
 
+/// The two-constant kernel SDTM-1 shipped from its twelve-month pilot fit (`docs/verification.md`
+/// §10.10), the density's own lag this experiment was measured against. The shipped field has since
+/// moved to nitric-oxide cooling, which is not a kernel; the experiment keeps the constants it ran on.
+const PILOT_KERNEL: StormKernel = StormKernel {
+    onset: 2_888.069_101_892_565,
+    recovery: 9_817.366_539_616_045,
+};
+
 /// Where a two-constant kernel peaks, in hours — the lag it weights most heavily.
 ///
 /// `w(t) ∝ e^{−t/τ_r} − e^{−t/τ_o}` is stationary where the two exponentials' derivatives cancel, at
@@ -473,7 +480,7 @@ fn kernel_peak_hours(k: &StormKernel) -> f64 {
 ///
 /// Ф15.J asked whether the wind model should read SDTM-1's storm driver — the response of a
 /// two-constant causal kernel to the `ap` history — instead of the 3-hourly index it had. The answer
-/// has to be measured on the wind's own rows, because the kernel in [`SDTM1_FIELD`] was fitted to
+/// has to be measured on the wind's own rows, because SDTM-1's kernel ([`PILOT_KERNEL`]) was fitted to
 /// *density*: reusing it for the wind asserts that two different responses share a time constant.
 ///
 /// The table is one fit per line at [`SELECTED`], differing only in how the `ap` history is reduced
@@ -484,9 +491,9 @@ fn kernel_peak_hours(k: &StormKernel) -> f64 {
 #[ignore = "needs the tools/fetch-wind-data.sh download in data/validation/wind"]
 fn the_storm_lag_the_wind_wants_is_measured_rather_than_borrowed() {
     let arcs = load_arcs(30);
-    let shipped = *SDTM1_FIELD.kernel();
+    let shipped = PILOT_KERNEL;
     println!(
-        "SDTM-1's own kernel: onset {:.2} h, recovery {:.2} h, peak {:.2} h\n",
+        "SDTM-1's pilot kernel: onset {:.2} h, recovery {:.2} h, peak {:.2} h\n",
         shipped.onset / 3_600.0,
         shipped.recovery / 3_600.0,
         kernel_peak_hours(&shipped)

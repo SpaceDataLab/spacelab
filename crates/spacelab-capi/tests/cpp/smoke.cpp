@@ -601,8 +601,8 @@ void the_coverage_wrapper_agrees_with_the_windows_it_summarises() {
     const spacelab::sensor apparent_mask = spacelab::elevation_mask_apparent(10.0 * M_PI / 180.0);
     CHECK(apparent_mask.kind == SL_SENSOR_ELEVATION_MASK);
     CHECK(apparent_mask.min_elevation_rad < mask.min_elevation_rad);
-    CHECK_NEAR(apparent_mask.min_elevation_rad,
-               spacelab::refraction_geometric(10.0 * M_PI / 180.0), 1e-15);
+    CHECK_NEAR(apparent_mask.min_elevation_rad, spacelab::refraction_geometric(10.0 * M_PI / 180.0),
+               1e-15);
     CHECK(spacelab::refraction_apparent(0.0) > 0.0);
 
     // Diurnal aberration through the throwing wrappers. The station is on the equator at longitude
@@ -777,11 +777,14 @@ void the_atmosphere_wrapper_answers_what_the_formulas_say() {
     CHECK(spacelab::nrlmsise00_density(172, 29000.0, 200.0, 0.0, 0.0, 150.0, 150.0, 4.0) >
           spacelab::nrlmsise00_density(172, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 4.0));
 
-    /* SDTM-1 through the span overload: a constant index history is the kernel's unit-gain case, so
-     * the response is that constant exactly; the default cadence is the 3-hourly one the fit used. */
+    /* SDTM-1 through the span overload: a constant index history sits on the cooling state's steady
+     * state, below the index, the same at the default 3-hourly cadence and at an hourly one. */
     const std::array<double, 16> quiet_ap{5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0,
                                           5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0};
-    CHECK(spacelab::sdtm1_storm_response(quiet_ap) == 5.0);
+    const double quiet_storm = spacelab::sdtm1_storm_response(quiet_ap);
+    CHECK(quiet_storm > 0.0 && quiet_storm < 5.0);
+    CHECK(std::abs(spacelab::sdtm1_storm_response(quiet_ap, 3600.0) - quiet_storm) <
+          1e-12 * quiet_storm);
     const double sdtm_400 =
         spacelab::sdtm1_density(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 5.0);
     CHECK(spacelab::sdtm1_density(172.0, 29000.0, 200.0, 0.0, 0.0, 150.0, 150.0, 5.0) > sdtm_400);
@@ -1557,7 +1560,6 @@ void the_conjunction_wrapper_carries_an_exception_back_through_c() {
                                         SL_RE_EARTH + 800e3, SL_RE_EARTH + 420e3, 1.0));
 }
 
-
 /*
  * The control pillar through the C++ wrapper.
  *
@@ -1646,9 +1648,8 @@ void the_control_wrapper_closes_the_loop_and_carries_its_refusals() {
     CHECK_NEAR(margin.normalised, margin.seconds * margin.natural_frequency_rad_s, 1e-12);
     CHECK(spacelab::delay_margin_of_gains(4.0, quaternion.angle, quaternion.rate).seconds ==
           margin.seconds);
-    const spacelab::binding_axis worst =
-        spacelab::worst_principal_axis(SL_LAW_QUATERNION_PD, 8.0, 12.0, spacelab::vec3{6.0, 2.0,
-                                                                                       9.0});
+    const spacelab::binding_axis worst = spacelab::worst_principal_axis(
+        SL_LAW_QUATERNION_PD, 8.0, 12.0, spacelab::vec3{6.0, 2.0, 9.0});
     CHECK(worst.axis < 3);
     CHECK(worst.margin.seconds <= margin.seconds);
 
@@ -1664,7 +1665,8 @@ void the_control_wrapper_closes_the_loop_and_carries_its_refusals() {
     CHECK(solved.residual < 1e-9);
     CHECK_NEAR(solved.gain[0], solved.riccati[2], 1e-12);
 
-    const spacelab::linear_plant cw = spacelab::clohessy_wiltshire_plant(2.0 * std::numbers::pi / 5400.0);
+    const spacelab::linear_plant cw =
+        spacelab::clohessy_wiltshire_plant(2.0 * std::numbers::pi / 5400.0);
     CHECK(cw.a.size() == 36 && cw.b.size() == 18);
     CHECK(std::all_of(cw.b.begin(), cw.b.begin() + 9, [](double v) { return v == 0.0; }));
 
@@ -1687,8 +1689,7 @@ void the_control_wrapper_closes_the_loop_and_carries_its_refusals() {
     const std::vector<double> spectrum = spacelab::laplacian_spectrum(path, 4);
     CHECK(spectrum.size() == 4);
     CHECK(spacelab::algebraic_connectivity(path, 4) == spectrum[1]);
-    const double bound =
-        spacelab::consensus_delay_bound(path, 4, SL_CONSENSUS_DELAYED_RELATIVE);
+    const double bound = spacelab::consensus_delay_bound(path, 4, SL_CONSENSUS_DELAYED_RELATIVE);
     CHECK_NEAR(bound, std::numbers::pi / (2.0 * spectrum[3]), 1e-12);
 
     /* The modes size themselves from the agent count and arrive alongside the eigenvalues, so a
@@ -1724,9 +1725,8 @@ void the_control_wrapper_closes_the_loop_and_carries_its_refusals() {
     CHECK_NEAR(coefficients[2], 6.0, 1e-12);
 
     const std::array<double, 4> start{1.0, -2.0, 3.0, -0.5};
-    const spacelab::consensus_result settled =
-        spacelab::consensus_run(path, SL_CONSENSUS_DELAYED_RELATIVE, 0.7 * bound, start, 40.0,
-                                1e-9);
+    const spacelab::consensus_result settled = spacelab::consensus_run(
+        path, SL_CONSENSUS_DELAYED_RELATIVE, 0.7 * bound, start, 40.0, 1e-9);
     CHECK(settled.final_state.size() == 4);
     CHECK(settled.accepted > 0);
     CHECK(settled.disagreement < 1e-3 * spacelab::consensus_disagreement(start));

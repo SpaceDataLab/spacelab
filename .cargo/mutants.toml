@@ -1026,7 +1026,7 @@ exclude_re = [
     # it are real gaps and are killed by
     # `the_set_index_parsers_reject_every_shape_of_line_that_is_not_a_row`: `< 11` is the bounds
     # proof for `t[10]`, `<= 11` drops the narrowest legal row, and `== 11` admits short ones.
-    "space_weather\\.rs:767:28: replace \\|\\| with && in parse_solfsmy",
+    "space_weather\\.rs:768:28: replace \\|\\| with && in parse_solfsmy",
 
     # `parse_hpo`'s guard is the third instance of the same shape, and the argument closes the same
     # way. `&&` is unsatisfiable -- the empty string does not start with `#` -- so both classes fall
@@ -1040,7 +1040,7 @@ exclude_re = [
     # Identical `Vec` on every input. The width guard below it is the real bounds proof and is
     # killed by `parse_hpo_keeps_the_row_it_can_use_and_drops_every_shape_that_is_not_data`, whose
     # fixture text carries a nine-field row: `< 9` keeps it and `<= 9` drops it.
-    "space_weather\\.rs:547:28: replace \\|\\| with && in parse_hpo",
+    "space_weather\\.rs:548:28: replace \\|\\| with && in parse_hpo",
 
     # `extend_forecast`'s `horizon = through + FLUX_WINDOW / 2` with `/` -> `*` synthesises to
     # `through + 162` instead of `through + 40`. Every returned day `i <= through` reads only its
@@ -1049,7 +1049,7 @@ exclude_re = [
     # last measured day, recurrence the day 27 earlier), so those values are the same under either
     # horizon. Both `horizon - origin` and `horizon - through` stay positive, so neither `?`
     # changes. Identical `Vec` on every input; the mutant only synthesises 122 days more.
-    "space_weather\\.rs:452:41: replace / with \\* in extend_forecast",
+    "space_weather\\.rs:453:41: replace / with \\* in extend_forecast",
 
     # --- crates/spacelab-propagation/src/time_variable_gravity.rs ---
     # --- Three floating tolerance ties, each unreachable on the binary grid its operands live on.
@@ -4137,10 +4137,10 @@ exclude_re = [
     "lib\\.rs:1252:18: replace / with % in propagate_j2_itrf_dense",
     "lib\\.rs:1252:18: replace / with \\* in propagate_j2_itrf_dense",
     "lib\\.rs:1507:18: replace / with % in propagate_relativistic_dense",
-    "lib\\.rs:1794:18: replace / with % in propagate_drag_dense",
-    "lib\\.rs:1794:18: replace / with \\* in propagate_drag_dense",
-    "lib\\.rs:1872:18: replace / with % in propagate_luni_solar_dense",
-    "lib\\.rs:1872:18: replace / with \\* in propagate_luni_solar_dense",
+    "lib\\.rs:1796:18: replace / with % in propagate_drag_dense",
+    "lib\\.rs:1796:18: replace / with \\* in propagate_drag_dense",
+    "lib\\.rs:1874:18: replace / with % in propagate_luni_solar_dense",
+    "lib\\.rs:1874:18: replace / with \\* in propagate_luni_solar_dense",
 
     # --- `spacelab-capi`. Both patterns carry the crate path, unlike the `lib\.rs:` forms above:
     # --- two crates now have a mutated `lib.rs`, and a bare line:col would match either.
@@ -4175,7 +4175,7 @@ exclude_re = [
     # `fl(2π)` is not the true period of `sin`/`cos`, and it is measured rather than assumed:
     # `the_magnetic_coordinates_track_the_dipole_and_the_sun` walks 96 points and reports a worst
     # |MLT(lst) − MLT(lst + 24 h)| of 7.1e-15 h. The expansion it feeds resolves 24/(2·degree) h.
-    "wind_model\\.rs:360:51: replace - with \\+ in magnetic_point",
+    "wind_model\\.rs:361:51: replace - with \\+ in magnetic_point",
 
     # `let idx = |n, m| n·w + m`, the scratch layout of the Legendre tables inside `angular_basis`,
     # tied to `n·w − m`. It is a *permutation* of the same storage, not a different answer: every
@@ -4187,7 +4187,7 @@ exclude_re = [
     # `n·w − m ≤ (w−1)·w < w²`. The values are therefore identical, which
     # `the_basis_is_the_gradient_of_its_harmonic` confirms empirically against an evaluator that
     # does not share the layout.
-    "wind_model\\.rs:408:42: replace \\+ with - in angular_basis",
+    "wind_model\\.rs:409:42: replace \\+ with - in angular_basis",
 
     # The two short-circuits in `velocity` that skip the high-latitude block, each tied to `>=`. Both
     # guards exist to save work, not to change the answer, and `>=` is exactly the mutation that
@@ -4210,20 +4210,20 @@ exclude_re = [
     # Both arguments are over finite coefficients and a finite point; on a non-finite `ap` the added
     # `inf · 0` would be NaN, which is a distinction without a difference for a model whose drivers
     # are polynomials in that same input.
-    "wind_model\\.rs:559:36: replace > with >= in HorizontalWindField::velocity",
-    "wind_model\\.rs:562:23: replace > with >= in HorizontalWindField::velocity",
+    "wind_model\\.rs:560:36: replace > with >= in HorizontalWindField::velocity",
+    "wind_model\\.rs:563:23: replace > with >= in HorizontalWindField::velocity",
 
     # `jd_max > 0` → `>=` in `fit`, the same short-circuit as the two above and equivalent for the
     # same reason: at disturbance degree zero `angular_terms` is zero, so `angular_basis` returns an
     # empty vector, `for j in 0..0` writes nothing, and the design row the mutant spends the extra
     # `magnetic_point` call on is byte for byte the row it would have had.
-    "wind_model\\.rs:639:23: replace > with >= in HorizontalWindField::fit",
+    "wind_model\\.rs:640:23: replace > with >= in HorizontalWindField::fit",
 
     # `for j in i + 1..k` → `i * 1..k` in the loop that mirrors the upper triangle of the normal
     # equations into the lower one. The extra iteration it admits is `j == i`, whose body is
     # `ata[i·k + i] = ata[i·k + i]` — a self-assignment, and the only one, since `i * 1 == i`
     # exactly for every `usize`.
-    "wind_model\\.rs:685:24: replace \\+ with \\* in HorizontalWindField::fit",
+    "wind_model\\.rs:686:24: replace \\+ with \\* in HorizontalWindField::fit",
 
     # `for k in i + 1..n` → `i..n` in the back-substitution of the Cholesky solve. The extra
     # iteration reads `c[i]`, which the loop is about to write and which `vec![0.0; n]` left at
@@ -4231,7 +4231,7 @@ exclude_re = [
     # and every finite pivot, and the pivot is finite: `l = sqrt(d)` is only reached once `d` has
     # passed `d.is_nan() || d <= 0.0`, and the only way past that with a non-finite `d` is an input
     # matrix that was already non-finite.
-    "wind_model\\.rs:735:20: replace \\+ with \\* in solve_symmetric_positive_definite",
+    "wind_model\\.rs:736:20: replace \\+ with \\* in solve_symmetric_positive_definite",
 
     # `sec = total_sec − 86 400·days` → `+` in the drag adapter. `sec` has exactly one consumer,
     # `lst_raw`, which is reduced to `[0, 24)` before it reaches the model; the mutant differs from
@@ -4239,7 +4239,7 @@ exclude_re = [
     # number of days and the reduction removes it. Keeping the subtraction is still the right code:
     # reducing before the division to hours is what stops `sec / 3 600` from being a large number
     # that the wrap then cancels against, and the mutant's precision degrades as `t` grows.
-    "wind_model\\.rs:821:29: replace - with \\+ in <impl Wind for EmpiricalWind<G>>::velocity",
+    "wind_model\\.rs:822:29: replace - with \\+ in <impl Wind for EmpiricalWind<G>>::velocity",
 
     # `up[2]·ê[0] − up[0]·ê[2]` → `+` in the north direction. `ê[2]` is constructed as
     # `S::from_f64(0.0)` two lines above, so the subtrahend is an exact `±0.0`, and `x − 0.0` and
@@ -5463,7 +5463,7 @@ exclude_re = [
     # unreachable, and an assertion on `weight(0.0).is_sign_negative()` would be pinning IEEE-754's
     # sign rule rather than the kernel's causality. The `>`-side of the same branch is caught by
     # `the_storm_kernel_has_unit_gain_a_delayed_onset_and_the_peak_the_algebra_gives`.
-    "crates/spacelab-propagation/src/sdtm/mod\\.rs:199:16: replace < with <= in StormKernel::weight",
+    "crates/spacelab-propagation/src/sdtm/mod\\.rs:200:16: replace < with <= in StormKernel::weight",
 
     # `self.heights.locate(height_km, 0, self.heights.count - 1)` in `WamIpeField::density`, the
     # upper node rewritten to `count + 1` or `count / 1`. `density` has already returned `None`

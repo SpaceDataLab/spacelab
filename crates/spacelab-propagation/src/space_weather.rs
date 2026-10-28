@@ -213,9 +213,9 @@ const fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
 
 /// Cadence of the feed's sub-daily indices, seconds — three hours, eight intervals to the day.
 ///
-/// Public because it is the `cadence` argument [`crate::sdtm::StormKernel::response`] must be given
-/// for the history [`sdtm_ap_history`] returns: the kernel integrates a step function, and a cadence
-/// that does not match the sampling rescales the storm response rather than failing.
+/// Public because it is the `cadence` argument [`crate::sdtm::StormResponse::response`] must be
+/// given for the history [`sdtm_ap_history`] returns: the response integrates a step function, and a
+/// cadence that does not match the sampling rescales the storm response rather than failing.
 pub const THREE_HOURLY_CADENCE: f64 = 10_800.0;
 
 /// The inverse of [`days_from_civil`], Hinnant's `civil_from_days` — the calendar date a synthesised
@@ -304,18 +304,19 @@ pub fn nrlmsise_ap_array(
     ])
 }
 
-/// The 3-hourly `ap` history SDTM-1's storm kernel integrates, oldest first, ending at the interval
+/// The 3-hourly `ap` history SDTM-1's storm state integrates, oldest first, ending at the interval
 /// **before** the one containing `sec` UT seconds into `year-month-day`.
 ///
 /// The exclusion of the sample's own interval is causality, not caution: `ap` for the interval a
 /// sample falls in is not published at the sample's epoch, so a model that used it could not be run
-/// forward. It is also what `tools/gen_sdtm_coefficients.py` fitted the kernel on, which is what makes
-/// the two the same model.
+/// forward. It is also what `tools/fit-sdtm-corpus.py` fitted the storm state on, which is what
+/// makes the two the same model.
 ///
-/// `N` is how far back the recursion is warmed up. The kernel forgets its initial state as
-/// `exp(-3 h/τ_r)^N`, so with the fitted `τ_r` under 2 h even `N = 8` leaves a part in a million;
-/// [`crate::sdtm::coefficients`] is evaluated with 16. Returns `None` if any of those intervals is
-/// missing from the feed, because a shortened history reads as a quieter storm.
+/// `N` is how far back the recursion is warmed up. For the shipped field it is
+/// [`crate::sdtm::coefficients::HISTORY`]: nitric oxide remembers a storm for days, and that length
+/// is the shortest whole number of days the generator measured to move the driver by less than a
+/// hundredth of an `ap` anywhere in its corpus. Returns `None` if any of those intervals is missing
+/// from the feed, because a shortened history reads as a quieter storm.
 #[must_use]
 pub fn sdtm_ap_history<const N: usize>(
     days: &[SpaceWeatherDay],
@@ -340,23 +341,23 @@ pub fn sdtm_ap_history<const N: usize>(
 
 /// The three SDTM-1 drivers at the instant `sec` UT seconds into `year-month-day`, with the model's
 /// own index conventions applied: F10.7 of the **previous** day, the **trailing** 81-day mean of the
-/// same day, and the storm kernel's response over the `ap` history ending at the interval before the
+/// same day, and the storm state's response over the `ap` history ending at the interval before the
 /// sample.
 ///
 /// The conventions belong here rather than at the call site for the same reason the JB2008 drivers'
 /// lags do: each of the three is part of the model definition, and every one of them has a plausible
 /// wrong answer in the same file. The centred 81-day mean is the quantity NRLMSISE-00 asks for and it
-/// is *not* this model's — `tools/gen_sdtm_coefficients.py` fitted the trailing one, because it is the
+/// is *not* this model's — the generator fitted the trailing one, because it is the
 /// only one an operational caller has at the end of the series. Sampling F10.7 on the sample's own day
-/// would read as spuriously good on a flare day, and giving the kernel a cadence other than
+/// would read as spuriously good on a flare day, and giving the storm state a cadence other than
 /// [`THREE_HOURLY_CADENCE`] rescales the storm term silently.
 ///
-/// `N` is the kernel's warm-up length — see [`sdtm_ap_history`], which is where the `None` cases are:
+/// `N` is the storm state's warm-up length — see [`sdtm_ap_history`], which is where the `None` cases are:
 /// the previous day, the sample's day or any of the `N` history intervals missing from the feed.
 #[must_use]
 pub fn sdtm_drivers<const N: usize>(
     days: &[SpaceWeatherDay],
-    kernel: &crate::sdtm::StormKernel,
+    storm: &crate::sdtm::StormResponse,
     year: i32,
     month: u32,
     day: u32,
@@ -372,7 +373,7 @@ pub fn sdtm_drivers<const N: usize>(
     Some(crate::sdtm::SdtmDrivers {
         f107: previous.f107_observed,
         f107a: today.f107_last81,
-        storm: kernel.response(&history, THREE_HOURLY_CADENCE),
+        storm: storm.response(&history, THREE_HOURLY_CADENCE),
     })
 }
 
@@ -1617,19 +1618,19 @@ XXXX 05 10 19.0 19.50 33733.79167 33733.81250  9.000  154 0
             d.f107_last81 = 150.0 + f64::from(k);
             d.f107_center81 = 900.0; // the quantity this model must not read
         }
-        let kernel = crate::sdtm::coefficients::FIELD.kernel();
-        let drivers = sdtm_drivers::<16>(&days, kernel, 2024, 4, 9, 12.0 * 3600.0).unwrap();
+        let storm = crate::sdtm::coefficients::FIELD.storm();
+        let drivers = sdtm_drivers::<16>(&days, storm, 2024, 4, 9, 12.0 * 3600.0).unwrap();
         assert_eq!(drivers.f107, days[98].f107_observed);
         assert_eq!(drivers.f107a, days[99].f107_last81);
-        // The history ends at the interval before noon, all of it inside day 99 at `ap` 99, so the
-        // kernel's response to a constant history is that constant times its own gain.
+        // The history ends at the interval before noon, all of it inside day 99 at `ap` 99: the
+        // driver is the field's own response to exactly that history.
         let history = sdtm_ap_history::<16>(&days, 2024, 4, 9, 12.0 * 3600.0).unwrap();
         assert_eq!(
             drivers.storm,
-            kernel.response(&history, THREE_HOURLY_CADENCE)
+            storm.response(&history, THREE_HOURLY_CADENCE)
         );
         assert!(drivers.storm > 0.0);
         // And it refuses what it cannot assemble rather than shortening the history.
-        assert!(sdtm_drivers::<16>(&days, kernel, 2024, 1, 1, 0.0).is_none());
+        assert!(sdtm_drivers::<16>(&days, storm, 2024, 1, 1, 0.0).is_none());
     }
 }

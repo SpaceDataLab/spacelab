@@ -358,7 +358,8 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 in both bridges | #319's defect is a capability that reaches one bridge and not the other | the same four names defined, registered and exercised on both sides, enforced by a test that reads both files | 4 of 4 name-for-name; `just capi` **12/12** across C99–C23 × C++20–C++26 × throw/nothrow × `-fshort-enums`; the kernel's unit gain and the interval's multiplicativity pinned as exact equalities in C, C++ and Python | tests/bridge_parity.rs, tests/c/smoke.c, tests/bindings.py |
 | SDTM-1 operational drivers | the fit's conventions — yesterday's F10.7, the **trailing** 81-day mean, the kernel over the `ap` history before the sample — belong to the library, not to each call site | `space_weather::sdtm_drivers` against the hand assembly, and the crate's own 81-day window against the provider's published mean | the two means are not interchangeable (6.7 flux units apart on average, 42.6 at worst); our window matches the published one to **0.0494** over 22 323 fully measured windows, which is its one-decimal rounding | src/space_weather.rs, tests/operational_path.rs |
 | SDTM-1 operational latency and forecast | a density at the newest epoch one fetched file supports, and a measured baseline past it | the feed's last measured day against the download's own timestamp; persistence and 27-day recurrence scored by lead over 420 origins | **1 day** behind a 2026-09-14 fetch (2 behind a 2026-08-10 one); recurrence overtakes persistence at lead **8** in F10.7 and lead **2** in `Ap`, and the two coincide exactly at lead 27 | tests/operational_path.rs |
-| SDTM-1 fitted field — Rust against the generator | the fit is done in Python and the evaluator in Rust; two implementations of one model | `tools/gen_sdtm_coefficients.py`'s own values at 64 of the geometries it fitted on, every field written at round-trip precision | worst `T∞` **1.824e-15**, worst ρ **7.516e-15** relative (tolerances 1e-12 / 1e-11) | tests/sdtm_reference.rs |
+| SDTM-1 fitted field — Rust against the generator | the fit is done in Python and the evaluator in Rust; two implementations of one model | `tools/fit-sdtm-corpus.py`'s own values at 64 of the geometries it fitted on, every field written at round-trip precision | worst `T∞` **2.402e-15**, worst ρ **1.237e-14** relative (tolerances 1e-12 / 1e-11) | tests/sdtm_reference.rs |
+| SDTM-1 shipped corpus field | the §10.24 form, fitted on all eight satellites and shipped; the storm state's Rust step against the CAS; the history it needs measured | `derivations/sdtm_no_cooling.mac`'s 30-digit steps; the fit's own state against a truncated history over every 3-hour interval of the corpus span; the held-out-family residual | step to 1e-13 rel; `HISTORY` 96 intervals (worst 0.0094 `ap`); 90 % interval covers 88.6–99.7 % of each held-out family; **2024-05-10 55.2 %** from the daily flux excess (§10.25) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
 
 ### Tides
 
@@ -5001,6 +5002,7 @@ The 39 split three ways, and the second and third classes are new:
 | `reseal-sdtm-core` | the same three files | **361** | **0** | 17 | the control, **379 mutants in 77 min**, 1 timeout, and both axes reconcile at once. The population falls by exactly one — the equivalent `StormKernel::weight` comparison, now excluded by the ledger and so no longer tested — and caught rises by exactly ten, one per closed survivor. The unviable set is unchanged element for element, the timeout is the same `isqrt` counter, and nothing that the first block caught became uncaught, which is the property #286 made this block worth its hour for |
 | `seal-sw-dst` | `spacelab-propagation/src/space_weather.rs`, whole file, after Ф14.O added `parse_usgs_dst` / `usgs_dst_at` | 338 | **9** | 0 | 365 mutants, 18 unviable, `JOBS=2`. **Three are the new reader**: the `||` → `&&` mutants at 701:13 and 702:13 accept a stamp wrong in one separator only, and 715:39 one with day 0 or 32 and a legal hour; the unit test gained one row wrong in exactly one place for each, and each mutant, applied by hand in a worktree, now fails it. **Six predate it and are owed**: `civil_from_days` 229:17 (`-` → `+`, `/`) and `extend_forecast` 496:27, 496:41, 505:13, 528:24 — both arrived with `04c86e2` (2026-09-14), after `reseal3-sw-hpo` last measured the file |
 | `reseal-sw-dst` | the same file | **346** | **0** | 0 | the control, 364 mutants in 38 min, 18 unviable, clean, and it reconciles: 365 less the one now ledgered. The calendar round trip gained the era before year 0, the branch a negative day number takes (229:17); `the_measured_days_are_returned_unchanged` kills 528:24, which recomputed the measured days' means; `a_forecast_across_a_year_boundary_before_1970_carries_its_own_dates` kills the deleted `year` field (505:13) and `through * 40` (496:27), which is negative before 1970 and so refuses. `/` → `*` at 496:41 only synthesises 122 days more, never read by a returned day's window, and is ledgered with that proof |
+| `seal-sdtm-cooling` | `spacelab-propagation/src/sdtm/mod.rs`, after §10.25 replaced the storm kernel's single slot with `StormResponse` and added `NitricOxideCooling` | 356 | **0** | 1 | 363 mutants in 52 min, 6 unviable, clean on the first run: the cooling step is pinned by the Maxima reference values of `derivations/sdtm_no_cooling.mac` to 1e-13, its fixed point and its reduction to the heating filter by two identities, and each refusal of the checked constructor by its own argument, so no arithmetic or comparison in the new code survives. The timeout is the same frozen `isqrt` counter as in `seal-sdtm-core` |
 "Stale" means the survivors were closed by a commit that landed *after* that block's snapshot was
 taken. A block reports on the tree as it stood when it **started**, so those verdicts are behind the
 tree rather than open, and each needs only a re-measurement. `small-seal`'s five were verified dead
@@ -5542,7 +5544,8 @@ relative error:
 | NRLMSISE-00, daily `Ap` | 2.019 ± 1.235 | 2.087 ± 1.346 | 2.019 ± 1.236 | 2.086 ± 1.346 |
 | JB2008 | 1.359 ± 0.652 | 1.133 ± 0.297 | 1.358 ± 0.645 | 1.156 ± 0.312 |
 | DTM2020 *(Orekit ships DTM2000)* | 1.056 ± 0.316 | 1.189 ± 0.361 | 2.163 ± 1.661 | 2.243 ± 1.725 |
-| **SDTM-1, ours — in sample** | **0.927 ± 0.274** | 1.257 ± 0.383 | — | — |
+| **SDTM-1 pilot (§10.10) — in sample** | **0.927 ± 0.274** | 1.257 ± 0.383 | — | — |
+| SDTM-1 shipped corpus field (§10.25) | 1.110 ± 0.349 | 1.546 ± 0.743 | — | — |
 
 On MAPE, the metric the density literature reports, in the same order: 103.4 / 102.0 / 47.6 / 23.8 /
 **22.1 %** on the quiet day and 68.2 / 114.7 / **20.6** / 24.1 / 30.1 % on the storm day. SDTM-1's two
@@ -5574,15 +5577,21 @@ our own model is below NRLMSISE-00 in every bin; this is the table that answers 
 saw 8 170 rows at one-hour spacing and this is every sixth row of the full product, 43 times as many,
 so the 20.3 % here against 19.3 % there is what the hourly decimation cost.
 
-| bin | n | NRLMSISE-00 `ap[]` | NRLMSISE-00 `Ap` | JB2008 | DTM2020 | SDTM-1, in sample |
-|---|---|---|---|---|---|---|
-| all | 348 693 | 51.7 % | 52.7 % | 25.5 % | **20.2 %** | 20.3 % |
-| F10.7 < 100 | 122 475 | 86.2 % | 88.7 % | 39.0 % | **22.4 %** | 24.2 % |
-| 100 ≤ F10.7 < 175 | 185 898 | 30.7 % | 30.8 % | 17.7 % | 18.2 % | **16.7 %** |
-| F10.7 ≥ 175 | 40 320 | 43.6 % | 44.5 % | **20.8 %** | 22.6 % | 24.9 % |
-| `Ap` < 15 (quiet) | 276 116 | 54.9 % | 55.4 % | 25.8 % | **19.1 %** | 19.9 % |
-| 15 ≤ `Ap` < 50 (active) | 53 451 | 37.3 % | 39.8 % | 22.2 % | 21.6 % | **19.0 %** |
-| `Ap` ≥ 50 (G2 or worse) | 19 126 | 44.3 % | 49.8 % | 31.0 % | 30.5 % | **29.2 %** |
+| bin | n | NRLMSISE-00 `ap[]` | NRLMSISE-00 `Ap` | JB2008 | DTM2020 | SDTM-1 pilot, in sample | SDTM-1 shipped (§10.25) |
+|---|---|---|---|---|---|---|---|
+| all | 348 693 | 51.7 % | 52.7 % | 25.5 % | **20.2 %** | 20.3 % | 23.2 % |
+| F10.7 < 100 | 122 475 | 86.2 % | 88.7 % | 39.0 % | **22.4 %** | 24.2 % | 26.0 % |
+| 100 ≤ F10.7 < 175 | 185 898 | 30.7 % | 30.8 % | 17.7 % | 18.2 % | **16.7 %** | 21.5 % |
+| F10.7 ≥ 175 | 40 320 | 43.6 % | 44.5 % | **20.8 %** | 22.6 % | 24.9 % | 22.8 % |
+| `Ap` < 15 (quiet) | 276 116 | 54.9 % | 55.4 % | 25.8 % | **19.1 %** | 19.9 % | 22.0 % |
+| 15 ≤ `Ap` < 50 (active) | 53 451 | 37.3 % | 39.8 % | 22.2 % | 21.6 % | **19.0 %** | 25.5 % |
+| `Ap` ≥ 50 (G2 or worse) | 19 126 | 44.3 % | 49.8 % | 31.0 % | 30.5 % | **29.2 %** | 34.3 % |
+
+**The shipped field since §10.25** is the corpus fit, not the pilot. On these rows — twelve of the
+corpus's 1 051 satellite-months — it is still below NRLMSISE-00 in every bin, and behind the
+pilot, which was fitted on exactly these months, in every bin but high flux. In the storm bin it is
+behind JB2008 and DTM2020 too, 34.3 % against 31.0 % and 30.5 %: these months hold the Gannon onset,
+whose daily flux excess §10.25 traces. The readings below are the pilot's.
 
 Three readings, and the third is the one that matters for Ф15.E:
 
@@ -7415,7 +7424,9 @@ solar time, so 15 E an hour earlier in UT is the same place in the model and rep
 harmonic over 1/24 of a day, which is all that is left — while the same 15 E at the same UT is an hour
 later in local time and worth 9.0 % and 11.6 %. Those two blocks are not reachable from a mutation run,
 which is the point: they are what a *caller* in that language is told, and the eighteen mutants are
-what the compiler is told. `just capi` stays **12/12**.
+what the compiler is told. `just capi` stays **12/12**. With the shipped corpus field (§10.25) the
+same-place residue is 2.2e-4 and 1.7e-4 and the hour of local time 12.0 % and 9.3 %, so the C bound
+on the latter is 5 %, as the Python one already was.
 
 **The model itself had never been sealed, and the block that finally did it found a defect.** Three
 blocks judged the wrappers; `sdtm/mod.rs`, `sdtm/uncertainty.rs` and `sdtm/coefficients.rs` — the Bates
@@ -8059,7 +8070,72 @@ reported because it is best on most rows; the comparison is a selection, and its
 optimistic by that selection. A fresh confirmation needs data none of the four saw: the 2026 months
 after the archive's end.
 
-The shipped coefficients and the Rust evaluator are unchanged: the state is in the fit tool only.
+The shipped coefficients and the Rust evaluator were unchanged at this step; §10.25 ships the state.
+
+### 10.25 The corpus field ships, with nitric-oxide cooling (Ф23.B, step 4)
+
+**What changed in the library.** A fitted field now owns a `sdtm::StormResponse`: the two-constant
+`StormKernel`, or `NitricOxideCooling`, the §10.24 state. Both run over the caller's `ap` history with
+the same conventions: each value held over its 3-hour interval, the last interval ending before the
+sample, the pre-history in steady state at the first value. The Rust step is §10.24's (`N` exact, `D`
+exact with `N` frozen at its mean). It reproduces the 30-digit reference steps of
+`derivations/sdtm_no_cooling.mac` to 1e-13 relative, holds the fixed point `H/(1 + H/H_s)` from the
+first step, and without cooling is the first-order heating filter. `Thermosphere::kernel()` is now
+`Thermosphere::storm()`, and `space_weather::sdtm_drivers` takes the response.
+
+**The shipped field.** `tools/fit-sdtm-corpus.py --fit-sigma --cooling --emit` fits the §10.24 form
+on all eight satellites at once: 365 214 rows, every 60th of the corpus, 2000-07 to 2026-04, with
+GRACE-FO C the reference. It writes `coefficients.rs` and the 64-row fixture. It replaces the
+twelve-month pilot of §10.10; the pilot's `--emit` is removed from `gen_sdtm_coefficients.py`, so the
+file has one writer. SDTM-1 is still not the default model (D-5): the minor-storm overshoot of §10.24
+comes first.
+
+| | shipped |
+|---|---|
+| `τ_h`, `τ_NO`, `H_s` | 22.27 h, 29.11 h, 16.17 `ap` |
+| Bates `σ` | 0.03274 km⁻¹ |
+| boundary scale | 0.4966, on its log bound of −0.7 as in every fold (§10.23) |
+| MAPE in sample | 22.5 % |
+| MAPE held out by mission family | 23.1 % pooled (the §10.24 folds, rerun in the same command) |
+| satellite scale against GRACE-FO C | Swarm A/B/C +0.6 / +1.4 / +0.7 %, GRACE A/B +6.0 / +6.6 %, CHAMP −0.04 %, GOCE +9.5 % |
+
+**The history it needs.** Nitric oxide remembers a storm for days, so the kernel's 16 intervals are
+not enough. On every 3-hour interval of the corpus span, the generator compares the Rust convention
+over `n` days with the fit's own state, warmed up from rest 120 days earlier. The worst difference in
+the storm driver is 15.2 `ap` at one day, 1.83 at four, 0.195 at eight, 0.0149 at eleven and
+**0.0094 at twelve**. `coefficients::HISTORY` is that twelve days, 96 intervals: the first length
+under a hundredth of an `ap`. The operational path and the campaign pass it to `sdtm_drivers`; the
+vendored space-weather fixture gained the eleven days that length reaches back.
+
+**The uncertainty table** is the held-out-family residual's spread about zero, per regime:
+
+| | f107a < 100 | | 100–150 | | ≥ 150 | |
+|---|---|---|---|---|---|---|
+| | quiet | active | quiet | active | quiet | active |
+| σ of `ln(model/measured)` | 0.314 | 0.456 | 0.270 | 0.303 | 0.232 | 0.339 |
+| rows | 177 645 | 1 901 | 112 697 | 3 376 | 67 192 | 2 403 |
+
+A table built without one family's rows has a 90 % interval that covers, of that family: CHAMP
+92.9 %, GOCE 99.7 %, GRACE 88.6 %, GRACE-FO 89.1 %, Swarm 92.2 %. The storm edge is still 15 in the
+driver's units. The cooling state saturates near `H_s`, so the active cells are now sustained storm
+time: 2.1 % of the rows, and the widest cells.
+
+**Rust against the generator**, 64 fixture rows at round-trip precision: worst `T∞` 2.402e-15, worst
+ρ 1.237e-14 relative.
+
+**What it costs on the two vendored days** (GRACE-FO C, both inside the corpus):
+
+| | pilot, fitted on these months (§10.10) | corpus field |
+|---|---|---|
+| 2019-01-01, quiet: MAPE / bias | 22.1 % / 0.927 | 26.2 % / 1.110 |
+| 2024-05-10, Gannon onset: MAPE / bias | 30.1 % / 1.235 | **55.2 % / 1.546** |
+
+The storm day is the flux, not the storm. F10.7 of the previous day is 233.2 sfu against a trailing
+81-day mean of 162.9, a daily excess `d` = 0.70 that only 0.76 % of the corpus rows reach. From 00 to
+15 UT, before the storm, the model is 1.31–1.45 times too dense; with `F10.7 = F10.7a` the same hours
+read 0.85–0.94. The storm hours (18–24 UT) read 1.80–1.83, and 1.21–1.22 without the excess. The
+pilot was fitted on this month, so it had learned the value. The linear `d` term is the next form
+question (plans/17); the field is shipped with the number stated, not hidden by a narrower test.
 
 ---
 
@@ -8368,7 +8444,6 @@ crates/spacelab-propagation/src/forces.rs | infra | types, traits, drivers or re
 crates/spacelab-propagation/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/netcdf_classic.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/rkn1210_consts.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
-crates/spacelab-propagation/src/sdtm/coefficients.rs | generated | fitted by tools/gen_sdtm_coefficients.py on measured density; a fit, not a formula to derive
 crates/spacelab-propagation/src/space_weather.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/tolerance.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/wind_data.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
@@ -8595,24 +8670,24 @@ The oracle-generating code is vendored so every number here is regenerable:
   `diff -r data/slr/fixtures crates/spacelab/tests/fixtures` is the reproducibility check. The
   eccentricities come from the site logs rather than the ILRS `ecc_une.snx` / `ecc_xyz.snx`
   databases because those are published only through NASA CDDIS, behind an Earthdata login.
-- **`tools/gen_sdtm_coefficients.py`** — §10.10's fit, and the only generator here whose output is a
-  *model* rather than an oracle. Reads the gitignored density product, writes
-  `crates/spacelab-propagation/src/sdtm/coefficients.rs` and the 64-row reference fixture, and prints
-  every split it was scored on. `--sweep` reproduces the cap-set and ridge tables; the shipped
-  coefficients are
+- **`tools/fit-sdtm-corpus.py`** — the shipped SDTM-1 field (§10.25), and the only generator here
+  whose output is a *model* rather than an oracle. Reads the gitignored TU Delft corpus (§10.20),
+  scores the form on every held-out mission family against NRLMSISE-00, then fits it on all eight
+  satellites and writes `crates/spacelab-propagation/src/sdtm/coefficients.rs` and the 64-row
+  reference fixture:
 
   ```bash
-  uv run --no-project --with numpy --with pandas --with scipy python tools/gen_sdtm_coefficients.py \
-      --degree 2 --thin 32 --caps storm-log1 --ridge 0.1 --fix-boundary --emit
+  cargo build -p spacelab-propagation --release --example nrlmsise00_rows
+  uv run --no-project --with numpy --with pandas --with scipy python -I tools/fit-sdtm-corpus.py \
+      --fit-sigma --cooling --emit
   ```
 
-  `storm-log1` is the cap set §10.15 chose, and it is read off `coefficients.rs`'s own header rather
-  than remembered — the `lean` set this line used to name is the linear-regressor fit that §10.15
-  replaced, and following it would have regenerated a *different* model under the same file name.
-  Re-running on the same inputs reproduces both files **apart from the fit date in the header**,
-  because the only other element that could vary is absent: the starting vector is a literal in the
-  source. The committed pair as fitted on 2026-09-14 is `sha256` `7c8ac607…` and `5c5f59b3…`; that
-  digest moves with the date line, so it identifies the artefact rather than certifying the run.
+  Re-running on the same corpus reproduces both files apart from the fit date in the header: the
+  starting vector is a literal in the source.
+- **`tools/gen_sdtm_coefficients.py`** — §10.10's twelve-month pilot and the experiments run on it
+  (§10.13–§10.17). It writes nothing: the fit, the splits and `--sweep`'s cap-set and ridge tables are
+  printed only. The pilot field it fitted on 2026-09-14 (`sha256` `7c8ac607…` and `5c5f59b3…` for
+  the coefficient file and fixture) shipped until §10.25.
 - **`tools/fetch-wind-data.sh`** — §10.5's measurement: the TU Delft `*_WND_ACC_*` crosswind product
   for a list of `MISSION:YYYY-MM` arcs, same manifest discipline as the density fetcher. 337 MB for
   the default twelve months, into gitignored `data/validation/wind/`.

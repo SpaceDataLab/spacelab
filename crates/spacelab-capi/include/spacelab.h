@@ -1362,10 +1362,11 @@ double sl_sdtm1_exospheric_temperature(double doy, double sec, double altitude_k
                                        double f107a, double storm);
 
 /*
- * SDTM-1's geomagnetic storm driver: the shipped kernel's response to an index history. `history` is
- * the `ap` series oldest first, ending at the interval BEFORE the sample, readable for `n` doubles;
- * `cadence_s` is that series' step, 10800 for CelesTrak's 3-hourly `ap`, which is what the fit used.
- * A truncated history reads as a quieter storm, so pass the whole ~36 h the response has support on.
+ * SDTM-1's geomagnetic storm driver: the shipped heating and nitric-oxide cooling state run over an
+ * index history. `history` is the `ap` series oldest first, ending at the interval BEFORE the sample,
+ * readable for `n` doubles; `cadence_s` is that series' step, 10800 for CelesTrak's 3-hourly `ap`,
+ * which is what the fit used. Nitric oxide remembers a storm for days, and a truncated history reads
+ * as a different storm: pass twelve days, 96 intervals.
  *
  * `n == 0` answers 0. A null `history`, or a cadence that is not finite and positive, answers NaN.
  */

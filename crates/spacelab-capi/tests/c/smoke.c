@@ -1022,6 +1022,7 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
     int i = 0;
     double ap_history[16];
     double storm_history[16];
+    double quiet_storm = 0.0;
     double interval[SL_SDTM1_INTERVAL];
     double density_400 = 0.0;
 
@@ -1033,17 +1034,18 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
     CHECK(sl_nrlmsise00_density(172, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 4.0) < 1e-11);
     CHECK(isnan(sl_nrlmsise00_density(172, 29000.0, NAN, 0.0, 0.0, 150.0, 150.0, 4.0)));
 
-    /* SDTM-1, this library's own model. A constant index history is the kernel's unit-gain case --
-     * both internal states start at the first value and stay there -- so the response is that
-     * constant exactly, at any length and any cadence. An `ap` 300 tail moves it most of the way up
-     * without reaching it, which is the lag the kernel exists for. */
+    /* SDTM-1, this library's own model. Its storm state cools: a constant index history sits on the
+     * steady state H/(1 + H/H_s) from the first step, below the index itself and the same at any
+     * cadence. An `ap` 300 tail moves it up without reaching it. */
     for (i = 0; i < 16; ++i) {
         ap_history[i] = 5.0;
         storm_history[i] = i < 12 ? 5.0 : 300.0;
     }
-    CHECK(sl_sdtm1_storm_response(ap_history, 16, 10800.0) == 5.0);
-    CHECK(sl_sdtm1_storm_response(ap_history, 16, 3600.0) == 5.0);
-    CHECK(sl_sdtm1_storm_response(storm_history, 16, 10800.0) > 250.0);
+    quiet_storm = sl_sdtm1_storm_response(ap_history, 16, 10800.0);
+    CHECK(quiet_storm > 0.0 && quiet_storm < 5.0);
+    CHECK(fabs(sl_sdtm1_storm_response(ap_history, 16, 3600.0) - quiet_storm) <
+          1e-12 * quiet_storm);
+    CHECK(sl_sdtm1_storm_response(storm_history, 16, 10800.0) > quiet_storm);
     CHECK(sl_sdtm1_storm_response(storm_history, 16, 10800.0) < 300.0);
     CHECK(sl_sdtm1_storm_response(ap_history, 0, 10800.0) == 0.0);
     CHECK(isnan(sl_sdtm1_storm_response(NULL, 16, 10800.0)));
@@ -1059,13 +1061,13 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
 
     /* Fifteen degrees of longitude is one hour of local solar time, which is the convention a caller
      * has to be able to rely on: 15 E an hour earlier in UT is the same place in the model, and holds
-     * the density to 3.3e-4 relative -- the annual harmonic over 1/24 of a day -- while the same 15 E
-     * at the same UT is an hour later in local time and worth 11.6 %. */
+     * the density to 1.7e-4 relative -- the annual harmonic over 1/24 of a day -- while the same 15 E
+     * at the same UT is an hour later in local time and worth 9.3 %. */
     density_400 = sl_sdtm1_density(172.0, 43200.0, 400.0, 0.0, 0.0, 150.0, 150.0, 5.0);
     CHECK(fabs(sl_sdtm1_density(172.0, 39600.0, 400.0, 0.0, 15.0, 150.0, 150.0, 5.0) / density_400 -
                1.0) < 1e-3);
     CHECK(fabs(sl_sdtm1_density(172.0, 43200.0, 400.0, 0.0, 15.0, 150.0, 150.0, 5.0) / density_400 -
-               1.0) > 0.1);
+               1.0) > 0.05);
 
     /* T_inf is above the 380 K boundary by construction and inside the 586-1528 K the fit produced
      * over the corpus; a storm raises it. */
@@ -1075,8 +1077,7 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
           1528.0);
     CHECK(sl_sdtm1_exospheric_temperature(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 250.0) >
           sl_sdtm1_exospheric_temperature(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 5.0));
-    CHECK(isnan(
-        sl_sdtm1_exospheric_temperature(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, NAN, 5.0)));
+    CHECK(isnan(sl_sdtm1_exospheric_temperature(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, NAN, 5.0)));
 
     /* The interval brackets the density multiplicatively, so z = 0 collapses it onto the value and a
      * wider z only widens it; a null out pointer is refused rather than written through. */
@@ -1084,8 +1085,8 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
     CHECK(sl_sdtm1_density_interval(density_400, 150.0, 150.0, 5.0, 0.0, interval) == SL_OK);
     CHECK_NEAR(interval[0], density_400, 1e-24);
     CHECK_NEAR(interval[1], density_400, 1e-24);
-    CHECK(sl_sdtm1_density_interval(density_400, 150.0, 150.0, 5.0, 1.6448536269514727,
-                                    interval) == SL_OK);
+    CHECK(sl_sdtm1_density_interval(density_400, 150.0, 150.0, 5.0, 1.6448536269514727, interval) ==
+          SL_OK);
     CHECK(interval[0] < density_400);
     CHECK(interval[1] > density_400);
     CHECK_NEAR(interval[0] * interval[1], density_400 * density_400, 1e-36);
@@ -2212,8 +2213,8 @@ static void the_control_surface_closes_its_own_loop(void) {
         CHECK(sl_attitude_lyapunov(8.0, 3.0, IDENTITY, IDENTITY, &rest, &rest, INERTIA,
                                    &lyapunov) == SL_OK);
         CHECK(lyapunov == 0.0);
-        CHECK(sl_attitude_lyapunov(8.0, 3.0, turned, IDENTITY, &rest, &rest, INERTIA,
-                                   &lyapunov) == SL_OK);
+        CHECK(sl_attitude_lyapunov(8.0, 3.0, turned, IDENTITY, &rest, &rest, INERTIA, &lyapunov) ==
+              SL_OK);
         CHECK(lyapunov > 0.0);
     }
 
@@ -2256,8 +2257,8 @@ static void the_control_surface_closes_its_own_loop(void) {
                1.0, 1e-12);
     /* The short-buffer branch, which the C++ wrapper sizes its way past and never takes. */
     CHECK(sl_attitude_loop_run(SL_LAW_QUATERNION_PD, 8.0, 12.0, &latency, 0.1, &initial, &seed,
-                               IDENTITY, INERTIA, 40, few, 2, &few_len, NULL) ==
-          SL_ERR_BUFFER_TOO_SMALL);
+                               IDENTITY, INERTIA, 40, few, 2, &few_len,
+                               NULL) == SL_ERR_BUFFER_TOO_SMALL);
     CHECK(few_len == 40);
     /* A lag of 600 steps does not fit the 512-sample history this ABI gives the loop, and the
      * refusal is the point: wrapping the ring would read a state from a previous era. */
@@ -2266,8 +2267,8 @@ static void the_control_surface_closes_its_own_loop(void) {
 
     /* The margin of a named law is the margin of its own linearisation -- not of the nominal
      * gains, which are a different loop for the MRP law. */
-    CHECK(sl_attitude_small_angle_gains(SL_LAW_QUATERNION_PD, 8.0, 12.0, &angle_gain,
-                                        &rate_gain) == SL_OK);
+    CHECK(sl_attitude_small_angle_gains(SL_LAW_QUATERNION_PD, 8.0, 12.0, &angle_gain, &rate_gain) ==
+          SL_OK);
     CHECK(sl_delay_margin_of_gains(4.0, angle_gain, rate_gain, &direct) == SL_OK);
     CHECK(sl_delay_margin_of_law(SL_LAW_QUATERNION_PD, 8.0, 12.0, 4.0, &margin) == SL_OK);
     CHECK(margin.seconds == direct.seconds);
@@ -2402,10 +2403,8 @@ static void the_control_surface_closes_its_own_loop(void) {
         }
         /* The matrix-order wall, which is the same two numbers as the agent wall and not the
          * same wall -- so it is refused here for its own reason and by its own check. */
-        CHECK(sl_characteristic_polynomial(companion, 1, coefficients) ==
-              SL_ERR_INVALID_ARGUMENT);
-        CHECK(sl_characteristic_polynomial(companion, 13, coefficients) ==
-              SL_ERR_INVALID_ARGUMENT);
+        CHECK(sl_characteristic_polynomial(companion, 1, coefficients) == SL_ERR_INVALID_ARGUMENT);
+        CHECK(sl_characteristic_polynomial(companion, 13, coefficients) == SL_ERR_INVALID_ARGUMENT);
         CHECK(sl_characteristic_polynomial(NULL, 3, coefficients) == SL_ERR_INVALID_ARGUMENT);
     }
 

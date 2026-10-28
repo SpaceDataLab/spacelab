@@ -108,9 +108,9 @@ fn a_density_at_the_last_measured_day_from_one_fetched_file() {
     );
 
     // 12:00 UT at the last measured day: the `ap` history ends at 09-12 UT, all of it published.
-    let drivers = space_weather::sdtm_drivers::<16>(
+    let drivers = space_weather::sdtm_drivers::<{ coefficients::HISTORY }>(
         &days,
-        field.kernel(),
+        field.storm(),
         now.year,
         now.month,
         now.day,

@@ -10,7 +10,7 @@
 //!
 //! The drivers are held constant over the span, as operational orbit determination does with a single
 //! space-weather record; the day of year advances with the propagation time. [`super::SdtmDrivers::
-//! storm`] is a convolution over an index *history*, so it is computed once per epoch by
+//! storm`] is a state run over an index *history*, so it is computed once per epoch by
 //! [`crate::space_weather::sdtm_drivers`] and held here — the history belongs to whoever fetched it.
 //!
 //! # Why this wrapper does not evaluate the model twice
@@ -51,9 +51,9 @@ use super::{SdtmDrivers, SdtmPoint, Thermosphere};
 pub struct SdtmAtmosphere<G, const K: usize> {
     /// The fitted field — [`super::coefficients::FIELD`] for the shipped one.
     pub field: Thermosphere<K>,
-    /// The indices, held constant over the span. `storm` is [`super::StormKernel::response`] over the
-    /// caller's index history, so it must have been convolved with **this field's** kernel
-    /// ([`Thermosphere::kernel`]); a response built with another kernel is another model's driver.
+    /// The indices, held constant over the span. `storm` is [`super::StormResponse::response`] over
+    /// the caller's index history, so it must have been run through **this field's** response
+    /// ([`Thermosphere::storm`]); a response built with another is another model's driver.
     pub drivers: SdtmDrivers,
     /// Day of year at propagation time `t = 0`, `1.0` at the start of 1 January.
     pub doy0: f64,

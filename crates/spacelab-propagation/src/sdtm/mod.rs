@@ -39,7 +39,7 @@
 //!
 //! # What is fitted
 //!
-//! The exospheric temperature, the profile's shape parameter, the storm kernel's two time constants,
+//! The exospheric temperature, the profile's shape parameter, the storm response's time constants,
 //! and one scale on the boundary's *total* density. The boundary *composition* stays literature
 //! ([`BOUNDARY`], Jacchia 1971): the fit may move the level at 120 km, and does, because that level is
 //! a 1971 table rather than a measurement of this atmosphere — but it may not move one species against
@@ -72,8 +72,9 @@
 //! The indices, exactly as JB2008 and [`crate::nrlmsise00`] do: nothing here reads a data
 //! file. The one piece of state a memoryless index cannot express is the storm response, because the
 //! thermosphere's reaction to geomagnetic forcing rises over hours and decays over most of a day.
-//! [`StormKernel`] is that convolution, with both time constants fitted; it is a property of the
-//! model, so the field owns it and exposes it through [`Thermosphere::kernel`], while the *history*
+//! [`StormResponse`] is that state — the two-constant [`StormKernel`] or heating with
+//! [`NitricOxideCooling`], every constant fitted; it is a property of the
+//! model, so the field owns it and exposes it through [`Thermosphere::storm`], while the *history*
 //! stays with the caller who fetched it. One call per epoch feeds many density evaluations.
 
 use crate::density_calibration::DensityCorrection;
@@ -229,6 +230,101 @@ impl StormKernel {
     }
 }
 
+/// Heating with nitric-oxide cooling, after Weimer et al. (2015, 2020, 2023), in the storm index's
+/// own units:
+///
+/// `dD/dt = (H − D)/τ_h − D·N/(τ_h·H_s)`, `dN/dt = (H − N)/τ_NO`,
+///
+/// with `H` the index, `D` the storm response and `N` the nitric-oxide state. Two states rather than
+/// one kernel because the measured storm has a fast peak and a slow storm-day level, and one linear
+/// kernel carries either but not both (`docs/verification.md` §10.23): the nitric oxide a storm
+/// produces builds up over a day and then cools the thermosphere it heated, which lowers the later
+/// peaks of a long storm and shortens its recovery. Without cooling (`H_s → ∞`) it is the unit-gain
+/// first-order filter; in steady state `D = H/(1 + H/H_s)`.
+///
+/// All three constants are fitted. Derived in `derivations/sdtm_no_cooling.mac`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NitricOxideCooling {
+    /// Heating time constant `τ_h`, seconds.
+    pub heating: f64,
+    /// Nitric-oxide time constant `τ_NO`, seconds.
+    pub nitric_oxide: f64,
+    /// Saturation level `H_s`, in index units: the index at which cooling halves the response.
+    pub saturation: f64,
+}
+
+impl NitricOxideCooling {
+    /// `D` in steady state under a constant index, `H/(1 + H/H_s)`.
+    #[must_use]
+    pub fn steady_state(&self, index: f64) -> f64 {
+        index / (1.0 + index / self.saturation)
+    }
+
+    /// The response at the end of `history`, with [`StormKernel::response`]'s conventions: values
+    /// every `cadence` seconds, each held over its interval, `history.last()` the interval ending at
+    /// the evaluation epoch.
+    ///
+    /// `N` takes its exact step. `D`'s rate depends on `N`, and the exact step of that system is not
+    /// elementary, so `D` takes the exact step of the system with `N` frozen at its exact mean over
+    /// the interval: the local error starts at `h³`, and on a realistic storm at a 3 h cadence it is
+    /// 0.32 % of `D` against a fine Runge–Kutta solution. Before the series starts both states are
+    /// taken to be in steady state at its first value, which leaves no transient at the start of a
+    /// fetched file that began quiet.
+    #[must_use]
+    pub fn response(&self, history: &[f64], cadence: f64) -> f64 {
+        let Some(&first) = history.first() else {
+            return 0.0;
+        };
+        let decay = libm::exp(-cadence / self.nitric_oxide);
+        let mean_weight = self.nitric_oxide / cadence * (1.0 - decay);
+        let (mut d, mut n) = (self.steady_state(first), first);
+        for &drive in history {
+            let n_mean = drive + (n - drive) * mean_weight;
+            let rate = (1.0 + n_mean / self.saturation) / self.heating;
+            let target = drive / (self.heating * rate);
+            d = target + (d - target) * libm::exp(-rate * cadence);
+            n = drive + (n - drive) * decay;
+        }
+        d
+    }
+}
+
+/// How a fitted field turns the index history into its storm driver.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StormResponse {
+    /// The two-constant linear kernel.
+    Kernel(StormKernel),
+    /// Heating with nitric-oxide cooling.
+    Cooling(NitricOxideCooling),
+}
+
+impl StormResponse {
+    /// The storm driver at the end of `history` — [`StormKernel::response`] or
+    /// [`NitricOxideCooling::response`], which share their conventions.
+    #[must_use]
+    pub fn response(&self, history: &[f64], cadence: f64) -> f64 {
+        match self {
+            Self::Kernel(k) => k.response(history, cadence),
+            Self::Cooling(c) => c.response(history, cadence),
+        }
+    }
+
+    /// Whether the constants describe a response: a kernel's positive and separated by more than
+    /// [`KERNEL_SEPARATION`] (it divides by their difference), the cooling's finite and positive.
+    fn usable(&self) -> bool {
+        match self {
+            Self::Kernel(k) => {
+                k.onset > 0.0
+                    && k.recovery > 0.0
+                    && (k.recovery - k.onset).abs() > KERNEL_SEPARATION * k.recovery
+            }
+            Self::Cooling(c) => [c.heating, c.nitric_oxide, c.saturation]
+                .iter()
+                .all(|x| x.is_finite() && *x > 0.0),
+        }
+    }
+}
+
 /// Where and when to evaluate the model.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SdtmPoint {
@@ -266,7 +362,7 @@ pub struct SdtmDrivers {
     /// average, by 31.6 at the 99th percentile and by 42.6 at the worst (2001-09-17), and by 9.3 on
     /// average across the six months this model was fitted on.
     pub f107a: f64,
-    /// Geomagnetic storm response — [`StormKernel::response`] over the index history, in the units
+    /// Geomagnetic storm response — [`StormResponse::response`] over the index history, in the units
     /// of that index (`ap` or `ap60`).
     pub storm: f64,
 }
@@ -356,7 +452,7 @@ pub use uncertainty::{
 };
 
 /// A fitted SDTM field: the exospheric-temperature coefficients, the profile shape parameter and the
-/// storm kernel.
+/// storm response.
 ///
 /// `K` is the number of sun-fixed spherical harmonics, `(degree + 1)²` — 1 for a globally uniform
 /// temperature, 9 for degree 2, 16 for degree 3. The degree is a fit decision, not a constant of the
@@ -367,7 +463,7 @@ pub struct Thermosphere<const K: usize> {
     coeffs: [[f64; K]; DRIVERS],
     sigma: f64,
     boundary_scale: f64,
-    kernel: StormKernel,
+    storm: StormResponse,
 }
 
 impl<const K: usize> Thermosphere<K> {
@@ -383,16 +479,16 @@ impl<const K: usize> Thermosphere<K> {
     /// US 10 641 925 B2 claims (`docs/provenance.md`).
     ///
     /// Returns `None` unless `sigma` and `boundary_scale` are finite and strictly positive, `K` is a
-    /// perfect square, and the kernel's constants are positive and separated by more than
-    /// [`KERNEL_SEPARATION`]: a non-positive `sigma` is not a profile that rises to `T∞`, a `K` that is
-    /// not `(degree+1)²` does not index a spherical-harmonic basis, and an unseparated kernel is a
-    /// `0/0`.
+    /// perfect square, and the storm response's constants describe one — a kernel's positive and
+    /// separated by more than [`KERNEL_SEPARATION`], the cooling's finite and positive: a non-positive
+    /// `sigma` is not a profile that rises to `T∞`, a `K` that is not `(degree+1)²` does not index a
+    /// spherical-harmonic basis, and an unseparated kernel is a `0/0`.
     #[must_use]
     pub fn from_coefficients(
         coeffs: [[f64; K]; DRIVERS],
         sigma: f64,
         boundary_scale: f64,
-        kernel: StormKernel,
+        storm: StormResponse,
     ) -> Option<Self> {
         let square = {
             let root = isqrt(K);
@@ -403,14 +499,12 @@ impl<const K: usize> Thermosphere<K> {
             && boundary_scale.is_finite()
             && boundary_scale > 0.0
             && square
-            && kernel.onset > 0.0
-            && kernel.recovery > 0.0
-            && (kernel.recovery - kernel.onset).abs() > KERNEL_SEPARATION * kernel.recovery;
+            && storm.usable();
         usable.then_some(Self {
             coeffs,
             sigma,
             boundary_scale,
-            kernel,
+            storm,
         })
     }
 
@@ -426,13 +520,13 @@ impl<const K: usize> Thermosphere<K> {
         coeffs: [[f64; K]; DRIVERS],
         sigma: f64,
         boundary_scale: f64,
-        kernel: StormKernel,
+        storm: StormResponse,
     ) -> Self {
         Self {
             coeffs,
             sigma,
             boundary_scale,
-            kernel,
+            storm,
         }
     }
 
@@ -460,10 +554,10 @@ impl<const K: usize> Thermosphere<K> {
         self.boundary_scale
     }
 
-    /// The fitted storm kernel, for the caller to convolve its own index history with.
+    /// The fitted storm response, for the caller to run over its own index history.
     #[must_use]
-    pub const fn kernel(&self) -> &StormKernel {
-        &self.kernel
+    pub const fn storm(&self) -> &StormResponse {
+        &self.storm
     }
 
     /// Exospheric temperature `T∞`, K — at or above [`BOUNDARY_TEMPERATURE`] by construction, and
@@ -598,7 +692,8 @@ mod tests {
         coeffs[0][4] = -0.03; // Y₂₀ — pole-to-equator
         coeffs[8][0] = 0.015; // annual
         coeffs[14][0] = 0.008; // semiannual amplitude growing with activity
-        Thermosphere::from_coefficients(coeffs, 2.0e-5, 1.0, kernel()).expect("a usable field")
+        Thermosphere::from_coefficients(coeffs, 2.0e-5, 1.0, StormResponse::Kernel(kernel()))
+            .expect("a usable field")
     }
 
     fn kernel() -> StormKernel {
@@ -837,9 +932,8 @@ mod tests {
     fn the_boundary_scale_multiplies_the_density_and_nothing_else() {
         let f = field();
         let scale = 0.75;
-        let scaled =
-            Thermosphere::from_coefficients(*f.coefficients(), f.sigma, scale, *f.kernel())
-                .expect("usable");
+        let scaled = Thermosphere::from_coefficients(*f.coefficients(), f.sigma, scale, *f.storm())
+            .expect("usable");
         let d = drivers();
         for &z in &[BOUNDARY_ALTITUDE, 200_000.0, 450_000.0, 800_000.0] {
             let p = point(z);
@@ -879,8 +973,13 @@ mod tests {
         // comparison can see, and σζ/(σT∞) is still evaluated the general way.
         let mut coeffs = [[0.0; 1]; DRIVERS];
         coeffs[0][0] = -30.0;
-        let f =
-            Thermosphere::<1>::from_coefficients(coeffs, 2.0e-5, 1.0, kernel()).expect("usable");
+        let f = Thermosphere::<1>::from_coefficients(
+            coeffs,
+            2.0e-5,
+            1.0,
+            StormResponse::Kernel(kernel()),
+        )
+        .expect("usable");
         let d = drivers();
         for &z in &[200_000.0, 400_000.0, 700_000.0] {
             let zeta = geopotential_height(z);
@@ -992,8 +1091,13 @@ mod tests {
         // what it degrades into there is the isothermal barometric profile rather than a NaN.
         let mut coeffs = [[0.0; 1]; DRIVERS];
         coeffs[0][0] = -800.0;
-        let cold =
-            Thermosphere::<1>::from_coefficients(coeffs, 2.0e-5, 1.0, kernel()).expect("usable");
+        let cold = Thermosphere::<1>::from_coefficients(
+            coeffs,
+            2.0e-5,
+            1.0,
+            StormResponse::Kernel(kernel()),
+        )
+        .expect("usable");
         let t = cold.exospheric_temperature(&point(400_000.0), &quiet);
         assert_eq!(
             t, BOUNDARY_TEMPERATURE,
@@ -1058,9 +1162,8 @@ mod tests {
         for row in flat.iter_mut().skip(9) {
             *row = [0.0; 9];
         }
-        let additive =
-            Thermosphere::from_coefficients(flat, f.sigma, f.boundary_scale, *f.kernel())
-                .expect("usable");
+        let additive = Thermosphere::from_coefficients(flat, f.sigma, f.boundary_scale, *f.storm())
+            .expect("usable");
         let (q, a) = (
             seasonal_swing(&additive, 70.0),
             seasonal_swing(&additive, 220.0),
@@ -1141,11 +1244,130 @@ mod tests {
         );
     }
 
+    /// The constants `derivations/sdtm_no_cooling.mac` §7 steps with: `τ_h` = 6 h, `τ_NO` = 20 h,
+    /// `H_s` = 300.
+    fn cooling() -> NitricOxideCooling {
+        NitricOxideCooling {
+            heating: 6.0 * 3600.0,
+            nitric_oxide: 20.0 * 3600.0,
+            saturation: 300.0,
+        }
+    }
+
+    /// The step is the one Maxima proved: from rest, `H` = 0, 80, 200, 50 at a 3 h hold reach the
+    /// values `sdtm_no_cooling.mac` prints at 30 digits (and `sdtm_no_cooling.gp` confirms at 60).
+    /// A history that starts at zero starts from rest, because the pre-history steady state at 0 is 0.
+    #[test]
+    #[expect(
+        clippy::excessive_precision,
+        reason = "the CAS's digits as it printed them"
+    )]
+    fn the_cooling_step_reproduces_the_cas_reference_values() {
+        let history = [0.0, 80.0, 200.0, 50.0];
+        let want = [
+            0.0,
+            31.340_590_579_752_310_568_477_078_14,
+            95.476_858_372_459_638_463_825_058_898_3,
+            73.433_019_279_766_652_034_989_509_123_7,
+        ];
+        for (n, d) in want.iter().enumerate() {
+            let got = cooling().response(&history[..=n], 3.0 * 3600.0);
+            assert!(
+                (got - d).abs() <= 1e-13 * d.max(1.0),
+                "after {} steps: {got} against the CAS's {d}",
+                n + 1
+            );
+        }
+    }
+
+    /// The steady state is `H/(1 + H/H_s)`, a constant history sits on it from the first step (no
+    /// start transient), and without cooling the response is the unit-gain first-order filter.
+    #[test]
+    fn the_cooling_state_holds_its_fixed_point_and_reduces_to_the_heating_filter() {
+        let c = cooling();
+        let cadence = 3.0 * 3600.0;
+        let want = 50.0 / (1.0 + 50.0 / 300.0);
+        assert!((c.steady_state(50.0) - want).abs() < 1e-14 * want);
+        for len in [1, 2, 40] {
+            let got = c.response(&vec![50.0; len], cadence);
+            assert!(
+                (got - want).abs() < 1e-12 * want,
+                "{len} steps at 50: {got}"
+            );
+        }
+        let none = NitricOxideCooling {
+            saturation: f64::MAX,
+            ..c
+        };
+        let mut history = vec![0.0; 9];
+        history[1..].fill(100.0);
+        let filter = 100.0 * (1.0 - libm::exp(-8.0 * cadence / c.heating));
+        let got = none.response(&history, cadence);
+        assert!(
+            (got - filter).abs() < 1e-12 * filter,
+            "no cooling: {got} against the first-order filter's {filter}"
+        );
+        // Cooling lowers the same storm, and an empty history is quiet.
+        assert!(c.response(&history, cadence) < got);
+        assert_eq!(c.response(&[], cadence), 0.0);
+    }
+
+    /// The enum is the two responses and nothing more.
+    #[test]
+    fn the_storm_response_is_the_variant_it_holds() {
+        let history = [4.0, 30.0, 90.0, 120.0, 40.0, 9.0];
+        let cadence = 3.0 * 3600.0;
+        assert_eq!(
+            StormResponse::Kernel(kernel()).response(&history, cadence),
+            kernel().response(&history, cadence)
+        );
+        assert_eq!(
+            StormResponse::Cooling(cooling()).response(&history, cadence),
+            cooling().response(&history, cadence)
+        );
+    }
+
+    /// The constructor refuses cooling constants that are not finite and positive, one at a time.
+    #[test]
+    fn the_constructor_refuses_a_cooling_that_is_not_a_response() {
+        let build = |c| {
+            Thermosphere::<9>::from_coefficients(
+                [[0.0; 9]; DRIVERS],
+                2e-5,
+                1.0,
+                StormResponse::Cooling(c),
+            )
+        };
+        assert!(build(cooling()).is_some());
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            for c in [
+                NitricOxideCooling {
+                    heating: bad,
+                    ..cooling()
+                },
+                NitricOxideCooling {
+                    nitric_oxide: bad,
+                    ..cooling()
+                },
+                NitricOxideCooling {
+                    saturation: bad,
+                    ..cooling()
+                },
+            ] {
+                assert!(build(c).is_none(), "{c:?} accepted");
+            }
+        }
+    }
+
     /// The constructor refuses what is not a model: a non-positive shape parameter or boundary scale,
     /// a `K` that is not a perfect square, and a kernel with equal or non-positive time constants.
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one refusal per clause, each beside its reason"
+    )]
     fn the_constructor_refuses_parameters_that_are_not_a_profile() {
-        let ok = kernel();
+        let ok = StormResponse::Kernel(kernel());
         assert!(Thermosphere::<9>::from_coefficients([[0.0; 9]; DRIVERS], 0.0, 1.0, ok).is_none());
         assert!(
             Thermosphere::<9>::from_coefficients([[0.0; 9]; DRIVERS], -2e-5, 1.0, ok).is_none()
@@ -1169,7 +1391,13 @@ mod tests {
             recovery: 3600.0,
         };
         assert!(
-            Thermosphere::<9>::from_coefficients([[0.0; 9]; DRIVERS], 2e-5, 1.0, same).is_none()
+            Thermosphere::<9>::from_coefficients(
+                [[0.0; 9]; DRIVERS],
+                2e-5,
+                1.0,
+                StormResponse::Kernel(same)
+            )
+            .is_none()
         );
         // And a pair that is merely too close, which is the numerically dangerous case rather than
         // the impossible one.
@@ -1178,15 +1406,26 @@ mod tests {
             recovery: 3600.0 * (1.0 + 1e-4),
         };
         assert!(
-            Thermosphere::<9>::from_coefficients([[0.0; 9]; DRIVERS], 2e-5, 1.0, close).is_none()
+            Thermosphere::<9>::from_coefficients(
+                [[0.0; 9]; DRIVERS],
+                2e-5,
+                1.0,
+                StormResponse::Kernel(close)
+            )
+            .is_none()
         );
         let negative = StormKernel {
             onset: -3600.0,
             recovery: 3600.0,
         };
         assert!(
-            Thermosphere::<9>::from_coefficients([[0.0; 9]; DRIVERS], 2e-5, 1.0, negative)
-                .is_none()
+            Thermosphere::<9>::from_coefficients(
+                [[0.0; 9]; DRIVERS],
+                2e-5,
+                1.0,
+                StormResponse::Kernel(negative)
+            )
+            .is_none()
         );
         // Zero, separately from negative, and one constant at a time. A zero time constant is not the
         // limit of a small one: `exp(-lag/0)` is `exp(-inf) = 0` at every positive lag and `exp(NaN)`
@@ -1204,8 +1443,13 @@ mod tests {
             },
         ] {
             assert!(
-                Thermosphere::<9>::from_coefficients([[0.0; 9]; DRIVERS], 2e-5, 1.0, zeroed)
-                    .is_none(),
+                Thermosphere::<9>::from_coefficients(
+                    [[0.0; 9]; DRIVERS],
+                    2e-5,
+                    1.0,
+                    StormResponse::Kernel(zeroed)
+                )
+                .is_none(),
                 "{zeroed:?} accepted"
             );
         }
@@ -1223,16 +1467,26 @@ mod tests {
             "the boundary case is not exact, so it tests nothing"
         );
         assert!(
-            Thermosphere::<9>::from_coefficients([[0.0; 9]; DRIVERS], 2e-5, 1.0, at_boundary)
-                .is_none()
+            Thermosphere::<9>::from_coefficients(
+                [[0.0; 9]; DRIVERS],
+                2e-5,
+                1.0,
+                StormResponse::Kernel(at_boundary)
+            )
+            .is_none()
         );
         let past_boundary = StormKernel {
             onset: 1997.0,
             recovery: 2000.0,
         };
         assert!(
-            Thermosphere::<9>::from_coefficients([[0.0; 9]; DRIVERS], 2e-5, 1.0, past_boundary)
-                .is_some()
+            Thermosphere::<9>::from_coefficients(
+                [[0.0; 9]; DRIVERS],
+                2e-5,
+                1.0,
+                StormResponse::Kernel(past_boundary)
+            )
+            .is_some()
         );
         assert_eq!(Thermosphere::<16>::degree(), 3);
         assert_eq!(Thermosphere::<1>::degree(), 0);
@@ -1266,11 +1520,16 @@ mod tests {
     /// far above, `e^{−σζ}` is small enough that what is left of `T∞ − T` is a stated bound.
     #[test]
     fn the_accessors_report_the_fit_and_the_profile_spans_its_two_temperatures() {
-        let f = Thermosphere::<9>::from_coefficients([[0.0; 9]; DRIVERS], 3.5e-5, 1.75, kernel())
-            .expect("a usable field");
+        let f = Thermosphere::<9>::from_coefficients(
+            [[0.0; 9]; DRIVERS],
+            3.5e-5,
+            1.75,
+            StormResponse::Kernel(kernel()),
+        )
+        .expect("a usable field");
         assert_eq!(f.sigma(), 3.5e-5);
         assert_eq!(f.boundary_scale(), 1.75);
-        assert_eq!(*f.kernel(), kernel());
+        assert_eq!(*f.storm(), StormResponse::Kernel(kernel()));
 
         let f = field();
         let (p, d) = (point(BOUNDARY_ALTITUDE), drivers());

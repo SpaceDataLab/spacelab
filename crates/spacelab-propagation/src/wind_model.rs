@@ -197,10 +197,11 @@ pub struct WindPoint {
     /// reproduce running forward rather than a defect.
     ///
     /// It is the *instantaneous* index and not a filtered one. Ф15.J asked whether it should instead
-    /// be SDTM-1's storm driver — [`crate::sdtm::StormKernel::response`] over the 48 h history — and
-    /// measured seven two-constant causal kernels with peaks from 0.14 h to 11 h against it. The
-    /// held-out RMS was monotone in the peak lag with the zero-lag end best, so the crosswind carries
-    /// no storm lag this data can resolve and the density field's kernel is not borrowed for it.
+    /// be SDTM-1's storm driver — then [`crate::sdtm::StormKernel::response`] over the 48 h
+    /// history — and measured seven two-constant causal kernels with peaks from 0.14 h to 11 h
+    /// against it. The held-out RMS was monotone in the peak lag with the zero-lag end best, so the
+    /// crosswind carries no storm lag this data can resolve and the density field's storm state is
+    /// not borrowed for it.
     /// `the_storm_lag_the_wind_wants_is_measured_rather_than_borrowed` is that table.
     pub ap: f64,
 }

@@ -1562,8 +1562,9 @@ fn nrlmsise00_density(
 ///
 /// `f107` is the **previous day's** observed 10.7 cm flux and `f107a` its 81-day **trailing** mean —
 /// the trailing one, not the centred mean NRLMSISE-00 specifies, because the fit used the window that
-/// stays an observation to the last published day. `storm` is the kernel response over the `ap`
-/// history, from `sdtm1_storm_response`; it is not an `ap` value and passing one is a different model.
+/// stays an observation to the last published day. `storm` is the storm state's response over the
+/// `ap` history, from `sdtm1_storm_response`; it is not an `ap` value and passing one is a different
+/// model.
 #[pyfunction]
 #[pyo3(signature = (doy, sec, alt_km, lat_deg, lon_deg, f107 = 150.0, f107a = 150.0, storm = 0.0))]
 #[allow(clippy::too_many_arguments)] // day of year, UT, three geodetic coordinates, three drivers
@@ -1608,17 +1609,18 @@ fn sdtm1_exospheric_temperature(
     )
 }
 
-/// **SDTM-1**'s geomagnetic storm driver: the shipped kernel's response to an index history.
+/// **SDTM-1**'s geomagnetic storm driver: the shipped heating and nitric-oxide cooling state run
+/// over an index history.
 ///
 /// `history` is the `ap` series oldest first, ending at the interval **before** the sample, and
 /// `cadence_s` is that series' step — 10 800 s for CelesTrak's 3-hourly `ap`, which is what the fit
-/// used. The two time constants belong to the fitted field, so a caller cannot build this driver
-/// itself; a truncated history reads as a quieter storm, so pass the whole window the response has
-/// support on (about a day and a half).
+/// used. The three constants belong to the fitted field, so a caller cannot build this driver
+/// itself. Nitric oxide remembers a storm for days, and a truncated history reads as a different
+/// storm: pass twelve days, 96 intervals (`sdtm::coefficients::HISTORY` in Rust).
 #[pyfunction]
 #[pyo3(signature = (history, cadence_s = 10_800.0))]
 fn sdtm1_storm_response(history: Vec<f64>, cadence_s: f64) -> f64 {
-    SDTM1_FIELD.kernel().response(&history, cadence_s)
+    SDTM1_FIELD.storm().response(&history, cadence_s)
 }
 
 /// **SDTM-1**'s log-normal density interval: `(lower, upper)` in kg/m³ about `density`.
@@ -7891,20 +7893,31 @@ mod tests {
         assert!(at(100.0) > quiet, "{} against {quiet}", at(100.0));
     }
 
-    /// The kernel has unit DC gain by construction — both internal states are seeded at the first
-    /// sample — so a constant history answers that constant exactly, at any cadence. An exact property
-    /// of the shipped filter, which is what makes it worth asserting in a wrapper.
+    /// The shipped storm state cools, so a constant history answers its steady state
+    /// `H/(1 + H/H_s)` from the first step, at any cadence — the field's own fixed point, which is
+    /// what makes it worth asserting in a wrapper.
     #[test]
-    fn the_sdtm1_storm_kernel_passes_a_constant_history_through_unchanged() {
-        assert_eq!(sdtm1_storm_response(vec![5.0; 16], 10_800.0), 5.0);
-        assert_eq!(sdtm1_storm_response(vec![5.0; 16], 3_600.0), 5.0);
+    fn the_sdtm1_storm_state_holds_a_constant_history_at_its_steady_state() {
+        let spacelab_propagation::sdtm::StormResponse::Cooling(cooling) = SDTM1_FIELD.storm()
+        else {
+            panic!("the shipped field's storm state is the cooling one");
+        };
+        let steady = cooling.steady_state(5.0);
+        assert!(steady < 5.0);
+        for cadence in [10_800.0, 3_600.0] {
+            let got = sdtm1_storm_response(vec![5.0; 16], cadence);
+            assert!(
+                (got - steady).abs() < 1e-12 * steady,
+                "{got} at {cadence} s"
+            );
+        }
         // No history is no response, which is the answer an empty Python list gets.
         assert_eq!(sdtm1_storm_response(Vec::new(), 10_800.0), 0.0);
         // A surge over a quiet background lands between the background and the peak.
         let mut surge = vec![5.0; 16];
         surge[12..].fill(300.0);
         let response = sdtm1_storm_response(surge, 10_800.0);
-        assert!((5.0..300.0).contains(&response), "{response}");
+        assert!((steady..300.0).contains(&response), "{response}");
     }
 
     /// The interval is log-normal about the density, so `lower · upper = density²` exactly whatever
@@ -7929,11 +7942,11 @@ mod tests {
             sdtm1_density_interval(density, 150.0, 150.0, 0.0, 0.0),
             (density, density)
         );
-        // Low flux is the widest of the six regimes by a factor of two.
+        // The quiet low-flux cell is wider than the quiet high-flux one, so the flux edge is read.
         let (quiet_lo, quiet_hi) =
             sdtm1_density_interval(density, 80.0, 80.0, 0.0, 1.644_853_626_951_472_7);
         assert!(
-            quiet_hi / quiet_lo > 2.0 * (upper / lower),
+            quiet_hi / quiet_lo > upper / lower,
             "{quiet_lo}..{quiet_hi} against {lower}..{upper}"
         );
         // Moving the storm bin moves the interval; the measured direction is not asserted, only that

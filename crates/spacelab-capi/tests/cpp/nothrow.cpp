@@ -384,8 +384,7 @@ void the_coverage_wrapper_still_agrees_with_its_windows() {
     // domain error and a zero-length direction is not a direction.
     const spacelab::vec3 station{.x = spacelab::re_earth, .y = 0.0, .z = 0.0};
     const spacelab::vec3 spin{.x = 0.0, .y = 0.0, .z = SL_EARTH_ROTATION_RATE};
-    const spacelab::result<spacelab::vec3> carried =
-        spacelab::try_diurnal_velocity(station, spin);
+    const spacelab::result<spacelab::vec3> carried = spacelab::try_diurnal_velocity(station, spin);
     CHECK(static_cast<bool>(carried));
     CHECK(carried->y > 465.0 && carried->y < 465.2);
     const spacelab::vec3 zenith{.x = 1.0, .y = 0.0, .z = 0.0};
@@ -495,7 +494,8 @@ void the_atmosphere_wrapper_still_answers_without_exceptions() {
     /* SDTM-1's three total functions need no `result`; its interval does, and here it is the branch
      * rather than the throw. */
     const std::array<double, 4> quiet_ap{5.0, 5.0, 5.0, 5.0};
-    CHECK(spacelab::sdtm1_storm_response(quiet_ap) == 5.0);
+    const double quiet_storm = spacelab::sdtm1_storm_response(quiet_ap);
+    CHECK(quiet_storm > 0.0 && quiet_storm < 5.0);
     const double sdtm_400 =
         spacelab::sdtm1_density(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 5.0);
     CHECK(spacelab::sdtm1_exospheric_temperature(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0,
@@ -884,7 +884,6 @@ void the_new_observables_still_report_a_refusal_as_a_status() {
           SL_ERR_INVALID_ARGUMENT);
 }
 
-
 /*
  * The control surface through the `try_` layer only.
  *
@@ -977,7 +976,8 @@ void the_control_surface_reports_every_wall_as_a_status() {
 
     /* The modes wrapper checks its own span before the call, the same way `try_lqr` does. */
     CHECK(spacelab::try_laplacian_modes(path, 3).error() == SL_ERR_INVALID_ARGUMENT);
-    const spacelab::result<spacelab::laplacian_modes> eigen = spacelab::try_laplacian_modes(path, 4);
+    const spacelab::result<spacelab::laplacian_modes> eigen =
+        spacelab::try_laplacian_modes(path, 4);
     CHECK(eigen.has_value());
     CHECK(eigen->values.size() == 4 && eigen->modes.size() == 16);
     CHECK(eigen->values == *spectrum);
@@ -997,8 +997,7 @@ void the_control_surface_reports_every_wall_as_a_status() {
 
     /* The matrix-order wall, refused for its own reason and reported as its own status. */
     const std::array<double, 9> companion{0.0, 1.0, 0.0, 0.0, 0.0, 1.0, -6.0, -11.0, -6.0};
-    CHECK(spacelab::try_characteristic_polynomial(companion, 2).error() ==
-          SL_ERR_INVALID_ARGUMENT);
+    CHECK(spacelab::try_characteristic_polynomial(companion, 2).error() == SL_ERR_INVALID_ARGUMENT);
     const spacelab::result<std::vector<double>> coefficients =
         spacelab::try_characteristic_polynomial(companion, 3);
     CHECK(coefficients.has_value());
@@ -1025,9 +1024,9 @@ void the_control_surface_reports_every_wall_as_a_status() {
 
     /* An unknown law tag is a status here too, and it is the enum-width case as well: a narrowed
      * enum would not carry 7 across the boundary to be refused. */
-    CHECK(spacelab::try_attitude_small_angle_gains(static_cast<spacelab::attitude_law>(7), 8.0,
-                                                   12.0)
-              .error() == SL_ERR_INVALID_ARGUMENT);
+    CHECK(
+        spacelab::try_attitude_small_angle_gains(static_cast<spacelab::attitude_law>(7), 8.0, 12.0)
+            .error() == SL_ERR_INVALID_ARGUMENT);
     const spacelab::result<spacelab::small_angle_gains> gains =
         spacelab::try_attitude_small_angle_gains(SL_LAW_QUATERNION_PD, 8.0, 12.0);
     CHECK(gains.has_value());

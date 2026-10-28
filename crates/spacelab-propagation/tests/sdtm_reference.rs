@@ -1,6 +1,6 @@
 //! The shipped SDTM-1 evaluator against the generator that fitted it.
 //!
-//! `tools/gen_sdtm_coefficients.py` does the search in Python and writes `sdtm/coefficients.rs`. Two
+//! `tools/fit-sdtm-corpus.py` does the search in Python and writes `sdtm/coefficients.rs`. Two
 //! implementations of one model is a transcription risk exactly like the ported atmospheres of §2 —
 //! the fitted numbers can be right and the Rust still wrong about which driver multiplies which
 //! harmonic, what the geopotential conversion is, or where the storm response is sampled. So the
@@ -9,7 +9,7 @@
 //!
 //! The fixture is our own model's output at our own sample of points: no measured density, no driver
 //! series and nothing from TU Delft's files is in it, which is why it can be committed while the
-//! 226 MB of measurements it was fitted on cannot (`docs/provenance.md`, `sdtm-reference`).
+//! 23 GB of measurements it was fitted on cannot (`docs/provenance.md`, `sdtm-reference`).
 //!
 //! A mismatch here is a *transcription* failure, so the tolerance is what two correct implementations
 //! of the same arithmetic differ by and not a physical tolerance: every field of the fixture is written
@@ -77,6 +77,7 @@ fn the_evaluator_reproduces_the_generators_own_values() {
             .max(((t - row.exospheric_temperature) / row.exospheric_temperature).abs());
         worst_density = worst_density.max(((rho - row.density) / row.density).abs());
     }
+    println!("worst T∞ {worst_temperature:.3e}, worst ρ {worst_density:.3e} relative");
     // Round-tripped inputs, so this is the arithmetic's own disagreement: ~1e-15 in T∞, and that
     // amplified by the eight or nine scale heights between the boundary and the fitted band in ρ.
     assert!(
@@ -121,17 +122,16 @@ fn the_fitted_field_is_physical_everywhere_the_generator_sampled() {
 /// The generator's own altitudes are inside the band it was fitted on, and the shape parameter it
 /// chose is the one `coefficients.rs` carries.
 ///
-/// This is a tripwire for the ticket's own limitation rather than for the code: the fit sees 423 to
-/// 537 km and nothing else, so `sigma` is not identified by it (`docs/verification.md` §10.10) — and
-/// neither is the split of the density *level* between `sigma`, `T∞` and the boundary scale. If a later
-/// corpus widens the band, this test is what says the note is stale.
+/// A tripwire for the fit's coverage rather than for the code: the corpus spans GOCE's orbit near
+/// 250 km to Swarm B's above 500 km, which is what identifies `sigma` (`docs/verification.md`
+/// §10.21). If a later corpus narrows or widens the band, this test is what says the note is stale.
 #[test]
 fn the_fitted_band_is_the_one_the_verdict_names() {
     let altitudes: Vec<f64> = rows().iter().map(|r| r.point.altitude).collect();
     let low = altitudes.iter().copied().fold(f64::INFINITY, f64::min);
     let high = altitudes.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     assert!(
-        (400_000.0..560_000.0).contains(&low) && (400_000.0..=560_000.0).contains(&high),
+        (150_000.0..300_000.0).contains(&low) && (450_000.0..=560_000.0).contains(&high),
         "sampled altitudes {low:e} .. {high:e}"
     );
     let field = coefficients::FIELD;
@@ -147,7 +147,7 @@ fn the_fitted_band_is_the_one_the_verdict_names() {
             *field.coefficients(),
             field.sigma(),
             field.boundary_scale(),
-            *field.kernel(),
+            *field.storm(),
         )
         .is_some(),
         "the generated literals are not a field the checked constructor accepts"
@@ -156,18 +156,17 @@ fn the_fitted_band_is_the_one_the_verdict_names() {
     // The geopotential conversion the generator used is the one the crate exports.
     assert!(geopotential_height(sdtm::BOUNDARY_ALTITUDE).abs() < 1.0e-9);
 
-    // `MISSION_SCALE` is reported and never applied, so no density can be wrong because of it and no
-    // other assertion in this file reads it. That is exactly why it needs one of its own: a number
-    // nothing consumes can be regenerated with the wrong sign and stay wrong indefinitely. It is the
-    // log offset the fit gives the *second* mission's rows, so `exp` of it is the factor by which
-    // SWARM-A's accelerometer densities sit below GRACE-FO-C's precise-orbit ones for the same
-    // physics. Negative, and a few per cent — Siemes et al. (2023) publish the two methods as
-    // disagreeing at that level, and the fit's own bound was a factor of 1.35 either way, which this
-    // is nowhere near.
-    let factor = libm::exp(coefficients::MISSION_SCALE);
-    assert!(
-        (0.90..1.0).contains(&factor),
-        "the second mission reads {:.2} % against the first, which is not a cross-calibration",
-        100.0 * (factor - 1.0)
-    );
+    // `SATELLITE_SCALE` is reported and never applied, so no density can be wrong because of it and
+    // no other assertion in this file reads it. That is exactly why it needs one of its own: a number
+    // nothing consumes can be regenerated wrong and stay wrong indefinitely. Each is the log offset
+    // the fit gives one satellite's rows against GRACE-FO C's, and each must sit well inside the
+    // fit's bound of 0.3: near the bound the scale is clamped, not a cross-calibration.
+    assert_eq!(coefficients::SATELLITE_SCALE.len(), 7);
+    for (name, scale) in coefficients::SATELLITE_SCALE {
+        assert!(
+            scale.abs() < 0.2,
+            "{name} reads {:.2} % against GRACE-FO C, which is not a cross-calibration",
+            100.0 * (libm::exp(scale) - 1.0)
+        );
+    }
 }

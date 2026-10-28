@@ -139,9 +139,9 @@ def test_sdtm1_is_a_profile_a_temperature_a_kernel_and_an_interval():
 
     # Fifteen degrees of longitude is one hour of local solar time, and that is the convention a
     # caller has to be able to rely on: 15 degrees east an hour earlier in UT is the same place in the
-    # model and reproduces the density to 5.9e-4 relative -- the annual harmonic over 1/24 of a day,
+    # model and reproduces the density to 2.2e-4 relative -- the annual harmonic over 1/24 of a day,
     # which is all that is left -- while the same 15 degrees at the same UT is an hour later in local
-    # time and worth 9.0 %. Asserted as a ratio rather than a wrapped-longitude symmetry, because a
+    # time and worth 12.0 %. Asserted as a ratio rather than a wrapped-longitude symmetry, because a
     # symmetry of the input cannot pin the constant it is built out of.
     here = sl.sdtm1_density(alt_km=400.0, **base)
     same_place = sl.sdtm1_density(
@@ -173,14 +173,18 @@ def test_sdtm1_is_a_profile_a_temperature_a_kernel_and_an_interval():
     assert 586.0 < t_inf < 1528.0, t_inf
     assert sl.sdtm1_exospheric_temperature(alt_km=400.0, storm=250.0, **base) > t_inf
 
-    # A constant index history is the kernel's unit-gain case: both internal states start at the
-    # first value and stay there, so the response is that constant exactly, at any cadence. A rising
-    # tail moves it most of the way up without reaching it, which is the lag the kernel is for.
-    assert sl.sdtm1_storm_response([5.0] * 16) == 5.0
-    assert sl.sdtm1_storm_response([5.0] * 16, cadence_s=3600.0) == 5.0
+    # The storm state cools: a constant index history sits on the steady state H/(1 + H/H_s) from
+    # the first step, below the index itself and the same at any cadence. A rising tail moves it up
+    # without reaching the peak.
+    quiet = sl.sdtm1_storm_response([5.0] * 16)
+    assert 0.0 < quiet < 5.0, quiet
+    assert (
+        abs(sl.sdtm1_storm_response([5.0] * 16, cadence_s=3600.0) - quiet)
+        < 1e-12 * quiet
+    )
     assert sl.sdtm1_storm_response([]) == 0.0
     surge = sl.sdtm1_storm_response([5.0] * 12 + [300.0] * 4)
-    assert 250.0 < surge < 300.0, surge
+    assert quiet < surge < 300.0, surge
 
     # The interval is multiplicative about the density, so z = 0 collapses it and the geometric mean
     # of the two ends is the density itself.
@@ -190,12 +194,13 @@ def test_sdtm1_is_a_profile_a_temperature_a_kernel_and_an_interval():
     same = sl.sdtm1_density_interval(reference, z=0.0)
     assert same == (reference, reference), same
     # Both regime arguments must reach the table, or the interval is one number pretending to be six.
-    # Low flux is the extrapolation cell and by far the widest (sigma 0.77 against 0.33); the storm
-    # bin at a given flux is, as measured, marginally *narrower* than the quiet one, so its direction
-    # is not asserted -- only that moving the bin moves the interval.
+    # The quiet low-flux cell is wider than the quiet high-flux one (sigma 0.31 against 0.23). Which
+    # way the storm bin moves the interval is a property of the fit, not of the bridge -- the pilot
+    # field had it marginally narrower, the corpus field has it wider -- so only that moving the bin
+    # moves the interval is asserted.
     low_flux = sl.sdtm1_density_interval(reference, f107a=80.0)
     mid_flux = sl.sdtm1_density_interval(reference, f107a=150.0)
-    assert low_flux[1] - low_flux[0] > 2.0 * (mid_flux[1] - mid_flux[0]), (
+    assert low_flux[1] - low_flux[0] > mid_flux[1] - mid_flux[0], (
         low_flux,
         mid_flux,
     )

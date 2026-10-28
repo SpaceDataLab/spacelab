@@ -60,15 +60,33 @@ FAMILY = {
 EPOCH_2000 = pd.Timestamp("2000-01-01")
 
 
-def load_corpus(step: int, trailing_mean: bool = True) -> pd.DataFrame:
-    """Every `step`-th corpus row of each satellite, with `gen_sdtm_coefficients.load`'s drivers."""
+def load_corpus(
+    step: int,
+    trailing_mean: bool = True,
+    windows: list[tuple[pd.Timestamp, pd.Timestamp]] | None = None,
+) -> pd.DataFrame:
+    """Every `step`-th corpus row of each satellite, with `gen_sdtm_coefficients.load`'s drivers.
+
+    `windows`, when given, keeps only the rows inside one of those `[start, end)` spans, before any
+    driver is joined: the storm windows of the whole archive are a few per cent of its 22 million rows.
+    """
     frames = []
     for sat in SATELLITES:
         path = CORPUS / f"corpus_{sat}.npz"
         if not path.exists():
             sys.exit(f"no {path.name}; run tools/build-density-corpus.py")
         z = np.load(path)
-        pick = slice(None, None, step)
+        pick = np.arange(0, z["t_ms"].size, step)
+        if windows is not None:
+            t_ms = z["t_ms"][pick]
+            inside = np.zeros(pick.size, dtype=bool)
+            for start, end in windows:
+                lo, hi = (
+                    (x - EPOCH_2000) // pd.Timedelta(milliseconds=1)
+                    for x in (start, end)
+                )
+                inside[np.searchsorted(t_ms, lo) : np.searchsorted(t_ms, hi)] = True
+            pick = pick[inside]
         frames.append(
             pd.DataFrame(
                 {
@@ -355,6 +373,12 @@ def main() -> None:
         help="fit the Bates shape: the corpus spans 250-540 km, which the pilot did not",
     )
     parser.add_argument("--folds", nargs="*", help="only these held-out families")
+    parser.add_argument(
+        "--storms",
+        action="store_true",
+        help="then score every storm of the archive on Bruinsma & Laurens (2024)'s protocol, "
+        "each satellite by the fold that held its family out (Ф15.H)",
+    )
     argument = parser.parse_args()
     sigma = None if argument.fit_sigma else argument.sigma
 
@@ -374,6 +398,7 @@ def main() -> None:
 
     families = argument.folds or sorted(set(FAMILY.values()))
     held = np.full(len(rows), np.nan)
+    fitted: dict[str, tuple[tuple[str, ...], np.ndarray]] = {}
     for fam in families:
         test = rows.family.to_numpy() == fam
         train_sats = tuple(s for s in SATELLITES if s in set(sat[~test]))
@@ -382,6 +407,7 @@ def main() -> None:
         p = model.fit(np.where(~test)[0])
         r, _ = model.score(p, np.where(test)[0])
         held[test] = r
+        fitted[fam] = (train_sats, p)
         onset, recovery = model.kernel(p)
         pk = model.pack
         scales = " ".join(
@@ -419,6 +445,62 @@ def main() -> None:
             "MSIS debiased": debias(msis[done], sat[done]),
         },
     )
+    if argument.storms:
+        storms(rows, fitted, argument, sigma)
+
+
+def storms(
+    rows: pd.DataFrame,
+    fitted: dict[str, tuple[tuple[str, ...], np.ndarray]],
+    argument: argparse.Namespace,
+    sigma: float | None,
+) -> None:
+    """Ф15.H: every storm the archive covers, each satellite scored by the model that never saw it.
+
+    The fit is on thinned rows; the storm protocol averages over orbits, so it reads the corpus at
+    its full 120 s inside the storm windows only. Storms are found on the 3-hourly `ap` from the
+    corpus's first day, so `storm_onsets` does not scan sixty years the corpus does not cover.
+    """
+    ap, epoch = rows.attrs["ap"], rows.attrs["ap_epoch"]
+    first = (rows.t.min().normalize() - epoch).days * 8
+    found = g.storm_onsets(ap[first:], epoch + pd.Timedelta(days=first // 8))
+    windows = [
+        (
+            s["t0"] + pd.Timedelta(hours=g.PHASES[0][0]),
+            s["t0"] + pd.Timedelta(hours=s["phase3_end"] + 12.0),
+        )
+        for s in found
+    ]
+    window_rows = load_corpus(1, windows=windows)
+    window_rows = window_rows[window_rows.family.isin(fitted)].reset_index(drop=True)
+    window_rows["mission"] = window_rows.sat
+    print(
+        f"\n{len(found)} storms with ap >= {g.STORM_AP:g} since {rows.t.min():%Y-%m}; "
+        f"{len(window_rows)} rows at 120 s inside their windows",
+        flush=True,
+    )
+    arg = g.fit_arguments(window_rows, argument.degree)
+    sat = window_rows.sat.to_numpy()
+    caps = g.CAPS[argument.caps]
+    held = np.full(len(window_rows), np.nan)
+    for fam, (train_sats, p) in fitted.items():
+        model = CorpusModel(arg, sat, train_sats, caps, argument.ridge, sigma)
+        here = np.where(window_rows.family.to_numpy() == fam)[0]
+        held[here] = model.score(p, here)[0]
+    msis = nrlmsise00(window_rows) - arg["ln_rho"]
+    done = np.isfinite(held) & np.isfinite(msis)
+    print(
+        f"{int((~done).sum())} window rows without an NRLMSISE-00 answer; dropped from both"
+    )
+    scored = window_rows[done].reset_index(drop=True)
+    scored.attrs = {
+        **rows.attrs,
+        "ap": ap[first:],
+        "ap_epoch": epoch + pd.Timedelta(days=first // 8),
+    }
+    present = tuple(s for s in SATELLITES if s in set(scored.sat))
+    g.storm_assessment(scored, held[done], "SDTM-1 held-out-mission", present)
+    g.storm_assessment(scored, msis[done], "NRLMSISE-00 ap[]", present)
 
 
 if __name__ == "__main__":

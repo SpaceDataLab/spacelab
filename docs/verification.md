@@ -350,6 +350,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | The storm kernel's memory | whether a longer memory is what the storm peak is short of — the remedy §10.15 named, tested before it was built | eight kernels pinned with `--pin-kernel` at the shipped operating point against the free fit, all held out by calendar month; and the sixteen comparisons split on Bruinsma & Laurens's own multiple-peak label | **no.** The peak error is uncorrelated with activity (r = **−0.19** against `ln(peak ap)`) and the split is **multiple-peak against single-peak**: 0.619 against 1.127, and **all ten MP comparisons under-reach at every one of the eight rungs**. Unit DC gain means a longer kernel lowers every modelled peak, helping the storms that over-reach and hurting the ten that do not | tools/gen_sdtm_coefficients.py |
 | USGS Dst as the storm driver | whether the open `Dst` is what JB2008's 23.7 % is made of — JB2008 is the only `Dst`-driven model (Ф23.B, first step) | `--dst`: the screened hourly Dst4 depression drives the kernel, against the same fit on `ap`, held out by calendar month | **no.** Worse on every aggregate: held-out spread 10.8 → 13.3 %, mean peak error 0.35 → **0.64**, LOSMO 21.9 → 23.4 %; the kernel collapses to 0.02 / 1.02 h because `Dst` already carries the ring current's memory (§10.15) | tools/gen_sdtm_coefficients.py |
 | SDTM-1 on held-out missions | Ф15.E's gate: a model fitted on some missions must transfer to a mission it never saw, and beat NRLMSISE-00 in every bin | the shipped form refitted on the whole TU Delft archive (§10.20), one mission family held out at a time, against NRLMSISE-00 `ap[]` on the same 365 211 rows | pooled **23.5 %** (bar 25.5 %), worst edge 36.5 % (bar 40 %); **fails one bin**: `Ap` ≥ 50, 36.5 % against NRLMSISE-00's 35.4 % (§10.21) | tools/fit-sdtm-corpus.py |
+| SDTM-1 storms on held-out missions | Ф15.H: onset ±3 h, recovery ±6 h, peak within ±25 % on storms the model never saw | Bruinsma & Laurens (2024)'s protocol on all 204 covered storms since 2000 (630 comparisons), each satellite from the fold that held its family out, against NRLMSISE-00 `ap[]` on the same rows | **not passed**: 65 / 76 / **43 %** of comparisons (NRLMSISE-00 64 / 78 / 15 %); median peak ratio 0.98, but 0.73 at `ap` ≥ 300 (§10.22) | tools/fit-sdtm-corpus.py |
 | SDTM-1 on the drag path | a fitted field is not a force model: the `Atmosphere` the STM reads must be the field, and its gradient the field's own | the wrapper against the field at the named point, the dual gradient against the analytic `dρ/dz`, the boundary degeneracy, a 6015-point positivity sweep, and `CalibratedAtmosphere` over it | bit-equal value; gradient < **1e-14** relative; `1/H` finite and positive everywhere, smallest ρ **9.0e-33 kg/m³**; no second model evaluation and no fallback arm, unlike the other three wrappers | src/sdtm/atmosphere.rs |
 | SDTM-1's altitude convention | the conventions of the file a model was fitted to are part of its parameters, and nothing that round-trips a model against itself checks them | the fit's own input column against the docstring: TU Delft column 4 is "Altitude (m), GRS80" | the docstring said a spherical datum; the fit used geodetic height. **21.371 km** apart at the equator, a factor of **1.44** in density at 400 km. Corrected, and `SdtmAtmosphere` removes the choice from the caller | src/sdtm/mod.rs |
 | SDTM-1 in both bridges | #319's defect is a capability that reaches one bridge and not the other | the same four names defined, registered and exercised on both sides, enforced by a test that reads both files | 4 of 4 name-for-name; `just capi` **12/12** across C99–C23 × C++20–C++26 × throw/nothrow × `-fshort-enums`; the kernel's unit gain and the interval's multiplicativity pinned as exact equalities in C, C++ and Python | tests/bridge_parity.rs, tests/c/smoke.c, tests/bindings.py |
@@ -7922,6 +7923,57 @@ promote a corpus fit has not passed.
 observed F10.7 is 707.6 and 573.4 sfu — the 2005-09-09 and 2006-12-06 X-class flares in Penticton's
 noon measurement. At 2–3 rows of those days the model returns NaN; at 500 sfu the same row is finite.
 Those rows are dropped from both models. Whether the reference C does the same is not checked here.
+
+### 10.22 Every storm the archive covers, on held-out missions (Ф15.H)
+
+§10.14 scored eight storms on two satellites. `tools/fit-sdtm-corpus.py --fit-sigma --storms` scores
+every storm the archive covers, on §10.14's protocol (Bruinsma & Laurens 2024, the same code), with
+each satellite's residual taken from the §10.21 fold that held its mission family out. The fit reads
+thinned rows. The storm protocol averages over orbits, so it reads the corpus at the full 120 s inside
+the storm windows: 1 635 670 rows. `ap` reaches 80 at **213 storms** from 2000-07; **204** have all
+four phases covered by at least one satellite, for **630 comparisons** (storm × satellite). The three
+storms §10.14 could not run are in it: 2003-10-29 (CHAMP, GRACE-A/B), 2015-03-17 (Swarm A/B/C,
+GRACE-A/B), 2017-09-08 (Swarm A/B/C, GRACE-A). NRLMSISE-00 has no answer on 125 window rows (the
+flare days of §10.21); they are dropped from both models.
+
+| statistic, 630 comparisons | SDTM-1, held-out mission | NRLMSISE-00 `ap[]` |
+|---|---|---|
+| ⟨O/C⟩ after the phase-1 debiasing | 1.007 | 1.056 |
+| StD of the per-storm ⟨O/C⟩ | 18.2 % | 13.1 % |
+| mean in-storm StD | 21.2 % | 21.2 % |
+| mean Pearson R | 0.870 | 0.869 |
+| onset within ±3 h | 408 / 630 (65 %) | 403 / 630 (64 %) |
+| recovery half-time within ±6 h | 453 / 595 (76 %) | 437 / 561 (78 %) |
+| **peak enhancement within ±25 %** | **273 / 630 (43 %)** | 94 / 630 (15 %) |
+| peak ratio model/measured, median | **0.980** | 0.587 |
+| \|peak ratio − 1\|, median | 0.302 | 0.434 |
+
+The mean peak error is not in the table on purpose. It is 0.60 for SDTM-1 and 0.46 for NRLMSISE-00,
+and both are set by a few comparisons where the measured enhancement is near zero, so the ratio
+diverges (worst 29.5). The median is the statistic that describes the storms.
+
+**By storm class** (SDTM-1; NRLMSISE-00 in brackets):
+
+| class | n | peak ratio, median | within ±25 % | onset within ±3 h |
+|---|---|---|---|---|
+| single peak | 378 | 1.005 (0.601) | 40 % (15 %) | 73 % (68 %) |
+| multiple peak | 252 | 0.906 (0.579) | 48 % (16 %) | 52 % (58 %) |
+| peak `ap` < 150 | 498 | 0.983 (0.595) | 47 % (14 %) | 66 % (63 %) |
+| peak `ap` ≥ 150 | 132 | 0.901 (0.543) | 29 % (21 %) | 60 % (67 %) |
+| peak `ap` ≥ 300 | 33 | **0.727** (0.429) | 30 % (9 %) | 36 % (55 %) |
+
+**What changed from §10.14.** On eight storms the peak enhancement fell short by about half, and
+§10.17 found no kernel memory that fixed it. On the whole archive, held out by mission, the median
+peak is at 0.98: the systematic under-reach is gone for the typical storm. It stays for the largest
+ones, 0.73 at `ap` ≥ 300, and for timing on multiple-peak storms (52 % within ±3 h). The pilot's
+storms were few, recent and dominated by Gannon, so they over-weighted the class that is still short.
+
+**Verdict: not passed.** The criteria are onset ±3 h, recovery ±6 h and peak within ±25 % on held-out
+storms; they hold on 65 %, 76 % and 43 % of comparisons. SDTM-1 places the peak three times as often
+as NRLMSISE-00 within ±25 %, and matches it on timing and in-storm scatter. NRLMSISE-00 is more
+consistent from storm to storm in level (13.1 % against 18.2 %). The remaining storm work is the
+largest storms and the multiple-peak timing: Ф23.B, on this corpus. JB2008, the only `Dst`-driven
+model and §10.14's best on the peak, is not run on these rows (§10.21).
 
 ---
 

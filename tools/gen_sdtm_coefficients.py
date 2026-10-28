@@ -855,7 +855,12 @@ def storm_window_rows(centred_mean: bool, storm_driver: str) -> pd.DataFrame | N
     return out
 
 
-def storm_assessment(rows: pd.DataFrame, residual: np.ndarray, label: str) -> None:
+def storm_assessment(
+    rows: pd.DataFrame,
+    residual: np.ndarray,
+    label: str,
+    missions: tuple[str, ...] = ("GRACE-FO-C", "SWARM-A"),
+) -> None:
     """The storm statistics of Bruinsma & Laurens (2024) Eq. (1) on a *held-out* residual.
 
     `residual` is `ln(rho_model/rho_measured)`, so the paper's observed-to-computed ratio is
@@ -878,7 +883,7 @@ def storm_assessment(rows: pd.DataFrame, residual: np.ndarray, label: str) -> No
     for storm in storms:
         hours = (time - np.datetime64(storm["t0"])) / np.timedelta64(1, "h")
         windows = storm_windows(storm)
-        for mission in ("GRACE-FO-C", "SWARM-A"):
+        for mission in missions:
             is_mission = rows.mission.to_numpy() == mission
             phases = [(hours >= a) & (hours < b) & is_mission for a, b in windows]
             if any(p.sum() == 0 for p in phases):

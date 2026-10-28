@@ -905,6 +905,7 @@ if have maxima; then
     mac_zeros edl_allen_eggers.mac 7 "Allen-Eggers ballistic entry and its peak deceleration"
     mac_zeros atmosphere_lift.mac 25 "the density lift to SI and its radial gradient -rho/H"
     mac_zeros sdtm_uncertainty.mac 14 "the shipped interval's normal quantiles and log symmetry"
+    mac_zeros sdtm_no_cooling.mac 12 "the heating and nitric-oxide cooling step: exact N step and mean, frozen D step, fixed points, local error from h^3"
     mac_zeros density_calibration_ridge.mac 104 "the ridge calibration fit solves its normal equations exactly"
     mac_zeros wind_model_vsh.mac 222 "the vector spherical harmonic basis by Rodrigues' formula; the ridge stationarity"
     mac_zeros attitude_law_frames.mac 75 "every attitude law is an orthonormal right-handed frame"
@@ -1013,7 +1014,7 @@ if have gp; then
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form \
         rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
         cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal iod_classical patched_conics \
-        targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty density_calibration_ridge \
+        targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling density_calibration_ridge \
         wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms \
         chi_square_quantiles robust_weights se3_exponential particle_resampling sampling_transforms \
         conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \

@@ -23,6 +23,10 @@ the library itself through `examples/nrlmsise00_rows.rs`. `--fit-sigma` frees th
 the pilot held fixed because two satellites in one altitude band could not identify it; GOCE at 250 km
 and CHAMP at 300-450 km can.
 
+`--cooling` replaces the two-constant storm kernel by heating with nitric-oxide cooling
+(`cooling_grid`, `derivations/sdtm_no_cooling.mac`), the Ф23.B state equation. `--storms` then
+scores every archived storm on Bruinsma & Laurens (2024)'s protocol (Ф15.H).
+
 Run:
 
     cargo build -p spacelab-propagation --release --example nrlmsise00_rows
@@ -142,6 +146,8 @@ class Packing:
     scaled: tuple[str, ...]
     """Satellites with a fitted log scale: the training set less its reference."""
     free_sigma: bool
+    cooling: bool
+    """The storm response is `cooling_grid`'s two-state equation, with a third kernel slot."""
 
     @property
     def i_onset(self) -> int:
@@ -152,21 +158,65 @@ class Packing:
         return self.n_c + 1
 
     @property
+    def i_cool(self) -> int:
+        """`ln(H_s / ap)`, the cooling's saturation level; absent without cooling."""
+        return self.n_c + 2 if self.cooling else -1
+
+    @property
+    def n_kernel(self) -> int:
+        return 3 if self.cooling else 2
+
+    @property
     def i_boundary(self) -> int:
-        return self.n_c + 2
+        return self.n_c + self.n_kernel
 
     @property
     def i_scale(self) -> int:
-        return self.n_c + 3
+        return self.n_c + self.n_kernel + 1
 
     @property
     def i_sigma(self) -> int:
         """`sigma / 1e-5 m^-1`, last, and absent when `sigma` is held fixed."""
-        return self.n_c + 3 + len(self.scaled) if self.free_sigma else -1
+        return self.i_scale + len(self.scaled) if self.free_sigma else -1
 
     @property
     def size(self) -> int:
-        return self.n_c + 3 + len(self.scaled) + int(self.free_sigma)
+        return self.i_scale + len(self.scaled) + int(self.free_sigma)
+
+
+def cooling_grid(
+    ap: np.ndarray,
+    heating: float,
+    nitric: float,
+    saturation: float,
+    cadence: float,
+    first: int,
+) -> np.ndarray:
+    """Heating with nitric-oxide cooling, on the driver's grid (`derivations/sdtm_no_cooling.mac`).
+
+    `dD/dt = (H - D)/heating - D N/(heating saturation)`, `dN/dt = (H - N)/nitric`, `H` the driver
+    held over each interval. `N` takes its exact step; `D` the exact step of the system with `N`
+    frozen at its exact mean over the interval, whose local error starts at `h^3`. Element `i` is
+    the state after interval `i`, the convention `storm_grid` has, so the same `interval` index
+    reads it. Without cooling (`saturation` -> infinity) it is the unit-gain first-order filter;
+    in steady state it is `H / (1 + H/saturation)`.
+
+    The recursion starts at `first` from rest; entries before it are zero and are never read.
+    """
+    h = cadence / 3600.0
+    decay = np.exp(-h / nitric)
+    out = np.zeros(ap.size)
+    d = n = 0.0
+    mean_weight = nitric / h * (1.0 - decay)
+    for i in range(first, ap.size):
+        drive = ap[i]
+        n_mean = drive + (n - drive) * mean_weight
+        rate = (1.0 + n_mean / saturation) / heating
+        target = drive / (heating * rate)
+        d = target + (d - target) * np.exp(-rate * h)
+        n = drive + (n - drive) * decay
+        out[i] = d
+    return out
 
 
 class CorpusModel:
@@ -180,6 +230,7 @@ class CorpusModel:
         caps,
         ridge: float,
         sigma: float | None,
+        cooling: bool = False,
     ):
         self.a = arg
         self.sat = sat
@@ -188,38 +239,52 @@ class CorpusModel:
             g.harmonic_mask(caps, arg["k"]).reshape(g.DRIVERS, arg["k"])
         )
         self.pack = Packing(
-            n_c=len(self.pairs), scaled=train[1:], free_sigma=sigma is None
+            n_c=len(self.pairs),
+            scaled=train[1:],
+            free_sigma=sigma is None,
+            cooling=cooling,
         )
+        # 120 days before the first sample: the slowest admitted state (480 h) has forgotten its
+        # start by e^-6 there.
+        self.first = max(int(arg["interval"].min()) - 120 * 8, 0)
         self.indicator = (
             np.column_stack([(sat == s).astype(float) for s in self.pack.scaled])
             if self.pack.scaled
             else np.zeros((sat.size, 0))
         )
         self.ridge = ridge
-        self._design_key: tuple[float, float] | None = None
+        self._design_key: tuple[float, ...] | None = None
         self._design: np.ndarray | None = None
-        reference = self.design(3.0 * 3600.0, 18.0 * 3600.0)
+        reference = self.design(
+            *((6.0, 20.0, 300.0) if cooling else (3.0 * 3600.0, 18.0 * 3600.0))
+        )
         self.penalty = np.sqrt(ridge) * np.sqrt(np.mean(reference**2, axis=0))
         self.penalty[0] = 0.0
 
     def shape(self, p: np.ndarray) -> float:
         return p[self.pack.i_sigma] * 1.0e-5 if self.sigma is None else self.sigma
 
-    def kernel(self, p: np.ndarray) -> tuple[float, float]:
-        onset = np.exp(p[self.pack.i_onset]) * 3600.0
-        return onset, onset + np.exp(p[self.pack.i_gap]) * 3600.0
+    def kernel(self, p: np.ndarray) -> tuple[float, ...]:
+        """`(onset s, recovery s)`, or with cooling `(heating h, nitric h, saturation ap)`."""
+        pk = self.pack
+        if pk.cooling:
+            return tuple(float(np.exp(p[j])) for j in (pk.i_onset, pk.i_gap, pk.i_cool))
+        onset = np.exp(p[pk.i_onset]) * 3600.0
+        return onset, onset + np.exp(p[pk.i_gap]) * 3600.0
 
-    def design(self, onset: float, recovery: float) -> np.ndarray:
-        if self._design_key == (onset, recovery) and self._design is not None:
+    def design(self, *kernel: float) -> np.ndarray:
+        if self._design_key == kernel and self._design is not None:
             return self._design
-        storm = g.storm_grid(self.a["ap"], onset, recovery, self.a["cadence"])[
-            self.a["interval"]
-        ]
+        if self.pack.cooling:
+            grid = cooling_grid(self.a["ap"], *kernel, self.a["cadence"], self.first)
+        else:
+            grid = g.storm_grid(self.a["ap"], *kernel, self.a["cadence"])
+        storm = grid[self.a["interval"]]
         drivers = g.driver_matrix(self.a["f107"], self.a["f107a"], storm, self.a["doy"])
         out = np.empty((drivers.shape[0], len(self.pairs)))
         for j, (d, k) in enumerate(self.pairs):
             out[:, j] = drivers[:, d] * self.a["harmonics"][:, k]
-        self._design_key, self._design = (onset, recovery), out
+        self._design_key, self._design = kernel, out
         return out
 
     def score(self, p: np.ndarray, index: np.ndarray, design: np.ndarray | None = None):
@@ -251,7 +316,8 @@ class CorpusModel:
         out[:n, pk.i_boundary] = 1.0
         out[:n, pk.i_scale : pk.i_scale + len(pk.scaled)] = self.indicator[index]
         step = 1.0e-4
-        for j in (pk.i_onset, pk.i_gap) + ((pk.i_sigma,) if pk.free_sigma else ()):
+        slots = (pk.i_onset, pk.i_gap) + ((pk.i_cool,) if pk.cooling else ())
+        for j in slots + ((pk.i_sigma,) if pk.free_sigma else ()):
             shifted = p.copy()
             shifted[j] += step
             out[:n, j] = (self.score(shifted, index)[0] - base) / step
@@ -263,10 +329,20 @@ class CorpusModel:
         pk = self.pack
         start = np.zeros(pk.size)
         start[0] = np.log(700.0)
-        start[pk.i_onset], start[pk.i_gap] = np.log(3.0), np.log(15.0)
         lower, upper = np.full(pk.size, -np.inf), np.full(pk.size, np.inf)
-        lower[pk.i_onset], upper[pk.i_onset] = np.log(1.0 / 60.0), np.log(12.0)
-        lower[pk.i_gap], upper[pk.i_gap] = np.log(1.0), np.log(72.0)
+        if pk.cooling:
+            # Heating 0.5-72 h and nitric oxide 1-480 h, in hours; the saturation from 5 ap, where
+            # cooling halves the response of a minor storm, to 1e5, where there is none.
+            start[pk.i_onset], start[pk.i_gap], start[pk.i_cool] = np.log(
+                [6.0, 20.0, 300.0]
+            )
+            lower[pk.i_onset], upper[pk.i_onset] = np.log(0.5), np.log(72.0)
+            lower[pk.i_gap], upper[pk.i_gap] = np.log(1.0), np.log(480.0)
+            lower[pk.i_cool], upper[pk.i_cool] = np.log(5.0), np.log(1.0e5)
+        else:
+            start[pk.i_onset], start[pk.i_gap] = np.log(3.0), np.log(15.0)
+            lower[pk.i_onset], upper[pk.i_onset] = np.log(1.0 / 60.0), np.log(12.0)
+            lower[pk.i_gap], upper[pk.i_gap] = np.log(1.0), np.log(72.0)
         lower[pk.i_boundary], upper[pk.i_boundary] = -0.7, 0.7
         # The accelerometer-to-accelerometer and accelerometer-to-POD scales, bounded as
         # `gen_sdtm_coefficients.fit` bounds its one mission scale and for the same reason.
@@ -379,6 +455,12 @@ def main() -> None:
         help="then score every storm of the archive on Bruinsma & Laurens (2024)'s protocol, "
         "each satellite by the fold that held its family out (Ф15.H)",
     )
+    parser.add_argument(
+        "--cooling",
+        action="store_true",
+        help="drive the storm term by heating with nitric-oxide cooling (Ф23.B) instead of the "
+        "two-constant kernel",
+    )
     argument = parser.parse_args()
     sigma = None if argument.fit_sigma else argument.sigma
 
@@ -402,13 +484,15 @@ def main() -> None:
     for fam in families:
         test = rows.family.to_numpy() == fam
         train_sats = tuple(s for s in SATELLITES if s in set(sat[~test]))
-        model = CorpusModel(arg, sat, train_sats, caps, argument.ridge, sigma)
+        model = CorpusModel(
+            arg, sat, train_sats, caps, argument.ridge, sigma, argument.cooling
+        )
         t0 = time.time()
         p = model.fit(np.where(~test)[0])
         r, _ = model.score(p, np.where(test)[0])
         held[test] = r
         fitted[fam] = (train_sats, p)
-        onset, recovery = model.kernel(p)
+        kernel = model.kernel(p)
         pk = model.pack
         scales = " ".join(
             f"{s} {np.exp(v):.3f}"
@@ -419,8 +503,12 @@ def main() -> None:
         print(
             f"held out {fam:<9} {test.sum():8d} rows: raw {g.mape(r):5.1f}%  "
             f"debiased {g.mape(debias(r, sat[test])):5.1f}%  bias {np.exp(r.mean()):.3f}  "
-            f"kernel {onset / 3600:.2f}/{recovery / 3600:.2f} h  "
-            f"boundary {np.exp(p[pk.i_boundary]):.3f}  sigma {model.shape(p) * 1e3:.4f}/km  "
+            + (
+                f"heating {kernel[0]:.2f} h  NO {kernel[1]:.1f} h  saturation {kernel[2]:.0f} ap  "
+                if pk.cooling
+                else f"kernel {kernel[0] / 3600:.2f}/{kernel[1] / 3600:.2f} h  "
+            )
+            + f"boundary {np.exp(p[pk.i_boundary]):.3f}  sigma {model.shape(p) * 1e3:.4f}/km  "
             f"scales vs {train_sats[0]}: {scales}  {time.time() - t0:.0f}s",
             flush=True,
         )
@@ -484,7 +572,9 @@ def storms(
     caps = g.CAPS[argument.caps]
     held = np.full(len(window_rows), np.nan)
     for fam, (train_sats, p) in fitted.items():
-        model = CorpusModel(arg, sat, train_sats, caps, argument.ridge, sigma)
+        model = CorpusModel(
+            arg, sat, train_sats, caps, argument.ridge, sigma, argument.cooling
+        )
         here = np.where(window_rows.family.to_numpy() == fam)[0]
         held[here] = model.score(p, here)[0]
     msis = nrlmsise00(window_rows) - arg["ln_rho"]

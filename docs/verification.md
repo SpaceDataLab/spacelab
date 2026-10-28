@@ -352,6 +352,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 on held-out missions | Ф15.E's gate: a model fitted on some missions must transfer to a mission it never saw, and beat NRLMSISE-00 in every bin | the shipped form refitted on the whole TU Delft archive (§10.20), one mission family held out at a time, against NRLMSISE-00 `ap[]` on the same 365 211 rows | pooled **23.5 %** (bar 25.5 %), worst edge 36.5 % (bar 40 %); **fails one bin**: `Ap` ≥ 50, 36.5 % against NRLMSISE-00's 35.4 % (§10.21) | tools/fit-sdtm-corpus.py |
 | SDTM-1 storms on held-out missions | Ф15.H: onset ±3 h, recovery ±6 h, peak within ±25 % on storms the model never saw | Bruinsma & Laurens (2024)'s protocol on all 204 covered storms since 2000 (630 comparisons), each satellite from the fold that held its family out, against NRLMSISE-00 `ap[]` on the same rows | **not passed**: 65 / 76 / **43 %** of comparisons (NRLMSISE-00 64 / 78 / 15 %); median peak ratio 0.98, but 0.73 at `ap` ≥ 300 (§10.22) | tools/fit-sdtm-corpus.py |
 | SDTM-1 storm regressor on the corpus | whether the storm term's shape, not a missing state equation, caps the storm-day level and the largest peaks | `storm-log1`, `storm-log` (a, a²) and `storm2` (linear + square), same folds, rows and storm protocol | **a trade-off, not a winner**: `storm-log` passes all of Ф15.E (30.6 % vs NRLMSISE-00's 35.4 % at `Ap` ≥ 50) and drops the peak to 27 % within ±25 % (median 0.65); `storm-log1` keeps 43 % and 0.98 (§10.23) | tools/fit-sdtm-corpus.py |
+| SDTM-1 with nitric-oxide cooling | Ф23.B: a heating + NO-cooling state in place of the storm kernel — the step, its fixed points and its error order derived before it is fitted | `derivations/sdtm_no_cooling.mac` (12 identities at 0, local error from `h³`) and `sdtm_no_cooling.gp` (60 digits); the §10.21 folds and §10.22 storms on both thinning phases | **Ф15.E passes all three** (23.1 % pooled; 30.3 % vs NRLMSISE-00's 35.4 % at `Ap` ≥ 50); storms: `ap` ≥ 300 peak 0.97, recovery ±6 h 80 %; peak ±25 % 40 % with the typical storm overshot (1.13) (§10.24) | tools/fit-sdtm-corpus.py, derivations/sdtm_no_cooling.mac |
 | SDTM-1 on the drag path | a fitted field is not a force model: the `Atmosphere` the STM reads must be the field, and its gradient the field's own | the wrapper against the field at the named point, the dual gradient against the analytic `dρ/dz`, the boundary degeneracy, a 6015-point positivity sweep, and `CalibratedAtmosphere` over it | bit-equal value; gradient < **1e-14** relative; `1/H` finite and positive everywhere, smallest ρ **9.0e-33 kg/m³**; no second model evaluation and no fallback arm, unlike the other three wrappers | src/sdtm/atmosphere.rs |
 | SDTM-1's altitude convention | the conventions of the file a model was fitted to are part of its parameters, and nothing that round-trips a model against itself checks them | the fit's own input column against the docstring: TU Delft column 4 is "Altitude (m), GRS80" | the docstring said a spherical datum; the fit used geodetic height. **21.371 km** apart at the equator, a factor of **1.44** in density at 400 km. Corrected, and `SdtmAtmosphere` removes the choice from the caller | src/sdtm/mod.rs |
 | SDTM-1 in both bridges | #319's defect is a capability that reaches one bridge and not the other | the same four names defined, registered and exercised on both sides, enforced by a test that reads both files | 4 of 4 name-for-name; `just capi` **12/12** across C99–C23 × C++20–C++26 × throw/nothrow × `-fshort-enums`; the kernel's unit gain and the interval's multiplicativity pinned as exact equalities in C, C++ and Python | tests/bridge_parity.rs, tests/c/smoke.c, tests/bindings.py |
@@ -8001,6 +8002,64 @@ slow storm-day level. A response with two time scales — a fast heating term an
 lowers or holds the level afterwards — can have both. That is the structure of the Weimer heating and
 NO-cooling equations, which is Ф23.B's next step. The shipped coefficients stay the pilot's: neither
 set is promoted on this evidence.
+
+### 10.24 Heating with nitric-oxide cooling: the first SDTM-1 that passes Ф15.E (Ф23.B, step 3)
+
+**Which way the storm error points.** Before a cooling term is added, its sign has to be right: plans/17
+warned that cooling lowers later peaks and could deepen the multiple-peak under-reach. The per-phase
+⟨O/C⟩ of §10.22 answers it. Under `storm-log1` the median O/C in phase 3 (main and recovery) and
+phase 4 (post-storm) is 0.89–0.94 for multiple-peak storms and for storms with `ap` ≥ 150 — the model
+is too *dense* after the peak while it under-reaches the peak itself. Removing density late in a
+strong storm is what nitric-oxide cooling does, so the sign is right.
+
+**The state** (`derivations/sdtm_no_cooling.mac`, after Weimer et al. 2015/2020/2023, in the driver's
+units): `dD/dt = (H − D)/τ_h − D N/(τ_h H_s)` and `dN/dt = (H − N)/τ_NO`, `H` the 3-hourly `ap` held
+over each interval, `D` in place of the kernel's output in the same `a = ln(1 + D/15)` regressor.
+Without cooling (`H_s → ∞`) it is the unit-gain first-order filter; in steady state it is
+`H/(1 + H/H_s)`; during a storm the decay rate `(1 + N/H_s)/τ_h` rises with the NO state, so recovery
+speeds up as the storm goes on. `N` takes its exact step; `D` the exact step with `N` frozen at its
+exact mean over the interval. Maxima proves both steps, the mean, the fixed points, the `H_s → ∞`
+limit and Weimer's Euler-to-continuous `τ = −Δt/ln(1 − Δt/τ_E)` (12 identities at 0), and shows that
+the frozen step's local error starts at `h³`, with coefficient `−H(N₀ − H)/(12 τ_h² τ_NO H_s)`. On a
+four-interval storm it differs from RK4 at 1/2000 h by 0.32 % in `D`. PARI/GP recomputes the
+reference steps at 60 digits; `cooling_grid` in `tools/fit-sdtm-corpus.py` matches them to 1 ulp.
+One parameter more than the kernel: `τ_h`, `τ_NO`, `H_s`.
+
+**On the §10.21 folds and the §10.22 storms** (`--fit-sigma --cooling --storms`; the other thinning
+phase in brackets):
+
+| | `storm-log1` (§10.21–22) | `storm-log` (§10.23) | **cooling** |
+|---|---|---|---|
+| pooled held-out MAPE | 23.5 % | 23.3 % | **23.1 %** (23.2 %) |
+| `Ap` ≥ 50 bin, NRLMSISE-00 35.4 % | 36.5 % ✗ | 30.6 % | **30.3 %** (30.6 % vs 35.8 %) |
+| worst regime edge | 36.5 % | 30.6 % | **30.3 %** |
+| onset within ±3 h | 65 % | 61 % | **69 %** (69 %) |
+| recovery within ±6 h | 76 % | 58 % | **80 %** (80 %) |
+| peak within ±25 % | **43 %** | 27 % | 40 % (39.5 %) |
+| peak ratio, median | 0.98 | 0.65 | 1.13 (1.11) |
+| peak ratio at `ap` ≥ 300 | 0.73 | 0.28 | **0.97** (0.95) |
+| onset within ±3 h, multiple-peak | 52 % | 47 % | **65 %** |
+| phase 3 / 4 O/C, `ap` ≥ 150 | 0.89 / 0.92 | 1.00 / 0.90 | **1.01 / 1.03** |
+
+Fitted on every fold: `τ_h` 20.7–25.4 h, `H_s` 11–17 `ap`, `τ_NO` 15.7–31.6 h on four folds and
+80–84 h on the fold that holds Swarm out, so `τ_NO` is the least identified of the three. With
+`H_s` that low the steady response is strongly saturated, and the storm-time decay rate is several
+times `1/τ_h`.
+
+**Verdict.** **Ф15.E passes, all three criteria**, on both thinning phases: 23.1 % pooled against the
+25.5 % bar, below NRLMSISE-00 in every bin (the storm bin by 5 points), worst edge 30.3 %. On storms
+the state fixes what §10.22 left: the largest storms (0.97 against 0.73), multiple-peak timing (65 %
+against 52 %) and the late-phase excess. It **does not** meet the restated Ф15.H target (≥ 43 % within
+±25 % with the median in 0.9–1.1): the typical single-peak storm is now overshot (median 1.21), and
+the peak count falls three points. So Ф23.B's state equation is confirmed in direction and on every
+level and timing statistic, and the remaining storm work is the peak gain of minor storms.
+
+**Optimism.** Four storm terms have now been compared on the same folds and storms, and this one is
+reported because it is best on most rows; the comparison is a selection, and its Ф15.E pass is
+optimistic by that selection. A fresh confirmation needs data none of the four saw: the 2026 months
+after the archive's end.
+
+The shipped coefficients and the Rust evaluator are unchanged: the state is in the fit tool only.
 
 ---
 

@@ -1,0 +1,101 @@
+/* A two-time-scale storm response for SDTM-1 (plans/17 Ф23.B): heating with nitric-oxide cooling,
+   after Weimer et al. (2015, 2020, 2023), written in the storm driver's own units.
+
+     dD/dt = (H - D)/tc - g N D        the storm temperature excess, unit DC gain without cooling
+     dN/dt = (H - N)/tn                the nitric-oxide state, unit DC gain
+
+   H is the driver (3-hourly ap), constant over a step of length h (zero-order hold). Weimer's
+   cooling `C_NO = gamma N (T_solar + dT - eps)` keeps its bilinear N*D form; the quiet offset
+   T_solar - eps is not carried, so the excess cannot go below zero (overcooling is Ф23.D).
+
+   N has an exact step. The D equation has a time-varying rate tc^-1 + g N(t), and its exact
+   step is not elementary; the shipped step freezes N at its exact mean over the step, Nbar,
+   and is then exact for that frozen system. What is proved here: the N step, Nbar, the frozen
+   step, the fixed points, the limit g -> 0, Weimer's Euler-to-continuous time constant, and that
+   the frozen step's local error starts at h^3. Every identity prints 0. The numeric block gives
+   the reference values the Python implementation is checked against. */
+
+ratprint : false$
+fpprintprec : 0$
+
+/* 1. The exact N step and its mean over the step. */
+Nexact(t) := H + (N0 - H)*exp(-t/tn)$
+print("N step, ODE residual:", ratsimp(diff(Nexact(t), t) - (H - Nexact(t))/tn))$
+print("N step, initial value:", ratsimp(Nexact(0) - N0))$
+Nbar : H + (N0 - H)*tn/h*(1 - exp(-h/tn))$
+print("N mean over the step:", ratsimp(integrate(Nexact(t), t, 0, h)/h - Nbar))$
+
+/* 2. The frozen D step: rate lam = 1/tc + g Nbar, forcing H/tc. */
+lam : 1/tc + g*Nb$
+Dstar : (H/tc)/lam$
+Dfrozen(t) := Dstar + (D0 - Dstar)*exp(-lam*t)$
+print("frozen D step, ODE residual:", ratsimp(diff(Dfrozen(t), t) - ((H - Dfrozen(t))/tc - g*Nb*Dfrozen(t))))$
+print("frozen D step, initial value:", ratsimp(Dfrozen(0) - D0))$
+
+/* 3. Fixed points of the continuous system, and the frozen step's at N0 = H. */
+Dfix : H/(1 + g*tc*H)$
+print("fixed point, dN/dt:", ratsimp((H - H)/tn))$
+print("fixed point, dD/dt:", ratsimp((H - Dfix)/tc - g*H*Dfix))$
+print("frozen step keeps the fixed point:", ratsimp(subst([Nb = subst(N0 = H, Nbar), D0 = Dfix], Dfrozen(h)) - Dfix))$
+
+/* 4. Without cooling the response is the unit-gain first-order filter. */
+print("g = 0, step from rest:", ratsimp(subst([g = 0, D0 = 0], Dfrozen(t)) - H*(1 - exp(-t/tc))))$
+
+/* 5. Weimer's Euler constants: x+ = x (1 - dt/tE) is the exact decay of tau = -dt/ln(1 - dt/tE). */
+tau : -dt/log(1 - dt/tE)$
+print("Euler to continuous tau:", ratsimp(exp(-dt/tau) - (1 - dt/tE)))$
+
+/* 6. Local error. The exact solution's Taylor coefficients come from the ODE by total
+   differentiation; the scheme's from its closed form with Nb = Nbar. They agree through h^2. */
+fD(D, N) := (H - D)/tc - g*N*D$
+fN(D, N) := (H - N)/tn$
+d1 : fD(D0, N0)$
+dN1 : fN(D0, N0)$
+total(e) := diff(e, D0)*d1 + diff(e, N0)*dN1$
+d2 : total(d1)$
+d3 : total(d2)$
+exact3 : D0 + d1*h + d2*h^2/2 + d3*h^3/6$
+scheme : subst(Nb = Nbar, Dfrozen(h))$
+err : taylor(scheme - exact3, h, 0, 3)$
+print("local error, h^1 coefficient:", ratsimp(coeff(expand(ratdisrep(err)), h, 1)))$
+print("local error, h^2 coefficient:", ratsimp(coeff(expand(ratdisrep(err)), h, 2)))$
+c3 : ratsimp(coeff(expand(ratdisrep(err)), h, 3))$
+print("local error, h^3 coefficient (not 0):", factor(c3))$
+
+/* 7. Reference values for the Python step, 30 digits: tc = 6 h, tn = 20 h, g = 1/(tc 300),
+   h = 3 h, H = 0, 80, 200, 50, from rest. Hours are the unit. */
+fpprec : 30$
+hold_step(Dk, Nk, Hk) := block([nb, l, ds],
+    nb : Hk + (Nk - Hk)*20/3*(1 - exp(-3/20)),
+    l : 1/6 + nb/(6*300),
+    ds : (Hk/6)/l,
+    [ds + (Dk - ds)*exp(-l*3), Hk + (Nk - Hk)*exp(-3/20)])$
+state : [0, 0]$
+for Hk in [0, 80, 200, 50] do (
+    state : bfloat(hold_step(state[1], state[2], Hk)),
+    print("reference step H =", Hk, ": D =", state[1], " N =", state[2]))$
+
+/* 8. The frozen step against the continuous system on the same input, by RK4 at 1/2000 h. The
+   difference is the splitting error the shipped step makes on a realistic storm. */
+rk4(Dk, Nk, Hk, n) := block([dtt : 3/n, a, b, k1, k2, k3, k4, m1, m2, m3, m4],
+    a : Dk, b : Nk,
+    for i thru n do (
+        k1 : float(fD(a, b)), m1 : float((Hk - b)/20),
+        k2 : float(fD(a + dtt/2*k1, b + dtt/2*m1)), m2 : float((Hk - (b + dtt/2*m1))/20),
+        k3 : float(fD(a + dtt/2*k2, b + dtt/2*m2)), m3 : float((Hk - (b + dtt/2*m2))/20),
+        k4 : float(fD(a + dtt*k3, b + dtt*m3)), m4 : float((Hk - (b + dtt*m3))/20),
+        a : a + dtt/6*(k1 + 2*k2 + 2*k3 + k4),
+        b : b + dtt/6*(m1 + 2*m2 + 2*m3 + m4)),
+    [a, b])$
+fine : [0.0, 0.0]$
+coarse : [0.0, 0.0]$
+worst : 0.0$
+block([H, tc, g],
+    tc : 6, g : 1/(6*300),
+    for Hk in [0, 80, 200, 50] do (
+        H : Hk,
+        fine : rk4(fine[1], fine[2], Hk, 6000),
+        coarse : float(hold_step(coarse[1], coarse[2], Hk)),
+        worst : max(worst, abs(coarse[1] - fine[1])/max(1, abs(fine[1]))),
+        print("H =", Hk, " frozen D =", coarse[1], " RK4 D =", fine[1])))$
+print("frozen step against RK4, worst relative difference in D:", worst)$

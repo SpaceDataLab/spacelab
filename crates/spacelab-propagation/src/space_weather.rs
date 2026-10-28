@@ -604,6 +604,112 @@ pub fn hpo_at(
         .copied()
 }
 
+/// One hour of the USGS Dst series, as `tools/fetch-usgs-dst.sh` writes it.
+///
+/// USGS publishes two disturbance-storm-time indices from late September 2015 (Rigler 2017,
+/// doi:10.3133/ofr20171037), both U.S. public domain: `Dst4` from the four observatories of the
+/// traditional Dst, and `Dst3` from USGS observatories alone, more complete and with less latency.
+/// They are a separate construction from Kyoto's Dst, whose baseline sits lower, so a model fitted
+/// on Kyoto is refitted on these rather than fed them.
+///
+/// Each value is the mean of the hour's sixty 1-minute samples; the file stamps it at the hour's
+/// centre, `hh:29:30`, and it is held here by the hour it covers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UsgsDstHour {
+    /// Calendar year, UT.
+    pub year: i32,
+    /// Calendar month, `1..=12`.
+    pub month: u32,
+    /// Day of month, `1..=31`.
+    pub day: u32,
+    /// The hour UT the value averages, `0..=23`.
+    pub hour: u32,
+    /// `Dst4` in nT, `None` where the service has no value for the hour.
+    pub dst4: Option<f64>,
+    /// `Dst3` in nT, `None` where the service has no value for the hour.
+    pub dst3: Option<f64>,
+}
+
+/// Parse the hourly file `tools/fetch-usgs-dst.sh` assembles (`usgs_dst_hourly.txt` or an excerpt).
+///
+/// A row is `YYYY-MM-DDThh:29:30Z Dst4 Dst3`, each value a number or `null`. Comment lines and rows
+/// of any other shape are skipped, a stamp off the hour's centre among them. A `null` stays `None`:
+/// a missing storm index is not a quiet hour, and Dst 0 would read as one.
+#[must_use]
+pub fn parse_usgs_dst(text: &str) -> Vec<UsgsDstHour> {
+    let value = |s: &str| -> Option<Option<f64>> {
+        if s == "null" {
+            Some(None)
+        } else {
+            s.parse::<f64>().ok().filter(|v| v.is_finite()).map(Some)
+        }
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() != 3 || f[0].starts_with('#') {
+            continue;
+        }
+        let t = f[0];
+        if t.len() != 20
+            || !t.is_ascii()
+            || &t[4..5] != "-"
+            || &t[7..8] != "-"
+            || &t[10..11] != "T"
+            || &t[13..] != ":29:30Z"
+        {
+            continue;
+        }
+        let (Ok(year), Ok(month), Ok(day), Ok(hour)) = (
+            t[0..4].parse::<i32>(),
+            t[5..7].parse::<u32>(),
+            t[8..10].parse::<u32>(),
+            t[11..13].parse::<u32>(),
+        ) else {
+            continue;
+        };
+        if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 {
+            continue;
+        }
+        let (Some(dst4), Some(dst3)) = (value(f[1]), value(f[2])) else {
+            continue;
+        };
+        out.push(UsgsDstHour {
+            year,
+            month,
+            day,
+            hour,
+            dst4,
+            dst3,
+        });
+    }
+    out
+}
+
+/// The USGS Dst hour containing `sec` UT seconds into `year-month-day`, if the series has it.
+///
+/// `hours` must be ascending, as [`parse_usgs_dst`] returns; the lookup is a binary search, since the
+/// full series is ~10⁵ rows and a propagator asks once per step. A non-finite `sec` has no hour.
+#[must_use]
+pub fn usgs_dst_at(
+    hours: &[UsgsDstHour],
+    year: i32,
+    month: u32,
+    day: u32,
+    sec: f64,
+) -> Option<UsgsDstHour> {
+    if !sec.is_finite() {
+        return None;
+    }
+    let hour = (sec / 3600.0).clamp(0.0, 23.0) as u32;
+    let key = (year, month, day, hour);
+    let i = hours.partition_point(|h| (h.year, h.month, h.day, h.hour) < key);
+    hours
+        .get(i)
+        .filter(|h| (h.year, h.month, h.day, h.hour) == key)
+        .copied()
+}
+
 /// One day of the Space Environment Technologies `SOLFSMY.TXT` series — the four solar indices
 /// JB2008 is fitted against and their 81-day centred means.
 ///
@@ -1225,6 +1331,89 @@ XXXX 05 10 19.0 19.50 33733.79167 33733.81250  9.000  154 0
             Some(80.0)
         );
     }
+
+    #[test]
+    fn parse_usgs_dst_keeps_nulls_as_absent_and_drops_every_shape_that_is_not_a_row() {
+        // Two good rows (one with a null), then the header, a stamp off the hour's centre, a
+        // missing column, an unparsable value, a non-finite value, an impossible hour, a
+        // non-ASCII stamp of the right byte length, and stamps each wrong in exactly one place:
+        // one separator, the month, the day at either end.
+        let text = "\
+#time                         Dst4                 Dst3
+2024-05-11T02:29:30Z    -399.30463333333336   -421.92495
+2024-05-31T23:29:30Z                  null     -7.45295
+2024-05-11T03:00:00Z   -380.0 -400.0
+2024-05-11T04:29:30Z   -380.0
+2024-05-11T05:29:30Z   -38O.0 -400.0
+2024-05-11T06:29:30Z   inf -400.0
+2024-05-11T24:29:30Z   -1.0 -1.0
+2024é5-11T07:29:30Z   -1.0 -1.0
+2024/05-11T08:29:30Z   -1.0 -1.0
+2024-05/11T09:29:30Z   -1.0 -1.0
+2024-05-11X10:29:30Z   -1.0 -1.0
+2024-13-11T11:29:30Z   -1.0 -1.0
+2024-05-00T12:29:30Z   -1.0 -1.0
+2024-05-32T13:29:30Z   -1.0 -1.0
+";
+        let got = parse_usgs_dst(text);
+        assert_eq!(
+            got,
+            [
+                UsgsDstHour {
+                    year: 2024,
+                    month: 5,
+                    day: 11,
+                    hour: 2,
+                    dst4: Some(-399.304_633_333_333_36),
+                    dst3: Some(-421.924_95),
+                },
+                UsgsDstHour {
+                    year: 2024,
+                    month: 5,
+                    day: 31,
+                    hour: 23,
+                    dst4: None,
+                    dst3: Some(-7.452_95),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn usgs_dst_at_reads_the_hour_that_contains_the_instant_and_none_where_there_is_no_row() {
+        let at = |day, hour| UsgsDstHour {
+            year: 2024,
+            month: 5,
+            day,
+            hour,
+            dst4: Some(-f64::from(100 * day + hour)),
+            dst3: None,
+        };
+        // 2024-05-10 from 02 UT with 05 UT absent, then 05-11 00 UT.
+        let series: Vec<UsgsDstHour> = (2..24)
+            .filter(|&h| h != 5)
+            .map(|h| at(10, h))
+            .chain([at(11, 0)])
+            .collect();
+        let dst = |sec| usgs_dst_at(&series, 2024, 5, 10, sec).and_then(|h| h.dst4);
+
+        assert_eq!(dst(15.0 * 3600.0), Some(-1015.0));
+        assert_eq!(dst(16.0 * 3600.0 - 1.0), Some(-1015.0));
+        assert_eq!(dst(16.0 * 3600.0), Some(-1016.0));
+        // An hour the series lacks is not filled from a neighbour.
+        assert_eq!(dst(5.5 * 3600.0), None);
+        assert_eq!(dst(0.0), None);
+        // Seconds past the day clamp into its last hour, not the next day's first.
+        assert_eq!(dst(86_400.0), Some(-1023.0));
+        assert_eq!(dst(f64::NAN), None);
+        assert_eq!(dst(f64::INFINITY), None);
+        assert_eq!(
+            usgs_dst_at(&series, 2024, 5, 11, 600.0).and_then(|h| h.dst4),
+            Some(-1100.0)
+        );
+        assert!(usgs_dst_at(&series, 2024, 5, 12, 0.0).is_none());
+    }
+
     /// A synthetic feed of `n` consecutive measured days whose flux is `100 + k` and whose 3-hourly
     /// `ap` is `k`, so that a copied day is identifiable by its value alone.
     fn ramp(n: u16) -> Vec<SpaceWeatherDay> {

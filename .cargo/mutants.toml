@@ -1026,7 +1026,7 @@ exclude_re = [
     # it are real gaps and are killed by
     # `the_set_index_parsers_reject_every_shape_of_line_that_is_not_a_row`: `< 11` is the bounds
     # proof for `t[10]`, `<= 11` drops the narrowest legal row, and `== 11` admits short ones.
-    "space_weather\\.rs:661:28: replace \\|\\| with && in parse_solfsmy",
+    "space_weather\\.rs:767:28: replace \\|\\| with && in parse_solfsmy",
 
     # `parse_hpo`'s guard is the third instance of the same shape, and the argument closes the same
     # way. `&&` is unsatisfiable -- the empty string does not start with `#` -- so both classes fall

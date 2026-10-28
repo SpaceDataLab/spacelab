@@ -4994,6 +4994,7 @@ The 39 split three ways, and the second and third classes are new:
 | `reseal-sdtm-bridge` | the same surface | 36 | **0** | **0** | the other control, 37 mutants in 10 min, 1 unviable, and the same arithmetic one bridge over: the population unchanged and caught up by exactly one. The two controls together are what lets the finding be stated as a property of the *assertions* rather than of either language's binding -- the same eight lines, the same nineteen mutants, two independently written test suites, and both of them blind in the same place until the symmetry was replaced by a value |
 | `seal-sdtm-core` | `spacelab-propagation/src/sdtm/{mod,uncertainty,coefficients}.rs` | 351 | **11** | 17 | the SDTM-1 *model*, which had never been under a named block -- the `spacelab-propagation` whole-crate census predates the module by a month. **380 mutants in 74 min, 1 timeout.** One survivor is equivalent and ledgered (`lag < 0.0` -> `<=` in `StormKernel::weight`: at `lag == 0` the body computes `(1 - 1)/(τ_r - τ_o)`, so the two paths differ only in the sign of a zero, and nothing divides by a weight). One is a **defect**, not a gap: `sdtm::isqrt` searched from 0 where `density_calibration::isqrt` -- the same helper, twenty files away -- searches from 1, so `isqrt(0)` underflowed `Thermosphere::<0>::degree()` (`isqrt(K) - 1` on a `usize`) and `K = 0` passed the perfect-square clause. The other nine are ordinary gaps with one shape between them: **every parameter was reached through a density**, where a wrong `boundary_scale` is a constant the ratio tests divide out, a temperature never appears on its own, and a `> 0.0` guard is only ever given a *negative* argument rather than zero. The timeout is the thirteen-fold shape the ledger's preamble already names -- `r += 1` rewritten to `r *= 1` freezes the loop counter the loop's termination *is* |
 | `reseal-sdtm-core` | the same three files | **361** | **0** | 17 | the control, **379 mutants in 77 min**, 1 timeout, and both axes reconcile at once. The population falls by exactly one — the equivalent `StormKernel::weight` comparison, now excluded by the ledger and so no longer tested — and caught rises by exactly ten, one per closed survivor. The unviable set is unchanged element for element, the timeout is the same `isqrt` counter, and nothing that the first block caught became uncaught, which is the property #286 made this block worth its hour for |
+| `seal-sw-dst` | `spacelab-propagation/src/space_weather.rs`, whole file, after Ф14.O added `parse_usgs_dst` / `usgs_dst_at` | 338 | **9** | 0 | 365 mutants, 18 unviable, `JOBS=2`. **Three are the new reader**: the `||` → `&&` mutants at 701:13 and 702:13 accept a stamp wrong in one separator only, and 715:39 one with day 0 or 32 and a legal hour; the unit test gained one row wrong in exactly one place for each, and each mutant, applied by hand in a worktree, now fails it. **Six predate it and are owed**: `civil_from_days` 229:17 (`-` → `+`, `/`) and `extend_forecast` 496:27, 496:41, 505:13, 528:24 — both arrived with `04c86e2` (2026-09-14), after `reseal3-sw-hpo` last measured the file. The control waits for that repair |
 "Stale" means the survivors were closed by a commit that landed *after* that block's snapshot was
 taken. A block reports on the tree as it stood when it **started**, so those verdicts are behind the
 tree rather than open, and each needs only a re-measurement. `small-seal`'s five were verified dead
@@ -6197,6 +6198,33 @@ it.
 | Within-interval spread the 3-hourly product cannot express | — | `ap60` inside each of the day's eight intervals | worst spread **3.67×**, 15–18 UT | tests/hourly_geomagnetic_index.rs |
 | What resolving the onset hour is worth in density | NRLMSISE-00 `switches[9] = -1` storm mode, slot 1 only | the model against itself, one driver changed | worst single-hour deviation inside the measured **3–10 %** band; sign changes across the interval; the monotone fall breaks | tests/hourly_geomagnetic_index.rs |
 
+**USGS Dst (Ф14.O).** `space_weather::{parse_usgs_dst, usgs_dst_at}` read the hourly `Dst4` and
+`Dst3` that `tools/fetch-usgs-dst.sh` fetches from USGS — public domain, from late September 2015
+(`provenance.md`, row `usgs-dst`). Each value is the service's boxcar mean of the hour's 1-minute
+samples, stamped at the hour's centre; a `null` hour stays `None`. Like Hpo it feeds no model yet and
+is not bridged: Dst-driven terms are fitted on Kyoto's Dst, whose baseline differs, so the series
+enters SDTM-1 only through a refit (Ф23.A).
+
+**The fetched series, measured (2026-10-28).** 134 months, 97 896 hours; values from 2015-09-24, the
+newest hour ~45 min after it ended. Dst4 has 88 217 values (90.7 % of its span), Dst3 87 887 (90.4 %);
+the median over all hours is 1.8 and 1.9 nT, and in quiet hours (`Hp60 ≤ 1`) 5.7 and 5.8 nT — the
+near-zero level that sets USGS apart from Kyoto. **The `variation` product is not quality-controlled.**
+Outside −600…+100 nT lie 116 Dst4 hours and 991 Dst3 hours, and the large ones cannot be
+geomagnetic: Dst3 from
+2019-03-16 to 05-13 carries ~420 hours between −2 147 483.648 and +2 111 687 — the first is the int32
+minimum over 1000, a 1-minute fill value averaged into the hour; Dst3 sits at +100…+254 nT from
+2024-02-26 to 03-18; spikes reach +9 323 / +14 575 nT (2017-02-08), −5 521 nT (Dst4, 2022-11-06) and
+−10 954 nT (Dst4, 2026-04). Reported to USGS on 2026-10-28. The reader keeps the values as published,
+since a screen is a modelling choice; Ф23.A's fit screens before it uses them. Where both are in range,
+|Dst4 − Dst3| has median 3.0 nT and 99th percentile 66 nT.
+
+| Component | Specification source | Check | Residual / tol | Where |
+|---|---|---|---|---|
+| The fetched file's shape | the service's JSON (`times`, `values`, `metadata`) | every month: exactly its hours, each at `hh:29:30`, both elements, `type=variation`, 3600 s, numbers or `null` | refused otherwise, nothing cached | tools/fetch-usgs-dst.sh |
+| Rows parse; absent is not quiet | the file `fetch-usgs-dst.sh` writes | the shapes it can contain: `null`, an off-centre stamp, a short row, an unparsable or non-finite value, hour 24, a non-ASCII stamp | 2 of 9 rows kept, `null` → `None` | src/space_weather.rs |
+| The hour that contains an instant | — | binary search over the ascending series | missing hours and other days answer `None`; the day's seconds clamp into it | src/space_weather.rs |
+| The Gannon storm's depth and hour | the storm as both indices record it | **USGS week 2024-05-08…14 beside GFZ `Hp60`** | 168 consecutive hours; Dst4 −399.30 nT at 02 UT 05-11, Dst3 −421.92 nT at 04 UT; Hp60 at its week maximum 10.667 in Dst4's hour | tests/usgs_dst_gannon.rs |
+
 ### 10.8 An ocean-tide atlas turned into geopotential coefficients, by us
 
 Every ocean-tide table this workspace shipped until now was a *transcription*: FES2004 and FES2014b
@@ -6401,7 +6429,7 @@ that is what the verdicts rest on rather than on someone's reading of a web page
 | LISIRD composite Lyman-α (Machol 2019) | **no licence stated** | 1947-02-14 → 2026-09-10 | 4 d | **rejected: terms** → oracle |
 | Bremen composite Mg II (and the F30-extended form) | **no terms on the page or in the files** | 1978.85 → 2026.69 (17 476 rows) | 2 d | **rejected: terms** → oracle |
 | Viereck composite Mg II, SORCE Mg II, SOHO/SEM, CLS F30 | **no licence stated** (LISIRD catalogue) | various | — | **rejected: terms** |
-| USGS Dst | open, but the series is all-null at every storm tried (Ф14.F) | — | — | **rejected: data** |
+| USGS Dst4, Dst3 | U.S. public domain, credit "U.S. Geological Survey" (`usgs-dst`) | 2015-09-24 → | **~45 min** (2026-10-28) | **admitted from 2015-09, screened**: the 2026-09 "all-null" was the wrong element id (Ф14.O); the hourly product carries artefacts (§10.7) |
 | WDC Kyoto Dst | *"does not allow commercial applications of the geomagnetic indices"* | 1957– | — | **rejected: terms** → oracle |
 | SET SOLFSMY / DTCFILE (S10, M10, Y10, ΔTc) | no terms stated anywhere | 1997– | 1 d | **rejected: terms** → JB2008 validation only |
 

@@ -8378,8 +8378,29 @@ high-flux storm cell is still the one where the interval under-covers on these m
 **Where step 6 leaves Ф23.B.** The overshoot of the minor storms, which D-5 was waiting on, is gone
 on the corpus folds. It costs the largest storms, which now under-reach (`ap ≥ 300` median 0.63,
 §10.27). The plan's gate is not met: the 16 comparisons stand at 26.7 % by mission family (§10.27)
-and 26.2 % in sample, against JB2008's 23.7 %. SDTM-1 stays non-default until D-5 is decided. Next:
-the large-storm under-reach.
+and 26.2 % in sample, against JB2008's 23.7 %. Next: the large-storm under-reach.
+
+**D-5, decided 2026-10-30: SDTM-1 is the recommended model inside its fitted envelope** — 225–545 km
+geodetic height, F10.7a 65.8–231.9 sfu — **and NRLMSISE-00 stays the baseline everywhere and the
+model outside it.** The comparison that decides it is against the model SDTM-1 replaces, on the same
+held-out folds:
+
+| | SDTM-1 | NRLMSISE-00 |
+|---|---|---|
+| held out by mission family, MAPE raw / debiased | **20.8 / 21.0 %** | 50.1 / 28.4 % |
+| storm peaks within ±25 %, of 630 | **357** | 94 |
+| median peak ratio, all / `ap ≥ 300` | **1.00 / 0.63** | 0.59 / 0.43 |
+| peak closer to the measurement, all / `ap ≥ 300` | **482 / 29** | 148 / 4 |
+
+SDTM-1 is below NRLMSISE-00 in every flux, storm and family bin raw. Debiased, which is what a
+fitted drag coefficient does, it is below in every bin but one, `0.3 ≤ d < 0.7` (20.1 against
+18.7 %), and within a point at F10.7a ≥ 150 (19.1 against 19.4 %) and `Ap ≥ 50` (24.8 against
+25.4 %). The large-storm under-reach does not argue for NRLMSISE-00: its peak is further from the
+measurement on 29 of the 33 comparisons. Outside the envelope
+SDTM-1 is an extrapolation no corpus row tests, and its 120 km boundary scale sits on its fit bound,
+so the low profile is set by a bound, not by data. The library's API does not change: it has no
+default atmosphere, and every drag path names its model. The decision is withdrawn if SDTM-1 is not
+below NRLMSISE-00 on months that none of the sixteen storm-term fits of §10.27 saw.
 
 ---
 

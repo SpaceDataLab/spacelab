@@ -132,7 +132,11 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   of 70 sfu or more from 167 % to 25 % MAPE. **One regime is still known to be poor: high flux in storm
   time.** There the 90 % interval covers 80.8 % of the §10.2 campaign, and on 2024-05-10 (233 against
   163 sfu) the model is 1.22–1.41 times too dense before the storm begins and 36.2 % MAPE over the
-  day. SDTM-1 is not the default model; the calibrated NRLMSISE-00 is, until that is decided (D-5).
+  day. **Inside 225–545 km and F10.7a 65.8–231.9 sfu SDTM-1 is the recommended model; NRLMSISE-00 is
+  the baseline everywhere and the model to use outside that envelope** (`docs/verification.md`
+  §10.28). The library has no default atmosphere: every drag path names its model. The calibrated
+  NRLMSISE-00 of §10.2 (28.9 %) is a correction fitted on the caller's own densities, and the same
+  layer applies to SDTM-1.
   One convention is load-bearing and easy to get wrong: `SdtmPoint::altitude` is **geodetic** height
   above the reference ellipsoid, because that is the column the fit read (TU Delft's, GRS80) and what
   JB2008, DTM2020 and NRLMSISE-00 all take. `sdtm::REFERENCE_RADIUS` is the effective radius of the

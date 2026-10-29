@@ -247,6 +247,15 @@ CAPS: dict[str, tuple[int, ...]] = {
     # shows that a quadratic in the linear index destroys the held-out extrapolation (Gannon R falls to
     # 0.29 and 0.04), so the question this set answers is whether the log scale alone is enough.
     "storm-log1": (9, 1, 0, 0, -1, -1, 1, -1, 1, 1, 1, 1, -1, -1, -1, -1),
+    # `storm-log1` with the storm term given degree 2, so `Y20` -- the pole-to-equator gradient that
+    # auroral heating puts into a storm -- can carry it (Ф23.B, the minor-storm overshoot). It does not:
+    # 228 of 630 storm peaks within 25 % against `storm-log1`'s 246 (`docs/verification.md` §10.27).
+    "storm-log1-geo": (9, 1, 0, 0, -1, -1, 2, -1, 1, 1, 1, 1, -1, -1, -1, -1),
+    # `storm-log1` with the linear `storm/100` beside `a`, global: a term that keeps growing where the
+    # log has flattened, for the large storms the log-plus-cooling form under-reaches at every flux.
+    # Neutral on its own; with the storm state scaled by `(F10.7a/150)^kappa` it takes the eight
+    # storms' mean peak error from 30.5 to 26.7 % (§10.27).
+    "storm-log1-lin": (9, 1, 0, 0, 0, -1, 1, -1, 1, 1, 1, 1, -1, -1, -1, -1),
 }
 
 

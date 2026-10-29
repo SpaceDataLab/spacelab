@@ -361,6 +361,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 fitted field — Rust against the generator | the fit is done in Python and the evaluator in Rust; two implementations of one model | `tools/fit-sdtm-corpus.py`'s own values at 64 of the geometries it fitted on, every field written at round-trip precision | worst `T∞` **2.402e-15**, worst ρ **1.237e-14** relative (tolerances 1e-12 / 1e-11) | tests/sdtm_reference.rs |
 | SDTM-1 shipped corpus field | the §10.24 form, fitted on all eight satellites and shipped; the storm state's Rust step against the CAS; the history it needs measured | `derivations/sdtm_no_cooling.mac`'s 30-digit steps; the fit's own state against a truncated history over every 3-hour interval of the corpus span; the held-out-family residual | step to 1e-13 rel; `HISTORY` 88 intervals (worst 0.0070 `ap`, §10.26); 90 % interval covers 87.4–99.6 % of each held-out family; **2024-05-10 46.3 %** (§10.26) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
 | SDTM-1 saturated flux excess | the daily excess `d` entering `T∞` as `D·tanh(d/D)`, `D` fitted in every fold; the form and its rewrite of the flux against the CAS | `derivations/sdtm_flux_excess.mac` (10 identities, 30-digit values) and `.gp` at 60 digits; the held-out-family residual by `d` | values to 1e-15; `D` 0.266–0.270 across folds; held-out MAPE 23.1 → 21.5 %, `d ≥ 0.7` 167 → 25.0 %, `Ap ≥ 50` 30.3 → 28.5 %; campaign 23.2 → 21.9 %; high-flux storm cell still 83.5 % at 90 % (§10.26) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
+| SDTM-1 storm response against the solar flux | Ф23.B: the minor-storm overshoot of §10.24, split by type, epoch and flux before a remedy is chosen | the 630 corpus storm comparisons by F10.7a; sixteen storm terms and fits on the same folds, both thinning phases for the winner | the overshoot is a **flux trend**, median peak 0.71 below F10.7a = 80 to 2.36 above 200; the storm state scaled by `(F10.7a/150)^κ` inside `a`, `κ` −1.26 to −1.32 in every fold, flattens it (1.01 … 1.19): peaks within ±25 % 246 → **357** of 630, median 1.00, the eight storms 37.7 → 26.7 %, pooled 21.5 → 20.8 %; the `ap` ≥ 300 median falls 0.96 → 0.63 (§10.27) | tools/fit-sdtm-corpus.py |
 
 ### Tides
 
@@ -8198,6 +8199,85 @@ median 1.03. The quiet day reads 25.6 % (26.2 %).
 **What it does not fix.** Regime 5, high flux in storm time, moves only from 82.4 to 83.5 %, so the
 flux excess is not what that cell lacks; plans/17 Ф23.G records the target as not met. The
 minor-storm peak overshoot of §10.24 is unchanged, and SDTM-1 is still not the default model.
+
+### 10.27 The minor-storm overshoot is a solar-flux dependence (Ф23.B, step 5)
+
+**Where the overshoot is.** The 630 corpus storm comparisons of §10.26 (`--storms`, each satellite
+from the fold that held its family out), split three ways. By type and strength the median peak
+ratio is 1.55 for single-peak storms at `ap` 150–299 (37 comparisons), 1.17 for single-peak storms
+below 150 (341), and 0.96 for multiple-peak storms at 300 and above (33). By epoch it is 1.26 / 1.46
+(multiple / single peak) in 2000–04, 0.72 / 0.81 in 2005–10, 1.02 / 1.07 in 2011–15, 0.80 / 0.76 in
+2016–20 and 1.41 / 1.56 in 2021–26: it follows the solar cycle. By the storm day's 81-day mean flux:
+
+| F10.7a | < 80 | 80–110 | 110–150 | 150–200 | ≥ 200 |
+|---|---|---|---|---|---|
+| comparisons | 60 | 155 | 213 | 169 | 33 |
+| median peak ratio | 0.71 | 0.89 | 1.15 | 1.62 | 2.36 |
+| phase 3 O/C | 1.29 | 1.10 | 1.00 | 0.90 | 0.80 |
+
+So the "minor-storm overshoot" is a trend with the flux. The minor storms carry most of the count, and
+the years since 2021 are high-flux years. Low-flux storms are under-reached, not over.
+
+**Why.** `T∞ = T₀ + exp(Σ c·x)`, so the storm term multiplies the quiet `T∞ − T₀`, and a storm adds
+kelvins in proportion to it. That excess grows with the flux; the measured storm response does not.
+
+**Two regressor shapes first, both refuted.** The linear storm index without the log (`lean`) puts
+175 of 630 peaks within ±25 % (246 under `storm-log1`) and 32.5 % at `Ap ≥ 50` (28.5 %), with
+unstable folds. Degree 2 for the storm term (`storm-log1-geo`) gives 228.
+
+**The flux dependence, five ways.** Every row has the §10.26 form: cooling, the fitted excess
+saturation, held out by mission family. The last column is the plan's eight storms × {GRACE-FO C,
+Swarm A} on this protocol, the mean of |peak − 1|.
+
+| storm term | pooled | `Ap ≥ 50` | peak ±25 % | median | single peak | `ap ≥ 300` | F10.7a < 80 | ≥ 200 | 16 comparisons |
+|---|---|---|---|---|---|---|---|---|---|
+| `storm-log1` (§10.26) | 21.5 % | 28.5 % | 246 | 1.13 | 1.21 | 0.96 | 0.71 | 2.36 | 37.7 % |
+| `+ a·f` regressor | 20.7 % | 24.4 % | 259 | 0.91 | 0.96 | 0.46 | 1.11 | 0.14 | 43.2 % |
+| `× exp(κf)` on the term | 20.6 % | 23.4 % | 290 | 0.91 | 0.96 | 0.44 | 1.18 | 0.62 | 40.2 % |
+| `D·exp(κf)` into `a` | 20.6 % | 23.6 % | 338 | 0.87 | 0.90 | 0.49 | 0.87 | 0.74 | 38.4 % |
+| `D·(F10.7a/150)^κ` into `a` | 20.9 % | 24.1 % | 349 | 0.96 | 0.99 | 0.57 | 0.88 | 1.20 | 30.5 % |
+| **the same, + linear `s`** (`storm-log1-lin`) | **20.8 %** | **23.9 %** | **357** | **1.00** | 1.03 | 0.63 | 1.01 | 1.19 | **26.7 %** |
+| (other thinning phase) | 21.0 % | 24.0 % | 356 | 0.99 | 1.02 | 0.63 | 0.99 | 1.18 | 26.9 % |
+
+The interaction regressor is linear in `f` and crosses zero near F10.7a = 250, so it takes the storm
+response away at high flux (0.14). A gain on the whole term scales the largest storms as much as the
+smallest. A gain on the storm state `D` *inside* `a = ln(1 + D/15)` is a gain on a minor storm and a
+shift `κ·ln(F10.7a/150)` on a large one. The exponential form still leaves the top bin at 0.74. The
+power form, which is flatter at high flux, makes the trend flat: 1.01 / 0.97 / 0.96 / 1.05 / 1.19
+across the five bins. The linear `s` changes nothing under the exponential gain (36.4 %) but helps
+under the power gain (30.5 → 26.7 %). `κ` is −1.26 to −1.32 in all five folds and on both thinning
+phases: a storm counts 2.4 times as much at F10.7a = 75 as at 150, and 0.59 times as much at 225.
+`τ_h` 17.2–18.5 h, `τ_NO` 23–52 h, `H_s` 20–26 `ap`.
+
+**Tried beside it, with the exponential input gain; none moves the largest storms.** A fitted knee
+for the log, `exp(μ + κf)`, gives `μ` −0.09 to −0.25 and 346 peaks within ±25 %. `[a, a²]` gives 338.
+A cooling with a largest factor `q`, `(N/H_s)/(1 + N/(q·H_s))`, goes to its 10⁴ bound in every fold,
+so the corpus prefers the cooling uncapped. Weighting the rows with daily `Ap ≥ 50` by 5 or 20 in the
+fold fits (scoring unweighted) gives 341 / 338 peaks within ±25 % and 33.7 / 33.1 % on the 16. The
+2024-05-10 peak then reads 0.46–0.58, so the loss is not what holds the large storms down. (The two
+weighted fits first ran with `τ_h` bounded at 12 h by a misplaced branch in the tool. They were rerun
+after the fix, and the first numbers are discarded.)
+
+**Verdict.** The restated Ф15.H target of §10.23 — at least 43 % of the peaks within ±25 %, median
+0.9–1.1 — **is met on the corpus folds**: 56.7 %, median 1.00. Ф15.E still passes all three: 20.8 %
+pooled, 23.9 % at `Ap ≥ 50` against NRLMSISE-00's 35.4 %, worst edge 23.9 %. On the 16 comparisons,
+held out here by mission family rather than by calendar month, the mean peak error falls from
+37.7 % to 26.7 %. JB2008 is at 23.7 % on the calendar-month protocol, so the plan's gate is not yet
+met.
+
+**What it costs.** The largest storms. The `ap ≥ 300` median falls from 0.96 to 0.63: 2024-05-10
+from 0.89–1.02 to 0.58–0.69, 2024-10-10 from 1.25–1.51 to 0.51–0.63. In `storm-log1` those peaks were
+right because the flux overshoot cancelled an under-reach. The large storms at low flux show that
+under-reach in `storm-log1` too: 2003-11-20 0.47–0.62, 2004-07-27 0.29–0.52, 2005-08-24 0.05–0.48.
+Onset within ±3 h falls from 441 to 429 comparisons, recovery within ±6 h from 491/604 to 477/600.
+
+**Optimism.** Sixteen storm terms and fits were compared in this step alone, on the same folds and
+storms. The power form was tried after the exponential one had shown its top bin. So the selection
+is optimistic, and a fresh confirmation needs months that none of them saw.
+
+The shipped coefficients and the Rust evaluator are unchanged at this step. Next: the gain in
+`sdtm/`, derived in Maxima, and the shipped field refitted on `storm-log1-lin`; then the large-storm
+under-reach.
 
 ---
 

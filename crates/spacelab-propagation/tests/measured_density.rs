@@ -450,14 +450,16 @@ fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storm
     }
 
     // SDTM-1 against DTM2020, the model it has to reach. The corpus field is behind it on both days:
-    // 25.6 % against 23.8 % quiet (bias 1.096 against 1.056), 46.3 % against 24.1 % on the storm day
-    // (bias 1.455). The storm day is the flux, not the storm: F10.7 of the previous day is 233.2 sfu
+    // 25.9 % against 23.8 % quiet (bias 1.103 against 1.056), 36.2 % against 24.1 % on the storm day
+    // (bias 1.340). The storm day is the flux, not the storm: F10.7 of the previous day is 233.2 sfu
     // against an 81-day trailing mean of 162.9, a daily excess only 0.76 % of the corpus rows reach.
     // Linear, that excess carried the model 1.31–1.45 times too dense from 00 to 15 UT, before the
     // storm begins (55.2 % on the day); saturated (`sdtm::FluxExcess`, `docs/verification.md`
-    // §10.26) the same hours read 1.22–1.43. The rest is this day's: over the corpus the rows with
-    // that excess read a median 1.03. The twelve-month pilot this field replaced was fitted on this
-    // very month and read 30.1 %. These are the measured values, not targets.
+    // §10.26) the same hours read 1.22–1.43, and 46.3 % on the day. The storm's flux gain
+    // (`sdtm::StormGain`, §10.28) leaves those hours at 1.22–1.41 and takes the storm hours down,
+    // to 36.2 %. The rest is this day's: over the corpus the rows with that excess read a median
+    // 1.02. The twelve-month pilot this field replaced was fitted on this very month and read 30.1 %.
+    // These are the measured values, not targets.
     assert!(
         (1.0..1.2).contains(&fit_of(Model::Sdtm1, &quiet).bias),
         "SDTM-1 quiet bias {}",
@@ -469,12 +471,12 @@ fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storm
         fit_of(Model::Sdtm1, &quiet).mape
     );
     assert!(
-        fit_of(Model::Sdtm1, &storm).mape < 50.0,
+        fit_of(Model::Sdtm1, &storm).mape < 40.0,
         "SDTM-1 storm MAPE {:.1}%",
         fit_of(Model::Sdtm1, &storm).mape
     );
     assert!(
-        (1.35..1.55).contains(&fit_of(Model::Sdtm1, &storm).bias),
+        (1.24..1.44).contains(&fit_of(Model::Sdtm1, &storm).bias),
         "SDTM-1 storm bias {}",
         fit_of(Model::Sdtm1, &storm).bias
     );
@@ -487,9 +489,9 @@ fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storm
 /// what it claims is that `ρ·e^{±1.645σ}` contains the measurement nine times in ten *for a mission the
 /// fit has not seen* — 87.4 to 99.6 % of each family, with the table built without it. A single day is
 /// not that population, and the two vendored days show both sides of it. The quiet day is covered as
-/// claimed, to within its own sampling spread (89.9 %). The storm day is the flux-excess outlier the
-/// headline test describes: its first fifteen hours sit 1.22–1.43 times high in the quiet-storm cell,
-/// and the 90 % interval covers 76.1 % of it.
+/// claimed, to within its own sampling spread (88.5 %). The storm day is the flux-excess outlier the
+/// headline test describes: its first fifteen hours sit 1.22–1.41 times high in the quiet-storm cell,
+/// and the 90 % interval covers 76.7 % of it.
 ///
 /// So what is asserted is the quiet day's coverage to within three binomial standard errors, that on
 /// the outlier day the 99 % interval still covers nine rows in ten, and that a wider quantile never
@@ -1483,15 +1485,20 @@ fn every_downloaded_month_stratified_by_flux_and_storm_level() {
 ///
 /// The fixture-day test asserts that the interval does not under-cover on two days; this asserts it for
 /// every cell of the table over 348 693 evaluations, which is the only way a single wrong `σ` would
-/// show. The table claims 90 % for a mission family the fit has not seen, and measured 87.4 to 99.6 %
-/// of each (`docs/verification.md` §10.26). These months are inside the fit, so no cell may cover less
-/// than the worst held-out family did; that, and not the nominal 90 %, is the bound — on the shipped
-/// field five cells cover 88.6 to 93.5 %.
+/// show. The table claims 90 % for a mission family the fit has not seen. Held out by family it covers
+/// 89.0 to 90.9 % of each regime's corpus rows, and 82.2 to 99.7 % of one family's rows in one regime
+/// (`docs/verification.md` §10.28). These months are inside the fit, so no cell may cover less than
+/// the worst held-out family did *in that cell*; that, and not the nominal 90 %, is the bound. A
+/// family's pooled coverage is not a floor for a cell: it averages the cells, and a single storm can
+/// sit below it. On the shipped field five cells cover 85.7 to 93.0 %. The lowest is the low-flux
+/// storm cell, and it is one storm day, 2021-11-04: the model's geometric-mean ratio to the
+/// measurement is 0.84 (GRACE-FO C) and 0.82 (Swarm A), against DTM2020's 0.69–0.70 and the previous
+/// field's 0.75.
 ///
-/// The sixth, high flux in storm time, covers **83.5 %**, and is held to that measured value instead:
-/// its σ, measured over the corpus, is too narrow for these months. It was 82.4 % with the daily flux
-/// excess linear, so saturating that term (§10.26) is not what this cell lacks, and the cause is open.
-/// The tripwire is there to move with the fix, not to bless the number.
+/// The sixth, high flux in storm time, covers **80.8 %**, and is held to that measured value instead:
+/// its σ, measured over the corpus, is too narrow for these months. It was 83.5 % before the storm's
+/// flux gain narrowed σ from 0.334 to 0.250, and 82.4 % with the daily flux excess linear; the cause is
+/// open. The tripwire is there to move with the fix, not to bless the number.
 fn the_interval_covers_every_regime(all: &[Evaluation]) {
     println!("\n== the shipped 90 % interval, by regime ==");
     let mut cells: BTreeMap<usize, Vec<(f64, f64, SdtmDrivers)>> = BTreeMap::new();
@@ -1511,8 +1518,9 @@ fn the_interval_covers_every_regime(all: &[Evaluation]) {
             coefficients::UNCERTAINTY.table()[*cell],
             100.0 * covered
         );
-        // Regime 5 is the high-flux storm cell; see the note above.
-        let bound = if *cell == 5 { 0.80 } else { 0.87 };
+        // The worst held-out family's coverage in each cell, rounded down, as `fit-sdtm-corpus.py
+        // --emit` prints it; regime 5, the high-flux storm cell, at its measured value (see above).
+        let bound = [0.84, 0.82, 0.85, 0.82, 0.82, 0.80][*cell];
         assert!(
             covered >= bound,
             "regime {cell} under-covers at {:.1}%",

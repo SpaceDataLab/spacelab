@@ -587,15 +587,22 @@ def history_length(model: CorpusModel, p: np.ndarray) -> tuple[int, float]:
     """The shortest whole-day history whose response is within `HISTORY_TOLERANCE` of the fit's own.
 
     Scored on every 3-hour interval from the corpus's first row to its last, against `cooling_grid`
-    warmed up from rest 120 days before the first.
+    warmed up from rest 120 days before the first. With a storm gain the regressors read the gained
+    driver, so the change is scaled by the largest gain any corpus row has.
     """
     kernel = model.kernel(p)
+    gain = model.gain(p)
+    largest = (
+        1.0
+        if gain is None
+        else float(np.exp(gain * model._gain_argument(model.a["f107a"])).max())
+    )
     ap, cadence = model.a["ap"], model.a["cadence"]
     reference = cooling_grid(ap, *kernel, cadence, model.first)
     interval = model.a["interval"]
     ends = np.arange(int(interval.min()), int(interval.max()) + 1)
     for days in range(1, 61):
-        worst = float(
+        worst = largest * float(
             np.abs(
                 truncated_cooling(ap, *kernel, cadence, ends, 8 * days)
                 - reference[ends]
@@ -635,14 +642,23 @@ def emit(
     cells = g.regime(f107a, storm)
     family = rows.family.to_numpy()
     coverage = {}
+    covered = np.zeros(len(held), dtype=bool)
     for fam in sorted(set(family)):
         here = family == fam
         table, _ = g.uncertainty(held[~here], f107a[~here], storm[~here])
-        coverage[fam] = 100.0 * float(
-            (np.abs(held[here]) <= g.NORMAL_90 * table[cells[here]]).mean()
-        )
+        covered[here] = np.abs(held[here]) <= g.NORMAL_90 * table[cells[here]]
+        coverage[fam] = 100.0 * float(covered[here].mean())
         print(
             f"  the 90 % interval built without {fam} covers {coverage[fam]:.1f} % of it"
+        )
+    # The table's claim is per regime, so it is checked per regime too: a pooled family figure can
+    # hide one cell, and one family's cell is the floor a single campaign cell is held to.
+    for c in range(len(sigma)):
+        cell = cells == c
+        worst = min(covered[cell & (family == f)].mean() for f in set(family[cell]))
+        print(
+            f"  regime {c}: held out, the 90 % interval covers {100.0 * covered[cell].mean():.1f} %"
+            f" of {cell.sum()} rows, {100.0 * worst:.1f} % of its worst family"
         )
     history, worst = history_length(model, p)
 
@@ -670,6 +686,14 @@ def emit(
             if model.excess(p) is not None
             else []
         ),
+        *(
+            [
+                "The storm driver scales as (F10.7a/150)^kappa, kappa fitted "
+                "(`derivations/sdtm_storm_gain.mac`)."
+            ]
+            if model.gain(p) is not None
+            else []
+        ),
         f"Held out by mission family, MAPE {g.mape(held):.1f} % pooled.",
         "",
         "The uncertainty table below is that held-out residual's spread about zero, per regime. A",
@@ -688,11 +712,11 @@ def emit(
         + (
             "//!\n"
             "//! The fit's own verdict, the folds it was scored on and what it does not claim are in\n"
-            "//! `docs/verification.md` §10.21-§10.26.\n"
+            "//! `docs/verification.md` §10.21-§10.28.\n"
             "#![allow(clippy::unreadable_literal)]\n\n"
             "use super::{\n"
             "    DRIVERS, DensityUncertainty, FLUX_EDGES, FluxExcess, NitricOxideCooling, STORM_EDGES,\n"
-            "    StormResponse, Thermosphere,\n"
+            "    StormGain, StormResponse, Thermosphere,\n"
             "};\n\n"
             "/// Degree of the sun-fixed spherical-harmonic expansion this fit used.\n"
             f"pub const DEGREE: usize = {argument.degree};\n"
@@ -707,8 +731,9 @@ def emit(
             "/// The fitted field.\n"
             "///\n"
             "/// Built by the unchecked constructor because every argument is a literal in this file;\n"
-            "/// `sdtm_reference.rs` puts the same five through `Thermosphere::from_coefficients` and\n"
-            "/// `with_flux_excess` and asserts they accept them, which is where the refusals bind.\n"
+            "/// `sdtm_reference.rs` puts the same six through `Thermosphere::from_coefficients`,\n"
+            "/// `with_flux_excess` and `with_storm_gain` and asserts they accept them, which is where the\n"
+            "/// refusals bind.\n"
             "pub const FIELD: Thermosphere<HARMONICS> = Thermosphere::from_fitted(\n"
             "    COEFFICIENTS,\n"
             f"    {g.literal(model.shape(p))},\n"
@@ -724,6 +749,13 @@ def emit(
                 "    },\n"
                 if model.excess(p) is not None
                 else "    FluxExcess::Linear,\n"
+            )
+            + (
+                "    StormGain::FluxPower {\n"
+                f"        exponent: {g.literal(model.gain(p))},\n"
+                "    },\n"
+                if model.gain(p) is not None
+                else "    StormGain::Unity,\n"
             )
             + ");\n\n"
             "/// Number of 3-hourly `ap` intervals the storm state is to be run over: the shortest whole\n"
@@ -757,7 +789,9 @@ def emit(
 
     index = np.linspace(0, len(rows) - 1, 64).astype(int)
     exponent = (
-        model.design(heating, nitric, saturation, excess=model.excess(p))[index]
+        model.design(
+            heating, nitric, saturation, excess=model.excess(p), gain=model.gain(p)
+        )[index]
         @ p[: pk.n_c]
     )
     t_inf = g.BOUNDARY_TEMPERATURE + np.exp(exponent)
@@ -931,7 +965,7 @@ def main() -> None:
         choices=("amplitude", "input", "input-knee", "input-power"),
         help="scale the storm term (amplitude) or the storm state inside it (input) by "
         "exp(kappa f), by exp(mu + kappa f) (input-knee) or by (F10.7a/150)^kappa (input-power), "
-        "kappa and mu fitted in every fold (Ф23.B); not written by --emit yet",
+        "kappa and mu fitted in every fold (Ф23.B); --emit writes input-power",
     )
     parser.add_argument(
         "--excess-saturation",
@@ -950,9 +984,9 @@ def main() -> None:
         if not argument.cooling or argument.emit:
             sys.exit("--cooling-cap bounds --cooling, and --emit does not write it yet")
         argument.cooling = "capped"
-    if argument.emit and argument.storm_gain:
+    if argument.emit and argument.storm_gain not in (None, "input-power"):
         sys.exit(
-            "--emit does not write the storm gain yet: the evaluator has no such field"
+            "--emit writes the storm gain as sdtm::StormGain::FluxPower: give input-power"
         )
     if argument.emit and (argument.folds or not argument.cooling):
         sys.exit(

@@ -358,10 +358,11 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 in both bridges | #319's defect is a capability that reaches one bridge and not the other | the same four names defined, registered and exercised on both sides, enforced by a test that reads both files | 4 of 4 name-for-name; `just capi` **12/12** across C99–C23 × C++20–C++26 × throw/nothrow × `-fshort-enums`; the kernel's unit gain and the interval's multiplicativity pinned as exact equalities in C, C++ and Python | tests/bridge_parity.rs, tests/c/smoke.c, tests/bindings.py |
 | SDTM-1 operational drivers | the fit's conventions — yesterday's F10.7, the **trailing** 81-day mean, the kernel over the `ap` history before the sample — belong to the library, not to each call site | `space_weather::sdtm_drivers` against the hand assembly, and the crate's own 81-day window against the provider's published mean | the two means are not interchangeable (6.7 flux units apart on average, 42.6 at worst); our window matches the published one to **0.0494** over 22 323 fully measured windows, which is its one-decimal rounding | src/space_weather.rs, tests/operational_path.rs |
 | SDTM-1 operational latency and forecast | a density at the newest epoch one fetched file supports, and a measured baseline past it | the feed's last measured day against the download's own timestamp; persistence and 27-day recurrence scored by lead over 420 origins | **1 day** behind a 2026-09-14 fetch (2 behind a 2026-08-10 one); recurrence overtakes persistence at lead **8** in F10.7 and lead **2** in `Ap`, and the two coincide exactly at lead 27 | tests/operational_path.rs |
-| SDTM-1 fitted field — Rust against the generator | the fit is done in Python and the evaluator in Rust; two implementations of one model | `tools/fit-sdtm-corpus.py`'s own values at 64 of the geometries it fitted on, every field written at round-trip precision | worst `T∞` **2.402e-15**, worst ρ **1.237e-14** relative (tolerances 1e-12 / 1e-11) | tests/sdtm_reference.rs |
-| SDTM-1 shipped corpus field | the §10.24 form, fitted on all eight satellites and shipped; the storm state's Rust step against the CAS; the history it needs measured | `derivations/sdtm_no_cooling.mac`'s 30-digit steps; the fit's own state against a truncated history over every 3-hour interval of the corpus span; the held-out-family residual | step to 1e-13 rel; `HISTORY` 88 intervals (worst 0.0070 `ap`, §10.26); 90 % interval covers 87.4–99.6 % of each held-out family; **2024-05-10 46.3 %** (§10.26) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
+| SDTM-1 fitted field — Rust against the generator | the fit is done in Python and the evaluator in Rust; two implementations of one model | `tools/fit-sdtm-corpus.py`'s own values at 64 of the geometries it fitted on, every field written at round-trip precision | worst `T∞` **1.923e-15**, worst ρ **1.168e-14** relative (tolerances 1e-12 / 1e-11) | tests/sdtm_reference.rs |
+| SDTM-1 shipped corpus field | the §10.24 form, fitted on all eight satellites and shipped; the storm state's Rust step against the CAS; the history it needs measured | `derivations/sdtm_no_cooling.mac`'s 30-digit steps; the fit's own state against a truncated history over every 3-hour interval of the corpus span; the held-out-family residual | step to 1e-13 rel; `HISTORY` 120 intervals (worst 0.0063 `ap` times the largest storm gain, §10.28); 90 % interval covers 87.8–99.6 % of each held-out family and 89.0–90.9 % of each regime; **2024-05-10 36.2 %** (§10.28) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
 | SDTM-1 saturated flux excess | the daily excess `d` entering `T∞` as `D·tanh(d/D)`, `D` fitted in every fold; the form and its rewrite of the flux against the CAS | `derivations/sdtm_flux_excess.mac` (10 identities, 30-digit values) and `.gp` at 60 digits; the held-out-family residual by `d` | values to 1e-15; `D` 0.266–0.270 across folds; held-out MAPE 23.1 → 21.5 %, `d ≥ 0.7` 167 → 25.0 %, `Ap ≥ 50` 30.3 → 28.5 %; campaign 23.2 → 21.9 %; high-flux storm cell still 83.5 % at 90 % (§10.26) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
 | SDTM-1 storm response against the solar flux | Ф23.B: the minor-storm overshoot of §10.24, split by type, epoch and flux before a remedy is chosen | the 630 corpus storm comparisons by F10.7a; sixteen storm terms and fits on the same folds, both thinning phases for the winner | the overshoot is a **flux trend**, median peak 0.71 below F10.7a = 80 to 2.36 above 200; the storm state scaled by `(F10.7a/150)^κ` inside `a`, `κ` −1.26 to −1.32 in every fold, flattens it (1.01 … 1.19): peaks within ±25 % 246 → **357** of 630, median 1.00, the eight storms 37.7 → 26.7 %, pooled 21.5 → 20.8 %; the `ap` ≥ 300 median falls 0.96 → 0.63 (§10.27) | tools/fit-sdtm-corpus.py |
+| SDTM-1 storm flux gain, shipped | Ф23.B step 6: `sdtm::StormGain`, the storm driver times `(F10.7a/150)^κ`, in the evaluator and the refitted field; its algebra against the CAS | `derivations/sdtm_storm_gain.mac` (9 identities, 30-digit values) and `.gp` at 60 digits; the §10.2 campaign; held-out coverage per regime | values to 1e-15; `κ` −1.2993; in sample 20.9 → 20.4 %, held out 21.5 → 20.8 %; campaign 21.9 → 21.5 %, storm time 33.5 → **28.5 %** (JB2008 31.0 %); Ф15.H peak error 39.3 → 26.2 % in sample (JB2008 23.7 %); campaign coverage 89.5 % pooled, high-flux storm cell **80.8 %** (§10.28) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
 
 ### Tides
 
@@ -5006,6 +5007,7 @@ The 39 split three ways, and the second and third classes are new:
 | `reseal-sw-dst` | the same file | **346** | **0** | 0 | the control, 364 mutants in 38 min, 18 unviable, clean, and it reconciles: 365 less the one now ledgered. The calendar round trip gained the era before year 0, the branch a negative day number takes (229:17); `the_measured_days_are_returned_unchanged` kills 528:24, which recomputed the measured days' means; `a_forecast_across_a_year_boundary_before_1970_carries_its_own_dates` kills the deleted `year` field (505:13) and `through * 40` (496:27), which is negative before 1970 and so refuses. `/` → `*` at 496:41 only synthesises 122 days more, never read by a returned day's window, and is ledgered with that proof |
 | `seal-sdtm-cooling` | `spacelab-propagation/src/sdtm/mod.rs`, after §10.25 replaced the storm kernel's single slot with `StormResponse` and added `NitricOxideCooling` | 356 | **0** | 1 | 363 mutants in 52 min, 6 unviable, clean on the first run: the cooling step is pinned by the Maxima reference values of `derivations/sdtm_no_cooling.mac` to 1e-13, its fixed point and its reduction to the heating filter by two identities, and each refusal of the checked constructor by its own argument, so no arithmetic or comparison in the new code survives. The timeout is the same frozen `isqrt` counter as in `seal-sdtm-core` |
 | `seal-sdtm-flux-excess` | `spacelab-propagation/src/sdtm/mod.rs`, after §10.26 added `FluxExcess` and `Thermosphere::with_flux_excess` | 380 | **0** | 1 | 390 mutants in 50 min, 9 unviable, clean on the first run: `FluxExcess::excess` is pinned by the 30-digit values of `derivations/sdtm_flux_excess.mac` to 1e-15, the flux rewrite by the saturated field matching the linear field at the rewritten flux, the linear branch by an identity, and each refusal of `with_flux_excess` by its own scale. The timeout is the same frozen `isqrt` counter as in `seal-sdtm-core` |
+| `seal-sdtm-storm-gain` | `spacelab-propagation/src/sdtm/mod.rs`, after §10.28 added `StormGain` and `Thermosphere::with_storm_gain`, `--re StormGain --re storm_gain --re exospheric_temperature` | 25 | **0** | 0 | 28 mutants in 10 min, 3 unviable, clean on the first run. Scoped to the new code, because the rest of the file is unchanged since `seal-sdtm-flux-excess` and the whole file, 405 mutants, would have taken 2.3 h on a machine another project was loading. `StormGain::gain` is pinned by the 30-digit values of `derivations/sdtm_storm_gain.mac` to 1e-15, `drivers` by the gained field matching the unity field at the gained driver, the refusals of `with_storm_gain` by each non-finite exponent, and `exospheric_temperature`'s sum by the reference fixture. The three unviable are `Default::default()` over `SdtmDrivers`, `Thermosphere` and `StormGain`, none of which has one |
 "Stale" means the survivors were closed by a commit that landed *after* that block's snapshot was
 taken. A block reports on the tree as it stood when it **started**, so those verdicts are behind the
 tree rather than open, and each needs only a re-measurement. `small-seal`'s five were verified dead
@@ -5580,22 +5582,22 @@ our own model is below NRLMSISE-00 in every bin; this is the table that answers 
 saw 8 170 rows at one-hour spacing and this is every sixth row of the full product, 43 times as many,
 so the 20.3 % here against 19.3 % there is what the hourly decimation cost.
 
-| bin | n | NRLMSISE-00 `ap[]` | NRLMSISE-00 `Ap` | JB2008 | DTM2020 | SDTM-1 pilot, in sample | SDTM-1 shipped (§10.26) |
+| bin | n | NRLMSISE-00 `ap[]` | NRLMSISE-00 `Ap` | JB2008 | DTM2020 | SDTM-1 pilot, in sample | SDTM-1 shipped (§10.28) |
 |---|---|---|---|---|---|---|---|
-| all | 348 693 | 51.7 % | 52.7 % | 25.5 % | **20.2 %** | 20.3 % | 21.9 % |
-| F10.7 < 100 | 122 475 | 86.2 % | 88.7 % | 39.0 % | **22.4 %** | 24.2 % | 25.4 % |
-| 100 ≤ F10.7 < 175 | 185 898 | 30.7 % | 30.8 % | 17.7 % | 18.2 % | **16.7 %** | 19.5 % |
-| F10.7 ≥ 175 | 40 320 | 43.6 % | 44.5 % | **20.8 %** | 22.6 % | 24.9 % | 22.6 % |
-| `Ap` < 15 (quiet) | 276 116 | 54.9 % | 55.4 % | 25.8 % | **19.1 %** | 19.9 % | 20.9 % |
-| 15 ≤ `Ap` < 50 (active) | 53 451 | 37.3 % | 39.8 % | 22.2 % | 21.6 % | **19.0 %** | 23.0 % |
-| `Ap` ≥ 50 (G2 or worse) | 19 126 | 44.3 % | 49.8 % | 31.0 % | 30.5 % | **29.2 %** | 33.5 % |
+| all | 348 693 | 51.7 % | 52.7 % | 25.5 % | **20.2 %** | 20.3 % | 21.5 % |
+| F10.7 < 100 | 122 475 | 86.2 % | 88.7 % | 39.0 % | **22.4 %** | 24.2 % | 24.9 % |
+| 100 ≤ F10.7 < 175 | 185 898 | 30.7 % | 30.8 % | 17.7 % | 18.2 % | **16.7 %** | 19.0 % |
+| F10.7 ≥ 175 | 40 320 | 43.6 % | 44.5 % | **20.8 %** | 22.6 % | 24.9 % | 22.8 % |
+| `Ap` < 15 (quiet) | 276 116 | 54.9 % | 55.4 % | 25.8 % | **19.1 %** | 19.9 % | 21.0 % |
+| 15 ≤ `Ap` < 50 (active) | 53 451 | 37.3 % | 39.8 % | 22.2 % | 21.6 % | **19.0 %** | 21.7 % |
+| `Ap` ≥ 50 (G2 or worse) | 19 126 | 44.3 % | 49.8 % | 31.0 % | 30.5 % | 29.2 % | **28.5 %** |
 
-**The shipped field since §10.25** is the corpus fit, not the pilot, and since §10.26 its daily flux
-excess saturates. On these rows — twelve of the
-corpus's 1 051 satellite-months — it is still below NRLMSISE-00 in every bin, and behind the
-pilot, which was fitted on exactly these months, in every bin but high flux. In the storm bin it is
-behind JB2008 and DTM2020 too, 33.5 % against 31.0 % and 30.5 %: these months hold the Gannon onset,
-whose daily flux excess §10.25 traces and §10.26 saturates. The readings below are the pilot's.
+**The shipped field since §10.25** is the corpus fit, not the pilot. Since §10.26 its daily flux
+excess saturates, and since §10.28 its storm driver carries the flux gain. On these rows — twelve of
+the corpus's 1 051 satellite-months — it is still below NRLMSISE-00 in every bin. It is behind the
+pilot, which was fitted on exactly these months, in every bin but high flux and storm time. In the
+storm bin it is now the lowest of all, 28.5 % against JB2008's 31.0 % and DTM2020's 30.5 %; before
+the gain it was 33.5 %. The readings below are the pilot's.
 
 Three readings, and the third is the one that matters for Ф15.E:
 
@@ -8278,6 +8280,106 @@ is optimistic, and a fresh confirmation needs months that none of them saw.
 The shipped coefficients and the Rust evaluator are unchanged at this step. Next: the gain in
 `sdtm/`, derived in Maxima, and the shipped field refitted on `storm-log1-lin`; then the large-storm
 under-reach.
+
+### 10.28 The storm's flux gain ships (Ф23.B, step 6)
+
+**What changed in the library.** A fitted field now owns a `sdtm::StormGain`: `Unity`, or
+`FluxPower { exponent }`, which multiplies the storm driver by `g = (F10.7a/150)^κ` before the
+driver terms are formed. It sits after `FluxExcess`, so the saturated flux and the gained storm reach
+`T∞` together. `Thermosphere::from_coefficients` gives `Unity`; `with_storm_gain` sets it and refuses
+an exponent that is not finite; `storm_gain()` reads it back. `derivations/sdtm_storm_gain.mac` proves
+nine identities: `g(150) = 1` for every `κ`, the constant elasticity `κ`, the reciprocal
+`g(F)·g(150²/F) = 1`, a gain on a minor storm and a shift `ln g` on a large one inside
+`a = ln(1 + D/15)`, the homogeneity of the cooling state's steady state, `N` step and `D` step, and
+the slope `κg/F`. `sdtm_storm_gain.gp` repeats the reference values, the reciprocal and the `D`-step
+homogeneity at 60 digits. The Rust gain reproduces the 30-digit values to 1e-15.
+
+The bridges pass the raw storm driver to `SDTM1_FIELD`, which applies its own gain, so their API does
+not change.
+
+**The shipped field.** `tools/fit-sdtm-corpus.py --fit-sigma --cooling --excess-saturation fit
+--storm-gain input-power --caps storm-log1-lin --emit`, on the same 365 214 rows:
+
+| | §10.26 | shipped |
+|---|---|---|
+| storm term | `storm-log1` | `storm-log1-lin`, 36 coefficients |
+| `κ` | — | −1.2993 (folds −1.264 to −1.316) |
+| `τ_h`, `τ_NO`, `H_s` | 22.34 h, 26.64 h, 16.52 `ap` | 17.49 h, 32.96 h, 24.77 `ap` |
+| excess scale `D` | 0.2672 | 0.2631, about 26 sfu |
+| MAPE in sample | 20.9 % | 20.4 % |
+| MAPE held out by mission family | 21.5 % | 20.8 % |
+
+**The history it needs.** The gain multiplies the error of a truncated history as well as the storm.
+Over the corpus span it reaches 2.92 at the lowest F10.7a, 65.8, so the generator now scales the
+worst storm-driver change by that largest gain before comparing it with the tolerance. The worst
+change is 0.0165 `ap` at fourteen days and **0.0063 at fifteen**. `coefficients::HISTORY` is 120
+intervals (it was 88). The vendored space-weather fixture gained the three days that length reaches
+back before each window (2018-12-17 to 19, 2024-04-25 to 27), copied unchanged from `SW-All.csv`.
+
+**The uncertainty table**, the held-out-family residual's spread about zero per regime:
+
+| | f107a < 100 | | 100–150 | | ≥ 150 | |
+|---|---|---|---|---|---|---|
+| | quiet | active | quiet | active | quiet | active |
+| σ, §10.26 | 0.300 | 0.371 | 0.245 | 0.297 | 0.238 | 0.334 |
+| σ, shipped | 0.293 | 0.284 | 0.241 | 0.270 | 0.230 | 0.250 |
+
+Every cell narrows, and the two storm cells most: those are the rows the gain moved. A table built
+without one family covers that family's rows 87.8–99.6 % at 90 % (CHAMP 92.9, GOCE 99.6, GRACE 87.8,
+GRACE-FO 87.8, Swarm 91.4 %).
+
+**Rust against the generator**, 64 fixture rows at round-trip precision: worst `T∞` 1.923e-15, worst
+ρ 1.168e-14 relative.
+
+**On the two vendored days** (GRACE-FO C, both inside the corpus):
+
+| | §10.26 | shipped |
+|---|---|---|
+| 2019-01-01, quiet: MAPE / bias | 25.6 % / 1.096 | 25.9 % / 1.103 |
+| 2024-05-10, Gannon onset: MAPE / bias | 46.3 % / 1.455 | **36.2 % / 1.340** |
+
+The storm day's flux is 162.9 sfu, where `g` is 0.898. From 00 to 15 UT, before the storm, the hours
+read 1.22–1.41, about as before: that is the flux excess, not the storm. The storm hours carry the
+gain. The test bounds follow the measured values: storm-day MAPE below 40 % (was 50 %), bias
+1.24–1.44 (was 1.35–1.55). The 90 % interval covers 88.5 % of the quiet day and 76.7 % of the storm
+day.
+
+**On the §10.2 campaign** (348 693 rows, in sample):
+
+| | SDTM-1, §10.26 | SDTM-1, shipped | JB2008 | DTM2020 | NRLMSISE-00 |
+|---|---|---|---|---|---|
+| all | 21.9 % | **21.5 %** | 25.5 % | 20.2 % | 51.7 % |
+| flux low / moderate / high | 25.4 / 19.5 / 22.6 % | 24.9 / 19.0 / 22.8 % | 39.0 / 17.7 / 20.8 % | 22.4 / 18.2 / 22.6 % | 86.2 / 30.7 / 43.6 % |
+| geomag quiet / active | 20.9 / 23.0 % | 21.0 / 21.7 % | 25.8 / 22.2 % | 19.1 / 21.6 % | 54.9 / 37.3 % |
+| geomag storm | 33.5 % | **28.5 %** | 31.0 % | 30.5 % | 44.3 % |
+| Ф15.H, 16 comparisons: mean peak error | 39.3 % | **26.2 %** | 23.7 % | 33.5 % | 42.8 % |
+| Ф15.H: mean onset error | 4.7 h | 5.3 h | 5.1 h | 6.7 h | 6.1 h |
+
+In storm time SDTM-1 is now the best of the five models on these months. The onset gets worse by
+0.6 h on average; one comparison, 2022-04-10, is 37.5 h off. The peak error is in sample here, and
+still above JB2008's.
+
+**The interval on the campaign.** The 90 % interval covers 90.4 / 85.7 / 87.7 / 93.0 / 90.8 /
+**80.8 %** by regime, 89.5 % pooled (§10.26: 90.2 / 88.6 / 89.2 / 93.5 / 91.3 / 83.5 %, 90.2 %).
+A narrower `σ` covers less of these months. Over the corpus, held out by family, the same table covers
+90.9 / 90.3 / 89.5 / 89.0 / 90.9 / 90.8 % by regime, so the claim holds in each regime where it is
+made. The worst family in each cell covers 84.1 / 82.7 / 85.4 / 82.2 / 82.5 / 87.8 %; `--emit` now
+prints both lines.
+
+The campaign test held every cell to the worst family's *pooled* coverage, 87 %. That compares one
+cell with an average over cells, and on this field regime 1 fails it. That cell is one storm day,
+2021-11-04, 1 894 rows, at 85.7 %. On that day the model moved closer to the measurement, not
+further. Its geometric-mean ratio went from 0.75 to 0.84 on GRACE-FO C and from 0.75 to 0.82 on Swarm A;
+DTM2020 reads 0.69–0.70. The cell's `σ` narrowed, 0.371 to 0.284, because the corpus's 290 low-flux
+storm days improved. The floor is now per cell: the worst held-out family's coverage in that cell,
+rounded down. Regime 5 is held to its measured value as before, now 0.80 against 80.8 %. The
+high-flux storm cell is still the one where the interval under-covers on these months.
+
+**Where step 6 leaves Ф23.B.** The overshoot of the minor storms, which D-5 was waiting on, is gone
+on the corpus folds. It costs the largest storms, which now under-reach (`ap ≥ 300` median 0.63,
+§10.27). The plan's gate is not met: the 16 comparisons stand at 26.7 % by mission family (§10.27)
+and 26.2 % in sample, against JB2008's 23.7 %. SDTM-1 stays non-default until D-5 is decided. Next:
+the large-storm under-reach.
 
 ---
 

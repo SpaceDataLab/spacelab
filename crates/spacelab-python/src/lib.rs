@@ -1616,7 +1616,7 @@ fn sdtm1_exospheric_temperature(
 /// `cadence_s` is that series' step — 10 800 s for CelesTrak's 3-hourly `ap`, which is what the fit
 /// used. The three constants belong to the fitted field, so a caller cannot build this driver
 /// itself. Nitric oxide remembers a storm for days, and a truncated history reads as a different
-/// storm: pass eleven days, 88 intervals (`sdtm::coefficients::HISTORY` in Rust).
+/// storm: pass fifteen days, 120 intervals (`sdtm::coefficients::HISTORY` in Rust).
 #[pyfunction]
 #[pyo3(signature = (history, cadence_s = 10_800.0))]
 fn sdtm1_storm_response(history: Vec<f64>, cadence_s: f64) -> f64 {

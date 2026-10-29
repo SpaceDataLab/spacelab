@@ -1,0 +1,52 @@
+/* The storm state's flux gain of SDTM-1 (plans/17 Ф23.B step 5, docs/verification.md §10.27):
+   D' = g(F) D with g(F) = (F/150)^kappa, F the 81-day trailing F10.7 mean and kappa fitted.
+
+   D' replaces the storm state D inside the log regressor a = ln(1 + D/15). What is proved here: g is
+   1 at the reference flux for every kappa, has the constant elasticity kappa and is reciprocal about
+   the reference; it is a gain on a minor storm and a shift ln g on a large one; applied after the
+   heating and nitric-oxide cooling state it equals that state run on g H with the saturation g H_s,
+   because the steady state, the frozen-N D step and the exact N step are all homogeneous of degree
+   one; and its slope has the sign of kappa. Every identity prints 0. The numeric block gives the
+   reference values the Rust implementation is checked against. */
+
+ratprint : false$
+fpprintprec : 0$
+
+g(F) := (F/150)^kappa$
+a(D) := log(1 + D/15)$
+assume(F > 0, G > 0, D > 0)$
+
+/* 1. Unity at the reference flux, whatever kappa is. */
+print("unity at the reference flux:", ratsimp(g(150) - 1))$
+
+/* 2. Constant elasticity: d ln g / d ln F = kappa. */
+print("elasticity is kappa:", ratsimp(radcan(F*diff(log(g(F)), F) - kappa)))$
+
+/* 3. Reciprocal about the reference: g(F) g(150^2/F) = 1. */
+print("reciprocal about 150:", radcan(g(F)*g(150^2/F) - 1))$
+
+/* 4. A gain on a minor storm, a shift on a large one. */
+print("gain on a minor storm:", limit(a(G*D)/a(D), D, 0) - G)$
+print("shift on a large storm:", limit(a(G*D) - a(D), D, inf) - log(G))$
+
+/* 5. Homogeneity of the cooling state of sdtm_no_cooling.mac: scaling the drive, both states and
+   the saturation by G scales the output by G. N's exact step and mean, then D's frozen-N step. */
+nstep(n, u) := u + (n - u)*exp(-h/tn)$
+nmean(n, u) := u + (n - u)*tn/h*(1 - exp(-h/tn))$
+dstep(d, n, u, hs) := block([m, rate, target],
+    m : nmean(n, u),
+    rate : (1 + m/hs)/th,
+    target : u/(th*rate),
+    target + (d - target)*exp(-rate*h))$
+print("steady state is homogeneous:", ratsimp(G*H/(1 + G*H/(G*Hs)) - G*(H/(1 + H/Hs))))$
+print("N step is homogeneous:", ratsimp(nstep(G*n, G*u) - G*nstep(n, u)))$
+print("D step is homogeneous:", ratsimp(dstep(G*d, G*n, G*u, G*Hs) - G*dstep(d, n, u, Hs)))$
+
+/* 6. The slope: dg/dF = kappa g/F, so g rises with F for kappa > 0 and falls for kappa < 0. */
+print("slope is kappa g/F:", ratsimp(radcan(diff(g(F), F) - kappa*g(F)/F)))$
+
+/* 7. Reference values, 30 digits, at kappa = -13/10 (the corpus folds' -1.26 to -1.32, rounded),
+   for a quiet-sun, the reference, an active and a solar-maximum mean flux. */
+fpprec : 30$
+for x in [75, 150, 225, 300] do
+    print("reference g at kappa = -1.3, F =", x, ":", bfloat(subst(kappa = -13/10, g(x))))$

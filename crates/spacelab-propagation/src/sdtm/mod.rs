@@ -378,6 +378,59 @@ impl FluxExcess {
     }
 }
 
+/// How the storm driver of [`driver_terms`] scales with the 81-day mean flux.
+///
+/// `T∞ − T₀` is the exponential of the regression, so a storm term with no flux in it adds kelvins in
+/// proportion to the quiet `T∞ − T₀`, which rises with the flux. The measured storm response does
+/// not (`docs/verification.md` §10.27): held out on the corpus, the median storm-peak ratio ran from
+/// 0.71 below F10.7a = 80 to 2.36 above 200. Scaling the storm driver by `(F10.7a/150)^κ` before it
+/// enters `a = ln(1 + storm/15)` is a gain on a minor storm and a shift by the log of the gain on a
+/// large one, and it takes the trend out; `κ` is −1.26 to −1.32 on every held-out fold.
+///
+/// It scales the storm state's output. While the gain holds over the history that is the state run
+/// on the gained index with the gained saturation, because the state is homogeneous of degree one.
+/// Derived in `derivations/sdtm_storm_gain.mac`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StormGain {
+    /// The storm driver as the state gives it.
+    Unity,
+    /// `(F10.7a/150)^κ`, with `exponent` the fitted `κ`.
+    FluxPower {
+        /// `κ`.
+        exponent: f64,
+    },
+}
+
+impl StormGain {
+    /// The factor on the storm driver at the 81-day mean flux `f107a`.
+    #[must_use]
+    pub fn gain(&self, f107a: f64) -> f64 {
+        match *self {
+            Self::Unity => 1.0,
+            Self::FluxPower { exponent } => libm::pow(f107a / REFERENCE_F107, exponent),
+        }
+    }
+
+    /// `drivers` with the storm driver scaled by [`Self::gain`].
+    fn drivers(&self, drivers: &SdtmDrivers) -> SdtmDrivers {
+        match self {
+            Self::Unity => *drivers,
+            Self::FluxPower { .. } => SdtmDrivers {
+                storm: drivers.storm * self.gain(drivers.f107a),
+                ..*drivers
+            },
+        }
+    }
+
+    /// Whether this is a form: an exponent that is finite.
+    fn usable(&self) -> bool {
+        match *self {
+            Self::Unity => true,
+            Self::FluxPower { exponent } => exponent.is_finite(),
+        }
+    }
+}
+
 /// Where and when to evaluate the model.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SdtmPoint {
@@ -518,6 +571,7 @@ pub struct Thermosphere<const K: usize> {
     boundary_scale: f64,
     storm: StormResponse,
     flux_excess: FluxExcess,
+    storm_gain: StormGain,
 }
 
 impl<const K: usize> Thermosphere<K> {
@@ -560,6 +614,7 @@ impl<const K: usize> Thermosphere<K> {
             boundary_scale,
             storm,
             flux_excess: FluxExcess::Linear,
+            storm_gain: StormGain::Unity,
         })
     }
 
@@ -572,6 +627,14 @@ impl<const K: usize> Thermosphere<K> {
             flux_excess,
             ..self
         })
+    }
+
+    /// The same field with the storm driver scaled as `storm_gain` says;
+    /// [`Self::from_coefficients`] makes it [`StormGain::Unity`]. `None` unless an exponent is
+    /// finite.
+    #[must_use]
+    pub fn with_storm_gain(self, storm_gain: StormGain) -> Option<Self> {
+        storm_gain.usable().then_some(Self { storm_gain, ..self })
     }
 
     /// The same field without the checks — for the generated table, and nothing else.
@@ -588,6 +651,7 @@ impl<const K: usize> Thermosphere<K> {
         boundary_scale: f64,
         storm: StormResponse,
         flux_excess: FluxExcess,
+        storm_gain: StormGain,
     ) -> Self {
         Self {
             coeffs,
@@ -595,6 +659,7 @@ impl<const K: usize> Thermosphere<K> {
             boundary_scale,
             storm,
             flux_excess,
+            storm_gain,
         }
     }
 
@@ -634,12 +699,21 @@ impl<const K: usize> Thermosphere<K> {
         &self.flux_excess
     }
 
+    /// How the fitted field scales the storm driver with the 81-day mean flux.
+    #[must_use]
+    pub const fn storm_gain(&self) -> &StormGain {
+        &self.storm_gain
+    }
+
     /// Exospheric temperature `T∞`, K — at or above [`BOUNDARY_TEMPERATURE`] by construction, and
     /// equal to it only where the exponent underflows, which is the isothermal limit.
     #[must_use]
     pub fn exospheric_temperature(&self, point: &SdtmPoint, drivers: &SdtmDrivers) -> f64 {
         let angular = DensityCorrection::<K>::basis(point.latitude, point.local_solar_time);
-        let g = driver_terms(point, &self.flux_excess.drivers(drivers));
+        let g = driver_terms(
+            point,
+            &self.storm_gain.drivers(&self.flux_excess.drivers(drivers)),
+        );
         let mut sum = 0.0;
         for (row, gi) in self.coeffs.iter().zip(g) {
             for (c, y) in row.iter().zip(angular) {
@@ -1504,6 +1578,91 @@ mod tests {
                     .with_flux_excess(FluxExcess::Saturated { scale: bad })
                     .is_none(),
                 "scale {bad} accepted"
+            );
+        }
+    }
+
+    /// The gain is the one Maxima proved: at `κ` = −1.3 the four mean fluxes of
+    /// `sdtm_storm_gain.mac` reach its 30-digit values (and `sdtm_storm_gain.gp` confirms at 60), the
+    /// reference flux gives exactly 1, and the unity form is 1 everywhere.
+    #[test]
+    #[expect(
+        clippy::excessive_precision,
+        reason = "the CAS's digits as it printed them"
+    )]
+    fn the_storm_gain_reproduces_the_cas_reference_values() {
+        let power = StormGain::FluxPower { exponent: -1.3 };
+        for (f107a, want) in [
+            (75.0, 2.462_288_826_689_832_568_998_786_138_34),
+            (150.0, 1.0),
+            (225.0, 0.590_311_662_197_037_410_598_387_887_71),
+            (300.0, 0.406_126_198_178_117_761_304_854_691_387),
+        ] {
+            let got = power.gain(f107a);
+            assert!(
+                (got - want).abs() <= 1e-15 * want,
+                "F10.7a = {f107a}: {got} against the CAS's {want}"
+            );
+            assert_eq!(StormGain::Unity.gain(f107a), 1.0);
+        }
+        assert_eq!(power.gain(REFERENCE_F107), 1.0, "not 1 at the reference");
+    }
+
+    /// The field reads the storm driver through its gain and nowhere else: a gained field is the
+    /// unity field at the gained driver, the unity form rewrites nothing, and the gain is what the
+    /// field reports.
+    #[test]
+    fn the_field_takes_the_storm_driver_through_its_gain() {
+        let unity = field();
+        let gain = StormGain::FluxPower { exponent: -1.3 };
+        let gained = unity.with_storm_gain(gain).expect("a usable exponent");
+        assert_eq!(*unity.storm_gain(), StormGain::Unity);
+        assert_eq!(*gained.storm_gain(), gain);
+        let raw = SdtmDrivers {
+            f107: 230.0,
+            f107a: 225.0,
+            storm: 40.0,
+        };
+        let moved = SdtmDrivers {
+            storm: 40.0 * gain.gain(225.0),
+            ..raw
+        };
+        let here = point(400_000.0);
+        let want = unity.exospheric_temperature(&here, &moved);
+        let got = gained.exospheric_temperature(&here, &raw);
+        assert!((got - want).abs() < 1e-12 * want, "{got} against {want}");
+        // The gain is 0.59 here, so the gained field reads a smaller storm than the raw driver.
+        let ungained = unity.exospheric_temperature(&here, &raw);
+        assert!(ungained - got > 1.0, "{got} against {ungained}");
+        assert_eq!(
+            StormGain::Unity.drivers(&raw),
+            raw,
+            "the unity form rewrites the drivers"
+        );
+        // At the reference flux the gain is 1 and the two fields agree to the bit.
+        let reference = SdtmDrivers {
+            f107a: REFERENCE_F107,
+            ..raw
+        };
+        assert_eq!(
+            gained.exospheric_temperature(&here, &reference),
+            unity.exospheric_temperature(&here, &reference)
+        );
+    }
+
+    /// An exponent that is not finite is not a form; zero is, and it is the unity gain.
+    #[test]
+    fn the_constructor_refuses_a_storm_gain_that_is_not_a_form() {
+        assert!(field().with_storm_gain(StormGain::Unity).is_some());
+        let zero = StormGain::FluxPower { exponent: 0.0 };
+        assert!(field().with_storm_gain(zero).is_some());
+        assert_eq!(zero.gain(73.0), 1.0);
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                field()
+                    .with_storm_gain(StormGain::FluxPower { exponent: bad })
+                    .is_none(),
+                "exponent {bad} accepted"
             );
         }
     }

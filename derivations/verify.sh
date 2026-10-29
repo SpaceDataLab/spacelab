@@ -908,6 +908,7 @@ if have maxima; then
     mac_zeros teme_c1.mac 3 "TEME to ITRF by AIAA 2006-6753 Eq. (C-1): ROT3 composes and fixes the pole; the Appendix C example at 40 digits"
     mac_zeros sdtm_no_cooling.mac 12 "the heating and nitric-oxide cooling step: exact N step and mean, frozen D step, fixed points, local error from h^3"
     mac_zeros sdtm_flux_excess.mac 10 "the saturated daily flux excess D tanh(d/D): the flux rewrite returns it; odd, unit slope, series, bounded by D, linear as D -> inf, monotone"
+    mac_zeros sdtm_storm_gain.mac 9 "the storm state's flux gain (F10.7a/150)^kappa: unity at 150, elasticity kappa, reciprocal; a gain on a minor storm and a shift on a large one; the cooling state homogeneous of degree one"
     mac_zeros density_calibration_ridge.mac 104 "the ridge calibration fit solves its normal equations exactly"
     mac_zeros wind_model_vsh.mac 222 "the vector spherical harmonic basis by Rodrigues' formula; the ridge stationarity"
     mac_zeros attitude_law_frames.mac 75 "every attitude law is an orthonormal right-handed frame"
@@ -1016,7 +1017,8 @@ if have gp; then
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form \
         rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
         cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal iod_classical patched_conics \
-        targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess density_calibration_ridge \
+        targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain \
+        density_calibration_ridge \
         wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms \
         chi_square_quantiles robust_weights se3_exponential particle_resampling sampling_transforms \
         conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \

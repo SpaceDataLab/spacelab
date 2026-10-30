@@ -364,6 +364,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 storm response against the solar flux | Ф23.B: the minor-storm overshoot of §10.24, split by type, epoch and flux before a remedy is chosen | the 630 corpus storm comparisons by F10.7a; sixteen storm terms and fits on the same folds, both thinning phases for the winner | the overshoot is a **flux trend**, median peak 0.71 below F10.7a = 80 to 2.36 above 200; the storm state scaled by `(F10.7a/150)^κ` inside `a`, `κ` −1.26 to −1.32 in every fold, flattens it (1.01 … 1.19): peaks within ±25 % 246 → **357** of 630, median 1.00, the eight storms 37.7 → 26.7 %, pooled 21.5 → 20.8 %; the `ap` ≥ 300 median falls 0.96 → 0.63 (§10.27) | tools/fit-sdtm-corpus.py |
 | SDTM-1 storm flux gain, shipped | Ф23.B step 6: `sdtm::StormGain`, the storm driver times `(F10.7a/150)^κ`, in the evaluator and the refitted field; its algebra against the CAS | `derivations/sdtm_storm_gain.mac` (9 identities, 30-digit values) and `.gp` at 60 digits; the §10.2 campaign; held-out coverage per regime | values to 1e-15; `κ` −1.2993; in sample 20.9 → 20.4 %, held out 21.5 → 20.8 %; campaign 21.9 → 21.5 %, storm time 33.5 → **28.5 %** (JB2008 31.0 %); Ф15.H peak error 39.3 → 26.2 % in sample (JB2008 23.7 %); campaign coverage 89.5 % pooled, high-flux storm cell **80.8 %** (§10.28) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
 | SDTM-1 where it is recommended | Ф23.H: D-5 recommends SDTM-1 inside its fitted envelope, so the envelope is data and the recommendation reachable from both bridges | `sdtm::coefficients::ENVELOPE`, written by `--emit` from the fitted rows; `Envelope::contains` at both closed ends and at NaN; the 64 reference rows inside it; each bridge's SDTM-1 drag constructor against `Drag<SdtmAtmosphere>` built from the crate's types | 224.660–545.488 km, F10.7a 65.8–231.9; the re-emitted field bit-identical; both constructors within 1e-6 m of the crate's system after an hour; `just capi` **12/12** (§10.29) | src/sdtm/mod.rs, tests/sdtm_reference.rs, spacelab-python/src/lib.rs, spacelab-capi/src/lib.rs |
+| SDTM-1 at the largest storms | Ф23.B step 7: the peak deficit at first-day mean `ap` ≥ 120 after §10.28, located before a remedy, then two storm states and an hourly driver held out on the same folds | the 630 comparisons by the storm's first-day mean `ap`, phase and satellite; nitric oxide driven by `mix·H + (1 − mix)·D` and a fast uncooled mode `(1 − w)·D + w·F`, each fitted and fixed, both reducing to the shipped form bit for bit; the cooling state on GFZ's hourly `ap60`; the mixed step against RK4 in Maxima | the deficit is at the **peak**: on time (1.5 h), phase 3 9–10 % under, peak 0.64 at ≥ 180; the satellites of one storm agree, the storms do not (medians 0.365–1.51); `mix` fits to 1.000 and the fast mode to its bound, and fixed neither moves ≥ 180 (0.630–0.642); `ap60` gives 0.71, 449 against 429 peaks within ±3 h, `Ap ≥ 50` 23.9 → 23.4 %, **not shipped** (D-26) (§10.30) | tools/fit-sdtm-corpus.py |
 
 ### Tides
 
@@ -8485,6 +8486,88 @@ test accepted any error, so a zero cadence that a weakened check let through pas
 the integration then failed on the NaN state. The block's listing showed the first, its first timeout
 the second, and its one survivor the third. Each has its test now, and the control,
 `reseal-sdtm1-drag-bridge`, is 176 mutants, 161 caught, 0 missed, 15 unviable.
+
+### 10.30 The large-storm deficit is at the peak, and no storm state lifts it (Ф23.B, step 7)
+
+**Where it is.** §10.28's shipped form on the corpus folds (`--fit-sigma --cooling
+--excess-saturation fit --storm-gain input-power --caps storm-log1-lin --storms`), its 630 storm
+comparisons split by the storm's first-day mean `ap`, the mean of the eight 3-hourly values from
+`t0`:
+
+| first-day mean `ap` | < 50 | 50–80 | 80–120 | 120–180 | ≥ 180 |
+|---|---|---|---|---|---|
+| comparisons | 362 | 157 | 80 | 20 | 11 |
+| median peak ratio | 1.04 | 1.00 | 0.87 | 0.69 | 0.64 |
+| phase 2 O/C | 1.06 | 1.03 | 1.05 | 1.01 | 1.01 |
+| phase 3 O/C | 0.99 | 0.99 | 1.09 | 1.10 | 1.09 |
+
+The ratio follows the storm's sustained strength; the flux trend is gone since §10.27. The timing is
+right: in every bin the model's orbit-averaged peak comes 1.5 h after the measured one at the
+median, and at the largest storms the recovery half-times agree (median 0 h). Phase 3, from `t0` to
+36 h past the last peak, is 9–10 % under. So at the largest storms the model is on time, a tenth
+short over the storm and a third short at the peak.
+
+**Not the altitude; the spread is between storms the index rates alike.** Eleven storms have a
+first-day mean `ap` ≥ 120 (31 comparisons). Within a storm the satellites agree: in six of the eight
+that more than one satellite saw, their ratios lie within 0.18 of each other, and GRACE-B is the
+outlier in the other two. CHAMP and GRACE-A read 0.50 and 0.41 on 2003-11-20, 0.23 and 0.40 on
+2004-07-27, and 0.72 and 0.72 on 2004-11-08. Between storms they do not agree: the storm medians run
+from 0.365 (2004-07-27) to 1.51 (2001-11-06), and five of the eleven reach 0.86 or more.
+
+**Two storm states, each refuted twice: by its own fit and by a fixed probe.** First, nitric oxide
+driven by `mix·H + (1 − mix)·D` instead of `H` (`--cooling-mix`). At `mix = 0` it follows the
+response, and the steady state `D(1 + D/H_s) = H` grows as `√(H·H_s)` instead of stopping at `H_s`.
+On a two-day `ap` 300 storm the model's peak `D` is then 124 against 76 (Maxima). Second, a share
+`w` of the heating through a fast first-order mode `F` that the cooling does not reach, `S = (1 −
+w)·D + w·F` (`--fast-heating`). `F` takes the nitric-oxide step of `derivations/sdtm_no_cooling.mac`
+§1. Both reduce to the shipped form bit for bit, at `mix = 1` and at `w = 0`. Every row is held out
+by mission family. The four bins are the median peak ratio by first-day mean `ap`; the last column
+is phase 3's O/C at ≥ 120:
+
+| storm state | pooled | `Ap ≥ 50` | peak ±25 % | peak ±3 h | recovery ±6 h | < 80 | 80–120 | 120–180 | ≥ 180 | phase 3 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| shipped (§10.28) | 20.8 % | 23.9 % | 357 | 429 | 477/600 | 1.024 | 0.865 | 0.686 | 0.635 | 1.088 |
+| `mix` fitted: 1.000 in every fold | 20.8 % | 23.9 % | 357 | 429 | 477/600 | 1.024 | 0.865 | 0.686 | 0.635 | 1.088 |
+| `mix` 0.5 | 20.9 % | 24.2 % | 358 | 427 | 472/601 | 1.019 | 0.857 | 0.688 | 0.642 | 1.057 |
+| `mix` 0 | 20.9 % | 25.6 % | 369 | 403 | 457/598 | 0.985 | 0.823 | 0.656 | 0.630 | 0.974 |
+| fast mode fitted: 0.25 h (its bound), `w` 0.004–0.014 | 20.8 % | 24.0 % | 354 | 433 | 482/601 | 1.031 | 0.869 | 0.691 | 0.638 | 1.084 |
+| fast mode 1.5 h, `w` 0.1 | 20.9 % | 24.9 % | 363 | 437 | 475/603 | 1.043 | 0.862 | 0.676 | 0.641 | 1.013 |
+| hourly `ap60` as the driver | 20.75 % | 23.4 % | 367 | 449 | 475/593 | 1.029 | 0.907 | 0.733 | 0.707 | 1.082 |
+
+Fitted, `mix` goes to 1.000 in all five folds, and the fast mode goes to its 0.25 h bound with
+0.4–1.4 % of the heating: the corpus keeps the shipped closure. Fixed, neither moves the largest
+storms. At `mix = 0` the storm's mean level rises past the measurement (phase 3: 1.09 → 0.97), its
+peak stays at 0.63, and the timing degrades (429 → 403 peaks within ±3 h). So the cooling does not
+hold the peak down: the profile is too flat. The fast mode at 1.5 h with a tenth of the heating
+leaves the peaks at 0.68 and 0.64 and costs a point at `Ap ≥ 50`. In every variant the regressor's
+coefficients refit to the moderate storms, and the largest stay at 0.63–0.69, as they did under
+§10.27's cooling cap and storm weights. The frozen cooling step runs high on a storm's rise
+(§10.24), so it is no part of the deficit.
+
+**The driver: hourly `ap60`, the plan's input proxy (§10.15 tried it under the old kernel).**
+`--ap60` drives the same cooling state by GFZ's hourly `ap60`. The storms are still found on the
+3-hourly `ap`, so the same 630 comparisons are scored, and the 3-hourly path reproduces the shipped
+design bit for bit. The five folds ran as separate processes, so the pooled and `Ap ≥ 50` figures
+are row-weighted from the per-family values. Over the same three hours `ap60` averages 0.95 of `ap`
+at `ap` ≥ 150 (correlation 0.98), so the index adds resolution, not amplitude. That is what it buys:
+20 more peaks within ±3 h, 10 more within ±25 %, half a point at `Ap ≥ 50`, and 0.64 → 0.71 at the
+largest storms, a fifth of their gap. The families move by 0.1 point each, all better except GOCE
+(12.4 → 12.7 % raw, debiased equal). On the plan's 16 comparisons it has 12 within ±25 % against 9,
+but a mean error of 27.4 % against 26.7 %; half of that mean is the two 2022-04-10 comparisons, at
+2.00 and 2.22 (shipped 1.89 and 2.13). The other variants score 25.9–27.7 % there, against JB2008's
+23.7 % on the calendar-month protocol.
+
+**Verdict.** No storm state tried here, nor §10.27's, lifts the largest storms: the deficit is a
+peak that the index does not carry, between storms that the 3-hourly index rates alike. The hourly
+index recovers a fifth of it and sharpens the timing. It is not shipped (`plans/17` D-26). A field
+fitted on `ap60` changes what every bridge's `ap_history` means, and drag prediction runs on
+forecast indices: NOAA forecasts 3-hourly Kp for three days and daily Ap out to 45, while GFZ's Hp60
+forecast reaches 72 h and is described as under development. Driving the storm state by the solar
+wind instead (OMNI's IMF and plasma, never its Kyoto columns) is the next lever, and a decision
+about what SDTM-1 is specified on.
+
+**Optimism.** Six more storm states were fitted on the same folds and storms. None is kept, so the
+shipped form's numbers stand. The shipped coefficients and the Rust evaluator are unchanged.
 
 ---
 

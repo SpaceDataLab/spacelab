@@ -158,7 +158,14 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   2024-05-10 0.58–0.69. **A drag prediction through a severe storm should be expected to run low at
   the peak by a third.** JB2008, driven by hourly `Dst`, remains the reference on storm peaks in the
   published assessment (23.7 % mean error; SDTM-1 26.2 % on the same 16 comparisons, in sample).
-  Hourly `ap60` and USGS `Dst` as SDTM-1's driver were both measured and both made it worse (§10.15).
+  SDTM-1's deficit is at the peak, not in the timing or the storm's mean: the model's peak comes a
+  median 1.5 h after the measured one, and over the storm it is a tenth low. Between storms that `ap`
+  rates alike the ratio runs from 0.365 to 1.51 (storm medians at a first-day mean `ap` of 120 or
+  more), so one severe storm can be off by more, either way (§10.30). USGS `Dst` as SDTM-1's driver
+  made it worse (§10.15). Hourly `ap60` made it worse under the old kernel (§10.15); under the cooling
+  state it recovers a fifth of the large-storm gap (0.64 → 0.71) and sharpens the peak's timing. It is
+  not the shipped driver: GFZ's forecast of it reaches 72 h and is described as under development.
+  Neither the nitric oxide's drive nor a fast uncooled mode lifts the largest storms (§10.30).
 - **In the drag path an empirical atmosphere contributes a radial density gradient and no horizontal one.**
   `Drag`'s state-transition matrix needs `∂ρ/∂r`, and four of the five atmospheres exist only in `f64`,
   so each wrapper lifts the value through a local exponential `ρ = ρ₀·exp(−(|r| − |r₀|)/H)`. Two things

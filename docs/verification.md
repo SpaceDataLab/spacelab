@@ -365,6 +365,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 storm flux gain, shipped | Ф23.B step 6: `sdtm::StormGain`, the storm driver times `(F10.7a/150)^κ`, in the evaluator and the refitted field; its algebra against the CAS | `derivations/sdtm_storm_gain.mac` (9 identities, 30-digit values) and `.gp` at 60 digits; the §10.2 campaign; held-out coverage per regime | values to 1e-15; `κ` −1.2993; in sample 20.9 → 20.4 %, held out 21.5 → 20.8 %; campaign 21.9 → 21.5 %, storm time 33.5 → **28.5 %** (JB2008 31.0 %); Ф15.H peak error 39.3 → 26.2 % in sample (JB2008 23.7 %); campaign coverage 89.5 % pooled, high-flux storm cell **80.8 %** (§10.28) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
 | SDTM-1 where it is recommended | Ф23.H: D-5 recommends SDTM-1 inside its fitted envelope, so the envelope is data and the recommendation reachable from both bridges | `sdtm::coefficients::ENVELOPE`, written by `--emit` from the fitted rows; `Envelope::contains` at both closed ends and at NaN; the 64 reference rows inside it; each bridge's SDTM-1 drag constructor against `Drag<SdtmAtmosphere>` built from the crate's types | 224.660–545.488 km, F10.7a 65.8–231.9; the re-emitted field bit-identical; both constructors within 1e-6 m of the crate's system after an hour; `just capi` **12/12** (§10.29) | src/sdtm/mod.rs, tests/sdtm_reference.rs, spacelab-python/src/lib.rs, spacelab-capi/src/lib.rs |
 | SDTM-1 at the largest storms | Ф23.B step 7: the peak deficit at first-day mean `ap` ≥ 120 after §10.28, located before a remedy, then two storm states and an hourly driver held out on the same folds | the 630 comparisons by the storm's first-day mean `ap`, phase and satellite; nitric oxide driven by `mix·H + (1 − mix)·D` and a fast uncooled mode `(1 − w)·D + w·F`, each fitted and fixed, both reducing to the shipped form bit for bit; the cooling state on GFZ's hourly `ap60`; the mixed step against RK4 in Maxima | the deficit is at the **peak**: on time (1.5 h), phase 3 9–10 % under, peak 0.64 at ≥ 180; the satellites of one storm agree, the storms do not (medians 0.365–1.51); `mix` fits to 1.000 and the fast mode to its bound, and fixed neither moves ≥ 180 (0.630–0.642); `ap60` gives 0.71, 449 against 429 peaks within ±3 h, `Ap ≥ 50` 23.9 → 23.4 %, **not shipped** (D-26) (§10.30) | tools/fit-sdtm-corpus.py |
+| SDTM-1 driven by the solar wind | Ф23.B step 8: OMNI's hourly solar wind (CC0, IMF and plasma only) as the storm drive beside `ap60`, held out on §10.30's folds and storms | Newell's coupling mapped onto `ap60`'s distribution, its map checked against a second route on every hour; the drive `(1 − s)·ap60 + s·N` reducing to `--ap60` bit for bit at `s = 0`; `s` fitted and fixed at 1; the fit from two starts, chosen by training cost | `s` 0.478–0.524 in every fold; pooled 20.75 → **20.45 %**, peaks within ±25 % 367 → 375 and ±3 h 449 → 455, ≥ 180 0.71 → **0.94**, mean `|ln M/O|` lower in every bin; the plan's 16 **23.5 %** (JB2008 23.7 %); `Ap ≥ 50` 23.4 → 23.7 %; a second basin at nitric oxide 1 h, 1.2 % higher in cost; an opt-in reconstruction field (D-27, Ф23.I) (§10.31) | tools/fetch-omni.sh, tools/fit-sdtm-corpus.py |
 
 ### Tides
 
@@ -8568,6 +8569,80 @@ about what SDTM-1 is specified on.
 
 **Optimism.** Six more storm states were fitted on the same folds and storms. None is kept, so the
 shipped form's numbers stand. The shipped coefficients and the Rust evaluator are unchanged.
+
+### 10.31 The solar wind lifts the largest storms (Ф23.B, step 8)
+
+**The drive.** NASA's OMNI2 hourly solar wind at the bow-shock nose (King & Papitashvili 2005,
+doi:10.1029/2004JA010649), CC0 by its SPASE record (`docs/provenance.md`, `nasa-omni`), is fetched
+by `tools/fetch-omni.sh`, which keeps the IMF and plasma columns and drops every index, Kyoto's
+among them. Newell et al. (2007)'s coupling `V^(4/3) B_T^(2/3) sin^(8/3)(θ/2)`
+(doi:10.1029/2006JA012015), from the flow speed and the GSM `By` and `Bz`, is mapped onto `ap60`'s
+scale by quantile over every hour that both series have since 1999. The two drives then share one
+distribution and differ only in which hours carry which value. `--solar-wind` drives the storm state
+by `(1 − s)·ap60 + s·N`, `N` the mapped coupling. An hour without the solar wind takes its `ap60`:
+0.54 % of the hours since 1999, 1.2 % of the storm windows, and all of the Halloween 2003 storm,
+whose plasma ACE did not measure. At `s = 0` the design is `--ap60`'s bit for bit, at `s = 1` the
+mapped coupling's, and the map equals the same quantile map of the coupling computed by a second
+route on every hour. Of three couplings, Newell's agrees best with `ap60` by the hour: Spearman
+0.547, against Kan & Lee's 0.542 and `V·Bs`'s 0.407.
+
+**A diagnostic first.** Over each storm's window, from 18 h before `t0` to 36 h after it, the mapped
+coupling's sum divided by `ap60`'s sum was ranked against the `ap60` model's peak ratio. Over all
+629 comparisons with a positive ratio the two correlate as expected: Spearman −0.29, so the model is
+low where the solar wind is stronger than the index. Regressed out, the ratio narrows the spread of
+`ln M/O` from 0.421 to 0.400. At a first-day mean `ap` of 120 or more it shows nothing (+0.17, 31
+comparisons). A sum over a window can only rank storms; the fit can also use the timing.
+
+**The fit.** The same folds and storms as §10.30, every row held out by mission family. The four
+bins are the median peak ratio by first-day mean `ap`; the last column is phase 3's O/C at ≥ 120:
+
+| storm drive | pooled | `Ap ≥ 50` | peak ±25 % | peak ±3 h | recovery ±6 h | < 80 | 80–120 | 120–180 | ≥ 180 | phase 3 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 3-hourly `ap`, shipped (§10.28) | 20.8 % | 23.9 % | 357 | 429 | 477/600 | 1.024 | 0.865 | 0.686 | 0.635 | 1.088 |
+| hourly `ap60` (§10.30) | 20.75 % | 23.4 % | 367 | 449 | 475/593 | 1.029 | 0.907 | 0.733 | 0.707 | 1.082 |
+| the solar wind alone, `s = 1` | 20.75 % | 25.0 % | 307 | 406 | 481/584 | 0.937 | 1.188 | 0.845 | 1.108 | 1.082 |
+| `s` fitted: 0.478–0.524 | 20.45 % | 23.7 % | 375 | 455 | 476/587 | 1.033 | 1.088 | 0.810 | 0.941 | 1.074 |
+
+Fitted, the share is a half in every fold: 0.478 with GRACE held out, 0.497 GRACE-FO, 0.500 CHAMP
+and GOCE, 0.524 Swarm. The corpus wants both drives. The peaks move closer in every bin: the mean
+`|ln M/O|` falls from 0.288 to 0.270 below 80, 0.434 to 0.393 at 80–120, 0.327 to 0.276 at 120–180
+and 0.379 to 0.252 at ≥ 180 (shipped 0.575). The worst storm of §10.30, 2004-07-27 (0.23–0.40
+shipped, 0.44–0.70 on `ap60`), reads 0.84–1.25. The early CHAMP storms that were already high go
+higher (2001-03-31 1.55 → 1.69, 2001-11-06 1.55 → 1.68). On the plan's 16 comparisons the mean error
+is 23.5 % with 11 within ±25 %, against 27.4 % and 12 on `ap60`, 26.7 % and 9 shipped, and JB2008's
+23.7 % on the calendar-month protocol. Its worst are still 2022-04-10 (1.70 and 1.88; `ap60` 2.00
+and 2.22) and GRACE-FO C on 2021-11-03 (1.51). Pooled, the families move by 0.2–0.4 point, all
+better except GOCE (12.7 → 12.9 % raw, 11.3 → 11.1 % debiased).
+
+What the solar wind does not improve is the storm-day rows. `Ap ≥ 50` goes from 23.4 % to 23.7 %:
+CHAMP 19.5 → 19.1 %, Swarm 23.0 → 23.1 %, GRACE 25.5 → 26.2 %, GRACE-FO 25.9 → 26.6 %, GOCE 16.5 →
+18.0 % on 81 rows. The global storm state moves the peaks; it does not move the structure along an
+orbit on a storm day. The solar wind alone keeps the pooled error and loses on the storm days
+(25.0 %) and on the peaks (307 within ±25 %). On the 16 it reads 20.7 %, which says that the two
+drives carry different storms, not that one is the better index.
+
+**The optimiser.** From the tool's start (6 h, 20 h, 300 ap) the fold that holds GRACE-FO out
+reached a second basin. In it the nitric oxide sits at its 1 h bound, with 14.5 h of heating and a
+saturation of 27 ap, and the GRACE-FO C storm peaks fall to 0.31–0.43. Its training cost is 1.2 %
+higher than the basin the other folds reach: 10 071.6 against 9 955.2 when the same fold starts at
+(20.4 h, 30 h, 24 ap). The CHAMP fold, started in that basin, also settles 1.2 % higher (10 449.5
+against 10 325.2). With the solar wind in the drive the fit now starts again from the shipped
+field's kernel and keeps the lower cost. The choice is by the training cost, which the held-out rows
+do not enter. All five folds then agree: heating 20.2–21.0 h, nitric oxide 23.6–39.9 h, saturation
+21–25 ap. The table's last row is that fit.
+
+**Verdict.** The solar wind carries what `ap` lacks at the largest storms. Half the drive from it
+and half from `ap60` gives the best storm peaks, timing and pooled error measured so far. It does
+not help the storm-day rows, and it cannot drive a prediction: the solar wind is measured at L1,
+less than an hour before it reaches the Earth, and the north–south field that the coupling turns on
+is not forecast operationally. `plans/17` D-27 therefore adds the solar wind as a second, opt-in field for
+reconstruction and nowcasting, fitted on hourly `ap60` and OMNI (Ф23.I). The 3-hourly field stays
+the default and the forecast path.
+
+**Optimism.** Four solar-wind drives were fitted on the same folds: the share fitted from one start,
+fixed at 1, fixed at ½, and fitted from two starts. The rows above are the planned two, the share
+fitted and the solar wind alone; the second start is chosen by the training cost. The shipped
+coefficients and the Rust evaluator are unchanged.
 
 ---
 

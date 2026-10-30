@@ -28,7 +28,8 @@ and CHAMP at 300-450 km can.
 drives its nitric oxide by `mix H + (1 - mix) D`, `mix` fixed or fitted, which is that equation
 at `mix = 1` (`mixed_cooling_grid`). `--fast-heating` passes a share `w` of the heating through a
 fast first-order mode that the nitric oxide does not cool (`fast_grid`). `--ap60` drives the storm
-state by GFZ's hourly `ap60` instead of the 3-hourly `ap`. `--storms` then scores every archived
+state by GFZ's hourly `ap60` instead of the 3-hourly `ap`, and `--solar-wind` mixes into it the
+hourly solar-wind coupling of NASA's OMNI (`newell_driver`). `--storms` then scores every archived
 storm on Bruinsma & Laurens (2024)'s protocol (Ф15.H).
 
 `--emit` (with `--cooling`, every fold) writes the shipped field: the same form fitted on all eight
@@ -49,6 +50,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -56,6 +58,7 @@ import time
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
+from scipy.stats import rankdata
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import gen_sdtm_coefficients as g
@@ -103,6 +106,7 @@ def load_corpus(
     windows: list[tuple[pd.Timestamp, pd.Timestamp]] | None = None,
     phase: int = 0,
     ap60: bool = False,
+    wind: bool = False,
 ) -> pd.DataFrame:
     """Every `step`-th corpus row of each satellite, with `gen_sdtm_coefficients.load`'s drivers.
 
@@ -111,6 +115,7 @@ def load_corpus(
     `ap60` drives the storm state by GFZ's hourly series, as `gen_sdtm_coefficients.load` does; the
     storms are still found on the 3-hourly `ap`, so the same storms are scored. Measured and not
     shipped: better peak timing and a fifth of the large-storm gap (`docs/verification.md` §10.30).
+    `wind`, with `ap60`, adds `newell_driver`'s series on the same hourly grid as `attrs["wind"]`.
     """
     frames = []
     for sat in SATELLITES:
@@ -183,9 +188,69 @@ def load_corpus(
         rows.attrs.update(
             driver=hourly, driver_epoch=hourly_epoch, driver_cadence=g.AP60_CADENCE
         )
+        if wind:
+            rows.attrs["wind"] = newell_driver(hourly, hourly_epoch)
     if not (np.isfinite(rows.f107).all() and np.isfinite(rows.f107a).all()):
         sys.exit("SW-All.csv lacks a flux for some corpus day")
     return rows
+
+
+def shipped_kernel() -> tuple[float, float, float]:
+    """The shipped field's `(heating h, nitric h, saturation ap)`, as `coefficients.rs` holds them."""
+    text = OUT_RS.read_text()
+    heating, nitric, saturation = (
+        float(re.search(rf"\b{name}: ([0-9.eE+-]+),", text).group(1))
+        for name in ("heating", "nitric_oxide", "saturation")
+    )
+    return heating / 3600.0, nitric / 3600.0, saturation
+
+
+def newell_driver(hourly: np.ndarray, epoch: pd.Timestamp) -> np.ndarray:
+    """Newell et al. (2007)'s coupling `V^(4/3) B_T^(2/3) sin^(8/3)(theta/2)` on `ap60`'s grid and scale.
+
+    `V` is OMNI's flow speed, `B_T` and the clock angle `theta` its IMF `By` and `Bz` in GSM, all
+    hourly averages from their stamp, as `ap60`'s are (`tools/fetch-omni.sh`). The coupling is
+    mapped onto `ap60` by quantile over every hour both series have, so the two share one
+    distribution and differ only in which hours carry which value; an hour without the solar wind
+    takes its `ap60`. Of three couplings it agrees best with `ap60` by the hour, Spearman 0.547
+    against Kan & Lee's 0.542 and `V Bs`'s 0.407 over 2000-2026.
+    """
+    path = g.DENSITY / "omni2_sw_hourly.txt"
+    if not path.exists():
+        sys.exit(f"no {path.name}; run tools/fetch-omni.sh")
+    frame = pd.read_csv(
+        path,
+        sep=r"\s+",
+        comment="#",
+        header=None,
+        usecols=[0, 5, 6, 9],
+        names=["hour", "by", "bz", "v"],
+        na_values=["null"],
+        engine="c",
+    )
+    start = pd.to_datetime(frame.hour, format="%Y-%m-%dT%H")
+    step = start.diff().iloc[1:].unique()
+    if step.size != 1 or step[0] != pd.Timedelta(hours=1):
+        sys.exit(f"{path.name} is not a contiguous hourly grid: steps {step}")
+    by, bz, v = (frame[c].to_numpy() for c in ("by", "bz", "v"))
+    clock = np.arctan2(by, bz)
+    coupling = v ** (4.0 / 3.0) * np.hypot(by, bz) ** (2.0 / 3.0)
+    coupling *= np.abs(np.sin(clock / 2.0)) ** (8.0 / 3.0)
+    lead = int((start.iloc[0] - epoch) / pd.Timedelta(hours=1))
+    if lead < 0:
+        sys.exit(f"{path.name} starts before the ap60 series")
+    on_grid = np.full(hourly.size, np.nan)
+    span = min(coupling.size, hourly.size - lead)
+    on_grid[lead : lead + span] = coupling[:span]
+    present = np.isfinite(on_grid)
+    rank = (rankdata(on_grid[present]) - 0.5) / present.sum()
+    out = hourly.copy()
+    out[present] = np.quantile(hourly[present], rank)
+    print(
+        f"{path.name}: the solar wind fills {present.sum()} of the {span} hours it spans",
+        flush=True,
+    )
+    return out
 
 
 STORM_COLUMNS = [4, 5, 6, 7]
@@ -206,6 +271,8 @@ class Packing:
     """Or the nitric oxide's drive mixes the index and the response, `ln mix` in that slot."""
     fast: bool = False
     """And a fast, uncooled heating mode: `ln tau_f` and `ln w` in two kernel slots after those."""
+    wind: bool = False
+    """Or the solar wind's share of the drive, `ln share` in the fourth kernel slot."""
     free_excess: bool = False
     """The daily flux excess's saturation scale is fitted, after `sigma` (Ф23.G)."""
     free_gain: bool = False
@@ -237,6 +304,11 @@ class Packing:
         return self.n_c + 3 if self.mixed else -1
 
     @property
+    def i_wind(self) -> int:
+        """`ln share`, the solar wind's share of the drive; absent unless it is fitted."""
+        return self.n_c + 3 if self.wind else -1
+
+    @property
     def i_fast(self) -> int:
         """`ln tau_f`, the fast mode's time in hours, then `ln w`; absent without the mode."""
         return self.n_c + 3 + int(self.capped or self.mixed) if self.fast else -1
@@ -245,7 +317,7 @@ class Packing:
     def n_kernel(self) -> int:
         if not self.cooling:
             return 2
-        return 3 + int(self.capped or self.mixed) + 2 * int(self.fast)
+        return 3 + int(self.capped or self.mixed or self.wind) + 2 * int(self.fast)
 
     @property
     def i_boundary(self) -> int:
@@ -411,6 +483,7 @@ class CorpusModel:
         gain: str | None = None,
         mix: float | str | None = None,
         fast: tuple[float, float] | str | None = None,
+        wind: float | str | None = None,
     ):
         """`excess` saturates the daily flux excess: `None` keeps it linear, a number is a fixed
         scale `D`, `"fit"` fits `D` with the other nonlinear parameters. `gain`, with `kappa`
@@ -421,13 +494,16 @@ class CorpusModel:
         `"input"` with `(F10.7a/150)^kappa`, flatter than `exp(kappa f)` at high flux. `mix`, with
         cooling, drives the nitric oxide by `mix H + (1 - mix) D`: `None` keeps `H`, a number is a
         fixed share, `"fit"` fits it in a fourth kernel slot. `fast`, with cooling: `None` has no
-        fast mode, `(tau_f h, w)` a fixed one, `"fit"` fits both after the other kernel slots."""
+        fast mode, `(tau_f h, w)` a fixed one, `"fit"` fits both after the other kernel slots.
+        `wind`, with cooling and an hourly driver: the drive is `(1 - share) ap60 + share N`, `N` in
+        `arg["wind"]`; `None` has no solar wind, a number is a fixed share, `"fit"` fits it."""
         self.a = arg
         self.sat = sat
         self.sigma = sigma
         self.excess_scale = excess if isinstance(excess, float) else None
         self.mix_share = mix if isinstance(mix, float) else None
         self.fast_mode = fast if isinstance(fast, tuple) else None
+        self.wind_share = wind if isinstance(wind, float) else None
         self.pairs = np.argwhere(
             g.harmonic_mask(caps, arg["k"]).reshape(g.DRIVERS, arg["k"])
         )
@@ -439,6 +515,7 @@ class CorpusModel:
             capped=cooling == "capped",
             mixed=mix == "fit",
             fast=fast == "fit",
+            wind=wind == "fit",
             free_excess=excess == "fit",
             free_gain=gain is not None,
             free_knee=gain == "input-knee",
@@ -463,7 +540,7 @@ class CorpusModel:
                 (
                     (6.0, 20.0, 300.0)
                     + ((10.0,) if cooling == "capped" else ())
-                    + ((0.5,) if mix == "fit" else ())
+                    + ((0.5,) if mix == "fit" or wind == "fit" else ())
                     + ((2.0, 0.1) if fast == "fit" else ())
                 )
                 if cooling
@@ -486,6 +563,7 @@ class CorpusModel:
             slots = (pk.i_onset, pk.i_gap, pk.i_cool) + (
                 (pk.i_cap,) if pk.capped else ((pk.i_mix,) if pk.mixed else ())
             )
+            slots += (pk.i_wind,) if pk.wind else ()
             slots += (pk.i_fast, pk.i_fast + 1) if pk.fast else ()
             return tuple(float(np.exp(p[j])) for j in slots)
         onset = np.exp(p[pk.i_onset]) * 3600.0
@@ -523,6 +601,10 @@ class CorpusModel:
         key = (*kernel, excess, gain, knee)
         if self._design_key == key and self._design is not None:
             return self._design
+        drive = self.a["ap"]
+        if self.pack.wind or self.wind_share is not None:
+            share = kernel[3] if self.pack.wind else self.wind_share
+            drive = (1.0 - share) * drive + share * self.a["wind"]
         if self.pack.mixed or self.mix_share is not None:
             share = kernel[3] if self.pack.mixed else self.mix_share
             grid = mixed_cooling_grid(
@@ -530,11 +612,11 @@ class CorpusModel:
             )
         elif self.pack.cooling:
             grid = cooling_grid(
-                self.a["ap"],
+                drive,
                 *kernel[:3],
                 self.a["cadence"],
                 self.first,
-                cap=kernel[3] if len(kernel) == 4 else np.inf,
+                cap=kernel[3] if self.pack.capped else np.inf,
             )
         else:
             grid = g.storm_grid(self.a["ap"], *kernel, self.a["cadence"])
@@ -609,6 +691,7 @@ class CorpusModel:
         slots = (pk.i_onset, pk.i_gap) + ((pk.i_cool,) if pk.cooling else ())
         slots += (pk.i_cap,) if pk.capped else ()
         slots += (pk.i_mix,) if pk.mixed else ()
+        slots += (pk.i_wind,) if pk.wind else ()
         slots += (pk.i_fast, pk.i_fast + 1) if pk.fast else ()
         slots += (pk.i_sigma,) if pk.free_sigma else ()
         slots += (pk.i_excess,) if pk.free_excess else ()
@@ -652,6 +735,10 @@ class CorpusModel:
             # From a drive that is almost all response to the shipped one, all index.
             start[pk.i_mix] = np.log(0.5)
             lower[pk.i_mix], upper[pk.i_mix] = np.log(1.0e-3), 0.0
+        if pk.wind:
+            # From a drive that is almost all ap60 to one that is all solar wind.
+            start[pk.i_wind] = np.log(0.5)
+            lower[pk.i_wind], upper[pk.i_wind] = np.log(1.0e-3), 0.0
         if pk.fast:
             # Faster than a 3 h interval to a quarter day; a share from none to half the heating.
             start[pk.i_fast], start[pk.i_fast + 1] = np.log(2.0), np.log(0.1)
@@ -684,6 +771,25 @@ class CorpusModel:
             max_nfev=80,
             verbose=0,
         )
+        if pk.wind or self.wind_share is not None:
+            # With the solar wind in the drive a second basin, nitric oxide at its 1 h bound and
+            # a training cost 1.2 % higher, catches the start above in one fold of five
+            # (`docs/verification.md` §10.31): start again from the shipped field's kernel and
+            # keep the lower cost.
+            start = start.copy()
+            start[[pk.i_onset, pk.i_gap, pk.i_cool]] = np.log(shipped_kernel())
+            again = least_squares(
+                self.residual,
+                start,
+                jac=self.jacobian,
+                args=(index,),
+                bounds=(lower, upper),
+                x_scale="jac",
+                max_nfev=80,
+                verbose=0,
+            )
+            if again.cost < out.cost:
+                out = again
         return out.x
 
 
@@ -1060,6 +1166,12 @@ def fast_option(argument: argparse.Namespace) -> tuple[float, float] | str | Non
     return tau, share
 
 
+def wind_option(argument: argparse.Namespace) -> float | str | None:
+    """`--solar-wind` as `CorpusModel` takes it."""
+    value = argument.solar_wind
+    return value if value in (None, "fit") else float(value)
+
+
 def mix_option(argument: argparse.Namespace) -> float | str | None:
     """`--cooling-mix` as `CorpusModel` takes it."""
     value = argument.cooling_mix
@@ -1129,6 +1241,13 @@ def main() -> None:
         "storms are still found on the 3-hourly ap",
     )
     parser.add_argument(
+        "--solar-wind",
+        metavar="SHARE|fit",
+        help="with --ap60, drive the storm state by (1 - SHARE) ap60 + SHARE N, N the Newell "
+        "coupling of OMNI's hourly solar wind on ap60's scale, SHARE fixed in [0, 1] or fitted "
+        "in every fold",
+    )
+    parser.add_argument(
         "--fast-heating",
         metavar="TAU,W|fit",
         help="pass a share W of the heating through a fast uncooled mode of TAU hours, fixed or "
@@ -1172,6 +1291,26 @@ def main() -> None:
             )
     if argument.ap60 and argument.emit:
         sys.exit("--ap60 is a fold experiment: --emit writes the 3-hourly field")
+    if argument.solar_wind is not None:
+        if not (argument.cooling and argument.ap60) or argument.emit:
+            sys.exit(
+                "--solar-wind mixes into --ap60's hourly drive under --cooling, no --emit"
+            )
+        if (
+            argument.cooling_cap
+            or argument.cooling_mix is not None
+            or argument.fast_heating
+        ):
+            sys.exit(
+                "--solar-wind takes --cooling alone, without a cap, a mix or a fast mode"
+            )
+        if (
+            argument.solar_wind != "fit"
+            and not 0.0 <= float(argument.solar_wind) <= 1.0
+        ):
+            sys.exit(
+                f"--solar-wind is a share in [0, 1] or fit, not {argument.solar_wind}"
+            )
     if argument.fast_heating is not None:
         if (
             not argument.cooling
@@ -1200,7 +1339,12 @@ def main() -> None:
     sigma = None if argument.fit_sigma else argument.sigma
 
     began = time.time()
-    rows = load_corpus(argument.step, phase=argument.phase, ap60=argument.ap60)
+    rows = load_corpus(
+        argument.step,
+        phase=argument.phase,
+        ap60=argument.ap60,
+        wind=argument.solar_wind is not None,
+    )
     day_ap = rows.attrs["ap"].reshape(-1, 8).mean(axis=1)
     ap_daily = day_ap[
         (rows.t.dt.normalize() - rows.attrs["ap_epoch"]).dt.days.to_numpy()
@@ -1210,9 +1354,11 @@ def main() -> None:
         flush=True,
     )
     arg = g.fit_arguments(rows, argument.degree)
+    arg["wind"] = rows.attrs.get("wind")
     excess = excess_option(argument)
     mix = mix_option(argument)
     fast = fast_option(argument)
+    wind = wind_option(argument)
     sat = rows.sat.to_numpy()
     caps = g.CAPS[argument.caps]
 
@@ -1234,6 +1380,7 @@ def main() -> None:
             argument.storm_gain,
             mix,
             fast,
+            wind,
         )
         if argument.storm_weight is not None:
             model.root_weight = np.sqrt(
@@ -1259,6 +1406,7 @@ def main() -> None:
                 f"heating {kernel[0]:.2f} h  NO {kernel[1]:.1f} h  saturation {kernel[2]:.0f} ap  "
                 + (f"cap q {kernel[3]:.2f}  " if pk.capped else "")
                 + (f"mix {kernel[3]:.3f}  " if pk.mixed else "")
+                + (f"solar wind {kernel[3]:.3f}  " if pk.wind else "")
                 + (
                     f"fast {kernel[-2]:.2f} h share {kernel[-1]:.3f}  "
                     if pk.fast
@@ -1317,6 +1465,7 @@ def main() -> None:
             argument.storm_gain,
             mix,
             fast,
+            wind,
         )
         p = model.fit(np.arange(len(rows)))
         r, _ = model.score(p, np.arange(len(rows)))
@@ -1357,7 +1506,9 @@ def storms(
         )
         for s in found
     ]
-    window_rows = load_corpus(1, windows=windows, ap60=argument.ap60)
+    window_rows = load_corpus(
+        1, windows=windows, ap60=argument.ap60, wind=argument.solar_wind is not None
+    )
     window_rows = window_rows[window_rows.family.isin(fitted)].reset_index(drop=True)
     window_rows["mission"] = window_rows.sat
     print(
@@ -1368,7 +1519,9 @@ def storms(
     excess = excess_option(argument)
     mix = mix_option(argument)
     fast = fast_option(argument)
+    wind = wind_option(argument)
     arg = g.fit_arguments(window_rows, argument.degree)
+    arg["wind"] = window_rows.attrs.get("wind")
     sat = window_rows.sat.to_numpy()
     caps = g.CAPS[argument.caps]
     held = np.full(len(window_rows), np.nan)
@@ -1385,6 +1538,7 @@ def storms(
             argument.storm_gain,
             mix,
             fast,
+            wind,
         )
         here = np.where(window_rows.family.to_numpy() == fam)[0]
         held[here] = model.score(p, here)[0]

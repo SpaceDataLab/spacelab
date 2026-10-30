@@ -165,7 +165,11 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   made it worse (§10.15). Hourly `ap60` made it worse under the old kernel (§10.15); under the cooling
   state it recovers a fifth of the large-storm gap (0.64 → 0.71) and sharpens the peak's timing. It is
   not the shipped driver: GFZ's forecast of it reaches 72 h and is described as under development.
-  Neither the nitric oxide's drive nor a fast uncooled mode lifts the largest storms (§10.30).
+  Neither the nitric oxide's drive nor a fast uncooled mode lifts the largest storms (§10.30). Driven
+  half by the measured solar wind and half by `ap60`, a held-out fit lifts them to 0.94 of the
+  observed peak at the median, with the pooled error 20.75 → 20.45 % and the storm-day rows 23.4 →
+  23.7 % (§10.31). That field is not in the release yet, and it cannot drive a prediction: the solar
+  wind is measured less than an hour before it reaches the Earth.
 - **In the drag path an empirical atmosphere contributes a radial density gradient and no horizontal one.**
   `Drag`'s state-transition matrix needs `∂ρ/∂r`, and four of the five atmospheres exist only in `f64`,
   so each wrapper lifts the value through a local exponential `ρ = ρ₀·exp(−(|r| − |r₀|)/H)`. Two things

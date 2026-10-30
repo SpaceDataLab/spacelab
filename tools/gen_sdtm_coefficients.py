@@ -721,6 +721,22 @@ STORM_AP = 80.0
 PHASES = ((-30.0, -18.0), (-18.0, 0.0), (0.0, 36.0), (36.0, 48.0))
 """Storm phases in hours from `t0` for a single-peak storm: pre-storm, onset, main, post-storm."""
 
+SCORED_PHASES = {2: "onset", 3: "main and recovery", 4: "post-storm"}
+"""The phases scored apart, by number. Phase 1 is the debiasing window: its `<O/C>` is 1 by design."""
+
+PHASE_RECORD = (
+    "t0",
+    "peak_ap",
+    "multiple_peak",
+    "mission",
+    "phase",
+    "n",
+    "log_mean",
+    "scatter",
+    "R",
+)
+"""One comparison's statistics in one scored phase, as `storm_assessment` returns them."""
+
 
 def storm_onsets(ap: np.ndarray, epoch: pd.Timestamp) -> list[dict]:
     """Every storm in a 3-hourly `ap` series, on the protocol of Bruinsma & Laurens (2024) 2.
@@ -854,21 +870,46 @@ def storm_window_rows(centred_mean: bool, storm_driver: str) -> pd.DataFrame | N
     return out
 
 
+def storm_statistics(
+    observed: np.ndarray, log_ratio: np.ndarray
+) -> tuple[float, float, float]:
+    """Bruinsma & Laurens (2024) Eq. (1) on a set of kept pairs: `ln <O/C>`, the StD of `ln(O/C)`
+    about it in per cent, and the Pearson R of the observed and the debiased computed density.
+
+    `log_ratio` is the debiased `ln(O/C)`, so the computed density is `observed * exp(-log_ratio)`.
+    An empty set has no statistic, and one pair has no correlation: those are `nan`.
+    """
+    if observed.size == 0:
+        return float("nan"), float("nan"), float("nan")
+    computed = observed * np.exp(-log_ratio)
+    correlation = (
+        float(np.corrcoef(observed, computed)[0, 1])
+        if observed.size > 1
+        else float("nan")
+    )
+    return float(log_ratio.mean()), 100.0 * float(np.std(log_ratio)), correlation
+
+
 def storm_assessment(
     rows: pd.DataFrame,
     residual: np.ndarray,
     label: str,
     missions: tuple[str, ...] = ("GRACE-FO-C", "SWARM-A"),
-) -> None:
+) -> pd.DataFrame:
     """The storm statistics of Bruinsma & Laurens (2024) Eq. (1) on a *held-out* residual.
 
     `residual` is `ln(rho_model/rho_measured)`, so the paper's observed-to-computed ratio is
     `exp(-residual)` and its debiasing -- a scale factor fitted on phase 1 and applied to the model in
     every phase -- is a constant shift of the residual. The scatter is therefore unchanged by the
     debiasing and the mean ratio is what moves, which is the point of reporting both.
+
+    Returns Eq. (1) per comparison and scored phase (`PHASE_RECORD`), where the phase kept two pairs
+    or more, for `phase_scorecard`.
     """
     storms = storm_onsets(rows.attrs["ap"], rows.attrs["ap_epoch"])
     time = rows.t.to_numpy()
+    observed = rows.rho.to_numpy()
+    records: list[tuple] = []
     print(f"\n== storm assessment on the {label} residual ==")
     print(
         "t0                   peak ap  type  mission      "
@@ -893,17 +934,28 @@ def storm_assessment(
             inside = phases[0] | phases[1] | phases[2] | phases[3]
             log_ratio = -(residual - shift)
             keep = inside & (np.abs(log_ratio) < np.log(10.0))
-            mean_ratio = float(np.exp(log_ratio[keep].mean()))
-            scatter = 100.0 * float(np.std(log_ratio[keep]))
-            o = rows.rho.to_numpy()[keep]
-            c = o * np.exp(residual[keep] - shift)
-            correlation = float(np.corrcoef(o, c)[0, 1]) if o.size > 1 else float("nan")
-            per_phase = [
-                float(np.exp(log_ratio[p & keep].mean()))
-                if (p & keep).any()
-                else float("nan")
-                for p in phases[1:]
-            ]
+            log_mean, scatter, correlation = storm_statistics(
+                observed[keep], log_ratio[keep]
+            )
+            mean_ratio = float(np.exp(log_mean))
+            in_phase = {k: phases[k - 1] & keep for k in SCORED_PHASES}
+            per_phase = {
+                k: storm_statistics(observed[m], log_ratio[m])
+                for k, m in in_phase.items()
+            }
+            records.extend(
+                (
+                    storm["t0"],
+                    storm["peak_ap"],
+                    storm["multiple_peak"],
+                    mission,
+                    k,
+                    int(m.sum()),
+                    *per_phase[k],
+                )
+                for k, m in in_phase.items()
+                if m.sum() >= 2
+            )
             # Timing, on the orbit-averaged series. The pre-storm phase is binned too, because the
             # quiet level it fixes is what the enhancement below is measured against.
             window = (phases[0] | phases[1] | phases[2]) & keep
@@ -941,12 +993,13 @@ def storm_assessment(
                 f"{storm['t0']:%Y-%m-%d %H:%M}  {storm['peak_ap']:7.0f}  "
                 f"{'MP' if storm['multiple_peak'] else 'SP'}    {mission:<12}"
                 f"{int(keep.sum()):6d}{mean_ratio:8.3f}{scatter:8.1f}{correlation:7.3f}"
-                + "".join(f"{x:10.3f}" for x in per_phase)
+                + "".join(f"{np.exp(x[0]):10.3f}" for x in per_phase.values())
                 + f"{onset:9.1f}{peak_ratio:10.3f}{delta_tau:10.1f}"
             )
+    table = pd.DataFrame.from_records(records, columns=PHASE_RECORD)
     if seen == 0:
         print("no storm in the corpus has all four phases covered by either mission")
-        return
+        return table
     # The aggregate, computed here rather than by hand off the table above: the mean of the per-storm
     # mean ratios in log space and the spread of those means, which is the pair the literature reports,
     # then the three timing numbers the verdict is stated in.
@@ -967,6 +1020,33 @@ def storm_assessment(
             f"  {name:<16} mean {np.mean(values[good]):7.2f}  worst {np.max(values[good]):7.2f}  "
             f"within {bound:g}: {int((values[good] <= bound).sum())} of {int(good.sum())}"
         )
+    return table
+
+
+def phase_scorecard(records: pd.DataFrame, label: str) -> None:
+    """Eq. (1) per scored phase, averaged over comparisons the way Bruinsma & Laurens's tables are.
+
+    Each comparison -- one storm seen by one satellite -- counts once, as in `storm_assessment`'s
+    whole-storm aggregate: `<O/C>` is the geometric mean of the comparisons' own and `StD<O/C>` their
+    spread in the log; the in-phase StD and R are plain means. Rows by satellite follow each phase.
+    """
+    print(
+        f"\n== per-phase scorecard, {label}: {records.t0.nunique()} storms, "
+        f"{len(records[['t0', 'mission']].drop_duplicates())} comparisons =="
+    )
+    print("phase              mission     n   <O/C>  StD<O/C> %  mean StD %  mean R")
+    for phase, name in SCORED_PHASES.items():
+        here = records[records.phase == phase]
+        parts = [("all", here)] + [
+            (mission, here[here.mission == mission])
+            for mission in sorted(set(here.mission))
+        ]
+        for mission, part in parts:
+            log_mean = part.log_mean.to_numpy()
+            print(
+                f"{name:<18} {mission:<10}{len(part):5d}{np.exp(log_mean.mean()):8.3f}"
+                f"{100.0 * np.std(log_mean):12.1f}{part.scatter.mean():12.1f}{part.R.mean():8.3f}"
+            )
 
 
 def mape(residual: np.ndarray) -> float:

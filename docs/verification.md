@@ -367,6 +367,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 at the largest storms | Ф23.B step 7: the peak deficit at first-day mean `ap` ≥ 120 after §10.28, located before a remedy, then two storm states and an hourly driver held out on the same folds | the 630 comparisons by the storm's first-day mean `ap`, phase and satellite; nitric oxide driven by `mix·H + (1 − mix)·D` and a fast uncooled mode `(1 − w)·D + w·F`, each fitted and fixed, both reducing to the shipped form bit for bit; the cooling state on GFZ's hourly `ap60`; the mixed step against RK4 in Maxima | the deficit is at the **peak**: on time (1.5 h), phase 3 9–10 % under, peak 0.64 at ≥ 180; the satellites of one storm agree, the storms do not (medians 0.365–1.51); `mix` fits to 1.000 and the fast mode to its bound, and fixed neither moves ≥ 180 (0.630–0.642); `ap60` gives 0.71, 449 against 429 peaks within ±3 h, `Ap ≥ 50` 23.9 → 23.4 %, **not shipped** (D-26) (§10.30) | tools/fit-sdtm-corpus.py |
 | SDTM-1 driven by the solar wind | Ф23.B step 8: OMNI's hourly solar wind (CC0, IMF and plasma only) as the storm drive beside `ap60`, held out on §10.30's folds and storms | Newell's coupling mapped onto `ap60`'s distribution, its map checked against a second route on every hour; the drive `(1 − s)·ap60 + s·N` reducing to `--ap60` bit for bit at `s = 0`; `s` fitted and fixed at 1; the fit from two starts, chosen by training cost | `s` 0.478–0.524 in every fold; pooled 20.75 → **20.45 %**, peaks within ±25 % 367 → 375 and ±3 h 449 → 455, ≥ 180 0.71 → **0.94**, mean `|ln M/O|` lower in every bin; the plan's 16 **23.5 %** (JB2008 23.7 %); `Ap ≥ 50` 23.4 → 23.7 %; a second basin at nitric oxide 1 h, 1.2 % higher in cost; an opt-in reconstruction field (D-27, Ф23.I) (§10.31) | tools/fetch-omni.sh, tools/fit-sdtm-corpus.py |
 | SDTM-1 solar-wind field, shipped | Ф23.I (D-27): §10.31's drive as a second, opt-in field for reconstruction and nowcasting; the 3-hourly field stays the default | a 34-knot quantile map a caller can evaluate, refitted on §10.31's folds; Rust against the generator on 64 field rows and 384 synthetic hours (gaps, both ends of the map, due north, a zero field); Newell's coupling against `derivations/sdtm_solar_wind.mac` (8 identities, 30-digit values) and `.gp` at 60 digits; both bridges against the crate's types, the history they quote held to `HISTORY` | pooled **20.45 %** held out, equal to §10.31; peaks within ±3 h 455 → 461; `s` 0.500, `κ` −1.2794, in sample 20.0 %; `HISTORY` 336 hours; σ narrower in every cell, the worst family covering **78.2 %** of the low-flux active cell; `T∞` 2.0e-15, ρ 1.0e-14, the hourly path 7.4e-16, the coupling against the CAS 7.8e-16; `just capi` **12/12**; mutation 61 + 159 + 307 caught, **0** missed after one boundary test (§10.32) | src/sdtm/solar_wind.rs, tests/sdtm_solar_wind_reference.rs, spacelab-python/src/lib.rs, spacelab-capi/src/lib.rs, tools/fit-sdtm-corpus.py |
+| SDTM-1 by storm phase, in Wang et al. (2026)'s form | Ф23.C: §10.14's protocol scored per phase — onset, main and recovery, post-storm — on Wang et al.'s storms and satellites, so the article can set SDTM-1 beside their CCMC assessment | `storm_assessment` per phase against Maxima at 40 digits on a synthetic multiple-peak storm; the scorecard against Maxima on 114 records; both shipped fields' whole-storm counts reproduced | worst **3.8e-16** relative, kept pairs identical; 166 storms, 293 comparisons, held out by family: main and recovery `⟨O/C⟩` **1.022** (solar wind 1.007) against NRLMSISE-00's 1.111, post-storm 1.036 against 0.999; Wang et al.'s MSIS finding (20–30 % and 10 % low) is not reproduced: `⟨O/C⟩` 1.111 and 0.999 (§10.33) | tools/fit-sdtm-corpus.py |
 
 ### Tides
 
@@ -8747,6 +8748,111 @@ test asked for the bound. The refusal test now holds both bounds from each side,
 values where the solar-wind fit has four, and it wrote no file. The line was corrected, a thinned emit
 (`--step 1200`) ran the whole path first, and the full emit then wrote the shipped files over the
 thinned ones. The folds could tune nothing in the map: it has no free parameter.
+
+### 10.33 Storm phases in the form of Wang et al. (2026) (Ф23.C)
+
+§10.22 scores whole storms. The CCMC assessment of **Wang et al. (2026)**, *Comprehensive and Open
+Assessment of Thermospheric Models During Geomagnetic Storm Times Within CCMC Framework*, Space
+Weather **24**(4), doi:10.1029/2025SW004782, scores each storm phase apart. It runs empirical and
+physics models — MSIS, DTM, JB2008, WAM-IPE, WACCM-X, GITM, CTIPe, TIE-GCM — over 151 storms of
+2001–2023 against the TU Delft densities of CHAMP, GOCE, GRACE, GRACE-FO and Swarm A. Bruinsma and
+Laurens are among its authors, and the protocol is the one §10.14 implements: storms at `ap` ≥ 80,
+phases from the peak `ap`, each model scaled to the measurements on the pre-storm phase, then the
+debiased mean O/C, the standard deviation and the Pearson correlation in the onset, the main and
+recovery, and the post-storm phase. This section puts SDTM-1 in that form, so that the article can
+set our numbers beside theirs.
+
+**What was read.** The article's abstract (from OpenAlex) and its EGU25-1673 abstract. The tables
+were not: the publisher and DOAJ answer 403 to a script, the TU Delft repository copy did not answer,
+and the CCMC ITMAP page publishes no numbers. So the comparison below is with the abstract's
+findings: DTM2020 is best in every phase, then JB2008 and DTM2013, and the MSIS models are low by
+about 20–30 % in main and recovery and about 10 % post-storm. One statement disagrees with the
+others: the team's CCMC ISWAT page (G2A-01) dates a storm by its minimum `Dst`, the EGU abstract
+and Bruinsma & Laurens (2024) by its peak `ap`. We use the peak `ap`. Kyoto's `Dst` cannot be used
+here (its terms forbid commercial use), and the USGS `Dst` this tree holds starts on 2015-09-24.
+
+**The form.** `storm_assessment` (`tools/gen_sdtm_coefficients.py`) now returns Eq. (1) for every
+comparison — one storm seen by one satellite — in each of phases 2, 3 and 4. `phase_scorecard`
+averages them per phase as §10.22 averages whole storms: each comparison counts once, `⟨O/C⟩` is
+the geometric mean of the comparisons' own, `StD⟨O/C⟩` their spread in the log, and the in-phase
+StD and R are plain means. `tools/fit-sdtm-corpus.py --storms` prints the scorecard over every
+comparison and over Wang et al.'s scope: `t0` in 2001–2023, and CHAMP, GRACE A, GOCE, GRACE-FO C and
+Swarm A. GRACE B flies 220 km behind GRACE A, so both would count GRACE twice. `--storm-table`
+writes the statistics, and `--scorecard` pools the tables of the five runs that each held out one
+family.
+
+**The cross-check.** A synthetic multiple-peak storm went through `storm_assessment`: a second
+interval at `ap` 95 fifteen hours after the first peak, so phase 3 ends at `t0` + 51 h, and in each
+phase one pair more than a factor of ten off. Maxima recomputed the phase windows, the debiasing,
+the rejection and Eq. (1) from the dumped series at 40 digits. The kept pairs are the same (539,
+1 528, 359), and the worst relative difference over the nine statistics is **3.8e-16**. The scorecard
+of a smoke run's 114 records, recomputed in Maxima, agrees to the printed digit. The runs reproduce
+the whole-storm counts of both shipped fields: 357, 429 and 477/600 (§10.28), and 376, 461 and
+479/587 (§10.32).
+
+**By phase, on Wang et al.'s scope**: 168 storms reach `ap` 80 with `t0` in 2001–2023, and **166**
+have all four phases on at least one of the five satellites, **293** comparisons. Every SDTM-1 row is
+held out by mission family (§10.21):
+
+| phase | model | comparisons | `⟨O/C⟩` | StD `⟨O/C⟩` | mean StD | mean R |
+|---|---|---|---|---|---|---|
+| onset | SDTM-1, 3-hourly `ap` (shipped) | 293 | 1.055 | 8.4 % | 18.2 % | 0.872 |
+| | SDTM-1, solar wind (opt-in) | 293 | **1.031** | **6.9 %** | **17.5 %** | **0.882** |
+| | NRLMSISE-00, `ap[]` | 293 | 1.037 | 11.6 % | 19.4 % | 0.863 |
+| main and recovery | SDTM-1, 3-hourly `ap` | 293 | 1.022 | 14.1 % | 19.0 % | 0.876 |
+| | SDTM-1, solar wind | 293 | **1.007** | **13.5 %** | **18.0 %** | **0.891** |
+| | NRLMSISE-00 | 291 | 1.111 | 17.7 % | 20.2 % | 0.863 |
+| post-storm | SDTM-1, 3-hourly `ap` | 293 | 1.036 | 15.8 % | 14.4 % | 0.924 |
+| | SDTM-1, solar wind | 293 | 1.031 | **14.9 %** | **14.2 %** | **0.927** |
+| | NRLMSISE-00 | 291 | **0.999** | 18.6 % | **14.2 %** | 0.924 |
+
+Main and recovery, by satellite (`⟨O/C⟩`; NRLMSISE-00's comparisons in brackets where they differ):
+
+| satellite | comparisons | SDTM-1, 3-hourly | SDTM-1, solar wind | NRLMSISE-00 |
+|---|---|---|---|---|
+| CHAMP | 86 (85) | 1.015 | 1.001 | 1.066 |
+| GRACE A | 113 (112) | 1.011 | 0.988 | 1.122 |
+| GOCE | 19 | 1.029 | 1.020 | 1.089 |
+| GRACE-FO C | 21 | 1.013 | 1.007 | 1.129 |
+| Swarm A | 54 | 1.060 | 1.051 | 1.160 |
+
+Over every comparison — 204 storms and 630 comparisons, with 2024–2026 and GRACE B, Swarm B and C —
+no `⟨O/C⟩` in the first table moves by more than 0.013.
+
+**In main and recovery SDTM-1 is ahead.** This phase holds most of a storm's extra drag. Both SDTM-1
+fields' `⟨O/C⟩` are within 0.022 of unity, where NRLMSISE-00's is 1.111, and both have the smaller
+spread and scatter and the higher correlation. Every satellite agrees: NRLMSISE-00 reads
+1.066–1.160, the shipped field 1.011–1.060, the solar-wind field 0.988–1.051.
+
+**In the onset and after the storm, NRLMSISE-00 has the level and SDTM-1 the consistency.**
+NRLMSISE-00's post-storm `⟨O/C⟩` is 0.999; SDTM-1's are 1.036 and 1.031, so after the storm the
+measured density is 3–4 % above our model, which is Ф23.D's question. In the onset it is 5.5 % above
+the shipped field, 3.7 % above NRLMSISE-00 and 3.1 % above the solar-wind field. In both phases
+SDTM-1's storm-to-storm spread is smaller (8.4 and 6.9 % against 11.6 %; 15.8 and 14.9 % against
+18.6 %), and its correlation is equal or higher.
+
+**The solar-wind field is better than the shipped field in every phase and on every statistic**,
+which is §10.31's result in this form. It reconstructs and nowcasts and cannot forecast (§10.32): a
+forecast gets the 3-hourly field's numbers.
+
+**Against Wang et al.'s findings.** They find the MSIS models low by about 20–30 % in main and
+recovery and about 10 % post-storm. On our protocol NRLMSISE-00's `⟨O/C⟩` is 1.111 and 0.999, 11 %
+and 0 % in the same sense, so this form does not reproduce their MSIS finding, and the abstract does
+not say which step differs. Four candidates, none tested here: the driver (we run NRLMSISE-00 on the
+3-hourly `ap[]` history, §10.2, and the abstract does not name its `ap` input); the epoch (minimum
+`Dst` or peak `ap`); the aggregation (one vote per comparison here); and the models (their "MSIS
+models" are plural, and of the MSIS family this tree runs NRLMSISE-00 only). The storms differ too:
+166 here against their 151, and the abstract does not give their selection. So the NRLMSISE-00 rows
+are a reference in our form, not a reproduction of their MSIS row. Their best model, DTM2020, has no
+row here: its numbers are not in the abstract, and it was fitted on these densities, while every
+SDTM-1 row above is held out.
+
+**The one storm NRLMSISE-00 loses.** On 2005-09-11 the pre-storm phase reads the previous day's
+F10.7, which is the flare-contaminated 707.6 sfu of 2005-09-09 (§10.21). NRLMSISE-00's scale factor
+is set at that flux, so from `t0` on every pair is more than a factor of ten off and is rejected:
+phases 3 and 4 of that storm on CHAMP and GRACE A (and GRACE B) have no NRLMSISE-00 statistic, so
+the tables count 291 there. SDTM-1 keeps them: its daily flux excess saturates at that flux
+(§10.26).
 
 ---
 

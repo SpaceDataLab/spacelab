@@ -30,7 +30,9 @@ at `mix = 1` (`mixed_cooling_grid`). `--fast-heating` passes a share `w` of the 
 fast first-order mode that the nitric oxide does not cool (`fast_grid`). `--ap60` drives the storm
 state by GFZ's hourly `ap60` instead of the 3-hourly `ap`, and `--solar-wind` mixes into it the
 hourly solar-wind coupling of NASA's OMNI (`newell_driver`). `--storms` then scores every archived
-storm on Bruinsma & Laurens (2024)'s protocol (Ф15.H).
+storm on Bruinsma & Laurens (2024)'s protocol (Ф15.H), and per storm phase on Wang et al. (2026)'s
+storms and satellites too (Ф23.C). `--storm-table` writes those per-phase statistics, and
+`--scorecard` pools the tables of runs that held out different families.
 
 `--emit` (with `--cooling`, every fold) writes the shipped field: the same form fitted on all eight
 satellites, GRACE-FO C the reference, into `crates/spacelab-propagation/src/sdtm/coefficients.rs`,
@@ -86,6 +88,13 @@ NAME = {
     "SB": "Swarm B",
     "SC": "Swarm C",
 }
+WANG_2026 = (
+    pd.Timestamp("2001-01-01"),
+    pd.Timestamp("2024-01-01"),
+    ("CH", "GA", "GO", "GC", "SA"),
+)
+"""Wang et al. (2026)'s storms and satellites: `t0` in 2001-2023, and CHAMP, GRACE, GOCE, GRACE-FO and
+Swarm A. Of the GRACE pair only A: the two fly one orbit 220 km apart, so both would count GRACE twice."""
 EPOCH_2000 = pd.Timestamp("2000-01-01")
 OUT_RS = g.ROOT / "crates" / "spacelab-propagation" / "src" / "sdtm" / "coefficients.rs"
 OUT_FIXTURE = (
@@ -1394,6 +1403,18 @@ def main() -> None:
         "each satellite by the fold that held its family out (Ф15.H)",
     )
     parser.add_argument(
+        "--storm-table",
+        type=pathlib.Path,
+        help="with --storms, write every comparison's per-phase statistics to this CSV",
+    )
+    parser.add_argument(
+        "--scorecard",
+        nargs="+",
+        type=pathlib.Path,
+        metavar="CSV",
+        help="print the per-phase scorecards of these --storm-table files pooled, and fit nothing",
+    )
+    parser.add_argument(
         "--emit",
         action="store_true",
         help="then fit on every satellite and write coefficients.rs and the fixture, or with "
@@ -1454,6 +1475,16 @@ def main() -> None:
         "fold; the comparator and the bins read the raw flux",
     )
     argument = parser.parse_args()
+    if argument.scorecard:
+        scorecards(
+            pd.concat(
+                (pd.read_csv(path, parse_dates=["t0"]) for path in argument.scorecard),
+                ignore_index=True,
+            )
+        )
+        return
+    if argument.storm_table and not argument.storms:
+        sys.exit("--storm-table writes what --storms scores: give both")
     if argument.emit and argument.excess_saturation not in (None, "fit"):
         sys.exit(
             "a fixed --excess-saturation is a measurement, not a shippable field: fit it"
@@ -1706,7 +1737,8 @@ def storms(
     window_rows = window_rows[window_rows.family.isin(fitted)].reset_index(drop=True)
     window_rows["mission"] = window_rows.sat
     print(
-        f"\n{len(found)} storms with ap >= {g.STORM_AP:g} since {rows.t.min():%Y-%m}; "
+        f"\n{len(found)} storms with ap >= {g.STORM_AP:g} since {rows.t.min():%Y-%m}, "
+        f"{sum(WANG_2026[0] <= s['t0'] < WANG_2026[1] for s in found)} with t0 in 2001-2023; "
         f"{len(window_rows)} rows at 120 s inside their windows",
         flush=True,
     )
@@ -1748,8 +1780,33 @@ def storms(
         "ap_epoch": epoch + pd.Timedelta(days=first // 8),
     }
     present = tuple(s for s in SATELLITES if s in set(scored.sat))
-    g.storm_assessment(scored, held[done], "SDTM-1 held-out-mission", present)
-    g.storm_assessment(scored, msis[done], "NRLMSISE-00 ap[]", present)
+    table = pd.concat(
+        [
+            g.storm_assessment(scored, residual, model, present).assign(model=model)
+            for model, residual in (
+                ("SDTM-1 held-out-mission", held[done]),
+                ("NRLMSISE-00 ap[]", msis[done]),
+            )
+        ],
+        ignore_index=True,
+    )
+    scorecards(table)
+    if argument.storm_table:
+        table.to_csv(argument.storm_table, index=False)
+        print(f"wrote {len(table)} per-phase rows to {argument.storm_table}")
+
+
+def scorecards(table: pd.DataFrame) -> None:
+    """Each model's per-phase scorecard over every comparison, then over Wang et al. (2026)'s scope."""
+    start, end, satellites = WANG_2026
+    scope = (table.t0 >= start) & (table.t0 < end) & table.mission.isin(satellites)
+    for model in table.model.unique():
+        mine = table.model == model
+        g.phase_scorecard(table[mine], f"{model}, every comparison")
+        g.phase_scorecard(
+            table[mine & scope],
+            f"{model}, Wang et al. (2026)'s scope: 2001-2023, {' '.join(satellites)}",
+        )
 
 
 if __name__ == "__main__":

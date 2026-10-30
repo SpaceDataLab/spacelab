@@ -154,9 +154,11 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   Laurens (2024)'s protocol over the 204 storms the corpus covers since 2000, each satellite by the
   fit that held its family out (630 comparisons), the peak is within ±25 % on 57 %, with median peak
   ratio 1.00 and 1.03 for single-peak storms; the onset is within ±3 h on 68 % and the recovery within
-  ±6 h on 80 %. The largest storms (`ap` ≥ 300) reach only 0.63 of the observed peak enhancement:
-  2024-05-10 0.58–0.69. **A drag prediction through a severe storm should be expected to run low at
-  the peak by a third.** JB2008, driven by hourly `Dst`, remains the reference on storm peaks in the
+  ±6 h on 80 %. By phase, in Wang et al. (2026)'s form, the measured density is 5.5 % above the
+  debiased model in the onset, 2.2 % in main and recovery and 3.6 % after the storm (166 storms of
+  2001–2023, §10.33). The largest storms (`ap` ≥ 300) reach only 0.63 of the observed peak
+  enhancement: 2024-05-10 0.58–0.69. **A drag prediction through a severe storm should be expected
+  to run low at the peak by a third.** JB2008, driven by hourly `Dst`, remains the reference on storm peaks in the
   published assessment (23.7 % mean error; SDTM-1 26.2 % on the same 16 comparisons, in sample).
   SDTM-1's deficit is at the peak, not in the timing or the storm's mean: the model's peak comes a
   median 1.5 h after the measured one, and over the storm it is a tenth low. Between storms that `ap`

@@ -1,0 +1,50 @@
+/* Newell et al. (2007)'s solar-wind coupling in SDTM-1's solar-wind field (docs/verification.md
+   §10.32): N = V^(4/3) B_T^(2/3) |sin(theta/2)|^(8/3), with B_T = sqrt(By^2 + Bz^2) the IMF transverse
+   to the Sun-Earth line and theta = atan2(By, Bz) its clock angle in GSM.
+
+   What is proved here: sin^2(theta/2) = (1 - Bz/B_T)/2 at the clock angle in every quadrant, so
+   N = V^(4/3) B_T^(2/3) ((1 - Bz/B_T)/2)^(4/3) -- the second route the Rust tests check the shipped
+   arithmetic against; N is zero for a field due north and V^(4/3) |Bz|^(2/3) for one due south; it
+   is even in By; and it is homogeneous of degree 4/3 in V and 2/3 in the field. Every identity
+   prints 0. The numeric block gives the reference values sdtm::SolarWind::coupling is checked
+   against. */
+
+ratprint : false$
+fpprintprec : 0$
+
+transverse(y, z) := sqrt(y^2 + z^2)$
+half(y, z) := (1 - z/transverse(y, z))/2$
+newell(v, y, z) := v^(4/3)*transverse(y, z)^(2/3)*half(y, z)^(4/3)$
+assume(v > 0, lambda > 0, mu > 0)$
+
+/* 1. The half-angle identity. */
+print("half-angle identity:", ratsimp(trigreduce(sin(t/2)^2) - (1 - cos(t))/2))$
+
+/* 2. At the clock angle: cos(atan2(By, Bz)) = Bz/B_T for every (By, Bz) other than (0, 0). */
+print("sin^2 at the clock angle:",
+      ratsimp(trigreduce(sin(atan2(by, bz)/2)^2) - half(by, bz)))$
+
+/* 3. The same in bfloat in all four quadrants and on the four half-axes, where atan2 changes branch. */
+fpprec : 40$
+probe : [[3, -4], [-3, -4], [3, 4], [-3, 4], [0, 5], [0, -5], [5, 0], [-5, 0], [1/10, -7], [-7, 1/10]]$
+worst : lmax(map(lambda([p], abs(bfloat(sin(atan2(p[1], p[2])/2)^2 - half(p[1], p[2])))), probe))$
+print("bfloat, every quadrant and half-axis:", if worst < 10^-35 then 0 else worst)$
+
+/* 4. Due north the coupling vanishes; due south it is V^(4/3) |Bz|^(2/3). */
+assume(north > 0, south < 0)$
+print("due north:", ratsimp(newell(v, 0, north)))$
+print("due south:", ratsimp(radcan(newell(v, 0, south) - v^(4/3)*(-south)^(2/3))))$
+
+/* 5. Even in By: a field turned east and one turned west couple alike. */
+print("even in By:", ratsimp(newell(v, -by, bz) - newell(v, by, bz)))$
+
+/* 6. Homogeneous of degree 4/3 in the speed and 2/3 in the field. */
+print("degree 4/3 in V:", ratsimp(radcan(newell(lambda*v, by, bz) - lambda^(4/3)*newell(v, by, bz))))$
+print("degree 2/3 in B:", ratsimp(radcan(newell(v, mu*by, mu*bz) - mu^(2/3)*newell(v, by, bz))))$
+
+/* 7. Reference values, 30 digits, through the clock-angle form the Rust evaluates: a southward
+   field turned west, a strong southward one turned east, a northward one, and one due south. */
+fpprec : 30$
+for w in [[400, 3, -4], [650, -2, -12], [350, 4, 3], [800, 0, -20]] do
+    print("N at V, By, Bz =", w, "->",
+          bfloat(w[1]^(4/3)*transverse(w[2], w[3])^(2/3)*abs(sin(atan2(w[2], w[3])/2))^(8/3)))$

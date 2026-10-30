@@ -46,6 +46,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -930,8 +931,8 @@ try_figures_of_merit(std::span<const coverage_metrics> cells,
 #if defined(__cpp_exceptions)
 
 [[nodiscard]] inline double refraction_apparent(double true_altitude_rad,
-                                               double pressure_hpa = 1010.0,
-                                               double temperature_k = 283.0) {
+                                                double pressure_hpa = 1010.0,
+                                                double temperature_k = 283.0) {
     return detail::unwrap(try_refraction_apparent(true_altitude_rad, pressure_hpa, temperature_k));
 }
 
@@ -1051,6 +1052,22 @@ class ephemeris {
             return ::sl_ephemeris_drag_sdtm1(&in, t1_seconds, &orientation, &model,
                                              ap_history.data(), ap_history.size(), cadence_s,
                                              tolerance, raw);
+        });
+    }
+
+    [[nodiscard]] static result<ephemeris>
+    drag_sdtm1_solar_wind(const state &in, double t1_seconds, const eop &orientation,
+                          const sdtm1_drag &model, std::span<const double> ap60,
+                          std::span<const double> speed_km_s, std::span<const double> by_nt,
+                          std::span<const double> bz_nt, double tolerance = 1e-9) {
+        if (speed_km_s.size() != ap60.size() || by_nt.size() != ap60.size() ||
+            bz_nt.size() != ap60.size()) {
+            return detail::failure<ephemeris>(SL_ERR_INVALID_ARGUMENT);
+        }
+        return build([&](::sl_ephemeris **raw) {
+            return ::sl_ephemeris_drag_sdtm1_solar_wind(
+                &in, t1_seconds, &orientation, &model, ap60.data(), speed_km_s.data(), by_nt.data(),
+                bz_nt.data(), ap60.size(), tolerance, raw);
         });
     }
 
@@ -1710,6 +1727,52 @@ try_sdtm1_density_interval(double density, double f107, double f107a, double sto
     using envelope = std::array<double, SL_SDTM1_ENVELOPE>;
     envelope out{};
     const ::sl_status s = ::sl_sdtm1_envelope(out.data());
+    return s == SL_OK ? result<envelope>(out) : detail::failure<envelope>(s);
+}
+
+[[nodiscard]] inline double sdtm1_solar_wind_density(double doy, double sec, double altitude_km,
+                                                     double latitude_deg, double longitude_deg,
+                                                     double f107, double f107a,
+                                                     double storm) noexcept {
+    return ::sl_sdtm1_solar_wind_density(doy, sec, altitude_km, latitude_deg, longitude_deg, f107,
+                                         f107a, storm);
+}
+
+[[nodiscard]] inline double
+sdtm1_solar_wind_exospheric_temperature(double doy, double sec, double altitude_km,
+                                        double latitude_deg, double longitude_deg, double f107,
+                                        double f107a, double storm) noexcept {
+    return ::sl_sdtm1_solar_wind_exospheric_temperature(doy, sec, altitude_km, latitude_deg,
+                                                        longitude_deg, f107, f107a, storm);
+}
+
+/* Four series of different lengths are not a history, and answer NaN as an invalid hour does. */
+[[nodiscard]] inline double
+sdtm1_solar_wind_storm_response(std::span<const double> ap60, std::span<const double> speed_km_s,
+                                std::span<const double> by_nt,
+                                std::span<const double> bz_nt) noexcept {
+    if (speed_km_s.size() != ap60.size() || by_nt.size() != ap60.size() ||
+        bz_nt.size() != ap60.size()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return ::sl_sdtm1_solar_wind_storm_response(ap60.data(), speed_km_s.data(), by_nt.data(),
+                                                bz_nt.data(), ap60.size());
+}
+
+[[nodiscard]] inline result<std::array<double, SL_SDTM1_INTERVAL>>
+try_sdtm1_solar_wind_density_interval(double density, double f107, double f107a, double storm,
+                                      double z) {
+    using interval = std::array<double, SL_SDTM1_INTERVAL>;
+    interval out{};
+    const ::sl_status s =
+        ::sl_sdtm1_solar_wind_density_interval(density, f107, f107a, storm, z, out.data());
+    return s == SL_OK ? result<interval>(out) : detail::failure<interval>(s);
+}
+
+[[nodiscard]] inline result<std::array<double, SL_SDTM1_ENVELOPE>> try_sdtm1_solar_wind_envelope() {
+    using envelope = std::array<double, SL_SDTM1_ENVELOPE>;
+    envelope out{};
+    const ::sl_status s = ::sl_sdtm1_solar_wind_envelope(out.data());
     return s == SL_OK ? result<envelope>(out) : detail::failure<envelope>(s);
 }
 
@@ -2756,11 +2819,12 @@ struct attitude_error {
 };
 
 [[nodiscard]] inline result<attitude_error>
-try_attitude_error_mrp(const std::array<double, 9> &rotation, const std::array<double, 9> &reference,
-                   const vec3 &rate, const vec3 &rate_reference) {
+try_attitude_error_mrp(const std::array<double, 9> &rotation,
+                       const std::array<double, 9> &reference, const vec3 &rate,
+                       const vec3 &rate_reference) {
     attitude_error out{};
     const ::sl_status s = ::sl_attitude_error_mrp(rotation.data(), reference.data(), &rate,
-                                              &rate_reference, &out.mrp, &out.angle_rad);
+                                                  &rate_reference, &out.mrp, &out.angle_rad);
     return s == SL_OK ? result<attitude_error>(out) : detail::failure<attitude_error>(s);
 }
 
@@ -2775,23 +2839,23 @@ try_attitude_error_quaternion(const std::array<double, 9> &rotation,
                       : detail::failure<std::array<double, 4>>(s);
 }
 
-[[nodiscard]] inline result<vec3>
-try_attitude_torque(attitude_law law, double proportional, double derivative,
-                    const std::array<double, 9> &rotation, const std::array<double, 9> &reference,
-                    const vec3 &rate, const vec3 &rate_reference,
-                    const std::array<double, 9> &inertia) {
+[[nodiscard]] inline result<vec3> try_attitude_torque(attitude_law law, double proportional,
+                                                      double derivative,
+                                                      const std::array<double, 9> &rotation,
+                                                      const std::array<double, 9> &reference,
+                                                      const vec3 &rate, const vec3 &rate_reference,
+                                                      const std::array<double, 9> &inertia) {
     vec3 out{};
     const ::sl_status s =
-        ::sl_attitude_torque(law, proportional, derivative, rotation.data(), reference.data(), &rate,
-                             &rate_reference, inertia.data(), &out);
+        ::sl_attitude_torque(law, proportional, derivative, rotation.data(), reference.data(),
+                             &rate, &rate_reference, inertia.data(), &out);
     return s == SL_OK ? result<vec3>(out) : detail::failure<vec3>(s);
 }
 
 [[nodiscard]] inline result<double>
-try_attitude_lyapunov(double proportional, double derivative,
-                      const std::array<double, 9> &rotation, const std::array<double, 9> &reference,
-                      const vec3 &rate, const vec3 &rate_reference,
-                      const std::array<double, 9> &inertia) {
+try_attitude_lyapunov(double proportional, double derivative, const std::array<double, 9> &rotation,
+                      const std::array<double, 9> &reference, const vec3 &rate,
+                      const vec3 &rate_reference, const std::array<double, 9> &inertia) {
     double out = 0.0;
     const ::sl_status s =
         ::sl_attitude_lyapunov(proportional, derivative, rotation.data(), reference.data(), &rate,
@@ -2829,9 +2893,8 @@ struct pd_response {
 [[nodiscard]] inline result<pd_response>
 try_quaternion_pd_response(double proportional, double derivative, double moment) {
     pd_response out{};
-    const ::sl_status s = ::sl_quaternion_pd_response(proportional, derivative, moment,
-                                                      &out.natural_frequency_rad_s,
-                                                      &out.damping_ratio);
+    const ::sl_status s = ::sl_quaternion_pd_response(
+        proportional, derivative, moment, &out.natural_frequency_rad_s, &out.damping_ratio);
     return s == SL_OK ? result<pd_response>(out) : detail::failure<pd_response>(s);
 }
 
@@ -2847,8 +2910,8 @@ try_attitude_loop_run(attitude_law law, double proportional, double derivative, 
                       const std::array<double, 9> &reference, const std::array<double, 9> &inertia,
                       std::size_t steps) {
     loop_run out{};
-    auto samples = detail::sized<loop_sample>(
-        [&](loop_sample *buf, std::size_t cap, std::size_t *len) {
+    auto samples =
+        detail::sized<loop_sample>([&](loop_sample *buf, std::size_t cap, std::size_t *len) {
             return ::sl_attitude_loop_run(law, proportional, derivative, &l, step, &initial, &seed,
                                           reference.data(), inertia.data(), steps, buf, cap, len,
                                           &out.final_state);
@@ -2860,9 +2923,8 @@ try_attitude_loop_run(attitude_law law, double proportional, double derivative, 
     return result<loop_run>(std::move(out));
 }
 
-[[nodiscard]] inline result<delay_margin> try_delay_margin_of_gains(double moment,
-                                                                    double angle_gain,
-                                                                    double rate_gain) {
+[[nodiscard]] inline result<delay_margin>
+try_delay_margin_of_gains(double moment, double angle_gain, double rate_gain) {
     delay_margin out{};
     const ::sl_status s = ::sl_delay_margin_of_gains(moment, angle_gain, rate_gain, &out);
     return s == SL_OK ? result<delay_margin>(out) : detail::failure<delay_margin>(s);
@@ -2881,12 +2943,13 @@ struct binding_axis {
     delay_margin margin;
 };
 
-[[nodiscard]] inline result<binding_axis>
-try_worst_principal_axis(attitude_law law, double proportional, double derivative,
-                         const vec3 &moments) {
+[[nodiscard]] inline result<binding_axis> try_worst_principal_axis(attitude_law law,
+                                                                   double proportional,
+                                                                   double derivative,
+                                                                   const vec3 &moments) {
     binding_axis out{};
-    const ::sl_status s = ::sl_worst_principal_axis(law, proportional, derivative, &moments,
-                                                    &out.axis, &out.margin);
+    const ::sl_status s =
+        ::sl_worst_principal_axis(law, proportional, derivative, &moments, &out.axis, &out.margin);
     return s == SL_OK ? result<binding_axis>(out) : detail::failure<binding_axis>(s);
 }
 
@@ -2909,11 +2972,9 @@ struct lqr_solution {
     double residual;
 };
 
-[[nodiscard]] inline result<lqr_solution> try_lqr(std::span<const double> a,
-                                                  std::span<const double> b,
-                                                  std::span<const double> q,
-                                                  std::span<const double> r, std::size_t n,
-                                                  std::size_t m) {
+[[nodiscard]] inline result<lqr_solution>
+try_lqr(std::span<const double> a, std::span<const double> b, std::span<const double> q,
+        std::span<const double> r, std::size_t n, std::size_t m) {
     if (a.size() != n * n || b.size() != n * m || q.size() != n * n || r.size() != m * m) {
         return detail::failure<lqr_solution>(SL_ERR_INVALID_ARGUMENT);
     }
@@ -2947,8 +3008,8 @@ try_element_feedback_acceleration(const element_feedback &law,
                                   const std::array<double, 6> &elements, double mu,
                                   double true_longitude_rad, const std::array<double, 6> &error) {
     vec3 out{};
-    const ::sl_status s = ::sl_element_feedback_acceleration(&law, elements.data(), mu,
-                                                             true_longitude_rad, error.data(), &out);
+    const ::sl_status s = ::sl_element_feedback_acceleration(
+        &law, elements.data(), mu, true_longitude_rad, error.data(), &out);
     return s == SL_OK ? result<vec3>(out) : detail::failure<vec3>(s);
 }
 
@@ -2980,8 +3041,8 @@ struct laplacian_modes {
     std::vector<double> modes;
 };
 
-[[nodiscard]] inline result<laplacian_modes>
-try_laplacian_modes(std::span<const double> adjacency, std::size_t agents) {
+[[nodiscard]] inline result<laplacian_modes> try_laplacian_modes(std::span<const double> adjacency,
+                                                                 std::size_t agents) {
     if (adjacency.size() != agents * agents) {
         return detail::failure<laplacian_modes>(SL_ERR_INVALID_ARGUMENT);
     }
@@ -3045,9 +3106,9 @@ try_consensus_run(std::span<const double> adjacency, consensus_protocol protocol
         return detail::failure<consensus_result>(SL_ERR_INVALID_ARGUMENT);
     }
     consensus_result out{std::vector<double>(agents), 0.0, 0, 0};
-    const ::sl_status s = ::sl_consensus_run(adjacency.data(), agents, protocol, delay,
-                                             initial.data(), t1, tolerance, out.final_state.data(),
-                                             &out.disagreement, &out.accepted, &out.rejected);
+    const ::sl_status s =
+        ::sl_consensus_run(adjacency.data(), agents, protocol, delay, initial.data(), t1, tolerance,
+                           out.final_state.data(), &out.disagreement, &out.accepted, &out.rejected);
     return s == SL_OK ? result<consensus_result>(std::move(out))
                       : detail::failure<consensus_result>(s);
 }
@@ -3181,6 +3242,16 @@ sdtm1_density_interval(double density, double f107, double f107a, double storm, 
 
 [[nodiscard]] inline std::array<double, SL_SDTM1_ENVELOPE> sdtm1_envelope() {
     return detail::unwrap(try_sdtm1_envelope());
+}
+
+[[nodiscard]] inline std::array<double, SL_SDTM1_INTERVAL>
+sdtm1_solar_wind_density_interval(double density, double f107, double f107a, double storm,
+                                  double z) {
+    return detail::unwrap(try_sdtm1_solar_wind_density_interval(density, f107, f107a, storm, z));
+}
+
+[[nodiscard]] inline std::array<double, SL_SDTM1_ENVELOPE> sdtm1_solar_wind_envelope() {
+    return detail::unwrap(try_sdtm1_solar_wind_envelope());
 }
 
 [[nodiscard]] inline std::array<double, SL_DENSITY_DRIVERS>
@@ -3601,6 +3672,7 @@ closest_approaches(Sampler &&relative, double start, double end, double step, do
     return detail::unwrap(
         try_closest_approaches(std::forward<Sampler>(relative), start, end, step, tolerance));
 }
+
 /* ---- Closed-loop control ---- */
 
 [[nodiscard]] inline double latency_total(const latency &l) {
@@ -3612,9 +3684,9 @@ closest_approaches(Sampler &&relative, double start, double end, double step, do
 }
 
 [[nodiscard]] inline attitude_error attitude_error_mrp(const std::array<double, 9> &rotation,
-                                                      const std::array<double, 9> &reference,
-                                                      const vec3 &rate,
-                                                      const vec3 &rate_reference) {
+                                                       const std::array<double, 9> &reference,
+                                                       const vec3 &rate,
+                                                       const vec3 &rate_reference) {
     return detail::unwrap(try_attitude_error_mrp(rotation, reference, rate, rate_reference));
 }
 
@@ -3643,9 +3715,8 @@ attitude_error_quaternion(const std::array<double, 9> &rotation,
                                                 rate_reference, inertia));
 }
 
-[[nodiscard]] inline small_angle_gains attitude_small_angle_gains(attitude_law law,
-                                                                  double proportional,
-                                                                  double derivative) {
+[[nodiscard]] inline small_angle_gains
+attitude_small_angle_gains(attitude_law law, double proportional, double derivative) {
     return detail::unwrap(try_attitude_small_angle_gains(law, proportional, derivative));
 }
 
@@ -3693,7 +3764,7 @@ attitude_loop_run(attitude_law law, double proportional, double derivative, cons
 }
 
 [[nodiscard]] inline std::vector<double> characteristic_polynomial(std::span<const double> m,
-                                                                  std::size_t n) {
+                                                                   std::size_t n) {
     return detail::unwrap(try_characteristic_polynomial(m, n));
 }
 
@@ -3724,7 +3795,7 @@ attitude_loop_run(attitude_law law, double proportional, double derivative, cons
 }
 
 [[nodiscard]] inline laplacian_modes laplacian_eigen(std::span<const double> adjacency,
-                                                    std::size_t agents) {
+                                                     std::size_t agents) {
     return detail::unwrap(try_laplacian_modes(adjacency, agents));
 }
 
@@ -3739,8 +3810,7 @@ attitude_loop_run(attitude_law law, double proportional, double derivative, cons
 }
 
 [[nodiscard]] inline double consensus_delay_bound(std::span<const double> adjacency,
-                                                  std::size_t agents,
-                                                  consensus_protocol protocol) {
+                                                  std::size_t agents, consensus_protocol protocol) {
     return detail::unwrap(try_consensus_delay_bound(adjacency, agents, protocol));
 }
 
@@ -3755,9 +3825,8 @@ attitude_loop_run(attitude_law law, double proportional, double derivative, cons
     return detail::unwrap(try_consensus_run(adjacency, protocol, delay, initial, t1, tolerance));
 }
 
-[[nodiscard]] inline std::vector<double> delay_breakpoints(std::span<const double> delays,
-                                                           double t0, double t1,
-                                                           std::size_t levels) {
+[[nodiscard]] inline std::vector<double>
+delay_breakpoints(std::span<const double> delays, double t0, double t1, std::size_t levels) {
     return detail::unwrap(try_delay_breakpoints(delays, t0, t1, levels));
 }
 

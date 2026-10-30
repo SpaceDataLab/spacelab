@@ -1026,6 +1026,11 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
     double interval[SL_SDTM1_INTERVAL];
     double envelope[SL_SDTM1_ENVELOPE];
     double density_400 = 0.0;
+    double sw_ap60[16];
+    double sw_speed[16];
+    double sw_by[16];
+    double sw_bz[16];
+    double wind_storm = 0.0;
 
     /* The thermosphere thins with height, in kg/m^3 and not the model's own g/cm^3 -- and a NaN
      * argument is NaN out, which the model on its own does not do. */
@@ -1100,6 +1105,59 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
     CHECK(envelope[0] < 400.0 && 400.0 < envelope[1] && envelope[1] < 600.0);
     CHECK(envelope[2] < 150.0 && 150.0 < envelope[3]);
     CHECK(sl_sdtm1_envelope(NULL) == SL_ERR_INVALID_ARGUMENT);
+
+    /* SDTM-1's solar-wind field runs its storm state hourly. An hour without the solar wind -- a NaN
+     * speed, By or Bz -- drives by its ap60, so a quiet ap60 history without it sits on its steady
+     * state below 5, as the 3-hourly field's does. A strong southward field over the last six hours
+     * drives the same history higher, and a due-north one lower. A fill value is no solar wind and
+     * answers NaN, as a null series does; n = 0 is an empty history. */
+    for (i = 0; i < 16; ++i) {
+        sw_ap60[i] = 5.0;
+        sw_speed[i] = NAN;
+        sw_by[i] = NAN;
+        sw_bz[i] = NAN;
+    }
+    quiet_storm = sl_sdtm1_solar_wind_storm_response(sw_ap60, sw_speed, sw_by, sw_bz, 16);
+    CHECK(quiet_storm > 0.0 && quiet_storm < 5.0);
+    for (i = 10; i < 16; ++i) {
+        sw_speed[i] = 700.0;
+        sw_by[i] = 0.0;
+        sw_bz[i] = -20.0;
+    }
+    wind_storm = sl_sdtm1_solar_wind_storm_response(sw_ap60, sw_speed, sw_by, sw_bz, 16);
+    CHECK(wind_storm > quiet_storm);
+    for (i = 10; i < 16; ++i) {
+        sw_bz[i] = 20.0;
+    }
+    CHECK(sl_sdtm1_solar_wind_storm_response(sw_ap60, sw_speed, sw_by, sw_bz, 16) < quiet_storm);
+    sw_speed[12] = 9999.0;
+    CHECK(isnan(sl_sdtm1_solar_wind_storm_response(sw_ap60, sw_speed, sw_by, sw_bz, 16)));
+    CHECK(sl_sdtm1_solar_wind_storm_response(sw_ap60, sw_speed, sw_by, sw_bz, 0) == 0.0);
+    CHECK(isnan(sl_sdtm1_solar_wind_storm_response(sw_ap60, NULL, sw_by, sw_bz, 16)));
+
+    /* Its point functions take the 3-hourly field's arguments in the same units and answer its own
+     * values; its interval and envelope are its own fit's, and a null out pointer is refused. */
+    density_400 = sl_sdtm1_solar_wind_density(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 5.0);
+    CHECK(sl_sdtm1_solar_wind_density(172.0, 29000.0, 200.0, 0.0, 0.0, 150.0, 150.0, 5.0) >
+          density_400);
+    CHECK(density_400 > 1e-13 && density_400 < 1e-11);
+    CHECK(density_400 != sl_sdtm1_density(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 5.0));
+    CHECK(isnan(sl_sdtm1_solar_wind_density(NAN, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 5.0)));
+    CHECK(sl_sdtm1_solar_wind_exospheric_temperature(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0,
+                                                     250.0) >
+          sl_sdtm1_solar_wind_exospheric_temperature(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0,
+                                                     5.0));
+    CHECK(isnan(sl_sdtm1_solar_wind_exospheric_temperature(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0,
+                                                           NAN, 5.0)));
+    CHECK(sl_sdtm1_solar_wind_density_interval(density_400, 150.0, 150.0, 5.0, 1.6448536269514727,
+                                               interval) == SL_OK);
+    CHECK(interval[0] < density_400 && density_400 < interval[1]);
+    CHECK(sl_sdtm1_solar_wind_density_interval(density_400, 150.0, 150.0, 5.0, 1.0, NULL) ==
+          SL_ERR_INVALID_ARGUMENT);
+    CHECK(sl_sdtm1_solar_wind_envelope(envelope) == SL_OK);
+    CHECK(envelope[0] < 400.0 && 400.0 < envelope[1] && envelope[1] < 600.0);
+    CHECK(envelope[2] < 150.0 && 150.0 < envelope[3]);
+    CHECK(sl_sdtm1_solar_wind_envelope(NULL) == SL_ERR_INVALID_ARGUMENT);
 
     /* Step-2 is trigonometric in the sidereal argument, so a whole turn is the identity. */
     CHECK(sl_solid_tide_step2(0.7, delaunay, step2_a) == SL_OK);
@@ -1261,6 +1319,10 @@ static void the_force_models_all_build_the_same_handle(void) {
     sl_nrlmsise_drag drag;
     sl_sdtm1_drag sdtm1;
     double quiet_ap[120];
+    double hours_ap60[48];
+    double hours_speed[48];
+    double hours_by[48];
+    double hours_bz[48];
     sl_ephemeris *e = NULL;
     double speed = sqrt(SL_MU_EARTH / 7000000.0);
     double inclination = 51.6 * PI / 180.0;
@@ -1304,6 +1366,12 @@ static void the_force_models_all_build_the_same_handle(void) {
     sdtm1.mu = SL_MU_EARTH;
     for (i = 0; i < 120; ++i) {
         quiet_ap[i] = 5.0;
+    }
+    for (i = 0; i < 48; ++i) {
+        hours_ap60[i] = 5.0;
+        hours_speed[i] = 400.0;
+        hours_by[i] = 2.0;
+        hours_bz[i] = -3.0;
     }
 
     for (i = 0; i < 2; ++i) {
@@ -1351,6 +1419,24 @@ static void the_force_models_all_build_the_same_handle(void) {
     quiet_ap[3] = NAN;
     CHECK(sl_ephemeris_drag_sdtm1(&s0, arc, &eop, &sdtm1, quiet_ap, 120, 10800.0, 1e-10, &e) ==
           SL_ERR_INVALID_ARGUMENT);
+    CHECK(e == NULL);
+
+    /* The solar-wind field's drag takes four hourly series of one length. A null one, n = 0, or an
+     * hour that is no hour -- a fill value for Bz -- is refused, and the pointer stays untouched. */
+    CHECK(sl_ephemeris_drag_sdtm1_solar_wind(&s0, arc, &eop, &sdtm1, hours_ap60, hours_speed,
+                                             hours_by, hours_bz, 48, 1e-10, &e) == SL_OK);
+    CHECK(sl_ephemeris_at(e, arc, &at_end) == SL_OK);
+    sl_ephemeris_close(e);
+    e = NULL;
+    CHECK(sl_ephemeris_drag_sdtm1_solar_wind(&s0, arc, &eop, &sdtm1, hours_ap60, NULL, hours_by,
+                                             hours_bz, 48, 1e-10, &e) == SL_ERR_INVALID_ARGUMENT);
+    CHECK(sl_ephemeris_drag_sdtm1_solar_wind(&s0, arc, &eop, &sdtm1, hours_ap60, hours_speed,
+                                             hours_by, hours_bz, 0, 1e-10,
+                                             &e) == SL_ERR_INVALID_ARGUMENT);
+    hours_bz[7] = -999.9;
+    CHECK(sl_ephemeris_drag_sdtm1_solar_wind(&s0, arc, &eop, &sdtm1, hours_ap60, hours_speed,
+                                             hours_by, hours_bz, 48, 1e-10,
+                                             &e) == SL_ERR_INVALID_ARGUMENT);
     CHECK(e == NULL);
 
     CHECK(sl_ephemeris_geopotential_itrf(&s0, arc, 4, &eop, 1e-11, &e) == SL_OK);

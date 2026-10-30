@@ -157,7 +157,15 @@ The following ask for attribution, and this is it. None of them restricts use.
   Geomagnetic Hpo index, V. 3.0, GFZ Helmholtz Centre for Geosciences,
   CC BY 4.0 -- Matzka, J. et al. (2024), doi:10.5880/Hpo.0003; Yamazaki, Y.
   et al. (2024), doi:10.22541/essoar.171838396.68563140/v1. Fixtures
-  crates/spacelab-propagation/tests/fixtures/gfz_hp*_gannon.txt.
+  crates/spacelab-propagation/tests/fixtures/gfz_hp*_gannon.txt, and the ap60
+  classes of the coupling map in
+  crates/spacelab-propagation/src/sdtm/solar_wind_coefficients.rs, each placed
+  at a quantile of the solar wind's coupling (a derived table).
+
+  OMNI 2 hourly solar wind and interplanetary magnetic field, NASA/GSFC Space
+  Physics Data Facility, CC0 1.0, acknowledged as OMNIWeb asks -- King, J. H.
+  and Papitashvili, N. E. (2005), doi:10.1029/2004JA010649. The coupling knots
+  of the same map are its quantiles.
 
   IGS products and multi-GNSS broadcast navigation files, International GNSS
   Service, under the IGS Data and Product Disclaimer and Terms of Use

@@ -168,8 +168,24 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   Neither the nitric oxide's drive nor a fast uncooled mode lifts the largest storms (§10.30). Driven
   half by the measured solar wind and half by `ap60`, a held-out fit lifts them to 0.94 of the
   observed peak at the median, with the pooled error 20.75 → 20.45 % and the storm-day rows 23.4 →
-  23.7 % (§10.31). That field is not in the release yet, and it cannot drive a prediction: the solar
-  wind is measured less than an hour before it reaches the Earth.
+  23.7 % (§10.31). That field ships opt-in as `sdtm::solar_wind_coefficients` (§10.32), for
+  reconstruction and nowcasting. It cannot drive a prediction: the solar wind is measured less than
+  an hour before it reaches the Earth.
+- **SDTM-1's solar-wind field reconstructs and nowcasts; it does not forecast.**
+  `sdtm::solar_wind_coefficients` (§10.32) runs its storm state hourly on `(1 − s)·ap60 + s·N`,
+  `s` = 0.500, over 336 hours (fourteen days) of history that end at the hour before the sample. It
+  was fitted on OMNI's hourly averages, time-shifted from L1 to the bow-shock nose, and on GFZ's
+  `ap60`. A caller with real-time L1 data shifts it to the bow shock and averages it by the hour
+  first. No real-time series was in the fit, and their error is not in the uncertainty table:
+  whether a storm reconstructed on real-time solar wind scores better than on `ap60` alone is not
+  measured. An hour without the solar wind drives by its `ap60`, so a gap degrades to the `ap60`
+  drive and does not fail; the Halloween 2003 storm, whose plasma ACE did not measure, is such a
+  storm throughout. The map from Newell's coupling onto `ap60`'s scale holds its end values, so a
+  coupling above the strongest knot, 120 848, reads as `ap60` 534 however strong the solar wind is.
+  The field moves the storm peaks, not the storm-day rows (§10.31). Its 90 % interval covers 78.2 %
+  of the worst family's rows in the low-flux active cell, and no campaign test runs it (§10.32).
+  Each field's storm driver is its own state: the 3-hourly field's driver is not the solar-wind
+  field's input, and the reverse.
 - **In the drag path an empirical atmosphere contributes a radial density gradient and no horizontal one.**
   `Drag`'s state-transition matrix needs `∂ρ/∂r`, and four of the five atmospheres exist only in `f64`,
   so each wrapper lifts the value through a local exponential `ρ = ρ₀·exp(−(|r| − |r₀|)/H)`. Two things

@@ -4127,20 +4127,20 @@ exclude_re = [
     # `propagate_ias15_dense` appears once, not twice: IAS15 predicts its b-polynomial from the first
     # step, so `%` there does move the answer far enough for
     # `interpreter_tests::the_dense_ephemerides_interpolate_the_orbit_they_integrated` to catch it.
-    "lib\\.rs:981:19: replace / with \\* in propagate_ias15_dense",
-    "lib\\.rs:1008:18: replace / with % in propagate_dense",
-    "lib\\.rs:1008:18: replace / with \\* in propagate_dense",
-    "lib\\.rs:1102:18: replace / with % in propagate_geopotential_dense",
-    "lib\\.rs:1102:18: replace / with \\* in propagate_geopotential_dense",
-    "lib\\.rs:1189:18: replace / with % in propagate_geopotential_itrf_dense",
-    "lib\\.rs:1189:18: replace / with \\* in propagate_geopotential_itrf_dense",
-    "lib\\.rs:1252:18: replace / with % in propagate_j2_itrf_dense",
-    "lib\\.rs:1252:18: replace / with \\* in propagate_j2_itrf_dense",
-    "lib\\.rs:1507:18: replace / with % in propagate_relativistic_dense",
-    "lib\\.rs:1796:18: replace / with % in propagate_drag_dense",
-    "lib\\.rs:1796:18: replace / with \\* in propagate_drag_dense",
-    "lib\\.rs:1874:18: replace / with % in propagate_luni_solar_dense",
-    "lib\\.rs:1874:18: replace / with \\* in propagate_luni_solar_dense",
+    "lib\\.rs:988:19: replace / with \\* in propagate_ias15_dense",
+    "lib\\.rs:1015:18: replace / with % in propagate_dense",
+    "lib\\.rs:1015:18: replace / with \\* in propagate_dense",
+    "lib\\.rs:1109:18: replace / with % in propagate_geopotential_dense",
+    "lib\\.rs:1109:18: replace / with \\* in propagate_geopotential_dense",
+    "lib\\.rs:1218:18: replace / with % in propagate_geopotential_itrf_dense",
+    "lib\\.rs:1218:18: replace / with \\* in propagate_geopotential_itrf_dense",
+    "lib\\.rs:1281:18: replace / with % in propagate_j2_itrf_dense",
+    "lib\\.rs:1281:18: replace / with \\* in propagate_j2_itrf_dense",
+    "lib\\.rs:1536:18: replace / with % in propagate_relativistic_dense",
+    "lib\\.rs:2161:18: replace / with % in propagate_drag_dense",
+    "lib\\.rs:2161:18: replace / with \\* in propagate_drag_dense",
+    "lib\\.rs:2239:18: replace / with % in propagate_luni_solar_dense",
+    "lib\\.rs:2239:18: replace / with \\* in propagate_luni_solar_dense",
 
     # --- `spacelab-capi`. Both patterns carry the crate path, unlike the `lib\.rs:` forms above:
     # --- two crates now have a mutated `lib.rs`, and a bare line:col would match either.
@@ -4150,7 +4150,7 @@ exclude_re = [
     # condition collapses to `!is_char_boundary(keep)` -- but `str::is_char_boundary(0)` is
     # documented to return true unconditionally, so the loop exits at `keep == 0` either way. The
     # decrement is never reached at zero and cannot underflow under either operator.
-    "crates/spacelab-capi/src/lib\\.rs:437:16: replace > with >= in copy_to_c_buffer",
+    "crates/spacelab-capi/src/lib\\.rs:444:16: replace > with >= in copy_to_c_buffer",
 
     # `sl_abi_version -> 1` was excluded here while `ABI_VERSION` was 1 and the two functions were
     # the same function. The ABI is at 2 as of the `sl_cloud_mask*` family, so the mutant is
@@ -5463,7 +5463,7 @@ exclude_re = [
     # unreachable, and an assertion on `weight(0.0).is_sign_negative()` would be pinning IEEE-754's
     # sign rule rather than the kernel's causality. The `>`-side of the same branch is caught by
     # `the_storm_kernel_has_unit_gain_a_delayed_onset_and_the_peak_the_algebra_gives`.
-    "crates/spacelab-propagation/src/sdtm/mod\\.rs:200:16: replace < with <= in StormKernel::weight",
+    "crates/spacelab-propagation/src/sdtm/mod\\.rs:209:16: replace < with <= in StormKernel::weight",
 
     # `self.heights.locate(height_km, 0, self.heights.count - 1)` in `WamIpeField::density`, the
     # upper node rewritten to `count + 1` or `count / 1`. `density` has already returned `None`

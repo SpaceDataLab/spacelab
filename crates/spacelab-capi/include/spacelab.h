@@ -557,6 +557,21 @@ sl_status sl_ephemeris_drag_sdtm1(const sl_state *in, double t1_seconds, const s
                                   double cadence_s, double tolerance, sl_ephemeris **out);
 
 /*
+ * Drag through SDTM-1's solar-wind field, as `sl_ephemeris_drag_sdtm1` is through the 3-hourly
+ * field: for reconstructing an arc, where the hours of `ap60` and solar wind before it are measured.
+ * The four series are `n` hours, oldest first, ending at the hour BEFORE the arc's epoch, as
+ * `sl_sdtm1_solar_wind_storm_response` takes them; the storm state is run over them once and held
+ * over the arc with the record's two fluxes. A field of the record that is not finite, a null
+ * series, `n == 0`, or an hour `sl_sdtm1_solar_wind_storm_response` refuses answers
+ * SL_ERR_INVALID_ARGUMENT, and the message names the hour.
+ */
+sl_status sl_ephemeris_drag_sdtm1_solar_wind(const sl_state *in, double t1_seconds,
+                                             const sl_eop *eop, const sl_sdtm1_drag *drag,
+                                             const double *ap60, const double *speed_km_s,
+                                             const double *by_nt, const double *bz_nt, size_t n,
+                                             double tolerance, sl_ephemeris **out);
+
+/*
  * The geopotential evaluated in the true ITRF -- rotated by the interpolated CIO chain rather than
  * by a uniform sidereal angle, which is the difference between kilometres and metres over a day --
  * and the same plus the full IERS 2010 degree-2 solid Earth tide: Step 1, the frequency-dependent
@@ -1418,6 +1433,44 @@ sl_status sl_sdtm1_density_interval(double density, double f107, double f107a, d
  * field, and NRLMSISE-00 is the recommendation.
  */
 sl_status sl_sdtm1_envelope(double *out);
+
+/*
+ * SDTM-1's solar-wind field: SDTM-1 fitted again with its storm state run hourly on GFZ's `ap60`
+ * and the measured solar wind, for reconstruction and nowcasting. The `sl_sdtm1_*` field above stays
+ * the forecast path, because the solar wind is measured less than an hour before it arrives. The
+ * point functions take the arguments and units of `sl_sdtm1_density`; their `storm` is
+ * `sl_sdtm1_solar_wind_storm_response`, and the 3-hourly field's is another model's driver.
+ * Non-finite in, NaN out.
+ */
+double sl_sdtm1_solar_wind_density(double doy, double sec, double altitude_km, double latitude_deg,
+                                   double longitude_deg, double f107, double f107a, double storm);
+double sl_sdtm1_solar_wind_exospheric_temperature(double doy, double sec, double altitude_km,
+                                                  double latitude_deg, double longitude_deg,
+                                                  double f107, double f107a, double storm);
+
+/*
+ * The solar-wind field's storm driver over `n` hours, oldest first, ending at the hour BEFORE the
+ * sample, each series readable for `n` doubles: GFZ's `ap60`, and the solar wind at the bow-shock
+ * nose as `speed_km_s` and the GSM `by_nt`, `bz_nt`. The field was fitted on OMNI's
+ * hourly averages, time-shifted from L1 to the bow shock, so real-time L1 data is shifted first. A
+ * NaN speed, By or Bz is an hour without the solar wind, and it drives by its `ap60`. Nitric oxide
+ * remembers a storm for days: pass fourteen days, 336 hours.
+ *
+ * `n == 0` answers 0. A null pointer, an `ap60` that is negative or not finite, or a value that is no
+ * solar wind -- a speed outside [0, 5000) km/s or a field of 500 nT or more, which is a fill value --
+ * answers NaN.
+ */
+double sl_sdtm1_solar_wind_storm_response(const double *ap60, const double *speed_km_s,
+                                          const double *by_nt, const double *bz_nt, size_t n);
+
+/*
+ * The solar-wind field's own interval and envelope, as `sl_sdtm1_density_interval` and
+ * `sl_sdtm1_envelope` are for the 3-hourly field: `SL_SDTM1_INTERVAL` and `SL_SDTM1_ENVELOPE`
+ * doubles out.
+ */
+sl_status sl_sdtm1_solar_wind_density_interval(double density, double f107, double f107a,
+                                               double storm, double z, double *out);
+sl_status sl_sdtm1_solar_wind_envelope(double *out);
 
 /* The field a Brouwer-Lyddane mean-element theory is built over, and the state it starts from. */
 typedef struct sl_brouwer_lyddane_params {

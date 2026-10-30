@@ -151,9 +151,14 @@ use spacelab_propagation::lifetime::{
 };
 use spacelab_propagation::relativity::EARTH_ANGULAR_MOMENTUM_PER_MASS;
 use spacelab_propagation::sdtm::{
-    SdtmAtmosphere, SdtmDrivers, SdtmPoint,
+    DensityUncertainty, Envelope, SdtmAtmosphere, SdtmDrivers, SdtmPoint, StormHour, Thermosphere,
     coefficients::{
-        ENVELOPE as SDTM1_ENVELOPE, FIELD as SDTM1_FIELD, UNCERTAINTY as SDTM1_UNCERTAINTY,
+        ENVELOPE as SDTM1_ENVELOPE, FIELD as SDTM1_FIELD, HARMONICS as SDTM1_HARMONICS,
+        UNCERTAINTY as SDTM1_UNCERTAINTY,
+    },
+    solar_wind_coefficients::{
+        DRIVE as SDTM1_SW_DRIVE, ENVELOPE as SDTM1_SW_ENVELOPE, FIELD as SDTM1_SW_FIELD,
+        UNCERTAINTY as SDTM1_SW_UNCERTAINTY,
     },
 };
 use spacelab_propagation::space_weather::{
@@ -5309,24 +5314,49 @@ pub extern "C" fn sl_sdtm1_density(
     storm: f64,
 ) -> f64 {
     guard_f64(|| {
-        let arguments = [
-            doy,
-            sec,
-            altitude_km,
-            latitude_deg,
-            longitude_deg,
-            f107,
-            f107a,
-            storm,
-        ];
-        if arguments.iter().any(|v| !v.is_finite()) {
-            return f64::NAN;
-        }
-        SDTM1_FIELD.density(
-            &sdtm1_point(doy, sec, altitude_km, latitude_deg, longitude_deg),
-            &SdtmDrivers { f107, f107a, storm },
+        sdtm_at(
+            &SDTM1_FIELD,
+            Thermosphere::density,
+            [
+                doy,
+                sec,
+                altitude_km,
+                latitude_deg,
+                longitude_deg,
+                f107,
+                f107a,
+                storm,
+            ],
         )
     })
+}
+
+/// One SDTM-1 field's `value` at the point and drivers the `sl_sdtm1_*` point functions take, in
+/// their order: `[doy, sec, altitude_km, latitude_deg, longitude_deg, f107, f107a, storm]`. NaN for
+/// a non-finite argument, for the reason `sl_sdtm1_density` gives.
+fn sdtm_at(
+    field: &Thermosphere<SDTM1_HARMONICS>,
+    value: fn(&Thermosphere<SDTM1_HARMONICS>, &SdtmPoint, &SdtmDrivers) -> f64,
+    arguments: [f64; 8],
+) -> f64 {
+    if arguments.iter().any(|v| !v.is_finite()) {
+        return f64::NAN;
+    }
+    let [
+        doy,
+        sec,
+        altitude_km,
+        latitude_deg,
+        longitude_deg,
+        f107,
+        f107a,
+        storm,
+    ] = arguments;
+    value(
+        field,
+        &sdtm1_point(doy, sec, altitude_km, latitude_deg, longitude_deg),
+        &SdtmDrivers { f107, f107a, storm },
+    )
 }
 
 /// SDTM-1 exospheric temperature `T∞`, K, at the same point and drivers as `sl_sdtm1_density`.
@@ -5347,22 +5377,19 @@ pub extern "C" fn sl_sdtm1_exospheric_temperature(
     storm: f64,
 ) -> f64 {
     guard_f64(|| {
-        let arguments = [
-            doy,
-            sec,
-            altitude_km,
-            latitude_deg,
-            longitude_deg,
-            f107,
-            f107a,
-            storm,
-        ];
-        if arguments.iter().any(|v| !v.is_finite()) {
-            return f64::NAN;
-        }
-        SDTM1_FIELD.exospheric_temperature(
-            &sdtm1_point(doy, sec, altitude_km, latitude_deg, longitude_deg),
-            &SdtmDrivers { f107, f107a, storm },
+        sdtm_at(
+            &SDTM1_FIELD,
+            Thermosphere::exospheric_temperature,
+            [
+                doy,
+                sec,
+                altitude_km,
+                latitude_deg,
+                longitude_deg,
+                f107,
+                f107a,
+                storm,
+            ],
         )
     })
 }
@@ -5431,14 +5458,27 @@ pub unsafe extern "C" fn sl_sdtm1_density_interval(
         if out.is_null() {
             return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null out pointer"));
         }
-        let (lower, upper) =
-            SDTM1_UNCERTAINTY.interval(density, &SdtmDrivers { f107, f107a, storm }, z);
+        let interval = sdtm_interval(&SDTM1_UNCERTAINTY, density, f107, f107a, storm, z);
         // SAFETY: checked non-null; the caller states it is writable for two doubles.
         unsafe {
-            core::ptr::copy_nonoverlapping([lower, upper].as_ptr(), out, SL_SDTM1_INTERVAL);
+            core::ptr::copy_nonoverlapping(interval.as_ptr(), out, SL_SDTM1_INTERVAL);
         }
         SL_OK
     })
+}
+
+/// `[lower, upper]` from one field's regime table. A safe helper because `cargo mutants` generates
+/// nothing for the body of an `unsafe fn`.
+fn sdtm_interval(
+    table: &DensityUncertainty,
+    density: f64,
+    f107: f64,
+    f107a: f64,
+    storm: f64,
+    z: f64,
+) -> [f64; SL_SDTM1_INTERVAL] {
+    let (lower, upper) = table.interval(density, &SdtmDrivers { f107, f107a, storm }, z);
+    [lower, upper]
 }
 
 /// How many doubles `sl_sdtm1_envelope` writes.
@@ -5447,8 +5487,8 @@ pub const SL_SDTM1_ENVELOPE: usize = 4;
 /// The envelope in this header's units for SDTM-1: kilometres, as `sl_sdtm1_density` takes them,
 /// and solar flux units. A safe helper because `cargo mutants` generates nothing for the body of an
 /// `unsafe fn`.
-fn sdtm1_envelope() -> [f64; SL_SDTM1_ENVELOPE] {
-    let (altitude, f107a) = (SDTM1_ENVELOPE.altitude, SDTM1_ENVELOPE.f107a);
+fn sdtm1_envelope(envelope: &Envelope) -> [f64; SL_SDTM1_ENVELOPE] {
+    let (altitude, f107a) = (&envelope.altitude, &envelope.f107a);
     [
         *altitude.start() / 1000.0,
         *altitude.end() / 1000.0,
@@ -5476,7 +5516,201 @@ pub unsafe extern "C" fn sl_sdtm1_envelope(out: *mut f64) -> i32 {
         }
         // SAFETY: checked non-null; the caller states it is writable for four doubles.
         unsafe {
-            core::ptr::copy_nonoverlapping(sdtm1_envelope().as_ptr(), out, SL_SDTM1_ENVELOPE);
+            core::ptr::copy_nonoverlapping(
+                sdtm1_envelope(&SDTM1_ENVELOPE).as_ptr(),
+                out,
+                SL_SDTM1_ENVELOPE,
+            );
+        }
+        SL_OK
+    })
+}
+
+/// SDTM-1's solar-wind field total mass density, kg/m³: SDTM-1 fitted again with its storm state
+/// run hourly on GFZ's `ap60` and the measured solar wind, for reconstruction and nowcasting.
+/// `sl_sdtm1_density` stays the forecast path, because the solar wind is measured less than an hour
+/// before it arrives. Same arguments and units as `sl_sdtm1_density`; `storm` is
+/// `sl_sdtm1_solar_wind_storm_response`'s output, and the 3-hourly field's is another model's
+/// driver. A non-finite argument answers NaN.
+#[allow(clippy::too_many_arguments)] // a day, a time, three coordinates and three drivers
+#[unsafe(no_mangle)]
+pub extern "C" fn sl_sdtm1_solar_wind_density(
+    doy: f64,
+    sec: f64,
+    altitude_km: f64,
+    latitude_deg: f64,
+    longitude_deg: f64,
+    f107: f64,
+    f107a: f64,
+    storm: f64,
+) -> f64 {
+    guard_f64(|| {
+        sdtm_at(
+            &SDTM1_SW_FIELD,
+            Thermosphere::density,
+            [
+                doy,
+                sec,
+                altitude_km,
+                latitude_deg,
+                longitude_deg,
+                f107,
+                f107a,
+                storm,
+            ],
+        )
+    })
+}
+
+/// SDTM-1's solar-wind field exospheric temperature `T∞`, K, at the same point and drivers as
+/// `sl_sdtm1_solar_wind_density`. A non-finite argument answers NaN.
+#[allow(clippy::too_many_arguments)] // a day, a time, three coordinates and three drivers
+#[unsafe(no_mangle)]
+pub extern "C" fn sl_sdtm1_solar_wind_exospheric_temperature(
+    doy: f64,
+    sec: f64,
+    altitude_km: f64,
+    latitude_deg: f64,
+    longitude_deg: f64,
+    f107: f64,
+    f107a: f64,
+    storm: f64,
+) -> f64 {
+    guard_f64(|| {
+        sdtm_at(
+            &SDTM1_SW_FIELD,
+            Thermosphere::exospheric_temperature,
+            [
+                doy,
+                sec,
+                altitude_km,
+                latitude_deg,
+                longitude_deg,
+                f107,
+                f107a,
+                storm,
+            ],
+        )
+    })
+}
+
+/// The hours of the solar-wind field from four borrowed series, or the index of the first hour that
+/// is none: `StormHour::from_values` is the rule. A safe helper for the reason `check_eop_series`
+/// gives.
+fn sdtm1_solar_wind_hours(
+    ap60: &[f64],
+    speed: &[f64],
+    by: &[f64],
+    bz: &[f64],
+) -> Result<Vec<StormHour>, usize> {
+    ap60.iter()
+        .zip(speed)
+        .zip(by)
+        .zip(bz)
+        .enumerate()
+        .map(|(i, (((&a, &v), &y), &z))| StormHour::from_values(a, v, y, z).ok_or(i))
+        .collect()
+}
+
+/// The solar-wind field's storm driver over borrowed hours, NaN where one is no hour of it.
+fn sdtm1_solar_wind_storm_response(ap60: &[f64], speed: &[f64], by: &[f64], bz: &[f64]) -> f64 {
+    sdtm1_solar_wind_hours(ap60, speed, by, bz).map_or(f64::NAN, |hours| {
+        SDTM1_SW_DRIVE.storm(SDTM1_SW_FIELD.storm(), &hours)
+    })
+}
+
+/// SDTM-1's solar-wind field storm driver: its heating and nitric-oxide cooling state run hourly
+/// over `(1 − s)·ap60 + s·N`, `N` Newell's coupling of the solar wind on `ap60`'s scale.
+///
+/// The four series are `n` hours, oldest first, ending at the hour **before** the sample: GFZ's
+/// `ap60`, and the solar wind at the bow-shock nose as `speed_km_s` and the GSM `by_nt`, `bz_nt`.
+/// The field was fitted on OMNI's hourly averages, time-shifted from L1 to the bow
+/// shock, so real-time L1 data is shifted first. A NaN speed, `By` or `Bz` is an hour without the
+/// solar wind, and it drives by its `ap60`. Nitric oxide remembers a storm for days: pass
+/// fourteen days, 336 hours (`sdtm::solar_wind_coefficients::HISTORY` in Rust).
+///
+/// `n = 0` answers `0`. A null pointer, an `ap60` that is negative or not finite, or a value that is
+/// no solar wind — a speed outside `[0, 5000)` km/s or a field of 500 nT or more, which is a fill
+/// value — answers NaN.
+///
+/// # Safety
+/// `ap60`, `speed_km_s`, `by_nt` and `bz_nt` are each readable for `n` doubles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_sdtm1_solar_wind_storm_response(
+    ap60: *const f64,
+    speed_km_s: *const f64,
+    by_nt: *const f64,
+    bz_nt: *const f64,
+    n: usize,
+) -> f64 {
+    guard_f64(|| {
+        if ap60.is_null() || speed_km_s.is_null() || by_nt.is_null() || bz_nt.is_null() {
+            return f64::NAN;
+        }
+        // SAFETY: checked non-null; the caller states each is readable for `n` doubles.
+        let (a, v, y, z) = unsafe {
+            (
+                core::slice::from_raw_parts(ap60, n),
+                core::slice::from_raw_parts(speed_km_s, n),
+                core::slice::from_raw_parts(by_nt, n),
+                core::slice::from_raw_parts(bz_nt, n),
+            )
+        };
+        sdtm1_solar_wind_storm_response(a, v, y, z)
+    })
+}
+
+/// SDTM-1's solar-wind field log-normal density interval about `density`, `[lower, upper]` in
+/// kg/m³, as `sl_sdtm1_density_interval` is for the 3-hourly field: its own regime table, measured
+/// on its own held-out residual. `f107a` and `storm` must be the values `density` was evaluated
+/// with.
+///
+/// # Safety
+/// `out` is writable for `SL_SDTM1_INTERVAL` doubles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_sdtm1_solar_wind_density_interval(
+    density: f64,
+    f107: f64,
+    f107a: f64,
+    storm: f64,
+    z: f64,
+    out: *mut f64,
+) -> i32 {
+    guard(|| {
+        const WHO: &str = "sl_sdtm1_solar_wind_density_interval";
+        if out.is_null() {
+            return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null out pointer"));
+        }
+        let interval = sdtm_interval(&SDTM1_SW_UNCERTAINTY, density, f107, f107a, storm, z);
+        // SAFETY: checked non-null; the caller states it is writable for two doubles.
+        unsafe {
+            core::ptr::copy_nonoverlapping(interval.as_ptr(), out, SL_SDTM1_INTERVAL);
+        }
+        SL_OK
+    })
+}
+
+/// SDTM-1's solar-wind field fitted envelope, `[lowest_km, highest_km, lowest_f107a,
+/// highest_f107a]`, as `sl_sdtm1_envelope` is for the 3-hourly field.
+///
+/// # Safety
+/// `out` is writable for `SL_SDTM1_ENVELOPE` doubles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_sdtm1_solar_wind_envelope(out: *mut f64) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return fail(
+                SL_ERR_INVALID_ARGUMENT,
+                "sl_sdtm1_solar_wind_envelope: null out pointer",
+            );
+        }
+        // SAFETY: checked non-null; the caller states it is writable for four doubles.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                sdtm1_envelope(&SDTM1_SW_ENVELOPE).as_ptr(),
+                out,
+                SL_SDTM1_ENVELOPE,
+            );
         }
         SL_OK
     })
@@ -6593,43 +6827,171 @@ pub unsafe extern "C" fn sl_ephemeris_drag_sdtm1(
             Ok(storm) => storm,
             Err(status) => return status,
         };
-        let sys = Plain(Newtonian((
-            PointMass { mu: d.mu },
-            Drag {
-                ballistic_coefficient: d.ballistic_coefficient,
-                earth_rotation_rate: spacelab_frames::EARTH_ROTATION_RATE,
-                atmosphere: SdtmAtmosphere {
-                    field: SDTM1_FIELD,
-                    drivers: SdtmDrivers {
-                        f107: d.f107,
-                        f107a: d.f107a,
-                        storm,
-                    },
-                    doy0: d.doy,
-                    sec0: d.seconds_of_day,
-                    geodetic: geodetic_over(cio_over(eop, t1_seconds)),
-                },
-                wind: NoWind,
-            },
-        )));
         // SAFETY: `out` was checked non-null above.
         unsafe {
-            deliver_dop853(
+            sdtm_drag(
                 WHO,
-                || {
-                    integrate_dop853(
-                        &sys,
-                        0.0,
-                        &y0,
-                        t1_seconds,
-                        initial_step(t1_seconds),
-                        Controls::new(Tolerance::new(tolerance, tolerance), 1e-3),
-                    )
-                },
+                (&y0, t1_seconds, tolerance),
+                &eop,
+                &d,
+                (&SDTM1_FIELD, storm),
                 out,
             )
         }
     })
+}
+
+/// Propagate under point-mass gravity and drag through SDTM-1's solar-wind field, as
+/// `sl_ephemeris_drag_sdtm1` does through the 3-hourly field: for reconstructing an arc, where the
+/// hours of `ap60` and solar wind before it are measured.
+///
+/// The four series are `n` hours, oldest first, ending at the hour **before** the arc's epoch, as
+/// `sl_sdtm1_solar_wind_storm_response` takes them; the storm state is run over them once and held
+/// over the arc with the record's two fluxes. A field of the record that is not finite, a null
+/// series, `n = 0`, or an hour `sl_sdtm1_solar_wind_storm_response` refuses answers
+/// `SL_ERR_INVALID_ARGUMENT`, and the message names the hour.
+///
+/// # Safety
+/// `in` points at one initialised `sl_state`; `eop` at one `sl_eop`; `drag` at one
+/// `sl_sdtm1_drag`; `ap60`, `speed_km_s`, `by_nt` and `bz_nt` are each readable for `n` doubles;
+/// `out` is writable for one pointer.
+#[allow(clippy::too_many_arguments)] // the arc, its frame, the record, four series and the handle
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_ephemeris_drag_sdtm1_solar_wind(
+    r#in: *const SlState,
+    t1_seconds: f64,
+    eop: *const SlEop,
+    drag: *const SlSdtm1Drag,
+    ap60: *const f64,
+    speed_km_s: *const f64,
+    by_nt: *const f64,
+    bz_nt: *const f64,
+    n: usize,
+    tolerance: f64,
+    out: *mut *mut SlEphemeris,
+) -> i32 {
+    guard(|| {
+        const WHO: &str = "sl_ephemeris_drag_sdtm1_solar_wind";
+        if r#in.is_null()
+            || eop.is_null()
+            || drag.is_null()
+            || ap60.is_null()
+            || speed_km_s.is_null()
+            || by_nt.is_null()
+            || bz_nt.is_null()
+            || out.is_null()
+        {
+            return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null pointer"));
+        }
+        if let Err(status) = check_arc(WHO, t1_seconds, tolerance) {
+            return status;
+        }
+        // SAFETY: checked non-null; the caller states all three are initialised.
+        let (y0, eop, d) = unsafe { (to_six(*r#in), *eop, *drag) };
+        if let Err(status) = check_sdtm1_drag(WHO, &d) {
+            return status;
+        }
+        // SAFETY: checked non-null; the caller states each is readable for `n` doubles.
+        let (a, v, y, z) = unsafe {
+            (
+                core::slice::from_raw_parts(ap60, n),
+                core::slice::from_raw_parts(speed_km_s, n),
+                core::slice::from_raw_parts(by_nt, n),
+                core::slice::from_raw_parts(bz_nt, n),
+            )
+        };
+        let storm = match sdtm1_solar_wind_drag_storm(WHO, a, v, y, z) {
+            Ok(storm) => storm,
+            Err(status) => return status,
+        };
+        // SAFETY: `out` was checked non-null above.
+        unsafe {
+            sdtm_drag(
+                WHO,
+                (&y0, t1_seconds, tolerance),
+                &eop,
+                &d,
+                (&SDTM1_SW_FIELD, storm),
+                out,
+            )
+        }
+    })
+}
+
+/// The storm driver `sl_ephemeris_drag_sdtm1_solar_wind` holds over its arc, refused by name where
+/// the hours cannot give one: none, or one that is no hour of the field. A safe helper for the
+/// reason `check_eop_series` gives.
+fn sdtm1_solar_wind_drag_storm(
+    who: &str,
+    ap60: &[f64],
+    speed: &[f64],
+    by: &[f64],
+    bz: &[f64],
+) -> Result<f64, i32> {
+    check_nonzero(who, "n", ap60.len())?;
+    let hours = sdtm1_solar_wind_hours(ap60, speed, by, bz).map_err(|i| {
+        fail(
+            SL_ERR_INVALID_ARGUMENT,
+            format!(
+                "{who}: hour {i} is ap60 {}, speed {} km/s, By {} nT, Bz {} nT: ap60 must be \
+                 finite and not negative, and a solar wind NaN where it is missing or a speed in \
+                 [0, 5000) km/s with |By|, |Bz| below 500 nT",
+                ap60[i], speed[i], by[i], bz[i]
+            ),
+        )
+    })?;
+    Ok(SDTM1_SW_DRIVE.storm(SDTM1_SW_FIELD.storm(), &hours))
+}
+
+/// The arc both SDTM-1 drag entry points integrate once their storm driver is known: point mass
+/// and drag through `field` with the record's fluxes and `storm` held over it.
+///
+/// # Safety
+/// `out` is writable for one pointer.
+unsafe fn sdtm_drag(
+    who: &str,
+    (y0, t1_seconds, tolerance): (&[f64; 6], f64, f64),
+    eop: &SlEop,
+    d: &SlSdtm1Drag,
+    (field, storm): (&Thermosphere<SDTM1_HARMONICS>, f64),
+    out: *mut *mut SlEphemeris,
+) -> i32 {
+    let sys = Plain(Newtonian((
+        PointMass { mu: d.mu },
+        Drag {
+            ballistic_coefficient: d.ballistic_coefficient,
+            earth_rotation_rate: spacelab_frames::EARTH_ROTATION_RATE,
+            atmosphere: SdtmAtmosphere {
+                field: *field,
+                drivers: SdtmDrivers {
+                    f107: d.f107,
+                    f107a: d.f107a,
+                    storm,
+                },
+                doy0: d.doy,
+                sec0: d.seconds_of_day,
+                geodetic: geodetic_over(cio_over(*eop, t1_seconds)),
+            },
+            wind: NoWind,
+        },
+    )));
+    // SAFETY: the caller states `out` is writable for one pointer.
+    unsafe {
+        deliver_dop853(
+            who,
+            || {
+                integrate_dop853(
+                    &sys,
+                    0.0,
+                    y0,
+                    t1_seconds,
+                    initial_step(t1_seconds),
+                    Controls::new(Tolerance::new(tolerance, tolerance), 1e-3),
+                )
+            },
+            out,
+        )
+    }
 }
 
 /// Propagate under the geopotential evaluated in the true ITRF, rotated by the interpolated CIO
@@ -18874,6 +19236,377 @@ mod tests {
             unsafe { sl_sdtm1_envelope(core::ptr::null_mut()) },
             SL_ERR_INVALID_ARGUMENT
         );
+    }
+
+    /// The solar-wind field's two point functions evaluate that field and not the 3-hourly one, at
+    /// the point and drivers built here by name, with distinct fluxes so that a swap cannot survive;
+    /// every argument is refused when it is not finite.
+    #[test]
+    fn the_sdtm1_solar_wind_point_functions_evaluate_their_own_field() {
+        let p = sdtm1_point(172.0, 54_000.0, 400.0, 45.0, 30.0);
+        let drivers = SdtmDrivers {
+            f107: 120.0,
+            f107a: 160.0,
+            storm: 30.0,
+        };
+        let density =
+            sl_sdtm1_solar_wind_density(172.0, 54_000.0, 400.0, 45.0, 30.0, 120.0, 160.0, 30.0);
+        assert_eq!(density, SDTM1_SW_FIELD.density(&p, &drivers));
+        assert_ne!(density, SDTM1_FIELD.density(&p, &drivers));
+        let temperature = sl_sdtm1_solar_wind_exospheric_temperature(
+            172.0, 54_000.0, 400.0, 45.0, 30.0, 120.0, 160.0, 30.0,
+        );
+        assert_eq!(
+            temperature,
+            SDTM1_SW_FIELD.exospheric_temperature(&p, &drivers)
+        );
+        assert_ne!(
+            temperature,
+            SDTM1_FIELD.exospheric_temperature(&p, &drivers)
+        );
+
+        let base = [172.0, 29_000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 0.0];
+        for slot in 0..base.len() {
+            let mut a = base;
+            a[slot] = f64::NAN;
+            assert!(
+                sl_sdtm1_solar_wind_density(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
+                    .is_nan(),
+                "a NaN in slot {slot} answered a density"
+            );
+            assert!(
+                sl_sdtm1_solar_wind_exospheric_temperature(
+                    a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]
+                )
+                .is_nan(),
+                "a NaN in slot {slot} answered a temperature"
+            );
+        }
+    }
+
+    /// Hours that end in a storm the solar wind drives harder than `ap60` says: four quiet days,
+    /// then two of `ap60` 120 under a southward field strong enough to reach the top of the map. `By`
+    /// and `Bz` differ, so that exchanging the two moves the clock angle and with it the coupling.
+    fn solar_wind_storm_hours() -> [Vec<f64>; 4] {
+        let series = |quiet: f64, storm: f64| -> Vec<f64> {
+            (0..144)
+                .map(|i| if i < 96 { quiet } else { storm })
+                .collect()
+        };
+        [
+            series(7.0, 120.0),
+            series(380.0, 1_100.0),
+            series(2.0, 4.0),
+            series(1.0, -50.0),
+        ]
+    }
+
+    /// The hours [`solar_wind_storm_hours`] names, built by name rather than by the helper under
+    /// test, with `gap` the one hour without the solar wind.
+    fn solar_wind_hours_by_name(
+        [ap60, speed, by, bz]: &[Vec<f64>; 4],
+        gap: usize,
+    ) -> Vec<StormHour> {
+        (0..ap60.len())
+            .map(|i| StormHour {
+                ap60: ap60[i],
+                solar_wind: (i != gap).then_some(spacelab_propagation::sdtm::SolarWind {
+                    speed: speed[i],
+                    by: by[i],
+                    bz: bz[i],
+                }),
+            })
+            .collect()
+    }
+
+    /// The four series read as the hours they name, through the C boundary: the storm is the field's
+    /// drive run hourly over them, an hour with a NaN in its solar wind drives by its `ap60`, and an
+    /// hour that is no hour is refused.
+    #[test]
+    fn the_sdtm1_solar_wind_storm_response_runs_the_drive_over_the_hours() {
+        let mut series = solar_wind_storm_hours();
+        series[3][120] = f64::NAN;
+        let [ap60, speed, by, bz] = &series;
+        let n = ap60.len();
+        let want = SDTM1_SW_DRIVE.storm(
+            SDTM1_SW_FIELD.storm(),
+            &solar_wind_hours_by_name(&series, 120),
+        );
+        let got = unsafe {
+            sl_sdtm1_solar_wind_storm_response(
+                ap60.as_ptr(),
+                speed.as_ptr(),
+                by.as_ptr(),
+                bz.as_ptr(),
+                n,
+            )
+        };
+        assert_eq!(got, want);
+        // A northward field couples less than the same field turned south, so exchanging `By` and
+        // `Bz` lowers the drive.
+        let exchanged = sdtm1_solar_wind_storm_response(ap60, speed, bz, by);
+        assert!(exchanged < got, "{exchanged} against {got}");
+        // Without the solar wind every hour drives by its `ap60`: the field's own storm state over
+        // `ap60` at the hourly cadence, and below the storm the wind drives.
+        let none = vec![f64::NAN; n];
+        let quiet = sdtm1_solar_wind_storm_response(ap60, &none, &none, &none);
+        assert_eq!(
+            quiet,
+            SDTM1_SW_FIELD
+                .storm()
+                .response(ap60, spacelab_propagation::sdtm::HOURLY_CADENCE)
+        );
+        assert!(quiet < got, "{quiet} against {got}");
+
+        // `n = 0` is a history with nothing in it, and a null series is no history at all.
+        let pointers = [ap60.as_ptr(), speed.as_ptr(), by.as_ptr(), bz.as_ptr()];
+        assert_eq!(
+            unsafe {
+                sl_sdtm1_solar_wind_storm_response(
+                    pointers[0],
+                    pointers[1],
+                    pointers[2],
+                    pointers[3],
+                    0,
+                )
+            },
+            0.0
+        );
+        for slot in 0..pointers.len() {
+            let mut p = pointers;
+            p[slot] = core::ptr::null();
+            assert!(
+                unsafe { sl_sdtm1_solar_wind_storm_response(p[0], p[1], p[2], p[3], n) }.is_nan(),
+                "a null series {slot} answered a number"
+            );
+        }
+        // An `ap60` that is negative or not finite, and a fill value for the solar wind.
+        for (slot, value) in [
+            (0, -1.0),
+            (0, f64::NAN),
+            (0, f64::INFINITY),
+            (1, -1.0),
+            (1, 5_000.0),
+            (1, f64::INFINITY),
+            (2, 500.0),
+            (3, -500.0),
+        ] {
+            let mut bad = series.clone();
+            bad[slot][100] = value;
+            let [a, v, y, z] = &bad;
+            assert!(
+                sdtm1_solar_wind_storm_response(a, v, y, z).is_nan(),
+                "{value} in series {slot} answered a number"
+            );
+        }
+    }
+
+    /// The solar-wind field's interval is its own table's and its envelope its own fit's, in this
+    /// header's units, and both refuse a null out pointer.
+    #[test]
+    fn the_sdtm1_solar_wind_interval_and_envelope_are_the_fields_own() {
+        let (density, z) = (4.118e-12, 1.644_853_626_951_472_7);
+        let drivers = SdtmDrivers {
+            f107: 150.0,
+            f107a: 150.0,
+            storm: 20.0,
+        };
+        let mut out = [f64::MIN; SL_SDTM1_INTERVAL];
+        assert_eq!(
+            unsafe {
+                sl_sdtm1_solar_wind_density_interval(
+                    density,
+                    150.0,
+                    150.0,
+                    20.0,
+                    z,
+                    out.as_mut_ptr(),
+                )
+            },
+            SL_OK
+        );
+        let (lower, upper) = SDTM1_SW_UNCERTAINTY.interval(density, &drivers, z);
+        assert_eq!(out, [lower, upper]);
+        assert!(lower < density && density < upper, "{out:?}");
+        let (lower_3h, upper_3h) = SDTM1_UNCERTAINTY.interval(density, &drivers, z);
+        assert_ne!(out, [lower_3h, upper_3h], "the 3-hourly table answered");
+        assert_eq!(
+            unsafe {
+                sl_sdtm1_solar_wind_density_interval(
+                    density,
+                    150.0,
+                    150.0,
+                    20.0,
+                    z,
+                    core::ptr::null_mut(),
+                )
+            },
+            SL_ERR_INVALID_ARGUMENT
+        );
+
+        let mut envelope = [0.0; SL_SDTM1_ENVELOPE];
+        assert_eq!(
+            unsafe { sl_sdtm1_solar_wind_envelope(envelope.as_mut_ptr()) },
+            SL_OK
+        );
+        assert_eq!(
+            envelope,
+            [
+                *SDTM1_SW_ENVELOPE.altitude.start() / 1000.0,
+                *SDTM1_SW_ENVELOPE.altitude.end() / 1000.0,
+                *SDTM1_SW_ENVELOPE.f107a.start(),
+                *SDTM1_SW_ENVELOPE.f107a.end(),
+            ]
+        );
+        assert_eq!(
+            unsafe { sl_sdtm1_solar_wind_envelope(core::ptr::null_mut()) },
+            SL_ERR_INVALID_ARGUMENT
+        );
+    }
+
+    /// Drag through SDTM-1's solar-wind field over an hour, the four series of one length.
+    fn sdtm1_solar_wind_arc(
+        s0: &SlState,
+        drag: SlSdtm1Drag,
+        [ap60, speed, by, bz]: [&[f64]; 4],
+    ) -> Result<SlState, i32> {
+        sample_ephemeris(
+            |out| unsafe {
+                sl_ephemeris_drag_sdtm1_solar_wind(
+                    s0,
+                    3_600.0,
+                    &raw const EOP,
+                    &raw const drag,
+                    ap60.as_ptr(),
+                    speed.as_ptr(),
+                    by.as_ptr(),
+                    bz.as_ptr(),
+                    ap60.len(),
+                    1e-10,
+                    out,
+                )
+            },
+            3_600.0,
+        )
+    }
+
+    /// The solar-wind drag constructor against the same system assembled here from the crate's own
+    /// types, with the storm the hours drive held over the arc. The solar wind reaches the orbit: the
+    /// same hours without it are another storm and another endpoint. The record's fields are
+    /// `check_sdtm1_drag`'s, refused by the 3-hourly test above, so one of them stands for the rest.
+    #[test]
+    fn the_sdtm1_solar_wind_drag_constructor_is_the_crates_own_system() {
+        let s0 = circular_state(6_778_000.0, 51.6_f64.to_radians());
+        let arc = 3_600.0;
+        let series = solar_wind_storm_hours();
+        let [ap60, speed, by, bz] = &series;
+        let got = sdtm1_solar_wind_arc(&s0, SDTM1_DRAG, [ap60, speed, by, bz])
+            .expect("SDTM-1 solar-wind drag");
+
+        let storm = SDTM1_SW_DRIVE.storm(
+            SDTM1_SW_FIELD.storm(),
+            &solar_wind_hours_by_name(&series, usize::MAX),
+        );
+        let sys = Plain(Newtonian((
+            PointMass { mu: MU_EARTH },
+            Drag {
+                ballistic_coefficient: 0.02,
+                earth_rotation_rate: spacelab_frames::EARTH_ROTATION_RATE,
+                atmosphere: SdtmAtmosphere {
+                    field: SDTM1_SW_FIELD,
+                    drivers: SdtmDrivers {
+                        f107: 128.0,
+                        f107a: 141.0,
+                        storm,
+                    },
+                    doy0: 172.0,
+                    sec0: 29_000.0,
+                    geodetic: geodetic_over(cio_over(EOP, arc)),
+                },
+                wind: NoWind,
+            },
+        )));
+        let reference = integrate_dop853(
+            &sys,
+            0.0,
+            &to_six(s0),
+            arc,
+            initial_step(arc),
+            Controls::new(Tolerance::new(1e-10, 1e-10), 1e-3),
+        )
+        .expect("the reference system integrates over an hour")
+        .final_state();
+        let want = SlState {
+            position: SlVec3 {
+                x: reference[0],
+                y: reference[1],
+                z: reference[2],
+            },
+            velocity: SlVec3 {
+                x: reference[3],
+                y: reference[4],
+                z: reference[5],
+            },
+        };
+        assert!(miss(got, want) < 1e-6, "{} m", miss(got, want));
+        let none = vec![f64::NAN; ap60.len()];
+        let moved = miss(
+            sdtm1_solar_wind_arc(&s0, SDTM1_DRAG, [ap60, &none, &none, &none])
+                .expect("SDTM-1 solar-wind drag"),
+            got,
+        );
+        assert!(moved > 1e-3, "the solar wind moved it {moved} m");
+
+        let refused = |drag: SlSdtm1Drag, hours: [&[f64]; 4], named: &str| {
+            assert_eq!(
+                sdtm1_solar_wind_arc(&s0, drag, hours),
+                Err(SL_ERR_INVALID_ARGUMENT),
+                "{named}"
+            );
+            assert!(last_error().contains(named), "{named}: {}", last_error());
+        };
+        refused(
+            SlSdtm1Drag {
+                doy: f64::NAN,
+                ..SDTM1_DRAG
+            },
+            [ap60, speed, by, bz],
+            " doy is NaN",
+        );
+        refused(SDTM1_DRAG, [&[], &[], &[], &[]], " n is zero");
+        let mut fill = speed.clone();
+        fill[1] = 9_999.0;
+        refused(
+            SDTM1_DRAG,
+            [ap60, &fill, by, bz],
+            " hour 1 is ap60 7, speed 9999 km/s, By 2 nT, Bz 1 nT",
+        );
+
+        let record = SDTM1_DRAG;
+        let mut handle: *mut SlEphemeris = core::ptr::null_mut();
+        let pointers = [ap60.as_ptr(), speed.as_ptr(), by.as_ptr(), bz.as_ptr()];
+        for slot in 0..pointers.len() {
+            let mut p = pointers;
+            p[slot] = core::ptr::null();
+            let status = unsafe {
+                sl_ephemeris_drag_sdtm1_solar_wind(
+                    &raw const s0,
+                    arc,
+                    &raw const EOP,
+                    &raw const record,
+                    p[0],
+                    p[1],
+                    p[2],
+                    p[3],
+                    ap60.len(),
+                    1e-10,
+                    &raw mut handle,
+                )
+            };
+            assert_eq!(status, SL_ERR_INVALID_ARGUMENT, "a null series {slot}");
+        }
+        // A refused constructor writes nothing, so the caller's pointer is still what it was.
+        assert!(handle.is_null());
     }
 
     #[test]

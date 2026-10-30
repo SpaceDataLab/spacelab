@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <numbers>
 #include <span>
 #include <string>
@@ -509,6 +510,28 @@ void the_atmosphere_wrapper_still_answers_without_exceptions() {
         spacelab::try_sdtm1_envelope();
     CHECK(static_cast<bool>(envelope));
     CHECK((*envelope)[0] < 400.0 && 400.0 < (*envelope)[1]);
+
+    /* The solar-wind field the same way: its storm response is total, its interval and envelope
+     * are results. */
+    const std::array<double, 4> no_wind{
+        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()};
+    const double sw_quiet =
+        spacelab::sdtm1_solar_wind_storm_response(quiet_ap, no_wind, no_wind, no_wind);
+    CHECK(sw_quiet > 0.0 && sw_quiet < 5.0);
+    const double sw_400 =
+        spacelab::sdtm1_solar_wind_density(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 5.0);
+    CHECK(spacelab::sdtm1_solar_wind_exospheric_temperature(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0,
+                                                            150.0, 5.0) > 0.0);
+    const spacelab::result<std::array<double, SL_SDTM1_INTERVAL>> sw_band =
+        spacelab::try_sdtm1_solar_wind_density_interval(sw_400, 150.0, 150.0, 5.0,
+                                                        1.6448536269514727);
+    CHECK(static_cast<bool>(sw_band));
+    CHECK((*sw_band)[0] < sw_400 && sw_400 < (*sw_band)[1]);
+    const spacelab::result<std::array<double, SL_SDTM1_ENVELOPE>> sw_envelope =
+        spacelab::try_sdtm1_solar_wind_envelope();
+    CHECK(static_cast<bool>(sw_envelope));
+    CHECK((*sw_envelope)[0] < 400.0 && 400.0 < (*sw_envelope)[1]);
 
     const double t = 20.0 * 365.25 * 86400.0;
     const spacelab::result<std::array<double, 2>> now = spacelab::try_solid_pole_tide(0.0, 1e-7, t);

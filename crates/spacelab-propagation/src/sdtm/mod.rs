@@ -76,6 +76,15 @@
 //! [`NitricOxideCooling`], every constant fitted; it is a property of the
 //! model, so the field owns it and exposes it through [`Thermosphere::storm`], while the *history*
 //! stays with the caller who fetched it. One call per epoch feeds many density evaluations.
+//!
+//! # Two fields
+//!
+//! [`coefficients`] is the default and the forecast path: its storm state runs on 3-hourly `ap`,
+//! which is forecast. [`solar_wind_coefficients`] is the same form fitted again with the state run
+//! hourly on GFZ's `ap60` and the measured solar wind ([`SolarWindDrive`]), for reconstruction and
+//! nowcasting. It reaches the largest storms' peaks better (`docs/verification.md` §10.31–§10.32),
+//! and it cannot forecast, because the solar wind is measured less than an hour before it arrives.
+//! Each field's storm driver is its own state: one field's driver is not the other's input.
 
 use crate::density_calibration::DensityCorrection;
 
@@ -214,7 +223,13 @@ impl StormKernel {
     /// first value, which is the assumption that leaves no transient at the start of a fetched file.
     #[must_use]
     pub fn response(&self, history: &[f64], cadence: f64) -> f64 {
-        let Some(&first) = history.first() else {
+        self.run(history.iter().copied(), cadence)
+    }
+
+    /// [`Self::response`] over any series, so a drive computed hour by hour needs no buffer.
+    fn run(&self, history: impl IntoIterator<Item = f64>, cadence: f64) -> f64 {
+        let mut history = history.into_iter().peekable();
+        let Some(&first) = history.peek() else {
             return 0.0;
         };
         let (decay_o, decay_r) = (
@@ -222,7 +237,7 @@ impl StormKernel {
             libm::exp(-cadence / self.recovery),
         );
         let (mut y_o, mut y_r) = (first, first);
-        for &a in history {
+        for a in history {
             y_o = a + (y_o - a) * decay_o;
             y_r = a + (y_r - a) * decay_r;
         }
@@ -274,13 +289,19 @@ impl NitricOxideCooling {
     /// fetched file that began quiet.
     #[must_use]
     pub fn response(&self, history: &[f64], cadence: f64) -> f64 {
-        let Some(&first) = history.first() else {
+        self.run(history.iter().copied(), cadence)
+    }
+
+    /// [`Self::response`] over any series, so a drive computed hour by hour needs no buffer.
+    fn run(&self, history: impl IntoIterator<Item = f64>, cadence: f64) -> f64 {
+        let mut history = history.into_iter().peekable();
+        let Some(&first) = history.peek() else {
             return 0.0;
         };
         let decay = libm::exp(-cadence / self.nitric_oxide);
         let mean_weight = self.nitric_oxide / cadence * (1.0 - decay);
         let (mut d, mut n) = (self.steady_state(first), first);
-        for &drive in history {
+        for drive in history {
             let n_mean = drive + (n - drive) * mean_weight;
             let rate = (1.0 + n_mean / self.saturation) / self.heating;
             let target = drive / (self.heating * rate);
@@ -305,9 +326,14 @@ impl StormResponse {
     /// [`NitricOxideCooling::response`], which share their conventions.
     #[must_use]
     pub fn response(&self, history: &[f64], cadence: f64) -> f64 {
+        self.run(history.iter().copied(), cadence)
+    }
+
+    /// [`Self::response`] over any series.
+    fn run(&self, history: impl IntoIterator<Item = f64>, cadence: f64) -> f64 {
         match self {
-            Self::Kernel(k) => k.response(history, cadence),
-            Self::Cooling(c) => c.response(history, cadence),
+            Self::Kernel(k) => k.run(history, cadence),
+            Self::Cooling(c) => c.run(history, cadence),
         }
     }
 
@@ -575,9 +601,13 @@ pub fn driver_terms(point: &SdtmPoint, drivers: &SdtmDrivers) -> [f64; DRIVERS] 
 
 mod atmosphere;
 pub mod coefficients;
+mod solar_wind;
+pub mod solar_wind_coefficients;
 mod uncertainty;
 
 pub use atmosphere::SdtmAtmosphere;
+
+pub use solar_wind::{CouplingMap, HOURLY_CADENCE, SolarWind, SolarWindDrive, StormHour};
 
 pub use uncertainty::{
     DensityUncertainty, FLUX_EDGES, NORMAL_90, NORMAL_95, NORMAL_99, REGIMES, STORM_EDGES,

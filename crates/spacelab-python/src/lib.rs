@@ -160,9 +160,14 @@ use spacelab_propagation::lifetime::{
 };
 use spacelab_propagation::relativity::EARTH_ANGULAR_MOMENTUM_PER_MASS;
 use spacelab_propagation::sdtm::{
-    Envelope, SdtmAtmosphere, SdtmDrivers, SdtmPoint,
+    Envelope, SdtmAtmosphere, SdtmDrivers, SdtmPoint, StormHour, Thermosphere,
     coefficients::{
-        ENVELOPE as SDTM1_ENVELOPE, FIELD as SDTM1_FIELD, UNCERTAINTY as SDTM1_UNCERTAINTY,
+        ENVELOPE as SDTM1_ENVELOPE, FIELD as SDTM1_FIELD, HARMONICS as SDTM1_HARMONICS,
+        UNCERTAINTY as SDTM1_UNCERTAINTY,
+    },
+    solar_wind_coefficients::{
+        DRIVE as SDTM1_SW_DRIVE, ENVELOPE as SDTM1_SW_ENVELOPE, FIELD as SDTM1_SW_FIELD,
+        UNCERTAINTY as SDTM1_SW_UNCERTAINTY,
     },
 };
 use spacelab_propagation::space_weather::{
@@ -1666,11 +1671,7 @@ fn sdtm1_density_interval(density: f64, f107: f64, f107a: f64, storm: f64, z: f6
 /// recommendation (`docs/verification.md` §10.28).
 #[pyfunction]
 fn sdtm1_envelope() -> ((f64, f64), (f64, f64)) {
-    let Envelope { altitude, f107a } = SDTM1_ENVELOPE;
-    (
-        (*altitude.start() / 1000.0, *altitude.end() / 1000.0),
-        (*f107a.start(), *f107a.end()),
-    )
+    envelope_km(&SDTM1_ENVELOPE)
 }
 
 /// The evaluation point the three `sdtm1_*` point functions share, assembled the way the fit's own
@@ -1684,6 +1685,143 @@ fn sdtm1_point(doy: f64, sec: f64, alt_km: f64, lat_deg: f64, lon_deg: f64) -> S
         local_solar_time: lst,
         day_of_year: doy + sec / 86_400.0,
     }
+}
+
+/// **SDTM-1's solar-wind field** total mass density (kg/m³): SDTM-1 fitted again with its storm
+/// state run hourly on GFZ's `ap60` and the measured solar wind, for reconstruction and nowcasting.
+/// `sdtm1_density` stays the forecast path, because the solar wind is measured less than an hour
+/// before it arrives and its north–south field is not forecast. Same point and flux arguments as
+/// `sdtm1_density`; `storm` is `sdtm1_solar_wind_storm_response` over the hourly history — the
+/// 3-hourly field's storm driver is another model's.
+#[pyfunction]
+#[pyo3(signature = (doy, sec, alt_km, lat_deg, lon_deg, f107 = 150.0, f107a = 150.0, storm = 0.0))]
+#[allow(clippy::too_many_arguments)] // day of year, UT, three geodetic coordinates, three drivers
+fn sdtm1_solar_wind_density(
+    doy: f64,
+    sec: f64,
+    alt_km: f64,
+    lat_deg: f64,
+    lon_deg: f64,
+    f107: f64,
+    f107a: f64,
+    storm: f64,
+) -> f64 {
+    SDTM1_SW_FIELD.density(
+        &sdtm1_point(doy, sec, alt_km, lat_deg, lon_deg),
+        &SdtmDrivers { f107, f107a, storm },
+    )
+}
+
+/// **SDTM-1's solar-wind field** exospheric temperature `T∞` (K), at the same point and drivers as
+/// `sdtm1_solar_wind_density`.
+#[pyfunction]
+#[pyo3(signature = (doy, sec, alt_km, lat_deg, lon_deg, f107 = 150.0, f107a = 150.0, storm = 0.0))]
+#[allow(clippy::too_many_arguments)] // day of year, UT, three geodetic coordinates, three drivers
+fn sdtm1_solar_wind_exospheric_temperature(
+    doy: f64,
+    sec: f64,
+    alt_km: f64,
+    lat_deg: f64,
+    lon_deg: f64,
+    f107: f64,
+    f107a: f64,
+    storm: f64,
+) -> f64 {
+    SDTM1_SW_FIELD.exospheric_temperature(
+        &sdtm1_point(doy, sec, alt_km, lat_deg, lon_deg),
+        &SdtmDrivers { f107, f107a, storm },
+    )
+}
+
+/// **SDTM-1's solar-wind field**'s storm driver: its heating and nitric-oxide cooling state run
+/// hourly over `(1 − s)·ap60 + s·N`, `N` Newell's coupling of the solar wind on `ap60`'s scale.
+///
+/// The four series are hourly, oldest first, ending at the hour **before** the sample: GFZ's
+/// `ap60`, and the solar wind at the bow-shock nose as `speed_km_s` and the GSM `by_nt`, `bz_nt`.
+/// The field was fitted on OMNI's hourly averages, time-shifted from L1 to the bow
+/// shock, so real-time L1 data is shifted first. A NaN speed, `By` or `Bz` is an hour without the
+/// solar wind, and it drives by its `ap60`. Nitric oxide remembers a storm for days: pass
+/// fourteen days, 336 hours (`sdtm::solar_wind_coefficients::HISTORY` in Rust).
+///
+/// Series of unequal length, an `ap60` that is negative or not finite, or a value that is no solar
+/// wind — a speed outside `[0, 5000)` km/s or a field of 500 nT or more, which is a fill value —
+/// raise `ValueError`. An empty history answers 0.
+#[pyfunction]
+fn sdtm1_solar_wind_storm_response(
+    ap60: Vec<f64>,
+    speed_km_s: Vec<f64>,
+    by_nt: Vec<f64>,
+    bz_nt: Vec<f64>,
+) -> PyResult<f64> {
+    let hours = sdtm1_solar_wind_hours(&ap60, &speed_km_s, &by_nt, &bz_nt)?;
+    Ok(SDTM1_SW_DRIVE.storm(SDTM1_SW_FIELD.storm(), &hours))
+}
+
+/// The hours the solar-wind field runs over, refused where the four series are not hours of it —
+/// [`StormHour::from_values`] is the rule, and this names the hour that breaks it.
+fn sdtm1_solar_wind_hours(
+    ap60: &[f64],
+    speed: &[f64],
+    by: &[f64],
+    bz: &[f64],
+) -> PyResult<Vec<StormHour>> {
+    if [speed.len(), by.len(), bz.len()] != [ap60.len(); 3] {
+        return Err(PyValueError::new_err(format!(
+            "ap60, speed_km_s, by_nt and bz_nt hold {}, {}, {} and {} hours, and must hold one \
+             each",
+            ap60.len(),
+            speed.len(),
+            by.len(),
+            bz.len()
+        )));
+    }
+    ap60.iter()
+        .zip(speed)
+        .zip(by)
+        .zip(bz)
+        .enumerate()
+        .map(|(i, (((&a, &v), &y), &z))| {
+            StormHour::from_values(a, v, y, z).ok_or_else(|| {
+                PyValueError::new_err(format!(
+                    "hour {i} is ap60 {a}, speed {v} km/s, By {y} nT, Bz {z} nT: ap60 must be \
+                     finite and not negative, and a solar wind NaN where it is missing or a speed \
+                     in [0, 5000) km/s with |By|, |Bz| below 500 nT"
+                ))
+            })
+        })
+        .collect()
+}
+
+/// **SDTM-1's solar-wind field**'s log-normal density interval, `(lower, upper)` in kg/m³ about
+/// `density`, as `sdtm1_density_interval` is for the 3-hourly field: its own regime table, measured
+/// on its own held-out residual. `f107a` and `storm` must be the values `density` was evaluated
+/// with.
+#[pyfunction]
+#[pyo3(signature = (density, f107 = 150.0, f107a = 150.0, storm = 0.0, z = 1.644_853_626_951_472_7))]
+fn sdtm1_solar_wind_density_interval(
+    density: f64,
+    f107: f64,
+    f107a: f64,
+    storm: f64,
+    z: f64,
+) -> (f64, f64) {
+    SDTM1_SW_UNCERTAINTY.interval(density, &SdtmDrivers { f107, f107a, storm }, z)
+}
+
+/// **SDTM-1's solar-wind field**'s fitted envelope, `((lowest_km, highest_km), (lowest_f107a,
+/// highest_f107a))`, as `sdtm1_envelope` is for the 3-hourly field.
+#[pyfunction]
+fn sdtm1_solar_wind_envelope() -> ((f64, f64), (f64, f64)) {
+    envelope_km(&SDTM1_SW_ENVELOPE)
+}
+
+/// An envelope in the bridge's units: kilometres and solar flux units.
+fn envelope_km(envelope: &Envelope) -> ((f64, f64), (f64, f64)) {
+    let Envelope { altitude, f107a } = envelope;
+    (
+        (*altitude.start() / 1000.0, *altitude.end() / 1000.0),
+        (*f107a.start(), *f107a.end()),
+    )
 }
 
 /// Point mass + atmospheric drag with the **NRLMSISE-00** thermospheric density model — the modern
@@ -1810,6 +1948,106 @@ fn propagate_drag_sdtm1_dense(
 ) -> PyResult<DenseEphemeris> {
     let storm = sdtm1_drag_storm(&ap_history, cadence_s)?;
     let _ = lod_seconds; // the CIO rotation is independent of LOD (it only scales the discarded ω).
+    sdtm_drag_dense(
+        py,
+        SdtmArc {
+            field: SDTM1_FIELD,
+            drivers: SdtmDrivers { f107, f107a, storm },
+            doy,
+            sec_of_day,
+            ballistic_coefficient,
+            mu,
+        },
+        (r0, v0, t1),
+        (epoch_tt_ns, epoch_ut1_ns),
+        [xp_rad, yp_rad, dx_rad, dy_rad],
+        tol,
+    )
+}
+
+/// Point mass + atmospheric drag through **SDTM-1's solar-wind field**, as
+/// `propagate_drag_sdtm1_dense` is through the 3-hourly field: for reconstructing an arc, where
+/// the hours of `ap60` and solar wind before it are measured. The storm state is run once over the
+/// four hourly series, as `sdtm1_solar_wind_storm_response` runs it, and held over the arc with
+/// `f107` and `f107a`. An empty history, or a value `sdtm1_solar_wind_storm_response` refuses,
+/// raises `ValueError`. Epochs are ns since J2000. Returns a [`DenseEphemeris`].
+#[pyfunction]
+#[pyo3(signature = (
+    r0, v0, t1, epoch_tt_ns, epoch_ut1_ns, doy, sec_of_day, ballistic_coefficient, ap60,
+    speed_km_s, by_nt, bz_nt, f107 = 150.0, f107a = 150.0, mu = 3.986_004_418e14,
+    xp_rad = 0.0, yp_rad = 0.0, dx_rad = 0.0, dy_rad = 0.0, lod_seconds = 0.0, tol = 1e-9,
+))]
+#[allow(clippy::too_many_arguments)] // state, span, two epochs, SDTM-1 epoch, BC, space weather, EOP
+fn propagate_drag_sdtm1_solar_wind_dense(
+    py: Python<'_>,
+    r0: [f64; 3],
+    v0: [f64; 3],
+    t1: f64,
+    epoch_tt_ns: i128,
+    epoch_ut1_ns: i128,
+    doy: f64,
+    sec_of_day: f64,
+    ballistic_coefficient: f64,
+    ap60: Vec<f64>,
+    speed_km_s: Vec<f64>,
+    by_nt: Vec<f64>,
+    bz_nt: Vec<f64>,
+    f107: f64,
+    f107a: f64,
+    mu: f64,
+    xp_rad: f64,
+    yp_rad: f64,
+    dx_rad: f64,
+    dy_rad: f64,
+    lod_seconds: f64,
+    tol: f64,
+) -> PyResult<DenseEphemeris> {
+    let hours = sdtm1_solar_wind_hours(&ap60, &speed_km_s, &by_nt, &bz_nt)?;
+    if hours.is_empty() {
+        return Err(PyValueError::new_err(
+            "the hourly history is empty: pass fourteen days, 336 hours",
+        ));
+    }
+    let storm = SDTM1_SW_DRIVE.storm(SDTM1_SW_FIELD.storm(), &hours);
+    let _ = lod_seconds; // the CIO rotation is independent of LOD (it only scales the discarded ω).
+    sdtm_drag_dense(
+        py,
+        SdtmArc {
+            field: SDTM1_SW_FIELD,
+            drivers: SdtmDrivers { f107, f107a, storm },
+            doy,
+            sec_of_day,
+            ballistic_coefficient,
+            mu,
+        },
+        (r0, v0, t1),
+        (epoch_tt_ns, epoch_ut1_ns),
+        [xp_rad, yp_rad, dx_rad, dy_rad],
+        tol,
+    )
+}
+
+/// What an SDTM-1 drag arc holds fixed: the field, its drivers over the arc, the arc's epoch, the
+/// ballistic coefficient and the central body.
+struct SdtmArc {
+    field: Thermosphere<SDTM1_HARMONICS>,
+    drivers: SdtmDrivers,
+    doy: f64,
+    sec_of_day: f64,
+    ballistic_coefficient: f64,
+    mu: f64,
+}
+
+/// The dense SDTM-1 drag arc both propagators share: point mass and drag through `arc.field`, the
+/// geodetic point taken in the rigorous ITRF of the two epochs and the EOP `[xp, yp, dx, dy]`.
+fn sdtm_drag_dense(
+    py: Python<'_>,
+    arc: SdtmArc,
+    (r0, v0, t1): ([f64; 3], [f64; 3], f64),
+    (epoch_tt_ns, epoch_ut1_ns): (i128, i128),
+    [xp_rad, yp_rad, dx_rad, dy_rad]: [f64; 4],
+    tol: f64,
+) -> PyResult<DenseEphemeris> {
     let geodetic = geodetic_over(cio_fast(
         epoch_tt_ns,
         epoch_ut1_ns,
@@ -1820,18 +2058,18 @@ fn propagate_drag_sdtm1_dense(
         dy_rad,
     ));
     let drag = Drag {
-        ballistic_coefficient,
+        ballistic_coefficient: arc.ballistic_coefficient,
         earth_rotation_rate: EARTH_ROTATION_RATE,
         atmosphere: SdtmAtmosphere {
-            field: SDTM1_FIELD,
-            drivers: SdtmDrivers { f107, f107a, storm },
-            doy0: doy,
-            sec0: sec_of_day,
+            field: arc.field,
+            drivers: arc.drivers,
+            doy0: arc.doy,
+            sec0: arc.sec_of_day,
             geodetic,
         },
         wind: NoWind,
     };
-    let sys = Plain(Newtonian((PointMass { mu }, drag)));
+    let sys = Plain(Newtonian((PointMass { mu: arc.mu }, drag)));
     let y0 = [r0[0], r0[1], r0[2], v0[0], v0[1], v0[2]];
     let h0 = (t1 / 1000.0).abs().max(1.0);
     let traj = py
@@ -6302,6 +6540,15 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sdtm1_storm_response, m)?)?;
     m.add_function(wrap_pyfunction!(sdtm1_density_interval, m)?)?;
     m.add_function(wrap_pyfunction!(sdtm1_envelope, m)?)?;
+    m.add_function(wrap_pyfunction!(propagate_drag_sdtm1_solar_wind_dense, m)?)?;
+    m.add_function(wrap_pyfunction!(sdtm1_solar_wind_density, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        sdtm1_solar_wind_exospheric_temperature,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(sdtm1_solar_wind_storm_response, m)?)?;
+    m.add_function(wrap_pyfunction!(sdtm1_solar_wind_density_interval, m)?)?;
+    m.add_function(wrap_pyfunction!(sdtm1_solar_wind_envelope, m)?)?;
     m.add_function(wrap_pyfunction!(brouwer_lyddane_propagate, m)?)?;
     m.add_function(wrap_pyfunction!(dsst_zonal_propagate_mean, m)?)?;
     m.add_function(wrap_pyfunction!(dsst_zonal_propagate_osculating, m)?)?;
@@ -8083,6 +8330,53 @@ mod tests {
         assert_ne!(
             sdtm1_density_interval(density, 150.0, 150.0, 100.0, 1.644_853_626_951_472_7),
             (lower, upper)
+        );
+    }
+
+    /// The solar-wind family evaluates its own field at the point `sdtm1_point` assembles, with the
+    /// drivers in their named slots, and that field is not the 3-hourly one: the same arguments to
+    /// the two families are two models.
+    #[test]
+    fn the_sdtm1_solar_wind_wrappers_evaluate_their_own_field() {
+        let p = sdtm1_point(172.0, 54_000.0, 400.0, 45.0, 30.0);
+        let drivers = SdtmDrivers {
+            f107: 120.0,
+            f107a: 160.0,
+            storm: 30.0,
+        };
+        let args = (172.0, 54_000.0, 400.0, 45.0, 30.0, 120.0, 160.0, 30.0);
+        let got = sdtm1_solar_wind_density(
+            args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+        );
+        assert_eq!(got, SDTM1_SW_FIELD.density(&p, &drivers));
+        assert_ne!(
+            got,
+            sdtm1_density(
+                args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7
+            )
+        );
+        assert_eq!(
+            sdtm1_solar_wind_exospheric_temperature(
+                args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+            ),
+            SDTM1_SW_FIELD.exospheric_temperature(&p, &drivers)
+        );
+        let z = 1.644_853_626_951_472_7;
+        let (lower, upper) = sdtm1_solar_wind_density_interval(got, 120.0, 160.0, 30.0, z);
+        assert_eq!(
+            (lower, upper),
+            SDTM1_SW_UNCERTAINTY.interval(got, &drivers, z)
+        );
+        assert!((lower * upper / (got * got) - 1.0).abs() < 1e-12);
+        let ((altitude_lo, altitude_hi), (f107a_lo, f107a_hi)) = sdtm1_solar_wind_envelope();
+        assert_eq!(
+            [altitude_lo, altitude_hi, f107a_lo, f107a_hi],
+            [
+                *SDTM1_SW_ENVELOPE.altitude.start() / 1000.0,
+                *SDTM1_SW_ENVELOPE.altitude.end() / 1000.0,
+                *SDTM1_SW_ENVELOPE.f107a.start(),
+                *SDTM1_SW_ENVELOPE.f107a.end(),
+            ]
         );
     }
 
@@ -11545,6 +11839,221 @@ def one_row(x):
                     refused.is_instance_of::<PyValueError>(py)
                         && refused.to_string().contains(named),
                     "{bad:?} at {cadence_s} s: {refused}"
+                );
+            }
+        });
+    }
+
+    /// The hourly storm driver is the field's own state over its own drive; NaN in an hour's wind
+    /// is that hour's `ap60` alone; and what is no hour of the field is refused by name, before
+    /// anything is run.
+    #[test]
+    fn the_sdtm1_solar_wind_storm_response_runs_the_drive_and_refuses_what_is_no_hour() {
+        let n = 48;
+        let (ap60, speed, by, bz) = (vec![9.0; n], vec![450.0; n], vec![2.0; n], vec![-4.0; n]);
+        let hours = vec![StormHour::from_values(9.0, 450.0, 2.0, -4.0).unwrap(); n];
+        let got =
+            sdtm1_solar_wind_storm_response(ap60.clone(), speed.clone(), by.clone(), bz.clone())
+                .unwrap();
+        assert_eq!(got, SDTM1_SW_DRIVE.storm(SDTM1_SW_FIELD.storm(), &hours));
+        let gap = sdtm1_solar_wind_storm_response(
+            ap60.clone(),
+            vec![f64::NAN; n],
+            by.clone(),
+            bz.clone(),
+        )
+        .unwrap();
+        assert_eq!(gap, SDTM1_SW_FIELD.storm().response(&ap60, 3_600.0));
+        assert_ne!(got, gap, "the solar wind reaches the drive");
+        assert_eq!(
+            sdtm1_solar_wind_storm_response(vec![], vec![], vec![], vec![]).unwrap(),
+            0.0
+        );
+        Python::attach(|py| {
+            for (a, v, y, z, named) in [
+                (
+                    ap60.clone(),
+                    vec![450.0; n - 1],
+                    by.clone(),
+                    bz.clone(),
+                    "hold 48, 47, 48 and 48",
+                ),
+                (
+                    vec![-1.0; n],
+                    speed.clone(),
+                    by.clone(),
+                    bz.clone(),
+                    "hour 0 is ap60 -1,",
+                ),
+                (
+                    ap60.clone(),
+                    vec![9_999.0; n],
+                    by.clone(),
+                    bz.clone(),
+                    "speed 9999 km/s",
+                ),
+                (
+                    ap60.clone(),
+                    speed.clone(),
+                    vec![999.9; n],
+                    bz.clone(),
+                    "By 999.9 nT",
+                ),
+            ] {
+                let Err(refused) = sdtm1_solar_wind_storm_response(a, v, y, z) else {
+                    panic!("{named}: accepted");
+                };
+                assert!(
+                    refused.is_instance_of::<PyValueError>(py)
+                        && refused.to_string().contains(named),
+                    "{named}: {refused}"
+                );
+            }
+        });
+    }
+
+    /// The solar-wind drag propagator against the same system assembled here from the crate's own
+    /// types, with the storm the hours drive held over the arc. The hours end in a storm whose solar
+    /// wind reaches the top of the map, so the same hours without it are another orbit; hours that
+    /// are no history are refused by name before anything is integrated.
+    #[test]
+    fn the_sdtm1_solar_wind_drag_propagator_is_the_crates_own_system() {
+        let (r0, v0) = ([6_778e3, 0.0, 0.0], [0.0, 5.4e3, 5.4e3]);
+        let t1 = 3_600.0;
+        let (epoch_tt, epoch_ut1) = (631_152_069_184_000_000_i128, 631_152_000_000_000_000_i128);
+        let (doy, sec, bc) = (172.0, 29_000.0, 0.02); // C_d·A/m, m²/kg
+        let (f107, f107a) = (128.0, 141.0);
+        let series = |quiet: f64, storm: f64| -> Vec<f64> {
+            (0..144)
+                .map(|i| if i < 96 { quiet } else { storm })
+                .collect()
+        };
+        let (ap60, speed, by, bz) = (
+            series(7.0, 120.0),
+            series(380.0, 1_100.0),
+            series(2.0, 4.0),
+            series(1.0, -50.0),
+        );
+        let hours: Vec<StormHour> = (0..ap60.len())
+            .map(|i| StormHour {
+                ap60: ap60[i],
+                solar_wind: Some(spacelab_propagation::sdtm::SolarWind {
+                    speed: speed[i],
+                    by: by[i],
+                    bz: bz[i],
+                }),
+            })
+            .collect();
+        let storm = SDTM1_SW_DRIVE.storm(SDTM1_SW_FIELD.storm(), &hours);
+        let (xp, yp, dx, dy, tol) = (1e-6, 1e-6, 0.0, 0.0, 1e-10);
+
+        let cio = cio_fast(epoch_tt, epoch_ut1, t1, xp, yp, dx, dy);
+        let geodetic = move |t: f64, rf: [f64; 3]| match earth_itrf_to_geodetic(
+            cio.transform(t).position(Position::<Gcrf>::new(vec3(rf))),
+        ) {
+            Ok(g) => (
+                g.height.metres() / 1000.0,
+                g.latitude.degrees(),
+                g.longitude.degrees(),
+            ),
+            Err(_) => (0.0, 0.0, 0.0),
+        };
+        let sys = Plain(Newtonian((
+            PointMass { mu: MU_EARTH },
+            Drag {
+                ballistic_coefficient: bc,
+                earth_rotation_rate: EARTH_ROTATION_RATE,
+                atmosphere: SdtmAtmosphere {
+                    field: SDTM1_SW_FIELD,
+                    drivers: SdtmDrivers { f107, f107a, storm },
+                    doy0: doy,
+                    sec0: sec,
+                    geodetic,
+                },
+                wind: NoWind,
+            },
+        )));
+        let y0 = [r0[0], r0[1], r0[2], v0[0], v0[1], v0[2]];
+        let reference = integrate_dop853(
+            &sys,
+            0.0,
+            &y0,
+            t1,
+            (t1 / 1000.0).abs().max(1.0),
+            Controls::new(Tolerance::new(tol, tol), 1e-3),
+        )
+        .expect("the reference system integrates over an hour")
+        .final_state();
+
+        Python::attach(|py| {
+            let attempt = |[ap60, speed, by, bz]: [&[f64]; 4]| {
+                propagate_drag_sdtm1_solar_wind_dense(
+                    py,
+                    r0,
+                    v0,
+                    t1,
+                    epoch_tt,
+                    epoch_ut1,
+                    doy,
+                    sec,
+                    bc,
+                    ap60.to_vec(),
+                    speed.to_vec(),
+                    by.to_vec(),
+                    bz.to_vec(),
+                    f107,
+                    f107a,
+                    MU_EARTH,
+                    xp,
+                    yp,
+                    dx,
+                    dy,
+                    0.0,
+                    tol,
+                )
+            };
+            let run = |hours: [&[f64]; 4]| {
+                attempt(hours)
+                    .expect("the bridge integrates over an hour")
+                    .final_state()
+            };
+            let (r, v) = run([&ap60, &speed, &by, &bz]);
+            for i in 0..3 {
+                assert!(
+                    (r[i] - reference[i]).abs() < 1e-6 && (v[i] - reference[i + 3]).abs() < 1e-9,
+                    "component {i}: bridge {:?} against the crate's own system {reference:?}",
+                    (r, v)
+                );
+            }
+            let none = vec![f64::NAN; ap60.len()];
+            let (s, _) = run([&ap60, &none, &none, &none]);
+            let apart = (0..3).map(|i| (s[i] - r[i]).powi(2)).sum::<f64>().sqrt();
+            assert!(
+                apart > 1e-3,
+                "the solar wind moved the endpoint by {apart} m"
+            );
+
+            let mut fill = speed.clone();
+            fill[1] = 9_999.0;
+            let short = &speed[1..];
+            for (bad, named) in [
+                ([&[][..], &[], &[], &[]], "the hourly history is empty"),
+                (
+                    [&ap60[..], short, &by, &bz],
+                    "hold 144, 143, 144 and 144 hours",
+                ),
+                (
+                    [&ap60[..], &fill, &by, &bz],
+                    "hour 1 is ap60 7, speed 9999 km/s",
+                ),
+            ] {
+                let Err(refused) = attempt(bad) else {
+                    panic!("{named}: accepted");
+                };
+                assert!(
+                    refused.is_instance_of::<PyValueError>(py)
+                        && refused.to_string().contains(named),
+                    "{named}: {refused}"
                 );
             }
         });

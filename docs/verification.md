@@ -366,6 +366,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 where it is recommended | Ф23.H: D-5 recommends SDTM-1 inside its fitted envelope, so the envelope is data and the recommendation reachable from both bridges | `sdtm::coefficients::ENVELOPE`, written by `--emit` from the fitted rows; `Envelope::contains` at both closed ends and at NaN; the 64 reference rows inside it; each bridge's SDTM-1 drag constructor against `Drag<SdtmAtmosphere>` built from the crate's types | 224.660–545.488 km, F10.7a 65.8–231.9; the re-emitted field bit-identical; both constructors within 1e-6 m of the crate's system after an hour; `just capi` **12/12** (§10.29) | src/sdtm/mod.rs, tests/sdtm_reference.rs, spacelab-python/src/lib.rs, spacelab-capi/src/lib.rs |
 | SDTM-1 at the largest storms | Ф23.B step 7: the peak deficit at first-day mean `ap` ≥ 120 after §10.28, located before a remedy, then two storm states and an hourly driver held out on the same folds | the 630 comparisons by the storm's first-day mean `ap`, phase and satellite; nitric oxide driven by `mix·H + (1 − mix)·D` and a fast uncooled mode `(1 − w)·D + w·F`, each fitted and fixed, both reducing to the shipped form bit for bit; the cooling state on GFZ's hourly `ap60`; the mixed step against RK4 in Maxima | the deficit is at the **peak**: on time (1.5 h), phase 3 9–10 % under, peak 0.64 at ≥ 180; the satellites of one storm agree, the storms do not (medians 0.365–1.51); `mix` fits to 1.000 and the fast mode to its bound, and fixed neither moves ≥ 180 (0.630–0.642); `ap60` gives 0.71, 449 against 429 peaks within ±3 h, `Ap ≥ 50` 23.9 → 23.4 %, **not shipped** (D-26) (§10.30) | tools/fit-sdtm-corpus.py |
 | SDTM-1 driven by the solar wind | Ф23.B step 8: OMNI's hourly solar wind (CC0, IMF and plasma only) as the storm drive beside `ap60`, held out on §10.30's folds and storms | Newell's coupling mapped onto `ap60`'s distribution, its map checked against a second route on every hour; the drive `(1 − s)·ap60 + s·N` reducing to `--ap60` bit for bit at `s = 0`; `s` fitted and fixed at 1; the fit from two starts, chosen by training cost | `s` 0.478–0.524 in every fold; pooled 20.75 → **20.45 %**, peaks within ±25 % 367 → 375 and ±3 h 449 → 455, ≥ 180 0.71 → **0.94**, mean `|ln M/O|` lower in every bin; the plan's 16 **23.5 %** (JB2008 23.7 %); `Ap ≥ 50` 23.4 → 23.7 %; a second basin at nitric oxide 1 h, 1.2 % higher in cost; an opt-in reconstruction field (D-27, Ф23.I) (§10.31) | tools/fetch-omni.sh, tools/fit-sdtm-corpus.py |
+| SDTM-1 solar-wind field, shipped | Ф23.I (D-27): §10.31's drive as a second, opt-in field for reconstruction and nowcasting; the 3-hourly field stays the default | a 34-knot quantile map a caller can evaluate, refitted on §10.31's folds; Rust against the generator on 64 field rows and 384 synthetic hours (gaps, both ends of the map, due north, a zero field); Newell's coupling against `derivations/sdtm_solar_wind.mac` (8 identities, 30-digit values) and `.gp` at 60 digits; both bridges against the crate's types, the history they quote held to `HISTORY` | pooled **20.45 %** held out, equal to §10.31; peaks within ±3 h 455 → 461; `s` 0.500, `κ` −1.2794, in sample 20.0 %; `HISTORY` 336 hours; σ narrower in every cell, the worst family covering **78.2 %** of the low-flux active cell; `T∞` 2.0e-15, ρ 1.0e-14, the hourly path 7.4e-16, the coupling against the CAS 7.8e-16; `just capi` **12/12**; mutation 61 + 159 + 307 caught, **0** missed after one boundary test (§10.32) | src/sdtm/solar_wind.rs, tests/sdtm_solar_wind_reference.rs, spacelab-python/src/lib.rs, spacelab-capi/src/lib.rs, tools/fit-sdtm-corpus.py |
 
 ### Tides
 
@@ -5015,6 +5016,10 @@ The 39 split three ways, and the second and third classes are new:
 | `seal-sdtm1-drag-capi` | `spacelab-capi/src/lib.rs`, after §10.29 added the SDTM-1 drag constructor and the envelope accessor, `--re sdtm1 --re geodetic_over` | 59 | **0** | 0 | 59 mutants in 6 min, 0 unviable, clean on the first run. 32 are `geodetic_over`, the operators of the hand-multiplied rotation into the ITRF, and `the_drag_geodetic_point_is_the_typed_frame_transforms` kills every one against `CioInterpolator::transform`. The constructor is `unsafe extern "C"` and generates nothing (#260), so its checks are the safe `check_sdtm1_drag` and `sdtm1_drag_storm`. Their four constant returns are all caught by the refusal test, and the storm state replaced by 0, 1 or −1 also by the comparison with the crate's own system. A first run of this block, on the design that took a storm value, was stopped when the argument became the history. It had caught 16 `sdtm1_point` mutants and found the one unviable `Default::default()` over `SdtmPoint`, and `--iterate` skipped those 17 here; `sdtm1_point` and the tests that caught them are unchanged |
 | `seal-sdtm1-drag-bridge` | `spacelab-python/src/lib.rs`, the same surface, `--re sdtm1 --re geodetic_over` under `--no-default-features --features test-interpreter` | 140 | **1** | 1 | the bridge's half, and its third run. **The first was stopped after 19 caught**, all `geodetic_over`, when the listing showed 85 of its 176 mutants in `sdtm1_envelope` — 81 of them the 3⁴ constant tuples of its return — and no Rust test calling that function. `tests/bindings.py` checks it through the wheel, and `cargo mutants` does not run the wheel, so none of the 85 could have been caught; `the_sdtm1_envelope_is_the_fitted_one_in_kilometres` was added, as in the C ABI. **The second was stopped at its first timeout**, `*` → `+` in a row of `geodetic_over`'s rotation. That mutant fails two tests, and a third, the NRLMSISE-00 drag propagator's, integrates through the garbled point past the 20 s limit; the C ABI's `the_drag_geodetic_point_is_the_typed_frame_transforms` was added too. The third run is this row: 157 mutants in 20 min, `--iterate` skipping the first run's 19, 15 unviable, and the same mutant timing out again, because the slow test still runs beside the two that fail. **One survivor**, `cadence_s > 0.0` → `>= 0.0` in `sdtm1_drag_storm`. The refusal test asked only for an error, and at a zero cadence the mutant lets the history through: the storm state comes out NaN and the integration fails anyway, so a refusal was being observed through a later failure. The test now asks for a `ValueError` that names the input, as the C ABI's test asks for the name, and `tests/bindings.py` the same. The 15 unviable are fourteen whole-function replacements of a `PyResult` return (#319's shape) and `Default::default()` over `SdtmPoint` |
 | `reseal-sdtm1-drag-bridge` | the same surface, `--timeout 60` | **161** | **0** | 0 | the control, **176 mutants in 22 min**, 15 unviable, and it reconciles on every axis: the third run's 140 caught, the first run's 19 that it skipped, the survivor, and the timeout. At three times the limit that mutant finishes in 43 s and fails three tests, the slow NRLMSISE-00 one among them, so it was a detection paid for in wall clock and not a hang. The unviable set is the same fifteen, and the population is the first run's 176 |
+| `seal-sdtm1-solar-wind-capi` | `spacelab-capi/src/lib.rs`, after §10.32 added the solar-wind field's entry points, `--re sdtm` | 61 | **0** | 0 | 63 mutants in 4 min, 2 unviable, clean on the first run. The unviable are `Default::default()` over `SdtmPoint` and over `StormHour`, which have none. The block spans both fields' entry points, because the 3-hourly ones now go through the helpers the solar-wind ones share: `sdtm_at`, `sdtm_interval`, `sdtm1_envelope` and `sdtm_drag` |
+| `seal-sdtm-solar-wind` | `spacelab-propagation/src/sdtm/{solar_wind,mod}.rs`: the new file, and the storm states' `response` and `run` that §10.32 split, `--re solar_wind.rs --re ::run --re ::response` | 158 | **1** | 0 | 175 mutants in 16 min, 16 unviable. 171 are in scope; the other four are `delete field` mutants of `mod.rs` that cargo-mutants 27.1.0 tests despite `--re`, all four caught and counted in the 158. **One survivor**, `b.abs() < 500.0` → `<=` in `StormHour::from_values`: the docs refuse a field of 500 nT, and no test asked for exactly 500. The refusal test now holds a speed of 5 000 km/s and 500 nT on each component, and accepts 0 and 4 999.9 km/s and 499.9 nT; under the mutant it fails. The 16 unviable are whole-function replacements by `Default::default()` or by a leaked `Box` of a type that has none |
+| `reseal-sdtm-solar-wind` | the same two files and filters | 159 | **0** | 0 | the control, 175 mutants in 15 min, the same 16 unviable, and it reconciles on both axes: the population is unchanged and caught rises by exactly one, the survivor. The fix was a test, not a change of code |
+| `seal-sdtm1-solar-wind-bridge` | `spacelab-python/src/lib.rs`, the same surface, `--re sdtm --re envelope_km` under `--no-default-features --features test-interpreter`, `JOBS=4` | 307 | **0** | 0 | 347 mutants in 23 min, 40 unviable, clean on the first run. 247 of them are the 3⁴ constant tuples of three envelope returns, `sdtm1_envelope`, `sdtm1_solar_wind_envelope` and the `envelope_km` both now call, and a Rust test holds each wrapper to its field's `ENVELOPE`. The 40 unviable are whole-function replacements of a `PyResult` return (#319's shape) and `Default::default()` over `SdtmPoint` |
 "Stale" means the survivors were closed by a commit that landed *after* that block's snapshot was
 taken. A block reports on the tree as it stood when it **started**, so those verdicts are behind the
 tree rather than open, and each needs only a re-measurement. `small-seal`'s five were verified dead
@@ -8643,6 +8648,105 @@ the default and the forecast path.
 fixed at 1, fixed at ½, and fitted from two starts. The rows above are the planned two, the share
 fitted and the solar wind alone; the second start is chosen by the training cost. The shipped
 coefficients and the Rust evaluator are unchanged.
+
+### 10.32 The solar-wind field ships, opt-in (Ф23.I)
+
+`plans/17` D-27 adds §10.31's drive to the library as a second SDTM-1 field, for reconstruction and
+nowcasting. The 3-hourly field stays the default and the forecast path: `sdtm::coefficients` and its
+fixture did not change.
+
+**A map a caller can evaluate.** §10.31 put the coupling on `ap60`'s scale by its rank among all the
+hours of the span, which a caller cannot repeat for one hour. The shipped map is a table, one knot
+per `ap60` class over the 241 531 hours that have both series, 1999-01-01 to 2026-09-13: the class's
+value at the coupling's quantile at the class's mid-probability. It is linear between knots and holds
+the end knots' values outside them. It has no free parameter. Its 34 knots run from a coupling of
+10.14 at `ap60` 0 to 120 847.6 at 534. The same folds and storms, refitted with it, every row held
+out by mission family:
+
+| map | pooled | `Ap ≥ 50` | peak ±25 % | peak ±3 h | recovery ±6 h | < 80 | 80–120 | 120–180 | ≥ 180 | phase 3 | the 16 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| ranks over the span (§10.31) | 20.45 % | 23.70 % | 375 | 455 | 476/587 | 1.033 | 1.088 | 0.810 | 0.941 | 1.074 | 23.5 %, 11 within ±25 % |
+| 34 knots, shipped | 20.45 % | 23.61 % | 376 | 461 | 479/587 | 1.031 | 1.091 | 0.813 | 0.928 | 1.074 | 23.4 %, 11 |
+
+The plan's gate was the pooled error within 0.05 point of §10.31 and each storm count within ±5. The
+pooled error is equal. One count is outside the band, on the side of better: 6 more peaks within
+±3 h. The share is close to a half in every fold: 0.476 with GRACE held out, 0.497 GRACE-FO, 0.499
+CHAMP, 0.500 GOCE, 0.526 Swarm.
+
+**The field.** `tools/fit-sdtm-corpus.py --fit-sigma --cooling --ap60 --solar-wind fit
+--excess-saturation fit --storm-gain input-power --caps storm-log1-lin --emit`, on the same 365 214
+rows, writes `sdtm/solar_wind_coefficients.rs` and two fixtures. `--emit` refuses `--ap60` alone and
+a fixed share: the first is a fold experiment, the second a measurement and not a fitted field.
+
+| | 3-hourly field (§10.28) | solar-wind field |
+|---|---|---|
+| storm drive | 3-hourly `ap` | `(1 − s)·ap60 + s·N`, hourly, `s` = 0.500 |
+| `τ_h`, `τ_NO`, `H_s` | 17.49 h, 32.96 h, 24.77 `ap` | 20.46 h, 30.28 h, 23.82 `ap` |
+| `κ` | −1.2993 (folds −1.264 to −1.316) | −1.2794 (folds −1.243 to −1.304) |
+| excess scale `D` | 0.2631 | 0.2716 |
+| MAPE in sample | 20.4 % | 20.0 % |
+| MAPE held out by mission family | 20.8 % | 20.45 % |
+| `HISTORY` | 120 intervals, 15 days | 336 hours, 14 days |
+| `ENVELOPE` | 224.660–545.488 km, F10.7a 65.8–231.9 | the same rows, the same envelope |
+
+**The history it needs.** The generator measures it as for the 3-hourly field (§10.28), on every
+hour of the corpus span: the storm state over a whole number of days against the state run from
+rest 120 days before the first row, the change scaled by the largest storm gain of any row. The
+worst change is 0.0225 `ap` at thirteen days and **0.0096 at fourteen**.
+`solar_wind_coefficients::HISTORY` is 336 hours. Both bridges quote "fourteen days, 336 hours", and
+`bridge_parity.rs` holds the quotes to the constant.
+
+**The uncertainty table**, the held-out-family residual's spread about zero per regime:
+
+| | f107a < 100 | | 100–150 | | ≥ 150 | |
+|---|---|---|---|---|---|---|
+| | quiet | active | quiet | active | quiet | active |
+| σ, 3-hourly field (§10.28) | 0.293 | 0.284 | 0.241 | 0.270 | 0.230 | 0.250 |
+| σ, solar-wind field | 0.289 | 0.273 | 0.239 | 0.269 | 0.228 | 0.242 |
+
+Every cell narrows, by 0.001 to 0.011. Each field puts a row in a cell by its own storm driver, so
+the active cells do not hold the same rows. A table built without one family covers that family's
+rows 87.1–99.6 % at 90 % (CHAMP 92.7, GOCE 99.6, GRACE 87.1, GRACE-FO 88.1, Swarm 92.0 %). By
+regime, held out by family, it covers 91.0 / 89.2 / 89.4 / 88.6 / 91.2 / 90.8 % (3-hourly field
+90.9 / 90.3 / 89.5 / 89.0 / 90.9 / 90.8 %). The worst family in each cell covers 84.3 / **78.2** /
+84.3 / 80.8 / 81.2 / 85.5 % (84.1 / 82.7 / 85.4 / 82.2 / 82.5 / 87.8 %): lower in five cells of six,
+and 4.5 points lower in the low-flux active cell, 2 941 rows. No campaign test runs this field, so
+its interval rests on the held-out corpus alone.
+
+**Rust against the generator.** 64 reference rows at round-trip precision: worst `T∞` 1.964e-15,
+worst ρ 1.047e-14 relative. The second fixture is 384 closed-form synthetic hours: a minor storm, a
+major one that peaks 36 h before the end, 29 hours without the solar wind (gaps of a day, of four
+hours and of one), a northward field with `By` = 0, a zero field, the clock angle at −π/2 and at π,
+and a coupling above the top knot. Over the 384 hours the worst coupling is 7.418e-16 and the worst
+drive 7.327e-16 relative. Over the 49 windows that end in the last 48 hours and the hour before them,
+the worst storm driver is 7.089e-16 (bounds 1e-13, 1e-13, 1e-12).
+
+**The coupling against the CAS.** `derivations/sdtm_solar_wind.mac` proves eight identities: the
+half-angle form at the clock angle, symbolically and in every quadrant; zero due north and
+`V^(4/3)|Bz|^(2/3)` due south; even in `By`; homogeneous of degree 4/3 in `V` and 2/3 in `B`. It
+prints the coupling at four winds to 30 digits, and `sdtm_solar_wind.gp` repeats them at 60.
+`SolarWind::coupling` reproduces them to 7.8e-16 relative (bound 2e-15).
+
+**The bridges.** The C ABI gains `sl_sdtm1_solar_wind_density`, `_exospheric_temperature`,
+`_storm_response`, `_density_interval` and `_envelope`, and the drag constructor
+`sl_ephemeris_drag_sdtm1_solar_wind`; `spacelab.hpp` wraps them. The Python bridge has the five
+under the same names without `sl_`, and `propagate_drag_sdtm1_solar_wind_dense`. The storm driver
+and the drag constructor take the four hourly series as separate arrays. They refuse a negative or
+non-finite `ap60` and a fill value, and C++ and Python also refuse series of unequal length: C and
+C++ answer NaN or an error code, Python raises `ValueError`. Each entry point is tested against the
+crate's own types, the drag constructor against `Drag<SdtmAtmosphere>` assembled from them.
+`just capi` passes 12/12 on both compilers, and the wheel's 66 tests pass.
+
+**Mutation.** `seal-sdtm1-solar-wind-capi` (63 mutants) and `seal-sdtm1-solar-wind-bridge` (347) are
+clean on the first run. `seal-sdtm-solar-wind` (175, the new file and the storm states' `run`) has
+one survivor: under `<` → `<=` `StormHour::from_values` accepts a field of exactly 500 nT, and no
+test asked for the bound. The refusal test now holds both bounds from each side, and
+`reseal-sdtm-solar-wind` is 159 caught, 0 missed.
+
+**Optimism.** The first full emit stopped at its in-sample report line, which named three kernel
+values where the solar-wind fit has four, and it wrote no file. The line was corrected, a thinned emit
+(`--step 1200`) ran the whole path first, and the full emit then wrote the shipped files over the
+thinned ones. The folds could tune nothing in the map: it has no free parameter.
 
 ---
 

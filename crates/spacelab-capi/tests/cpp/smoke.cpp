@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <numbers>
 #include <numeric>
 #include <span>
@@ -798,6 +799,38 @@ void the_atmosphere_wrapper_answers_what_the_formulas_say() {
     CHECK(envelope[0] < 400.0 && 400.0 < envelope[1]);
     CHECK(envelope[2] < 150.0 && 150.0 < envelope[3]);
 
+    /* The solar-wind field through its four spans: hours without the solar wind drive by their
+     * ap60, a strong southward field drives the same hours higher, and spans of different lengths
+     * are no history and answer NaN. */
+    std::array<double, 16> sw_speed{};
+    std::array<double, 16> sw_by{};
+    std::array<double, 16> sw_bz{};
+    sw_speed.fill(std::numeric_limits<double>::quiet_NaN());
+    sw_by.fill(std::numeric_limits<double>::quiet_NaN());
+    sw_bz.fill(std::numeric_limits<double>::quiet_NaN());
+    const double sw_quiet =
+        spacelab::sdtm1_solar_wind_storm_response(quiet_ap, sw_speed, sw_by, sw_bz);
+    CHECK(sw_quiet > 0.0 && sw_quiet < 5.0);
+    for (std::size_t i = 10; i < sw_speed.size(); ++i) {
+        sw_speed[i] = 700.0;
+        sw_by[i] = 0.0;
+        sw_bz[i] = -20.0;
+    }
+    CHECK(spacelab::sdtm1_solar_wind_storm_response(quiet_ap, sw_speed, sw_by, sw_bz) > sw_quiet);
+    CHECK(std::isnan(spacelab::sdtm1_solar_wind_storm_response(
+        quiet_ap, std::span<const double>(sw_speed).first(15), sw_by, sw_bz)));
+    const double sw_400 =
+        spacelab::sdtm1_solar_wind_density(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 5.0);
+    CHECK(spacelab::sdtm1_solar_wind_density(172.0, 29000.0, 200.0, 0.0, 0.0, 150.0, 150.0, 5.0) >
+          sw_400);
+    CHECK(spacelab::sdtm1_solar_wind_exospheric_temperature(172.0, 29000.0, 400.0, 0.0, 0.0, 150.0,
+                                                            150.0, 5.0) > 0.0);
+    const std::array<double, SL_SDTM1_INTERVAL> sw_band =
+        spacelab::sdtm1_solar_wind_density_interval(sw_400, 150.0, 150.0, 5.0, 1.6448536269514727);
+    CHECK(sw_band[0] < sw_400 && sw_400 < sw_band[1]);
+    const std::array<double, SL_SDTM1_ENVELOPE> sw_envelope = spacelab::sdtm1_solar_wind_envelope();
+    CHECK(sw_envelope[0] < 400.0 && 400.0 < sw_envelope[1]);
+
     const std::array<double, 5> delaunay{1.1, 2.2, 3.3, 4.4, 5.5};
     const std::array<double, 5> once = spacelab::solid_tide_step2(0.7, delaunay);
     const std::array<double, 5> turned =
@@ -939,6 +972,20 @@ void every_force_model_is_a_factory_that_owns_its_handle() {
     quiet_ap.fill(5.0);
     CHECK(static_cast<bool>(
         spacelab::ephemeris::drag_sdtm1(s0, arc, orientation, sdtm1, quiet_ap, 10800.0, 1e-10)));
+    std::array<double, 48> hours_ap60{};
+    std::array<double, 48> hours_speed{};
+    std::array<double, 48> hours_by{};
+    std::array<double, 48> hours_bz{};
+    hours_ap60.fill(5.0);
+    hours_speed.fill(400.0);
+    hours_by.fill(2.0);
+    hours_bz.fill(-3.0);
+    CHECK(static_cast<bool>(spacelab::ephemeris::drag_sdtm1_solar_wind(
+        s0, arc, orientation, sdtm1, hours_ap60, hours_speed, hours_by, hours_bz, 1e-10)));
+    /* Spans of different lengths are refused before the library is asked. */
+    CHECK(!spacelab::ephemeris::drag_sdtm1_solar_wind(
+        s0, arc, orientation, sdtm1, hours_ap60, std::span<const double>(hours_speed).first(47),
+        hours_by, hours_bz));
 
     CHECK(static_cast<bool>(spacelab::ephemeris::geopotential_itrf(s0, arc, 4, orientation)));
     CHECK(static_cast<bool>(spacelab::ephemeris::geopotential_tide(

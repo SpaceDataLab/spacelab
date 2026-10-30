@@ -37,7 +37,9 @@ satellites, GRACE-FO C the reference, into `crates/spacelab-propagation/src/sdtm
 and the Rust test's fixture. Its uncertainty table is the held-out-family residual's spread; its
 storm-history length is the shortest whole number of days whose truncation moves the driver by
 less than `HISTORY_TOLERANCE` anywhere in the corpus span. Nothing from the density files is in
-either output: the coefficients are ours, the fixture is our own model's values.
+either output: the coefficients are ours, the fixture is our own model's values. With `--ap60
+--solar-wind fit` it writes the solar-wind field instead, `solar_wind_coefficients.rs` with its
+coupling map, its fixture, and an hourly fixture of closed-form synthetic hours (`emit_hours`).
 
 Run:
 
@@ -58,7 +60,6 @@ import time
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
-from scipy.stats import rankdata
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import gen_sdtm_coefficients as g
@@ -95,6 +96,9 @@ OUT_FIXTURE = (
     / "fixtures"
     / "sdtm_reference.csv"
 )
+OUT_RS_WIND = OUT_RS.with_name("solar_wind_coefficients.rs")
+OUT_FIXTURE_WIND = OUT_FIXTURE.with_name("sdtm_solar_wind_reference.csv")
+OUT_FIXTURE_HOURS = OUT_FIXTURE.with_name("sdtm_solar_wind_hours.csv")
 HISTORY_TOLERANCE = 0.01
 """Largest change in the storm driver, in `ap`, that the shipped history length may make: a
 hundredth of the index's own resolution."""
@@ -115,7 +119,8 @@ def load_corpus(
     `ap60` drives the storm state by GFZ's hourly series, as `gen_sdtm_coefficients.load` does; the
     storms are still found on the 3-hourly `ap`, so the same storms are scored. Measured and not
     shipped: better peak timing and a fifth of the large-storm gap (`docs/verification.md` §10.30).
-    `wind`, with `ap60`, adds `newell_driver`'s series on the same hourly grid as `attrs["wind"]`.
+    `wind`, with `ap60`, adds `newell_driver`'s series on the same hourly grid as `attrs["wind"]`,
+    and the map that put it on `ap60`'s scale as `attrs["wind_map"]`.
     """
     frames = []
     for sat in SATELLITES:
@@ -189,7 +194,9 @@ def load_corpus(
             driver=hourly, driver_epoch=hourly_epoch, driver_cadence=g.AP60_CADENCE
         )
         if wind:
-            rows.attrs["wind"] = newell_driver(hourly, hourly_epoch)
+            rows.attrs["wind"], rows.attrs["wind_map"] = newell_driver(
+                hourly, hourly_epoch
+            )
     if not (np.isfinite(rows.f107).all() and np.isfinite(rows.f107a).all()):
         sys.exit("SW-All.csv lacks a flux for some corpus day")
     return rows
@@ -205,15 +212,60 @@ def shipped_kernel() -> tuple[float, float, float]:
     return heating / 3600.0, nitric / 3600.0, saturation
 
 
-def newell_driver(hourly: np.ndarray, epoch: pd.Timestamp) -> np.ndarray:
-    """Newell et al. (2007)'s coupling `V^(4/3) B_T^(2/3) sin^(8/3)(theta/2)` on `ap60`'s grid and scale.
+def newell_coupling(speed: np.ndarray, by: np.ndarray, bz: np.ndarray) -> np.ndarray:
+    """Newell et al. (2007)'s `V^(4/3) B_T^(2/3) sin^(8/3)(theta/2)`, with `B_T` and the clock angle
+    `theta` from the IMF's GSM `By` and `Bz`: `sdtm::SolarWind::coupling`'s arithmetic, in its order.
+    """
+    coupling = speed ** (4.0 / 3.0) * np.hypot(by, bz) ** (2.0 / 3.0)
+    return coupling * np.abs(np.sin(np.arctan2(by, bz) / 2.0)) ** (8.0 / 3.0)
 
-    `V` is OMNI's flow speed, `B_T` and the clock angle `theta` its IMF `By` and `Bz` in GSM, all
-    hourly averages from their stamp, as `ap60`'s are (`tools/fetch-omni.sh`). The coupling is
-    mapped onto `ap60` by quantile over every hour both series have, so the two share one
-    distribution and differ only in which hours carry which value; an hour without the solar wind
-    takes its `ap60`. Of three couplings it agrees best with `ap60` by the hour, Spearman 0.547
-    against Kan & Lee's 0.542 and `V Bs`'s 0.407 over 2000-2026.
+
+@dataclasses.dataclass(frozen=True)
+class CouplingMap:
+    """The map from Newell's coupling onto `ap60`'s scale, and the hours it was read from."""
+
+    coupling: np.ndarray
+    """The knots' coupling, strictly increasing."""
+    ap60: np.ndarray
+    """The knots' `ap60`: one class of the series each."""
+    hours: int
+    first: pd.Timestamp
+    last: pd.Timestamp
+
+    def __call__(self, coupling: np.ndarray) -> np.ndarray:
+        """Linear between the knots and held at the end values outside them, as `np.interp` and
+        `sdtm::CouplingMap::ap60` read them."""
+        return np.interp(coupling, self.coupling, self.ap60)
+
+
+def coupling_map(
+    coupling: np.ndarray, ap60: np.ndarray, hours: np.ndarray
+) -> CouplingMap:
+    """One knot per `ap60` class over `hours`: the class's value at the coupling's quantile at the
+    class's mid-probability.
+
+    The quantile map this replaces is a step at every class boundary and is read off 240 000 hours,
+    so it cannot ship; the table is continuous and monotone, and it is what the solar-wind field
+    ships.
+    """
+    values, counts = np.unique(ap60, return_counts=True)
+    knots = np.quantile(coupling, (np.cumsum(counts) - 0.5 * counts) / counts.sum())
+    if not (np.diff(knots) > 0.0).all():
+        sys.exit("the coupling's quantiles at ap60's classes do not strictly increase")
+    return CouplingMap(knots, values, hours.size, hours.min(), hours.max())
+
+
+def newell_driver(
+    hourly: np.ndarray, epoch: pd.Timestamp
+) -> tuple[np.ndarray, CouplingMap]:
+    """`newell_coupling` on `ap60`'s grid and scale, and the map that put it there.
+
+    The speed and the IMF are OMNI's hourly averages from their stamp, as `ap60`'s are
+    (`tools/fetch-omni.sh`). `coupling_map` puts the coupling onto `ap60`'s scale over every hour both
+    series have, so the two share one distribution, to the table's interpolation, and differ in
+    which hours carry which value; an hour without the solar wind takes its `ap60`. Of three
+    couplings it agrees best with `ap60` by the hour, Spearman 0.547 against Kan & Lee's 0.542 and
+    `V Bs`'s 0.407 over 2000-2026.
     """
     path = g.DENSITY / "omni2_sw_hourly.txt"
     if not path.exists():
@@ -233,9 +285,7 @@ def newell_driver(hourly: np.ndarray, epoch: pd.Timestamp) -> np.ndarray:
     if step.size != 1 or step[0] != pd.Timedelta(hours=1):
         sys.exit(f"{path.name} is not a contiguous hourly grid: steps {step}")
     by, bz, v = (frame[c].to_numpy() for c in ("by", "bz", "v"))
-    clock = np.arctan2(by, bz)
-    coupling = v ** (4.0 / 3.0) * np.hypot(by, bz) ** (2.0 / 3.0)
-    coupling *= np.abs(np.sin(clock / 2.0)) ** (8.0 / 3.0)
+    coupling = newell_coupling(v, by, bz)
     lead = int((start.iloc[0] - epoch) / pd.Timedelta(hours=1))
     if lead < 0:
         sys.exit(f"{path.name} starts before the ap60 series")
@@ -243,14 +293,17 @@ def newell_driver(hourly: np.ndarray, epoch: pd.Timestamp) -> np.ndarray:
     span = min(coupling.size, hourly.size - lead)
     on_grid[lead : lead + span] = coupling[:span]
     present = np.isfinite(on_grid)
-    rank = (rankdata(on_grid[present]) - 0.5) / present.sum()
+    hours = epoch + pd.to_timedelta(np.flatnonzero(present), unit="h")
+    wind_map = coupling_map(on_grid[present], hourly[present], hours)
     out = hourly.copy()
-    out[present] = np.quantile(hourly[present], rank)
+    out[present] = wind_map(on_grid[present])
     print(
-        f"{path.name}: the solar wind fills {present.sum()} of the {span} hours it spans",
+        f"{path.name}: the solar wind fills {present.sum()} of the {span} hours it spans, "
+        f"{wind_map.first:%Y-%m-%dT%H} to {wind_map.last:%Y-%m-%dT%H}; "
+        f"{wind_map.coupling.size} knots",
         flush=True,
     )
-    return out
+    return out, wind_map
 
 
 STORM_COLUMNS = [4, 5, 6, 7]
@@ -591,6 +644,17 @@ class CorpusModel:
         """`mu` of `exp(mu + kappa f)`, or `None` where the knee is held at `ln(1 + storm/15)`'s."""
         return float(p[self.pack.i_knee]) if self.pack.free_knee else None
 
+    def share(self, kernel: tuple[float, ...]) -> float | None:
+        """The solar wind's share of the drive, or `None` without it."""
+        return kernel[3] if self.pack.wind else self.wind_share
+
+    def drive(self, kernel: tuple[float, ...]) -> np.ndarray:
+        """The series the storm state integrates: the index, or `(1 - share) ap60 + share N`."""
+        share = self.share(kernel)
+        if share is None:
+            return self.a["ap"]
+        return (1.0 - share) * self.a["ap"] + share * self.a["wind"]
+
     def design(
         self,
         *kernel: float,
@@ -601,10 +665,7 @@ class CorpusModel:
         key = (*kernel, excess, gain, knee)
         if self._design_key == key and self._design is not None:
             return self._design
-        drive = self.a["ap"]
-        if self.pack.wind or self.wind_share is not None:
-            share = kernel[3] if self.pack.wind else self.wind_share
-            drive = (1.0 - share) * drive + share * self.a["wind"]
+        drive = self.drive(kernel)
         if self.pack.mixed or self.mix_share is not None:
             share = kernel[3] if self.pack.mixed else self.mix_share
             grid = mixed_cooling_grid(
@@ -808,14 +869,14 @@ def truncated_cooling(
     value instead of from rest far back, so the difference between the two is what a finite history
     costs.
     """
-    window = ap[ends[:, None] - length + 1 + np.arange(length)]
+    start = ends - length + 1
     h = cadence / 3600.0
     decay = np.exp(-h / nitric)
     mean_weight = nitric / h * (1.0 - decay)
-    first = window[:, 0]
+    first = ap[start]
     d, n = first / (1.0 + first / saturation), first.copy()
     for j in range(length):
-        drive = window[:, j]
+        drive = ap[start + j]
         n_mean = drive + (n - drive) * mean_weight
         rate = (1.0 + n_mean / saturation) / heating
         target = drive / (heating * rate)
@@ -827,9 +888,10 @@ def truncated_cooling(
 def history_length(model: CorpusModel, p: np.ndarray) -> tuple[int, float]:
     """The shortest whole-day history whose response is within `HISTORY_TOLERANCE` of the fit's own.
 
-    Scored on every 3-hour interval from the corpus's first row to its last, against `cooling_grid`
-    warmed up from rest 120 days before the first. With a storm gain the regressors read the gained
-    driver, so the change is scaled by the largest gain any corpus row has.
+    Scored on every interval of the drive's cadence from the corpus's first row to its last,
+    against `cooling_grid` warmed up from rest 120 days before the first. With a storm gain the
+    regressors read the gained driver, so the change is scaled by the largest gain any corpus row
+    has. Returns the length in intervals.
     """
     kernel = model.kernel(p)
     gain = model.gain(p)
@@ -838,14 +900,15 @@ def history_length(model: CorpusModel, p: np.ndarray) -> tuple[int, float]:
         if gain is None
         else float(np.exp(gain * model._gain_argument(model.a["f107a"])).max())
     )
-    ap, cadence = model.a["ap"], model.a["cadence"]
-    reference = cooling_grid(ap, *kernel, cadence, model.first)
+    drive, cadence = model.drive(kernel), model.a["cadence"]
+    per_day = round(86_400.0 / cadence)
+    reference = cooling_grid(drive, *kernel[:3], cadence, model.first)
     interval = model.a["interval"]
     ends = np.arange(int(interval.min()), int(interval.max()) + 1)
     for days in range(1, 61):
         worst = largest * float(
             np.abs(
-                truncated_cooling(ap, *kernel, cadence, ends, 8 * days)
+                truncated_cooling(drive, *kernel[:3], cadence, ends, per_day * days)
                 - reference[ends]
             ).max()
         )
@@ -854,8 +917,107 @@ def history_length(model: CorpusModel, p: np.ndarray) -> tuple[int, float]:
             flush=True,
         )
         if worst < HISTORY_TOLERANCE:
-            return 8 * days, worst
+            return per_day * days, worst
     sys.exit("no history up to 60 days reaches HISTORY_TOLERANCE")
+
+
+def wind_note(wind_map: CouplingMap, share: float) -> list[str]:
+    """The solar-wind field's header lines: its drive, and the attribution its map's sources ask."""
+    return [
+        f"It runs hourly on (1 - s) ap60 + s N, s = {share:.3f} fitted (`DRIVE`): GFZ's ap60, and N",
+        "Newell et al. (2007)'s coupling of NASA's OMNI solar wind on ap60's scale, by a table whose",
+        f"{wind_map.coupling.size} knots are read off the {wind_map.hours} hours both series have, "
+        f"{wind_map.first:%Y-%m-%dT%H} to",
+        f"{wind_map.last:%Y-%m-%dT%H}: OMNI from NASA/GSFC's SPDF, CC0 1.0 (King & Papitashvili 2005,",
+        "doi:10.1029/2004JA010649), and ap60 from GFZ Helmholtz Centre for Geosciences, CC BY 4.0",
+        "(Matzka et al. 2024, doi:10.5880/Hpo.0003), which is the attribution that licence asks of",
+        "adapted material. An hour without the solar wind takes its ap60.",
+    ]
+
+
+def drive_rs(wind_map: CouplingMap, share: float) -> str:
+    """`KNOTS` and `DRIVE` for `solar_wind_coefficients.rs`."""
+
+    def rows(values: np.ndarray, per_line: int) -> str:
+        return "".join(
+            "            "
+            + ", ".join(g.literal(v) for v in values[i : i + per_line])
+            + ",\n"
+            for i in range(0, values.size, per_line)
+        )
+
+    return (
+        "/// Number of knots in [`DRIVE`]'s coupling map.\n"
+        f"pub const KNOTS: usize = {wind_map.coupling.size};\n\n"
+        "/// How [`FIELD`]'s storm state is driven: hourly, by `(1 - share) ap60 + share N` with `N` the\n"
+        "/// solar-wind coupling on `ap60`'s scale, and by `ap60` alone in an hour without the solar\n"
+        "/// wind. Built by the unchecked constructors for the reason [`FIELD`] is;\n"
+        "/// `sdtm_solar_wind_reference.rs` puts the literals through `CouplingMap::new` and\n"
+        "/// `SolarWindDrive::new`.\n"
+        "#[rustfmt::skip]\n"
+        "pub const DRIVE: SolarWindDrive<KNOTS> = SolarWindDrive::from_fitted(\n"
+        f"    {g.literal(share)},\n"
+        "    CouplingMap::from_fitted(\n"
+        "        [\n" + rows(wind_map.coupling, 4) + "        ],\n"
+        "        [\n" + rows(wind_map.ap60, 12) + "        ],\n"
+        "    ),\n"
+        ");\n\n"
+    )
+
+
+def synthetic_hours(n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """`(ap60, speed km/s, By nT, Bz nT)` over `n` hours: a minor storm, a major one peaking 36 h
+    before the end, and the cases `sdtm::SolarWindDrive` and `sdtm::CouplingMap` branch on.
+
+    Closed-form rather than measured, so the fixture carries nothing of OMNI's or GFZ's: gaps of a
+    day, of four hours and of one (all three values NaN), a northward field with `By = 0` and a zero
+    field (coupling zero, below the first knot), the clock angle at `-pi/2` and at `pi`, and a coupling
+    above the last knot.
+    """
+    t = np.arange(n, dtype=float)
+    major = np.exp(-0.5 * ((t - (n - 36)) / 10.0) ** 2)
+    minor = np.exp(-0.5 * ((t - n / 2) / 6.0) ** 2)
+    ap60 = np.round(2.0 + 300.0 * major + 60.0 * minor)
+    speed = (
+        350.0 + 450.0 * major + 120.0 * minor + 15.0 * np.sin(2.0 * np.pi * t / 29.0)
+    )
+    transverse = 3.0 + 35.0 * major + 8.0 * minor
+    clock = 2.0 * np.pi * t / 41.0 + np.pi * major
+    by, bz = transverse * np.sin(clock), transverse * np.cos(clock)
+    for hour, (v, y, z) in {
+        n - 30: (1100.0, 0.0, -50.0),
+        n - 10: (400.0, 0.0, 5.0),
+        n - 9: (400.0, 0.0, 0.0),
+        n - 8: (500.0, -6.0, 0.0),
+        n - 7: (500.0, 0.0, -6.0),
+    }.items():
+        speed[hour], by[hour], bz[hour] = v, y, z
+    for gap in (np.arange(100, 124), np.arange(n - 40, n - 36), np.array([n - 20])):
+        speed[gap] = by[gap] = bz[gap] = np.nan
+    return ap60, speed, by, bz
+
+
+def emit_hours(model: CorpusModel, kernel: tuple[float, ...], history: int) -> None:
+    """The solar-wind field's hourly fixture: `synthetic_hours` through `newell_coupling`, the map,
+    the drive, and `truncated_cooling` over each `history`-hour window that ends in the last 48."""
+    share, wind_map = model.share(kernel), model.a["wind_map"]
+    ap60, speed, by, bz = synthetic_hours(history + 48)
+    coupling = newell_coupling(speed, by, bz)
+    present = np.isfinite(coupling)
+    drive = np.where(present, (1.0 - share) * ap60 + share * wind_map(coupling), ap60)
+    ends = np.arange(history - 1, ap60.size)
+    storm = np.full(ap60.size, np.nan)
+    storm[ends] = truncated_cooling(drive, *kernel[:3], 3600.0, ends, history)
+    lines = [
+        "# SDTM-1 solar-wind field hourly reference -- generated by tools/fit-sdtm-corpus.py.",
+        "# Closed-form synthetic hours (`synthetic_hours`), not measured data. NaN marks an hour without",
+        f"# the solar wind; `storm` is the driver over the {history} hours ending at the row.",
+        "# ap60,speed_km_s,by_nT,bz_nT,coupling,drive,storm",
+    ]
+    for row in zip(ap60, speed, by, bz, coupling, drive, storm, strict=True):
+        lines.append(",".join("NaN" if np.isnan(x) else g.literal(x) for x in row))
+    OUT_FIXTURE_HOURS.write_text("\n".join(lines) + "\n")
+    print(f"wrote {OUT_FIXTURE_HOURS.relative_to(g.ROOT)} ({ap60.size} hours)")
 
 
 def emit(
@@ -866,14 +1028,20 @@ def emit(
     held: np.ndarray,
 ) -> None:
     """Write the shipped field and the fixture: `p` fitted on every satellite, `held` the residual
-    each row had in the fold that held its family out."""
+    each row had in the fold that held its family out. With the solar wind in the drive the field
+    is the solar-wind one, and `emit_hours` writes its hourly fixture beside it."""
     pk, arg = model.pack, model.a
-    heating, nitric, saturation = model.kernel(p)
+    kernel = model.kernel(p)
+    heating, nitric, saturation = kernel[:3]
+    share = model.share(kernel)
+    out_rs, out_fixture = (
+        (OUT_RS, OUT_FIXTURE) if share is None else (OUT_RS_WIND, OUT_FIXTURE_WIND)
+    )
     grid = np.zeros((g.DRIVERS, arg["k"]))
     for (d, k), c in zip(model.pairs, p[: pk.n_c], strict=True):
         grid[d, k] = c
     storm = cooling_grid(
-        arg["ap"], heating, nitric, saturation, arg["cadence"], model.first
+        model.drive(kernel), heating, nitric, saturation, arg["cadence"], model.first
     )[arg["interval"]]
     f107a = arg["f107a"]
 
@@ -919,6 +1087,7 @@ def emit(
         f"coefficients, ridge {argument.ridge:g}, the Bates shape fitted, the boundary scale fitted"
         f"{at_bound}.",
         "The storm driver is heating with nitric-oxide cooling (`derivations/sdtm_no_cooling.mac`).",
+        *([] if share is None else wind_note(model.a["wind_map"], share)),
         *(
             [
                 "The daily flux excess saturates as D tanh(d/D), D fitted "
@@ -946,19 +1115,29 @@ def emit(
         for s, v in zip(pk.scaled, scales, strict=True)
     )
     rows_rs = ["    [" + ", ".join(g.literal(c) for c in row) + "]," for row in grid]
-    OUT_RS.write_text(
-        "//! Fitted SDTM-1 coefficients -- generated by `tools/fit-sdtm-corpus.py`, do not edit.\n"
-        "//!\n"
+    out_rs.write_text(
+        (
+            "//! Fitted SDTM-1 coefficients -- generated by `tools/fit-sdtm-corpus.py`, do not edit.\n"
+            if share is None
+            else "//! Fitted SDTM-1 solar-wind field -- generated by `tools/fit-sdtm-corpus.py`, do not "
+            "edit.\n"
+        )
+        + "//!\n"
         + "".join(f"//! {line}\n".replace("//! \n", "//!\n") for line in note)
         + (
             "//!\n"
             "//! The fit's own verdict, the folds it was scored on and what it does not claim are in\n"
-            "//! `docs/verification.md` §10.21-§10.28.\n"
+            f"//! `docs/verification.md` §10.21-§10.{28 if share is None else 32}.\n"
             "#![allow(clippy::unreadable_literal)]\n\n"
             "use super::{\n"
-            "    DRIVERS, DensityUncertainty, Envelope, FLUX_EDGES, FluxExcess, NitricOxideCooling, STORM_EDGES,\n"
-            "    StormGain, StormResponse, Thermosphere,\n"
-            "};\n\n"
+            + (
+                "    DRIVERS, DensityUncertainty, Envelope, FLUX_EDGES, FluxExcess, NitricOxideCooling, STORM_EDGES,\n"
+                "    StormGain, StormResponse, Thermosphere,\n"
+                if share is None
+                else "    CouplingMap, DRIVERS, DensityUncertainty, Envelope, FLUX_EDGES, FluxExcess, NitricOxideCooling,\n"
+                "    STORM_EDGES, SolarWindDrive, StormGain, StormResponse, Thermosphere,\n"
+            )
+            + "};\n\n"
             "/// Degree of the sun-fixed spherical-harmonic expansion this fit used.\n"
             f"pub const DEGREE: usize = {argument.degree};\n"
             "/// Number of harmonics, `(DEGREE + 1)^2`.\n"
@@ -999,16 +1178,23 @@ def emit(
                 else "    StormGain::Unity,\n"
             )
             + ");\n\n"
-            "/// Where [`FIELD`] was fitted: the lowest and the highest geodetic altitude, m, and 81-day mean\n"
+            + ("" if share is None else drive_rs(model.a["wind_map"], share))
+            + "/// Where [`FIELD`] was fitted: the lowest and the highest geodetic altitude, m, and 81-day mean\n"
             "/// F10.7 among its rows.\n"
             "pub const ENVELOPE: Envelope = Envelope {\n"
             f"    altitude: {g.literal(rows.altitude.min())}..={g.literal(rows.altitude.max())},\n"
             f"    f107a: {g.literal(rows.f107a.min())}..={g.literal(rows.f107a.max())},\n"
             "};\n\n"
-            "/// Number of 3-hourly `ap` intervals the storm state is to be run over: the shortest whole\n"
-            "/// number of days whose truncation moves the driver by less than a hundredth of an `ap` at\n"
-            f"/// every interval of the corpus span (worst {worst:.2g}).\n"
-            f"pub const HISTORY: usize = {history};\n\n"
+            + (
+                "/// Number of 3-hourly `ap` intervals the storm state is to be run over: the shortest whole\n"
+                "/// number of days whose truncation moves the driver by less than a hundredth of an `ap` at\n"
+                f"/// every interval of the corpus span (worst {worst:.2g}).\n"
+                if share is None
+                else "/// Number of hours the storm state is to be run over: the shortest whole number of days\n"
+                "/// whose truncation moves the driver by less than a hundredth of an `ap` at every hour of\n"
+                f"/// the corpus span (worst {worst:.2g}).\n"
+            )
+            + f"pub const HISTORY: usize = {history};\n\n"
             "/// Log-scale offset of each satellite's densities against GRACE-FO C's, reported rather\n"
             "/// than applied: the model is the physics, and these are what the calibrations disagree by.\n"
             f"pub const SATELLITE_SCALE: [(&str, f64); {len(pk.scaled)}] = [\n"
@@ -1032,19 +1218,18 @@ def emit(
             )
         )
     )
-    print(f"wrote {OUT_RS.relative_to(g.ROOT)}")
+    print(f"wrote {out_rs.relative_to(g.ROOT)}")
 
     index = np.linspace(0, len(rows) - 1, 64).astype(int)
     exponent = (
-        model.design(
-            heating, nitric, saturation, excess=model.excess(p), gain=model.gain(p)
-        )[index]
+        model.design(*kernel, excess=model.excess(p), gain=model.gain(p))[index]
         @ p[: pk.n_c]
     )
     t_inf = g.BOUNDARY_TEMPERATURE + np.exp(exponent)
     ln_rho, _ = g.profile(t_inf, model.shape(p), arg["zeta"][index])
     lines = [
-        "# SDTM-1 reference values -- generated by tools/fit-sdtm-corpus.py.",
+        f"# SDTM-1{'' if share is None else ' solar-wind field'} reference values -- generated by "
+        "tools/fit-sdtm-corpus.py.",
         "# Our own model evaluated at our own sample of geometries: nothing here is measured data.",
         "# altitude_m,latitude_rad,local_solar_time_h,day_of_year,f107,f107a,storm_ap,t_inf_K,density_kg_m3",
     ]
@@ -1061,8 +1246,10 @@ def emit(
             np.exp(ln_rho[j] + boundary),
         ]
         lines.append(",".join(g.literal(x) for x in field))
-    OUT_FIXTURE.write_text("\n".join(lines) + "\n")
-    print(f"wrote {OUT_FIXTURE.relative_to(g.ROOT)} ({index.size} rows)")
+    out_fixture.write_text("\n".join(lines) + "\n")
+    print(f"wrote {out_fixture.relative_to(g.ROOT)} ({index.size} rows)")
+    if share is not None:
+        emit_hours(model, kernel, history)
 
 
 def debias(residual: np.ndarray, sat: np.ndarray) -> np.ndarray:
@@ -1209,8 +1396,8 @@ def main() -> None:
     parser.add_argument(
         "--emit",
         action="store_true",
-        help="then fit on every satellite and write coefficients.rs and the fixture; needs "
-        "--cooling and every fold",
+        help="then fit on every satellite and write coefficients.rs and the fixture, or with "
+        "--ap60 --solar-wind fit the solar-wind field's; needs --cooling and every fold",
     )
     parser.add_argument(
         "--cooling",
@@ -1289,12 +1476,17 @@ def main() -> None:
             sys.exit(
                 f"--cooling-mix is a share in [0, 1] or fit, not {argument.cooling_mix}"
             )
-    if argument.ap60 and argument.emit:
-        sys.exit("--ap60 is a fold experiment: --emit writes the 3-hourly field")
+    if argument.ap60 and argument.emit and argument.solar_wind is None:
+        sys.exit(
+            "--ap60 alone is a fold experiment: --emit writes the 3-hourly field, or the "
+            "solar-wind one with --solar-wind fit"
+        )
     if argument.solar_wind is not None:
-        if not (argument.cooling and argument.ap60) or argument.emit:
+        if not (argument.cooling and argument.ap60):
+            sys.exit("--solar-wind mixes into --ap60's hourly drive under --cooling")
+        if argument.emit and argument.solar_wind != "fit":
             sys.exit(
-                "--solar-wind mixes into --ap60's hourly drive under --cooling, no --emit"
+                "a fixed --solar-wind share is a measurement, not a shippable field: fit it"
             )
         if (
             argument.cooling_cap
@@ -1355,6 +1547,7 @@ def main() -> None:
     )
     arg = g.fit_arguments(rows, argument.degree)
     arg["wind"] = rows.attrs.get("wind")
+    arg["wind_map"] = rows.attrs.get("wind_map")
     excess = excess_option(argument)
     mix = mix_option(argument)
     fast = fast_option(argument)
@@ -1469,13 +1662,14 @@ def main() -> None:
         )
         p = model.fit(np.arange(len(rows)))
         r, _ = model.score(p, np.arange(len(rows)))
+        names = ("heating h", "NO h", "saturation ap") + (
+            ("solar wind",) if model.pack.wind else ()
+        )
         print(
             f"  in sample MAPE {g.mape(r):.1f}%  "
             + "  ".join(
                 f"{name} {v:.4g}"
-                for name, v in zip(
-                    ("heating h", "NO h", "saturation ap"), model.kernel(p), strict=True
-                )
+                for name, v in zip(names, model.kernel(p), strict=True)
             ),
             flush=True,
         )

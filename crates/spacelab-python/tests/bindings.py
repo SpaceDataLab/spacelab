@@ -425,6 +425,107 @@ def test_sdtm1_drag_removes_orbital_energy_inside_its_envelope():
         raise AssertionError(f"{bad[:3]} at {cadence_s} s was accepted")
 
 
+def test_sdtm1_solar_wind_is_a_field_of_its_own_over_hours_of_ap60_and_the_solar_wind():
+    base = {
+        "doy": 80.0,
+        "sec": 43200.0,
+        "alt_km": 400.0,
+        "lat_deg": 35.0,
+        "lon_deg": 140.0,
+    }
+    # The 3-hourly field's arguments, and another field behind them; each argument reaches it.
+    here = sl.sdtm1_solar_wind_density(**base)
+    assert 1e-13 < here < 5e-11, here
+    assert here != sl.sdtm1_density(**base)
+    for name, value in (
+        ("doy", 260.0),
+        ("sec", 3600.0),
+        ("lat_deg", -35.0),
+        ("lon_deg", -40.0),
+        ("f107", 220.0),
+        ("f107a", 210.0),
+        ("storm", 60.0),
+    ):
+        assert sl.sdtm1_solar_wind_density(**{**base, name: value}) != here, name
+    t_inf = sl.sdtm1_solar_wind_exospheric_temperature(**base)
+    assert (
+        sl.sdtm1_solar_wind_exospheric_temperature(**{**base, "storm": 250.0}) > t_inf
+    )
+
+    # Hours without the solar wind drive by their ap60, so a quiet history sits on its steady
+    # state, below 5. A strong southward field over the last six hours drives the same hours
+    # higher, and a due-north one lower. Series that are no hours are refused, by name.
+    nan = [math.nan] * 16
+    quiet = sl.sdtm1_solar_wind_storm_response([5.0] * 16, nan, nan, nan)
+    assert 0.0 < quiet < 5.0, quiet
+    speed = nan[:10] + [700.0] * 6
+    by = nan[:10] + [0.0] * 6
+    south = sl.sdtm1_solar_wind_storm_response(
+        [5.0] * 16, speed, by, nan[:10] + [-20.0] * 6
+    )
+    north = sl.sdtm1_solar_wind_storm_response(
+        [5.0] * 16, speed, by, nan[:10] + [20.0] * 6
+    )
+    assert north < quiet < south, (north, quiet, south)
+    assert sl.sdtm1_solar_wind_storm_response([], [], [], []) == 0.0
+    for hours, named in (
+        (([5.0] * 16, speed[:15], by, by), "hold 16, 15, 16 and 16 hours"),
+        (([5.0] * 15 + [-1.0], nan, nan, nan), "hour 15 is ap60 -1,"),
+        (
+            ([5.0] * 16, [*speed[:15], 9999.0], by, by),
+            "hour 15 is ap60 5, speed 9999 km/s",
+        ),
+    ):
+        try:
+            sl.sdtm1_solar_wind_storm_response(*hours)
+        except ValueError as refused:
+            assert named in str(refused), f"{named}: {refused}"
+            continue
+        raise AssertionError(f"{named}: accepted")
+
+    # Its interval and envelope are its own fit's, in the 3-hourly field's units.
+    lo, hi = sl.sdtm1_solar_wind_density_interval(here)
+    assert lo < here < hi, (lo, here, hi)
+    assert abs(lo * hi / here**2 - 1.0) < 1e-12, (lo, hi)
+    (low, high), (flux_low, flux_high) = sl.sdtm1_solar_wind_envelope()
+    assert 200.0 < low < 400.0 < high < 600.0, (low, high)
+    assert 50.0 < flux_low < 150.0 < flux_high < 300.0, (flux_low, flux_high)
+
+
+def test_sdtm1_solar_wind_drag_removes_more_energy_under_a_storm_in_the_solar_wind():
+    r0, v0 = circular_state(400e3, math.radians(51.6))
+    span = 6.0 * 3600.0
+    start = specific_energy((r0, v0))
+    ap60, nan = [5.0] * 48, [math.nan] * 48
+    calm = sl.propagate_drag_sdtm1_solar_wind_dense(
+        r0, v0, span, 0, 0, 80, 43200.0, 0.02, ap60, nan, nan, nan
+    )
+    loss = specific_energy(calm.final_state()) - start
+    assert -1e5 < loss < -1.0, loss
+
+    # The same quiet ap60 under a storm in the solar wind: the thermosphere heats, and drag takes
+    # more of the orbit's energy.
+    speed = [400.0] * 36 + [900.0] * 12
+    by = [0.0] * 48
+    bz = [2.0] * 36 + [-30.0] * 12
+    stormy = sl.propagate_drag_sdtm1_solar_wind_dense(
+        r0, v0, span, 0, 0, 80, 43200.0, 0.02, ap60, speed, by, bz
+    )
+    assert specific_energy(stormy.final_state()) < specific_energy(calm.final_state())
+    for hours, named in (
+        (([], [], [], []), "the hourly history is empty"),
+        ((ap60, speed[1:], by, bz), "hold 48, 47, 48 and 48 hours"),
+    ):
+        try:
+            sl.propagate_drag_sdtm1_solar_wind_dense(
+                r0, v0, span, 0, 0, 80, 43200.0, 0.02, *hours
+            )
+        except ValueError as refused:
+            assert named in str(refused), f"{named}: {refused}"
+            continue
+        raise AssertionError(f"{named}: accepted")
+
+
 def test_topocentric_azimuth_and_range_rate_use_the_local_frame():
     station = [
         RE,

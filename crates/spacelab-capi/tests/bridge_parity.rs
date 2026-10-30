@@ -97,18 +97,18 @@ fn the_two_bridges_expose_the_same_control_surface() {
     );
 }
 
-/// The five `sdtm1_*` exports, name for name, on both bridges, and the SDTM-1 drag constructor under
-/// each bridge's own spelling of one.
+/// The five `sdtm1_*` exports of each of SDTM-1's two fields, name for name, on both bridges, and
+/// each field's drag constructor under each bridge's own spelling of one.
 ///
 /// Not a section comparison like the test above: the atmospheres section of the C header is mostly
 /// two-call length protocols and out-parameter writers that have no same-named Python counterpart, so
 /// comparing the whole section would fail on drift that predates this model and is not drift at all.
-/// What is worth pinning is the surface that shipped together — SDTM-1 reached both bridges in one
-/// ticket, and the next capability added to one of them should not quietly skip the other. A dense
+/// What is worth pinning is the surface that shipped together — each field reached both bridges in
+/// one ticket, and the next capability added to one of them should not quietly skip the other. A dense
 /// constructor is `sl_ephemeris_*` in C and `propagate_*_dense` in Python, as NRLMSISE-00's drag is.
 #[test]
 fn both_bridges_name_the_same_sdtm1_surface() {
-    const SURFACE: [(&str, &str); 6] = [
+    const SURFACE: [(&str, &str); 12] = [
         ("sdtm1_density", "sdtm1_density"),
         (
             "sdtm1_exospheric_temperature",
@@ -118,9 +118,30 @@ fn both_bridges_name_the_same_sdtm1_surface() {
         ("sdtm1_density_interval", "sdtm1_density_interval"),
         ("sdtm1_envelope", "sdtm1_envelope"),
         ("ephemeris_drag_sdtm1", "propagate_drag_sdtm1_dense"),
+        ("sdtm1_solar_wind_density", "sdtm1_solar_wind_density"),
+        (
+            "sdtm1_solar_wind_exospheric_temperature",
+            "sdtm1_solar_wind_exospheric_temperature",
+        ),
+        (
+            "sdtm1_solar_wind_storm_response",
+            "sdtm1_solar_wind_storm_response",
+        ),
+        (
+            "sdtm1_solar_wind_density_interval",
+            "sdtm1_solar_wind_density_interval",
+        ),
+        ("sdtm1_solar_wind_envelope", "sdtm1_solar_wind_envelope"),
+        (
+            "ephemeris_drag_sdtm1_solar_wind",
+            "propagate_drag_sdtm1_solar_wind_dense",
+        ),
     ];
     let header = read("include/spacelab.h");
     let bridge = read("../spacelab-python/src/lib.rs");
+    // rustfmt wraps a long registration over three lines, so registrations are matched with the
+    // whitespace taken out.
+    let registrations: String = bridge.split_whitespace().collect();
     for (c_name, py_name) in SURFACE {
         assert!(
             header.contains(&format!("sl_{c_name}(")),
@@ -131,8 +152,28 @@ fn both_bridges_name_the_same_sdtm1_surface() {
             "the Python bridge defines no {py_name}"
         );
         assert!(
-            bridge.contains(&format!("wrap_pyfunction!({py_name},")),
+            registrations.contains(&format!("wrap_pyfunction!({py_name},")),
             "the Python bridge never registers {py_name}"
+        );
+    }
+}
+
+/// Both bridges tell a caller how many hours of history the solar-wind field's storm state needs,
+/// in prose a refit does not regenerate: it has to say the number the generator wrote.
+#[test]
+fn both_bridges_quote_the_hourly_history_the_solar_wind_field_needs() {
+    let hours = format!(
+        "{} hours",
+        spacelab_propagation::sdtm::solar_wind_coefficients::HISTORY
+    );
+    for (bridge, relative, at_least) in [
+        ("the C header", "include/spacelab.h", 1),
+        ("the Python bridge", "../spacelab-python/src/lib.rs", 2),
+    ] {
+        let quoted = read(relative).matches(&hours).count();
+        assert!(
+            quoted >= at_least,
+            "{bridge} quotes `{hours}` {quoted} times, fewer than its {at_least}"
         );
     }
 }

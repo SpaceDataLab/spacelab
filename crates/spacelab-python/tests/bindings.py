@@ -388,6 +388,43 @@ def test_nrlmsise00_drag_removes_orbital_energy():
     assert abs(specific_energy(conservative.final_state()) - start) < 1.0
 
 
+def test_sdtm1_drag_removes_orbital_energy_inside_its_envelope():
+    (low, high), (flux_low, flux_high) = sl.sdtm1_envelope()
+    assert 200.0 < low < 400.0 < high < 600.0, (low, high)
+    assert 50.0 < flux_low < 150.0 < flux_high < 300.0, (flux_low, flux_high)
+    r0, v0 = circular_state(400e3, math.radians(51.6))
+    span = 6.0 * 3600.0
+    start = specific_energy((r0, v0))
+    quiet = [5.0] * 120
+    drag = sl.propagate_drag_sdtm1_dense(r0, v0, span, 0, 0, 80, 43200.0, 0.02, quiet)
+    loss = specific_energy(drag.final_state()) - start
+    assert -1e5 < loss < -1.0, loss
+
+    # A larger ballistic coefficient loses more, and so does a storm, which heats the thermosphere.
+    heavier = sl.propagate_drag_sdtm1_dense(r0, v0, span, 0, 0, 80, 43200.0, 0.2, quiet)
+    assert specific_energy(heavier.final_state()) < specific_energy(drag.final_state())
+    stormy = sl.propagate_drag_sdtm1_dense(
+        r0, v0, span, 0, 0, 80, 43200.0, 0.02, [5.0] * 100 + [150.0] * 20
+    )
+    assert specific_energy(stormy.final_state()) < specific_energy(drag.final_state())
+
+    # The history is the storm state's input, so one that cannot be a history is refused, by name:
+    # an error from the integration instead would come from a state the refusal let through.
+    for bad, cadence_s, named in (
+        ([], 10800.0, "ap_history is empty"),
+        ([5.0, math.nan], 10800.0, "ap_history[1] is NaN"),
+        (quiet, 0.0, "cadence_s is 0,"),
+    ):
+        try:
+            sl.propagate_drag_sdtm1_dense(
+                r0, v0, span, 0, 0, 80, 43200.0, 0.02, bad, cadence_s=cadence_s
+            )
+        except ValueError as refused:
+            assert named in str(refused), f"{bad[:3]} at {cadence_s} s: {refused}"
+            continue
+        raise AssertionError(f"{bad[:3]} at {cadence_s} s was accepted")
+
+
 def test_topocentric_azimuth_and_range_rate_use_the_local_frame():
     station = [
         RE,

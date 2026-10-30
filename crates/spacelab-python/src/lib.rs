@@ -160,8 +160,10 @@ use spacelab_propagation::lifetime::{
 };
 use spacelab_propagation::relativity::EARTH_ANGULAR_MOMENTUM_PER_MASS;
 use spacelab_propagation::sdtm::{
-    SdtmDrivers, SdtmPoint,
-    coefficients::{FIELD as SDTM1_FIELD, UNCERTAINTY as SDTM1_UNCERTAINTY},
+    Envelope, SdtmAtmosphere, SdtmDrivers, SdtmPoint,
+    coefficients::{
+        ENVELOPE as SDTM1_ENVELOPE, FIELD as SDTM1_FIELD, UNCERTAINTY as SDTM1_UNCERTAINTY,
+    },
 };
 use spacelab_propagation::space_weather::{
     density_drivers, nrlmsise_ap_array, parse_space_weather,
@@ -1141,6 +1143,28 @@ fn cio_fast(
     )
 }
 
+/// The geodetic point the drag atmospheres read at time `t`: the inertial position rotated into the
+/// ITRF, then to WGS-84 as `(altitude km, latitude deg, longitude deg)`, the triple both atmosphere
+/// closures take.
+fn geodetic_over(cio: CioInterpolator) -> impl Fn(f64, [f64; 3]) -> (f64, f64, f64) {
+    move |t: f64, rf: [f64; 3]| {
+        let m = cio.rotation_rows(t);
+        let r_itrf = [
+            m[0][0] * rf[0] + m[0][1] * rf[1] + m[0][2] * rf[2],
+            m[1][0] * rf[0] + m[1][1] * rf[1] + m[1][2] * rf[2],
+            m[2][0] * rf[0] + m[2][1] * rf[1] + m[2][2] * rf[2],
+        ];
+        match earth_itrf_to_geodetic(Position::new(vec3(r_itrf))) {
+            Ok(g) => (
+                g.height.metres() / 1000.0,
+                g.latitude.degrees(),
+                g.longitude.degrees(),
+            ),
+            Err(_) => (0.0, 0.0, 0.0),
+        }
+    }
+}
+
 /// Like [`propagate_geopotential_dense`], but the geopotential is evaluated in the **rigorous ITRF**
 /// (IAU 2006/2000A CIO: precession, nutation, ERA, polar motion) rather than a fixed-axis rotation.
 /// The pole is tracked exactly, which is what an Earth-fixed field actually requires: the fixed-axis
@@ -1626,7 +1650,7 @@ fn sdtm1_storm_response(history: Vec<f64>, cadence_s: f64) -> f64 {
 /// **SDTM-1**'s log-normal density interval: `(lower, upper)` in kg/m³ about `density`.
 ///
 /// The spread of `ln(ρ_model/ρ_measured)` was measured by flux × storm regime on the residual of a fit
-/// with the calendar month held out, so the interval is the model's error against measurement rather
+/// with the mission family held out, so the interval is the model's error against measurement rather
 /// than a formal propagation of parameter covariance. `z` is the standard-normal multiplier: 1.645 for
 /// 90 %, 1.960 for 95 %, 2.576 for 99 %. Which regime applies is decided by `f107a` and `storm`, so
 /// they must be the same values `density` was evaluated with.
@@ -1634,6 +1658,19 @@ fn sdtm1_storm_response(history: Vec<f64>, cadence_s: f64) -> f64 {
 #[pyo3(signature = (density, f107 = 150.0, f107a = 150.0, storm = 0.0, z = 1.644_853_626_951_472_7))]
 fn sdtm1_density_interval(density: f64, f107: f64, f107a: f64, storm: f64, z: f64) -> (f64, f64) {
     SDTM1_UNCERTAINTY.interval(density, &SdtmDrivers { f107, f107a, storm }, z)
+}
+
+/// **SDTM-1**'s fitted envelope, `((lowest_km, highest_km), (lowest_f107a, highest_f107a))`: the
+/// geodetic altitude and the 81-day trailing mean flux its rows span, both ends included. Inside it
+/// SDTM-1 is the recommended model; outside it no row tests the field, and NRLMSISE-00 is the
+/// recommendation (`docs/verification.md` §10.28).
+#[pyfunction]
+fn sdtm1_envelope() -> ((f64, f64), (f64, f64)) {
+    let Envelope { altitude, f107a } = SDTM1_ENVELOPE;
+    (
+        (*altitude.start() / 1000.0, *altitude.end() / 1000.0),
+        (*f107a.start(), *f107a.end()),
+    )
 }
 
 /// The evaluation point the three `sdtm1_*` point functions share, assembled the way the fit's own
@@ -1686,9 +1723,8 @@ fn propagate_drag_nrlmsise00_dense(
     lod_seconds: f64,
     tol: f64,
 ) -> PyResult<DenseEphemeris> {
-    // Inertial → geodetic at time `t`: rotate into the ITRF, then WGS-84 (altitude km, lat/lon deg).
     let _ = lod_seconds; // the CIO rotation is independent of LOD (it only scales the discarded ω).
-    let cio = cio_fast(
+    let geodetic = geodetic_over(cio_fast(
         epoch_tt_ns,
         epoch_ut1_ns,
         t1,
@@ -1696,23 +1732,7 @@ fn propagate_drag_nrlmsise00_dense(
         yp_rad,
         dx_rad,
         dy_rad,
-    );
-    let geodetic = move |t: f64, rf: [f64; 3]| {
-        let m = cio.rotation_rows(t);
-        let r_itrf = [
-            m[0][0] * rf[0] + m[0][1] * rf[1] + m[0][2] * rf[2],
-            m[1][0] * rf[0] + m[1][1] * rf[1] + m[1][2] * rf[2],
-            m[2][0] * rf[0] + m[2][1] * rf[1] + m[2][2] * rf[2],
-        ];
-        match earth_itrf_to_geodetic(Position::new(vec3(r_itrf))) {
-            Ok(g) => (
-                g.height.metres() / 1000.0,
-                g.latitude.degrees(),
-                g.longitude.degrees(),
-            ),
-            Err(_) => (0.0, 0.0, 0.0),
-        }
-    };
+    ));
     let drag = Drag {
         ballistic_coefficient,
         earth_rotation_rate: EARTH_ROTATION_RATE,
@@ -1742,6 +1762,113 @@ fn propagate_drag_nrlmsise00_dense(
         })
         .map_err(|e| PyValueError::new_err(format!("dense propagation failed: {e:?}")))?;
     Ok(DenseEphemeris { traj })
+}
+
+/// Point mass + atmospheric drag through **SDTM-1** — this library's own thermosphere model, and the
+/// recommended one inside its fitted envelope, `sdtm1_envelope()`; outside it the recommendation is
+/// NRLMSISE-00, `propagate_drag_nrlmsise00_dense` (`docs/verification.md` §10.28). The satellite's
+/// geodetic altitude, latitude and longitude are taken in the rigorous ITRF, and the density between
+/// two evaluations follows SDTM-1's own analytic scale height.
+///
+/// `ballistic_coefficient` is `C_d A / m` (m²/kg). `doy` (day of year) and `sec_of_day` (UT) set the
+/// model's epoch, advanced with the propagation. `ap_history` is the `ap` series oldest first, ending
+/// at the interval **before** the arc's epoch, one value every `cadence_s` seconds: the storm state is
+/// run over it once, as `sdtm1_storm_response` runs it, and held over the arc with `f107`, the
+/// previous day's flux, and `f107a`, its 81-day trailing mean. Nitric oxide remembers a storm for
+/// days: pass fifteen days, 120 intervals. A history of one value is that value's steady state. An
+/// empty history, a value that is not finite or a cadence that is not finite and positive raises
+/// `ValueError`. An arc that leaves the envelope is integrated, not refused: there the model
+/// extrapolates. Epochs are ns since J2000. Returns a [`DenseEphemeris`].
+#[pyfunction]
+#[pyo3(signature = (
+    r0, v0, t1, epoch_tt_ns, epoch_ut1_ns, doy, sec_of_day, ballistic_coefficient, ap_history,
+    f107 = 150.0, f107a = 150.0, cadence_s = 10_800.0, mu = 3.986_004_418e14,
+    xp_rad = 0.0, yp_rad = 0.0, dx_rad = 0.0, dy_rad = 0.0, lod_seconds = 0.0, tol = 1e-9,
+))]
+#[allow(clippy::too_many_arguments)] // state, span, two epochs, SDTM-1 epoch, BC, space weather, EOP
+fn propagate_drag_sdtm1_dense(
+    py: Python<'_>,
+    r0: [f64; 3],
+    v0: [f64; 3],
+    t1: f64,
+    epoch_tt_ns: i128,
+    epoch_ut1_ns: i128,
+    doy: f64,
+    sec_of_day: f64,
+    ballistic_coefficient: f64,
+    ap_history: Vec<f64>,
+    f107: f64,
+    f107a: f64,
+    cadence_s: f64,
+    mu: f64,
+    xp_rad: f64,
+    yp_rad: f64,
+    dx_rad: f64,
+    dy_rad: f64,
+    lod_seconds: f64,
+    tol: f64,
+) -> PyResult<DenseEphemeris> {
+    let storm = sdtm1_drag_storm(&ap_history, cadence_s)?;
+    let _ = lod_seconds; // the CIO rotation is independent of LOD (it only scales the discarded ω).
+    let geodetic = geodetic_over(cio_fast(
+        epoch_tt_ns,
+        epoch_ut1_ns,
+        t1,
+        xp_rad,
+        yp_rad,
+        dx_rad,
+        dy_rad,
+    ));
+    let drag = Drag {
+        ballistic_coefficient,
+        earth_rotation_rate: EARTH_ROTATION_RATE,
+        atmosphere: SdtmAtmosphere {
+            field: SDTM1_FIELD,
+            drivers: SdtmDrivers { f107, f107a, storm },
+            doy0: doy,
+            sec0: sec_of_day,
+            geodetic,
+        },
+        wind: NoWind,
+    };
+    let sys = Plain(Newtonian((PointMass { mu }, drag)));
+    let y0 = [r0[0], r0[1], r0[2], v0[0], v0[1], v0[2]];
+    let h0 = (t1 / 1000.0).abs().max(1.0);
+    let traj = py
+        .detach(|| {
+            integrate_dop853(
+                &sys,
+                0.0,
+                &y0,
+                t1,
+                h0,
+                Controls::new(Tolerance::new(tol, tol), 1e-3),
+            )
+        })
+        .map_err(|e| PyValueError::new_err(format!("dense propagation failed: {e:?}")))?;
+    Ok(DenseEphemeris { traj })
+}
+
+/// The storm driver `propagate_drag_sdtm1_dense` holds over its arc, refused where the history
+/// cannot give one: empty, a value that is not finite, or a cadence that is not finite and positive.
+fn sdtm1_drag_storm(history: &[f64], cadence_s: f64) -> PyResult<f64> {
+    if history.is_empty() {
+        return Err(PyValueError::new_err(
+            "ap_history is empty: pass fifteen days, 120 intervals",
+        ));
+    }
+    if let Some(i) = history.iter().position(|v| !v.is_finite()) {
+        return Err(PyValueError::new_err(format!(
+            "ap_history[{i}] is {}, and must be finite",
+            history[i]
+        )));
+    }
+    if !(cadence_s.is_finite() && cadence_s > 0.0) {
+        return Err(PyValueError::new_err(format!(
+            "cadence_s is {cadence_s}, and must be finite and positive"
+        )));
+    }
+    Ok(SDTM1_FIELD.storm().response(history, cadence_s))
 }
 
 /// Like [`propagate_geopotential_dense`] but adding atmospheric drag — the dominant non-gravitational
@@ -6168,11 +6295,13 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(propagate_relativistic_dense, m)?)?;
     m.add_function(wrap_pyfunction!(propagate_drag_dense, m)?)?;
     m.add_function(wrap_pyfunction!(propagate_drag_nrlmsise00_dense, m)?)?;
+    m.add_function(wrap_pyfunction!(propagate_drag_sdtm1_dense, m)?)?;
     m.add_function(wrap_pyfunction!(nrlmsise00_density, m)?)?;
     m.add_function(wrap_pyfunction!(sdtm1_density, m)?)?;
     m.add_function(wrap_pyfunction!(sdtm1_exospheric_temperature, m)?)?;
     m.add_function(wrap_pyfunction!(sdtm1_storm_response, m)?)?;
     m.add_function(wrap_pyfunction!(sdtm1_density_interval, m)?)?;
+    m.add_function(wrap_pyfunction!(sdtm1_envelope, m)?)?;
     m.add_function(wrap_pyfunction!(brouwer_lyddane_propagate, m)?)?;
     m.add_function(wrap_pyfunction!(dsst_zonal_propagate_mean, m)?)?;
     m.add_function(wrap_pyfunction!(dsst_zonal_propagate_osculating, m)?)?;
@@ -7955,6 +8084,49 @@ mod tests {
             sdtm1_density_interval(density, 150.0, 150.0, 100.0, 1.644_853_626_951_472_7),
             (lower, upper)
         );
+    }
+
+    /// The envelope in the bridge's units, kilometres and solar flux units, in the documented order.
+    #[test]
+    fn the_sdtm1_envelope_is_the_fitted_one_in_kilometres() {
+        let ((altitude_lo, altitude_hi), (f107a_lo, f107a_hi)) = sdtm1_envelope();
+        assert_eq!(
+            [altitude_lo, altitude_hi, f107a_lo, f107a_hi],
+            [
+                *SDTM1_ENVELOPE.altitude.start() / 1000.0,
+                *SDTM1_ENVELOPE.altitude.end() / 1000.0,
+                *SDTM1_ENVELOPE.f107a.start(),
+                *SDTM1_ENVELOPE.f107a.end(),
+            ]
+        );
+        assert!(
+            (200.0..400.0).contains(&altitude_lo) && (400.0..600.0).contains(&altitude_hi),
+            "{altitude_lo}..{altitude_hi} km"
+        );
+    }
+
+    /// The geodetic triple both drag atmospheres read, against the same rotation applied through the
+    /// typed frame API instead of by multiplying the three rows out by hand. A garbled row moves the
+    /// altitude by hundreds of kilometres, and a dropped `/ 1000` by a factor of a thousand.
+    #[test]
+    fn the_drag_geodetic_point_is_the_typed_frame_transforms() {
+        let (epoch_tt, epoch_ut1) = (631_152_069_184_000_000_i128, 631_152_000_000_000_000_i128);
+        let cio = || cio_fast(epoch_tt, epoch_ut1, 3_600.0, 1e-6, 1e-6, 0.0, 0.0);
+        let (typed, geodetic) = (cio(), geodetic_over(cio()));
+        let r = [4.1e6, 3.3e6, 3.8e6];
+        for t in [0.0, 1_234.5, 3_600.0] {
+            let g =
+                earth_itrf_to_geodetic(typed.transform(t).position(Position::<Gcrf>::new(vec3(r))))
+                    .expect("the point is above the ellipsoid, so it has a geodetic position");
+            let (altitude_km, latitude_deg, longitude_deg) = geodetic(t, r);
+            assert!(
+                (altitude_km - g.height.metres() / 1000.0).abs() < 1e-9
+                    && (latitude_deg - g.latitude.degrees()).abs() < 1e-12
+                    && (longitude_deg - g.longitude.degrees()).abs() < 1e-12,
+                "t = {t}: {:?} against {g:?}",
+                (altitude_km, latitude_deg, longitude_deg)
+            );
+        }
     }
 
     /// One `D19.12` RINEX field: sign/space, one leading digit, 12 fractional, `D`, signed 2-digit
@@ -11250,6 +11422,131 @@ def one_row(x):
                 .sum::<f64>()
                 .sqrt();
             assert!(decayed > 1.0, "drag moved the endpoint by only {decayed} m");
+        });
+    }
+
+    /// The SDTM-1 drag propagator against the same system assembled here from the crate's own types,
+    /// through the typed frame transform: the shipped field, the storm state run over the history, the
+    /// two fluxes each in its slot, the epoch and the ballistic coefficient. The two fluxes are
+    /// different numbers and the history ends in a storm, so exchanging the fluxes or quieting the
+    /// history moves the density and so the endpoint.
+    #[test]
+    fn the_sdtm1_drag_propagator_is_the_crates_own_system() {
+        let (r0, v0) = ([6_778e3, 0.0, 0.0], [0.0, 5.4e3, 5.4e3]);
+        let t1 = 3_600.0;
+        let (epoch_tt, epoch_ut1) = (631_152_069_184_000_000_i128, 631_152_000_000_000_000_i128);
+        let (doy, sec, bc) = (172.0, 29_000.0, 0.02); // C_d·A/m, m²/kg
+        let (f107, f107a) = (128.0, 141.0);
+        let history: Vec<f64> = (0..120)
+            .map(|i| if i < 104 { 7.0 } else { 120.0 })
+            .collect();
+        let storm = SDTM1_FIELD.storm().response(&history, 10_800.0);
+        let (xp, yp, dx, dy, tol) = (1e-6, 1e-6, 0.0, 0.0, 1e-10);
+
+        let cio = cio_fast(epoch_tt, epoch_ut1, t1, xp, yp, dx, dy);
+        let geodetic = move |t: f64, rf: [f64; 3]| match earth_itrf_to_geodetic(
+            cio.transform(t).position(Position::<Gcrf>::new(vec3(rf))),
+        ) {
+            Ok(g) => (
+                g.height.metres() / 1000.0,
+                g.latitude.degrees(),
+                g.longitude.degrees(),
+            ),
+            Err(_) => (0.0, 0.0, 0.0),
+        };
+        let sys = Plain(Newtonian((
+            PointMass { mu: MU_EARTH },
+            Drag {
+                ballistic_coefficient: bc,
+                earth_rotation_rate: EARTH_ROTATION_RATE,
+                atmosphere: SdtmAtmosphere {
+                    field: SDTM1_FIELD,
+                    drivers: SdtmDrivers { f107, f107a, storm },
+                    doy0: doy,
+                    sec0: sec,
+                    geodetic,
+                },
+                wind: NoWind,
+            },
+        )));
+        let y0 = [r0[0], r0[1], r0[2], v0[0], v0[1], v0[2]];
+        let reference = integrate_dop853(
+            &sys,
+            0.0,
+            &y0,
+            t1,
+            (t1 / 1000.0).abs().max(1.0),
+            Controls::new(Tolerance::new(tol, tol), 1e-3),
+        )
+        .expect("the reference system integrates over an hour")
+        .final_state();
+
+        Python::attach(|py| {
+            let attempt = |f107: f64, f107a: f64, history: &[f64], cadence_s: f64| {
+                propagate_drag_sdtm1_dense(
+                    py,
+                    r0,
+                    v0,
+                    t1,
+                    epoch_tt,
+                    epoch_ut1,
+                    doy,
+                    sec,
+                    bc,
+                    history.to_vec(),
+                    f107,
+                    f107a,
+                    cadence_s,
+                    MU_EARTH,
+                    xp,
+                    yp,
+                    dx,
+                    dy,
+                    0.0,
+                    tol,
+                )
+            };
+            let run = |f107: f64, f107a: f64, history: &[f64]| {
+                attempt(f107, f107a, history, 10_800.0)
+                    .expect("the bridge integrates over an hour")
+                    .final_state()
+            };
+            let (r, v) = run(f107, f107a, &history);
+            for i in 0..3 {
+                assert!(
+                    (r[i] - reference[i]).abs() < 1e-6 && (v[i] - reference[i + 3]).abs() < 1e-9,
+                    "component {i}: bridge {:?} against the crate's own system {reference:?}",
+                    (r, v)
+                );
+            }
+            // Each driver reaches the field: a swap of the two fluxes, or a quiet history, is another
+            // orbit. A history of one value is that value's steady state, which is not the stormy one.
+            let apart = |(s, _): ([f64; 3], [f64; 3])| {
+                (0..3).map(|i| (s[i] - r[i]).powi(2)).sum::<f64>().sqrt()
+            };
+            assert!(apart(run(f107a, f107, &history)) > 1e-3);
+            assert!(apart(run(f107, f107a, &[7.0; 120])) > 1e-3);
+            assert!(apart(run(f107, f107a, &[7.0])) > 1e-3);
+            // And a history that cannot be one is refused before anything is integrated, by name: an
+            // error from the integration instead would come from a storm state the refusal let through.
+            for (bad, cadence_s, named) in [
+                (vec![], 10_800.0, "ap_history is empty"),
+                (vec![7.0, f64::NAN, 7.0], 10_800.0, "ap_history[1] is NaN"),
+                (vec![7.0, f64::INFINITY], 10_800.0, "ap_history[1] is inf"),
+                (history.clone(), 0.0, "cadence_s is 0,"),
+                (history.clone(), -10_800.0, "cadence_s is -10800,"),
+                (history.clone(), f64::NAN, "cadence_s is NaN,"),
+                (history.clone(), f64::INFINITY, "cadence_s is inf,"),
+            ] {
+                let Err(refused) = attempt(f107, f107a, &bad, cadence_s) else {
+                    panic!("{bad:?} at {cadence_s} s accepted");
+                };
+                assert!(
+                    refused.is_instance_of::<PyValueError>(py)
+                        && refused.to_string().contains(named),
+                    "{bad:?} at {cadence_s} s: {refused}"
+                );
+            }
         });
     }
 

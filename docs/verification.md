@@ -363,6 +363,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 saturated flux excess | the daily excess `d` entering `T∞` as `D·tanh(d/D)`, `D` fitted in every fold; the form and its rewrite of the flux against the CAS | `derivations/sdtm_flux_excess.mac` (10 identities, 30-digit values) and `.gp` at 60 digits; the held-out-family residual by `d` | values to 1e-15; `D` 0.266–0.270 across folds; held-out MAPE 23.1 → 21.5 %, `d ≥ 0.7` 167 → 25.0 %, `Ap ≥ 50` 30.3 → 28.5 %; campaign 23.2 → 21.9 %; high-flux storm cell still 83.5 % at 90 % (§10.26) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
 | SDTM-1 storm response against the solar flux | Ф23.B: the minor-storm overshoot of §10.24, split by type, epoch and flux before a remedy is chosen | the 630 corpus storm comparisons by F10.7a; sixteen storm terms and fits on the same folds, both thinning phases for the winner | the overshoot is a **flux trend**, median peak 0.71 below F10.7a = 80 to 2.36 above 200; the storm state scaled by `(F10.7a/150)^κ` inside `a`, `κ` −1.26 to −1.32 in every fold, flattens it (1.01 … 1.19): peaks within ±25 % 246 → **357** of 630, median 1.00, the eight storms 37.7 → 26.7 %, pooled 21.5 → 20.8 %; the `ap` ≥ 300 median falls 0.96 → 0.63 (§10.27) | tools/fit-sdtm-corpus.py |
 | SDTM-1 storm flux gain, shipped | Ф23.B step 6: `sdtm::StormGain`, the storm driver times `(F10.7a/150)^κ`, in the evaluator and the refitted field; its algebra against the CAS | `derivations/sdtm_storm_gain.mac` (9 identities, 30-digit values) and `.gp` at 60 digits; the §10.2 campaign; held-out coverage per regime | values to 1e-15; `κ` −1.2993; in sample 20.9 → 20.4 %, held out 21.5 → 20.8 %; campaign 21.9 → 21.5 %, storm time 33.5 → **28.5 %** (JB2008 31.0 %); Ф15.H peak error 39.3 → 26.2 % in sample (JB2008 23.7 %); campaign coverage 89.5 % pooled, high-flux storm cell **80.8 %** (§10.28) | src/sdtm/mod.rs, tools/fit-sdtm-corpus.py |
+| SDTM-1 where it is recommended | Ф23.H: D-5 recommends SDTM-1 inside its fitted envelope, so the envelope is data and the recommendation reachable from both bridges | `sdtm::coefficients::ENVELOPE`, written by `--emit` from the fitted rows; `Envelope::contains` at both closed ends and at NaN; the 64 reference rows inside it; each bridge's SDTM-1 drag constructor against `Drag<SdtmAtmosphere>` built from the crate's types | 224.660–545.488 km, F10.7a 65.8–231.9; the re-emitted field bit-identical; both constructors within 1e-6 m of the crate's system after an hour; `just capi` **12/12** (§10.29) | src/sdtm/mod.rs, tests/sdtm_reference.rs, spacelab-python/src/lib.rs, spacelab-capi/src/lib.rs |
 
 ### Tides
 
@@ -5007,7 +5008,11 @@ The 39 split three ways, and the second and third classes are new:
 | `reseal-sw-dst` | the same file | **346** | **0** | 0 | the control, 364 mutants in 38 min, 18 unviable, clean, and it reconciles: 365 less the one now ledgered. The calendar round trip gained the era before year 0, the branch a negative day number takes (229:17); `the_measured_days_are_returned_unchanged` kills 528:24, which recomputed the measured days' means; `a_forecast_across_a_year_boundary_before_1970_carries_its_own_dates` kills the deleted `year` field (505:13) and `through * 40` (496:27), which is negative before 1970 and so refuses. `/` → `*` at 496:41 only synthesises 122 days more, never read by a returned day's window, and is ledgered with that proof |
 | `seal-sdtm-cooling` | `spacelab-propagation/src/sdtm/mod.rs`, after §10.25 replaced the storm kernel's single slot with `StormResponse` and added `NitricOxideCooling` | 356 | **0** | 1 | 363 mutants in 52 min, 6 unviable, clean on the first run: the cooling step is pinned by the Maxima reference values of `derivations/sdtm_no_cooling.mac` to 1e-13, its fixed point and its reduction to the heating filter by two identities, and each refusal of the checked constructor by its own argument, so no arithmetic or comparison in the new code survives. The timeout is the same frozen `isqrt` counter as in `seal-sdtm-core` |
 | `seal-sdtm-flux-excess` | `spacelab-propagation/src/sdtm/mod.rs`, after §10.26 added `FluxExcess` and `Thermosphere::with_flux_excess` | 380 | **0** | 1 | 390 mutants in 50 min, 9 unviable, clean on the first run: `FluxExcess::excess` is pinned by the 30-digit values of `derivations/sdtm_flux_excess.mac` to 1e-15, the flux rewrite by the saturated field matching the linear field at the rewritten flux, the linear branch by an identity, and each refusal of `with_flux_excess` by its own scale. The timeout is the same frozen `isqrt` counter as in `seal-sdtm-core` |
-| `seal-sdtm-storm-gain` | `spacelab-propagation/src/sdtm/mod.rs`, after §10.28 added `StormGain` and `Thermosphere::with_storm_gain`, `--re StormGain --re storm_gain --re exospheric_temperature` | 25 | **0** | 0 | 28 mutants in 10 min, 3 unviable, clean on the first run. Scoped to the new code, because the rest of the file is unchanged since `seal-sdtm-flux-excess` and the whole file, 405 mutants, would have taken 2.3 h on a machine another project was loading. `StormGain::gain` is pinned by the 30-digit values of `derivations/sdtm_storm_gain.mac` to 1e-15, `drivers` by the gained field matching the unity field at the gained driver, the refusals of `with_storm_gain` by each non-finite exponent, and `exospheric_temperature`'s sum by the reference fixture. The three unviable are `Default::default()` over `SdtmDrivers`, `Thermosphere` and `StormGain`, none of which has one |
+| `seal-sdtm-storm-gain` | `spacelab-propagation/src/sdtm/mod.rs`, after §10.28 added `StormGain` and `Thermosphere::with_storm_gain`, `--re StormGain --re storm_gain --re exospheric_temperature` | 25 | **0** | 0 | 28 mutants in 10 min, 3 unviable, clean on the first run. Scoped to the new code, because the rest of the file is unchanged since `seal-sdtm-flux-excess` and the whole file, 405 mutants, would have taken 2.3 h on a machine another project was loading. `StormGain::gain` is pinned by the 30-digit values of `derivations/sdtm_storm_gain.mac` to 1e-15, `drivers` by the gained field matching the unity field at the gained driver, the refusals of `with_storm_gain` by each non-finite exponent, and `exospheric_temperature`'s sum by the reference fixture. The three unviable are `Default::default()` over `SdtmDrivers`, `Thermosphere` and `StormGain`, none of which has one. Two of the 28 are outside the regex, both caught: the struct-field deletions in `FluxExcess::drivers` and `with_flux_excess`, which cargo-mutants 27.1.0 does not filter (`seal-sdtm-envelope`) |
+| `seal-sdtm-envelope` | `spacelab-propagation/src/sdtm/mod.rs`, after §10.29 added `Envelope`, `--re Envelope` | 7 | **0** | 0 | 7 mutants in 4 min, 0 unviable, clean on the first run. Three are `Envelope::contains`, both constant returns and `&&` → `\|\|`, and `the_envelope_is_closed_on_each_axis_and_refuses_a_nan` kills all three: it puts a point outside on one axis and inside on the other, the only input that separates the two operators. **The other four are outside the regex.** They are the file's struct-field deletions, in `FluxExcess::drivers`, `StormGain::drivers`, `with_flux_excess` and `with_storm_gain`, and cargo-mutants 27.1.0 tests that genre whatever `--re` and `--exclude-re` say: `--re ZZZ_NO_SUCH_NAME` still lists all four. That is sourcefrog/cargo-mutants#632, fixed by #634 on its main branch on 2026-10-08, after the release in use. Each of the four is caught by the test of the function it is in, so the defect widens a scoped block and never narrows one; an `exclude_re` entry in `.cargo/mutants.toml` cannot remove that genre until the fix is released |
+| `seal-sdtm1-drag-capi` | `spacelab-capi/src/lib.rs`, after §10.29 added the SDTM-1 drag constructor and the envelope accessor, `--re sdtm1 --re geodetic_over` | 59 | **0** | 0 | 59 mutants in 6 min, 0 unviable, clean on the first run. 32 are `geodetic_over`, the operators of the hand-multiplied rotation into the ITRF, and `the_drag_geodetic_point_is_the_typed_frame_transforms` kills every one against `CioInterpolator::transform`. The constructor is `unsafe extern "C"` and generates nothing (#260), so its checks are the safe `check_sdtm1_drag` and `sdtm1_drag_storm`. Their four constant returns are all caught by the refusal test, and the storm state replaced by 0, 1 or −1 also by the comparison with the crate's own system. A first run of this block, on the design that took a storm value, was stopped when the argument became the history. It had caught 16 `sdtm1_point` mutants and found the one unviable `Default::default()` over `SdtmPoint`, and `--iterate` skipped those 17 here; `sdtm1_point` and the tests that caught them are unchanged |
+| `seal-sdtm1-drag-bridge` | `spacelab-python/src/lib.rs`, the same surface, `--re sdtm1 --re geodetic_over` under `--no-default-features --features test-interpreter` | 140 | **1** | 1 | the bridge's half, and its third run. **The first was stopped after 19 caught**, all `geodetic_over`, when the listing showed 85 of its 176 mutants in `sdtm1_envelope` — 81 of them the 3⁴ constant tuples of its return — and no Rust test calling that function. `tests/bindings.py` checks it through the wheel, and `cargo mutants` does not run the wheel, so none of the 85 could have been caught; `the_sdtm1_envelope_is_the_fitted_one_in_kilometres` was added, as in the C ABI. **The second was stopped at its first timeout**, `*` → `+` in a row of `geodetic_over`'s rotation. That mutant fails two tests, and a third, the NRLMSISE-00 drag propagator's, integrates through the garbled point past the 20 s limit; the C ABI's `the_drag_geodetic_point_is_the_typed_frame_transforms` was added too. The third run is this row: 157 mutants in 20 min, `--iterate` skipping the first run's 19, 15 unviable, and the same mutant timing out again, because the slow test still runs beside the two that fail. **One survivor**, `cadence_s > 0.0` → `>= 0.0` in `sdtm1_drag_storm`. The refusal test asked only for an error, and at a zero cadence the mutant lets the history through: the storm state comes out NaN and the integration fails anyway, so a refusal was being observed through a later failure. The test now asks for a `ValueError` that names the input, as the C ABI's test asks for the name, and `tests/bindings.py` the same. The 15 unviable are fourteen whole-function replacements of a `PyResult` return (#319's shape) and `Default::default()` over `SdtmPoint` |
+| `reseal-sdtm1-drag-bridge` | the same surface, `--timeout 60` | **161** | **0** | 0 | the control, **176 mutants in 22 min**, 15 unviable, and it reconciles on every axis: the third run's 140 caught, the first run's 19 that it skipped, the survivor, and the timeout. At three times the limit that mutant finishes in 43 s and fails three tests, the slow NRLMSISE-00 one among them, so it was a detection paid for in wall clock and not a hang. The unviable set is the same fifteen, and the population is the first run's 176 |
 "Stale" means the survivors were closed by a commit that landed *after* that block's snapshot was
 taken. A block reports on the tree as it stood when it **started**, so those verdicts are behind the
 tree rather than open, and each needs only a re-measurement. `small-seal`'s five were verified dead
@@ -8401,6 +8406,82 @@ SDTM-1 is an extrapolation no corpus row tests, and its 120 km boundary scale si
 so the low profile is set by a bound, not by data. The library's API does not change: it has no
 default atmosphere, and every drag path names its model. The decision is withdrawn if SDTM-1 is not
 below NRLMSISE-00 on months that none of the sixteen storm-term fits of §10.27 saw.
+
+### 10.29 SDTM-1 where it is recommended (Ф23.H, items 1 and 2)
+
+D-5 recommends SDTM-1 inside its fitted envelope and NRLMSISE-00 outside it (§10.28). Two gaps kept
+code from applying that: the envelope was a sentence in the docs, and only NRLMSISE-00 had a drag
+constructor in the bridges.
+
+**The envelope is data.** `tools/fit-sdtm-corpus.py --emit` now writes `sdtm::coefficients::ENVELOPE`
+beside `FIELD`: the lowest and the highest geodetic altitude and 81-day trailing mean flux among the
+365 214 fitted rows, at round-trip precision.
+
+| | lowest | highest |
+|---|---|---|
+| geodetic altitude, m | 224 660.373 | 545 488.256 |
+| F10.7a, sfu | 65.8 | 231.9 |
+
+The type is `sdtm::Envelope`, two `RangeInclusive<f64>`. `contains(&SdtmPoint, &SdtmDrivers)` is true
+at both closed ends and false for a NaN on either axis (`the_envelope_is_closed_on_each_axis_and_refuses_a_nan`).
+It bounds the two inputs D-5 names. The storm driver is not bounded: its range is whatever storms
+2000–2026 brought. Neither is the daily flux, whose excess the field saturates (§10.26).
+`the_envelope_holds_every_sampled_row_and_is_the_one_the_docs_quote` holds all 64 reference rows
+inside it, which ties its units to `SdtmPoint`'s metres, and holds its rounded ends to the 225–545 km
+and 65.8–231.9 sfu that `docs/limitations.md` and §10.28 quote. The re-emit that wrote it reproduced
+the field bit for bit: no coefficient, constant or `σ` literal moved, and the reference fixture is
+byte-identical.
+
+**Drag through SDTM-1 in both bridges.** Python `propagate_drag_sdtm1_dense` and C
+`sl_ephemeris_drag_sdtm1`, with its record `sl_sdtm1_drag` and the C++ `ephemeris::drag_sdtm1`, sit
+beside the NRLMSISE-00 constructors: the same state, epochs and Earth-orientation arguments, then the
+previous day's `f107`, the trailing `f107a`, and the **`ap` history** in place of NRLMSISE-00's `ap`.
+The constructor runs the storm state over the history once, as `sdtm1_storm_response` does, and holds
+it over the arc with the two fluxes.
+
+The argument is the history and not the storm value because the value is easy to get wrong: it is a
+state over the index, not an index. A caller who moves from NRLMSISE-00 and passes its daily `ap` of
+200 as the value hands the model nine times the driver that a steady `ap` 200 gives, 22.04 from
+`H/(1 + H/H_s)` with `H_s` = 24.77. A history cannot be misread that way, and its shortest form
+degrades to the right answer: a history of one value is that value's steady state, which both bridges'
+tests pass as `[7.0]`. An empty history, a value in it that is not finite, and a cadence that is not
+finite and positive are refused — in Python as `ValueError`, in C as `SL_ERR_INVALID_ARGUMENT` naming
+the input.
+
+`sdtm1_envelope()` and `sl_sdtm1_envelope` give the envelope in the bridges' own units, kilometres and
+sfu. No constructor refuses an arc that leaves the envelope; there the model extrapolates, and the docs
+say so. A refusal would fail a decaying orbit at the altitude it passes on its way down, and the
+recommendation is a choice of model made by the caller, not a property of one arc. The C constructor
+also refuses a field of `sl_sdtm1_drag` that is not finite, by name. The record's
+`ballistic_coefficient` is `Cd A / m` in m²/kg, which is what every drag record of the C ABI passes to
+`Drag`; the header had documented the two older records' field as its inverse, `m / (Cd A)`, since the
+C ABI's first commit, and that is corrected too.
+
+The rotation into the ITRF and the ellipsoid that both drag constructors read is now one function per
+bridge, `geodetic_over`, rather than a copy in each constructor. What checks the new surface:
+
+| check | what it would catch | result |
+|---|---|---|
+| `the_drag_geodetic_point_is_the_typed_frame_transforms` (both bridges) | the hand-multiplied rotation against `CioInterpolator::transform` at three epochs | altitude within 1 µm, angles within 1e-12° |
+| `the_sdtm1_drag_propagator_is_the_crates_own_system` (Python bridge) | the bridge's arc against `Drag<SdtmAtmosphere>` built from the crate's types, rotated through the typed transform, an hour at 400 km | within 1e-6 m and 1e-9 m/s |
+| `the_sdtm1_drag_constructor_is_the_crates_own_system` (C ABI) | the same, through `sl_ephemeris_drag_sdtm1` | within 1e-6 m |
+| the same two tests, perturbed | the two fluxes exchanged, a quiet history, a history of one value; in the C ABI also the next day and twice the ballistic coefficient | each moves the endpoint by more than 1 mm |
+| the Python test's refusals | an empty history, a NaN or an infinite value in it, four cadences that are not finite and positive | a `ValueError` that names the input, so a refusal cannot pass as a failure of the integration it should have prevented |
+| `the_sdtm1_drag_constructor_refuses_a_record_it_cannot_integrate` | a NaN in each of the six fields; an empty history, a NaN or an infinite value in it, four cadences that are not finite and positive; a null record, a null history, a zero arc | `SL_ERR_INVALID_ARGUMENT`, the input named, the handle untouched |
+| `the_sdtm1_envelope_is_the_fitted_one_in_kilometres` (both bridges) | the order and units of the envelope, and in C a null out pointer | equal to `ENVELOPE` over 1000 for the altitudes |
+| `tests/bindings.py` | energy through the installed wheel: six hours at 400 km | energy falls; a larger ballistic coefficient and a history that ends in a storm each take more; an empty history, a NaN in it and a zero cadence raise a `ValueError` that names the input |
+| `tests/c/smoke.c`, `tests/cpp/smoke.cpp`, `nothrow.cpp` | the headers as a C and a C++ caller compile them | an arc at a 7000 km radius, above the envelope, is integrated; a null or empty history and a NaN in it are refused; `just capi` **12/12** on both compilers |
+| `both_bridges_name_the_same_sdtm1_surface` | a capability that reaches one bridge and not the other | five `sdtm1_*` names, and the drag constructor under each bridge's own spelling |
+
+**Mutation (§5.3).** `seal-sdtm-envelope` is 7 mutants, 7 caught: three in `Envelope::contains`, and
+four struct-field deletions outside the block's regex, which cargo-mutants 27.1.0 tests whatever
+`--re` says. `seal-sdtm1-drag-capi` is 59 mutants, 59 caught. The Python bridge had three gaps that
+the C ABI did not have. No Rust test called its `sdtm1_envelope`. Nothing tested its `geodetic_over`
+directly, so a garbled rotation was caught only by integrating through it, slowly. And its refusal
+test accepted any error, so a zero cadence that a weakened check let through passed as refused when
+the integration then failed on the NaN state. The block's listing showed the first, its first timeout
+the second, and its one survivor the third. Each has its test now, and the control,
+`reseal-sdtm1-drag-bridge`, is 176 mutants, 161 caught, 0 missed, 15 unviable.
 
 ---
 

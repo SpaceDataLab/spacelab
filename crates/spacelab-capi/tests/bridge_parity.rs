@@ -97,35 +97,42 @@ fn the_two_bridges_expose_the_same_control_surface() {
     );
 }
 
-/// The four `sdtm1_*` exports, name for name, on both bridges.
+/// The five `sdtm1_*` exports, name for name, on both bridges, and the SDTM-1 drag constructor under
+/// each bridge's own spelling of one.
 ///
 /// Not a section comparison like the test above: the atmospheres section of the C header is mostly
 /// two-call length protocols and out-parameter writers that have no same-named Python counterpart, so
 /// comparing the whole section would fail on drift that predates this model and is not drift at all.
 /// What is worth pinning is the surface that shipped together — SDTM-1 reached both bridges in one
-/// ticket, and the next capability added to one of them should not quietly skip the other.
+/// ticket, and the next capability added to one of them should not quietly skip the other. A dense
+/// constructor is `sl_ephemeris_*` in C and `propagate_*_dense` in Python, as NRLMSISE-00's drag is.
 #[test]
 fn both_bridges_name_the_same_sdtm1_surface() {
-    const SURFACE: [&str; 4] = [
-        "sdtm1_density",
-        "sdtm1_exospheric_temperature",
-        "sdtm1_storm_response",
-        "sdtm1_density_interval",
+    const SURFACE: [(&str, &str); 6] = [
+        ("sdtm1_density", "sdtm1_density"),
+        (
+            "sdtm1_exospheric_temperature",
+            "sdtm1_exospheric_temperature",
+        ),
+        ("sdtm1_storm_response", "sdtm1_storm_response"),
+        ("sdtm1_density_interval", "sdtm1_density_interval"),
+        ("sdtm1_envelope", "sdtm1_envelope"),
+        ("ephemeris_drag_sdtm1", "propagate_drag_sdtm1_dense"),
     ];
     let header = read("include/spacelab.h");
     let bridge = read("../spacelab-python/src/lib.rs");
-    for name in SURFACE {
+    for (c_name, py_name) in SURFACE {
         assert!(
-            header.contains(&format!("sl_{name}(")),
-            "the C header declares no sl_{name}"
+            header.contains(&format!("sl_{c_name}(")),
+            "the C header declares no sl_{c_name}"
         );
         assert!(
-            bridge.contains(&format!("fn {name}(")),
-            "the Python bridge defines no {name}"
+            bridge.contains(&format!("fn {py_name}(")),
+            "the Python bridge defines no {py_name}"
         );
         assert!(
-            bridge.contains(&format!("wrap_pyfunction!({name},")),
-            "the Python bridge never registers {name}"
+            bridge.contains(&format!("wrap_pyfunction!({py_name},")),
+            "the Python bridge never registers {py_name}"
         );
     }
 }

@@ -151,8 +151,10 @@ use spacelab_propagation::lifetime::{
 };
 use spacelab_propagation::relativity::EARTH_ANGULAR_MOMENTUM_PER_MASS;
 use spacelab_propagation::sdtm::{
-    SdtmDrivers, SdtmPoint,
-    coefficients::{FIELD as SDTM1_FIELD, UNCERTAINTY as SDTM1_UNCERTAINTY},
+    SdtmAtmosphere, SdtmDrivers, SdtmPoint,
+    coefficients::{
+        ENVELOPE as SDTM1_ENVELOPE, FIELD as SDTM1_FIELD, UNCERTAINTY as SDTM1_UNCERTAINTY,
+    },
 };
 use spacelab_propagation::space_weather::{
     density_drivers, nrlmsise_ap_array, parse_space_weather,
@@ -5408,7 +5410,7 @@ pub unsafe extern "C" fn sl_sdtm1_storm_response(
 /// SDTM-1's log-normal density interval about `density`, `[lower, upper]` in kg/m³.
 ///
 /// The spread of `ln(ρ_model/ρ_measured)` was measured by flux × storm regime on the residual of a fit
-/// with the calendar month held out, so this is the model's error against measurement rather than a
+/// with the mission family held out, so this is the model's error against measurement rather than a
 /// propagation of parameter covariance. `z` is the standard-normal multiplier: 1.645 for 90 %, 1.960
 /// for 95 %, 2.576 for 99 %. Which regime applies is decided by `f107a` and `storm`, so they must be
 /// the values `density` was evaluated with.
@@ -5434,6 +5436,47 @@ pub unsafe extern "C" fn sl_sdtm1_density_interval(
         // SAFETY: checked non-null; the caller states it is writable for two doubles.
         unsafe {
             core::ptr::copy_nonoverlapping([lower, upper].as_ptr(), out, SL_SDTM1_INTERVAL);
+        }
+        SL_OK
+    })
+}
+
+/// How many doubles `sl_sdtm1_envelope` writes.
+pub const SL_SDTM1_ENVELOPE: usize = 4;
+
+/// The envelope in this header's units for SDTM-1: kilometres, as `sl_sdtm1_density` takes them,
+/// and solar flux units. A safe helper because `cargo mutants` generates nothing for the body of an
+/// `unsafe fn`.
+fn sdtm1_envelope() -> [f64; SL_SDTM1_ENVELOPE] {
+    let (altitude, f107a) = (SDTM1_ENVELOPE.altitude, SDTM1_ENVELOPE.f107a);
+    [
+        *altitude.start() / 1000.0,
+        *altitude.end() / 1000.0,
+        *f107a.start(),
+        *f107a.end(),
+    ]
+}
+
+/// SDTM-1's fitted envelope, `[lowest_km, highest_km, lowest_f107a, highest_f107a]`: the geodetic
+/// altitude and the 81-day trailing mean flux its rows span, both ends included.
+///
+/// Inside it SDTM-1 is the recommended model; outside it no row tests the field, and NRLMSISE-00 is
+/// the recommendation (`docs/verification.md` §10.28).
+///
+/// # Safety
+/// `out` is writable for `SL_SDTM1_ENVELOPE` doubles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_sdtm1_envelope(out: *mut f64) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return fail(
+                SL_ERR_INVALID_ARGUMENT,
+                "sl_sdtm1_envelope: null out pointer",
+            );
+        }
+        // SAFETY: checked non-null; the caller states it is writable for four doubles.
+        unsafe {
+            core::ptr::copy_nonoverlapping(sdtm1_envelope().as_ptr(), out, SL_SDTM1_ENVELOPE);
         }
         SL_OK
     })
@@ -6097,7 +6140,7 @@ pub struct SlEopSample {
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct SlExponentialAtmosphere {
-    /// `m / (Cd A)`, kg/m².
+    /// `Cd A / m`, m²/kg.
     pub ballistic_coefficient: f64,
     /// Density at the reference altitude, kg/m³.
     pub reference_density: f64,
@@ -6117,7 +6160,7 @@ pub struct SlNrlmsiseDrag {
     pub doy: i32,
     /// UT seconds into that day.
     pub seconds_of_day: f64,
-    /// `m / (Cd A)`, kg/m².
+    /// `Cd A / m`, m²/kg.
     pub ballistic_coefficient: f64,
     /// Daily 10.7 cm solar flux, sfu.
     pub f107: f64,
@@ -6127,6 +6170,51 @@ pub struct SlNrlmsiseDrag {
     pub ap: f64,
     /// Gravitational parameter, m³/s².
     pub mu: f64,
+}
+
+/// `sl_sdtm1_drag`: drag through SDTM-1 rather than through NRLMSISE-00. The `ap` history its storm
+/// state is run over is passed beside it, as `sl_sdtm1_storm_response` takes one.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct SlSdtm1Drag {
+    /// Day of year at the arc's epoch; a double, as `sl_sdtm1_density` takes it.
+    pub doy: f64,
+    /// UT seconds into that day.
+    pub seconds_of_day: f64,
+    /// `Cd A / m`, m²/kg.
+    pub ballistic_coefficient: f64,
+    /// The previous day's 10.7 cm flux, sfu.
+    pub f107: f64,
+    /// Its 81-day trailing mean, sfu.
+    pub f107a: f64,
+    /// Gravitational parameter, m³/s².
+    pub mu: f64,
+}
+
+/// What an `sl_sdtm1_drag` has to be: finite in every field. A safe helper for the reason
+/// `check_eop_series` gives.
+fn check_sdtm1_drag(who: &str, d: &SlSdtm1Drag) -> Result<(), i32> {
+    for (name, value) in [
+        ("doy", d.doy),
+        ("seconds_of_day", d.seconds_of_day),
+        ("ballistic_coefficient", d.ballistic_coefficient),
+        ("f107", d.f107),
+        ("f107a", d.f107a),
+        ("mu", d.mu),
+    ] {
+        check_finite(who, name, value)?;
+    }
+    Ok(())
+}
+
+/// The storm driver `sl_ephemeris_drag_sdtm1` holds over its arc, refused where the history cannot
+/// give one: empty, a value that is not finite, or a cadence that is not finite and positive. A safe
+/// helper for the reason `check_eop_series` gives.
+fn sdtm1_drag_storm(who: &str, history: &[f64], cadence_s: f64) -> Result<f64, i32> {
+    check_nonzero(who, "n", history.len())?;
+    check_all_finite(who, "ap_history", history)?;
+    check_positive(who, "cadence_s", cadence_s, SL_ERR_INVALID_ARGUMENT)?;
+    Ok(SDTM1_FIELD.storm().response(history, cadence_s))
 }
 
 /// An arc has to end somewhere, and a zero-length one is not an arc.
@@ -6205,6 +6293,28 @@ fn cio_over(eop: SlEop, span: f64) -> CioInterpolator {
         Angle::from_radians(eop.dy_rad),
         0.0,
     )
+}
+
+/// The geodetic point the drag atmospheres read at time `t`: the inertial position rotated into the
+/// ITRF, then to the ellipsoid as `(altitude km, latitude deg, longitude deg)`, the triple both
+/// atmosphere closures take. A safe helper for the reason `check_eop_series` gives.
+fn geodetic_over(cio: CioInterpolator) -> impl Fn(f64, [f64; 3]) -> (f64, f64, f64) {
+    move |t: f64, rf: [f64; 3]| {
+        let m = cio.rotation_rows(t);
+        let r_itrf = Vec3::new(
+            m[0][0] * rf[0] + m[0][1] * rf[1] + m[0][2] * rf[2],
+            m[1][0] * rf[0] + m[1][1] * rf[1] + m[1][2] * rf[2],
+            m[2][0] * rf[0] + m[2][1] * rf[1] + m[2][2] * rf[2],
+        );
+        match earth_itrf_to_geodetic(Position::new(r_itrf)) {
+            Ok(g) => (
+                g.height.metres() / 1000.0,
+                g.latitude.degrees(),
+                g.longitude.degrees(),
+            ),
+            Err(_) => (0.0, 0.0, 0.0),
+        }
+    }
 }
 
 /// Hand a DOP853 dense integration's result to the caller as a handle. Every constructor below
@@ -6396,23 +6506,7 @@ pub unsafe extern "C" fn sl_ephemeris_drag_nrlmsise00(
         }
         // SAFETY: checked non-null; the caller states all three are initialised.
         let (y0, eop, d) = unsafe { (to_six(*r#in), *eop, *drag) };
-        let cio = cio_over(eop, t1_seconds);
-        let geodetic = move |t: f64, rf: [f64; 3]| {
-            let m = cio.rotation_rows(t);
-            let r_itrf = Vec3::new(
-                m[0][0] * rf[0] + m[0][1] * rf[1] + m[0][2] * rf[2],
-                m[1][0] * rf[0] + m[1][1] * rf[1] + m[1][2] * rf[2],
-                m[2][0] * rf[0] + m[2][1] * rf[1] + m[2][2] * rf[2],
-            );
-            match earth_itrf_to_geodetic(Position::new(r_itrf)) {
-                Ok(g) => (
-                    g.height.metres() / 1000.0,
-                    g.latitude.degrees(),
-                    g.longitude.degrees(),
-                ),
-                Err(_) => (0.0, 0.0, 0.0),
-            }
-        };
+        let geodetic = geodetic_over(cio_over(eop, t1_seconds));
         let sys = Plain(Newtonian((
             PointMass { mu: d.mu },
             Drag {
@@ -6425,6 +6519,95 @@ pub unsafe extern "C" fn sl_ephemeris_drag_nrlmsise00(
                     f107a: d.f107a,
                     ap: d.ap,
                     geodetic,
+                },
+                wind: NoWind,
+            },
+        )));
+        // SAFETY: `out` was checked non-null above.
+        unsafe {
+            deliver_dop853(
+                WHO,
+                || {
+                    integrate_dop853(
+                        &sys,
+                        0.0,
+                        &y0,
+                        t1_seconds,
+                        initial_step(t1_seconds),
+                        Controls::new(Tolerance::new(tolerance, tolerance), 1e-3),
+                    )
+                },
+                out,
+            )
+        }
+    })
+}
+
+/// Propagate under point-mass gravity and drag through SDTM-1, the model recommended inside its
+/// fitted envelope (`sl_sdtm1_envelope`); outside it the recommendation is
+/// `sl_ephemeris_drag_nrlmsise00`. The density is read at the geodetic point the state rotates to at
+/// each stage, and an arc that leaves the envelope is integrated, not refused.
+///
+/// `ap_history` is the `ap` series oldest first, ending at the interval **before** the arc's epoch,
+/// one value every `cadence_s` seconds; the storm state is run over it once, as
+/// `sl_sdtm1_storm_response` runs it, and held over the arc. A history of one value is that value's
+/// steady state.
+///
+/// # Safety
+/// `in` points at one initialised `sl_state`; `eop` at one `sl_eop`; `drag` at one
+/// `sl_sdtm1_drag`; `ap_history` is readable for `n` doubles; `out` is writable for one pointer.
+#[allow(clippy::too_many_arguments)] // the arc, its frame, the record, the history and the handle
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_ephemeris_drag_sdtm1(
+    r#in: *const SlState,
+    t1_seconds: f64,
+    eop: *const SlEop,
+    drag: *const SlSdtm1Drag,
+    ap_history: *const f64,
+    n: usize,
+    cadence_s: f64,
+    tolerance: f64,
+    out: *mut *mut SlEphemeris,
+) -> i32 {
+    guard(|| {
+        const WHO: &str = "sl_ephemeris_drag_sdtm1";
+        if r#in.is_null()
+            || eop.is_null()
+            || drag.is_null()
+            || ap_history.is_null()
+            || out.is_null()
+        {
+            return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null pointer"));
+        }
+        if let Err(status) = check_arc(WHO, t1_seconds, tolerance) {
+            return status;
+        }
+        // SAFETY: checked non-null; the caller states all three are initialised.
+        let (y0, eop, d) = unsafe { (to_six(*r#in), *eop, *drag) };
+        if let Err(status) = check_sdtm1_drag(WHO, &d) {
+            return status;
+        }
+        // SAFETY: checked non-null; the caller states it is readable for `n` doubles.
+        let history = unsafe { core::slice::from_raw_parts(ap_history, n) };
+        let storm = match sdtm1_drag_storm(WHO, history, cadence_s) {
+            Ok(storm) => storm,
+            Err(status) => return status,
+        };
+        let sys = Plain(Newtonian((
+            PointMass { mu: d.mu },
+            Drag {
+                ballistic_coefficient: d.ballistic_coefficient,
+                earth_rotation_rate: spacelab_frames::EARTH_ROTATION_RATE,
+                atmosphere: SdtmAtmosphere {
+                    field: SDTM1_FIELD,
+                    drivers: SdtmDrivers {
+                        f107: d.f107,
+                        f107a: d.f107a,
+                        storm,
+                    },
+                    doy0: d.doy,
+                    sec0: d.seconds_of_day,
+                    geodetic: geodetic_over(cio_over(eop, t1_seconds)),
                 },
                 wind: NoWind,
             },
@@ -18390,6 +18573,307 @@ mod tests {
         )
         .expect("two-body");
         assert!(miss(kepler, thermosphere) > 1e-9);
+    }
+
+    /// The geodetic triple both drag atmospheres read, against the same rotation applied through the
+    /// typed frame API instead of by multiplying the three rows out by hand. A garbled row moves the
+    /// altitude by hundreds of kilometres, and a dropped `/ 1000` by a factor of a thousand.
+    #[test]
+    fn the_drag_geodetic_point_is_the_typed_frame_transforms() {
+        let (cio, geodetic) = (
+            cio_over(EOP, 3_600.0),
+            geodetic_over(cio_over(EOP, 3_600.0)),
+        );
+        let r = [4.1e6, 3.3e6, 3.8e6];
+        for t in [0.0, 1_234.5, 3_600.0] {
+            let g = earth_itrf_to_geodetic(
+                cio.transform(t)
+                    .position(Position::<Gcrf>::new(Vec3::new(r[0], r[1], r[2]))),
+            )
+            .expect("the point is above the ellipsoid, so it has a geodetic position");
+            let (altitude_km, latitude_deg, longitude_deg) = geodetic(t, r);
+            assert!(
+                (altitude_km - g.height.metres() / 1000.0).abs() < 1e-9
+                    && (latitude_deg - g.latitude.degrees()).abs() < 1e-12
+                    && (longitude_deg - g.longitude.degrees()).abs() < 1e-12,
+                "t = {t}: {:?} against {g:?}",
+                (altitude_km, latitude_deg, longitude_deg)
+            );
+        }
+    }
+
+    /// An `ap` history that ends in a storm: four quiet days, then two of `ap` 120.
+    fn stormy_history() -> Vec<f64> {
+        (0..120)
+            .map(|i| if i < 104 { 7.0 } else { 120.0 })
+            .collect()
+    }
+
+    /// Drag through SDTM-1 over an hour, the history passed at the 3-hourly cadence the fit used.
+    fn sdtm1_arc(s0: &SlState, drag: SlSdtm1Drag, history: &[f64]) -> Result<SlState, i32> {
+        sample_ephemeris(
+            |out| unsafe {
+                sl_ephemeris_drag_sdtm1(
+                    s0,
+                    3_600.0,
+                    &raw const EOP,
+                    &raw const drag,
+                    history.as_ptr(),
+                    history.len(),
+                    10_800.0,
+                    1e-10,
+                    out,
+                )
+            },
+            3_600.0,
+        )
+    }
+
+    const SDTM1_DRAG: SlSdtm1Drag = SlSdtm1Drag {
+        doy: 172.0,
+        seconds_of_day: 29_000.0,
+        ballistic_coefficient: 0.02,
+        f107: 128.0,
+        f107a: 141.0,
+        mu: MU_EARTH,
+    };
+
+    /// The SDTM-1 drag constructor against the same system assembled here from the crate's own
+    /// types: the shipped field, the storm state run over the history, the two fluxes each in its
+    /// slot, the epoch and the ballistic coefficient. The two fluxes are different numbers and the
+    /// history ends in a storm, so exchanging the fluxes or quieting the history moves the endpoint.
+    #[test]
+    fn the_sdtm1_drag_constructor_is_the_crates_own_system() {
+        let s0 = circular_state(6_778_000.0, 51.6_f64.to_radians());
+        let arc = 3_600.0;
+        let history = stormy_history();
+        let got = sdtm1_arc(&s0, SDTM1_DRAG, &history).expect("SDTM-1 drag");
+
+        let sys = Plain(Newtonian((
+            PointMass { mu: MU_EARTH },
+            Drag {
+                ballistic_coefficient: 0.02,
+                earth_rotation_rate: spacelab_frames::EARTH_ROTATION_RATE,
+                atmosphere: SdtmAtmosphere {
+                    field: SDTM1_FIELD,
+                    drivers: SdtmDrivers {
+                        f107: 128.0,
+                        f107a: 141.0,
+                        storm: SDTM1_FIELD.storm().response(&history, 10_800.0),
+                    },
+                    doy0: 172.0,
+                    sec0: 29_000.0,
+                    geodetic: geodetic_over(cio_over(EOP, arc)),
+                },
+                wind: NoWind,
+            },
+        )));
+        let reference = integrate_dop853(
+            &sys,
+            0.0,
+            &to_six(s0),
+            arc,
+            initial_step(arc),
+            Controls::new(Tolerance::new(1e-10, 1e-10), 1e-3),
+        )
+        .expect("the reference system integrates over an hour")
+        .final_state();
+        let want = SlState {
+            position: SlVec3 {
+                x: reference[0],
+                y: reference[1],
+                z: reference[2],
+            },
+            velocity: SlVec3 {
+                x: reference[3],
+                y: reference[4],
+                z: reference[5],
+            },
+        };
+        assert!(miss(got, want) < 1e-6, "{} m", miss(got, want));
+
+        // Each driver reaches the field, and so does the epoch: a swap of the two fluxes, the next
+        // day, or twice the ballistic coefficient is another orbit.
+        for other in [
+            SlSdtm1Drag {
+                f107: 141.0,
+                f107a: 128.0,
+                ..SDTM1_DRAG
+            },
+            SlSdtm1Drag {
+                doy: 173.0,
+                ..SDTM1_DRAG
+            },
+            SlSdtm1Drag {
+                ballistic_coefficient: 0.04,
+                ..SDTM1_DRAG
+            },
+        ] {
+            let moved = miss(sdtm1_arc(&s0, other, &history).expect("SDTM-1 drag"), got);
+            assert!(moved > 1e-3, "{other:?} moved it {moved} m");
+        }
+        // And so does the history: a quiet one, and a history of one value, which is that value's
+        // steady state rather than the storm the full history ends in.
+        for quiet in [&[7.0; 120][..], &[7.0]] {
+            let moved = miss(sdtm1_arc(&s0, SDTM1_DRAG, quiet).expect("SDTM-1 drag"), got);
+            assert!(moved > 1e-3, "{} values moved it {moved} m", quiet.len());
+        }
+    }
+
+    /// Every field of the drag record is refused when it is not finite, by name; so is a history that
+    /// cannot be one, and so is a null.
+    #[test]
+    fn the_sdtm1_drag_constructor_refuses_a_record_it_cannot_integrate() {
+        let s0 = circular_state(6_778_000.0, 0.0);
+        let history = stormy_history();
+        let nan = f64::NAN;
+        let refused = |drag: SlSdtm1Drag, history: &[f64], named: &str| {
+            assert_eq!(
+                sdtm1_arc(&s0, drag, history),
+                Err(SL_ERR_INVALID_ARGUMENT),
+                "{named}"
+            );
+            assert!(last_error().contains(named), "{named}: {}", last_error());
+        };
+        for (name, bad) in [
+            (
+                "doy",
+                SlSdtm1Drag {
+                    doy: nan,
+                    ..SDTM1_DRAG
+                },
+            ),
+            (
+                "seconds_of_day",
+                SlSdtm1Drag {
+                    seconds_of_day: nan,
+                    ..SDTM1_DRAG
+                },
+            ),
+            (
+                "ballistic_coefficient",
+                SlSdtm1Drag {
+                    ballistic_coefficient: nan,
+                    ..SDTM1_DRAG
+                },
+            ),
+            (
+                "f107",
+                SlSdtm1Drag {
+                    f107: nan,
+                    ..SDTM1_DRAG
+                },
+            ),
+            (
+                "f107a",
+                SlSdtm1Drag {
+                    f107a: nan,
+                    ..SDTM1_DRAG
+                },
+            ),
+            (
+                "mu",
+                SlSdtm1Drag {
+                    mu: nan,
+                    ..SDTM1_DRAG
+                },
+            ),
+        ] {
+            refused(bad, &history, &format!(" {name} is NaN"));
+        }
+        refused(SDTM1_DRAG, &[], " n is zero");
+        refused(SDTM1_DRAG, &[7.0, nan, 7.0], " ap_history[1] is NaN");
+        refused(SDTM1_DRAG, &[7.0, f64::INFINITY], " ap_history[1] is inf");
+
+        let record = SDTM1_DRAG;
+        let mut handle: *mut SlEphemeris = core::ptr::null_mut();
+        let call = |drag: *const SlSdtm1Drag,
+                    history: *const f64,
+                    cadence_s: f64,
+                    t1: f64,
+                    handle: *mut *mut SlEphemeris| unsafe {
+            sl_ephemeris_drag_sdtm1(
+                &raw const s0,
+                t1,
+                &raw const EOP,
+                drag,
+                history,
+                120,
+                cadence_s,
+                1e-9,
+                handle,
+            )
+        };
+        for cadence_s in [0.0, -10_800.0, nan, f64::INFINITY] {
+            assert_eq!(
+                call(
+                    &raw const record,
+                    history.as_ptr(),
+                    cadence_s,
+                    600.0,
+                    &raw mut handle
+                ),
+                SL_ERR_INVALID_ARGUMENT,
+                "cadence {cadence_s}"
+            );
+            assert!(last_error().contains("cadence_s"), "{}", last_error());
+        }
+        assert_eq!(
+            call(
+                core::ptr::null(),
+                history.as_ptr(),
+                10_800.0,
+                600.0,
+                &raw mut handle
+            ),
+            SL_ERR_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            call(
+                &raw const record,
+                core::ptr::null(),
+                10_800.0,
+                600.0,
+                &raw mut handle
+            ),
+            SL_ERR_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            call(
+                &raw const record,
+                history.as_ptr(),
+                10_800.0,
+                0.0,
+                &raw mut handle
+            ),
+            SL_ERR_INVALID_ARGUMENT
+        );
+        // A refused constructor writes nothing, so the caller's pointer is still what it was.
+        assert!(handle.is_null());
+    }
+
+    /// The envelope in this header's units, kilometres and solar flux units, in the documented order.
+    #[test]
+    fn the_sdtm1_envelope_is_the_fitted_one_in_kilometres() {
+        let mut out = [0.0; SL_SDTM1_ENVELOPE];
+        assert_eq!(unsafe { sl_sdtm1_envelope(out.as_mut_ptr()) }, SL_OK);
+        assert_eq!(
+            out,
+            [
+                *SDTM1_ENVELOPE.altitude.start() / 1000.0,
+                *SDTM1_ENVELOPE.altitude.end() / 1000.0,
+                *SDTM1_ENVELOPE.f107a.start(),
+                *SDTM1_ENVELOPE.f107a.end(),
+            ]
+        );
+        assert!(
+            (200.0..400.0).contains(&out[0]) && (400.0..600.0).contains(&out[1]),
+            "{out:?}"
+        );
+        assert_eq!(
+            unsafe { sl_sdtm1_envelope(core::ptr::null_mut()) },
+            SL_ERR_INVALID_ARGUMENT
+        );
     }
 
     #[test]

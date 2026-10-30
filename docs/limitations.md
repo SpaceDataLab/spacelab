@@ -134,7 +134,10 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   163 sfu) the model is 1.22–1.41 times too dense before the storm begins and 36.2 % MAPE over the
   day. **Inside 225–545 km and F10.7a 65.8–231.9 sfu SDTM-1 is the recommended model; NRLMSISE-00 is
   the baseline everywhere and the model to use outside that envelope** (`docs/verification.md`
-  §10.28). The library has no default atmosphere: every drag path names its model. The calibrated
+  §10.28). The envelope is `sdtm::coefficients::ENVELOPE`, `sdtm1_envelope()` and `sl_sdtm1_envelope`
+  in the bridges, and each bridge has an SDTM-1 drag constructor beside the NRLMSISE-00 one; neither
+  refuses an arc that leaves the envelope (§10.29). The library has no default atmosphere: every drag
+  path names its model. The calibrated
   NRLMSISE-00 of §10.2 (28.9 %) is a correction fitted on the caller's own densities, and the same
   layer applies to SDTM-1.
   One convention is load-bearing and easy to get wrong: `SdtmPoint::altitude` is **geodetic** height

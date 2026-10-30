@@ -103,6 +103,7 @@ using eop = ::sl_eop;
 using eop_sample = ::sl_eop_sample;
 using exponential_atmosphere = ::sl_exponential_atmosphere;
 using nrlmsise_drag = ::sl_nrlmsise_drag;
+using sdtm1_drag = ::sl_sdtm1_drag;
 using precision = ::sl_precision;
 using complex = ::sl_complex;
 using csa_params = ::sl_csa_params;
@@ -1042,6 +1043,17 @@ class ephemeris {
         });
     }
 
+    [[nodiscard]] static result<ephemeris>
+    drag_sdtm1(const state &in, double t1_seconds, const eop &orientation, const sdtm1_drag &model,
+               std::span<const double> ap_history, double cadence_s = 10800.0,
+               double tolerance = 1e-9) {
+        return build([&](::sl_ephemeris **raw) {
+            return ::sl_ephemeris_drag_sdtm1(&in, t1_seconds, &orientation, &model,
+                                             ap_history.data(), ap_history.size(), cadence_s,
+                                             tolerance, raw);
+        });
+    }
+
     [[nodiscard]] static result<ephemeris> geopotential_itrf(const state &in, double t1_seconds,
                                                              std::uint32_t degree,
                                                              const eop &orientation,
@@ -1692,6 +1704,13 @@ try_sdtm1_density_interval(double density, double f107, double f107a, double sto
     interval out{};
     const ::sl_status s = ::sl_sdtm1_density_interval(density, f107, f107a, storm, z, out.data());
     return s == SL_OK ? result<interval>(out) : detail::failure<interval>(s);
+}
+
+[[nodiscard]] inline result<std::array<double, SL_SDTM1_ENVELOPE>> try_sdtm1_envelope() {
+    using envelope = std::array<double, SL_SDTM1_ENVELOPE>;
+    envelope out{};
+    const ::sl_status s = ::sl_sdtm1_envelope(out.data());
+    return s == SL_OK ? result<envelope>(out) : detail::failure<envelope>(s);
 }
 
 [[nodiscard]] inline result<std::vector<state>>
@@ -3158,6 +3177,10 @@ ocean_pole_tide(double xp_rad, double yp_rad, double t_seconds,
 [[nodiscard]] inline std::array<double, SL_SDTM1_INTERVAL>
 sdtm1_density_interval(double density, double f107, double f107a, double storm, double z) {
     return detail::unwrap(try_sdtm1_density_interval(density, f107, f107a, storm, z));
+}
+
+[[nodiscard]] inline std::array<double, SL_SDTM1_ENVELOPE> sdtm1_envelope() {
+    return detail::unwrap(try_sdtm1_envelope());
 }
 
 [[nodiscard]] inline std::array<double, SL_DENSITY_DRIVERS>

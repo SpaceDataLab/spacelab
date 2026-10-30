@@ -473,6 +473,30 @@ pub struct SdtmDrivers {
     pub storm: f64,
 }
 
+/// The region a fitted field's rows span: geodetic altitude and the 81-day mean flux, each from its
+/// lowest row to its highest.
+///
+/// Inside it the field interpolates between measurements. Outside it the field extrapolates where no
+/// row tests it, and `docs/verification.md` §10.28 recommends NRLMSISE-00 there instead. The storm
+/// driver is not bounded here: its fitted range is whatever storms the corpus span brought, and the
+/// largest of those are a known limitation of their own (`docs/limitations.md`). Nor is the daily
+/// flux, whose excess over the mean the shipped field saturates ([`FluxExcess`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Envelope {
+    /// Geodetic altitude, m, as [`SdtmPoint::altitude`].
+    pub altitude: core::ops::RangeInclusive<f64>,
+    /// 81-day trailing mean F10.7, as [`SdtmDrivers::f107a`].
+    pub f107a: core::ops::RangeInclusive<f64>,
+}
+
+impl Envelope {
+    /// Whether a point and its drivers are inside, both ends included. A NaN is outside.
+    #[must_use]
+    pub fn contains(&self, point: &SdtmPoint, drivers: &SdtmDrivers) -> bool {
+        self.altitude.contains(&point.altitude) && self.f107a.contains(&drivers.f107a)
+    }
+}
+
 /// Number of global regressors the exospheric-temperature coefficients are affine in.
 pub const DRIVERS: usize = 16;
 
@@ -1665,6 +1689,38 @@ mod tests {
                 "exponent {bad} accepted"
             );
         }
+    }
+
+    /// Both ends are inside and the next double past either is not, on each axis alone; a NaN on
+    /// either axis is outside, and the axes the envelope does not bound move nothing.
+    #[test]
+    fn the_envelope_is_closed_on_each_axis_and_refuses_a_nan() {
+        let envelope = Envelope {
+            altitude: 225.0e3..=545.0e3,
+            f107a: 65.8..=231.9,
+        };
+        let inside = |altitude: f64, f107a: f64| {
+            envelope.contains(&point(altitude), &SdtmDrivers { f107a, ..drivers() })
+        };
+        assert!(inside(400.0e3, 141.0));
+        for altitude in [225.0e3, 545.0e3] {
+            assert!(inside(altitude, 141.0), "{altitude}");
+        }
+        for f107a in [65.8, 231.9] {
+            assert!(inside(400.0e3, f107a), "{f107a}");
+        }
+        for altitude in [f64::next_down(225.0e3), f64::next_up(545.0e3), f64::NAN] {
+            assert!(!inside(altitude, 141.0), "{altitude}");
+        }
+        for f107a in [f64::next_down(65.8), f64::next_up(231.9), f64::NAN] {
+            assert!(!inside(400.0e3, f107a), "{f107a}");
+        }
+        let storm = SdtmDrivers {
+            f107: 400.0,
+            storm: 300.0,
+            ..drivers()
+        };
+        assert!(envelope.contains(&point(400.0e3), &storm));
     }
 
     /// The constructor refuses what is not a model: a non-positive shape parameter or boundary scale,

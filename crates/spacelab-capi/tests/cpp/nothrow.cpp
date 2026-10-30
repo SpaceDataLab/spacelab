@@ -505,6 +505,10 @@ void the_atmosphere_wrapper_still_answers_without_exceptions() {
     CHECK(static_cast<bool>(band));
     CHECK((*band)[0] < sdtm_400);
     CHECK((*band)[1] > sdtm_400);
+    const spacelab::result<std::array<double, SL_SDTM1_ENVELOPE>> envelope =
+        spacelab::try_sdtm1_envelope();
+    CHECK(static_cast<bool>(envelope));
+    CHECK((*envelope)[0] < 400.0 && 400.0 < (*envelope)[1]);
 
     const double t = 20.0 * 365.25 * 86400.0;
     const spacelab::result<std::array<double, 2>> now = spacelab::try_solid_pole_tide(0.0, 1e-7, t);

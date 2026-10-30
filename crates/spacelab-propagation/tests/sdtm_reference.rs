@@ -172,3 +172,30 @@ fn the_fitted_band_is_the_one_the_verdict_names() {
         );
     }
 }
+
+/// Every row the generator sampled is inside the envelope it wrote, which holds the envelope to the
+/// units of `SdtmPoint` and `SdtmDrivers`: an envelope written in kilometres would hold none of them.
+/// And the envelope is the one the docs quote, rounded, so a refit that moves it fails here until
+/// `docs/limitations.md` and `docs/verification.md` §10.28 move with it.
+#[test]
+fn the_envelope_holds_every_sampled_row_and_is_the_one_the_docs_quote() {
+    let envelope = coefficients::ENVELOPE;
+    for row in &rows() {
+        assert!(
+            envelope.contains(&row.point, &row.drivers),
+            "{:?} {:?} outside {envelope:?}",
+            row.point,
+            row.drivers
+        );
+    }
+    let km = |m: f64| (m / 1000.0).round();
+    let tenth = |x: f64| (x * 10.0).round() / 10.0;
+    assert_eq!(
+        (km(*envelope.altitude.start()), km(*envelope.altitude.end())),
+        (225.0, 545.0)
+    );
+    assert_eq!(
+        (tenth(*envelope.f107a.start()), tenth(*envelope.f107a.end())),
+        (65.8, 231.9)
+    );
+}

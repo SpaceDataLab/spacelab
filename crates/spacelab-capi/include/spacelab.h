@@ -483,7 +483,7 @@ sl_status sl_ephemeris_j2_dense(const sl_state *in, double t1_seconds, double mu
 
 /* A scale-height atmosphere and the ballistic coefficient through it. */
 typedef struct sl_exponential_atmosphere {
-    double ballistic_coefficient; /* m / (Cd A), kg/m^2 */
+    double ballistic_coefficient; /* Cd A / m, m^2/kg */
     double reference_density;     /* at the reference altitude, kg/m^3 */
     double reference_altitude_m;  /* above the surface */
     double scale_height_m;        /* the e-folding height */
@@ -518,7 +518,7 @@ typedef struct sl_eop {
 typedef struct sl_nrlmsise_drag {
     int32_t doy;                  /* day of year at the arc's epoch */
     double seconds_of_day;        /* UT seconds into it */
-    double ballistic_coefficient; /* m / (Cd A), kg/m^2 */
+    double ballistic_coefficient; /* Cd A / m, m^2/kg */
     double f107;                  /* daily 10.7 cm flux, sfu */
     double f107a;                 /* its 81-day mean */
     double ap;                    /* the daily planetary amplitude */
@@ -528,6 +528,33 @@ typedef struct sl_nrlmsise_drag {
 sl_status sl_ephemeris_drag_nrlmsise00(const sl_state *in, double t1_seconds, const sl_eop *eop,
                                        const sl_nrlmsise_drag *drag, double tolerance,
                                        sl_ephemeris **out);
+
+/*
+ * Drag through SDTM-1, the model recommended inside its fitted envelope (`sl_sdtm1_envelope`);
+ * outside it the recommendation is `sl_ephemeris_drag_nrlmsise00`. An arc that leaves the envelope
+ * is integrated, not refused.
+ *
+ * `ap_history` is the `ap` series oldest first, ending at the interval BEFORE the arc's epoch,
+ * readable for `n` doubles, one every `cadence_s` seconds -- 10800 for CelesTrak's 3-hourly `ap`. The
+ * storm state is run over it once, as `sl_sdtm1_storm_response` runs it, and held over the arc with
+ * the two fluxes. Nitric oxide remembers a storm for days: pass fifteen days, 120 intervals. A
+ * history of one value is that value's steady state.
+ *
+ * A field of the record that is not finite, a null or empty history, a value in it that is not
+ * finite, or a cadence that is not finite and positive answers SL_ERR_INVALID_ARGUMENT.
+ */
+typedef struct sl_sdtm1_drag {
+    double doy;                   /* day of year at the arc's epoch */
+    double seconds_of_day;        /* UT seconds into it */
+    double ballistic_coefficient; /* Cd A / m, m^2/kg */
+    double f107;                  /* the previous day's 10.7 cm flux, sfu */
+    double f107a;                 /* its 81-day TRAILING mean */
+    double mu;                    /* m^3/s^2 */
+} sl_sdtm1_drag;
+
+sl_status sl_ephemeris_drag_sdtm1(const sl_state *in, double t1_seconds, const sl_eop *eop,
+                                  const sl_sdtm1_drag *drag, const double *ap_history, size_t n,
+                                  double cadence_s, double tolerance, sl_ephemeris **out);
 
 /*
  * The geopotential evaluated in the true ITRF -- rotated by the interpolated CIO chain rather than
@@ -1380,6 +1407,17 @@ double sl_sdtm1_storm_response(const double *history, size_t n, double cadence_s
  */
 sl_status sl_sdtm1_density_interval(double density, double f107, double f107a, double storm,
                                     double z, double *out);
+
+/* How many doubles `sl_sdtm1_envelope` writes. */
+#define SL_SDTM1_ENVELOPE 4
+
+/*
+ * SDTM-1's fitted envelope, `[lowest_km, highest_km, lowest_f107a, highest_f107a]`,
+ * `SL_SDTM1_ENVELOPE` doubles out: the geodetic altitude and the 81-day trailing mean flux its rows
+ * span, both ends included. Inside it SDTM-1 is the recommended model; outside it no row tests the
+ * field, and NRLMSISE-00 is the recommendation.
+ */
+sl_status sl_sdtm1_envelope(double *out);
 
 /* The field a Brouwer-Lyddane mean-element theory is built over, and the state it starts from. */
 typedef struct sl_brouwer_lyddane_params {

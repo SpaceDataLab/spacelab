@@ -794,6 +794,9 @@ void the_atmosphere_wrapper_answers_what_the_formulas_say() {
         spacelab::sdtm1_density_interval(sdtm_400, 150.0, 150.0, 5.0, 1.6448536269514727);
     CHECK(band[0] < sdtm_400);
     CHECK(band[1] > sdtm_400);
+    const std::array<double, SL_SDTM1_ENVELOPE> envelope = spacelab::sdtm1_envelope();
+    CHECK(envelope[0] < 400.0 && 400.0 < envelope[1]);
+    CHECK(envelope[2] < 150.0 && 150.0 < envelope[3]);
 
     const std::array<double, 5> delaunay{1.1, 2.2, 3.3, 4.4, 5.5};
     const std::array<double, 5> once = spacelab::solid_tide_step2(0.7, delaunay);
@@ -925,6 +928,17 @@ void every_force_model_is_a_factory_that_owns_its_handle() {
                                                .mu = spacelab::mu_earth};
     CHECK(static_cast<bool>(
         spacelab::ephemeris::drag_nrlmsise00(s0, arc, orientation, thermosphere, 1e-10)));
+
+    const spacelab::sdtm1_drag sdtm1{.doy = 172.0,
+                                     .seconds_of_day = 29000.0,
+                                     .ballistic_coefficient = 0.02,
+                                     .f107 = 128.0,
+                                     .f107a = 141.0,
+                                     .mu = spacelab::mu_earth};
+    std::array<double, 120> quiet_ap{};
+    quiet_ap.fill(5.0);
+    CHECK(static_cast<bool>(
+        spacelab::ephemeris::drag_sdtm1(s0, arc, orientation, sdtm1, quiet_ap, 10800.0, 1e-10)));
 
     CHECK(static_cast<bool>(spacelab::ephemeris::geopotential_itrf(s0, arc, 4, orientation)));
     CHECK(static_cast<bool>(spacelab::ephemeris::geopotential_tide(

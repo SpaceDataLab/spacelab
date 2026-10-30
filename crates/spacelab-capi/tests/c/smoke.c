@@ -1024,6 +1024,7 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
     double storm_history[16];
     double quiet_storm = 0.0;
     double interval[SL_SDTM1_INTERVAL];
+    double envelope[SL_SDTM1_ENVELOPE];
     double density_400 = 0.0;
 
     /* The thermosphere thins with height, in kg/m^3 and not the model's own g/cm^3 -- and a NaN
@@ -1092,6 +1093,13 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
     CHECK_NEAR(interval[0] * interval[1], density_400 * density_400, 1e-36);
     CHECK(sl_sdtm1_density_interval(density_400, 150.0, 150.0, 5.0, 1.0, NULL) ==
           SL_ERR_INVALID_ARGUMENT);
+
+    /* The envelope is kilometres and flux units in the order the header names, and it holds the
+     * 400 km and 150 sfu evaluated above; a null out pointer is refused. */
+    CHECK(sl_sdtm1_envelope(envelope) == SL_OK);
+    CHECK(envelope[0] < 400.0 && 400.0 < envelope[1] && envelope[1] < 600.0);
+    CHECK(envelope[2] < 150.0 && 150.0 < envelope[3]);
+    CHECK(sl_sdtm1_envelope(NULL) == SL_ERR_INVALID_ARGUMENT);
 
     /* Step-2 is trigonometric in the sidereal argument, so a whole turn is the identity. */
     CHECK(sl_solid_tide_step2(0.7, delaunay, step2_a) == SL_OK);
@@ -1251,6 +1259,8 @@ static void the_force_models_all_build_the_same_handle(void) {
     sl_eop_sample series[2];
     sl_exponential_atmosphere atmosphere;
     sl_nrlmsise_drag drag;
+    sl_sdtm1_drag sdtm1;
+    double quiet_ap[120];
     sl_ephemeris *e = NULL;
     double speed = sqrt(SL_MU_EARTH / 7000000.0);
     double inclination = 51.6 * PI / 180.0;
@@ -1286,6 +1296,16 @@ static void the_force_models_all_build_the_same_handle(void) {
     drag.ap = 4.0;
     drag.mu = SL_MU_EARTH;
 
+    sdtm1.doy = 172.0;
+    sdtm1.seconds_of_day = 29000.0;
+    sdtm1.ballistic_coefficient = 0.02;
+    sdtm1.f107 = 128.0;
+    sdtm1.f107a = 141.0;
+    sdtm1.mu = SL_MU_EARTH;
+    for (i = 0; i < 120; ++i) {
+        quiet_ap[i] = 5.0;
+    }
+
     for (i = 0; i < 2; ++i) {
         series[i].t_seconds = i == 0 ? -arc : 2.0 * arc;
         series[i].xp_rad = eop.xp_rad;
@@ -1315,6 +1335,23 @@ static void the_force_models_all_build_the_same_handle(void) {
     CHECK(sl_ephemeris_at(e, arc, &at_end) == SL_OK);
     sl_ephemeris_close(e);
     e = NULL;
+
+    /* A 7000 km radius is above SDTM-1's envelope, and the arc is integrated rather than refused.
+     * A null or empty history, or a value in it that is not finite, is refused, and the refusal
+     * leaves the pointer untouched. */
+    CHECK(sl_ephemeris_drag_sdtm1(&s0, arc, &eop, &sdtm1, quiet_ap, 120, 10800.0, 1e-10, &e) ==
+          SL_OK);
+    CHECK(sl_ephemeris_at(e, arc, &at_end) == SL_OK);
+    sl_ephemeris_close(e);
+    e = NULL;
+    CHECK(sl_ephemeris_drag_sdtm1(&s0, arc, &eop, &sdtm1, NULL, 120, 10800.0, 1e-10, &e) ==
+          SL_ERR_INVALID_ARGUMENT);
+    CHECK(sl_ephemeris_drag_sdtm1(&s0, arc, &eop, &sdtm1, quiet_ap, 0, 10800.0, 1e-10, &e) ==
+          SL_ERR_INVALID_ARGUMENT);
+    quiet_ap[3] = NAN;
+    CHECK(sl_ephemeris_drag_sdtm1(&s0, arc, &eop, &sdtm1, quiet_ap, 120, 10800.0, 1e-10, &e) ==
+          SL_ERR_INVALID_ARGUMENT);
+    CHECK(e == NULL);
 
     CHECK(sl_ephemeris_geopotential_itrf(&s0, arc, 4, &eop, 1e-11, &e) == SL_OK);
     CHECK(sl_ephemeris_at(e, arc, &at_end) == SL_OK);

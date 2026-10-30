@@ -8043,7 +8043,10 @@ speeds up as the storm goes on. `N` takes its exact step; `D` the exact step wit
 exact mean over the interval. Maxima proves both steps, the mean, the fixed points, the `H_s → ∞`
 limit and Weimer's Euler-to-continuous `τ = −Δt/ln(1 − Δt/τ_E)` (12 identities at 0), and shows that
 the frozen step's local error starts at `h³`, with coefficient `−H(N₀ − H)/(12 τ_h² τ_NO H_s)`. On a
-four-interval storm it differs from RK4 at 1/2000 h by 0.32 % in `D`. PARI/GP recomputes the
+four-interval storm at the derivation's test constants (`τ_h` 6 h, `τ_NO` 20 h, `H_s` 300) it
+differs from RK4 at 1/2000 h by 0.32 % in `D`. At the shipped constants, which cool far harder, that
+coefficient is positive while `N` climbs, and a day of storm overstates the peak by 0.29 % at `ap`
+80, 1.28 % at 300 and 1.81 % at 400 (the derivation's §9). PARI/GP recomputes the
 reference steps at 60 digits; `cooling_grid` in `tools/fit-sdtm-corpus.py` matches them to 1 ulp.
 One parameter more than the kernel: `τ_h`, `τ_NO`, `H_s`.
 

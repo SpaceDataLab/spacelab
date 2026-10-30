@@ -266,8 +266,10 @@ impl NitricOxideCooling {
     ///
     /// `N` takes its exact step. `D`'s rate depends on `N`, and the exact step of that system is not
     /// elementary, so `D` takes the exact step of the system with `N` frozen at its exact mean over
-    /// the interval: the local error starts at `h³`, and on a realistic storm at a 3 h cadence it is
-    /// 0.32 % of `D` against a fine Runge–Kutta solution. Before the series starts both states are
+    /// the interval: the local error starts at `h³`. At a 3 h cadence and the shipped constants it
+    /// runs high on a storm's rise: against a fine Runge–Kutta solution, a day of storm overstates
+    /// the peak by 0.29 % at `ap` 80, 1.28 % at 300 and 1.81 % at 400
+    /// (`derivations/sdtm_no_cooling.mac` §9). Before the series starts both states are
     /// taken to be in steady state at its first value, which leaves no transient at the start of a
     /// fetched file that began quiet.
     #[must_use]

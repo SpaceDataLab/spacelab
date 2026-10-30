@@ -99,3 +99,37 @@ block([H, tc, g],
         worst : max(worst, abs(coarse[1] - fine[1])/max(1, abs(fine[1]))),
         print("H =", Hk, " frozen D =", coarse[1], " RK4 D =", fine[1])))$
 print("frozen step against RK4, worst relative difference in D:", worst)$
+
+/* 9. The same comparison at the shipped constants (sdtm/coefficients.rs), which cool far harder
+   than 8's: a quiet week at ap 7 from steady state, one day of storm, a quiet week; RK4 at 1000
+   sub-steps per interval, which 500 reproduce to 1e-14. The h^3 coefficient of 6 is positive
+   while N climbs toward H, so the step runs high on the rise and overstates the peak. */
+sh_tc : float(6295024178295275/(3600*10^11))$
+sh_tn : float(11864859040774021/(3600*10^11))$
+sh_g : 1/(sh_tc*float(2477339239626375/10^14))$
+sh_step(Dk, Nk, Hk) := block([nb, l, ds],
+    nb : Hk + (Nk - Hk)*sh_tn/3*(1 - exp(-3/sh_tn)),
+    l : 1/sh_tc + sh_g*nb,
+    ds : (Hk/sh_tc)/l,
+    [ds + (Dk - ds)*exp(-l*3), Hk + (Nk - Hk)*exp(-3/sh_tn)])$
+sh_f(a, b, Hk) := [(Hk - a)/sh_tc - sh_g*b*a, (Hk - b)/sh_tn]$
+sh_rk4(y, Hk, n) := block([dtt : 3.0/n, k1, k2, k3, k4],
+    for i thru n do (
+        k1 : sh_f(y[1], y[2], Hk),
+        k2 : sh_f(y[1] + dtt/2*k1[1], y[2] + dtt/2*k1[2], Hk),
+        k3 : sh_f(y[1] + dtt/2*k2[1], y[2] + dtt/2*k2[2], Hk),
+        k4 : sh_f(y[1] + dtt*k3[1], y[2] + dtt*k3[2], Hk),
+        y : y + dtt/6*(k1 + 2*k2 + 2*k3 + k4)),
+    y)$
+sh_storm(level, n) := block([c, f, cs : [], fs : []],
+    c : [7.0/(1 + 7.0*sh_g*sh_tc), 7.0], f : c,
+    for Hk in append(makelist(7.0, 56), makelist(level, 8), makelist(7.0, 56)) do (
+        c : sh_step(c[1], c[2], Hk), f : sh_rk4(f, Hk, n),
+        cs : cons(c[1], cs), fs : cons(f[1], fs)),
+    [lmax(cs), lmax(fs), lmax(abs(cs - fs))/lmax(fs)])$
+for level in [80.0, 150.0, 300.0, 400.0] do (
+    r : sh_storm(level, 1000),
+    print("shipped constants, ap", level, "for a day: frozen peak D =", r[1],
+          " RK4 peak D =", r[2], " worst |dD|/peak =", r[3]))$
+print("ap 300 at 500 sub-steps less 1000, in that ratio:",
+      sh_storm(300.0, 500)[3] - sh_storm(300.0, 1000)[3])$

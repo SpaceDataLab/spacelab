@@ -32,7 +32,9 @@ state by GFZ's hourly `ap60` instead of the 3-hourly `ap`, and `--solar-wind` mi
 hourly solar-wind coupling of NASA's OMNI (`newell_driver`). `--storms` then scores every archived
 storm on Bruinsma & Laurens (2024)'s protocol (Ф15.H), and per storm phase on Wang et al. (2026)'s
 storms and satellites too (Ф23.C). `--storm-table` writes those per-phase statistics, and
-`--scorecard` pools the tables of runs that held out different families.
+`--scorecard` pools the tables of runs that held out different families. Both print the storms
+`NAMED_STORMS` names apart, and `--storms` scores the `CASES` too: the density's change after a
+storm, post-storm overcooling among them, from a quiet day (Ф23.D).
 
 `--emit` (with `--cooling`, every fold) writes the shipped field: the same form fitted on all eight
 satellites, GRACE-FO C the reference, into `crates/spacelab-propagation/src/sdtm/coefficients.rs`,
@@ -53,11 +55,13 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import itertools
 import pathlib
 import re
 import subprocess
 import sys
 import time
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -95,6 +99,74 @@ WANG_2026 = (
 )
 """Wang et al. (2026)'s storms and satellites: `t0` in 2001-2023, and CHAMP, GRACE, GOCE, GRACE-FO and
 Swarm A. Of the GRACE pair only A: the two fly one orbit 220 km apart, so both would count GRACE twice."""
+NAMED_STORMS = {
+    pd.Timestamp("2003-10-29 07:30"): "Halloween 2003",
+    pd.Timestamp("2024-05-10 19:30"): "May 2024 (Gannon)",
+    pd.Timestamp("2024-10-10 22:30"): "October 2024",
+}
+"""The storms the gate names (Ф23.D), by the `t0` that `g.storm_onsets` finds for them. The protocol
+joins the Halloween storms of 29 and 30 October 2003 into one multiple-peak storm."""
+
+
+@dataclasses.dataclass(frozen=True)
+class Region:
+    """Where a case reads one satellite: north of `latitude` (deg), local solar time inside `lst` (h)."""
+
+    latitude: float
+    lst: tuple[float, float]
+
+
+@dataclasses.dataclass(frozen=True)
+class Case:
+    """A named change of the density after a storm, from a quiet reference span (Ф23.D).
+
+    The reference is the mean over the span's samples; the window's value is the extreme -- the lowest
+    for a depletion, the highest for an enhancement -- of the means over passes through the region,
+    or over 90 min orbit bins where the case has no region. The measured density and both models get
+    the same reduction at the same samples, so each model's change is its prediction of the measured.
+    """
+
+    name: str
+    reference: tuple[pd.Timestamp, pd.Timestamp]
+    window: tuple[pd.Timestamp, pd.Timestamp]
+    effect: Literal["depletion", "enhancement"]
+    regions: dict[str, Region] | None = None
+    """By satellite; `None` reads every satellite in whole orbits."""
+
+
+CASES = (
+    Case(
+        "Halloween 2003 recovery (Lei et al. 2012; Licata et al. 2022)",
+        (pd.Timestamp("2003-10-28 01:30"), pd.Timestamp("2003-10-28 13:30")),
+        (pd.Timestamp("2003-11-02"), pd.Timestamp("2003-11-04")),
+        "depletion",
+    ),
+    Case(
+        "February 2022 Starlink loss (Berger et al. 2023)",
+        (pd.Timestamp("2022-01-25"), pd.Timestamp("2022-02-03")),
+        (pd.Timestamp("2022-02-03"), pd.Timestamp("2022-02-06")),
+        "enhancement",
+    ),
+    Case(
+        "May 2024 overcooling (Ranjan et al. 2024)",
+        (pd.Timestamp("2024-05-09"), pd.Timestamp("2024-05-10")),
+        (pd.Timestamp("2024-05-12"), pd.Timestamp("2024-05-13")),
+        "depletion",
+        {
+            "SA": Region(45.0, (7.0, 9.0)),
+            "SC": Region(45.0, (7.0, 9.0)),
+            "SB": Region(45.0, (8.0, 11.5)),
+        },
+    ),
+)
+"""Ranjan et al.'s reference, window and regions are theirs, and Berger et al.'s reference is theirs:
+the nine days before the launch. Lei et al. do not say which quiet time they compare with, so the
+Halloween reference is the storm's own pre-storm phase, `t0` - 30 h to `t0` - 18 h, and its window the
+recovery days over which Licata et al. find NRLMSIS 2.0 high."""
+PASS_GAP = pd.Timedelta(minutes=30)
+"""A gap that ends one pass through a case's region: the region is crossed once an orbit."""
+PEAK_AP_EDGES = (80.0, 100.0, 150.0, 200.0, 300.0)
+"""Lower edges of `by_storm_size`'s bins in a storm's peak `ap`; the last bin is open."""
 EPOCH_2000 = pd.Timestamp("2000-01-01")
 OUT_RS = g.ROOT / "crates" / "spacelab-propagation" / "src" / "sdtm" / "coefficients.rs"
 OUT_FIXTURE = (
@@ -1400,7 +1472,8 @@ def main() -> None:
         "--storms",
         action="store_true",
         help="then score every storm of the archive on Bruinsma & Laurens (2024)'s protocol, "
-        "each satellite by the fold that held its family out (Ф15.H)",
+        "each satellite by the fold that held its family out (Ф15.H), and the named storms and "
+        "cases (Ф23.D)",
     )
     parser.add_argument(
         "--storm-table",
@@ -1476,12 +1549,13 @@ def main() -> None:
     )
     argument = parser.parse_args()
     if argument.scorecard:
-        scorecards(
-            pd.concat(
-                (pd.read_csv(path, parse_dates=["t0"]) for path in argument.scorecard),
-                ignore_index=True,
-            )
+        table = pd.concat(
+            (pd.read_csv(path, parse_dates=["t0"]) for path in argument.scorecard),
+            ignore_index=True,
         )
+        scorecards(table)
+        named_storms(table)
+        by_storm_size(table)
         return
     if argument.storm_table and not argument.storms:
         sys.exit("--storm-table writes what --storms scores: give both")
@@ -1707,6 +1781,7 @@ def main() -> None:
         emit(model, p, rows, argument, held)
     if argument.storms:
         storms(rows, fitted, argument, sigma)
+        cases(fitted, argument, sigma)
 
 
 def storms(
@@ -1742,6 +1817,44 @@ def storms(
         f"{len(window_rows)} rows at 120 s inside their windows",
         flush=True,
     )
+    held, msis = held_out(window_rows, fitted, argument, sigma)
+    done = np.isfinite(held) & np.isfinite(msis)
+    print(
+        f"{int((~done).sum())} window rows without an NRLMSISE-00 answer; dropped from both"
+    )
+    scored = window_rows[done].reset_index(drop=True)
+    scored.attrs = {
+        **rows.attrs,
+        "ap": ap[first:],
+        "ap_epoch": epoch + pd.Timedelta(days=first // 8),
+    }
+    present = tuple(s for s in SATELLITES if s in set(scored.sat))
+    table = pd.concat(
+        [
+            g.storm_assessment(scored, residual, model, present).assign(model=model)
+            for model, residual in (
+                ("SDTM-1 held-out-mission", held[done]),
+                ("NRLMSISE-00 ap[]", msis[done]),
+            )
+        ],
+        ignore_index=True,
+    )
+    scorecards(table)
+    named_storms(table)
+    by_storm_size(table)
+    if argument.storm_table:
+        table.to_csv(argument.storm_table, index=False)
+        print(f"wrote {len(table)} per-phase rows to {argument.storm_table}")
+
+
+def held_out(
+    window_rows: pd.DataFrame,
+    fitted: dict[str, tuple[tuple[str, ...], np.ndarray]],
+    argument: argparse.Namespace,
+    sigma: float | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """`ln(rho_model/rho_measured)` on rows read apart from the fit: SDTM-1's from the fold that held
+    each row's family out, and NRLMSISE-00's."""
     excess = excess_option(argument)
     mix = mix_option(argument)
     fast = fast_option(argument)
@@ -1768,32 +1881,184 @@ def storms(
         )
         here = np.where(window_rows.family.to_numpy() == fam)[0]
         held[here] = model.score(p, here)[0]
-    msis = nrlmsise00(window_rows) - arg["ln_rho"]
+    return held, nrlmsise00(window_rows) - arg["ln_rho"]
+
+
+def orbit_means(frame: pd.DataFrame, by_pass: bool) -> pd.DataFrame:
+    """Every density column's mean per orbit, indexed by the orbit's mean time.
+
+    An orbit is one pass through a case's region (`PASS_GAP`) or, with `by_pass` false, a 90 min bin
+    from midnight. Partial ones go, against half the median count, as `g.orbit_bins` drops them.
+    """
+    if by_pass:
+        key = (frame.t.diff() > PASS_GAP).cumsum()
+    else:
+        key = (frame.t - frame.t.dt.normalize().min()) // pd.Timedelta(minutes=90)
+    groups = frame.drop(columns="sat").groupby(key.to_numpy())
+    counts = groups.size()
+    return groups.mean()[counts >= counts.median() / 2.0].set_index("t")
+
+
+def cases(
+    fitted: dict[str, tuple[tuple[str, ...], np.ndarray]],
+    argument: argparse.Namespace,
+    sigma: float | None,
+) -> None:
+    """Ф23.D: every named case on each satellite of a held-out family that flew it."""
+    day = pd.Timedelta(days=1)
+    every = load_corpus(
+        1,
+        windows=[span for c in CASES for span in (c.reference, c.window)],
+        ap60=argument.ap60,
+        wind=argument.solar_wind is not None,
+    )
+    window_rows = every[every.family.isin(fitted)].reset_index(drop=True)
+    held, msis = held_out(window_rows, fitted, argument, sigma)
     done = np.isfinite(held) & np.isfinite(msis)
     print(
-        f"{int((~done).sum())} window rows without an NRLMSISE-00 answer; dropped from both"
+        f"\n== named cases (Ф23.D): {len(window_rows)} rows at 120 s, "
+        f"{int((~done).sum())} without an NRLMSISE-00 answer dropped from both models =="
     )
-    scored = window_rows[done].reset_index(drop=True)
-    scored.attrs = {
-        **rows.attrs,
-        "ap": ap[first:],
-        "ap_epoch": epoch + pd.Timedelta(days=first // 8),
-    }
-    present = tuple(s for s in SATELLITES if s in set(scored.sat))
-    table = pd.concat(
-        [
-            g.storm_assessment(scored, residual, model, present).assign(model=model)
-            for model, residual in (
-                ("SDTM-1 held-out-mission", held[done]),
-                ("NRLMSISE-00 ap[]", msis[done]),
+    rows = window_rows[done].reset_index(drop=True)
+    density = pd.DataFrame(
+        {
+            "t": rows.t,
+            "sat": rows.sat,
+            "measured": rows.rho,
+            "SDTM-1": rows.rho * np.exp(held[done]),
+            "NRLMSISE-00": rows.rho * np.exp(msis[done]),
+        }
+    )
+    ap, epoch = every.attrs["ap"], every.attrs["ap_epoch"]
+    interval = pd.Timedelta(seconds=g.AP_CADENCE)
+
+    def drivers(start: pd.Timestamp, end: pd.Timestamp) -> str:
+        """The span's mean F10.7 and F10.7a as the models read them, over every satellite's rows,
+        and the mean of the `ap` intervals it overlaps."""
+        inside = (every.t >= start) & (every.t < end)
+        mean_ap = ap[(start - epoch) // interval : -((epoch - end) // interval)].mean()
+        return f"{every.f107[inside].mean():.1f}/{every.f107a[inside].mean():.1f}/{mean_ap:.0f}"
+
+    for case in CASES:
+        reference = (
+            (rows.t >= case.reference[0]) & (rows.t < case.reference[1])
+        ).to_numpy()
+        window = ((rows.t >= case.window[0]) & (rows.t < case.window[1])).to_numpy()
+        lines = []
+        for sat in SATELLITES:
+            here = rows.sat.to_numpy() == sat
+            if case.regions is not None:
+                if sat not in case.regions:
+                    continue
+                region = case.regions[sat]
+                here &= (rows.latitude > region.latitude).to_numpy()
+                here &= rows.lst.between(*region.lst, inclusive="neither").to_numpy()
+            if not (here & reference).any() or not (here & window).any():
+                continue
+            change, at, orbits = case_change(
+                density, here & reference, here & window, case
             )
-        ],
-        ignore_index=True,
+            lines.append(
+                f"{sat:<4}{rows.altitude[here & reference].mean() / 1e3:6.1f}/"
+                f"{rows.altitude[here & window].mean() / 1e3:5.1f}"
+                f"{int((here & reference).sum()):14d}{orbits:8d}    "
+                + "".join(
+                    f"{100.0 * change[c]:+9.1f}% {at[c]:%m-%d %H:%M}"
+                    for c in change.index
+                )
+            )
+        print(
+            f"\n{case.name}: the {case.effect} from [{case.reference[0]:%Y-%m-%d %H:%M}, "
+            f"{case.reference[1]:%Y-%m-%d %H:%M}) to [{case.window[0]:%Y-%m-%d %H:%M}, "
+            f"{case.window[1]:%Y-%m-%d %H:%M})"
+        )
+        if not lines:
+            print("no satellite of the held-out families flew it")
+            continue
+        print(
+            f"F10.7 / F10.7a the models read / mean ap: reference {drivers(*case.reference)}"
+            + "".join(
+                f", {d:%m-%d} {drivers(d, d + day)}"
+                for d in pd.date_range(*case.window, inclusive="left")
+            )
+        )
+        print(
+            "sat  altitude km   reference n  orbits    "
+            + "".join(f"{name:>22}" for name in density.columns[2:])
+        )
+        print("\n".join(lines))
+
+
+def case_change(
+    density: pd.DataFrame, reference: np.ndarray, window: np.ndarray, case: Case
+) -> tuple[pd.Series, pd.Series, int]:
+    """`Case`'s reduction on one satellite's samples: each density column's change from the mean over
+    `reference` to the extreme orbit mean over `window`, that orbit's time, and the window's orbits."""
+    quiet = density[reference].drop(columns=["t", "sat"]).mean()
+    means = orbit_means(density[window], case.regions is not None)
+    if case.effect == "depletion":
+        return means.min() / quiet - 1.0, means.idxmin(), len(means)
+    return means.max() / quiet - 1.0, means.idxmax(), len(means)
+
+
+def named_storms(table: pd.DataFrame) -> None:
+    """The per-phase records of `NAMED_STORMS`, the models side by side (Ф23.D)."""
+    models = list(table.model.unique())
+    print(
+        "\n== named storms (Ф23.D): n, <O/C>, StD % and R by phase; "
+        + " | ".join(models)
+        + " =="
     )
-    scorecards(table)
-    if argument.storm_table:
-        table.to_csv(argument.storm_table, index=False)
-        print(f"wrote {len(table)} per-phase rows to {argument.storm_table}")
+    for t0, name in NAMED_STORMS.items():
+        here = table[table.t0 == t0]
+        if here.empty:
+            print(f"{name}, t0 {t0:%Y-%m-%d %H:%M}: no comparison in this run")
+            continue
+        print(
+            f"{name}, t0 {t0:%Y-%m-%d %H:%M}: peak ap {here.peak_ap.iloc[0]:.0f}, "
+            f"{'multiple' if here.multiple_peak.iloc[0] else 'single'} peak"
+        )
+        for mission in (s for s in SATELLITES if s in set(here.mission)):
+            for phase, label in g.SCORED_PHASES.items():
+                cells = []
+                for model in models:
+                    r = here[
+                        (here.model == model)
+                        & (here.mission == mission)
+                        & (here.phase == phase)
+                    ]
+                    cells.append(
+                        f"{r.n.iloc[0]:5d}{np.exp(r.log_mean.iloc[0]):7.3f}"
+                        f"{r.scatter.iloc[0]:6.1f}{r.R.iloc[0]:7.3f}"
+                        if len(r)
+                        else f"{'-':>25}"
+                    )
+                print(f"  {mission:<4}{label:<18}" + " | ".join(cells))
+
+
+def by_storm_size(table: pd.DataFrame) -> None:
+    """Each model's per-phase `<O/C>` by the storm's peak `ap`, over every comparison (Ф23.D).
+
+    Overcooling would make the post-storm value fall as the storms grow: more nitric oxide, more
+    cooling after the heating has gone.
+    """
+    bins = list(itertools.pairwise([*PEAK_AP_EDGES, np.inf]))
+    print("\n== per-phase <O/C> by peak ap (Ф23.D), comparisons in brackets ==")
+    print(
+        f"{'':<42}"
+        + "".join(
+            f"{f'{lo:g}-{hi:g}' if np.isfinite(hi) else f'>= {lo:g}':>15}"
+            for lo, hi in bins
+        )
+    )
+    for model in table.model.unique():
+        for phase, name in g.SCORED_PHASES.items():
+            here = table[(table.model == model) & (table.phase == phase)]
+            cells = []
+            for lo, hi in bins:
+                part = here[(here.peak_ap >= lo) & (here.peak_ap < hi)]
+                cells.append(f"{np.exp(part.log_mean.mean()):9.3f} ({len(part):3d})")
+            print(f"{model:<24}{name:<18}" + "".join(cells))
 
 
 def scorecards(table: pd.DataFrame) -> None:

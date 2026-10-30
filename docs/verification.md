@@ -368,6 +368,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 driven by the solar wind | Ф23.B step 8: OMNI's hourly solar wind (CC0, IMF and plasma only) as the storm drive beside `ap60`, held out on §10.30's folds and storms | Newell's coupling mapped onto `ap60`'s distribution, its map checked against a second route on every hour; the drive `(1 − s)·ap60 + s·N` reducing to `--ap60` bit for bit at `s = 0`; `s` fitted and fixed at 1; the fit from two starts, chosen by training cost | `s` 0.478–0.524 in every fold; pooled 20.75 → **20.45 %**, peaks within ±25 % 367 → 375 and ±3 h 449 → 455, ≥ 180 0.71 → **0.94**, mean `|ln M/O|` lower in every bin; the plan's 16 **23.5 %** (JB2008 23.7 %); `Ap ≥ 50` 23.4 → 23.7 %; a second basin at nitric oxide 1 h, 1.2 % higher in cost; an opt-in reconstruction field (D-27, Ф23.I) (§10.31) | tools/fetch-omni.sh, tools/fit-sdtm-corpus.py |
 | SDTM-1 solar-wind field, shipped | Ф23.I (D-27): §10.31's drive as a second, opt-in field for reconstruction and nowcasting; the 3-hourly field stays the default | a 34-knot quantile map a caller can evaluate, refitted on §10.31's folds; Rust against the generator on 64 field rows and 384 synthetic hours (gaps, both ends of the map, due north, a zero field); Newell's coupling against `derivations/sdtm_solar_wind.mac` (8 identities, 30-digit values) and `.gp` at 60 digits; both bridges against the crate's types, the history they quote held to `HISTORY` | pooled **20.45 %** held out, equal to §10.31; peaks within ±3 h 455 → 461; `s` 0.500, `κ` −1.2794, in sample 20.0 %; `HISTORY` 336 hours; σ narrower in every cell, the worst family covering **78.2 %** of the low-flux active cell; `T∞` 2.0e-15, ρ 1.0e-14, the hourly path 7.4e-16, the coupling against the CAS 7.8e-16; `just capi` **12/12**; mutation 61 + 159 + 307 caught, **0** missed after one boundary test (§10.32) | src/sdtm/solar_wind.rs, tests/sdtm_solar_wind_reference.rs, spacelab-python/src/lib.rs, spacelab-capi/src/lib.rs, tools/fit-sdtm-corpus.py |
 | SDTM-1 by storm phase, in Wang et al. (2026)'s form | Ф23.C: §10.14's protocol scored per phase — onset, main and recovery, post-storm — on Wang et al.'s storms and satellites, so the article can set SDTM-1 beside their CCMC assessment | `storm_assessment` per phase against Maxima at 40 digits on a synthetic multiple-peak storm; the scorecard against Maxima on 114 records; both shipped fields' whole-storm counts reproduced | worst **3.8e-16** relative, kept pairs identical; 166 storms, 293 comparisons, held out by family: main and recovery `⟨O/C⟩` **1.022** (solar wind 1.007) against NRLMSISE-00's 1.111, post-storm 1.036 against 0.999; Wang et al.'s MSIS finding (20–30 % and 10 % low) is not reproduced: `⟨O/C⟩` 1.111 and 0.999 (§10.33) | tools/fit-sdtm-corpus.py |
+| SDTM-1 on named storms and post-storm targets | Ф23.D: the storms and the post-storm overcooling the drag literature names (D9-5, D9-7) as rows of the gate, held out by family, beside NRLMSISE-00 at the same samples | `case_change` against Maxima at 40 digits on three satellites' samples; the named storms from §10.33's records, whose four families' tables these runs reproduce byte for byte | worst **1.2e-15**, orbits identical; 12 May 2024 Swarm A, C, B measured −27.4, −25.1, −12.7 % (Ranjan et al. 22, 23, 11.37 %): SDTM-1 −3.6 to −4.1 %, NRLMSISE-00 +13 to +17 %, neither overcools; Halloween 2003 recovery −28 to −33 %: SDTM-1 −3.1 to +0.4 % (its daily excess saturated), NRLMSISE-00 −25 to −26 %; Starlink 2022 (`ap` 56) +99 to +123 %: SDTM-1 +83 to +113 % (84–92 % of it), NRLMSISE-00 +48 to +58 % (about half), the solar-wind field +140 to +188 % (an overshoot); SDTM-1's post-storm `⟨O/C⟩` 1.009–1.083 in every bin of the storm's peak `ap`, so overcooling is an event, not that phase's average (§10.34) | tools/fit-sdtm-corpus.py |
 
 ### Tides
 
@@ -8853,6 +8854,153 @@ is set at that flux, so from `t0` on every pair is more than a factor of ten off
 phases 3 and 4 of that storm on CHAMP and GRACE A (and GRACE B) have no NRLMSISE-00 statistic, so
 the tables count 291 there. SDTM-1 keeps them: its daily flux excess saturates at that flux
 (§10.26).
+
+### 10.34 Named storms and post-storm overcooling (Ф23.D)
+
+§10.22 and §10.33 average over storms; the drag literature names particular ones. The research
+digest asks for the post-storm overcooling of the literature as a target (D9-5) and for the storms
+of February 2022, May 2024 and October 2024 as cases (D9-7). This section makes them rows of the
+gate, each satellite scored by the fit that held its family out (§10.21), beside NRLMSISE-00 on the
+same samples.
+
+**What was read.** Ranjan et al. (2024), arXiv:2411.14071, in full: from TU Delft's Swarm densities
+— the source of this corpus — normalised to 490 km by NRLMSISE-00, above 45° N between 07:00 and
+09:00 local solar time (Swarm B 08:00–11:30), the density on 12 May 2024 was up to 22 % (Swarm A),
+23 % (C) and 11.37 % (B) below the mean of 9 May, while the EUV flux rose. Lei et al. (2012), JGR
+117(A3), doi:10.1029/2011JA016994, the abstract only: after the Halloween storms of 2003 CHAMP's and
+GRACE's densities fell 23–36 % below quiet-time values, and the abstract does not define the quiet
+time (Licata et al. quote the range as 23–26 %). Licata et al. (2022), arXiv:2206.05824, in full:
+NRLMSIS 2.0 is high against CHAMP after those storms, most of all in the recovery of 2–3 November;
+their "up to 40 %" is read off machine-learned models and is not a target here. Berger et al.
+(2023), Space Weather 21, e2022SW003330, the abstract: the density at 210 km was at least 20–30 %
+above the nine days before the Starlink launch of 3 February 2022. Oliveira et al. (2025), Front.
+Astron. Space Sci. 11, 1522139, the abstract: Starlink-1089 re-entered on 12 October 2024, ten days
+before its prediction. Parker & Linares (2024), J. Spacecr. Rockets 61(5), 1412–1416, and Scherf et
+al. (arXiv:2602.18595) give no number to test.
+
+**The form.** `NAMED_STORMS` (`tools/fit-sdtm-corpus.py`) picks three storms out of §10.33's
+per-phase table by the `t0` the protocol finds: Halloween 2003 (2003-10-29 07:30; the protocol joins
+the storms of the 29th and the 30th into one multiple-peak storm), May 2024 (2024-05-10 19:30) and
+October 2024 (2024-10-10 22:30). `CASES` are changes after a storm, each from a quiet reference to a
+window. The reference's value is the mean over its samples. The window's value is the lowest orbit
+mean for a depletion and the highest for an enhancement, an orbit being one pass through the case's
+region or, without a region, a 90 min bin. `case_change` applies that reduction to the measured
+density and to both models at the same samples, so each model's change is its prediction of the
+measured one. Ranjan et al.'s reference, window and regions are theirs, and Berger et al.'s
+reference is theirs; the Starlink window is the three storm days, 3–5 February. Lei et al. do not
+define their quiet time, so the Halloween reference is the storm's own pre-storm phase (`t0` − 30 h
+to `t0` − 18 h, §10.14), and the window is Licata et al.'s 2–3 November. A first run took 27
+October, the last day before the storm with daily `Ap` ≤ 15. Its models read the 298.3 sfu of 26
+October, the month's highest daily flux, so that case would have measured the response to one day's
+flux more than the recovery. `by_storm_size` puts §10.33's per-phase `⟨O/C⟩` in bins of the storm's
+peak `ap`: if overcooling were the rule, the post-storm value would fall below 1 as the storms grow.
+`--storms` prints all three; `--scorecard` prints the named storms and the bins from the pooled
+tables.
+
+**The cross-check.** Maxima recomputed `case_change` at 40 digits from the dumped samples of Swarm A
+and B on 12 May 2024 (by pass) and of CHAMP on 2–3 November 2003 (by 90 min bin). The same orbits
+survive the partial-orbit rule (15, 15 and 32), the extremes fall in the same orbits, and the worst
+relative difference of the changes is **1.2e-15**. The named-storm rows are §10.33's records, and
+the four families' storm tables of these runs are byte-identical to §10.33's: the held-out fits did
+not move.
+
+**The measured targets reproduce.** On 12 May 2024 the corpus has Swarm A 27.4 %, C 25.1 % and B
+12.7 % below 9 May, against Ranjan et al.'s 22, 23 and 11.37 %. The two days' mean altitudes agree
+to 0.4 km, so the normalisation to 490 km cannot make the difference; the reduction can: ours is the
+lowest pass mean, theirs the lowest point of an averaged series whose averaging is not stated. After
+the Halloween storms CHAMP is 27.6 % and GRACE A 32.6 % below the pre-storm phase, inside Lei et
+al.'s 23–36 %.
+
+The cases, each model's change at the measured samples:
+
+| case: reference → window | satellite | measured | SDTM-1, 3-hourly `ap` | SDTM-1, solar wind | NRLMSISE-00 |
+|---|---|---|---|---|---|
+| May 2024 overcooling: 9 May → 12 May, above 45° N, morning | Swarm A | −27.4 % | −3.6 % | −6.6 % | +13.3 % |
+| | Swarm C | −25.1 % | −3.6 % | −6.6 % | +13.4 % |
+| | Swarm B | −12.7 % | −4.1 % | −5.5 % | +17.0 % |
+| Halloween 2003 recovery: pre-storm phase → 2–3 November | CHAMP | −27.6 % | −3.1 % | −9.7 % | −25.0 % |
+| | GRACE A | −32.6 % | +0.4 % | −5.2 % | −26.1 % |
+| | GRACE B | −33.2 % | +0.3 % | −5.4 % | −26.2 % |
+| February 2022 Starlink: 25 January – 2 February → 3–5 February | GRACE-FO C | +122.7 % | +112.9 % | +188.2 % | +57.6 % |
+| | Swarm A | +99.4 % | +83.2 % | +139.5 % | +47.7 % |
+| | Swarm B | +118.6 % | +102.1 % | +175.7 % | +57.6 % |
+| | Swarm C | +99.6 % | +83.2 % | +139.6 % | +47.7 % |
+
+**No model overcools on 12 May 2024.** The density fell a quarter below the quiet day before the
+storm, while the flux the models read barely moved (F10.7 227.1 → 213.7 sfu, F10.7a 162.0 → 164.3).
+SDTM-1 falls 3.6–4.1 %, and 5.5–6.6 % on the solar wind. NRLMSISE-00 rises 13–17 %, the wrong sign:
+its `ap[]` history, the means over 12–57 h before the sample, still holds the main phase. SDTM-1
+cannot do better by construction. Its cooling is proportional to the storm state
+(`derivations/sdtm_no_cooling.mac`), so the state never goes below zero, and the quiet offset
+`T_solar − ε` of Weimer et al.'s cooling, which lets their `ΔT` go negative, is not carried
+(§10.24). In the protocol this day is inside phase 3: the storm's last `ap` ≥ 80 within 48 h of
+`t0`, 33 h after it, extends phase 3 to `t0` + 69 h, so the post-storm phase starts on 13 May at
+16:30.
+
+**After the Halloween storms SDTM-1 misses the recovery, mostly through its flux excess.** CHAMP and
+GRACE fell 28–33 %, NRLMSISE-00 25–26 %, SDTM-1 between −3.1 and +0.4 %, and 5–10 % on the solar
+wind. The daily flux the models read fell from 257.2 to 210.4 and 190.4 sfu as the large active
+regions declined, but both spans are past the saturation of SDTM-1's excess (§10.26). At the folds'
+`D` of 0.262 and 0.266, `D·tanh(d/D)` goes from 0.262–0.266 to 0.256–0.259 while `d` falls from
+1.316 to 0.574 (Maxima), and F10.7a rose 7.4 sfu: so SDTM-1 reads the flux of 3 November as that of
+28 October. NRLMSISE-00 reads the daily flux whole and has no overcooling either; it falls 2.6–7.0
+points less than the measured density.
+
+**The Starlink storm doubled the density at 440–510 km, and SDTM-1 has most of it.** From the nine
+days before the launch to the storm's highest orbit, on 4 February, the measured density rose
+99–123 %, for a storm whose `ap` peaked at 56: below the protocol's 80, so no storm table holds it.
+SDTM-1 rises 83–113 %, 84–92 % of the measured, its highest orbit 3–4.5 h after the measured one;
+NRLMSISE-00 rises 48–58 %, about half. The solar-wind field rises 140–188 %, an overshoot, with its
+highest orbit on 3 February at 12:45, 30 h before the measured one. A relative enhancement grows with
+height, so Berger et al.'s 20–30 % at 210 km is context, not a target.
+
+The named storms, `⟨O/C⟩` per phase over their satellites:
+
+| storm | satellites | phase | SDTM-1, 3-hourly `ap` | SDTM-1, solar wind | NRLMSISE-00 |
+|---|---|---|---|---|---|
+| Halloween 2003, `ap` 400 | CHAMP, GRACE A, B | onset | 0.986–1.010 | 0.992–1.041 | 1.059–1.123 |
+| | | main and recovery | 0.725–0.852 | 0.828–0.908 | 0.633–0.835 |
+| | | post-storm | 0.758–0.818 | 0.817–0.874 | 0.824–0.858 |
+| May 2024, `ap` 400 | GRACE-FO C, Swarm A, B, C | onset | 1.020–1.045 | 1.001–1.027 | 0.971–0.984 |
+| | | main and recovery | 1.066–1.156 | 1.038–1.141 | 0.999–1.026 |
+| | | post-storm | 1.127–1.154 | 1.166–1.200 | 1.021–1.038 |
+| October 2024, `ap` 300 | GRACE-FO C, Swarm A, B, C | onset | 1.108–1.152 | 1.071–1.115 | 1.035–1.049 |
+| | | main and recovery | 1.017–1.041 | 1.025–1.050 | 0.904–0.915 |
+| | | post-storm | 0.879–0.925 | 0.920–0.965 | 0.818–0.862 |
+
+**By named storm, neither model leads throughout.** After Halloween both are too dense: the measured
+density is 18–24 % below SDTM-1 (13–18 % on the solar wind) and 14–18 % below NRLMSISE-00, the
+recovery case above in the protocol's form. In May 2024 NRLMSISE-00 has the level in every phase and
+SDTM-1 the shape: in main and recovery its StD is 25.7–28.5 % (solar wind 21.9–24.5 %) against
+37.2–41.7 %, its R 0.86–0.90 (0.89–0.93) against 0.74–0.77. In October 2024 SDTM-1 has the level in
+main and recovery and after the storm, NRLMSISE-00 in the onset. The solar-wind field is the closest
+of the three in Halloween's main and recovery (0.828–0.908) and in October 2024's post-storm phase
+(0.920–0.965), and the farthest after May 2024 (1.166–1.200).
+
+`⟨O/C⟩` by the storm's peak `ap`, over all 630 comparisons (§10.33's pooled tables):
+
+| phase | model | 80–100 | 100–150 | 150–200 | 200–300 | ≥ 300 |
+|---|---|---|---|---|---|---|
+| main and recovery | SDTM-1, 3-hourly `ap` | 1.010 | 0.996 | 1.017 | 1.024 | 1.107 |
+| | SDTM-1, solar wind | 1.005 | 0.990 | 0.984 | 1.005 | 1.095 |
+| | NRLMSISE-00 | 1.100 | 1.113 | 1.086 | 1.072 | 1.073 |
+| post-storm | SDTM-1, 3-hourly `ap` | 1.037 | 1.027 | 1.012 | 1.009 | 1.083 |
+| | SDTM-1, solar wind | 1.033 | 1.020 | 1.010 | 1.031 | 1.124 |
+| | NRLMSISE-00 | 0.998 | 1.002 | 0.953 | 0.949 | 1.028 |
+| comparisons | | 360 | 138 | 63 (NRLMSISE-00 60) | 36 | 33 |
+
+**Overcooling is an event, not the rule.** If it were the rule, the post-storm `⟨O/C⟩` would fall
+below 1 as the storms grow. SDTM-1's eases from 1.037 to 1.009 up to `ap` 300, never below 1, and is
+1.083 above it (solar wind 1.124), where the model is low, not high: the large-storm under-reach of
+§10.30 carried past the main phase. NRLMSISE-00's dips to 0.95 at 150–300 and is 1.028 above. So the
+overcooling of Halloween 2003 and of 12 May 2024 is not the post-storm phase's average, and a term
+that adds it must not cost that average.
+
+**What follows, not done here.** The quiet offset in the cooling, one parameter fitted per fold that
+leaves the shipped form at zero, would let the storm state go below zero. Its gate is the named
+cases, with the bins above, the pooled error and the storm counts not worse (Ф23.J). The Halloween
+recovery also shows that §10.26's saturation caps a sustained excess, not only a flare's: a week of
+large active regions reads as a single flare day. In that case it is the larger miss.
 
 ---
 

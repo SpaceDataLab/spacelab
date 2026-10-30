@@ -173,6 +173,17 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   23.7 % (§10.31). That field ships opt-in as `sdtm::solar_wind_coefficients` (§10.32), for
   reconstruction and nowcasting. It cannot drive a prediction: the solar wind is measured less than
   an hour before it reaches the Earth.
+- **SDTM-1 does not overcool after a storm, and its saturated flux excess hides a sustained
+  decline.** Its storm state cannot go below zero (§10.24), so after a storm the model returns to
+  its quiet level from above. On 12 May 2024 Swarm A and C measured the density 25–27 % below the
+  quiet day before the storm, above 45° N in the morning (Ranjan et al. 2024's target); SDTM-1 is
+  3.6 % below that day and NRLMSISE-00 13 % above it. After the Halloween storms of 2003 the
+  measured density fell 28–33 % as the daily flux fell from 257 to 190 sfu; SDTM-1 fell at most 3 %,
+  because both spans are past the saturation of its daily excess (§10.26), and NRLMSISE-00 fell
+  25–26 % (`docs/verification.md` §10.34). **In the days after a severe storm the measured density
+  can be up to a third below SDTM-1's.** Over the 630 storm comparisons SDTM-1 is not too dense
+  after a storm on average: its post-storm `⟨O/C⟩` is 1.009–1.083 in every bin of the storm's peak
+  `ap`. So these are events, not a bias of the post-storm phase.
 - **SDTM-1's solar-wind field reconstructs and nowcasts; it does not forecast.**
   `sdtm::solar_wind_coefficients` (§10.32) runs its storm state hourly on `(1 − s)·ap60 + s·N`,
   `s` = 0.500, over 336 hours (fourteen days) of history that end at the hour before the sample. It
@@ -184,10 +195,12 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   drive and does not fail; the Halloween 2003 storm, whose plasma ACE did not measure, is such a
   storm throughout. The map from Newell's coupling onto `ap60`'s scale holds its end values, so a
   coupling above the strongest knot, 120 848, reads as `ap60` 534 however strong the solar wind is.
-  The field moves the storm peaks, not the storm-day rows (§10.31). Its 90 % interval covers 78.2 %
-  of the worst family's rows in the low-flux active cell, and no campaign test runs it (§10.32).
-  Each field's storm driver is its own state: the 3-hourly field's driver is not the solar-wind
-  field's input, and the reverse.
+  The field moves the storm peaks, not the storm-day rows (§10.31). On the Starlink storm of
+  February 2022 (`ap` 56) it overshoots: the density it predicts rises 140–188 %, where the measured
+  density rises 99–123 %, and its highest orbit is 30 h early (§10.34). Its 90 % interval covers
+  78.2 % of the worst family's rows in the low-flux active cell, and no campaign test runs it
+  (§10.32). Each field's storm driver is its own state: the 3-hourly field's driver is not the
+  solar-wind field's input, and the reverse.
 - **In the drag path an empirical atmosphere contributes a radial density gradient and no horizontal one.**
   `Drag`'s state-transition matrix needs `∂ρ/∂r`, and four of the five atmospheres exist only in `f64`,
   so each wrapper lifts the value through a local exponential `ρ = ρ₀·exp(−(|r| − |r₀|)/H)`. Two things

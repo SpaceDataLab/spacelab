@@ -369,6 +369,21 @@ impl<const P: usize> BoxWing<P> {
         sun_dir_body: &[S; 3],
         conditions: &crate::drag_coefficient::FreeMolecularConditions,
     ) -> [S; 3] {
+        self.gas_surface_drag_acceleration(rho, v_rel_body, sun_dir_body, &(*conditions).into())
+    }
+
+    /// [`Self::sentman_drag_acceleration`] with any gas–surface model: each windward facet's
+    /// coefficients are `conditions.surface`'s ([`crate::drag_coefficient::SurfaceModel`]), a
+    /// clean or partly adsorbate-covered surface re-emitting diffusely or by Lord's kernels.
+    /// [`Self::sentman_drag_acceleration`] is this at a clean diffuse surface, bit for bit.
+    #[must_use]
+    pub fn gas_surface_drag_acceleration<S: Scalar>(
+        &self,
+        rho: S,
+        v_rel_body: &[S; 3],
+        sun_dir_body: &[S; 3],
+        conditions: &crate::drag_coefficient::GasSurfaceConditions,
+    ) -> [S; 3] {
         let vnorm2 = dot3(v_rel_body, v_rel_body);
         let inv_vnorm = vnorm2.sqrt().recip();
         let vdir = [
@@ -393,10 +408,9 @@ impl<const P: usize> BoxWing<P> {
             }
             if d.value() < 0.0 {
                 let gamma = -d.value(); // cos incidence ∈ (0, 1]
-                let c = crate::drag_coefficient::sentman_panel(
+                let c = conditions.surface.panel(
                     speed_ratio,
                     gamma,
-                    conditions.accommodation,
                     conditions.wall_temperature,
                     conditions.atmosphere_temperature,
                 );
@@ -1300,6 +1314,56 @@ mod tests {
         assert!(
             a[1].abs() < 1e-18 && a[2].abs() < 1e-18,
             "transverse leak {a:?}"
+        );
+    }
+
+    #[test]
+    fn gas_surface_box_drag_uses_the_surface_model_on_each_windward_facet() {
+        use crate::drag_coefficient::{
+            GasSurfaceConditions, Reemission, SurfaceModel, speed_ratio,
+        };
+        let bw = BoxWing::<6>::box6(1.0, 1.0, 1.0, 100.0, 2.2, 0.0, 0.2, 0.3);
+        let v_rel = [-7600.0, 0.0, 0.0];
+        let surface = SurfaceModel {
+            clean: Reemission::Cll {
+                normal_accommodation: 0.5,
+                tangential_accommodation: 0.9,
+            },
+            adsorbate: Reemission::Diffuse { accommodation: 1.0 },
+            coverage: 0.4,
+        };
+        let cond = GasSurfaceConditions {
+            atmosphere_temperature: 1000.0,
+            mean_molar_mass: 0.016,
+            wall_temperature: 300.0,
+            surface,
+        };
+        let rho = 1.0e-12;
+        let a = bw.gas_surface_drag_acceleration(rho, &v_rel, &[0.0, 0.0, 1.0], &cond);
+        let cd = surface
+            .panel(speed_ratio(7600.0, 1000.0, 0.016), 1.0, 300.0, 1000.0)
+            .drag;
+        // Between the diffuse 2.15 and the CLL clean surface's 3.45 at this speed ratio.
+        assert!((2.5..3.0).contains(&cd), "cd {cd}");
+        let coeff = rho * 7600.0 * 7600.0 / (2.0 * 100.0);
+        assert!(
+            (a[0] + coeff * cd).abs() < 1e-18,
+            "a_x {} vs {}",
+            a[0],
+            -coeff * cd
+        );
+        assert!(
+            a[1].abs() < 1e-18 && a[2].abs() < 1e-18,
+            "transverse leak {a:?}"
+        );
+
+        // A clean diffuse surface is Sentman's model, bit for bit.
+        let sentman = sentman_conditions();
+        let v_oblique = [-5200.0, 3100.0, -4400.0];
+        let sun = [0.35, 0.62, -0.70];
+        assert_eq!(
+            bw.gas_surface_drag_acceleration(rho, &v_oblique, &sun, &sentman.into()),
+            bw.sentman_drag_acceleration(rho, &v_oblique, &sun, &sentman)
         );
     }
 

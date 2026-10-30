@@ -120,7 +120,8 @@ pub use density_rom::jacobi_symmetric;
 pub use dop853::Dop853;
 pub use dopri5::Dopri5;
 pub use drag_coefficient::{
-    FreeMolecularConditions, SentmanCoefficients, sentman_panel, speed_ratio,
+    FreeMolecularConditions, GasSurfaceConditions, Reemission, SentmanCoefficients, SurfaceModel,
+    cll_panel, langmuir_coverage, sentman_panel, speed_ratio,
 };
 #[cfg(feature = "std")]
 pub use dsst::{

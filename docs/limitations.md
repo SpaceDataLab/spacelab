@@ -201,6 +201,15 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   78.2 % of the worst family's rows in the low-flux active cell, and no campaign test runs it
   (§10.32). Each field's storm driver is its own state: the 3-hourly field's driver is not the
   solar-wind field's input, and the reverse.
+- **The gas–surface models beyond Sentman carry no fitted constants, and the bridges expose Sentman
+  only.** `cll_panel`, `SurfaceModel` and `langmuir_coverage` (`docs/verification.md` §10.35) take
+  the accommodations and the Langmuir constant from the caller. The published Langmuir constants for
+  diffuse re-emission, 1.44e6 and 3e6 Pa⁻¹, differ by a factor of two, and both reached the
+  repository through citing papers only. A drag fit consistent with TU Delft's densities, and so
+  with SDTM-1's corpus, uses diffuse re-emission at an accommodation of 0.85; any other surface
+  model changes the inferred density by the ratio of the drag coefficients. The coefficients use one
+  mean molar mass, not a speed ratio per species. The Python and C bridges expose `sentman_panel`
+  only.
 - **In the drag path an empirical atmosphere contributes a radial density gradient and no horizontal one.**
   `Drag`'s state-transition matrix needs `∂ρ/∂r`, and four of the five atmospheres exist only in `f64`,
   so each wrapper lifts the value through a local exponential `ρ = ρ₀·exp(−(|r| − |r₀|)/H)`. Two things

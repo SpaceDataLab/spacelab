@@ -300,6 +300,7 @@ convergence order + Hamiltonian conservation + cross-checks against independentl
 | **Geocentric propagation vs a fourth propagator** | XGM2019e→70 in the true ITRF, Sun + Moon as point masses; drag, SRP, albedo, tides and relativity off on both sides | **NEPTUNE**, same initial state, *the same coefficients* (`make_gravity_overlay.py` writes the embedded table in NEPTUNE's own layout) and *its own EOP row* | \|Δr\| = 0.05 m @ 3 h, 0.25 m @ 12 h, 0.47 m @ 24 h, linear and monotone; the two fields alone differ by 18.4 m over the same day | spacelab/tests/neptune\_sentinel1b.rs |
 | **ITRF → GCRF, one epoch** | IAU 2006/2000A CIO chain on Sentinel-1B's POE state | **NEPTUNE**'s own reduction (libslam `slam_reduction.f90`) on **its own** EOP row for MJD 58659 | \|Δr\| = 1.3e-5 m, \|Δv\| = 1.6e-7 m/s — 0.4 µas of pole | spacelab-frames/tests/neptune\_frames.rs |
 | Sentman drag coefficient | Sentman 1961; Doornbos 2011 | ADBSat `coeff_sentman.m` + Doornbos 2011 benchmark table | table < 1e-4; s vs 7.4549 < 1e-3 | src/drag_coefficient.rs |
+| CLL panel, adsorbate-covered surface (Ф23.E) | Lord 1991's kernels; Pilinski et al. 2013's coverage weighting and Langmuir isotherm | `derivations/cll_panel.mac` (the kernels' moments, the mean reflected normal speed as ₁F₁, the limits at `α_n` = 1, 0 and `s → ∞`); `derivations/cll_panel.gp`, ten panels at 40 digits | ten rows within **2.5e-14**; `α_n` = 1 is Sentman's within 1e-13; the forms of ₁F₁ agree to 1.5e-39 (asymptotic 7.8e-33); mutation 334 → 0 missed after a NaN fix, a work bound and five justified equivalents; no fitted constant ships (§10.35) | src/drag_coefficient.rs |
 
 **Orekit's Knocke model weighs each element by the wrong cosine** (found 2026-10-24). Lambert's law
 weighs an element by the cosine between its normal and the ray it emits along. Orekit 13.1.7's
@@ -9001,6 +9002,98 @@ leaves the shipped form at zero, would let the storm state go below zero. Its ga
 cases, with the bins above, the pooled error and the storm counts not worse (Ф23.J). The Halloween
 recovery also shows that §10.26's saturation caps a sustained excess, not only a flare's: a week of
 large active regions reads as a single flare day. In that case it is the larger miss.
+
+### 10.35 Gas–surface interaction beyond Sentman (Ф23.E)
+
+Sentman's model (`derivations/sentman_panel.mac`) re-emits every molecule diffusely; its one
+accommodation coefficient sets the speed of the re-emitted gas, not its direction. The research
+digest asks for the models that the drag literature uses beside it (D9-8): diffuse re-emission on a
+surface partly covered by adsorbed atomic oxygen, with the coverage from a Langmuir isotherm, and
+the Cercignani–Lampis–Lord (CLL) kernels, whose re-emission runs from diffuse to specular.
+
+**What was read.** Livadiotti et al. (2020), arXiv:2010.00489, in full: the CL kernel and Lord's
+normal and tangential kernels with their normalisation and reciprocity (their Eqs. 28–34), and the
+statement that Walker et al. (2014)'s CLL "closed form" puts fitted `σ_n`–`α_n` relations, four
+parameters per gas and shape, into Schaaf and Chambre's equations. Antona et al. (2024),
+arXiv:2411.10874, in full: the coverage weighting `C_D = (1 − Θ)·C_D,s + Θ·C_D,ads` of Pilinski et
+al. (2013), the Langmuir isotherm `Θ = K·P_O/(1 + K·P_O)`, and `K` = 3e6 Pa⁻¹ for DRIA and 5e6 for
+CLL from Walker et al. (2014b). Paul et al. (2022), arXiv:2210.08364, in full: `K` = 1.44e6 for DRIA
+from Walker et al. (2014c), and TU Delft's DSMC drag coefficients generated at an energy
+accommodation of 0.85. Not readable: Walker et al. (2014) and Pilinski et al. (2010, 2013) in AIAA's
+journals; Bernstein & Pilinski (2022), whose Wiley copy answered 403; Sheridan et al. (2022) and its
+thesis, behind a browser challenge that was not bypassed.
+
+**The form.** `cll_panel` keeps Sentman's incident pressure and shear and re-emits by Lord's
+kernels. The tangential kernel returns `1 − σ_t` of each molecule's tangential velocity on average,
+so the shear is `σ_t` times the incident shear, in closed form. The normal kernel's mean reflected
+speed is `m(x) = (√(π α_n)/2)·₁F₁(−½; 1; −(1 − α_n)x²/α_n)` for a molecule that arrives at `x` wall
+thermal speeds, also in closed form. What remains is one integral of `m` over the incident
+Maxwellian, `c_re = 2w ∫₀^∞ t (s/√π) e^{−s²(t−g)²} m(t/w) dt` with `w = √(T_w/T_∞)/s`. The code
+takes it by adaptive Gauss–Kronrod G7–K15 to a relative 1e-13, on the 40-digit nodes and weights
+of `derivations/kronrod_g7k15.mac`, and evaluates `₁F₁` by its positive series `e^{−q}·₁F₁(3/2; 1;
+q)` up to `q` = 60 and by its asymptotic series above. This is exact mathematics where Walker et al.
+fitted: the only approximation is the quadrature. `SurfaceModel` weights a clean and an adsorbate
+re-emission, each diffuse or CLL, by the coverage, and `langmuir_coverage` gives the coverage from
+`P_O = n_O·k_B·T`. `BoxWing::gas_surface_drag_acceleration` takes any `SurfaceModel`;
+`sentman_drag_acceleration` is now that method at a clean diffuse surface, bit for bit.
+
+**The gate.** `derivations/cll_panel.mac` derives, in Maxima:
+
+1. each term of Lord's normal kernel integrates to `Q^k/k!`, so the kernel integrates to 1;
+2. the mean's terms are `√α_n·Γ(k + 3/2)·Q^k/(k!)²`;
+3. so the mean is `(√(π α_n)/2)·e^{−Q}·₁F₁(3/2; 1; Q)`, by the term ratio;
+4. Kummer's form, the Bessel form `e^{−q/2}((1 + q)I₀(q/2) + q·I₁(q/2))` and the positive series
+   agree at 40 digits, worst **1.5e-39**, and the asymptotic branch agrees above 60, worst
+   **7.8e-33**;
+5. the tangential kernel integrates to 1 with mean `(1 − σ_t)ξ`;
+6. at `α_n` = 1 the re-emission is Sentman's diffuse term at `α` = 1;
+7. the leading asymptotic term of `m(x)` is `√(1 − α_n)·x`, so `c_p → 2g²(1 + √(1 − α_n))` as
+   `s → ∞`, and the series' second term is `1/(4q)`.
+
+`derivations/cll_panel.gp` integrates ten panels at 40 digits with PARI's own quadrature and the
+Bessel form of `m`. It covers normal, oblique, grazing, edge-on and leeward incidence, `α_n` from
+1e-4 to 0.999, `σ_t` from 0 to 1, and speed ratios 3 to 12. The shipped code matches every
+coefficient of every row within **2.5e-14** relative. At `α_n` = 1 it matches `sentman_panel` within
+1e-13 at five incidences, including leeward. At `α_n` = `σ_t` = 0 it reflects specularly: twice
+the incident pressure, no shear, and `c_p` 4 at normal incidence. At `s` = 2000 it is within 1e-12
+of the 40-digit value, 3.4142140157, and within 1e-6 of the limit `2(1 + √½)`. `h(q)` matches the
+Bessel form within 4 ulp at nine points from 1e-3 to 1e6, on both sides of the branch seam.
+
+**Mutation.** `seal-gas-surface` mutated the new code and Sentman's: 334 mutants, 257 caught, 59
+timed out, 9 unviable and 9 missed. The timeouts found a defect: a NaN input never met the
+asymptotic series' stopping test, and an adaptive quadrature that never met its tolerance halved
+down to 2³⁰ intervals. `kummer_h` now returns NaN for NaN, `kronrod` accepts a non-finite estimate
+and stops at 2²⁰ intervals, and a test holds the work on `1/√x` under 2000 evaluations from either
+end (1264 measured). Of the 9 missed, two are the box-wing's edge-on ties the ledger already
+justifies, and five move a stopping bound by a factor that no value can see: they are justified in
+`.cargo/mutants.toml`. The other two were the recursion's depth counter, which the `1/√x` test now
+catches. Resealed after the fix: 169 mutants with 3 missed, then `kronrod`'s 56 with 1 missed, then
+line 307's 6 with **0** missed.
+
+**What the models change.** At `s` = 7.4549, `T_w` = 300 K and `T_∞` = 1000 K, a panel normal to
+the flow has `C_d` 2.148 under Sentman at full accommodation. Under CLL it has 3.447 at `α_n` = 0.5
+and 4.025 near specular (`α_n` = 1e-4, `σ_t` = 0, at `s` = 9 and `T_∞` = 900 K). The drag coefficient, and with it every density
+inferred from drag, moves by more than half between these surfaces. That is the scale of the
+gas–surface uncertainty in densities derived from accelerometers.
+
+**Consistency with the TU Delft densities.** SDTM-1 is fitted to TU Delft's densities (§10.20).
+Their drag coefficients are DSMC runs at an energy accommodation of 0.85, re-emitted diffusely
+(Paul et al. 2022, on data from TU Delft). TU Delft's geometry and aerodynamic tables themselves are
+CC BY-NC-SA, and spacelab does not admit them. A caller who wants densities consistent with that
+corpus models the surface as `Reemission::Diffuse { accommodation: 0.85 }`. A caller who models it
+as CLL or adsorbate-covered changes the drag coefficient, and so the density a drag fit would
+infer, by the ratio of the two coefficients. This is a modelling requirement, not a gate: no
+TU Delft coefficient enters any test.
+
+**No fitted constant ships.** The Langmuir constant is a fit to satellite drag. The two published
+values for DRIA, 1.44e6 and 3e6 Pa⁻¹, differ by a factor of two, and both reach this repository
+through citing papers only. So `langmuir_coverage` takes `K` from the caller and has no default.
+The same holds for `α_n` and `σ_t`. At `K` = 1.44e6 Pa⁻¹, an oxygen density of 1e14 m⁻³ and
+1000 K, the coverage is 0.665, so the adsorbate dominates the drag coefficient there.
+
+**Not done here.** The bridges do not expose `cll_panel`, `SurfaceModel` or
+`langmuir_coverage` yet. The coefficients use one mean molar mass, not one speed ratio per species.
+No `K` is fitted to the corpus.
 
 ---
 

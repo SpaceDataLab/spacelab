@@ -894,6 +894,28 @@ exclude_re = [
     "crates/spacelab-propagation/src/geopotential\\.rs:410:21: replace \\+ with \\* in GeoPotential::acceleration_simd",
     "crates/spacelab-propagation/src/geopotential\\.rs:410:30: replace \\+ with \\* in GeoPotential::acceleration_simd",
 
+    # --- crates/spacelab-propagation/src/drag_coefficient.rs ---
+    # `kummer_h`'s two stopping tests and `kronrod`'s acceptance test, each moved by a factor no
+    # value can see. Measured, seal-gas-surface 2026-10-31: the shipped rows hold at 4 ulp (h) and
+    # 2.5e-14 (the panel) under each of these mutants.
+    #
+    # The positive series stops once `k > q` and its term is below `ε/100` of the sum. The tie
+    # `>` → `>=` differs only when the term equals that bound exactly; `ε·1e-2` → `ε/1e-2` stops
+    # it at `100ε` instead, and past `k > q` the ratio of successive terms is below `q/k < 1` and
+    # falls, so the remainder after a term of `100ε` is below one ulp of a sum ≥ 1.
+    "crates/spacelab-propagation/src/drag_coefficient\\.rs:261:30: replace > with >= in kummer_h",
+    "crates/spacelab-propagation/src/drag_coefficient\\.rs:261:54: replace \\* with / in kummer_h",
+    # The asymptotic series breaks at its smallest term or below `ε/100` of the sum. `||` → `&&`
+    # keeps adding terms below that bound until the smallest one, each under `ε/100` of a sum
+    # ≥ 1 (q ≥ 60): no ulp moves. `ε·1e-2` → `ε/1e-2` stops at `100ε`, where the next term is
+    # already below `1/(4q)` of it: under 1e-16.
+    "crates/spacelab-propagation/src/drag_coefficient\\.rs:271:41: replace \\|\\| with && in kummer_h",
+    "crates/spacelab-propagation/src/drag_coefficient\\.rs:271:80: replace \\* with / in kummer_h",
+    # `kronrod` accepts a panel when K15 and G7 agree to `1e-13` relative. `1e-13·|K15|` →
+    # `1e-13/|K15|` loosens that for `|K15| < 1`, but the agreement bounds G7's error, not K15's:
+    # on these smooth integrands K15 is exact to rounding long before G7 meets either bound.
+    "crates/spacelab-propagation/src/drag_coefficient\\.rs:304:36: replace \\* with / in kronrod",
+
     # --- crates/spacelab-propagation/src/spacecraft.rs ---
 
     # The `d == 0` ties in the two facet loops that use the fixed per-facet `C_d`: the double-sided
@@ -911,8 +933,8 @@ exclude_re = [
     # edge-on facet there does move the answer, and that mutant is caught.
     "crates/spacelab-propagation/src/spacecraft\\.rs:331:48: replace > with >= in BoxWing<P>::for_each_drag_facet",
     "crates/spacelab-propagation/src/spacecraft\\.rs:335:26: replace < with <= in BoxWing<P>::for_each_drag_facet",
-    "crates/spacelab-propagation/src/spacecraft\\.rs:471:48: replace > with >= in BoxWing<P>::for_each_srp_facet",
-    "crates/spacelab-propagation/src/spacecraft\\.rs:475:26: replace < with <= in BoxWing<P>::for_each_srp_facet",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:485:48: replace > with >= in BoxWing<P>::for_each_srp_facet",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:489:26: replace < with <= in BoxWing<P>::for_each_srp_facet",
 
     # `if f.value() < HIPPARCHUS_EPSILON` in the Sun-pointing panel normal, tied to `<=`. Provably
     # unreachable, not measured: `f = 1 − d²` for a unit Sun direction and a unit axis, so `d ∈
@@ -922,26 +944,26 @@ exclude_re = [
     # agree everywhere. `< → ==` is caught — it turns the fallback off entirely.
     "spacecraft\\.rs:171:30: replace < with <= in Facet::unit_normal",
 
-    # The double-sided flip `d > 0` in `sentman_drag_acceleration`, tied to `>=`. Unlike the windward
-    # gate on the line below it — which *is* caught, because Sentman's `c_p` is nonzero at grazing
-    # incidence — the flip is invisible at the tie. At `d == 0` the mutant negates the normal and
+    # The double-sided flip `d > 0` in `gas_surface_drag_acceleration`, tied to `>=`. Unlike the
+    # windward gate on the line below it — which *is* caught, because `c_p` is nonzero at grazing
+    # incidence under every surface model — the flip is invisible at the tie. At `d == 0` the mutant negates the normal and
     # sets `d = −0.0`; the gate `d.value() < 0.0` is false for `−0.0` exactly as it was for `+0.0`,
     # so the facet is skipped either way and neither `normal` nor `d` is read again.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:390:48: replace > with >= in BoxWing<P>::sentman_drag_acceleration",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:405:48: replace > with >= in BoxWing<P>::gas_surface_drag_acceleration",
 
     # `if sin_delta > 1.0e-9` — the shear gate — tied to `>=`. Provably unreachable, the same
     # reachable-set argument as `Facet::unit_normal` above. `sin_delta = sqrt(max(1 − γ², 0))` with
     # `γ = −d` for a unit normal and a unit flow direction, so `1 − γ²` is either exactly `0` or at
     # least `2⁻⁵²`, and `sqrt` is exact on both: `sin_delta ∈ {0} ∪ [2⁻²⁶, 1]`. The threshold `1e-9`
     # sits strictly between `0` and `2⁻²⁶ = 1.49e-8`, so no input lands on the boundary.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:414:30: replace > with >= in BoxWing<P>::sentman_drag_acceleration",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:428:30: replace > with >= in BoxWing<P>::gas_surface_drag_acceleration",
 
     # `along < 0.0` — the anti-sunward half of the cylindrical shadow — tied to `<=`. Reachable only
     # for a satellite *inside* the Earth: the two disagree at `along == 0.0`, and there the second
     # half of the conjunction reads `perp² = ‖sat‖² − 0 < R²`, i.e. `‖sat‖ < R`. The companion
     # `perp² < R²` tie is *not* on this list — it is reachable, and
     # `a_satellite_exactly_on_the_shadow_cylinder_is_lit` constructs it exactly.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:691:27: replace < with <= in <impl Acceleration for PanelSrp<M, R, E>>::acceleration",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:705:27: replace < with <= in <impl Acceleration for PanelSrp<M, R, E>>::acceleration",
 
     # --- crates/spacelab-propagation/src/earth_radiation.rs ---
 

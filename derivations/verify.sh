@@ -495,6 +495,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima sentman_panel.mac" "expected 9 identities and limits to hold, found $holds"
     fi
 
+    out=$(macf cll_panel.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9][a-z]?\) holds:')
+    if [ "$holds" -eq 9 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima cll_panel.mac: Lord's kernels integrate to 1, the mean reflected normal speed is (sqrt(pi a)/2) 1F1(-1/2;1;-q), a = 1 is Sentman's full accommodation and the hyperthermal limit is 2(1 + sqrt(1 - a))"
+    else
+        bad "maxima cll_panel.mac" "expected 9 identities and limits to hold, found $holds"
+    fi
+
     out=$(macf knocke_lambert.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 8 ] && printf '%s' "$out" | grep -q '^DONE'; then
@@ -1025,7 +1033,7 @@ if have gp; then
         conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \
         hull_delaunay spherical_triangle igrf_synthesis geomagnetic_dipole attitude_control gmst82 \
         cio_rotation gnss_combinations gps_broadcast_orbit glonass_pz90_motion slr_two_way_range \
-        kronrod_g7k15 nequick_fourier gauss2_richardson swath_sphere observation_geometry \
+        kronrod_g7k15 cll_panel nequick_fourier gauss2_richardson swath_sphere observation_geometry \
         stereo_disparity pinhole_collinearity rpc_bias_affine ortho_bilinear_dem \
         ray_ellipsoid_geolocation gnomonic_tan_plate quad_hash source_moments \
         relativistic_aberration detection_box_geometry harris_structure_tensor edge_mtf \

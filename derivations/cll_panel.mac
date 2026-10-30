@@ -1,0 +1,109 @@
+/* The Cercignani-Lampis-Lord (CLL) flat panel, derived from Lord's kernels rather than fitted.
+
+   `spacelab-propagation::drag_coefficient::cll_panel` ships, with the incident terms of
+   `derivations/sentman_panel.mac` (g = cos(delta), l = sin(delta), z = 1 + erf(s g),
+   e = exp(-s^2 g^2)),
+
+       c_t  = sigma_t (l g z + l e/(s sqrt(pi)))
+       c_p  = (g^2 + 1/(2 s^2)) z + g e/(sqrt(pi) s) + c_re
+       c_re = 2 w Int_0^inf t (s/sqrt(pi)) exp(-s^2 (t - g)^2) m(t/w) dt,  w = sqrt(T_w/T_inf)/s
+       m(x) = (sqrt(pi a)/2) h((1 - a) x^2/a),  h(q) = exp(-q) 1F1(3/2; 1; q) = 1F1(-1/2; 1; -q)
+
+   with a = alpha_n, the normal energy accommodation, and sigma_t the tangential momentum
+   accommodation. Lord (1991) writes the kernels in velocities over the wall's most probable speed
+   c_w = sqrt(2 k T_w/m); w = c_w/V. m(x) is the mean reflected normal speed of a molecule that
+   arrives at normal speed x. Walker, Mehta & Koller (2014) fit sigma_n-alpha_n relations into Schaaf
+   and Chambre's closed forms instead; this file derives the exact moments, and the remaining
+   one-dimensional integral is done by quadrature, checked at 60 digits in `cll_panel.gp`.         */
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+fpprec : 40$
+assume(a > 0, a < 1, xi > 0)$
+declare(k, integer)$
+assume(k >= 0)$
+
+/* ---- (1) Lord's normal kernel, term by term ---------------------------------------------------
+   K(xi -> x) = (2 x/a) I0(2 r x xi/a) exp(-(x^2 + r^2 xi^2)/a), r = sqrt(1 - a), and
+   I0(y) = sum (y/2)^(2k)/(k!)^2. Each term's integral over x in (0, inf) is a Gaussian moment.     */
+r : sqrt(1 - a)$
+term(j) := (2/a)*(r*xi/a)^(2*k)/(k!)^2*integrate(x^(2*k + 1 + j)*exp(-x^2/a), x, 0, inf)$
+Q : r^2*xi^2/a$
+/* The normalisation's k-th term is Q^k/k!, so the sum is exp(Q) and exp(-Q) cancels it.            */
+must(is(ratsimp(makegamma(term(0)) - Q^k/gamma(k + 1)) = 0),
+     "(1) holds: the normalisation's k-th term is Q^k/k!, so the kernel integrates to 1")$
+
+/* The mean's k-th term is sqrt(a) Gamma(k + 3/2) Q^k/(k!)^2: the k-th term of
+   sqrt(a) Gamma(3/2) 1F1(3/2; 1; Q), whose term ratio is (k + 3/2) Q/(k + 1)^2 and first term 1.   */
+mean_term : makegamma(term(1))$
+must(is(ratsimp(mean_term - sqrt(a)*gamma(k + 3/2)*Q^k/gamma(k + 1)^2) = 0),
+     "(2) holds: the mean's k-th term is sqrt(a) Gamma(k + 3/2) Q^k/(k!)^2")$
+ratio : ratsimp(makefact(subst(k = k + 1, gamma(k + 3/2)/gamma(k + 1)^2)
+                          /(gamma(k + 3/2)/gamma(k + 1)^2)))$
+must(is(ratsimp(minfactorial(makefact(makegamma(ratio))) - (k + 3/2)/(k + 1)^2) = 0)
+     and is(subst(k = 0, gamma(k + 3/2)/gamma(k + 1)^2) = sqrt(%pi)/2),
+     "(3) holds: the series is (sqrt(pi a)/2) 1F1(3/2; 1; Q), so m = (sqrt(pi a)/2) exp(-Q) 1F1(3/2; 1; Q)")$
+
+/* ---- (4) three forms of h at 40 digits: Kummer's, the Bessel form exp(-q/2)((1 + q) I0(q/2) +
+   q I1(q/2)), and the two branches the code evaluates: the positive series below 60 and the
+   asymptotic series sum (-1/2)_j^2/j! q^(-j) times q^(1/2)/Gamma(3/2) above it (DLMF 13.7.1), cut
+   at its smallest term. That series and the dropped exponentially small part are both of order
+   exp(-q), so above 60 the branch is good to about 1e-26 relative: far below double precision.    */
+h_series(qv) := block([t : 1b0, s : 1b0, j : 0],
+  qv : bfloat(qv),
+  while abs(t) > 1b-45*abs(s) or j < 5 do (t : t*(j + 3/2)*qv/(j + 1)^2, s : s + t, j : j + 1),
+  s*exp(-qv))$
+h_asym(qv) := block([t : 1b0, s : 1b0, j : 0, nt],
+  qv : bfloat(qv),
+  nt : t*(j - 1/2)^2/((j + 1)*qv),
+  while abs(nt) < abs(t) and abs(nt) > 1b-45*abs(s) do
+    (t : nt, s : s + t, j : j + 1, nt : t*(j - 1/2)^2/((j + 1)*qv)),
+  bfloat(s*sqrt(qv)/gamma(3/2)))$
+worst : 0$
+worst_asym : 0$
+for qv in [1/1000, 1/10, 1, 3, 17, 60] do block([ref, bes],
+  ref : bfloat(hypergeometric([-1/2], [1], -qv)),
+  bes : bfloat(exp(-qv/2)*((1 + qv)*bessel_i(0, qv/2) + qv*bessel_i(1, qv/2))),
+  worst : max(worst, abs(bes/ref - 1), abs(h_series(qv)/ref - 1)))$
+for qv in [61, 100, 300] do block([ref],
+  ref : bfloat(exp(-qv/2)*((1 + qv)*bessel_i(0, qv/2) + qv*bessel_i(1, qv/2))),
+  worst : max(worst, abs(h_series(qv)/ref - 1)),
+  worst_asym : max(worst_asym, abs(h_asym(qv)/ref - 1)))$
+print("worst relative difference among the forms of h:", worst, "; the asymptotic branch:",
+      worst_asym)$
+must(worst < 1b-35 and worst_asym < 1b-24,
+     "(4) holds: Kummer, the Bessel form and the series agree to 1e-35, the asymptotic branch to 1e-24")$
+
+/* ---- (5) the tangential kernel exp(-(x - (1 - sigma) xi)^2/(sigma (2 - sigma)))/sqrt(pi sigma
+   (2 - sigma)) integrates to 1 and has mean (1 - sigma) xi, so the reflected tangential momentum
+   is (1 - sigma) of the incident's and the shear is sigma times Sentman's incident shear.          */
+assume(sg > 0, sg < 1)$
+Kt : exp(-(x - (1 - sg)*xi)^2/(sg*(2 - sg)))/sqrt(%pi*sg*(2 - sg))$
+must(is(ratsimp(radcan(integrate(Kt, x, minf, inf))) = 1)
+     and is(ratsimp(radcan(integrate(x*Kt, x, minf, inf) - (1 - sg)*xi)) = 0),
+     "(5) holds: the tangential kernel integrates to 1 and its mean is (1 - sigma_t) xi")$
+
+/* ---- (6) a = 1 is Sentman's full accommodation: m = sqrt(pi)/2 and c_re is the number flux times
+   sqrt(pi) w, the shipped diffuse term with v_ratio = w = sqrt(T_w/T_inf)/s.                       */
+z : 1 + erf(s*g)$
+e : exp(-s^2*g^2)$
+flux : (g*z + e/(s*sqrt(%pi)))/2$
+must(is(ratsimp(2*w*(sqrt(%pi)/2)*flux - (1/2)*w*(sqrt(%pi)*g*z + e/s)) = 0)
+     and is(ratsimp(subst(alpha = 1, (1/2)*(1 + alpha*(2*Tw/(Ti*s^2) - 1))) - Tw/(Ti*s^2)) = 0),
+     "(6) holds: at a = 1 the CLL re-emission is Sentman's diffuse term at alpha = 1")$
+
+/* ---- (7) a -> 0 is specular: Q -> inf and m -> sqrt(1 - a) x -> x, so c_re is the incident
+   pressure and normal incidence tends to 4 as s -> inf. In general the hyperthermal limit is
+   c_p -> 2 g^2 (1 + sqrt(1 - a)): c_re -> 2 w g m(g/w), and m(x) = sqrt(1 - a) x (1 + O(1/x^2)).    */
+assume(x > 0, g > 0, tau > 0, w > 0)$
+lead : (sqrt(%pi*a)/2)*sqrt((1 - a)*x^2/a)/gamma(3/2)$
+must(is(ratsimp(radcan(lead - sqrt(1 - a)*x)) = 0),
+     "(7a) holds: the leading asymptotic term of m(x) is sqrt(1 - a) x")$
+cre_hyper : 2*w*g*subst(x = g/w, sqrt(1 - a)*x*(1 + a/(4*(1 - a))*(w/g)^2))$
+must(is(ratsimp(limit(subst(w = tau/s, cre_hyper), s, inf) - 2*g^2*sqrt(1 - a)) = 0),
+     "(7b) holds: c_re -> 2 g^2 sqrt(1 - a) as s -> inf, so c_p -> 2 g^2 (1 + sqrt(1 - a))")$
+/* (7b) uses the series' second term: h(q) = (q^(1/2)/Gamma(3/2)) (1 + 1/(4 q) + O(q^-2)), so
+   m(x) = sqrt(1 - a) x (1 + a/(4 (1 - a) x^2) + ...); any coefficient there gives the same limit. */
+must(abs(h_asym(10^6)/(sqrt(10^6)/gamma(3/2)) - (1 + 1/(4*10^6))) < 1b-12,
+     "(7c) holds: h(q) = (q^(1/2)/Gamma(3/2)) (1 + 1/(4 q) + O(q^-2))")$
+
+print("DONE")$

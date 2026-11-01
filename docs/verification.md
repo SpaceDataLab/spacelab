@@ -6462,7 +6462,7 @@ that is what the verdicts rest on rather than on someone's reading of a web page
 | GOES-R EUVS 30.4 nm / Ly-α / Mg II | *"redistributed and used without restriction"*, CC0 in LISIRD | 2017-02-07 → (g18/g19 current) | **3 d** | **admitted from 2017-02** |
 | SDO/EVE ESP 27.16–33.8 nm band, MEGS-P Ly-α diode | CC0 1.0, in the file | 2010-04-30 → 2026-09-12, 5959 / 5938 days | **1 d** | **admitted from 2010-04** |
 | SDO/EVE He II 30.4 nm *line* | CC0 1.0 | 2010-04-30 → **2014-05-26** | dead | admitted, unusable alone — MEGS-A failed |
-| LISIRD composite Lyman-α (Machol 2019) | **no licence stated** | 1947-02-14 → 2026-09-10 | 4 d | **rejected: terms** → oracle |
+| LISIRD composite Lyman-α (Machol 2019) | **CC0 1.0** since v4.26.1 (2026-10-28): `lds:license lds:cc0` in the catalogue and `LICENSE.txt` in the data directory (7 049 bytes, sha256 `7179683e…6f1309`), read 2026-10-31; it was *no licence stated* when this table was first printed (2026-09-14) | 1947-02-14 → 2026-09-10 | 4 d | terms **admitted**; **rejected: latency** as an operational driver → the historical driver for 2000–2010 (Y10, Ф18.A′) |
 | Bremen composite Mg II (and the F30-extended form) | **no terms on the page or in the files** | 1978.85 → 2026.69 (17 476 rows) | 2 d | **rejected: terms** → oracle |
 | Viereck composite Mg II, SORCE Mg II, SOHO/SEM, CLS F30 | **no licence stated** (LISIRD catalogue) | various | — | **rejected: terms** |
 | USGS Dst4, Dst3 | U.S. public domain, credit "U.S. Geological Survey" (`usgs-dst`) | 2015-09-24 → | **~45 min** (2026-10-28) | **admitted from 2015-09, screened**: the 2026-09 "all-null" was the wrong element id (Ф14.O); the hourly product carries artefacts (§10.7) |

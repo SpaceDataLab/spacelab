@@ -117,9 +117,15 @@ EUVS_PROXIES = ("irr_304", "irr_1216", "MgII_standard")
 ACCEPT = {"lisird_lemr.nt": "application/n-triples"}
 
 
+# The two files that carry the terms layer are re-downloaded on every `--fetch`: a licence that
+# appears in the catalogue after the first run (the composite Lyman-alpha's CC0 did, 2026-10-28) is
+# invisible to a run that trusts a cached copy. The data files are large and stay cached.
+REFRESH = {"lisird_lemr.nt", "composite_lya_LICENSE.txt"}
+
+
 def fetch(name: str, url: str, allow: bool) -> pathlib.Path:
     path = CACHE / name
-    if path.exists():
+    if path.exists() and not (allow and name in REFRESH):
         return path
     if not allow:
         sys.exit(f"{path} is absent; re-run with --fetch to download it from {url}")
@@ -368,7 +374,10 @@ def main() -> None:
             f"{(today - observed[-1]).days} d",
         )
     )
-    for name in ("MgII_composite.dat", "composite_lyman_alpha.csv"):
+    for name, dataset in (
+        ("MgII_composite.dat", "bremen_composite_mgii"),
+        ("composite_lyman_alpha.csv", "composite_lyman_alpha"),
+    ):
         rows = [
             line
             for line in paths[name].read_text(errors="replace").splitlines()
@@ -382,9 +391,9 @@ def main() -> None:
                 str(epoch + dt.timedelta(days=float(row.split(",")[0])))
                 for row in (rows[0], rows[-1])
             )
-        print(
-            f"  {name:<22} {span}  {len(rows)} rows  (no stated licence: oracle only)"
-        )
+        licence = licences.get(dataset, NONE_STATED)
+        verdict = "oracle only" if licence == NONE_STATED else "admitted"
+        print(f"  {name:<22} {span}  {len(rows)} rows  ({licence}: {verdict})")
 
     print("\n## What each EUV proxy is worth over F10.7\n")
     print(

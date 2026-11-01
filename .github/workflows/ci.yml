@@ -365,6 +365,7 @@ jobs:
         with:
           name: mutants-sealed-${{ matrix.slot }}.out
           path: mutants/mutants.out
+          retention-days: 14
 
 
   # The job above can only name crates that have been taken to zero survivors, and taking a crate
@@ -515,6 +516,7 @@ jobs:
         if: always()
         with:
           name: mutants-diff.out
+          retention-days: 14
           path: |
             mutants-diff/mutants.out
             mutants-diff-onnx/mutants.out

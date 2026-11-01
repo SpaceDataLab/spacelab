@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import pathlib
 import re
 import sys
@@ -80,6 +81,7 @@ OTHER = {
     "lisird_lemr.nt": "https://lasp.colorado.edu/lemr/lisird/lisird",
     "MgII_composite.dat": "https://www.iup.uni-bremen.de/gome/solar/MgII_composite.dat",
     "composite_lyman_alpha.csv": "https://lasp.colorado.edu/lisird/latis/dap/composite_lyman_alpha.csv",
+    "composite_lya_LICENSE.txt": "https://lasp.colorado.edu/data/timed_see/composite_lya/LICENSE.txt",
     "latest_EVE_L3_merged_1nm.ncdf": "https://lasp.colorado.edu/eve/data_access/eve_data/products/merged/latest_EVE_L3_merged_1nm.ncdf",
 }
 
@@ -332,6 +334,11 @@ def main() -> None:
     print("`license` global attribute of the data file itself:")
     for source, licence in stated.items():
         print(f"  {source:<20} {licence!r}")
+    licence_file = paths["composite_lya_LICENSE.txt"]
+    print(
+        f"\nComposite Lyman-alpha LICENSE.txt ({OTHER['composite_lya_LICENSE.txt']}): "
+        f"{licence_file.stat().st_size} bytes, sha256 {hashlib.sha256(licence_file.read_bytes()).hexdigest()}"
+    )
     print("\nLISIRD catalogue, `lds:license` per dataset:")
     width = max(len(name) for name in CANDIDATES)
     for name in CANDIDATES:

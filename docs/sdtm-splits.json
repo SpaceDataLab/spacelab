@@ -1,0 +1,245 @@
+{
+ "step": 60,
+ "phase": 0,
+ "recovery_hours": 72.0,
+ "splits": [
+  {
+   "name": "family-CHAMP",
+   "kind": "family",
+   "family": "CHAMP"
+  },
+  {
+   "name": "family-GOCE",
+   "kind": "family",
+   "family": "GOCE"
+  },
+  {
+   "name": "family-GRACE",
+   "kind": "family",
+   "family": "GRACE"
+  },
+  {
+   "name": "family-GRACE-FO",
+   "kind": "family",
+   "family": "GRACE-FO"
+  },
+  {
+   "name": "family-Swarm",
+   "kind": "family",
+   "family": "Swarm"
+  },
+  {
+   "name": "origin-2005",
+   "kind": "origin",
+   "cut": "2005-01-01",
+   "until": "2008-01-01"
+  },
+  {
+   "name": "origin-2008",
+   "kind": "origin",
+   "cut": "2008-01-01",
+   "until": "2011-01-01"
+  },
+  {
+   "name": "origin-2011",
+   "kind": "origin",
+   "cut": "2011-01-01",
+   "until": "2014-01-01"
+  },
+  {
+   "name": "origin-2014",
+   "kind": "origin",
+   "cut": "2014-01-01",
+   "until": "2017-01-01"
+  },
+  {
+   "name": "origin-2017",
+   "kind": "origin",
+   "cut": "2017-01-01",
+   "until": "2020-01-01"
+  },
+  {
+   "name": "origin-2020",
+   "kind": "origin",
+   "cut": "2020-01-01",
+   "until": "2023-01-01"
+  },
+  {
+   "name": "origin-2023",
+   "kind": "origin",
+   "cut": "2023-01-01",
+   "until": "2027-01-01"
+  },
+  {
+   "name": "storm-2001-03-31T04",
+   "kind": "storm",
+   "start": "2001-03-29 22:30:00",
+   "end": "2001-04-05 10:30:00"
+  },
+  {
+   "name": "storm-2001-11-06T01",
+   "kind": "storm",
+   "start": "2001-11-04 19:30:00",
+   "end": "2001-11-11 10:30:00"
+  },
+  {
+   "name": "storm-2003-10-29T07",
+   "kind": "storm",
+   "start": "2003-10-28 01:30:00",
+   "end": "2003-11-04 19:30:00"
+  },
+  {
+   "name": "joint-2003-10-29T07-CHAMP",
+   "kind": "joint",
+   "family": "CHAMP",
+   "start": "2003-10-28 01:30:00",
+   "end": "2003-11-04 19:30:00"
+  },
+  {
+   "name": "joint-2003-10-29T07-GOCE",
+   "kind": "joint",
+   "family": "GOCE",
+   "start": "2003-10-28 01:30:00",
+   "end": "2003-11-04 19:30:00"
+  },
+  {
+   "name": "joint-2003-10-29T07-GRACE",
+   "kind": "joint",
+   "family": "GRACE",
+   "start": "2003-10-28 01:30:00",
+   "end": "2003-11-04 19:30:00"
+  },
+  {
+   "name": "joint-2003-10-29T07-GRACE-FO",
+   "kind": "joint",
+   "family": "GRACE-FO",
+   "start": "2003-10-28 01:30:00",
+   "end": "2003-11-04 19:30:00"
+  },
+  {
+   "name": "joint-2003-10-29T07-Swarm",
+   "kind": "joint",
+   "family": "Swarm",
+   "start": "2003-10-28 01:30:00",
+   "end": "2003-11-04 19:30:00"
+  },
+  {
+   "name": "storm-2003-11-20T07",
+   "kind": "storm",
+   "start": "2003-11-19 01:30:00",
+   "end": "2003-11-25 19:30:00"
+  },
+  {
+   "name": "storm-2004-07-27T01",
+   "kind": "storm",
+   "start": "2004-07-25 19:30:00",
+   "end": "2004-08-01 10:30:00"
+  },
+  {
+   "name": "storm-2004-11-08T01",
+   "kind": "storm",
+   "start": "2004-11-06 19:30:00",
+   "end": "2004-11-14 13:30:00"
+  },
+  {
+   "name": "storm-2005-08-24T10",
+   "kind": "storm",
+   "start": "2005-08-23 04:30:00",
+   "end": "2005-08-29 07:30:00"
+  },
+  {
+   "name": "storm-2024-05-10T19",
+   "kind": "storm",
+   "start": "2024-05-09 13:30:00",
+   "end": "2024-05-16 16:30:00"
+  },
+  {
+   "name": "joint-2024-05-10T19-CHAMP",
+   "kind": "joint",
+   "family": "CHAMP",
+   "start": "2024-05-09 13:30:00",
+   "end": "2024-05-16 16:30:00"
+  },
+  {
+   "name": "joint-2024-05-10T19-GOCE",
+   "kind": "joint",
+   "family": "GOCE",
+   "start": "2024-05-09 13:30:00",
+   "end": "2024-05-16 16:30:00"
+  },
+  {
+   "name": "joint-2024-05-10T19-GRACE",
+   "kind": "joint",
+   "family": "GRACE",
+   "start": "2024-05-09 13:30:00",
+   "end": "2024-05-16 16:30:00"
+  },
+  {
+   "name": "joint-2024-05-10T19-GRACE-FO",
+   "kind": "joint",
+   "family": "GRACE-FO",
+   "start": "2024-05-09 13:30:00",
+   "end": "2024-05-16 16:30:00"
+  },
+  {
+   "name": "joint-2024-05-10T19-Swarm",
+   "kind": "joint",
+   "family": "Swarm",
+   "start": "2024-05-09 13:30:00",
+   "end": "2024-05-16 16:30:00"
+  },
+  {
+   "name": "storm-2024-10-10T22",
+   "kind": "storm",
+   "start": "2024-10-09 16:30:00",
+   "end": "2024-10-16 01:30:00"
+  },
+  {
+   "name": "joint-2024-10-10T22-CHAMP",
+   "kind": "joint",
+   "family": "CHAMP",
+   "start": "2024-10-09 16:30:00",
+   "end": "2024-10-16 01:30:00"
+  },
+  {
+   "name": "joint-2024-10-10T22-GOCE",
+   "kind": "joint",
+   "family": "GOCE",
+   "start": "2024-10-09 16:30:00",
+   "end": "2024-10-16 01:30:00"
+  },
+  {
+   "name": "joint-2024-10-10T22-GRACE",
+   "kind": "joint",
+   "family": "GRACE",
+   "start": "2024-10-09 16:30:00",
+   "end": "2024-10-16 01:30:00"
+  },
+  {
+   "name": "joint-2024-10-10T22-GRACE-FO",
+   "kind": "joint",
+   "family": "GRACE-FO",
+   "start": "2024-10-09 16:30:00",
+   "end": "2024-10-16 01:30:00"
+  },
+  {
+   "name": "joint-2024-10-10T22-Swarm",
+   "kind": "joint",
+   "family": "Swarm",
+   "start": "2024-10-09 16:30:00",
+   "end": "2024-10-16 01:30:00"
+  },
+  {
+   "name": "storm-2025-11-12T01",
+   "kind": "storm",
+   "start": "2025-11-10 19:30:00",
+   "end": "2025-11-17 19:30:00"
+  },
+  {
+   "name": "storm-2026-01-19T22",
+   "kind": "storm",
+   "start": "2026-01-18 16:30:00",
+   "end": "2026-01-25 22:30:00"
+  }
+ ]
+}

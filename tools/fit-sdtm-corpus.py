@@ -336,18 +336,8 @@ def coupling_map(
     return CouplingMap(knots, values, hours.size, hours.min(), hours.max())
 
 
-def newell_driver(
-    hourly: np.ndarray, epoch: pd.Timestamp
-) -> tuple[np.ndarray, CouplingMap]:
-    """`newell_coupling` on `ap60`'s grid and scale, and the map that put it there.
-
-    The speed and the IMF are OMNI's hourly averages from their stamp, as `ap60`'s are
-    (`tools/fetch-omni.sh`). `coupling_map` puts the coupling onto `ap60`'s scale over every hour both
-    series have, so the two share one distribution, to the table's interpolation, and differ in
-    which hours carry which value; an hour without the solar wind takes its `ap60`. Of three
-    couplings it agrees best with `ap60` by the hour, Spearman 0.547 against Kan & Lee's 0.542 and
-    `V Bs`'s 0.407 over 2000-2026.
-    """
+def coupling_on_grid(hourly: np.ndarray, epoch: pd.Timestamp) -> np.ndarray:
+    """`newell_coupling` on `ap60`'s hourly grid, NaN where the solar wind is missing."""
     path = g.DENSITY / "omni2_sw_hourly.txt"
     if not path.exists():
         sys.exit(f"no {path.name}; run tools/fetch-omni.sh")
@@ -373,13 +363,30 @@ def newell_driver(
     on_grid = np.full(hourly.size, np.nan)
     span = min(coupling.size, hourly.size - lead)
     on_grid[lead : lead + span] = coupling[:span]
+    return on_grid
+
+
+def newell_driver(
+    hourly: np.ndarray, epoch: pd.Timestamp
+) -> tuple[np.ndarray, CouplingMap]:
+    """`newell_coupling` on `ap60`'s grid and scale, and the map that put it there.
+
+    The speed and the IMF are OMNI's hourly averages from their stamp, as `ap60`'s are
+    (`tools/fetch-omni.sh`). `coupling_map` puts the coupling onto `ap60`'s scale over every hour both
+    series have, so the two share one distribution, to the table's interpolation, and differ in
+    which hours carry which value; an hour without the solar wind takes its `ap60`. Of three
+    couplings it agrees best with `ap60` by the hour, Spearman 0.547 against Kan & Lee's 0.542 and
+    `V Bs`'s 0.407 over 2000-2026.
+    """
+    on_grid = coupling_on_grid(hourly, epoch)
     present = np.isfinite(on_grid)
     hours = epoch + pd.to_timedelta(np.flatnonzero(present), unit="h")
     wind_map = coupling_map(on_grid[present], hourly[present], hours)
     out = hourly.copy()
     out[present] = wind_map(on_grid[present])
     print(
-        f"{path.name}: the solar wind fills {present.sum()} of the {span} hours it spans, "
+        f"omni2_sw_hourly.txt: the solar wind fills {present.sum()} of the "
+        f"{on_grid.size} hours of the grid, "
         f"{wind_map.first:%Y-%m-%dT%H} to {wind_map.last:%Y-%m-%dT%H}; "
         f"{wind_map.coupling.size} knots",
         flush=True,
@@ -618,8 +625,11 @@ class CorpusModel:
         mix: float | str | None = None,
         fast: tuple[float, float] | str | None = None,
         wind: float | str | None = None,
+        penalty_rows: np.ndarray | None = None,
     ):
-        """`excess` saturates the daily flux excess: `None` keeps it linear, a number is a fixed
+        """`penalty_rows` are the rows whose scale sets the ridge, every row when `None`; a harness
+        that holds rows out passes the training rows, so that nothing of a test row reaches the fit
+        (`tools/evaluate-sdtm.py`). `excess` saturates the daily flux excess: `None` keeps it linear, a number is a fixed
         scale `D`, `"fit"` fits `D` with the other nonlinear parameters. `gain`, with `kappa`
         fitted and `f` the 81-day flux regressor: `"amplitude"` multiplies every storm regressor by
         `exp(kappa f)`; `"input"` multiplies the storm state by it before the regressors are formed,
@@ -683,6 +693,8 @@ class CorpusModel:
             excess=0.5 if self.pack.free_excess else self.excess_scale,
             gain=0.0 if gain else None,
         )
+        if penalty_rows is not None:
+            reference = reference[penalty_rows]
         self.penalty = np.sqrt(ridge) * np.sqrt(np.mean(reference**2, axis=0))
         self.penalty[0] = 0.0
 

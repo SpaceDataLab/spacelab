@@ -18,6 +18,10 @@ freeze:
 freeze-data:
     uv run --no-project python -I tools/check-sdtm-freeze.py --data
 
+# The evaluation harness's leak tests (Ф30.B).
+harness:
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/test_evaluate_sdtm.py
+
 fmt:
     cargo fmt --all -- --check
 

@@ -9,6 +9,15 @@ default:
 # fmt, clippy and the test suite, cheapest first.
 check: fmt lint test test-optional-features capi
 
+# D-30: SDTM-1's frozen code and, with the corpus on disk, its frozen data. A deliberate change writes
+# a new baseline with `tools/check-sdtm-freeze.py --write` and a row in `docs/sdtm-selection-ledger.md`.
+freeze:
+    uv run --no-project python -I tools/check-sdtm-freeze.py
+    uv run --no-project python -I tools/test_check_sdtm_freeze.py
+
+freeze-data:
+    uv run --no-project python -I tools/check-sdtm-freeze.py --data
+
 fmt:
     cargo fmt --all -- --check
 

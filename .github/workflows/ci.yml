@@ -86,6 +86,11 @@ jobs:
       - name: Comparator-decided tests are all in the ledger
         run: python3 tools/check-comparators.py --check
 
+      # D-30: no change to SDTM-1's form or coefficients until the harness can judge it. The corpus is
+      # not on the runner, so this holds the code half; `just freeze-data` holds the data half here.
+      - name: SDTM-1 is frozen at its baseline
+        run: python3 tools/check-sdtm-freeze.py && python3 tools/test_check_sdtm_freeze.py
+
       # Same argument one file over, with one honest limit. A generated changelog cannot describe
       # the commit that adds it, so "byte-identical to the projection of HEAD" is a fixed point no
       # commit can sit at -- it was written that way first and failed on its own commit. What runs

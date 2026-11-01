@@ -1,0 +1,63 @@
+{
+  "last_emit_commit": "e06f607ee1fb547e29b19d3f902e8714ef083391",
+  "emit": {
+    "default": "tools/fit-sdtm-corpus.py --fit-sigma --cooling --excess-saturation fit --storm-gain input-power --caps storm-log1-lin --emit",
+    "solar_wind": "tools/fit-sdtm-corpus.py --fit-sigma --cooling --ap60 --solar-wind fit --excess-saturation fit --storm-gain input-power --caps storm-log1-lin --emit"
+  },
+  "code": {
+    "crates/spacelab-propagation/src/sdtm/coefficients.rs": "7cc5d588840e3335cb7a16a7a236acebd655362a173f8ff3475ec309062c938f",
+    "crates/spacelab-propagation/src/sdtm/solar_wind_coefficients.rs": "363ef5c14629986532873f8d65ca9aeb0c55a163f6ad07be54f2ae93602f763f",
+    "crates/spacelab-propagation/src/sdtm/mod.rs": "b0d14895c6bc906da14f0577c330b84f1e519c1bc826843361d4866a87d1397f",
+    "crates/spacelab-propagation/src/sdtm/atmosphere.rs": "f4014e910c0a0c47c5e5633242908883b3fff605205bab9bef406b61d332bb7c"
+  },
+  "data": {
+    "data/validation/tudelft-v02/corpus/manifest.json": {
+      "size": 383168,
+      "sha256": "776d3435f674f7d2514ee6bdf67e1482cf24296251abc79f5cbfd8af705fdb25"
+    },
+    "data/validation/tudelft-v02/corpus/corpus_CH.npz": {
+      "size": 97649767,
+      "sha256": "d26854049b4c92d00cb4e800e29d71f6ad339f32a924d2ebde0ebd91bab95d27"
+    },
+    "data/validation/tudelft-v02/corpus/corpus_GA.npz": {
+      "size": 98458991,
+      "sha256": "a473ffc2b9340a32cff8c8c19c67e835ccda7932d99e7f4f715ea2fb02a16c6f"
+    },
+    "data/validation/tudelft-v02/corpus/corpus_GB.npz": {
+      "size": 89964692,
+      "sha256": "0777aa48728855d1fb7f6fedb6585697bfe4a7ffa9a7b7dae5da5e520d1d5537"
+    },
+    "data/validation/tudelft-v02/corpus/corpus_GC.npz": {
+      "size": 56769759,
+      "sha256": "e173c8aacf5f35f9d8040a89eff8dd1f6caf1b10264926ef03e85446f8a44d89"
+    },
+    "data/validation/tudelft-v02/corpus/corpus_GO.npz": {
+      "size": 25226266,
+      "sha256": "ea3efbacb7da0083a7c0b0c37822ece3823811e0a7664b133ab443c211b5ee42"
+    },
+    "data/validation/tudelft-v02/corpus/corpus_SA.npz": {
+      "size": 126924086,
+      "sha256": "380f22468d9a6e9a8e1b0774adbd2b903f1db8381655cb0dc8401c8ee7feaaae"
+    },
+    "data/validation/tudelft-v02/corpus/corpus_SB.npz": {
+      "size": 127464920,
+      "sha256": "8a8c7279ad74d7b75254cc5d9ff6bb511cfe29cd4a38ee246ff09ff16d64c76d"
+    },
+    "data/validation/tudelft-v02/corpus/corpus_SC.npz": {
+      "size": 127212100,
+      "sha256": "4a6d735edce9668f3c1fb9aff68c4dbbd0bfb438e88143034962f15ab1ad63a0"
+    },
+    "data/validation/density/SW-All.csv": {
+      "size": 2883484,
+      "sha256": "be232576e1d99d258e7a550d9faeeb02edae5b88419a9a0d19ed73c02dbd9670"
+    },
+    "data/validation/density/Hp60_ap60_complete_series.txt": {
+      "size": 21934383,
+      "sha256": "95909958a487057ff269cb03aaf8e291d77424e0e205fceeec35f35e134e8a3c"
+    },
+    "data/validation/density/omni2_sw_hourly.txt": {
+      "size": 20948058,
+      "sha256": "c8475b66b4ac3b4226e5c083897dcca4ca884d70e0b9de9e6c5457a683561b4d"
+    }
+  }
+}

@@ -98,7 +98,7 @@ fn main() {
     );
     println!("  interpolates per stage, applying the exact ERA — matched to the f64 floor.");
     println!(
-        "  Whether that matters depends on the force model it shares a stage with; spacelab-book's"
+        "  Whether that matters depends on the force model it shares a stage with; spacedatalab-book's"
     );
     println!(
         "  `frames_bench` times this transform against the geopotential on one named machine."

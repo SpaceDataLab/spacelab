@@ -5306,7 +5306,7 @@ wrong answer; this one asks the question upstream of that — whether the model 
 faithfully is still the one the issuing body publishes. A residual of 1e-9 against a superseded
 model is 1e-9 of agreement with the wrong thing.
 
-**This table is transcribed, not just read.** `spacelab-book`'s `verification_ladder` generator
+**This table is transcribed, not just read.** `spacedatalab-book`'s `verification_ladder` generator
 copies the *decision* cell verbatim into LaTeX, so a character with no LaTeX mapping stops the book
 building 244 pages in, naming a file no human wrote. It happened once, with the ticket identifier
 `Ф6.G`; the generator now refuses at the point of writing instead, but the cheaper rule is here:

@@ -1,0 +1,61 @@
+/* Split-conformal coverage in exact rationals -- the law `lifetime_drivers::conformal_radius` and
+ * tools/lifetime-campaign.py state.
+ *
+ * With n calibration scores and one new score, exchangeable and distinct, the new score's rank among
+ * the n + 1 is uniform. So it is at or below the k-th smallest of the n with probability k/(n + 1),
+ * and k = ceil((n + 1)(1 - alpha)) is the smallest k whose probability reaches 1 - alpha. Conditional
+ * on the calibration set the coverage C is Beta(k, n + 1 - k), and the hits among m new scores are
+ * Beta-binomial over it. Shown here, each line printing `<name>: 0`:
+ *   1. the rank law: of the n + 1 equally likely ranks exactly k are at or below the k-th smallest;
+ *   2. 1 - alpha <= k/(n + 1) < 1 - alpha + 1/(n + 1) on a grid of n and alpha;
+ *   3. the Beta law integrates to one, and its mean is k/(n + 1): the marginal coverage again;
+ *   4. its variance is k(n + 1 - k)/((n + 1)^2 (n + 2));
+ *   5. the Beta-binomial sums to one and has mean m k/(n + 1).
+ * Identities 3-5 run on a grid in exact rationals, because k and n are integers and Maxima's beta
+ * integral needs them so. derivations/split_conformal_coverage.gp recomputes the Beta-binomial and
+ * the 5-95 % bands the campaign prints.
+ *
+ * Run: timeout 120 maxima --very-quiet -Q -b derivations/split_conformal_coverage.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* 1. Ranks 1..n+1 are equally likely; the new score is at or below the k-th smallest of the n
+      exactly when its rank is 1..k. */
+rank_defect : 0$
+for n : 1 thru 40 do for k : 1 thru n do
+  rank_defect : rank_defect + abs(sum(if r <= k then 1/(n + 1) else 0, r, 1, n + 1) - k/(n + 1))$
+zero("rank law: P(rank <= k) = k/(n + 1)", rank_defect)$
+
+/* 2. The rounding. */
+bound_failures : 0$
+for n : 1 thru 200 do for a in [1/100, 1/20, 1/10, 1/7, 1/5, 1/3, 1/2, 9/10] do block(
+  [k : ceiling((n + 1)*(1 - a)), c],
+  c : k/(n + 1),
+  if not (c >= 1 - a and c < 1 - a + 1/(n + 1)) then bound_failures : bound_failures + 1)$
+zero("coverage bound: 1 - alpha <= k/(n + 1) < 1 - alpha + 1/(n + 1)", bound_failures)$
+
+/* 3-4. The conditional law. */
+beta_moment(j, k, n) := integrate(x^(k + j - 1)*(1 - x)^(n - k), x, 0, 1)/beta(k, n + 1 - k)$
+grid : [[1, 1], [1, 2], [2, 2], [3, 9], [9, 9], [18, 19], [27, 29], [45, 49], [90, 99]]$
+total : 0$ mean : 0$ variance : 0$
+for g in grid do block([k : g[1], n : g[2], m1, m2],
+  total : total + abs(ratsimp(makegamma(beta_moment(0, k, n))) - 1),
+  m1 : ratsimp(makegamma(beta_moment(1, k, n))),
+  m2 : ratsimp(makegamma(beta_moment(2, k, n))),
+  mean : mean + abs(m1 - k/(n + 1)),
+  variance : variance + abs(m2 - m1^2 - k*(n + 1 - k)/((n + 1)^2*(n + 2))))$
+zero("Beta(k, n + 1 - k) integrates to one", total)$
+zero("its mean is k/(n + 1)", mean)$
+zero("its variance is k(n + 1 - k)/((n + 1)^2 (n + 2))", variance)$
+
+/* 5. Hits among m new scores. */
+bb(x, m, k, n) := binomial(m, x)*beta(x + k, m - x + n + 1 - k)/beta(k, n + 1 - k)$
+bb_total : 0$ bb_mean : 0$
+for g in grid do for m in [1, 5, 20] do block([k : g[1], n : g[2]],
+  bb_total : bb_total + abs(ratsimp(makegamma(sum(bb(x, m, k, n), x, 0, m))) - 1),
+  bb_mean : bb_mean + abs(ratsimp(makegamma(sum(x*bb(x, m, k, n), x, 0, m))) - m*k/(n + 1)))$
+zero("the Beta-binomial sums to one", bb_total)$
+zero("its mean is m k/(n + 1)", bb_mean)$

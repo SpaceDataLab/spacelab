@@ -1,0 +1,82 @@
+/* The design effect and the cluster bootstrap -- the laws tools/cluster-intervals.py rests on.
+ *
+ * m rows in a cluster, unit variance sigma^2, correlation rho inside a cluster, none between. Shown here,
+ * each line printing `<name>: 0`:
+ *   1. Var(cluster sum) = m sigma^2 (1 + (m - 1) rho), from the covariance matrix on a grid of m;
+ *   2. the matrix has determinant (1 - rho)^(m - 1) (1 + (m - 1) rho), so rho >= -1/(m - 1);
+ *   3. x = u + e gives rho = su2/(su2 + se2), and Var(cluster mean) = se2/m + su2 is the same law;
+ *   4. the ANOVA estimator (MSB - MSW)/(MSB + (m - 1) MSW) returns rho from the expected mean squares;
+ *   5. Fisher's large-sample variance of that estimator, by the delta method from the two chi-squares;
+ *   6. the cluster bootstrap of k equal clusters, enumerated: its mean is the sample's, and its variance
+ *      is sum (c_i - cbar)^2 / k^2 for k = 2, 3, 4;
+ *   7. AR(1) at phi, a mean of m: sigma^2/m [1 + 2 sum (1 - h/m) phi^h], and its closed form;
+ *   8. that factor tends to (1 + phi)/(1 - phi): the long block a block bootstrap needs.
+ * derivations/cluster_design_effect.gp recomputes 1, 6 and 7 in exact rationals.
+ *
+ * Run: timeout 120 maxima --very-quiet -Q -b derivations/cluster_design_effect.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+covariance(m) := genmatrix(lambda([i, j], if i = j then s2 else rho*s2), m, m)$
+
+/* 1. */
+defect : 0$
+for m : 2 thru 12 do block([v : covariance(m), total : 0],
+  for i : 1 thru m do for j : 1 thru m do total : total + v[i, j],
+  defect : defect + abs(ratsimp(total - m*s2*(1 + (m - 1)*rho))))$
+zero("Var(cluster sum) = m s2 (1 + (m - 1) rho)", defect)$
+
+/* 2. */
+defect : 0$
+for m : 2 thru 8 do defect : defect + abs(ratsimp(
+  determinant(covariance(m)) - s2^m*(1 - rho)^(m - 1)*(1 + (m - 1)*rho)))$
+zero("det = s2^m (1 - rho)^(m - 1) (1 + (m - 1) rho)", defect)$
+
+/* 3. */
+rho_of : su2/(su2 + se2)$
+zero("Var(cluster mean) = se2/m + su2 = s2/m (1 + (m - 1) rho)",
+  ratsimp((su2 + se2)/m*(1 + (m - 1)*rho_of) - (se2/m + su2)))$
+
+/* 4. */
+msb : se2 + m*su2$
+msw : se2$
+zero("ANOVA: (MSB - MSW)/(MSB + (m - 1) MSW) = rho",
+  ratsimp((msb - msw)/(msb + (m - 1)*msw) - rho_of))$
+
+/* 5. rhohat = (F - 1)/(F + m - 1), F = MSB/MSW, each mean square a scaled chi-square on k - 1 and on
+      k (m - 1) degrees of freedom, so Var(ln F) ~ 2/(k - 1) + 2/(k (m - 1)). */
+f_at : (1 + (m - 1)*rho)/(1 - rho)$
+slope : at(diff((f - 1)/(f + m - 1), f), f = f_at)$
+delta : slope^2*f_at^2*(2/(k - 1) + 2/(k*(m - 1)))$
+fisher : 2*(k*m - 1)*(1 - rho)^2*(1 + (m - 1)*rho)^2/(m^2*k*(m - 1)*(k - 1))$
+zero("Var(rhohat): delta method = Fisher's form", ratsimp(delta - fisher))$
+
+/* 6. */
+tuples(k) := block([out : [[]]],
+  for i : 1 thru k do
+    out : apply(append, map(lambda([t], makelist(endcons(j, t), j, 1, k)), out)),
+  out)$
+bootstrap_defects(k) := block([c : makelist(concat(c_, i), i, 1, k), means, cbar, bmean, bvar],
+  means : map(lambda([t], sum(c[t[i]], i, 1, k)/k), tuples(k)),
+  cbar : sum(c[i], i, 1, k)/k,
+  bmean : sum(means[i], i, 1, length(means))/length(means),
+  bvar : sum((means[i] - bmean)^2, i, 1, length(means))/length(means),
+  [ratsimp(bmean - cbar), ratsimp(bvar - sum((c[i] - cbar)^2, i, 1, k)/k^2)])$
+for k : 2 thru 4 do block([d : bootstrap_defects(k)],
+  zero(printf(false, "cluster bootstrap, k = ~d: mean", k), d[1]),
+  zero(printf(false, "cluster bootstrap, k = ~d: variance = sum (c - cbar)^2/k^2", k), d[2]))$
+
+/* 7. */
+ar_factor(m) := 1 + 2*sum((1 - h/m)*phi^h, h, 1, m - 1)$
+ar_closed(m) := (1 + phi)/(1 - phi) - 2*phi*(1 - phi^m)/(m*(1 - phi)^2)$
+defect : 0$
+for m : 1 thru 30 do defect : defect + abs(ratsimp(ar_factor(m) - ar_closed(m)))$
+zero("AR(1): factor of a mean of m, closed form", defect)$
+
+/* 8. */
+assume(0 < phi, phi < 1)$
+zero("AR(1): the factor tends to (1 + phi)/(1 - phi)",
+  ratsimp(limit(ar_closed(n) - (1 + phi)/(1 - phi), n, inf)))$

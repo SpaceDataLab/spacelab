@@ -1,0 +1,40 @@
+/* A TLE's mean motion is Kozai's; its semi-major axis is Brouwer's. The recovery Spacetrack Report 3
+ * prints, and tools/lifetime-campaign.py uses, as a series against the relation it inverts.
+ *
+ * With S = (3/2) k2 (3 cos^2 i - 1)/(1 - e^2)^(3/2), Brouwer's a'' and Kozai's n0 are tied by
+ *     n0 = n''(1 + S/a''^2),   n'' = ke a''^(-3/2),
+ * so a1 = (ke/n0)^(2/3) = a''(1 + S/a''^2)^(-2/3). The report inverts that in closed form:
+ *     d1 = S/a1^2,  a0 = a1(1 - d1/3 - d1^2 - (134/81) d1^3),  d0 = S/a0^2,  a'' = a0/(1 - d0).
+ * That inversion is exact to first order only: the report's d0 reads a0 where the relation has a''. So
+ * what this file shows is how far the recipe stands from the relation. Each line prints `<name>: 0`,
+ * with d = S/a1^2 as the small parameter and lengths in units of a1:
+ *   1. the recipe's a'' agrees with the true inverse at order d^0 and d^1;
+ *   2. they differ by (4/3) d^2 at second order.
+ * At LEO d is at most 1.5e-3, so the two stand at most 20 m apart. A TLE's mean a is defined by the
+ * recipe, the difference is a constant over a decay, and only drops in a enter the fit.
+ * derivations/tle_kozai_recovery.gp evaluates both at 60 digits and pins the campaign's value.
+ *
+ * Run: timeout 120 maxima --very-quiet -Q -b derivations/tle_kozai_recovery.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* In units of a1 = 1, S = d. The true a'' solves a1 = a''(1 + S/a''^2)^(-2/3): as a series in d. */
+ansatz : 1 + c1*d + c2*d^2 + c3*d^3 + c4*d^4$
+true_relation : taylor(ansatz*(1 + d/ansatz^2)^(-2/3) - 1, d, 0, 4)$
+sol : solve([coeff(expand(true_relation), d, 1), coeff(expand(true_relation), d, 2),
+             coeff(expand(true_relation), d, 3), coeff(expand(true_relation), d, 4)],
+            [c1, c2, c3, c4])[1]$
+true_a : subst(sol, ansatz)$
+
+/* The report's recipe. */
+a0 : 1 - d/3 - d^2 - 134/81*d^3$
+d0 : d/a0^2$
+recipe : taylor(a0/(1 - d0), d, 0, 4)$
+
+difference : expand(rat(recipe) - rat(true_a))$
+zero("order d^0", coeff(difference, d, 0))$
+zero("order d^1", coeff(difference, d, 1))$
+zero("order d^2 is (4/3) d^2", coeff(difference, d, 2) - 4/3)$

@@ -883,6 +883,9 @@ if have maxima; then
     mac_zeros design_orbit.mac 5 "repeat-ground-track and sun-synchronous conditions, critical inclination"
     mac_zeros kepler_universal.mac 9 "universal-variable Kepler equation and f gdot - fdot g = 1"
     mac_zeros lifetime_exponential_decay.mac 5 "the exact erfi decay epoch solves the circular decay ODE"
+    mac_zeros split_conformal_coverage.mac 7 "split-conformal rank law, rounding bound, Beta and Beta-binomial laws"
+    mac_zeros cluster_design_effect.mac 13 "the design effect, Fisher's variance of its rho, the enumerated cluster bootstrap, the AR(1) factor"
+    mac_zeros tle_kozai_recovery.mac 3 "a TLE's Kozai recovery against the relation it inverts: first order, then (4/3) d^2"
     mac_zeros harris_priester_law.mac 16 "the Harris-Priester law: exponential brackets, half-angle power, apex values"
     mac_zeros soc_street_geometry.mac 18 "street-of-coverage widths, co- and counter-rotating node steps, seam and stagger"
     mac_zeros walker_phasing.mac 5 "Walker T/P/F relative phasing as an exact lattice"
@@ -1022,7 +1025,7 @@ fi
 if have gp; then
     for f in access_horizon_crossing root_reference_roots photometry_closed_forms observability_diurnal_arc \
         elevation_footprint cone_footprint comms_link_budget sar_incidence scan_catalogue \
-        wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay harris_priester_law \
+        wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay split_conformal_coverage cluster_design_effect tle_kozai_recovery harris_priester_law \
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form \
         rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
         cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal iod_classical patched_conics \

@@ -62,10 +62,6 @@ STORM_PEAK_AP = 300.0
 JOINT_NAMED = ("2003-10-29 07:30:00", "2024-05-10 19:30:00", "2024-10-10 22:30:00")
 # The recovery is masked with the storm: 72 h past the last phase the protocol scores.
 RECOVERY_HOURS = 72.0
-FIELDS: dict[str, dict[str, Any]] = {
-    "default": {"ap60": False, "wind": None},
-    "solar_wind": {"ap60": True, "wind": "fit"},
-}
 FORM: dict[str, Any] = {
     "caps": "storm-log1-lin",
     "ridge": 1.0e-3,
@@ -73,6 +69,17 @@ FORM: dict[str, Any] = {
     "cooling": True,
     "excess": "fit",
     "gain": "input-power",
+    "ap60": False,
+    "wind": None,
+}
+# The shipped form, and that form with one mechanism taken away or added: `plans/17` Ф30.C and Ф30.F.
+FIELDS: dict[str, dict[str, Any]] = {
+    "default": FORM,
+    "solar_wind": {**FORM, "ap60": True, "wind": "fit"},
+    "ap60": {**FORM, "ap60": True},
+    "no_gain": {**FORM, "gain": None},
+    "no_saturation": {**FORM, "excess": None},
+    "no_cooling": {**FORM, "cooling": False},
 }
 
 
@@ -283,12 +290,12 @@ def command_run(args) -> int:
             fold_arg,
             sat,
             train_sats,
-            g.CAPS[FORM["caps"]],
-            FORM["ridge"],
-            FORM["sigma"],
-            FORM["cooling"],
-            FORM["excess"],
-            FORM["gain"],
+            g.CAPS[settings["caps"]],
+            settings["ridge"],
+            settings["sigma"],
+            settings["cooling"],
+            settings["excess"],
+            settings["gain"],
             None,
             None,
             settings["wind"],

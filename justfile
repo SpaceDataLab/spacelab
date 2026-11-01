@@ -18,9 +18,10 @@ freeze:
 freeze-data:
     uv run --no-project python -I tools/check-sdtm-freeze.py --data
 
-# The evaluation harness's leak tests (Ф30.B).
+# The evaluation harness's leak tests and the clustered intervals' laws (Ф30.B, Ф30.C).
 harness:
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/test_evaluate_sdtm.py
+    uv run --no-project --with numpy python -I tools/test_cluster_intervals.py
 
 fmt:
     cargo fmt --all -- --check
@@ -201,7 +202,7 @@ mutants NAME +FILES:
     mkdir -p "$out" "{{MUTANTS_CACHE}}/tmp" "$snap"
     args=(); for f in {{FILES}}; do args+=(--file "$f"); just mutants-anchors "$f" || exit 1; done
     rm -rf "$snap"; mkdir -p "$snap"
-    tar -cf - --exclude=./target --exclude=./.claude --exclude=./data/validation/tudelft-v02 . | tar -xf - -C "$snap" || exit 1
+    tar -cf - --exclude=./target --exclude=./.claude --exclude=./data/validation/tudelft-v02 --exclude=./data/validation/reentry --exclude=./data/validation/sdtm-eval . | tar -xf - -C "$snap" || exit 1
     just _tree-stamp "$snap" > "$out/tree.stamp"
     just LANE={{LANE}} MEM_BATCH={{MEM_BATCH}} _capped-batch cargo mutants -d "$snap" --jobs {{JOBS}} --test-tool {{TEST_TOOL}} \
         --timeout {{MUTANTS_TIMEOUT}} "${args[@]}" --output "$out" \
@@ -240,7 +241,7 @@ mutants-pkg NAME PACKAGES *EXTRA:
     args=(); for p in {{PACKAGES}}; do args+=(-p "$p"); done
     for f in {{MUTANTS_SKIP}}; do args+=(--exclude "$f"); done
     rm -rf "$snap"; mkdir -p "$snap"
-    tar -cf - --exclude=./target --exclude=./.claude --exclude=./data/validation/tudelft-v02 . | tar -xf - -C "$snap" || exit 1
+    tar -cf - --exclude=./target --exclude=./.claude --exclude=./data/validation/tudelft-v02 --exclude=./data/validation/reentry --exclude=./data/validation/sdtm-eval . | tar -xf - -C "$snap" || exit 1
     just _tree-stamp "$snap" > "$out/tree.stamp"
     just LANE={{LANE}} MEM_BATCH={{MEM_BATCH}} _capped-batch cargo mutants -d "$snap" --jobs {{JOBS}} --test-tool {{TEST_TOOL}} \
         --iterate "${args[@]}" {{EXTRA}} --output "$out" \

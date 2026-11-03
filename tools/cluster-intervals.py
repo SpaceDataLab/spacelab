@@ -176,6 +176,83 @@ def report_table(
         )
 
 
+def phase_draws(
+    log_a: np.ndarray,
+    log_b: np.ndarray,
+    storms: np.ndarray,
+    draws: int,
+    seed: int = SEED,
+) -> np.ndarray:
+    """Whole storms drawn with replacement over one phase's comparisons, the two models paired.
+
+    `log_a` and `log_b` are each comparison's `ln <O/C>`. Each draw: both models' `<O/C>`, the difference
+    in distance from 1 (`|ln a| - |ln b|`), both spreads of the log, and their difference.
+    """
+    k = int(storms.max()) + 1
+    rng = np.random.default_rng(seed)
+    out = np.empty((draws, 6))
+    for i in range(draws):
+        weight = np.bincount(rng.integers(0, k, k), minlength=k)[storms].astype(float)
+        mean_a = np.average(log_a, weights=weight)
+        mean_b = np.average(log_b, weights=weight)
+        spread_a = np.sqrt(np.average((log_a - mean_a) ** 2, weights=weight))
+        spread_b = np.sqrt(np.average((log_b - mean_b) ** 2, weights=weight))
+        out[i] = (
+            np.exp(mean_a),
+            np.exp(mean_b),
+            abs(mean_a) - abs(mean_b),
+            spread_a,
+            spread_b,
+            spread_a - spread_b,
+        )
+    return out
+
+
+def phase_report(paths: list[str], draws: int) -> None:
+    """§10.33's `<O/C>` and spread by phase, on what both models scored, the storm as the cluster."""
+    # Here and not at the top: the laws' tests need only numpy.
+    import pandas as pd
+
+    harness = load_harness()
+    fit, g = harness.fit, harness.g
+    table = pd.concat(
+        (pd.read_csv(path, parse_dates=["t0"]) for path in paths), ignore_index=True
+    )
+    mine = table[table.model.str.startswith("SDTM-1")]
+    other = table[table.model.str.startswith("NRLMSISE-00")]
+    paired = mine.merge(other, on=["t0", "mission", "phase"], suffixes=("", "_other"))
+    start, end, satellites = fit.WANG_2026
+    scope = (paired.t0 >= start) & (paired.t0 < end) & paired.mission.isin(satellites)
+    for label, part in (
+        ("Wang et al.'s scope", paired[scope]),
+        ("every comparison", paired),
+    ):
+        print(
+            f"\n{label}: phase | comparisons | storms | SDTM-1 <O/C> | NRLMSISE-00 <O/C> | "
+            "|ln| difference | SDTM-1 spread | NRLMSISE-00 spread | spread difference"
+        )
+        for phase, name in g.SCORED_PHASES.items():
+            here = part[part.phase == phase]
+            storms = dense_ids(here.t0.to_numpy())
+            a, b = here.log_mean.to_numpy(), here.log_mean_other.to_numpy()
+            result = phase_draws(a, b, storms, draws)
+            point = (
+                np.exp(a.mean()),
+                np.exp(b.mean()),
+                abs(a.mean()) - abs(b.mean()),
+                a.std(),
+                b.std(),
+                a.std() - b.std(),
+            )
+            cells = []
+            for j, value in enumerate(point):
+                low, high = interval(result[:, j])
+                cells.append(f"{value:.3f} [{low:.3f}, {high:.3f}]")
+            print(
+                f"{name} | {len(here)} | {int(storms.max()) + 1} | " + " | ".join(cells)
+            )
+
+
 def load_harness():
     spec = importlib.util.spec_from_file_location(
         "evaluate_sdtm", HERE / "evaluate-sdtm.py"
@@ -195,7 +272,16 @@ def main() -> int:
     parser.add_argument(
         "--against", help="another field's folds, in NRLMSISE-00's place"
     )
+    parser.add_argument(
+        "--phases",
+        nargs="+",
+        metavar="CSV",
+        help="fit-sdtm-corpus.py --storm-table files, one per fold: print §10.33's phases and stop",
+    )
     args = parser.parse_args()
+    if args.phases:
+        phase_report(args.phases, args.draws)
+        return 0
     harness = load_harness()
     fit, g = harness.fit, harness.g
     rows = fit.load_corpus(harness.STEP, phase=harness.PHASE)

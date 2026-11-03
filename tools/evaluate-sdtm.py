@@ -80,6 +80,9 @@ FIELDS: dict[str, dict[str, Any]] = {
     "no_gain": {**FORM, "gain": None},
     "no_saturation": {**FORM, "excess": None},
     "no_cooling": {**FORM, "cooling": False},
+    # The centred 81-day flux, which NRLMSISE-00 reads, for the trailing one: reconstruction only,
+    # since a centred mean needs 40 days of the future.
+    "centred": {**FORM, "centred": True},
 }
 
 
@@ -242,7 +245,11 @@ def command_splits(_args) -> int:
 def command_run(args) -> int:
     settings = FIELDS[args.field]
     rows = fit.load_corpus(
-        STEP, phase=PHASE, ap60=settings["ap60"], wind=settings["wind"] is not None
+        STEP,
+        trailing_mean=not settings.get("centred", False),
+        phase=PHASE,
+        ap60=settings["ap60"],
+        wind=settings["wind"] is not None,
     )
     arg = g.fit_arguments(rows, 2)
     arg["wind"] = rows.attrs.get("wind")

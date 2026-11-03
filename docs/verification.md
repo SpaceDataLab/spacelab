@@ -370,6 +370,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 solar-wind field, shipped | Ф23.I (D-27): §10.31's drive as a second, opt-in field for reconstruction and nowcasting; the 3-hourly field stays the default | a 34-knot quantile map a caller can evaluate, refitted on §10.31's folds; Rust against the generator on 64 field rows and 384 synthetic hours (gaps, both ends of the map, due north, a zero field); Newell's coupling against `derivations/sdtm_solar_wind.mac` (8 identities, 30-digit values) and `.gp` at 60 digits; both bridges against the crate's types, the history they quote held to `HISTORY` | pooled **20.45 %** held out, equal to §10.31; peaks within ±3 h 455 → 461; `s` 0.500, `κ` −1.2794, in sample 20.0 %; `HISTORY` 336 hours; σ narrower in every cell, the worst family covering **78.2 %** of the low-flux active cell; `T∞` 2.0e-15, ρ 1.0e-14, the hourly path 7.4e-16, the coupling against the CAS 7.8e-16; `just capi` **12/12**; mutation 61 + 159 + 307 caught, **0** missed after one boundary test (§10.32) | src/sdtm/solar_wind.rs, tests/sdtm_solar_wind_reference.rs, spacelab-python/src/lib.rs, spacelab-capi/src/lib.rs, tools/fit-sdtm-corpus.py |
 | SDTM-1 by storm phase, in Wang et al. (2026)'s form | Ф23.C: §10.14's protocol scored per phase — onset, main and recovery, post-storm — on Wang et al.'s storms and satellites, so the article can set SDTM-1 beside their CCMC assessment | `storm_assessment` per phase against Maxima at 40 digits on a synthetic multiple-peak storm; the scorecard against Maxima on 114 records; both shipped fields' whole-storm counts reproduced | worst **3.8e-16** relative, kept pairs identical; 166 storms, 293 comparisons, held out by family: main and recovery `⟨O/C⟩` **1.022** (solar wind 1.007) against NRLMSISE-00's 1.111, post-storm 1.036 against 0.999; Wang et al.'s MSIS finding (20–30 % and 10 % low) is not reproduced: `⟨O/C⟩` 1.111 and 0.999 (§10.33) | tools/fit-sdtm-corpus.py |
 | SDTM-1 on named storms and post-storm targets | Ф23.D: the storms and the post-storm overcooling the drag literature names (D9-5, D9-7) as rows of the gate, held out by family, beside NRLMSISE-00 at the same samples | `case_change` against Maxima at 40 digits on three satellites' samples; the named storms from §10.33's records, whose four families' tables these runs reproduce byte for byte | worst **1.2e-15**, orbits identical; 12 May 2024 Swarm A, C, B measured −27.4, −25.1, −12.7 % (Ranjan et al. 22, 23, 11.37 %): SDTM-1 −3.6 to −4.1 %, NRLMSISE-00 +13 to +17 %, neither overcools; Halloween 2003 recovery −28 to −33 %: SDTM-1 −3.1 to +0.4 % (its daily excess saturated), NRLMSISE-00 −25 to −26 %; Starlink 2022 (`ap` 56) +99 to +123 %: SDTM-1 +83 to +113 % (84–92 % of it), NRLMSISE-00 +48 to +58 % (about half), the solar-wind field +140 to +188 % (an overshoot); SDTM-1's post-storm `⟨O/C⟩` 1.009–1.083 in every bin of the storm's peak `ap`, so overcooling is an event, not that phase's average (§10.34) | tools/fit-sdtm-corpus.py |
+| SDTM-1 without the time or the storm it saw | Ф30.B, Ф30.C: the frozen form on 38 declared splits, everything fitted rebuilt in each fold, intervals resampling whole days, rotations, years, storms and families, the difference paired | leak tests that fail on a deliberately leaked row, storm or map; the design effect and the cluster bootstrap's variance in Maxima (`derivations/cluster_design_effect.mac`, 13 identities, PARI agrees); a known `ρ` recovered on a synthetic series | reproduces §10.28's 20.8 / 21.0 / 50.1 %; rolling origin 25.8 %, one storm out 23.8 %, joint 21.8 %, against NRLMSISE-00's 52.6, 56.6, 73.4 %; two of eleven storms lost; difference to NRLMSISE-00 on years −29.25 [−42.63, −18.37], a design effect of 40; `ap60` is better than the shipped drive by +0.09 [+0.03, +0.15] (§10.36) | tools/evaluate-sdtm.py, tools/cluster-intervals.py |
 
 ### Tides
 
@@ -9094,6 +9095,137 @@ The same holds for `α_n` and `σ_t`. At `K` = 1.44e6 Pa⁻¹, an oxygen density
 **Not done here.** The bridges do not expose `cll_panel`, `SurfaceModel` or
 `langmuir_coverage` yet. The coefficients use one mean molar mass, not one speed ratio per species.
 No `K` is fitted to the corpus.
+
+### 10.36 SDTM-1 without the time or the storm it saw, and with clustered intervals (Ф30.B, Ф30.C)
+
+Every number from §10.21 to §10.34 comes from one set of folds: one mission family out, the others in. Those
+folds chose the form they report (`docs/sdtm-selection-ledger.md`), and a held-out family still saw the
+storms and the driver history of the families that fitted it, because the missions overlap in time. Their
+intervals were also taken on rows, and the rows of one satellite are 2 h apart in one storm. This section
+asks the two questions that were left open: what the frozen form does on a time or a storm it did not see,
+and how far the numbers are from each other once the intervals respect the clustering. It chooses nothing.
+The field is the baseline of `docs/sdtm1-baseline.json`.
+
+**The harness.** `tools/evaluate-sdtm.py` is separate from the fit. `docs/sdtm-splits.json` declares 38
+splits before any is read: 5 by family, 7 by rolling origin, 11 with one storm out, its recovery masked and
+the indices before it kept as input, and 15 with a storm and a family out together, of which 6 have rows.
+The ridge's scale and, for the solar-wind field, the coupling map are rebuilt inside each fold. `guard` and
+`guard_map` refuse a fold that breaks this, and `tools/test_evaluate_sdtm.py` holds them to it with
+deliberate leaks: a future row, a row in both sets, a row of the held-out storm or family, a map fitted on a
+test hour. Every fold reads the measured indices, so this is **reconstruction**, not a forecast.
+
+**The reproduction gate.** With the old penalty, whose scale came from the whole corpus, the family folds
+give 20.8, 21.0 and 50.1 %, §10.28's printed digits. The ridge's scale rebuilt inside each fold gives the
+same digits, so that leak did not move the headline.
+
+**The four kinds of split** (`evaluate-sdtm.py summary`), MAPE on the thinned rows:
+
+| split | rows | SDTM-1 | each satellite's mean removed in the fold | NRLMSISE-00 |
+|---|---|---|---|---|
+| one family out | 365 211 | 20.8 % | 21.0 % | 50.1 % |
+| rolling origin | 325 939 | 25.8 % | 21.5 % | 52.6 % |
+| one storm out, recovery masked | 2 645 | 23.8 % | 18.2 % | 56.6 % |
+| storm and family out together | 898 | 21.8 % | 18.8 % | 73.4 % |
+
+**Out of time, the level drifts and the shape holds.** The rolling origin costs 5.0 points of MAPE, and
+removing each satellite's mean in the fold takes back 4.3 of them. Two folds carry the loss. The cut at 2005
+scores 45.6 % with a median model/measured of 1.349 (23.5 % with the mean removed), and the cut at 2017 scores
+32.5 % at 1.167 (23.9 %). The other five are 16.4–27.1 %. So a reader who carries a fitted scale gets about
+21 %. A reader who takes the field as it stands, years past its data, should expect its mean to be off, by up
+to a third in the worst of seven folds. This section does not say why those two folds drift.
+
+**One storm out.** Nine of eleven storms beat NRLMSISE-00, most by a wide margin (2003-10-29: 22.6 % against
+85.4 %; 2024-05-10: 24.9 % against 61.9 %; 2024-10-10: 16.4 % against 76.4 %). **Two do not:** 2001-03-31,
+25.6 % against 13.2 %, with a median model/measured of 0.753, and 2025-11-12, 18.6 % against 14.5 %. The worst
+fold is 2003-11-20 at 45.9 %, a median ratio of 1.419, and that error is in the level: 16.0 % with the mean
+removed.
+
+**Clustered intervals.** `tools/cluster-intervals.py` resamples whole clusters and pairs the difference on
+each draw. The levels are the row, the day, a 27-day rotation, the year, the storm (a row outside every storm
+window goes to its rotation) and the family, whose 5 clusters it enumerates exactly. The design effect
+`1 + (m − 1)ρ`, Fisher's variance of the ANOVA `ρ̂` and the bootstrap's own variance are in
+`derivations/cluster_design_effect.mac` (13 identities; PARI recomputes the exact ones), and
+`tools/test_cluster_intervals.py` recovers a synthetic series' known `ρ` inside its stated error. The family folds, 95 %:
+
+| rows | SDTM-1 | NRLMSISE-00 | difference, on rows | on years | on storms | on families |
+|---|---|---|---|---|---|---|
+| all, 365 211 | 20.83 [19.32, 22.72] | 50.08 [38.31, 64.71] | −29.25 [−31.31, −27.42] | [−42.63, −18.37] | [−39.50, −22.73] | [−31.48, −25.51] |
+| Ap < 15 | 20.93 [19.14, 23.11] | 53.25 [39.68, 69.44] | −32.31 [−34.82, −30.14] | [−47.04, −19.89] | [−45.03, −24.69] | [−35.58, −27.97] |
+| 15 ≤ Ap < 50 | 20.11 [18.96, 21.27] | 34.90 [30.88, 40.46] | −14.79 [−15.07, −14.52] | [−20.07, −11.02] | [−16.98, −12.61] | [−16.55, −12.47] |
+| Ap ≥ 50, 4 299 | 23.88 [21.18, 25.86] | 35.43 [28.16, 41.45] | −11.55 [−12.51, −10.67] | [−16.68, −5.64] | [−15.91, −7.28] | [−13.36, −9.85] |
+| Ap ≥ 100, 814 | 23.65 [21.70, 26.01] | 45.33 [32.17, 55.14] | −21.68 [−24.59, −18.90] | [−31.23, −9.34] | [−35.13, −10.99] | [−26.84, −15.17] |
+| inside a storm window, 23 683 | 21.35 [20.07, 22.64] | 35.26 [30.84, 40.04] | −13.91 [−14.34, −13.49] | [−17.93, −10.18] | [−16.69, −11.29] | [−15.27, −12.27] |
+
+The two models' columns are on years. Rolling origin, on years: all rows 25.76 against 52.58, a difference of
+−26.82 [−41.39, −15.28]; Ap ≥ 50, 27.21 against 33.87, −6.66 [−12.89, −0.31]; Ap ≥ 100, 26.31 against 38.59,
+−12.28 [−17.46, −3.63].
+
+**What the clustering changes.** A row-level interval on the difference is about six times too narrow: its
+design effect at the year level is 40, against a `ρ` of only 0.035 for the absolute error inside a 27-day
+block (0.087 out of time). The small `ρ` hides a large `m`. **What it does not change:** the lead over
+NRLMSISE-00 survives at every level in every row of the table, and out of time too, where Ap ≥ 50 on years is
+the closest call, with its upper end at −0.31.
+
+**NRLMSISE-00's own number is unstable.** 292 % at a flux excess `d ≥ 0.5`, year-level interval
+[50.6, 1 090.9], because a flare-contaminated flux sets its density several times too high on a few days
+(§10.21). Those 6 815 rows are about 5.5 of its 50.1 points, so the fair summary of the lead is the bins above,
+not the one headline.
+
+**Each mechanism against the same fold rows** (`--field no_gain`, and so on; each field is the shipped form
+with the one thing removed or changed, refitted in each fold). The shipped field's MAPE minus the variant's,
+on years, so negative means the mechanism helps:
+
+| mechanism | §, headline | all rows | Ap ≥ 50 | Ap ≥ 100 | flux excess ≥ 0.5 | storm window |
+|---|---|---|---|---|---|---|
+| nitric-oxide cooling | §10.25 | −0.31 [−0.49, −0.15] | −5.03 [−7.07, −2.79] | −9.87 [−14.09, −2.89] | −1.33 [−3.81, +0.26] spans 0 | −2.14 [−3.48, −0.92] |
+| flux-excess saturation | §10.26 | −1.66 [−2.94, −0.65] | −1.37 [−3.76, +0.94] spans 0 | −4.14 [−12.56, +2.40] spans 0 | −59.28 [−171.16, −13.55] | −7.24 [−18.21, −0.10] |
+| storm flux gain | §10.27, §10.28 | −0.54 [−0.72, −0.37] | −2.85 [−4.38, −1.58] | −1.93 [−4.52, +1.11] spans 0 | −0.22 [−0.74, +0.16] spans 0 | −1.92 [−2.68, −1.24] |
+| 3-hourly `ap`, not `ap60` | §10.30, D-26 | **+0.09 [+0.03, +0.15]** | +0.47 [−0.10, +1.01] spans 0 | +0.05 [−1.36, +1.44] spans 0 | +0.11 [−0.16, +0.28] spans 0 | **+0.39 [+0.29, +0.52]** |
+| solar-wind field minus shipped | §10.31, §10.32 | −0.38 [−0.56, −0.19] | −0.26 [−1.19, +0.81] spans 0 | +0.31 [−1.58, +3.84] spans 0 | −0.64 [−1.13, −0.10] | −0.56 [−0.82, −0.30] |
+
+**Reading the table.** Every mechanism that shipped helps on all rows and inside a storm, and each of the three
+carries one regime of its own: the cooling at Ap ≥ 100, the saturation at the flux excess, the gain at Ap ≥ 50.
+**Four things a reader of the earlier sections would not guess.** The gain does not significantly lower MAPE at
+Ap ≥ 100. The saturation's interval at Ap ≥ 50 and at Ap ≥ 100 spans zero, as its target is elsewhere. The
+solar-wind field's lead on MAPE at Ap ≥ 50 and Ap ≥ 100 spans zero: §10.31's result at the largest storms is the
+*peak* ratio, 0.71 to 0.94, which is not this statistic, and this table does not refute it. And `ap60` is
+significantly better than the shipped 3-hourly drive on all rows and in storm windows, by 0.09 and 0.39 points.
+§10.30 measured that and kept the 3-hourly `ap` for what a forecast can read (D-26). That argument stands, and the
+cost is now stated with its interval.
+
+**The flux's window.** A field refitted on the centred 81-day mean (`--field centred`) scores 21.1 % on the family
+folds and 26.0 % on rolling origin, against 20.8 and 25.8 %. So the centred mean, which needs 40 days of flux that
+have not happened (§10.5), does not help density either. It is measured here for §10.37.
+
+**§10.33's phases, with the storm as the cluster.** These read the 120 s rows, not the harness's, and the five
+folds' storm tables (`cluster-intervals.py --phases`). On Wang et al.'s scope, where both models scored the
+comparison, the interval resampling whole storms:
+
+| phase | comparisons, storms | SDTM-1 `⟨O/C⟩` | NRLMSISE-00 `⟨O/C⟩` | SDTM-1's `\|ln⟨O/C⟩\|` minus NRLMSISE-00's | spread of `ln`, SDTM-1 minus NRLMSISE-00 |
+|---|---|---|---|---|---|
+| onset | 293, 166 | 1.055 [1.042, 1.069] | 1.037 [1.019, 1.056] | **+0.018 [+0.002, +0.033]** | −0.032 [−0.061, −0.006] |
+| main and recovery | 291, 165 | 1.020 [0.998, 1.043] | 1.111 [1.081, 1.142] | −0.085 [−0.104, −0.066] | −0.037 [−0.067, −0.013] |
+| post-storm | 291, 165 | 1.035 [1.010, 1.060] | 0.999 [0.970, 1.030] | +0.033 [−0.017, +0.045] spans 0 | −0.028 [−0.059, −0.002] |
+
+§10.33 reads 1.022 and 1.036 for SDTM-1 in the last two rows on 293 comparisons, and the two NRLMSISE-00 misses
+are why these are 291. Its main-and-recovery lead survives the clustering, and so does its smaller spread in
+every phase. Over every comparison (204 storms), the post-storm spread's interval, −0.020 [−0.047, +0.001], does
+span zero. **Onset goes the other way:** NRLMSISE-00's mean is significantly nearer to 1.
+
+**What this does not settle.** §10.34's named storms are one storm each, so no interval by storm exists for them,
+and the 28–33 % fall in density after Halloween 2003, which SDTM-1 reads as at most 3 %, stays a case. No rival model has a row yet: JB2008, DTM2020 and a field
+frozen before 2020 are Ф30.D's. The form was chosen on the family folds, so these numbers are
+out-of-sample for the fit and not for the design (`docs/sdtm-selection-ledger.md`). And none of this is a forecast:
+every fold read the measured indices.
+
+Run (results stay under `data/validation/sdtm-eval/`, never committed):
+
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind origin
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py summary --field default
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/cluster-intervals.py --kind family --against no_gain
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/fit-sdtm-corpus.py --fit-sigma --cooling \
+      --excess-saturation fit --storm-gain input-power --caps storm-log1-lin --storms --folds CHAMP --storm-table CHAMP.csv
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/cluster-intervals.py --phases CHAMP.csv ...
 
 ---
 

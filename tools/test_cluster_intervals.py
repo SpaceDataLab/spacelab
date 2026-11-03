@@ -23,6 +23,24 @@ sys.modules["cluster_intervals"] = tool
 spec.loader.exec_module(tool)
 
 
+def test_the_phase_resampler_keeps_storms_whole_and_reports_the_pair() -> None:
+    # Two storms: every comparison of one reads +0.1 and of the other -0.1, on model a. Model b is a
+    # shifted by 0.3, so its spread equals a's on every draw and only the means move.
+    storms = np.array([0, 0, 0, 1, 1, 1])
+    log_a = np.array([0.1, 0.1, 0.1, -0.1, -0.1, -0.1])
+    draws = tool.phase_draws(log_a, log_a + 0.3, storms, 400)
+    assert np.allclose(draws[:, 5], 0.0)
+    # Whole storms: a draw is both of them, or the first twice, or the second twice.
+    values = set(np.round(np.log(draws[:, 0]), 12))
+    assert values == {-0.1, 0.0, 0.1}
+    assert np.allclose(np.log(draws[:, 1]) - np.log(draws[:, 0]), 0.3)
+    # Each storm with one value: a draw has no spread, unless it holds both storms.
+    assert np.allclose(draws[np.abs(np.log(draws[:, 0])) > 1e-9, 3], 0.0)
+    assert np.allclose(draws[np.abs(np.log(draws[:, 0])) < 1e-9, 3], 0.1)
+    # The distance from 1, and its difference, with |0.1| - |0.4|, 0 - 0.3 and |-0.1| - |0.2|.
+    assert set(np.round(draws[:, 2], 12)) == {-0.3, -0.1}
+
+
 def random_effects(
     rho: float, k: int, m: int, seed: int
 ) -> tuple[np.ndarray, np.ndarray]:

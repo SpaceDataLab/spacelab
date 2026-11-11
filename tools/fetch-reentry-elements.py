@@ -8,10 +8,14 @@ historical TLE archive (planet4589.org/space/elements) states no licence, so its
 One request a second, and it stops on anything other than 200 or 404. A file already on disk is not
 fetched again. Standard library only.
 
-    tools/fetch-reentry-elements.py [--dry-run] [--objects N ...]
+    tools/fetch-reentry-elements.py [--dry-run] [--objects N ...] [--cpf TARGET:N ...]
 
 `--objects` fetches these catalogue numbers instead of the campaign's candidates: the spheres of known
 area-to-mass that `plans/17` Ф23.T scores are payloads, which the candidates exclude.
+
+`--cpf` fetches ILRS predictions (CPF) of a laser target from the EUROLAS Data Center instead, for a
+sphere the archive has no element sets for (Ф23.U: ANDE). For each lead the lifetime campaign starts
+from, the last file issued at least a day before it, under `data/validation/reentry/cpf/TARGET/`.
 """
 
 from __future__ import annotations
@@ -29,6 +33,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "data" / "validation" / "reentry"
 GCAT = "https://planet4589.org/space/gcat/tsv/cat/satcat.tsv"
 ELEMENTS = "https://planet4589.org/space/elements"
+CPF = "https://edc.dgfi.tum.de/pub/slr/cpf_predicts"
+# `lifetime-campaign.py`'s leads, days before decay.
+LEADS_DAYS = (7, 30, 90, 365, 1095)
 AGENT = "spacelab-lifetime-campaign (spacedatalab.org)"
 # The years in which a sample of the archive holds element sets up to the decay itself.
 WINDOWS = ((1990, 2006), (2012, 2014))
@@ -95,10 +102,53 @@ def candidates(catalogue: str) -> list[int]:
     return found
 
 
+def cpf_files(target: str, years: range) -> list[tuple[dt.date, str]]:
+    """The target's prediction files by issue date, from the data centre's yearly listings."""
+    name = re.compile(rf">({re.escape(target)}_cpf_(\d{{6}})_\d+\.\w+)<")
+    found = []
+    for year in years:
+        page = fetch(f"{CPF}/{year}/{target}/")
+        time.sleep(1.0)
+        for match in name.finditer((page or b"").decode("ascii", "replace")):
+            found.append((dt.datetime.strptime(match[2], "%y%m%d").date(), match[1]))
+    return sorted(set(found))
+
+
+def fetch_cpf(spec: str, catalogue: str) -> None:
+    target, number = spec.split(":")
+    row = next(
+        line.split("\t")
+        for line in catalogue.splitlines()
+        if line.split("\t")[1:2] == [number]
+    )
+    launch, decay = decay_date(row[7]), decay_date(row[11])
+    if launch is None or decay is None:
+        sys.exit(f"{target}: no launch or decay date in GCAT")
+    files = cpf_files(target, range(launch.year, decay.year + 1))
+    folder = OUT / "cpf" / target
+    folder.mkdir(parents=True, exist_ok=True)
+    for lead in LEADS_DAYS:
+        start = decay - dt.timedelta(days=lead + 1)
+        chosen = [f for f in files if f[0] <= start]
+        if not chosen or start - chosen[-1][0] > dt.timedelta(days=4):
+            print(f"{target}: no file within four days before {lead} d")
+            continue
+        issued, name = chosen[-1]
+        target_path = folder / name
+        if not target_path.exists():
+            body = fetch(f"{CPF}/{issued.year}/{target}/{name}")
+            if body is None:
+                sys.exit(f"{name} is gone")
+            target_path.write_bytes(body)
+            time.sleep(1.0)
+        print(f"{target}: {lead} d <- {name}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--objects", type=int, nargs="+", metavar="N")
+    parser.add_argument("--cpf", nargs="+", metavar="TARGET:N")
     args = parser.parse_args()
     (OUT / "elements").mkdir(parents=True, exist_ok=True)
     catalogue = OUT / "satcat.tsv"
@@ -107,6 +157,11 @@ def main() -> int:
         if body is None:
             sys.exit("GCAT's catalogue is gone")
         catalogue.write_bytes(body)
+    if args.cpf:
+        text = catalogue.read_text(encoding="utf-8", errors="replace")
+        for spec in args.cpf:
+            fetch_cpf(spec, text)
+        return 0
     objects = args.objects or candidates(
         catalogue.read_text(encoding="utf-8", errors="replace")
     )

@@ -1,0 +1,34 @@
+/* The velocity of a tabulated orbit (plans/17 Ф23.U): an ILRS prediction file (CPF) holds positions only,
+   every h = 60 s, so crates/spacelab/examples/cpf_mean_state.rs takes the velocity at a node from the
+   nine nodes around it, f'(0) ~ (1/h) sum_{j=-4..4} w_j f(j h).
+
+   The weights are the ones exact for every polynomial of degree 8 or less (1), and they are the
+   derivative of the Lagrange interpolant through the nine nodes at the centre (2). The first term they
+   miss is c h^8 f^(9) (3), so on a circular orbit of mean motion n the velocity error is at most
+   |c| (n h)^8 v. Every identity prints 0.
+   derivations/central_difference.gp checks the weights in exact rationals and on sin.               */
+
+ratprint : false$
+display2d : false$
+nodes : makelist(j, j, -4, 4)$
+w : makelist(concat(w, j + 5), j, -4, 4)$
+pow(x, p) := if p = 0 then 1 else x^p$
+moments : makelist(sum(w[k]*pow(nodes[k], p), k, 1, 9) - (if p = 1 then 1 else 0), p, 0, 8)$
+weights : map(rhs, linsolve(moments, w))$
+expected : [1/280, -4/105, 1/5, -4/5, 0, 4/5, -1/5, 4/105, -1/280]$
+print("1 the weights exact to degree 8, the largest miss:", lmax(map(abs, weights - expected)))$
+
+lagrange : sum(f[k]*product(if m = k then 1 else (x - nodes[m])/(nodes[k] - nodes[m]), m, 1, 9), k, 1, 9)$
+derivative : subst(x = 0, diff(lagrange, x))$
+print("2 the Lagrange interpolant's slope at the centre:",
+      ratsimp(derivative - sum(expected[k]*f[k], k, 1, 9)))$
+
+c : sum(expected[k]*nodes[k]^9, k, 1, 9)/9!$
+print("3 the first missed term, c h^8 f^(9), c =", c, "; -1/630 minus c:", -1/630 - c)$
+
+/* A 400 km circular orbit, h = 60 s: (n h)^8/630 of the speed. */
+mu : 3986004415 * 10^5$
+a : 6378137 + 400000$
+n : sqrt(mu/a^3)$
+linel : 200$
+print("velocity error bound, m/s, at 400 km and h = 60 s:", float(abs(c)*(n*60)^8*n*a))$

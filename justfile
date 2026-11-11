@@ -27,6 +27,7 @@ harness:
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/test_no_step_accuracy.py
     uv run --no-project --python 3.13 --with numpy --with pandas --with scipy --with h5py python -I tools/test_column_on2.py
     cargo run -q -p spacelab-propagation --release --example column_on2 -- --check
+    cargo run -q -p spacelab --release --example cpf_mean_state -- --check
 
 fmt:
     cargo fmt --all -- --check

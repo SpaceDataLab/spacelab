@@ -42,6 +42,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "data" / "validation" / "reentry"
 FEED = ROOT / "data" / "validation" / "density" / "SW-All.csv"
 WORKER = ROOT / "target" / "release" / "examples" / "lifetime_campaign"
+CPF_STATE = ROOT / "target" / "release" / "examples" / "cpf_mean_state"
 
 DAY = 86_400.0
 LEADS_DAYS = (7, 30, 90, 365, 1095)
@@ -819,8 +820,40 @@ SPHERES = (
     (25769, "Starshine 1", 39.0, 0.475, "eoPortal, STARSHINE"),
     (26996, "Starshine 2", 39.0, 0.475, "eoPortal, STARSHINE: as Starshine 1"),
     (26929, "Starshine 3", 91.0, 0.94, "eoPortal, STARSHINE; ILRS, Starshine 3"),
+    # Ф23.U: the 1990s arm. The 6-inch spheres are 5.000 kg of aluminium in two press kits. The
+    # 4-inch ones are 1.482 kg of aluminium in Bowman & Moe (AAS 05-257, citing JSC-27242) but 4.256 kg
+    # of steel in the STS-53 kit and GCAT; they decayed before the 6-inch ones, which only aluminium
+    # explains, so they enter as aluminium.
+    (22994, "ODERACS E (6 in)", 5.000, 0.1524, "STS-60 and STS-63 press kits"),
+    (22995, "ODERACS F (6 in)", 5.000, 0.1524, "STS-60 and STS-63 press kits"),
+    (23471, "ODERACS 2A (6 in)", 5.000, 0.1524, "STS-60 and STS-63 press kits"),
+    (22990, "ODERACS A (4 in)", 1.482, 0.1016, "Bowman & Moe, AAS 05-257"),
+    (22991, "ODERACS B (4 in)", 1.482, 0.1016, "Bowman & Moe, AAS 05-257"),
+    (23472, "ODERACS 2B (4 in)", 1.482, 0.1016, "Bowman & Moe, AAS 05-257"),
+    # The 2007-2010 arm, as flown: NRL, "ANDE-RR Flight Hardware Details" (2007) and "ANDE-2 Flight
+    # Hardware Details" (2009), hosted by the ILRS. GCAT's 75 kg and 0.4 m for FCal are the design's.
+    (29664, "ANDE-RR MAA", 52.04, 0.4826, "NRL, ANDE-RR Flight Hardware Details"),
+    (29667, "ANDE-RR FCal", 62.70, 0.4445, "NRL, ANDE-RR Flight Hardware Details"),
+    (35694, "ANDE-2 Castor", 47.45, 0.4826, "NRL, ANDE-2 Flight Hardware Details"),
+    (35693, "ANDE-2 Pollux", 27.442, 0.4826, "NRL, ANDE-2 Flight Hardware Details"),
 )
+# Spheres with no element sets in the archive, and their ILRS target names: their states are the
+# laser predictions `fetch-reentry-elements.py --cpf` fetches, turned into mean elements by
+# `cargo run -p spacelab --release --example cpf_mean_state`.
+CPF_TARGETS = {29664: "anderra", 29667: "anderrp", 35694: "andec", 35693: "andep"}
 SPHERE_CD = (1.2, 1.5, 1.8, 2.1, 2.4, 2.7, 3.0, 3.3, 3.6)
+
+
+def cpf_states(target: str) -> list[tuple[float, list[float]]]:
+    """Mean element sets, as `read_elements` returns them, from the target's prediction files."""
+    files = sorted(str(f) for f in (OUT / "cpf" / target).glob("*"))
+    if not files:
+        return []
+    out = subprocess.run(
+        [str(CPF_STATE), *files], capture_output=True, text=True, check=True
+    ).stdout
+    rows = [line.split("\t")[1:] for line in out.splitlines()]
+    return sorted((float(r[0]), [float(x) for x in r[1:]]) for r in rows)
 
 
 def needed_cd(lifetimes: dict[float, float], truth: float) -> float | None:
@@ -842,10 +875,18 @@ def spheres(args) -> int:
     catalogue = read_catalogue()
     jobs = []
     truth = {}
-    for number, name, mass, diameter, _ in SPHERES:
+    chosen = [s for s in SPHERES if not args.objects or s[0] in args.objects]
+    for number, name, mass, diameter, _ in chosen:
         decay = decay_time(catalogue[number]["DDate"])
-        path = OUT / "elements" / f"S{number:05d}"
-        sets = read_elements(path.read_text(encoding="utf-8", errors="replace"))
+        sets = (
+            cpf_states(CPF_TARGETS[number])
+            if number in CPF_TARGETS
+            else read_elements(
+                (OUT / "elements" / f"S{number:05d}").read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            )
+        )
         if decay is None or not sets:
             print(
                 f"{name}: no decay date or no element sets; run fetch-reentry-elements.py --objects"
@@ -890,7 +931,7 @@ def spheres(args) -> int:
         "sphere | A/m m2/kg | lead d | true remaining d | model | lifetime at C_d 2.1 / 2.4 / 2.7, d | "
         "C_d it needs"
     )
-    for number, name, mass, diameter, _ in SPHERES:
+    for number, name, mass, diameter, _ in chosen:
         for lead in LEADS_DAYS:
             if (number, lead) not in truth:
                 continue
@@ -937,6 +978,13 @@ def main() -> int:
     sub.add_parser("cases").set_defaults(func=cases)
     sphere = sub.add_parser("spheres")
     sphere.add_argument("--processes", type=int, default=(os.cpu_count() or 2) // 2)
+    sphere.add_argument(
+        "--objects",
+        type=int,
+        nargs="+",
+        metavar="N",
+        help="only these catalogue numbers",
+    )
     sphere.set_defaults(func=spheres)
     args = parser.parse_args()
     return args.func(args)

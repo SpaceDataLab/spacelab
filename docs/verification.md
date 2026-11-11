@@ -380,6 +380,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Spheres by era | Ф23.U: ten more smooth spheres of known area-to-mass, six from 1994–1996 (ODERACS) and four from 2007–2010 (ANDE, its states from NRL's laser predictions), the `C_d` each model needs for the true lifetime | the nine-node central difference exact to degree 8 in Maxima and PARI/GP; the CPF chain's `--check` recovers a known mean state to 6 µm in `a` | ODERACS agrees with GFZ-1 (SDTM-1 needs 2.77–3.17 against 2.23–2.37); ANDE, in SDTM-1's own years, needs 2.49–2.96, so SDTM-1 is too thin near solar minimum at 200–350 km in both eras; both models need 11 % less in 2007–2010, the era's share, which a secular term would remove (§10.43) | tools/lifetime-campaign.py, crates/spacelab/examples/cpf_mean_state.rs |
 | The ablation ladder | Ф30.F: nine rungs from the Bates profile on the flux to the solar wind, each the rung above in a limit, fitted and scored on the five family and eleven storm-out folds, with paired intervals on storm windows and 27-day blocks | each removal a limit of the shipped form in Maxima (`derivations/sdtm_ablation.mac`) | geography and season −20.6 points; the index −2.1; heating alone loses 6.6 on the storm folds and cooling wins 14.0 back; the kernel's second constant buys nothing; saturation −1.7, in the pre-storm phase; gain −0.5; the solar wind −0.4, gaining in every column; wall time not measured (§10.44) | tools/ablation-table.py |
 | One level per satellite, or a scale each | Ф30.G: what the shipped per-satellite scales buy held out, the most any scale could buy, and one level for every satellite, on the five family folds | `no_scales` is the shipped field on one level (`tools/test_evaluate_sdtm.py`) | the scales stay: one level costs +0.47 [+0.22, +0.73] points; the best constant per satellite bounds any scale at 0.35 points; the training mean is the wrong level (21.43 %); GOCE's scale runs +4.4 to +19.4 %; GRACE-FO C's v02c sits below its v02 by about −4 × 10⁻¹⁵ kg m⁻³, 4.4 % at the median and 24 % in the lowest density tercile of June 2018 (F72); the other seven satellites miss v02 less (21.9 against 24.2 %), but fitting on v02 costs the other families +0.33 [+0.15, +0.52], a level effect, and raises their level below F10.7a 80 by 2.6–4.4 %, about 4 of the spheres' 7–25 % (§10.45) | tools/satellite-scale.py, tools/density-versions.py, tools/corpus-variant.py, tools/low-flux-level.py |
+| The post-storm drop, four rivals | Ф23.J: a boundary-oxygen factor, a quiet offset δ, a linear form and the nitric oxide's time scaled by the flux, each added to the shipped form and fitted on the family and storm-out folds, then on §10.33's storm protocol and §10.34's named cases | each rival's step, fixed points and limits in Maxima and PARI/GP (`sdtm_composition`, `sdtm_overcooling`, `sdtm_nitric_flux`); `kn` held at Wang et al.'s middle to 30 digits in both | no rival reproduces the drop: 12 May 2024 at best −9.4 % against −25 to −27 % measured; δ fits to 0, linear costs +3.07 points in main and recovery, composition is unstable and raises the post-storm `⟨O/C⟩` to 1.126 at `ap` ≥ 300; the fitted `kn` sits at its bound 3 (a ratio of 23, Wang et al. 3–4); held at their 1.1933 with no parameter added it wins every paired measure (−0.06 [−0.09, −0.03] on the families, −0.77 [−0.99, −0.57] in main and recovery, −0.45 [−0.83, −0.05] on the storm folds) but lifts the post-storm `⟨O/C⟩` 0.1–0.9 points; shipping it is D-35 (§10.46) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/ablation-table.py |
 
 ### Tides
 
@@ -10000,6 +10001,93 @@ Run (results stay under `data/validation/sdtm-eval/`):
     uv run --no-project --with numpy --with pandas python -I tools/corpus-variant.py --sat GC --version v02 --out corpus-gc-v02
     # then the five family folds with --field gc_v02, and tools/satellite-scale.py --field gc_v02
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/low-flux-level.py --fields default gc_v02
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
+
+### 10.46 The post-storm drop: four rivals, held out (Ф23.J)
+
+§10.34 found that no model reproduces the measured density drop after a storm: on 12 May 2024 Swarm measures
+−25 to −27 % and SDTM-1 gives −3.6 %. The cooling is proportional to the storm state, so it ends with the state.
+Four rivals add one mechanism each to the shipped form. Each has its gate in Maxima and PARI/GP:
+
+- **composition** (`derivations/sdtm_composition.mac`): the boundary's atomic oxygen times `e^c`, with
+  `c = c0 − c1 ln(1 + X/15)` and `X` the storm drive filtered with a fitted time `τ_c`;
+- **δ** (`derivations/sdtm_overcooling.mac`, A1–A9): the cooling acts on `D + δ`, Weimer's quiet offset;
+- **linear** (the same file, B1–B5): `dD/dt = (H − D − βN)/τ_h`, linear in the state, without saturation;
+- **the nitric oxide's time scaled by the flux** (`derivations/sdtm_nitric_flux.mac`):
+  `τ_NO (F10.7a/150)^(−kn)`, after Wang et al. (2026), who find the relaxation 3–4 times shorter at solar
+  maximum. `nitric_flux` fits `kn`; `nitric_flux_wang` holds it at `ln 3.5 / ln(200/70) = 1.1933`, the middle
+  of their ratio between F10.7a 70 and 200, to 30 digits in both engines, and adds no parameter.
+
+MAPE held out, in %, on Ф30.B's five family folds and eleven storm-out folds:
+
+| field | parameters | family: all | outside storms | main and recovery | post-storm | storm folds |
+|---|---|---|---|---|---|---|
+| shipped | 49 | 20.83 | 20.81 | 21.65 | 19.47 | 23.79 |
+| composition | 52 | 20.82 | 20.80 | 21.49 | 19.33 | 22.95 |
+| δ | 50 | 20.84 | 20.81 | 21.74 | 19.73 | not run |
+| linear | 49 | 21.15 | 21.00 | 24.72 | 21.13 | not run |
+| `nitric_flux`, `kn` fitted | 50 | 20.72 | 20.77 | 20.24 | 18.67 | 23.62 |
+| `nitric_flux_wang`, `kn` held | 49 | 20.78 | 20.79 | 20.88 | 19.07 | 23.34 |
+
+Each rival minus the shipped field, in percentage points, paired on the same rows; the interval resamples storm
+windows and 27-day blocks:
+
+| field | family: all | outside storms | main and recovery | storm folds |
+|---|---|---|---|---|
+| composition | −0.02 [−0.06, +0.03] spans 0 | −0.01 [−0.05, +0.04] spans 0 | −0.16 [−0.33, −0.00] | −0.83 [−1.83, +0.03] spans 0 |
+| δ | +0.01 [−0.00, +0.02] spans 0 | +0.00 [−0.01, +0.01] spans 0 | +0.09 [−0.07, +0.26] spans 0 | — |
+| linear | +0.31 [+0.24, +0.40] | +0.18 [+0.13, +0.23] | +3.07 [+1.68, +4.62] | — |
+| `nitric_flux` | −0.11 [−0.17, −0.06] | −0.05 [−0.10, +0.01] spans 0 | −1.41 [−1.91, −0.94] | −0.16 [−1.04, +0.72] spans 0 |
+| `nitric_flux_wang` | −0.06 [−0.09, −0.03] | −0.02 [−0.05, +0.00] spans 0 | −0.77 [−0.99, −0.57] | −0.45 [−0.83, −0.05] |
+
+§10.33's storm protocol and §10.34's named cases, held out by family (`--storms --rival`); 204 storms, 630
+comparisons. `⟨O/C⟩` is the mean model/measured, then its scatter `StD⟨O/C⟩`:
+
+| field | all | main and recovery | post-storm | post-storm `⟨O/C⟩` by peak `ap`: 80–100, 100–150, 150–200, 200–300, ≥ 300 | main and recovery, `ap` ≥ 300 |
+|---|---|---|---|---|---|
+| shipped | 1.024, 10.7 % | 1.013, 14.7 % | 1.033, 16.7 % | 1.037, 1.027, 1.012, 1.009, 1.083 | 1.107 |
+| composition | 1.030, 10.8 % | 1.023, 14.8 % | 1.041, 16.7 % | 1.040, 1.032, 1.029, 1.027, 1.126 | 1.149 |
+| `nitric_flux` | 1.031, 10.1 % | 1.026, 13.9 % | 1.030, 15.9 % | 1.032, 1.029, 1.003, 1.008, 1.086 | 1.172 |
+| `nitric_flux_wang` | 1.026, 10.3 % | 1.016, 14.0 % | 1.036, 16.2 % | 1.038, 1.031, 1.016, 1.018, 1.092 | 1.135 |
+
+| named case | measured | shipped | composition | `nitric_flux` | `nitric_flux_wang` |
+|---|---|---|---|---|---|
+| Halloween 2003 recovery, GRACE A / CHAMP | −32.6 / −27.6 % | +0.4 / −3.1 % | −5.7 / −5.4 % | −3.2 / −4.8 % | −1.9 / −4.4 % |
+| Starlink, February 2022, GRACE-FO C / Swarm A | +122.7 / +99.4 % | +112.9 / +83.2 % | +111.3 / +83.5 % | +116.9 / +87.5 % | +113.8 / +84.6 % |
+| 12 May 2024, Swarm A / B | −27.4 / −12.7 % | −3.6 / −4.1 % | −5.0 / −5.5 % | −9.4 / −8.8 % | −6.3 / −6.3 % |
+
+Findings:
+
+- **No rival reproduces the drop.** The deepest on 12 May 2024, `nitric_flux`, takes Swarm A from −3.6 to −9.4 %
+  against −27.4 % measured; the deepest on the Halloween recovery, composition, takes GRACE A from +0.4 to −5.7 %
+  against −32.6 %. On these two each rival closes at most a quarter of the gap. The drop is not a property of
+  the state's time constant, of a quiet offset, or of a boundary oxygen fitted to these satellites.
+- **δ and linear are out on the family folds.** δ fits to 0 in four of five folds (370 in the fifth, a degenerate
+  optimum), so the offset is not in the data. The linear form loses saturation and costs +3.07 points in main and
+  recovery, as F63 predicted. Their storm folds and storm protocol were not run.
+- **Composition is unstable and biases the large storms.** Its `c0` runs from −0.27 to +0.19 across folds and
+  `τ_c` reaches its 480 h bound in two. It deepens the named drops by 1.4 to 6.1 points, but raises the
+  post-storm `⟨O/C⟩` in every size bin, to 1.126 at `ap` ≥ 300. It fails the gate.
+- **The fitted `kn` is not Wang et al.'s.** It sits at its upper bound 3 in all five folds: a ratio of about 23
+  between F10.7a 70 and 200, against their 3–4. It buys the most in main and recovery (−1.41 points), but its
+  main and recovery `⟨O/C⟩` at `ap` ≥ 300 rises from 1.107 to 1.172. The bound stands in for another term.
+- **Held at Wang et al.'s value, the flux-scaled time is the one rival that wins every paired measure.** With no
+  parameter added it buys −0.06 points on the families, −0.77 in main and recovery and −0.45 on the storm folds,
+  each interval clear of 0. It lowers the storm scatter (`StD⟨O/C⟩` 10.7 to 10.3 %) and moves every named case
+  toward the measured, by 0.9 to 2.7 points. Against the gate it moves the post-storm `⟨O/C⟩` up by 0.1 to 0.9
+  points in every size bin and main and recovery at `ap` ≥ 300 from 1.107 to 1.135 (33 comparisons). A form change
+  of the frozen field, a re-baseline and a ledger row, is a decision for the plan (D-35), not made here.
+
+Run (the harness folds stay under `data/validation/sdtm-eval/`):
+
+    for f in composition delta linear nitric_flux nitric_flux_wang; do for s in CHAMP GOCE GRACE GRACE-FO Swarm; do
+      uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind family --field $f --only family-$s
+    done; done
+    # the eleven storm-out folds: --kind storm --field F --only storm-..., for composition, nitric_flux and nitric_flux_wang
+    for r in composition nitric_flux nitric_flux_wang; do
+      uv run --no-project --with numpy --with pandas --with scipy python -I tools/fit-sdtm-corpus.py --fit-sigma --cooling \
+        --excess-saturation fit --storm-gain input-power --caps storm-log1-lin --storms --storm-table $r.csv --rival $r
+    done
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
 
 ---

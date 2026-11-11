@@ -96,6 +96,17 @@ FIELDS: dict[str, dict[str, Any]] = {
     "first_order": {**RUNG, "limit": "first-order"},
     "two_constant": RUNG,
     "nitric": {**RUNG, "cooling": True},
+    # Every satellite on the field's level, no log scale of its own (Ф30.G): with the shipped free
+    # scales, the two ends a hierarchical prior on the scales lies between.
+    "no_scales": {**FORM, "scales": False},
+    # Ф23.J's rivals for the post-storm drop. The composition rival: the boundary's atomic oxygen carries a
+    # quiet factor and a storm depletion that outlasts the heating (`derivations/sdtm_composition.mac`).
+    "composition": {**FORM, "composition": True},
+    # The delta rival: the cooling carries Weimer's quiet offset, so a quiet drive under a high nitric-oxide
+    # state overcools; and the review's linear form, which has no saturation
+    # (`derivations/sdtm_overcooling.mac`).
+    "delta": {**FORM, "delta": True},
+    "linear": {**FORM, "linear": True},
 }
 
 
@@ -329,6 +340,10 @@ def command_run(args) -> int:
             settings["wind"],
             penalty_rows=None if args.legacy_penalty else train,
             limit=settings["limit"],
+            scales=settings.get("scales", True),
+            composition=settings.get("composition", False),
+            delta=settings.get("delta", False),
+            linear=settings.get("linear", False),
         )
         p = model.fit(train)
         residual, _ = model.score(p, test)

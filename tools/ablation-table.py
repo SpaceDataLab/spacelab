@@ -33,6 +33,14 @@ RUNGS = (
     ("+ flux gain: shipped", "default", "no_gain"),
     ("+ solar wind", "solar_wind", "default"),
 )
+# Variants of the shipped form beside the ladder, paired with it the same way: Ф30.G's one level for every
+# satellite, and Ф23.J's rivals for the post-storm drop.
+RIVALS = (
+    ("one level, no satellite scales", "no_scales", "default"),
+    ("+ composition: boundary oxygen", "composition", "default"),
+    ("+ delta: the cooling's quiet offset", "delta", "default"),
+    ("linear heating and cooling", "linear", "default"),
+)
 KINDS = ("family", "storm")
 
 
@@ -85,7 +93,7 @@ def main() -> int:
     rows = fit.load_corpus(harness.STEP, phase=harness.PHASE)
     t_all = rows.t.to_numpy()
     family_all = rows.family.to_numpy()
-    read = {(f, k): folds(harness, f, k) for _, f, _ in RUNGS for k in KINDS}
+    read = {(f, k): folds(harness, f, k) for _, f, _ in RUNGS + RIVALS for k in KINDS}
     missing = [f"{f}/{k}" for (f, k), z in read.items() if z is None]
     if missing:
         print("not yet run: " + ", ".join(missing), flush=True)
@@ -126,7 +134,7 @@ def main() -> int:
         "rung | field | parameters | "
         + " | ".join(f"{k}: {name}" for k, name in columns)
     )
-    for label, field, _ in RUNGS:
+    for label, field, _ in RUNGS + RIVALS:
         cells = []
         for kind, name in columns:
             z = read[field, kind]
@@ -150,7 +158,7 @@ def main() -> int:
     ]
     shown = [c for c in shown if c[0] in selections]
     print("rung | against | " + " | ".join(f"{k}: {name}" for k, name in shown))
-    for label, field, parent in RUNGS:
+    for label, field, parent in RUNGS + RIVALS:
         if parent is None:
             continue
         cells = []

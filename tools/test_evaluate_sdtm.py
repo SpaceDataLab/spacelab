@@ -182,6 +182,126 @@ def test_the_rungs_pack_their_kernel_slots_and_refuse_a_state_they_are_the_limit
         raise AssertionError("a rung with cooling was accepted")
 
 
+def test_no_scales_is_the_shipped_form_on_one_level() -> None:
+    fields = harness.FIELDS
+    assert "scales" not in fields["default"]
+    assert {k: v for k, v in fields["no_scales"].items() if k != "scales"} == fields[
+        "default"
+    ]
+    assert fields["no_scales"]["scales"] is False
+    pk = harness.fit.Packing(n_c=7, scaled=(), free_sigma=True, cooling=True)
+    assert pk.i_scale == pk.i_boundary + 1 and pk.size == pk.i_scale + 1
+
+
+def test_the_composition_rival_takes_three_slots_last_and_moves_no_other() -> None:
+    fields, fit = harness.FIELDS, harness.fit
+    assert {k: v for k, v in fields["composition"].items() if k != "composition"} == (
+        fields["default"]
+    )
+    common = {
+        "n_c": 7,
+        "scaled": ("SA",),
+        "free_sigma": True,
+        "cooling": True,
+        "free_excess": True,
+    }
+    shipped = fit.Packing(**common, free_gain=True, free_knee=True)
+    rival = fit.Packing(**common, free_gain=True, free_knee=True, composition=True)
+    assert (rival.i_gain, rival.i_knee, rival.i_excess) == (
+        shipped.i_gain,
+        shipped.i_knee,
+        shipped.i_excess,
+    )
+    assert rival.size == shipped.size + 3 and rival.i_oxygen == shipped.size
+    assert shipped.i_oxygen == -1
+
+
+def test_the_delta_and_linear_rivals_pack_their_slots_and_refuse_each_other() -> None:
+    fields, fit = harness.FIELDS, harness.fit
+    for name in ("delta", "linear"):
+        assert {k: v for k, v in fields[name].items() if k != name} == fields["default"]
+    common = {"n_c": 7, "scaled": ("SA",), "free_sigma": True, "cooling": True}
+    shipped = fit.Packing(**common, free_gain=True)
+    both = fit.Packing(**common, free_gain=True, composition=True, delta=True)
+    assert both.i_gain == shipped.i_gain and both.size == shipped.size + 4
+    assert (both.i_oxygen, both.i_delta) == (shipped.size, shipped.size + 3)
+    linear = fit.Packing(**common, free_gain=True, linear=True)
+    assert linear.size == shipped.size and linear.i_cool == shipped.i_cool
+    for wrong in ({"delta": True, "linear": True}, {"delta": True, "mix": 0.5}):
+        try:
+            fit.CorpusModel({}, np.array([]), (), (), 0.0, None, True, **wrong)
+        except ValueError:
+            continue
+        raise AssertionError(f"{wrong} was accepted")
+
+
+def test_the_delta_cooling_is_the_shipped_one_at_zero_and_settles_where_maxima_says() -> (
+    None
+):
+    fit = harness.fit
+    ap = np.random.default_rng(7).gamma(0.6, 25.0, 3000)
+    shipped = fit.cooling_grid(ap, 6.0, 20.0, 300.0, 10_800.0, 0)
+    assert np.array_equal(
+        fit.cooling_grid(ap, 6.0, 20.0, 300.0, 10_800.0, 0, delta=0.0), shipped
+    )
+    # `sdtm_overcooling.mac` A4: under a held drive h the state settles at h (Hs - delta)/(Hs + h).
+    h, hs, delta = 120.0, 250.0, 40.0
+    held = fit.cooling_grid(np.full(2000, h), 9.0, 30.0, hs, 10_800.0, 0, delta=delta)
+    assert np.isclose(held[-1], h * (hs - delta) / (hs + h), rtol=1e-12, atol=0.0)
+    # A storm, then quiet under a still-high N: below zero while delta N > H Hs.
+    storm = np.r_[np.full(8, 300.0), np.full(400, 5.0)]
+    after = fit.cooling_grid(storm, 9.0, 30.0, hs, 10_800.0, 0, delta=delta)
+    assert after.min() < 0.0 < after[-1]
+
+
+def test_the_linear_form_is_exact_settles_linearly_and_undershoots() -> None:
+    fit = harness.fit
+    tc, tn, beta, q = 9.0, 30.0, 0.35, 200.0
+    held = fit.linear_grid(np.full(3000, q), tc, tn, beta, 3600.0, 0)
+    assert np.isclose(held[-1], (1.0 - beta) * q, rtol=1e-12, atol=0.0)
+    # `sdtm_overcooling.mac` B4: after the drive stops, D e^(t/tn) -> -beta Q tn/(tn - tc).
+    out = fit.linear_grid(
+        np.r_[np.full(3000, q), np.zeros(600)], tc, tn, beta, 3600.0, 0
+    )
+    t = np.arange(1, 601, dtype=float)
+    assert out[3000:].min() < 0.0
+    assert np.isclose(
+        out[-1] * np.exp(t[-1] / tn), -beta * q * tn / (tn - tc), rtol=1e-9
+    )
+    # Exact for a held drive: three 1 h steps are one 3 h step.
+    ap = np.random.default_rng(3).gamma(0.6, 25.0, 500)
+    coarse = fit.linear_grid(ap, tc, tn, beta, 10_800.0, 0)
+    fine = fit.linear_grid(np.repeat(ap, 3), tc, tn, beta, 3600.0, 0)
+    assert np.allclose(fine[2::3], coarse, rtol=1e-12, atol=1e-10)
+    # Where the two times meet, the step is the limit of the steps beside it.
+    met = fit.linear_grid(ap, 12.0, 12.0, beta, 10_800.0, 0)
+    near = fit.linear_grid(ap, 12.0, 12.0 * (1.0 + 1e-7), beta, 10_800.0, 0)
+    assert np.allclose(met, near, rtol=1e-5, atol=1e-9)
+
+
+def test_the_oxygen_factor_moves_ln_rho_by_the_oxygen_mass_fraction() -> None:
+    g = harness.g
+    # `derivations/sdtm_composition.mac`'s shipped boundary at T_inf 700 and 1000 K, 200 km.
+    sigma, radius, base = 3.341439818644104e-5, 6_356_766.0, 120_000.0
+    zeta = np.full(2, (200_000.0 - base) * (radius + base) / (radius + 200_000.0))
+    t_inf = np.array([700.0, 1000.0])
+    w = np.array([0.38866192176198305, 0.2908741220196561])
+    d_ln = np.array([0.002326011527589191, 0.0012183443381514763])
+    shipped, slope = g.profile(t_inf, sigma, zeta)
+    assert np.allclose(slope, d_ln, rtol=1e-12, atol=0.0)
+    same = g.profile(t_inf, sigma, zeta, np.zeros(2))
+    assert np.array_equal(same[0], shipped) and np.array_equal(same[1], slope)
+    c = np.log(1.040 / 0.487542453257362)
+    moved, moved_slope = g.profile(t_inf, sigma, zeta, np.full(2, c))
+    assert np.allclose(moved - shipped, np.log1p(w * np.expm1(c)), rtol=1e-12, atol=0.0)
+    h = 1.0e-3
+    central = (
+        g.profile(t_inf + h, sigma, zeta, np.full(2, c))[0]
+        - g.profile(t_inf - h, sigma, zeta, np.full(2, c))[0]
+    ) / (2.0 * h)
+    assert np.allclose(moved_slope, central, rtol=1e-8, atol=0.0)
+
+
 def test_the_cap_sets_of_the_lowest_rungs_are_nested_in_the_shipped_one() -> None:
     g = harness.g
     k = (9 + 1) ** 2

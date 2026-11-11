@@ -420,6 +420,15 @@ class Packing:
     """The storm term's flux exponent `kappa` is fitted, after the excess (Ф23.B)."""
     free_knee: bool = False
     """And a constant `mu` beside it, `exp(mu + kappa f)`: the log regressor's knee, fitted."""
+    delta: bool = False
+    """With cooling, the cooling acts on `D + delta`, Weimer's quiet offset (`plans/17` Ф23.J,
+    `derivations/sdtm_overcooling.mac` A): `delta` in `ap` units, last."""
+    linear: bool = False
+    """With cooling, the review's linear form `dD/dt = (H - D - beta N)/heating` instead
+    (`derivations/sdtm_overcooling.mac` B): `ln beta` in the cooling's slot."""
+    composition: bool = False
+    """The boundary's atomic oxygen carries `e^c`, `c = c0 - c1 ln(1 + X/15)`, `X` the drive filtered with
+    its own time `tau_c` (`plans/17` Ф23.J): `c0`, `c1` and `ln tau_c` in hours, last."""
     limit: str | None = None
     """A rung of the ablation below the kernels (Ф30.F, `derivations/sdtm_ablation.mac`):
     `"first-order"`, the heating alone, `cooling_grid` at `H_s -> inf`, with its time in the onset slot;
@@ -493,12 +502,29 @@ class Packing:
     @property
     def i_gain(self) -> int:
         """`kappa`, after the excess, and absent when the storm term does not scale with the flux."""
-        return self.size - 1 - int(self.free_knee) if self.free_gain else -1
+        return (
+            self.size - 1 - int(self.free_knee) - self.n_tail if self.free_gain else -1
+        )
 
     @property
     def i_knee(self) -> int:
         """`mu`, last, and absent unless the knee is fitted."""
-        return self.size - 1 if self.free_knee else -1
+        return self.size - 1 - self.n_tail if self.free_knee else -1
+
+    @property
+    def n_tail(self) -> int:
+        """The rivals' slots after the knee: the composition's three, then `delta`."""
+        return 3 * int(self.composition) + int(self.delta)
+
+    @property
+    def i_oxygen(self) -> int:
+        """`c0`, then `c1` and `ln tau_c`; absent without the composition rival."""
+        return self.size - self.n_tail if self.composition else -1
+
+    @property
+    def i_delta(self) -> int:
+        """`delta`, last; absent unless the cooling carries the quiet offset."""
+        return self.size - 1 if self.delta else -1
 
     @property
     def size(self) -> int:
@@ -509,6 +535,7 @@ class Packing:
             + int(self.free_excess)
             + int(self.free_gain)
             + int(self.free_knee)
+            + self.n_tail
         )
 
 
@@ -520,6 +547,7 @@ def cooling_grid(
     cadence: float,
     first: int,
     cap: float = np.inf,
+    delta: float = 0.0,
 ) -> np.ndarray:
     """Heating with nitric-oxide cooling, on the driver's grid (`derivations/sdtm_no_cooling.mac`).
 
@@ -535,6 +563,10 @@ def cooling_grid(
     `H/(1 + q)` instead of stopping at `saturation`. Refuted, not derived: the fit sends `q` to
     its 1e4 bound in every fold (`docs/verification.md` §10.27).
 
+    A `delta` > 0 cools `D + delta` instead of `D`, Weimer's quiet offset: the step's target is
+    `(H - delta c)/(1 + c)`, `c` the cooling factor, below zero where a quiet drive meets a high `N`
+    (`derivations/sdtm_overcooling.mac` A). At 0 it is the shipped step bit for bit.
+
     The recursion starts at `first` from rest; entries before it are zero and are never read.
     """
     h = cadence / 3600.0
@@ -547,9 +579,40 @@ def cooling_grid(
         n_mean = drive + (n - drive) * mean_weight
         cooling = n_mean / saturation / (1.0 + n_mean / (cap * saturation))
         rate = (1.0 + cooling) / heating
-        target = drive / (heating * rate)
+        target = (drive - delta * cooling) / (heating * rate)
         d = target + (d - target) * np.exp(-rate * h)
         n = drive + (n - drive) * decay
+        out[i] = d
+    return out
+
+
+def linear_grid(
+    ap: np.ndarray,
+    heating: float,
+    nitric: float,
+    beta: float,
+    cadence: float,
+    first: int,
+) -> np.ndarray:
+    """The review's linear heating and cooling, `dD/dt = (H - D - beta N)/heating`, `dN/dt = (H - N)/nitric`.
+
+    Exact for the driver held over each interval, `N` and `D` both (`derivations/sdtm_overcooling.mac`
+    B): `D <- (1 - beta) H + (D - (1 - beta) H) e^(-h/heating) - beta (N - H) nitric phi`, with `phi =
+    (e^(-h/nitric) - e^(-h/heating))/(nitric - heating)`, which is `h e^(-h/heating)/heating^2` where the
+    two times meet. Its steady state `(1 - beta) H` has no saturation, and after a storm it undershoots
+    below zero. Conventions as `cooling_grid`'s.
+    """
+    h = cadence / 3600.0
+    slow, fast = np.exp(-h / nitric), np.exp(-h / heating)
+    gap = nitric - heating
+    phi = (slow - fast) / gap if abs(gap) > 1.0e-9 * heating else h * fast / heating**2
+    out = np.zeros(ap.size)
+    d = n = 0.0
+    for i in range(first, ap.size):
+        drive = ap[i]
+        level = (1.0 - beta) * drive
+        d = level + (d - level) * fast - beta * (n - drive) * nitric * phi
+        n = drive + (n - drive) * slow
         out[i] = d
     return out
 
@@ -635,6 +698,10 @@ class CorpusModel:
         wind: float | str | None = None,
         penalty_rows: np.ndarray | None = None,
         limit: str | None = None,
+        scales: bool = True,
+        composition: bool = False,
+        delta: bool = False,
+        linear: bool = False,
     ):
         """`penalty_rows` are the rows whose scale sets the ridge, every row when `None`; a harness
         that holds rows out passes the training rows, so that nothing of a test row reaches the fit
@@ -650,9 +717,16 @@ class CorpusModel:
         fast mode, `(tau_f h, w)` a fixed one, `"fit"` fits both after the other kernel slots.
         `wind`, with cooling and an hourly driver: the drive is `(1 - share) ap60 + share N`, `N` in
         `arg["wind"]`; `None` has no solar wind, a number is a fixed share, `"fit"` fits it. `limit`,
-        without cooling, mix, fast mode or wind, is one of `Packing.limit`'s rungs."""
+        without cooling, mix, fast mode or wind, is one of `Packing.limit`'s rungs. `scales=False`
+        fits no satellite a log scale of its own, so every satellite shares the field's level
+        (`plans/17` Ф30.G). `composition`, `delta` and `linear` add `Packing`'s rivals of those names;
+        `delta` and `linear` need the plain cooling, without a cap, mix or fast mode, and not each other."""
         if limit is not None and (cooling or mix or fast or wind):
             raise ValueError(f"the {limit} rung has no cooling, mix, fast mode or wind")
+        if (delta or linear) and (
+            cooling is not True or mix or fast or (delta and linear)
+        ):
+            raise ValueError("delta and linear each need the plain cooling, alone")
         self.a = arg
         self.sat = sat
         self.sigma = sigma
@@ -665,7 +739,7 @@ class CorpusModel:
         )
         self.pack = Packing(
             n_c=len(self.pairs),
-            scaled=train[1:],
+            scaled=train[1:] if scales else (),
             free_sigma=sigma is None,
             cooling=bool(cooling),
             capped=cooling == "capped",
@@ -675,6 +749,9 @@ class CorpusModel:
             free_excess=excess == "fit",
             free_gain=gain is not None,
             free_knee=gain == "input-knee",
+            delta=delta,
+            linear=linear,
+            composition=composition,
             limit=limit,
         )
         self.gain_form = gain
@@ -692,10 +769,12 @@ class CorpusModel:
         """Per-row `sqrt(weight)` of the loss, or `None` for every row alike."""
         self._design_key: tuple[float | None, ...] | None = None
         self._design: np.ndarray | None = None
+        self._depletion_key: tuple[float, ...] | None = None
+        self._depletion: np.ndarray | None = None
         reference = self.design(
             *(
                 (
-                    (6.0, 20.0, 300.0)
+                    (6.0, 20.0, 0.3 if linear else 300.0)
                     + ((10.0,) if cooling == "capped" else ())
                     + ((0.5,) if mix == "fit" or wind == "fit" else ())
                     + ((2.0, 0.1) if fast == "fit" else ())
@@ -705,6 +784,7 @@ class CorpusModel:
             ),
             excess=0.5 if self.pack.free_excess else self.excess_scale,
             gain=0.0 if gain else None,
+            delta=10.0 if delta else None,
         )
         if penalty_rows is not None:
             reference = reference[penalty_rows]
@@ -748,6 +828,10 @@ class CorpusModel:
             return np.log(f107a / g.REFERENCE_F107)
         return (f107a - g.REFERENCE_F107) / g.F107_SCALE
 
+    def delta(self, p: np.ndarray) -> float | None:
+        """`delta`, the cooling's quiet offset in `ap` units, or `None` where the cooling has none."""
+        return float(p[self.pack.i_delta]) if self.pack.delta else None
+
     def knee(self, p: np.ndarray) -> float | None:
         """`mu` of `exp(mu + kappa f)`, or `None` where the knee is held at `ln(1 + storm/15)`'s."""
         return float(p[self.pack.i_knee]) if self.pack.free_knee else None
@@ -769,8 +853,9 @@ class CorpusModel:
         excess: float | None = None,
         gain: float | None = None,
         knee: float | None = None,
+        delta: float | None = None,
     ) -> np.ndarray:
-        key = (*kernel, excess, gain, knee)
+        key = (*kernel, excess, gain, knee, delta)
         if self._design_key == key and self._design is not None:
             return self._design
         drive = self.drive(kernel)
@@ -785,6 +870,8 @@ class CorpusModel:
             grid = mixed_cooling_grid(
                 self.a["ap"], *kernel[:3], share, self.a["cadence"], self.first
             )
+        elif self.pack.linear:
+            grid = linear_grid(drive, *kernel[:3], self.a["cadence"], self.first)
         elif self.pack.cooling:
             grid = cooling_grid(
                 drive,
@@ -792,6 +879,7 @@ class CorpusModel:
                 self.a["cadence"],
                 self.first,
                 cap=kernel[3] if self.pack.capped else np.inf,
+                delta=delta or 0.0,
             )
         else:
             grid = g.storm_grid(self.a["ap"], *kernel, self.a["cadence"])
@@ -817,6 +905,11 @@ class CorpusModel:
         ):
             storm = storm * scale
         drivers = g.driver_matrix(f107, f107a, storm, self.a["doy"])
+        if self.pack.delta or self.pack.linear:
+            # These states go below zero, where `ln(1 + storm/15)` has no value: its odd extension
+            # (`derivations/sdtm_overcooling.mac` A6-A9), the same above zero.
+            a = np.sign(storm) * np.log1p(np.abs(storm) / g.REFERENCE_AP)
+            drivers[:, STORM_COLUMNS[2]], drivers[:, STORM_COLUMNS[3]] = a, a * a
         if scale is not None and self.gain_form == "amplitude":
             drivers[:, STORM_COLUMNS] *= scale[:, None]
         out = np.empty((drivers.shape[0], len(self.pairs)))
@@ -833,16 +926,34 @@ class CorpusModel:
                 excess=self.excess(p),
                 gain=self.gain(p),
                 knee=self.knee(p),
+                delta=self.delta(p),
             )
         exponent = design[index] @ p[: self.pack.n_c]
         t_inf = g.BOUNDARY_TEMPERATURE + np.exp(np.clip(exponent, -50.0, 50.0))
-        ln_rho, d_ln = g.profile(t_inf, self.shape(p), self.a["zeta"][index])
+        ln_rho, d_ln = g.profile(
+            t_inf, self.shape(p), self.a["zeta"][index], self.oxygen(p, index)
+        )
         scales = (
             self.indicator[index]
             @ p[self.pack.i_scale : self.pack.i_scale + len(self.pack.scaled)]
         )
         residual = ln_rho + p[self.pack.i_boundary] + scales - self.a["ln_rho"][index]
         return residual, d_ln * (t_inf - g.BOUNDARY_TEMPERATURE)
+
+    def oxygen(self, p: np.ndarray, index: np.ndarray) -> np.ndarray | None:
+        """`c` of the boundary's atomic oxygen on `index`, or `None` without the composition rival."""
+        pk = self.pack
+        if not pk.composition:
+            return None
+        quiet, depletion, tau = p[pk.i_oxygen : pk.i_oxygen + 3]
+        key = (self.share(self.kernel(p)) or 0.0, float(tau))
+        if self._depletion_key != key or self._depletion is None:
+            state = fast_grid(
+                self.drive(self.kernel(p)), np.exp(tau), self.a["cadence"], self.first
+            )
+            self._depletion_key = key
+            self._depletion = np.log1p(state[self.a["interval"]] / 15.0)
+        return quiet - depletion * self._depletion[index]
 
     def residual(self, p: np.ndarray, index: np.ndarray) -> np.ndarray:
         r, _ = self.score(p, index)
@@ -856,7 +967,11 @@ class CorpusModel:
         n, pk = index.size, self.pack
         out = np.zeros((n + pk.n_c, pk.size))
         design = self.design(
-            *self.kernel(p), excess=self.excess(p), gain=self.gain(p), knee=self.knee(p)
+            *self.kernel(p),
+            excess=self.excess(p),
+            gain=self.gain(p),
+            knee=self.knee(p),
+            delta=self.delta(p),
         )
         base, chain = self.score(p, index, design)
         out[:n, : pk.n_c] = design[index] * chain[:, None]
@@ -873,7 +988,10 @@ class CorpusModel:
         slots += (pk.i_sigma,) if pk.free_sigma else ()
         slots += (pk.i_excess,) if pk.free_excess else ()
         slots += (pk.i_gain,) if pk.free_gain else ()
-        for j in slots + ((pk.i_knee,) if pk.free_knee else ()):
+        slots += (pk.i_knee,) if pk.free_knee else ()
+        slots += tuple(range(pk.i_oxygen, pk.i_oxygen + 3)) if pk.composition else ()
+        slots += (pk.i_delta,) if pk.delta else ()
+        for j in slots:
             shifted = p.copy()
             shifted[j] += step
             out[:n, j] = (self.score(shifted, index)[0] - base) / step
@@ -881,7 +999,11 @@ class CorpusModel:
             out[:n] *= self.root_weight[index][:, None]
         # restore the cache to the unshifted kernel
         self.design(
-            *self.kernel(p), excess=self.excess(p), gain=self.gain(p), knee=self.knee(p)
+            *self.kernel(p),
+            excess=self.excess(p),
+            gain=self.gain(p),
+            knee=self.knee(p),
+            delta=self.delta(p),
         )
         out[n:, : pk.n_c] = np.diag(np.sqrt(n) * self.penalty)
         return out
@@ -906,6 +1028,10 @@ class CorpusModel:
             lower[pk.i_onset], upper[pk.i_onset] = np.log(0.5), np.log(72.0)
             lower[pk.i_gap], upper[pk.i_gap] = np.log(1.0), np.log(480.0)
             lower[pk.i_cool], upper[pk.i_cool] = np.log(5.0), np.log(1.0e5)
+            if pk.linear:
+                # beta from a cooling that is a sign to one that takes 99 % of the drive.
+                start[pk.i_cool] = np.log(0.3)
+                lower[pk.i_cool], upper[pk.i_cool] = np.log(1.0e-3), np.log(0.99)
         else:
             start[pk.i_onset], start[pk.i_gap] = np.log(3.0), np.log(15.0)
             lower[pk.i_onset], upper[pk.i_onset] = np.log(1.0 / 60.0), np.log(12.0)
@@ -944,6 +1070,19 @@ class CorpusModel:
             lower[pk.i_gain], upper[pk.i_gain] = -3.0, 3.0
         if pk.free_knee:
             lower[pk.i_knee], upper[pk.i_knee] = -3.0, 3.0
+        if pk.composition:
+            # Oxygen from e^-1 to e^1.5 of the boundary's, GOLD's column ratio at c = 0.76
+            # (`derivations/sdtm_composition.mac`); a storm term of either sign up to one e-fold per unit
+            # of `ln(1 + X/15)`, which is 3 at ap 300; its time from a heating's 3 h to 20 days. The
+            # term starts away from 0 so that `tau_c` has a gradient.
+            o = pk.i_oxygen
+            start[o : o + 3] = 0.0, 0.05, np.log(24.0)
+            lower[o : o + 3] = -1.0, -1.0, np.log(3.0)
+            upper[o : o + 3] = 1.5, 1.0, np.log(480.0)
+        if pk.delta:
+            # From the shipped cooling, 0, to an offset well past any saturation level the fit has found.
+            start[pk.i_delta] = 10.0
+            lower[pk.i_delta], upper[pk.i_delta] = 0.0, 2000.0
         out = least_squares(
             self.residual,
             start,

@@ -90,6 +90,7 @@ SPECIES = np.array(
 MASS = SPECIES[:, 0] * ATOMIC_MASS
 NUMBER = SPECIES[:, 1]
 ALPHA = SPECIES[:, 2]
+OXYGEN = 2
 
 # Regime edges of the shipped uncertainty table, in the model's own drivers: the 81-day mean flux, and
 # the storm kernel's response in units of `ap`. Both are quantities a caller already has to have in
@@ -276,9 +277,17 @@ def harmonic_mask(caps: tuple[int, ...], k: int) -> np.ndarray:
 
 
 def profile(
-    t_inf: np.ndarray, sigma: float, zeta: np.ndarray
+    t_inf: np.ndarray,
+    sigma: float,
+    zeta: np.ndarray,
+    oxygen: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """`(ln rho, d ln rho / d T_inf)` of the shipped profile, both analytic."""
+    """`(ln rho, d ln rho / d T_inf)` of the shipped profile, both analytic.
+
+    `oxygen`, per row, is `c` of `plans/17` Ф23.J's composition rival: the boundary's atomic oxygen
+    `n_O0 e^c`, the other species where they are, so that `d ln rho / dc` is the oxygen mass fraction
+    (`derivations/sdtm_composition.mac`). `None` is the shipped boundary.
+    """
     decay = np.exp(-sigma * zeta)
     t = t_inf - (t_inf - BOUNDARY_TEMPERATURE) * decay
     integral = (sigma * zeta + np.log(t / BOUNDARY_TEMPERATURE)) / (sigma * t_inf)
@@ -290,6 +299,8 @@ def profile(
         * ratio[:, None] ** (1.0 + ALPHA)
         * np.exp(-np.outer(integral, barometric))
     )
+    if oxygen is not None:
+        partial[:, OXYGEN] *= np.exp(oxygen)
     rho = partial.sum(axis=1)
     # dT/dT_inf = 1 - e^{-sigma zeta}; dI1/dT_inf follows from I1's own closed form.
     dt_dinf = 1.0 - decay

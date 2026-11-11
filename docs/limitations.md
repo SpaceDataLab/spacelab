@@ -193,6 +193,11 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   field is checked only through these lifetimes**, never against a measured density. The conformal re-entry
   window covers inside its stated band at every lead for both models; the analog ensemble alone is too narrow.
   The sample holds objects that did come down.
+- **On years it was not fitted on, SDTM-1 is ahead of NRLMSISE-00 and JB2008, not of every model.** Fitted
+  on the rows before 2020 and scored on 109 221 rows of 2020–2026 at 419–542 km, it reads 21.2 % MAPE against
+  NRLMSISE-00's 44.9 % and the clean-room JB2008's 26.4 % (`docs/verification.md` §10.38). In storm time,
+  24 storms do not resolve its lead. DTM2020, which no open release can carry, is not behind it on these rows.
+  NRLMSIS 2.x, WAM-IPE and TIE-GCM were not run, each for a stated reason.
 - **SDTM-1's solar-wind field reconstructs and nowcasts; it does not forecast.**
   `sdtm::solar_wind_coefficients` (§10.32) runs its storm state hourly on `(1 − s)·ap60 + s·N`,
   `s` = 0.500, over 336 hours (fourteen days) of history that end at the hour before the sample. It

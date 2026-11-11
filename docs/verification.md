@@ -372,6 +372,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 on named storms and post-storm targets | Ф23.D: the storms and the post-storm overcooling the drag literature names (D9-5, D9-7) as rows of the gate, held out by family, beside NRLMSISE-00 at the same samples | `case_change` against Maxima at 40 digits on three satellites' samples; the named storms from §10.33's records, whose four families' tables these runs reproduce byte for byte | worst **1.2e-15**, orbits identical; 12 May 2024 Swarm A, C, B measured −27.4, −25.1, −12.7 % (Ranjan et al. 22, 23, 11.37 %): SDTM-1 −3.6 to −4.1 %, NRLMSISE-00 +13 to +17 %, neither overcools; Halloween 2003 recovery −28 to −33 %: SDTM-1 −3.1 to +0.4 % (its daily excess saturated), NRLMSISE-00 −25 to −26 %; Starlink 2022 (`ap` 56) +99 to +123 %: SDTM-1 +83 to +113 % (84–92 % of it), NRLMSISE-00 +48 to +58 % (about half), the solar-wind field +140 to +188 % (an overshoot); SDTM-1's post-storm `⟨O/C⟩` 1.009–1.083 in every bin of the storm's peak `ap`, so overcooling is an event, not that phase's average (§10.34) | tools/fit-sdtm-corpus.py |
 | SDTM-1 without the time or the storm it saw | Ф30.B, Ф30.C: the frozen form on 38 declared splits, everything fitted rebuilt in each fold, intervals resampling whole days, rotations, years, storms and families, the difference paired | leak tests that fail on a deliberately leaked row, storm or map; the design effect and the cluster bootstrap's variance in Maxima (`derivations/cluster_design_effect.mac`, 13 identities, PARI agrees); a known `ρ` recovered on a synthetic series | reproduces §10.28's 20.8 / 21.0 / 50.1 %; rolling origin 25.8 %, one storm out 23.8 %, joint 21.8 %, against NRLMSISE-00's 52.6, 56.6, 73.4 %; two of eleven storms lost; difference to NRLMSISE-00 on years −29.25 [−42.63, −18.37], a design effect of 40; `ap60` is better than the shipped drive by +0.09 [+0.03, +0.15] (§10.36) | tools/evaluate-sdtm.py, tools/cluster-intervals.py |
 | Lifetime on real re-entries | Ф23.F: a mean-element decay with the ballistic coefficient fitted on the decay seen, under the measured indices, persistence and an analog-cycle ensemble, scored on GCAT re-entries one object a launch, the later 40 % of launches held out and opened once | the split-conformal coverage law in Maxima (`derivations/split_conformal_coverage.mac`, 7 identities, PARI agrees) and its Beta-binomial band; the TLE mean-motion recovery against the relation it inverts (`derivations/tle_kozai_recovery.mac`) | every window covers inside its band at 7–1 095 days for both models; SDTM-1 minus NRLMSISE-00 on 146 held-out objects, mean `|ln T/T_true|` +0.010 [−0.003, +0.023], median +0.025 [+0.004, +0.042]: SDTM-1 is not better here; the join at 225 km was the first deficit's cause (§10.37) | tools/lifetime-campaign.py, src/lifetime_drivers.rs |
+| SDTM-1 frozen at 2020 beside the literature models | Ф30.D: SDTM-1 fitted on the rows before 2020 and scored on 109 221 rows of 2020–2026 that no model was fitted on, each model with its input mode and the licence of its number | the `frozen` split refuses a training row from its cut on (`tools/test_evaluate_sdtm.py`); every model answers every row; the intervals of §10.36 | 21.2 % (20.9 % with the solar wind) against NRLMSISE-00's 44.9 % and the clean-room JB2008's 26.4 %; minus JB2008 on years −5.24 [−10.71, −0.16]; in storm time the lead is not resolved; refitting at 2023 does not help (21.6 %) (§10.38) | tools/evaluate-sdtm.py |
 
 ### Tides
 
@@ -9352,6 +9353,69 @@ Run (the element archive stays under `data/validation/reentry/`, never committed
     uv run --no-project python -I tools/lifetime-campaign.py run --max-lead 1095
     uv run --no-project python -I tools/lifetime-campaign.py score
     uv run --no-project python -I tools/lifetime-campaign.py cases
+
+---
+
+### 10.38 SDTM-1 frozen at 2020 beside the literature models, on 2020–2026 (Ф30.D)
+
+§10.36 tests SDTM-1 against its own fit. This section sets it beside the models a reader would choose instead,
+on rows that none of them was fitted on. SDTM-1 is fitted on the corpus rows before 2020-01-01 (255 993 rows)
+and scored on every row after: **109 221 rows of GRACE-FO C and Swarm A, B and C, 2020-01-01 to 2026-04-30**, 1 637 of
+them on 35 days at daily `Ap` ≥ 50. The split is `frozen-2020` in `docs/sdtm-splits.json`. It has its own kind,
+so it never enters the pooled rolling origin. NRLMSISE-00 and JB2008 were fitted long before 2020. DTM2020's
+operational model, the one driven by F10.7 and Kp, was fitted on data up to 2019 (Bruinsma & Boniface 2021,
+read from the abstract). So no model here saw these rows. Every model answers every row.
+
+Each model is driven as §10.2 drives it, and the drivers are the input mode. All modes are reconstruction:
+each reads measured indices, and two read indices from after the instant.
+
+| model | input mode | its number | MAPE | each satellite's mean removed | `Ap` ≥ 50 | 100 · mean `\|ln M/O\|` | median `M/O` |
+|---|---|---|---|---|---|---|---|
+| **SDTM-1, frozen at 2020** | F10.7 of the day before, its trailing 81-day mean, 3-hourly `ap` | ours: public | **21.2 %** | 21.2 % | 26.5 % | 20.4 | 0.980 |
+| SDTM-1 with the solar wind (D-27), frozen at 2020 | as above, with hourly `ap60` and OMNI's hourly solar wind | ours, OMNI CC0: public | **20.9 %** | 20.8 % | 26.6 % | 20.0 | 0.987 |
+| NRLMSISE-00 | F10.7 of the day before, its *centred* 81-day mean (40 days ahead), the storm-time `ap[]` | NRL's public-domain code, our port: public | 44.9 % | 24.4 % | 34.9 % | 33.2 | 1.310 |
+| JB2008, clean-room (Ф18.A′) | SET's F10/S10/M10/Y10 at their lags, *centred* 81-day means, hourly `ΔTc` from `Dst` | our code; SET's indices state no terms: public | 26.4 % | 27.5 % | 30.5 % | 27.5 | 1.020 |
+
+Not run, each with its reason. **NRLMSIS 2.x:** its licence and patent keep it to validation (D-30 (c)), its
+code is not in the tree, and running it needs a new dependency, which is the user's call. **WAM-IPE:** waits for
+its team's answer (Ф18.B-5). **TIE-GCM:** its terms were read on 2026-11-11 (NCAR's Open Source Academic Research
+License: research, academic and non-profit use only, no operational hindcast products, no sale of data
+products). A published research comparison is inside them; a six-year general-circulation run is not inside
+this ticket. **ITMAP's scorecards:** none publish numbers (§10.33).
+
+**Paired differences**, SDTM-1 frozen at 2020 minus the model, on the same rows and the same 4 000 draws
+(Ф30.C). The clusters are 2 312 days, 7 years and 136 storms; in storm time they are 35 days, 6 years and
+24 storms.
+
+| SDTM-1 minus | rows | metric | difference | days | years | storms |
+|---|---|---|---|---|---|---|
+| NRLMSISE-00 | all | MAPE | −23.74 | [−24.93, −22.52] | [−42.30, −10.59] | [−29.17, −18.55] |
+| JB2008, clean-room | all | MAPE | **−5.24** | [−5.89, −4.58] | [−10.71, −0.16] | [−7.79, −2.92] |
+| JB2008, clean-room | all | 100 · `\|ln\|` | −7.12 | [−8.35, −5.93] | [−17.97, +0.09] | [−12.44, −2.74] |
+| NRLMSISE-00 | `Ap` ≥ 50 | MAPE | −8.38 | [−15.37, −2.47] | [−19.12, +1.40] | [−16.28, −0.93] |
+| JB2008, clean-room | `Ap` ≥ 50 | MAPE | −3.98 | [−10.29, +1.74] | [−9.28, +4.23] | [−11.27, +1.74] |
+
+Findings:
+
+- **On years it never saw, SDTM-1 is ahead of NRLMSISE-00 and JB2008.** The lead over NRLMSISE-00 holds at every
+  level. The lead over JB2008 holds at every level on MAPE, but only just on years (−0.16), and on the symmetric
+  `|ln|` the year interval reaches +0.09. Seven years are a coarse cluster; the storm level, 136 clusters,
+  excludes zero on both metrics.
+- **In storm time the lead is not resolved.** At `Ap` ≥ 50 SDTM-1 is lower than both models, but 24 storms do
+  not separate it from JB2008 at any level, nor from NRLMSISE-00 on years.
+- **NRLMSISE-00's error here is mostly its level.** Its median ratio is 1.31, and with each satellite's mean
+  removed it drops from 44.9 to 24.4 %. SDTM-1 drops nowhere (21.2 %), because its level is right (0.980).
+- **The freeze costs nothing measurable.** The rolling-origin folds of §10.36, refitted at 2020 and again at
+  2023, score the same rows at 21.6 %, against 21.2 % for the fit frozen at 2020.
+
+**What this does not settle.** Four satellites at 419–542 km, so the altitudes below 400 km are not in it.
+Six and a half years: the minimum, rise, peak and early decline of cycle 25. Every model reads measured indices, and two read indices
+from after the instant; a forecast-mode comparison is Ф30.H's.
+
+Run (results stay under `data/`, never committed):
+
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py splits
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind frozen [--field solar_wind]
 
 ---
 

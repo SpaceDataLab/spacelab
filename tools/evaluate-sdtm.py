@@ -74,7 +74,11 @@ FORM: dict[str, Any] = {
     "gain": "input-power",
     "ap60": False,
     "wind": None,
+    "limit": None,
 }
+# The ablation's rungs below the shipped form (Ф30.F, `derivations/sdtm_ablation.mac`), each the rung above
+# in a limit: no flux gain or saturation, then each storm state, then no storm term, then no geography.
+RUNG = {**FORM, "cooling": False, "excess": None, "gain": None}
 # The shipped form, and that form with one mechanism taken away or added: `plans/17` Ф30.C and Ф30.F.
 FIELDS: dict[str, dict[str, Any]] = {
     "default": FORM,
@@ -86,6 +90,12 @@ FIELDS: dict[str, dict[str, Any]] = {
     # The centred 81-day flux, which NRLMSISE-00 reads, for the trailing one: reconstruction only,
     # since a centred mean needs 40 days of the future.
     "centred": {**FORM, "centred": True},
+    "bates": {**RUNG, "caps": "bates", "limit": "instant"},
+    "harmonics": {**RUNG, "caps": "harmonics", "limit": "instant"},
+    "instant": {**RUNG, "limit": "instant"},
+    "first_order": {**RUNG, "limit": "first-order"},
+    "two_constant": RUNG,
+    "nitric": {**RUNG, "cooling": True},
 }
 
 
@@ -318,6 +328,7 @@ def command_run(args) -> int:
             None,
             settings["wind"],
             penalty_rows=None if args.legacy_penalty else train,
+            limit=settings["limit"],
         )
         p = model.fit(train)
         residual, _ = model.score(p, test)

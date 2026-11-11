@@ -420,14 +420,20 @@ class Packing:
     """The storm term's flux exponent `kappa` is fitted, after the excess (Ф23.B)."""
     free_knee: bool = False
     """And a constant `mu` beside it, `exp(mu + kappa f)`: the log regressor's knee, fitted."""
+    limit: str | None = None
+    """A rung of the ablation below the kernels (Ф30.F, `derivations/sdtm_ablation.mac`):
+    `"first-order"`, the heating alone, `cooling_grid` at `H_s -> inf`, with its time in the onset slot;
+    `"instant"`, the index held over its interval, the filter at `tau -> 0`, with no kernel slot."""
 
     @property
     def i_onset(self) -> int:
-        return self.n_c
+        """`ln` of the onset time, of the heating time with cooling or at `"first-order"`; absent at `"instant"`."""
+        return self.n_c if self.limit != "instant" else -1
 
     @property
     def i_gap(self) -> int:
-        return self.n_c + 1
+        """`ln` of the recovery's gap, or of the nitric oxide's time with cooling; absent at a limit."""
+        return self.n_c + 1 if self.limit is None else -1
 
     @property
     def i_cool(self) -> int:
@@ -456,6 +462,8 @@ class Packing:
 
     @property
     def n_kernel(self) -> int:
+        if self.limit is not None:
+            return int(self.limit == "first-order")
         if not self.cooling:
             return 2
         return 3 + int(self.capped or self.mixed or self.wind) + 2 * int(self.fast)
@@ -626,6 +634,7 @@ class CorpusModel:
         fast: tuple[float, float] | str | None = None,
         wind: float | str | None = None,
         penalty_rows: np.ndarray | None = None,
+        limit: str | None = None,
     ):
         """`penalty_rows` are the rows whose scale sets the ridge, every row when `None`; a harness
         that holds rows out passes the training rows, so that nothing of a test row reaches the fit
@@ -640,7 +649,10 @@ class CorpusModel:
         fixed share, `"fit"` fits it in a fourth kernel slot. `fast`, with cooling: `None` has no
         fast mode, `(tau_f h, w)` a fixed one, `"fit"` fits both after the other kernel slots.
         `wind`, with cooling and an hourly driver: the drive is `(1 - share) ap60 + share N`, `N` in
-        `arg["wind"]`; `None` has no solar wind, a number is a fixed share, `"fit"` fits it."""
+        `arg["wind"]`; `None` has no solar wind, a number is a fixed share, `"fit"` fits it. `limit`,
+        without cooling, mix, fast mode or wind, is one of `Packing.limit`'s rungs."""
+        if limit is not None and (cooling or mix or fast or wind):
+            raise ValueError(f"the {limit} rung has no cooling, mix, fast mode or wind")
         self.a = arg
         self.sat = sat
         self.sigma = sigma
@@ -663,6 +675,7 @@ class CorpusModel:
             free_excess=excess == "fit",
             free_gain=gain is not None,
             free_knee=gain == "input-knee",
+            limit=limit,
         )
         self.gain_form = gain
         # 120 days before the first sample: the slowest admitted state (480 h) has forgotten its
@@ -705,6 +718,8 @@ class CorpusModel:
         """`(onset s, recovery s)`, or with cooling `(heating h, nitric h, saturation ap)` and then
         `q` or `mix` where either is fitted."""
         pk = self.pack
+        if pk.limit is not None:
+            return tuple(float(np.exp(p[j])) for j in (pk.i_onset,)[: pk.n_kernel])
         if pk.cooling:
             slots = (pk.i_onset, pk.i_gap, pk.i_cool) + (
                 (pk.i_cap,) if pk.capped else ((pk.i_mix,) if pk.mixed else ())
@@ -759,7 +774,13 @@ class CorpusModel:
         if self._design_key == key and self._design is not None:
             return self._design
         drive = self.drive(kernel)
-        if self.pack.mixed or self.mix_share is not None:
+        if self.pack.limit == "instant":
+            grid = drive
+        elif self.pack.limit == "first-order":
+            grid = cooling_grid(
+                drive, kernel[0], 1.0, np.inf, self.a["cadence"], self.first
+            )
+        elif self.pack.mixed or self.mix_share is not None:
             share = kernel[3] if self.pack.mixed else self.mix_share
             grid = mixed_cooling_grid(
                 self.a["ap"], *kernel[:3], share, self.a["cadence"], self.first
@@ -842,7 +863,9 @@ class CorpusModel:
         out[:n, pk.i_boundary] = 1.0
         out[:n, pk.i_scale : pk.i_scale + len(pk.scaled)] = self.indicator[index]
         step = 1.0e-4
-        slots = (pk.i_onset, pk.i_gap) + ((pk.i_cool,) if pk.cooling else ())
+        slots = (pk.i_onset, pk.i_gap)[: pk.n_kernel] + (
+            (pk.i_cool,) if pk.cooling else ()
+        )
         slots += (pk.i_cap,) if pk.capped else ()
         slots += (pk.i_mix,) if pk.mixed else ()
         slots += (pk.i_wind,) if pk.wind else ()
@@ -868,7 +891,13 @@ class CorpusModel:
         start = np.zeros(pk.size)
         start[0] = np.log(700.0)
         lower, upper = np.full(pk.size, -np.inf), np.full(pk.size, np.inf)
-        if pk.cooling:
+        if pk.limit == "first-order":
+            # The cooling's heating bounds, which this rung is the limit of.
+            start[pk.i_onset] = np.log(6.0)
+            lower[pk.i_onset], upper[pk.i_onset] = np.log(0.5), np.log(72.0)
+        elif pk.limit == "instant":
+            pass
+        elif pk.cooling:
             # Heating 0.5-72 h and nitric oxide 1-480 h, in hours; the saturation from 5 ap, where
             # cooling halves the response of a minor storm, to 1e5, where there is none.
             start[pk.i_onset], start[pk.i_gap], start[pk.i_cool] = np.log(

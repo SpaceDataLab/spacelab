@@ -140,6 +140,62 @@ def test_an_extreme_test_hour_moves_a_leaked_map_and_not_the_folds_own() -> None
     )
 
 
+def test_heating_alone_is_the_shipped_state_without_cooling_and_the_kernel_without_its_onset() -> (
+    None
+):
+    fit, g = harness.fit, harness.g
+    ap = np.random.default_rng(5).gamma(0.6, 25.0, 4000)
+    cadence, heating = 10_800.0, 17.4
+    alone = fit.cooling_grid(ap, heating, 32.6, np.inf, cadence, 0)
+    decay = np.exp(-cadence / 3600.0 / heating)
+    y, explicit = 0.0, np.empty(ap.size)
+    for i, u in enumerate(ap):
+        y = u + (y - u) * decay
+        explicit[i] = y
+    assert np.allclose(alone, explicit, rtol=1e-12, atol=0.0)
+    # `storm_grid` starts in steady state and `cooling_grid` from rest: compare after 300 steps, 50 heating times.
+    gap = [
+        np.abs(g.storm_grid(ap, onset, heating * 3600.0, cadence) - alone)[300:].max()
+        / alone[300:].max()
+        for onset in (1.0, 1.0e-3)
+    ]
+    assert gap[1] < 1e-7 and 500.0 < gap[0] / gap[1] < 2000.0, gap
+
+
+def test_the_rungs_pack_their_kernel_slots_and_refuse_a_state_they_are_the_limit_of() -> (
+    None
+):
+    fit = harness.fit
+    for limit, n_kernel in ((None, 2), ("first-order", 1), ("instant", 0)):
+        pk = fit.Packing(
+            n_c=7, scaled=("SA", "SB"), free_sigma=True, cooling=False, limit=limit
+        )
+        assert pk.n_kernel == n_kernel and pk.i_boundary == 7 + n_kernel
+        used = [j for j in (pk.i_onset, pk.i_gap) if j >= 0]
+        assert used == list(range(7, 7 + n_kernel)), (limit, used)
+        assert pk.size == 7 + n_kernel + 1 + 2 + 1
+    try:
+        fit.CorpusModel({}, np.array([]), (), (), 0.0, None, True, limit="instant")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a rung with cooling was accepted")
+
+
+def test_the_cap_sets_of_the_lowest_rungs_are_nested_in_the_shipped_one() -> None:
+    g = harness.g
+    k = (9 + 1) ** 2
+    shipped, harmonics, bates = (
+        g.harmonic_mask(g.CAPS[name], k).reshape(g.DRIVERS, k)
+        for name in (harness.FORM["caps"], "harmonics", "bates")
+    )
+    storm = harness.fit.STORM_COLUMNS
+    assert not harmonics[storm].any() and np.array_equal(
+        np.delete(harmonics, storm, axis=0), np.delete(shipped, storm, axis=0)
+    )
+    assert (bates <= harmonics).all() and bates.sum() == 4 and bates[:4, 0].all()
+
+
 if __name__ == "__main__":
     for name, test in sorted(globals().items()):
         if name.startswith("test_"):

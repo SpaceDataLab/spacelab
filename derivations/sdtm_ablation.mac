@@ -1,0 +1,66 @@
+/* The ablation ladder of SDTM-1 (plans/17 Ф30.F): each rung is the rung above it in a limit, so a
+   rung is the shipped field with mechanisms taken away, not another model.
+
+     shipped + solar wind  --share -> 0-->     shipped
+     shipped               --kappa -> 0-->     the storm state unscaled by the flux
+                           --D -> inf-->       the daily flux excess linear
+                           --H_s -> inf-->     heating alone: the first-order filter of time th
+     two-constant kernel   --to -> 0-->        the same first-order filter, of time tr
+     first-order filter    --tau -> 0-->       the index itself, held over its interval
+     the index             --index -> 0-->     the storm regressors vanish: geography and season
+     geography and season  --c -> 0-->         the Bates profile on the flux alone
+
+   The steps are the implemented ones: `cooling_grid`'s frozen-N D step (sdtm_no_cooling.mac),
+   `storm_grid`'s two first-order filters, the saturated excess (sdtm_flux_excess.mac), the
+   input-power gain (sdtm_storm_gain.mac) and the solar wind's share of the drive
+   (sdtm_solar_wind.mac). The last rung sets linear coefficients to zero and has nothing to prove.
+   Every identity prints 0. */
+
+ratprint : false$
+assume(h > 0, th > 0, tn > 0, tr > 0, tau > 0, F > 0, t > 0)$
+
+/* 1. The solar wind's share s of the drive (1 - s) A + s W, at s -> 0. */
+print("solar wind, share to 0:", limit((1 - s)*A + s*W, s, 0) - A)$
+
+/* 2. The input-power gain (F/150)^kappa, at kappa -> 0. */
+print("gain, kappa to 0:", limit((F/150)^kappa, kappa, 0) - 1)$
+
+/* 3. The saturated excess D tanh(d/D), at D -> inf. */
+print("flux saturation, D to inf:", limit(D*tanh(d/D), D, inf) - d)$
+
+/* 4. Nitric-oxide cooling. The state equation dD/dt = (H - D)/th - D N/(th H_s), and the frozen-N
+   step `cooling_grid` takes, at H_s -> inf: the first-order filter of time th. */
+first(y, u, k) := u + (y - u)*exp(-h/k)$
+nmean(n, u) := u + (n - u)*tn/h*(1 - exp(-h/tn))$
+dstep(y, n, u, hs) := block([m, rate, target],
+    m : nmean(n, u),
+    rate : (1 + m/hs)/th,
+    target : u/(th*rate),
+    target + (y - target)*exp(-rate*h))$
+print("cooling, the state equation at H_s to inf:",
+    ratsimp(limit((H - y)/th - y*N/(th*hs), hs, inf) - (H - y)/th))$
+print("cooling, the frozen-N step at H_s to inf:",
+    ratsimp(limit(dstep(y, n, u, hs), hs, inf) - first(y, u, th)))$
+
+/* 5. The two-constant kernel: `storm_grid` is (tr S_r - to S_o)/(tr - to), S_k the first-order
+   filter of time k. As to -> 0 the fast filter is the index and its weight vanishes, so the kernel
+   is the slow filter; its impulse response (e^(-t/tr) - e^(-t/to))/(tr - to) goes to e^(-t/tr)/tr. */
+print("kernel, the fast filter at to to 0:", limit(first(y, u, to), to, 0, plus) - u)$
+print("kernel, the step at to to 0:",
+    ratsimp(limit((tr*first(yr, u, tr) - to*first(yo, u, to))/(tr - to), to, 0, plus)
+        - first(yr, u, tr)))$
+print("kernel, the impulse response at to to 0:",
+    limit((exp(-t/tr) - exp(-t/to))/(tr - to), to, 0, plus) - exp(-t/tr)/tr)$
+
+/* 6. Both stateful rungs meet at the same first-order filter when their slow times agree. */
+print("cooling and kernel meet at th = tr:",
+    ratsimp(subst(tr = th,
+        limit((tr*first(y, u, tr) - to*first(yo, u, to))/(tr - to), to, 0, plus))
+        - limit(dstep(y, n, u, hs), hs, inf)))$
+
+/* 7. The first-order filter at tau -> 0 is the index held over its interval. */
+print("first-order, tau to 0:", limit(first(y, u, tau), tau, 0, plus) - u)$
+
+/* 8. The storm regressors s = state/100 and a = ln(1 + state/15) vanish with the state. */
+print("the linear storm regressor at a zero state:", limit(x/100, x, 0))$
+print("the log storm regressor at a zero state:", limit(log(1 + x/15), x, 0))$

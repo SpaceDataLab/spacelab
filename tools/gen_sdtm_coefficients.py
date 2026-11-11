@@ -256,6 +256,10 @@ CAPS: dict[str, tuple[int, ...]] = {
     # Neutral on its own; with the storm state scaled by `(F10.7a/150)^kappa` it takes the eight
     # storms' mean peak error from 30.5 to 26.7 % (§10.27).
     "storm-log1-lin": (9, 1, 0, 0, 0, -1, 1, -1, 1, 1, 1, 1, -1, -1, -1, -1),
+    # The ablation's two lowest rungs (Ф30.F): `storm-log1-lin` with its storm terms taken out, and that
+    # with the geography and the season taken out too, the Bates profile on the flux alone.
+    "harmonics": (9, 1, 0, 0, -1, -1, -1, -1, 1, 1, 1, 1, -1, -1, -1, -1),
+    "bates": (0, 0, 0, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1),
 }
 
 

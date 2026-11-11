@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import itertools
+import math
 import pathlib
 import re
 import subprocess
@@ -167,6 +168,9 @@ PASS_GAP = pd.Timedelta(minutes=30)
 """A gap that ends one pass through a case's region: the region is crossed once an orbit."""
 PEAK_AP_EDGES = (80.0, 100.0, 150.0, 200.0, 300.0)
 """Lower edges of `by_storm_size`'s bins in a storm's peak `ap`; the last bin is open."""
+WANG_KN = math.log(3.5) / math.log(200.0 / 70.0)
+"""`kn` for Wang et al.'s middle ratio, 3.5, of the nitric oxide's times between F10.7a 70 and 200
+(`derivations/sdtm_nitric_flux.mac` 5)."""
 EPOCH_2000 = pd.Timestamp("2000-01-01")
 OUT_RS = g.ROOT / "crates" / "spacelab-propagation" / "src" / "sdtm" / "coefficients.rs"
 OUT_FIXTURE = (
@@ -1670,12 +1674,14 @@ def wind_option(argument: argparse.Namespace) -> float | str | None:
     return value if value in (None, "fit") else float(value)
 
 
-def rival_option(argument: argparse.Namespace) -> dict[str, bool | str | None]:
-    """`--rival` as `CorpusModel`'s keywords; `nitric_flux` fits `kn`."""
-    rivals: dict[str, bool | str | None] = {
+def rival_option(argument: argparse.Namespace) -> dict[str, bool | str | float | None]:
+    """`--rival` as `CorpusModel`'s keywords; `nitric_flux` fits `kn`, `nitric_flux_wang` holds it at
+    `WANG_KN`."""
+    rivals: dict[str, bool | str | float | None] = {
         name: argument.rival == name for name in ("composition", "delta", "linear")
     }
-    return {**rivals, "nitric_flux": "fit" if argument.rival == "nitric_flux" else None}
+    held = {"nitric_flux": "fit", "nitric_flux_wang": WANG_KN}
+    return {**rivals, "nitric_flux": held.get(argument.rival)}
 
 
 def mix_option(argument: argparse.Namespace) -> float | str | None:
@@ -1733,7 +1739,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--rival",
-        choices=("composition", "delta", "linear", "nitric_flux"),
+        choices=("composition", "delta", "linear", "nitric_flux", "nitric_flux_wang"),
         help="with --cooling, one of `plans/17` Ф23.J's rivals for the post-storm drop in every fold "
         "(tools/evaluate-sdtm.py's fields of those names); never emitted",
     )

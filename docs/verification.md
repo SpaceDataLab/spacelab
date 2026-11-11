@@ -371,6 +371,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 by storm phase, in Wang et al. (2026)'s form | Ф23.C: §10.14's protocol scored per phase — onset, main and recovery, post-storm — on Wang et al.'s storms and satellites, so the article can set SDTM-1 beside their CCMC assessment | `storm_assessment` per phase against Maxima at 40 digits on a synthetic multiple-peak storm; the scorecard against Maxima on 114 records; both shipped fields' whole-storm counts reproduced | worst **3.8e-16** relative, kept pairs identical; 166 storms, 293 comparisons, held out by family: main and recovery `⟨O/C⟩` **1.022** (solar wind 1.007) against NRLMSISE-00's 1.111, post-storm 1.036 against 0.999; Wang et al.'s MSIS finding (20–30 % and 10 % low) is not reproduced: `⟨O/C⟩` 1.111 and 0.999 (§10.33) | tools/fit-sdtm-corpus.py |
 | SDTM-1 on named storms and post-storm targets | Ф23.D: the storms and the post-storm overcooling the drag literature names (D9-5, D9-7) as rows of the gate, held out by family, beside NRLMSISE-00 at the same samples | `case_change` against Maxima at 40 digits on three satellites' samples; the named storms from §10.33's records, whose four families' tables these runs reproduce byte for byte | worst **1.2e-15**, orbits identical; 12 May 2024 Swarm A, C, B measured −27.4, −25.1, −12.7 % (Ranjan et al. 22, 23, 11.37 %): SDTM-1 −3.6 to −4.1 %, NRLMSISE-00 +13 to +17 %, neither overcools; Halloween 2003 recovery −28 to −33 %: SDTM-1 −3.1 to +0.4 % (its daily excess saturated), NRLMSISE-00 −25 to −26 %; Starlink 2022 (`ap` 56) +99 to +123 %: SDTM-1 +83 to +113 % (84–92 % of it), NRLMSISE-00 +48 to +58 % (about half), the solar-wind field +140 to +188 % (an overshoot); SDTM-1's post-storm `⟨O/C⟩` 1.009–1.083 in every bin of the storm's peak `ap`, so overcooling is an event, not that phase's average (§10.34) | tools/fit-sdtm-corpus.py |
 | SDTM-1 without the time or the storm it saw | Ф30.B, Ф30.C: the frozen form on 38 declared splits, everything fitted rebuilt in each fold, intervals resampling whole days, rotations, years, storms and families, the difference paired | leak tests that fail on a deliberately leaked row, storm or map; the design effect and the cluster bootstrap's variance in Maxima (`derivations/cluster_design_effect.mac`, 13 identities, PARI agrees); a known `ρ` recovered on a synthetic series | reproduces §10.28's 20.8 / 21.0 / 50.1 %; rolling origin 25.8 %, one storm out 23.8 %, joint 21.8 %, against NRLMSISE-00's 52.6, 56.6, 73.4 %; two of eleven storms lost; difference to NRLMSISE-00 on years −29.25 [−42.63, −18.37], a design effect of 40; `ap60` is better than the shipped drive by +0.09 [+0.03, +0.15] (§10.36) | tools/evaluate-sdtm.py, tools/cluster-intervals.py |
+| Lifetime on real re-entries | Ф23.F: a mean-element decay with the ballistic coefficient fitted on the decay seen, under the measured indices, persistence and an analog-cycle ensemble, scored on GCAT re-entries one object a launch, the later 40 % of launches held out and opened once | the split-conformal coverage law in Maxima (`derivations/split_conformal_coverage.mac`, 7 identities, PARI agrees) and its Beta-binomial band; the TLE mean-motion recovery against the relation it inverts (`derivations/tle_kozai_recovery.mac`) | every window covers inside its band at 7–1 095 days for both models; SDTM-1 minus NRLMSISE-00 on 146 held-out objects, mean `|ln T/T_true|` +0.010 [−0.003, +0.023], median +0.025 [+0.004, +0.042]: SDTM-1 is not better here; the join at 225 km was the first deficit's cause (§10.37) | tools/lifetime-campaign.py, src/lifetime_drivers.rs |
 
 ### Tides
 
@@ -9226,6 +9227,131 @@ Run (results stay under `data/validation/sdtm-eval/`, never committed):
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/fit-sdtm-corpus.py --fit-sigma --cooling \
       --excess-saturation fit --storm-gain input-power --caps storm-log1-lin --storms --folds CHAMP --storm-table CHAMP.csv
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/cluster-intervals.py --phases CHAMP.csv ...
+
+### 10.37 Lifetime on real re-entries, under the measured Sun and under a guessed one (Ф23.F)
+
+A lifetime is bought to answer one question: when will this object come down. Two errors enter: the
+atmosphere's, with the Sun known, and the Sun's, which nobody knows in advance. This section scores both
+on objects that did come down, and puts a window around the answer whose coverage is measured, not assumed.
+
+**The objects.** GCAT (`satcat.tsv`, J. McDowell) gives the decay dates, the types and the launch tags, and
+McDowell's element archive gives the element sets (`docs/provenance.md` rows `gcat` and
+`mcdowell-elements`; the archive states no licence, so its raw files stay under the gitignored `data/` and
+only derived numbers leave). `tools/fetch-reentry-elements.py` fetched 4 367 objects, and 653 of them have no
+elements. An object is kept when it is unpowered (GCAT types D, R and C), its last element set is within
+5 days of the decay, its eccentricity is below 0.02, its perigee is above 180 km at the start, it fell at
+least 1 km over the fit window and never rose by more than 3 km, and it starts in 1990 or later. **One object
+per launch**, because the fragments of one launch share an orbit and a Sun and are one draw, not many. The
+leads are 7, 30, 90, 365 and 1 095 days before the decay, with 100, 100, 100, 60 and 40 objects spread evenly
+in time. **The sample is conditioned on a known decay date**, so the coverage below is the coverage on objects
+that did come down.
+
+**The prediction.** The mean-element decay of `crates/spacelab-propagation/src/lifetime.rs`: DSST zonal
+terms J2–J6 (EGM2008), DSST drag, DOP853 at a tolerance of 1e-9, in segments on the 3-hour grid of the
+indices, to a re-entry at 120 km. The ballistic coefficient is fitted on the decay already seen, over
+`max(30 d, lead/2)` before the start, by a bracketed secant to 0.1 m in the mean semi-major axis. In 66 of
+800 jobs the bracket stays on an end. Those jobs are left out, and the paired tables use only the objects
+both models fitted. Three futures
+(`lifetime_drivers::Scenario`):
+
+* **observed**, the measured indices: the atmosphere's own error;
+* **persistence**, the indices of the start held: the baseline;
+* **analog**, each earlier solar cycle at the start's phase, ±183 days, its flux scaled to meet today's and
+  the scale relaxing with `τ` = 730 days, chosen on flux before 1990 alone. Every analog is wholly known
+  before the start. The ensemble's median is the forecast.
+
+NRLMSISE-00 runs the ensemble at 7 and 30 days only. It is the slower model, so beyond 30 days its rows are
+the observed and the persistence runs.
+
+**The window.** The earlier 60 % of launches calibrate and the later 40 % test, a split fixed before any
+error was seen. `conformal_radius` takes the `k`-th smallest calibration error of the ensemble median,
+`k = ⌈(n + 1)(1 − α)⌉` at α = 0.1. Its coverage law is `derivations/split_conformal_coverage.mac` (7
+identities; PARI agrees), and a test count is judged against the Beta-binomial band of that law.
+
+**The join was the first result.** The first scores put SDTM-1 far behind NRLMSISE-00 at 7 days (median
+`|ln T/T_true|` 0.142 against 0.078). The field was read only inside its fitted envelope, 225–545 km, and
+NRLMSISE-00 outside it. The coefficient fitted through SDTM-1's density above 225 km is larger than the one
+fitted through NRLMSISE-00's (median `ln(B_SDTM/B_MSIS)` +0.24 at 7 days), because SDTM-1's density there is
+lower. Below 225 km NRLMSISE-00 then received that larger coefficient, so the object fell too fast. A decay
+now reads SDTM-1 down to its own 120 km boundary (`decay_envelope`). On the calibration part, paired by
+launch, that is 0.022 [0.010, 0.035] better in mean `|ln|`. Reading the field above 545 km does not help:
+no gain at 90 days or less, and +0.015 [−0.006, +0.037] at 365–1 095 days. Dropping the flux limits does not
+help either. The centred flux mean is +0.006 [−0.002, +0.015], not significant, and it needs 40 days of the
+future. **This choice was made on the calibration part, after a look at early scores that included objects
+of the later test part.** `docs/sdtm-selection-ledger.md` row 9 records it, committed before the test part
+was opened once (`tools/lifetime-campaign.py score`). The point density keeps §10.28's recommendation:
+**below 225 km SDTM-1 is checked only through these lifetimes**, never against a measured density.
+
+**The held-out part** (median `|ln T/T_true|`; the window is the ensemble median ± the conformal radius):
+
+| lead | model | objects | observed | its signed median | persistence | ensemble median | raw 5–95 % covers | radius | the window covers | band at α = 0.1 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 7 d | NRLMSISE-00 | 37 | **0.084** | −0.049 | 0.084 | 0.117 | 23/37 | 0.287 | 33/37 | 30–37 |
+| | SDTM-1 | 37 | 0.104 | −0.011 | **0.073** | **0.102** | 22/37 | 0.269 | 35/37 | 30–37 |
+| 30 d | NRLMSISE-00 | 36 | **0.090** | −0.039 | **0.114** | **0.103** | 21/36 | 0.329 | 32/36 | 29–36 |
+| | SDTM-1 | 36 | 0.119 | −0.032 | 0.146 | 0.132 | 18/36 | 0.277 | 29/36 | 29–36 |
+| 90 d | NRLMSISE-00 | 36 | **0.088** | −0.010 | **0.083** | — | — | — | — | — |
+| | SDTM-1 | 36 | 0.094 | +0.052 | 0.130 | 0.131 | 27/36 | 0.321 | 33/36 | 29–36 |
+| 365 d | NRLMSISE-00 | 22 | 0.115 | −0.049 | 0.168 | — | — | — | — | — |
+| | SDTM-1 | 22 | **0.103** | +0.003 | **0.144** | 0.097 | 19/22 | 0.343 | 20/22 | 17–22 |
+| 1 095 d | NRLMSISE-00 | 15 | **0.027** | −0.022 | 0.262 | — | — | — | — | — |
+| | SDTM-1 | 15 | 0.116 | −0.001 | **0.241** | 0.229 | 11/15 | 0.453 | 13/15 | 11–15 |
+
+Paired by launch on the same objects, SDTM-1 minus NRLMSISE-00 in `|ln T/T_true|`, 95 % intervals:
+
+| part | lead | objects | mean, observed | median, observed | mean, persistence |
+|---|---|---|---|---|---|
+| test | ≤ 90 d | 109 | +0.009 [−0.005, +0.023] | +0.021 [−0.002, +0.036] | +0.021 [+0.005, +0.036] |
+| test | 365 d | 22 | −0.025 [−0.063, +0.012] | −0.012 [−0.111, +0.071] | +0.018 [−0.028, +0.063] |
+| test | 1 095 d | 15 | **+0.070 [+0.025, +0.111]** | +0.089 [+0.021, +0.142] | −0.044 [−0.125, +0.038] |
+| test | all | 146 | +0.010 [−0.003, +0.023] | **+0.025 [+0.004, +0.042]** | +0.014 [−0.003, +0.030] |
+| calibration | all | 220 | +0.014 [+0.003, +0.024] | +0.025 [+0.009, +0.035] | +0.038 [+0.024, +0.052] |
+
+**SDTM-1 is not the better model for a lifetime with a fitted coefficient.** On the held-out part its mean
+error is within 0.010 of NRLMSISE-00's, and the interval spans zero; its median error is 0.025 larger, and
+that interval does not. It is ahead at 365 days and behind at 1 095 days, both on 15–22 objects. This is not
+a contradiction of §10.36, where SDTM-1's density error is less than half of NRLMSISE-00's. A fitted
+coefficient absorbs the level of the density, and the level is where SDTM-1's lead is; what is left is the
+shape in height and in time. Two observations point at where to look, and neither is tested here. Below
+225 km the field is an extrapolation of the Bates profile that no measured density constrains. And at 7 days
+SDTM-1's persistence run, 0.073, beats its own run on the measured indices, 0.104, so its response to the
+last week's changes in the indices costs more than it gives.
+
+**The window holds.** Each of the seven tested windows covers inside its band, for both models; SDTM-1's
+at 30 days sits on the band's lower edge, 29 of 36. The radius is 0.27–0.45 in `ln`, a factor of 1.3–1.6
+either way. The raw 5–95 % spread of the analog ensemble covers far less at 90 days or less, 18–27 of 36–37,
+so the ensemble is too narrow, and the conformal step is what makes the window honest.
+
+**Three named cases** (`tools/lifetime-campaign.py cases`):
+
+* **January 2009, the sudden stratospheric warming.** Yue et al. (2026, doi:10.1029/2025SW004835) put its
+  effect at 0.2–0.3 d of lifetime. Neither model has a warming in it, so the case shows instead what a
+  small flux error does: 2 sfu more, held throughout, at F10.7a 68.9. The shift is 0.21 d on a 9.3-day
+  SDTM-1 lifetime from 230 km at B = 0.02 m²/kg (0.12 d of 6.6 d under NRLMSISE-00), and 0.34 d on 10.8 days
+  from 260 km at B = 0.05. So a shift the size of the published one needs a lifetime of about 9–11 days here.
+* **May 2024, TRISAT-R** (Kosanič & Kramberger 2026, from the digest only: the decay went from 0.4 to more
+  than 1 km/day and about a week of lifetime was lost). With B set to 0.4 km/day over 21 April – 9 May, the
+  peak rate is 0.97–1.21 km/day for SDTM-1 and 0.92–1.13 for NRLMSISE-00 at 350–450 km. The fall over 10–13
+  May is 2.1–2.5 km, 5.2–6.2 days of the quiet rate, of which 0.9–1.3 km is above quiet: 2.2–3.2 days.
+  "About a week" matches the whole fall, not the excess; which one the paper means is not known here.
+* **February 2022, Starlink group 4-7.** GCAT catalogues decays 5.2–12.7 days after launch. The storm
+  shortens the lifetime from a 209 × 335 km orbit by 4.6–12.9 % under SDTM-1 and 1.2–9.1 % under
+  NRLMSISE-00, for B from 0.015 to 0.148 m²/kg. With B unknown this is a sensitivity, not a test.
+
+**What this does not settle.** One object a launch, conditioned on a known decay: a population that did not
+come down is outside it. The test part is 146 objects, 15 at 1 095 days. The NRLMSISE-00 ensemble stops at
+30 days. The tolerance is not converged against a tighter one in this run (`converge`). And with the
+coefficient fitted, the test cannot see the level of the density. Objects of known area-to-mass, such as
+spheres, would see it, and that is a test of its own.
+
+Run (the element archive stays under `data/validation/reentry/`, never committed):
+
+    uv run --no-project python -I tools/fetch-reentry-elements.py
+    uv run --no-project python -I tools/lifetime-campaign.py select
+    cargo build -p spacelab-propagation --release --example lifetime_campaign
+    uv run --no-project python -I tools/lifetime-campaign.py run --max-lead 1095
+    uv run --no-project python -I tools/lifetime-campaign.py score
+    uv run --no-project python -I tools/lifetime-campaign.py cases
 
 ---
 

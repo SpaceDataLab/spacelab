@@ -184,6 +184,15 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   can be up to a third below SDTM-1's.** Over the 630 storm comparisons SDTM-1 is not too dense
   after a storm on average: its post-storm `⟨O/C⟩` is 1.009–1.083 in every bin of the storm's peak
   `ap`. So these are events, not a bias of the post-storm phase.
+- **For a lifetime with a fitted ballistic coefficient, SDTM-1 is not better than NRLMSISE-00.** On 146
+  held-out re-entries, one object a launch, SDTM-1's median `|ln T/T_true|` is 0.025 [0.004, 0.042] larger
+  and its mean 0.010 [−0.003, 0.023] larger (`docs/verification.md` §10.37). A fitted coefficient absorbs the
+  density's level, which is where SDTM-1 is ahead, so this test sees the shape in height and time. A decay
+  reads SDTM-1 down to its 120 km boundary (`lifetime_drivers::decay_envelope`), because a coefficient fitted
+  through SDTM-1 and handed to NRLMSISE-00 below 225 km brings the object down too fast. **Below 225 km the
+  field is checked only through these lifetimes**, never against a measured density. The conformal re-entry
+  window covers inside its stated band at every lead for both models; the analog ensemble alone is too narrow.
+  The sample holds objects that did come down.
 - **SDTM-1's solar-wind field reconstructs and nowcasts; it does not forecast.**
   `sdtm::solar_wind_coefficients` (§10.32) runs its storm state hourly on `(1 − s)·ap60 + s·N`,
   `s` = 0.500, over 336 hours (fourteen days) of history that end at the hour before the sample. It

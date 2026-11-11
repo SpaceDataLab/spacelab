@@ -31,6 +31,7 @@ import itertools
 import math
 import os
 import pathlib
+import random
 import re
 import statistics
 import subprocess
@@ -567,13 +568,35 @@ def score(_args) -> int:
                 math.log(min(r["observed"], r["horizon"]) / r["truth"]) for r in test
             )
             persistence_error = statistics.median(err(r, "persistence") for r in test)
-            if group[0]["median"] is None:
+            ensemble = group[0]["median"] is not None
+            radius = (
+                conformal_radius([err(r, "median") for r in cal])
+                if ensemble
+                else math.inf
+            )
+            # Every object, so that two models pair on the same launches; a model run without the
+            # ensemble leaves the ensemble's three columns empty.
+            for split, part in (("cal", cal), ("test", test)):
+                for r in part:
+                    cells = ["", "", ""]
+                    if ensemble:
+                        inside = abs(math.log(r["median"] / r["truth"])) <= radius
+                        raw_inside = r["lo"] <= r["truth"] <= r["hi"]
+                        cells = [
+                            f"{err(r, 'median'):.6g}",
+                            f"{int(raw_inside)}",
+                            f"{int(inside)}",
+                        ]
+                    out.write(
+                        f"{lead}\t{model}\t{r['launch']}\t{split}\t{err(r, 'observed'):.6g}\t"
+                        f"{err(r, 'persistence'):.6g}\t" + "\t".join(cells) + "\n"
+                    )
+            if not ensemble:
                 print(
                     f"{lead} | {model} | {len(cal)} | {len(test)} | {len(ordered)} | "
                     f"{observed_error:.3f} | {observed_bias:+.3f} | {persistence_error:.3f} | — | — | — | — | —"
                 )
                 continue
-            radius = conformal_radius([err(r, "median") for r in cal])
             hits = 0
             raw = 0
             for r in test:
@@ -581,14 +604,6 @@ def score(_args) -> int:
                 raw_inside = r["lo"] <= r["truth"] <= r["hi"]
                 hits += inside
                 raw += raw_inside
-            for split, part in (("cal", cal), ("test", test)):
-                for r in part:
-                    inside = abs(math.log(r["median"] / r["truth"])) <= radius
-                    raw_inside = r["lo"] <= r["truth"] <= r["hi"]
-                    out.write(
-                        f"{lead}\t{model}\t{r['launch']}\t{split}\t{err(r, 'observed'):.6g}\t"
-                        f"{err(r, 'persistence'):.6g}\t{err(r, 'median'):.6g}\t{int(raw_inside)}\t{int(inside)}\n"
-                    )
             lo, hi = (0, len(test))
             if not math.isinf(radius):
                 lo, hi = beta_binomial_band(len(test), len(cal), ALPHA)
@@ -598,7 +613,62 @@ def score(_args) -> int:
                 f"{statistics.median(err(r, 'median') for r in test):.3f} | "
                 f"{raw}/{len(test)} | {radius:.3f} | {hits}/{len(test)} | {lo}–{hi}"
             )
+    paired_table()
     return 0
+
+
+def paired_table(draws: int = 4000, seed: int = 20261111) -> None:
+    """SDTM-1 minus NRLMSISE-00 in `|ln T/T_true|` on the objects both fitted, launches resampled.
+
+    One object per launch, so resampling objects is resampling launches. Mean and median of the
+    difference's two sides, each with its 95 % percentile interval, by part and by lead.
+    """
+    by: dict[tuple[str, int, str], dict[str, dict[str, str]]] = {}
+    with (OUT / "scores.tsv").open() as handle:
+        for r in csv.DictReader(handle, delimiter="\t"):
+            by.setdefault((r["split"], int(r["lead"]), r["object_launch"]), {})[
+                r["model"]
+            ] = r
+    print(
+        "\nSDTM-1 minus NRLMSISE-00, paired by launch: part | leads | objects | "
+        "mean, observed | median, observed | mean, persistence"
+    )
+    groups = {
+        "<= 90 d": lambda lead: lead <= 90,
+        "365 d": lambda lead: lead == 365,
+        "1095 d": lambda lead: lead == 1095,
+        "all": lambda lead: True,
+    }
+    for part in ("test", "cal"):
+        for name, wanted in groups.items():
+            pairs = [
+                (v["sdtm"], v["msis"])
+                for (split, lead, _), v in by.items()
+                if split == part and wanted(lead) and "sdtm" in v and "msis" in v
+            ]
+            if not pairs:
+                continue
+            cells = []
+            for field, stat in (
+                ("ln_observed", statistics.mean),
+                ("ln_observed", statistics.median),
+                ("ln_persistence", statistics.mean),
+            ):
+                a = [float(x[field]) for x, _ in pairs]
+                b = [float(y[field]) for _, y in pairs]
+                rng = random.Random(seed)
+                spread = []
+                for _ in range(draws):
+                    pick = [rng.randrange(len(a)) for _ in a]
+                    spread.append(
+                        stat([a[i] for i in pick]) - stat([b[i] for i in pick])
+                    )
+                low, high = (
+                    quantile(sorted(spread), 0.025),
+                    quantile(sorted(spread), 0.975),
+                )
+                cells.append(f"{stat(a) - stat(b):+.3f} [{low:+.3f}, {high:+.3f}]")
+            print(f"{part} | {name} | {len(pairs)} | " + " | ".join(cells))
 
 
 def unix(*when: int) -> float:

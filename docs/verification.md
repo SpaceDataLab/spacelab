@@ -373,6 +373,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 without the time or the storm it saw | Ф30.B, Ф30.C: the frozen form on 38 declared splits, everything fitted rebuilt in each fold, intervals resampling whole days, rotations, years, storms and families, the difference paired | leak tests that fail on a deliberately leaked row, storm or map; the design effect and the cluster bootstrap's variance in Maxima (`derivations/cluster_design_effect.mac`, 13 identities, PARI agrees); a known `ρ` recovered on a synthetic series | reproduces §10.28's 20.8 / 21.0 / 50.1 %; rolling origin 25.8 %, one storm out 23.8 %, joint 21.8 %, against NRLMSISE-00's 52.6, 56.6, 73.4 %; two of eleven storms lost; difference to NRLMSISE-00 on years −29.25 [−42.63, −18.37], a design effect of 40; `ap60` is better than the shipped drive by +0.09 [+0.03, +0.15] (§10.36) | tools/evaluate-sdtm.py, tools/cluster-intervals.py |
 | Lifetime on real re-entries | Ф23.F: a mean-element decay with the ballistic coefficient fitted on the decay seen, under the measured indices, persistence and an analog-cycle ensemble, scored on GCAT re-entries one object a launch, the later 40 % of launches held out and opened once | the split-conformal coverage law in Maxima (`derivations/split_conformal_coverage.mac`, 7 identities, PARI agrees) and its Beta-binomial band; the TLE mean-motion recovery against the relation it inverts (`derivations/tle_kozai_recovery.mac`) | every window covers inside its band at 7–1 095 days for both models; SDTM-1 minus NRLMSISE-00 on 146 held-out objects, mean `|ln T/T_true|` +0.010 [−0.003, +0.023], median +0.025 [+0.004, +0.042]: SDTM-1 is not better here; the join at 225 km was the first deficit's cause (§10.37) | tools/lifetime-campaign.py, src/lifetime_drivers.rs |
 | SDTM-1 frozen at 2020 beside the literature models | Ф30.D: SDTM-1 fitted on the rows before 2020 and scored on 109 221 rows of 2020–2026 that no model was fitted on, each model with its input mode and the licence of its number | the `frozen` split refuses a training row from its cut on (`tools/test_evaluate_sdtm.py`); every model answers every row; the intervals of §10.36 | 21.2 % (20.9 % with the solar wind) against NRLMSISE-00's 44.9 % and the clean-room JB2008's 26.4 %; minus JB2008 on years −5.24 [−10.71, −0.16]; in storm time the lead is not resolved; refitting at 2023 does not help (21.6 %) (§10.38) | tools/evaluate-sdtm.py |
+| The density level seen by spheres | Ф23.T: four spheres of known area-to-mass, no fitted coefficient, the `C_d` each model needs for the true lifetime set beside the physical value of a smooth sphere | Moe & Bowman (2005)'s physical `C_d` of a smooth sphere, 2.18–2.37 at 300–500 km; the lifetime's dependence on `C_d` interpolated between runs | Starshine 3 (2001–2003): SDTM-1 needs 2.16–2.33, inside; NRLMSISE-00 1.91–2.03, too dense. GFZ-1 (1995–1999): SDTM-1 needs 2.84–3.51, too thin; NRLMSISE-00 2.23–2.61. Starshine 1–2 are mirror-covered and decide nothing; a secular change between the fitted eras is a hypothesis (§10.39) | tools/lifetime-campaign.py |
 
 ### Tides
 
@@ -9416,6 +9417,62 @@ Run (results stay under `data/`, never committed):
 
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py splits
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind frozen [--field solar_wind]
+
+---
+
+### 10.39 The density level seen by spheres of known area-to-mass (Ф23.T)
+
+§10.37 fits the ballistic coefficient, and the fit absorbs the density's level. A sphere's drag does not depend on its
+attitude, so its coefficient is `C_d A/m` with only `C_d` unknown, and `C_d` has a physical value. Four spheres have
+a decay date in GCAT and element sets up to it in McDowell's archive (`tools/fetch-reentry-elements.py --objects`):
+
+| sphere | mass, diameter | source | A/m, m²/kg | flew |
+|---|---|---|---|---|
+| GFZ-1 | 20.630 kg, 0.215 m | GFZ, research-infrastructure page | 0.00176 | 1995-04 to 1999-06, solar minimum and rise |
+| Starshine 1 | 39 kg, 0.475 m | eoPortal | 0.00454 | 1999-06 to 2000-02, maximum |
+| Starshine 2 | as Starshine 1 | eoPortal | 0.00454 | 2001-12 to 2002-04, maximum |
+| Starshine 3 | 91 kg, 0.94 m | eoPortal, ILRS | 0.00763 | 2001-09 to 2003-01, maximum |
+
+From the element set nearest before each lead, the decay runs under the measured indices with `C_d` from 1.2 to 3.6
+(`tools/lifetime-campaign.py spheres`). The table gives the `C_d` at which each model's lifetime equals the true one,
+interpolated log-linearly. The lifetime is not exactly `1/C_d`, because a slower decay meets another Sun.
+
+| sphere | lead, d | true, d | `C_d` SDTM-1 needs | `C_d` NRLMSISE-00 needs |
+|---|---|---|---|---|
+| GFZ-1 | 7 / 30 / 90 / 365 / 1 095 | 7.0 / 30.4 / 90.3 / 365.3 / 1 095.4 | 2.89 / 2.84 / 2.99 / 3.26 / 3.51 | 2.27 / 2.23 / 2.38 / 2.61 / 2.58 |
+| Starshine 1 | 7 / 90 | 8.3 / 90.2 | 2.99 / 2.54 | 2.27 / 2.09 |
+| Starshine 2 | 30 / 90 | 33.3 / 90.1 | 2.80 / 3.42 | 2.17 / 2.27 |
+| Starshine 3 | 7 / 30 / 90 / 365 | 7.9 / 30.0 / 92.1 / 366.4 | 2.33 / 2.23 / 2.16 / 2.54 | 1.99 / 2.03 / 1.91 / 1.95 |
+
+**The physical value.** Moe & Bowman (2005, AAS 05-258, Appendices A and B) give the drag coefficient of a smooth
+sphere from Sentman's and Schamberg's models with accommodation measured in orbit: near solar minimum 2.23 at 250 km,
+2.31 at 300 km, 2.37 at 350 km; near maximum 2.18 at 300 km, 2.26 at 400 km, 2.34 at 500 km. Starshine 1 and 2 are not
+smooth: 68 % of their surface is flat mirrors, and the same paper attributes their higher fitted coefficient to the
+mirrors' edges (2.15 and 2.16 against Starshine 3's 2.01, all fitted against Jacchia's model). Starshine 3 is 30 %
+mirrors; GFZ-1 carries 60 retroreflectors.
+
+Findings:
+
+- **Starshine 3, inside SDTM-1's years:** SDTM-1 needs 2.16–2.33 up to 90 days, inside the smooth-sphere band;
+  NRLMSISE-00 needs 1.91–2.03, below the band of 2.18–2.30 at 300–470 km, so it is too dense by about 7–17 %. At 365 days SDTM-1 needs 2.54.
+- **GFZ-1, before SDTM-1's years:** SDTM-1 needs 2.84–3.51, far above the minimum's band of 2.23–2.37, so it is too
+  thin by roughly 20–50 %; NRLMSISE-00 needs 2.23–2.61, inside the band or up to 10 % above it.
+- **Starshine 1 and 2:** SDTM-1 needs 2.54–3.42 and NRLMSISE-00 2.09–2.27. Their mirrors raise the physical value by an
+  amount nobody has measured, so they do not decide between the models.
+- **A hypothesis, not a result:** SDTM-1 is fitted on 2001–2026 and has no secular term. That span holds the 2007–2009
+  minimum, whose density at 400 km was 10–30 % below climatological expectation (Emmert, Lean & Picone 2010). NRLMSISE-00
+  is fitted on earlier data. A model fitted on the later thermosphere would read too thin in 1995–1999. One sphere
+  cannot show it; spheres of known area-to-mass from the 1990s and after 2010 can (the Taifun and ODERACS spheres need
+  masses from a primary source, and ANDE's element sets are not in the archive).
+
+**What this does not settle.** Four objects, one of them before 2001; no interval can be put on four draws. GCAT's
+decay dates without an hour are taken at noon, which moves a 7-day truth by up to 7 %. The masses of Starshine 1–3 are
+round values. The states are mean elements recovered from TLEs. The `C_d` table is for smooth spheres.
+
+Run (element sets stay under `data/validation/reentry/`, never committed):
+
+    uv run --no-project python -I tools/fetch-reentry-elements.py --objects 23558 25769 26929 26996
+    uv run --no-project python -I tools/lifetime-campaign.py spheres
 
 ---
 

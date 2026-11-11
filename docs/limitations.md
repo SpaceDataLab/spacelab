@@ -198,6 +198,11 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   NRLMSISE-00's 44.9 % and the clean-room JB2008's 26.4 % (`docs/verification.md` §10.38). In storm time,
   24 storms do not resolve its lead. DTM2020, which no open release can carry, is not behind it on these rows.
   NRLMSIS 2.x, WAM-IPE and TIE-GCM were not run, each for a stated reason.
+- **Before 2001 SDTM-1 may read too thin.** It is fitted on 2001–2026 and has no secular term. GFZ-1, a sphere of
+  known area-to-mass that decayed in 1995–1999, needs a drag coefficient of 2.84–3.51 under SDTM-1 for its true
+  lifetime, against 2.23–2.37 for a smooth sphere; NRLMSISE-00 needs 2.23–2.61. Starshine 3, in 2001–2003, needs
+  2.16–2.33 under SDTM-1 (`docs/verification.md` §10.39). One sphere is not a trend: for a date before 2001, check
+  SDTM-1 against NRLMSISE-00.
 - **SDTM-1's solar-wind field reconstructs and nowcasts; it does not forecast.**
   `sdtm::solar_wind_coefficients` (§10.32) runs its storm state hourly on `(1 − s)·ap60 + s·N`,
   `s` = 0.500, over 336 hours (fourteen days) of history that end at the hour before the sample. It

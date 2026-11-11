@@ -36,6 +36,8 @@ const TOP: f64 = 5.0e6;
 /// The pieces' upper ends above the level, m; the last piece runs to [`TOP`].
 const PIECES: [f64; 5] = [2.0e4, 6.0e4, 1.5e5, 4.0e5, 1.0e6];
 const NODES: usize = 32;
+/// Nodes on one Newton step, a few kilometres: the column is updated by the step's integral, not recomputed.
+const STEP_NODES: usize = 16;
 /// [`BOUNDARY`]'s order: N2, O2, O, Ar, He.
 const N2: usize = 0;
 const O: usize = 2;
@@ -62,13 +64,13 @@ const GATE: [(f64, f64, f64); 3] = [
     ),
 ];
 
-/// Gauss–Legendre nodes and weights on `[−1, 1]`, by Newton on `P_n`.
-fn gauss_legendre() -> ([f64; NODES], [f64; NODES]) {
-    let order = f64::from(u32::try_from(NODES).expect("small"));
-    let (mut nodes, mut weights) = ([0.0; NODES], [0.0; NODES]);
+/// Gauss–Legendre nodes and weights on `[−1, 1]`, by Newton on `P_N`.
+fn gauss_legendre<const N: usize>() -> ([f64; N], [f64; N]) {
+    let order = f64::from(u32::try_from(N).expect("small"));
+    let (mut nodes, mut weights) = ([0.0; N], [0.0; N]);
     let legendre = |root: f64| {
         let (mut p0, mut p1) = (1.0, root);
-        for degree in 2..=NODES {
+        for degree in 2..=N {
             let degree = f64::from(u32::try_from(degree).expect("small"));
             (p0, p1) = (
                 p1,
@@ -95,43 +97,56 @@ fn gauss_legendre() -> ([f64; NODES], [f64; NODES]) {
     (nodes, weights)
 }
 
-/// `[O, N2]` columns above `z`, m⁻², of the densities `density(z) = [n_O, n_N2]` in m⁻³.
-fn columns(
+/// The column's rule on each piece and the Newton step's.
+struct Rules {
+    column: ([f64; NODES], [f64; NODES]),
+    step: ([f64; STEP_NODES], [f64; STEP_NODES]),
+}
+
+/// `[O, N2]` integrals from `low` to `high`, signed, of the densities `density(z) = [n_O, n_N2]` in m⁻³.
+fn integral<const N: usize>(
     density: &impl Fn(f64) -> [f64; 2],
-    rule: &([f64; NODES], [f64; NODES]),
-    z: f64,
+    rule: &([f64; N], [f64; N]),
+    low: f64,
+    high: f64,
 ) -> [f64; 2] {
+    let (middle, half) = (f64::midpoint(low, high), 0.5 * (high - low));
+    let mut sum = [0.0; 2];
+    for (x, w) in rule.0.iter().zip(&rule.1) {
+        let n = density(middle + half * x);
+        sum[0] += w * half * n[0];
+        sum[1] += w * half * n[1];
+    }
+    sum
+}
+
+/// `[O, N2]` columns above `z`, m⁻².
+fn columns(density: &impl Fn(f64) -> [f64; 2], rules: &Rules, z: f64) -> [f64; 2] {
     let mut sum = [0.0; 2];
     let mut low = z;
     for high in PIECES.iter().map(|p| z + p).chain(std::iter::once(TOP)) {
-        let (middle, half) = (f64::midpoint(low, high), 0.5 * (high - low));
-        for (x, w) in rule.0.iter().zip(&rule.1) {
-            let n = density(middle + half * x);
-            sum[0] += w * half * n[0];
-            sum[1] += w * half * n[1];
-        }
+        let piece = integral(density, &rules.column, low, high);
+        sum = [sum[0] + piece[0], sum[1] + piece[1]];
         low = high;
     }
     sum
 }
 
-/// The depth, m, and the ratio there; `None` if Newton leaves `[floor, 400 km]` or does not converge.
-fn depth(
-    density: &impl Fn(f64) -> [f64; 2],
-    rule: &([f64; NODES], [f64; NODES]),
-    floor: f64,
-) -> Option<(f64, f64)> {
+/// The depth, m, and the ratio there; `None` if Newton leaves `[floor, 400 km]` or does not converge. The
+/// columns are computed once at 140 km and carried: each step subtracts its own integral.
+fn depth(density: &impl Fn(f64) -> [f64; 2], rules: &Rules, floor: f64) -> Option<(f64, f64)> {
     let mut z = 140e3;
+    let mut column = columns(density, rules, z);
     for _ in 0..60 {
-        let [_, n2] = columns(density, rule, z);
-        let step = (n2 / DEPTH_COLUMN).ln() * n2 / density(z)[1];
-        z += step;
-        if !(floor..=4.0e5).contains(&z) {
+        let step = (column[1] / DEPTH_COLUMN).ln() * column[1] / density(z)[1];
+        if !(floor..=4.0e5).contains(&(z + step)) {
             return None;
         }
+        let slice = integral(density, &rules.step, z, z + step);
+        column = [column[0] - slice[0], column[1] - slice[1]];
+        z += step;
         if step.abs() < 1e-7 {
-            let [o, n2] = columns(density, rule, z);
-            return Some((z, o / n2));
+            return Some((z, column[0] / column[1]));
         }
     }
     None
@@ -155,10 +170,10 @@ fn sdtm(t_inf: f64, z: f64) -> [f64; 2] {
     })
 }
 
-fn check(rule: &([f64; NODES], [f64; NODES])) -> bool {
+fn check(rules: &Rules) -> bool {
     let mut ok = true;
     for (t_inf, z_gate, ratio_gate) in GATE {
-        let (z, ratio) = depth(&|z| sdtm(t_inf, z), rule, BOUNDARY_ALTITUDE).expect("a depth");
+        let (z, ratio) = depth(&|z| sdtm(t_inf, z), rules, BOUNDARY_ALTITUDE).expect("a depth");
         let (dz, dr) = (z / z_gate - 1.0, ratio / ratio_gate - 1.0);
         let pass = dz.abs() < 1e-12 && dr.abs() < 1e-12;
         ok &= pass;
@@ -185,12 +200,15 @@ fn day_of_year(year: i32, month: u32, day: u32) -> i32 {
 }
 
 fn main() {
-    let rule = gauss_legendre();
+    let rules = Rules {
+        column: gauss_legendre(),
+        step: gauss_legendre(),
+    };
     let path = std::env::args()
         .nth(1)
         .expect("usage: column_on2 SW-All.csv < points | column_on2 --check");
     if path == "--check" {
-        std::process::exit(i32::from(!check(&rule)));
+        std::process::exit(i32::from(!check(&rules)));
     }
     let days = space_weather::parse_space_weather(
         &std::fs::read_to_string(path).expect("readable SW-All.csv"),
@@ -234,7 +252,7 @@ fn main() {
                 day_of_year: f64::from(doy) + sec / 86_400.0,
             };
             let t_inf = field.exospheric_temperature(&point, &drivers);
-            depth(&|z| sdtm(t_inf, z), &rule, BOUNDARY_ALTITUDE).map(|(z, r)| (t_inf, r, z))
+            depth(&|z| sdtm(t_inf, z), &rules, BOUNDARY_ALTITUDE).map(|(z, r)| (t_inf, r, z))
         });
         let msis_row = window(&days, year, month, day).and_then(|w| {
             let today = w[4];
@@ -256,7 +274,7 @@ fn main() {
                 let d = gtd7(&input, &storm).d;
                 [d[1] * 1e6, d[2] * 1e6]
             };
-            depth(&msis, &rule, 9.0e4)
+            depth(&msis, &rules, 9.0e4)
         });
         let (t_inf, sdtm_ratio, sdtm_z) = sdtm_row.unwrap_or((f64::NAN, f64::NAN, f64::NAN));
         let (msis_z, msis_ratio) = msis_row.unwrap_or((f64::NAN, f64::NAN));

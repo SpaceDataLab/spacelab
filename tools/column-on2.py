@@ -8,8 +8,8 @@ GOLD retrieves ΣO/N2, the ratio of O's vertical column to N2's above the height
 day on; the phases are `tools/residual-maps.py`'s, pre-storm through post-storm.
 
     days    the GOLD days the storms' phases cover, `year doy` a line, for `tools/fetch-gold-on2.sh`
-    points  GOLD's good pixels, per scan, as the median of each 5° cell; writes the cells and the example's input
-    score   the models' ratios beside GOLD's: the bias by phase and magnetic latitude, and each cell's change
+    points  GOLD's good pixels, per scan, on its fixed 2.5° x 3° grid; writes them and the example's input
+    score   the models' ratios beside GOLD's: the bias by phase and magnetic latitude, and each pixel's change
             from its own pre-storm value, with intervals resampling whole storms
 
 A pixel is good where its own and its scan's quality flag are 0, the solar zenith and emission angles are
@@ -36,8 +36,6 @@ GOLD = ROOT / "data" / "validation" / "gold-on2"
 FIRST_DAY = pd.Timestamp("2018-10-05")
 GRATING_SHIFT = pd.Timestamp("2024-10-07")
 SHIFT_GUARD = pd.Timedelta(days=10)
-CELL = 5.0
-MIN_PIXELS = 4
 MAX_ANGLE = 75.0
 MAX_MLAT = 60.0
 MLAT_BANDS = ((0.0, 30.0), (30.0, 60.0))
@@ -110,17 +108,14 @@ def days(g) -> int:
     return 0
 
 
-def cells_of(path: pathlib.Path, maps) -> pd.DataFrame:
-    """One day file's good pixels, per scan and 5° cell: median ratio and random uncertainty, pixel count."""
+def pixels_of(path: pathlib.Path, maps) -> pd.DataFrame:
+    """One day file's good pixels: grid row and column, place, time, ratio and its three uncertainties."""
     import h5py
 
     with h5py.File(path, "r") as f:
         on2, dqi = f["on2"][:], f["on2_dqi"][:]
-        sza, ea, unc = (
-            f["solar_zenith_angle"][:],
-            f["emission_angle"][:],
-            f["on2_unc_ran"][:],
-        )
+        sza, ea = f["solar_zenith_angle"][:], f["emission_angle"][:]
+        unc = {k: f[f"on2_unc_{k}"][:] for k in ("ran", "sys", "mod")}
         lat, lon = f["latitude"][:].astype(float), f["longitude"][:].astype(float)
         scan_ok = f["dqi"][:] == 0
         start = [b"".join(r).decode() for r in f["scan_start_time"][:]]
@@ -141,61 +136,58 @@ def cells_of(path: pathlib.Path, maps) -> pd.DataFrame:
         )
         if not good.any():
             continue
-        la, lo = lat[good], lon[good]
+        i, j = np.nonzero(good)
         year = middle[s].year + (middle[s].day_of_year - 0.5) / 365.25
-        axis = maps.dipole_axis(np.full(la.size, year))
-        mlat = np.degrees(maps.magnetic(axis, np.radians(la), np.radians(lo))[0])
+        axis = maps.dipole_axis(np.full(i.size, year))
+        mlat = np.degrees(
+            maps.magnetic(axis, np.radians(lat[i, j]), np.radians(lon[i, j]))[0]
+        )
         keep = np.abs(mlat) < MAX_MLAT
+        i, j = i[keep], j[keep]
         frame = pd.DataFrame(
             {
-                "lat": la[keep],
-                "lon": lo[keep],
+                "i": i,
+                "j": j,
+                "lat": lat[i, j],
+                "lon": lon[i, j],
                 "mlat": mlat[keep],
-                "on2": on2[s][good][keep].astype(float),
-                "unc": unc[s][good][keep].astype(float),
+                "on2": on2[s][i, j].astype(float),
+                **{f"unc_{k}": v[s][i, j].astype(float) for k, v in unc.items()},
             }
         )
-        frame["i"] = np.floor(frame.lat / CELL).astype(int)
-        frame["j"] = np.floor(frame.lon / CELL).astype(int)
-        grouped = frame.groupby(["i", "j"])
-        cell = grouped.median()
-        cell["n"] = grouped.size()
-        cell = cell[cell.n >= MIN_PIXELS].reset_index()
-        cell["t"] = middle[s]
-        rows.append(cell)
+        frame["t"] = middle[s]
+        rows.append(frame)
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
 def points(g, maps) -> int:
     files = sorted((GOLD / "raw").glob("gold_l2_on2_*.nc"))
-    table = pd.concat([cells_of(p, maps) for p in files], ignore_index=True)
+    table = pd.concat([pixels_of(p, maps) for p in files], ignore_index=True)
     table = table[~excluded(table.t)].reset_index(drop=True)
     table["lon"] = (table.lon + 180.0) % 360.0 - 180.0
     ut = (table.t - table.t.dt.normalize()) / pd.Timedelta(seconds=1)
     table["sec"] = ut
     table["lst"] = (ut / 3600.0 + table.lon / 15.0) % 24.0
-    table.to_csv(GOLD / "cells.csv", index=False)
-    with (GOLD / "cells.in").open("w") as out:
+    table.to_csv(GOLD / "pixels.csv", index=False)
+    with (GOLD / "pixels.in").open("w") as out:
         for r in table.itertuples():
             out.write(
                 f"{r.t.year} {r.t.month} {r.t.day} {r.sec:.1f} {r.lat:.4f} {r.lon:.4f} {r.lst:.5f}\n"
             )
-    print(
-        f"{len(files)} days, {len(table)} cells ({table.n.sum()} pixels) -> {GOLD / 'cells.in'}"
-    )
+    print(f"{len(files)} days, {len(table)} pixels -> {GOLD / 'pixels.in'}")
     return 0
 
 
 def score(g, maps, draws: int) -> int:
-    table = pd.read_csv(GOLD / "cells.csv", parse_dates=["t"])
+    table = pd.read_csv(GOLD / "pixels.csv", parse_dates=["t"])
     models = pd.read_csv(
-        GOLD / "cells.out",
+        GOLD / "pixels.out",
         sep=" ",
         header=None,
         names=["t_inf", "sdtm", "sdtm_z", "msis", "msis_z"],
     )
     if len(models) != len(table):
-        raise ValueError(f"{len(models)} model rows for {len(table)} cells")
+        raise ValueError(f"{len(models)} model rows for {len(table)} pixels")
     table = pd.concat([table, models], axis=1)
     found, _ = storms(g)
     table["phase"], table["storm"] = phases(g, found, table.t)
@@ -206,13 +198,15 @@ def score(g, maps, draws: int) -> int:
     rng = np.random.default_rng(23)
     clusters = table.storm.to_numpy()
     print(
-        f"{table.storm.nunique()} storms, {len(table)} cells; GOLD median {table.on2.median():.3f}, "
+        f"{table.storm.nunique()} storms, {len(table)} pixels; GOLD median {table.on2.median():.3f} "
+        f"(uncertainty medians: random {table.unc_ran.median():.3f}, systematic {table.unc_sys.median():.3f}, "
+        f"model {table.unc_mod.median():.3f}), "
         f"SDTM-1 {table.sdtm.min():.3f} to {table.sdtm.max():.3f}, NRLMSISE-00 median {table.msis.median():.3f}"
     )
     print(
         "\nbias, 100 (exp(mean ln(model/GOLD)) - 1) %, [95 % storm-resampled]: SDTM-1 | NRLMSISE-00"
     )
-    print("phase | magnetic latitude | cells | storms | SDTM-1 | NRLMSISE-00")
+    print("phase | magnetic latitude | pixels | storms | SDTM-1 | NRLMSISE-00")
     for k, name in enumerate(names):
         for low, high in ((0.0, MAX_MLAT), *MLAT_BANDS):
             a = (
@@ -222,18 +216,18 @@ def score(g, maps, draws: int) -> int:
             ).to_numpy()
             if not a.any():
                 continue
-            cells = []
+            row = []
             for model in ("sdtm", "msis"):
                 v = np.log(table[model] / table.on2).to_numpy()
                 m, lo, hi = maps.mean_interval(v, a, clusters, draws, rng)
-                cells.append(
+                row.append(
                     f"{100 * np.expm1(m):+.1f} [{100 * np.expm1(lo):+.1f}, {100 * np.expm1(hi):+.1f}]"
                 )
             print(
                 f"{name} | {low:g}-{high:g}° | {a.sum()} | {table.storm[a].nunique()} | "
-                + " | ".join(cells)
+                + " | ".join(row)
             )
-    # Each cell's change from the same cell's pre-storm mean in the same storm: what the storm did there.
+    # Each pixel's change from the same pixel's pre-storm mean in the same storm: what the storm did there.
     base = (
         table[table.phase == 0]
         .groupby(["storm", "i", "j"])[["on2", "sdtm", "msis"]]
@@ -245,9 +239,9 @@ def score(g, maps, draws: int) -> int:
     joined = joined[joined.phase > 0].reset_index(drop=True)
     clusters = joined.storm.to_numpy()
     print(
-        "\nchange from the cell's own pre-storm mean, %, [95 % storm-resampled]: GOLD | SDTM-1 | NRLMSISE-00"
+        "\nchange from the pixel's own pre-storm mean, %, [95 % storm-resampled]: GOLD | SDTM-1 | NRLMSISE-00"
     )
-    print("phase | magnetic latitude | cells | storms | GOLD | SDTM-1 | NRLMSISE-00")
+    print("phase | magnetic latitude | pixels | storms | GOLD | SDTM-1 | NRLMSISE-00")
     for k, name in enumerate(names):
         if k == 0:
             continue
@@ -259,16 +253,16 @@ def score(g, maps, draws: int) -> int:
             ).to_numpy()
             if not a.any():
                 continue
-            cells = []
+            row = []
             for col in ("on2", "sdtm", "msis"):
                 v = np.log(joined[col] / joined[f"{col}_pre"]).to_numpy()
                 m, lo, hi = maps.mean_interval(v, a, clusters, draws, rng)
-                cells.append(
+                row.append(
                     f"{100 * np.expm1(m):+.1f} [{100 * np.expm1(lo):+.1f}, {100 * np.expm1(hi):+.1f}]"
                 )
             print(
                 f"{name} | {low:g}-{high:g}° | {a.sum()} | {joined.storm[a].nunique()} | "
-                + " | ".join(cells)
+                + " | ".join(row)
             )
     return 0
 

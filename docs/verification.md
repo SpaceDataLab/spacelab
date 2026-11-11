@@ -383,6 +383,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | The post-storm drop, four rivals | Ф23.J: a boundary-oxygen factor, a quiet offset δ, a linear form and the nitric oxide's time scaled by the flux, each added to the shipped form and fitted on the family and storm-out folds, then on §10.33's storm protocol and §10.34's named cases | each rival's step, fixed points and limits in Maxima and PARI/GP (`sdtm_composition`, `sdtm_overcooling`, `sdtm_nitric_flux`); `kn` held at Wang et al.'s middle to 30 digits in both | no rival reproduces the drop: 12 May 2024 at best −9.4 % against −25 to −27 % measured; δ fits to 0, linear costs +3.07 points in main and recovery, composition is unstable and raises the post-storm `⟨O/C⟩` to 1.126 at `ap` ≥ 300; the fitted `kn` sits at its bound 3 (a ratio of 23, Wang et al. 3–4); held at their 1.1933 with no parameter added it wins every paired measure (−0.06 [−0.09, −0.03] on the families, −0.77 [−0.99, −0.57] in main and recovery, −0.45 [−0.83, −0.05] on the storm folds) but lifts the post-storm `⟨O/C⟩` 0.1–0.9 points; shipping it is D-35 (§10.46) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/ablation-table.py |
 | Thinning: the fit at 10 min, 30 min and 2 h | Ф30.E: the shipped form refitted on every 5th, 15th and 60th row of the 120 s corpus, one family fold at a time, each scored on the same held-out rows and on §10.33's storm windows at 120 s | the peak memory of every run measured before the grid was chosen: linear in the rows, 11.05–15.17 GB at 10 min, so the 120 s corpus (55–76 GB) does not fit in 38.6 GB | thinning does not move the error: each family's MAPE within 0.03 points across the three steps, the storm onset unchanged, the peak error by 0.002 (better on 280 of 599 storms), the fitted kernel within 0.2 h, 0.2 h, 1 `ap` and 0.006 in `κ`; F62 is answered for the estimates (§10.47) | tools/fit-sdtm-corpus.py, tools/thinning-table.py |
 | The daily flux's memory | Ф23.L: the daily F10.7 through a first-order filter before `T∞`, with the heating time (no parameter) or its own, on the family and storm-out folds; the interval's coverage by regime held out, on the corpus and on §10.2's campaign rows | the filter's daily step, its `τ → 0` limit, `lfilter`'s recursion and a spike's conserved flux in Maxima (9 identities) and PARI/GP; `tools/regime-coverage.py` reproduces §10.28's held-out coverage digit for digit | its own time is 26–35 h; pre-storm MAPE 20.79 → 19.91 %, family −0.07 [−0.13, −0.01] with the heating time, storm folds span 0; regime 5 stays at 84.4 % on the campaign rows against the 88 % target, because the cell misses through a storm-time excess (May 2024 1.124, June 2025 1.195 model/measured), not the flux (§10.48) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/regime-coverage.py |
+| The quiet latitude structure | Ф23.V: the high-minus-low latitude contrast of the held-out residual on the quiet rows, by season, by height and, read after, by flux; two latitude rows of the form fixed before their folds (`degree3`, `boundary_latitude`) and three read after (`flux_latitude`, `flux_boundary_latitude`, `no_swarm`); the measured density boxcar-smoothed as Swarm's GPS densities are | the rule written into the tool before each run; `smoothing_shift` exact to 1e-13 on a synthetic series with a gap; `no_swarm`'s Swarm fold equals the shipped one to 1e-11 | CHAMP +11.4, GOCE +12.1 in both seasons (winter +17), +7 to +16 at F10.7a ≥ 100 at every height, negative only below 100 sfu above 400 km; no row meets the rule (`degree3` −0.08, `boundary_latitude` −0.03 and GOCE overshot); `flux_boundary_latitude` −0.31 [−0.37, −0.25], after the data → blind months (Ф23.X); Swarm's resolution moves CHAMP/GOCE by 2 points only (Ф23.Y) (§10.49) | tools/latitude-contrast.py, tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py |
 
 ### Tides
 
@@ -10208,6 +10209,93 @@ Run (the harness folds stay under `data/validation/sdtm-eval/`):
     done; done
     # the eleven storm-out folds: --kind storm --field F --only storm-...
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/regime-coverage.py --fields default flux_memory flux_memory_fit
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
+
+### 10.49 The quiet latitude structure (Ф23.V)
+
+§10.40 found SDTM-1's held-out residual higher at high latitude than at low on CHAMP and GOCE, before, during and
+after storms, in geographic as in magnetic latitude. `tools/latitude-contrast.py` reads it on the quiet rows of
+the family folds, daily `Ap` < 15, 302 115 of 365 214 rows. The contrast is `100 ×` the mean `ln(model/measured)`
+at `|lat|` ≥ 60° minus that at `|lat|` < 40°, with a 95 % interval resampling 27-day blocks. Two splits and their
+reading were written into the tool before the first run: by season (the high rows of the summer and of the winter
+hemisphere apart) and by height. A contrast of one sign in both seasons belongs to the mean field's latitude
+structure; one that grows as the height falls belongs to the profile below `T∞`.
+
+The contrast on the quiet rows, SDTM-1 against NRLMSISE-00 on the same rows:
+
+| family | summer hemisphere | winter hemisphere | equinox | all |
+|---|---|---|---|---|
+| CHAMP | +4.8 / −3.8 | +17.0 / +1.6 | +12.7 / −1.1 | **+11.4** [+10.6, +12.1] / −1.1 |
+| GOCE | +5.6 / +2.3 | +16.8 / +7.1 | +13.9 / +4.1 | **+12.1** [+11.4, +12.7] / +4.5 |
+| GRACE | −0.4 / −5.3 | +1.5 / −8.5 | +5.6 / −6.5 | +2.2 [+0.4, +3.9] / −6.8 |
+| GRACE-FO | −4.2 / −8.3 | −8.9 / −12.8 | +4.2 / −6.5 | −3.1 [−6.6, +0.4] / −9.3 |
+| Swarm | −10.0 / −11.1 | −6.2 / −13.0 | −6.7 / −14.4 | −7.6 [−9.5, −5.7] / −12.8 |
+
+By height, every family pooled: +11.3 below 300 km, +11.7 at 300–400, −0.9 at 400–475 and −6.8 from 475 km
+(NRLMSISE-00 +3.7, +2.8, −9.4, −12.2). By the rule written first, CHAMP's and GOCE's contrast is the mean field's,
+with a winter excess of 11–12 points on top, and it grows as the height falls, so it belongs below `T∞`.
+
+**The height bins mix flux levels.** A split of each family by height and by F10.7a, added after that run had been
+read and so descriptive, shows a different shape. At F10.7a ≥ 100 the contrast is +7 to +16 on every
+accelerometer family at every height; Swarm's is +2.4 and +1.5. Below 100 it is still +3 to +11 under 400 km,
+and above 400 km it turns negative: GRACE −5.3 and −7.8, GRACE-FO −16.1, Swarm −14.2 and −25.2.
+The structure depends on the flux and on the height together.
+
+**The latitude terms of the form, as Ф30.F's rows.** Two rows were fixed before their folds ran. The first is
+`degree3`, the mean field at degree 3, which gives `T∞` a richer latitude structure. The second is
+`boundary_latitude`, the boundary's `ln ρ` with `b20 Y20 + Y10 (b1c cos ω + b1s sin ω)`, `ω` the annual phase:
+a latitude structure below `T∞`. Their rule was also fixed before the folds ran. A row explains the structure if
+its `all` contrast on CHAMP, on GOCE and on Swarm is at most half the shipped field's in size, and its paired
+family-fold MAPE is no worse. Two more rows were read after the split by flux, and so are descriptive.
+`flux_latitude` gives the 81-day flux's response degree 2 (`Y2m × f`), so the pole-to-equator gradient of `T∞`
+can change with the flux. `flux_boundary_latitude` is `flux_latitude` with the boundary's structure added.
+
+| field | parameters | family MAPE, % | paired, all | paired, main and recovery | CHAMP | GOCE | GRACE | GRACE-FO | Swarm |
+|---|---|---|---|---|---|---|---|---|---|
+| shipped | 49 | 20.83 | — | — | +11.4 | +12.1 | +2.2 | −3.1 | −7.6 |
+| `degree3` | 56 | 20.75 | −0.08 [−0.11, −0.06] | −0.07 [−0.12, −0.02] | +11.3 | +12.0 | +2.2 | −3.1 | −7.7 |
+| `boundary_latitude` | 52 | 20.80 | −0.03 [−0.06, −0.01] | −0.08 [−0.12, −0.04] | +5.3 | −6.7 | +2.6 | −0.7 | −5.6 |
+| `flux_latitude`, after the data | 54 | 20.62 | −0.21 [−0.27, −0.16] | −0.14 [−0.23, −0.04] | +11.3 | +12.5 | +5.5 | −3.9 | −8.2 |
+| `flux_boundary_latitude`, after the data | 57 | 20.52 | **−0.31** [−0.37, −0.25] | −0.23 [−0.33, −0.12] | +4.5 | −9.0 | +6.2 | −1.2 | −6.1 |
+| `no_swarm`, after the data | 46 | 21.27 | +0.44 [+0.33, +0.55] | −0.14 [−0.49, +0.18] spans 0 | +9.4 | +10.3 | −4.6 | −7.5 | −7.6 |
+
+**The measurement's resolution.** Swarm's densities come from GPS accelerations, whose effective resolution is
+about 20 min (van den IJssel et al., EGU21-5580); every other family's come from an accelerometer. A smoothed
+measurement flattens the measured latitude contrast and so shifts the residual's. With `--smoothing`, the tool
+averages each accelerometer family's measured density over a centred boxcar at the corpus's 120 s cadence and
+reads the shift. With a 22 min window the shift is −7 to −13 points at F10.7a ≥ 100 at every height, −10 to −14
+under 400 km at either flux, and −0.7 to −2.3 at < 100 above 400 km. The boxcar is a proxy: the product's filter is not a boxcar. NRLMSISE-00, fitted to no
+Swarm row, sits 1 to 9 points lower on Swarm than on GRACE or GRACE-FO at the same height and flux. `no_swarm` takes
+every Swarm row out of every fold's training set. Its Swarm fold is the shipped one to 1e-11. It moves CHAMP's
+contrast by 2.0 points and GOCE's by 1.8, and it costs +0.44 points of MAPE.
+
+Findings:
+
+- **No row meets the rule, so Ф23.V changes nothing in the form.** `degree3` gains 0.08 points and leaves every
+  contrast within 0.1: the structure is not in `T∞`'s higher degrees. `boundary_latitude` halves CHAMP's contrast,
+  +11.4 → +5.3. It overshoots GOCE's, +12.1 → −6.7, and moves Swarm's only to −5.6.
+- **The structure lives in the flux, the height and the latitude together.** `flux_latitude` takes most of the
+  flux dependence out above 400 km (GRACE-FO at ≥ 100: +10.3 → +1.0) and adds to it below 400 km at low flux
+  (CHAMP at 300–400 km: +9.9 → +15.2). Neither term alone carries the structure.
+- **`flux_boundary_latitude` is the largest held-out gain of the rivals so far**, behind only the opt-in solar
+  wind's −0.38: −0.31 [−0.37, −0.25] for 8 parameters, and −0.23 in the main and recovery phase. It was read after the data, and it still fails the
+  contrast rule on GOCE and Swarm. It goes to Ф30.J's blind months before the ledger sees it (Ф23.X).
+- **Swarm's resolution is a measurement effect of the right size, but not the cause.** Taking Swarm out of training
+  moves CHAMP and GOCE by about 2 points and costs 0.44 points of MAPE, so Swarm stays. An observation operator
+  scores the model averaged over the product's window on Swarm rows, in the fit and in the score. It is the
+  principled remedy for the rest (Ф23.Y).
+- **The winter excess on CHAMP and GOCE is real and unexplained.** The excess is 12.2 and 11.2 points over the summer
+  hemisphere, against NRLMSISE-00's 5.4 and 4.8. `boundary_latitude`'s annual `Y10` leaves CHAMP's at 13.0 and
+  cuts GOCE's to 6.7.
+
+Run (the harness folds stay under `data/validation/sdtm-eval/`):
+
+    for f in degree3 boundary_latitude flux_latitude flux_boundary_latitude no_swarm; do for s in CHAMP GOCE GRACE GRACE-FO Swarm; do
+      uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind family --field $f --only family-$s
+    done; done
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/latitude-contrast.py \
+      --fields default degree3 boundary_latitude flux_latitude flux_boundary_latitude no_swarm
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/latitude-contrast.py --smoothing 10 20 40
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
 
 ---

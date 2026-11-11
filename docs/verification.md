@@ -381,6 +381,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | The ablation ladder | Ф30.F: nine rungs from the Bates profile on the flux to the solar wind, each the rung above in a limit, fitted and scored on the five family and eleven storm-out folds, with paired intervals on storm windows and 27-day blocks | each removal a limit of the shipped form in Maxima (`derivations/sdtm_ablation.mac`) | geography and season −20.6 points; the index −2.1; heating alone loses 6.6 on the storm folds and cooling wins 14.0 back; the kernel's second constant buys nothing; saturation −1.7, in the pre-storm phase; gain −0.5; the solar wind −0.4, gaining in every column; wall time not measured (§10.44) | tools/ablation-table.py |
 | One level per satellite, or a scale each | Ф30.G: what the shipped per-satellite scales buy held out, the most any scale could buy, and one level for every satellite, on the five family folds | `no_scales` is the shipped field on one level (`tools/test_evaluate_sdtm.py`) | the scales stay: one level costs +0.47 [+0.22, +0.73] points; the best constant per satellite bounds any scale at 0.35 points; the training mean is the wrong level (21.43 %); GOCE's scale runs +4.4 to +19.4 %; GRACE-FO C's v02c sits below its v02 by about −4 × 10⁻¹⁵ kg m⁻³, 4.4 % at the median and 24 % in the lowest density tercile of June 2018 (F72); the other seven satellites miss v02 less (21.9 against 24.2 %), but fitting on v02 costs the other families +0.33 [+0.15, +0.52], a level effect, and raises their level below F10.7a 80 by 2.6–4.4 %, about 4 of the spheres' 7–25 % (§10.45) | tools/satellite-scale.py, tools/density-versions.py, tools/corpus-variant.py, tools/low-flux-level.py |
 | The post-storm drop, four rivals | Ф23.J: a boundary-oxygen factor, a quiet offset δ, a linear form and the nitric oxide's time scaled by the flux, each added to the shipped form and fitted on the family and storm-out folds, then on §10.33's storm protocol and §10.34's named cases | each rival's step, fixed points and limits in Maxima and PARI/GP (`sdtm_composition`, `sdtm_overcooling`, `sdtm_nitric_flux`); `kn` held at Wang et al.'s middle to 30 digits in both | no rival reproduces the drop: 12 May 2024 at best −9.4 % against −25 to −27 % measured; δ fits to 0, linear costs +3.07 points in main and recovery, composition is unstable and raises the post-storm `⟨O/C⟩` to 1.126 at `ap` ≥ 300; the fitted `kn` sits at its bound 3 (a ratio of 23, Wang et al. 3–4); held at their 1.1933 with no parameter added it wins every paired measure (−0.06 [−0.09, −0.03] on the families, −0.77 [−0.99, −0.57] in main and recovery, −0.45 [−0.83, −0.05] on the storm folds) but lifts the post-storm `⟨O/C⟩` 0.1–0.9 points; shipping it is D-35 (§10.46) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/ablation-table.py |
+| Thinning: the fit at 10 min, 30 min and 2 h | Ф30.E: the shipped form refitted on every 5th, 15th and 60th row of the 120 s corpus, one family fold at a time, each scored on the same held-out rows and on §10.33's storm windows at 120 s | the peak memory of every run measured before the grid was chosen: linear in the rows, 11.05–15.17 GB at 10 min, so the 120 s corpus (55–76 GB) does not fit in 38.6 GB | thinning does not move the error: each family's MAPE within 0.03 points across the three steps, the storm onset unchanged, the peak error by 0.002 (better on 280 of 599 storms), the fitted kernel within 0.2 h, 0.2 h, 1 `ap` and 0.006 in `κ`; F62 is answered for the estimates (§10.47) | tools/fit-sdtm-corpus.py, tools/thinning-table.py |
 
 ### Tides
 
@@ -10089,6 +10090,58 @@ Run (the harness folds stay under `data/validation/sdtm-eval/`):
         --excess-saturation fit --storm-gain input-power --caps storm-log1-lin --storms --storm-table $r.csv --rival $r
     done
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
+
+### 10.47 Thinning: the fit at 10 min, 30 min and 2 h (Ф30.E)
+
+The harness fits every 60th row of the 120 s corpus, one row in 2 h (F62). Ф30.E refits the shipped form on every
+15th row (30 min) and every 5th (10 min), one family fold at a time, and scores every fit on the same rows: the
+step-60 rows held out, and §10.33's storm assessment on the 120 s windows.
+
+**The memory limit, measured first.** The peak resident memory of one fold is 1.10–1.45 GB at 2 h (365 214
+rows), 3.81–5.26 GB at 30 min (1 460 844 rows) and 11.05–15.17 GB at 10 min (4 382 523 rows): linear in the rows.
+The 120 s corpus, about 21.9 million rows, would need five times the 10 min peak, 55–76 GB, on a machine with
+38.6 GB. So 10 min is the finest grid reported. Wall times are not quoted: the machine was not quiet.
+
+Held-out MAPE on the step-60 rows, in %, SDTM-1 on all of them / at `Ap ≥ 50`, and NRLMSISE-00 on the same rows:
+
+| family | 10 min | 30 min | 2 h | NRLMSISE-00 |
+|---|---|---|---|---|
+| CHAMP | 18.37 / 19.84 | 18.36 / 19.84 | 18.34 / 19.85 | 43.89 |
+| GOCE | 12.46 / 16.44 | 12.43 / 16.42 | 12.44 / 16.40 | 30.40 |
+| GRACE | 21.20 / 25.61 | 21.19 / 25.61 | 21.20 / 25.64 | 53.32 |
+| GRACE-FO | 24.18 / 26.24 | 24.18 / 26.23 | 24.17 / 26.25 | 56.25 |
+| Swarm | 21.29 / 23.84 | 21.30 / 23.86 | 21.29 / 23.87 | 49.89 |
+
+Storms by first-peak `ap`, 599 comparisons on the five families: mean |onset error| in h / mean |peak
+model/measured − 1| / mean |half-recovery error| in h:
+
+| first-peak `ap` | storms | 10 min | 30 min | 2 h |
+|---|---|---|---|---|
+| ≥ 80 | 599 | 4.48 / 0.340 / 4.59 | 4.48 / 0.340 / 4.63 | 4.48 / 0.342 / 4.63 |
+| 80–150 | 471 | 4.75 / 0.333 / 4.83 | 4.75 / 0.334 / 4.87 | 4.75 / 0.336 / 4.87 |
+| 150–300 | 96 | 3.00 / 0.351 / 3.16 | 3.00 / 0.352 / 3.14 | 3.00 / 0.354 / 3.17 |
+| ≥ 300 | 32 | 4.88 / 0.401 / 5.30 | 4.88 / 0.399 / 5.48 | 4.88 / 0.395 / 5.48 |
+
+Findings:
+
+- **Thinning does not move the error.** Each family's held-out MAPE agrees within 0.03 points at the three steps,
+  and within 0.04 at `Ap ≥ 50`.
+- **Nor the storms.** The onset error is the same at every step. Storm by storm against 2 h, the peak error moves
+  by −0.002 at 10 min, better on 280 of 599 storms: no more than chance. At `ap` ≥ 300 the peak error is 0.006
+  worse and the half-recovery 0.18 h better.
+- **Nor the fitted kernel.** Across the steps, in every fold, the heating time stays within 0.2 h, the nitric
+  oxide's time within 0.2 h, the saturation within 1 `ap` and `κ` within 0.006.
+- **F62's question is answered for the estimates.** Rows 2 h apart carry what the fit uses. The intervals stay
+  those of §10.44, which resample storm windows and 27-day blocks and do not assume independent rows.
+
+Run (results stay under `data/validation/sdtm-eval/thinning/`):
+
+    for k in 5 15 60; do for f in CHAMP GOCE GRACE GRACE-FO Swarm; do
+      uv run --no-project --with numpy --with pandas --with scipy python -I tools/fit-sdtm-corpus.py --fit-sigma --cooling \
+        --excess-saturation fit --storm-gain input-power --caps storm-log1-lin --step $k --score-step 60 --storms \
+        --folds $f --storm-table data/validation/sdtm-eval/thinning/step$k-$f.csv > data/validation/sdtm-eval/thinning/step$k-$f.log
+    done; done
+    uv run --no-project --with numpy --with pandas python -I tools/thinning-table.py
 
 ---
 

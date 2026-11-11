@@ -379,7 +379,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Composition against GOLD and TianMu-1 | Ф23.P: SDTM-1's and NRLMSISE-00's column O/N₂ against 575,761 GOLD L2 pixels in the phases of 52 storms since 2018-10, and their local O/N₂ against TianMu-1's mass spectrometer through 10–12 October 2024 | the column above a height is n T/b for any T in Maxima (12 identities) and PARI/GP at 60 digits; the column ratio at the N₂ depth free of T∞ and σ; the example to 4e-16 | SDTM-1's column ratio is low by 52 % in every phase and does not move in storms (+0.1 % where GOLD falls 4.9 % at 30–60° magnetic latitude); its in-situ storm drop is heating alone, flat in latitude, and recovers too fast: the composition rival of Ф23.J must vary the boundary composition (§10.42) | tools/column-on2.py, tools/tianmu-on2.py |
 | Spheres by era | Ф23.U: ten more smooth spheres of known area-to-mass, six from 1994–1996 (ODERACS) and four from 2007–2010 (ANDE, its states from NRL's laser predictions), the `C_d` each model needs for the true lifetime | the nine-node central difference exact to degree 8 in Maxima and PARI/GP; the CPF chain's `--check` recovers a known mean state to 6 µm in `a` | ODERACS agrees with GFZ-1 (SDTM-1 needs 2.77–3.17 against 2.23–2.37); ANDE, in SDTM-1's own years, needs 2.49–2.96, so SDTM-1 is too thin near solar minimum at 200–350 km in both eras; both models need 11 % less in 2007–2010, the era's share, which a secular term would remove (§10.43) | tools/lifetime-campaign.py, crates/spacelab/examples/cpf_mean_state.rs |
 | The ablation ladder | Ф30.F: nine rungs from the Bates profile on the flux to the solar wind, each the rung above in a limit, fitted and scored on the five family and eleven storm-out folds, with paired intervals on storm windows and 27-day blocks | each removal a limit of the shipped form in Maxima (`derivations/sdtm_ablation.mac`) | geography and season −20.6 points; the index −2.1; heating alone loses 6.6 on the storm folds and cooling wins 14.0 back; the kernel's second constant buys nothing; saturation −1.7, in the pre-storm phase; gain −0.5; the solar wind −0.4, gaining in every column; wall time not measured (§10.44) | tools/ablation-table.py |
-| One level per satellite, or a scale each | Ф30.G: what the shipped per-satellite scales buy held out, the most any scale could buy, and one level for every satellite, on the five family folds | `no_scales` is the shipped field on one level (`tools/test_evaluate_sdtm.py`) | the scales stay: one level costs +0.47 [+0.22, +0.73] points; the best constant per satellite bounds any scale at 0.35 points; the training mean is the wrong level (21.43 %); GOCE's scale runs +4.4 to +19.4 %; GRACE-FO C's v02c sits below its v02 by about −4 × 10⁻¹⁵ kg m⁻³, 4.4 % at the median and 24 % in the lowest density tercile of June 2018 (F72, §10.45) | tools/satellite-scale.py, tools/density-versions.py |
+| One level per satellite, or a scale each | Ф30.G: what the shipped per-satellite scales buy held out, the most any scale could buy, and one level for every satellite, on the five family folds | `no_scales` is the shipped field on one level (`tools/test_evaluate_sdtm.py`) | the scales stay: one level costs +0.47 [+0.22, +0.73] points; the best constant per satellite bounds any scale at 0.35 points; the training mean is the wrong level (21.43 %); GOCE's scale runs +4.4 to +19.4 %; GRACE-FO C's v02c sits below its v02 by about −4 × 10⁻¹⁵ kg m⁻³, 4.4 % at the median and 24 % in the lowest density tercile of June 2018 (F72); the other seven satellites miss v02 less (21.9 against 24.2 %), but fitting on v02 costs the other families +0.33 [+0.15, +0.52], a level effect (§10.45) | tools/satellite-scale.py, tools/density-versions.py, tools/corpus-variant.py |
 
 ### Tides
 
@@ -9960,6 +9960,28 @@ Findings:
   direction of every other satellite's positive scale. Which version is right is not known here. Whether it is a
   part of §10.43's deficit near solar minimum is a test still to run (F72).
 
+**GRACE-FO C on v02 (Ф30.G-2).** `tools/corpus-variant.py` puts GRACE-FO C's v02 densities on the same instants
+where v02 exists (1,174,151 of 2,070,308 rows, median v02/v02c 1.037) and keeps every row. The `gc_v02` field is the
+shipped form fitted on that corpus. MAPE held out, in %:
+
+| family | shipped | `gc_v02` | shipped, best constant per satellite | `gc_v02`, best constant per satellite |
+|---|---|---|---|---|
+| CHAMP | 18.34 | 19.11 | 17.84 | 17.86 |
+| GOCE | 12.44 | 11.77 | 11.24 | 11.25 |
+| GRACE | 21.20 | 21.10 | 21.04 | 21.10 |
+| Swarm | 21.29 | 21.91 | 21.13 | 21.24 |
+| GRACE-FO, scored against its own version | 24.17 (v02c) | 21.89 (v02) | 22.81 | 21.28 |
+
+- **The other seven satellites agree better with v02.** The GRACE-FO fold trains without GRACE-FO C, so both
+  variants fit the same model, to 3e-11 in every parameter; only the truth it is scored on differs. That model misses v02 by 21.89 % and v02c by
+  24.17 %, and by 21.28 % and 22.81 % with the best constant. So v02c differs from the rest of the constellation in
+  shape as well as level. NRLMSISE-00 also misses v02 less: 48.94 % against 56.25 %.
+- **Fitting on v02 does not help the other families.** On CHAMP, GOCE, GRACE and Swarm, paired on the same rows and
+  truth, `gc_v02` costs +0.33 [+0.15, +0.52] points. A held-out family sits on the reference's level, and v02 raises
+  that level by about 4 %: with the best constant per satellite the two variants differ by at most 0.11 points.
+- **The training scales move as F72 predicts.** Against GRACE-FO C on v02, GRACE's scales fall from +6.1…+8.8 % to
+  +2.8…+5.2 %, and Swarm's from +0.4…+2.7 % to −2.8…0.0 %.
+
 Run (results stay under `data/validation/sdtm-eval/`):
 
     for f in CHAMP GOCE GRACE GRACE-FO Swarm; do
@@ -9967,6 +9989,8 @@ Run (results stay under `data/validation/sdtm-eval/`):
     done
     uv run --no-project --with numpy --with scipy python -I tools/satellite-scale.py [--field no_scales]
     uv run --no-project --with numpy --with pandas python -I tools/density-versions.py --sat GC --old v02 --new v02c
+    uv run --no-project --with numpy --with pandas python -I tools/corpus-variant.py --sat GC --version v02 --out corpus-gc-v02
+    # then the five family folds with --field gc_v02, and tools/satellite-scale.py --field gc_v02
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
 
 ---

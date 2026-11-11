@@ -1,0 +1,36 @@
+/* The memory arm of plans/17 Ф23.L: the daily F10.7 reaches T_inf through a first-order filter,
+     dG/dt = (F - G)/tau,  F held over each day,
+   so a quasi-homologous run of flares heats for longer than its days, and a lone flare spike for less
+   than its height. SDTM-1 then reads G of the day before, where the shipped form reads F; the excess
+   d = (G - F10.7a)/100 goes into D tanh(d/D) as before. With a = exp(-h/tau), h = 24 h:
+     (1) the step G1 = F + (G0 - F) a solves the equation over a day with F held, from G0;
+     (2) as tau -> 0 the step returns F: the shipped form is the limit;
+     (3) a held F is a fixed point;
+     (4) the step is scipy's lfilter with b = [1 - a] and a = [1, -a];
+     (5) a one-day spike of height A from a steady flux leaves A (1 - a) a^n after n more days, whose
+         sum is A: the filter delays the spike's flux and conserves it;
+     (6) a step of height A held from day 0 has reached A (1 - a^(n+1)) after day n;
+     (7) the spike's largest excess is A (1 - a): at tau = 24 h, 1 - 1/e of it.
+   Every identity prints 0. derivations/sdtm_flux_memory.gp checks the step against RK4 and (5)-(7)
+   numerically. */
+
+ratprint : false$
+display2d : false$
+
+advance(G0, F, t) := F + (G0 - F)*exp(-t/tau)$
+assume(tau > 0, t > 0, h > 0)$
+print("1 the step's ODE residual:", ratsimp(diff(advance(G0, F, t), t) - (F - advance(G0, F, t))/tau))$
+print("1 its initial value:", ratsimp(subst(t = 0, advance(G0, F, t)) - G0))$
+print("2 tau -> 0 returns F:", limit(advance(G0, F, h), tau, 0, plus) - F)$
+print("3 a held flux is a fixed point:", ratsimp(advance(F, F, h) - F))$
+print("4 the step is lfilter's recursion:", ratsimp(((1 - a)*F + a*G0) - subst(exp(-h/tau) = a, advance(G0, F, h))))$
+
+assume(a > 0, a < 1)$
+print("5 the spike's excess sums to its height:",
+      ratsimp(ev(sum(A*(1 - a)*a^n, n, 0, inf), simpsum) - A))$
+print("5 the excess after n days is the recursion's:",
+      ratsimp(subst(exp(-h/tau) = a, advance(A*(1 - a)*a^n, 0, h)) - A*(1 - a)*a^(n + 1)))$
+print("6 a held step after day n:",
+      ratsimp(ev(sum(A*(1 - a)*a^k, k, 0, n), simpsum) - A*(1 - a^(n + 1))))$
+print("7 the spike's largest excess:", ratsimp(subst(exp(-h/tau) = a, advance(0, A, h)) - A*(1 - a)))$
+print("  at tau = 24 h, as a share of the spike:", float(1 - exp(-1)))$

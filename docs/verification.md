@@ -376,6 +376,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | The density level seen by spheres | Ф23.T: four spheres of known area-to-mass, no fitted coefficient, the `C_d` each model needs for the true lifetime set beside the physical value of a smooth sphere | Moe & Bowman (2005)'s physical `C_d` of a smooth sphere, 2.18–2.37 at 300–500 km; the lifetime's dependence on `C_d` interpolated between runs | Starshine 3 (2001–2003): SDTM-1 needs 2.16–2.33, inside; NRLMSISE-00 1.91–2.03, too dense. GFZ-1 (1995–1999): SDTM-1 needs 2.84–3.51, too thin; NRLMSISE-00 2.23–2.61. Starshine 1–2 are mirror-covered and decide nothing; a secular change between the fitted eras is a hypothesis (§10.39) | tools/lifetime-campaign.py |
 | Held-out residuals in magnetic coordinates | Ф23.O: the five family folds' held-out residuals by magnetic latitude, magnetic local time and storm phase; the contrast of magnetic latitude above 60° against below 40°, intervals resampling storms | the centred IGRF-14 dipole gated in Maxima; the verdict rule written into the tool before the run | NO-GO for an auroral term: in the main and recovery phase SDTM-1's contrast lies above zero on four families (+5.9 to +13.2), the opposite of missed auroral heating, and is as large before the storm; the storm-time deficit is at low latitude (−8.3 at night); the dayside onset deficit at high latitude (−14.3) is a hypothesis (§10.40) | tools/residual-maps.py |
 | The nitric-oxide step against its exact solution | Ф23.Q: the shipped frozen-N step, and 2, 4 and 8 sub-steps, against the exact step under a held drive on 216 storms since 2000, beside the spread of the same peak over the five folds' constants | the exact step's integrating factor in Maxima, its integral at 40 digits by Maxima and at 60 by PARI/GP, equal to 1e-36; the tool to 2e-15 | the step reads the peak high by a median of 0.31 % and at most 1.63 %, a median of 0.047 of the fold spread (at most 0.236); two sub-steps take it to 0.40 %, so no refit alone (§10.41) | tools/no-step-accuracy.py |
+| Composition against GOLD and TianMu-1 | Ф23.P: SDTM-1's and NRLMSISE-00's column O/N₂ against 575,761 GOLD L2 pixels in the phases of 52 storms since 2018-10, and their local O/N₂ against TianMu-1's mass spectrometer through 10–12 October 2024 | the column above a height is n T/b for any T in Maxima (12 identities) and PARI/GP at 60 digits; the column ratio at the N₂ depth free of T∞ and σ; the example to 4e-16 | SDTM-1's column ratio is low by 52 % in every phase and does not move in storms (+0.1 % where GOLD falls 4.9 % at 30–60° magnetic latitude); its in-situ storm drop is heating alone, flat in latitude, and recovers too fast: the composition rival of Ф23.J must vary the boundary composition (§10.42) | tools/column-on2.py, tools/tianmu-on2.py |
 
 ### Tides
 
@@ -9602,6 +9603,125 @@ than §10.40's, which starts at the first row.
 Run:
 
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/no-step-accuracy.py
+
+### 10.42 Composition: the column O/N₂ against GOLD, the local O/N₂ against TianMu-1 (Ф23.P)
+
+SDTM-1 is fitted on total mass density, and its composition at 120 km is Jacchia (1971)'s, held fixed. Total
+density can hide errors in temperature and in O/N₂ that cancel (F65). GOLD's ΣO/N₂ and TianMu-1's mass
+spectrometer measure composition and are open. This section is validation only: nothing is fitted to either.
+
+**The gate.** In diffusive equilibrium with no thermal diffusion, the partial pressure is the weight of the column
+above it. So the column of a species above a height is `n T/b`, `b = m g₀/k`, for every temperature profile
+(`derivations/sdtm_column.mac`, 12 identities; the Bates column is also integrated directly). The depth is where
+N₂'s column is 1e17 cm⁻² (Strickland et al. 1995). In geopotential height, the column ratio there is
+
+    ΣO/N₂ = (b_N₂/b_O) (n_O,120/n_N₂,120) (n_N₂,120 T₁₂₀/(b_N₂ N*))^(1 − b_O/b_N₂),
+
+with no `T∞` and no `σ` in it. Heating lifts the pressure levels and leaves the ratio on them where it was. At the
+shipped boundary the ratio is 0.4818. The boundary is Jacchia's composition (O/N₂ = 0.19 at 120 km) with the fitted
+density scale 0.4966, which enters to the power 0.43. The vertical column in geometric altitude adds only the
+growth of the column's area with height: 0.4860, 0.4875 and 0.4906 at `T∞` = 700, 1000 and 1500 K. PARI/GP
+(`derivations/sdtm_column.gp`, `intnum` at 60 digits) agrees with Maxima to 1e-38 on the constant and to 1e-11
+on QUADPACK's geometric values. `column_on2 --check` matches the GP values to 4e-16.
+
+**GOLD.** The storm protocol of Bruinsma & Laurens (2024) finds 55 storms from GOLD's first level-2 day,
+2018-10-05. The data are GOLD's level-2 ON2 V04 files from SPDF for the 246 days their phases cover. A pixel is
+used where its quality flag and its scan's are 0, the solar zenith and emission angles are below 75°, and the
+magnetic latitude is below 60°; V04's release notes give contamination poleward of 60°. Days within 10 days of
+the 2024-10-07 grating shift are left out, which removes the October 2024 storm. That leaves 722,013 pixels, of which
+575,761 fall in a phase of 52 storms. GOLD's median ratio is 1.040. Its median uncertainties are 0.030 random,
+0.031 systematic and 0.284 from the retrieval's model. Each pixel's models are `column_on2`'s: SDTM-1 at its
+`T∞` there, and NRLMSISE-00 driven as in §10.2. The intervals resample whole storms.
+
+| phase | magnetic latitude | pixels | storms | SDTM-1 bias | NRLMSISE-00 bias |
+|---|---|---|---|---|---|
+| pre-storm | 0–60° | 72,947 | 42 | −52.2 [−53.6, −51.0] | −9.6 [−13.0, −6.6] |
+| onset | 0–60° | 133,642 | 51 | −51.4 [−53.3, −49.7] | −8.6 [−11.2, −6.0] |
+| main and recovery | 0–30° | 218,818 | 50 | −53.5 [−55.0, −52.1] | −6.1 [−10.1, −1.8] |
+| main and recovery | 30–60° | 72,315 | 49 | −47.2 [−50.3, −44.4] | −14.2 [−16.9, −11.2] |
+| post-storm | 0–60° | 78,039 | 44 | −53.2 [−54.6, −51.5] | −8.3 [−10.2, −6.4] |
+
+Bias is `100 (exp(mean ln(model/GOLD)) − 1)` %. What a storm does is read pixel by pixel: the change from the same
+pixel's mean in the same storm's pre-storm phase. GOLD sees the same disk from geostationary orbit, so the pixel
+is a fixed place.
+
+| storms by first-peak `ap` | magnetic latitude | pixels | storms | GOLD | SDTM-1 | NRLMSISE-00 |
+|---|---|---|---|---|---|---|
+| all, main and recovery | 0–30° | 150,991 | 41 | +2.4 [+0.8, +4.2] | +0.1 [+0.0, +0.1] | +4.8 [+2.4, +8.0] |
+| all, main and recovery | 30–60° | 48,087 | 41 | −4.9 [−7.7, −1.7] | +0.1 [+0.1, +0.1] | −3.7 [−5.2, −2.5] |
+| 80–150 | 30–60° | 37,481 | 32 | −4.5 [−6.9, −1.2] | +0.1 [+0.0, +0.1] | −3.0 [−4.3, −2.1] |
+| 150–300 | 30–60° | 7,682 | 7 | −2.0 [−7.6, +3.1] | +0.2 [+0.0, +0.2] | −3.9 [−5.2, −0.2] |
+| ≥ 300 | 0–30° | 9,561 | 2 | +4.5 | +0.0 | +23.9 |
+| ≥ 300 | 30–60° | 2,924 | 2 | −17.7 | +0.0 | −10.5 |
+
+In the onset phase none of the three moves by more than 4 %, and GOLD's change spans zero. With two storms, the
+≥ 300 rows have no interval.
+
+**TianMu-1.** One storm, 10–12 October 2024, from the plot data of Ai et al. (2026) (Zenodo
+doi:10.5281/zenodo.20195710, CC BY 4.0). The record is TM-19's O and N₂ every 2 s, used every 30 s, on the
+ascending node (about 01 h local time) and the descending node (about 13 h). It has no altitude. The paper's
+figure 5 puts the orbit at 518–545 km, so the models run at 520 and 545 km. What is compared is the change of the
+local ratio from the paper's quiet window, which a stable orbit leaves free of the height. The two heights differ
+by at most 2 points. The windows are the paper's own: quiet before 15:40 UT on 10 October, main 16:00–03:00 UT,
+recovery 15:00–02:30 UT on 11–12 October. The record's NRLMSIS 2.0 columns are not read.
+
+| node | latitude | quiet O/N₂, measured / SDTM-1 / NRLMSISE-00 | main, measured / SDTM-1 / NRLMSISE-00 | recovery, measured / SDTM-1 / NRLMSISE-00 |
+|---|---|---|---|---|
+| night | 0–30° | 55.1 / 26.1 / 64.6 | −41.9 / −44.1 / −28.8 | −6.5 / −15.4 / −13.6 |
+| night | 30–60° | 54.6 / 22.0 / 45.0 | −72.0 / −43.7 / −64.3 | −32.0 / −13.8 / −51.8 |
+| night | 60–90° | 31.3 / 17.0 / 20.9 | −62.4 / −39.3 / −78.8 | −35.6 / −10.6 / −66.8 |
+| day | 0–30° | 23.6 / 10.3 / 28.9 | −4.2 / −26.3 / −9.5 | +2.4 / −2.0 / +0.1 |
+| day | 30–60° | 24.7 / 11.2 / 24.9 | −30.9 / −29.6 / −38.3 | −7.3 / −4.2 / −21.6 |
+| day | 60–90° | 25.9 / 13.4 / 18.2 | −52.8 / −35.0 / −67.6 | −31.4 / −6.9 / −50.1 |
+
+The models are at 520 km. The changes are in %. The samples are 2 s apart on one satellite, so the table carries
+no interval.
+
+Findings:
+
+- **SDTM-1's column O/N₂ is low by 52 % in every phase and both latitude bands:** 0.49 against GOLD's 1.04. That
+  is twice GOLD's retrieval-model uncertainty, 27 % at the median. NRLMSISE-00 is low by 6–15 %, inside that
+  uncertainty. The gate gives the cause: the ratio depends only on the boundary, that is, on Jacchia's O/N₂ at
+  120 km and on the fitted scale.
+- **SDTM-1's column has no storm response.** It moves by 0.1 %. In the main and recovery phase GOLD falls by 4.9 %
+  [1.7, 7.7] at 30–60° magnetic latitude and rises by 2.4 % at 0–30°. In the two largest storms it falls by 18 %.
+  NRLMSISE-00 has the same pattern: −3.7 % and +4.8 %.
+- **At a fixed height, SDTM-1's storm response is heating alone.** TianMu-1's quiet O/N₂ is again about twice
+  SDTM-1's. In the main phase, heating lifts N₂ and SDTM-1's ratio falls by 26–44 % at every latitude. The
+  measured fall depends on latitude: on the night side −42, −72 and −62 % from low to high latitude, on the day
+  side −4, −31 and −53 %. In recovery SDTM-1 returns while the measured depletion stays: at 30–90° the measured
+  ratio is still −31 to −36 %, except on the day side at 30–60° (−7 %), and SDTM-1's is −4 to −14 %. NRLMSISE-00
+  has the latitude structure but overshoots the recovery: −50 to −67 % at 60–90°.
+
+**Consequence.** No `T∞` term can correct the column ratio, because the gate shows it is independent of `T∞`.
+Ф23.J's composition rival must make the boundary composition vary, in two parts.
+
+- **The quiet level.** O/N₂ at 120 km is the one constant that sets ΣO/N₂. Total density alone does not identify
+  it (F65); GOLD does.
+- **A storm-time depletion.** It must be larger at high latitudes and persist into recovery: in TianMu-1's
+  recovery heating has relaxed, yet the depletion stays. This is the post-storm O depletion of Mikhailov &
+  Perrone (2025).
+
+Either part changes the density at satellite heights. So it is a form change through Ф30.A's ledger (D-30),
+after Ф30.F.
+
+**What this does not settle.**
+
+- GOLD's absolute level carries its retrieval's model uncertainty, so a bias of 52 % sets a direction and an
+  order of magnitude, not a value to fit to.
+- The pixel-by-pixel change is free of that uncertainty, but GOLD sees only the day side between about 120° W and
+  25° E.
+- TianMu-1 is one storm and one satellite without its altitude.
+
+Run:
+
+    tools/fetch-gold-on2.sh < <(uv run --no-project --python 3.13 --with numpy --with pandas --with scipy --with h5py python -I tools/column-on2.py days)
+    uv run --no-project --python 3.13 --with numpy --with pandas --with scipy --with h5py python -I tools/column-on2.py points
+    target/release/examples/column_on2 data/validation/density/SW-All.csv < data/validation/gold-on2/pixels.in > data/validation/gold-on2/pixels.out
+    uv run --no-project --python 3.13 --with numpy --with pandas --with scipy --with h5py python -I tools/column-on2.py score
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/tianmu-on2.py points
+    for h in 520 545; do target/release/examples/column_on2 --local $h data/validation/density/SW-All.csv < data/validation/tianmu-ngms/points.in > data/validation/tianmu-ngms/points-$h.out; done
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/tianmu-on2.py score
 
 ---
 

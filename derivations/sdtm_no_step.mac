@@ -1,0 +1,56 @@
+/* The exact step of SDTM-1's heating with nitric-oxide cooling over one interval of constant drive
+   (plans/17 Ф23.Q): the reference the shipped frozen-N step and its sub-steps are measured against.
+
+     dD/dt = (H - D)/tc - g N D,   dN/dt = (H - N)/tn,   H constant over the interval.
+
+   N(t) = H + (N0 - H) e^(-t/tn) is exact (sdtm_no_cooling.mac 1). D's equation is then linear with the
+   rate r(t) = 1/tc + g N(t), so D(t) = e^(-A(t)) (D0 + (H/tc) int_0^t e^(A(s)) ds) with A' = r, A(0) = 0.
+   A has a closed form; the integral of e^A has none (it is exp of exp), and is a quadrature of a smooth,
+   positive integrand. What is proved: A's closed form, and D(t)'s equation and initial value. Every
+   identity prints 0. The numeric block gives, at the shipped constants and four states, the exact D after
+   one 3 h interval at 40 digits, and the frozen-N step taken once, twice and four times over it, which
+   tools/no-step-accuracy.py is checked against. */
+
+ratprint : false$
+fpprintprec : 0$
+assume(tc > 0, tn > 0, g > 0, t > 0)$
+
+A(t) := t/tc + g*(H*t + (N0 - H)*tn*(1 - exp(-t/tn)))$
+print("A, its derivative is the rate:",
+    ratsimp(diff(A(t), t) - (1/tc + g*(H + (N0 - H)*exp(-t/tn)))))$
+print("A, zero at the start:", ratsimp(A(0)))$
+
+D(t) := exp(-A(t))*(D0 + (H/tc)*'integrate(exp(A(s)), s, 0, t))$
+print("D, the state equation:",
+    ratsimp(diff(D(t), t) - ((H - D(t))/tc - g*(H + (N0 - H)*exp(-t/tn))*D(t))))$
+print("D, the initial value:", ratsimp(ev(D(0), nouns) - D0))$
+
+/* The shipped constants, as sdtm_no_cooling.mac 9 reads them from sdtm/coefficients.rs: heating and
+   nitric-oxide times in hours, g = 1/(tc H_s). */
+fpprec : 40$
+load(brmbrg)$
+brombergtol : 1.0b-38$
+brombergabs : 0.0b0$
+brombergit : 30$
+sh_tc : bfloat(6295024178295275/(3600*10^11))$
+sh_tn : bfloat(11864859040774021/(3600*10^11))$
+sh_g : 1/(sh_tc*bfloat(2477339239626375/10^14))$
+hstep : 3$
+exact(d0, n0, hk) := block([a],
+    a(x) := x/sh_tc + sh_g*(hk*x + (n0 - hk)*sh_tn*(1 - exp(-x/sh_tn))),
+    bfloat(exp(-a(hstep))*(d0 + (hk/sh_tc)*bromberg(lambda([x], exp(a(x))), 0, hstep))))$
+/* The shipped step over h, N frozen at its exact mean; `k` of them across the interval. */
+frozen(d0, n0, hk, k) := block([d : bfloat(d0), n : bfloat(n0), h : bfloat(hstep/k), nb, l, ds],
+    for i thru k do (
+        nb : hk + (n - hk)*sh_tn/h*(1 - exp(-h/sh_tn)),
+        l : 1/sh_tc + sh_g*nb,
+        ds : (hk/sh_tc)/l,
+        d : ds + (d - ds)*exp(-l*h),
+        n : hk + (n - hk)*exp(-h/sh_tn)),
+    d)$
+states : [[bfloat(7/(1 + 7*sh_g*sh_tc)), 7, 300], [100, 50, 300], [200, 250, 7], [25, 25, 80]]$
+linel : 200$
+for j thru length(states) do block([st : states[j]],
+    print("state", j, "D0 N0 H:", st[1], st[2], st[3]),
+    print("state", j, "exact:", exact(st[1], st[2], st[3])),
+    for k in [1, 2, 4] do print("state", j, "frozen x", k, ":", frozen(st[1], st[2], st[3], k)))$

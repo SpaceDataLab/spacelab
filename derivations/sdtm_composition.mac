@@ -1,0 +1,88 @@
+/* The composition rival of plans/17 Ф23.J: SDTM-1's boundary oxygen raised by a factor e^c, n_O0 -> n_O0 e^c,
+   with nitrogen and the other species left where they are.
+
+   §10.42 found SDTM-1's column O/N2 half of GOLD's and fixed by the 120 km boundary, so the rival frees the
+   boundary oxygen. Before any fit, what it can do:
+     (1) at fixed T∞, d rho/dc is the oxygen mass density rho_O, so d ln rho/dc = w, the oxygen mass fraction;
+     (2) w lies in [0, 1];
+     (3) the column O/N2 of derivations/sdtm_column.mac scales as e^c;
+     (4) a fit holds the density at the heights it has rows. With the common boundary scale s and T∞ free and
+         ln rho held at z1 and z2, the response at a third height is
+           d ln rho(z3)/dc = (w3 - w1) - (D3 - D1)(w1 - w2)/(D1 - D2),
+         D = d ln rho/d T∞. This is where the rival moves the density: below GOCE's rows, where §10.43's
+         spheres find SDTM-1 too thin.
+   Then the shipped boundary in numbers: w and D at 200, 250, 300 and 490 km, the linear response at 200 and
+   300 km with 250 and 490 km held, and the exact response for the c that brings the column ratio to GOLD's
+   median, solved for s and T∞. Every identity prints 0.
+   derivations/sdtm_composition.gp checks the numbers at 60 digits.                                         */
+
+ratprint : false$
+display2d : false$
+linel : 200$
+
+/* (1), (2): any profile shapes fN, fO, fX >= 0, oxygen's own e^c. */
+rho : mN*nN0*fN + mO*nO0*exp(c)*fO + mX*nX0*fX$
+print("1 d rho/dc is the oxygen mass density:", ratsimp(diff(rho, c) - mO*nO0*exp(c)*fO))$
+w : mO*nO0*exp(c)*fO/rho$
+print("2 1 - w is the other species' share:", ratsimp(1 - w - (mN*nN0*fN + mX*nX0*fX)/rho))$
+
+/* (3): sdtm_column.mac's closed form at the N2 depth Nst. */
+closed : (bN/bO)*(nO0*exp(c)/nN0)*(nN0*T0/(bN*Nst))^(1 - bO/bN)$
+print("3 the column O/N2 scales as e^c:", radcan(closed/subst(c = 0, closed) - exp(c)))$
+
+/* (4): two held heights, the common log scale ds and dT free. */
+held : linsolve([ds + D1*dT + w1*dc = 0, ds + D2*dT + w2*dc = 0], [ds, dT])$
+response : subst(held, ds + D3*dT + w3*dc)/dc$
+print("4 the response at a third height:",
+      ratsimp(response - ((w3 - w1) - (D3 - D1)*(w1 - w2)/(D1 - D2))))$
+
+/* The shipped boundary: sdtm/mod.rs's species and sdtm/coefficients.rs's sigma and boundary scale, exact
+   from their decimal literals, as derivations/sdtm_column.mac. */
+fpprec : 40$
+R : 6356766$
+z0 : 120000$
+g0 : 980665/100000*(R/(R + z0))^2$
+kB : 1380649/10^29$
+amu : 166053906892/10^38$
+T0 : 380$
+sg : 3341439818644104/10^20$
+sc : 49658530381854077/10^17$
+/* N2, O2, O, Ar, He: mass in u, number at 120 km in m^-3, thermal diffusion alpha. */
+species : [[280134/10^4, 4*10^17, 0], [319988/10^4, 75*10^15, 0], [159994/10^4, 76*10^15, 0],
+           [39948/10^3, 18*10^14, 0], [40026/10^4, 34*10^12, -38/100]]$
+geo(z) := (z - z0)*(R + z0)/(R + z)$
+temp(Ti, x) := Ti - (Ti - T0)*exp(-sg*x)$
+i1(Ti, x) := (sg*x + log(temp(Ti, x)/T0))/(sg*Ti)$
+/* Oxygen, the third species, carries e^cc. */
+partial(sp, Ti, x, cc) := sp[1]*amu*sc*sp[2]*(if sp = species[3] then exp(cc) else 1)
+                          *(T0/temp(Ti, x))^(1 + sp[3])*exp(-sp[1]*amu*g0/kB*i1(Ti, x))$
+lnrho(Ti, x, cc) := log(sum(partial(species[k], Ti, x, cc), k, 1, 5))$
+wO(Ti, x) := partial(species[3], Ti, x, 0)/sum(partial(species[k], Ti, x, 0), k, 1, 5)$
+dlnT(Ti, x) := block([t], subst(t = Ti, diff(lnrho(t, x, 0), t)))$
+
+heights : [200000, 250000, 300000, 490000]$
+for Ti in [700, 1000] do (
+  print("T∞", Ti, "K: oxygen mass fraction w at 200/250/300/490 km:",
+        map(lambda([z], float(bfloat(wO(Ti, geo(z))))), heights)),
+  print("        d ln rho/d T∞, 1/K:", map(lambda([z], float(bfloat(dlnT(Ti, geo(z))))), heights)))$
+
+lin(Ti, z3) := block([x1 : geo(250000), x2 : geo(490000), x3 : geo(z3), w1, w2, w3, d1, d2, d3],
+  [w1, w2, w3] : map(lambda([x], wO(Ti, x)), [x1, x2, x3]),
+  [d1, d2, d3] : map(lambda([x], dlnT(Ti, x)), [x1, x2, x3]),
+  (w3 - w1) - (d3 - d1)*(w1 - w2)/(d1 - d2))$
+for Ti in [700, 1000] do
+  print("T∞", Ti, "K, 250 and 490 km held: d ln rho/dc at 200 km", float(bfloat(lin(Ti, 200000))),
+        ", at 300 km", float(bfloat(lin(Ti, 300000))))$
+
+/* The c that brings the shipped column ratio, 0.4875 at T∞ 1000 K in geometric height (sdtm_column.mac),
+   to GOLD's median 1.040 (§10.42); then s and T∞ solved so that rho at 250 and 490 km does not move. */
+cg : log(1040/1000/(487542453257362/10^15))$
+print("c for GOLD's median column ratio:", float(cg))$
+load("mnewton")$
+for Ti in [700, 1000] do block([x1 : geo(250000), x2 : geo(490000), x3 : geo(200000), x4 : geo(300000), sol, s1, t1],
+  sol : mnewton([lnrho(t, x1, cg) + s - lnrho(Ti, x1, 0), lnrho(t, x2, cg) + s - lnrho(Ti, x2, 0)], [s, t],
+                [-0.5, Ti*0.9]),
+  [s1, t1] : [rhs(sol[1][1]), rhs(sol[1][2])],
+  print("T∞", Ti, "K, exact: s", float(s1), "T∞ ->", float(t1), "K; density change at 200 km",
+        float(exp(lnrho(t1, x3, cg) + s1 - lnrho(Ti, x3, 0)) - 1),
+        ", at 300 km", float(exp(lnrho(t1, x4, cg) + s1 - lnrho(Ti, x4, 0)) - 1)))$

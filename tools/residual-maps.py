@@ -131,6 +131,29 @@ def contrast(values, a, b, clusters, draws, rng) -> tuple[float, float, float]:
     return values[a].mean() - values[b].mean(), float(low), float(high)
 
 
+def storm_phases(rows, g, t: np.ndarray) -> tuple[np.ndarray, np.ndarray, list[dict]]:
+    """Each time's phase (an index into `PHASE_NAMES`) and storm, -1 outside every storm, on the protocol's
+    first-peak `t0`; and the storms. A time in two storms' phases goes to the first."""
+    ap, epoch = rows.attrs["ap"], rows.attrs["ap_epoch"]
+    start = (rows.t.min().normalize() - epoch).days * 8
+    found = g.storm_onsets(ap[start:], epoch + np.timedelta64(start // 8, "D"))
+    phase = np.full(t.size, -1)
+    storm = np.full(t.size, -1)
+    for n, s in enumerate(found):
+        hours = (t - np.datetime64(s["t0"])) / np.timedelta64(1, "h")
+        edges = (
+            g.PHASES[0][0],
+            g.PHASES[1][0],
+            0.0,
+            s["phase3_end"],
+            s["phase3_end"] + 12.0,
+        )
+        for k in range(4):
+            here = (phase < 0) & (hours >= edges[k]) & (hours < edges[k + 1])
+            phase[here], storm[here] = k, n
+    return phase, storm, found
+
+
 def mean_interval(values, a, clusters, draws, rng) -> tuple[float, float, float]:
     """Mean over `a`, with an interval resampling the clusters that hold a row of `a`."""
     ids = np.unique(clusters[a], return_inverse=True)[1]
@@ -181,25 +204,7 @@ def main() -> int:
         r.lst.to_numpy(),
         declination(r.t.dt.day_of_year.to_numpy()),
     )
-    # Each row's storm and phase, on the protocol's first-peak `t0`; -1 outside every storm.
-    ap, epoch = rows.attrs["ap"], rows.attrs["ap_epoch"]
-    start = (rows.t.min().normalize() - epoch).days * 8
-    found = g.storm_onsets(ap[start:], epoch + np.timedelta64(start // 8, "D"))
-    phase = np.full(t.size, -1)
-    storm = np.full(t.size, -1)
-    for n, s in enumerate(found):
-        t0 = np.datetime64(s["t0"])
-        hours = (t - t0) / np.timedelta64(1, "h")
-        edges = [
-            g.PHASES[0][0],
-            g.PHASES[1][0],
-            0.0,
-            s["phase3_end"],
-            s["phase3_end"] + 12.0,
-        ]
-        for k in range(4):
-            here = (phase < 0) & (hours >= edges[k]) & (hours < edges[k + 1])
-            phase[here], storm[here] = k, n
+    phase, storm, found = storm_phases(rows, g, t)
     print(
         f"{args.field}, family folds: {done.sum()} rows, {len(found)} storms; "
         f"rows in a phase: "

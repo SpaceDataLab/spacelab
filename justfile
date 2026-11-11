@@ -18,10 +18,11 @@ freeze:
 freeze-data:
     uv run --no-project python -I tools/check-sdtm-freeze.py --data
 
-# The evaluation harness's leak tests and the clustered intervals' laws (Ф30.B, Ф30.C).
+# The evaluation harness's leak tests, the clustered intervals' laws and the residual maps' coordinates (Ф30.B, Ф30.C, Ф23.O).
 harness:
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/test_evaluate_sdtm.py
     uv run --no-project --with numpy python -I tools/test_cluster_intervals.py
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/test_residual_maps.py
 
 fmt:
     cargo fmt --all -- --check

@@ -377,6 +377,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Held-out residuals in magnetic coordinates | Ф23.O: the five family folds' held-out residuals by magnetic latitude, magnetic local time and storm phase; the contrast of magnetic latitude above 60° against below 40°, intervals resampling storms | the centred IGRF-14 dipole gated in Maxima; the verdict rule written into the tool before the run | NO-GO for an auroral term: in the main and recovery phase SDTM-1's contrast lies above zero on four families (+5.9 to +13.2), the opposite of missed auroral heating, and is as large before the storm; the storm-time deficit is at low latitude (−8.3 at night); the dayside onset deficit at high latitude (−14.3) is a hypothesis (§10.40) | tools/residual-maps.py |
 | The nitric-oxide step against its exact solution | Ф23.Q: the shipped frozen-N step, and 2, 4 and 8 sub-steps, against the exact step under a held drive on 216 storms since 2000, beside the spread of the same peak over the five folds' constants | the exact step's integrating factor in Maxima, its integral at 40 digits by Maxima and at 60 by PARI/GP, equal to 1e-36; the tool to 2e-15 | the step reads the peak high by a median of 0.31 % and at most 1.63 %, a median of 0.047 of the fold spread (at most 0.236); two sub-steps take it to 0.40 %, so no refit alone (§10.41) | tools/no-step-accuracy.py |
 | Composition against GOLD and TianMu-1 | Ф23.P: SDTM-1's and NRLMSISE-00's column O/N₂ against 575,761 GOLD L2 pixels in the phases of 52 storms since 2018-10, and their local O/N₂ against TianMu-1's mass spectrometer through 10–12 October 2024 | the column above a height is n T/b for any T in Maxima (12 identities) and PARI/GP at 60 digits; the column ratio at the N₂ depth free of T∞ and σ; the example to 4e-16 | SDTM-1's column ratio is low by 52 % in every phase and does not move in storms (+0.1 % where GOLD falls 4.9 % at 30–60° magnetic latitude); its in-situ storm drop is heating alone, flat in latitude, and recovers too fast: the composition rival of Ф23.J must vary the boundary composition (§10.42) | tools/column-on2.py, tools/tianmu-on2.py |
+| Spheres by era | Ф23.U: ten more smooth spheres of known area-to-mass, six from 1994–1996 (ODERACS) and four from 2007–2010 (ANDE, its states from NRL's laser predictions), the `C_d` each model needs for the true lifetime | the nine-node central difference exact to degree 8 in Maxima and PARI/GP; the CPF chain's `--check` recovers a known mean state to 6 µm in `a` | ODERACS agrees with GFZ-1 (SDTM-1 needs 2.77–3.17 against 2.23–2.37); ANDE, in SDTM-1's own years, needs 2.49–2.96, so SDTM-1 is too thin near solar minimum at 200–350 km in both eras; both models need 11 % less in 2007–2010, the era's share, which a secular term would remove (§10.43) | tools/lifetime-campaign.py, crates/spacelab/examples/cpf_mean_state.rs |
 
 ### Tides
 
@@ -9722,6 +9723,98 @@ Run:
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/tianmu-on2.py points
     for h in 520 545; do target/release/examples/column_on2 --local $h data/validation/density/SW-All.csv < data/validation/tianmu-ngms/points.in > data/validation/tianmu-ngms/points-$h.out; done
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/tianmu-on2.py score
+
+### 10.43 Spheres by era: ODERACS in 1994–1996, ANDE in 2007–2010 (Ф23.U)
+
+§10.39 found SDTM-1 too thin under GFZ-1 (1995–1999) and right under Starshine 3 (2001–2003), and proposed a cause:
+SDTM-1 is fitted on 2001–2026 with no secular term, so it reads the 1990s too thin. Ten more smooth spheres test this.
+Six flew in 1994–1996. Four flew in 2007–2010, inside SDTM-1's years. Both groups flew at solar minimum, at the same
+heights.
+
+| sphere | mass, diameter | source | A/m, m²/kg | flew | state from |
+|---|---|---|---|---|---|
+| ODERACS E, F, 2A (6 in) | 5.000 kg, 0.1524 m, aluminium | STS-60 and STS-63 press kits | 0.00365 | 1994-02 to 1995-03; 1995-02 to 1996-03 | element sets |
+| ODERACS A, B, 2B (4 in) | 1.482 kg, 0.1016 m, aluminium | Bowman & Moe, AAS 05-257, citing JSC-27242 | 0.00547 | 1994-02 to 1994-10; 1995-02 to 1995-09 | element sets |
+| ANDE-RR MAA | 52.04 kg, 0.4826 m (19 in) | NRL, "ANDE-RR Flight Hardware Details" (2007) | 0.00352 | 2006-12 to 2007-12 | laser predictions |
+| ANDE-RR FCal | 62.70 kg, 0.4445 m (17.5 in) | as MAA | 0.00247 | 2006-12 to 2008-05 | laser predictions |
+| ANDE-2 Castor | 47.45 kg, 0.4826 m | NRL, "ANDE-2 Flight Hardware Details" (2009) | 0.00386 | 2009-07 to 2010-08 | laser predictions |
+| ANDE-2 Pollux | 27.442 kg, 0.4826 m | as Castor | 0.00667 | 2009-07 to 2010-03 | laser predictions |
+
+The sources disagree on two items. The 4-inch ODERACS spheres are 4.256 kg of steel in the STS-53 press kit and in
+GCAT. GCAT gives FCal as 75 kg and 0.4 m, which are the design's values. The NRL documents, hosted by the ILRS, give
+the values as flown.
+
+**The states.** ODERACS takes the mean elements of the element set nearest before each lead, as in §10.39. ANDE has no
+element sets in J. McDowell's archive, so it takes NRL's laser predictions (CPF) from the EUROLAS Data Center
+(`tools/fetch-reentry-elements.py --cpf`). These give ITRF positions every 60 s. The velocity at the fifth node is a
+nine-node central difference: `derivations/central_difference.mac` derives its weights, exact to degree 8, and
+PARI/GP checks them. Its error is −h⁸f⁽⁹⁾/630, which is 5.5e-9 m/s at 60 s. The state then goes to TEME with the
+measured Earth orientation. The DSST mean elements are the inverse of the lifetime worker's own J2–J6 short-period
+map (`crates/spacelab/examples/cpf_mean_state.rs`). Its `--check` runs the chain backwards from a known mean state. It
+recovers the velocity to 3.2e-9 m/s and `a` to 6 µm. Of four mutants, it catches three: a perturbed weight, the true
+anomaly in place of the mean one, and the inversion left out (4.55 km in `a`). The fourth damps the fixed point and
+converges to the same state. For each lead, the state comes from the last file issued at least a day before it.
+
+The `C_d` each model needs for the true lifetime, interpolated as in §10.39:
+
+| sphere | lead, d | true, d | `C_d` SDTM-1 needs | `C_d` NRLMSISE-00 needs |
+|---|---|---|---|---|
+| ODERACS E (6 in) | 7 / 30 / 90 / 365 | 7.30 / 32.40 / 90.50 / 366.06 | 2.965 / 3.002 / 2.870 / 2.878 | 2.114 / 2.173 / 2.047 / 2.070 |
+| ODERACS F (6 in) | 7 / 30 / 90 / 365 | 7.42 / 30.47 / 90.44 / 365.03 | 3.167 / 2.985 / 2.924 / 2.936 | 2.291 / 2.166 / 2.080 / 2.119 |
+| ODERACS 2A (6 in) | 7 / 30 / 90 / 365 | 7.14 / 30.03 / 90.12 / 365.57 | 3.045 / 2.828 / 2.774 / 2.874 | 2.133 / 1.990 / 1.940 / 1.962 |
+| ODERACS A (4 in) | 7 / 30 / 90 | 7.30 / 30.27 / 91.16 | 3.026 / 2.807 / 2.795 | 2.021 / 1.916 / 1.962 |
+| ODERACS B (4 in) | 7 / 30 / 90 | 7.25 / 30.28 / 90.36 | 2.928 / 2.790 / 2.828 | 1.913 / 1.892 / 1.981 |
+| ODERACS 2B (4 in) | 7 / 30 / 90 | 7.37 / 30.51 / 90.55 | 3.164 / 3.019 / 2.897 | 2.103 / 2.033 / 2.050 |
+| ANDE-RR MAA | 7 / 30 / 90 | 7.50 / 30.50 / 90.50 | 2.560 / 2.568 / 2.609 | 1.826 / 1.698 / 1.661 |
+| ANDE-RR FCal | 7 / 30 / 90 / 365 | 7.50 / 30.50 / 90.50 / 365.50 | 2.584 / 2.525 / 2.585 / 2.493 | 1.910 / 1.790 / 1.783 / 1.677 |
+| ANDE-2 Castor | 30 / 90 / 365 | 30.50 / 90.50 / 365.50 | 2.961 / 2.783 / 2.710 | 2.145 / 1.979 / 1.743 |
+| ANDE-2 Pollux | 7 / 30 / 90 | 7.50 / 30.50 / 90.50 | 2.747 / 2.890 / 2.814 | 1.916 / 1.991 / 1.842 |
+
+The mean height at the lead is 210–345 km for ODERACS and 197–330 km for ANDE. By arm, the median and range:
+
+| arm | years | spheres | SDTM-1 needs | NRLMSISE-00 needs | smooth sphere, Moe & Bowman (2005) |
+|---|---|---|---|---|---|
+| GFZ-1 (§10.39) | 1995–1999 | 1 | 2.84–3.51 | 2.23–2.61 | 2.23–2.37 at 250–350 km |
+| ODERACS | 1994–1996 | 6 | 2.92 (2.77–3.17) | 2.05 (1.89–2.29) | 2.23–2.37 at 250–350 km |
+| Starshine 3 (§10.39) | 2001–2003 | 1 | 2.16–2.54 | 1.91–2.03 | 2.18–2.30 at 300–470 km |
+| ANDE | 2007–2010 | 4 | 2.61 (2.49–2.96) | 1.83 (1.66–2.15) | 2.23–2.31 at 250–300 km |
+
+Below 250 km the paper gives no value, and the physical `C_d` is lower there.
+
+Findings:
+
+- **ODERACS agrees with GFZ-1.** In 1994–1996 SDTM-1 needs 2.77–3.17 where a smooth sphere has 2.23–2.37. So it is
+  too thin by roughly 14–30 %. NRLMSISE-00 needs 1.89–2.29, which is between 3 % too thin and 25 % too dense.
+- **The decays settle the 4-inch mass.** As aluminium, the 4-inch spheres need the same `C_d` as the 6-inch ones
+  (medians 2.90 and 2.93 under SDTM-1). As steel, their A/m is 2.87 times smaller. The `C_d` they need would then be
+  2.87 times larger, about 8.3, which no sphere has.
+- **ANDE does not clear SDTM-1 in its own years.** At the 2007–2010 minimum SDTM-1 needs 2.49–2.96. That is above the
+  band at every sphere and lead, so it is too thin by roughly 7–25 %. NRLMSISE-00 needs 1.66–2.15, so it is too dense
+  by roughly 4–39 %. This is the anomalous minimum of Emmert, Lean & Picone (2010). §10.39's "right after 2001" rests
+  on Starshine 3 alone, at solar maximum.
+- **The era is a part, not the whole.** From 1994–1996 to 2007–2010, both models need 11 % less (leads up to 90 days):
+  SDTM-1 2.93 to 2.61, NRLMSISE-00 2.04 to 1.84. The ratio between the two models is 1.43 in both minima. This is what
+  happens if each model holds its own era and the thermosphere was about 11 % thinner at 200–350 km in 2007–2010 for
+  the same indices. Emmert, Lean & Picone found 10–30 % at 400 km. A secular term would remove these 11 %. It would not
+  remove SDTM-1's 7–25 % deficit in its own years.
+- **Where the rest may lie (hypotheses).** On each sphere with both leads, the deficit is a little larger at 7 days,
+  below 230 km, than at 365 days. The decays spend their time where SDTM-1 has the fewest rows. Below 225 km it has no rows at all (Ф23.S
+  (1)). Its lowest rows are GOCE's, at 250–280 km in 2009–2013. Its boundary composition is also wrong (§10.42). Both
+  are tested next: Ф23.S through B-consistency, and Ф23.J's composition rival, after Ф30.F.
+
+**What this does not settle.** The ten spheres come from four launches, so no interval can be put on them. GCAT's
+decay dates without an hour are taken at noon. This moves a 7-day truth by up to 7 %. The 4-inch masses rest on one
+secondary citation and on the decays themselves. ANDE's spheres carry retroreflectors, so the smooth-sphere band may be
+low for them. The laser predictions are forecasts, and their states are taken at the start of each file. The
+arm after 2010 is empty. POPACS 1 (to 2026) and the Q-Sat sphere (to 2024) have element sets only from Space-Track,
+which no fetch script uses. They are not in the archive or in the ILRS predictions.
+
+Run (raw element sets and predictions stay under `data/validation/reentry/`, never committed):
+
+    uv run --no-project python -I tools/fetch-reentry-elements.py --objects 22990 22991 22994 22995 23471 23472
+    uv run --no-project python -I tools/fetch-reentry-elements.py --cpf anderra:29664 anderrp:29667 andep:35693 andec:35694
+    cargo build -p spacelab --release --example cpf_mean_state
+    uv run --no-project python -I tools/lifetime-campaign.py spheres --objects 22994 22995 23471 22990 22991 23472 29664 29667 35694 35693
 
 ---
 

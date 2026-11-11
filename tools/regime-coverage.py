@@ -8,7 +8,8 @@ shipped table, and the family's rows are covered where `|r| <= 1.645 sigma` of t
 `gen_sdtm_coefficients.regime`'s, the 81-day flux by the storm state, and the storm state is the shipped
 kernel's (`coefficients.rs`) for every field, so all fields are scored on the same cells. Regime 5 is the
 high-flux storm cell. A second line per field covers the rows of §10.2's campaign, GRACE-FO C and Swarm A in
-its six months, held out the same way: where the shipped table under-covers regime 5 in sample.
+its six months, held out the same way: where the shipped table under-covers regime 5 in sample; then the
+campaign's regime-5 rows by month, with their median model/measured.
 
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/regime-coverage.py [--fields default flux_memory]
 """
@@ -99,6 +100,15 @@ def main() -> int:
                 + " / ".join(f"{v:.1f}" for v in by_regime)
                 + f" | {100.0 * covered[keep].mean():.1f} | {g.mape(held[keep]):.2f}"
             )
+        high = campaign & (cells == len(by_regime) - 1)
+        for month in CAMPAIGN_MONTHS:
+            here = high & (rows.month.to_numpy() == month)
+            if here.any():
+                print(
+                    f"  {field}, campaign regime {len(by_regime) - 1}, {month}: {here.sum()} rows, "
+                    f"covered {100.0 * covered[here].mean():.1f} %, "
+                    f"median model/measured {np.exp(np.median(held[here])):.3f}"
+                )
     return 0
 
 

@@ -45,6 +45,15 @@ RIVALS = (
     ("+ the daily flux's memory, at the heating time", "flux_memory", "default"),
     ("+ the daily flux's memory, its own time", "flux_memory_fit", "default"),
     ("GRACE-FO C on v02, GRACE-FO rows left out", "gc_v02", "default"),
+    ("mean field at degree 3", "degree3", "default"),
+    ("+ the boundary's latitude structure", "boundary_latitude", "default"),
+    ("flux response at degree 2 (after the data)", "flux_latitude", "default"),
+    (
+        "the same + the boundary's structure (after the data)",
+        "flux_boundary_latitude",
+        "default",
+    ),
+    ("no Swarm row in training (after the data)", "no_swarm", "default"),
 )
 # A field on a corpus variant measures one family differently (`tools/corpus-variant.py`): its MAPE and its
 # pairing leave that family's rows out, so both sides are scored on the same truth.

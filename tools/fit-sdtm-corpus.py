@@ -450,6 +450,9 @@ class Packing:
     flux_memory: bool = False
     """The daily F10.7 reaches `T_inf` through `flux_memory`'s filter with its own time (`plans/17` Ф23.L,
     `derivations/sdtm_flux_memory.mac`): `ln tau_m` in hours, last."""
+    boundary_latitude: bool = False
+    """The boundary's `ln rho` carries `b20 Y20 + Y10 (b1c cos w + b1s sin w)`, `w` the annual phase
+    (`plans/17` Ф23.V): a latitude structure below `T_inf`, three slots after every other."""
     limit: str | None = None
     """A rung of the ablation below the kernels (Ф30.F, `derivations/sdtm_ablation.mac`):
     `"first-order"`, the heating alone, `cooling_grid` at `H_s -> inf`, with its time in the onset slot;
@@ -524,13 +527,15 @@ class Packing:
     def i_gain(self) -> int:
         """`kappa`, after the excess, and absent when the storm term does not scale with the flux."""
         return (
-            self.size - 1 - int(self.free_knee) - self.n_tail if self.free_gain else -1
+            self.tail_end - 1 - int(self.free_knee) - self.n_tail
+            if self.free_gain
+            else -1
         )
 
     @property
     def i_knee(self) -> int:
         """`mu`, last, and absent unless the knee is fitted."""
-        return self.size - 1 - self.n_tail if self.free_knee else -1
+        return self.tail_end - 1 - self.n_tail if self.free_knee else -1
 
     @property
     def n_tail(self) -> int:
@@ -545,13 +550,13 @@ class Packing:
     @property
     def i_oxygen(self) -> int:
         """`c0`, then `c1` and `ln tau_c`; absent without the composition rival."""
-        return self.size - self.n_tail if self.composition else -1
+        return self.tail_end - self.n_tail if self.composition else -1
 
     @property
     def i_delta(self) -> int:
         """`delta`; absent unless the cooling carries the quiet offset."""
         return (
-            self.size - 1 - int(self.nitric_flux) - int(self.flux_memory)
+            self.tail_end - 1 - int(self.nitric_flux) - int(self.flux_memory)
             if self.delta
             else -1
         )
@@ -559,17 +564,32 @@ class Packing:
     @property
     def i_kn(self) -> int:
         """`kn`; absent unless the nitric oxide's time scales with the flux."""
-        return self.size - 1 - int(self.flux_memory) if self.nitric_flux else -1
+        return self.tail_end - 1 - int(self.flux_memory) if self.nitric_flux else -1
 
     @property
     def i_memory(self) -> int:
         """`ln tau_m` in hours, last; absent unless the flux's memory has its own time."""
-        return self.size - 1 if self.flux_memory else -1
+        return self.tail_end - 1 if self.flux_memory else -1
+
+    @property
+    def n_latitude(self) -> int:
+        return 3 * int(self.boundary_latitude)
+
+    @property
+    def i_latitude(self) -> int:
+        """`b20`, then `b1c` and `b1s`; absent without the boundary's latitude structure."""
+        return self.tail_end if self.boundary_latitude else -1
+
+    @property
+    def tail_end(self) -> int:
+        """One past the rivals' tail: where the boundary's latitude slots start."""
+        return self.size - self.n_latitude
 
     @property
     def size(self) -> int:
         return (
-            self.i_scale
+            self.n_latitude
+            + self.i_scale
             + len(self.scaled)
             + int(self.free_sigma)
             + int(self.free_excess)
@@ -758,6 +778,7 @@ class CorpusModel:
         linear: bool = False,
         nitric_flux: float | str | None = None,
         flux_memory: str | None = None,
+        boundary_latitude: bool = False,
     ):
         """`penalty_rows` are the rows whose scale sets the ridge, every row when `None`; a harness
         that holds rows out passes the training rows, so that nothing of a test row reaches the fit
@@ -781,7 +802,9 @@ class CorpusModel:
         nitric oxide's time constant, a number holds `kn` there, `"fit"` fits it. `flux_memory` passes the
         daily F10.7 through `flux_memory`'s filter before it reaches `T_inf` (`plans/17` Ф23.L): `None` reads
         the day's own flux, `"heating"` filters it with the fitted heating time, so with cooling and no
-        parameter added, and `"fit"` with a time of its own."""
+        parameter added, and `"fit"` with a time of its own. `boundary_latitude` adds `Packing`'s
+        latitude structure of the boundary's `ln rho` (`plans/17` Ф23.V), from `arg["harmonics"]`'s `Y10`
+        and `Y20`, so at degree 2 or more."""
         if limit is not None and (cooling or mix or fast or wind):
             raise ValueError(f"the {limit} rung has no cooling, mix, fast mode or wind")
         rivals = int(delta) + int(linear) + int(nitric_flux is not None)
@@ -800,6 +823,10 @@ class CorpusModel:
         if flux_memory == "heating" and not cooling:
             raise ValueError(
                 "the flux memory at the heating time needs the cooling's heating slot"
+            )
+        if boundary_latitude and arg["k"] < 9:
+            raise ValueError(
+                "the boundary's latitude structure needs degree-2 harmonics"
             )
         self.a = arg
         self.sat = sat
@@ -830,6 +857,7 @@ class CorpusModel:
             nitric_flux=nitric_flux == "fit",
             flux_memory=flux_memory == "fit",
             composition=composition,
+            boundary_latitude=boundary_latitude,
             limit=limit,
         )
         self.gain_form = gain
@@ -840,6 +868,15 @@ class CorpusModel:
         self.indicator = (
             np.column_stack([(sat == s).astype(float) for s in self.pack.scaled])
             if self.pack.scaled
+            else np.zeros((sat.size, 0))
+        )
+        omega = 2.0 * np.pi * arg["doy"] / 365.25
+        y10 = arg["harmonics"][:, 1]
+        self.latitude_terms = (
+            np.column_stack(
+                [arg["harmonics"][:, 4], y10 * np.cos(omega), y10 * np.sin(omega)]
+            )
+            if boundary_latitude
             else np.zeros((sat.size, 0))
         )
         self.ridge = ridge
@@ -1041,6 +1078,9 @@ class CorpusModel:
             self.indicator[index]
             @ p[self.pack.i_scale : self.pack.i_scale + len(self.pack.scaled)]
         )
+        if self.pack.boundary_latitude:
+            i = self.pack.i_latitude
+            scales = scales + self.latitude_terms[index] @ p[i : i + 3]
         residual = ln_rho + p[self.pack.i_boundary] + scales - self.a["ln_rho"][index]
         return residual, d_ln * (t_inf - g.BOUNDARY_TEMPERATURE)
 
@@ -1083,6 +1123,8 @@ class CorpusModel:
         out[:n, : pk.n_c] = design[index] * chain[:, None]
         out[:n, pk.i_boundary] = 1.0
         out[:n, pk.i_scale : pk.i_scale + len(pk.scaled)] = self.indicator[index]
+        if pk.boundary_latitude:
+            out[:n, pk.i_latitude : pk.i_latitude + 3] = self.latitude_terms[index]
         step = 1.0e-4
         slots = (pk.i_onset, pk.i_gap)[: pk.n_kernel] + (
             (pk.i_cool,) if pk.cooling else ()

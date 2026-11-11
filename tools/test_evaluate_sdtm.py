@@ -382,6 +382,68 @@ def test_the_flux_memory_is_the_day_s_flux_at_tau_0_and_delays_a_spike_without_l
             )
 
 
+def test_the_latitude_rows_are_the_shipped_form_plus_one_key_and_move_no_other_slot() -> (
+    None
+):
+    fit, fields = harness.fit, harness.FIELDS
+    assert fields["degree3"] == {**fields["default"], "degree": 3}
+    assert fields["boundary_latitude"] == {
+        **fields["default"],
+        "boundary_latitude": True,
+    }
+    shipped_caps = fit.g.CAPS[fields["default"]["caps"]]
+    flux_caps = fit.g.CAPS[fields["flux_latitude"]["caps"]]
+    assert [
+        i
+        for i, (a, b) in enumerate(zip(shipped_caps, flux_caps, strict=True))
+        if a != b
+    ] == [1]
+    assert (shipped_caps[1], flux_caps[1]) == (1, 2)
+    assert fields["flux_boundary_latitude"] == {
+        **fields["flux_latitude"],
+        "boundary_latitude": True,
+    }
+    # The Swarm fold trains on no Swarm row already, so dropping the family leaves that fold the shipped one.
+    assert fields["no_swarm"] == {**fields["default"], "drop_families": ("Swarm",)}
+    train, _ = harness.masks(T, FAMILY, FOLD)
+    assert train.size and not np.isin(FAMILY[train], ("Swarm",)).any()
+    common = {
+        "n_c": 7,
+        "scaled": ("SA",),
+        "free_sigma": True,
+        "cooling": True,
+        "free_gain": True,
+        "free_knee": True,
+        "composition": True,
+        "delta": True,
+        "nitric_flux": True,
+        "flux_memory": True,
+    }
+    shipped = fit.Packing(**common)
+    rival = fit.Packing(**common, boundary_latitude=True)
+    slots = ("i_gain", "i_knee", "i_oxygen", "i_delta", "i_kn", "i_memory")
+    assert [getattr(rival, s) for s in slots] == [getattr(shipped, s) for s in slots]
+    assert rival.size == shipped.size + 3 and rival.i_latitude == shipped.size
+    assert shipped.i_latitude == -1
+    # The columns the boundary term reads: fully normalised Y10 = sqrt(3) sin(phi) and
+    # Y20 = sqrt(5) (3 sin^2(phi) - 1) / 2, at the pole, the equator and 30 degrees.
+    latitude = np.radians(np.array([90.0, 0.0, 30.0]))
+    y = fit.g.basis(latitude, np.zeros(3), 2)
+    assert np.allclose(y[:, 1], np.sqrt(3.0) * np.sin(latitude), rtol=0.0, atol=1e-15)
+    expected = np.sqrt(5.0) * (3.0 * np.sin(latitude) ** 2 - 1.0) / 2.0
+    assert np.allclose(y[:, 4], expected, rtol=0.0, atol=1e-15)
+    try:
+        fit.CorpusModel(
+            {"k": 4}, np.array([]), (), (), 0.0, None, True, boundary_latitude=True
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            "the boundary's latitude structure at degree 1 was accepted"
+        )
+
+
 def test_the_oxygen_factor_moves_ln_rho_by_the_oxygen_mass_fraction() -> None:
     g = harness.g
     # `derivations/sdtm_composition.mac`'s shipped boundary at T_inf 700 and 1000 K, 200 km.

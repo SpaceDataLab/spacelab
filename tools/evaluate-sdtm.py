@@ -115,6 +115,20 @@ FIELDS: dict[str, dict[str, Any]] = {
     # with the fitted heating time and with a time of its own.
     "flux_memory": {**FORM, "flux_memory": "heating"},
     "flux_memory_fit": {**FORM, "flux_memory": "fit"},
+    # Ф23.V's latitude rows: the mean field at degree 3, a richer latitude structure of T_inf alone; and the
+    # boundary's ln rho with Y20 and an annual Y10, a latitude structure below T_inf.
+    "degree3": {**FORM, "degree": 3},
+    "boundary_latitude": {**FORM, "boundary_latitude": True},
+    # Read after the split by flux: the flux's response at degree 2, alone and with the boundary's structure.
+    "flux_latitude": {**FORM, "caps": "storm-log1-lin-f2"},
+    # Read after §10.49's smoothing table: no Swarm row in any fold's training set, so no row whose density
+    # comes from GPS accelerations at about 20 min resolution. The Swarm fold is the shipped one.
+    "no_swarm": {**FORM, "drop_families": ("Swarm",)},
+    "flux_boundary_latitude": {
+        **FORM,
+        "caps": "storm-log1-lin-f2",
+        "boundary_latitude": True,
+    },
     # The shipped form on GRACE-FO C's v02 densities where v02 exists, v02c elsewhere, the rows unchanged
     # (`tools/corpus-variant.py`; Ф30.G-2, F72).
     "gc_v02": {**FORM, "corpus": "corpus-gc-v02"},
@@ -296,7 +310,7 @@ def command_run(args) -> int:
         wind=settings["wind"] is not None,
         corpus=fit.CORPUS if variant is None else fit.CORPUS.parent / variant,
     )
-    arg = g.fit_arguments(rows, 2)
+    arg = g.fit_arguments(rows, settings.get("degree", 2))
     arg["wind"] = rows.attrs.get("wind")
     arg["wind_map"] = rows.attrs.get("wind_map")
     sat = rows.sat.to_numpy()
@@ -324,6 +338,7 @@ def command_run(args) -> int:
         if target.exists():
             continue
         train, test = masks(t, family, split)
+        train = train[~np.isin(family[train], settings.get("drop_families", ()))]
         guard(t, family, split, train, test)
         if test.size == 0:
             print(f"{split['name']}: no rows to score", flush=True)
@@ -360,6 +375,7 @@ def command_run(args) -> int:
             linear=settings.get("linear", False),
             nitric_flux=settings.get("nitric_flux"),
             flux_memory=settings.get("flux_memory"),
+            boundary_latitude=settings.get("boundary_latitude", False),
         )
         p = model.fit(train)
         residual, _ = model.score(p, test)

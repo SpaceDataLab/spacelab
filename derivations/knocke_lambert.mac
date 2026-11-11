@@ -83,4 +83,45 @@ print("quadrature:", float(ql), float(qg))$
 must(is(abs(ql/lambert_z - 1) < 1e-10) and is(abs(qg/orekit_z - 1) < 1e-10),
      "(4) holds: quadrature agrees with both closed forms to 1e-10")$
 
+/* ---- (5) the central cap, exactly (plans/17 Ф17.F) ---------------------------------------------
+   The grid's central cap of half-angle D about the sub-satellite point is one element: its whole area
+   2 pi R^2 (1 - cos D) at the sub-satellite point, a distance r - R away, with both cosines 1. That is
+   the first term of the cap's integral only. The cap's own integral is radial(emission, 1) taken from
+   x = cos D instead of the horizon; cut at the horizon when D reaches past it.                      */
+assume(c0 > R/r, c0 < 1)$
+cap_exact : block([A],
+  A : integrate(ratsimp(subst(x = xq, 2*R^2*emission*(r - R*x)/q^3)*(-dxdq)), q),
+  subst(q = sqrt(r^2 + R^2 - 2*r*R*c0), A) - subst(q = r - R, A))$
+closed : R^2*(1 - c0^2)/(r^2 + R^2 - 2*r*R*c0)$
+must(is(ratsimp(radcan(cap_exact - closed)) = 0),
+     "(5) holds: the cap of half-angle D gives R^2 sin^2 D / (r^2 + R^2 - 2 r R cos D)")$
+must(is(ratsimp(subst(c0 = R/r, closed) - R^2/r^2) = 0),
+     "(5) holds: at the horizon the cap is the whole view factor (R/r)^2")$
+/* The rim distance in the form the code evaluates, free of the cancellation in 1 - cos D. */
+must(is(trigsimp(trigreduce((r - R)^2 + 4*r*R*sin(D/2)^2 - (r^2 + R^2 - 2*r*R*cos(D)))) = 0),
+     "(5) holds: r^2 + R^2 - 2 r R cos D = (r - R)^2 + 4 r R sin^2(D/2)")$
+/* A crown between half-angles D1 < D2 (cosines c1 > c2) integrated directly, against the
+   difference of the two caps the code takes. */
+assume(c2 > R/r, c2 < c1, c1 < 1)$
+crown : block([A],
+  A : integrate(ratsimp(subst(x = xq, 2*R^2*emission*(r - R*x)/q^3)*(-dxdq)), q),
+  subst(q = sqrt(r^2 + R^2 - 2*r*R*c2), A) - subst(q = sqrt(r^2 + R^2 - 2*r*R*c1), A))$
+must(is(ratsimp(radcan(crown - (subst(c0 = c2, closed) - subst(c0 = c1, closed)))) = 0),
+     "(5) holds: a crown is the difference of its two caps")$
+/* The lumped element: area/(pi (r - R)^2), both cosines 1. */
+lumped : 2*R^2*(1 - cos(D))/(r - R)^2$
+capD : subst(c0 = cos(D), closed)$
+must(is(ratsimp(taylor(capD - lumped, D, 0, 2)) = 0),
+     "(5) holds: the lumped cap is the exact cap's series to D^2, so its error starts at D^4")$
+print("  the D^4 term of exact minus lumped:", factor(ratsimp(coeff(taylor(capD - lumped, D, 0, 4), D, 4))))$
+/* Measured, not quoted: the exact cap, cut at the horizon, and the lumped cap over it, at 30 digits
+   with the R of the Rust test (`the_central_cap_is_its_closed_form`), Orekit's 6378136.46 m. */
+fpprec : 30$
+cap_at(h, deg) := block([Rv : 637813646/100, rv, Dv, cv],
+  rv : Rv + h, Dv : bfloat(deg*%pi/180), cv : max(cos(Dv), bfloat(Rv/rv)),
+  [bfloat(subst([R = Rv, r = rv, c0 = cv], closed)),
+   bfloat(subst([R = Rv, r = rv, D = Dv], lumped)/subst([R = Rv, r = rv, c0 = cv], closed))])$
+for h in [500000, 20000000] do for deg in [1, 15, 30] do
+  print("  cap and lumped over exact,", h, "m,", deg, "deg:", cap_at(h, deg))$
+
 print("DONE")$

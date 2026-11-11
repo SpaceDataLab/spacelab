@@ -1,0 +1,74 @@
+/* The scores plans/17 Ф30.I prints for a zero-mean normal forecast of a log residual r, with z = r/sigma,
+ * Phi the standard normal distribution and phi its density, as tools/uncertainty-scores.py computes them:
+ *
+ *   CRPS(N(0, sigma^2), r) = sigma (z (2 Phi(z) - 1) + 2 phi(z) - 1/sqrt(pi)),
+ *
+ * from Gneiting and Raftery's representation CRPS(F, y) = E|X - y| - E|X - X'|/2, X and X' independent
+ * draws of F. Shown here, each line printing `<name>: 0`:
+ *   1. E|X - z| = z (2 Phi(z) - 1) + 2 phi(z) for X standard normal;
+ *   2. E|X - X'| = 2/sqrt(pi), X - X' being N(0, 2);
+ *   3. the closed form's derivative in z is 2 Phi(z) - 1, which is also the derivative of the defining
+ *      integral of (Phi(x) - H(x - z))^2 by the fundamental theorem: Phi(z)^2 - (1 - Phi(z))^2;
+ *   4. at z = 0 both are (sqrt(2) - 1)/sqrt(pi): the integral is 2 int_0^inf (erfc(x/sqrt 2)/2)^2 dx;
+ *      with 3, the closed form equals the integral for every z;
+ *   5. the closed form is even in z;
+ *   6. the zero-mean normal's negative log density, ln sigma + ln(2 pi)/2 + z^2/2, is the log score;
+ *   7. the continuous sigma's objective, eta + r^2 exp(-2 eta)/2 per row with eta = ln sigma = beta.x,
+ *      has gradient (1 - r^2 exp(-2 eta)) x and Hessian 2 r^2 exp(-2 eta) x x', positive semidefinite:
+ *      the fit has no local minimum but the global one, and sigma^2 = r^2 is each row's stationary point.
+ * derivations/gaussian_scores.gp recomputes the defining integral at 50 digits for several z.
+ *
+ * Run: timeout 120 maxima --very-quiet -Q -b derivations/gaussian_scores.mac </dev/null
+ */
+
+display2d : false$
+ratprint : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+Phi(t) := (1 + erf(t/sqrt(2)))/2$
+phi(t) := exp(-t^2/2)/sqrt(2*%pi)$
+crps(t) := t*(2*Phi(t) - 1) + 2*phi(t) - 1/sqrt(%pi)$
+
+assume(z > 0)$
+abs_dev : integrate((z - x)*phi(x), x, minf, z) + integrate((x - z)*phi(x), x, z, inf)$
+zero("1 E|X - z| for z > 0", ratsimp(abs_dev - (z*(2*Phi(z) - 1) + 2*phi(z))))$
+forget(z > 0)$
+assume(z < 0)$
+abs_dev : integrate((z - x)*phi(x), x, minf, z) + integrate((x - z)*phi(x), x, z, inf)$
+zero("1 E|X - z| for z < 0", ratsimp(abs_dev - (z*(2*Phi(z) - 1) + 2*phi(z))))$
+forget(z < 0)$
+
+pair : 2*integrate(u*exp(-u^2/4)/sqrt(4*%pi), u, 0, inf)$
+zero("2 E|X - X'| = 2/sqrt(pi)", ratsimp(pair - 2/sqrt(%pi)))$
+
+zero("3 the closed form's derivative is 2 Phi(z) - 1", ratsimp(diff(crps(z), z) - (2*Phi(z) - 1)))$
+zero("3 the integral's derivative is 2 Phi(z) - 1", ratsimp(expand(Phi(z)^2 - (1 - Phi(z))^2) - (2*Phi(z) - 1)))$
+
+/* 4. Maxima does not integrate erfc^2 itself, so by parts, each step its own identity. With x = sqrt(2) t,
+      2 int_0^inf (erfc(x/sqrt 2)/2)^2 dx = (sqrt(2)/2) int_0^inf erfc(t)^2 dt. */
+zero("4 d/dt (t erfc^2) = erfc^2 - (4/sqrt(pi)) t erfc e^-t^2",
+     ratsimp(diff(t*erfc(t)^2, t) - (erfc(t)^2 - 4/sqrt(%pi)*t*erfc(t)*exp(-t^2))))$
+zero("4 t erfc(t)^2 vanishes at infinity", limit(t*erfc(t)^2, t, inf))$
+zero("4 d/dt (-e^-t^2 erfc/2) = t e^-t^2 erfc + e^-2t^2/sqrt(pi)",
+     ratsimp(diff(-exp(-t^2)*erfc(t)/2, t) - (t*exp(-t^2)*erfc(t) + exp(-2*t^2)/sqrt(%pi))))$
+zero("4 -e^-t^2 erfc/2 vanishes at infinity", limit(-exp(-t^2)*erfc(t)/2, t, inf))$
+inner : (0 - subst(t = 0, -exp(-t^2)*erfc(t)/2)) - integrate(exp(-2*t^2)/sqrt(%pi), t, 0, inf)$
+zero("4 int_0^inf t e^-t^2 erfc dt = 1/2 - 1/(2 sqrt 2)", ratsimp(radcan(inner - (1/2 - 1/(2*sqrt(2))))))$
+erfc_square : 4/sqrt(%pi)*inner$
+zero("4 int_0^inf erfc^2 dt = (2 - sqrt 2)/sqrt(pi)", ratsimp(radcan(erfc_square - (2 - sqrt(2))/sqrt(%pi))))$
+zero("4 the integral at z = 0", ratsimp(radcan(sqrt(2)/2*erfc_square - (sqrt(2) - 1)/sqrt(%pi))))$
+zero("4 the closed form at z = 0", ratsimp(crps(0) - (sqrt(2) - 1)/sqrt(%pi)))$
+
+zero("5 the closed form is even", ratsimp(expand(crps(-z) - crps(z))))$
+
+assume(sigma > 0)$
+log_score : -log(phi(r/sigma)/sigma)$
+zero("6 the log score", ratsimp(radcan(log_score - (log(sigma) + log(2*%pi)/2 + r^2/(2*sigma^2)))))$
+
+objective : eta + r^2*exp(-2*eta)/2$
+zero("7 the gradient in eta", ratsimp(diff(objective, eta) - (1 - r^2*exp(-2*eta))))$
+zero("7 the curvature in eta", ratsimp(diff(objective, eta, 2) - 2*r^2*exp(-2*eta)))$
+zero("7 the stationary point is sigma^2 = r^2", ratsimp(subst(eta = log(r), diff(objective, eta))))$

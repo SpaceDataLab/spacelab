@@ -722,7 +722,7 @@ class CorpusModel:
         composition: bool = False,
         delta: bool = False,
         linear: bool = False,
-        nitric_flux: bool = False,
+        nitric_flux: float | str | None = None,
     ):
         """`penalty_rows` are the rows whose scale sets the ridge, every row when `None`; a harness
         that holds rows out passes the training rows, so that nothing of a test row reaches the fit
@@ -742,16 +742,16 @@ class CorpusModel:
         fits no satellite a log scale of its own, so every satellite shares the field's level
         (`plans/17` Ф30.G). `composition`, `delta`, `linear` and `nitric_flux` add `Packing`'s rivals of
         those names; the last three each need the plain cooling, without a cap, mix or fast mode, and
-        not each other, and `nitric_flux` the 3-hourly driver's `arg["flux_grid"]`."""
+        not each other. `nitric_flux` needs the 3-hourly driver's `arg["flux_grid"]`: `None` keeps the
+        nitric oxide's time constant, a number holds `kn` there, `"fit"` fits it."""
         if limit is not None and (cooling or mix or fast or wind):
             raise ValueError(f"the {limit} rung has no cooling, mix, fast mode or wind")
-        if (delta or linear or nitric_flux) and (
-            cooling is not True or mix or fast or delta + linear + nitric_flux > 1
-        ):
+        rivals = int(delta) + int(linear) + int(nitric_flux is not None)
+        if rivals and (cooling is not True or mix or fast or rivals > 1):
             raise ValueError(
                 "delta, linear and nitric_flux each need the plain cooling, alone"
             )
-        if nitric_flux and arg.get("flux_grid") is None:
+        if nitric_flux is not None and arg.get("flux_grid") is None:
             raise ValueError("nitric_flux needs the 3-hourly driver's flux grid")
         self.a = arg
         self.sat = sat
@@ -760,6 +760,7 @@ class CorpusModel:
         self.mix_share = mix if isinstance(mix, float) else None
         self.fast_mode = fast if isinstance(fast, tuple) else None
         self.wind_share = wind if isinstance(wind, float) else None
+        self.held_kn = nitric_flux if isinstance(nitric_flux, float) else None
         self.pairs = np.argwhere(
             g.harmonic_mask(caps, arg["k"]).reshape(g.DRIVERS, arg["k"])
         )
@@ -777,7 +778,7 @@ class CorpusModel:
             free_knee=gain == "input-knee",
             delta=delta,
             linear=linear,
-            nitric_flux=nitric_flux,
+            nitric_flux=nitric_flux == "fit",
             composition=composition,
             limit=limit,
         )
@@ -812,7 +813,7 @@ class CorpusModel:
             excess=0.5 if self.pack.free_excess else self.excess_scale,
             gain=0.0 if gain else None,
             delta=10.0 if delta else None,
-            kn=0.0 if nitric_flux else None,
+            kn=0.0 if nitric_flux == "fit" else self.held_kn,
         )
         if penalty_rows is not None:
             reference = reference[penalty_rows]
@@ -861,8 +862,9 @@ class CorpusModel:
         return float(p[self.pack.i_delta]) if self.pack.delta else None
 
     def kn(self, p: np.ndarray) -> float | None:
-        """`kn`, the nitric oxide's time's elasticity in the flux, or `None` where the time is fixed."""
-        return float(p[self.pack.i_kn]) if self.pack.nitric_flux else None
+        """`kn`, the nitric oxide's time's elasticity in the flux, fitted or held, or `None` where the
+        time is constant."""
+        return float(p[self.pack.i_kn]) if self.pack.nitric_flux else self.held_kn
 
     def knee(self, p: np.ndarray) -> float | None:
         """`mu` of `exp(mu + kappa f)`, or `None` where the knee is held at `ln(1 + storm/15)`'s."""
@@ -1668,12 +1670,12 @@ def wind_option(argument: argparse.Namespace) -> float | str | None:
     return value if value in (None, "fit") else float(value)
 
 
-def rival_option(argument: argparse.Namespace) -> dict[str, bool]:
-    """`--rival` as `CorpusModel`'s keywords."""
-    return {
-        name: argument.rival == name
-        for name in ("composition", "delta", "linear", "nitric_flux")
+def rival_option(argument: argparse.Namespace) -> dict[str, bool | str | None]:
+    """`--rival` as `CorpusModel`'s keywords; `nitric_flux` fits `kn`."""
+    rivals: dict[str, bool | str | None] = {
+        name: argument.rival == name for name in ("composition", "delta", "linear")
     }
+    return {**rivals, "nitric_flux": "fit" if argument.rival == "nitric_flux" else None}
 
 
 def mix_option(argument: argparse.Namespace) -> float | str | None:

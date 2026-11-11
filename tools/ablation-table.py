@@ -41,6 +41,7 @@ RIVALS = (
     ("+ delta: the cooling's quiet offset", "delta", "default"),
     ("linear heating and cooling", "linear", "default"),
     ("+ nitric-oxide time scaled by the flux", "nitric_flux", "default"),
+    ("+ the same, kn held at Wang et al.'s middle", "nitric_flux_wang", "default"),
     ("GRACE-FO C on v02, GRACE-FO rows left out", "gc_v02", "default"),
 )
 # A field on a corpus variant measures one family differently (`tools/corpus-variant.py`): its MAPE and its

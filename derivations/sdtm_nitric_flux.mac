@@ -9,7 +9,8 @@
      (4) the steady state D = H/(1 + H/Hs) does not depend on tn, so the rival moves only the storm's time
          course, not its steady level;
      (5) the ratio of the times at two fluxes is (F2/F1)^(-kn): Wang et al.'s 3-4 between F = 70 and 200
-         asks kn = ln(ratio)/ln(200/70), printed for 3 and 4.
+         asks kn = ln(ratio)/ln(200/70), printed for 3, 4 and the middle 7/2 that tools/evaluate-sdtm.py's
+         `nitric_flux_wang` field holds.
    Every identity prints 0. derivations/sdtm_nitric_flux.gp checks the step and (5) numerically. */
 
 ratprint : false$
@@ -32,4 +33,4 @@ print("4 the steady state solves dD/dt = 0 at N = H for any T:",
 print("4 and N settles at H for any T:", rhs(solve((H - N)/T, N)[1]) - H)$
 
 print("5 the ratio of times at two fluxes:", radcan(tn(F2)/tn(F1) - (F2/F1)^(-kn)))$
-for r in [3, 4] do print("  kn for a ratio", r, "between F 70 and 200:", float(log(r)/log(200/70)))$
+for r in [3, 7/2, 4] do print("  kn for a ratio", r, "between F 70 and 200:", float(log(r)/log(200/70)))$

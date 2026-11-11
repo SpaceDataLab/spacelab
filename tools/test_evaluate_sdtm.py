@@ -314,11 +314,26 @@ def test_a_flux_scaled_nitric_time_is_the_shipped_one_at_a_constant_and_faster_a
     assert np.isclose(slow[-1], fast[-1], rtol=1e-3)
     assert not np.allclose(slow[16:40], fast[16:40], rtol=1e-3)
     try:
-        fit.CorpusModel({}, np.array([]), (), (), 0.0, None, True, nitric_flux=True)
+        fit.CorpusModel({}, np.array([]), (), (), 0.0, None, True, nitric_flux="fit")
     except ValueError:
         pass
     else:
         raise AssertionError("a flux-scaled time without a flux grid was accepted")
+
+
+def test_the_held_nitric_time_field_is_wang_et_al_s_middle_and_fits_no_slot() -> None:
+    fit, fields = harness.fit, harness.FIELDS
+    held = fields["nitric_flux_wang"]
+    assert {k: v for k, v in held.items() if k != "nitric_flux"} == fields["default"]
+    # `derivations/sdtm_nitric_flux.mac` 5 at a ratio of 7/2 between F10.7a 70 and 200, to 30 digits in
+    # Maxima and PARI/GP: 1.19330974196566946430933276836.
+    assert abs(held["nitric_flux"] - 1.1933097419656695) <= 1e-16
+    try:
+        fit.CorpusModel({}, np.array([]), (), (), 0.0, None, True, nitric_flux=1.2)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a held flux-scaled time without a flux grid was accepted")
 
 
 def test_the_oxygen_factor_moves_ln_rho_by_the_oxygen_mass_fraction() -> None:

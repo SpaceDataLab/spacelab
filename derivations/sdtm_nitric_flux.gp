@@ -36,7 +36,8 @@ tn(tn0, F, kn) = tn0*(F/150)^(-kn);
     near(out[1], H/(1 + H/Hs), 1e-12) && near(out[2], H/(1 + H/Hs), 1e-12));
 }
 {
-  check("5 kn for a ratio 3 and 4 between F 70 and 200 against Maxima",
+  check("5 kn for a ratio 3, 7/2 and 4 between F 70 and 200 against Maxima",
     near(log(3)/log(200/70), 1.0464746960755194, 1e-15) && near(log(4)/log(200/70), 1.3205040442273863, 1e-15)
+    && near(log(7/2)/log(200/70), 1.19330974196566946430933276836, 1e-29)
     && near(tn(20.0, 70.0, log(3)/log(200/70))/tn(20.0, 200.0, log(3)/log(200/70)), 3, 1e-50));
 }

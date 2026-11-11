@@ -727,7 +727,7 @@ mod tests {
     }
 
     /// A uniform Lambertian sphere: the whole grid, central cap and crowns, against the view factor
-    /// `(R/r)²` (G3, `derivations/knocke_lambert.mac` (1)), along `r̂` and across it. The crowns'
+    /// `(R/r)²` of `derivations/knocke_lambert.mac` (1), along `r̂` and across it (G3). The crowns'
     /// kernels telescope to the horizon's view factor and the evenly spaced sectors cancel across
     /// `r̂`, so the grid is exact to a rounding: 5.1e-15 at most here. Orekit's midpoint crowns,
     /// even behind the exact cap, missed by 4.1e-2 at 20 000 km and Δ = 30°, and by 2.2e-2 at 500 km

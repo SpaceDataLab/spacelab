@@ -264,10 +264,11 @@ impl<const N: usize> Mul for HyperDual<N> {
 impl<const N: usize> Div for HyperDual<N> {
     type Output = Self;
     /// Quotient rule to second order, from differentiating `w·v = u` twice: with `w = u/v`,
-    /// `w'ᵢ = (u'ᵢ − w v'ᵢ)/v` and `w''ᵢⱼ = (u''ᵢⱼ − w'ᵢ v'ⱼ − w'ⱼ v'ᵢ − w v''ᵢⱼ)/v`.
+    /// `w'ᵢ = (u'ᵢ − w v'ᵢ)/v` and `w''ᵢⱼ = (u''ᵢⱼ − w'ᵢ v'ⱼ − w'ⱼ v'ᵢ − w v''ᵢⱼ)/v`. The value is the
+    /// correctly rounded `u/v`, not `u·(1/v)`, so it is f64's quotient bit for bit.
     fn div(self, rhs: Self) -> Self {
         let inv = 1.0 / rhs.value;
-        let value = self.value * inv;
+        let value = self.value / rhs.value;
         let mut grad = [0.0; N];
         let mut hess = [[0.0; N]; N];
         for i in 0..N {

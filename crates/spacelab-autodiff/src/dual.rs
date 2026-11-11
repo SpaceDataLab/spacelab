@@ -194,18 +194,16 @@ impl<const N: usize> Mul for Dual<N> {
 
 impl<const N: usize> Div for Dual<N> {
     type Output = Self;
-    /// Quotient rule `(u/v)' = (u'v - uv')/v²`.
+    /// Quotient rule, from differentiating `w·v = u`: with `w = u/v`, `w'ᵢ = (u'ᵢ − w v'ᵢ)/v`. The
+    /// value is the correctly rounded `u/v`, not `u·(1/v)`, so it is f64's quotient bit for bit.
     fn div(self, rhs: Self) -> Self {
+        let value = self.value / rhs.value;
         let inv = 1.0 / rhs.value;
-        let inv2 = inv * inv;
         let mut grad = [0.0; N];
         for i in 0..N {
-            grad[i] = (self.grad[i] * rhs.value - self.value * rhs.grad[i]) * inv2;
+            grad[i] = (self.grad[i] - value * rhs.grad[i]) * inv;
         }
-        Self {
-            value: self.value * inv,
-            grad,
-        }
+        Self { value, grad }
     }
 }
 
@@ -261,6 +259,13 @@ impl<const N: usize> Mul<f64> for Dual<N> {
 impl<const N: usize> Div<f64> for Dual<N> {
     type Output = Self;
     fn div(self, rhs: f64) -> Self {
-        self * (1.0 / rhs)
+        let mut grad = self.grad;
+        for g in &mut grad {
+            *g /= rhs;
+        }
+        Self {
+            value: self.value / rhs,
+            grad,
+        }
     }
 }

@@ -58,6 +58,40 @@ fn the_scalar_trait_delegates_consistently_across_f64_dual_and_hyperdual() {
     }
 }
 
+/// A quotient's value is f64's correctly rounded `u/v`. On these pairs `u·(1/v)` is one ulp off it,
+/// which is what `Dual` and `HyperDual` computed before, so a generic force evaluated at `Dual` parted
+/// from its own f64 instantiation by an ulp per quotient.
+#[test]
+#[allow(clippy::float_cmp)] // the point is bit equality
+fn a_quotient_has_the_f64_value_bit_for_bit() {
+    for (u, v) in [(7.0, 3.0), (5.0, 7.0), (6.9e6, 7.36e6)] {
+        assert_ne!(
+            u * (1.0 / v),
+            u / v,
+            "{u}/{v} no longer tells the two roundings apart"
+        );
+        let dual = Dual::<2>::variable(u, 0) / Dual::<2>::variable(v, 1);
+        assert_eq!(dual.value(), u / v, "Dual {u}/{v}");
+        assert_eq!(
+            (Dual::<2>::variable(u, 0) / v).value(),
+            u / v,
+            "Dual {u}/{v} by an f64"
+        );
+        let hyper = HyperDual::<2>::variable(u, 0) / HyperDual::<2>::variable(v, 1);
+        assert_eq!(hyper.value(), u / v, "HyperDual {u}/{v}");
+        // ∂(u/v)/∂u = 1/v and ∂(u/v)/∂v = −u/v², to a rounding.
+        let (du, dv) = (dual.grad()[0], dual.grad()[1]);
+        assert!(
+            (du - 1.0 / v).abs() <= 2.0 * f64::EPSILON / v,
+            "Dual ∂u {u}/{v}"
+        );
+        assert!(
+            (dv + u / (v * v)).abs() <= 4.0 * f64::EPSILON * u / (v * v),
+            "Dual ∂v {u}/{v}"
+        );
+    }
+}
+
 #[test]
 #[allow(clippy::float_cmp)] // the operators are exact affine maps on these inputs
 fn dual_operators_and_constructors_carry_the_right_derivative() {

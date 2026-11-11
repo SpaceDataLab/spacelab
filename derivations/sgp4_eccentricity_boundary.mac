@@ -1,0 +1,135 @@
+/* What SGP4's near-Earth branch on the eccentricity adds, and what a test of it must see (plans/17 Ф17.G).
+
+   The `sgp4` crate 2.4.0 (`near_earth.rs:128`), as Vallado's sgp4init, keeps two drag terms only when
+   e0 > 1e-4, strictly:
+
+       omgcof = B* cc3 cos(w0),  cc3 = -2 coef xi (J3/J2) n0" sin(I0) / e0,
+       xmcof  = -(2/3) coef B* / (e0 eta),
+
+   and at time t adds  delta = omgcof t + xmcof ((1 + eta cos Mdf)^3 - (1 + eta cos M0)^3)  to the mean
+   anomaly and takes it from the argument of perigee, Mdf = M0 + Mdot t. At e0 = 1e-4 exactly neither
+   term exists. Shown here:
+     1. the mean longitude M + w does not move, and to first order in e the position moves by
+        a e delta sin M radially and 2 a e delta cos M along the track;
+     2. e0 delta is independent of e0 at leading order: the jump is of order a coef B*, centimetres in
+        LEO, whatever e0 is just above the boundary;
+     3. SGP4's secular chain for one element set at e0 = 1.001e-4, evaluated at 40 digits, gives the
+        jump `crates/spacelab-sgp4/tests/sgp4_dependency_pins.rs` asserts, at t = 720 and 1440 min.
+
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/sgp4_eccentricity_boundary.mac </dev/null */
+
+display2d : false$
+ratprint : false$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+/* ---- (1) the first-order displacement -------------------------------------------------------------
+   Kepler's equation to second order in e: E = M + e sin M + (e^2/2) sin 2M; r = a (1 - e cos E); the
+   argument of latitude u = w + f, f the true anomaly, f = M + 2 e sin M + (5/4) e^2 sin 2M. */
+kepler_r(a, e, m) := a*(1 - e*cos(m + e*sin(m)))$
+kepler_u(e, m, w) := w + m + 2*e*sin(m) + 5/4*e^2*sin(2*m)$
+dr : taylor(kepler_r(a, e, m + d) - kepler_r(a, e, m), [e, d], 0, 2)$
+must(is(ratsimp(coeff(coeff(expand(dr), d, 1), e, 1) - a*sin(m)) = 0),
+     "(1) holds: the radial displacement is a e delta sin M to first order")$
+du : taylor(kepler_u(e, m + d, w - d) - kepler_u(e, m, w), [e, d], 0, 2)$
+must(is(ratsimp(coeff(coeff(expand(du), d, 1), e, 0)) = 0),
+     "(1) holds: the mean longitude does not move: no along-track term free of e")$
+must(is(ratsimp(coeff(coeff(expand(du), d, 1), e, 1) - 2*cos(m)) = 0),
+     "(1) holds: the along-track displacement is r du = 2 a e delta cos M to first order")$
+
+/* ---- (2) the jump's order ------------------------------------------------------------------------- */
+xmcof_s : -2/3*coef*bstar/(e0*eta)$
+e_delta_m : taylor(e0*xmcof_s*((1 + eta*cos(mt))^3 - (1 + eta*cos(m0))^3), eta, 0, 1)$
+must(is(ratsimp(coeff(expand(e_delta_m), eta, 0) - (-2*coef*bstar*(cos(mt) - cos(m0)))) = 0),
+     "(2) holds: e0 xmcof (...) = -2 coef B* (cos M - cos M0) + O(eta), free of e0")$
+must(is(ratsimp(e0*(bstar*(-2*coef*xi*j3oj2*n0*sin(i0)/e0)*cos(w0)*t)
+                - (-2*coef*bstar*xi*j3oj2*n0*sin(i0)*cos(w0)*t)) = 0),
+     "(2) holds: e0 omgcof t is free of e0")$
+
+/* ---- (3) one element set, SGP4's secular chain at 40 digits ---------------------------------------
+   WGS84 as the crate's model.rs; ISS-like elements, B* = 1e-4. Exact decimals, then bfloat. */
+fpprec : 40$
+ae : 6378137/1000$
+ke : 7436685316871385/10^17$
+j2 : 108262998905/10^14$
+j3 : -253215306/10^14$
+j4 : -161098761/10^14$
+deg : %pi/180$
+inc : 516461/10000*deg$
+argp0 : 891723/10000*deg$
+mo : 2804612/10000*deg$
+n0kozai : 1549507896/10^8*%pi/720$
+bstar_v : 1/10000$
+e0_v : 1001/10^7$
+
+/* Kozai to Brouwer mean motion, as `Orbit::from_kozai_elements`. */
+a1 : (ke/n0kozai)^(2/3)$
+p0 : 3/4*j2*(3*cos(inc)^2 - 1)/(1 - e0_v^2)^(3/2)$
+d1 : p0/a1^2$
+d0 : p0/(a1*(1 - d1^2 - d1*(1/3 + 134*d1^2/81)))^2$
+no : n0kozai/(1 + d0)$
+ao : (ke/no)^(2/3)$
+perigee_km : bfloat(ae*(ao*(1 - e0_v) - 1))$
+must(is(perigee_km > 220), "(3) holds: the perigee is above 220 km, so SGP4 keeps the full drag terms")$
+must(is(perigee_km >= 156), "(3) holds: the perigee is above 156 km, so s = 78 km over the surface")$
+s4 : 78/ae + 1$
+qzms24 : (42/ae)^4$
+tsi : 1/(ao - s4)$
+coef : qzms24*tsi^4$
+eta : ao*e0_v*tsi$
+etasq : eta^2$
+eeta : e0_v*eta$
+psisq : abs(1 - etasq)$
+coef1 : coef/psisq^(7/2)$
+cosio : cos(inc)$
+sinio : sin(inc)$
+cosio2 : cosio^2$
+cosio4 : cosio2^2$
+omeosq : 1 - e0_v^2$
+rteosq : sqrt(omeosq)$
+con41 : 3*cosio2 - 1$
+con42 : 1 - 5*cosio2$
+x1mth2 : 1 - cosio2$
+cc2 : coef1*no*(ao*(1 + 3/2*etasq + eeta*(4 + etasq))
+               + 3/8*j2*tsi/psisq*con41*(8 + 3*etasq*(8 + etasq)))$
+cc1 : bstar_v*cc2$
+cc3 : -2*coef*tsi*(j3/j2)*no*sinio/e0_v$
+cc4 : 2*no*coef1*ao*omeosq*(eta*(2 + etasq/2) + e0_v*(1/2 + 2*etasq)
+        - j2*tsi/(ao*psisq)*(-3*con41*(1 - 2*eeta + etasq*(3/2 - eeta/2))
+                             + 3/4*x1mth2*(2*etasq - eeta*(1 + etasq))*cos(2*argp0)))$
+cc5 : 2*coef1*ao*omeosq*(1 + 11/4*(etasq + eeta) + eeta*etasq)$
+pinvsq : 1/(ao*omeosq)^2$
+temp1 : 3/2*j2*pinvsq*no$
+temp2 : temp1*j2*pinvsq/2$
+temp3 : -15/32*j4*pinvsq^2*no$
+mdot : no + temp1*rteosq*con41/2 + temp2*rteosq*(13 - 78*cosio2 + 137*cosio4)/16$
+omgcof : bstar_v*cc3*cos(argp0)$
+xmcof : -2/3*coef*bstar_v/eeta$
+delmo : (1 + eta*cos(mo))^3$
+cc1sq : cc1^2$
+d2 : 4*ao*tsi*cc1sq$
+tmp : d2*tsi*cc1/3$
+d3 : (17*ao + s4)*tmp$
+d4 : tmp*ao*tsi*(221*ao + 31*s4)*cc1/2$
+t2cof : 3/2*cc1$
+t3cof : d2 + 2*cc1sq$
+t4cof : (3*d3 + cc1*(12*d2 + 10*cc1sq))/4$
+t5cof : (3*d4 + 12*cc1*d3 + 6*d2^2 + 15*cc1sq*(2*d2 + cc1sq))/5$
+
+/* The jump at t minutes: [radial km, along-track km, delta rad], (1)'s first-order form at SGP4's own
+   secularly updated a, e and M. */
+jump(t) := block([xmdf, delta, mm, tempa, tempe, templ, am, em],
+  xmdf : mo + mdot*t,
+  delta : omgcof*t + xmcof*((1 + eta*cos(xmdf))^3 - delmo),
+  mm : xmdf + delta,
+  tempa : 1 - cc1*t - d2*t^2 - d3*t^3 - d4*t^4,
+  tempe : bstar_v*cc4*t + bstar_v*cc5*(sin(mm) - sin(mo)),
+  templ : t2cof*t^2 + t3cof*t^3 + t^4*(t4cof + t*t5cof),
+  am : ao*tempa^2,
+  em : e0_v - tempe,
+  mm : mm + no*templ,
+  bfloat([am*ae*em*delta*sin(mm), 2*am*ae*em*delta*cos(mm), delta]))$
+print("  perigee height, km:", perigee_km)$
+print("  coef B*:", bfloat(coef*bstar_v), " a coef B*, km:", bfloat(ao*ae*coef*bstar_v))$
+for t in [720, 1440] do print("  jump at", t, "min [radial km, along km, delta rad]:", jump(t))$
+
+print("DONE")$

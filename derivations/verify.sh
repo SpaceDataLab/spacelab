@@ -511,6 +511,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima knocke_lambert.mac" "expected 13 identities to hold, found $holds"
     fi
 
+    out=$(macf sgp4_eccentricity_boundary.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 7 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima sgp4_eccentricity_boundary.mac: SGP4's drag terms above e = 1e-4 shift M and w oppositely, moving the state a e delta sin M radially and 2 a e delta cos M along track, of order a coef B* whatever e"
+    else
+        bad "maxima sgp4_eccentricity_boundary.mac" "expected 7 identities to hold, found $holds"
+    fi
+
     out=$(macf shadow_lens.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 15 ] && printf '%s' "$out" | grep -q '^DONE'; then

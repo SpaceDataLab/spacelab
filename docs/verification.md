@@ -382,6 +382,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | One level per satellite, or a scale each | Ф30.G: what the shipped per-satellite scales buy held out, the most any scale could buy, and one level for every satellite, on the five family folds | `no_scales` is the shipped field on one level (`tools/test_evaluate_sdtm.py`) | the scales stay: one level costs +0.47 [+0.22, +0.73] points; the best constant per satellite bounds any scale at 0.35 points; the training mean is the wrong level (21.43 %); GOCE's scale runs +4.4 to +19.4 %; GRACE-FO C's v02c sits below its v02 by about −4 × 10⁻¹⁵ kg m⁻³, 4.4 % at the median and 24 % in the lowest density tercile of June 2018 (F72); the other seven satellites miss v02 less (21.9 against 24.2 %), but fitting on v02 costs the other families +0.33 [+0.15, +0.52], a level effect, and raises their level below F10.7a 80 by 2.6–4.4 %, about 4 of the spheres' 7–25 % (§10.45) | tools/satellite-scale.py, tools/density-versions.py, tools/corpus-variant.py, tools/low-flux-level.py |
 | The post-storm drop, four rivals | Ф23.J: a boundary-oxygen factor, a quiet offset δ, a linear form and the nitric oxide's time scaled by the flux, each added to the shipped form and fitted on the family and storm-out folds, then on §10.33's storm protocol and §10.34's named cases | each rival's step, fixed points and limits in Maxima and PARI/GP (`sdtm_composition`, `sdtm_overcooling`, `sdtm_nitric_flux`); `kn` held at Wang et al.'s middle to 30 digits in both | no rival reproduces the drop: 12 May 2024 at best −9.4 % against −25 to −27 % measured; δ fits to 0, linear costs +3.07 points in main and recovery, composition is unstable and raises the post-storm `⟨O/C⟩` to 1.126 at `ap` ≥ 300; the fitted `kn` sits at its bound 3 (a ratio of 23, Wang et al. 3–4); held at their 1.1933 with no parameter added it wins every paired measure (−0.06 [−0.09, −0.03] on the families, −0.77 [−0.99, −0.57] in main and recovery, −0.45 [−0.83, −0.05] on the storm folds) but lifts the post-storm `⟨O/C⟩` 0.1–0.9 points; shipping it is D-35 (§10.46) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/ablation-table.py |
 | Thinning: the fit at 10 min, 30 min and 2 h | Ф30.E: the shipped form refitted on every 5th, 15th and 60th row of the 120 s corpus, one family fold at a time, each scored on the same held-out rows and on §10.33's storm windows at 120 s | the peak memory of every run measured before the grid was chosen: linear in the rows, 11.05–15.17 GB at 10 min, so the 120 s corpus (55–76 GB) does not fit in 38.6 GB | thinning does not move the error: each family's MAPE within 0.03 points across the three steps, the storm onset unchanged, the peak error by 0.002 (better on 280 of 599 storms), the fitted kernel within 0.2 h, 0.2 h, 1 `ap` and 0.006 in `κ`; F62 is answered for the estimates (§10.47) | tools/fit-sdtm-corpus.py, tools/thinning-table.py |
+| The daily flux's memory | Ф23.L: the daily F10.7 through a first-order filter before `T∞`, with the heating time (no parameter) or its own, on the family and storm-out folds; the interval's coverage by regime held out, on the corpus and on §10.2's campaign rows | the filter's daily step, its `τ → 0` limit, `lfilter`'s recursion and a spike's conserved flux in Maxima (9 identities) and PARI/GP; `tools/regime-coverage.py` reproduces §10.28's held-out coverage digit for digit | its own time is 26–35 h; pre-storm MAPE 20.79 → 19.91 %, family −0.07 [−0.13, −0.01] with the heating time, storm folds span 0; regime 5 stays at 84.4 % on the campaign rows against the 88 % target, because the cell misses through a storm-time excess (May 2024 1.124, June 2025 1.195 model/measured), not the flux (§10.48) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/regime-coverage.py |
 
 ### Tides
 
@@ -10142,6 +10143,72 @@ Run (results stay under `data/validation/sdtm-eval/thinning/`):
         --folds $f --storm-table data/validation/sdtm-eval/thinning/step$k-$f.csv > data/validation/sdtm-eval/thinning/step$k-$f.log
     done; done
     uv run --no-project --with numpy --with pandas python -I tools/thinning-table.py
+
+### 10.48 The daily flux's memory (Ф23.L)
+
+§10.26 and §10.28 leave one cell under-covered: in the high-flux storm cell, regime 5, the 90 % interval covers
+80.8 % of §10.2's campaign rows in sample. Tulasi Ram et al. (*GRL* 2026) find that flares from one active region,
+at intervals shorter than the thermosphere's relaxation time, sustain the heating for days. Ф23.L's memory arm
+passes the daily F10.7 through `dG/dt = (F − G)/τ` before it reaches `T∞`; SDTM-1 reads `G` of the day before,
+so only past data enter. `derivations/sdtm_flux_memory.mac` proves the daily step exact, the shipped flux as
+`τ → 0`, the recursion `scipy.signal.lfilter` runs, a spike's flux conserved and a held step's approach (9
+identities); `derivations/sdtm_flux_memory.gp` checks the step against RK4 and the rest at 60 digits. Two fields:
+`flux_memory` filters with the fitted heating time and adds no parameter; `flux_memory_fit` gives the filter a
+time of its own.
+
+The verdict is the coverage. `tools/regime-coverage.py` builds each family's table without that family, as `--emit`
+does, on cells set by the shipped kernel's storm state, so every field is scored on the same cells. For the
+shipped field it reproduces §10.28's held-out coverage, 90.9 / 90.3 / 89.5 / 89.0 / 90.9 / 90.8 %, digit for digit.
+It also scores the campaign's rows, GRACE-FO C and Swarm A in the six months, held out: regime 5 is covered
+84.4 % there, the held-out side of §10.28's 80.8 % in sample. Ф23.L's target is 88 %.
+
+MAPE held out, in %, on the five family folds and the eleven storm-out folds:
+
+| field | parameters | family: all | pre-storm | onset | main and recovery | post-storm | storm folds |
+|---|---|---|---|---|---|---|---|
+| shipped | 49 | 20.83 | 20.79 | 20.83 | 21.65 | 19.47 | 23.79 |
+| `flux_memory`, the heating time | 49 | 20.76 | 20.12 | 20.60 | 21.62 | 19.44 | 23.00 |
+| `flux_memory_fit`, its own time | 50 | 20.75 | 19.91 | 20.41 | 21.64 | 19.48 | 23.37 |
+
+Each field minus the shipped one, paired, in percentage points:
+
+| field | family: all | outside storms | main and recovery | storm folds |
+|---|---|---|---|---|
+| `flux_memory` | −0.07 [−0.13, −0.01] | −0.06 [−0.12, −0.00] | −0.03 [−0.39, +0.34] spans 0 | −0.78 [−1.84, +0.10] spans 0 |
+| `flux_memory_fit` | −0.08 [−0.16, +0.01] spans 0 | −0.07 [−0.15, +0.01] spans 0 | −0.02 [−0.48, +0.47] spans 0 | −0.42 [−1.88, +0.86] spans 0 |
+
+The 90 % interval's coverage by regime, in %, each family's table built without it:
+
+| field | corpus: regimes 0–5 | campaign rows: regimes 0–5 | campaign rows' MAPE |
+|---|---|---|---|
+| shipped | 90.9 / 90.3 / 89.5 / 89.0 / 90.9 / 90.8 | 91.4 / 78.3 / 88.5 / 92.8 / 90.5 / **84.4** | 20.87 |
+| `flux_memory` | 90.9 / 90.0 / 89.6 / 89.1 / 91.0 / 90.7 | 91.2 / 78.3 / 90.4 / 93.8 / 91.8 / **84.4** | 20.24 |
+| `flux_memory_fit` | 90.9 / 90.1 / 89.5 / 89.0 / 91.0 / 90.8 | 91.2 / 82.6 / 91.3 / 93.8 / 91.8 / **84.4** | 20.09 |
+
+Findings:
+
+- **The memory is in the data.** Its own time is 26.0–34.5 h in the five folds, against a heating time of
+  17.9–19.1 h. Held to the heating time, it pulls the heating time to 20.6–25.5 h (17.2–18.4 h shipped): one
+  time does not serve both.
+- **It helps where the flux leads the storm.** The pre-storm MAPE falls from 20.79 to 19.91 % and the onset from
+  20.83 to 20.41 %; the family folds gain 0.07 points, clear of 0 with the heating time. Main and recovery do not
+  move, and on the storm folds both intervals span 0.
+- **It does not move regime 5.** On the corpus the cell stays at 90.7–90.8 %; on the campaign rows at 84.4 % for
+  all three fields. The target, 88 %, is not met.
+- **Regime 5 misses through a storm-time excess, not through the flux.** On the campaign rows the cell holds 24
+  rows of April 2023, covered 91.7 % at a median model/measured 0.870, 78 of May 2024, 79.5 % at 1.124, and 58 of
+  June 2025, 87.9 % at 1.195. The model sits above the measurement in large storms at high flux: §10.46's main
+  and recovery `⟨O/C⟩` at `ap` ≥ 300 is 1.107 (F73). A flux term cannot remove a storm-time bias, so the measured-EUV
+  arm (GOES XRS or the Lyman-α composite) was not run.
+
+Run (the harness folds stay under `data/validation/sdtm-eval/`):
+
+    for f in flux_memory flux_memory_fit; do for s in CHAMP GOCE GRACE GRACE-FO Swarm; do
+      uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind family --field $f --only family-$s
+    done; done
+    # the eleven storm-out folds: --kind storm --field F --only storm-...
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/regime-coverage.py --fields default flux_memory flux_memory_fit
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
 
 ---
 

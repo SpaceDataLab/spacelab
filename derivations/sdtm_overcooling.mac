@@ -1,0 +1,55 @@
+/* Two rivals of plans/17 Ф23.J for the post-storm drop that SDTM-1 misses (§10.34: 12 May 2024 measured
+   -25...-27 %, SDTM-1 -3.6 %), in the storm driver's own units, beside derivations/sdtm_no_cooling.mac.
+
+   The delta form carries Weimer's quiet offset, which the shipped cooling drops:
+     dD/dt = (H - D)/tc - (D + delta) N/(tc Hs),   dN/dt = (H - N)/tn,   delta >= 0.
+   The review's linear form, which F63 says loses the saturation:
+     dD/dt = (H - D - beta N)/tc,                  dN/dt = (H - N)/tn,   beta >= 0.
+
+   (A) delta form: the step with N frozen at its interval mean is exact for that frozen system; delta -> 0
+       is the shipped step; the steady state is h (Hs - delta)/(Hs + h); the step's target is below zero
+       exactly where delta N > H Hs, so a quiet drive under a still-high N overcools. The storm regressor
+       a = ln(1 + D/15) has no value below -15, so the rival reads its odd extension
+       sign(D) ln(1 + |D|/15): odd, equal to the shipped a above zero, slope 1/15 from both sides.
+   (B) linear form: the exact step for a held drive, N exact too; the steady state (1 - beta) H is linear in
+       H; after the drive stops it ends at K e^(-t/tn), K = -beta Q tn/(tn - tc) < 0 for tn > tc;
+       beta -> 0 is the heating alone.
+   Every identity prints 0. derivations/sdtm_overcooling.gp checks the forms numerically at 60 digits. */
+
+ratprint : false$
+display2d : false$
+
+/* (A) */
+lam : (1 + Nb/Hs)/tc$
+target : (H - delta*Nb/Hs)/(1 + Nb/Hs)$
+Dd(t) := target + (D0 - target)*exp(-lam*t)$
+print("A1 frozen delta step, ODE residual:",
+      ratsimp(diff(Dd(t), t) - ((H - Dd(t))/tc - (Dd(t) + delta)*Nb/(tc*Hs))))$
+print("A2 frozen delta step, initial value:", ratsimp(Dd(0) - D0))$
+shipped : H/(1 + Nb/Hs) + (D0 - H/(1 + Nb/Hs))*exp(-lam*t)$
+print("A3 delta -> 0 is the shipped frozen step:", ratsimp(subst(delta = 0, Dd(t)) - shipped))$
+steady : h*(Hs - delta)/(Hs + h)$
+print("A4 steady state h (Hs - delta)/(Hs + h) at H = N = h:",
+      ratsimp((h - steady)/tc - (steady + delta)*h/(tc*Hs)))$
+print("A5 the target's sign is that of H Hs - delta N:",
+      ratsimp(target*(Hs + Nb) - (H*Hs - delta*Nb)))$
+odd(x) := signum(x)*log(1 + abs(x)/15)$
+assume(x > 0)$
+print("A6 the odd extension is odd:", radcan(odd(-x) + odd(x)))$
+print("A7 and equals ln(1 + D/15) above zero:", radcan(odd(x) - log(1 + x/15)))$
+print("A8 slope 1/15 from above:", limit((odd(x) - 0)/x, x, 0, plus) - 1/15)$
+print("A9 slope 1/15 from below:", limit(odd(-x)/(-x), x, 0, plus) - 1/15)$
+forget(x > 0)$
+
+/* (B) */
+K : -beta*(N0 - H)*tn/(tn - tc)$
+Dl(t) := (1 - beta)*H + (D0 - (1 - beta)*H - K)*exp(-t/tc) + K*exp(-t/tn)$
+Nl(t) := H + (N0 - H)*exp(-t/tn)$
+print("B1 linear step, ODE residual:", ratsimp(diff(Dl(t), t) - (H - Dl(t) - beta*Nl(t))/tc))$
+print("B2 linear step, initial value:", ratsimp(Dl(0) - D0))$
+print("B3 the steady state is linear in the drive:", diff((1 - beta)*H, H, 2))$
+after : subst([H = 0, D0 = (1 - beta)*Q, N0 = Q], Dl(t))$
+print("B4 after the drive stops it ends at K e^(-t/tn):",
+      ratsimp(after - (((1 - beta)*Q + beta*Q*tn/(tn - tc))*exp(-t/tc) - beta*Q*tn/(tn - tc)*exp(-t/tn))))$
+print("B5 beta -> 0 is the heating alone:",
+      ratsimp(subst(beta = 0, Dl(t)) - (H + (D0 - H)*exp(-t/tc))))$

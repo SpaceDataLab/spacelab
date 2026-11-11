@@ -1,0 +1,99 @@
+/* The vertical column of SDTM-1's species and the column ratio O/N2 (plans/17 Ф23.P): what GOLD and GUVI
+   retrieve, from the profile sdtm_bates.mac proves.
+
+   One species, no thermal diffusion. Diffusive equilibrium is d(n k T)/dx = -n m g0 in geopotential height x,
+   whatever T(x) is: the partial pressure is the weight of the column above it. So the column above x is
+   N(x) = int_x^inf n dx' = n(x) T(x)/b, b = m g0/k, for every temperature profile (1). For the Bates profile
+   the same column is also integrated directly: with u = exp(-s x), T = Tinf (1 - kap u), kap = 1 - T0/Tinf,
+   gam = b/(s Tinf), the density is n0 (T0/Tinf)^(1+gam) u^gam (1 - kap u)^(-1-gam) (2), whose antiderivative
+   in u is (u/(1 - kap u))^gam/gam (3), zero at u = 0 (4); the integral equals n T/b (5), and n T vanishes at
+   the top (6).
+
+   Two species. The depth is where N2's column is N* = 1e17 cm^-2 (Strickland et al. 1995): there
+   exp(-bN I1) = N* bN/(nN0 T0) (7), and the column ratio is
+     SigmaO/N2 = (bN/bO) (nO0/nN0) (nN0 T0/(bN N*))^(1 - bO/bN)        (8)
+   with no Tinf and no s in it: on a fixed-composition, fixed-pressure boundary, heating lifts the pressure
+   levels and leaves the ratio where it was. The fitted scale on the boundary density moves it as
+   scale^(1 - bO/bN) (9). In geopotential height the ratio is a constant of the model; only the vertical
+   column in geometric altitude, dz = ((R + z)/(R + z0))^2 dx, gives it a T dependence, through the growth of
+   the column's area with height. The numeric block gives both at the shipped boundary: the constant at 40
+   digits, and the geometric depth and ratio at Tinf = 700, 1000, 1500 K by QUADPACK to a top of 5000 km,
+   with the geopotential identity checked by quadrature at each (10-12). derivations/sdtm_column.gp is the
+   second engine. Every identity prints 0. Helium's thermal diffusion is outside: it is in neither column. */
+
+ratprint : false$
+assume(n0 > 0, b > 0, T0 > 0, Tinf > T0, s > 0, x > 0, u > 0, u < 1, kap > 0, kap < 1, gam > 0)$
+
+nany(x) := n0*T0/T(x)*exp(-b*'integrate(1/T(y), y, 0, x))$
+print("1 any T: the column n T/b has derivative -n:", ratsimp(diff(nany(x)*T(x)/b, x) + nany(x)))$
+
+TB(x) := Tinf - (Tinf - T0)*exp(-s*x)$
+I1(x) := (s*x + log(TB(x)/T0))/(s*Tinf)$
+nb(x) := n0*(T0/TB(x))*exp(-b*I1(x))$
+gamv : b/(s*Tinf)$
+kapv : 1 - T0/Tinf$
+nu : n0*(T0/Tinf)^(1 + gamv)*exp(-s*x)^gamv*(1 - kapv*exp(-s*x))^(-1 - gamv)$
+print("2 Bates: the density in u:", radcan(nu/nb(x) - 1))$
+G(u) := (u/(1 - kap*u))^gam/gam$
+print("3 Bates: the antiderivative in u:", radcan(diff(G(u), u) - u^(gam - 1)*(1 - kap*u)^(-1 - gam)))$
+print("4 Bates: the antiderivative at the top, u = 0:", limit(G(u), u, 0, plus))$
+column : n0/s*(T0/Tinf)^(1 + gamv)*subst([kap = kapv, gam = gamv, u = exp(-s*x)], G(u))$
+print("5 Bates: the integrated column is n T/b:", radcan(column/(nb(x)*TB(x)/b) - 1))$
+print("6 Bates: n T at the top:", limit(exp(-b*I1(x)), x, inf))$
+
+assume(bN > bO, bO > 0, nN0 > 0, nO0 > 0, Ns > 0, c > 0)$
+ratio(i) := (bN/bO)*(nO0/nN0)*exp((bN - bO)*i)$
+istar : log(nN0*T0/(bN*Ns))/bN$
+closed : (bN/bO)*(nO0/nN0)*(nN0*T0/(bN*Ns))^(1 - bO/bN)$
+print("7 the N2 column at the depth is N*:", radcan(nN0*T0/bN*exp(-bN*istar) - Ns))$
+print("8 the column ratio at the depth:", radcan(ratio(istar) - closed))$
+print("9 a common boundary scale c:", radcan(subst([nN0 = c*nN0, nO0 = c*nO0], closed)/closed - c^(1 - bO/bN)))$
+print("the ratio's variables:", listofvars(closed))$
+
+/* The shipped boundary: sdtm/mod.rs's constants and sdtm/coefficients.rs's sigma and boundary scale, exact
+   from their decimal literals. */
+fpprec : 40$
+linel : 200$
+R : 6356766$
+z0 : 120000$
+a : R + z0$
+g0 : 980665/100000*(R/a)^2$
+kB : 1380649/10^29$
+mu : 166053906892/10^38$
+T0 : 380$
+sg : 3341439818644104/10^20$
+sc : 49658530381854077/10^17$
+bN : 280134/10^4*mu*g0/kB$
+bO : 159994/10^4*mu*g0/kB$
+nN0 : sc*4*10^17$
+nO0 : sc*76*10^15$
+Nst : 10^21$
+ztop : 5000000$
+print("SigmaO/N2 in geopotential height, shipped boundary:", bfloat((bN/bO)*(nO0/nN0)*(nN0*T0/(bN*Nst))^(1 - bO/bN)))$
+istar : bfloat(log(nN0*T0/(bN*Nst))/bN)$
+print("I1 at the depth, m/K:", istar)$
+
+fsg : float(sg)$
+fbN : float(bN)$
+fbO : float(bO)$
+geo(z) := (z - z0)*a/(R + z)$
+TS(t, x) := t - (t - T0)*exp(-fsg*x)$
+IS(t, x) := (fsg*x + log(TS(t, x)/T0))/(fsg*t)$
+densx(n, b, t, x) := n*(T0/TS(t, x))*exp(-b*IS(t, x))$
+dens(n, b, t, z) := densx(n, b, t, geo(z))$
+col(n, b, t, z) := quad_qags(dens(n, b, t, y), y, z, z + 200000, 'epsrel = 2d-14, 'limit = 400)[1]
+    + quad_qags(dens(n, b, t, y), y, z + 200000, ztop, 'epsrel = 2d-14, 'limit = 400)[1]$
+for j thru 3 do block([t : [700, 1000, 1500][j], x, z, zp, cN, cO, err],
+    x : 20000.0,
+    for k thru 50 do x : x - (IS(t, x) - float(istar))*TS(t, x),
+    zp : (x*R + z0*a)/(a - x),
+    z : zp,
+    for k thru 12 do z : z + (col(float(nN0), fbN, t, z) - float(Nst))/dens(float(nN0), fbN, t, z),
+    cN : col(float(nN0), fbN, t, z),
+    cO : col(float(nO0), fbO, t, z),
+    err : quad_qagi(densx(float(nO0), fbO, t, y), y, x, inf, 'epsrel = 2d-14)[1]
+        /(densx(float(nO0), fbO, t, x)*TS(t, x)/fbO) - 1,
+    print("Tinf", t, "K: geopotential depth z", zp, "m; geometric depth z", z, "m; N2", cN, "O", cO,
+        "per m^2; SigmaO/N2", cO/cN),
+    print(9 + j, "Tinf", t, "K: O column above the geopotential depth, quadrature/(n T/b) - 1 below 1e-12:",
+        if abs(err) < 1d-12 then 0 else err))$

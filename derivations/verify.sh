@@ -922,6 +922,7 @@ if have maxima; then
     mac_zeros sdtm_storm_gain.mac 9 "the storm state's flux gain (F10.7a/150)^kappa: unity at 150, elasticity kappa, reciprocal; a gain on a minor storm and a shift on a large one; the cooling state homogeneous of degree one"
     mac_zeros sdtm_solar_wind.mac 8 "Newell's solar-wind coupling: the half-angle form at the clock angle, symbolic and in every quadrant; zero due north, V^(4/3)|Bz|^(2/3) due south; even in By; homogeneous of degree 4/3 in V and 2/3 in B"
     mac_zeros sdtm_no_step.mac 4 "the exact step of heating with nitric-oxide cooling under a held drive: the rate's integral in closed form, the integrating factor's state equation and start"
+    mac_zeros sdtm_column.mac 12 "the column above a height is n T/b in diffusive equilibrium for any T, the Bates column integrated directly, and SDTM-1's column O/N2 at the N2 depth free of Tinf and sigma"
     mac_zeros sdtm_ablation.mac 12 "SDTM-1's ablation ladder: each rung is the one above it in a limit; share, kappa -> 0, D, H_s -> inf, the kernel's fast time and the filter's time -> 0, the storm regressors with the state"
     mac_zeros density_calibration_ridge.mac 104 "the ridge calibration fit solves its normal equations exactly"
     mac_zeros wind_model_vsh.mac 222 "the vector spherical harmonic basis by Rodrigues' formula; the ridge stationarity"
@@ -1031,7 +1032,7 @@ if have gp; then
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form \
         rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
         cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal iod_classical patched_conics \
-        targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step \
+        targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step sdtm_column \
         density_calibration_ridge \
         wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms \
         chi_square_quantiles robust_weights se3_exponential particle_resampling sampling_transforms \

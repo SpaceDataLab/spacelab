@@ -8,6 +8,8 @@ any of them is read:
 
 * `family`: the fit tool's folds, kept for continuity. Under `--legacy-penalty` they reproduce its numbers;
 * `origin`: rolling-origin by date, training on the rows before the cut and scoring up to the next;
+* `frozen`: one cut, training before it and scoring every row after it, with the comparators of
+  `plans/17` Ф30.D read on the same rows. Its own kind, so that it never enters the pooled `origin`;
 * `storm`: one storm out, the rows of its window and its recovery masked. The indices before and during it
   stay as input, because the storm state needs them and they are not what is being predicted;
 * `joint`: a storm and a mission family out together.
@@ -57,6 +59,7 @@ OUT = ROOT / "data" / "validation" / "sdtm-eval"
 
 STEP, PHASE = 60, 0
 ORIGINS = ("2005", "2008", "2011", "2014", "2017", "2020", "2023")
+FROZEN = "2020"
 # The storms large enough to carry a peak the gate names: the first-peak `ap` of the G4-G5 storms.
 STORM_PEAK_AP = 300.0
 JOINT_NAMED = ("2003-10-29 07:30:00", "2024-05-10 19:30:00", "2024-10-10 22:30:00")
@@ -112,6 +115,14 @@ def declared_splits(
         }
         for cut, following in itertools.pairwise(cuts)
     ]
+    out.append(
+        {
+            "name": f"frozen-{FROZEN}",
+            "kind": "frozen",
+            "cut": f"{FROZEN}-01-01",
+            "until": f"{last.year + 1}-01-01",
+        }
+    )
     start_index = (first.normalize() - epoch).days * 8
     found = g.storm_onsets(
         ap[start_index:], epoch + pd.Timedelta(days=start_index // 8)
@@ -140,7 +151,7 @@ def masks(
     if kind == "family":
         test = family == split["family"]
         train = ~test
-    elif kind == "origin":
+    elif kind in ("origin", "frozen"):
         train = t < stamp(split["cut"])
         test = (t >= stamp(split["cut"])) & (t < stamp(split["until"]))
     elif kind in ("storm", "joint"):
@@ -168,7 +179,7 @@ def guard(
     kind = split["kind"]
     if kind in ("family", "joint") and (family[train] == split["family"]).any():
         raise LeakError(f"{split['name']}: the held-out family is in the training rows")
-    if kind == "origin" and (t[train] >= stamp(split["cut"])).any():
+    if kind in ("origin", "frozen") and (t[train] >= stamp(split["cut"])).any():
         raise LeakError(f"{split['name']}: a training row from after the cut")
     if kind in ("storm", "joint"):
         inside = (t[train] >= stamp(split["start"])) & (t[train] < stamp(split["end"]))
@@ -179,7 +190,7 @@ def guard(
 def training_hours(hours: np.ndarray, split: dict[str, str]) -> np.ndarray:
     """The hours a fold may read a whole-series table from: its training time, not its test time."""
     kind = split["kind"]
-    if kind == "origin":
+    if kind in ("origin", "frozen"):
         return hours < stamp(split["cut"])
     if kind in ("storm", "joint"):
         return (hours < stamp(split["start"])) | (hours >= stamp(split["end"]))
@@ -372,7 +383,9 @@ def main() -> int:
     sub.add_parser("splits").set_defaults(func=command_splits)
     runner = sub.add_parser("run")
     runner.add_argument(
-        "--kind", required=True, choices=("family", "origin", "storm", "joint")
+        "--kind",
+        required=True,
+        choices=("family", "origin", "frozen", "storm", "joint"),
     )
     runner.add_argument("--only")
     runner.add_argument("--field", default="default", choices=sorted(FIELDS))

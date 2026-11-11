@@ -29,6 +29,7 @@ spec.loader.exec_module(harness)
 T = np.array(pd.date_range("2010-01-01", periods=240, freq="D"), dtype="datetime64[ns]")
 FAMILY = np.array(["CHAMP", "GRACE", "Swarm"] * 80)
 ORIGIN = {"name": "o", "kind": "origin", "cut": "2010-05-01", "until": "2010-07-01"}
+FROZEN = {**ORIGIN, "name": "z", "kind": "frozen", "until": "2011-01-01"}
 STORM = {"name": "s", "kind": "storm", "start": "2010-03-01", "end": "2010-03-11"}
 JOINT = {**STORM, "name": "j", "kind": "joint", "family": "GRACE"}
 FOLD = {"name": "f", "kind": "family", "family": "Swarm"}
@@ -43,7 +44,7 @@ def refused(split, train, test) -> bool:
 
 
 def test_each_split_passes_its_own_guard() -> None:
-    for split in (ORIGIN, STORM, JOINT, FOLD):
+    for split in (ORIGIN, FROZEN, STORM, JOINT, FOLD):
         train, test = harness.masks(T, FAMILY, split)
         assert train.size and test.size, split
         assert not refused(split, train, test), split
@@ -56,8 +57,16 @@ def test_origin_scores_after_the_cut_and_trains_before_it() -> None:
 
 
 def test_a_future_row_is_refused() -> None:
-    train, test = harness.masks(T, FAMILY, ORIGIN)
-    assert refused(ORIGIN, np.append(train, test[0]), test[1:])
+    for split in (ORIGIN, FROZEN):
+        train, test = harness.masks(T, FAMILY, split)
+        assert refused(split, np.append(train, test[0]), test[1:]), split
+
+
+def test_frozen_scores_every_row_after_its_cut() -> None:
+    train, test = harness.masks(T, FAMILY, FROZEN)
+    cut = harness.stamp(FROZEN["cut"])
+    assert np.array_equal(T[test], T[np.searchsorted(T, cut) :])
+    assert T[train].max() < cut
 
 
 def test_a_row_in_both_sets_is_refused() -> None:

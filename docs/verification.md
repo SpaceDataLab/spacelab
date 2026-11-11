@@ -379,6 +379,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Composition against GOLD and TianMu-1 | Ф23.P: SDTM-1's and NRLMSISE-00's column O/N₂ against 575,761 GOLD L2 pixels in the phases of 52 storms since 2018-10, and their local O/N₂ against TianMu-1's mass spectrometer through 10–12 October 2024 | the column above a height is n T/b for any T in Maxima (12 identities) and PARI/GP at 60 digits; the column ratio at the N₂ depth free of T∞ and σ; the example to 4e-16 | SDTM-1's column ratio is low by 52 % in every phase and does not move in storms (+0.1 % where GOLD falls 4.9 % at 30–60° magnetic latitude); its in-situ storm drop is heating alone, flat in latitude, and recovers too fast: the composition rival of Ф23.J must vary the boundary composition (§10.42) | tools/column-on2.py, tools/tianmu-on2.py |
 | Spheres by era | Ф23.U: ten more smooth spheres of known area-to-mass, six from 1994–1996 (ODERACS) and four from 2007–2010 (ANDE, its states from NRL's laser predictions), the `C_d` each model needs for the true lifetime | the nine-node central difference exact to degree 8 in Maxima and PARI/GP; the CPF chain's `--check` recovers a known mean state to 6 µm in `a` | ODERACS agrees with GFZ-1 (SDTM-1 needs 2.77–3.17 against 2.23–2.37); ANDE, in SDTM-1's own years, needs 2.49–2.96, so SDTM-1 is too thin near solar minimum at 200–350 km in both eras; both models need 11 % less in 2007–2010, the era's share, which a secular term would remove (§10.43) | tools/lifetime-campaign.py, crates/spacelab/examples/cpf_mean_state.rs |
 | The ablation ladder | Ф30.F: nine rungs from the Bates profile on the flux to the solar wind, each the rung above in a limit, fitted and scored on the five family and eleven storm-out folds, with paired intervals on storm windows and 27-day blocks | each removal a limit of the shipped form in Maxima (`derivations/sdtm_ablation.mac`) | geography and season −20.6 points; the index −2.1; heating alone loses 6.6 on the storm folds and cooling wins 14.0 back; the kernel's second constant buys nothing; saturation −1.7, in the pre-storm phase; gain −0.5; the solar wind −0.4, gaining in every column; wall time not measured (§10.44) | tools/ablation-table.py |
+| One level per satellite, or a scale each | Ф30.G: what the shipped per-satellite scales buy held out, the most any scale could buy, and one level for every satellite, on the five family folds | `no_scales` is the shipped field on one level (`tools/test_evaluate_sdtm.py`) | the scales stay: one level costs +0.47 [+0.22, +0.73] points; the best constant per satellite bounds any scale at 0.35 points; the training mean is the wrong level (21.43 %); GOCE's scale runs +4.4 to +19.4 %; GRACE-FO C's v02c sits below its v02 by about −4 × 10⁻¹⁵ kg m⁻³, 4.4 % at the median and 24 % in the lowest density tercile of June 2018 (F72, §10.45) | tools/satellite-scale.py, tools/density-versions.py |
 
 ### Tides
 
@@ -9885,6 +9886,87 @@ Run (each fold is resumable; results stay under `data/validation/sdtm-eval/`):
         uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind $k --field $f
       done
     done
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
+
+---
+
+### 10.45 One level per satellite, or a scale each (Ф30.G)
+
+The shipped fit gives each training satellite a log scale against a reference: GRACE-FO C, or Swarm A where
+GRACE-FO is held out. A held-out family has no scale of its own, so it sits on the reference's level. The question
+is how much of the held-out error that level is. `tools/satellite-scale.py` reads the family folds and prints, per
+family and pooled:
+
+- the MAPE as scored;
+- the MAPE with the best constant per satellite, the shift that minimises that satellite's MAPE on its own test
+  rows. No scale chosen without the test rows can do better, so this bounds what any per-satellite scale can buy;
+- the MAPE at the training satellites' mean level, the reference's zero included;
+- the same for NRLMSISE-00.
+
+The `no_scales` field of `tools/evaluate-sdtm.py` fits one level for every satellite, the other end.
+
+MAPE held out, in %:
+
+| family | shipped, as scored | its best constant | training mean level | one level, as scored | its best constant | NRLMSISE-00 | its best constant |
+|---|---|---|---|---|---|---|---|
+| CHAMP | 18.34 | 17.84 | 19.08 | 19.40 | 17.94 | 43.89 | 19.49 |
+| GOCE | 12.44 | 11.24 | 11.65 | 11.64 | 11.25 | 30.40 | 18.24 |
+| GRACE | 21.20 | 21.04 | 21.10 | 20.81 | 20.81 | 53.32 | 32.83 |
+| GRACE-FO | 24.17 | 22.81 | 25.12 | 24.78 | 22.84 | 56.25 | 27.58 |
+| Swarm | 21.29 | 21.13 | 22.40 | 22.32 | 21.11 | 49.89 | 26.76 |
+| pooled | 20.83 | 20.48 | 21.43 | 21.31 | 20.41 | 50.08 | 27.57 |
+
+The shipped fit's training scales against the fold's reference, in %:
+
+| held out | scales |
+|---|---|
+| CHAMP | SA +0.4, SB +2.1, SC +0.5, GA +6.1, GB +6.9, GO +4.4 |
+| GOCE | SA +0.8, SB +1.9, SC +0.9, GA +7.1, GB +7.7, CH +1.1 |
+| GRACE | SA +2.6, SB +1.6, SC +2.7, CH +6.0, GO +19.4 |
+| GRACE-FO (reference SA) | SB +0.5, SC −0.4, GA +5.8, GB +6.4, CH +0.0, GO +7.4 |
+| Swarm | GA +8.2, GB +8.8, CH +2.1, GO +9.0 |
+
+One level against the shipped scales, in percentage points, paired on the same rows, with `tools/ablation-table.py`'s
+interval on storm windows and 27-day blocks: **+0.47 [+0.22, +0.73]** over all rows, +0.47 [+0.20, +0.74] outside
+storms, +0.76 [+0.31, +1.20] in the main and recovery phases.
+
+Findings:
+
+- **The scales stay.** One level costs 0.47 points held out, and the interval excludes zero.
+- **The level is a small part of the error.** The best constant per satellite takes SDTM-1 from 20.83 to 20.48 %, so
+  no choice of scale for a new satellite can buy more than 0.35 points. NRLMSISE-00's error is mostly level: its
+  best constant takes it from 50.08 to 27.57 %.
+- **The training mean is the wrong level for a new satellite.** It scores 21.43 %, worse than the reference's
+  20.83 % and worse than one level for all, 21.31 %. A hierarchical prior on the scales puts a new satellite at
+  its population mean. Its two ends are measured here, and neither beats the shipped choice, so it is not fitted.
+  That the score is monotone between the two ends is not proved.
+- **GOCE's scale is not stable.** It runs from +4.4 % to +19.4 % across folds. A held-out GOCE scores better on one
+  level (11.64 %) than at the reference (12.44 %).
+- **The producers' levels.** TU Delft's densities use DRIA/Sentman with one energy accommodation per mission: 0.85
+  for CHAMP, GRACE and GRACE-FO, 0.82 for GOCE, 0.93 for Swarm's orbit-determination densities (version 01). The
+  missions' spread against the models is about 4 % (March et al. 2021, *J. Space Weather Space Clim.* 11, 54).
+  Siemes et al. (2023, §4.3) find no significant offset between GRACE A and GRACE C in version 02; the two never
+  flew together, so that comparison runs through models. The fitted GRACE scales, +5.8 to +8.8 % against GRACE-FO C,
+  are larger than that spread.
+- **GRACE-FO C's v02c is not its v02 (F72).** The corpus reads each month's newest reprocessing, so all 96
+  GRACE-FO C months are v02c. For the 55 months from 2018-05 to 2022-11 the archive also holds v02. On the same
+  instants the median of v02c/v02 over the months is 0.956, from 0.859 to 1.000: 0.86 to 0.99 in 2018–2020, 0.93
+  to 0.98 in 2021 and 0.98 to 1.00 in 2022. Within a month the difference moves far less across the density
+  terciles than the ratio does: in January 2019 −3.3, −4.2 and −5.4 × 10⁻¹⁵ kg m⁻³ against ratios 0.87, 0.90 and
+  0.91; in July 2020 −4.4, −4.0 and −4.2 × 10⁻¹⁵ against 0.78, 0.88 and 0.94. So the ratio is lowest where the
+  density is lowest: the lowest tercile's median ratio reaches 0.76 in June 2018 and 0.78 in July 2020. An
+  additive change of this size moves a log level most at solar minimum and at GRACE-FO's height. That is where the
+  producers rate their densities least certain. GRACE-FO C is the fit's reference, and the change runs in the
+  direction of every other satellite's positive scale. Which version is right is not known here. Whether it is a
+  part of §10.43's deficit near solar minimum is a test still to run (F72).
+
+Run (results stay under `data/validation/sdtm-eval/`):
+
+    for f in CHAMP GOCE GRACE GRACE-FO Swarm; do
+      uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind family --field no_scales --only family-$f
+    done
+    uv run --no-project --with numpy --with scipy python -I tools/satellite-scale.py [--field no_scales]
+    uv run --no-project --with numpy --with pandas python -I tools/density-versions.py --sat GC --old v02 --new v02c
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
 
 ---

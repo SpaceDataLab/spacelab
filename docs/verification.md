@@ -285,7 +285,7 @@ convergence order + Hamiltonian conservation + cross-checks against independentl
 | Zonal J₂…J_{N+1} force | zonal-harmonic potential; classical J₂ node regression | analytic node-regression Ω̇; J₃ parity; energy/Lz | node < 3%; energy < 1e-9 rel; STM symplectic < 1e-6 | tests/zonal.rs, tests/forces.rs |
 | Time-variable gravity | IERS TN36 Table 6.2; ICGEM `.gfc` time-variable format | IERS 2010 Table 6.2 vendored rates; ICGEM parse vs hand series; `eigen6s2` excerpt | parse/eval < 1e-16…1e-18 | src/time_variable_gravity.rs |
 | Relativity (Schwarzschild / Lense-Thirring / de Sitter) | IERS TN36 §10.3 | closed-form Python golden **and** Orekit 13 golden CSV | Python < 1e-12; Orekit round-off (de Sitter < 1e-10) | src/relativity.rs |
-| Knocke Earth albedo/IR | Knocke, Ries & Tapley 1988; Lambert's law | Lambert's cosine: the polar-night closed form of `derivations/knocke_lambert.mac`. The grid under Orekit's cosine: Orekit 13 `KnockeRediffusedForceModel` golden, 4 LEO geometries | closed form < 2e-4 at Δ = 2π/2000, converging as Δ²; Orekit < 1e-12 | src/earth_radiation.rs |
+| Knocke Earth albedo/IR | Knocke, Ries & Tapley 1988; Lambert's law | **G3**, all from `derivations/knocke_lambert.mac`: a uniform sphere against its view factor `(R/r)²` at Δ = 1°, 15°, 30° and 500 km, 20 000 km; the central cap against `R² sin²Δ/d²`; the polar-night closed form. The grid under Orekit's cosine: Orekit 13 `KnockeRediffusedForceModel` golden, 4 LEO geometries | uniform sphere < 1e-13 along and across `r̂` (5.1e-15 measured); cap < 1e-14; polar night < 0.12 Δ² from Δ = 30° to 2π/2000 (5.6e-7 there); Orekit < 1e-12 | src/earth_radiation.rs |
 | Third-body force (Battin form) | Battin, *Astrodynamics* — f(q) indirect-term form | independent direct difference-of-terms; tidal-field limit | Battin≡direct < 1e-8; tidal < 1e-4 | tests/solar_perturbations.rs |
 | SRP force (direction / shadow / 1/d²) | cannonball SRP; solar irradiance at 1 AU | analytic geometry (1 AU ref 1.368e-7) | < 1e-10; near/far≈4 < 1e-3 | tests/solar_perturbations.rs |
 | Conical shadow (lens area, lighting ratio) | the area two discs share in the sky plane; conical umbra/penumbra geometry (Montenbruck–Gill) | **G3**: 171 exact-double inputs — both tangencies to the last double, `d → 0`, `r_E/r_S` from 0.6 to 264 — against the textbook area at 200 digits (`derivations/shadow_lens.gp`), every value inside an Arb ball (`shadow_lens_arb.c`); **G1**: `derivations/shadow_lens.mac`, the segment form is the textbook area and `dA/dd` minus the chord. *C*: Orekit's `acos` form, 6.5e-7 off in `ν` 1.1e-9 rad inside a tangency | `A` within `4 + κ` ulp, `κ = 4K/A` (measured 1.85 ulp where `κ < 1`, `c₂ = 0.71`); `ν` within the bound `A` carries | tests/shadow_lens.rs, src/shadow.rs |
@@ -315,6 +315,29 @@ the grid, the rotations and the coefficients element for element. At those four 
 1029 km with albedo and IR together, Orekit's flux is 1.99 to 2.04 times Lambert's, so the
 rediffused acceleration halves. The grid also converges faster, as `Δ²`: the emission cosine
 vanishes on the horizon, where the last crown is cut.
+
+**Orekit's Knocke grid lumps the central cap** (Ф17.F; Orekit #2022, fixed upstream in 13.1.9).
+Orekit 13.1.7 puts the central cap's whole area, `2πR²(1 − cos Δ)`, at the sub-satellite point.
+That is only the first, `Δ²`, term of the cap's integral. `derivations/knocke_lambert.mac` (5) gives
+the cap exactly, `R² sin²Δ/d²` with `d` the distance to its rim, and the lumped element over it is
+1.054 at Δ = 1°, 13.18 at 15° and 50.71 at 30°, 500 km over the sphere (the issue quotes 16× and 62×
+at its own geometry). The crowns were single midpoint elements, kept while their centres lay below
+the horizon, so the strip beyond the last one was lost. Behind the exact cap they still missed
+`(R/r)²` by 2.2e-2 at 500 km and Δ = 15°, and by 4.1e-2 at 20 000 km and Δ = 30°. The grid now
+integrates the Lambert kernel exactly over the cap and over each crown, a crown being the difference
+of two caps, and cuts the last crown at the horizon. Only the exitance and the ray are sampled at
+sector centres. A uniform sphere sums to `(R/r)²` within 5.1e-15 at every Δ tested. The polar-night
+case stays within 0.12 Δ²: 8.0e-3 at Δ = 30°, where the previous grid gave 50× the closed form, and
+5.6e-7 at Δ = 2π/2000, where it was 1.6e-4 off. The last crown's middle follows the horizon, so it
+carries derivatives, and the AD Jacobian matches central differences to 1e-5. Orekit's grid and
+cosine stay for tests only, behind the four golden vectors.
+
+One cause outside the model surfaced on the way. `Dual` and `HyperDual` rounded a quotient's value
+as `u·(1/v)`, not as f64's `u/v`, so a force evaluated at `Dual` parted from its own f64 evaluation by
+an ulp per quotient. The exact cap cut the Knocke flux 5× at the test's coarse grid, the crowns'
+drift no longer hid under a large cap term, and it reached 4.3 ulp of a component, over its 4-ulp
+bound. Both types now divide, and the Knocke
+force's `Dual` value equals its f64 value bit for bit.
 
 ### Atmospheres — exact ports of primary-source reference implementations
 

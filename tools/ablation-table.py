@@ -41,7 +41,11 @@ RIVALS = (
     ("+ delta: the cooling's quiet offset", "delta", "default"),
     ("linear heating and cooling", "linear", "default"),
     ("+ nitric-oxide time scaled by the flux", "nitric_flux", "default"),
+    ("GRACE-FO C on v02, GRACE-FO rows left out", "gc_v02", "default"),
 )
+# A field on a corpus variant measures one family differently (`tools/corpus-variant.py`): its MAPE and its
+# pairing leave that family's rows out, so both sides are scored on the same truth.
+CHANGED_TRUTH = {"gc_v02": "GRACE-FO"}
 KINDS = ("family", "storm")
 
 
@@ -98,7 +102,7 @@ def main() -> int:
     missing = [f"{f}/{k}" for (f, k), z in read.items() if z is None]
     if missing:
         print("not yet run: " + ", ".join(missing), flush=True)
-    selections, clusters = {}, {}
+    selections, clusters, families = {}, {}, {}
     for kind in KINDS:
         tests = [z["test"] for (f, k), z in read.items() if k == kind and z is not None]
         if not tests:
@@ -106,6 +110,7 @@ def main() -> int:
         if any(not np.array_equal(x, tests[0]) for x in tests):
             raise ValueError(f"the {kind} folds were scored on different rows")
         t, family = t_all[tests[0]], family_all[tests[0]]
+        families[kind] = family
         phase, _, found = maps.storm_phases(rows, g, t)
         windows = [
             (
@@ -135,6 +140,14 @@ def main() -> int:
         "rung | field | parameters | "
         + " | ".join(f"{k}: {name}" for k, name in columns)
     )
+
+    def scored(field: str, kind: str, name: str) -> np.ndarray:
+        """The selection's rows, less the family whose truth the field's corpus changes."""
+        out = selections[kind][name]
+        if field in CHANGED_TRUTH:
+            out = out & (families[kind] != CHANGED_TRUTH[field])
+        return out
+
     for label, field, _ in RUNGS + RIVALS:
         cells = []
         for kind, name in columns:
@@ -142,7 +155,7 @@ def main() -> int:
             cells.append(
                 "—"
                 if z is None
-                else f"{g.mape(z['residual'][selections[kind][name]]):.2f}"
+                else f"{g.mape(z['residual'][scored(field, kind, name)]):.2f}"
             )
         z = read[field, "family"]
         size = "—" if z is None else str(z["parameters"].size)
@@ -171,7 +184,7 @@ def main() -> int:
                 else paired(
                     child["residual"],
                     base["residual"],
-                    selections[kind][name],
+                    scored(field, kind, name),
                     clusters[kind],
                     args.draws,
                     intervals,

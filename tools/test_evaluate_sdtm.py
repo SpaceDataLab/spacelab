@@ -287,6 +287,40 @@ def test_the_corpus_variant_field_is_the_shipped_form_on_another_corpus() -> Non
     assert "corpus" not in fields["default"]
 
 
+def test_a_flux_scaled_nitric_time_is_the_shipped_one_at_a_constant_and_faster_at_high_flux() -> (
+    None
+):
+    fit, fields = harness.fit, harness.FIELDS
+    assert {k: v for k, v in fields["nitric_flux"].items() if k != "nitric_flux"} == (
+        fields["default"]
+    )
+    common = {"n_c": 7, "scaled": ("SA",), "free_sigma": True, "cooling": True}
+    shipped = fit.Packing(**common, free_gain=True)
+    rival = fit.Packing(**common, free_gain=True, composition=True, nitric_flux=True)
+    assert rival.i_gain == shipped.i_gain
+    assert (rival.i_oxygen, rival.i_kn) == (shipped.size, shipped.size + 3)
+    ap = np.random.default_rng(11).gamma(0.6, 25.0, 3000)
+    scalar = fit.cooling_grid(ap, 6.0, 20.0, 300.0, 10_800.0, 0)
+    held = fit.cooling_grid(ap, 6.0, np.full(ap.size, 20.0), 300.0, 10_800.0, 0)
+    assert np.array_equal(held, scalar)
+    # `sdtm_nitric_flux.mac` 4: the time does not move the steady state, only how fast it is reached.
+    storm = np.r_[np.full(16, 250.0), np.full(80, 4.0)]
+    slow = fit.cooling_grid(
+        storm, 6.0, 20.0 * (200.0 / 150.0) ** 1.2, 300.0, 10_800.0, 0
+    )
+    fast = fit.cooling_grid(
+        storm, 6.0, 20.0 * (200.0 / 150.0) ** -1.2, 300.0, 10_800.0, 0
+    )
+    assert np.isclose(slow[-1], fast[-1], rtol=1e-3)
+    assert not np.allclose(slow[16:40], fast[16:40], rtol=1e-3)
+    try:
+        fit.CorpusModel({}, np.array([]), (), (), 0.0, None, True, nitric_flux=True)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a flux-scaled time without a flux grid was accepted")
+
+
 def test_the_oxygen_factor_moves_ln_rho_by_the_oxygen_mass_fraction() -> None:
     g = harness.g
     # `derivations/sdtm_composition.mac`'s shipped boundary at T_inf 700 and 1000 K, 200 km.

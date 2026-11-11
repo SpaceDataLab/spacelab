@@ -107,6 +107,8 @@ FIELDS: dict[str, dict[str, Any]] = {
     # (`derivations/sdtm_overcooling.mac`).
     "delta": {**FORM, "delta": True},
     "linear": {**FORM, "linear": True},
+    # The nitric oxide's time scaled by the flux, `tn (F10.7a/150)^(-kn)` (`derivations/sdtm_nitric_flux.mac`).
+    "nitric_flux": {**FORM, "nitric_flux": True},
     # The shipped form on GRACE-FO C's v02 densities where v02 exists, v02c elsewhere, the rows unchanged
     # (`tools/corpus-variant.py`; Ф30.G-2, F72).
     "gc_v02": {**FORM, "corpus": "corpus-gc-v02"},
@@ -350,6 +352,7 @@ def command_run(args) -> int:
             composition=settings.get("composition", False),
             delta=settings.get("delta", False),
             linear=settings.get("linear", False),
+            nitric_flux=settings.get("nitric_flux", False),
         )
         p = model.fit(train)
         residual, _ = model.score(p, test)

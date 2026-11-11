@@ -482,6 +482,8 @@ def fit_arguments(rows: pd.DataFrame, degree: int) -> dict:
         "interval": rows.interval.to_numpy(),
         "ap": rows.attrs["driver"],
         "cadence": rows.attrs["driver_cadence"],
+        # The 81-day flux on the driver's grid where the loader gives it (`plans/17` Ф23.J), else `None`.
+        "flux_grid": rows.attrs.get("flux_grid"),
         "mission": (rows.mission.to_numpy() == "SWARM-A").astype(float),
         "ln_rho": np.log(rows.rho.to_numpy()),
         "k": harmonics.shape[1],

@@ -40,6 +40,7 @@ RIVALS = (
     ("+ composition: boundary oxygen", "composition", "default"),
     ("+ delta: the cooling's quiet offset", "delta", "default"),
     ("linear heating and cooling", "linear", "default"),
+    ("+ nitric-oxide time scaled by the flux", "nitric_flux", "default"),
 )
 KINDS = ("family", "storm")
 

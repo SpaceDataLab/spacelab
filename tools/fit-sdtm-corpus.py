@@ -265,6 +265,8 @@ def load_corpus(
         driver=ap,
         driver_epoch=flux.index[0],
         driver_cadence=g.AP_CADENCE,
+        # The 81-day flux on the 3-hourly grid, each day's eight intervals alike; the hourly driver has none.
+        flux_grid=np.repeat(flux[mean_column].to_numpy(dtype=float), 8),
     )
     if ap60:
         hourly, hourly_epoch = g.load_ap60()
@@ -274,7 +276,10 @@ def load_corpus(
             sys.exit("the ap60 series does not span the corpus")
         rows["interval"] = offset - 1
         rows.attrs.update(
-            driver=hourly, driver_epoch=hourly_epoch, driver_cadence=g.AP60_CADENCE
+            driver=hourly,
+            driver_epoch=hourly_epoch,
+            driver_cadence=g.AP60_CADENCE,
+            flux_grid=None,
         )
         if wind:
             rows.attrs["wind"], rows.attrs["wind_map"] = newell_driver(
@@ -428,6 +433,9 @@ class Packing:
     linear: bool = False
     """With cooling, the review's linear form `dD/dt = (H - D - beta N)/heating` instead
     (`derivations/sdtm_overcooling.mac` B): `ln beta` in the cooling's slot."""
+    nitric_flux: bool = False
+    """With cooling, the nitric oxide's time is `tn (F10.7a/150)^(-kn)` (`plans/17` Ф23.J,
+    `derivations/sdtm_nitric_flux.mac`): `kn` last."""
     composition: bool = False
     """The boundary's atomic oxygen carries `e^c`, `c = c0 - c1 ln(1 + X/15)`, `X` the drive filtered with
     its own time `tau_c` (`plans/17` Ф23.J): `c0`, `c1` and `ln tau_c` in hours, last."""
@@ -515,8 +523,8 @@ class Packing:
 
     @property
     def n_tail(self) -> int:
-        """The rivals' slots after the knee: the composition's three, then `delta`."""
-        return 3 * int(self.composition) + int(self.delta)
+        """The rivals' slots after the knee: the composition's three, then `delta`, then `kn`."""
+        return 3 * int(self.composition) + int(self.delta) + int(self.nitric_flux)
 
     @property
     def i_oxygen(self) -> int:
@@ -525,8 +533,13 @@ class Packing:
 
     @property
     def i_delta(self) -> int:
-        """`delta`, last; absent unless the cooling carries the quiet offset."""
-        return self.size - 1 if self.delta else -1
+        """`delta`; absent unless the cooling carries the quiet offset."""
+        return self.size - 1 - int(self.nitric_flux) if self.delta else -1
+
+    @property
+    def i_kn(self) -> int:
+        """`kn`, last; absent unless the nitric oxide's time scales with the flux."""
+        return self.size - 1 if self.nitric_flux else -1
 
     @property
     def size(self) -> int:
@@ -569,15 +582,20 @@ def cooling_grid(
     `(H - delta c)/(1 + c)`, `c` the cooling factor, below zero where a quiet drive meets a high `N`
     (`derivations/sdtm_overcooling.mac` A). At 0 it is the shipped step bit for bit.
 
+    `nitric` may be an array on the driver's grid, the time held over each interval
+    (`derivations/sdtm_nitric_flux.mac`); a constant array is the scalar bit for bit.
+
     The recursion starts at `first` from rest; entries before it are zero and are never read.
     """
     h = cadence / 3600.0
-    decay = np.exp(-h / nitric)
+    times = np.broadcast_to(np.asarray(nitric, dtype=float), ap.shape)
+    decays = np.exp(-h / times)
     out = np.zeros(ap.size)
     d = n = 0.0
-    mean_weight = nitric / h * (1.0 - decay)
+    mean_weights = times / h * (1.0 - decays)
     for i in range(first, ap.size):
         drive = ap[i]
+        decay, mean_weight = decays[i], mean_weights[i]
         n_mean = drive + (n - drive) * mean_weight
         cooling = n_mean / saturation / (1.0 + n_mean / (cap * saturation))
         rate = (1.0 + cooling) / heating
@@ -704,6 +722,7 @@ class CorpusModel:
         composition: bool = False,
         delta: bool = False,
         linear: bool = False,
+        nitric_flux: bool = False,
     ):
         """`penalty_rows` are the rows whose scale sets the ridge, every row when `None`; a harness
         that holds rows out passes the training rows, so that nothing of a test row reaches the fit
@@ -721,14 +740,19 @@ class CorpusModel:
         `arg["wind"]`; `None` has no solar wind, a number is a fixed share, `"fit"` fits it. `limit`,
         without cooling, mix, fast mode or wind, is one of `Packing.limit`'s rungs. `scales=False`
         fits no satellite a log scale of its own, so every satellite shares the field's level
-        (`plans/17` Ф30.G). `composition`, `delta` and `linear` add `Packing`'s rivals of those names;
-        `delta` and `linear` need the plain cooling, without a cap, mix or fast mode, and not each other."""
+        (`plans/17` Ф30.G). `composition`, `delta`, `linear` and `nitric_flux` add `Packing`'s rivals of
+        those names; the last three each need the plain cooling, without a cap, mix or fast mode, and
+        not each other, and `nitric_flux` the 3-hourly driver's `arg["flux_grid"]`."""
         if limit is not None and (cooling or mix or fast or wind):
             raise ValueError(f"the {limit} rung has no cooling, mix, fast mode or wind")
-        if (delta or linear) and (
-            cooling is not True or mix or fast or (delta and linear)
+        if (delta or linear or nitric_flux) and (
+            cooling is not True or mix or fast or delta + linear + nitric_flux > 1
         ):
-            raise ValueError("delta and linear each need the plain cooling, alone")
+            raise ValueError(
+                "delta, linear and nitric_flux each need the plain cooling, alone"
+            )
+        if nitric_flux and arg.get("flux_grid") is None:
+            raise ValueError("nitric_flux needs the 3-hourly driver's flux grid")
         self.a = arg
         self.sat = sat
         self.sigma = sigma
@@ -753,6 +777,7 @@ class CorpusModel:
             free_knee=gain == "input-knee",
             delta=delta,
             linear=linear,
+            nitric_flux=nitric_flux,
             composition=composition,
             limit=limit,
         )
@@ -787,6 +812,7 @@ class CorpusModel:
             excess=0.5 if self.pack.free_excess else self.excess_scale,
             gain=0.0 if gain else None,
             delta=10.0 if delta else None,
+            kn=0.0 if nitric_flux else None,
         )
         if penalty_rows is not None:
             reference = reference[penalty_rows]
@@ -834,6 +860,10 @@ class CorpusModel:
         """`delta`, the cooling's quiet offset in `ap` units, or `None` where the cooling has none."""
         return float(p[self.pack.i_delta]) if self.pack.delta else None
 
+    def kn(self, p: np.ndarray) -> float | None:
+        """`kn`, the nitric oxide's time's elasticity in the flux, or `None` where the time is fixed."""
+        return float(p[self.pack.i_kn]) if self.pack.nitric_flux else None
+
     def knee(self, p: np.ndarray) -> float | None:
         """`mu` of `exp(mu + kappa f)`, or `None` where the knee is held at `ln(1 + storm/15)`'s."""
         return float(p[self.pack.i_knee]) if self.pack.free_knee else None
@@ -856,8 +886,9 @@ class CorpusModel:
         gain: float | None = None,
         knee: float | None = None,
         delta: float | None = None,
+        kn: float | None = None,
     ) -> np.ndarray:
-        key = (*kernel, excess, gain, knee, delta)
+        key = (*kernel, excess, gain, knee, delta, kn)
         if self._design_key == key and self._design is not None:
             return self._design
         drive = self.drive(kernel)
@@ -875,9 +906,16 @@ class CorpusModel:
         elif self.pack.linear:
             grid = linear_grid(drive, *kernel[:3], self.a["cadence"], self.first)
         elif self.pack.cooling:
+            nitric = (
+                kernel[1]
+                if kn is None
+                else kernel[1] * (self.a["flux_grid"] / g.REFERENCE_F107) ** (-kn)
+            )
             grid = cooling_grid(
                 drive,
-                *kernel[:3],
+                kernel[0],
+                nitric,
+                kernel[2],
                 self.a["cadence"],
                 self.first,
                 cap=kernel[3] if self.pack.capped else np.inf,
@@ -929,6 +967,7 @@ class CorpusModel:
                 gain=self.gain(p),
                 knee=self.knee(p),
                 delta=self.delta(p),
+                kn=self.kn(p),
             )
         exponent = design[index] @ p[: self.pack.n_c]
         t_inf = g.BOUNDARY_TEMPERATURE + np.exp(np.clip(exponent, -50.0, 50.0))
@@ -974,6 +1013,7 @@ class CorpusModel:
             gain=self.gain(p),
             knee=self.knee(p),
             delta=self.delta(p),
+            kn=self.kn(p),
         )
         base, chain = self.score(p, index, design)
         out[:n, : pk.n_c] = design[index] * chain[:, None]
@@ -993,6 +1033,7 @@ class CorpusModel:
         slots += (pk.i_knee,) if pk.free_knee else ()
         slots += tuple(range(pk.i_oxygen, pk.i_oxygen + 3)) if pk.composition else ()
         slots += (pk.i_delta,) if pk.delta else ()
+        slots += (pk.i_kn,) if pk.nitric_flux else ()
         for j in slots:
             shifted = p.copy()
             shifted[j] += step
@@ -1006,6 +1047,7 @@ class CorpusModel:
             gain=self.gain(p),
             knee=self.knee(p),
             delta=self.delta(p),
+            kn=self.kn(p),
         )
         out[n:, : pk.n_c] = np.diag(np.sqrt(n) * self.penalty)
         return out
@@ -1081,6 +1123,10 @@ class CorpusModel:
             start[o : o + 3] = 0.0, 0.05, np.log(24.0)
             lower[o : o + 3] = -1.0, -1.0, np.log(3.0)
             upper[o : o + 3] = 1.5, 1.0, np.log(480.0)
+        if pk.nitric_flux:
+            # The time from e^-1 to e^3 per unit of ln(F10.7a/150); Wang et al.'s 3-4 between 70 and 200
+            # sfu is 1.05-1.32 (`derivations/sdtm_nitric_flux.mac`). The shipped constant time starts it.
+            lower[pk.i_kn], upper[pk.i_kn] = -1.0, 3.0
         if pk.delta:
             # From the shipped cooling, 0, to an offset well past any saturation level the fit has found.
             start[pk.i_delta] = 10.0
@@ -1624,7 +1670,10 @@ def wind_option(argument: argparse.Namespace) -> float | str | None:
 
 def rival_option(argument: argparse.Namespace) -> dict[str, bool]:
     """`--rival` as `CorpusModel`'s keywords."""
-    return {name: argument.rival == name for name in ("composition", "delta", "linear")}
+    return {
+        name: argument.rival == name
+        for name in ("composition", "delta", "linear", "nitric_flux")
+    }
 
 
 def mix_option(argument: argparse.Namespace) -> float | str | None:
@@ -1682,7 +1731,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--rival",
-        choices=("composition", "delta", "linear"),
+        choices=("composition", "delta", "linear", "nitric_flux"),
         help="with --cooling, one of `plans/17` Ф23.J's rivals for the post-storm drop in every fold "
         "(tools/evaluate-sdtm.py's fields of those names); never emitted",
     )
@@ -1940,6 +1989,7 @@ def main() -> None:
                 else ""
             )
             + (f"delta {model.delta(p):.1f} ap  " if pk.delta else "")
+            + (f"kn {model.kn(p):+.3f}  " if pk.nitric_flux else "")
             + f"scales vs {train_sats[0]}: {scales}  {time.time() - t0:.0f}s",
             flush=True,
         )

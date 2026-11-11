@@ -1,0 +1,42 @@
+/* How a density error grows into an along-track position error (plans/17 Ф30.H): the gate of the orbit-
+   prediction test, where the density model is the only thing that differs between runs.
+
+   A relative density error eps makes the drag acceleration a_D wrong by f = -eps a_D, a small constant
+   force along the track of a near-circular orbit of mean motion n. In the Clohessy-Wiltshire frame (x radial,
+   y along-track), from rest:
+     y(t) = 4 f (1 - cos n t)/n^2 - (3/2) f t^2,      x(t) = 2 f (n t - sin n t)/n^2      (1, 2)
+   Newton's f t^2/2 holds for t << 1/n (3); for t >> 1/n the secular -(3/2) f t^2 leads (4): more drag
+   lowers the orbit, which then runs ahead. The same secular term from mean elements: Gauss's equation for
+   a circular orbit gives a' = 2 f/n (5), and Kepler's third law turns it into an along-track drift of
+   a Delta lambda = -(3/2) f t^2 (6). So |Delta s| ~ (3/2) eps a_D t^2, and the periodic part is at most
+   8 |f|/n^2, a fraction 16/(3 (n t)^2) of the secular one: below 1 % after 6 h for a 90-minute orbit.
+   derivations/drag_error_growth.gp holds a nonlinear two-body orbit with exponential-atmosphere drag, run
+   with the density and with 1.1 times it, to this. Every identity prints 0.                              */
+
+ratprint : false$
+assume(n > 0, t > 0, a > 0, mu > 0)$
+atvalue(x(t), t = 0, 0)$
+atvalue(y(t), t = 0, 0)$
+atvalue('diff(x(t), t), t = 0, 0)$
+atvalue('diff(y(t), t), t = 0, 0)$
+sol : desolve(['diff(x(t), t, 2) - 2*n*'diff(y(t), t) - 3*n^2*x(t) = 0,
+               'diff(y(t), t, 2) + 2*n*'diff(x(t), t) = f], [x(t), y(t)])$
+ys : rhs(sol[2])$
+xs : rhs(sol[1])$
+print("1 along-track under a constant along-track force:", trigsimp(ys - (4*f*(1 - cos(n*t))/n^2 - 3/2*f*t^2)))$
+print("2 radial:", trigsimp(xs - 2*f*(n*t - sin(n*t))/n^2))$
+print("3 short times, Newton's f t^2/2:", ratsimp(taylor(ys, t, 0, 3) - f*t^2/2))$
+print("4 long times, y/t^2 to -3 f/2:", limit((ys + 3/2*f*t^2)/t^2, t, inf))$
+
+/* Mean elements. Vis-viva's energy -mu/(2a) changes at the power v f; on a circular orbit v = n a and
+   mu = n^2 a^3. The mean motion n = sqrt(mu/a^3) then drifts, and its double integral is the along-track
+   angle. */
+adot : 2*a^2*(n*a)*f/(n^2*a^3)$
+print("5 Gauss, a' on a circular orbit is 2 f/n:", ratsimp(adot - 2*f/n))$
+ndot : diff(sqrt(mu/a^3), a)*adot$
+ndot : ratsimp(subst(mu = n^2*a^3, ndot))$
+lambda_drift : integrate(integrate(ndot, t, 0, s), s, 0, t)$
+print("6 along-track drift a Delta lambda:", ratsimp(a*lambda_drift + 3/2*f*t^2))$
+
+linel : 200$
+print("periodic over secular after 6 h of a 90-minute orbit, n t = 8 pi, is at most", float(16/(3*(8*%pi)^2)))$

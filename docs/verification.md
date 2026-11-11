@@ -374,6 +374,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Lifetime on real re-entries | Ф23.F: a mean-element decay with the ballistic coefficient fitted on the decay seen, under the measured indices, persistence and an analog-cycle ensemble, scored on GCAT re-entries one object a launch, the later 40 % of launches held out and opened once | the split-conformal coverage law in Maxima (`derivations/split_conformal_coverage.mac`, 7 identities, PARI agrees) and its Beta-binomial band; the TLE mean-motion recovery against the relation it inverts (`derivations/tle_kozai_recovery.mac`) | every window covers inside its band at 7–1 095 days for both models; SDTM-1 minus NRLMSISE-00 on 146 held-out objects, mean `|ln T/T_true|` +0.010 [−0.003, +0.023], median +0.025 [+0.004, +0.042]: SDTM-1 is not better here; the join at 225 km was the first deficit's cause (§10.37) | tools/lifetime-campaign.py, src/lifetime_drivers.rs |
 | SDTM-1 frozen at 2020 beside the literature models | Ф30.D: SDTM-1 fitted on the rows before 2020 and scored on 109 221 rows of 2020–2026 that no model was fitted on, each model with its input mode and the licence of its number | the `frozen` split refuses a training row from its cut on (`tools/test_evaluate_sdtm.py`); every model answers every row; the intervals of §10.36 | 21.2 % (20.9 % with the solar wind) against NRLMSISE-00's 44.9 % and the clean-room JB2008's 26.4 %; minus JB2008 on years −5.24 [−10.71, −0.16]; in storm time the lead is not resolved; refitting at 2023 does not help (21.6 %) (§10.38) | tools/evaluate-sdtm.py |
 | The density level seen by spheres | Ф23.T: four spheres of known area-to-mass, no fitted coefficient, the `C_d` each model needs for the true lifetime set beside the physical value of a smooth sphere | Moe & Bowman (2005)'s physical `C_d` of a smooth sphere, 2.18–2.37 at 300–500 km; the lifetime's dependence on `C_d` interpolated between runs | Starshine 3 (2001–2003): SDTM-1 needs 2.16–2.33, inside; NRLMSISE-00 1.91–2.03, too dense. GFZ-1 (1995–1999): SDTM-1 needs 2.84–3.51, too thin; NRLMSISE-00 2.23–2.61. Starshine 1–2 are mirror-covered and decide nothing; a secular change between the fitted eras is a hypothesis (§10.39) | tools/lifetime-campaign.py |
+| Held-out residuals in magnetic coordinates | Ф23.O: the five family folds' held-out residuals by magnetic latitude, magnetic local time and storm phase; the contrast of magnetic latitude above 60° against below 40°, intervals resampling storms | the centred IGRF-14 dipole gated in Maxima; the verdict rule written into the tool before the run | NO-GO for an auroral term: in the main and recovery phase SDTM-1's contrast lies above zero on four families (+5.9 to +13.2), the opposite of missed auroral heating, and is as large before the storm; the storm-time deficit is at low latitude (−8.3 at night); the dayside onset deficit at high latitude (−14.3) is a hypothesis (§10.40) | tools/residual-maps.py |
 
 ### Tides
 
@@ -9473,6 +9474,81 @@ Run (element sets stay under `data/validation/reentry/`, never committed):
 
     uv run --no-project python -I tools/fetch-reentry-elements.py --objects 23558 25769 26929 26996
     uv run --no-project python -I tools/lifetime-campaign.py spheres
+
+### 10.40 Held-out residuals in magnetic coordinates, by storm phase (Ф23.O)
+
+An auroral heating term (`Q_auroral`) adds energy where the field lines meet the auroral oval. Before any such term
+is written, the held-out residuals must show that SDTM-1 misses heating there. This section is that test. It adds no
+term.
+
+**Coordinates.** The centred dipole of IGRF-14 (`crates/spacelab-geomagnetism/src/dipole.rs`, gated by
+`derivations/geomagnetic_dipole.mac`), with the coefficients linear between the IGRF epochs. Magnetic local time is
+12 h plus the magnetic longitude east of the sub-solar point's, with Cooper's solar declination.
+`tools/test_residual_maps.py` checks the pole and two points at 2025.0 against the gate's 40-digit values to `1e-15`.
+
+**Rows.** The held-out `ln(ρ_model/ρ_measured)` of the five family folds (§10.36): 365 211 rows at 2 h with an
+NRLMSISE-00 answer. The protocol of Bruinsma & Laurens (2024) finds 213 storms, with `t0` at the first peak of `ap`.
+The phases: pre-storm from 30 h to 18 h before `t0`, onset the 18 h before `t0`, main and recovery from `t0` to the
+end of phase 3, post-storm the 12 h after that.
+
+**The verdict, written into the tool before its first run.** The contrast is the mean residual at |MLat| ≥ 60° minus
+the mean at |MLat| < 40°, × 100. Its 95 % interval resamples whole storms (Ф30.C). GO only if, in the main and
+recovery phase, SDTM-1's interval lies below zero on at least two families.
+
+| family | rows high / low | SDTM-1, magnetic | SDTM-1, geographic | NRLMSISE-00, magnetic | SDTM-1 before the storm |
+|---|---|---|---|---|---|
+| CHAMP | 710 / 980 | +13.2 [+11.4, +15.0] | +13.5 [+11.7, +15.3] | −0.1 [−2.5, +2.4] | +12.6 [+9.4, +15.7] |
+| GOCE | 123 / 184 | +10.2 [+6.2, +14.8] | +10.2 [+6.7, +13.9] | +0.6 [−3.3, +4.9] | +15.3 [+10.4, +20.5] |
+| GRACE | 1 614 / 2 222 | +6.0 [+4.2, +7.8] | +8.2 [+6.5, +9.9] | +6.2 [+3.5, +8.8] | +4.2 [+1.1, +7.1] |
+| GRACE-FO | 400 / 546 | +5.9 [+3.4, +8.3] | +6.8 [+4.8, +8.9] | −3.5 [−6.6, +0.1] | +2.6 [−2.9, +8.3] |
+| Swarm | 1 818 / 2 510 | +1.3 [−0.2, +2.9] | +1.7 [+0.2, +3.3] | +0.4 [−1.7, +2.7] | −2.7 [−5.7, +0.3] |
+
+**NO-GO, on zero families.** The map below pools the families; each cell holds 180–1 732 rows.
+
+| phase | \|MLat\| | night, 21–3 h | dawn, 3–9 h | day, 9–15 h | dusk, 15–21 h |
+|---|---|---|---|---|---|
+| pre-storm | < 40° | −3.7 [−8.4, +1.3] | −5.1 [−8.6, −1.7] | −0.9 [−5.0, +3.3] | −3.0 [−6.4, +0.5] |
+| | 40–60° | +1.7 [−4.6, +7.9] | +3.1 [−1.7, +7.7] | +0.0 [−4.9, +5.2] | +0.4 [−4.0, +4.8] |
+| | ≥ 60° | +0.1 [−4.7, +4.9] | +3.3 [−0.8, +7.6] | −4.2 [−9.1, +0.4] | −1.5 [−5.3, +2.4] |
+| onset | < 40° | −7.5 [−11.5, −3.2] | −6.8 [−10.2, −3.4] | −4.2 [−7.7, −0.5] | −4.1 [−7.1, −1.2] |
+| | 40–60° | −3.6 [−8.9, +1.9] | −6.2 [−9.9, −2.4] | −7.0 [−11.9, −2.2] | −5.0 [−9.0, −0.9] |
+| | ≥ 60° | −8.1 [−12.4, −3.9] | −6.1 [−9.9, −2.3] | −14.3 [−18.8, −9.9] | −8.7 [−12.3, −5.3] |
+| main and recovery | < 40° | −8.3 [−12.0, −4.7] | −4.9 [−8.6, −1.3] | −3.8 [−7.1, −0.4] | −1.3 [−4.2, +1.7] |
+| | 40–60° | −0.9 [−4.8, +3.0] | +2.1 [−1.6, +5.6] | −0.9 [−5.2, +3.3] | +0.1 [−3.8, +3.8] |
+| | ≥ 60° | +2.0 [−1.5, +5.5] | +4.5 [+1.0, +7.8] | −2.3 [−5.9, +1.3] | −0.5 [−3.7, +2.7] |
+| post-storm | < 40° | −12.0 [−16.3, −7.8] | −6.2 [−9.6, −2.6] | −3.9 [−7.4, −0.2] | −5.0 [−8.0, −2.1] |
+| | 40–60° | −1.3 [−7.1, +3.9] | −1.7 [−5.7, +2.5] | −4.4 [−8.6, +0.0] | −2.3 [−6.6, +2.1] |
+| | ≥ 60° | −1.7 [−6.0, +2.9] | +0.1 [−4.1, +4.1] | −4.0 [−8.6, +0.7] | −1.4 [−4.8, +2.0] |
+
+Findings:
+
+- **No missed auroral heating in the main and recovery phase.** SDTM-1's contrast lies above zero on four families,
+  the opposite sign. An auroral term adds density at high latitude, so it would widen the contrast.
+- **The contrast belongs to the quiet model.** It is as large before the storm on CHAMP and GOCE. Geographic latitude
+  gives it to within 2.2 points in the main and recovery phase, so the magnetic field does not organize it. It is
+  largest on the two lowest families, GOCE and CHAMP (10–13), smaller on GRACE and GRACE-FO (6), and near zero on
+  Swarm. In the same phase, NRLMSISE-00's contrast spans zero on every family but GRACE.
+- **In a storm, SDTM-1 reads thin at low magnetic latitude.** On the night side the low band goes from −3.7 before the
+  storm to −8.3 in the main and recovery phase and −12.0 after it. The high band stays within about ±5 in the main and
+  recovery phase.
+- **A hypothesis, not a result.** At onset SDTM-1 reads thin at every latitude, most at high magnetic latitude on the
+  dayside: −14.3 [−18.8, −9.9]. The onset contrast lies below zero on GRACE (−5.4 [−8.6, −2.2]) and Swarm
+  (−7.9 [−9.9, −5.9]), and above zero on CHAMP and GOCE. Auroral input would show there first, but this was read after
+  the data. Ф23.W tests it with its rule written first, on rows no fit has seen.
+
+**Consequence.** No `Q_auroral` term. The latitude structure of the quiet model on the lower families is a form question (Ф23.V),
+so it waits for Ф30.F's ablation.
+
+**What this does not settle.** The centred dipole is not AACGM or quasi-dipole latitude; the two differ most where the
+field is far from a dipole, and the cut at 60° holds the oval only roughly. Rows are 2 h apart, so a storm crosses
+the oval in few of them; the 120 s storm windows of Ф30.E are the finer test. A family sees a storm at its two node
+local times only, so the sectors mix families and seasons. The cuts, 60° and 40°, and the phase edges were set
+before the run; no other cut was tried.
+
+Run (reads the family folds; results stay under `data/validation/sdtm-eval/`, never committed):
+
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind family
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/residual-maps.py
 
 ---
 

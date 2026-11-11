@@ -375,6 +375,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | SDTM-1 frozen at 2020 beside the literature models | Ф30.D: SDTM-1 fitted on the rows before 2020 and scored on 109 221 rows of 2020–2026 that no model was fitted on, each model with its input mode and the licence of its number | the `frozen` split refuses a training row from its cut on (`tools/test_evaluate_sdtm.py`); every model answers every row; the intervals of §10.36 | 21.2 % (20.9 % with the solar wind) against NRLMSISE-00's 44.9 % and the clean-room JB2008's 26.4 %; minus JB2008 on years −5.24 [−10.71, −0.16]; in storm time the lead is not resolved; refitting at 2023 does not help (21.6 %) (§10.38) | tools/evaluate-sdtm.py |
 | The density level seen by spheres | Ф23.T: four spheres of known area-to-mass, no fitted coefficient, the `C_d` each model needs for the true lifetime set beside the physical value of a smooth sphere | Moe & Bowman (2005)'s physical `C_d` of a smooth sphere, 2.18–2.37 at 300–500 km; the lifetime's dependence on `C_d` interpolated between runs | Starshine 3 (2001–2003): SDTM-1 needs 2.16–2.33, inside; NRLMSISE-00 1.91–2.03, too dense. GFZ-1 (1995–1999): SDTM-1 needs 2.84–3.51, too thin; NRLMSISE-00 2.23–2.61. Starshine 1–2 are mirror-covered and decide nothing; a secular change between the fitted eras is a hypothesis (§10.39) | tools/lifetime-campaign.py |
 | Held-out residuals in magnetic coordinates | Ф23.O: the five family folds' held-out residuals by magnetic latitude, magnetic local time and storm phase; the contrast of magnetic latitude above 60° against below 40°, intervals resampling storms | the centred IGRF-14 dipole gated in Maxima; the verdict rule written into the tool before the run | NO-GO for an auroral term: in the main and recovery phase SDTM-1's contrast lies above zero on four families (+5.9 to +13.2), the opposite of missed auroral heating, and is as large before the storm; the storm-time deficit is at low latitude (−8.3 at night); the dayside onset deficit at high latitude (−14.3) is a hypothesis (§10.40) | tools/residual-maps.py |
+| The nitric-oxide step against its exact solution | Ф23.Q: the shipped frozen-N step, and 2, 4 and 8 sub-steps, against the exact step under a held drive on 216 storms since 2000, beside the spread of the same peak over the five folds' constants | the exact step's integrating factor in Maxima, its integral at 40 digits by Maxima and at 60 by PARI/GP, equal to 1e-36; the tool to 2e-15 | the step reads the peak high by a median of 0.31 % and at most 1.63 %, a median of 0.047 of the fold spread (at most 0.236); two sub-steps take it to 0.40 %, so no refit alone (§10.41) | tools/no-step-accuracy.py |
 
 ### Tides
 
@@ -9549,6 +9550,58 @@ Run (reads the family folds; results stay under `data/validation/sdtm-eval/`, ne
 
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind family
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/residual-maps.py
+
+### 10.41 The nitric-oxide step against its exact solution, on every storm (Ф23.Q)
+
+SDTM-1's storm state takes one step per 3 h interval. `N` steps exactly; `D` steps exactly for the system with `N`
+frozen at its exact mean over the interval, so its local error starts at `h³` (`derivations/sdtm_no_cooling.mac`).
+Section 9 of that gate measures the error on one synthetic day of storm: 0.29 % of the peak at `ap` 80, 1.28 % at
+300, 1.81 % at 400. This section measures it on the real storms and sets it beside how well the fit knows the state.
+
+**The reference.** Under a held drive, `D`'s equation is linear with the rate `1/t_c + g N(t)`, so
+`D(h) = e^{-A(h)} (D₀ + (H/t_c) ∫₀ʰ e^{A(s)} ds)` with `A` in closed form (`derivations/sdtm_no_step.mac`, 4
+identities). The integral has no closed form; its integrand is smooth and lies in (0, 1], so Gauss–Legendre at 32
+nodes takes it to rounding. At the shipped constants and four states, Maxima (`bromberg`, 40 digits) and PARI/GP
+(`intnum`, 60 digits) agree to 1e-36 on the exact `D` and on the frozen step taken 1, 2 and 4 times; the tool
+matches them to 2e-15 (`tools/test_no_step_accuracy.py`). The frozen step's error falls as `1/k²` with `k`
+sub-steps.
+
+**The run.** The 3-hourly `ap` from rest, 120 days before the corpus's first month (2000-07), with the shipped
+constants (heating 17.486 h, nitric oxide 32.958 h, saturation 24.773 ap). On each of the 216 storms that
+Bruinsma & Laurens's protocol finds, the tool takes the error of the storm's peak and of its whole window, as a
+percentage of the exact peak. The fold spread is the range of the same exact peak under the constants each of the
+five family folds fitted, as a percentage of their median. The tool's single step equals `cooling_grid` bit for bit.
+
+| storms | first-peak `ap` | peak, 1 step | 2 steps | 4 steps | 8 steps | window, 1 step | fold spread |
+|---|---|---|---|---|---|---|---|
+| 216 | ≥ 80 | +0.31 / +0.70 / +1.63 | +0.08 / +0.18 / +0.40 | +0.02 / +0.04 / +0.10 | +0.00 / +0.01 / +0.03 | 0.31 / 0.74 / 1.63 | 7.16 / 10.70 / 20.84 |
+| 173 | 80–150 | +0.28 / +0.44 / +1.41 | +0.07 / +0.11 / +0.35 | +0.02 / +0.03 / +0.09 | +0.00 / +0.01 / +0.02 | 0.29 / 0.45 / 1.41 | 6.86 / 10.35 / 15.65 |
+| 34 | 150–300 | +0.61 / +0.81 / +0.86 | +0.15 / +0.20 / +0.22 | +0.04 / +0.05 / +0.05 | +0.01 / +0.01 / +0.01 | 0.62 / 0.81 / 0.86 | 8.31 / 12.08 / 16.21 |
+| 9 | ≥ 300 | +1.21 / +1.50 / +1.63 | +0.30 / +0.37 / +0.40 | +0.08 / +0.09 / +0.10 | +0.02 / +0.02 / +0.03 | 1.21 / 1.50 / 1.63 | 8.77 / 19.11 / 20.84 |
+
+Each cell is the median, the 90th percentile and the largest value over the storms, in % of the exact peak.
+
+Findings:
+
+- **The shipped step always reads the peak high,** by a median of 0.31 % and at most 1.63 %, and more on larger
+  storms: a median of 1.21 % at a first-peak `ap` of 300 or more. Over the whole window the largest error is
+  about the same, at most 1.63 %.
+- **The fit knows the state far less well than the step computes it.** The step's peak error is a median of 0.047
+  of the fold spread and at most 0.236 of it; it exceeds a tenth of the spread on 15 storms of 216.
+- **Two sub-steps take the error to at most 0.40 %, four to 0.10 %,** at two and four times the step's cost.
+
+**Consequence.** No refit for the step alone (D-30): its error is a twentieth of what the folds disagree on. The
+next batch of refits in Ф30.A's ledger takes the step with two sub-steps, in Rust and in Python together, with
+the gate's values as the parity test.
+
+**What this does not settle.** The error is in the state `D`, not in density. The density sees it through
+`ln(1 + D/15)`, `D/100` and the storm coefficients; this section does not measure that. The fold spread is the range
+of five fits, not an interval. The storm set starts at the corpus's first month, so it holds three storms more
+than §10.40's, which starts at the first row.
+
+Run:
+
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/no-step-accuracy.py
 
 ---
 

@@ -93,6 +93,33 @@ pub trait DecayAtmosphere {
     /// Inertial velocity of the atmosphere at `position` (m/s) — `ω_body × r` for a co-rotating
     /// atmosphere. Time-invariant for a rigidly rotating body, so it takes no `t`.
     fn velocity(&self, position: [f64; 3]) -> [f64; 3];
+
+    /// The first time after `t` at which the density's drivers jump, `INFINITY` if they never do.
+    ///
+    /// An index history is a step function, and an adaptive step cannot cross a step in its
+    /// right-hand side without collapsing to where the jump no longer shows in its error estimate.
+    /// A propagation therefore stops at each jump and starts again on the far side. It must be later
+    /// than `t`; one that is not ends the stopping, not the run.
+    fn next_jump(&self, _t: f64) -> f64 {
+        f64::INFINITY
+    }
+
+    /// The density at `t` with the drivers held at their values at `segment_start`, the time the
+    /// propagation last stopped.
+    ///
+    /// A Runge–Kutta stage lands exactly on the end of a segment, so reading the drivers at `t` would
+    /// sample the next one there and bring back the jump [`Self::next_jump`] exists to avoid.
+    fn density_held(&self, _segment_start: f64, t: f64, position: [f64; 3]) -> f64 {
+        self.density(t, position)
+    }
+
+    /// What the propagation is held to under this atmosphere. The default suits a smooth density:
+    /// it matches [`crate::dsst::propagator::DsstMeanPropagator`], so a drag-free configuration
+    /// reproduces it. An empirical model is smooth to far less, and holding it to this costs steps
+    /// and buys nothing.
+    fn tolerance(&self) -> Tolerance {
+        Tolerance::new(1e-14, 1e-12)
+    }
 }
 
 /// Any fixed-epoch [`Atmosphere`] read as a [`DecayAtmosphere`] that ignores time.
@@ -116,12 +143,14 @@ impl<A: Atmosphere> DecayAtmosphere for Frozen<A> {
 /// A [`DecayAtmosphere`] bound to one epoch, so the DSST quadrature can read it.
 struct At<'a, A> {
     atmosphere: &'a A,
+    segment_start: f64,
     t: f64,
 }
 
 impl<A: DecayAtmosphere> Atmosphere for At<'_, A> {
     fn density(&self, position: [f64; 3]) -> f64 {
-        self.atmosphere.density(self.t, position)
+        self.atmosphere
+            .density_held(self.segment_start, self.t, position)
     }
 
     fn velocity(&self, position: [f64; 3]) -> [f64; 3] {
@@ -272,14 +301,27 @@ fn perigee_altitude(state: &[f64; 6], body_radius: f64) -> Option<f64> {
 struct DecaySystem<'a, A> {
     model: &'a DecayModel<'a>,
     atmosphere: &'a A,
+    segment_start: f64,
 }
 
 impl<A: DecayAtmosphere> DynamicalSystem<6> for DecaySystem<'_, A> {
     fn derivative(&self, t: f64, y: &[f64; 6], dydt: &mut [f64; 6]) {
+        // Past the threshold there is no orbit left for the mean equations to describe, and they run
+        // on to a singularity in `a` at a finite time: every caller only asks which side it ended on,
+        // and an integrator chasing that singularity collapses its step and never returns. Smoothly,
+        // because a stop with a corner in it collapses the step just the same.
+        let weight = perigee_altitude(y, self.model.body_radius).map_or(0.0, |altitude| {
+            smoother_step((altitude - self.model.reentry_altitude) / STOPS_BELOW + 1.0)
+        });
+        if weight == 0.0 {
+            *dydt = [0.0; 6];
+            return;
+        }
         let aux = DsstAuxiliary::new(y[0], y[1], y[2], y[3], y[4], y[5], self.model.mu);
         let zonal = self.model.zonal.mean_element_rates(&aux);
         let at = At {
             atmosphere: self.atmosphere,
+            segment_start: self.segment_start,
             t,
         };
         let drag = self.model.drag.mean_element_rates(&aux, &at);
@@ -287,18 +329,26 @@ impl<A: DecayAtmosphere> DynamicalSystem<6> for DecaySystem<'_, A> {
             dydt[i] = zonal[i] + drag[i];
         }
         dydt[5] += aux.n;
+        for rate in dydt.iter_mut() {
+            *rate *= weight;
+        }
     }
 }
 
-/// The tolerance the mean-element propagation is held to, matching
-/// [`crate::dsst::propagator::DsstMeanPropagator`] so a drag-free configuration reproduces it.
-fn controls() -> Controls {
-    Controls::new(Tolerance::new(1e-14, 1e-12), 1e-6)
+/// `x³(x(6x − 15) + 10)` on `[0, 1]`, 0 below it and 1 above it: first and second derivatives vanish at
+/// both ends, so a rate multiplied by it stays twice differentiable.
+pub(crate) fn smoother_step(x: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * x * (x * (6.0 * x - 15.0) + 10.0)
 }
 
 /// The first step the mean-element propagation attempts. Handed over unclamped: the driver takes
 /// `h₀.min(t₁ − t₀)` itself, so a span shorter than this is already covered.
 const INITIAL_STEP: f64 = 60.0;
+
+/// How far below the re-entry altitude the mean equations have stopped, m. Below it rather than at it,
+/// so that a state always does cross the threshold the callers test, and nothing above it changes.
+const STOPS_BELOW: f64 = 1_000.0;
 
 /// Propagate the mean state from `state` at `from` to `to`, or `None` if it could not be stepped.
 fn advance<A: DecayAtmosphere>(
@@ -311,9 +361,45 @@ fn advance<A: DecayAtmosphere>(
     if to <= from {
         return Ok(state);
     }
-    let system = DecaySystem { model, atmosphere };
-    integrate_dop853(&system, from, &state, to, INITIAL_STEP, controls())
-        .map(|trajectory| trajectory.final_state())
+    let (mut t, mut y) = (from, state);
+    while t < to {
+        let jump = atmosphere.next_jump(t);
+        let (end, first_step) = if jump > t && jump.is_finite() {
+            let end = jump.min(to);
+            (end, end - t)
+        } else {
+            (to, INITIAL_STEP)
+        };
+        let system = DecaySystem {
+            model,
+            atmosphere,
+            segment_start: t,
+        };
+        let controls = Controls::new(atmosphere.tolerance(), 1e-6);
+        y = integrate_dop853(&system, t, &y, end, first_step, controls)?.final_state();
+        t = end;
+    }
+    Ok(y)
+}
+
+/// Propagate the mean equinoctial state `[a, k, h, q, p, λ]` from `from` to `to` under `model`.
+///
+/// What a caller needs to fit a ballistic coefficient to an observed decay before predicting with it.
+///
+/// A state whose perigee has fallen past [`DecayModel::reentry_altitude`] stays where it stopped, just
+/// below it, so a span far longer than the orbit has returns that state and not a singular one.
+///
+/// # Errors
+///
+/// [`IntegrationError`] when the propagation breaks down.
+pub fn propagate_decay<A: DecayAtmosphere>(
+    model: &DecayModel<'_>,
+    atmosphere: &A,
+    state: [f64; 6],
+    from: f64,
+    to: f64,
+) -> Result<[f64; 6], IntegrationError> {
+    advance(model, atmosphere, state, from, to)
 }
 
 /// Predict when one object re-enters, under one atmosphere.
@@ -750,6 +836,196 @@ mod tests {
             r0: AE + 400_000.0,
             scale_height: 60_000.0,
         })
+    }
+
+    /// An exponential atmosphere whose level steps every 3 h, counting what it is asked.
+    struct Stepped {
+        air: Frozen<Exponential>,
+        stops_at_jumps: bool,
+        evaluations: core::cell::Cell<u64>,
+    }
+
+    impl Stepped {
+        const PERIOD: f64 = 10_800.0;
+
+        fn level(t: f64) -> f64 {
+            if libm::floor(t / Self::PERIOD) % 2.0 == 0.0 {
+                1.0
+            } else {
+                1.5
+            }
+        }
+    }
+
+    impl DecayAtmosphere for Stepped {
+        fn density(&self, t: f64, position: [f64; 3]) -> f64 {
+            self.evaluations.set(self.evaluations.get() + 1);
+            Self::level(t) * self.air.density(t, position)
+        }
+
+        fn velocity(&self, position: [f64; 3]) -> [f64; 3] {
+            self.air.velocity(position)
+        }
+
+        fn next_jump(&self, t: f64) -> f64 {
+            if self.stops_at_jumps {
+                (libm::floor(t / Self::PERIOD) + 1.0) * Self::PERIOD
+            } else {
+                f64::INFINITY
+            }
+        }
+
+        fn density_held(&self, segment_start: f64, t: f64, position: [f64; 3]) -> f64 {
+            if self.stops_at_jumps {
+                self.evaluations.set(self.evaluations.get() + 1);
+                Self::level(segment_start) * self.air.density(t, position)
+            } else {
+                self.density(t, position)
+            }
+        }
+    }
+
+    #[test]
+    fn under_jumping_drivers_a_propagation_ends_where_the_orbit_has() {
+        let zonal = zonal(true);
+        let spacecraft = model(&zonal, 0.1);
+        let air = Stepped {
+            air: air(),
+            stops_at_jumps: true,
+            evaluations: core::cell::Cell::new(0),
+        };
+        // Far longer than this orbit has: it comes back below the threshold, not at the far end.
+        let span = 30.0 * 86_400.0;
+        let end = propagate_decay(&spacecraft, &air, circular(300_000.0), 0.0, span).unwrap();
+        let altitude = perigee_altitude(&end, AE).unwrap();
+        assert!(altitude <= DEFAULT_REENTRY_ALTITUDE, "{altitude}");
+        assert!(
+            altitude >= DEFAULT_REENTRY_ALTITUDE - STOPS_BELOW,
+            "{altitude}"
+        );
+    }
+
+    #[test]
+    fn the_stop_leaves_the_rates_alone_above_the_threshold_and_ends_them_below_it() {
+        assert_eq!(smoother_step(1.0).to_bits(), 1.0_f64.to_bits());
+        assert_eq!(smoother_step(7.0).to_bits(), 1.0_f64.to_bits());
+        assert_eq!(smoother_step(0.0).to_bits(), 0.0_f64.to_bits());
+        assert_eq!(smoother_step(-7.0).to_bits(), 0.0_f64.to_bits());
+        assert!((smoother_step(0.5) - 0.5).abs() < 1e-15);
+        let slope = |x: f64| (smoother_step(x + 1e-6) - smoother_step(x - 1e-6)) / 2e-6;
+        assert!(
+            slope(1e-3) < 1e-3 && slope(1.0 - 1e-3) < 1e-3,
+            "{}",
+            slope(1e-3)
+        );
+        assert!((slope(0.5) - 1.875).abs() < 1e-6, "{}", slope(0.5));
+    }
+
+    /// `next_jump` answers `t` itself: the stopping ends, the run does not.
+    #[test]
+    fn a_jump_not_later_than_t_ends_the_stopping_and_not_the_run() {
+        struct NotLater(Frozen<Exponential>);
+        impl DecayAtmosphere for NotLater {
+            fn density(&self, t: f64, position: [f64; 3]) -> f64 {
+                self.0.density(t, position)
+            }
+            fn velocity(&self, position: [f64; 3]) -> [f64; 3] {
+                self.0.velocity(position)
+            }
+            fn next_jump(&self, t: f64) -> f64 {
+                t
+            }
+        }
+        let zonal = zonal(true);
+        let spacecraft = model(&zonal, 0.01);
+        let span = 10_800.0;
+        let plain = propagate_decay(&spacecraft, &air(), circular(400_000.0), 0.0, span).unwrap();
+        let held = propagate_decay(
+            &spacecraft,
+            &NotLater(air()),
+            circular(400_000.0),
+            0.0,
+            span,
+        )
+        .unwrap();
+        assert_eq!(plain, held);
+    }
+
+    /// Kosmos-1867's reactor shield, B = 0.76 m²/kg, fell 1 300 km past the threshold in one segment
+    /// and its propagation did not return. A hundred times that B still stops at the threshold, at the
+    /// cost of the slowest orbit here to within a factor of two, whichever way the drivers are held.
+    #[test]
+    fn an_orbit_falling_through_the_threshold_stops_just_below_it() {
+        let zonal = zonal(true);
+        let span = 30.0 * 86_400.0;
+        for stops_at_jumps in [true, false] {
+            let air = Stepped {
+                air: air(),
+                stops_at_jumps,
+                evaluations: core::cell::Cell::new(0),
+            };
+            let run = |b: f64| {
+                air.evaluations.set(0);
+                let end = propagate_decay(&model(&zonal, b), &air, circular(300_000.0), 0.0, span)
+                    .unwrap();
+                (perigee_altitude(&end, AE).unwrap(), air.evaluations.get())
+            };
+            let (_, slowest) = run(0.1);
+            for b in [1.0, 10.0, 76.0] {
+                let (altitude, evaluations) = run(b);
+                assert!(altitude <= DEFAULT_REENTRY_ALTITUDE, "B = {b}: {altitude}");
+                assert!(
+                    altitude >= DEFAULT_REENTRY_ALTITUDE - STOPS_BELOW,
+                    "B = {b}: {altitude}"
+                );
+                assert!(
+                    evaluations <= 2 * slowest,
+                    "B = {b}: {evaluations} > 2 x {slowest}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_propagation_stops_at_a_jump_rather_than_collapsing_its_step_on_it() {
+        let zonal = zonal(true);
+        let spacecraft = model(&zonal, 0.01);
+        let span = 16.0 * Stepped::PERIOD;
+        let run = |stops_at_jumps| {
+            let air = Stepped {
+                air: air(),
+                stops_at_jumps,
+                evaluations: core::cell::Cell::new(0),
+            };
+            let end = propagate_decay(&spacecraft, &air, circular(400_000.0), 0.0, span).unwrap();
+            (end, air.evaluations.get())
+        };
+        let (held, held_evaluations) = run(true);
+        let (crossed, crossed_evaluations) = run(false);
+        // The definition: each 3 h at its own constant level, the last state handed on.
+        let mut chained = circular(400_000.0);
+        for k in 0..16_u32 {
+            let start = f64::from(k) * Stepped::PERIOD;
+            let level = Frozen(Exponential {
+                rho0: 2.0e-11 * Stepped::level(start),
+                r0: AE + 400_000.0,
+                scale_height: 60_000.0,
+            });
+            chained = propagate_decay(&spacecraft, &level, chained, start, start + Stepped::PERIOD)
+                .unwrap();
+        }
+        println!(
+            "evaluations {held_evaluations} held, {crossed_evaluations} crossed; \
+             a held − chained {:e} m, crossed − chained {:e} m",
+            held[0] - chained[0],
+            crossed[0] - chained[0]
+        );
+        assert!(libm::fabs(held[0] - chained[0]) < 1.0e-3);
+        assert!(libm::fabs(crossed[0] - chained[0]) < 1.0e-3);
+        assert!(
+            held_evaluations * 3 < crossed_evaluations,
+            "{held_evaluations} against {crossed_evaluations}"
+        );
     }
 
     /// The decay of a circular orbit is `da/dt = −ρ(a)·(Cd·S/m)·√(µa)`, and the DSST Gauss average
@@ -1399,6 +1675,7 @@ mod tests {
         let system = DecaySystem {
             model: &spacecraft,
             atmosphere: &atmosphere,
+            segment_start: 0.0,
         };
         let state = circular(400_000.0);
         let mut dydt = [0.0f64; 6];

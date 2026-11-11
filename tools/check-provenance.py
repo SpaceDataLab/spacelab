@@ -25,7 +25,7 @@ table groups files by upstream and a machine cannot read `{mod,tables}.rs` or `d
     uv run python tools/check-provenance.py            # list the sweep
     uv run python tools/check-provenance.py --check    # fail on anything uncovered
 
-The second half of the register is *data*: every host a `tools/fetch-*.sh` script reads, every
+The second half of the register is *data*: every host a `tools/fetch-*` script reads, every
 committed fixture and asset, with the terms as read and a verdict. A licence that binds a table
 binds the crate that embeds it just as a licence on code does, and `cargo deny` sees neither.
 
@@ -207,7 +207,7 @@ def data_rows() -> list[dict]:
 def fetch_hosts() -> dict[str, set[str]]:
     return {
         str(p.relative_to(ROOT)): set(HOST.findall(p.read_text(encoding="utf-8")))
-        for p in sorted(ROOT.glob("tools/fetch-*.sh"))
+        for p in sorted(ROOT.glob("tools/fetch-*.*"))
     }
 
 

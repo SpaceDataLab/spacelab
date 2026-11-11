@@ -5119,7 +5119,21 @@ exclude_re = [
     # Neither endpoint moves again, so the returned `Lifetime` is identical and only the cost is
     # not: 2 100 propagations where the guard needs about 50. Termination is bounded either way by
     # the counted loop, which is what makes this a cost mutant and not a hang.
-    "lifetime\\.rs:470:23: replace \\|\\| with && in refine",
+    "lifetime\\.rs:556:23: replace \\|\\| with && in refine",
+
+    # `DecayAtmosphere::next_jump`'s default, `INFINITY`, read by `lifetime::advance` as "no jump". 0.0
+    # and -1.0 are not later than any `t >= 0`, which the same test reads the same way, so they are
+    # equivalent. 1.0 stops one second into a run and goes on: two integrations of one smooth law,
+    # the same answer inside the tolerance, and `lifetime.rs`'s law tests hold it to that.
+    "lifetime\\.rs:104:9: replace DecayAtmosphere::next_jump -> f64 with 0\\.0",
+    "lifetime\\.rs:104:9: replace DecayAtmosphere::next_jump -> f64 with 1\\.0",
+    "lifetime\\.rs:104:9: replace DecayAtmosphere::next_jump -> f64 with -1\\.0",
+
+    # The first step a segment attempts, `end - t`, in `lifetime::advance`. It is a hint: the driver
+    # takes `h0.min(t1 - t0)` itself, so `end + t` is the same step, and `end / t` starts small and
+    # grows. The answer moves inside the tolerance and only the cost changes.
+    "lifetime\\.rs:369:23: replace - with \\+ in advance",
+    "lifetime\\.rs:369:23: replace - with / in advance",
 
     # --- `sgp4/tle.rs`. A sign test on a value two early returns have already made finite and
     # non-zero.

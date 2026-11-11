@@ -42,6 +42,7 @@ pub mod geopotential_coeffs;
 pub mod harris_priester;
 pub mod jacchia_bowman;
 pub mod lifetime;
+pub mod lifetime_drivers;
 pub mod lightcurve;
 pub mod linalg;
 pub mod lunar;

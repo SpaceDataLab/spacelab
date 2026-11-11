@@ -201,7 +201,7 @@ pub fn find(days: &[SpaceWeatherDay], year: i32, month: u32, day: u32) -> Option
 /// Proleptic-Gregorian day number (days since 1970-01-01), Howard Hinnant's `days_from_civil`. Exact
 /// integer arithmetic, so consecutive calendar days differ by exactly 1 across month and leap-year
 /// boundaries — the key the storm-array look-back is indexed by, robust to gaps in the feed.
-const fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+pub(crate) const fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
     let y = year as i64 - if month <= 2 { 1 } else { 0 };
     let era = (if y >= 0 { y } else { y - 399 }) / 400;
     let yoe = y - era * 400; // [0, 399]

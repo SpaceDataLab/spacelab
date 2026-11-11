@@ -8,7 +8,10 @@ historical TLE archive (planet4589.org/space/elements) states no licence, so its
 One request a second, and it stops on anything other than 200 or 404. A file already on disk is not
 fetched again. Standard library only.
 
-    tools/fetch-reentry-elements.py [--dry-run]
+    tools/fetch-reentry-elements.py [--dry-run] [--objects N ...]
+
+`--objects` fetches these catalogue numbers instead of the campaign's candidates: the spheres of known
+area-to-mass that `plans/17` Ф23.T scores are payloads, which the candidates exclude.
 """
 
 from __future__ import annotations
@@ -95,6 +98,7 @@ def candidates(catalogue: str) -> list[int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--objects", type=int, nargs="+", metavar="N")
     args = parser.parse_args()
     (OUT / "elements").mkdir(parents=True, exist_ok=True)
     catalogue = OUT / "satcat.tsv"
@@ -103,7 +107,9 @@ def main() -> int:
         if body is None:
             sys.exit("GCAT's catalogue is gone")
         catalogue.write_bytes(body)
-    objects = candidates(catalogue.read_text(encoding="utf-8", errors="replace"))
+    objects = args.objects or candidates(
+        catalogue.read_text(encoding="utf-8", errors="replace")
+    )
     print(f"{len(objects)} candidates")
     if args.dry_run:
         return 0

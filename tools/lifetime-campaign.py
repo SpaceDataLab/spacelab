@@ -15,6 +15,7 @@ way to know the truth, and it means the coverage below is of objects that did co
     tools/lifetime-campaign.py run [--max-lead DAYS]   # runs the jobs not yet in results.tsv
     tools/lifetime-campaign.py score    # prints the tables
     tools/lifetime-campaign.py cases    # the three named cases
+    tools/lifetime-campaign.py spheres  # Ф23.T: spheres of known area-to-mass, no fitted coefficient
 
 Standard library only. Raw element sets stay under `data/`.
 """
@@ -810,6 +811,101 @@ def case_starlink() -> None:
             print(f"{b} | {model} | {days(base)} | {days(kept)} | {ratio}")
 
 
+# Spheres of known area-to-mass (`plans/17` Ф23.T): catalogue number, name, mass kg, diameter m, source.
+# A sphere's drag does not depend on its attitude, so its ballistic coefficient is `C_d A / m` with
+# only `C_d` unknown. Their element sets come from `fetch-reentry-elements.py --objects`.
+SPHERES = (
+    (23558, "GFZ-1", 20.630, 0.215, "GFZ, research infrastructure page"),
+    (25769, "Starshine 1", 39.0, 0.475, "eoPortal, STARSHINE"),
+    (26996, "Starshine 2", 39.0, 0.475, "eoPortal, STARSHINE: as Starshine 1"),
+    (26929, "Starshine 3", 91.0, 0.94, "eoPortal, STARSHINE; ILRS, Starshine 3"),
+)
+SPHERE_CD = (1.2, 1.5, 1.8, 2.1, 2.4, 2.7, 3.0, 3.3, 3.6)
+
+
+def needed_cd(lifetimes: dict[float, float], truth: float) -> float | None:
+    """The `C_d` at which the predicted lifetime equals the true one, log-linear between grid points.
+
+    The lifetime falls as `C_d` rises; it is not exactly `1/C_d`, because the decay reaches each height
+    at another time, under another Sun. `None` when the truth is outside the grid's lifetimes.
+    """
+    grid = sorted(cd for cd, t in lifetimes.items() if math.isfinite(t))
+    for lo, hi in itertools.pairwise(grid):
+        t_lo, t_hi = lifetimes[lo], lifetimes[hi]
+        if t_hi <= truth <= t_lo:
+            w = math.log(t_lo / truth) / math.log(t_lo / t_hi)
+            return math.exp(math.log(lo) + w * math.log(hi / lo))
+    return None
+
+
+def spheres(args) -> int:
+    catalogue = read_catalogue()
+    jobs = []
+    truth = {}
+    for number, name, mass, diameter, _ in SPHERES:
+        decay = decay_time(catalogue[number]["DDate"])
+        path = OUT / "elements" / f"S{number:05d}"
+        sets = read_elements(path.read_text(encoding="utf-8", errors="replace"))
+        if decay is None or not sets:
+            print(
+                f"{name}: no decay date or no element sets; run fetch-reentry-elements.py --objects"
+            )
+            continue
+        area_over_mass = math.pi * diameter**2 / 4.0 / mass
+        for lead in LEADS_DAYS:
+            k = state_before(sets, decay - lead * DAY)
+            if k is None:
+                continue
+            t0, state = sets[k]
+            truth[(number, lead)] = decay - t0
+            horizon = (4.0 * lead + 60.0) * DAY
+            for model in MODELS:
+                jobs += [
+                    case_job(
+                        f"{number}|{lead}|{cd}",
+                        model,
+                        cd * area_over_mass,
+                        t0,
+                        state,
+                        horizon,
+                        "O",
+                    )
+                    for cd in SPHERE_CD
+                ]
+    print(f"{len(jobs)} jobs", flush=True)
+    with concurrent.futures.ProcessPoolExecutor(args.processes) as pool:
+        lines = [
+            line.split("\t")
+            for chunk in pool.map(run_chunk, ([job] for job in jobs))
+            for line in chunk.splitlines()
+        ]
+    # A worker line is `id member B seconds`; the job lines name the model in the same order.
+    lifetimes: dict[tuple[int, int, str], dict[float, float]] = {}
+    for job, line in zip(jobs, lines, strict=True):
+        key, model = job.split("\t")[:2]
+        number, lead, cd = key.split("|")
+        seconds = float(line[3]) if line[3] not in ("", "nan") else math.inf
+        lifetimes.setdefault((int(number), int(lead), model), {})[float(cd)] = seconds
+    print(
+        "sphere | A/m m2/kg | lead d | true remaining d | model | lifetime at C_d 2.1 / 2.4 / 2.7, d | "
+        "C_d it needs"
+    )
+    for number, name, mass, diameter, _ in SPHERES:
+        for lead in LEADS_DAYS:
+            if (number, lead) not in truth:
+                continue
+            t_true = truth[(number, lead)]
+            for model in MODELS:
+                by_cd = lifetimes[(number, lead, model)]
+                cd = needed_cd(by_cd, t_true)
+                print(
+                    f"{name} | {math.pi * diameter**2 / 4.0 / mass:.5f} | {lead} | {t_true / DAY:.2f} | {model} | "
+                    + " / ".join(f"{by_cd[c] / DAY:.2f}" for c in (2.1, 2.4, 2.7))
+                    + f" | {'outside 1.2-3.6' if cd is None else f'{cd:.3f}'}"
+                )
+    return 0
+
+
 def cases(_args) -> int:
     case_ssw()
     print()
@@ -839,6 +935,9 @@ def main() -> int:
     check.set_defaults(func=converge)
     sub.add_parser("score").set_defaults(func=score)
     sub.add_parser("cases").set_defaults(func=cases)
+    sphere = sub.add_parser("spheres")
+    sphere.add_argument("--processes", type=int, default=(os.cpu_count() or 2) // 2)
+    sphere.set_defaults(func=spheres)
     args = parser.parse_args()
     return args.func(args)
 

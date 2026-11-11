@@ -89,6 +89,18 @@ def test_quantile_is_nearest_rank_and_censored_sorts_last() -> None:
     assert campaign.quantile(values, 0.95) == math.inf
 
 
+def test_needed_cd_is_exact_on_a_power_law_and_refuses_outside_the_grid() -> None:
+    # Log-linear interpolation is exact where the lifetime is a power of C_d, as it is in a static atmosphere.
+    lifetimes = {cd: 100.0 / cd**1.3 for cd in campaign.SPHERE_CD}
+    for cd in (1.35, 2.2, 3.05):
+        found = campaign.needed_cd(lifetimes, 100.0 / cd**1.3)
+        assert found is not None and math.isclose(found, cd, rel_tol=1e-12), (cd, found)
+    assert campaign.needed_cd(lifetimes, 100.0) is None
+    assert campaign.needed_cd(lifetimes, 1.0) is None
+    survivor = {**lifetimes, 1.2: math.inf}
+    assert campaign.needed_cd(survivor, 100.0 / 1.4**1.3) is None
+
+
 if __name__ == "__main__":
     for name, test in sorted(globals().items()):
         if name.startswith("test_"):

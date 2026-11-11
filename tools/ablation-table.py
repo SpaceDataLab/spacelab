@@ -34,7 +34,7 @@ RUNGS = (
     ("+ solar wind", "solar_wind", "default"),
 )
 # Variants of the shipped form beside the ladder, paired with it the same way: Ф30.G's one level for every
-# satellite, and Ф23.J's rivals for the post-storm drop.
+# satellite, Ф23.J's rivals for the post-storm drop, and Ф23.L's memory of the daily flux.
 RIVALS = (
     ("one level, no satellite scales", "no_scales", "default"),
     ("+ composition: boundary oxygen", "composition", "default"),
@@ -42,6 +42,8 @@ RIVALS = (
     ("linear heating and cooling", "linear", "default"),
     ("+ nitric-oxide time scaled by the flux", "nitric_flux", "default"),
     ("+ the same, kn held at Wang et al.'s middle", "nitric_flux_wang", "default"),
+    ("+ the daily flux's memory, at the heating time", "flux_memory", "default"),
+    ("+ the daily flux's memory, its own time", "flux_memory_fit", "default"),
     ("GRACE-FO C on v02, GRACE-FO rows left out", "gc_v02", "default"),
 )
 # A field on a corpus variant measures one family differently (`tools/corpus-variant.py`): its MAPE and its

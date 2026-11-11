@@ -66,6 +66,7 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
+from scipy import signal
 from scipy.optimize import least_squares
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -257,6 +258,8 @@ def load_corpus(
     day = rows.t.dt.normalize()
     rows["f107"] = flux.loc[day - pd.Timedelta(days=1), "F10.7_OBS"].to_numpy()
     rows["f107a"] = flux.loc[day, mean_column].to_numpy()
+    # The day before's place in the daily series, for the flux's memory (`plans/17` Ф23.L).
+    rows["f107_index"] = flux.index.get_indexer(day - pd.Timedelta(days=1))
     ap = flux[[f"AP{i}" for i in range(1, 9)]].to_numpy().reshape(-1).astype(float)
     ap = np.where(np.isfinite(ap), ap, 0.0)
     offset = (
@@ -271,6 +274,7 @@ def load_corpus(
         driver_cadence=g.AP_CADENCE,
         # The 81-day flux on the 3-hourly grid, each day's eight intervals alike; the hourly driver has none.
         flux_grid=np.repeat(flux[mean_column].to_numpy(dtype=float), 8),
+        f107_daily=flux["F10.7_OBS"].to_numpy(dtype=float),
     )
     if ap60:
         hourly, hourly_epoch = g.load_ap60()
@@ -443,6 +447,9 @@ class Packing:
     composition: bool = False
     """The boundary's atomic oxygen carries `e^c`, `c = c0 - c1 ln(1 + X/15)`, `X` the drive filtered with
     its own time `tau_c` (`plans/17` Ф23.J): `c0`, `c1` and `ln tau_c` in hours, last."""
+    flux_memory: bool = False
+    """The daily F10.7 reaches `T_inf` through `flux_memory`'s filter with its own time (`plans/17` Ф23.L,
+    `derivations/sdtm_flux_memory.mac`): `ln tau_m` in hours, last."""
     limit: str | None = None
     """A rung of the ablation below the kernels (Ф30.F, `derivations/sdtm_ablation.mac`):
     `"first-order"`, the heating alone, `cooling_grid` at `H_s -> inf`, with its time in the onset slot;
@@ -527,8 +534,13 @@ class Packing:
 
     @property
     def n_tail(self) -> int:
-        """The rivals' slots after the knee: the composition's three, then `delta`, then `kn`."""
-        return 3 * int(self.composition) + int(self.delta) + int(self.nitric_flux)
+        """The rivals' slots after the knee: the composition's three, then `delta`, `kn` and `ln tau_m`."""
+        return (
+            3 * int(self.composition)
+            + int(self.delta)
+            + int(self.nitric_flux)
+            + int(self.flux_memory)
+        )
 
     @property
     def i_oxygen(self) -> int:
@@ -538,12 +550,21 @@ class Packing:
     @property
     def i_delta(self) -> int:
         """`delta`; absent unless the cooling carries the quiet offset."""
-        return self.size - 1 - int(self.nitric_flux) if self.delta else -1
+        return (
+            self.size - 1 - int(self.nitric_flux) - int(self.flux_memory)
+            if self.delta
+            else -1
+        )
 
     @property
     def i_kn(self) -> int:
-        """`kn`, last; absent unless the nitric oxide's time scales with the flux."""
-        return self.size - 1 if self.nitric_flux else -1
+        """`kn`; absent unless the nitric oxide's time scales with the flux."""
+        return self.size - 1 - int(self.flux_memory) if self.nitric_flux else -1
+
+    @property
+    def i_memory(self) -> int:
+        """`ln tau_m` in hours, last; absent unless the flux's memory has its own time."""
+        return self.size - 1 if self.flux_memory else -1
 
     @property
     def size(self) -> int:
@@ -556,6 +577,15 @@ class Packing:
             + int(self.free_knee)
             + self.n_tail
         )
+
+
+def flux_memory(daily: np.ndarray, tau: float) -> np.ndarray:
+    """The daily F10.7 through `dG/dt = (F - G)/tau`, `F` held over each day and `G = F` on the first:
+    `G1 = (1 - a) F + a G0`, `a = exp(-24 h / tau)`, `tau` in hours (`derivations/sdtm_flux_memory.mac`).
+    As `tau -> 0`, `a` is 0 and the series is returned bit for bit."""
+    a = np.exp(-24.0 / tau)
+    out, _ = signal.lfilter([1.0 - a], [1.0, -a], daily, zi=[a * daily[0]])
+    return out
 
 
 def cooling_grid(
@@ -727,6 +757,7 @@ class CorpusModel:
         delta: bool = False,
         linear: bool = False,
         nitric_flux: float | str | None = None,
+        flux_memory: str | None = None,
     ):
         """`penalty_rows` are the rows whose scale sets the ridge, every row when `None`; a harness
         that holds rows out passes the training rows, so that nothing of a test row reaches the fit
@@ -747,7 +778,10 @@ class CorpusModel:
         (`plans/17` Ф30.G). `composition`, `delta`, `linear` and `nitric_flux` add `Packing`'s rivals of
         those names; the last three each need the plain cooling, without a cap, mix or fast mode, and
         not each other. `nitric_flux` needs the 3-hourly driver's `arg["flux_grid"]`: `None` keeps the
-        nitric oxide's time constant, a number holds `kn` there, `"fit"` fits it."""
+        nitric oxide's time constant, a number holds `kn` there, `"fit"` fits it. `flux_memory` passes the
+        daily F10.7 through `flux_memory`'s filter before it reaches `T_inf` (`plans/17` Ф23.L): `None` reads
+        the day's own flux, `"heating"` filters it with the fitted heating time, so with cooling and no
+        parameter added, and `"fit"` with a time of its own."""
         if limit is not None and (cooling or mix or fast or wind):
             raise ValueError(f"the {limit} rung has no cooling, mix, fast mode or wind")
         rivals = int(delta) + int(linear) + int(nitric_flux is not None)
@@ -757,6 +791,16 @@ class CorpusModel:
             )
         if nitric_flux is not None and arg.get("flux_grid") is None:
             raise ValueError("nitric_flux needs the 3-hourly driver's flux grid")
+        if flux_memory not in (None, "heating", "fit"):
+            raise ValueError(
+                f"flux_memory is None, 'heating' or 'fit', not {flux_memory!r}"
+            )
+        if flux_memory is not None and arg.get("f107_daily") is None:
+            raise ValueError("flux_memory needs the daily F10.7 series")
+        if flux_memory == "heating" and not cooling:
+            raise ValueError(
+                "the flux memory at the heating time needs the cooling's heating slot"
+            )
         self.a = arg
         self.sat = sat
         self.sigma = sigma
@@ -765,6 +809,7 @@ class CorpusModel:
         self.fast_mode = fast if isinstance(fast, tuple) else None
         self.wind_share = wind if isinstance(wind, float) else None
         self.held_kn = nitric_flux if isinstance(nitric_flux, float) else None
+        self.memory_form = flux_memory
         self.pairs = np.argwhere(
             g.harmonic_mask(caps, arg["k"]).reshape(g.DRIVERS, arg["k"])
         )
@@ -783,6 +828,7 @@ class CorpusModel:
             delta=delta,
             linear=linear,
             nitric_flux=nitric_flux == "fit",
+            flux_memory=flux_memory == "fit",
             composition=composition,
             limit=limit,
         )
@@ -818,6 +864,7 @@ class CorpusModel:
             gain=0.0 if gain else None,
             delta=10.0 if delta else None,
             kn=0.0 if nitric_flux == "fit" else self.held_kn,
+            memory={"heating": 6.0, "fit": 24.0}.get(flux_memory or ""),
         )
         if penalty_rows is not None:
             reference = reference[penalty_rows]
@@ -870,6 +917,12 @@ class CorpusModel:
         time is constant."""
         return float(p[self.pack.i_kn]) if self.pack.nitric_flux else self.held_kn
 
+    def memory(self, p: np.ndarray) -> float | None:
+        """The flux memory's time in hours: the heating's, its own, or `None` without the memory."""
+        if self.memory_form == "heating":
+            return self.kernel(p)[0]
+        return float(np.exp(p[self.pack.i_memory])) if self.pack.flux_memory else None
+
     def knee(self, p: np.ndarray) -> float | None:
         """`mu` of `exp(mu + kappa f)`, or `None` where the knee is held at `ln(1 + storm/15)`'s."""
         return float(p[self.pack.i_knee]) if self.pack.free_knee else None
@@ -893,8 +946,9 @@ class CorpusModel:
         knee: float | None = None,
         delta: float | None = None,
         kn: float | None = None,
+        memory: float | None = None,
     ) -> np.ndarray:
-        key = (*kernel, excess, gain, knee, delta, kn)
+        key = (*kernel, excess, gain, knee, delta, kn, memory)
         if self._design_key == key and self._design is not None:
             return self._design
         drive = self.drive(kernel)
@@ -936,6 +990,8 @@ class CorpusModel:
             )
         storm = grid[self.a["interval"]]
         f107, f107a = self.a["f107"], self.a["f107a"]
+        if memory is not None:
+            f107 = flux_memory(self.a["f107_daily"], memory)[self.a["f107_index"]]
         if excess is not None:
             span = g.F107_SCALE * excess
             f107 = f107a + span * np.tanh((f107 - f107a) / span)
@@ -974,6 +1030,7 @@ class CorpusModel:
                 knee=self.knee(p),
                 delta=self.delta(p),
                 kn=self.kn(p),
+                memory=self.memory(p),
             )
         exponent = design[index] @ p[: self.pack.n_c]
         t_inf = g.BOUNDARY_TEMPERATURE + np.exp(np.clip(exponent, -50.0, 50.0))
@@ -1020,6 +1077,7 @@ class CorpusModel:
             knee=self.knee(p),
             delta=self.delta(p),
             kn=self.kn(p),
+            memory=self.memory(p),
         )
         base, chain = self.score(p, index, design)
         out[:n, : pk.n_c] = design[index] * chain[:, None]
@@ -1040,6 +1098,7 @@ class CorpusModel:
         slots += tuple(range(pk.i_oxygen, pk.i_oxygen + 3)) if pk.composition else ()
         slots += (pk.i_delta,) if pk.delta else ()
         slots += (pk.i_kn,) if pk.nitric_flux else ()
+        slots += (pk.i_memory,) if pk.flux_memory else ()
         for j in slots:
             shifted = p.copy()
             shifted[j] += step
@@ -1054,6 +1113,7 @@ class CorpusModel:
             knee=self.knee(p),
             delta=self.delta(p),
             kn=self.kn(p),
+            memory=self.memory(p),
         )
         out[n:, : pk.n_c] = np.diag(np.sqrt(n) * self.penalty)
         return out
@@ -1133,6 +1193,10 @@ class CorpusModel:
             # The time from e^-1 to e^3 per unit of ln(F10.7a/150); Wang et al.'s 3-4 between 70 and 200
             # sfu is 1.05-1.32 (`derivations/sdtm_nitric_flux.mac`). The shipped constant time starts it.
             lower[pk.i_kn], upper[pk.i_kn] = -1.0, 3.0
+        if pk.flux_memory:
+            # From an hour, the day's own flux, to a month; a day starts it.
+            start[pk.i_memory] = np.log(24.0)
+            lower[pk.i_memory], upper[pk.i_memory] = np.log(1.0), np.log(720.0)
         if pk.delta:
             # From the shipped cooling, 0, to an offset well past any saturation level the fit has found.
             start[pk.i_delta] = 10.0
@@ -1676,12 +1740,17 @@ def wind_option(argument: argparse.Namespace) -> float | str | None:
 
 def rival_option(argument: argparse.Namespace) -> dict[str, bool | str | float | None]:
     """`--rival` as `CorpusModel`'s keywords; `nitric_flux` fits `kn`, `nitric_flux_wang` holds it at
-    `WANG_KN`."""
+    `WANG_KN`; `flux_memory` filters the daily flux with the heating time, `flux_memory_fit` with its own."""
     rivals: dict[str, bool | str | float | None] = {
         name: argument.rival == name for name in ("composition", "delta", "linear")
     }
     held = {"nitric_flux": "fit", "nitric_flux_wang": WANG_KN}
-    return {**rivals, "nitric_flux": held.get(argument.rival)}
+    memory = {"flux_memory": "heating", "flux_memory_fit": "fit"}
+    return {
+        **rivals,
+        "nitric_flux": held.get(argument.rival),
+        "flux_memory": memory.get(argument.rival),
+    }
 
 
 def mix_option(argument: argparse.Namespace) -> float | str | None:
@@ -1739,9 +1808,17 @@ def main() -> None:
     )
     parser.add_argument(
         "--rival",
-        choices=("composition", "delta", "linear", "nitric_flux", "nitric_flux_wang"),
-        help="with --cooling, one of `plans/17` Ф23.J's rivals for the post-storm drop in every fold "
-        "(tools/evaluate-sdtm.py's fields of those names); never emitted",
+        choices=(
+            "composition",
+            "delta",
+            "linear",
+            "nitric_flux",
+            "nitric_flux_wang",
+            "flux_memory",
+            "flux_memory_fit",
+        ),
+        help="with --cooling, one of `plans/17` Ф23.J's rivals for the post-storm drop or Ф23.L's memory "
+        "arm in every fold (tools/evaluate-sdtm.py's fields of those names); never emitted",
     )
     parser.add_argument(
         "--emit",
@@ -1998,6 +2075,11 @@ def main() -> None:
             )
             + (f"delta {model.delta(p):.1f} ap  " if pk.delta else "")
             + (f"kn {model.kn(p):+.3f}  " if pk.nitric_flux else "")
+            + (
+                f"flux memory {model.memory(p):.1f} h  "
+                if model.memory(p) is not None
+                else ""
+            )
             + f"scales vs {train_sats[0]}: {scales}  {time.time() - t0:.0f}s",
             flush=True,
         )

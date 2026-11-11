@@ -336,6 +336,52 @@ def test_the_held_nitric_time_field_is_wang_et_al_s_middle_and_fits_no_slot() ->
         raise AssertionError("a held flux-scaled time without a flux grid was accepted")
 
 
+def test_the_flux_memory_is_the_day_s_flux_at_tau_0_and_delays_a_spike_without_losing_it() -> (
+    None
+):
+    fit, fields = harness.fit, harness.FIELDS
+    for name, form in (("flux_memory", "heating"), ("flux_memory_fit", "fit")):
+        assert fields[name] == {**fields["default"], "flux_memory": form}
+    daily = 100.0 + np.random.default_rng(7).gamma(1.5, 20.0, 400)
+    # `sdtm_flux_memory.mac` 2: as tau -> 0 the filter returns the day's own flux, bit for bit.
+    assert np.array_equal(fit.flux_memory(daily, 1e-3), daily)
+    # 1 and 4: lfilter's recursion is the exact daily step G1 = F + (G0 - F) exp(-24/tau).
+    tau, state, stepped = 30.0, daily[0], np.empty_like(daily)
+    for i, f in enumerate(daily):
+        state = f + (state - f) * np.exp(-24.0 / tau)
+        stepped[i] = state
+    assert np.allclose(fit.flux_memory(daily, tau), stepped, rtol=0.0, atol=1e-11)
+    # 5 and 7: a one-day spike's excess peaks at A (1 - a) and sums to A.
+    spike = np.full(200, 100.0)
+    spike[10] += 500.0
+    excess = fit.flux_memory(spike, 18.0) - 100.0
+    assert np.isclose(excess[10], 500.0 * (1.0 - np.exp(-24.0 / 18.0)), rtol=1e-13)
+    assert np.isclose(excess.sum(), 500.0, rtol=1e-12)
+    common = {
+        "n_c": 7,
+        "scaled": ("SA",),
+        "free_sigma": True,
+        "cooling": True,
+        "free_gain": True,
+    }
+    shipped = fit.Packing(**common)
+    both = fit.Packing(**common, nitric_flux=True, flux_memory=True)
+    assert (both.i_gain, both.i_kn, both.i_memory) == (
+        shipped.i_gain,
+        shipped.size,
+        shipped.size + 1,
+    )
+    for form in ("fit", "heating", "daily"):
+        try:
+            fit.CorpusModel({}, np.array([]), (), (), 0.0, None, True, flux_memory=form)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(
+                f"flux_memory={form!r} without a daily series was accepted"
+            )
+
+
 def test_the_oxygen_factor_moves_ln_rho_by_the_oxygen_mass_fraction() -> None:
     g = harness.g
     # `derivations/sdtm_composition.mac`'s shipped boundary at T_inf 700 and 1000 K, 200 km.

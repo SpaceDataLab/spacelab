@@ -111,6 +111,10 @@ FIELDS: dict[str, dict[str, Any]] = {
     "nitric_flux": {**FORM, "nitric_flux": "fit"},
     # The same with `kn` held at Wang et al.'s middle ratio.
     "nitric_flux_wang": {**FORM, "nitric_flux": fit.WANG_KN},
+    # Ф23.L's memory arm: the daily F10.7 filtered before it reaches T_inf (`derivations/sdtm_flux_memory.mac`),
+    # with the fitted heating time and with a time of its own.
+    "flux_memory": {**FORM, "flux_memory": "heating"},
+    "flux_memory_fit": {**FORM, "flux_memory": "fit"},
     # The shipped form on GRACE-FO C's v02 densities where v02 exists, v02c elsewhere, the rows unchanged
     # (`tools/corpus-variant.py`; Ф30.G-2, F72).
     "gc_v02": {**FORM, "corpus": "corpus-gc-v02"},
@@ -355,6 +359,7 @@ def command_run(args) -> int:
             delta=settings.get("delta", False),
             linear=settings.get("linear", False),
             nitric_flux=settings.get("nitric_flux"),
+            flux_memory=settings.get("flux_memory"),
         )
         p = model.fit(train)
         residual, _ = model.score(p, test)

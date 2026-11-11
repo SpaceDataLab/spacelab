@@ -484,6 +484,9 @@ def fit_arguments(rows: pd.DataFrame, degree: int) -> dict:
         "cadence": rows.attrs["driver_cadence"],
         # The 81-day flux on the driver's grid where the loader gives it (`plans/17` Ф23.J), else `None`.
         "flux_grid": rows.attrs.get("flux_grid"),
+        # The daily F10.7 and each row's day before in it, where the loader gives them (`plans/17` Ф23.L).
+        "f107_daily": rows.attrs.get("f107_daily"),
+        "f107_index": rows["f107_index"].to_numpy() if "f107_index" in rows else None,
         "mission": (rows.mission.to_numpy() == "SWARM-A").astype(float),
         "ln_rho": np.log(rows.rho.to_numpy()),
         "k": harmonics.shape[1],

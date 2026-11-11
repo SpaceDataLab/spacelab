@@ -192,6 +192,7 @@ def load_corpus(
     phase: int = 0,
     ap60: bool = False,
     wind: bool = False,
+    corpus: pathlib.Path = CORPUS,
 ) -> pd.DataFrame:
     """Every `step`-th corpus row of each satellite, with `gen_sdtm_coefficients.load`'s drivers.
 
@@ -201,11 +202,12 @@ def load_corpus(
     storms are still found on the 3-hourly `ap`, so the same storms are scored. Measured and not
     shipped: better peak timing and a fifth of the large-storm gap (`docs/verification.md` §10.30).
     `wind`, with `ap60`, adds `newell_driver`'s series on the same hourly grid as `attrs["wind"]`,
-    and the map that put it on `ap60`'s scale as `attrs["wind_map"]`.
+    and the map that put it on `ap60`'s scale as `attrs["wind_map"]`. `corpus` is the directory read: a
+    variant from `tools/corpus-variant.py` has the same rows.
     """
     frames = []
     for sat in SATELLITES:
-        path = CORPUS / f"corpus_{sat}.npz"
+        path = corpus / f"corpus_{sat}.npz"
         if not path.exists():
             sys.exit(f"no {path.name}; run tools/build-density-corpus.py")
         z = np.load(path)

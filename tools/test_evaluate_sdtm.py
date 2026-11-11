@@ -279,6 +279,14 @@ def test_the_linear_form_is_exact_settles_linearly_and_undershoots() -> None:
     assert np.allclose(met, near, rtol=1e-5, atol=1e-9)
 
 
+def test_the_corpus_variant_field_is_the_shipped_form_on_another_corpus() -> None:
+    fields = harness.FIELDS
+    assert {k: v for k, v in fields["gc_v02"].items() if k != "corpus"} == fields[
+        "default"
+    ]
+    assert "corpus" not in fields["default"]
+
+
 def test_the_oxygen_factor_moves_ln_rho_by_the_oxygen_mass_fraction() -> None:
     g = harness.g
     # `derivations/sdtm_composition.mac`'s shipped boundary at T_inf 700 and 1000 K, 200 km.

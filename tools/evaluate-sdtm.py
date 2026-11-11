@@ -107,6 +107,9 @@ FIELDS: dict[str, dict[str, Any]] = {
     # (`derivations/sdtm_overcooling.mac`).
     "delta": {**FORM, "delta": True},
     "linear": {**FORM, "linear": True},
+    # The shipped form on GRACE-FO C's v02 densities where v02 exists, v02c elsewhere, the rows unchanged
+    # (`tools/corpus-variant.py`; Ф30.G-2, F72).
+    "gc_v02": {**FORM, "corpus": "corpus-gc-v02"},
 }
 
 
@@ -276,12 +279,14 @@ def command_splits(_args) -> int:
 
 def command_run(args) -> int:
     settings = FIELDS[args.field]
+    variant = settings.get("corpus")
     rows = fit.load_corpus(
         STEP,
         trailing_mean=not settings.get("centred", False),
         phase=PHASE,
         ap60=settings["ap60"],
         wind=settings["wind"] is not None,
+        corpus=fit.CORPUS if variant is None else fit.CORPUS.parent / variant,
     )
     arg = g.fit_arguments(rows, 2)
     arg["wind"] = rows.attrs.get("wind")
@@ -296,7 +301,8 @@ def command_run(args) -> int:
     suffix = "-legacy" if args.legacy_penalty else ""
     out_dir = OUT / f"{args.field}{suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    msis_path = OUT / "msis.npy"
+    # NRLMSISE-00 against the measured densities: a corpus variant measures differently.
+    msis_path = OUT / ("msis.npy" if variant is None else f"msis-{variant}.npy")
     if not msis_path.exists():
         np.save(msis_path, fit.nrlmsise00(rows) - arg["ln_rho"])
     msis = np.load(msis_path)

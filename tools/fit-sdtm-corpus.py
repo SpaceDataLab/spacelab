@@ -1622,6 +1622,11 @@ def wind_option(argument: argparse.Namespace) -> float | str | None:
     return value if value in (None, "fit") else float(value)
 
 
+def rival_option(argument: argparse.Namespace) -> dict[str, bool]:
+    """`--rival` as `CorpusModel`'s keywords."""
+    return {name: argument.rival == name for name in ("composition", "delta", "linear")}
+
+
 def mix_option(argument: argparse.Namespace) -> float | str | None:
     """`--cooling-mix` as `CorpusModel` takes it."""
     value = argument.cooling_mix
@@ -1674,6 +1679,12 @@ def main() -> None:
         type=pathlib.Path,
         metavar="CSV",
         help="print the per-phase scorecards of these --storm-table files pooled, and fit nothing",
+    )
+    parser.add_argument(
+        "--rival",
+        choices=("composition", "delta", "linear"),
+        help="with --cooling, one of `plans/17` Ф23.J's rivals for the post-storm drop in every fold "
+        "(tools/evaluate-sdtm.py's fields of those names); never emitted",
     )
     parser.add_argument(
         "--emit",
@@ -1753,6 +1764,8 @@ def main() -> None:
         )
     if argument.emit and argument.storm_weight is not None:
         sys.exit("--storm-weight is a fold experiment: --emit fits every row alike")
+    if argument.rival and (argument.emit or not argument.cooling):
+        sys.exit("--rival is a fold experiment on --cooling: --emit does not write it")
     if argument.cooling_cap:
         if not argument.cooling or argument.emit:
             sys.exit("--cooling-cap bounds --cooling, and --emit does not write it yet")
@@ -1867,6 +1880,7 @@ def main() -> None:
             mix,
             fast,
             wind,
+            **rival_option(argument),
         )
         if argument.storm_weight is not None:
             model.root_weight = np.sqrt(
@@ -1889,7 +1903,12 @@ def main() -> None:
             f"held out {fam:<9} {test.sum():8d} rows: raw {g.mape(r):5.1f}%  "
             f"debiased {g.mape(debias(r, sat[test])):5.1f}%  bias {np.exp(r.mean()):.3f}  "
             + (
-                f"heating {kernel[0]:.2f} h  NO {kernel[1]:.1f} h  saturation {kernel[2]:.0f} ap  "
+                f"heating {kernel[0]:.2f} h  NO {kernel[1]:.1f} h  "
+                + (
+                    f"beta {kernel[2]:.3f}  "
+                    if pk.linear
+                    else f"saturation {kernel[2]:.0f} ap  "
+                )
                 + (f"cap q {kernel[3]:.2f}  " if pk.capped else "")
                 + (f"mix {kernel[3]:.3f}  " if pk.mixed else "")
                 + (f"solar wind {kernel[3]:.3f}  " if pk.wind else "")
@@ -1913,6 +1932,14 @@ def main() -> None:
                 else ""
             )
             + (f"knee mu {model.knee(p):+.3f}  " if model.knee(p) is not None else "")
+            + (
+                "oxygen c0 {:+.3f} c1 {:+.3f} tau {:.1f} h  ".format(
+                    *p[pk.i_oxygen : pk.i_oxygen + 2], np.exp(p[pk.i_oxygen + 2])
+                )
+                if pk.composition
+                else ""
+            )
+            + (f"delta {model.delta(p):.1f} ap  " if pk.delta else "")
             + f"scales vs {train_sats[0]}: {scales}  {time.time() - t0:.0f}s",
             flush=True,
         )
@@ -2079,6 +2106,7 @@ def held_out(
             mix,
             fast,
             wind,
+            **rival_option(argument),
         )
         here = np.where(window_rows.family.to_numpy() == fam)[0]
         held[here] = model.score(p, here)[0]

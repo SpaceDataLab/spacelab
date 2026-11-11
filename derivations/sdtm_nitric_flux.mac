@@ -1,0 +1,35 @@
+/* The fourth rival of plans/17 Ф23.J: the nitric oxide's time scales with the solar flux,
+     tn = tn0 (F/150)^(-kn),  F the 81-day mean F10.7,
+   after Wang, Mlynczak, Emmert et al. (2026), who find the relaxation 3-4 times shorter at solar maximum. The
+   flux changes by the day, so over a 3 h step tn is held, and the step is derivations/sdtm_no_cooling.mac's
+   with that step's tn.
+     (1) kn = 0 is the shipped constant time;
+     (2) d ln tn / d ln F = -kn: kn is the elasticity;
+     (3) the N step with tn held over the step is exact for that step's tn, and its mean is the shipped Nbar;
+     (4) the steady state D = H/(1 + H/Hs) does not depend on tn, so the rival moves only the storm's time
+         course, not its steady level;
+     (5) the ratio of the times at two fluxes is (F2/F1)^(-kn): Wang et al.'s 3-4 between F = 70 and 200
+         asks kn = ln(ratio)/ln(200/70), printed for 3 and 4.
+   Every identity prints 0. derivations/sdtm_nitric_flux.gp checks the step and (5) numerically. */
+
+ratprint : false$
+display2d : false$
+
+tn(F) := tn0*(F/150)^(-kn)$
+print("1 kn = 0 is the shipped time:", ratsimp(subst(kn = 0, tn(F)) - tn0))$
+assume(F > 0, tn0 > 0)$
+print("2 the elasticity is -kn:", radcan(F*diff(log(tn(F)), F) + kn))$
+
+Nstep(t) := H + (N0 - H)*exp(-t/T)$
+print("3 the N step at a held T, ODE residual:", ratsimp(diff(Nstep(t), t) - (H - Nstep(t))/T))$
+print("3 its initial value:", ratsimp(Nstep(0) - N0))$
+print("3 its mean is the shipped Nbar at T:",
+      ratsimp(integrate(Nstep(t), t, 0, h)/h - (H + (N0 - H)*T/h*(1 - exp(-h/T)))))$
+
+Dfix : H/(1 + H/Hs)$
+print("4 the steady state solves dD/dt = 0 at N = H for any T:",
+      ratsimp((H - Dfix)/tc - Dfix*H/(tc*Hs)))$
+print("4 and N settles at H for any T:", rhs(solve((H - N)/T, N)[1]) - H)$
+
+print("5 the ratio of times at two fluxes:", radcan(tn(F2)/tn(F1) - (F2/F1)^(-kn)))$
+for r in [3, 4] do print("  kn for a ratio", r, "between F 70 and 200:", float(log(r)/log(200/70)))$

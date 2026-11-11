@@ -925,6 +925,7 @@ if have maxima; then
     mac_zeros sdtm_column.mac 12 "the column above a height is n T/b in diffusive equilibrium for any T, the Bates column integrated directly, and SDTM-1's column O/N2 at the N2 depth free of Tinf and sigma"
     mac_zeros sdtm_composition.mac 4 "the composition rival n_O0 e^c: d ln rho/dc is the oxygen mass fraction, its complement the rest, the column O/N2 scales as e^c, and the response at a third height with two held"
     mac_zeros sdtm_overcooling.mac 14 "the post-storm rivals: the delta form's frozen step, its shipped limit, steady state and sign region, the odd log regressor; the linear form's exact step, linear steady state and undershoot"
+    mac_zeros sdtm_nitric_flux.mac 8 "the nitric-oxide time scaled by the flux: the shipped time at kn = 0, elasticity -kn, the held step exact with the shipped mean, a steady state free of the time, the ratio at two fluxes"
     mac_zeros central_difference.mac 3 "the nine-node central difference: its weights exact to degree 8, the Lagrange slope at the centre, the first missed term -h^8 f^(9)/630"
     mac_zeros drag_error_growth.mac 6 "a constant along-track force in Clohessy-Wiltshire and in mean elements: the along-track error of a density error eps grows as (3/2) eps a_D t^2"
     mac_zeros sdtm_ablation.mac 12 "SDTM-1's ablation ladder: each rung is the one above it in a limit; share, kappa -> 0, D, H_s -> inf, the kernel's fast time and the filter's time -> 0, the storm regressors with the state"
@@ -1036,7 +1037,7 @@ if have gp; then
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form \
         rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
         cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal iod_classical patched_conics \
-        targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step sdtm_column sdtm_composition sdtm_overcooling drag_error_growth central_difference \
+        targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step sdtm_column sdtm_composition sdtm_overcooling sdtm_nitric_flux drag_error_growth central_difference \
         density_calibration_ridge \
         wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms \
         chi_square_quantiles robust_weights se3_exponential particle_resampling sampling_transforms \

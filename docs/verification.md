@@ -384,6 +384,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Thinning: the fit at 10 min, 30 min and 2 h | Ф30.E: the shipped form refitted on every 5th, 15th and 60th row of the 120 s corpus, one family fold at a time, each scored on the same held-out rows and on §10.33's storm windows at 120 s | the peak memory of every run measured before the grid was chosen: linear in the rows, 11.05–15.17 GB at 10 min, so the 120 s corpus (55–76 GB) does not fit in 38.6 GB | thinning does not move the error: each family's MAPE within 0.03 points across the three steps, the storm onset unchanged, the peak error by 0.002 (better on 280 of 599 storms), the fitted kernel within 0.2 h, 0.2 h, 1 `ap` and 0.006 in `κ`; F62 is answered for the estimates (§10.47) | tools/fit-sdtm-corpus.py, tools/thinning-table.py |
 | The daily flux's memory | Ф23.L: the daily F10.7 through a first-order filter before `T∞`, with the heating time (no parameter) or its own, on the family and storm-out folds; the interval's coverage by regime held out, on the corpus and on §10.2's campaign rows | the filter's daily step, its `τ → 0` limit, `lfilter`'s recursion and a spike's conserved flux in Maxima (9 identities) and PARI/GP; `tools/regime-coverage.py` reproduces §10.28's held-out coverage digit for digit | its own time is 26–35 h; pre-storm MAPE 20.79 → 19.91 %, family −0.07 [−0.13, −0.01] with the heating time, storm folds span 0; regime 5 stays at 84.4 % on the campaign rows against the 88 % target, because the cell misses through a storm-time excess (May 2024 1.124, June 2025 1.195 model/measured), not the flux (§10.48) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/regime-coverage.py |
 | The quiet latitude structure | Ф23.V: the high-minus-low latitude contrast of the held-out residual on the quiet rows, by season, by height and, read after, by flux; two latitude rows of the form fixed before their folds (`degree3`, `boundary_latitude`) and three read after (`flux_latitude`, `flux_boundary_latitude`, `no_swarm`); the measured density boxcar-smoothed as Swarm's GPS densities are | the rule written into the tool before each run; `smoothing_shift` exact to 1e-13 on a synthetic series with a gap; `no_swarm`'s Swarm fold equals the shipped one to 1e-11 | CHAMP +11.4, GOCE +12.1 in both seasons (winter +17), +7 to +16 at F10.7a ≥ 100 at every height, negative only below 100 sfu above 400 km; no row meets the rule (`degree3` −0.08, `boundary_latitude` −0.03 and GOCE overshot); `flux_boundary_latitude` −0.31 [−0.37, −0.25], after the data → blind months (Ф23.X); Swarm's resolution moves CHAMP/GOCE by 2 points only (Ф23.Y) (§10.49) | tools/latitude-contrast.py, tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py |
+| Uncertainty beyond six bins | Ф30.I: the shipped six-cell σ against a continuous `ln σ(x)` in the model's inputs and two split-conformal rivals, each built from the other four families' held-out residuals; coverage, half-width, log score and CRPS by cell, family, height, storm phase and the campaign rows; the five fold fits' spread as the parameter part | the normal CRPS from `E|X − y| − E|X − X′|/2` in Maxima (18 identities) and against its defining integral in PARI/GP to 1e-45; Python against PARI to 16 digits; the σ fit recovers a known β; each fold refit reproduces its saved residual to 7e-15 | no method meets the target (the worst family per cell 78–88 %): the limitation stays printed; `continuous` log score −0.019 [−0.027, −0.011], CRPS −0.060 [−0.082, −0.038], GOCE 99.6 → 90.6 %, campaign regime 5 84.4 → 89.4 %; conformal adds nothing (q 1.61–1.63); the parameter part is ≤ 1.5 % of σ² (§10.50) | tools/uncertainty-scores.py, derivations/gaussian_scores.mac |
 
 ### Tides
 
@@ -10297,6 +10298,83 @@ Run (the harness folds stay under `data/validation/sdtm-eval/`):
       --fields default degree3 boundary_latitude flux_latitude flux_boundary_latitude no_swarm
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/latitude-contrast.py --smoothing 10 20 40
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
+
+### 10.50 Uncertainty beyond six bins (Ф30.I)
+
+`DensityUncertainty` is a zero-mean normal on `ln(model/measured)`, one σ per regime cell: the 81-day flux
+(below 100, 100–150, above) by the storm state (below or above 15). The worst family in a cell covers as little as
+82.2 % at 90 % (§10.32's table for the 3-hourly field). `tools/uncertainty-scores.py` scores it and three rivals on
+the five family folds. Each family's rows are forecast by a method built only from the other four families'
+held-out residuals:
+
+- `continuous`: `ln σ(x)` is linear in the model's own inputs. They are the 81-day flux and its square, the
+  storm state's `ln(1 + D/15)`, its square and its product with the flux, the altitude and its square, `Y20` of the
+  latitude, and the local time's diurnal harmonic: 11 coefficients. They are fitted by the zero-mean normal
+  likelihood, a convex fit.
+- `conformal_bins`: per cell, the `⌈(n + 1)·0.9⌉`-th smallest `|r|`.
+- `conformal_continuous`: the same rank on `|r|/σ(x)`.
+
+A conformal half-width `w` is scored as the normal of `σ = w/1.645`.
+
+`derivations/gaussian_scores.mac` derives the normal CRPS, `σ(z(2Φ(z) − 1) + 2φ(z) − 1/√π)`, from
+`E|X − y| − E|X − X′|/2`. It checks the derivative and the value at 0 against the defining integral (`∫erfc²` by
+parts, which Maxima cannot do in one step), the log score, and the convexity of the σ fit: 18 identities.
+`derivations/gaussian_scores.gp` checks the closed form against the defining integral at eight points, to 1e-45 at
+50 digits. The Python scores agree with PARI/GP to 16 digits. The σ fit recovers a known β on 200 000 synthetic
+rows to 0.002.
+
+The verdict was written into the tool before the first run. A method reaches the target only if, in every cell,
+the worst family covers at least 90 %, and on §10.2's campaign rows every cell with at least 50 rows covers at
+least 90 %. Between methods, the mean log score and CRPS decide, each paired against `bins6` with an interval that
+resamples 27-day blocks.
+
+| method | covered | half-width, ln × 100 | log score | CRPS × 100 | log score − bins6 | CRPS × 100 − bins6 |
+|---|---|---|---|---|---|---|
+| `bins6`, shipped | 90.5 % | 43.3 | +0.0930 | 14.721 | — | — |
+| `continuous` | 90.2 % | 43.1 | +0.0736 | 14.661 | **−0.0194** [−0.0272, −0.0111] | **−0.060** [−0.082, −0.038] |
+| `conformal_bins` | 89.6 % | 42.1 | +0.0943 | 14.717 | +0.0012 [−0.0002, +0.0027] | −0.004 [−0.009, +0.002] |
+| `conformal_continuous` | 89.7 % | 42.5 | +0.0750 | 14.661 | −0.0181 [−0.0261, −0.0088] | −0.060 [−0.081, −0.036] |
+
+Coverage at 90 %, by regime cell 0–5:
+
+| method | the worst family in each cell | campaign rows (n 1437 / 23 / 1197 / 97 / 1445 / 160) |
+|---|---|---|
+| `bins6` | 84.1 / 82.7 / 85.4 / 82.2 / 82.5 / 87.8 | 91.4 / 78.3 / 88.5 / 92.8 / 90.5 / **84.4** |
+| `continuous` | 87.6 / 79.6 / 83.8 / 81.9 / 78.3 / 87.5 | 93.1 / 87.0 / 88.6 / 90.7 / 92.6 / **89.4** |
+| `conformal_bins` | 82.5 / 81.3 / 84.9 / 82.5 / 82.1 / 87.0 | 90.4 / 78.3 / 87.9 / 92.8 / 89.9 / 83.8 |
+| `conformal_continuous` | 86.9 / 78.6 / 83.0 / 80.9 / 77.7 / 87.1 | 93.0 / 73.9 / 87.9 / 90.7 / 92.2 / 89.4 |
+
+Coverage by family and by height, `bins6` → `continuous`: CHAMP 92.9 → 88.4, GOCE 99.6 → 90.6, GRACE
+87.8 → 86.5, GRACE-FO 87.8 → 90.7, Swarm 91.4 → 93.2 %. Below 300 km it goes 99.6 → 90.8, at 300–400 km
+94.1 → 87.7, at 400–475 km 90.8 → 90.2, and from 475 km 88.2 → 90.8 %. By storm phase the two agree within 0.8
+points: onset 86.7 and 86.4 %, main and recovery 88.1 and 88.4 %.
+
+**Sources.** The five family fits are re-scored on every row with their satellite scales taken out; each
+reproduces its saved held-out residual to 7e-15. Their spread is the parameter part: an rms of 0.023–0.031 in
+`ln ρ` once each fit's mean level is removed, 0.6–1.5 % of the cell's σ². What remains is structural. The driver
+part is not separated here.
+
+Findings:
+
+- **No method meets the target, so the limitation stays printed.** `bins6`'s worst family per cell reproduces
+  §10.32's 84.1 / 82.7 / 85.4 / 82.2 / 82.5 / 87.8 % digit for digit. The binding cell is a family's, not a
+  regime's: in each cell one family's residual is wider than the rest (GRACE in three cells, GRACE-FO in two,
+  CHAMP in one). An interval that knows only the model's inputs cannot cover each family at 90 % without widening
+  it for all of them.
+- **`continuous` is the better forecast.** Its log score and CRPS are clear of zero. It puts the width where the
+  error is: GOCE's 99.6 % and the 99.6 % below 300 km fall to 90.6 and 90.8 %, and the campaign's regime-5 cell
+  rises from 84.4 to 89.4 %. The cost is the worst (family, cell) pair: 78.3 % for CHAMP in the high-flux quiet
+  cell against `bins6`'s worst, 82.2 %. σ grows by about 23 % per 100 km of height (`β_h` 0.20–0.22), and its
+  flux shape is a U (`β_f²` 0.12–0.56).
+- **Conformal buys nothing here.** The normalised rank `q` is 1.614–1.628 against the normal's 1.645, so the
+  residual is slightly lighter-tailed at 90 % than normal. Calibrating on other families narrows the interval
+  and lowers the held-out coverage by 0.5–0.9 points.
+- **The uncertainty is structural.** The parameter part is at most 1.5 % of σ², so a tighter fit would not
+  narrow the interval. Only a better form or a better observation model would (Ф23.X, Ф23.Y).
+
+Run:
+
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/uncertainty-scores.py
 
 ---
 

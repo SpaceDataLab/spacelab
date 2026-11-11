@@ -378,6 +378,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | The nitric-oxide step against its exact solution | Ф23.Q: the shipped frozen-N step, and 2, 4 and 8 sub-steps, against the exact step under a held drive on 216 storms since 2000, beside the spread of the same peak over the five folds' constants | the exact step's integrating factor in Maxima, its integral at 40 digits by Maxima and at 60 by PARI/GP, equal to 1e-36; the tool to 2e-15 | the step reads the peak high by a median of 0.31 % and at most 1.63 %, a median of 0.047 of the fold spread (at most 0.236); two sub-steps take it to 0.40 %, so no refit alone (§10.41) | tools/no-step-accuracy.py |
 | Composition against GOLD and TianMu-1 | Ф23.P: SDTM-1's and NRLMSISE-00's column O/N₂ against 575,761 GOLD L2 pixels in the phases of 52 storms since 2018-10, and their local O/N₂ against TianMu-1's mass spectrometer through 10–12 October 2024 | the column above a height is n T/b for any T in Maxima (12 identities) and PARI/GP at 60 digits; the column ratio at the N₂ depth free of T∞ and σ; the example to 4e-16 | SDTM-1's column ratio is low by 52 % in every phase and does not move in storms (+0.1 % where GOLD falls 4.9 % at 30–60° magnetic latitude); its in-situ storm drop is heating alone, flat in latitude, and recovers too fast: the composition rival of Ф23.J must vary the boundary composition (§10.42) | tools/column-on2.py, tools/tianmu-on2.py |
 | Spheres by era | Ф23.U: ten more smooth spheres of known area-to-mass, six from 1994–1996 (ODERACS) and four from 2007–2010 (ANDE, its states from NRL's laser predictions), the `C_d` each model needs for the true lifetime | the nine-node central difference exact to degree 8 in Maxima and PARI/GP; the CPF chain's `--check` recovers a known mean state to 6 µm in `a` | ODERACS agrees with GFZ-1 (SDTM-1 needs 2.77–3.17 against 2.23–2.37); ANDE, in SDTM-1's own years, needs 2.49–2.96, so SDTM-1 is too thin near solar minimum at 200–350 km in both eras; both models need 11 % less in 2007–2010, the era's share, which a secular term would remove (§10.43) | tools/lifetime-campaign.py, crates/spacelab/examples/cpf_mean_state.rs |
+| The ablation ladder | Ф30.F: nine rungs from the Bates profile on the flux to the solar wind, each the rung above in a limit, fitted and scored on the five family and eleven storm-out folds, with paired intervals on storm windows and 27-day blocks | each removal a limit of the shipped form in Maxima (`derivations/sdtm_ablation.mac`) | geography and season −20.6 points; the index −2.1; heating alone loses 6.6 on the storm folds and cooling wins 14.0 back; the kernel's second constant buys nothing; saturation −1.7, in the pre-storm phase; gain −0.5; the solar wind −0.4, gaining in every column; wall time not measured (§10.44) | tools/ablation-table.py |
 
 ### Tides
 
@@ -9815,6 +9816,76 @@ Run (raw element sets and predictions stay under `data/validation/reentry/`, nev
     uv run --no-project python -I tools/fetch-reentry-elements.py --cpf anderra:29664 anderrp:29667 andep:35693 andec:35694
     cargo build -p spacelab --release --example cpf_mean_state
     uv run --no-project python -I tools/lifetime-campaign.py spheres --objects 22994 22995 23471 22990 22991 23472 29664 29667 35694 35693
+
+### 10.44 The ablation ladder: what each mechanism of SDTM-1 buys, held out (Ф30.F)
+
+Each rung below is the rung above it in a limit, so a rung is the shipped field with mechanisms taken away, not
+another model. `derivations/sdtm_ablation.mac` proves each limit: the solar wind's share to 0, the gain's `κ` to 0,
+the saturation's `D` to ∞, the cooling's `H_s` to ∞, the kernel's second constant to 0, the filter's time to 0, and
+the storm regressors to 0. Each rung is a field of `tools/evaluate-sdtm.py`, fitted and scored on Ф30.B's five
+family folds and eleven storm-out folds. The two-constant kernel and nitric-oxide cooling are the two ways up
+from first-order heating. The shipped form takes cooling.
+
+MAPE held out, in %; the phases are `tools/residual-maps.py`'s:
+
+| rung | parameters | family: all | outside storms | pre-storm | onset | main and recovery | post-storm | storm folds |
+|---|---|---|---|---|---|---|---|---|
+| Bates on the flux | 12 | 46.72 | 46.82 | 61.17 | 46.11 | 42.49 | 40.94 | 46.09 |
+| + geography and season | 39 | 26.12 | 25.54 | 42.47 | 31.88 | 34.30 | 23.04 | 29.76 |
+| + ap, held over its interval | 44 | 23.99 | 23.47 | 43.25 | 30.41 | 29.14 | 23.93 | 31.37 |
+| + first-order heating | 45 | 23.44 | 22.78 | 43.87 | 29.89 | 30.98 | 25.11 | 37.92 |
+| + a second constant: the kernel | 46 | 23.44 | 22.78 | 43.88 | 29.88 | 30.95 | 25.09 | 37.83 |
+| + nitric-oxide cooling | 47 | 23.05 | 22.54 | 44.32 | 29.69 | 27.37 | 21.79 | 23.90 |
+| + flux saturation | 48 | 21.38 | 21.26 | 21.55 | 21.73 | 24.27 | 20.07 | 23.95 |
+| + flux gain: shipped | 49 | 20.83 | 20.81 | 20.79 | 20.83 | 21.65 | 19.47 | 23.79 |
+| + solar wind | 50 | 20.46 | 20.45 | 20.68 | 20.62 | 20.84 | 19.02 | 22.91 |
+
+What a rung adds: its MAPE minus that of the rung it extends, in percentage points, paired on the same rows. The
+interval resamples storm windows and 27-day blocks (`tools/cluster-intervals.py`'s storm level).
+
+| rung | against | family: all | outside storms | main and recovery | storm folds |
+|---|---|---|---|---|---|
+| + geography and season | Bates on the flux | -20.60 [-22.05, -19.19] | -21.28 [-22.82, -19.75] | -8.19 [-9.87, -6.18] | -16.33 [-21.71, -12.18] |
+| + ap, held over its interval | geography and season | -2.13 [-2.46, -1.79] | -2.07 [-2.43, -1.72] | -5.16 [-7.13, -3.24] | +1.61 [-3.00, +6.71] spans 0 |
+| + first-order heating | the index | -0.56 [-0.68, -0.43] | -0.69 [-0.81, -0.57] | +1.84 [+0.54, +3.14] | +6.55 [+3.84, +9.08] |
+| + a second constant: the kernel | first-order heating | -0.00 [-0.00, +0.00] spans 0 | +0.00 [-0.00, +0.00] spans 0 | -0.02 [-0.04, -0.01] | -0.09 [-0.13, -0.06] |
+| + nitric-oxide cooling | first-order heating | -0.39 [-0.52, -0.26] | -0.23 [-0.34, -0.11] | -3.61 [-5.22, -2.06] | -14.03 [-19.16, -8.40] |
+| + flux saturation | nitric-oxide cooling | -1.67 [-2.87, -0.77] | -1.28 [-2.35, -0.60] | -3.10 [-8.91, +0.18] spans 0 | +0.05 [-4.64, +3.27] spans 0 |
+| + flux gain: shipped | flux saturation | -0.54 [-0.64, -0.45] | -0.45 [-0.54, -0.35] | -2.62 [-3.27, -1.98] | -0.16 [-0.93, +0.58] spans 0 |
+| + solar wind | shipped | -0.38 [-0.48, -0.27] | -0.36 [-0.47, -0.26] | -0.81 [-1.22, -0.42] | -0.87 [-1.53, -0.20] |
+
+Findings:
+
+- **Geography and season carry most of the field.** They take 20.6 points off the Bates profile on the flux alone
+  (46.7 to 26.1 %).
+- **The index comes next:** −2.13 on the family folds and −5.16 in the main and recovery phases. On the storm-out
+  folds the interval spans zero.
+- **Heating alone costs at storms.** First-order heating gains 0.56 overall, but it loses 1.84 in the main and
+  recovery phases and 6.55 on the storm-out folds. Nitric-oxide cooling turns that round: −3.61 in the main and
+  recovery phases and −14.03 on the storm-out folds.
+- **The kernel's second constant buys nothing.** It gives 0.00 on the family folds, an interval that spans zero,
+  and −0.02 and −0.09 at storms. The shipped form does not carry it.
+- **Flux saturation acts outside storms.** It gives −1.67 [−2.87, −0.77] overall. Its gain sits in the pre-storm
+  phase (44.32 to 21.55 %), where the storm term is quiet, so it is the flux that it corrects. In the main and
+  recovery phases and on the storm-out folds its interval spans zero.
+- **The flux gain:** −0.54 overall and −2.62 in the main and recovery phases. On the storm-out folds it spans zero.
+- **The solar wind** gains in every column, and each interval excludes zero: −0.38 overall, −0.81 in the main and
+  recovery phases, and −0.87 on the storm-out folds. Geography and season, and the cooling, also gain in every
+  column. The solar wind stays opt-in (D-27).
+- **Reported as spanning zero:** the kernel's second constant on the family folds; the index, the saturation and
+  the gain on the storm-out folds; the saturation in the main and recovery phases.
+
+**Not measured:** the wall time per call. These folds ran on this machine at the same time, and a time needs the
+`bench` procedure on a quiet one. That number is still to be taken.
+
+Run (each fold is resumable; results stay under `data/validation/sdtm-eval/`):
+
+    for f in bates harmonics instant first_order two_constant nitric no_gain default solar_wind; do
+      for k in family storm; do
+        uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind $k --field $f
+      done
+    done
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
 
 ---
 

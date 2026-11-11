@@ -2,13 +2,16 @@
 //! NRLMSISE-00, at the points GOLD and GUVI retrieve it (`plans/17` Ф23.P).
 //!
 //! `cargo run -p spacelab-propagation --release --example column_on2 -- SW-All.csv < points > columns`
+//! `cargo run -p spacelab-propagation --release --example column_on2 -- --local 520 SW-All.csv < points`
 //! `cargo run -p spacelab-propagation --release --example column_on2 -- --check`
 //!
 //! Each input line is `year month day seconds_of_day latitude_deg longitude_deg lst_h`; each output line is
 //! `t_inf_k sdtm_ratio sdtm_depth_km msis_ratio msis_depth_km`, `nan` where the feed lacks a day a model
 //! needs. The column is the vertical one in geodetic altitude, `∫_z^top n dz` to 5000 km, by 32-point
 //! Gauss–Legendre on six pieces; the depth is where N2's column is 1e21 m⁻², by Newton on the column's
-//! logarithm, whose derivative is `−n/N`.
+//! logarithm, whose derivative is `−n/N`. `--local ALT_KM` prints instead each model's local ratio `n_O/n_N2` at
+//! that geodetic altitude, in the ratio columns, and the altitude in the depth columns: what an in-situ mass
+//! spectrometer measures (TianMu-1's NGMS).
 //!
 //! SDTM-1's species are its closed form (`derivations/sdtm_column.mac`): the boundary composition and scale
 //! and the Bates profile at the field's `T∞` and `σ`, so its ratio is the geometric one the gate computes.
@@ -199,85 +202,143 @@ fn day_of_year(year: i32, month: u32, day: u32) -> i32 {
     CUMULATIVE[month_index] + i32::try_from(day).expect("day 1..=31") + i32::from(leap && month > 2)
 }
 
+/// One input line: the civil date, UT seconds, geodetic latitude and longitude in degrees, local solar time.
+struct Point {
+    year: i32,
+    month: u32,
+    day: u32,
+    sec: f64,
+    lat: f64,
+    lon: f64,
+    lst: f64,
+}
+
+fn parse(line: &str) -> Point {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    let [year, month, day, rest @ ..] = &fields[..] else {
+        panic!("expected 7 fields, got {line:?}");
+    };
+    let f: Vec<f64> = rest
+        .iter()
+        .map(|x| x.parse().expect("numeric field"))
+        .collect();
+    let [sec, lat, lon, lst] = f[..] else {
+        panic!("expected 7 fields, got {line:?}");
+    };
+    Point {
+        year: year.parse().expect("integer year"),
+        month: month.parse().expect("integer month"),
+        day: day.parse().expect("integer day"),
+        sec,
+        lat,
+        lon,
+        lst,
+    }
+}
+
+/// SDTM-1's `(T∞, ratio, height)`: the column ratio and its depth, or the local ratio at `local`.
+fn sdtm_at(
+    days: &[SpaceWeatherDay],
+    p: &Point,
+    local: Option<f64>,
+    rules: &Rules,
+) -> Option<(f64, f64, f64)> {
+    let field = coefficients::FIELD;
+    let drivers = space_weather::sdtm_drivers::<{ coefficients::HISTORY }>(
+        days,
+        field.storm(),
+        p.year,
+        p.month,
+        p.day,
+        p.sec,
+    )?;
+    let point = SdtmPoint {
+        altitude: 4.0e5,
+        latitude: p.lat.to_radians(),
+        local_solar_time: p.lst.rem_euclid(24.0),
+        day_of_year: f64::from(day_of_year(p.year, p.month, p.day)) + p.sec / 86_400.0,
+    };
+    let t_inf = field.exospheric_temperature(&point, &drivers);
+    match local {
+        Some(z) => {
+            let [o, n2] = sdtm(t_inf, z);
+            Some((t_inf, o / n2, z))
+        }
+        None => depth(&|z| sdtm(t_inf, z), rules, BOUNDARY_ALTITUDE).map(|(z, r)| (t_inf, r, z)),
+    }
+}
+
+/// NRLMSISE-00's `(height, ratio)`, as [`sdtm_at`].
+fn msis_at(
+    days: &[SpaceWeatherDay],
+    p: &Point,
+    local: Option<f64>,
+    rules: &Rules,
+) -> Option<(f64, f64)> {
+    let mut flags = Nrlmsise00Flags::default();
+    flags.switches[9] = -1;
+    let w = window(days, p.year, p.month, p.day)?;
+    let today = w[4];
+    let ap_array = space_weather::nrlmsise_ap_array(w, p.year, p.month, p.day, p.sec)?;
+    let msis = |z: f64| {
+        let input = Nrlmsise00Input {
+            year: p.year,
+            doy: day_of_year(p.year, p.month, p.day),
+            sec: p.sec,
+            alt: z / 1000.0,
+            g_lat: p.lat,
+            g_long: p.lon,
+            lst: p.lst,
+            f107a: today.f107_center81,
+            f107: w[3].f107_observed,
+            ap: today.ap,
+            ap_array: Some(ap_array),
+        };
+        let d = gtd7(&input, &flags).d;
+        [d[1] * 1e6, d[2] * 1e6]
+    };
+    match local {
+        Some(z) => {
+            let [o, n2] = msis(z);
+            Some((z, o / n2))
+        }
+        None => depth(&msis, rules, 9.0e4),
+    }
+}
+
 fn main() {
     let rules = Rules {
         column: gauss_legendre(),
         step: gauss_legendre(),
     };
-    let path = std::env::args()
-        .nth(1)
-        .expect("usage: column_on2 SW-All.csv < points | column_on2 --check");
-    if path == "--check" {
-        std::process::exit(i32::from(!check(&rules)));
-    }
+    let args: Vec<String> = std::env::args().collect();
+    let usage = "usage: column_on2 [--local ALT_KM] SW-All.csv < points | column_on2 --check";
+    let (local, path) = match args.get(1).map(String::as_str) {
+        Some("--check") => std::process::exit(i32::from(!check(&rules))),
+        Some("--local") => (
+            Some(
+                1000.0
+                    * args
+                        .get(2)
+                        .expect(usage)
+                        .parse::<f64>()
+                        .expect("altitude, km"),
+            ),
+            args.get(3).expect(usage),
+        ),
+        Some(_) => (None, &args[1]),
+        None => panic!("{usage}"),
+    };
     let days = space_weather::parse_space_weather(
         &std::fs::read_to_string(path).expect("readable SW-All.csv"),
     );
-    let mut storm = Nrlmsise00Flags::default();
-    storm.switches[9] = -1;
-    let field = coefficients::FIELD;
-
     let mut out = BufWriter::new(std::io::stdout().lock());
     for line in std::io::stdin().lock().lines() {
-        let line = line.expect("readable stdin");
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        let [year, month, day, rest @ ..] = &fields[..] else {
-            panic!("expected 7 fields, got {line:?}");
-        };
-        let year: i32 = year.parse().expect("integer year");
-        let month: u32 = month.parse().expect("integer month");
-        let day: u32 = day.parse().expect("integer day");
-        let f: Vec<f64> = rest
-            .iter()
-            .map(|x| x.parse().expect("numeric field"))
-            .collect();
-        let [sec, lat, lon, lst] = f[..] else {
-            panic!("expected 7 fields, got {line:?}");
-        };
-        let doy = day_of_year(year, month, day);
-
-        let sdtm_row = space_weather::sdtm_drivers::<{ coefficients::HISTORY }>(
-            &days,
-            field.storm(),
-            year,
-            month,
-            day,
-            sec,
-        )
-        .and_then(|drivers| {
-            let point = SdtmPoint {
-                altitude: 4.0e5,
-                latitude: lat.to_radians(),
-                local_solar_time: lst.rem_euclid(24.0),
-                day_of_year: f64::from(doy) + sec / 86_400.0,
-            };
-            let t_inf = field.exospheric_temperature(&point, &drivers);
-            depth(&|z| sdtm(t_inf, z), &rules, BOUNDARY_ALTITUDE).map(|(z, r)| (t_inf, r, z))
-        });
-        let msis_row = window(&days, year, month, day).and_then(|w| {
-            let today = w[4];
-            let ap_array = space_weather::nrlmsise_ap_array(w, year, month, day, sec)?;
-            let msis = |z: f64| {
-                let input = Nrlmsise00Input {
-                    year,
-                    doy,
-                    sec,
-                    alt: z / 1000.0,
-                    g_lat: lat,
-                    g_long: lon,
-                    lst,
-                    f107a: today.f107_center81,
-                    f107: w[3].f107_observed,
-                    ap: today.ap,
-                    ap_array: Some(ap_array),
-                };
-                let d = gtd7(&input, &storm).d;
-                [d[1] * 1e6, d[2] * 1e6]
-            };
-            depth(&msis, &rules, 9.0e4)
-        });
-        let (t_inf, sdtm_ratio, sdtm_z) = sdtm_row.unwrap_or((f64::NAN, f64::NAN, f64::NAN));
-        let (msis_z, msis_ratio) = msis_row.unwrap_or((f64::NAN, f64::NAN));
+        let point = parse(&line.expect("readable stdin"));
+        let (t_inf, sdtm_ratio, sdtm_z) =
+            sdtm_at(&days, &point, local, &rules).unwrap_or((f64::NAN, f64::NAN, f64::NAN));
+        let (msis_z, msis_ratio) =
+            msis_at(&days, &point, local, &rules).unwrap_or((f64::NAN, f64::NAN));
         writeln!(
             out,
             "{t_inf:.3} {sdtm_ratio:.6} {:.4} {msis_ratio:.6} {:.4}",

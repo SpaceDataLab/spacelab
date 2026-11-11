@@ -39,6 +39,7 @@ SHIFT_GUARD = pd.Timedelta(days=10)
 MAX_ANGLE = 75.0
 MAX_MLAT = 60.0
 MLAT_BANDS = ((0.0, 30.0), (30.0, 60.0))
+PEAK_CLASSES = ((80.0, 150.0), (150.0, 300.0), (300.0, np.inf))
 
 
 def load(name: str, file: str):
@@ -233,11 +234,23 @@ def score(g, maps, draws: int) -> int:
         .groupby(["storm", "i", "j"])[["on2", "sdtm", "msis"]]
         .mean()
     )
-    joined = table.join(base, on=["storm", "i", "j"], rsuffix="_pre").dropna(
-        subset=["on2_pre"]
-    )
+    joined = table.merge(
+        base, left_on=["storm", "i", "j"], right_index=True, suffixes=("", "_pre")
+    ).dropna(subset=["on2_pre"])
     joined = joined[joined.phase > 0].reset_index(drop=True)
+    joined["peak_ap"] = [found[n]["peak_ap"] for n in joined.storm]
     clusters = joined.storm.to_numpy()
+
+    def change(a: np.ndarray, label: str) -> None:
+        row = []
+        for col in ("on2", "sdtm", "msis"):
+            v = np.log(joined[col] / joined[f"{col}_pre"]).to_numpy()
+            m, lo, hi = maps.mean_interval(v, a, clusters, draws, rng)
+            row.append(
+                f"{100 * np.expm1(m):+.1f} [{100 * np.expm1(lo):+.1f}, {100 * np.expm1(hi):+.1f}]"
+            )
+        print(f"{label} | {a.sum()} | {joined.storm[a].nunique()} | " + " | ".join(row))
+
     print(
         "\nchange from the pixel's own pre-storm mean, %, [95 % storm-resampled]: GOLD | SDTM-1 | NRLMSISE-00"
     )
@@ -251,19 +264,26 @@ def score(g, maps, draws: int) -> int:
                 & (joined.mlat.abs() >= low)
                 & (joined.mlat.abs() < high)
             ).to_numpy()
-            if not a.any():
-                continue
-            row = []
-            for col in ("on2", "sdtm", "msis"):
-                v = np.log(joined[col] / joined[f"{col}_pre"]).to_numpy()
-                m, lo, hi = maps.mean_interval(v, a, clusters, draws, rng)
-                row.append(
-                    f"{100 * np.expm1(m):+.1f} [{100 * np.expm1(lo):+.1f}, {100 * np.expm1(hi):+.1f}]"
+            if a.any():
+                change(a, f"{name} | {low:g}-{high:g}°")
+    print("\nthe same, main and recovery, by the storm's first-peak ap")
+    print(
+        "first-peak ap | magnetic latitude | pixels | storms | GOLD | SDTM-1 | NRLMSISE-00"
+    )
+    for p_low, p_high in PEAK_CLASSES:
+        for low, high in MLAT_BANDS:
+            a = (
+                (joined.phase == 2)
+                & (joined.peak_ap >= p_low)
+                & (joined.peak_ap < p_high)
+                & (joined.mlat.abs() >= low)
+                & (joined.mlat.abs() < high)
+            ).to_numpy()
+            if a.any():
+                label = (
+                    f"{p_low:g}-{p_high:g}" if np.isfinite(p_high) else f">= {p_low:g}"
                 )
-            print(
-                f"{name} | {low:g}-{high:g}° | {a.sum()} | {joined.storm[a].nunique()} | "
-                + " | ".join(row)
-            )
+                change(a, f"{label} | {low:g}-{high:g}°")
     return 0
 
 

@@ -1469,6 +1469,12 @@ def main() -> None:
         default=0,
         help="start the thinning at this row (0 <= phase < step)",
     )
+    parser.add_argument(
+        "--score-step",
+        type=int,
+        help="also print the held-out scores on the rows a run at this step and phase 0 would read: "
+        "the same rows for every --step that divides it (Ф30.E)",
+    )
     parser.add_argument("--degree", type=int, default=2)
     parser.add_argument("--caps", choices=sorted(g.CAPS), default="storm-log1")
     parser.add_argument("--ridge", type=float, default=1.0e-3)
@@ -1761,6 +1767,19 @@ def main() -> None:
             "MSIS debiased": debias(msis[done], sat[done]),
         },
     )
+    if argument.score_step:
+        index = (
+            argument.phase + argument.step * rows.groupby("sat", sort=False).cumcount()
+        )
+        common = done & (index.to_numpy() % argument.score_step == 0)
+        storm = ap_daily >= 50.0
+        print(
+            f"\non the rows of --step {argument.score_step}: {common.sum()} rows, SDTM-1 held out "
+            f"{g.mape(held[common]):.2f} %, debiased {g.mape(debias(held[common], sat[common])):.2f} %, "
+            f"Ap >= 50 {g.mape(held[common & storm]):.2f} % ({(common & storm).sum()} rows); "
+            f"NRLMSISE-00 {g.mape(msis[common]):.2f} %",
+            flush=True,
+        )
     if argument.emit:
         print("\nthe shipped field, fitted on every satellite", flush=True)
         model = CorpusModel(
@@ -1925,6 +1944,9 @@ def cases(
         wind=argument.solar_wind is not None,
     )
     window_rows = every[every.family.isin(fitted)].reset_index(drop=True)
+    if window_rows.empty:
+        print("\n== named cases (Ф23.D): no held-out family flew one ==")
+        return
     held, msis = held_out(window_rows, fitted, argument, sigma)
     done = np.isfinite(held) & np.isfinite(msis)
     print(

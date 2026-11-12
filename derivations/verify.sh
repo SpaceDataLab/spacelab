@@ -1008,12 +1008,13 @@ if have maxima; then
     mac_zeros gauss_legendre_tables.mac 29 "the DSST Gauss-Legendre tables are the nearest doubles to the roots of P_n and their weights; each rule is exact to degree 2n - 1"
     mac_zeros access_horizon_crossing.mac 4 "a circular pass rises and sets at acos(Re cos e / r) - e"
     mac_zeros root_reference_roots.mac 12 "Cardano, Dottie and W(1) roots the root finder is gated on"
+    mac_zeros event_geometry.mac 9 "apparent radius, occulted-rim extremes, elevation and angle forms of the event detectors"
     mac_zeros metrics_periodic_gaps.mac 8 "coverage metrics of a periodic pass pattern in exact rationals"
     mac_zeros fom_weighted_grid.mac 7 "weighted figures of merit on an exact grid, and their weight-scaling invariance"
     mac_zeros photometry_closed_forms.mac 17 "the diffuse-sphere phase law, V zero point, air mass and limiting magnitude"
     mac_zeros observability_diurnal_arc.mac 13 "the diurnal arc solves the altitude equation; air-mass values; refraction monotone"
     mac_zeros elevation_footprint.mac 8 "the elevation footprint edge from its defining vectors"
-    mac_zeros cone_footprint.mac 13 "the cone footprint edge, its tangency with the horizon, 1 - e^2 = (1 - f)^2"
+    mac_zeros cone_footprint.mac 15 "the cone footprint edge, its tangency with the horizon, the limb, 1 - e^2 = (1 - f)^2"
     mac_zeros comms_link_budget.mac 7 "slant range, free-space loss and the dB link budget"
     mac_zeros sar_incidence.mac 7 "SAR incidence, band edges and look side"
     mac_zeros scan_catalogue.mac 12 "scan-angle catalogue end points, antisymmetry and VIIRS extent"
@@ -1172,7 +1173,7 @@ if have maxima; then
     done
 fi
 if have gp; then
-    for f in access_horizon_crossing root_reference_roots photometry_closed_forms observability_diurnal_arc \
+    for f in access_horizon_crossing root_reference_roots event_geometry photometry_closed_forms observability_diurnal_arc \
         elevation_footprint cone_footprint comms_link_budget sar_incidence scan_catalogue \
         wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay split_conformal_coverage cluster_design_effect tle_kozai_recovery harris_priester_law \
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form \

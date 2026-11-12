@@ -161,11 +161,15 @@ fn g_vanishes_on_the_derived_footprint_edge() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 3. `Cone ∧ Horizon` reproduces SaVi's horizon-limited branch — without a branch.
+// 3. `Cone ∧ Horizon` ends on the derived edge in both of its regimes — without a branch.
 // ---------------------------------------------------------------------------------------------
 
-/// SaVi's two closed forms for the footprint radius on the unit sphere, `rho = sin(lam_max)`.
-fn savi_cone_rho(l: f64, alpha: f64) -> f64 {
+/// The footprint radius on the unit sphere, `rho = sin(lam_max)`, as
+/// `derivations/cone_footprint.mac` derives it from the defining vectors: the near-side cone
+/// edge `lam = asin(L sin a) - a` while `L sin a < 1` ((1)-(2), in front of the limb by (6)), and
+/// past it the horizon edge `cos(lam) = 1/L`, the whole visible cap then inside the cone
+/// ((14)-(15)). SaVi publishes the same two forms; `footprint3.mac` proves them equal.
+fn cone_horizon_rho(l: f64, alpha: f64) -> f64 {
     let (s, c) = (alpha.sin(), alpha.cos());
     if l >= 1.0 / s {
         // horizon-limited: the cone is wider than the limb
@@ -176,11 +180,11 @@ fn savi_cone_rho(l: f64, alpha: f64) -> f64 {
 }
 
 #[test]
-fn cone_and_horizon_boundary_matches_savi_in_both_branches() {
+fn cone_and_horizon_boundary_is_the_derived_edge_in_both_regimes() {
     let (cell, zenith) = polar_cell();
     let horizon = ElevationMask::HORIZON;
 
-    // (L, alpha_deg, which branch SaVi takes)
+    // (L, alpha_deg, which edge limits the footprint)
     let cases = [
         (1.05_f64, 30.0_f64, "cone-limited"), // 1/sin a = 2.0  > L
         (1.08, 20.0, "cone-limited"),         // 1/sin a = 2.92 > L
@@ -193,7 +197,7 @@ fn cone_and_horizon_boundary_matches_savi_in_both_branches() {
         let cone = Cone::new(alpha).expect("half-angle in range");
         let combined = And(cone, horizon);
 
-        let lam_edge = savi_cone_rho(l, alpha).asin();
+        let lam_edge = cone_horizon_rho(l, alpha).asin();
 
         // Just inside the edge: covered. Just outside: not. The margin is chosen so the angular
         // step moves the satellite far more than the rounding of `g` (metres, not nanometres).

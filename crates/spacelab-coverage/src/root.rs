@@ -23,9 +23,12 @@
 //! * The bracket is a **precondition**, checked, not hoped for: `f(a)` and `f(b)` must differ in
 //!   sign. `brent` returns [`RootError::NotBracketed`] otherwise rather than extrapolating, which is
 //!   the failure mode `notes/11-gmat.md` §3 records in GMAT.
-//! * Convergence is **guaranteed**: the interpolated step is accepted only when it lands inside the
-//!   bracket and beats bisection, so the interval never stops shrinking and the worst case is
-//!   bisection — `⌈log2((b−a)/tol)⌉` evaluations, bounded, no watchdog needed.
+//! * Convergence is **guaranteed**: an interpolated step is accepted only when it lands inside the
+//!   bracket and shrinks it fast enough, and otherwise the step bisects, so the interval never
+//!   stops shrinking. The worst case is Brent's `(t + 1)² − 2` evaluations, `t = log2(|b − a|/τ)`
+//!   the bisection count and `τ = tol/2` the least tolerance (Bus & Dekker 1975, §1 and Theorem
+//!   3.3.1) — bounded, no watchdog needed, but not bisection's `t`: a triple root on a wide bracket
+//!   costs 111 evaluations where bisection takes 44 (`tests/root.rs`).
 //! * The tolerance is on the **abscissa** (the units of `x` — seconds, for a time root), never on
 //!   `f`. This is the dimension three other implementations get wrong: GMAT compares its tolerance
 //!   with a difference in the stop parameter's own units, PreviSat applies a tolerance in days to a

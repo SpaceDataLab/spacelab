@@ -19,9 +19,13 @@
    (1)-(2) the closed form; (3)-(4) theta = alpha on it; (5) the division-free u~ = n2 - c.r is
    |r| (w . bhat) for any vectors; (6)-(7) the edge elevation; (8)-(10) the tangency; (11) the
    nadir turn rate |d bhat/dt| = |v_perp|/|r| the rate bound uses; (12) dg/dt for g = w . bhat -
-   ca |w| at a frozen bhat; (13) 1 - e^2 = (1 - f)^2, the constant INVERSE_ONE_MINUS_E2 inverts.
+   ca |w| at a frozen bhat; (13) 1 - e^2 = (1 - f)^2, the constant INVERSE_ONE_MINUS_E2 inverts;
+   (14)-(15) the limb: on the horizon edge cos(lam_h) = 1/L the line of sight has |w|^2 = L^2 - 1
+   and an off-nadir angle with sin(theta_h) = 1/L. The whole visible cap is inside the cone when
+   theta_h <= alpha, i.e. L sin(alpha) >= 1: past the tangency the horizon is the edge, before it
+   the cone edge of (1)-(2), whose elevation (6) is positive while sigma < 1.
 
-   Every residual prints as `<name>: 0`, 13 of them.                                             */
+   Every residual prints as `<name>: 0`, 15 of them.                                             */
 
 display2d : false$
 red(e) := ratsimp(ratsubst(1 - L^2*sa^2, k^2, ratsubst(1 - sa^2, ca^2, ratsimp(e))))$
@@ -78,3 +82,9 @@ print("cone_rate_identity:",
 
 /* (13) e^2 = f (2 - f), so 1/(1 - e^2) = 1/(1 - f)^2 */
 print("one_minus_e2:", ratsimp(1 - f*(2 - f) - (1 - f)^2))$
+
+/* (14)-(15) the limb, at the horizon edge cos(lam_h) = 1/L, sin(lam_h) = sqrt(L^2 - 1)/L */
+Sh : L*[sqrt(L^2 - 1)/L, 0, 1/L]$
+wh : G - Sh$
+print("limb_range_squared:", ratsimp(wh . wh - (L^2 - 1)))$
+print("limb_off_nadir_sine:", ratsimp(1 - (wh . (-Sh/L))^2/(wh . wh) - 1/L^2))$

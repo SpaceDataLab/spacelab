@@ -10,6 +10,10 @@
 //! * elevation — `g > 0` above the mask (visible), `g < 0` below;
 //! * field of view — `g < 0` inside the cone (target visible), `g > 0` outside (Orekit's
 //!   offset-from-boundary convention).
+//!
+//! The signs are this module's contract. The geometry is derived in `derivations/event_geometry.mac`
+//! (second engine `event_geometry.gp`): the apparent radius `asin(R/d)`, the rim extremes `s ± α`
+//! that make the umbra and penumbra tests exact, and the `atan2` forms of elevation and angle.
 
 // The single letters (a, b, d, g) are the notation of the detector geometry.
 #![allow(clippy::many_single_char_names)]

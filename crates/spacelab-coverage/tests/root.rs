@@ -232,6 +232,28 @@ fn the_cost_of_every_bracket_shape_is_the_measured_one() {
     assert_eq!(total, 642, "the battery's total cost moved");
 }
 
+/// Brent's worst case holds on every shape of the battery: at most `(t + 1)² − 2` evaluations,
+/// `t = log2(|b − a|/τ)` the number bisection needs (Bus & Dekker 1975, §1, of Brent's algorithm;
+/// `t` as in their Theorem 3.3.1). `τ` is the least value of the tolerance function, `tol/2` here:
+/// the search stops once `|c − b| ≤ 2·(2ε|b| + tol/2)`. The flat roots of order 3 to 25 cost more
+/// than bisection would and stay inside the bound; that is the guarantee, not bisection's `t`.
+#[test]
+fn no_bracket_costs_more_than_brents_bound() {
+    let mut above_bisection = 0;
+    for (i, &(f, a, b, tol, _)) in COST.iter().enumerate() {
+        let br = brent(f, a, b, tol).expect("bracketed");
+        let t = ((b - a).abs() / (0.5 * tol)).log2();
+        let bound = (t + 1.0).powi(2) - 2.0;
+        let n = f64::from(br.evaluations);
+        assert!(
+            n <= bound,
+            "case {i}: {n} evaluations, Brent's bound {bound:.1}"
+        );
+        above_bisection += u32::from(n > t.ceil());
+    }
+    assert_eq!(above_bisection, 4, "brackets that cost more than bisection");
+}
+
 #[test]
 fn the_bracket_width_is_the_interval_it_reports() {
     // `assert_valid_bracket` only ever compares the width against an upper bound, which a width

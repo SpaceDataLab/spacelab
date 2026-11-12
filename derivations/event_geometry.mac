@@ -1,0 +1,73 @@
+/* The geometry behind the event detectors of crates/spacelab-coverage/src/detectors.rs.
+
+   Eclipse. A sphere of radius R seen from distance d > R fills a cone whose half-angle alpha has
+   sin(alpha) = R/d: the line of sight to the tangent point is perpendicular to the radius there.
+   Two apparent disks, the occulting one (Earth, alpha_e) and the occulted one (Sun, alpha_s), with
+   centres s apart: a point of the occulted rim at position angle psi, counted from the side away
+   from the occulting centre, lies D(psi) from it, cos D = cos s cos alpha_s - sin s sin alpha_s
+   cos psi (the spherical cosine rule), and that is monotone in cos psi, so D runs from
+   |s - alpha_s| to s + alpha_s. The occulted disk is wholly behind the occulting one exactly when
+   s + alpha_s <= alpha_e (the umbra, g = s - (alpha_e - alpha_s) <= 0) and wholly clear of it
+   exactly when s - alpha_s >= alpha_e (outside the penumbra, g = s - (alpha_e + alpha_s) >= 0).
+
+   Elevation. With up a unit vector and d the line of sight, v = d . up and h = |d - v up| satisfy
+   h^2 + v^2 = |d|^2, so atan2(v, h) is the angle whose sine is v/|d|: the elevation.
+
+   Field of view. atan2(|a x b|, a . b) is the angle between a and b: |a x b|^2 + (a . b)^2 =
+   |a|^2 |b|^2 (Lagrange's identity).
+
+   Which sign each g takes inside its event is the module's own contract, stated there; it is chosen
+   to be Orekit's, so a port behaves the same, and nothing here depends on it.
+
+   (1)-(2) the tangent cone; (3)-(4) the rim point from vectors and its distance; (5)-(6) the two
+   extremes; (7) the monotonicity in cos psi; (8) the elevation identity; (9) Lagrange's identity.
+   Every residual prints as `<name>: 0`, 9 of them.
+
+   timeout 120 maxima --very-quiet -Q -b event_geometry.mac                                        */
+
+display2d : false$
+
+/* (1)-(2) Viewer at the origin, sphere centred at (d, 0, 0); the tangent point P = O + R (cos phi,
+   sin phi, 0) has (P - V) . (P - O) = 0, i.e. cos phi = -R/d. The angle theta between P and O
+   then has cos^2 theta = 1 - R^2/d^2 with cos theta > 0. */
+P : [d + R*cphi, R*sphi, 0]$
+O : [d, 0, 0]$
+tangent : ratsubst(1 - cphi^2, sphi^2, expand(P . (P - O)))$
+cphi0 : rhs(first(solve(tangent, cphi)))$
+print("tangent_point:", ratsimp(cphi0 + R/d))$
+pp : ratsimp(ratsubst(1 - cphi^2, sphi^2, expand(P . P)))$
+po : expand(P . O)$
+print("apparent_radius:", ratsimp(subst(cphi = cphi0, 1 - po^2/(pp*d^2)) - R^2/d^2))$
+
+/* (3)-(4) Unit vectors: occulting centre e = (1, 0, 0), occulted centre u at angle s in the x-y
+   plane, and the rim point r at angle alpha_s from u, position angle psi about it. */
+e : [1, 0, 0]$
+u : [cos(s), sin(s), 0]$
+n1 : [-sin(s), cos(s), 0]$
+n2 : [0, 0, 1]$
+r : cos(as)*u + sin(as)*(cos(psi)*n1 + sin(psi)*n2)$
+print("rim_unit:", trigsimp(r . r - 1))$
+cosD : cos(s)*cos(as) - sin(s)*sin(as)*cos(psi)$
+print("rim_distance:", trigsimp(r . e - cosD))$
+
+/* (5)-(6) the extremes: psi = pi gives cos(s - as) (the near point), psi = 0 cos(s + as) (the far
+   point). */
+print("rim_near:", trigsimp(trigexpand(subst(psi = %pi, cosD) - cos(s - as))))$
+print("rim_far:", trigsimp(trigexpand(subst(psi = 0, cosD) - cos(s + as))))$
+
+/* (7) d cos D / d cos psi = -sin s sin as <= 0 on 0 <= s, as <= pi: cos D falls, so D rises,
+   monotonically from the near point to the far one. */
+print("rim_monotone:", ratsimp(diff(subst(cos(psi) = cp, cosD), cp) + sin(s)*sin(as)))$
+
+/* (8) elevation: up unit, d arbitrary */
+dv : [d1, d2, d3]$
+up : [u1, u2, u3]$
+vv : dv . up$
+hv : dv - vv*up$
+print("elevation_split:", ratsimp(ratsubst(1 - u1^2 - u2^2, u3^2, expand(hv . hv + vv^2 - dv . dv))))$
+
+/* (9) Lagrange's identity */
+av : [a1, a2, a3]$
+bv : [b1, b2, b3]$
+cross(x, y) := [x[2]*y[3] - x[3]*y[2], x[3]*y[1] - x[1]*y[3], x[1]*y[2] - x[2]*y[1]]$
+print("lagrange:", ratsimp(expand(cross(av, bv) . cross(av, bv) + (av . bv)^2 - (av . av)*(bv . bv))))$

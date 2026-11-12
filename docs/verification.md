@@ -11454,8 +11454,15 @@ as the doubles they parse to. Dormand–Prince's dense output had no check at al
 now shown to be order 4 at every θ, the eight order-4 conditions as identities in θ. The read-back
 found one wrong digit. SABA4's kick weights carried a 36th digit two units off, because the
 generator printed roots it had taken at 36 digits; the double was right, the text was not, and the
-generator now works at 60. **Today: 181 open literals in 95 items.** `--check` fails on an item with more open literals than its entry, on a new item
-and on an entry the sweep no longer matches, so the count can only fall: an entry leaves when its
+generator now works at 60.
+
+The SLR constants went next. `derivations/ocean_loading.mac` reads the Doodson coefficients and
+rates of `TDFRPH` back from `loading.rs`, as exact rationals. `STEP2DIU`'s 32 coefficients in
+`displacement.rs` were compared once, digit for digit and in order, with `DEHANTTIDEINEL.F` of the
+IERS Conventions (2010) software, and its mass ratios and Earth radius with that routine's lines
+270–272; the hydrostatic zenith-delay factor in `troposphere.rs` with `FCUL_ZD_HPA.F`, equation
+(26). All agree. **Today: 141 open literals in 89 items.** `--check` fails on an item with more
+open literals than its entry, on a new item and on an entry the sweep no longer matches, so the count can only fall: an entry leaves when its
 literals name the derivation that checks them or the document they are copied from.
 
 ```text
@@ -11545,12 +11552,6 @@ crates/spacelab-sgp4/src/tle.rs::epoch | 1
 crates/spacelab-signal/src/csa.rs::C | 1
 crates/spacelab-signal/src/sar.rs::secondary_range_compression | 1
 crates/spacelab-signal/src/sar.rs::src_fm_rate | 1
-crates/spacelab-slr/src/displacement.rs::EARTH_RADIUS | 1
-crates/spacelab-slr/src/displacement.rs::MASS_RATIO_MOON | 1
-crates/spacelab-slr/src/displacement.rs::MASS_RATIO_SUN | 1
-crates/spacelab-slr/src/displacement.rs::new | 18
-crates/spacelab-slr/src/loading.rs::new | 18
-crates/spacelab-slr/src/troposphere.rs::CO2_PPM | 1
 ```
 
 ## Reproducing the oracles

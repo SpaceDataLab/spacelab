@@ -4,7 +4,8 @@
    helpers let the derivation read the committed table back and hold every entry against the value
    it derives. `rust_table(path, name)` returns the literals of `const NAME: ... = [ ... ];` in
    order, flattened, as the text the source shows: a literal, or a quotient `p / q` of two;
-   `rust_scalar(path, name)` the one entry of `const NAME: f64 = ...;`.
+   `rust_scalar(path, name)` the one entry of `const NAME: f64 = ...;`, and
+   `rust_literals_between(path, begin, finish)` the literals written inline between two lines.
    `rust_rational` reads one as the exact rational it denotes and `rust_number` as a bigfloat at the
    current fpprec. `same_rationals(entries, exact)` is true when each entry is exactly its rational;
    `same_doubles` when each parses to the double its exact value rounds to; `transcribed` when each
@@ -65,6 +66,25 @@ rust_scalar(path, name) := block([s : openr(path), line, head : concat("const ",
       out : strim(" ", substring(line, at + 2, ssearch(";", line)))),
   close(s),
   if out = false then error("rust_scalar: no const", name, "in", path),
+  out)$
+
+/* The numeric literals of the lines after the first one containing `begin`, up to and excluding the
+   first containing `finish`, in order, with their signs: for coefficients written inline in code. A
+   minus followed by a space and a literal is read as that literal's sign, so `c - 0.5 * t` gives
+   -0.5; `//` comments are skipped. */
+rust_literals_between(path, begin, finish) := block([s : openr(path), line, inside : false, done : false,
+                                              out : [], at],
+  while not done and (line : readline(s)) # false do (
+    if inside and ssearch(finish, line) # false then done : true
+    else if inside then (
+      at : ssearch("//", line),
+      if at # false then line : substring(line, 1, at),
+      line : ssubst("-", "- ", line),
+      for c in ["(", ")", "[", "]", "*", "+", ",", ";", "="] do line : ssubst(" ", c, line),
+      out : append(out, sublist(split(line, " ", false), rust_is_number)))
+    else if ssearch(begin, line) # false then inside : true),
+  close(s),
+  if not done then error("rust_literals_between: no span", begin, "to", finish, "in", path),
   out)$
 
 /* Every entry is exactly the rational its derivation gives: for tables written as quotients of

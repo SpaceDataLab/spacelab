@@ -113,6 +113,7 @@ pub fn mendes_pavlis_zenith_delay(
     let fnh = 0.003_101 * (W0 + 3.0 * W1 * sigma2 + 5.0 * W2 * sigma4 + 7.0 * W3 * sigma6);
 
     ZenithDelay {
+        // Equations (26) and (38), as IERS Conventions (2010) software `FCUL_ZD_HPA.F` writes them.
         hydrostatic: 2.416_579e-3 * fh * pressure / f,
         non_hydrostatic: 1e-4 * (5.316 * fnh - 3.759 * fh) * water_vapour / f,
     }

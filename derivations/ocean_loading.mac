@@ -67,6 +67,16 @@ for a : 1 thru 5 do block([c0, c1],
 print("largest rate error in units of 1e-10 cycles/day:", bfloat(worst))$
 must(is(worst <= 1/2),
      "(2) holds: the ten rate coefficients are the polynomials' derivatives at the tenth decimal, l' needing no t term")$
+/* The two lists above are the module's own, read back from `DoodsonArguments::new` as written: the
+   25 polynomial coefficients in order, the day fraction's 360, then the nine rate terms (plans/17
+   Ф17.D). */
+load("rust_literals.mac")$
+written : rust_literals_between("../crates/spacelab-slr/src/loading.rs",
+                                "fn new(day_fraction: f64, t: f64)", "let ds = df + domega;")$
+must(same_rationals(written,
+                    append(flatten(makelist(makelist(shipped[a][k][1], k, 1, 5), a, 1, 5)), [360],
+                           delete(0, flatten(rates)))),
+     "(2) holds: loading.rs writes exactly these coefficients and rates")$
 
 /* ---- (3) the Doodson values and their rates ---------------------------------------------------- */
 args : [l, lp, F, D, Om]$

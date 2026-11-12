@@ -48,7 +48,8 @@ const L20: f64 = 0.0847;
 const H3: f64 = 0.292;
 const L3: f64 = 0.015;
 /// Sun/Moon mass ratios and the equatorial radius the tidal factors are formed with, from the
-/// reference routine's own current-best-estimate block.
+/// reference routine's own current-best-estimate block (`DEHANTTIDEINEL.F`, IERS Conventions (2010)
+/// software, chapter 7, as updated 2009-08-07).
 const MASS_RATIO_SUN: f64 = 332_946.048_2;
 const MASS_RATIO_MOON: f64 = 0.012_300_037_1;
 const EARTH_RADIUS: f64 = 6_378_136.6;
@@ -215,6 +216,8 @@ struct TidalArguments {
 }
 
 impl TidalArguments {
+    /// `STEP2DIU`'s phase angles, its 32 coefficients digit for digit (`DEHANTTIDEINEL.F`, IERS
+    /// Conventions (2010) software, chapter 7).
     fn new(fractional_hour: f64, t: f64) -> Self {
         let mut s =
             218.316_645_63 + (481_267.881_94 + (-0.001_466_388_9 + 0.000_001_851_39 * t) * t) * t;

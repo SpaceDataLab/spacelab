@@ -149,6 +149,8 @@ struct DoodsonArguments {
 }
 
 impl DoodsonArguments {
+    /// The IERS Conventions (2010) Delaunay arguments in degrees and their rates, as `TDFRPH`
+    /// writes them; `derivations/ocean_loading.mac` (1)–(2) checks each and reads them back.
     fn new(day_fraction: f64, t: f64) -> Self {
         // Delaunay arguments, degrees, in the IERS expressions the reference carries.
         let l = 134.963_402_51

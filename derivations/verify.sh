@@ -647,6 +647,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         skip "maxima cio_iers.mac" "tools/fetch-specs.sh output"
     fi
 
+    out=$(macf sgp4_regime.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 2 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima sgp4_regime.mac: Regime is the document's branch for all 33 published sets, none within 1e-6 of an edge"
+    else
+        bad "maxima sgp4_regime.mac" "expected 2 checks to hold, found $holds"
+    fi
+
     out=$(macf hansen_zonal.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then

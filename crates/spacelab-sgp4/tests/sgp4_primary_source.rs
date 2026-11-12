@@ -236,6 +236,10 @@ fn we_reproduce_the_published_output_to_the_precision_it_was_printed_at() {
         VELOCITY_PRINT_ULP_MS * 1e6,
     );
 
+    assert_eq!(
+        refused_objects, 0,
+        "every element set the published file propagates must be built and compared",
+    );
     assert!(
         compared > 600,
         "only {compared} states compared; the published file should yield far more",

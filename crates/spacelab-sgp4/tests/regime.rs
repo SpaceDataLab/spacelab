@@ -2,15 +2,49 @@
 //!
 //! [`Regime`] reimplements the published branch conditions so a caller can ask them
 //! without propagating. Reimplementing a condition is exactly the sort of thing that
-//! silently drifts, so it is checked two ways: against the propagator's own internal
-//! selector for the resonant cases, and against the deep-space period test for the
-//! rest.
+//! silently drifts. The gate is the document: `DOCUMENT_REGIME` is what its criteria
+//! assign each published set, evaluated at 40 digits in `derivations/sgp4_regime.mac`.
+//! The propagator's own internal selector and the deep-space period test are compared
+//! as well.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use spacelab_sgp4::{Convention, Regime, Satellite};
 
 const CASES: &str = include_str!("fixtures/sgp4_ver_tle.txt");
+
+/// The branch each published set takes by the document's criteria (Spacetrack Report #3 as
+/// revised by Vallado et al. 2006: the un-Kozai `n₀″`, the 225-minute period, the two resonance
+/// windows), row `k` for the `k`-th set of `fixtures/sgp4_ver_tle.txt`. Derived at 40 digits from
+/// the TLE fields by `derivations/sgp4_regime.mac`, which reads this table back. 0 near-Earth,
+/// 1 deep space without resonance, 2 24-hour resonance, 3 12-hour resonance; -1 a set
+/// `Satellite` refuses to build.
+const DOCUMENT_REGIME: [i8; 33] = [
+    0, 1, 0, 3, 3, 2, 1, 2, 1, 1, 3, 0, 3, 1, 1, 1, 2, 2, 2, 3, 0, 1, 0, 1, 2, 0, 0, 0, 0, 1, 1, 2,
+    1,
+];
+
+#[test]
+fn every_published_set_takes_the_branch_the_document_assigns() {
+    let lines = tle_lines();
+    assert_eq!(lines.len(), DOCUMENT_REGIME.len());
+    let got: Vec<i8> = lines
+        .iter()
+        .map(|(l1, l2)| match Satellite::from_tle_unchecked(l1, l2) {
+            Err(_) => -1,
+            Ok(satellite) => match satellite.regime() {
+                Regime::NearEarth => 0,
+                Regime::DeepSpaceNonResonant => 1,
+                Regime::DeepSpaceSynchronous => 2,
+                Regime::DeepSpaceHalfDay => 3,
+            },
+        })
+        .collect();
+    assert_eq!(
+        got, DOCUMENT_REGIME,
+        "Satellite's branches (or -1 where it refuses), set by set, against the document's"
+    );
+}
 
 /// The 33 published element sets as `(line1, line2)`.
 fn tle_lines() -> Vec<(&'static str, &'static str)> {

@@ -286,7 +286,10 @@ impl Satellite {
         // The underlying parser validates the checksum itself and has no way to be
         // told not to. Recompute the digit so it accepts the line: the caller has
         // already said it does not care, and the checksum feeds nothing downstream.
-        let (r1, r2) = (repair_checksum(line1), repair_checksum(line2));
+        let (r1, r2) = (
+            repair_checksum(&blank_ephemeris_type_as_zero(line1)),
+            repair_checksum(line2),
+        );
         let elements = sgp4::Elements::from_tle(None, r1.as_bytes(), r2.as_bytes())
             .map_err(|_| PropagationError::MalformedElements)?;
         Self::from_elements(&elements, Convention::default())
@@ -480,6 +483,17 @@ impl Satellite {
         for (t, slot) in times.iter().zip(out.iter_mut()) {
             *slot = self.propagate_at(*t);
         }
+    }
+}
+
+/// Line 1 with a blank ephemeris-type column (63) read as `0`, as the reference `twoline2rv`
+/// (Vallado et al. 2006) reads it. The published verification set carries one such line,
+/// catalogue 11801, and the document propagates it; the vendor parser refuses the blank. A `0`
+/// adds nothing to the checksum.
+fn blank_ephemeris_type_as_zero(line: &str) -> String {
+    match (line.get(..62), line.get(62..63), line.get(63..)) {
+        (Some(head), Some(" "), Some(tail)) => format!("{head}0{tail}"),
+        _ => line.to_owned(),
     }
 }
 

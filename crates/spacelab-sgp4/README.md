@@ -7,7 +7,7 @@ Typed, batch-shaped SGP4 propagation for many satellites.
 Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
 decides — a derivation, an exact value, the equation that defines the quantity — and
 another code's output is a comparison, never the proof. This crate is verified in
-[§3 Orbital mechanics & automatic differentiation](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#3--orbital-mechanics--automatic-differentiation) (10 rows).
+[§3 Orbital mechanics & automatic differentiation](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#3--orbital-mechanics--automatic-differentiation) (11 rows).
 
 - API documentation: <https://docs.rs/spacelab-sgp4>
 - Homepage: <https://spacedatalab.org>

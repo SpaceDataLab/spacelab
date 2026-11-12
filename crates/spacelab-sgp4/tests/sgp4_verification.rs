@@ -72,16 +72,16 @@ fn every_verification_element_set_is_accepted_or_explicitly_refused() {
         .map(|c| c.norad)
         .collect();
 
-    // Refusing an element set at construction is a legitimate answer for the cases
-    // designed to be outside the model's domain. Silently accepting one and then
-    // producing a plausible orbit would not be.
+    // The document's own driver builds all 33, the out-of-domain cases included: they fail
+    // at propagation, where the reference reports its error codes, not at construction.
+    // Catalogue 11801's blank ephemeris-type column is read as `0`, as `twoline2rv` reads it.
     println!(
         "{} of 33 element sets refused at construction: {rejected:?}",
         rejected.len()
     );
     assert!(
-        rejected.len() <= 2,
-        "refused too many: {rejected:?} — the crate is rejecting valid elements"
+        rejected.is_empty(),
+        "refused {rejected:?}, which the document's driver builds"
     );
 }
 

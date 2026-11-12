@@ -903,6 +903,27 @@ else
     skip "nrlmsise00_tables.py" "tools/fetch-nrlmsise00-fortran.sh output"
 fi
 
+# The FES2004 ocean-tide table: `ocean_tide_fes2004.rs` claims to be generated from the
+# `fes2004_Cnm-Snm.dat` the IERS Conventions Centre publishes with chapter 6. This re-runs the
+# generator on the pinned snapshot `tools/fetch-specs.sh` fetches and compares every byte.
+FES2004_DAT=../data/specs/iers-fes2004.620dc48f.dat
+FES2004_SHA256=620dc48fd4d97baa14f532287b19788bd55dc2056e0b478ab0f928b951c194cf
+if [ -f "$FES2004_DAT" ] && have python3; then
+    regenerated=$(mktemp)
+    if [ "$(sha256sum "$FES2004_DAT" | cut -d' ' -f1)" != "$FES2004_SHA256" ]; then
+        bad "ocean_tide_fes2004.py" "$FES2004_DAT is not the pinned IERS file"
+    elif ! timeout 300 python3 -I ocean_tide_fes2004.py "$FES2004_DAT" "$regenerated" >/dev/null 2>&1; then
+        bad "ocean_tide_fes2004.py" "the generator failed on the pinned IERS file"
+    elif cmp -s "$regenerated" ../crates/spacelab-propagation/src/ocean_tide_fes2004.rs; then
+        ok "ocean_tide_fes2004.py: ocean_tide_fes2004.rs is byte for byte the IERS Conventions Centre's FES2004 file"
+    else
+        bad "ocean_tide_fes2004.py" "ocean_tide_fes2004.rs differs from what the pinned IERS file regenerates"
+    fi
+    rm -f "$regenerated"
+else
+    skip "ocean_tide_fes2004.py" "tools/fetch-specs.sh output"
+fi
+
 # The DSST's Gauss-Legendre tables: gauss_legendre_tables.gp generates them from P_n and prints the
 # Rust text; the block in gaussian.rs must be that output byte for byte.
 if have gp; then

@@ -2,10 +2,11 @@
 """Machine-extract the FES2004 ocean-tide geopotential coefficients to a Rust table.
 
 Each Doodson tide wave carries, per spherical-harmonic degree n and order m, the prograde (C+, S+)
-and retrograde (C-, S-) coefficients of IERS Conventions 2010 Eq. 6.15. The file lists them in units
-of 10^-11 (the scale Orekit's `FESCnmSnmReader` applies, `LazyLoadedGravityFields` line 178:
-`new FESCnmSnmReader(FES_CNM_SNM_FILENAME, 1.0e-11)` -- the stale "10^-12" in the reader javadoc is a
-doc bug; the file header and the constructor both say 10^-11).
+and retrograde (C-, S-) coefficients of IERS Conventions 2010 Eq. 6.15. The file is the one the IERS
+Conventions Centre publishes with chapter 6 (`tidemodels/fes2004_Cnm-Snm.dat`, which `tools/fetch-specs.sh`
+fetches and `derivations/verify.sh` regenerates the table from); its header gives the unit, 10^-11.
+Orekit's `orekit-data` copy carries the same rows, and Orekit's `FESCnmSnmReader` applies the same scale
+(`LazyLoadedGravityFields` line 178; the "10^-12" in that reader's javadoc is a doc bug).
 
 Waves are grouped by Doodson number (the first column with its dot removed: "255.555" -> 255555) and
 sorted ascending, so the Rust accumulation order matches the Orekit bench (which sorts identically) --
@@ -19,7 +20,7 @@ triangle (n = 2..deg, m = 0..min(n,ord)) has no gaps -- a gap would be NaN in Or
 wave.
 
     uv run --no-project python derivations/ocean_tide_fes2004.py \
-        /tmp/orekit-bench/orekit-data-main/fes2004_Cnm-Snm.dat \
+        data/specs/iers-fes2004.620dc48f.dat \
         crates/spacelab-propagation/src/ocean_tide_fes2004.rs
 """
 
@@ -101,7 +102,7 @@ def emit(waves, darwin) -> str:
         "    clippy::excessive_precision,\n"
         "    clippy::approx_constant\n"
         ")]\n\n"
-        "/// FES2004 coefficient scale: file values are in units of 10^-11 (Orekit `FESCnmSnmReader`).\n"
+        "/// FES2004 coefficient scale: file values are in units of 10^-11, as the file's header says.\n"
         f"pub const SCALE: f64 = {SCALE_LITERAL};\n\n"
         "/// One Doodson tide wave: its Doodson number and the fully-normalized prograde/retrograde\n"
         "/// coefficients `(n, m, C+, S+, C-, S-)` (verbatim, in units of [`SCALE`]) for degree n >= 2.\n"

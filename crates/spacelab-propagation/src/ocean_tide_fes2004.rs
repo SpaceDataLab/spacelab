@@ -10,7 +10,7 @@
     clippy::approx_constant
 )]
 
-/// FES2004 coefficient scale: file values are in units of 10^-11 (Orekit `FESCnmSnmReader`).
+/// FES2004 coefficient scale: file values are in units of 10^-11, as the file's header says.
 pub const SCALE: f64 = 1.0e-11;
 
 /// One Doodson tide wave: its Doodson number and the fully-normalized prograde/retrograde

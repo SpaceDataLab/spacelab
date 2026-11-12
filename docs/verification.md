@@ -10789,9 +10789,124 @@ falls as `1/(nt)`: it is 0.15 % at 72 h.
 
 **What this sets for the comparison.** At 450 km and F10.7 150, a 20 % density error moves a 24 h
 prediction by 1.6 km and a 72 h one by 14 km. At 350 km the shifts are 8.4 km and 76 km. TU Delft's
-positions, at 0.001° (about 110 m), resolve these from about 12 h on, so they can serve as a km-level
-pilot. The scored comparison needs POD of independent origin (`plans/17` Ф30.H), and each source needs its
+positions resolve these from about 12 h on, so they can serve as a km-level pilot (§10.57). GRACE-FO C's
+are given to 0.001° (about 110 m), and Swarm's to 1e-8°; this paragraph first said 0.001° for all four.
+The scored comparison needs POD of independent origin (`plans/17` Ф30.H), and each source needs its
 licence step first.
+
+### 10.57 Orbit prediction under SDTM-1 and NRLMSISE-00: the km-level pilot (Ф30.H)
+
+§10.56 set the scale of what a density error does to a predicted orbit. This section measures it on real
+orbits, with the density model as the only variable.
+
+**The arcs.** The positions are those in TU Delft's v02 density files (CC BY 4.0, `docs/provenance.md`), one
+row every 120 s. GRACE-FO C gives its longitude and latitude to 0.001° (about 110 m), Swarm A, B and C to
+1e-8°. An epoch falls at 00:00 UTC every 14 days from 2020-01-01; an arc is the day before it and the three
+days after it. The orbits lie at 419–543 km. 600 arcs qualify on the rule below: 161 of GRACE-FO C, 143 of Swarm A, 155 of Swarm B and
+141 of Swarm C. These positions are a pilot. They are not POD of independent origin, and the licence
+steps for the Swarm and GRACE-FO orbit products are still open.
+
+**The method.** `crates/spacelab/examples/orbit_prediction.rs`, driven by `tools/orbit-pilot.py`.
+
+- **Forces, the same for both models.** `XGM2019e` to degree 30, the analytic Sun and Moon, a nominal
+  cannonball solar pressure, and co-rotating drag with `C_d A/m` = 0.004 m²/kg times a fitted scale. The
+  frame is the Earth-fixed one turned by the Earth rotation angle, with UTC for UT1. The Sun and Moon are
+  read in their own J2000 axes, up to 0.3° from that frame. Each of these approximations is the same
+  under both models.
+- **Fit.** The state at the arc's first row and the drag scale, seven parameters, are fitted to the 24 h
+  before the epoch. The scale is then frozen. That is the persistence of the last 24 h correction, F64's
+  baseline.
+- **Prediction.** Three days, with the error in radial, along-track and cross-track at 6, 12, 24, 48 and
+  72 h.
+- **SDTM-1** is the field frozen at 2020 (§10.38), exported by `tools/evaluate-sdtm.py export`. Before the
+  run, the Rust field rebuilt from the export reproduced the Python fit on 64 of its scored rows: worst
+  relative error 2.0e-15 in `T∞` and 1.2e-14 in `ρ`. Every arc lies after its fit. NRLMSISE-00 was
+  fitted long before 2020.
+- **Modes.** `forecast` reads only what is known at the epoch. For both models the fit and the prediction
+  take the trailing 81-day flux, and the prediction holds the indices' state one second before the epoch.
+  `observed` reads the measured indices, the centred flux included, and is shown apart. So is
+  `calibrated`, which fits the state and the scale to the whole 96 h arc.
+- **The rule** is in the tool's docstring, written before the first run. Primary: forecast mode, 72 h,
+  along-track. Per arc, `d = ln(|s_SDTM| / |s_MSIS|)`. Its median over arcs has a 95 % interval from 4 000
+  bootstrap draws of epochs, with the arcs of one epoch drawn together. SDTM-1 is ahead when the interval
+  lies below zero, and behind when it lies above. An arc leaves every table when one of its four fits
+  fails, or when one has an RMS above five times its satellite's median.
+
+**The fits.** All 2 400 converged. The median fit RMS is 25.3 m on GRACE-FO C, the size its 0.001°
+positions allow, and 6.4–7.3 m on Swarm. The RMS rule removes two Swarm A arcs (2023-02-08 and 2024-10-16,
+RMS 53–58 m under both models). 598 arcs remain.
+
+| mode | horizon | median along-track error, SDTM-1 | NRLMSISE-00 | median `d` [95 %] | SDTM-1 smaller |
+|---|---|---|---|---|---|
+| forecast | 6 h | 46 m | 47 m | +0.006 [−0.021, +0.033] | 49 % |
+| forecast | 12 h | 90 m | 92 m | −0.025 [−0.061, +0.002] | 55 % |
+| forecast | 24 h | 241 m | 251 m | −0.043 [−0.096, −0.006] | 57 % |
+| forecast | 48 h | 840 m | 879 m | −0.029 [−0.074, +0.004] | 55 % |
+| **forecast** | **72 h** | **1 794 m** | **1 802 m** | **−0.014 [−0.071, +0.012]** | 54 % |
+| observed | 24 h | 214 m | 223 m | −0.007 [−0.049, +0.072] | 51 % |
+| observed | 72 h | 1 628 m | 1 582 m | +0.005 [−0.016, +0.061] | 48 % |
+
+The total error is within 2 % of the along-track one from 24 h on. The other tables are in the tool's output
+(`score`).
+
+**Verdict: no difference shown.** The primary interval, [−0.071, +0.012], contains zero.
+
+Findings:
+
+- **With a 24 h correction held, the density model moves a 72 h prediction by about 1 %.** The median error is
+  1.8 km under both models. It comes from how the density departs from its level of the day before, over the
+  next three days.
+- **At 24 h in forecast mode, SDTM-1's error is 4 % smaller,** with an interval clear of zero
+  (−0.043 [−0.096, −0.006]). This is a description, not a verdict: the rule names 72 h. At 12 h and 48 h the
+  interval reaches zero. By satellite, the lead at 24 h is clear of zero only on Swarm A (−0.104
+  [−0.190, −0.011]).
+- **The measured indices help both models alike.** In observed mode the 72 h medians fall to 1.63 and 1.58
+  km, and `d` is +0.005 [−0.016, +0.061].
+- **NRLMSISE-00's level error does not reach the orbit.** The fitted scale absorbs it. In `ln`, SDTM-1's scale is
+  0.29–0.31 above NRLMSISE-00's on every satellite: its density on these orbits is 25 % lower, as the median ratios
+  of §10.38 (0.980 against 1.310) predict. The spread of the scale from arc to arc is the same for the two
+  models (MAD 0.13–0.19 against 0.14–0.16). So SDTM-1 has the right level, but its day-to-day variation is no
+  closer to the truth here.
+- **Thirteen arcs fit a negative drag scale, under both models.** All are on GRACE-FO C or Swarm B, the higher
+  orbits, in 2020–2021 at solar minimum. There, drag is weaker than the along-track part of the forces not
+  modelled. Earth albedo and infrared, and the error of the cannonball, are the likely ones. The rule keeps these arcs. Without them
+  (sensitivity, not part of the rule), the primary is −0.014 [−0.076, +0.016] on 585 arcs.
+- **For F64.** On 2020–2026, SDTM-1's density MAPE is 21.2 % against NRLMSISE-00's 44.9 % (§10.38). Once the
+  level is calibrated on the day before, that gap does not give a better 1–3-day prediction at 420–540 km.
+  Zhang et al. (2026) read the preceding 24 h of densities, which is a different mode. Their numbers are not
+  compared here.
+
+**The calibrated mode.** On every fourth epoch, state and scale were fitted to the whole 96 h arc under the
+measured indices. The level is then calibrated out, and what the fit cannot absorb is how each model's density
+varies over the four days. 149 of the 155 arcs pass the RMS rule.
+
+| satellite | arcs | median 96 h fit RMS, SDTM-1 | NRLMSISE-00 | median `ln(RMS_SDTM / RMS_MSIS)` [95 %] | SDTM-1 smaller |
+|---|---|---|---|---|---|
+| all | 149 | 30.0 m | 29.5 m | +0.009 [−0.026, +0.065] | 46 % |
+| GRACE-FO C | 40 | 31.6 m | 31.7 m | +0.004 [−0.022, +0.026] | 47 % |
+| Swarm A | 34 | 26.6 m | 31.9 m | −0.011 [−0.289, +0.182] | 53 % |
+| Swarm B | 40 | 20.9 m | 21.0 m | +0.022 [−0.018, +0.112] | 40 % |
+| Swarm C | 35 | 31.1 m | 29.3 m | +0.015 [−0.318, +0.170] | 46 % |
+
+- **The variation over four days fits no better under either model.** A single scale leaves about 30 m over
+  96 h, against 6–7 m over 24 h on Swarm. That residual is the same under both models.
+- **The rule removes six arcs here.** Two hold the storms of 2021-11-04 (daily Ap 72) and 2023-03-23/24 (55,
+  73). There, SDTM-1's fit is the better one: 212 against 335 m on Swarm A in 2021, and 25 against 161 m on
+  Swarm C in 2023. On GRACE-FO C in 2021 both fail, at 4.5 and 4.1 km. The other three arcs are quiet (daily
+  Ap ≤ 10) and fit 78–204 m under both models. A manoeuvre is the likely cause; it was not checked. Two storms
+  are a case, not a result.
+
+**What remains.** POD of independent origin, each source after its licence step. A lower orbit, where drag
+dominates the unmodelled forces. The corpus has no blind arc below 420 km: CHAMP and GOCE end before 2020, and
+SDTM-1 was fitted on them.
+
+Run, after `tools/evaluate-sdtm.py run --kind frozen` (results stay under `data/`, never committed):
+
+    uv run --project tools --locked python -I tools/evaluate-sdtm.py export --split frozen-2020
+    cargo build -p spacelab --release --example orbit_prediction
+    uv run --project tools --locked python -I tools/orbit-pilot.py arcs
+    uv run --project tools --locked python -I tools/orbit-pilot.py run [--calibrated]
+    uv run --project tools --locked python -I tools/orbit-pilot.py score
 
 ---
 

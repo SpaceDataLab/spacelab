@@ -105,6 +105,19 @@ The scoring code is written and committed before the first blind month is read, 
 the blind rows only through the paths of §2, and it scores the shipped field as its coefficient table
 holds it, not a refit. Its commit is the one §1 and §6 cite.
 
+Added on 2026-11-12, with the runner and before any blind row is read: three conventions that §10.38 applied and
+this file did not name. Each satellite's log scale from the field's table (`SATELLITE_SCALE`) multiplies SDTM-1's
+density, as the harness scored §10.38's folds; GRACE-FO C is the reference, at zero. The storm state runs from 120
+days before the row, as the fit runs it, not over the tables' shorter `HISTORY`. The day of year is the day and the
+whole hour, as the fit read it.
+
+The runner is `tools/score-blind.py`, with `crates/spacelab-propagation/examples/blind_rows.rs` for SDTM-1's two
+fields and the clean-room JB2008. On the same day, `tools/score-blind.py cut` printed §10.38's public table to its
+printed digits: the four models' five columns, and the five paired differences with their intervals at days, years
+and storms. Row by row, SDTM-1's two fields agree with the harness's residuals to 2.5e-14 in `ln`, and NRLMSISE-00
+exactly. Over the tables' 15-day `HISTORY`, the fields frozen at 2020 (nitric oxide 40 h, against the shipped 30 h)
+differed by up to 4.9e-4 and moved one interval bound by 0.01; hence the 120 days.
+
 ## 8 · What a reader can regenerate
 
 Every public number above, from a clean checkout, the TU Delft data and the drivers of §2. The private rows

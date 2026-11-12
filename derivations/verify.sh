@@ -505,10 +505,10 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
 
     out=$(macf knocke_lambert.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
-    if [ "$holds" -eq 17 ] && printf '%s' "$out" | grep -q '^DONE'; then
-        ok "maxima knocke_lambert.mac: Lambert's cosine gives the view factor (R/r)^2 exactly; Orekit's gives 1.97x it at 500 km and 2M at the surface; the central cap is R^2 sin^2 D / d^2, a crown the difference of two caps, the lumped element the cap's D^2 term; an exitance varying across r pushes the flux across it by a closed form"
+    if [ "$holds" -eq 26 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima knocke_lambert.mac: Lambert's cosine gives the view factor (R/r)^2 exactly; Orekit's gives 1.97x it at 500 km and 2M at the surface; the central cap is R^2 sin^2 D / d^2, a crown the difference of two caps, the lumped element the cap's D^2 term; an exitance varying across r pushes the flux across it by a closed form; a crown's view factor, first moment and cross flux are closed forms in the slant distance, and three or more azimuths sum a linear exitance exactly"
     else
-        bad "maxima knocke_lambert.mac" "expected 17 identities to hold, found $holds"
+        bad "maxima knocke_lambert.mac" "expected 26 identities to hold, found $holds"
     fi
 
     out=$(macf sgp4_eccentricity_boundary.mac)

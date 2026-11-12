@@ -158,4 +158,67 @@ for h in [500000, 20000000] do
 must(every(lambda([h], is(abs(across_quad(h)/across_at(h) - 1) < 1e-10)), [500000, 20000000]),
      "(6) holds: quadrature agrees with the closed form to 1e-10 at 500 km and 20 000 km")$
 
+/* ---- (7) a linear exitance summed exactly (plans/17 Ф17.H) -------------------------------------
+   The grid samples the exitance at one colatitude per crown, at n azimuths (k + 1/2) 2 pi/n. The
+   central cap is the crown from x = 1. A crown carries three moments of the kernel: V, its view
+   factor (5); W, its first moment in the versine y = 1 - x; and T, its flux across r per unit of
+   sin(gamma) cos(phi) (6). In the slant distance squared s = q^2, with A = r^2 - R^2, d = r - R,
+   the crown's edges s1 < s2, D = s2 - s1 and L = log(s2/s1), each is a closed form. Each is checked
+   by its derivative in s2, the kernel times |dx/ds| = 1/(2 r R), and by its zero at s2 = s1.     */
+assume(s1 > 0, s2 > 0)$
+A : r^2 - R^2$
+d : r - R$
+xs : (r^2 + R^2 - s)/(2*r*R)$
+kernel_s : 2*R^2*(r*x - R)*(r - R*x)/s^2$
+across_s : -R^3*(1 - x^2)*(r*x - R)/s^2$
+V_s : D*(A^2 - s1*s2)/(4*r^2*s1*s2)$
+W_s : (A^2*L - D*((s1 + s2)/2 + d^2*A^2/(s1*s2) - d^2))/(8*r^3*R)$
+T_s : -(A*(3*r^2 + R^2)*L + D*((s1 + s2)/2 - (3*r^2 + R^2) - A^3/(s1*s2)))/(16*r^3*R)$
+in_s(e) := subst([D = s2 - s1, L = log(s2) - log(s1)], e)$
+moment_ok(e, k) := is(ratsimp(diff(in_s(e), s2) - subst(s = s2, subst(x = xs, k))/(2*r*R)) = 0)
+                   and is(ratsimp(subst(s2 = s1, in_s(e))) = 0)$
+must(moment_ok(V_s, kernel_s), "(7) holds: V = D (A^2 - s1 s2)/(4 r^2 s1 s2)")$
+must(moment_ok(W_s, (1 - x)*kernel_s),
+     "(7) holds: W = (A^2 L - D ((s1 + s2)/2 + d^2 A^2/(s1 s2) - d^2))/(8 r^3 R)")$
+must(moment_ok(T_s, across_s),
+     "(7) holds: T = -(A (3r^2 + R^2) L + D ((s1 + s2)/2 - (3r^2 + R^2) - A^3/(s1 s2)))/(16 r^3 R)")$
+/* The code writes A^2 - s1 s2 as A a1 + s1 a2, a = A - s = 2 R (r x - R) the edge's height above
+   the horizon, so V has no cancellation, and a crown's width as D = 2 r R (x1 - x2), or a1 when it
+   ends at the horizon. */
+must(is(ratsimp(A^2 - s1*s2 - (A*(A - s1) + s1*(A - s2))) = 0),
+     "(7) holds: A^2 - s1 s2 = A a1 + s1 a2")$
+must(is(ratsimp(A - subst(x = c, r^2 + R^2 - 2*r*R*x) - 2*R*(r*c - R)) = 0),
+     "(7) holds: a = A - s = 2 R (r x - R)")$
+/* The sample. Under the exitance a0 + bz x + sin(gamma)(be cos(phi) + bh sin(phi)), the crown's flux
+   along r is a0 V + bz (V - W) and across it T (be, bh). The grid evaluates the exitance at
+   x_s = 1 - W/V and at each azimuth phi_k, and weights it by V/n along r and by 2 T/(n sin(gamma_s))
+   along the azimuth's unit vector. Along r it sums V (a0 + bz x_s) = a0 V + bz (V - W). Across it
+   the constant part cancels and the varying part sums to T (be, bh), because for n >= 3 the
+   azimuths give sum cos = sum sin = sum cos sin = 0 and sum cos^2 = sum sin^2 = n/2. n = 2 fails
+   the last two, so the grid takes at least three sectors. */
+fpprec : 30$
+azimuth_sums(n) := block([p : makelist(bfloat((k + 1/2)*2*%pi/n), k, 0, n - 1)],
+  map(lambda([f], apply("+", map(f, p))),
+      [cos, sin, lambda([t], cos(t)*sin(t)), lambda([t], cos(t)^2 - 1/2), lambda([t], sin(t)^2 - 1/2)]))$
+must(every(lambda([n], every(lambda([v], is(abs(v) < 1b-25)), azimuth_sums(n))),
+           makelist(n, n, 3, 64)),
+     "(7) holds: for n = 3 ... 64 sectors the five azimuth sums vanish")$
+must(not every(lambda([v], is(abs(v) < 1b-25)), azimuth_sums(2)),
+     "(7) holds: for n = 2 they do not")$
+/* The visible cap's first moment, x_tot = V - W from the sub-satellite point (s1 = d^2) to the
+   horizon (s2 = A), the radial flux of the exitance x, at 30 digits for the Rust test
+   (`a_linear_exitance_is_summed_exactly`), and by quadrature in x. */
+x_total : ratsimp(subst([s1 = d^2, s2 = A, D = A - d^2, L = log(A/d^2)], V_s - W_s))$
+x_at(h) := block([Rv : 637813646/100], bfloat(subst([R = Rv, r = Rv + h], x_total)))$
+x_quad(h) := block([Rv : 637813646/100],
+  quad_qags(float(subst([R = Rv, r = Rv + h], x*2*R^2*(r*x - R)*(r - R*x)/qq^2)), x,
+            float(Rv/(Rv + h)), 1, 'epsrel = 1e-13)[1])$
+t_total : ratsimp(subst([s1 = d^2, s2 = A, D = A - d^2, L = log(A/d^2)], T_s))$
+must(is(ratsimp(logcontract(t_total - across_closed)) = 0),
+     "(7) holds: T over the visible cap is (6)'s closed form")$
+for h in [500000, 20000000] do
+  print("  first moment of the cap,", h, "m:", x_at(h), " quadrature", x_quad(h))$
+must(every(lambda([h], is(abs(x_quad(h)/x_at(h) - 1) < 1e-10)), [500000, 20000000]),
+     "(7) holds: quadrature agrees with the first moment to 1e-10 at 500 km and 20 000 km")$
+
 print("DONE")$

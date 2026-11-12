@@ -285,7 +285,7 @@ convergence order + Hamiltonian conservation + cross-checks against independentl
 | Zonal J₂…J_{N+1} force | zonal-harmonic potential; classical J₂ node regression | analytic node-regression Ω̇; J₃ parity; energy/Lz | node < 3%; energy < 1e-9 rel; STM symplectic < 1e-6 | tests/zonal.rs, tests/forces.rs |
 | Time-variable gravity | IERS TN36 Table 6.2; ICGEM `.gfc` time-variable format | IERS 2010 Table 6.2 vendored rates; ICGEM parse vs hand series; `eigen6s2` excerpt | parse/eval < 1e-16…1e-18 | src/time_variable_gravity.rs |
 | Relativity (Schwarzschild / Lense-Thirring / de Sitter) | IERS TN36 §10.3 | closed-form Python golden **and** Orekit 13 golden CSV | Python < 1e-12; Orekit round-off (de Sitter < 1e-10) | src/relativity.rs |
-| Knocke Earth albedo/IR | Knocke, Ries & Tapley 1988; Lambert's law | **G3**, all from `derivations/knocke_lambert.mac`: a uniform sphere against its view factor `(R/r)²` at Δ = 1°, 15°, 30° and 500 km, 20 000 km; the central cap against `R² sin²Δ/d²`; the polar-night closed form; an exitance varying across `r̂` against the flux it pushes across. The grid under Orekit's cosine: Orekit 13 `KnockeRediffusedForceModel` golden, 4 LEO geometries | uniform sphere < 1e-13 along and across `r̂` (1.0e-14 measured); cap < 1e-14; polar night < 0.12 Δ² from Δ = 30° to 2π/2000 (5.6e-7 there); varying exitance across `r̂` < 6.5 Δ² at 500 km and 0.035 Δ² at 20 000 km from Δ = 2π/180 to 2π/2000 (6.1e-5 and 3.2e-7 there); Orekit < 1e-12 | src/earth_radiation.rs |
+| Knocke Earth albedo/IR | Knocke, Ries & Tapley 1988; Lambert's law | **G3**, all from `derivations/knocke_lambert.mac`: a uniform sphere against its view factor `(R/r)²` at Δ = 1°, 15°, 30° and 500 km, 20 000 km; the central cap against `R² sin²Δ/d²`; the polar-night closed form; an exitance linear in the point, `α + p̂·b`, against its flux along and across `r̂` ((6), (7)). The grid under Orekit's cosine: Orekit 13 `KnockeRediffusedForceModel` golden, 4 LEO geometries | uniform sphere < 1e-13 along and across `r̂` (1.0e-14 measured); cap < 1e-14; polar night < 0.001 Δ² from Δ = 30° to 2π/2000 (5.8e-9 there); linear exitance < 1e-12 from Δ = π to 2π/4000 at 500 km and 20 000 km (6.0e-14 measured); Orekit < 1e-12 | src/earth_radiation.rs |
 | Third-body force (Battin form) | Battin, *Astrodynamics* — f(q) indirect-term form | independent direct difference-of-terms; tidal-field limit | Battin≡direct < 1e-8; tidal < 1e-4 | tests/solar_perturbations.rs |
 | SRP force (direction / shadow / 1/d²) | cannonball SRP; solar irradiance at 1 AU | analytic geometry (1 AU ref 1.368e-7) | < 1e-10; near/far≈4 < 1e-3 | tests/solar_perturbations.rs |
 | Conical shadow (lens area, lighting ratio) | the area two discs share in the sky plane; conical umbra/penumbra geometry (Montenbruck–Gill) | **G3**: 171 exact-double inputs — both tangencies to the last double, `d → 0`, `r_E/r_S` from 0.6 to 264 — against the textbook area at 200 digits (`derivations/shadow_lens.gp`), every value inside an Arb ball (`shadow_lens_arb.c`); **G1**: `derivations/shadow_lens.mac`, the segment form is the textbook area and `dA/dd` minus the chord. *C*: Orekit's `acos` form, 6.5e-7 off in `ν` 1.1e-9 rad inside a tangency | `A` within `4 + κ` ulp, `κ = 4K/A` (measured 1.85 ulp where `κ < 1`, `c₂ = 0.71`); `ν` within the bound `A` carries | tests/shadow_lens.rs, src/shadow.rs |
@@ -337,6 +337,23 @@ horizon, because the central cap radiates along `r̂` and a crown only at its mi
 and absent at 30° (plans/17 F78). The last crown's middle follows the horizon, so it
 carries derivatives, and the AD Jacobian matches central differences to 1e-5. Orekit's grid and
 cosine stay for tests only, behind the four golden vectors.
+
+**The Knocke grid sums a linear exitance exactly** (Ф17.H, F78, 2026-11-12). Each crown, the central
+cap being the crown from the sub-satellite point, now carries three moments of the Lambert kernel:
+its view factor, its first moment in `1 − cos γ`, and its flux across `r̂` per unit of `sin γ cos φ`.
+`derivations/knocke_lambert.mac` (7) gives each in closed form in the squared slant distance and
+checks it by its derivative. A crown is sampled at the colatitude of its mean `cos γ`, at
+`max(⌈2π/Δ⌉, 3)` azimuths, and each sample weights its exitance by the view factor along `r̂` and by
+the cross flux along its azimuth. Any exitance `α + p̂·b` then sums to its exact flux: 6.0e-14 at
+most from Δ = π to 2π/4000, at 500 km and 20 000 km, where the previous grid missed by 7.6e-2 at
+Δ = π. On a crown narrower than its inner slant distance the closed form cancels, so 12-point
+Gauss–Legendre takes it there, whose error term is below 1e-18. The polar-night error fell from
+0.12 Δ² to 0.0006 Δ²: 4.6e-5 at Δ = 30° and 5.8e-9 at 2π/2000. Under Knocke's own exitance at
+500 km, with the Sun overhead, at 60°, on the terminator and at 110°, and against the n = 4000 grid,
+the worst miss fell from 0.84 % and 0.21° to 0.11 % and 0.01° at Δ = 5°, from 3.5 % and 1.9° to
+0.48 % and 0.05° at 15°, and from 3.9 % and 2.3° to 0.63 % and 0.08° at 30°. What remains is the
+albedo's cut at the terminator, which is not linear. Every sample's colatitude follows `r`, so it
+carries derivatives, and the AD Jacobian still matches central differences to 1e-5.
 
 One cause outside the model surfaced on the way. `Dual` and `HyperDual` rounded a quotient's value
 as `u·(1/v)`, not as f64's `u/v`, so a force evaluated at `Dual` parted from its own f64 evaluation by

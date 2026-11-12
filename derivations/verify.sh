@@ -962,6 +962,22 @@ else
     skip "sgp4_vallado_maxima.py" "tools/fetch-specs.sh output"
 fi
 
+# GPT3's grid as TU Wien publishes it (CC BY 4.0): the vendored asset must be their `gpt3_5.grd`
+# with its CRLF line ends made LF, byte for byte. `gpt3_evaluation.mac`, in section 7, evaluates it.
+GPT3_GRD=../data/specs/gpt3-5-grd.3bf35c61.grd
+GPT3_GRD_SHA256=3bf35c611e7cd5c42a0650ee14652a8f36430127ec213ed7b7b867bd29245b3d
+if [ -f "$GPT3_GRD" ]; then
+    if [ "$(sha256sum "$GPT3_GRD" | cut -d' ' -f1)" != "$GPT3_GRD_SHA256" ]; then
+        bad "gpt3_5.grd" "$GPT3_GRD is not the pinned TU Wien file"
+    elif tr -d '\r' < "$GPT3_GRD" | cmp -s - ../crates/spacelab-gnss/assets/gpt3_5.grd; then
+        ok "gpt3_5.grd: the vendored GPT3 grid is TU Wien's file, line ends made LF, byte for byte"
+    else
+        bad "gpt3_5.grd" "the vendored asset differs from TU Wien's gpt3_5.grd"
+    fi
+else
+    skip "gpt3_5.grd" "tools/fetch-specs.sh output"
+fi
+
 # The DSST's Gauss-Legendre tables: gauss_legendre_tables.gp generates them from P_n and prints the
 # Rust text; the block in gaussian.rs must be that output byte for byte.
 if have gp; then
@@ -1111,6 +1127,7 @@ if have maxima; then
     mac_zeros gnss_combinations.mac 32 "IF, GF, wide/narrow-lane and MW combinations as exact rationals of the ICD carriers"
     mac_zeros gnss_cycle_slip.mac 13 "the slip predictor is the least-squares polynomial extrapolation"
     mac_zeros gnss_dop.mac 31 "DOP from the cofactor traces; closed forms for zenith-plus-ring geometries"
+    mac_zeros gpt3_evaluation.mac 13 "GPT3 from its definition: the grid's harmonics, height reduction and bilinear cell reproduce gpt3() at 10 sites"
     mac_zeros gps_broadcast_orbit.mac 8 "the IS-GPS-200 user algorithm, its velocity and the relativistic term"
     mac_zeros glonass_pz90_motion.mac 10 "the PZ-90 equations of motion as the J2 gradient plus rotating-frame terms"
     mac_zeros slr_two_way_range.mac 4 "the SLR legs as roots of the light-time equations"
@@ -1185,7 +1202,7 @@ if have gp; then
         chi_square_quantiles robust_weights se3_exponential particle_resampling sampling_transforms \
         conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \
         hull_delaunay spherical_triangle igrf_synthesis geomagnetic_dipole attitude_control gmst82 \
-        cio_rotation gnss_combinations gps_broadcast_orbit glonass_pz90_motion slr_two_way_range \
+        cio_rotation gnss_combinations gpt3_evaluation gps_broadcast_orbit glonass_pz90_motion slr_two_way_range \
         kronrod_g7k15 cll_panel nequick_fourier gauss2_richardson swath_sphere observation_geometry \
         stereo_disparity pinhole_collinearity rpc_bias_affine ortho_bilinear_dem \
         ray_ellipsoid_geolocation gnomonic_tan_plate quad_hash source_moments \

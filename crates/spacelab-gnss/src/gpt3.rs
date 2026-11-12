@@ -22,6 +22,13 @@
 //! virtual temperature is exact rather than first-order, so the only approximation is 0.6077's
 //! rounding of `(1 − 0.622)/0.622`. The file also prices the model's `R = 8.3143` against CODATA
 //! (2.3e-6 of the pressure over 1 km).
+//!
+//! `derivations/gpt3_evaluation.mac` evaluates the whole model in Maxima from the grid, which
+//! `verify.sh` holds against TU Wien's `gpt3_5.grd`, and `tests/gpt3_maxima.rs` holds this function
+//! to it at ten sites. North of 87.5° and south of −87.5° no cell surrounds the site, and the last
+//! full cell is continued linearly (Orekit's choice, continuous across 87.5°). TU Wien's
+//! `gpt3_5_fast.m` takes the nearest node there; at the South Pole the two differ by as much as
+//! 3.6 hPa and 5 K over four longitudes in January and July.
 
 // Grid-index/key arithmetic uses f64<->i64 casts on values that are always small and exact; the grid
 // geometry uses standard short names (lat/lon, si/wi, t/u) and the oracle literals stay byte-exact.

@@ -1,0 +1,127 @@
+/* GPT3 evaluated from its definition, in exact rationals and 40-digit bigfloats (plans/17 Ф17.M).
+
+   The model is a 5 x 5 degree grid and the rules that read it, both published by TU Wien with
+   Landskron & Boehm (2018), J Geod 92:349: the grid `gpt3_5.grd` (CC BY 4.0, the data gate in
+   verify.sh holds the vendored asset against it) and the evaluation in `gpt3_5_fast.m`. The rules:
+
+   - each node carries, per parameter, a0 A1 B1 A2 B2, read as
+       a0 + A1 cos(2 pi d/365.25) + B1 sin(2 pi d/365.25) + A2 cos(4 pi d/365.25) + B2 sin(4 pi d/365.25)
+     for d the day of the year, with the grid's units: Q and dT/dh in 1e-3, a_h and a_w in 1e-3, the
+     gradients in 1e-5;
+   - each of the four nodes around the site is brought from its own height to the site's,
+     Delta h = h - undu - Hs, by the lines `gpt3_reduction.mac` derives;
+   - the four reduced values are weighted bilinearly in latitude and longitude, the cell being the
+     one whose corners the grid's own coordinate columns name.
+
+   Two conventions are ours, not TU Wien's, and are stated here rather than hidden:
+   - north of 87.5 and south of -87.5 degrees no cell surrounds the site; we continue the last
+     full cell linearly (Orekit's choice), which is continuous across 87.5. gpt3_5_fast.m takes the
+     nearest node there instead, which is not. The size of that difference is printed below.
+   - the day of the year is the caller's continuous argument; gpt3_5_fast.m derives it from an MJD.
+
+   Each node is looked up by TU Wien's own line arithmetic, line (row - 1) 72 + column with rows from
+   87.5 south and columns from 2.5 east, and that line's coordinate columns must name the node: so
+   the file's order is checked too. The site table is GPT3_MAXIMA in
+   crates/spacelab-gnss/tests/gpt3_maxima.rs, which holds every entry as this file's value rounded to
+   the digits it shows; the Rust test holds gpt3() to the table.
+
+   Every check prints as `<name>: 0`, 13 of them.
+
+   timeout 300 maxima --very-quiet -Q -b gpt3_evaluation.mac                                      */
+
+display2d : false$
+fpprec : 40$
+load("rust_literals.mac")$
+
+grid_path : "../crates/spacelab-gnss/assets/gpt3_5.grd"$
+table_path : "../crates/spacelab-gnss/tests/gpt3_maxima.rs"$
+
+/* ---- the grid: header labels, then 2592 lines of 64 decimal tokens -------------------------- */
+s : openr(grid_path)$
+header : rest(split(readline(s)))$
+lines : []$
+while (l : readline(s)) # false do if slength(strim(" ", l)) > 0 then lines : cons(split(l), lines)$
+close(s)$
+lines : reverse(lines)$
+gridline : make_array(any, length(lines))$
+block([k : 0], for l in lines do (gridline[k] : l, k : k + 1))$
+column(label) := block([at : sublist_indices(header, lambda([h], h = label))],
+  if length(at) # 1 then error("gpt3 grid: no single column", label) else first(at))$
+
+print("grid_lines:", length(lines) - 36*72)$
+
+/* The line TU Wien's indexing gives a node, checked against the node's own coordinate columns. */
+node(lat, lon) := block([row : (175/2 - lat)/5 + 1, col : (mod(lon, 360) - 5/2)/5 + 1, l],
+  if not (integerp(row) and integerp(col)) then error("not a node:", lat, lon),
+  l : gridline[(row - 1)*72 + col - 1],
+  if rust_decimal(l[1]) # lat or mod(rust_decimal(l[2]), 360) # mod(lon, 360)
+  then error("gpt3 grid: line", (row - 1)*72 + col, "is not node", lat, lon),
+  l)$
+
+seasonal(l, label, scale, d) := block([c : column(label), th : 2*%pi*d/(36525/100)],
+  scale*(rust_decimal(l[c]) + rust_decimal(l[c + 1])*cos(th) + rust_decimal(l[c + 2])*sin(th)
+         + rust_decimal(l[c + 3])*cos(2*th) + rust_decimal(l[c + 4])*sin(2*th)))$
+
+/* One node at day d reduced to height h: [ah, aw, p, T, e, Tm, lambda, Gn_h, Ge_h, Gn_w, Ge_w],
+   SI units (Pa, K). */
+g0 : 980665/100000$
+dMtr : 28965/1000000$
+Rg : 83143/10000$
+corner(l, d, h) := block([dh, T0, Q, dT, p0, la, Tv, f, e0],
+  dh : h - rust_decimal(l[column("undu")]) - rust_decimal(l[column("Hs")]),
+  T0 : seasonal(l, "T:a0", 1, d),
+  Q : seasonal(l, "Q:a0", 1/1000, d),
+  dT : seasonal(l, "dT:a0", 1/1000, d),
+  p0 : seasonal(l, "p:a0", 1, d),
+  la : seasonal(l, "lambda:a0", 1, d),
+  Tv : T0*(1 + 6077/10000*Q),
+  f : -dh*g0*dMtr/(Rg*Tv),
+  e0 : Q*p0/(622/1000 + 378/1000*Q),
+  bfloat([seasonal(l, "a_h:a0", 1/1000, d), seasonal(l, "a_w:a0", 1/1000, d),
+          p0*exp(f), T0 + dT*dh, e0*exp(f*(1 + la)),
+          seasonal(l, "Tm:a0", 1, d), la,
+          seasonal(l, "Gn_h:a0", 1/100000, d), seasonal(l, "Ge_h:a0", 1/100000, d),
+          seasonal(l, "Gn_w:a0", 1/100000, d), seasonal(l, "Ge_w:a0", 1/100000, d)]))$
+
+/* The site: the cell whose south-west corner is the last node at or below the site, its row
+   clamped to the 35 full cells (the polar continuation), the longitude folded into
+   [-177.5, 182.5) so that 182.5 is the westmost column one turn east. */
+gpt3_at(lat, lon, d, h) := block([lo, la0, lo0, t, u, sw, se, nw, ne],
+  lo : lon - 360*floor((lon + 355/2)/360),
+  la0 : min(165/2, max(-175/2, 5*floor((lat - 5/2)/5) + 5/2)),
+  lo0 : 5*floor((lo - 5/2)/5) + 5/2,
+  t : (lo - lo0)/5,
+  u : (lat - la0)/5,
+  sw : corner(node(la0, lo0), d, h),
+  se : corner(node(la0, lo0 + 5), d, h),
+  nw : corner(node(la0 + 5, lo0), d, h),
+  ne : corner(node(la0 + 5, lo0 + 5), d, h),
+  bfloat((1 - t)*(1 - u)*sw + (1 - t)*u*nw + t*(1 - u)*se + t*u*ne))$
+
+/* TU Wien's polar rule at |lat| >= 87.5: the nearest node, reduced to the site. */
+gpt3_nearest(lat, lon, d, h) := block([plon : mod(lon, 360), ppod : 90 - lat, ipod, ilon],
+  ipod : min(36, floor((ppod + 5)/5)),
+  ilon : floor((plon + 5)/5),
+  if ilon = 73 then ilon : 1,
+  if ilon = 0 then ilon : 72,
+  corner(gridline[(ipod - 1)*72 + ilon - 1], d, h))$
+
+/* ---- the table the Rust test holds: lat, lon (degrees), day, height (m), then the 11 fields ---- */
+literals : rust_table(table_path, "GPT3_MAXIMA")$
+rows : length(literals)/15$
+print("table_shape:", if integerp(rows) and rows >= 10 then 0 else 1)$
+for k : 0 thru rows - 1 do block(
+  [lits : makelist(literals[15*k + j], j, 1, 15), inp, want],
+  inp : map(rust_decimal, firstn(lits, 4)),
+  want : apply(gpt3_at, inp),
+  print(sconcat("site_", k + 1, ":"),
+        if transcribed(rest(lits, 4), want) then 0 else 1))$
+
+/* ---- the bilinear weights reproduce a node exactly, and the seam is the mean of its nodes ------ */
+print("node_is_node:", if every(lambda([a, b], is(abs(a - b) < 10^-35)),
+        gpt3_at(155/2, 275/2, 92, 0), corner(node(155/2, 275/2), 92, 0)) then 0 else 1)$
+
+/* ---- the polar convention, priced: ours against TU Wien's nearest node -------------------------- */
+block([ours : gpt3_at(899/10, 1637/100, 1, 0), theirs : gpt3_nearest(899/10, 1637/100, 1, 0)],
+  print("at (89.9, 16.37) day 1, ours - nearest node: p", ours[3] - theirs[3], "Pa, T",
+        ours[4] - theirs[4], "K, a_h", ours[1] - theirs[1]))$

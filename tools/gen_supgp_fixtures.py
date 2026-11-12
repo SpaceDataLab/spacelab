@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cut the committed SupGP fixtures from the snapshots ``tools/fetch-supgp.sh`` leaves in ``data/``.
+"""Cut the committed SupGP fixtures from the TLE snapshots of ``fetch-supgp.sh --fixture-snapshot``.
 
 Three fixtures come out, and each answers a different question:
 

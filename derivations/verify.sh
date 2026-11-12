@@ -1025,6 +1025,7 @@ if have maxima; then
     mac_zeros access_horizon_crossing.mac 4 "a circular pass rises and sets at acos(Re cos e / r) - e"
     mac_zeros root_reference_roots.mac 12 "Cardano, Dottie and W(1) roots the root finder is gated on"
     mac_zeros event_geometry.mac 9 "apparent radius, occulted-rim extremes, elevation and angle forms of the event detectors"
+    mac_zeros box_wing_momentum.mac 13 "box-wing facet forces from the momentum balance: Lambert's 2/3, eq. 8-44, drag with specular lift, the Sun-tracking normal"
     mac_zeros metrics_periodic_gaps.mac 8 "coverage metrics of a periodic pass pattern in exact rationals"
     mac_zeros fom_weighted_grid.mac 7 "weighted figures of merit on an exact grid, and their weight-scaling invariance"
     mac_zeros photometry_closed_forms.mac 17 "the diffuse-sphere phase law, V zero point, air mass and limiting magnitude"
@@ -1190,7 +1191,7 @@ if have maxima; then
     done
 fi
 if have gp; then
-    for f in access_horizon_crossing root_reference_roots event_geometry photometry_closed_forms observability_diurnal_arc \
+    for f in access_horizon_crossing root_reference_roots event_geometry box_wing_momentum photometry_closed_forms observability_diurnal_arc \
         elevation_footprint cone_footprint comms_link_budget sar_incidence scan_catalogue \
         wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay split_conformal_coverage cluster_design_effect tle_kozai_recovery harris_priester_law \
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form \

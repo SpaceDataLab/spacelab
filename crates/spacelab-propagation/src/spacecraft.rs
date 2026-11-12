@@ -1,6 +1,8 @@
 //! Attitude-dependent **box-wing** (panel) spacecraft models for atmospheric drag and solar
-//! radiation pressure — a faithful port of Orekit's `BoxAndSolarArraySpacecraft`
-//! (`RadiationSensitive` / `DragSensitive`).
+//! radiation pressure — a port of Orekit's `BoxAndSolarArraySpacecraft` (`RadiationSensitive` /
+//! `DragSensitive`), each facet force derived from the momentum balance in
+//! `derivations/box_wing_momentum.mac`. The drag lift term departs from Orekit's, which is short of
+//! one factor `|n̂·v̂|` away from head-on incidence (F89).
 //!
 //! # Why a panel model
 //!
@@ -25,7 +27,8 @@
 //! * **Drag** ([`BoxWing::drag_acceleration`]): with `v̂` the unit relative velocity
 //!   `v_atm − v_sat` (Orekit's convention, so drag pushes along `+v̂`), each windward facet
 //!   (`n̂ · v̂ < 0`) adds `coeff · C_d · A · (n̂·v̂)`-weighted terms, `coeff = ρ · |v|² / (2m)`.
-//!   The optional lift term rotates part of the force from the wind direction toward `n̂`.
+//!   A lift ratio `λ` of the molecules reflects specularly: each hands over `2|n̂·v̂|` of its
+//!   momentum along `−n̂`, so the lift force goes as `(n̂·v̂)²`.
 //! * **SRP** ([`BoxWing::srp_acceleration`]): each sunlit facet (`n̂ · flux < 0`) adds Vallado's
 //!   eq. 8-44 absorption/specular/diffuse decomposition,
 //!   `−(P·A·cosθ/m)·[(C_a+C_d)·ŝ + 2(C_s·cosθ + C_d/3)·n̂]`, with `ŝ` the satellite→Sun unit,
@@ -281,14 +284,16 @@ impl BoxWing<7> {
 }
 
 impl<const P: usize> BoxWing<P> {
-    /// Body-frame drag acceleration — a direct port of Orekit `BoxAndSolarArraySpacecraft`'s
-    /// `dragAcceleration` (the `double` path). `v_rel_body` is the relative velocity `v_atm − v_sat`
+    /// Body-frame drag acceleration — Orekit `BoxAndSolarArraySpacecraft`'s `dragAcceleration` (the
+    /// `double` path) with its lift term corrected. `v_rel_body` is the relative velocity `v_atm − v_sat`
     /// (Orekit's convention) in the body frame; `sun_dir_body` is the unit satellite→Sun direction in
     /// the body frame (needed only by Sun-tracking arrays). The result is in the body frame.
     ///
     /// Per windward facet (`n̂·v̂ < 0`, after the double-sided flip): with `f = coeff·C_d·A·(n̂·v̂)`
     /// (`≤ 0`) and `coeff = ρ·|v|²/(2m)`, the contribution is
-    /// `(1−lift)·|f|·v̂ + 2·lift·f·n̂`. With `lift = 0` this is the standard projected-area drag
+    /// `(1−lift)·|f|·v̂ + 2·lift·f·|n̂·v̂|·n̂`: absorbed molecules push along the wind, specular ones
+    /// along the inward normal by twice their normal momentum. Orekit drops the last `|n̂·v̂|`, which
+    /// matters only off head-on incidence (F89). With `lift = 0` this is the standard projected-area drag
     /// `½ρ|v|²(C_d/m)·A·|n̂·v̂|·v̂` along the wind.
     #[must_use]
     pub fn drag_acceleration<S: Scalar>(
@@ -337,7 +342,9 @@ impl<const P: usize> BoxWing<P> {
                 let f = coeff * S::from_f64(facet.drag * facet.area) * d; // ≤ 0 here
                 // |f| = −f since f ≤ 0 in this branch — bit-identical to Orekit's FastMath.abs(f).
                 let a_v = -f * S::from_f64(1.0 - facet.lift_ratio);
-                let a_n = f * S::from_f64(2.0 * facet.lift_ratio);
+                // A specular molecule hands over 2|n̂·v̂| of its momentum along n̂, and f already
+                // counts the |n̂·v̂| of the molecules arriving (box_wing_momentum.mac (5)–(6)).
+                let a_n = f * S::from_f64(2.0 * facet.lift_ratio) * (-d);
                 sink(
                     index,
                     [
@@ -811,8 +818,37 @@ mod tests {
     // geometries by calling Orekit's own `dragAcceleration` / `radiationPressureAcceleration` directly.
     // The attitude matrix M (inertial→body) is emitted as columns = applyTo(basis), so M·v equals the
     // Hipparchus rotation exactly; the port applies M inbound and Mᵀ outbound. A lift-enabled box
-    // (liftRatio 0.25) exercises the drag lift term.
+    // (liftRatio 0.25) exercises the drag lift term; its drag is held to the momentum balance, not to
+    // Orekit, whose lift term is short of one factor |n̂·v̂| (F89).
     const RHO: f64 = 2.0e-12;
+
+    /// The `lift_tilt` geometry, Orekit's: the inertial→body attitude and the relative velocity.
+    const LIFT_ATTITUDE: [[f64; 3]; 3] = [
+        [
+            7.81639107922839700e-01,
+            -4.82929352591077100e-01,
+            3.94739845178505130e-01,
+        ],
+        [
+            5.50117295349308300e-01,
+            8.32030097196060800e-01,
+            -7.13924275919757800e-02,
+        ],
+        [
+            -2.93957932914131400e-01,
+            2.72956329411641900e-01,
+            9.16015052229478500e-01,
+        ],
+    ];
+    const LIFT_RELVEL: [f64; 3] = [7400.0, 900.0, -1200.0];
+    /// Drag on the lift-enabled box at that geometry from the momentum balance,
+    /// `derivations/box_wing_momentum.mac` (12): each specular molecule hands over `2|n̂·v̂|` of its
+    /// momentum along the normal.
+    const LIFT_DRAG_MAXIMA: [f64; 3] = [
+        9.34740185042298e-7,
+        1.0478264780690853e-7,
+        -9.3920984129150755e-8,
+    ];
 
     fn box_only() -> BoxWing<6> {
         BoxWing::<6>::box6(1.5, 2.0, 3.0, 1000.0, 2.2, 0.0, 0.3, 0.4)
@@ -874,7 +910,7 @@ mod tests {
 
     /// The box-wing drag + SRP accelerations match Orekit's `BoxAndSolarArraySpacecraft` to < 1e-9
     /// relative across five geometries: a bare box at near-identity and tilted attitudes, a
-    /// lift-enabled box (validating the drag lift term), and a box + Sun-tracking array at both
+    /// lift-enabled box (its drag against `box_wing_momentum.mac`, F89), and a box + Sun-tracking array at both
     /// attitudes (validating the `PointingPanel` normal and the double-sided panel).
     #[test]
     #[allow(clippy::too_many_lines)] // five embedded Orekit golden geometries, one per fixture block
@@ -962,35 +998,15 @@ mod tests {
         worst = worst.max(check(
             "lift_tilt",
             &box_lift(),
-            [
-                [
-                    7.81639107922839700e-01,
-                    -4.82929352591077100e-01,
-                    3.94739845178505130e-01,
-                ],
-                [
-                    5.50117295349308300e-01,
-                    8.32030097196060800e-01,
-                    -7.13924275919757800e-02,
-                ],
-                [
-                    -2.93957932914131400e-01,
-                    2.72956329411641900e-01,
-                    9.16015052229478500e-01,
-                ],
-            ],
-            [7400.0, 900.0, -1200.0],
+            LIFT_ATTITUDE,
+            LIFT_RELVEL,
             [
                 2.72242175241453040e-06,
                 -3.17615871115028600e-06,
                 1.81494783494302070e-06,
             ],
             [1.0, 0.0, 0.0],
-            [
-                1.05063598970169920e-06,
-                1.04319104803891920e-07,
-                -1.05929245207931560e-07,
-            ],
+            LIFT_DRAG_MAXIMA,
             [
                 3.00124364514176600e-08,
                 -2.76854288282366800e-08,

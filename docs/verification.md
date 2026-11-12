@@ -415,6 +415,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | The daily flux's memory | Ф23.L: the daily F10.7 through a first-order filter before `T∞`, with the heating time (no parameter) or its own, on the family and storm-out folds; the interval's coverage by regime held out, on the corpus and on §10.2's campaign rows | the filter's daily step, its `τ → 0` limit, `lfilter`'s recursion and a spike's conserved flux in Maxima (9 identities) and PARI/GP; `tools/regime-coverage.py` reproduces §10.28's held-out coverage digit for digit | its own time is 26–35 h; pre-storm MAPE 20.79 → 19.91 %, family −0.07 [−0.13, −0.01] with the heating time, storm folds span 0; regime 5 stays at 84.4 % on the campaign rows against the 88 % target, because the cell misses through a storm-time excess (May 2024 1.124, June 2025 1.195 model/measured), not the flux (§10.48) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/regime-coverage.py |
 | The quiet latitude structure | Ф23.V: the high-minus-low latitude contrast of the held-out residual on the quiet rows, by season, by height and, read after, by flux; two latitude rows of the form fixed before their folds (`degree3`, `boundary_latitude`) and three read after (`flux_latitude`, `flux_boundary_latitude`, `no_swarm`); the measured density boxcar-smoothed as Swarm's GPS densities are | the rule written into the tool before each run; `smoothing_shift` exact to 1e-13 on a synthetic series with a gap; `no_swarm`'s Swarm fold equals the shipped one to 1e-11 | CHAMP +11.4, GOCE +12.1 in both seasons (winter +17), +7 to +16 at F10.7a ≥ 100 at every height, negative only below 100 sfu above 400 km; no row meets the rule (`degree3` −0.08, `boundary_latitude` −0.03 and GOCE overshot); `flux_boundary_latitude` −0.31 [−0.37, −0.25], after the data → blind months (Ф23.X); Swarm's resolution moves CHAMP/GOCE by 2 points only (Ф23.Y) (§10.49) | tools/latitude-contrast.py, tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py |
 | Uncertainty beyond six bins | Ф30.I: the shipped six-cell σ against a continuous `ln σ(x)` in the model's inputs and two split-conformal rivals, each built from the other four families' held-out residuals; coverage, half-width, log score and CRPS by cell, family, height, storm phase and the campaign rows; the five fold fits' spread as the parameter part | the normal CRPS from `E|X − y| − E|X − X′|/2` in Maxima (18 identities) and against its defining integral in PARI/GP to 1e-45; Python against PARI to 16 digits; the σ fit recovers a known β; each fold refit reproduces its saved residual to 7e-15 | no method meets the target (the worst family per cell 78–88 %): the limitation stays printed; `continuous` log score −0.019 [−0.027, −0.011], CRPS −0.060 [−0.082, −0.038], GOCE 99.6 → 90.6 %, campaign regime 5 84.4 → 89.4 %; conformal adds nothing (q 1.61–1.63); the parameter part is ≤ 1.5 % of σ² (§10.50) | tools/uncertainty-scores.py, derivations/gaussian_scores.mac |
+| Other benchmarks' cases | Ф25.E: STORM-AI's 4 537 evaluation cases (CC BY 4.0) and AETHER-P3 Nowcast's twelve, as manifests and `windows` folds that keep out every satellite inside any case's span, the benchmarks' held-out satellites and, for AETHER-P3, every row from 2024; SDTM-1 on persistence and on reconstruction against NRLMSISE-00 and the clean-room JB2008 on measured indices | the orbit-mean operator on the measured density against STORM-AI's target (median 0.29 %, 99th percentile 2.3 %); the case count per subset and satellite against the devkit; our NRLMSISE-00 and JB2008 against AETHER-P3's Table 9 (means 0.428 / 0.434 and 0.213 / 0.220); `LeakError` on a padded, held-out or late row | private set: SDTM-1 persistence RMSE 36 % below JB2008; Phase 1.2 52 % above it, the fold having no deep minimum (median ln ratio +0.33 in 2018–2020); AETHER-P3 RE 0.250, between JB2008 0.213 and NRLMSISE-00 0.428, behind HASDM 0.147 and AETHER-P3 0.116 (§10.51) | tools/benchmark-splits.py, tools/evaluate-sdtm.py, tools/test_evaluate_sdtm.py |
 
 ### Tides
 
@@ -10407,6 +10408,139 @@ Findings:
 Run:
 
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/uncertainty-scores.py
+
+### 10.51 Other benchmarks' cases: STORM-AI and AETHER-P3 (Ф25.E)
+
+Two published density benchmarks are scored through the harness. Each is a manifest under `docs/` and a `windows`
+split of `tools/evaluate-sdtm.py`. A case is a span of one satellite. The fit keeps out every row of every
+satellite inside any case's span widened by `pad_hours`, every row of the satellites the benchmark held out of its
+own training, and, where the benchmark says so, every row from `until` on. Only each case's own satellite inside
+its own span is scored. `guard` refuses a training row that breaks any of the three rules, and
+`tools/test_evaluate_sdtm.py` checks both sides on an inline split and the span membership against brute force.
+`tools/benchmark-splits.py` scores each fold on the benchmark's own terms. The comparators are NRLMSISE-00 and the
+clean-room JB2008, both on the measured indices. DTM2020 is not used here.
+
+**STORM-AI** (Sanchez-Hurtado et al. 2026, doi:10.1029/2026SW004994; dataset doi:10.7910/DVN/U6K6MJ, version 1.1,
+CC BY 4.0). `tools/fetch-storm-ai.sh` takes the twelve `private_eval__*` archives, 26 GiB, each checked against
+Dataverse's MD5. They hold 7 037 cases; 4 557 evaluation entries name 4 537 of them: 2 747 in Phase 1.1, 1 327 in
+Phase 1.2 and 483 in the private set. Twenty cases, ten CHAMP and ten GRACE-B in October 2003, are in Phase 1.1
+and in the private set, at the same instant and with the same target file. For the ten GRACE-B cases the private
+set gives other elements, 12 km lower in semi-major axis and 81–93° further along in true anomaly. The mission archive's
+own elements agree with Phase 1.1's, and they set the period here. The count per subset and satellite is the
+devkit's, case for case. Swarm B is in no STORM-AI training set, so it is out of the fold.
+
+The target is TU Delft's orbit-mean density at UTC 10-minute ticks for the 72 h after the initial state: 432
+ticks, the first 0–599 s after it. The scorer averages each model the same way: over one orbital period, from the
+initial state's semi-major axis, centred on the tick, along the corpus's rows, and not at all where the rows
+cover less than 90 % of the period. On the measured density this operator returns the target: median
+`|ratio − 1|` 0.29 %, 99th percentile 2.3 %, on 1 920 812 ticks. One case, 71687 (GRACE-B, 2006-12-07), has no
+tick that every model answers.
+
+There are two input modes. *Reconstruction* reads the measured indices through the 72 h, as every harness fold
+does. *Persistence* holds the 3-hourly `ap` from the last whole interval before the initial state, and F10.7 and
+its 81-day mean from the day before it: all that a STORM-AI entry knew. Both comparators read the measured
+indices, which is an advantage over persistence.
+
+The cases tile the missions' years: inside some padded span lie 98–100 % of each year from 2001 to 2009, from
+2014 to 2020 and of 2024, but 27 % of 2000, 58 % of 2010, and nothing of 2011–2013 or 2021–2023. So the fold
+trains on 93 962 rows from those gaps: the rising phase and maximum of cycles 24 and 25, and no deep minimum. A
+looser rule that kept the other satellites inside a case's span would put GRACE-A, which flies 220 km from
+GRACE-B, in the training set of 949 GRACE-B cases. It is not used.
+
+RMSE of the orbit means in 1e-13 kg/m³, on the ticks that every model and the target answer. `1 − RMSE/JB2008` is
+given for persistence and reconstruction. The skill is STORM-AI's propagation score with NRLMSISE-00 as the
+reference, not their NRLMSIS 2.x, which `nrlmsis2` keeps us from running.
+
+| cases | n | ticks | SDTM-1 persistence | SDTM-1 reconstruction | NRLMSISE-00 | JB2008 | 1 − RMSE/JB2008 | skill vs NRLMSISE-00, persistence |
+|---|---|---|---|---|---|---|---|---|
+| all | 4536 | 1 920 812 | 4.267 | 3.307 | 6.327 | 4.554 | +0.063, +0.274 | +0.434 |
+| Phase 1.1 | 2746 | 1 155 798 | 5.256 | 4.099 | 7.829 | 5.313 | +0.011, +0.228 | +0.432 |
+| Phase 1.2 | 1327 | 566 236 | 1.181 | 0.862 | 1.128 | 0.778 | −0.518, −0.109 | +0.180 |
+| private | 483 | 207 072 | 3.799 | 2.537 | 6.349 | 5.957 | **+0.362**, +0.574 | +0.522 |
+| private CHAMP | 10 | 4321 | 12.921 | 6.004 | 25.872 | 10.297 | −0.255, +0.417 | +0.569 |
+| private GRACE-B | 10 | 3973 | 2.085 | 1.379 | 5.459 | 2.062 | −0.011, +0.331 | +0.766 |
+| private GRACE-FO | 130 | 55 423 | 2.899 | 1.945 | 3.021 | 2.096 | −0.384, +0.072 | +0.293 |
+| private Swarm A | 102 | 43 921 | 3.790 | 2.817 | 6.629 | 7.704 | +0.508, +0.634 | +0.584 |
+| private Swarm B | 122 | 52 475 | 2.782 | 2.029 | 3.898 | 4.942 | +0.437, +0.589 | +0.368 |
+| private Swarm C | 109 | 46 959 | 3.988 | 2.903 | 6.692 | 7.642 | +0.478, +0.620 | +0.558 |
+| May 2024 storm, 10–13 May | 12 | 5191 | 9.716 | 4.560 | 9.306 | 5.392 | −0.802, +0.154 | |
+| Halloween 2003, cases from October and November | 40 | 16 684 | 9.742 | 6.013 | 16.673 | 6.956 | −0.401, +0.135 | |
+
+The median of `ln(model/target)` by era shows where the fold has no data:
+
+| years | ticks | SDTM-1 persistence | SDTM-1 reconstruction | NRLMSISE-00 | JB2008 |
+|---|---|---|---|---|---|
+| 2000–2004 | 331 995 | +0.036 | +0.037 | +0.183 | +0.111 |
+| 2005–2009 | 489 362 | +0.243 | +0.244 | +0.428 | +0.200 |
+| 2014–2017 | 410 314 | −0.002 | −0.005 | +0.212 | +0.067 |
+| 2018–2020 | 431 220 | +0.331 | +0.334 | +0.638 | +0.221 |
+| 2021–2024 | 198 778 | −0.053 | −0.054 | +0.223 | −0.077 |
+
+Findings:
+
+- **On the private set, SDTM-1 on persistence has an RMSE 36 % below JB2008 on measured indices**, and 44–51 % below
+  it on each Swarm. On reconstruction the margin is 57 %. The STORM-AI paper's abstract gives its winner an OD-RMSE
+  50.8 % below JB2008's overall and 6.1 % below it in May 2024. Its body is not reachable from here (Wiley answers
+  403), so the inputs behind that JB2008 are not known. An OD-RMSE is a position error and this is a density
+  error, so the numbers sit side by side without a rank.
+- **Both deep minima are outside the fold, and there SDTM-1 is too dense.** In 2018–2020 its median is +0.33 and
+  in 2005–2009 +0.24, against JB2008's +0.22 and +0.20. In the years the fold has neighbours for, 2014–2017 and
+  2021–2024, it is within 0.06. Phase 1.2, Swarm B and C from 2014 to 2020, is the one subset where JB2008 wins,
+  by 52 % on persistence. These numbers measure SDTM-1 carried across a minimum it never saw, not the shipped
+  model, which was fitted on these years.
+- **A storm is the forecast problem, and persistence does not solve it.** In the May 2024 storm and the Halloween
+  2003 storms, persistence has an RMSE 80 % and 40 % above JB2008 on measured indices. The same fit on the
+  measured indices is 15 % and 14 % below it. STORM-AI's question is the difference between the two.
+
+**AETHER-P3 Nowcast** (Wang & Bai 2026, arXiv:2609.06777, CC BY 4.0). Twelve cases in February 2015 and May
+2024, the paper's Table 7, read as whole UTC days. Its RE is the mean `|ρ̂/ρ − 1|` over a case's points, then
+the unweighted mean over the cases. AETHER-P3 trained up to the end of 2023 and saw neither Swarm A nor Swarm B.
+So the fold trains on rows before 2024-01-01, without either Swarm and without the twelve spans: 238 153 rows.
+Every model reads the measured indices, as a nowcast does. The published columns are from Table 9. WAM-IPE's
+mean is over its six May 2024 cases.
+
+| case | satellite | days | rows | SDTM-1 | NRLMSISE-00 | JB2008 | AETHER-P3, published | HASDM | JB2008 | NRLMSISE-00 | WAM-IPE |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | Swarm A | quiet, high flux, 2024-05-24 to 31 | 5737 | 0.216 | 0.480 | 0.305 | 0.143 | 0.113 | 0.291 | 0.470 | 1.013 |
+| 2 | Swarm C | quiet, high flux, 2024-05-24 to 31 | 5737 | 0.219 | 0.475 | 0.307 | 0.142 | 0.134 | 0.281 | 0.495 | 1.076 |
+| 3 | Swarm A | quiet, medium flux, 2015-02-10 to 15 | 4307 | 0.197 | 0.206 | 0.120 | 0.091 | 0.126 | 0.134 | 0.207 | — |
+| 4 | Swarm C | quiet, medium flux, 2015-02-10 to 15 | 4284 | 0.197 | 0.211 | 0.118 | 0.087 | 0.118 | 0.128 | 0.211 | — |
+| 5 | Swarm A | moderate event I, 2015-02-16 to 20 | 3600 | 0.158 | 0.140 | 0.134 | 0.082 | 0.129 | 0.135 | 0.146 | — |
+| 6 | Swarm C | moderate event I, 2015-02-16 to 20 | 3600 | 0.159 | 0.146 | 0.136 | 0.085 | 0.129 | 0.137 | 0.153 | — |
+| 7 | Swarm A | moderate event II, 2015-02-23 to 25 | 2130 | 0.142 | 0.117 | 0.132 | 0.073 | 0.139 | 0.135 | 0.127 | — |
+| 8 | Swarm C | moderate event II, 2015-02-23 to 25 | 2130 | 0.143 | 0.120 | 0.132 | 0.082 | 0.140 | 0.139 | 0.133 | — |
+| 9 | GRACE-FO | extreme storm, 2024-05-10 to 13 | 2880 | 0.444 | 0.825 | 0.314 | 0.165 | 0.207 | 0.334 | 0.826 | 0.907 |
+| 10 | Swarm A | extreme storm, 2024-05-10 to 13 | 2880 | 0.388 | 0.797 | 0.289 | 0.137 | 0.176 | 0.305 | 0.799 | 0.805 |
+| 11 | Swarm B | extreme storm, 2024-05-10 to 13 | 2880 | 0.342 | 0.838 | 0.288 | 0.168 | 0.184 | 0.305 | 0.843 | 1.006 |
+| 12 | Swarm C | extreme storm, 2024-05-10 to 13 | 2880 | 0.392 | 0.787 | 0.286 | 0.135 | 0.173 | 0.310 | 0.802 | 0.816 |
+| mean | | | | **0.250** | 0.428 | 0.213 | 0.116 | 0.147 | 0.220 | 0.434 | 0.937 |
+
+The first three model columns are ours; the last six are the paper's.
+
+Findings:
+
+- **Our comparators reproduce the paper's.** NRLMSISE-00 has a mean of 0.428 against the published 0.434, within
+  2 % on six cases and within 10 % on all twelve. The clean-room JB2008 has 0.213 against 0.220, within 11 % on
+  every case. So the case dates, the rows and the RE agree with the paper's.
+- **SDTM-1, at 0.250, is between JB2008 and NRLMSISE-00, and behind HASDM (0.147) and AETHER-P3 (0.116).** It
+  beats JB2008 on the two quiet May 2024 cases (0.216 and 0.219 against 0.305 and 0.307). It loses on the quiet
+  February 2015 cases (0.197 against 0.120 and 0.118) and on the four May 2024 storm cases (0.342–0.444 against
+  0.286–0.314). The storm cases are its largest errors, as in §10.30.
+- The paper the research digest cited for AETHER-P3, arXiv:2608.00352, is the forecast paper with eight cases.
+  The twelve cases and Table 9 are in the Nowcast paper, arXiv:2609.06777.
+
+Run:
+
+    tools/fetch-storm-ai.sh
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/benchmark-splits.py storm-ai-manifest data/validation/storm-ai
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/benchmark-splits.py aether-manifest
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind windows
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/benchmark-splits.py score storm-ai
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/benchmark-splits.py table storm-ai
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/benchmark-splits.py score aether-p3
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/benchmark-splits.py table aether-p3
+
+The archives, the targets and the scores stay under `data/`, which is never committed.
 
 ---
 

@@ -27,7 +27,7 @@ every other family's from an accelerometer.
 their folds were read: a row explains the structure if its `all` contrast on CHAMP, on GOCE and on Swarm is half
 the shipped field's or less in size, and its paired family-fold MAPE (`tools/ablation-table.py`) is no worse.
 
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/latitude-contrast.py [--fields default]
+    uv run --project tools --locked python -I tools/latitude-contrast.py [--fields default]
 """
 
 from __future__ import annotations

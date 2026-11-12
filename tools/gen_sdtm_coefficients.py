@@ -44,8 +44,7 @@ on the rest.
 
 ## Run
 
-    uv run --no-project --with numpy --with pandas --with scipy \\
-        python tools/gen_sdtm_coefficients.py --degree 2
+    uv run --project tools --locked python -I tools/gen_sdtm_coefficients.py --degree 2
 
 Nothing is written: this is the twelve-month pilot and the experiments run on it. The shipped
 coefficients are the corpus fit's, written by `tools/fit-sdtm-corpus.py --emit`.

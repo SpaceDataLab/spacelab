@@ -16,7 +16,7 @@ printed beside it, and the map by magnetic latitude and magnetic local time is d
 
     tools/residual-maps.py [--field default] [--draws 4000]
 
-Run under `uv run --no-project --with numpy --with pandas --with scipy python -I`.
+Run under `uv run --project tools --locked python -I`.
 """
 
 from __future__ import annotations

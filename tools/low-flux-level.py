@@ -6,7 +6,7 @@ two `--fields`, checks they hold the same test rows, and keeps the rows whose 81
 `--below`. Per family it prints the rows kept, each field's MAPE, and each field's median model/measured,
 pooled and per satellite. A level shift shows as one ratio between the medians in every family.
 
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/low-flux-level.py [--fields default gc_v02] [--below 80 70]
+    uv run --project tools --locked python -I tools/low-flux-level.py [--fields default gc_v02] [--below 80 70]
 """
 
 from __future__ import annotations

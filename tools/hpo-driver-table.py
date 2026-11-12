@@ -10,7 +10,7 @@ stands in for them. The ratio is model over measured, `C/O = exp(residual)`. Eac
 resamples storm windows and 27-day blocks (`tools/cluster-intervals.py`'s `storm` level), where there are at
 least ten of them.
 
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/hpo-driver-table.py
+    uv run --project tools --locked python -I tools/hpo-driver-table.py
 """
 
 from __future__ import annotations

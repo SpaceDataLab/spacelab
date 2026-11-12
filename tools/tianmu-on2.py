@@ -15,7 +15,7 @@ read.
     points  every 15th sample (30 s) as `column_on2 --local`'s input
     score   the changes, measured and modelled, by node and latitude band
 
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/tianmu-on2.py points|score
+    uv run --project tools --locked python -I tools/tianmu-on2.py points|score
 """
 
 from __future__ import annotations

@@ -14,7 +14,7 @@ C, or Swarm A where GRACE-FO is held out). Per family and pooled, it prints the 
 and NRLMSISE-00's as scored and with its best constant. It prints each fold's fitted training scales, and
 with `--field no_scales` scores the fit that gives no satellite a scale (Ф30.G's other end).
 
-    uv run --no-project --with numpy --with scipy python -I tools/satellite-scale.py [--field default]
+    uv run --project tools --locked python -I tools/satellite-scale.py [--field default]
 """
 
 from __future__ import annotations

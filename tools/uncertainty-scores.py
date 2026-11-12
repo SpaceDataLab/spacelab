@@ -29,7 +29,7 @@ family covers at least 90 %, and on the campaign rows every cell with at least 5
 Otherwise the limitation stays printed. Between methods, the mean log score and CRPS decide, each paired against
 `bins6` with an interval resampling 27-day blocks.
 
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/uncertainty-scores.py [--field default]
+    uv run --project tools --locked python -I tools/uncertainty-scores.py [--field default]
 """
 
 from __future__ import annotations

@@ -14,7 +14,7 @@ because there are only five. Five clusters give a coarse interval and its edges 
 
 `--against` puts another fit of the same form in NRLMSISE-00's column, on the same rows and the same draws.
 
-Run under `uv run --no-project --with numpy --with pandas --with scipy python -I`; `summary` of
+Run under `uv run --project tools --locked python -I`; `summary` of
 `tools/evaluate-sdtm.py` holds the per-split numbers this one puts intervals on.
 """
 

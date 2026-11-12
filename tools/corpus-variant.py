@@ -7,7 +7,7 @@ version holds the month and keeps the row; every other row, and every other sate
 own. The rows are the same rows, so a field fitted on the variant is scored on the same test rows as the
 shipped one and the folds stay paired. The other satellites' files are linked, not copied.
 
-    uv run --no-project --with numpy --with pandas python -I tools/corpus-variant.py --sat GC --version v02 --out corpus-gc-v02
+    uv run --project tools --locked python -I tools/corpus-variant.py --sat GC --version v02 --out corpus-gc-v02
 """
 
 from __future__ import annotations

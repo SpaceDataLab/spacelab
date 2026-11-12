@@ -25,7 +25,7 @@ the fitted folds on the benchmarks' own terms:
     tools/benchmark-splits.py score storm-ai [--field default]
     tools/benchmark-splits.py table storm-ai [--field default]
 
-Run under `uv run --no-project --with numpy --with pandas --with scipy python -I`. The targets and the scores
+Run under `uv run --project tools --locked python -I`. The targets and the scores
 stay under `data/`, which is never committed; the manifests name cases, not densities.
 """
 

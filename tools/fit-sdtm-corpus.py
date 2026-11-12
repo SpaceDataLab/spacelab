@@ -48,7 +48,7 @@ coupling map, its fixture, and an hourly fixture of closed-form synthetic hours 
 Run:
 
     cargo build -p spacelab-propagation --release --example nrlmsise00_rows
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/fit-sdtm-corpus.py --fit-sigma
+    uv run --project tools --locked python -I tools/fit-sdtm-corpus.py --fit-sigma
 """
 
 from __future__ import annotations

@@ -28,7 +28,7 @@ reconstruction: every fold reads the measured indices, as `plans/17` rule 12 say
     tools/evaluate-sdtm.py summary [--field default]
     tools/evaluate-sdtm.py export --split frozen-2020 [--field solar_wind]   # for a Rust caller (Ф30.H, J)
 
-Run under `uv run --no-project --with numpy --with pandas --with scipy python -I`. Results stay under
+Run under `uv run --project tools --locked python -I`. Results stay under
 `data/`, which is never committed.
 """
 

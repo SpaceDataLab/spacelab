@@ -11,7 +11,7 @@ high-flux storm cell. A second line per field covers the rows of §10.2's campai
 its six months, held out the same way: where the shipped table under-covers regime 5 in sample; then the
 campaign's regime-5 rows by month, with their median model/measured.
 
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/regime-coverage.py [--fields default flux_memory]
+    uv run --project tools --locked python -I tools/regime-coverage.py [--fields default flux_memory]
 """
 
 from __future__ import annotations

@@ -31,7 +31,7 @@ geodetic), `lst` (h), `arglat` (deg), `rho` (kg/m3), `degraded` (GOCE only, else
 
 Run:
 
-    uv run --no-project --with numpy --with pandas python -I tools/build-density-corpus.py
+    uv run --project tools --locked python -I tools/build-density-corpus.py
 """
 
 from __future__ import annotations

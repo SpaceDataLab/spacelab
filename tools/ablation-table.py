@@ -8,7 +8,7 @@ A rung's gain is its MAPE minus that of the rung it extends, in percentage point
 with an interval that resamples storm windows and 27-day blocks (`tools/cluster-intervals.py`'s `storm`
 level). Wall time per call is not measured here: it needs the `bench` procedure on a quiet machine.
 
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
+    uv run --project tools --locked python -I tools/ablation-table.py
 """
 
 from __future__ import annotations

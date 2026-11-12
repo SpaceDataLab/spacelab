@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The harness refuses a leak: `tools/evaluate-sdtm.py`'s guards against deliberately leaked folds.
 
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/test_evaluate_sdtm.py
+    uv run --project tools --locked python -I tools/test_evaluate_sdtm.py
 
 The tests build a small fake corpus and hand each guard the fold it must refuse. They also rebuild the
 coupling map with and without an extreme test hour, to show that the hour reaches the leaked map and does

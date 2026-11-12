@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The coordinates of `tools/residual-maps.py` are `dipole.rs`'s, whose values `derivations/geomagnetic_dipole.mac` gates.
 
-uv run --no-project --with numpy --with pandas --with scipy python -I tools/test_residual_maps.py
+uv run --project tools --locked python -I tools/test_residual_maps.py
 """
 
 from __future__ import annotations

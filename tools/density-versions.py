@@ -8,7 +8,7 @@ difference in each tercile of the old density: a multiplicative change shows one
 tercile, an additive one the same difference. Rows are kept as the corpus keeps them: flag 0 and a
 positive density.
 
-    uv run --no-project --with numpy --with pandas python -I tools/density-versions.py [--sat GC] [--old v02] [--new v02c]
+    uv run --project tools --locked python -I tools/density-versions.py [--sat GC] [--old v02] [--new v02c]
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 """`tools/no-step-accuracy.py` against `derivations/sdtm_no_step.mac`'s 40-digit values, and its single frozen step
 against `cooling_grid`.
 
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/test_no_step_accuracy.py
+    uv run --project tools --locked python -I tools/test_no_step_accuracy.py
 """
 
 from __future__ import annotations

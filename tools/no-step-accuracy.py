@@ -10,7 +10,7 @@ the storm's peak and the largest error over its window, both relative to the exa
 spread of the same exact peak over the constants the five family folds fitted: how far the fit itself is from
 knowing the state.
 
-    uv run --no-project --with numpy --with pandas --with scipy python -I tools/no-step-accuracy.py
+    uv run --project tools --locked python -I tools/no-step-accuracy.py
 """
 
 from __future__ import annotations

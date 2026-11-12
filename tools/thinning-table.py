@@ -7,7 +7,7 @@ rows a run at step 60 reads, the same for every K, and the storm assessment's pe
 ratio (model over measured) and half-recovery error (h), on the 120 s storm windows. It prints them by step
 and by the storm's first-peak `ap`, and the change from step 60 storm by storm, on the storms both steps scored.
 
-    uv run --no-project --with numpy --with pandas python -I tools/thinning-table.py
+    uv run --project tools --locked python -I tools/thinning-table.py
 """
 
 from __future__ import annotations

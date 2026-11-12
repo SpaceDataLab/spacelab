@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The resampler against the laws of `derivations/cluster_design_effect.mac`, on series whose rho is known.
 
-uv run --no-project --with numpy --with pandas --with scipy python -I tools/test_cluster_intervals.py
+uv run --project tools --locked python -I tools/test_cluster_intervals.py
 """
 
 from __future__ import annotations

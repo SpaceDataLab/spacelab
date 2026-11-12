@@ -10430,9 +10430,12 @@ and in the private set, at the same instant and with the same target file. For t
 set gives other elements at the same latitude, longitude and altitude: a semi-major axis 12 km lower and an
 argument of latitude 100.3–100.9° further on. Here the elements set only the averaging period, from the
 semi-major axis, which the difference moves by 0.26 %; the mission archive's elements agree with Phase 1.1's and
-are used. The angles do not agree with the latitude column in general: Phase 1.1's elements put 2 743 of its
-2 747 states within 1° of the ascending node, where the column's median |latitude| is 68.7°. Which of the two is
-right is not settled here. The count per subset and satellite is the devkit's, case for case. Swarm B is in no STORM-AI training set, so it is out of the fold.
+are used. Converted to geodetic coordinates (IAU 1976 precession and GMST, nutation and polar motion left out),
+the private set's elements for these ten reproduce their latitude and longitude within 0.3°. Phase 1.1's elements
+put 2 743 of its 2 747 states within 1° of the ascending node, where the latitude column's median |latitude| is
+68.7°. In Phase 1.2 the longitude column is the right ascension of the elements' position (median difference
+0.03°), not the ITRF longitude. Both are reported to the devkit's maintainers (STORM-AI-devkit-2025 discussion 32,
+2026-11-12). The count per subset and satellite is the devkit's, case for case. Swarm B is in no STORM-AI training set, so it is out of the fold.
 
 The target is TU Delft's orbit-mean density at UTC 10-minute ticks for the 72 h after the initial state: 432
 ticks, the first 0–599 s after it. The scorer averages each model the same way: over one orbital period, from the

@@ -1,0 +1,28 @@
+{
+ "source": {
+  "benchmark": "AETHER-P3 Nowcast's twelve benchmark cases (Table 7; dates as whole UTC days)",
+  "paper": "Wang & Bai 2026, arXiv:2609.06777",
+  "licence": "CC BY 4.0"
+ },
+ "columns": [
+  "id",
+  "sat",
+  "start",
+  "end",
+  "subset"
+ ],
+ "cases": [
+  [1, "SA", "2024-05-24 00:00:00", "2024-06-01 00:00:00", "High-solar quiet"],
+  [2, "SC", "2024-05-24 00:00:00", "2024-06-01 00:00:00", "High-solar quiet"],
+  [3, "SA", "2015-02-10 00:00:00", "2015-02-16 00:00:00", "Medium-solar quiet"],
+  [4, "SC", "2015-02-10 00:00:00", "2015-02-16 00:00:00", "Medium-solar quiet"],
+  [5, "SA", "2015-02-16 00:00:00", "2015-02-21 00:00:00", "Moderate event I"],
+  [6, "SC", "2015-02-16 00:00:00", "2015-02-21 00:00:00", "Moderate event I"],
+  [7, "SA", "2015-02-23 00:00:00", "2015-02-26 00:00:00", "Moderate event II"],
+  [8, "SC", "2015-02-23 00:00:00", "2015-02-26 00:00:00", "Moderate event II"],
+  [9, "GC", "2024-05-10 00:00:00", "2024-05-14 00:00:00", "Extreme storm"],
+  [10, "SA", "2024-05-10 00:00:00", "2024-05-14 00:00:00", "Extreme storm"],
+  [11, "SB", "2024-05-10 00:00:00", "2024-05-14 00:00:00", "Extreme storm"],
+  [12, "SC", "2024-05-10 00:00:00", "2024-05-14 00:00:00", "Extreme storm"]
+ ]
+}

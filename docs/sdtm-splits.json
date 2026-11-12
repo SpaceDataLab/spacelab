@@ -246,6 +246,26 @@
    "kind": "storm",
    "start": "2026-01-18 16:30:00",
    "end": "2026-01-25 22:30:00"
+  },
+  {
+   "name": "storm-ai",
+   "kind": "windows",
+   "manifest": "docs/storm-ai-split.json",
+   "hold_out": [
+    "SB"
+   ],
+   "pad_hours": 1.0
+  },
+  {
+   "name": "aether-p3",
+   "kind": "windows",
+   "manifest": "docs/aether-p3-cases.json",
+   "hold_out": [
+    "SA",
+    "SB"
+   ],
+   "pad_hours": 0.0,
+   "until": "2024-01-01"
   }
  ]
 }

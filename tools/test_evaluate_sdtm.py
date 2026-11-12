@@ -33,6 +33,19 @@ FROZEN = {**ORIGIN, "name": "z", "kind": "frozen", "until": "2011-01-01"}
 STORM = {"name": "s", "kind": "storm", "start": "2010-03-01", "end": "2010-03-11"}
 JOINT = {**STORM, "name": "j", "kind": "joint", "family": "GRACE"}
 FOLD = {"name": "f", "kind": "family", "family": "Swarm"}
+SAT = np.array(["CH", "GA", "SB"] * 80)
+# Two cases of another benchmark: a CHAMP one, and a Swarm B one on the satellite the benchmark held out.
+WINDOWS = {
+    "name": "w",
+    "kind": "windows",
+    "cases": [
+        {"sat": "CH", "start": "2010-02-01", "end": "2010-02-04"},
+        {"sat": "SB", "start": "2010-06-01", "end": "2010-06-04"},
+    ],
+    "hold_out": ["SB"],
+    "pad_hours": 24.0,
+    "until": "2010-08-01",
+}
 
 
 def refused(split, train, test) -> bool:
@@ -98,6 +111,66 @@ def test_joint_holds_out_the_family_and_the_storm_both() -> None:
         & (T[outside_family] < np.datetime64("2010-03-11"))
     ]
     assert refused(JOINT, np.append(train, in_storm[0]), test)
+
+
+def windows_refused(train: np.ndarray, test: np.ndarray) -> bool:
+    try:
+        harness.guard(T, FAMILY, WINDOWS, train, test, SAT)
+    except harness.LeakError:
+        return True
+    return False
+
+
+def test_windows_score_each_case_on_its_own_satellite_and_train_outside_every_padded_span() -> (
+    None
+):
+    days = T
+    train, test = harness.masks(days, FAMILY, WINDOWS, SAT)
+    assert not windows_refused(train, test)
+    feb = (days >= np.datetime64("2010-02-01")) & (days < np.datetime64("2010-02-04"))
+    jun = (days >= np.datetime64("2010-06-01")) & (days < np.datetime64("2010-06-04"))
+    assert np.array_equal(
+        test, np.flatnonzero((feb & (SAT == "CH")) | (jun & (SAT == "SB")))
+    )
+    padded = (days >= np.datetime64("2010-01-31")) & (
+        days < np.datetime64("2010-02-05")
+    )
+    padded |= (days >= np.datetime64("2010-05-31")) & (
+        days < np.datetime64("2010-06-05")
+    )
+    expected = ~padded & (SAT != "SB") & (days < np.datetime64("2010-08-01"))
+    assert np.array_equal(train, np.flatnonzero(expected))
+
+
+def test_windows_refuse_a_padded_row_a_held_out_satellite_and_a_row_after_the_end() -> (
+    None
+):
+    days = T
+    train, test = harness.masks(days, FAMILY, WINDOWS, SAT)
+    pad_row = np.flatnonzero((days == np.datetime64("2010-02-04")) & (SAT == "GA"))[0]
+    swarm_b = np.flatnonzero((SAT == "SB") & (days < np.datetime64("2010-05-01")))[0]
+    late = np.flatnonzero((SAT == "CH") & (days >= np.datetime64("2010-08-01")))[0]
+    for leaked in (pad_row, swarm_b, late):
+        assert windows_refused(np.append(train, leaked), test), days[leaked]
+
+
+def test_every_benchmark_manifest_reads_as_its_cases() -> None:
+    for split in harness.BENCHMARKS:
+        sat, start, end = harness.case_spans(split)
+        assert sat.size and (start < end).all(), split["name"]
+        assert set(split["hold_out"]) <= set(harness.fit.SATELLITES), split["name"]
+
+
+def test_inside_spans_is_the_brute_force_membership_of_overlapping_spans() -> None:
+    rng = np.random.default_rng(25)
+    base = np.datetime64("2010-01-01T00:00", "ns")
+    hour = np.timedelta64(3600, "s")
+    for _ in range(50):
+        start = base + rng.integers(0, 500, 12) * hour
+        end = start + rng.integers(0, 80, 12) * hour
+        t = base + rng.integers(-10, 600, 400) * hour
+        brute = ((t[:, None] >= start) & (t[:, None] < end)).any(axis=1)
+        assert np.array_equal(harness.inside_spans(t, start, end), brute)
 
 
 def test_a_map_on_a_test_hour_is_refused() -> None:

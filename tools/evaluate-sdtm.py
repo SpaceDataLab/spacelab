@@ -12,7 +12,10 @@ any of them is read:
   `plans/17` Ф30.D read on the same rows. Its own kind, so that it never enters the pooled `origin`;
 * `storm`: one storm out, the rows of its window and its recovery masked. The indices before and during it
   stay as input, because the storm state needs them and they are not what is being predicted;
-* `joint`: a storm and a mission family out together.
+* `joint`: a storm and a mission family out together;
+* `windows`: another benchmark's cases, read from its manifest (`plans/17` Ф25.E). Every case's span, padded
+  by `pad_hours`, is out of training on every satellite; the `hold_out` satellites are out entirely, and
+  with `until` so is every row from then on. The scored rows are each case's own satellite inside its span.
 
 Inside each fold everything derived from the data is rebuilt from the training rows or the training hours:
 the ridge's scale and, for the solar-wind field, the coupling map. `guard` and `guard_map` refuse a fold
@@ -186,13 +189,79 @@ def declared_splits(
                 {"name": f"joint-{name}-{f}", "kind": "joint", "family": f, **window}
                 for f in sorted(set(fit.FAMILY.values()))
             ]
-    return out
+    return out + list(BENCHMARKS)
+
+
+# Other benchmarks' cases, each manifest written by `tools/benchmark-splits.py`. STORM-AI trained without
+# Swarm B; its orbit means read half an orbit past each end of the 72 h. AETHER-P3 Nowcast trained on
+# densities up to 2023 and on neither Swarm A nor Swarm B; its scores are at points.
+BENCHMARKS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "storm-ai",
+        "kind": "windows",
+        "manifest": "docs/storm-ai-split.json",
+        "hold_out": ["SB"],
+        "pad_hours": 1.0,
+    },
+    {
+        "name": "aether-p3",
+        "kind": "windows",
+        "manifest": "docs/aether-p3-cases.json",
+        "hold_out": ["SA", "SB"],
+        "pad_hours": 0.0,
+        "until": "2024-01-01",
+    },
+)
+
+
+def case_spans(split: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """`(satellite, start, end)` of a `windows` split's cases: inline `cases`, else its manifest's."""
+    cases = split.get("cases")
+    if cases is None:
+        manifest = json.loads((ROOT / split["manifest"]).read_text(encoding="utf-8"))
+        cases = [
+            dict(zip(manifest["columns"], c, strict=True)) for c in manifest["cases"]
+        ]
+    sat = np.array([c["sat"] for c in cases])
+    start, end = (
+        np.array([stamp(c[key]) for c in cases], dtype="datetime64[ns]")
+        for key in ("start", "end")
+    )
+    return sat, start, end
+
+
+def inside_spans(t: np.ndarray, start: np.ndarray, end: np.ndarray) -> np.ndarray:
+    """Whether each `t` lies in some `[start, end)`: inside one exactly when it is before the latest end
+    of the spans that begin at or before it."""
+    order = np.argsort(start, kind="stable")
+    begins, reach = start[order], np.maximum.accumulate(end[order])
+    i = np.searchsorted(begins, t, side="right") - 1
+    return (i >= 0) & (t < reach[np.maximum(i, 0)])
+
+
+def window_masks(
+    t: np.ndarray, sat: np.ndarray, split: dict[str, Any]
+) -> tuple[np.ndarray, np.ndarray]:
+    """A `windows` split's training and scored rows, as boolean masks."""
+    case_sat, start, end = case_spans(split)
+    pad = np.timedelta64(round(split["pad_hours"] * 3600), "s")
+    train = ~inside_spans(t, start - pad, end + pad) & ~np.isin(sat, split["hold_out"])
+    if "until" in split:
+        train &= t < stamp(split["until"])
+    test = np.zeros(t.size, dtype=bool)
+    for s in np.unique(case_sat):
+        mine = case_sat == s
+        test |= (sat == s) & inside_spans(t, start[mine], end[mine])
+    return train, test
 
 
 def masks(
-    t: np.ndarray, family: np.ndarray, split: dict[str, str]
+    t: np.ndarray,
+    family: np.ndarray,
+    split: dict[str, Any],
+    sat: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """The training rows and the scored rows of one split, as indices."""
+    """The training rows and the scored rows of one split, as indices. A `windows` split needs `sat`."""
     kind = split["kind"]
     if kind == "family":
         test = family == split["family"]
@@ -207,6 +276,12 @@ def masks(
         else:
             held = family == split["family"]
             train, test = ~(inside | held), inside & held
+    elif kind == "windows":
+        if sat is None:
+            raise ValueError(
+                f"{split['name']}: a windows split needs each row's satellite"
+            )
+        train, test = window_masks(t, sat, split)
     else:
         raise ValueError(f"no such split kind: {kind}")
     return np.flatnonzero(train), np.flatnonzero(test)
@@ -215,14 +290,30 @@ def masks(
 def guard(
     t: np.ndarray,
     family: np.ndarray,
-    split: dict[str, str],
+    split: dict[str, Any],
     train: np.ndarray,
     test: np.ndarray,
+    sat: np.ndarray | None = None,
 ) -> None:
     """Refuse a fold whose training rows hold anything it is scored on."""
     if np.intersect1d(train, test).size:
         raise LeakError(f"{split['name']}: a row is in both sets")
     kind = split["kind"]
+    if kind == "windows":
+        if sat is None:
+            raise ValueError(
+                f"{split['name']}: a windows split needs each row's satellite"
+            )
+        _, start, end = case_spans(split)
+        pad = np.timedelta64(round(split["pad_hours"] * 3600), "s")
+        if inside_spans(t[train], start - pad, end + pad).any():
+            raise LeakError(f"{split['name']}: a training row from inside a case")
+        if np.isin(sat[train], split["hold_out"]).any():
+            raise LeakError(
+                f"{split['name']}: a held-out satellite is in the training rows"
+            )
+        if "until" in split and (t[train] >= stamp(split["until"])).any():
+            raise LeakError(f"{split['name']}: a training row from after its end")
     if kind in ("family", "joint") and (family[train] == split["family"]).any():
         raise LeakError(f"{split['name']}: the held-out family is in the training rows")
     if kind in ("origin", "frozen") and (t[train] >= stamp(split["cut"])).any():
@@ -240,6 +331,13 @@ def training_hours(hours: np.ndarray, split: dict[str, str]) -> np.ndarray:
         return hours < stamp(split["cut"])
     if kind in ("storm", "joint"):
         return (hours < stamp(split["start"])) | (hours >= stamp(split["end"]))
+    if kind == "windows":
+        _, start, end = case_spans(split)
+        pad = np.timedelta64(round(split["pad_hours"] * 3600), "s")
+        allowed = ~inside_spans(hours, start - pad, end + pad)
+        return (
+            allowed & (hours < stamp(split["until"])) if "until" in split else allowed
+        )
     return np.ones(hours.size, dtype=bool)
 
 
@@ -299,6 +397,40 @@ def command_splits(_args) -> int:
     return 0
 
 
+def fold_model(
+    arg: dict,
+    sat: np.ndarray,
+    train_sats: tuple[str, ...],
+    settings: dict[str, Any],
+    penalty_rows: np.ndarray | None,
+):
+    """A field's `CorpusModel` on `arg`'s rows, with a slot for each satellite of `train_sats`: a fold's
+    fitted parameters score any rows through it."""
+    return fit.CorpusModel(
+        arg,
+        sat,
+        train_sats,
+        g.CAPS[settings["caps"]],
+        settings["ridge"],
+        settings["sigma"],
+        settings["cooling"],
+        settings["excess"],
+        settings["gain"],
+        None,
+        None,
+        settings["wind"],
+        penalty_rows=penalty_rows,
+        limit=settings["limit"],
+        scales=settings.get("scales", True),
+        composition=settings.get("composition", False),
+        delta=settings.get("delta", False),
+        linear=settings.get("linear", False),
+        nitric_flux=settings.get("nitric_flux"),
+        flux_memory=settings.get("flux_memory"),
+        boundary_latitude=settings.get("boundary_latitude", False),
+    )
+
+
 def command_run(args) -> int:
     settings = FIELDS[args.field]
     variant = settings.get("corpus")
@@ -337,9 +469,9 @@ def command_run(args) -> int:
         target = out_dir / f"{split['name']}.npz"
         if target.exists():
             continue
-        train, test = masks(t, family, split)
+        train, test = masks(t, family, split, sat)
         train = train[~np.isin(family[train], settings.get("drop_families", ()))]
-        guard(t, family, split, train, test)
+        guard(t, family, split, train, test, sat)
         if test.size == 0:
             print(f"{split['name']}: no rows to score", flush=True)
             continue
@@ -354,28 +486,12 @@ def command_run(args) -> int:
         seen = set(sat[train])
         train_sats = tuple(s for s in fit.SATELLITES if s in seen)
         began = time.time()
-        model = fit.CorpusModel(
+        model = fold_model(
             fold_arg,
             sat,
             train_sats,
-            g.CAPS[settings["caps"]],
-            settings["ridge"],
-            settings["sigma"],
-            settings["cooling"],
-            settings["excess"],
-            settings["gain"],
-            None,
-            None,
-            settings["wind"],
-            penalty_rows=None if args.legacy_penalty else train,
-            limit=settings["limit"],
-            scales=settings.get("scales", True),
-            composition=settings.get("composition", False),
-            delta=settings.get("delta", False),
-            linear=settings.get("linear", False),
-            nitric_flux=settings.get("nitric_flux"),
-            flux_memory=settings.get("flux_memory"),
-            boundary_latitude=settings.get("boundary_latitude", False),
+            settings,
+            None if args.legacy_penalty else train,
         )
         p = model.fit(train)
         residual, _ = model.score(p, test)
@@ -388,6 +504,7 @@ def command_run(args) -> int:
             ap_daily=ap_daily[test],
             train_rows=train.size,
             parameters=p,
+            train_sats=np.array(train_sats),
         )
         print(
             f"{split['name']}: {train.size} train, {test.size} test, MAPE {g.mape(residual):.1f} %, "
@@ -443,7 +560,7 @@ def main() -> int:
     runner.add_argument(
         "--kind",
         required=True,
-        choices=("family", "origin", "frozen", "storm", "joint"),
+        choices=("family", "origin", "frozen", "storm", "joint", "windows"),
     )
     runner.add_argument("--only")
     runner.add_argument("--field", default="default", choices=sorted(FIELDS))

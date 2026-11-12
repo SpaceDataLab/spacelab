@@ -124,4 +124,38 @@ cap_at(h, deg) := block([Rv : 637813646/100, rv, Dv, cv],
 for h in [500000, 20000000] do for deg in [1, 15, 30] do
   print("  cap and lumped over exact,", h, "m,", deg, "deg:", cap_at(h, deg))$
 
+/* ---- (6) the flux across r, under an exitance that varies across it (plans/17 Ф17.F) -----------
+   A uniform sphere's flux lies along r, so it cannot test where the grid's rays point. The exitance
+   1 + m sin(gamma) cos(phi) = 1 + m p.e/|p|, with e a unit vector across r and phi the element's
+   azimuth from it, pushes the flux along e. The element at (x = cos(gamma), phi) has area
+   R^2 dx dphi and emits along r - p, whose component along r is r - R x and along e is
+   -R sin(gamma) cos(phi). sg stands for sin(gamma) until the azimuth is integrated out.          */
+qq : r^2 + R^2 - 2*r*R*x$
+element(component) := (1 + m*sg*cos(phi))*(r*x - R)/sqrt(qq)*component*R^2/(%pi*qq^(3/2))$
+radial_phi : ratsimp(integrate(element(r - R*x), phi, 0, 2*%pi))$
+across_phi : ratsimp(subst(sg = sqrt(1 - x^2), integrate(element(-R*sg*cos(phi)), phi, 0, 2*%pi)))$
+must(is(ratsimp(radial_phi - 2*R^2*(r*x - R)*(r - R*x)/qq^2) = 0),
+     "(6) holds: the varying part leaves the radial flux the uniform sphere's, (R/r)^2")$
+across_kernel : -R^3*(1 - x^2)*(r*x - R)/qq^2$
+must(is(ratsimp(across_phi - m*across_kernel) = 0),
+     "(6) holds: over the azimuth, the flux along e is m times -R^3 (1 - x^2)(r x - R)/q^4 dx")$
+/* The antiderivative's logs take negative arguments, log(-(r - R)^2) and log(R^2 - r^2), whose
+   i pi parts cancel in the difference. */
+across_A : integrate(across_kernel, x)$
+across_closed : ((3*r^2 + R^2)*(r^2 - R^2)*log((r - R)/(r + R))
+                 + 2*R*(r - R)*(3*r^2 + 3*R*r + 2*R^2))/(16*R*r^3)$
+must(is(ratsimp(logcontract(subst(x = 1, across_A) - subst(x = R/r, across_A) - across_closed)) = 0),
+     "(6) holds: from the horizon, it is ((3r^2 + R^2)(r^2 - R^2) log((r - R)/(r + R)) + 2R(r - R)(3r^2 + 3rR + 2R^2))/(16 R r^3)")$
+/* At 30 digits with the R of the Rust test (`a_varying_exitance_pushes_the_flux_across_r`), and by
+   quadrature in x. */
+across_at(h) := block([Rv : 637813646/100],
+  bfloat(subst([R = Rv, r = Rv + h], across_closed)))$
+across_quad(h) := block([Rv : 637813646/100],
+  quad_qags(float(subst([R = Rv, r = Rv + h], across_kernel)), x, float(Rv/(Rv + h)), 1,
+            'epsrel = 1e-13)[1])$
+for h in [500000, 20000000] do
+  print("  flux along e per unit m,", h, "m:", across_at(h), " quadrature", across_quad(h))$
+must(every(lambda([h], is(abs(across_quad(h)/across_at(h) - 1) < 1e-10)), [500000, 20000000]),
+     "(6) holds: quadrature agrees with the closed form to 1e-10 at 500 km and 20 000 km")$
+
 print("DONE")$

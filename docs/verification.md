@@ -4757,6 +4757,13 @@ suppression list; they are the campaign's second output. The proofs that recur:
 Exclusions are anchored by `file:line:col`, which **goes stale the moment a line is inserted above
 the code it names**. `just mutants-anchors <FILE>` re-derives the live mutant list and reports
 `N entries, N mutants excluded, 0 broken`; the real staleness signal is `entries != excluded`.
+An entry belongs to FILE when its anchored path is FILE or a suffix of it at a path-component
+boundary, whatever its number of components (F38: the 276 `dsst/srp.rs`-style partial paths were
+invisible to the old exact-or-basename rule, which gave a false green with three anchors of
+`gaussian_short_period.rs` drifted and now names all three). A miss is drift when the anchored path
+names that one source file and no other — 882 of the 1 021 entries — and only a shared basename such
+as `lib.rs` is reported as `same-name anchors elsewhere`. A FILE that `cargo mutants --list` returns no
+mutant for, a wrong path or a file with nothing to mutate, fails rather than reconciling `0 of 0`.
 
 `just mutants-ledger` does the same over the whole ledger in two `--list` calls instead of two per
 file — ~2 min against ~1.6 h for the 137 anchored files — and asks a strictly stronger question,

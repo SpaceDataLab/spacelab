@@ -461,20 +461,26 @@ mutants-anchors FILE:
     # `short_period.rs` also suffix-match `gaussian_short_period.rs`, `tesseral_short_period.rs` and
     # `third_body_short_period.rs`, so the count came out 59/3, 56/0 and 63/7 and stopped the queue
     # on three files whose ledger is in fact correct. Matching on the basename alone would be worse
-    # still -- every other `mod.rs` in the ledger.
-    # Whether the anchor names a path or only a basename decides what a miss means. An anchor that
-    # carries its crate path names one file and no other, so failing to find its mutant is drift --
+    # still -- every other `mod.rs` in the ledger. The suffix may have several components: 276
+    # entries anchor `dsst/srp.rs`-style partial paths, and an exact-or-basename rule saw none of
+    # them, so `dsst/srp.rs` came back `0 entries, 9 mutants excluded` on a correct ledger.
+    # How many source files the anchored path names decides what a miss means. One file -- a crate
+    # path, a partial path or a basename found once -- and failing to find its mutant is drift:
     # `spacelab-capi`'s two entries went stale exactly that way and were reported as belonging
-    # elsewhere for as long as they were wrong. A bare `lib.rs:` cannot tell the two apart, because
-    # every crate has one, so there a miss is only ever "not this file".
+    # elsewhere for as long as they were wrong. A bare `lib.rs:` names every crate's, so there a
+    # miss is only ever "not this file".
+    if not allm:
+        why = "nothing in it to mutate" if pathlib.Path(sys.argv[1]).is_file() else "no such file"
+        print(f"cargo mutants --list returns no mutant for {sys.argv[1]} ({why}): this would check nothing")
+        sys.exit(1)
+    sources = {str(p) for p in pathlib.Path("crates").rglob("*.rs")} | {sys.argv[1]}
     candidates = []
     for raw in re.findall(r'^\s*"((?:[^"\\]|\\.)*)"\s*,\s*$', toml, re.M):
         pat = raw.replace("\\\\", "\\")
         anchored = pat.split(":", 1)[0].replace("\\", "")
-        if sys.argv[1] == anchored:
-            candidates.append((pat, True))
-        elif "/" not in anchored and sys.argv[1].endswith("/" + anchored):
-            candidates.append((pat, False))
+        named = {s for s in sources if s == anchored or s.endswith("/" + anchored)}
+        if sys.argv[1] in named:
+            candidates.append((pat, named == {sys.argv[1]}))
     entries, elsewhere, bad = [], 0, 0
     for pat, names_this_file in candidates:
         if re.search(r"(?<!\\)[|+*?(){}\[\]^$]", pat):

@@ -16,6 +16,7 @@ way to know the truth, and it means the coverage below is of objects that did co
     tools/lifetime-campaign.py score    # prints the tables
     tools/lifetime-campaign.py cases    # the three named cases
     tools/lifetime-campaign.py spheres  # Ф23.T: spheres of known area-to-mass, no fitted coefficient
+    tools/lifetime-campaign.py halves   # Ф23.S (1): B above and below 225 km on the calibration decays
 
 Standard library only. Raw element sets stay under `data/`.
 """
@@ -84,6 +85,8 @@ ALPHA = 0.1
 # Everything scored starts here. The analog blend's `tau` is chosen on flux before it, and only there.
 TEST_ERA = dt.datetime(1990, 1, 1, tzinfo=dt.UTC).timestamp()
 PHASE_OFFSETS_DAYS = (-183, 0, 183)
+# SDTM-1's fitted envelope starts here; below it the field is the Bates profile extrapolated (Ф23.S).
+SPLIT_PERIGEE_M = 225_000.0
 TAU_GRID_DAYS = (30, 60, 90, 180, 365, 730, 1460)
 
 # WGS-72, the constants a TLE's mean motion is defined with (Hoots & Roehrich 1980).
@@ -947,6 +950,186 @@ def spheres(args) -> int:
     return 0
 
 
+def calibration_objects(catalogue) -> dict[str, int]:
+    """One object per launch of §10.37's calibration parts, from launches that entered no test part.
+
+    The shortest lead's object stands for its launch, the lowest catalogue number breaking a tie.
+    """
+    splits: dict[str, set[str]] = {}
+    with (OUT / "scores.tsv").open() as handle:
+        for r in csv.DictReader(handle, delimiter="\t"):
+            splits.setdefault(r["object_launch"], set()).add(r["split"])
+    calibration = {launch for launch, parts in splits.items() if parts == {"cal"}}
+    chosen: dict[str, tuple[int, int]] = {}
+    for line in (OUT / "jobs.tsv").read_text().splitlines():
+        name, lead, _model = line.split("\t", 1)[0].split("|")
+        number = int(name[1:])
+        launch = catalogue[number]["Launch_Tag"]
+        if launch in calibration:
+            entry = (int(lead), number)
+            chosen[launch] = min(chosen.get(launch, entry), entry)
+    return {launch: number for launch, (_, number) in chosen.items()}
+
+
+def split_windows(sets):
+    """The fit windows `((start, end) above, (start, end) below)` around `SPLIT_PERIGEE_M`.
+
+    The lower window runs from the first set whose perigee is below the split to the last set. The
+    upper one ends where the lower one starts and begins at the latest set at least as far above in
+    the mean `a`, so both windows span the same height. Returns the reason when there is none.
+    """
+    perigee = [s[1][0] * (1.0 - s[1][1]) - 6_378_137.0 for s in sets]
+    k_mid = next((k for k, h in enumerate(perigee) if h <= SPLIT_PERIGEE_M), None)
+    if not k_mid:
+        return "no set on both sides of the split"
+    a = [s[1][0] for s in sets]
+    drop = a[k_mid] - a[-1]
+    if drop < MIN_DROP_M:
+        return "no real drop below the split"
+    k_up = next((k for k in range(k_mid - 1, -1, -1) if a[k] - a[k_mid] >= drop), None)
+    if k_up is None:
+        return "no drop as long above the split"
+    if any(y - x > MAX_UPWARD_JUMP_M for x, y in itertools.pairwise(a[k_up:])):
+        return "an upward jump in a"
+    return (sets[k_up], sets[k_mid]), (sets[k_mid], sets[-1])
+
+
+def interval(values: list[float], stat, draws: int = 4000, seed: int = 20261111) -> str:
+    """`stat` of `values` and its 95 % percentile interval, objects (so launches) resampled."""
+    rng = random.Random(seed)
+    spread = sorted(
+        stat([values[rng.randrange(len(values))] for _ in values]) for _ in range(draws)
+    )
+    return f"{stat(values):+.3f} [{quantile(spread, 0.025):+.3f}, {quantile(spread, 0.975):+.3f}]"
+
+
+def halves(args) -> int:
+    """Ф23.S (1): does `B` fitted below 225 km agree with `B` fitted above it, on the same decays?
+
+    Below 225 km SDTM-1 is its Bates profile extrapolated, and no measured density constrains it. A
+    decay does: a model whose density falls with height in the wrong shape needs another `B` below
+    the split than above it. Rule, fixed before the first run: SDTM-1's shape below 225 km disagrees
+    with the decays when SDTM-1 minus NRLMSISE-00 in `ln(B_below/B_above)`, paired by object, has a
+    95 % interval clear of zero on both its mean and its median; a negative sign means SDTM-1 is too
+    dense below the split relative to above it. A change of `C_d` with height enters both models
+    alike, so only the difference is free of it; each model's own ratio is printed beside it.
+    Calibration objects only: §10.37's test part stays closed.
+    """
+    catalogue = read_catalogue()
+    feed = Feed(FEED)
+    reasons: dict[str, int] = {}
+    windows = {}
+    for _launch, number in sorted(calibration_objects(catalogue).items()):
+        decay = decay_time(catalogue[number]["DDate"])
+        assert decay is not None, number  # `select` made no job without a decay date
+        text = (OUT / "elements" / f"S{number:05d}").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        found = split_windows([s for s in read_elements(text) if s[0] <= decay])
+        if isinstance(found, str):
+            reasons[found] = reasons.get(found, 0) + 1
+            continue
+        windows[number] = found
+    jobs = [
+        case_job(f"{number}|{half}|{model}", model, start, end[0], end[1], 1.0, "O")
+        for number, pair in windows.items()
+        for half, (start, end) in zip(("above", "below"), pair, strict=True)
+        for model in MODELS
+    ]
+    print(f"{len(windows)} objects, {len(jobs)} fits", flush=True)
+    for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
+        print(f"  left out: {reason}: {count}")
+    with concurrent.futures.ProcessPoolExecutor(args.processes) as pool:
+        lines = [
+            line.split("\t")
+            for chunk in pool.map(run_chunk, ([job] for job in jobs))
+            for line in chunk.splitlines()
+        ]
+    fitted: dict[tuple[int, str, str], float] = {}
+    for line in lines:
+        number, half, model = line[0].split("|")
+        if line[1] != "fit":
+            fitted[int(number), half, model] = float(line[2])
+    ratio = {
+        (number, model): math.log(
+            fitted[number, "below", model] / fitted[number, "above", model]
+        )
+        for number in windows
+        for model in MODELS
+        if (number, "below", model) in fitted and (number, "above", model) in fitted
+    }
+    both = [n for n in windows if all((n, m) in ratio for m in MODELS)]
+    print(f"{len(both)} objects with all four fits\n")
+
+    def height(state) -> float:
+        return (state[0] * (1.0 - state[1]) - 6_378_137.0) / 1_000.0
+
+    for label, pick in (
+        ("perigee at the upper start, km", lambda w: height(w[0][0][1])),
+        ("perigee at the split, km", lambda w: height(w[1][0][1])),
+        ("perigee at the last set, km", lambda w: height(w[1][1][1])),
+        ("upper window, days", lambda w: (w[0][1][0] - w[0][0][0]) / DAY),
+        ("lower window, days", lambda w: (w[1][1][0] - w[1][0][0]) / DAY),
+    ):
+        values = sorted(pick(windows[n]) for n in both)
+        print(
+            f"{label}: median {statistics.median(values):.1f}, "
+            f"10-90 % {quantile(values, 0.1):.1f}-{quantile(values, 0.9):.1f}"
+        )
+    flux = {n: feed.f81_at(windows[n][1][0][0]) for n in both}
+    cut = statistics.median(flux.values())
+    groups = {
+        "all": both,
+        f"F10.7a at the split < {cut:.0f}": [n for n in both if flux[n] < cut],
+        f"F10.7a at the split >= {cut:.0f}": [n for n in both if flux[n] >= cut],
+    }
+    with (OUT / "halves.tsv").open("w") as out:
+        out.write(
+            "object\tf107a_split\t"
+            + "\t".join(
+                f"b_{half}_{model}" for half in ("above", "below") for model in MODELS
+            )
+            + "\n"
+        )
+        for n in both:
+            out.write(
+                f"{n}\t{flux[n]:.1f}\t"
+                + "\t".join(
+                    f"{fitted[n, half, model]:.6e}"
+                    for half in ("above", "below")
+                    for model in MODELS
+                )
+                + "\n"
+            )
+    print("\nln(B below / B above) | objects | mean | median | median |ln|, the spread")
+    for name, group in groups.items():
+        for model in MODELS:
+            values = [ratio[n, model] for n in group]
+            print(
+                f"{name}, {model} | {len(values)} | {interval(values, statistics.mean)} | "
+                f"{interval(values, statistics.median)} | "
+                f"{interval([abs(v) for v in values], statistics.median)}"
+            )
+    print("\nSDTM-1 minus NRLMSISE-00 | objects | mean | median | |ln| of each, mean")
+    for name, group in groups.items():
+        values = [ratio[n, "sdtm"] - ratio[n, "msis"] for n in group]
+        spread = [abs(ratio[n, "sdtm"]) - abs(ratio[n, "msis"]) for n in group]
+        print(
+            f"{name} | {len(values)} | {interval(values, statistics.mean)} | "
+            f"{interval(values, statistics.median)} | {interval(spread, statistics.mean)}"
+        )
+    print("\nln(B_SDTM / B_MSIS) by window | objects | mean | median")
+    for half in ("above", "below"):
+        values = [
+            math.log(fitted[n, half, "sdtm"] / fitted[n, half, "msis"]) for n in both
+        ]
+        print(
+            f"{half} | {len(values)} | {interval(values, statistics.mean)} | "
+            f"{interval(values, statistics.median)}"
+        )
+    return 0
+
+
 def cases(_args) -> int:
     case_ssw()
     print()
@@ -986,6 +1169,9 @@ def main() -> int:
         help="only these catalogue numbers",
     )
     sphere.set_defaults(func=spheres)
+    split = sub.add_parser("halves")
+    split.add_argument("--processes", type=int, default=(os.cpu_count() or 2) // 2)
+    split.set_defaults(func=halves)
     args = parser.parse_args()
     return args.func(args)
 

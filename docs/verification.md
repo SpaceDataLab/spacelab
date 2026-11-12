@@ -10672,6 +10672,75 @@ That sigma is not the fit's interval at 250 km, where the residual is 710 times 
 move is larger than the 24 h state gap the two step sequences make (at most 4.1e-6 m), so the move comes from
 the Jacobian, not from the integrator.
 
+### 10.55 The shape a fitted lifetime sees (Ф23.S)
+
+§10.37 left two leads for SDTM-1's lifetime gap to NRLMSISE-00, and tested neither. This section tests both
+on §10.37's calibration part only. A launch with a row in any test part is left out, so the test part stays
+closed.
+
+**Lead 1: the field below 225 km.** There SDTM-1 is its Bates profile extrapolated, and no measured density
+constrains it. A decay does. If a model's density changes with height in the wrong shape, the `B` fitted
+below the split differs from the `B` fitted above it.
+
+    uv run --project tools --locked python -I tools/lifetime-campaign.py halves
+
+- **Objects.** One a launch, 113 calibration launches. 51 have element sets on both sides of the split and a
+  drop of 1 km or more in each window; 48 of them give all four fits.
+- **Windows.** The lower window runs from the first set with perigee below 225 km to the last set. The upper
+  window ends there and spans the same fall in the mean `a`. Medians: perigee 271 → 222 km above, in 12.3
+  days; 222 → 166 km below, in 2.9 days.
+- **Fit.** §10.37's secant fit of `B` under the measured indices, for each window and each model.
+- **Rule, fixed before the run.** SDTM-1's shape below 225 km disagrees with the decays when SDTM-1 minus
+  NRLMSISE-00 in `ln(B_below/B_above)`, paired by object, has a 95 % interval clear of zero on both its mean
+  and its median. A negative sign means SDTM-1 is too dense below the split, relative to above it.
+
+| `ln(B_below/B_above)` | objects | mean | median | median `\|ln\|` |
+|---|---|---|---|---|
+| SDTM-1 | 48 | +0.001 [−0.061, +0.050] | +0.015 [−0.029, +0.066] | 0.076 [0.047, 0.130] |
+| NRLMSISE-00 | 48 | −0.040 [−0.100, +0.005] | −0.016 [−0.061, +0.039] | 0.068 [0.052, 0.105] |
+| **SDTM-1 minus NRLMSISE-00** | 48 | **+0.041 [+0.017, +0.064]** | **+0.033 [+0.011, +0.065]** | `\|ln\|`: +0.009 [−0.011, +0.030] |
+| the same, F10.7a < 153 at the split | 24 | +0.027 [−0.004, +0.058] | +0.015 [−0.008, +0.058] | −0.000 [−0.023, +0.024] |
+| the same, F10.7a ≥ 153 | 24 | +0.055 [+0.021, +0.091] | +0.048 [+0.024, +0.084] | +0.019 [−0.014, +0.052] |
+
+Intervals are 95 %, 4 000 draws over objects. The last column of the difference rows is the mean of
+`|ln|` SDTM-1 minus `|ln|` NRLMSISE-00. The level: `ln(B_SDTM/B_MSIS)` is +0.257 [+0.229, +0.284] above the
+split and +0.298 [+0.272, +0.324] below it. So SDTM-1 is 23–26 % thinner than NRLMSISE-00 at 170–310 km, as
+§10.37's +0.24 said.
+
+**Verdict on lead 1.** The rule's condition holds, with a positive sign. Relative to NRLMSISE-00, SDTM-1 is
+4 % thinner below 225 km than above it. The rule as written takes NRLMSISE-00 as the reference, and the
+models' own ratios do not support that:
+
+- SDTM-1's own halves agree, +0.001.
+- NRLMSISE-00's lean the other way, −0.040, with an interval that reaches +0.005.
+- The spread is the same in both models.
+
+So the decays do not show that SDTM-1's extrapolation below 225 km is wrong. A change of `C_d` with height
+is in both ratios and cancels only in the difference.
+
+One subgroup was not planned before the run, and it is printed as a lead only. At F10.7a ≥ 153, SDTM-1's own
+mean ratio is +0.063 [+0.015, +0.110], but its median interval includes zero. That points to SDTM-1 being too
+thin below 225 km at high flux. It has 24 objects and goes to the next refit's agenda, untested.
+
+**Lead 2: the response to the last week's indices.** On §10.37's test part, SDTM-1 at 7 days did better
+under persistence (0.073) than under the measured indices (0.104). On the calibration part the measured
+indices help. Here are the observed-minus-persistence values of `|ln T/T_true|` at 7 days:
+
+| model | objects | mean | median |
+|---|---|---|---|
+| SDTM-1 | 55 | −0.033 [−0.056, −0.013] | −0.014 [−0.036, −0.006] |
+| NRLMSISE-00 | 56 | −0.016 [−0.032, −0.001] | −0.016 [−0.024, −0.001] |
+
+The test part's ordering is therefore not a property of the model on the part a change may be chosen on. The
+flux-excess and storm variants were not run. The measured indices help both models. SDTM-1's mean gain,
+0.033, is twice NRLMSISE-00's, 0.016; that difference was not tested.
+
+**Verdict on the ticket.** Neither lead closes the calibration gap. Over all leads it is +0.025 [+0.009,
++0.035] in median `|ln|` (§10.37); at 7 days alone it is +0.024 [−0.006, +0.058]. SDTM-1 does not change,
+which the Ф30.J protocol requires anyway. The gap stays unexplained. What is left is what neither lead
+touched: the fit window's response to the indices, and the level, which a fitted `B` absorbs and Ф23.T's
+spheres measure.
+
 ---
 
 ## 11 · Published errata as a second opinion

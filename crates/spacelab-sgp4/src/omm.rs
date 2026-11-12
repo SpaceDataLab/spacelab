@@ -506,6 +506,29 @@ MEAN_MOTION_DDOT = 0\n";
         assert_eq!(elements[0].norad_id, 270_123);
     }
 
+    /// Celestrak carries catalog numbers to nine digits in OMM (F51): one survives into the propagator
+    /// whole, the TLE writer refuses it by its type, and a number past the propagator's `u32` is refused
+    /// rather than clamped to another object's.
+    #[test]
+    fn a_nine_digit_catalog_number_survives_the_omm_path_and_no_tle_names_it() {
+        use crate::{Convention, PropagationError, Satellite, TleBuilder, TleError};
+        let elements = parse_omm_csv(&CSV.replace("25544", "999999999")).unwrap();
+        let satellite = Satellite::from_elements(&elements[0], Convention::default()).unwrap();
+        assert_eq!(satellite.norad_id().get(), 999_999_999);
+        assert_eq!(
+            TleBuilder::from_elements(&elements[0]).build().unwrap_err(),
+            TleError::CatalogNumberTooLarge {
+                norad_id: 999_999_999
+            }
+        );
+        let past = parse_omm_csv(&CSV.replace("25544", "4294967296")).unwrap();
+        assert_eq!(past[0].norad_id, 4_294_967_296);
+        assert_eq!(
+            Satellite::from_elements(&past[0], Convention::default()).unwrap_err(),
+            PropagationError::MalformedElements
+        );
+    }
+
     #[test]
     fn a_quoted_object_name_does_not_shift_the_columns_after_it() {
         let csv = CSV.replace("ISS (ZARYA)", "\"COSMOS 2251, DEB\"");

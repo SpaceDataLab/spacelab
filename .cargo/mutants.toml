@@ -3838,7 +3838,7 @@ exclude_re = [
     # reference equator to the bit. SGP4 arrives there through eight transcendental terms; no
     # element set in the published verification file lands within 10⁻⁹ m of it, and an object
     # sitting exactly on the reference surface is decayed either way you answer.
-    "satellite\\.rs:449:28: replace < with <= in Satellite::propagate_minutes",
+    "satellite\\.rs:452:28: replace < with <= in Satellite::propagate_minutes",
 
     # The `propagate_many_into` guard chooses how the work is split, not what it computes. Both
     # branches assign satellite `i`, epoch `j` to `out[i·t + j]` and call the same
@@ -3849,9 +3849,9 @@ exclude_re = [
     # `either_empty_side_of_the_batch_takes_the_sequential_path`, which is what leaves only these
     # three: each still refuses both degenerate shapes and differs from the original solely in
     # which non-degenerate batches it hands to threads.
-    "satellite\\.rs:565:16: replace <= with > in propagate_many_into",
-    "satellite\\.rs:565:41: replace < with <= in propagate_many_into",
-    "satellite\\.rs:565:45: replace \\* with \\+ in propagate_many_into",
+    "satellite\\.rs:568:16: replace <= with > in propagate_many_into",
+    "satellite\\.rs:568:41: replace < with <= in propagate_many_into",
+    "satellite\\.rs:568:45: replace \\* with \\+ in propagate_many_into",
 
     # --- `estimation/se3.rs`. The small-angle split, at the split and one decade wide of it.
     #

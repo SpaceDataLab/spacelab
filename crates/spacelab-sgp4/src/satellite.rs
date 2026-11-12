@@ -344,7 +344,10 @@ impl Satellite {
         .map_err(|_| PropagationError::UnusableElements)?;
 
         Ok(Self {
-            norad_id: NoradId::new(elements.norad_id.try_into().unwrap_or(u32::MAX)),
+            norad_id: NoradId::new(
+                u32::try_from(elements.norad_id)
+                    .map_err(|_| PropagationError::MalformedElements)?,
+            ),
             epoch_naive_ns: epoch.naive_ns_since_j2000(),
             constants,
             convention,

@@ -823,6 +823,13 @@ mod tests {
                 .unwrap_err(),
             TleError::CatalogNumberTooLarge { norad_id: 270_123 }
         );
+        assert_eq!(
+            TleBuilder::from_elements(&iss())
+                .norad_id(NoradId::new(100_000))
+                .build()
+                .unwrap_err(),
+            TleError::CatalogNumberTooLarge { norad_id: 100_000 }
+        );
         // The last representable one still prints.
         let tle = TleBuilder::from_elements(&iss())
             .norad_id(NoradId::new(99_999))

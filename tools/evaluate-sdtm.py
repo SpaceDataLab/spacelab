@@ -26,7 +26,7 @@ reconstruction: every fold reads the measured indices, as `plans/17` rule 12 say
     tools/evaluate-sdtm.py run --kind family --legacy-penalty
     tools/evaluate-sdtm.py run --kind origin [--field solar_wind]
     tools/evaluate-sdtm.py summary [--field default]
-    tools/evaluate-sdtm.py export --split frozen-2020   # the fold's field, for a Rust caller (Ф30.H)
+    tools/evaluate-sdtm.py export --split frozen-2020 [--field solar_wind]   # for a Rust caller (Ф30.H, J)
 
 Run under `uv run --no-project --with numpy --with pandas --with scipy python -I`. Results stay under
 `data/`, which is never committed.
@@ -350,10 +350,10 @@ def guard_map(hours_used: np.ndarray, split: dict[str, str]) -> None:
         )
 
 
-def fold_drive(
+def fold_map(
     on_grid: np.ndarray, hourly: np.ndarray, epoch: pd.Timestamp, split: dict[str, str]
 ):
-    """The solar-wind drive with the coupling map rebuilt from the fold's training hours only."""
+    """The coupling map rebuilt from the fold's training hours only."""
     present = np.isfinite(on_grid)
     hours = np.asarray(
         epoch + pd.to_timedelta(np.flatnonzero(present), unit="h"),
@@ -361,13 +361,20 @@ def fold_drive(
     )
     allowed = training_hours(hours, split)
     guard_map(hours[allowed], split)
-    wind_map = fit.coupling_map(
+    return fit.coupling_map(
         on_grid[present][allowed],
         hourly[present][allowed],
         pd.DatetimeIndex(hours[allowed]),
     )
+
+
+def fold_drive(
+    on_grid: np.ndarray, hourly: np.ndarray, epoch: pd.Timestamp, split: dict[str, str]
+):
+    """The solar-wind drive with the coupling map rebuilt from the fold's training hours only."""
+    present = np.isfinite(on_grid)
     out = hourly.copy()
-    out[present] = wind_map(on_grid[present])
+    out[present] = fold_map(on_grid, hourly, epoch, split)(on_grid[present])
     return out
 
 
@@ -555,25 +562,52 @@ def command_summary(args) -> int:
 
 def command_export(args) -> int:
     """Write a fold's fitted field as `Thermosphere::from_coefficients`'s arguments, and the generator's own
-    values at 64 of the fold's scored rows, so a Rust caller can rebuild the field and check it (Ф30.H).
+    values at 64 of the fold's scored rows, so a Rust caller can rebuild the field and check it (Ф30.H,
+    Ф30.J).
 
-    The second file has the columns of `crates/spacelab-propagation/tests/fixtures/sdtm_reference.csv`:
-    the field alone, with no satellite's log scale, as `fit-sdtm-corpus.py`'s `emit` writes it.
+    The field file also holds each satellite's log scale against the fold's reference (`scale_<SAT>`),
+    and for the solar-wind field the share and the coupling map the fold rebuilt from its training hours
+    (`share`, `knot_coupling`, `knot_ap60`). The second file has the columns of
+    `crates/spacelab-propagation/tests/fixtures/sdtm_reference.csv`: the field alone, with no satellite's
+    log scale, as `fit-sdtm-corpus.py`'s `emit` writes it.
     """
     settings = FIELDS[args.field]
-    if settings is not FORM:
+    if args.field not in ("default", "solar_wind"):
         sys.exit(
-            "export writes the shipped form only: its storm state, saturation and gain"
+            "export writes the shipped forms only: the 3-hourly field and the solar-wind one"
         )
     saved = np.load(OUT / args.field / f"{args.split}.npz")
+    wind = settings["wind"] is not None
     rows = fit.load_corpus(
-        STEP, trailing_mean=True, phase=PHASE, ap60=False, wind=False
+        STEP, trailing_mean=True, phase=PHASE, ap60=settings["ap60"], wind=wind
     )
     arg = g.fit_arguments(rows, 2)
+    split = next(s for s in read_splits() if s["name"] == args.split)
+    sat = rows.sat.to_numpy()
+    # The fold's training satellites, as `command_run` read them; a fold saved before it kept them
+    # has none to compare with.
+    train, _ = masks(rows.t.to_numpy(), rows.family.to_numpy(), split, sat)
+    train_sats = tuple(s for s in fit.SATELLITES if s in set(sat[train]))
+    if "train_sats" in saved.files and tuple(saved["train_sats"]) != train_sats:
+        sys.exit(f"{args.split}: the fold trained on {tuple(saved['train_sats'])}")
+    wind_lines = []
+    if wind:
+        hourly, epoch = rows.attrs["driver"], rows.attrs["driver_epoch"]
+        on_grid = fit.coupling_on_grid(hourly, epoch)
+        wind_map = fold_map(on_grid, hourly, epoch, split)
+        # As `command_run` scores the fold: the drive on the fold's own map, and no whole-span map.
+        arg["wind"] = fold_drive(on_grid, hourly, epoch, split)
+        arg["wind_map"] = None
+        wind_lines = [
+            f"knot_coupling {' '.join(g.literal(c) for c in wind_map.coupling)}",
+            f"knot_ap60 {' '.join(g.literal(a) for a in wind_map.ap60)}",
+        ]
     p = saved["parameters"]
-    model = fold_model(
-        arg, rows.sat.to_numpy(), tuple(saved["train_sats"]), settings, None
-    )
+    model = fold_model(arg, sat, train_sats, settings, None)
+    if p.size != model.pack.size:
+        sys.exit(
+            f"{args.split}: {p.size} parameters saved, the form has {model.pack.size}"
+        )
     pk = model.pack
     kernel = model.kernel(p)
     heating, nitric, saturation = kernel[:3]
@@ -591,7 +625,18 @@ def command_export(args) -> int:
         f"excess_scale {g.literal(model.excess(p))}",
         f"gain_exponent {g.literal(model.gain(p))}",
         *(f"coefficients {' '.join(g.literal(c) for c in row)}" for row in grid),
+        *(
+            f"scale_{sat} {g.literal(s)}"
+            for sat, s in zip(
+                pk.scaled,
+                p[pk.i_scale : pk.i_scale + len(pk.scaled)],
+                strict=True,
+            )
+        ),
     ]
+    share = model.share(kernel)
+    if share is not None:
+        lines += [f"share {g.literal(share)}", *wind_lines]
     stem = OUT / args.field / args.split
     stem.with_suffix(".field").write_text("\n".join(lines) + "\n")
 

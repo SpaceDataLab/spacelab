@@ -1,23 +1,21 @@
 //! A near-Earth SGP4 reimplementation whose per-satellite constants can be uploaded to the GPU.
 //!
 //! The `sgp4` crate keeps its initialized `Constants` fields `pub(crate)`, so a GPU batch SGP4 cannot
-//! reuse them — it needs its own init. This is a faithful port of `sgp4` 2.4 (the `from_elements`
-//! path: WGS84 geopotential, IAU epoch — near-Earth propagation never uses the sidereal time). It is
-//! **near-Earth only**: deep-space element sets (Brouwer mean motion ≤ 2π/225 min⁻¹, i.e. period
-//! ≥ 225 min) are rejected — they are the small minority of a catalogue and the branchy resonance /
-//! luni-solar machinery does not vectorise. The CPU path here is the correctness oracle for the GPU
-//! kernel; both are checked against the `sgp4` crate.
-
-#![allow(clippy::unreadable_literal)]
+//! reuse them — it needs its own init. This is a faithful port of `sgp4` 2.4's near-Earth arithmetic
+//! on WGS-72, the document's geopotential (Vallado et al. 2006), refusing where the document refuses
+//! (codes 1, 4 and 6). It is **near-Earth only**: deep-space element sets (Brouwer mean motion
+//! ≤ 2π/225 min⁻¹, i.e. period ≥ 225 min) are rejected — the branchy resonance and luni-solar
+//! machinery does not vectorise. The CPU path here is the correctness oracle for the GPU kernel and
+//! is held to the document's printed output, `tcppver.out`.
 
 use bytemuck::{Pod, Zeroable};
 
-// WGS84, matching `sgp4::model::WGS84` used by `Constants::from_elements`.
-const AE: f64 = 6378.137;
-const KE: f64 = 0.07436685316871385;
-const J2: f64 = 0.00108262998905;
-const J3: f64 = -0.00000253215306;
-const J4: f64 = -0.00000161098761;
+// WGS-72: the element sets are fitted with it, and `Satellite`'s reference convention uses it.
+const AE: f64 = sgp4::WGS72.ae;
+const KE: f64 = sgp4::WGS72.ke;
+const J2: f64 = sgp4::WGS72.j2;
+const J3: f64 = sgp4::WGS72.j3;
+const J4: f64 = sgp4::WGS72.j4;
 const PI: f64 = core::f64::consts::PI;
 
 /// The per-satellite SGP4 constants (f64), initialised once from an element set. The near-Earth SGP4
@@ -220,10 +218,10 @@ impl Sgp4Sat {
         Some(sat)
     }
 
-    /// TEME position (km) and velocity (km/s) at `t` minutes since epoch, or `None` on a diverged
-    /// element set. Mirrors `sgp4::Constants::propagate_from_state` (near-Earth branch).
+    /// TEME position (km) and velocity (km/s) at `t` minutes since epoch, or `None` where the
+    /// document refuses. Mirrors `sgp4::Constants::propagate_from_state` (near-Earth branch).
     #[must_use]
-    #[allow(clippy::similar_names)]
+    #[allow(clippy::similar_names, clippy::too_many_lines)]
     pub fn propagate(&self, t: f64) -> Option<([f64; 3], [f64; 3])> {
         let p22 = self.right_ascension_0 + self.right_ascension_dot * t + self.k0 * t.powi(2);
         let p23 = self.argument_of_perigee_0 + self.argument_of_perigee_dot * t;
@@ -296,6 +294,10 @@ impl Sgp4Sat {
         let p45 = 1.0 - 2.0 * p42.powi(2);
         let p46 = 0.5 * J2 / pl / pl;
         let rk = r * (1.0 - 1.5 * p46 * b * self.k6) + 0.5 * (0.5 * J2 / pl) * self.k3 * p45;
+        // The document's code 6: the radius has fallen below one Earth radius.
+        if rk < 1.0 {
+            return None;
+        }
         let uk = u - 0.25 * p46 * self.k4 * p44;
         let inclination_k = inclination + 1.5 * p46 * inclination.cos() * inclination.sin() * p45;
         let right_ascension_k = p22 + 1.5 * p46 * inclination.cos() * p44;
@@ -433,27 +435,38 @@ mod tests {
         ),
     ];
 
+    type State = ([f64; 3], [f64; 3]);
+
+    /// The `sgp4` crate on WGS-72, as `Satellite`'s reference convention builds it, with the
+    /// document's code 6 applied: the crate answers below one Earth radius, the document does not.
+    fn crate_reference(el: &sgp4::Elements) -> impl Fn(f64) -> Option<State> {
+        let constants = sgp4::Constants::from_elements_afspc_compatibility_mode(el).unwrap();
+        move |t| {
+            let p = constants.propagate(sgp4::MinutesSinceEpoch(t)).ok()?;
+            let r = p.position.iter().map(|x| x * x).sum::<f64>().sqrt();
+            (r >= sgp4::WGS72.ae).then_some((p.position, p.velocity))
+        }
+    }
+
     #[test]
     fn init_and_propagate_match_the_sgp4_crate() {
         let mut checked = 0;
         for (l1, l2) in TLES {
             let elements = sgp4::Elements::from_tle(None, l1.as_bytes(), l2.as_bytes()).unwrap();
-            let reference = sgp4::Constants::from_elements(&elements).unwrap();
+            let reference = crate_reference(&elements);
             let Some(sat) = Sgp4Sat::from_elements(&elements) else {
                 continue; // deep-space, skipped
             };
             for &t in &[0.0, 10.0, 100.0, 720.0, 1440.0, -360.0] {
-                let mine = sat.propagate(t);
-                let theirs = reference.propagate(sgp4::MinutesSinceEpoch(t));
-                match (mine, theirs) {
-                    (Some((r, v)), Ok(p)) => {
-                        let dr = ((r[0] - p.position[0]).powi(2)
-                            + (r[1] - p.position[1]).powi(2)
-                            + (r[2] - p.position[2]).powi(2))
+                match (sat.propagate(t), reference(t)) {
+                    (Some((r, v)), Some((position, velocity))) => {
+                        let dr = ((r[0] - position[0]).powi(2)
+                            + (r[1] - position[1]).powi(2)
+                            + (r[2] - position[2]).powi(2))
                         .sqrt();
-                        let dv = ((v[0] - p.velocity[0]).powi(2)
-                            + (v[1] - p.velocity[1]).powi(2)
-                            + (v[2] - p.velocity[2]).powi(2))
+                        let dv = ((v[0] - velocity[0]).powi(2)
+                            + (v[1] - velocity[1]).powi(2)
+                            + (v[2] - velocity[2]).powi(2))
                         .sqrt();
                         assert!(
                             dr < 1e-6 && dv < 1e-9,
@@ -461,7 +474,7 @@ mod tests {
                         );
                         checked += 1;
                     }
-                    (None, Err(_)) => {}
+                    (None, None) => {}
                     (m, r) => panic!("t={t}: solvability disagreement (mine {m:?}, crate {r:?})"),
                 }
             }
@@ -472,21 +485,6 @@ mod tests {
         );
     }
 
-    /// The official AIAA 2006-6753 verification element sets, on their published time grids.
-    ///
-    /// The three TLEs above are three ordinary LEO objects, and every branch in `from_elements`
-    /// that discriminates decides the same way for all of them: each perigee is far above the
-    /// 156 km rung of the `s` ladder, each Brouwer mean motion far above the deep-space cutoff,
-    /// each inclination far from 180°, each `high_altitude`. A mutation of any of those
-    /// discriminants cannot change the answer, and 100 mutants of this file survive that fixture.
-    ///
-    /// The verification set spans the regimes on purpose — 9 near-Earth objects from 87 to 133
-    /// minutes including two retrograde and Vallado's decaying 88888, and 20 deep-space objects
-    /// the port must refuse rather than mis-propagate.
-    ///
-    /// The comparison is exact, because that is what it measures: over all 160 states of the
-    /// published grids the port and the crate land on the same doubles, this being a
-    /// transcription of the same arithmetic in the same order rather than an independent
     /// The `k5` singularity guard, which the official verification set never reaches.
     ///
     /// `k5` divides by `1 + cos i`, so the AFSPC code substitutes `1.5e-12` for the denominator
@@ -512,20 +510,17 @@ mod tests {
                     el.inclination
                 )
             };
-            let reference = sgp4::Constants::from_elements(&el).unwrap();
+            let reference = crate_reference(&el);
             let mut compared = 0u32;
             for step in 0..=48 {
                 let t = f64::from(step) * 30.0;
-                match (
-                    sat.propagate(t),
-                    reference.propagate(sgp4::MinutesSinceEpoch(t)),
-                ) {
-                    (Some((r, v)), Ok(p)) => {
-                        assert_eq!(r, p.position, "inclination {}, t = {t}", el.inclination);
-                        assert_eq!(v, p.velocity, "inclination {}, t = {t}", el.inclination);
+                match (sat.propagate(t), reference(t)) {
+                    (Some((r, v)), Some((position, velocity))) => {
+                        assert_eq!(r, position, "inclination {}, t = {t}", el.inclination);
+                        assert_eq!(v, velocity, "inclination {}, t = {t}", el.inclination);
                         compared += 1;
                     }
-                    (None, Err(_)) => {}
+                    (None, None) => {}
                     (m, r) => panic!("solvability disagreement at t = {t}: {m:?} vs {r:?}"),
                 }
             }
@@ -556,15 +551,12 @@ mod tests {
         let Some(sat) = Sgp4Sat::from_elements(&edge) else {
             panic!("the guard-band element set was refused")
         };
-        let reference = sgp4::Constants::from_elements(&edge).unwrap();
+        let reference = crate_reference(&edge);
         for step in 0..=24 {
             let t = f64::from(step) * 60.0;
-            if let (Some((r, v)), Ok(p)) = (
-                sat.propagate(t),
-                reference.propagate(sgp4::MinutesSinceEpoch(t)),
-            ) {
-                assert_eq!(r, p.position, "guard band, t = {t}");
-                assert_eq!(v, p.velocity, "guard band, t = {t}");
+            if let (Some((r, v)), Some((position, velocity))) = (sat.propagate(t), reference(t)) {
+                assert_eq!(r, position, "guard band, t = {t}");
+                assert_eq!(v, velocity, "guard band, t = {t}");
             }
         }
 
@@ -578,12 +570,10 @@ mod tests {
             let Some(sat) = Sgp4Sat::from_elements(&el) else {
                 panic!("element set at eccentricity {eccentricity} was refused")
             };
-            let reference = sgp4::Constants::from_elements(&el).unwrap();
-            if let (Some((r, _)), Ok(p)) = (
-                sat.propagate(90.0),
-                reference.propagate(sgp4::MinutesSinceEpoch(90.0)),
-            ) {
-                assert_eq!(r, p.position, "eccentricity {eccentricity}");
+            if let (Some((r, _)), Some((position, _))) =
+                (sat.propagate(90.0), crate_reference(&el)(90.0))
+            {
+                assert_eq!(r, position, "eccentricity {eccentricity}");
             }
         }
     }
@@ -636,16 +626,14 @@ mod tests {
             let Ok(el) = sgp4::Elements::from_tle(None, f[0].as_bytes(), f[1].as_bytes()) else {
                 continue;
             };
-            let (Some(sat), Ok(reference)) = (
-                Sgp4Sat::from_elements(&el),
-                sgp4::Constants::from_elements(&el),
-            ) else {
+            let Some(sat) = Sgp4Sat::from_elements(&el) else {
                 continue;
             };
+            let reference = crate_reference(&el);
             for k in -600..=600_i32 {
                 let t = f64::from(k) * 1440.0; // days out, either side of epoch
                 let ours = sat.propagate(t).is_none();
-                let theirs = reference.propagate(sgp4::MinutesSinceEpoch(t)).is_err();
+                let theirs = reference(t).is_none();
                 assert_eq!(ours, theirs, "{} at t = {t} min", el.norad_id);
                 checked += 1;
                 refused += u32::from(ours);
@@ -655,7 +643,24 @@ mod tests {
         assert!(refused > 0, "no epoch exercised the no-solution branch");
     }
 
+    /// The official AIAA 2006-6753 verification element sets, on their published time grids.
+    ///
+    /// The three TLEs above are three ordinary LEO objects, and every branch in `from_elements`
+    /// that discriminates decides the same way for all of them: each perigee is far above the
+    /// 156 km rung of the `s` ladder, each Brouwer mean motion far above the deep-space cutoff,
+    /// each inclination far from 180°, each `high_altitude`. A mutation of any of those
+    /// discriminants cannot change the answer, and 100 mutants of this file survive that fixture.
+    ///
+    /// The verification set spans the regimes on purpose — 9 near-Earth objects from 87 to 133
+    /// minutes including two retrograde and Vallado's decaying 88888, and 20 deep-space objects
+    /// the port must refuse rather than mis-propagate.
+    ///
+    /// The comparison is exact, because that is what it measures: over all 157 answered states of
+    /// the published grids the port and the crate land on the same doubles, this being a
+    /// transcription of the same arithmetic in the same order rather than an independent
     /// derivation. Any drift at all is therefore a real divergence, not accumulated rounding.
+    /// At the document's three code-6 states, 28872 at 55 and 60 min and 29141 at 440, both refuse,
+    /// the crate through `crate_reference`.
     #[test]
     fn the_official_verification_sets_agree_with_the_sgp4_crate() {
         const CASES: &str = include_str!("../../spacelab-sgp4/tests/fixtures/sgp4_ver_tle.txt");
@@ -696,7 +701,7 @@ mod tests {
             );
             near_earth += 1;
 
-            let reference = sgp4::Constants::from_elements(&el).unwrap();
+            let reference = crate_reference(&el);
             let (first, last, step): (f64, f64, f64) = (
                 f[2].parse().unwrap(),
                 f[3].parse().unwrap(),
@@ -704,20 +709,17 @@ mod tests {
             );
             let mut t = first;
             while t <= last {
-                match (
-                    sat.propagate(t),
-                    reference.propagate(sgp4::MinutesSinceEpoch(t)),
-                ) {
-                    (Some((r, v)), Ok(p)) => {
+                match (sat.propagate(t), reference(t)) {
+                    (Some((r, v)), Some((position, velocity))) => {
                         let d = |a: [f64; 3], b: [f64; 3]| {
                             ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2))
                                 .sqrt()
                         };
-                        worst_r = spacelab_testkit::nan_max(worst_r, d(r, p.position));
-                        worst_v = spacelab_testkit::nan_max(worst_v, d(v, p.velocity));
+                        worst_r = spacelab_testkit::nan_max(worst_r, d(r, position));
+                        worst_v = spacelab_testkit::nan_max(worst_v, d(v, velocity));
                         compared += 1;
                     }
-                    (None, Err(_)) => {}
+                    (None, None) => {}
                     (m, r) => panic!("{id} at t={t}: solvability disagreement ({m:?} vs {r:?})"),
                 }
                 t += step;
@@ -727,10 +729,181 @@ mod tests {
         assert_eq!(near_earth, 9, "near-Earth sets in the verification file");
         assert_eq!(deep_space, 20, "deep-space sets in the verification file");
         assert_eq!(unparsed, 4, "sets the sgp4 crate refuses to read");
-        assert_eq!(compared, 160, "state comparisons over the published grids");
+        assert_eq!(compared, 157, "state comparisons over the published grids");
         assert!(
             worst_r <= 0.0 && worst_v <= 0.0,
             "worst divergence {worst_r:.3e} km, {worst_v:.3e} km/s vs the sgp4 crate"
+        );
+    }
+
+    /// Every refusal the document's model makes on the near-Earth sets every five minutes for a
+    /// day, past where its driver stops, as runs: set (row of `sgp4_ver_tle.txt`, from 0), first
+    /// minute, last minute, class (1: codes 1–4, 6: code 6). Derived by
+    /// `derivations/sgp4_document.mac` (5), which reads it back. The model is a function of t
+    /// alone: after its first refusal 28872 (set 25) dips below one Earth radius once a revolution
+    /// and answers between, and 29141 (set 26) answers at 1405 min.
+    #[rustfmt::skip]
+    const DAY_REFUSALS: [f64; 84] = [
+        11.0, 490.0, 1440.0, 1.0,
+        25.0, 55.0, 65.0, 6.0,
+        25.0, 140.0, 155.0, 6.0,
+        25.0, 230.0, 240.0, 6.0,
+        25.0, 315.0, 330.0, 6.0,
+        25.0, 400.0, 415.0, 6.0,
+        25.0, 490.0, 500.0, 6.0,
+        25.0, 575.0, 590.0, 6.0,
+        25.0, 660.0, 675.0, 6.0,
+        25.0, 750.0, 760.0, 6.0,
+        25.0, 835.0, 845.0, 6.0,
+        25.0, 920.0, 930.0, 6.0,
+        25.0, 1005.0, 1020.0, 6.0,
+        25.0, 1090.0, 1105.0, 6.0,
+        25.0, 1175.0, 1190.0, 6.0,
+        25.0, 1260.0, 1275.0, 6.0,
+        25.0, 1345.0, 1360.0, 6.0,
+        25.0, 1430.0, 1440.0, 6.0,
+        26.0, 425.0, 1375.0, 6.0,
+        26.0, 1380.0, 1400.0, 1.0,
+        26.0, 1410.0, 1440.0, 6.0,
+    ];
+
+    /// The port refuses exactly where the document's model refuses, every five minutes for a day.
+    #[test]
+    fn the_port_refuses_exactly_where_the_document_refuses_through_a_day() {
+        const CASES: &str = include_str!("../../spacelab-sgp4/tests/fixtures/sgp4_ver_tle.txt");
+        let (mut sets, mut refused) = (0, 0);
+        for (k, line) in CASES
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .enumerate()
+        {
+            let f: Vec<&str> = line.split('|').collect();
+            let Ok(el) = sgp4::Elements::from_tle(None, f[0].as_bytes(), f[1].as_bytes()) else {
+                continue;
+            };
+            let Some(sat) = Sgp4Sat::from_elements(&el) else {
+                continue;
+            };
+            sets += 1;
+            let set = f64::from(u32::try_from(k).unwrap());
+            for minute in (0..=288_u16).map(|j| f64::from(j * 5)) {
+                let document = DAY_REFUSALS
+                    .chunks(4)
+                    .any(|r| (r[0] - set).abs() < 0.5 && (r[1]..=r[2]).contains(&minute));
+                assert_eq!(
+                    sat.propagate(minute).is_none(),
+                    document,
+                    "set {k} ({}) at {minute} min",
+                    el.norad_id
+                );
+                refused += usize::from(document);
+            }
+        }
+        assert_eq!((sets, refused), (9, 455), "near-Earth sets and refusals");
+    }
+
+    /// (G5) The document's printed output, `tcppver.out` (AIAA 2006-6753, Appendix E), for every
+    /// near-Earth set: each printed state to a millimetre and a micrometre per second, and each
+    /// section ending where this port first refuses.
+    ///
+    /// The document's driver prints t = 0 and then each grid time until its first error. Every
+    /// near-Earth refusal run in `derivations/sgp4_document.mac` reaches the end of its grid
+    /// (22312 and 28350 code 1, 28872 and 29141 code 6), so refusing each grid time past the
+    /// printed rows is the document's verdict as well.
+    #[test]
+    fn the_published_output_is_reproduced_and_ends_where_the_document_refuses() {
+        const CASES: &str = include_str!("../../spacelab-sgp4/tests/fixtures/sgp4_ver_tle.txt");
+        const PUBLISHED: &str = include_str!("../../spacelab-sgp4/tests/fixtures/tcppver.out");
+        let mut sections: Vec<Vec<[f64; 7]>> = Vec::new();
+        for line in PUBLISHED.lines() {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() == 2 && fields[1] == "xx" {
+                sections.push(Vec::new());
+            } else if fields.len() >= 7 {
+                let mut row = [0.0; 7];
+                for (x, f) in row.iter_mut().zip(&fields) {
+                    *x = f.parse().unwrap();
+                }
+                sections.last_mut().unwrap().push(row);
+            }
+        }
+        let sets: Vec<&str> = CASES
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .collect();
+        assert_eq!(sections.len(), sets.len(), "one published section per set");
+
+        let d = |a: [f64; 3], b: [f64; 3]| {
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        };
+        let (mut near_earth, mut printed, mut refused) = (0, 0, 0);
+        let (mut worst_r, mut worst_v) = (0.0_f64, 0.0_f64);
+        for (set, rows) in sets.iter().zip(&sections) {
+            let f: Vec<&str> = set.split('|').collect();
+            let Ok(el) = sgp4::Elements::from_tle(None, f[0].as_bytes(), f[1].as_bytes()) else {
+                continue;
+            };
+            let Some(sat) = Sgp4Sat::from_elements(&el) else {
+                continue;
+            };
+            near_earth += 1;
+            let id = el.norad_id;
+
+            // The driver's grid: t = 0, then the first time (one step back unless it is 0)
+            // stepped forward in binary64, the last step clamped to the last time.
+            let (first, last, step): (f64, f64, f64) = (
+                f[2].parse().unwrap(),
+                f[3].parse().unwrap(),
+                f[4].parse().unwrap(),
+            );
+            let mut grid = vec![0.0];
+            let mut t = if first.abs() > 1e-8 {
+                first - step
+            } else {
+                first
+            };
+            while t < last {
+                t = (t + step).min(last);
+                grid.push(t);
+            }
+            assert!(rows.len() <= grid.len(), "{id}: more rows than grid times");
+
+            for (row, &t) in rows.iter().zip(&grid) {
+                assert!(
+                    (row[0] - t).abs() < 1e-6,
+                    "{id}: printed {} min, grid {t}",
+                    row[0]
+                );
+                let Some((r, v)) = sat.propagate(t) else {
+                    panic!("{id} refused at {t} min, which the document prints")
+                };
+                worst_r = spacelab_testkit::nan_max(worst_r, d(r, [row[1], row[2], row[3]]));
+                worst_v = spacelab_testkit::nan_max(worst_v, d(v, [row[4], row[5], row[6]]));
+                printed += 1;
+            }
+            for &t in &grid[rows.len()..] {
+                assert!(
+                    sat.propagate(t).is_none(),
+                    "{id} answered at {t} min, past the document's first refusal"
+                );
+                refused += 1;
+            }
+        }
+
+        println!(
+            "tcppver.out, near-Earth: {printed} rows, worst {:.3} µm and {:.4} µm/s; {refused} refused",
+            worst_r * 1e9,
+            worst_v * 1e9
+        );
+        assert_eq!(near_earth, 9, "near-Earth sets in the document");
+        assert_eq!(
+            (printed, refused),
+            (158, 64),
+            "printed rows and refusals past them"
+        );
+        assert!(
+            worst_r < 1e-6 && worst_v < 1e-9,
+            "worst {worst_r:.3e} km, {worst_v:.3e} km/s against the printed output"
         );
     }
 }

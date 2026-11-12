@@ -3380,8 +3380,8 @@ exclude_re = [
     # knots, so moving either comparison onto the tie changes nothing: at 98 the first piece gives the
     # constant 20 and the second `98 - 78 = 20`; at 156 the second gives `156 - 78 = 78` and the third
     # the constant 78. Vallado's code chooses the pieces the same way for the same reason.
-    "batch_sgp4\\.rs:98:24: replace < with <= in Sgp4Sat::from_elements",
-    "batch_sgp4\\.rs:100:22: replace < with <= in Sgp4Sat::from_elements",
+    "batch_sgp4\\.rs:96:24: replace < with <= in Sgp4Sat::from_elements",
+    "batch_sgp4\\.rs:98:22: replace < with <= in Sgp4Sat::from_elements",
 
     # `parallel_fill` picks between a serial loop and a chunked one, and the two are specified and
     # tested to produce bit-identical output -- `parallel_cpu_paths_are_bit_identical_to_serial`
@@ -3401,16 +3401,18 @@ exclude_re = [
     "lib\\.rs:873:48: replace \\| with \\^ in Gpu::output",
     "lib\\.rs:898:49: replace \\| with \\^ in Gpu::run",
 
-    # Three tolerance comparisons whose two forms differ only on the tie, and the tie is an exact
+    # Four tolerance comparisons whose two forms differ only on the tie, and the tie is an exact
     # `f64` equality with a literal that the quantity being compared never produces: the Newton
-    # correction landing on 1.0e-12 to the bit, `axn² + ayn²` landing on 1 to the bit, and
-    # `|1 + cos i|` landing on 1.5e-12 to the bit. Each quantity is a ratio or sum of transcendental
+    # correction landing on 1.0e-12 to the bit, `axn² + ayn²` landing on 1 to the bit,
+    # `|1 + cos i|` landing on 1.5e-12 to the bit, and the radius `rk` landing on one Earth radius
+    # to the bit (the document's code 6). Each quantity is a ratio or sum of transcendental
     # terms; the branch either side of the tie is what the tests exercise, and
     # `the_branch_boundaries_a_tle_cannot_express_agree_with_the_sgp4_crate` puts an element set
     # inside the third guard band on purpose.
-    "batch_sgp4\\.rs:152:38: replace > with >= in Sgp4Sat::from_elements",
-    "batch_sgp4\\.rs:277:28: replace < with <= in Sgp4Sat::propagate",
-    "batch_sgp4\\.rs:284:15: replace < with <= in Sgp4Sat::propagate",
+    "batch_sgp4\\.rs:150:38: replace > with >= in Sgp4Sat::from_elements",
+    "batch_sgp4\\.rs:275:28: replace < with <= in Sgp4Sat::propagate",
+    "batch_sgp4\\.rs:282:15: replace < with <= in Sgp4Sat::propagate",
+    "batch_sgp4\\.rs:298:15: replace < with <= in Sgp4Sat::propagate",
 
     # A porkchop cell with `tof = 0` is refused either way: `spacelab_astro::lambert` validates its
     # own time of flight, so the mutated branch calls it and gets `None`, which `map_or` turns into

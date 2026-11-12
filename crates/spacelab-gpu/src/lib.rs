@@ -543,11 +543,11 @@ struct Params { n_sat: u32, n_time: u32 };
 @group(0) @binding(2) var<storage, read_write> out:   array<State>;
 @group(0) @binding(3) var<uniform>             params: Params;
 
-// The WGS 84 set of Vallado et al. (2006), xke = 60/sqrt(AE³/398600.5), and 2π;
+// WGS-72, the geopotential of Vallado et al. (2006), xke = 60/sqrt(AE³/398600.8), and 2π;
 // derivations/constants_readback.mac reads all four back.
-const KE: f32 = 0.07436685316871385;
-const AE: f32 = 6378.137;
-const J2: f32 = 0.00108262998905;
+const KE: f32 = 0.07436691613317341;
+const AE: f32 = 6378.135;
+const J2: f32 = 0.001082616;
 const TAU: f32 = 6.28318530717959;
 
 @compute @workgroup_size(64)
@@ -616,6 +616,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p45 = 1.0 - 2.0 * p42 * p42;
     let p46 = 0.5 * J2 / pl / pl;
     let rk = r * (1.0 - 1.5 * p46 * b * s.k6) + 0.5 * (0.5 * J2 / pl) * s.k3 * p45;
+    if (rk < 1.0) { out[idx] = zero; return; }
     let uk = u - 0.25 * p46 * s.k4 * p44;
     let inc_k = inc + 1.5 * p46 * cos(inc) * sin(inc) * p45;
     let raan_k = p22 + 1.5 * p46 * cos(inc) * p44;
@@ -1327,13 +1328,14 @@ mod tests {
 
     /// The batch propagator answers in SI metres, laid out row-major.
     ///
-    /// The units are pinned by physics rather than by restating the scale factor: a near-Earth
-    /// orbit sits 4e6..5e7 m from the centre and moves at 1e3..1.5e4 m/s, and the same numbers in
+    /// The units are pinned by physics rather than by restating the scale factor: a live near-Earth
+    /// cell sits 6.37e6..5e7 m from the centre and moves at 1e3..1.5e4 m/s, and the same numbers in
     /// kilometres are three orders outside both windows, so no change to the conversion lands
-    /// inside them. The lower radius bound is below the Earth's surface on purpose: the
-    /// verification set carries decaying objects, and both this port and the `sgp4` crate return
-    /// their sub-surface states rather than refusing them (29141 reaches 5250.9 km at t = 745). The layout is pinned by asking for one cell on its own and requiring the batch
-    /// to agree with it bit for bit -- a wrong index divides or wraps differently at other shapes.
+    /// inside them. The lower radius bound is the Earth's surface: the port refuses below one Earth
+    /// radius, as the document does (code 6), so the decaying objects of the verification set
+    /// (29141 at t = 745) come back zeroed. The layout is pinned by asking for one cell on its own
+    /// and requiring the batch to agree with it bit for bit -- a wrong index divides or wraps
+    /// differently at other shapes.
     #[allow(clippy::float_cmp)] // both calls run the same code on the same inputs
     #[test]
     fn the_cpu_batch_is_metres_in_row_major_order() {
@@ -1351,7 +1353,7 @@ mod tests {
                 continue; // a decayed or diverged cell is zeroed by contract
             }
             assert!(
-                (4.0e6..5.0e7).contains(&r),
+                (6.37e6..5.0e7).contains(&r),
                 "|r| = {r} m is not a near-Earth radius"
             );
             assert!(
@@ -1590,6 +1592,45 @@ mod tests {
         }
     }
 
+    /// The kernel refuses where the `f64` port refuses, on the near-Earth sets of the verification
+    /// file every five minutes for a day: the grid of `batch_sgp4`'s `DAY_REFUSALS`, which holds
+    /// the port to the document's code 1 (22312) and code 6 (28872, 29141). A refusal is a zeroed
+    /// cell.
+    #[allow(clippy::float_cmp)] // a refused cell is written as exact zeros
+    #[test]
+    fn gpu_sgp4_refuses_where_the_cpu_port_refuses() {
+        let Some(gpu) = Gpu::new() else {
+            eprintln!("no GPU available, skipping");
+            return;
+        };
+        let sats = near_earth_sats();
+        let times: Vec<f32> = (0..=288_u16).map(|k| f32::from(k * 5)).collect();
+        let init: Vec<batch_sgp4::Sgp4Init> = sats.iter().map(|s| s.to_gpu()).collect();
+        let g = gpu.sgp4_propagate(&init, &times);
+        let (mut answered, mut refused) = (0, 0);
+        for (i, sat) in sats.iter().enumerate() {
+            for (j, &t) in times.iter().enumerate() {
+                let cpu = sat.propagate(f64::from(t)).is_none();
+                let cell = g[i * times.len() + j];
+                let zero = cell.r == [0.0; 3] && cell.v == [0.0; 3];
+                assert_eq!(
+                    zero, cpu,
+                    "satellite {i} at {t} min: GPU zero {zero}, CPU refused {cpu}"
+                );
+                if cpu {
+                    refused += 1;
+                } else {
+                    answered += 1;
+                }
+            }
+        }
+        assert_eq!(
+            (answered, refused),
+            (2146, 455),
+            "cells answered and refused"
+        );
+    }
+
     #[test]
     fn gpu_sgp4_matches_the_crate() {
         let Some(gpu) = Gpu::new() else {
@@ -1617,7 +1658,7 @@ mod tests {
             let el = sgp4::Elements::from_tle(None, l1.as_bytes(), l2.as_bytes()).unwrap();
             if let Some(s) = batch_sgp4::Sgp4Sat::from_elements(&el) {
                 sats.push(s.to_gpu());
-                refs.push(sgp4::Constants::from_elements(&el).unwrap());
+                refs.push(sgp4::Constants::from_elements_afspc_compatibility_mode(&el).unwrap());
             }
         }
         let times: Vec<f32> = (0..96).map(|k| f64::from(k) as f32 * 15.0).collect(); // 0..~24 h

@@ -3,7 +3,7 @@
    SGP4 is a document-defined model (D-18 a): Spacetrack Report #3 as revised by Vallado et al.
    (2006), AIAA 2006-6753, whose routines `sgp4_vallado.mac` carries, translated statement for
    statement by `sgp4_vallado_maxima.py`. This file runs the document's own driver (`testcpp`) on the
-   33 published element sets and holds four things:
+   33 published element sets and holds five things:
 
    (1) G5: the model reproduces every row of the published `tcppver.out` that it answers, so the
        translation is the document's arithmetic;
@@ -14,10 +14,14 @@
        driver's grid, as runs [set, first minute, last minute, class] (class 1: codes 1-4, the mean
        or perturbed elements left the model's domain; class 6: code 6, decayed). The Rust test holds
        `Satellite::propagate_minutes` to it at every grid time, the answered ones included;
-   (4) no verdict lies within 1e-9 of its threshold, so double arithmetic cannot change one.
+   (4) no verdict lies within 1e-9 of its threshold, so double arithmetic cannot change one;
+   (5) `DAY_REFUSALS` in spacelab-gpu's `batch_sgp4.rs` is every refusal the model makes on the
+       near-Earth sets every five minutes for a day, past where the driver stops, again no verdict
+       within 1e-9 of its threshold. The model is a function of t alone, so after a refusal it can
+       answer again; the batch port and the GPU kernel are held to these runs.
 
-   The element sets are read as `twoline2rv` reads them; the epoch is exact, from the two-digit year
-   and the day of year. WGS-72, opsmode 'i', as the published run.
+   The element sets are read as `twoline2rv` reads them; the epoch is the driver's binary64 Julian
+   date (`binary64`). WGS-72, opsmode 'i', as the published run.
 
    timeout 1800 maxima --very-quiet -Q -b sgp4_document.mac                                        */
 
@@ -160,4 +164,23 @@ table : map(rust_rational, rust_table(refusal_test, "DOCUMENT_REFUSALS"))$
 must(table = flatten(runs), "(3) holds: DOCUMENT_REFUSALS is every refusal the document's model makes on the driver's grid")$
 print("    nearest edge, absolute:", least, "at", least_at)$
 must(least > 10^-9, "(4) holds: no verdict lies within 1e-9 of its threshold")$
+
+day : makelist(5 * j, j, 0, 288)$
+day_runs : []$ day_least : 10^10$ day_least_at : false$ day_sets : 0$
+for k : 1 thru length(sets) do block([set : sets[k], run : false],
+  init_set(set[1], set[2]),
+  if sat["method"] = "n" then (
+    day_sets : day_sets + 1,
+    for t in day do block([v : state_at(t), c],
+      c : class(v[1]),
+      if v[3] < day_least then (day_least : v[3], day_least_at : [sections[k][1], t]),
+      if run # false and (c # run[4] or c = 0) then (day_runs : cons(run, day_runs), run : false),
+      if c # 0 then (if run = false then run : [k - 1, t, t, c] else run[3] : t)),
+    if run # false then day_runs : cons(run, day_runs)))$
+day_runs : reverse(day_runs)$
+print("    near-Earth sets:", day_sets, "; day refusal runs [set, first, last, class]:", day_runs)$
+print("    nearest edge on the day grid:", day_least, "at", day_least_at)$
+day_table : map(rust_rational, rust_table("../crates/spacelab-gpu/src/batch_sgp4.rs", "DAY_REFUSALS"))$
+must(day_sets = 9 and day_table = flatten(day_runs) and day_least > 10^-9,
+     "(5) holds: DAY_REFUSALS is every refusal of the 9 near-Earth sets every 5 min for a day")$
 print("DONE")$

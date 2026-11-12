@@ -19,8 +19,8 @@ src(crate, file) := concat("../crates/", crate, "/src/", file)$
    The defining a = 6378137 m and 1/f = 298.257223563 and GM = 3.986004418e14 m³/s² (NIMA TR8350.2,
    Table 3.1), the polar radius b = a(1 − f) and the ratio a²/b² = 1/(1 − e²) they fix. Every copy:
    spacelab-earth's, the coverage detectors', the image-quality scale, the lifetime drivers', the
-   link budget's, the sensor cone's, the cull body's, the geolocation ellipsoid's in km, the entry
-   model's Earth and the GPU kernel's radius in km. */
+   link budget's, the sensor cone's, the cull body's, the geolocation ellipsoid's in km and the
+   entry model's Earth. */
 
 a : 6378137$
 inverse_f : 298257223563 / 10^9$
@@ -53,8 +53,7 @@ wgs84_ok : [
               [a / 1000, b / 1000]),
   transcribed(sublist(rust_literals_between(src("spacelab-astro", "edl.rs"),
                                             "pub const EARTH: Self = Self {", "};"), long_literal),
-              [gm, a]),
-  transcribed([rust_scalar(src("spacelab-gpu", "lib.rs"), "AE")], [a / 1000])]$
+              [gm, a])]$
 print("WGS 84 copies:", wgs84_ok)$
 must(every(identity, wgs84_ok), "(1) holds: every WGS 84 copy is the defining value or its consequence")$
 
@@ -80,15 +79,17 @@ must(transcribed([rust_scalar(src("spacelab-estimation", "conjunction_domain.rs"
      "(3) holds: DURATION_WIDTHS is 2 sqrt(2) erfc^-1(1e-6) to its 40 digits")$
 
 /* ---- (4) the GPU kernels' SGP4 constants ---------------------------------------------------------
-   The WGS 84 set of Vallado et al. (2006), AIAA 2006-6753: μ = 398600.5 km³/s², Rₑ = 6378.137 km
-   (checked in (1)), J2 = 0.00108262998905, and xke = 60/√(Rₑ³/μ) in Earth radii^(3/2) per minute;
-   and 2π, which each of the two kernels declares. */
+   WGS-72, the geopotential of Vallado et al. (2006), AIAA 2006-6753, and of the element sets:
+   μ = 398600.8 km³/s², Rₑ = 6378.135 km, J2 = 0.001082616, and xke = 60/√(Rₑ³/μ) in Earth
+   radii^(3/2) per minute; and 2π, which each of the two kernels declares. */
 
 gpu : src("spacelab-gpu", "lib.rs")$
-must(transcribed([rust_scalar(gpu, "KE")], [60 / sqrt((a / 1000)^3 / (3986005 / 10))])
-     and same_rationals([rust_scalar(gpu, "J2")], [108262998905 / 10^14])
+re72 : 6378135 / 1000$
+must(transcribed([rust_scalar(gpu, "KE")], [60 / sqrt(re72^3 / (3986008 / 10))])
+     and same_rationals([rust_scalar(gpu, "AE")], [re72])
+     and same_rationals([rust_scalar(gpu, "J2")], [1082616 / 10^9])
      and transcribed(rust_scalars(gpu, "TAU"), [2 * %pi, 2 * %pi]),
-     "(4) holds: the kernels' xke follows from WGS 84's mu and radius, J2 is Vallado's, TAU is 2 pi")$
+     "(4) holds: the kernels' xke follows from WGS-72's mu and radius, AE and J2 are WGS-72's, TAU is 2 pi")$
 
 /* ---- (5) SGP4's 24-hour resonance window ----------------------------------------------------------
    0.2° and 0.3° per minute, in rad/min, cut (not rounded) at the tenth decimal: the edges as the

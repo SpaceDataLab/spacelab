@@ -657,10 +657,10 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
 
     out=$(macf sgp4_document.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
-    if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
-        ok "maxima sgp4_document.mac: the document's SGP4 at 40 digits reproduces tcppver.out to < 1 mm, ends every published section where it first refuses, and DOCUMENT_REFUSALS is its every refusal"
+    if [ "$holds" -eq 5 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima sgp4_document.mac: the document's SGP4 at 40 digits reproduces tcppver.out to < 1 mm, ends every published section where it first refuses, and DOCUMENT_REFUSALS and DAY_REFUSALS are its every refusal"
     else
-        bad "maxima sgp4_document.mac" "expected 4 checks to hold, found $holds"
+        bad "maxima sgp4_document.mac" "expected 5 checks to hold, found $holds"
     fi
 
     out=$(macf hansen_zonal.mac)

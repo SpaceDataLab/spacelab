@@ -36,6 +36,12 @@ compare:
     uv run --no-project python -I tools/test_compare.py
     uv run --no-project python -I tools/compare.py
 
+# Ф17.D: every literal of more than six significant digits in library code names its source, or is
+# in the ledger of docs/verification.md §12.2, which can only shrink.
+constants:
+    uv run --no-project python -I tools/test_check_constants.py
+    uv run --no-project python -I tools/check-constants.py --check
+
 fmt:
     cargo fmt --all -- --check
 

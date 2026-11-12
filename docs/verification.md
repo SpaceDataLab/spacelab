@@ -11421,6 +11421,160 @@ crates/spacelab/tests/neptune_sentinel1b.rs::the_full_day_against_neptune | name
 crates/spacelab/tests/neptune_sentinel1b.rs::two_orbits_of_the_geocentric_model_track_neptune | name:neptune
 ```
 
+### 12.2 · Long literals without a named source
+
+A literal with more than six significant digits is a number someone transcribed or computed, and a
+wrong digit in it is the error the tests see least: the mutation runs found tables where no test
+could see a flipped sign. `plans/17` Ф17.D asks every such literal in library code to say where it
+comes from. `tools/check-constants.py` sweeps each crate's `src/`, `#[cfg(test)]` items excluded by
+matching their braces, and sorts the literals into four classes. **Sealed**: the item is a table
+`derivations/table_seals.py` folds. **Derived**: the literal's line, the comment block above it, or
+the one above its item names a file under `derivations/` or `tools/` that exists; a run of items with
+no blank line between them shares the comment above its first item, and an attribute's literals
+(the defaults of a `#[pyo3(signature = …)]`) belong to the item below it; a file whose header says it
+is generated and names its generator counts whole. **Cited**: the same comments cite a document — a
+standard (IERS, IAU, ICD, IS-GPS, CODATA, WGS 84, the SI), a paper (a capitalised word or a bracket
+before a year, "et al."), a URL or a DOI. A code is not a document, so naming Orekit or SOFA does
+not count. **Open**: the rest. The classes say what a literal *names*, not that the named file
+checks its digits; that is read item by item as the entries below are retired.
+
+The first sweep, on 2026-11-12, counts **23 256 literals: 18 298 sealed, 4 424 derived, 206 cited
+and 328 open, in 127 items.** The open ones are integrator tableaux whose derivation the module doc
+names but the item does not (IAS15 49, ARK 31, ABM 16, Radau 14, Rosenbrock 13, SABA 12, Dormand–
+Prince 12), the Python and C bindings' default arguments (72 and 14, mostly the same few repeated
+across signatures: μ, a and J2–J4 of the gravity models, the Earth's rotation rate, a normal
+quantile), the SLR site-displacement constants (40) and a tail of
+single constants. `--check` fails on an item with more open literals than its entry, on a new item
+and on an entry the sweep no longer matches, so the count can only fall: an entry leaves when its
+literals name the derivation that checks them or the document they are copied from.
+
+```text
+crates/spacelab-astro/src/edl.rs::EARTH | 2
+crates/spacelab-astro/src/edl.rs::MARS | 1
+crates/spacelab-capi/src/lib.rs::ASTRONOMICAL_UNIT | 1
+crates/spacelab-capi/src/lib.rs::DRAIM_INCLINATION_RAD | 2
+crates/spacelab-capi/src/lib.rs::MU_EARTH | 1
+crates/spacelab-capi/src/lib.rs::MU_MOON | 1
+crates/spacelab-capi/src/lib.rs::RE_EARTH | 1
+crates/spacelab-capi/src/lib.rs::SL_DSST_MAX_ZONAL | 8
+crates/spacelab-coverage/src/detectors.rs::EARTH_EQUATORIAL_RADIUS | 1
+crates/spacelab-earth/src/wgs84.rs::EQUATORIAL_RADIUS | 1
+crates/spacelab-earth/src/wgs84.rs::FLATTENING | 1
+crates/spacelab-earthvision/src/image_quality.rs::A | 1
+crates/spacelab-earthvision/src/image_quality.rs::F | 1
+crates/spacelab-earthvision/src/radiative_transfer.rs::unit | 1
+crates/spacelab-elements/src/design.rs::SUN_SYNCHRONOUS_NODE_RATE | 1
+crates/spacelab-estimation/src/conjunction_domain.rs::DURATION_WIDTHS | 1
+crates/spacelab-fa/src/earth_rotation.rs::C0 | 1
+crates/spacelab-fa/src/earth_rotation.rs::C1 | 1
+crates/spacelab-gnss/src/sp3.rs::JDN_SECONDS_AT_J2000 | 1
+crates/spacelab-gpu/src/lib.rs::AE | 1
+crates/spacelab-gpu/src/lib.rs::J2 | 1
+crates/spacelab-gpu/src/lib.rs::KE | 1
+crates/spacelab-gpu/src/lib.rs::TAU | 2
+crates/spacelab-ionosphere/src/parameters.rs::X0 | 1
+crates/spacelab-propagation/src/abm.rs::AB8 | 8
+crates/spacelab-propagation/src/abm.rs::AM8 | 8
+crates/spacelab-propagation/src/ark.rs::AEX | 22
+crates/spacelab-propagation/src/ark.rs::AIM | 9
+crates/spacelab-propagation/src/dopri5.rs::D1 | 2
+crates/spacelab-propagation/src/dopri5.rs::D3 | 2
+crates/spacelab-propagation/src/dopri5.rs::D4 | 2
+crates/spacelab-propagation/src/dopri5.rs::D5 | 2
+crates/spacelab-propagation/src/dopri5.rs::D6 | 2
+crates/spacelab-propagation/src/dopri5.rs::D7 | 2
+crates/spacelab-propagation/src/dsst/srp.rs::D_REF | 1
+crates/spacelab-propagation/src/earth_radiation.rs::SPEED_OF_LIGHT | 1
+crates/spacelab-propagation/src/ias15.rs::CC | 21
+crates/spacelab-propagation/src/ias15.rs::DD | 21
+crates/spacelab-propagation/src/ias15.rs::H | 7
+crates/spacelab-propagation/src/jacchia_bowman/constants.rs::M_BAR_COEFFS | 1
+crates/spacelab-propagation/src/jacchia_bowman/constants.rs::R_E | 1
+crates/spacelab-propagation/src/jacchia_bowman/constants.rs::TROPICAL_YEAR_DAYS | 1
+crates/spacelab-propagation/src/jacchia_bowman/constants.rs::TX_A | 1
+crates/spacelab-propagation/src/jacchia_bowman/constants.rs::TX_C | 1
+crates/spacelab-propagation/src/lifetime_drivers.rs::WGS84_A | 1
+crates/spacelab-propagation/src/lifetime_drivers.rs::WGS84_INVERSE_F | 1
+crates/spacelab-propagation/src/radau.rs::A | 9
+crates/spacelab-propagation/src/radau.rs::B | 3
+crates/spacelab-propagation/src/radau.rs::C | 2
+crates/spacelab-propagation/src/rosenbrock.rs::A31 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::A32 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::B1 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::B2 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::B3 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::B4 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::C21 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::C3 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::C31 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::C32 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::C41 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::C42 | 1
+crates/spacelab-propagation/src/rosenbrock.rs::C43 | 1
+crates/spacelab-propagation/src/saba.rs::SABA2_C | 3
+crates/spacelab-propagation/src/saba.rs::SABA4_C | 5
+crates/spacelab-propagation/src/saba.rs::SABA4_D | 4
+crates/spacelab-propagation/src/sdtm/mod.rs::REFERENCE_RADIUS | 1
+crates/spacelab-propagation/src/sdtm/uncertainty.rs::NORMAL_90 | 1
+crates/spacelab-propagation/src/sdtm/uncertainty.rs::NORMAL_95 | 1
+crates/spacelab-propagation/src/sdtm/uncertainty.rs::NORMAL_99 | 1
+crates/spacelab-propagation/src/space_weather.rs::hpo_at | 1
+crates/spacelab-propagation/src/spacecraft.rs::HIPPARCHUS_EPSILON | 1
+crates/spacelab-python/src/lib.rs::EARTH_ROTATION_RATE | 2
+crates/spacelab-python/src/lib.rs::MU_EARTH | 1
+crates/spacelab-python/src/lib.rs::MU_MOON | 2
+crates/spacelab-python/src/lib.rs::MU_SUN | 2
+crates/spacelab-python/src/lib.rs::RE_EARTH | 1
+crates/spacelab-python/src/lib.rs::ballistic_log_sensitivity | 2
+crates/spacelab-python/src/lib.rs::brouwer_lyddane_propagate | 6
+crates/spacelab-python/src/lib.rs::draim_geometry | 2
+crates/spacelab-python/src/lib.rs::dsst_propagate_mean_full | 6
+crates/spacelab-python/src/lib.rs::dsst_propagate_osculating_full | 6
+crates/spacelab-python/src/lib.rs::dsst_zonal_propagate_mean | 6
+crates/spacelab-python/src/lib.rs::dsst_zonal_propagate_osculating | 6
+crates/spacelab-python/src/lib.rs::frozen_eccentricity | 3
+crates/spacelab-python/src/lib.rs::libration_points | 1
+crates/spacelab-python/src/lib.rs::minimum_walker | 1
+crates/spacelab-python/src/lib.rs::orbital_lifetime | 2
+crates/spacelab-python/src/lib.rs::orbital_lifetime_ensemble | 2
+crates/spacelab-python/src/lib.rs::propagate_dense | 1
+crates/spacelab-python/src/lib.rs::propagate_drag_dense | 1
+crates/spacelab-python/src/lib.rs::propagate_drag_nrlmsise00_dense | 1
+crates/spacelab-python/src/lib.rs::propagate_drag_sdtm1_dense | 1
+crates/spacelab-python/src/lib.rs::propagate_drag_sdtm1_solar_wind_dense | 1
+crates/spacelab-python/src/lib.rs::propagate_ias15_dense | 1
+crates/spacelab-python/src/lib.rs::repeat_ground_track_sma | 4
+crates/spacelab-python/src/lib.rs::richardson_halo | 1
+crates/spacelab-python/src/lib.rs::sdtm1_density_interval | 1
+crates/spacelab-python/src/lib.rs::sdtm1_solar_wind_density_interval | 1
+crates/spacelab-python/src/lib.rs::street_of_coverage | 2
+crates/spacelab-python/src/lib.rs::street_of_coverage_geometry | 2
+crates/spacelab-python/src/lib.rs::sun_synchronous_inclination | 3
+crates/spacelab-python/src/lib.rs::walker_constellation | 1
+crates/spacelab-sensors/src/comms.rs::C_LIGHT | 1
+crates/spacelab-sensors/src/comms.rs::EARTH_RADIUS | 1
+crates/spacelab-sensors/src/cone.rs::INVERSE_ONE_MINUS_E2 | 1
+crates/spacelab-sensors/src/cull.rs::WGS84 | 1
+crates/spacelab-sensors/src/ellipsoid_grid.rs::WGS84_GAMMA | 1
+crates/spacelab-sensors/src/geoloc.rs::WGS84 | 2
+crates/spacelab-sensors/src/scan.rs::ASCAT_SCAN_SECONDS | 1
+crates/spacelab-sensors/src/scan.rs::VIIRS_COLUMN_SECONDS | 1
+crates/spacelab-sensors/src/scan.rs::VIIRS_SCAN_SECONDS | 1
+crates/spacelab-sgp4/src/satellite.rs::SYNCHRONOUS_HI | 1
+crates/spacelab-sgp4/src/satellite.rs::SYNCHRONOUS_LO | 1
+crates/spacelab-sgp4/src/satellite.rs::WGS72_EQUATORIAL_RADIUS_M | 1
+crates/spacelab-sgp4/src/tle.rs::epoch | 1
+crates/spacelab-signal/src/csa.rs::C | 1
+crates/spacelab-signal/src/sar.rs::secondary_range_compression | 1
+crates/spacelab-signal/src/sar.rs::src_fm_rate | 1
+crates/spacelab-slr/src/displacement.rs::EARTH_RADIUS | 1
+crates/spacelab-slr/src/displacement.rs::MASS_RATIO_MOON | 1
+crates/spacelab-slr/src/displacement.rs::MASS_RATIO_SUN | 1
+crates/spacelab-slr/src/displacement.rs::new | 18
+crates/spacelab-slr/src/loading.rs::new | 18
+crates/spacelab-slr/src/troposphere.rs::CO2_PPM | 1
+```
+
 ## Reproducing the oracles
 
 The oracle-generating code is vendored so every number here is regenerable:

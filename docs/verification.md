@@ -11290,11 +11290,11 @@ codes, adds three: a degree-70 geopotential, a DCT and a Bessel function; the WA
 product test (§10.18) adds a fourth. The spec-vector audit (Ф19.E, 2026-10-26) adds three the rules had missed: the
 `FCULZD_HPA` zenith delay, `TDFRPH`'s arguments and `HARDISP`'s spline, whose expected values the compiled IERS routines printed
 through `tools/iers-oracle` — no code's name in them, so the doc rule now reads that harness too. Ф17.B batch 1 removes two: Harris–Priester's density law is gated in Maxima and PARI, its Orekit
-reference test is parked and its ceiling test asserts the model's definition. Ф19.G batch 1 (2026-11-13) parks 26: GPT3's
-two reference cases, ITU-R P.834's one, the box-wing's five geometries and 22 DSST tests, after
+reference test is parked and its ceiling test asserts the model's definition. Ф19.G batch 1 (2026-11-13) parks GPT3's
+two reference cases, the box-wing's five geometries and 22 DSST tests, after
 `tests/dsst_short_period_identity.rs` gained the conservative mean rates as orbit averages of Gauss's
-rates (zonal, Sun and Moon, the 1:1 and 2:1 resonances), `itu834_mapping.mac` the recommendation's
-constants and the box-wing's lift drag a test of its own. **Today: 105
+rates (zonal, Sun and Moon, the 1:1 and 2:1 resonances) and the box-wing's lift drag a test of its own.
+**Today: 105
 comparator-decided tests of 3 687** — name 68, file 18, fixture 4, doc 15; 46 of them Orekit's (33 by
 name), 26 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked

@@ -871,8 +871,8 @@ mod tests {
         )
     }
 
-    /// Per-component relative error < 1e-9 against Orekit, reporting the actual max.
-    fn assert_close(label: &str, kind: &str, got: [f64; 3], want: [f64; 3]) -> f64 {
+    /// The largest per-component relative distance, absolute where the reference component is 0.
+    fn relative_distance(got: [f64; 3], want: [f64; 3]) -> f64 {
         let mut max_rel = 0.0_f64;
         for i in 0..3 {
             let rel = if want[i] == 0.0 {
@@ -882,17 +882,12 @@ mod tests {
             };
             max_rel = nan_max(max_rel, rel);
         }
-        std::println!("{label} {kind}: max rel err {max_rel:.3e}");
-        assert!(
-            max_rel < 1e-9,
-            "{label} {kind}: got {got:?} want {want:?} max rel {max_rel:.3e}"
-        );
         max_rel
     }
 
     #[allow(clippy::too_many_arguments)]
     fn check<const P: usize>(
-        label: &str,
+        label: &'static str,
         model: &BoxWing<P>,
         m: [[f64; 3]; 3],
         relvel: [f64; 3],
@@ -900,207 +895,261 @@ mod tests {
         sundir: [f64; 3],
         exp_drag: [f64; 3],
         exp_srp: [f64; 3],
-    ) -> f64 {
+    ) -> (&'static str, [f64; 2]) {
         let drag = model.drag_acceleration_inertial(RHO, &relvel, &sundir, &m);
         let srp = model.srp_acceleration_inertial(&flux, &sundir, &m);
-        let ed = assert_close(label, "drag", drag, exp_drag);
-        let es = assert_close(label, "srp", srp, exp_srp);
-        ed.max(es)
+        (
+            label,
+            [
+                relative_distance(drag, exp_drag),
+                relative_distance(srp, exp_srp),
+            ],
+        )
     }
 
-    /// The box-wing drag + SRP accelerations match Orekit's `BoxAndSolarArraySpacecraft` to < 1e-9
-    /// relative across five geometries: a bare box at near-identity and tilted attitudes, a
-    /// lift-enabled box (its drag against `box_wing_momentum.mac`, F89), and a box + Sun-tracking array at both
-    /// attitudes (validating the `PointingPanel` normal and the double-sided panel).
+    /// The lift-enabled box's drag at Orekit's `lift_tilt` geometry is the momentum balance's,
+    /// `derivations/box_wing_momentum.mac` (12): each specular molecule hands over `2|n̂·v̂|` of its
+    /// momentum along the normal. (G3)
     #[test]
+    fn the_lift_box_drag_is_the_momentum_balance() {
+        let drag = box_lift().drag_acceleration_inertial(
+            RHO,
+            &LIFT_RELVEL,
+            &[1.0, 0.0, 0.0],
+            &LIFT_ATTITUDE,
+        );
+        let rel = relative_distance(drag, LIFT_DRAG_MAXIMA);
+        assert!(
+            rel < 1e-9,
+            "lift drag {drag:?} against {LIFT_DRAG_MAXIMA:?}: {rel:.3e}"
+        );
+    }
+
+    /// Orekit 13.1.7's drag on the lift-enabled box at `lift_tilt` (`tools/orekit-oracle`,
+    /// `orekit_box_wing.csv`): one factor `|n̂·v̂|` short in the lift term (F89).
+    const OREKIT_LIFT_DRAG: [f64; 3] = [
+        1.050_635_989_701_699_2e-6,
+        1.043_191_048_038_919_2e-7,
+        -1.059_292_452_079_315_6e-7,
+    ];
+
+    /// The distance to Orekit's `BoxAndSolarArraySpacecraft` drag and SRP across five geometries: a
+    /// bare box at near-identity and tilted attitudes, a lift-enabled box, and a box + Sun-tracking
+    /// array at both attitudes. The lift box's drag is a row of its own: Orekit's lift term is short
+    /// of one factor `|n̂·v̂|` (F89), and [`the_lift_box_drag_is_the_momentum_balance`] decides it.
+    /// The facet forces and the array's pointing are decided by `derivations/box_wing_momentum.mac`.
+    #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
     #[allow(clippy::too_many_lines)] // five embedded Orekit golden geometries, one per fixture block
-    fn box_wing_matches_orekit() {
-        let mut worst = 0.0_f64;
+    fn box_wing_distance_to_orekit() {
+        let rows = [
+            check(
+                "box_id",
+                &box_only(),
+                [
+                    [
+                        9.99999999999994200e-01,
+                        -7.07827974419919800e-08,
+                        8.05621714697613400e-08,
+                    ],
+                    [
+                        7.07827947785733800e-08,
+                        9.99999999999997100e-01,
+                        3.30604145422213640e-08,
+                    ],
+                    [
+                        -8.05621738098697200e-08,
+                        -3.30604088398055230e-08,
+                        9.99999999999996200e-01,
+                    ],
+                ],
+                [7400.0, 900.0, -1200.0],
+                [
+                    2.72242175241453040e-06,
+                    -3.17615871115028600e-06,
+                    1.81494783494302070e-06,
+                ],
+                [1.0, 0.0, 0.0],
+                [
+                    8.47374050370470000e-07,
+                    1.03059006126138250e-07,
+                    -1.37412008168184340e-07,
+                ],
+                [
+                    2.39900762653069940e-08,
+                    -2.58978296625905040e-08,
+                    1.14370087300053210e-08,
+                ],
+            ),
+            check(
+                "box_tilt",
+                &box_only(),
+                [
+                    [
+                        7.81639107922839700e-01,
+                        -4.82929352591077100e-01,
+                        3.94739845178505130e-01,
+                    ],
+                    [
+                        5.50117295349308300e-01,
+                        8.32030097196060800e-01,
+                        -7.13924275919757800e-02,
+                    ],
+                    [
+                        -2.93957932914131400e-01,
+                        2.72956329411641900e-01,
+                        9.16015052229478500e-01,
+                    ],
+                ],
+                [-2600.0, 6100.0, 3300.0],
+                [
+                    -1.37150180009253020e-06,
+                    9.14334533395020300e-07,
+                    -4.25165558028684400e-06,
+                ],
+                [1.0, 0.0, 0.0],
+                [
+                    -3.07462203268989630e-07,
+                    7.21353630746475900e-07,
+                    3.90240488764487150e-07,
+                ],
+                [
+                    -1.44462782012073580e-08,
+                    8.92491129137265700e-09,
+                    -2.95535110056117300e-08,
+                ],
+            ),
+            check(
+                "lift_tilt",
+                &box_lift(),
+                LIFT_ATTITUDE,
+                LIFT_RELVEL,
+                [
+                    2.72242175241453040e-06,
+                    -3.17615871115028600e-06,
+                    1.81494783494302070e-06,
+                ],
+                [1.0, 0.0, 0.0],
+                OREKIT_LIFT_DRAG,
+                [
+                    3.00124364514176600e-08,
+                    -2.76854288282366800e-08,
+                    1.78562818589368200e-08,
+                ],
+            ),
+            check(
+                "arr_id",
+                &box_array(),
+                [
+                    [
+                        9.99999999999994200e-01,
+                        -7.07827974419919800e-08,
+                        8.05621714697613400e-08,
+                    ],
+                    [
+                        7.07827947785733800e-08,
+                        9.99999999999997100e-01,
+                        3.30604145422213640e-08,
+                    ],
+                    [
+                        -8.05621738098697200e-08,
+                        -3.30604088398055230e-08,
+                        9.99999999999996200e-01,
+                    ],
+                ],
+                [7400.0, 900.0, -1200.0],
+                [
+                    -7.95287837940697900e-07,
+                    4.26471318372766600e-06,
+                    1.84870015260790400e-06,
+                ],
+                [
+                    1.68646344367932440e-01,
+                    -9.04362237043323200e-01,
+                    -3.92029788079080400e-01,
+                ],
+                [
+                    2.15843841394434670e-06,
+                    2.62512780074312440e-07,
+                    -3.50017040099083300e-07,
+                ],
+                [
+                    -1.72684851234705200e-08,
+                    5.55753998440712800e-08,
+                    3.92753913253922540e-08,
+                ],
+            ),
+            check(
+                "arr_tilt",
+                &box_array(),
+                [
+                    [
+                        7.81639107922839700e-01,
+                        -4.82929352591077100e-01,
+                        3.94739845178505130e-01,
+                    ],
+                    [
+                        5.50117295349308300e-01,
+                        8.32030097196060800e-01,
+                        -7.13924275919757800e-02,
+                    ],
+                    [
+                        -2.93957932914131400e-01,
+                        2.72956329411641900e-01,
+                        9.16015052229478500e-01,
+                    ],
+                ],
+                [-2600.0, 6100.0, 3300.0],
+                [
+                    -7.95287837940697900e-07,
+                    4.26471318372766600e-06,
+                    1.84870015260790400e-06,
+                ],
+                [
+                    1.68646344367932440e-01,
+                    -9.04362237043323200e-01,
+                    -3.92029788079080400e-01,
+                ],
+                [
+                    -1.05934405235560420e-06,
+                    2.48538412283430180e-06,
+                    1.34455206645134470e-06,
+                ],
+                [
+                    -5.24378345200247630e-08,
+                    1.00335642218016190e-07,
+                    6.21245126259656200e-08,
+                ],
+            ),
+        ];
 
-        worst = worst.max(check(
-            "box_id",
-            &box_only(),
-            [
-                [
-                    9.99999999999994200e-01,
-                    -7.07827974419919800e-08,
-                    8.05621714697613400e-08,
-                ],
-                [
-                    7.07827947785733800e-08,
-                    9.99999999999997100e-01,
-                    3.30604145422213640e-08,
-                ],
-                [
-                    -8.05621738098697200e-08,
-                    -3.30604088398055230e-08,
-                    9.99999999999996200e-01,
-                ],
-            ],
-            [7400.0, 900.0, -1200.0],
-            [
-                2.72242175241453040e-06,
-                -3.17615871115028600e-06,
-                1.81494783494302070e-06,
-            ],
-            [1.0, 0.0, 0.0],
-            [
-                8.47374050370470000e-07,
-                1.03059006126138250e-07,
-                -1.37412008168184340e-07,
-            ],
-            [
-                2.39900762653069940e-08,
-                -2.58978296625905040e-08,
-                1.14370087300053210e-08,
-            ],
-        ));
-
-        worst = worst.max(check(
-            "box_tilt",
-            &box_only(),
-            [
-                [
-                    7.81639107922839700e-01,
-                    -4.82929352591077100e-01,
-                    3.94739845178505130e-01,
-                ],
-                [
-                    5.50117295349308300e-01,
-                    8.32030097196060800e-01,
-                    -7.13924275919757800e-02,
-                ],
-                [
-                    -2.93957932914131400e-01,
-                    2.72956329411641900e-01,
-                    9.16015052229478500e-01,
-                ],
-            ],
-            [-2600.0, 6100.0, 3300.0],
-            [
-                -1.37150180009253020e-06,
-                9.14334533395020300e-07,
-                -4.25165558028684400e-06,
-            ],
-            [1.0, 0.0, 0.0],
-            [
-                -3.07462203268989630e-07,
-                7.21353630746475900e-07,
-                3.90240488764487150e-07,
-            ],
-            [
-                -1.44462782012073580e-08,
-                8.92491129137265700e-09,
-                -2.95535110056117300e-08,
-            ],
-        ));
-
-        worst = worst.max(check(
-            "lift_tilt",
-            &box_lift(),
-            LIFT_ATTITUDE,
-            LIFT_RELVEL,
-            [
-                2.72242175241453040e-06,
-                -3.17615871115028600e-06,
-                1.81494783494302070e-06,
-            ],
-            [1.0, 0.0, 0.0],
-            LIFT_DRAG_MAXIMA,
-            [
-                3.00124364514176600e-08,
-                -2.76854288282366800e-08,
-                1.78562818589368200e-08,
-            ],
-        ));
-
-        worst = worst.max(check(
-            "arr_id",
-            &box_array(),
-            [
-                [
-                    9.99999999999994200e-01,
-                    -7.07827974419919800e-08,
-                    8.05621714697613400e-08,
-                ],
-                [
-                    7.07827947785733800e-08,
-                    9.99999999999997100e-01,
-                    3.30604145422213640e-08,
-                ],
-                [
-                    -8.05621738098697200e-08,
-                    -3.30604088398055230e-08,
-                    9.99999999999996200e-01,
-                ],
-            ],
-            [7400.0, 900.0, -1200.0],
-            [
-                -7.95287837940697900e-07,
-                4.26471318372766600e-06,
-                1.84870015260790400e-06,
-            ],
-            [
-                1.68646344367932440e-01,
-                -9.04362237043323200e-01,
-                -3.92029788079080400e-01,
-            ],
-            [
-                2.15843841394434670e-06,
-                2.62512780074312440e-07,
-                -3.50017040099083300e-07,
-            ],
-            [
-                -1.72684851234705200e-08,
-                5.55753998440712800e-08,
-                3.92753913253922540e-08,
-            ],
-        ));
-
-        worst = worst.max(check(
-            "arr_tilt",
-            &box_array(),
-            [
-                [
-                    7.81639107922839700e-01,
-                    -4.82929352591077100e-01,
-                    3.94739845178505130e-01,
-                ],
-                [
-                    5.50117295349308300e-01,
-                    8.32030097196060800e-01,
-                    -7.13924275919757800e-02,
-                ],
-                [
-                    -2.93957932914131400e-01,
-                    2.72956329411641900e-01,
-                    9.16015052229478500e-01,
-                ],
-            ],
-            [-2600.0, 6100.0, 3300.0],
-            [
-                -7.95287837940697900e-07,
-                4.26471318372766600e-06,
-                1.84870015260790400e-06,
-            ],
-            [
-                1.68646344367932440e-01,
-                -9.04362237043323200e-01,
-                -3.92029788079080400e-01,
-            ],
-            [
-                -1.05934405235560420e-06,
-                2.48538412283430180e-06,
-                1.34455206645134470e-06,
-            ],
-            [
-                -5.24378345200247630e-08,
-                1.00335642218016190e-07,
-                6.21245126259656200e-08,
-            ],
-        ));
-
-        std::println!("box-wing worst-case relative error vs Orekit: {worst:.3e}");
+        let row = |quantity: &str, distances: &[f64]| {
+            let max = distances.iter().copied().fold(0.0, nan_max);
+            #[allow(clippy::cast_precision_loss)] // a handful of fixtures
+            let rms =
+                (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+            std::println!(
+                "comparison | Orekit | 13.1.7 | {quantity} | relative | {} | {max:.3e} | {rms:.3e}",
+                distances.len()
+            );
+        };
+        let no_lift: Vec<f64> = rows
+            .iter()
+            .filter(|(label, _)| *label != "lift_tilt")
+            .map(|(_, d)| d[0])
+            .collect();
+        let lift: Vec<f64> = rows
+            .iter()
+            .filter(|(label, _)| *label == "lift_tilt")
+            .map(|(_, d)| d[0])
+            .collect();
+        let srp: Vec<f64> = rows.iter().map(|(_, d)| d[1]).collect();
+        row("box-wing drag, no lift", &no_lift);
+        row(
+            "box-wing drag with lift, Orekit's lift one incidence factor short (F89)",
+            &lift,
+        );
+        row("box-wing SRP", &srp);
     }
 
     fn norm(v: [f64; 3]) -> f64 {

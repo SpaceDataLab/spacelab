@@ -907,74 +907,66 @@ mod tests {
         DsstThirdBody::new(MU, MOON_GM)
     }
 
-    /// Compare an osculating state to Orekit's, asserting `a` to `a_tol` metres and the equinoctial
-    /// e/i components + mean longitude to `comp_tol`; returns `(max |Δa|, max |Δcomp|)`.
-    ///
-    /// Both bounds are set a factor of three or four above what the port measurably achieves against
-    /// each fixture, not decades above it. The residual is the Hermite interpolation Orekit applies to
-    /// the coefficients between grid points and this module does not — a fixed, deterministic
-    /// modelling difference over fixed golden data, computed through `libm` rather than the platform
-    /// libm, so it does not drift. Three decades of slack here is what let a whole class of
-    /// arithmetic faults through: `wnsj.compute(-j, …)` losing its sign moves `max comp` to 3.30e-12
-    /// and `max |Δa|` to 1.68e-7 m, both of which the old 1e-9 / 1e-5 bounds accepted.
-    fn assert_osc(
-        got: [f64; 6],
-        want: [f64; 6],
-        a_tol: f64,
-        comp_tol: f64,
-        label: &str,
-    ) -> (f64, f64) {
-        let da = (got[0] - want[0]).abs();
-        assert!(da < a_tol, "{label}: a abs {da:.3e} m");
-        let mut max_comp = 0.0_f64;
-        for i in 1..6 {
-            let d = (got[i] - want[i]).abs();
-            max_comp = max_comp.max(d);
-            assert!(d < comp_tol, "{label} comp[{i}]: {d:.3e}");
-        }
-        (da, max_comp)
+    /// An osculating state's distance to Orekit's: `|Δa|` in metres, then the five other elements.
+    /// The residual is the Hermite interpolation Orekit applies to the coefficients between grid
+    /// points and this module does not.
+    fn osc_distances(got: [f64; 6], want: [f64; 6]) -> (f64, [f64; 5]) {
+        (
+            (got[0] - want[0]).abs(),
+            core::array::from_fn(|i| (got[i + 1] - want[i + 1]).abs()),
+        )
     }
 
-    /// The `(maxAR3Pow, maxEccPow)` truncation the short-period path fixes must equal Orekit's
-    /// `DSSTThirdBodyStaticContext` values (Sun: (3, 2); Moon: (4, 2)).
+    /// The distance to Orekit's `DSSTThirdBodyStaticContext` cut on the short-period path (Sun (3, 2),
+    /// Moon (4, 2)): Orekit's heuristic, which no mathematics fixes.
     #[test]
-    fn truncation_matches_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn truncation_distance_to_orekit() {
         let aux = DsstAuxiliary::new(A0, EX0, EY0, HX0, HY0, LM0, MU);
         let ts = sun().truncation(&aux, norm(SUN_POS[0]));
-        assert_eq!((ts.max_ar3_pow, ts.max_ecc_pow), (SUN_MAX_AR3, SUN_MAX_ECC));
         let tm = moon().truncation(&aux, norm(BOTH_MOON_POS[0]));
-        assert_eq!(
-            (tm.max_ar3_pow, tm.max_ecc_pow),
-            (MOON_MAX_AR3, MOON_MAX_ECC)
+        let d = [
+            ts.max_ar3_pow.abs_diff(SUN_MAX_AR3),
+            ts.max_ecc_pow.abs_diff(SUN_MAX_ECC),
+            tm.max_ar3_pow.abs_diff(MOON_MAX_AR3),
+            tm.max_ecc_pow.abs_diff(MOON_MAX_ECC),
+        ];
+        super::super::comparison_row(
+            "DSST third-body short-period cut (maxAR3Pow, maxEccPow), Sun and Moon",
+            "powers",
+            &d.map(|x| x as f64),
         );
     }
 
-    /// The Sun-only osculating state `mean + short-period δ` matches Orekit's OSCULATING DSSTPropagator
-    /// at every sample: `a` to a tight abs bound and the equinoctial e/i components + mean longitude to
-    /// ~1e-9. Orekit's own mean state is fed in, so this gates only the short-period assembly.
+    /// The distance to Orekit's OSCULATING `DSSTPropagator` with the Sun alone, from Orekit's own mean
+    /// state, so only the short-period assembly is compared. `tests/dsst_short_period_identity.rs`
+    /// decides it, against its defining equation.
     #[test]
-    fn sun_short_period_matches_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn sun_short_period_distance_to_orekit() {
         let s = sun();
-        let (mut max_da, mut max_comp) = (0.0_f64, 0.0_f64);
+        let (mut da, mut rest) = (std::vec::Vec::new(), std::vec::Vec::new());
         for k in 0..4 {
-            let osc = s.osculating(SUN_MEAN[k], SUN_POS[k]);
-            // Achieved: 2.79e-8 m and 2.84e-13.
-            let (da, comp) = assert_osc(osc, SUN_OSC[k], 1e-7, 1e-12, "sun");
-            max_da = max_da.max(da);
-            max_comp = max_comp.max(comp);
+            let (a, others) = osc_distances(s.osculating(SUN_MEAN[k], SUN_POS[k]), SUN_OSC[k]);
+            da.push(a);
+            rest.extend(others);
         }
-        std::println!(
-            "Sun short-period vs Orekit: max |Δa| {max_da:.2e} m, max comp {max_comp:.2e}"
+        super::super::comparison_row("DSST Sun short periods, osculating a", "m", &da);
+        super::super::comparison_row(
+            "DSST Sun short periods, osculating k, h, q, p, λ",
+            "1",
+            &rest,
         );
     }
 
-    /// The Sun+Moon osculating state `mean + δ_sun + δ_moon` matches Orekit's OSCULATING DSSTPropagator
-    /// (both bodies) at every sample. Each body's short-period δ is summed, as with the mean rates.
+    /// The distance to Orekit's OSCULATING `DSSTPropagator` with both bodies, each body's short period
+    /// summed, as with the mean rates.
     #[test]
-    fn sun_moon_short_period_matches_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn sun_moon_short_period_distance_to_orekit() {
         let s = sun();
         let m = moon();
-        let (mut max_da, mut max_comp) = (0.0_f64, 0.0_f64);
+        let (mut da, mut rest) = (std::vec::Vec::new(), std::vec::Vec::new());
         for k in 0..4 {
             let aux = DsstAuxiliary::new(
                 BOTH_MEAN[k][0],
@@ -991,13 +983,15 @@ mod tests {
             for i in 0..6 {
                 osc[i] += dsun[i] + dmoon[i];
             }
-            // Achieved: 1.30e-7 m and 1.21e-12.
-            let (da, comp) = assert_osc(osc, BOTH_OSC[k], 4e-7, 5e-12, "sun+moon");
-            max_da = max_da.max(da);
-            max_comp = max_comp.max(comp);
+            let (a, others) = osc_distances(osc, BOTH_OSC[k]);
+            da.push(a);
+            rest.extend(others);
         }
-        std::println!(
-            "Sun+Moon short-period vs Orekit: max |Δa| {max_da:.2e} m, max comp {max_comp:.2e}"
+        super::super::comparison_row("DSST Sun and Moon short periods, osculating a", "m", &da);
+        super::super::comparison_row(
+            "DSST Sun and Moon short periods, osculating k, h, q, p, λ",
+            "1",
+            &rest,
         );
     }
 

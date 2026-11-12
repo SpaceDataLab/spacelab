@@ -940,41 +940,31 @@ mod tests {
         d - TAU * libm::round(d / TAU)
     }
 
-    /// The six short-period corrections `[Δa, Δk, Δh, Δq, Δp, Δλ]` evaluated at Orekit's own mean
-    /// state reproduce Orekit's own `ShortPeriodTerms.value` there to `9.1e-13 m` in `a` and
-    /// `6.5e-19` in the remaining five components, over degrees 2…6.
-    ///
-    /// `dsst::tests::osculating_short_period_matches_orekit` compares the same physics but through a
-    /// full `propagate_osculating` run and asserts `|Δa| < 1e-2 m` / `< 1e-9` per component against an
-    /// achieved `1.06e-5 m` / `7.23e-12`: three and two orders of magnitude of slack, so any mutation
-    /// that perturbs the assembly below those thresholds passes unseen.
-    ///
-    /// This fixture used to difference a MEAN and an OSCULATING propagator run, which left `3.03e-6 m`
-    /// in `a` — Orekit's Hermite interpolation of its own short-period coefficients between
-    /// integration steps, fifteen times the `1.97e-7 m` the surviving `compute_cij_sij` mutants move,
-    /// so the comparison could not see them. Asking Orekit for the correction *at* the mean state
-    /// removes the interpolation and the mean-propagation drift together, sharpening the residual by
-    /// six orders of magnitude, and the bounds here are set at the measured figure.
+    /// The distance to Orekit's own `ShortPeriodTerms.value` at Orekit's mean state, over degrees
+    /// 2…6: the correction asked *at* the mean state, with no interpolation and no propagation drift
+    /// in between. `tests/dsst_short_period_identity.rs` decides the short periods, against their
+    /// defining equation.
     #[test]
-    fn short_period_at_orekit_mean_state_matches_orekit() {
-        let (mut max_da, mut max_comp) = (0.0_f64, 0.0_f64);
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn short_period_at_orekit_mean_state_distance_to_orekit() {
+        let (mut da, mut rest) = (std::vec::Vec::new(), std::vec::Vec::new());
         for (d, row) in SP.iter().enumerate() {
-            let degree = d + 2;
-            let z = zonal_of_degree(degree);
+            let z = zonal_of_degree(d + 2);
             for k in 0..MEAN.len() {
                 let sp = z.short_period_correction(&aux_at(MEAN[k]));
-                let da = (sp[0] - row[k][0]).abs();
-                assert!(da < 1.0e-12, "degree={degree} k={k}: |Δa| {da:.3e} m");
-                max_da = max_da.max(da);
-                for i in 1..6 {
-                    let e = (sp[i] - row[k][i]).abs();
-                    assert!(e < 7.0e-19, "degree={degree} k={k} comp[{i}]: {e:.3e}");
-                    max_comp = max_comp.max(e);
-                }
+                da.push((sp[0] - row[k][0]).abs());
+                rest.extend((1..6).map(|i| (sp[i] - row[k][i]).abs()));
             }
         }
-        std::println!(
-            "zonal short-period at Orekit mean state, degrees 2..6: max |Δa| {max_da:.3e} m, max comp {max_comp:.3e}"
+        super::super::comparison_row(
+            "DSST zonal short periods at Orekit's mean state, degrees 2–6, a",
+            "m",
+            &da,
+        );
+        super::super::comparison_row(
+            "DSST zonal short periods at Orekit's mean state, degrees 2–6, k, h, q, p, λ",
+            "1",
+            &rest,
         );
     }
 

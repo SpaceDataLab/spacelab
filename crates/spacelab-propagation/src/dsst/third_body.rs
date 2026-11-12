@@ -512,18 +512,25 @@ mod tests {
         DsstThirdBody::new(MU, MOON_GM)
     }
 
-    /// The `(maxAR3Pow, maxEccPow)` truncation the port fixes at the initial state and geometry must
-    /// equal Orekit's `DSSTThirdBodyStaticContext` values (Sun: (3, 2); Moon: (4, 2)) — else different
-    /// terms are retained and the rates drift.
+    /// The distance to Orekit's `DSSTThirdBodyStaticContext` cut `(maxAR3Pow, maxEccPow)` at the
+    /// initial state (Sun (3, 2), Moon (4, 2)): Orekit's heuristic, which no mathematics fixes; what it
+    /// drops is measured against the orbit average in `tests/dsst_short_period_identity.rs`.
     #[test]
-    fn truncation_matches_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn truncation_distance_to_orekit() {
         let aux = DsstAuxiliary::new(A0, EX0, EY0, HX0, HY0, LM0, MU);
         let ts = sun().truncation(&aux, norm(SUN_POS));
-        assert_eq!((ts.max_ar3_pow, ts.max_ecc_pow), (SUN_MAX_AR3, SUN_MAX_ECC));
         let tm = moon().truncation(&aux, norm(MOON_POS));
-        assert_eq!(
-            (tm.max_ar3_pow, tm.max_ecc_pow),
-            (MOON_MAX_AR3, MOON_MAX_ECC)
+        let d = [
+            ts.max_ar3_pow.abs_diff(SUN_MAX_AR3),
+            ts.max_ecc_pow.abs_diff(SUN_MAX_ECC),
+            tm.max_ar3_pow.abs_diff(MOON_MAX_AR3),
+            tm.max_ecc_pow.abs_diff(MOON_MAX_ECC),
+        ];
+        super::super::comparison_row(
+            "DSST third-body cut (maxAR3Pow, maxEccPow), Sun and Moon",
+            "powers",
+            &d.map(|x| x as f64),
         );
     }
 
@@ -651,7 +658,7 @@ mod tests {
     /// it reads (µ₃, R₃, a/R₃, e), the orders the series-bound rule prescribes: the highest degree and
     /// eccentricity power whose Danielson upper bound Tₙₘ still reaches the truncation tolerance. (G2)
     ///
-    /// [`truncation_matches_orekit`] pins one fixture state per body, where the answer is (3, 2) and
+    /// [`truncation_distance_to_orekit`] reads one fixture state per body, where the answer is (3, 2) and
     /// (4, 2) and every accept/reject decision is taken with orders of magnitude to spare. Nothing in
     /// the loop has to be right for that to pass — not the tolerance rule, not the term formula, not
     /// the `xmuarn` / `nsmd2` / `m` / `n` accumulators that walk the lattice — which is why 24 mutants
@@ -722,45 +729,42 @@ mod tests {
         );
     }
 
-    /// Compare a rate vector to Orekit's, returning the max relative error (`da` is identically zero,
-    /// checked absolutely) and asserting each component below `1e-10`.
-    fn assert_rates(got: [f64; 6], want: [f64; 6], label: &str) -> f64 {
-        let mut max_rel = 0.0_f64;
-        for i in 0..6 {
-            let err = if want[i] == 0.0 {
+    /// Each rate's distance to Orekit's, relative, absolute where Orekit's is zero (`da`).
+    fn rate_distances(got: [f64; 6], want: [f64; 6]) -> [f64; 6] {
+        core::array::from_fn(|i| {
+            if want[i] == 0.0 {
                 got[i].abs()
             } else {
                 (got[i] - want[i]).abs() / want[i].abs()
-            };
-            max_rel = max_rel.max(err);
-            assert!(
-                err < 1e-10,
-                "{label} rate[{i}] got {} want {} rel {err:.3e}",
-                got[i],
-                want[i]
-            );
-        }
-        max_rel
+            }
+        })
     }
 
-    /// The six fixed-state Sun mean-element rates match Orekit's `getMeanElementRate` to < 1e-10
-    /// relative.
+    /// The distance to Orekit's `getMeanElementRate` for the Sun at a fixed state.
+    /// `tests/dsst_short_period_identity.rs` decides: the rates are the orbit average of Gauss's.
     #[test]
-    fn fixed_state_sun_rates_match_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn fixed_state_sun_rates_distance_to_orekit() {
         let aux = DsstAuxiliary::new(A0, EX0, EY0, HX0, HY0, LM0, MU);
         let got = sun().mean_element_rates(&aux, SUN_POS);
-        let max_rel = assert_rates(got, SUN_RATES, "sun");
-        std::println!("max fixed-state Sun rate rel error: {max_rel:.3e}");
+        super::super::comparison_row(
+            "DSST Sun mean element rates at a fixed state",
+            "relative",
+            &rate_distances(got, SUN_RATES),
+        );
     }
 
-    /// The six fixed-state Moon mean-element rates match Orekit's `getMeanElementRate` to < 1e-10
-    /// relative.
+    /// The distance to Orekit's `getMeanElementRate` for the Moon at a fixed state.
     #[test]
-    fn fixed_state_moon_rates_match_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn fixed_state_moon_rates_distance_to_orekit() {
         let aux = DsstAuxiliary::new(A0, EX0, EY0, HX0, HY0, LM0, MU);
         let got = moon().mean_element_rates(&aux, MOON_POS);
-        let max_rel = assert_rates(got, MOON_RATES, "moon");
-        std::println!("max fixed-state Moon rate rel error: {max_rel:.3e}");
+        super::super::comparison_row(
+            "DSST Moon mean element rates at a fixed state",
+            "relative",
+            &rate_distances(got, MOON_RATES),
+        );
     }
 
     // MEAN DSSTPropagator samples with BOTH bodies (Sun + Moon): sample times, mean equinoctial
@@ -848,14 +852,13 @@ mod tests {
         }
     }
 
-    /// The MEAN semi-analytical propagation with both third bodies matches Orekit's `DSSTPropagator`
-    /// at every 6 h sample: `a` to < 1e-9 relative, the equinoctial e/i components to < 1e-9 absolute,
-    /// and the mean longitude to < 1 m along-track. The Sun/Moon ephemeris is a 5-point Lagrange
-    /// interpolation of Orekit's sampled positions (sub-metre accurate, negligible on these rates); a
-    /// production propagation would feed a real ephemeris instead.
+    /// The distance to Orekit's MEAN `DSSTPropagator` with both third bodies at every 6 h sample. The
+    /// Sun/Moon ephemeris is a 5-point Lagrange interpolation of Orekit's sampled positions
+    /// (sub-metre accurate, negligible on these rates).
     #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
     #[allow(clippy::expect_used)]
-    fn mean_propagation_matches_orekit() {
+    fn mean_propagation_distance_to_orekit() {
         let aux0 = DsstAuxiliary::new(A0, EX0, EY0, HX0, HY0, LM0, MU);
         let s = sun();
         let m = moon();
@@ -866,7 +869,11 @@ mod tests {
             moon_trunc: m.truncation(&aux0, norm(MOON_POS)),
         };
         let tol = Tolerance::new(1e-14, 1e-12);
-        let (mut max_a_rel, mut max_eh_abs, mut max_along) = (0.0_f64, 0.0_f64, 0.0_f64);
+        let (mut a, mut ehpq, mut along) = (
+            std::vec::Vec::new(),
+            std::vec::Vec::new(),
+            std::vec::Vec::new(),
+        );
         for k in 0..5 {
             let t = SAMPLE_T[k];
             let want = SAMPLE_STATE[k];
@@ -877,23 +884,16 @@ mod tests {
                     .expect("DSST third-body mean propagation")
                     .final_state()
             };
-            let a_rel = (got[0] - want[0]).abs() / want[0].abs();
-            max_a_rel = max_a_rel.max(a_rel);
-            for i in 1..=4 {
-                max_eh_abs = max_eh_abs.max((got[i] - want[i]).abs());
-            }
-            let along = want[0] * wrap(got[5] - want[5]).abs();
-            max_along = max_along.max(along);
-
-            assert!(a_rel < 1e-9, "t={t}: a rel {a_rel:.3e}");
-            for i in 1..=4 {
-                let e = (got[i] - want[i]).abs();
-                assert!(e < 1e-9, "t={t}: comp[{i}] abs {e:.3e}");
-            }
-            assert!(along < 1.0, "t={t}: along-track {along:.3e} m");
+            a.push((got[0] - want[0]).abs() / want[0].abs());
+            ehpq.extend((1..=4).map(|i| (got[i] - want[i]).abs()));
+            along.push(want[0] * wrap(got[5] - want[5]).abs());
         }
-        std::println!(
-            "max third-body mean-prop errors: a_rel {max_a_rel:.3e}, e/i_abs {max_eh_abs:.3e}, along {max_along:.3e} m"
+        super::super::comparison_row("DSST Sun and Moon mean propagation, a", "relative", &a);
+        super::super::comparison_row("DSST Sun and Moon mean propagation, k, h, q, p", "1", &ehpq);
+        super::super::comparison_row(
+            "DSST Sun and Moon mean propagation, along-track",
+            "m",
+            &along,
         );
     }
 }

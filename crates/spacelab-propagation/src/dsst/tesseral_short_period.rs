@@ -383,16 +383,25 @@ mod tests {
         DsstTesseral::new(MU, AE, RATE, cnm, snm)
     }
 
-    /// The unnormalized 4x4 field takes Orekit's default short-period truncations: order 4, non-resonant
-    /// eccentricity power 4, m-daily eccentricity power 2, frequency bound 8.
+    /// The distance to Orekit's default short-period cuts for the unnormalized 4×4 field: order 4,
+    /// non-resonant eccentricity power 4, m-daily order 4 and eccentricity power 2, frequency bound
+    /// 8. Orekit's heuristic, which no mathematics fixes.
     #[test]
-    fn truncation_matches_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn truncation_distance_to_orekit() {
         let trunc = SpTruncation::from(&tesseral());
-        assert_eq!(trunc.max_order_tesseral_sp, 4);
-        assert_eq!(trunc.max_ecc_pow_tesseral_sp, 4);
-        assert_eq!(trunc.max_order_mdaily_sp, 4);
-        assert_eq!(trunc.max_ecc_pow_mdaily_sp, 2);
-        assert_eq!(trunc.max_frequency, 8);
+        let d = [
+            trunc.max_order_tesseral_sp.abs_diff(4),
+            trunc.max_ecc_pow_tesseral_sp.abs_diff(4),
+            trunc.max_order_mdaily_sp.abs_diff(4),
+            trunc.max_ecc_pow_mdaily_sp.abs_diff(2),
+            trunc.max_frequency.abs_diff(8),
+        ];
+        super::super::comparison_row(
+            "DSST tesseral short-period cuts (order, e-power, m-daily order, m-daily e-power, frequency)",
+            "powers",
+            &d.map(|x| x as f64),
+        );
     }
 
     /// Orekit's m-daily eccentricity bound is `min(4, degree − 2)`, but the 4×4 fixture sits on the one
@@ -468,31 +477,23 @@ mod tests {
         assert_eq!(tesseral().resonant_orders(&aux).len(), 0);
     }
 
-    /// The tesseral short-period δ [Δa, Δk, Δh, Δq, Δp, Δλ] matches Orekit's direct `value(meanOrbit)`
-    /// at every sample to round-off: `a` to a tight absolute bound and the equinoctial e/i components +
-    /// mean longitude to `comp_tol`. Orekit's own mean state and a field frozen at the epoch (so its
-    /// harmonics do not drift over the propagation) isolate the short-period assembly (m-daily +
-    /// non-resonant); the port reproduces it to ~1e-15 relative.
+    /// The distance to Orekit's direct `value(meanOrbit)` at Orekit's own mean state, the field frozen
+    /// at the epoch. `tests/dsst_short_period_identity.rs` decides the short periods, against their
+    /// defining equation over the torus `(λ, θ)`.
     #[test]
-    fn tesseral_short_period_matches_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn tesseral_short_period_distance_to_orekit() {
         let tess = tesseral();
-        let (mut max_da, mut max_comp) = (0.0_f64, 0.0_f64);
+        let (mut da, mut rest) = (std::vec::Vec::new(), std::vec::Vec::new());
         for k in 0..4 {
             let aux = DsstAuxiliary::new(
                 MEAN[k][0], MEAN[k][1], MEAN[k][2], MEAN[k][3], MEAN[k][4], MEAN[k][5], MU,
             );
             let sp = tess.short_period_correction(&aux, GMST);
-            let da = (sp[0] - DELTA[k][0]).abs();
-            assert!(da < 1e-9, "k={k}: a abs {da:.3e} m");
-            max_da = max_da.max(da);
-            for i in 1..6 {
-                let d = (sp[i] - DELTA[k][i]).abs();
-                max_comp = max_comp.max(d);
-                assert!(d < 1e-15, "k={k} comp[{i}]: {d:.3e}");
-            }
+            da.push((sp[0] - DELTA[k][0]).abs());
+            rest.extend((1..6).map(|i| (sp[i] - DELTA[k][i]).abs()));
         }
-        std::println!(
-            "Tesseral short-period vs Orekit: max |Δa| {max_da:.2e} m, max comp {max_comp:.2e}"
-        );
+        super::super::comparison_row("DSST tesseral short periods, a", "m", &da);
+        super::super::comparison_row("DSST tesseral short periods, k, h, q, p, λ", "1", &rest);
     }
 }

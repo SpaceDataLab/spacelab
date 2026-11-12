@@ -291,25 +291,17 @@ mod tests {
         }
     }
 
-    /// The full-circle integration limits `[-π + L_v, π + L_v]` the port computes must match Orekit's
-    /// `getLLimits` (which then feeds the quadrature) — else a different 2π window is averaged and the
-    /// discrete Gauss nodes land elsewhere.
+    /// The distance to Orekit's `getLLimits`, the full-circle window `[-π + L_v, π + L_v]`. The limits
+    /// test below decides them, against where the radius crosses `rbar`.
     #[test]
-    fn integration_limits_match_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn integration_limits_distance_to_orekit() {
         let ll = drag().l_limits(&aux());
-        let e_low = (ll[0] - LL_LOW).abs();
-        let e_high = (ll[1] - LL_HIGH).abs();
-        assert!(
-            e_low < 1e-12,
-            "L_low got {} want {LL_LOW} abs {e_low:.3e}",
-            ll[0]
+        super::super::comparison_row(
+            "DSST drag integration limits",
+            "rad",
+            &[(ll[0] - LL_LOW).abs(), (ll[1] - LL_HIGH).abs()],
         );
-        assert!(
-            e_high < 1e-12,
-            "L_high got {} want {LL_HIGH} abs {e_high:.3e}",
-            ll[1]
-        );
-        std::println!("drag integration-limit abs errors: low {e_low:.3e}, high {e_high:.3e}");
     }
 
     /// The three branches of `l_limits`, against the conic rather than against a golden pair. Orekit's
@@ -362,59 +354,37 @@ mod tests {
         assert_eq!(dip.l_limits(&low), [ww - PI, ww + PI], "grazing apogee");
     }
 
-    /// The Gauss-order the port selects must equal Orekit's cached order (drag's smooth full-circle
-    /// integrand converges early, unlike SRP's shadow-clipped one).
+    /// The distance to Orekit's cached Gauss order: Orekit's heuristic, which no mathematics fixes; the
+    /// quadrature's error is measured in `tests/dsst_short_period_identity.rs`.
     #[test]
-    fn gauss_order_matches_orekit() {
-        assert_eq!(drag().gauss_order(&aux(), &atmosphere()), GAUSS_ORDER);
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn gauss_order_distance_to_orekit() {
+        let ours = drag().gauss_order(&aux(), &atmosphere());
+        super::super::comparison_row(
+            "DSST drag Gauss order",
+            "nodes",
+            &[ours.abs_diff(GAUSS_ORDER) as f64],
+        );
     }
 
-    /// The six fixed-state drag mean-element rates match Orekit's `getMeanElementRate` to < 1e-9
-    /// relative. Unlike SRP, drag has no shadow terminator and no near-zero `da` cancellation: drag
-    /// removes energy secularly, so the dominant `da` is well-conditioned and matches **bit-exactly**
-    /// (0.0 relative); the equinoctial e/i components agree to ~4e-14 and the tiny along-track `dm`
-    /// (~-3.8e-16 rad/s, round-off level) to 1.6e-11. The dominant `da` is additionally cross-checked
-    /// **independently of Orekit** against a first-principles numerical orbit-average of the Gauss
-    /// `a`-equation (200k mean-anomaly samples): -1.185464e-3 m/s, agreeing to 3.5e-15 relative — so
-    /// this validates Orekit's own value, not merely that the port reproduces it.
+    /// The distance to Orekit's `getMeanElementRate` at a fixed state, relative, absolute where
+    /// Orekit's is zero. `tests/dsst_short_period_identity.rs` decides the rates: the average of
+    /// Gauss's rates over the atmospheric arc.
     #[test]
-    fn fixed_state_rates_match_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn fixed_state_rates_distance_to_orekit() {
         let got = drag().mean_element_rates(&aux(), &atmosphere());
-        let mut errs = [0.0_f64; 6];
-        for i in 0..6 {
-            errs[i] = if RATES[i] == 0.0 {
+        let d: [f64; 6] = core::array::from_fn(|i| {
+            if RATES[i] == 0.0 {
                 got[i].abs()
             } else {
                 (got[i] - RATES[i]).abs() / RATES[i].abs()
-            };
-        }
-        std::println!(
-            "per-component drag rate rel errors: da {:.3e} dk {:.3e} dh {:.3e} dq {:.3e} dp {:.3e} dm {:.3e}",
-            errs[0],
-            errs[1],
-            errs[2],
-            errs[3],
-            errs[4],
-            errs[5]
+            }
+        });
+        super::super::comparison_row(
+            "DSST drag mean element rates at a fixed state",
+            "relative",
+            &d,
         );
-        // The doc comment above claims `da` matches bit-exactly, and nothing enforced it: the `1e-9`
-        // bound below leaves seven orders of magnitude of slack in the one component that has none.
-        // Kahan-compensating the quadrature the wrong way lands here at 1.829e-16 relative.
-        assert!(
-            errs[0] == 0.0,
-            "da is documented as bit-exact against Orekit; got {} want {} rel {:.3e}",
-            got[0],
-            RATES[0],
-            errs[0]
-        );
-        for i in 0..6 {
-            assert!(
-                errs[i] < 1e-9,
-                "rate[{i}] got {} want {} rel {:.3e}",
-                got[i],
-                RATES[i],
-                errs[i]
-            );
-        }
     }
 }

@@ -12,7 +12,7 @@ script finds every parked test in the committed tree, runs each one alone
 `max` and `RMS` are the largest and the root-mean-square distance over the `n` samples. It writes them all to
 `docs/comparisons.md` with the date, and lists the parked tests that print no row, so that no comparator is
 missing from the table without a word. A test that fails stops the script: its distance is not judged, but
-a comparator that cannot run has no distance to record.
+a comparator that cannot run has no distance to record. A row whose test lies inside a licence-restricted
 
     uv run --no-project python -I tools/compare.py
 """
@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime
+import importlib.util
 import os
 import pathlib
 import re
@@ -125,13 +126,23 @@ def cargo(args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+INLINE_MOD = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*\{", re.M)
+
+
 def full_name(test: Parked, listed: list[str], module: str) -> str:
-    """The one listed test path that is `test`: its name, inside its file's module."""
+    """The one listed test path that is `test`: its name, inside its file's module.
+
+    Between the file's module and the name only the file's own inline modules (`mod tests { ... }`)
+    may stand: `dsst::drag::tests::x` is not in `dsst/mod.rs`, though it starts with `dsst::`.
+    """
+    inline = set(INLINE_MOD.findall((ROOT / test.path).read_text()))
+    prefix = module + "::" if module else ""
     hits = [
         name
         for name in listed
-        if name.rsplit("::", 1)[-1] == test.name
-        and (not module or name.startswith(module + "::"))
+        if name.startswith(prefix)
+        and name.rsplit("::", 1)[-1] == test.name
+        and all(seg in inline for seg in name[len(prefix) :].split("::")[:-1])
     ]
     if len(hits) != 1:
         raise ValueError(f"{test.key}: {len(hits)} ignored tests match, {hits}")
@@ -172,7 +183,24 @@ def run(tests: list[Parked]) -> list[tuple[Parked, list[Row]]]:
     return results
 
 
-def table(results: list[tuple[Parked, list[Row]]], day: datetime.date) -> str:
+def restricted_roots() -> list[str]:
+    spec = importlib.util.spec_from_file_location(
+        "check_provenance", ROOT / "tools" / "check-provenance.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.restricted()[0]
+
+
+def table(
+    results: list[tuple[Parked, list[Row]]], day: datetime.date, restricted: list[str]
+) -> str:
+    def private(test: Parked) -> str:
+        return (
+            if any(test.path.startswith(r) for r in restricted)
+            else ""
+        )
+
     out = [
         "# Comparisons",
         "",
@@ -192,14 +220,14 @@ def table(results: list[tuple[Parked, list[Row]]], day: datetime.date) -> str:
     ]
     out += [
         f"| {r.code} | {r.version} | {r.quantity} | {r.unit} | {r.n} | {r.max:.3e} | {r.rms:.3e} | "
-        f"`{test.key}` |"
+        f"`{test.key}` |{private(test)}"
         for test, rows in results
         for r in rows
     ]
-    silent = [test.key for test, rows in results if not rows]
+    silent = [test for test, rows in results if not rows]
     if silent:
         out += ["", "Parked comparator tests that print no row yet:", ""]
-        out += [f"- `{key}`" for key in silent]
+        out += [f"- `{test.key}`{private(test)}" for test in silent]
     return "\n".join(out) + "\n"
 
 
@@ -218,7 +246,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.parse_args()
     results = run(parked_tests(ROOT, committed_rust()))
-    OUT.write_text(table(results, datetime.datetime.now(datetime.UTC).date()))
+    OUT.write_text(
+        table(results, datetime.datetime.now(datetime.UTC).date(), restricted_roots())
+    )
     rows = sum(len(r) for _, r in results)
     print(f"{len(results)} parked tests, {rows} rows -> {OUT.relative_to(ROOT)}")
     return 0

@@ -14,14 +14,53 @@ root-mean-square distance over them.
 | Code | Version | Quantity | Unit | n | max | RMS | Test |
 |---|---|---|---|--:|--:|--:|---|
 | pyerfa | not recorded | TAI−UTC on and around every leap second | s | 299 | 0.000e+00 | 0.000e+00 | `crates/spacelab-fa/tests/delta_at_oracle.rs::delta_at_agrees_with_pyerfa_on_every_transition` |
+| Orekit | not recorded | GPT3 mapping coefficients a_h, a_w | 1 | 4 | 4.228e-10 | 3.196e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |
+| Orekit | not recorded | GPT3 temperatures T, Tm | K | 4 | 4.254e-10 | 2.724e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |
+| Orekit | not recorded | GPT3 pressures p, e | hPa | 4 | 4.986e-10 | 3.581e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |
+| Orekit | not recorded | GPT3 water-vapour decrease factor λ | 1 | 2 | 1.615e-10 | 1.586e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |
+| Orekit | not recorded | GPT3 gradient coefficients | 1 | 8 | 3.405e-10 | 2.182e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |
+| Orekit | 13.1.7 | DSST drag integration limits | rad | 2 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/drag.rs::integration_limits_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST drag Gauss order | nodes | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/drag.rs::gauss_order_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST drag mean element rates at a fixed state | relative | 6 | 2.140e-11 | 8.736e-12 | `crates/spacelab-propagation/src/dsst/drag.rs::fixed_state_rates_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST SRP short periods, osculating a | m | 4 | 2.739e-05 | 2.125e-05 | `crates/spacelab-propagation/src/dsst/gaussian_short_period.rs::srp_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST SRP short periods, osculating k, h, q, p, λ | 1 | 20 | 2.527e-10 | 1.038e-10 | `crates/spacelab-propagation/src/dsst/gaussian_short_period.rs::srp_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST drag short periods, osculating a | m | 4 | 4.359e-02 | 3.409e-02 | `crates/spacelab-propagation/src/dsst/gaussian_short_period.rs::drag_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST drag short periods, osculating k, h, q, p, λ | 1 | 20 | 8.132e-09 | 4.545e-09 | `crates/spacelab-propagation/src/dsst/gaussian_short_period.rs::drag_short_period_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST zonal eccentricity cut of the mean rates | powers | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/mod.rs::truncation_order_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST zonal mean element rates at a fixed state | relative | 6 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/mod.rs::fixed_state_rates_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST zonal mean propagation, a | relative | 5 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/mod.rs::mean_propagation_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST zonal mean propagation, k, h, q, p | 1 | 20 | 2.914e-11 | 1.112e-11 | `crates/spacelab-propagation/src/dsst/mod.rs::mean_propagation_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST zonal mean propagation, along-track | m | 5 | 2.554e-04 | 1.339e-04 | `crates/spacelab-propagation/src/dsst/mod.rs::mean_propagation_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST zonal osculating a | m | 4 | 1.058e-05 | 5.652e-06 | `crates/spacelab-propagation/src/dsst/mod.rs::osculating_short_period_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST zonal osculating k, h, q, p, λ | 1 | 20 | 7.226e-12 | 3.331e-12 | `crates/spacelab-propagation/src/dsst/mod.rs::osculating_short_period_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST zonal short periods at Orekit's mean state, degrees 2–6, a | m | 10 | 9.095e-13 | 8.385e-13 | `crates/spacelab-propagation/src/dsst/short_period.rs::short_period_at_orekit_mean_state_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST zonal short periods at Orekit's mean state, degrees 2–6, k, h, q, p, λ | 1 | 50 | 6.505e-19 | 1.912e-19 | `crates/spacelab-propagation/src/dsst/short_period.rs::short_period_at_orekit_mean_state_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST SRP eclipse crossings, distance from the Sun line minus ae | m | 2 | 3.189e+02 | 3.189e+02 | `crates/spacelab-propagation/src/dsst/srp.rs::orekit_limits_sit_on_the_ae_b_cylinder` |
 | Orekit | 13.1.7 | DSST SRP mean element rates at a fixed state | relative | 6 | 3.297e-03 | 2.684e-03 | `crates/spacelab-propagation/src/dsst/srp.rs::fixed_state_rates_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST tesseral resonant mean rates, GEO 1:1 | relative | 6 | 2.460e-16 | 1.569e-16 | `crates/spacelab-propagation/src/dsst/tesseral.rs::geo_resonant_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST tesseral resonant mean rates, GPS 2:1 | relative | 6 | 6.587e-15 | 2.736e-15 | `crates/spacelab-propagation/src/dsst/tesseral.rs::gps_resonant_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST tesseral resonant mean rates, GEO 1:1 at e = 0.004 | relative | 6 | 4.200e-16 | 2.728e-16 | `crates/spacelab-propagation/src/dsst/tesseral.rs::geo_low_ecc_resonant_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST tesseral eccentricity cut, Orekit's step table | powers | 13 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/tesseral.rs::max_ecc_pow_distance_to_orekits_step_table` |
+| Orekit | 13.1.7 | DSST tesseral short-period cuts (order, e-power, m-daily order, m-daily e-power, frequency) | powers | 5 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::truncation_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST tesseral short periods, a | m | 4 | 4.263e-14 | 2.189e-14 | `crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::tesseral_short_period_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST tesseral short periods, k, h, q, p, λ | 1 | 20 | 1.355e-20 | 6.382e-21 | `crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::tesseral_short_period_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST third-body cut (maxAR3Pow, maxEccPow), Sun and Moon | powers | 4 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/third_body.rs::truncation_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Sun mean element rates at a fixed state | relative | 6 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/third_body.rs::fixed_state_sun_rates_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Moon mean element rates at a fixed state | relative | 6 | 2.617e-16 | 1.068e-16 | `crates/spacelab-propagation/src/dsst/third_body.rs::fixed_state_moon_rates_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Sun and Moon mean propagation, a | relative | 5 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/third_body.rs::mean_propagation_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Sun and Moon mean propagation, k, h, q, p | 1 | 20 | 7.550e-15 | 3.104e-15 | `crates/spacelab-propagation/src/dsst/third_body.rs::mean_propagation_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Sun and Moon mean propagation, along-track | m | 5 | 6.139e-07 | 3.370e-07 | `crates/spacelab-propagation/src/dsst/third_body.rs::mean_propagation_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST third-body short-period cut (maxAR3Pow, maxEccPow), Sun and Moon | powers | 4 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::truncation_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Sun short periods, osculating a | m | 4 | 2.794e-08 | 1.810e-08 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_short_period_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Sun short periods, osculating k, h, q, p, λ | 1 | 20 | 2.842e-13 | 7.344e-14 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_short_period_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Sun and Moon short periods, osculating a | m | 4 | 1.304e-07 | 8.267e-08 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Sun and Moon short periods, osculating k, h, q, p, λ | 1 | 20 | 1.208e-12 | 3.072e-13 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | Harris–Priester density | relative | 16 | 4.233e-16 | 1.237e-16 | `crates/spacelab-propagation/src/harris_priester/mod.rs::density_distance_to_orekit` |
 | NRLMSISE-00 C (Brodowski) | release 20041227 | test_gtd7's 17 printed cases, 11 fields each, the printed zeros left out | relative | 165 | 4.803e-07 | 1.795e-07 | `crates/spacelab-propagation/src/nrlmsise00/mod.rs::gtd7_matches_reference_vectors` |
+| Orekit | 13.1.7 | box-wing drag, no lift | relative | 4 | 9.632e-16 | 6.754e-16 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |
+| Orekit | 13.1.7 | box-wing drag with lift, Orekit's lift one incidence factor short (F89) | relative | 1 | 1.134e-01 | 1.134e-01 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |
+| Orekit | 13.1.7 | box-wing SRP | relative | 5 | 1.278e-15 | 8.422e-16 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST zonal eccentricity cut over 1134 states | powers | 1134 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/tests/dsst_truncation.rs::the_eccentricity_truncation_order_distance_to_orekit` |
 | Orekit | 13.1.7 | eclipse masking ratio ν, Orekit's arrangement against the reference | 1 | 171 | 6.510e-07 | 7.041e-08 | `crates/spacelab-propagation/tests/shadow_lens.rs::orekit_masking_ratio_distance_to_the_reference` |
 
 Parked comparator tests that print no row yet:

@@ -824,27 +824,11 @@ mod tests {
         )
     }
 
-    /// Score every rate component against its own Orekit magnitude (< 1e-9 relative). No component
-    /// needs the near-zero-cancellation relaxation: even the ~1e-13 e/i-vector rates track Orekit to
-    /// ~1e-14 relative, since the resonant potential and its derivatives are smooth here.
-    fn check(name: &str, state: &[f64; 6], want: &[f64; 6]) -> f64 {
+    /// Prints each rate's distance to Orekit's, relative to its own Orekit magnitude.
+    fn distance(quantity: &str, state: &[f64; 6], want: &[f64; 6]) {
         let got = tesseral().mean_element_rates(&aux(state), GMST);
-        let mut max_rel = 0.0_f64;
-        for i in 0..6 {
-            let err = if want[i] == 0.0 {
-                got[i].abs()
-            } else {
-                (got[i] - want[i]).abs() / want[i].abs()
-            };
-            max_rel = max_rel.max(err);
-            assert!(
-                err < 1e-9,
-                "{name} rate[{i}] got {} want {} rel {err:.3e}",
-                got[i],
-                want[i]
-            );
-        }
-        max_rel
+        let d: [f64; 6] = core::array::from_fn(|i| (got[i] - want[i]).abs() / want[i].abs());
+        super::super::comparison_row(quantity, "relative", &d);
     }
 
     /// LEO (a = 7.2e6): no tesseral resonance -> all six mean rates are identically zero.
@@ -856,41 +840,48 @@ mod tests {
         }
     }
 
-    /// GEO (a ~ 42164 km): 1:1 resonance, resonant orders {1,2,3,4}. Exercises the full resonant
-    /// path (Hansen tesseral, GHmsj, GammaMns, Jacobi, Vmns) for j = 1..4.
+    /// GEO (a ~ 42164 km): 1:1 resonance, resonant orders {1,2,3,4}. The distance to Orekit's rates;
+    /// `tests/dsst_short_period_identity.rs` decides them, as the average along the resonant path.
     #[test]
-    fn geo_resonant_matches_orekit() {
-        let max_rel = check("geo", &GEO_STATE, &GEO_RATES);
-        std::println!("GEO max tesseral rate rel error: {max_rel:.3e}");
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn geo_resonant_distance_to_orekit() {
+        distance(
+            "DSST tesseral resonant mean rates, GEO 1:1",
+            &GEO_STATE,
+            &GEO_RATES,
+        );
     }
 
-    /// GPS-like (a ~ 26560 km): 2:1 resonance, resonant orders {2,4} with j = {1,2} — a different
-    /// resonant structure and j-selection than GEO.
+    /// GPS-like (a ~ 26560 km): 2:1 resonance, resonant orders {2,4} with j = {1,2}.
     #[test]
-    fn gps_resonant_matches_orekit() {
-        let max_rel = check("gps", &GPS_STATE, &GPS_RATES);
-        std::println!("GPS max tesseral rate rel error: {max_rel:.3e}");
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn gps_resonant_distance_to_orekit() {
+        distance(
+            "DSST tesseral resonant mean rates, GPS 2:1",
+            &GPS_STATE,
+            &GPS_RATES,
+        );
     }
 
-    /// GEO at e = 0.004, the same 1:1 resonance one eccentricity band lower. Both older fixtures
-    /// sit at e = 0.01, where `maxEccPow = 4 = max_degree` makes `min(maxEccPow ± j, max_degree)`
-    /// saturate at `max_degree` for every resonant `j`: the s-range is `[-4, 4]` however the two
-    /// bounds are written. At e = 0.004 `maxEccPow` drops to 3 and the clamp stops biting — the
-    /// j = 1 range is `s ∈ [-2, 4]`, asymmetric — so this is the only case in the suite where the
-    /// truncation bounds themselves are observable.
+    /// GEO at e = 0.004, where `maxEccPow` drops to 3 and the s-range of the j = 1 term is `[-2, 4]`,
+    /// asymmetric: the only fixture where the cut's bounds reach the answer.
     #[test]
-    fn geo_low_ecc_resonant_matches_orekit() {
-        let max_rel = check("geo_low_ecc", &GEO_LOW_ECC_STATE, &GEO_LOW_ECC_RATES);
-        std::println!("GEO e=0.004 max tesseral rate rel error: {max_rel:.3e}");
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn geo_low_ecc_resonant_distance_to_orekit() {
+        distance(
+            "DSST tesseral resonant mean rates, GEO 1:1 at e = 0.004",
+            &GEO_LOW_ECC_STATE,
+            &GEO_LOW_ECC_RATES,
+        );
     }
 
     /// `get_max_ecc_pow` against Orekit 13.1.7's own step table, read off the shipped
     /// `DSSTTesseral.getMaxEccPow` bytecode: thresholds 0.005/0.02/0.1/0.2/0.3/0.4 returning
-    /// 3/4/7/10/12/15, 20 above. Every rate fixture sits at e ≤ 0.01, so only the first two steps
-    /// were ever evaluated and the four upper thresholds could each move a whole band unnoticed.
-    /// Both the threshold itself (the comparison is `<=`) and an interior point are checked.
+    /// 3/4/7/10/12/15, 20 above, at each threshold (the comparison is `<=`) and between. Orekit's
+    /// heuristic, which no mathematics fixes.
     #[test]
-    fn max_ecc_pow_matches_orekit_step_table() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn max_ecc_pow_distance_to_orekits_step_table() {
         #[rustfmt::skip]
         const TABLE: [(f64, usize); 13] = [
             (0.0,  3), (0.005, 3),
@@ -901,9 +892,12 @@ mod tests {
             (0.35, 15), (0.4,  15),
             (0.5,  20),
         ];
-        for (e, want) in TABLE {
-            assert_eq!(get_max_ecc_pow(e), want, "max_ecc_pow at e = {e}");
-        }
+        let d = TABLE.map(|(e, want)| get_max_ecc_pow(e).abs_diff(want) as f64);
+        super::super::comparison_row(
+            "DSST tesseral eccentricity cut, Orekit's step table",
+            "powers",
+            &d,
+        );
     }
 
     /// The resonance acceptance window: Orekit keeps order `m` when `|m·θ̇/n − j| ≤ 1 / max(10,

@@ -459,14 +459,14 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 |---|---|---|---|---|
 | Box-wing drag + SRP | each facet's force from the momentum it keeps of the stream through its projected area: absorbed, reflected specularly (`2|n̂·d̂|` along the normal), or re-emitted by Lambert's law (mean direction `(2/3) n̂`); SRP is Montenbruck & Gill eq. 3.75 = Vallado eq. 8-44, drag with a lift ratio of specular molecules goes as `(n̂·v̂)²` (F89: Orekit's lift term is short of one `|n̂·v̂|`); a facet counts on its lit/windward side, both sides if double-sided; the Sun-tracking array normal is the best one rotational degree of freedom allows | **Maxima** `derivations/box_wing_momentum.mac` (13 identities, the lift case at the golden geometry), PARI/GP `box_wing_momentum.gp` at 100 digits; Orekit 13 `BoxAndSolarArraySpacecraft` golden as comparator where the models agree (4 geometries, and SRP in the fifth) | < 1e-9 | src/spacecraft.rs, derivations/box_wing_momentum.mac |
 | Constant-thrust / impulse / parametric maneuvers | rocket equation; constant-thrust and impulsive definitions | Orekit `ConstantThrustManeuver`/`ImpulseManeuver`/`ParametricAcceleration` golden | r/v < 1e-12; AD vs FD | src/maneuver.rs |
-| DSST **drag** mean rates | Danielson et al. 1995 — Gaussian VOP averaging | Orekit `getMeanElementRate` **+** independent 200k-sample Gauss orbit-average | da bit-exact (0.0 rel); e/i ~4e-14; indep. 3.5e-15 rel | src/dsst/drag.rs |
+| DSST **drag** mean rates | Danielson et al. 1995 — Gaussian VOP averaging | the defining average `(1/2π)∫F dλ` of Gauss's rates over the whole turn inside the atmosphere and over the arc below `rbar` (G2, `tests/dsst_short_period_identity.rs`); the limits where the radius crosses `rbar` (G2); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 1.8e-10 and 2.2e-10 of the rates, the central differences' own error | src/dsst/drag.rs, tests/dsst_short_period_identity.rs |
 | DSST **drag** short-period | Danielson et al. 1995 — Gaussian short-period: the zero-mean solution of `n·∂η/∂λ = F − ⟨F⟩`, with `(3/2)(n/a)η_a` on the left for λ | the defining equation on the shipped corrections, ∂/∂λ of osc − mean taken spectrally and the force raised ×1000 past the test's rounding (`tests/dsst_short_period_identity.rs`); `derivations/dsst_gaussian_short_period.{mac,gp}`: ρⱼ + iσⱼ, the product to sum at JMAX = 12, the closed form of `F = cos L`; the full-turn trapezoid against Arb's `2Iⱼ(z)`. Comparator: Orekit OSCULATING | 8.7e-9 at e = 1e-4 and 3.0e-9 in LEO (bound 2e-8); 3.9e-6 at e = 0.05 (bound 1e-5), the j ≤ 12 cut: 2.1e-9 at twice the scale height; 1.6e-3 on an arc that leaves the atmosphere, the step at `rbar`: ÷8.4 when `rbar` moves 2H out; closed form 1.9e-15 (bound 1e-14). Orekit is 4.4e-2 m away in `a`, from its D¹, which takes C⁰ where 𝒞⁰ = C⁰/2 − ⟨F⟩ belongs | src/dsst/gaussian_short_period.rs |
 | DSST **SRP** mean rates | Danielson et al. 1995 — Gaussian VOP averaging; the shadow function (3.5) carried from the cylinder to the penumbra and umbra cones of a spherical body | the defining average `(1/2π)∫νF dλ` over the whole orbit at 80 digits, by two routes, in the true and in the mean longitude (`derivations/dsst_srp_conical_average.gp`; `tests/dsst_srp_conical_reference.rs`: LEO, HEO, GEO, penumbra only, 1e-6 short of the umbra, sunlit) **+** the cone equations, their quartic, the precheck and the smoothstep in `derivations/dsst_srp_conical_shadow.mac` (25 checks) **+** the contacts against a bisection on the angles that define them, 2394 states, and the penumbra rule against the same piece in eight parts, 2048 pieces (`src/dsst/srp.rs`). Comparator: Orekit `getMeanElementRate`, a cylinder of radius `ae·B` and a cut at it | 4.0e-15 at worst, on the penumbra-only orbit, 1.0e-16 … 3.7e-16 on the others (bound 2e-14); the routes agree to 1.3e-46 of the rates' scale; contacts 6.2e-14 rad (bound 1e-12); penumbra rule 6.6e-14 (bound 2e-13); the average by the test's own quadrature 1.5e-11 (bound 1e-10). Orekit is 8.3e-4 (`dk`, `dh`) to 3.3e-3 (`dλ`) away, relative | src/dsst/srp.rs |
 | DSST **SRP** short-period | Danielson et al. 1995 — Gaussian short-period: the zero-mean solution of `n·∂η/∂λ = F − ⟨F⟩` | the defining equation on the shipped corrections at e = 1e-4, 0.008, 0.05, 0.1, the Sun 75° and 85° from the orbit plane, never in shadow (`tests/dsst_short_period_identity.rs`); the Fourier coefficients on the conical pieces against the 80-digit average (`derivations/dsst_srp_conical_average.gp`, `src/dsst/srp.rs`); `derivations/dsst_gaussian_short_period.{mac,gp}`. In shadow the equation is not a gate: a series cut at j ≤ 12 cannot follow the shadow's edges, and the residual there is 0.24 to 0.94 of the force. Comparator: Orekit OSCULATING (~62 mm `a` swing) | 5.0e-9 at worst (bound 1e-8) with the force ×1000; 4.1e-6 unraised, 1280× more: the test's rounding; Fourier coefficients 3.4e-15 (bound 2e-14). Orekit is 2.7e-5 m away in `a`, 2.5e-10 in the others | src/dsst/gaussian_short_period.rs, src/dsst/srp.rs |
-| DSST **zonal** mean rates + prop | Danielson et al. 1995 — zonal; Kaula 1966 | Orekit `getMeanElementRate` J₂…J₆ | rates < 1e-10 rel; along-track < 1 m | src/dsst/mod.rs |
-| DSST **zonal** short-period | Danielson et al. 1995 — zonal short-period | Orekit OSCULATING; numeric J2–J5 cross-check | da < 1e-2 m; comps < 1e-9 | src/dsst/short_period.rs |
-| DSST **tesseral** mean + short-period | Danielson et al. 1995 — resonant tesseral | Orekit (GEO 1:1 & GPS 2:1 resonance) | < 1e-9 rel (meas ~1e-14); non-resonant exact 0.0 | src/dsst/tesseral.rs, tesseral_short_period.rs |
-| DSST **third-body** mean + short-period | Danielson et al. 1995 — third-body | Orekit `getMeanElementRate` **+** independent FD of disturbing potential | Sun/Moon < 1e-10 rel; along < 1 m | src/dsst/third_body.rs |
+| DSST **zonal** mean rates + prop | Danielson et al. 1995 — zonal; Kaula 1966 | **Maxima** `derivations/dsst_zonal_average.mac` (U the orbit average, its partials, Kozai's J2 rates); the rates the orbit average of Gauss's rates (G2, `tests/dsst_short_period_identity.rs`): J2 alone, summed in closed form in `e`, and J2…J6 under the default cut; the propagation solves the ODE of the summed rates (G2, `propagator.rs`); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | J2 6.4e-12 and 1.1e-11 of the rates' swing (bound 5e-11), J2…J6 3.4e-9 (bound 1e-8, the e-cut) | src/dsst/mod.rs, src/dsst/zonal.rs, tests/dsst_short_period_identity.rs |
+| DSST **zonal** short-period | Danielson et al. 1995 — zonal short-period: the zero-mean solution of `n·∂η/∂λ = F − ⟨F⟩` | the defining equation on the shipped corrections, J2…J6 (G2, `tests/dsst_short_period_identity.rs`); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 1.6e-10 at e = 0.01, 2.1e-7 at e = 0.05, the e⁵ the s-cut drops | src/dsst/short_period.rs, tests/dsst_short_period_identity.rs |
+| DSST **tesseral** mean + short-period | Danielson et al. 1995 — resonant tesseral | **Maxima** `derivations/dsst_tesseral_expansion.mac` (the Hansen, G/H, Jacobi and inclination layers multiply out to the order-m harmonic, n ≤ 5); the resonant mean rates the average of Gauss's rates along the resonant path at exact 1:1 and 2:1 commensurability, and the short periods their defining equation over the torus (λ, θ) (G2, `tests/dsst_short_period_identity.rs`); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | mean rates 1.7e-8 and 7.9e-11 of the swing (bound 5e-8; the 1:1 figure moves as the central difference's dv²); short periods 1.2e-6, the m-daily e³ cut; non-resonant exact 0.0 | src/dsst/tesseral.rs, tesseral_short_period.rs, tests/dsst_short_period_identity.rs |
+| DSST **third-body** mean + short-period | Danielson et al. 1995 — third-body | **Maxima** `derivations/dsst_third_body_average.mac` (the Hansen kernels, U the point-mass orbit average for n = 2…6, its partials); the mean rates the orbit average of Gauss's rates, at the default cut and at (8, 8), and the short periods their defining equation (G2, `tests/dsst_short_period_identity.rs`); the cut the series-bound rule prescribes (G2, 440 states); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | mean rates 1.7e-5 → 1.1e-11 of the swing in LEO, 4.6e-7 → 4.1e-8 in GEO, default → (8, 8); short periods 2.4e-5 LEO, 1.8e-3 GEO, falling as (a/R₃)³ | src/dsst/third_body.rs, third_body_short_period.rs, tests/dsst_short_period_identity.rs |
 | DSST Hansen kernels | Hansen coefficients; recurrences in Danielson et al. 1995 | analytic recurrence self-check | value < 1e-14; deriv < 1e-12 | src/dsst/hansen.rs |
 | DSST full propagator | Danielson et al. 1995 — mean + short-period composition | mean → osculating → mean is the identity under all five forces, LEO and GEO, three epochs (G4: `mean_from_osculating`, the fixed point `mean ← osc − η(mean)`) **+** the propagated mean elements solve their ODE: central differences at ±600 s equal the summed mean rates within the integrator's tolerance budget (G2) **+** the right-hand side is the sum of the five rates (G1). Comparator: the Orekit-validated DsstZonal mean/osculating with the other four nulled | round trip 3.5e-18 (short periods 7e-5 … 9e-4); rates 0.23 of the budget `(1e-12 + 1e-14·|y|)/h`; zonal-only a < 1e-3 m | src/dsst/propagator.rs |
 
@@ -11290,9 +11290,13 @@ codes, adds three: a degree-70 geopotential, a DCT and a Bessel function; the WA
 product test (§10.18) adds a fourth. The spec-vector audit (Ф19.E, 2026-10-26) adds three the rules had missed: the
 `FCULZD_HPA` zenith delay, `TDFRPH`'s arguments and `HARDISP`'s spline, whose expected values the compiled IERS routines printed
 through `tools/iers-oracle` — no code's name in them, so the doc rule now reads that harness too. Ф17.B batch 1 removes two: Harris–Priester's density law is gated in Maxima and PARI, its Orekit
-reference test is parked and its ceiling test asserts the model's definition. **Today: 131
-comparator-decided tests of 3 339** — name 94, file 18, fixture 4, doc 15; 71 of them Orekit's (59 by
-name), 49 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+reference test is parked and its ceiling test asserts the model's definition. Ф19.G batch 1 (2026-11-13) parks 26: GPT3's
+two reference cases, ITU-R P.834's one, the box-wing's five geometries and 22 DSST tests, after
+`tests/dsst_short_period_identity.rs` gained the conservative mean rates as orbit averages of Gauss's
+rates (zonal, Sun and Moon, the 1:1 and 2:1 resonances), `itu834_mapping.mac` the recommendation's
+constants and the box-wing's lift drag a test of its own. **Today: 105
+comparator-decided tests of 3 687** — name 68, file 18, fixture 4, doc 15; 46 of them Orekit's (33 by
+name), 26 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 The parked tests are the suite: `just compare` (`tools/compare.py`) runs each one alone, reads the
@@ -11350,8 +11354,6 @@ crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_inside_a_leap_second_is_of
 crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_matches_orekit_iers1996_outside_leap_seconds | name:orekit
 crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_agrees_with_orekit_to_the_convention_floor | name:orekit
 crates/spacelab-geometry/tests/qhull_cross_check.rs::every_construction_agrees_with_qhull_on_the_same_points | name:qhull
-crates/spacelab-gnss/src/gpt3.rs::matches_orekit_matlab_ref_case1 | name:orekit
-crates/spacelab-gnss/src/gpt3.rs::matches_orekit_matlab_ref_case2 | name:orekit
 crates/spacelab-gnss/src/models.rs::gmf_matches_the_orekit_reference_values | name:orekit
 crates/spacelab-gnss/src/models.rs::niell_matches_the_orekit_reference_values | name:orekit
 crates/spacelab-gnss/src/models.rs::vmf1_matches_the_orekit_reference_values | name:orekit
@@ -11360,32 +11362,11 @@ crates/spacelab-gnss/src/vmf_grid.rs::parses_real_vmf3_5x5_and_matches_orekit_at
 crates/spacelab-ionosphere/src/modip.rs::the_orekit_reference_points_are_reproduced_on_the_galileo_grid | name:orekit
 crates/spacelab-ionosphere/tests/galileo_stec.rs::the_stec_matches_the_jrc_reference_in_every_month | name:jrc
 crates/spacelab-propagation/src/dsst/coefficients.rs::the_scalar_coefficients_and_upper_bounds_match_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/drag.rs::fixed_state_rates_match_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/drag.rs::gauss_order_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/drag.rs::integration_limits_match_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/mod.rs::fixed_state_rates_match_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/mod.rs::mean_propagation_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/mod.rs::osculating_short_period_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/mod.rs::truncation_order_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/short_period.rs::short_period_at_orekit_mean_state_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/tesseral.rs::geo_low_ecc_resonant_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/tesseral.rs::geo_resonant_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/tesseral.rs::gps_resonant_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/tesseral.rs::max_ecc_pow_matches_orekit_step_table | name:orekit
 crates/spacelab-propagation/src/dsst/tesseral.rs::resonance_window_is_one_part_in_ten_revolutions | doc:orekit
 crates/spacelab-propagation/src/dsst/tesseral.rs::zero_frequency_order_is_not_resonant | doc:orekit
 crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::osculating_adds_the_short_period_correction_to_the_mean | doc:orekit
-crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::tesseral_short_period_matches_orekit | name:orekit
 crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::the_mdaily_eccentricity_bound_follows_the_degree | doc:orekit
 crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::the_resonant_term_is_excluded_from_the_short_period_sum | doc:orekit
-crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::truncation_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/third_body.rs::fixed_state_moon_rates_match_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/third_body.rs::fixed_state_sun_rates_match_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/third_body.rs::mean_propagation_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/third_body.rs::truncation_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_short_period_matches_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/third_body_short_period.rs::truncation_matches_orekit | name:orekit
 crates/spacelab-propagation/src/earth_radiation.rs::knocke_matches_orekit | name:orekit
 crates/spacelab-propagation/src/ephemeris.rs::both_bodies_reach_erfa_at_the_documented_accuracy | name:erfa
 crates/spacelab-propagation/src/geopotential.rs::validated_against_scipy_at_degree_70 | name:scipy
@@ -11403,8 +11384,6 @@ crates/spacelab-propagation/src/solid_tide.rs::pole_tide_matches_orekit | name:o
 crates/spacelab-propagation/src/solid_tide.rs::step2_matches_orekit | name:orekit
 crates/spacelab-propagation/src/spacecraft.rs::a_null_radiation_flux_returns_zero_and_the_threshold_is_strict | doc:orekit
 crates/spacelab-propagation/src/spacecraft.rs::an_array_edge_on_to_the_sun_falls_back_to_an_arbitrary_perpendicular | doc:orekit
-crates/spacelab-propagation/src/spacecraft.rs::box_wing_matches_orekit | name:orekit
-crates/spacelab-propagation/tests/dsst_truncation.rs::the_eccentricity_truncation_order_matches_orekit | name:orekit
 crates/spacelab-propagation/tests/measured_density.rs::the_three_hourly_ap_array_is_what_carries_the_storm | doc:orekit
 crates/spacelab-propagation/tests/measured_wind.rs::hwm14_and_our_field_are_scored_on_the_same_held_out_rows | name:hwm14
 crates/spacelab-propagation/tests/wam_ipe_product.rs::a_noaa_file_reads_as_scipy_reads_it | name:scipy

@@ -373,45 +373,193 @@ fn the_third_body_residual_is_the_distance_cut() {
     }
 }
 
+/// The Earth's rotation rate, rad/s, for the tesseral tests.
+const THETA_DOT: f64 = 7.292_115e-5;
+
+/// Unnormalised `C_nm`, `S_nm` through degree 4, m ≥ 1: Earth-sized, signs as in EGM.
+const TESSERALS: [(usize, usize, f64, f64); 9] = [
+    (2, 1, -2.4e-10, 1.5e-9),
+    (2, 2, 1.574_5e-6, -9.039e-7),
+    (3, 1, 2.191_9e-6, 2.688e-7),
+    (3, 2, 3.089e-7, -2.115e-7),
+    (3, 3, 1.006e-7, 1.972e-7),
+    (4, 1, -5.087e-7, -4.494e-7),
+    (4, 2, 7.783e-8, 1.481e-7),
+    (4, 3, 5.92e-8, -1.201e-8),
+    (4, 4, -3.98e-9, 6.52e-9),
+];
+
+/// [`TESSERALS`] as the DSST contribution and as the field it expands.
+struct TesseralField {
+    dsst: DsstTesseral,
+    geo: GeoPotential,
+}
+
+impl TesseralField {
+    fn new() -> Self {
+        let mut cnm: Vec<Vec<f64>> = (0..5).map(|n| vec![0.0; n + 1]).collect();
+        let mut snm = cnm.clone();
+        for &(n, m, c, s) in &TESSERALS {
+            cnm[n][m] = c;
+            snm[n][m] = s;
+        }
+        Self {
+            dsst: DsstTesseral::new(MU, RE, THETA_DOT, cnm, snm),
+            geo: GeoPotential::from_unnormalized(MU, RE, 4, &TESSERALS)
+                .expect("degree 4 is supported"),
+        }
+    }
+
+    /// The field's perturbing acceleration in the inertial frame, the body frame turned by θ about
+    /// +Z: `r_b = R(θ) r`, `a = R(θ)ᵀ a_b`.
+    fn acceleration(&self, t: f64, r: [f64; 3]) -> [f64; 3] {
+        let (st, ct) = t.sin_cos();
+        let rb = [ct * r[0] + st * r[1], -st * r[0] + ct * r[1], r[2]];
+        let ab = perturbing(self.geo.acceleration_simd(&rb), rb);
+        [ct * ab[0] - st * ab[1], st * ab[0] + ct * ab[1], ab[2]]
+    }
+}
+
 /// A degree-4 tesseral field on a non-resonant LEO, over the torus (λ, θ). Measured 1.2e-6, the
 /// size of the e³ the m-daily s-cut `min(4, d − 2)` drops at e = 0.01.
 #[test]
 fn tesseral_short_periods_solve_their_defining_equation() {
-    let theta_dot = 7.292_115e-5;
-    // Unnormalised C_nm, S_nm, m ≥ 1: Earth-sized, signs as in EGM.
-    let cs: [(usize, usize, f64, f64); 9] = [
-        (2, 1, -2.4e-10, 1.5e-9),
-        (2, 2, 1.574_5e-6, -9.039e-7),
-        (3, 1, 2.191_9e-6, 2.688e-7),
-        (3, 2, 3.089e-7, -2.115e-7),
-        (3, 3, 1.006e-7, 1.972e-7),
-        (4, 1, -5.087e-7, -4.494e-7),
-        (4, 2, 7.783e-8, 1.481e-7),
-        (4, 3, 5.92e-8, -1.201e-8),
-        (4, 4, -3.98e-9, 6.52e-9),
-    ];
-    let mut cnm: Vec<Vec<f64>> = (0..5).map(|n| vec![0.0; n + 1]).collect();
-    let mut snm = cnm.clone();
-    for &(n, m, c, s) in &cs {
-        cnm[n][m] = c;
-        snm[n][m] = s;
-    }
-    let tess = DsstTesseral::new(MU, RE, theta_dot, cnm, snm);
-    let geo = GeoPotential::from_unnormalized(MU, RE, 4, &cs).expect("degree 4 is supported");
+    let field = TesseralField::new();
     let v = verdicts(
         LEO,
         16,
-        theta_dot,
-        |l, t| tess.short_period_correction(&aux(LEO, l), t),
-        |t, r, _| {
-            // Body frame turned by θ about +Z: r_b = R(θ) r, a = R(θ)ᵀ a_b.
-            let (st, ct) = t.sin_cos();
-            let rb = [ct * r[0] + st * r[1], -st * r[0] + ct * r[1], r[2]];
-            let ab = perturbing(geo.acceleration_simd(&rb), rb);
-            [ct * ab[0] - st * ab[1], st * ab[0] + ct * ab[1], ab[2]]
-        },
+        THETA_DOT,
+        |l, t| field.dsst.short_period_correction(&aux(LEO, l), t),
+        |t, r, _| field.acceleration(t, r),
     );
     assert_verdicts("tesseral", &v, 5e-6);
+}
+
+/// Each element's distance between `got`, a contribution's mean rates at `(λ₀, θ₀)`, and the
+/// average of Gauss's rates along `(λ₀ + ratio·x, θ₀ + x)` over a turn of `x`, over the swing of
+/// those rates. The mean rates are that average by definition: with `ratio` the commensurability
+/// `n/θ̇`, the path holds every resonant argument `jλ − mθ` fixed and averages every other term
+/// away; a contribution that does not read θ takes `ratio = 1`.
+fn mean_rate_residuals(
+    got: [f64; 6],
+    mean: [f64; 5],
+    (l0, t0, ratio): (f64, f64, f64),
+    acc: impl Fn(f64, [f64; 3], [f64; 3]) -> [f64; 3],
+) -> [f64; 6] {
+    let [a, k, h, q, p] = mean;
+    let rates: Vec<[f64; 6]> = (0..N)
+        .map(|i| {
+            let x = TAU * i as f64 / N as f64;
+            gauss_rates([a, k, h, q, p, l0 + ratio * x], &|r, v| acc(t0 + x, r, v))
+        })
+        .collect();
+    core::array::from_fn(|i| {
+        let fbar = rates.iter().map(|r| r[i]).sum::<f64>() / N as f64;
+        let swing = rates
+            .iter()
+            .map(|r| (r[i] - fbar).abs())
+            .fold(0.0, f64::max);
+        (got[i] - fbar).abs() / swing
+    })
+}
+
+fn largest(residuals: [f64; 6]) -> f64 {
+    residuals.into_iter().fold(0.0, f64::max)
+}
+
+/// The zonal mean rates are the orbit average of Gauss's rates. J2 alone is summed in closed form
+/// in the eccentricity and meets the average at the step of the velocity partials, at e = 0.01 and
+/// at e = 0.32; J2..J6 under the default cut meet it to the e-powers the cut drops, in `k` and `h`,
+/// unmoved by the step. Measured 6.4e-12 and 1.1e-11 for J2, 3.4e-9 for J2..J6. (G2)
+#[test]
+fn zonal_mean_rates_are_the_orbit_average_of_gauss_rates() {
+    let j2 = 1.082_626_7e-3;
+    let zonal = DsstZonal::from_j(MU, RE, &[j2]);
+    let geo = GeoPotential::from_unnormalized(MU, RE, 2, &[(2, 0, -j2, 0.0)])
+        .expect("degree 2 is supported");
+    for mean in [LEO, [2.6e7, 0.15, -0.2, 0.3, -0.25]] {
+        let r = mean_rate_residuals(
+            zonal.mean_element_rates(&aux(mean, 0.7)),
+            mean,
+            (0.7, 0.0, 1.0),
+            |_, r, _| perturbing(geo.acceleration_simd(&r), r),
+        );
+        assert!(largest(r) < 5e-11, "J2 at {mean:?}: {r:?}");
+    }
+    let j = [j2, -2.532_4e-6, -1.619_6e-6, -2.272_9e-7, 5.406_8e-7];
+    let zonal = DsstZonal::from_j(MU, RE, &j);
+    let coeffs: Vec<(usize, usize, f64, f64)> = j
+        .iter()
+        .enumerate()
+        .map(|(i, &jn)| (i + 2, 0, -jn, 0.0))
+        .collect();
+    let geo = GeoPotential::from_unnormalized(MU, RE, 6, &coeffs).expect("degree 6 is supported");
+    let r = mean_rate_residuals(
+        zonal.mean_element_rates(&aux(LEO, 0.7)),
+        LEO,
+        (0.7, 0.0, 1.0),
+        |_, r, _| perturbing(geo.acceleration_simd(&r), r),
+    );
+    assert!(largest(r) < 1e-8, "J2..J6: {r:?}");
+}
+
+/// The Moon's mean rates, the Moon held fixed, are the orbit average of Gauss's rates to the cut in
+/// `a/R₃` and `e`: raising the cut from the default to `(8, 8)` takes them to the step of the
+/// velocity partials in LEO, and down an order in GEO, where `a/R₃` is 0.11 and `(a/R₃)⁸` is still
+/// 2e-8. Measured 1.7e-5 at the default and 1.1e-11 at `(8, 8)` in LEO, 4.6e-7 and 4.1e-8 in GEO;
+/// the step moves none of the four. (G2)
+#[test]
+fn third_body_mean_rates_are_the_orbit_average_of_gauss_rates() {
+    use spacelab_propagation::dsst::third_body::ThirdBodyTruncation;
+    let mu3 = 4.902_800_066e12;
+    let moon = DsstThirdBody::new(MU, mu3);
+    let s = [2.1e8, -3.0e8, 1.1e8];
+    let raised = ThirdBodyTruncation {
+        max_ar3_pow: 8,
+        max_ecc_pow: 8,
+    };
+    for (mean, default_bound, raised_bound) in [
+        (LEO, 5e-5, 5e-11),
+        ([4.2164e7, 0.02, -0.01, 0.05, -0.03], 2e-6, 2e-7),
+    ] {
+        let residuals =
+            |got| mean_rate_residuals(got, mean, (0.7, 0.0, 1.0), |_, r, _| tide(mu3, s, r));
+        let at_default = residuals(moon.mean_element_rates(&aux(mean, 0.7), s));
+        let at_raised = residuals(moon.mean_element_rates_with_trunc(&aux(mean, 0.7), s, raised));
+        assert!(
+            largest(at_default) < default_bound,
+            "default cut at {mean:?}: {at_default:?}"
+        );
+        assert!(
+            largest(at_raised) < raised_bound,
+            "(8, 8) at {mean:?}: {at_raised:?}"
+        );
+    }
+}
+
+/// The resonant tesseral mean rates are the average of Gauss's rates along the resonant path, at
+/// an exact 1:1 (geostationary) and 2:1 (GPS) commensurability: everything but the resonant
+/// `j = m·θ̇/n` terms averages away there. Measured 1.7e-8 and 7.9e-11; the 1:1 figure is the
+/// semi-major axis rate, and it is the central difference's step: it moves as `dv²`, 2.5e-7 at
+/// `dv = 0.2` m/s, and to 2.2e-9 at 0.01, where rounding takes over. (G2)
+#[test]
+fn resonant_tesseral_mean_rates_are_the_average_along_the_resonant_path() {
+    let field = TesseralField::new();
+    for (ratio, [k, h, q, p]) in [
+        (1.0_f64, [0.01, 0.005, 0.05, -0.03]),
+        (2.0, [0.003, 0.009, 0.38, 0.35]),
+    ] {
+        let a = (MU / (ratio * THETA_DOT).powi(2)).cbrt();
+        let mean = [a, k, h, q, p];
+        let (l0, t0) = (0.7, 1.9);
+        let r = mean_rate_residuals(
+            field.dsst.mean_element_rates(&aux(mean, l0), t0),
+            mean,
+            (l0, t0, ratio),
+            |t, r, _| field.acceleration(t, r),
+        );
+        assert!(largest(r) < 5e-8, "{ratio}:1 resonance: {r:?}");
+    }
 }
 
 const CD: f64 = 2.2;

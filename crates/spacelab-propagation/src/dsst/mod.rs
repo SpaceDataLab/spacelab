@@ -68,6 +68,22 @@ pub use tesseral::DsstTesseral;
 pub use third_body::DsstThirdBody;
 pub use zonal::DsstZonal;
 
+/// Prints one row of `docs/comparisons.md` for `tools/compare.py`: the `n` distances to Orekit
+/// 13.1.7 (`tools/orekit-oracle`) of one quantity, their largest and their root mean square. A NaN
+/// distance is the largest.
+#[cfg(test)]
+pub(crate) fn comparison_row(quantity: &str, unit: &str, distances: &[f64]) {
+    let max = distances
+        .iter()
+        .copied()
+        .fold(0.0, spacelab_testkit::nan_max);
+    let rms = libm::sqrt(distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64);
+    std::println!(
+        "comparison | Orekit | 13.1.7 | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,72 +203,71 @@ mod tests {
         assert_eq!(DsstZonal::from_j(MU, AE, &j[..1]).max_degree(), 2);
     }
 
-    /// The eccentricity-power truncation the port fixes at the initial state must equal Orekit's
-    /// own `maxEccPowMeanElements` (2 here) — else different terms are retained and the rates drift.
+    /// The distance to Orekit's `maxEccPowMeanElements` at the initial state (2 here): the series cut
+    /// is Orekit's heuristic, which no mathematics fixes; what it drops is measured against the
+    /// orbit average in `tests/dsst_short_period_identity.rs`.
     #[test]
-    fn truncation_order_matches_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn truncation_order_distance_to_orekit() {
         let aux = DsstAuxiliary::new(A0, EX0, EY0, HX0, HY0, LM0, MU);
-        assert_eq!(zonal().max_ecc_pow(&aux), MAX_ECC_POW);
-    }
-
-    /// The six fixed-state mean-element rates match Orekit's `getMeanElementRate` to < 1e-10
-    /// relative (`da` is identically zero, checked absolutely).
-    #[test]
-    fn fixed_state_rates_match_orekit() {
-        let aux = DsstAuxiliary::new(A0, EX0, EY0, HX0, HY0, LM0, MU);
-        let got = zonal().mean_element_rates(&aux);
-        let mut max_rel = 0.0_f64;
-        for i in 0..6 {
-            let err = if RATES[i] == 0.0 {
-                got[i].abs()
-            } else {
-                (got[i] - RATES[i]).abs() / RATES[i].abs()
-            };
-            max_rel = max_rel.max(err);
-            assert!(
-                err < 1e-10,
-                "rate[{i}] got {} want {} rel {err:.3e}",
-                got[i],
-                RATES[i]
-            );
-        }
-        std::println!("max fixed-state rate rel error: {max_rel:.3e}");
-    }
-
-    /// The MEAN semi-analytical propagation matches Orekit's `DSSTPropagator` at every sample:
-    /// `a` to < 1e-9 relative, the equinoctial e/i components to < 1e-9 absolute, and the mean
-    /// longitude to < 1 m along-track.
-    #[test]
-    fn mean_propagation_matches_orekit() {
-        let z = zonal();
-        let (mut max_a_rel, mut max_eh_abs, mut max_along) = (0.0_f64, 0.0_f64, 0.0_f64);
-        for (t, want) in SAMPLES {
-            let got = z.propagate_mean(INIT, t);
-            let a_rel = (got[0] - want[0]).abs() / want[0].abs();
-            max_a_rel = max_a_rel.max(a_rel);
-            for i in 1..=4 {
-                max_eh_abs = max_eh_abs.max((got[i] - want[i]).abs());
-            }
-            let along = want[0] * wrap(got[5] - want[5]).abs();
-            max_along = max_along.max(along);
-
-            assert!(a_rel < 1e-9, "t={t}: a rel {a_rel:.3e}");
-            for i in 1..=4 {
-                let e = (got[i] - want[i]).abs();
-                assert!(e < 1e-9, "t={t}: comp[{i}] abs {e:.3e}");
-            }
-            assert!(along < 1.0, "t={t}: along-track {along:.3e} m");
-        }
-        std::println!(
-            "max mean-prop errors: a_rel {max_a_rel:.3e}, e/i_abs {max_eh_abs:.3e}, along {max_along:.3e} m"
+        let ours = zonal().max_ecc_pow(&aux);
+        comparison_row(
+            "DSST zonal eccentricity cut of the mean rates",
+            "powers",
+            &[ours.abs_diff(MAX_ECC_POW) as f64],
         );
     }
 
-    /// The osculating output (mean + short-period) matches Orekit's DSSTPropagator run in
-    /// `PropagationType.OSCULATING` (`orekit_dsst_zonal_sp.csv`) to round-off. Orekit returns the raw
-    /// mean state at the initial epoch, so `t = 0` is excluded — our osculating consistently applies
-    /// the short-period there too. Cross-checked first-principles: the osculating tracks a numerical
-    /// J2–J5 propagation to ~230 m over 12 h (the DSST truncation residual).
+    /// The distance to Orekit's `getMeanElementRate` at a fixed state, relative, absolute where
+    /// Orekit's is zero (`da`). `tests/dsst_short_period_identity.rs` decides: the rates are the
+    /// orbit average of Gauss's rates.
+    #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn fixed_state_rates_distance_to_orekit() {
+        let aux = DsstAuxiliary::new(A0, EX0, EY0, HX0, HY0, LM0, MU);
+        let got = zonal().mean_element_rates(&aux);
+        let distances: std::vec::Vec<f64> = (0..6)
+            .map(|i| {
+                if RATES[i] == 0.0 {
+                    got[i].abs()
+                } else {
+                    (got[i] - RATES[i]).abs() / RATES[i].abs()
+                }
+            })
+            .collect();
+        comparison_row(
+            "DSST zonal mean element rates at a fixed state",
+            "relative",
+            &distances,
+        );
+    }
+
+    /// The distance to Orekit's MEAN `DSSTPropagator` at every sample. The propagator's own test
+    /// decides: the propagated elements solve the ODE of the summed mean rates (`propagator.rs`).
+    #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn mean_propagation_distance_to_orekit() {
+        let z = zonal();
+        let (mut a, mut ehpq, mut along) = (
+            std::vec::Vec::new(),
+            std::vec::Vec::new(),
+            std::vec::Vec::new(),
+        );
+        for (t, want) in SAMPLES {
+            let got = z.propagate_mean(INIT, t);
+            a.push((got[0] - want[0]).abs() / want[0].abs());
+            ehpq.extend((1..=4).map(|i| (got[i] - want[i]).abs()));
+            along.push(want[0] * wrap(got[5] - want[5]).abs());
+        }
+        comparison_row("DSST zonal mean propagation, a", "relative", &a);
+        comparison_row("DSST zonal mean propagation, k, h, q, p", "1", &ehpq);
+        comparison_row("DSST zonal mean propagation, along-track", "m", &along);
+    }
+
+    /// Orekit's DSSTPropagator run in `PropagationType.OSCULATING` (`orekit_dsst_zonal_sp.csv`), for
+    /// the distance below. Orekit returns the raw mean state at the initial epoch, so `t = 0` is
+    /// excluded — our osculating applies the short period there too. The short periods are decided
+    /// by their defining equation in `tests/dsst_short_period_identity.rs`.
     #[rustfmt::skip]
     const OSC_GOLDEN: [(f64, [f64; 6]); 4] = [
         (10800.0, [7.20080406051416800e+06, 2.62505970455380930e-03, 9.07352971461781100e-03, 8.53294337752836500e-01, 7.71500600121665100e-01, 1.25799728461532960e+01]),
@@ -262,21 +277,16 @@ mod tests {
     ];
 
     #[test]
-    fn osculating_short_period_matches_orekit() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn osculating_short_period_distance_to_orekit() {
         let z = zonal();
-        let mut max_da = 0.0f64;
-        let mut max_comp = 0.0f64;
+        let (mut da, mut rest) = (std::vec::Vec::new(), std::vec::Vec::new());
         for (t, g) in OSC_GOLDEN {
             let o = z.propagate_osculating(INIT, t);
-            let da = (o[0] - g[0]).abs();
-            assert!(da < 1e-2, "t={t}: da = {da:.3e} m");
-            max_da = max_da.max(da);
-            for i in 1..6 {
-                let d = (o[i] - g[i]).abs();
-                assert!(d < 1e-9, "t={t} comp {i}: {d:.3e}");
-                max_comp = max_comp.max(d);
-            }
+            da.push((o[0] - g[0]).abs());
+            rest.extend((1..6).map(|i| (o[i] - g[i]).abs()));
         }
-        std::println!("DSST osculating vs Orekit: max da {max_da:.2e} m, max comp {max_comp:.2e}");
+        comparison_row("DSST zonal osculating a", "m", &da);
+        comparison_row("DSST zonal osculating k, h, q, p, λ", "1", &rest);
     }
 }

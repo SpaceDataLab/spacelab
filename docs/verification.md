@@ -10629,6 +10629,49 @@ What a reader cannot regenerate, and why:
 Not done here: the archive's DOI and AGU's data and software checklist go with the paper (`plans/17` Ф30.L), and
 publishing them is the user's decision.
 
+### 10.54 The horizontal density gradient in an orbit fit (Ф23.R)
+
+`SdtmAtmosphere` puts the density into the state-transition matrix through `ρ₀·exp((|r₀| − |r|)/H)`. The STM
+therefore sees `∂ρ/∂z·r̂` and none of the gradient across the ground. NRLMSISE-00's, Harris–Priester's and the
+clean-room JB2008's wrappers do the same. The question is whether that gap moves an orbit fit.
+
+    cargo run -p spacelab --release --example sdtm_horizontal_gradient
+
+The experiment, fixed with its verdict rule in the example's header before the first run:
+
+- **Truth.** A 24 h arc under point mass, `J₂` (EGM2008) and co-rotating drag with NRLMSISE-00 density,
+  `C_d A/m` = 0.011 m²/kg. The orbit is circular at 87.4°, with its node at local noon on day 80. It crosses the
+  day–night contrast twice a revolution, the largest horizontal gradient the field has.
+- **Observations.** Positions every 30 s, 2 881 epochs, with 5 cm Gaussian noise (seeded).
+- **Model.** The same forces with SDTM-1's shipped field and an estimated drag scale: seven parameters. Both
+  fits start at the true state and compute the same density value; only the Jacobian differs. *Radial* is the
+  shipped wrapper. *Full* lifts along `∇ρ`, the 10 m central difference of the field through the same geodetic
+  closure.
+- **Instrument.** `∇ρ·n̂`, with `n̂` the ellipsoid normal, must equal the field's analytic `∂ρ/∂z`: geodetic
+  latitude and longitude do not change along the normal.
+- **Rule.** An estimate's interval is its formal sigma from the full fit, scaled by the post-fit variance
+  factor `cost/(m − 7)`. GO only if some parameter moves by more than its interval.
+
+Measured on 2026-11-12, F10.7 = F10.7a = 150. Two runs gave identical output.
+
+| scenario | `∇ρ·n̂` vs `∂ρ/∂z` | `\|∇ₕρ\|/\|∂ρ/∂z\|`, median (max) | Φ position rows after 24 h | post-fit RMS | largest move / interval | largest move |
+|---|---|---|---|---|---|---|
+| 250 km, ap 15 | 1.4e-8 | 1.6e-3 (2.1e-3) | 2.4e-5 | 35.725 m | 3.0e-3 (`vz`) | 2.7 mm |
+| 450 km, ap 15 | 5.7e-9 | 5.0e-3 (6.0e-3) | 5.8e-6 | 0.506 m | 5.6e-4 (`x`) | 3.4 µm |
+| 450 km, ap 100 | 4.0e-9 | 2.7e-3 (3.0e-3) | 5.2e-6 | 3.402 m | 9.5e-5 (`y`) | 8.6 µm |
+
+The columns: the instrument's worst relative error; the horizontal gradient against the vertical one along
+the arc (1 441 samples); the relative Frobenius gap of Φ's position rows at the true state; then the two fits.
+Both fits converge, to the same post-fit RMS and the same drag scale to six digits. The drag scale is
+1.1327, 0.9750 and 0.4790; the fitted model's error against the truth sets those numbers, not the gradient.
+
+**Verdict: NO-GO.** The largest move is 3.0e-3 of its interval, 330 times below the rule. The frozen wrapper
+stays, and the Maxima-derived full gradient the ticket names is not written. Against the noise-only formal
+sigma, which leaves out the model error, the largest move is 2.2 at 250 km (`vz`) and below 6.5e-3 at 450 km.
+That sigma is not the fit's interval at 250 km, where the residual is 710 times the noise. In every scenario the
+move is larger than the 24 h state gap the two step sequences make (at most 4.1e-6 m), so the move comes from
+the Jacobian, not from the integrator.
+
 ---
 
 ## 11 · Published errata as a second opinion

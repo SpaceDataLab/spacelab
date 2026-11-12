@@ -4069,7 +4069,7 @@ exclude_re = [
     "sinex\\.rs:171:39: replace % with / in parse_epoch",
 
     # Both operators belong to `row[4] * a.perigee_sun`, the last term of the long-period step-2
-    # argument on line 336 — the `+` at column 75 is the left-associative one whose *right* operand is that
+    # argument on line 347 — the `+` at column 75 is the left-associative one whose *right* operand is that
     # product, not the one before `a.node`. `STEP2_LONG_PERIOD` has no solar-perigee dependence:
     # column 4 is `0.0` in all five rows, which
     # `displacement::tests::the_long_period_table_has_no_solar_perigee_dependence` pins so this
@@ -4183,20 +4183,20 @@ exclude_re = [
     # `propagate_ias15_dense` appears once, not twice: IAS15 predicts its b-polynomial from the first
     # step, so `%` there does move the answer far enough for
     # `interpreter_tests::the_dense_ephemerides_interpolate_the_orbit_they_integrated` to catch it.
-    "lib\\.rs:988:19: replace / with \\* in propagate_ias15_dense",
-    "lib\\.rs:1015:18: replace / with % in propagate_dense",
-    "lib\\.rs:1015:18: replace / with \\* in propagate_dense",
-    "lib\\.rs:1109:18: replace / with % in propagate_geopotential_dense",
-    "lib\\.rs:1109:18: replace / with \\* in propagate_geopotential_dense",
-    "lib\\.rs:1218:18: replace / with % in propagate_geopotential_itrf_dense",
-    "lib\\.rs:1218:18: replace / with \\* in propagate_geopotential_itrf_dense",
-    "lib\\.rs:1281:18: replace / with % in propagate_j2_itrf_dense",
-    "lib\\.rs:1281:18: replace / with \\* in propagate_j2_itrf_dense",
-    "lib\\.rs:1536:18: replace / with % in propagate_relativistic_dense",
-    "lib\\.rs:2161:18: replace / with % in propagate_drag_dense",
-    "lib\\.rs:2161:18: replace / with \\* in propagate_drag_dense",
-    "lib\\.rs:2239:18: replace / with % in propagate_luni_solar_dense",
-    "lib\\.rs:2239:18: replace / with \\* in propagate_luni_solar_dense",
+    "lib\\.rs:992:19: replace / with \\* in propagate_ias15_dense",
+    "lib\\.rs:1020:18: replace / with % in propagate_dense",
+    "lib\\.rs:1020:18: replace / with \\* in propagate_dense",
+    "lib\\.rs:1114:18: replace / with % in propagate_geopotential_dense",
+    "lib\\.rs:1114:18: replace / with \\* in propagate_geopotential_dense",
+    "lib\\.rs:1223:18: replace / with % in propagate_geopotential_itrf_dense",
+    "lib\\.rs:1223:18: replace / with \\* in propagate_geopotential_itrf_dense",
+    "lib\\.rs:1286:18: replace / with % in propagate_j2_itrf_dense",
+    "lib\\.rs:1286:18: replace / with \\* in propagate_j2_itrf_dense",
+    "lib\\.rs:1543:18: replace / with % in propagate_relativistic_dense",
+    "lib\\.rs:2174:18: replace / with % in propagate_drag_dense",
+    "lib\\.rs:2174:18: replace / with \\* in propagate_drag_dense",
+    "lib\\.rs:2253:18: replace / with % in propagate_luni_solar_dense",
+    "lib\\.rs:2253:18: replace / with \\* in propagate_luni_solar_dense",
 
     # --- `spacelab-capi`. Both patterns carry the crate path, unlike the `lib\.rs:` forms above:
     # --- two crates now have a mutated `lib.rs`, and a bare line:col would match either.

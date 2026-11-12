@@ -119,8 +119,8 @@ mod tests {
     use spacelab_testkit::nan_max;
 
     const MU_EARTH: f64 = 3.986_004_418e14;
-    // Earth's sidereal rotation rate, rad/s (2π / 86 164.0905 s).
-    const OMEGA_EARTH: f64 = 7.292_115_146_5e-5;
+    // The Earth Rotation Angle's rate, rad/s (IERS Conventions (2010), Table 1.1).
+    const OMEGA_EARTH: f64 = 7.292_115_146_706_979e-5;
 
     fn example() -> FlowerConstellation {
         FlowerConstellation {
@@ -351,10 +351,10 @@ mod tests {
     #[test]
     fn the_semi_major_axis_matches_the_derived_value() {
         for (np, nd, want) in [
-            (3, 1, 2.027_041_982_595_185e7),
-            (14, 3, 1.509_868_273_243_782_3e7),
-            (2, 1, 2.656_176_415_793_235_1e7),
-            (13, 1, 7.626_313_928_017_769e6),
+            (3, 1, 2.027_041_982_556_827_7e7),
+            (14, 3, 1.509_868_273_215_211_6e7),
+            (2, 1, 2.656_176_415_742_973_3e7),
+            (13, 1, 7.626_313_927_873_459e6),
         ] {
             let fc = FlowerConstellation {
                 petals: np,

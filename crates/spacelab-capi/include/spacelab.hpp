@@ -1230,7 +1230,7 @@ try_propagate_j2_precision(const state &in, double mu, double j2, double earth_r
 
 /* L1, L2, L3, L4, L5 in synodic nondimensional coordinates. Earth-Moon is the default ratio. */
 [[nodiscard]] inline result<std::array<vec3, 5>>
-try_libration_points(double mass_ratio = 0.012150585) {
+try_libration_points(double mass_ratio = 0.012150584460351) {
     std::array<vec3, 5> out{};
     const ::sl_status s = ::sl_libration_points(mass_ratio, out.data());
     using five = std::array<vec3, 5>;
@@ -1239,7 +1239,7 @@ try_libration_points(double mass_ratio = 0.012150585) {
 
 [[nodiscard]] inline result<state> try_richardson_halo(std::uint32_t li, double amplitude_z,
                                                        bool northern = true,
-                                                       double mass_ratio = 0.012150585) {
+                                                       double mass_ratio = 0.012150584460351) {
     state out{};
     const ::sl_status s = ::sl_richardson_halo(li, amplitude_z, northern, mass_ratio, &out);
     return s == SL_OK ? result<state>(out) : detail::failure<state>(s);
@@ -1252,12 +1252,12 @@ try_libration_points(double mass_ratio = 0.012150585) {
     return detail::unwrap(try_geopotential_acceleration(degree, r_body_fixed));
 }
 
-[[nodiscard]] inline std::array<vec3, 5> libration_points(double mass_ratio = 0.012150585) {
+[[nodiscard]] inline std::array<vec3, 5> libration_points(double mass_ratio = 0.012150584460351) {
     return detail::unwrap(try_libration_points(mass_ratio));
 }
 
 [[nodiscard]] inline state richardson_halo(std::uint32_t li, double amplitude_z,
-                                           bool northern = true, double mass_ratio = 0.012150585) {
+                                           bool northern = true, double mass_ratio = 0.012150584460351) {
     return detail::unwrap(try_richardson_halo(li, amplitude_z, northern, mass_ratio));
 }
 

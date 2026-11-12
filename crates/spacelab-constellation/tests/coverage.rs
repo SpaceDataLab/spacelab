@@ -14,7 +14,7 @@ use spacelab_sensors::{ElevationMask, OrbitBound};
 
 const MU: f64 = 3.986_004_418e14;
 const RE: f64 = 6_378_137.0;
-const OMEGA_E: f64 = 7.292_115_146_5e-5; // Earth sidereal rate, rad/s
+const OMEGA_E: f64 = 7.292_115_146_706_979e-5; // Earth Rotation Angle rate, rad/s
 const DAY: f64 = 86_400.0;
 
 /// Earth-fixed (ECEF) satellite position at time `t`: propagate in inertial coordinates, then undo

@@ -1383,20 +1383,21 @@ pub unsafe extern "C" fn sl_soc_params_init(p: *mut SlSocParams) {
     };
 }
 
-/// Earth's gravitational parameter, the default the `_init` functions write. Mirrors
-/// `SL_MU_EARTH`.
+/// Earth's gravitational parameter, WGS 84's, the default the `_init` functions write. Mirrors
+/// `SL_MU_EARTH`; derivations/binding_defaults.mac reads both back.
 const MU_EARTH: f64 = 3.986_004_418e14;
 
-/// WGS-84 equatorial radius, the default the `_init` functions write. Mirrors `SL_RE_EARTH`.
+/// WGS-84 equatorial radius, the default the `_init` functions write. Mirrors `SL_RE_EARTH`;
+/// derivations/binding_defaults.mac reads both back.
 const RE_EARTH: f64 = 6_378_137.0;
 
-/// Heliocentric gravitational parameter, IAU 2015 / DE440, m³/s².
+/// Heliocentric gravitational parameter of DE405, m³/s² (derivations/binding_defaults.mac).
 const MU_SUN: f64 = 1.327_124_400_18e20;
 
-/// Selenocentric gravitational parameter, m³/s².
+/// Selenocentric gravitational parameter of DE430, m³/s² (derivations/binding_defaults.mac).
 const MU_MOON: f64 = 4.902_800_066e12;
 
-/// The defining astronomical unit, metres.
+/// The defining astronomical unit, metres (IAU 2012 Resolution B2).
 const ASTRONOMICAL_UNIT: f64 = 1.495_978_707e11;
 
 /// Write `values` through the two-call protocol documented in the header.
@@ -2071,14 +2072,16 @@ pub struct SlDsstParams {
 ///
 /// # Safety
 /// `p` is writable for one `sl_dsst_params`.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sl_dsst_params_init(p: *mut SlDsstParams) {
     if p.is_null() {
         return;
     }
     let mut zonal = [0.0_f64; SL_DSST_MAX_ZONAL];
-    // EIGEN-6S normalised zonals through J5, the same four the Python bridge defaults to, so the
-    // two bindings answer identically on a call that names no field.
+    // EGM96's unnormalised J2..J5, its GM and radius, and the Sun's and Moon's GM: the defaults
+    // the Python bridge writes, so the two bindings answer identically on a call that names no
+    // field.
     zonal[..4].copy_from_slice(&[
         1.082_626_68e-3,
         -2.532_656_49e-6,
@@ -2942,6 +2945,7 @@ pub struct SlDraimParams {
 /// The inclination of the Draim patent's worked example, 33°, in radians. Written to full double
 /// precision rather than as `33.0_f64.to_radians()` so that the C and Python defaults are the same
 /// bits: the two would agree to the last place anyway, but "would" is not a test.
+/// derivations/binding_defaults.mac reads both back.
 const DRAIM_INCLINATION_RAD: f64 = 0.575_958_653_158_128_8;
 
 /// Fill `p` with the defaults documented in the header.
@@ -2964,7 +2968,7 @@ pub unsafe extern "C" fn sl_flower_params_init(p: *mut SlFlowerParams) {
             arg_periapsis_rad: 0.0,
             raan_rad: 0.0,
             mean_anomaly_rad: 0.0,
-            frame_rate_rad_s: 7.292_115_146_5e-5,
+            frame_rate_rad_s: spacelab_frames::EARTH_ROTATION_RATE,
             mu: MU_EARTH,
         }
     };
@@ -13801,7 +13805,7 @@ mod tests {
     const J2_EARTH: f64 = 1.082_626_68e-3;
 
     /// Earth's third zonal harmonic, the value `SL_J3_EARTH` must equal.
-    const J3_EARTH: f64 = -2.532_653_65e-6;
+    const J3_EARTH: f64 = -2.532_656_49e-6;
 
     /// The literal a `#define NAME <literal>` gives, or a failure naming the macro that is missing.
     fn define(name: &str) -> &'static str {
@@ -16437,9 +16441,10 @@ mod tests {
         // SAFETY: the pointer is to a local of the right type.
         unsafe { sl_flower_params_init(&raw mut f) };
         assert_eq!(f.mu, MU_EARTH, "init must supply Earth's mu");
-        assert!(
-            (f.frame_rate_rad_s - 7.292_115_146_5e-5).abs() < 1e-18,
-            "init must supply Earth's sidereal rate, not a zero that makes the track inertial"
+        assert_eq!(
+            f.frame_rate_rad_s.to_bits(),
+            spacelab_frames::EARTH_ROTATION_RATE.to_bits(),
+            "init must supply Earth's rotation rate, not a zero that makes the track inertial"
         );
         f.petals = 3;
         f.days = 1;

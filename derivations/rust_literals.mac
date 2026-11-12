@@ -4,8 +4,11 @@
    helpers let the derivation read the committed table back and hold every entry against the value
    it derives. `rust_table(path, name)` returns the literals of `const NAME: ... = [ ... ];` in
    order, flattened, as the text the source shows: a literal, or a quotient `p / q` of two;
-   `rust_scalar(path, name)` the one entry of `const NAME: f64 = ...;`, and
-   `rust_literals_between(path, begin, finish)` the literals written inline between two lines.
+   `rust_scalar(path, name)` the one entry of `const NAME: f64 = ...;`, `rust_scalars` every copy of
+   it, `rust_literals_between(path, begin, finish)` the literals written inline between two lines,
+   `rust_signature_defaults(path, fn)` the defaults of a `#[pyo3(signature = ...)]`,
+   `assigned_literals(path, name)` every literal written as `name = <literal>`, and
+   `c_define(path, name)` the value of a C `#define NAME <literal>`.
    `rust_rational` reads one as the exact rational it denotes and `rust_number` as a bigfloat at the
    current fpprec. `same_rationals(entries, exact)` is true when each entry is exactly its rational;
    `same_doubles` when each parses to the double its exact value rounds to; `transcribed` when each
@@ -66,6 +69,88 @@ rust_scalar(path, name) := block([s : openr(path), line, head : concat("const ",
       out : strim(" ", substring(line, at + 2, ssearch(";", line)))),
   close(s),
   if out = false then error("rust_scalar: no const", name, "in", path),
+  out)$
+
+/* Every `const NAME: f64 = <entry>;` in the file, in order: a constant a module repeats inside
+   several functions. */
+rust_scalars(path, name) := block([s : openr(path), line, head : concat("const ", name, ": "), out : [],
+                                   at],
+  while (line : readline(s)) # false do
+    if ssearch(head, line) # false then (
+      at : ssearch("= ", line),
+      out : endcons(strim(" ", substring(line, at + 2, ssearch(";", line))), out)),
+  close(s),
+  if out = [] then error("rust_scalars: no const", name, "in", path),
+  out)$
+
+/* The significant digits a literal shows: separators, sign, exponent and padding zeros dropped. */
+rust_significant(t) := block([u : rust_digits(t), at],
+  at : ssearch("e", ssubst("e", "E", u)),
+  if at # false then u : substring(u, 1, at),
+  slength(strimr("0", striml("0", ssubst("", "-", ssubst("", ".", u))))))$
+
+/* `t` split at its commas outside brackets and string quotes. */
+rust_split_top(t) := block([out : [], depth : 0, start : 1, c, quoted : false],
+  for i : 1 thru slength(t) do (
+    c : charat(t, i),
+    if c = "\"" then quoted : not quoted
+    else if not quoted then (
+      if c = "(" or c = "[" then depth : depth + 1
+      else if c = ")" or c = "]" then depth : depth - 1
+      else if c = "," and depth = 0 then (out : endcons(substring(t, start, i), out), start : i + 1))),
+  endcons(substring(t, start), out))$
+
+/* The defaults of the `#[pyo3(signature = (...))]` right above `fn fname(`, as [name, value] pairs: a
+   value is the literal's text, or the list of them for a `vec![...]` default. A default that is no
+   literal (`None`, `true`, a name) comes back as its text. */
+rust_signature_defaults(path, fname) := block([s : openr(path), line, acc : false, sig : false,
+                                               found : false, head : concat("fn ", fname, "("), body,
+                                               at, name, value, pairs : []],
+  while found = false and (line : readline(s)) # false do (
+    if acc # false then (
+      acc : concat(acc, " ", line),
+      if ssearch(")]", line) # false then (sig : acc, acc : false))
+    else if ssearch("#[pyo3(signature", line) # false then (
+      if ssearch(")]", line) # false then sig : line else acc : line)
+    else if ssearch(head, line) # false then found : true
+    else if ssearch("fn ", striml(" ", line)) = 1 or ssearch("pub fn ", striml(" ", line)) = 1 then
+      sig : false),
+  close(s),
+  if found = false or sig = false then
+    error("rust_signature_defaults: no signature above fn", fname, "in", path),
+  body : substring(sig, ssearch("signature = (", sig) + 13, ssearch("))]", sig)),
+  for piece in rust_split_top(body) do (
+    at : ssearch("=", piece),
+    if at # false then (
+      name : strim(" ", substring(piece, 1, at)),
+      value : strim(" ", substring(piece, at + 1)),
+      if ssearch("[", value) # false then
+        value : map(lambda([e], strim(" ", e)),
+                    sublist(split(ssubst("", "]", ssubst("", "[", ssubst("", "vec!", value))), ",", false),
+                            lambda([e], strim(" ", e) # ""))),
+      pairs : endcons([name, value], pairs))),
+  pairs)$
+
+/* Every literal written as `name = <literal>` in the file, in order: a default argument of a C++
+   wrapper. */
+assigned_literals(path, name) := block([s : openr(path), line, head : concat(name, " = "), out : [],
+                                        at, rest],
+  while (line : readline(s)) # false do (
+    rest : line,
+    while (at : ssearch(head, rest)) # false do (
+      rest : substring(rest, at + slength(head)),
+      out : endcons(first(split(ssubst(" ", ")", ssubst(" ", ",", rest)), " ", false)), out))),
+  close(s),
+  if out = [] then error("assigned_literals: no", name, "in", path),
+  out)$
+
+/* The value of `#define NAME <literal>` in a C header, its parentheses dropped. */
+c_define(path, name) := block([s : openr(path), line, head : concat("#define ", name, " "), out : false],
+  while out = false and (line : readline(s)) # false do
+    if ssearch(head, line) = 1 then
+      out : strim(" ()", substring(line, slength(head) + 1)),
+  close(s),
+  if out = false then error("c_define: no", name, "in", path),
   out)$
 
 /* The numeric literals of the lines after the first one containing `begin`, up to and excluding the

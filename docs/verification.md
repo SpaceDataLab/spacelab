@@ -11461,19 +11461,32 @@ rates of `TDFRPH` back from `loading.rs`, as exact rationals. `STEP2DIU`'s 32 co
 `displacement.rs` were compared once, digit for digit and in order, with `DEHANTTIDEINEL.F` of the
 IERS Conventions (2010) software, and its mass ratios and Earth radius with that routine's lines
 270–272; the hydrostatic zenith-delay factor in `troposphere.rs` with `FCUL_ZD_HPA.F`, equation
-(26). All agree. **Today: 141 open literals in 89 items.** `--check` fails on an item with more
-open literals than its entry, on a new item and on an entry the sweep no longer matches, so the count can only fall: an entry leaves when its
-literals name the derivation that checks them or the document they are copied from.
+(26). All agree.
+
+The bindings' defaults came third. pyo3 shows a default in Python's signature only when it is a
+literal, so the bridge writes μ, Rₑ and the zonals out in each of the 31 signatures that take them,
+and the C API repeats them in its `_init` functions, its header and its C++ wrapper.
+`derivations/binding_defaults.mac` derives each from its source (WGS 84, EGM96's normalised zonals,
+the rate of the Earth Rotation Angle, the IERS Moon–Earth mass ratio, the DE405 and DE430 headers,
+the 0.95 normal quantile) and reads every copy back. It found three wrong values.
+`frozen_eccentricity`'s J3 and the header's `SL_J3_EARTH` were −2.53265365e-6, which no gravity
+model gives; EGM96's is −2.53265649e-6, 1.1e-6 relative away. The flower constellations' default
+frame rate was 7.2921151465e-5 rad/s, labelled 2π/86 164.0905 s, which is 7.2921158579e-5; it is now
+the rate of the Earth Rotation Angle, 7.292115146706979e-5, the value `SL_EARTH_ROTATION_RATE`
+already gave (the old default was 2.8e-11 relative below it). The golden values that rested on the
+two old numbers are recomputed: the frozen eccentricities of `derivations/j2_secular_rates.mac` at
+EGM96's J3, and the flower fixtures' semi-major axes of `derivations/flower_phasing.gp` at the new
+rate. The C++ wrappers' Earth–Moon mass ratio was 0.012150585, 4.4e-8 relative above the
+0.012150584460351 that Rust and Python use. Two labels were wrong as well: the C API's GM☉ said "IAU
+2015 / DE440" and is DE405's, and its DSST zonals said "EIGEN-6S normalised" and are EGM96's
+unnormalised J_n. **Today: 55 open literals in 52 items.** `--check` fails on an item with more open
+literals than its entry, on a new item and on an entry the sweep no longer matches, so the count can
+only fall: an entry leaves when its literals name the derivation that checks them or the document
+they are copied from.
 
 ```text
 crates/spacelab-astro/src/edl.rs::EARTH | 2
 crates/spacelab-astro/src/edl.rs::MARS | 1
-crates/spacelab-capi/src/lib.rs::ASTRONOMICAL_UNIT | 1
-crates/spacelab-capi/src/lib.rs::DRAIM_INCLINATION_RAD | 2
-crates/spacelab-capi/src/lib.rs::MU_EARTH | 1
-crates/spacelab-capi/src/lib.rs::MU_MOON | 1
-crates/spacelab-capi/src/lib.rs::RE_EARTH | 1
-crates/spacelab-capi/src/lib.rs::SL_DSST_MAX_ZONAL | 8
 crates/spacelab-coverage/src/detectors.rs::EARTH_EQUATORIAL_RADIUS | 1
 crates/spacelab-earth/src/wgs84.rs::EQUATORIAL_RADIUS | 1
 crates/spacelab-earth/src/wgs84.rs::FLATTENING | 1
@@ -11505,37 +11518,6 @@ crates/spacelab-propagation/src/sdtm/uncertainty.rs::NORMAL_95 | 1
 crates/spacelab-propagation/src/sdtm/uncertainty.rs::NORMAL_99 | 1
 crates/spacelab-propagation/src/space_weather.rs::hpo_at | 1
 crates/spacelab-propagation/src/spacecraft.rs::HIPPARCHUS_EPSILON | 1
-crates/spacelab-python/src/lib.rs::EARTH_ROTATION_RATE | 2
-crates/spacelab-python/src/lib.rs::MU_EARTH | 1
-crates/spacelab-python/src/lib.rs::MU_MOON | 2
-crates/spacelab-python/src/lib.rs::MU_SUN | 2
-crates/spacelab-python/src/lib.rs::RE_EARTH | 1
-crates/spacelab-python/src/lib.rs::ballistic_log_sensitivity | 2
-crates/spacelab-python/src/lib.rs::brouwer_lyddane_propagate | 6
-crates/spacelab-python/src/lib.rs::draim_geometry | 2
-crates/spacelab-python/src/lib.rs::dsst_propagate_mean_full | 6
-crates/spacelab-python/src/lib.rs::dsst_propagate_osculating_full | 6
-crates/spacelab-python/src/lib.rs::dsst_zonal_propagate_mean | 6
-crates/spacelab-python/src/lib.rs::dsst_zonal_propagate_osculating | 6
-crates/spacelab-python/src/lib.rs::frozen_eccentricity | 3
-crates/spacelab-python/src/lib.rs::libration_points | 1
-crates/spacelab-python/src/lib.rs::minimum_walker | 1
-crates/spacelab-python/src/lib.rs::orbital_lifetime | 2
-crates/spacelab-python/src/lib.rs::orbital_lifetime_ensemble | 2
-crates/spacelab-python/src/lib.rs::propagate_dense | 1
-crates/spacelab-python/src/lib.rs::propagate_drag_dense | 1
-crates/spacelab-python/src/lib.rs::propagate_drag_nrlmsise00_dense | 1
-crates/spacelab-python/src/lib.rs::propagate_drag_sdtm1_dense | 1
-crates/spacelab-python/src/lib.rs::propagate_drag_sdtm1_solar_wind_dense | 1
-crates/spacelab-python/src/lib.rs::propagate_ias15_dense | 1
-crates/spacelab-python/src/lib.rs::repeat_ground_track_sma | 4
-crates/spacelab-python/src/lib.rs::richardson_halo | 1
-crates/spacelab-python/src/lib.rs::sdtm1_density_interval | 1
-crates/spacelab-python/src/lib.rs::sdtm1_solar_wind_density_interval | 1
-crates/spacelab-python/src/lib.rs::street_of_coverage | 2
-crates/spacelab-python/src/lib.rs::street_of_coverage_geometry | 2
-crates/spacelab-python/src/lib.rs::sun_synchronous_inclination | 3
-crates/spacelab-python/src/lib.rs::walker_constellation | 1
 crates/spacelab-sensors/src/comms.rs::C_LIGHT | 1
 crates/spacelab-sensors/src/comms.rs::EARTH_RADIUS | 1
 crates/spacelab-sensors/src/cone.rs::INVERSE_ONE_MINUS_E2 | 1

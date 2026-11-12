@@ -89,8 +89,9 @@ e_sol : trigsimp(ratsimp(subst(rhs(kepler3), mu, e_sol)))$
 coded_e : -(J3/(2*J2))*(Re/a)*sin(inc)$
 check("e_frozen", e_sol, coded_e)$
 
-/* Golden table for the Rust test. Columns: a, i(deg), e_frozen. */
-J3_v : -2.53265365b-6$
+/* Golden table for the Rust test. Columns: a, i(deg), e_frozen. J3 is EGM96's, -sqrt(7) C30 with
+   C30 = 0.957254173792e-6 (derivations/binding_defaults.mac), at the nine digits the bindings show. */
+J3_v : -2.53265649b-6$
 efrozen(row) := block([av, iv],
   av : bfloat(row[1]), iv : bfloat(row[2])*%pi/180,
   printf(true, "FROZEN ~h ~h ~h~%", av, row[2],

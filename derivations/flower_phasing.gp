@@ -3,7 +3,9 @@
 \\ Run: timeout 120 gp -q -f derivations/flower_phasing.gp </dev/null
 default(realprecision, 60);
 mu = 3986004418 * 10^5;
-w = 72921151465 / 10^15;
+\\ The fixtures' frame rate as flower.rs writes it: the Earth Rotation Angle's rate, IERS
+\\ Conventions (2010) Table 1.1, to a double's 16 digits.
+w = 7292115146706979 / 10^20;
 {
   foreach([[3, 1], [14, 3], [2, 1], [13, 1]], c,
     my(n = c[1]*w/c[2], a = (mu/n^2)^(1/3));

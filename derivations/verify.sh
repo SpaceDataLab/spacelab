@@ -577,6 +577,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima ocean_loading.mac" "expected 11 checks to hold, found $holds"
     fi
 
+    out=$(macf binding_defaults.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 5 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima binding_defaults.mac: every default the Python and C bindings write is its source's value to the digits it shows"
+    else
+        bad "maxima binding_defaults.mac" "expected 5 checks to hold, found $holds"
+    fi
+
     out=$(macf hansen_zonal.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then

@@ -51,7 +51,7 @@ NUMBER = re.compile(
     r"(?<![\w.])(\d[\d_]*\.[\d_]*(?:[eE][+-]?\d+)?|\d[\d_]*[eE][+-]?\d+)(?:_?f(?:32|64))?(?![\w.])"
 )
 ITEM = re.compile(
-    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+fn|const|static|(?:async\s+|unsafe\s+)*fn)\s+"
+    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+fn|const|static|(?:async\s+|unsafe\s+|extern\s+\"[^\"]*\"\s+)*fn)\s+"
     r"([A-Za-z_]\w*)"
 )
 CFG_TEST = re.compile(r"^\s*#\[cfg\((?:all\()?test\b")

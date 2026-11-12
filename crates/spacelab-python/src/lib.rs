@@ -216,6 +216,7 @@ use spacelab_vision::detect::{
     BBox, decode_box as dv_decode_box, generate_anchors as dv_generate_anchors, nms as dv_nms,
 };
 
+// WGS 84's GM and equatorial radius: derivations/binding_defaults.mac reads both back.
 const MU_EARTH: f64 = 3.986_004_418e14;
 const RE_EARTH: f64 = 6_378_137.0;
 
@@ -274,6 +275,7 @@ fn lambert(
 /// Richardson's third-order analytic halo seed: the perpendicular-crossing synodic state
 /// `[x, 0, z, 0, vy, 0]` for collinear point `li` (0 = L1, 1 = L2), γ-normalized out-of-plane amplitude
 /// `az`, class `northern`, and mass ratio `mu` (default Earth–Moon). Raises `ValueError` if invalid.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (li, az, northern=true, mu=0.012_150_584_460_351))]
 fn richardson_halo(li: usize, az: f64, northern: bool, mu: f64) -> PyResult<[f64; 6]> {
@@ -293,6 +295,7 @@ fn geopotential_acceleration(degree: usize, r: [f64; 3]) -> PyResult<[f64; 3]> {
 
 /// The five libration points of the circular restricted three-body problem for mass ratio `mu`, each
 /// as `[x, y, z]` in synodic nondimensional coordinates: `[L1, L2, L3, L4, L5]`.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (mu=0.012_150_584_460_351))]
 fn libration_points(mu: f64) -> [[f64; 3]; 5] {
@@ -972,6 +975,7 @@ impl Ias15Ephemeris {
 /// its compensated summation — reaching the f64 round-off floor (nanometres over a day), an order of
 /// magnitude below a DOP853's micrometres. Position-only forces, so no drag; set `j2 = 0` for pure
 /// two-body. Returns an [`Ias15Ephemeris`]. Raises `ValueError` on a failed integration.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (r0, v0, t1, mu, j2 = 0.0, re = 6_378_137.0))]
 fn propagate_ias15_dense(
@@ -997,6 +1001,7 @@ fn propagate_ias15_dense(
 /// Propagate `(r0, v0)` (m, m/s) for `t1` seconds under point-mass gravity `mu` plus `J₂` oblateness
 /// (`re` reference radius), adapting the DOP853 step to `tol`, and return a queryable
 /// [`DenseEphemeris`]. Set `j2 = 0` for pure two-body. Raises `ValueError` on a failed integration.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (r0, v0, t1, mu, j2 = 0.0, re = 6_378_137.0, tol = 1e-10))]
 #[allow(clippy::too_many_arguments)] // GIL token, state, span, and the field constants
@@ -1385,6 +1390,7 @@ fn propagate_j2_itrf_eop_dense(
 /// geopotential plus the Sun/Moon-raised tidal deformation of the low-degree field (a ~cm–dm effect on
 /// a LEO orbit over a day). Sun and Moon come from the built-in analytic ephemerides at
 /// `epoch_j2000_seconds`; `mu_sun`/`mu_moon` set the tidal amplitudes. Epochs are ns since J2000.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     r0, v0, t1, degree, epoch_tt_ns, epoch_ut1_ns, epoch_j2000_seconds,
@@ -1429,8 +1435,8 @@ fn propagate_geopotential_tide_dense(
     let rotate = move |t: f64| cio.rotation_rows(t);
     let rotate_tide = move |t: f64| cio_tide.rotation_rows(t);
     let tide = SolidEarthTide {
-        mu_earth: 3.986_004_415e14, // MODEL_GM of the embedded geopotential
-        re_earth: 6_378_136.3,      // MODEL_RE
+        mu_earth: spacelab_propagation::geopotential_coeffs::MODEL_GM,
+        re_earth: spacelab_propagation::geopotential_coeffs::MODEL_RE,
         mu_sun,
         mu_moon,
         sun: AnalyticSun {
@@ -1489,6 +1495,7 @@ fn propagate_geopotential_tide_dense(
 /// Lense–Thirring frame dragging, and de Sitter geodesic precession. The Sun (for de Sitter) comes
 /// from the built-in analytic ephemeris at `epoch_j2000_seconds`, its velocity by central difference.
 /// Compare the result against a two-body ([`kepler_propagate`]) run to isolate the relativistic drift.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     r0, v0, t1, epoch_j2000_seconds,
@@ -1659,6 +1666,7 @@ fn sdtm1_storm_response(history: Vec<f64>, cadence_s: f64) -> f64 {
 /// than a formal propagation of parameter covariance. `z` is the standard-normal multiplier: 1.645 for
 /// 90 %, 1.960 for 95 %, 2.576 for 99 %. Which regime applies is decided by `f107a` and `storm`, so
 /// they must be the same values `density` was evaluated with.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (density, f107 = 150.0, f107a = 150.0, storm = 0.0, z = 1.644_853_626_951_472_7))]
 fn sdtm1_density_interval(density: f64, f107: f64, f107a: f64, storm: f64, z: f64) -> (f64, f64) {
@@ -1796,6 +1804,7 @@ fn sdtm1_solar_wind_hours(
 /// `density`, as `sdtm1_density_interval` is for the 3-hourly field: its own regime table, measured
 /// on its own held-out residual. `f107a` and `storm` must be the values `density` was evaluated
 /// with.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (density, f107 = 150.0, f107a = 150.0, storm = 0.0, z = 1.644_853_626_951_472_7))]
 fn sdtm1_solar_wind_density_interval(
@@ -1833,6 +1842,7 @@ fn envelope_km(envelope: &Envelope) -> ((f64, f64), (f64, f64)) {
 /// `ballistic_coefficient` is `C_d A / m` (m²/kg). `doy` (day of year) and `sec_of_day` (UT) set the
 /// NRLMSISE epoch, advanced with the propagation. Epochs are ns since J2000. Returns a
 /// [`DenseEphemeris`]; compare a drag run against a two-body run to see the decay.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     r0, v0, t1, epoch_tt_ns, epoch_ut1_ns, doy, sec_of_day, ballistic_coefficient,
@@ -1917,6 +1927,7 @@ fn propagate_drag_nrlmsise00_dense(
 /// empty history, a value that is not finite or a cadence that is not finite and positive raises
 /// `ValueError`. An arc that leaves the envelope is integrated, not refused: there the model
 /// extrapolates. Epochs are ns since J2000. Returns a [`DenseEphemeris`].
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     r0, v0, t1, epoch_tt_ns, epoch_ut1_ns, doy, sec_of_day, ballistic_coefficient, ap_history,
@@ -1971,6 +1982,7 @@ fn propagate_drag_sdtm1_dense(
 /// four hourly series, as `sdtm1_solar_wind_storm_response` runs it, and held over the arc with
 /// `f107` and `f107a`. An empty history, or a value `sdtm1_solar_wind_storm_response` refuses,
 /// raises `ValueError`. Epochs are ns since J2000. Returns a [`DenseEphemeris`].
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     r0, v0, t1, epoch_tt_ns, epoch_ut1_ns, doy, sec_of_day, ballistic_coefficient, ap60,
@@ -2117,6 +2129,7 @@ fn sdtm1_drag_storm(history: &[f64], cadence_s: f64) -> PyResult<f64> {
 /// `ballistic_coefficient` is `C_d A / m` (m²/kg), a per-satellite property with no safe universal
 /// default, so it is required. The atmosphere defaults to Vallado's 400 km reference
 /// (`ρ₀ = 3.725×10⁻¹² kg/m³` at 400 km, scale height 58.515 km). Returns a [`DenseEphemeris`].
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     r0, v0, t1, degree, ballistic_coefficient,
@@ -2200,7 +2213,8 @@ fn propagate_luni_solar_dense(
     theta0: f64,
     tol: f64,
 ) -> PyResult<DenseEphemeris> {
-    // Heliocentric and lunar gravitational parameters (IAU 2015 / DE440) and the defining AU, SI.
+    // GM of the Sun (DE405) and the Moon (DE430), and the au (IAU 2012 Resolution B2), SI:
+    // derivations/binding_defaults.mac reads each back against its source.
     const MU_SUN: f64 = 1.327_124_400_18e20;
     const MU_MOON: f64 = 4.902_800_066e12;
     const ASTRONOMICAL_UNIT: f64 = 1.495_978_707e11;
@@ -2231,7 +2245,7 @@ fn propagate_luni_solar_dense(
         SolarRadiationPressure {
             reference_acceleration: srp_reference_acceleration,
             astronomical_unit: ASTRONOMICAL_UNIT,
-            earth_radius: 6_378_137.0,
+            earth_radius: RE_EARTH,
             sun,
         },
     )));
@@ -2290,6 +2304,7 @@ impl De440 {
 /// `m2` (rad/s², like a TLE `B*`) is the empirical along-track secular term: with `m2 = 0` the theory
 /// has a known in-track drift (~tens of km/day for a LEO, the orbit *plane* stays exact), fitted away
 /// in orbit determination. Fast: a mean-element drift plus closed-form periodic terms, no integration.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     r0, v0, times, mu = 3.986_004_415e14, re = 6_378_136.3,
@@ -2329,6 +2344,7 @@ fn brouwer_lyddane_propagate(
 /// `p=tan(i/2)·sin Ω`, `λ=M+ϖ`), returns the mean equinoctial state at each time in `times` (seconds).
 /// `j` is `[J2, J3, …]`. The orbit-averaged rates are integrated with large steps — cheap over long
 /// arcs, capturing the secular drift (node regression, apsidal precession) without short-period noise.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     initial, times, mu = 3.986_004_415e14, re = 6_378_136.3,
@@ -2354,6 +2370,7 @@ fn dsst_zonal_propagate_mean(
 /// DSST **osculating** propagation under the zonal geopotential J2–Jn: the mean-element drift plus the
 /// analytic short-period corrections. Given an initial *mean* equinoctial state `[a, k, h, q, p, λ]`,
 /// returns the *osculating* equinoctial state at each time — the full DSST OSCULATING output.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     initial, times, mu = 3.986_004_415e14, re = 6_378_136.3,
@@ -2433,6 +2450,7 @@ fn ocean_pole_tide(xp: f64, yp: f64, t: f64, mean_pole: &str) -> PyResult<[f64; 
 /// mean rate is identically zero away from a tesseral resonance, i.e. for every orbit except
 /// repeat-ground-track ones (GEO, GPS), so this is the full conservative mean rate for the common
 /// LEO/MEO/HEO case. Each summed contribution is individually bit-exact against Orekit.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     initial, times, epoch_j2000_seconds,
@@ -2452,9 +2470,9 @@ fn dsst_propagate_mean_full(
     cr: f64,
     area_over_mass: f64,
 ) -> Vec<[f64; 6]> {
+    // GM of the Sun (DE405) and the Moon (DE430): derivations/binding_defaults.mac.
     const MU_SUN: f64 = 1.327_124_400_18e20;
     const MU_MOON: f64 = 4.902_800_066e12;
-    const EARTH_ROTATION_RATE: f64 = 7.292_115_146_706_979e-5;
     let zonal = DsstZonal::from_j(mu, re, &j);
     let sun_tb = DsstThirdBody::new(mu, MU_SUN);
     let moon_tb = DsstThirdBody::new(mu, MU_MOON);
@@ -2491,6 +2509,7 @@ fn dsst_propagate_mean_full(
 /// returned equinoctial states are osculating rather than mean. Given an initial *mean* equinoctial
 /// state `[a, k, h, q, p, λ]`, returns the osculating state at each requested time. The tesseral
 /// short-period is zero here (non-resonant, zero field); drag is not part of this propagator.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     initial, times, epoch_j2000_seconds,
@@ -2510,9 +2529,9 @@ fn dsst_propagate_osculating_full(
     cr: f64,
     area_over_mass: f64,
 ) -> Vec<[f64; 6]> {
+    // GM of the Sun (DE405) and the Moon (DE430): derivations/binding_defaults.mac.
     const MU_SUN: f64 = 1.327_124_400_18e20;
     const MU_MOON: f64 = 4.902_800_066e12;
-    const EARTH_ROTATION_RATE: f64 = 7.292_115_146_706_979e-5;
     let zonal = DsstZonal::from_j(mu, re, &j);
     let sun_tb = DsstThirdBody::new(mu, MU_SUN);
     let moon_tb = DsstThirdBody::new(mu, MU_MOON);
@@ -2551,6 +2570,7 @@ fn dsst_propagate_osculating_full(
 /// Walker constellation `i: T/P/F` — returns each satellite's inertial state `(r, v)` (SI) at the
 /// epoch, plane-major. `pattern` is `"delta"` (planes over 2π of RAAN) or `"star"` (over π); angles
 /// are radians, `semi_major_axis` metres. Feed the states to any propagator or plot them directly.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (pattern, inclination, planes, per_plane, phasing, semi_major_axis, mu = 3.986_004_418e14))]
 fn walker_constellation(
@@ -2589,6 +2609,7 @@ fn walker_constellation(
 /// states `(r, v)` (SI), plane-major; the list is **empty** when the geometry cannot tile a street
 /// (footprint ≤ 0, an inclination too far from polar, or a `per_plane` below the `⌈π/θ⌉` floor).
 /// `per_plane = None` picks the minimum. Use [`street_of_coverage_geometry`] for the plane count.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (inclination, altitude, min_elevation, earth_radius = 6_378_137.0, mu = 3.986_004_418e14, per_plane = None))]
 fn street_of_coverage(
@@ -2619,6 +2640,7 @@ fn street_of_coverage(
 /// `(planes, per_plane, footprint_half_angle, street_half_width, raan_step_co, raan_step_counter,
 /// raan_step, raan_span, inter_plane_phase)` — counts as integers, angles in radians. Returns `None`
 /// when the geometry is infeasible.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (inclination, altitude, min_elevation, earth_radius = 6_378_137.0, mu = 3.986_004_418e14, per_plane = None))]
 #[allow(clippy::type_complexity)] // one flat geometry record, documented field-by-field above
@@ -2657,10 +2679,11 @@ fn street_of_coverage_geometry(
 /// `(eccentricity, inclination, arg_periapsis)`, uniformly time-phased along the common ground track
 /// (Mortari et al. 2004). `frame_rate` is the rotating frame's rate (rad/s, default Earth sidereal);
 /// angles radians. Returns the inertial states `(r, v)` (SI), or empty if any count is zero.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     petals, days, satellites, eccentricity, inclination, arg_periapsis,
-    raan = 0.0, mean_anomaly = 0.0, frame_rate = 7.292_115_146_5e-5, mu = 3.986_004_418e14,
+    raan = 0.0, mean_anomaly = 0.0, frame_rate = 7.292_115_146_706_979e-5, mu = 3.986_004_418e14,
 ))]
 #[allow(clippy::too_many_arguments)] // Np, Nd, Ns, the shared orbit shape, the reference Ω/M, frame, mu
 fn flower_constellation(
@@ -2701,6 +2724,7 @@ fn flower_constellation(
 /// the inertial states `(r, v)` (SI). A circular lattice with `config = F` reproduces a Walker
 /// `i: T/P/F`; the literature's `Nc′` (Avendaño et al. 2013) is `config = −Nc′ mod orbits`
 /// (`docs/adr/0002-lattice-configuration-number.md`). Angles radians.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     orbits, sats_per_orbit, config, semi_major_axis, eccentricity, inclination,
@@ -2740,6 +2764,7 @@ fn lattice_flower(
 /// Draim's four-satellite continuous global coverage constellation (Draim 1987). `period` seconds,
 /// angles radians; the defaults are the patent's worked example (48 h, `e = 0.28`, `i = 33°`).
 /// Returns the four satellites' inertial states `(r, v)` (SI).
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (period = 172_800.0, eccentricity = 0.28, inclination = 0.575_958_653_158_128_8, raan0 = 0.0, mu = 3.986_004_418e14))]
 fn draim_constellation(
@@ -2786,6 +2811,7 @@ fn alpha_characteristic(
 /// The fewest-satellite Walker Delta system whose α-characteristic is within `max_footprint`
 /// (radians) — the cheapest constellation that continuously `fold`-fold covers the sphere with that
 /// sensor footprint, at the common orbit. Returns `(planes, per_plane, phasing, total)`, or `None`.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     max_footprint, inclination, semi_major_axis, mu = 3.986_004_418e14,
@@ -2817,6 +2843,7 @@ fn minimum_walker(
 
 /// The Draim orbit geometry for the given `period` (s), eccentricity and inclination: returns
 /// `(semi_major_axis, perigee_radius, apogee_radius)` in metres.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (period = 172_800.0, eccentricity = 0.28, inclination = 0.575_958_653_158_128_8, mu = 3.986_004_418e14))]
 fn draim_geometry(period: f64, eccentricity: f64, inclination: f64, mu: f64) -> (f64, f64, f64) {
@@ -2903,6 +2930,7 @@ fn saastamoinen_zenith_delay(pressure: f64, lat: f64, height: f64) -> f64 {
 /// The Sun-synchronous inclination (radians) for a circular-ish orbit of `semi_major_axis` (m) and
 /// `eccentricity`. `None` when the orbit is too high for `J2` to precess the node a full turn a year.
 /// Defaults are Earth (WGS-84 μ/Rₑ/J₂) and the tropical-year node rate.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (semi_major_axis, eccentricity=0.0, mu=3.986_004_418e14, re=6_378_137.0, j2=1.082_626_68e-3))]
 fn sun_synchronous_inclination(
@@ -2925,6 +2953,7 @@ fn sun_synchronous_inclination(
 
 /// The semi-major axis (m) whose ground track repeats after `revs` revolutions in `days` nodal days at
 /// the given `inclination` (rad). Defaults are Earth (WGS-84 μ/Rₑ/J₂ and sidereal rotation rate).
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (revs, days, inclination, eccentricity=0.0, mu=3.986_004_418e14, re=6_378_137.0, j2=1.082_626_68e-3, earth_rotation_rate=7.292_115_146_7e-5))]
 #[allow(clippy::too_many_arguments)]
@@ -2952,8 +2981,9 @@ fn repeat_ground_track_sma(
 
 /// The frozen-orbit eccentricity (`ω = 90°`) balancing the `J2`/`J3` perigee drift, for
 /// `semi_major_axis` (m) and `inclination` (rad). Defaults are Earth (WGS-84 Rₑ, EGM `J2`/`J3`).
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
-#[pyo3(signature = (semi_major_axis, inclination, re=6_378_137.0, j2=1.082_626_68e-3, j3=-2.532_653_65e-6))]
+#[pyo3(signature = (semi_major_axis, inclination, re=6_378_137.0, j2=1.082_626_68e-3, j3=-2.532_656_49e-6))]
 fn frozen_eccentricity(semi_major_axis: f64, inclination: f64, re: f64, j2: f64, j3: f64) -> f64 {
     design_frozen_eccentricity(
         semi_major_axis,
@@ -4819,6 +4849,7 @@ fn lifetime_outcome(outcome: Lifetime) -> (&'static str, f64, f64) {
 /// finite, for a pair of them needing too many chunks, and for an initial state that is not
 /// elliptic. A propagation that breaks down is **not** an error — it is `"unresolved"`, because it
 /// is an outcome of the physics as often as of the arguments.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     initial, zonals, cd, area_over_mass, reference_density, reference_radius, scale_height,
@@ -4880,6 +4911,7 @@ fn orbital_lifetime(
 ///
 /// A non-zero `unresolved` is a finding rather than a statistic: those members stopped being
 /// propagable before reaching the threshold, and every quantile reported is conditioned on that.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     initial, zonals, cd, area_over_mass, reference_density, reference_radius, scale_height,
@@ -4947,6 +4979,7 @@ fn orbital_lifetime_ensemble(
 /// buys, in the units the requirement is written in. `fraction` is the relative step taken either
 /// side of `area_over_mass`. Raises `ValueError` if either side fails to re-enter within the
 /// horizon, because a sensitivity between two epochs one of which does not exist is not a number.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     initial, zonals, cd, area_over_mass, reference_density, reference_radius, scale_height,
@@ -8627,7 +8660,7 @@ mod tests {
     fn the_flower_binding_phases_one_repeating_orbit() {
         let (petals, days, satellites) = (5u32, 2u32, 8u32);
         let (ecc, inc, argp, mu) = (0.2, 0.5, 1.1, 3.986_004_418e14);
-        let frame_rate = 7.292_115_146_5e-5;
+        let frame_rate = EARTH_ROTATION_RATE;
         let sats = flower_constellation(
             petals, days, satellites, ecc, inc, argp, 0.0, 0.0, frame_rate, mu,
         );
@@ -8893,10 +8926,10 @@ mod tests {
         let faster = repeat_ground_track_sma(revs + 16, days, i8_deg, 0.0, mu, re, j2, rate);
         assert!(faster < a_repeat, "{faster} m is not below {a_repeat} m");
 
-        let e = frozen_eccentricity(a, 98.0_f64.to_radians(), re, j2, -2.532_653_65e-6);
+        let e = frozen_eccentricity(a, 98.0_f64.to_radians(), re, j2, -2.532_656_49e-6);
         assert!((0.8e-3..1.3e-3).contains(&e), "{e} is not a frozen orbit");
         // e_frozen ∝ −J3·sin i / (2·J2·a/Re): doubling |J3| doubles the eccentricity.
-        let doubled = frozen_eccentricity(a, 98.0_f64.to_radians(), re, j2, -5.065_307_30e-6);
+        let doubled = frozen_eccentricity(a, 98.0_f64.to_radians(), re, j2, -5.065_312_98e-6);
         assert!((doubled / e - 2.0).abs() < 1e-9, "{doubled} against {e}");
 
         let crit = critical_inclination();
@@ -11486,7 +11519,7 @@ def one_row(x):
         let initial = [7_200e3, 1.0e-3, 5.0e-4, 0.2, 0.1, 0.3];
         let times = vec![0.0, 5_400.0, 10_800.0];
         let (mu, re) = (3.986_004_415e14, 6_378_136.3);
-        let j = std::vec![0.0, 0.0, 1.082_626_68e-3, -2.532_653_65e-6];
+        let j = std::vec![0.0, 0.0, 1.082_626_68e-3, -2.532_656_49e-6];
 
         Python::attach(|py| {
             let mean = dsst_zonal_propagate_mean(py, initial, times.clone(), mu, re, j.clone());

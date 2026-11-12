@@ -1,0 +1,162 @@
+/* The default arguments of the Python and C bindings, held against the documents they come from
+   (plans/17 Ф17.D).
+
+   pyo3 shows a default in Python's signature only when it is a literal: a named constant comes out
+   as `...`. So the bridge writes μ, Rₑ and the zonals out in every signature that takes them, and the
+   C API repeats them in its `_init` functions and its header. A wrong digit in one copy is invisible
+   to every test that passes its own value. This script derives each default from its source and
+   reads every copy back from the source text: each must be its source value rounded to the digits it
+   shows (`transcribed`).
+
+   timeout 300 maxima --very-quiet -Q -b binding_defaults.mac                                       */
+
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+fpprec : 40$
+
+/* ---- (1) the sources ----------------------------------------------------------------------------
+   WGS 84: GM = 3.986004418e14 m³/s² (IERS Conventions (2010), Table 1.1) and a = 6378137 m
+   (NIMA TR8350.2, Table 3.1).
+   EGM96 (Lemoine et al. 1998): GM = 3.986004415e14 m³/s², a = 6378136.3 m, and the fully normalised
+   zonals C̄20..C̄50 of its coefficient file. The unnormalised J_n = −√(2n+1) C̄n0.
+   The Earth's rotation: the Earth Rotation Angle advances 1.00273781191135448 revolutions per UT1
+   day (IERS Conventions (2010), Table 1.1).
+   The Earth–Moon mass parameter of the restricted three-body problem, r/(1+r), with the Moon–Earth
+   mass ratio r = 0.0123000371 (IERS Conventions (2010), Table 1.1); derivations/cr3bp.gp rounds the
+   same ratio for spacelab-astro.
+   GM of the Sun from DE405 (Standish 1998) and of the Moon from DE430 (Folkner et al. 2014), from the
+   headers' GMS, GMB and EMRAT in au³/day² and their au in km: GM☉ = GMS·au³/day²,
+   GM☾ = GMB/(1 + EMRAT)·au³/day². These are the two values the propagation tests and
+   derivations/solid_tide.py use; DE440's own are a later release.
+   The astronomical unit, 149 597 870 700 m (IAU 2012 Resolution B2).
+   The one-sided 95 % normal quantile z = Φ⁻¹(0.95), the root of erf(z/√2) = 0.9.
+   The inclination of the Draim patent's worked example, 33°. */
+
+gm_wgs84 : 3986004418 * 10^5$
+a_wgs84 : 6378137$
+gm_egm96 : 3986004415 * 10^5$
+a_egm96 : 63781363 / 10$
+cbar_egm96 : [-484165371736 / 10^15, 957254173792 / 10^18, 539873863789 / 10^18,
+              685323475630 / 10^19]$
+J : makelist(-sqrt(2 * n + 1) * cbar_egm96[n - 1], n, 2, 5)$
+era_rate : 2 * %pi * (100273781191135448 / 10^17) / 86400$
+r_moon_earth : 123000371 / 10^10$
+mu_earth_moon : r_moon_earth / (1 + r_moon_earth)$
+day : 86400$
+gm_sun_de405 : (295912208285591095 / 10^21) * (149597870691000015 / 10^9)^3 * 10^9 / day^2$
+gm_moon_de430 : (899701139019987100 / 10^27) / (1 + 813005690741906200 / 10^16)
+                * (149597870700 / 10^3)^3 * 10^9 / day^2$
+au : 149597870700$
+z95 : bf_find_root(bfloat(erf(x / sqrt(2b0))) - 9b-1, x, 1.6b0, 1.7b0)$
+draim_inclination : 33 * %pi / 180$
+
+print("EGM96 J2..J5 =", bfloat(J))$
+print("ERA rate, rad/s =", bfloat(era_rate))$
+print("Earth-Moon mass parameter =", bfloat(mu_earth_moon))$
+print("GM Sun DE405 =", bfloat(gm_sun_de405), "  GM Moon DE430 =", bfloat(gm_moon_de430))$
+print("z(0.95) =", z95, "  33 deg =", bfloat(draim_inclination))$
+must(is(abs(bfloat(erf(z95 / sqrt(2b0))) - 9b-1) < 10^-35), "(1) holds: z is the 0.95 quantile")$
+
+/* ---- (2) the Python bridge's signature defaults -------------------------------------------------
+   Each function's defaults by name. Every default of its signature with more than six significant
+   digits must be named here, and each named one must be its value rounded to the digits it shows. */
+
+python : "../crates/spacelab-python/src/lib.rs"$
+wgs(mu_name, radius_name) := [mu_name = gm_wgs84, radius_name = a_wgs84]$
+egm96 : ["mu" = gm_egm96, "re" = a_egm96]$
+signatures : [
+  ["richardson_halo", ["mu" = mu_earth_moon]],
+  ["libration_points", ["mu" = mu_earth_moon]],
+  ["propagate_ias15_dense", ["re" = a_wgs84]],
+  ["propagate_dense", ["re" = a_wgs84]],
+  ["propagate_geopotential_tide_dense", ["mu_sun" = gm_sun_de405, "mu_moon" = gm_moon_de430]],
+  ["propagate_relativistic_dense", ["mu" = gm_wgs84, "mu_sun" = gm_sun_de405]],
+  ["sdtm1_density_interval", ["z" = z95]],
+  ["sdtm1_solar_wind_density_interval", ["z" = z95]],
+  ["propagate_drag_nrlmsise00_dense", ["mu" = gm_wgs84]],
+  ["propagate_drag_sdtm1_dense", ["mu" = gm_wgs84]],
+  ["propagate_drag_sdtm1_solar_wind_dense", ["mu" = gm_wgs84]],
+  ["propagate_drag_dense", ["earth_radius" = a_wgs84]],
+  ["brouwer_lyddane_propagate",
+   append(egm96, ["c20" = -J[1], "c30" = -J[2], "c40" = -J[3], "c50" = -J[4]])],
+  ["dsst_zonal_propagate_mean", append(egm96, ["j" = J])],
+  ["dsst_zonal_propagate_osculating", append(egm96, ["j" = J])],
+  ["dsst_propagate_mean_full", append(egm96, ["j" = J])],
+  ["dsst_propagate_osculating_full", append(egm96, ["j" = J])],
+  ["walker_constellation", ["mu" = gm_wgs84]],
+  ["street_of_coverage", wgs("mu", "earth_radius")],
+  ["street_of_coverage_geometry", wgs("mu", "earth_radius")],
+  ["flower_constellation", ["mu" = gm_wgs84, "frame_rate" = era_rate]],
+  ["lattice_flower", ["mu" = gm_wgs84]],
+  ["draim_constellation", ["mu" = gm_wgs84, "inclination" = draim_inclination]],
+  ["minimum_walker", ["mu" = gm_wgs84]],
+  ["draim_geometry", ["mu" = gm_wgs84, "inclination" = draim_inclination]],
+  ["sun_synchronous_inclination", append(wgs("mu", "re"), ["j2" = J[1]])],
+  ["repeat_ground_track_sma", append(wgs("mu", "re"), ["j2" = J[1], "earth_rotation_rate" = era_rate])],
+  ["frozen_eccentricity", ["re" = a_wgs84, "j2" = J[1], "j3" = J[2]]],
+  ["orbital_lifetime", wgs("mu", "body_radius")],
+  ["orbital_lifetime_ensemble", wgs("mu", "body_radius")],
+  ["ballistic_log_sensitivity", wgs("mu", "body_radius")]]$
+
+as_list(v) := if listp(v) then v else [v]$
+long_literal(t) := rust_is_number(t) and rust_significant(t) > 6$
+lookup(name, pairs) := block([hit : sublist(pairs, lambda([p], p[1] = name))],
+  if hit = [] then 'none else hit[1][2])$
+
+/* A function's signature against its expected defaults: the misses, as [function, name, text]. */
+signature_misses(path, fname, expected) := block([got : rust_signature_defaults(path, fname),
+                                                  misses : [], want, text],
+  for p in got do (
+    want : assoc(p[1], expected, 'none),
+    if want = 'none then (
+      if some(long_literal, as_list(p[2])) then misses : endcons([fname, p[1], p[2], "unnamed"], misses))
+    else if not transcribed(as_list(p[2]), as_list(want)) then
+      misses : endcons([fname, p[1], p[2], bfloat(want)], misses)),
+  for e in expected do
+    if lookup(lhs(e), got) = 'none then misses : endcons([fname, lhs(e), "absent"], misses),
+  misses)$
+
+misses : apply(append, map(lambda([s], signature_misses(python, s[1], s[2])), signatures))$
+for m in misses do print("MISS", m)$
+must(is(misses = []),
+     concat("(2) holds: the Python bridge's ", length(signatures),
+            " signatures write their defaults from their sources"))$
+
+/* ---- (3) the Python bridge's named constants -----------------------------------------------------
+   The module's MU_EARTH and RE_EARTH, and the Sun's and Moon's GM and the au that the luni-solar and
+   full-DSST functions declare for themselves, in every copy. */
+
+python_constants : ["MU_EARTH" = gm_wgs84, "RE_EARTH" = a_wgs84, "MU_SUN" = gm_sun_de405,
+                    "MU_MOON" = gm_moon_de430, "ASTRONOMICAL_UNIT" = au]$
+must(every(lambda([c], block([copies : rust_scalars(python, lhs(c))],
+             transcribed(copies, makelist(rhs(c), length(copies))))), python_constants),
+     "(3) holds: the Python bridge's constants are their sources' values, every copy")$
+
+/* ---- (4) the C API ------------------------------------------------------------------------------
+   Its constants, the Draim inclination, and the long literals sl_dsst_params_init writes, in order:
+   J2..J5, EGM96's GM and a, then the Sun's and the Moon's GM. */
+
+capi : "../crates/spacelab-capi/src/lib.rs"$
+capi_constants : ["MU_EARTH" = gm_wgs84, "RE_EARTH" = a_wgs84, "MU_SUN" = gm_sun_de405,
+                  "MU_MOON" = gm_moon_de430, "ASTRONOMICAL_UNIT" = au,
+                  "DRAIM_INCLINATION_RAD" = draim_inclination]$
+dsst_init : sublist(rust_literals_between(capi, "fn sl_dsst_params_init(", "zonal_count:"),
+                    long_literal)$
+must(every(lambda([c], transcribed([rust_scalar(capi, lhs(c))], [rhs(c)])), capi_constants)
+     and transcribed(dsst_init, append(J, [gm_egm96, a_egm96, gm_sun_de405, gm_moon_de430])),
+     "(4) holds: the C API's constants and sl_dsst_params_init's defaults are their sources' values")$
+
+/* ---- (5) the C header and the C++ wrapper -------------------------------------------------------
+   The header's Earth constants, and the Earth–Moon mass ratio every C++ three-body wrapper takes by
+   default. */
+
+header : "../crates/spacelab-capi/include/spacelab.h"$
+wrapper : "../crates/spacelab-capi/include/spacelab.hpp"$
+defines : ["SL_MU_EARTH" = gm_wgs84, "SL_RE_EARTH" = a_wgs84, "SL_J2_EARTH" = J[1],
+           "SL_J3_EARTH" = J[2], "SL_EARTH_ROTATION_RATE" = era_rate]$
+ratios : assigned_literals(wrapper, "mass_ratio")$
+must(every(lambda([d], transcribed([c_define(header, lhs(d))], [rhs(d)])), defines)
+     and length(ratios) = 4 and transcribed(ratios, makelist(mu_earth_moon, 4)),
+     "(5) holds: the header's Earth constants and the C++ wrappers' mass ratio are their sources' values")$
+
+print("DONE")$

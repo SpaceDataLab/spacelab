@@ -197,11 +197,11 @@ typedef enum {
 /* WGS-84 equatorial radius, m. */
 #define SL_RE_EARTH 6378137.0
 
-/* Earth's second zonal harmonic, unnormalised. */
+/* Earth's second zonal harmonic, unnormalised, EGM96's. */
 #define SL_J2_EARTH 1.08262668e-3
 
-/* Earth's third zonal harmonic, unnormalised. */
-#define SL_J3_EARTH (-2.53265365e-6)
+/* Earth's third zonal harmonic, unnormalised, EGM96's. */
+#define SL_J3_EARTH (-2.53265649e-6)
 
 /* Earth's rotation rate, rad/s. */
 #define SL_EARTH_ROTATION_RATE 7.292115146706979e-5
@@ -675,7 +675,7 @@ sl_status sl_geopotential_acceleration(uint32_t degree, const sl_vec3 *r_body_fi
 /*
  * The five libration points of the circular restricted three-body problem for `mass_ratio`, in
  * synodic nondimensional coordinates, written to `out[0..5]` as L1, L2, L3, L4, L5. The mass ratio
- * must lie in (0, 1); Earth-Moon is 0.012150585.
+ * must lie in (0, 1); Earth-Moon is 0.012150584460351.
  */
 sl_status sl_libration_points(double mass_ratio, sl_vec3 *out);
 
@@ -713,7 +713,7 @@ typedef struct sl_flower_params {
     double arg_periapsis_rad;
     double raan_rad;         /* the reference satellite's node */
     double mean_anomaly_rad; /* the reference satellite's anomaly */
-    double frame_rate_rad_s; /* the rotating frame's rate; default is Earth's sidereal rate */
+    double frame_rate_rad_s; /* the rotating frame's rate; default SL_EARTH_ROTATION_RATE */
     double mu;
 } sl_flower_params;
 

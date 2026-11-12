@@ -17,12 +17,12 @@ row with the harness's own residual, model by model, where the harness kept one.
 corpus's span and a field that `tools/check-sdtm-freeze.py --data` does not pass. The shipped fields are
 scored as their coefficient tables hold them, through the library (`examples/blind_rows.rs`).
 
-Models: SDTM-1 and its solar-wind field (`blind_rows`), NRLMSISE-00 (`nrlmsise00_rows`), the clean-room
-JB2008 (`blind_rows`). Each satellite's log scale from the field's table enters SDTM-1, as the harness
-scored §10.38. The metrics are §4's, the paired intervals `tools/cluster-intervals.py`'s, and the
-verdicts §5's, read once there are 180 days of blind rows:
+Models: SDTM-1 and its solar-wind field (`blind_rows`), NRLMSISE-00 (`nrlmsise00_rows`).
+Each satellite's log scale from the field's table enters SDTM-1, as the harness scored §10.38. The
+metrics are §4's, the paired intervals `tools/cluster-intervals.py`'s, and the verdicts §5's, read once
+there are 180 days of blind rows:
 
-- **B1, B2:** SDTM-1 minus NRLMSISE-00, and minus the clean-room JB2008, on MAPE over all rows.
+- **B1:** SDTM-1 minus NRLMSISE-00, on MAPE over all rows.
 - **B3:** SDTM-1's pooled median `M/O` in [0.95, 1.05], a point check.
 - **B4:** onset phase, magnetic local time 9-15 h, `|MLat|` >= 60: SDTM-1's mean `100 ln M/O`; and the
   onset contrast `|MLat|` >= 60 minus `|MLat|` < 40 on each mission family. The phases, the dipole and
@@ -81,11 +81,11 @@ MODELS = {
         "F10.7 of the day before, its centred 81-day mean, the storm-time ap[]",
         "NRL's public-domain code, our port: public",
     ),
-    "JB2008, clean-room": (
-        "SET's F10/S10/M10/Y10 at their lags, centred 81-day means, hourly ΔTc from Dst",
-        "our code: public",
-    ),
 }
+
+
+# The models `blind_rows` prints, one column each.
+BLIND_ROWS = ("SDTM-1", "SDTM-1 with the solar wind")
 
 
 def load(name: str, file: str):
@@ -113,14 +113,12 @@ def feeds(g) -> list[pathlib.Path]:
             "SW-All.csv",
             "Hp60_ap60_complete_series.txt",
             "omni2_sw_hourly.txt",
-            "SOLFSMY.TXT",
-            "DTCFILE.TXT",
         )
     ]
 
 
 def evaluate(rows: pd.DataFrame, g, fields: list[pathlib.Path]) -> np.ndarray:
-    """`ln(model / measured)` of SDTM-1, its solar-wind field and the clean-room JB2008: rows x 3."""
+    """`ln(model / measured)` of each `BLIND_ROWS` model: one column each, in that order."""
     if not EXAMPLE.exists():
         sys.exit(
             f"no {EXAMPLE}; run cargo build -p spacelab-propagation --release --example blind_rows"
@@ -150,7 +148,7 @@ def evaluate(rows: pd.DataFrame, g, fields: list[pathlib.Path]) -> np.ndarray:
     )
     if done.returncode != 0:
         sys.exit(f"blind_rows failed:\n{done.stderr}")
-    out = np.array(done.stdout.split(), dtype=float).reshape(-1, 3)
+    out = np.array(done.stdout.split(), dtype=float).reshape(-1, len(BLIND_ROWS))
     if out.shape[0] != len(rows):
         sys.exit(f"blind_rows answered {out.shape[0]} rows of {len(rows)}")
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -414,15 +412,11 @@ def read_verdicts(
         return
     sdtm = series["SDTM-1"]
     print(
-        f"\nverdicts (§5), on {days} days; B1, B2 and B5 hold when the interval lies below zero at "
+        f"\nverdicts (§5), on {days} days; the paired verdicts hold when the interval lies below zero at "
         f"{', '.join(VERDICT_LEVELS)}"
     )
     print(
         f"B1, SDTM-1 against NRLMSISE-00, MAPE, all rows: {verdict(found['NRLMSISE-00', 'all', 'MAPE'])}"
-    )
-    print(
-        "B2, SDTM-1 against the clean-room JB2008, MAPE, all rows: "
-        f"{verdict(found['JB2008, clean-room', 'all', 'MAPE'])}"
     )
     level = float(np.exp(np.median(sdtm[every])))
     inside = LEVEL_BAND[0] <= level <= LEVEL_BAND[1]
@@ -493,7 +487,6 @@ def command_cut(_args) -> int:
         "SDTM-1": rust[:, 0],
         "SDTM-1 with the solar wind": rust[:, 1],
         "NRLMSISE-00": msis,
-        "JB2008, clean-room": rust[:, 2],
     }
     score(rows, series, g, fit, intervals, every_interval=True)
     return 0
@@ -578,7 +571,6 @@ def command_blind(args) -> int:
         "SDTM-1": rust[:, 0],
         "SDTM-1 with the solar wind": rust[:, 1],
         "NRLMSISE-00": msis,
-        "JB2008, clean-room": rust[:, 2],
     }
     every, found, clusters = score(rows, series, g, fit, intervals)
     read_verdicts(rows, series, every, found, clusters, harness, intervals)

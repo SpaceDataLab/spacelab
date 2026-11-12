@@ -1,13 +1,14 @@
-//! SDTM-1's two fields and the clean-room JB2008 on many rows, for the prospective blind test of
+//! SDTM-1's two fields on many rows, for the prospective blind test of
 //! `docs/sdtm1-blind-protocol.md` (`plans/17` Ф30.J). NRLMSISE-00 comes from `nrlmsise00_rows`.
 //!
-//! `cargo run -p spacelab-propagation --release --example blind_rows -- SW-All.csv HP60 OMNI SOLFSMY.TXT DTCFILE.TXT [DEFAULT.field SOLAR_WIND.field] < rows > out`
+//! `cargo run -p spacelab-propagation --release --example blind_rows -- FEEDS [DEFAULT.field SOLAR_WIND.field] < rows > out`
 //!
-//! `HP60` is GFZ's `Hp60_ap60_complete_series.txt`, `OMNI` the `omni2_sw_hourly.txt` that
-//! `tools/fetch-omni.sh` writes. Each input line is `satellite year month day seconds_of_day
-//! altitude_m latitude_deg longitude_deg lst_h`, the satellite as the corpus's two-letter code. Each
-//! output line is SDTM-1's density, the solar-wind field's and the clean-room JB2008's, kg/m³, `nan`
-//! where a feed lacks an hour or a day the model needs.
+//! The feeds are `SW-All.csv`, `HP60` and `OMNI`, in that order: `HP60` is GFZ's
+//! `Hp60_ap60_complete_series.txt`, `OMNI` the `omni2_sw_hourly.txt` that `tools/fetch-omni.sh` writes.
+//! Each input line is `satellite year month day seconds_of_day altitude_m latitude_deg longitude_deg
+//! lst_h`, the satellite as the corpus's two-letter code. Each output line is SDTM-1's density and
+//! the solar-wind field's,
+//! kg/m³, `nan` where a feed lacks an hour or a day the model needs.
 //!
 //! - **The fields.** With no field file, the shipped ones: [`coefficients::FIELD`] and
 //!   [`solar_wind_coefficients::FIELD`] with its [`solar_wind_coefficients::DRIVE`]. With two, the
@@ -19,33 +20,25 @@
 //!   and the whole hour, as `tools/gen_sdtm_coefficients.py` reads it. Each
 //!   satellite's log scale from the field's table multiplies the density, as the harness scores a
 //!   fold and as `docs/verification.md` §10.38 printed it; GRACE-FO C is the reference, at zero.
-//! - **JB2008** is driven as `tests/measured_density.rs` drives it (§10.2): SET's indices at their
-//!   lags, and the hour angle from the row's local solar time.
 
 #![allow(clippy::expect_used)]
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufWriter, Write};
 
-use spacelab_propagation::ephemeris::{AnalyticSun, Ephemeris};
-use spacelab_propagation::jacchia_bowman;
 use spacelab_propagation::sdtm::{
     CouplingMap, DRIVERS, FluxExcess, NitricOxideCooling, SdtmDrivers, SdtmPoint, SolarWindDrive,
     StormGain, StormHour, StormResponse, Thermosphere, coefficients, solar_wind_coefficients,
 };
-use spacelab_propagation::space_weather::{
-    self, DstTemperatureDay, SolarIndexDay, SpaceWeatherDay,
-};
+use spacelab_propagation::space_weather::{self, SpaceWeatherDay};
 
 const HARMONICS: usize = coefficients::HARMONICS;
-const FLATTENING: f64 = 1.0 / 298.257_223_563;
 /// The storm state's warm-up, 3-hourly intervals and hours: the 120 days the fit runs it from
 /// (`tools/fit-sdtm-corpus.py`, `CorpusModel.first`). The tables' own `HISTORY` is the shortest a caller
 /// needs for the shipped constants; a fold's slower nitric oxide (40 h at the 2020 cut against the shipped
 /// 30 h) leaves 5e-4 in `ln ρ` after its 15 days, and a scorer reproduces the fit.
 const WARM_UP_INTERVALS: usize = 120 * 8;
 const WARM_UP_HOURS: i64 = 120 * 24;
-const MJD_AT_UNIX_EPOCH: f64 = 40587.0;
 
 /// A field and each satellite's log scale against GRACE-FO C.
 struct Scored {
@@ -280,72 +273,21 @@ fn day_of_year(year: i32, month: u32, day: u32) -> u32 {
     CUMULATIVE[month_index] + day + u32::from(leap && month > 2)
 }
 
-/// The clean-room JB2008 on SET's argument list: `AMJD, SUN(1..2), SAT(1..3)` and the nine drivers.
-/// Only the hour angle `sat_ra − sun_ra` enters, so it is taken from the row's local solar time and
-/// the Sun's right ascension is zero.
-fn jb2008_open(row: &Row, solar: &[SolarIndexDay], dst: &[DstTemperatureDay]) -> Option<f64> {
-    let d = space_weather::jb2008_drivers(solar, dst, row.year, row.day_of_year, row.sec)?;
-    let day = i32::try_from(days_since_1970(row.year, row.month, row.day)).expect("a day in i32");
-    let mjd = MJD_AT_UNIX_EPOCH + f64::from(day) + row.sec / 86_400.0;
-    let sun = AnalyticSun {
-        epoch_j2000_seconds: (mjd - 51_544.5) * 86_400.0,
-    }
-    .position(0.0);
-    let sun_dec = (sun[2] / (sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]).sqrt()).asin();
-    let one_minus_f = 1.0 - FLATTENING;
-    let input = jacchia_bowman::Input {
-        mjd,
-        sun_ra: 0.0,
-        sun_dec,
-        sat_ra: (row.lst - 12.0) * (std::f64::consts::PI / 12.0),
-        sat_lat: (one_minus_f * one_minus_f * row.latitude.tan()).atan(),
-        height_km: row.altitude / 1000.0,
-        indices: jacchia_bowman::SolarIndices {
-            f10: d.f10,
-            f10_bar: d.f10b,
-            s10: d.s10,
-            s10_bar: d.s10b,
-            m10: d.xm10,
-            m10_bar: d.xm10b,
-            y10: d.y10,
-            y10_bar: d.y10b,
-        },
-        dtc_storm: d.dstdtc,
-    };
-    // A refusal at a corpus height is a defect to see, not a row to drop.
-    Some(
-        jacchia_bowman::evaluate(&input)
-            .unwrap_or_else(|e| panic!("JB2008 open refused {input:?}: {e:?}"))
-            .density,
-    )
-}
-
-struct Row {
-    year: i32,
-    month: u32,
-    day: u32,
-    day_of_year: u32,
-    sec: f64,
-    altitude: f64,
-    latitude: f64,
-    lst: f64,
-}
+const USAGE: &str = concat!(
+    "usage: blind_rows SW-All.csv HP60 OMNI",
+    " [DEFAULT.field SOLAR_WIND.field] < rows",
+);
 
 fn main() {
     let paths: Vec<String> = std::env::args().skip(1).collect();
-    let (feeds, fields) = paths.split_at(paths.len().min(5));
-    let [sw, hp60, omni_path, solfsmy, dtcfile] = feeds else {
-        panic!(
-            "usage: blind_rows SW-All.csv HP60 OMNI SOLFSMY.TXT DTCFILE.TXT [DEFAULT.field SOLAR_WIND.field] < rows"
-        );
+    let [sw, hp60, omni_path, fields @ ..] = &paths[..] else {
+        panic!("{USAGE}");
     };
     let read = |p: &str| std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{p}: {e}"));
     let feeds = Feeds {
         days: space_weather::parse_space_weather(&read(sw)),
         ap60: read_ap60(&read(hp60)),
         omni: read_omni(&read(omni_path)),
-        solar: space_weather::parse_solfsmy(&read(solfsmy)),
-        dst: space_weather::parse_dtcfile(&read(dtcfile)),
     };
     match fields {
         [] => score_rows(
@@ -380,24 +322,15 @@ struct Feeds {
     days: Vec<SpaceWeatherDay>,
     ap60: Hourly<f64>,
     omni: Hourly<[f64; 3]>,
-    solar: Vec<SolarIndexDay>,
-    dst: Vec<DstTemperatureDay>,
 }
 
-/// Every row of stdin under the two fields and the clean-room JB2008, one output line each.
+/// Every row of stdin under the models, one output line each.
 fn score_rows<const M: usize>(
     feeds: &Feeds,
     default: &Scored,
     wind: &Scored,
     drive: &SolarWindDrive<M>,
 ) {
-    let Feeds {
-        days,
-        ap60,
-        omni,
-        solar,
-        dst,
-    } = feeds;
     let mut out = BufWriter::new(std::io::stdout().lock());
     for line in std::io::stdin().lock().lines() {
         let line = line.expect("readable stdin");
@@ -415,26 +348,18 @@ fn score_rows<const M: usize>(
         let [sec, altitude, lat, _lon, lst] = f[..] else {
             panic!("expected 9 fields, got {line:?}");
         };
-        let row = Row {
-            year,
-            month,
-            day,
-            day_of_year: day_of_year(year, month, day),
-            sec,
-            altitude,
-            latitude: lat.to_radians(),
-            lst,
-        };
+        let latitude = lat.to_radians();
+        let doy = day_of_year(year, month, day);
         let whole_hour = (sec / 3_600.0).floor();
         let point = SdtmPoint {
             altitude,
-            latitude: row.latitude,
+            latitude,
             local_solar_time: lst,
-            day_of_year: f64::from(row.day_of_year) + whole_hour / 24.0,
+            day_of_year: f64::from(doy) + whole_hour / 24.0,
         };
         // The flux drivers are the same for both fields; the solar-wind field replaces the storm.
         let drivers = space_weather::sdtm_drivers::<WARM_UP_INTERVALS>(
-            days,
+            &feeds.days,
             default.field.storm(),
             year,
             month,
@@ -447,20 +372,19 @@ fn score_rows<const M: usize>(
             .zip(solar_wind_storm(
                 drive,
                 wind.field.storm(),
-                ap60,
-                omni,
+                &feeds.ap60,
+                &feeds.omni,
                 hour,
             ))
             .map(|(d, storm)| wind.density(satellite, &point, &SdtmDrivers { storm, ..d }));
-        let rho_jb = jb2008_open(&row, solar, dst);
         let nan = f64::NAN;
-        writeln!(
+        write!(
             out,
-            "{:e} {:e} {:e}",
+            "{:e} {:e}",
             rho_default.unwrap_or(nan),
-            rho_wind.unwrap_or(nan),
-            rho_jb.unwrap_or(nan)
+            rho_wind.unwrap_or(nan)
         )
         .expect("writable stdout");
+        writeln!(out).expect("writable stdout");
     }
 }

@@ -11103,8 +11103,8 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 333 modules, 243 name a check, 90 do not** — no physics
-module, 28 parsers, 6 generated and 56 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
+(`plans/16` Ф17.B orders them). **Today: 336 modules, 248 name a check, 88 do not** — no physics
+module, 28 parsers, 5 generated and 55 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
 the last 42 — GNSS, SLR, the NeQuick ionosphere, earthvision, signal, vision, sensors and
 astrometry (`earthvision/sfm.rs` and `cloud.rs` hold no formula of their own and moved to
 infrastructure) — and fixed what the gates found: the GLONASS `J2` was the ICD's 8-digit
@@ -11190,7 +11190,6 @@ crates/spacelab-core/src/lib.rs | infra | types, traits, drivers or re-exports; 
 crates/spacelab-core/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-core/src/time.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-coverage/src/combine.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-coverage/src/detectors.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-coverage/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-coverage/src/parallel.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-earth/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive

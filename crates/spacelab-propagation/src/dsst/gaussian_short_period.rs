@@ -529,12 +529,32 @@ mod tests {
         }
     }
 
-    /// `(max |Δa|, max |Δ|)` over the samples, `Δ` the other five elements.
-    fn distance(pairs: impl Iterator<Item = ([f64; 6], [f64; 6])>) -> (f64, f64) {
-        pairs.fold((0.0_f64, 0.0_f64), |(da, rest), (got, want)| {
-            let others = (1..6).fold(0.0_f64, |m, i| nan_max(m, (got[i] - want[i]).abs()));
-            (nan_max(da, (got[0] - want[0]).abs()), nan_max(rest, others))
-        })
+    /// `(max |Δa|, max |Δ|)` over the samples, `Δ` the other five elements, after printing both as
+    /// rows of `docs/comparisons.md` under `what`.
+    fn distance(what: &str, pairs: impl Iterator<Item = ([f64; 6], [f64; 6])>) -> (f64, f64) {
+        let (mut a, mut rest) = (Vec::new(), Vec::new());
+        for (got, want) in pairs {
+            a.push((got[0] - want[0]).abs());
+            rest.extend((1..6).map(|i| (got[i] - want[i]).abs()));
+        }
+        let max_rms = |d: &[f64]| {
+            let max = d.iter().fold(0.0_f64, |m, &x| nan_max(m, x));
+            (
+                max,
+                (d.iter().map(|x| x * x).sum::<f64>() / d.len() as f64).sqrt(),
+            )
+        };
+        let (da, rms_a) = max_rms(&a);
+        let (others, rms_rest) = max_rms(&rest);
+        std::println!(
+            "comparison | Orekit | 13.1.7 | {what}, osculating a | m | {} | {da:.3e} | {rms_a:.3e}",
+            a.len()
+        );
+        std::println!(
+            "comparison | Orekit | 13.1.7 | {what}, osculating k, h, q, p, λ | 1 | {} | {others:.3e} | {rms_rest:.3e}",
+            rest.len()
+        );
+        (da, others)
     }
 
     /// The distance to Orekit's SRP short periods on its fixture: 2.7e-5 m in `a`, of a ~62 mm swing,
@@ -544,8 +564,10 @@ mod tests {
     #[ignore = "comparator: the distance to Orekit, not a verdict"]
     fn srp_short_period_distance_to_orekit() {
         let srp = DsstSolarRadiationPressure::new(CR, SRP_AOM, MU, AE);
-        let (da, rest) =
-            distance((0..4).map(|k| (srp.osculating(SRP_MEAN[k], SRP_SUN[k]), SRP_OSC[k])));
+        let (da, rest) = distance(
+            "DSST SRP short periods",
+            (0..4).map(|k| (srp.osculating(SRP_MEAN[k], SRP_SUN[k]), SRP_OSC[k])),
+        );
         std::println!("SRP short periods vs Orekit 13: |Δa| {da:.2e} m, others {rest:.2e}");
     }
 
@@ -562,8 +584,10 @@ mod tests {
             rho: RHO,
             omega: OMEGA,
         };
-        let (da, rest) =
-            distance((0..4).map(|k| (drag.osculating(DRAG_MEAN[k], &atmosphere), DRAG_OSC[k])));
+        let (da, rest) = distance(
+            "DSST drag short periods",
+            (0..4).map(|k| (drag.osculating(DRAG_MEAN[k], &atmosphere), DRAG_OSC[k])),
+        );
         std::println!("drag short periods vs Orekit 13: |Δa| {da:.2e} m, others {rest:.2e}");
     }
 

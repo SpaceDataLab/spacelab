@@ -29,6 +29,12 @@ harness:
     cargo run -q -p spacelab-propagation --release --example column_on2 -- --check
     cargo run -q -p spacelab --release --example cpf_mean_state -- --check
 
+# The comparator suite (Ф19.C): every test parked as a comparator, run, and its distances written to
+# docs/comparisons.md. On demand, never a gate: a distance to another code decides nothing.
+compare:
+    uv run --no-project python -I tools/test_compare.py
+    uv run --no-project python -I tools/compare.py
+
 fmt:
     cargo fmt --all -- --check
 

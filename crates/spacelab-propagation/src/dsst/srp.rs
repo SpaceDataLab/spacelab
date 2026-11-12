@@ -881,6 +881,7 @@ mod tests {
         let dir = normalize(SUN_POS);
         let alpha = gaussian::dot_ext(dir, a.f_vec);
         let beta = gaussian::dot_ext(dir, a.g_vec);
+        let (mut worst, mut sum_sq) = (0.0_f64, 0.0_f64);
         for l in [LL_LOW, LL_HIGH] {
             let c_phi = alpha * cos(l) + beta * sin(l);
             let perpendicular = gaussian::norm(position(&a, l)) * sqrt(1.0 - c_phi * c_phi);
@@ -889,7 +890,15 @@ mod tests {
                  ae = {AE:.3} m",
                 AE * a.big_b
             );
+            let off = libm::fabs(perpendicular - AE);
+            worst = worst.max(off);
+            sum_sq += off * off;
         }
+        std::println!(
+            "comparison | Orekit | 13.1.7 | DSST SRP eclipse crossings, distance from the Sun line minus ae | m | 2 | \
+             {worst:.3e} | {:.3e}",
+            sqrt(sum_sq / 2.0)
+        );
     }
 
     /// The six fixed-state rates against Orekit's `getMeanElementRate` on its fixture. Orekit cuts the
@@ -910,6 +919,11 @@ mod tests {
             rel[3],
             rel[4],
             rel[5]
+        );
+        std::println!(
+            "comparison | Orekit | 13.1.7 | DSST SRP mean element rates at a fixed state | relative | 6 | {:.3e} | {:.3e}",
+            rel.iter().fold(0.0_f64, |m, &r| m.max(r)),
+            sqrt(rel.iter().map(|r| r * r).sum::<f64>() / 6.0)
         );
     }
     /// Horner evaluation of `a₀xⁿ + … + aₙ`, for the residual half of the root check.

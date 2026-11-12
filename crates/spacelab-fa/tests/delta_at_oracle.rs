@@ -21,6 +21,7 @@ const FIXTURES: &str = include_str!("fixtures/delta_at_pyerfa.csv");
 #[ignore = "comparator: pyerfa's leap-second table, not a verdict"]
 fn delta_at_agrees_with_pyerfa_on_every_transition() {
     let mut checked = 0_usize;
+    let (mut worst, mut sum_sq) = (0_i32, 0_i64);
 
     for (i, line) in FIXTURES.lines().enumerate() {
         let line = line.trim();
@@ -39,7 +40,12 @@ fn delta_at_agrees_with_pyerfa_on_every_transition() {
 
         match delta_at(utc) {
             Ok(got) => {
-                assert_eq!(got, expected, "{year}-{month:02}-{day:02}: TAI-UTC");
+                let off = (got - expected).abs();
+                if off != 0 {
+                    println!("{year}-{month:02}-{day:02}: TAI-UTC {got} s, pyerfa {expected} s");
+                }
+                worst = worst.max(off);
+                sum_sq += i64::from(off) * i64::from(off);
                 checked += 1;
             }
             Err(e) => panic!("{year}-{month:02}-{day:02}: {e}"),
@@ -47,7 +53,15 @@ fn delta_at_agrees_with_pyerfa_on_every_transition() {
     }
 
     assert!(checked >= 250, "thin fixture set: only {checked} dates");
-    println!("delta_at: {checked} dates agree");
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a sum of squared whole seconds over a few hundred dates"
+    )]
+    let rms = (sum_sq as f64 / checked as f64).sqrt();
+    println!(
+        "comparison | pyerfa | not recorded | TAI−UTC on and around every leap second | s | {checked} | {worst:.3e} | {rms:.3e}",
+        worst = f64::from(worst)
+    );
 }
 
 #[test]

@@ -304,14 +304,26 @@ fn orekit_masking_ratio(separation: f64, alpha_central: f64, alpha_sun: f64) -> 
 /// across that penumbra. A comparison, kept to reproduce the figure `shadow.rs` quotes.
 #[test]
 #[ignore = "comparator: the distance of Orekit's arrangement, not a verdict"]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a fixture's length, far below 2^52"
+)]
 fn orekit_masking_ratio_distance_to_the_reference() {
     let mut worst = (0.0_f64, 0_usize);
+    let mut sum_sq = 0.0_f64;
     for (i, &(re, rs, d, _, _, nu_hi, nu_lo, _)) in REFERENCE.iter().enumerate() {
         let err = ((orekit_masking_ratio(d, re, rs) - nu_hi) - nu_lo).abs();
+        sum_sq += err * err;
         if err > worst.0 {
             worst = (err, i);
         }
     }
+    println!(
+        "comparison | Orekit | 13.1.7 | eclipse masking ratio ν, Orekit's arrangement against the reference | 1 | {} | {:.3e} | {:.3e}",
+        REFERENCE.len(),
+        worst.0,
+        (sum_sq / REFERENCE.len() as f64).sqrt()
+    );
     let (re, rs, d, _, _, nu_hi, _, _) = REFERENCE[worst.1];
     println!(
         "Orekit's masking ratio: worst |Δν| {:.2e} at r_E {re:e}, r_S {rs:e}, d {d:e} (ν {nu_hi:.3e}), shipped {:.2e}",

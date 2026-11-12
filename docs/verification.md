@@ -10951,6 +10951,10 @@ comparator-decided tests of 3 339** — name 94, file 18, fixture 4, doc 15; 71 
 name), 49 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
+The parked tests are the suite: `just compare` (`tools/compare.py`) runs each one alone, reads the
+`comparison | code | version | quantity | unit | n | max | RMS` rows it prints and writes them to
+[`comparisons.md`](comparisons.md) with the date. A distance there is recorded, never judged: no
+parked test asserts on it.
 
 ```text
 crates/spacelab-astrometry/tests/aberration_erfa.rs::a_direction_along_the_motion_does_not_shift | file:erfa

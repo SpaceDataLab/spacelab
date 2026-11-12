@@ -23,7 +23,7 @@
 //! module tests `the_density_is_the_law_at_50_digits` (G1), against
 //! `derivations/harris_priester_law.gp`'s evaluation of the law from its definition, and
 //! `the_night_side_scale_height_is_the_bracket_s_own` (G3). Orekit 13.1.7's
-//! `HarrisPriester.getDensity` is a comparator, `matches_orekit_reference`, parked for the benchmark.
+//! `HarrisPriester.getDensity` is a comparator, `density_distance_to_orekit`, parked for the benchmark.
 
 #![allow(
     clippy::excessive_precision,
@@ -185,26 +185,29 @@ mod tests {
         ([ 4.73614717007294950e+06,  5.64432040498933800e+06,  0.00000000000000000e+00], 4.0, 1.87298589064156980e-14),
     ];
 
-    /// The port reproduces Orekit's density across the whole sweep to a few ULP — the two share the
-    /// Montenbruck & Gill table and the full-precision 30° lag, so only `pow`/`sinCos` rounding differs
-    /// (libm vs Hipparchus). A wrong table or a mis-transcribed cosine law would miss by orders of
-    /// magnitude, not `1e-12`.
+    /// The distance to Orekit's density across the sweep, a row of `docs/comparisons.md`. The two
+    /// share the Montenbruck & Gill table and the full-precision 30° lag, so only `pow`/`sinCos`
+    /// rounding should differ (libm vs Hipparchus); a wrong table or a mis-transcribed cosine law
+    /// would sit orders of magnitude above that.
     #[test]
     #[ignore = "comparator: Orekit HarrisPriester, Ф19.C"]
-    fn matches_orekit_reference() {
-        let mut max_rel = 0.0_f64;
+    #[expect(clippy::cast_precision_loss, reason = "a 16-row fixture's length")]
+    fn density_distance_to_orekit() {
+        let (mut max_rel, mut sum_sq) = (0.0_f64, 0.0_f64);
         for &(pos, n, rho_ref) in &GOLDEN {
             let model = HarrisPriester {
                 equatorial_radius: WGS84_A,
                 flattening: WGS84_F,
                 n,
             };
-            let rho = harris_priester(SUN, pos, &model);
-            max_rel = nan_max(max_rel, ((rho - rho_ref) / rho_ref).abs());
+            let rel = ((harris_priester(SUN, pos, &model) - rho_ref) / rho_ref).abs();
+            max_rel = nan_max(max_rel, rel);
+            sum_sq += rel * rel;
         }
-        assert!(
-            max_rel < 1.0e-11,
-            "max density rel err vs Orekit {max_rel:e} exceeds 1e-11"
+        let rms = (sum_sq / GOLDEN.len() as f64).sqrt();
+        std::println!(
+            "comparison | Orekit | 13.1.7 | Harris–Priester density | relative | {} | {max_rel:.3e} | {rms:.3e}",
+            GOLDEN.len()
         );
     }
 

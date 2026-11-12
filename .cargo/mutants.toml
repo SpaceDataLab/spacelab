@@ -975,18 +975,18 @@ exclude_re = [
     # `π/2` is not an f64. The sibling `*` mutants are *not* on this list: `C2 / sin φ` is `0/0` at
     # `φ = 0`, and `the_season_is_finite_at_its_own_reference_epoch` evaluates exactly there.
     # Re-open both if Knocke's coefficients ever gain a sine amplitude.
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:222:35: replace \\+ with - in KnockeEarthRadiation<M, R, E>::grid_sum",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:223:35: replace \\+ with - in KnockeEarthRadiation<M, R, E>::grid_sum",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:234:35: replace \\+ with - in KnockeEarthRadiation<M, R, E>::grid_sum",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:235:35: replace \\+ with - in KnockeEarthRadiation<M, R, E>::grid_sum",
 
     # `if cos_sun.value() > 0.0` — the daylit gate on the albedo — tied to `>=`. Differs only at the
     # terminator, `cos θ☉` exactly zero, and there the two agree anyway: `albedo` is read in exactly
     # one place, `albedo · Φ · cos_sun`, so admitting the element multiplies the coefficient by zero
-    # and adds nothing. Provable, not measured. This is *not* true of the horizon gate above it,
-    # which returns early and skips terms that do not carry `cos α` as a factor.
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:355:37: replace > with >= in elementary_flux",
+    # and adds nothing. Provable, not measured.
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:457:37: replace > with >= in knocke_exitance",
 
-    # The two grid walks' counted limits — the `crowns_left`/`sectors_left` guards, their decrements,
-    # and the subtraction inside `step_bound` that sizes them. Seven mutants, one argument.
+    # The crown walk's counted limit — the `crowns_left` guard, its decrement, and the subtraction
+    # inside `step_bound` that sizes it. Four mutants, one argument. (There were seven until Ф17.F
+    # made the sector walk a `for` loop over ⌈2π/Δ⌉ sectors, which has no accumulator to plateau.)
     #
     # The counters exist so the walks terminate when `off += Δ` stops climbing (Δ below ulp(off)/2);
     # they are deliberately an *over*-bound, never the authority on where a walk ends. `step_bound`
@@ -1000,19 +1000,43 @@ exclude_re = [
     # unobservable at every resolution whose grid can be evaluated at all, and each of the seven —
     # dropping the guard (`> 0` → `>= 0` on a `usize`), freezing the decrement (`-=` → `/=`),
     # inverting it (`-=` → `+=`), or widening the bound (`bound − start` → `bound + start`) — leaves
-    # every payable flux bit-identical.
+    # every payable flux bit-identical. The measurement above was taken on the sector walk; the crown
+    # walk climbs `lower += Δ` to `acos(R/r) ≤ π/2`, below `τ`, so the same bound covers it.
     #
     # This is the honest limit of the #227 fix and is written up as such in docs/verification.md:
-    # the counted limit buys termination in ℕ, not termination in time. Re-open all seven the day
+    # the counted limit buys termination in ℕ, not termination in time. Re-open all four the day
     # `AngularResolution` gains a floor that makes the worst-case grid payable, because then the
     # counter becomes reachable and each of these becomes a live wrong answer.
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:256:51: replace > with >= in KnockeEarthRadiation<M, R, E>::grid_sum",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:257:25: replace -= with /= in KnockeEarthRadiation<M, R, E>::grid_sum",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:257:25: replace -= with \\+= in KnockeEarthRadiation<M, R, E>::grid_sum",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:262:52: replace > with >= in KnockeEarthRadiation<M, R, E>::grid_sum",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:263:30: replace -= with \\+= in KnockeEarthRadiation<M, R, E>::grid_sum",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:263:30: replace -= with /= in KnockeEarthRadiation<M, R, E>::grid_sum",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:300:24: replace - with \\+ in step_bound",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:280:42: replace > with >= in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:281:21: replace -= with /= in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:281:21: replace -= with \\+= in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:381:24: replace - with \\+ in step_bound",
+
+    # The crown walk's horizon tests: `lower < horizon` tied to `<=`, the `&&` joining it to the
+    # counter tied to `||`, and the last crown's `upper < horizon` tied to `<=`. Three mutants, one
+    # argument. A crown that starts at or past the horizon has both cap view factors `(R/r)²`
+    # (`cap_view_factor` returns it once cos Δ ≤ R/r), so its share is zero and it adds nothing. `||`
+    # walks on through such crowns until the counter ends; each `<=` differs only where `lower` or
+    # `upper` equals the f64 horizon exactly, and there the extra crown is zero to a rounding and the
+    # last crown's two colatitudes, `½(lower + upper)` and `½(lower + edge)`, agree to an ulp. Below
+    # the surface the horizon is NaN and `||` returns NaN where `&&` returns the cap alone, an input
+    # outside the model.
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:280:17: replace < with <= in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:280:27: replace && with \\|\\| in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:286:37: replace < with <= in walk",
+
+    # The sectors' azimuth phase: the start `0.5 · step` tied to `0.5 + step` and `0.5 / step`, the
+    # step's `+=` tied to `-=`, and the last crown's `−¼(lower + edge)` tied to `+¼`, which turns its
+    # ring by π. Four mutants, one argument: the phase is a free choice of the grid. `east` is any axis
+    # across `r`, so the sectors' origin is arbitrary, and each mutant still leaves `n` evenly spaced
+    # sectors at the right colatitude with the right share. The sums of cos φ, sin φ and cos² φ over
+    # evenly spaced φ do not depend on where they start, so every closed form the tests hold — the
+    # uniform sphere, the polar cap, `1 + p̂·ê` along `r̂`, `ê` and `r̂ × ê` — is met alike, and any
+    # other exitance moves within the grid's own Δ² error. No closed form prefers one phase.
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:294:66: delete - in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:297:31: replace \\* with \\+ in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:297:31: replace \\* with / in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:308:21: replace \\+= with -= in walk",
 
     # --- crates/spacelab-propagation/src/space_weather.rs ---
 

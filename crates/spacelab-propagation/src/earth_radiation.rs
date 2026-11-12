@@ -259,9 +259,8 @@ fn walk<S: Scalar, F: Fn(&[S; 3]) -> S>(re: f64, ares: f64, r: &[S; 3], exitance
     // projectedToGround = r̂·Rₑ — the sub-satellite point on the sphere.
     let pg_scale = S::from_f64(re) * inv_r_norm;
     let projected = [r[0] * pg_scale, r[1] * pg_scale, r[2] * pg_scale];
-    // east = (−q·rᵧ, q·rₓ, 0), q = 1/|(rₓ,rᵧ)| — an in-plane unit vector, the first crown axis.
-    let q = (r[0] * r[0] + r[1] * r[1]).sqrt().recip();
-    let east = [-(q * r[1]), q * r[0], S::from_f64(0.0)];
+    // east = (−rᵧ, rₓ, 0), across `r` — the first crown axis. [`rotate_by`] divides by its norm.
+    let east = [-r[1], r[0], S::from_f64(0.0)];
 
     // The central cap, at its centre's exitance. Orekit lumps the cap's whole area at its centre,
     // which is only the first, `Δ²`, term of its integral (`derivations/knocke_lambert.mac` (5)):
@@ -729,7 +728,7 @@ mod tests {
     /// A uniform Lambertian sphere: the whole grid, central cap and crowns, against the view factor
     /// `(R/r)²` of `derivations/knocke_lambert.mac` (1), along `r̂` and across it (G3). The crowns'
     /// kernels telescope to the horizon's view factor and the evenly spaced sectors cancel across
-    /// `r̂`, so the grid is exact to a rounding: 5.1e-15 at most here. Orekit's midpoint crowns,
+    /// `r̂`, so the grid is exact to a rounding: 1.0e-14 at most here. Orekit's midpoint crowns,
     /// even behind the exact cap, missed by 4.1e-2 at 20 000 km and Δ = 30°, and by 2.2e-2 at 500 km
     /// and Δ = 15°, where the first crown's centre lies past the horizon and the strip beyond the cap
     /// is dropped.
@@ -758,6 +757,61 @@ mod tests {
                     dot3(&across, &across).sqrt() / want
                 );
             }
+        }
+    }
+
+    /// A sphere whose exitance varies across `r̂`, `1 + p̂·ê` with `ê ⊥ r̂`, against the closed form
+    /// of `derivations/knocke_lambert.mac` (6) (G3). A uniform sphere's flux lies along `r̂`, so only
+    /// a varying exitance tests where the sectors' rays point. Along `r̂` the variation integrates
+    /// out over the azimuth and the flux stays `(R/r)²`; along `ê` it is
+    /// `−R³ ∫ (1 − x²)(r x − R)/q⁴ dx` from the horizon; along `r̂ × ê` it is zero.
+    ///
+    /// Along `ê` each crown is taken at its middle colatitude and the central cap at its centre,
+    /// which pushes nothing across `r̂`, so the error falls as `Δ²` only once `Δ` is well inside the
+    /// horizon: from n = 180 to 4000 it is 6.2 Δ² at 500 km and 0.0325 Δ² at 20 000 km, and 2000
+    /// leaves 6.1e-5 and 3.2e-7. At 500 km, where the horizon is 22°, Δ = 5° gives 10 % too little,
+    /// 15° gives 86 % and 30°, a cap past the horizon, none at all (plans/17 F78). Along `r̂` and
+    /// `r̂ × ê` the error is a rounding, 3.3e-14 at most here.
+    #[test]
+    fn a_varying_exitance_pushes_the_flux_across_r() {
+        // (height m, flux along ê at 30 digits, the Δ² coefficient's bound).
+        const CASES: [(f64, f64, f64); 2] = [
+            (500.0e3, -5.129_877_400_784_409_8e-2, 6.5),
+            (20_000.0e3, -3.070_578_142_665_827_0e-3, 0.035),
+        ];
+        let e = [0.0, 0.8, -0.6];
+        let h = [-0.8, 0.36, 0.48];
+        for (height, closed, bound) in CASES {
+            let r = AE + height;
+            let sat = [r * 0.6, r * 0.48, r * 0.64];
+            let want = (AE / r) * (AE / r);
+            let error = |n: f64| {
+                let flux = walk(AE, TAU / n, &sat, |p: &[f64; 3]| {
+                    1.0 + dot3(p, &e) / dot3(p, p).sqrt()
+                });
+                let radial = dot3(&flux, &sat) / r / want - 1.0;
+                let across = dot3(&flux, &h) / want;
+                assert!(
+                    radial.abs() < 1e-13 && across.abs() < 1e-13,
+                    "{height} m, n = {n}: {radial:+.3e} along r̂, {across:+.3e} along r̂ × ê"
+                );
+                dot3(&flux, &e) / closed - 1.0
+            };
+            for n in [180.0, 360.0, 720.0, 2000.0] {
+                let step = TAU / n;
+                let along_e = error(n);
+                assert!(
+                    along_e.abs() < bound * step * step,
+                    "{height} m, n = {n}: {along_e:+.3e} along ê, {:.4}·Δ²",
+                    along_e / (step * step)
+                );
+            }
+            let (coarse, fine) = (error(720.0).abs(), error(2000.0).abs());
+            assert!(
+                coarse / fine > 6.0,
+                "{height} m: Δ²-convergence would cut the error 7.7×, not {:.1}×",
+                coarse / fine
+            );
         }
     }
 

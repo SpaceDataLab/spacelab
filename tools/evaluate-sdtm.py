@@ -26,6 +26,7 @@ reconstruction: every fold reads the measured indices, as `plans/17` rule 12 say
     tools/evaluate-sdtm.py run --kind family --legacy-penalty
     tools/evaluate-sdtm.py run --kind origin [--field solar_wind]
     tools/evaluate-sdtm.py summary [--field default]
+    tools/evaluate-sdtm.py export --split frozen-2020   # the fold's field, for a Rust caller (Ф30.H)
 
 Run under `uv run --no-project --with numpy --with pandas --with scipy python -I`. Results stay under
 `data/`, which is never committed.
@@ -552,6 +553,84 @@ def command_summary(args) -> int:
     return 0
 
 
+def command_export(args) -> int:
+    """Write a fold's fitted field as `Thermosphere::from_coefficients`'s arguments, and the generator's own
+    values at 64 of the fold's scored rows, so a Rust caller can rebuild the field and check it (Ф30.H).
+
+    The second file has the columns of `crates/spacelab-propagation/tests/fixtures/sdtm_reference.csv`:
+    the field alone, with no satellite's log scale, as `fit-sdtm-corpus.py`'s `emit` writes it.
+    """
+    settings = FIELDS[args.field]
+    if settings is not FORM:
+        sys.exit(
+            "export writes the shipped form only: its storm state, saturation and gain"
+        )
+    saved = np.load(OUT / args.field / f"{args.split}.npz")
+    rows = fit.load_corpus(
+        STEP, trailing_mean=True, phase=PHASE, ap60=False, wind=False
+    )
+    arg = g.fit_arguments(rows, 2)
+    p = saved["parameters"]
+    model = fold_model(
+        arg, rows.sat.to_numpy(), tuple(saved["train_sats"]), settings, None
+    )
+    pk = model.pack
+    kernel = model.kernel(p)
+    heating, nitric, saturation = kernel[:3]
+    grid = np.zeros((g.DRIVERS, arg["k"]))
+    for (d, k), c in zip(model.pairs, p[: pk.n_c], strict=True):
+        grid[d, k] = c
+    boundary = p[pk.i_boundary]
+    lines = [
+        f"# SDTM-1 field fitted by tools/evaluate-sdtm.py, field {args.field}, split {args.split}.",
+        f"sigma {g.literal(model.shape(p))}",
+        f"boundary_scale {g.literal(np.exp(boundary))}",
+        f"heating_s {g.literal(heating * 3600.0)}",
+        f"nitric_oxide_s {g.literal(nitric * 3600.0)}",
+        f"saturation {g.literal(saturation)}",
+        f"excess_scale {g.literal(model.excess(p))}",
+        f"gain_exponent {g.literal(model.gain(p))}",
+        *(f"coefficients {' '.join(g.literal(c) for c in row)}" for row in grid),
+    ]
+    stem = OUT / args.field / args.split
+    stem.with_suffix(".field").write_text("\n".join(lines) + "\n")
+
+    test = saved["test"]
+    index = test[np.linspace(0, test.size - 1, 64).astype(int)]
+    exponent = (
+        model.design(*kernel, excess=model.excess(p), gain=model.gain(p))[index]
+        @ p[: pk.n_c]
+    )
+    t_inf = g.BOUNDARY_TEMPERATURE + np.exp(exponent)
+    ln_rho, _ = g.profile(t_inf, model.shape(p), arg["zeta"][index])
+    storm = fit.cooling_grid(
+        model.drive(kernel), heating, nitric, saturation, arg["cadence"], model.first
+    )[arg["interval"]]
+    fixture = [
+        "# altitude_m,latitude_rad,local_solar_time_h,day_of_year,f107,f107a,storm_ap,t_inf_K,density_kg_m3"
+    ]
+    for j, i in enumerate(index):
+        fixture.append(
+            ",".join(
+                g.literal(x)
+                for x in (
+                    rows.altitude.iat[i],
+                    np.deg2rad(rows.latitude.iat[i]),
+                    rows.lst.iat[i],
+                    arg["doy"][i],
+                    arg["f107"][i],
+                    arg["f107a"][i],
+                    storm[i],
+                    t_inf[j],
+                    np.exp(ln_rho[j] + boundary),
+                )
+            )
+        )
+    stem.with_suffix(".fixture.csv").write_text("\n".join(fixture) + "\n")
+    print(f"wrote {stem.with_suffix('.field')} and {stem.with_suffix('.fixture.csv')}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(required=True)
@@ -573,6 +652,10 @@ def main() -> int:
     summary = sub.add_parser("summary")
     summary.add_argument("--field", default="default")
     summary.set_defaults(func=command_summary)
+    export = sub.add_parser("export")
+    export.add_argument("--split", required=True)
+    export.add_argument("--field", default="default", choices=sorted(FIELDS))
+    export.set_defaults(func=command_export)
     args = parser.parse_args()
     return args.func(args)
 

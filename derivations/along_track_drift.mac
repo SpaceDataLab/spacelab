@@ -1,0 +1,101 @@
+/* The along-track error a density error makes in an orbit prediction -- plans/17 Ф30.H's gate (F64).
+ *
+ * Hill-Clohessy-Wiltshire about a circular orbit of mean motion n, x radial, y along-track, with an
+ * in-plane perturbing acceleration (fx, fy) and the offsets zero at t = 0:
+ *     x'' - 2 n y' - 3 n^2 x = fx,      y'' + 2 n x' = fy.
+ * A density error eps on a drag acceleration a_d is fy = -eps a_d along the velocity, plus a radial
+ * part that drag on a near-circular orbit barely has.
+ *
+ * Shown here, each line printing `<name>: 0`:
+ *   1. the response to a constant fy, from Laplace transforms, satisfies both equations and the four
+ *      initial conditions;
+ *   2. its along-track part is y = -(3/2) fy t^2 + (4 fy/n^2)(1 - cos n t): the secular term of F64,
+ *      |dy| = 1.5 eps a_d t^2, and a bounded remainder;
+ *   3. that remainder over the secular term is at most (16/3)/(n t)^2, so 0.9 % at n t = 24.4
+ *      (6 h at 450 km) and below 0.01 % at 72 h;
+ *   4. the impulse responses G_yx, G_yy (y after a unit impulse in fx, in fy) are the step responses'
+ *      time derivatives and satisfy the equations with the impulse's initial velocity; so for any
+ *      f(t), y(t) = int_0^t [G_yx(t-s) fx(s) + G_yy(t-s) fy(s)] ds, the convolution
+ *      tests/along_track_drift.rs integrates;
+ *   5. G_yy = -3 tau + (4/n) sin n tau, so a constant fy gives back (2) through the convolution;
+ *   6. the drag-density feedback. The perturbed orbit flies lower, through denser air, so its
+ *      along-track drag error gains k x, with k = d a_y/d x = a_y (d rho/dh)/rho > 0. That term is of
+ *      first order in eps, because x is. To first order in k it is the convolution of the kernels
+ *      with k x0 (Duhamel): x1 = int G_xy(t-s) k x0(s) ds and y1 = int G_yy(t-s) k x0(s) ds leave a
+ *      residual -k x1 in the along-track equation, of order k^2. For constant fy and k, y1's secular
+ *      term is -k fy t^3/n, the fraction (2/3) k t/n of y0's: about 1 % at 350 km after 72 h.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/along_track_drift.mac </dev/null
+ */
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+assume(n > 0, t > 0, tau > 0)$
+
+cw(X, Y, FX, FY) := [diff(X, t, 2) - 2*n*diff(Y, t) - 3*n^2*X - FX,
+                     diff(Y, t, 2) + 2*n*diff(X, t) - FY]$
+
+/* 1. The step response to (fx, fy), solved by Laplace transforms with zero initial state. */
+atvalue(x(t), t = 0, 0)$ atvalue(y(t), t = 0, 0)$
+atvalue('diff(x(t), t), t = 0, 0)$ atvalue('diff(y(t), t), t = 0, 0)$
+sol : desolve([diff(x(t), t, 2) - 2*n*diff(y(t), t) - 3*n^2*x(t) = fx,
+               diff(y(t), t, 2) + 2*n*diff(x(t), t) = fy], [x(t), y(t)])$
+X : rhs(sol[1])$ Y : rhs(sol[2])$
+eqs : cw(X, Y, fx, fy)$
+zero("step_radial_equation", trigsimp(expand(eqs[1])))$
+zero("step_along_track_equation", trigsimp(expand(eqs[2])))$
+zero("step_x0", trigsimp(subst(t = 0, X)))$
+zero("step_y0", trigsimp(subst(t = 0, Y)))$
+zero("step_vx0", trigsimp(subst(t = 0, diff(X, t))))$
+zero("step_vy0", trigsimp(subst(t = 0, diff(Y, t))))$
+
+/* 2. The along-track part under fy alone: the secular term and its bounded remainder. */
+Yfy : subst(fx = 0, Y)$
+zero("along_track_step", trigsimp(expand(Yfy - (-(3/2)*fy*t^2 + 4*fy/n^2*(1 - cos(n*t))))))$
+
+/* 3. The remainder over the secular term: |4 (1 - cos) / n^2| / (3/2 t^2) <= (16/3)/(n t)^2,
+   with equality at cos n t = -1. */
+ratio : (4/n^2)*(1 - cos(n*t)) / ((3/2)*t^2)$
+zero("remainder_bound_attained", ratsimp(subst(cos(n*t) = -1, ratio) - (16/3)/(n*t)^2))$
+printf(true, "remainder_bound_at_nt_24.4: ~,6f~%", float((16/3)/24.4^2))$
+
+/* 4. Impulse responses: the time derivative of the unit-step responses. */
+Gyx : diff(subst([fx = 1, fy = 0], Y), t)$
+Gyy : diff(subst([fx = 0, fy = 1], Y), t)$
+Gxx : diff(subst([fx = 1, fy = 0], X), t)$
+Gxy : diff(subst([fx = 0, fy = 1], X), t)$
+/* A unit impulse in fx leaves x' = 1 at t = 0+, one in fy leaves y' = 1; both satisfy the free
+   equations after it. */
+free_x : cw(Gxx, Gyx, 0, 0)$ free_y : cw(Gxy, Gyy, 0, 0)$
+zero("impulse_fx_radial_equation", trigsimp(expand(free_x[1])))$
+zero("impulse_fx_along_track_equation", trigsimp(expand(free_x[2])))$
+zero("impulse_fy_radial_equation", trigsimp(expand(free_y[1])))$
+zero("impulse_fy_along_track_equation", trigsimp(expand(free_y[2])))$
+initial : [["fx_x", Gxx], ["fx_y", Gyx], ["fx_vx_minus_1", diff(Gxx, t) - 1], ["fx_vy", diff(Gyx, t)],
+            ["fy_x", Gxy], ["fy_y", Gyy], ["fy_vx", diff(Gxy, t)], ["fy_vy_minus_1", diff(Gyy, t) - 1]]$
+for e in initial do zero(sconcat("impulse_initial_", e[1]), trigsimp(subst(t = 0, e[2])))$
+
+/* 5. The kernels in closed form, and the convolution of a constant fy giving back (2). */
+zero("G_yy", trigsimp(expand(Gyy - (-3*t + 4/n*sin(n*t)))))$
+zero("G_yx", trigsimp(expand(Gyx - (2/n*(cos(n*t) - 1)))))$
+conv : integrate(subst(t = t - s, Gyy), s, 0, t)$
+zero("convolution_of_constant_fy", trigsimp(expand(conv - subst(fy = 1, Yfy))))$
+printf(true, "G_yy(tau) = ~a~%", subst(t = tau, trigsimp(expand(Gyy))))$
+printf(true, "G_yx(tau) = ~a~%", subst(t = tau, trigsimp(expand(Gyx))))$
+
+/* 6. The drag-density feedback, to first order in k. */
+zero("G_xx", trigsimp(expand(Gxx - sin(n*t)/n)))$
+zero("G_xy", trigsimp(expand(Gxy - 2/n*(1 - cos(n*t)))))$
+x0 : subst(fx = 0, X)$
+y0 : Yfy$
+x1 : integrate(subst(t = t - s, Gxy)*k*subst(t = s, x0), s, 0, t)$
+y1 : integrate(subst(t = t - s, Gyy)*k*subst(t = s, x0), s, 0, t)$
+res : cw(x0 + x1, y0 + y1, 0, fy + k*(x0 + x1))$
+zero("feedback_radial_equation", trigsimp(expand(res[1])))$
+zero("feedback_residual_is_second_order", trigsimp(expand(res[2] + k*x1)))$
+for e in [["x1", x1], ["y1", y1], ["vx1", diff(x1, t)], ["vy1", diff(y1, t)]] do
+  zero(sconcat("feedback_initial_", e[1]), trigsimp(subst(t = 0, e[2])))$
+zero("feedback_secular_t3", ratsimp(coeff(expand(y1), t, 3) + k*fy/n))$
+zero("feedback_fraction", ratsimp(coeff(expand(y1), t, 3)*t^3/coeff(expand(y0), t, 2)/t^2 - 2*k*t/(3*n)))$

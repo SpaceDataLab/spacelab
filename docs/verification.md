@@ -10741,6 +10741,58 @@ which the Ф30.J protocol requires anyway. The gap stays unexplained. What is le
 touched: the fit window's response to the indices, and the level, which a fitted `B` absorbs and Ф23.T's
 spheres measure.
 
+### 10.56 What a density error does to an orbit prediction: the gate (Ф30.H)
+
+A density MAPE does not say how far a predicted orbit drifts in 6–72 h (F64). The expected scale is
+`Δs ≈ 1.5·ε·a_d·t²` along track, for a density error `ε` on a drag acceleration `a_d`. Before any
+prediction is scored, this section checks that scale in Maxima and on a synthetic density error.
+
+**The derivation.** `derivations/along_track_drift.mac` checks 33 identities. Each one reduces to zero.
+
+1. In Hill–Clohessy–Wiltshire, the response to a constant along-track acceleration `f` is
+   `y = −(3/2) f t² + (4f/n²)(1 − cos nt)`. Its radial part and all four initial conditions hold.
+2. The remainder over the secular term is at most `(16/3)/(nt)²`: 0.9 % at 6 h at 450 km.
+3. The impulse responses are `G_yy = −3τ + (4/n) sin nτ`, `G_yx = (2/n)(cos nτ − 1)`,
+   `G_xx = sin nτ / n` and `G_xy = 2(1 − cos nτ)/n`. Any forcing therefore enters as a convolution.
+4. The perturbed orbit flies lower, through denser air, so its drag error gains `k·x` with
+   `k = ∂a_y/∂x`. That term is of first order in `ε`. To first order in `k`, the kernels convolved
+   with `k·x₀` solve the coupled equations up to `O(k²)`. For constant `f` and `k`, the correction is
+   `−k f t³/n`, a fraction `(2/3)·k·t/n` of the secular term.
+
+**The synthetic check.** `crates/spacelab-propagation/tests/along_track_drift.rs`:
+
+- **Propagations.** Two runs start from one state. One uses SDTM-1's density `ρ`, the other `(1 + ε)ρ`.
+  Both have point mass, `J₂` and co-rotating drag, with `C_d A/m` = 0.011 m²/kg, F10.7 = 150 and an
+  inclination of 51.6°.
+- **Predictions.** The along-track separation at 6–72 h is held to two predictions. The bounds were
+  fixed before the first run.
+  - The HCW convolution of `ε·a_drag`, sampled on the reference orbit every 20 s, within 1 %.
+  - F64's `1.5·ε·ā_d·t²` within 5 %, where `ā_d` is the mean along-track drag acceleration over `[0, t]`.
+
+| case | 6 h | 24 h | 72 h | HCW alone, worst | HCW with feedback, worst | `1.5·ε·ā_d·t²`, worst |
+|---|---|---|---|---|---|---|
+| 350 km, ε = +0.2 | +535 m | +8.42 km | +76.3 km | 1.19e-2 | 2.96e-3 | 3.17e-2 |
+| 350 km, ε = −0.2 | −535 m | −8.41 km | −76.0 km | 7.86e-3 | 2.08e-3 | 3.14e-2 |
+| 450 km, ε = +0.2 | +105 m | +1.61 km | +14.4 km | 1.79e-3 | 1.25e-3 | 4.91e-2 |
+| 450 km, ε = −0.2 | −105 m | −1.61 km | −14.4 km | 1.58e-3 | 1.04e-3 | 4.90e-2 |
+
+The worst-case columns are relative errors over the five horizons, 6, 12, 24, 48 and 72 h.
+
+**The first run failed.** It held the convolution *without* the feedback to the 1 % bound, and missed
+it: 1.19 % at 350 km after 72 h. I had taken the term in item 4 to be of second order in `ε`, and it is
+of first order. Its predicted share at that point is 1.0 %, and the part of the two misses that is
+symmetric in `ε` is 0.99 %. Item 4 was derived, the convolution now carries it, and the bound did not
+change: the worst miss is now 0.30 %. What is left is antisymmetric in `ε`, so it is of second order.
+F64's formula holds within 5 % everywhere. Its worst miss, 4.91 % at 450 km after 6 h, is close to the
+bound. The cause is that the day–night modulation of `a_d` resonates with the orbit, and that share
+falls as `1/(nt)`: it is 0.15 % at 72 h.
+
+**What this sets for the comparison.** At 450 km and F10.7 150, a 20 % density error moves a 24 h
+prediction by 1.6 km and a 72 h one by 14 km. At 350 km the shifts are 8.4 km and 76 km. TU Delft's
+positions, at 0.001° (about 110 m), resolve these from about 12 h on, so they can serve as a km-level
+pilot. The scored comparison needs POD of independent origin (`plans/17` Ф30.H), and each source needs its
+licence step first.
+
 ---
 
 ## 11 · Published errata as a second opinion

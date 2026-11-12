@@ -221,4 +221,33 @@ for h in [500000, 20000000] do
 must(every(lambda([h], is(abs(x_quad(h)/x_at(h) - 1) < 1e-10)), [500000, 20000000]),
      "(7) holds: quadrature agrees with the first moment to 1e-10 at 500 km and 20 000 km")$
 
+/* ---- (8) a thin crown, where the closed forms cancel (plans/17 Ф17.H) -------------------------
+   For D << s1, A^2 L and the D (...) beside it in W and T agree in their leading digits, so in f64
+   the difference loses digits as D/s1 shrinks; V has no such difference. The code
+   takes a crown with D < s1 by 12-point Gauss-Legendre in s instead. The reference: the crown from
+   40 to 40.01 degrees at 35 786 km, D/s1 = 4e-5, its three moments from the closed forms at 60
+   digits, printed at 30 for the Rust test (`a_thin_crown_keeps_its_digits`), and by quadrature in
+   x, where V, W and T are the integrals of the kernel, (1 - x) times it and the across kernel. */
+fpprec : 60$
+thin_edges : block([Rv : 637813646/100, h : 35786000, t1 : 40*%pi/180, t2 : 4001*%pi/18000],
+  [Rv, Rv + h, Rv^2 + (Rv + h)^2 - 2*Rv*(Rv + h)*cos(t1), Rv^2 + (Rv + h)^2 - 2*Rv*(Rv + h)*cos(t2),
+   cos(t1), cos(t2)])$
+thin(e) := block([Rv : thin_edges[1], rv : thin_edges[2]],
+  bfloat(subst([R = Rv, r = rv],
+    subst([D = thin_edges[4] - thin_edges[3], L = log(thin_edges[4]/thin_edges[3]),
+           s1 = thin_edges[3], s2 = thin_edges[4]], e))))$
+thin_quad(k) := block([Rv : float(thin_edges[1]), rv : float(thin_edges[2])],
+  quad_qags(float(subst([R = Rv, r = rv, s = Rv^2 + rv^2 - 2*Rv*rv*x], k)), x,
+            float(thin_edges[6]), float(thin_edges[5]), 'epsrel = 1e-13)[1])$
+thin_moments : map(thin, [V_s, W_s, T_s])$
+thin_quads : map(thin_quad, [kernel_s, (1 - x)*kernel_s, across_s])$
+fpprintprec : 30$
+print("  thin crown at 35 786 km, 40 to 40.01 degrees: D/s1 =",
+      float(thin((s2 - s1)/s1)))$
+print("  V, W, T:", thin_moments)$
+print("  quadrature:", thin_quads)$
+fpprintprec : 0$
+must(every(lambda([m, q], is(abs(q/m - 1) < 1e-9)), thin_moments, thin_quads),
+     "(8) holds: the thin crown's closed-form moments agree with quadrature to 1e-9")$
+
 print("DONE")$

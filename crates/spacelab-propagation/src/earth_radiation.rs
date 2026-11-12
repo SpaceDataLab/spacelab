@@ -263,11 +263,12 @@ fn walk<S: Scalar, F: Fn(&[S; 3]) -> S>(re: f64, ares: f64, r: &[S; 3], exitance
     let inv_r_norm = r_norm.recip();
     let up = [r[0] * inv_r_norm, r[1] * inv_r_norm, r[2] * inv_r_norm];
     // east = (−rᵧ, rₓ, 0)/|·| and north = r̂ × east span the plane across `r`, where the azimuths lie.
+    // east has no z component, so only its x and y are kept, and the products with its zero drop.
     let inv_east_norm = (r[0] * r[0] + r[1] * r[1]).sqrt().recip();
-    let east = [-(r[1] * inv_east_norm), r[0] * inv_east_norm, zero];
+    let east = [-(r[1] * inv_east_norm), r[0] * inv_east_norm];
     let north = [
-        up[1] * east[2] - up[2] * east[1],
-        up[2] * east[0] - up[0] * east[2],
+        -(up[2] * east[1]),
+        up[2] * east[0],
         up[0] * east[1] - up[1] * east[0],
     ];
 
@@ -317,7 +318,7 @@ fn walk<S: Scalar, F: Fn(&[S; 3]) -> S>(re: f64, ares: f64, r: &[S; 3], exitance
             let toward = [
                 east[0] * cos_phi + north[0] * sin_phi,
                 east[1] * cos_phi + north[1] * sin_phi,
-                east[2] * cos_phi + north[2] * sin_phi,
+                north[2] * sin_phi,
             ];
             let center = [
                 up[0] * rise + toward[0] * reach,
@@ -859,6 +860,64 @@ mod tests {
         }
     }
 
+    /// A thin crown keeps its moments to the last digits (G3): the crown from 40° to 40.01° at
+    /// 35 786 km, `D/s₁ = 4.3e-5`, against `derivations/knocke_lambert.mac` (8) at 30 digits. The
+    /// closed forms of `W` and `T` subtract two terms that agree in their leading digits there: in
+    /// f64 they miss `W` by 8.5e-11 of itself, so the crown is taken by quadrature.
+    #[test]
+    fn a_thin_crown_keeps_its_digits() {
+        let r = AE + 35_786.0e3;
+        let (lower, upper) = (40.0 * PI / 180.0, 40.01 * PI / 180.0);
+        let inner = Edge::at(AE, r, lower);
+        let outer = Edge::at(AE, r, upper);
+        let width =
+            4.0 * AE * libm::sin(0.5 * (lower + upper)) * libm::sin(0.5 * (upper - lower)) * r;
+        let moments = crown_moments(AE, r, &inner, &outer, width);
+        for (name, got, exact) in [
+            (
+                "V",
+                moments.view,
+                4.458_672_327_583_450_623_321_563_076_65e-6,
+            ),
+            (
+                "W",
+                moments.versine,
+                1.043_381_286_851_103_802_631_229_338_43e-6,
+            ),
+            (
+                "T",
+                moments.across,
+                -1.576_288_032_987_454_844_618_466_404_6e-7,
+            ),
+        ] {
+            assert!(
+                (got / exact - 1.0).abs() < 1e-13,
+                "{name}: {got:e} against {exact:e}"
+            );
+        }
+    }
+
+    /// The horizon edge is the edge at the horizon's colatitude `acos(R/r)`: `s = r² − R²`,
+    /// `rise = 2R(r − R)` and `height = 0`, each written without the angle. `Edge::at` there leaves
+    /// a height of rounding size, 2R times an ulp of `R`, so it is held against `s`.
+    #[test]
+    fn the_horizon_edge_is_the_edge_at_the_horizon() {
+        for height in [500.0e3, 20_000.0e3, 1.0e9] {
+            let r = AE + height;
+            let at = Edge::at(AE, r, libm::acos(AE / r));
+            let horizon = Edge::horizon(AE, r);
+            assert!((horizon.s / at.s - 1.0).abs() < 1e-14, "{height} m: s");
+            assert!(
+                (horizon.rise / at.rise - 1.0).abs() < 1e-14,
+                "{height} m: rise"
+            );
+            assert!(
+                horizon.height == 0.0 && at.height.abs() < 1e-14 * at.s,
+                "{height} m: height"
+            );
+        }
+    }
+
     /// A uniform Lambertian sphere: the whole grid, central cap and crowns, against the view factor
     /// `(R/r)²` of `derivations/knocke_lambert.mac` (1), along `r̂` and across it (G3). The crowns'
     /// kernels telescope to the horizon's view factor and the evenly spaced sectors cancel across
@@ -939,6 +998,39 @@ mod tests {
                 assert!(
                     error < 1e-12,
                     "{height} m, n = {n}: {error:.3e} from the closed forms"
+                );
+            }
+        }
+    }
+
+    /// An exitance carrying the azimuthal harmonic `sin³γ cos 3φ` across `r̂`, `α + β Re((p̂·(ê + iĥ))³)`:
+    /// the harmonic integrates to nothing in any direction, so the flux is the uniform sphere's
+    /// `α(R/r)²` along `r̂` (G3). The grid's `n` azimuths sum `cos 3φ` to zero along `r̂`, and
+    /// `cos 2φ` and `cos 4φ` to zero across it, unless `n` divides 2, 3 or 4, so from n = 5 on the
+    /// harmonic adds nothing to a rounding at every step, while a grid of three or four azimuths
+    /// would keep it. This is what holds the azimuth count to `⌈2π/Δ⌉`: a linear exitance alone is
+    /// summed exactly by any three.
+    #[test]
+    fn an_azimuthal_harmonic_the_grid_resolves_adds_nothing() {
+        let e = [0.0, 0.8, -0.6];
+        let h = [-0.8, 0.36, 0.48];
+        let (alpha, beta) = (0.7, 0.4);
+        for height in [500.0e3, 20_000.0e3] {
+            let r = AE + height;
+            let up = [0.6, 0.48, 0.64];
+            let sat = up.map(|c| c * r);
+            let along = alpha * (AE / r) * (AE / r);
+            for n in [5.0, 12.0, 24.0, 72.0, 360.0, 2000.0] {
+                let flux = walk(AE, TAU / n, &sat, |p: &[f64; 3]| {
+                    let norm = dot3(p, p).sqrt();
+                    let (x, y) = (dot3(p, &e) / norm, dot3(p, &h) / norm);
+                    alpha + beta * (x * x * x - 3.0 * x * y * y)
+                });
+                let miss = [0, 1, 2].map(|i| flux[i] - along * up[i]);
+                let error = dot3(&miss, &miss).sqrt() / along;
+                assert!(
+                    error < 1e-12,
+                    "{height} m, n = {n}: {error:.3e} from α(R/r)²"
                 );
             }
         }

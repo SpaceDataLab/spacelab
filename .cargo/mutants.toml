@@ -982,7 +982,7 @@ exclude_re = [
     # terminator, `cos θ☉` exactly zero, and there the two agree anyway: `albedo` is read in exactly
     # one place, `albedo · Φ · cos_sun`, so admitting the element multiplies the coefficient by zero
     # and adds nothing. Provable, not measured.
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:579:37: replace > with >= in knocke_exitance",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:580:37: replace > with >= in knocke_exitance",
 
     # The crown walk's counted limit — the `crowns_left` guard, its decrement, and the subtraction
     # inside `step_bound` that sizes it. Four mutants, one argument. (There were seven until Ф17.F
@@ -1007,10 +1007,46 @@ exclude_re = [
     # the counted limit buys termination in ℕ, not termination in time. Re-open all four the day
     # `AngularResolution` gains a floor that makes the worst-case grid payable, because then the
     # counter becomes reachable and each of these becomes a live wrong answer.
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:288:53: replace > with >= in walk",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:289:21: replace -= with /= in walk",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:289:21: replace -= with \\+= in walk",
-    "crates/spacelab-propagation/src/earth_radiation\\.rs:520:24: replace - with \\+ in step_bound",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:289:53: replace > with >= in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:290:21: replace -= with /= in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:290:21: replace -= with \\+= in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:521:24: replace - with \\+ in step_bound",
+
+    # The crowns' colatitudes negated, `lower + Δ` tied to `lower − Δ`. Provably bit-identical: every
+    # use of a colatitude is even in it. `Edge::at` reads it through `sin²(θ/2)` and `cos θ`, and the
+    # width `4R sin((θ₁ + θ₂)/2) sin((θ₂ − θ₁)/2)` is a product of two factors that both change sign.
+    # libm's `sin` is odd and its `cos` even to the bit (the reduction modulo π/2 rounds to nearest,
+    # symmetric in sign, and the kernels are odd and even polynomials), so the walk over −θ is the
+    # walk over θ.
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:291:27: replace \\+ with - in walk",
+
+    # The rim's gate `height > 0`, tied to `>=`. Differs only on a rim exactly on the horizon, where
+    # `r cos θ` rounds to `R`. The mutant then keeps the rim as the crown's outer edge with the chord
+    # as its width, the original swaps in `Edge::horizon` with `inner.height`. The two are the same
+    # edge — `the_horizon_edge_is_the_edge_at_the_horizon` holds `s`, `rise` and `height` to 1e-14 —
+    # and `D = s₂ − s₁ = h₁` there, so they differ by rounding, on one input of measure zero. The walk
+    # stops after either, its inner height being zero.
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:293:52: replace > with >= in walk",
+
+    # The sectors' azimuth phase: the start `0.5 · step` tied to `0.5 + step`, and the step's `+=`
+    # tied to `-=`. Two mutants, one argument: the phase is a free choice of the grid. `east` is any
+    # axis across `r`, so the sectors' origin and sense are arbitrary, and each mutant still leaves `n`
+    # evenly spaced sectors. The sums of cos φ, sin φ, cos φ sin φ and cos² φ over evenly spaced φ do
+    # not depend on where they start or which way they turn (`knocke_lambert.mac` (7)), so every
+    # closed form the tests hold — the uniform sphere, the polar cap, a linear exitance, an azimuthal
+    # harmonic the grid resolves — is met alike, and any other exitance moves within the grid's own
+    # error. No closed form prefers one phase. The sibling `0.5 / step` is caught, by rounding rather
+    # than by the mathematics: it starts the sectors at n/4π rad, and at n = 2000 the sines and
+    # cosines of arguments near 160 miss the linear exitance by 3.7e-12.
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:312:31: replace \\* with \\+ in walk",
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:335:21: replace \\+= with -= in walk",
+
+    # The crown's branch `D < s₁`, tied to `<=`. At `D = s₁` exactly the mutant takes the quadrature
+    # and the original the closed forms, and both are accurate there: the closed forms' cancellation
+    # is of order `(s₁/D)²`, here 1, and the 12-point rule's error term is `(3 + √8)⁻²⁴ = 4e-19`. They
+    # differ by rounding, on one input of measure zero. The `==` sibling, which sends every thin crown
+    # to the closed forms, is caught by `a_thin_crown_keeps_its_digits`.
+    "crates/spacelab-propagation/src/earth_radiation\\.rs:420:22: replace < with <= in crown_moments",
 
     # --- crates/spacelab-propagation/src/space_weather.rs ---
 

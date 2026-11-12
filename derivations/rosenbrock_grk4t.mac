@@ -81,3 +81,23 @@ Am : matrix([0,0,0,0], [A21,0,0,0], [A31,A32,0,0], [A31,A32,0,0])$
 alv : (bfloat(Am) . Gm) . ones$
 print("stage times from A*Gamma:", float(alv[2][1]), float(alv[3][1]), float(alv[4][1]));
 print("  against the published  0.462  0.8802083333333334  (stage 4 reuses stage 3)");
+
+/* The Rust constants (plans/17 Ф17.D). rosenbrock.rs carries the same published decimals as this
+ * file, so each must parse to the same double; and its D2..D4 are the doubles nearest the d_i
+ * derived above. */
+load("rust_literals.mac")$
+src : "../crates/spacelab-propagation/src/rosenbrock.rs"$
+tableau : ["GAMMA", "A21", "A31", "A32", "C21", "C31", "C32", "C41", "C42", "C43", "B1", "B2", "B3", "B4"]$
+print("rust GRK4T tableau is this file's:",
+      same_doubles(map(lambda([n], rust_scalar(src, n)), tableau),
+                   [gamma, A21, A31, A32, C21, C31, C32, C41, C42, C43, B1, B2, B3, B4]));
+/* The stage times ros4.f prints, which A Gamma reproduces to 2 ulp: the alpha_ij are themselves
+ * 16-digit decimals. */
+published_c : [rust_decimal("0.4620000000000000e0"), rust_decimal("0.8802083333333334e0")]$
+print("rust C2, C3 are the published stage times:",
+      same_doubles([rust_scalar(src, "C2"), rust_scalar(src, "C3")], published_c));
+print("A Gamma gives them within 2 ulp:",
+      every(lambda([a, c], is(abs(nearest_double(a) - nearest_double(c)) <= 2 * 2^-53)),
+            [alv[2][1], alv[3][1]], published_c));
+print("rust D2..D4 are the nearest doubles to the derived d:",
+      same_doubles(map(lambda([n], rust_scalar(src, n)), ["D2", "D3", "D4"]), [dv[2][1], dv[3][1], dv[4][1]]));

@@ -1,0 +1,109 @@
+/* The literals of a Rust table, read from the source as written (plans/17 Ф17.D).
+
+   A table transcribed from a derivation's output is only as good as the transcription. These
+   helpers let the derivation read the committed table back and hold every entry against the value
+   it derives. `rust_table(path, name)` returns the literals of `const NAME: ... = [ ... ];` in
+   order, flattened, as the text the source shows: a literal, or a quotient `p / q` of two;
+   `rust_scalar(path, name)` the one entry of `const NAME: f64 = ...;`.
+   `rust_rational` reads one as the exact rational it denotes and `rust_number` as a bigfloat at the
+   current fpprec. `same_rationals(entries, exact)` is true when each entry is exactly its rational;
+   `same_doubles` when each parses to the double its exact value rounds to; `transcribed` when each
+   is its exact value rounded to the digits it shows. rustc's parse plays no part, so a wrong digit
+   cannot hide behind it.
+
+   load("rust_literals.mac")$ from derivations/, as verify.sh runs the derivations.               */
+
+rust_digits(t) := ssubst("", "f32", ssubst("", "f64", ssubst("", "_", strim(" ", t))))$
+
+/* A Rust float literal, `_` separators, an exponent and an `f64` suffix allowed, as the exact
+   rational its decimal text denotes. */
+rust_decimal(t) := block([u : rust_digits(t), ex : 0, at, sign : 1, point],
+  at : ssearch("e", ssubst("e", "E", u)),
+  if at # false then (ex : parse_string(substring(u, at + 1)), u : substring(u, 1, at)),
+  if charat(u, 1) = "-" then (sign : -1, u : substring(u, 2)),
+  point : ssearch(".", u),
+  sign * parse_string(ssubst("", ".", u))
+       * 10^(ex - (if point = false then 0 else slength(u) - point)))$
+
+/* An entry: a literal, or the quotient `p / q` of two, which f64 rounds once, as an exact rational. */
+rust_rational(t) := block([at : ssearch("/", t)],
+  if at = false then rust_decimal(t)
+  else rust_decimal(substring(t, 1, at)) / rust_decimal(substring(t, at + 1)))$
+
+/* An entry as a bigfloat at the current fpprec. */
+rust_number(t) := bfloat(rust_rational(t))$
+
+rust_is_number(t) := block([u : strim(" ", t)], slength(u) > 0 and
+  (digitcharp(charat(u, 1)) or (slength(u) > 1 and charat(u, 1) = "-" and digitcharp(charat(u, 2)))))$
+
+rust_table(path, name) := block([s : openr(path), line, inside : false, done : false, out : [],
+                                 head : concat("const ", name, ":"), at, body],
+  while not done and (line : readline(s)) # false do (
+    body : false,
+    if inside then body : line
+    else if ssearch(head, line) # false then (
+      inside : true,
+      at : ssearch("= [", line),
+      body : if at = false then "" else substring(line, at + 3)),
+    if body # false then (
+      at : ssearch("//", body),
+      if at # false then body : substring(body, 1, at),
+      at : ssearch("];", body),
+      if at # false then (done : true, body : substring(body, 1, at)),
+      for c in ["[", "]", ";"] do body : ssubst(",", c, body),
+      out : append(out, map(lambda([e], strim(" ", e)), sublist(split(body, ",", false), rust_is_number))))),
+  close(s),
+  if not done then error("rust_table: no complete table", name, "in", path),
+  out)$
+
+/* The value of a scalar `const NAME: f64 = <entry>;` on one line, as the text the source shows. */
+rust_scalar(path, name) := block([s : openr(path), line, head : concat("const ", name, ": "), out : false,
+                                  at],
+  while out = false and (line : readline(s)) # false do
+    if ssearch(head, line) # false then (
+      at : ssearch("= ", line),
+      out : strim(" ", substring(line, at + 2, ssearch(";", line)))),
+  close(s),
+  if out = false then error("rust_scalar: no const", name, "in", path),
+  out)$
+
+/* Every entry is exactly the rational its derivation gives: for tables written as quotients of
+   integers, or as decimals that terminate. */
+same_rationals(entries, exact) := length(entries) = length(exact) and
+  every(lambda([t, x], is(ratsimp(rust_rational(t) - x) = 0)), entries, exact)$
+
+/* The place of a literal's last shown digit, from its text: 10^(e - k + 1) for a leading digit at
+   10^e and k digits shown from it. `none` for a literal that shows no nonzero digit. */
+rust_last_place(t) := block([u : rust_digits(t), m, ex : 0, at, point, digits, first],
+  at : ssearch("e", ssubst("e", "E", u)),
+  if at = false then m : u else (m : substring(u, 1, at), ex : parse_string(substring(u, at + 1))),
+  m : ssubst("", "-", m),
+  point : ssearch(".", m),
+  if point = false then point : slength(m) + 1,
+  digits : ssubst("", ".", m),
+  first : false,
+  for i : 1 thru slength(digits) while first = false do
+    if charat(digits, i) # "0" then first : i,
+  if first = false then 'none
+  else 10^((point - 1 - first + ex) - (slength(digits) - first + 1) + 1))$
+
+/* The nearest double to x, at the current fpprec, as an exact rational: its 53-bit significand
+   rounded, a tie being impossible for the irrationals and long decimals held here. */
+nearest_double(x) := block([a : bfloat(abs(x)), sign : if bfloat(x) < 0 then -1 else 1, e],
+  if is(equal(a, 0)) then 0
+  else (e : floor(log(a) / log(2b0)),
+        while 2^e > a do e : e - 1,
+        while 2^(e + 1) <= a do e : e + 1,
+        sign * round(a * 2^(52 - e)) * 2^(e - 52)))$
+
+/* Every literal parses to the double its exact value rounds to. What a compiled `f64` table needs;
+   weaker than `transcribed` where a table carries more digits than a double holds. */
+same_doubles(literals, exact) := length(literals) = length(exact) and
+  every(lambda([t, x], is(nearest_double(rust_number(t)) = nearest_double(x))), literals, exact)$
+
+/* Every literal is its exact value rounded to the digits it shows; a literal of zeros is exact. */
+transcribed(literals, exact) := length(literals) = length(exact) and
+  every(lambda([t, x], block([place : rust_last_place(t), v : rust_number(t)],
+          if place = 'none then is(bfloat(abs(x)) < 10^(-fpprec + 5))
+          else is(bfloat(abs(v - x)) <= bfloat(place / 2)))),
+        literals, exact)$

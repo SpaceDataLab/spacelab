@@ -21,8 +21,9 @@
 //! Everything is derived from the eight nodes in `derivations/ias15_nodes.mac`: the nodes are the
 //! roots of `d⁷/dx⁷[x⁸(x−1)⁷]` (the Gauss–Radau-left polynomial), and the `c`/`d` conversion matrices
 //! are the coefficients of the Newton-basis products expanded into the power basis (and its inverse).
-//! The literals below are transcribed from that CAS output; they reproduce REBOUND's hardcoded arrays
-//! to \~1e-33.
+//! The literals below carry REBOUND's digits, which agree with the derived values to \~1e-33; the
+//! derivation reads them back from this file and checks that each parses to the double its derived
+//! value rounds to.
 //!
 //! # Constraint
 //!
@@ -53,7 +54,8 @@ const STAGES: usize = 8;
 /// Number of `b`/`g` coefficients (the degree-7 fit).
 const NB: usize = 7;
 
-/// Gauss–Radau-left nodes, roots of `d⁷/dx⁷[x⁸(x−1)⁷]` (see the module derivation).
+/// Gauss–Radau-left nodes, roots of `d⁷/dx⁷[x⁸(x−1)⁷]`, each the nearest double to its root
+/// (`derivations/ias15_nodes.mac`).
 const H: [f64; STAGES] = [
     0.0,
     0.05626256053692214646565219103231117577976,
@@ -65,7 +67,8 @@ const H: [f64; STAGES] = [
     0.9775206135612875018911745004291549400898,
 ];
 
-/// `c` conversion matrix (Newton `g` → power `b`), REBOUND flat packing `c[k(k-1)/2 + j]`.
+/// `c` conversion matrix (Newton `g` → power `b`), REBOUND flat packing `c[k(k-1)/2 + j]`, each
+/// entry the nearest double to the derived one (`derivations/ias15_nodes.mac`).
 const CC: [f64; 21] = [
     -0.05626256053692214646565219103231117,
     0.01014080283006362998648180478770816,
@@ -90,7 +93,8 @@ const CC: [f64; 21] = [
     -2.755812719772045831442158832904176,
 ];
 
-/// `d` conversion matrix (power `b` → Newton `g`, for warm starting), flat packing `d[j(j-1)/2 + i]`.
+/// `d` conversion matrix (power `b` → Newton `g`, for warm starting), flat packing `d[j(j-1)/2 + i]`,
+/// each entry the nearest double to the derived one (`derivations/ias15_nodes.mac`).
 const DD: [f64; 21] = [
     0.05626256053692214646565219103231117,
     0.003165475718170829249990480039457002,

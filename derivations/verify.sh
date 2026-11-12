@@ -60,8 +60,8 @@ if have maxima; then
 
     out=$(timeout 120 maxima --very-quiet -b dopri5_order.mac 2>&1)
     zeros=$(printf '%s' "$out" | grep -cE ': 0 *$')
-    if [ "$zeros" -ge 18 ]; then
-        ok "maxima dopri5_order.mac: the DOPRI5 tableau satisfies every order condition through 5"
+    if [ "$zeros" -ge 18 ] && printf '%s' "$out" | grep -q '^dense output is order 4 at every theta: true' && printf '%s' "$out" | grep -q '^rust D1, D3..D7 are exactly d: true'; then
+        ok "maxima dopri5_order.mac: the DOPRI5 tableau satisfies every order condition through 5, its dense output is order 4 at every theta, and dopri5.rs holds its weights exactly"
     else
         bad "maxima dopri5_order.mac" "expected >=18 order conditions to vanish, found $zeros"
     fi
@@ -113,8 +113,8 @@ if have maxima; then
     fi
 
     out=$(timeout 120 maxima --very-quiet -b adams_coeffs.mac 2>&1)
-    if printf '%s' "$out" | grep -qE 'AB8 sum .*: +1' && printf '%s' "$out" | grep -qE 'AM8 sum .*: +1' && [ "$(printf '%s' "$out" | grep -cE 'leading.*: +0')" -ge 2 ]; then
-        ok "maxima adams_coeffs.mac: AB8/AM8 sum to 1 and the leading coefficients derive correctly"
+    if printf '%s' "$out" | grep -qE 'AB8 sum .*: +1' && printf '%s' "$out" | grep -qE 'AM8 sum .*: +1' && [ "$(printf '%s' "$out" | grep -cE 'leading.*: +0')" -ge 2 ] && [ "$(printf '%s' "$out" | grep -cE '^rust (AB8|AM8) is .*: true')" -eq 4 ]; then
+        ok "maxima adams_coeffs.mac: AB8/AM8 sum to 1, the leading coefficients derive correctly, and abm.rs holds every coefficient rounded to its digits"
     else
         bad "maxima adams_coeffs.mac" "an Adams coefficient identity failed"
     fi
@@ -141,8 +141,8 @@ if have maxima; then
     out=$(timeout 120 maxima --very-quiet -b radau5_coeffs.mac 2>&1)
     bcond=$(printf '%s' "$out" | grep -cE 'B\( [1-5] \) residual .*: +0')
     stiff=$(printf '%s' "$out" | grep -cE 'stiff-accurate b [1-3].*: +0')
-    if [ "$bcond" -ge 5 ] && [ "$stiff" -ge 3 ] && [ "$(printf '%s' "$out" | grep -cE 'row-sum a.*: +0')" -ge 3 ]; then
-        ok "maxima radau5_coeffs.mac: Radau IIA tableau is order 5 (B(1..5)=0), stiffly accurate, rows sum to c"
+    if [ "$bcond" -ge 5 ] && [ "$stiff" -ge 3 ] && [ "$(printf '%s' "$out" | grep -cE 'row-sum a.*: +0')" -ge 3 ] && [ "$(printf '%s' "$out" | grep -cE '^rust (C|A|B) is .*: true')" -eq 3 ]; then
+        ok "maxima radau5_coeffs.mac: Radau IIA tableau is order 5 (B(1..5)=0), stiffly accurate, rows sum to c, and radau.rs holds it rounded to its digits"
     else
         bad "maxima radau5_coeffs.mac" "a Radau IIA order/collocation condition failed (B=$bcond stiff=$stiff)"
     fi
@@ -150,8 +150,8 @@ if have maxima; then
     out=$(timeout 120 maxima --very-quiet -b rosenbrock_grk4t.mac 2>&1)
     # the GRK4T stability function must match exp(z) through z^4 (5 MATCH lines: z^0..z^4)
     matches=$(printf '%s' "$out" | grep -cE 'MATCH \(order cond\)')
-    if [ "$matches" -ge 5 ]; then
-        ok "maxima rosenbrock_grk4t.mac: the GRK4T stage recurrence reproduces exp(z) through z^4 (order 4)"
+    if [ "$matches" -ge 5 ] && [ "$(printf '%s' "$out" | grep -cE '^(rust .*|A Gamma .*): true')" -eq 4 ]; then
+        ok "maxima rosenbrock_grk4t.mac: the GRK4T stage recurrence reproduces exp(z) through z^4 (order 4), and rosenbrock.rs holds the same doubles"
     else
         bad "maxima rosenbrock_grk4t.mac" "GRK4T stability function did not match exp(z) to order 4 (matches=$matches)"
     fi
@@ -159,10 +159,11 @@ if have maxima; then
     out=$(timeout 120 maxima --very-quiet -b ias15_nodes.mac 2>&1)
     # eight Gauss-Radau nodes (h0=0, h7<1) and the c/d conversion matrices are mutually inverse
     cdinv=$(printf '%s' "$out" | grep -oE 'c.d - I largest entry \(=0\?\): [0-9.]+b-[0-9]+' | grep -oE 'b-[0-9]+' | tr -d 'b-')
-    if printf '%s' "$out" | grep -qE 'node count .*: +8' && [ -n "$cdinv" ] && [ "$cdinv" -ge 30 ]; then
-        ok "maxima ias15_nodes.mac: 8 Gauss-Radau nodes derived, c and d conversion matrices invert to ~1e-${cdinv}"
+    rust=$(printf '%s' "$out" | grep -cE '^rust (H|CC|DD) is the nearest doubles to .*: true')
+    if printf '%s' "$out" | grep -qE 'node count .*: +8' && [ -n "$cdinv" ] && [ "$cdinv" -ge 30 ] && [ "$rust" -eq 3 ]; then
+        ok "maxima ias15_nodes.mac: 8 Gauss-Radau nodes derived, c and d conversion matrices invert to ~1e-${cdinv}, and ias15.rs holds their nearest doubles"
     else
-        bad "maxima ias15_nodes.mac" "IAS15 node/matrix derivation failed (c.d-I exponent e-${cdinv:-?})"
+        bad "maxima ias15_nodes.mac" "IAS15 node/matrix derivation failed (c.d-I exponent e-${cdinv:-?}, ${rust:-0} of 3 Rust tables match)"
     fi
 
     out=$(timeout 120 maxima --very-quiet -b whfast_stumpff.mac 2>&1)
@@ -188,10 +189,11 @@ if have maxima; then
     out=$(timeout 120 maxima --very-quiet -b ark_order.mac 2>&1)
     # all 18 ARK4(3)6L[2]SA order-4 conditions vanish to ~1e-27 (the coefficients' precision)
     exp=$(printf '%s' "$out" | grep -oE 'residual.*: [0-9.]+b-[0-9]+' | grep -oE 'b-[0-9]+' | tr -d 'b-')
-    if [ -n "$exp" ] && [ "$exp" -ge 20 ]; then
-        ok "maxima ark_order.mac: the ARK4(3)6L[2]SA IMEX pair satisfies all 18 order-4 conditions to ~1e-${exp}"
+    rust=$(printf '%s' "$out" | grep -cE '^rust (C|B|AEX|AIM) is exactly .*: true')
+    if [ -n "$exp" ] && [ "$exp" -ge 20 ] && [ "$rust" -eq 4 ]; then
+        ok "maxima ark_order.mac: the ARK4(3)6L[2]SA IMEX pair satisfies all 18 order-4 conditions to ~1e-${exp}, and ark.rs holds its rationals exactly"
     else
-        bad "maxima ark_order.mac" "an ARK order-4 condition did not vanish (exponent e-${exp:-?})"
+        bad "maxima ark_order.mac" "an ARK order-4 condition did not vanish (exponent e-${exp:-?}), or ark.rs differs (${rust:-0} of 4 tables match)"
     fi
 
     out=$(timeout 120 maxima --very-quiet -b mercurius_changeover.mac 2>&1)
@@ -215,8 +217,8 @@ if have maxima; then
     out=$(timeout 120 maxima --very-quiet -b saba_coeffs.mac 2>&1)
     # SABA drift lengths and kick weights each sum to 1 (n=1..4, to ~1e-33), and SABA2 matches its form
     sums=$(printf '%s' "$out" | grep -cE 'max \|sum - 1\| \(~0\?\): (0\.0|[0-9.]+b-[0-9][0-9])')
-    if [ "$sums" -ge 4 ] && printf '%s' "$out" | grep -qE 'SABA2 c1.*\(=0\?\): 0\.0' && printf '%s' "$out" | grep -qE 'SABA2 c2.*\(=0\?\): 0\.0'; then
-        ok "maxima saba_coeffs.mac: SABA_n Gauss-Legendre drift/kick coefficients sum to 1, SABA2 closed form checks"
+    if [ "$sums" -ge 4 ] && printf '%s' "$out" | grep -qE 'SABA2 c1.*\(=0\?\): 0\.0' && printf '%s' "$out" | grep -qE 'SABA2 c2.*\(=0\?\): 0\.0' && [ "$(printf '%s' "$out" | grep -cE '^rust SABA[24]_[CD] is .*: true')" -eq 4 ]; then
+        ok "maxima saba_coeffs.mac: SABA_n Gauss-Legendre drift/kick coefficients sum to 1, SABA2 closed form checks, and saba.rs holds them rounded to their digits"
     else
         bad "maxima saba_coeffs.mac" "a SABA coefficient identity failed (sums=$sums)"
     fi

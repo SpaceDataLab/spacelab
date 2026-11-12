@@ -56,6 +56,8 @@ use crate::driver::{
 use crate::linalg::lu_factor;
 use crate::variational::ScalarSystem;
 
+/// The GRK4T tableau as `ros4.f` prints it (Kaps & Rentrop 1979); `derivations/rosenbrock_grk4t.mac`
+/// holds the same decimals and checks the order conditions on them.
 const GAMMA: f64 = 0.231;
 const A21: f64 = 0.2000000000000000e1;
 const A31: f64 = 0.4524708207373116e1;
@@ -70,7 +72,8 @@ const B1: f64 = 0.3957503746640777e1;
 const B2: f64 = 0.4624892388363313e1;
 const B3: f64 = 0.6174772638750108e0;
 const B4: f64 = 0.1282612945269037e1;
-/// Stage times `cᵢ` (only affect a non-autonomous force).
+/// Stage times `cᵢ` (only affect a non-autonomous force), as `ros4.f` prints them;
+/// `derivations/rosenbrock_grk4t.mac` reproduces them from `A·Γ` to 2 ulp.
 const C2: f64 = 0.4620000000000000e0;
 const C3: f64 = 0.8802083333333334e0;
 /// `dᵢ = Σⱼ γᵢⱼ`, the weights of the `h·dᵢ·∂f/∂t` stage terms, from

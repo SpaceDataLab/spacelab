@@ -34,8 +34,22 @@ print("SABA2 c1 - (1/2 - 1/(2 sqrt3)) (=0?):", bfloat(saba(2)[1][1] - (1/2 - 1/(
 print("SABA2 c2 - 1/sqrt3            (=0?):", bfloat(saba(2)[1][2] - 1/sqrt(3)));
 print("SABA2 d  - (1/2, 1/2)         (=0?):", bfloat(saba(2)[2][1] - 1/2 + saba(2)[2][2] - 1/2));
 
-/* Full-precision literals for SABA_2 and SABA_4 (transcribed from the CAS). */
+/* Full-precision literals for SABA_2 and SABA_4, printed at 36 digits from roots taken at 60: at
+   fpprec 36 the roots lose their last digits, and SABA4_D once carried a 36th digit two off. */
+fpprec : 60$
+fpprintprec : 36$
 print("--- SABA2 c ---");  for z in saba(2)[1] do print(bfloat(z), ",");
 print("--- SABA2 d ---");  for z in saba(2)[2] do print(bfloat(z), ",");
 print("--- SABA4 c ---");  for z in saba(4)[1] do print(bfloat(z), ",");
 print("--- SABA4 d ---");  for z in saba(4)[2] do print(bfloat(z), ",");
+
+/* The Rust tables (plans/17 Ф17.D). saba.rs holds SABA_2 and SABA_4 as derived here, each value
+   rounded to the digits it shows. */
+fpprintprec : 0$
+load("rust_literals.mac")$
+src : "../crates/spacelab-propagation/src/saba.rs"$
+s2 : saba(2)$  s4 : saba(4)$
+print("rust SABA2_C is rounded to its digits:", transcribed(rust_table(src, "SABA2_C"), s2[1]));
+print("rust SABA2_D is rounded to its digits:", transcribed(rust_table(src, "SABA2_D"), s2[2]));
+print("rust SABA4_C is rounded to its digits:", transcribed(rust_table(src, "SABA4_C"), s4[1]));
+print("rust SABA4_D is rounded to its digits:", transcribed(rust_table(src, "SABA4_D"), s4[2]));

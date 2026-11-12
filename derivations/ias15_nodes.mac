@@ -10,7 +10,7 @@
  * The acceleration on a step is fitted by a 7th-degree polynomial in the substep parameter, written
  * in the Newton divided-difference basis with coefficients g[0..6], then converted to the power
  * basis b[0..6] by the constant lower-triangular matrix c (Everhart Eq. 7). This script derives the
- * nodes and the c-matrix from first principles so the Rust constants are transcribed from the CAS.
+ * nodes and the c-matrix from first principles and reads the Rust constants back against them.
  *
  *   maxima --very-quiet -b ias15_nodes.mac
  */
@@ -33,13 +33,26 @@ print("h[0] (=0?):", h[1], "   h[7] (<1?):", h[8]);
  * the j-th Newton product is c[j][k]; so b_k = sum_j c[j][k] g_j. Everhart tabulates these; here we
  * expand the products symbolically and read them off, exactly. */
 newton(j) := prod(t - h[m+1], m, 0, j-1)$   /* j-th Newton product, j = 0..6 (empty prod = 1) */
-C : genmatrix(lambda([jj, kk], coeff(expand(newton(jj-1)), t, kk-1)), 7, 7)$
+C : genmatrix(lambda([jj, kk], coeff(expand(newton(jj-1)), t, kk-1)), 8, 8)$
 print("--- c matrix (b_k = sum_j c[j][k] g_j), lower-triangular, unit diagonal ---");
-for j:1 thru 7 do for k:1 thru j do print("c[", j-1, "][", k-1, "] =", bfloat(C[j][k]));
+for j:1 thru 8 do for k:1 thru j do print("c[", j-1, "][", k-1, "] =", bfloat(C[j][k]));
 
 /* --- d-matrix: the inverse conversion g = d . b, used to rescale the b-coefficients when the step
  * size changes between steps (Everhart's warm start). d = c^{-1}, also lower-triangular. --------- */
 D : invert(C)$
-print("c.d - I largest entry (=0?):", bfloat(lmax(map(abs, flatten(args(C . D - ident(7)))))));
+print("c.d - I largest entry (=0?):", bfloat(lmax(map(abs, flatten(args(C . D - ident(8)))))));
 print("--- d matrix (g_k = sum_j d[j][k] b_j) ---");
-for j:1 thru 7 do for k:1 thru j do print("d[", j-1, "][", k-1, "] =", bfloat(D[j][k]));
+for j:1 thru 8 do for k:1 thru j do print("d[", j-1, "][", k-1, "] =", bfloat(D[j][k]));
+
+/* --- The Rust tables (plans/17 Ф17.D) -------------------------------------------------------
+ * ias15.rs holds the nodes H and the strict lower triangles of c and d, row by row in REBOUND's
+ * packing: CC[k(k-1)/2 + j] for k = 1..6, j < k. The Newton products here carry the factor
+ * t - h0 = t, so that entry is C[k+2][j+2] of this matrix, and likewise for d. Its literals came
+ * from REBOUND's arrays, which agree with these values to ~1e-33, past a double's 17 digits: each
+ * must parse to the double its derived value rounds to. */
+load("rust_literals.mac")$
+src : "../crates/spacelab-propagation/src/ias15.rs"$
+packed(M) := flatten(makelist(makelist(M[k+2][j+2], j, 0, k-1), k, 1, 6))$
+print("rust H is the nearest doubles to the nodes:", same_doubles(rust_table(src, "H"), h));
+print("rust CC is the nearest doubles to c:", same_doubles(rust_table(src, "CC"), packed(C)));
+print("rust DD is the nearest doubles to d:", same_doubles(rust_table(src, "DD"), packed(D)));

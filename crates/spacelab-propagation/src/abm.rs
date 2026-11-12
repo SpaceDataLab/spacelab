@@ -27,7 +27,8 @@ use crate::{Dop853, DynamicalSystem, Tolerance};
 
 const ORDER: usize = 8;
 
-/// Adams–Bashforth-8 predictor weights, on `f_n, f_{n-1}, …, f_{n-7}` (full-precision literals).
+/// Adams–Bashforth-8 predictor weights, on `f_n, f_{n-1}, …, f_{n-7}`, each its rational rounded to the
+/// digits shown (`derivations/adams_coeffs.mac` derives them and reads them back).
 const AB8: [f64; ORDER] = [
     3.58995535714285714285714285714286,
     -9.52520667989417989417989417989418,
@@ -39,7 +40,8 @@ const AB8: [f64; ORDER] = [
     -0.304224537037037037037037037037037,
 ];
 
-/// Adams–Moulton-8 corrector weights, on `f_{n+1}, f_n, …, f_{n-6}`. Shared with [`crate::gj`],
+/// Adams–Moulton-8 corrector weights, on `f_{n+1}, f_n, …, f_{n-6}`, each its rational rounded to the
+/// digits shown (`derivations/adams_coeffs.mac`). Shared with [`crate::gj`],
 /// where the same first-sum (Adams) companion advances the velocity of the Gauss–Jackson scheme.
 pub(crate) const AM8: [f64; ORDER] = [
     0.304224537037037037037037037037037,

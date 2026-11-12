@@ -11444,7 +11444,17 @@ names but the item does not (IAS15 49, ARK 31, ABM 16, Radau 14, Rosenbrock 13, 
 Prince 12), the Python and C bindings' default arguments (72 and 14, mostly the same few repeated
 across signatures: μ, a and J2–J4 of the gravity models, the Earth's rotation rate, a normal
 quantile), the SLR site-displacement constants (40) and a tail of
-single constants. `--check` fails on an item with more open literals than its entry, on a new item
+single constants.
+
+The integrator tableaux went first, the same day. Each derivation now reads its Rust table back from
+the source, through `derivations/rust_literals.mac`, and holds every entry against the value it
+derives: ARK's and the dense-output weights of Dormand–Prince exactly as rationals; Adams, Radau
+IIA and SABA rounded to the digits they show; IAS15's REBOUND digits and GRK4T's published decimals
+as the doubles they parse to. Dormand–Prince's dense output had no check at all: its interpolant is
+now shown to be order 4 at every θ, the eight order-4 conditions as identities in θ. The read-back
+found one wrong digit. SABA4's kick weights carried a 36th digit two units off, because the
+generator printed roots it had taken at 36 digits; the double was right, the text was not, and the
+generator now works at 60. **Today: 181 open literals in 95 items.** `--check` fails on an item with more open literals than its entry, on a new item
 and on an entry the sweep no longer matches, so the count can only fall: an entry leaves when its
 literals name the derivation that checks them or the document they are copied from.
 
@@ -11473,21 +11483,8 @@ crates/spacelab-gpu/src/lib.rs::J2 | 1
 crates/spacelab-gpu/src/lib.rs::KE | 1
 crates/spacelab-gpu/src/lib.rs::TAU | 2
 crates/spacelab-ionosphere/src/parameters.rs::X0 | 1
-crates/spacelab-propagation/src/abm.rs::AB8 | 8
-crates/spacelab-propagation/src/abm.rs::AM8 | 8
-crates/spacelab-propagation/src/ark.rs::AEX | 22
-crates/spacelab-propagation/src/ark.rs::AIM | 9
-crates/spacelab-propagation/src/dopri5.rs::D1 | 2
-crates/spacelab-propagation/src/dopri5.rs::D3 | 2
-crates/spacelab-propagation/src/dopri5.rs::D4 | 2
-crates/spacelab-propagation/src/dopri5.rs::D5 | 2
-crates/spacelab-propagation/src/dopri5.rs::D6 | 2
-crates/spacelab-propagation/src/dopri5.rs::D7 | 2
 crates/spacelab-propagation/src/dsst/srp.rs::D_REF | 1
 crates/spacelab-propagation/src/earth_radiation.rs::SPEED_OF_LIGHT | 1
-crates/spacelab-propagation/src/ias15.rs::CC | 21
-crates/spacelab-propagation/src/ias15.rs::DD | 21
-crates/spacelab-propagation/src/ias15.rs::H | 7
 crates/spacelab-propagation/src/jacchia_bowman/constants.rs::M_BAR_COEFFS | 1
 crates/spacelab-propagation/src/jacchia_bowman/constants.rs::R_E | 1
 crates/spacelab-propagation/src/jacchia_bowman/constants.rs::TROPICAL_YEAR_DAYS | 1
@@ -11495,25 +11492,6 @@ crates/spacelab-propagation/src/jacchia_bowman/constants.rs::TX_A | 1
 crates/spacelab-propagation/src/jacchia_bowman/constants.rs::TX_C | 1
 crates/spacelab-propagation/src/lifetime_drivers.rs::WGS84_A | 1
 crates/spacelab-propagation/src/lifetime_drivers.rs::WGS84_INVERSE_F | 1
-crates/spacelab-propagation/src/radau.rs::A | 9
-crates/spacelab-propagation/src/radau.rs::B | 3
-crates/spacelab-propagation/src/radau.rs::C | 2
-crates/spacelab-propagation/src/rosenbrock.rs::A31 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::A32 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::B1 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::B2 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::B3 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::B4 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::C21 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::C3 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::C31 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::C32 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::C41 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::C42 | 1
-crates/spacelab-propagation/src/rosenbrock.rs::C43 | 1
-crates/spacelab-propagation/src/saba.rs::SABA2_C | 3
-crates/spacelab-propagation/src/saba.rs::SABA4_C | 5
-crates/spacelab-propagation/src/saba.rs::SABA4_D | 4
 crates/spacelab-propagation/src/sdtm/mod.rs::REFERENCE_RADIUS | 1
 crates/spacelab-propagation/src/sdtm/uncertainty.rs::NORMAL_90 | 1
 crates/spacelab-propagation/src/sdtm/uncertainty.rs::NORMAL_95 | 1

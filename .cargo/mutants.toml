@@ -1857,8 +1857,8 @@ exclude_re = [
     # same variant the unmutated guard returns one line earlier, and returns it before any
     # `try_step`, so `sys.derivative` is never called and not even an evaluation-counting probe
     # separates the two. Every other input takes the same branch in both. Provable, not searched.
-    "abm\\.rs:74:13: replace > with >= in integrate_abm8",
-    "abm\\.rs:150:13: replace > with >= in integrate_abm8_dense",
+    "abm\\.rs:76:13: replace > with >= in integrate_abm8",
+    "abm\\.rs:152:13: replace > with >= in integrate_abm8_dense",
 
     # The other half of the same guard, `h > 0.0` → `h >= 0.0`, differs at exactly `h == ±0.0`, and
     # only when `t1 > t0` (otherwise the first conjunct still fires). There the mutant falls through
@@ -1866,24 +1866,24 @@ exclude_re = [
     # positive numerator over `+0.0` or `-0.0`, i.e. `+inf` or `-inf`. `!(asked.is_finite() && asked
     # >= 0.0)` catches both and returns `IntegrationError::BadArguments`, the same variant one line
     # earlier would have, and returns it before `Nordsieck`/DOP853 is constructed at all.
-    "abm\\.rs:74:23: replace > with >= in integrate_abm8",
-    "abm\\.rs:150:23: replace > with >= in integrate_abm8_dense",
+    "abm\\.rs:76:23: replace > with >= in integrate_abm8",
+    "abm\\.rs:152:23: replace > with >= in integrate_abm8_dense",
 
     # And `&&` → `||` is the union of those two cases: the mutated guard fires only when *both*
     # conjuncts fail, so the fall-through set is exactly the inputs failing one of them. `t1 < t0`
     # with `h > 0` gives `asked < 0`; `t1` or `t0` NaN gives `asked` NaN; `h < 0` gives `asked < 0`;
     # `h == ±0.0` gives `asked == ±inf`; each is rejected by `step_count` above. The one remaining
-    # case, `t1 == t0` with `h > 0`, is the `74:13` argument verbatim — `step == ±0.0` and
+    # case, `t1 == t0` with `h > 0`, is the `76:13` argument verbatim — `step == ±0.0` and
     # `driver::integrate` refuses the collapsed span. All five paths reach the same `BadArguments`
     # before any `sys.derivative`, so the mutant is observationally identical.
-    "abm\\.rs:74:18: replace && with \\|\\| in integrate_abm8",
-    "abm\\.rs:150:18: replace && with \\|\\| in integrate_abm8_dense",
+    "abm\\.rs:76:18: replace && with \\|\\| in integrate_abm8",
+    "abm\\.rs:152:18: replace && with \\|\\| in integrate_abm8_dense",
 
     # --- crates/spacelab-propagation/src/adams_nordsieck.rs ---
 
     # `if !(t1 > t0 && h > 0.0)` again, but this integrator has no DOP853 startup to re-catch a
     # collapsed span — `Nordsieck::start` accepts `h == 0.0` and returns `y0` — so only the `h`
-    # conjunct is equivalent here, and it is equivalent for the same reason as `abm.rs:74:23`:
+    # conjunct is equivalent here, and it is equivalent for the same reason as `abm.rs:76:23`:
     # `h >= 0.0` lets `h == ±0.0` through to `step_count(t0, t1, ±0.0, 1)`, where `asked` is `±inf`
     # and the `is_finite` test returns `BadArguments`. The other two mutants of this line, `>` on
     # `t1 > t0` and the `&&`, do change behaviour at `t1 == t0` — they return `Ok(y0)` where the
@@ -1895,9 +1895,9 @@ exclude_re = [
     # The same `h > 0.0` conjunct in `integrate_ark`'s entry guard, and the same proof: `h >= 0.0`
     # differs only at `h == ±0.0` with `t1 > t0`, where `step_count(t0, t1, ±0.0, 1)` divides a
     # positive span by a zero step, gets `±inf`, and returns `BadArguments` from its `is_finite`
-    # test. `170:13` and `170:18` are *not* equivalent — `Nordsieck`-style, an empty span would
+    # test. `172:13` and `172:18` are *not* equivalent — `Nordsieck`-style, an empty span would
     # reach the stage loop — and `ark_rejects_bad_arguments` already covers them.
-    "ark\\.rs:170:23: replace > with >= in integrate_ark",
+    "ark\\.rs:172:23: replace > with >= in integrate_ark",
 
     # --- crates/spacelab-propagation/src/driver.rs ---
 
@@ -1933,7 +1933,7 @@ exclude_re = [
     "gj\\.rs:115:36: replace > with >= in integrate_gj8",
     "gj\\.rs:222:36: replace > with >= in integrate_gj8_dense",
 
-    # The `h > 0.0` conjunct of the same guard, equivalent for the reason `abm.rs:74:23` is: `>=`
+    # The `h > 0.0` conjunct of the same guard, equivalent for the reason `abm.rs:76:23` is: `>=`
     # differs only at `h == ±0.0`, and with `t1 > t0` that reaches `step_count(t0, t1, ±0.0, 7)`,
     # whose first act is `asked = (t1 - t0) / h`. A positive span over a signed zero is `±inf`, the
     # `asked.is_finite()` test rejects it, and the `?` propagates the identical
@@ -1945,7 +1945,7 @@ exclude_re = [
     # --- crates/spacelab-propagation/src/mercurius.rs ---
 
     # The `dt > 0.0` conjunct of `if !(t1 > t0 && dt > 0.0 && mu > 0.0)`, equivalent for the reason
-    # `abm.rs:74:23` is: `>=` differs only at `dt == ±0.0`, and with `t1 > t0` that reaches
+    # `abm.rs:76:23` is: `>=` differs only at `dt == ±0.0`, and with `t1 > t0` that reaches
     # `step_count(t0, t1, ±0.0, 1)`, whose `asked = (t1 - t0) / dt` is `±inf`. The `is_finite` test
     # returns the identical `IntegrationError::BadArguments` two lines below where the guard would
     # have. The other four mutants of this line are *not* equivalent and are killed by
@@ -1995,17 +1995,17 @@ exclude_re = [
     # are killed by `the_fixed_step_entry_points_refuse_an_empty_span`, which also holds the
     # `SN == 3N` boundary — without it a caller's wrong type argument came back as
     # `StageSolveFailed`, a stage blamed for a singular Newton matrix it was handed.
-    "radau\\.rs:182:38: replace > with >= in integrate_radau5",
-    "radau\\.rs:210:38: replace > with >= in integrate_radau5_dense",
+    "radau\\.rs:184:38: replace > with >= in integrate_radau5",
+    "radau\\.rs:212:38: replace > with >= in integrate_radau5_dense",
 
     # The two halves of the simplified-Newton stopping test,
     # `if d2.sqrt() <= NEWTON_TOL * (1.0 + k2.sqrt())`. Neither mutant changes the fixed point the
     # iteration is converging to — only when it stops looking.
     #
-    # `147:16` makes `k2 *= kk[i] * kk[i]`, and `k2` is initialised to `0.0`, so it stays `0.0` for
+    # `148:16` makes `k2 *= kk[i] * kk[i]`, and `k2` is initialised to `0.0`, so it stays `0.0` for
     # every iteration and the test collapses to the absolute `d2.sqrt() <= 1e-12`. That is *stricter*
     # than the mixed form whenever `k2 > 0`, so it can only spend iterations, never accept a less
-    # converged root. `149:43` makes the same expression `NEWTON_TOL * (1.0 * k2.sqrt())`, the purely
+    # converged root. `151:43` makes the same expression `NEWTON_TOL * (1.0 * k2.sqrt())`, the purely
     # relative form, which is looser by the same factor.
     #
     # Measured rather than argued, by instrumenting the loop across `tests/radau.rs`: 9 909
@@ -2022,14 +2022,14 @@ exclude_re = [
     # while the state is large enough for the relative term to matter — a fixture built against the
     # value of `NEWTON_TOL` rather than against any model, and one that would have to be rebuilt
     # whenever that constant moved. Same ground as `dop853.rs:135:43`.
-    "radau\\.rs:146:16: replace \\+= with \\*= in radau_step",
-    "radau\\.rs:149:43: replace \\+ with \\* in radau_step",
+    "radau\\.rs:148:16: replace \\+= with \\*= in radau_step",
+    "radau\\.rs:151:43: replace \\+ with \\* in radau_step",
 
     # --- crates/spacelab-propagation/src/rosenbrock.rs ---
 
     # `if !(t1 > t0 && h > 0.0)` in both GRK4T forms, the `h` conjunct, and the same proof.
-    "rosenbrock\\.rs:181:23: replace > with >= in integrate_rosenbrock4",
-    "rosenbrock\\.rs:209:23: replace > with >= in integrate_rosenbrock4_dense",
+    "rosenbrock\\.rs:184:23: replace > with >= in integrate_rosenbrock4",
+    "rosenbrock\\.rs:212:23: replace > with >= in integrate_rosenbrock4_dense",
 
     # --- crates/spacelab-propagation/src/saba.rs ---
 
@@ -2045,8 +2045,8 @@ exclude_re = [
     # first step raises it; even were they zero, `kepler_drift`'s `dt == 0.0` short-circuit only
     # defers the refusal to the next stage. MERCURIUS escapes the argument because it can hand a step
     # to IAS15 instead, and `−mu·r/|r|³` at `mu = 0` is just an absent term.
-    "saba\\.rs:99:24: replace > with >= in integrate_saba",
-    "saba\\.rs:99:36: replace > with >= in integrate_saba",
+    "saba\\.rs:100:24: replace > with >= in integrate_saba",
+    "saba\\.rs:100:36: replace > with >= in integrate_saba",
 
     # --- crates/spacelab-propagation/src/symplectic.rs ---
 
@@ -2561,13 +2561,13 @@ exclude_re = [
 
     # `if err < CONVERGENCE`, the predictor--corrector break, tied to `<=`. `err` is `db6_max /
     # a7_max`, a quotient of two computed doubles, and it would have to equal `1e-16` bit for bit.
-    "ias15\\.rs:265:16: replace < with <= in ias15_pc",
+    "ias15\\.rs:269:16: replace < with <= in ias15_pc",
 
     # `if dt_new / dt < SAFETY`, the rejection test, tied at a ratio of exactly 0.25. `dt_new` is
     # `dt · (EPSILON / integrator_error)^(1/7)`, so the tie needs a seventh root to land on 0.25 bit
     # for bit. The second clause this test used to carry, `&& dt < t1 - t`, is gone: it was not the
     # redundancy the earlier note here claimed but a live accuracy hole, and #224 removed it.
-    "ias15\\.rs:366:24: replace < with <= in integrate_ias15",
+    "ias15\\.rs:370:24: replace < with <= in integrate_ias15",
 
     # --- The growth cap, `if dt_next / dt > 1.0 / SAFETY { dt_next = dt / SAFETY }`, and the value
     # --- it assigns. NOT proved — bounded search. The cap is reachable only where
@@ -2582,13 +2582,13 @@ exclude_re = [
     # --- that small drives `b₆` to exactly zero and the run spends the climb in the equality case.
     # --- Reaching the window needs an error positive but under 6.1e-14, and no fixture built here
     # --- has landed in it.
-    "ias15\\.rs:330:25: replace > with >= in integrate_ias15",
-    "ias15\\.rs:330:25: replace > with == in integrate_ias15",
-    "ias15\\.rs:414:26: replace / with % in integrate_ias15",
-    "ias15\\.rs:414:26: replace / with \\* in integrate_ias15",
+    "ias15\\.rs:334:25: replace > with >= in integrate_ias15",
+    "ias15\\.rs:334:25: replace > with == in integrate_ias15",
+    "ias15\\.rs:418:26: replace / with % in integrate_ias15",
+    "ias15\\.rs:418:26: replace / with \\* in integrate_ias15",
 
     # `integrate_ias15_dense` carries its own copy of the rejection test and of the growth cap —
-    # `580:24` against `366:24`, `632:25`/`633:26` against `413:25`/`414:26` — character for
+    # `584:24` against `370:24`, `636:25`/`637:26` against `417:25`/`418:26` — character for
     # character, on the same `dt_new` the same `ias15_pc` returned. Both arguments above transfer
     # verbatim, including the honest label on the second: the rejection tie needs a seventh root to
     # land on 0.25 bit for bit, and the growth cap is a bounded search, not a proof. Re-measured on
@@ -2597,10 +2597,10 @@ exclude_re = [
     # `ias15_drifts_in_a_straight_line_when_no_force_acts`, where the force-free arm returns exactly
     # `dt / SAFETY` and the cap fires on the equality it would have assigned anyway, and
     # `ias15_throws_away_a_first_step_far_too_large_for_the_perigee`, which exercises the other side.
-    "ias15\\.rs:580:24: replace < with <= in integrate_ias15_dense",
-    "ias15\\.rs:632:25: replace > with >= in integrate_ias15_dense",
-    "ias15\\.rs:633:26: replace / with % in integrate_ias15_dense",
-    "ias15\\.rs:633:26: replace / with \\* in integrate_ias15_dense",
+    "ias15\\.rs:584:24: replace < with <= in integrate_ias15_dense",
+    "ias15\\.rs:636:25: replace > with >= in integrate_ias15_dense",
+    "ias15\\.rs:637:26: replace / with % in integrate_ias15_dense",
+    "ias15\\.rs:637:26: replace / with \\* in integrate_ias15_dense",
 
     # --- `signal/insar.rs`, `draw_cut`. The Bresenham step directions
     # --- `let (sr, sc) = (if r < tr { 1 } else { -1 }, if c < tc { 1 } else { -1 })`, each tied to

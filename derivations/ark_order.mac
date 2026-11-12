@@ -49,3 +49,12 @@ resid : append(
 
 print("ARK4(3)6L[2]SA order-4 conditions (shared, EX, IM, coupling): 18 residuals");
 print("ARK max |order-condition residual| (~0?):", bfloat(apply(max, map(abs, resid))));
+
+/* The Rust tables (plans/17 Ф17.D). ark.rs writes each coefficient as the quotient of the two
+ * integers above, which f64 rounds once; each entry must be exactly the rational here. */
+load("rust_literals.mac")$
+src : "../crates/spacelab-propagation/src/ark.rs"$
+print("rust C is exactly c:", same_rationals(rust_table(src, "C"), c));
+print("rust B is exactly b:", same_rationals(rust_table(src, "B"), b));
+print("rust AEX is exactly Aex:", same_rationals(rust_table(src, "AEX"), flatten(args(Aex))));
+print("rust AIM is exactly Aim:", same_rationals(rust_table(src, "AIM"), flatten(args(Aim))));

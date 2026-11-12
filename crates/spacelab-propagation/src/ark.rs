@@ -48,7 +48,8 @@ const B: [f64; S] = [
     0.25,
 ];
 
-/// Explicit ERK Butcher matrix (strictly lower triangular).
+/// Explicit ERK Butcher matrix (strictly lower triangular), each entry exactly Kennedy & Carpenter's
+/// rational (`derivations/ark_order.mac` reads it back).
 const AEX: [[f64; S]; S] = [
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     [0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -79,7 +80,8 @@ const AEX: [[f64; S]; S] = [
     ],
 ];
 
-/// Implicit ESDIRK Butcher matrix (lower triangular, diagonal `γ`, first stage explicit).
+/// Implicit ESDIRK Butcher matrix (lower triangular, diagonal `γ`, first stage explicit), each entry
+/// exactly Kennedy & Carpenter's rational (`derivations/ark_order.mac` reads it back).
 const AIM: [[f64; S]; S] = [
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     [0.25, 0.25, 0.0, 0.0, 0.0, 0.0],

@@ -54,7 +54,8 @@ const E5: f64 = -17_253.0 / 339_200.0;
 const E6: f64 = 22.0 / 525.0;
 const E7: f64 = -1.0 / 40.0;
 
-// --- dense-output coefficients d, Hairer contd5 ---
+// --- dense-output coefficients d, Hairer contd5; `derivations/dopri5_order.mac` checks the
+// interpolant they build is order 4 at every theta ---
 const D1: f64 = -12_715_105_075.0 / 11_282_082_432.0;
 const D3: f64 = 87_487_479_700.0 / 32_700_410_799.0;
 const D4: f64 = -10_690_763_975.0 / 1_880_347_072.0;

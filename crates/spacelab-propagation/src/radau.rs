@@ -54,14 +54,15 @@ const MAX_NEWTON: usize = 50;
 /// Relative increment threshold for Newton convergence.
 const NEWTON_TOL: f64 = 1e-12;
 
-/// Collocation nodes `c` — the right-Radau points `(4∓√6)/10, 1` (see the module derivation).
+/// Collocation nodes `c` — the right-Radau points `(4∓√6)/10, 1` (`derivations/radau5_coeffs.mac`).
 const C: [f64; S] = [
     0.155051025721682190180271592529410861,
     0.644948974278317809819728407470589139,
     1.0,
 ];
 
-/// Butcher matrix `aᵢⱼ = ∫₀^{cᵢ} Lⱼ`, row-major.
+/// Butcher matrix `aᵢⱼ = ∫₀^{cᵢ} Lⱼ`, row-major, each entry rounded to the digits shown
+/// (`derivations/radau5_coeffs.mac` derives it and reads it back).
 const A: [[f64; S]; S] = [
     [
         0.19681547722366042586838614299182989,
@@ -80,7 +81,8 @@ const A: [[f64; S]; S] = [
     ],
 ];
 
-/// Quadrature weights `bⱼ = ∫₀¹ Lⱼ`. Equal to `A[2]` (stiff accuracy), stated separately for clarity.
+/// Quadrature weights `bⱼ = ∫₀¹ Lⱼ`. Equal to `A[2]` (stiff accuracy), stated separately for clarity
+/// (`derivations/radau5_coeffs.mac`).
 const B: [f64; S] = [
     0.376403062700467275050075442369280795,
     0.512485826188421613838813446519608094,

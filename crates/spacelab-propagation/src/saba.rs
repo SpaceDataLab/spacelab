@@ -35,7 +35,8 @@ use crate::driver::{IntegrationError, step_count};
 use crate::forces::Acceleration;
 use crate::whfast::kepler_drift;
 
-/// SABA₂ drift lengths `c` (order 4): `½ ∓ 1/(2√3)`, `1/√3`.
+/// SABA₂ drift lengths `c` (order 4): `½ ∓ 1/(2√3)`, `1/√3`, rounded to the digits shown
+/// (`derivations/saba_coeffs.mac` derives them and reads them back).
 const SABA2_C: [f64; 3] = [
     0.211324865405187117745425609749021272,
     0.577350269189625764509148780501957456,
@@ -44,7 +45,7 @@ const SABA2_C: [f64; 3] = [
 /// SABA₂ kick weights `d`: the Gauss–Legendre-2 weights.
 const SABA2_D: [f64; 2] = [0.5, 0.5];
 
-/// SABA₄ drift lengths `c` (order 8), from the Gauss–Legendre-4 abscissae.
+/// SABA₄ drift lengths `c` (order 8), from the Gauss–Legendre-4 abscissae (`derivations/saba_coeffs.mac`).
 const SABA4_C: [f64; 5] = [
     0.0694318442029737123880267555535952475,
     0.260577634004598155210640364894782409,
@@ -52,12 +53,12 @@ const SABA4_C: [f64; 5] = [
     0.260577634004598155210640364894782409,
     0.0694318442029737123880267555535952475,
 ];
-/// SABA₄ kick weights `d`: the Gauss–Legendre-4 weights.
+/// SABA₄ kick weights `d`: the Gauss–Legendre-4 weights `(18 ∓ √30)/72` (`derivations/saba_coeffs.mac`).
 const SABA4_D: [f64; 4] = [
-    0.173927422568726928686531974610999706,
-    0.326072577431273071313468025389000294,
-    0.326072577431273071313468025389000294,
-    0.173927422568726928686531974610999706,
+    0.173927422568726928686531974610999704,
+    0.326072577431273071313468025389000296,
+    0.326072577431273071313468025389000296,
+    0.173927422568726928686531974610999704,
 ];
 
 /// One SABA step of size `h`: the palindrome `drift(c₀h) kick(d₀h) … kick(d_{n-1}h) drift(cₙh)`.

@@ -1,0 +1,59 @@
+/* The entry-equation fixtures of spacelab-astro's edl.rs, at 60 digits (plans/17 Ф17.D).
+
+   The tests hold `entry_derivative`, its banked form and one step of `propagate_entry` against the
+   module header's equations evaluated here:
+
+     V̇ = −D/m − g sin γ,   γ̇ = [L/m − (g − V²/r) cos γ] / V,   ṙ = V sin γ,   ṡ = V cos γ · R/r,
+
+   with D/m = ½ρV²/β, L/m = (L/D)(D/m) cos σ, g = μ/r², ρ = ρ₀ exp(−(r − R)/H). The atmosphere is
+   `Atmosphere::MARS`: μ the Mars system's GM from DE440 (derivations/constants_readback.mac holds
+   the literal), R = 3389.5 km, ρ₀ = 0.020 kg/m³, H = 11.1 km. Every input is the double the test's
+   decimal parses to, so the fixtures are what an exact evaluation of the f64 inputs gives.
+
+   Run with mu_mars set to 4282837 * 10^7 to reproduce the fixtures of the earlier, truncated μ.
+
+   timeout 120 maxima --very-quiet -Q -b edl_entry_fixture.mac                                     */
+
+fpprec : 60$
+load("rust_literals.mac")$
+if not numberp(mu_mars) then mu_mars : 42828375816 * 10^3$
+radius : 33895 * 10^2$
+rho0 : nearest_double(2 / 100)$
+scale_height : 11100$
+beta : 115$
+lift_to_drag : nearest_double(24 / 100)$
+cos_bank : nearest_double(37 / 100)$
+g_earth : nearest_double(980665 / 10^5)$
+state : [5321, nearest_double(-2715 / 10^4), 33895 * 10^2 + 62500, 137000]$
+dt : 3 / 4$
+
+rhs(s, cb) := block([v : s[1], gam : s[2], r : s[3], g, rho, d_m, l_m],
+  g : mu_mars / r^2,
+  rho : rho0 * exp(-(r - radius) / scale_height),
+  d_m : rho * v^2 / (2 * beta),
+  l_m : lift_to_drag * d_m * cb,
+  bfloat([-d_m - g * sin(gam), (l_m - (g - v^2 / r) * cos(gam)) / v, v * sin(gam),
+          v * cos(gam) * radius / r]))$
+
+k1 : rhs(state, 1)$
+k2 : rhs(state + dt / 2 * k1, 1)$
+k3 : rhs(state + dt / 2 * k2, 1)$
+k4 : rhs(state + dt * k3, 1)$
+rk4_step : bfloat(state + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4))$
+drag_g : bfloat(rho0 * exp(-(state[3] - radius) / scale_height) * state[1]^2 / (2 * beta) / g_earth)$
+
+fpprintprec : 28$
+print("DERIVATIVE", k1)$
+print("DERIVATIVE_BANKED", rhs(state, cos_bank))$
+print("RK4_STEP", rk4_step)$
+print("DRAG_G", drag_g)$
+
+/* The fixtures as edl.rs writes them, each its value here rounded to the digits it shows. */
+edl : "../crates/spacelab-astro/src/edl.rs"$
+if transcribed(rust_table(edl, "DERIVATIVE"), k1)
+   and transcribed(rust_table(edl, "DERIVATIVE_BANKED"), rhs(state, cos_bank))
+   and transcribed(rust_table(edl, "RK4_STEP"), rk4_step)
+   and transcribed([rust_scalar(edl, "DRAG_G")], [drag_g])
+then print("(1) holds: edl.rs writes these fixtures")
+else error("FAILED: edl.rs's fixtures are not these values")$
+print("DONE")$

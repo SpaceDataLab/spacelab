@@ -431,6 +431,7 @@ struct Params { n_dep: u32, n_arr: u32, mu: f32, prograde: u32 };
 @group(0) @binding(3) var<storage, read_write> out_c3: array<f32>;
 @group(0) @binding(4) var<uniform>             params: Params;
 
+// 2π; derivations/constants_readback.mac reads it back.
 const TAU: f32 = 6.28318530717959;
 const SENTINEL: f32 = 3.0e30;
 
@@ -542,6 +543,8 @@ struct Params { n_sat: u32, n_time: u32 };
 @group(0) @binding(2) var<storage, read_write> out:   array<State>;
 @group(0) @binding(3) var<uniform>             params: Params;
 
+// The WGS 84 set of Vallado et al. (2006), xke = 60/sqrt(AE³/398600.5), and 2π;
+// derivations/constants_readback.mac reads all four back.
 const KE: f32 = 0.07436685316871385;
 const AE: f32 = 6378.137;
 const J2: f32 = 0.00108262998905;

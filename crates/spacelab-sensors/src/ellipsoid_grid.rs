@@ -32,7 +32,7 @@ use crate::{ElevationMask, SensorError};
 ///
 /// Computed to 40 digits in PARI/GP two independent ways — from `f` and from `e²` — and rounded
 /// once. `tests/ellipsoid_grid.rs` recomputes it from `f` and asserts the bits match, so it
-/// cannot drift.
+/// cannot drift; `derivations/constants_readback.mac` holds the literal against `a²/b²` in Maxima.
 pub const WGS84_GAMMA: f64 = 1.006_739_496_742_276_5;
 
 /// Cell centres on a biaxial ellipsoid, three streams, zenith derived.

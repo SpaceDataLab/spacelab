@@ -11,10 +11,11 @@ use core::fmt;
 use spacelab_core::{Angle, Length, Vec3};
 use spacelab_frames::{Itrf, Position};
 
-/// Semi-major axis, metres. A *defining* constant of WGS-84: exact by decree.
+/// Semi-major axis, metres. A *defining* constant of WGS-84: exact by decree. `derivations/constants_readback.mac`
+/// reads it back, with its copies in the other crates.
 pub const EQUATORIAL_RADIUS: f64 = 6_378_137.0;
 
-/// Flattening. The other defining constant, `1/298.257223563`.
+/// Flattening. The other defining constant of WGS 84, `1/298.257223563`.
 pub const FLATTENING: f64 = 1.0 / 298.257_223_563;
 
 /// Semi-minor axis, metres. Derived: `a(1 − f)`.

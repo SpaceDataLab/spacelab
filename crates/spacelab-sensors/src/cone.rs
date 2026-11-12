@@ -13,6 +13,7 @@ use crate::{AccessGeometry, Constraint, OrbitBound, SensorError};
 /// Written from the flattening rather than transcribed, so it cannot drift from
 /// [`spacelab_earth::FLATTENING`]; the crate does not depend on `spacelab-earth` (see [`Boresight`])
 /// and `flattening_agrees_with_the_earth_crate` asserts the two are the same bits.
+// WGS 84's 1/f; `derivations/constants_readback.mac` reads it back.
 const INVERSE_ONE_MINUS_E2: f64 = {
     let f = 1.0 / 298.257_223_563;
     let e2 = f * (2.0 - f);

@@ -11479,61 +11479,34 @@ EGM96's J3, and the flower fixtures' semi-major axes of `derivations/flower_phas
 rate. The C++ wrappers' Earth–Moon mass ratio was 0.012150585, 4.4e-8 relative above the
 0.012150584460351 that Rust and Python use. Two labels were wrong as well: the C API's GM☉ said "IAU
 2015 / DE440" and is DE405's, and its DSST zonals said "EIGEN-6S normalised" and are EGM96's
-unnormalised J_n. **Today: 55 open literals in 52 items.** `--check` fails on an item with more open
-literals than its entry, on a new item and on an entry the sweep no longer matches, so the count can
-only fall: an entry leaves when its literals name the derivation that checks them or the document
-they are copied from.
+unnormalised J_n.
+
+The tail went last. `derivations/constants_readback.mac` reads back the WGS 84 ellipsoid's copies in
+seven crates, Hipparchus's 2⁻⁵³ and the 2⁵³ of the radiative-transfer draw, the conjunction width,
+the GPU kernels' SGP4 set and SGP4's resonance window, which the reference code cuts rather than
+rounds at the tenth decimal. The others name their standard: the SI for the speed of light, WGS 72,
+and the Smithsonian Special Reports behind Jacchia–Bowman (the sweep now reads `WGS-84` and `SR313`
+as the documents they spell). It found two more wrong values. `DURATION_WIDTHS` carried 40 digits,
+and the last three were wrong: it had been solved as `1 − erf(x) = γ` at 40 digits, which cancels
+six of them. Solved on `erfc` itself, with PARI/GP's `solve` agreeing, it ends …047241745; the
+double is unchanged. The entry model's Mars GM, 4.282837e13 and called "DE-grade", is DE440's
+42828.375816 km³/s² cut at seven digits, 1.4e-7 relative below it. It is now DE440's value, and a
+new `derivations/edl_entry_fixture.mac` regenerates the entry-equation fixtures; at the old GM it
+reproduces the old fixtures digit for digit. Eight literals stay open, each for a reason: the
+Sun-synchronous rate's 365.2422-day year and three scan periods, whose documents are not to hand;
+DSST's SRP reference distance, which is Orekit's convention and no document's; the reference radius
+of the frozen SDTM-1 code, which a comment would unfreeze; and two in private code. **Today: 8 open
+literals in 8 items.** `--check` fails on an item with more open literals than its entry, on a new
+item and on an entry the sweep no longer matches, so the count can only fall: an entry leaves when
+its literals name the derivation that checks them or the document they are copied from.
 
 ```text
-crates/spacelab-astro/src/edl.rs::EARTH | 2
-crates/spacelab-astro/src/edl.rs::MARS | 1
-crates/spacelab-coverage/src/detectors.rs::EARTH_EQUATORIAL_RADIUS | 1
-crates/spacelab-earth/src/wgs84.rs::EQUATORIAL_RADIUS | 1
-crates/spacelab-earth/src/wgs84.rs::FLATTENING | 1
-crates/spacelab-earthvision/src/image_quality.rs::A | 1
-crates/spacelab-earthvision/src/image_quality.rs::F | 1
-crates/spacelab-earthvision/src/radiative_transfer.rs::unit | 1
 crates/spacelab-elements/src/design.rs::SUN_SYNCHRONOUS_NODE_RATE | 1
-crates/spacelab-estimation/src/conjunction_domain.rs::DURATION_WIDTHS | 1
-crates/spacelab-fa/src/earth_rotation.rs::C0 | 1
-crates/spacelab-fa/src/earth_rotation.rs::C1 | 1
-crates/spacelab-gnss/src/sp3.rs::JDN_SECONDS_AT_J2000 | 1
-crates/spacelab-gpu/src/lib.rs::AE | 1
-crates/spacelab-gpu/src/lib.rs::J2 | 1
-crates/spacelab-gpu/src/lib.rs::KE | 1
-crates/spacelab-gpu/src/lib.rs::TAU | 2
-crates/spacelab-ionosphere/src/parameters.rs::X0 | 1
 crates/spacelab-propagation/src/dsst/srp.rs::D_REF | 1
-crates/spacelab-propagation/src/earth_radiation.rs::SPEED_OF_LIGHT | 1
-crates/spacelab-propagation/src/jacchia_bowman/constants.rs::M_BAR_COEFFS | 1
-crates/spacelab-propagation/src/jacchia_bowman/constants.rs::R_E | 1
-crates/spacelab-propagation/src/jacchia_bowman/constants.rs::TROPICAL_YEAR_DAYS | 1
-crates/spacelab-propagation/src/jacchia_bowman/constants.rs::TX_A | 1
-crates/spacelab-propagation/src/jacchia_bowman/constants.rs::TX_C | 1
-crates/spacelab-propagation/src/lifetime_drivers.rs::WGS84_A | 1
-crates/spacelab-propagation/src/lifetime_drivers.rs::WGS84_INVERSE_F | 1
 crates/spacelab-propagation/src/sdtm/mod.rs::REFERENCE_RADIUS | 1
-crates/spacelab-propagation/src/sdtm/uncertainty.rs::NORMAL_90 | 1
-crates/spacelab-propagation/src/sdtm/uncertainty.rs::NORMAL_95 | 1
-crates/spacelab-propagation/src/sdtm/uncertainty.rs::NORMAL_99 | 1
-crates/spacelab-propagation/src/space_weather.rs::hpo_at | 1
-crates/spacelab-propagation/src/spacecraft.rs::HIPPARCHUS_EPSILON | 1
-crates/spacelab-sensors/src/comms.rs::C_LIGHT | 1
-crates/spacelab-sensors/src/comms.rs::EARTH_RADIUS | 1
-crates/spacelab-sensors/src/cone.rs::INVERSE_ONE_MINUS_E2 | 1
-crates/spacelab-sensors/src/cull.rs::WGS84 | 1
-crates/spacelab-sensors/src/ellipsoid_grid.rs::WGS84_GAMMA | 1
-crates/spacelab-sensors/src/geoloc.rs::WGS84 | 2
 crates/spacelab-sensors/src/scan.rs::ASCAT_SCAN_SECONDS | 1
 crates/spacelab-sensors/src/scan.rs::VIIRS_COLUMN_SECONDS | 1
 crates/spacelab-sensors/src/scan.rs::VIIRS_SCAN_SECONDS | 1
-crates/spacelab-sgp4/src/satellite.rs::SYNCHRONOUS_HI | 1
-crates/spacelab-sgp4/src/satellite.rs::SYNCHRONOUS_LO | 1
-crates/spacelab-sgp4/src/satellite.rs::WGS72_EQUATORIAL_RADIUS_M | 1
-crates/spacelab-sgp4/src/tle.rs::epoch | 1
-crates/spacelab-signal/src/csa.rs::C | 1
-crates/spacelab-signal/src/sar.rs::secondary_range_compression | 1
-crates/spacelab-signal/src/sar.rs::src_fm_rate | 1
 ```
 
 ## Reproducing the oracles

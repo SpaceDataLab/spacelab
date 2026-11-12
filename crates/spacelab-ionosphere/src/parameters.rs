@@ -22,7 +22,8 @@ use crate::fourier::{FourierTimeSeries, sin_cos};
 use crate::math::{clip_exp, join};
 use crate::types::SinCos;
 
-/// Solar zenith angle at the day/night transition, degrees.
+/// Solar zenith angle at the day/night transition, degrees: the double nearest the fixed point
+/// of Eq. 29, `derivations/nequick_parameters.mac`.
 const X0: f64 = 86.23292796211615;
 
 /// Ionospheric profile parameters used to evaluate the electron density.

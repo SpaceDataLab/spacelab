@@ -173,7 +173,8 @@ impl Rng {
 
     /// Uniform in `[0, 1)`.
     pub(crate) fn unit(&mut self) -> f64 {
-        (self.next_u64() >> 11) as f64 * (1.0 / 9_007_199_254_740_992.0) // 2⁵³
+        // 53 random bits over 2⁵³, which `derivations/constants_readback.mac` checks is exact.
+        (self.next_u64() >> 11) as f64 * (1.0 / 9_007_199_254_740_992.0)
     }
 
     /// Uniform in `(0, 1]` — safe for `−ln(ξ)`.

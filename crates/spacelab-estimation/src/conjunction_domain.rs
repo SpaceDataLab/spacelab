@@ -83,10 +83,13 @@ pub const DURATION_TAIL_FRACTION: f64 = 1.0e-6;
 /// The conjunction duration in 1-σ widths of the Mahalanobis curve: `2√2 · erfc⁻¹(γ)` at
 /// `γ =` [`DURATION_TAIL_FRACTION`], i.e. `≈ 9.78 w′`.
 ///
-/// Computed in Maxima at 40 digits — `erfc⁻¹(10⁻⁶) = 3.458910737279500022150927635957569519438`,
-/// residual `|erfc(x) − γ| = 3.4e-42` — rather than transcribed from the paper's "≈ 9.8".
+/// Computed in Maxima by `derivations/constants_readback.mac` as the root of `erfc` itself —
+/// `erfc⁻¹(10⁻⁶) = 3.458910737279500022150927635957569519916`, residual
+/// `|erfc(x) − γ| = 2.4e-45`, which PARI/GP's `solve` reproduces — rather than transcribed from
+/// the paper's "≈ 9.8". Solving `1 − erf(x) = γ` at 40 digits, as an earlier version did, cancels
+/// six of them and left the last three digits here wrong; the double was unaffected.
 #[allow(clippy::excessive_precision)]
-pub const DURATION_WIDTHS: f64 = 9.783_276_951_397_180_772_462_244_919_914_047_240_392;
+pub const DURATION_WIDTHS: f64 = 9.783_276_951_397_180_772_462_244_919_914_047_241_745;
 
 /// The value of `V_o` above which the offset between TCA and the rectilinear Mahalanobis minimum is
 /// an offset violation. The paper's threshold, selected so that no actual usage violation went

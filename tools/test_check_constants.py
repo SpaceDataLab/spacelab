@@ -117,6 +117,19 @@ def test_a_year_cites_only_after_a_name_or_a_bracket() -> None:
         assert not tool.CITE.search(plain), plain
 
 
+def test_a_standard_cites_under_each_of_its_spellings() -> None:
+    for cited in (
+        "WGS-84 equatorial radius",
+        "WGS 84",
+        "WGS84",
+        "WGS-72, not WGS-84",
+        "SR313 p. 9",
+    ):
+        assert tool.CITE.search(cited), cited
+    for plain in ("WGS-841 points", "SR31 rows"):
+        assert not tool.CITE.search(plain), plain
+
+
 def test_a_named_path_may_give_its_extensions_in_braces() -> None:
     assert tool.exists("derivations/gauss_legendre_tables")
     assert tool.exists("tools/check-constants.py")

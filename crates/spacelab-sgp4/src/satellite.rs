@@ -147,10 +147,12 @@ pub enum Convention {
 /// across a boundary it sits close to.
 const DEEP_SPACE_MEAN_MOTION: f64 = core::f64::consts::TAU / 225.0;
 
-/// Lower edge of the 24-hour resonance window, rad/min. Strict.
+/// Lower edge of the 24-hour resonance window, rad/min. Strict. 0.2°/min cut at the tenth
+/// decimal, as Hoots & Roehrich (1980) write it; `derivations/constants_readback.mac` checks the cut.
 const SYNCHRONOUS_LO: f64 = 0.003_490_658_5;
 
-/// Upper edge of the 24-hour resonance window, rad/min. Strict.
+/// Upper edge of the 24-hour resonance window, rad/min. Strict. 0.3°/min cut, not rounded, at
+/// the tenth decimal, as Hoots & Roehrich (1980) write it; `derivations/constants_readback.mac` checks the cut.
 const SYNCHRONOUS_HI: f64 = 0.005_235_987_7;
 
 /// Lower edge of the 12-hour resonance window, rad/min. Inclusive.

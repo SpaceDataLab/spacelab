@@ -737,6 +737,7 @@ pub fn ground_sample_distance(
 /// The meridian and prime-vertical radii of curvature, not a mean sphere: they differ by 0.7 % from
 /// each other at the equator, which is a whole pixel in twenty on a metre-class product.
 fn local_scale(latitude: f64) -> (f64, f64) {
+    // The WGS 84 ellipsoid; `derivations/constants_readback.mac` reads both back.
     const A: f64 = 6_378_137.0;
     const F: f64 = 1.0 / 298.257_223_563;
     let e2 = F * (2.0 - F);

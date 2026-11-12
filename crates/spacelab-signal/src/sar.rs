@@ -392,6 +392,7 @@ pub fn src_fm_rate(f_eta: f64, params: &RdaParams) -> Option<f64> {
     if libm::fabs(f_eta) < 1e-9 {
         return None;
     }
+    // The speed of light, m/s, exact in the SI.
     let c = 299_792_458.0;
     let f0 = c / params.wavelength;
     let migration = params.wavelength * f_eta / (2.0 * params.velocity);
@@ -415,7 +416,8 @@ pub fn secondary_range_compression(
     nr: usize,
     params: &RdaParams,
 ) -> Vec<Complex> {
-    let fs_r = 299_792_458.0 / (2.0 * params.range_spacing); // range-frequency sample rate (Hz)
+    // Range-frequency sample rate (Hz), c/(2Δr) with c exact in the SI.
+    let fs_r = 299_792_458.0 / (2.0 * params.range_spacing);
     let mut out = rd_data.to_vec();
     let mut line = vec![Complex::ZERO; nr];
     for k in 0..na {

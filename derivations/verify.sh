@@ -585,6 +585,21 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima binding_defaults.mac" "expected 5 checks to hold, found $holds"
     fi
 
+    out=$(macf constants_readback.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 6 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima constants_readback.mac: WGS 84's copies, 2^±53, the conjunction width, the GPU SGP4 set, SGP4's resonance window and Mars's GM are their sources' values"
+    else
+        bad "maxima constants_readback.mac" "expected 6 checks to hold, found $holds"
+    fi
+
+    out=$(macf edl_entry_fixture.mac)
+    if printf '%s' "$out" | grep -q '^(1) holds:' && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima edl_entry_fixture.mac: edl.rs's entry-equation fixtures are the 60-digit evaluation at the inputs' doubles"
+    else
+        bad "maxima edl_entry_fixture.mac" "the fixtures do not hold"
+    fi
+
     out=$(macf hansen_zonal.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then

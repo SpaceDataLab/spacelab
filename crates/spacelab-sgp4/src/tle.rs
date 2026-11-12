@@ -659,7 +659,7 @@ fn epoch(elements: &Elements) -> Result<String, TleError> {
     let seconds =
         f64::from(datetime.num_seconds_from_midnight()) + f64::from(datetime.nanosecond()) * 1e-9;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // bounded to 8 digits below
-    let fraction = ((seconds / 86_400.0) * 1e8).round().min(99_999_999.0) as u64;
+    let fraction = ((seconds / 86_400.0) * 1e8).round().min(1e8 - 1.0) as u64;
     Ok(format!(
         "{:02}{:03}.{fraction:08}",
         year % 100,

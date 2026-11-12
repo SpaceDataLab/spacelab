@@ -60,6 +60,7 @@ const SAFE_MIN: f64 = f64::MIN_POSITIVE;
 /// `2⁻⁵³` = Hipparchus `Precision.EPSILON` — the guard for a solar array whose rotation axis points
 /// (near) exactly at the Sun. This is **not** Rust's [`f64::EPSILON`] (`2⁻⁵²`); the values differ by
 /// a factor of two and the wrong one would move the degenerate-case boundary.
+/// `derivations/constants_readback.mac` holds the literal against `2⁻⁵³`.
 const HIPPARCHUS_EPSILON: f64 = 1.110_223_024_625_156_5e-16;
 
 // ---------------------------------------------------------------------------------------------------

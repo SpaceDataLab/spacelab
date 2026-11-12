@@ -593,7 +593,7 @@ pub fn hpo_at(
     sec: f64,
 ) -> Option<HpoInterval> {
     let hour = if sec.is_finite() {
-        (sec / 3600.0).clamp(0.0, 23.999_999)
+        (sec / 3600.0).clamp(0.0, 24.0 - 1e-6)
     } else {
         0.0
     };

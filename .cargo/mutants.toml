@@ -514,7 +514,7 @@ exclude_re = [
     # tie that `a_guidance_cycle_matched_to_the_predictor_flies_exactly_what_it_predicted` actually
     # hits: the banks differ by exactly 1.819e-12 and the range they fly by 9.9e-8 m on a 525.7 km
     # arc — 1.9e-13 relative, four orders below the guidance's own resolution.
-    "edl\\.rs:260:18: replace < with <= in fnpeg_bank_command_within",
+    "edl\\.rs:262:18: replace < with <= in fnpeg_bank_command_within",
 
     # Both halves of the outer guidance loop's stop test, `budget spent OR no longer flying`, are
     # equivalent for the same reason: the inner flight loop carries the flight condition too and is
@@ -525,8 +525,8 @@ exclude_re = [
     # mutant, `306:40`, is caught, because there nothing stops the vehicle flying past the terminal
     # condition. `290:23`, the `==` of the budget test, is caught for the opposite reason: it makes
     # the outer loop break before it has flown anything.
-    "edl\\.rs:297:28: replace \\|\\| with && in guided_entry",
-    "edl\\.rs:297:55: replace && with \\|\\| in guided_entry",
+    "edl\\.rs:299:28: replace \\|\\| with && in guided_entry",
+    "edl\\.rs:299:55: replace && with \\|\\| in guided_entry",
 
     # The same masking covers the *strictness* of the outer guard's two comparisons — and only the
     # outer one. `>` and `>=` part exactly where a state sits on a boundary; at the top of a cycle
@@ -544,8 +544,8 @@ exclude_re = [
     # reads one off a bank-independent ballistic vehicle, and `..._at_the_surface_and_not_one_step_
     # below_it` moves the surface onto a step endpoint under a zero-density atmosphere. Both now
     # kill their mutant and leave this pair equivalent, so the two guards are separated here.
-    "edl\\.rs:297:38: replace > with >= in guided_entry",
-    "edl\\.rs:297:63: replace > with >= in guided_entry",
+    "edl\\.rs:299:38: replace > with >= in guided_entry",
+    "edl\\.rs:299:63: replace > with >= in guided_entry",
 
     # `if 2.0 * p < min1.min(min2)`. It ties at `2p == min(min1, min2)`, admitting a step the
     # baseline rejects. When `min2 = |e·q|` is the binding bound, the tie gives `d = p/q = ±e/2`,
@@ -931,10 +931,10 @@ exclude_re = [
     # `sentman_drag_acceleration` is *not* on this list for the same tie: Sentman's `c_p` is
     # nonzero at grazing incidence (the thermal back-flux term survives `γ = 0`), so admitting an
     # edge-on facet there does move the answer, and that mutant is caught.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:331:48: replace > with >= in BoxWing<P>::for_each_drag_facet",
-    "crates/spacelab-propagation/src/spacecraft\\.rs:335:26: replace < with <= in BoxWing<P>::for_each_drag_facet",
-    "crates/spacelab-propagation/src/spacecraft\\.rs:485:48: replace > with >= in BoxWing<P>::for_each_srp_facet",
-    "crates/spacelab-propagation/src/spacecraft\\.rs:489:26: replace < with <= in BoxWing<P>::for_each_srp_facet",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:332:48: replace > with >= in BoxWing<P>::for_each_drag_facet",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:336:26: replace < with <= in BoxWing<P>::for_each_drag_facet",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:486:48: replace > with >= in BoxWing<P>::for_each_srp_facet",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:490:26: replace < with <= in BoxWing<P>::for_each_srp_facet",
 
     # `if f.value() < HIPPARCHUS_EPSILON` in the Sun-pointing panel normal, tied to `<=`. Provably
     # unreachable, not measured: `f = 1 − d²` for a unit Sun direction and a unit axis, so `d ∈
@@ -942,28 +942,28 @@ exclude_re = [
     # at most `1 − 2⁻⁵²`, so `f ≥ 2⁻⁵²`. The reachable set is `{0} ∪ [2⁻⁵², ∞)` and the threshold is
     # `2⁻⁵³`, which lies strictly between: no input can put `f` *on* the boundary, so `<` and `<=`
     # agree everywhere. `< → ==` is caught — it turns the fallback off entirely.
-    "spacecraft\\.rs:171:30: replace < with <= in Facet::unit_normal",
+    "spacecraft\\.rs:172:30: replace < with <= in Facet::unit_normal",
 
     # The double-sided flip `d > 0` in `gas_surface_drag_acceleration`, tied to `>=`. Unlike the
     # windward gate on the line below it — which *is* caught, because `c_p` is nonzero at grazing
     # incidence under every surface model — the flip is invisible at the tie. At `d == 0` the mutant negates the normal and
     # sets `d = −0.0`; the gate `d.value() < 0.0` is false for `−0.0` exactly as it was for `+0.0`,
     # so the facet is skipped either way and neither `normal` nor `d` is read again.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:405:48: replace > with >= in BoxWing<P>::gas_surface_drag_acceleration",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:406:48: replace > with >= in BoxWing<P>::gas_surface_drag_acceleration",
 
     # `if sin_delta > 1.0e-9` — the shear gate — tied to `>=`. Provably unreachable, the same
     # reachable-set argument as `Facet::unit_normal` above. `sin_delta = sqrt(max(1 − γ², 0))` with
     # `γ = −d` for a unit normal and a unit flow direction, so `1 − γ²` is either exactly `0` or at
     # least `2⁻⁵²`, and `sqrt` is exact on both: `sin_delta ∈ {0} ∪ [2⁻²⁶, 1]`. The threshold `1e-9`
     # sits strictly between `0` and `2⁻²⁶ = 1.49e-8`, so no input lands on the boundary.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:428:30: replace > with >= in BoxWing<P>::gas_surface_drag_acceleration",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:429:30: replace > with >= in BoxWing<P>::gas_surface_drag_acceleration",
 
     # `along < 0.0` — the anti-sunward half of the cylindrical shadow — tied to `<=`. Reachable only
     # for a satellite *inside* the Earth: the two disagree at `along == 0.0`, and there the second
     # half of the conjunction reads `perp² = ‖sat‖² − 0 < R²`, i.e. `‖sat‖ < R`. The companion
     # `perp² < R²` tie is *not* on this list — it is reachable, and
     # `a_satellite_exactly_on_the_shadow_cylinder_is_lit` constructs it exactly.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:705:27: replace < with <= in <impl Acceleration for PanelSrp<M, R, E>>::acceleration",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:706:27: replace < with <= in <impl Acceleration for PanelSrp<M, R, E>>::acceleration",
 
     # --- crates/spacelab-propagation/src/earth_radiation.rs ---
 
@@ -3025,7 +3025,7 @@ exclude_re = [
     # at the fixture epochs. In floating point the two differ by `2·sin(u)·sin(12·delta)` where
     # `delta = fl(pi/12) - pi/12` is at most half an ulp, i.e. at most 2.6e-16 absolute in
     # `c_zenith` -- under the ulp of `c_zenith` itself.
-    "parameters\\.rs:162:36: replace - with \\+ in compute_effective_solar_angle",
+    "parameters\\.rs:163:36: replace - with \\+ in compute_effective_solar_angle",
 
     # `if value < 1e-6 { 0.0 } else { value }` (Eq. 39) is dead in its entirety today, so both
     # mutants substitute an unread value. `value` is a convex combination of `temp2` and
@@ -3036,8 +3036,8 @@ exclude_re = [
     # every substituted value takes the no-F1 arm, where `nm_f1` is never read, and neither
     # `fo_f1` nor `nm_f1` is stored in `NeQuickParameters`. The clamp becomes load-bearing the
     # moment anything reads either for its own sake, which is why it stays.
-    "parameters\\.rs:279:14: replace < with <= in compute_fo_f1",
-    "parameters\\.rs:279:14: replace < with == in compute_fo_f1",
+    "parameters\\.rs:280:14: replace < with <= in compute_fo_f1",
+    "parameters\\.rs:280:14: replace < with == in compute_fo_f1",
 
     # --- `ionosphere/model.rs`. Eq. 127's two forms are the same number where the guard chooses.
     #
@@ -3398,8 +3398,8 @@ exclude_re = [
     # `wgpu::BufferUsages` is a bitflag set and both operands of each of these are single, distinct
     # bits, so exclusive-or and or produce the same mask. The buffers are created with exactly the
     # usages they are then used with, and the GPU tests exercise both.
-    "lib\\.rs:870:48: replace \\| with \\^ in Gpu::output",
-    "lib\\.rs:895:49: replace \\| with \\^ in Gpu::run",
+    "lib\\.rs:873:48: replace \\| with \\^ in Gpu::output",
+    "lib\\.rs:898:49: replace \\| with \\^ in Gpu::run",
 
     # Three tolerance comparisons whose two forms differ only on the tie, and the tie is an exact
     # `f64` equality with a literal that the quantity being compared never produces: the Newton
@@ -3837,18 +3837,18 @@ exclude_re = [
     # degrees-to-radians factor on those three angles feeds a value nothing observes. (The
     # inclination's factor does reach `n₀"`, and is pinned by
     # `the_brouwer_mean_motion_is_the_published_un_kozai_recursion`.)
-    "satellite\\.rs:338:38: replace \\* with / in Satellite::from_elements",
-    "satellite\\.rs:338:38: replace \\* with \\+ in Satellite::from_elements",
-    "satellite\\.rs:340:42: replace \\* with / in Satellite::from_elements",
-    "satellite\\.rs:340:42: replace \\* with \\+ in Satellite::from_elements",
-    "satellite\\.rs:341:35: replace \\* with / in Satellite::from_elements",
-    "satellite\\.rs:341:35: replace \\* with \\+ in Satellite::from_elements",
+    "satellite\\.rs:340:38: replace \\* with / in Satellite::from_elements",
+    "satellite\\.rs:340:38: replace \\* with \\+ in Satellite::from_elements",
+    "satellite\\.rs:342:42: replace \\* with / in Satellite::from_elements",
+    "satellite\\.rs:342:42: replace \\* with \\+ in Satellite::from_elements",
+    "satellite\\.rs:343:35: replace \\* with / in Satellite::from_elements",
+    "satellite\\.rs:343:35: replace \\* with \\+ in Satellite::from_elements",
 
     # `norm() < WGS72_EQUATORIAL_RADIUS_M` → `<=` is the re-entry test at a radius equal to the
     # reference equator to the bit. SGP4 arrives there through eight transcendental terms; no
     # element set in the published verification file lands within 10⁻⁹ m of it, and an object
     # sitting exactly on the reference surface is decayed either way you answer.
-    "satellite\\.rs:452:28: replace < with <= in Satellite::propagate_minutes",
+    "satellite\\.rs:454:28: replace < with <= in Satellite::propagate_minutes",
 
     # The `propagate_many_into` guard chooses how the work is split, not what it computes. Both
     # branches assign satellite `i`, epoch `j` to `out[i·t + j]` and call the same
@@ -3859,9 +3859,9 @@ exclude_re = [
     # `either_empty_side_of_the_batch_takes_the_sequential_path`, which is what leaves only these
     # three: each still refuses both degenerate shapes and differs from the original solely in
     # which non-degenerate batches it hands to threads.
-    "satellite\\.rs:568:16: replace <= with > in propagate_many_into",
-    "satellite\\.rs:568:41: replace < with <= in propagate_many_into",
-    "satellite\\.rs:568:45: replace \\* with \\+ in propagate_many_into",
+    "satellite\\.rs:570:16: replace <= with > in propagate_many_into",
+    "satellite\\.rs:570:41: replace < with <= in propagate_many_into",
+    "satellite\\.rs:570:45: replace \\* with \\+ in propagate_many_into",
 
     # --- `estimation/se3.rs`. The small-angle split, at the split and one decade wide of it.
     #
@@ -4050,7 +4050,7 @@ exclude_re = [
     # difference 2.2e-16 rad (1 ulp) and worst height difference 7.5e-9 m, against test tolerances of
     # 1e-10 rad and 1e-6 m. (The subtractive form does lose accuracy for `s > 1e5`; the reachable
     # domain has `s <= 6.0e-4`.)
-    "wgs84\\.rs:116:32: replace \\+ with - in itrf_to_geodetic",
+    "wgs84\\.rs:117:32: replace \\+ with - in itrf_to_geodetic",
 
     # `year % 100 != 0 || year % 400 == 0`, the century half of the Gregorian leap rule in
     # `parse_epoch`. SINEX carries a **two-digit** year and pivots on `yy < 50`, so the years this
@@ -5067,7 +5067,7 @@ exclude_re = [
     # harmless, and a test asserting the branches agree at the threshold would be asserting
     # something false. `the_pole_threshold_is_unreachable_from_below` walks the `f64` neighbourhood
     # of `|d_z| = 1` and pins the emptiness instead.
-    "radiative_transfer\\.rs:325:19: replace < with <= in scatter_direction",
+    "radiative_transfer\\.rs:326:19: replace < with <= in scatter_direction",
 
     # --- `earthvision/radiative_transfer.rs`. The mirror image of a mirror-symmetric problem.
     #
@@ -5096,7 +5096,7 @@ exclude_re = [
     # over both hemispheres and eight azimuths, which is what makes the ensemble contain `mirror(d)`
     # with exactly the weight it gives `d`. Without that step the mutant is `d · mirror(view)` and
     # nothing says the walk visits the mirrored path.
-    "radiative_transfer\\.rs:459:46: replace \\+ with - in estimate",
+    "radiative_transfer\\.rs:460:46: replace \\+ with - in estimate",
 
     # --- `estimation/process_noise.rs`. A pivot search that re-examines the row it started from.
     #
@@ -5359,14 +5359,14 @@ exclude_re = [
     # move is anything `UsageViolations::assess` reads: the minimum by 1.8e-15 and the width by
     # 1.4e-15, both machine noise. `CurvilinearEncounter::time_of_minimum` is an accessor no check
     # consumes.
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:597:22: replace < with <= in bracket_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:623:19: replace < with <= in golden_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:636:36: replace \\* with / in golden_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:640:15: replace < with == in golden_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:640:15: replace < with > in golden_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:640:15: replace < with <= in golden_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:673:22: replace \\|\\| with && in unit_rise",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:676:55: replace < with <= in unit_rise",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:600:22: replace < with <= in bracket_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:626:19: replace < with <= in golden_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:639:36: replace \\* with / in golden_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:643:15: replace < with == in golden_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:643:15: replace < with > in golden_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:643:15: replace < with <= in golden_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:676:22: replace \\|\\| with && in unit_rise",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:679:55: replace < with <= in unit_rise",
 
     # radiometric.rs — two survivors of `reseal-radiometric`, both proved rather than measured
     # against a tolerance.

@@ -21,7 +21,7 @@
 
 use crate::{AccessGeometry, Constraint, ElevationMask, OrbitBound, SensorError};
 
-/// Speed of light, m/s.
+/// Speed of light, m/s, exact in the SI.
 const C_LIGHT: f64 = 299_792_458.0;
 /// `−10·log₁₀(k)` with the exact SI `k = 1.380649e−23 J/K`: the Boltzmann term of the C/N₀
 /// equation, dBW/(K·Hz), at the 40 digits `derivations/comms_link_budget.mac` prints. The

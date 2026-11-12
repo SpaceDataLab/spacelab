@@ -47,15 +47,17 @@ pub struct Atmosphere {
 }
 
 impl Atmosphere {
-    /// Mars: DE-grade `μ`, mean radius, and a standard exponential fit (`ρ₀ ≈ 0.020 kg/m³`,
-    /// `H ≈ 11.1 km`).
+    /// Mars: the Mars system's `μ` from DE440 (Park et al. 2021), mean radius, and a standard
+    /// exponential fit (`ρ₀ ≈ 0.020 kg/m³`, `H ≈ 11.1 km`). The moons add 1.5e-8 to `μ`.
+    /// `derivations/constants_readback.mac` reads `μ` back.
     pub const MARS: Self = Self {
-        mu: 4.282_837e13,
+        mu: 4.282_837_581_6e13,
         radius: 3.389_5e6,
         surface_density: 0.020,
         scale_height: 11_100.0,
     };
-    /// Earth: standard `μ`, radius, sea-level density and a `~7.2 km` scale height.
+    /// Earth: WGS 84's `μ` and equatorial radius, sea-level density and a `~7.2 km` scale height.
+    /// `derivations/constants_readback.mac` reads `μ` and the radius back.
     pub const EARTH: Self = Self {
         mu: 3.986_004_418e14,
         radius: 6.378_137e6,
@@ -347,27 +349,27 @@ mod tests {
     const COS_BANK: f64 = 0.37;
 
     /// `[V̇, γ̇, ṙ, ṡ]` at `STATE`, evaluated at 60 decimal digits from the equations of the module
-    /// header, unbanked and at `COS_BANK`.
+    /// header, unbanked and at `COS_BANK`, by `derivations/edl_entry_fixture.mac`.
     const DERIVATIVE: [f64; 4] = [
-        -7.865_661_531_129_359_860_074_466,
-        0.001_232_498_226_779_378_667_319_796,
+        -7.865_661_400_240_098_835_372_611,
+        0.001_232_498_138_413_916_268_196_867,
         -1_426.968_712_458_566_615_013_526,
         5_033.280_103_253_884_379_204_645,
     ];
     const DERIVATIVE_BANKED: [f64; 4] = [
-        -7.865_661_531_129_359_860_074_466,
-        0.000_981_601_267_927_477_500_676_915_9,
+        -7.865_661_400_240_098_835_372_611,
+        0.000_981_601_179_562_015_101_553_987_4,
         -1_426.968_712_458_566_615_013_526,
         5_033.280_103_253_884_379_204_645,
     ];
 
     /// One classical Runge–Kutta step of the unbanked equations from `STATE` over 0.75 s, and the
-    /// sensed drag at `STATE` in Earth-g — both at 60 decimal digits.
+    /// sensed drag at `STATE` in Earth-g — both at 60 decimal digits, by the same derivation.
     const RK4_STEP: EntryState = [
-        5_314.778_635_321_540_586_110_520,
-        -0.270_561_777_235_870_283_209_517_4,
-        3_450_932.181_468_133_764_376_732,
-        140_773.865_513_298_650_193_820_3,
+        5_314.778_635_419_500_097_184_321,
+        -0.270_561_777_302_198_348_568_129_7,
+        3_450_932.181_467_996_536_512_231,
+        140_773.865_513_298_745_427_364_8,
     ];
     const DRAG_G: f64 = 0.900_359_993_578_327_859_538_598_6;
 

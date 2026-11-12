@@ -56,16 +56,19 @@ pub const REGIMES: usize = (FLUX_EDGES.len() + 1) * (STORM_EDGES.len() + 1);
 ///
 /// Maxima at 60 digits — `fpprec:60$ bfloat(sqrt(2)*inverse_erf(9/10));`, cut here to 30 —
 /// `1.64485362695147271486384890799`, whose nearest `f64` this is, 7.9e-17 (0.355 ulp) away.
+/// `derivations/sdtm_uncertainty.mac` reads all three back.
 pub const NORMAL_90: f64 = 1.644_853_626_951_472_7;
 
 /// Two-sided standard-normal 95 % quantile, `√2 · erf⁻¹(0.95)`.
 ///
-/// Maxima, same form: `1.95996398454005423552459443052`, 0.162 ulp from this `f64`.
+/// Maxima, same form: `1.95996398454005423552459443052`, 0.162 ulp from this `f64`
+/// (`derivations/sdtm_uncertainty.mac`).
 pub const NORMAL_95: f64 = 1.959_963_984_540_054_3;
 
 /// Two-sided standard-normal 99 % quantile, `√2 · erf⁻¹(0.99)`.
 ///
-/// Maxima, same form: `2.57582930354890076097857674860`, 0.151 ulp from this `f64`.
+/// Maxima, same form: `2.57582930354890076097857674860`, 0.151 ulp from this `f64`
+/// (`derivations/sdtm_uncertainty.mac`).
 pub const NORMAL_99: f64 = 2.575_829_303_548_901;
 
 /// The spread of `ln(ρ_model/ρ_measured)` by regime.

@@ -13,7 +13,7 @@ where it comes from, in one of three ways:
     `derivations/` or `tools/` that exists: the derivation that checks it or the generator that
     emitted it; a file whose header says it is generated and names its generator counts whole;
   * **cited** -- the same comments cite a document: a standard (IERS, IAU, ICD, CODATA, WGS 84,
-    ...), a paper (a year, "et al."), a URL or a DOI. A code is not a document (`plans/17` §1.1),
+    WGS 72, a Smithsonian Special Report ...), a paper (a year, "et al."), a URL or a DOI. A code is not a document (`plans/17` §1.1),
     so naming Orekit or SOFA does not count.
 
 The rest are the ledger in `docs/verification.md` §12.2, one line per item with its count. The
@@ -62,7 +62,7 @@ PATH = re.compile(r"((?:derivations|tools)/[\w./-]*\w)")
 # "Knocke (1988)", "Vallado 2013" or "(2010)", so that "n = 2000" in a comment does not.
 CITE = re.compile(
     r"(?:\b[A-Z][\w'&.-]*,? \(?|\()(?:1[89]|20)\d\d[a-z]?\b(?!-\d)|et al\b|https?://|\b(?:doi|DOI)\b|"
-    r"arXiv|\bIERS\b|\bIAU\b|\bICD\b|IS-GPS|IS-QZSS|CODATA|\bNIST\b|\bSI\b(?!\)| units)|\bWGS ?84\b|\bEGM\d|"
+    r"arXiv|\bIERS\b|\bIAU\b|\bICD\b|IS-GPS|IS-QZSS|CODATA|\bNIST\b|\bSI\b(?!\)| units)|\bWGS[ -]?(?:84|72)\b|\bSR ?\d{3}\b|\bEGM\d|"
     r"\bGRS ?80\b|\bTN ?\d|\bRFC ?\d|\bISO ?\d|CCSDS|\bNGA\b|ITU-R|Conventions|\bTable \d|"
     r"\bEqs?\.? ?\(?\d"
 )

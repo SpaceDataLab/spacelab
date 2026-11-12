@@ -43,6 +43,7 @@ use crate::sar::azimuth_frequency;
 use alloc::vec;
 use alloc::vec::Vec;
 
+/// Speed of light, m/s, exact in the SI.
 const C: f64 = 299_792_458.0;
 const PI: f64 = core::f64::consts::PI;
 

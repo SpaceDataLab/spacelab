@@ -169,8 +169,8 @@ pub(crate) fn parse_time_system(tok: &str) -> Option<TimeSystem> {
     })
 }
 
-/// Seconds from JDN 0 at 00:00 to the J2000 epoch, JD 2451545.0 = 2000-01-01 12:00. `jdn` counts
-/// whole days from midnight, JD from noon, so the half-day is not optional.
+/// Seconds from JDN 0 at 00:00 to the J2000 epoch the IAU defines, JD 2451545.0 = 2000-01-01
+/// 12:00. `jdn` counts whole days from midnight, JD from noon, so the half-day is not optional.
 pub(crate) const JDN_SECONDS_AT_J2000: f64 = 2_451_545.0 * 86_400.0 + 43_200.0;
 
 /// A parsed SP3 file: the epoch grid (seconds from the first epoch) and, per satellite, the ECEF

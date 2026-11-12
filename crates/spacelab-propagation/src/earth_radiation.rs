@@ -85,7 +85,7 @@ pub const EARTH_AROUND_SUN_PULSATION: f64 = TAU / JULIAN_YEAR;
 pub const JULIAN_YEAR: f64 = 3.155_76e7;
 /// Solar-irradiance coefficient, J/m³ — Orekit `KnockeRediffusedForceModel.ES_COEFF`.
 pub const ES_COEFF: f64 = 4.560_6e-6;
-/// Speed of light, m/s — Orekit `Constants.SPEED_OF_LIGHT`.
+/// Speed of light, m/s, exact in the SI.
 pub const SPEED_OF_LIGHT: f64 = 2.997_924_58e8;
 /// The JPL-SSD astronomical unit, m — Orekit `Constants.JPL_SSD_ASTRONOMICAL_UNIT`.
 ///

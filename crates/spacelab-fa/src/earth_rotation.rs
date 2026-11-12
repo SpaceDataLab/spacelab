@@ -17,9 +17,9 @@ use spacelab_core::{
 // 50-digit mpmath evaluation in `derivations/gmst82.py`; the exact bit patterns are asserted
 // in the tests, so a mistyped digit fails there rather than silently shifting GMST.
 
-/// Constant term, seconds of time. GMST at J2000.0 = 18ʰ41ᵐ50ˢ.54841.
+/// Constant term, seconds of time (Aoki et al. 1982). GMST at J2000.0 = 18ʰ41ᵐ50ˢ.54841.
 const C0: f64 = 67_310.548_41;
-/// Linear term beyond the whole-day part, seconds per Julian century.
+/// Linear term beyond the whole-day part, seconds per Julian century (Aoki et al. 1982).
 const C1: f64 = 8_640_184.812_866;
 /// Quadratic term, seconds per Julian century squared.
 const C2: f64 = 0.093_104;

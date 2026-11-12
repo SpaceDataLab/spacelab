@@ -9458,6 +9458,10 @@ Findings:
 Six and a half years: the minimum, rise, peak and early decline of cycle 25. Every model reads measured indices, and two read indices
 from after the instant; a forecast-mode comparison is Ф30.H's.
 
+The prospective test, on the months after 2026-04 that no fit or tool here has read, is registered in
+[`sdtm1-blind-protocol.md`](sdtm1-blind-protocol.md) (Ф30.J): the frozen field, the rows, the metrics of this
+section and five hypotheses with their decision rules, fixed before the first blind row.
+
 Run (results stay under `data/`, never committed):
 
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py splits

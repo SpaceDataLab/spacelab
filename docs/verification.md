@@ -166,7 +166,7 @@ The other seven of the ten are **not** covered, and the reason differs by table:
 | `ocean_tide_got.rs` — GOT5.5, 31 waves to degree 6 | GOT5.5 **cotidal grids** (GSFC), analysed here | there is no coefficient file to re-derive from: this table is computed rather than transcribed, so the seal says only that the committed numbers are the generator's. The question a re-derivation would answer is answered instead by `tests/ocean_tide_atlas.rs`, which measures it against two published atlases (§10.8) |
 | `ocean_tide_eot20.rs` — EOT20, 16 waves to degree 6 | EOT20 **cotidal grids** (DGFI-TUM, SEANOE), analysed here | the same position as GOT: computed by the same generator, so the seal says only that the numbers are the generator's, and `tests/ocean_tide_atlas.rs` measures them against both FES tables. FES2014b is EOT20's reference model, which that test states (§10.8) |
 | `models.rs` — Niell / GMF / VMF3 mapping coefficients | the published papers | the coefficients appear in a paper's tables, not in a machine-readable distribution |
-| `tide_step2_tables.rs` — IERS 2010 Tables 6.5a/b/c | IERS Conventions 2010, chapter 6 | the tables live in the chapter PDF. The IERS site does publish `STEP2DIU.F`/`STEP2LON.F`, but those carry the *site-displacement* Step-2 coefficients — a different quantity from the geopotential ΔC̄/ΔS̄ this table holds |
+| `tide_step2_tables.rs` — IERS 2010 Tables 6.5a/b/c | **Orekit's** `tab6.5{a,b,c}.txt`; held row for row against IERS Conventions (2010) chapter 6 as updated 2018-02-01 | no seal, a read-back instead: the tables live in the chapter PDF, and `derivations/tide_step2_iers.mac` parses them from its text, compares every row's τ, Delaunay multipliers and amplitudes, and checks each row's Delaunay multipliers against its Doodson number and its two amplitudes against its δk (Ф19.G). The IERS site's `STEP2DIU.F`/`STEP2LON.F` carry the *site-displacement* Step-2 coefficients — a different quantity from the geopotential ΔC̄/ΔS̄ this table holds |
 
 `subdaily_tables.rs` is outside both lists: `derivations/eop_subdaily.py` transcribes ORTHO_EOP,
 PMSDNUT2 and UTLIBR inside the script and certifies the whole model against each routine's official
@@ -445,9 +445,10 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Ocean tide ΔC̄/ΔS̄ (FES2004) | IERS TN36 §6.3; FES2004 as the IERS Conventions Centre publishes it (`verify.sh` regenerates the table from that file) | Orekit 13 `OceanTides` FES2004 deg/order 6 | rel < 1e-9 | src/ocean_tide.rs |
 | Ocean tide acceleration (FES2004) | IERS TN36 §6.3 (the same IERS FES2004 file) | Orekit 13 `OceanTides` (ITRF) | rel < 1e-7 (meas 5.2e-8, cancellation floor) | src/ocean_tide.rs |
 | Ocean tide admittance weights | IERS TN36 §6.3 admittance; FES2014b (aviso-fes) primary file | pyfes (FES2014b / aviso-fes), spline + linear minor waves | < 1e-6 (meas ~7e-15) | src/ocean_tide_admittance.rs |
-| Solid Earth tide Step-2 | IERS TN36 Ch. 6, Tables 6.5a–6.5c | Orekit `getTideFrequencyDependenceFunction` | rel < 2e-3 | src/solid_tide.rs |
-| Solid pole tide (§6.4) / ocean pole tide (§6.5) | IERS TN36 §6.4 / §6.5 | Orekit `getSolidPoleTide` / `getOceanPoleTide`, at `MeanPole::Iers2010` — Orekit implements no other | rel < 1e-9 | src/solid_tide.rs |
-| Secular pole, the shipped default (Ch. 7 Eq. 21) | IERS TN36 Ch. 7 as amended 2018/02/01, Eq. (21) | `derivations/pole_wobble.py` at 50 dps, 7 epochs × 2 polar motions | rel < 1e-15 | src/solid_tide.rs |
+| Solid Earth tide Step 1 (eqs 6.6, 6.7, 6.14) | IERS Conventions (2010) ch. 6 as updated 2018-02-01, Table 6.3 | **Maxima** `derivations/solid_tide_iers.mac`: eq (6.6) in complex form is the shipped real pair, Table 6.3 and (6.14) read back; the acceleration the gradient of the chapter's potential at 40 digits, Step 1 at the reference geometry and Step 1 + 2 + pole tide at Orekit's (G3); the Python finite-difference reference held to 2.3e-9; Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 2.1 and 0.23 of ε·GM/r² (bound 8): the tide is read off a degree-4 field less its monopole, so its error is the monopole's rounding, 1e-8 of the tide | src/solid_tide.rs |
+| Solid Earth tide Step 2 (eq 6.8) | IERS Conventions (2010) ch. 6, Tables 6.5a–6.5c | **Maxima** `derivations/tide_step2_iers.mac` on the chapter's text: the shipped tables are Tables 6.5a/b/c row for row, every row's Delaunay multipliers follow from its Doodson number and its amplitudes from its δk; `solid_tide_iers.mac`: eq (6.8) in complex form is the shipped per-band arithmetic, and its sum at the oracle epoch (G3); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 1.9e-14 (bound 1e-13) | src/solid_tide.rs, src/tide_step2_tables.rs |
+| Solid pole tide (§6.4) / ocean pole tide (§6.5) | IERS Conventions (2010) eqs (6.22)–(6.24); Desai (2002) | **Maxima** `derivations/solid_tide_iers.mac`: k2 ΔV projects onto P̄21 alone, 1.333e-9 follows from k2 and the chapter 1 constants, the ocean −2.1778e-10, 0.01724, −1.7232e-10, 0.03365 from Desai's (2, 1) row, γ and R2; both equations on both poles at 40 digits (G3); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) — Orekit implements only the 2010 pole | 6.5e-16 (bound 3e-15); 0.0115 sits at the edge of the printed k2's rounding (F92) | src/solid_tide.rs |
+| Secular pole, the shipped default (Ch. 7 Eq. 21) | IERS TN36 Ch. 7 as amended 2018/02/01, Eq. (21) | `derivations/pole_wobble.py` at 50 dps, 7 epochs × 2 polar motions, re-derived in Maxima by `solid_tide_iers.mac` (6) to every digit shown | rel < 1e-15 | src/solid_tide.rs |
 | FES2004 / FES2014b coeff tables | FES2004 IERS Conventions Centre file / FES2014b aviso-fes file (both re-derived) | vendored verbatim primary source | SCALE=1e-11 verbatim | src/ocean_tide_fes2004.rs, fes2014.rs |
 | Ocean tide ΔC̄/ΔS̄ from a cotidal grid (GOT5.5) | IERS TN36 §6.3 Eq. 6.18–6.21, conventions proved in Maxima | FES2004 **and** FES2014b, the spread between them as the floor | closer to FES2014b than FES2004 is on all 9 waves the three share; worst rms 0.228e-11 over 17 | derivations/tide_to_stokes.py, tests/ocean_tide_atlas.rs |
 | Ocean tide ΔC̄/ΔS̄ from a cotidal grid (EOT20) | IERS TN36 §6.3 Eq. 6.18–6.21, the same generator | FES2004 and FES2014b; FES2014b is EOT20's reference model | closer to FES2014b than FES2004 is on all 9 diurnal and semi-diurnal waves the three share; worst rms 0.157e-11 over 14 | derivations/tide_to_stokes.py, tests/ocean_tide_atlas.rs |
@@ -11294,9 +11295,12 @@ reference test is parked and its ceiling test asserts the model's definition. Ф
 two reference cases, the box-wing's five geometries and 22 DSST tests, after
 `tests/dsst_short_period_identity.rs` gained the conservative mean rates as orbit averages of Gauss's
 rates (zonal, Sun and Moon, the 1:1 and 2:1 resonances) and the box-wing's lift drag a test of its own.
-**Today: 105
-comparator-decided tests of 3 687** — name 68, file 18, fixture 4, doc 15; 46 of them Orekit's (33 by
-name), 26 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+Batch 2 (2026-11-13) parks the solid tide's four — Step 2, the two pole tides and the acceleration — after
+`solid_tide_iers.mac` derived the chapter's equations into the force and `tide_step2_iers.mac` held
+the Step-2 tables against chapter 6 row by row.
+**Today: 101
+comparator-decided tests of 3 691** — name 64, file 18, fixture 4, doc 15; 42 of them Orekit's (29 by
+name), 22 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 The parked tests are the suite: `just compare` (`tools/compare.py`) runs each one alone, reads the
@@ -11378,10 +11382,6 @@ crates/spacelab-propagation/src/ocean_tide.rs::acceleration_matches_orekit | nam
 crates/spacelab-propagation/src/ocean_tide.rs::admittance_weights_match_pyfes | name:pyfes
 crates/spacelab-propagation/src/ocean_tide.rs::delta_cs_matches_orekit | name:orekit
 crates/spacelab-propagation/src/relativity.rs::matches_orekit | name:orekit
-crates/spacelab-propagation/src/solid_tide.rs::acceleration_matches_orekit | name:orekit
-crates/spacelab-propagation/src/solid_tide.rs::ocean_pole_tide_matches_orekit | name:orekit
-crates/spacelab-propagation/src/solid_tide.rs::pole_tide_matches_orekit | name:orekit
-crates/spacelab-propagation/src/solid_tide.rs::step2_matches_orekit | name:orekit
 crates/spacelab-propagation/src/spacecraft.rs::a_null_radiation_flux_returns_zero_and_the_threshold_is_strict | doc:orekit
 crates/spacelab-propagation/src/spacecraft.rs::an_array_edge_on_to_the_sun_falls_back_to_an_arbitrary_perpendicular | doc:orekit
 crates/spacelab-propagation/tests/measured_density.rs::the_three_hourly_ap_array_is_what_carries_the_storm | doc:orekit

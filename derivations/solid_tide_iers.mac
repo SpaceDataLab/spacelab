@@ -1,0 +1,256 @@
+/* `crates/spacelab-propagation/src/solid_tide.rs` against IERS Conventions (2010) chapter 6 as
+   updated 2018-02-01: Step 1, Step 2 and the two pole tides (plans/17 Ф19.G).
+
+   Orekit's SolidTides decided these until Ф19.G and is a comparator now (docs/comparisons.md). The
+   chapter's own equations decide:
+     (1) eq (6.6) in its complex form is the real pair the force ships, over the sums
+         Sc - i Ss = sum_j (GM_j/GM)(Re/r_j)^(n+1) Pnm(sin Phi_j) e^(-i m lambda_j); eq (6.7) is
+         the same at the k+ and n = 2;
+     (2) Table 6.3's Love numbers and eq (6.14)'s permanent part as shipped, and A0, A1 of eqs
+         (6.8c, d) from aE;
+     (3) eq (6.8a, b) in complex form is the real per-band arithmetic of `step2_corrections`, with
+         theta_f = m (theta_g + pi) - N.F;
+     (4) eq (6.22): the response k2 dV of the centrifugal potential is the single harmonic P21, with
+         dC21 - i dS21 = -Omega^2 aE^3 k2 (m1 - i m2)/(GM sqrt(15)); at k2 = 0.3077 + 0.0036 i and
+         the chapter 1 constants it is 1.333e-9 per arcsec. The printed 0.0115 is Im k2/Re k2 only
+         at the rounding edge of the printed Im k2: 0.0036/0.3077 = 0.01170 (F92). The force ships
+         the printed equation;
+     (5) eq (6.23) at (n, m) = (2, 1), with Desai's A21, B21, gamma and R2 of eq (6.23b), gives the
+         four printed coefficients of eq (6.24), which the force ships;
+     (6) the wobble (m1, m2) of eq (25) about the secular pole of eq (21) and about the 2010
+         printing's Table 7.7 (as `derivations/pole_wobble.py` types it; the 2018 chapter no longer
+         prints it): the two Rust goldens `pole_wobble.py` wrote at 50 digits, re-derived here;
+     (7) the goldens of the Rust G3 tests, at 40 digits: Step 2 at the oracle epoch from the shipped
+         tables, the pole tides at the fixture polar motion about both poles, and two accelerations,
+         each the gradient of the chapter's potential: Step 1 at the reference geometry (which also
+         holds the Python reference to its finite-difference step), and Step 1 + Step 2 + the solid
+         pole tide at Orekit's geometry.
+   `tide_step2_iers.mac` holds the Step-2 tables against the chapter's text and Desai's four (2, 1)
+   numbers against his file.
+
+   timeout 300 maxima --very-quiet -Q -b solid_tide_iers.mac                                        */
+
+load("rust_literals.mac")$
+fpprec : 40$
+fpprintprec : 20$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+src : "../crates/spacelab-propagation/src/solid_tide.rs"$
+tab : "../crates/spacelab-propagation/src/tide_step2_tables.rs"$
+
+/* Whether some line of the file contains the text. */
+in_source(path, text) := block([s : openr(path), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+all_in_source(path, texts) := every(lambda([t], in_source(path, t)), texts)$
+/* |v - printed| within half the printed value's last place. */
+printed(v, p, place) := is(bfloat(abs(v - p)) <= bfloat(place/2))$
+
+/* Chapter 1, Tables 1.1 and 1.2. */
+Om : 7292115/10^11$ aE : 63781366/10$ GMe : 3986004418*10^5$ gE : 97803278/10^7$ G : 667428/10^16$
+arcsec : %pi/648000$
+
+/* ---- (1) eq (6.6) and (6.7) ----------------------------------------------------------------------- */
+declare([kR, kI, Sc, Ss], real)$
+eq66 : rectform((kR + %i*kI)/(2*n + 1)*(Sc - %i*Ss))$
+must(is(ratsimp(realpart(eq66) - (kR*Sc + kI*Ss)/(2*n + 1)) = 0)
+     and is(ratsimp(-imagpart(eq66) - (kR*Ss - kI*Sc)/(2*n + 1)) = 0)
+     and all_in_source(src, [
+       "let x = pos[2] / r; // sin(latitude)",
+       "let lon = libm::atan2(pos[1], pos[0]);",
+       "let radial = gm_ratio * libm::pow(self.re_earth / r, (n + 1) as f64);",
+       "let fac = radial * pbar(n, m, x);",
+       "sc[n][m] += fac * libm::cos(m as f64 * lon);",
+       "ss[n][m] += fac * libm::sin(m as f64 * lon);",
+       "(K2_RE[m] * sc[2][m] + K2_IM[m] * ss[2][m]) / 5.0,",
+       "(K2_RE[m] * ss[2][m] - K2_IM[m] * sc[2][m]) / 5.0,",
+       "let three = |m: usize| (K3_RE[m] * sc[3][m] / 7.0, K3_RE[m] * ss[3][m] / 7.0);",
+       "let four = |m: usize| (K2_PLUS[m] * sc[2][m] / 5.0, K2_PLUS[m] * ss[2][m] / 5.0);"]),
+     "(1) holds: eq (6.6) is dC = (kR Sc + kI Ss)/(2n+1), dS = (kR Ss - kI Sc)/(2n+1) over the shipped sums, and (6.7) the same at k+ on the n = 2 sums")$
+
+/* ---- (2) Table 6.3, eq (6.14), A0 and A1 ------------------------------------------------------------ */
+must(same_rationals(rust_table(src, "K2_RE"), [30190, 29830, 30102]/10^5)
+     and same_rationals(rust_table(src, "K2_IM"), [0, -144, -130]/10^5)
+     and same_rationals(rust_table(src, "K2_PLUS"), [-89, -80, -57]/10^5)
+     and same_rationals(rust_table(src, "K3_RE"), [93, 93, 93, 94]/10^3)
+     and is(rust_scalar(src, "PERMANENT_TIDE_C20") = "4.4228e-8 * -0.314_60 * 0.301_90")
+     and printed(1/(aE*sqrt(4*%pi)), 44228/10^12, 10^-12)
+     and printed(1/(aE*sqrt(8*%pi)), 31274/10^12, 10^-12),
+     "(2) holds: Table 6.3's anelastic k2m, Im k2m, k2m+ and k3m, eq (6.14)'s A0 H0 k20 as shipped; A0 = 4.4228e-8 and A1 = 3.1274e-8 are 1/(aE sqrt(4 pi)) and 1/(aE sqrt(8 pi))")$
+
+/* ---- (3) eq (6.8) ---------------------------------------------------------------------------------- */
+declare([ip, op, th], real)$
+z68 : rectform((ip + %i*op)*exp(%i*th))$
+w21 : rectform(-%i*z68)$
+must(is(trigsimp(realpart(z68) - (ip*cos(th) - op*sin(th))) = 0)
+     and is(trigsimp(realpart(w21) - (ip*sin(th) + op*cos(th))) = 0)
+     and is(trigsimp(-imagpart(w21) - (ip*cos(th) - op*sin(th))) = 0)
+     and is(trigsimp(-imagpart(z68) - (-ip*sin(th) - op*cos(th))) = 0)
+     and all_in_source(src, [
+       "let gamma = gmst + core::f64::consts::PI;",
+       "f64::from(tau) * gamma",
+       "- (f64::from(m[0]) * l",
+       "+ f64::from(m[1]) * lp",
+       "+ f64::from(m[2]) * f",
+       "+ f64::from(m[3]) * d",
+       "+ f64::from(m[4]) * om)",
+       "c20 += ip * c - op * s;",
+       "c21 += ip * s + op * c;",
+       "s21 += ip * c - op * s;",
+       "c22 += ip * c - op * s;",
+       "s22 += -ip * s - op * c;",
+       "c20 * 1e-12,"]),
+     "(3) holds: eq (6.8a) is ip cos - op sin; eq (6.8b) with eta1 = -i gives dC21 = ip sin + op cos, dS21 = ip cos - op sin, with eta2 = 1 dC22 = ip cos - op sin, dS22 = -ip sin - op cos, as shipped, at theta = tau (GMST + pi) - N.F")$
+
+/* ---- (4) eq (6.22) --------------------------------------------------------------------------------- */
+declare([m1, m2, lam, cth, sth, a, GMs, Oms], real)$
+assume(a > 0, GMs > 0)$
+/* P21 normalized (4 pi, no Condon-Shortley phase), from Rodrigues, at x = cos(colatitude). */
+Nnm(n, m) := sqrt((2 - kron_delta(m, 0))*(2*n + 1)*(n - m)!/(n + m)!)$
+Pd(n, m, u) := subst(xx = u, diff(expand(diff((xx^2 - 1)^n, xx, n)/(2^n*n!)), xx, m))$
+P21 : Nnm(2, 1)*sth*Pd(2, 1, cth)$
+k2c : kR + %i*kI$
+Kp : Oms^2*a^3/(GMs*sqrt(15))$
+dC22 : -Kp*realpart(rectform(k2c*(m1 - %i*m2)))$
+dS22 : Kp*imagpart(rectform(k2c*(m1 - %i*m2)))$
+/* (GM/a)(dC cos lam + dS sin lam) P21 at r = a is the perturbation -(Om^2 a^2/2) sin(2 th) Re[k2 (m1 - i m2) e^(i lam)]. */
+response : -(Oms^2*a^2/2)*(2*sth*cth)*realpart(rectform(k2c*(m1 - %i*m2)*(cos(lam) + %i*sin(lam))))$
+solid_global : bfloat(Om^2*aE^3/(GMe*sqrt(15))*3077/10^4*arcsec)$
+/* Re k2 and Im k2 as printed, 0.3077 and 0.0036, hold any value within half their last place. */
+ratio_low : (36 - 1/2)/(3077 + 1/2)$
+ratio_high : (36 + 1/2)/(3077 - 1/2)$
+must(is(radcan(GMs/a*(dC22*cos(lam) + dS22*sin(lam))*P21 - response) = 0)
+     and is(ratsimp(dC22 + Kp*kR*(m1 + kI/kR*m2)) = 0)
+     and is(ratsimp(dS22 + Kp*kR*(m2 - kI/kR*m1)) = 0)
+     and printed(solid_global, 1333/10^12, 10^-12)
+     and is(ratio_low < 1155/10^5 and ratio_high >= 1145/10^5),
+     "(4) holds: eq (6.22)'s k2 response is the single harmonic P21 = sqrt(15) sin cos with dC21 = -K Re k2 (m1 + (Im/Re) m2), dS21 = -K Re k2 (m2 - (Im/Re) m1); K Re k2 per arcsec is 1.333e-9; 0.0115 lies inside the printed k2's rounding")$
+print("F92: Im k2/Re k2 at the printed digits is", bfloat(36/3077), "against the printed 0.0115; consistent only for Im k2 in [0.00355, 0.003554)")$
+must(is(rust_scalar(src, "GLOBAL") = "-1.333e-9 / ARC_SEC_TO_RAD")
+     and same_rationals([rust_scalar(src, "RATIO")], [115/10^4])
+     and same_doubles([rust_scalar(src, "ARC_SEC_TO_RAD")], [arcsec])
+     and in_source(src, "[GLOBAL * (m1 + RATIO * m2), GLOBAL * (m2 - RATIO * m1)]"),
+     "(4) holds: pole_tide_corrections ships eq (6.22)'s printed -1.333e-9 (m1 + 0.0115 m2), -1.333e-9 (m2 - 0.0115 m1), m in arcsec = rad / (pi/648000)")$
+
+/* ---- (5) eq (6.23) and (6.24) ---------------------------------------------------------------------- */
+/* Desai's (2, 1) row of desaiscopolecoef.txt: A21 real, B21 real, A21 imaginary, B21 imaginary. */
+A21R : -24325330521304/10^14$ B21R : 54680741193318/10^16$
+A21I : 54680741193318/10^16$ B21I : -19252111185300/10^14$
+rho_w : 1025$ k2load : -3075/10^4$ gR : 6870/10^4$ gI : 36/10^4$
+R2 : Om^2*aE^4/GMe*4*%pi*G*rho_w/gE*(1 + k2load)/5$
+declare([AR, AI, BR, BI, gamR, gamI], real)$
+c623 : AR*(m1*gamR + m2*gamI) + AI*(m2*gamR - m1*gamI)$
+s623 : BR*(m1*gamR + m2*gamI) + BI*(m2*gamR - m1*gamI)$
+oc1 : bfloat(R2*(A21R*gR - A21I*gI)*arcsec)$
+oc2 : bfloat(R2*(A21R*gI + A21I*gR)*arcsec)$
+os2 : bfloat(R2*(B21R*gI + B21I*gR)*arcsec)$
+os1 : bfloat(R2*(B21R*gR - B21I*gI)*arcsec)$
+must(is(ratsimp(c623 - (m1*(AR*gamR - AI*gamI) + m2*(AR*gamI + AI*gamR))) = 0)
+     and is(ratsimp(s623 - (m2*(BR*gamI + BI*gamR) + m1*(BR*gamR - BI*gamI))) = 0)
+     and printed(oc1, -21778/10^14, 10^-14) and printed(oc2/oc1, -1724/10^5, 10^-5)
+     and printed(os2, -17232/10^14, 10^-14) and printed(os1/os2, -3365/10^5, 10^-5)
+     and all_in_source(src, ["-2.1778e-10 * (m1 - 0.01724 * m2) / ARC_SEC_TO_RAD,",
+                              "-1.7232e-10 * (m2 - 0.03365 * m1) / ARC_SEC_TO_RAD,"]),
+     "(5) holds: eq (6.23) at (2, 1) with Desai's A21, B21, gamma = 0.6870 + 0.0036 i and R2 gives eq (6.24)'s -2.1778e-10, 0.01724, -1.7232e-10, 0.03365, as shipped")$
+
+/* ---- (6) the wobble of both poles ------------------------------------------------------------------ */
+/* In the shipped 15-digit decimal of pi/648000, as pole_wobble.py and the code read it: (4) shows it
+   is that number's double, but it is 1.3e-17 short of it, above the goldens' 25 digits. */
+arcsec_code : rust_rational(rust_scalar(src, "ARC_SEC_TO_RAD"))$
+mas : arcsec_code/1000$
+year : 31557600$
+xp : rust_rational(rust_scalar(src, "POLE_XP"))$
+yp : rust_rational(rust_scalar(src, "POLE_YP"))$
+wobble(x, y, t, pole) := block([u : t/year, mx, my],
+  if pole = 'secular then (mx : 550/10 + 1677/1000*u, my : 3205/10 + 3460/1000*u)
+  else if t <= 3652.5*86400 then (
+    mx : 55974/1000 + 18243/10^4*u + 18413/10^5*u^2 + 7024/10^6*u^3,
+    my : 346346/1000 + 17896/10^4*u - 10729/10^5*u^2 - 908/10^6*u^3)
+  else (mx : 23513/1000 + 76141/10^4*u, my : 358891/1000 - 6287/10^4*u),
+  [x - mx*mas, my*mas - y])$
+golden_rows(begin) := block([l : rust_literals_between(src, begin, "];"), rows : []],
+  if length(l) # 38 then error("golden_rows: expected XP, YP, 7 and 35 entries after", begin),
+  l : rest(l, 3),
+  for i : 0 thru 6 do rows : endcons(makelist(l[5*i + j], j, 1, 5), rows),
+  rows)$
+wobble_holds(rows, pole) := every(lambda([r], block([t : rust_rational(r[1])],
+  transcribed([r[2], r[3], r[4], r[5]], append(wobble(0, 0, t, pole), wobble(xp, yp, t, pole))))), rows)$
+must(wobble_holds(golden_rows("fn the_mean_pole_is_iers_table_7_7_on_both_branches"), 'iers2010)
+     and wobble_holds(golden_rows("fn the_secular_pole_is_the_2018_chapter_7_line"), 'secular),
+     "(6) holds: m1 = xp - xs, m2 = ys - yp about eq (21)'s secular pole and Table 7.7's 2010 pole are pole_wobble.py's 50-digit goldens at all seven epochs, to every digit they show")$
+
+/* ---- (7) the goldens ------------------------------------------------------------------------------- */
+/* Step 2 (6.8) from the shipped tables, `(tau, [l, l', F, D, Omega], ip, op)` per row. */
+band(name) := block([l : map(rust_rational, rust_literals_between(tab, concat("pub static ", name, ":"), "];"))],
+  makelist([l[8*i + 1], makelist(l[8*i + 1 + j], j, 1, 5), l[8*i + 7], l[8*i + 8]], i, 0, length(l)/8 - 1))$
+gmst : rust_rational(rust_scalar(src, "ORACLE_GMST"))$
+args : map(rust_rational, rust_table(src, "ORACLE_DELAUNAY"))$
+band_sum(rows) := bfloat(rectform(sum(block([r : rows[i]],
+  (r[3] + %i*r[4])*exp(%i*bfloat(r[1]*(gmst + %pi) - r[2] . args))), i, 1, length(rows))))$
+lp : band_sum(band("LONG_PERIOD"))$
+di : rectform(-%i*band_sum(band("DIURNAL")))$
+sd : band_sum(band("SEMIDIURNAL"))$
+step2 : bfloat(10^-12*[realpart(lp), realpart(di), -imagpart(di), realpart(sd), -imagpart(sd)])$
+print("STEP2_MAXIMA", step2)$
+
+/* The pole tides of eqs (6.22) and (6.24) as printed, about the 2010 pole then the secular pole. */
+tpole : rust_rational(rust_scalar(src, "POLE_T"))$
+pole_terms(pole) := block([w : wobble(xp, yp, tpole, pole), u1, u2],
+  u1 : w[1]/arcsec_code, u2 : w[2]/arcsec_code,
+  bfloat([-1333/10^12*(u1 + 115/10^4*u2), -1333/10^12*(u2 - 115/10^4*u1),
+          -21778/10^14*(u1 - 1724/10^5*u2), -17232/10^14*(u2 - 3365/10^5*u1)]))$
+poles : [pole_terms('iers2010), pole_terms('secular)]$
+print("POLE_TIDES_MAXIMA", poles)$
+
+/* Eq (6.6) and (6.7) for bodies at ITRF positions, less (6.14): [[n, m, dC, dS], ...] for n = 2..4. */
+step1(bodies, GMref, Re) := block([sums, out : [], k, s],
+  sums(n, m) := sum(block([b : bodies[j], R], R : sqrt(b[1]^2 + b[2]^2 + b[3]^2),
+      b[4]/GMref*(Re/R)^(n + 1)*Nnm(n, m)*Pd(n, m, b[3]/R)*((b[1] - %i*b[2])/R)^m), j, 1, length(bodies)),
+  for n : 2 thru 3 do for m : 0 thru n do (
+    k : if n = 2 then [30190, 29830, 30102][m + 1]/10^5 - %i*[0, 144, 130][m + 1]/10^5
+        else [93, 93, 93, 94][m + 1]/10^3,
+    s : bfloat(rectform(k/(2*n + 1)*sums(n, m))),
+    out : endcons([n, m, realpart(s), -imagpart(s)], out)),
+  for m : 0 thru 2 do (
+    s : bfloat(rectform([-89, -80, -57][m + 1]/10^5/5*sums(2, m))),
+    out : endcons([4, m, realpart(s), -imagpart(s)], out)),
+  out[1][3] : out[1][3] - 44228/10^12*(-31460/10^5)*30190/10^5,
+  out)$
+/* The gradient at (x, y, z) of (GM/r) sum (Re/r)^n Pnm(sin phi)(dC cos m lam + dS sin m lam). */
+declare([x, y, z], real)$
+rr : sqrt(x^2 + y^2 + z^2)$
+basis(n, m, GMref, Re) := block([w : expand((x + %i*y)^m)],
+  GMref/rr*(Re/rr)^n*Nnm(n, m)*Pd(n, m, z/rr)/rr^m*[realpart(w), imagpart(w)])$
+gradient_at(coeffs, GMref, Re, at) := block([v : 0],
+  for c in coeffs do block([bv : basis(c[1], c[2], GMref, Re)], v : v + c[3]*bv[1] + c[4]*bv[2]),
+  bfloat(subst([x = at[1], y = at[2], z = at[3]], [diff(v, x), diff(v, y), diff(v, z)])))$
+rat3(name) := map(rust_rational, rust_table(src, name))$
+ratk(name) := rust_rational(rust_scalar(src, name))$
+
+/* Step 1 at the reference geometry. */
+ref_coeffs : step1([endcons(ratk("MU_SUN"), rat3("SUN")), endcons(ratk("MU_MOON"), rat3("MOON"))],
+                   ratk("MU_EARTH"), ratk("RE_EARTH"))$
+step1_accel : gradient_at(ref_coeffs, ratk("MU_EARTH"), ratk("RE_EARTH"), rat3("SAT"))$
+print("STEP1_ACCELERATION_MAXIMA", step1_accel)$
+python_ref : map(rust_number, rust_literals_between(src, "let reference = [", "];"))$
+python_gap : lmax(makelist(abs(python_ref[i] - step1_accel[i])/abs(step1_accel[i]), i, 1, 3))$
+print("the Python reference against it:", python_gap)$
+
+/* Step 1 + Step 2 + the solid pole tide about the 2010 pole at Orekit's geometry. */
+full_coeffs : step1([endcons(ratk("ORACLE_MU_SUN"), rat3("ORACLE_SUN")),
+                     endcons(ratk("ORACLE_MU_MOON"), rat3("ORACLE_MOON"))],
+                    ratk("ORACLE_MU_EARTH"), ratk("ORACLE_RE"))$
+full_coeffs[1][3] : full_coeffs[1][3] + step2[1]$
+full_coeffs[2][3] : full_coeffs[2][3] + step2[2] + poles[1][1]$
+full_coeffs[2][4] : full_coeffs[2][4] + step2[3] + poles[1][2]$
+full_coeffs[3][3] : full_coeffs[3][3] + step2[4]$
+full_coeffs[3][4] : full_coeffs[3][4] + step2[5]$
+full_accel : gradient_at(full_coeffs, ratk("ORACLE_MU_EARTH"), ratk("ORACLE_RE"), rat3("ORACLE_SAT"))$
+print("FULL_ACCELERATION_MAXIMA", full_accel)$
+
+must(transcribed(rust_table(src, "STEP2_MAXIMA"), step2)
+     and transcribed(rust_table(src, "POLE_TIDES_MAXIMA"), flatten(poles))
+     and transcribed(rust_table(src, "STEP1_ACCELERATION_MAXIMA"), step1_accel)
+     and transcribed(rust_table(src, "FULL_ACCELERATION_MAXIMA"), full_accel)
+     and is(python_gap < 1b-4),
+     "(7) holds: the Rust goldens are eq (6.8) at the oracle epoch, eqs (6.22) and (6.24) on both poles, and the gradients of the Step-1 and full potentials, to every digit shown; the Python reference is within its 1e-4")$
+print("DONE")$

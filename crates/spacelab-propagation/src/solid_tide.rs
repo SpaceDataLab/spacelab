@@ -19,10 +19,13 @@
 //!
 //! # Provenance
 //!
-//! Love numbers: IERS Conventions 2010, Table 6.3 (anelastic Earth). The ΔC̄/ΔS̄ formula and the
-//! resulting acceleration are cross-checked in `derivations/solid_tide.py`, which validates the
-//! fully-normalized Legendre against closed forms and the analytic gradient against a finite
-//! difference of the potential. The embedded geopotential is zero-tide, matching the IERS convention.
+//! Love numbers: IERS Conventions 2010, Table 6.3 (anelastic Earth). `derivations/solid_tide_iers.mac`
+//! holds the force to chapter 6 as updated 2018-02-01: eqs. (6.6)–(6.8), (6.22) and (6.24) in their
+//! complex forms are the shipped arithmetic, Table 6.3 and the printed constants are read back, and
+//! the acceleration is the gradient of the chapter's potential at 40 digits.
+//! `derivations/tide_step2_iers.mac` holds the Step-2 tables against the chapter's own rows.
+//! `derivations/solid_tide.py` checks the Legendre functions against closed forms and the gradient
+//! against a finite difference. The embedded geopotential is zero-tide, matching the IERS convention.
 
 // Dense IERS/geodesy notation (ΔC̄_nm, P̄_nm, k₂ₘ⁺) and a Love number that happens to sit near log10(2).
 #![allow(
@@ -361,20 +364,123 @@ mod tests {
 
     use super::*;
 
-    /// The IERS 2010 Step-2 corrections `[ΔC20, ΔC21, ΔS21, ΔC22, ΔS22]` match Orekit's
-    /// `getTideFrequencyDependenceFunction` at 2024-01-01T00:00 UTC (`orekit_tide_step2.csv`), given
-    /// the same GMST and Delaunay arguments (from pyerfa). The small residual is the GMST/UT1 source.
+    // The oracle epoch, 2024-01-01T00:00 UTC: GMST and the Delaunay arguments `[l, l′, F, D, Ω]`
+    // (pyerfa), then the polar motion (rad) and seconds since J2000 of `orekit_solid_tide.csv`.
+    const ORACLE_GMST: f64 = 1.747_993_533_381_043_7;
+    const ORACLE_DELAUNAY: [f64; 5] = [
+        3.074_748_156_506_035,
+        6.227_494_630_588_011,
+        2.358_847_296_999_664_3,
+        4.116_729_537_850_365,
+        -5.918_788_376_630_828,
+    ];
+    const POLE_XP: f64 = 6.636_808_406_180_881e-7;
+    const POLE_YP: f64 = 9.802_205_411_513_153e-7;
+    const POLE_T: f64 = 7.573_392_691_84e8;
+
+    // Orekit's geometry at the oracle epoch (`tools/orekit-oracle`, `orekit_solid_tide.csv`): its
+    // constants, the Sun and Moon in the ITRF, the satellite.
+    const ORACLE_MU_EARTH: f64 = 3.986_004_415e14;
+    const ORACLE_RE: f64 = 6.378_136_46e6;
+    const ORACLE_MU_SUN: f64 = 1.327_124_400_412_794_6e20;
+    const ORACLE_MU_MOON: f64 = 4.902_800_118_457_551e12;
+    const ORACLE_SUN: [f64; 3] = [
+        -135_337_748_175.940_03,
+        -1_832_917_823.254_058_8,
+        -57_614_487_601.187_485,
+    ];
+    const ORACLE_MOON: [f64; 3] = [
+        203_571_377.964_981_02,
+        338_362_165.014_877_2,
+        88_464_793.006_448_67,
+    ];
+    const ORACLE_SAT: [f64; 3] = [
+        860_234.487_436_545,
+        -6_739_356.482_322_041,
+        3_015_140.267_186_367,
+    ];
+
+    /// Eq. (6.8) at the oracle epoch, summed over Tables 6.5a/b/c at 40 digits:
+    /// `derivations/solid_tide_iers.mac` (7).
+    const STEP2_MAXIMA: [f64; 5] = [
+        2.597_677_943_876_027_795_9e-11,
+        -5.498_848_696_904_457_327_9e-10,
+        1.662_436_035_931_665_245_9e-11,
+        3.524_413_863_892_767_919_7e-13,
+        -8.290_916_822_360_145_663_9e-13,
+    ];
+    /// `[ΔC̄21, ΔS̄21]` of the solid pole tide (6.22), then of the ocean pole tide (6.24), at the
+    /// fixture polar motion: about the 2010 mean pole, then about the secular pole. (7)
+    const POLE_TIDES_MAXIMA: [[f64; 4]; 2] = [
+        [
+            9.026_860_837_280_098_350_8e-11,
+            -1.898_399_277_381_071_308_8e-10,
+            1.563_409_711_250_010_668_5e-11,
+            -2.480_573_723_029_980_459e-11,
+        ],
+        [
+            -5.860_377_223_205_551_419e-11,
+            -2.677_614_638_886_120_076_4e-10,
+            -8.314_189_964_653_503_048e-12,
+            -3.445_517_826_324_778_251_9e-11,
+        ],
+    ];
+    /// The Step-1 tide at the reference geometry below: the gradient of the potential of eqs. (6.6)
+    /// and (6.7), the permanent part (6.14) removed. (7)
+    const STEP1_ACCELERATION_MAXIMA: [f64; 3] = [
+        -2.768_972_469_677_793_543_8e-7,
+        -5.234_395_298_021_209_211e-8,
+        -1.341_338_415_096_082_099_1e-7,
+    ];
+    /// The full tide at Orekit's geometry: Step 1, Step 2 at the oracle epoch and the solid pole tide
+    /// about the 2010 mean pole, Orekit's configuration. (7)
+    const FULL_ACCELERATION_MAXIMA: [f64; 3] = [
+        -5.007_455_277_690_092_403_6e-8,
+        -7.576_258_161_766_712_949e-8,
+        2.564_281_013_492_897_971_7e-8,
+    ];
+
+    fn relative_distance(got: [f64; 3], want: [f64; 3]) -> f64 {
+        let diff = libm::sqrt((0..3).map(|i| (got[i] - want[i]).powi(2)).sum());
+        diff / libm::sqrt(want.iter().map(|v| v * v).sum())
+    }
+
+    /// `|got − want|` in units of `ε·GM/r²`. The force reads the tide off a degree-4 field as that
+    /// field's acceleration less the monopole's, so its error is the monopole's rounding: about
+    /// `ε·GM/r²`, 1.6e-15 m/s² in LEO, which is the last place of the total acceleration the tide is
+    /// added to. Relative to the tide (3e-7 m/s² and less) it is 1e-8.
+    fn in_monopole_roundings(got: [f64; 3], want: [f64; 3], mu: f64, r: [f64; 3]) -> f64 {
+        let diff = libm::sqrt((0..3).map(|i| (got[i] - want[i]).powi(2)).sum());
+        diff / (f64::EPSILON * mu / (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]))
+    }
+
+    fn oracle_tide(pole: MeanPole) -> impl Acceleration {
+        SolidEarthTide {
+            mu_earth: ORACLE_MU_EARTH,
+            re_earth: ORACLE_RE,
+            mu_sun: ORACLE_MU_SUN,
+            mu_moon: ORACLE_MU_MOON,
+            sun: Fixed(ORACLE_SUN),
+            moon: Fixed(ORACLE_MOON),
+            rotate: |_t: f64| IDENTITY,
+            // Step 2 and the solid pole tide share the ΔC̄21/ΔS̄21 slots.
+            step2: move |_t: f64| {
+                let p = pole_tide_corrections(POLE_XP, POLE_YP, POLE_T, pole);
+                let mut s = step2_corrections(ORACLE_GMST, ORACLE_DELAUNAY);
+                s[1] += p[0];
+                s[2] += p[1];
+                s
+            },
+        }
+    }
+
+    /// The distance to Orekit's `getTideFrequencyDependenceFunction` at the oracle epoch
+    /// (`orekit_tide_step2.csv`), given the same GMST and Delaunay arguments. Orekit evaluates its own
+    /// GMST from UT1, which is most of the distance; [`step2_is_eq_6_8_at_the_oracle_epoch`] decides.
     #[test]
-    fn step2_matches_orekit() {
-        let gmst = 1.747_993_533_381_043_7;
-        let delaunay = [
-            3.074_748_156_506_035,
-            6.227_494_630_588_011,
-            2.358_847_296_999_664_3,
-            4.116_729_537_850_365,
-            -5.918_788_376_630_828,
-        ];
-        let got = step2_corrections(gmst, delaunay);
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn step2_distance_to_orekit() {
+        let got = step2_corrections(ORACLE_GMST, ORACLE_DELAUNAY);
         let orekit = [
             2.597_677_943_876_342_7e-11,
             -5.498_848_696_902_133e-10,
@@ -382,15 +488,34 @@ mod tests {
             3.524_413_863_644_123e-13,
             -8.290_916_822_465_907e-13,
         ];
+        let distances: std::vec::Vec<f64> = (0..5)
+            .map(|i| (got[i] - orekit[i]).abs() / orekit[i].abs())
+            .collect();
+        crate::dsst::comparison_row(
+            "IERS 2010 Step-2 ΔC̄20, ΔC̄21, ΔS̄21, ΔC̄22, ΔS̄22 at 2024-01-01",
+            "relative",
+            &distances,
+        );
+    }
+
+    /// Eq. (6.8) at the oracle epoch: the frequency-dependent corrections Tables 6.5a/b/c sum to,
+    /// evaluated at 40 digits by `derivations/solid_tide_iers.mac` (7), which also holds the tables
+    /// against the chapter row for row (`tide_step2_iers.mac`). (G3)
+    #[test]
+    fn step2_is_eq_6_8_at_the_oracle_epoch() {
+        let got = step2_corrections(ORACLE_GMST, ORACLE_DELAUNAY);
+        let mut worst = 0.0_f64;
         for i in 0..5 {
-            let rel = (got[i] - orekit[i]).abs() / orekit[i].abs();
+            let rel = (got[i] - STEP2_MAXIMA[i]).abs() / STEP2_MAXIMA[i].abs();
+            worst = spacelab_testkit::nan_max(worst, rel);
             assert!(
-                rel < 2e-3,
+                rel < 1e-13,
                 "component {i}: got {}, want {}, rel {rel:.2e}",
                 got[i],
-                orekit[i]
+                STEP2_MAXIMA[i]
             );
         }
+        println!("Step 2 against eq. (6.8) at 40 digits: {worst:.3e} worst relative");
     }
 
     /// At zero tide argument the sums collapse to the amplitude columns of IERS Tables 6.5a/b/c.
@@ -428,56 +553,65 @@ mod tests {
         );
     }
 
-    /// The solid Earth pole tide (§6.4) `[ΔC̄21, ΔS̄21]` matches Orekit's `getSolidPoleTide` at the
-    /// oracle epoch (2024, post-2010 linear mean pole), given the same polar motion and
-    /// seconds-since-J2000 (`orekit_solid_tide.csv`).
-    ///
-    /// Orekit 13 measures the wobble from the 2010 printing's Table 7.7, so this fixture pins
-    /// [`MeanPole::Iers2010`] and nothing else: it is agreement with Orekit's reading of a
-    /// superseded convention. What the workspace *ships* is the secular pole, pinned against the
-    /// Conventions' own coefficients in [`the_secular_pole_is_the_2018_chapter_7_line`].
+    /// The distance to Orekit's `getSolidPoleTide` at the oracle epoch, given the same polar motion.
+    /// Orekit 13 measures the wobble from the 2010 printing's Table 7.7, so this pins
+    /// [`MeanPole::Iers2010`]. [`the_pole_tides_are_eqs_6_22_and_6_24`] decides.
     #[test]
-    fn pole_tide_matches_orekit() {
-        let got = pole_tide_corrections(
-            6.636_808_406_180_881e-07,
-            9.802_205_411_513_153e-07,
-            7.573_392_691_84e08,
-            MeanPole::Iers2010,
-        );
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn pole_tide_distance_to_orekit() {
+        let got = pole_tide_corrections(POLE_XP, POLE_YP, POLE_T, MeanPole::Iers2010);
         let orekit = [9.026_860_837_280_10e-11, -1.898_399_277_381_072_2e-10];
-        for i in 0..2 {
-            let rel = (got[i] - orekit[i]).abs() / orekit[i].abs();
-            assert!(
-                rel < 1e-9,
-                "component {i}: got {}, want {}, rel {rel:.2e}",
-                got[i],
-                orekit[i]
-            );
-        }
+        let distances: std::vec::Vec<f64> = (0..2)
+            .map(|i| (got[i] - orekit[i]).abs() / orekit[i].abs())
+            .collect();
+        crate::dsst::comparison_row(
+            "IERS 2010 solid pole tide ΔC̄21, ΔS̄21 about the 2010 mean pole",
+            "relative",
+            &distances,
+        );
     }
 
-    /// The OCEAN pole tide (§6.5) `[ΔC̄21, ΔS̄21]` matches Orekit's `getOceanPoleTide` at the oracle
-    /// epoch, given the same polar motion (`orekit_solid_tide.csv`). Same caveat as
-    /// [`pole_tide_matches_orekit`]: it pins [`MeanPole::Iers2010`], because that is the pole Orekit
-    /// measures from.
+    /// The distance to Orekit's `getOceanPoleTide` at the oracle epoch, given the same polar motion,
+    /// about [`MeanPole::Iers2010`]. [`the_pole_tides_are_eqs_6_22_and_6_24`] decides.
     #[test]
-    fn ocean_pole_tide_matches_orekit() {
-        let got = ocean_pole_tide_corrections(
-            6.636_808_406_180_881e-07,
-            9.802_205_411_513_153e-07,
-            7.573_392_691_84e08,
-            MeanPole::Iers2010,
-        );
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn ocean_pole_tide_distance_to_orekit() {
+        let got = ocean_pole_tide_corrections(POLE_XP, POLE_YP, POLE_T, MeanPole::Iers2010);
         let orekit = [1.563_409_711_250_010_3e-11, -2.480_573_723_029_982e-11];
-        for i in 0..2 {
-            let rel = (got[i] - orekit[i]).abs() / orekit[i].abs();
-            assert!(
-                rel < 1e-9,
-                "component {i}: got {}, want {}, rel {rel:.2e}",
-                got[i],
-                orekit[i]
-            );
+        let distances: std::vec::Vec<f64> = (0..2)
+            .map(|i| (got[i] - orekit[i]).abs() / orekit[i].abs())
+            .collect();
+        crate::dsst::comparison_row(
+            "IERS 2010 ocean pole tide ΔC̄21, ΔS̄21 about the 2010 mean pole",
+            "relative",
+            &distances,
+        );
+    }
+
+    /// The solid (6.22) and ocean (6.24) pole tides at the fixture polar motion, about both
+    /// conventional poles, against `derivations/solid_tide_iers.mac` (7): the equations the
+    /// chapter prints, on the wobble of eq. (21) and Table 7.7 at 40 digits. The same file derives
+    /// 1.333e-9 from k2 and the ocean coefficients from Desai's (2, 1) terms. (G3)
+    #[test]
+    fn the_pole_tides_are_eqs_6_22_and_6_24() {
+        let mut worst = 0.0_f64;
+        for (pole, want) in [MeanPole::Iers2010, MeanPole::Secular2018]
+            .into_iter()
+            .zip(POLE_TIDES_MAXIMA)
+        {
+            let solid = pole_tide_corrections(POLE_XP, POLE_YP, POLE_T, pole);
+            let ocean = ocean_pole_tide_corrections(POLE_XP, POLE_YP, POLE_T, pole);
+            for (i, got) in solid.into_iter().chain(ocean).enumerate() {
+                let rel = (got - want[i]).abs() / want[i].abs();
+                worst = spacelab_testkit::nan_max(worst, rel);
+                assert!(
+                    rel < 3e-15,
+                    "{pole:?} term {i}: got {got}, want {}, rel {rel:.2e}",
+                    want[i]
+                );
+            }
         }
+        println!("pole tides against eqs. (6.22), (6.24) at 40 digits: {worst:.3e} worst relative");
     }
 
     /// `pole_wobble` against `derivations/pole_wobble.py`: IERS 2010 Table 7.7 at 50 digits in the
@@ -807,83 +941,75 @@ mod tests {
         }
     }
 
-    /// The tidal acceleration matches Orekit's `SolidTides` (IERS 2010) at a fixed geometry Orekit
-    /// emitted (`tools/orekit-oracle`, `orekit_solid_tide.csv`) — the independent third-party check.
-    /// With the Step-2 frequency-dependent corrections and the solid Earth pole tide (§6.4) wired in
-    /// (same epoch as `step2_matches_orekit`: the emitted Sun in ITRF equals the third-body Sun in
-    /// GCRF rotated by GMST = 1.74799…), spacelab applies the full IERS 2010 degree-2 tide
-    /// (Step 1 + Step 2 + pole tide) and matches Orekit's default config to round-off (~4e-9),
-    /// closing the former ~5.7 % pole-tide gap.
+    /// The distance to Orekit's `SolidTides` (IERS 2010, its default `poleTide=true`) at the
+    /// geometry Orekit emitted (`orekit_solid_tide.csv`), in Orekit's configuration: Step 1, Step 2
+    /// and the solid pole tide about [`MeanPole::Iers2010`].
+    /// [`the_full_tide_is_the_gradient_of_steps_1_and_2_and_the_pole_tide`] decides.
     #[test]
-    fn acceleration_matches_orekit() {
-        // Step-2 corrections at the oracle epoch (GMST + Delaunay from `step2_matches_orekit`).
-        let gmst = 1.747_993_533_381_043_7;
-        let delaunay = [
-            3.074_748_156_506_035,
-            6.227_494_630_588_011,
-            2.358_847_296_999_664_3,
-            4.116_729_537_850_365,
-            -5.918_788_376_630_828,
-        ];
-        let tide = SolidEarthTide {
-            mu_earth: 3.986_004_415e14,
-            re_earth: 6.378_136_46e6,
-            mu_sun: 1.327_124_400_412_794_6e20,
-            mu_moon: 4.902_800_118_457_551e12,
-            sun: Fixed([
-                -135_337_748_175.940_03,
-                -1_832_917_823.254_058_8,
-                -57_614_487_601.187_485,
-            ]),
-            moon: Fixed([
-                203_571_377.964_981_02,
-                338_362_165.014_877_2,
-                88_464_793.006_448_67,
-            ]),
-            rotate: |_t: f64| [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            // Full IERS 2010 degree-2 tide: Step 2 + the solid Earth pole tide (§6.4), the latter
-            // added to the same ΔC̄21/ΔS̄21 slots (xp, yp, t from `orekit_solid_tide.csv`), and
-            // measured from the pole Orekit measures from rather than the one this crate defaults to.
-            step2: move |_t: f64| {
-                let pole = pole_tide_corrections(
-                    6.636_808_406_180_881e-07,
-                    9.802_205_411_513_153e-07,
-                    7.573_392_691_84e08,
-                    MeanPole::Iers2010,
-                );
-                let mut s = step2_corrections(gmst, delaunay);
-                s[1] += pole[0]; // ΔC̄21
-                s[2] += pole[1]; // ΔS̄21
-                s
-            },
-        };
-        let sat = [
-            860_234.487_436_545,
-            -6_739_356.482_322_041,
-            3_015_140.267_186_367,
-        ];
-        let a = tide.acceleration::<f64>(0.0, &sat, &[0.0; 3]);
-        // Orekit's `SolidTides` WITH the pole tide (its default `poleTide=true`) — spacelab now applies
-        // the full IERS 2010 degree-2 tide: Step 1 + Step 2 + the solid Earth pole tide, closing the
-        // former ~5.7% pole-tide gap.
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn acceleration_distance_to_orekit() {
+        let a = oracle_tide(MeanPole::Iers2010).acceleration::<f64>(0.0, &ORACLE_SAT, &[0.0; 3]);
         let orekit = [
             -5.007_455_277_686_382_4e-08,
             -7.576_258_161_787_424e-08,
             2.564_281_013_490_208_3e-08,
         ];
-        let mag = libm::sqrt(orekit.iter().map(|v| v * v).sum());
-        let diff = libm::sqrt((0..3).map(|i| (a[i] - orekit[i]).powi(2)).sum());
-        let rel = diff / mag;
-        std::eprintln!("solid tide vs Orekit (full IERS 2010, with pole tide): rel diff {rel:.3e}");
+        crate::dsst::comparison_row(
+            "IERS 2010 solid tide acceleration with the pole tide, norm of the difference",
+            "relative",
+            &[relative_distance(a, orekit)],
+        );
+    }
+
+    /// The full tide at Orekit's geometry is the gradient of the chapter's potential: the ΔC̄/ΔS̄ of
+    /// eqs. (6.6), (6.7) less (6.14), plus Step 2 (6.8) and the solid pole tide (6.22), differentiated
+    /// and evaluated at 40 digits by `derivations/solid_tide_iers.mac` (7). (G3)
+    #[test]
+    fn the_full_tide_is_the_gradient_of_steps_1_and_2_and_the_pole_tide() {
+        let a = oracle_tide(MeanPole::Iers2010).acceleration::<f64>(0.0, &ORACLE_SAT, &[0.0; 3]);
+        let units = in_monopole_roundings(a, FULL_ACCELERATION_MAXIMA, ORACLE_MU_EARTH, ORACLE_SAT);
+        println!(
+            "full tide against the gradient at 40 digits: {units:.3} monopole roundings, {:.3e} relative",
+            relative_distance(a, FULL_ACCELERATION_MAXIMA)
+        );
         assert!(
-            rel < 0.01,
-            "spacelab full IERS tide should match Orekit's with-pole config to < 1%, got {rel:.2e}"
+            units < 8.0,
+            "{a:?} against {FULL_ACCELERATION_MAXIMA:?}: {units:.3} ε·GM/r²"
+        );
+    }
+
+    /// The Step-1 tide at the reference geometry is the gradient of the potential of eqs. (6.6) and
+    /// (6.7), the permanent part (6.14) removed, at 40 digits: `derivations/solid_tide_iers.mac` (7).
+    /// It also holds the Python reference above to its finite-difference step. (G3)
+    #[test]
+    fn the_step1_tide_is_the_gradient_of_eqs_6_6_and_6_7() {
+        let tide = SolidEarthTide {
+            mu_earth: MU_EARTH,
+            re_earth: RE_EARTH,
+            mu_sun: MU_SUN,
+            mu_moon: MU_MOON,
+            sun: Fixed(SUN),
+            moon: Fixed(MOON),
+            rotate: |_t: f64| IDENTITY,
+            step2: |_t: f64| [0.0; 5],
+        };
+        let a = tide.acceleration::<f64>(0.0, &SAT, &[0.0; 3]);
+        let units = in_monopole_roundings(a, STEP1_ACCELERATION_MAXIMA, MU_EARTH, SAT);
+        println!(
+            "Step-1 tide against the gradient at 40 digits: {units:.3} monopole roundings, {:.3e} relative",
+            relative_distance(a, STEP1_ACCELERATION_MAXIMA)
+        );
+        assert!(
+            units < 8.0,
+            "{a:?} against {STEP1_ACCELERATION_MAXIMA:?}: {units:.3} ε·GM/r²"
         );
     }
 
     const IDENTITY: [[f64; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     const MU_EARTH: f64 = 3.986_004_415e14;
     const RE_EARTH: f64 = 6_378_136.3;
+    const MU_SUN: f64 = 1.327_124_400_18e20;
+    const MU_MOON: f64 = 4.902_800_066e12;
     const SUN: [f64; 3] = [1.4e11, 0.5e11, 0.3e11];
     const MOON: [f64; 3] = [3.5e8, 1.5e8, 1.0e8];
     const SAT: [f64; 3] = [6.5e6, 2.0e6, 3.0e6];

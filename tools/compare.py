@@ -66,6 +66,9 @@ def parse_row(line: str) -> Row:
     fields = line.removeprefix(PREFIX).split(" | ")
     if not line.startswith(PREFIX) or len(fields) != 7:
         raise ValueError(f"not a comparison row of 8 fields: {line!r}")
+    # A field is a Markdown table cell: a `|` inside one splits the cell where the table is read.
+    if any("|" in f for f in fields):
+        raise ValueError(f"a comparison field holds '|': {line!r}")
     code, version, quantity, unit, n, worst, rms = (f.strip() for f in fields)
     return Row(code, version, quantity, unit, int(n), float(worst), float(rms))
 

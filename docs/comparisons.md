@@ -57,6 +57,10 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | DSST Sun and Moon short periods, osculating k, h, q, p, λ | 1 | 20 | 1.208e-12 | 3.072e-13 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | Harris–Priester density | relative | 16 | 4.233e-16 | 1.237e-16 | `crates/spacelab-propagation/src/harris_priester/mod.rs::density_distance_to_orekit` |
 | NRLMSISE-00 C (Brodowski) | release 20041227 | test_gtd7's 17 printed cases, 11 fields each, the printed zeros left out | relative | 165 | 4.803e-07 | 1.795e-07 | `crates/spacelab-propagation/src/nrlmsise00/mod.rs::gtd7_matches_reference_vectors` |
+| Orekit | 13.1.7 | IERS 2010 Step-2 ΔC̄20, ΔC̄21, ΔS̄21, ΔC̄22, ΔS̄22 at 2024-01-01 | relative | 5 | 4.837e-10 | 2.187e-10 | `crates/spacelab-propagation/src/solid_tide.rs::step2_distance_to_orekit` |
+| Orekit | 13.1.7 | IERS 2010 solid pole tide ΔC̄21, ΔS̄21 about the 2010 mean pole | relative | 2 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/solid_tide.rs::pole_tide_distance_to_orekit` |
+| Orekit | 13.1.7 | IERS 2010 ocean pole tide ΔC̄21, ΔS̄21 about the 2010 mean pole | relative | 2 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/solid_tide.rs::ocean_pole_tide_distance_to_orekit` |
+| Orekit | 13.1.7 | IERS 2010 solid tide acceleration with the pole tide, norm of the difference | relative | 1 | 3.972e-09 | 3.972e-09 | `crates/spacelab-propagation/src/solid_tide.rs::acceleration_distance_to_orekit` |
 | Orekit | 13.1.7 | box-wing drag, no lift | relative | 4 | 9.632e-16 | 6.754e-16 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |
 | Orekit | 13.1.7 | box-wing drag with lift, Orekit's lift one incidence factor short (F89) | relative | 1 | 1.134e-01 | 1.134e-01 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |
 | Orekit | 13.1.7 | box-wing SRP | relative | 5 | 1.278e-15 | 8.422e-16 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |

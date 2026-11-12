@@ -1,0 +1,119 @@
+/* `crates/spacelab-propagation/src/tide_step2_tables.rs` against Tables 6.5a/b/c of IERS
+   Conventions (2010) chapter 6 as updated 2018-02-01, and Desai's ocean pole-tide (2, 1) row
+   (plans/17 Ф19.G).
+
+   `derivations/tide_step2_tables.py` transcribed the tables from the copy Orekit bundles, an
+   implementation's. This holds them against the chapter, whose rows carry two columns the
+   transcription dropped and which pin the ones it kept:
+     (1) the chapter's three tables parse to 48, 21 and 2 rows;
+     (2) each row's Doodson number spells its six multipliers (tau, s, h, p, N', ps), the first digit
+         tau and the others +5;
+     (3) each row's Delaunay multipliers N are what its Doodson multipliers n give: theta_f = n.beta
+         = m (theta_g + pi) - N.F, with Delaunay's arguments as mean longitudes (chapter 5, eq 5.43)
+         l = s - p, l' = h - ps, F = s - Omega, D = s - h, Omega = -N', and Doodson's
+         tau = theta_g + pi - s;
+     (4) each row's in- and out-of-phase amplitudes A dk^R H, A dk^I H are in the ratio of its
+         printed dk^R : dk^I, to the rounding of the four printed numbers;
+     (5) the shipped tables are the chapter's rows, in order: tau, the five N, and the two
+         amplitudes (Table 6.5c's single amplitude being the in-phase one);
+     (6) Desai's (2, 1) row is the four numbers `solid_tide_iers.mac` (5) derives eq (6.24) from.
+
+   The inputs are `tools/fetch-specs.sh` snapshots, pinned by SHA-256 in `derivations/verify.sh`,
+   which writes the chapter's text (`pdftotext -layout`) and the coefficients (`gunzip`) beside
+   them and skips this when they are absent.
+
+   timeout 300 maxima --very-quiet -Q -b tide_step2_iers.mac                                         */
+
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+chapter : "../data/specs/iers-icc6.abb3c0b0.txt"$
+desai : "../data/specs/iers-desai-scopole.075efd2e.txt"$
+tab : "../crates/spacelab-propagation/src/tide_step2_tables.rs"$
+
+all_digits(t) := slength(t) > 0 and every(digitcharp, charlist(t))$
+doodson_token(t) := block([c : ssearch(",", t)],
+  c # false and c > 1 and c < slength(t) and all_digits(ssubst("", ",", t)))$
+/* The six multipliers a Doodson number spells: a five-digit number has tau = 0. */
+doodson(t) := block([d : ssubst("", ",", t)],
+  if slength(d) = 5 then d : concat("0", d),
+  block([v : map(parse_string, charlist(d))], cons(v[1], makelist(v[i] - 5, i, 2, 6))))$
+num(t) := rust_rational(t)$
+
+/* ---- (1) the rows ---------------------------------------------------------------------------------- */
+/* [doodson token, the tokens after it] per row, for the lines from `begin` to `finish`. */
+table_rows(begin, finish) := block([s : openr(chapter), line, inside : false, done : false, out : [], toks, j],
+  while not done and (line : readline(s)) # false do (
+    if inside and ssearch(finish, line) # false then done : true
+    else if inside then (
+      toks : split(line, " ", true),
+      j : false,
+      for i : 1 thru length(toks) while j = false do if doodson_token(toks[i]) then j : i,
+      if j # false then out : endcons([toks[j], rest(toks, j)], out))
+    else if ssearch(begin, line) # false then inside : true),
+  close(s),
+  if not done then error("table_rows: no span", begin, "to", finish),
+  out)$
+ta : table_rows("Table 6.5a:", "Table 6.5b:")$
+tb : table_rows("Table 6.5b:", "Table 6.5c:")$
+tc : table_rows("Table 6.5c:", "6.2.2")$
+must(is(map(length, [ta, tb, tc]) = [48, 21, 2])
+     and every(lambda([r], is(length(r[2]) = 15)), ta)
+     and every(lambda([r], is(length(r[2]) = 16)), tb)
+     and every(lambda([r], is(length(r[2]) = 14)), tc),
+     "(1) holds: Tables 6.5a, 6.5b and 6.5c parse to 48, 21 and 2 rows of 15, 16 and 14 columns after the Doodson number")$
+
+/* Per row: [n (6), N (5), dkR, dkI, ip, op], each table's columns in its own order. */
+fields_a(r) := block([v : map(num, r[2])], [makelist(v[i], i, 1, 6), makelist(v[i], i, 7, 11), v[12], v[13], v[14], v[15]])$
+fields_b(r) := block([v : map(num, r[2])], [makelist(v[i], i, 2, 7), makelist(v[i], i, 8, 12), v[13], v[15], v[14], v[16]])$
+fields_c(r) := block([v : map(num, r[2])], [makelist(v[i], i, 2, 7), makelist(v[i], i, 8, 12), v[13], 0, v[14], 0])$
+fa : map(fields_a, ta)$  fb : map(fields_b, tb)$  fc : map(fields_c, tc)$
+
+/* ---- (2) the Doodson numbers ----------------------------------------------------------------------- */
+must(every(lambda([r, f], is(doodson(r[1]) = f[1])), append(ta, tb, tc), append(fa, fb, fc)),
+     "(2) holds: every Doodson number spells its row's (tau, s, h, p, N', ps)")$
+
+/* ---- (3) Doodson to Delaunay ----------------------------------------------------------------------- */
+/* The definitions solved for Doodson's arguments; T stands for theta_g + pi. */
+sol : linsolve([l = s - p, lp = h - ps, F = s - Om, D = s - h, Om = -Np, tau = T - s], [tau, s, h, p, Np, ps])$
+delaunay_of(n) := block([arg : expand(subst(sol, n . [tau, s, h, p, Np, ps]))],
+  if coeff(arg, T) # n[1] then error("delaunay_of: m is not tau", n),
+  makelist(-coeff(arg, v), v, [l, lp, F, D, Om]))$
+must(every(lambda([f], is(delaunay_of(f[1]) = f[2])), append(fa, fb, fc)),
+     "(3) holds: every row's Delaunay multipliers N follow from its Doodson multipliers n, with theta_g's multiplier tau")$
+
+/* ---- (4) the amplitudes' ratio --------------------------------------------------------------------- */
+/* ip dkI - op dkR vanishes for the exact numbers; the printed ones move it by at most half the
+   amplitudes' last place times |dk| plus half dk's last place times |amplitude|. */
+ratio_holds(rows, dk_place) := every(lambda([f], block([dR : f[3], dI : f[4], ip : f[5], op : f[6]],
+  is(abs(ip*dI - op*dR) <= 1/20*(abs(dR) + abs(dI)) + dk_place/2*(abs(ip) + abs(op)) + 1/20*dk_place))), rows)$
+must(ratio_holds(fa, 1) and ratio_holds(fb, 1/10^5) and every(lambda([f], is(f[6] = 0)), fc),
+     "(4) holds: in every row of 6.5a and 6.5b the amplitudes are in the ratio of dk^R : dk^I to their printed digits; 6.5c is real")$
+
+/* ---- (5) the shipped tables ------------------------------------------------------------------------ */
+shipped(name) := block([l : map(num, rust_literals_between(tab, concat("pub static ", name, ":"), "];"))],
+  makelist([l[8*i + 1], makelist(l[8*i + 1 + j], j, 1, 5), l[8*i + 7], l[8*i + 8]], i, 0, length(l)/8 - 1))$
+chapter_rows(fields) := map(lambda([f], [f[1][1], f[2], f[5], f[6]]), fields)$
+must(is(shipped("DIURNAL") = chapter_rows(fa))
+     and is(shipped("LONG_PERIOD") = chapter_rows(fb))
+     and is(shipped("SEMIDIURNAL") = chapter_rows(fc)),
+     "(5) holds: DIURNAL, LONG_PERIOD and SEMIDIURNAL are Tables 6.5a, 6.5b and 6.5c row for row: tau, the Delaunay multipliers and the amplitudes")$
+
+/* ---- (6) Desai's (2, 1) row ------------------------------------------------------------------------ */
+desai_row(n, m) := block([s : openr(desai), line, toks, out : false],
+  while out = false and (line : readline(s)) # false do (
+    toks : split(line, " ", true),
+    if length(toks) = 6 and toks[1] = string(n) and toks[2] = string(m) then out : map(num, rest(toks, 2))),
+  close(s), out)$
+/* The `A21R : ...$ B21R : ...$` assignments of solid_tide_iers.mac, as [name, value]. */
+typed_desai() := block([s : openr("solid_tide_iers.mac"), line, out : []],
+  while (line : readline(s)) # false do
+    if ssearch("A21R : ", line) = 1 or ssearch("A21I : ", line) = 1 then
+      for piece in split(line, "$", false) do block([kv : split(piece, " : ", false)],
+        if length(kv) = 2 then out : endcons([strim(" ", kv[1]), ev(parse_string(kv[2]))], out)),
+  close(s), out)$
+row21 : desai_row(2, 1)$
+typed : typed_desai()$
+must(row21 # false and is(length(typed) = 4)
+     and is(sort(typed) = sort([["A21R", row21[1]], ["B21R", row21[2]], ["A21I", row21[3]], ["B21I", row21[4]]])),
+     "(6) holds: Desai's (2, 1) row, A real, B real, A imaginary, B imaginary, is what solid_tide_iers.mac derives eq (6.24) from")$
+print("DONE")$

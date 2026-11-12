@@ -569,6 +569,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima solid_tide_love.mac" "expected 10 checks to hold, found $holds"
     fi
 
+    out=$(macf solid_tide_iers.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 8 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima solid_tide_iers.mac: the force is eqs (6.6)-(6.8), (6.22) and (6.24); 1.333e-9 and the ocean coefficients follow from k2 and Desai; the G3 goldens are the chapter's potential at 40 digits"
+    else
+        bad "maxima solid_tide_iers.mac" "expected 8 checks to hold, found $holds"
+    fi
+
     out=$(macf ocean_loading.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 11 ] && printf '%s' "$out" | grep -q '^DONE'; then
@@ -645,6 +653,31 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         fi
     else
         skip "maxima cio_iers.mac" "tools/fetch-specs.sh output"
+    fi
+
+    # IERS Conventions chapter 6 (2018-02-01) and Desai's ocean pole-tide coefficients, fetched and
+    # pinned the same way; the chapter's text and the coefficients are written beside them.
+    icc6=../data/specs/iers-icc6.abb3c0b0.pdf
+    desai=../data/specs/iers-desai-scopole.075efd2e.gz
+    if [ -f "$icc6" ] && [ -f "$desai" ] && command -v pdftotext >/dev/null; then
+        if ! printf '%s  %s\n%s  %s\n' \
+            abb3c0b0b6d2079b19893d6872a9d8e7320516d9a4736acb5eecaa79c4543388 "$icc6" \
+            075efd2ecbf2cd9137ffcbff8a60a75cd9d64a6a10cf271ddd57075257c9d3dc "$desai" \
+            | sha256sum --check --quiet >/dev/null 2>&1; then
+            bad "maxima tide_step2_iers.mac" "the IERS chapter 6 or Desai snapshot is not the pinned file"
+        else
+            pdftotext -layout "$icc6" "${icc6%.pdf}.txt"
+            gzip -dc "$desai" > "${desai%.gz}.txt"
+            out=$(macf tide_step2_iers.mac)
+            holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+            if [ "$holds" -eq 6 ] && printf '%s' "$out" | grep -q '^DONE'; then
+                ok "maxima tide_step2_iers.mac: tide_step2_tables.rs is Tables 6.5a/b/c row for row; every row's Delaunay multipliers follow from its Doodson number and its amplitudes from its dk"
+            else
+                bad "maxima tide_step2_iers.mac" "expected 6 checks to hold, found $holds"
+            fi
+        fi
+    else
+        skip "maxima tide_step2_iers.mac" "tools/fetch-specs.sh output and pdftotext"
     fi
 
     out=$(macf sgp4_regime.mac)

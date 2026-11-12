@@ -2,19 +2,21 @@
 //! instantaneous impulses, and the polynomial / argument-of-latitude-harmonic empirical terms orbit
 //! determination uses to absorb un-modelled residuals. Ports of Orekit's
 //! `ConstantThrustManeuver`, `ImpulseManeuver`, and `ParametricAcceleration` /
-//! `PolynomialAccelerationModel`, validated against them (`tools/orekit-oracle`,
-//! `orekit_maneuver.csv`).
+//! `PolynomialAccelerationModel`. `derivations/maneuver.mac` derives the rocket equation from the mass
+//! channel, the RTN basis and the argument of latitude from their definitions and the polynomial from
+//! its Horner loop, and evaluates the test goldens at 40 digits; Orekit is a comparator
+//! (`docs/comparisons.md`).
 //!
 //! # Frames
 //!
 //! Every applied vector here — a thrust direction, an impulse Δv, an empirical direction — is quoted
 //! in one of two frames, named once by [`Frame`]: the inertial propagation frame, or the local-orbital
 //! **RTN** frame (radial / transverse / normal, a.k.a. RSW / QSW / LVLH). The RTN basis is built from
-//! the instantaneous `(r, v)` — `R̂ = r̂`, `Ŵ = (r×v)/‖r×v‖`, `T̂ = Ŵ × R̂` (Orekit `LOFType.QSW`,
-//! against which the basis is validated) — so an RTN direction rotates into the inertial frame the
-//! propagator integrates. Making the frame a two-variant sum rather than two booleans keeps the illegal
-//! "inertial-and-RTN" state unrepresentable, and the one rotation is written over any [`Scalar`] so it
-//! threads the state-transition matrix like every other force.
+//! the instantaneous `(r, v)` — `R̂ = r̂`, `Ŵ = (r×v)/‖r×v‖`, `T̂ = Ŵ × R̂` (Orekit `LOFType.QSW`) —
+//! so an RTN direction rotates into the inertial frame the propagator integrates. Making the frame a
+//! two-variant sum rather than two booleans keeps the illegal "inertial-and-RTN" state
+//! unrepresentable, and the one rotation is written over any [`Scalar`] so it threads the
+//! state-transition matrix like every other force.
 //!
 //! # The mass channel (finite thrust)
 //!
@@ -50,7 +52,7 @@
 //! the driver is real surgery and out of scope here; the idiomatic composition instead is to integrate
 //! up to the trigger time, apply [`ImpulsiveManeuver::apply`], and integrate onward from the reset
 //! state — the state transform is the reusable unit, and the caller (or a future event-aware driver)
-//! sequences it. The transform is validated against Orekit's `ImpulseManeuver` output directly.
+//! sequences it. Orekit's `ImpulseManeuver` output is the transform's comparator.
 
 // Manoeuvre and orbital-frame algebra speaks in single letters — (r, v) for the state, (R, T, W) for
 // the RTN axes, u for the argument of latitude, F/m and I_sp/g₀ for the rocket equation. These are the
@@ -72,9 +74,8 @@ pub const G0_STANDARD_GRAVITY: f64 = 9.806_65;
 /// local-orbital **RTN** frame built from `(r, v)`.
 ///
 /// `Rtn` is the radial / transverse / normal frame — `R̂ = r̂`, `Ŵ = (r×v)/‖r×v‖`, `T̂ = Ŵ × R̂` — a.k.a.
-/// RSW / QSW / LVLH, matching Orekit `LOFType.QSW` (validated against it). Naming the frame as a sum
-/// type makes the two mutually-exclusive choices one argument instead of two booleans with a runtime
-/// check.
+/// RSW / QSW / LVLH, Orekit's `LOFType.QSW`. Naming the frame as a sum type makes the two
+/// mutually-exclusive choices one argument instead of two booleans with a runtime check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Frame {
     /// The inertial propagation frame — the vector is used as given.
@@ -106,7 +107,7 @@ impl Frame {
 /// The RTN / RSW orthonormal basis `[R̂, T̂, Ŵ]`, each a unit vector in the inertial frame, from the
 /// inertial state `(r, v)`: `R̂ = r̂` (radial), `Ŵ = (r×v)/‖r×v‖` (orbit normal, cross-track),
 /// `T̂ = Ŵ × R̂` (in-plane transverse, along the motion for a prograde orbit). This is Orekit's
-/// `LOFType.QSW` triad (Q, S, W), against which it is validated.
+/// `LOFType.QSW` triad (Q, S, W).
 ///
 /// `T̂` is a cross product of two orthogonal unit vectors, so it is unit without a further norm — the
 /// only normalisation is `r̂` and `Ŵ`.
@@ -288,7 +289,7 @@ impl<const K: usize> AccelerationSignal for PolynomialSignal<K> {
 /// A harmonic in the **argument of latitude** `u`: `c cos(h u) + s sin(h u)` — the classic
 /// once-per-revolution (`h = 1`) empirical term orbit determination uses to absorb periodic residuals,
 /// resolved per RTN component. `u` is the angle from the ascending node to the satellite in the orbital
-/// plane, computed geometrically from `(r, v)` (validated against Orekit's `CircularOrbit.getAlphaV`).
+/// plane, computed geometrically from `(r, v)` (Orekit's `CircularOrbit.getAlphaV`).
 ///
 /// This is **not** Orekit's `HarmonicAccelerationModel`, which is harmonic in *time* (a fixed period and
 /// phase); the argument-of-latitude form is the OD-standard empirical harmonic (GEODYN / GNSS CODE
@@ -381,7 +382,8 @@ fn argument_of_latitude_sincos<S: Scalar>(r: &[S; 3], v: &[S; 3]) -> (S, S) {
 
 #[cfg(test)]
 mod tests {
-    // Verbatim Orekit `%.17e` golden vectors (tools/orekit-oracle, orekit_maneuver.csv) — full precision.
+    // Verbatim Orekit `%.17e` vectors (tools/orekit-oracle, orekit_maneuver.csv) and the 40-digit
+    // goldens of derivations/maneuver.mac.
     #![allow(
         clippy::float_cmp,
         clippy::unreadable_literal,
@@ -394,26 +396,16 @@ mod tests {
 
     const MU: f64 = 3.98600441500000000e+14;
 
-    /// Max per-component relative error (absolute where the reference is zero), reporting the actual.
-    fn max_rel(label: &str, got: &[f64], want: &[f64]) -> f64 {
-        let mut m = 0.0_f64;
-        for i in 0..got.len() {
-            let rel = if want[i] == 0.0 {
-                got[i].abs()
-            } else {
-                (got[i] - want[i]).abs() / want[i].abs()
-            };
-            m = m.max(rel);
-        }
-        std::println!("{label}: max rel err {m:.3e}");
-        m
+    /// `|got − want| / |want|`, the norm of the difference relative to the norm of the reference.
+    fn relative_distance(got: &[f64], want: &[f64]) -> f64 {
+        let diff: f64 = got.iter().zip(want).map(|(g, w)| (g - w) * (g - w)).sum();
+        let norm: f64 = want.iter().map(|w| w * w).sum();
+        libm::sqrt(diff / norm)
     }
 
-    // ---- 1. Constant-thrust short arc, matched fixed-step RK4 vs Orekit ConstantThrustManeuver ----
-    // A LEO arc under point-mass gravity plus an always-firing constant thrust, both integrated with
-    // the identical classical RK4 tableau at a fixed 30 s step (20 steps over 600 s). Because the
-    // Butcher tableau, step, force formula and thrust direction match, the only divergence is ~1 ulp
-    // per gravity evaluation (op-order of `−μr/|r|³`), so the match is near machine precision.
+    // ---- 1. Constant thrust: a LEO arc under point-mass gravity and an always-firing thrust, the
+    // classical RK4 tableau at a fixed 30 s step (20 steps over 600 s). CT_FLOW, CT_ACCEL0, CT_RF, CT_VF
+    // and CT_MF are Orekit's `ConstantThrustManeuver` under the same tableau and step (comparator). ----
     const CT_THRUST: f64 = 4.00000000000000000e+02;
     const CT_ISP: f64 = 3.00000000000000000e+02;
     const CT_FLOW: f64 = 1.35962161730390440e-01;
@@ -450,6 +442,24 @@ mod tests {
         1.99999975000004700e-01,
         1.66666645833337230e-01,
         -2.08166640645838200e-01,
+    ];
+
+    /// `derivations/maneuver.mac` (4) at 40 digits: `F/(I_sp g₀)`, `F/m₀·d̂`, and `[r, v, m]` after the
+    /// 20 RK4 steps.
+    const CT_FLOW_MAXIMA: f64 = 1.3596216173039043234e-1;
+    const CT_ACCEL0_MAXIMA: [f64; 3] = [
+        1.999999750000047e-1,
+        1.6666664583333725333e-1,
+        -2.0816664064583823333e-1,
+    ];
+    const CT_FINAL_MAXIMA: [f64; 7] = [
+        -1.8321988613826936014e6,
+        3.9616429805095439805e6,
+        5.4375378626074098227e6,
+        -6.5321602450401098252e3,
+        -3.4747569517003689538e3,
+        1.7104342965703234992e2,
+        1.1184227029617657406e3,
     ];
 
     fn constant_thrust() -> ConstantThrust<PointMass> {
@@ -494,40 +504,77 @@ mod tests {
         }
     }
 
-    /// The seven-element `[r, v, m]` state integrated with the matched RK4 reproduces Orekit's final
-    /// position, velocity and mass; the initial thrust acceleration matches `F/m₀·d̂`; the flow rate is
-    /// the rocket-equation value.
-    #[test]
-    fn constant_thrust_matches_orekit() {
-        let ct = constant_thrust();
-        assert!((ct.flow_rate() - CT_FLOW).abs() < 1e-15 * CT_FLOW);
-
-        // Thrust acceleration at the initial firing state: eval minus the background gravity.
-        let y0 = [
+    fn ct_y0() -> [f64; 7] {
+        [
             CT_R0[0], CT_R0[1], CT_R0[2], CT_V0[0], CT_V0[1], CT_V0[2], CT_MASS0,
-        ];
-        let d0 = ct.eval::<f64>(0.0, &y0);
-        let grav = PointMass { mu: MU }.acceleration::<f64>(0.0, &CT_R0, &CT_V0);
-        let thrust_accel = [d0[3] - grav[0], d0[4] - grav[1], d0[5] - grav[2]];
-        // Measured residuals are ~1e-15 (near bit-exact); the gates keep ~3 orders of libm headroom.
-        assert!(max_rel("ct accel0", &thrust_accel, &CT_ACCEL0) < 1e-12);
-        assert!(
-            (d0[6] + CT_FLOW).abs() < 1e-15 * CT_FLOW,
-            "mdot != -flow_rate"
-        );
-
-        // Matched fixed-step RK4 propagation of [r, v, m].
-        let yf = rk4_integrate::<7>(&Plain(ct), 0.0, &y0, CT_SPAN, CT_NSTEPS);
-        let rf = max_rel("ct rf", &yf[0..3], &CT_RF);
-        let vf = max_rel("ct vf", &yf[3..6], &CT_VF);
-        let mf = ((yf[6] - CT_MF) / CT_MF).abs();
-        std::println!("ct mf: rel err {mf:.3e}");
-        assert!(rf < 1e-12, "final position vs Orekit: {rf:.3e}");
-        assert!(vf < 1e-12, "final velocity vs Orekit: {vf:.3e}");
-        assert!(mf < 1e-13, "final mass vs Orekit: {mf:.3e}");
+        ]
     }
 
-    // ---- 2. Impulsive maneuver vs Orekit ImpulseManeuver (inertial and RTN/QSW) ----
+    /// The thrust acceleration at the initial firing state: `eval` less the background gravity.
+    fn ct_thrust_acceleration0() -> [f64; 3] {
+        let d0 = constant_thrust().eval::<f64>(0.0, &ct_y0());
+        let grav = PointMass { mu: MU }.acceleration::<f64>(0.0, &CT_R0, &CT_V0);
+        [d0[3] - grav[0], d0[4] - grav[1], d0[5] - grav[2]]
+    }
+
+    fn ct_final() -> [f64; 7] {
+        rk4_integrate::<7>(&Plain(constant_thrust()), 0.0, &ct_y0(), CT_SPAN, CT_NSTEPS)
+    }
+
+    /// The distance to Orekit's `ConstantThrustManeuver` under the identical RK4 tableau and step.
+    /// [`constant_thrust_is_the_rocket_equation_under_rk4`] decides.
+    #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn constant_thrust_distance_to_orekit() {
+        let yf = ct_final();
+        for (quantity, got, want) in [
+            (
+                "flow rate",
+                &[constant_thrust().flow_rate()][..],
+                &[CT_FLOW][..],
+            ),
+            (
+                "initial thrust acceleration",
+                &ct_thrust_acceleration0()[..],
+                &CT_ACCEL0[..],
+            ),
+            ("position after RK4 30 s x 20", &yf[0..3], &CT_RF[..]),
+            ("velocity after RK4 30 s x 20", &yf[3..6], &CT_VF[..]),
+            ("mass after RK4 30 s x 20", &yf[6..7], &[CT_MF][..]),
+        ] {
+            crate::dsst::comparison_row(
+                &std::format!("constant thrust, {quantity}"),
+                "relative",
+                &[relative_distance(got, want)],
+            );
+        }
+    }
+
+    /// The flow rate is `F/(I_sp g₀)`, `ṁ` its negative, the thrust acceleration `F/m₀·d̂`, and the
+    /// seven-element state after 20 steps is the classical RK4 tableau run on `[r, v, m]` at 40 digits
+    /// by `derivations/maneuver.mac` (4), whose (1) derives the rocket equation from the mass channel.
+    /// Measured: flow exact, acceleration 7.2e-16, the final state 3.8e-16 at worst. (G3)
+    #[test]
+    fn constant_thrust_is_the_rocket_equation_under_rk4() {
+        let ct = constant_thrust();
+        let flow = (ct.flow_rate() - CT_FLOW_MAXIMA).abs() / CT_FLOW_MAXIMA;
+        assert_eq!(ct.eval::<f64>(0.0, &ct_y0())[6], -ct.flow_rate());
+        let accel0 = relative_distance(&ct_thrust_acceleration0(), &CT_ACCEL0_MAXIMA);
+        let yf = ct_final();
+        let rf = relative_distance(&yf[0..3], &CT_FINAL_MAXIMA[0..3]);
+        let vf = relative_distance(&yf[3..6], &CT_FINAL_MAXIMA[3..6]);
+        let mf = relative_distance(&yf[6..7], &CT_FINAL_MAXIMA[6..7]);
+        println!(
+            "constant thrust against 40 digits: flow {flow:.3e}, accel0 {accel0:.3e}, r {rf:.3e}, v {vf:.3e}, m {mf:.3e}"
+        );
+        assert!(flow < 5e-16, "flow rate {flow:.3e}");
+        assert!(accel0 < 3e-15, "initial thrust acceleration {accel0:.3e}");
+        assert!(rf < 1.5e-15, "final position {rf:.3e}");
+        assert!(vf < 1e-15, "final velocity {vf:.3e}");
+        assert!(mf < 1e-15, "final mass {mf:.3e}");
+    }
+
+    // ---- 2. Impulsive manoeuvre, inertial and RTN (QSW) ----
     const IMP_R: [f64; 3] = [
         6.26383676685378050e+06,
         2.73755933437816470e+06,
@@ -538,12 +585,33 @@ mod tests {
         6.11664197152401300e+03,
         3.00502609735479800e+03,
     ];
+    const IMP_DV_INERTIAL: [f64; 3] = [50.0, -30.0, 20.0];
+    const IMP_DV_RTN: [f64; 3] = [15.0, 40.0, -10.0];
+    /// Orekit's `ImpulseManeuver` post-impulse velocities (comparator).
+    const OREKIT_IMPULSE_INERTIAL: [f64; 3] = [
+        -3.13398692573610330e+03,
+        6.08664197152401300e+03,
+        3.02502609735479800e+03,
+    ];
+    const OREKIT_IMPULSE_RTN: [f64; 3] = [
+        -3.18923192231559730e+03,
+        6.15872853844793700e+03,
+        3.01626045961703130e+03,
+    ];
+    /// `derivations/maneuver.mac` (4) at 40 digits: `v + Δv`, and `v + Δv_R R̂ + Δv_T T̂ + Δv_W Ŵ`.
+    const IMPULSE_INERTIAL_MAXIMA: [f64; 3] = [
+        -3.1339869257361033e3,
+        6.086641971524013e3,
+        3.025026097354798e3,
+    ];
+    const IMPULSE_RTN_MAXIMA: [f64; 3] = [
+        -3.1892319223155975326e3,
+        6.1587285384479377663e3,
+        3.0162604596170314747e3,
+    ];
 
-    /// The state transform `v ↦ v + Δv` reproduces Orekit's `ImpulseManeuver` post-impulse velocity,
-    /// for an inertial Δv and an RTN (QSW) Δv — the latter validating the RTN→inertial rotation against
-    /// Orekit's `LofOffset(QSW)`.
-    #[test]
-    fn impulse_matches_orekit() {
+    /// The post-impulse state for each frame.
+    fn impulses() -> [[f64; 6]; 2] {
         let pre = [
             IMP_R[0],
             IMP_R[1],
@@ -552,136 +620,252 @@ mod tests {
             IMP_VPRE[1],
             IMP_VPRE[2],
         ];
-
-        let inertial = ImpulsiveManeuver {
-            delta_v: [50.0, -30.0, 20.0],
-            frame: Frame::Inertial,
-        };
-        let post_in = inertial.apply(&pre);
-        let want_in = [
-            -3.13398692573610330e+03,
-            6.08664197152401300e+03,
-            3.02502609735479800e+03,
-        ];
-        assert!(max_rel("impulse inertial", &post_in[3..6], &want_in) < 1e-12);
-
-        // The seven-element form agrees on `[r, v]` and leaves the mass untouched.
-        let post7 =
-            inertial.apply_with_mass(&[pre[0], pre[1], pre[2], pre[3], pre[4], pre[5], 950.0]);
-        assert_eq!(&post7[0..6], &post_in[0..6]);
-        assert_eq!(post7[6], 950.0);
-
-        let rtn = ImpulsiveManeuver {
-            delta_v: [15.0, 40.0, -10.0],
-            frame: Frame::Rtn,
-        };
-        let post_rtn = rtn.apply(&pre);
-        let want_rtn = [
-            -3.18923192231559730e+03,
-            6.15872853844793700e+03,
-            3.01626045961703130e+03,
-        ];
-        assert!(max_rel("impulse rtn", &post_rtn[3..6], &want_rtn) < 1e-12);
+        [(IMP_DV_INERTIAL, Frame::Inertial), (IMP_DV_RTN, Frame::Rtn)]
+            .map(|(delta_v, frame)| ImpulsiveManeuver { delta_v, frame }.apply(&pre))
     }
 
-    // ---- 3. RTN (QSW) basis and argument of latitude vs Orekit ----
-    /// The RTN basis matches Orekit's `LOFType.QSW` axes, and the argument of latitude matches Orekit's
-    /// `CircularOrbit.getAlphaV`, at a fixed LEO state.
+    /// The distance to Orekit's `ImpulseManeuver`, inertial and through `LofOffset(QSW)`.
+    /// [`the_impulse_adds_the_rotated_delta_v`] decides.
     #[test]
-    fn rtn_frame_matches_orekit() {
-        let r = [6.80e6, 9.0e5, 2.1e6];
-        let v = [-1.2e3, 6.4e3, 3.2e3];
-        let [rr, tt, ww] = rtn_basis(&r, &v);
-        let want_r = [
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn impulse_distance_to_orekit() {
+        let [inertial, rtn] = impulses();
+        for (quantity, got, want) in [
+            ("inertial", &inertial[3..6], OREKIT_IMPULSE_INERTIAL),
+            ("RTN (QSW)", &rtn[3..6], OREKIT_IMPULSE_RTN),
+        ] {
+            crate::dsst::comparison_row(
+                &std::format!("impulsive manoeuvre, post-impulse velocity, {quantity} delta-v"),
+                "relative",
+                &[relative_distance(got, &want)],
+            );
+        }
+    }
+
+    /// The impulse keeps the position and adds `Δv`, rotated from RTN with the basis of the pre-impulse
+    /// state, as `derivations/maneuver.mac` (4) evaluates at 40 digits; the seven-element form leaves
+    /// the mass untouched. Measured: inertial exact, RTN 6.0e-17. (G3)
+    #[test]
+    fn the_impulse_adds_the_rotated_delta_v() {
+        let [inertial, rtn] = impulses();
+        assert_eq!(&inertial[0..3], &IMP_R[..]);
+        assert_eq!(&rtn[0..3], &IMP_R[..]);
+        let a = relative_distance(&inertial[3..6], &IMPULSE_INERTIAL_MAXIMA);
+        let b = relative_distance(&rtn[3..6], &IMPULSE_RTN_MAXIMA);
+        println!("impulse against 40 digits: inertial {a:.3e}, RTN {b:.3e}");
+        assert!(a < 3e-16, "inertial {a:.3e}");
+        assert!(b < 3e-16, "RTN {b:.3e}");
+
+        let mass = 950.0;
+        let post7 = ImpulsiveManeuver {
+            delta_v: IMP_DV_INERTIAL,
+            frame: Frame::Inertial,
+        }
+        .apply_with_mass(&[
+            IMP_R[0],
+            IMP_R[1],
+            IMP_R[2],
+            IMP_VPRE[0],
+            IMP_VPRE[1],
+            IMP_VPRE[2],
+            mass,
+        ]);
+        assert_eq!(&post7[0..6], &inertial[..]);
+        assert_eq!(post7[6], mass);
+    }
+
+    // ---- 3. RTN (QSW) basis and argument of latitude ----
+    const RTN_R: [f64; 3] = [6.80e6, 9.0e5, 2.1e6];
+    const RTN_V: [f64; 3] = [-1.2e3, 6.4e3, 3.2e3];
+    /// Orekit's `LOFType.QSW` axes Q, S, W and `CircularOrbit.getAlphaV` (comparator).
+    const OREKIT_RTN: [[f64; 3]; 3] = [
+        [
             9.47925097196537200e-01,
             1.25460674628953440e-01,
             2.92741574134224700e-01,
-        ];
-        let want_t = [
+        ],
+        [
             -2.44920597063388650e-01,
             8.74713346478164900e-01,
             4.18199070571759150e-01,
-        ];
-        let want_w = [
+        ],
+        [
             -2.03597424441099240e-01,
             -4.68119835741466800e-01,
             8.59890637317521500e-01,
-        ];
-        assert!(max_rel("rtn R", &rr, &want_r) < 1e-13);
-        assert!(max_rel("rtn T", &tt, &want_t) < 1e-13);
-        assert!(max_rel("rtn W", &ww, &want_w) < 1e-13);
+        ],
+    ];
+    const OREKIT_ALPHA_V: f64 = 6.10729534713573300e-01;
+    /// `derivations/maneuver.mac` (4) at 40 digits: `R̂`, `T̂`, `Ŵ`, then `(sin u, cos u)`.
+    const RTN_MAXIMA: [[f64; 3]; 3] = [
+        [
+            9.4792509719653700467e-1,
+            1.2546067462895342709e-1,
+            2.9274157413422466321e-1,
+        ],
+        [
+            -2.4492059706338861479e-1,
+            8.7471334647816483425e-1,
+            4.1819907057175915703e-1,
+        ],
+        [
+            -2.035974244410992267e-1,
+            -4.681198357414667826e-1,
+            8.5989063731752135518e-1,
+        ],
+    ];
+    const SIN_COS_U_MAXIMA: [f64; 2] = [5.7346526928335946811e-1, 8.1922987306723868742e-1];
 
-        let alpha_v = 6.10729534713573300e-01_f64;
-        let (sin_u, cos_u) = argument_of_latitude_sincos(&r, &v);
-        assert!((sin_u - alpha_v.sin()).abs() < 1e-13, "sin u: {sin_u}");
-        assert!((cos_u - alpha_v.cos()).abs() < 1e-13, "cos u: {cos_u}");
+    /// The distance to Orekit's QSW axes and `getAlphaV`.
+    /// [`the_rtn_basis_and_the_argument_of_latitude_are_their_definitions`] decides.
+    #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn rtn_frame_distance_to_orekit() {
+        let basis = rtn_basis(&RTN_R, &RTN_V);
+        for (axis, got, want) in [
+            ("R", basis[0], OREKIT_RTN[0]),
+            ("T", basis[1], OREKIT_RTN[1]),
+            ("W", basis[2], OREKIT_RTN[2]),
+        ] {
+            crate::dsst::comparison_row(
+                &std::format!("RTN (QSW) basis, {axis} axis"),
+                "relative",
+                &[relative_distance(&got, &want)],
+            );
+        }
+        let (sin_u, cos_u) = argument_of_latitude_sincos(&RTN_R, &RTN_V);
+        crate::dsst::comparison_row(
+            "argument of latitude, (sin u, cos u)",
+            "relative",
+            &[relative_distance(
+                &[sin_u, cos_u],
+                &[OREKIT_ALPHA_V.sin(), OREKIT_ALPHA_V.cos()],
+            )],
+        );
     }
 
-    // ---- 4. Polynomial empirical acceleration vs Orekit ParametricAcceleration ----
+    /// The RTN basis and `(sin u, cos u)` at a LEO state are their definitions, evaluated at 40
+    /// digits by `derivations/maneuver.mac` (4), whose (2) proves the construction orthonormal and the
+    /// latitude the orbit's `u` for every node and inclination. Measured 1.6e-16. (G3)
+    #[test]
+    fn the_rtn_basis_and_the_argument_of_latitude_are_their_definitions() {
+        let basis = rtn_basis(&RTN_R, &RTN_V);
+        let (sin_u, cos_u) = argument_of_latitude_sincos(&RTN_R, &RTN_V);
+        let mut worst = relative_distance(&[sin_u, cos_u], &SIN_COS_U_MAXIMA);
+        for (got, want) in basis.iter().zip(RTN_MAXIMA) {
+            worst = nan_max(worst, relative_distance(got, &want));
+        }
+        println!("RTN basis and argument of latitude against 40 digits: {worst:.3e}");
+        assert!(
+            worst < 6e-16,
+            "RTN basis or argument of latitude {worst:.3e}"
+        );
+    }
+
+    // ---- 4. Polynomial empirical acceleration ----
     const POLY_DIR: [f64; 3] = [
         3.03045763365663200e-01,
         -5.05076272276105300e-01,
         8.08122035641768500e-01,
     ];
+    const POLY_COEFFICIENTS: [f64; 3] = [2.0e-7, 3.0e-9, -1.0e-11];
+    /// The shipped reference time. Orekit's `PolynomialAccelerationModel` evaluates
+    /// `amp += amp·dt + cₖ`, the polynomial in `1 + (t − t_ref)` (`derivations/maneuver.mac` (3)), so its
+    /// reference date of 50 s is this crate's 49 s.
+    const POLY_REFERENCE_TIME: f64 = 49.0;
+    const POLY_TIMES: [f64; 4] = [0.0, 100.0, 250.0, 500.0];
+    /// Orekit's `ParametricAcceleration` + `PolynomialAccelerationModel` at the four epochs
+    /// (comparator).
+    const OREKIT_POLY: [[f64; 3]; 4] = [
+        [
+            8.78529667997057800e-09,
+            -1.46421611332842980e-08,
+            2.34274578132548770e-08,
+        ],
+        [
+            9.90929341629382100e-08,
+            -1.65154890271563660e-07,
+            2.64247824434501900e-07,
+        ],
+        [
+            1.20912229125265980e-07,
+            -2.01520381875443280e-07,
+            3.22432611000709300e-07,
+        ],
+        [
+            -1.45768042636517600e-07,
+            2.42946737727529370e-07,
+            -3.88714780364047000e-07,
+        ],
+    ];
+    /// `derivations/maneuver.mac` (4) at 40 digits: `Σ cₖ (t − t_ref)ᵏ d̂` at the four epochs.
+    const POLY_MAXIMA: [[f64; 3]; 4] = [
+        [
+            8.785296679970576168e-9,
+            -1.4642161133284292647e-8,
+            2.3427457813254868815e-8,
+        ],
+        [
+            9.9092934162938209768e-8,
+            -1.65154890271563672047e-7,
+            2.64247824434501881815e-7,
+        ],
+        [
+            1.20912229125265960168e-7,
+            -2.01520381875443253647e-7,
+            3.22432611000709213815e-7,
+        ],
+        [
+            -1.45768042636517655832e-7,
+            2.42946737727529410353e-7,
+            -3.88714780364047066185e-7,
+        ],
+    ];
 
-    /// The polynomial-in-time empirical acceleration matches Orekit's `ParametricAcceleration` +
-    /// `PolynomialAccelerationModel` at four epochs. Orekit evaluates its polynomial in `1 + (t − t_ref)`
-    /// (from the class bytecode: `amp = amp·(1 + dt) + cₖ`), so this crate's clean `Σ cₖ(t − t_ref)ᵏ`
-    /// with `reference_time = 49 s` reproduces Orekit's `t_ref = 50 s` exactly — the documented
-    /// one-second bridge between the two conventions.
-    #[test]
-    fn polynomial_empirical_matches_orekit() {
+    /// The polynomial empirical acceleration at the four epochs. Inertial and time-only, so the state
+    /// is not read.
+    fn polynomial_accelerations() -> [[f64; 3]; 4] {
         let emp = EmpiricalAcceleration {
             direction: POLY_DIR,
             frame: Frame::Inertial,
             signal: PolynomialSignal {
-                reference_time: 49.0, // Orekit t_ref = 50 s, evaluated in 1 + (t − t_ref)
-                coefficients: [2.0e-7, 3.0e-9, -1.0e-11],
+                reference_time: POLY_REFERENCE_TIME,
+                coefficients: POLY_COEFFICIENTS,
             },
         };
-        // Inertial direction and time-only signal → position/velocity are unused; pass a dummy state.
-        let r = [7.0e6, 0.0, 0.0];
-        let v = [0.0, 7.5e3, 0.0];
-        let cases: [(f64, [f64; 3]); 4] = [
-            (
-                0.0,
-                [
-                    8.78529667997057800e-09,
-                    -1.46421611332842980e-08,
-                    2.34274578132548770e-08,
-                ],
-            ),
-            (
-                100.0,
-                [
-                    9.90929341629382100e-08,
-                    -1.65154890271563660e-07,
-                    2.64247824434501900e-07,
-                ],
-            ),
-            (
-                250.0,
-                [
-                    1.20912229125265980e-07,
-                    -2.01520381875443280e-07,
-                    3.22432611000709300e-07,
-                ],
-            ),
-            (
-                500.0,
-                [
-                    -1.45768042636517600e-07,
-                    2.42946737727529370e-07,
-                    -3.88714780364047000e-07,
-                ],
-            ),
-        ];
+        POLY_TIMES.map(|t| emp.acceleration::<f64>(t, &[7.0e6, 0.0, 0.0], &[0.0, 7.5e3, 0.0]))
+    }
+
+    /// The distance to Orekit's `ParametricAcceleration` + `PolynomialAccelerationModel`.
+    /// [`the_polynomial_empirical_acceleration_is_its_polynomial`] decides.
+    #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn polynomial_empirical_distance_to_orekit() {
+        let distances: std::vec::Vec<f64> = polynomial_accelerations()
+            .iter()
+            .zip(OREKIT_POLY)
+            .map(|(got, want)| relative_distance(got, &want))
+            .collect();
+        crate::dsst::comparison_row(
+            "polynomial empirical acceleration, Orekit reference date one second later",
+            "relative",
+            &distances,
+        );
+    }
+
+    /// The polynomial empirical acceleration is `Σ cₖ (t − t_ref)ᵏ d̂` at four epochs, as
+    /// `derivations/maneuver.mac` (4) evaluates at 40 digits. Measured 4.3e-16. (G3)
+    #[test]
+    fn the_polynomial_empirical_acceleration_is_its_polynomial() {
         let mut worst = 0.0_f64;
-        for (t, want) in cases {
-            let a = emp.acceleration::<f64>(t, &r, &v);
-            worst = nan_max(worst, max_rel(&std::format!("poly t={t}"), &a, &want));
+        for (got, want) in polynomial_accelerations().iter().zip(POLY_MAXIMA) {
+            worst = nan_max(worst, relative_distance(got, &want));
         }
-        assert!(worst < 1e-13, "polynomial empirical vs Orekit: {worst:.3e}");
+        println!("polynomial empirical acceleration against 40 digits: {worst:.3e}");
+        assert!(
+            worst < 1.5e-15,
+            "polynomial empirical acceleration {worst:.3e}"
+        );
     }
 
     // ---- 5. Harmonic empirical (argument of latitude) — analytic anchors ----

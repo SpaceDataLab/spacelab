@@ -593,6 +593,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima relativity_iers.mac" "expected 6 checks to hold, found $holds"
     fi
 
+    out=$(macf maneuver.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima maneuver.mac: the mass channel is the rocket equation, the RTN basis and argument of latitude their definitions, the empirical polynomial its Horner loop; the G3 goldens at 40 digits"
+    else
+        bad "maxima maneuver.mac" "expected 4 checks to hold, found $holds"
+    fi
+
     out=$(macf ocean_loading.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 11 ] && printf '%s' "$out" | grep -q '^DONE'; then

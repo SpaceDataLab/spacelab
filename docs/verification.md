@@ -459,7 +459,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
 | Box-wing drag + SRP | each facet's force from the momentum it keeps of the stream through its projected area: absorbed, reflected specularly (`2|n̂·d̂|` along the normal), or re-emitted by Lambert's law (mean direction `(2/3) n̂`); SRP is Montenbruck & Gill eq. 3.75 = Vallado eq. 8-44, drag with a lift ratio of specular molecules goes as `(n̂·v̂)²` (F89: Orekit's lift term is short of one `|n̂·v̂|`); a facet counts on its lit/windward side, both sides if double-sided; the Sun-tracking array normal is the best one rotational degree of freedom allows | **Maxima** `derivations/box_wing_momentum.mac` (13 identities, the lift case at the golden geometry), PARI/GP `box_wing_momentum.gp` at 100 digits; Orekit 13 `BoxAndSolarArraySpacecraft` golden as comparator where the models agree (4 geometries, and SRP in the fifth) | < 1e-9 | src/spacecraft.rs, derivations/box_wing_momentum.mac |
-| Constant-thrust / impulse / parametric maneuvers | rocket equation; constant-thrust and impulsive definitions | Orekit `ConstantThrustManeuver`/`ImpulseManeuver`/`ParametricAcceleration` golden | r/v < 1e-12; AD vs FD | src/maneuver.rs |
+| Constant-thrust / impulse / parametric maneuvers | rocket equation; constant-thrust and impulsive definitions | **Maxima** `derivations/maneuver.mac`: the mass channel gives Tsiolkovsky's Δv and RK4 carries the mass exactly; the RTN basis is orthonormal and the shipped argument of latitude is `u` for every node and inclination; the Horner loop is `Σ cₖ τᵏ`, Orekit's `Σ cₖ (1 + τ)ᵏ`; RK4 on `[r, v, m]`, the impulses, the basis and the polynomial at 40 digits (G3); AD vs FD; Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 7.2e-16 at worst (bounds 3e-16 … 3e-15) | src/maneuver.rs |
 | DSST **drag** mean rates | Danielson et al. 1995 — Gaussian VOP averaging | the defining average `(1/2π)∫F dλ` of Gauss's rates over the whole turn inside the atmosphere and over the arc below `rbar` (G2, `tests/dsst_short_period_identity.rs`); the limits where the radius crosses `rbar` (G2); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 1.8e-10 and 2.2e-10 of the rates, the central differences' own error | src/dsst/drag.rs, tests/dsst_short_period_identity.rs |
 | DSST **drag** short-period | Danielson et al. 1995 — Gaussian short-period: the zero-mean solution of `n·∂η/∂λ = F − ⟨F⟩`, with `(3/2)(n/a)η_a` on the left for λ | the defining equation on the shipped corrections, ∂/∂λ of osc − mean taken spectrally and the force raised ×1000 past the test's rounding (`tests/dsst_short_period_identity.rs`); `derivations/dsst_gaussian_short_period.{mac,gp}`: ρⱼ + iσⱼ, the product to sum at JMAX = 12, the closed form of `F = cos L`; the full-turn trapezoid against Arb's `2Iⱼ(z)`. Comparator: Orekit OSCULATING | 8.7e-9 at e = 1e-4 and 3.0e-9 in LEO (bound 2e-8); 3.9e-6 at e = 0.05 (bound 1e-5), the j ≤ 12 cut: 2.1e-9 at twice the scale height; 1.6e-3 on an arc that leaves the atmosphere, the step at `rbar`: ÷8.4 when `rbar` moves 2H out; closed form 1.9e-15 (bound 1e-14). Orekit is 4.4e-2 m away in `a`, from its D¹, which takes C⁰ where 𝒞⁰ = C⁰/2 − ⟨F⟩ belongs | src/dsst/gaussian_short_period.rs |
 | DSST **SRP** mean rates | Danielson et al. 1995 — Gaussian VOP averaging; the shadow function (3.5) carried from the cylinder to the penumbra and umbra cones of a spherical body | the defining average `(1/2π)∫νF dλ` over the whole orbit at 80 digits, by two routes, in the true and in the mean longitude (`derivations/dsst_srp_conical_average.gp`; `tests/dsst_srp_conical_reference.rs`: LEO, HEO, GEO, penumbra only, 1e-6 short of the umbra, sunlit) **+** the cone equations, their quartic, the precheck and the smoothstep in `derivations/dsst_srp_conical_shadow.mac` (25 checks) **+** the contacts against a bisection on the angles that define them, 2394 states, and the penumbra rule against the same piece in eight parts, 2048 pieces (`src/dsst/srp.rs`). Comparator: Orekit `getMeanElementRate`, a cylinder of radius `ae·B` and a cut at it | 4.0e-15 at worst, on the penumbra-only orbit, 1.0e-16 … 3.7e-16 on the others (bound 2e-14); the routes agree to 1.3e-46 of the rates' scale; contacts 6.2e-14 rad (bound 1e-12); penumbra rule 6.6e-14 (bound 2e-13); the average by the test's own quadrature 1.5e-11 (bound 1e-10). Orekit is 8.3e-4 (`dk`, `dh`) to 3.3e-3 (`dλ`) away, relative | src/dsst/srp.rs |
@@ -11301,9 +11301,11 @@ the Step-2 tables against chapter 6 row by row.
 Batch 3 (2026-11-13) parks the ocean tide's two after `ocean_tide_iers.mac` derived eq (6.15) and
 the Doodson-to-Delaunay map into the force, and relativity's one after `relativity_iers.mac` held
 eq (10.12) to the force and to its classical limits.
-**Today: 98
-comparator-decided tests of 3 694** — name 61, file 18, fixture 4, doc 15; 39 of them Orekit's (26 by
-name), 19 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+Batch 4 (2026-11-13) parks the manoeuvres' four after `maneuver.mac` derived the rocket equation, the
+RTN basis, the argument of latitude and the empirical polynomial from their definitions.
+**Today: 94
+comparator-decided tests of 3 698** — name 57, file 18, fixture 4, doc 15; 35 of them Orekit's (22 by
+name), 15 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 The parked tests are the suite: `just compare` (`tools/compare.py`) runs each one alone, reads the
@@ -11377,10 +11379,6 @@ crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::the_resonant_term
 crates/spacelab-propagation/src/earth_radiation.rs::knocke_matches_orekit | name:orekit
 crates/spacelab-propagation/src/ephemeris.rs::both_bodies_reach_erfa_at_the_documented_accuracy | name:erfa
 crates/spacelab-propagation/src/geopotential.rs::validated_against_scipy_at_degree_70 | name:scipy
-crates/spacelab-propagation/src/maneuver.rs::constant_thrust_matches_orekit | name:orekit
-crates/spacelab-propagation/src/maneuver.rs::impulse_matches_orekit | name:orekit
-crates/spacelab-propagation/src/maneuver.rs::polynomial_empirical_matches_orekit | name:orekit
-crates/spacelab-propagation/src/maneuver.rs::rtn_frame_matches_orekit | name:orekit
 crates/spacelab-propagation/src/ocean_tide.rs::admittance_weights_match_pyfes | name:pyfes
 crates/spacelab-propagation/src/spacecraft.rs::a_null_radiation_flux_returns_zero_and_the_threshold_is_strict | doc:orekit
 crates/spacelab-propagation/src/spacecraft.rs::an_array_edge_on_to_the_sun_falls_back_to_an_arbitrary_perpendicular | doc:orekit

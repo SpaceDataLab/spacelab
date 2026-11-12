@@ -1,0 +1,145 @@
+/* `crates/spacelab-propagation/src/maneuver.rs`: the rocket equation, the RTN frame, the impulse and the
+   polynomial empirical term, from their definitions (plans/17 Ф19.G).
+
+   Orekit's ConstantThrustManeuver, ImpulseManeuver, LOFType.QSW and PolynomialAccelerationModel decided
+   this until Ф19.G and are a comparator now (docs/comparisons.md). The definitions decide:
+     (1) the mass channel is the rocket equation: m' = -F/(Isp g0) with g0 the CGPM's 9.80665 exactly,
+         v' = (F/m) d; burning for T along a fixed d gives Tsiolkovsky's Isp g0 ln(m0/m(T)), and an RK4
+         step carries the mass exactly;
+     (2) the RTN basis R = r/|r|, W = (r x v)/|r x v|, T = W x R is orthonormal and right-handed, and the
+         shipped argument of latitude, cos u = R.n, sin u = R.(W x n) with n along z x W, is the u of
+         r = |r| R3(-Omega) R1(-i) [cos u, sin u, 0] for every node and inclination;
+     (3) the shipped Horner loop in tau = t - t_ref is sum c_k tau^k; Orekit's `amp += amp dt + c_k` is
+         sum c_k (1 + dt)^k, so Orekit's reference date is the shipped one plus one second;
+     (4) the goldens of the Rust G3 tests at 40 digits: the classical RK4 tableau run on [r, v, m] over
+         the test's 20 steps, the initial thrust acceleration and the flow rate; the impulse's
+         post-burn velocities, inertial and RTN; the basis and (sin u, cos u) at the RTN test state;
+         the polynomial at the four test epochs.
+
+   timeout 300 maxima --very-quiet -Q -b maneuver.mac                                                */
+
+load("rust_literals.mac")$
+fpprec : 40$
+fpprintprec : 20$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+src : "../crates/spacelab-propagation/src/maneuver.rs"$
+in_source(path, text) := block([s : openr(path), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+all_in_source(path, texts) := every(lambda([t], in_source(path, t)), texts)$
+each_axis(f) := makelist(f(i), i, 0, 2)$
+zero(u) := every(lambda([x], is(ratsimp(x) = 0)), if listp(u) then u else [u])$
+
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+vdot(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+unit(a) := a/sqrt(vdot(a, a))$
+/* The shipped constructions. */
+rtn_basis(r, v) := block([R : unit(r), W : unit(cross(r, v))], [R, cross(W, R), W])$
+sincos_u(r, v) := block([R : unit(r), W : unit(cross(r, v)), n],
+  n : unit([-W[2], W[1], 0]), [vdot(R, cross(W, n)), vdot(R, n)])$
+to_inertial(d, r, v) := block([b : rtn_basis(r, v)], d[1]*b[1] + d[2]*b[2] + d[3]*b[3])$
+
+/* ---- (1) the rocket equation ----------------------------------------------------------------------- */
+g0 : rust_rational(rust_scalar(src, "G0_STANDARD_GRAVITY"))$
+mass(t) := m0 - F/(Isp*gs)*t$
+/* Tsiolkovsky's Delta v as the integral of F/m: its derivative is F/m(T) and it vanishes at T = 0. */
+dv : Isp*gs*log(m0/mass(T))$
+/* One RK4 step of m' = -k: the four stages agree and the step is m - k h. */
+rk4_scalar(f, y, h) := block([k1 : f(y), k2, k3, k4],
+  k2 : f(y + h/2*k1), k3 : f(y + h/2*k2), k4 : f(y + h*k3), y + h/6*(k1 + 2*k2 + 2*k3 + k4))$
+must(is(g0 = 980665/100000)
+     and zero(radcan(diff(dv, T) - F/mass(T))) and zero(subst(T = 0, dv))
+     and zero(rk4_scalar(lambda([y], -k), m, h) - (m - k*h))
+     and all_in_source(src, append([
+       "self.thrust / (self.isp * self.g0)",
+       "let f_over_m = S::from_f64(self.thrust) / m;",
+       "let mdot = S::from_f64(-self.flow_rate());",
+       "let dir = self.frame.rotate_to_inertial(&d, &r, &v);",
+       "t >= self.t_start && t < self.t_end"],
+       each_axis(lambda([i], concat("a[", i, "] + f_over_m * dir[", i, "]," ))))),
+     "(1) holds: m' = -F/(Isp g0) with g0 = 9.80665 exactly, v' = (F/m) d; a fixed-direction burn gives Isp g0 ln(m0/m(T)) and RK4 carries the mass exactly")$
+
+/* ---- (2) the RTN basis and the argument of latitude ------------------------------------------------ */
+declare([x, y, z, vx, vy, vz, vr], real)$
+b : rtn_basis([x, y, z], [vx, vy, vz])$
+gram : genmatrix(lambda([i, j], vdot(b[i], b[j])), 3, 3)$
+assume(rr > 0, vt > 0, sin(inc) > 0)$
+/* A state at node Omega, inclination inc and argument of latitude u, moving prograde in its plane. */
+rot3(a) := matrix([cos(a), -sin(a), 0], [sin(a), cos(a), 0], [0, 0, 1])$
+rot1(a) := matrix([1, 0, 0], [0, cos(a), -sin(a)], [0, sin(a), cos(a)])$
+col(m) := [m[1, 1], m[2, 1], m[3, 1]]$
+pq : rot3(Om) . rot1(inc)$
+r_u : rr*col(pq . matrix([cos(u)], [sin(u)], [0]))$
+v_u : vt*col(pq . matrix([-sin(u)], [cos(u)], [0])) + vr*r_u/rr$
+trig0(e) := ratsimp(trigsimp(trigreduce(radcan(trigsimp(e)))))$
+must(zero(flatten(args(radcan(gram - ident(3)))))
+     and zero(radcan(cross(b[1], b[2]) - b[3]))
+     and zero(map(trig0, sincos_u(r_u, v_u) - [sin(u), cos(u)]))
+     and all_in_source(src, [
+       "let that = cross(&what, &rhat);",
+       "let node = [-hhat[1], hhat[0], S::from_f64(0.0)];",
+       "let that = cross(&hhat, &nhat);",
+       "let cos_u = dot3(&rhat, &nhat);",
+       "let sin_u = dot3(&rhat, &that);",
+       "vec[0] * rr[0] + vec[1] * tt[0] + vec[2] * ww[0],"]),
+     "(2) holds: R, T = W x R, W are orthonormal and right-handed, and the shipped (sin u, cos u) is the argument of latitude for every node and inclination")$
+
+/* ---- (3) the polynomial ---------------------------------------------------------------------------- */
+horner(cs, x) := block([acc : 0], for c in reverse(cs) do acc : acc*x + c, acc)$
+orekit_horner(cs, dt) := block([acc : 0], for c in reverse(cs) do acc : acc + acc*dt + c, acc)$
+cs : [c0, c1, c2, c3]$
+must(zero(horner(cs, tau) - sum(cs[k + 1]*tau^k, k, 0, 3))
+     and zero(orekit_horner(cs, dt) - sum(cs[k + 1]*(1 + dt)^k, k, 0, 3))
+     and zero(orekit_horner(cs, t - (tr + 1)) - horner(cs, t - tr))
+     and all_in_source(src, ["let tau = t - self.reference_time;", "acc = acc * tau + c;"]),
+     "(3) holds: the shipped loop is sum c_k tau^k; Orekit's is sum c_k (1 + dt)^k, the shipped polynomial about a reference one second earlier")$
+
+/* ---- (4) the goldens ------------------------------------------------------------------------------- */
+num(name) := rust_rational(rust_scalar(src, name))$
+vec(name) := map(rust_rational, rust_table(src, name))$
+mu : num("MU")$
+thrust : num("CT_THRUST")$  isp : num("CT_ISP")$  dir : vec("CT_DIR")$
+flow : thrust/(isp*g0)$
+/* The always-firing [r, v, m] system: point-mass gravity plus F/m d, m' = -flow. */
+ct_rate(s) := block([r : [s[1], s[2], s[3]], m : s[7], rn],
+  rn : sqrt(vdot(r, r)),
+  append([s[4], s[5], s[6]], -mu*r/rn^3 + thrust/m*dir, [-flow]))$
+rk4(f, s, h) := block([k1 : f(s), k2, k3, k4],
+  k2 : f(s + h/2*k1), k3 : f(s + h/2*k2), k4 : f(s + h*k3), s + h/6*(k1 + 2*k2 + 2*k3 + k4))$
+steps : num("CT_NSTEPS")$
+s : bfloat(append(vec("CT_R0"), vec("CT_V0"), [num("CT_MASS0")]))$
+for i : 1 thru steps do s : rk4(ct_rate, s, bfloat(num("CT_SPAN")/steps))$
+ct_final : s$
+ct_accel0 : bfloat(thrust/num("CT_MASS0")*dir)$
+print("CT_FLOW_MAXIMA", bfloat(flow))$
+print("CT_ACCEL0_MAXIMA", ct_accel0)$
+print("CT_FINAL_MAXIMA", ct_final)$
+
+imp_r : vec("IMP_R")$  imp_v : vec("IMP_VPRE")$
+imp_inertial : bfloat(imp_v + vec("IMP_DV_INERTIAL"))$
+imp_rtn : bfloat(imp_v + to_inertial(vec("IMP_DV_RTN"), imp_r, imp_v))$
+print("IMPULSE_INERTIAL_MAXIMA", imp_inertial)$
+print("IMPULSE_RTN_MAXIMA", imp_rtn)$
+
+rtn_r : vec("RTN_R")$  rtn_v : vec("RTN_V")$
+rtn : bfloat(flatten(rtn_basis(rtn_r, rtn_v)))$
+su : bfloat(sincos_u(rtn_r, rtn_v))$
+print("RTN_MAXIMA", rtn)$
+print("SIN_COS_U_MAXIMA", su)$
+
+poly : bfloat(flatten(map(lambda([t], horner(vec("POLY_COEFFICIENTS"), t - num("POLY_REFERENCE_TIME"))*vec("POLY_DIR")),
+                          vec("POLY_TIMES"))))$
+/* Products of short decimals: at 20 digits these end on a tie, so they are printed to 30. */
+block([fpprintprec : 30], print("POLY_MAXIMA", poly))$
+
+must(is(steps = 20) and is(abs(ct_final[7] - bfloat(num("CT_MASS0") - flow*num("CT_SPAN"))) < 1b-35)
+     and transcribed([rust_scalar(src, "CT_FLOW_MAXIMA")], [bfloat(flow)])
+     and transcribed(rust_table(src, "CT_ACCEL0_MAXIMA"), ct_accel0)
+     and transcribed(rust_table(src, "CT_FINAL_MAXIMA"), ct_final)
+     and transcribed(rust_table(src, "IMPULSE_INERTIAL_MAXIMA"), imp_inertial)
+     and transcribed(rust_table(src, "IMPULSE_RTN_MAXIMA"), imp_rtn)
+     and transcribed(rust_table(src, "RTN_MAXIMA"), rtn)
+     and transcribed(rust_table(src, "SIN_COS_U_MAXIMA"), su)
+     and transcribed(rust_table(src, "POLY_MAXIMA"), poly),
+     "(4) holds: the Rust goldens are RK4 on [r, v, m], F/(Isp g0), F/m0 d, the impulses, the RTN basis, (sin u, cos u) and the polynomial at 40 digits, to every digit shown")$
+print("DONE")$

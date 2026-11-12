@@ -56,6 +56,18 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | DSST Sun and Moon short periods, osculating a | m | 4 | 1.304e-07 | 8.267e-08 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST Sun and Moon short periods, osculating k, h, q, p, λ | 1 | 20 | 1.208e-12 | 3.072e-13 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | Harris–Priester density | relative | 16 | 4.233e-16 | 1.237e-16 | `crates/spacelab-propagation/src/harris_priester/mod.rs::density_distance_to_orekit` |
+| Orekit | 13.1.7 | constant thrust, flow rate | relative | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/maneuver.rs::constant_thrust_distance_to_orekit` |
+| Orekit | 13.1.7 | constant thrust, initial thrust acceleration | relative | 1 | 6.341e-16 | 6.341e-16 | `crates/spacelab-propagation/src/maneuver.rs::constant_thrust_distance_to_orekit` |
+| Orekit | 13.1.7 | constant thrust, position after RK4 30 s x 20 | relative | 1 | 1.670e-16 | 1.670e-16 | `crates/spacelab-propagation/src/maneuver.rs::constant_thrust_distance_to_orekit` |
+| Orekit | 13.1.7 | constant thrust, velocity after RK4 30 s x 20 | relative | 1 | 1.250e-16 | 1.250e-16 | `crates/spacelab-propagation/src/maneuver.rs::constant_thrust_distance_to_orekit` |
+| Orekit | 13.1.7 | constant thrust, mass after RK4 30 s x 20 | relative | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/maneuver.rs::constant_thrust_distance_to_orekit` |
+| Orekit | 13.1.7 | impulsive manoeuvre, post-impulse velocity, inertial delta-v | relative | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/maneuver.rs::impulse_distance_to_orekit` |
+| Orekit | 13.1.7 | impulsive manoeuvre, post-impulse velocity, RTN (QSW) delta-v | relative | 1 | 6.013e-17 | 6.013e-17 | `crates/spacelab-propagation/src/maneuver.rs::impulse_distance_to_orekit` |
+| Orekit | 13.1.7 | RTN (QSW) basis, R axis | relative | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/maneuver.rs::rtn_frame_distance_to_orekit` |
+| Orekit | 13.1.7 | RTN (QSW) basis, T axis | relative | 1 | 1.110e-16 | 1.110e-16 | `crates/spacelab-propagation/src/maneuver.rs::rtn_frame_distance_to_orekit` |
+| Orekit | 13.1.7 | RTN (QSW) basis, W axis | relative | 1 | 1.272e-16 | 1.272e-16 | `crates/spacelab-propagation/src/maneuver.rs::rtn_frame_distance_to_orekit` |
+| Orekit | 13.1.7 | argument of latitude, (sin u, cos u) | relative | 1 | 1.110e-16 | 1.110e-16 | `crates/spacelab-propagation/src/maneuver.rs::rtn_frame_distance_to_orekit` |
+| Orekit | 13.1.7 | polynomial empirical acceleration, Orekit reference date one second later | relative | 4 | 4.270e-16 | 2.609e-16 | `crates/spacelab-propagation/src/maneuver.rs::polynomial_empirical_distance_to_orekit` |
 | NRLMSISE-00 C (Brodowski) | release 20041227 | test_gtd7's 17 printed cases, 11 fields each, the printed zeros left out | relative | 165 | 4.803e-07 | 1.795e-07 | `crates/spacelab-propagation/src/nrlmsise00/mod.rs::gtd7_matches_reference_vectors` |
 | Orekit | 13.1.7 | IERS 2010 ocean tide ΔC̄nm, ΔS̄nm, FES2004 to degree 6, at 2024-01-01 | relative | 50 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/ocean_tide.rs::delta_cs_distance_to_orekit` |
 | Orekit | 13.1.7 | IERS 2010 ocean tide acceleration, FES2004 to degree 6, norm of the difference | relative | 1 | 5.229e-08 | 5.229e-08 | `crates/spacelab-propagation/src/ocean_tide.rs::acceleration_distance_to_orekit` |

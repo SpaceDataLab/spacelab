@@ -1037,6 +1037,7 @@ if have maxima; then
     mac_zeros scan_catalogue.mac 12 "scan-angle catalogue end points, antisymmetry and VIIRS extent"
     mac_zeros wgs84_geodesy.mac 13 "WGS 84 derived constants and both geodetic maps"
     mac_zeros keplerian_elements.mac 31 "element <-> state maps invert each other on every branch; Kepler's equation"
+    mac_zeros brouwer_m2_phipps.mac 7 "Phipps' along-track drag drift of a, e and the mean anomaly from Kepler's third law"
     mac_zeros design_orbit.mac 5 "repeat-ground-track and sun-synchronous conditions, critical inclination"
     mac_zeros kepler_universal.mac 9 "universal-variable Kepler equation and f gdot - fdot g = 1"
     mac_zeros lifetime_exponential_decay.mac 5 "the exact erfi decay epoch solves the circular decay ODE"
@@ -1191,7 +1192,7 @@ if have maxima; then
     done
 fi
 if have gp; then
-    for f in access_horizon_crossing root_reference_roots event_geometry box_wing_momentum photometry_closed_forms observability_diurnal_arc \
+    for f in access_horizon_crossing root_reference_roots event_geometry box_wing_momentum brouwer_m2_phipps photometry_closed_forms observability_diurnal_arc \
         elevation_footprint cone_footprint comms_link_budget sar_incidence scan_catalogue \
         wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay split_conformal_coverage cluster_design_effect tle_kozai_recovery harris_priester_law \
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form \

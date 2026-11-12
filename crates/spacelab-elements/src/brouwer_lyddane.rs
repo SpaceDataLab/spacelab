@@ -339,17 +339,31 @@ impl BlModel {
         }
     }
 
+    /// Mean elements at `dt` seconds from the mean epoch: Brouwer's secular rates in the angles, and
+    /// Phipps' along-track drag term (1992, Eqs 2.38, 2.41, 2.45) in `a`, `e` and the mean anomaly.
+    fn secular(&self, dt: f64) -> Els {
+        let not = dt * self.n0;
+        let dt_m2 = dt * self.m2;
+        Els {
+            a: self.mean.a + dt_m2 * self.a_rate,
+            e: clamp(self.mean.e + dt_m2 * self.e_rate, 0.0, MAX_ECC),
+            i: self.mean.i,
+            pa: normalize_pi(self.mean.pa + self.dsg * not),
+            raan: normalize_pi(self.mean.raan + self.dsh * not),
+            m: normalize_pi(self.mean.m + (1.0 + self.dsl) * not + dt * dt_m2),
+        }
+    }
+
     /// Osculating elements at `dt` seconds from the mean epoch (Orekit `propagateParameters`).
     fn osculating(&self, dt: f64) -> Els {
-        let not = dt * self.n0;
-        // Empirical along-track drag term M2 (Phipps 1992): drifts a, e and the mean anomaly.
-        let dt_m2 = dt * self.m2;
-        let dt2_m2 = dt * dt_m2;
-        let app = self.mean.a + dt_m2 * self.a_rate;
-        let epp = clamp(self.mean.e + dt_m2 * self.e_rate, 0.0, MAX_ECC);
-        let gpp = normalize_pi(self.mean.pa + self.dsg * not);
-        let hpp = normalize_pi(self.mean.raan + self.dsh * not);
-        let lpp = normalize_pi(self.mean.m + (1.0 + self.dsl) * not + dt2_m2);
+        let Els {
+            a: app,
+            e: epp,
+            pa: gpp,
+            raan: hpp,
+            m: lpp,
+            ..
+        } = self.secular(dt);
 
         // Long-period corrections.
         let (sgpp, cgpp) = libm::sincos(gpp);
@@ -572,6 +586,11 @@ impl BrouwerLyddane {
     /// the theory has a known along-track drift (~tens of km/day for a LEO — the orbit *plane* is
     /// exact but the in-track phase leads/lags), which is corrected by fitting `m2` in orbit
     /// determination. Use [`BrouwerLyddane::from_osculating`] for the pure `m2 = 0` case.
+    ///
+    /// The term is Phipps' (1992, NPS thesis, Eqs 2.38–2.45): the mean anomaly gains `m2·t²`, and
+    /// with `m = n₀(1 + δₛl)` the mean `a` and `e` drift at `ȧ = −4a·m2/(3m)` (Kepler's third law to
+    /// first order) and `ė = −4eη²·m2/(3m)` (his `σ = 1`). His cubic term `M3·t³` is not carried.
+    /// `derivations/brouwer_m2_phipps.mac` derives the rates.
     ///
     /// # Errors
     ///
@@ -855,6 +874,56 @@ mod tests {
         }
         std::eprintln!("Brouwer-Lyddane M2=1e-14 vs Orekit: max |Δr| = {max_dr:.3e} m");
     }
+    /// The M2 drift is Phipps 1992's, read off the mean elements a day out: the mean anomaly gains
+    /// exactly `M2·t²` (Eq. 2.38); `ȧ/a = −(2/3)·ṁ/m` with `ṁ = 2·M2` (Kepler's third law, Eqs 2.40–2.41);
+    /// `ė/e = η²·ȧ/a` (Eq. 2.44 with his `σ = 1`, Eq. 2.45); and the angles' Brouwer rates do not see it.
+    #[test]
+    fn the_m2_drift_is_phipps() {
+        let mean = Els {
+            a: MEAN_LEO[0],
+            e: MEAN_LEO[1],
+            i: MEAN_LEO[2],
+            pa: MEAN_LEO[3],
+            raan: MEAN_LEO[4],
+            m: MEAN_LEO[5],
+        };
+        let c = [0.0, 0.0, C20, C30, C40, C50];
+        let m2 = 1e-14;
+        let drag = BlModel::new(mean, RE, MU, c, m2);
+        let free = BlModel::new(mean, RE, MU, c, 0.0);
+        let t = 86_400.0;
+        let (with, without) = (drag.secular(t), free.secular(t));
+        let m = drag.n0 * (1.0 + drag.dsl);
+
+        let dl = normalize_pi(with.m - without.m);
+        assert!(
+            (dl - m2 * t * t).abs() < 1e-13,
+            "Δl = {dl}, M2 t² = {}",
+            m2 * t * t
+        );
+
+        let adot_over_a = (with.a - mean.a) / (t * mean.a);
+        let kepler = -(2.0 / 3.0) * (2.0 * m2) / m;
+        assert!(
+            ((adot_over_a - kepler) / kepler).abs() < 1e-9,
+            "ȧ/a = {adot_over_a}, Kepler {kepler}"
+        );
+
+        let eta2 = 1.0 - mean.e * mean.e;
+        let edot_over_e = (with.e - mean.e) / (t * mean.e);
+        assert!(
+            ((edot_over_e - eta2 * adot_over_a) / (eta2 * adot_over_a)).abs() < 1e-8,
+            "ė/e = {edot_over_e}, η² ȧ/a = {}",
+            eta2 * adot_over_a
+        );
+
+        assert_eq!(
+            (with.pa, with.raan, with.i),
+            (without.pa, without.raan, without.i)
+        );
+        assert_eq!((without.a, without.e), (mean.a, mean.e));
+    }
+
     // Orekit `BrouwerLyddanePropagator.computeMeanOrbit` (epsilon 1e-13, 200 iterations) on the same
     // osculating states, as `a, e, i, ω, Ω, M` — see `tools/orekit-oracle/BlOracle.java`.
     const MEAN_LEO: [f64; 6] = [

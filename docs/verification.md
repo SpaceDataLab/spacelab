@@ -10596,6 +10596,39 @@ Run:
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind family --field ap60
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/hpo-driver-table.py
 
+### 10.53 The numbers rerun under pinned versions (Ф30.K)
+
+The commands in this section run as `uv run --no-project --with numpy --with pandas --with scipy`. That form
+resolves the newest release of each package at every run, on the newest interpreter uv finds; on this machine
+that is Python 3.15.0. A reader a year later would run other code. `tools/pyproject.toml` and its `uv.lock` pin
+the analysis environment: Python 3.14, numpy 2.5.4, pandas 3.1.1, scipy 1.18.1, h5py 3.16.0, python-dateutil
+4.0.0 and tzdata 2026.6, each with its hashes. To rerun any command above under them, replace
+`--no-project --with …` by `--project tools --locked`:
+
+    uv run --project tools --locked python -I tools/evaluate-sdtm.py run --kind frozen
+
+`just harness` runs its tests that way. Two checks, from the archive and the drivers alone, on 2026-11-12:
+
+| check | against | result |
+|---|---|---|
+| The corpus, rebuilt from `Archive.zip` into an empty directory by `tools/build-density-corpus.py` (6 min) | the frozen baseline, `docs/sdtm1-baseline.json` | the manifest and all eight `corpus_*.npz` byte-identical, so `just freeze-data` passes on the rebuild |
+| `frozen-2020` refitted and scored (§10.38; the fit takes 131 s) | the run of 2026-11-11, under the unpinned form | the 50 parameters and the 109 221 residuals bit-identical; MAPE 21.2 % |
+
+The second check's two result files hold the same arrays but are not the same bytes: every member's CRC and
+size agree, and the files differ after the last member, in the container. So a result is compared by its
+arrays, and the freeze compares the corpus, which the pinned environment rebuilds byte for byte.
+
+What a reader cannot regenerate, and why:
+
+- The private comparator columns, DTM2020 and JB2008 by SET's program (§10.38; `docs/provenance.md`, "Not for
+  public release"). The clean-room JB2008 stands for SET's program in public.
+- Nothing else, given the archive. TU Delft's server has refused connections since 2026-09-05, and the archive
+  came from TU Delft by email on 2026-10-25; the data register pins its size and sha256
+  (`tudelft-thermosphere`). A reader needs the same archive.
+
+Not done here: the archive's DOI and AGU's data and software checklist go with the paper (`plans/17` Ф30.L), and
+publishing them is the user's decision.
+
 ---
 
 ## 11 · Published errata as a second opinion

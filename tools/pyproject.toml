@@ -1,0 +1,15 @@
+# The pinned environment of the analysis tools (`plans/17` Ф30.K): SDTM-1's fit, its evaluation harness and
+# the tables built on them. Not a package. `uv.lock` beside this file fixes every version and hash, so a reader
+# reruns the numbers of `docs/verification.md` under the versions that printed them:
+#
+#     uv run --project tools --locked python -I tools/<tool>.py
+#
+# Python 3.14: h5py publishes no 3.15 wheel yet (2026-11-12).
+[project]
+name = "spacelab-analysis"
+version = "0"
+requires-python = ">=3.14,<3.15"
+dependencies = ["numpy>=2.5.4", "pandas>=3.1.1", "scipy>=1.18.1", "h5py>=3.16.0"]
+
+[tool.uv]
+package = false

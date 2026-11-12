@@ -600,6 +600,53 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima edl_entry_fixture.mac" "the fixtures do not hold"
     fi
 
+    # The IERS Conventions (2010) Tables 5.3a/5.3b, which `tools/fetch-specs.sh` fetches as
+    # digest-named snapshots; the pin is each file's SHA-256, so a table the IERS revised fails here.
+    tab53a=../data/specs/iers-tab5.3a.6da73bfe.txt
+    tab53b=../data/specs/iers-tab5.3b.f0dff02c.txt
+    if [ -f "$tab53a" ] && [ -f "$tab53b" ]; then
+        if ! printf '%s  %s\n%s  %s\n' \
+            6da73bfe10873ac815520d00fffd67114d647a34afebc5946cfc275e73693f32 "$tab53a" \
+            f0dff02c78809b629cc64e2a9fbeffaea5ae20f67e1a62a0ed966f8624807557 "$tab53b" \
+            | sha256sum --check --quiet >/dev/null 2>&1; then
+            bad "maxima nutation_iers.mac" "the IERS Table 5.3a/5.3b snapshots are not the pinned files"
+        else
+            out=$(macf nutation_iers.mac)
+            holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+            if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
+                ok "maxima nutation_iers.mac: nut_tables.rs is IERS Tables 5.3a/5.3b row for row; only the 11 out-of-phase rates A''' and B''' are the IERS's alone"
+            else
+                bad "maxima nutation_iers.mac" "expected 4 checks to hold, found $holds"
+            fi
+        fi
+    else
+        skip "maxima nutation_iers.mac" "tools/fetch-specs.sh output"
+    fi
+
+    # The IERS Conventions (2010) Tables 5.2a, 5.2b and 5.2d, fetched and pinned the same way.
+    tab52a=../data/specs/iers-tab5.2a.19549252.txt
+    tab52b=../data/specs/iers-tab5.2b.1f17a3a6.txt
+    tab52d=../data/specs/iers-tab5.2d.fe94c83e.txt
+    if [ -f "$tab52a" ] && [ -f "$tab52b" ] && [ -f "$tab52d" ]; then
+        if ! printf '%s  %s\n%s  %s\n%s  %s\n' \
+            19549252df9eb77c8237dbf5b749de82b7fd7713a8b60b35371538cd36b6aa1d "$tab52a" \
+            1f17a3a6ad0b468705b3323bfe72d0320ce996798ec7cba0cdde4405d88f14d9 "$tab52b" \
+            fe94c83e1ef6f92b15b3f007779ae70c0984c06ee45d5511b4c821ee9a0ecded "$tab52d" \
+            | sha256sum --check --quiet >/dev/null 2>&1; then
+            bad "maxima cio_iers.mac" "the IERS Table 5.2a/5.2b/5.2d snapshots are not the pinned files"
+        else
+            out=$(macf cio_iers.mac)
+            holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+            if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
+                ok "maxima cio_iers.mac: cio_tables.rs is IERS Tables 5.2a/5.2b/5.2d term for term, polynomials included"
+            else
+                bad "maxima cio_iers.mac" "expected 3 checks to hold, found $holds"
+            fi
+        fi
+    else
+        skip "maxima cio_iers.mac" "tools/fetch-specs.sh output"
+    fi
+
     out=$(macf hansen_zonal.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then

@@ -159,8 +159,8 @@ The other seven of the ten are **not** covered, and the reason differs by table:
 
 | table | what the generator actually read | why not re-derived |
 |---|---|---|
-| `nut_tables.rs` — IAU 2000A nutation, 678 + 687 terms | **SOFA `nut00a.c`** ⚠ | the source is an *implementation*, not the IERS table. IERS TN36 tab5.3a publishes the same model in a different layout; reconciling the two is a transcription of its own, not a comparison |
-| `cio_tables.rs` — CIP X,Y and CIO locator s | **SOFA `xy06.c`, `s06.c`** ⚠ | same shape. IERS tab5.2a/b/d are fetchable and would be a genuinely independent primary source; SOFA keeps 8 of the 14 fundamental arguments where the IERS table prints all 16 columns, so the mapping has to be established before the seals can be compared |
+| `nut_tables.rs` — IAU 2000A nutation, 678 + 687 terms | **SOFA `nut00a.c`**; held row for row against IERS TN36 Tables 5.3a/5.3b | no seal, a read-back instead: the IERS files merge the two series, write each argument with its first multiplier positive and fold in the IAU 2006 adjustments, so `derivations/nutation_iers.mac` builds that layout from the transcription and compares all 2 357 amplitudes and 57 rates exactly, to 0.01 µas. The files' only column the transcription lacks is the 11 out-of-phase rates A‴/B‴, which the MHB2000 code adopted by IAU 2000 B1.6 did not contain (TN36 §5.6.1; below 1 µas). The files also drop an adjustment below the 0.1 µas cut-off on 19 rows where the chapter's own printed extract keeps it (207455.40 against 207455.50); `nutation.rs` applies it in full, as `nut06a` does |
+| `cio_tables.rs` — CIP X,Y and CIO locator s | **SOFA `xy06.c`, `s06.c`**; held term for term against IERS TN36 Tables 5.2a/5.2b/5.2d | no seal, a read-back instead: `derivations/cio_iers.mac` maps `xy06`'s coded amplitudes and `s06`'s 8 arguments onto the IERS rows and compares all 1 600 X, 1 275 Y and 66 s terms and the three polynomial parts exactly; the six arguments `s06` omits are zero on every IERS row |
 | `ocean_tide_fes2004.rs` — FES2004 to degree 6 | **Orekit's `orekit-data/fes2004_Cnm-Snm.dat`** ⚠ | deliberately so: this table exists to match the Orekit gate bit-for-bit, down to the summation order. It is a faithful copy of Orekit's copy, and re-deriving it from Orekit would not break that circle. FES2014b, which is the default, comes from the agency file |
 | `nrlmsise00/tables.rs` | **`nrlmsise00_sub.for`**, the NRL FORTRAN's `BLOCK DATA GTD7BK` | the model has no agency-published *table*; the reference program *is* the specification, so this is the definitional case above, not a gap. Re-based off Brodowski's C in `3143a74`, and the re-basing is a measurement: regenerating from the FORTRAN reproduces all 3 290 shipped values byte for byte |
 | `ocean_tide_got.rs` — GOT5.5, 31 waves to degree 6 | GOT5.5 **cotidal grids** (GSFC), analysed here | there is no coefficient file to re-derive from: this table is computed rather than transcribed, so the seal says only that the committed numbers are the generator's. The question a re-derivation would answer is answered instead by `tests/ocean_tide_atlas.rs`, which measures it against two published atlases (§10.8) |
@@ -173,11 +173,11 @@ PMSDNUT2 and UTLIBR inside the script and certifies the whole model against each
 test case before emitting, so the model is pinned end-to-end even though the table is not re-derived
 from a separate file.
 
-Four rows above are flagged ⚠ — their specification is in practice another implementation. For
-`nut_tables.rs` and `cio_tables.rs` the numbers are IAU/IERS model constants either way, and they are
-cross-checked against pyerfa and the SOFA self-test vectors to 1e-18 rad, so this is not a
-correctness worry. It is a *lineage* worry: pyerfa is ERFA is SOFA, so the check and the source share
-an ancestor, and only the IERS tables would break that.
+One row above is flagged ⚠ — FES2004, whose specification is in practice Orekit's copy. `nut_tables.rs`
+and `cio_tables.rs` were flagged too until 2026-11-12: their numbers were cross-checked only against
+pyerfa and the SOFA self-test vectors, and pyerfa is ERFA is SOFA, so the check and the source shared
+an ancestor. The IERS tables break that. `tools/fetch-specs.sh` fetches them as digest-named snapshots,
+`derivations/verify.sh` pins their SHA-256, and the two read-backs above hold the transcriptions to them.
 
 ---
 
@@ -194,11 +194,11 @@ an ancestor, and only the IERS tables would break that.
 | core | UtcDateTime validation + MJD anchors | IAU/IAG MJD definition | known constants (MJD 51544.0/.5; 2000-01-01 = day 10957) | bit-exact | tests/core_api.rs |
 | core | Angle/Length unit conversions | SI + IAU angle definitions | analytic exact (180°=π, 3600″=1°) | < 1e-15…1e-18 | tests/core_api.rs |
 | fa | 14 fundamental arguments (Delaunay + planetary) | IERS TN36 §5.7.2 (Simon 1994, Souchay 1999) | pyerfa (ERFA/SOFA) at t=0.06 | < 1e-13 rad | src/fundamental.rs |
-| fa | CIP X,Y (IAU 2006/2000A series) | IERS TN36 tab5.2a/5.2b — SOFA `xy06.c` in practice ⚠ | SOFA `t_xy06` golden vector | < 1e-15 rad | src/cio.rs |
+| fa | CIP X,Y (IAU 2006/2000A series) | IERS TN36 Tables 5.2a/5.2b | the tables term for term (`derivations/cio_iers.mac`); SOFA `t_xy06` golden vector | < 1e-15 rad | src/cio.rs |
 | fa | CIP X,Y full-nutation cross-check | IERS TN36 Ch. 5 (equinox ≡ CIO route) | erfa.xys06a (independent equinox route) | < 5e-11 rad (meas ~1e-12) | src/cio.rs |
-| fa | CIO locator s | IERS TN36 tab5.2d — SOFA `s06.c` in practice ⚠ | SOFA `t_s06` golden vector | < 1e-20 rad | src/cio.rs |
+| fa | CIO locator s | IERS TN36 Table 5.2d | the table term for term (`derivations/cio_iers.mac`); SOFA `t_s06` golden vector | < 1e-20 rad | src/cio.rs |
 | fa | Earth Rotation Angle | IAU 2000 Res. B1.8 (Capitaine 2000) | SOFA `t_era00` golden vector | < 1e-12 rad | src/cio.rs |
-| fa | Nutation Δψ,Δε IAU 2000A / 2006A | IERS TN36 §5.5.1 (MHB2000) — SOFA `nut00a.c` in practice ⚠ | SOFA `t_nut00a` / `t_nut06a` | < 1e-13 rad | src/nutation.rs |
+| fa | Nutation Δψ,Δε IAU 2000A / 2006A | IERS TN36 §5.5.1 (MHB2000), Tables 5.3a/5.3b | the tables row for row, all but their 11 A‴/B‴ rates (`derivations/nutation_iers.mac`); SOFA `t_nut00a` / `t_nut06a` | < 1e-13 rad | src/nutation.rs |
 | fa | GMST82 over 10 millennia (≥40 epochs) | Aoki et al. 1982 / IAU 1982 GMST | pyerfa (SOFA lineage), fixtures from `derivations/gmst82.py` | 8-ULP bound (~1e-12 rad/century) | tests/gmst82_oracle.rs |
 | fa | Leap-second table `delta_at` on every day from 1972-01-01 to 2027-06-28 (G5) | IERS `leap-seconds.list`, updated through Bulletin C 72, valid until 2027-06-28 | the IERS list itself, vendored (public domain): `TAI − UTC` changes on exactly its 28 dates, to its values; the list's expiry is past 2027-05-20. `tests/delta_at_oracle.rs` (pyerfa) is a parked comparator | exact integer | tests/leap_second_list.rs |
 | fa | TDB−TT (Fairhead–Bretagnon, 787 terms), 441 epochs over ±100 yr | Fairhead & Bretagnon 1990; IERS TN36 §10 | pyerfa `dtdb`, fixtures from `derivations/tdb_tables.py` | 128 ULP of the peak, rounded up (5e-17 s; meas 2.2e-19 = 1 ULP) | tests/dtdb_oracle.rs |

@@ -1,0 +1,106 @@
+/* The CIP X, Y and CIO locator s series: cio_tables.rs read back against the IERS Conventions (2010)
+   Tables 5.2a, 5.2b and 5.2d, the document that publishes them (plans/17 Ф17.C).
+
+   `derivations/cio06_tables.py` transcribed the series from SOFA's `xy06.c` and `s06.c`,
+   implementations: X and Y as 1309 frequencies whose amplitudes carry a code for coordinate, sine or
+   cosine and power of t, and s + XY/2 on 8 of the 14 fundamental arguments (l, l', F, D, Ω, L_Ve,
+   L_E, p_A). The IERS files print each series row by row, every argument with its first non-zero
+   multiplier positive (sin changes sign, cos does not), all 14 columns, in µas to 0.01, in blocks
+   j = 0..4 by the power of t, after a polynomial part. Unlike Δψ (nutation_iers.mac), X and Y carry
+   no obliquity factor (§5.6.3), so the transcription and the tables must agree term for term.
+
+   The tables come from `tools/fetch-specs.sh` as digest-named snapshots; `derivations/verify.sh`
+   pins their SHA-256 and skips this when they are absent.
+
+   timeout 300 maxima --very-quiet -Q -b cio_iers.mac                                                */
+
+display2d : false$
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+tab52a : "../data/specs/iers-tab5.2a.19549252.txt"$
+tab52b : "../data/specs/iers-tab5.2b.1f17a3a6.txt"$
+tab52d : "../data/specs/iers-tab5.2d.fe94c83e.txt"$
+cio : "../crates/spacelab-fa/src/cio_tables.rs"$
+
+values(name) := map(rust_rational, rust_table(cio, name))$
+rows(name, width) := block([flat : values(name)],
+  makelist(makelist(flat[(i - 1) * width + j], j, 1, width), i, 1, length(flat) / width))$
+canon(m) := block([first : sublist(m, lambda([v], v # 0))[1]],
+  if first > 0 then [m, 1] else [-m, -1])$
+
+/* series[[name, j, key]] = [sin, cos] in µas, merged by canonical argument. */
+keys : []$
+add_amp(name, j, m, sc, amp) := block([c : canon(m), k],
+  k : [name, j, c[1]],
+  if not member(k, keys) then (keys : cons(k, keys), series[k] : [0, 0]),
+  series[k] : series[k] + (if sc = 0 then [c[2] * amp, 0] else [0, amp]))$
+
+/* ---- the transcription ------------------------------------------------------------------------ */
+
+xy_mult : rows("XY_MULT", 14)$
+xy_offset : values("XY_OFFSET")$
+xy_code : values("XY_CODE")$
+xy_amp : values("XY_AMP")$
+/* code = xy | sc << 1 | power << 2, as cio06_tables.py packs SOFA's jaxy/jasc/japt. */
+for p thru length(xy_mult) do
+  for i : xy_offset[p] + 1 thru xy_offset[p + 1] do block([c : xy_code[i]],
+    add_amp(if mod(c, 2) = 0 then "X" else "Y", floor(c / 4), xy_mult[p], mod(floor(c / 2), 2),
+            xy_amp[i]))$
+
+s_mult : rows("S_MULT", 8)$
+s_pt : values("S_PT")$
+s_sin : values("S_SIN")$
+s_cos : values("S_COS")$
+/* s06's 8 arguments, placed in the IERS order l l' F D Ω L_Me L_Ve L_E L_Ma L_J L_Sa L_U L_Ne p_A. */
+s_place(m) := [m[1], m[2], m[3], m[4], m[5], 0, m[6], m[7], 0, 0, 0, 0, 0, m[8]]$
+for i thru length(s_mult) do (
+  add_amp("s", s_pt[i], s_place(s_mult[i]), 0, s_sin[i] * 10^6),
+  add_amp("s", s_pt[i], s_place(s_mult[i]), 1, s_cos[i] * 10^6))$
+xyp : rows("XYP", 6)$
+print(length(xy_mult), "X, Y frequencies with", length(xy_amp), "amplitudes and", length(s_mult),
+      "s terms ->", length(keys), "rows")$
+
+/* ---- the IERS files ---------------------------------------------------------------------------- */
+
+digits_only(t) := every(digitcharp, charlist(t))$
+/* The polynomial line, "- 16617. + 2004191898. t - 429782.9 t^2 ...", as its six coefficients. */
+poly_read(t) := block([sign : 1, c : false, out : makelist(0, 6)],
+  for w in t do
+    if w = "-" then sign : -1 else if w = "+" then sign : 1
+    else if w = "t" or substring(w, 1, 2) = "t" then (
+      out[if w = "t" then 2 else parse_string(substring(w, 3)) + 1] : c, c : false, sign : 1)
+    else (if c # false then out[1] : c, c : sign * rust_decimal(w), sign : 1),
+  if c # false then out[1] : c,
+  out)$
+iers_read(path, name) := block([s : openr(path), line, t, j : false, out : [], poly : false],
+  while (line : readline(s)) # false do (
+    t : tokens(line),
+    if poly = false and member("t^5", t) then poly : poly_read(t)
+    else if length(t) >= 3 and t[1] = "j" and t[2] = "=" then j : parse_string(t[3])
+    else if j # false and length(t) = 17 and digits_only(t[1]) then
+      out : cons([[name, j, makelist(parse_string(t[i]), i, 4, 17)], rust_decimal(t[2]),
+                  rust_decimal(t[3])], out)),
+  close(s),
+  [reverse(out), poly])$
+
+matches(file_rows, name) := block([ks : map(first, file_rows)],
+  every(lambda([k], canon(k[3])[2] = 1), ks)
+  and length(unique(ks)) = length(ks)
+  and setify(ks) = setify(sublist(keys, lambda([k], k[1] = name and series[k] # [0, 0])))
+  and every(lambda([r], [r[2], r[3]] = series[r[1]]), file_rows))$
+
+[xa, xpoly] : iers_read(tab52a, "X")$
+[ya, ypoly] : iers_read(tab52b, "Y")$
+[sa, spoly] : iers_read(tab52d, "s")$
+print("Tables 5.2a, 5.2b, 5.2d:", length(xa), length(ya), length(sa), "rows")$
+
+/* ---- (1) X, (2) Y, (3) s + XY/2 ---------------------------------------------------------------- */
+
+must(matches(xa, "X") and xpoly = xyp[1] * 10^6,
+     "(1) holds: every term of Table 5.2a and its polynomial are the transcription's X")$
+must(matches(ya, "Y") and ypoly = xyp[2] * 10^6,
+     "(2) holds: every term of Table 5.2b and its polynomial are the transcription's Y")$
+must(matches(sa, "s") and spoly = values("S_POLY") * 10^6,
+     "(3) holds: every term of Table 5.2d and its polynomial are the transcription's s + XY/2; the six arguments s06 omits are zero on every row")$
+print("DONE")$

@@ -1,0 +1,140 @@
+/* IAU 2000A nutation: nut_tables.rs read back against the IERS Conventions (2010) Tables 5.3a and
+   5.3b, the document that publishes the series (plans/17 Ф17.C).
+
+   `derivations/nut00a_tables.py` transcribed the luni-solar (678) and planetary (687) series from
+   SOFA's `nut00a.c`, an implementation. This holds the transcription against the IERS files, which
+   print the same model as "IAU 2000A_R06": the two series merged term by term, each argument written
+   with its first non-zero multiplier positive (sin changes sign, cos does not), in µas to 0.01, with
+   the IAU 2006 adjustments of §5.6.3 folded in (Capitaine & Wallace 2006):
+
+     Δψ: the amplitudes times 1 + 0.4697e-6 (the obliquity ratio), and Poisson terms −2.7774e-6·t
+         times each amplitude (the J2 rate);  Δε: the Poisson terms only.
+
+   The IERS files apply them in three ways, each found here row by row:
+     - 5.3a, j = 0: the 0.4697e-6 part only where it reaches the 0.1 µas cut-off;
+     - 5.3a, j = 1: A' = S1 (1 + 0.4697e-6) − 2.7774e-6 S0 always, a row listed where S1 ≠ 0 or the
+       J2 part reaches 0.01 µas/century;
+     - 5.3b, j = 1: the J2 part only where it reaches 0.1 µas/century.
+   `nutation.rs` applies both adjustments in full, as SOFA's nut06a does and as the chapter's own
+   extract of the tables prints them (207455.50, 147587.77, −67.76 where the files print 207455.40,
+   147587.70, −67.70); (5) counts the rows where the files' cut makes the difference.
+
+   The files carry one column the transcription cannot: the out-of-phase rates A‴ (t cos in Δψ) and
+   B‴ (t sin in Δε). §5.6.1: the MHB2000 code adopted by IAU 2000 Resolution B1.6 "did not contain
+   the A‴ and B‴ terms", SOFA's NUT00A adopted that version, and the difference is below 1 µas. (3)
+   and (4) name the eleven rows that carry them.
+
+   The tables come from `tools/fetch-specs.sh` as digest-named snapshots; `derivations/verify.sh`
+   pins their SHA-256 and skips this when they are absent.
+
+   timeout 300 maxima --very-quiet -Q -b nutation_iers.mac                                            */
+
+display2d : false$
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+tab53a : "../data/specs/iers-tab5.3a.6da73bfe.txt"$
+tab53b : "../data/specs/iers-tab5.3b.f0dff02c.txt"$
+nut : "../crates/spacelab-fa/src/nut_tables.rs"$
+
+k_obl : 4697 / 10^10$
+k_j2 : -27774 / 10^10$
+cut : 1 / 10$
+r2(x) := signum(x) * floor(abs(x) * 100 + 1/2) / 100$
+above(x, c) := if abs(x) >= c then x else 0$
+
+/* ---- the transcription, merged as the IERS files merge it ------------------------------------ */
+
+rows(path, name, width) := block([flat : map(rust_rational, rust_table(path, name))],
+  makelist(makelist(flat[(i - 1) * width + j], j, 1, width), i, 1, length(flat) / width))$
+canon(m) := block([first : sublist(m, lambda([v], v # 0))[1]],
+  if first > 0 then [m, 1] else [-m, -1])$
+
+/* base[key] = [S0, S1, C0, Ec0, Ec1, Es0] in µas: Δψ sin, t sin, cos; Δε cos, t cos, sin. */
+keys : []$
+add_term(m, s0, s1, c0, e0, e1, es) := block([c : canon(m), k, s],
+  k : c[1], s : c[2],
+  if not member(k, keys) then (keys : cons(k, keys), base[k] : [0, 0, 0, 0, 0, 0]),
+  base[k] : base[k] + [s * s0, s * s1, c0, e0, e1, s * es])$
+
+ls_m : rows(nut, "XLS_MULT", 5)$  ls_c : rows(nut, "XLS_COEF", 6)$
+pl_m : rows(nut, "XPL_MULT", 13)$ pl_c : rows(nut, "XPL_COEF", 4)$
+/* nut00a: luni-solar (sp, spt, cp, ce, cet, se), planetary (sp, cp, se, ce), in 0.1 µas; the
+   planetary multipliers carry no l', which the IERS column order puts second. */
+for i thru length(ls_m) do block([c : ls_c[i] / 10],
+  add_term(append(ls_m[i], makelist(0, 9)), c[1], c[2], c[3], c[4], c[5], c[6]))$
+for i thru length(pl_m) do block([c : pl_c[i] / 10, m : pl_m[i]],
+  add_term(append([m[1], 0], rest(m)), c[1], 0, c[2], c[4], 0, c[3]))$
+print(length(ls_m), "luni-solar +", length(pl_m), "planetary terms ->", length(keys), "arguments")$
+
+/* ---- the IERS files ------------------------------------------------------------------------ */
+
+digits_only(t) := every(digitcharp, charlist(t))$
+iers_read(path) := block([s : openr(path), line, t, j : false, out : [[], []]],
+  while (line : readline(s)) # false do (
+    t : tokens(line),
+    if length(t) >= 3 and t[1] = "j" and t[2] = "=" then j : parse_string(t[3])
+    else if j # false and length(t) = 17 and digits_only(t[1]) then
+      out[j + 1] : cons([makelist(parse_string(t[i]), i, 4, 17), rust_decimal(t[2]),
+                         rust_decimal(t[3])], out[j + 1])),
+  close(s),
+  map(reverse, out))$
+a : iers_read(tab53a)$
+b : iers_read(tab53b)$
+print("Table 5.3a:", length(a[1]), "+", length(a[2]), "rows;  Table 5.3b:", length(b[1]), "+",
+      length(b[2]), "rows")$
+
+/* A file block matches when its rows are exactly the listed arguments, each canonical and once, and
+   every printed pair is the derived pair. */
+matches(block_rows, listed, derived) := block([ks : map(first, block_rows)],
+  every(lambda([k], canon(k)[2] = 1), ks)
+  and length(unique(ks)) = length(ks)
+  and setify(ks) = setify(sublist(keys, listed))
+  and every(lambda([r], [r[2], r[3]] = derived(r[1])), block_rows))$
+
+/* ---- (1) Δψ, in phase and out of phase: 1320 rows of 5.3a, j = 0 --------------------------- */
+
+psi0(k) := block([v : base[k]],
+  [r2(v[1] + above(k_obl * v[1], cut)), r2(v[3] + above(k_obl * v[3], cut))])$
+must(matches(a[1], lambda([k], psi0(k) # [0, 0]), psi0),
+     "(1) holds: every Δψ amplitude of Table 5.3a is the transcription's, adjusted as the file adjusts")$
+
+/* ---- (2) Δε: 1037 rows of 5.3b, j = 0 (columns B'' sin, B cos) ------------------------------- */
+
+eps0(k) := block([v : base[k]], [r2(v[6]), r2(v[4])])$
+must(matches(b[1], lambda([k], eps0(k) # [0, 0]), eps0),
+     "(2) holds: every Δε amplitude of Table 5.3b is the transcription's")$
+
+/* ---- (3) the Δψ rates: 5.3a, j = 1 ----------------------------------------------------------- */
+
+a_only : sublist(a[2], lambda([r], r[3] # 0))$
+psi1(k) := block([v : base[k], r : assoc(k, map(lambda([x], x[1] = x[3]), a[2]), 0)],
+  [r2(v[2] * (1 + k_obl) + k_j2 * v[1]), r])$
+must(matches(a[2], lambda([k], base[k][2] # 0 or abs(k_j2 * base[k][1]) >= 1/100), psi1),
+     "(3) holds: every A' rate of Table 5.3a is the transcription's with the J2 Poisson term")$
+print("    A''' (t cos), in the IERS files only:", map(lambda([r], [r[1], r[3]]), a_only))$
+
+/* ---- (4) the Δε rates: 5.3b, j = 1 (columns B''' sin, B' cos) -------------------------------- */
+
+b_only : sublist(b[2], lambda([r], r[2] # 0))$
+eps1(k) := block([v : base[k], r : assoc(k, map(lambda([x], x[1] = x[2]), b[2]), 0)],
+  [r, r2(v[5] + above(k_j2 * v[4], cut))])$
+must(matches(b[2], lambda([k], base[k][5] # 0), eps1),
+     "(4) holds: every B' rate of Table 5.3b is the transcription's with the J2 Poisson term")$
+print("    B''' (t sin), in the IERS files only:", map(lambda([r], [r[1], r[2]]), b_only))$
+must(length(a_only) = 6 and length(b_only) = 5
+     and every(lambda([r], abs(r[3]) < 3), a_only) and every(lambda([r], abs(r[2]) < 1), b_only),
+     "    the IERS-only rates are 6 + 5 rows, each below 3 µas/century")$
+
+/* ---- (5) where the files' 0.1 µas cut departs from the full adjustment ------------------------- */
+
+full0(k) := [r2(base[k][1] * (1 + k_obl)), r2(base[k][3] * (1 + k_obl))]$
+cut0 : sublist(keys, lambda([k], full0(k) # psi0(k)))$
+cut1 : sublist(keys, lambda([k], base[k][5] # 0 and
+                                 r2(base[k][5] + k_j2 * base[k][4]) # eps1(k)[2]))$
+print("(5) Table 5.3a j = 0 drops the 0.4697e-6 part on", length(cut0), "rows, at most",
+      lmax(map(lambda([k], lmax(abs(full0(k) - psi0(k)))), cut0)), "µas;")$
+print("    Table 5.3b j = 1 drops the J2 part on", length(cut1), "rows, at most",
+      lmax(map(lambda([k], abs(r2(base[k][5] + k_j2 * base[k][4]) - eps1(k)[2])), cut1)),
+      "µas/century. nutation.rs applies both in full.")$
+print("DONE")$

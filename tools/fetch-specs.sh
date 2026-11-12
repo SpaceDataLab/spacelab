@@ -26,6 +26,11 @@ SPECS=(
   "xgm2019e|https://icgem.gfz-potsdam.de/getmodel/gfc/8e01a2aba4f291ac0638b79a390155713b70fdc9b266981023c756839c11c9b8/XGM2019e.gfc|0-4194303|gfc|ICGEM XGM2019e, first 4 MiB (through degree 267)"
   "fes2014b|https://api.sedoo.fr/formater-catalogue-prod/grace/direct/fes2014b.v1.Cnm-Snm_Om1+Om2C20_without_S1_wave.POT_format.txt||txt|FES2014b.v1 Cnm-Snm, POT format, Om1+Om2 equilibrium, C20 without S1"
   "igrf14coeffs|https://www.ngdc.noaa.gov/IAGA/vmod/coeffs/igrf14coeffs.txt||txt|IAGA IGRF-14 Gauss coefficients, 1900.0-2025.0 plus 2025-30 secular variation"
+  "iers-tab5.2a|https://iers-conventions.obspm.fr/content/chapter5/additional_info/tab5.2a.txt||txt|IERS Conventions (2010) Table 5.2a, CIP X from IAU 2006 precession and IAU 2000A_R06 nutation"
+  "iers-tab5.2b|https://iers-conventions.obspm.fr/content/chapter5/additional_info/tab5.2b.txt||txt|IERS Conventions (2010) Table 5.2b, CIP Y from IAU 2006 precession and IAU 2000A_R06 nutation"
+  "iers-tab5.2d|https://iers-conventions.obspm.fr/content/chapter5/additional_info/tab5.2d.txt||txt|IERS Conventions (2010) Table 5.2d, the CIO locator s + XY/2"
+  "iers-tab5.3a|https://iers-conventions.obspm.fr/content/chapter5/additional_info/tab5.3a.txt||txt|IERS Conventions (2010) Table 5.3a, IAU 2000A_R06 nutation in longitude"
+  "iers-tab5.3b|https://iers-conventions.obspm.fr/content/chapter5/additional_info/tab5.3b.txt||txt|IERS Conventions (2010) Table 5.3b, IAU 2000A_R06 nutation in obliquity"
 )
 
 for spec in "${SPECS[@]}"; do

@@ -161,7 +161,7 @@ if have maxima; then
     cdinv=$(printf '%s' "$out" | grep -oE 'c.d - I largest entry \(=0\?\): [0-9.]+b-[0-9]+' | grep -oE 'b-[0-9]+' | tr -d 'b-')
     rust=$(printf '%s' "$out" | grep -cE '^rust (H|CC|DD) is the nearest doubles to .*: true')
     if printf '%s' "$out" | grep -qE 'node count .*: +8' && [ -n "$cdinv" ] && [ "$cdinv" -ge 30 ] && [ "$rust" -eq 3 ]; then
-        ok "maxima ias15_nodes.mac: 8 Gauss-Radau nodes derived, c and d conversion matrices invert to ~1e-${cdinv}, and ias15.rs holds their nearest doubles"
+        ok "maxima ias15_nodes.mac: 8 Gauss-Radau nodes derived, c and d conversion matrices invert to ~1e-${cdinv}, and ias15.rs holds them to the last digit shown, which parse to their nearest doubles"
     else
         bad "maxima ias15_nodes.mac" "IAS15 node/matrix derivation failed (c.d-I exponent e-${cdinv:-?}, ${rust:-0} of 3 Rust tables match)"
     fi

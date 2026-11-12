@@ -47,12 +47,15 @@ for j:1 thru 8 do for k:1 thru j do print("d[", j-1, "][", k-1, "] =", bfloat(D[
 /* --- The Rust tables (plans/17 Ф17.D) -------------------------------------------------------
  * ias15.rs holds the nodes H and the strict lower triangles of c and d, row by row in REBOUND's
  * packing: CC[k(k-1)/2 + j] for k = 1..6, j < k. The Newton products here carry the factor
- * t - h0 = t, so that entry is C[k+2][j+2] of this matrix, and likewise for d. Its literals came
- * from REBOUND's arrays, which agree with these values to ~1e-33, past a double's 17 digits: each
- * must parse to the double its derived value rounds to. */
+ * t - h0 = t, so that entry is C[k+2][j+2] of this matrix, and likewise for d. Its literals are
+ * these values at 60 digits rounded to 30 (REBOUND's arrays agree to ~1e-33): each must be its
+ * derived value rounded at its last digit, and parse to the double that value rounds to. */
 load("rust_literals.mac")$
 src : "../crates/spacelab-propagation/src/ias15.rs"$
 packed(M) := flatten(makelist(makelist(M[k+2][j+2], j, 0, k-1), k, 1, 6))$
-print("rust H is the nearest doubles to the nodes:", same_doubles(rust_table(src, "H"), h));
-print("rust CC is the nearest doubles to c:", same_doubles(rust_table(src, "CC"), packed(C)));
-print("rust DD is the nearest doubles to d:", same_doubles(rust_table(src, "DD"), packed(D)));
+print("rust H is the nearest doubles to the nodes, rounded at its last digit:", same_doubles(rust_table(src, "H"), h)
+  and transcribed(rust_table(src, "H"), h));
+print("rust CC is the nearest doubles to c, rounded at its last digit:", same_doubles(rust_table(src, "CC"), packed(C))
+  and transcribed(rust_table(src, "CC"), packed(C)));
+print("rust DD is the nearest doubles to d, rounded at its last digit:", same_doubles(rust_table(src, "DD"), packed(D))
+  and transcribed(rust_table(src, "DD"), packed(D)));

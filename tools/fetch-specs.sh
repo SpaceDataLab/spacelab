@@ -34,6 +34,8 @@ SPECS=(
   "iers-fes2004|https://iers-conventions.obspm.fr/content/chapter6/additional_info/tidemodels/fes2004_Cnm-Snm.dat||dat|IERS Conventions (2010) chapter 6, FES2004 Cnm-Snm to (100,100), the Conventions Centre copy"
   "python-sgp4-propagation|https://raw.githubusercontent.com/brandon-rhodes/python-sgp4/2.27/sgp4/propagation.py||py|python-sgp4 2.27 sgp4/propagation.py (MIT), Vallado's SGP4/SDP4 routines line for line"
   "gpt3-5-grd|https://vmf.geo.tuwien.ac.at/codes/gpt3_5.grd||grd|TU Wien GPT3 5x5 degree grid (CC BY 4.0), CRLF line ends"
+  "h3-faceijk|https://raw.githubusercontent.com/uber/h3/v4.5.0/src/h3lib/lib/faceijk.c||c|Uber H3 v4.5.0 faceijk.c (Apache-2.0): icosahedron face centres and axis azimuths"
+  "h3-constants|https://raw.githubusercontent.com/uber/h3/v4.5.0/src/h3lib/include/constants.h||h|Uber H3 v4.5.0 constants.h (Apache-2.0): resolution-0 gnomonic unit, aperture-7 rotation"
 )
 
 for spec in "${SPECS[@]}"; do

@@ -1,0 +1,223 @@
+/* The H3 grid by its definition (plans/17 Ф17.P).
+
+   `spacelab-grid` indexes with the `h3o` crate, a port of Uber's C library, and that library is the
+   grid's specification in practice. The grid is fixed by a few numbers in it (h3_constants.mac,
+   generated from H3 v4.5.0 by h3_constants.py) and by its construction:
+
+   - the 20 face centres of an icosahedron in a fixed orientation, and per face the azimuths of the
+     i, j, k axes of a hexagonal lattice in the face's gnomonic (tangent-plane) projection;
+   - resolution 0's lattice unit u in that plane, chosen so that the face's vertices are lattice
+     points; each finer resolution divides the unit by sqrt 7 and turns the lattice by the
+     aperture-7 angle, back and forth (Class III at odd resolutions);
+   - a point's cell at a resolution: the closest face centre, the gnomonic projection onto that face,
+     the nearest lattice point; the cell's centre is that lattice point projected back.
+
+   (1)-(2) the face centres are a regular icosahedron's: unit vectors whose pair cosines are, with
+   the right multiplicities, the five that an exact icosahedron's face centres have;
+   (3) every face's three axes point at its three vertices, i, j, k counter-clockwise in the plane;
+   (4)-(5) tan(face centre to vertex) = 3 - sqrt 5 and to an edge midpoint (3 - sqrt 5)/2, exactly,
+   so u = (3 - sqrt 5)/2; (6) H3's RES0_U_GNOMONIC is that to 4e-16, 2.7 ulp, and its inverse the
+   reciprocal of that rounding, not of u (F90, printed);
+   (7)-(8) the aperture-7 angle is atan(sqrt 3/5) = asin sqrt(3/28), and H3's constant is it to its
+   45 digits; (9) turned and scaled by it, a coarser lattice lies on the finer one at both parities;
+   (10) resolution 0 has 122 cells (4 lattice points inside each face, 30 edge midpoints, 12 vertices)
+   and n(r+1) = 7 n(r) - 12 (a hexagon has 7 children, a pentagon 6), so n(r) = 2 + 120 7^r;
+   (11)-(12) the structure at 40 digits: sample points within 7 degrees of a face centre, at every
+   resolution, mapped to their cell centre; every point lies well inside its cell, and
+   crates/spacelab-grid/tests/h3_maxima.rs holds the table h3o is compared with.
+
+   Every check prints as `<name>: 0`, 12 of them.
+
+   timeout 300 maxima --very-quiet -Q -b h3_definition.mac                                         */
+
+display2d : false$
+fpprec : 40$
+ratprint : false$
+load("rust_literals.mac")$
+load("h3_constants.mac")$
+
+table_path : "../crates/spacelab-grid/tests/h3_maxima.rs"$
+
+dotv(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+crossv(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+unitv(a) := a/sqrt(dotv(a, a))$
+twopi : bfloat(2*%pi)$
+posang(a) := block([x : bfloat(a)], x - twopi*floor(x/twopi))$
+angdiff(a, b) := block([d : posang(a - b)], min(d, twopi - d))$
+
+C : map(lambda([v], bfloat(v)), h3_face_centre)$
+AZ : map(lambda([v], bfloat(v)), h3_face_axes_az)$
+faces : makelist(f, f, 1, 20)$
+tol : 1b-14$
+
+/* ---- an exact icosahedron: 12 vertices (0, +-1, +-phi) cycled, 20 faces of three adjacent ones -- */
+phi : (1 + sqrt(5))/2$
+ico_vertices : block([out : []],
+  for s1 in [-1, 1] do for s2 in [-1, 1] do
+    out : append(out, [[0, s1, s2*phi], [s1, s2*phi, 0], [s2*phi, 0, s1]]),
+  out)$
+adjacent(a, b) := is(ratsimp(dotv(a - b, a - b)) = 4)$
+ico_faces : block([out : [], n : length(ico_vertices)],
+  for a : 1 thru n do for b : a + 1 thru n do for c : b + 1 thru n do
+    if adjacent(ico_vertices[a], ico_vertices[b]) and adjacent(ico_vertices[b], ico_vertices[c])
+       and adjacent(ico_vertices[a], ico_vertices[c])
+    then out : endcons([ico_vertices[a], ico_vertices[b], ico_vertices[c]], out),
+  out)$
+centroid(t) := (t[1] + t[2] + t[3])/3$
+in_q5(x) := ratsimp(x), algebraic : true$
+/* All centroids have one length, so a pair's cosine is its dot product over that length squared. */
+centroid_norm2 : map(lambda([t], in_q5(dotv(centroid(t), centroid(t)))), ico_faces)$
+exact_pairs : block([out : [], n2 : centroid_norm2[1]],
+  for a : 1 thru 20 do for b : a + 1 thru 20 do
+    out : endcons(in_q5(dotv(centroid(ico_faces[a]), centroid(ico_faces[b]))/n2), out),
+  out)$
+exact_count(v) := length(sublist(exact_pairs, lambda([x], is(in_q5(x - v) = 0))))$
+expected : [[-1, 10], [-sqrt(5)/3, 30], [-1/3, 60], [1/3, 60], [sqrt(5)/3, 30]]$
+
+/* (1)-(2) */
+print("face_centres_unit:",
+  if every(lambda([c], is(abs(dotv(c, c) - 1) < tol)), C) then 0 else 1)$
+h3_pairs : block([out : []],
+  for a : 1 thru 20 do for b : a + 1 thru 20 do out : endcons(dotv(C[a], C[b]), out), out)$
+nearest_value(x) := block([best : 1, gap : 10],
+  for k : 1 thru length(expected) do
+    if abs(x - bfloat(expected[k][1])) < gap then (gap : abs(x - bfloat(expected[k][1])), best : k),
+  [best, gap])$
+h3_classes : map(nearest_value, h3_pairs)$
+print("face_centres_are_an_icosahedron:",
+  if length(ico_faces) = 20 and length(unique(centroid_norm2)) = 1
+     and every(lambda([e], is(exact_count(e[1]) = e[2])), expected)
+     and every(lambda([e], is(length(sublist(h3_classes, lambda([c], is(c[1] = e)))) = expected[e][2])),
+               makelist(k, k, 1, length(expected)))
+     and every(lambda([c], is(c[2] < tol)), h3_classes)
+  then 0 else 1)$
+
+/* (3) azimuths in H3's sense: from north, clockwise, in the tangent plane at p1 */
+north_of(p) := unitv([0, 0, 1] - p[3]*p)$
+east_of(p) := crossv(north_of(p), p)$
+azimuth(p1, p2) := block([q : unitv(p2 - dotv(p2, p1)*p1)],
+  posang(atan2(dotv(q, east_of(p1)), dotv(q, north_of(p1)))))$
+neighbours(f) := sublist(faces, lambda([g], is(g # f and abs(dotv(C[f], C[g]) - bfloat(sqrt(5)/3)) < tol)))$
+/* A vertex of face f is shared with two of its neighbours: the centre of the circle through the three. */
+face_vertices(f) := block([nb : neighbours(f), out : []],
+  for a : 1 thru 3 do for b : a + 1 thru 3 do
+    block([g : nb[a], h : nb[b], v],
+      if abs(dotv(C[g], C[h]) - bfloat(1/3)) < tol then (
+        v : unitv(crossv(C[g] - C[f], C[h] - C[f])),
+        if dotv(v, C[f]) < 0 then v : -v,
+        out : endcons(v, out))),
+  out)$
+axes_ok(f) := block([vs : face_vertices(f), az],
+  az : map(lambda([v], azimuth(C[f], v)), vs),
+  length(vs) = 3
+  and every(lambda([k], is(lmin(map(lambda([a], angdiff(a, AZ[f][k])), az)) < tol)), [1, 2, 3])
+  and is(angdiff(AZ[f][2], AZ[f][1] - 2*%pi/3) < tol)
+  and is(angdiff(AZ[f][3], AZ[f][1] - 4*%pi/3) < tol))$
+print("axes_point_at_the_vertices:", if every(axes_ok, faces) then 0 else 1)$
+
+/* (4)-(5) */
+tangent_to(c, p) := sqrt(dotv(p, p)*dotv(c, c) - dotv(p, c)^2)/dotv(p, c)$
+/* tan^2 in Q(sqrt 5); both tangents are positive, since the vertex and the edge midpoint lie on the
+   centroid's side (p . c > 0). */
+tangent2_to(c, p) := in_q5((dotv(p, p)*dotv(c, c) - dotv(p, c)^2)/dotv(p, c)^2)$
+t0 : ico_faces[1]$
+u_exact : (3 - sqrt(5))/2$
+print("vertex_tangent:", in_q5(tangent2_to(centroid(t0), t0[1]) - (3 - sqrt(5))^2)
+  + (if every(lambda([v], is(in_q5(dotv(v, centroid(t0))) > 0)), t0) then 0 else 1))$
+print("res0_unit_is_the_edge_midpoint:", in_q5(tangent2_to(centroid(t0), (t0[1] + t0[2])/2) - u_exact^2))$
+f90_res0 : bfloat(h3_res0_u_gnomonic/u_exact - 1)$
+f90_inv : bfloat(h3_inv_res0_u_gnomonic*h3_res0_u_gnomonic - 1)$
+print("F90: RES0_U_GNOMONIC / ((3 - sqrt 5)/2) - 1 =", f90_res0, "; INV_RES0_U_GNOMONIC * RES0_U_GNOMONIC - 1 =", f90_inv)$
+print("res0_constant_is_u_to_f90:", if is(abs(f90_res0) < 5b-16) and is(abs(f90_inv) < 1b-21) then 0 else 1)$
+/* the H3 data's vertices, too, sit at tan 3 - sqrt 5 from their face centres */
+data_vertex_tan_gap : lmax(map(lambda([f],
+  lmax(map(lambda([v], abs(tangent_to(C[f], v) - bfloat(3 - sqrt(5)))), face_vertices(f)))), faces))$
+
+/* (7)-(8) */
+ap7 : atan(sqrt(3)/5)$
+print("ap7_angle:", radcan(sin(ap7)^2 - 3/28) + radcan(tan(ap7) - sqrt(3)/5)
+  + (if is(data_vertex_tan_gap < tol) then 0 else 1))$
+print("ap7_constant:", block([fpprec : 60],
+  if is(abs(bfloat(h3_ap7_rot - ap7)) < 1b-44) and is(abs(bfloat(h3_sqrt7 - sqrt(7))) < 1b-39)
+  then 0 else 1))$
+
+/* (9) hex2d (x, y) = (i - j/2, j sqrt 3/2); a vector's lattice coordinates, and the two parities */
+lattice_ij(v) := [radcan(v[1] + v[2]/sqrt(3)), radcan(2*v[2]/sqrt(3))]$
+turn(v, a) := [cos(a)*v[1] - sin(a)*v[2], sin(a)*v[1] + cos(a)*v[2]]$
+ei : [1, 0]$
+ej : [-1/2, sqrt(3)/2]$
+coarse_on_fine(sign) := every(lambda([e], every(integerp,
+  lattice_ij(map(lambda([x], radcan(trigexpand(sqrt(7)*x))), turn(e, sign*ap7))))), [ei, ej])$
+print("aperture_7_nests:", if coarse_on_fine(-1) and coarse_on_fine(1) then 0 else 1)$
+
+/* (10) resolution 0's lattice points on one face: the triangle of vertices 2 e_i, 2 e_j, 2 e_k */
+tri : [2*ei, 2*ej, [-1, -sqrt(3)]]$
+barycentric(p) := block([a : tri[1], b : tri[2], c : tri[3], det, l1, l2],
+  det : (b[2] - c[2])*(a[1] - c[1]) + (c[1] - b[1])*(a[2] - c[2]),
+  l1 : radcan(((b[2] - c[2])*(p[1] - c[1]) + (c[1] - b[1])*(p[2] - c[2]))/det),
+  l2 : radcan(((c[2] - a[2])*(p[1] - c[1]) + (a[1] - c[1])*(p[2] - c[2]))/det),
+  [l1, l2, radcan(1 - l1 - l2)])$
+res0_points : block([out : []],
+  for i : -3 thru 3 do for j : -3 thru 3 do
+    block([l : barycentric([i - j/2, j*sqrt(3)/2])],
+      if every(lambda([x], is(x >= 0)), l) then out : endcons(length(sublist(l, lambda([x], is(x = 0)))), out)),
+  out)$
+inside : length(sublist(res0_points, lambda([z], z = 0)))$
+on_edge : length(sublist(res0_points, lambda([z], z = 1)))$
+at_vertex : length(sublist(res0_points, lambda([z], z = 2)))$
+n_cells(r) := 2 + 120*7^r$
+print("cell_count:", (20*inside + 20*on_edge/2 + 20*at_vertex/5 - n_cells(0))
+  + radcan(n_cells(r + 1) - (7*n_cells(r) - 12))
+  + (if [inside, on_edge, at_vertex] = [4, 3, 3] then 0 else 1))$
+
+/* (11)-(12) the structure */
+to_vec(lat, lon) := [cos(lat)*cos(lon), cos(lat)*sin(lon), sin(lat)]$
+deg : bfloat(%pi/180)$
+closest_face(p) := block([best : 1],
+  for f in faces do if dotv(C[f], p) > dotv(C[best], p) then best : f, best)$
+class_iii(res) := oddp(res)$
+/* hex2d of a point on face f at resolution res, then the nearest lattice point and its margin. */
+hex2d(p, f, res) := block([r, theta],
+  r : atan2(sqrt(dotv(crossv(C[f], p), crossv(C[f], p))), dotv(C[f], p)),
+  theta : AZ[f][1] - azimuth(C[f], p) - (if class_iii(res) then bfloat(ap7) else 0),
+  r : tan(r)/bfloat(u_exact)*bfloat(sqrt(7))^res,
+  [r*cos(theta), r*sin(theta)])$
+nearest_lattice(v) := block([j0, i0, cands, d],
+  j0 : floor(2*v[2]/bfloat(sqrt(3))), i0 : floor(v[1] + v[2]/bfloat(sqrt(3))),
+  cands : [],
+  for i : i0 - 1 thru i0 + 2 do for j : j0 - 1 thru j0 + 2 do
+    block([x : i - j/2, y : j*bfloat(sqrt(3))/2],
+      cands : endcons([sqrt((v[1] - x)^2 + (v[2] - y)^2), [x, y]], cands)),
+  cands : sort(cands, lambda([a, b], a[1] < b[1])),
+  [cands[1][2], cands[2][1] - cands[1][1]])$
+centre_of(L, f, res) := block([r, theta, dir],
+  r : sqrt(L[1]^2 + L[2]^2),
+  if is(r < 1b-30) then C[f]
+  else (
+    theta : atan2(L[2], L[1]) + (if class_iii(res) then bfloat(ap7) else 0),
+    r : atan(r*bfloat(sqrt(7))^(-res)*bfloat(u_exact)),
+    theta : AZ[f][1] - theta,
+    dir : cos(theta)*north_of(C[f]) + sin(theta)*east_of(C[f]),
+    cos(r)*C[f] + sin(r)*dir))$
+cell_centre(lat_deg, lon_deg, res) := block([p, f, nl, c],
+  p : bfloat(to_vec(lat_deg*deg, lon_deg*deg)),
+  f : closest_face(p),
+  nl : nearest_lattice(hex2d(p, f, res)),
+  c : centre_of(nl[1], f, res),
+  [asin(c[3])/deg, atan2(c[2], c[1])/deg, nl[2], f])$
+
+/* The sample: row k on face 1 + mod(7k, 20), at resolution mod(k, 16), offset 1 + mod(37k, 600)/100
+   degrees from the face centre at azimuth mod(97k, 360) + 0.37, rounded to 1e-10 degrees. */
+sample_point(k) := block([f : 1 + mod(7*k, 20), d, a, p],
+  d : (1 + mod(37*k, 600)/100)*deg, a : (mod(97*k, 360) + 37/100)*deg,
+  p : cos(d)*C[f] + sin(d)*(cos(a)*north_of(C[f]) + sin(a)*east_of(C[f])),
+  [round(asin(p[3])/deg*10^10)/10^10, round(atan2(p[2], p[1])/deg*10^10)/10^10, mod(k, 16), f])$
+samples : makelist(sample_point(k), k, 0, 23)$
+rows : map(lambda([s], block([c : cell_centre(s[1], s[2], s[3])], [s, c])), samples)$
+print("smallest margin to a second lattice point, in lattice units:", lmin(map(lambda([r], r[2][3]), rows)))$
+print("points_inside_their_cells:",
+  if every(lambda([r], is(r[2][3] > 1b-6) and is(r[2][4] = r[1][4])), rows) then 0 else 1)$
+
+literals : rust_table(table_path, "H3_MAXIMA")$
+want : apply(append, map(lambda([r], [r[1][1], r[1][2], r[1][3], r[2][1], r[2][2]]), rows))$
+print("table_is_the_structure:", if transcribed(literals, want) then 0 else 1)$

@@ -919,6 +919,30 @@ else
     skip "nrlmsise00_tables.py" "tools/fetch-nrlmsise00-fortran.sh output"
 fi
 
+# H3's constants: `h3_constants.mac` claims to be `h3_constants.py`'s reading of Uber's H3 v4.5.0
+# `faceijk.c` and `constants.h`. This re-runs the reader on the pinned snapshots `tools/fetch-specs.sh`
+# fetches and compares every byte; `h3_definition.mac`, below, proves what the numbers must be.
+H3_FACEIJK=../data/specs/h3-faceijk.7828ec42.c
+H3_FACEIJK_SHA256=7828ec42137b8134dd1ec209a0d2f393d17893850051dd10a6e63e5b4a36388c
+H3_CONSTANTS=../data/specs/h3-constants.5f4068fa.h
+H3_CONSTANTS_SHA256=5f4068fa886e1e67b1581d5795f2b034d6c6fadc2c84141b802db2710e3d6450
+if [ -f "$H3_FACEIJK" ] && [ -f "$H3_CONSTANTS" ] && have python3; then
+    regenerated=$(mktemp)
+    if [ "$(sha256sum "$H3_FACEIJK" | cut -d' ' -f1)" != "$H3_FACEIJK_SHA256" ] \
+        || [ "$(sha256sum "$H3_CONSTANTS" | cut -d' ' -f1)" != "$H3_CONSTANTS_SHA256" ]; then
+        bad "h3_constants.py" "the H3 snapshots are not the pinned v4.5.0 files"
+    elif ! timeout 60 python3 -I h3_constants.py "$H3_FACEIJK" "$H3_CONSTANTS" "$regenerated" >/dev/null 2>&1; then
+        bad "h3_constants.py" "the reader failed on the pinned H3 files"
+    elif cmp -s "$regenerated" h3_constants.mac; then
+        ok "h3_constants.py: h3_constants.mac is byte for byte H3 v4.5.0's face centres, axis azimuths and constants"
+    else
+        bad "h3_constants.py" "h3_constants.mac differs from what the pinned H3 files regenerate"
+    fi
+    rm -f "$regenerated"
+else
+    skip "h3_constants.py" "tools/fetch-specs.sh output"
+fi
+
 # The FES2004 ocean-tide table: `ocean_tide_fes2004.rs` claims to be generated from the
 # `fes2004_Cnm-Snm.dat` the IERS Conventions Centre publishes with chapter 6. This re-runs the
 # generator on the pinned snapshot `tools/fetch-specs.sh` fetches and compares every byte.
@@ -1129,6 +1153,7 @@ if have maxima; then
     mac_zeros gnss_combinations.mac 32 "IF, GF, wide/narrow-lane and MW combinations as exact rationals of the ICD carriers"
     mac_zeros gnss_cycle_slip.mac 13 "the slip predictor is the least-squares polynomial extrapolation"
     mac_zeros gnss_dop.mac 31 "DOP from the cofactor traces; closed forms for zenith-plus-ring geometries"
+    mac_zeros h3_definition.mac 12 "the H3 grid by its definition: an icosahedron's faces, axes on the vertices, u = (3 - sqrt 5)/2, the aperture-7 turn, 2 + 120 7^r cells, 24 cell centres"
     mac_zeros gpt3_evaluation.mac 13 "GPT3 from its definition: the grid's harmonics, height reduction and bilinear cell reproduce gpt3() at 10 sites"
     mac_zeros gps_broadcast_orbit.mac 8 "the IS-GPS-200 user algorithm, its velocity and the relativistic term"
     mac_zeros glonass_pz90_motion.mac 10 "the PZ-90 equations of motion as the J2 gradient plus rotating-frame terms"
@@ -1192,7 +1217,7 @@ if have maxima; then
     done
 fi
 if have gp; then
-    for f in access_horizon_crossing root_reference_roots event_geometry box_wing_momentum brouwer_m2_phipps photometry_closed_forms observability_diurnal_arc \
+    for f in access_horizon_crossing root_reference_roots event_geometry box_wing_momentum brouwer_m2_phipps h3_definition photometry_closed_forms observability_diurnal_arc \
         elevation_footprint cone_footprint comms_link_budget sar_incidence scan_catalogue \
         wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay split_conformal_coverage cluster_design_effect tle_kozai_recovery harris_priester_law \
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form \

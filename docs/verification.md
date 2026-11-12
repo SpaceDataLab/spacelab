@@ -10418,7 +10418,8 @@ own training, and, where the benchmark says so, every row from `until` on. Only 
 its own span is scored. `guard` refuses a training row that breaks any of the three rules, and
 `tools/test_evaluate_sdtm.py` checks both sides on an inline split and the span membership against brute force.
 `tools/benchmark-splits.py` scores each fold on the benchmark's own terms. The comparators are NRLMSISE-00 and the
-clean-room JB2008, both on the measured indices. DTM2020 is not used here.
+clean-room JB2008, both on the measured indices. DTM2020 is not used here. The JB2008 rows come from an example
+that the public tree does not hold, so there the scorer prints NRLMSISE-00 alone.
 
 **STORM-AI** (Sanchez-Hurtado et al. 2026, doi:10.1029/2026SW004994; dataset doi:10.7910/DVN/U6K6MJ, version 1.1,
 CC BY 4.0). `tools/fetch-storm-ai.sh` takes the twelve `private_eval__*` archives, 26 GiB, each checked against

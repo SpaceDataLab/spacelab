@@ -8,9 +8,10 @@ beta = gamma = 1:
   * de Sitter      — geodesic precession from the Earth's orbit about the Sun (~1e-11 m/s^2).
 
 This mirrors the closed-form the Rust port evaluates, so it catches a transcription bug in either
-port; the genuine independent third-party check is Orekit (tools/orekit-oracle ->
-orekit_relativity.csv), whose Relativity / LenseThirringRelativity / DeSitterRelativity implement the
-same equation. Prints machine-readable golden vectors for the Rust unit test.
+port. `derivations/relativity_iers.mac` decides: it holds the equation to the chapter and to its
+classical limits, and these vectors to it. Orekit's Relativity / LenseThirringRelativity /
+DeSitterRelativity are a comparator (docs/comparisons.md). Prints machine-readable golden vectors
+for the Rust unit test.
 
     uv run --no-project --with numpy python derivations/relativity.py
 """

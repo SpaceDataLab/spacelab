@@ -577,6 +577,22 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima solid_tide_iers.mac" "expected 8 checks to hold, found $holds"
     fi
 
+    out=$(macf ocean_tide_iers.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima ocean_tide_iers.mac: the force is eq (6.15) under the Doodson-to-Delaunay map of eq 5.43; the G3 goldens are its field and gradient at 40 digits, less only theta's f64 rounding"
+    else
+        bad "maxima ocean_tide_iers.mac" "expected 4 checks to hold, found $holds"
+    fi
+
+    out=$(macf relativity_iers.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 6 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima relativity_iers.mac: the forces are eq (10.12)'s three lines; averaged they give Einstein's perigee advance, the Lense-Thirring rates, the geodesic precession and the chapter's 0.8, 180 and 19 mas/y; the G3 goldens at 40 digits"
+    else
+        bad "maxima relativity_iers.mac" "expected 6 checks to hold, found $holds"
+    fi
+
     out=$(macf ocean_loading.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 11 ] && printf '%s' "$out" | grep -q '^DONE'; then

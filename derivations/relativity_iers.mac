@@ -1,0 +1,190 @@
+/* `crates/spacelab-propagation/src/relativity.rs` against IERS Conventions (2010) eq (10.12)
+   (plans/17 Ф19.G).
+
+   Orekit's Relativity, LenseThirringRelativity and DeSitterRelativity decided this until Ф19.G and
+   are a comparator now (docs/comparisons.md). The chapter and the mechanics decide:
+     (1) eq (10.12) at beta = gamma = 1 is the three shipped forces: line 1 Schwarzschild, line 2
+         Lense-Thirring, line 3 de Sitter with the chapter's R = -r_sun and Rdot = -v_sun;
+     (2) line 1, averaged over a Kepler orbit, turns the Laplace-Runge-Lenz vector by
+         6 pi GM/(c^2 a (1 - e^2)) a revolution, Einstein's perigee advance 3 n GM/(c^2 a (1 - e^2)),
+         and changes neither e nor the energy;
+     (3) line 2, averaged, turns the angular momentum about J at 2 GM J/(c^2 a^3 (1 - e^2)^(3/2)),
+         Lense and Thirring's node rate, changing neither its size nor the inclination, and turns
+         the perigee at -6 GM J cos i/(c^2 a^3 (1 - e^2)^(3/2));
+     (4) line 3, averaged, turns the angular momentum about R x Rdot at
+         (3/2) GM_S |R x Rdot|/(c^2 R^3), the geodesic precession;
+     (5) at the shipped J and c these rates are the chapter's own numbers below eq (10.12):
+         Lense-Thirring 0.8 mas/y at geostationary orbit and 180 mas/y low (400 km here), de Sitter
+         19 mas/y;
+     (6) the goldens: relativity.py's numpy vectors are eq (10.12) to 2e-15 relative (6.6e-16 seen), and
+         the Rust G3 goldens are its three lines at the Orekit oracle's geometry at 40 digits.
+
+   timeout 300 maxima --very-quiet -Q -b relativity_iers.mac                                         */
+
+load("rust_literals.mac")$
+fpprec : 40$
+fpprintprec : 20$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+src : "../crates/spacelab-propagation/src/relativity.rs"$
+in_source(path, text) := block([s : openr(path), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+all_in_source(path, texts) := every(lambda([t], in_source(path, t)), texts)$
+each_axis(f) := makelist(f(i), i, 0, 2)$
+
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+vdot(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+zero(u) := every(lambda([x], is(ratsimp(x) = 0)), if listp(u) then u else [u])$
+
+/* Eq (10.12), line by line, with the chapter's PPN beta and gamma: r, v the satellite in the GCRS,
+   rn = |r|, R and Rd the Earth's position and velocity about the Sun. */
+line1(GM, c, beta, gam, r, rn, v) :=
+  GM/(c^2*rn^3)*((2*(beta + gam)*GM/rn - gam*vdot(v, v))*r + 2*(1 + gam)*vdot(r, v)*v)$
+line2(GM, c, gam, r, rn, v, J) := (1 + gam)*GM/(c^2*rn^3)*(3/rn^2*cross(r, v)*vdot(r, J) + cross(v, J))$
+line3(GMS, c, gam, v, R, Rd) := (1 + 2*gam)*cross(cross(Rd, -GMS*R/(c^2*sqrt(vdot(R, R))^3)), v)$
+
+/* ---- (1) the shipped forces ------------------------------------------------------------------------ */
+/* relativity.rs as written: Schwarzschild's pre and k, Lense-Thirring's pre, de Sitter's u and v_E. */
+shipped_s(mu, c, r, v) := block([r2 : vdot(r, r), rn],
+  rn : sqrt(r2), mu*(1/(r2*rn))*(1/c^2)*((4*mu/rn - vdot(v, v))*r + 4*vdot(r, v)*v))$
+shipped_lt(mu, c, r, v, j) := block([r2 : vdot(r, r), rn],
+  rn : sqrt(r2), 2*mu*(1/(r2*rn))*(1/c^2)*(3*(1/r2)*cross(r, v)*vdot(r, j) + cross(v, j)))$
+shipped_ds(mus, c, v, rsun, vsun) := block([rsn : sqrt(vdot(rsun, rsun))],
+  3*cross(cross(-vsun, mus/(c*c*rsn*rsn*rsn)*rsun), v))$
+declare([x, y, z, vx, vy, vz, jx, jy, jz, X, Y, Z, VX, VY, VZ], real)$
+assume(GM > 0, GMS > 0, cl > 0)$
+rs : [x, y, z]$  vs : [vx, vy, vz]$  js : [jx, jy, jz]$  Rs : [X, Y, Z]$  Vs : [VX, VY, VZ]$
+must(zero(line1(GM, cl, 1, 1, rs, sqrt(vdot(rs, rs)), vs) - shipped_s(GM, cl, rs, vs))
+     and zero(line2(GM, cl, 1, rs, sqrt(vdot(rs, rs)), vs, js) - shipped_lt(GM, cl, rs, vs, js))
+     and zero(line3(GMS, cl, 1, vs, Rs, Vs) - shipped_ds(GMS, cl, vs, -Rs, -Vs))
+     and is(rust_rational(rust_scalar(src, "C_LIGHT")) = 299792458)
+     and all_in_source(src, append(
+       ["a[1] * b[2] - a[2] * b[1],", "a[2] * b[0] - a[0] * b[2],", "a[0] * b[1] - a[1] * b[0],",
+        "let pre = mu * inv_r3 * inv_c2;", "let k = S::from_f64(4.0) * mu * rn.recip() - vv;",
+        "let inv_r3 = (r2 * rn).recip();", "let inv_r2 = r2.recip();",
+        "let inv_c2 = S::from_f64((C_LIGHT * C_LIGHT).recip());",
+        "let rv = r[0] * v[0] + r[1] * v[1] + r[2] * v[2];",
+        "let vv = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];",
+        "let pre = S::from_f64(2.0) * mu * inv_r3 * inv_c2;",
+        "let rxv = cross(r, v);", "let vxj = cross(v, &j);",
+        "let rj = r[0] * j[0] + r[1] * j[1] + r[2] * j[2];",
+        "let u_scale = self.mu_sun / (C_LIGHT * C_LIGHT * rsn * rsn * rsn);",
+        "let a = cross(&cross(&v_e, &u), v);",
+        "[three * a[0], three * a[1], three * a[2]]"],
+       each_axis(lambda([i], concat("pre * (k * r[", i, "] + four * rv * v[", i, "]),"))),
+       each_axis(lambda([i], concat("pre * (three * inv_r2 * rxv[", i, "] * rj + vxj[", i, "]),"))),
+       each_axis(lambda([i], concat("S::from_f64(u_scale * r_sun[", i, "]),"))),
+       each_axis(lambda([i], concat("S::from_f64(-v_sun[", i, "]),"))))),
+     "(1) holds: eq (10.12) at beta = gamma = 1 is Schwarzschild, Lense-Thirring and de Sitter as shipped, de Sitter's R = -r_sun, Rdot = -v_sun")$
+
+/* ---- the Kepler orbit ------------------------------------------------------------------------------ */
+/* Semi-latus rectum p, eccentricity e, true anomaly fa; perigee on P, the plane spanned by P and Q at
+   inclination inc about the node on P. Over a revolution dt = rn^2/h dfa. */
+assume(p > 0, e > 0, e < 1, Jz > 0, sin(inc) > 0)$
+rn : p/(1 + e*cos(fa))$
+plane(P, Q) := [rn*(cos(fa)*P + sin(fa)*Q), sqrt(GM/p)*(-sin(fa)*P + (e + cos(fa))*Q)]$
+hmag : sqrt(GM*p)$
+/* The change of a rate over one revolution: its integral over fa with dt = rn^2/h dfa. */
+over_revolution(rate) := map(lambda([u],
+  block([w : ratsimp(ratsubst(1 - cos(fa)^2, sin(fa)^2, ratsimp(u*rn^2/hmag)))],
+    if not freeof(fa, denom(w)) then error("over_revolution: the integrand is not a trigonometric polynomial", w),
+    ratsimp(integrate(trigreduce(expand(w)), fa, 0, 2*%pi)))), rate)$
+lrl(r, v) := cross(v, cross(r, v)) - GM*r/rn$
+/* Zero once sin^2 = 1 - cos^2 is used, for the anomaly and the inclination. */
+zero_on(u) := zero(ratsubst(1 - cos(inc)^2, sin(inc)^2, ratsubst(1 - cos(fa)^2, sin(fa)^2, trigexpand(u))))$
+lrl_rate(r, v, acc) := cross(acc, cross(r, v)) + cross(v, cross(r, acc))$
+energy_rate(r, v, acc) := [vdot(v, acc)]$
+
+/* ---- (2) Schwarzschild: Einstein's perigee advance ------------------------------------------------- */
+[r1, v1] : plane([1, 0, 0], [0, 1, 0])$
+acc1 : line1(GM, cl, 1, 1, r1, rn, v1)$
+dA : over_revolution(lrl_rate(r1, v1, acc1))$
+dE : over_revolution(energy_rate(r1, v1, acc1))$
+/* A = GM e P: dA along P changes e, dA along Q turns the perigee by dA_Q/(GM e). */
+must(zero_on(vdot(r1, r1) - rn^2) and zero_on(lrl(r1, v1) - [GM*e, 0, 0])
+     and zero(dE) and zero([dA[1], dA[3]])
+     and zero([dA[2]/(GM*e) - 6*%pi*GM/(cl^2*p)]),
+     "(2) holds: line 1 turns the perigee by 6 pi GM/(c^2 a (1 - e^2)) a revolution, 3 n GM/(c^2 a (1 - e^2)), and moves neither e nor the energy")$
+
+/* ---- (3) Lense-Thirring: the node and the perigee -------------------------------------------------- */
+[r2, v2] : plane([1, 0, 0], [0, cos(inc), sin(inc)])$
+acc2 : line2(GM, cl, 1, r2, rn, v2, [0, 0, Jz])$
+dh2 : over_revolution(cross(r2, acc2))$
+dA2 : over_revolution(lrl_rate(r2, v2, acc2))$
+/* h = sqrt(GM p) [0, -sin inc, cos inc]: a node rate W turns it by T W z x h = T W sqrt(GM p) sin inc P
+   in a period T = 2 pi a^(3/2)/sqrt(GM), a = p/(1 - e^2). The perigee measured from the moving node
+   turns at w' = dA_Q/(GM e T) - W cos inc. */
+T : 2*%pi*(p/(1 - e^2))^(3/2)/sqrt(GM)$
+W_lt : 2*GM*Jz/(cl^2*(p/(1 - e^2))^3*(1 - e^2)^(3/2))$
+w_lt : -6*GM*Jz*cos(inc)/(cl^2*(p/(1 - e^2))^3*(1 - e^2)^(3/2))$
+must(zero_on(vdot(r2, r2) - rn^2)
+     and zero([radcan(dh2[1] - T*W_lt*hmag*sin(inc)), dh2[2], dh2[3]])
+     and zero([dA2[1]])
+     and zero_on(radcan(vdot(dA2, [0, cos(inc), sin(inc)])/(GM*e*T) - W_lt*cos(inc) - w_lt)),
+     "(3) holds: line 2 turns the node at 2 GM J/(c^2 a^3 (1 - e^2)^(3/2)) and the perigee at -6 GM J cos i/(c^2 a^3 (1 - e^2)^(3/2)), moving neither |h|, i nor e")$
+
+/* ---- (4) de Sitter: the geodesic precession -------------------------------------------------------- */
+/* The Sun's state is constant over a revolution; W = Rd x (-GM_S R/(c^2 R^3)) is any vector. Line 3 is
+   3 W x v, which does not fall off with r, so the revolution is integrated over the eccentric anomaly
+   ea: r = [a (cos ea - e), a sqrt(1 - e^2) sin ea, 0], v dt = dr/dea dea, and
+   r x dr/dea = a^2 sqrt(1 - e^2) (1 - e cos ea) z, so h = n a^2 sqrt(1 - e^2) z and T = 2 pi/n. */
+declare([w1, w2, w3], real)$
+assume(aa > 0)$
+rE : [aa*(cos(ea) - e), aa*sqrt(1 - e^2)*sin(ea), 0]$
+dh3 : map(lambda([u], ratsimp(integrate(trigreduce(expand(u)), ea, 0, 2*%pi))),
+          cross(rE, 3*cross([w1, w2, w3], diff(rE, ea))))$
+must(zero(trigsimp(cross(rE, diff(rE, ea)) - aa^2*sqrt(1 - e^2)*(1 - e*cos(ea))*[0, 0, 1]))
+     and zero(dh3 - 3/2*2*%pi*aa^2*sqrt(1 - e^2)*cross([w1, w2, w3], [0, 0, 1]))
+     and zero(cross(Vs, -GMS*Rs/(cl^2*sqrt(vdot(Rs, Rs))^3)) - GMS/(cl^2*sqrt(vdot(Rs, Rs))^3)*cross(Rs, Vs)),
+     "(4) holds: line 3 turns the angular momentum about R x Rdot at (3/2) GM_S |R x Rdot|/(c^2 R^3)")$
+
+/* ---- (5) the chapter's numbers --------------------------------------------------------------------- */
+/* IERS Conventions (2010) Table 1.1: GM_E (TT), GM_S (TDB), a_E, the astronomical unit; the Earth's
+   rotation rate of chapter 1; the Julian year. */
+GM_E : 3986004418*10^5$  GM_S : 132712442099*10^9$  A_E : 63781366/10$  AU : 149597870700$
+OMEGA_E : 7292115*10^(-11)$
+c_light : rust_rational(rust_scalar(src, "C_LIGHT"))$
+J_E : rust_rational(rust_scalar(src, "EARTH_ANGULAR_MOMENTUM_PER_MASS"))$
+mas_per_year : 180/%pi*3600*1000*36525*86400/100$
+node_lt(a) := bfloat(2*GM_E*J_E/(c_light^2*a^3)*mas_per_year)$
+geo : (GM_E/OMEGA_E^2)^(1/3)$
+low : A_E + 400*10^3$
+geodesic : bfloat(3/2*GM_S*sqrt(GM_S/AU)*AU/(c_light^2*AU^3)*mas_per_year)$
+print("Lense-Thirring node rate, mas/y: geostationary", node_lt(geo), ", 400 km", node_lt(low),
+      "; de Sitter, mas/y:", geodesic)$
+must(is(round(10*node_lt(geo)) = 8) and is(round(node_lt(low)/10) = 18) and is(round(geodesic) = 19),
+     "(5) holds: the rates are the chapter's 0.8 mas/y (geostationary) and 180 mas/y (low orbit) for Lense-Thirring and 19 mas/y for de Sitter, to the digits it prints")$
+
+/* ---- (6) the goldens ------------------------------------------------------------------------------- */
+num_table(name) := map(rust_rational, rust_table(src, name))$
+eq1012(r, v, GMe, J, GMs, R, Rd) := block([rn : sqrt(vdot(r, r))],
+  [line1(GMe, c_light, 1, 1, r, rn, v), line2(GMe, c_light, 1, r, rn, v, J), line3(GMs, c_light, 1, v, R, Rd)])$
+/* relativity.py's geometry: the geocentric Sun, so R = -r_sun, Rdot = -v_sun. */
+mu_e : rust_rational(rust_scalar(src, "MU_EARTH"))$
+mu_s : rust_rational(rust_scalar(src, "MU_SUN"))$
+r_py : num_table("R")$  v_py : num_table("V")$
+py : eq1012(r_py, v_py, mu_e, [0, 0, J_E], mu_s, -num_table("R_SUN"), -num_table("V_SUN"))$
+j_tilted : map(rust_rational, sublist(
+  rust_literals_between(src, "fn lense_thirring_matches_python_reference_off_axis", "const ORACLE_MU_SUN"),
+  lambda([t], ssearch("e8", t) # false)))$
+py_tilted : line2(mu_e, c_light, 1, r_py, sqrt(vdot(r_py, r_py)), v_py, j_tilted)$
+goldens(begin, finish) := map(rust_number, sublist(rust_literals_between(src, begin, finish),
+  lambda([t], ssearch(".", t) # false and ssearch("e-", t) # false)))$
+py_goldens : append(goldens("fn matches_python_reference", "fn lense_thirring_matches_python_reference_off_axis"),
+                    goldens("fn lense_thirring_matches_python_reference_off_axis", "const ORACLE_MU_SUN"))$
+py_exact : bfloat(append(flatten(py), py_tilted))$
+py_worst : lmax(map(lambda([g, x], abs(g - x)/abs(x)), py_goldens, py_exact))$
+print("relativity.py's goldens against eq (10.12) at 40 digits:", py_worst, "worst relative")$
+
+oracle : bfloat(eq1012(num_table("ORACLE_R"), num_table("ORACLE_V"), mu_e, [0, 0, J_E],
+                       rust_rational(rust_scalar(src, "ORACLE_MU_SUN")),
+                       num_table("EARTH_FROM_SUN_R"), num_table("EARTH_FROM_SUN_V")))$
+print("SCHWARZSCHILD_MAXIMA", oracle[1])$
+print("LENSE_THIRRING_MAXIMA", oracle[2])$
+print("DE_SITTER_MAXIMA", oracle[3])$
+must(is(length(j_tilted) = 3) and is(length(py_goldens) = 12) and is(py_worst < 2b-15)
+     and transcribed(rust_table(src, "SCHWARZSCHILD_MAXIMA"), oracle[1])
+     and transcribed(rust_table(src, "LENSE_THIRRING_MAXIMA"), oracle[2])
+     and transcribed(rust_table(src, "DE_SITTER_MAXIMA"), oracle[3]),
+     "(6) holds: relativity.py's twelve goldens are eq (10.12) to 2e-15, and the Rust goldens are its three lines at the oracle's geometry to every digit shown")$
+print("DONE")$

@@ -1,0 +1,148 @@
+/* `crates/spacelab-propagation/src/ocean_tide.rs` against IERS Conventions (2010) eq (6.15), chapter
+   6 as updated 2018-02-01 (plans/17 Ф19.G).
+
+   Orekit's OceanTides decided this until Ф19.G and is a comparator now (docs/comparisons.md). The
+   chapter decides:
+     (1) eq (6.15), dC - i dS = sum_f sum_(+,-) (C+-_f - +i S+-_f) e^(+-i theta_f), is the shipped
+         dC = (C+ + C-) cos + (S+ + S-) sin, dS = (S+ - S-) cos - (C+ - C-) sin;
+     (2) theta_f = n.beta of the wave's Doodson number is the shipped dot product with
+         (gamma, l, l', F, D, Omega): the decode spells (tau, s, h, p, N', ps) from the digits, and
+         the shipped Delaunay multipliers are what Delaunay's arguments as mean longitudes give
+         (chapter 5, eq 5.43: l = s - p, l' = h - ps, F = s - Omega, D = s - h, Omega = -N', and
+         Doodson's tau = gamma - s), for every multiplier;
+     (3) the goldens of the Rust G3 tests, at 40 digits: eq (6.15) over the shipped FES2004 table at
+         the oracle epoch, and the gradient of its potential at the oracle's satellite, with dS_n0 set
+         to zero as the chapter's note on FES2004's zonal terms says (it multiplies sin 0 lambda, so
+         the Rust force, which keeps it, must agree);
+     (4) the oracle's arguments are Orekit's unreduced radians (GMST 159, F 2026), so the f64 theta
+         carries ~eps |theta| of rounding before its sine: rounding theta as f64 does, product by
+         product and sum by sum, moves the cells by up to 3e-12 relative, which is the distance the
+         Rust G3 test bounds.
+   `derivations/verify.sh` regenerates the FES2004 table from the Conventions Centre's file.
+
+   timeout 300 maxima --very-quiet -Q -b ocean_tide_iers.mac                                         */
+
+load("rust_literals.mac")$
+fpprec : 40$
+fpprintprec : 20$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+src : "../crates/spacelab-propagation/src/ocean_tide.rs"$
+fes : "../crates/spacelab-propagation/src/ocean_tide_fes2004.rs"$
+in_source(path, text) := block([s : openr(path), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+all_in_source(path, texts) := every(lambda([t], in_source(path, t)), texts)$
+
+/* ---- (1) eq (6.15) --------------------------------------------------------------------------------- */
+declare([Cp, Sp, Cm, Sm, th], real)$
+e615 : rectform((Cp - %i*Sp)*exp(%i*th) + (Cm + %i*Sm)*exp(-%i*th))$
+must(is(trigsimp(realpart(e615) - ((Cp + Cm)*cos(th) + (Sp + Sm)*sin(th))) = 0)
+     and is(trigsimp(-imagpart(e615) - ((Sp - Sm)*cos(th) - (Cp - Cm)*sin(th))) = 0)
+     and all_in_source(src, [
+       "let gamma = gmst + core::f64::consts::PI;",
+       "let (sin, cos) = libm::sincos(theta);",
+       "cell[0] += (c_plus + c_minus) * cos + (s_plus + s_minus) * sin;",
+       "cell[1] += (s_plus - s_minus) * cos - (c_plus - c_minus) * sin;",
+       "let c_plus = c_plus * self.scale;"]),
+     "(1) holds: eq (6.15) is dC = (C+ + C-) cos + (S+ + S-) sin, dS = (S+ - S-) cos - (C+ - C-) sin, as shipped")$
+
+/* ---- (2) the argument ------------------------------------------------------------------------------ */
+sol : linsolve([l = s - p, lp = h - ps, F = s - Om, D = s - h, Om = -Np, tau = T - s], [tau, s, h, p, Np, ps])$
+nb : expand(subst(sol, [ctau, cs, ch, cp, cnp, cps] . [tau, s, h, p, Np, ps]))$
+shipped : [ctau, -cp, -cps, -ctau + cs + ch + cp + cps, -ch - cps, -ctau + cs + ch + cp - cnp + cps]$
+must(is(makelist(ratsimp(coeff(nb, v)), v, [T, l, lp, F, D, Om]) = shipped)
+     and is(ratsimp(nb - shipped . [T, l, lp, F, D, Om]) = 0)
+     and all_in_source(src, [
+       "let c_ps = (doodson % 10) as i32 - 5;",
+       "let c_n_prime = ((doodson / 10) % 10) as i32 - 5;",
+       "let c_p = ((doodson / 100) % 10) as i32 - 5;",
+       "let c_h = ((doodson / 1000) % 10) as i32 - 5;",
+       "let c_s = ((doodson / 10000) % 10) as i32 - 5;",
+       "let c_tau = ((doodson / 100_000) % 10) as i32;",
+       "let c_gamma = c_tau;",
+       "let c_l = -c_p;",
+       "let c_l_prime = -c_ps;",
+       "let c_f = -c_tau + c_s + c_h + c_p + c_ps;",
+       "let c_d = -c_h - c_ps;",
+       "let c_omega = -c_tau + c_s + c_h + c_p - c_n_prime + c_ps;",
+       "f64::from(c_gamma) * gamma"]),
+     "(2) holds: the Doodson digits decode to (tau, s, h, p, N', ps), and n.beta is the shipped dot product with (gamma, l, l', F, D, Omega) for every multiplier")$
+
+/* ---- (3) the goldens ------------------------------------------------------------------------------- */
+/* The shipped table as [doodson, [[n, m, C+, S+, C-, S-], ...]], exact. */
+waves() := block([s : openr(fes), line, inside : false, done : false, out : [], cur : false, at],
+  while not done and (line : readline(s)) # false do (
+    if inside and ssearch("];", line) = 1 then done : true
+    else if inside then (
+      at : ssearch("doodson: ", line),
+      if at # false then (
+        if cur # false then out : endcons(cur, out),
+        cur : [parse_string(substring(line, at + 9, ssearch(",", line, 'sequal, at))), []])
+      else if ssearch("(", strim(" ", line)) = 1 then
+        cur[2] : endcons(map(rust_rational, split(ssubst("", ")", ssubst("", "(", strim(" ,", line))), ", ")), cur[2]))
+    else if ssearch("pub static FES2004_WAVES", line) # false then inside : true),
+  close(s),
+  if not done then error("waves: no table in", fes),
+  endcons(cur, out))$
+fes_waves : waves()$
+scale : rust_rational(rust_scalar(fes, "SCALE"))$
+argument(d, gam, del) := block([dg : makelist(mod(floor(d/10^k), 10), k, 0, 5)],
+  block([cps : dg[1] - 5, cnp : dg[2] - 5, cp : dg[3] - 5, ch : dg[4] - 5, cs : dg[5] - 5, ctau : dg[6]],
+    [ctau, -cp, -cps, -ctau + cs + ch + cp + cps, -ch - cps, -ctau + cs + ch + cp - cnp + cps] . cons(gam, del)))$
+gmst : rust_rational(rust_scalar(src, "GMST"))$
+del : map(rust_rational, rust_table(src, "DELAUNAY"))$
+/* dC - i dS at (n, m) by eq (6.15), complex. */
+cells : makelist(makelist(0, m, 0, n), n, 0, 6)$
+for w in fes_waves do block([th : bfloat(argument(w[1], gmst + %pi, del)), ep, em],
+  ep : bfloat(cos(th)) + %i*bfloat(sin(th)), em : bfloat(cos(th)) - %i*bfloat(sin(th)),
+  for c in w[2] do block([n : c[1], m : c[2]],
+    cells[n + 1][m + 1] : cells[n + 1][m + 1]
+      + scale*((c[3] - %i*c[4])*ep + (c[5] + %i*c[6])*em)))$
+dcs : []$
+for n : 2 thru 6 do for m : 0 thru n do block([z : rectform(bfloat(cells[n + 1][m + 1]))],
+  dcs : endcons([n, m, realpart(z), -imagpart(z)], dcs))$
+print("DCS_MAXIMA", dcs)$
+
+/* The gradient at (x, y, z) of (GM/r) sum (Re/r)^n Pnm(sin phi)(dC cos m lam + dS sin m lam). */
+Nnm(n, m) := sqrt((2 - kron_delta(m, 0))*(2*n + 1)*(n - m)!/(n + m)!)$
+Pd(n, m, u) := subst(xx = u, diff(expand(diff((xx^2 - 1)^n, xx, n)/(2^n*n!)), xx, m))$
+declare([x, y, z], real)$
+rr : sqrt(x^2 + y^2 + z^2)$
+GMe : rust_rational(rust_scalar(src, "MU_EARTH"))$
+Re : rust_rational(rust_scalar(src, "RE_EARTH"))$
+sat : map(rust_rational, rust_table(src, "SAT_ITRF"))$
+v : 0$
+for c in dcs do block([n : c[1], m : c[2], w],
+  w : expand((x + %i*y)^c[2]),
+  v : v + GMe/rr*(Re/rr)^n*Nnm(n, m)*Pd(n, m, z/rr)/rr^m
+          *(c[3]*realpart(w) + (if m = 0 then 0 else c[4])*imagpart(w)))$
+accel : bfloat(subst([x = sat[1], y = sat[2], z = sat[3]], [diff(v, x), diff(v, y), diff(v, z)]))$
+print("ACCELERATION_MAXIMA", accel)$
+
+numbers_of(entries) := sublist(entries, lambda([t], ssearch(".", t) # false or ssearch("e", t) # false))$
+must(transcribed(numbers_of(rust_table(src, "DCS_MAXIMA")), flatten(map(lambda([c], [c[3], c[4]]), dcs)))
+     and transcribed(rust_table(src, "ACCELERATION_MAXIMA"), accel),
+     "(3) holds: the Rust goldens are eq (6.15) over the shipped FES2004 table at the oracle epoch and the gradient of its potential with dS_n0 = 0, to every digit shown")$
+
+/* ---- (4) the argument's rounding ------------------------------------------------------------------- */
+r64(u) := nearest_double(u)$
+theta64(d) := block([dg : makelist(mod(floor(d/10^k), 10), k, 0, 5), c, gam, acc],
+  block([cps : dg[1] - 5, cnp : dg[2] - 5, cp : dg[3] - 5, ch : dg[4] - 5, cs : dg[5] - 5, ctau : dg[6]],
+    c : [ctau, -cp, -cps, -ctau + cs + ch + cp + cps, -ch - cps, -ctau + cs + ch + cp - cnp + cps]),
+  gam : r64(r64(gmst) + r64(%pi)),
+  acc : r64(c[1]*gam),
+  for i : 2 thru 6 do acc : r64(acc + r64(c[i]*r64(del[i - 1]))),
+  acc)$
+cells64 : makelist(makelist(0, m, 0, n), n, 0, 6)$
+for w in fes_waves do block([th : theta64(w[1]), ep, em],
+  ep : bfloat(cos(th)) + %i*bfloat(sin(th)), em : bfloat(cos(th)) - %i*bfloat(sin(th)),
+  for c in w[2] do block([n : c[1], m : c[2]],
+    cells64[n + 1][m + 1] : cells64[n + 1][m + 1]
+      + scale*((c[3] - %i*c[4])*ep + (c[5] + %i*c[6])*em)))$
+moved : 0$
+for c in dcs do block([z : rectform(bfloat(cells64[c[1] + 1][c[2] + 1]))],
+  moved : max(moved, abs(realpart(z) - c[3])/abs(c[3]), abs(-imagpart(z) - c[4])/abs(c[4])))$
+print("rounding theta as f64 moves the cells by", moved)$
+must(is(moved > 1b-13 and moved < 1b-11),
+     "(4) holds: rounding theta as f64 does moves eq (6.15)'s cells by 1e-13 to 1e-11 relative at the oracle's unreduced arguments")$
+print("DONE")$

@@ -60,8 +60,10 @@
 //! `org.orekit.forces.gravity.potential.OceanTidesWave.addContribution` (Doodson decode, Doodson→
 //! Delaunay map, and the ΔC̄/ΔS̄ recurrence). Coefficients: `derivations/ocean_tide_fes2004.py` from
 //! the FES2004 `fes2004_Cnm-Snm.dat` (degree-6 gate), and `derivations/ocean_tide_fes2014.py` from the
-//! FES2014b `fes2014b_Cnm-Snm.txt` (full degree/order 100). Validated against Orekit's `OceanTides` in
-//! the tests.
+//! FES2014b `fes2014b_Cnm-Snm.txt` (full degree/order 100). `derivations/ocean_tide_iers.mac` holds
+//! the port to the chapter: eq. (6.15) in complex form is the shipped arithmetic, the Doodson decode
+//! and Delaunay map are what Delaunay's arguments as mean longitudes give, and the FES2004 field and
+//! its gradient are evaluated at 40 digits for the tests. Orekit's `OceanTides` is a comparator.
 
 // Dense IERS/geodesy notation (ΔC̄_nm, C⁺nm, θ) and the domain's Doodson/Delaunay argument names
 // (cS/cPs, cL/cLPrime, cNPrime) — kept verbatim from Orekit, so they read alike by construction.
@@ -457,6 +459,179 @@ mod tests {
     ];
     const MU_EARTH: f64 = 3.986_004_415e14;
     const RE_EARTH: f64 = 6.378_136_46e6;
+    /// Eq. (6.15) over the shipped FES2004 table at the oracle epoch, `(n, m, ΔC̄, ΔS̄)`, at 40 digits:
+    /// `derivations/ocean_tide_iers.mac` (3).
+    const DCS_MAXIMA: [(usize, usize, f64, f64); count_cells(6)] = [
+        (
+            2,
+            0,
+            8.666_130_906_763_759_333_4e-11,
+            -5.779_563_670_388_967_423_5e-11,
+        ),
+        (
+            2,
+            1,
+            -3.589_491_203_181_032_697_7e-11,
+            3.215_670_192_254_323_374_2e-11,
+        ),
+        (
+            2,
+            2,
+            -2.368_089_474_826_439_621_4e-10,
+            -4.075_251_486_829_271_623_6e-10,
+        ),
+        (
+            3,
+            0,
+            1.632_358_869_790_181_354_6e-10,
+            1.214_024_859_748_589_305_3e-10,
+        ),
+        (
+            3,
+            1,
+            -5.767_054_465_198_900_896_2e-10,
+            -8.382_194_967_380_562_776_4e-11,
+        ),
+        (
+            3,
+            2,
+            4.449_670_626_694_489_351_5e-11,
+            -2.560_708_601_621_693_831_9e-11,
+        ),
+        (
+            3,
+            3,
+            -6.186_012_283_989_680_112_7e-10,
+            1.357_097_903_722_317_123_1e-11,
+        ),
+        (
+            4,
+            0,
+            -7.747_568_215_110_979_333_9e-11,
+            -7.088_010_683_344_062_223_9e-11,
+        ),
+        (
+            4,
+            1,
+            -5.648_333_470_153_775_400_3e-10,
+            -3.904_614_322_733_382_518_8e-11,
+        ),
+        (
+            4,
+            2,
+            1.632_797_775_009_298_844_4e-10,
+            3.461_413_884_568_563_171_3e-10,
+        ),
+        (
+            4,
+            3,
+            2.426_844_841_551_848_230_3e-10,
+            2.863_805_627_712_230_070_8e-10,
+        ),
+        (
+            4,
+            4,
+            9.354_054_238_615_614_98e-11,
+            -3.658_893_671_277_539_577_6e-10,
+        ),
+        (
+            5,
+            0,
+            -9.088_577_019_073_460_683_9e-11,
+            -6.655_543_710_380_280_878e-11,
+        ),
+        (
+            5,
+            1,
+            5.698_287_296_373_658_825_3e-10,
+            -1.194_454_936_120_357_143e-10,
+        ),
+        (
+            5,
+            2,
+            7.244_131_102_104_356_404_9e-11,
+            2.988_001_194_306_956_654_8e-10,
+        ),
+        (
+            5,
+            3,
+            -6.148_255_630_433_068_979_8e-11,
+            -2.361_714_485_267_336_636_2e-10,
+        ),
+        (
+            5,
+            4,
+            -2.742_890_154_002_682_427_4e-10,
+            2.723_151_016_092_077_026e-10,
+        ),
+        (
+            5,
+            5,
+            1.829_211_793_851_459_508_4e-10,
+            -2.226_201_502_903_634_072_1e-10,
+        ),
+        (
+            6,
+            0,
+            -3.924_682_435_823_712_977_5e-11,
+            1.068_919_385_873_068_819_3e-10,
+        ),
+        (
+            6,
+            1,
+            8.291_366_205_754_621_850_8e-11,
+            -8.612_704_894_231_876_987_4e-12,
+        ),
+        (
+            6,
+            2,
+            -1.482_149_168_650_242_346_9e-10,
+            -1.128_717_055_905_430_910_3e-10,
+        ),
+        (
+            6,
+            3,
+            -1.353_871_895_556_823_676_8e-10,
+            4.470_373_900_057_114_436_7e-11,
+        ),
+        (
+            6,
+            4,
+            -3.065_361_224_948_592_055_7e-11,
+            5.504_941_397_033_381_511_4e-11,
+        ),
+        (
+            6,
+            5,
+            -3.052_425_497_913_049_556_3e-11,
+            -1.827_269_139_941_639_051_8e-10,
+        ),
+        (
+            6,
+            6,
+            -3.573_981_005_964_024_159_1e-10,
+            2.646_396_224_466_889_050_2e-10,
+        ),
+    ];
+    /// The gradient of that field's potential at [`SAT_ITRF`], ΔS̄n0 set to zero as the chapter's note
+    /// on FES2004's zonal terms says (it multiplies sin 0λ): (3).
+    const ACCELERATION_MAXIMA: [f64; 3] = [
+        2.498_773_707_100_666_877_2e-9,
+        2.713_406_085_954_064_754_6e-9,
+        -2.849_702_724_339_476_463e-8,
+    ];
+
+    fn relative_distance(got: [f64; 3], want: [f64; 3]) -> f64 {
+        let diff = libm::sqrt((0..3).map(|i| (got[i] - want[i]).powi(2)).sum());
+        diff / libm::sqrt(want.iter().map(|v| v * v).sum())
+    }
+
+    /// `|got − want|` in units of `ε·GM/r²`: the force reads the tide off a field less its forced
+    /// monopole, so its error is the monopole's rounding, the last place of the total acceleration.
+    fn in_monopole_roundings(got: [f64; 3], want: [f64; 3], mu: f64, r: [f64; 3]) -> f64 {
+        let diff = libm::sqrt((0..3).map(|i| (got[i] - want[i]).powi(2)).sum());
+        diff / (f64::EPSILON * mu / (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]))
+    }
 
     fn fes2004_tide() -> OceanTide<impl Fn(f64) -> [[f64; 3]; 3], impl Fn(f64) -> (f64, [f64; 5])> {
         OceanTide {
@@ -471,50 +646,78 @@ mod tests {
         }
     }
 
-    /// The ocean-tide ΔC̄nm/ΔS̄nm (Eq. 6.15) match Orekit's `OceanTidesWave.addContribution` given
-    /// Orekit's own GMST + Delaunay arguments. This is a pure deterministic sum with no frame/gradient
-    /// path, so it is near-bit-exact; the residual is only libm-vs-Hipparchus `sincos` and the ±π
-    /// reconstruction of γ (the emitted GMST is `getGamma() − π`).
+    /// The distance to Orekit's `OceanTidesWave.addContribution` given Orekit's own GMST and Delaunay
+    /// arguments, cell by cell. [`delta_cs_is_eq_6_15_at_the_oracle_epoch`] decides.
     #[test]
-    fn delta_cs_matches_orekit() {
-        let tide = fes2004_tide();
-        let grid = tide.delta_cs(GMST, DELAUNAY);
-        let mut max_rel = 0.0_f64;
-        for &(n, m, want_c, want_s) in &OREKIT_DCS {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn delta_cs_distance_to_orekit() {
+        let grid = fes2004_tide().delta_cs(GMST, DELAUNAY);
+        let distances: std::vec::Vec<f64> = OREKIT_DCS
+            .iter()
+            .flat_map(|&(n, m, c, s)| {
+                [(grid[n][m][0], c), (grid[n][m][1], s)]
+                    .map(|(got, want)| (got - want).abs() / want.abs())
+            })
+            .collect();
+        crate::dsst::comparison_row(
+            "IERS 2010 ocean tide ΔC̄nm, ΔS̄nm, FES2004 to degree 6, at 2024-01-01",
+            "relative",
+            &distances,
+        );
+    }
+
+    /// Eq. (6.15) over the shipped FES2004 table at the oracle epoch, every cell of degree 2 to 6,
+    /// against `derivations/ocean_tide_iers.mac` (3) at 40 digits. (G3)
+    ///
+    /// The oracle's arguments are Orekit's unreduced radians (GMST 159, F 2026), so θ formed in f64
+    /// carries `ε·|θ|` of rounding before its sine. The same file (4) rounds θ as f64 does and finds
+    /// the cells move by 3.18e-12 relative; this test measures 3.18e-12.
+    #[test]
+    fn delta_cs_is_eq_6_15_at_the_oracle_epoch() {
+        let grid = fes2004_tide().delta_cs(GMST, DELAUNAY);
+        let mut worst = 0.0_f64;
+        for &(n, m, want_c, want_s) in &DCS_MAXIMA {
             for (got, want) in [(grid[n][m][0], want_c), (grid[n][m][1], want_s)] {
                 let rel = (got - want).abs() / want.abs();
-                max_rel = max_rel.max(rel);
+                worst = spacelab_testkit::nan_max(worst, rel);
                 assert!(
-                    rel < 1e-9,
+                    rel < 1e-11,
                     "ΔC̄/ΔS̄ ({n},{m}): got {got:e}, want {want:e}, rel {rel:.3e}"
                 );
             }
         }
-        std::eprintln!("ocean tide ΔC̄/ΔS̄ vs Orekit: max rel {max_rel:.3e}");
+        println!("ocean tide ΔC̄/ΔS̄ against eq. (6.15) at 40 digits: {worst:.3e} worst relative");
     }
 
-    /// The ocean-tide acceleration matches Orekit's `OceanTides` (FES2004, no pole tide, no
-    /// interpolation) at the emitted ITRF geometry (identity rotation: the state is already in the
-    /// ITRF). ΔC̄/ΔS̄ are bit-exact (above), so the ~5e-8 relative residual is NOT the coefficient sum
-    /// and NOT a gradient-model disagreement — it is the catastrophic cancellation of recovering the
-    /// tidal acceleration (~2.87e-8 m/s²) by subtracting the *forced* monopole from the field: this
-    /// port reuses the tested `GeoPotential` recursion, which sets C̄₀₀ = 1, then subtracts −μr/r³.
-    /// The monopole is ~7.21 m/s², so its ULP (~1.6e-15) sets an absolute floor of ~1.5e-15 m/s²,
-    /// i.e. ULP(μ/r²)/|a_tide| ≈ 5.6e-8 relative — matched by the observed 5.2e-8 (abs ≈ 1.5e-15
-    /// m/s², physically negligible). Orekit's ocean field has no monopole (C̄₀₀ = 0) and so avoids the
-    /// cancellation; this is the documented cost of the shared-evaluator technique, as in
-    /// [`crate::solid_tide`]. The bound is tight to what the cancellation floor allows.
+    /// The distance to Orekit's `OceanTides` (FES2004, no pole tide, no interpolation) at the emitted
+    /// ITRF geometry. Orekit's field has no monopole, so it avoids the cancellation this force pays
+    /// (`ε·GM/r²`, 5e-8 of the tide here). [`the_acceleration_is_the_gradient_of_eq_6_15`] decides.
     #[test]
-    fn acceleration_matches_orekit() {
-        let tide = fes2004_tide();
-        let a = tide.acceleration::<f64>(0.0, &SAT_ITRF, &[0.0; 3]);
-        let mag = libm::sqrt(A_TIDE_ITRF.iter().map(|v| v * v).sum());
-        let diff = libm::sqrt((0..3).map(|i| (a[i] - A_TIDE_ITRF[i]).powi(2)).sum());
-        let rel = diff / mag;
-        std::eprintln!("ocean tide acceleration vs Orekit: rel diff {rel:.3e}");
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn acceleration_distance_to_orekit() {
+        let a = fes2004_tide().acceleration::<f64>(0.0, &SAT_ITRF, &[0.0; 3]);
+        crate::dsst::comparison_row(
+            "IERS 2010 ocean tide acceleration, FES2004 to degree 6, norm of the difference",
+            "relative",
+            &[relative_distance(a, A_TIDE_ITRF)],
+        );
+    }
+
+    /// The acceleration at the oracle's satellite is the gradient of the potential of eq. (6.15)'s
+    /// field, differentiated and evaluated at 40 digits by `derivations/ocean_tide_iers.mac` (3). The
+    /// force keeps ΔS̄n0, which the chapter says to zero; it multiplies sin 0λ, so the two agree. The
+    /// error is the forced monopole's rounding, `ε·GM/r²`. (G3)
+    #[test]
+    fn the_acceleration_is_the_gradient_of_eq_6_15() {
+        let a = fes2004_tide().acceleration::<f64>(0.0, &SAT_ITRF, &[0.0; 3]);
+        let units = in_monopole_roundings(a, ACCELERATION_MAXIMA, MU_EARTH, SAT_ITRF);
+        println!(
+            "ocean tide against the gradient at 40 digits: {units:.3} monopole roundings, {:.3e} relative",
+            relative_distance(a, ACCELERATION_MAXIMA)
+        );
         assert!(
-            rel < 1e-7,
-            "spacelab ocean tide should match Orekit to the monopole-cancellation floor, got {rel:.3e}"
+            units < 4.0,
+            "{a:?} against {ACCELERATION_MAXIMA:?}: {units:.3} ε·GM/r²"
         );
     }
 
@@ -690,7 +893,7 @@ mod tests {
 
     /// Enabling admittance adds the minor waves to Eq. 6.15 (the wiring fires and is deterministic),
     /// while leaving the explicit-wave sum — the Orekit-exact default — untouched when `admittance`
-    /// is empty (guaranteed by [`delta_cs_matches_orekit`], which runs with `admittance: &[]`). (S2)
+    /// is empty (guaranteed by [`delta_cs_is_eq_6_15_at_the_oracle_epoch`], which runs with `admittance: &[]`). (S2)
     #[test]
     fn admittance_augments_delta_cs() {
         let base = fes2004_tide().delta_cs(GMST, DELAUNAY);
@@ -737,7 +940,7 @@ mod tests {
     /// the fold, both sides of each weighted accumulation, the reference lookup and the degree cut.
     /// Pointing a wave at itself at weight 1 makes the explicit-wave loop the oracle for the inferred
     /// one: same coefficients, same θ, so the two folds must land on the same double and their sum on
-    /// exactly twice it. That loop is what `delta_cs_matches_orekit` pins against Orekit.
+    /// exactly twice it. That loop is what `delta_cs_is_eq_6_15_at_the_oracle_epoch` pins to eq. (6.15).
     ///
     /// The second case is the same identity at `max_degree = GRID_MAX`, where the scratch channel
     /// grid is read at its last row and column — the only reach that separates `GRID_MAX + 1` from
@@ -806,7 +1009,7 @@ mod tests {
     /// The Earth orientation must be transparent: the tidal field is body-fixed, so rotating the
     /// satellite in and the acceleration out is the same computation whichever side does it. (G4)
     ///
-    /// `acceleration_matches_orekit` passes the identity — the oracle's state is already in the ITRF
+    /// `the_acceleration_is_the_gradient_of_eq_6_15` passes the identity — the oracle's state is already in the ITRF
     /// — where every off-diagonal entry is an exact zero and every diagonal one an exact one, and
     /// `x · 1 ≡ x / 1`, `x + 0 ≡ x − 0`. Both frame transforms are then unassertable: 24 mutants.
     #[test]
@@ -845,7 +1048,7 @@ mod tests {
         let norm = |v: [f64; 3]| libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
         let rel = norm([0, 1, 2].map(|i| got[i] - want[i])) / norm(want);
         std::eprintln!("ocean tide, rotated vs pre-rotated: {rel:.3e} relative");
-        // Loose by the standard of this file for the reason `acceleration_matches_orekit` records:
+        // Loose by the standard of this file for the reason `in_monopole_roundings` records:
         // subtracting the forced monopole cancels eight digits, so merely reassociating the same
         // arithmetic already costs ~5e-8. Every mutation here moves the answer by a fraction of it.
         assert!(

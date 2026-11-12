@@ -12,14 +12,17 @@
 //!
 //! All three use the general-relativity PPN values β = γ = 1. Compose them (and with the other forces)
 //! through the tuple [`Acceleration`] impls; there is deliberately no combined god-struct, matching
-//! Orekit's split into `Relativity`, `LenseThirringRelativity`, `DeSitterRelativity`, against which
-//! each term is validated (`tools/orekit-oracle`, `orekit_relativity.csv`).
+//! Orekit's split into `Relativity`, `LenseThirringRelativity`, `DeSitterRelativity`, which are a
+//! comparator (`docs/comparisons.md`).
 //!
 //! # Provenance
 //!
 //! Formula: IERS Conventions 2010, Eq. 10.12. Earth angular momentum per unit mass J = 9.8×10⁸ m²/s
 //! (IERS 2010, matching Orekit's `LenseThirringRelativity`). Speed of light is the exact SI value.
-//! Cross-checked term-by-term in `derivations/relativity.py`.
+//! `derivations/relativity_iers.mac` holds each term to its line of Eq. 10.12, derives Einstein's
+//! perigee advance, the Lense-Thirring node and perigee rates and the geodesic precession from them,
+//! recovers the chapter's 0.8, 180 and 19 mas/y, and evaluates the test goldens at 40 digits;
+//! `derivations/relativity.py`'s vectors are held to it there.
 
 // Post-Newtonian vector algebra: single-letter physics names (r, v, J, u) and GM_S/GM_E doc notation.
 #![allow(
@@ -148,7 +151,8 @@ impl<F: Fn(f64) -> ([f64; 3], [f64; 3])> Acceleration for DeSitter<F> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::excessive_precision)] // verbatim derivations/relativity.py golden vectors
+    // Verbatim derivations/relativity.py golden vectors and relativity_iers.mac's 40-digit output.
+    #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
     use super::*;
 
     const R: [f64; 3] = [7_000e3, 1_000e3, 2_000e3];
@@ -270,76 +274,118 @@ mod tests {
         );
     }
 
-    /// Third-party validation against Orekit 13's `Relativity` / `LenseThirringRelativity` /
-    /// `DeSitterRelativity` at a fixed GCRF geometry (`tools/orekit-oracle`,
-    /// `orekit_relativity.csv`). Schwarzschild and Lense-Thirring match Orekit to round-off (same
-    /// formula, same J = [0,0,9.8e8] since Orekit is given the GCRF as the body frame).
-    ///
-    /// For de Sitter the force is driven by the exact Earth-relative-to-Sun PV that Orekit's model
-    /// consumes; the two implementations then agree to round-off. Note Orekit reads that PV in the
-    /// Sun's *body-inertial* frame (pole at Dec ≈ +63.9°), whereas the production force uses the
-    /// GCRS-aligned geocentric Sun per IERS 2010 — the two differ only by the Sun's pole tilt, a
-    /// negligible rotation of a ~4×10⁻¹¹ m/s² term.
-    #[test]
-    fn matches_orekit() {
-        let mu = 3.986_004_415e14;
-        let mu_sun = 1.327_124_400_412_794_6e20;
-        let r = [7_000_000.0, 1_200_000.0, 2_000_000.0];
-        let v = [-1_500.0, 6_500.0, 3_200.0];
+    /// The geometry of the Orekit oracle (`tools/orekit-oracle`, `orekit_relativity.csv`): a GCRF
+    /// satellite, and the Earth's position and velocity about the Sun as Orekit's de Sitter reads
+    /// them, which eq. (10.12) calls `R` and `Ṙ`.
+    const ORACLE_MU_SUN: f64 = 1.327_124_400_412_794_6e20;
+    const ORACLE_R: [f64; 3] = [7_000_000.0, 1_200_000.0, 2_000_000.0];
+    const ORACLE_V: [f64; 3] = [-1_500.0, 6_500.0, 3_200.0];
+    const EARTH_FROM_SUN_R: [f64; 3] = [
+        13_122_691_835.549_543,
+        146_321_465_681.630_86,
+        -7_544_434_398.738_96,
+    ];
+    const EARTH_FROM_SUN_V: [f64; 3] = [-29_973.536_593_835, 2_488.441_675_955, -3_490.902_679_888];
 
-        let s = Schwarzschild { mu }.acceleration::<f64>(0.0, &r, &v);
-        assert_close(
-            s,
-            [
-                1.222_560_616_623_010_5e-08,
-                3.200_008_711_459_487_6e-09,
-                4.085_978_303_461_707_0e-09,
-            ],
-            1e-12,
-        );
+    /// Orekit 13's `Relativity`, `LenseThirringRelativity` and `DeSitterRelativity` at the oracle
+    /// geometry.
+    const OREKIT_TERMS: [[f64; 3]; 3] = [
+        [
+            1.222_560_616_623_010_5e-08,
+            3.200_008_711_459_487_6e-09,
+            4.085_978_303_461_707_0e-09,
+        ],
+        [
+            1.188_182_261_915_046_0e-10,
+            -2.812_044_603_809_647_3e-11,
+            1.128_156_995_421_512_4e-10,
+        ],
+        [
+            -3.875_708_605_574_370_0e-11,
+            -7.032_298_000_337_574_0e-12,
+            -3.883_028_775_444_161_0e-12,
+        ],
+    ];
 
+    /// Eq. (10.12)'s three lines at the oracle geometry, at 40 digits
+    /// (`derivations/relativity_iers.mac` (6)).
+    const SCHWARZSCHILD_MAXIMA: [f64; 3] = [
+        1.222560616623010378e-8,
+        3.2000087114594870656e-9,
+        4.0859783034617065981e-9,
+    ];
+    const LENSE_THIRRING_MAXIMA: [f64; 3] = [
+        1.1881822619150458855e-10,
+        -2.8120446038096469033e-11,
+        1.1281569954215122861e-10,
+    ];
+    const DE_SITTER_MAXIMA: [f64; 3] = [
+        -3.8757086055743790924e-11,
+        -7.0322980003376513426e-12,
+        -3.8830287754440477062e-12,
+    ];
+
+    /// Schwarzschild, Lense-Thirring and de Sitter at the oracle geometry. The force takes the
+    /// geocentric Sun and sets `R = −r_sun`, `Ṙ = −v_sun`, so it is handed the negation of the Earth's
+    /// heliocentric state.
+    fn oracle_terms() -> [[f64; 3]; 3] {
+        let s = Schwarzschild { mu: MU_EARTH }.acceleration::<f64>(0.0, &ORACLE_R, &ORACLE_V);
         let lt = LenseThirring {
-            mu,
+            mu: MU_EARTH,
             j: [0.0, 0.0, EARTH_ANGULAR_MOMENTUM_PER_MASS],
         }
-        .acceleration::<f64>(0.0, &r, &v);
-        assert_close(
-            lt,
-            [
-                1.188_182_261_915_046_0e-10,
-                -2.812_044_603_809_647_3e-11,
-                1.128_156_995_421_512_4e-10,
-            ],
-            1e-12,
-        );
-
-        // Earth relative to Sun, exactly as Orekit's de Sitter reads it. The force takes the
-        // geocentric Sun (r_sun, v_sun) and internally sets R = −r_sun, v_E = −v_sun, so pass the
-        // negation to make it use Orekit's R, v_E verbatim.
-        let r_es = [
-            13_122_691_835.549_543,
-            146_321_465_681.630_86,
-            -7_544_434_398.738_96,
-        ];
-        let v_es = [-29_973.536_593_835, 2_488.441_675_955, -3_490.902_679_888];
+        .acceleration::<f64>(0.0, &ORACLE_R, &ORACLE_V);
         let ds = DeSitter {
-            mu_sun,
-            sun_pv: move |_t| {
-                (
-                    [-r_es[0], -r_es[1], -r_es[2]],
-                    [-v_es[0], -v_es[1], -v_es[2]],
-                )
-            },
+            mu_sun: ORACLE_MU_SUN,
+            sun_pv: |_t| (EARTH_FROM_SUN_R.map(|x| -x), EARTH_FROM_SUN_V.map(|x| -x)),
         }
-        .acceleration::<f64>(0.0, &r, &v);
-        assert_close(
-            ds,
-            [
-                -3.875_708_605_574_370_0e-11,
-                -7.032_298_000_337_574_0e-12,
-                -3.883_028_775_444_161_0e-12,
-            ],
-            1e-10,
-        );
+        .acceleration::<f64>(0.0, &ORACLE_R, &ORACLE_V);
+        [s, lt, ds]
+    }
+
+    fn relative_distance(got: [f64; 3], want: [f64; 3]) -> f64 {
+        let diff = libm::sqrt((0..3).map(|i| (got[i] - want[i]).powi(2)).sum());
+        diff / mag(want)
+    }
+
+    const TERMS: [&str; 3] = [
+        "IERS 2010 eq 10.12 Schwarzschild acceleration",
+        "IERS 2010 eq 10.12 Lense-Thirring acceleration",
+        "IERS 2010 eq 10.12 de Sitter acceleration",
+    ];
+
+    /// The distance to Orekit 13 at the oracle geometry, term by term. Orekit reads the de Sitter
+    /// state in the Sun's body-inertial frame; the oracle hands that state over verbatim.
+    /// [`each_term_is_its_line_of_eq_10_12`] decides.
+    #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn distance_to_orekit() {
+        for ((name, got), want) in TERMS.iter().zip(oracle_terms()).zip(OREKIT_TERMS) {
+            crate::dsst::comparison_row(
+                &std::format!("{name}, norm of the difference"),
+                "relative",
+                &[relative_distance(got, want)],
+            );
+        }
+    }
+
+    /// Each term at the oracle geometry is its line of eq. (10.12) at β = γ = 1, evaluated at 40
+    /// digits by `derivations/relativity_iers.mac` (6) from the Earth's heliocentric `R`, `Ṙ` as the
+    /// chapter writes them. The worst term is 2.6e-16 relative, a few roundings of the f64 sum. (G3)
+    #[test]
+    fn each_term_is_its_line_of_eq_10_12() {
+        let want = [
+            SCHWARZSCHILD_MAXIMA,
+            LENSE_THIRRING_MAXIMA,
+            DE_SITTER_MAXIMA,
+        ];
+        for ((name, got), want) in TERMS.iter().zip(oracle_terms()).zip(want) {
+            let rel = relative_distance(got, want);
+            println!("{name}, against 40 digits: {rel:.3e} relative");
+            assert!(
+                rel < 1e-15,
+                "{name}: got {got:?}, want {want:?}, rel {rel:.3e}"
+            );
+        }
     }
 }

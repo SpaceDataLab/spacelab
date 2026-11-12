@@ -285,7 +285,7 @@ convergence order + Hamiltonian conservation + cross-checks against independentl
 | GeoPotential SIMD ≡ scalar / zonal-only | internal API contract | self-consistency + verified `forces::Zonal` | SIMD rel < 1e-12; zonal < 1e-9 | src/geopotential.rs |
 | Zonal J₂…J_{N+1} force | zonal-harmonic potential; classical J₂ node regression | analytic node-regression Ω̇; J₃ parity; energy/Lz | node < 3%; energy < 1e-9 rel; STM symplectic < 1e-6 | tests/zonal.rs, tests/forces.rs |
 | Time-variable gravity | IERS TN36 Table 6.2; ICGEM `.gfc` time-variable format | IERS 2010 Table 6.2 vendored rates; ICGEM parse vs hand series; `eigen6s2` excerpt | parse/eval < 1e-16…1e-18 | src/time_variable_gravity.rs |
-| Relativity (Schwarzschild / Lense-Thirring / de Sitter) | IERS TN36 §10.3 | closed-form Python golden **and** Orekit 13 golden CSV | Python < 1e-12; Orekit round-off (de Sitter < 1e-10) | src/relativity.rs |
+| Relativity (Schwarzschild / Lense-Thirring / de Sitter) | IERS Conventions (2010) eq (10.12) | **Maxima** `derivations/relativity_iers.mac`: eq (10.12) at β = γ = 1 is the shipped arithmetic; averaged over a Kepler orbit its lines give Einstein's perigee advance, the Lense-Thirring node and perigee rates and the geodesic precession, and at the shipped J the chapter's 0.8, 180 and 19 mas/y; each term at Orekit's geometry at 40 digits (G3); the Python closed-form vectors held to it; Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 2.6e-16 (bound 1e-15); the Python vectors 6.6e-16 (bound 2e-15) | src/relativity.rs |
 | Knocke Earth albedo/IR | Knocke, Ries & Tapley 1988; Lambert's law | **G3**, all from `derivations/knocke_lambert.mac`: a uniform sphere against its view factor `(R/r)²` at Δ = 1°, 15°, 30° and 500 km, 20 000 km; the central cap against `R² sin²Δ/d²`; the polar-night closed form; an exitance linear in the point, `α + p̂·b`, against its flux along and across `r̂` ((6), (7)); a thin crown's three moments at 30 digits (8). The grid under Orekit's cosine: Orekit 13 `KnockeRediffusedForceModel` golden, 4 LEO geometries | uniform sphere < 1e-13 along and across `r̂` (1.0e-14 measured); cap < 1e-14; polar night < 0.001 Δ² from Δ = 30° to 2π/2000 (5.8e-9 there); linear exitance < 1e-12 from Δ = π to 2π/4000 at 500 km and 20 000 km (6.0e-14 measured); thin crown < 1e-13; Orekit < 1e-12 | src/earth_radiation.rs |
 | Third-body force (Battin form) | Battin, *Astrodynamics* — f(q) indirect-term form | independent direct difference-of-terms; tidal-field limit | Battin≡direct < 1e-8; tidal < 1e-4 | tests/solar_perturbations.rs |
 | SRP force (direction / shadow / 1/d²) | cannonball SRP; solar irradiance at 1 AU | analytic geometry (1 AU ref 1.368e-7) | < 1e-10; near/far≈4 < 1e-3 | tests/solar_perturbations.rs |
@@ -442,8 +442,8 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 
 | Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
-| Ocean tide ΔC̄/ΔS̄ (FES2004) | IERS TN36 §6.3; FES2004 as the IERS Conventions Centre publishes it (`verify.sh` regenerates the table from that file) | Orekit 13 `OceanTides` FES2004 deg/order 6 | rel < 1e-9 | src/ocean_tide.rs |
-| Ocean tide acceleration (FES2004) | IERS TN36 §6.3 (the same IERS FES2004 file) | Orekit 13 `OceanTides` (ITRF) | rel < 1e-7 (meas 5.2e-8, cancellation floor) | src/ocean_tide.rs |
+| Ocean tide ΔC̄/ΔS̄ (FES2004) | IERS Conventions (2010) eq (6.15); FES2004 as the IERS Conventions Centre publishes it (`verify.sh` regenerates the table from that file) | **Maxima** `derivations/ocean_tide_iers.mac`: eq (6.15) in complex form is the shipped arithmetic, the Doodson decode and Delaunay map follow from eq 5.43's mean longitudes; the 25 cells at the oracle epoch at 40 digits (G3); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 3.2e-12 (bound 1e-11): θ's f64 rounding at Orekit's unreduced arguments, which (4) reproduces to 3.18e-12 | src/ocean_tide.rs |
+| Ocean tide acceleration (FES2004) | IERS Conventions (2010) eq (6.15) (the same IERS FES2004 file) | **Maxima** `derivations/ocean_tide_iers.mac`: the gradient of the field's potential at 40 digits, ΔS̄n0 zeroed as the chapter's FES2004 note says (G3); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 0.94 of ε·GM/r² (bound 4): the forced monopole's rounding, 5.2e-8 of the tide | src/ocean_tide.rs |
 | Ocean tide admittance weights | IERS TN36 §6.3 admittance; FES2014b (aviso-fes) primary file | pyfes (FES2014b / aviso-fes), spline + linear minor waves | < 1e-6 (meas ~7e-15) | src/ocean_tide_admittance.rs |
 | Solid Earth tide Step 1 (eqs 6.6, 6.7, 6.14) | IERS Conventions (2010) ch. 6 as updated 2018-02-01, Table 6.3 | **Maxima** `derivations/solid_tide_iers.mac`: eq (6.6) in complex form is the shipped real pair, Table 6.3 and (6.14) read back; the acceleration the gradient of the chapter's potential at 40 digits, Step 1 at the reference geometry and Step 1 + 2 + pole tide at Orekit's (G3); the Python finite-difference reference held to 2.3e-9; Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 2.1 and 0.23 of ε·GM/r² (bound 8): the tide is read off a degree-4 field less its monopole, so its error is the monopole's rounding, 1e-8 of the tide | src/solid_tide.rs |
 | Solid Earth tide Step 2 (eq 6.8) | IERS Conventions (2010) ch. 6, Tables 6.5a–6.5c | **Maxima** `derivations/tide_step2_iers.mac` on the chapter's text: the shipped tables are Tables 6.5a/b/c row for row, every row's Delaunay multipliers follow from its Doodson number and its amplitudes from its δk; `solid_tide_iers.mac`: eq (6.8) in complex form is the shipped per-band arithmetic, and its sum at the oracle epoch (G3); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)) | 1.9e-14 (bound 1e-13) | src/solid_tide.rs, src/tide_step2_tables.rs |
@@ -11298,9 +11298,12 @@ rates (zonal, Sun and Moon, the 1:1 and 2:1 resonances) and the box-wing's lift 
 Batch 2 (2026-11-13) parks the solid tide's four — Step 2, the two pole tides and the acceleration — after
 `solid_tide_iers.mac` derived the chapter's equations into the force and `tide_step2_iers.mac` held
 the Step-2 tables against chapter 6 row by row.
-**Today: 101
-comparator-decided tests of 3 691** — name 64, file 18, fixture 4, doc 15; 42 of them Orekit's (29 by
-name), 22 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+Batch 3 (2026-11-13) parks the ocean tide's two after `ocean_tide_iers.mac` derived eq (6.15) and
+the Doodson-to-Delaunay map into the force, and relativity's one after `relativity_iers.mac` held
+eq (10.12) to the force and to its classical limits.
+**Today: 98
+comparator-decided tests of 3 694** — name 61, file 18, fixture 4, doc 15; 39 of them Orekit's (26 by
+name), 19 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 The parked tests are the suite: `just compare` (`tools/compare.py`) runs each one alone, reads the
@@ -11378,10 +11381,7 @@ crates/spacelab-propagation/src/maneuver.rs::constant_thrust_matches_orekit | na
 crates/spacelab-propagation/src/maneuver.rs::impulse_matches_orekit | name:orekit
 crates/spacelab-propagation/src/maneuver.rs::polynomial_empirical_matches_orekit | name:orekit
 crates/spacelab-propagation/src/maneuver.rs::rtn_frame_matches_orekit | name:orekit
-crates/spacelab-propagation/src/ocean_tide.rs::acceleration_matches_orekit | name:orekit
 crates/spacelab-propagation/src/ocean_tide.rs::admittance_weights_match_pyfes | name:pyfes
-crates/spacelab-propagation/src/ocean_tide.rs::delta_cs_matches_orekit | name:orekit
-crates/spacelab-propagation/src/relativity.rs::matches_orekit | name:orekit
 crates/spacelab-propagation/src/spacecraft.rs::a_null_radiation_flux_returns_zero_and_the_threshold_is_strict | doc:orekit
 crates/spacelab-propagation/src/spacecraft.rs::an_array_edge_on_to_the_sun_falls_back_to_an_arbitrary_perpendicular | doc:orekit
 crates/spacelab-propagation/tests/measured_density.rs::the_three_hourly_ap_array_is_what_carries_the_storm | doc:orekit

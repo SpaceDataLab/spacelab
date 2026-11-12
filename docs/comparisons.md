@@ -57,6 +57,11 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | DSST Sun and Moon short periods, osculating k, h, q, p, λ | 1 | 20 | 1.208e-12 | 3.072e-13 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | Harris–Priester density | relative | 16 | 4.233e-16 | 1.237e-16 | `crates/spacelab-propagation/src/harris_priester/mod.rs::density_distance_to_orekit` |
 | NRLMSISE-00 C (Brodowski) | release 20041227 | test_gtd7's 17 printed cases, 11 fields each, the printed zeros left out | relative | 165 | 4.803e-07 | 1.795e-07 | `crates/spacelab-propagation/src/nrlmsise00/mod.rs::gtd7_matches_reference_vectors` |
+| Orekit | 13.1.7 | IERS 2010 ocean tide ΔC̄nm, ΔS̄nm, FES2004 to degree 6, at 2024-01-01 | relative | 50 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/ocean_tide.rs::delta_cs_distance_to_orekit` |
+| Orekit | 13.1.7 | IERS 2010 ocean tide acceleration, FES2004 to degree 6, norm of the difference | relative | 1 | 5.229e-08 | 5.229e-08 | `crates/spacelab-propagation/src/ocean_tide.rs::acceleration_distance_to_orekit` |
+| Orekit | 13.1.7 | IERS 2010 eq 10.12 Schwarzschild acceleration, norm of the difference | relative | 1 | 3.902e-16 | 3.902e-16 | `crates/spacelab-propagation/src/relativity.rs::distance_to_orekit` |
+| Orekit | 13.1.7 | IERS 2010 eq 10.12 Lense-Thirring acceleration, norm of the difference | relative | 1 | 8.692e-17 | 8.692e-17 | `crates/spacelab-propagation/src/relativity.rs::distance_to_orekit` |
+| Orekit | 13.1.7 | IERS 2010 eq 10.12 de Sitter acceleration, norm of the difference | relative | 1 | 4.058e-15 | 4.058e-15 | `crates/spacelab-propagation/src/relativity.rs::distance_to_orekit` |
 | Orekit | 13.1.7 | IERS 2010 Step-2 ΔC̄20, ΔC̄21, ΔS̄21, ΔC̄22, ΔS̄22 at 2024-01-01 | relative | 5 | 4.837e-10 | 2.187e-10 | `crates/spacelab-propagation/src/solid_tide.rs::step2_distance_to_orekit` |
 | Orekit | 13.1.7 | IERS 2010 solid pole tide ΔC̄21, ΔS̄21 about the 2010 mean pole | relative | 2 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/solid_tide.rs::pole_tide_distance_to_orekit` |
 | Orekit | 13.1.7 | IERS 2010 ocean pole tide ΔC̄21, ΔS̄21 about the 2010 mean pole | relative | 2 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/solid_tide.rs::ocean_pole_tide_distance_to_orekit` |

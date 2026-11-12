@@ -32,6 +32,7 @@ SPECS=(
   "iers-tab5.3a|https://iers-conventions.obspm.fr/content/chapter5/additional_info/tab5.3a.txt||txt|IERS Conventions (2010) Table 5.3a, IAU 2000A_R06 nutation in longitude"
   "iers-tab5.3b|https://iers-conventions.obspm.fr/content/chapter5/additional_info/tab5.3b.txt||txt|IERS Conventions (2010) Table 5.3b, IAU 2000A_R06 nutation in obliquity"
   "iers-fes2004|https://iers-conventions.obspm.fr/content/chapter6/additional_info/tidemodels/fes2004_Cnm-Snm.dat||dat|IERS Conventions (2010) chapter 6, FES2004 Cnm-Snm to (100,100), the Conventions Centre copy"
+  "python-sgp4-propagation|https://raw.githubusercontent.com/brandon-rhodes/python-sgp4/2.27/sgp4/propagation.py||py|python-sgp4 2.27 sgp4/propagation.py (MIT), Vallado's SGP4/SDP4 routines line for line"
 )
 
 for spec in "${SPECS[@]}"; do

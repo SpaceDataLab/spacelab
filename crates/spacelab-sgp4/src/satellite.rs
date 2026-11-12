@@ -421,7 +421,7 @@ impl Satellite {
     ///
     /// # Errors
     ///
-    /// [`PropagationError::Diverged`] if SGP4 cannot carry the object there.
+    /// [`PropagationError::Diverged`] or [`PropagationError::Decayed`], as `propagate_minutes`.
     pub fn propagate_at(&self, utc: UtcDateTime) -> Result<StateVector<Teme>, PropagationError> {
         self.propagate_minutes(self.minutes_since_epoch(utc))
     }
@@ -434,9 +434,9 @@ impl Satellite {
     ///
     /// # Errors
     ///
-    /// [`PropagationError::Diverged`] if SGP4 cannot carry the object there: the
-    /// mean eccentricity left `[0, 1)`, the semi-latus rectum went negative, or the
-    /// object decayed. The verification set contains cases designed to do each.
+    /// [`PropagationError::Diverged`] if the mean or perturbed elements left the model's domain
+    /// (the document's codes 1–4), [`PropagationError::Decayed`] if the radius fell below the
+    /// Earth's (code 6). `tests/document_refusals.rs` holds both to the document's own model.
     pub fn propagate_minutes(&self, minutes: f64) -> Result<StateVector<Teme>, PropagationError> {
         let minutes = sgp4::MinutesSinceEpoch(minutes);
         let p = match self.convention {

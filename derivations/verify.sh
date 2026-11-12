@@ -655,6 +655,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima sgp4_regime.mac" "expected 2 checks to hold, found $holds"
     fi
 
+    out=$(macf sgp4_document.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima sgp4_document.mac: the document's SGP4 at 40 digits reproduces tcppver.out to < 1 mm, ends every published section where it first refuses, and DOCUMENT_REFUSALS is its every refusal"
+    else
+        bad "maxima sgp4_document.mac" "expected 4 checks to hold, found $holds"
+    fi
+
     out=$(macf hansen_zonal.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
@@ -930,6 +938,28 @@ if [ -f "$FES2004_DAT" ] && have python3; then
     rm -f "$regenerated"
 else
     skip "ocean_tide_fes2004.py" "tools/fetch-specs.sh output"
+fi
+
+# SGP4 as the document defines it: `sgp4_vallado.mac` claims to be python-sgp4's `propagation.py`
+# (Vallado's routines, MIT) translated statement for statement into Maxima. This re-runs the
+# translator on the pinned snapshot `tools/fetch-specs.sh` fetches and compares every byte;
+# `sgp4_document.mac`, above, evaluates the translation.
+SGP4_PY=../data/specs/python-sgp4-propagation.fa851ca7.py
+SGP4_PY_SHA256=fa851ca7d8710eb54d684de61bc84cc8a3687241518e4ee4cfe8249e0fb33a92
+if [ -f "$SGP4_PY" ] && have python3; then
+    regenerated=$(mktemp)
+    if [ "$(sha256sum "$SGP4_PY" | cut -d' ' -f1)" != "$SGP4_PY_SHA256" ]; then
+        bad "sgp4_vallado_maxima.py" "$SGP4_PY is not the pinned python-sgp4 file"
+    elif ! timeout 120 python3 -I sgp4_vallado_maxima.py "$SGP4_PY" "$regenerated" >/dev/null 2>&1; then
+        bad "sgp4_vallado_maxima.py" "the translator failed on the pinned python-sgp4 file"
+    elif cmp -s "$regenerated" sgp4_vallado.mac; then
+        ok "sgp4_vallado_maxima.py: sgp4_vallado.mac is the pinned propagation.py, translated statement for statement"
+    else
+        bad "sgp4_vallado_maxima.py" "sgp4_vallado.mac differs from what the pinned propagation.py translates to"
+    fi
+    rm -f "$regenerated"
+else
+    skip "sgp4_vallado_maxima.py" "tools/fetch-specs.sh output"
 fi
 
 # The DSST's Gauss-Legendre tables: gauss_legendre_tables.gp generates them from P_n and prints the

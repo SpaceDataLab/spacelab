@@ -1,0 +1,163 @@
+/* SGP4/SDP4 as the document defines it, evaluated at 40 digits (plans/17 Ф17.J).
+
+   SGP4 is a document-defined model (D-18 a): Spacetrack Report #3 as revised by Vallado et al.
+   (2006), AIAA 2006-6753, whose routines `sgp4_vallado.mac` carries, translated statement for
+   statement by `sgp4_vallado_maxima.py`. This file runs the document's own driver (`testcpp`) on the
+   33 published element sets and holds four things:
+
+   (1) G5: the model reproduces every row of the published `tcppver.out` that it answers, so the
+       translation is the document's arithmetic;
+   (2) the document's error tests end each published section where the printout ends: the driver
+       prints t = 0 regardless, then each grid time until the first nonzero `satrec.error`, so a
+       section's row count is fixed by where the model first refuses;
+   (3) `DOCUMENT_REFUSALS` in `tests/document_refusals.rs` is every refusal the model makes on the
+       driver's grid, as runs [set, first minute, last minute, class] (class 1: codes 1-4, the mean
+       or perturbed elements left the model's domain; class 6: code 6, decayed). The Rust test holds
+       `Satellite::propagate_minutes` to it at every grid time, the answered ones included;
+   (4) no verdict lies within 1e-9 of its threshold, so double arithmetic cannot change one.
+
+   The element sets are read as `twoline2rv` reads them; the epoch is exact, from the two-digit year
+   and the day of year. WGS-72, opsmode 'i', as the published run.
+
+   timeout 1800 maxima --very-quiet -Q -b sgp4_document.mac                                        */
+
+display2d : false$
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+fpprec : 40$
+load("sgp4_vallado.mac")$
+
+fixture : "../crates/spacelab-sgp4/tests/fixtures/sgp4_ver_tle.txt"$
+published : "../crates/spacelab-sgp4/tests/fixtures/tcppver.out"$
+refusal_test : "../crates/spacelab-sgp4/tests/document_refusals.rs"$
+
+/* WGS-72, getgravconst('wgs72'). */
+mu : 3986008 / 10$
+re : 6378135 / 1000$
+j2 : 1082616 / 10^9$
+j3 : -253881 / 10^11$
+j4 : -165597 / 10^11$
+xke : 60 / sqrt(re^3 / mu)$
+wgs72 : map(bfloat, [1 / xke, mu, re, xke, j2, j3, j4, j3 / j2])$
+
+/* Python's line[a:b], 0-based and end-exclusive. */
+cut(line, a, b) := substring(line, a + 1, b + 1)$
+num(s) := rust_decimal(strim(" ", s))$
+signed(c) := if c = "-" then -1 else 1$
+
+read_sets(path) := block([s : openr(path), line, out : [], parts],
+  while (line : readline(s)) # false do
+    if slength(strim(" ", line)) > 0 and charat(line, 1) # "#" then (
+      parts : split(line, "|"),
+      out : cons([parts[1], parts[2], num(parts[3]), num(parts[4]), num(parts[5])], out)),
+  close(s),
+  reverse(out))$
+
+/* The binary64 nearest a positive rational, ties to even: the driver holds the epoch's Julian date
+   as one double, which sits up to 2.3e-10 d (20 us) off the date the TLE prints. That is part of the
+   published run: 23333's lunar terms (a = 241 600 km) move its t = 0 position 4.2 mm across it. */
+binary64(x) := block([e : 0, u, q, n],
+  while 2^(e + 1) <= x do e : e + 1,
+  while 2^e > x do e : e - 1,
+  u : 2^(e - 52), q : x / u, n : floor(q),
+  if q - n > 1/2 or (q - n = 1/2 and oddp(n)) then n : n + 1,
+  n * u)$
+
+/* `twoline2rv` (python-sgp4 io.py): fields, units, and the epoch in days from 1949 Dec 31 0h. */
+init_set(l1, l2) := block([yy, year, days, jd0, xpdotp, ndot, nddot, bstar, ecco],
+  yy : parse_string(cut(l1, 18, 20)),
+  year : if yy < 57 then yy + 2000 else yy + 1900,
+  days : num(cut(l1, 20, 32)),
+  jd0 : 367 * year - floor(7 * year / 4) + 31 + 3442027 / 2,
+  xpdotp : 1440 / (2 * %pi),
+  ndot : num(cut(l1, 33, 43)),
+  nddot : signed(cut(l1, 44, 45)) * num(cut(l1, 45, 50)) / 10^5 * 10^parse_string(strim(" ", cut(l1, 50, 52))),
+  bstar : signed(cut(l1, 53, 54)) * num(cut(l1, 54, 59)) / 10^5 * 10^parse_string(strim(" ", cut(l1, 59, 61))),
+  ecco : num(ssubst("0", " ", cut(l2, 26, 33))) / 10^7,
+  kill(sat),
+  sat["margin"] : 10^10,
+  vallado_sgp4init(wgs72, "i", strim(" ", cut(l1, 2, 7)), bfloat(binary64(jd0 + days - 1) - 4866563 / 2),
+    bfloat(bstar), bfloat(ndot / (xpdotp * 1440)), bfloat(nddot / (xpdotp * 1440^2)), bfloat(ecco),
+    num(cut(l2, 34, 42)) * v_deg2rad, num(cut(l2, 8, 16)) * v_deg2rad, num(cut(l2, 43, 51)) * v_deg2rad,
+    bfloat(num(cut(l2, 52, 63)) / xpdotp), num(cut(l2, 17, 25)) * v_deg2rad))$
+
+/* One call of the document's `sgp4`: [error code, [r, v] or false, margin]. */
+state_at(t) := block([rv],
+  sat["margin"] : 10^10,
+  rv : vallado_sgp4(bfloat(t), wgs72),
+  [sat["error"], if sat["error"] = 0 then rv else false, sat["margin"]])$
+
+/* The driver's grid: t = 0 first, then start, start + step, ... with the last step clamped to stop. */
+grid(start, stop, dt) := block([ts : start, out : [0]],
+  if abs(ts) > 1 / 10^8 then ts : ts - dt,
+  while ts < stop do (ts : ts + dt, if ts > stop then ts : stop, out : cons(ts, out)),
+  reverse(out))$
+
+read_published(path) := block([s : openr(path), line, out : [], cur : false, f],
+  while (line : readline(s)) # false do (
+    f : sublist(split(strim(" ", line), " ", false), lambda([w], slength(w) > 0)),
+    if length(f) = 2 and f[2] = "xx" then (
+      if cur # false then out : cons(cur, out),
+      cur : [parse_string(f[1]), []])
+    else if length(f) >= 7 then cur[2] : endcons(map(num, firstn(f, 7)), cur[2])),
+  if cur # false then out : cons(cur, out),
+  close(s),
+  reverse(out))$
+
+sets : read_sets(fixture)$
+sections : read_published(published)$
+must(length(sets) = 33 and length(sections) = 33, "the 33 published sets and the 33 published sections")$
+
+class(code) := if code = 0 then 0 else if code = 6 then 6 else 1$
+
+worst_r : 0$ worst_v : 0$ worst_at : false$ inside : 0$ compared : 0$ declined : 0$
+rows_ok : true$ runs : []$ least : 10^10$ least_at : false$
+for k : 1 thru length(sets) do block([set : sets[k], times, verdicts, sec, rows, first_bad, expected,
+                                      codes : [], run : false],
+  init_set(set[1], set[2]),
+  times : grid(set[3], set[4], set[5]),
+  verdicts : map(state_at, times),
+  sec : sections[k],
+  rows : sec[2],
+  /* (1) the answered rows against the printout */
+  for j : 1 thru length(rows) do block([row : rows[j], v : verdicts[j], dr, dv],
+    if v[1] # 0 then declined : declined + 1
+    else (
+      if row[1] # times[j] then error("row time", row[1], "is not grid time", times[j], "of", sec[1]),
+      dr : sqrt(sum((v[2][1][i] - row[i + 1])^2, i, 1, 3)),
+      dv : sqrt(sum((v[2][2][i] - row[i + 4])^2, i, 1, 3)),
+      compared : compared + 1,
+      if dr <= 5 / 10^9 * sqrt(3) then inside : inside + 1,
+      if dr > worst_r then (worst_r : dr, worst_at : [sec[1], row[1]]),
+      if dv > worst_v then worst_v : dv)),
+  /* (2) where the document's driver stops */
+  first_bad : if verdicts[1][1] # 0 then 0
+              else block([n : 0], for j : 2 thru length(times) while verdicts[j][1] = 0 do n : n + 1, n),
+  expected : 1 + first_bad,
+  if expected # length(rows) then (rows_ok : false,
+    print("    ", sec[1], ": the model stops after", expected, "rows, the printout after", length(rows))),
+  /* (3) refusal runs, and (4) the margins */
+  for j : 1 thru length(times) do block([c : class(verdicts[j][1])],
+    if verdicts[j][3] < least then (least : verdicts[j][3], least_at : [sec[1], times[j]]),
+    if verdicts[j][1] # 0 then codes : cons(verdicts[j][1], codes),
+    if run # false and (c # run[4] or c = 0) then (runs : cons(run, runs), run : false),
+    if c # 0 then (if run = false then run : [k - 1, times[j], times[j], c] else run[3] : times[j])),
+  if run # false then runs : cons(run, runs),
+  if codes # [] then print("    set", k - 1, sec[1], "refused at", length(codes), "of", length(times),
+                           "grid times; codes", map(lambda([c], [c, length(sublist(codes, lambda([x], x = c)))]),
+                                                    listify(setify(codes)))))$
+runs : reverse(runs)$
+
+print("    G5:", compared, "rows compared,", declined, "printed rows the model refuses; worst position",
+      float(worst_r * 10^6), "mm at", worst_at, "; worst velocity", float(worst_v * 10^6), "mm/s;",
+      inside, "rows inside the print floor")$
+must(declined = 1 and worst_r < 10^-6 and worst_v < 10^-9 and inside > 0.9 * compared,
+     "(1) holds: the translated model reproduces every answered row of tcppver.out to < 1 mm")$
+must(rows_ok, "(2) holds: every published section ends where the document's error tests first refuse")$
+
+print("    refusal runs [set, first, last, class]:", runs)$
+table : map(rust_rational, rust_table(refusal_test, "DOCUMENT_REFUSALS"))$
+must(table = flatten(runs), "(3) holds: DOCUMENT_REFUSALS is every refusal the document's model makes on the driver's grid")$
+print("    nearest edge, absolute:", least, "at", least_at)$
+must(least > 10^-9, "(4) holds: no verdict lies within 1e-9 of its threshold")$
+print("DONE")$

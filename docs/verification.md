@@ -416,6 +416,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | The quiet latitude structure | Ф23.V: the high-minus-low latitude contrast of the held-out residual on the quiet rows, by season, by height and, read after, by flux; two latitude rows of the form fixed before their folds (`degree3`, `boundary_latitude`) and three read after (`flux_latitude`, `flux_boundary_latitude`, `no_swarm`); the measured density boxcar-smoothed as Swarm's GPS densities are | the rule written into the tool before each run; `smoothing_shift` exact to 1e-13 on a synthetic series with a gap; `no_swarm`'s Swarm fold equals the shipped one to 1e-11 | CHAMP +11.4, GOCE +12.1 in both seasons (winter +17), +7 to +16 at F10.7a ≥ 100 at every height, negative only below 100 sfu above 400 km; no row meets the rule (`degree3` −0.08, `boundary_latitude` −0.03 and GOCE overshot); `flux_boundary_latitude` −0.31 [−0.37, −0.25], after the data → blind months (Ф23.X); Swarm's resolution moves CHAMP/GOCE by 2 points only (Ф23.Y) (§10.49) | tools/latitude-contrast.py, tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py |
 | Uncertainty beyond six bins | Ф30.I: the shipped six-cell σ against a continuous `ln σ(x)` in the model's inputs and two split-conformal rivals, each built from the other four families' held-out residuals; coverage, half-width, log score and CRPS by cell, family, height, storm phase and the campaign rows; the five fold fits' spread as the parameter part | the normal CRPS from `E|X − y| − E|X − X′|/2` in Maxima (18 identities) and against its defining integral in PARI/GP to 1e-45; Python against PARI to 16 digits; the σ fit recovers a known β; each fold refit reproduces its saved residual to 7e-15 | no method meets the target (the worst family per cell 78–88 %): the limitation stays printed; `continuous` log score −0.019 [−0.027, −0.011], CRPS −0.060 [−0.082, −0.038], GOCE 99.6 → 90.6 %, campaign regime 5 84.4 → 89.4 %; conformal adds nothing (q 1.61–1.63); the parameter part is ≤ 1.5 % of σ² (§10.50) | tools/uncertainty-scores.py, derivations/gaussian_scores.mac |
 | Other benchmarks' cases | Ф25.E: STORM-AI's 4 537 evaluation cases (CC BY 4.0) and AETHER-P3 Nowcast's twelve, as manifests and `windows` folds that keep out every satellite inside any case's span, the benchmarks' held-out satellites and, for AETHER-P3, every row from 2024; SDTM-1 on persistence and on reconstruction against NRLMSISE-00 and the clean-room JB2008 on measured indices | the orbit-mean operator on the measured density against STORM-AI's target (median 0.29 %, 99th percentile 2.3 %); the case count per subset and satellite against the devkit; our NRLMSISE-00 and JB2008 against AETHER-P3's Table 9 (means 0.428 / 0.434 and 0.213 / 0.220); `LeakError` on a padded, held-out or late row | private set: SDTM-1 persistence RMSE 36 % below JB2008; Phase 1.2 52 % above it, the fold having no deep minimum (median ln ratio +0.33 in 2018–2020); AETHER-P3 RE 0.250, between JB2008 0.213 and NRLMSISE-00 0.428, behind HASDM 0.147 and AETHER-P3 0.116 (§10.51) | tools/benchmark-splits.py, tools/evaluate-sdtm.py, tools/test_evaluate_sdtm.py |
+| The hourly Hpo driver beside Zhu et al. | Ф20.F: GFZ Hpo version 3.0 confirmed on the live file; SDTM-1 driven by `ap60` against the 3-hourly `ap` on the same held-out family-fold rows, by the day's `Ap`, beside Zhu et al. (2026) for JB2008 | both fields scored on the same 365 211 rows (checked); a paired interval over storms and 27-day blocks, withheld below ten clusters | `Ap` 15–100: C/O RMSE −1.0 to −1.7 %, MAPE −0.3 to −0.6 points (JB2008 in Zhu et al.: −4 to −11 %); from `Ap` 100 no sign; two storms at ≥ 200 move the wrong way (+8 %); not shipped, D-26 (§10.52) | tools/hpo-driver-table.py |
 
 ### Tides
 
@@ -10545,6 +10546,48 @@ Run:
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/benchmark-splits.py table aether-p3
 
 The archives, the targets and the scores stay under `data/`, which is never committed.
+
+### 10.52 The hourly Hpo driver beside Zhu et al. (Ф20.F)
+
+GFZ's Hpo indices are at version 3.0 (Matzka et al. 2024, doi:10.5880/Hpo.0003, CC BY 4.0). The live file's header,
+read 2026-11-12, is byte for byte that of the 2026-09-14 copy in the SDTM-1 data freeze. So every `ap60` fit here,
+§10.30's included, already reads version 3.0, and there is nothing to refit.
+
+Zhu et al. (2026, *Earth Space Sci.*, doi:10.1029/2025EA004454) drive JB2008, DTM2020 and NRLMSIS 2.1 by the Hpo
+indices instead of Kp and ap over 126 storms. JB2008 gains 3–9 % in the mean computed/observed ratio and 4–11 % in
+its RMSE in moderate and intense storms, and loses in super storms. DTM2020 gains less, NRLMSIS 2.1 less than 1–2 %.
+`tools/hpo-driver-table.py` makes the same comparison for SDTM-1 from the harness's family folds of the `default`
+and `ap60` fields. Every row is held out from the fit that scores it, and both fields are scored on the same
+365 211 rows. Their storm classes are not reproduced here; the day's `Ap` stands in for them. `C/O` is model over
+measured. A change is `ap60` minus the 3-hourly `ap`, with a 95 % interval that resamples storm windows and 27-day
+blocks, given only where there are at least ten of them.
+
+| day's `Ap` | rows | clusters | C/O mean, 3-hourly, `ap60` | C/O RMSE, 3-hourly, `ap60` | RMSE change | MAPE, 3-hourly, `ap60` | MAPE change, points |
+|---|---|---|---|---|---|---|---|
+| 0–15 | 302 115 | 531 | 1.000, 0.996 | 0.440, 0.438 | −0.4 [−0.7, +0.3] % | 20.9, 20.9 | −0.0 [−0.1, +0.0] |
+| 15–30 | 47 849 | 441 | 0.984, 0.986 | 0.271, 0.268 | **−1.1** [−1.7, −0.6] % | 19.9, 19.6 | **−0.3** [−0.4, −0.2] |
+| 30–50 | 10 948 | 227 | 1.008, 1.014 | 0.284, 0.279 | **−1.7** [−3.0, −0.5] % | 21.1, 20.6 | **−0.5** [−0.7, −0.3] |
+| 50–100 | 3485 | 79 | 1.037, 1.045 | 0.320, 0.317 | −1.0 [−3.4, +1.7] % | 23.9, 23.4 | **−0.6** [−1.0, −0.1] |
+| 100–200 | 739 | 19 | 1.009, 1.040 | 0.310, 0.316 | +1.8 [−6.3, +8.9] % | 23.5, 23.3 | −0.2 [−1.5, +1.3] |
+| ≥ 200 | 75 | 2 | 1.063, 1.132 | 0.334, 0.361 | +8.2 % | 25.3, 26.7 | +1.5 |
+
+Findings:
+
+- **On days of `Ap` 15–100 the hourly driver lowers the C/O RMSE by 1.0–1.7 % and the MAPE by 0.3–0.6 points.** The
+  intervals exclude zero at `Ap` 15–50 for both and at 50–100 for the MAPE. That is less than JB2008's 4–11 %.
+  SDTM-1's storm state already integrates the 3-hourly `ap` through its kernel, and over three hours `ap60`
+  averages 0.95 of `ap` at `ap` ≥ 150 with a correlation of 0.98 (§10.30): the hourly series adds resolution, not
+  information.
+- **From `Ap` 100 the change has no sign.** At `Ap` ≥ 200 there are two storms. There the hourly driver raises the
+  mean C/O from 1.06 to 1.13 and the RMSE by 8 %, the direction Zhu et al. report for JB2008 in super storms, but
+  two storms set no interval.
+- On quiet days the change stays inside its interval.
+- §10.30's verdict stands (`plans/17` D-26): the hourly driver is not shipped.
+
+Run:
+
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/evaluate-sdtm.py run --kind family --field ap60
+    uv run --no-project --with numpy --with pandas --with scipy python -I tools/hpo-driver-table.py
 
 ---
 

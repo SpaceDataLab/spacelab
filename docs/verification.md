@@ -10426,9 +10426,12 @@ CC BY 4.0). `tools/fetch-storm-ai.sh` takes the twelve `private_eval__*` archive
 Dataverse's MD5. They hold 7 037 cases; 4 557 evaluation entries name 4 537 of them: 2 747 in Phase 1.1, 1 327 in
 Phase 1.2 and 483 in the private set. Twenty cases, ten CHAMP and ten GRACE-B in October 2003, are in Phase 1.1
 and in the private set, at the same instant and with the same target file. For the ten GRACE-B cases the private
-set gives other elements, 12 km lower in semi-major axis and 81–93° further along in true anomaly. The mission archive's
-own elements agree with Phase 1.1's, and they set the period here. The count per subset and satellite is the
-devkit's, case for case. Swarm B is in no STORM-AI training set, so it is out of the fold.
+set gives other elements at the same latitude, longitude and altitude: a semi-major axis 12 km lower and an
+argument of latitude 100.3–100.9° further on. Here the elements set only the averaging period, from the
+semi-major axis, which the difference moves by 0.26 %; the mission archive's elements agree with Phase 1.1's and
+are used. The angles do not agree with the latitude column in general: Phase 1.1's elements put 2 743 of its
+2 747 states within 1° of the ascending node, where the column's median |latitude| is 68.7°. Which of the two is
+right is not settled here. The count per subset and satellite is the devkit's, case for case. Swarm B is in no STORM-AI training set, so it is out of the fold.
 
 The target is TU Delft's orbit-mean density at UTC 10-minute ticks for the 72 h after the initial state: 432
 ticks, the first 0–599 s after it. The scorer averages each model the same way: over one orbital period, from the

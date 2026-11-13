@@ -19,6 +19,10 @@
          brackets {y; V}, each J separately, with Phipps' T2 standing for 1/(1 - 5 cos^2 i).
      (4) conservation: V is free of l and h, so it keeps L and G cos i, and every long-period
          d1i is -(e cos i/(eta^2 sin i)) d1e: vli1, vli2, vli3 against vle1, vle2, vle3.
+     (5) the osculating a (Ф17.R): the shipped a is the energy integral -1/(2a) + R(x) = K'' at the
+         first-order position; it equals the second-order generator's a, J2^2 short-period, J3-J5
+         short-period and long-period cross terms, identically, and at 40 digits differs from it at
+         third order. a'' + d2a alone misses that O(J2^2) a, an along-track drift.
 
    Orekit's BLModel, which this module otherwise follows, fails (2) in d2e and e d2l and (4) in
    vli1 and vli3.
@@ -219,4 +223,62 @@ tilt : -c*e/(et^2*sinI)$
 must(vanishes(cv("vli1") - tilt*cv("vle1")) and vanishes(cv("vli2") - tilt*cv("vle2"))
      and vanishes(cv("vli3") - tilt*cv("vle3")),
      "(4) holds: every long-period d1i is -(e cos i/(eta^2 sin i)) d1e, so G cos i is kept")$
+
+/* ---- (5) the osculating a ------------------------------------------------------------------------- */
+/* x = exp(W) exp(V) y'' with W = J2 W1 + W2, W2 solving n Dl(W2) = (J2^2/2)(X - Xl) + sum_k Jk (Hk - <Hk>_l)
+   over k = 3, 4, 5. V is free of l, so L'' is unchanged by it and L = L'' + J2 d1 + d2, d1 = {L; W1}, with
+     d2 = (J2^2/2)(-(X - Xl)/n + {d1; W1}) - sum_k Jk (Hk - <Hk>_l)/n + J2 {d1; V},
+   and a = L^2 gains 2 sqrt(a'') d2 + J2^2 d1^2 at second order. The module ships, instead, the energy
+   integral H(x) = K''(y''): -1/(2a) + R(x) = K'', R the J2-J5 potential at the osculating position. */
+d1 : -Dl(W1)$
+H3 : Hn(3, P3)$  H4 : Hn(4, P4)$  H5 : Hn(5, P5)$
+d2sp : J2^2/2*(-(X - Xl)/n + PB(d1, W1))$
+d2n : -(J3*(H3 - lav(expand(H3))) + J4*(H4 - H4l) + J5*(H5 - lav(expand(H5))))/n$
+d2lp : J2*PB(d1, V)$
+d2 : d2sp + d2n + d2lp$
+Rn(x, r) := J2*P2(x)/r^3 + J3*P3(x)/r^4 + J4*P4(x)/r^5 + J5*P5(x)/r^6$
+must(vanishes(shipped("kq", bind(["kq"], [])) - a*(J2*K1 + J2^2/2*K2 + J4*K4))
+     and is(ratsimp(subst(['j2 = J2, 'j3 = J3, 'j4 = J4, 'j5 = J5, 're = 1, 'q = 1/r, 's2 = sphi^2], rust_expr("pot"))
+                    - Rn(sphi, r)) = 0)
+     and every(in_source, ["j2: -c[2],", "j3: -c[3],", "j4: -c[4],", "j5: -c[5],", "let s2 = sphi * sphi;",
+                           "let q = self.re / r;", "let (fo, _) = true_from_mean(l, e);",
+                           "let r = (app + d2a) * (1.0 - e * e) / (1.0 + e * libm::cos(fo));",
+                           "let sphi = libm::sin(i) * libm::sin(g + fo);",
+                           "let a = 1.0 / ((1.0 - 2.0 * self.kq) / app + 2.0 * pot);"]),
+     "(5a) holds: the shipped a is 1/a = (1 - 2 kq)/a'' + 2 R, kq = a''(J2 K1 + (J2^2/2) K2 + J4 K4) and R = sum Jn Pn(sin i sin(g + f))/r^(n + 1) at the first-order elements")$
+/* The second-order part of H(x) - K'' is -(G1 + G3): the J2^2 short-period group G1 and, J by J, the
+   long-period cross group G3; the J3-J5 short-period terms cancel by d2n's construction. Each is a
+   consequence of (1a) and (3a) through Leibniz' rule, checked here as written. */
+G1 : expand(J2^2/2*(X - n*PB(d1, W1) + 3*d1^2/a^2 - 2*PB(H2, W1)))$
+G3(k) := block([Vk : jpart(V, k)], -n*J2*PB(d1, Vk) - J2*PB(H2, Vk) - jpart(P, k))$
+must(is(hipow(G1, phi) = 1) and vanishes(canon(coeff(G1, phi, 1))) and vanishes(canon(coeff(G1, phi, 0)))
+     and every(lambda([k], vanishes(canon(G3(k)))), [J2, J3, J4, J5]),
+     "(5b) holds: the energy integral and the second-order generator give the same a to second order, identically")$
+/* At 40 digits, with J2 = s J2_E and J3, J4, J5 = s^2 Jn_E: the energy integral's a, from the first-order
+   position, against (sqrt(a'') + J2 d1 + d2)^2 and against (sqrt(a'') + J2 d1)^2. */
+fpprec : 40$
+kepler_f(l0, e0) := block([E : bf_find_root(EE - e0*sin(EE) - l0, EE, l0 - 1, l0 + 1)],
+  2*atan(sqrt((1 + e0)/(1 - e0))*tan(E/2)))$
+jvals(s) := bfloat([J2 = s*1082626/10^9, J3 = s^2*(-2532)/10^9, J4 = s^2*(-1619)/10^9, J5 = s^2*(-227)/10^9])$
+/* [a'', e'', cos i, g'', l''] -> [[aE - aG, aE - a1] at s = 1, the same at s = 1/2] */
+routes(pt) := block([ff : kepler_f(bfloat(pt[5]), bfloat(pt[2])), atp, dL, dG, dl, dg, gen, fst, KK],
+  atp : bfloat([a = pt[1], e = pt[2], c = pt[3], g = pt[4], f = ff, phi = ff - pt[5], et = sqrt(1 - pt[2]^2)]),
+  [dL, dG, dl, dg, gen, fst, KK] : map(lambda([q], expand(subst(atp, q))),
+     [J2*d1, -J2*Dg(W1) - Dg(V), J2*DL(W1) + DL(V), J2*DG(W1) + DG(V), (sqrt(a) + J2*d1 + d2)^2,
+      (sqrt(a) + J2*d1)^2, K]),
+  map(lambda([s], block([js : jvals(s), Lx, Gx, Hx, ex, cx, fx, rx, aE],
+    Lx : sqrt(bfloat(pt[1])) + subst(js, dL),
+    Gx : sqrt(bfloat(pt[1]*(1 - pt[2]^2))) + subst(js, dG),
+    Hx : sqrt(bfloat(pt[1]*(1 - pt[2]^2)))*pt[3],
+    ex : sqrt(1 - (Gx/Lx)^2), cx : Hx/Gx,
+    fx : kepler_f(bfloat(pt[5]) + subst(js, dl), ex),
+    rx : Lx^2*(1 - ex^2)/(1 + ex*cos(fx)),
+    aE : 1/(2*(subst(js, Rn(sqrt(1 - cx^2)*sin(bfloat(pt[4]) + subst(js, dg) + fx), rx)) - subst(js, KK))),
+    [aE - subst(js, gen), aE - subst(js, fst)])), [1, 1/2]))$
+ratios : map(lambda([pt], block([u : routes(pt)],
+  print("  at", pt, ": aE - aG", u[1][1], "->", u[2][1], ", aE - a1", u[1][2], "->", u[2][2]),
+  [u[1][1]/u[2][1], u[1][2]/u[2][2]])), [[113/100, 3/10, 3/5, 7/10, 11/10], [106/100, 1/5, 1/10, 2, 5/2]])$
+print("  ratios", ratios)$
+must(every(lambda([r], is(r[1] > 15/2 and r[1] < 17/2 and r[2] > 7/2 and r[2] < 9/2)), ratios),
+     "(5) holds: at 40 digits the energy integral's a minus the generator's falls 8x when J halves, third order; minus the first-order a, 4x: d2 is the second-order a it carries")$
 print("DONE")$

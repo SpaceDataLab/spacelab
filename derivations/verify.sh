@@ -654,10 +654,10 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
 
     out=$(macf brouwer_lyddane.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9][ab]?\) holds:')
-    if [ "$holds" -eq 9 ] && printf '%s' "$out" | grep -q '^DONE'; then
-        ok "maxima brouwer_lyddane.mac: the J2^2/J4 secular rates by Lie-Deprit, the short-period terms the brackets of a generator solving the homological equation, the long-period terms those of the g-generator, G cos i kept"
+    if [ "$holds" -eq 12 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima brouwer_lyddane.mac: the J2^2/J4 secular rates by Lie-Deprit, the short-period terms the brackets of a generator solving the homological equation, the long-period terms those of the g-generator, G cos i kept, the osculating a by the energy integral equal to the second-order generator's"
     else
-        bad "maxima brouwer_lyddane.mac" "expected 9 checks to hold, found $holds"
+        bad "maxima brouwer_lyddane.mac" "expected 12 checks to hold, found $holds"
     fi
 
     out=$(macf eckstein_hechler.mac)

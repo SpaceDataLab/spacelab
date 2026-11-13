@@ -17,10 +17,14 @@
 //! The reported osculating Cartesian state is the standard Keplerian conversion of the osculating
 //! elements — the same state Orekit's propagator returns (its `KeplerianOrbit` carries element rates
 //! for the state-transition matrix, but the velocity `getPVCoordinates` reports is the Keplerian
-//! velocity of the osculating ellipse). Against an integration of the J2–J5 equations of motion it
-//! stays within 366 m over three revolutions of a near-circular LEO and 2.2 km at `e = 0.3`: the
-//! along-track drift of a mean motion whose `a` lacks the short-period J2², J3 and J4 terms the
-//! theory leaves out.
+//! velocity of the osculating ellipse). The osculating `a` is not `a'' + δa₁`: it is the one the
+//! energy integral fixes, `−μ/(2a) + R = K''`, the J2–J5 potential at the osculating position
+//! against the mean Hamiltonian, which carries the second-order generator's J2², J3–J5 and
+//! long-period cross terms of `a`. The mean motion the fixed point recovers is then right to
+//! `O(J2²)`. Against an integration of the J2–J5 equations of motion the state stays within 66 m
+//! over three revolutions of a near-circular LEO and 125 m at `e = 0.3`, the second-order periodic
+//! terms of the other elements, and drifts along track by 2 m a revolution at most, a third-order
+//! drift; with `a'' + δa₁` the drift was 111 and 527 m a revolution.
 //!
 //! Construction is fallible. The fixed point does not converge within about 8° of retrograde
 //! equatorial, where Lyddane's `sin(i/2)` node variables divide by `cos(i/2)`, so that is reported
@@ -45,6 +49,10 @@
 //!   and J5 Hamiltonian by the J2 rate of `g`, and the long-period coefficients are its brackets,
 //!   with Phipps' `T2` standing for `1/(1 − 5 cos² i)`.
 //! * (4): every long-period `δi` is `−e cos i/(η² sin i)·δe`, the conservation of `G cos i`.
+//! * (5): the osculating `L` to second order from the generators — the J2² short-period bracket,
+//!   the J3–J5 short-period terms and the long-period cross term — is the energy integral's, the
+//!   shipped `kq` is the mean Hamiltonian's J2, J2² and J4 part, and at sample elements the energy
+//!   at the first-order osculating position gives the generator's `a` to third order.
 //!
 //! Orekit's `BLModel` fails (2) in `δe` and `e·δl`, and (4) in two `δi` coefficients. Its
 //! propagation then drifts from the equations of motion at first order in J2: 38 km over three
@@ -173,6 +181,12 @@ struct Els {
 struct BlModel {
     mean: Els,
     mu: f64,
+    re: f64,
+    j2: f64,
+    j3: f64,
+    j4: f64,
+    j5: f64,
+    kq: f64,
     n0: f64,
     dsl: f64,
     dsg: f64,
@@ -263,6 +277,17 @@ impl BlModel {
             + 0.375 * yp22 * (-5.0 + n * (12.0 + 9.0 * n) - ci2 * (35.0 + n * (36.0 + 5.0 * n)))
             + 1.25 * yp4 * (5.0 - 3.0 * n2) * (3.0 - 7.0 * ci2))
             * ci;
+        // The mean Hamiltonian whose rates these are, K'' = −μ(1 − 2 kq)/(2a''): kq is its J2,
+        // J2² and J4 part over μ/a'' (derivations/brouwer_lyddane.mac (5)).
+        let kq = -0.5 * yp2 * n * ci2x3m1
+            - 0.03125
+                * yp22
+                * n
+                * (-15.0
+                    + n * (12.0 + 15.0 * n)
+                    + ci2
+                        * (30.0 - n * (72.0 + 54.0 * n) + ci2 * (105.0 + n * (108.0 + 15.0 * n))))
+            - 0.0625 * yp4 * n * (2.0 + 3.0 * epp2) * (3.0 - ci2 * (30.0 - 35.0 * ci2));
 
         // Secular rates driven by the empirical along-track term M2 (Phipps 1992, Eqs 2.41 & 2.45).
         let coef = -4.0 / (3.0 * n0 * (1.0 + dsl));
@@ -321,6 +346,12 @@ impl BlModel {
         Self {
             mean,
             mu,
+            re,
+            j2: -c[2],
+            j3: -c[3],
+            j4: -c[4],
+            j5: -c[5],
+            kq,
             n0,
             dsl,
             dsg,
@@ -453,7 +484,6 @@ impl BlModel {
         let di = f64::midpoint(d1i, d2i) * cio2 + sio2;
         let z = lpp + gpp + hpp + d1z + d2z;
 
-        let a = app + d2a;
         let e = libm::sqrt(de * de + dl * dl);
         let (slpp, clpp) = libm::sincos(lpp);
         let l = libm::atan2(de * slpp + dl * clpp, de * clpp - dl * slpp);
@@ -464,6 +494,23 @@ impl BlModel {
         let (shpp, chpp) = libm::sincos(hpp);
         let h = libm::atan2(di * shpp + dh * chpp, di * chpp - dh * shpp);
         let g = z - l - h;
+
+        // The osculating a is the one the energy integral fixes, −μ/(2a) + R = K'': the J2–J5
+        // potential R at the osculating position, which the first-order elements give to O(J2²),
+        // against the mean Hamiltonian. To O(J2²) this is a'' + d2a plus the second-order
+        // generator's J2², J3–J5 and long-period cross terms (derivations/brouwer_lyddane.mac (5));
+        // a'' + d2a alone leaves O(J2²) in a'' and so in the mean motion, an along-track drift.
+        let (fo, _) = true_from_mean(l, e);
+        let r = (app + d2a) * (1.0 - e * e) / (1.0 + e * libm::cos(fo));
+        let sphi = libm::sin(i) * libm::sin(g + fo);
+        let s2 = sphi * sphi;
+        let q = self.re / r;
+        let pot = (q * q / r)
+            * (self.j2 * 0.5 * (3.0 * s2 - 1.0)
+                + q * (self.j3 * 0.5 * sphi * (5.0 * s2 - 3.0)
+                    + q * (self.j4 * 0.125 * (3.0 + s2 * (35.0 * s2 - 30.0))
+                        + q * self.j5 * 0.125 * sphi * (15.0 + s2 * (63.0 * s2 - 70.0)))));
+        let a = 1.0 / ((1.0 - 2.0 * self.kq) / app + 2.0 * pot);
 
         Els {
             a,
@@ -1095,8 +1142,10 @@ mod tests {
 
     /// The worst distance from the propagated state to an integration of the same zonal field —
     /// point mass plus `J2..J5` by Legendre recurrence, Dormand–Prince 8(5,3) at 10⁻¹³ — sampled
-    /// each minute over three revolutions, m.
-    fn distance_to_the_equations_of_motion(osc: &KeplerianElements, c: [f64; 4]) -> f64 {
+    /// each minute over three revolutions, m; and the along-track drift, the mean along-track
+    /// offset over the third revolution less that over the first, per revolution, m. A mean motion
+    /// off by δn drifts by `a δn` times the period each revolution; the periodic offsets average out.
+    fn distance_to_the_equations_of_motion(osc: &KeplerianElements, c: [f64; 4]) -> (f64, f64) {
         use spacelab_propagation::driver::{Controls, integrate};
         use spacelab_propagation::forces::{Newtonian, Plain, PointMass, Zonal};
         use spacelab_propagation::{Dop853, Tolerance};
@@ -1110,7 +1159,8 @@ mod tests {
                 j: [-c[0], -c[1], -c[2], -c[3]],
             },
         ));
-        let minutes = (3.0 * osc.period() / 60.0).floor();
+        let period = osc.period();
+        let minutes = (3.0 * period / 60.0).floor();
         let traj = integrate(
             &Dop853,
             &Plain(field),
@@ -1122,36 +1172,88 @@ mod tests {
         )
         .unwrap();
         let mut worst = 0.0f64;
+        // per revolution: the summed along-track offset and the sample count
+        let mut along = [(0.0f64, 0.0f64); 3];
         let mut t = 60.0;
         while t <= 60.0 * minutes {
             let y = traj.eval(t);
             let (r, _) = bl.propagate(t);
-            worst = worst.max((r.x - y[0]).hypot(r.y - y[1]).hypot(r.z - y[2]));
+            let d = Vec3::new(r.x - y[0], r.y - y[1], r.z - y[2]);
+            worst = worst.max(d.norm());
+            let rr = Vec3::new(y[0], y[1], y[2]);
+            let track = rr.cross(Vec3::new(y[3], y[4], y[5])).cross(rr);
+            let rev = if t < period {
+                0
+            } else if t < 2.0 * period {
+                1
+            } else {
+                2
+            };
+            along[rev].0 += d.dot(track) / track.norm();
+            along[rev].1 += 1.0;
             t += 60.0;
         }
-        worst
+        (
+            worst,
+            0.5 * (along[2].0 / along[2].1 - along[0].0 / along[0].1),
+        )
     }
 
     /// Brouwer's theory is the solution of the zonal equations of motion to first order in J2 in
     /// its periodic terms, so the propagated state follows a numerical integration of the same
-    /// field to `O(J2²)`: tens of metres over three revolutions in LEO, kilometres where the
-    /// second-order drift grows with `e`. (S1)
+    /// field to `O(J2²)`: tens of metres over three revolutions. (S1)
     #[test]
     fn the_propagation_follows_the_zonal_equations_of_motion() {
         let c = [C20, C30, C40, C50];
         let d: std::vec::Vec<f64> = orbits()
             .iter()
-            .map(|osc| distance_to_the_equations_of_motion(osc, c))
+            .map(|osc| distance_to_the_equations_of_motion(osc, c).0)
             .collect();
         std::eprintln!("Brouwer-Lyddane against the J2-J5 equations of motion: {d:?} m");
-        // Measured 366, 2230, 388, 458 m. Most of it is the along-track drift of a mean motion
-        // whose `a` lacks the short-period J3, J4 (each linear in its J, measured) and J2² terms
-        // the theory leaves out; a first-order defect is tens of kilometres here.
-        for (k, bound) in [1_500.0, 9_000.0, 1_600.0, 1_800.0].into_iter().enumerate() {
+        // Measured 65.6, 124.5, 92.5, 47.0 m: the second-order periodic terms of e, i, l, g and h
+        // the theory leaves out. With a'' + δa₁ for the osculating a, the mean motion drifted at
+        // O(J2²) and these were 366, 2230, 388, 458 m; a first-order defect is tens of kilometres.
+        for (k, bound) in [250.0, 500.0, 400.0, 200.0].into_iter().enumerate() {
             assert!(
                 d[k] < bound,
                 "orbit {k}: {:.3e} m from the equations of motion",
                 d[k]
+            );
+        }
+    }
+
+    /// The osculating `a` is the one the energy integral fixes, so the mean `a` the fixed point
+    /// recovers, and with it the mean motion, is right to `O(J2²)`: the along-track drift is third
+    /// order, and halving J2 divides it by eight. An `a` short of its second-order terms drifts at
+    /// `O(J2²)` and divides by four. (S1, S2)
+    #[test]
+    fn the_along_track_drift_is_third_order_in_j2() {
+        let c = [C20, C30, C40, C50];
+        let drift: std::vec::Vec<f64> = orbits()
+            .iter()
+            .map(|osc| distance_to_the_equations_of_motion(osc, c).1)
+            .collect();
+        std::eprintln!("Brouwer-Lyddane along-track drift, J2-J5: {drift:?} m per revolution");
+        // Measured -0.044, 2.04, -1.93, 0.55 m; a'' + δa₁ drifted -111, -527, -113, -140 m.
+        for (k, bound) in [0.2, 8.0, 8.0, 2.5].into_iter().enumerate() {
+            assert!(
+                drift[k].abs() < bound,
+                "orbit {k}: {:.3e} m per revolution",
+                drift[k]
+            );
+        }
+        for osc in [eccentric(), orbits()[2]] {
+            let full = distance_to_the_equations_of_motion(&osc, [C20, 0.0, 0.0, 0.0]).1;
+            let half = distance_to_the_equations_of_motion(&osc, [0.5 * C20, 0.0, 0.0, 0.0]).1;
+            let ratio = full / half;
+            std::eprintln!(
+                "Brouwer-Lyddane J2-only drift: {full:.3e} m, at J2/2 {half:.3e} m, ratio {ratio:.3}"
+            );
+            // Measured 7.90 at e = 0.3 and 8.05 near-equatorial; 4.00 and 4.02 with a'' + δa₁.
+            assert!(
+                (7.5..8.5).contains(&ratio),
+                "e = {}: drift ratio {ratio:.3}",
+                osc.eccentricity
             );
         }
     }
@@ -1162,16 +1264,87 @@ mod tests {
     #[test]
     fn the_residual_is_second_order_in_j2() {
         for osc in [eccentric(), leo()] {
-            let full = distance_to_the_equations_of_motion(&osc, [C20, 0.0, 0.0, 0.0]);
-            let half = distance_to_the_equations_of_motion(&osc, [0.5 * C20, 0.0, 0.0, 0.0]);
+            let full = distance_to_the_equations_of_motion(&osc, [C20, 0.0, 0.0, 0.0]).0;
+            let half = distance_to_the_equations_of_motion(&osc, [0.5 * C20, 0.0, 0.0, 0.0]).0;
             let ratio = full / half;
             std::eprintln!(
                 "Brouwer-Lyddane J2 only: {full:.3e} m, at J2/2 {half:.3e} m, ratio {ratio:.3}"
             );
-            // Measured 3.988 at e = 0.3 and 4.016 on the LEO; Orekit's map gives 1.97 at e = 0.3.
+            // Measured 4.175 at e = 0.3 and 4.011 on the LEO (3.988 and 4.016 while the drift,
+            // also second order, dominated); Orekit's map gives 1.97 at e = 0.3.
             assert!(
                 (3.8..4.2).contains(&ratio),
                 "e = {}: ratio {ratio:.3}",
+                osc.eccentricity
+            );
+        }
+    }
+
+    /// The state's `J2..J5` energy `v²/2 − μ/r + (μ/r) Σ Jn (Re/r)^n Pn(z/r)`, J/kg.
+    fn zonal_energy(r: Vec3, v: Vec3, c: [f64; 4]) -> f64 {
+        let rn = r.norm();
+        let s = r.z / rn;
+        let s2 = s * s;
+        let q = RE / rn;
+        let p = [
+            0.5 * (3.0 * s2 - 1.0),
+            0.5 * s * (5.0 * s2 - 3.0),
+            0.125 * (3.0 + s2 * (35.0 * s2 - 30.0)),
+            0.125 * s * (15.0 + s2 * (63.0 * s2 - 70.0)),
+        ];
+        let mut sum = 0.0;
+        let mut qn = q * q;
+        for k in 0..4 {
+            sum -= c[k] * qn * p[k];
+            qn *= q;
+        }
+        0.5 * v.dot(v) - MU / rn + MU / rn * sum
+    }
+
+    /// The worst relative change of [`zonal_energy`] along the propagated state, each minute over
+    /// three revolutions.
+    fn energy_change(osc: &KeplerianElements, c: [f64; 4]) -> f64 {
+        let bl = BrouwerLyddane::from_osculating(osc, RE, c[0], c[1], c[2], c[3]).unwrap();
+        let (r0, v0) = bl.propagate(0.0);
+        let e0 = zonal_energy(r0, v0, c);
+        let minutes = (3.0 * osc.period() / 60.0).floor();
+        let mut worst = 0.0f64;
+        let mut t = 60.0;
+        while t <= 60.0 * minutes {
+            let (r, v) = bl.propagate(t);
+            worst = worst.max(((zonal_energy(r, v, c) - e0) / e0).abs());
+            t += 60.0;
+        }
+        worst
+    }
+
+    /// The propagated state keeps the `J2..J5` energy to third order: its osculating `a` is the
+    /// one `−μ/(2a) + R = K''` fixes, and the first-order elements put the potential `R` within
+    /// `O(J2³)` of its value at the state. Halving J2 divides the change by eight. (G4)
+    #[test]
+    fn the_state_keeps_the_zonal_energy_to_third_order() {
+        let c = [C20, C30, C40, C50];
+        let d: std::vec::Vec<f64> = orbits().iter().map(|osc| energy_change(osc, c)).collect();
+        std::eprintln!("Brouwer-Lyddane relative energy change, J2-J5: {d:?}");
+        // Measured 3.2e-8, 5.1e-8, 3.4e-11, 1.6e-8; with a'' + δa₁, 5.8e-6, 1.1e-5, 1.0e-8, 5.2e-6.
+        for (k, bound) in [1.3e-7, 2e-7, 1.5e-10, 6e-8].into_iter().enumerate() {
+            assert!(
+                d[k] < bound,
+                "orbit {k}: relative energy change {:.3e}",
+                d[k]
+            );
+        }
+        for osc in [eccentric(), leo()] {
+            let full = energy_change(&osc, [C20, 0.0, 0.0, 0.0]);
+            let half = energy_change(&osc, [0.5 * C20, 0.0, 0.0, 0.0]);
+            let ratio = full / half;
+            std::eprintln!(
+                "Brouwer-Lyddane J2-only energy change: {full:.3e}, at J2/2 {half:.3e}, ratio {ratio:.3}"
+            );
+            // Measured 7.99 and 7.98; 4.00 and 4.00 with a'' + δa₁.
+            assert!(
+                (7.5..8.5).contains(&ratio),
+                "e = {}: energy ratio {ratio:.3}",
                 osc.eccentricity
             );
         }

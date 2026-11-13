@@ -1,15 +1,18 @@
-//! The attitude plant against a second, independent oracle: NASA's 42.
+//! Comparator: the attitude plant against a second, independent implementation, NASA's 42.
+//! Benchmark material, not a gate. The gravity-gradient torque is decided by
+//! `derivations/gravity_gradient.mac` (`spacelab-propagation/src/torque.rs`) and the RKMK4 step by
+//! its order and conservation tests (`spacelab-propagation/tests/attitude.rs`).
 //!
-//! Basilisk already agrees with this workspace to 1.2e-11 rad on the closed loop
-//! (`basilisk_oracle.rs`). Two implementations agreeing is worth less than three, and the two that
-//! agree are both descendants of the same textbook. 42 (`ericstoneking/42`, NASA Goddard, **NASA
-//! Open Source Agreement v1.3**) is a separate code base with its own rigid-body formulation, and
-//! it supplies the leg Basilisk's fixture covers only pointwise: **gravity-gradient torque driving
-//! the attitude over a whole orbit arc**, rather than the torque evaluated at five geometries.
+//! Basilisk already lies 1.2e-11 rad from this workspace on the closed loop
+//! (`basilisk_oracle.rs`), and the two are both descendants of the same textbook. 42
+//! (`ericstoneking/42`, NASA Goddard, **NASA Open Source Agreement v1.3**) is a separate code base
+//! with its own rigid-body formulation, and it supplies the leg Basilisk's fixture covers only
+//! pointwise: **gravity-gradient torque driving the attitude over a whole orbit arc**, rather than
+//! the torque evaluated at five geometries.
 //!
 //! 42 is run unmodified, from input decks only, and nothing of it is redistributed — so none of
 //! NOSA's Modification obligations arise. `tools/gen_42_oracle.py` records the licence reading and
-//! generates the fixture; 42 is an oracle and never a dependency.
+//! generates the fixture; 42 is a comparator and never a dependency.
 //!
 //! # What this leg costs, and what it therefore cannot claim
 //!
@@ -201,39 +204,43 @@ fn the_quaternion_convention_is_the_crates_own_exponential() {
     let gap = angle_between(&rotation_of_quaternion(q), &exp_so3(scale(axis, angle)));
     println!("quaternion vs exp_so3 on the fixture's initial attitude: {gap:.3e} rad");
     assert!(gap < 1e-15, "quaternion convention: {gap} rad");
-
-    let first = samples().into_iter().next().expect("a first sample");
-    let stated = angle_between(&first.rotation, &exp_so3(scale(axis, angle)));
-    println!("42's t = 0 attitude against the deck it was given: {stated:.3e} rad");
-    // 42 prints seven digits, so the round trip through its own output file is the floor here.
-    assert!(stated < 1e-6, "42's initial attitude: {stated} rad");
 }
 
-/// 42's orbit against the closed-form circle it was started on.
+/// 42's initial attitude against the deck it was given, and its orbit against the closed-form
+/// circle it was started on.
 ///
 /// The gravity-gradient torque is driven by this position, so an orbit that has quietly drifted
-/// would show up as an attitude discrepancy with no attitude cause. Measuring it separately keeps
-/// the two apart.
+/// would show up as an attitude distance with no attitude cause. Measuring it separately keeps the
+/// two apart. 42 prints seven digits of a 6.8e6 m position, so one metre is its printing resolution.
 #[test]
-fn the_orbit_42_propagated_is_the_circle_it_was_given() {
+#[ignore = "comparator: the distance to nasa42, not a verdict"]
+fn initial_attitude_and_orbit_distance_to_42() {
     let samples = samples();
+    let axis = scale([1.0, 2.0, 3.0], 1.0 / norm([1.0, 2.0, 3.0]));
+    let deck = exp_so3(scale(axis, 40.0_f64.to_radians()));
+    let first = samples.first().expect("a first sample");
+    comparison_row(
+        "the t = 0 attitude against the deck's 40 degrees about (1, 2, 3)",
+        "rad",
+        &[angle_between(&first.rotation, &deck)],
+    );
+
     let (r0, v0) = initial_state(&samples);
     let radius = norm(r0);
-
-    let (mut worst, mut worst_radius) = (0.0_f64, 0.0_f64);
-    for sample in &samples {
-        worst = worst.max(norm(sub(position_at(r0, v0, sample.time), sample.position)));
-        worst_radius = worst_radius.max(libm::fabs(norm(sample.position) - radius));
-    }
-    println!(
-        "42's orbit vs the closed-form circle: worst {worst:.3e} m over {} samples on a \
-         {radius:.1} m radius; worst radius excursion {worst_radius:.3e} m",
-        samples.len()
+    let mut worst_radius = 0.0_f64;
+    let gaps: Vec<f64> = samples
+        .iter()
+        .map(|sample| {
+            worst_radius = worst_radius.max(libm::fabs(norm(sample.position) - radius));
+            norm(sub(position_at(r0, v0, sample.time), sample.position))
+        })
+        .collect();
+    println!("42's worst radius excursion {worst_radius:.3e} m on a {radius:.1} m radius");
+    comparison_row(
+        "the orbit's position against the closed-form circle it was started on",
+        "m",
+        &gaps,
     );
-    // 42 prints seven digits of a 6.8e6 m position, so one metre is the printing resolution and
-    // the assertion is that the orbit is a circle to it, not that it is a circle to machine epsilon.
-    assert!(worst < 2.0, "orbit gap {worst} m");
-    assert!(worst_radius < 2.0, "radius excursion {worst_radius} m");
 }
 
 /// The gravity-gradient torque driving a tumbling body over a 2000 s arc, against 42.
@@ -245,11 +252,11 @@ fn the_orbit_42_propagated_is_the_circle_it_was_given() {
 /// step instead, which is 42's seven printed digits. Held the same way, this workspace reproduces
 /// 42 *at each of its step sizes*, not merely in the converged limit.
 ///
-/// There is therefore no convergence order to read off, and asserting one would be asserting noise.
-/// What is asserted is the two things the run does establish: the residual sits at the oracle's
-/// printing floor, and it is 503x below the oracle's own discretisation spread.
+/// There is therefore no convergence order to read off. The rows are the distance at each step,
+/// which sits at 42's printing floor, and the printed spread of 42 against itself, 503 times larger.
 #[test]
-fn the_gravity_gradient_arc_agrees_with_42_at_every_step_it_was_run_at() {
+#[ignore = "comparator: the distance to nasa42, not a verdict"]
+fn gravity_gradient_arc_distance_to_42() {
     let inertia = Inertia::principal(MOMENTS).expect("positive definite");
     let samples = samples();
     let mut steps: Vec<f64> = samples.iter().map(|s| s.step).collect();
@@ -265,7 +272,7 @@ fn the_gravity_gradient_arc_agrees_with_42_at_every_step_it_was_run_at() {
     let run_at =
         |step: f64| -> Vec<&Sample> { samples.iter().filter(|s| s.step == step).collect() };
 
-    let mut worst_gap = 0.0_f64;
+    let (mut angles, mut rates) = (Vec::new(), Vec::new());
     for &step in &steps {
         let run = run_at(step);
         let start = run.first().expect("a first sample");
@@ -301,8 +308,10 @@ fn the_gravity_gradient_arc_agrees_with_42_at_every_step_it_was_run_at() {
         println!(
             "  step {step:6.4} s: attitude gap {worst_angle:.3e} rad, rate gap {worst_rate:.3e} rad/s"
         );
-        worst_gap = worst_gap.max(worst_angle);
+        angles.push(worst_angle);
+        rates.push(worst_rate);
     }
+    let worst_gap = angles.iter().copied().fold(0.0, f64::max);
 
     // 42 against itself: the same scenario at the coarsest and the finest step it was run at. This
     // is the oracle's own discretisation error, and it is what the residual above has to be small
@@ -324,14 +333,25 @@ fn the_gravity_gradient_arc_agrees_with_42_at_every_step_it_was_run_at() {
         steps[steps.len() - 1],
         spread / worst_gap
     );
-
-    assert!(
-        worst_gap < 3e-6,
-        "42 and spacelab must agree at 42's printed precision: {worst_gap} rad"
+    comparison_row(
+        "the attitude over a 2000 s gravity-gradient arc, worst at each step",
+        "rad",
+        &angles,
     );
-    assert!(
-        spread / worst_gap > 50.0,
-        "the residual must be far below the oracle's own discretisation spread: \
-         {worst_gap} rad against {spread} rad"
+    comparison_row(
+        "the body rate over a 2000 s gravity-gradient arc, worst at each step",
+        "rad/s",
+        &rates,
+    );
+}
+
+/// One `comparison | ...` row of `tools/compare.py`.
+fn comparison_row(quantity: &str, unit: &str, distances: &[f64]) {
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    #[expect(clippy::cast_precision_loss, reason = "a count of a few distances")]
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+    println!(
+        "comparison | nasa42 | not recorded | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
     );
 }

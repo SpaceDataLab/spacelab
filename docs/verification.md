@@ -505,6 +505,24 @@ The other library calls have a one-digit literal exponent: at most 8u, or 9u for
 `spacelab-autodiff`'s `Dual::powi` and `HyperDual::powi` call `libm::pow`. Which elementary-function
 layer the `no_std` code uses (CORE-MATH or `libm`) is still open; this audit does not depend on it.
 
+### 1.5 Claims from openai/math, kept unverified (Ф28.G)
+
+The openai/math repository states results produced by a model, and its README says they could have
+issues. Three bear on this tree, and none enters code as a fact. Crouzeix's bound belongs to Ф22.J.
+
+- The Brauchart–Hardin–Saff constant of the minimal logarithmic energy on S²,
+  C_log = 2 ln 2 + ½ ln(2/3) + 3 ln(√π/Γ(1/3)) = −0.05560530494339251850 (Maxima, 40 digits). The
+  closed form is the conjecture's; nothing here derives it. It measures the energy of a point set and
+  bounds no coverage error. For the golden-spiral points the coverage oracles sample with,
+  (E − (½ − ln 2)N² + ½N ln N)/N is −0.0387 at N = 100, −0.0439 at 1 000, −0.0446 at 4 000 and
+  16 000, and −0.0448 at 32 000, where E is the energy over ordered pairs. That is about 0.011 above
+  C_log, as a configuration that is not optimal must be if the conjecture holds. The N = 100 value
+  is Maxima's, at 40 digits; the others are Kahan-summed in Julia, which gives Maxima's N = 100
+  energy to every printed digit.
+- The Barker conjecture (no binary Barker code of even length above 4) and Ryser's (a circulant
+  Hadamard matrix only for n ∈ {1, 4}). `spacelab-signal` has no code search for them to annotate.
+  A search written later states both as conjectures.
+
 ---
 
 ## 2 · Numerical propagation, forces & DSST

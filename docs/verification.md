@@ -11315,8 +11315,8 @@ Batch 7 (2026-11-13) parks the light time's four and the access edges' Orekit te
 `light_time_down_leg.mac` solved the down leg on the exact two-body orbit at 40 digits, and puts
 every pass edge on a root of its own elevation (G2) and the Earth-orientation shift on its
 first-order prediction (S1).
-**Today: 77
-comparator-decided tests of 3 709** — name 44, file 14, fixture 4, doc 15; 20 of them Orekit's (9 by
+**Today: 75
+comparator-decided tests of 3 710** — name 42, file 14, fixture 4, doc 15; 18 of them Orekit's (7 by
 name), 15 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).

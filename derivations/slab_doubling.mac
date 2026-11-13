@@ -1,0 +1,133 @@
+/* The doubling-and-adding solution of slab_doubling.jl, recomputed on a reduced input in 40-digit
+   arithmetic (plans/17 Ф19.G): what the references of spacelab-earthvision's Monte Carlo gates rest on.
+
+   slab_doubling.jl solves the scalar transfer equation of a homogeneous slab azimuthal order by
+   order on the double-Gauss rule plus zero-weight extra nodes, starting from a single-scattering
+   layer of depth tau/2^n and doubling it n times (its header gives the six equations). Here the
+   same steps run on the three-node rule, whose nodes (1 -+ sqrt(3/5))/2, 1/2 and weights 5/18, 4/9,
+   5/18 are exact, with extra nodes 3/5 and 4/5, the trapezoid rule on K = 64 points of the azimuth,
+   and n = 10, for the three cases it writes to slab_doubling_reduced.txt: isotropic tau = 1,
+   omega = 0.9 (order 0); Henyey-Greenstein g = 1/2, tau = 2, omega = 0.95 (orders 0-3); Rayleigh
+   tau = 0.3, omega = 1 (orders 0-2).
+
+     (1) the three-node rule integrates 2 mu^(k+1) on (0, 1) exactly for k = 0..4;
+     (2) Rayleigh's azimuthal coefficients, by integration, are 3/8 (1 + mu^2 mu'^2 + s^2 s'^2/2),
+         +-3/8 mu mu' s s' and 3/32 s^2 s'^2, none above order 2, and the 64-point trapezoid rule
+         returns them to 2e-40 (measured 4.6e-41, 4.4x);
+     (3) every R_m and T_m at the extra nodes in slab_doubling_reduced.txt is this recomputation to
+         3e-14 relative (measured 6.0e-15, 5x: the doubles' own rounding through ten doublings);
+     (4) R_m and T_m are symmetric in the two directions (reciprocity) to 2e-40 (measured 3.4e-41);
+     (5) as tau -> 0 the order-0 reflection is the single-scattering omega p_0 (1 - exp(-tau (1/mu +
+         1/mu'))) / (2 (mu + mu')) of slab_single_scattering.mac (1): at tau = 1e-6 to 1e-5 relative
+         (measured 3.1e-6, the double scattering's O(tau), 3.2x);
+     (6) a conservative Rayleigh slab, whose discrete scattering conserves exactly on this rule, loses
+         nothing: plane albedo + total transmittance = 1 at the extra nodes after 40 doublings, to
+         1e-12 (measured 2.4e-13, 4.1x) -- the first-order start's O(tau 2^-40).
+
+   timeout 300 maxima --very-quiet -Q -b slab_doubling.mac                                         */
+
+load("linearalgebra")$
+linel : 4000$
+fpprec : 40$
+ratprint : false$
+
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+r35 : sqrt(3/5)$
+mu : [(1 - r35)/2, 1/2, (1 + r35)/2, 3/5, 4/5]$
+weights : [5/18, 4/9, 5/18]$
+cw : append(makelist(2 * weights[k] * mu[k], k, 1, 3), [0, 0])$
+nn : length(mu)$
+s(m) := sqrt(1 - m^2)$
+
+/* (1) */
+must(every(lambda([k], is(ratsimp(sum(cw[i] * mu[i]^k, i, 1, 3) - 2 / (k + 2)) = 0)), makelist(k, k, 0, 4)),
+     "(1) holds: the three-node rule integrates 2 mu^(k+1) on (0, 1) exactly for k = 0..4")$
+
+hg(g, x) := (1 - g^2) / (2 * (1 + g^2 - 2 * g * x)^(3/2))$
+phase(name, x) := if name = 'isotropic then 1/2 else if name = 'hg then hg(1/2, x) else 3/8 * (1 + x^2)$
+
+/* p_m(i, j) by the trapezoid rule on kk points: (1/kk) sum_k w_k cos(m phi_k) p(sg mu mu' + s s' cos phi_k) */
+kk : 64$
+trapezoid(name, sg, a, b, m) := block([half : kk / 2, t : 0b0, phi],
+  for k : 0 thru half do (
+    phi : bfloat(2 * %pi * k / kk),
+    t : t + (if k = 0 or k = half then 1 else 2) * cos(m * phi)
+            * bfloat(phase(name, sg * a * b + s(a) * s(b) * cos(phi)))),
+  t / kk)$
+
+/* (2) */
+assume(a > 0, a < 1, b > 0, b < 1)$
+rayleigh_m(sg, m) := ratsimp(integrate(3/8 * (1 + (sg * a * b + s(a) * s(b) * cos(phi))^2) * cos(m * phi),
+                                       phi, 0, %pi) / %pi)$
+closed : [3/8 * (1 + a^2 * b^2 + (1 - a^2) * (1 - b^2) / 2), sg * 3/8 * a * b * s(a) * s(b),
+          3/32 * (1 - a^2) * (1 - b^2), 0]$
+derived : makelist(rayleigh_m(sg, m), m, 0, 3)$
+same : every(lambda([d, c], is(ratsimp(subst(sg = 1, d - c)) = 0) and is(ratsimp(subst(sg = -1, d - c)) = 0)),
+             derived, closed)$
+worst : lmax(flatten(makelist(makelist(makelist(makelist(
+  abs(trapezoid('rayleigh, sg0, mu[i], mu[j], m) - bfloat(subst([a = mu[i], b = mu[j], sg = sg0], closed[m + 1]))),
+  m, 0, 3), j, 1, nn), i, 1, nn), sg0, [-1, 1])))$
+print("Rayleigh: trapezoid against the closed form, worst", float(worst))$
+must(same and is(worst < 2 * 10^-40),
+     "(2) holds: Rayleigh's azimuthal coefficients are 3/8 (1 + mu^2 mu'^2 + s^2 s'^2/2), +-3/8 mu mu' s s', 3/32 s^2 s'^2 and nothing above, and the trapezoid rule returns them")$
+
+/* ---- doubling ---------------------------------------------------------------------------------- */
+cmat : diag_matrix(cw[1], cw[2], cw[3], cw[4], cw[5])$
+emat(t) := apply(diag_matrix, map(lambda([m], bfloat(exp(-t / m))), mu))$
+bf(mm) := matrixmap(bfloat, mm)$
+inv(mm) := invert_by_lu(mm, 'bigfloatfield)$
+
+/* R_m, T_m of a slab of depth tau, albedo omega, from a start of depth tau/2^n doubled n times. */
+slab_order(name, m, tau, omega, n) := block([dt, r, tt, t, e, q, ss, d, u, r2, t2, cb],
+  dt : tau / 2^n,
+  cb : bf(cmat),
+  r : genmatrix(lambda([i, j], bfloat(omega * dt * trapezoid(name, -1, mu[i], mu[j], m) / (2 * mu[i] * mu[j]))), nn, nn),
+  tt : genmatrix(lambda([i, j], bfloat(omega * dt * trapezoid(name, 1, mu[i], mu[j], m) / (2 * mu[i] * mu[j]))), nn, nn),
+  t : dt,
+  for k : 1 thru n do (
+    e : emat(t),
+    q : r . cb . r,
+    ss : inv(ident(nn) - q . cb) . q,
+    d : tt + ss . e + ss . cb . tt,
+    u : r . e + r . cb . d,
+    r2 : r + e . u + tt . cb . u,
+    t2 : e . d + tt . e + tt . cb . d,
+    r : r2, tt : t2, t : 2 * t),
+  [r, tt])$
+
+/* ---- (3)-(4): the reduced cases ---------------------------------------------------------------- */
+cases : [['isotropic, 1, 9/10, 0], ['hg, 2, 95/100, 3], ['rayleigh, 3/10, 1, 2]]$
+ours : []$
+asym : 0$
+for c in cases do
+  for m : 0 thru c[4] do block([rt : slab_order(c[1], m, c[2], c[3], 10)],
+    asym : max(asym, lmax(flatten(makelist(makelist(
+      max(abs(rt[1][i, j] - rt[1][j, i]), abs(rt[2][i, j] - rt[2][j, i])), j, 1, nn), i, 1, nn)))),
+    for j : 4 thru 5 do for i : 4 thru 5 do ours : endcons([rt[1][i, j], rt[2][i, j]], ours))$
+
+theirs : block([f : openr("slab_doubling_reduced.txt"), line, out : []],
+  while (line : readline(f)) # false do
+    if slength(strim(" ", line)) > 0 then out : endcons(map(parse_string, split(strim(" ", line), " ")), out),
+  close(f), out)$
+miss : if length(theirs) # length(ours) then inf
+       else lmax(map(lambda([o, t], max(abs(o[1] - t[1]) / abs(o[1]), abs(o[2] - t[2]) / abs(o[2]))), ours, theirs))$
+print("reduced input: ", length(ours), "pairs, worst relative difference from slab_doubling.jl", float(miss))$
+must(is(miss < 3 * 10^-14), "(3) holds: slab_doubling.jl's R_m and T_m on the reduced input are this recomputation to 3e-14")$
+print("reciprocity, worst", float(asym))$
+must(is(asym < 2 * 10^-40), "(4) holds: R_m and T_m are symmetric in their two directions")$
+
+/* (5) */
+thin : slab_order('hg, 0, 10^-6, 95/100, 10)$
+single(i, j) := bfloat(95/100 * trapezoid('hg, -1, mu[i], mu[j], 0) * (1 - exp(-10^-6 * (1/mu[i] + 1/mu[j])))
+                       / (2 * (mu[i] + mu[j])))$
+thin_miss : lmax(flatten(makelist(makelist(abs(thin[1][i, j] / single(i, j) - 1), j, 4, 5), i, 4, 5)))$
+print("single-scattering limit at tau = 1e-6, worst relative", float(thin_miss))$
+must(is(thin_miss < 10^-5), "(5) holds: as tau -> 0 the reflection is omega p_0 (1 - exp(-tau (1/mu + 1/mu'))) / (2 (mu + mu'))")$
+
+/* (6) */
+cons : slab_order('rayleigh, 0, 3/10, 1, 40)$
+loss : lmax(makelist(abs(sum(cw[i] * (cons[1][i, j] + cons[2][i, j]), i, 1, 3) + bfloat(exp(-(3/10) / mu[j])) - 1), j, 4, 5))$
+print("conservative Rayleigh slab, |albedo + transmittance - 1|", float(loss))$
+must(is(loss < 10^-12), "(6) holds: a conservative slab loses nothing to O(tau 2^-40)")$
+print("DONE")$

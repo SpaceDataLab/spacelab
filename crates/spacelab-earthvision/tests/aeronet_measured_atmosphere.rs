@@ -1,14 +1,15 @@
-//! The 6S coupling on atmospheres AERONET measured, against DISORT solving the same ones.
+//! The 6S coupling on atmospheres AERONET measured, against the transfer equation solved on the
+//! same ones.
 //!
-//! Every earlier check on [`coupling_from_slab`] tested it as a *solver*: against DISORT in
-//! `phase_function_slab`, against libRadtran through pyspectral in `pyspectral_rayleigh`, on
-//! optical depths somebody chose — `0.1`, `1e-4`, `0.7`, `1.2` in the module's own fixtures, and a
+//! Every earlier check on [`coupling_from_slab`] tested it as a *solver*: against the doubling
+//! solution in `phase_function_slab` and `pyspectral_rayleigh`, on optical depths somebody chose — `0.1`, `1e-4`, `0.7`, `1.2` in the module's own fixtures, and a
 //! US Standard profile in `docs/verification.md` §5.1. None of those atmospheres was measured. This
 //! one closes that: `tools/gen_aeronet_oracle.py` takes the optical depth, the single-scattering
 //! albedo and the asymmetry parameter — which are exactly [`Atmosphere`]'s three fields — from
 //! AERONET Version 3 **Level 2.0** almucantar inversions, all three from the same retrieval so the
-//! triple is self-consistent, and `tools/gen_aeronet_disort_oracle.py` solves those same
-//! atmospheres with DISORT.
+//! triple is self-consistent, and `derivations/slab_doubling.jl` solves those same atmospheres by
+//! doubling and adding (`fixtures/aeronet_coupling_doubling.txt`). DISORT solved them first
+//! (`tools/gen_aeronet_disort_oracle.py`); its distance is a comparator row.
 //!
 //! A hundred and twenty atmospheres: five aerosol regimes (savanna burning, Amazon smoke, Arabian
 //! dust, Sahelian dust, industrial haze) × six retrievals spanning each site's own `AOD(440)` range
@@ -22,14 +23,14 @@
 //!
 //! | term | n | worst | RMS | signed mean | RMS sampling noise | ratio |
 //! |---|---|---|---|---|---|---|
-//! | `transmittance_down` | 120 | 5.92e-3 | 1.23e-3 | +1.46e-4 | 9.83e-4 | 1.25 |
+//! | `transmittance_down` | 120 | 5.92e-3 | 1.23e-3 | +1.54e-4 | 9.83e-4 | 1.25 |
 //! | `transmittance_up`   | 120 | 2.58e-3 | 7.64e-4 | −3.66e-5 | 7.62e-4 | 1.00 |
 //! | `spherical_albedo`   | 120 | 7.00e-3 | 2.29e-3 | −1.50e-4 | 2.35e-3 | 0.98 |
-//! | `path_reflectance`   | 360 | 1.63e-2 | 4.33e-3 | +1.06e-4 | 4.25e-3 | 1.02 |
+//! | `path_reflectance`   | 360 | 1.63e-2 | 4.33e-3 | +1.07e-4 | 4.25e-3 | 1.02 |
 //!
-//! **All four terms agree with DISORT at their own sampling noise**, and the signed means say they
-//! do not lean: against standard errors of 9.0e-5, 7.0e-5, 2.1e-4 and 2.2e-4 the four means sit at
-//! +1.6σ, −0.5σ, −0.7σ and +0.5σ. `T↓`'s ratio of 1.25 is the largest and it is one heavy row — the
+//! **All four terms agree with the transfer equation at their own sampling noise**, and the signed
+//! means say they do not lean: against standard errors of 9.0e-5, 7.0e-5, 2.1e-4 and 2.2e-4 the four
+//! means sit at +1.7σ, −0.5σ, −0.7σ and +0.5σ. `T↓`'s ratio of 1.25 is the largest and it is one heavy row — the
 //! 5.92e-3 worst case is 19 % of that term's total variance on its own.
 //!
 //! **How this differs from the reading #326 published, which is the point of #327.** That version
@@ -42,15 +43,23 @@
 //! than the forward one. Two convergence studies settled it. Ours, in photons
 //! (`examples/aeronet_path_residual.rs`, 32 seeds on these atmospheres): RMS bias **1.53e-3 →
 //! 7.06e-4 → 3.60e-4** at 100 k → 400 k → 1.6 M, ratios 2.16 and 1.96 against the 2.00 that `1/√N`
-//! predicts, with no floor and the aggregate lean never above 1.8σ. Theirs, in streams
-//! (`tools/gen_aeronet_disort_oracle.py`): the reference moves **1.67e-7 worst** between 96 and 256
-//! streams. The residual is our sampling and nothing else.
+//! predicts, with no floor and the aggregate lean never above 1.8σ. The reference's, in nodes and
+//! orders (`slab_doubling.jl convergence`): 192 nodes, 81 orders and a `2⁻⁴⁰` start move no term by
+//! more than **2.3e-9** on the deepest, the most forward-scattering and the most absorbing of the
+//! columns. The residual is our sampling and nothing else.
+//!
+//! **DISORT, which these residuals were first measured against, is 1.9e-4 out on one retrieval.**
+//! Its 96-stream solution agrees with the doubling solution to 2.5e-9 on 116 of the 120 rows. The
+//! other four are Banizoumbou on 15 March 2006, the one retrieval whose `μ₀ = 0.32560` lies within
+//! 1e-3 of one of DISORT's 48 quadrature cosines — 2.6e-5 from it, where the next nearest is 1.3e-3
+//! — and there its `T↓` is 1.9e-4 and its path reflectance 4.9e-6 from a solution that moves by
+//! 1.4e-10 from 96 to 192 nodes. The distance is recorded in `coupling_distance_to_disort`.
 //!
 //! **The spherical albedo's dominant error is the quadrature, not the sampler.**
 //! [`coupling_from_slab`] integrates `∫₀¹ R(μ) 2μ dμ` on a four-node Gauss–Legendre rule; the
-//! reference is computed on *those same four nodes*, so the 7.00e-3 above is the Monte Carlo's. A
-//! sixteen-node value is generated beside it, and the four-node rule differs from it by **1.30e-2
-//! worst, 2.66e-3 RMS** — larger than our disagreement with DISORT on the shared nodes. It is
+//! reference is computed on *those same four nodes*, so the 7.00e-3 above is the Monte Carlo's. The
+//! integral on the reference's 96 nodes is written beside it, and the four-node rule differs from it
+//! by **1.30e-2 worst, 2.66e-3 RMS** — larger than the Monte Carlo's residual on the shared nodes. It is
 //! recorded rather than fixed: `s` enters the correction only through `1/(1 − s·ρ_s)`, and at the
 //! `s ≈ 0.1` these atmospheres produce and a surface at `ρ_s = 0.15` a 1.3 % error in `s` moves the
 //! retrieved reflectance by 2e-4 relative. The term is small enough that its own quadrature is not
@@ -69,10 +78,10 @@
 //! constrains it — in practice `AOD(440) ≥ 0.4` — so every column here is a loaded one and none of
 //! this speaks for a pristine maritime atmosphere. AERONET measures no ozone, and its optical depth
 //! is aerosol-only with the molecular and gaseous terms already removed, so no ozone enters either
-//! side and none of it hides in the residual; the molecular half has its own oracle in
-//! `pyspectral_rayleigh`. And this is still a comparison of two solvers on a measured *atmosphere*,
-//! not against a measured *radiance* — that rung is RadCalNet's, and `radcalnet_measured_radiance`
-//! is where it is climbed.
+//! side and none of it hides in the residual; the molecular half has its own gate in
+//! `pyspectral_rayleigh`. And this is still a check of the solver on a measured *atmosphere*, not
+//! against a measured *radiance* — that rung is RadCalNet's, and `radcalnet_measured_radiance` is
+//! where it is climbed.
 
 #![allow(clippy::doc_markdown)] // RadCalNet and the other network names are proper nouns, not items
 #![allow(clippy::expect_used)] // a malformed fixture is a broken generator, and should stop the run
@@ -123,7 +132,8 @@ struct Reference {
     transmittance_down: f64,
     transmittance_up: f64,
     spherical_albedo_g4: f64,
-    spherical_albedo_g16: f64,
+    /// The same integral on the reference's own nodes: 96 for the doubling solution, 16 for DISORT.
+    spherical_albedo_fine: f64,
     path_reflectance: [f64; 3],
 }
 
@@ -154,8 +164,7 @@ fn measured() -> Vec<Measured> {
         .collect()
 }
 
-fn reference() -> Vec<Reference> {
-    let text = include_str!("fixtures/aeronet_coupling_disort.txt");
+fn reference(text: &str) -> Vec<Reference> {
     data(text)
         .map(|line| {
             let f = fields(line);
@@ -165,7 +174,7 @@ fn reference() -> Vec<Reference> {
                 transmittance_down: parse(4),
                 transmittance_up: parse(5),
                 spherical_albedo_g4: parse(6),
-                spherical_albedo_g16: parse(7),
+                spherical_albedo_fine: parse(7),
                 path_reflectance: [parse(8), parse(9), parse(10)],
             }
         })
@@ -204,7 +213,7 @@ fn stream(row: usize, azimuth: usize, draw: u64) -> u64 {
         .wrapping_add(draw.wrapping_mul(0x9e37_79b9_7f4a_7c15))
 }
 
-/// One term's disagreement with DISORT and the sampling noise it was measured with — the two numbers
+/// One term's disagreement with the reference and the sampling noise it was measured with — the two numbers
 /// whose ratio is the only honest reading of a Monte Carlo residual.
 #[derive(Default)]
 struct Term {
@@ -245,10 +254,20 @@ impl Term {
     }
 }
 
+/// (G3) The four coupling terms against the transfer equation on the 120 measured atmospheres.
+///
+/// `fixtures/aeronet_coupling_doubling.txt` is `derivations/slab_doubling.jl`'s doubling-and-adding
+/// solution of each atmosphere: 96 Gauss nodes per hemisphere, a start of `2⁻³⁴` of the depth, the
+/// exact single scattering plus 41 azimuthal orders of the multiple scattering. On the deepest
+/// (`τ = 3.778`), the most forward-scattering (`g = 0.826`) and the most absorbing (`ω = 0.755`)
+/// atmosphere, 192 nodes, 81 orders and `2⁻⁴⁰` move no term by more than 2.3e-9, and
+/// `derivations/slab_doubling.mac` recomputes the method on a reduced input in 40-digit arithmetic.
+/// The bound is statistical, stated in the module docs: each term's RMS residual within 1.6 times its
+/// RMS standard error, and its worst within the published magnitude.
 #[test]
-fn the_coupling_terms_reproduce_disort_on_measured_atmospheres() {
+fn the_coupling_terms_meet_the_doubling_solution_on_measured_atmospheres() {
     let rows = measured();
-    let references = reference();
+    let references = reference(include_str!("fixtures/aeronet_coupling_doubling.txt"));
     assert_eq!(rows.len(), references.len(), "the two fixtures pair up");
 
     let mut down = Term::default();
@@ -282,7 +301,7 @@ fn the_coupling_terms_reproduce_disort_on_measured_atmospheres() {
         );
         up.push(&draws(|c| c.transmittance_up), expected.transmittance_up);
         albedo.push(&draws(|c| c.spherical_albedo), expected.spherical_albedo_g4);
-        quadrature.push(expected.spherical_albedo_g4 / expected.spherical_albedo_g16 - 1.0);
+        quadrature.push(expected.spherical_albedo_g4 / expected.spherical_albedo_fine - 1.0);
 
         path.push(&draws(|c| c.path_reflectance), expected.path_reflectance[0]);
         for (azimuth_index, azimuth) in AZIMUTHS_DEG.iter().enumerate().skip(1) {
@@ -337,7 +356,74 @@ fn the_coupling_terms_reproduce_disort_on_measured_atmospheres() {
     }
     assert!(
         quad_worst < 2.0e-2,
-        "the four-node rule against sixteen nodes, worst {quad_worst:.3e}"
+        "the four-node rule against the integral, worst {quad_worst:.3e}"
+    );
+}
+
+/// The distance from the four coupling terms to DISORT on the same atmospheres:
+/// `tools/gen_aeronet_disort_oracle.py`, `pydisort` at 96 streams and 96 moments, one stream per
+/// point. The last row is the doubling solution's own distance to DISORT, every term together.
+#[test]
+#[ignore = "comparator: the distance to disort, not a verdict"]
+fn coupling_distance_to_disort() {
+    let rows = measured();
+    let disort = reference(include_str!("fixtures/aeronet_coupling_disort.txt"));
+    let doubling = reference(include_str!("fixtures/aeronet_coupling_doubling.txt"));
+    assert_eq!(rows.len(), disort.len(), "the two fixtures pair up");
+    let mut terms: [Vec<f64>; 4] = Default::default();
+    let mut solvers = Vec::new();
+    for (index, ((row, expected), ours)) in rows.iter().zip(&disort).zip(&doubling).enumerate() {
+        assert_eq!(row.key, expected.key, "the fixtures are in the same order");
+        let atmosphere = slab(row);
+        let coupling = coupling_from_slab(
+            &atmosphere,
+            mu_sun(row),
+            MU_VIEW,
+            AZIMUTHS_DEG[0].to_radians(),
+            PHOTONS,
+            stream(index, 0, 0),
+        );
+        terms[0].push(coupling.transmittance_down / expected.transmittance_down - 1.0);
+        terms[1].push(coupling.transmittance_up / expected.transmittance_up - 1.0);
+        terms[2].push(coupling.spherical_albedo / expected.spherical_albedo_g4 - 1.0);
+        terms[3].push(coupling.path_reflectance / expected.path_reflectance[0] - 1.0);
+        for (azimuth_index, azimuth) in AZIMUTHS_DEG.iter().enumerate().skip(1) {
+            let value = path_reflectance(
+                &atmosphere,
+                mu_sun(row),
+                MU_VIEW,
+                azimuth.to_radians(),
+                PHOTONS,
+                stream(index, azimuth_index, 0),
+            );
+            terms[3].push(value / expected.path_reflectance[azimuth_index] - 1.0);
+        }
+        solvers.push(ours.transmittance_down / expected.transmittance_down - 1.0);
+        solvers.push(ours.transmittance_up / expected.transmittance_up - 1.0);
+        solvers.push(ours.spherical_albedo_g4 / expected.spherical_albedo_g4 - 1.0);
+        for (a, b) in ours.path_reflectance.iter().zip(expected.path_reflectance) {
+            solvers.push(a / b - 1.0);
+        }
+    }
+    let names = [
+        "T-down, Monte Carlo",
+        "T-up, Monte Carlo",
+        "spherical albedo on four nodes, Monte Carlo",
+        "path reflectance at three azimuths, Monte Carlo",
+    ];
+    for (name, distances) in names.iter().zip(&terms) {
+        comparison_row(name, distances);
+    }
+    comparison_row("every term, the doubling solution", &solvers);
+}
+
+/// One `comparison | ...` row of `tools/compare.py`, for relative distances.
+fn comparison_row(quantity: &str, distances: &[f64]) {
+    let (max, rms) = spread(distances);
+    println!(
+        "comparison | disort | not recorded | {quantity} on the AERONET atmospheres | 1 | {} | \
+         {max:.3e} | {rms:.3e}",
+        distances.len()
     );
 }
 

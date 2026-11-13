@@ -1489,9 +1489,19 @@ mod tests {
     /// in bigfloat, at a precision that carries its largest term, and finds the first zero on it; it
     /// also shows the three-term recurrence and the Hankel coefficients the code runs on are the
     /// series' and A&S 9.2.9–9.2.10's. `.gp` recomputes every value with PARI's own `besselj`. The
-    /// arguments are the thirteen of the comparator test below. The bound is absolute, as there,
-    /// because near a zero of `J₁` no method keeps relative accuracy. The aperture is
-    /// `x √(S/4π)` with Cauchy's `S/4` for the mean projected area and `S = 12h + 3√3`.
+    /// arguments span nine decades and straddle where a Bessel routine goes wrong: `J₁ ≈ x/2`, the
+    /// first maximum, the first zero, and the large arguments where the recurrence is started far
+    /// above `x`. The bound is absolute because near a zero of `J₁` no method keeps relative
+    /// accuracy. The aperture is `x √(S/4π)` with Cauchy's `S/4` for the mean projected area and
+    /// `S = 12h + 3√3`.
+    ///
+    /// `2.5e-5` is there for a reason none of the others cover. The unnormalised recurrence overflows
+    /// and is rescaled by `1e-250` whenever it passes `1e250`, and for `x` in `[2.10e-5, 3.67e-5]` —
+    /// and, over a 5 201-point log sweep of `[1e-8, 1e5]`, only there — that rescale fires at `n = 2`,
+    /// after `j1` has already been assigned. Everywhere else it fires at `n ≥ 3`, where `j1` is still
+    /// zero and any scaling of it is a no-op that the assignment then overwrites. So this is the one
+    /// argument at which the rescale's effect on `j1` is observable at all, and without it a rescale
+    /// that added or divided instead of multiplying would return `1e245` or `∞` unremarked.
     #[test]
     fn the_geometric_optics_reproduces_its_derivation() {
         const J1: [(f64, f64); 13] = [
@@ -1522,6 +1532,8 @@ mod tests {
         }
         // The double nearest the zero is within half an ulp, 2.2e-16, of it, and |J₁′| there is 0.40.
         assert!(bessel_j1(FIRST_ZERO).abs() < 2e-16);
+        // Every term of the series carries a power of x.
+        assert_eq!(bessel_j1(0.0), 0.0);
         let x_eq = aperture_size_parameter(&cirrus());
         assert!(
             (x_eq - APERTURE).abs() <= 4.0 * f64::EPSILON * APERTURE,
@@ -1561,26 +1573,15 @@ mod tests {
         assert!((first - 2.0 * b / 3.0).abs() < 1e-14, "first {first}");
     }
 
-    /// `J₁` against an independent implementation, and against its own defining zero.
-    ///
-    /// The reference values are `scipy.special.j1` at arguments spanning nine decades — `2.5e-5` is
-    /// `mpmath.besselj` at 40 digits, for the reason below — chosen to straddle the places a Bessel
-    /// routine goes wrong: the small-argument limit where `J₁ ≈ x/2`,
-    /// the first maximum, the first zero, and the large-argument regime where the recurrence has to
-    /// be started far above `x` and normalised. The zero at `3.831705970207512…` is the stronger of
-    /// the two checks, because it is a property of the function that no implementation can fit its
-    /// way to: it is tested as an absolute residual, which is the only sensible tolerance at a root.
-    ///
-    /// `2.5e-5` is there for a reason none of the others cover. The unnormalised recurrence overflows
-    /// and is rescaled by `1e-250` whenever it passes `1e250`, and for `x` in `[2.10e-5, 3.67e-5]` —
-    /// and, over a 5 201-point log sweep of `[1e-8, 1e5]`, only there — that rescale fires at `n = 2`,
-    /// after `j1` has already been assigned. Everywhere else it fires at `n ≥ 3`, where `j1` is still
-    /// zero and any scaling of it is a no-op that the assignment then overwrites. So this is the one
-    /// argument at which the rescale's effect on `j1` is observable at all, and without it a rescale
-    /// that added or divided instead of multiplying would return `1e245` or `∞` unremarked.
+    /// The distance from `J₁` to `scipy.special.j1` at the thirteen arguments of
+    /// `the_geometric_optics_reproduces_its_derivation`, which decides the function (G2):
+    /// `derivations/ice_geometric_optics.mac` sums its series at a precision that carries the largest
+    /// term, PARI's `besselj` recomputes every value, and the first zero is the series'. `2.5e-5` is
+    /// `mpmath.besselj` at 40 digits. Recorded, not judged.
     #[test]
-    fn the_bessel_function_matches_an_independent_implementation() {
-        const REFERENCE: [(f64, f64); 13] = [
+    #[ignore = "comparator: the distance to scipy, not a verdict"]
+    fn bessel_distance_to_scipy() {
+        const SCIPY: [(f64, f64); 13] = [
             (1e-6, 4.999_999_999_999_375e-7),
             (2.5e-5, 1.249_999_999_902_343_8e-5),
             (0.5, 0.242_268_457_674_873_87),
@@ -1595,17 +1596,16 @@ mod tests {
             (400.0, -0.009_222_058_428_586_357),
             (1000.0, 0.004_728_311_907_089_521),
         ];
-        for (x, expected) in REFERENCE {
-            let residual = (bessel_j1(x) - expected).abs();
-            assert!(
-                residual < 2e-15,
-                "J1({x}) = {} against {expected}, residual {residual:e}",
-                bessel_j1(x)
-            );
-        }
-        // The first zero of J₁, to all the digits a f64 argument can carry.
-        assert!(bessel_j1(3.831_705_970_207_512_3).abs() < 2e-15);
-        assert_eq!(bessel_j1(0.0), 0.0);
+        let distances: Vec<f64> = SCIPY
+            .iter()
+            .map(|&(x, value)| (bessel_j1(x) - value).abs())
+            .collect();
+        let max = distances.iter().copied().fold(0.0, f64::max);
+        let rms = libm::sqrt(distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64);
+        std::println!(
+            "comparison | scipy | not recorded | J1 at thirteen arguments | 1 | {} | {max:.3e} | {rms:.3e}",
+            distances.len()
+        );
     }
 
     /// `x = 100` is a seam between two entirely different algorithms, and a seam is where a wrong
@@ -1614,8 +1614,9 @@ mod tests {
     /// Measured across the two adjacent doubles either side of it, nothing else can contribute:
     /// `|J₁′| ≤ 0.08` over a gap of 1.4e-14 is 1.1e-15, the same size as the asymptotic's own 6.5e-16
     /// absolute accuracy there, so the bound below is the two branches' disagreement and nothing more.
-    /// The seam cannot drift *downward* unnoticed either — the `x = 50` row of the table above holds
-    /// `J₁` to 2e-15 absolute, and the expansion is 8.0e-15 out there.
+    /// The seam cannot drift *downward* unnoticed either — the `x = 50` row of
+    /// `the_geometric_optics_reproduces_its_derivation` holds `J₁` to 1e-15 absolute, and the
+    /// expansion is 8.0e-15 out there.
     #[test]
     fn the_two_branches_of_the_bessel_function_meet_at_their_crossover() {
         let seam = 100.0_f64;

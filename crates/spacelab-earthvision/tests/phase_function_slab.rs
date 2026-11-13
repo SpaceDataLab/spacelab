@@ -1,22 +1,14 @@
-//! The slab against DISORT, and each phase function against the reflectance it implies.
+//! The slab against the transfer equation, and each phase function against the reflectance it
+//! implies.
 //!
-//! `monte_carlo_slab` traces photons. DISORT (Stamnes et al.) solves the azimuthally decomposed
-//! transfer equation on a Gauss quadrature by eigen-decomposition. They share no arithmetic, which is
-//! what makes the comparison a verification rather than a Monte Carlo agreeing with itself. The
-//! reference values below come from `tools/gen_disort_oracle.py`, run against `pydisort` — an
-//! ephemeral oracle, never a dependency of this workspace.
+//! `monte_carlo_slab` traces photons. `derivations/slab_doubling.jl` solves the azimuthally
+//! decomposed transfer equation on a Gauss quadrature by doubling and adding. They share no
+//! arithmetic, which is what makes the comparison a verification rather than a Monte Carlo agreeing
+//! with itself. The solver is given the *analytic* phase function, integrated over azimuth by the
+//! trapezoid rule, so no Legendre truncation stands between the two. DISORT (`pydisort`,
+//! `tools/gen_disort_oracle.py`) solved the same seven cases first; its distance is a comparator row.
 //!
-//! The oracle's own convergence is recorded with it: moving from 32 to 96 streams and moments shifts
-//! the hardest case (`g = 0.85`) by `1.8e-7` in reflectance, four orders below the Monte Carlo's
-//! sampling noise at the photon counts used here. So the residuals reported are the Monte Carlo's.
-//!
-//! Both codes are given the *analytic* phase function rather than a shared table: DISORT takes
-//! Legendre moments, which for Henyey–Greenstein are `gˡ` exactly, and 96 of them put the truncated
-//! expansion within `1e-6` of the closed form. Neither code has to imitate the other's representation
-//! for the comparison to be of the same scatterer.
-//!
-//! The tabulated members — Mie and ice — are not in the DISORT table, because a halo needs hundreds
-//! of Legendre moments and the truncation would become the thing being measured. They are covered
+//! The tabulated members — Mie and ice — are not in the reference table. They are covered
 //! instead by two checks that do not need a second solver: energy conservation at `ω = 1`, which only
 //! a correct sampler passes, and the thin-slab limit, where the reflectance is the phase function's
 //! own backscatter fraction and nothing else.
@@ -69,102 +61,146 @@ fn backscatter_fraction(phase: &PhaseFunction) -> f64 {
     total * h / 3.0
 }
 
-/// The slab against DISORT: seven cases spanning isotropic to strongly forward-peaked, absorbing and
-/// conservative, normal and slant incidence.
-#[test]
-fn the_photon_slab_reproduces_disort() {
-    // name, tau, omega, mu0, phase, DISORT reflectance, DISORT transmittance
-    let cases: [(&str, f64, f64, f64, PhaseFunction, f64, f64); 7] = [
-        (
-            "isotropic thin",
-            0.0,
-            1.0,
-            1.0,
-            PhaseFunction::HenyeyGreenstein { asymmetry: 0.0 },
-            0.0,
-            1.000_000_001,
-        ),
-        (
-            "isotropic",
-            1.0,
-            1.0,
-            1.0,
-            PhaseFunction::HenyeyGreenstein { asymmetry: 0.0 },
-            0.341_328_759,
-            0.658_671_240,
-        ),
-        (
-            "isotropic absorbing",
-            1.0,
-            0.9,
-            0.6,
-            PhaseFunction::HenyeyGreenstein { asymmetry: 0.0 },
-            0.360_929_444,
-            0.458_943_252,
-        ),
-        (
-            "hg g=0.5",
-            2.0,
-            1.0,
-            0.8,
-            PhaseFunction::HenyeyGreenstein { asymmetry: 0.5 },
-            0.388_621_810,
-            0.611_378_191,
-        ),
-        (
-            "hg g=0.85",
-            4.0,
-            0.99,
-            0.7,
-            PhaseFunction::HenyeyGreenstein { asymmetry: 0.85 },
-            0.282_283_476,
-            0.640_119_247,
-        ),
-        (
-            "hg g=-0.4",
-            1.5,
-            0.85,
-            1.0,
-            PhaseFunction::HenyeyGreenstein { asymmetry: -0.4 },
-            0.366_877_511,
-            0.355_597_215,
-        ),
-        (
-            "two-lobe",
-            3.0,
-            0.95,
-            0.75,
-            PhaseFunction::DoubleHenyeyGreenstein {
-                forward: 0.85,
-                backward: -0.6,
-                forward_weight: 0.6,
-            },
-            0.473_042_276,
-            0.291_857_444,
-        ),
-    ];
+/// The seven slab cases: isotropic to strongly forward-peaked, absorbing and conservative, normal
+/// and slant incidence. Name, `τ`, `ω`, `μ₀`, phase function.
+const CASES: [(&str, f64, f64, f64, PhaseFunction<'static>); 7] = [
+    (
+        "isotropic thin",
+        0.0,
+        1.0,
+        1.0,
+        PhaseFunction::HenyeyGreenstein { asymmetry: 0.0 },
+    ),
+    (
+        "isotropic",
+        1.0,
+        1.0,
+        1.0,
+        PhaseFunction::HenyeyGreenstein { asymmetry: 0.0 },
+    ),
+    (
+        "isotropic absorbing",
+        1.0,
+        0.9,
+        0.6,
+        PhaseFunction::HenyeyGreenstein { asymmetry: 0.0 },
+    ),
+    (
+        "hg g=0.5",
+        2.0,
+        1.0,
+        0.8,
+        PhaseFunction::HenyeyGreenstein { asymmetry: 0.5 },
+    ),
+    (
+        "hg g=0.85",
+        4.0,
+        0.99,
+        0.7,
+        PhaseFunction::HenyeyGreenstein { asymmetry: 0.85 },
+    ),
+    (
+        "hg g=-0.4",
+        1.5,
+        0.85,
+        1.0,
+        PhaseFunction::HenyeyGreenstein { asymmetry: -0.4 },
+    ),
+    (
+        "two-lobe",
+        3.0,
+        0.95,
+        0.75,
+        PhaseFunction::DoubleHenyeyGreenstein {
+            forward: 0.85,
+            backward: -0.6,
+            forward_weight: 0.6,
+        },
+    ),
+];
 
+const SEED: u64 = 20_240_813;
+
+fn slab(case: &(&str, f64, f64, f64, PhaseFunction<'static>)) -> (f64, f64) {
+    let (_, tau, omega, mu0, phase) = *case;
+    let atmosphere = Atmosphere {
+        optical_depth: tau,
+        single_scattering_albedo: omega,
+        phase,
+    };
+    let result = monte_carlo_slab(&atmosphere, mu0, PHOTONS, SEED);
+    (result.reflectance, result.transmittance)
+}
+
+/// (G3) The slab against the transfer equation solved by doubling and adding, on the seven [`CASES`].
+///
+/// `derivations/slab_doubling.jl` solves the equation azimuthal order by order on 128 Gauss nodes
+/// per hemisphere, doubling a single-scattering layer of `2⁻⁴⁰` of the depth forty times; 256
+/// nodes move no value by more than 8.4e-12 and a `2⁻³⁴` start by 4.2e-9, and
+/// `derivations/slab_doubling.mac` recomputes the method on a reduced input in 40-digit arithmetic.
+/// A photon ends in exactly one of reflection, transmission and absorption, so each estimate is a
+/// binomial proportion with `σ = √(p(1 − p)/N)` at the reference `p`. Every estimate is held to 4σ;
+/// the worst of the twelve is 1.22σ. At `τ = 0` both are exact and `σ = 0`.
+#[test]
+fn the_photon_slab_meets_the_doubling_solution() {
+    // reflectance, total transmittance
+    const DOUBLING: [(f64, f64); 7] = [
+        (0.0, 1.0),
+        (0.341_328_759_811_201, 0.658_671_240_196_554),
+        (0.360_929_443_633_221, 0.458_943_251_841_913),
+        (0.388_621_809_357_278, 0.611_378_190_679_398),
+        (0.282_283_476_174_921, 0.640_119_246_675_284),
+        (0.366_877_511_127_119, 0.355_597_215_076_836),
+        (0.473_042_276_030_450, 0.291_857_443_995_510),
+    ];
     let mut worst: f64 = 0.0;
-    for (name, tau, omega, mu0, phase, want_r, want_t) in cases {
-        let atmosphere = Atmosphere {
-            optical_depth: tau,
-            single_scattering_albedo: omega,
-            phase,
-        };
-        let result = monte_carlo_slab(&atmosphere, mu0, PHOTONS, 20_240_813);
-        let (dr, dt) = (
-            (result.reflectance - want_r).abs(),
-            (result.transmittance - want_t).abs(),
-        );
+    for (case, (want_r, want_t)) in CASES.iter().zip(DOUBLING) {
+        let (r, t) = slab(case);
+        let mut sigmas = [0.0; 2];
+        for (k, (got, want)) in [(r, want_r), (t, want_t)].into_iter().enumerate() {
+            let sigma = (want * (1.0 - want) / f64::from(PHOTONS)).sqrt();
+            if sigma == 0.0 {
+                assert_eq!(got, want, "{}: a certain outcome", case.0);
+            } else {
+                sigmas[k] = (got - want).abs() / sigma;
+                worst = worst.max(sigmas[k]);
+            }
+        }
         println!(
-            "{name:20} R {:.6} vs {want_r:.6} ({dr:.2e})   T {:.6} vs {want_t:.6} ({dt:.2e})",
-            result.reflectance, result.transmittance
+            "{:20} R {r:.6} vs {want_r:.6} ({:.2}σ)   T {t:.6} vs {want_t:.6} ({:.2}σ)",
+            case.0, sigmas[0], sigmas[1]
         );
-        worst = worst.max(dr).max(dt);
     }
-    // Three standard errors of a binomial at a million photons is 1.5e-3; the assertion is set from
-    // that rather than from the residuals, so a real bias has somewhere to show up.
-    assert!(worst < 1.5e-3, "worst DISORT residual {worst}");
+    assert!(worst < 4.0, "worst residual {worst:.2}σ");
+}
+
+/// The distance from the photon slab to DISORT on the seven [`CASES`]: `tools/gen_disort_oracle.py`,
+/// `pydisort` at 96 streams and 96 moments.
+#[test]
+#[ignore = "comparator: the distance to disort, not a verdict"]
+fn slab_distance_to_disort() {
+    // reflectance, total transmittance
+    const DISORT: [(f64, f64); 7] = [
+        (0.0, 1.000_000_001),
+        (0.341_328_759, 0.658_671_240),
+        (0.360_929_444, 0.458_943_252),
+        (0.388_621_810, 0.611_378_191),
+        (0.282_283_476, 0.640_119_247),
+        (0.366_877_511, 0.355_597_215),
+        (0.473_042_276, 0.291_857_444),
+    ];
+    let mut distances = Vec::new();
+    for (case, (want_r, want_t)) in CASES.iter().zip(DISORT) {
+        let (r, t) = slab(case);
+        distances.push((r - want_r).abs());
+        distances.push((t - want_t).abs());
+    }
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+    println!(
+        "comparison | disort | not recorded | slab R and T, Monte Carlo at 1e6 photons | 1 | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
+    );
 }
 
 /// The thin-slab limit ties every member to its own phase function, with no second solver involved.
@@ -357,8 +393,9 @@ fn every_member_conserves_energy_in_a_conservative_slab() {
 
 /// A finely tabulated Henyey–Greenstein produces the same slab as the analytic one. (S1)
 ///
-/// This is what carries the DISORT verification across to the tabulated members: the analytic path is
-/// checked against a second solver above, and this says the tabulated path is the same path. Both
+/// This is what carries the doubling verification across to the tabulated members: the analytic path
+/// is checked against the transfer equation above, and this says the tabulated path is the same
+/// path. Both
 /// runs use the identical photon stream, so the difference is the phase function and nothing else.
 #[test]
 fn a_tabulated_henyey_greenstein_gives_the_same_slab_as_the_analytic_one() {

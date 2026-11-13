@@ -1355,6 +1355,15 @@ if have maxima; then
         bad "maxima diurnal_aberration.mac" "expected 2 checks to hold, found $holds"
     fi
     mac_zeros geomagnetic_dipole.mac 22 "the centred dipole's pole, moment and field"
+    # The doubling-and-adding transfer-equation solution of slab_doubling.jl, which the earthvision
+    # Monte Carlo gates are held to, recomputed in 40 digits on a reduced input.
+    out=$(macf slab_doubling.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 6 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima slab_doubling.mac: slab_doubling.jl's doubling on a reduced input in 40 digits, Rayleigh's three azimuthal orders, reciprocity, the single-scattering limit and conservation"
+    else
+        bad "maxima slab_doubling.mac" "expected 6 checks to hold, found $holds"
+    fi
     mac_zeros attitude_control.mac 18 "attitude error kinematics, the Lyapunov derivative and the PD loop"
     mac_zeros gmst82.mac 10 "GMST 1982 as the exact rational polynomial"
     out=$(macf gcrf_itrf_chain.mac)

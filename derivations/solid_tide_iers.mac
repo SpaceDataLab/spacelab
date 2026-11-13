@@ -127,7 +127,7 @@ must(is(radcan(GMs/a*(dC22*cos(lam) + dS22*sin(lam))*P21 - response) = 0)
 print("F92: Im k2/Re k2 at the printed digits is", bfloat(36/3077), "against the printed 0.0115; consistent only for Im k2 in [0.00355, 0.003554)")$
 must(is(rust_scalar(src, "GLOBAL") = "-1.333e-9 / ARC_SEC_TO_RAD")
      and same_rationals([rust_scalar(src, "RATIO")], [115/10^4])
-     and same_doubles([rust_scalar(src, "ARC_SEC_TO_RAD")], [arcsec])
+     and certified_doubles("ARC_SEC_TO_RAD", [rust_scalar(src, "ARC_SEC_TO_RAD")], [arcsec])
      and in_source(src, "[GLOBAL * (m1 + RATIO * m2), GLOBAL * (m2 - RATIO * m1)]"),
      "(4) holds: pole_tide_corrections ships eq (6.22)'s printed -1.333e-9 (m1 + 0.0115 m2), -1.333e-9 (m2 - 0.0115 m1), m in arcsec = rad / (pi/648000)")$
 

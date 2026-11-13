@@ -27,7 +27,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # literal they decide against a bigfloat, which the Arb pass after the Ф17.B gates decides in balls.
 ARB_IN=$(mktemp)
 trap 'rm -f "$ARB_IN"' EXIT
-arb_keep() { printf '%s\n' "$1" | grep -E '^ARB(VAR|LET)? ' >> "$ARB_IN"; }
+arb_keep() { printf '%s\n' "$1" | grep -E '^ARB(VAR|LET|D|F64)? ' >> "$ARB_IN"; }
 
 printf '\nRe-deriving every claim the source code attributes to a computer algebra system.\n\n'
 
@@ -156,6 +156,7 @@ if have maxima; then
     fi
 
     out=$(timeout 120 maxima --very-quiet -b rosenbrock_grk4t.mac 2>&1)
+    arb_keep "$out"
     # the GRK4T stability function must match exp(z) through z^4 (5 MATCH lines: z^0..z^4)
     matches=$(printf '%s' "$out" | grep -cE 'MATCH \(order cond\)')
     if [ "$matches" -ge 5 ] && [ "$(printf '%s' "$out" | grep -cE '^(rust .*|A Gamma .*): true')" -eq 4 ]; then

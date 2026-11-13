@@ -13,7 +13,8 @@
    current fpprec. `same_rationals(entries, exact)` is true when each entry is exactly its rational;
    `same_doubles` when each parses to the double its exact value rounds to; `transcribed` when each
    is its exact value rounded to the digits it shows. rustc's parse plays no part, so a wrong digit
-   cannot hide behind it.
+   cannot hide behind it. `certified` and `certified_doubles` make the last two claims and also hand
+   them to arb_balls.c, which decides them in ball arithmetic.
 
    load("rust_literals.mac")$ from derivations/, as verify.sh runs the derivations.               */
 
@@ -192,19 +193,45 @@ rust_last_place(t) := block([u : rust_digits(t), m, ex : 0, at, point, digits, f
   if first = false then 'none
   else 10^((point - 1 - first + ex) - (slength(digits) - first + 1) + 1))$
 
-/* The nearest double to x, at the current fpprec, as an exact rational: its 53-bit significand
-   rounded, a tie being impossible for the irrationals and long decimals held here. */
-nearest_double(x) := block([a : bfloat(abs(x)), sign : if bfloat(x) < 0 then -1 else 1, e],
+/* The double nearest x, as an exact rational (plans/17 Ф28.A). A rational is rounded in integer
+   arithmetic, ties to even as IEEE 754 rounds, and must land on a normal double or 0. Any other
+   exact value takes its candidate from a bigfloat at the current fpprec, which bounds nothing, so
+   it also prints `ARBD <candidate> <x in reverse Polish notation>` once per value, and
+   `arb_balls.c` decides in ball arithmetic that x rounds to that double. A float is rounded as a
+   bigfloat and prints nothing. */
+floor_log2(a) := block([e : floor(log(bfloat(a)) / log(2b0))],
+  while 2^e > a do e : e - 1,
+  while 2^(e + 1) <= a do e : e + 1,
+  e)$
+nearest_double_q(q) := block([a : abs(q), e, s, m, f],
+  if q = 0 then return(0),
+  e : floor_log2(a),
+  s : a * 2^(52 - e),
+  m : floor(s), f : s - m,
+  if f > 1/2 or (f = 1/2 and oddp(m)) then m : m + 1,
+  if m = 2^53 then (m : 2^52, e : e + 1),
+  if e < -1022 or e > 1023 then error("nearest_double: not a normal double:", q),
+  signum(q) * m * 2^(e - 52))$
+nearest_double_bf(x) := block([a : bfloat(abs(x)), sign : if bfloat(x) < 0 then -1 else 1, e],
   if is(equal(a, 0)) then 0
   else (e : floor(log(a) / log(2b0)),
         while 2^e > a do e : e - 1,
         while 2^(e + 1) <= a do e : e + 1,
         sign * round(a * 2^(52 - e)) * 2^(e - 52)))$
+has_float(e) := if atom(e) then floatnump(e) or bfloatp(e) else some(has_float, args(e))$
+nearest_double(x) := if ratnump(x) then nearest_double_q(x)
+  else block([d : nearest_double_bf(x), key],
+    if not has_float(x) then (
+      key : string(x),
+      if arb_doubles_seen[key] # true then (
+        printf(true, "ARBD ~a ~{~a~^ ~}~%", d, arb_rpn(x)),
+        arb_doubles_seen[key] : true)),
+    d)$
 
 /* Every literal parses to the double its exact value rounds to. What a compiled `f64` table needs;
    weaker than `transcribed` where a table carries more digits than a double holds. */
 same_doubles(literals, exact) := length(literals) = length(exact) and
-  every(lambda([t, x], is(nearest_double(rust_number(t)) = nearest_double(x))), literals, exact)$
+  every(lambda([t, x], is(nearest_double(rust_rational(t)) = nearest_double(x))), literals, exact)$
 
 /* Every literal is its exact value rounded to the digits it shows; a literal of zeros is exact. */
 transcribed(literals, exact) := length(literals) = length(exact) and
@@ -281,4 +308,17 @@ certified(name, literals, exact) :=
   transcribed(literals, map(arb_value, exact)) and
   (for i thru length(literals) do
      printf(true, "ARB ~a ~a ~a ~{~a~^ ~}~%", name, i - 1, rust_digits(literals[i]), arb_rpn(exact[i])),
+   true)$
+/* `same_doubles` with the claim handed to Arb: one line `ARBF64 name index literal <value>` per
+   literal, where arb_balls.c decides that the double the literal parses to (correctly rounded, as
+   Rust parses it) is the double the value rounds to. A rational is checked here exactly as well;
+   other values against their bigfloats. A quotient literal `p / q`, which Rust evaluates as two
+   rounded doubles divided, is refused. */
+certified_doubles(name, literals, exact) :=
+  same_doubles(literals, map(lambda([e], if ratnump(e) then e else arb_value(e)), exact)) and
+  (for i thru length(literals) do (
+     if ssearch("/", literals[i]) # false then
+       error("certified_doubles: a quotient literal, which Rust rounds twice:", literals[i]),
+     printf(true, "ARBF64 ~a ~a ~a ~{~a~^ ~}~%", name, i - 1, rust_digits(literals[i]),
+            arb_rpn(exact[i]))),
    true)$

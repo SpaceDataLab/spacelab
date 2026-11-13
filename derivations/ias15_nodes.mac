@@ -66,9 +66,9 @@ Dsym : map(expand, invert(Csym))$
 print("c and d in the roots - c and d, worst (~0?):",
       lmax(map(lambda([a, b], bfloat(abs(subst(arb_roots, a) - b))),
                flatten(append(args(Csym), args(Dsym))), flatten(append(args(C), args(D))))));
-print("rust H is the nearest doubles to the nodes, rounded at its last digit:", same_doubles(rust_table(src, "H"), h)
+print("rust H is the nearest doubles to the nodes, rounded at its last digit:", certified_doubles("H", rust_table(src, "H"), hsym)
   and certified("H", rust_table(src, "H"), hsym));
-print("rust CC is the nearest doubles to c, rounded at its last digit:", same_doubles(rust_table(src, "CC"), packed(C))
+print("rust CC is the nearest doubles to c, rounded at its last digit:", certified_doubles("CC", rust_table(src, "CC"), packed(Csym))
   and certified("CC", rust_table(src, "CC"), packed(Csym)));
-print("rust DD is the nearest doubles to d, rounded at its last digit:", same_doubles(rust_table(src, "DD"), packed(D))
+print("rust DD is the nearest doubles to d, rounded at its last digit:", certified_doubles("DD", rust_table(src, "DD"), packed(Dsym))
   and certified("DD", rust_table(src, "DD"), packed(Dsym)));

@@ -50,8 +50,8 @@ wgs84_ok : [
             sublist(rust_literals_between(src("spacelab-sensors", "cull.rs"),
                                           "pub const WGS84: Self = Self {", "};"), long_literal),
             [b]),
-  same_doubles([rust_scalar(src("spacelab-sensors", "ellipsoid_grid.rs"), "WGS84_GAMMA")],
-               [a^2 / b^2]),
+  certified_doubles("WGS84_GAMMA", [rust_scalar(src("spacelab-sensors", "ellipsoid_grid.rs"), "WGS84_GAMMA")],
+                    [a^2 / b^2]),
   certified("GEOLOC_WGS84_KM",
             sublist(rust_literals_between(src("spacelab-sensors", "geoloc.rs"),
                                           "pub const WGS84: Ellipsoid = Ellipsoid {", "};"),
@@ -65,15 +65,22 @@ print("WGS 84 copies:", wgs84_ok)$
 must(every(identity, wgs84_ok), "(1) holds: every WGS 84 copy is the defining value or its consequence")$
 
 /* ---- (2) two powers of two ------------------------------------------------------------------------
-   Hipparchus's `Precision.EPSILON`, 2⁻⁵³, and the 2⁵³ that maps 53 random bits onto [0, 1). */
+   Hipparchus's `Precision.EPSILON`, 2⁻⁵³, and the 2⁵³ that maps 53 random bits onto [0, 1). The
+   rounding `nearest_double` does is checked on its ties here too: ties go to the even significand,
+   2^53 - 1/2 carries into the next binade, and 2^1024 and 2^-1023 are no normal double. */
 
-must(same_doubles([rust_scalar(src("spacelab-propagation", "spacecraft.rs"), "HIPPARCHUS_EPSILON")],
-                  [2^-53])
+must(certified_doubles("HIPPARCHUS_EPSILON",
+                       [rust_scalar(src("spacelab-propagation", "spacecraft.rs"), "HIPPARCHUS_EPSILON")],
+                       [2^-53])
+     and is(map(nearest_double, [2^53 + 1, 2^53 + 3, -(2^53 + 1), 1 + 2^-53, 1 + 3*2^-53, 2^53 - 1/2])
+            = [2^53, 2^53 + 4, -2^53, 1, 1 + 2^-51, 2^53])
+     and block([errormsg : false],
+               errcatch(nearest_double(2^1024)) = [] and errcatch(nearest_double(2^-1023)) = [])
      and same_rationals(sublist(rust_literals_between(src("spacelab-earthvision", "radiative_transfer.rs"),
                                                       "pub(crate) fn unit(&mut self)", "}"),
                                 long_literal),
                         [2^53]),
-     "(2) holds: the guard is 2^-53 and the unit draw divides by 2^53 exactly")$
+     "(2) holds: the guard is 2^-53, the draw divides by 2^53, ties go to even")$
 
 /* ---- (3) the conjunction duration in widths -------------------------------------------------------
    2√2 erfc⁻¹(γ) at γ = 10⁻⁶. The root is taken of erfc itself: 1 − erf(x) at x ≈ 3.46 cancels six

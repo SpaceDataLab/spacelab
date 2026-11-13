@@ -22,8 +22,15 @@
    that ball in any later value. `ARBLET name token...` names a value shared by
    later ones, evaluated once at each precision: a value built by iteration
    (RK4 steps) then stays linear in its length. A root or a let may use only
-   names defined on earlier lines. With -v it prints each ball, its precision
-   and the literal.
+   names defined on earlier lines.
+
+   Doubles: `ARBF64 name index literal token...` claims that the double the
+   decimal literal parses to (correctly rounded, ties to even) is the double
+   the value rounds to; `ARBD candidate token...` that the value rounds to the
+   double `candidate`, a dyadic rational. Both ends of the value's ball must
+   round to the same 53-bit significand (FLINT's ARF_RND_NEAR is ties to even),
+   that double must be the claimed one, and normal or zero. With -v it prints
+   each ball, its precision and the literal.
 
      cc -O2 arb_balls.c -o arb_balls $(pkg-config --cflags --libs flint)
      timeout 300 maxima --very-quiet -Q -b derivation.mac | ./arb_balls
@@ -51,9 +58,9 @@ typedef struct {
 } var_t;
 static var_t *vars;
 static int nvars;
-static int checked, failed, verbose;
-static double worst_margin;
-static slong worst_prec;
+static int checked, failed, verbose, dchecked, dfailed;
+static double worst_margin, worst_dmargin;
+static slong worst_prec, worst_dprec;
 
 static void die(const char *what, const char *detail) {
   fprintf(stderr, "arb_balls: %s: %s\n", what, detail);
@@ -333,6 +340,126 @@ static void certify(char **tok, int n) {
   arb_clear(v);
 }
 
+/* q <- the decimal literal [-]digits[.digits][e[-]digits] exactly; 0 when
+   malformed */
+static int decimal(fmpq_t q, const char *lit) {
+  const char *p = lit + (*lit == '-');
+  fmpz_t m, t;
+  fmpz_init(m), fmpz_init(t);
+  long frac = 0, ex = 0;
+  int digits = 0, point = 0, ok = 1;
+  for (; *p && *p != 'e' && *p != 'E'; p++)
+    if (*p == '.' && !point)
+      point = 1;
+    else if (isdigit((unsigned char)*p)) {
+      fmpz_mul_ui(m, m, 10);
+      fmpz_add_ui(m, m, (ulong)(*p - '0'));
+      digits++, frac += point;
+    } else
+      ok = 0;
+  if (*p) {
+    char *end;
+    ex = strtol(p + 1, &end, 10);
+    ok = ok && end != p + 1 && !*end;
+  }
+  ok = ok && digits > 0;
+  if (ok) {
+    long k = ex - frac;
+    fmpz_set_ui(t, 10);
+    fmpz_pow_ui(t, t, (ulong)(k < 0 ? -k : k));
+    if (k < 0)
+      fmpq_set_fmpz_frac(q, m, t);
+    else {
+      fmpz_mul(m, m, t);
+      fmpq_set_fmpz(q, m);
+    }
+    if (*lit == '-')
+      fmpq_neg(q, q);
+  }
+  fmpz_clear(m), fmpz_clear(t);
+  return ok;
+}
+
+/* 1 when every point of v rounds to one double, written to d */
+static int rounds_to(arf_t d, const arb_t v, slong prec) {
+  arf_t lo, hi;
+  arf_init(lo), arf_init(hi);
+  int ok = arb_is_finite(v);
+  if (ok) {
+    arb_get_lbound_arf(lo, v, prec);
+    arb_get_ubound_arf(hi, v, prec);
+    arf_set_round(lo, lo, 53, ARF_RND_NEAR);
+    arf_set_round(hi, hi, 53, ARF_RND_NEAR);
+    ok = arf_equal(lo, hi);
+    arf_set(d, lo);
+  }
+  arf_clear(lo), arf_clear(hi);
+  return ok;
+}
+
+static int normal(const arf_t d) {
+  return arf_is_zero(d) ||
+         (arf_cmpabs_2exp_si(d, -1022) >= 0 && arf_cmpabs_2exp_si(d, 1024) < 0);
+}
+
+/* (|V - D| + rad) over half the gap from D to the next double on V's side */
+static double ulp_margin(const arb_t v, const arf_t d, slong prec) {
+  if (arf_is_zero(d))
+    return 0;
+  slong e = arf_abs_bound_lt_2exp_si(d);
+  int below = arf_cmpabs(arb_midref(v), d) < 0;
+  arb_t t;
+  arb_init(t);
+  arb_set_arf(t, d);
+  arb_sub(t, v, t, prec);
+  arb_abs(t, t);
+  arb_mul_2exp_si(t, t, -(e - 54 - (below && arf_bits(d) == 1)));
+  double m = arf_get_d(arb_midref(t), ARF_RND_UP) + mag_get_d(arb_radref(t));
+  arb_clear(t);
+  return m;
+}
+
+/* ARBF64 name index literal token... (f64) or ARBD candidate token... */
+static void certify_double(char **tok, int n, int f64) {
+  int skip = f64 ? 3 : 1, decided = 0, ok = 0;
+  fmpq_t q;
+  arf_t want, got;
+  arb_t v;
+  fmpq_init(q), arf_init(want), arf_init(got), arb_init(v);
+  if (f64 ? !decimal(q, tok[2]) : fmpq_set_str(q, tok[0], 10) != 0)
+    die(f64 ? "literal" : "candidate", f64 ? tok[2] : tok[0]);
+  fmpq_canonicalise(q);
+  /* a literal rounds; a candidate must already be a double */
+  int inexact = arf_set_fmpq(want, q, 53, ARF_RND_NEAR);
+  slong prec = 0;
+  for (int p = 0; p < NPREC && !decided; p++) {
+    prec = precs[p];
+    if (!evaluate(v, tok + skip, n - skip, p, NULL)) {
+      arb_indeterminate(v);
+      continue;
+    }
+    decided = rounds_to(got, v, prec);
+  }
+  ok = decided && arf_equal(got, want) && normal(want) && (f64 || !inexact);
+  double margin = ok ? ulp_margin(v, want, prec) : 0;
+  if (!ok || verbose) {
+    const char *label = ok ? "BALL" : decided ? "WRONG" : "UNDECIDED";
+    if (f64)
+      printf("%s double %s[%s]: literal %s, value ", label, tok[0], tok[1],
+             tok[2]);
+    else
+      printf("%s double: candidate %s, value ", label, tok[0]);
+    arb_printn(v, 40, 0);
+    printf(" at %ld bits\n", (long)prec);
+  }
+  if (!ok)
+    dfailed++;
+  else if (margin > worst_dmargin)
+    worst_dmargin = margin, worst_dprec = prec;
+  dchecked++;
+  fmpq_clear(q), arf_clear(want), arf_clear(got), arb_clear(v);
+}
+
 /* tok[0..n) copied, each `$name` in it already defined: names go strictly
    forward, so no value depends on itself */
 static char **copy_tokens(char **tok, int n) {
@@ -392,12 +519,16 @@ int main(int argc, char **argv) {
   int ntok = 1024;
   char **tok = malloc(sizeof *tok * (size_t)ntok);
   while (getline(&line, &cap, stdin) > 0) {
-    int root = !strncmp(line, "ARBVAR ", 7), let = !strncmp(line, "ARBLET ", 7);
-    if (strncmp(line, "ARB ", 4) && !root && !let)
+    int root = !strncmp(line, "ARBVAR ", 7), let = !strncmp(line, "ARBLET ", 7),
+        f64 = !strncmp(line, "ARBF64 ", 7), dbl = !strncmp(line, "ARBD ", 5);
+    if (strncmp(line, "ARB ", 4) && !root && !let && !f64 && !dbl)
       continue;
     int n = 0;
-    for (char *t = strtok(line + (root || let ? 7 : 4), " \t\r\n"); t;
-         t = strtok(NULL, " \t\r\n")) {
+    for (char *t = strtok(line + (root || let || f64 ? 7
+                                  : dbl              ? 5
+                                                     : 4),
+                          " \t\r\n");
+         t; t = strtok(NULL, " \t\r\n")) {
       if (n == ntok)
         tok = realloc(tok, sizeof *tok * (size_t)(ntok *= 2));
       tok[n++] = t;
@@ -406,6 +537,10 @@ int main(int argc, char **argv) {
       define_root(tok, n);
     else if (let)
       define_let(tok, n);
+    else if ((f64 && n < 4) || (dbl && n < 2))
+      die("short line", line);
+    else if (f64 || dbl)
+      certify_double(tok, n, f64);
     else if (n < 4)
       die("short line", line);
     else
@@ -413,13 +548,21 @@ int main(int argc, char **argv) {
   }
   free(tok);
   free(line);
-  if (failed || !checked) {
-    printf("FAILED: %d of %d literals undecided or wrong\n", failed, checked);
+  if (failed || dfailed || (!checked && !dchecked)) {
+    printf("FAILED: %d of %d literals and %d of %d doubles undecided or "
+           "wrong\n",
+           failed, checked, dfailed, dchecked);
     return 1;
   }
-  printf("CERTIFIED %d literals; the worst lies %.3g of a half unit in its "
-         "last digit from its ball (%ld bits)\n",
-         checked, worst_margin, (long)worst_prec);
+  printf("CERTIFIED %d literals, %d doubles", checked, dchecked);
+  if (checked)
+    printf("; the worst lies %.3g of a half unit in its last digit from its "
+           "ball (%ld bits)",
+           worst_margin, (long)worst_prec);
+  if (dchecked)
+    printf("%s the worst double %.3g of a half ulp (%ld bits)",
+           checked ? "," : ";", worst_dmargin, (long)worst_dprec);
+  printf("\n");
   flint_cleanup();
   return 0;
 }

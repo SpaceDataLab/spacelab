@@ -31,6 +31,18 @@ root-mean-square distance over them.
 | pyerfa | not recorded | geodetic latitude by Vermeille's inverse | rad | 505 | 2.604e-11 | 1.057e-11 | `crates/spacelab-earth/tests/geodetic.rs::geodetic_inverse_distance_to_pyerfa` |
 | pyerfa | not recorded | geodetic longitude | rad | 505 | 4.441e-16 | 1.016e-16 | `crates/spacelab-earth/tests/geodetic.rs::geodetic_inverse_distance_to_pyerfa` |
 | pyerfa | not recorded | ellipsoidal height | m | 505 | 4.768e-07 | 2.149e-08 | `crates/spacelab-earth/tests/geodetic.rs::geodetic_inverse_distance_to_pyerfa` |
+| scipy | not recorded | J1 at thirteen arguments | 1 | 13 | 7.945e-16 | 2.657e-16 | `crates/spacelab-earthvision/src/ice.rs::bessel_distance_to_scipy` |
+| disort | not recorded | T-down, Monte Carlo on the AERONET atmospheres | 1 | 120 | 9.537e-03 | 1.861e-03 | `crates/spacelab-earthvision/tests/aeronet_measured_atmosphere.rs::coupling_distance_to_disort` |
+| disort | not recorded | T-up, Monte Carlo on the AERONET atmospheres | 1 | 120 | 4.425e-03 | 1.232e-03 | `crates/spacelab-earthvision/tests/aeronet_measured_atmosphere.rs::coupling_distance_to_disort` |
+| disort | not recorded | spherical albedo on four nodes, Monte Carlo on the AERONET atmospheres | 1 | 120 | 9.924e-03 | 3.750e-03 | `crates/spacelab-earthvision/tests/aeronet_measured_atmosphere.rs::coupling_distance_to_disort` |
+| disort | not recorded | path reflectance at three azimuths, Monte Carlo on the AERONET atmospheres | 1 | 360 | 3.002e-02 | 7.440e-03 | `crates/spacelab-earthvision/tests/aeronet_measured_atmosphere.rs::coupling_distance_to_disort` |
+| disort | not recorded | every term, the doubling solution on the AERONET atmospheres | 1 | 720 | 2.594e-04 | 1.902e-05 | `crates/spacelab-earthvision/tests/aeronet_measured_atmosphere.rs::coupling_distance_to_disort` |
+| disort | not recorded | slab R and T, Monte Carlo at 1e6 photons | 1 | 14 | 5.848e-04 | 3.143e-04 | `crates/spacelab-earthvision/tests/phase_function_slab.rs::slab_distance_to_disort` |
+| pyspectral | LUT v1.0.1 | Rayleigh path reflectance, one fitted ozone depth per wavelength | 1 | 512 | 2.264e-02 | 8.688e-03 | `crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::angular_shape_distance_to_pyspectral` |
+| pyspectral | LUT v1.0.1 | Rayleigh path reflectance above air mass 3.05, ozone fitted below it | 1 | 320 | 3.274e-02 | 1.293e-02 | `crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::out_of_sample_distance_to_pyspectral` |
+| pyspectral | LUT v1.0.1 | Rayleigh path reflectance at 600 nm, no absorber | 1 | 64 | 2.582e-01 | 1.754e-01 | `crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::distance_to_pyspectral_without_the_ozone` |
+| pyspectral | LUT v1.0.1 | Rayleigh path reflectance at 800 nm, no absorber | 1 | 64 | 5.090e-02 | 3.007e-02 | `crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::distance_to_pyspectral_without_the_ozone` |
+| modtran | 5.3.3 | TOA reflectance on RadCalNet's measured scenes | 1 | 313 | 7.839e-03 | 1.986e-03 | `crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs::toa_distance_to_radcalnets_modtran` |
 | Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, position | m | 9 | 3.400e+04 | 2.390e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
 | Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, velocity | m/s | 9 | 2.940e+01 | 1.741e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
 | Orekit | 13.1.7 | Brouwer-Lyddane LEO with M2 = 1e-14 rad/s2, 1 day, position | m | 9 | 3.400e+04 | 2.390e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::drag_distance_to_orekit` |

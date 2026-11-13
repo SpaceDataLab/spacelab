@@ -416,9 +416,12 @@ mutants-staleness:
 # and answers a strictly stronger question, because it can see across files: `mutants-anchors` counts
 # entries against a per-file total, so an entry that matches *two* mutants and one that matches none
 # cancel out and the file still reconciles. Here every entry is required to claim exactly one mutant
-# and every mutant to be claimed by exactly one entry.
-mutants-ledger:
-    uv run python tools/mutants-ledger.py
+# and every mutant to be claimed by exactly one entry. `--rewrite` also moves each stale anchor whose
+# function is byte-identical to the one its proof was written against; `--since HEAD` reports an
+# anchor that moved onto another mutant of the same shape, which still reconciles.
+mutants-ledger *ARGS:
+    uv run --no-project python -I tools/test_mutants_ledger.py
+    uv run python tools/mutants-ledger.py {{ARGS}}
 
 # Does the §5.3 table still say what the runs said? Every row's counts are copied by hand out of what
 # `mutants-verdict` printed above, and nothing checked them until this existed: ten rows of sixty-two

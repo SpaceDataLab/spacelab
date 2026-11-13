@@ -4778,7 +4778,7 @@ mutant for, a wrong path or a file with nothing to mutate, fails rather than rec
 file — ~2 min against ~1.6 h for the 137 anchored files — and asks a strictly stronger question,
 because it can see across files: the per-file count lets an entry matching *two* mutants cancel
 against one matching none. It requires every entry to claim exactly one mutant and every excluded
-mutant to be claimed by exactly one entry. Current: **1 012 entries, 1 012 excluded, 1 012 claimed,
+mutant to be claimed by exactly one entry. Current: **1 020 entries, 1 020 excluded, 1 020 claimed,
 0 broken**. Every entry sits in a block preceded by prose; an exclusion with no proof above it is
 indistinguishable from having given up on the mutant, so that count is checked alongside the anchor
 reconciliation.
@@ -4893,6 +4893,26 @@ below it in one stroke — and the campaign only noticed because the next census
 those nine, `423:25`, as a fresh survivor. It was not fresh: it was an equivalence proved days
 earlier whose anchor had moved out from under it. A stale anchor is silent in exactly the direction
 that costs measurement time.
+
+The repair is mechanical since Ф10.K, and only where it can be. Ф17.D, Ф17.N and the Ф19.G batches
+left 37 anchors stale (F97). `just mutants-ledger --rewrite` moves an anchor only when the function
+cargo-mutants names — `--list --json` carries its span — is byte-identical to the one in the commit
+that last wrote the entry, with the anchor at the same offset inside it: 29 of the 37 moved that way.
+The eight it left were right to be left. Six were `gmf_mapping` and `vmf1_mapping` proofs whose code
+F94 had rewritten: the `t0` hemisphere switch and the `cos(coef − psi)` seasonal term they argued
+about no longer exist, so two entries were deleted, and the four mutants that replace the rest — the
+`latitude < 0.0` tie and `phase ± psi` — were run, survive, and are argued afresh. Two were
+`for_each_drag_facet`'s edge-on ties, whose function F89 had changed by giving the lift its second
+`|n̂·v̂|`; that factor is `d` again, so the argument holds, and both mutants were re-run and survive.
+
+The same pass found the drift no count can see. `98c9739` inserted a line above
+`EmpiricalWind::velocity`: its `822:29` neighbour went stale and was re-anchored, but `852:33` landed
+on the `-` of the cross product's *x* component, a mutant of the same shape, and went on claiming
+exactly one. Its proof is about the *y* component, whose subtrahend is the exact zero `ê[2]`; the *x*
+component's subtrahend is not zero, and the mutant the entry excused from 2026-10-28 is caught the
+moment it is run. `just mutants-ledger --since REV` now reports every entry that stood in REV's ledger
+and names code no entry excluded there. Over all 197 ledger commits this was the only one; it is
+re-anchored to `853:33`, where its mutant survives as argued. `--since HEAD` runs before each commit.
 
 #### A bare-basename anchor cannot be called broken, and two crates have an `iod.rs`
 

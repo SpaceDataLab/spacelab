@@ -278,30 +278,32 @@ exclude_re = [
     # --- `brent`'s acceptance rule. Proved unreachable or provably indistinguishable. ---
 
     # `if d.abs() > tol1 { b += d } else { b += ±tol1 }`. The two differ only at `|d| == tol1`, and
-    # there they compute the same `b`. `d` is either `xm` — and the convergence test at line 155 has
-    # already returned unless `|xm| > tol1`, so that branch cannot tie — or the accepted step `p/q`.
+    # there they compute the same `b`. `d` is either `xm` — and the convergence test
+    # `if xm.abs() <= tol1` has already returned unless `|xm| > tol1`, so that branch cannot tie — or
+    # the accepted step `p/q`.
     # Acceptance requires `2p < 3·xm·q − |tol1·q|` with `p = |p| ≥ 0`, which forces `xm·q > 0`; so
     # `q` carries the sign of `xm` and `d = p/q` does too. At `|d| == tol1` that makes `d` exactly
     # the `sign(xm)·tol1` the else branch adds.
-    "root\\.rs:201:20: replace > with >= in brent",
+    "root\\.rs:204:20: replace > with >= in brent",
 
     # `b += if xm > 0.0 { tol1 } else { -tol1 }`. `xm == 0.0` is unreachable: `xm` is not reassigned
-    # after line 149, line 155 returns when `xm.abs() <= tol1`, and `tol1 = 2ε|b| + tol/2 > 0`
-    # because `tol > 0` is checked on entry. So `|xm| > tol1 > 0` wherever this is evaluated.
-    "root\\.rs:204:24: replace > with >= in brent",
+    # after `let xm = 0.5 * (c - b)`, the convergence test returns when `xm.abs() <= tol1`, and
+    # `tol1 = 2ε|b| + tol/2 > 0` because `tol > 0` is checked on entry. So `|xm| > tol1 > 0`
+    # wherever this is evaluated.
+    "root\\.rs:207:24: replace > with >= in brent",
 
     # `if (fb > 0.0) == (fc > 0.0)`, left operand. `fb == ±0` does reach here, but the block it
     # guards writes only `c`, `fc`, `d` and `e`. The next iteration cannot swap (`|fc| < |fb| = 0`
     # is false) and returns at `if fb == 0.0` with a bracket built from `b` and `evals` alone —
     # neither of which the block touches. The difference is real and unobservable.
-    "root\\.rs:215:16: replace > with >= in brent",
+    "root\\.rs:218:16: replace > with >= in brent",
 
     # Same test, right operand. `fc` is never ±0 here: it is written in exactly three places, and
-    # each writes a value already known to be nonzero — before the loop (line 120 returned if
-    # `fa == 0`); inside the swap, whose guard `fc.abs() < fb.abs()` forces `fb != 0` and whose body
-    # sets `fc` to that `fb`; and at line 213, where `fa` is the `fb` that passed line 151's
-    # `fb == 0.0` return.
-    "root\\.rs:215:30: replace > with >= in brent",
+    # each writes a value already known to be nonzero — before the loop (the endpoint check returned
+    # if `fa == 0`); inside the swap, whose guard `fc.abs() < fb.abs()` forces `fb != 0` and whose
+    # body sets `fc` to that `fb`; and in this block's `fc = fa`, where `fa` is the `fb` that passed
+    # the loop's `if fb == 0.0` return.
+    "root\\.rs:218:30: replace > with >= in brent",
 
     # --- The two below are NOT proofs. Each is a measure-zero tie whose reachable instances were
     # --- shown to produce the identical step, plus a bounded search that found no counterexample:
@@ -317,7 +319,7 @@ exclude_re = [
     # `p = −2·xm` and `q = 2`, and `p/q` comes out as exactly `xm` — with the sign flip for negative
     # `xm` and without it for positive — so an accepted step is the bisection step itself. Only
     # opposite signs in the inverse-quadratic branch are unproved.
-    "root\\.rs:164:40: replace > with >= in brent",
+    "root\\.rs:167:40: replace > with >= in brent",
 
     # NOT a proof. `if libm::fabs(dx) < 1e-14` in `Cr3bp::collinear_points`, the Newton break, tied
     # to `<=`. The two differ only when the correction is exactly `1e-14`, and `dx` is the quotient
@@ -552,7 +554,7 @@ exclude_re = [
     # which on the step where `e` is the current bracket width is exactly `xm` — again the bisection
     # step, so only `e` differs. When `min1` binds, the tie is an exact float coincidence between a
     # quotient and `3·xm·q − |tol1·q|`.
-    "root\\.rs:186:24: replace < with <= in brent",
+    "root\\.rs:189:24: replace < with <= in brent",
 
     # --- `optimal.rs`. Two provable no-ops, four tolerance ties, and a Newton that is
     # --- self-correcting in the same sense as `lambert`'s. Every measurement below is the worst
@@ -849,9 +851,9 @@ exclude_re = [
     # `at_zero_tide_argument_step2_is_the_amplitude_columns`, which drives every argument to zero and
     # asserts that ΔS̄22 vanishes identically there — the same assertion that records why the three
     # below cannot be reached. Re-open all three if Table 6.5c ever gains an out-of-phase amplitude.
-    "solid_tide\\.rs:86:23: replace - with \\+ in step2_corrections",
-    "solid_tide\\.rs:87:24: replace - with \\+ in step2_corrections",
-    "solid_tide\\.rs:87:29: replace \\* with / in step2_corrections",
+    "solid_tide\\.rs:89:23: replace - with \\+ in step2_corrections",
+    "solid_tide\\.rs:90:24: replace - with \\+ in step2_corrections",
+    "solid_tide\\.rs:90:29: replace \\* with / in step2_corrections",
 
     # --- crates/spacelab-propagation/src/geopotential.rs ---
     # --- Every measurement below is over `embedded(4 | 70 | 120)` at four points, off-axis and
@@ -923,18 +925,18 @@ exclude_re = [
     # facet exactly edge-on to the wind or the flux, and such a facet contributes nothing either
     # way. Provable, not measured. Under `>=` the flip runs and stores `−0.0`, and `-0.0 < 0.0` is
     # false, so the facet is still skipped. Under `<=` the facet is admitted, but every term it
-    # brings carries `d` as a factor — `f = coeff·C_d·A·d` for drag, `c_n = 2A·d·inner` and
-    # `c_s = A·d·inv_psr·(C_s−1)` for radiation — so all of them are `±0.0` and the running sum is
-    # unchanged. The distinction that survives is `+0.0` against `−0.0` in a component that is
-    # exactly zero, which compares equal.
+    # brings carries `d` as a factor — `f = coeff·C_d·A·d` for drag, whose lift `f·2·lift·(−d)`
+    # carries it twice since F89, and `c_n = 2A·d·inner` and `c_s = A·d·inv_psr·(C_s−1)` for
+    # radiation — so all of them are `±0.0` and the running sum is unchanged. The distinction that
+    # survives is `+0.0` against `−0.0` in a component that is exactly zero, which compares equal.
     #
     # `sentman_drag_acceleration` is *not* on this list for the same tie: Sentman's `c_p` is
     # nonzero at grazing incidence (the thermal back-flux term survives `γ = 0`), so admitting an
     # edge-on facet there does move the answer, and that mutant is caught.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:332:48: replace > with >= in BoxWing<P>::for_each_drag_facet",
-    "crates/spacelab-propagation/src/spacecraft\\.rs:336:26: replace < with <= in BoxWing<P>::for_each_drag_facet",
-    "crates/spacelab-propagation/src/spacecraft\\.rs:486:48: replace > with >= in BoxWing<P>::for_each_srp_facet",
-    "crates/spacelab-propagation/src/spacecraft\\.rs:490:26: replace < with <= in BoxWing<P>::for_each_srp_facet",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:337:48: replace > with >= in BoxWing<P>::for_each_drag_facet",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:341:26: replace < with <= in BoxWing<P>::for_each_drag_facet",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:493:48: replace > with >= in BoxWing<P>::for_each_srp_facet",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:497:26: replace < with <= in BoxWing<P>::for_each_srp_facet",
 
     # `if f.value() < HIPPARCHUS_EPSILON` in the Sun-pointing panel normal, tied to `<=`. Provably
     # unreachable, not measured: `f = 1 − d²` for a unit Sun direction and a unit axis, so `d ∈
@@ -942,28 +944,28 @@ exclude_re = [
     # at most `1 − 2⁻⁵²`, so `f ≥ 2⁻⁵²`. The reachable set is `{0} ∪ [2⁻⁵², ∞)` and the threshold is
     # `2⁻⁵³`, which lies strictly between: no input can put `f` *on* the boundary, so `<` and `<=`
     # agree everywhere. `< → ==` is caught — it turns the fallback off entirely.
-    "spacecraft\\.rs:172:30: replace < with <= in Facet::unit_normal",
+    "spacecraft\\.rs:175:30: replace < with <= in Facet::unit_normal",
 
     # The double-sided flip `d > 0` in `gas_surface_drag_acceleration`, tied to `>=`. Unlike the
     # windward gate on the line below it — which *is* caught, because `c_p` is nonzero at grazing
     # incidence under every surface model — the flip is invisible at the tie. At `d == 0` the mutant negates the normal and
     # sets `d = −0.0`; the gate `d.value() < 0.0` is false for `−0.0` exactly as it was for `+0.0`,
     # so the facet is skipped either way and neither `normal` nor `d` is read again.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:406:48: replace > with >= in BoxWing<P>::gas_surface_drag_acceleration",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:413:48: replace > with >= in BoxWing<P>::gas_surface_drag_acceleration",
 
     # `if sin_delta > 1.0e-9` — the shear gate — tied to `>=`. Provably unreachable, the same
     # reachable-set argument as `Facet::unit_normal` above. `sin_delta = sqrt(max(1 − γ², 0))` with
     # `γ = −d` for a unit normal and a unit flow direction, so `1 − γ²` is either exactly `0` or at
     # least `2⁻⁵²`, and `sqrt` is exact on both: `sin_delta ∈ {0} ∪ [2⁻²⁶, 1]`. The threshold `1e-9`
     # sits strictly between `0` and `2⁻²⁶ = 1.49e-8`, so no input lands on the boundary.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:429:30: replace > with >= in BoxWing<P>::gas_surface_drag_acceleration",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:436:30: replace > with >= in BoxWing<P>::gas_surface_drag_acceleration",
 
     # `along < 0.0` — the anti-sunward half of the cylindrical shadow — tied to `<=`. Reachable only
     # for a satellite *inside* the Earth: the two disagree at `along == 0.0`, and there the second
     # half of the conjunction reads `perp² = ‖sat‖² − 0 < R²`, i.e. `‖sat‖ < R`. The companion
     # `perp² < R²` tie is *not* on this list — it is reachable, and
     # `a_satellite_exactly_on_the_shadow_cylinder_is_lit` constructs it exactly.
-    "crates/spacelab-propagation/src/spacecraft\\.rs:706:27: replace < with <= in <impl Acceleration for PanelSrp<M, R, E>>::acceleration",
+    "crates/spacelab-propagation/src/spacecraft\\.rs:713:27: replace < with <= in <impl Acceleration for PanelSrp<M, R, E>>::acceleration",
 
     # --- crates/spacelab-propagation/src/earth_radiation.rs ---
 
@@ -2325,7 +2327,7 @@ exclude_re = [
     # `inf * 0`. Both outputs read `nhat` through `dot3`/`cross`, so both are NaN under either form.
     # Measured over five geometries -- inclined, two equatorial, polar, out-of-plane -- the variants
     # return bit-identical `(sin_u, cos_u)`, or NaN in both.
-    "maneuver\\.rs:375:59: replace \\* with / in argument_of_latitude_sincos",
+    "maneuver\\.rs:376:59: replace \\* with / in argument_of_latitude_sincos",
 
     # `sp3::set_sample`'s back-fill guard, `series.len() < n_epochs`. The guard is unreachable, so all
     # four comparisons behave identically. `set_sample` has exactly one caller, `Sp3::parse`, which
@@ -2561,13 +2563,13 @@ exclude_re = [
 
     # `if err < CONVERGENCE`, the predictor--corrector break, tied to `<=`. `err` is `db6_max /
     # a7_max`, a quotient of two computed doubles, and it would have to equal `1e-16` bit for bit.
-    "ias15\\.rs:269:16: replace < with <= in ias15_pc",
+    "ias15\\.rs:270:16: replace < with <= in ias15_pc",
 
     # `if dt_new / dt < SAFETY`, the rejection test, tied at a ratio of exactly 0.25. `dt_new` is
     # `dt · (EPSILON / integrator_error)^(1/7)`, so the tie needs a seventh root to land on 0.25 bit
     # for bit. The second clause this test used to carry, `&& dt < t1 - t`, is gone: it was not the
     # redundancy the earlier note here claimed but a live accuracy hole, and #224 removed it.
-    "ias15\\.rs:370:24: replace < with <= in integrate_ias15",
+    "ias15\\.rs:371:24: replace < with <= in integrate_ias15",
 
     # --- The growth cap, `if dt_next / dt > 1.0 / SAFETY { dt_next = dt / SAFETY }`, and the value
     # --- it assigns. NOT proved — bounded search. The cap is reachable only where
@@ -2582,10 +2584,10 @@ exclude_re = [
     # --- that small drives `b₆` to exactly zero and the run spends the climb in the equality case.
     # --- Reaching the window needs an error positive but under 6.1e-14, and no fixture built here
     # --- has landed in it.
-    "ias15\\.rs:334:25: replace > with >= in integrate_ias15",
-    "ias15\\.rs:334:25: replace > with == in integrate_ias15",
-    "ias15\\.rs:418:26: replace / with % in integrate_ias15",
-    "ias15\\.rs:418:26: replace / with \\* in integrate_ias15",
+    "ias15\\.rs:335:25: replace > with >= in integrate_ias15",
+    "ias15\\.rs:335:25: replace > with == in integrate_ias15",
+    "ias15\\.rs:419:26: replace / with % in integrate_ias15",
+    "ias15\\.rs:419:26: replace / with \\* in integrate_ias15",
 
     # `integrate_ias15_dense` carries its own copy of the rejection test and of the growth cap —
     # `584:24` against `370:24`, `636:25`/`637:26` against `417:25`/`418:26` — character for
@@ -2597,10 +2599,10 @@ exclude_re = [
     # `ias15_drifts_in_a_straight_line_when_no_force_acts`, where the force-free arm returns exactly
     # `dt / SAFETY` and the cap fires on the equality it would have assigned anyway, and
     # `ias15_throws_away_a_first_step_far_too_large_for_the_perigee`, which exercises the other side.
-    "ias15\\.rs:584:24: replace < with <= in integrate_ias15_dense",
-    "ias15\\.rs:636:25: replace > with >= in integrate_ias15_dense",
-    "ias15\\.rs:637:26: replace / with % in integrate_ias15_dense",
-    "ias15\\.rs:637:26: replace / with \\* in integrate_ias15_dense",
+    "ias15\\.rs:585:24: replace < with <= in integrate_ias15_dense",
+    "ias15\\.rs:637:25: replace > with >= in integrate_ias15_dense",
+    "ias15\\.rs:638:26: replace / with % in integrate_ias15_dense",
+    "ias15\\.rs:638:26: replace / with \\* in integrate_ias15_dense",
 
     # --- `signal/insar.rs`, `draw_cut`. The Bresenham step directions
     # --- `let (sr, sc) = (if r < tr { 1 } else { -1 }, if c < tc { 1 } else { -1 })`, each tied to
@@ -3334,45 +3336,26 @@ exclude_re = [
     # neither branch of `t0` is observable. The wet factor has no season at all.
     "models\\.rs:196:26: replace < with <= in niell_mapping",
 
-    # GMF picks `psi`, `c10h` and `c11h` by `sin(latitude) > 0.0`, so `>=` differs only where
-    # `sin(latitude)` is exactly zero, i.e. latitude exactly +/-0.0. There `1 - cos(latitude)` is
-    # exactly `0.0`, which annihilates the entire `c10h`/`c11h` bracket, and `psi` survives only
-    # through `seasonal = cos(coef - psi)` with `coef = psi + x`: for `psi = 0` that is `x`
-    # exactly, and for `psi = PI` it is `x` to within the rounding of `fl(fl(PI + x) - PI)` --
-    # measured at 4 ulps of the cosine over the year, which scales an amplitude two to three orders
-    # below the mean (125.17 against -0.2738 in the leading term), i.e. ~1e-18 of the mapping factor.
-    "models\\.rs:362:40: replace > with >= in gmf_mapping",
+    # GMF and VMF1 pick `c10h`, `c11h` and `psi` by `latitude < 0.0`, so `<=` differs only at
+    # latitude exactly +/-0.0. There `1 - cos(latitude)` is exactly `+0.0`, and it multiplies the
+    # only term any of the three reaches: `ch = c0h + (...) * (1 - cos(latitude))`, whose bracket is
+    # finite and positive on both branches, so `ch` is `c0h` bit for bit. Neither function reads
+    # `psi` anywhere else -- GMF's seasonal `a` term is `cos(phase)`, one phase on both hemispheres --
+    # so these two are equivalent, not merely close.
+    "models\\.rs:365:41: replace < with <= in gmf_mapping",
+    "models\\.rs:435:41: replace < with <= in vmf1_mapping",
 
-    # `seasonal = cos(coef - psi)` becomes `cos(coef + psi)`. `psi` is 0 or PI: at 0 the two are
-    # bit-for-bit identical for every finite `coef`, and at PI both equal `-cos(coef)` exactly, since
-    # cosine has period 2*PI. What is left is the rounding of `fl(coef -+ PI)` -- measured over the
-    # year at a worst absolute 1.11e-15, five ulps of 1.0. `seasonal` scales `ampl_hydro`/`ampl_wet`,
-    # two to three orders below the corresponding mean, so the mapping factor moves by ~1e-18.
-    "models\\.rs:397:35: replace - with \\+ in gmf_mapping",
-
-    # `coef = psi + x` becomes `psi - x`. Cosine is even and both values `psi` takes are its
-    # symmetry points, so `cos(psi - x) = cos(psi + x)` identically: for `psi = 0` bit-for-bit,
-    # since `fl(0 - x)` is `-x` exactly, and for `psi = PI` because `cos(PI - x) = cos(PI + x) =
-    # -cos(x)`. `seasonal = cos(coef - psi)` likewise becomes `cos(-x) = cos(x)`. The residue is
-    # the rounding of the two arguments, measured at 3 ulps of the cosine over the year.
-    "models\\.rs:368:20: replace \\+ with - in gmf_mapping",
-
-    # VMF1 picks `psi`, `c10h` and `c11h` by `sin(latitude) > 0.0` and `t0` by `latitude < 0.0`, so
-    # `>=` and `<=` differ from the original only at latitude exactly +/-0.0. There `1 - cos(latitude)`
-    # is exactly `0.0`, and it multiplies the sole term any of the four reaches: `psi` and `t0` enter
-    # through `coef`, `coef` only through `cos(coef) + 1.0`, and that product is `0.0 * finite` on
-    # every branch. Unlike GMF, VMF1 takes its `a` coefficients from the caller and has no `seasonal`
-    # term, so there is no second route out. Bit-for-bit identical, not merely close.
-    "models\\.rs:431:52: replace > with >= in vmf1_mapping",
-    "models\\.rs:436:26: replace < with <= in vmf1_mapping",
-
-    # `coef = psi + x` becomes `psi - x`, and cosine is even about both values `psi` takes: at 0,
-    # `fl(0 - x)` is `-x` exactly and `cos` is sign-symmetric; at PI, `cos(PI - x) = cos(PI + x)`
-    # identically. The residue is the rounding of the argument -- measured over the year at a worst
-    # absolute 6.94e-16, 3.1 ulps of 1.0. It reaches the result scaled by `c11h/2 * (1 - cos lat)`,
-    # at most 0.007, so `ch` moves by <= 5e-18; at 5 degrees elevation the mapping factor's
-    # sensitivity is `d(m)/m = -0.143 dc`, giving ~7e-19 relative -- a thousandth of an ulp.
-    "models\\.rs:438:20: replace \\+ with - in vmf1_mapping",
+    # `cos(phase + psi)` becomes `cos(phase - psi)`. `psi` is 0 or PI: at 0, `fl(phase - 0)` is
+    # `phase` exactly; at PI, `cos(u - PI) = cos(u + PI) = -cos(u)` identically, so the mutant is the
+    # same mathematics rounded differently -- `fl(phase - PI)` for `fl(phase + PI)`, each as good a
+    # rounding of the true argument as the other. Measured with `libm` over the year (day 0 to 367
+    # in steps of 1/64): a worst absolute 1.14e-15 in the cosine, 5.1 ulps of 1.0. It reaches `ch`
+    # scaled by `c11h/2 * (1 - cos(latitude)) <= 0.0035`, so `ch` moves by at most 4.0e-18, and
+    # `|d ln m / dc|` peaks at 16.1 on the horizon (Maxima, `a` in [1.1e-3, 1.5e-3], `c` in
+    # [0.062, 0.071]; 0.136 at 5 degrees): the hydrostatic factor moves by at most 6.4e-17
+    # relative, under one ulp. The wet factor does not read `ch`.
+    "models\\.rs:372:33: replace \\+ with - in gmf_mapping",
+    "models\\.rs:442:33: replace \\+ with - in vmf1_mapping",
 
     # --- spacelab-gpu ------------------------------------------------------------------------------
     #
@@ -3398,8 +3381,8 @@ exclude_re = [
     # `wgpu::BufferUsages` is a bitflag set and both operands of each of these are single, distinct
     # bits, so exclusive-or and or produce the same mask. The buffers are created with exactly the
     # usages they are then used with, and the GPU tests exercise both.
-    "lib\\.rs:873:48: replace \\| with \\^ in Gpu::output",
-    "lib\\.rs:898:49: replace \\| with \\^ in Gpu::run",
+    "lib\\.rs:874:48: replace \\| with \\^ in Gpu::output",
+    "lib\\.rs:899:49: replace \\| with \\^ in Gpu::run",
 
     # Four tolerance comparisons whose two forms differ only on the tie, and the tie is an exact
     # `f64` equality with a literal that the quantity being compared never produces: the Newton
@@ -3977,7 +3960,7 @@ exclude_re = [
     # clamp is dead, and its doc comment says as much — "no clipping is needed against the eastern
     # edge". It is kept because it is what makes the invariant local to the one line that indexes
     # `wi + 1`, rather than a property of a sibling field.)
-    "gpt3\\.rs:257:59: replace - with \\+ in Gpt3Grid::west_index",
+    "gpt3\\.rs:264:59: replace - with \\+ in Gpt3Grid::west_index",
 
     # --- `gnss/rinex.rs`. Sakamoto's sum is never negative, so its wrap is never needed.
     #
@@ -4303,7 +4286,7 @@ exclude_re = [
     # `S::from_f64(0.0)` two lines above, so the subtrahend is an exact `±0.0`, and `x − 0.0` and
     # `x + 0.0` agree on every input including the infinities and NaN. They differ only in the sign
     # of the result when `x` is itself `−0.0`, which compares equal and is returned by value.
-    "wind_model\\.rs:852:33: replace - with \\+ in <impl Wind for EmpiricalWind<G>>::velocity",
+    "wind_model\\.rs:853:33: replace - with \\+ in <impl Wind for EmpiricalWind<G>>::velocity",
 
     # `if row > norm { norm = row }` in the infinity-norm loop → `>=`. On a tie the mutant assigns
     # `norm = row` where `row == norm` already, which is the identity, and there is no other

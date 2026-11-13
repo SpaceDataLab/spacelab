@@ -1673,6 +1673,7 @@ else
 fi
 if have maxima; then
     mac_zeros approximation_supnorm.mac 28 "each series' worst error, found at fpprec 120, lies inside Sollya's enclosure"
+    mac_zeros pade66_backward_error.mac 7 "the [6/6] Padé approximant's backward error is at most 0.385u for every A, normal or not"
 fi
 
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"

@@ -1,0 +1,69 @@
+/* The backward error of `process_noise::matrix_exp`'s [6/6] Padé approximant, for every A, normal
+   or not (plans/17 Ф28.B: the item verification.md §1.3 left open).
+
+   matrix_exp scales A by 2^-s until X = 2^-s A has ‖X‖∞ <= θ = 1/2, and returns r(X)^(2^s), where
+   r(x) = p(x)/p(-x) is the [6/6] Padé approximant of e^x. Let G(x) = e^(-x) r(x) - 1. If
+   ‖G(X)‖ < 1, then r(X) = e^(X + h(X)) with h(X) = log(I + G(X)), because G(X) commutes with X.
+   Hence r(X)^(2^s) = e^(A + ΔA) with ΔA = 2^s h(X), and ‖ΔA‖/‖A‖ = ‖h(X)‖/‖X‖ (Higham 2005;
+   Al-Mohy and Higham 2009). The scalar bound in approximation_supnorm.mac covers only the
+   eigenvalues of a normal A. This bound holds for every A, because it bounds ‖h(X)‖ by power series
+   in ‖X‖ with non-negative coefficients, and the infinity-norm is submultiplicative.
+
+   G(x) = -e^(-x) a(x)/q(x), with q(x) = p(-x) and a(x) = e^x q(x) - p(x) = sum_{k>=13} a_k x^k.
+   The coefficients g_k of G are computed exactly to x^K, K = 60. Coefficient by coefficient,
+   |g_k| <= m_k, the coefficients of M(x) = E(x) Ã(x)/(1 - Q̃(x)), where E = sum x^i/i!,
+   Ã = sum |a_k| x^k and Q̃ = sum_{j>=1} |q_j| x^j. So the tail sum_{k>K} |g_k| θ^k is at most
+   M(θ) - sum_{k<=K} m_k θ^k. M(θ) is bounded above with e^(1/2) < 33/20 and, for k > K,
+   |a_k| <= sum_j |q_j|/(k - j)!. Then ‖G(X)‖ <= y < 1 and ‖h(X)‖ <= -log(1 - y) <= y/(1 - y).
+   Every series starts at x^13, so the bound over ‖X‖ is largest at ‖X‖ = θ. All of it is exact
+   rational arithmetic except e^(1/2) < 33/20, which is checked in bfloat.
+
+   For comparison, not as a bound: Higham's sum of |c_k| θ^(k-1) over the series of h itself.
+
+   timeout 600 maxima --very-quiet -Q -b pade66_backward_error.mac                               */
+
+display2d : false$
+fpprec : 40$
+m : 6$
+K : 60$
+th : 1/2$
+u : 2^-53$
+
+p(x) := sum((2*m - k)! * m! / ((2*m)! * k! * (m - k)!) * x^k, k, 0, m)$
+qc : makelist(coeff(expand(p(-x)), x, j), j, 0, m)$
+pc : makelist(coeff(expand(p(x)), x, j), j, 0, m)$
+ak(k) := sum(qc[j + 1] / (k - j)!, j, 0, min(k, m)) - (if k <= m then pc[k + 1] else 0)$
+zero_if(ok) := if ok then 0 else 1$
+
+print("a_0 .. a_12 vanish, so G starts at x^13:",
+      zero_if(every(lambda([k], is(ak(k) = 0)), makelist(k, k, 0, 2*m))))$
+print("a_13 is the Pade error constant (6!)^2/(12! 13!):",
+      zero_if(is(ak(13) = m!^2 / ((2*m)! * (2*m + 1)!))))$
+
+e_half : 33/20$
+print("e^(1/2) < 33/20:", zero_if(is(bfloat(exp(1/2)) < bfloat(e_half))))$
+Qabs : sum(abs(qc[j + 1]) * th^j, j, 0, m)$
+Qtil : Qabs - 1$
+print("Q~(1/2) < 1, so 1/q has the majorant 1/(1 - Q~):", zero_if(is(Qtil < 1)))$
+
+Atil : sum(abs(ak(k)) * th^k, k, 2*m + 1, K) + Qabs * th^(K - m + 1) / (K - m + 1)! * e_half$
+y : e_half * Atil / (1 - Qtil)$
+
+gs : taylor(-exp(-x) * sum(ak(k) * x^k, k, 2*m + 1, K) / p(-x), x, 0, K)$
+Ms : taylor(sum(x^i / i!, i, 0, K) * sum(abs(ak(k)) * x^k, k, 2*m + 1, K)
+            / (1 - sum(abs(qc[j + 1]) * x^j, j, 1, m)), x, 0, K)$
+print("m_k >= |g_k| for every k <= 60:",
+      zero_if(every(lambda([k], is(coeff(Ms, x, k) >= abs(coeff(gs, x, k)))), makelist(k, k, 0, K))))$
+
+Gbound : sum(abs(coeff(gs, x, k)) * th^k, k, 0, K) + (y - sum(coeff(Ms, x, k) * th^k, k, 0, K))$
+print("tail beyond x^60:", bfloat(y - sum(coeff(Ms, x, k) * th^k, k, 0, K)),
+      "  ||G(X)|| <=", bfloat(Gbound))$
+print("||G(X)|| < 1, so log(I + G) is its series:", zero_if(is(Gbound < 1)))$
+
+B : Gbound / ((1 - Gbound) * th)$
+print("||dA||/||A|| <=", bfloat(B), "=", bfloat(B / u), "u")$
+print("the backward error is at most 0.385u for every A:", zero_if(is(B <= 385/1000 * u)))$
+
+hs : taylor(log(exp(-x) * p(x) / p(-x)), x, 0, K)$
+print("for comparison, Higham's sum |c_k| theta^(k-1) to x^60:",
+      bfloat(sum(abs(coeff(hs, x, k)) * th^(k - 1), k, 1, K) / u), "u")$

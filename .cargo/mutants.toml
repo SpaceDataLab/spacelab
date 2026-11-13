@@ -4295,14 +4295,14 @@ exclude_re = [
     # `norm = row` where `row == norm` already, which is the identity, and there is no other
     # difference: nothing else in the loop body reads `row` or `norm`. A running maximum written this
     # way is equivalent under `>=` for every input, not merely for the reachable ones.
-    "process_noise\\.rs:157:16: replace > with >= in matrix_exp",
+    "process_noise\\.rs:158:16: replace > with >= in matrix_exp",
 
     # `for row in (col + 1)..N` in the pivot search → `*`, giving `(col * 1)..N` = `col..N`. The extra
     # first iteration compares `|lu[col][col]|` against `best`, which was initialised to exactly that
     # value one line above, and `candidate > best` is false for `x > x`. Neither `best` nor `pivot`
     # moves, so the scan is bit-identical. (The `>=` mutant on the very next line is *not* equivalent
     # and is killed by `solve_pivots_and_breaks_ties_toward_the_first_row`.)
-    "process_noise\\.rs:488:25: replace \\+ with \\* in solve",
+    "process_noise\\.rs:489:25: replace \\+ with \\* in solve",
 
     # --- `robust.rs`. Three sites where the mutation cannot reach a different double.
 
@@ -5101,7 +5101,7 @@ exclude_re = [
     # This is an equivalence in the arithmetic, not a gap in the tests — `solve` is already
     # exercised on a permutation matrix, which forces a pivot swap, and on a tied first column,
     # which forces the strict comparison to decline one.
-    "process_noise\\.rs:474:25: replace \\+ with \\* in solve",
+    "process_noise\\.rs:475:25: replace \\+ with \\* in solve",
 
     # --- `estimation/rts.rs`. A square-root factor is signed; the covariance it factors is not.
     #

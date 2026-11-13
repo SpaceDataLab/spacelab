@@ -111,8 +111,9 @@ pub enum ProcessNoiseError {
 pub type DiscreteStep<const N: usize> = ([[f64; N]; N], [[f64; N]; N]);
 
 /// Padé order. Six is the classical choice: with the argument scaled to `‖A‖∞ ≤ 1/2` the `[6/6]`
-/// approximant is accurate to well below `f64` rounding, and each extra order costs a matrix product
-/// that buys nothing.
+/// approximant is accurate to well below `f64` rounding, a backward error of at most `0.385u·‖A‖`
+/// for every `A`, normal or not (`derivations/pade66_backward_error.mac`), and each extra order
+/// costs a matrix product that buys nothing.
 const PADE_ORDER: u8 = 6;
 
 /// The scaled argument's target infinity-norm. The Padé error bound is a function of this, so it is

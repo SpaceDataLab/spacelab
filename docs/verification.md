@@ -424,13 +424,11 @@ bound is missing or extra.
 | (1 − e^(−y/2))/y ≈ ½ − y/8 + y²/48 | `spacelab-estimation` `conjunction` | y = r² < 1e-8 | [5.208, 5.209]e-27 | none | no |
 | sin t to t²⁹/29! | `spacelab-autodiff` `double_double::sin_series` | \|t\| ≤ π/4 | [9.616, 9.617]e-38, under DD_EPS = 2⁻¹⁰⁴ = 4.93e-32 | "fourteen terms suffice": holds | no |
 | eʳ − 1 to r⁹/9! | `double_double::exp` | \|r\| ≤ ln2/1024 | [8.224, 8.225]e-36, under DD_EPS | "seven terms is what that bound costs": holds | no |
-| eˣ by the [6/6] Padé rational, scalar x | `spacelab-estimation` `process_noise::matrix_exp` | \|x\| ≤ ½ | [2.132, 2.133]e-17, 0.19 u | "accurate to well below f64 rounding": holds for a scalar, so for each eigenvalue of a normal A | no |
+| eˣ by the [6/6] Padé rational, scalar x | `spacelab-estimation` `process_noise::matrix_exp` | \|x\| ≤ ½ | [2.132, 2.133]e-17, 0.19 u | "accurate to well below f64 rounding": holds, for every A (below) | no |
 
 Not certified, and why. The Kepler and universal-variable solvers start Newton from a closed-form
 guess, not from a fitted polynomial. The ice model's Bessel J₁ for x ≥ 100 is the asymptotic
-expansion A&S 9.2.5–9.2.6, and Sollya has no Bessel function to compare it with. The Padé row is the
-scalar error only: for a non-normal A the backward error is the series of log(e⁻ˣ r(x)), which no
-file here bounds. The f and g series of initial orbit determination are truncated in time, and
+expansion A&S 9.2.5–9.2.6, and Sollya has no Bessel function to compare it with. The f and g series of initial orbit determination are truncated in time, and
 their error depends on the orbit, not on one function of one interval.
 
 The inventory found one defect beside the series. Above the switch at y = 10⁻⁸, Patera's contour
@@ -453,6 +451,16 @@ unfold the window, C's worst falls from 4.40u to 3.03u and S's from 5.11u to 4.9
 two coefficients move with Sollya's working precision: seven precisions from 150 to 1000 bits gave
 seven pairs. The Sollya file regenerates them at prec = 300, where they were made, and its gate is
 the certified bound of the committed doubles. approximation_supnorm.mac reads them from kepler.rs.
+
+The Padé row bounds |r(x)/eˣ − 1| for a scalar x, so it covers the eigenvalues of a normal A only.
+For every A, `derivations/pade66_backward_error.mac` bounds the backward error instead, in the
+framework of Higham (2005) and Al-Mohy and Higham (2009). With X = 2⁻ˢA and ‖X‖∞ ≤ ½,
+r(X) = e^(X + h(X)), h = log(1 + G) and G(x) = e^(−x) r(x) − 1, so r(X)^(2ˢ) = e^(A + ΔA) with
+‖ΔA‖/‖A‖ = ‖h(X)‖/‖X‖. G's coefficients are exact rationals to x⁶⁰. A majorant series with
+non-negative coefficients bounds the tail beyond it, by 4.9e-20. All of it is exact arithmetic
+except e^(1/2) < 33/20. The result is ‖ΔA‖/‖A‖ ≤ 4.27e-17 = 0.385u for every A, normal or not.
+Higham's sum of |cₖ|θ^(k−1) over the series of h, which has no tail bound, gives 0.384u. This is
+the error in exact arithmetic; the rounding of the evaluation and of the squarings is separate.
 
 Sollya is out of tree (D-21). It is never linked and never a dependency. The build is
 [Sollya 8.0](https://www.sollya.org/releases/sollya-8.0/sollya-8.0.tar.gz) (CeCILL-C), sha256

@@ -433,6 +433,12 @@ scalar error only: for a non-normal A the backward error is the series of log(e�
 file here bounds. The f and g series of initial orbit determination are truncated in time, and
 their error depends on the orbit, not on one function of one interval.
 
+The inventory found one defect beside the series. Above the switch at y = 10⁻⁸, Patera's contour
+weight took `(1 − e^(−y/2))/y` directly, and the subtraction cancelled `2u/y` of it: a centred
+conjunction at R/σ = 1.0001e-4 came back 4.2e-9 relative off its closed form `−expm1(−R²/2σ²)`.
+The weight is now `−expm1(−y/2)/y` there, and the same check from R/σ = 1.0001e-4 to 0.1 holds to
+2.3e-14 (bound 1e-13, `patera_keeps_its_contour_weight_digits_above_the_series_switch`).
+
 Sollya is out of tree (D-21). It is never linked and never a dependency. The build is
 [Sollya 8.0](https://www.sollya.org/releases/sollya-8.0/sollya-8.0.tar.gz) (CeCILL-C), sha256
 `58d734f9a2fc8e6733c11f96d2df9ab25bef24d71c401230e29f0a1339a81192`. It uses

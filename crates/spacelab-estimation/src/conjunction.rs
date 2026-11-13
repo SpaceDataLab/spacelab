@@ -355,11 +355,12 @@ impl EncounterPlane {
             let r2 = s1 * s1 + s2 * s2;
             let flux = s1 * s2p - s2 * s1p;
             let gauss = libm::exp(-0.5 * r2);
-            // h(r) = (1 − e^{−r²/2})/r², with its removable r→0 limit ½ − r²/8 + r⁴/48.
+            // h(r) = (1 − e^{−r²/2})/r² = −expm1(−r²/2)/r², with its removable r→0 limit
+            // ½ − r²/8 + r⁴/48; expm1 keeps the 2u/r² that 1 − e^{−r²/2} would cancel above it.
             let h = if r2 < 1e-8 {
                 0.5 - r2 / 8.0 + r2 * r2 / 48.0
             } else {
-                (1.0 - gauss) / r2
+                -libm::expm1(-0.5 * r2) / r2
             };
             acc += h * flux;
             tail -= gauss / r2 * flux;
@@ -1114,6 +1115,23 @@ mod tests {
     #[test]
     fn patera_takes_the_series_where_its_contour_weight_would_cancel() {
         for r in [1e-6, 1e-5, 5e-5, 9.9e-5] {
+            let plane = EncounterPlane::from_diagonal(0.0, 0.0, 1.0, 1.0, r).unwrap();
+            let want = -libm::expm1(-0.5 * r * r);
+            let got = plane.probability_patera();
+            let rel = (got - want).abs() / want;
+            println!("R/sigma={r:e}: patera={got:.17e} exact={want:.17e} rel={rel:.2e}");
+            assert!(
+                rel < 1e-13,
+                "R/sigma={r:e}: {got:.17e} vs exact {want:.17e} (rel {rel:.2e})"
+            );
+        }
+    }
+
+    /// The same centred check above the switch, where `x = r²` is past `10⁻⁸` and the weight is
+    /// evaluated directly: `1 − e^{−x/2}` there would cancel `2u/x` of `h`, 2.2e-10 at `R/σ = 10⁻³`.
+    #[test]
+    fn patera_keeps_its_contour_weight_digits_above_the_series_switch() {
+        for r in [1.0001e-4, 3e-4, 1e-3, 1e-2, 1e-1] {
             let plane = EncounterPlane::from_diagonal(0.0, 0.0, 1.0, 1.0, r).unwrap();
             let want = -libm::expm1(-0.5 * r * r);
             let got = plane.probability_patera();

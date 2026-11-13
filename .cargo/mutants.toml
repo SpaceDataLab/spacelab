@@ -3170,17 +3170,17 @@ exclude_re = [
 
     # `r2 < 1e-8` tied to `<=`, the switch onto the series form of `h`. `1e-8` is a tolerance, not a
     # boundary: at `x = 1e-8` the series `½ − x/8 + x²/48` truncates at `x³/192 = 5e-27` relative,
-    # while the direct `(1 − e^{−x/2})/x` loses `2u/x = 2e-8` of it to cancellation. The mutant moves
-    # exactly one point -- `x` bit-equal to `1e-8` -- onto the *more* accurate branch, and no test can
-    # demand the less accurate value.
-    "conjunction\\.rs:359:27: replace < with <= in EncounterPlane::probability_patera",
+    # and the direct `−expm1(−x/2)/x` is within libm's ulp of `expm1` and one division of it. The
+    # mutant moves exactly one point -- `x` bit-equal to `1e-8` -- between two forms that agree to
+    # about an ulp, under the quadrature's own `2.2e-14`, so no test can tell them apart.
+    "conjunction\\.rs:360:27: replace < with <= in EncounterPlane::probability_patera",
 
     # The `x²/48` term of that series is at most `2.1e-18` over the branch (`x < 1e-8`), under a
     # quarter of an ulp of the `½ − x/8` it corrects, so flipping its sign is *bit-identical*:
     # measured over 200k `x` drawn from the branch plus both endpoints, not one sample changed a
     # single bit. (Which also says the term is dead weight at its own coefficient; it stays because it
     # is the series the doc comment quotes.)
-    "conjunction\\.rs:360:32: replace \\+ with - in EncounterPlane::probability_patera",
+    "conjunction\\.rs:361:32: replace \\+ with - in EncounterPlane::probability_patera",
 
     # The same term with its divisor mutated is no longer below an ulp, but is still below the noise
     # floor of what consumes it. Over the same 200k samples: `/48 → %48` is a no-op on `x² < 48`, so
@@ -3188,8 +3188,8 @@ exclude_re = [
     # by at most 86 ulp, `1.9e-14`. The quadrature that sums 1024 such terms accumulates `2.2e-14` of
     # its own rounding against the closed form (the test above prints it), so separating either
     # mutant would mean asserting that accumulation.
-    "conjunction\\.rs:360:42: replace / with % in EncounterPlane::probability_patera",
-    "conjunction\\.rs:360:42: replace / with \\* in EncounterPlane::probability_patera",
+    "conjunction\\.rs:361:42: replace / with % in EncounterPlane::probability_patera",
+    "conjunction\\.rs:361:42: replace / with \\* in EncounterPlane::probability_patera",
 
     # Chan's early exit, `if fi > b && term < 1e-18·pc { break }`, in all five mutated forms. Two
     # facts settle them. (1) `term_i = Poisson(b)(i) · P(J ≤ i−1)` is a product of two factors both
@@ -3201,11 +3201,11 @@ exclude_re = [
     # the running total and decaying super-exponentially past the mode. That is the code's own
     # documented justification for having the break at all, so the mutant computes the *more*
     # complete sum. `<` → `<=` differs only at exact equality and drops the same tail.
-    "conjunction\\.rs:417:19: replace > with >= in EncounterPlane::probability_chan",
-    "conjunction\\.rs:417:19: replace > with < in EncounterPlane::probability_chan",
-    "conjunction\\.rs:417:19: replace > with == in EncounterPlane::probability_chan",
-    "conjunction\\.rs:417:31: replace < with <= in EncounterPlane::probability_chan",
-    "conjunction\\.rs:417:31: replace < with == in EncounterPlane::probability_chan",
+    "conjunction\\.rs:418:19: replace > with >= in EncounterPlane::probability_chan",
+    "conjunction\\.rs:418:19: replace > with < in EncounterPlane::probability_chan",
+    "conjunction\\.rs:418:19: replace > with == in EncounterPlane::probability_chan",
+    "conjunction\\.rs:418:31: replace < with <= in EncounterPlane::probability_chan",
+    "conjunction\\.rs:418:31: replace < with == in EncounterPlane::probability_chan",
 
     # `if f > best_f` tied to `>=` in the 48-point coarse scan: which of two equally good grid points
     # is handed to the refinement. `best_f` is identical either way, and so is the answer, because the
@@ -3214,27 +3214,27 @@ exclude_re = [
     # tie is a saturation rather than a coincidence between two samples of a smooth unimodal
     # function: every sample underflowed to `0.0`, or the flat top is `clamp_unit`'s `1.0` (a centred
     # conjunction at small `k`), and golden section on a constant returns `best_f` unchanged.
-    "conjunction\\.rs:453:18: replace > with >= in EncounterPlane::probability_max",
+    "conjunction\\.rs:454:18: replace > with >= in EncounterPlane::probability_max",
 
     # `width = (hi − lo)/steps` tied to `%`: `50 % 48 = 2` instead of `50/48 = 1.0417`. `width` only
     # sets the bracket `[best_x − width, best_x + width]` handed to the golden section, whose one
     # requirement is to contain the peak -- and the peak is within one grid step of the coarse argmax,
     # so a wider bracket is as valid as the exact one. Golden section on a unimodal `eval` converges
     # from either to the same peak within the same `1e-10` in `log k`, where `Pc` is stationary.
-    "conjunction\\.rs:459:31: replace / with % in EncounterPlane::probability_max",
+    "conjunction\\.rs:460:31: replace / with % in EncounterPlane::probability_max",
 
     # `if fc > fd` tied to `>=`, the golden-section branch. On a tie both retained brackets, `[a, d]`
     # and `[c, b]`, contain `[c, d]` and hence the peak, so both stay valid golden brackets and
     # converge to it. Ties arise only where `eval` is flat -- the same two saturations as above.
-    "conjunction\\.rs:465:19: replace > with >= in EncounterPlane::probability_max",
+    "conjunction\\.rs:466:19: replace > with >= in EncounterPlane::probability_max",
 
     # The convergence test `|b − a| < 1e-10`, tied to `<=` (accepting a bracket of exactly the
     # declared convergence width, at most one iteration earlier) and to `==` (never true, so all 64
     # iterations run). The loop is bounded at 64 either way and running it out only narrows the
     # bracket further, to `2.08·0.618⁶⁴ ≈ 9e-14`, so `max(fc, fd)` moves by `O(Δ²·f″)` at a
     # stationary point.
-    "conjunction\\.rs:478:34: replace < with <= in EncounterPlane::probability_max",
-    "conjunction\\.rs:478:34: replace < with == in EncounterPlane::probability_max",
+    "conjunction\\.rs:479:34: replace < with <= in EncounterPlane::probability_max",
+    "conjunction\\.rs:479:34: replace < with == in EncounterPlane::probability_max",
 
     # The same test with `b − a` mutated to `b + a`: a test on the bracket's *midpoint* rather than
     # its width. Write `a = best_x + width·α`, `b = best_x + width·β` with `α, β ∈ [−1, 1]` (the
@@ -3245,7 +3245,7 @@ exclude_re = [
     # `α + β → 2(p − best_x)/width`: the break fires only once the bracket has centred on the peak
     # `p ≈ best_x`, which is the state the original break detects, and where the coarse point *is* the
     # peak so `best_f` already equals the maximum. Otherwise it never fires and all 64 iterations run.
-    "conjunction\\.rs:478:29: replace - with \\+ in EncounterPlane::probability_max",
+    "conjunction\\.rs:479:29: replace - with \\+ in EncounterPlane::probability_max",
 
     # `poisson_terms` is a safety margin -- "the mean plus a wide margin in standard deviations" --
     # whose contract is to be an upper bound, not a formula, and every mutated form is still one.
@@ -3255,9 +3255,9 @@ exclude_re = [
     # `(mean + 50√(mean+1))·64` by ≥ 3194. Past `b ≈ 1e6` the `1 << 20` cap binds for every form
     # including the original. A test that told them apart would be asserting the size of the margin,
     # which is the one thing about it that carries no meaning.
-    "conjunction\\.rs:560:18: replace \\+ with \\* in poisson_terms",
-    "conjunction\\.rs:560:43: replace \\+ with \\* in poisson_terms",
-    "conjunction\\.rs:560:50: replace \\+ with \\* in poisson_terms",
+    "conjunction\\.rs:561:18: replace \\+ with \\* in poisson_terms",
+    "conjunction\\.rs:561:43: replace \\+ with \\* in poisson_terms",
+    "conjunction\\.rs:561:50: replace \\+ with \\* in poisson_terms",
 
     # --- spacelab-estimation: rts.rs ------------------------------------------------------------
     #

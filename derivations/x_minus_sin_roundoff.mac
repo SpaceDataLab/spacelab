@@ -1,0 +1,120 @@
+/* The round-off of `x_minus_sin`'s series branch, x in [2^-180, 2), bounded by hand (plans/17
+   Ф28.D): every rounding of the shipped code is a lemma below, and Maxima adds their bounds in
+   exact rationals and takes the supremum over x.
+
+   timeout 300 maxima --very-quiet -Q -b x_minus_sin_roundoff.mac
+
+   Code: crates/spacelab-propagation/src/shadow.rs, `x_minus_sin`, `two_product`, `divide`. Every
+   operation is one IEEE double rounding to nearest-even, no FMA, so RN(y) = y (1 + delta) with
+   |delta| <= u = 2^-53 while nothing underflows. Notation: T3 = x^3/3!, T5 = x^5/5!,
+   T7 = x^7/7!, Q the nested polynomial the loop evaluates, P = T3 - T5 + T7 Q the Taylor
+   polynomial to x^25/25! (shadow_lens.mac (8)), V = x - sin x.
+
+   Exact steps -- the theorems the code rests on, each with its hypothesis:
+     two_product(a, b) = (p, l) with p + l = a b exactly (Dekker 1971, Veltkamp's split by
+       2^27 + 1): no overflow, and e_a + e_b >= e_min + p - 1 = -970 for the exponents of a and b.
+       The smallest product here is x3 x2 ~ x^5 >= 2^-900 at x = 2^-180, and q k in `divide`.
+     divide(hi, lo, k): q = RN(hi/k); p + e = q k exactly; hi - p is exact by Sterbenz, since
+       p = RN(q k) is within (1 + u)^2 of hi; and (hi - p) - e = hi - q k is the remainder of a
+       correctly rounded division, which is a double (Bohlender, Walter, Kornerup, Matula 1991),
+       so its rounding is exact too: r = hi - k q with |r| <= u hi.
+     head = t3 - t5, back = head - t3, head_lo = (t3 - (head - back)) - (t5 + back) is Knuth's
+       two-sum of t3 and -t5: head + head_lo = t3 - t5 exactly, |head_lo| <= u |head|.
+
+   (1) Dekker's pairs and the lo parts. x2 + x2l = x^2, x3 + e3 = x x2, x5 + e5 = x3 x2 exactly;
+       x3l = RN(e3 + RN(x x2l)) carries x^3 - x3 = e3 + x x2l to within eta3, and x5l carries
+       (x3 + x3l)(x2 + x2l) - x5 less the dropped x3l x2l to within the roundings of its sum.
+   (2) `divide`: t3 + t3l = (x3 + x3l)/6 + rho7/6 + rho8, the two roundings of (r + lo)/6.
+   (3) the loop: q_k = RN(1 - RN(RN(x2 q_(k-1))/N_k)), N_k = 24*25, 22*23, ..., 8*9, against
+       Q_k = 1 - x^2 Q_(k-1)/N_k; 0 < Q_k <= 1, and v_k/Q_k <= 4/(N_k - 4) for x < 2.
+   (4) the tail RN(RN(RN(x5 x2) q)/5040): eight roundings on x^7 and the loop's theta.
+   (5) the final sum: three roundings inside, one to make the result, and the truncation x^27/27!.
+   (6) the supremum over x: every bound is c T3, c T5 or c T7 and V >= T3 - T5 (the series
+       alternates with falling terms), so each ratio grows with x and x = 2 is the worst.
+
+   Result: |result - V| <= 1.2441 u V, and <= 0.7441 ulp(V): the last rounding is half an ulp and
+   everything before it is at most 0.2441 u V < 0.2441 ulp(V). A result one binade above or below
+   V is at most that 0.2441 ulp or 0.5 ulp away. `shadow::x_minus_sin`'s test holds the 0.75 ulp;
+   the lens budget (shadow_lens_budget.mac) uses the 1.245 u.                                    */
+
+fpprec : 30$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+u : 2^-53$
+show(name, v) := print(name, "=", bfloat(v))$
+
+/* ---- (1) the lo parts, as multiples of x^n ---------------------------------------------------- */
+/* |x2l| <= u x^2;  x2 <= (1+u) x^2;  |e3| <= u x x2 <= u (1+u) x^3 */
+eta3 : u*u + u*(u*(1+u) + u*(1+u))$                  /* rho1 + rho2, times x^3 */
+L3 : u*(1+u) + u + eta3$                             /* |x3l| <= L3 x^3 */
+X3 : (1+u)^2$                                        /* x3 <= X3 x^3 */
+m1 : (1+u)*(u*X3)$                                   /* |RN(x3 x2l)| <= m1 x^5 */
+m2 : (1+u)*(L3*(1+u))$                               /* |RN(x3l x2)| <= m2 x^5 */
+rho3 : u*(u*X3)$  rho4 : u*(L3*(1+u))$  rho5 : u*(m1 + m2)$
+E5 : u*(1+u)^3$                                      /* |e5| <= E5 x^5 */
+rho6 : u*(E5 + (1+u)*(m1 + m2))$
+eta5 : eta3 + L3*u + rho3 + rho4 + rho5 + rho6$      /* eta3 x^2 + |x3l x2l| + the roundings */
+L5 : E5 + (1+u)*(m1 + m2) + rho6 + rho3 + rho4 + rho5$
+X5 : (1+u)^4$                                        /* x5 <= X5 x^5 */
+must(is(eta3 < 4*u^2) and is(eta5 < 20*u^2) and is(L3 < 3*u) and is(L5 < 5*u),
+     "(1) holds: x^3 and x^5 carried as pairs to within 4 u^2 and 20 u^2, the lo parts under 3u and 5u")$
+
+/* ---- (2) divide by 6 and by 120: errors and lo sizes, as multiples of T3 and T5 ---------------- */
+div_err(Xh, L, eta, k) := block([r, y],
+  r : u*Xh,                                          /* |hi - k q| <= u hi */
+  y : (1+u)*(r + L),                                 /* |RN(r + lo)| */
+  [eta + u*(r + L) + u*y,                            /* k (eps): eta + rho7 + k rho8 */
+   (1+u)*y])$                                        /* k |t l| */
+[eps3, l3] : div_err(X3, L3, eta3, 6)$               /* times x^3 / 6 = T3 */
+[eps5, l5] : div_err(X5, L5, eta5, 120)$             /* times x^5 / 120 = T5 */
+must(is(eps3 < 12*u^2) and is(eps5 < 40*u^2) and is(l3 < 4*u) and is(l5 < 6*u),
+     "(2) holds: t3 + t3l and t5 + t5l are T3 and T5 to within 12 u^2 T3 and 40 u^2 T5")$
+
+/* ---- (3) the loop's relative error theta ------------------------------------------------------- */
+theta : block([th : 0, first : true, phi, rho],
+  for n in [24, 22, 20, 18, 16, 14, 12, 10, 8] do (
+    rho : 4/(n*(n + 1) - 4),
+    phi : if first then (1+u)^2 - 1 else (1+u)^3*(1 + th) - 1,
+    th : (1 + rho*phi)*(1+u) - 1,
+    first : false),
+  th)$
+show("theta / u", theta/u)$
+must(is(theta < 125/100*u), "(3) holds: the loop's Q within 1.25 u")$
+
+/* ---- (4) the tail ------------------------------------------------------------------------------- */
+tailerr : (1+u)^8*(1 + theta) - 1$                   /* times T7 Q <= T7 */
+must(is(tailerr < 93/10*u), "(4) holds: the tail within 9.3 u of T7 Q")$
+
+/* ---- (5)-(6) the sum, against V >= T3 - T5, at its worst x = 2 ---------------------------------- */
+y : 4$                                               /* x^2 at x = 2 */
+r3 : 1/(1 - y/20)$                                   /* T3/V */
+r5 : (y/20)/(1 - y/20)$                              /* T5/V */
+r7 : (y^2/840)/(1 - y/20)$                           /* T7/V */
+rtrunc : (y^12*6/27!)/(1 - y/20)$                    /* (x^27/27!)/V */
+e_abs : u*(1+u)^4*r3$                                /* |head_lo| <= u |head| */
+w1 : (1+u)*(e_abs + l3*r3)$                          /* |RN(head_lo + t3l)| */
+rho11 : u*(e_abs + l3*r3)$
+w2 : (1+u)*(w1 + l5*r5)$
+rho12 : u*(w1 + l5*r5)$
+Tt : (1 + tailerr)*r7$
+rho13 : u*(w2 + Tt)$
+Delta : eps3*r3 + eps5*r5 + rho11 + rho12 + rho13 + tailerr*r7$
+before : (1+u)*(Delta + rtrunc)$                     /* (|Delta| + |tau|)/V, and the rounding of it */
+rel : u + before$
+show("before the last rounding, / (u V)", before/u)$
+show("relative bound, / u", rel/u)$
+show("of which the truncation, / u", rtrunc/u)$
+must(is(before < 2443/10000*u), "(5) holds: everything before the last rounding is under 0.2443 u V")$
+must(is(rel < 1245/1000*u) and is(1/2 + before/u < 3/4),
+     "(6) holds: x_minus_sin's series is within 1.245 u relative and 0.745 ulp of x - sin x on [2^-180, 2)")$
+
+/* Each ratio grows with y = x^2 on [0, 4]: r3, r5, r7 and rtrunc are increasing, so x = 2 bounds
+   them all. */
+ry : [1/(1 - t/20), (t/20)/(1 - t/20), (t^2/840)/(1 - t/20), (t^12*6/27!)/(1 - t/20)]$
+/* each derivative is a polynomial over (t - 20)^2 times a positive constant; the polynomial has
+   no root in (0, 4] (Sturm, `nroots`) and is positive at t = 2 */
+rises(f) := block([dd : factor(ratsimp(diff(f, t))), n, q],
+  n : expand(num(dd)), q : denom(dd),
+  (freeof(t, n) or is(nroots(n, 0, 4) = 0)) and is(subst(t = 2, n) > 0)
+  and is(ratsimp(q/(t - 20)^2) > 0) and freeof(t, ratsimp(q/(t - 20)^2)))$
+must(every(rises, ry), "(6) holds: the four ratios rise with x^2 on [0, 4], so x = 2 is the supremum")$
+print("DONE")$

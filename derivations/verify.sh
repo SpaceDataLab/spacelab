@@ -540,6 +540,22 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima shadow_lens.mac" "expected 15 identities to hold, found $holds"
     fi
 
+    out=$(macf x_minus_sin_roundoff.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 7 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima x_minus_sin_roundoff.mac: x_minus_sin's series, every rounding bounded, is within 1.245 u relative and 0.745 ulp of x - sin x on [2^-180, 2)"
+    else
+        bad "maxima x_minus_sin_roundoff.mac" "expected 7 bounds to hold, found $holds"
+    fi
+
+    out=$(macf shadow_lens_budget.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 9 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima shadow_lens_budget.mac: lens_area's 23 rounding sensitivities in closed form, and the first-order budget under 18 + 2 kappa where a segment angle is below 1/25 (the rest is shadow_lens_budget_arb.c's)"
+    else
+        bad "maxima shadow_lens_budget.mac" "expected 9 checks to hold, found $holds"
+    fi
+
     out=$(macf decimal_year.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
@@ -1024,15 +1040,15 @@ sys.exit(0 if a == b else 1)
     lens=$(timeout 300 gp -q -f shadow_lens.gp </dev/null 2>&1)
     rows=$(printf '%s\n' "$lens" | grep -E '^    \(')
     n=$(printf '%s\n' "$rows" | grep -c .)
-    if [ "$n" -eq 184 ] && ! printf '%s' "$lens" | grep -qF '***'; then
+    if [ "$n" -eq 276 ] && ! printf '%s' "$lens" | grep -qF '***'; then
         missing=$(printf '%s\n' "$rows" | grep -cvxF -f <(cat ../crates/spacelab-propagation/tests/shadow_lens.rs ../crates/spacelab-propagation/src/shadow.rs))
         if [ "$missing" -eq 0 ]; then
-            ok "pari shadow_lens.gp: the 171 lens and 13 x - sin x reference rows, at 200 digits on exact doubles, are in the tests verbatim"
+            ok "pari shadow_lens.gp: the 184 lens (171 on the grid, 13 off it) and 92 x - sin x reference rows, at 200 digits on exact doubles, are in the tests verbatim"
         else
             bad "pari shadow_lens.gp" "$missing printed rows are not in tests/shadow_lens.rs or src/shadow.rs"
         fi
     else
-        bad "pari shadow_lens.gp" "expected 184 rows and no error, found $n"
+        bad "pari shadow_lens.gp" "expected 276 rows and no error, found $n"
     fi
     if have cc && pkg-config --exists flint 2>/dev/null; then
         tmp=$(mktemp -d)
@@ -1043,9 +1059,16 @@ sys.exit(0 if a == b else 1)
         else
             bad "arb shadow_lens_arb.c" "$(cat "$tmp/cc.log")${cert:-}"
         fi
+        # shellcheck disable=SC2046 # pkg-config prints separate flags
+        if cc -O2 shadow_lens_budget_arb.c -o "$tmp/budget" $(pkg-config --cflags --libs flint) 2>"$tmp/cc.log" \
+            && cert=$(timeout 120 "$tmp/budget"); then
+            ok "arb shadow_lens_budget_arb.c: $cert"
+        else
+            bad "arb shadow_lens_budget_arb.c" "$(cat "$tmp/cc.log")${cert:-}"
+        fi
         rm -rf "$tmp"
     else
-        skip "arb shadow_lens_arb.c" "a C compiler and FLINT"
+        skip "arb shadow_lens_arb.c, shadow_lens_budget_arb.c" "a C compiler and FLINT"
     fi
 
     # Chan's series at 80 digits by two routes; every row it prints is in the test, verbatim.
@@ -1563,14 +1586,16 @@ if have maxima; then
 fi
 # Ф28.D: the same kernels and the shadow lens under FPTaylor, a static analysis independent of Gappa.
 # Each row is an input, its error mode and, per expression in order, the bound its header states
-# (`n*b` for n expressions under one bound). A run fails if any bound comes out above its stated
-# value, or if it prints a different number of bounds, which a timeout does. FPTaylor is out of tree
-# (D-21); without it the block is skipped.
+# (`n*b` for n expressions under one bound); mode rel-u is rel with every rounding a relative u
+# (`--fp-power2-model false`), the model a hand budget counts. A run fails if any bound comes out
+# above its stated value, or if it prints a different number of bounds, which a timeout does.
+# FPTaylor is out of tree (D-21); without it the block is skipped.
 if have fptaylor; then
     fpt_tmp=$(mktemp -d)
     while read -r f mode bounds; do
         opts="--opt-x-abs-tol 0 --opt-x-rel-tol 0 --opt-f-rel-tol 1e-2 --opt-f-abs-tol 0"
-        [ "$mode" = rel ] && opts="$opts --rel-error true --abs-error false --rel-error-threshold 0"
+        [ "$mode" = rel ] || [ "$mode" = rel-u ] && opts="$opts --rel-error true --abs-error false --rel-error-threshold 0"
+        [ "$mode" = rel-u ] && opts="$opts --fp-power2-model false"
         # shellcheck disable=SC2086
         got=$(timeout 600 fptaylor --log-base-dir "$fpt_tmp" --tmp-base-dir "$fpt_tmp" $opts "${f}_roundoff.fptaylor" 2>&1 |
             grep -E '^(Absolute|Relative) error \(exact\):' | awk '{ printf "%s ", $4 }')
@@ -1588,7 +1613,7 @@ era abs 1.447e-12 1.237e-15
 gmst82 abs 1.874e-7 6.982e-15
 kepler abs 6.130e-16 4.486e-14 4.530e-14
 geopotential_seed rel 3.910e-16 3.910e-16 3.634e-16
-shadow_lens rel 61*1.519e-15 2.036e-16 2.729e-14 5.623e-14 1.271e-13 1.877e-13
+shadow_lens rel-u 2.986e-16 3.624e-14 7.617e-14 1.692e-13 2.441e-13
 EOF
     rm -rf "$fpt_tmp"
 else

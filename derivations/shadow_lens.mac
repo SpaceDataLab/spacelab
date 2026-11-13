@@ -20,7 +20,7 @@
    atan2(|u x v|, u.v). (5): both arrangements against the textbook at 40 digits. (6)-(7): the
    shipped form is the textbook area -- its atan2 is the acos of the law of cosines, its factored
    product is Heron's, and r^2 (x - sin x)/2 at x = 2 theta is Orekit's segment. (8): the series,
-   its recurrence and its remainder. (9): dA/dd is minus the chord, sqrt(heron)/d, so the area's
+   its nested form and its remainder. (9): dA/dd is minus the chord, sqrt(heron)/d, so the area's
    condition number in d is kappa = sqrt(heron)/A, the bound tests/shadow_lens.rs is gated on.   */
 
 must(ok, what) := if ok then print(what) else error("FAILED:", what)$
@@ -99,14 +99,13 @@ must(is(trigsimp(trigexpand(r^2*theta - r*cos(theta)*r*sin(theta)
      "(7) holds: r^2 theta - (r cos theta)(r sin theta) = r^2 (x - sin x)/2 at x = 2 theta")$
 
 /* ---- (8) x - sin x by its series ---------------------------------------------------------------
-   The code starts at x^3/6 and multiplies by -x^2/(n (n + 1)), n = 2k, for k = 2..12. */
-series_terms : block([term : x^3/6, out : [x^3/6]],
-  for k : 2 thru 12 do (term : -term*x^2/((2*k)*(2*k + 1)), out : endcons(term, out)),
-  out)$
-must(is(ratsimp(apply("+", series_terms) - taylor(x - sin(x), x, 0, 25)) = 0)
-     and is(ratsimp(apply("+", series_terms)
-                    - sum((-1)^(k + 1)*x^(2*k + 1)/(2*k + 1)!, k, 1, 12)) = 0),
-     "(8) holds: the recurrence builds x^3/3! - x^5/5! + ... + x^25/25!, the Taylor polynomial")$
+   The code sums x^3/3! - x^5/5! + x^7/7! Q, the first two as double-double pairs, with Q from the
+   loop q <- 1 - x^2 q/(n (n + 1)) over n = 24, 22, ..., 8 from q = 1. */
+series_q : block([q : 1], for n in [24, 22, 20, 18, 16, 14, 12, 10, 8] do q : 1 - x^2*q/(n*(n + 1)), q)$
+series_sum : x^3/6 - x^5/120 + x^7/5040*series_q$
+must(is(ratsimp(series_sum - taylor(x - sin(x), x, 0, 25)) = 0)
+     and is(ratsimp(series_sum - sum((-1)^(k + 1)*x^(2*k + 1)/(2*k + 1)!, k, 1, 12)) = 0),
+     "(8) holds: x^3/3! - x^5/5! + x^7/7! Q is x^3/3! - ... + x^25/25!, the Taylor polynomial")$
 /* Below 2 the terms fall by x^2/((2k+2)(2k+3)) < 4/20 each, so the first one left out bounds the
    remainder; it is largest against the sum at x = 2. Above 2, |sin x|/(x - sin x) falls on
    [2, pi] (sin falls, x - sin x grows) and is at most 1/pi on [pi, 2 pi]. */

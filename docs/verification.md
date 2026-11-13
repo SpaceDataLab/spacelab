@@ -332,52 +332,60 @@ input works around that as follows. Its header gives the details.
   division by zero. Gappa's proof rests on the hypothesis P + Q ∈ [0.955, 46] and on hand lemmas,
   and FPTaylor has no way to state either. Gappa's bound stands alone there.
 
-**The shadow lens** (`spacelab-propagation` `shadow.rs`, derivations/shadow_lens_roundoff.fptaylor):
+**The shadow lens** (`spacelab-propagation` `shadow.rs`, derivations/shadow_lens_roundoff.fptaylor,
+x_minus_sin_roundoff.mac, shadow_lens_budget.mac, shadow_lens_budget_arb.c). Found and fixed.
 
-- `x − sin x` by its series (x < 2) is within **1.519e-15 = 13.7u** for x in [2⁻⁶⁰, 2). By
-  `x − sin x` itself (x ≥ 2) it is within **2.036e-16 = 1.83u**. Here u = 2⁻⁵³, and a bound in u is
-  a bound in ulp of the result.
-- The test `x_minus_sin_is_within_two_ulp_of_the_reference` holds 2 ulp on its table only. The
-  claim is not true off that table. At x = 1.858598579272284 the series returns 0.8997285676743384,
-  which is **4.44 ulp** from x − sin x = 0.89972856767433790…. The series branch uses `+ − × ÷` only,
-  so a Julia replay is bit for bit. Maxima, which rounds each operation of the sum in rationals,
-  gives the same result. 600 000 random x in Julia found no error above 4.45 ulp. The cause: the
-  partial sums exceed 1 while the result is below 1, so they round at twice the result's ulp. The
-  test's `c₁ = 4` assumes 2 ulp here.
-- `lens_area` for the 400 km pair, in four boxes across the penumbra:
+**The finding.** The test's gate `c₁ + c₂κ` ulp of `A`, with `c₁ = 4` and `c₂ = 1`, failed off its
+grid. The shipped `lens_area` was run at 40 000 random d across the penumbra of each radius pair of
+`tests/shadow_lens.rs`, against 512-bit arithmetic. 34 of the 280 000 points were above the gate, on
+three pairs:
 
-| d (rad) | κ | Gate c₁ + c₂κ (ulp) | FPTaylor |
-|---|---|---|---|
-| 1.2220462 … 1.2232089 | 119 … 181 | 123 … 185 | 2.729e-14 = 246u |
-| 1.2232089 … 1.2255341 | 181 … 336 | 185 … 340 | 5.623e-14 = 506u |
-| 1.2255341 … 1.2282334 | 336 … 898 | 340 … 902 | 1.271e-13 = 1144u |
-| 1.2278593 … 1.2289832 | 745 … 1491 | 749 … 1495 | 1.877e-13 = 1690u |
+| Pair r_E, r_S (rad) | d (rad) | Error then | κ | Gate then | Error now | Gate now (18 + 2κ) |
+|---|---|---|---|---|---|---|
+| 4.929513065031875e-3, 4.650484023614976e-3 (occulter 6 % larger) | 0.006578513728120271 | 8.57 ulp | 3.17 | 7.17 ulp (**1.195**) | 4.57 ulp | 24.3 ulp (0.19) |
+| 4.650484023614976e-3, the same (equal discs) | 0.00620552431625267 | 7.81 ulp | 2.89 | 6.89 ulp (**1.133**) | 4.81 ulp | 23.8 ulp (0.20) |
+| 1.6593209407822666e-2, 4.650484023614976e-3 (Moon's distance) | 0.018519308730246358 | 15.17 ulp | 9.71 | 13.71 ulp (**1.107**) | 15.17 ulp | 37.4 ulp (0.41) |
 
-FPTaylor does not prove the gate. Its own lower estimate is within 0.7 % of each bound. So each
-bound is the maximum of FPTaylor's first-order model, 1.13 to 1.49 times the gate at the box's far
-end. The model gives every rounding that acts like a shift of d its worst sign at the same time.
-The gate's c₂ = 1 counts one of them, the sum r_E + r_S. The model also counts d − diff, d + diff,
-diff·sum, d² and d² ∓ squares. Toward either tangency FPTaylor gives no useful bound, because the
-square root of a vanishing product has an unbounded derivative.
+**The cause.** `c₁ = 4` was an incomplete error budget, checked on the test's grid only.
 
-**The gate fails off the test's grid.** The shipped `lens_area` was run at 40 000 random d across
-the penumbra of each radius pair of `tests/shadow_lens.rs`. The run used `shadow.rs`'s source and
-libm 0.2.16. The reference is 512-bit arithmetic, and Maxima at 80 digits gives the same error at
-each point below. 34 of the 280 000 points are above the gate, on three pairs:
+- It gave `x − sin x` 2 ulp. The term-by-term series exceeded that: at x = 1.858598579272284 it
+  returned 0.8997285676743384, **4.44 ulp** from x − sin x = 0.89972856767433790…. Its partial
+  sums exceed 1 while the result is below 1, so they round at twice the result's ulp.
+- It left out how x − sin x grows a relative error in x: by x(1 − cos x)/(x − sin x), 3 at x → 0
+  and 2.6 at x = 2. That error comes from `atan2`'s ulp and from the roundings of Heron's product
+  and of d² ∓ (r_E² − r_S²). κ is a sensitivity to d alone and does not cover them.
+- `c₂ = 1` counted only the rounding of r_E + r_S. FPTaylor's model on the 400 km pair already
+  showed the other roundings that act like a shift of d, 1.13 to 1.49 times the gate.
 
-| Pair r_E, r_S (rad) | d (rad) | A | Error | κ | Gate | Error / gate | Points above |
-|---|---|---|---|---|---|---|---|
-| 4.929513065031875e-3, 4.650484023614976e-3 (occulter 6 % larger) | 0.006578513728120271 | 1.4430419585233871e-5 | 8.57 ulp | 3.17 | 7.17 ulp | **1.195** | 25 |
-| 4.650484023614976e-3, the same (equal discs) | 0.00620552431625267 | 1.4852687177768032e-5 | 7.81 ulp | 2.89 | 6.89 ulp | **1.133** | 2 |
-| 1.6593209407822666e-2, 4.650484023614976e-3 (Moon's distance) | 0.018519308730246358 | 1.517868930354365e-5 | 15.17 ulp | 9.71 | 13.71 ulp | **1.107** | 7 |
+**The fix.**
 
-The other four pairs stay below 0.75 of the gate; the 400 km pair comes to 0.47. All three points
-have κ below 10, so c₁ carries most of the gate there. Its derivation counts 2 ulp for x − sin x,
-then two products and the sum. It misses two errors that can account for the excess. The series
-error reaches 4.44 ulp. Also, `atan2`'s one-ulp error grows by the condition number of x − sin x
-in x, x(1 − cos x)/(x − sin x), which falls from 3 at x → 0 to 2.6 at x = 2.
-`shadow.rs`'s doc comment states the gate only "on the grid of tests/shadow_lens.rs", so it is true
-as written. The test's derivation of c₁ is not.
+- `x_minus_sin` below 2 sums x³/3! − x⁵/5! + x⁷/7! Q with the first two terms as double-double
+  pairs (Dekker's product on Veltkamp's halves, no FMA) and Knuth's two-sum. Every rounding is
+  bounded in x_minus_sin_roundoff.mac: within **1.245u** relative and **0.745 ulp** for
+  x ≥ 2⁻¹⁸⁰. Measured: 0.571 ulp and 1.052u at most over 2 000 006 points. The test table grew from
+  13 rows to 92, every k/32 and every tenth below 2 among them, each inside an Arb ball.
+- The gate is derived from every rounding `lens_area` performs. shadow_lens_budget.mac
+  differentiates the 23 roundings and gives each sensitivity in closed form in the chord frame.
+  The first-order budget is then at most **18 + 2κ** in units of u over the whole penumbra.
+  `c₂ = 2` is the least value that leaves `c₁` finite: when the occulter's edge straightens through
+  the Sun's centre, κ grows without bound and the roundings of r_E ± r_S, their product and d²
+  act as 2κ. `c₁ = 18` is above the 17.93 that is left at most, at two equal segments of x ≈ 1.4.
+  The maximum is certified by interval bisection in Arb (shadow_lens_budget_arb.c, 7 290 boxes);
+  the strips next to the triangle's edges, where intervals cannot reach, are bounded by hand in the
+  .mac file.
+- FPTaylor cross-checks the budget. With every rounding a relative u (`--fp-power2-model false`),
+  its lower estimates on the four boxes are 324.6u, 679.7u, 1510u and 2179u; the budget's maxima
+  are 324.6u, 679.7u, 1508u and 2179u. lens_p4 differs because FPTaylor evaluates the direct
+  branch below x = 2 as well.
+- The budget is first order. Its remainder is of order (κu)², which matters only near external
+  tangency, and there the budget's κ coefficient falls to 1 and leaves half of 2κ unused.
+
+**Measured after the fix.** A fresh deterministic scan of 347 001 separations over the seven pairs
+finds no point above the gate: the worst is 0.408 of it (near external tangency, κ = 2.0e9), and
+0.398 where κ < 100. Against the pointwise budget the worst is 0.815. The test now also holds 13
+rows off the grid: the three points above, the old code's worst point, and each pair's worst
+from the scan. The old code passes the new lens gate too (its worst scan point comes to 0.41 of
+it); the old series fails the new `x − sin x` bound, 4.44 against 0.75 ulp.
 
 ---
 
@@ -425,7 +433,7 @@ convergence order + Hamiltonian conservation + cross-checks against independentl
 | Knocke Earth albedo/IR | Knocke, Ries & Tapley 1988; Lambert's law | **G3**, all from `derivations/knocke_lambert.mac`: a uniform sphere against its view factor `(R/r)²` at Δ = 1°, 15°, 30° and 500 km, 20 000 km; the central cap against `R² sin²Δ/d²`; the polar-night closed form; an exitance linear in the point, `α + p̂·b`, against its flux along and across `r̂` ((6), (7)); a thin crown's three moments at 30 digits (8). The grid under Orekit's cosine: Orekit 13 `KnockeRediffusedForceModel` golden, 4 LEO geometries | uniform sphere < 1e-13 along and across `r̂` (1.0e-14 measured); cap < 1e-14; polar night < 0.001 Δ² from Δ = 30° to 2π/2000 (5.8e-9 there); linear exitance < 1e-12 from Δ = π to 2π/4000 at 500 km and 20 000 km (6.0e-14 measured); thin crown < 1e-13; Orekit < 1e-12 | src/earth_radiation.rs |
 | Third-body force (Battin form) | Battin, *Astrodynamics* — f(q) indirect-term form | independent direct difference-of-terms; tidal-field limit | Battin≡direct < 1e-8; tidal < 1e-4 | tests/solar_perturbations.rs |
 | SRP force (direction / shadow / 1/d²) | cannonball SRP; solar irradiance at 1 AU | analytic geometry (1 AU ref 1.368e-7) | < 1e-10; near/far≈4 < 1e-3 | tests/solar_perturbations.rs |
-| Conical shadow (lens area, lighting ratio) | the area two discs share in the sky plane; conical umbra/penumbra geometry (Montenbruck–Gill) | **G3**: 171 exact-double inputs — both tangencies to the last double, `d → 0`, `r_E/r_S` from 0.6 to 264 — against the textbook area at 200 digits (`derivations/shadow_lens.gp`), every value inside an Arb ball (`shadow_lens_arb.c`); **G1**: `derivations/shadow_lens.mac`, the segment form is the textbook area and `dA/dd` minus the chord. *C*: Orekit's `acos` form, 6.5e-7 off in `ν` 1.1e-9 rad inside a tangency | `A` within `4 + κ` ulp, `κ = 4K/A` (measured 1.85 ulp where `κ < 1`, `c₂ = 0.71`); `ν` within the bound `A` carries | tests/shadow_lens.rs, src/shadow.rs |
+| Conical shadow (lens area, lighting ratio) | the area two discs share in the sky plane; conical umbra/penumbra geometry (Montenbruck–Gill) | **G3**: 184 exact-double inputs — both tangencies to the last double, `d → 0`, `r_E/r_S` from 0.6 to 264, 13 off the grid — against the textbook area at 200 digits (`derivations/shadow_lens.gp`), every value inside an Arb ball (`shadow_lens_arb.c`); **G1**: `derivations/shadow_lens.mac`, the segment form is the textbook area and `dA/dd` minus the chord; `shadow_lens_budget.mac` + `shadow_lens_budget_arb.c`, the round-off gate from every rounding; `x_minus_sin_roundoff.mac`, the series within 1.245u. *C*: Orekit's `acos` form, 6.5e-7 off in `ν` 1.1e-9 rad inside a tangency | `A` within `18 + 2κ` ulp, `κ = 4K/A`, derived (measured worst 0.408 of it, 1.85 ulp where `κ < 1`); `x − sin x` within 0.745 ulp (measured 0.571); `ν` within the bound `A` carries | tests/shadow_lens.rs, src/shadow.rs |
 | Analytic Sun / Moon ephemeris | Montenbruck–Gill low-precision solar/lunar series | textbook RA/Dec; JPL Horizons ICRF vector @ J2000 | Sun RA < 0.3°; Moon angular < 0.15°, range < 3000 km | tests/ephemeris.rs |
 | Lunar gravity field (GRGM1200A → 40) | PDS SHADR `gggrx_1200a_sha.tab` (GSFC/GRAIL), parsed by content; header `GM = 4902.8001224453` km³/s², `Re = 1738.000` km | mpmath 60-digit direct Legendre summation of the same coefficients, central-differenced (`derivations/gen_lunar_oracle.py`) — a different algebra from the Gottlieb recursion under test | worst 7.333e-16 rel (assert < 1e-11) | tests/lunar\_gravity.rs |
 | Lunar PA → ME frame rotation | NAIF `moon_de440_250416.tf`, `TKFRAME_31009_ANGLES` (Park et al. 2021) | ANISE reading the same kernel through its own Euler-parameter path; and the mean Earth direction over a nodal cycle of DE440 | 1.255e-7 element (0.22 m on the surface) — an ordering difference, see below | spacelab-ephemeris/tests/lunar\_orientation.rs |

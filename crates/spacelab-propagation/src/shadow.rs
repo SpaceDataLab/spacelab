@@ -14,8 +14,9 @@
 //! the angle the chord subtends at that disc's centre: `x/2 = atan2(4K, d² + r² − r'²)`, where
 //! `4K = √((r + r' − d)(d − r + r')(d + r − r')(d + r + r'))` is four times Heron's area of the
 //! triangle of the two centres and a crossing point. The product is taken in factored form and
-//! `x − sin x` by its Taylor series below `x = 2`, so neither tangency cancels, and the plateaus are
-//! decided by comparing `d` with `r_E + r_S` and `|r_E − r_S|` — no angular margin.
+//! `x − sin x` by its Taylor series below `x = 2`, its leading terms in double-double, so neither
+//! tangency cancels, and the plateaus are decided by comparing `d` with `r_E + r_S` and
+//! `|r_E − r_S|` — no angular margin.
 //!
 //! Orekit's arrangement — `acos` of each chord distance, less the chord's triangle — is the same area
 //! (`derivations/shadow_lens.mac`) and loses digits at both tangencies and in between: on the grid
@@ -25,11 +26,13 @@
 //!
 //! # Checked against
 //!
-//! `tests/shadow_lens.rs`: on 171 exact binary64 inputs — seven radius pairs from a 400 km orbit's
+//! `tests/shadow_lens.rs`: on 184 exact binary64 inputs — seven radius pairs from a 400 km orbit's
 //! Earth (`r_E/r_S = 264`) to an occulter inside the Sun's disc, both tangencies to the last double,
-//! and `d → 0` — [`lens_area`] against `derivations/shadow_lens.gp`'s 200-digit values, each inside
-//! an Arb ball (`derivations/shadow_lens_arb.c`). The bound is `c₁ + c₂κ` ulp of `A`, `κ = 4K/A` its
-//! condition number in `d`; `derivations/shadow_lens.mac` shows the segment form is the textbook area.
+//! `d → 0`, and 13 points off that grid — [`lens_area`] against `derivations/shadow_lens.gp`'s
+//! 200-digit values, each inside an Arb ball (`derivations/shadow_lens_arb.c`). The bound is
+//! `18 + 2κ` ulp of `A`, `κ = 4K/A` its condition number in `d`, derived from every rounding the code
+//! performs (`derivations/shadow_lens_budget.mac`, `shadow_lens_budget_arb.c`);
+//! `derivations/shadow_lens.mac` shows the segment form is the textbook area.
 
 use libm::{asin, atan2, fabs, sin, sqrt};
 
@@ -59,21 +62,57 @@ fn angle(u: [f64; 3], v: [f64; 3]) -> f64 {
     atan2(norm(cross(u, v)), dot(u, v))
 }
 
+/// `a · b` as `hi + lo` exactly: Dekker's product on Veltkamp's halves (Dekker 1971), so no fused
+/// multiply-add is needed. Exact while neither the product nor its error term leaves the normal
+/// range.
+fn two_product(a: f64, b: f64) -> (f64, f64) {
+    const SPLIT: f64 = 134_217_729.0; // 2^27 + 1
+    let halves = |v: f64| {
+        let c = SPLIT * v;
+        let hi = c - (c - v);
+        (hi, v - hi)
+    };
+    let p = a * b;
+    let (ah, al) = halves(a);
+    let (bh, bl) = halves(b);
+    (p, ((ah * bh - p) + ah * bl + al * bh) + al * bl)
+}
+
+/// `(hi + lo) / k` as a pair whose sum is within a few `u²` of it, for a small integer `k`: the
+/// quotient's remainder `hi − k·q` is exact by Dekker's product and Sterbenz.
+fn divide(hi: f64, lo: f64, k: f64) -> (f64, f64) {
+    let q = hi / k;
+    let (p, e) = two_product(q, k);
+    (q, (((hi - p) - e) + lo) / k)
+}
+
 /// `x − sin x` for `x ∈ [0, 2π]`. Below `x = 2` it is the alternating Taylor series
-/// `x³/3! − x⁵/5! + …` to `x²⁵/25!`, whose terms fall by at least `x²/20 < 1/5` each, so the first
-/// one left out, `x²⁷/27!`, bounds the remainder: under `1.2e-20` of the sum. Above it `|sin x|` is
-/// at most `0.84` of `x − sin x`, so the subtraction keeps its digits.
+/// `x³/3! − x⁵/5! + x⁷/7! Q`, `Q = 1 − x²/(8·9) (1 − x²/(10·11) (… (1 − x²/(24·25))))` to `x²⁵/25!`:
+/// the first two terms as double-double pairs, their difference by Knuth's two-sum, and the rest,
+/// at most `0.024` of the result, in plain doubles. The terms fall by at least `x²/20 < 1/5` each, so
+/// the first one left out, `x²⁷/27!`, bounds the truncation: under `1.2e-20` of the sum. Everything
+/// before the last rounding is within `0.245u` of `x − sin x`, so the result is within `1.245u`
+/// relative and `0.745` ulp for `x ≥ 2⁻¹⁸⁰` (`derivations/x_minus_sin_roundoff.mac`). Above `x = 2`,
+/// `|sin x|` is at most `0.84` of `x − sin x`, so the subtraction keeps its digits: within
+/// `1 + 2|sin x|/(x − sin x) ≤ 2.67` u, libm's ulp of `sin x` and one rounding.
 fn x_minus_sin(x: f64) -> f64 {
     if x < 2.0 {
-        let x2 = x * x;
-        let mut term = x * x2 / 6.0;
-        let mut sum = term;
-        for k in 2..=12_u32 {
-            let n = f64::from(2 * k);
-            term *= -x2 / (n * (n + 1.0));
-            sum += term;
+        let (x2, x2l) = two_product(x, x);
+        let (x3, e3) = two_product(x, x2);
+        let x3l = e3 + x * x2l;
+        let (x5, e5) = two_product(x3, x2);
+        let x5l = e5 + (x3 * x2l + x3l * x2);
+        let (t3, t3l) = divide(x3, x3l, 6.0);
+        let (t5, t5l) = divide(x5, x5l, 120.0);
+        let mut q = 1.0;
+        for n in [24.0, 22.0, 20.0, 18.0, 16.0, 14.0, 12.0, 10.0, 8.0] {
+            q = 1.0 - x2 * q / (n * (n + 1.0));
         }
-        sum
+        let tail = x5 * x2 * q / 5040.0;
+        let head = t3 - t5;
+        let back = head - t3;
+        let head_lo = (t3 - (head - back)) - (t5 + back);
+        head + (((head_lo + t3l) - t5l) + tail)
     } else {
         x - sin(x)
     }
@@ -84,8 +123,9 @@ fn x_minus_sin(x: f64) -> f64 {
 ///
 /// `0` when the discs are apart, `π·min(r)²` when one lies inside the other, and in between the two
 /// circular segments on the common chord, `r²(x − sin x)/2` each, with `x/2 = atan2(4K, d² + r² − r'²)`
-/// and `4K` Heron's product in factored form (module docs). Within `c₁ + c₂κ` ulp of the exact area
-/// of the given doubles, `κ = 4K/A`, on the grid of `tests/shadow_lens.rs`.
+/// and `4K` Heron's product in factored form (module docs). Within `(18 + 2κ)u` relative of the exact
+/// area of the given doubles, so within `18 + 2κ` ulp, `κ = 4K/A`: to first order in the roundings,
+/// over the whole penumbra (`derivations/shadow_lens_budget.mac`).
 #[must_use]
 pub fn lens_area(separation: f64, alpha_central: f64, alpha_sun: f64) -> f64 {
     use core::f64::consts::PI;
@@ -187,21 +227,121 @@ mod tests {
     (6.283185307179586e0, 6.283185307179586e0, 2.4492935982947064e-16),
     ];
 
+    /// The series branch densely, from the same script: every `k/32` and every tenth below 2, the
+    /// point where the old term-by-term sum was 4.44 ulp off (1.858598579272284), and the worst
+    /// points of a 2 000 006-point scan of the shipped series.
+    #[expect(clippy::unreadable_literal, reason = "printed by the script and checked verbatim")]
+    #[rustfmt::skip]
+    const X_MINUS_SIN_SERIES: [(f64, f64, f64); 79] = [
+    (3.125e-2, 5.08601467392126e-6, 5.774541248819496e-24),
+    (6.25e-2, 4.0682157619801415e-5, 6.041675973557332e-22),
+    (9.375e-2, 1.37268764487107e-4, 8.097322675576633e-22),
+    (1e-1, 1.665833531718477e-4, 9.961062288767823e-21),
+    (1.25e-1, 3.2526661477231004e-4, -1.3983696530037811e-21),
+    (1.5625e-1, 6.350072264439588e-4, 4.4044420388485705e-21),
+    (1.875e-1, 1.0967032377301154e-3, 3.586508933995256e-20),
+    (2e-1, 1.3306692049387847e-3, 3.3555772988158105e-20),
+    (2.1875e-1, 1.7404189049898431e-3, 1.0563152048487e-19),
+    (2.5e-1, 2.5960407454770702e-3, 1.5845018300563033e-19),
+    (2.8125e-1, 3.693248353663674e-3, 1.0684536597044932e-19),
+    (3e-1, 4.4797933386604245e-3, -1.0076077903606229e-19),
+    (3.125e-1, 5.0614854196191494e-3, -1.1004366442765296e-19),
+    (3.4375e-1, 6.729930977746924e-3, 9.606099507362659e-20),
+    (3.75e-1, 8.727470913952439e-3, -4.69526293754318e-19),
+    (4e-1, 1.058165769134951e-2, -6.102971666250016e-20),
+    (4.0625e-1, 1.1082669759065763e-2, 5.315296356693493e-19),
+    (4.375e-1, 1.3823742796061989e-2, 7.666018129902178e-19),
+    (4.6875e-1, 1.6978528508316222e-2, 1.2951800381916742e-18),
+    (5.3125e-1, 2.463854518574263e-2, 1.4691116685991519e-18),
+    (5.625e-1, 2.9197326463979826e-2, 7.485231289837725e-19),
+    (5.9375e-1, 3.4276868752633124e-2, -1.8778673370728243e-18),
+    (6e-1, 3.535752660496464e-2, -2.1941104937027437e-18),
+    (6.25e-1, 3.9902727059537846e-2, -6.271787700960239e-19),
+    (6.5625e-1, 4.609992292420863e-2, 9.204820997754244e-19),
+    (6.875e-1, 5.28929199847307e-2, -1.2588712691117479e-19),
+    (7e-1, 5.578231276230894e-2, -2.8740567927338755e-18),
+    (7.1875e-1, 6.0305600089432455e-2, 3.0419171807705746e-18),
+    (7.5e-1, 6.836123997666584e-2, -2.4713097085356585e-18),
+    (7.8125e-1, 7.708248854546633e-2, -2.2237933649608737e-18),
+    (8e-1, 8.264390910047725e-2, -1.1851419720716684e-18),
+    (8.125e-1, 8.649134473928745e-2, 1.8584303455814125e-18),
+    (8.4375e-1, 9.660913606440577e-2, -1.6194122646532092e-18),
+    (8.75e-1, 1.0745649776397297e-1, -5.8985321879771185e-18),
+    (9e-1, 1.1667309037251662e-1, -1.908188809964743e-18),
+    (9.0625e-1, 1.1905335266805106e-1, 4.500814036448646e-19),
+    (9.375e-1, 1.3141889173930701e-1, -9.581959135080334e-18),
+    (9.6875e-1, 1.4457155533336327e-1, -1.2632096669432433e-17),
+    (1.03125e0, 1.7330815718751652e-1, 4.097477302943774e-18),
+    (1.0625e0, 1.8892506483292887e-1, 1.1342141201441087e-17),
+    (1.09375e0, 2.0539500357772697e-1, 2.526759081024206e-18),
+    (1.1e0, 2.087926399385647e-1, 8.303729613773933e-18),
+    (1.125e0, 2.2273240590090485e-1, -8.060268334979814e-18),
+    (1.15625e0, 2.409508572179933e-1, 4.715837465848465e-18),
+    (1.1875e0, 2.6006308261513233e-1, -6.645726005605572e-18),
+    (1.2e0, 2.679609140327736e-1, 1.036460881230838e-17),
+    (1.21875e0, 2.800809344232402e-1, 6.754915874182965e-18),
+    (1.25e0, 3.010153806444138e-1, -1.3508965656504773e-17),
+    (1.28125e0, 3.2287649424186027e-1, -1.2785048983819597e-17),
+    (1.3e0, 3.364418145828071e-1, -1.8247650480909386e-17),
+    (1.3125e0, 3.4567344330381977e-1, -1.771640581949128e-18),
+    (1.34375e0, 3.6941448209108274e-1, 6.0506280423808274e-18),
+    (1.375e0, 3.941069429768443e-1, 1.613707158139294e-17),
+    (1.4e0, 4.1455027001153977e-1, -2.200402298371803e-17),
+    (1.40625e0, 4.197572292867663e-1, -1.9449459906232266e-17),
+    (1.4375e0, 4.463708090462383e-1, 4.121690732375912e-18),
+    (1.46875e0, 4.7395220964094403e-1, 1.8275853850004697e-17),
+    (1.53125e0, 5.32031854077604e-1, -3.726031261620716e-17),
+    (1.5625e0, 5.625344143217511e-1, 1.633274480620419e-17),
+    (1.59375e0, 5.940134239906244e-1, -2.7111783461603818e-17),
+    (1.6e0, 6.00426396958495e-1, -5.1870146867022216e-17),
+    (1.625e0, 6.264686594601684e-1, 2.958300233854839e-17),
+    (1.65625e0, 6.598989438384004e-1, -2.6749645464721284e-18),
+    (1.6875e0, 6.943021481146251e-1, -4.0503049291509105e-17),
+    (1.7e0, 7.083351895475314e-1, -5.077812604198573e-17),
+    (1.71875e0, 7.296751932383774e-1, -4.271139167030821e-17),
+    (1.75e0, 7.660140531260631e-1, 2.4308897094982022e-17),
+    (1.78125e0, 8.033137585923614e-1, -4.431923170524409e-17),
+    (1.8e0, 8.261523691218049e-1, -2.90678192930995e-17),
+    (1.8125e0, 8.415684022025495e-1, 1.4404590742971085e-17),
+    (1.84375e0, 8.807711440410128e-1, 1.814986636328818e-17),
+    (1.858598579272284e0, 8.99728567674338e-1, -4.9202777212515743e-17),
+    (1.875e0, 9.209142183903062e-1, 1.7763371808564367e-18),
+    (1.9e0, 9.536999123125854e-1, -4.6531737366356815e-17),
+    (1.90625e0, 9.619889413142455e-1, 2.8020804737642804e-17),
+    (1.9100976999889905e0, 9.671102815271663e-1, 4.763364268255673e-17),
+    (1.9375e0, 1.0039857191376238e0, 1.8047010573845976e-17),
+    (1.9376388993070526e0, 1.0041744284374043e0, -1.0472298578422326e-16),
+    (1.96875e0, 1.0468940578142722e0, 1.223145636473661e-17),
+    ];
+
     /// The spacing of doubles at `x > 0`.
     fn ulp(x: f64) -> f64 {
         f64::from_bits(x.to_bits() + 1) - x
     }
 
-    /// The series and the subtraction, each within its own error of the reference.
+    /// Each branch within its proved bound: the series within 0.745 ulp
+    /// (`derivations/x_minus_sin_roundoff.mac`), the subtraction within `1 + 2|sin x|/(x − sin x)`
+    /// ulp, one rounding and libm's one ulp of `sin x`.
     #[test]
-    fn x_minus_sin_is_within_two_ulp_of_the_reference() {
-        let mut worst = 0.0_f64;
-        for &(x, hi, lo) in &X_MINUS_SIN {
+    fn x_minus_sin_is_within_its_proved_bound_of_the_reference() {
+        let (mut series, mut direct) = (0.0_f64, 0.0_f64);
+        for &(x, hi, lo) in X_MINUS_SIN.iter().chain(&X_MINUS_SIN_SERIES) {
             let err = fabs((x_minus_sin(x) - hi) - lo) / ulp(hi);
-            assert!(err <= 2.0, "x = {x:e}: {err:.2} ulp");
-            worst = worst.max(err);
+            let bound = if x < 2.0 {
+                0.75
+            } else {
+                1.0 + 2.0 * fabs(x - hi) / hi
+            };
+            assert!(err <= bound, "x = {x:e}: {err:.3} ulp against {bound:.3}");
+            if x < 2.0 {
+                series = series.max(err);
+            } else {
+                direct = direct.max(err / bound);
+            }
         }
-        std::println!("x − sin x: worst {worst:.2} ulp");
+        std::println!(
+            "x − sin x: series worst {series:.3} ulp; direct worst {direct:.3} of its bound"
+        );
     }
 
     #[test]

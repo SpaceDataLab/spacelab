@@ -15,7 +15,9 @@
 //! tangency, where `A′ → 0` and nothing is left but the final roundings. So the gate is `c₁ + c₂κ`
 //! ulp: `c₁` for the roundings no input perturbation explains, `c₂` per unit of `κ` for those that
 //! act like one — the sum `r_E + r_S` rounded before `d` is taken from it is a relative error of
-//! half an ulp in `d`.
+//! half an ulp in `d`. Both are derived from every rounding the code performs, not fitted to the
+//! rows ([`C1`]), and [`OFF_GRID`] holds the points off the grid where the earlier, fitted pair
+//! failed.
 
 use spacelab_propagation::shadow::{lens_area, masking_ratio};
 
@@ -201,23 +203,62 @@ const REFERENCE: [Row; 171] = [
     (2.7902904141689855e-3, 4.650484023614976e-3, 7.4407744377839626e-3, 0.0, 0.0, 1e0, 0.0, 0.0),
 ];
 
+/// Rows off the grid, from the same script: the three separations at which the earlier gate
+/// (`c₁ = 4`, `c₂ = 1`) failed by up to 1.195×, the old code's worst point, and from a
+/// deterministic scan of 347 001 separations over the seven pairs (uniform, and geometric towards
+/// each tangency) each pair's worst against the gate and, where it differs, its worst at `κ < 100`.
+#[expect(clippy::unreadable_literal, reason = "printed by the script and checked verbatim")]
+#[rustfmt::skip]
+const OFF_GRID: [Row; 13] = [
+    (4.929513065031875e-3, 4.650484023614976e-3, 6.578513728120271e-3, 1.4430419585233886e-5, -7.31112263321749e-22, 7.876106318726702e-1, -1.0182123144010637e-17, 3.172e0),
+    (1.6593209407822666e-2, 4.650484023614976e-3, 1.8519308730246358e-2, 1.5178689303543624e-5, -2.922188235836929e-22, 7.765974709786349e-1, -4.017156619837198e-17, 9.706e0),
+    (4.650484023614976e-3, 4.650484023614976e-3, 6.20552431625267e-3, 1.4852687177768045e-5, -3.149662672037692e-22, 7.813956256748774e-1, 2.0102585097521277e-17, 2.895e0),
+    (4.929513065031875e-3, 4.650484023614976e-3, 6.590534949594048e-3, 1.4346845369203477e-5, 7.514003499342177e-22, 7.888406913889298e-1, 9.402981147747805e-18, 3.191e0),
+    (1.2255340947973166e0, 4.650484023614976e-3, 1.2276396881556837e0, 1.5059564548530218e-5, -6.05620388852465e-22, 7.783507693700072e-1, 4.017890241350279e-17, 6.755e2),
+    (1.2255340947973166e0, 4.650484023614976e-3, 1.2208836108984784e0, 6.794322951488114e-5, -5.727048885283156e-21, 2.642914265825196e-12, -3.8534556537237303e-29, 3.879e-2),
+    (1.5185203663730337e-1, 4.650484023614976e-3, 1.490284308576425e-1, 5.840430484254062e-5, -2.702642956683615e-21, 1.4039551461717945e-1, -9.457960622834676e-18, 1.903e1),
+    (1.6593209407822666e-2, 4.650484023614976e-3, 2.0193617525061904e-2, 3.7823404889847682e-6, -2.4806426815503556e-23, 9.443308698161551e-1, -1.9248637731968904e-17, 2.840e1),
+    (1e-1, 1e-2, 1.0490997474876261e-1, 6.085618916862054e-5, 2.466293376929407e-22, 8.062887335215716e-1, 1.6853120218262203e-17, 2.930e1),
+    (2.7902904141689855e-3, 4.650484023614976e-3, 6.143136476570905e-3, 3.5523383801624886e-6, 1.159094411145424e-22, 9.47716079946199e-1, -3.6131898180014424e-17, 6.920e0),
+    (4.650484023614976e-3, 4.650484023614976e-3, 4.38241825952987e-3, 2.8745409591790586e-5, 1.3996569359849964e-21, 5.769201759033443e-1, -3.480766376378596e-17, 1.251e0),
+    (4.929513065031875e-3, 4.650484023614976e-3, 9.579997088536369e-3, 3.387342020576803e-21, -7.624425230611682e-38, 1e0, -4.985547558974871e-17, 1.301e11),
+    (4.929513065031875e-3, 4.650484023614976e-3, 8.830200534770054e-3, 1.871341427013608e-6, 2.705861537832164e-23, 9.724572788139428e-1, -2.1561321785544565e-17, 1.752e1),
+];
+
 /// The spacing of doubles at `x > 0`.
 fn ulp(x: f64) -> f64 {
     f64::from_bits(x.to_bits() + 1) - x
 }
 
-/// `c₂ = 1`: rounding `r_E + r_S` before `d` is taken from it moves the external gap by up to half an
-/// ulp of the sum, a relative error in `d` of at most `u·s/d ≈ u`, which is worth `κ` ulp of `A`.
-/// `c₁ = 4` is what is left: `x − sin x` within 2 ulp (`shadow.rs`), then two products and the sum.
-/// Measured: 1.85 ulp where `κ < 1`, and with `c₁ = 2` every row fits under `c₂ = 0.71`.
-const C1: f64 = 4.0;
-const C2: f64 = 1.0;
+/// The gate, derived (`derivations/shadow_lens_budget.mac`, `derivations/shadow_lens_budget_arb.c`).
+/// To first order the computed area is `A + Σ sᵢδᵢ` over the 23 roundings of `lens_area`, with
+/// `|δᵢ| ≤ u` for IEEE operations, `2u` for libm's `atan2` and `sin` (one ulp) and `1.245u` for
+/// `x − sin x` below 2 (`derivations/x_minus_sin_roundoff.mac`). Over the whole penumbra
+/// `Σ bᵢ|sᵢ|/A ≤ c₁ + c₂κ` with `c₁ = 18`, `c₂ = 2`, in units of `u`. The bound is relative, so it
+/// holds in ulp of `A` as well (`u·A < ulp(A)`).
+///
+/// `c₂ = 2` is the least value that leaves `c₁` finite. When the occulter's edge straightens through
+/// the Sun's centre, `κ` grows without bound. There the roundings of `r_E ± r_S` count `κ`, the
+/// rounding of their product `κ/2` and the rounding of `d²` `κ/2`. `c₁ = 18` is above the 17.93
+/// that is left at most, at two equal segments of `x ≈ 1.4` (`κ ≈ 4.8`). There `atan2`'s ulp
+/// alone costs 5.6, as `x − sin x` grows a relative error in `x` up to 3×.
+///
+/// The gate was `c₁ = 4`, `c₂ = 1`, an incomplete budget checked on the grid only. It gave
+/// `x − sin x` 2 ulp, which the old series exceeded: 4.44 ulp at `x = 1.858598579272284`. It left
+/// out the growth of a relative error in `x` through `x − sin x`: `atan2`'s ulp and the roundings
+/// of Heron's product and of `d² ∓ (r_E² − r_S²)`, which `κ`, a sensitivity to `d` alone, does not
+/// cover. Off the grid it failed by up to 1.195× ([`OFF_GRID`]'s first three rows).
+///
+/// The budget is first order. Its remainder is of order `(κu)²`, which matters only near external
+/// tangency. There `G0 → 1` leaves half of `c₂κ` unused (`shadow_lens_budget.mac`).
+const C1: f64 = 18.0;
+const C2: f64 = 2.0;
 
 /// `A` on every row within `c₁ + c₂κ` ulp of the reference, and exactly 0 where the discs are apart.
 #[test]
 fn the_lens_area_is_within_its_condition_bound_of_the_reference() {
-    let (mut flat, mut fit, mut worst) = (0.0_f64, 0.0_f64, 0.0_f64);
-    for &(re, rs, d, a_hi, a_lo, _, _, kappa) in &REFERENCE {
+    let (mut flat, mut worst) = (0.0_f64, 0.0_f64);
+    for &(re, rs, d, a_hi, a_lo, _, _, kappa) in REFERENCE.iter().chain(&OFF_GRID) {
         let a = lens_area(d, re, rs);
         if a_hi == 0.0 {
             assert_eq!(
@@ -236,27 +277,23 @@ fn the_lens_area_is_within_its_condition_bound_of_the_reference() {
         if kappa < 1.0 {
             flat = flat.max(err);
         }
-        if kappa > 0.0 {
-            fit = fit.max((err - 2.0) / kappa);
-        }
     }
-    println!(
-        "lens area: worst {worst:.3} of the bound; {flat:.2} ulp where κ < 1; c₂ {fit:.3} with c₁ = 2"
-    );
+    println!("lens area: worst {worst:.3} of the bound; {flat:.2} ulp where κ < 1");
 }
 
 /// `ν` on every row within the bound `A`'s carries through `1 − A/(π r_S²)`: `(1 − ν)` times `A`'s
-/// relative error plus that of `π r_S²` and the division, `3.4u`, then half an ulp of 1 for the
-/// subtraction. In units of `u = 2⁻⁵³`, since near the umbra `ν` is an absolute quantity: the bound
-/// does not promise its relative accuracy where `ν → 0`, and nothing that uses it needs that.
+/// relative error, at most `(c₁ + c₂κ)u` since the gate is a relative bound, plus that of `π r_S²`
+/// and the division, `3.4u`, then half an ulp of 1 for the subtraction. In units of `u = 2⁻⁵³`,
+/// since near the umbra `ν` is an absolute quantity: the bound does not promise its relative
+/// accuracy where `ν → 0`, and nothing that uses it needs that.
 #[test]
 fn the_visible_fraction_is_within_the_bound_the_area_carries() {
     let u = f64::EPSILON / 2.0;
     let mut worst = 0.0_f64;
-    for &(re, rs, d, _, _, nu_hi, nu_lo, kappa) in &REFERENCE {
+    for &(re, rs, d, _, _, nu_hi, nu_lo, kappa) in REFERENCE.iter().chain(&OFF_GRID) {
         let nu = masking_ratio(d, re, rs);
         let err = ((nu - nu_hi) - nu_lo).abs() / u;
-        let bound = (1.0 - nu_hi) * (2.0 * (C1 + C2 * kappa) + 3.4) + 0.5;
+        let bound = (1.0 - nu_hi) * (C1 + C2 * kappa + 3.4) + 0.5;
         assert!(
             err <= bound,
             "r_E {re:e}, r_S {rs:e}, d {d:e}: |Δν| {err:.2}u against {bound:.2}u"

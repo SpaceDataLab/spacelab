@@ -1,0 +1,135 @@
+/* The first-order round-off budget of `shadow::lens_area`, over every rounding the shipped code
+   performs, and the gate it proves: |A_computed - A| <= (c1 + c2 kappa) u A with c1 = 18, c2 = 2,
+   u = 2^-53, kappa = 4K/A the area's condition number in d (plans/17 Ф28.D).
+
+   timeout 300 maxima --very-quiet -Q -b shadow_lens_budget.mac
+
+   The code (crates/spacelab-propagation/src/shadow.rs), each operation one IEEE double rounding,
+   delta_i its relative error: sum = r_E + r_S (1), diff = r_E - r_S (2), the four Heron factors
+   (3)-(6), their three products (7)-(9), the sqrt (10), squares = diff sum (11), d^2 (12),
+   d^2 -+ squares (13)-(14), atan2 for the Sun and the occulter (15)-(16), x_minus_sin (17)-(18),
+   r_S^2 and its product (19)-(20), r_E^2 and its product (21)-(22), the final sum (23). The
+   doubling and the halving are exact. |delta_i| <= u for the IEEE operations; libm's atan2 and sin
+   (musl's) are assumed within one ulp, a relative 2u; x_minus_sin is within 1.245 u below x = 2
+   (x_minus_sin_roundoff.mac) and 1 + 2|sin x|/(x - sin x) u above it (sin's ulp and the
+   subtraction). To first order A_computed - A = sum_i s_i delta_i, s_i = dA/d delta_i at 0.
+
+   (1) The 23 sensitivities, by differentiating the perturbed computation, in the chord frame:
+       the common chord has half-length w = 1, the centres lie m_S = cot a and m_E = cot b from it
+       (signed), so r_S = csc a, r_E = csc b, d = cot a + cot b and x_S = 2a, x_E = 2b, with
+       (a, b) on the triangle a, b > 0, a + b < pi. A is scale-free after dividing by w^2, so the
+       triangle is the whole penumbra. Closed forms:
+         s1 = d (1 + cos(a-b)),  s2 = d (1 - cos(a-b)),  s3 .. s9 = d cos(a-b) sin a sin b,
+         s10 = 2 s3,  s11 = d sin^2(a-b),  s12 = -d (sin^2 a + sin^2 b),
+         s13 = -2 cos a sin a,  s14 = -2 cos b sin b,  s15 = 2a,  s16 = 2b,
+         s17 = s19 = s20 = A_S,  s18 = s21 = s22 = A_E,  s23 = A,
+       A_S = (2a - sin 2a)/(2 sin^2 a) the Sun's segment, A_E the occulter's, A = A_S + A_E.
+       s1 .. s14 by exact simplification, s15 .. s23 at 60 digits on 40 points of the triangle.
+   (2) kappa = 2d/A (4K = 2 d w, shadow_lens.mac (2)), and the budget B = sum_i b_i |s_i| / A, b_i
+       the bounds above in units of u, is
+         B = kappa G0 + [2|cos a| sin a + 2|cos b| sin b + 4a + 4b + X_S A_S + X_E A_E]/A + 3,
+         G0 = 1 + (9/2)|cos(a-b)| sin a sin b + sin^2(a-b)/2 + (sin^2 a + sin^2 b)/2,
+       and G0 - 2 = (9/2)|cos(a-b)| sin a sin b - cos(a-b) cos a cos b.
+   (3) Why c2 = 2: kappa grows without bound only as b -> 0 or a -> 0 (an occulter edge that is
+       nearly straight across the chord, or external tangency), where G0 -> 1 + sin^2 a <= 2, and
+       2 is reached at a = pi/2: a straight edge through the Sun's centre. Any c2 < 2 leaves
+       B - c2 kappa unbounded as r_E/r_S grows, so 2 is the least c2 with a finite c1.
+   (4) The kappa-free part, per disc: [2|cos a| sin a + 4a + X A_S] = A_S g(2a), with
+       g(x) = 2 amp(x) + X(x) + f(x), amp(x) = x (1 - cos x)/(x - sin x) the gain of a relative
+       error in x through x - sin x, f(x) = 4|cos(x/2)| sin^3(x/2)/(x - sin x). So that part is at
+       most 3 + sup g. amp <= 3 on (0, 2 pi] (3(x - sin x) - x(1 - cos x) has derivative
+       2 sin(x/2)(2 sin(x/2) - x cos(x/2)) >= 0, tan y >= y) and f <= 3 on (0, pi] (with y = x/2,
+       3(2y - sin 2y) - 4 cos y sin^3 y has derivative 16 sin^4 y), so g < 6 + 1.245 + 3 = 10.245
+       below x = 2; shadow_lens_budget_arb.c certifies g <= 9.05 on [2, 2 pi].
+   (5) The strips a <= 1/50 (and b <= 1/50 by symmetry). There B - 2 kappa is the kappa-free part
+       plus 2 d (G0 - 2)/A = 2 sin(a+b) [(9/2)|cos(a-b)| - cos(a-b) cot a cot b]/A. With
+       beta = 3/10: where |b - pi/2| >= beta, cos(a-b) and cot b have one sign and
+       cot(1/50) tan(beta) > 9/2, so the bracket is <= 0. Where |b - pi/2| < beta, the second term
+       is positive only for pi/2 < b < pi/2 + a, where |cot b| < tan a, so the bracket is at most
+       (11/2)|cos(a-b)| <= (11/2) sin(beta + 1/50), and A >= A_E(pi/2 - beta). So
+       B - 2 kappa <= 3 + 10.245 + 11 sin(beta + 1/50)/A_E(pi/2 - beta) < 16.5. A_E rises with b
+       (its derivative is 2 (sin b - b cos b)/sin^3 b > 0, tan b >= b).
+   (6) The rest of the triangle, a, b >= 1/50 up to and including the edge a + b = pi (d -> 0,
+       where every term is finite), is shadow_lens_budget_arb.c's: B - 2 kappa <= 18 by interval
+       bisection, its maximum 17.93 near a = b = 0.698 (kappa 4.8).
+
+   What this is not: the remainder past first order. It is O((kappa u)^2) relative, negligible
+   while kappa u is small. Near external tangency, where kappa u reaches 1 on the test's grid,
+   G0 -> 1 leaves half of the gate's 2 kappa unused; there A grows as (sum - d)^(3/2), and a
+   relative error t in sum - d leaves a remainder of at most |t|/3 times the first-order term for
+   -1 <= t <= 3. That is an argument, not a check this file makes.                              */
+
+fpprec : 60$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+/* ---- (1) the perturbed computation and its sensitivities ------------------------------------- */
+E : makelist(concat(e, i), i, 1, 23)$
+sm : (rE + rS)*(1 + e1)$
+df : (rE - rS)*(1 + e2)$
+f1 : (sm - d)*(1 + e3)$ f2 : (d - df)*(1 + e4)$ f3 : (d + df)*(1 + e5)$ f4 : (d + sm)*(1 + e6)$
+p1 : f1*f2*(1 + e7)$ p2 : p1*f3*(1 + e8)$ p3 : p2*f4*(1 + e9)$
+h : sqrt(p3)*(1 + e10)$
+sq : df*sm*(1 + e11)$
+d2 : d^2*(1 + e12)$
+denS : (d2 - sq)*(1 + e13)$ denE : (d2 + sq)*(1 + e14)$
+xS : 2*atan2(h, denS)*(1 + e15)$ xE : 2*atan2(h, denE)*(1 + e16)$
+gS : (xS - sin(xS))*(1 + e17)$ gE : (xE - sin(xE))*(1 + e18)$
+sun : rS^2*(1 + e19)*gS*(1 + e20)$ cen : rE^2*(1 + e21)*gE*(1 + e22)$
+Acomp : (sun + cen)/2*(1 + e23)$
+zero : map(lambda([v], v = 0), E)$
+sens : map(lambda([v], subst(zero, diff(Acomp, v))), E)$
+
+/* chord frame, w = 1, as algebraic functions of mS = cot a, mE = cot b */
+assume(mS + mE > 0)$
+geo : [rS = sqrt(1 + mS^2), rE = sqrt(1 + mE^2), d = mS + mE]$
+S : map(lambda([s], ratsimp(trigsimp(trigexpand(subst(geo, s))))), sens)$
+S : ratsimp(subst(sqrt(4*mS^2 + 8*mE*mS + 4*mE^2) = 2*(mS + mE), S))$
+RS : sqrt(1 + mS^2)$ RE : sqrt(1 + mE^2)$ D : mS + mE$
+cab : (mS*mE + 1)/(RS*RE)$            /* cos(a - b) */
+sab : (mE - mS)/(RS*RE)$              /* sin(a - b) */
+ssb : 1/(RS*RE)$                      /* sin a sin b */
+closed : append([D*(1 + cab), D*(1 - cab)], makelist(D*cab*ssb, i, 3, 9),
+                [2*D*cab*ssb, D*sab^2, -D*(1/RS^2 + 1/RE^2), -2*mS/RS^2, -2*mE/RE^2])$
+must(every(lambda([i], is(ratsimp(S[i] - closed[i]) = 0)), makelist(i, i, 1, 14)),
+     "(1) holds: s1 .. s14 are the closed forms, by exact simplification")$
+
+/* s15 .. s23 at 60 digits, in (a, b) */
+SAB(i, a0, b0) := bfloat(subst([mS = cot(a0), mE = cot(b0)], S[i]))$
+AS(a) := (2*a - sin(2*a))/(2*sin(a)^2)$
+closed2(a, b) := [2*a, 2*b, AS(a), AS(b), AS(a), AS(a), AS(b), AS(b), AS(a) + AS(b)]$
+worst : 0$
+for k : 1 thru 40 do block([a0, b0, c],
+  a0 : bfloat(%pi*(k - 1/2)/41), b0 : bfloat((%pi - a0)*mod(k*17, 41)/41 + 10^-3),
+  c : bfloat(closed2(a0, b0)),
+  for i : 15 thru 23 do worst : max(worst, abs(SAB(i, a0, b0) - c[i - 14])))$
+print("largest difference, s15 .. s23:", worst)$
+must(is(worst < 10^-50), "(1) holds: s15 .. s23 are 2a, 2b, A_S, A_E, A to 50 digits on 40 points")$
+
+/* ---- (2) the budget, regrouped ----------------------------------------------------------------- */
+/* |s1| + |s2| = 2d, since |cos(a - b)| <= 1 */
+must(is(ratsimp(closed[1] + closed[2] - 2*D) = 0), "(2) holds: |s1| + |s2| = 2 d")$
+G0m2 : (9/2)*abs(cos(a - b))*sin(a)*sin(b) + sin(a - b)^2/2 + (sin(a)^2 + sin(b)^2)/2 - 1$
+must(is(trigsimp(trigexpand(sin(a - b)^2/2 + (sin(a)^2 + sin(b)^2)/2 - 1
+                            + cos(a - b)*cos(a)*cos(b))) = 0),
+     "(2) holds: G0 - 2 = (9/2)|cos(a-b)| sin a sin b - cos(a-b) cos a cos b")$
+
+/* ---- (4) the lemmas on amp, f and A_E ---------------------------------------------------------- */
+gamp : 3*(x - sin(x)) - x*(1 - cos(x))$
+must(is(trigsimp(trigreduce(diff(gamp, x) - 2*sin(x/2)*(2*sin(x/2) - x*cos(x/2)))) = 0),
+     "(4) holds: (3(x - sin x) - x(1 - cos x))' = 2 sin(x/2)(2 sin(x/2) - x cos(x/2)), so amp <= 3")$
+gf : 3*(2*y - sin(2*y)) - 4*cos(y)*sin(y)^3$
+must(is(trigsimp(trigreduce(diff(gf, y) - 16*sin(y)^4)) = 0),
+     "(4) holds: (3(x - sin x) - 4 cos y sin^3 y)' = 16 sin^4 y in y = x/2, so f <= 3 on (0, pi]")$
+dAE : diff(AS(b), b)$
+must(is(ratsimp(trigsimp(trigexpand(dAE*sin(b)^3 - 2*(sin(b) - b*cos(b))))) = 0),
+     "(4) holds: A_E' sin^3 b = 2 (sin b - b cos b), so A_E rises with b")$
+
+/* ---- (5) the strips ------------------------------------------------------------------------------ */
+eps : 1/50$ beta : 3/10$
+must(is(bfloat(cot(eps)*tan(beta)) > 9/2),
+     "(5) holds: cot(1/50) tan(3/10) > 9/2, so G0 <= 2 in the strip away from b = pi/2")$
+mid : bfloat(11*sin(beta + eps)/AS(%pi/2 - beta))$
+strip : 3 + 10245/1000 + mid$
+print("strip a <= 1/50: kappa term at most", mid, "; B - 2 kappa at most", strip)$
+must(is(strip < 165/10), "(5) holds: B - 2 kappa < 16.5 where a or b <= 1/50")$
+print("DONE")$

@@ -103,9 +103,35 @@ for (i = 1, #pairs,
   foreach (vecsort(Vec(ds), , 8), d, if (d > 0, lens_row(re, rs, d)));
 );
 }
+/* Off the grid: the three points docs/verification.md section 1.2 found over the old gate, the
+   old series' worst point, and from a deterministic scan of 347 001 separations over the seven
+   pairs (uniform, and geometric towards each tangency) each pair's worst against the gate and,
+   where it differs, its worst at kappa < 100. */
+print("// lens, off the grid");
+{
+foreach ([[5, "0.006578513728120271"], [3, "0.018519308730246358"], [6, "0.00620552431625267"],
+          [5, "0.0065905349495940478"],
+          [1, "1.2276396881556837"], [1, "1.2208836108984784"], [2, "0.1490284308576425"],
+          [3, "0.020193617525061904"], [4, "0.10490997474876261"], [7, "0.0061431364765709047"],
+          [6, "0.0043824182595298697"], [5, "0.009579997088536369"], [5, "0.0088302005347700545"]], q,
+  lens_row(pairs[q[1]][1], pairs[q[1]][2], dbl(eval(q[2]))));
+}
 print("// x - sin x");
 {
 foreach ([2^-30, dbl(1/10^8), dbl(1/1000), 1/2, 1, 3/2, down(2), 2, up(2), 5/2, dbl(Pi), 6, dbl(2 * Pi)], x,
+  my(p = pair(x - sin(x)));
+  printf("    (%s, %s, %s),\n", lit(x), lit(p[1]), lit(p[2])));
+}
+/* The series branch densely: every k/32 and every tenth below 2 not above, the point where the
+   old term-by-term sum was 4.44 ulp off, and the worst points of a 2 000 006-point scan of the
+   shipped series (in ulp, then relative). */
+print("// x - sin x, the series densely");
+{
+my(xs = List());
+for (k = 1, 63, if (k % 16, listput(xs, k / 32)));
+for (k = 1, 19, if (k % 5, listput(xs, dbl(k / 10))));
+foreach (["1.858598579272284", "1.9100976999889905", "1.9376388993070526"], t, listput(xs, dbl(eval(t))));
+foreach (vecsort(Vec(xs)), x,
   my(p = pair(x - sin(x)));
   printf("    (%s, %s, %s),\n", lit(x), lit(p[1]), lit(p[2])));
 }

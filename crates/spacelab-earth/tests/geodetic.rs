@@ -1,8 +1,9 @@
-//! Vermeille's closed form against ERFA's Fukushima iteration.
+//! Vermeille's closed form against ERFA's Fukushima iteration, and the geodetic map's own properties.
 //!
-//! Two *different algorithms*, not two transcriptions of one. Agreement here is
-//! evidence that both solve the quartic they claim to; agreement between `pyerfa`
-//! and `sofars` would only have been evidence that both descend from SOFA.
+//! The inverse is decided by `derivations/wgs84_geodesy.mac`:
+//! `the_inverse_solves_the_defining_equation_of_the_geodetic_latitude` (G2) in `tests/wgs84.rs`.
+//! ERFA's `gc2gd` here is a comparator — two *different algorithms*, not two transcriptions of one,
+//! so its distance measures how they round.
 
 // x, y, z and lat, lon, h are the names of the things themselves.
 #![allow(
@@ -20,17 +21,6 @@ use spacelab_frames::{Itrf, Position};
 
 const FIXTURES: &str = include_str!("fixtures/gc2gd_pyerfa.csv");
 
-/// Latitude agreement, radians.
-///
-/// The two algorithms differ only in how they round. Measured worst case over
-/// 4000 random points from LEO to GEO is `2.6e-11` rad, which is 0.17 mm on the
-/// surface. The bound below is four times that, and still far below any physical
-/// meaning: the geoid departs from this ellipsoid by a hundred metres.
-const TOL_LAT_RAD: f64 = 1e-10;
-
-/// Height agreement, metres. Measured worst case `1.5e-8` m.
-const TOL_H_M: f64 = 1e-6;
-
 fn parse(line: &str) -> [f64; 6] {
     let v: Vec<f64> = line
         .split(',')
@@ -39,39 +29,36 @@ fn parse(line: &str) -> [f64; 6] {
     [v[0], v[1], v[2], v[3], v[4], v[5]]
 }
 
+/// The distances to `pyerfa`'s `gc2gd` (Fukushima's iteration) at the fixture's points from LEO to GEO.
 #[test]
-fn vermeille_agrees_with_fukushima() {
-    let (mut worst_lat, mut worst_lon, mut worst_h) = (0.0_f64, 0.0_f64, 0.0_f64);
-    let mut checked = 0;
-
+#[ignore = "comparator: the distance to pyerfa, not a verdict"]
+fn geodetic_inverse_distance_to_pyerfa() {
+    let (mut lat, mut lon, mut h) = (Vec::new(), Vec::new(), Vec::new());
     for line in FIXTURES.lines().filter(|l| !l.trim().is_empty()) {
-        let [x, y, z, lat, lon, h] = parse(line);
+        let [x, y, z, want_lat, want_lon, want_h] = parse(line);
         let got = itrf_to_geodetic(Position::new(Vec3::new(x, y, z))).expect("outside the lens");
-
-        let dlat = (got.latitude.radians() - lat).abs();
+        lat.push((got.latitude.radians() - want_lat).abs());
         // Longitude wraps; compare on the circle.
-        let dlon = {
-            let d = (got.longitude.radians() - lon).rem_euclid(std::f64::consts::TAU);
-            d.min(std::f64::consts::TAU - d)
-        };
-        let dh = (got.height.metres() - h).abs();
-
-        worst_lat = worst_lat.max(dlat);
-        worst_lon = worst_lon.max(dlon);
-        worst_h = worst_h.max(dh);
-
-        assert!(
-            dlat < TOL_LAT_RAD,
-            "lat differs by {dlat:.3e} rad at ({x}, {y}, {z})"
-        );
-        assert!(dlon < TOL_LAT_RAD, "lon differs by {dlon:.3e} rad");
-        assert!(dh < TOL_H_M, "height differs by {dh:.3e} m");
-        checked += 1;
+        let d = (got.longitude.radians() - want_lon).rem_euclid(std::f64::consts::TAU);
+        lon.push(d.min(std::f64::consts::TAU - d));
+        h.push((got.height.metres() - want_h).abs());
     }
+    comparison_row("geodetic latitude by Vermeille's inverse", "rad", &lat);
+    comparison_row("geodetic longitude", "rad", &lon);
+    comparison_row("ellipsoidal height", "m", &h);
+}
 
-    assert!(checked >= 500);
+/// One `comparison | ...` row of `tools/compare.py`.
+fn comparison_row(quantity: &str, unit: &str, distances: &[f64]) {
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a count of a few thousand points"
+    )]
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
     println!(
-        "gc2gd: {checked} points; worst dlat {worst_lat:.2e} rad, dlon {worst_lon:.2e} rad, dh {worst_h:.2e} m"
+        "comparison | pyerfa | not recorded | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
     );
 }
 

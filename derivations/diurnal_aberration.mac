@@ -1,0 +1,63 @@
+/* Diurnal aberration at the five stations of crates/spacelab-astrometry/tests/aberration_erfa.rs, in
+   40-digit arithmetic (plans/17 Ф19.G): the values its G3 test holds `Aberration::diurnal` to.
+
+   A station at r on an Earth turning at omega about z moves at v = omega z x r, speed
+   omega sqrt(x^2 + y^2), with no z component. A direction n = +z is therefore across the motion,
+   cos(theta) = 0, and relativistic_aberration.mac's law cos(theta') = (cos(theta) + b)/(1 + b cos(theta))
+   gives cos(theta') = b: the direction turns towards the motion by asin(b), b = v/c.
+
+     (1) OMEGA in the test is the IERS (2010) eq (5.15) rate's double, read back, and each station
+         row repeats over its case group;
+     (2) DIURNAL_EXACT is each station's speed in m/s and the shift of +z in arcseconds, each literal
+         its exact value rounded to the digits it shows.
+
+   timeout 300 maxima --very-quiet -Q -b diurnal_aberration.mac                                       */
+
+fpprec : 40$
+display2d : false$
+linel : 4000$
+load("rust_literals.mac")$
+load("stringproc")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+test_rs : "../crates/spacelab-astrometry/tests/aberration_erfa.rs"$
+c_light : 299792458$
+
+/* The `station: [x, y, z]` rows of the generated CASES block, in file order. */
+station_rows : block([s : openr(test_rs), line, at, out : []],
+  while (line : readline(s)) # false do (
+    at : ssearch("station: [", line),
+    /* the struct's own `station: [f64; 3]` is a type, not a row */
+    if at # false and ssearch("f64", line) = false then
+      out : cons(map(lambda([t], nearest_double(rust_rational(t))),
+                     split(substring(line, at + 10, ssearch("]", line)), ",")), out)),
+  close(s), reverse(out))$
+stations : makelist(station_rows[4 * i + 1], i, 0, length(station_rows) / 4 - 1)$
+/* the doubles rustc parses the literals to, which the test hands the code */
+omega : nearest_double(rust_rational(rust_scalar(test_rs, "OMEGA")))$
+
+/* (1) */
+must(length(station_rows) = 20
+     and every(lambda([i], every(lambda([j], is(station_rows[4 * i + j] = station_rows[4 * i + 1])),
+                                 [2, 3, 4])), makelist(i, i, 0, 4))
+     and is(omega = nearest_double(100273781191135448 / 10^17 * 2 * %pi / 86400)),
+     "(1) holds: OMEGA is the nearest double to eq (5.15)'s rate; five stations, one per case group")$
+
+/* (2) */
+speed(r) := bfloat(omega * sqrt(r[1]^2 + r[2]^2))$
+shift_arcsec(r) := bfloat(asin(speed(r) / c_light) * 648000 / %pi)$
+exact : map(lambda([r], [speed(r), shift_arcsec(r)]), stations)$
+
+lit(v) := block([a : abs(v), e, m, t],
+  if is(equal(v, 0)) then return("0.0"),
+  e : floor(float(log(bfloat(a)) / log(10b0))),
+  m : round(a * 10^(24 - e)),
+  if m >= 10^25 then (e : e + 1, m : round(a * 10^(24 - e))),
+  if m < 10^24 then (e : e - 1, m : round(a * 10^(24 - e))),
+  t : string(m),
+  concat(if is(v < 0) then "-" else "", charat(t, 1), ".", substring(t, 2), "e", e))$
+for row in exact do print("DIURNAL_EXACT", simplode(map(lit, row), ", "))$
+
+must(transcribed(rust_table(test_rs, "DIURNAL_EXACT"), flatten(exact)),
+     "(2) holds: DIURNAL_EXACT is each station's speed and the shift across the motion, exact")$
+print("DONE")$

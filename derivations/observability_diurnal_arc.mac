@@ -4,7 +4,9 @@
        p, is sin h = sin p sin d + cos p cos d cos H (the spherical triangle pole-zenith-body).
        Solving it for cos H gives the shipped (sin h0 - sin p sin d)/(cos p cos d); exact arcs at
        three points follow, and nautical twilight at the equator at the equinox is exactly 48 min of
-       mean solar rotation past the horizon crossing.
+       mean solar rotation past the horizon crossing. The altitude at H = pi (lower culmination) is
+       sin h = -cos(p + d) and at H = 0 (upper) sin h = cos(p - d): cos H < -1 is the threshold below
+       the lowest altitude, cos H > 1 above the highest -- the two polar branches.
    (2) The sidereal hour-angle rate: 1.00273781191135448 revolutions per UT1 day is exactly
        15.0410671786703172 deg/h, and the error of dividing by 15 deg/h instead is exactly
        3600 (1 - 1/1.00273781191135448) s per hour of hour angle.
@@ -27,6 +29,9 @@ cosHof(pp, dd, hh) := (sin(hh) - sin(pp)*sin(dd))/(cos(pp)*cos(dd))$
 print("arc_equator_equinox_horizon:", ratsimp(cosHof(0, 0, 0)))$
 print("arc_lat30_dec30_alt30:", ratsimp(cosHof(%pi/6, %pi/6, %pi/6) - 1/3))$
 print("arc_lat45_dec30_horizon:", radcan(cosHof(%pi/4, %pi/6, 0) + 1/sqrt(3)))$
+altitude(pp, dd, hh) := sin(pp)*sin(dd) + cos(pp)*cos(dd)*cos(hh)$
+print("lower_culmination_altitude:", trigsimp(trigexpand(altitude(p, d, %pi) + cos(p + d))))$
+print("upper_culmination_altitude:", trigsimp(trigexpand(altitude(p, d, 0) - cos(p - d))))$
 print("  H(0,0,0) = pi/2;  H(30,30,30) = acos(1/3) =", bfloat(acos(1/3)),
       ";  H(45,30,0) = acos(-1/sqrt 3) =", bfloat(acos(-1/sqrt(3))))$
 /* Nautical: cos H = sin(-12 deg) at p = d = 0, so H = pi/2 + 12 deg; at 15 deg/h that is 48 min

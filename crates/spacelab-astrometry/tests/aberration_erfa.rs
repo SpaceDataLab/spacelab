@@ -1,4 +1,7 @@
-//! Diurnal aberration against ERFA `ab` — the SOFA lineage, which shares no code with this crate.
+//! Diurnal aberration against ERFA `ab` — the SOFA lineage, which shares no code with this crate. The
+//! comparison is a comparator; the law is decided by `derivations/relativistic_aberration.mac` (G2 in
+//! `tests/derivation_gates.rs`), and the speeds and shifts this file quotes by
+//! `derivations/diurnal_aberration.mac` (G3 below).
 //!
 //! The Earth's 29.8 km/s orbital motion is the famous 20.5" constant of aberration and it does *not*
 //! apply to a satellite observation: station and satellite share the Earth's barycentric velocity and
@@ -233,102 +236,116 @@ const CASES: &[Case] = &[
 ];
 // END GENERATED
 
-/// The whole comparison: every fixture direction, against ERFA's own output vector.
+/// Each fixture station's speed `ω √(x² + y²)` in m/s and the shift of `+z` in arcseconds, which
+/// is across the motion and so turns by `asin(v/c)`: `derivations/diurnal_aberration.mac` at 40
+/// digits, in the order the `+z` cases appear (the derivation reads this table back).
+#[allow(clippy::excessive_precision)] // 25 digits as the derivation prints them
+const DIURNAL_EXACT: [[f64; 2]; 5] = [
+    [4.651010942547221180935632e2, 3.200013360302787902085124e-1],
+    [3.819260096979835461377572e2, 2.627747706418369237967126e-1],
+    [3.294382413509347195585112e2, 2.266618562587334748463564e-1],
+    [3.865864186555154727225411e2, 2.659812500745461508414481e-1],
+    [9.701128375318988446145715e1, 6.674622097108976385312577e-2],
+];
+
+/// The worst speed miss measured is 5.684e-14 m/s, one ulp of the equator's 465 m/s. The bound is 3.5
+/// times that.
+const SPEED_BOUND: f64 = 2.0e-13;
+
+/// The worst shift miss measured is 2.776e-17 arcsec, half an ulp of the equator's 0.32″. The bound is
+/// 3.6 times that.
+const SHIFT_BOUND: f64 = 1.0e-16;
+
+/// The diurnal speed is `ω` times the distance from the axis, and a direction across the motion turns
+/// by `asin(v/c)`, at every fixture station. (G3)
+///
+/// These are the magnitudes the documentation quotes: 465.101 m/s and 0.320″ on the equator, and the
+/// 0.262″ the limitations document gives at 34.9° — at that latitude *and that direction*: the shift
+/// depends on where the telescope points as much as on how fast the station moves.
 #[test]
-fn the_boost_reproduces_erfa_ab_on_every_fixture_direction() {
-    let mut worst = 0.0_f64;
+fn the_diurnal_speed_and_the_shift_across_the_motion_are_their_closed_forms() {
+    let across: Vec<&Case> = CASES.iter().filter(|c| c.what.ends_with("+z")).collect();
+    assert_eq!(across.len(), DIURNAL_EXACT.len(), "one +z case per station");
+    let (mut speed_miss, mut shift_miss) = (0.0_f64, 0.0_f64);
+    for (case, [speed, shift]) in across.iter().zip(DIURNAL_EXACT) {
+        let station = Vec3::new(case.station[0], case.station[1], case.station[2]);
+        let aberration = Aberration::diurnal(station, Vec3::new(0.0, 0.0, OMEGA))
+            .expect("a station moves well below c");
+        let natural = Vec3::new(0.0, 0.0, 1.0);
+        let got = aberration
+            .apply(natural)
+            .expect("a unit direction aberrates");
+        speed_miss = speed_miss.max((aberration.constant() * SPEED_OF_LIGHT - speed).abs());
+        shift_miss = shift_miss.max((separation(natural, got) / ARCSEC - shift).abs());
+    }
+    assert!(speed_miss < SPEED_BOUND, "speed: {speed_miss:.3e} m/s");
+    assert!(shift_miss < SHIFT_BOUND, "shift: {shift_miss:.3e} arcsec");
+
+    let [equator, equator_shift] = DIURNAL_EXACT[0];
+    assert!((equator - 465.101).abs() < 1e-3 && (equator_shift - 0.320).abs() < 1e-3);
+    let [mid, mid_shift] = DIURNAL_EXACT[1];
+    assert!(
+        (mid - 381.926).abs() < 1e-3 && (mid_shift - 0.262_775).abs() < 1e-6,
+        "34.9 deg: {mid} m/s, {mid_shift}\""
+    );
+    // Polar stations barely move: 97 m/s at 78 deg, a fifth of the equator's.
+    assert!(DIURNAL_EXACT[4][0] < equator / 4.0);
+}
+
+/// The distances to ERFA `ab` on every fixture direction, and to the station speeds and shifts the
+/// generator recorded.
+#[test]
+#[ignore = "comparator: the distance to erfa, not a verdict"]
+fn boost_distance_to_erfa() {
+    let mut directions = Vec::new();
+    let mut speeds = Vec::new();
+    let mut shifts = Vec::new();
     for case in CASES {
         let station = Vec3::new(case.station[0], case.station[1], case.station[2]);
         let aberration = Aberration::diurnal(station, Vec3::new(0.0, 0.0, OMEGA))
             .expect("a station moves well below c");
-
-        assert!(
-            (aberration.constant() * SPEED_OF_LIGHT - case.speed).abs() < 1e-9,
-            "{}: |v| is {} m/s against ERFA's {}",
-            case.what,
-            aberration.constant() * SPEED_OF_LIGHT,
-            case.speed
-        );
-
+        speeds.push((aberration.constant() * SPEED_OF_LIGHT - case.speed).abs());
         let natural = Vec3::new(case.natural[0], case.natural[1], case.natural[2]);
         let want = Vec3::new(case.erfa[0], case.erfa[1], case.erfa[2]);
         let got = aberration
             .apply(natural)
             .expect("a unit direction aberrates");
-        let gap = separation(got, want);
-        worst = worst.max(gap);
-        assert!(
-            gap < 1e-15,
-            "{}: {gap} rad from ERFA, which is more than round-off on one formula",
-            case.what
-        );
-
-        // And the shift itself is the published size, so a sign slip that still lands on a unit
-        // vector cannot pass by agreeing with a mirrored ERFA call.
-        let shift = separation(natural, got) / ARCSEC;
-        assert!(
-            (shift - case.shift_arcsec).abs() < 1e-9,
-            "{}: shift {shift}\" against ERFA's {}\"",
-            case.what,
-            case.shift_arcsec
-        );
+        directions.push(separation(got, want));
+        shifts.push((separation(natural, got) / ARCSEC - case.shift_arcsec).abs());
     }
-    println!("worst separation from ERFA `ab`: {worst:.3e} rad");
+    comparison_row(
+        "the diurnally aberrated direction at 20 cases",
+        "rad",
+        &directions,
+    );
+    comparison_row("the station speed at 20 cases", "m/s", &speeds);
+    comparison_row("the aberration shift at 20 cases", "arcsec", &shifts);
 }
 
-/// The magnitudes the documentation states, from the fixture rather than from the formula again.
-#[test]
-fn the_diurnal_speed_is_cosine_of_latitude_and_the_shift_follows_it() {
-    let equator = CASES[0].speed;
-    assert!(
-        (equator - 465.101).abs() < 1e-3,
-        "the equatorial speed is {equator} m/s, not 465.101"
-    );
-    // The 0.262" the limitations document quotes, at the latitude *and the direction* it quotes it
-    // for: the shift depends on where the telescope points as much as on how fast the station moves,
-    // and 34.9 deg alone selects the `+x` row at 0.119", which is a different number.
-    let mid = CASES.iter().find(|c| c.what == "34.9°, +z").unwrap();
-    assert!(
-        (mid.speed - 381.926).abs() < 1e-3 && (mid.shift_arcsec - 0.262_775).abs() < 1e-6,
-        "34.9 deg: {} m/s, {}\"",
-        mid.speed,
-        mid.shift_arcsec
-    );
-    // Polar stations barely move: 97 m/s at 78 deg, a fifth of the equator's.
-    let polar = CASES.iter().find(|c| c.what.starts_with("78")).unwrap();
-    assert!(polar.speed < equator / 4.0, "{} m/s at 78 deg", polar.speed);
-}
+/// The worst residual measured is 5.551e-17 rad, half an ulp of a unit vector. The bound is 3.6 times
+/// that.
+const ALONG_BOUND: f64 = 2.0e-16;
 
-/// A direction along the velocity has no transverse component to aberrate, exactly. The fixture
-/// carries ERFA's own zero for this, so it is a comparison and not just a property.
+/// A direction along the velocity has no transverse component to aberrate:
+/// `derivations/relativistic_aberration.mac` (2) keeps `n'` in the plane of `n` and `β` with its
+/// component across `β` scaled by `√(1 − β²)`, which is zero here. (G3)
+///
+/// Not exactly zero in `f64`: the fixture direction is `-v` renormalised, so it is antiparallel to
+/// `β` only to within the rounding of that normalisation, and `apply` then adds a `β` component that
+/// cancels to a few ulp rather than to nothing.
 #[test]
 fn a_direction_along_the_motion_does_not_shift() {
+    let mut worst = 0.0_f64;
     for case in CASES.iter().filter(|c| c.what.ends_with("along -v")) {
-        // ERFA's own zero is a floating-point zero: three of the five stations give exactly 0.0 and
-        // the other two give ~1e-11", which is 5e-17 rad -- one ULP of a unit vector, arriving from
-        // renormalising `-v`. Asserting equality with 0.0 would be asserting the reference
-        // implementation's rounding rather than the physics, so the gate is 1e-9" (5e-15 rad).
-        assert!(
-            case.shift_arcsec.abs() < 1e-9,
-            "{}: ERFA reports {}\" here, far above its own round-off, so the fixture is wrong",
-            case.what,
-            case.shift_arcsec
-        );
         let station = Vec3::new(case.station[0], case.station[1], case.station[2]);
         let aberration = Aberration::diurnal(station, Vec3::new(0.0, 0.0, OMEGA)).unwrap();
         let natural = Vec3::new(case.natural[0], case.natural[1], case.natural[2]);
-        // Not exactly zero: the fixture direction is `-v` renormalised in f64, so it is antiparallel
-        // to `beta` only to within the rounding of that normalisation, and `apply` then adds a `beta`
-        // component that cancels to a few ULP rather than to nothing. A few ULP of a unit vector is a
-        // few times 1e-16 rad, so the gate is 1e-15 -- still four orders below the 1e-11 rad (2
-        // microarcsecond) at which any of this could reach a measurement.
-        let residual = separation(natural, aberration.apply(natural).unwrap());
-        assert!(
-            residual < 1e-15,
-            "{}: a direction along the motion moved by {residual} rad",
-            case.what
-        );
+        worst = worst.max(separation(natural, aberration.apply(natural).unwrap()));
     }
+    assert!(
+        worst < ALONG_BOUND,
+        "a direction along the motion moved by {worst:.3e} rad"
+    );
 }
 
 /// `diurnal` is `new(omega x r)` and nothing else, and the cross product is the place a sign or an
@@ -367,5 +384,16 @@ fn the_rotation_rate_is_the_frames_crates_rotation_rate() {
         OMEGA.to_bits(),
         spacelab_frames::EARTH_ROTATION_RATE.to_bits(),
         "the two rotation rates are not the same bits"
+    );
+}
+
+/// One `comparison | ...` row of `tools/compare.py`.
+fn comparison_row(quantity: &str, unit: &str, distances: &[f64]) {
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    #[expect(clippy::cast_precision_loss, reason = "a count of a few distances")]
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+    println!(
+        "comparison | erfa | not recorded | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
     );
 }

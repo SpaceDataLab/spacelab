@@ -776,20 +776,49 @@ mod tests {
         }
     }
 
+    /// The forward DCT-II of `x = (1, 2, 3, 4, 5)`, `F_k = Σ x_n cos(πk(2n+1)/10)`: radicals in
+    /// `derivations/insar_unwrap.mac` (6), to 25 digits (the derivation reads this table back). The
+    /// even `k > 0` vanish exactly.
+    #[allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    const DCT_FORWARD_EXACT: [f64; 5] = [
+        15.0,
+        -4.979796569765560546803169e0,
+        0.0,
+        -4.490279765795853724419452e-1,
+        0.0,
+    ];
+
+    /// The worst miss measured is 1.776e-15, eight ulps of unity: five rounded cosines weighted up to 5
+    /// summed. The bound is 3.4 times that.
+    const DCT_BOUND: f64 = 6.0e-15;
+
+    /// (G3) The coded forward is the DCT-II's defining sum, with no factor of two: `F_0` is the plain
+    /// sum, and the round trip cannot see a scale the forward and inverse share.
     #[test]
-    fn dct_matches_scipy_and_round_trips() {
-        // dct1_forward = scipy.fft.dct(x, type=2)/2 (our forward drops scipy's factor-2 convention).
+    fn the_forward_dct_is_its_defining_sum() {
         let f = dct1_forward(&[1.0, 2.0, 3.0, 4.0, 5.0]);
-        let oracle = [15.0, -4.979796569765561, 0.0, -0.4490279765795853, 0.0];
-        for (g, o) in f.iter().zip(oracle) {
-            assert!((g - o).abs() < 1e-9, "{g} vs scipy {o}");
-        }
-        // The inverse is exact.
-        let x: Vec<f64> = (0..16).map(|k| (f64::from(k) * 0.37).sin() + 0.5).collect();
-        let rt = dct1_inverse(&dct1_forward(&x));
-        for (a, b) in rt.iter().zip(&x) {
-            assert!((a - b).abs() < 1e-10);
-        }
+        let worst = f
+            .iter()
+            .zip(DCT_FORWARD_EXACT)
+            .map(|(g, e)| (g - e).abs())
+            .fold(0.0, f64::max);
+        assert!(worst < DCT_BOUND, "{worst:.3e}");
+    }
+
+    /// The distance to `scipy.fft.dct(x, type=2) / 2` (scipy carries a factor of two this forward
+    /// drops).
+    #[test]
+    #[ignore = "comparator: the distance to scipy, not a verdict"]
+    fn dct_distance_to_scipy() {
+        let f = dct1_forward(&[1.0, 2.0, 3.0, 4.0, 5.0]);
+        let scipy = [15.0, -4.979796569765561, 0.0, -0.4490279765795853, 0.0];
+        let distances: Vec<f64> = f.iter().zip(scipy).map(|(g, o)| (g - o).abs()).collect();
+        let max = distances.iter().copied().fold(0.0, f64::max);
+        let rms = (distances.iter().map(|d| d * d).sum::<f64>() / 5.0).sqrt();
+        println!(
+            "comparison | scipy | not recorded | the forward DCT-II of (1, 2, 3, 4, 5) | 1 | {} | {max:.3e} | {rms:.3e}",
+            distances.len()
+        );
     }
 
     /// (G3) A smooth field has no residues — the four steps around a cell of a gradient telescope —

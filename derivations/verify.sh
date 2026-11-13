@@ -1243,7 +1243,7 @@ if have maxima; then
     mac_zeros metrics_periodic_gaps.mac 8 "coverage metrics of a periodic pass pattern in exact rationals"
     mac_zeros fom_weighted_grid.mac 7 "weighted figures of merit on an exact grid, and their weight-scaling invariance"
     mac_zeros photometry_closed_forms.mac 17 "the diffuse-sphere phase law, V zero point, air mass and limiting magnitude"
-    mac_zeros observability_diurnal_arc.mac 13 "the diurnal arc solves the altitude equation; air-mass values; refraction monotone"
+    mac_zeros observability_diurnal_arc.mac 15 "the diurnal arc solves the altitude equation; its culminations bound the polar branches; air-mass values; refraction monotone"
     mac_zeros elevation_footprint.mac 8 "the elevation footprint edge from its defining vectors"
     mac_zeros cone_footprint.mac 15 "the cone footprint edge, its tangency with the horizon, the limb, 1 - e^2 = (1 - f)^2"
     mac_zeros comms_link_budget.mac 7 "slant range, free-space loss and the dB link budget"
@@ -1337,6 +1337,14 @@ if have maxima; then
     mac_zeros hull_delaunay.mac 10 "Delaunay and convex hull against their brute-force definitions"
     mac_zeros spherical_triangle.mac 14 "spherical excess as the solid angle of a triangle"
     mac_zeros igrf_synthesis.mac 37 "IGRF field as minus the gradient of the Schmidt-normalised potential"
+    # Diurnal aberration at aberration_erfa.rs's five stations: speed and the shift across the motion.
+    out=$(timeout 300 maxima --very-quiet --suppress-input-echo -Q -b diurnal_aberration.mac </dev/null 2>&1)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 2 ] && printf '%s' "$out" | grep -q '^DONE' && ! printf '%s' "$out" | grep -q 'Lisp error'; then
+        ok "maxima diurnal_aberration.mac: DIURNAL_EXACT is omega times the distance from the axis and asin(v/c) across the motion"
+    else
+        bad "maxima diurnal_aberration.mac" "expected 2 checks to hold, found $holds"
+    fi
     mac_zeros geomagnetic_dipole.mac 22 "the centred dipole's pole, moment and field"
     mac_zeros attitude_control.mac 18 "attitude error kinematics, the Lyapunov derivative and the PD loop"
     mac_zeros gmst82.mac 10 "GMST 1982 as the exact rational polynomial"
@@ -1375,7 +1383,7 @@ if have maxima; then
     mac_zeros polsar_decomposition.mac 19 "coherency matrix and H/A/alpha of the canonical scatterers"
     mac_zeros radon_transform.mac 14 "the Ram-Lak filter, the Gaussian projection and filtered back-projection"
     mac_zeros psinsar_sbas.mac 12 "the SBAS normal equations and the height sensitivity"
-    mac_zeros insar_unwrap.mac 14 "coherence, residues and the DCT Poisson unwrapping"
+    mac_zeros insar_unwrap.mac 16 "coherence, residues, the DCT Poisson unwrapping and the forward DCT's defining sum"
     mac_zeros sar_range_doppler.mac 18 "the chirp matched filter, its sinc limit and the range-Doppler terms"
     mac_zeros csa_point_target.mac 6 "the chirp-scaling phase multiplies compose to a pure delay"
     mac_zeros tomosar_beamforming.mac 16 "Bartlett and Capon spectra and the tomographic steering phase"

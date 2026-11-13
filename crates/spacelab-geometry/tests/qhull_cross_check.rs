@@ -1,4 +1,6 @@
-//! `spacelab-geometry` against qhull on the same points.
+//! `spacelab-geometry` against qhull on the same points: a comparator. The constructions are decided
+//! by `derivations/hull_delaunay.mac` — the brute-force Delaunay and hull sets (G2) and Euler's counts
+//! (G4) that `delaunay.rs` and `hull.rs` hold their tests to.
 //!
 //! qhull (Barber, Dobkin & Huhdanpaa, *The quickhull algorithm for convex hulls*, ACM TOMS 22(4),
 //! 1996) is the reference implementation, and it reaches its answers by a different route: floating
@@ -131,61 +133,71 @@ fn sorted(simplices: &[[usize; 3]]) -> BTreeSet<[usize; 3]> {
         .collect()
 }
 
+/// How many elements two sets do not share.
+fn mismatch<T: Ord + Clone>(a: &BTreeSet<T>, b: &BTreeSet<T>) -> usize {
+    a.symmetric_difference(b).count()
+}
+
+/// The distance to qhull on each of the eight cases: the extreme points, triangles or facets the two
+/// codes do not share, or the difference in triangle count where the input has no unique answer.
 #[test]
-fn every_construction_agrees_with_qhull_on_the_same_points() {
+#[ignore = "comparator: the distance to qhull, not a verdict"]
+fn construction_distance_to_qhull() {
     let cases = parse(FIXTURE);
     assert_eq!(cases.len(), 8, "the fixture lost a case");
 
+    let mut distances = Vec::new();
     for case in &cases {
         let expected_vertices: BTreeSet<usize> = case.vertices.iter().copied().collect();
-        match case.kind.as_str() {
+        let differ = match case.kind.as_str() {
             "hull2" => {
                 let points = planar(case);
                 let hull: BTreeSet<usize> = convex_hull_2d(&points).unwrap().into_iter().collect();
-                assert_eq!(hull, expected_vertices, "{}: extreme points", case.name);
+                mismatch(&hull, &expected_vertices)
             }
             "delaunay2" => {
                 let points = planar(case);
                 let mesh = Triangulation::new(&points).unwrap();
-                assert_eq!(
-                    sorted(mesh.triangles()),
-                    sorted(&case.simplices),
-                    "{}: triangles",
-                    case.name
-                );
+                mismatch(&sorted(mesh.triangles()), &sorted(&case.simplices))
             }
             "delaunay2_count" => {
                 let points = planar(case);
                 let mesh = Triangulation::new(&points).unwrap();
-                assert_eq!(
-                    mesh.triangles().len(),
-                    case.simplex_count.expect("a triangle count"),
-                    "{}: triangle count",
-                    case.name
-                );
                 let hull: BTreeSet<usize> = convex_hull_2d(&points).unwrap().into_iter().collect();
-                assert_eq!(hull, expected_vertices, "{}: extreme points", case.name);
+                mesh.triangles()
+                    .len()
+                    .abs_diff(case.simplex_count.expect("a triangle count"))
+                    + mismatch(&hull, &expected_vertices)
             }
             "hull3" | "hull3_vertices" => {
                 let points = spatial(case);
                 let hull = ConvexHull::new(&points).unwrap();
                 let vertices: BTreeSet<usize> = hull.vertices().iter().copied().collect();
-                assert_eq!(vertices, expected_vertices, "{}: extreme points", case.name);
-                if case.kind == "hull3" {
-                    assert_eq!(
-                        sorted(hull.faces()),
-                        sorted(&case.simplices),
-                        "{}: facets",
-                        case.name
-                    );
-                }
+                mismatch(&vertices, &expected_vertices)
+                    + if case.kind == "hull3" {
+                        mismatch(&sorted(hull.faces()), &sorted(&case.simplices))
+                    } else {
+                        0
+                    }
             }
             other => panic!("unknown case kind `{other}`"),
-        }
+        };
         println!(
-            "{}: agrees with qhull on {} points",
+            "{}: {differ} elements not shared with qhull on {} points",
             case.name,
             case.points.len()
         );
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a count of a few dozen elements"
+        )]
+        distances.push(differ as f64);
     }
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    #[expect(clippy::cast_precision_loss, reason = "a count of eight cases")]
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+    println!(
+        "comparison | qhull | not recorded | hull vertices, facets and Delaunay triangles not shared | element | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
+    );
 }

@@ -26,7 +26,9 @@
 //!
 //! The second test is the one that does need the ephemeris. astropy scans a whole day at Tromsø and
 //! finds the Sun never crosses; `diurnal_arc` says so from the declination alone. Six such days are
-//! in the fixture, five polar-day and one polar-night.
+//! in the fixture, five polar-day and one polar-night. Which side the body stays on is decided by
+//! `every_branch_is_the_side_its_culminations_put_the_body_on` (G2) in `src/observability.rs`, so
+//! the second test is a comparator: it counts the days the two disagree on.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)] // a malformed fixture is a broken generator
 
@@ -111,16 +113,15 @@ fn the_diurnal_arc_inverts_astropys_rotation_exactly_at_seventy_four_crossings()
     println!("worst implied altitude difference {worst_altitude_arcsec:.6e}″ at {worst_at}");
 }
 
-/// The polar branches, against an ephemeris rather than against an expectation.
-///
-/// #279 asserted them at Tromsø from the geometry alone. Here astropy independently finds no
-/// crossing on the same days, and the two agree on *which* side the Sun stayed — which is the half
-/// of the claim a `|cos H| > 1` test cannot make on its own.
+/// The polar branches against astropy, which finds no crossing on six days: one per day where the
+/// branch `diurnal_arc` reports, or its duration, is not the side astropy saw the Sun stay on.
 #[test]
-fn the_polar_branches_are_the_days_astropy_finds_no_crossing_on() {
+#[ignore = "comparator: the distance to astropy, not a verdict"]
+fn polar_branch_distance_to_astropy() {
     let rows = oracle();
     let mut above = 0;
     let mut below = 0;
+    let mut mismatches = Vec::new();
     for row in &rows {
         match row.outcome.as_str() {
             "always_above" => above += 1,
@@ -135,30 +136,24 @@ fn the_polar_branches_are_the_days_astropy_finds_no_crossing_on() {
         );
         let arc = diurnal_arc(row.latitude, row.declination, row.threshold);
         let expected_above = row.outcome == "always_above";
-        assert_eq!(
-            matches!(arc, DiurnalArc::AlwaysAbove),
-            expected_above,
-            "{} {} {}: {arc:?} against astropy's {}",
-            row.site,
-            row.date,
-            row.event,
-            row.outcome
-        );
-        // And the duration is the branch's own answer, which nothing else here reaches.
         let duration = arc.duration(7.292_115e-5);
-        assert!(
-            if expected_above {
+        let agrees = matches!(arc, DiurnalArc::AlwaysAbove) == expected_above
+            && if expected_above {
                 duration.is_infinite()
             } else {
                 duration == 0.0
-            },
-            "{} {}: duration {duration} for {arc:?}",
-            row.site,
-            row.date
-        );
+            };
+        mismatches.push(if agrees { 0.0 } else { 1.0 });
     }
     assert!(
         above > 0 && below > 0,
         "the fixture should exercise both polar branches, got {above} above and {below} below"
+    );
+    let max = mismatches.iter().copied().fold(0.0, f64::max);
+    #[expect(clippy::cast_precision_loss, reason = "a count of six days")]
+    let rms = (mismatches.iter().map(|d| d * d).sum::<f64>() / mismatches.len() as f64).sqrt();
+    println!(
+        "comparison | astropy | not recorded | polar-branch days on the wrong side | day | {} | {max:.3e} | {rms:.3e}",
+        mismatches.len()
     );
 }

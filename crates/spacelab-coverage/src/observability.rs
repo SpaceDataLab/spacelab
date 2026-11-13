@@ -714,6 +714,56 @@ mod tests {
         }
     }
 
+    /// (G2) Every branch `diurnal_arc` reports is the side of the threshold its culminations put the
+    /// body on. Over a day the altitude runs between the lower culmination, `sin h = −cos(φ + δ)` at
+    /// `H = π`, and the upper, `sin h = cos(φ − δ)` at `H = 0`
+    /// (`derivations/observability_diurnal_arc.mac`): a body never crossing `h₀` stays above it when
+    /// the lower one does and below it when the upper one does, and one that rises has `h₀` between
+    /// them. Residual ≤ 8·ε over the same 5° grid as the altitude equation, both polar branches and the
+    /// rising one exercised.
+    #[test]
+    fn every_branch_is_the_side_its_culminations_put_the_body_on() {
+        let tol = 8.0 * f64::EPSILON;
+        let (mut above, mut below, mut rises) = (0_u32, 0_u32, 0_u32);
+        for lat in (-85..=85).step_by(5) {
+            for dec in (-85..=85).step_by(5) {
+                for alt in (-18..=30).step_by(6) {
+                    let (phi, delta, h0) = (
+                        f64::from(lat) * DEG,
+                        f64::from(dec) * DEG,
+                        f64::from(alt) * DEG,
+                    );
+                    let (lowest, highest) = (-libm::cos(phi + delta), libm::cos(phi - delta));
+                    let threshold = libm::sin(h0);
+                    let arc = diurnal_arc(phi, delta, h0);
+                    let holds = match arc {
+                        DiurnalArc::AlwaysAbove => {
+                            above += 1;
+                            lowest >= threshold - tol
+                        }
+                        DiurnalArc::AlwaysBelow => {
+                            below += 1;
+                            highest <= threshold + tol
+                        }
+                        DiurnalArc::Rises { .. } => {
+                            rises += 1;
+                            lowest <= threshold + tol && threshold <= highest + tol
+                        }
+                    };
+                    assert!(
+                        holds,
+                        "φ {lat}, δ {dec}, h₀ {alt}: {arc:?} with culminations {lowest:e}, \
+                         {highest:e} about {threshold:e}"
+                    );
+                }
+            }
+        }
+        assert!(
+            above > 0 && below > 0 && rises > 0,
+            "the grid must exercise every branch: {above} above, {below} below, {rises} rising"
+        );
+    }
+
     /// (G3) The sidereal hour-angle rate is exactly 15.041 067 178 670 317 2 °/h, and the error of
     /// dividing by 15 °/h is exactly `3600 (1 − 1/k)` = 9.829 212 346 235 372 s per hour of hour
     /// angle (`derivations/observability_diurnal_arc.mac`, `.gp`). Bound 4 ulps relative on the rate;

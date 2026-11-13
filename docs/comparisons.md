@@ -13,6 +13,17 @@ root-mean-square distance over them.
 
 | Code | Version | Quantity | Unit | n | max | RMS | Test |
 |---|---|---|---|--:|--:|--:|---|
+| basilisk | 2.11.1 | the MRP law at fixed-reference states (controlLawType 1) | N.m | 7 | 1.241e-16 | 5.275e-17 | `crates/spacelab-control/tests/basilisk_oracle.rs::mrp_law_distance_to_basilisk` |
+| basilisk | 2.11.1 | the MRP law at tracking states, with the feedforward it omits added | N.m | 3 | 3.103e-17 | 2.502e-17 | `crates/spacelab-control/tests/basilisk_oracle.rs::mrp_law_distance_to_basilisk` |
+| basilisk | 2.11.1 | controlLawType 0 minus 1 against -omega_BR x [I]omega_BN | N.m | 10 | 6.206e-17 | 2.635e-17 | `crates/spacelab-control/tests/basilisk_oracle.rs::default_law_gap_distance_to_basilisk` |
+| basilisk | 2.11.1 | a 120 s slew's attitude at four steps, actuator before the hub | rad | 4 | 6.099e-08 | 3.054e-08 | `crates/spacelab-control/tests/basilisk_oracle.rs::closed_loop_distance_to_basilisk` |
+| basilisk | 2.11.1 | a 120 s slew's attitude at four steps, actuator after the hub, lag modelled | rad | 4 | 8.143e-08 | 4.077e-08 | `crates/spacelab-control/tests/basilisk_oracle.rs::closed_loop_distance_to_basilisk` |
+| basilisk | 2.11.1 | a 120 s slew's attitude at four steps, actuator after the hub, lag ignored | rad | 4 | 6.685e-03 | 3.580e-03 | `crates/spacelab-control/tests/basilisk_oracle.rs::closed_loop_distance_to_basilisk` |
+| basilisk | 2.11.1 | the gravity-gradient torque at five geometries | N.m | 5 | 4.507e-21 | 2.413e-21 | `crates/spacelab-control/tests/basilisk_oracle.rs::gravity_gradient_distance_to_basilisk` |
+| nasa42 | not recorded | the t = 0 attitude against the deck's 40 degrees about (1, 2, 3) | rad | 1 | 1.032e-07 | 1.032e-07 | `crates/spacelab-control/tests/nasa42_oracle.rs::initial_attitude_and_orbit_distance_to_42` |
+| nasa42 | not recorded | the orbit's position against the closed-form circle it was started on | m | 84 | 7.638e-01 | 4.883e-01 | `crates/spacelab-control/tests/nasa42_oracle.rs::initial_attitude_and_orbit_distance_to_42` |
+| nasa42 | not recorded | the attitude over a 2000 s gravity-gradient arc, worst at each step | rad | 4 | 1.051e-06 | 1.013e-06 | `crates/spacelab-control/tests/nasa42_oracle.rs::gravity_gradient_arc_distance_to_42` |
+| nasa42 | not recorded | the body rate over a 2000 s gravity-gradient arc, worst at each step | rad/s | 4 | 1.313e-08 | 1.277e-08 | `crates/spacelab-control/tests/nasa42_oracle.rs::gravity_gradient_arc_distance_to_42` |
 | Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, position | m | 9 | 3.400e+04 | 2.390e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
 | Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, velocity | m/s | 9 | 2.940e+01 | 1.741e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
 | Orekit | 13.1.7 | Brouwer-Lyddane LEO with M2 = 1e-14 rad/s2, 1 day, position | m | 9 | 3.400e+04 | 2.390e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::drag_distance_to_orekit` |

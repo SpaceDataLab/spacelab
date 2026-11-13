@@ -1,0 +1,23 @@
+/* The truncation of the f32 Stumpff series in spacelab-gpu's Lambert kernel (`stumpff_c`,
+   `stumpff_s` in its WGSL), certified (plans/17 Ф28.B).
+
+   Within |z| <= 1e-6 (the f32 literal) the kernel takes
+     C(z) ~ 1/2 - z/24 + z^2/720,   S(z) ~ s6 - z/120 + z^2/5040,
+   s6 the f32 `1.0 / 6.0` folds to; the other coefficients are exact. Single precision has
+   u = 2^-24 = 6.0e-8, so the series must stay well under that. As in kepler_stumpff_supnorm.sollya
+   each sign of z is a function of s in [0, sqrt(top)], top the f32 1e-6, and `split` encloses
+   sup |p/f - 1| on each.
+
+   cd derivations && timeout 300 sollya gpu_stumpff_supnorm.sollya                               */
+
+execute("supnorm_lib.sollya");
+
+s6 = round(1/6, SG, RN);
+top = round(1e-6, SG, RN);
+b = round(sqrt(top), prec, RU);
+
+split("gpu_stumpff_C_pos", x^2 * (1/2 - x^2/24 + x^4/720), 1 - cos(x), b, 48);
+split("gpu_stumpff_C_neg", x^2 * (1/2 + x^2/24 + x^4/720), cosh(x) - 1, b, 48);
+split("gpu_stumpff_S_pos", x^3 * (s6 - x^2/120 + x^4/5040), x - sin(x), b, 48);
+split("gpu_stumpff_S_neg", x^3 * (s6 + x^2/120 + x^4/5040), sinh(x) - x, b, 48);
+quit;

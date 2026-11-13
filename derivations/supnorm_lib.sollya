@@ -1,0 +1,56 @@
+/* The two ways the *_supnorm.sollya files enclose sup |p/f - 1| (plans/17 Ф28.B), and how they
+   print it. Each file runs `execute("supnorm_lib.sollya")` from derivations/.
+
+   Where f = x^-m g with g entire, P = x^m p is a polynomial and P/g - 1 = p/f - 1, so
+   supnorm(P, g, ...) never sees a quotient that cancels.
+     direct: g has no zero in I, or a simple one, which supnorm divides out of P and g itself.
+     split:  g has a zero of order 2 or more at 0. Sollya 8.0 evaluates 0/0 at a point by one
+             application of L'Hopital's rule only, so supnorm fails with 0 as an endpoint; on [t, b],
+             t = b 2^-k, g has no zero and supnorm succeeds. On [0, t] the interval evaluation of
+             P/g - 1, where L'Hopital's rule over an interval resolves 0/0 at any order, encloses
+             every value; t is small enough that the enclosure is narrow. The supremum over [0, b] is
+             the larger of the two pieces', and either piece's lower bound is a lower bound of it.
+   Each prints `BOUND <name> <up> low <lo>`, the enclosure [lo, up] rounded outward to four digits.
+   Sollya has no factorial operator (a trailing `!` only silences a command); `fact` is n!.       */
+
+verbosity = 1!;
+display = decimal!;
+prec = 200!;
+acc = 2^-15;
+
+fact = proc(n) {
+  var r, i;
+  r = 1;
+  for i from 2 to n do r = r * i;
+  return r;
+};
+
+dec4 = proc(v, ex, up) {
+  var m;
+  if up then m = ceil(round(v * 10^(-ex), prec, RU)) else m = floor(round(v * 10^(-ex), prec, RD));
+  return m @ "e" @ ex;
+};
+
+report = proc(name, lo, up) {
+  var ex;
+  ex = floor(log10(up)) - 3;
+  print("BOUND", name, dec4(up, ex, true), "low", dec4(lo, ex, false));
+};
+
+direct = proc(name, P, g, I) {
+  var r;
+  r = supnorm(P, g, I, relative, acc);
+  report(name, inf(r), sup(r));
+};
+
+split = proc(name, P, g, b, k) {
+  var t, r, e, lo, up;
+  t = b * 2^(-k);
+  r = supnorm(P, g, [t; b], relative, acc);
+  e = evaluate(P/g - 1, [0; t]);
+  up = max(sup(r), abs(inf(e)), abs(sup(e)));
+  lo = inf(r);
+  if inf(e) > 0 then lo = max(lo, inf(e));
+  if sup(e) < 0 then lo = max(lo, -sup(e));
+  report(name, lo, up);
+};

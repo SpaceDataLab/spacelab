@@ -1,0 +1,91 @@
+/* Each approximation of plans/17 Ф28.B, its relative error evaluated at fpprec 120 where it is
+   largest, and held inside the enclosure Sollya certified for it (the *_supnorm.sollya files).
+
+   timeout 300 maxima --very-quiet -Q -b approximation_supnorm.mac
+
+   The coefficients are the shipped ones as exact rationals: d6 and d12 are the doubles `1.0 / 6.0`
+   and `1.0 / 12.0` fold to and s6 the f32 one, each rounded here from the rational and checked
+   against its literal; every other coefficient is exact. Sollya took each f as x^-m g with g entire;
+   here f is the quotient as the code's comment writes it, so the two engines share no
+   reformulation. For each approximation p of f on [a, b] the error |p/f - 1| is evaluated at the
+   limit x -> 0 (Maxima's `limit`; each f has a removable singularity, or a zero p shares, there),
+   on 64 equally spaced points of (0, b] (and of [a, 0) where a < 0), and by golden section around
+   the largest grid value, which finds an interior maximum. The largest value must lie inside
+   Sollya's enclosure [lo, up] of the supremum: below lo, the evaluation missed the maximum or
+   Sollya's lower bound is wrong; above up, Sollya's bound is wrong. One `<name> outside Sollya's
+   enclosure: 0` line per approximation, 28 in all. */
+
+fpprec : 120$
+display2d : false$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+/* round a positive rational to p significant bits, ties to even (Maxima's round) */
+rn(q, p) := block([e : 0],
+  while 2^(e + 1) <= q do e : e + 1,
+  while 2^e > q do e : e - 1,
+  round(q * 2^(p - 1 - e)) * 2^(e - p + 1))$
+d6 : rn(1/6, 53)$  d12 : rn(1/12, 53)$  s6 : rn(1/6, 24)$
+must(is(d6 = 6004799503160661/2^55) and is(d12 = d6/2) and is(s6 = 11184811/2^26),
+     "d6, d12 and s6 are the doubles and the float that 1/6 and 1/12 round to")$
+
+ser(sgn, off, n) := sum(sgn^k * x^(2*k) / (2*k + off)!, k, 0, n)$
+err(p, f, t) := abs(bfloat(subst(x = t, p) / subst(x = t, f)) - 1)$
+/* the largest |p/f - 1| seen by a golden-section search for the maximum inside (lo, hi) */
+golden(p, f, lo, hi) := block([g : (sqrt(5b0) - 1)/2, l : bfloat(lo), h : bfloat(hi), c, d, ec, ed, best : 0],
+  for k thru 90 do (
+    c : h - g*(h - l), d : l + g*(h - l), ec : err(p, f, c), ed : err(p, f, d),
+    best : max(best, ec, ed),
+    if ec > ed then h : d else l : c),
+  best)$
+worst(p, f, a, b) := block([n : 64, pts, vals, m, j, w],
+  pts : map(bfloat, append(if a = 0 then [] else makelist(a * i / n, i, 1, n), makelist(b * i / n, i, 1, n))),
+  vals : map(lambda([t], err(p, f, t)), pts),
+  m : lmax(vals),
+  j : first(sublist_indices(vals, lambda([v], v = m))),
+  w : bfloat((b - a) / n),
+  max(abs(bfloat(limit(p / f - 1, x, 0))), m,
+      golden(p, f, max(bfloat(a), pts[j] - w), min(bfloat(b), pts[j] + w))))$
+
+kb : sqrt(1/32)$
+wb : sqrt(rn(1/10, 53))$
+gb : sqrt(rn(1/10^6, 24))$
+T : 1000001/10^14$
+rr : log(2)/1024$
+pade66(y) := sum((12 - k)! * 6! / (12! * k! * (6 - k)!) * y^k, k, 0, 6)$
+cpos : (1 - cos(x))/x^2$  cneg : (cosh(x) - 1)/x^2$
+spos : (x - sin(x))/x^3$  sneg : (sinh(x) - x)/x^3$
+
+/* name, p, f, a, b, and Sollya's enclosure as [lo, up, e]: [lo 10^e, up 10^e] */
+cases : [
+  ["kepler_stumpff_C_pos", ser(-1, 2, 4), cpos, 0, kb, [1247, 1248, -19]],
+  ["kepler_stumpff_C_neg", ser(1, 2, 4), cneg, 0, kb, [1241, 1242, -19]],
+  ["kepler_stumpff_S_pos", ser(-1, 3, 4) - 1/6 + d6, spos, 0, kb, [5552, 5553, -20]],
+  ["kepler_stumpff_S_neg", ser(1, 3, 4) - 1/6 + d6, sneg, 0, kb, [8409, 8411, -20]],
+  ["whfast_stumpff_c2_pos", ser(-1, 2, 8), cpos, 0, wb, [8287, 8288, -31]],
+  ["whfast_stumpff_c2_neg", ser(1, 2, 8), cneg, 0, wb, [8154, 8155, -31]],
+  ["whfast_stumpff_c3_pos", 6 * d6 * ser(-1, 3, 8), spos, 0, wb, [5551, 5552, -20]],
+  ["whfast_stumpff_c3_neg", 6 * d6 * ser(1, 3, 8), sneg, 0, wb, [5551, 5552, -20]],
+  ["gpu_stumpff_C_pos", ser(-1, 2, 2), cpos, 0, gb, [4960, 4961, -26]],
+  ["gpu_stumpff_C_neg", ser(1, 2, 2), cneg, 0, gb, [4960, 4961, -26]],
+  ["gpu_stumpff_S_pos", ser(-1, 3, 2) - 1/6 + s6, spos, 0, gb, [2980, 2981, -11]],
+  ["gpu_stumpff_S_neg", ser(1, 3, 2) - 1/6 + s6, sneg, 0, gb, [2980, 2981, -11]],
+  ["shadow_x_minus_sin", sum((-1)^(k + 1) * x^(2*k + 1) / (2*k + 1)!, k, 1, 12), x - sin(x), 0, 2, [1124, 1125, -23]],
+  ["attitude_exp_so3_a", 1 - x^2/6, sin(x)/x, 0, T, [8333, 8334, -38]],
+  ["attitude_exp_so3_b", 1/2 - x^2/24, cpos, 0, T, [2777, 2778, -38]],
+  ["attitude_exp_so3_a_at_1e-3", 1 - x^2/6, sin(x)/x, 0, 1/1000, [8333, 8334, -18]],
+  ["attitude_exp_so3_b_at_1e-3", 1/2 - x^2/24, cpos, 0, 1/1000, [2777, 2778, -18]],
+  ["lie_quaternion_w", 1 - x^2/8, cos(x/2), 0, T, [2604, 2605, -38]],
+  ["lie_quaternion_v", 1/2 + 0*x, sin(x/2)/x, 0, T, [4166, 4167, -21]],
+  ["se3_so3_exp_a", 1 + 0*x, sin(x)/x, 0, T, [1666, 1667, -20]],
+  ["se3_left_jacobian_a", 1/2 + 0*x, cpos, 0, T, [8333, 8334, -21]],
+  ["se3_left_jacobian_b", d6 + 0*x, spos, 0, T, [5551, 5552, -20]],
+  ["conjunction_h", 1/2 - x/8 + x^2/48, (1 - exp(-x/2))/x, 0, T, [5208, 5209, -30]],
+  ["se3_left_jacobian_inv_c", d12 + 0*x, 1/x^2 - (1 + cos(x))/(2*x*sin(x)), 0, T, [5717, 5718, -20]],
+  ["se3_so3_log", 1/2 + 0*x, x/(2*sin(x)), 0, T, [1666, 1667, -20]],
+  ["dd_sin_14_terms", sum((-1)^k * x^(2*k + 1) / (2*k + 1)!, k, 0, 14), sin(x), 0, %pi/4, [9616, 9617, -41]],
+  ["dd_expm1_7_terms", sum(x^n / n!, n, 1, 9), exp(x) - 1, -rr, rr, [8224, 8225, -39]],
+  ["process_noise_pade66_scalar", pade66(x) / pade66(-x), exp(x), -1/2, 1/2, [2132, 2133, -20]]]$
+
+for c in cases do block([obs : worst(c[2], c[3], c[4], c[5]), lo : c[6][1] * 10^c[6][3], up : c[6][2] * 10^c[6][3]],
+  print(c[1], "worst", float(obs), " Sollya", float(lo), float(up), " position", float((obs - lo) / (up - lo))),
+  print(c[1], "outside Sollya's enclosure:", if is(obs >= lo) and is(obs <= up) then 0 else 1))$

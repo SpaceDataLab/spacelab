@@ -1,0 +1,49 @@
+/* The small-argument branches that replace a removable singularity by a short series, certified
+   (plans/17 Ф28.B). Each is used below the branch's own threshold; d6 and d12 are the doubles
+   `1.0 / 6.0` and `1.0 / 12.0` fold to, every other coefficient is exact.
+
+     spacelab-propagation attitude::exp_so3, theta < 1e-8:
+       sin t/t ~ 1 - t^2/6,  (1 - cos t)/t^2 ~ 1/2 - t^2/24; and at t = 1e-3, where its comment
+       says the two-term series is already 2.8e-15 off;
+     spacelab-estimation lie::from_rotation_vector, angle < 1e-8:
+       cos(t/2) ~ 1 - t^2/8,  sin(t/2)/t ~ 1/2 (the quaternion is normalised afterwards);
+     spacelab-estimation se3, theta < EPS = 1e-8:
+       so3_exp sin t/t ~ 1, and (1 - cos t)/t^2 ~ 1/2 as left_jacobian's first;
+       left_jacobian (1 - cos t)/t^2 ~ 1/2, (t - sin t)/t^3 ~ d6;
+       left_jacobian_inv 1/t^2 - (1 + cos t)/(2 t sin t) ~ d12;  so3_log t/(2 sin t) ~ 1/2;
+     spacelab-estimation conjunction, r^2 < 1e-8:
+       h = (1 - exp(-y/2))/y ~ 1/2 - y/8 + y^2/48, y = r^2.
+
+   Each is enclosed over [0, T], T = 1.000001e-8: the thresholds are doubles near 1e-8, and se3's
+   is EPS*EPS rounded, so T covers each branch with room. The split points keep the interval
+   evaluation's width, of order t^2, under acc times the bound. left_jacobian_inv and so3_log have
+   no entire numerator a polynomial factor clears, so `split` takes their quotients as they stand;
+   supnorm then needs its bisection floor `diam` lowered to reach t = T 2^-12. attitude's b, split
+   at T 2^-40, needs 400 bits for supnorm's Taylor forms to survive the cancellation there. Against
+   a degree-1 P, supnorm cannot decide the order of g's simple zero, so lie's v and so3_exp's a are
+   split too.
+
+   cd derivations && timeout 300 sollya small_angle_supnorm.sollya                              */
+
+execute("supnorm_lib.sollya");
+
+d6 = round(1/6, D, RN);
+d12 = round(1/12, D, RN);
+T = 1.000001e-8;
+
+direct("attitude_exp_so3_a", x - x^3/6, sin(x), [0; T]);
+prec = 400!;
+split("attitude_exp_so3_b", x^2 * (1/2 - x^2/24), 1 - cos(x), T, 40);
+prec = 200!;
+direct("attitude_exp_so3_a_at_1e-3", x - x^3/6, sin(x), [0; 1/1000]);
+split("attitude_exp_so3_b_at_1e-3", x^2 * (1/2 - x^2/24), 1 - cos(x), 1/1000, 24);
+direct("lie_quaternion_w", 1 - x^2/8, cos(x/2), [0; T]);
+split("lie_quaternion_v", x/2, sin(x/2), T, 12);
+split("se3_so3_exp_a", x, sin(x), T, 12);
+split("se3_left_jacobian_a", x^2/2, 1 - cos(x), T, 12);
+split("se3_left_jacobian_b", d6 * x^3, x - sin(x), T, 12);
+direct("conjunction_h", x * (1/2 - x/8 + x^2/48), -expm1(-x/2), [0; T]);
+diam = 2^-16!;
+split("se3_left_jacobian_inv_c", d12 + 0*x, (2*sin(x) - x - x*cos(x))/(2*x^2*sin(x)), T, 12);
+split("se3_so3_log", 1/2 + 0*x, x/(2*sin(x)), T, 12);
+quit;

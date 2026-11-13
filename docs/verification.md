@@ -387,6 +387,65 @@ rows off the grid: the three points above, the old code's worst point, and each 
 from the scan. The old code passes the new lens gate too (its worst scan point comes to 0.41 of
 it); the old series fails the new `x − sin x` bound, 4.44 against 0.75 ulp.
 
+### 1.3 Each shipped series' approximation error, certified (Ф28.B)
+
+§1.1 and §1.2 bound the round-off of an evaluation. This section bounds the other half: how far
+the polynomial itself is from the function, in exact arithmetic. Every series the code ships in
+place of a closed form is certified by Sollya's `supnorm`. It encloses sup |p/f − 1| over the
+interval the code uses p on. The coefficients are the shipped doubles as exact rationals:
+`1.0 / 6.0` is 6004799503160661·2⁻⁵⁵, 2⁻⁵⁴ below 1/6 relative. A division by a small integer at
+run time is evaluation error, so its coefficient counts as exact.
+
+Most f are 0/0 at x = 0 in their closed form. Sollya 8.0 applies L'Hôpital's rule at a point
+only once, so `supnorm` fails with 0 as an endpoint when the zero is of order 2 or more. Two forms
+avoid this (derivations/supnorm_lib.sollya). In both, f = x⁻ᵐg with g entire, and supnorm compares
+P = xᵐp with g. `direct` covers a g with no zero or a simple zero in the interval; supnorm divides a
+simple zero out. `split` covers a zero of order 2 or 3: supnorm takes [t, b], t = b·2⁻ᵏ, and
+interval evaluation, where L'Hôpital's rule works at any order, encloses p/f − 1 on [0, t]. The inverse left Jacobian's coefficient and the
+SO(3) log's coefficient have no such g, so `split` takes their quotients as they stand.
+`derivations/approximation_supnorm.mac` is the cross-check. It writes each f as the code's
+comment does and evaluates |p/f − 1| at fpprec 120: at the limit x → 0, on a 64-point grid, and
+by golden section around the grid's largest value. All 28 maxima lie inside Sollya's enclosures.
+§8 of `derivations/verify.sh` runs both. It fails if a bound is above its committed value, or if a
+bound is missing or extra.
+
+| Series | Code | Domain | Certified sup \|p/f − 1\| | Claim in the code | Part 2 |
+|---|---|---|---|---|---|
+| Stumpff C, degree 4 in w | `spacelab-astro` `kepler::stumpff` | \|w\| ≤ 1/32 | [1.247, 1.248]e-16 for w ≥ 0, [1.241, 1.242]e-16 below | first dropped term 1.2e-16: holds | **candidate**: fpminimax's degree 4 reaches 7.810e-18, 16× closer |
+| Stumpff S, degree 4 in w | same | \|w\| ≤ 1/32 | [5.552, 5.553]e-17 for w ≥ 0, **[8.409, 8.411]e-17** below | 2.9e-17: the dropped term only; `1.0 / 6.0` adds 5.55e-17. **Comment corrected** | no: fpminimax reaches 5.561e-17, the 2⁻⁵⁴ of the constant term |
+| c₂, c₃ with eight terms | `spacelab-propagation` `whfast::stumpff` | \|z\| ≤ 0.1 (the double) | c₂ [8.287, 8.288]e-28 and [8.154, 8.155]e-28; c₃ [5.551, 5.552]e-17, all 2⁻⁵⁴ from `1.0 / 6.0` | "eight terms saturate f64": holds, with room | no |
+| f32 C, S, degree 2 | `spacelab-gpu` Lambert WGSL | \|z\| ≤ 1e-6 (the f32) | C [4.960, 4.961]e-23; S [2.980, 2.981]e-8, the f32 `1.0 / 6.0`'s 2⁻²⁵ | none | no |
+| x − sin x to x²⁵/25! | `spacelab-propagation` `shadow::x_minus_sin` | [0, 2] | [1.124, 1.125]e-20 | under 1.2e-20: holds | no |
+| sin θ/θ ≈ 1 − θ²/6, (1 − cos θ)/θ² ≈ ½ − θ²/24 | `spacelab-propagation` `attitude::exp_so3` | θ < 1e-8 | [8.333, 8.334]e-35, [2.777, 2.778]e-35 | none | no |
+| the same two at θ = 1e-3 | same, the comment on raising the threshold | θ ≤ 1e-3 | [8.333, 8.334]e-15, [2.777, 2.778]e-15 | 2.8e-15 for b, the comment's subject: holds | — |
+| cos(θ/2) ≈ 1 − θ²/8, sin(θ/2)/θ ≈ ½ | `spacelab-estimation` `lie::from_rotation_vector` | θ < 1e-8 | [2.604, 2.605]e-35, [4.166, 4.167]e-18 | none | no |
+| sin θ/θ ≈ 1 in `so3_exp`; (1 − cos θ)/θ² ≈ ½, (θ − sin θ)/θ³ ≈ 1/6 in `left_jacobian` | `spacelab-estimation` `se3` | θ < 1e-8 | [1.666, 1.667]e-17; [8.333, 8.334]e-18, [5.551, 5.552]e-17 | none | no |
+| 1/θ² − (1 + cos θ)/(2θ sin θ) ≈ 1/12; θ/(2 sin θ) ≈ ½ | `se3` `left_jacobian_inv`, `so3_log` | θ < 1e-8 | [5.717, 5.718]e-17, [1.666, 1.667]e-17 | none | no |
+| (1 − e^(−y/2))/y ≈ ½ − y/8 + y²/48 | `spacelab-estimation` `conjunction` | y = r² < 1e-8 | [5.208, 5.209]e-27 | none | no |
+| sin t to t²⁹/29! | `spacelab-autodiff` `double_double::sin_series` | \|t\| ≤ π/4 | [9.616, 9.617]e-38, under DD_EPS = 2⁻¹⁰⁴ = 4.93e-32 | "fourteen terms suffice": holds | no |
+| eʳ − 1 to r⁹/9! | `double_double::exp` | \|r\| ≤ ln2/1024 | [8.224, 8.225]e-36, under DD_EPS | "seven terms is what that bound costs": holds | no |
+| eˣ by the [6/6] Padé rational, scalar x | `spacelab-estimation` `process_noise::matrix_exp` | \|x\| ≤ ½ | [2.132, 2.133]e-17, 0.19 u | "accurate to well below f64 rounding": holds for a scalar, so for each eigenvalue of a normal A | no |
+
+Not certified, and why. The Kepler and universal-variable solvers start Newton from a closed-form
+guess, not from a fitted polynomial. The ice model's Bessel J₁ for x ≥ 100 is the asymptotic
+expansion A&S 9.2.5–9.2.6, and Sollya has no Bessel function to compare it with. The Padé row is the
+scalar error only: for a non-normal A the backward error is the series of log(e⁻ˣ r(x)), which no
+file here bounds. The f and g series of initial orbit determination are truncated in time, and
+their error depends on the orbit, not on one function of one interval.
+
+Sollya is out of tree (D-21). It is never linked and never a dependency. The build is
+[Sollya 8.0](https://www.sollya.org/releases/sollya-8.0/sollya-8.0.tar.gz) (CeCILL-C), sha256
+`58d734f9a2fc8e6733c11f96d2df9ab25bef24d71c401230e29f0a1339a81192`. It uses
+[MPFI 1.5.4](https://perso.ens-lyon.fr/nathalie.revol/softwares/mpfi-1.5.4.tar.bz2) (LGPL-3.0+),
+sha256 `d20ba56a8d57d0816f028be8b18a4aa909a068efcb9a260e69577939e4199752`, and
+[fplll 5.5.0](https://github.com/fplll/fplll/releases/download/5.5.0/fplll-5.5.0.tar.gz)
+(LGPL-2.1+), sha256 `f0af6bdd0ebd5871e87ff3ef7737cb5360b1e38181a4e5a8c1236f3476fec3b2`, both
+static. MPFR 4.2.2 and GMP 6.3.0 are the system's. All three are built in user space under
+`~/.local/src/{mpfi,fplll,sollya}-dl.*` into the prefix `~/.local/opt/sollya`, with `make -j4`.
+`~/.local/bin/sollya` sets `LD_LIBRARY_PATH` to the prefix's `lib` only. Sollya 8.0 needs
+`CFLAGS=-std=gnu17` with GCC 15 or later: C23 reads its `int miniyyparse();` as a declaration
+with no parameters, which conflicts with the generated parser.
+
 ---
 
 ## 2 · Numerical propagation, forces & DSST

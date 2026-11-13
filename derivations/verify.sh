@@ -1619,6 +1619,61 @@ EOF
 else
     skip "Ф28.D FPTaylor round-off bounds" fptaylor
 fi
+# Ф28.B: each shipped series' approximation error, certified. Each Sollya file encloses
+# sup |p/f − 1| on the interval the code uses p on and prints `BOUND <name> <up> low <lo>`
+# (supnorm_lib.sollya). A file fails if a bound is missing, extra, not a number, or above the value
+# a row below commits. approximation_supnorm.mac evaluates each error at fpprec 120 and finds its
+# maximum inside Sollya's enclosure. Sollya is out of tree (D-21); without it the files are skipped.
+if have sollya; then
+    sol_rows=$(cat <<'EOF'
+kepler_stumpff kepler_stumpff_C_pos 1248e-19
+kepler_stumpff kepler_stumpff_C_neg 1242e-19
+kepler_stumpff kepler_stumpff_S_pos 5553e-20
+kepler_stumpff kepler_stumpff_S_neg 8411e-20
+whfast_stumpff whfast_stumpff_c2_pos 8288e-31
+whfast_stumpff whfast_stumpff_c2_neg 8155e-31
+whfast_stumpff whfast_stumpff_c3_pos 5552e-20
+whfast_stumpff whfast_stumpff_c3_neg 5552e-20
+gpu_stumpff gpu_stumpff_C_pos 4961e-26
+gpu_stumpff gpu_stumpff_C_neg 4961e-26
+gpu_stumpff gpu_stumpff_S_pos 2981e-11
+gpu_stumpff gpu_stumpff_S_neg 2981e-11
+shadow_x_minus_sin shadow_x_minus_sin 1125e-23
+small_angle attitude_exp_so3_a 8334e-38
+small_angle attitude_exp_so3_b 2778e-38
+small_angle attitude_exp_so3_a_at_1e-3 8334e-18
+small_angle attitude_exp_so3_b_at_1e-3 2778e-18
+small_angle lie_quaternion_w 2605e-38
+small_angle lie_quaternion_v 4167e-21
+small_angle se3_so3_exp_a 1667e-20
+small_angle se3_left_jacobian_a 8334e-21
+small_angle se3_left_jacobian_b 5552e-20
+small_angle conjunction_h 5209e-30
+small_angle se3_left_jacobian_inv_c 5718e-20
+small_angle se3_so3_log 1667e-20
+double_double_series dd_sin_14_terms 9617e-41
+double_double_series dd_expm1_7_terms 8225e-39
+process_noise_pade process_noise_pade66_scalar 2133e-20
+EOF
+    )
+    for f in kepler_stumpff whfast_stumpff gpu_stumpff shadow_x_minus_sin small_angle double_double_series \
+        process_noise_pade; do
+        out=$(timeout 300 sollya "${f}_supnorm.sollya" </dev/null 2>&1)
+        if { printf '%s\n' "$sol_rows" | awk -v f="$f" '$1 == f { print "max", $2, $3 }'; printf '%s\n' "$out"; } |
+            awk '$1 == "max" { b[$2] = $3; n++; next }
+                $1 == "BOUND" { m++; if (!($2 in b) || $3 !~ /^[0-9]+e-?[0-9]+$/ || $3 + 0 > b[$2] + 0) bad = 1 }
+                END { exit bad || m != n }'; then
+            ok "sollya ${f}_supnorm.sollya: every certified approximation error at or under its committed bound"
+        else
+            bad "sollya ${f}_supnorm.sollya" "$(printf '%s\n' "$out" | awk '$1 == "BOUND" { printf "%s=%s ", $2, $3 }')"
+        fi
+    done
+else
+    skip "Ф28.B Sollya supnorm certificates" sollya
+fi
+if have maxima; then
+    mac_zeros approximation_supnorm.mac 28 "each series' worst error, found at fpprec 120, lies inside Sollya's enclosure"
+fi
 
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ] || exit 1

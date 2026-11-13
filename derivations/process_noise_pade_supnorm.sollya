@@ -1,0 +1,23 @@
+/* The [6/6] Padé approximant of spacelab-estimation `process_noise::matrix_exp`, for a scalar
+   argument, certified (plans/17 Ф28.B).
+
+   The code scales A until ||A||_inf <= 1/2 and forms r(A) = N(-A)^-1 N(A), N(x) = sum c_k x^k with
+   c_k = (12 - k)! 6!/(12! k! (6 - k)!), built at run time by c *= (q - k + 1)/((2q - k + 1) k); its
+   rounding is evaluation error, so the coefficients count as exact. The comment on PADE_ORDER says
+   the approximant is "accurate to well below f64 rounding" there. For a scalar x in [-1/2, 1/2],
+   r(x)/e^x - 1 = N(x)/(N(-x) e^x) - 1, so `direct` compares P = N with g = N(-x) e^x, which has no
+   zero there. For a matrix this is the error on each eigenvalue of a normal A; a non-normal A needs
+   the backward-error series of log(e^-x r(x)), which this file does not bound.
+
+   cd derivations && timeout 300 sollya process_noise_pade_supnorm.sollya                        */
+
+execute("supnorm_lib.sollya");
+
+n = 0; m = 0;
+for k from 0 to 6 do {
+  n = n + fact(12 - k) * fact(6) / (fact(12) * fact(k) * fact(6 - k)) * x^k;
+  m = m + fact(12 - k) * fact(6) / (fact(12) * fact(k) * fact(6 - k)) * (-x)^k;
+};
+
+direct("process_noise_pade66_scalar", n, m * exp(x), [-1/2; 1/2]);
+quit;

@@ -1,0 +1,21 @@
+/* The truncation of `x - sin x`'s series in spacelab-propagation `shadow::x_minus_sin`, certified
+   (plans/17 Ф28.B).
+
+   Below x = 2 the code sums x^3/3! - x^5/5! + x^7/7! Q with Q's Horner chain over n = 8, 10, ..., 24,
+   which in exact arithmetic is the Taylor polynomial to x^25/25!: every coefficient is exact (the
+   leading terms are double-double, the divisions are by exact small integers at run time), so the
+   approximation is that polynomial and its rounding is x_minus_sin_roundoff.mac's. The doc comment
+   says the first term left out, x^27/27!, bounds the truncation under 1.2e-20 of the sum.
+
+   `split` encloses sup |p/f - 1| over [0, 2], f = x - sin x, whose zero of order 3 at 0 the
+   polynomial shares.
+
+   cd derivations && timeout 300 sollya shadow_x_minus_sin_supnorm.sollya                        */
+
+execute("supnorm_lib.sollya");
+
+p = 0;
+for k from 1 to 12 do p = p + (-1)^(k + 1) * x^(2*k + 1) / fact(2*k + 1);
+
+split("shadow_x_minus_sin", p, x - sin(x), 2, 40);
+quit;

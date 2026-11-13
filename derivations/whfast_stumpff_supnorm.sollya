@@ -1,0 +1,32 @@
+/* The truncation of the Stumpff series in spacelab-propagation `whfast::stumpff`, certified
+   (plans/17 Ф28.B).
+
+   The code quarters z until |zr| <= 0.1 and sums c2 and c3 from 0.5 and d6 with eight more terms
+   each, every term the previous one times -zr/((2k+1)(2k+2)) or -zr/((2k+2)(2k+3)); exactly
+     c2 ~ sum_{k=0}^{8} (-zr)^k/(2k+2)!,   c3 ~ 6 d6 sum_{k=0}^{8} (-zr)^k/(2k+3)!,
+   d6 the double `1.0 / 6.0` folds to, which scales every term of c3. The comment says eight terms
+   saturate f64 for |zr| <= 0.1. As in kepler_stumpff_supnorm.sollya each sign of zr is a function
+   of s in [0, sqrt(top)], top the double 0.1 (just above 1/10), and `split` encloses
+   sup |p/f - 1| on each.
+
+   cd derivations && timeout 300 sollya whfast_stumpff_supnorm.sollya                           */
+
+execute("supnorm_lib.sollya");
+
+d6 = round(1/6, D, RN);
+top = round(1/10, D, RN);
+b = round(sqrt(top), prec, RU);
+
+c2pos = 0; c2neg = 0; c3pos = 0; c3neg = 0;
+for k from 0 to 8 do {
+  c2pos = c2pos + (-1)^k * x^(2*k) / fact(2*k + 2);
+  c2neg = c2neg + x^(2*k) / fact(2*k + 2);
+  c3pos = c3pos + 6 * d6 * (-1)^k * x^(2*k) / fact(2*k + 3);
+  c3neg = c3neg + 6 * d6 * x^(2*k) / fact(2*k + 3);
+};
+
+split("whfast_stumpff_c2_pos", x^2 * c2pos, 1 - cos(x), b, 48);
+split("whfast_stumpff_c2_neg", x^2 * c2neg, cosh(x) - 1, b, 48);
+split("whfast_stumpff_c3_pos", x^3 * c3pos, x - sin(x), b, 48);
+split("whfast_stumpff_c3_neg", x^3 * c3neg, sinh(x) - x, b, 48);
+quit;

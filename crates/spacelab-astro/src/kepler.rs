@@ -92,8 +92,8 @@ pub(crate) fn stumpff(z: f64) -> (f64, f64) {
         w *= 0.25;
         folds += 1;
     }
-    // `C = Σ (−z)^k/(2k+2)!`, `S = Σ (−z)^k/(2k+3)!`, both to `z⁴`. Inside the window the first
-    // dropped term is 1.2e-16 of `C` and 2.9e-17 of `S`.
+    // `C = Σ (−z)^k/(2k+2)!`, `S = Σ (−z)^k/(2k+3)!`, to `z⁴`: relative error ≤ 1.25e-16 for `C`,
+    // ≤ 8.5e-17 for `S`, most of it `1.0 / 6.0`'s 2⁻⁵⁴ (derivations/kepler_stumpff_supnorm.sollya).
     let mut c = 0.5 - w / 24.0 + w * w / 720.0 - w * w * w / 40_320.0 + w * w * w * w / 3_628_800.0;
     let mut s = 1.0 / 6.0 - w / 120.0 + w * w / 5040.0 - w * w * w / 362_880.0
         + w * w * w * w / 39_916_800.0;

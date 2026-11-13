@@ -1,0 +1,28 @@
+/* The term counts spacelab-autodiff's double-double `sin` and `exp` rely on, certified
+   (plans/17 Ф28.B).
+
+   `sin_series` sums t - t^3/3! + ... on the reduced |t| <= pi/4 and stops once a term falls below
+   the running sum's resolution DD_EPS = 2^-104; its comment says fourteen terms suffice, that is
+   the polynomial to t^29/29!. `exp` sums r + r^2/2! + ... on the reduced |r| <= ln2/1024 the same
+   way; its comment says seven terms after the opening r + r^2/2 are what that bound costs, the
+   polynomial to r^9/9!. If the truncation after those counts is under DD_EPS relative, the loop's
+   exit is reached by them. Both functions' coefficients are exact (the divisions run in
+   double-double).
+
+   `direct` encloses sup |p/f - 1| on [0, pi/4] for sin (p/f is even, so the half suffices) and on
+   [-ln2/1024, ln2/1024] for exp(r) - 1; each f has a simple zero at 0, which supnorm divides out.
+
+   cd derivations && timeout 300 sollya double_double_series_supnorm.sollya                      */
+
+execute("supnorm_lib.sollya");
+prec = 300!;
+
+ps = 0;
+for k from 0 to 14 do ps = ps + (-1)^k * x^(2*k + 1) / fact(2*k + 1);
+pe = 0;
+for n from 1 to 9 do pe = pe + x^n / fact(n);
+r = round(log(2)/1024, prec, RU);
+
+direct("dd_sin_14_terms", ps, sin(x), [0; round(pi/4, prec, RU)]);
+direct("dd_expm1_7_terms", pe, expm1(x), [-r; r]);
+quit;

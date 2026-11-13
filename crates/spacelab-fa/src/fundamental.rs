@@ -15,9 +15,10 @@
 //! The polynomial coefficients are the IERS-published decimals of the cited models
 //! — not transcribed from any implementation's source. The Delaunay arguments are
 //! reduced modulo a full turn in arcseconds before conversion, exactly as the
-//! published algorithm specifies; the planetary longitudes modulo `2π`. Every
-//! function is cross-checked against `pyerfa` (ERFA, BSD-3-Clause) in the tests
-//! below and in `derivations/fundamental_args.py`, to under `1e-13` rad.
+//! published algorithm specifies; the planetary longitudes modulo `2π`.
+//! `derivations/fundamental_arguments.mac` holds every coefficient to the published
+//! decimal and writes the exact values the tests hold each function to; `pyerfa`
+//! (ERFA, BSD-3-Clause) is a comparator.
 
 use spacelab_core::Angle;
 
@@ -135,17 +136,155 @@ pub fn fapa03(t: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::excessive_precision)] // verbatim pyerfa oracle values
+    // Exact values to 25 digits as the derivation prints them, and verbatim pyerfa values.
+    #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
     #![allow(clippy::type_complexity)] // a test table of (name, fn ptr, expected)
 
     use super::*;
 
-    /// Reference values from `pyerfa` (ERFA, BSD) at `t = 0.06` Julian centuries
-    /// (TT JD 2400000.5 + 53736.0), the SOFA self-test epoch. A truncated
-    /// coefficient shifts the argument by more than this tolerance and fails here.
-    /// See `derivations/fundamental_args.py`.
+    /// The fourteen arguments in the order `ARGUMENTS_EXACT` holds them.
+    const ARGUMENTS: [fn(f64) -> f64; 14] = [
+        fal03, falp03, faf03, fad03, faom03, fame03, fave03, fae03, fama03, faju03, fasa03, faur03,
+        fane03, fapa03,
+    ];
+
+    /// `t = 0.06` (TT JD 2400000.5 + 53736.0, the SOFA self-test epoch), a century and half a
+    /// century either side of J2000, and two centuries out.
+    const EPOCHS: [f64; 6] = [0.06, -1.0, -0.5, 0.5, 1.0, 2.0];
+
+    /// The fourteen at [`EPOCHS`]: eqs (5.43) and (5.44) of the IERS Conventions (2010) in exact
+    /// arithmetic, reduced as the module says, to 25 digits (`derivations/fundamental_arguments.mac`
+    /// reads this table back).
+    const ARGUMENTS_EXACT: [[f64; 14]; 6] = [
+        [
+            5.705402575902754796387522e0,
+            6.239065584464557534958239e0,
+            4.981049699601457816763943e0,
+            2.421971746329525499703946e-1,
+            1.570165698203728253308263e-1,
+            3.850395011954332284189684e0,
+            1.624006902470132962942178e0,
+            1.752813570868479743325185e0,
+            1.114414244481653350533886e0,
+            3.777692272845999882384979e0,
+            2.153811386759999952638085e0,
+            5.929983463401999983395149e0,
+            5.540684500827999991532765e0,
+            1.462924392875999945860204e-3,
+        ],
+        [
+            -1.115183659436996646064090e0,
+            -2.655231640888373072429724e-2,
+            -6.086816721524464884260624e0,
+            -1.616702487420072564323435e-1,
+            4.523594802968210737714460e0,
+            -3.148988143051198552931279e0,
+            -2.763881610069907381035438e-1,
+            -4.518769274320938784396610e0,
+            -1.132125783661503199885088e0,
+            -2.104067309663308184597706e0,
+            -1.606337817461240569224140e0,
+            -1.996865984700000000000000e0,
+            1.498582723200000000000000e0,
+            -2.437636309000000000000000e-2,
+        ],
+        [
+            -2.521445155848006577830886e0,
+            -3.483807756864621399410730e-2,
+            -5.371033020586903672689138e0,
+            -3.764779403781769519892617e0,
+            2.114153037687785380819460e-1,
+            -5.656374957705185753390926e0,
+            -4.833306039183081845977059e0,
+            -4.524242133750262630660948e0,
+            -3.747507742510338076867831e0,
+            -7.522604063316540922988529e-1,
+            -3.507753183820413523074713e0,
+            1.742213943650000000000000e0,
+            3.405234505100000000000000e0,
+            -1.218952827250000000000000e-2,
+        ],
+        [
+            9.494486128694003103544561e-1,
+            6.231771683214022492574395e0,
+            2.343626966703829947999282e0,
+            1.595326523953606538415562e0,
+            -2.129704104629074497490256e0,
+            1.895222027346012799540353e0,
+            4.902414126003495369051772e0,
+            1.747997454570676153735662e0,
+            3.588098954151165123017257e0,
+            1.951353400331654092298853e0,
+            5.255786697820413523074713e0,
+            2.937188493170413523074713e0,
+            9.353527617204135230747132e-1,
+            1.219222172750000000000000e-2,
+        ],
+        [
+            5.826604253498133491669960e0,
+            6.223481898965887114950875e0,
+            3.059317938336139070532098e0,
+            4.275356347494807376586291e0,
+            -1.586439578169707548452508e-1,
+            5.671020519871612076005992e0,
+            3.454962478274042611782571e-1,
+            1.742524595141352307471323e0,
+            9.727169953023302460345146e-1,
+            3.303160303663308184597706e0,
+            3.354371331461240569224140e0,
+            3.930831143408270461494265e-1,
+            2.842004543620413523074713e0,
+            2.438713691000000000000000e-2,
+        ],
+        [
+            3.014778051161376177535047e0,
+            6.206898310216130863927996e0,
+            4.490607126128474610903657e0,
+            3.352184524880349302489012e0,
+            -2.499654439742786264705095e0,
+            6.562468905636376750866970e-1,
+            3.798031105834394999281801e0,
+            1.731578876282704614942647e0,
+            2.025138384784246968994316e0,
+            6.006774110326616369195412e0,
+            5.834725905922481138448279e0,
+            1.588057663861240569224140e0,
+            3.721228002408270461494265e-1,
+            4.878504764000000000000000e-2,
+        ],
+    ];
+
+    /// The worst miss measured is 1.593e-12 rad, `fal03` at `t = 2`: 0.69 of the 2.3e-12 rad ulp of
+    /// its unreduced `3.5e9″` polynomial. The bound is 3.1 times that.
+    const MEASURED_BOUND: f64 = 5.0e-12;
+
+    /// Every argument is its published polynomial, reduced as specified, at six epochs. (G3)
+    ///
+    /// One small `t` cannot separate a polynomial's coefficients: at `t = 0.06` the quartic term is
+    /// five orders below the linear one, so `faom03`'s `-0.00005939` moves the argument by 7.5e-15
+    /// rad, under a `f64` ulp of the argument itself. Over a century either side of J2000, and two
+    /// centuries out, the high-order terms carry their own weight: the same sign change is 5.8e-10
+    /// rad at `t = 1` and 9.2e-9 at `t = 2`. The bound is the `f64` evaluation's own resolution
+    /// there: two centuries out the Delaunay polynomials reach `3.5e9″`, whose ulp is `2.3e-12` rad.
     #[test]
-    fn matches_pyerfa_at_the_sofa_epoch() {
+    fn the_arguments_are_their_published_polynomials_reduced_as_specified() {
+        let mut worst = (0.0_f64, String::new());
+        for (t, exact) in EPOCHS.iter().zip(ARGUMENTS_EXACT.iter()) {
+            for (i, (f, want)) in ARGUMENTS.iter().zip(exact.iter()).enumerate() {
+                let miss = (f(*t) - want).abs();
+                if miss > worst.0 || miss.is_nan() {
+                    worst = (miss, format!("argument {i} at t = {t}"));
+                }
+            }
+        }
+        assert!(worst.0 < MEASURED_BOUND, "{:.3e} at {}", worst.0, worst.1);
+    }
+
+    /// The distances to `pyerfa` (ERFA, BSD) at `t = 0.06` Julian centuries (TT JD 2400000.5 +
+    /// 53736.0), the SOFA self-test epoch.
+    #[test]
+    #[ignore = "comparator: the distance to pyerfa, not a verdict"]
+    fn sofa_epoch_distance_to_pyerfa() {
         let t = 0.06;
         let cases: [(&str, fn(f64) -> f64, f64); 14] = [
             ("fal03", fal03, 5.705_402_575_902_765_78e0),
@@ -163,30 +302,21 @@ mod tests {
             ("fane03", fane03, 5.540_684_500_828_000_13e0),
             ("fapa03", fapa03, 1.462_924_392_875_999_96e-3),
         ];
-        for (name, f, expected) in cases {
-            let got = f(t);
-            assert!(
-                (got - expected).abs() < 1e-13,
-                "{name}: got {got:.17e}, expected {expected:.17e}, delta {:.2e}",
-                got - expected
-            );
-        }
+        let distances: Vec<f64> = cases
+            .iter()
+            .map(|(_, f, want)| (f(t) - want).abs())
+            .collect();
+        pyerfa_row(
+            "the fourteen fundamental arguments at the SOFA epoch",
+            &distances,
+        );
     }
 
-    /// The same fourteen against `pyerfa`, away from the self-test epoch.
-    ///
-    /// One small `t` cannot separate a polynomial's coefficients: at `t = 0.06` the quartic term is
-    /// five orders below the linear one, so `faom03`'s `-0.00005939` moves the argument by 7.5e-15
-    /// rad -- under the tolerance above, and under a `f64` ulp of the argument itself. Over a
-    /// century either side of J2000, and two centuries out, the high-order terms carry their own
-    /// weight: the same sign change is 5.8e-10 rad at `t = 1` and 9.2e-9 at `t = 2`.
+    /// The same fourteen against `pyerfa` at five epochs away from the self-test epoch.
     #[test]
+    #[ignore = "comparator: the distance to pyerfa, not a verdict"]
     #[allow(clippy::too_many_lines)] // seventy oracle values: five epochs of fourteen arguments
-    fn matches_pyerfa_across_four_centuries() {
-        let names = [
-            "fal03", "falp03", "faf03", "fad03", "faom03", "fame03", "fave03", "fae03", "fama03",
-            "faju03", "fasa03", "faur03", "fane03", "fapa03",
-        ];
+    fn four_centuries_distance_to_pyerfa() {
         let fns: [fn(f64) -> f64; 14] = [
             fal03, falp03, faf03, fad03, faom03, fame03, fave03, fae03, fama03, faju03, fasa03,
             faur03, fane03, fapa03,
@@ -288,18 +418,31 @@ mod tests {
                 ],
             ),
         ];
-        // Both evaluate the same Horner form on the same constants and reduce with the same `fmod`,
-        // so the agreement is exact at all seventy points; the two ulps are there for a future
-        // toolchain that contracts a multiply-add, not for an error anything here can make.
-        for (t, expected) in cases {
-            for i in 0..14 {
-                spacelab_testkit::assert_within_ulps(
-                    fns[i](t),
-                    expected[i],
-                    2,
-                    &format!("{} at t = {t}", names[i]),
-                );
-            }
-        }
+        let distances: Vec<f64> = cases
+            .iter()
+            .flat_map(|(t, expected)| {
+                fns.iter()
+                    .zip(expected)
+                    .map(|(f, want)| (f(*t) - want).abs())
+            })
+            .collect();
+        pyerfa_row(
+            "the fourteen fundamental arguments at t = -1, -0.5, 0.5, 1, 2",
+            &distances,
+        );
+    }
+
+    /// One `comparison | ...` row of `tools/compare.py`, in radians.
+    fn pyerfa_row(quantity: &str, distances: &[f64]) {
+        let max = distances.iter().copied().fold(0.0, f64::max);
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a count of at most seventy distances"
+        )]
+        let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+        println!(
+            "comparison | pyerfa | not recorded | {quantity} | rad | {} | {max:.3e} | {rms:.3e}",
+            distances.len()
+        );
     }
 }

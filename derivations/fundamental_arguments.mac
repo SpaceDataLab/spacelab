@@ -1,0 +1,88 @@
+/* The IAU 2006/2000A fundamental arguments and the IAU 2000 Earth Rotation Angle of spacelab-fa, in
+   exact rational arithmetic (plans/17 Ф19.G): the values fundamental.rs and cio.rs are held to.
+
+   IERS Conventions (2010) eq (5.43) gives the five Delaunay arguments as quartics in t, Julian
+   centuries of TT since J2000, in arcseconds (the constant terms printed in degrees); eq (5.44) the
+   eight planetary mean longitudes, linear in t, in radians, and the general precession in
+   longitude p_A, a quadratic. fundamental.rs reduces the Delaunay arguments modulo 1 296 000 arcsec
+   and the planetary longitudes modulo 2 pi, both with C's fmod, whose remainder keeps the sign of
+   the dividend; p_A is not reduced. Capitaine et al. (2000): ERA(Tu) = 2 pi (0.7790572732640 +
+   1.00273781191135448 Tu) with Tu the UT1 days since J2000, taken in [0, 2 pi).
+
+     (1) every coefficient fundamental.rs and era() write is the published decimal, exactly;
+     (2) ARGUMENTS_EXACT in fundamental.rs is the fourteen arguments at t = 0.06 (the double the test
+         passes; TT JD 2400000.5 + 53736) and t = -1, -1/2, 1/2, 1, 2, each literal its exact value
+         rounded to the digits it shows;
+     (3) ERA_EXACT in cio.rs is the ERA at the six UT1 day counts the test passes, likewise.
+
+   timeout 300 maxima --very-quiet -Q -b fundamental_arguments.mac                                   */
+
+fpprec : 40$
+display2d : false$
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+fund : "../crates/spacelab-fa/src/fundamental.rs"$
+cio : "../crates/spacelab-fa/src/cio.rs"$
+dec(s) := rust_rational(s)$
+
+/* eq (5.43): name, constant term in degrees, then the arcsecond coefficients of t .. t^4 */
+delaunay : [
+  ["fal03", "134.96340251", "1717915923.2178", "31.8792", "0.051635", "-0.00024470"],
+  ["falp03", "357.52910918", "129596581.0481", "-0.5532", "0.000136", "-0.00001149"],
+  ["faf03", "93.27209062", "1739527262.8478", "-12.7512", "-0.001037", "0.00000417"],
+  ["fad03", "297.85019547", "1602961601.2090", "-6.3706", "0.006593", "-0.00003169"],
+  ["faom03", "125.04455501", "-6962890.5431", "7.4722", "0.007702", "-0.00005939"]]$
+delaunay_coefficients(row) := cons(3600 * dec(row[2]), map(dec, rest(row, 2)))$
+/* eq (5.44): name, radians at J2000, radians per Julian century */
+planetary : [
+  ["fame03", "4.402608842", "2608.7903141574"], ["fave03", "3.176146697", "1021.3285546211"],
+  ["fae03", "1.753470314", "628.3075849991"], ["fama03", "6.203480913", "334.0612426700"],
+  ["faju03", "0.599546497", "52.9690962641"], ["fasa03", "0.874016757", "21.3299104960"],
+  ["faur03", "5.481293872", "7.4781598567"], ["fane03", "5.311886287", "3.8133035638"]]$
+p_a : [dec("0.02438175"), dec("0.00000538691")]$
+era_published : [dec("0.7790572732640"), dec("1.00273781191135448")]$
+
+/* (1) */
+read_back(name, finish) := map(rust_rational,
+  rust_literals_between(fund, concat("pub fn ", name, "("), finish))$
+must(every(lambda([row], is(read_back(row[1], "libm::fmod") = delaunay_coefficients(row))), delaunay)
+     and every(lambda([row], is(read_back(row[1], "}") = [dec(row[2]), dec(row[3])])), planetary)
+     and is(read_back("fapa03", "}") = p_a)
+     and is(map(rust_rational, rust_literals_between(cio, "pub fn era(", "Angle::from_radians"))
+            = [era_published[1], era_published[2] - 1]),
+     "(1) holds: the 47 coefficients of eqs (5.43), (5.44) and the ERA's two are the published decimals")$
+
+/* (2) */
+fmod_c(x, m) := x - m * truncate(bfloat(x / m))$
+delaunay_value(row, t) := block([c : delaunay_coefficients(row)],
+  bfloat(fmod_c(sum(c[k + 1] * t^k, k, 0, 4), 1296000) * %pi / 648000))$
+planetary_value(row, t) := fmod_c(bfloat(dec(row[2]) + dec(row[3]) * t), bfloat(2 * %pi))$
+arguments(t) := append(map(lambda([row], delaunay_value(row, t)), delaunay),
+                       map(lambda([row], planetary_value(row, t)), planetary),
+                       [bfloat((p_a[1] + p_a[2] * t) * t)])$
+epochs : [nearest_double(6 / 100), -1, -1/2, 1/2, 1, 2]$
+exact_arguments : map(arguments, epochs)$
+
+/* (3) */
+era_days : [5687/2, 11373/4, -9873/8, 146099/8, 0, -3/4]$
+era_value(tu) := bfloat(2 * %pi * mod(era_published[1] + era_published[2] * tu, 1))$
+exact_era : map(era_value, era_days)$
+
+/* A value as a Rust literal of 25 significant digits. */
+lit(v) := block([a : abs(v), e, m, t],
+  if is(equal(v, 0)) then return("0.0"),
+  e : floor(float(log(bfloat(a)) / log(10b0))),
+  m : round(a * 10^(24 - e)),
+  if m >= 10^25 then (e : e + 1, m : round(a * 10^(24 - e))),
+  if m < 10^24 then (e : e - 1, m : round(a * 10^(24 - e))),
+  t : string(m),
+  concat(if is(v < 0) then "-" else "", charat(t, 1), ".", substring(t, 2), "e", e))$
+for row in exact_arguments do print("ARGUMENTS_EXACT", simplode(map(lit, row), ", "))$
+print("ERA_EXACT", simplode(map(lit, exact_era), ", "))$
+
+must(transcribed(rust_table(fund, "ARGUMENTS_EXACT"), flatten(exact_arguments)),
+     "(2) holds: ARGUMENTS_EXACT is the fourteen arguments at the six epochs, exact")$
+must(transcribed(rust_table(cio, "ERA_EXACT"), exact_era),
+     "(3) holds: ERA_EXACT is the ERA at the six UT1 day counts, exact")$
+print("DONE")$

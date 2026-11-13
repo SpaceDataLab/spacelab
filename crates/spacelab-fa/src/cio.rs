@@ -18,8 +18,10 @@
 //! The `X, Y, s` series coefficients (`crate::cio_tables`) are machine-extracted
 //! from the IERS-published model and validated against `pyerfa` and the SOFA
 //! self-test vectors to `< 5e-18` rad — see `derivations/cio06_tables.py`. The ERA
-//! constants are the IAU 2000 values (Capitaine et al. 2000). Every
-//! function here is cross-checked against `pyerfa` in the tests below.
+//! constants are the IAU 2000 values (Capitaine et al. 2000);
+//! `derivations/fundamental_arguments.mac` holds them to the published decimals and
+//! writes the exact angles the ERA test holds [`era`] to, while `pyerfa` and the SOFA
+//! `t_era00` vector are comparators.
 
 use spacelab_core::{
     Angle,
@@ -180,7 +182,8 @@ fn reduce_turns_to_radians(turns: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::excessive_precision)] // verbatim SOFA golden-vector values
+    // Exact values to 25 digits as the derivation prints them, and verbatim SOFA values.
+    #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
 
     use super::*;
 
@@ -233,34 +236,65 @@ mod tests {
         assert!((s - gs).abs() < 1e-20, "s: got {s:.19e} want {gs:.19e}");
     }
 
-    /// ERA reproduces the SOFA `t_era00` golden vector at UT1 JD 2400000.5 + 54388.0.
+    /// UT1 days since J2000: the SOFA `t_era00` epoch (JD 2400000.5 + 54388.0), and five more whose
+    /// day fractions are a quarter, an eighth and none at all.
+    const ERA_DAYS: [f64; 6] = [2843.5, 2843.25, -1234.125, 18262.375, 0.0, -0.75];
+
+    /// The ERA at [`ERA_DAYS`]: Capitaine et al. (2000) in exact arithmetic, reduced to `[0, 2π)`, to
+    /// 25 digits (`derivations/fundamental_arguments.mac` reads this table back).
+    const ERA_EXACT: [f64; 6] = [
+        4.022837240028158101781625e-1,
+        5.110372159493694735572060e0,
+        1.729479102667400704953986e0,
+        9.613592572988905425073335e-1,
+        4.894961212823756883076502e0,
+        1.696705977576342284823349e-1,
+    ];
+
+    /// The worst miss measured is 9.659e-15 rad, at day 18262.375: 0.22 of the 4.46e-14 rad that one
+    /// ulp of its ~51-turn sum is. The bound is 3.1 times that.
+    const ERA_BOUND: f64 = 3.0e-14;
+
+    /// The ERA is its linear function of UT1, reduced to one turn. (G3)
+    ///
+    /// The SOFA epoch sits at UT1 midnight-plus-half-a-day, and a half turn of `frac` is exactly
+    /// the half of a turn that the reduction to `[0, 2π)` throws away: negating `frac` there moves
+    /// the angle by a whole turn and changes nothing. One epoch cannot separate the two terms
+    /// `frac` appears in — the integer-stripped unit coefficient and the small linear one — so the
+    /// other five carry fractions of a quarter, an eighth and none at all; mistaking the sign of a
+    /// quarter-day fraction is 1.6 rad.
     #[test]
-    fn era_matches_sofa_golden() {
-        let ut1 = Epoch::<Ut1>::from_days_since_j2000(2843.5);
-        let got = era(ut1).radians();
-        let want = 0.402_283_724_002_815_810_2;
-        assert!(
-            (got - want).abs() < 1e-12,
-            "ERA: got {got:.19e} want {want:.19e}"
+    fn era_is_its_linear_function_of_ut1_reduced_to_one_turn() {
+        let mut worst = (0.0_f64, 0.0_f64);
+        for (days, want) in ERA_DAYS.into_iter().zip(ERA_EXACT) {
+            let miss = (era(Epoch::<Ut1>::from_days_since_j2000(days)).radians() - want).abs();
+            if miss > worst.0 || miss.is_nan() {
+                worst = (miss, days);
+            }
+        }
+        assert!(worst.0 < ERA_BOUND, "{:.3e} at day {}", worst.0, worst.1);
+    }
+
+    /// The distance to the SOFA `t_era00` golden vector at UT1 JD 2400000.5 + 54388.0.
+    #[test]
+    #[ignore = "comparator: the distance to SOFA, not a verdict"]
+    fn era_distance_to_sofa() {
+        let got = era(Epoch::<Ut1>::from_days_since_j2000(2843.5)).radians();
+        comparison_row(
+            "sofa",
+            "the ERA at the t_era00 epoch",
+            &[(got - 0.402_283_724_002_815_810_2).abs()],
         );
     }
 
-    /// ERA at day fractions other than a half day.
+    /// The distances to `erfa.era00` at the five day fractions other than a half day.
     ///
-    /// The golden vector above sits at UT1 midnight-plus-half-a-day, and a half turn of
-    /// `frac` is exactly the half of a turn that the reduction to `[0, 2π)` throws away:
-    /// negating `frac` there moves the angle by a whole turn and changes nothing. One
-    /// epoch cannot separate the two terms `frac` appears in — the integer-stripped unit
-    /// coefficient and the small linear one — so these five carry fractions of a quarter,
-    /// an eighth and none at all. Reference from `erfa.era00`.
-    ///
-    /// The tolerance is `erfa`'s conditioning, not ours: `era00` multiplies the whole turn
-    /// count by 2π and reduces the radian value, so its answer carries the ulp of a ~320 rad
-    /// quantity, while reducing in turns first — what [`era`] does — carries the ulp of ~51.
-    /// The worst residual over these five is 2.12e-14 rad, at the epoch furthest from J2000;
-    /// mistaking the sign of a quarter-day fraction is 1.6 rad.
+    /// `era00` multiplies the whole turn count by 2π and reduces the radian value, so its answer
+    /// carries the ulp of a ~320 rad quantity, while reducing in turns first — what [`era`] does —
+    /// carries the ulp of ~51.
     #[test]
-    fn era_matches_pyerfa_at_other_day_fractions() {
+    #[ignore = "comparator: the distance to pyerfa, not a verdict"]
+    fn era_distance_to_pyerfa_at_other_day_fractions() {
         let cases = [
             (2843.25_f64, 5.110_372_159_493_699_94e0),
             (-1234.125, 1.729_479_102_667_401_24e0),
@@ -268,13 +302,25 @@ mod tests {
             (0.0, 4.894_961_212_823_756_29e0),
             (-0.75, 1.696_705_977_576_341_28e-1),
         ];
-        for (days, want) in cases {
-            let got = era(Epoch::<Ut1>::from_days_since_j2000(days)).radians();
-            assert!(
-                (got - want).abs() < 5e-14,
-                "ERA at day {days}: got {got:.19e} want {want:.19e}"
-            );
-        }
+        let distances = cases.map(|(days, want)| {
+            (era(Epoch::<Ut1>::from_days_since_j2000(days)).radians() - want).abs()
+        });
+        comparison_row(
+            "pyerfa",
+            "the ERA at five day fractions other than a half day",
+            &distances,
+        );
+    }
+
+    /// One `comparison | ...` row of `tools/compare.py`, in radians.
+    fn comparison_row(code: &str, quantity: &str, distances: &[f64]) {
+        let max = distances.iter().copied().fold(0.0, f64::max);
+        #[expect(clippy::cast_precision_loss, reason = "a count of a few distances")]
+        let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+        println!(
+            "comparison | {code} | not recorded | {quantity} | rad | {} | {max:.3e} | {rms:.3e}",
+            distances.len()
+        );
     }
 
     /// The reduction is total: every finite input leaves an angle in `[0, 2π)`.

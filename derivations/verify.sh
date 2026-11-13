@@ -702,6 +702,16 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima dsst_coefficients.mac" "expected 8 checks and the fixture's rows, found $holds checks"
     fi
 
+    # spacelab-fa's fundamental arguments and ERA: every coefficient is the published decimal, and the
+    # exact tables fundamental.rs and cio.rs hold the functions to are the polynomials in exact arithmetic.
+    out=$(macf fundamental_arguments.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima fundamental_arguments.mac: the 14 arguments and the ERA are the published decimals; ARGUMENTS_EXACT and ERA_EXACT are their exact values"
+    else
+        bad "maxima fundamental_arguments.mac" "expected 3 checks to hold, found $holds"
+    fi
+
     # The IERS Conventions (2010) Tables 5.3a/5.3b, which `tools/fetch-specs.sh` fetches as
     # digest-named snapshots; the pin is each file's SHA-256, so a table the IERS revised fails here.
     tab53a=../data/specs/iers-tab5.3a.6da73bfe.txt

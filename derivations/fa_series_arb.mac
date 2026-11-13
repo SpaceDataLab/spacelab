@@ -1,0 +1,47 @@
+/* The input of `fa_series_arb.c` (plans/17 Ф28.A): every coefficient fundamental_arguments.mac,
+   cio_nutation_series.mac and tdb_series.mac read, as the exact rational it is, and every 25-digit
+   literal the spacelab-fa tests hold the code to, as the source writes it.
+
+   Maxima's bigfloats carry no error bound, so the tables those files wrote are certified
+   elsewhere: the C program evaluates the same quantities in Arb ball arithmetic and requires each
+   literal to be its value correctly rounded to the 25 digits it shows. This file only reads; it
+   loads cio_nutation_series.mac and tdb_series.mac, whose checks run first.
+
+       timeout 600 maxima --very-quiet -Q -b fa_series_arb.mac | ./fa_series_arb                  */
+
+batchload("cio_nutation_series.mac")$
+q(v) := string(v)$
+line(tag, l) := print(simplode(cons(tag, map(q, l)), " "))$
+print("BEGIN")$
+line("EPOCHS", epochs)$
+for row in delaunay do line("DELAUNAY", delaunay_coefficients(row))$
+for row in planetary do line("PLANETARY", [dec(row[2]), dec(row[3])])$
+line("PA", p_a)$
+line("ERA", era_published)$
+line("ERADAYS", era_days)$
+line("XP", xyp[1])$
+line("YP", xyp[2])$
+for f in xy_freqs do for term in f[2] do line("XYT", append(f[1], term))$
+line("SPOLY", table(cio_tables, "S_POLY"))$
+for term in s_terms do line("ST", append(term[1], [term[2], term[3], term[4]]))$
+line("LSELP", table(nut_tables, "LS_ELP"))$
+line("LSD", table(nut_tables, "LS_D"))$
+for term in ls_terms do line("LS", append(term[1], term[2]))$
+for name in ["PL_AL", "PL_AF", "PL_AD", "PL_AOM", "PL_ANE"] do line(name, table(nut_tables, name))$
+for term in pl_terms do line("PL", append(term[1], term[2]))$
+line("K06", [k_obl, k_j2])$
+lits(tag, path, name) := print(simplode(cons(tag, rust_table(path, name)), " "))$
+lits("LIT_ARGUMENTS", fund, "ARGUMENTS_EXACT")$
+lits("LIT_ERA", cio_rs, "ERA_EXACT")$
+lits("LIT_XY", cio_rs, "XY_EXACT")$
+lits("LIT_S", cio_rs, "S_EXACT")$
+lits("LIT_NUT", nutation_rs, "NUT_EXACT")$
+/* tdb_series.mac redefines table(), so it loads after everything above has been printed */
+batchload("tdb_series.mac")$
+line("TDBEND", group_end)$
+for r in fairhead do line("FH", r)$
+for r in jpl do line("JPL", r)$
+line("JPLT2", [jpl_t2])$
+line("TDBT", map(lambda([d], nearest_double(d / millennium)), tdb_days))$
+lits("LIT_TDB", tdb_rs, "TDB_EXACT")$
+print("END")$

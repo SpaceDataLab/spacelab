@@ -731,6 +731,23 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima tdb_series.mac" "expected 2 checks to hold, found $holds"
     fi
 
+    # The certificate for the spacelab-fa tables the three files above wrote from unbounded bigfloats:
+    # Arb balls decide that each of the 140 literals is its value rounded to its own digits.
+    if have cc && pkg-config --exists flint 2>/dev/null; then
+        tmp=$(mktemp -d)
+        # shellcheck disable=SC2046 # pkg-config prints separate flags
+        if cc -O2 fa_series_arb.c -o "$tmp/arb" $(pkg-config --cflags --libs flint) 2>"$tmp/cc.log" \
+            && cert=$(macf fa_series_arb.mac | timeout 120 "$tmp/arb" 2>&1) \
+            && printf '%s' "$cert" | grep -q '^CERTIFIED 140 literals'; then
+            ok "arb fa_series_arb.c: $cert"
+        else
+            bad "arb fa_series_arb.c" "$(cat "$tmp/cc.log")${cert:-}"
+        fi
+        rm -rf "$tmp"
+    else
+        skip "arb fa_series_arb.c" "a C compiler and FLINT"
+    fi
+
     # The IERS Conventions (2010) Tables 5.3a/5.3b, which `tools/fetch-specs.sh` fetches as
     # digest-named snapshots; the pin is each file's SHA-256, so a table the IERS revised fails here.
     tab53a=../data/specs/iers-tab5.3a.6da73bfe.txt

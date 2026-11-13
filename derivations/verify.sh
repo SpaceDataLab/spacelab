@@ -1466,10 +1466,11 @@ if have maxima; then
     if have cc && pkg-config --exists flint 2>/dev/null; then
         tmp=$(mktemp -d)
         cert=""
+        literals=746
         # shellcheck disable=SC2046 # pkg-config prints separate flags
         if cc -O2 arb_balls.c -o "$tmp/arb" $(pkg-config --cflags --libs flint) 2>"$tmp/cc.log" \
             && cert=$(timeout 300 "$tmp/arb" < "$ARB_IN" 2>&1) \
-            && printf '%s' "$cert" | grep -q '^CERTIFIED 762 literals'; then
+            && printf '%s' "$cert" | grep -q "^CERTIFIED $literals literals, 92 doubles;"; then
             ok "arb arb_balls.c: $cert"
         else
             bad "arb arb_balls.c" "$(cat "$tmp/cc.log")${cert}"

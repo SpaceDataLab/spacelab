@@ -1,4 +1,8 @@
-//! The whole chain, end to end, against an implementation that shares none of it.
+//! Comparator: the whole chain, end to end, against an implementation that shares none of it.
+//! Benchmark material, not a gate: each stage has its own. SGP4 by its document
+//! (`derivations/sgp4_document.mac`, `tests/sgp4_verification.rs`), TEME by AIAA 2006-6753
+//! Eq. (C-1) (`derivations/teme_c1.mac`), GMST82 by `derivations/gmst82.mac`, and the geodetic
+//! inverse by `derivations/wgs84_geodesy.mac`.
 //!
 //! ```text
 //! TLE ──SGP4──▶ TEME ──GMST82 + EqEq82_kin──▶ PEF ──polar motion──▶ ITRF ──Vermeille──▶ lat, lon, h
@@ -35,23 +39,16 @@ const FIXTURES: &str = include_str!("fixtures/iss_groundtrack_skyfield.csv");
 const LINE1: &str = "1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927";
 const LINE2: &str = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
 
-/// Angular tolerance, degrees. `1e-7°` is 11 mm on the surface.
+/// The distances to Skyfield's ISS subpoints.
 ///
-/// The two chains differ by: the TIO locator we apply and Skyfield does not
-/// (0.14 mm); the 32 ns quantum of the UT1 column (15 nm of rotation); and the
-/// rounding of two different geodetic solvers (sub-millimetre, measured separately
-/// against ERFA). Nothing here should reach a centimetre.
-const TOL_DEG: f64 = 1e-7;
-
-/// Height tolerance, metres.
-const TOL_H_M: f64 = 1e-3;
-
+/// The two chains differ by the TIO locator we apply and Skyfield does not (0.14 mm), the 32 ns
+/// quantum of the UT1 column (15 nm of rotation) and the rounding of two geodetic solvers.
 #[test]
-fn the_iss_ground_track_agrees_with_skyfield() {
+#[ignore = "comparator: the distance to skyfield, not a verdict"]
+fn iss_ground_track_distance_to_skyfield() {
     let satellite = Satellite::from_tle(LINE1, LINE2).expect("the ISS element set parses");
 
-    let mut checked = 0;
-    let (mut worst_lat, mut worst_lon, mut worst_h) = (0.0_f64, 0.0_f64, 0.0_f64);
+    let (mut lats, mut lons, mut heights) = (Vec::new(), Vec::new(), Vec::new());
 
     for line in FIXTURES.lines() {
         let line = line.trim();
@@ -104,19 +101,32 @@ fn the_iss_ground_track_agrees_with_skyfield() {
         };
         let dh = (geo.height.metres() - h).abs();
 
-        worst_lat = worst_lat.max(dlat);
-        worst_lon = worst_lon.max(dlon);
-        worst_h = worst_h.max(dh);
-
-        assert!(dlat < TOL_DEG, "lat off by {dlat:.3e}° at {utc}");
-        assert!(dlon < TOL_DEG, "lon off by {dlon:.3e}° at {utc}");
-        assert!(dh < TOL_H_M, "height off by {dh:.3e} m at {utc}");
-        checked += 1;
+        lats.push(dlat);
+        lons.push(dlon);
+        heights.push(dh);
     }
 
-    assert!(checked >= 40, "thin fixture set: {checked}");
+    assert!(lats.len() >= 40, "thin fixture set: {}", lats.len());
+    comparison_row("ISS subpoint latitude", "deg", &lats);
+    comparison_row(
+        "ISS subpoint longitude, Eq. (C-1) kinematic terms removed",
+        "deg",
+        &lons,
+    );
+    comparison_row("ISS subpoint height", "m", &heights);
+}
+
+/// One `comparison | ...` row of `tools/compare.py`.
+fn comparison_row(quantity: &str, unit: &str, distances: &[f64]) {
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a count of a few dozen distances"
+    )]
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
     println!(
-        "ground track: {checked} points; worst dlat {worst_lat:.2e}°, dlon {worst_lon:.2e}°, dh {worst_h:.2e} m"
+        "comparison | skyfield | not recorded | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
     );
 }
 

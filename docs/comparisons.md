@@ -27,7 +27,12 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | Brouwer-Lyddane mean (i, w, raan, M), e = 0.3 | rad | 4 | 5.928e-04 | 4.096e-04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
 | Orekit | 13.1.7 | position, LEO, 8 states over 1.75 h | m | 8 | 3.144e+01 | 2.067e+01 | `crates/spacelab-elements/src/eckstein_hechler.rs::reference_distance_to_orekit` |
 | Orekit | 13.1.7 | velocity, LEO, 8 states over 1.75 h | m/s | 8 | 3.256e-02 | 3.246e-02 | `crates/spacelab-elements/src/eckstein_hechler.rs::reference_distance_to_orekit` |
+| sofa | not recorded | the ERA at the t_era00 epoch | rad | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-fa/src/cio.rs::era_distance_to_sofa` |
+| pyerfa | not recorded | the ERA at five day fractions other than a half day | rad | 5 | 2.121e-14 | 9.542e-15 | `crates/spacelab-fa/src/cio.rs::era_distance_to_pyerfa_at_other_day_fractions` |
+| pyerfa | not recorded | the fourteen fundamental arguments at the SOFA epoch | rad | 14 | 0.000e+00 | 0.000e+00 | `crates/spacelab-fa/src/fundamental.rs::sofa_epoch_distance_to_pyerfa` |
+| pyerfa | not recorded | the fourteen fundamental arguments at t = -1, -0.5, 0.5, 1, 2 | rad | 70 | 0.000e+00 | 0.000e+00 | `crates/spacelab-fa/src/fundamental.rs::four_centuries_distance_to_pyerfa` |
 | pyerfa | not recorded | TAI−UTC on and around every leap second | s | 299 | 0.000e+00 | 0.000e+00 | `crates/spacelab-fa/tests/delta_at_oracle.rs::delta_at_agrees_with_pyerfa_on_every_transition` |
+| pyerfa | not recorded | GMST82 at epochs over ten millennia | rad | 45 | 3.669e-12 | 1.172e-12 | `crates/spacelab-fa/tests/gmst82_oracle.rs::gmst82_distance_to_pyerfa_across_ten_millennia` |
 | Orekit | 13.1.7 | GMST82, IERS_1996, epochs 2000-2029 outside leap seconds | rad | 10 | 3.868e-12 | 1.797e-12 | `crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_distance_to_orekit_outside_leap_seconds` |
 | Orekit | 13.1.7 | GMST82 inside a leap second, at the instant | rad | 2 | 1.213e-12 | 1.052e-12 | `crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_distance_to_orekit_inside_a_leap_second` |
 | Orekit | 13.1.7 | TEME to ITRF position, AIAA and ISS vectors | m | 20 | 9.865e-01 | 7.645e-01 | `crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_distance_to_orekit` |

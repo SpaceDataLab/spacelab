@@ -4,8 +4,9 @@
    The tables have their derivations; these are the constants written once or twice across the
    crates: the WGS 84 ellipsoid in seven of them, two powers of two, the conjunction width, the
    GPU kernels' SGP4 constants, SGP4's resonance window and the Mars GM of the entry model. Each
-   must be its source's value rounded to the digits it shows (`transcribed`), or the double nearest
-   it (`same_doubles`) where the text carries a double's 17 digits.
+   must be its source's value rounded to the digits it shows (`certified`, which hands the exact value
+   to the Arb pass of arb_balls.c; `transcribed` for the erfc root of (3)), or the double nearest it
+   (`same_doubles`) where the text carries a double's 17 digits.
 
    timeout 300 maxima --very-quiet -Q -b constants_readback.mac                                     */
 
@@ -30,30 +31,36 @@ gm : 3986004418 * 10^5$
 print("b =", bfloat(b), "  a^2/b^2 =", bfloat(a^2 / b^2))$
 
 wgs84_ok : [
-  transcribed([rust_scalar(src("spacelab-earth", "wgs84.rs"), "EQUATORIAL_RADIUS")], [a]),
+  certified("EQUATORIAL_RADIUS", [rust_scalar(src("spacelab-earth", "wgs84.rs"), "EQUATORIAL_RADIUS")], [a]),
   same_rationals([rust_scalar(src("spacelab-earth", "wgs84.rs"), "FLATTENING")], [f]),
-  transcribed([rust_scalar(src("spacelab-coverage", "detectors.rs"), "EARTH_EQUATORIAL_RADIUS")], [a]),
-  transcribed([rust_scalar(src("spacelab-earthvision", "image_quality.rs"), "A")], [a]),
+  certified("EARTH_EQUATORIAL_RADIUS", [rust_scalar(src("spacelab-coverage", "detectors.rs"), "EARTH_EQUATORIAL_RADIUS")],
+            [a]),
+  certified("IMAGE_QUALITY_A", [rust_scalar(src("spacelab-earthvision", "image_quality.rs"), "A")], [a]),
   same_rationals([rust_scalar(src("spacelab-earthvision", "image_quality.rs"), "F")], [f]),
-  transcribed([rust_scalar(src("spacelab-propagation", "lifetime_drivers.rs"), "WGS84_A")], [a]),
-  transcribed([rust_scalar(src("spacelab-propagation", "lifetime_drivers.rs"), "WGS84_INVERSE_F")],
-              [inverse_f]),
-  transcribed([rust_scalar(src("spacelab-sensors", "comms.rs"), "EARTH_RADIUS")], [a]),
-  transcribed(sublist(rust_literals_between(src("spacelab-sensors", "cone.rs"),
-                                            "const INVERSE_ONE_MINUS_E2", "};"), long_literal),
-              [inverse_f]),
-  transcribed(sublist(rust_literals_between(src("spacelab-sensors", "cull.rs"),
-                                            "pub const WGS84: Self = Self {", "};"), long_literal),
-              [b]),
+  certified("WGS84_A", [rust_scalar(src("spacelab-propagation", "lifetime_drivers.rs"), "WGS84_A")], [a]),
+  certified("WGS84_INVERSE_F",
+            [rust_scalar(src("spacelab-propagation", "lifetime_drivers.rs"), "WGS84_INVERSE_F")],
+            [inverse_f]),
+  certified("COMMS_EARTH_RADIUS", [rust_scalar(src("spacelab-sensors", "comms.rs"), "EARTH_RADIUS")], [a]),
+  certified("CONE_INVERSE_F",
+            sublist(rust_literals_between(src("spacelab-sensors", "cone.rs"),
+                                          "const INVERSE_ONE_MINUS_E2", "};"), long_literal),
+            [inverse_f]),
+  certified("CULL_WGS84_B",
+            sublist(rust_literals_between(src("spacelab-sensors", "cull.rs"),
+                                          "pub const WGS84: Self = Self {", "};"), long_literal),
+            [b]),
   same_doubles([rust_scalar(src("spacelab-sensors", "ellipsoid_grid.rs"), "WGS84_GAMMA")],
                [a^2 / b^2]),
-  transcribed(sublist(rust_literals_between(src("spacelab-sensors", "geoloc.rs"),
-                                            "pub const WGS84: Ellipsoid = Ellipsoid {", "};"),
-                      long_literal),
-              [a / 1000, b / 1000]),
-  transcribed(sublist(rust_literals_between(src("spacelab-astro", "edl.rs"),
-                                            "pub const EARTH: Self = Self {", "};"), long_literal),
-              [gm, a])]$
+  certified("GEOLOC_WGS84_KM",
+            sublist(rust_literals_between(src("spacelab-sensors", "geoloc.rs"),
+                                          "pub const WGS84: Ellipsoid = Ellipsoid {", "};"),
+                    long_literal),
+            [a / 1000, b / 1000]),
+  certified("EDL_EARTH",
+            sublist(rust_literals_between(src("spacelab-astro", "edl.rs"),
+                                          "pub const EARTH: Self = Self {", "};"), long_literal),
+            [gm, a])]$
 print("WGS 84 copies:", wgs84_ok)$
 must(every(identity, wgs84_ok), "(1) holds: every WGS 84 copy is the defining value or its consequence")$
 
@@ -85,10 +92,10 @@ must(transcribed([rust_scalar(src("spacelab-estimation", "conjunction_domain.rs"
 
 gpu : src("spacelab-gpu", "lib.rs")$
 re72 : 6378135 / 1000$
-must(transcribed([rust_scalar(gpu, "KE")], [60 / sqrt(re72^3 / (3986008 / 10))])
+must(certified("GPU_KE", [rust_scalar(gpu, "KE")], [60 / sqrt(re72^3 / (3986008 / 10))])
      and same_rationals([rust_scalar(gpu, "AE")], [re72])
      and same_rationals([rust_scalar(gpu, "J2")], [1082616 / 10^9])
-     and transcribed(rust_scalars(gpu, "TAU"), [2 * %pi, 2 * %pi]),
+     and certified("GPU_TAU", rust_scalars(gpu, "TAU"), [2 * %pi, 2 * %pi]),
      "(4) holds: the kernels' xke follows from WGS-72's mu and radius, AE and J2 are WGS-72's, TAU is 2 pi")$
 
 /* ---- (5) SGP4's 24-hour resonance window ----------------------------------------------------------
@@ -105,9 +112,10 @@ must(same_rationals([rust_scalar(sgp4, "SYNCHRONOUS_LO"), rust_scalar(sgp4, "SYN
 /* ---- (6) the Mars GM of the entry model -----------------------------------------------------------
    GM of the Mars system from the DE440 header (Park et al. 2021), 42828.375816 km³/s². */
 
-must(transcribed(sublist(rust_literals_between(src("spacelab-astro", "edl.rs"),
-                                               "pub const MARS: Self = Self {", "};"), long_literal),
-                 [42828375816 / 10^6 * 10^9]),
+must(certified("EDL_MARS_GM",
+               sublist(rust_literals_between(src("spacelab-astro", "edl.rs"),
+                                             "pub const MARS: Self = Self {", "};"), long_literal),
+               [42828375816 / 10^6 * 10^9]),
      "(6) holds: the entry model's Mars GM is DE440's")$
 
 print("DONE")$

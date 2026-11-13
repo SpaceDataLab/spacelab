@@ -605,6 +605,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     fi
 
     out=$(macf maneuver.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima maneuver.mac: the mass channel is the rocket equation, the RTN basis and argument of latitude their definitions, the empirical polynomial its Horner loop; the G3 goldens at 40 digits"
@@ -682,6 +683,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     fi
 
     out=$(macf binding_defaults.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 5 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima binding_defaults.mac: every default the Python and C bindings write is its source's value to the digits it shows"
@@ -690,6 +692,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     fi
 
     out=$(macf constants_readback.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 6 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima constants_readback.mac: WGS 84's copies, 2^±53, the conjunction width, the GPU SGP4 set, SGP4's resonance window and Mars's GM are their sources' values"
@@ -1412,7 +1415,7 @@ if have maxima; then
     mac_zeros gnss_combinations.mac 32 "IF, GF, wide/narrow-lane and MW combinations as exact rationals of the ICD carriers"
     mac_zeros gnss_cycle_slip.mac 13 "the slip predictor is the least-squares polynomial extrapolation"
     mac_zeros gnss_dop.mac 31 "DOP from the cofactor traces; closed forms for zenith-plus-ring geometries"
-    mac_zeros h3_definition.mac 12 "the H3 grid by its definition: an icosahedron's faces, axes on the vertices, u = (3 - sqrt 5)/2, the aperture-7 turn, 2 + 120 7^r cells, 24 cell centres"
+    mac_zeros h3_definition.mac 13 "the H3 grid by its definition: an icosahedron's faces, axes on the vertices, u = (3 - sqrt 5)/2, the aperture-7 turn, 2 + 120 7^r cells, 24 cell centres, exact and in Arb balls"
     mac_zeros gpt3_evaluation.mac 13 "GPT3 from its definition: the grid's harmonics, height reduction and bilinear cell reproduce gpt3() at 10 sites"
     mac_zeros gps_broadcast_orbit.mac 8 "the IS-GPS-200 user algorithm, its velocity and the relativistic term"
     mac_zeros glonass_pz90_motion.mac 10 "the PZ-90 equations of motion as the J2 gradient plus rotating-frame terms"

@@ -22,11 +22,13 @@
    45 digits; (9) turned and scaled by it, a coarser lattice lies on the finer one at both parities;
    (10) resolution 0 has 122 cells (4 lattice points inside each face, 30 edge midpoints, 12 vertices)
    and n(r+1) = 7 n(r) - 12 (a hexagon has 7 children, a pentagon 6), so n(r) = 2 + 120 7^r;
-   (11)-(12) the structure at 40 digits: sample points within 7 degrees of a face centre, at every
-   resolution, mapped to their cell centre; every point lies well inside its cell, and
-   crates/spacelab-grid/tests/h3_maxima.rs holds the table h3o is compared with.
+   (11)-(13) the structure at 40 digits: sample points within 7 degrees of a face centre, at every
+   resolution, mapped to their cell centre; every point lies well inside its cell; each centre,
+   rebuilt exactly on the face and lattice point the 40-digit search chose, is the 40-digit one; and
+   crates/spacelab-grid/tests/h3_maxima.rs holds the table h3o is compared with, each row its exact
+   values rounded (`certified`, decided in Arb balls by arb_balls.c).
 
-   Every check prints as `<name>: 0`, 12 of them.
+   Every check prints as `<name>: 0`, 13 of them.
 
    timeout 300 maxima --very-quiet -Q -b h3_definition.mac                                         */
 
@@ -187,9 +189,9 @@ nearest_lattice(v) := block([j0, i0, cands, d],
   cands : [],
   for i : i0 - 1 thru i0 + 2 do for j : j0 - 1 thru j0 + 2 do
     block([x : i - j/2, y : j*bfloat(sqrt(3))/2],
-      cands : endcons([sqrt((v[1] - x)^2 + (v[2] - y)^2), [x, y]], cands)),
+      cands : endcons([sqrt((v[1] - x)^2 + (v[2] - y)^2), [x, y], [i, j]], cands)),
   cands : sort(cands, lambda([a, b], a[1] < b[1])),
-  [cands[1][2], cands[2][1] - cands[1][1]])$
+  [cands[1][2], cands[2][1] - cands[1][1], cands[1][3]])$
 centre_of(L, f, res) := block([r, theta, dir],
   r : sqrt(L[1]^2 + L[2]^2),
   if is(r < 1b-30) then C[f]
@@ -199,12 +201,23 @@ centre_of(L, f, res) := block([r, theta, dir],
     theta : AZ[f][1] - theta,
     dir : cos(theta)*north_of(C[f]) + sin(theta)*east_of(C[f]),
     cos(r)*C[f] + sin(r)*dir))$
-cell_centre(lat_deg, lon_deg, res) := block([p, f, nl, c],
+/* The same centre in exact terms, on the lattice point (i, j) and the face the bigfloat search chose:
+   what the Arb pass decides. */
+centre_exact(ij, f, res) := block([x : ij[1] - ij[2]/2, y : ij[2]*sqrt(3)/2, c0 : h3_face_centre[f],
+                                   r, theta, dir],
+  if ij = [0, 0] then c0
+  else (
+    theta : h3_face_axes_az[f][1] - atan2(y, x) - (if class_iii(res) then ap7 else 0),
+    r : atan(sqrt(x^2 + y^2)*sqrt(7)^(-res)*u_exact),
+    dir : cos(theta)*north_of(c0) + sin(theta)*east_of(c0),
+    cos(r)*c0 + sin(r)*dir))$
+cell_centre(lat_deg, lon_deg, res) := block([p, f, nl, c, e],
   p : bfloat(to_vec(lat_deg*deg, lon_deg*deg)),
   f : closest_face(p),
   nl : nearest_lattice(hex2d(p, f, res)),
   c : centre_of(nl[1], f, res),
-  [asin(c[3])/deg, atan2(c[2], c[1])/deg, nl[2], f])$
+  e : centre_exact(nl[3], f, res),
+  [asin(c[3])/deg, atan2(c[2], c[1])/deg, nl[2], f, asin(e[3])*180/%pi, atan2(e[2], e[1])*180/%pi])$
 
 /* The sample: row k on face 1 + mod(7k, 20), at resolution mod(k, 16), offset 1 + mod(37k, 600)/100
    degrees from the face centre at azimuth mod(97k, 360) + 0.37, rounded to 1e-10 degrees. */
@@ -218,6 +231,17 @@ print("smallest margin to a second lattice point, in lattice units:", lmin(map(l
 print("points_inside_their_cells:",
   if every(lambda([r], is(r[2][3] > 1b-6) and is(r[2][4] = r[1][4])), rows) then 0 else 1)$
 
+exact_gap : block([fpprec : 60],
+  lmax(map(lambda([r], max(abs(bfloat(r[2][5]) - r[2][1]), abs(bfloat(r[2][6]) - r[2][2]))), rows)))$
+print("exact centres against the 40-digit ones, largest gap in degrees:", exact_gap)$
+print("exact_centres_are_the_bigfloat:", if is(exact_gap < 4b-38) then 0 else 1)$
+
 literals : rust_table(table_path, "H3_MAXIMA")$
 want : apply(append, map(lambda([r], [r[1][1], r[1][2], r[1][3], r[2][1], r[2][2]]), rows))$
-print("table_is_the_structure:", if transcribed(literals, want) then 0 else 1)$
+exact_row(r) := [r[1][1], r[1][2], r[1][3], r[2][5], r[2][6]]$
+print("table_is_the_structure:",
+  if transcribed(literals, want) and is(length(literals) = 5*length(rows))
+     and every(lambda([k], certified(sconcat("H3_MAXIMA_row", k), makelist(literals[5*k + i], i, 1, 5),
+                                     exact_row(rows[k + 1]))),
+               makelist(k, k, 0, length(rows) - 1))
+  then 0 else 1)$

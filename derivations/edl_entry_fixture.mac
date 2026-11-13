@@ -32,28 +32,29 @@ rhs(s, cb) := block([v : s[1], gam : s[2], r : s[3], g, rho, d_m, l_m],
   rho : rho0 * exp(-(r - radius) / scale_height),
   d_m : rho * v^2 / (2 * beta),
   l_m : lift_to_drag * d_m * cb,
-  bfloat([-d_m - g * sin(gam), (l_m - (g - v^2 / r) * cos(gam)) / v, v * sin(gam),
-          v * cos(gam) * radius / r]))$
+  [-d_m - g * sin(gam), (l_m - (g - v^2 / r) * cos(gam)) / v, v * sin(gam),
+   v * cos(gam) * radius / r])$
 
 k1 : rhs(state, 1)$
 k2 : rhs(state + dt / 2 * k1, 1)$
 k3 : rhs(state + dt / 2 * k2, 1)$
 k4 : rhs(state + dt * k3, 1)$
-rk4_step : bfloat(state + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4))$
-drag_g : bfloat(rho0 * exp(-(state[3] - radius) / scale_height) * state[1]^2 / (2 * beta) / g_earth)$
+rk4_step : state + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)$
+drag_g : rho0 * exp(-(state[3] - radius) / scale_height) * state[1]^2 / (2 * beta) / g_earth$
 
 fpprintprec : 28$
-print("DERIVATIVE", k1)$
-print("DERIVATIVE_BANKED", rhs(state, cos_bank))$
-print("RK4_STEP", rk4_step)$
-print("DRAG_G", drag_g)$
+print("DERIVATIVE", bfloat(k1))$
+print("DERIVATIVE_BANKED", bfloat(rhs(state, cos_bank)))$
+print("RK4_STEP", bfloat(rk4_step))$
+print("DRAG_G", bfloat(drag_g))$
 
-/* The fixtures as edl.rs writes them, each its value here rounded to the digits it shows. */
+/* The fixtures as edl.rs writes them, each its value here rounded to the digits it shows. The
+   values stay exact through the four RK4 stages, so the Arb pass decides each (plans/17 Ф28.A). */
 edl : "../crates/spacelab-astro/src/edl.rs"$
-if transcribed(rust_table(edl, "DERIVATIVE"), k1)
-   and transcribed(rust_table(edl, "DERIVATIVE_BANKED"), rhs(state, cos_bank))
-   and transcribed(rust_table(edl, "RK4_STEP"), rk4_step)
-   and transcribed([rust_scalar(edl, "DRAG_G")], [drag_g])
+if certified("DERIVATIVE", rust_table(edl, "DERIVATIVE"), k1)
+   and certified("DERIVATIVE_BANKED", rust_table(edl, "DERIVATIVE_BANKED"), rhs(state, cos_bank))
+   and certified("RK4_STEP", rust_table(edl, "RK4_STEP"), rk4_step)
+   and certified("DRAG_G", [rust_scalar(edl, "DRAG_G")], [drag_g])
 then print("(1) holds: edl.rs writes these fixtures")
 else error("FAILED: edl.rs's fixtures are not these values")$
 print("DONE")$

@@ -696,6 +696,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     fi
 
     out=$(macf edl_entry_fixture.mac)
+    arb_keep "$out"
     if printf '%s' "$out" | grep -q '^(1) holds:' && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima edl_entry_fixture.mac: edl.rs's entry-equation fixtures are the 60-digit evaluation at the inputs' doubles"
     else
@@ -1459,7 +1460,7 @@ if have maxima; then
         # shellcheck disable=SC2046 # pkg-config prints separate flags
         if cc -O2 arb_balls.c -o "$tmp/arb" $(pkg-config --cflags --libs flint) 2>"$tmp/cc.log" \
             && cert=$(timeout 300 "$tmp/arb" < "$ARB_IN" 2>&1) \
-            && printf '%s' "$cert" | grep -q '^CERTIFIED 253 literals'; then
+            && printf '%s' "$cert" | grep -q '^CERTIFIED 266 literals'; then
             ok "arb arb_balls.c: $cert"
         else
             bad "arb arb_balls.c" "$(cat "$tmp/cc.log")${cert}"

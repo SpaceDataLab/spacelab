@@ -50,9 +50,10 @@ must(is(gap = 0) and is(worst < 12b-20)
 
 /* ---- (3) the goldens ------------------------------------------------------------------------------- */
 lods : map(rust_rational, rust_table(oracle, "LOD_SECONDS"))$
-w : bfloat(map(lambda([l], shipped*(1 - l/86400)), lods))$
+w_exact : map(lambda([l], shipped*(1 - l/86400)), lods)$
+w : bfloat(w_exact)$
 print("ROTATION_RATE_MAXIMA", w)$
 must(is(lods = [0, 18/10000, -5/10000, 35/10000])
-     and transcribed(rust_table(oracle, "ROTATION_RATE_MAXIMA"), w),
+     and certified("ROTATION_RATE_MAXIMA", rust_table(oracle, "ROTATION_RATE_MAXIMA"), w_exact),
      "(3) holds: the Rust goldens are the shipped double times 1 - LOD/86400 at four LODs, to every digit shown")$
 print("DONE")$

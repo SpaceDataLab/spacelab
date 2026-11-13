@@ -11403,20 +11403,6 @@ orderings miss at first order and the reversed product at second. pyerfa's pipel
 NEPTUNE's reduction and both NEPTUNE arcs, and Skyfield's ISS ground track are parked: the
 geopotential, third-body, Dormand–Prince, lunar-frame and SGP4-VER gates decide their pieces. The
 celestial-pole offset test is tagged (S2).
-The 266 literals of `ARGUMENTS_EXACT`, `ERA_EXACT`, `XY_EXACT`, `S_EXACT`, `NUT_EXACT`, `TDB_EXACT`,
-`POM_EXACT` and `CHAIN_EXACT` came from 40-digit bigfloats, which bound nothing (Ф28.A).
-`derivations/fa_series_arb.mac` prints every coefficient and input those files read as an exact
-rational, and `fa_series_arb.c` evaluates the same quantities in Arb at 320 bits: each literal must
-lie within half a unit in its last digit of its ball, and a literal written `0.0` must be an exact
-zero. All 266 are decided; the closest lies at 0.997 of that half unit. A changed last digit, or a
-term missing from the input, fails the run.
-The same claim for any derivation is `certified(name, literals, exact)` in `rust_literals.mac`: it
-decides each literal against a bigfloat as `transcribed` does, and prints the unevaluated exact
-value in reverse Polish notation; `derivations/arb_balls.c` evaluates every such line verify.sh
-collects in Arb at 256 bits, 1 024 or 4 096 where that does not decide it, and fails on any literal
-that is not its value correctly rounded. `DIURNAL_EXACT`, `DCT_FORWARD_EXACT`, `ZENITH_EXACT`,
-HARDISP's `ARGUMENTS_EXACT` and spline tables and `DEGREE_70_EXACT` go through it: 42 literals, the
-closest at 0.981 of a half unit.
 Batch 12g (2026-11-13, Ф19.G) takes seven of nine. `derivations/geopotential_degree70.mac` writes
 each degree-70 XGM2019e term as an exact rational times `N̄ₙₘ/r` — the explicit-sum Legendre
 polynomial and `(x + iy)ᵐ`, no recursion — and the acceleration at two points (G3: 4.4e-15, bound
@@ -11444,6 +11430,21 @@ from a DISORT quadrature cosine, where its `T↓` is 1.9e-4 out. DISORT, libRadt
 RadCalNet's MODTRAN TOA become comparator rows, as does SciPy's `J₁`, which
 `ice_geometric_optics.mac` already decided (G2). The assumed-atmosphere test never read DISORT's
 fixture: the fixture rule reached it through a shared word, and it leaves with that fixture.
+The 266 literals of `ARGUMENTS_EXACT`, `ERA_EXACT`, `XY_EXACT`, `S_EXACT`, `NUT_EXACT`, `TDB_EXACT`,
+`POM_EXACT` and `CHAIN_EXACT` came from 40-digit bigfloats, which bound nothing (Ф28.A).
+`derivations/fa_series_arb.mac` prints every coefficient and input those files read as an exact
+rational, and `fa_series_arb.c` evaluates the same quantities in Arb at 320 bits: each literal must
+lie within half a unit in its last digit of its ball, and a literal written `0.0` must be an exact
+zero. All 266 are decided; the closest lies at 0.997 of that half unit. A changed last digit, or a
+term missing from the input, fails the run.
+The same claim for any derivation is `certified(name, literals, exact)` in `rust_literals.mac`: it
+decides each literal against a bigfloat as `transcribed` does, and prints the unevaluated exact
+value in reverse Polish notation; `derivations/arb_balls.c` evaluates every such line verify.sh
+collects in Arb at 256 bits, 1 024 or 4 096 where that does not decide it, and fails on any literal
+that is not its value correctly rounded. Thirteen derivations go through it — the diurnal
+aberration, the forward DCT, the zenith delay, HARDISP, the degree-70 field, the Adams and Radau IIA
+tableaux, the Earth's rotation rate, both MODIP grids, the VMF grid, the IERS relativity lines and
+the box-wing lift: 129 literals, the closest at 0.981 of a half unit.
 
 **Today: 2
 comparator-decided tests of 3 735** — name 2, file 0, fixture 0, doc 0; none of them Orekit's,

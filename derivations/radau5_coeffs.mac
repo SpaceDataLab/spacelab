@@ -60,6 +60,6 @@ print("--- b ---");       for j:1 thru 3 do print(bfloat(b[j]), ",");
 load("rust_literals.mac")$
 fpprec : 60$
 src : "../crates/spacelab-propagation/src/radau.rs"$
-print("rust C is c rounded to its digits:", transcribed(rust_table(src, "C"), c));
-print("rust A is A rounded to its digits:", transcribed(rust_table(src, "A"), flatten(args(A))));
-print("rust B is b rounded to its digits:", transcribed(rust_table(src, "B"), b));
+print("rust C is c rounded to its digits:", certified("C", rust_table(src, "C"), c));
+print("rust A is A rounded to its digits:", certified("A", rust_table(src, "A"), flatten(args(A))));
+print("rust B is b rounded to its digits:", certified("B", rust_table(src, "B"), b));

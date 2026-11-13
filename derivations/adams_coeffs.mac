@@ -17,7 +17,7 @@ print("AM8 leading (=5257/17280?): ", am[1] - 5257/17280)$
 load("rust_literals.mac")$
 fpprec : 60$
 src : "../crates/spacelab-propagation/src/abm.rs"$
-print("rust AB8 is ab rounded to its digits:", transcribed(rust_table(src, "AB8"), ab))$
-print("rust AM8 is am rounded to its digits:", transcribed(rust_table(src, "AM8"), am))$
+print("rust AB8 is ab rounded to its digits:", certified("AB8", rust_table(src, "AB8"), ab))$
+print("rust AM8 is am rounded to its digits:", certified("AM8", rust_table(src, "AM8"), am))$
 print("rust AB8 is the nearest doubles to ab:", same_doubles(rust_table(src, "AB8"), ab))$
 print("rust AM8 is the nearest doubles to am:", same_doubles(rust_table(src, "AM8"), am))$

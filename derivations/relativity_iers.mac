@@ -176,15 +176,16 @@ py_exact : bfloat(append(flatten(py), py_tilted))$
 py_worst : lmax(map(lambda([g, x], abs(g - x)/abs(x)), py_goldens, py_exact))$
 print("relativity.py's goldens against eq (10.12) at 40 digits:", py_worst, "worst relative")$
 
-oracle : bfloat(eq1012(num_table("ORACLE_R"), num_table("ORACLE_V"), mu_e, [0, 0, J_E],
+oracle_exact : eq1012(num_table("ORACLE_R"), num_table("ORACLE_V"), mu_e, [0, 0, J_E],
                        rust_rational(rust_scalar(src, "ORACLE_MU_SUN")),
-                       num_table("EARTH_FROM_SUN_R"), num_table("EARTH_FROM_SUN_V")))$
+                       num_table("EARTH_FROM_SUN_R"), num_table("EARTH_FROM_SUN_V"))$
+oracle : bfloat(oracle_exact)$
 print("SCHWARZSCHILD_MAXIMA", oracle[1])$
 print("LENSE_THIRRING_MAXIMA", oracle[2])$
 print("DE_SITTER_MAXIMA", oracle[3])$
 must(is(length(j_tilted) = 3) and is(length(py_goldens) = 12) and is(py_worst < 2b-15)
-     and transcribed(rust_table(src, "SCHWARZSCHILD_MAXIMA"), oracle[1])
-     and transcribed(rust_table(src, "LENSE_THIRRING_MAXIMA"), oracle[2])
-     and transcribed(rust_table(src, "DE_SITTER_MAXIMA"), oracle[3]),
+     and certified("SCHWARZSCHILD_MAXIMA", rust_table(src, "SCHWARZSCHILD_MAXIMA"), oracle_exact[1])
+     and certified("LENSE_THIRRING_MAXIMA", rust_table(src, "LENSE_THIRRING_MAXIMA"), oracle_exact[2])
+     and certified("DE_SITTER_MAXIMA", rust_table(src, "DE_SITTER_MAXIMA"), oracle_exact[3]),
      "(6) holds: relativity.py's twelve goldens are eq (10.12) to 2e-15, and the Rust goldens are its three lines at the oracle's geometry to every digit shown")$
 print("DONE")$

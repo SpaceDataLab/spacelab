@@ -93,6 +93,6 @@ bicubic(lat, lon) := block([l : lon - 360*floor((lon + 180)/360), x, y, i, j, la
 modip : map(lambda([p], bicubic(p[1], p[2])), points)$
 print("MODIP_GALILEO_MAXIMA", bfloat(modip))$
 must(is(length(modip) = 16)
-     and transcribed(rust_table(src, "MODIP_GALILEO_MAXIMA"), bfloat(modip)),
+     and certified("MODIP_GALILEO_MAXIMA", rust_table(src, "MODIP_GALILEO_MAXIMA"), modip),
      "(4) holds: the Rust goldens are the bicubic through the sixteen nearest samples at the sixteen points, to every digit shown")$
 print("DONE")$

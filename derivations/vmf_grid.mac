@@ -80,7 +80,7 @@ between : map(lambda([v00, v01, v10, v11], blend(cell_t, cell_u, v00, v01, v10, 
 print("NODE_MAXIMA", bfloat(node))$
 print("BLEND_MAXIMA", bfloat(between))$
 must(is(node = [117002/10^8, 45484/10^8, 23203/10^4, 191/10^4]) and is([cell_t, cell_u] = [3/4, 3/8])
-     and transcribed(rust_table(src, "NODE_MAXIMA"), bfloat(node))
-     and transcribed(rust_table(src, "BLEND_MAXIMA"), bfloat(between)),
+     and certified("NODE_MAXIMA", rust_table(src, "NODE_MAXIMA"), node)
+     and certified("BLEND_MAXIMA", rust_table(src, "BLEND_MAXIMA"), between),
      "(3) holds: the Rust goldens are the file's row at (77.5, 2.5) and the bilinear blend round (76.25, 4.375), to every digit shown")$
 print("DONE")$

@@ -123,12 +123,12 @@ box_drag(lift_power) := block([vb, V2, wb, acc : [0, 0, 0], dd, ff, coeff],
     if is(bfloat(dd) < 0) then (
       ff : coeff*(22/10)*fc[2]*dd,
       acc : acc + (1 - 1/4)*(-ff)*wb + 2*(1/4)*ff*(-dd)^lift_power*fc[1])),
-  bfloat(list_matrix_entries(transpose(M) . transpose(matrix(acc/1000)))))$
-print("lift_tilt_drag:", if transcribed(rust_table(src, "LIFT_DRAG_MAXIMA"), box_drag(1)) then 0 else 1)$
+  list_matrix_entries(transpose(M) . transpose(matrix(acc/1000))))$
+print("lift_tilt_drag:", if certified("LIFT_DRAG_MAXIMA", rust_table(src, "LIFT_DRAG_MAXIMA"), box_drag(1)) then 0 else 1)$
 /* Orekit 13.1.7's printed drag for this geometry (tools/orekit-oracle, orekit_box_wing.csv), the
    vector the golden test held before F89. */
 orekit_printed : [1.05063598970169920b-06, 1.04319104803891920b-07, -1.05929245207931560b-07]$
-block([orekit : orekit_printed, ours : box_drag(0), worst],
+block([orekit : orekit_printed, ours : bfloat(box_drag(0)), worst],
   worst : lmax(map(lambda([x, y], abs(x - y)/abs(y)), ours, orekit)),
   print("Orekit's lift_tilt vector against its own single-|d| form, worst relative:", worst),
   print("orekit_vector_is_its_formula:", if worst < 10^-12 then 0 else 1))$

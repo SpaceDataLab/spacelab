@@ -119,6 +119,7 @@ if have maxima; then
     fi
 
     out=$(timeout 120 maxima --very-quiet -b adams_coeffs.mac 2>&1)
+    arb_keep "$out"
     if printf '%s' "$out" | grep -qE 'AB8 sum .*: +1' && printf '%s' "$out" | grep -qE 'AM8 sum .*: +1' && [ "$(printf '%s' "$out" | grep -cE 'leading.*: +0')" -ge 2 ] && [ "$(printf '%s' "$out" | grep -cE '^rust (AB8|AM8) is .*: true')" -eq 4 ]; then
         ok "maxima adams_coeffs.mac: AB8/AM8 sum to 1, the leading coefficients derive correctly, and abm.rs holds every coefficient rounded to its digits"
     else
@@ -145,6 +146,7 @@ if have maxima; then
     fi
 
     out=$(timeout 120 maxima --very-quiet -b radau5_coeffs.mac 2>&1)
+    arb_keep "$out"
     bcond=$(printf '%s' "$out" | grep -cE 'B\( [1-5] \) residual .*: +0')
     stiff=$(printf '%s' "$out" | grep -cE 'stiff-accurate b [1-3].*: +0')
     if [ "$bcond" -ge 5 ] && [ "$stiff" -ge 3 ] && [ "$(printf '%s' "$out" | grep -cE 'row-sum a.*: +0')" -ge 3 ] && [ "$(printf '%s' "$out" | grep -cE '^rust (C|A|B) is .*: true')" -eq 3 ]; then
@@ -592,6 +594,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     fi
 
     out=$(macf relativity_iers.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 6 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima relativity_iers.mac: the forces are eq (10.12)'s three lines; averaged they give Einstein's perigee advance, the Lense-Thirring rates, the geodesic precession and the chapter's 0.8, 180 and 19 mas/y; the G3 goldens at 40 digits"
@@ -616,6 +619,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     fi
 
     out=$(macf vmf_grid.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima vmf_grid.mac: the shipped weights are the bilinear interpolant, the fixture's rows run in the order the reshape undoes; the G3 goldens are the file's own rows"
@@ -624,6 +628,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     fi
 
     out=$(macf modip_grid.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima modip_grid.mac: the third-order interpolation is the cubic through its four samples, the Galileo file's wrap rows and columns are the sphere's, the G3 goldens the bicubic through the sixteen nearest samples"
@@ -632,6 +637,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     fi
 
     out=$(macf earth_rotation_rate.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima earth_rotation_rate.mac: EARTH_ROTATION_RATE is the nearest double to the ERA's rate, slowed by 1 - LOD/86400 per SI second; the G3 goldens at 40 digits"
@@ -1452,7 +1458,7 @@ if have maxima; then
         # shellcheck disable=SC2046 # pkg-config prints separate flags
         if cc -O2 arb_balls.c -o "$tmp/arb" $(pkg-config --cflags --libs flint) 2>"$tmp/cc.log" \
             && cert=$(timeout 300 "$tmp/arb" < "$ARB_IN" 2>&1) \
-            && printf '%s' "$cert" | grep -q '^CERTIFIED 42 literals'; then
+            && printf '%s' "$cert" | grep -q '^CERTIFIED 129 literals'; then
             ok "arb arb_balls.c: $cert"
         else
             bad "arb arb_balls.c" "$(cat "$tmp/cc.log")${cert}"

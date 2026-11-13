@@ -1,14 +1,14 @@
-//! GCRF→ITRF (IAU 2006/2000A CIO) validated element-wise against pyerfa.
+//! GCRF→ITRF (IAU 2006/2000A CIO) against pyerfa, element-wise: a comparator.
 //!
-//! The reference matrices in the fixture come from the identical pipeline —
-//! `xy06` series, `s06`, `c2ixys`, `era00`, `sp00`, `pom00`, `c2tcio` — evaluated by
-//! pyerfa (ERFA, BSD-3-Clause). See `derivations/cio_frame.py`. Because both sides are
-//! the same CIO algorithm (not Vallado-equinox vs IERS-CIO), this asserts a tight
-//! numeric tolerance, not a convention floor.
+//! The gate is `the_transform_is_the_iers_chain_at_six_epochs` in `src/cio.rs`, which holds the
+//! transform to the IERS (2010) chain composed in 40-digit arithmetic by
+//! `derivations/gcrf_itrf_chain.mac`. The reference matrices in the fixture here come from the
+//! identical pipeline — `xy06` series, `s06`, `c2ixys`, `era00`, `sp00`, `pom00`, `c2tcio` —
+//! evaluated by pyerfa (ERFA, BSD-3-Clause), see `derivations/cio_frame.py`; their distance is
+//! recorded, not judged.
 //!
-//! Four of the nine fixture epochs carry celestial-pole offsets `dX`, `dY`. Without them
-//! the offsets reach the transform only as `+0`, where a sign error, a swapped pair and a
-//! dropped term all produce the same matrix; with them the fixture resolves each.
+//! Four of the nine fixture epochs carry celestial-pole offsets `dX`, `dY`, as five of the gate's
+//! six epochs do.
 //!
 //! LOD does not enter the ERFA pipeline at all — ERFA has no Earth-rotation rate — so the
 //! angular velocity is decided by `derivations/earth_rotation_rate.mac` instead.
@@ -47,12 +47,11 @@ fn max_element_gap(a: &[[f64; 3]; 3], b: &[f64; 9]) -> f64 {
     d
 }
 
+/// The distance to pyerfa's CIO pipeline over the nine fixture epochs.
 #[test]
-fn gcrf_to_itrf_matches_pyerfa_cio_pipeline() {
-    let mut max_diff = 0.0_f64;
-    let mut count = 0;
-    let mut with_offsets = 0;
-
+#[ignore = "comparator: the distance to pyerfa, not a verdict"]
+fn gcrf_to_itrf_distance_to_pyerfa_cio_pipeline() {
+    let mut distances = Vec::new();
     for line in FIXTURE.lines() {
         if line.starts_with('#') || line.trim().is_empty() {
             continue;
@@ -60,58 +59,37 @@ fn gcrf_to_itrf_matches_pyerfa_cio_pipeline() {
         let v: Vec<f64> = line.split(',').map(|x| x.trim().parse().unwrap()).collect();
         assert_eq!(v.len(), 15, "row must be 6 params + 9 matrix elements");
 
-        let tt = Epoch::<Tt>::from_days_since_j2000(v[0]);
-        let ut1 = Epoch::<Ut1>::from_days_since_j2000(v[1]);
         let xf = gcrf_to_itrf(
-            ut1,
-            tt,
+            Epoch::<Ut1>::from_days_since_j2000(v[1]),
+            Epoch::<Tt>::from_days_since_j2000(v[0]),
             Angle::from_arcseconds(v[2]),
             Angle::from_arcseconds(v[3]),
             mas(v[4]),
             mas(v[5]),
             0.0,
         );
-
         let mut reference = [0.0; 9];
         reference.copy_from_slice(&v[6..15]);
-        max_diff = nan_max(
-            max_diff,
-            max_element_gap(&xf.rotation.matrix().rows, &reference),
-        );
-
-        // The angular velocity is the pole-axis spin rotated into GCRF: a pure
-        // rotation of (0,0,ω), so its magnitude is exactly the nominal rate at LOD 0.
-        assert!(
-            (xf.omega.norm() - EARTH_ROTATION_RATE).abs() < 1e-18,
-            "|ω| = {} drifted from the nominal rate",
-            xf.omega.norm()
-        );
-        if v[4] != 0.0 || v[5] != 0.0 {
-            with_offsets += 1;
-        }
-        count += 1;
+        distances.push(max_element_gap(&xf.rotation.matrix().rows, &reference));
     }
-
-    assert_eq!(count, 9, "expected 9 fixture epochs");
-    assert!(
-        with_offsets >= 4,
-        "only {with_offsets} epochs carry celestial-pole offsets; dX/dY would go untested"
-    );
-    assert!(
-        max_diff < 5e-13,
-        "max GCRF→ITRF element diff {max_diff:.3e} exceeds 5e-13 (was ~4.9e-14)"
-    );
-    eprintln!(
-        "gcrf_to_itrf vs pyerfa CIO pipeline: max element diff {max_diff:.3e} over {count} epochs"
+    assert_eq!(distances.len(), 9, "expected 9 fixture epochs");
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    #[expect(clippy::cast_precision_loss, reason = "nine distances")]
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+    println!(
+        "comparison | pyerfa | not recorded | the GCRF→ITRF matrix, worst entry | 1 | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
     );
 }
 
+/// Each celestial-pole offset moves the matrix by its own size, alone. (S2)
+///
+/// A rotation of the pole through `δ` moves the matrix by `δ` to first order. The chain gate in
+/// `src/cio.rs` resolves `dX` and `dY` because they move the matrix by more than its 3e-13 bound;
+/// this measures that they do, and that each moves it *alone* — a transform that applied `dX`
+/// twice and dropped `dY` would still reproduce a row where the two happen to be equal and opposite.
 #[test]
 fn each_celestial_pole_offset_moves_the_matrix_by_its_own_size() {
-    // The fixture above resolves dX and dY only because they move the matrix by more than its
-    // 5e-13 agreement floor. Measure that they do, and that each moves it *alone* — a transform
-    // that applied dX twice and dropped dY would still reproduce a fixture row where the two
-    // happen to be equal and opposite.
     let tt = Epoch::<Tt>::from_days_since_j2000(8766.0);
     let ut1 = Epoch::<Ut1>::from_days_since_j2000(8765.6);
     let zero = Angle::from_radians(0.0);

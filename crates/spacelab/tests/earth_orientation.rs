@@ -16,7 +16,6 @@ use spacelab_eop::{EopQuality, EopSeries};
 use spacelab_fa::{LeapError, delta_at, utc_to_tai};
 use spacelab_frames::teme_to_itrf;
 use spacelab_sgp4::Satellite;
-use spacelab_testkit::nan_max;
 
 const EXCERPT: &str = include_str!("../../spacelab-eop/tests/fixtures/finals2000A_excerpt.txt");
 const TRACK: &str = include_str!("fixtures/iss_groundtrack_eop_skyfield.csv");
@@ -108,17 +107,20 @@ fn we_do_not_invent_an_orientation_outside_the_series() {
 }
 
 /// The seam, end to end, against Skyfield fed from the same measurements.
+///
+/// The pieces are decided by their own gates: SGP4 by SGP4-VER (G5), GMST82 by
+/// `derivations/gmst82.mac`, polar motion by `derivations/gcrf_itrf_chain.mac` (7), the EOP
+/// reading by `the_time_scales_are_offsets_on_the_naive_coordinate` above. Needs the snapshot
+/// `tools/fetch-eop.sh` writes.
 #[test]
-#[ignore = "needs a snapshot from tools/fetch-eop.sh"]
-fn the_iss_ground_track_with_real_earth_orientation() {
+#[ignore = "comparator: the distance to skyfield, not a verdict"]
+fn iss_ground_track_distance_to_skyfield() {
     let Some(series) = full_series() else {
         panic!("run tools/fetch-eop.sh first");
     };
     let satellite = Satellite::from_tle(LINE1, LINE2).expect("the ISS element set parses");
 
-    let (mut worst_lat, mut worst_lon, mut worst_h) = (0.0_f64, 0.0_f64, 0.0_f64);
-    let mut checked = 0;
-
+    let (mut dut1, mut dlat, mut dlon, mut dh) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for line in TRACK
         .lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
@@ -135,20 +137,19 @@ fn the_iss_ground_track_with_real_earth_orientation() {
         .expect("a real instant");
 
         let e = earth_orientation_at(utc, EopSource::Series(&series)).expect("2008 is tabulated");
-
         // Our ΔUT1 comes from the IERS file; Skyfield's comes from its ΔT tables.
-        // They should agree closely, and a disagreement here would be a finding.
         let theirs = Epoch::<Ut1>::from_ns_since_j2000(f[6].parse::<i128>().unwrap());
-        let dut1_gap_ns = e.orientation.ut1.ns_since_j2000() - theirs.ns_since_j2000();
-        assert!(
-            dut1_gap_ns.abs() < 2_000_000,
-            "our ΔUT1 and Skyfield's differ by {dut1_gap_ns} ns"
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a gap of milliseconds in nanoseconds"
+        )]
+        dut1.push(
+            (e.orientation.ut1.ns_since_j2000() - theirs.ns_since_j2000()).abs() as f64 * 1e-9,
         );
 
         let (transform, quality) =
             teme_to_itrf_at(utc, EopSource::Series(&series)).expect("in range");
         assert_eq!(quality.tabulated(), Some(EopQuality::Final));
-
         let teme = satellite
             .propagate_at(utc)
             .expect("the ISS has not decayed");
@@ -159,28 +160,36 @@ fn the_iss_ground_track_with_real_earth_orientation() {
             f[8].parse().unwrap(),
             f[9].parse().unwrap(),
         );
-        let dlat = (geo.latitude.degrees() - lat).abs();
-        let dlon = {
+        dlat.push((geo.latitude.degrees() - lat).abs());
+        dlon.push({
             let d = (geo.longitude.degrees() - lon).rem_euclid(360.0);
             d.min(360.0 - d)
-        };
-        let dh = (geo.height.metres() - h).abs();
-
-        worst_lat = nan_max(worst_lat, dlat);
-        worst_lon = nan_max(worst_lon, dlon);
-        worst_h = nan_max(worst_h, dh);
-        checked += 1;
+        });
+        dh.push((geo.height.metres() - h).abs());
     }
-
-    println!(
-        "with EOP: {checked} points; worst dlat {worst_lat:.2e}°, dlon {worst_lon:.2e}°, dh {worst_h:.2e} m"
-    );
-    assert!(checked >= 40);
-    // 1e-6° is 11 cm. Our ΔUT1 is interpolated linearly and Skyfield's comes from a
-    // different table, so a few centimetres of disagreement is expected and honest.
-    assert!(worst_lat < 1e-6, "latitude worst case {worst_lat:.3e}°");
-    assert!(worst_lon < 1e-6, "longitude worst case {worst_lon:.3e}°");
-    assert!(worst_h < 0.1, "height worst case {worst_h:.3e} m");
+    assert!(dlat.len() >= 40, "only {} track points", dlat.len());
+    for (quantity, unit, distances) in [
+        ("the ISS ground track with measured EOP, ΔUT1", "s", &dut1),
+        (
+            "the ISS ground track with measured EOP, latitude",
+            "deg",
+            &dlat,
+        ),
+        (
+            "the ISS ground track with measured EOP, longitude",
+            "deg",
+            &dlon,
+        ),
+        ("the ISS ground track with measured EOP, height", "m", &dh),
+    ] {
+        let max = distances.iter().copied().fold(0.0, f64::max);
+        #[expect(clippy::cast_precision_loss, reason = "a few dozen track points")]
+        let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+        println!(
+            "comparison | skyfield | not recorded | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+            distances.len()
+        );
+    }
 }
 
 /// What ignoring the Earth's orientation actually costs, measured rather than quoted.

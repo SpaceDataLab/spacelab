@@ -207,8 +207,8 @@ regeneration above hold the tables to them.
 | fa | GMST82 coefficients C0–C3 | Aoki et al. 1982 | mpmath 50-digit certified nearest-f64 | bit-exact `to_bits()` | src/earth_rotation.rs |
 | fa | UTC↔TAI round-trip + refusals | IERS Bulletin C / `tai-utc.dat` | IERS leap-second bulletin (vendored) + self-consistency | bit-exact | src/leap_seconds.rs, tests/leap_seconds.rs |
 | fa | UTC ↔ TAI ↔ TT on integer nanoseconds, across every leap second and past 2027-05-20 (G4) | ITU-R TF.460 (a leap second is `23:59:60`, the day 86 401 s); CGPM 2026 Res. 5 (continuous UTC from 2027-05-20); TT = TAI + 32.184 s | none — the definitions: both round trips, labels increasing with TAI, `TAI − UTC` = 10 s on 1972-01-01, every day through 2499 86 400 s except 27 of 86 401 (June 30 or December 31, none after 2016, the only days that accept `23:59:60`), the four edges of each leap second, UTC = TAI − 37 s from 2017; 4096 draws per property | exact, to the nanosecond | tests/utc_properties.rs |
-| frames | GCRF→ITRF full IAU 2006/2000A CIO pipeline | IERS TN36 §5.4–5.6 | pyerfa CIO pipeline, 5 epochs, element-wise | < 5e-13 (meas ~4.9e-14) | tests/cio_oracle.rs |
-| frames | Polar-motion matrix (pom00), ≥30 matrices | IERS TN36 §5.4.1 | pyerfa `pom00` | < 1e-15 | tests/frames.rs |
+| frames | GCRF→ITRF full IAU 2006/2000A CIO pipeline (G3) | IERS TN36 eqs (5.1), (5.3), (5.10), (5.13), (5.15) | **Maxima** `derivations/gcrf_itrf_chain.mac` (8): `Wᵀ·R₃(ERA)·Q(X+dX, Y+dY, s)` in 40-digit arithmetic on the exact series of `fundamental_arguments.mac` and `cio_nutation_series.mac`, six epochs over ±2 centuries with pole coordinates and CIP offsets; pyerfa's pipeline a comparator ([`comparisons.md`](comparisons.md)) | < 3e-13 (meas 9.703e-14 two centuries out: half an ulp of the ERA's 201 turns) | src/cio.rs |
+| frames | Polar-motion matrix, and the three orderings it rejects (G3) | IERS TN36 eq. (5.3), `s′` by eq. (5.13) | **Maxima** `derivations/gcrf_itrf_chain.mac` (7): `Wᵀ = R₁(−y_p)·R₂(−x_p)·R₃(s′)` in 40-digit arithmetic at eight pole positions; the transposed and sign-flipped candidates miss at first order in the angles, the reversed product at second; pyerfa `pom00` a comparator | < 4.5e-16 (meas 1.110e-16, one ulp) | tests/frames.rs |
 | frames | The polar-motion ordering as algebra: the transpose identity, and why one wrong candidate nearly passes | IERS TN36 `W(t) = R₃(−s′)·R₂(x_p)·R₁(y_p)`; the shipped matrix claims to be its transpose | **Maxima**, `derivations/frame_transform.mac` — the identity at symbolic angles, then a Taylor expansion of the reversed product in a common small angle | `R₁(−y_p)·R₂(−x_p)·R₃(s′) − W(t)ᵀ` is the **zero matrix**, exactly and at every angle. The reversed product's **first-order term cancels identically**; the leading miss is `x_p·y_p`, with `±y_p·s′` and `x_p·s′` beside it — **9e-12 at 3 µrad**, which is what the fixture's measured 6.2e-12 is. The dangerous candidate is separated by a product of the two pole coordinates and not by `s′` at all | derivations/frame_transform.mac |
 | frames | GMST82 inside the frame chain, ≥10 epochs | IERS Conventions 1996 §5 | decided by `derivations/gmst82.mac` (spacelab-fa row above); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)), 3.9e-12 rad outside leap seconds and 1.2e-12 rad inside one at the instant itself, one UT1 second before the naive coordinate's | — | tests/orekit_oracle.rs |
 | frames | TEME→ITRF full transform (pos + vel) | Vallado 2006 (AIAA 2006-6753) Eq. (C-1), `r_PEF = ROT3(θ_GMST82 + EqEq1982_kin) r_TEME`, `EqEq1982_kin = 0.00264″ sin Ω + 0.000063″ sin 2Ω` — no IAU/IERS definition of TEME. The paper also gives Eq. (1) without the kinematic terms; the authors confirmed (2026-10-28) that (C-1) is intended. `derivations/teme_c1.mac` evaluates (C-1) on the Appendix C example at 40 digits; `tests/teme_vallado_2006.rs` holds the transform to it (**3.6e-8 m**); the printed vector is 1.33 cm from (C-1) and 8.48 cm from Eq. (1) (comparison only; the earlier 1.35 cm used a UT1 rate wrong by `k`) | `tests/teme_vallado_2006.rs` against `teme_c1.mac`; Orekit 13's IERS CIO chain (a different algorithm) a comparator ([`comparisons.md`](comparisons.md)), 0.99 m in position and 4.4e-4 m/s in velocity | 3.6e-8 m | tests/teme_vallado_2006.rs |
@@ -2617,7 +2617,7 @@ where a non-Rust caller would make it — the #319 drift pattern at crate granul
 | spacelab | Access-window rise/set edges (ISS) | elevation-event definition, `ε = asin(d·ẑ/\|d\|)`; IERS TN36 frame chain | the definition (G2): at every edge the elevation equals the mask, the window lies above it and a second either side below it, and a 5 s sample of the day is above the mask only inside a window; Orekit `ElevationDetector` on the same IERS series as comparator (`docs/comparisons.md`) | every edge within **2.5e-5 s** of its root, bound the scan's 1e-4 s tolerance; 3 passes, none missed | tests/access_oracle.rs |
 | spacelab | What Earth orientation is worth on a pass edge | IERS `finals2000A`, MJD 54725..54735 | the same scan run twice, `EopSource::Series` against `EopSource::NoEop`; each edge's move against `−Δε/ε̇`, the implicit-function theorem's first order (S1) | edges move up to **38.1 ms**; the prediction within **1.5e-5 s** | tests/access_oracle.rs |
 | spacelab | What refraction costs an access edge, and the mask that reproduces it | Sæmundsson (1986) and Bennett (1982), the two fits `observability.rs` carries | self-consistency on the Orekit-validated ISS pass set: refraction applied to every sample against refraction applied once to the mask | every edge one-signed; 0.81–1.18 s at a 10° mask, 9.3–20.3 s at the horizon; the two routes within **3.7″** of elevation | tests/refraction_in_access.rs |
-| spacelab | ISS ground track w/ measured EOP *(ignored: snapshot)* | IERS TN36 + WGS-84 + IERS `finals2000A` | Skyfield fed the same finals2000A | dlat/dlon < 1e-6°, dh < 0.1 m | tests/earth_orientation.rs |
+| spacelab | ISS ground track w/ measured EOP *(parked comparator)* | IERS TN36 + WGS-84 + IERS `finals2000A` | Skyfield fed the same finals2000A, a distance in [`comparisons.md`](comparisons.md); the pieces decided by SGP4-VER (G5), `gmst82.mac` and `gcrf_itrf_chain.mac` (7) | recorded, not judged | tests/earth_orientation.rs |
 | spacelab | Sentinel-1A propagated orbit vs design | ESA published Sentinel-1 orbit parameters | published Sentinel-1 orbit (i=98.18°, ~693 km, 0.9856°/day) | inc < 0.15°; precession 0.95–1.02°/day | tests/sentinel_reality.rs |
 | spacelab | teme_to_itrf_at ≡ decomposed transform; error-stage refusals | internal API contract | self-consistency / property | exact equality | tests/earth_orientation.rs |
 | spacelab | `EopSource::NoEop` is the zeroed pole and `UT1 = UTC`, and says so | internal API contract | self-consistency: the transform against `teme_to_itrf` fed the same fields | exact equality; `quality` is `Absent`, and TT is still the real one | tests/earth_orientation.rs |
@@ -11400,9 +11400,18 @@ diurnal arc are the side their culminations, `sin h = −cos(φ + δ)` and `cos(
 (G2), so astropy's six days are a row. `insar_unwrap.mac` (6) gives the forward DCT-II of `(1, …, 5)`
 in radicals (G3), and scipy's values are parked; Vermeille's inverse and the hull constructions
 already had their gates, so pyerfa's `gc2gd` and qhull are parked behind them.
+Batch 12f (2026-11-13, Ф19.G) takes the frame chain's ten. `derivations/gcrf_itrf_chain.mac` composes
+IERS (2010) `Wᵀ·R₃(ERA)·Q(X+dX, Y+dY, s)` in 40 digits on the exact arguments and series of batches
+12a and 12b, at six epochs out to two centuries with pole coordinates and CIP offsets (G3); the
+worst miss, 9.7e-14 rad, is half an ulp of the ERA's 201 turns. It writes `Wᵀ` with
+`s′ = −47 µas·t` at eight pole positions (G3, one ulp), which the transposed and sign-flipped
+orderings miss at first order and the reversed product at second. pyerfa's pipeline and `pom00`,
+NEPTUNE's reduction and both NEPTUNE arcs, and Skyfield's ISS ground track are parked: the
+geopotential, third-body, Dormand–Prince, lunar-frame and SGP4-VER gates decide their pieces. The
+celestial-pole offset test is tagged (S2).
 
-**Today: 27
-comparator-decided tests of 3 726** — name 16, file 4, fixture 3, doc 4; none of them Orekit's,
+**Today: 17
+comparator-decided tests of 3 727** — name 10, file 2, fixture 1, doc 4; none of them Orekit's,
 5 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
@@ -11420,13 +11429,6 @@ crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::our_monte_carlo_and_di
 crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::the_absorber_fitted_at_low_air_mass_predicts_the_high_air_mass_half | file:pyspectral
 crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::without_the_ozone_the_six_hundred_nanometre_disagreement_is_an_order_of_magnitude_worse | file:pyspectral
 crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs::our_slab_reproduces_radcalnets_modtran_toa_on_measured_scenes | name:modtran
-crates/spacelab-ephemeris/tests/neptune_lro.rs::a_day_of_the_selenocentric_model_tracks_neptune | name:neptune
-crates/spacelab-ephemeris/tests/neptune_lro.rs::the_full_week_against_neptune | name:neptune
-crates/spacelab-frames/tests/cio_oracle.rs::each_celestial_pole_offset_moves_the_matrix_by_its_own_size | file:oracle
-crates/spacelab-frames/tests/cio_oracle.rs::gcrf_to_itrf_matches_pyerfa_cio_pipeline | name:pyerfa
-crates/spacelab-frames/tests/frames.rs::polar_motion_matches_pyerfa_pom00 | name:pyerfa
-crates/spacelab-frames/tests/frames.rs::polar_motion_rejects_the_other_three_orderings | fixture:pyerfa
-crates/spacelab-frames/tests/neptune_frames.rs::the_gcrf_state_matches_neptunes_own_reduction | file:neptune
 crates/spacelab-ionosphere/tests/galileo_stec.rs::the_stec_matches_the_jrc_reference_in_every_month | name:jrc
 crates/spacelab-propagation/src/ephemeris.rs::both_bodies_reach_erfa_at_the_documented_accuracy | name:erfa
 crates/spacelab-propagation/src/geopotential.rs::validated_against_scipy_at_degree_70 | name:scipy
@@ -11436,9 +11438,6 @@ crates/spacelab-propagation/tests/wam_ipe_product.rs::a_noaa_file_reads_as_scipy
 crates/spacelab-slr/src/loading.rs::the_spline_matches_the_reference_routine_away_from_four_knots | doc:iers-oracle
 crates/spacelab-slr/src/loading.rs::the_tidal_arguments_match_the_reference_routine | doc:iers-oracle
 crates/spacelab-slr/src/troposphere.rs::the_zenith_delay_reproduces_the_iers_reference_routine | doc:iers-oracle
-crates/spacelab/tests/earth_orientation.rs::the_iss_ground_track_with_real_earth_orientation | fixture:skyfield
-crates/spacelab/tests/neptune_sentinel1b.rs::the_full_day_against_neptune | name:neptune
-crates/spacelab/tests/neptune_sentinel1b.rs::two_orbits_of_the_geocentric_model_track_neptune | name:neptune
 ```
 
 ### 12.2 · Long literals without a named source

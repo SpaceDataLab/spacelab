@@ -249,7 +249,7 @@ exclude_re = [
     # non-negative, so `>` and `>=` differ only at `r2 == 0` — where `d = atan(√(r2/(1−r2))) = 0`,
     # `R₂(d) = I`, and the rotation collapses to `R₃(−(E+s))·R₃(E) = R₃(−s)`: `E` cancels, whichever
     # value the branch picked. Both halves proved in `derivations/cio_frame_branch.mac`.
-    "cio\\.rs:42:19: replace > with >= in gcrf_to_cirs",
+    "cio\\.rs:44:19: replace > with >= in gcrf_to_cirs",
 
     # The Lagrange stencil origin in `CioInterpolator::interpolate`, `− STENCIL/2 + 1`. Mutating the
     # `+ 1` to `− 1` or `* 1` slides the stencil by two nodes and one node. Measured over the whole

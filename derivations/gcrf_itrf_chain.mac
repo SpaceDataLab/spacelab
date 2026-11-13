@@ -1,0 +1,69 @@
+/* GCRF -> ITRF of spacelab-frames as the IERS Conventions (2010) chain, in 40-digit arithmetic
+   (plans/17 Ф19.G): the values tests/frames.rs and src/cio.rs hold the polar-motion matrix and the
+   whole transform to.
+
+   Eq (5.1): [ITRS] = W(t) R(t) Q(t) [GCRS] read as frames, so the GCRS -> ITRS matrix is
+   W^T . R3(ERA) . Q^T-as-coded, with the coded GCRS -> CIRS product R3(-(E + s)) R2(d) R3(E) of
+   eq (5.10) (cio_rotation.mac (1) proves it the closed form), E = atan2(Y, X), d = atan(r / sqrt(1 -
+   r^2)), r^2 = X^2 + Y^2; the CIP X, Y the series plus the IERS celestial-pole offsets dX, dY, the
+   CIO locator s the model's (eq (5.18) on the model X, Y); ERA eq (5.15) of UT1; and the
+   polar-motion matrix W = R3(-s') R2(xp) R1(yp) of eq (5.3) with s' = -47 µas t of eq (5.13), whose
+   transpose spacelab writes R1(-yp) R2(-xp) R3(s') (cio_rotation.mac (4)). R1, R2, R3 are the
+   passive frame rotations, as Mat3::rot1/2/3.
+
+   It loads cio_nutation_series.mac, whose checks are (1)-(6); X, Y, s and the ERA are its exact ones.
+
+     (7) POM_EXACT in tests/frames.rs is W^T at the POM_INPUTS doubles, each literal its value
+         rounded to the digits it shows;
+     (8) tio_locator writes eq (5.13)'s -47 µas per century, and CHAIN_EXACT in src/cio.rs is the
+         GCRF -> ITRF matrix at the six TT epochs of the series tables, UT1 at CHAIN_UT1_DAYS and the
+         Earth orientation of CHAIN_EOP, likewise.
+
+   timeout 600 maxima --very-quiet -Q -b gcrf_itrf_chain.mac                                       */
+
+batchload("cio_nutation_series.mac")$
+linel : 4000$
+
+frames_rs : "../crates/spacelab-frames/tests/frames.rs"$
+frames_cio : "../crates/spacelab-frames/src/cio.rs"$
+polar_rs : "../crates/spacelab-frames/src/polar_motion.rs"$
+
+R1(a) := block([c : cos(a), s : sin(a)], matrix([1, 0, 0], [0, c, s], [0, -s, c]))$
+R2(a) := block([c : cos(a), s : sin(a)], matrix([c, 0, -s], [0, 1, 0], [s, 0, c]))$
+R3(a) := block([c : cos(a), s : sin(a)], matrix([c, s, 0], [-s, c, 0], [0, 0, 1]))$
+doubles(path, name) := map(lambda([t], nearest_double(rust_rational(t))), rust_table(path, name))$
+arcsec(v) := bfloat(v * %pi / 648000)$
+w_transposed(xp, yp, sp) := R1(bfloat(-yp)) . R2(bfloat(-xp)) . R3(bfloat(sp))$
+entries(m) := flatten(makelist(makelist(m[i, j], j, 1, 3), i, 1, 3))$
+
+/* ---- (7) the polar-motion matrix ---------------------------------------------------------------- */
+
+pom_inputs : chunks(doubles(frames_rs, "POM_INPUTS"), 3)$
+exact_pom : map(lambda([v], entries(w_transposed(v[1], v[2], v[3]))), pom_inputs)$
+
+/* ---- (8) the chain ------------------------------------------------------------------------------- */
+
+tt_days : doubles(frames_cio, "CHAIN_TT_DAYS")$
+ut1_days : doubles(frames_cio, "CHAIN_UT1_DAYS")$
+eop : chunks(doubles(frames_cio, "CHAIN_EOP"), 4)$
+s_prime(t) := arcsec(dec("-47e-6") * t)$
+gcrf_to_cirs(x, y, s) := block([r2 : x^2 + y^2, e, d],
+  e : atan2(y, x), d : atan(sqrt(r2 / (1 - r2))),
+  R3(-(e + s)) . R2(d) . R3(e))$
+chain(t, ut1, v) := block([xy : cip_xy(t), s],
+  s : cio_s(t, xy[1], xy[2]),
+  entries(w_transposed(arcsec(v[1]), arcsec(v[2]), s_prime(t)) . R3(era_value(ut1))
+          . gcrf_to_cirs(xy[1] + arcsec(v[3]), xy[2] + arcsec(v[4]), s)))$
+exact_chain : map(chain, epochs, ut1_days, eop)$
+
+for row in exact_pom do print("POM_EXACT", simplode(map(lit, row), ", "))$
+for row in exact_chain do print("CHAIN_EXACT", simplode(map(lit, row), ", "))$
+
+must(transcribed(rust_table(frames_rs, "POM_EXACT"), flatten(exact_pom)),
+     "(7) holds: POM_EXACT is W transposed at the POM_INPUTS doubles, exact")$
+must(is(map(lambda([d], nearest_double(d / 36525)), tt_days) = epochs)
+     and is(map(rust_rational, rust_literals_between(polar_rs, "pub fn tio_locator(", "}"))
+            = [dec("-47e-6")])
+     and transcribed(rust_table(frames_cio, "CHAIN_EXACT"), flatten(exact_chain)),
+     "(8) holds: s' is -47 µas per century, and CHAIN_EXACT is the GCRF -> ITRF chain at the six epochs, exact")$
+print("DONE")$

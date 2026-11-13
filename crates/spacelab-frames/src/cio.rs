@@ -11,8 +11,10 @@
 //! full accumulated precession, about 1.5 km a day at present epochs.
 //!
 //! The three angles come from [`spacelab_fa`] ([`cip_xy`], [`cio_locator_s`],
-//! [`era`]); this module only assembles rotations, and every matrix construction is
-//! compared element-wise with `pyerfa` in `tests/cio_oracle.rs`.
+//! [`era`]); this module only assembles rotations. `derivations/gcrf_itrf_chain.mac` composes
+//! the IERS (2010) chain in 40-digit arithmetic at six epochs and the module test
+//! `the_transform_is_the_iers_chain_at_six_epochs` (G3) holds [`gcrf_to_itrf`] to it; `pyerfa`
+//! is a comparator in `tests/cio_oracle.rs`.
 //!
 //! Gate: `derivations/cio_rotation.mac` proves the coded GCRS→CIRS product is the IERS 2010
 //! Eq. 5.10 closed form, that the CIP is its CIRS `z`-axis and that the polar-motion product is
@@ -124,6 +126,195 @@ pub fn gcrf_to_itrf_into(epochs: &[Orientation], out: &mut [Transform<Gcrf, Itrf
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// TT days since J2000 of the chain gate: `t = 0.06`, a century and half a century either side
+    /// of J2000, and two centuries out — the epochs `spacelab_fa` holds `X, Y, s` at.
+    const CHAIN_TT_DAYS: [f64; 6] = [2191.5, -36_525.0, -18_262.5, 18_262.5, 36_525.0, 73_050.0];
+
+    /// UT1 days since J2000 at the same instants, nine hours behind TT: the transform must take
+    /// the ERA from UT1 and everything else from TT, and a nine-hour gap tells the two apart.
+    const CHAIN_UT1_DAYS: [f64; 6] = [
+        2191.125,
+        -36_525.375,
+        -18_262.875,
+        18_262.125,
+        36_524.625,
+        73_049.625,
+    ];
+
+    /// `(x_p, y_p, dX, dY)` in arcseconds at each epoch: polar motion of the observed size with
+    /// both signs, and celestial-pole offsets of a few tenths of a milliarcsecond, none at the first.
+    const CHAIN_EOP: [[f64; 4]; 6] = [
+        [0.0526, 0.3838, 0.0, 0.0],
+        [0.161, 0.301, 0.0003, -0.00016],
+        [-0.12, 0.45, -0.0005, 0.00025],
+        [0.25, 0.05, 0.00014, 0.0004],
+        [0.03, -0.52, 0.0006, -0.0007],
+        [-0.2, 0.2, -0.0002, 0.00012],
+    ];
+
+    /// The GCRF→ITRF matrix at [`CHAIN_TT_DAYS`], [`CHAIN_UT1_DAYS`] and [`CHAIN_EOP`]: IERS (2010)
+    /// eqs (5.1), (5.3), (5.10), (5.13) and (5.15) composed in 40-digit arithmetic on the exact
+    /// `X, Y, s` and ERA, to 25 digits (`derivations/gcrf_itrf_chain.mac` (8) reads this table back).
+    #[expect(
+        clippy::unreadable_literal,
+        clippy::excessive_precision,
+        reason = "25-digit literals written by the derivation"
+    )]
+    const CHAIN_EXACT: [[[f64; 3]; 3]; 6] = [
+        [
+            [
+                8.197555488544985134875432e-1,
+                -5.727133980466696832819871e-1,
+                -4.514643914984849613971973e-4,
+            ],
+            [
+                5.727132823121961242806741e-1,
+                8.197556721024495640926932e-1,
+                -3.664956369937373245638696e-4,
+            ],
+            [
+                5.799874573151259997975767e-4,
+                4.187717855440453653073546e-5,
+                9.999998309304113444658045e-1,
+            ],
+        ],
+        [
+            [
+                -8.250968785492402412386973e-1,
+                5.649357232831171040046117e-1,
+                -7.922724713230814580104394e-3,
+            ],
+            [
+                -5.649082721438347785971490e-1,
+                -8.251349065604192202091491e-1,
+                -5.570461291073301037644937e-3,
+            ],
+            [
+                -9.684269294448733986975493e-3,
+                -1.205574949214731020220287e-4,
+                9.999530990972141667764149e-1,
+            ],
+        ],
+        [
+            [
+                8.225970136770599053645334e-1,
+                -5.686106559014516482008454e-1,
+                4.009374627528451661368239e-3,
+            ],
+            [
+                5.686039884714725170949851e-1,
+                8.226067844248355911296629e-1,
+                2.753636244243962625766807e-3,
+            ],
+            [
+                -4.863885680859272028955995e-3,
+                1.461345322100335156123535e-5,
+                9.999881711313041912353139e-1,
+            ],
+        ],
+        [
+            [
+                8.174912494756424668095025e-1,
+                -5.759269589518412775871757e-1,
+                -4.024299098852162783725610e-3,
+            ],
+            [
+                5.759202958137590985428480e-1,
+                8.175011530231109814421774e-1,
+                -2.770861901339942621246141e-3,
+            ],
+            [
+                4.885683221935739563968598e-3,
+                -5.252016960313770176736547e-5,
+                9.999880635993045094526638e-1,
+            ],
+        ],
+        [
+            [
+                -8.148851903351813783388271e-1,
+                5.795677288787839701782037e-1,
+                7.960792340186670966193252e-3,
+            ],
+            [
+                -5.795408559447884783630241e-1,
+                -8.149240721521785674131868e-1,
+                5.581479883757473504410391e-3,
+            ],
+            [
+                9.722286931434731191387357e-3,
+                -6.533910940280420183060166e-5,
+                9.999527353168366806789502e-1,
+            ],
+        ],
+        [
+            [
+                -8.095640373733299350909152e-1,
+                5.868130571528221680075287e-1,
+                1.601578430025566669377666e-2,
+            ],
+            [
+                -5.867097483050034164837246e-1,
+                -8.097223047554166535141582e-1,
+                1.102090855853988840274679e-2,
+            ],
+            [
+                1.943555081990713091322811e-2,
+                -4.744855475363895130622923e-4,
+                9.998109992532548580613388e-1,
+            ],
+        ],
+    ];
+
+    /// The worst miss measured is 9.703e-14, two centuries out: the ERA's sum there is 201 turns,
+    /// and half an ulp of it is 9e-14 rad. The bound is 3.1 times that.
+    const CHAIN_BOUND: f64 = 3.0e-13;
+
+    /// The transform is the IERS chain: polar motion after the Earth Rotation Angle after the
+    /// precession-nutation of the offset pole, at six epochs. (G3)
+    ///
+    /// Each factor has its own gate — `X, Y, s` and the ERA in `spacelab_fa`, the CIO product and
+    /// `Wᵀ` in `derivations/cio_rotation.mac` — so what this decides is the assembly: the order of
+    /// the three rotations, UT1 for the ERA and TT for the rest, `dX` to `X` and `dY` to `Y` with
+    /// the model `s`, and the TIO locator's sign and rate.
+    #[test]
+    fn the_transform_is_the_iers_chain_at_six_epochs() {
+        let mut worst = (0.0_f64, 0.0_f64);
+        for (((tt, ut1), eop), exact) in CHAIN_TT_DAYS
+            .into_iter()
+            .zip(CHAIN_UT1_DAYS)
+            .zip(CHAIN_EOP)
+            .zip(CHAIN_EXACT)
+        {
+            let [xp, yp, dx, dy] = eop.map(Angle::from_arcseconds);
+            let got = gcrf_to_itrf(
+                Epoch::<Ut1>::from_days_since_j2000(ut1),
+                Epoch::<Tt>::from_days_since_j2000(tt),
+                xp,
+                yp,
+                dx,
+                dy,
+                0.0,
+            )
+            .rotation
+            .matrix()
+            .rows;
+            for i in 0..3 {
+                for j in 0..3 {
+                    let miss = (got[i][j] - exact[i][j]).abs();
+                    if miss > worst.0 || miss.is_nan() {
+                        worst = (miss, tt);
+                    }
+                }
+            }
+        }
+        assert!(
+            worst.0 < CHAIN_BOUND,
+            "{:.3e} at TT day {}",
+            worst.0,
+            worst.1
+        );
+    }
 
     /// `(X, Y, s)` as `(mantissa, exponent)` pairs, and the GCRS→CIRS matrix
     /// `derivations/cio_rotation.mac` prints for them from the IERS 2010 Eq. 5.10 closed form at

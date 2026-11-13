@@ -1,4 +1,9 @@
-//! The ITRF→GCRF chain against NEPTUNE's, on one epoch and one state.
+//! The ITRF→GCRF chain against NEPTUNE's, on one epoch and one state: a comparator.
+//!
+//! The chain is decided by its gates — `the_transform_is_the_iers_chain_at_six_epochs` in
+//! `src/cio.rs` (`derivations/gcrf_itrf_chain.mac`), the rotation rate in `tests/cio_oracle.rs`
+//! (`derivations/earth_rotation_rate.mac`) and the state algebra in `derivations/frame_transform.mac`
+//! — so the distance below is recorded, not judged.
 //!
 //! `orekit_oracle.rs` measures the chain against Orekit; this measures it against a fourth lineage
 //! (Space-Systems/neptune, TU Braunschweig ILR/IRAS, Apache-2.0), whose reduction lives in libslam
@@ -84,24 +89,18 @@ fn our_gcrf() -> StateVector<spacelab_frames::Gcrf> {
 
 /// The same terrestrial state lifted into the celestial frame by two independent implementations.
 ///
-/// The bound is two orders above the measurement, which is enough room for the last digits of a
-/// series evaluated in a different order and no room at all for anything structural: a dropped CIO
-/// locator, polar motion with the wrong sign, ERA against GMST, or the missing `ω × r` term in the
-/// velocity each land four or more orders above it.
+/// A dropped CIO locator, polar motion with the wrong sign, ERA against GMST, or the missing
+/// `ω × r` term in the velocity would each land four or more orders above the distance measured.
 #[test]
-fn the_gcrf_state_matches_neptunes_own_reduction() {
+#[ignore = "comparator: the distance to neptune, not a verdict"]
+fn gcrf_state_distance_to_neptune() {
     let ours = our_gcrf();
     let position = (ours.position.vector - R_GCRF_NEPTUNE).norm();
     let velocity = (ours.velocity.vector - V_GCRF_NEPTUNE).norm();
-    println!("ITRF→GCRF vs NEPTUNE: |Δr| = {position:.3e} m, |Δv| = {velocity:.3e} m/s");
-    assert!(
-        position < 1e-3,
-        "position differs by {position:.3e} m — beyond the CIP-interpolation difference the module \
-         documents"
+    println!(
+        "comparison | neptune | not recorded | the Sentinel-1B ITRF state in the GCRF, position | m | 1 | {position:.3e} | {position:.3e}"
     );
-    assert!(
-        velocity < 1e-5,
-        "velocity differs by {velocity:.3e} m/s — beyond what the position difference and the LOD \
-         term can account for"
+    println!(
+        "comparison | neptune | not recorded | the Sentinel-1B ITRF state in the GCRF, velocity | m/s | 1 | {velocity:.3e} | {velocity:.3e}"
     );
 }

@@ -1,4 +1,8 @@
-//! The selenocentric force model against NEPTUNE, a fourth independent propagator.
+//! The selenocentric force model against NEPTUNE, a fourth independent propagator: a comparator.
+//! Each piece is decided by its own gate — the field by `derivations/geopotential.mac`, the
+//! principal-axis rotation by `derivations/lunar_frames.mac`, the third bodies by
+//! `derivations/third_body_battin.mac`, Dormand–Prince 8 by `derivations/dop853_order.mac` — so
+//! the propagated distance is recorded, not judged.
 //!
 //! `lro_arc.rs` measures this model against NASA's reconstruction of LRO, which answers "is it
 //! right" but not "is it right for the reasons we think". This answers the second question: NEPTUNE
@@ -102,9 +106,9 @@ fn kernels_present() -> bool {
     true
 }
 
-/// Propagate the fixture's initial state for `span_seconds` and report the worst position
-/// difference against NEPTUNE, together with the difference at the end of the span.
-fn compare(reference: &Reference, span_seconds: f64) -> (f64, f64) {
+/// Propagate the fixture's initial state for `span_seconds` and return the position difference
+/// against NEPTUNE at every fixture sample inside the span.
+fn compare(reference: &Reference, span_seconds: f64) -> Vec<f64> {
     let eph = Ephemeris::load(SPK)
         .expect("de440s.bsp loads")
         .with_kernel(BPC)
@@ -147,8 +151,7 @@ fn compare(reference: &Reference, span_seconds: f64) -> (f64, f64) {
     )
     .expect("the arc integrates");
 
-    let mut worst: f64 = 0.0;
-    let mut last = 0.0;
+    let mut distances = Vec::new();
     // Report every six hours. The elapsed column is a difference of two ET values around 8.1e8 s,
     // so it lands a microsecond off the round number and an equality test on it never fires.
     let mut next_report = 0.0;
@@ -160,55 +163,55 @@ fn compare(reference: &Reference, span_seconds: f64) -> (f64, f64) {
         let difference =
             ((got[0] - want[0]).powi(2) + (got[1] - want[1]).powi(2) + (got[2] - want[2]).powi(2))
                 .sqrt();
-        worst = worst.max(difference);
-        last = difference;
+        distances.push(difference);
         if elapsed >= next_report {
             println!("  +{:>6.1} h  |Δr| = {difference:9.1} m", elapsed / 3600.0);
             next_report += 21_600.0;
         }
     }
-    (worst, last)
+    distances
+}
+
+/// One `comparison | ...` row of `tools/compare.py`, in metres.
+fn comparison_row(quantity: &str, distances: &[f64]) {
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    #[expect(clippy::cast_precision_loss, reason = "a few thousand samples")]
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+    println!(
+        "comparison | neptune | not recorded | {quantity} | m | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
+    );
 }
 
 /// A day of the same arc, on the same field, against a propagator that shares no line of code.
 ///
-/// The cap is what a frame difference of the size named in the module docs buys over a day, and no
-/// more: the two implementations are not expected to agree to the metre while one evaluates a
-/// principal-axis field at a mean-Earth position. What it does catch is the whole class of failure
-/// the reconstruction test cannot separate from a truncation — a transposed rotation, a lost origin
-/// shift, a third body with the wrong sign — each of which is orders above this.
+/// The two implementations are not expected to agree to the metre while one evaluates a
+/// principal-axis field at a mean-Earth position (the module docs).
 #[test]
-fn a_day_of_the_selenocentric_model_tracks_neptune() {
+#[ignore = "comparator: the distance to neptune, not a verdict"]
+fn one_day_distance_to_neptune() {
     if !kernels_present() {
         return;
     }
-    let reference = read_reference();
-    let (worst, last) = compare(&reference, 86_400.0);
-    println!("NEPTUNE vs spacelab over 24 h: worst {worst:.1} m, final {last:.1} m");
-    assert!(
-        worst > 0.0 && worst < 2_000.0,
-        "24 h against NEPTUNE is {worst:.1} m — outside (0, 2000) that is a model difference, not \
-         the frame and ephemeris differences the module documents"
+    let distances = compare(&read_reference(), 86_400.0);
+    comparison_row(
+        "LRO position over 24 h, selenocentric force model",
+        &distances,
     );
 }
 
-/// The full seven-day span the fixture holds.
-///
-/// Ignored by default because a degree-40 field over 89 orbits is minutes, not seconds, in a debug
-/// build. Run with
-/// `cargo test --release -p spacelab-ephemeris --test neptune_lro -- --ignored --nocapture`.
+/// The full seven-day span the fixture holds: a degree-40 field over 89 orbits.
 #[test]
-#[ignore = "seven days of degree-40 lunar field; run in release"]
-fn the_full_week_against_neptune() {
+#[ignore = "comparator: the distance to neptune, not a verdict"]
+fn full_week_distance_to_neptune() {
     if !kernels_present() {
         return;
     }
     let reference = read_reference();
     let span = reference.samples.last().expect("the fixture has rows").0;
-    let (worst, last) = compare(&reference, span);
-    println!(
-        "NEPTUNE vs spacelab over {:.1} days: worst {worst:.1} m, final {last:.1} m",
-        span / 86_400.0
+    let distances = compare(&reference, span);
+    comparison_row(
+        "LRO position over 7 days, selenocentric force model",
+        &distances,
     );
-    assert!(worst > 0.0 && worst.is_finite());
 }

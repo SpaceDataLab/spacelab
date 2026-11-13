@@ -1348,6 +1348,14 @@ if have maxima; then
     mac_zeros geomagnetic_dipole.mac 22 "the centred dipole's pole, moment and field"
     mac_zeros attitude_control.mac 18 "attitude error kinematics, the Lyapunov derivative and the PD loop"
     mac_zeros gmst82.mac 10 "GMST 1982 as the exact rational polynomial"
+    out=$(macf gcrf_itrf_chain.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 8 ] && [ "$(printf '%s' "$out" | grep -c '^DONE')" -eq 3 ]; then
+        ok "maxima gcrf_itrf_chain.mac: polar motion is W transposed with s' = -47 uas t, and the GCRF to ITRF matrix is the IERS chain at six epochs, both at 40 digits"
+    else
+        bad "maxima gcrf_itrf_chain.mac" "expected 8 checks to hold, found $holds"
+    fi
+
     mac_zeros cio_rotation.mac 8 "the CIO-based rotation as the IERS closed form in X, Y, s"
     mac_zeros gnss_combinations.mac 32 "IF, GF, wide/narrow-lane and MW combinations as exact rationals of the ICD carriers"
     mac_zeros gnss_cycle_slip.mac 13 "the slip predictor is the least-squares polynomial extrapolation"

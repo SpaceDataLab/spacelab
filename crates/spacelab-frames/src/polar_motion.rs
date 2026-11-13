@@ -1,7 +1,10 @@
 //! Polar motion: the wobble of the crust about the rotation axis.
 //!
 //! What checks it: `derivations/frame_transform.mac` proves the transpose identity
-//! [`pef_to_itrf`] asserts, and derives the commutator its own rejection test measures.
+//! [`pef_to_itrf`] asserts, and derives the commutator its own rejection test measures;
+//! `derivations/gcrf_itrf_chain.mac` (7) writes `Wᵀ` in 40-digit arithmetic at eight poles, which
+//! `tests/frames.rs` holds the matrix and its three rejected orderings to (G3), and (8) reads the
+//! TIO locator's rate back as eq (5.13)'s.
 //! `derivations/polar_motion_rate.py` measures how fast the pole actually moves, which is what
 //! [`crate::teme::teme_to_itrf`] neglects.
 
@@ -19,8 +22,8 @@ use crate::rotation::{Itrf, Pef, Rotation};
 /// s' = −47 µas · t
 /// ```
 ///
-/// with `t` in Julian centuries of TT since J2000. Verified against `pyerfa`'s
-/// `sp00`: identical to the last bit at every epoch tested.
+/// with `t` in Julian centuries of TT since J2000 (IERS Conventions 2010, eq 5.13).
+/// `pyerfa`'s `sp00` agrees to the last bit at every epoch tested.
 ///
 /// A microarcsecond is three millimetres at the Earth's surface. It is included
 /// because it costs one multiplication, not because anything we do yet can see it.
@@ -41,17 +44,17 @@ pub fn tio_locator(tt: Epoch<Tt>) -> Angle {
 /// # Provenance
 ///
 /// The sign convention was not taken on faith. Four candidate orderings were built
-/// and compared element-wise against `pyerfa`'s `pom00`. This one agrees to zero
-/// difference in every element; the two that get a sign or a transpose wrong miss by
-/// `5.9e-6`, which is twice the largest `|x_p|` or `|y_p|` in the fixture — a wrong
+/// and compared element-wise against `Wᵀ` in exact arithmetic. This one agrees to an
+/// ulp in every element; the two that get a sign or a transpose wrong miss by
+/// `5.9e-6`, which is twice the largest `|x_p|` or `|y_p|` of the poles tried — a wrong
 /// convention does not look wrong, it looks like a different pole.
 ///
 /// The fourth candidate is the dangerous one. Keeping every factor and every sign but
 /// reversing the product misses by only `6.2e-12`: rotations through microradians
 /// almost commute, so the error is the commutator, second order in the angles and
 /// four hundredths of a millimetre on the ground. All four are rebuilt and separated
-/// by `polar_motion_rejects_the_other_three_orderings`, so these numbers are enforced
-/// rather than remembered.
+/// by `the_polar_motion_matrix_is_w_transposed_and_no_other_ordering`, so these numbers
+/// are enforced rather than remembered.
 ///
 /// `derivations/frame_transform.mac` turns both halves of that paragraph into algebra.
 /// The transpose identity is exact at every angle — `R₁(−y_p)·R₂(−x_p)·R₃(s′) − W(t)ᵀ`

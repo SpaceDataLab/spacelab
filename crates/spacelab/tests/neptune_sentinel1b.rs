@@ -1,4 +1,8 @@
-//! The geocentric force model against NEPTUNE, on the same field and the same Earth orientation.
+//! The geocentric force model against NEPTUNE, on the same field and the same Earth orientation:
+//! a comparator. Each piece is decided by its own gate — the field by `derivations/geopotential.mac`,
+//! the third bodies by `derivations/third_body_battin.mac`, Dormand–Prince 8 by
+//! `derivations/dop853_order.mac`, the Earth orientation by `derivations/gcrf_itrf_chain.mac` — so
+//! the propagated distance is recorded, not judged.
 //!
 //! `igs_orbit_fit.rs` fits this workspace's model to an IGS product and compares the *fit* with
 //! Orekit's; this compares the *propagation* itself, step for step, with a fourth lineage
@@ -151,10 +155,10 @@ fn rotation_rows(t: f64) -> [[f64; 3]; 3] {
     .rows
 }
 
-/// Propagate the same initial state for `span_seconds` and report the worst position difference
-/// against NEPTUNE, and the difference at the end of the span.
+/// Propagate the same initial state for `span_seconds` and return the position difference against
+/// NEPTUNE at every fixture sample inside the span.
 #[allow(clippy::cast_precision_loss)] // 6.1e17 ns is 2⁵⁹·¹, so the f64 carries it to 128 ns
-fn compare(samples: &[(f64, [f64; 3])], span_seconds: f64) -> (f64, f64) {
+fn compare(samples: &[(f64, [f64; 3])], span_seconds: f64) -> Vec<f64> {
     let eph = Ephemeris::load(SPK).expect("de440s.bsp loads");
     // ET is seconds past J2000; TT for this epoch is within 2 ms of it, which is millimetres of
     // third-body position on a 1e-6 m/s² term. The i128→f64 narrowing above costs 128 ns, five
@@ -191,8 +195,7 @@ fn compare(samples: &[(f64, [f64; 3])], span_seconds: f64) -> (f64, f64) {
     )
     .expect("the arc integrates");
 
-    let mut worst: f64 = 0.0;
-    let mut last = 0.0;
+    let mut distances = Vec::new();
     let mut next_report = 0.0;
     for &(elapsed, want) in samples {
         if elapsed > span_seconds {
@@ -202,14 +205,13 @@ fn compare(samples: &[(f64, [f64; 3])], span_seconds: f64) -> (f64, f64) {
         let difference =
             ((got[0] - want[0]).powi(2) + (got[1] - want[1]).powi(2) + (got[2] - want[2]).powi(2))
                 .sqrt();
-        worst = worst.max(difference);
-        last = difference;
+        distances.push(difference);
         if elapsed >= next_report {
             println!("  +{:>5.1} h  |Δr| = {difference:8.2} m", elapsed / 3600.0);
             next_report += 10_800.0;
         }
     }
-    (worst, last)
+    distances
 }
 
 fn kernel_present() -> bool {
@@ -220,36 +222,43 @@ fn kernel_present() -> bool {
     false
 }
 
-/// Three hours — two orbits of Sentinel-1B — against a propagator that shares no line of code.
-#[test]
-fn two_orbits_of_the_geocentric_model_track_neptune() {
-    if !kernel_present() {
-        return;
-    }
-    let samples = reference();
-    let (worst, last) = compare(&samples, 10_800.0);
-    println!("NEPTUNE vs spacelab over 3 h: worst {worst:.2} m, final {last:.2} m");
-    assert!(
-        worst > 0.0 && worst < 20.0,
-        "3 h against NEPTUNE is {worst:.2} m — outside (0, 20) that is a model difference, not the \
-         ephemeris and integrator differences the module documents"
+/// One `comparison | ...` row of `tools/compare.py`, in metres.
+fn comparison_row(quantity: &str, distances: &[f64]) {
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    #[expect(clippy::cast_precision_loss, reason = "a few thousand samples")]
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+    println!(
+        "comparison | neptune | not recorded | {quantity} | m | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
     );
 }
 
-/// The full day the fixture holds.
-///
-/// Ignored by default: a degree-70 field with a per-step CIO chain over 86 400 s is minutes in a
-/// debug build. Run with
-/// `cargo test --release -p spacelab --test neptune_sentinel1b -- --ignored --nocapture`.
+/// Three hours — two orbits of Sentinel-1B — against a propagator that shares no line of code.
 #[test]
-#[ignore = "a day of degree-70 field with a per-step frame chain; run in release"]
-fn the_full_day_against_neptune() {
+#[ignore = "comparator: the distance to neptune, not a verdict"]
+fn two_orbits_distance_to_neptune() {
+    if !kernel_present() {
+        return;
+    }
+    let distances = compare(&reference(), 10_800.0);
+    comparison_row(
+        "Sentinel-1B position over 3 h, geocentric force model",
+        &distances,
+    );
+}
+
+/// The full day the fixture holds: a degree-70 field with a per-step CIO chain over 86 400 s.
+#[test]
+#[ignore = "comparator: the distance to neptune, not a verdict"]
+fn full_day_distance_to_neptune() {
     if !kernel_present() {
         return;
     }
     let samples = reference();
     let span = samples.last().expect("the fixture has rows").0;
-    let (worst, last) = compare(&samples, span);
-    println!("NEPTUNE vs spacelab over 24 h: worst {worst:.2} m, final {last:.2} m");
-    assert!(worst > 0.0 && worst.is_finite());
+    let distances = compare(&samples, span);
+    comparison_row(
+        "Sentinel-1B position over 24 h, geocentric force model",
+        &distances,
+    );
 }

@@ -11,60 +11,218 @@ use spacelab_testkit::nan_max;
 
 const FIXTURES: &str = include_str!("fixtures/pom00_pyerfa.csv");
 
-/// The polar-motion matrix, element by element, against the oracle.
-#[test]
-fn polar_motion_matches_pyerfa_pom00() {
-    let mut checked = 0;
+/// `(x_p, y_p, s′)` in radians: no polar motion, a nanoradian, and six rows of the observed range,
+/// both signs of each coordinate among them.
+#[expect(
+    clippy::unreadable_literal,
+    clippy::excessive_precision,
+    reason = "the fixture's doubles at 17 digits"
+)]
+const POM_INPUTS: [[f64; 3]; 8] = [
+    [0.0, 0.0, 0.0],
+    [1.0000000000000001e-09, -1.0000000000000001e-09, 0.0],
+    [
+        5.7825367913444852e-07,
+        1.7064712906508029e-06,
+        -2.1068072122758105e-10,
+    ],
+    [
+        2.5983462753026055e-06,
+        2.2200475214688046e-06,
+        1.6561135782611204e-10,
+    ],
+    [
+        -2.491417404151455e-06,
+        -2.482602812688112e-06,
+        -2.9024768657039105e-11,
+    ],
+    [
+        2.7542273578020037e-06,
+        -1.9778436416473006e-06,
+        -1.8828789429033793e-10,
+    ],
+    [
+        -2.9410341917590808e-06,
+        -1.0797117133062152e-06,
+        1.9418241213306112e-10,
+    ],
+    [
+        -8.332197551115247e-07,
+        -2.7560448962887512e-06,
+        -1.7561494781879532e-10,
+    ],
+];
+
+/// `Wᵀ = R₁(−y_p)·R₂(−x_p)·R₃(s′)` at [`POM_INPUTS`] in 40-digit arithmetic, to 25 digits
+/// (`derivations/gcrf_itrf_chain.mac` (7) reads this table back).
+#[expect(
+    clippy::unreadable_literal,
+    clippy::excessive_precision,
+    reason = "25-digit literals written by the derivation"
+)]
+const POM_EXACT: [[[f64; 3]; 3]; 8] = [
+    [
+        [1.000000000000000000000000e0, 0.0, 0.0],
+        [0.0, 1.000000000000000000000000e0, 0.0],
+        [0.0, 0.0, 1.000000000000000000000000e0],
+    ],
+    [
+        [
+            9.999999999999999995000000e-1,
+            0.0,
+            1.000000000000000062114925e-9,
+        ],
+        [
+            -1.000000000000000124229850e-18,
+            9.999999999999999995000000e-1,
+            1.000000000000000061614925e-9,
+        ],
+        [
+            -1.000000000000000061614925e-9,
+            -1.000000000000000062114925e-9,
+            9.999999999999999990000000e-1,
+        ],
+    ],
+    [
+        [
+            9.999999999998328113190906e-1,
+            -2.106807212275458273365991e-10,
+            5.782536791344162927486881e-7,
+        ],
+        [
+            2.116674945294298986542275e-10,
+            9.999999999985439778446916e-1,
+            -1.706471290649689341032435e-6,
+        ],
+        [
+            -5.782536787740537403123023e-7,
+            1.706471290771801545813148e-6,
+            9.999999999983767892083766e-1,
+        ],
+    ],
+    [
+        [
+            9.999999999966242983030989e-1,
+            1.656113578255529815511207e-10,
+            2.598346275299681747977200e-6,
+        ],
+        [
+            -1.598429056173118988114437e-10,
+            9.999999999975356944884529e-1,
+            -2.220047521459486766720192e-6,
+        ],
+        [
+            -2.598346275660943713396230e-6,
+            2.220047521036665330090979e-6,
+            9.999999999941599928180319e-1,
+        ],
+    ],
+    [
+        [
+            9.999999999968964196587260e-1,
+            -2.902476865694902451956251e-11,
+            -2.491417404148877569519371e-6,
+        ],
+        [
+            3.520996851206342533243865e-11,
+            9.999999999969183416366174e-1,
+            2.482602812677856847398308e-6,
+        ],
+        [
+            2.491417404069142899934133e-6,
+            -2.482602812757874618464178e-6,
+            9.999999999938147612963749e-1,
+        ],
+    ],
+    [
+        [
+            9.999999999962071158130437e-1,
+            -1.882878942896237746782015e-10,
+            2.754227357798521522764460e-6,
+        ],
+        [
+            1.828404632227003513518182e-10,
+            9.999999999980440672478978e-1,
+            1.977843641638509384793629e-6,
+        ],
+        [
+            -2.754227358165538453786842e-6,
+            -1.977843641127423447000471e-6,
+            9.999999999942511830953756e-1,
+        ],
+    ],
+    [
+        [
+            9.999999999956751589226017e-1,
+            1.941824121322213101226695e-10,
+            -2.941034191754840944268523e-6,
+        ],
+        [
+            -1.910069430668767693919151e-10,
+            9.999999999994171112898380e-1,
+            1.079711713301335795061571e-6,
+        ],
+        [
+            2.941034191962787673538215e-6,
+            -1.079711712734908263069882e-6,
+            9.999999999950922702495324e-1,
+        ],
+    ],
+    [
+        [
+            9.999999999996528724044257e-1,
+            -1.756149478187343612600351e-10,
+            -8.332197551114282915279488e-7,
+        ],
+        [
+            1.779113388716872633830751e-10,
+            9.999999999962021082489992e-1,
+            2.756044896284305423433063e-6,
+        ],
+        [
+            8.332197546242611324461828e-7,
+            -2.756044896431587966401134e-6,
+            9.999999999958549806846701e-1,
+        ],
+    ],
+];
+
+/// The worst miss of the shipped matrix measured is 1.110e-16, one ulp of an entry just below 1.
+/// The bound is four times that, the same four ulps `src/cio.rs` holds the CIO product to.
+const POM_BOUND: f64 = 4.5e-16;
+
+/// The largest element-wise gap between a matrix and an exact table entry.
+fn gap(m: &Mat3, exact: &[[f64; 3]; 3]) -> f64 {
     let mut worst = 0.0_f64;
-
-    for line in FIXTURES.lines().filter(|l| !l.trim().is_empty()) {
-        let v: Vec<f64> = line
-            .split(',')
-            .map(|t| t.trim().parse().expect("a float"))
-            .collect();
-        assert_eq!(v.len(), 12, "xp, yp, sp and nine matrix elements");
-
-        let (xp, yp, sp) = (
-            Angle::from_radians(v[0]),
-            Angle::from_radians(v[1]),
-            Angle::from_radians(v[2]),
-        );
-        let got = pef_to_itrf(xp, yp, sp).matrix();
-
-        for i in 0..3 {
-            for j in 0..3 {
-                let delta = (got.rows[i][j] - v[3 + i * 3 + j]).abs();
-                worst = nan_max(worst, delta);
-                assert!(delta < 1e-15, "element ({i},{j}) differs by {delta:.3e}");
-            }
+    for (row, exact_row) in m.rows.iter().zip(exact) {
+        for (got, want) in row.iter().zip(exact_row) {
+            worst = nan_max(worst, (got - want).abs());
         }
-        checked += 1;
     }
-
-    assert!(checked >= 30);
-    println!("pom00: {checked} matrices, worst element delta {worst:.3e}");
+    worst
 }
 
-/// The three orderings [`pef_to_itrf`] rejects, and how far each of them misses.
+/// The polar-motion matrix is `Wᵀ`, and none of the three orderings [`pef_to_itrf`] rejects. (G3)
 ///
-/// The `pef_to_itrf` doc quotes these separations. Rebuilding all four candidates here
-/// is what keeps that paragraph true: if the implementation drifted onto one of the
-/// rejected forms, or if the rejected forms stopped being distinguishable, this fails.
-/// The last one is the point of the test — right factors, right signs, product the
-/// other way round — because rotations through microradians almost commute and the
-/// error is second order, so no tolerance set by eye would ever catch it.
+/// The `pef_to_itrf` doc quotes these separations. Rebuilding all four candidates against `Wᵀ` in
+/// exact arithmetic is what keeps that paragraph true: if the implementation drifted onto one of
+/// the rejected forms, or if the rejected forms stopped being distinguishable, this fails. The last
+/// one is the point of the test — right factors, right signs, product the other way round — because
+/// rotations through microradians almost commute and the error is second order, so no tolerance set
+/// by eye would ever catch it.
 #[test]
-fn polar_motion_rejects_the_other_three_orderings() {
-    let (mut fwd, mut sign, mut rev, mut angle) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
-
-    for line in FIXTURES.lines().filter(|l| !l.trim().is_empty()) {
-        let v: Vec<f64> = line
-            .split(',')
-            .map(|t| t.trim().parse().expect("a float"))
-            .collect();
-        let (xp, yp, sp) = (v[0], v[1], v[2]);
+fn the_polar_motion_matrix_is_w_transposed_and_no_other_ordering() {
+    let (mut shipped, mut fwd, mut sign, mut rev, mut angle) =
+        (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+    for (&[xp, yp, sp], exact) in POM_INPUTS.iter().zip(&POM_EXACT) {
         angle = nan_max(nan_max(angle, xp.abs()), yp.abs());
-
+        let got = pef_to_itrf(
+            Angle::from_radians(xp),
+            Angle::from_radians(yp),
+            Angle::from_radians(sp),
+        )
+        .matrix();
+        shipped = nan_max(shipped, gap(&got, exact));
         let candidates = [
             // W itself, applied where its transpose belongs.
             Mat3::rot3(-sp) * Mat3::rot2(xp) * Mat3::rot1(yp),
@@ -74,14 +232,14 @@ fn polar_motion_rejects_the_other_three_orderings() {
             Mat3::rot3(sp) * Mat3::rot2(-xp) * Mat3::rot1(-yp),
         ];
         for (worst, m) in [&mut fwd, &mut sign, &mut rev].into_iter().zip(candidates) {
-            for i in 0..3 {
-                for j in 0..3 {
-                    *worst = worst.max((m.rows[i][j] - v[3 + i * 3 + j]).abs());
-                }
-            }
+            *worst = nan_max(*worst, gap(&m, exact));
         }
     }
-
+    println!(
+        "Wᵀ {shipped:.2e}; rejected orderings: transpose {fwd:.2e}, signs {sign:.2e}, reversed \
+         {rev:.2e}; largest |xp| or |yp| {angle:.2e} rad"
+    );
+    assert!(shipped < POM_BOUND, "Wᵀ misses by {shipped:.3e}");
     // First order in the angles: both land within a factor of two of `2 * angle`.
     for (name, miss) in [("transpose", fwd), ("signs", sign)] {
         assert!(
@@ -91,15 +249,47 @@ fn polar_motion_rejects_the_other_three_orderings() {
     }
     // Second order: the commutator, which is why it is invisible and why it is here.
     assert!(
-        rev > 0.0 && rev < angle * angle,
+        rev > 1000.0 * POM_BOUND && rev < angle * angle,
         "the reversed product misses by {rev:.2e}, which is not the commutator"
-    );
-    println!(
-        "rejected orderings: transpose {fwd:.2e}, signs {sign:.2e}, reversed {rev:.2e}; \
-         largest |xp| or |yp| {angle:.2e} rad"
     );
 }
 
+/// The polar-motion matrix against `pyerfa`'s `pom00`, element by element.
+#[test]
+#[ignore = "comparator: the distance to pyerfa, not a verdict"]
+fn polar_motion_distance_to_pyerfa_pom00() {
+    let mut distances = Vec::new();
+    for line in FIXTURES.lines().filter(|l| !l.trim().is_empty()) {
+        let v: Vec<f64> = line
+            .split(',')
+            .map(|t| t.trim().parse().expect("a float"))
+            .collect();
+        assert_eq!(v.len(), 12, "xp, yp, sp and nine matrix elements");
+        let got = pef_to_itrf(
+            Angle::from_radians(v[0]),
+            Angle::from_radians(v[1]),
+            Angle::from_radians(v[2]),
+        )
+        .matrix();
+        let mut worst = 0.0_f64;
+        for i in 0..3 {
+            for j in 0..3 {
+                worst = nan_max(worst, (got.rows[i][j] - v[3 + i * 3 + j]).abs());
+            }
+        }
+        distances.push(worst);
+    }
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a count of a few dozen matrices"
+    )]
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+    println!(
+        "comparison | pyerfa | not recorded | the polar-motion matrix, worst entry | 1 | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
+    );
+}
 #[test]
 fn the_tio_locator_is_minus_47_microarcseconds_per_century() {
     let one_century = Epoch::<Tt>::from_days_since_j2000(36_525.0);

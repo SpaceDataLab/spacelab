@@ -52,12 +52,13 @@ f_h(lambda) := block([s2 : 1 / lambda^2],
 f_nh(lambda) := block([s2 : 1 / lambda^2],
   dec("0.003101") * (w0 + 3 * w1 * s2 + 5 * w2 * s2^2 + 7 * w3 * s2^3))$
 zenith(phi, h, p, e, lambda) :=
-  [bfloat(dec("2.416579e-3") * f_h(lambda) * p / f_s(phi, h)),
-   bfloat(dec("1e-4") * (dec("5.316") * f_nh(lambda) - dec("3.759") * f_h(lambda)) * e / f_s(phi, h))]$
+  [dec("2.416579e-3") * f_h(lambda) * p / f_s(phi, h),
+   dec("1e-4") * (dec("5.316") * f_nh(lambda) - dec("3.759") * f_h(lambda)) * e / f_s(phi, h)]$
 
 d(x) := nearest_double(x)$
 latitude : d(d(dec("30.67166667")) * d(d(%pi) / 180))$
-exact : zenith(latitude, d(dec("2010.344")), d(dec("798.4188")), d(dec("14.322")), d(dec("0.532")))$
+zenith_values : zenith(latitude, d(dec("2010.344")), d(dec("798.4188")), d(dec("14.322")), d(dec("0.532")))$
+exact : map(bfloat, zenith_values)$
 
 lit(v) := block([a : abs(v), e, m, t],
   if is(equal(v, 0)) then return("0.0"),
@@ -69,6 +70,6 @@ lit(v) := block([a : abs(v), e, m, t],
   concat(if is(v < 0) then "-" else "", charat(t, 1), ".", substring(t, 2), "e", e))$
 print("ZENITH_EXACT", simplode(map(lit, exact), ", "))$
 print("total", lit(exact[1] + exact[2]))$
-must(transcribed(rust_table(trop, "ZENITH_EXACT"), exact),
+must(certified("ZENITH_EXACT", rust_table(trop, "ZENITH_EXACT"), zenith_values),
      "(2) holds: ZENITH_EXACT is d_h and d_nh at the IERS test point, exact")$
 print("DONE")$

@@ -23,6 +23,12 @@ skip() { printf '  \033[33mSKIP\033[0m  %s (%s not installed)\n' "$1" "$2"; SKIP
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# The `ARB` lines derivations print through `certified` (rust_literals.mac): the exact value of each
+# literal they decide against a bigfloat, which the Arb pass after the Ф17.B gates decides in balls.
+ARB_IN=$(mktemp)
+trap 'rm -f "$ARB_IN"' EXIT
+arb_keep() { printf '%s\n' "$1" | grep '^ARB ' >> "$ARB_IN"; }
+
 printf '\nRe-deriving every claim the source code attributes to a computer algebra system.\n\n'
 
 # ---------------------------------------------------------------------------------------------
@@ -1215,6 +1221,7 @@ fi
 mac_zeros() { # file count what
     local out zeros
     out=$(timeout 300 maxima --very-quiet --suppress-input-echo -Q -b "$1" </dev/null 2>&1)
+    arb_keep "$out"
     zeros=$(printf '%s\n' "$out" | grep -cE ': +0 *$')
     if [ "$zeros" -eq "$2" ] && ! printf '%s' "$out" | grep -q 'Lisp error'; then
         ok "maxima $1: $3 ($2 identities)"
@@ -1340,6 +1347,7 @@ if have maxima; then
     mac_zeros igrf_synthesis.mac 37 "IGRF field as minus the gradient of the Schmidt-normalised potential"
     # Diurnal aberration at aberration_erfa.rs's five stations: speed and the shift across the motion.
     out=$(timeout 300 maxima --very-quiet --suppress-input-echo -Q -b diurnal_aberration.mac </dev/null 2>&1)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 2 ] && printf '%s' "$out" | grep -q '^DONE' && ! printf '%s' "$out" | grep -q 'Lisp error'; then
         ok "maxima diurnal_aberration.mac: DIURNAL_EXACT is omega times the distance from the axis and asin(v/c) across the motion"
@@ -1359,6 +1367,7 @@ if have maxima; then
 
     mac_zeros cio_rotation.mac 8 "the CIO-based rotation as the IERS closed form in X, Y, s"
     out=$(macf mendes_pavlis_zenith.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 2 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima mendes_pavlis_zenith.mac: the zenith delay's 26 constants are Mendes & Pavlis's decimals; ZENITH_EXACT is d_h and d_nh at the IERS test point"
@@ -1366,6 +1375,7 @@ if have maxima; then
         bad "maxima mendes_pavlis_zenith.mac" "expected 2 checks to hold, found $holds"
     fi
     out=$(macf hardisp_goldens.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima hardisp_goldens.mac: M2, K1, Ssa and S2's exact Doodson sums at the published epoch; the clamped spline's defining equations solved exactly at six unequal knots"
@@ -1373,6 +1383,7 @@ if have maxima; then
         bad "maxima hardisp_goldens.mac" "expected 3 checks to hold, found $holds"
     fi
     out=$(macf geopotential_degree70.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 2 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima geopotential_degree70.mac: each term an exact rational times Nbar_nm / r, its gradient the defining one; the degree-70 XGM2019e acceleration at two points"
@@ -1423,6 +1434,24 @@ if have maxima; then
     mac_zeros slab_single_scattering.mac 12 "the slab's first-collision expectation and conservation"
     mac_zeros six_s_coupling_brdf.mac 15 "the 6S coupling inverse, Gauss-Legendre on [0, 1] and the BRDF kernels"
     mac_zeros ice_geometric_optics.mac 22 "the ice-crystal geometric optics: Fresnel, halos, J1 and Airy"
+
+    # The certificate for every table written through `certified` above (plans/17 Ф28.A): each
+    # literal its exact value correctly rounded, decided in Arb balls rather than against a bigfloat.
+    if have cc && pkg-config --exists flint 2>/dev/null; then
+        tmp=$(mktemp -d)
+        cert=""
+        # shellcheck disable=SC2046 # pkg-config prints separate flags
+        if cc -O2 arb_balls.c -o "$tmp/arb" $(pkg-config --cflags --libs flint) 2>"$tmp/cc.log" \
+            && cert=$(timeout 300 "$tmp/arb" < "$ARB_IN" 2>&1) \
+            && printf '%s' "$cert" | grep -q '^CERTIFIED 42 literals'; then
+            ok "arb arb_balls.c: $cert"
+        else
+            bad "arb arb_balls.c" "$(cat "$tmp/cc.log")${cert}"
+        fi
+        rm -rf "$tmp"
+    else
+        skip "arb arb_balls.c" "a C compiler and FLINT"
+    fi
 else
     skip "Ф17.B Maxima gates" maxima
 fi

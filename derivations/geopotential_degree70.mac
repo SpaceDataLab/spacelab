@@ -107,12 +107,15 @@ must(is(worst_diff < 10^-50) and is(worst_value < 10^-50),
      "(1) holds: the closed-form term and gradient are the defining ones, n <= 6 by diff, n <= 12 against assoc_legendre_p")$
 
 /* ---- (2) the degree-70 acceleration ------------------------------------------------------------ */
-acceleration(p) := block([r2 : p[1]^2 + p[2]^2 + p[3]^2, total : [0b0, 0b0, 0b0]],
-  for row in rows do block([n : row[1], m : row[2]],
-    total : total + bfloat(sqrt(nbar2(n, m)))
-                * bfloat(RE^n*term_gradient(p, n, m, [row[3], row[4]])/r2^n)),
-  GM*total/bfloat(sqrt(r2)))$
-exact : flatten(map(acceleration, P))$
+/* each component exact: GM / r times a sum of rationals times sqrt(Nbar_nm^2), added once */
+acceleration(p) := block([r2 : p[1]^2 + p[2]^2 + p[3]^2, terms : [[], [], []]],
+  for row in rows do block([n : row[1], m : row[2], w, g],
+    w : sqrt(nbar2(n, m)),
+    g : RE^n*term_gradient(p, n, m, [row[3], row[4]])/r2^n,
+    for i thru 3 do terms[i] : cons(w*g[i], terms[i])),
+  map(lambda([l], GM*apply("+", l)/sqrt(r2)), terms))$
+degree70_values : flatten(map(acceleration, P))$
+exact : map(bfloat, degree70_values)$
 
 lit(v) := block([a : abs(v), e, m, t],
   if is(equal(v, 0)) then return("0.0"),
@@ -123,6 +126,6 @@ lit(v) := block([a : abs(v), e, m, t],
   t : string(m),
   concat(if is(v < 0) then "-" else "", charat(t, 1), ".", substring(t, 2), "e", e))$
 print("DEGREE_70_EXACT", simplode(map(lit, exact), ", "))$
-must(transcribed(rust_table(geo, "DEGREE_70_EXACT"), exact),
+must(certified("DEGREE_70_EXACT", rust_table(geo, "DEGREE_70_EXACT"), degree70_values),
      "(2) holds: DEGREE_70_EXACT is the degree-70 sum's gradient at DEGREE_70_POINTS, exact")$
 print("DONE")$

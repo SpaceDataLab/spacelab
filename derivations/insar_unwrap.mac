@@ -117,8 +117,10 @@ fpprec : 40$
 ramp_dct(kk) := sum((m + 1)*cos(%pi*kk*(2*m + 1)/10), m, 0, 4)$
 zero("dct_forward_even_k_vanish",
      abs(ratsimp(radcan(ramp_dct(2)))) + abs(ratsimp(radcan(ramp_dct(4)))))$
-ramp_exact : makelist(bfloat(ramp_dct(kk)), kk, 0, 4)$
+ramp_values : makelist(ratsimp(radcan(ramp_dct(kk))), kk, 0, 4)$
+ramp_exact : map(bfloat, ramp_values)$
 printf(true, "DCT_FORWARD_EXACT ~{~a~^, ~}~%", ramp_exact)$
 zero("dct_forward_values_transcribed",
-     if transcribed(rust_table("../crates/spacelab-signal/src/insar.rs", "DCT_FORWARD_EXACT"),
-                    ramp_exact) then 0 else 1)$
+     if certified("DCT_FORWARD_EXACT",
+                  rust_table("../crates/spacelab-signal/src/insar.rs", "DCT_FORWARD_EXACT"),
+                  ramp_values) then 0 else 1)$

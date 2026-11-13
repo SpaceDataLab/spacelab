@@ -212,3 +212,40 @@ transcribed(literals, exact) := length(literals) = length(exact) and
           if place = 'none then is(bfloat(abs(x)) < 10^(-fpprec + 5))
           else is(bfloat(abs(v - x)) <= bfloat(place / 2)))),
         literals, exact)$
+
+/* `transcribed` against a bigfloat, which bounds nothing, and the same claim handed to Arb
+   (plans/17 Ф28.A): `exact` holds the values unevaluated -- rationals, %pi, %e, sums, products,
+   powers and the elementary functions Arb has -- and for each literal one line
+   `ARB name index literal <the value in reverse Polish notation>` goes to the output, where
+   `arb_balls.c` decides in ball arithmetic that the literal is the value correctly rounded. A float
+   inside a value, or a function Arb has not, is an error rather than a silent bigfloat. */
+arb_unary : ["sin", "cos", "tan", "asin", "acos", "atan", "exp", "log", "abs", "sinh", "cosh", "tanh"]$
+arb_emit(e) := block([inflag : true, o, a],
+  if ratnump(e) then arb_out : cons(string(e), arb_out)
+  else if e = %pi then arb_out : cons("pi", arb_out)
+  else if e = %e then arb_out : cons("e", arb_out)
+  else if floatnump(e) or bfloatp(e) then error("certified: a float, which bounds nothing:", e)
+  else if atom(e) then error("certified: a free symbol:", e)
+  else (o : op(e), a : args(e),
+    if o = "+" or o = "*" then (
+      for x in a do arb_emit(x),
+      arb_out : cons(concat(if o = "+" then "add" else "mul", length(a)), arb_out))
+    else if o = "^" and a[1] = %e then (arb_emit(a[2]), arb_out : cons("exp", arb_out))
+    else if o = "^" and integerp(a[2]) then (
+      arb_emit(a[1]), arb_out : cons(concat("pow", a[2]), arb_out))
+    else if o = "^" and ratnump(a[2]) then (
+      arb_emit(a[1]),
+      /* ratnumer, not num: a derivation may define its own num() */
+      arb_out : cons(concat("root", ratdisrep(ratdenom(a[2]))), arb_out),
+      if ratdisrep(ratnumer(a[2])) # 1 then
+        arb_out : cons(concat("pow", ratdisrep(ratnumer(a[2]))), arb_out))
+    else if o = "^" then (arb_emit(a[1]), arb_emit(a[2]), arb_out : cons("powx", arb_out))
+    else if o = 'atan2 then (arb_emit(a[1]), arb_emit(a[2]), arb_out : cons("atan2", arb_out))
+    else if length(a) = 1 and member(string(o), arb_unary) then (
+      arb_emit(a[1]), arb_out : cons(string(o), arb_out))
+    else error("certified: no Arb counterpart for", o)))$
+arb_rpn(e) := block([arb_out : []], arb_emit(e), reverse(arb_out))$
+certified(name, literals, exact) := transcribed(literals, map(bfloat, exact)) and
+  (for i thru length(literals) do
+     printf(true, "ARB ~a ~a ~a ~{~a~^ ~}~%", name, i - 1, rust_digits(literals[i]), arb_rpn(exact[i])),
+   true)$

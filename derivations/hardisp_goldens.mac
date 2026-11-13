@@ -61,7 +61,7 @@ print("ARGUMENTS_EXACT", simplode(map(lambda([v], lit(bfloat(v))), arguments), "
 /* S2 is 2 cycles per day and 720 times the day fraction exactly, whatever the polynomials say. */
 must(is(arguments[7] = 2) and is(arguments[8] = wrap(720*fr)),
      "(1) holds: S2's frequency is 2 and its argument 720 day fractions, exactly")$
-must(transcribed(rust_table(src, "ARGUMENTS_EXACT"), map(bfloat, arguments)),
+must(certified("ARGUMENTS_EXACT", rust_table(src, "ARGUMENTS_EXACT"), arguments),
      "(1) holds: ARGUMENTS_EXACT is M2, K1, Ssa and S2's Doodson sums at epoch(0)'s doubles, exact")$
 
 /* ---- (2) the spline ------------------------------------------------------------------------------ */
@@ -88,7 +88,7 @@ midpoint : makelist(d((x[k] + x[k + 1])/2), k, 1, n - 1)$
 midvalues : makelist(subst(solved, piece(midpoint[k], k)), k, 1, n - 1)$
 print("SPLINE_CURVATURE_EXACT", simplode(map(lambda([v], lit(bfloat(v))), curvature), ", "))$
 print("SPLINE_MIDPOINT_EXACT", simplode(map(lambda([v], lit(bfloat(v))), midvalues), ", "))$
-must(transcribed(rust_table(src, "SPLINE_CURVATURE_EXACT"), map(bfloat, curvature))
-     and transcribed(rust_table(src, "SPLINE_MIDPOINT_EXACT"), map(bfloat, midvalues)),
+must(certified("SPLINE_CURVATURE_EXACT", rust_table(src, "SPLINE_CURVATURE_EXACT"), curvature)
+     and certified("SPLINE_MIDPOINT_EXACT", rust_table(src, "SPLINE_MIDPOINT_EXACT"), midvalues),
      "(2) holds: the curvature and midpoint goldens are the clamped spline's defining equations solved exactly")$
 print("DONE")$

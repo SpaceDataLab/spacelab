@@ -1349,6 +1349,8 @@ typedef struct sl_mapping {
  * height and season; GMF (2006), which adds longitude; and VMF1 and VMF3, which take the `a`
  * coefficients an operational grid supplies instead of deriving them.
  *
+ * `day_of_year` is 1.0 at 1 January 0h UTC.
+ *
  * `elevation_rad` at or below the horizon is `SL_ERR_DOMAIN`: a mapping function is a ratio to the
  * zenith delay along a ray that leaves the atmosphere, and at the horizon it does not.
  */

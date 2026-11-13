@@ -180,7 +180,7 @@ fn niell_fraction<S: Scalar>(a: f64, b: f64, c: f64, elevation: S) -> S {
 
 /// The Niell (1996) tropospheric mapping functions `(hydrostatic, wet)` — the accurate replacement
 /// for [`obliquity_mapping`]. `latitude` (geodetic, rad), `height` (ellipsoidal, m), `day_of_year`
-/// (1–366, day fraction allowed), `elevation` (rad).
+/// (counted from January 0.0 UTC: 1.0 at 1 January 0h, fraction allowed), `elevation` (rad).
 ///
 /// The hydrostatic factor is latitude- and season-dependent (a cosine of day-of-year about day 28,
 /// shifted half a year in the southern hemisphere) with a height correction; the wet factor is
@@ -341,12 +341,16 @@ fn gmf_legendre(t: f64) -> [[f64; 10]; 10] {
 /// The Global Mapping Function (GMF) tropospheric mapping factors `(hydrostatic, wet)` of
 /// Böhm et al. 2006 — a spherical-harmonic (degree/order 9) empirical model, consistent with VMF1,
 /// needing only station location and date. `latitude`/`longitude` are geodetic radians, `height` the
-/// height above the ellipsoid (m), `day_of_year` the (fractional) day of year, `elevation` radians.
+/// height above the ellipsoid (m), `day_of_year` the day of year counted from January 0.0 UTC (1.0 at
+/// 1 January 0h, fraction allowed), `elevation` radians.
 ///
-/// Each `a` coefficient is
-/// `Σ (mean + ampl·cos(2π(doy + 1 − t0)/365.25))·P(n,m)(sin φ)·(cos mλ + sin mλ)` over the harmonics;
-/// the factors then follow the Marini continued fraction with the Niell hydrostatic height
-/// correction. Ported from Orekit's `GlobalMappingFunctionModel`.
+/// As the IERS Conventions (2010) routine `GMF.F` writes it, with the phase `u = 2π(doy − 28)/365.25`:
+/// each `a` coefficient is `Σ (mean + ampl·cos u)·P(n,m)(sin φ)·(cos mλ + sin mλ)` over the harmonics,
+/// one phase on both hemispheres since the expansion is global, and the hydrostatic `c` is
+/// `c0h + ((cos(u + ψ) + 1)·c11h/2 + c10h)(1 − cos φ)` with `ψ = π` south of the equator. The factors
+/// then follow the Marini continued fraction with the Niell hydrostatic height correction. `GMF.F`
+/// counts its days from 28 January 1980, so its phase runs ahead of this calendar one by the part of a
+/// day the 365.25-day cycle has drifted (0.75 day in 2009). `derivations/gnss_mapping.mac`.
 #[must_use]
 pub fn gmf_mapping<S: Scalar>(
     latitude: f64,
@@ -358,22 +362,21 @@ pub fn gmf_mapping<S: Scalar>(
     // Hydrostatic b and c coefficients (Böhm et al. 2006); c depends on hemisphere and season.
     let bh = 0.0029;
     let c0h = 0.062;
-    let sin_lat = libm::sin(latitude);
-    let (c10h, c11h, psi) = if sin_lat > 0.0 {
-        (0.001, 0.005, 0.0) // northern hemisphere
-    } else {
+    let (c10h, c11h, psi) = if latitude < 0.0 {
         (0.002, 0.007, PI) // southern hemisphere
+    } else {
+        (0.001, 0.005, 0.0) // northern hemisphere
     };
-    let t0 = if latitude < 0.0 { 28.0 + 183.0 } else { 28.0 };
-    let coef = psi + ((day_of_year + 1.0 - t0) / 365.25) * TAU;
-    let ch = c0h + ((libm::cos(coef) + 1.0) * (c11h / 2.0) + c10h) * (1.0 - libm::cos(latitude));
+    let phase = (day_of_year - 28.0) / 365.25 * TAU;
+    let ch =
+        c0h + ((libm::cos(phase + psi) + 1.0) * (c11h / 2.0) + c10h) * (1.0 - libm::cos(latitude));
 
     // Wet b and c coefficients (Böhm et al. 2006), fixed.
     let bw = 0.00146;
     let cw = 0.04391;
 
     // Spherical-harmonic series for the a coefficients, Pnm(sin φ) to degree/order 9.
-    let p = gmf_legendre(sin_lat);
+    let p = gmf_legendre(libm::sin(latitude));
     let mut a0_hydro = 0.0;
     let mut ampl_hydro = 0.0;
     let mut a0_wet = 0.0;
@@ -394,7 +397,7 @@ pub fn gmf_mapping<S: Scalar>(
             j += 1;
         }
     }
-    let seasonal = libm::cos(coef - psi);
+    let seasonal = libm::cos(phase);
     let ah = a0_hydro + ampl_hydro * seasonal;
     let aw = a0_wet + ampl_wet * seasonal;
 
@@ -411,11 +414,12 @@ pub fn gmf_mapping<S: Scalar>(
 /// The Vienna Mapping Function VMF1 tropospheric mapping factors `(hydrostatic, wet)` of
 /// Böhm et al. (2006). The `ah`/`aw` a-coefficients are **caller-supplied** (they come from numerical
 /// weather models — Orekit's `ViennaACoefficients` / `ConstantViennaAProvider`), while the `b`/`c`
-/// coefficients are fixed: the hydrostatic `c` follows a latitude/day-of-year formula with a
-/// northern/southern-hemisphere phase `psi`, and the hydrostatic factor carries the Niell (1996)
-/// height correction (the wet factor does not). `latitude` (geodetic, rad), `height` (m above the
-/// ellipsoid), `day_of_year` (Orekit's continuous `getDayOfYear`, with day 1.0 = 1 Jan at noon),
-/// `elevation` (rad). Ported from Orekit's `ViennaOne`.
+/// coefficients are fixed: the hydrostatic `c` is [`gmf_mapping`]'s, `c0h + ((cos(u + ψ) + 1)·c11h/2 +
+/// c10h)(1 − cos φ)` with `u = 2π(doy − 28)/365.25` and `ψ = π` south of the equator, and the
+/// hydrostatic factor carries the Niell (1996) height correction (the wet factor does not), as the
+/// IERS Conventions (2010) routine `VMF1_HT.F` writes it. `latitude` (geodetic, rad), `height` (m
+/// above the ellipsoid), `day_of_year` (counted from January 0.0 UTC: 1.0 at 1 January 0h, fraction
+/// allowed), `elevation` (rad). `derivations/gnss_mapping.mac`.
 #[must_use]
 pub fn vmf1_mapping<S: Scalar>(
     ah: f64,
@@ -428,15 +432,14 @@ pub fn vmf1_mapping<S: Scalar>(
     // Hydrostatic b and c coefficients; c depends on hemisphere and season.
     let bh = 0.0029;
     let c0h = 0.062;
-    let (c10h, c11h, psi) = if libm::sin(latitude) > 0.0 {
-        (0.001, 0.005, 0.0) // northern hemisphere
-    } else {
+    let (c10h, c11h, psi) = if latitude < 0.0 {
         (0.002, 0.007, PI) // southern hemisphere
+    } else {
+        (0.001, 0.005, 0.0) // northern hemisphere
     };
-    let t0 = if latitude < 0.0 { 28.0 + 183.0 } else { 28.0 };
-    // VMF1 normalises the seasonal phase by 365 (not 365.25) and does not offset the day of year.
-    let coef = psi + ((day_of_year - t0) / 365.0) * TAU;
-    let ch = c0h + ((libm::cos(coef) + 1.0) * (c11h / 2.0) + c10h) * (1.0 - libm::cos(latitude));
+    let phase = (day_of_year - 28.0) / 365.25 * TAU;
+    let ch =
+        c0h + ((libm::cos(phase + psi) + 1.0) * (c11h / 2.0) + c10h) * (1.0 - libm::cos(latitude));
 
     // Wet b and c coefficients, fixed.
     let bw = 0.00146;
@@ -5305,9 +5308,10 @@ fn vmf3_seasonal_fit(doy: f64, a0: f64, a1: f64, a2: f64, b1: f64, b2: f64) -> f
 /// Landskron & Böhm (2018) — a spherical-harmonic (degree/order 12) refinement of VMF1 whose `b`/`c`
 /// coefficients come from a Legendre-in-latitude, Fourier-in-longitude expansion with a seasonal fit.
 /// The `ah`/`aw` a-coefficients are **caller-supplied** (numerical weather models). `latitude`/
-/// `longitude` are geodetic radians, `height` is metres above the ellipsoid, `day_of_year` is Orekit's
-/// continuous `getDayOfYear` (day 1.0 = 1 Jan noon), `elevation` radians. Ported from Orekit's
-/// `ViennaThree`.
+/// `longitude` are geodetic radians, `height` is metres above the ellipsoid, `day_of_year` is counted
+/// from January 0.0 UTC (1.0 at 1 January 0h, fraction allowed) as TU Wien's `vmf3.m` takes it from the
+/// MJD, `elevation` radians. Tables from Orekit's `ViennaThree`; `derivations/gnss_mapping.mac` holds
+/// the formulas to `vmf3.m`.
 #[must_use]
 pub fn vmf3_mapping<S: Scalar>(
     ah: f64,
@@ -5411,6 +5415,8 @@ pub fn ionospheric_mapping_factor<S: Scalar>(elevation: S, ionosphere_height: f6
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::excessive_precision)]
+
     use proptest::prelude::*;
 
     use super::*;
@@ -5788,13 +5794,81 @@ mod tests {
         assert!(obliquity_mapping(10.0_f64.to_radians()) > 5.0);
     }
 
+    /// `derivations/gnss_mapping.mac` (6) at 40 digits, `(hydrostatic, wet)` pairs: Niell at 48° N,
+    /// 68 m, day 1, 5° elevation; GMF and VMF1 at the IERS routines' test cases and their southern
+    /// mirrors; VMF3 at 37.5° N 277.5° E, 2018-11-25 12h (day 329.5), at 38°, 5° and 85°.
+    const NIELL_MAXIMA: [f64; 2] = [1.015_645_975_476_051_841_1e1, 1.074_751_386_753_790_008_2e1];
+    const GMF_MAXIMA: [f64; 4] = [
+        3.425_245_519_339_136_858_4e0,
+        3.449_589_116_182_418_39e0,
+        3.426_611_275_391_242_902_8e0,
+        3.450_709_541_784_632_399_1e0,
+    ];
+    const VMF1_MAXIMA: [f64; 4] = [
+        3.425_088_087_972_571_545_8e0,
+        3.448_299_714_692_571_926_5e0,
+        3.425_081_317_979_232_311_9e0,
+        3.448_299_714_692_571_926_5e0,
+    ];
+    const VMF3_MAXIMA: [f64; 6] = [
+        1.621_023_722_917_122_971_8e0,
+        1.623_023_296_301_598_602_1e0,
+        1.013_279_091_361_455_063_9e1,
+        1.087_915_360_644_627_225_8e1,
+        1.003_810_410_985_008_976_7e0,
+        1.003_816_229_746_941_519_9e0,
+    ];
+    /// The IERS routines' test case (`GMF.F`, `VMF1_HT.F`): NRAO Green Bank, MJD 55055. Their day count
+    /// `MJD − 44239 + 1 − 28` is this crate's `day_of_year − 28` less 29 turns of 365.25 days when
+    /// `day_of_year` is 224.75: the 365.25-day cycle runs 0.75 day ahead of the 2009 calendar.
+    const IERS_LATITUDE: f64 = 0.6708665767;
+    const IERS_LONGITUDE: f64 = -1.393397187;
+    const IERS_ZENITH_DISTANCE: f64 = 1.278564131;
+    const IERS_DAY_OF_YEAR: f64 = 224.75;
+
+    fn relative(got: f64, want: f64) -> f64 {
+        (got - want).abs() / want.abs()
+    }
+
+    /// One `comparison | ...` row of `tools/compare.py`: the relative distances to the reference
+    /// values of Orekit's own unit tests, whose Orekit version the fixtures do not record.
+    fn comparison_row(quantity: &str, distances: &[f64]) {
+        let max = distances
+            .iter()
+            .copied()
+            .fold(0.0, spacelab_testkit::nan_max);
+        let rms = libm::sqrt(distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64);
+        std::println!(
+            "comparison | Orekit | not recorded | {quantity} | relative | {} | {max:.3e} | {rms:.3e}",
+            distances.len()
+        );
+    }
+
+    /// The distance to Orekit's `NiellMappingFunctionModelTest` reference (48° N, 68 m, day 1, 5°),
+    /// printed to three decimals. [`niell_is_its_definition_at_the_reference_point`] decides.
     #[test]
-    fn niell_matches_the_orekit_reference_values() {
-        // Orekit NiellMappingFunctionModelTest: 48° lat, 68 m, 1994-01-01 (DOY 1), 5° elevation
-        // → hydrostatic 10.156, wet 10.748.
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn niell_distance_to_orekit() {
         let (hydro, wet) = niell_mapping(48.0_f64.to_radians(), 68.0, 1.0, 5.0_f64.to_radians());
-        assert!((hydro - 10.156).abs() < 2e-3, "hydrostatic {hydro}");
-        assert!((wet - 10.748).abs() < 2e-3, "wet {wet}");
+        comparison_row(
+            "Niell mapping, 48 deg N, 5 deg elevation, (hydrostatic, wet)",
+            &[relative(hydro, 10.156), relative(wet, 10.748)],
+        );
+    }
+
+    /// Niell (1996) at its reference point: the tables interpolated in latitude, the hydrostatic
+    /// season, the height correction and the continued fraction, at 40 digits by
+    /// `derivations/gnss_mapping.mac` (6). (G3)
+    #[test]
+    fn niell_is_its_definition_at_the_reference_point() {
+        let (hydro, wet) = niell_mapping(48.0_f64.to_radians(), 68.0, 1.0, 5.0_f64.to_radians());
+        let worst = relative(hydro, NIELL_MAXIMA[0]).max(relative(wet, NIELL_MAXIMA[1]));
+        println!("Niell against 40 digits: {worst:.3e}");
+        // Measured 0: both factors round to the nearest double. Two ulps.
+        assert!(
+            worst < 5e-16,
+            "Niell ({hydro}, {wet}) against {NIELL_MAXIMA:?}: {worst:.3e}"
+        );
     }
 
     /// The southern hemisphere is the northern one, 183 days later.
@@ -5916,55 +5990,91 @@ mod tests {
         assert!((2.0..4.0).contains(&low), "10° factor {low}"); // ~3 at low elevation
     }
 
+    /// The distance to Orekit's `GlobalMappingFunctionModelTest` (Green Bank, 2009-08-12 12h UTC, day
+    /// 224.5 here), whose expectations are `GMF.F`'s test output rounded to six decimals.
+    /// [`gmf_is_the_iers_routine_at_its_test_case`] decides.
     #[test]
-    fn gmf_matches_the_orekit_reference_values() {
-        // Orekit GlobalMappingFunctionModelTest (NRAO, Green Bank, WV): MJD 55055 (12 Aug 2009) at
-        // 43200 s UTC → hydrostatic 3.425246, wet 3.449589 (IERS Conventions 2010 reference).
-        let latitude = 0.6708665767;
-        let longitude = -1.393397187;
-        let height = 844.715;
-        let elevation = 0.5 * PI - 1.278564131;
-        // Orekit's AbsoluteDate.getDayOfYear(utc): day 1.0 falls on 1 January at noon, so noon of the
-        // 224th day of 2009 is 224.0 (NOT 224.5); durationFrom() also crosses the 2008-12-31 leap
-        // second, adding 1 s = 1/86400 day (negligible at this tolerance).
-        let day_of_year = (224.0 * 86_400.0 + 1.0) / 86_400.0;
-        let (hydro, wet) = gmf_mapping(latitude, longitude, height, day_of_year, elevation);
-        assert!((hydro - 3.425246).abs() < 2e-6, "hydrostatic {hydro}");
-        assert!((wet - 3.449589).abs() < 2e-6, "wet {wet}");
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn gmf_distance_to_orekit() {
+        let elevation = 0.5 * PI - IERS_ZENITH_DISTANCE;
+        let (hydro, wet) = gmf_mapping(IERS_LATITUDE, IERS_LONGITUDE, 844.715, 224.5, elevation);
+        comparison_row(
+            "GMF mapping, Green Bank, 2009-08-12 12h, (hydrostatic, wet)",
+            &[relative(hydro, 3.425246), relative(wet, 3.449589)],
+        );
+    }
+
+    /// GMF is the IERS Conventions routine `GMF.F` at its own test case, and at the same site mirrored
+    /// south of the equator, where the routine keeps the `a` season and shifts `c`'s by π:
+    /// `derivations/gnss_mapping.mac` (2) and (4) at 40 digits; (2) also holds the 40-digit value to
+    /// the routine's printed output. (G3)
+    #[test]
+    fn gmf_is_the_iers_routine_at_its_test_case() {
+        let elevation = 0.5 * PI - IERS_ZENITH_DISTANCE;
+        let mut worst = 0.0_f64;
+        for (latitude, want) in [
+            (IERS_LATITUDE, &GMF_MAXIMA[0..2]),
+            (-IERS_LATITUDE, &GMF_MAXIMA[2..4]),
+        ] {
+            let (hydro, wet) = gmf_mapping(
+                latitude,
+                IERS_LONGITUDE,
+                844.715,
+                IERS_DAY_OF_YEAR,
+                elevation,
+            );
+            worst = worst
+                .max(relative(hydro, want[0]))
+                .max(relative(wet, want[1]));
+        }
+        println!("GMF against GMF.F at 40 digits: {worst:.3e}");
+        // Measured 5.2e-16.
+        assert!(worst < 2e-15, "GMF against GMF.F: {worst:.3e}");
+    }
+
+    /// GMF and VMF1 are continuous across the equator, from either side.
+    ///
+    /// The routines' only hemisphere switch is `c`'s: `ψ = π` and the southern `c10h`, `c11h`, all
+    /// inside the term multiplied by `1 − cos φ`, which is exactly zero at the equator. The `a`
+    /// season does not switch, and the spherical-harmonic `a` coefficients are continuous in
+    /// `sin φ`. The neighbours are the smallest doubles either side, so a disagreement can only be
+    /// a seasonal phase that changes with the hemisphere, as the former `t0 = 28 + 183` did for
+    /// half a year.
+    #[test]
+    fn the_gmf_and_vmf1_seasons_are_continuous_across_the_equator() {
+        let el = 12.0_f64.to_radians();
+        let same = |a: (f64, f64), b: (f64, f64)| {
+            (a.0 / b.0 - 1.0).abs() < 1e-14 && (a.1 / b.1 - 1.0).abs() < 1e-14
+        };
+        for doy in [1.0_f64, 88.0, 205.0, 331.0] {
+            for side in [f64::MIN_POSITIVE, -f64::MIN_POSITIVE] {
+                let (equator, neighbour) = (
+                    gmf_mapping(0.0, 0.3, 400.0, doy, el),
+                    gmf_mapping(side, 0.3, 400.0, doy, el),
+                );
+                assert!(
+                    same(equator, neighbour),
+                    "GMF day {doy}: the equator {equator:?} against {side:e}'s {neighbour:?}"
+                );
+                let (equator, neighbour) = (
+                    vmf1_mapping(0.001_276_83, 0.000_609_55, 0.0, 400.0, doy, el),
+                    vmf1_mapping(0.001_276_83, 0.000_609_55, side, 400.0, doy, el),
+                );
+                assert!(
+                    same(equator, neighbour),
+                    "VMF1 day {doy}: the equator {equator:?} against {side:e}'s {neighbour:?}"
+                );
+            }
+        }
     }
 
     /// GMF and VMF1 are affine in the cosine of the seasonal phase, on both hemispheres. (G3)
     ///
     /// GMF's `a` coefficients are `mean + ampl·cos u` and both models' hydrostatic `c` is
-    /// `c0h + [(cos u + 1)·c11h/2 + c10h]·(1 − cos φ)`, so every coefficient is affine in the same
-    /// `u = cos(2π(d − t0)/T)`. The quarter-phase day, where that cosine vanishes, must therefore
-    /// sit midway between the two extremes up to the curvature of the continued fraction. Each
-    /// model is checked against one Orekit point on one day at one northern latitude, which fixes
-    /// neither the period, nor the phase normalisation, nor the southern branch.
-    /// GMF's equator belongs to the northern hemisphere.
-    ///
-    /// `t0` is chosen by `latitude < 0.0`, so the equator and a site an inch north of it differ in
-    /// nothing else: the spherical-harmonic `a` coefficients are continuous in `sin φ` and the `c`
-    /// coefficient's whole latitude term is multiplied by `1 − cos φ`, which is exactly zero
-    /// there. What is left is the seasonal phase, and half a year of it is not a rounding.
-    ///
-    /// The neighbour is the smallest positive double, so the `a` series sees a `sin φ` that differs
-    /// from zero by `1e-308` and the two calls can only disagree through `t0` — bar the couple of
-    /// ulps that reducing `cos(coef − ψ)` costs when `ψ` is `π` rather than `0`.
-    #[test]
-    fn the_gmf_equator_belongs_to_the_northern_hemisphere() {
-        let el = 12.0_f64.to_radians();
-        for doy in [1.0_f64, 88.0, 205.0, 331.0] {
-            let equator = gmf_mapping(0.0, 0.3, 400.0, doy, el);
-            let north = gmf_mapping(f64::MIN_POSITIVE, 0.3, 400.0, doy, el);
-            assert!(
-                (equator.0 / north.0 - 1.0).abs() < 1e-14
-                    && (equator.1 / north.1 - 1.0).abs() < 1e-14,
-                "day {doy}: the equator {equator:?} does not continue the northern side {north:?}"
-            );
-        }
-    }
-
+    /// `c0h + [(cos(u + ψ) + 1)·c11h/2 + c10h]·(1 − cos φ)` with `cos(u + ψ) = ±cos u`, so every
+    /// coefficient is affine in the same `cos u`, `u = 2π(d − 28)/365.25`, on both hemispheres. The
+    /// quarter-phase day, where that cosine vanishes, must therefore sit midway between the two
+    /// extremes up to the curvature of the continued fraction.
     #[test]
     fn the_gmf_and_vmf1_seasons_are_affine_in_the_cosine_of_the_day() {
         let el = 7.0_f64.to_radians();
@@ -5978,46 +6088,70 @@ mod tests {
                  ({lo}, {hi})"
             );
         };
+        let (t0, year) = (28.0, 365.25);
         for lat_deg in [-64.0_f64, -19.0, 24.0, 57.0] {
             let lat = lat_deg.to_radians();
-            let t0 = if lat_deg < 0.0 { 28.0 + 183.0 } else { 28.0 };
 
-            // GMF: period 365.25, and the day is offset by one before the phase is taken.
             let g = |doy: f64| gmf_mapping(lat, 0.7, 600.0, doy, el);
-            let (peak, trough, mean) = (
-                g(t0 - 1.0),
-                g(t0 - 1.0 + 365.25 / 2.0),
-                g(t0 - 1.0 + 365.25 / 4.0),
-            );
+            let (peak, trough, mean) = (g(t0), g(t0 + year / 2.0), g(t0 + year / 4.0));
             midway((mean.0, peak.0, trough.0), "GMF hydrostatic", lat_deg);
             midway((mean.1, peak.1, trough.1), "GMF wet", lat_deg);
 
-            // VMF1: period 365, no day offset, and the `a` coefficients are caller-supplied, so
-            // only the hydrostatic `c` carries the season.
+            // VMF1's `a` coefficients are caller-supplied, so only the hydrostatic `c` carries the
+            // season.
             let v = |doy: f64| vmf1_mapping(0.001_276_83, 0.000_609_55, lat, 600.0, doy, el);
-            let (peak, trough, mean) = (v(t0), v(t0 + 365.0 / 2.0), v(t0 + 365.0 / 4.0));
+            let (peak, trough, mean) = (v(t0), v(t0 + year / 2.0), v(t0 + year / 4.0));
             midway((mean.0, peak.0, trough.0), "VMF1 hydrostatic", lat_deg);
         }
     }
 
+    /// The distance to Orekit's `ViennaOneMappingFunctionTest` (ah 0.00127683, aw 0.00060955, 38° N,
+    /// 824.17 m, 2009-08-12 0h, day 224.0 here), whose expectations are `VMF1_HT.F`'s test output, at
+    /// the routine's latitude 0.6708665767, rounded to six decimals.
+    /// [`vmf1_is_the_iers_routine_at_its_test_case`] decides.
     #[test]
-    fn vmf1_matches_the_orekit_reference_values() {
-        // Orekit ViennaOneMappingFunctionTest (NRAO, Green Bank, WV): ah=0.00127683, aw=0.00060955;
-        // lat 38°, lon 280°, h 824.17 m; MJD 55055 at 0h UTC → hydrostatic 3.425088, wet 3.448300.
-        // getDayOfYear(utc): 2009-08-12 is DOY 224 at noon, so midnight is 223.5; durationFrom() also
-        // crosses the 2008-12-31 leap second, adding 1 s = 1/86400 day.
-        let day_of_year = (223.5 * 86_400.0 + 1.0) / 86_400.0;
-        let elevation = 0.5 * PI - 1.278564131;
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn vmf1_distance_to_orekit() {
+        let elevation = 0.5 * PI - IERS_ZENITH_DISTANCE;
         let (hydro, wet) = vmf1_mapping(
             0.00127683,
             0.00060955,
             38.0_f64.to_radians(),
             824.17,
-            day_of_year,
+            224.0,
             elevation,
         );
-        assert!((hydro - 3.425088).abs() < 2e-6, "hydrostatic {hydro}");
-        assert!((wet - 3.448300).abs() < 2e-6, "wet {wet}");
+        comparison_row(
+            "VMF1 mapping, Green Bank, 2009-08-12 0h, (hydrostatic, wet)",
+            &[relative(hydro, 3.425088), relative(wet, 3.448300)],
+        );
+    }
+
+    /// VMF1 is the IERS Conventions routine `VMF1_HT.F` at its own test case and at its southern
+    /// mirror, `derivations/gnss_mapping.mac` (3) and (4) at 40 digits. (G3)
+    #[test]
+    fn vmf1_is_the_iers_routine_at_its_test_case() {
+        let elevation = 0.5 * PI - IERS_ZENITH_DISTANCE;
+        let mut worst = 0.0_f64;
+        for (latitude, want) in [
+            (IERS_LATITUDE, &VMF1_MAXIMA[0..2]),
+            (-IERS_LATITUDE, &VMF1_MAXIMA[2..4]),
+        ] {
+            let (hydro, wet) = vmf1_mapping(
+                0.00127683,
+                0.00060955,
+                latitude,
+                824.17,
+                IERS_DAY_OF_YEAR,
+                elevation,
+            );
+            worst = worst
+                .max(relative(hydro, want[0]))
+                .max(relative(wet, want[1]));
+        }
+        println!("VMF1 against VMF1_HT.F at 40 digits: {worst:.3e}");
+        // Measured 3.9e-16.
+        assert!(worst < 1.5e-15, "VMF1 against VMF1_HT.F: {worst:.3e}");
     }
 
     /// The three published VMF1 hydrostatic `c` constants, recovered by inverting the model.
@@ -6049,20 +6183,20 @@ mod tests {
             }
             f64::midpoint(lo, hi)
         };
-        // VMF1 takes the phase straight from the day, so the extrema sit on t0 and half a period
-        // away; in the south `psi = PI` swaps which of the two is the peak.
+        // `c`'s extrema sit on day 28 and half a 365.25-day year later; in the south `psi = PI`
+        // swaps which of the two is the peak.
+        let (t0, half) = (28.0, 365.25 / 2.0);
         for lat_deg in [-70.0_f64, -31.0, 18.0, 47.0] {
             let north = lat_deg > 0.0;
-            let (t0, c10h, c11h) = if north {
-                (28.0, 0.001, 0.005)
+            let (c10h, c11h) = if north {
+                (0.001, 0.005)
             } else {
-                (28.0 + 183.0, 0.002, 0.007)
+                (0.002, 0.007)
             };
-            let half = 365.0 / 2.0;
             let (peak, trough) = if north {
                 (t0, t0 + half)
             } else {
-                (t0 - half, t0)
+                (t0 + half, t0)
             };
             let lat = lat_deg.to_radians();
             let k = 1.0 - libm::cos(lat);
@@ -6078,9 +6212,8 @@ mod tests {
                 );
             }
             // The season has one peak a year, not many: a single day past it the coefficient has
-            // already fallen. Nothing above sees the length of the year, because both solstices sit
-            // on a half-integer number of turns and that survives dropping the 365 -- the drop is
-            // `c11h/2 (1 - cos(TAU/365))` per unit `k`, 3.7e-7 north and 5.2e-7 south.
+            // already fallen, by `c11h/2 (1 - cos(TAU/365.25))` per unit `k`, 3.7e-7 north and
+            // 5.2e-7 south.
             let day_after = (cp - recover_ch(lat, peak + 1.0)) / k;
             assert!(
                 day_after > 2e-7,
@@ -6129,20 +6262,20 @@ mod tests {
             }
             f64::midpoint(lo, hi)
         };
-        // GMF offsets the day by one before taking the phase, so the extrema sit at t0 - 1 and half
-        // a period away; in the south `psi = PI` swaps which of the two is the peak.
+        // `c`'s extrema sit on day 28 and half a 365.25-day year later; in the south `psi = PI`
+        // swaps which of the two is the peak.
+        let (t0, half) = (28.0, 365.25 / 2.0);
         for lat_deg in [-70.0_f64, -31.0, 18.0, 47.0] {
             let north = lat_deg > 0.0;
-            let (t0, c10h, c11h) = if north {
-                (28.0, 0.001, 0.005)
+            let (c10h, c11h) = if north {
+                (0.001, 0.005)
             } else {
-                (28.0 + 183.0, 0.002, 0.007)
+                (0.002, 0.007)
             };
-            let half = 365.25 / 2.0;
             let (peak, trough) = if north {
-                (t0 - 1.0, t0 - 1.0 + half)
+                (t0, t0 + half)
             } else {
-                (t0 - 1.0 - half, t0 - 1.0)
+                (t0 + half, t0)
             };
             let lat = lat_deg.to_radians();
             let k = 1.0 - libm::cos(lat);
@@ -6167,31 +6300,61 @@ mod tests {
         }
     }
 
+    /// The distance to Orekit's `ViennaThreeMappingFunctionTest` (ah 0.00123462, aw 0.00047101,
+    /// 37.5° N 277.5° E, 824 m, 2018-11-25 12h, day 329.5 here) at 38°, 5° and 85°, printed to six
+    /// decimals. Orekit feeds its noon-based `getDayOfYear`, 329.0, where `vmf3.m` takes 329.5.
+    /// [`vmf3_is_the_tu_wien_routine`] decides.
     #[test]
-    fn vmf3_matches_the_orekit_reference_values() {
-        // Orekit ViennaThreeMappingFunctionTest: ah=0.00123462, aw=0.00047101; lat 37.5°, lon 277.5°,
-        // h 824.0 m; 2018-11-25 12:00:00 UTC → DOY 329.0 (noon, no leap second crossed in 2018).
-        let day_of_year = 329.0;
-        let ah = 0.00123462;
-        let aw = 0.00047101;
-        let lat = 37.5_f64.to_radians();
-        let lon = 277.5_f64.to_radians();
-        let h = 824.0;
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn vmf3_distance_to_orekit() {
+        let orekit = [
+            (38.0, 1.621024, 1.623023),
+            (5.0, 10.132802, 10.879154),
+            (85.0, 1.003810, 1.003816),
+        ];
+        let distances: std::vec::Vec<f64> = orekit
+            .iter()
+            .flat_map(|&(el, h, w)| {
+                let (hydro, wet) = vmf3_mapping(
+                    0.00123462,
+                    0.00047101,
+                    37.5_f64.to_radians(),
+                    277.5_f64.to_radians(),
+                    824.0,
+                    329.5,
+                    f64::to_radians(el),
+                );
+                [relative(hydro, h), relative(wet, w)]
+            })
+            .collect();
+        comparison_row(
+            "VMF3 mapping, 2018-11-25 12h, 38, 5 and 85 deg, (hydrostatic, wet)",
+            &distances,
+        );
+    }
 
-        // Elevation 38° → hydrostatic 1.621024, wet 1.623023.
-        let (hydro, wet) = vmf3_mapping(ah, aw, lat, lon, h, day_of_year, 38.0_f64.to_radians());
-        assert!((hydro - 1.621024).abs() < 2e-6, "38° hydrostatic {hydro}");
-        assert!((wet - 1.623023).abs() < 2e-6, "38° wet {wet}");
-
-        // Elevation 5° → hydrostatic 10.132802, wet 10.879154.
-        let (hydro, wet) = vmf3_mapping(ah, aw, lat, lon, h, day_of_year, 5.0_f64.to_radians());
-        assert!((hydro - 10.132802).abs() < 2e-6, "5° hydrostatic {hydro}");
-        assert!((wet - 10.879154).abs() < 2e-6, "5° wet {wet}");
-
-        // Elevation 85° → hydrostatic 1.003810, wet 1.003816.
-        let (hydro, wet) = vmf3_mapping(ah, aw, lat, lon, h, day_of_year, 85.0_f64.to_radians());
-        assert!((hydro - 1.003810).abs() < 2e-6, "85° hydrostatic {hydro}");
-        assert!((wet - 1.003816).abs() < 2e-6, "85° wet {wet}");
+    /// VMF3 is TU Wien's `vmf3.m` over the shipped tables at three elevations,
+    /// `derivations/gnss_mapping.mac` (5) and (6) at 40 digits. (G3)
+    #[test]
+    fn vmf3_is_the_tu_wien_routine() {
+        let mut worst = 0.0_f64;
+        for (i, el) in [38.0_f64, 5.0, 85.0].into_iter().enumerate() {
+            let (hydro, wet) = vmf3_mapping(
+                0.00123462,
+                0.00047101,
+                37.5_f64.to_radians(),
+                277.5_f64.to_radians(),
+                824.0,
+                329.5,
+                el.to_radians(),
+            );
+            worst = worst
+                .max(relative(hydro, VMF3_MAXIMA[2 * i]))
+                .max(relative(wet, VMF3_MAXIMA[2 * i + 1]));
+        }
+        println!("VMF3 against vmf3.m at 40 digits: {worst:.3e}");
+        // Measured 2.2e-16.
+        assert!(worst < 1e-15, "VMF3 against vmf3.m: {worst:.3e}");
     }
 
     /// The Niell, GMF and VMF3 coefficient tables, sealed.

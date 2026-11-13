@@ -1,0 +1,194 @@
+/* `crates/spacelab-gnss/src/models.rs`: the Niell, GMF, VMF1 and VMF3 tropospheric mapping functions
+   against the routines that define them (plans/17 Ф19.G).
+
+   Orekit's NiellMappingFunctionModel, GlobalMappingFunctionModel, ViennaOne and ViennaThree decided
+   this until Ф19.G and are a comparator now (docs/comparisons.md). The definitions decide: GMF and VMF1
+   are the IERS Conventions (2010) chapter 9 routines `GMF.F` and `VMF1_HT.F`, VMF3 is TU Wien's
+   `vmf3.m` (Landskron & Böhm 2018), Niell is Niell (1996).
+     (1) the shipped continued fraction is the routines' TOPCON/(SINE + GAMMA), 1 at the zenith, and
+         the hydrostatic height correction is theirs, with Niell's three constants;
+     (2) GMF: `GMF.F`'s formulas over the shipped 9 x 9 tables reproduce `GMF.F`'s own test case to
+         the digits a double carries, so the 440 shipped coefficients are the routine's; its day count
+         DOY = MJD - 44239 + 1 - 28 is the shipped (doy - 28) less whole 365.25-day turns, with doy
+         224.75 for MJD 55055 (2009-08-12 0h, the cycle 0.75 day ahead of the calendar);
+     (3) VMF1: `VMF1_HT.F`'s formulas reproduce its test case the same way;
+     (4) both routines take the `a` season with one phase on both hemispheres and give the
+         hydrostatic `c` the phase + pi south of the equator: the shipped code's former
+         t0 = 28 + 183 there reversed `a`'s season and cancelled the pi (F94);
+     (5) VMF3: `vmf3.m`'s V/W recursion is the shipped Heiskanen-Moritz P_nm(sin phi) times
+         (cos m lambda, sin m lambda) to degree 12, and its seasonal fit takes the calendar day of
+         year plus the fraction of the day;
+     (6) the goldens of the Rust G3 tests at 40 digits: Niell at its reference point, GMF and VMF1 at
+         the IERS test cases and their southern mirrors, VMF3 at three elevations.
+
+   timeout 600 maxima --very-quiet -Q -b gnss_mapping.mac                                            */
+
+load("rust_literals.mac")$
+fpprec : 40$
+fpprintprec : 20$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+src : "../crates/spacelab-gnss/src/models.rs"$
+in_source(path, text) := block([s : openr(path), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+all_in_source(path, texts) := every(lambda([t], in_source(path, t)), texts)$
+zero(u) := every(lambda([x], is(ratsimp(x) = 0)), if listp(u) then u else [u])$
+rtab(name) := map(rust_rational, rust_table(src, name))$
+rows5(l) := makelist(makelist(l[5*i + j], j, 1, 5), i, 0, length(l)/5 - 1)$
+bpi : bfloat(%pi)$
+
+/* ---- (1) the continued fraction -------------------------------------------------------------------- */
+/* The routines' form: BETA = B/(SINE + C), GAMMA = A/(SINE + BETA), TOPCON = 1 + A/(1 + B/(1 + C)). */
+routine_m(a, b, c, se) := block([beta, gamma, topcon],
+  beta : b/(se + c), gamma : a/(se + beta), topcon : 1 + a/(1 + b/(1 + c)), topcon/(se + gamma))$
+shipped_m(a, b, c, se) := (1 + a/(1 + b/(1 + c)))/(se + a/(se + b/(se + c)))$
+A_HT : rust_rational("2.53e-5")$  B_HT : rust_rational("5.49e-3")$  C_HT : rust_rational("1.14e-3")$
+height_correction(se, h) := (1/se - routine_m(A_HT, B_HT, C_HT, se))*h/1000$
+must(zero(routine_m(a, b, c, se) - shipped_m(a, b, c, se)) and zero(shipped_m(a, b, c, 1) - 1)
+     and all_in_source(src, [
+       "let num = 1.0 + a / (1.0 + b / (1.0 + c));",
+       "let den = sin_e + S::from_f64(a) / (sin_e + S::from_f64(b) / (sin_e + S::from_f64(c)));",
+       "- niell_fraction(2.53e-5, 5.49e-3, 1.14e-3, elevation))",
+       "* S::from_f64(height.max(0.0) / 1000.0);"]),
+     "(1) holds: the shipped fraction is the routines' TOPCON/(SINE + GAMMA), 1 at the zenith; the height correction is (1/sin e - m(2.53e-5, 5.49e-3, 1.14e-3)) h/1000")$
+
+/* ---- (2) GMF --------------------------------------------------------------------------------------- */
+/* Heiskanen & Moritz (1967) eq. 1-62, as GMF.F and the shipped code write it. */
+hm_legendre(n, m, t) := 1/2^n*sqrt(1 - t^2)^m
+  *sum((-1)^k*(2*n - 2*k)!/(k!*(n - k)!*(n - m - 2*k)!)*t^(n - m - 2*k), k, 0, floor((n - m)/2))$
+gmf_tables : map(rtab, ["GMF_AH_MEAN", "GMF_BH_MEAN", "GMF_AH_AMPL", "GMF_BH_AMPL",
+                       "GMF_AW_MEAN", "GMF_BW_MEAN", "GMF_AW_AMPL", "GMF_BW_AMPL"])$
+/* Sum over the 55 harmonics of (A P cos m lambda + B P sin m lambda) 1e-5, for a pair of tables. */
+gmf_series(A, B, lat, lon) := block([t : bfloat(sin(lat)), i : 0, acc : 0],
+  for n : 0 thru 9 do for m : 0 thru n do (i : i + 1,
+    acc : acc + (A[i]*hm_legendre(n, m, t)*bfloat(cos(m*lon)) + B[i]*hm_legendre(n, m, t)*bfloat(sin(m*lon)))/10^5),
+  acc)$
+/* GMF.F, statement for statement: DOY from the MJD, PHH = pi south, the a season unshifted. */
+gmf_iers(mjd, lat, lon, h, zd) := block([doy, phh, c11h, c10h, ch, ah, aw, se],
+  doy : mjd - 44239 + 1 - 28,
+  if lat < 0 then (phh : bpi, c11h : 7/1000, c10h : 2/1000) else (phh : 0, c11h : 5/1000, c10h : 1/1000),
+  ch : 62/1000 + ((bfloat(cos(doy/(36525/100)*2*bpi + phh)) + 1)*c11h/2 + c10h)*(1 - bfloat(cos(lat))),
+  ah : gmf_series(gmf_tables[1], gmf_tables[2], lat, lon)
+       + gmf_series(gmf_tables[3], gmf_tables[4], lat, lon)*bfloat(cos(doy/(36525/100)*2*bpi)),
+  aw : gmf_series(gmf_tables[5], gmf_tables[6], lat, lon)
+       + gmf_series(gmf_tables[7], gmf_tables[8], lat, lon)*bfloat(cos(doy/(36525/100)*2*bpi)),
+  se : bfloat(sin(bpi/2 - zd)),
+  [routine_m(ah, 29/10000, ch, se) + height_correction(se, h), routine_m(aw, 146/100000, 4391/100000, se)])$
+/* GMF.F's test case (header of the routine). */
+G_MJD : 55055$  G_LAT : rust_rational("0.6708665767")$  G_LON : rust_rational("-1.393397187")$
+G_HGT : rust_rational("844.715")$  G_ZD : rust_rational("1.278564131")$
+GMF_TEST : [rust_rational("3.425245519339138678"), rust_rational("3.449589116182419257")]$
+gmf_test : gmf_iers(G_MJD, G_LAT, G_LON, G_HGT, G_ZD)$
+gmf_dist : lmax(map(lambda([x, y], abs(x - y)/y), gmf_test, GMF_TEST))$
+print("GMF.F's test case at 40 digits:", gmf_test, "; from the printed output:", gmf_dist)$
+/* The shipped phase (doy - 28)/365.25 with doy 224.75 is DOY/365.25 less 29 whole turns. */
+G_DOY : rust_rational("224.75")$
+must(is(gmf_dist < 4b-15)
+     and is((G_DOY - 28) - (G_MJD - 44239 + 1 - 28) = -29*36525/100)
+     and all_in_source(src, [
+       "let phase = (day_of_year - 28.0) / 365.25 * TAU;",
+       "let seasonal = libm::cos(phase);"]),
+     "(2) holds: GMF.F over the shipped tables reproduces its own test case to 4e-15, and its DOY is the shipped doy - 28 less whole turns (doy 224.75 for MJD 55055)")$
+
+/* ---- (3) VMF1 -------------------------------------------------------------------------------------- */
+/* VMF1_HT.F: the c of GMF.F with caller-supplied a, and the same height correction. */
+vmf1_iers(ah, aw, mjd, lat, h, zd) := block([doy, phh, c11h, c10h, ch, se],
+  doy : mjd - 44239 + 1 - 28,
+  if lat < 0 then (phh : bpi, c11h : 7/1000, c10h : 2/1000) else (phh : 0, c11h : 5/1000, c10h : 1/1000),
+  ch : 62/1000 + ((bfloat(cos(doy/(36525/100)*2*bpi + phh)) + 1)*c11h/2 + c10h)*(1 - bfloat(cos(lat))),
+  se : bfloat(sin(bpi/2 - zd)),
+  [routine_m(ah, 29/10000, ch, se) + height_correction(se, h), routine_m(aw, 146/100000, 4391/100000, se)])$
+V_AH : rust_rational("0.00127683")$  V_AW : rust_rational("0.00060955")$  V_HGT : rust_rational("824.17")$
+VMF1_TEST : [rust_rational("3.425088087972572470"), rust_rational("3.448299714692572238")]$
+vmf1_test : vmf1_iers(V_AH, V_AW, G_MJD, G_LAT, V_HGT, G_ZD)$
+vmf1_dist : lmax(map(lambda([x, y], abs(x - y)/y), vmf1_test, VMF1_TEST))$
+print("VMF1_HT.F's test case at 40 digits:", vmf1_test, "; from the printed output:", vmf1_dist)$
+must(is(vmf1_dist < 4b-15),
+     "(3) holds: VMF1_HT.F reproduces its own test case to 4e-15")$
+
+/* ---- (4) the hemispheres --------------------------------------------------------------------------- */
+/* With u = 2 pi (doy - 28)/365.25: the routines' south takes cos u for a and cos(u + pi) for c. The
+   former shipped south took u' = pi + 2 pi (doy + 1 - 211)/365.25 for c and u' - pi for a (GMF), so
+   at any doy c's phase sits pi - 2 pi 182/365.25 = 0.011 rad from the north's u, and a's
+   -2 pi 182/365.25 = -(pi - 0.011): c's half-year is gone and a's season is reversed. */
+uo : 2*%pi*(d + 1 - 211)/(36525/100)$
+u : 2*%pi*(d - 28)/(36525/100)$
+c_slip : bfloat(ratsimp((%pi + uo) - u))$
+a_slip : bfloat(ratsimp(uo - u))$
+print("former southern c phase minus the north's:", c_slip, "; a phase minus the north's:", a_slip)$
+must(is(abs(c_slip) < 11b-3) and is(abs(a_slip + bpi) < 11b-3)
+     and all_in_source(src, ["let (c10h, c11h, psi) = if latitude < 0.0 {",
+                             "c0h + ((libm::cos(phase + psi) + 1.0) * (c11h / 2.0) + c10h) * (1.0 - libm::cos(latitude));"]),
+     "(4) holds: the routines' south keeps a's season and shifts c's by pi; the former t0 = 28 + 183 reversed a's season and cancelled c's pi to 1.1e-2 rad")$
+
+/* ---- (5) VMF3 -------------------------------------------------------------------------------------- */
+vmf3_tables : map(lambda([nm], rows5(rtab(nm))), ["BH_A", "BH_B", "BW_A", "BW_B", "CH_A", "CH_B", "CW_A", "CW_B"])$
+/* vmf3.m's solid harmonics: V(n, m) + i W(n, m) on the unit vector (x, y, z). */
+vw(lat, lon) := block([x, y, z, V, W, nmax : 12],
+  x : bfloat(cos(lat)*cos(lon)), y : bfloat(cos(lat)*sin(lon)), z : bfloat(sin(lat)),
+  V : make_array(any, 14, 14), W : make_array(any, 14, 14),
+  V[1, 1] : 1, W[1, 1] : 0, V[2, 1] : z*V[1, 1], W[2, 1] : 0,
+  for n : 2 thru nmax do (V[n + 1, 1] : ((2*n - 1)*z*V[n, 1] - (n - 1)*V[n - 1, 1])/n, W[n + 1, 1] : 0),
+  for m : 1 thru nmax do (
+    V[m + 1, m + 1] : (2*m - 1)*(x*V[m, m] - y*W[m, m]),
+    W[m + 1, m + 1] : (2*m - 1)*(x*W[m, m] + y*V[m, m]),
+    if m < nmax then (V[m + 2, m + 1] : (2*m + 1)*z*V[m + 1, m + 1], W[m + 2, m + 1] : (2*m + 1)*z*W[m + 1, m + 1]),
+    for n : m + 2 thru nmax do (
+      V[n + 1, m + 1] : ((2*n - 1)*z*V[n, m + 1] - (n + m - 1)*V[n - 1, m + 1])/(n - m),
+      W[n + 1, m + 1] : ((2*n - 1)*z*W[n, m + 1] - (n + m - 1)*W[n - 1, m + 1])/(n - m))),
+  [V, W])$
+T_LAT : 375*bpi/1800$  T_LON : 2775*bpi/1800$
+[Vt, Wt] : vw(T_LAT, T_LON)$
+vw_gap : lmax(flatten(makelist(makelist(
+  max(abs(Vt[n + 1, m + 1] - hm_legendre(n, m, bfloat(sin(T_LAT)))*bfloat(cos(m*T_LON))),
+      abs(Wt[n + 1, m + 1] - hm_legendre(n, m, bfloat(sin(T_LAT)))*bfloat(sin(m*T_LON)))), m, 0, n), n, 0, 12)))$
+/* Unnormalised, P_12,12 is ~1e10 here: the gap is relative to the largest harmonic. */
+vw_scale : lmax(flatten(makelist(makelist(max(abs(Vt[n + 1, m + 1]), abs(Wt[n + 1, m + 1])), m, 0, n), n, 0, 12)))$
+vw_gap : vw_gap/vw_scale$
+print("vmf3.m's V/W against P_nm(sin phi) (cos, sin) m lambda, degree 12, relative:", vw_gap)$
+/* vmf3.m: each of bh, bw, ch, cw is A0 + A1 cos w + B1 sin w + A2 cos 2w + B2 sin 2w, w = 2 pi doy/365.25,
+   each of the five a sum over (n, m) of anm V + bnm W. */
+vmf3_routine(ah, aw, doy, lat, lon, el) := block([V, W, w, coef : [], se],
+  [V, W] : vw(lat, lon),
+  w : 2*bpi*doy/(36525/100),
+  for k : 1 thru 4 do block([A : vmf3_tables[2*k - 1], B : vmf3_tables[2*k], s : [0, 0, 0, 0, 0], i : 0],
+    for n : 0 thru 12 do for m : 0 thru n do (i : i + 1,
+      s : s + A[i]*V[n + 1, m + 1] + B[i]*W[n + 1, m + 1]),
+    coef : endcons(s[1] + s[2]*bfloat(cos(w)) + s[3]*bfloat(sin(w)) + s[4]*bfloat(cos(2*w)) + s[5]*bfloat(sin(2*w)), coef)),
+  se : bfloat(sin(el)),
+  [shipped_m(ah, coef[1], coef[3], se), shipped_m(aw, coef[2], coef[4], se)])$
+must(is(vw_gap < 1b-36) and is(length(vmf3_tables[1]) = 91)
+     and all_in_source(src, [
+       "let coef = (doy / 365.25) * 2.0 * PI;",
+       "a0 + a1 * c1 + b1 * s1 + a2 * c2 + b2 * s2"]),
+     "(5) holds: vmf3.m's V/W recursion is P_nm(sin phi) (cos, sin) m lambda to degree 12, and its season is A0 + A1 cos w + B1 sin w + A2 cos 2w + B2 sin 2w in doy/365.25")$
+
+/* ---- (6) the goldens ------------------------------------------------------------------------------- */
+/* Niell (1996): the tables interpolated linearly in |latitude| between 15 and 75 deg, the hydrostatic
+   a, b, c each avg - amp cos(2 pi (doy - 28)/365.25) north of the equator. */
+niell_interp(t, lat_deg) := block([x : max(15, min(75, lat_deg)), seg, frac],
+  seg : min(3, floor((x - 15)/15)), frac : (x - (15 + 15*seg))/15,
+  t[seg + 1] + frac*(t[seg + 2] - t[seg + 1]))$
+niell(lat_deg, h, doy, el) := block([cs : bfloat(cos(2*bpi*(doy - 28)/(36525/100))), se : bfloat(sin(el)), abc, w],
+  abc : map(lambda([av, am], niell_interp(rtab(av), lat_deg) - niell_interp(rtab(am), lat_deg)*cs),
+            ["NIELL_AH_AVG", "NIELL_BH_AVG", "NIELL_CH_AVG"], ["NIELL_AH_AMP", "NIELL_BH_AMP", "NIELL_CH_AMP"]),
+  w : map(lambda([nm], niell_interp(rtab(nm), lat_deg)), ["NIELL_AW", "NIELL_BW", "NIELL_CW"]),
+  [shipped_m(abc[1], abc[2], abc[3], se) + height_correction(se, h), shipped_m(w[1], w[2], w[3], se)])$
+niell_g : niell(48, 68, 1, 5*bpi/180)$
+gmf_north : gmf_test$
+gmf_south : gmf_iers(G_MJD, -G_LAT, G_LON, G_HGT, G_ZD)$
+vmf1_north : vmf1_test$
+vmf1_south : vmf1_iers(V_AH, V_AW, G_MJD, -G_LAT, V_HGT, G_ZD)$
+vmf3_g : flatten(map(lambda([e], vmf3_routine(rust_rational("0.00123462"), rust_rational("0.00047101"),
+                                              rust_rational("329.5"), T_LAT, T_LON, e*bpi/180)), [38, 5, 85]))$
+print("NIELL_MAXIMA", niell_g)$
+print("GMF_MAXIMA", append(gmf_north, gmf_south))$
+print("VMF1_MAXIMA", append(vmf1_north, vmf1_south))$
+print("VMF3_MAXIMA", vmf3_g)$
+tests_src : "../crates/spacelab-gnss/src/models.rs"$
+must(transcribed(rust_table(tests_src, "NIELL_MAXIMA"), niell_g)
+     and transcribed(rust_table(tests_src, "GMF_MAXIMA"), append(gmf_north, gmf_south))
+     and transcribed(rust_table(tests_src, "VMF1_MAXIMA"), append(vmf1_north, vmf1_south))
+     and transcribed(rust_table(tests_src, "VMF3_MAXIMA"), vmf3_g),
+     "(6) holds: the Rust goldens are Niell, GMF and VMF1 north and south and VMF3 at three elevations at 40 digits, to every digit shown")$
+print("DONE")$

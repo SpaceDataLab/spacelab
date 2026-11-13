@@ -165,7 +165,7 @@ The other seven of the ten are **not** covered, and the reason differs by table:
 | `nrlmsise00/tables.rs` | **`nrlmsise00_sub.for`**, the NRL FORTRAN's `BLOCK DATA GTD7BK` | the model has no agency-published *table*; the reference program *is* the specification, so this is the definitional case above, not a gap. Re-based off Brodowski's C in `3143a74`, and the re-basing is a measurement: regenerating from the FORTRAN reproduces all 3 290 shipped values byte for byte |
 | `ocean_tide_got.rs` — GOT5.5, 31 waves to degree 6 | GOT5.5 **cotidal grids** (GSFC), analysed here | there is no coefficient file to re-derive from: this table is computed rather than transcribed, so the seal says only that the committed numbers are the generator's. The question a re-derivation would answer is answered instead by `tests/ocean_tide_atlas.rs`, which measures it against two published atlases (§10.8) |
 | `ocean_tide_eot20.rs` — EOT20, 16 waves to degree 6 | EOT20 **cotidal grids** (DGFI-TUM, SEANOE), analysed here | the same position as GOT: computed by the same generator, so the seal says only that the numbers are the generator's, and `tests/ocean_tide_atlas.rs` measures them against both FES tables. FES2014b is EOT20's reference model, which that test states (§10.8) |
-| `models.rs` — Niell / GMF / VMF3 mapping coefficients | the published papers | the coefficients appear in a paper's tables, not in a machine-readable distribution |
+| `models.rs` — Niell / GMF / VMF3 mapping coefficients | the published papers | the coefficients appear in a paper's tables, not in a machine-readable distribution; GMF's are held instead by `derivations/gnss_mapping.mac` (2), where IERS `GMF.F`'s formulas over the shipped tables land on the routine's own test output to 5e-16 |
 | `tide_step2_tables.rs` — IERS 2010 Tables 6.5a/b/c | **Orekit's** `tab6.5{a,b,c}.txt`; held row for row against IERS Conventions (2010) chapter 6 as updated 2018-02-01 | no seal, a read-back instead: the tables live in the chapter PDF, and `derivations/tide_step2_iers.mac` parses them from its text, compares every row's τ, Delaunay multipliers and amplitudes, and checks each row's Delaunay multipliers against its Doodson number and its two amplitudes against its δk (Ф19.G). The IERS site's `STEP2DIU.F`/`STEP2LON.F` carry the *site-displacement* Step-2 coefficients — a different quantity from the geopotential ΔC̄/ΔS̄ this table holds |
 
 `subdaily_tables.rs` is outside both lists: `derivations/eop_subdaily.py` transcribes ORTHO_EOP,
@@ -2500,7 +2500,7 @@ where a non-Rust caller would make it — the #319 drift pattern at crate granul
 
 | Crate | Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|---|
-| gnss | GMF / VMF1 / VMF3 / Niell mapping functions | Niell 1996; Boehm et al. 2006 (GMF/VMF1); Landskron & Boehm 2018 (VMF3) | Orekit mapping-function tests (Green Bank etc.) | < 2e-6 (VMF) … < 2e-3 (Niell) | src/models.rs |
+| gnss | GMF / VMF1 / VMF3 / Niell mapping functions | Niell 1996; IERS Conventions (2010) chapter 9 routines `GMF.F` and `VMF1_HT.F` (Boehm et al. 2006); TU Wien `vmf3.m` (Landskron & Boehm 2018) | **Maxima** `derivations/gnss_mapping.mac`: the shipped fraction and height correction are the routines'; `GMF.F` over the shipped tables and `VMF1_HT.F` reproduce their own test output to 5e-16 and 3e-16, at doy 224.75 for MJD 55055; south of the equator both keep `a`'s season and shift `c`'s by π, where the former `t0 = 28 + 183` reversed `a`'s and cancelled the π (fixed 2026-11-13); `vmf3.m`'s V/W recursion is the shipped `P_nm(sin φ)` to degree 12; Niell, GMF and VMF1 north and south and VMF3 at three elevations at 40 digits (G3); Orekit a comparator ([`comparisons.md`](comparisons.md)) | 5.2e-16 at worst (bounds 5e-16 … 2e-15) | src/models.rs |
 | gnss | GPT3 ah/aw/T/P/e/Tm/λ/gradients | the grid TU Wien publishes with Landskron & Böhm 2018 (`gpt3_5.grd`, CC BY 4.0; the asset is that file with LF line ends) read by the model's rules as TU Wien's `gpt3_5_fast.m` states them: `a0 + A1 cos θ + B1 sin θ + A2 cos 2θ + B2 sin 2θ`, `θ = 2π d/365.25`; each corner reduced to the site's height (`gpt3_reduction.mac`); bilinear weights in the cell the grid's own coordinates name. North of 87.5° and south of −87.5° the last full cell is continued linearly, our convention (Orekit's): `gpt3_5_fast.m` takes the nearest node there; at the South Pole station's height the two differ by as much as 3.6 hPa and 5 K over four longitudes in January and July (F88, D-37) | **Maxima** `derivations/gpt3_evaluation.mac`: 10 sites in exact rationals and 40-digit bigfloats, each node found by TU Wien's line arithmetic and its coordinate columns checked; sites 1–2 are the MATLAB reference values Orekit carries, reproduced. `verify.sh` holds the asset against TU Wien's file | ≤ 1e-13 of each field's scale (worst 1.2e-14) | src/gpt3.rs, tests/gpt3_maxima.rs, derivations/gpt3_evaluation.mac |
 | gnss | VMF3 grid interpolation | TU Wien VMF3 grid product; bilinear interpolation | Orekit `ViennaModelCoefficientsLoaderTest` 5×5 | ah/aw < 1e-8; zhd/zwd < 1e-4 | src/vmf_grid.rs |
 | gnss | RTCM 3 framing + CRC-24Q | RTCM 10403.x; the CRC-24Q polynomial `0x1864CFB` GPS uses for navigation-message parity | the **reveng catalogue's published check value**, and an exhaustive single-bit sweep of a real frame | `crc24q("123456789") = 0xCDE703` exactly — the CRC-24/LTE-A parameters, *not* CRC-24/OPENPGP's `0x21CF02`, which is the same polynomial seeded with `0xB704CE` and the value a search finds first. Every one of the **392 single-bit flips** in a real 49-byte 1057 frame is refused, and the frame length is pinned so the sweep cannot silently shrink; a partial frame is distinguished from a corrupt one at every truncation point of a 1019 | src/rtcm.rs |
@@ -11303,8 +11303,11 @@ the Doodson-to-Delaunay map into the force, and relativity's one after `relativi
 eq (10.12) to the force and to its classical limits.
 Batch 4 (2026-11-13) parks the manoeuvres' four after `maneuver.mac` derived the rocket equation, the
 RTN basis, the argument of latitude and the empirical polynomial from their definitions.
-**Today: 94
-comparator-decided tests of 3 698** — name 57, file 18, fixture 4, doc 15; 35 of them Orekit's (22 by
+Batch 4b (2026-11-13) parks the tropospheric mapping functions' four after `gnss_mapping.mac` ran
+IERS `GMF.F` and `VMF1_HT.F` onto their own test output and TU Wien's `vmf3.m` over the shipped
+tables; it found the southern GMF and VMF1 seasons half a year off in `a` and fixed them.
+**Today: 90
+comparator-decided tests of 3 702** — name 53, file 18, fixture 4, doc 15; 31 of them Orekit's (18 by
 name), 15 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
@@ -11363,10 +11366,6 @@ crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_inside_a_leap_second_is_of
 crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_matches_orekit_iers1996_outside_leap_seconds | name:orekit
 crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_agrees_with_orekit_to_the_convention_floor | name:orekit
 crates/spacelab-geometry/tests/qhull_cross_check.rs::every_construction_agrees_with_qhull_on_the_same_points | name:qhull
-crates/spacelab-gnss/src/models.rs::gmf_matches_the_orekit_reference_values | name:orekit
-crates/spacelab-gnss/src/models.rs::niell_matches_the_orekit_reference_values | name:orekit
-crates/spacelab-gnss/src/models.rs::vmf1_matches_the_orekit_reference_values | name:orekit
-crates/spacelab-gnss/src/models.rs::vmf3_matches_the_orekit_reference_values | name:orekit
 crates/spacelab-gnss/src/vmf_grid.rs::parses_real_vmf3_5x5_and_matches_orekit_at_a_node | name:orekit
 crates/spacelab-ionosphere/src/modip.rs::the_orekit_reference_points_are_reproduced_on_the_galileo_grid | name:orekit
 crates/spacelab-ionosphere/tests/galileo_stec.rs::the_stec_matches_the_jrc_reference_in_every_month | name:jrc

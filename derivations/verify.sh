@@ -601,6 +601,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima maneuver.mac" "expected 4 checks to hold, found $holds"
     fi
 
+    out=$(macf gnss_mapping.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 6 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima gnss_mapping.mac: GMF and VMF1 are IERS GMF.F and VMF1_HT.F, which reproduce their own test cases, on both hemispheres; VMF3 is TU Wien's vmf3.m; the G3 goldens at 40 digits"
+    else
+        bad "maxima gnss_mapping.mac" "expected 6 checks to hold, found $holds"
+    fi
+
     out=$(macf ocean_loading.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 11 ] && printf '%s' "$out" | grep -q '^DONE'; then

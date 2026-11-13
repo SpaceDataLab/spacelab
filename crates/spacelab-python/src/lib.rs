@@ -3147,15 +3147,16 @@ fn igrf_field_ecef(x: f64, y: f64, z: f64, year: f64) -> (f64, f64, f64) {
 }
 
 /// The Niell (1996) tropospheric mapping functions `(hydrostatic, wet)` for geodetic `latitude` (rad),
-/// ellipsoidal `height` (m), `day_of_year` and `elevation` (rad).
+/// ellipsoidal `height` (m), `day_of_year` and `elevation` (rad). `day_of_year` is 1.0 at 1 January
+/// 0h UTC, as in all four mapping functions.
 #[pyfunction]
 fn niell_mapping(latitude: f64, height: f64, day_of_year: f64, elevation: f64) -> (f64, f64) {
     gnss_niell_mapping(latitude, height, day_of_year, elevation)
 }
 
 /// The Global Mapping Function (GMF, Böhm 2006) tropospheric mapping functions `(hydrostatic, wet)`
-/// for geodetic `latitude`/`longitude` (rad), ellipsoidal `height` (m), `day_of_year` and `elevation`
-/// (rad).
+/// for geodetic `latitude`/`longitude` (rad), ellipsoidal `height` (m), `day_of_year` (1.0 at
+/// 1 January 0h UTC) and `elevation` (rad), as IERS Conventions' `GMF.F`.
 #[pyfunction]
 fn gmf_mapping(
     latitude: f64,
@@ -3169,7 +3170,8 @@ fn gmf_mapping(
 
 /// The VMF1 (Vienna, Böhm et al. 2006) tropospheric mapping functions `(hydrostatic, wet)`. The
 /// `a_h`/`a_w` coefficients come from a numerical weather model; geodetic `latitude` (rad),
-/// ellipsoidal `height` (m), `day_of_year` and `elevation` (rad) place the site and ray.
+/// ellipsoidal `height` (m), `day_of_year` (1.0 at 1 January 0h UTC) and `elevation` (rad) place the
+/// site and ray, as IERS Conventions' `VMF1_HT.F`.
 #[pyfunction]
 fn vmf1_mapping(
     a_h: f64,
@@ -3184,7 +3186,8 @@ fn vmf1_mapping(
 
 /// The VMF3 (Vienna, Landskron & Böhm 2018) tropospheric mapping functions `(hydrostatic, wet)`. The
 /// `a_h`/`a_w` coefficients come from a numerical weather model; geodetic `latitude`/`longitude`
-/// (rad), ellipsoidal `height` (m), `day_of_year` and `elevation` (rad) place the site and ray.
+/// (rad), ellipsoidal `height` (m), `day_of_year` (1.0 at 1 January 0h UTC) and `elevation` (rad)
+/// place the site and ray, as TU Wien's `vmf3.m`.
 #[pyfunction]
 fn vmf3_mapping(
     a_h: f64,

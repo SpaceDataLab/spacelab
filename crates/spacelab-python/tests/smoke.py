@@ -729,14 +729,17 @@ def test_ionosphere_and_swath_bindings():
 
 
 def test_tropo_mapping_itu_and_delay_bindings():
-    # GMF at Orekit's reference point/date -> hydrostatic 3.425246, wet 3.449589.
+    # GMF at IERS GMF.F's own test case (MJD 55055 is its day 224.75), derivations/gnss_mapping.mac
+    # (6) at 40 digits.
     hydro, wet = sl.gmf_mapping(
-        0.6708665767, -1.393397187, 844.715, 224.0, 0.5 * math.pi - 1.278564131
+        0.6708665767, -1.393397187, 844.715, 224.75, 0.5 * math.pi - 1.278564131
     )
-    assert abs(hydro - 3.425246) < 1e-5 and abs(wet - 3.449589) < 1e-5, (hydro, wet)
-    # Niell at its reference (48 deg, 68 m, DOY 1, 5 deg) -> 10.156 / 10.748.
+    assert abs(hydro / 3.4252455193391368584 - 1) < 2e-15, hydro
+    assert abs(wet / 3.44958911618241839 - 1) < 2e-15, wet
+    # Niell at its reference (48 deg, 68 m, day 1, 5 deg), gnss_mapping.mac (6).
     nh, nw = sl.niell_mapping(math.radians(48.0), 68.0, 1.0, math.radians(5.0))
-    assert abs(nh - 10.156) < 2e-3 and abs(nw - 10.748) < 2e-3, (nh, nw)
+    assert abs(nh / 10.156459754760518411 - 1) < 5e-16, nh
+    assert abs(nw / 10.747513867537900082 - 1) < 5e-16, nw
     # First-order ionospheric delay: ~3.25 m at L1 for 20 TECU.
     d = sl.ionospheric_path_delay(20.0, 1575.42e6)
     assert 3.2 < d < 3.3, d
@@ -757,30 +760,31 @@ def test_tropo_mapping_itu_and_delay_bindings():
 
 
 def test_vmf_mapping_bindings():
-    # VMF1 at Orekit's ViennaOne reference (ah=0.00127683, aw=0.00060955; 38N/280E/824.17m; MJD 55055
-    # midnight -> DOY 223.5 + a 1 s leap-second crossing) -> hydrostatic 3.425088, wet 3.448300.
-    doy1 = (223.5 * 86400.0 + 1.0) / 86400.0
+    # VMF1 at IERS VMF1_HT.F's own test case (ah=0.00127683, aw=0.00060955, MJD 55055 = its day
+    # 224.75), derivations/gnss_mapping.mac (6) at 40 digits.
     h1, w1 = sl.vmf1_mapping(
         0.00127683,
         0.00060955,
-        math.radians(38.0),
+        0.6708665767,
         824.17,
-        doy1,
+        224.75,
         0.5 * math.pi - 1.278564131,
     )
-    assert abs(h1 - 3.425088) < 2e-6 and abs(w1 - 3.448300) < 2e-6, (h1, w1)
-    # VMF3 at the ViennaThree reference (ah=0.00123462, aw=0.00047101; 37.5N/277.5E/824m; 2018-11-25
-    # 12:00 UTC -> DOY 329.0) at 5 deg elevation -> hydrostatic 10.132802, wet 10.879154.
+    assert abs(h1 / 3.4250880879725715458 - 1) < 1.5e-15, h1
+    assert abs(w1 / 3.4482997146925719265 - 1) < 1.5e-15, w1
+    # VMF3 by TU Wien's vmf3.m (ah=0.00123462, aw=0.00047101; 37.5N/277.5E/824m; 2018-11-25 12:00
+    # UTC is day 329.5) at 5 deg elevation, gnss_mapping.mac (6) at 40 digits.
     h3, w3 = sl.vmf3_mapping(
         0.00123462,
         0.00047101,
         math.radians(37.5),
         math.radians(277.5),
         824.0,
-        329.0,
+        329.5,
         math.radians(5.0),
     )
-    assert abs(h3 - 10.132802) < 2e-6 and abs(w3 - 10.879154) < 2e-6, (h3, w3)
+    assert abs(h3 / 10.132790913614550639 - 1) < 1e-15, h3
+    assert abs(w3 / 10.879153606446272258 - 1) < 1e-15, w3
 
 
 def test_vmf_grid_bindings():

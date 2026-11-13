@@ -3419,8 +3419,8 @@ exclude_re = [
     # a negative one, so `f < 0.0` is false always and the body under it is unreachable. (The high
     # half *is* reachable — a tiny negative `turns` rounds `f` up to exactly `1.0` — and
     # `the_turns_reduction_leaves_no_angle_outside_one_turn` kills those mutants.)
-    "cio\\.rs:177:11: replace \\+= with -= in reduce_turns_to_radians",
-    "cio\\.rs:177:11: replace \\+= with \\*= in reduce_turns_to_radians",
+    "cio\\.rs:179:11: replace \\+= with -= in reduce_turns_to_radians",
+    "cio\\.rs:179:11: replace \\+= with \\*= in reduce_turns_to_radians",
 
     # Same shape in `reduce_seconds_to_radians`, where the multiply by 86400 does make a negative
     # residue possible in principle — and only in principle. `reduced < 0` needs `86400·floor(q)` to

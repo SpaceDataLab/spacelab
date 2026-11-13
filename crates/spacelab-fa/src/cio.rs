@@ -15,13 +15,15 @@
 //!
 //! # Provenance
 //!
-//! The `X, Y, s` series coefficients (`crate::cio_tables`) are machine-extracted
-//! from the IERS-published model and validated against `pyerfa` and the SOFA
-//! self-test vectors to `< 5e-18` rad — see `derivations/cio06_tables.py`. The ERA
-//! constants are the IAU 2000 values (Capitaine et al. 2000);
+//! The `X, Y, s` series coefficients (`crate::cio_tables`) are machine-extracted by
+//! `derivations/cio06_tables.py` and held term by term to the IERS Conventions (2010)
+//! Tables 5.2a, 5.2b and 5.2d by `derivations/cio_iers.mac`;
+//! `derivations/cio_nutation_series.mac` sums them in 40-digit arithmetic and writes
+//! the values the tests hold [`cip_xy`] and [`cio_locator_s`] to. The ERA constants
+//! are the IAU 2000 values (Capitaine et al. 2000);
 //! `derivations/fundamental_arguments.mac` holds them to the published decimals and
-//! writes the exact angles the ERA test holds [`era`] to, while `pyerfa` and the SOFA
-//! `t_era00` vector are comparators.
+//! writes the exact angles the ERA test holds [`era`] to. `pyerfa` and the SOFA
+//! `t_xy06`, `t_s06` and `t_era00` vectors are comparators.
 
 use spacelab_core::{
     Angle,
@@ -193,15 +195,105 @@ mod tests {
         Epoch::from_days_since_j2000(2191.5)
     }
 
-    /// `X, Y` reproduce the SOFA `t_xy06` golden vector (radians). The series and the
-    /// coefficient tables are exercised end to end.
+    /// TT days since J2000 at which the series are held: `t = 0.06` (the SOFA self-test epoch), a
+    /// century and half a century either side of J2000, and two centuries out — the epochs of
+    /// [`crate::fundamental`]'s arguments.
+    const SERIES_DAYS: [f64; 6] = [2191.5, -36_525.0, -18_262.5, 18_262.5, 36_525.0, 73_050.0];
+
+    /// `X, Y` at [`SERIES_DAYS`]: eq (5.16) summed in 40-digit arithmetic over the IERS (2010)
+    /// Tables 5.2a and 5.2b, to 25 digits (`derivations/cio_nutation_series.mac` reads this table
+    /// back).
+    const XY_EXACT: [[f64; 2]; 6] = [
+        [5.791308486706010461598920e-4, 4.020579816732956051573133e-5],
+        [
+            -9.684090413737693249881655e-3,
+            -1.189116481842916528410902e-4,
+        ],
+        [
+            -4.865602325789341414289917e-3,
+            1.314839585232979065839028e-5,
+        ],
+        [
+            4.886533763528366947797060e-3,
+            -5.341831990202507094031032e-5,
+        ],
+        [
+            9.720704461729240764099680e-3,
+            -6.730586996167223499345463e-5,
+        ],
+        [
+            1.943690565478396271085283e-2,
+            -4.742699904065940052508769e-4,
+        ],
+    ];
+
+    /// `s` at [`SERIES_DAYS`] for the `X, Y` the doubles of [`XY_EXACT`] give: eq (5.18) summed over
+    /// Table 5.2d likewise.
+    const S_EXACT: [f64; 6] = [
+        -1.220032213076461748658837e-8,
+        -2.336591912459084400110537e-7,
+        6.443279169766965442454561e-8,
+        1.058366160190405539193861e-7,
+        -4.805119345337526002948732e-9,
+        1.832705450102923244183486e-6,
+    ];
+
+    /// The worst `X, Y` miss measured is 1.041e-17 rad, `X` two centuries out: three ulps of its
+    /// 0.019 rad, inside what the arguments' own 1.6e-12 rad miss there makes of the 6.8″ 18.6-year
+    /// term. The bound is 3.8 times that.
+    const XY_BOUND: f64 = 4.0e-17;
+
+    /// The worst `s` miss measured is 4.235e-21 rad, two centuries out: the arguments' 1.6e-12 rad
+    /// miss there times the series' largest amplitude, 2640.73 µas. The bound is 3.5 times that.
+    const S_BOUND: f64 = 1.5e-20;
+
+    /// `X, Y` are their series summed exactly. (G3)
+    ///
+    /// One epoch near J2000 cannot see the series' high powers of `t`: at `t = 0.06` a `t⁴` Poisson
+    /// term is a hundred-thousandth of its `t⁰` sibling. A century out and two centuries out they
+    /// carry their own weight, and the epochs those sit at are the ones [`crate::fundamental`]'s
+    /// arguments are held at.
     #[test]
-    fn cip_xy_matches_sofa_golden() {
+    fn the_cip_is_its_series_summed_exactly() {
+        let mut worst = (0.0_f64, 0.0_f64);
+        for (days, want) in SERIES_DAYS.into_iter().zip(XY_EXACT) {
+            let (x, y) = cip_xy(Epoch::from_days_since_j2000(days));
+            for miss in [(x - want[0]).abs(), (y - want[1]).abs()] {
+                if miss > worst.0 || miss.is_nan() {
+                    worst = (miss, days);
+                }
+            }
+        }
+        assert!(worst.0 < XY_BOUND, "{:.3e} at day {}", worst.0, worst.1);
+    }
+
+    /// `s` is its series summed exactly, for given `X, Y`. (G3)
+    #[test]
+    fn the_cio_locator_is_its_series_summed_exactly() {
+        let mut worst = (0.0_f64, 0.0_f64);
+        for ((days, xy), want) in SERIES_DAYS.into_iter().zip(XY_EXACT).zip(S_EXACT) {
+            let s = cio_locator_s(Epoch::from_days_since_j2000(days), xy[0], xy[1]);
+            let miss = (s - want).abs();
+            if miss > worst.0 || miss.is_nan() {
+                worst = (miss, days);
+            }
+        }
+        assert!(worst.0 < S_BOUND, "{:.3e} at day {}", worst.0, worst.1);
+    }
+
+    /// The distances to the SOFA `t_xy06` golden vector.
+    #[test]
+    #[ignore = "comparator: the distance to SOFA, not a verdict"]
+    fn cip_xy_distance_to_sofa() {
         let (x, y) = cip_xy(sofa_tt());
-        let gx = 0.579_130_848_670_601_097_5e-3;
-        let gy = 0.402_057_981_673_295_814_1e-4;
-        assert!((x - gx).abs() < 1e-15, "X: got {x:.19e} want {gx:.19e}");
-        assert!((y - gy).abs() < 1e-15, "Y: got {y:.19e} want {gy:.19e}");
+        comparison_row(
+            "sofa",
+            "the CIP X, Y at the t_xy06 epoch",
+            &[
+                (x - 0.579_130_848_670_601_097_5e-3).abs(),
+                (y - 0.402_057_981_673_295_814_1e-4).abs(),
+            ],
+        );
     }
 
     /// The `X, Y` series carries the **full** IAU 2000A nutation, not a truncation. (S1)
@@ -226,14 +318,18 @@ mod tests {
         assert!(dy < 5e-11, "Y vs xys06a: {dy:.3e}");
     }
 
-    /// `s` reproduces the SOFA `t_s06` golden vector for its reference `X, Y`.
+    /// The distance to the SOFA `t_s06` golden vector, for its reference `X, Y`.
     #[test]
-    fn cio_locator_matches_sofa_golden() {
+    #[ignore = "comparator: the distance to SOFA, not a verdict"]
+    fn cio_locator_distance_to_sofa() {
         let x = 0.579_130_848_670_601_100_0e-3;
         let y = 0.402_057_981_673_296_121_9e-4;
         let s = cio_locator_s(sofa_tt(), x, y);
-        let gs = -0.122_003_221_307_646_311_7e-7;
-        assert!((s - gs).abs() < 1e-20, "s: got {s:.19e} want {gs:.19e}");
+        comparison_row(
+            "sofa",
+            "the CIO locator s at the t_s06 epoch",
+            &[(s - -0.122_003_221_307_646_311_7e-7).abs()],
+        );
     }
 
     /// UT1 days since J2000: the SOFA `t_era00` epoch (JD 2400000.5 + 54388.0), and five more whose

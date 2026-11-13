@@ -1,0 +1,112 @@
+/* The CIP X, Y, the CIO locator s and the IAU 2000A / 2006A nutation of spacelab-fa, summed in
+   40-digit arithmetic at the six epochs fundamental.rs holds its arguments at (plans/17 Ф19.G): the
+   values cio.rs and nutation.rs are held to.
+
+   The series are the transcriptions in cio_tables.rs and nut_tables.rs, which cio_iers.mac and
+   nutation_iers.mac hold term by term to the IERS Conventions (2010) Tables 5.2a/b/d and 5.3a/b.
+   This file sums them as eqs (5.16) and (5.18) and §5.5.1 define them: X and Y a quintic plus
+   Poisson terms in sin and cos of integer combinations of the fourteen arguments of eqs (5.43) and
+   (5.44); s + XY/2 likewise on eight of them; the luni-solar nutation on l, l', F, D, Omega with
+   MHB2000's own l' and D, the planetary on MHB2000's own linear l, F, D, Omega and Neptune, the rest
+   eq (5.44)'s. IAU 2006A rescales the 2000A angles as §5.6.3 does: Delta psi by
+   1 + 0.4697e-6 - 2.7774e-6 t, Delta epsilon by 1 - 2.7774e-6 t.
+
+   It loads fundamental_arguments.mac, whose checks are (1)-(3); the arguments are its exact ones.
+
+     (4) XY_EXACT in cio.rs is X, Y at the six epochs, each literal its value rounded to the digits it
+         shows;
+     (5) S_EXACT in cio.rs is s at the six epochs for X, Y the doubles XY_EXACT parses to, likewise;
+     (6) NUT_EXACT in nutation.rs is the IAU 2000A and 2006A (Delta psi, Delta epsilon) at the six
+         epochs, likewise; and the two IAU 2006 factors nutation_06a writes are the published
+         decimals.
+
+   timeout 600 maxima --very-quiet -Q -b cio_nutation_series.mac                                    */
+
+batchload("fundamental_arguments.mac")$
+linel : 4000$
+
+cio_rs : "../crates/spacelab-fa/src/cio.rs"$
+cio_tables : "../crates/spacelab-fa/src/cio_tables.rs"$
+nutation_rs : "../crates/spacelab-fa/src/nutation.rs"$
+nut_tables : "../crates/spacelab-fa/src/nut_tables.rs"$
+table(path, name) := map(rust_rational, rust_table(path, name))$
+chunks(flat, width) := block([out : []],
+  while flat # [] do (out : cons(firstn(flat, width), out), flat : rest(flat, width)),
+  reverse(out))$
+dot(m, a) := apply("+", m * a)$
+as_radians(arcsec) := bfloat(arcsec * %pi / 648000)$
+
+/* ---- X, Y: eq (5.16) --------------------------------------------------------------------------- */
+
+xyp : chunks(table(cio_tables, "XYP"), 6)$
+xy_offset : table(cio_tables, "XY_OFFSET")$
+/* frequency p: its 14 multipliers and its [code, µas] amplitudes, code = xy | sc << 1 | power << 2 */
+xy_freqs : block([terms : map("[", table(cio_tables, "XY_CODE"), table(cio_tables, "XY_AMP")),
+                  out : []],
+  for k in rest(xy_offset) - firstn(xy_offset, length(xy_offset) - 1) do
+    (out : cons(firstn(terms, k), out), terms : rest(terms, k)),
+  map("[", chunks(table(cio_tables, "XY_MULT"), 14), reverse(out)))$
+cip_xy(t) := block([a : arguments(t), x : 0, y : 0, s, c, v],
+  for f in xy_freqs do (
+    s : sin(dot(f[1], a)), c : cos(dot(f[1], a)),
+    for term in f[2] do (
+      v : term[2] * (if mod(floor(term[1] / 2), 2) = 0 then s else c) * t^floor(term[1] / 4),
+      if mod(term[1], 2) = 0 then x : x + v else y : y + v)),
+  [as_radians(sum(xyp[1][j + 1] * t^j, j, 0, 5) + x / 10^6),
+   as_radians(sum(xyp[2][j + 1] * t^j, j, 0, 5) + y / 10^6)])$
+
+/* ---- s: eq (5.18), s = (the series for s + XY/2) - XY/2 ------------------------------------------ */
+
+s_terms : map("[", chunks(table(cio_tables, "S_MULT"), 8), table(cio_tables, "S_PT"),
+              table(cio_tables, "S_SIN"), table(cio_tables, "S_COS"))$
+cio_s(t, x, y) := block([a : arguments(t), a8, w : table(cio_tables, "S_POLY"), arg],
+  a8 : [a[1], a[2], a[3], a[4], a[5], a[7], a[8], a[14]],
+  for term in s_terms do (
+    arg : dot(term[1], a8),
+    w[term[2] + 1] : w[term[2] + 1] + term[3] * sin(arg) + term[4] * cos(arg)),
+  bfloat(as_radians(sum(w[j + 1] * t^j, j, 0, 5)) - x * y / 2))$
+
+/* ---- nutation: §5.5.1, in 0.1 µas ---------------------------------------------------------------- */
+
+ls_terms : map("[", chunks(table(nut_tables, "XLS_MULT"), 5), chunks(table(nut_tables, "XLS_COEF"), 6))$
+pl_terms : map("[", chunks(table(nut_tables, "XPL_MULT"), 13), chunks(table(nut_tables, "XPL_COEF"), 4))$
+quartic(name, t) := block([c : table(nut_tables, name)], as_radians(sum(c[k + 1] * t^k, k, 0, 4)))$
+linear(name, t) := block([c : table(nut_tables, name)], bfloat(c[1] + c[2] * t))$
+nutation_00a(t) := block([a : arguments(t), ls, pl, dp : 0, de : 0, s, c, k],
+  ls : [a[1], quartic("LS_ELP", t), a[3], quartic("LS_D", t), a[5]],
+  for term in ls_terms do (
+    s : sin(dot(term[1], ls)), c : cos(dot(term[1], ls)), k : term[2],
+    dp : dp + (k[1] + k[2] * t) * s + k[3] * c,
+    de : de + (k[4] + k[5] * t) * c + k[6] * s),
+  pl : [linear("PL_AL", t), linear("PL_AF", t), linear("PL_AD", t), linear("PL_AOM", t),
+        a[6], a[7], a[8], a[9], a[10], a[11], a[12], linear("PL_ANE", t), a[14]],
+  for term in pl_terms do (
+    s : sin(dot(term[1], pl)), c : cos(dot(term[1], pl)), k : term[2],
+    dp : dp + k[1] * s + k[2] * c,
+    de : de + k[3] * s + k[4] * c),
+  [as_radians(dp / 10^7), as_radians(de / 10^7)])$
+k_obl : dec("0.4697e-6")$
+k_j2 : dec("-2.7774e-6")$
+nutation_06a(t) := block([n : nutation_00a(t)],
+  [bfloat(n[1] * (1 + k_obl + k_j2 * t)), bfloat(n[2] * (1 + k_j2 * t))])$
+
+/* ---- the values ---------------------------------------------------------------------------------- */
+
+exact_xy : map(cip_xy, epochs)$
+/* the doubles the test passes to cio_locator_s: XY_EXACT's literals as rustc parses them */
+parsed(v) := nearest_double(rust_rational(lit(v)))$
+exact_s : map(lambda([t, xy], cio_s(t, parsed(xy[1]), parsed(xy[2]))), epochs, exact_xy)$
+exact_nut : map(lambda([t], append(nutation_00a(t), nutation_06a(t))), epochs)$
+for row in exact_xy do print("XY_EXACT", simplode(map(lit, row), ", "))$
+print("S_EXACT", simplode(map(lit, exact_s), ", "))$
+for row in exact_nut do print("NUT_EXACT", simplode(map(lit, row), ", "))$
+
+must(transcribed(rust_table(cio_rs, "XY_EXACT"), flatten(exact_xy)),
+     "(4) holds: XY_EXACT is X, Y at the six epochs, exact")$
+must(transcribed(rust_table(cio_rs, "S_EXACT"), exact_s),
+     "(5) holds: S_EXACT is s at the six epochs for XY_EXACT's doubles, exact")$
+must(transcribed(rust_table(nutation_rs, "NUT_EXACT"), flatten(exact_nut))
+     and is(map(rust_rational, rust_literals_between(nutation_rs, "pub fn nutation_06a(", "}"))
+            = [k_j2, k_obl]),
+     "(6) holds: NUT_EXACT is the IAU 2000A and 2006A nutation at the six epochs, exact; the IAU 2006 factors are the published decimals")$
+print("DONE")$

@@ -195,11 +195,11 @@ regeneration above hold the tables to them.
 | core | UtcDateTime validation + MJD anchors | IAU/IAG MJD definition | known constants (MJD 51544.0/.5; 2000-01-01 = day 10957) | bit-exact | tests/core_api.rs |
 | core | Angle/Length unit conversions | SI + IAU angle definitions | analytic exact (180°=π, 3600″=1°) | < 1e-15…1e-18 | tests/core_api.rs |
 | fa | 14 fundamental arguments (Delaunay + planetary) | IERS TN36 §5.7.2 eqs (5.43), (5.44) (Simon 1994, Souchay 1999) | **Maxima** `derivations/fundamental_arguments.mac`: the 47 coefficients are the published decimals; the polynomials in exact arithmetic, reduced as specified, at t = 0.06, ±1/2, ±1 and 2 centuries (G3); pyerfa a comparator ([`comparisons.md`](comparisons.md)) | 1.6e-12 rad at t = 2, 0.69 ulp of the unreduced polynomial (bound 5e-12) | src/fundamental.rs |
-| fa | CIP X,Y (IAU 2006/2000A series) | IERS TN36 Tables 5.2a/5.2b | the tables term for term (`derivations/cio_iers.mac`); SOFA `t_xy06` golden vector | < 1e-15 rad | src/cio.rs |
+| fa | CIP X,Y (IAU 2006/2000A series) | IERS TN36 Tables 5.2a/5.2b | the tables term for term (`derivations/cio_iers.mac`); **Maxima** `derivations/cio_nutation_series.mac`: eq (5.16) summed in 40 digits at t = 0.06, ±1/2, ±1 and 2 centuries (G3); SOFA `t_xy06` a comparator | 1.0e-17 rad at t = 2 (bound 4e-17) | src/cio.rs |
 | fa | CIP X,Y full-nutation cross-check | IERS TN36 Ch. 5 (equinox ≡ CIO route) | erfa.xys06a (independent equinox route) | < 5e-11 rad (meas ~1e-12) | src/cio.rs |
-| fa | CIO locator s | IERS TN36 Table 5.2d | the table term for term (`derivations/cio_iers.mac`); SOFA `t_s06` golden vector | < 1e-20 rad | src/cio.rs |
+| fa | CIO locator s | IERS TN36 Table 5.2d | the table term for term (`derivations/cio_iers.mac`); **Maxima** `derivations/cio_nutation_series.mac`: eq (5.18) summed in 40 digits at the same six epochs (G3); SOFA `t_s06` a comparator | 4.2e-21 rad at t = 2 (bound 1.5e-20) | src/cio.rs |
 | fa | Earth Rotation Angle | IAU 2000 Res. B1.8 (Capitaine 2000) | **Maxima** `derivations/fundamental_arguments.mac`: the two constants are the published decimals; the exact angle at six UT1 day counts, four day fractions among them (G3); SOFA `t_era00` and pyerfa comparators | 9.7e-15 rad (bound 3e-14) | src/cio.rs |
-| fa | Nutation Δψ,Δε IAU 2000A / 2006A | IERS TN36 §5.5.1 (MHB2000), Tables 5.3a/5.3b | the tables row for row, all but their 11 A‴/B‴ rates (`derivations/nutation_iers.mac`); SOFA `t_nut00a` / `t_nut06a` | < 1e-13 rad | src/nutation.rs |
+| fa | Nutation Δψ,Δε IAU 2000A / 2006A | IERS TN36 §5.5.1 (MHB2000), Tables 5.3a/5.3b | the tables row for row, all but their 11 A‴/B‴ rates (`derivations/nutation_iers.mac`); **Maxima** `derivations/cio_nutation_series.mac`: both series summed in 40 digits at the same six epochs, the §5.6.3 factors as their published decimals (G3); SOFA `t_nut00a` / `t_nut06a` and pyerfa comparators | 2.6e-17 rad at t = 2 (bound 1e-16) | src/nutation.rs |
 | fa | GMST82 over 10 millennia (45 epochs) | Aoki et al. 1982 / IAU 1982 GMST | decided by `derivations/gmst82.mac` (`src/earth_rotation.rs`, G2); pyerfa a comparator ([`comparisons.md`](comparisons.md)), fixtures from `derivations/gmst82.py`, 3.7e-12 rad four millennia out | — | tests/gmst82_oracle.rs |
 | fa | Leap-second table `delta_at` on every day from 1972-01-01 to 2027-06-28 (G5) | IERS `leap-seconds.list`, updated through Bulletin C 72, valid until 2027-06-28 | the IERS list itself, vendored (public domain): `TAI − UTC` changes on exactly its 28 dates, to its values; the list's expiry is past 2027-05-20. `tests/delta_at_oracle.rs` (pyerfa) is a parked comparator | exact integer | tests/leap_second_list.rs |
 | fa | TDB−TT (Fairhead–Bretagnon, 787 terms), 441 epochs over ±100 yr | Fairhead & Bretagnon 1990; IERS TN36 §10 | pyerfa `dtdb`, fixtures from `derivations/tdb_tables.py` | 128 ULP of the peak, rounded up (5e-17 s; meas 2.2e-19 = 1 ULP) | tests/dtdb_oracle.rs |
@@ -11368,9 +11368,14 @@ and (5.44) and the ERA's two as the published decimals, and writes the fourteen 
 epochs out to two centuries and the ERA at six UT1 day counts in exact arithmetic (G3). The worst
 misses are 0.69 and 0.22 of an ulp of the unreduced sums. GMST82's pyerfa test is parked behind the
 `gmst82.mac` gate it already had.
+Batch 12b (2026-11-13, Ф19.G) takes the series. `derivations/cio_nutation_series.mac` sums the CIP
+`X, Y`, the CIO locator `s` and both nutations in 40 digits over the transcriptions `cio_iers.mac` and
+`nutation_iers.mac` hold to the IERS tables, on the exact arguments of batch 12a, at the same six
+epochs (G3). The worst misses, two centuries out, are the arguments' own 1.6e-12 rad times the
+largest amplitudes. The SOFA vectors and pyerfa's four centuries are parked.
 
-**Today: 52
-comparator-decided tests of 3 721** — name 30, file 14, fixture 4, doc 4; none of them Orekit's,
+**Today: 47
+comparator-decided tests of 3 723** — name 25, file 14, fixture 4, doc 4; none of them Orekit's,
 5 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
@@ -11401,11 +11406,6 @@ crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::without_the_ozone_the_
 crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs::our_slab_reproduces_radcalnets_modtran_toa_on_measured_scenes | name:modtran
 crates/spacelab-ephemeris/tests/neptune_lro.rs::a_day_of_the_selenocentric_model_tracks_neptune | name:neptune
 crates/spacelab-ephemeris/tests/neptune_lro.rs::the_full_week_against_neptune | name:neptune
-crates/spacelab-fa/src/cio.rs::cio_locator_matches_sofa_golden | name:sofa
-crates/spacelab-fa/src/cio.rs::cip_xy_matches_sofa_golden | name:sofa
-crates/spacelab-fa/src/nutation.rs::both_nutation_series_match_pyerfa_across_four_centuries | name:pyerfa
-crates/spacelab-fa/src/nutation.rs::nutation_00a_matches_sofa_golden | name:sofa
-crates/spacelab-fa/src/nutation.rs::nutation_06a_matches_sofa_golden | name:sofa
 crates/spacelab-fa/tests/dtdb_oracle.rs::tdb_minus_tt_matches_pyerfa_over_two_centuries | name:pyerfa
 crates/spacelab-frames/tests/cio_oracle.rs::each_celestial_pole_offset_moves_the_matrix_by_its_own_size | file:oracle
 crates/spacelab-frames/tests/cio_oracle.rs::gcrf_to_itrf_matches_pyerfa_cio_pipeline | name:pyerfa

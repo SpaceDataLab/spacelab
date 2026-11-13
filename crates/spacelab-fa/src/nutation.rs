@@ -17,10 +17,13 @@
 //!
 //! The series coefficients (`crate::nut_tables`) are the IERS/IAU-published
 //! MHB2000 model constants (Mathews, Herring & Buffett 2002; IERS Conventions
-//! 2010, Technical Note 36, tables 5.3a/5.3b), machine-extracted and validated
-//! against `pyerfa` (ERFA, BSD-3-Clause) over a spread of epochs to `< 1e-18` rad
-//! and against the SOFA `t_nut00a` / `t_nut06a` self-test vectors — see
-//! `derivations/nut00a_tables.py`. spacelab does not link SOFA or ERFA.
+//! 2010, Technical Note 36, tables 5.3a/5.3b), machine-extracted by
+//! `derivations/nut00a_tables.py` and held row for row to the IERS tables by
+//! `derivations/nutation_iers.mac`. `derivations/cio_nutation_series.mac` sums both
+//! series in 40-digit arithmetic, applies the IAU 2006 factors as their published
+//! decimals, and writes the values the tests hold [`nutation_00a`] and
+//! [`nutation_06a`] to. `pyerfa` (ERFA, BSD-3-Clause) and the SOFA `t_nut00a` /
+//! `t_nut06a` self-test vectors are comparators; spacelab does not link SOFA or ERFA.
 //!
 //! The luni-solar and planetary blocks are summed with slightly different
 //! Delaunay-type arguments, exactly as MHB2000 prescribes: the luni-solar `l′`, `D`
@@ -169,7 +172,8 @@ pub fn nutation_06a(tt: Epoch<Tt>) -> (f64, f64) {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::excessive_precision)] // verbatim SOFA golden-vector values
+    // Exact values to 25 digits as the derivation prints them, and verbatim SOFA and pyerfa values.
+    #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
 
     use super::*;
 
@@ -178,54 +182,106 @@ mod tests {
         Epoch::from_days_since_j2000(2191.5)
     }
 
-    /// `Δψ, Δε` reproduce the SOFA `t_nut00a` golden vector. The tolerance is SOFA's
-    /// own (`1e-13`); the series in fact matches to a few `1e-19` (see the
-    /// derivation), the gap being the rounding of the printed golden constants.
+    /// TT days since J2000 at which the series are held: `t = 0.06` (the SOFA self-test epoch), a
+    /// century and half a century either side of J2000, and two centuries out — the epochs of
+    /// [`crate::fundamental`]'s arguments.
+    const SERIES_DAYS: [f64; 6] = [2191.5, -36_525.0, -18_262.5, 18_262.5, 36_525.0, 73_050.0];
+
+    /// IAU 2000A `Δψ, Δε` and IAU 2006A `Δψ, Δε` at [`SERIES_DAYS`]: both series summed in 40-digit
+    /// arithmetic, the 2006 factors applied exactly, to 25 digits
+    /// (`derivations/cio_nutation_series.mac` reads this table back).
+    const NUT_EXACT: [[f64; 4]; 6] = [
+        [
+            -9.630909107115593210319210e-6,
+            4.063239174001676613905611e-5,
+            -9.630912025820383576342485e-6,
+            4.063238496887247701570239e-5,
+        ],
+        [
+            8.409753134603515754101405e-5,
+            -1.111631344198687425678782e-5,
+            8.409780441912919125177410e-5,
+            -1.111634431643582803113238e-5,
+        ],
+        [
+            -1.601424665756253387386411e-5,
+            4.035162305736643226550146e-5,
+            -1.601427641843852228807706e-5,
+            4.035167909366537203026595e-5,
+        ],
+        [
+            7.355346965281273809044773e-5,
+            -2.583921583470367497508375e-5,
+            7.355340205717412715554143e-5,
+            -2.583917995178464532209032e-5,
+        ],
+        [
+            1.585987390484705170619881e-5,
+            4.162326779427022219241577e-5,
+            1.585983730501604149065759e-5,
+            4.162315218980625038630065e-5,
+        ],
+        [
+            5.432795503198357145486201e-5,
+            -3.868461745385661471975393e-5,
+            5.432767876889943831520281e-5,
+            -3.868440256854358203703049e-5,
+        ],
+    ];
+
+    /// The worst miss measured is 2.580e-17 rad, IAU 2000A `Δψ` two centuries out: inside what the
+    /// arguments' own 1.6e-12 rad miss there makes of the 17.2″ `Ω` term. The bound is 3.9 times
+    /// that.
+    const NUT_BOUND: f64 = 1.0e-16;
+
+    /// Both nutations are their series summed exactly. (G3)
+    ///
+    /// One epoch cannot separate a polynomial's coefficients from each other. `l′` and `D` are
+    /// quartics in `t` ([`poly_arcsec`]); at `t = 0.06` their cubic and quartic terms are seven
+    /// orders below the linear one, so corrupting the tail of the Horner nesting moves `Δψ` by
+    /// ~1e-15 rad, and `cargo mutants` found five such corruptions one epoch cannot see. A century
+    /// and two centuries out the same corruption is 1e-9 rad and larger.
     #[test]
-    fn nutation_00a_matches_sofa_golden() {
-        let (dpsi, deps) = nutation_00a(sofa_tt());
-        let gdpsi = -9.630_909_107_115_518_431e-6;
-        let gdeps = 4.063_239_174_001_678_710e-5;
-        assert!(
-            (dpsi - gdpsi).abs() < 1e-13,
-            "dpsi: {dpsi:.19e} want {gdpsi:.19e}"
-        );
-        assert!(
-            (deps - gdeps).abs() < 1e-13,
-            "deps: {deps:.19e} want {gdeps:.19e}"
+    fn both_nutations_are_their_series_summed_exactly() {
+        let mut worst = (0.0_f64, String::new());
+        for (days, want) in SERIES_DAYS.into_iter().zip(NUT_EXACT) {
+            let tt = Epoch::<Tt>::from_days_since_j2000(days);
+            let (psi_00a, eps_00a) = nutation_00a(tt);
+            let (psi_06a, eps_06a) = nutation_06a(tt);
+            for (i, got) in [psi_00a, eps_00a, psi_06a, eps_06a].into_iter().enumerate() {
+                let miss = (got - want[i]).abs();
+                if miss > worst.0 || miss.is_nan() {
+                    worst = (miss, format!("column {i} at day {days}"));
+                }
+            }
+        }
+        assert!(worst.0 < NUT_BOUND, "{:.3e} at {}", worst.0, worst.1);
+    }
+
+    /// The distances to the SOFA `t_nut00a` and `t_nut06a` golden vectors.
+    #[test]
+    #[ignore = "comparator: the distance to SOFA, not a verdict"]
+    fn nutation_distance_to_sofa() {
+        let (psi_00a, eps_00a) = nutation_00a(sofa_tt());
+        let (psi_06a, eps_06a) = nutation_06a(sofa_tt());
+        comparison_row(
+            "sofa",
+            "IAU 2000A and 2006A nutation at the t_nut00a and t_nut06a epoch",
+            &[
+                (psi_00a - -9.630_909_107_115_518_431e-6).abs(),
+                (eps_00a - 4.063_239_174_001_678_710e-5).abs(),
+                (psi_06a - -9.630_912_025_820_308_797e-6).abs(),
+                (eps_06a - 4.063_238_496_887_249_798e-5).abs(),
+            ],
         );
     }
 
-    /// `Δψ, Δε` reproduce the SOFA `t_nut06a` golden vector after the P03 rescale.
-    #[test]
-    fn nutation_06a_matches_sofa_golden() {
-        let (dpsi, deps) = nutation_06a(sofa_tt());
-        let gdpsi = -9.630_912_025_820_308_797e-6;
-        let gdeps = 4.063_238_496_887_249_798e-5;
-        assert!(
-            (dpsi - gdpsi).abs() < 1e-13,
-            "dpsi: {dpsi:.19e} want {gdpsi:.19e}"
-        );
-        assert!(
-            (deps - gdeps).abs() < 1e-13,
-            "deps: {deps:.19e} want {gdeps:.19e}"
-        );
-    }
-
-    /// Both series against `pyerfa` over four centuries.
+    /// The distances to `erfa.nut00a` and `erfa.nut06a` at five epochs over four centuries.
     ///
-    /// The two golden vectors above stand at one epoch, and one epoch cannot separate a
-    /// polynomial's coefficients from each other. `l′` and `D` are quartics in `t`
-    /// ([`poly_arcsec`]); at `t = 0.06` their cubic and quartic terms are seven orders below
-    /// the linear one, so corrupting the tail of the Horner nesting moves `Δψ` by ~1e-15 rad
-    /// — a tenth of SOFA's own tolerance. `cargo mutants` finds five such corruptions the two
-    /// golden vectors cannot see. Away from J2000 the same corruption is 1e-9 rad and larger.
-    ///
-    /// The agreement over these twenty values is exact to the bit — same series, same
-    /// summation order, same `sin`/`cos` — so the tolerance is in ulps. The two are there for
-    /// a future toolchain that contracts a multiply-add, not for an error the model can make.
+    /// Same series, same summation order, same `sin`/`cos`: the agreement is to the bit.
     #[test]
-    fn both_nutation_series_match_pyerfa_across_four_centuries() {
+    #[ignore = "comparator: the distance to pyerfa, not a verdict"]
+    fn nutation_distance_to_pyerfa_across_four_centuries() {
         // (days since J2000 TT, nut00a Δψ, Δε, nut06a Δψ, Δε)
         let cases = [
             (
@@ -264,26 +320,36 @@ mod tests {
                 -3.868_440_256_854_861_66e-5,
             ),
         ];
-        for (days, psi_00a, eps_00a, psi_06a, eps_06a) in cases {
-            let tt = Epoch::<Tt>::from_days_since_j2000(days);
-            for (label, (dpsi, deps), want_psi, want_eps) in [
-                ("nut00a", nutation_00a(tt), psi_00a, eps_00a),
-                ("nut06a", nutation_06a(tt), psi_06a, eps_06a),
-            ] {
-                spacelab_testkit::assert_within_ulps(
-                    dpsi,
-                    want_psi,
-                    2,
-                    &format!("{label} dpsi at day {days}"),
-                );
-                spacelab_testkit::assert_within_ulps(
-                    deps,
-                    want_eps,
-                    2,
-                    &format!("{label} deps at day {days}"),
-                );
-            }
-        }
+        let distances: Vec<f64> = cases
+            .iter()
+            .flat_map(|&(days, psi_00a, eps_00a, psi_06a, eps_06a)| {
+                let tt = Epoch::<Tt>::from_days_since_j2000(days);
+                let (p0, e0) = nutation_00a(tt);
+                let (p6, e6) = nutation_06a(tt);
+                [
+                    (p0 - psi_00a).abs(),
+                    (e0 - eps_00a).abs(),
+                    (p6 - psi_06a).abs(),
+                    (e6 - eps_06a).abs(),
+                ]
+            })
+            .collect();
+        comparison_row(
+            "pyerfa",
+            "IAU 2000A and 2006A nutation at t = -1, -0.5, 0.5, 1, 2",
+            &distances,
+        );
+    }
+
+    /// One `comparison | ...` row of `tools/compare.py`, in radians.
+    fn comparison_row(code: &str, quantity: &str, distances: &[f64]) {
+        let max = distances.iter().copied().fold(0.0, f64::max);
+        #[expect(clippy::cast_precision_loss, reason = "a count of a few distances")]
+        let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+        println!(
+            "comparison | {code} | not recorded | {quantity} | rad | {} | {max:.3e} | {rms:.3e}",
+            distances.len()
+        );
     }
 
     /// The IAU 2000A series coefficients, sealed. (S1)

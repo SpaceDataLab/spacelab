@@ -712,6 +712,16 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima fundamental_arguments.mac" "expected 3 checks to hold, found $holds"
     fi
 
+    # X, Y, s and the IAU 2000A/2006A nutation summed in 40 digits; the file loads
+    # fundamental_arguments.mac, so its three checks and DONE come first.
+    out=$(macf cio_nutation_series.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 6 ] && [ "$(printf '%s' "$out" | grep -c '^DONE')" -eq 2 ]; then
+        ok "maxima cio_nutation_series.mac: XY_EXACT, S_EXACT and NUT_EXACT are the CIO and nutation series summed exactly; the IAU 2006 factors are the published decimals"
+    else
+        bad "maxima cio_nutation_series.mac" "expected 6 checks to hold, found $holds"
+    fi
+
     # The IERS Conventions (2010) Tables 5.3a/5.3b, which `tools/fetch-specs.sh` fetches as
     # digest-named snapshots; the pin is each file's SHA-256, so a table the IERS revised fails here.
     tab53a=../data/specs/iers-tab5.3a.6da73bfe.txt

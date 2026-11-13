@@ -172,10 +172,12 @@ golden_rows(begin) := block([l : rust_literals_between(src, begin, "];"), rows :
   l : rest(l, 3),
   for i : 0 thru 6 do rows : endcons(makelist(l[5*i + j], j, 1, 5), rows),
   rows)$
-wobble_holds(rows, pole) := every(lambda([r], block([t : rust_rational(r[1])],
-  transcribed([r[2], r[3], r[4], r[5]], append(wobble(0, 0, t, pole), wobble(xp, yp, t, pole))))), rows)$
-must(wobble_holds(golden_rows("fn the_mean_pole_is_iers_table_7_7_on_both_branches"), 'iers2010)
-     and wobble_holds(golden_rows("fn the_secular_pole_is_the_2018_chapter_7_line"), 'secular),
+/* The wobble is rational, so the rows go to the Arb pass as they are. */
+wobble_holds(name, rows, pole) := certified(name, flatten(map(rest, rows)),
+  flatten(map(lambda([r], block([t : rust_rational(r[1])], append(wobble(0, 0, t, pole), wobble(xp, yp, t, pole)))),
+              rows)))$
+must(wobble_holds("POLE_WOBBLE_2010", golden_rows("fn the_mean_pole_is_iers_table_7_7_on_both_branches"), 'iers2010)
+     and wobble_holds("POLE_WOBBLE_SECULAR", golden_rows("fn the_secular_pole_is_the_2018_chapter_7_line"), 'secular),
      "(6) holds: m1 = xp - xs, m2 = ys - yp about eq (21)'s secular pole and Table 7.7's 2010 pole are pole_wobble.py's 50-digit goldens at all seven epochs, to every digit they show")$
 
 /* ---- (7) the goldens ------------------------------------------------------------------------------- */
@@ -196,9 +198,10 @@ print("STEP2_MAXIMA", step2)$
 tpole : rust_rational(rust_scalar(src, "POLE_T"))$
 pole_terms(pole) := block([w : wobble(xp, yp, tpole, pole), u1, u2],
   u1 : w[1]/arcsec_code, u2 : w[2]/arcsec_code,
-  bfloat([-1333/10^12*(u1 + 115/10^4*u2), -1333/10^12*(u2 - 115/10^4*u1),
-          -21778/10^14*(u1 - 1724/10^5*u2), -17232/10^14*(u2 - 3365/10^5*u1)]))$
-poles : [pole_terms('iers2010), pole_terms('secular)]$
+  [-1333/10^12*(u1 + 115/10^4*u2), -1333/10^12*(u2 - 115/10^4*u1),
+   -21778/10^14*(u1 - 1724/10^5*u2), -17232/10^14*(u2 - 3365/10^5*u1)])$
+poles_exact : [pole_terms('iers2010), pole_terms('secular)]$
+poles : bfloat(poles_exact)$
 print("POLE_TIDES_MAXIMA", poles)$
 
 /* Eq (6.6) and (6.7) for bodies at ITRF positions, less (6.14): [[n, m, dC, dS], ...] for n = 2..4. */
@@ -247,10 +250,59 @@ full_coeffs[3][4] : full_coeffs[3][4] + step2[5]$
 full_accel : gradient_at(full_coeffs, ratk("ORACLE_MU_EARTH"), ratk("ORACLE_RE"), rat3("ORACLE_SAT"))$
 print("FULL_ACCELERATION_MAXIMA", full_accel)$
 
-must(transcribed(rust_table(src, "STEP2_MAXIMA"), step2)
-     and transcribed(rust_table(src, "POLE_TIDES_MAXIMA"), flatten(poles))
-     and transcribed(rust_table(src, "STEP1_ACCELERATION_MAXIMA"), step1_accel)
-     and transcribed(rust_table(src, "FULL_ACCELERATION_MAXIMA"), full_accel)
+/* The same goldens as exact real values, for the Arb pass (plans/17 Ф28.A): (3)'s and (1)'s real
+   pairs, each sum's terms added once, and each gradient as the coefficients times the gradients of
+   their basis functions at the point. */
+band_pair(rows) := block([re : [], im : []],
+  for r in rows do block([theta : r[1]*(gmst + %pi) - r[2] . args],
+    re : cons(r[3]*cos(theta) - r[4]*sin(theta), re),
+    im : cons(r[3]*sin(theta) + r[4]*cos(theta), im)),
+  [apply("+", re), apply("+", im)])$
+lpx : band_pair(band("LONG_PERIOD"))$
+dix : band_pair(band("DIURNAL"))$
+sdx : band_pair(band("SEMIDIURNAL"))$
+step2_exact : 10^-12*[lpx[1], dix[2], dix[1], sdx[1], -sdx[2]]$
+step1_exact(bodies, GMref, Re) := block([pair_sums, out : []],
+  pair_sums(n, m) := block([pairs : map(lambda([b], block([R : sqrt(b[1]^2 + b[2]^2 + b[3]^2), w, c],
+      w : b[4]/GMref*(Re/R)^(n + 1)*Nnm(n, m)*Pd(n, m, b[3]/R)/R^m,
+      c : rectform(expand((b[1] - %i*b[2])^m)),
+      [w*realpart(c), w*imagpart(c)])), bodies)],
+    [apply("+", map(first, pairs)), apply("+", map(second, pairs))]),
+  for n : 2 thru 3 do for m : 0 thru n do block([p : pair_sums(n, m), kr, ki],
+    kr : if n = 2 then [30190, 29830, 30102][m + 1]/10^5 else [93, 93, 93, 94][m + 1]/10^3,
+    ki : if n = 2 then -[0, 144, 130][m + 1]/10^5 else 0,
+    out : endcons([n, m, (kr*p[1] - ki*p[2])/(2*n + 1), -(kr*p[2] + ki*p[1])/(2*n + 1)], out)),
+  for m : 0 thru 2 do block([p : pair_sums(2, m), kp : [-89, -80, -57][m + 1]/10^5],
+    out : endcons([4, m, kp/5*p[1], -kp/5*p[2]], out)),
+  out[1][3] : out[1][3] - 44228/10^12*(-31460/10^5)*30190/10^5,
+  out)$
+gradient_exact(coeffs, GMref, Re, at) := block([terms : [[], [], []]],
+  for c in coeffs do block([g : map(lambda([f], subst([x = at[1], y = at[2], z = at[3]], [diff(f, x), diff(f, y), diff(f, z)])),
+                                    basis(c[1], c[2], GMref, Re))],
+    for k thru 3 do terms[k] : cons(c[3]*g[1][k] + c[4]*g[2][k], terms[k])),
+  map(lambda([l], apply("+", l)), terms))$
+step1_accel_exact : gradient_exact(step1_exact([endcons(ratk("MU_SUN"), rat3("SUN")), endcons(ratk("MU_MOON"), rat3("MOON"))],
+                                               ratk("MU_EARTH"), ratk("RE_EARTH")),
+                                   ratk("MU_EARTH"), ratk("RE_EARTH"), rat3("SAT"))$
+full_coeffs_exact : step1_exact([endcons(ratk("ORACLE_MU_SUN"), rat3("ORACLE_SUN")),
+                                 endcons(ratk("ORACLE_MU_MOON"), rat3("ORACLE_MOON"))],
+                                ratk("ORACLE_MU_EARTH"), ratk("ORACLE_RE"))$
+full_coeffs_exact[1][3] : full_coeffs_exact[1][3] + step2_exact[1]$
+full_coeffs_exact[2][3] : full_coeffs_exact[2][3] + step2_exact[2] + poles_exact[1][1]$
+full_coeffs_exact[2][4] : full_coeffs_exact[2][4] + step2_exact[3] + poles_exact[1][2]$
+full_coeffs_exact[3][3] : full_coeffs_exact[3][3] + step2_exact[4]$
+full_coeffs_exact[3][4] : full_coeffs_exact[3][4] + step2_exact[5]$
+full_accel_exact : gradient_exact(full_coeffs_exact, ratk("ORACLE_MU_EARTH"), ratk("ORACLE_RE"), rat3("ORACLE_SAT"))$
+goldens_exact : append(step2_exact, flatten(poles_exact), step1_accel_exact, full_accel_exact)$
+exact_gap : lmax(map(lambda([e, b], abs(bfloat(e) - b)/abs(b)), goldens_exact,
+                     append(step2, flatten(poles), step1_accel, full_accel)))$
+print("the exact goldens against the 40-digit ones, worst relative:", exact_gap)$
+
+must(freeof(%i, goldens_exact) and is(exact_gap < 10^-35)
+     and certified("STEP2_MAXIMA", rust_table(src, "STEP2_MAXIMA"), step2_exact)
+     and certified("POLE_TIDES_MAXIMA", rust_table(src, "POLE_TIDES_MAXIMA"), flatten(poles_exact))
+     and certified("STEP1_ACCELERATION_MAXIMA", rust_table(src, "STEP1_ACCELERATION_MAXIMA"), step1_accel_exact)
+     and certified("FULL_ACCELERATION_MAXIMA", rust_table(src, "FULL_ACCELERATION_MAXIMA"), full_accel_exact)
      and is(python_gap < 1b-4),
      "(7) holds: the Rust goldens are eq (6.8) at the oracle epoch, eqs (6.22) and (6.24) on both poles, and the gradients of the Step-1 and full potentials, to every digit shown; the Python reference is within its 1e-4")$
 print("DONE")$

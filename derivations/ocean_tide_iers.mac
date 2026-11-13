@@ -119,9 +119,37 @@ for c in dcs do block([n : c[1], m : c[2], w],
 accel : bfloat(subst([x = sat[1], y = sat[2], z = sat[3]], [diff(v, x), diff(v, y), diff(v, z)]))$
 print("ACCELERATION_MAXIMA", accel)$
 
+/* The same goldens as exact real values, for the Arb pass (plans/17 Ф28.A): each cell by (1)'s real
+   pair, its terms added once, and the gradient as each cell's coefficients times the gradient of its
+   basis function at the satellite. */
+cell_terms : makelist(makelist([[], []], m, 0, n), n, 0, 6)$
+for w in fes_waves do block([th : argument(w[1], gmst + %pi, del), c0, s0],
+  c0 : cos(th), s0 : sin(th),
+  for c in w[2] do block([n : c[1], m : c[2], t : cell_terms[c[1] + 1][c[2] + 1]],
+    cell_terms[n + 1][m + 1] : [cons(scale*((c[3] + c[5])*c0 + (c[4] + c[6])*s0), t[1]),
+                                cons(scale*((c[4] - c[6])*c0 - (c[3] - c[5])*s0), t[2])]))$
+dcs_exact : []$
+for n : 2 thru 6 do for m : 0 thru n do
+  dcs_exact : endcons([n, m, apply("+", cell_terms[n + 1][m + 1][1]),
+                       apply("+", cell_terms[n + 1][m + 1][2])], dcs_exact)$
+basis_gradient(n, m) := block([w : expand((x + %i*y)^m), b],
+  b : GMe/rr*(Re/rr)^n*Nnm(n, m)*Pd(n, m, z/rr)/rr^m,
+  map(lambda([part], subst([x = sat[1], y = sat[2], z = sat[3]], [diff(b*part, x), diff(b*part, y), diff(b*part, z)])),
+      [realpart(w), imagpart(w)]))$
+accel_exact : block([terms : [[], [], []]],
+  for c in dcs_exact do block([g : basis_gradient(c[1], c[2])],
+    for k thru 3 do terms[k] : cons(c[3]*g[1][k] + (if c[2] = 0 then 0 else c[4])*g[2][k], terms[k])),
+  map(lambda([l], apply("+", l)), terms))$
+dcs_flat_exact : flatten(map(lambda([c], [c[3], c[4]]), dcs_exact))$
+exact_gap : lmax(map(lambda([e, b], abs(bfloat(e) - b)/abs(b)),
+                     append(dcs_flat_exact, accel_exact),
+                     append(flatten(map(lambda([c], [c[3], c[4]]), dcs)), accel)))$
+print("the exact cells and gradient against the 40-digit ones, worst relative:", exact_gap)$
+
 numbers_of(entries) := sublist(entries, lambda([t], ssearch(".", t) # false or ssearch("e", t) # false))$
-must(transcribed(numbers_of(rust_table(src, "DCS_MAXIMA")), flatten(map(lambda([c], [c[3], c[4]]), dcs)))
-     and transcribed(rust_table(src, "ACCELERATION_MAXIMA"), accel),
+must(freeof(%i, append(dcs_flat_exact, accel_exact)) and is(exact_gap < 10^-35)
+     and certified("DCS_MAXIMA", numbers_of(rust_table(src, "DCS_MAXIMA")), dcs_flat_exact)
+     and certified("ACCELERATION_MAXIMA", rust_table(src, "ACCELERATION_MAXIMA"), accel_exact),
      "(3) holds: the Rust goldens are eq (6.15) over the shipped FES2004 table at the oracle epoch and the gradient of its potential with dS_n0 = 0, to every digit shown")$
 
 /* ---- (4) the argument's rounding ------------------------------------------------------------------- */

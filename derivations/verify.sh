@@ -580,6 +580,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     fi
 
     out=$(macf solid_tide_iers.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 8 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima solid_tide_iers.mac: the force is eqs (6.6)-(6.8), (6.22) and (6.24); 1.333e-9 and the ocean coefficients follow from k2 and Desai; the G3 goldens are the chapter's potential at 40 digits"
@@ -588,6 +589,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     fi
 
     out=$(macf ocean_tide_iers.mac)
+    arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima ocean_tide_iers.mac: the force is eq (6.15) under the Doodson-to-Delaunay map of eq 5.43; the G3 goldens are its field and gradient at 40 digits, less only theta's f64 rounding"

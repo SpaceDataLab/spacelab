@@ -94,6 +94,16 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | box-wing SRP | relative | 5 | 1.278e-15 | 8.422e-16 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST zonal eccentricity cut over 1134 states | powers | 1134 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/tests/dsst_truncation.rs::the_eccentricity_truncation_order_distance_to_orekit` |
 | Orekit | 13.1.7 | eclipse masking ratio ν, Orekit's arrangement against the reference | 1 | 171 | 6.510e-07 | 7.041e-08 | `crates/spacelab-propagation/tests/shadow_lens.rs::orekit_masking_ratio_distance_to_the_reference` |
+| Orekit | 13.1.7 | ISS pass edges, mask 10 deg, IERS EOP | s | 6 | 9.237e-05 | 6.051e-05 | `crates/spacelab/tests/access_oracle.rs::iss_pass_edges_distance_to_orekit` |
+| Orekit | 13.1.7 | ISS pass edges, mask 10 deg, no EOP | s | 6 | 3.804e-02 | 2.311e-02 | `crates/spacelab/tests/access_oracle.rs::iss_pass_edges_distance_to_orekit` |
+| Orekit | 13.1.7 | two-body position at reception | m | 470 | 8.829e-07 | 2.648e-07 | `crates/spacelab/tests/light_time_oracle.rs::two_body_distance_to_orekit` |
+| Orekit | 13.1.7 | two-body position at emission | m | 470 | 8.380e-07 | 2.623e-07 | `crates/spacelab/tests/light_time_oracle.rs::two_body_distance_to_orekit` |
+| Orekit | 13.1.7 | down-leg flight time | s | 470 | 2.078e-15 | 4.943e-16 | `crates/spacelab/tests/light_time_oracle.rs::flight_time_distance_to_orekit` |
+| Orekit | 13.1.7 | one-way range, light-time | m | 470 | 6.608e-07 | 1.515e-07 | `crates/spacelab/tests/light_time_oracle.rs::range_distance_to_orekit` |
+| Orekit | 13.1.7 | one-way range, instantaneous convention | m | 470 | 6.252e+01 | 3.238e+01 | `crates/spacelab/tests/light_time_oracle.rs::range_distance_to_orekit` |
+| Orekit | 13.1.7 | instantaneous range, against Orekit's instantaneous | m | 470 | 6.529e-07 | 1.498e-07 | `crates/spacelab/tests/light_time_oracle.rs::range_distance_to_orekit` |
+| Orekit | 13.1.7 | one-way range rate, light-time | m/s | 470 | 3.297e-09 | 7.063e-10 | `crates/spacelab/tests/light_time_oracle.rs::range_rate_distance_to_orekit` |
+| Orekit | 13.1.7 | one-way range rate, instantaneous convention | m/s | 470 | 1.694e-01 | 1.052e-01 | `crates/spacelab/tests/light_time_oracle.rs::range_rate_distance_to_orekit` |
 
 Parked comparator tests that print no row yet:
 

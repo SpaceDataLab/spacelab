@@ -1,0 +1,113 @@
+/* `crates/spacelab-estimation`'s down-leg light time (`light_time::down_leg`, `observed::reduce`) and
+   the range and range-rate it feeds, on a two-body orbit at 40 digits (plans/17 Ф19.G).
+
+   Orekit's light-time solution and Range / RangeRate models decided
+   `crates/spacelab/tests/light_time_oracle.rs` until Ф19.G and are a comparator now
+   (docs/comparisons.md). The definitions decide:
+     (1) the two-body orbit from the fixture's epoch state, by Lagrange's f and g with the difference
+         form of Kepler's equation in the eccentric anomaly: the Lagrange identity f g' - f' g = 1,
+         energy and angular momentum hold to 1e-35 at every epoch used;
+     (2) the down leg: the signal leaves the satellite at t_e = t_r - tau and reaches the station's
+         reception position, c tau = |r(t_r - tau) - s(t_r)|; the shipped iteration is that fixed
+         point, and the range and range rate are |r_e - s| and (r_e - s).(v_e - s')/|r_e - s| at the
+         emission state, as `measurement.rs` writes them;
+     (3) the goldens of the Rust G3 test at 40 digits: tau, c tau, the range rate at emission and
+         the instantaneous range |r(t_r) - s| at the five fixture rows the Rust test names,
+         reception epochs 0 to 86 170 s, the inputs read from the fixture as the doubles Rust
+         parses them to.
+
+   timeout 300 maxima --very-quiet -Q -b light_time_down_leg.mac                                     */
+
+load("rust_literals.mac")$
+fpprec : 40$
+fpprintprec : 20$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+fixture : "../crates/spacelab/tests/fixtures/orekit_light_time.csv"$
+oracle : "../crates/spacelab/tests/light_time_oracle.rs"$
+light_time : "../crates/spacelab-estimation/src/light_time.rs"$
+measurement : "../crates/spacelab-estimation/src/measurement.rs"$
+in_source(path, text) := block([s : openr(path), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+all_in_source(path, texts) := every(lambda([t], in_source(path, t)), texts)$
+as_double(t) := nearest_double(rust_rational(strim(" ", t)))$
+vdot(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+cross(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+norm(a) := sqrt(vdot(a, a))$
+
+/* ---- the fixture ----------------------------------------------------------------------------------- */
+epoch_state : false$  rows : []$
+block([s : openr(fixture), line],
+  while (line : readline(s)) # false do (
+    if ssearch("# epoch_state=", line) = 1 then
+      epoch_state : map(as_double, split(substring(line, slength("# epoch_state=") + 1), ","))
+    else if slength(line) > 0 and charat(line, 1) # "#" then rows : endcons(split(line, ","), rows)),
+  close(s))$
+/* An integer, so the bigfloat is exact; kept exact, sqrt(mu) would stay a radical and swell. */
+mu : bfloat(nearest_double(rust_rational(rust_scalar(oracle, "MU"))))$
+c : rust_rational(rust_scalar(light_time, "SPEED_OF_LIGHT"))$
+picks : map(rust_rational, rust_table(oracle, "GOLDEN_ROWS"))$
+picked : map(lambda([k], map(as_double, rows[k + 1])), picks)$
+
+/* ---- (1) the orbit --------------------------------------------------------------------------------- */
+r0 : bfloat(firstn(epoch_state, 3))$  v0 : bfloat(rest(epoch_state, 3))$
+rn0 : norm(r0)$
+a : 1/(2/rn0 - vdot(v0, v0)/mu)$
+n : sqrt(mu/a^3)$
+sigma0 : vdot(r0, v0)/sqrt(mu)$
+/* Newton on the difference form; quadratic, so a step under 1e-30 leaves an error under 1e-60 and
+   one more step lands on the working precision. */
+kepler(dt) := block([E : bfloat(n*dt), F, Fp, dE : 1, k : 0],
+  while abs(dE) > 1b-30 or k < 2 do (
+    if abs(dE) <= 1b-30 then k : k + 1,
+    F : E + sigma0/sqrt(a)*(1 - cos(E)) - (1 - rn0/a)*sin(E) - n*dt,
+    Fp : 1 + sigma0/sqrt(a)*sin(E) - (1 - rn0/a)*cos(E),
+    dE : F/Fp, E : E - dE),
+  E)$
+state(dt) := block([E : kepler(dt), rn, f, g, fd, gd],
+  rn : a + (rn0 - a)*cos(E) + sigma0*sqrt(a)*sin(E),
+  f : 1 - a/rn0*(1 - cos(E)), g : dt - (E - sin(E))/n,
+  fd : -sqrt(mu*a)/(rn*rn0)*sin(E), gd : 1 - a/rn*(1 - cos(E)),
+  [f*r0 + g*v0, fd*r0 + gd*v0, f*gd - fd*g])$
+energy(s) := vdot(s[2], s[2])/2 - mu/norm(s[1])$
+h0 : cross(r0, v0)$
+orbit_ok(dt) := block([s : state(dt)],
+  abs(s[3] - 1) < 1b-35 and abs(energy(s)/energy([r0, v0]) - 1) < 1b-35
+  and norm(cross(s[1], s[2]) - h0)/norm(h0) < 1b-35)$
+must(every(lambda([p], orbit_ok(p[1]) and orbit_ok(p[1] - 1/50)), picked),
+     "(1) holds: f g' - f' g = 1, energy and angular momentum to 1e-35 at every epoch used")$
+
+/* ---- (2) the down leg ------------------------------------------------------------------------------ */
+/* The map contracts by |v|/c ~ 3e-5 per pass, so twelve passes from tau = 0 take tau below 1e-50 of
+   its error: past the working precision, without a stopping test that rounding could defeat. */
+down_leg(tr, s) := block([tau : 0],
+  for k thru 12 do tau : norm(state(tr - tau)[1] - s)/c,
+  tau)$
+results : map(lambda([p], block([tr : p[1], s : bfloat([p[2], p[3], p[4]]), sv : bfloat([p[5], p[6], p[7]]),
+                                  tau, e, dr],
+  tau : down_leg(tr, s), e : state(tr - tau), dr : e[1] - s,
+  [tau, c*tau, vdot(dr, e[2] - sv)/norm(dr), norm(state(tr)[1] - s), abs(norm(dr) - c*tau)])), picked)$
+must(every(lambda([x], x[5] < 1b-30), results)
+     and all_in_source(light_time, [
+       "let next = distance(source, receiver) / SPEED_OF_LIGHT;",
+       "source = emitter(receive - next)?;",
+       "emit: receive - delay,"])
+     and all_in_source(measurement, [
+       "(dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2]).sqrt()",
+       "let dot = dr[0] * dv[0] + dr[1] * dv[1] + dr[2] * dv[2];",
+       "dot * rho2.sqrt().recip()"]),
+     "(2) holds: c tau = |r(t_r - tau) - s(t_r)| at every pick, the shipped fixed point; range and range rate are the emission state's")$
+
+/* ---- (3) the goldens ------------------------------------------------------------------------------- */
+column(k) := map(lambda([x], x[k]), results)$
+print("TAU_MAXIMA", column(1))$
+print("RANGE_MAXIMA", column(2))$
+print("RANGE_RATE_MAXIMA", column(3))$
+print("INSTANTANEOUS_RANGE_MAXIMA", column(4))$
+must(is(map(lambda([p], p[1]), picked) = [0, 11740, 23960, 35710, 86170])
+     and transcribed(rust_table(oracle, "TAU_MAXIMA"), column(1))
+     and transcribed(rust_table(oracle, "RANGE_MAXIMA"), column(2))
+     and transcribed(rust_table(oracle, "RANGE_RATE_MAXIMA"), column(3))
+     and transcribed(rust_table(oracle, "INSTANTANEOUS_RANGE_MAXIMA"), column(4)),
+     "(3) holds: the Rust goldens are tau, c tau, the range rate at emission and the instantaneous range at five epochs, to every digit shown")$
+print("DONE")$

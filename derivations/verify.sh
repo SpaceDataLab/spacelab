@@ -633,6 +633,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima earth_rotation_rate.mac" "expected 3 checks to hold, found $holds"
     fi
 
+    out=$(macf light_time_down_leg.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima light_time_down_leg.mac: the two-body orbit by f and g, the down leg the fixed point of c tau = |r(t_r - tau) - s|; the G3 goldens at 40 digits"
+    else
+        bad "maxima light_time_down_leg.mac" "expected 3 checks to hold, found $holds"
+    fi
+
 
     out=$(macf ocean_loading.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')

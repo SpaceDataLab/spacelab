@@ -86,33 +86,49 @@ def test_discovery_finds_each_parked_fn_and_no_plain_ignore() -> None:
 
 
 def test_the_listed_name_must_be_unique_inside_the_module() -> None:
-    test = tool.Parked("crates/p/src/dsst/srp.rs", "rates")
-    listed = [
-        "dsst::srp::tests::rates",
-        "dsst::drag::tests::rates",
-        "dsst::srp::tests::rates_two",
-    ]
-    assert tool.full_name(test, listed, "dsst::srp") == "dsst::srp::tests::rates"
-    assert "2 ignored tests match" in raises(tool.full_name, test, listed, "dsst")
-    assert "0 ignored tests match" in raises(
-        tool.full_name, test, listed, "dsst::gaussian"
-    )
+    with tempfile.TemporaryDirectory() as d:
+        root = pathlib.Path(d)
+        path = root / "crates/p/src/dsst/srp.rs"
+        path.parent.mkdir(parents=True)
+        path.write_text("mod tests {\n}\nmod more {\n}\n")
+        test = tool.Parked("crates/p/src/dsst/srp.rs", "rates")
+        listed = [
+            "dsst::srp::tests::rates",
+            "dsst::drag::tests::rates",
+            "dsst::srp::tests::rates_two",
+        ]
+        assert (
+            tool.full_name(root, test, listed, "dsst::srp") == "dsst::srp::tests::rates"
+        )
+        # Only the file's own inline modules may stand between its module and the name.
+        assert "0 ignored tests match" in raises(
+            tool.full_name, root, test, listed, "dsst"
+        )
+        assert "0 ignored tests match" in raises(
+            tool.full_name, root, test, listed, "dsst::gaussian"
+        )
+        assert "2 ignored tests match" in raises(
+            tool.full_name, root, test, [*listed, "dsst::srp::more::rates"], "dsst::srp"
+        )
 
 
-def test_the_table_lists_every_row_and_names_a_silent_test() -> None:
+def test_the_table_lists_every_row_and_marks_a_restricted_one() -> None:
     loud = tool.Parked("crates/p/src/a.rs", "loud")
     silent = tool.Parked("crates/p/tests/b.rs", "silent")
+    hidden = tool.Parked("crates/q/src/c.rs", "hidden")
     row = tool.Row("Orekit", "13.1.7", "density", "relative", 16, 3.0e-15, 1.0e-15)
-    text = tool.table([(loud, [row, row]), (silent, [])], datetime.date(2026, 11, 12))
+    text = tool.table(
+        [(loud, [row, row]), (silent, []), (hidden, [row])],
+        datetime.date(2026, 11, 12),
+        ["crates/q/"],
+    )
     assert "Generated 2026-11-12." in text
     lines = [line for line in text.splitlines() if line.startswith("| Orekit")]
-    assert (
-        lines
-        == [
-            "| Orekit | 13.1.7 | density | relative | 16 | 3.000e-15 | 1.000e-15 | `crates/p/src/a.rs::loud` |"
-        ]
-        * 2
-    )
+    shown = "| Orekit | 13.1.7 | density | relative | 16 | 3.000e-15 | 1.000e-15 |"
+    assert lines == [
+        f"{shown} `crates/p/src/a.rs::loud` |",
+        f"{shown} `crates/p/src/a.rs::loud` |",
+    ]
     assert text.rstrip().endswith("- `crates/p/tests/b.rs::silent`")
 
 

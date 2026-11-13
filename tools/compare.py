@@ -132,13 +132,13 @@ def cargo(args: list[str]) -> subprocess.CompletedProcess[str]:
 INLINE_MOD = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*\{", re.M)
 
 
-def full_name(test: Parked, listed: list[str], module: str) -> str:
+def full_name(root: pathlib.Path, test: Parked, listed: list[str], module: str) -> str:
     """The one listed test path that is `test`: its name, inside its file's module.
 
     Between the file's module and the name only the file's own inline modules (`mod tests { ... }`)
     may stand: `dsst::drag::tests::x` is not in `dsst/mod.rs`, though it starts with `dsst::`.
     """
-    inline = set(INLINE_MOD.findall((ROOT / test.path).read_text()))
+    inline = set(INLINE_MOD.findall((root / test.path).read_text()))
     prefix = module + "::" if module else ""
     hits = [
         name
@@ -172,7 +172,7 @@ def run(tests: list[Parked]) -> list[tuple[Parked, list[Row]]]:
                 for line in done.stdout.splitlines()
                 if line.endswith(": test")
             ]
-        name = full_name(test, listed[selector], module)
+        name = full_name(ROOT, test, listed[selector], module)
         done = cargo([*selector, "--", "--ignored", "--exact", "--nocapture", name])
         if done.returncode != 0:
             fail(test.key, done)

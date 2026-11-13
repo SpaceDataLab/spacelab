@@ -1,0 +1,70 @@
+/* TDB - TT at the geocentre: the Fairhead & Bretagnon (1990) series of tdb.rs summed in 40-digit
+   arithmetic (plans/17 Ф19.G): the values tdb.rs holds tdb_minus_tt to.
+
+   tdb_tables.rs carries the series as SOFA's dtdb.c ships it (derivations/tdb_tables.py): 787 terms
+   A sin(w t + phi), A in seconds, w in rad per Julian millennium, phi in rad, in five blocks that
+   multiply t^0 .. t^4, and the adjustment to the JPL planetary masses, four periodic terms and
+   0.03638e-6 t^2 s. t is TT Julian millennia since J2000, 365 250 days each (IERS Conventions 2010,
+   §10.1). No document under data/specs prints the 787 coefficients, so this decides the evaluation,
+   not the transcription: their source is still dtdb.c.
+
+     (1) the series has the shape tdb.rs sums: five blocks ending at terms 474, 679, 764, 784 and
+         787, four JPL terms, and a millennium of 365 250 days;
+     (2) TDB_EXACT in tdb.rs is the series at the eight TT day counts the test passes, t the double
+         tdb_minus_tt divides each to, every literal its exact value rounded to the digits it shows.
+
+   timeout 300 maxima --very-quiet -Q -b tdb_series.mac                                             */
+
+fpprec : 40$
+display2d : false$
+linel : 4000$
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+tdb_rs : "../crates/spacelab-fa/src/tdb.rs"$
+tables : "../crates/spacelab-fa/src/tdb_tables.rs"$
+table(name) := map(rust_rational, rust_table(tables, name))$
+chunks(flat, width) := block([out : []],
+  while flat # [] do (out : cons(firstn(flat, width), out), flat : rest(flat, width)),
+  reverse(out))$
+
+group_end : table("GROUP_END")$
+fairhead : chunks(table("FAIRHEAD"), 3)$
+jpl : chunks(table("JPL_MASS"), 3)$
+jpl_t2 : rust_rational(rust_scalar(tables, "JPL_MASS_T2"))$
+millennium : rust_rational(rust_scalar(tdb_rs, "DAYS_PER_JULIAN_MILLENNIUM"))$
+
+/* (1) */
+must(is(group_end = [474, 679, 764, 784, 787]) and is(length(fairhead) = 787)
+     and is(length(jpl) = 4) and every(lambda([r], is(length(r) = 3)), append(fairhead, jpl))
+     and is(millennium = 365250),
+     "(1) holds: five blocks ending at 474, 679, 764, 784, 787, four JPL terms, 365 250 days a millennium")$
+
+/* (2) */
+term(r, t) := r[1] * sin(bfloat(r[2] * t + r[3]))$
+tdb_minus_tt(t) := block([w : 0, rows : fairhead, lo : 0, g],
+  for k thru 5 do (
+    g : 0,
+    for i : lo + 1 thru group_end[k] do (g : g + term(first(rows), t), rows : rest(rows)),
+    w : w + g * t^(k - 1),
+    lo : group_end[k]),
+  bfloat(w + apply("+", map(lambda([r], term(r, t)), jpl)) + jpl_t2 * t^2))$
+/* TT days since J2000: the SOFA self-test epoch, two centuries, one and a half either side of
+   J2000, and a three-quarter-day fraction; (day + fraction) is exact, so t is its quotient rounded. */
+tdb_days : [4383/2, -73050, -36525, -36525/2, 4939/4, 36525/2, 36525, 73050]$
+exact_tdb : map(lambda([d], tdb_minus_tt(nearest_double(d / millennium))), tdb_days)$
+
+/* A value as a Rust literal of 25 significant digits. */
+lit(v) := block([a : abs(v), e, m, t],
+  if is(equal(v, 0)) then return("0.0"),
+  e : floor(float(log(bfloat(a)) / log(10b0))),
+  m : round(a * 10^(24 - e)),
+  if m >= 10^25 then (e : e + 1, m : round(a * 10^(24 - e))),
+  if m < 10^24 then (e : e - 1, m : round(a * 10^(24 - e))),
+  t : string(m),
+  concat(if is(v < 0) then "-" else "", charat(t, 1), ".", substring(t, 2), "e", e))$
+print("TDB_EXACT", simplode(map(lit, exact_tdb), ", "))$
+
+must(transcribed(rust_table(tdb_rs, "TDB_EXACT"), exact_tdb),
+     "(2) holds: TDB_EXACT is the series at the eight TT day counts, exact")$
+print("DONE")$

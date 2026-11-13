@@ -16,10 +16,12 @@
 //! The series is Fairhead & Bretagnon (1990, A&A 229, 240) with the fundamental
 //! arguments of Simon et al. (1994, A&A 282, 663), adopted for IAU 2006 resolution
 //! B3 and described in IERS Conventions 2010 (TN36) section 10.1. The coefficients
-//! (`crate::tdb_tables`) are machine-extracted from the published model and
-//! validated against `pyerfa` over 2435 epochs from 1900 to 2100 to `< 1e-18` s and
-//! against the SOFA `t_dtdb` self-test vector to `< 1e-15` s — see
-//! `derivations/tdb_tables.py`.
+//! (`crate::tdb_tables`) are machine-extracted from SOFA's `dtdb.c` by
+//! `derivations/tdb_tables.py`, which checks the extraction against the SOFA `t_dtdb`
+//! self-test vector to `< 1e-15` s; no document in the repository prints them.
+//! `derivations/tdb_series.mac` sums the series in 40-digit arithmetic and writes the
+//! values the tests hold [`tdb_minus_tt`] to: it decides the evaluation, not the
+//! transcription. `pyerfa` is a comparator.
 //!
 //! # What is not here
 //!
@@ -104,7 +106,50 @@ fn offset_ns(seconds: f64) -> i128 {
 
 #[cfg(test)]
 mod tests {
+    // Exact values to 25 digits as the derivation prints them.
+    #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
+
     use super::*;
+
+    /// TT days since J2000: the SOFA self-test epoch (TT JD 2400000.5 + 53736.0), two centuries,
+    /// one and a half either side of J2000, and a three-quarter-day fraction.
+    const TDB_DAYS: [f64; 8] = [
+        2191.5, -73_050.0, -36_525.0, -18_262.5, 1234.75, 18_262.5, 36_525.0, 73_050.0,
+    ];
+
+    /// `TDB − TT` at [`TDB_DAYS`]: the series summed in 40-digit arithmetic at the `t` this module
+    /// divides each day count to, to 25 digits (`derivations/tdb_series.mac` reads this table back).
+    const TDB_EXACT: [f64; 8] = [
+        -5.541284160984533953499400e-5,
+        -1.292788238000218095574254e-5,
+        -3.332174010175927790157063e-5,
+        -7.069829559474016350723833e-5,
+        1.148843571247779995129053e-3,
+        -8.018829477932007950283626e-5,
+        -7.561525671871068648326857e-5,
+        -1.588113502821555415920919e-4,
+    ];
+
+    /// The worst miss measured is 2.673e-16 s, two centuries out: there the annual term's argument
+    /// is 1263 rad, whose half-ulp of 1.1e-13 rad times the term's 1.66 ms is 1.9e-16 s. The bound
+    /// is 3.7 times that.
+    const TDB_BOUND: f64 = 1.0e-15;
+
+    /// `TDB − TT` is its series summed exactly. (G3)
+    ///
+    /// The series' blocks multiply `t⁰ … t⁴`, `t` in millennia: a tenth of a millennium near J2000
+    /// cannot see the `t⁴` block, two centuries out it carries its own weight.
+    #[test]
+    fn the_offset_is_its_series_summed_exactly() {
+        let mut worst = (0.0_f64, 0.0_f64);
+        for (days, want) in TDB_DAYS.into_iter().zip(TDB_EXACT) {
+            let miss = (tdb_minus_tt(Epoch::<Tt>::from_days_since_j2000(days)) - want).abs();
+            if miss > worst.0 || miss.is_nan() {
+                worst = (miss, days);
+            }
+        }
+        assert!(worst.0 < TDB_BOUND, "{:.3e} s at day {}", worst.0, worst.1);
+    }
 
     /// The annual term is the whole story, and it has to have the right size.
     #[test]

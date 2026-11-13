@@ -202,7 +202,7 @@ regeneration above hold the tables to them.
 | fa | Nutation Δψ,Δε IAU 2000A / 2006A | IERS TN36 §5.5.1 (MHB2000), Tables 5.3a/5.3b | the tables row for row, all but their 11 A‴/B‴ rates (`derivations/nutation_iers.mac`); **Maxima** `derivations/cio_nutation_series.mac`: both series summed in 40 digits at the same six epochs, the §5.6.3 factors as their published decimals (G3); SOFA `t_nut00a` / `t_nut06a` and pyerfa comparators | 2.6e-17 rad at t = 2 (bound 1e-16) | src/nutation.rs |
 | fa | GMST82 over 10 millennia (45 epochs) | Aoki et al. 1982 / IAU 1982 GMST | decided by `derivations/gmst82.mac` (`src/earth_rotation.rs`, G2); pyerfa a comparator ([`comparisons.md`](comparisons.md)), fixtures from `derivations/gmst82.py`, 3.7e-12 rad four millennia out | — | tests/gmst82_oracle.rs |
 | fa | Leap-second table `delta_at` on every day from 1972-01-01 to 2027-06-28 (G5) | IERS `leap-seconds.list`, updated through Bulletin C 72, valid until 2027-06-28 | the IERS list itself, vendored (public domain): `TAI − UTC` changes on exactly its 28 dates, to its values; the list's expiry is past 2027-05-20. `tests/delta_at_oracle.rs` (pyerfa) is a parked comparator | exact integer | tests/leap_second_list.rs |
-| fa | TDB−TT (Fairhead–Bretagnon, 787 terms), 441 epochs over ±100 yr | Fairhead & Bretagnon 1990; IERS TN36 §10 | pyerfa `dtdb`, fixtures from `derivations/tdb_tables.py` | 128 ULP of the peak, rounded up (5e-17 s; meas 2.2e-19 = 1 ULP) | tests/dtdb_oracle.rs |
+| fa | TDB−TT (Fairhead–Bretagnon, 787 terms) at 8 epochs over ±2 centuries | Fairhead & Bretagnon 1990; IERS TN36 §10.1 — coefficients from SOFA `dtdb.c` ⚠ | **Maxima** `derivations/tdb_series.mac`: the series as `tdb.rs` sums it, five blocks in `t⁰…t⁴` and the JPL-mass adjustment, in 40-digit arithmetic (G3); decides the evaluation, not the transcription. pyerfa `dtdb` a comparator ([`comparisons.md`](comparisons.md)), 441 epochs, fixtures from `derivations/tdb_tables.py` | 2.7e-16 s two centuries out, the annual argument's rounding (bound 1e-15) | src/tdb.rs |
 | fa | TDB−TT coefficient extraction, topocentric included | Fairhead–Bretagnon 1990 — SOFA `dtdb.c` in practice ⚠ | SOFA `t_dtdb` golden vector | < 1e-15 s | derivations/tdb_tables.py |
 | fa | GMST82 coefficients C0–C3 | Aoki et al. 1982 | mpmath 50-digit certified nearest-f64 | bit-exact `to_bits()` | src/earth_rotation.rs |
 | fa | UTC↔TAI round-trip + refusals | IERS Bulletin C / `tai-utc.dat` | IERS leap-second bulletin (vendored) + self-consistency | bit-exact | src/leap_seconds.rs, tests/leap_seconds.rs |
@@ -11374,8 +11374,15 @@ Batch 12b (2026-11-13, Ф19.G) takes the series. `derivations/cio_nutation_serie
 epochs (G3). The worst misses, two centuries out, are the arguments' own 1.6e-12 rad times the
 largest amplitudes. The SOFA vectors and pyerfa's four centuries are parked.
 
-**Today: 47
-comparator-decided tests of 3 723** — name 25, file 14, fixture 4, doc 4; none of them Orekit's,
+Batch 12c (2026-11-13, Ф19.G) takes TDB−TT. `derivations/tdb_series.mac` sums the 787-term
+Fairhead–Bretagnon series and the JPL-mass adjustment as `tdb.rs` defines them, in 40-digit
+arithmetic at eight epochs over ±2 centuries (G3); the worst miss, 2.7e-16 s, is the rounding of
+the annual term's argument. The coefficients still come from SOFA's `dtdb.c`, which no document in
+the repository prints, so the gate decides the evaluation and pyerfa's test is parked.
+
+
+**Today: 46
+comparator-decided tests of 3 724** — name 24, file 14, fixture 4, doc 4; none of them Orekit's,
 5 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
@@ -11406,7 +11413,6 @@ crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::without_the_ozone_the_
 crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs::our_slab_reproduces_radcalnets_modtran_toa_on_measured_scenes | name:modtran
 crates/spacelab-ephemeris/tests/neptune_lro.rs::a_day_of_the_selenocentric_model_tracks_neptune | name:neptune
 crates/spacelab-ephemeris/tests/neptune_lro.rs::the_full_week_against_neptune | name:neptune
-crates/spacelab-fa/tests/dtdb_oracle.rs::tdb_minus_tt_matches_pyerfa_over_two_centuries | name:pyerfa
 crates/spacelab-frames/tests/cio_oracle.rs::each_celestial_pole_offset_moves_the_matrix_by_its_own_size | file:oracle
 crates/spacelab-frames/tests/cio_oracle.rs::gcrf_to_itrf_matches_pyerfa_cio_pipeline | name:pyerfa
 crates/spacelab-frames/tests/frames.rs::polar_motion_matches_pyerfa_pom00 | name:pyerfa

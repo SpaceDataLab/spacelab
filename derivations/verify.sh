@@ -722,6 +722,15 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima cio_nutation_series.mac" "expected 6 checks to hold, found $holds"
     fi
 
+    # TDB - TT: the Fairhead & Bretagnon series tdb.rs sums, in 40-digit arithmetic; TDB_EXACT is its value.
+    out=$(macf tdb_series.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 2 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima tdb_series.mac: the 787-term series and the JPL-mass adjustment summed exactly; TDB_EXACT is their value at eight epochs"
+    else
+        bad "maxima tdb_series.mac" "expected 2 checks to hold, found $holds"
+    fi
+
     # The IERS Conventions (2010) Tables 5.3a/5.3b, which `tools/fetch-specs.sh` fetches as
     # digest-named snapshots; the pin is each file's SHA-256, so a table the IERS revised fails here.
     tab53a=../data/specs/iers-tab5.3a.6da73bfe.txt

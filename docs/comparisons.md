@@ -43,16 +43,16 @@ root-mean-square distance over them.
 | pyspectral | LUT v1.0.1 | Rayleigh path reflectance at 600 nm, no absorber | 1 | 64 | 2.582e-01 | 1.754e-01 | `crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::distance_to_pyspectral_without_the_ozone` |
 | pyspectral | LUT v1.0.1 | Rayleigh path reflectance at 800 nm, no absorber | 1 | 64 | 5.090e-02 | 3.007e-02 | `crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::distance_to_pyspectral_without_the_ozone` |
 | modtran | 5.3.3 | TOA reflectance on RadCalNet's measured scenes | 1 | 313 | 7.839e-03 | 1.986e-03 | `crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs::toa_distance_to_radcalnets_modtran` |
-| Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, position | m | 9 | 3.400e+04 | 2.390e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
-| Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, velocity | m/s | 9 | 2.940e+01 | 1.741e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
-| Orekit | 13.1.7 | Brouwer-Lyddane LEO with M2 = 1e-14 rad/s2, 1 day, position | m | 9 | 3.400e+04 | 2.390e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::drag_distance_to_orekit` |
-| Orekit | 13.1.7 | Brouwer-Lyddane LEO with M2 = 1e-14 rad/s2, 1 day, velocity | m/s | 9 | 2.940e+01 | 1.741e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::drag_distance_to_orekit` |
-| Orekit | 13.1.7 | Brouwer-Lyddane e = 0.3, 8 weeks, position | m | 8 | 2.244e+05 | 1.338e+05 | `crates/spacelab-elements/src/brouwer_lyddane.rs::eccentric_distance_to_orekit` |
-| Orekit | 13.1.7 | Brouwer-Lyddane e = 0.3, 8 weeks, velocity | m/s | 8 | 3.492e+02 | 2.091e+02 | `crates/spacelab-elements/src/brouwer_lyddane.rs::eccentric_distance_to_orekit` |
-| Orekit | 13.1.7 | Brouwer-Lyddane mean a, LEO | m | 1 | 1.444e+01 | 1.444e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, position | m | 9 | 3.351e+04 | 2.394e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, velocity | m/s | 9 | 2.925e+01 | 1.742e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane LEO with M2 = 1e-14 rad/s2, 1 day, position | m | 9 | 3.351e+04 | 2.394e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::drag_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane LEO with M2 = 1e-14 rad/s2, 1 day, velocity | m/s | 9 | 2.925e+01 | 1.742e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::drag_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane e = 0.3, 8 weeks, position | m | 8 | 8.187e+05 | 4.896e+05 | `crates/spacelab-elements/src/brouwer_lyddane.rs::eccentric_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane e = 0.3, 8 weeks, velocity | m/s | 8 | 1.266e+03 | 7.594e+02 | `crates/spacelab-elements/src/brouwer_lyddane.rs::eccentric_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane mean a, LEO | m | 1 | 2.665e+00 | 2.665e+00 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
 | Orekit | 13.1.7 | Brouwer-Lyddane mean e, LEO | 1 | 1 | 1.756e-03 | 1.756e-03 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
 | Orekit | 13.1.7 | Brouwer-Lyddane mean (i, w, raan, M), LEO | rad | 4 | 4.194e-02 | 2.965e-02 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
-| Orekit | 13.1.7 | Brouwer-Lyddane mean a, e = 0.3 | m | 1 | 1.754e+01 | 1.754e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane mean a, e = 0.3 | m | 1 | 7.574e+01 | 7.574e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
 | Orekit | 13.1.7 | Brouwer-Lyddane mean e, e = 0.3 | 1 | 1 | 5.629e-04 | 5.629e-04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
 | Orekit | 13.1.7 | Brouwer-Lyddane mean (i, w, raan, M), e = 0.3 | rad | 4 | 5.928e-04 | 4.096e-04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
 | Orekit | 13.1.7 | position, LEO, 8 states over 1.75 h | m | 8 | 3.144e+01 | 2.067e+01 | `crates/spacelab-elements/src/eckstein_hechler.rs::reference_distance_to_orekit` |

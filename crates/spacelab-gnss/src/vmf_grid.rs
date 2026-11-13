@@ -297,16 +297,52 @@ mod tests {
   0.0 10.0  0.0040 0.0004 2.0 0.10
 ";
 
+    const VMF3_5X5: &str = include_str!("../tests/fixtures/vmf3_5x5_20181125.H00");
+
+    /// `derivations/vmf_grid.mac` (3): the file's row at (77.5°, 2.5°) and the bilinear blend of the
+    /// four rows round (76.25°, 4.375°), as `(ah, aw, zhd, zwd)`.
+    const NODE_MAXIMA: [f64; 4] = [1.170_02e-3, 4.548_4e-4, 2.320_3, 1.91e-2];
+    const BLEND_MAXIMA: [f64; 4] = [1.174_163_75e-3, 4.898_334_375e-4, 2.318_937_5, 2.506_875e-2];
+
+    fn relative_distances(c: VmfCoefficients, want: [f64; 4]) -> [f64; 4] {
+        let got = [c.ah, c.aw, c.zhd, c.zwd];
+        core::array::from_fn(|k| (got[k] - want[k]).abs() / want[k].abs())
+    }
+
+    /// The distance to Orekit's `ViennaModelCoefficientsLoaderTest` (VMF3 5×5, 2018-11-25 0h, node
+    /// (77.5°, 2.5°)). [`the_grid_is_its_rows_and_their_bilinear_blend`] decides.
     #[test]
-    fn parses_real_vmf3_5x5_and_matches_orekit_at_a_node() {
-        let grid = VmfGrid::parse(include_str!("../tests/fixtures/vmf3_5x5_20181125.H00")).unwrap();
-        assert_eq!(grid.model(), VmfModel::Vmf3);
-        // Orekit ViennaModelCoefficientsLoaderTest, VMF3 5×5, node (77.5°, 2.5°).
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn vmf3_5x5_node_distance_to_orekit() {
+        let grid = VmfGrid::parse(VMF3_5X5).unwrap();
         let c = grid.interpolate(77.5_f64.to_radians(), 2.5_f64.to_radians());
-        assert!((c.ah - 0.00117002).abs() < 1e-8, "ah {}", c.ah);
-        assert!((c.aw - 0.00045484).abs() < 1e-8, "aw {}", c.aw);
-        assert!((c.zhd - 2.3203).abs() < 1e-4, "zhd {}", c.zhd);
-        assert!((c.zwd - 0.0191).abs() < 1e-4, "zwd {}", c.zwd);
+        let d = relative_distances(c, [0.00117002, 0.00045484, 2.3203, 0.0191]);
+        let max = d.iter().copied().fold(0.0, f64::max);
+        let rms = (d.iter().map(|x| x * x).sum::<f64>() / d.len() as f64).sqrt();
+        println!(
+            "comparison | Orekit | not recorded | VMF3 5x5 grid, node (77.5, 2.5), (ah, aw, zhd, zwd) | relative | {} | {max:.3e} | {rms:.3e}",
+            d.len()
+        );
+    }
+
+    /// The grid at a node is that node's row of the file, and between nodes the bilinear blend of the
+    /// four rows round the point: `derivations/vmf_grid.mac` (1)–(3), with the file read by each
+    /// row's own latitude and longitude. (G3)
+    #[test]
+    fn the_grid_is_its_rows_and_their_bilinear_blend() {
+        let grid = VmfGrid::parse(VMF3_5X5).unwrap();
+        assert_eq!(grid.model(), VmfModel::Vmf3);
+        let mut worst = 0.0_f64;
+        for ((lat, lon), want) in [((77.5, 2.5), NODE_MAXIMA), ((76.25, 4.375), BLEND_MAXIMA)] {
+            let c = grid.interpolate(f64::to_radians(lat), f64::to_radians(lon));
+            worst = relative_distances(c, want)
+                .into_iter()
+                .fold(worst, f64::max);
+        }
+        println!("VMF grid against vmf_grid.mac at 40 digits: {worst:.3e}");
+        // Measured 1.5e-15: the cell offset f = (x - x0)/dx is taken on radians, so near f = 33 the
+        // weights carry a few ulps of f.
+        assert!(worst < 6e-15, "VMF grid against vmf_grid.mac: {worst:.3e}");
     }
 
     #[test]

@@ -2502,7 +2502,7 @@ where a non-Rust caller would make it — the #319 drift pattern at crate granul
 |---|---|---|---|---|---|
 | gnss | GMF / VMF1 / VMF3 / Niell mapping functions | Niell 1996; IERS Conventions (2010) chapter 9 routines `GMF.F` and `VMF1_HT.F` (Boehm et al. 2006); TU Wien `vmf3.m` (Landskron & Boehm 2018) | **Maxima** `derivations/gnss_mapping.mac`: the shipped fraction and height correction are the routines'; `GMF.F` over the shipped tables and `VMF1_HT.F` reproduce their own test output to 5e-16 and 3e-16, at doy 224.75 for MJD 55055; south of the equator both keep `a`'s season and shift `c`'s by π, where the former `t0 = 28 + 183` reversed `a`'s and cancelled the π (fixed 2026-11-13); `vmf3.m`'s V/W recursion is the shipped `P_nm(sin φ)` to degree 12; Niell, GMF and VMF1 north and south and VMF3 at three elevations at 40 digits (G3); Orekit a comparator ([`comparisons.md`](comparisons.md)) | 5.2e-16 at worst (bounds 5e-16 … 2e-15) | src/models.rs |
 | gnss | GPT3 ah/aw/T/P/e/Tm/λ/gradients | the grid TU Wien publishes with Landskron & Böhm 2018 (`gpt3_5.grd`, CC BY 4.0; the asset is that file with LF line ends) read by the model's rules as TU Wien's `gpt3_5_fast.m` states them: `a0 + A1 cos θ + B1 sin θ + A2 cos 2θ + B2 sin 2θ`, `θ = 2π d/365.25`; each corner reduced to the site's height (`gpt3_reduction.mac`); bilinear weights in the cell the grid's own coordinates name. North of 87.5° and south of −87.5° the last full cell is continued linearly, our convention (Orekit's): `gpt3_5_fast.m` takes the nearest node there; at the South Pole station's height the two differ by as much as 3.6 hPa and 5 K over four longitudes in January and July (F88, D-37) | **Maxima** `derivations/gpt3_evaluation.mac`: 10 sites in exact rationals and 40-digit bigfloats, each node found by TU Wien's line arithmetic and its coordinate columns checked; sites 1–2 are the MATLAB reference values Orekit carries, reproduced. `verify.sh` holds the asset against TU Wien's file | ≤ 1e-13 of each field's scale (worst 1.2e-14) | src/gpt3.rs, tests/gpt3_maxima.rs, derivations/gpt3_evaluation.mac |
-| gnss | VMF3 grid interpolation | TU Wien VMF3 grid product; bilinear interpolation | Orekit `ViennaModelCoefficientsLoaderTest` 5×5 | ah/aw < 1e-8; zhd/zwd < 1e-4 | src/vmf_grid.rs |
+| gnss | VMF3 grid interpolation | TU Wien VMF3 grid product; bilinear interpolation | **Maxima** `derivations/vmf_grid.mac`: the shipped weights are the unique bilinear interpolant through the four corners; read by each row's own latitude and longitude, the 5×5 fixture's 36 × 72 rows run in the order the reshape undoes; the G3 goldens are the file's row at (77.5°, 2.5°) and the blend round (76.25°, 4.375°); Orekit a comparator ([`comparisons.md`](comparisons.md)) | 1.5e-15 (bound 6e-15) | src/vmf_grid.rs |
 | gnss | RTCM 3 framing + CRC-24Q | RTCM 10403.x; the CRC-24Q polynomial `0x1864CFB` GPS uses for navigation-message parity | the **reveng catalogue's published check value**, and an exhaustive single-bit sweep of a real frame | `crc24q("123456789") = 0xCDE703` exactly — the CRC-24/LTE-A parameters, *not* CRC-24/OPENPGP's `0x21CF02`, which is the same polynomial seeded with `0xB704CE` and the value a search finds first. Every one of the **392 single-bit flips** in a real 49-byte 1057 frame is refused, and the frame length is pinned so the sweep cannot silently shrink; a partial frame is distinguished from a corrupt one at every truncation point of a 1019 | src/rtcm.rs |
 | gnss | RTCM 1005/1006/1019/1057/1058/1060 decode | RTCM 10403.x message definitions; IS-GPS-200 scale factors for 1019 | **physics, not the encoder**: the 1019 fixture is written from physical values by an independent bit-writer and the decoded ephemeris is checked as an *orbit* | semi-major axis within 1 m of `(√a)²`; period **43 076.7 s** against the half-sidereal-day 43 082 s (the 5.3 s is `Δn` plus the fixture's round `√a`); radius at `toe` inside `a(1 ± e)`; every field within its own quantisation step (2⁻³³ on `e`, 2⁻³¹ semicircles on the four angles, 2⁻³¹ s on TGD). The SSR sign convention is pinned on a hand-computed case: the orbit correction is **subtracted** in the radial/along/cross basis and the clock correction **added**, and the polynomials are referenced to `epoch + Δ/2`, not to the epoch | src/rtcm.rs |
 | gnss | NTRIP 1.0 / 2.0 client protocol | RTCM NTRIP 2.0 (and the `ICY 200 OK` 1.0 revision still in service) | the **RFC 4648 base64 vectors** for the authentication header, and the protocol's own failure modes exercised offline | all seven RFC vectors plus the `+/` alphabet top; both revisions' body offsets exact; an incomplete head is `Ok(None)` and a refusal is an error, at every prefix. **Security is asserted, not assumed**: a mountpoint, host, username or password holding CR, LF or NUL is refused at construction — the header-injection boundary — and neither the password nor its base64 appears in any `Debug` rendering or error string | src/ntrip.rs |
@@ -2525,6 +2525,7 @@ where a non-Rust caller would make it — the #319 drift pattern at crate granul
 | gnss | SBAS geostationary ephemeris | RINEX 4.02 Table A18 | the one record in BRD400DLR 2026/200 with a non-zero hour and a non-zero value in all twelve state columns — two thirds of the day's SBAS records broadcast a zero velocity, on which a scale error is invisible | radius 42 166 km, ECEF speed 57 m/s (a degree of inclination), `Toc` 36 160 s; the accuracy column's `32767` sentinel survives the read, which it did not while the field was a `u8` | tests/rinex4_nav.rs |
 | gnss | SP3 coordinate-system field → `ReferenceFrame` | SP3-c/d line 1, columns 47–51 | the header line of every SP3 product this repository holds, verbatim | `IGS20`, `IGc20` → ITRF2020; `SLR20` → SLRF2020; `PZ90` → not ITRS; absent → `Unstated`, which agrees with nothing including itself | src/sp3.rs |
 | ionosphere | NeQuick-G Galileo STEC: the 108 Annex E cases in all twelve months, an anti-meridian and a zenith ray | Galileo ionospheric correction algorithm ICD, issue 1.2 (Annex E data; Kronrod G7-K15, Annex F.2.6) | the JRC NeQuickG 1.0 reference implementation, run as an oracle (`tools/nequick-jrc-oracle`) | ≤ 1e-10 relative, measured 1.7e-13 over 1298 rays; the printed Annex E table < 0.04 TECU, its own departure from the reference | tests/galileo_stec.rs |
+| ionosphere | MODIP interpolation, Galileo grid | the Galileo ionospheric correction algorithm's `modipNeQG_wrapped.asc`; third-order interpolation in latitude, then longitude | **Maxima** `derivations/modip_grid.mac`: the shipped third-order formula is the cubic through its four samples; the file's own geometry places its samples (poles in rows 1 and 37, a turn of 36 columns, the rows past each pole the inner rows half a turn away); latitude-then-longitude is the bicubic through the sixteen nearest samples; goldens at Orekit's fourteen points and two whose stencils reach past a pole and the anti-meridian (G3); Orekit a comparator ([`comparisons.md`](comparisons.md)) | 2.8e-14° (bound 1e-13°) | src/modip.rs |
 | ionosphere | 1st-order path delay (40.3·STEC/f²) | dispersive-delay definition (40.3·STEC/f²) | published closed-form + property | 3.2–3.3 m; ratio < 1e-9 | src/lib.rs |
 | earthvision | RPC forward/inverse (real Pléiades RPC00B) | RPC00B rational-polynomial convention | rpcm `.projection` / `.localization` (independent RPC impl) | fwd < 1e-4 px; inv < 1e-6° | src/rpc.rs |
 | earthvision | RPC bundle-adjust affine on noisy GCPs | linear least squares | numpy.linalg.lstsq | < 1e-6 | src/rpc_adjust.rs |
@@ -11104,8 +11105,8 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 336 modules, 248 name a check, 88 do not** — no physics
-module, 28 parsers, 5 generated and 55 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
+(`plans/16` Ф17.B orders them). **Today: 336 modules, 250 name a check, 86 do not** — no physics
+module, 26 parsers, 5 generated and 55 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
 the last 42 — GNSS, SLR, the NeQuick ionosphere, earthvision, signal, vision, sensors and
 astrometry (`earthvision/sfm.rs` and `cloud.rs` hold no formula of their own and moved to
 infrastructure) — and fixed what the gates found: the GLONASS `J2` was the ICD's 8-digit
@@ -11222,14 +11223,12 @@ crates/spacelab-gnss/src/rinex_obs.rs | parser | format reader/writer; conforman
 crates/spacelab-gnss/src/rtcm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-gnss/src/sinex_bias.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-gnss/src/sp3.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
-crates/spacelab-gnss/src/vmf_grid.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-grid/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-grid/src/output.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-ionosphere/src/ccir.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-ionosphere/src/lib.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-ionosphere/src/math.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-ionosphere/src/model.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-ionosphere/src/modip.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-ionosphere/src/types.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-ndm/src/cdm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-ndm/src/kvn.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
@@ -11306,8 +11305,10 @@ RTN basis, the argument of latitude and the empirical polynomial from their defi
 Batch 4b (2026-11-13) parks the tropospheric mapping functions' four after `gnss_mapping.mac` ran
 IERS `GMF.F` and `VMF1_HT.F` onto their own test output and TU Wien's `vmf3.m` over the shipped
 tables; it found the southern GMF and VMF1 seasons half a year off in `a` and fixed them.
-**Today: 90
-comparator-decided tests of 3 702** — name 53, file 18, fixture 4, doc 15; 31 of them Orekit's (18 by
+Batch 5 (2026-11-13) parks the VMF grid's and MODIP's Orekit tests after `vmf_grid.mac` and
+`modip_grid.mac` derived their interpolants and read each file's geometry from its own rows.
+**Today: 87
+comparator-decided tests of 3 707** — name 50, file 18, fixture 4, doc 15; 28 of them Orekit's (15 by
 name), 15 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
@@ -11366,8 +11367,6 @@ crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_inside_a_leap_second_is_of
 crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_matches_orekit_iers1996_outside_leap_seconds | name:orekit
 crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_agrees_with_orekit_to_the_convention_floor | name:orekit
 crates/spacelab-geometry/tests/qhull_cross_check.rs::every_construction_agrees_with_qhull_on_the_same_points | name:qhull
-crates/spacelab-gnss/src/vmf_grid.rs::parses_real_vmf3_5x5_and_matches_orekit_at_a_node | name:orekit
-crates/spacelab-ionosphere/src/modip.rs::the_orekit_reference_points_are_reproduced_on_the_galileo_grid | name:orekit
 crates/spacelab-ionosphere/tests/galileo_stec.rs::the_stec_matches_the_jrc_reference_in_every_month | name:jrc
 crates/spacelab-propagation/src/dsst/coefficients.rs::the_scalar_coefficients_and_upper_bounds_match_orekit | name:orekit
 crates/spacelab-propagation/src/dsst/tesseral.rs::resonance_window_is_one_part_in_ten_revolutions | doc:orekit

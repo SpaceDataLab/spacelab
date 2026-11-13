@@ -609,6 +609,23 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima gnss_mapping.mac" "expected 6 checks to hold, found $holds"
     fi
 
+    out=$(macf vmf_grid.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima vmf_grid.mac: the shipped weights are the bilinear interpolant, the fixture's rows run in the order the reshape undoes; the G3 goldens are the file's own rows"
+    else
+        bad "maxima vmf_grid.mac" "expected 3 checks to hold, found $holds"
+    fi
+
+    out=$(macf modip_grid.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 4 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima modip_grid.mac: the third-order interpolation is the cubic through its four samples, the Galileo file's wrap rows and columns are the sphere's, the G3 goldens the bicubic through the sixteen nearest samples"
+    else
+        bad "maxima modip_grid.mac" "expected 4 checks to hold, found $holds"
+    fi
+
+
     out=$(macf ocean_loading.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 11 ] && printf '%s' "$out" | grep -q '^DONE'; then

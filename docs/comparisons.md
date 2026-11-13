@@ -23,6 +23,8 @@ root-mean-square distance over them.
 | Orekit | not recorded | GMF mapping, Green Bank, 2009-08-12 12h, (hydrostatic, wet) | relative | 2 | 3.645e-07 | 2.580e-07 | `crates/spacelab-gnss/src/models.rs::gmf_distance_to_orekit` |
 | Orekit | not recorded | VMF1 mapping, Green Bank, 2009-08-12 0h, (hydrostatic, wet) | relative | 2 | 8.274e-08 | 6.312e-08 | `crates/spacelab-gnss/src/models.rs::vmf1_distance_to_orekit` |
 | Orekit | not recorded | VMF3 mapping, 2018-11-25 12h, 38, 5 and 85 deg, (hydrostatic, wet) | relative | 6 | 1.094e-06 | 4.968e-07 | `crates/spacelab-gnss/src/models.rs::vmf3_distance_to_orekit` |
+| Orekit | not recorded | VMF3 5x5 grid, node (77.5, 2.5), (ah, aw, zhd, zwd) | relative | 4 | 1.549e-15 | 7.800e-16 | `crates/spacelab-gnss/src/vmf_grid.rs::vmf3_5x5_node_distance_to_orekit` |
+| Orekit | not recorded | MODIP, Galileo grid, five nodes and nine points between | deg | 14 | 4.583e-07 | 2.531e-07 | `crates/spacelab-ionosphere/src/modip.rs::galileo_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST drag integration limits | rad | 2 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/drag.rs::integration_limits_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST drag Gauss order | nodes | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/drag.rs::gauss_order_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST drag mean element rates at a fixed state | relative | 6 | 2.140e-11 | 8.736e-12 | `crates/spacelab-propagation/src/dsst/drag.rs::fixed_state_rates_distance_to_orekit` |

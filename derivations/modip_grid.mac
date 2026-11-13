@@ -1,0 +1,98 @@
+/* `crates/spacelab-ionosphere/src/modip.rs`: the Galileo MODIP grid and its third-order interpolation,
+   from the grid file's own geometry (plans/17 Ф19.G).
+
+   Orekit's ModipGridTest decided this until Ф19.G and is a comparator now (docs/comparisons.md). The
+   file and the definition of the interpolant decide:
+     (1) the shipped `interpolate`, (a0 + d (a1 + d (a2 + d a3)))/16 with d = 2x - 1, is the cubic
+         through (-1, z1), (0, z2), (1, z3), (2, z4) at x, for every z and x;
+     (2) the file's geometry: 39 x 39 samples whose row 1 is the south pole (-90 everywhere) and row
+         37 the north (+90 everywhere); columns 0, 37, 38 repeat 36, 1, 2, a turn of 36 columns; rows
+         0 and 38 are rows 2 and 36 half a turn (18 columns) away, the samples past each pole. So
+         sample (k, m) is MODIP at latitude -90 + 5(k - 1) and longitude lambda0 + 10(m - 1), and the
+         shipped indices x = (phi + 90)/5 + 1, y = (lambda + 180)/10 + 1 read it with lambda0 = -180,
+         the one convention the file does not carry;
+     (3) four cubics down the latitude stencil and then one across them is the same polynomial as four
+         across and then one down: the shipped order is the bicubic through the sixteen samples;
+     (4) the goldens of the Rust G3 test at 40 digits: that bicubic, in degrees, through the sixteen
+         samples nearest each of sixteen points (five on nodes, nine between them, and two whose
+         stencils reach past a pole and past the anti-meridian).
+
+   timeout 300 maxima --very-quiet -Q -b modip_grid.mac                                              */
+
+load("rust_literals.mac")$
+fpprec : 40$
+fpprintprec : 20$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+src : "../crates/spacelab-ionosphere/src/modip.rs"$
+grid_file : "../crates/spacelab-ionosphere/assets/modipNeQG_wrapped.asc"$
+in_source(path, text) := block([s : openr(path), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+all_in_source(path, texts) := every(lambda([t], in_source(path, t)), texts)$
+zero(u) := every(lambda([x], is(ratsimp(x) = 0)), if listp(u) then u else [u])$
+words(line) := sublist(split(line, " "), lambda([w], slength(w) > 0))$
+
+/* ---- (1) the cubic --------------------------------------------------------------------------------- */
+lagrange(nodes, ys, x) := sum(ys[a]*prod(if b = a then 1 else (x - nodes[b])/(nodes[a] - nodes[b]),
+                                                  b, 1, length(nodes)), a, 1, length(nodes))$
+shipped_cubic(z1, z2, z3, z4, x) := block([d : 2*x - 1, g1, g2, g3, g4],
+  g1 : z3 + z2, g2 : z3 - z2, g3 : z4 + z1, g4 : (z4 - z1)/3,
+  (9*g1 - g3 + d*(9*g2 - g4 + d*(g3 - g1 + d*(g4 - g2))))/16)$
+must(zero(shipped_cubic(z1, z2, z3, z4, x) - lagrange([-1, 0, 1, 2], [z1, z2, z3, z4], x))
+     and all_in_source(src, [
+       "let delta = 2.0 * x - 1.0;",
+       "let g1 = z3 + z2;", "let g2 = z3 - z2;", "let g3 = z4 + z1;", "let g4 = (z4 - z1) / 3.0;",
+       "let a0 = 9.0 * g1 - g3;", "let a1 = 9.0 * g2 - g4;", "let a2 = g3 - g1;", "let a3 = g4 - g2;",
+       "0.0625 * (a0 + delta * (a1 + delta * (a2 + delta * a3)))"]),
+     "(1) holds: the shipped third-order interpolation is the cubic through (-1, z1), (0, z2), (1, z3), (2, z4)")$
+
+/* ---- (2) the file's geometry ----------------------------------------------------------------------- */
+samples : []$
+block([s : openr(grid_file), line],
+  while (line : readline(s)) # false do samples : append(samples, map(rust_rational, words(line))),
+  close(s))$
+side : 39$
+G : makelist(makelist(samples[side*k + m + 1], m, 0, side - 1), k, 0, side - 1)$
+g(k, m) := G[k + 1][m + 1]$
+half_turn(k, m) := g(k, 1 + mod(m - 1 + 18, 36))$
+must(is(length(samples) = side^2)
+     and every(lambda([m], g(1, m) = -90 and g(37, m) = 90), makelist(m, m, 0, 38))
+     and every(lambda([k], g(k, 0) = g(k, 36) and g(k, 37) = g(k, 1) and g(k, 38) = g(k, 2)), makelist(k, k, 0, 38))
+     and every(lambda([m], g(0, m) = half_turn(2, m) and g(38, m) = half_turn(36, m)), makelist(m, m, 1, 36))
+     and all_in_source(src, [
+       "const GALILEO_NB_CELLS: usize = 36;",
+       "size_lat: PI / nb_cells as f64,",
+       "size_lon: 2.0 * PI / nb_cells as f64,",
+       "let x = (latitude + FRAC_PI_2) / self.size_lat + 1.0;",
+       "let mut y = (longitude + PI) / self.size_lon + 1.0;"]),
+     "(2) holds: rows 1 and 37 are the poles, 36 columns make a turn, rows 0 and 38 are the samples past the poles half a turn away: sample (k, m) is at (-90 + 5(k - 1), -180 + 10(m - 1))")$
+
+/* ---- (3) the tensor product ------------------------------------------------------------------------ */
+Z : genmatrix(lambda([a, b], z[a, b]), 4, 4)$
+down_then_across : lagrange([-1, 0, 1, 2],
+  makelist(lagrange([-1, 0, 1, 2], makelist(Z[a, b], a, 1, 4), s), b, 1, 4), t)$
+across_then_down : lagrange([-1, 0, 1, 2],
+  makelist(lagrange([-1, 0, 1, 2], makelist(Z[a, b], b, 1, 4), t), a, 1, 4), s)$
+must(zero(down_then_across - across_then_down)
+     and all_in_source(src, [
+       "g[i - 1][j - 1],",
+       "let z2 = interpolate(g[i - 1][j], g[i][j], g[i + 1][j], g[i + 2][j], delta_x);",
+       "g[i - 1][j + 2],",
+       "interpolate(z1, z2, z3, z4, delta_y)"]),
+     "(3) holds: the cubics down the latitude stencil, then across, are the cubics across, then down: one bicubic through the sixteen samples")$
+
+/* ---- (4) the goldens ------------------------------------------------------------------------------- */
+points : map(lambda([p], map(rust_rational, p)), [
+  ["-85", "-190"], ["-85", "-120"], ["-85", "110"], ["-5", "-110"], ["60", "20"],
+  ["55.1", "13.4"], ["60.1", "13.4"], ["65.1", "13.4"], ["55.1", "23.4"], ["60.1", "23.4"],
+  ["65.1", "23.4"], ["55.1", "33.4"], ["60.1", "33.4"], ["65.1", "33.4"], ["-89.5", "179"], ["89.5", "-179"]])$
+bicubic(lat, lon) := block([l : lon - 360*floor((lon + 180)/360), x, y, i, j, lats, lons],
+  x : (lat + 90)/5 + 1, y : (l + 180)/10 + 1, i : floor(x), j : floor(y),
+  lats : makelist(-90 + 5*(k - 1), k, i - 1, i + 2), lons : makelist(-180 + 10*(m - 1), m, j - 1, j + 2),
+  lagrange(lons, makelist(lagrange(lats, makelist(g(k, m), k, i - 1, i + 2), lat), m, j - 1, j + 2), l))$
+modip : map(lambda([p], bicubic(p[1], p[2])), points)$
+print("MODIP_GALILEO_MAXIMA", bfloat(modip))$
+must(is(length(modip) = 16)
+     and transcribed(rust_table(src, "MODIP_GALILEO_MAXIMA"), bfloat(modip)),
+     "(4) holds: the Rust goldens are the bicubic through the sixteen nearest samples at the sixteen points, to every digit shown")$
+print("DONE")$

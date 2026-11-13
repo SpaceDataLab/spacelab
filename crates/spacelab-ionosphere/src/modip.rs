@@ -281,53 +281,113 @@ pub(crate) mod tests {
         }
     }
 
-    /// The reference points Orekit's own `ModipGridTest` checks.
-    ///
-    /// A third-party implementation of the same interpolation over the same tables, at points
-    /// chosen by its authors rather than by ours: five on grid nodes and nine strictly between them
-    /// per grid. The interpolated nine are the ones that matter here — they are the
-    /// only external statement about what the surface does away from a sample, and the row and
-    /// column offsets of the stencil are visible nowhere else. Orekit's own tolerance is 1e-6°,
-    /// which is what is used; the measured worst residual over the twenty-eight is 4.6e-7°.
-    #[test]
-    fn the_orekit_reference_points_are_reproduced_on_the_galileo_grid() {
-        // (latitude °, longitude °, MODIP °) — Orekit `ModipGridTest.testGalileoGrid`.
-        const GALILEO: [(f64, f64, f64); 14] = [
-            (-85.0, -190.0, -77.31),
-            (-85.0, -120.0, -76.81),
-            (-85.0, 110.0, -77.19),
-            (-5.0, -110.0, 3.20),
-            (60.0, 20.0, 60.85),
-            (55.1, 13.4, 57.954_196),
-            (60.1, 13.4, 60.849_386),
-            (65.1, 13.4, 63.771_290),
-            (55.1, 23.4, 58.088_051),
-            (60.1, 23.4, 60.946_660),
-            (65.1, 23.4, 63.837_296),
-            (55.1, 33.4, 58.259_195),
-            (60.1, 33.4, 61.087_074),
-            (65.1, 33.4, 63.954_376),
-        ];
-        assert_reference_points("galileo", &ModipGrid::galileo(), &GALILEO, -90.0);
+    /// (latitude °, longitude °) at which `derivations/modip_grid.mac` (4) prints its goldens. The first
+    /// fourteen are Orekit's `ModipGridTest` points, five on nodes and nine between them; the last two
+    /// put the stencil on the rows past a pole and the columns past the anti-meridian, which none of
+    /// the fourteen reaches.
+    pub(crate) const GATE_POINTS: [(f64, f64); 16] = [
+        (-85.0, -190.0),
+        (-85.0, -120.0),
+        (-85.0, 110.0),
+        (-5.0, -110.0),
+        (60.0, 20.0),
+        (55.1, 13.4),
+        (60.1, 13.4),
+        (65.1, 13.4),
+        (55.1, 23.4),
+        (60.1, 23.4),
+        (65.1, 23.4),
+        (55.1, 33.4),
+        (60.1, 33.4),
+        (65.1, 33.4),
+        (-89.5, 179.0),
+        (89.5, -179.0),
+    ];
+
+    /// `derivations/modip_grid.mac` (4): the bicubic through the sixteen nearest samples of the
+    /// Galileo grid at [`GATE_POINTS`], degrees.
+    const MODIP_GALILEO_MAXIMA: [f64; 16] = [
+        -77.31,
+        -76.81,
+        -77.19,
+        3.2,
+        60.85,
+        57.954_195_701_186_24,
+        60.849_386_458_316_64,
+        63.771_289_996_405_6,
+        58.088_050_925_995_36,
+        60.946_660_163_843_52,
+        63.837_295_777_136,
+        58.259_195_426_392_16,
+        61.087_074_362_199_84,
+        63.954_375_550_309_76,
+        -89.344_789_477_5,
+        89.442_835_035,
+    ];
+
+    /// The largest absolute distance, in degrees, between `grid` and `want` at [`GATE_POINTS`].
+    pub(crate) fn worst_at_the_gate_points(grid: &ModipGrid, want: &[f64; 16]) -> f64 {
+        GATE_POINTS
+            .iter()
+            .zip(want)
+            .map(|(&(lat, lon), &w)| (grid.compute(lat.to_radians(), lon.to_radians()) - w).abs())
+            .fold(0.0, f64::max)
     }
 
-    /// Orekit's reference points on one grid, its wrap at the anti-meridian, and its poles.
-    /// `at_pole` is the grid's own south-pole sample, which the stencil returns a hair inside it.
-    pub(crate) fn assert_reference_points(
-        name: &str,
-        grid: &ModipGrid,
-        cases: &[(f64, f64, f64)],
-        at_pole: f64,
-    ) {
-        {
-            for &(lat_deg, lon_deg, want) in cases {
-                let got = grid.compute(lat_deg.to_radians(), lon_deg.to_radians());
-                assert!(
-                    (got - want).abs() < 1e-6,
-                    "{name} at ({lat_deg}, {lon_deg}): {got} vs {want}"
-                );
-            }
+    /// One `comparison | ...` row of `tools/compare.py`: the absolute distances, in degrees, to
+    /// Orekit's `ModipGridTest` expectations at the first fourteen [`GATE_POINTS`].
+    pub(crate) fn orekit_comparison_row(quantity: &str, grid: &ModipGrid, orekit: &[f64; 14]) {
+        let d: Vec<f64> = GATE_POINTS[..14]
+            .iter()
+            .zip(orekit)
+            .map(|(&(lat, lon), &w)| (grid.compute(lat.to_radians(), lon.to_radians()) - w).abs())
+            .collect();
+        let max = d.iter().copied().fold(0.0, f64::max);
+        let rms = (d.iter().map(|x| x * x).sum::<f64>() / d.len() as f64).sqrt();
+        println!(
+            "comparison | Orekit | not recorded | {quantity} | deg | {} | {max:.3e} | {rms:.3e}",
+            d.len()
+        );
+    }
 
+    /// The distance to Orekit's `ModipGridTest.testGalileoGrid`, printed to two and six decimals.
+    /// [`the_galileo_grid_is_the_bicubic_through_its_sixteen_nearest_samples`] decides.
+    #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn galileo_distance_to_orekit() {
+        orekit_comparison_row(
+            "MODIP, Galileo grid, five nodes and nine points between",
+            &ModipGrid::galileo(),
+            &[
+                -77.31, -76.81, -77.19, 3.20, 60.85, 57.954_196, 60.849_386, 63.771_290,
+                58.088_051, 60.946_660, 63.837_296, 58.259_195, 61.087_074, 63.954_376,
+            ],
+        );
+    }
+
+    /// The Galileo MODIP is the bicubic through the sixteen grid samples nearest the point, the
+    /// samples placed where the file's own geometry puts them: `derivations/modip_grid.mac` (1)–(4)
+    /// at 40 digits. (G3)
+    #[test]
+    fn the_galileo_grid_is_the_bicubic_through_its_sixteen_nearest_samples() {
+        let worst = worst_at_the_gate_points(&ModipGrid::galileo(), &MODIP_GALILEO_MAXIMA);
+        println!("Galileo MODIP against modip_grid.mac at 40 digits: {worst:.3e} deg");
+        // Measured 2.8e-14°, two ulps of a MODIP near 64°.
+        assert!(
+            worst < 1e-13,
+            "Galileo MODIP against modip_grid.mac: {worst:.3e} deg"
+        );
+    }
+
+    #[test]
+    fn the_galileo_grid_wraps_at_the_anti_meridian_and_saturates_at_the_poles() {
+        assert_wraps_and_saturates("galileo", &ModipGrid::galileo(), -90.0);
+    }
+
+    /// A grid's wrap at the anti-meridian, and its poles. `at_pole` is the grid's own south-pole
+    /// sample, which the stencil returns a hair inside it.
+    pub(crate) fn assert_wraps_and_saturates(name: &str, grid: &ModipGrid, at_pole: f64) {
+        {
             // Longitude runs off both ends of the table and has to come back around: the first
             // and last three columns are the same meridians as the ones a turn away.
             let mut lat_deg = -85.0_f64;

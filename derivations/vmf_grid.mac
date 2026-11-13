@@ -1,0 +1,86 @@
+/* `crates/spacelab-gnss/src/vmf_grid.rs`: the TU Wien VMF GRID reader and its bilinear interpolation,
+   from the file's own rows (plans/17 Ф19.G).
+
+   Orekit's ViennaModelCoefficientsLoaderTest decided this until Ф19.G and is a comparator now
+   (docs/comparisons.md). The file and the definition of bilinear interpolation decide:
+     (1) the shipped weights (1-t)(1-u), (1-t)u, t(1-u), tu give each corner its own value and are
+         affine in t and in u separately, and a + b t + c u + d t u through four corners is unique, so
+         they are the bilinear interpolant; `locate` takes t = f - floor f with f = (x - x0)/dx;
+     (2) the shipped reshape: read by each row's own latitude and longitude, the fixture's rows run
+         from the header's latmax down in dlat and, inside each latitude, from lonmin up in dlon,
+         36 x 72 of them, which is the order the shipped `(nlat - 1 - m / nlon) * nlon + m % nlon`
+         undoes;
+     (3) the goldens of the Rust G3 test at 40 digits: the row at (77.5, 2.5) as the file prints it,
+         and the bilinear blend of the four rows round (76.25, 4.375), t = 3/4 and u = 3/8.
+
+   timeout 300 maxima --very-quiet -Q -b vmf_grid.mac                                                */
+
+load("rust_literals.mac")$
+fpprec : 40$
+fpprintprec : 20$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+src : "../crates/spacelab-gnss/src/vmf_grid.rs"$
+grid_file : "../crates/spacelab-gnss/tests/fixtures/vmf3_5x5_20181125.H00"$
+in_source(path, text) := block([s : openr(path), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+all_in_source(path, texts) := every(lambda([t], in_source(path, t)), texts)$
+zero(u) := every(lambda([x], is(ratsimp(x) = 0)), if listp(u) then u else [u])$
+words(line) := sublist(split(line, " "), lambda([w], slength(w) > 0))$
+
+/* ---- (1) the bilinear interpolant ------------------------------------------------------------------ */
+blend(t, u, v00, v01, v10, v11) := (1 - t)*(1 - u)*v00 + (1 - t)*u*v01 + t*(1 - u)*v10 + t*u*v11$
+b : blend(t, u, v00, v01, v10, v11)$
+general : linsolve(map(lambda([c], subst([t = c[1], u = c[2]], k0 + k1*t + k2*u + k3*t*u) = c[3]),
+                       [[0, 0, v00], [0, 1, v01], [1, 0, v10], [1, 1, v11]]), [k0, k1, k2, k3])$
+must(zero([subst([t = 0, u = 0], b) - v00, subst([t = 0, u = 1], b) - v01,
+           subst([t = 1, u = 0], b) - v10, subst([t = 1, u = 1], b) - v11,
+           diff(b, t, 2), diff(b, u, 2),
+           b - subst(general, k0 + k1*t + k2*u + k3*t*u)])
+     and all_in_source(src, [
+       "(1.0 - t) * (1.0 - u) * v00 + (1.0 - t) * u * v01 + t * (1.0 - u) * v10 + t * u * v11",
+       "let v01 = g[base + 1];",
+       "let v10 = g[base + self.nlon];",
+       "let v11 = g[base + self.nlon + 1];",
+       "let f = (x - x0) / dx;",
+       "let t = (f - i as f64).clamp(0.0, 1.0);"]),
+     "(1) holds: the shipped weights are the bilinear interpolant, the unique a + b t + c u + d t u through the four corners")$
+
+/* ---- (2) the file's order -------------------------------------------------------------------------- */
+range : false$  rows : []$
+block([s : openr(grid_file), line, w],
+  while (line : readline(s)) # false do (
+    w : words(line),
+    if length(w) = 0 then true
+    else if ssearch("!", w[1]) = 1 then (
+      if ssearch("Range/resolution:", line) # false then
+        range : map(rust_rational, words(substring(line, ssearch(":", line) + 1))))
+    else rows : cons(map(rust_rational, w), rows)),
+  close(s))$
+rows : reverse(rows)$
+[latmin, latmax, lonmin, lonmax, dlat, dlon] : range$
+nlat : (latmax - latmin)/dlat + 1$  nlon : (lonmax - lonmin)/dlon + 1$
+in_order : true$
+for m : 0 thru length(rows) - 1 do block([r : rows[m + 1]],
+  if r[1] # latmax - floor(m/nlon)*dlat or r[2] # lonmin + mod(m, nlon)*dlon then in_order : false,
+  grid_row[r[1], r[2]] : rest(r, 2))$
+must(is(range = [-175/2, 175/2, 5/2, 715/2, 5, 5]) and is(nlat = 36) and is(nlon = 72)
+     and is(length(rows) = nlat*nlon) and in_order
+     and all_in_source(src, [
+       "let dst = (nlat - 1 - lat_desc) * nlon + lon_idx;",
+       "let lat_desc = m / nlon;",
+       "let lon_idx = m % nlon;"]),
+     "(2) holds: the fixture's 36 x 72 rows run from latmax down and, inside a latitude, from lonmin up, the order the shipped reshape undoes")$
+
+/* ---- (3) the goldens ------------------------------------------------------------------------------- */
+node : grid_row[155/2, 5/2]$
+cell_t : (305/4 - 145/2)/5$  cell_u : (35/8 - 5/2)/5$
+between : map(lambda([v00, v01, v10, v11], blend(cell_t, cell_u, v00, v01, v10, v11)),
+              grid_row[145/2, 5/2], grid_row[145/2, 15/2], grid_row[155/2, 5/2], grid_row[155/2, 15/2])$
+print("NODE_MAXIMA", bfloat(node))$
+print("BLEND_MAXIMA", bfloat(between))$
+must(is(node = [117002/10^8, 45484/10^8, 23203/10^4, 191/10^4]) and is([cell_t, cell_u] = [3/4, 3/8])
+     and transcribed(rust_table(src, "NODE_MAXIMA"), bfloat(node))
+     and transcribed(rust_table(src, "BLEND_MAXIMA"), bfloat(between)),
+     "(3) holds: the Rust goldens are the file's row at (77.5, 2.5) and the bilinear blend round (76.25, 4.375), to every digit shown")$
+print("DONE")$

@@ -48,8 +48,20 @@ print("--- SABA4 d ---");  for z in saba(4)[2] do print(bfloat(z), ",");
 fpprintprec : 0$
 load("rust_literals.mac")$
 src : "../crates/spacelab-propagation/src/saba.rs"$
-s2 : saba(2)$  s4 : saba(4)$
-print("rust SABA2_C is rounded to its digits:", transcribed(rust_table(src, "SABA2_C"), s2[1]));
-print("rust SABA2_D is rounded to its digits:", transcribed(rust_table(src, "SABA2_D"), s2[2]));
-print("rust SABA4_C is rounded to its digits:", transcribed(rust_table(src, "SABA4_C"), s4[1]));
-print("rust SABA4_D is rounded to its digits:", transcribed(rust_table(src, "SABA4_D"), s4[2]));
+/* For the tables, the same coefficients in radicals: P_2 and P_4 are even in xi = 2x - 1, so solve
+   gives their roots exactly, and the Arb pass decides each literal on them (plans/17 Ф28.A). */
+gl_exact(n) := block([xs, ws],
+  xs : sort(map(lambda([e], (1 + rhs(e))/2), solve(legendre_p(n, xi) = 0, xi)),
+            lambda([a, b], is(bfloat(a) < bfloat(b)))),
+  ws : map(lambda([xx], radcan(4 / ((1 - (2*xx - 1)^2) * subst(x = xx, diff(legendre_p(n, 2*x - 1), x))^2))),
+           xs),
+  [xs, ws])$
+saba_exact(n) := block([g : gl_exact(n)],
+  [append([g[1][1]], makelist(g[1][i] - g[1][i - 1], i, 2, n), [1 - g[1][n]]), g[2]])$
+s2 : saba_exact(2)$  s4 : saba_exact(4)$
+print("SABA2/4 in radicals - from bfallroots, worst (~0?):",
+      lmax(map(lambda([e, r], bfloat(abs(e - r))), flatten([s2, s4]), flatten([saba(2), saba(4)]))));
+print("rust SABA2_C is rounded to its digits:", certified("SABA2_C", rust_table(src, "SABA2_C"), s2[1]));
+print("rust SABA2_D is rounded to its digits:", certified("SABA2_D", rust_table(src, "SABA2_D"), s2[2]));
+print("rust SABA4_C is rounded to its digits:", certified("SABA4_C", rust_table(src, "SABA4_C"), s4[1]));
+print("rust SABA4_D is rounded to its digits:", certified("SABA4_D", rust_table(src, "SABA4_D"), s4[2]));

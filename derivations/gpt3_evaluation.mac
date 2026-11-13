@@ -77,11 +77,11 @@ corner(l, d, h) := block([dh, T0, Q, dT, p0, la, Tv, f, e0],
   Tv : T0*(1 + 6077/10000*Q),
   f : -dh*g0*dMtr/(Rg*Tv),
   e0 : Q*p0/(622/1000 + 378/1000*Q),
-  bfloat([seasonal(l, "a_h:a0", 1/1000, d), seasonal(l, "a_w:a0", 1/1000, d),
+  [seasonal(l, "a_h:a0", 1/1000, d), seasonal(l, "a_w:a0", 1/1000, d),
           p0*exp(f), T0 + dT*dh, e0*exp(f*(1 + la)),
           seasonal(l, "Tm:a0", 1, d), la,
           seasonal(l, "Gn_h:a0", 1/100000, d), seasonal(l, "Ge_h:a0", 1/100000, d),
-          seasonal(l, "Gn_w:a0", 1/100000, d), seasonal(l, "Ge_w:a0", 1/100000, d)]))$
+          seasonal(l, "Gn_w:a0", 1/100000, d), seasonal(l, "Ge_w:a0", 1/100000, d)])$
 
 /* The site: the cell whose south-west corner is the last node at or below the site, its row
    clamped to the 35 full cells (the polar continuation), the longitude folded into
@@ -96,7 +96,7 @@ gpt3_at(lat, lon, d, h) := block([lo, la0, lo0, t, u, sw, se, nw, ne],
   se : corner(node(la0, lo0 + 5), d, h),
   nw : corner(node(la0 + 5, lo0), d, h),
   ne : corner(node(la0 + 5, lo0 + 5), d, h),
-  bfloat((1 - t)*(1 - u)*sw + (1 - t)*u*nw + t*(1 - u)*se + t*u*ne))$
+  (1 - t)*(1 - u)*sw + (1 - t)*u*nw + t*(1 - u)*se + t*u*ne)$
 
 /* TU Wien's polar rule at |lat| >= 87.5: the nearest node, reduced to the site. */
 gpt3_nearest(lat, lon, d, h) := block([plon : mod(lon, 360), ppod : 90 - lat, ipod, ilon],
@@ -115,13 +115,13 @@ for k : 0 thru rows - 1 do block(
   inp : map(rust_decimal, firstn(lits, 4)),
   want : apply(gpt3_at, inp),
   print(sconcat("site_", k + 1, ":"),
-        if transcribed(rest(lits, 4), want) then 0 else 1))$
+        if certified(sconcat("GPT3_MAXIMA_site", k + 1), rest(lits, 4), want) then 0 else 1))$
 
 /* ---- the bilinear weights reproduce a node exactly, and the seam is the mean of its nodes ------ */
 print("node_is_node:", if every(lambda([a, b], is(abs(a - b) < 10^-35)),
-        gpt3_at(155/2, 275/2, 92, 0), corner(node(155/2, 275/2), 92, 0)) then 0 else 1)$
+        bfloat(gpt3_at(155/2, 275/2, 92, 0)), bfloat(corner(node(155/2, 275/2), 92, 0))) then 0 else 1)$
 
 /* ---- the polar convention, priced: ours against TU Wien's nearest node -------------------------- */
-block([ours : gpt3_at(899/10, 1637/100, 1, 0), theirs : gpt3_nearest(899/10, 1637/100, 1, 0)],
+block([ours : bfloat(gpt3_at(899/10, 1637/100, 1, 0)), theirs : bfloat(gpt3_nearest(899/10, 1637/100, 1, 0))],
   print("at (89.9, 16.37) day 1, ours - nearest node: p", ours[3] - theirs[3], "Pa, T",
         ours[4] - theirs[4], "K, a_h", ours[1] - theirs[1]))$

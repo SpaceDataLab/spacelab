@@ -223,6 +223,7 @@ if have maxima; then
     fi
 
     out=$(timeout 120 maxima --very-quiet -b saba_coeffs.mac 2>&1)
+    arb_keep "$out"
     # SABA drift lengths and kick weights each sum to 1 (n=1..4, to ~1e-33), and SABA2 matches its form
     sums=$(printf '%s' "$out" | grep -cE 'max \|sum - 1\| \(~0\?\): (0\.0|[0-9.]+b-[0-9][0-9])')
     if [ "$sums" -ge 4 ] && printf '%s' "$out" | grep -qE 'SABA2 c1.*\(=0\?\): 0\.0' && printf '%s' "$out" | grep -qE 'SABA2 c2.*\(=0\?\): 0\.0' && [ "$(printf '%s' "$out" | grep -cE '^rust SABA[24]_[CD] is .*: true')" -eq 4 ]; then
@@ -1458,7 +1459,7 @@ if have maxima; then
         # shellcheck disable=SC2046 # pkg-config prints separate flags
         if cc -O2 arb_balls.c -o "$tmp/arb" $(pkg-config --cflags --libs flint) 2>"$tmp/cc.log" \
             && cert=$(timeout 300 "$tmp/arb" < "$ARB_IN" 2>&1) \
-            && printf '%s' "$cert" | grep -q '^CERTIFIED 129 literals'; then
+            && printf '%s' "$cert" | grep -q '^CERTIFIED 253 literals'; then
             ok "arb arb_balls.c: $cert"
         else
             bad "arb arb_balls.c" "$(cat "$tmp/cc.log")${cert}"

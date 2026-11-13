@@ -11441,10 +11441,11 @@ The same claim for any derivation is `certified(name, literals, exact)` in `rust
 decides each literal against a bigfloat as `transcribed` does, and prints the unevaluated exact
 value in reverse Polish notation; `derivations/arb_balls.c` evaluates every such line verify.sh
 collects in Arb at 256 bits, 1 024 or 4 096 where that does not decide it, and fails on any literal
-that is not its value correctly rounded. Thirteen derivations go through it — the diurnal
-aberration, the forward DCT, the zenith delay, HARDISP, the degree-70 field, the Adams and Radau IIA
-tableaux, the Earth's rotation rate, both MODIP grids, the VMF grid, the IERS relativity lines and
-the box-wing lift: 129 literals, the closest at 0.981 of a half unit.
+that is not its value correctly rounded. Fifteen derivations go through it — the diurnal aberration,
+the forward DCT, the zenith delay, HARDISP, the degree-70 field, the Adams and Radau IIA tableaux,
+SABA₂ and SABA₄ on their Legendre roots in radicals, the Earth's rotation rate, both MODIP grids,
+the VMF grid, GPT3 at its ten sites, the IERS relativity lines and the box-wing lift: 253 literals,
+the closest at 0.995 of a half unit.
 
 **Today: 2
 comparator-decided tests of 3 735** — name 2, file 0, fixture 0, doc 0; none of them Orekit's,

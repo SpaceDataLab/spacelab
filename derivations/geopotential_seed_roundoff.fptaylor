@@ -1,0 +1,74 @@
+// The round-off of the geopotential recursion's seed, bounded by FPTaylor (plans/17 Ф28.D).
+//
+//   timeout 600 fptaylor --log-base-dir <tmp> --tmp-base-dir <tmp> --opt-x-abs-tol 0
+//     --opt-x-rel-tol 0 --opt-f-rel-tol 1e-2 --opt-f-abs-tol 0 --rel-error true --abs-error false
+//     --rel-error-threshold 0 geopotential_seed_roundoff.fptaylor
+//
+// The kernel, its operation order and its domain are geopotential_seed_roundoff.gappa's (Ф28.C):
+// crates/spacelab-propagation/src/geopotential.rs, `harmonic_quantities` and the rows n = 0, 1 of
+// `geo_row`. FPTaylor bounds the one quotient every seed shares,
+//
+//   inv_r = 1 / sqrt((x * x + y * y) + z * z),   R = |inv_r / IR - 1|,   IR = 1 / r,
+//
+// and the seeds follow from R by exact identities, one factor (1 + e), |e| <= u = 2^-53, per
+// rounding, and s3 = sqrt 3 (1 + e) for the double nearest sqrt 3:
+//
+//   V00 = rnd(re inv_r)                              |V00 / V00exact - 1| <= (1 + R)(1 + u) - 1
+//   V10 = rnd(rnd(s3 rnd(rnd(z re) inv_r2)) V00)     |V10 / V10exact - 1| <= (1 + R)^3 (1 + u)^7 - 1
+//
+// with inv_r2 = rnd(inv_r inv_r); V11 and W11 are V10's chain with x and y for z.
+//
+// On Gappa's domain (x, y, z in [2^-500, 4.3e8] m, r from 6245 km) no operation underflows or
+// overflows: the smallest square is 2^-1000. Without underflow every rounding is a pure relative
+// error, rnd[64, ne, 1, -53, 0] below (rnd64 less its subnormal term), and the relative error of
+// inv_r is then the same at (x, y, z) and at 2^k (x, y, z) for the same roundings: the expression is
+// homogeneous of degree -1 in the coordinates. Scaling the largest coordinate into [1, 2) puts every
+// point of the domain into one of three boxes, the largest coordinate in [0.5773, 2] and the other
+// two in [0, 2], where FPTaylor's relative bound is finite (r >= 0.5773 there).
+//
+// Result: R <= 3.910e-16 (boxes x and y) and 3.634e-16 (box z). Then V00 is within 5.020e-16
+// (Gappa 5.02e-16, ratio 1.000) and V10, V11, W11 within 1.950e-15 (Gappa 1.9e-15, ratio 1.026).
+// Observed in roundoff_samples.mac: 1.54e-16 and 4.47e-16.
+
+{
+Variables
+  float64 x in [0.5773, 2],
+  float64 y in [0, 2],
+  float64 z in [0, 2]
+;
+Definitions
+  ss rnd[64, ne, 1, -53, 0]= (x * x + y * y) + z * z,
+  inv_r = rnd[64, ne, 1, -53, 0](1 / rnd[64, ne, 1, -53, 0](sqrt(ss)))
+;
+Expressions
+  seed_inv_r_x = inv_r
+;
+}
+{
+Variables
+  float64 x in [0, 2],
+  float64 y in [0.5773, 2],
+  float64 z in [0, 2]
+;
+Definitions
+  ss rnd[64, ne, 1, -53, 0]= (x * x + y * y) + z * z,
+  inv_r = rnd[64, ne, 1, -53, 0](1 / rnd[64, ne, 1, -53, 0](sqrt(ss)))
+;
+Expressions
+  seed_inv_r_y = inv_r
+;
+}
+{
+Variables
+  float64 x in [0, 2],
+  float64 y in [0, 2],
+  float64 z in [0.5773, 2]
+;
+Definitions
+  ss rnd[64, ne, 1, -53, 0]= (x * x + y * y) + z * z,
+  inv_r = rnd[64, ne, 1, -53, 0](1 / rnd[64, ne, 1, -53, 0](sqrt(ss)))
+;
+Expressions
+  seed_inv_r_z = inv_r
+;
+}

@@ -1,0 +1,54 @@
+// The round-off of the shipped GMST (IAU 1982), bounded by FPTaylor (plans/17 Ф28.D).
+//
+//   timeout 300 fptaylor --log-base-dir <tmp> --tmp-base-dir <tmp> --opt-x-abs-tol 0
+//     --opt-x-rel-tol 0 --opt-f-rel-tol 1e-2 --opt-f-abs-tol 0 gmst82_roundoff.fptaylor
+//
+// The kernel, its operation order, its domain and the published decimals are gmst82_roundoff.gappa's
+// (Ф28.C): crates/spacelab-fa/src/earth_rotation.rs, `gmst82`. FPTaylor has no floor, and needs
+// none. With k = floor(rnd(seconds / 86400)) and the clamp's j in {-1, 0, 1} integers, g = seconds -
+// 86400 k the real difference the code rounds to r1, and r2 = rnd(r1 + 86400 j), the exact angle is
+// 2 pi / 86400 (S - 86400 (k - j)) = 2 pi / 86400 ((g + 86400 j) - (seconds - S)), so
+//
+//   |angle - GMST| <= 2 pi / 86400 |seconds - S| + |rnd(r2 W) - 2 pi / 86400 (g + 86400 j)|.
+//
+// Task 1 bounds |seconds - S|, S the published polynomial in real arithmetic on the same day count
+// and exact fraction F; task 2 the rest, both roundings of the reduction included. Task 2's box,
+// g in [-86401, 172801] and j in [-1, 1], holds every (g, j) the code reaches (k misses the floor of
+// the exact quotient by at most one) and more: r2 is in [-1, 86401] in the code, here up to 2.6e5,
+// so task 2 over-covers. Every `rnd64` is one IEEE double rounding to nearest-even; no FMA.
+//
+// Result: |seconds - S| <= 1.874e-7 s (Gappa 1.88e-7) and the rest <= 6.982e-15, so |angle - GMST|
+// <= 2 pi / 86400 1.874e-7 + 6.982e-15 = 1.3635e-11 rad; Gappa's 1.37e-11, ratio 0.995. Observed
+// in roundoff_samples.mac: 5.83e-12.
+
+{
+Variables
+  float64 D in [-1826250, 1826250],
+  real F in [0, 1]
+;
+Definitions
+  frac rnd64= F,
+  c rnd64= (D + frac) / 36525,
+  seconds rnd64= (67310.54841 + 86400 * frac) + ((-6.2e-6 * c + 0.093104) * c + 8640184.812866) * c
+;
+Expressions
+  gmst82_seconds = seconds
+;
+}
+
+{
+Variables
+  real g in [-86401, 172801],
+  float64 j in [-1, 1],
+  // pi, to 37 digits: the bound holds for every value in the interval, the real one among them
+  real p in [3.141592653589793238462643383279502884, 3.141592653589793238462643383279502885]
+;
+Definitions
+  w = rnd64(rnd64(2 * p) / 86400),
+  r2 = rnd64(rnd64(g) + 86400 * j),
+  angle = rnd64(r2 * w)
+;
+Expressions
+  gmst82_scale = angle
+;
+}

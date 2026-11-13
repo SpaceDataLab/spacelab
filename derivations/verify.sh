@@ -1561,6 +1561,39 @@ fi
 if have maxima; then
     mac_zeros roundoff_samples.mac 6 "the replayed f64 kernels stay under their Gappa bounds at the domains' edges; the Vermeille hypotheses hold on a grid to GEO"
 fi
+# Ф28.D: the same kernels and the shadow lens under FPTaylor, a static analysis independent of Gappa.
+# Each row is an input, its error mode and, per expression in order, the bound its header states
+# (`n*b` for n expressions under one bound). A run fails if any bound comes out above its stated
+# value, or if it prints a different number of bounds, which a timeout does. FPTaylor is out of tree
+# (D-21); without it the block is skipped.
+if have fptaylor; then
+    fpt_tmp=$(mktemp -d)
+    while read -r f mode bounds; do
+        opts="--opt-x-abs-tol 0 --opt-x-rel-tol 0 --opt-f-rel-tol 1e-2 --opt-f-abs-tol 0"
+        [ "$mode" = rel ] && opts="$opts --rel-error true --abs-error false --rel-error-threshold 0"
+        # shellcheck disable=SC2086
+        got=$(timeout 600 fptaylor --log-base-dir "$fpt_tmp" --tmp-base-dir "$fpt_tmp" $opts "${f}_roundoff.fptaylor" 2>&1 |
+            grep -E '^(Absolute|Relative) error \(exact\):' | awk '{ printf "%s ", $4 }')
+        if printf '%s\n%s\n' "$got" "$bounds" | awk 'NR == 1 { n = split($0, g) }
+            NR == 2 { k = split($0, t); m = 0
+                for (j = 1; j <= k; j++) { r = split(t[j], p, "*"); c = r == 2 ? p[1] : 1; for (q = 0; q < c; q++) b[++m] = p[r] }
+                good = n == m; for (i = 1; i <= m; i++) if (g[i] + 0 > b[i] + 0) good = 0 }
+            END { exit !good }'; then
+            ok "fptaylor ${f}_roundoff.fptaylor: every round-off bound at or under the one its header states"
+        else
+            bad "fptaylor ${f}_roundoff.fptaylor" "bounds [${got}] against [${bounds}]"
+        fi
+    done <<'EOF'
+era abs 1.447e-12 1.237e-15
+gmst82 abs 1.874e-7 6.982e-15
+kepler abs 6.130e-16 4.486e-14 4.530e-14
+geopotential_seed rel 3.910e-16 3.910e-16 3.634e-16
+shadow_lens rel 61*1.519e-15 2.036e-16 2.729e-14 5.623e-14 1.271e-13 1.877e-13
+EOF
+    rm -rf "$fpt_tmp"
+else
+    skip "Ф28.D FPTaylor round-off bounds" fptaylor
+fi
 
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -1,0 +1,48 @@
+// The round-off of the last Newton step of the shipped Kepler solve, bounded by FPTaylor
+// (plans/17 Ф28.D).
+//
+//   timeout 300 fptaylor --log-base-dir <tmp> --tmp-base-dir <tmp> --opt-x-abs-tol 0
+//     --opt-x-rel-tol 0 --opt-f-rel-tol 1e-2 --opt-f-abs-tol 0 kepler_roundoff.fptaylor
+//
+// The kernel, its operation order and its domain are kepler_roundoff.gappa's (Ф28.C):
+// crates/spacelab-elements/src/keplerian.rs, `eccentric_from_mean`, one step from the iterate E:
+//
+//   (sin_e, cos_e) = libm::sincos(E);  f = (E - e sin_e) - M;  step = f / (1 - e cos_e);  E1 = E - step
+//
+// FPTaylor's branch and bound takes no constraints, and Gappa's hypothesis that the step starts near
+// the root, |(E - e sin_e) - M| <= 1e-12, is one. It goes into the parametrisation instead: M is
+// written as E - e sin E - phi with phi the exact residual Fx, a real in [-1.001e-12, 1.001e-12]
+// (Gappa's |fc - Fx| <= 6.1e-16 widens the computed 1e-12 to it). Every (E, e, M) of Gappa's domain
+// has such a phi, and M itself is an input, never rounded, so nothing in the code's arithmetic
+// changes. The exact quantities are then Fx = phi, Stepx = phi / (1 - e cos E), E - Stepx.
+//
+// libm's sin and cos (musl kernels) are assumed within one ulp, as in Ф28.C. FPTaylor states that as
+// rnd[64, ne, 2]: a relative error of at most 2^-52, which one ulp never exceeds (here up to twice
+// Gappa's 2^-53 absolute for values in [1/2, 1)). Every `rnd64` is one IEEE double rounding to
+// nearest-even; no FMA.
+//
+// Result: |fc - Fx| <= 6.130e-16 (Gappa 6.1e-16), |step - Stepx| <= 4.486e-14 (Gappa 6.1e-14) and
+// |E1 - (E - Stepx)| <= 4.530e-14 (Gappa 6.14e-14, ratio 0.738). FPTaylor is the tighter here: its
+// libm error is relative, so a small sin or cos carries a small error. Observed in
+// roundoff_samples.mac: 1.13e-14.
+
+Variables
+  float64 E in [-0.001, 6.3],
+  float64 e in [0, 0.99],
+  real phi in [-1.001e-12, 1.001e-12]
+;
+Definitions
+  sc = rnd[64, ne, 2](sin(E)),
+  cc = rnd[64, ne, 2](cos(E)),
+  M = (E - e * sin(E)) - phi,
+  t1 = rnd64(E - rnd64(e * sc)),
+  fc = rnd64(t1 - M),
+  fp = rnd64(1 - rnd64(e * cc)),
+  step = rnd64(fc / fp),
+  E1 = rnd64(E - step)
+;
+Expressions
+  kepler_f = fc,
+  kepler_step = step,
+  kepler_next = E1
+;

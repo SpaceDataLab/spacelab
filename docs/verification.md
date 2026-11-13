@@ -286,6 +286,99 @@ Two Vermeille steps cannot be bounded by a relative error, so the proof treats t
 The ratios are lowest for Vermeille: about 1/40 for latitude and 1/50 for height. The bound adds
 about thirty roundings at their worst case. Ten sample points rarely meet that case.
 
+### 1.2 The same bounds from a second tool, and the shadow lens (Ф28.D)
+
+FPTaylor bounds the same kernels a second way. It bounds round-off with a symbolic Taylor form and
+a global branch-and-bound optimiser. Gappa uses interval arithmetic and rewriting. The two tools
+share no code. Each FPTaylor input has the kernel, the operation order and the domain of its Gappa
+file. libm's `sin`, `cos` and `atan2` are within one ulp, which FPTaylor states as a relative error
+of at most 2⁻⁵². `derivations/verify.sh` §8 runs each input. It fails if a bound comes out above
+the value that the input's header states.
+
+FPTaylor is out of tree (D-21). It is never linked and never a dependency. The build is FPTaylor
+0.9.4+dev, soarlab/FPTaylor commit `b5a77cae348400f21f83512210d9f43c4bffb381` (2024-09-01, MIT),
+with source tarball sha256 `262cb1fc723ce17f0414a85a31e29749c0041d62e0e3919d0a67cc715f8005ed`. It
+uses OCaml's `num` 1.6 (sha256 `b5cce325449aac746d5ca963d84688a627cca5b38d41e636cf71c68b60495b3e`)
+and OCaml 5.4.0. It is built in user space under `~/.local/src/fptaylor-b5a77ca.*` and runs as
+`~/.local/bin/fptaylor`. The build needs two patches. `Pervasives` becomes `Stdlib` for OCaml 5. The
+INTERVAL C library is compiled with `-std=gnu11 -fPIC`, because glibc's C23 headers conflict with it.
+
+| Kernel | FPTaylor bound | Gappa bound | FPTaylor / Gappa | Observed / FPTaylor | Input |
+|---|---|---|---|---|---|
+| ERA | **9.093e-12 rad** | 9.12e-12 rad | 0.997 | 0.47 | derivations/era_roundoff.fptaylor |
+| GMST82 | **1.3635e-11 rad**, and 1.874e-7 s before the reduction | 1.37e-11 rad, 1.88e-7 s | 0.995 | 0.43 | derivations/gmst82_roundoff.fptaylor |
+| Kepler, last Newton step | **4.530e-14**, with f within 6.130e-16 and the step within 4.486e-14 | 6.14e-14, 6.1e-16, 6.1e-14 | 0.738 | 0.25 | derivations/kepler_roundoff.fptaylor |
+| Vermeille | not expressible | 3.95e-15 rad; 5.97e-15·√(D² + z²) | — | — | — |
+| Geopotential seed | V̄₀₀ within **5.020e-16**; V̄₁₀, V̄₁₁, W̄₁₁ within **1.950e-15**, relative | 5.02e-16; 1.9e-15 | 1.000; 1.026 | 0.31; 0.23 | derivations/geopotential_seed_roundoff.fptaylor |
+
+The two tools agree within 3 % on ERA, GMST82 and the seed. Neither tool's bound is below an error
+that `roundoff_samples.mac` observed. FPTaylor's Kepler bound is 26 % lower than Gappa's, because
+FPTaylor states the libm error relative to the result. A small `sin` or `cos` then carries a small
+error.
+
+FPTaylor has no `floor`, `atan2`, `hypot` or `cbrt`, and its optimiser accepts no constraints. Each
+input works around that as follows. Its header gives the details.
+
+- **ERA and GMST82.** The `floor` is exact. The triangle inequality splits the error into the sum's
+  rounding and the reduction with its scale.
+- **Kepler.** Gappa's hypothesis is that the step starts near the root. FPTaylor gets it as a
+  parametrisation instead: M = E − e sin E − φ, with φ the exact residual.
+- **Seed.** Without underflow the relative error of 1/r does not change when the coordinates are
+  scaled by a power of 2. So three boxes with the largest coordinate in [0.5773, 2] hold the whole
+  domain. The seeds follow from 1/r by exact identities.
+- **Vermeille.** FPTaylor cannot express it. Even on a box 100 km by 1 km by 100 km, its interval
+  enclosure of the exact expression is [−∞, ∞]. The chain `k = √(u + v + w²) − w`, `k + e²` and the
+  divisions by them lose their sign by dependency. On the full domain FPTaylor cannot exclude a
+  division by zero. Gappa's proof rests on the hypothesis P + Q ∈ [0.955, 46] and on hand lemmas,
+  and FPTaylor has no way to state either. Gappa's bound stands alone there.
+
+**The shadow lens** (`spacelab-propagation` `shadow.rs`, derivations/shadow_lens_roundoff.fptaylor):
+
+- `x − sin x` by its series (x < 2) is within **1.519e-15 = 13.7u** for x in [2⁻⁶⁰, 2). By
+  `x − sin x` itself (x ≥ 2) it is within **2.036e-16 = 1.83u**. Here u = 2⁻⁵³, and a bound in u is
+  a bound in ulp of the result.
+- The test `x_minus_sin_is_within_two_ulp_of_the_reference` holds 2 ulp on its table only. The
+  claim is not true off that table. At x = 1.858598579272284 the series returns 0.8997285676743384,
+  which is **4.44 ulp** from x − sin x = 0.89972856767433790…. The series branch uses `+ − × ÷` only,
+  so a Julia replay is bit for bit. Maxima, which rounds each operation of the sum in rationals,
+  gives the same result. 600 000 random x in Julia found no error above 4.45 ulp. The cause: the
+  partial sums exceed 1 while the result is below 1, so they round at twice the result's ulp. The
+  test's `c₁ = 4` assumes 2 ulp here.
+- `lens_area` for the 400 km pair, in four boxes across the penumbra:
+
+| d (rad) | κ | Gate c₁ + c₂κ (ulp) | FPTaylor |
+|---|---|---|---|
+| 1.2220462 … 1.2232089 | 119 … 181 | 123 … 185 | 2.729e-14 = 246u |
+| 1.2232089 … 1.2255341 | 181 … 336 | 185 … 340 | 5.623e-14 = 506u |
+| 1.2255341 … 1.2282334 | 336 … 898 | 340 … 902 | 1.271e-13 = 1144u |
+| 1.2278593 … 1.2289832 | 745 … 1491 | 749 … 1495 | 1.877e-13 = 1690u |
+
+FPTaylor does not prove the gate. Its own lower estimate is within 0.7 % of each bound. So each
+bound is the maximum of FPTaylor's first-order model, 1.13 to 1.49 times the gate at the box's far
+end. The model gives every rounding that acts like a shift of d its worst sign at the same time.
+The gate's c₂ = 1 counts one of them, the sum r_E + r_S. The model also counts d − diff, d + diff,
+diff·sum, d² and d² ∓ squares. Toward either tangency FPTaylor gives no useful bound, because the
+square root of a vanishing product has an unbounded derivative.
+
+**The gate fails off the test's grid.** The shipped `lens_area` was run at 40 000 random d across
+the penumbra of each radius pair of `tests/shadow_lens.rs`. The run used `shadow.rs`'s source and
+libm 0.2.16. The reference is 512-bit arithmetic, and Maxima at 80 digits gives the same error at
+each point below. 34 of the 280 000 points are above the gate, on three pairs:
+
+| Pair r_E, r_S (rad) | d (rad) | A | Error | κ | Gate | Error / gate | Points above |
+|---|---|---|---|---|---|---|---|
+| 4.929513065031875e-3, 4.650484023614976e-3 (occulter 6 % larger) | 0.006578513728120271 | 1.4430419585233871e-5 | 8.57 ulp | 3.17 | 7.17 ulp | **1.195** | 25 |
+| 4.650484023614976e-3, the same (equal discs) | 0.00620552431625267 | 1.4852687177768032e-5 | 7.81 ulp | 2.89 | 6.89 ulp | **1.133** | 2 |
+| 1.6593209407822666e-2, 4.650484023614976e-3 (Moon's distance) | 0.018519308730246358 | 1.517868930354365e-5 | 15.17 ulp | 9.71 | 13.71 ulp | **1.107** | 7 |
+
+The other four pairs stay below 0.75 of the gate; the 400 km pair comes to 0.47. All three points
+have κ below 10, so c₁ carries most of the gate there. Its derivation counts 2 ulp for x − sin x,
+then two products and the sum. It misses two errors that can account for the excess. The series
+error reaches 4.44 ulp. Also, `atan2`'s one-ulp error grows by the condition number of x − sin x
+in x, x(1 − cos x)/(x − sin x), which falls from 3 at x → 0 to 2.6 at x = 2.
+`shadow.rs`'s doc comment states the gate only "on the grid of tests/shadow_lens.rs", so it is true
+as written. The test's derivation of c₁ is not.
+
 ---
 
 ## 2 · Numerical propagation, forces & DSST

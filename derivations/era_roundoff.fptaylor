@@ -1,0 +1,51 @@
+// The round-off of the shipped Earth Rotation Angle, bounded by FPTaylor (plans/17 Ф28.D).
+//
+//   timeout 300 fptaylor --log-base-dir <tmp> --tmp-base-dir <tmp> --opt-x-abs-tol 0
+//     --opt-x-rel-tol 0 --opt-f-rel-tol 1e-2 --opt-f-abs-tol 0 era_roundoff.fptaylor
+//
+// The kernel, its operation order, its domain and the published decimals are era_roundoff.gappa's
+// (Ф28.C): crates/spacelab-fa/src/cio.rs, `era`. FPTaylor has no floor, and needs none: with
+// k = floor(turns) an integer and g = turns - k in [0, 1) the real difference the code rounds to f,
+// the exact angle is 2 pi (Turns - k) = 2 pi (g - (turns - Turns)), so by the triangle inequality
+//
+//   |angle - ERA| <= 2 pi |turns - Turns| + |rnd(rnd(g) TAU) - 2 pi g|,   g in [0, 1],
+//
+// with Turns the same sum in real arithmetic on the same day count and exact fraction F. Task 1
+// bounds |turns - Turns|, task 2 the rest, the rounding of turns - k included (it is not exact when
+// turns is a hair below zero). Every `rnd64` is one IEEE double rounding to nearest-even; no FMA
+// (Rust never contracts). D is any double in the day range, a superset of the integers the code
+// passes.
+//
+// Result: |turns - Turns| <= 1.447e-12 and the rest <= 1.237e-15, so |angle - ERA| <= 2 pi 1.447e-12
+// + 1.237e-15 = 9.093e-12 rad, modulo 2 pi; Gappa's 9.12e-12, ratio 0.997. Observed in
+// roundoff_samples.mac: 4.29e-12.
+
+{
+Variables
+  float64 D in [-1826250, 1826250],
+  real F in [0, 1]
+;
+Definitions
+  frac rnd64= F,
+  tu rnd64= D + frac,
+  turns rnd64= (0.7790572732640 + frac) + 0.00273781191135448 * tu
+;
+Expressions
+  era_turns = turns
+;
+}
+
+{
+Variables
+  real g in [0, 1],
+  // pi, to 37 digits: the bound holds for every value in the interval, the real one among them
+  real p in [3.141592653589793238462643383279502884, 3.141592653589793238462643383279502885]
+;
+Definitions
+  tau = rnd64(2 * p),
+  angle = rnd64(rnd64(g) * tau)
+;
+Expressions
+  era_scale = angle
+;
+}

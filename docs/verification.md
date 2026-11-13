@@ -11441,11 +11441,17 @@ The same claim for any derivation is `certified(name, literals, exact)` in `rust
 decides each literal against a bigfloat as `transcribed` does, and prints the unevaluated exact
 value in reverse Polish notation; `derivations/arb_balls.c` evaluates every such line verify.sh
 collects in Arb at 256 bits, 1 024 or 4 096 where that does not decide it, and fails on any literal
-that is not its value correctly rounded. Sixteen derivations go through it — the diurnal aberration,
+that is not its value correctly rounded. Eighteen derivations go through it — the diurnal aberration,
 the forward DCT, the zenith delay, HARDISP, the degree-70 field, the Adams and Radau IIA tableaux,
 SABA₂ and SABA₄ on their Legendre roots in radicals, the Earth's rotation rate, both MODIP grids,
-the VMF grid, GPT3 at its ten sites, the IERS relativity lines and the box-wing lift, and the EDL
-entry equations through one RK4 step: 266 literals, the closest at 0.995 of a half unit.
+the VMF grid, GPT3 at its ten sites, the IERS relativity lines and the box-wing lift, the EDL
+entry equations through one RK4 step, Niell, GMF, VMF1 and VMF3 at three elevations, and IAS15's
+nodes and conversion matrices: 332 literals, the closest at 0.995 of a half unit. A value defined
+only as a root goes over as one: `arb_root(sym, f, x, lo, hi, value)` prints `f`, `f′` and a dyadic
+bracket, and `arb_balls.c` takes the root only if `f` changes sign across the bracket and the ball
+of `f′` over the whole bracket excludes zero, so the bracket holds exactly one root, which it then
+bisects to the working precision. IAS15's seven nonzero nodes are the roots of
+d⁷/dx⁷ [x⁸(x − 1)⁷] / x in 2⁻¹²⁰ brackets, and its c and d matrices are polynomials in them.
 
 **Today: 2
 comparator-decided tests of 3 735** — name 2, file 0, fixture 0, doc 0; none of them Orekit's,

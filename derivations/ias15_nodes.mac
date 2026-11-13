@@ -53,9 +53,22 @@ for j:1 thru 8 do for k:1 thru j do print("d[", j-1, "][", k-1, "] =", bfloat(D[
 load("rust_literals.mac")$
 src : "../crates/spacelab-propagation/src/ias15.rs"$
 packed(M) := flatten(makelist(makelist(M[k+2][j+2], j, 0, k-1), k, 1, 6))$
+/* For the Arb pass (plans/17 Ф28.A): each nonzero node is the root of P/x in a 2^-120 dyadic bracket
+ * around its bigfloat, which arb_balls.c certifies unique; c and d are polynomials in the nodes, so
+ * they go over as polynomials in those roots. */
+Q : ratsimp(P / x)$
+print("P/x leaves no remainder, Q(0) /= 0 (=true?):", is(ratsimp(Q*x - P) = 0) and is(subst(x = 0, Q) # 0));
+hsym : cons(0, makelist(concat('ias15_h, i), i, 1, 7))$
+for i:1 thru 7 do block([br : arb_bracket(h[i + 1], 120)],
+  arb_root(hsym[i + 1], Q, x, br[1], br[2], h[i + 1]))$
+Csym : genmatrix(lambda([jj, kk], coeff(expand(prod(t - hsym[m+1], m, 0, jj-2)), t, kk-1)), 8, 8)$
+Dsym : map(expand, invert(Csym))$
+print("c and d in the roots - c and d, worst (~0?):",
+      lmax(map(lambda([a, b], bfloat(abs(subst(arb_roots, a) - b))),
+               flatten(append(args(Csym), args(Dsym))), flatten(append(args(C), args(D))))));
 print("rust H is the nearest doubles to the nodes, rounded at its last digit:", same_doubles(rust_table(src, "H"), h)
-  and transcribed(rust_table(src, "H"), h));
+  and certified("H", rust_table(src, "H"), hsym));
 print("rust CC is the nearest doubles to c, rounded at its last digit:", same_doubles(rust_table(src, "CC"), packed(C))
-  and transcribed(rust_table(src, "CC"), packed(C)));
+  and certified("CC", rust_table(src, "CC"), packed(Csym)));
 print("rust DD is the nearest doubles to d, rounded at its last digit:", same_doubles(rust_table(src, "DD"), packed(D))
-  and transcribed(rust_table(src, "DD"), packed(D)));
+  and certified("DD", rust_table(src, "DD"), packed(Dsym)));

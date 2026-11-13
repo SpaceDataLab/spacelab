@@ -219,12 +219,30 @@ transcribed(literals, exact) := length(literals) = length(exact) and
    `ARB name index literal <the value in reverse Polish notation>` goes to the output, where
    `arb_balls.c` decides in ball arithmetic that the literal is the value correctly rounded. A float
    inside a value, or a function Arb has not, is an error rather than a silent bigfloat. */
-arb_unary : ["sin", "cos", "tan", "asin", "acos", "atan", "exp", "log", "abs", "sinh", "cosh", "tanh"]$
+arb_unary : ["sin", "cos", "tan", "asin", "acos", "atan", "exp", "log", "abs", "sinh", "cosh", "tanh",
+             "erf", "erfc"]$
+/* Values defined as roots: `arb_root(sym, f, x, lo, hi, value)` declares the symbol sym the root of
+   f(x) in [lo, hi] -- lo and hi dyadic rationals, value its bigfloat -- and prints
+   `ARBVAR sym lo hi <f> ; <f'>`. arb_balls.c certifies that f changes sign on [lo, hi] and f' keeps
+   away from zero there, so the root is unique, and narrows it to a ball; a value handed to
+   `certified` may then contain sym. `arb_bracket(v, bits)` is a dyadic [lo, hi] around a bigfloat. */
+arb_roots : []$
+arb_x : false$
+arb_bracket(v, bits) := [floor(v * 2^bits - 1) / 2^bits, ceiling(v * 2^bits + 1) / 2^bits]$
+arb_root(sym, f, x, lo, hi, value) := block([fx, dfx],
+  if not (ratnump(lo) and ratnump(hi) and is(lo < hi)) then error("arb_root: lo < hi rationals for", sym),
+  if member(sym, map(lhs, arb_roots)) then error("arb_root: defined twice:", sym),
+  block([arb_x : x], fx : arb_rpn(f), dfx : arb_rpn(diff(f, x))),
+  printf(true, "ARBVAR ~a ~a ~a ~{~a~^ ~} ; ~{~a~^ ~}~%", sym, lo, hi, fx, dfx),
+  arb_roots : endcons(sym = value, arb_roots),
+  value)$
 arb_emit(e) := block([inflag : true, o, a],
   if ratnump(e) then arb_out : cons(string(e), arb_out)
   else if e = %pi then arb_out : cons("pi", arb_out)
   else if e = %e then arb_out : cons("e", arb_out)
   else if floatnump(e) or bfloatp(e) then error("certified: a float, which bounds nothing:", e)
+  else if arb_x # false and e = arb_x then arb_out : cons("x", arb_out)
+  else if symbolp(e) and member(e, map(lhs, arb_roots)) then arb_out : cons(concat("$", e), arb_out)
   else if atom(e) then error("certified: a free symbol:", e)
   else (o : op(e), a : args(e),
     if o = "+" or o = "*" then (
@@ -245,7 +263,8 @@ arb_emit(e) := block([inflag : true, o, a],
       arb_emit(a[1]), arb_out : cons(string(o), arb_out))
     else error("certified: no Arb counterpart for", o)))$
 arb_rpn(e) := block([arb_out : []], arb_emit(e), reverse(arb_out))$
-certified(name, literals, exact) := transcribed(literals, map(bfloat, exact)) and
+certified(name, literals, exact) :=
+  transcribed(literals, map(lambda([e], bfloat(subst(arb_roots, e))), exact)) and
   (for i thru length(literals) do
      printf(true, "ARB ~a ~a ~a ~{~a~^ ~}~%", name, i - 1, rust_digits(literals[i]), arb_rpn(exact[i])),
    true)$

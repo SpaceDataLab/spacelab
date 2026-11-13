@@ -27,7 +27,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # literal they decide against a bigfloat, which the Arb pass after the Ф17.B gates decides in balls.
 ARB_IN=$(mktemp)
 trap 'rm -f "$ARB_IN"' EXIT
-arb_keep() { printf '%s\n' "$1" | grep '^ARB ' >> "$ARB_IN"; }
+arb_keep() { printf '%s\n' "$1" | grep -E '^ARB(VAR)? ' >> "$ARB_IN"; }
 
 printf '\nRe-deriving every claim the source code attributes to a computer algebra system.\n\n'
 
@@ -165,6 +165,7 @@ if have maxima; then
     fi
 
     out=$(timeout 120 maxima --very-quiet -b ias15_nodes.mac 2>&1)
+    arb_keep "$out"
     # eight Gauss-Radau nodes (h0=0, h7<1) and the c/d conversion matrices are mutually inverse
     cdinv=$(printf '%s' "$out" | grep -oE 'c.d - I largest entry \(=0\?\): [0-9.]+b-[0-9]+' | grep -oE 'b-[0-9]+' | tr -d 'b-')
     rust=$(printf '%s' "$out" | grep -cE '^rust (H|CC|DD) is the nearest doubles to .*: true')
@@ -1461,7 +1462,7 @@ if have maxima; then
         # shellcheck disable=SC2046 # pkg-config prints separate flags
         if cc -O2 arb_balls.c -o "$tmp/arb" $(pkg-config --cflags --libs flint) 2>"$tmp/cc.log" \
             && cert=$(timeout 300 "$tmp/arb" < "$ARB_IN" 2>&1) \
-            && printf '%s' "$cert" | grep -q '^CERTIFIED 266 literals'; then
+            && printf '%s' "$cert" | grep -q '^CERTIFIED 332 literals'; then
             ok "arb arb_balls.c: $cert"
         else
             bad "arb arb_balls.c" "$(cat "$tmp/cc.log")${cert}"

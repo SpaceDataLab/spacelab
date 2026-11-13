@@ -1,6 +1,7 @@
 /* The input of `fa_series_arb.c` (plans/17 Ф28.A): every coefficient fundamental_arguments.mac,
-   cio_nutation_series.mac and tdb_series.mac read, as the exact rational it is, and every 25-digit
-   literal the spacelab-fa tests hold the code to, as the source writes it.
+   cio_nutation_series.mac, tdb_series.mac and gcrf_itrf_chain.mac read, as the exact rational it
+   is, and every 25-digit literal the spacelab-fa and spacelab-frames tests hold the code to, as the
+   source writes it.
 
    Maxima's bigfloats carry no error bound, so the tables those files wrote are certified
    elsewhere: the C program evaluates the same quantities in Arb ball arithmetic and requires each
@@ -36,6 +37,17 @@ lits("LIT_ERA", cio_rs, "ERA_EXACT")$
 lits("LIT_XY", cio_rs, "XY_EXACT")$
 lits("LIT_S", cio_rs, "S_EXACT")$
 lits("LIT_NUT", nutation_rs, "NUT_EXACT")$
+/* gcrf_itrf_chain.mac's inputs, the doubles the tests hand the code, and its two tables */
+frames_rs : "../crates/spacelab-frames/tests/frames.rs"$
+frames_cio : "../crates/spacelab-frames/src/cio.rs"$
+double_table(path, name) := map(lambda([t], nearest_double(rust_rational(t))), rust_table(path, name))$
+line("POMIN", double_table(frames_rs, "POM_INPUTS"))$
+line("CHAINUT1", double_table(frames_cio, "CHAIN_UT1_DAYS"))$
+line("CHAINEOP", double_table(frames_cio, "CHAIN_EOP"))$
+line("SPRIME", map(rust_rational, rust_literals_between("../crates/spacelab-frames/src/polar_motion.rs",
+                                                        "pub fn tio_locator(", "}")))$
+lits("LIT_POM", frames_rs, "POM_EXACT")$
+lits("LIT_CHAIN", frames_cio, "CHAIN_EXACT")$
 /* tdb_series.mac redefines table(), so it loads after everything above has been printed */
 batchload("tdb_series.mac")$
 line("TDBEND", group_end)$

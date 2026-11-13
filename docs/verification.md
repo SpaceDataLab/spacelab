@@ -207,8 +207,8 @@ regeneration above hold the tables to them.
 | fa | GMST82 coefficients C0–C3 | Aoki et al. 1982 | mpmath 50-digit certified nearest-f64 | bit-exact `to_bits()` | src/earth_rotation.rs |
 | fa | UTC↔TAI round-trip + refusals | IERS Bulletin C / `tai-utc.dat` | IERS leap-second bulletin (vendored) + self-consistency | bit-exact | src/leap_seconds.rs, tests/leap_seconds.rs |
 | fa | UTC ↔ TAI ↔ TT on integer nanoseconds, across every leap second and past 2027-05-20 (G4) | ITU-R TF.460 (a leap second is `23:59:60`, the day 86 401 s); CGPM 2026 Res. 5 (continuous UTC from 2027-05-20); TT = TAI + 32.184 s | none — the definitions: both round trips, labels increasing with TAI, `TAI − UTC` = 10 s on 1972-01-01, every day through 2499 86 400 s except 27 of 86 401 (June 30 or December 31, none after 2016, the only days that accept `23:59:60`), the four edges of each leap second, UTC = TAI − 37 s from 2017; 4096 draws per property | exact, to the nanosecond | tests/utc_properties.rs |
-| frames | GCRF→ITRF full IAU 2006/2000A CIO pipeline (G3) | IERS TN36 eqs (5.1), (5.3), (5.10), (5.13), (5.15) | **Maxima** `derivations/gcrf_itrf_chain.mac` (8): `Wᵀ·R₃(ERA)·Q(X+dX, Y+dY, s)` in 40-digit arithmetic on the exact series of `fundamental_arguments.mac` and `cio_nutation_series.mac`, six epochs over ±2 centuries with pole coordinates and CIP offsets; pyerfa's pipeline a comparator ([`comparisons.md`](comparisons.md)) | < 3e-13 (meas 9.703e-14 two centuries out: half an ulp of the ERA's 201 turns) | src/cio.rs |
-| frames | Polar-motion matrix, and the three orderings it rejects (G3) | IERS TN36 eq. (5.3), `s′` by eq. (5.13) | **Maxima** `derivations/gcrf_itrf_chain.mac` (7): `Wᵀ = R₁(−y_p)·R₂(−x_p)·R₃(s′)` in 40-digit arithmetic at eight pole positions; the transposed and sign-flipped candidates miss at first order in the angles, the reversed product at second; pyerfa `pom00` a comparator | < 4.5e-16 (meas 1.110e-16, one ulp) | tests/frames.rs |
+| frames | GCRF→ITRF full IAU 2006/2000A CIO pipeline (G3) | IERS TN36 eqs (5.1), (5.3), (5.10), (5.13), (5.15) | **Maxima** `derivations/gcrf_itrf_chain.mac` (8): `Wᵀ·R₃(ERA)·Q(X+dX, Y+dY, s)` in 40-digit arithmetic on the exact series of `fundamental_arguments.mac` and `cio_nutation_series.mac`, six epochs over ±2 centuries with pole coordinates and CIP offsets, each literal its value correctly rounded, decided in Arb balls (`derivations/fa_series_arb.c`); pyerfa's pipeline a comparator ([`comparisons.md`](comparisons.md)) | < 3e-13 (meas 9.703e-14 two centuries out: half an ulp of the ERA's 201 turns) | src/cio.rs |
+| frames | Polar-motion matrix, and the three orderings it rejects (G3) | IERS TN36 eq. (5.3), `s′` by eq. (5.13) | **Maxima** `derivations/gcrf_itrf_chain.mac` (7): `Wᵀ = R₁(−y_p)·R₂(−x_p)·R₃(s′)` in 40-digit arithmetic at eight pole positions, each literal decided in Arb balls (`fa_series_arb.c`); the transposed and sign-flipped candidates miss at first order in the angles, the reversed product at second; pyerfa `pom00` a comparator | < 4.5e-16 (meas 1.110e-16, one ulp) | tests/frames.rs |
 | frames | The polar-motion ordering as algebra: the transpose identity, and why one wrong candidate nearly passes | IERS TN36 `W(t) = R₃(−s′)·R₂(x_p)·R₁(y_p)`; the shipped matrix claims to be its transpose | **Maxima**, `derivations/frame_transform.mac` — the identity at symbolic angles, then a Taylor expansion of the reversed product in a common small angle | `R₁(−y_p)·R₂(−x_p)·R₃(s′) − W(t)ᵀ` is the **zero matrix**, exactly and at every angle. The reversed product's **first-order term cancels identically**; the leading miss is `x_p·y_p`, with `±y_p·s′` and `x_p·s′` beside it — **9e-12 at 3 µrad**, which is what the fixture's measured 6.2e-12 is. The dangerous candidate is separated by a product of the two pole coordinates and not by `s′` at all | derivations/frame_transform.mac |
 | frames | GMST82 inside the frame chain, ≥10 epochs | IERS Conventions 1996 §5 | decided by `derivations/gmst82.mac` (spacelab-fa row above); Orekit 13.1.7 a comparator ([`comparisons.md`](comparisons.md)), 3.9e-12 rad outside leap seconds and 1.2e-12 rad inside one at the instant itself, one UT1 second before the naive coordinate's | — | tests/orekit_oracle.rs |
 | frames | TEME→ITRF full transform (pos + vel) | Vallado 2006 (AIAA 2006-6753) Eq. (C-1), `r_PEF = ROT3(θ_GMST82 + EqEq1982_kin) r_TEME`, `EqEq1982_kin = 0.00264″ sin Ω + 0.000063″ sin 2Ω` — no IAU/IERS definition of TEME. The paper also gives Eq. (1) without the kinematic terms; the authors confirmed (2026-10-28) that (C-1) is intended. `derivations/teme_c1.mac` evaluates (C-1) on the Appendix C example at 40 digits; `tests/teme_vallado_2006.rs` holds the transform to it (**3.6e-8 m**); the printed vector is 1.33 cm from (C-1) and 8.48 cm from Eq. (1) (comparison only; the earlier 1.35 cm used a UT1 rate wrong by `k`) | `tests/teme_vallado_2006.rs` against `teme_c1.mac`; Orekit 13's IERS CIO chain (a different algorithm) a comparator ([`comparisons.md`](comparisons.md)), 0.99 m in position and 4.4e-4 m/s in velocity | 3.6e-8 m | tests/teme_vallado_2006.rs |
@@ -11387,12 +11387,6 @@ Batch 12h (2026-11-13, Ф19.G) parks SGP4's satellite.js three and Skyfield grou
 sensors' two pyorbital tests: SGP4 is decided by its document (`sgp4_document.mac`, G5), the TEME,
 GMST82 and geodetic stages by `teme_c1.mac`, `gmst82.mac` and `wgs84_geodesy.mac`, the scan catalogue
 by `scan_catalogue.mac` and the ray's hit by `ray_ellipsoid_geolocation.mac`.
-The 140 literals of `ARGUMENTS_EXACT`, `ERA_EXACT`, `XY_EXACT`, `S_EXACT`, `NUT_EXACT` and
-`TDB_EXACT` came from 40-digit bigfloats, which bound nothing (Ф28.A).
-`derivations/fa_series_arb.mac` prints every coefficient those files read as an exact rational, and
-`fa_series_arb.c` evaluates the same quantities in Arb at 320 bits: each literal must lie within
-half a unit in its last digit of its ball. All 140 are decided; the closest lies at 0.983 of that
-half unit. A changed last digit, or a term missing from the input, fails the run.
 Batch 12e (2026-11-13, Ф19.G) takes seven more. `derivations/diurnal_aberration.mac` gives each
 ERFA station's speed `ω √(x² + y²)` and the shift across the motion `asin(v/c)` (G3), and a direction
 along the motion is the law's own fixed point; ERFA's `ab` is parked. The polar branches of the
@@ -11409,6 +11403,13 @@ orderings miss at first order and the reversed product at second. pyerfa's pipel
 NEPTUNE's reduction and both NEPTUNE arcs, and Skyfield's ISS ground track are parked: the
 geopotential, third-body, Dormand–Prince, lunar-frame and SGP4-VER gates decide their pieces. The
 celestial-pole offset test is tagged (S2).
+The 266 literals of `ARGUMENTS_EXACT`, `ERA_EXACT`, `XY_EXACT`, `S_EXACT`, `NUT_EXACT`, `TDB_EXACT`,
+`POM_EXACT` and `CHAIN_EXACT` came from 40-digit bigfloats, which bound nothing (Ф28.A).
+`derivations/fa_series_arb.mac` prints every coefficient and input those files read as an exact
+rational, and `fa_series_arb.c` evaluates the same quantities in Arb at 320 bits: each literal must
+lie within half a unit in its last digit of its ball, and a literal written `0.0` must be an exact
+zero. All 266 are decided; the closest lies at 0.997 of that half unit. A changed last digit, or a
+term missing from the input, fails the run.
 
 **Today: 17
 comparator-decided tests of 3 727** — name 10, file 2, fixture 1, doc 4; none of them Orekit's,

@@ -1,18 +1,21 @@
 /* The certificate for spacelab-fa's exact tables (plans/17 Ф28.A): every
-   25-digit literal of ARGUMENTS_EXACT, ERA_EXACT, XY_EXACT, S_EXACT, NUT_EXACT
-   and TDB_EXACT is its value correctly rounded to the digits it shows, decided
-   in Arb ball arithmetic.
+   25-digit literal of ARGUMENTS_EXACT, ERA_EXACT, XY_EXACT, S_EXACT, NUT_EXACT,
+   TDB_EXACT, and of spacelab-frames' POM_EXACT and CHAIN_EXACT, is its value
+   correctly rounded to the digits it shows, decided in Arb ball arithmetic.
 
-   `fundamental_arguments.mac`, `cio_nutation_series.mac` and `tdb_series.mac`
-   wrote those literals from 40-digit bigfloats, which bound nothing. This
+   `fundamental_arguments.mac`, `cio_nutation_series.mac`, `tdb_series.mac` and
+   `gcrf_itrf_chain.mac` wrote those literals from 40-digit bigfloats, which
+   bound nothing. This
    reads the coefficients `fa_series_arb.mac` prints as exact rationals and
    evaluates the same quantities at 320 bits: the IERS (2010) eqs (5.43) and
    (5.44) reduced with C's fmod, the ERA reduced to one turn, X and Y by eq
    (5.16), s by eq (5.18) at the doubles of XY_EXACT, the IAU 2000A nutation
-   and its IAU 2006 rescaling, and the Fairhead-Bretagnon TDB - TT. Each
+   and its IAU 2006 rescaling, the Fairhead-Bretagnon TDB - TT, the transposed
+   polar-motion matrix, and the GCRF -> ITRF chain W^T R3(ERA) Q of eq (5.1)
+   on the exact X, Y and s with the pole offsets added. Each
    literal L of a value V must satisfy |V - L| + rad < half a unit in L's last
    digit. A literal that cannot be decided fails, as does a run that reads
-   fewer than the 140 literals or any block short.
+   fewer than the 266 literals or any block short.
 
      cc -O2 fa_series_arb.c -o fa_series_arb \
          $(pkg-config --cflags --libs flint)
@@ -20,6 +23,7 @@
 */
 
 #include <flint/arb.h>
+#include <flint/arb_mat.h>
 #include <flint/fmpq.h>
 #include <flint/fmpz.h>
 #include <stdio.h>
@@ -30,8 +34,8 @@
 #define MAXTOK 128
 #define NEPOCH 6
 #define NSINGLE                                                                \
-  13 /* EPOCHS PA ERA ERADAYS XP YP SPOLY LSELP LSD K06                        \
-       TDBEND JPLT2 TDBT */
+  17 /* EPOCHS PA ERA ERADAYS XP YP SPOLY LSELP LSD K06                        \
+       TDBEND JPLT2 TDBT POMIN CHAINUT1 CHAINEOP SPRIME */
 
 typedef struct {
   int m[14];
@@ -60,6 +64,10 @@ static char *lit_args[84], *lit_era[NEPOCH], *lit_xy[2 * NEPOCH],
 static fmpq_t fh[787][3], jplm[4][3], jpl_t2, tdb_t[8];
 static int tdb_end[5], nfh, njpl;
 static char *lit_tdb[8];
+static fmpq_t pom_in[24], chain_ut1[NEPOCH], chain_eop[4 * NEPOCH], sprime;
+static char *lit_pom[72], *lit_chain[9 * NEPOCH];
+/* the exact CIP X, Y and the series part of s at each epoch, for the chain */
+static arb_t cip_x[NEPOCH], cip_y[NEPOCH], s_series[NEPOCH];
 static int checked, failed;
 static double worst_margin;
 
@@ -173,6 +181,17 @@ static void fmod_two_pi(arb_t r, const arb_t x) {
 /* L is V rounded to its own digits: |V - L| + rad < half a unit in L's last
  * place. */
 static void check(const char *what, int i, const arb_t v, const char *lit) {
+  /* an exact zero is written 0.0 and must be one */
+  if (!strcmp(lit, "0.0") || !strcmp(lit, "-0.0")) {
+    if (!arb_is_zero(v)) {
+      printf("UNDECIDED %s[%d]: literal %s, value ", what, i, lit);
+      arb_printn(v, 40, 0);
+      printf("\n");
+      failed++;
+    }
+    checked++;
+    return;
+  }
   const char *e = strpbrk(lit, "eE");
   const char *dot = strchr(lit, '.');
   if (!e || !dot)
@@ -297,6 +316,7 @@ static void epoch(int e) {
     arb_mul(r, r, coef, PREC);
     arb_div_ui(r, r, 648000, PREC);
     check("XY_EXACT", 2 * e + v, r, lit_xy[2 * e + v]);
+    arb_set(v == 0 ? cip_x[e] : cip_y[e], r);
     fmpq_clear(p);
   }
 
@@ -325,6 +345,7 @@ static void epoch(int e) {
   arb_const_pi(coef, PREC);
   arb_mul(r, r, coef, PREC);
   arb_div_ui(r, r, 648000, PREC);
+  arb_set(s_series[e], r);
   arb_set_d(x, strtod(lit_xy[2 * e], NULL));
   arb_set_d(y, strtod(lit_xy[2 * e + 1], NULL));
   arb_mul(x, x, y, PREC);
@@ -461,6 +482,114 @@ static void tdb(int e) {
   arb_clear(tt);
 }
 
+/* acc <- acc R(a), R1, R2, R3 the passive frame rotations of cio_rotation.mac
+   for axis 0, 1, 2 */
+static void rot_mul(arb_mat_t acc, int axis, const arb_t a) {
+  int i = (axis + 1) % 3, j = (axis + 2) % 3;
+  arb_mat_t r;
+  arb_t s, c;
+  arb_mat_init(r, 3, 3);
+  arb_init(s);
+  arb_init(c);
+  arb_sin_cos(s, c, a, PREC);
+  arb_mat_one(r);
+  arb_set(arb_mat_entry(r, i, i), c);
+  arb_set(arb_mat_entry(r, j, j), c);
+  arb_set(arb_mat_entry(r, i, j), s);
+  arb_neg(arb_mat_entry(r, j, i), s);
+  arb_mat_mul(acc, acc, r, PREC);
+  arb_mat_clear(r);
+  arb_clear(s);
+  arb_clear(c);
+}
+
+static void check_matrix(const char *what, int row, const arb_mat_t m,
+                         char **lit) {
+  for (int i = 0; i < 3; i++)
+    for (int j = 0; j < 3; j++)
+      check(what, 9 * row + 3 * i + j, arb_mat_entry(m, i, j),
+            lit[9 * row + 3 * i + j]);
+}
+
+/* POM_EXACT: W^T = R1(-yp) R2(-xp) R3(s') at the POM_INPUTS doubles */
+static void pom(int k) {
+  arb_mat_t w;
+  arb_t a;
+  arb_mat_init(w, 3, 3);
+  arb_init(a);
+  arb_mat_one(w);
+  arb_set_fmpq(a, pom_in[3 * k + 1], PREC);
+  arb_neg(a, a);
+  rot_mul(w, 0, a);
+  arb_set_fmpq(a, pom_in[3 * k], PREC);
+  arb_neg(a, a);
+  rot_mul(w, 1, a);
+  arb_set_fmpq(a, pom_in[3 * k + 2], PREC);
+  rot_mul(w, 2, a);
+  check_matrix("POM_EXACT", k, w, lit_pom);
+  arb_mat_clear(w);
+  arb_clear(a);
+}
+
+/* CHAIN_EXACT: W^T(xp, yp, s'(t)) R3(ERA(UT1)) R3(-(E + s)) R2(d) R3(E), with
+   E = atan2(Y', X'), d = atan(sqrt(r^2 / (1 - r^2))), X' and Y' the series
+   plus dX, dY, and s eq (5.18) on the series X, Y */
+static void chain(int e) {
+  arb_mat_t m;
+  arb_t a, x, y, s, r2, d, big_e;
+  fmpq_t q;
+  fmpz_t z;
+  arb_mat_init(m, 3, 3);
+  arb_init(a), arb_init(x), arb_init(y), arb_init(s), arb_init(r2), arb_init(d),
+      arb_init(big_e);
+  fmpq_init(q);
+  fmpz_init(z);
+  arb_mat_one(m);
+  arcsec_to_rad(a, chain_eop[4 * e + 1]);
+  arb_neg(a, a);
+  rot_mul(m, 0, a);
+  arcsec_to_rad(a, chain_eop[4 * e]);
+  arb_neg(a, a);
+  rot_mul(m, 1, a);
+  fmpq_mul(q, sprime, epochs[e]);
+  arcsec_to_rad(a, q);
+  rot_mul(m, 2, a);
+  poly_q(q, era_c, 2, chain_ut1[e]);
+  fmpz_fdiv_q(z, fmpq_numref(q), fmpq_denref(q));
+  fmpq_sub_fmpz(q, q, z);
+  arb_set_fmpq(a, q, PREC);
+  arb_const_pi(d, PREC);
+  arb_mul_2exp_si(d, d, 1);
+  arb_mul(a, a, d, PREC);
+  rot_mul(m, 2, a);
+  arcsec_to_rad(a, chain_eop[4 * e + 2]);
+  arb_add(x, cip_x[e], a, PREC);
+  arcsec_to_rad(a, chain_eop[4 * e + 3]);
+  arb_add(y, cip_y[e], a, PREC);
+  arb_mul(s, cip_x[e], cip_y[e], PREC);
+  arb_mul_2exp_si(s, s, -1);
+  arb_sub(s, s_series[e], s, PREC);
+  arb_atan2(big_e, y, x, PREC);
+  arb_sqr(r2, x, PREC);
+  arb_addmul(r2, y, y, PREC);
+  arb_sub_ui(a, r2, 1, PREC);
+  arb_neg(a, a);
+  arb_div(d, r2, a, PREC);
+  arb_sqrt(d, d, PREC);
+  arb_atan(d, d, PREC);
+  arb_add(a, big_e, s, PREC);
+  arb_neg(a, a);
+  rot_mul(m, 2, a);
+  rot_mul(m, 1, d);
+  rot_mul(m, 2, big_e);
+  check_matrix("CHAIN_EXACT", e, m, lit_chain);
+  arb_mat_clear(m);
+  arb_clear(a), arb_clear(x), arb_clear(y), arb_clear(s), arb_clear(r2),
+      arb_clear(d), arb_clear(big_e);
+  fmpq_clear(q);
+  fmpz_clear(z);
+}
+
 int main(void) {
   char *line = NULL, *tok[MAXTOK];
   size_t cap = 0;
@@ -494,6 +623,12 @@ int main(void) {
   for (int i = 0; i < 8; i++)
     fmpq_init(tdb_t[i]);
   fmpq_init(jpl_t2);
+  for (int i = 0; i < 24; i++)
+    fmpq_init(pom_in[i]), fmpq_init(chain_eop[i]);
+  for (int i = 0; i < NEPOCH; i++)
+    fmpq_init(chain_ut1[i]), arb_init(cip_x[i]), arb_init(cip_y[i]),
+        arb_init(s_series[i]);
+  fmpq_init(sprime);
 
   while (getline(&line, &cap, stdin) != -1) {
     int n = split(line, tok);
@@ -605,6 +740,18 @@ int main(void) {
       rats(tdb_t, v, n, 8, tag);
     else if (!strcmp(tag, "LIT_TDB"))
       lits(lit_tdb, v, n, 8, tag);
+    else if (!strcmp(tag, "POMIN") && (seen |= 1u << 13))
+      rats(pom_in, v, n, 24, tag);
+    else if (!strcmp(tag, "CHAINUT1") && (seen |= 1u << 14))
+      rats(chain_ut1, v, n, NEPOCH, tag);
+    else if (!strcmp(tag, "CHAINEOP") && (seen |= 1u << 15))
+      rats(chain_eop, v, n, 4 * NEPOCH, tag);
+    else if (!strcmp(tag, "SPRIME") && (seen |= 1u << 16))
+      rats(&sprime, v, n, 1, tag);
+    else if (!strcmp(tag, "LIT_POM"))
+      lits(lit_pom, v, n, 72, tag);
+    else if (!strcmp(tag, "LIT_CHAIN"))
+      lits(lit_chain, v, n, 9 * NEPOCH, tag);
     /* what tdb_series.mac prints of its own between the blocks */
     else if (strcmp(tag, "TDB_EXACT") && strcmp(tag, "DONE"))
       die(tag);
@@ -612,13 +759,18 @@ int main(void) {
   if (!ended || nd != 5 || np != 8 || nlin != 5 || nxy != 4755 || ns != 66 ||
       nls != 678 || npl != 687 || seen != (1u << NSINGLE) - 1 || !lit_args[0] ||
       !lit_era[0] || !lit_xy[0] || !lit_s[0] || !lit_nut[0] || nfh != 787 ||
-      njpl != 4 || tdb_end[4] != 787 || !lit_tdb[0])
+      njpl != 4 || tdb_end[4] != 787 || !lit_tdb[0] || !lit_pom[0] ||
+      !lit_chain[0])
     die("incomplete input");
   for (int e = 0; e < NEPOCH; e++)
     epoch(e);
   for (int e = 0; e < 8; e++)
     tdb(e);
-  if (failed || checked != 140) {
+  for (int k = 0; k < 8; k++)
+    pom(k);
+  for (int e = 0; e < NEPOCH; e++)
+    chain(e);
+  if (failed || checked != 266) {
     printf("FAILED: %d of %d literals undecided or wrong\n", failed, checked);
     return 1;
   }

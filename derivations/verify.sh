@@ -731,14 +731,15 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima tdb_series.mac" "expected 2 checks to hold, found $holds"
     fi
 
-    # The certificate for the spacelab-fa tables the three files above wrote from unbounded bigfloats:
-    # Arb balls decide that each of the 140 literals is its value rounded to its own digits.
+    # The certificate for the spacelab-fa tables the three files above, and gcrf_itrf_chain.mac, wrote
+    # from unbounded bigfloats: Arb balls decide that each of the 266 literals is its value rounded to
+    # its own digits.
     if have cc && pkg-config --exists flint 2>/dev/null; then
         tmp=$(mktemp -d)
         # shellcheck disable=SC2046 # pkg-config prints separate flags
         if cc -O2 fa_series_arb.c -o "$tmp/arb" $(pkg-config --cflags --libs flint) 2>"$tmp/cc.log" \
             && cert=$(macf fa_series_arb.mac | timeout 120 "$tmp/arb" 2>&1) \
-            && printf '%s' "$cert" | grep -q '^CERTIFIED 140 literals'; then
+            && printf '%s' "$cert" | grep -q '^CERTIFIED 266 literals'; then
             ok "arb fa_series_arb.c: $cert"
         else
             bad "arb fa_series_arb.c" "$(cat "$tmp/cc.log")${cert:-}"

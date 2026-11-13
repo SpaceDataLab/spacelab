@@ -11441,22 +11441,25 @@ The same claim for any derivation is `certified(name, literals, exact)` in `rust
 decides each literal against a bigfloat as `transcribed` does, and prints the unevaluated exact
 value in reverse Polish notation; `derivations/arb_balls.c` evaluates every such line verify.sh
 collects in Arb at 256 bits, 1 024 or 4 096 where that does not decide it, and fails on any literal
-that is not its value correctly rounded. Twenty-four derivations go through it — the diurnal
+that is not its value correctly rounded. Twenty-five derivations go through it — the diurnal
 aberration, the forward DCT, the zenith delay, HARDISP, the degree-70 field, the Adams and Radau IIA
 tableaux, SABA₂ and SABA₄ on their Legendre roots in radicals, the Earth's rotation rate, both MODIP
 grids, the VMF grid, GPT3 at its ten sites, the IERS relativity lines and the box-wing lift, the EDL
 entry equations through one RK4 step, Niell, GMF, VMF1 and VMF3 at three elevations, IAS15's nodes
 and conversion matrices, the IERS ocean and solid tide goldens, the H3 cell centres, the maneuver
-goldens, the binding defaults and the named constants: 736 literals, the closest at 0.995 of a half
-unit. A value defined
+goldens, the binding defaults, the named constants and the light-time down leg: 762 literals, the
+closest at 0.997 of a half unit. A value defined
 only as a root goes over as one: `arb_root(sym, f, x, lo, hi, value)` prints `f`, `f′` and a dyadic
 bracket, and `arb_balls.c` takes the root only if `f` changes sign across the bracket and the ball
 of `f′` over the whole bracket excludes zero, so the bracket holds exactly one root, which it then
 bisects to the working precision. IAS15's seven nonzero nodes are the roots of
 d⁷/dx⁷ [x⁸(x − 1)⁷] / x in 2⁻¹²⁰ brackets, and its c and d matrices are polynomials in them; the
-conjunction width 2√2 erfc⁻¹(10⁻⁶) and the 95 % normal quantile are roots of erfc and erf. Two
-tables stay on the bigfloat alone: the maneuver's position and velocity after twenty RK4 steps and
-the light-time down leg's four columns, which come out of iterations rather than closed forms.
+conjunction width 2√2 erfc⁻¹(10⁻⁶) and the 95 % normal quantile are roots of erfc and erf; the
+light-time down leg is a root in the emission eccentric anomaly, whose Kepler equation gives the
+emission time explicitly, so the fixed point in τ and Newton in E become one sign change. A value
+that an iteration builds goes over in shared steps: `arb_let(sym, e)` prints `ARBLET sym <rpn>`,
+evaluated once per precision and named by later lines, so the maneuver's twenty RK4 steps are 797
+lets rather than one tree whose size multiplies at every step. No generic table is left on the bigfloat alone.
 
 **Today: 2
 comparator-decided tests of 3 735** — name 2, file 0, fixture 0, doc 0; none of them Orekit's,

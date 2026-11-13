@@ -899,6 +899,31 @@ mod tests {
         }
     }
 
+    /// The L1 halo is the start of the validated halo enclosure in
+    /// `crates/spacelab-propagation/tests/fixtures/taylor_model_enclosures.txt` (Ф28.H), whose box
+    /// at the period certifies that this orbit closes to 1e-12. A seed or corrector change that
+    /// moves the orbit re-generates that fixture with `derivations/taylor_model_enclosures.jl`.
+    #[test]
+    fn the_l1_halo_is_the_one_the_enclosure_fixture_starts_from() {
+        let orbit = l1_halo(Cr3bp::EARTH_MOON);
+        let start = [
+            0.823_448_651_163_414_8,
+            0.0,
+            0.032_462_916_684_167_27,
+            0.0,
+            0.142_151_315_633_369_36,
+            0.0,
+        ];
+        let moved = (0..6)
+            .map(|i| (orbit.state[i] - start[i]).abs())
+            .fold((orbit.period - 2.749_936_415_198_593_7).abs(), f64::max);
+        std::println!("the halo is {moved:.2e} from the fixture's start and period");
+        assert!(
+            moved <= 1e-12,
+            "the halo moved {moved:.3e} from the fixture's start"
+        );
+    }
+
     /// Continuation traces a halo family of increasing out-of-plane amplitude, each member closing.
     #[test]
     fn halo_family_continues_by_amplitude() {

@@ -1,0 +1,102 @@
+/* The validated enclosures of taylor_model_enclosures.jl, checked (plans/17 Ф28.H).
+
+   The fixture holds, for three arcs, the initial state, the end time and a box [lo, hi] that
+   TaylorModels.jl says contains the exact state at that time. Every value is a double, written as
+   its IEEE-754 bit pattern, so this file reads the same doubles as the generator and the Rust
+   test, as exact rationals.
+
+   (1) kepler has a closed form. The initial state is an apsis, so the solution is Kepler's
+       equation from E = 0, solved here by Newton in 60-digit bfloat. The box must contain it (G3).
+       This checks the enclosure machinery itself, not only the arc.
+   (2) j2: the acceleration the generator and the test code is the gradient of
+       U = 1/r - J2 P2(z/r)/r^3, mu = R = 1 (G1).
+   (3) halo: the acceleration is the gradient of the CR3BP pseudo-potential
+       Omega = (x^2 + y^2)/2 + (1 - mu)/r1 + mu/r2, plus the Coriolis terms (2 vy, -2 vx, 0) (G1).
+   (4) j2 conserves h_z = x vy - y vx. h_z is bilinear, so its range over the box is the range over
+       the box's corners, and the initial h_z must lie in it (G4).
+
+   timeout 300 maxima --very-quiet -Q -b taylor_model_enclosures.mac                             */
+
+display2d : false$
+fpprec : 60$
+load("stringproc")$
+
+zero_if(ok) := if ok then 0 else 1$
+
+dbl(b) := block([s : floor(b / 2^63), e : mod(floor(b / 2^52), 2048), m : mod(b, 2^52)],
+  (-1)^s * (if e = 0 then m / 2^52 * 2^-1022 else (1 + m / 2^52) * 2^(e - 1023)))$
+
+fixture : "../crates/spacelab-propagation/tests/fixtures/taylor_model_enclosures.txt"$
+read_cases(path) := block([s : openr(path), line, words, cases : [], cur : false],
+  while (line : readline(s)) # false do
+    if slength(line) > 0 and charat(line, 1) # "#" then (
+      words : split(line, " ", false),
+      if first(words) = "case" then (
+        if cur # false then cases : endcons(cur, cases),
+        cur : [second(words)])
+      else cur : endcons(map(lambda([w], dbl(parse_string(w))), rest(words)), cur)),
+  if cur # false then cases : endcons(cur, cases),
+  close(s),
+  cases)$
+cases : read_cases(fixture)$
+case_of(name) := first(sublist(cases, lambda([c], first(c) = name)))$
+/* [name, ic, [t1], lo, hi] */
+
+/* (1) Kepler's closed form inside the kepler box. */
+kc : case_of("kepler")$
+[ic, t1, lo, hi] : [kc[2], kc[3][1], kc[4], kc[5]]$
+r0 : ic[1]$ v0 : ic[5]$
+print("the kepler start is an apsis on the x axis:",
+      zero_if(ic[2] = 0 and ic[3] = 0 and ic[4] = 0 and ic[6] = 0 and r0 > 0 and v0 > 0))$
+a : 1 / (2 / r0 - v0^2)$
+ecc : 1 - r0 / a$
+print("and it is the periapsis of an ellipse, 0 < e < 1:", zero_if(a > 0 and ecc > 0 and ecc < 1))$
+n : bfloat(a^(-3/2))$
+mean : n * bfloat(t1)$
+ea : mean$
+for k : 1 thru 60 do ea : ea - (ea - bfloat(ecc) * sin(ea) - mean) / (1 - bfloat(ecc) * cos(ea))$
+print("Newton on Kepler's equation settled, residual",
+      bfloat(ea - bfloat(ecc) * sin(ea) - mean))$
+den : 1 - bfloat(ecc) * cos(ea)$
+exact : [bfloat(a) * (cos(ea) - bfloat(ecc)), bfloat(a) * sqrt(bfloat(1 - ecc^2)) * sin(ea), 0,
+         -bfloat(a) * n * sin(ea) / den, bfloat(a) * n * sqrt(bfloat(1 - ecc^2)) * cos(ea) / den, 0]$
+inside(v, l, h) := is(bfloat(l) <= v and v <= bfloat(h))$
+print("where in its box each exact component lies, 0 at lo and 1 at hi:",
+      makelist(if hi[i] = lo[i] then "point" else float((exact[i] - bfloat(lo[i])) / bfloat(hi[i] - lo[i])),
+               i, 1, 6))$
+print("the kepler box contains the exact solution:",
+      zero_if(every(lambda([i], inside(exact[i], lo[i], hi[i])), makelist(i, i, 1, 6))))$
+
+/* (2) The J2 field the code writes is the gradient of its potential. */
+r : sqrt(x^2 + y^2 + z^2)$
+u : 1 / r - j2 * (3 * (z / r)^2 - 1) / (2 * r^3)$
+s : 3 / 2 * j2 / r^2$
+q : 5 * z^2 / r^2$
+coded : [-x / r^3 * (1 + s * (1 - q)), -y / r^3 * (1 + s * (1 - q)), -z / r^3 * (1 + s * (3 - q))]$
+print("the j2 field is grad U:",
+      zero_if(every(lambda([i], is(ratsimp(radcan(diff(u, [x, y, z][i]) - coded[i])) = 0)),
+                    [1, 2, 3])))$
+
+/* (3) The CR3BP field the code writes is grad Omega plus the Coriolis terms. */
+r1 : sqrt((x + mu)^2 + y^2 + z^2)$
+r2 : sqrt((x - 1 + mu)^2 + y^2 + z^2)$
+omega : (x^2 + y^2) / 2 + (1 - mu) / r1 + mu / r2$
+a1 : (1 - mu) / r1^3$
+a2 : mu / r2^3$
+coded : [x + 2 * vy - a1 * (x + mu) - a2 * (x - 1 + mu), y - 2 * vx - a1 * y - a2 * y,
+         -a1 * z - a2 * z]$
+coriolis : [2 * vy, -2 * vx, 0]$
+print("the halo field is grad Omega plus Coriolis:",
+      zero_if(every(lambda([i],
+                      is(ratsimp(radcan(diff(omega, [x, y, z][i]) + coriolis[i] - coded[i])) = 0)),
+                    [1, 2, 3])))$
+
+/* (4) h_z over the J2 box. */
+jc : case_of("j2")$
+[ic, lo, hi] : [jc[2], jc[4], jc[5]]$
+hz(p) := p[1] * p[5] - p[2] * p[4]$
+corners : makelist(makelist(if bit_and(k, 2^(i - 1)) # 0 then hi[i] else lo[i], i, 1, 6), k, 0, 63)$
+hz_box : map(hz, corners)$
+print("h_z at the start and the box's h_z range:", float(hz(ic)), float(lmin(hz_box)),
+      float(lmax(hz_box)))$
+print("the j2 box conserves h_z:", zero_if(is(lmin(hz_box) <= hz(ic) and hz(ic) <= lmax(hz_box))))$

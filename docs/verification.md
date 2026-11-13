@@ -604,6 +604,7 @@ convergence order + Hamiltonian conservation + cross-checks against independentl
 | Attitude RKMK4 (SO(3)) | Runge–Kutta–Munthe-Kaas; so(3) exponential in `derivations/lie_so3.mac` | self-consistency (invariants) | ‖L‖/energy < 1e-6; orthogonality < 1e-13 | tests/attitude.rs |
 | STM (two-body) | variational-equation definition; Hamiltonian symplecticity | self-consistency (symplectic/Liouville) + FD | ΦᵀJΦ=J < 1e-8; detΦ=1 < 1e-8; FD < 1e-5 | tests/stm.rs |
 | STT (2nd-order tensor) | Park & Scheeres 2006 | finite-difference of STM; Gauss–Hermite covariance | cov < 1e-8, mean < 1e-7 | tests/stt.rs |
+| DOP853, Taylor, RKN12(10), IAS15 against the exact flow | validated Taylor-model enclosures (Benet et al. 2019), §2.7 | a certified box around the exact state at the end of a Kepler, a J2 and a halo arc; the Kepler box against the closed form in `derivations/taylor_model_enclosures.mac` | error ≤ 5.1e-14 certified; < 2e-13 | tests/taylor_model_enclosures.rs |
 
 ### Forces — gravity, third-body, SRP, relativity, radiation, drag coefficient
 
@@ -1084,6 +1085,51 @@ not a result of the model, and it does not become a §10 row until Ф15.D and Ф
 corpus with a split named in advance. The one claim the form does make on its own is a negative one:
 it carries no effective-mass profile and no multi-source collation or weighting, which is what keeps it
 clear of US 10 641 925 B2's claims (`docs/provenance.md`).
+
+### 2.7 Every integrator inside a validated enclosure of the exact flow (Ф28.H)
+
+The integrator rows above compare an integrator with another integrator, or with a closed form that
+exists only for two bodies. A validated integrator gives a third kind of reference: a box that
+contains the exact solution, with a proof. `derivations/taylor_model_enclosures.jl` runs
+TaylorModels.jl 0.13.1 with IntervalArithmetic.jl 1.0.14 on Julia 1.13.1 (Benet, Forets, Sanders &
+Schilling 2019). Order 25 in time and order 1 in the initial box give these enclosures:
+
+| Arc | Dimensionless system | End time | Steps | Widest component |
+|---|---|---|---|---|
+| kepler | two-body, μ = 1, periapsis at e = 0.1 | 2π, one period | 22 | 6.8e-14 |
+| j2 | two-body + J2, μ = R = 1, r = 1.1, 51.6° | 7.25, about one period | 19 | 8.7e-14 |
+| halo | Earth–Moon CR3BP, `periodic::richardson_halo(EARTH_MOON, 0, 0.2, true)` | its period | 24 | 2.8e-14 |
+
+TaylorModels.jl adds its steps in floating point, so the script carries the time as a seventh state
+and refuses an arc that does not end exactly at the requested time. It also refuses the versions
+before F52's two fixes. The packages are not a dependency of the repository. The script writes
+`crates/spacelab-propagation/tests/fixtures/taylor_model_enclosures.txt`, with each double as its
+bit pattern, so the Rust test and Maxima read the same numbers.
+
+`derivations/taylor_model_enclosures.mac` checks the fixture independently, in `derivations/verify.sh`.
+Kepler's equation, solved by Newton at 60 digits, gives the exact state at 2π. Each component lies
+inside the box: at 0.48, 0.59, 0.47 and 0.50 of the width, and z and v_z are exactly zero. The J2
+field and the CR3BP field that the script and the test code are the gradients of their potentials,
+plus the Coriolis term for the CR3BP. The J2 box contains the initial h_z = x v_y − y v_x: h_z is
+bilinear, so its range over the box is the range over the 64 corners.
+
+For a computed state x, `max(|x − lo|, |x − hi|)` is a certified upper bound on the true error.
+`tests/taylor_model_enclosures.rs` measures it:
+
+| Arc | DOP853 | Taylor | RKN12(10) | IAS15 | Test bound |
+|---|---|---|---|---|---|
+| kepler | 5.0e-14 | 3.9e-14 | 3.7e-14 | 3.7e-14 | 2e-13 |
+| j2 | 5.1e-14 | 4.4e-14 | 4.5e-14 | 4.4e-14 | 2e-13 |
+| halo | 3.5e-14 | 3.4e-14 | — | — | 1.5e-13 |
+
+Each measured bound is at most 1.3 times the width of its box, so these runs reach the precision
+of the reference itself. The test bounds are 3 to 4 times the measured values. RKN12(10) and IAS15 take an
+acceleration of position only, so they cannot integrate the CR3BP with its Coriolis term.
+
+The halo box also certifies the corrector. The initial state lies within 9.8e-13 of the box at the
+period, so the orbit `richardson_halo` returns closes to 9.8e-13. The corrector accepts at 1e-11.
+`periodic::tests::the_l1_halo_is_the_one_the_enclosure_fixture_starts_from` pins the start, so a
+change to the seed or the corrector shows that the fixture must be generated again.
 
 ---
 

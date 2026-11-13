@@ -1,0 +1,222 @@
+/* `crates/spacelab-elements`'s Brouwer-Lyddane model (`brouwer_lyddane.rs`) from the zonal
+   Hamiltonian, in Delaunay variables (l, g, h, L, G, H) with mu = Re = 1 (plans/17 Ф17.Q).
+
+     H = -1/(2 a) + J2 H2 + J3 H3 + J4 H4 + J5 H5,   Hn = Pn(sin i sin(f + g))/r^(n + 1),
+
+   the zonal potential U = (1/r)(1 - sum Jn Pn(sin phi)/r^n) with H = v^2/2 - U. Every shipped
+   expression is read from the Rust source, its decimal literals as exact rationals, and mapped
+   to these variables by the module's own definitions (yp2 = J2/(2 a^2 eta^4), ...); the
+   checks are symbolic at symbolic a, e, cos i, g and f.
+
+     (1) secular: W1 below solves the homological equation n Dl(W1) = H2 - K1, K1 = <H2>_l; the
+         mean Hamiltonian to second order is K1 J2 + (J2^2/2) <<{H2 + K1; W1}>_l>_g
+         + J4 <<H4>_l>_g (Lie-Deprit). Its rates minus the shipped dsl, dsg, dsh are 0.
+     (2) short period: the six shipped terms d2a, d2e, d2i, e d2l, sin i d2h, d2z are the
+         brackets J2 {y; W1}, so the osculating elements obey Hamilton's equations to first order
+         in J2.
+     (3) long period: the generator V solves J2 DG(K1) Dg(V) = P, P the g-dependent part of the
+         averaged J2^2, J3, J4 and J5 Hamiltonian; the shipped coefficients vle1 ... vls3 are the
+         brackets {y; V}, each J separately, with Phipps' T2 standing for 1/(1 - 5 cos^2 i).
+     (4) conservation: V is free of l and h, so it keeps L and G cos i, and every long-period
+         d1i is -(e cos i/(eta^2 sin i)) d1e: vli1, vli2, vli3 against vle1, vle2, vle3.
+
+   Orekit's BLModel, which this module otherwise follows, fails (2) in d2e and e d2l and (4) in
+   vli1 and vli3.
+
+   timeout 600 maxima --very-quiet -Q -b brouwer_lyddane.mac                                       */
+
+display2d : false$
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+src : "../crates/spacelab-elements/src/brouwer_lyddane.rs"$
+assume(e > 0, e < 1, a > 0, c > -1, c < 1, et > 0)$
+
+/* ---- reading the shipped expressions ------------------------------------------------------------ */
+/* The text of `let NAME = ...;` with whitespace and `self.` dropped, up to its semicolon. */
+rust_let(path, name) := block([s : openr(path), line, head : concat("let ", name, " ="), acc : false, at,
+                               done : false],
+  while not done and (line : readline(s)) # false do (
+    if acc = false then (at : ssearch(head, line),
+                         if at # false and (slength(line) < at + slength(head)
+                                            or charat(line, at + slength(head)) = " ")
+                         then acc : substring(line, at + slength(head)))
+    else acc : concat(acc, line),
+    if acc # false and ssearch(";", acc) # false then done : true),
+  close(s),
+  if acc = false then error("rust_let: no", name, "in", path),
+  ssubst("", "self.", ssubst("", " ", substring(acc, 1, ssearch(";", acc)))))$
+is_ident_char(ch) := alphacharp(ch) or digitcharp(ch) or ch = "_"$
+/* Every decimal literal as its exact rational, so that parse_string reads no float. */
+exact_literals(t) := block([out : "", k : 1, m : slength(t), j, ch],
+  while k <= m do (
+    ch : charat(t, k),
+    if digitcharp(ch) and (k = 1 or not is_ident_char(charat(t, k - 1))) then (
+      j : k,
+      while j <= m and (digitcharp(charat(t, j)) or charat(t, j) = "." or charat(t, j) = "_") do j : j + 1,
+      if j <= m and charat(t, j) = "e" then (j : j + 1, if charat(t, j) = "-" or charat(t, j) = "+" then j : j + 1,
+                                            while j <= m and digitcharp(charat(t, j)) do j : j + 1),
+      out : concat(out, "(", string(rust_rational(substring(t, k, j))), ")"),
+      k : j)
+    else (out : concat(out, ch), k : k + 1)),
+  out)$
+rust_expr(name) := parse_string(exact_literals(rust_let(src, name)))$
+/* `let (sX, cX) = libm::sincos(ARG);` as [sX = sin(ARG), cX = cos(ARG)]. */
+rust_sincos(sname) := block([s : openr(src), line, head : concat("let (", sname, ", "), at, out : false, t, cn, k],
+  while out = false and (line : readline(s)) # false do (
+    at : ssearch(head, line),
+    if at # false then (
+      t : ssubst("", " ", substring(line, at + 5)),
+      cn : substring(t, ssearch(",", t) + 1, ssearch(")", t)),
+      k : slength(t), while charat(t, k) # ")" do k : k - 1,
+      out : parse_string(exact_literals(substring(t, ssearch("sincos(", t) + 7, k))),
+      out : [parse_string(sname) = sin(out), parse_string(cn) = cos(out)])),
+  close(s), out)$
+/* The bindings of `names`, each substituted into the later ones. */
+bind(names, pre) := block([defs : []],
+  for nm in names do defs : endcons(parse_string(nm) = subst(reverse(defs), subst(pre, rust_expr(nm))), defs),
+  reverse(defs))$
+in_source(text) := block([s : openr(src), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+
+/* The module's notation in these variables: et is eta = sqrt(1 - e^2), kept as a symbol so that
+   its powers cancel; q = Re/a = 1/a. */
+gradef(et, e, -e/et)$
+must(every(in_source, ["let yp2 = -0.5 * c[2] * ql / nl;", "let yp3 = c[3] * ql / nl;",
+                       "let yp4 = 0.375 * c[4] * ql / nl;", "let yp5 = c[5] * ql / nl;",
+                       "let mut ql = q * q;", "let mut nl = n2 * n2;", "ql *= q;", "nl *= n2;",
+                       "let n0 = libm::sqrt(mu / app) / app;", "let t2v = t2(ci);"]),
+     "(0) holds: yp_n = C_n0 (Re/a)^n / eta^(2n), times -1/2 and 3/8 at n = 2 and 4; n0 = sqrt(mu/a^3)")$
+yp2m : J2/(2*a^2*et^4)$
+model : [epp = e, epp2 = e^2, n2 = et^2, n = et, n3 = et^3, t8 = et + 1/(1 + et), app = a,
+         ci = c, ci2 = c^2, si = sqrt(1 - c^2), one_m_ci2 = 1 - c^2, ci2x3m1 = 3*c^2 - 1, ci2x5m1 = 5*c^2 - 1,
+         yp2 = yp2m, yp22 = yp2m^2, yp4 = -(3/8)*J4/(a^4*et^8),
+         fs12 = -J3/(a^3*et^6)/yp2m, fs13 = 10*(-(3/8)*J4/(a^4*et^8))/(3*yp2m), fs14 = -J5/(a^5*et^10)/yp2m,
+         t2v = 1/(1 - 5*c^2)]$
+shipped(nm, defs) := subst(model, subst(defs, parse_string(nm)))$
+eta1(X) := ratsubst(1 - e^2, et^2, X)$
+vanishes(X) := block([Y : ratsimp(X)],
+  Y : ratsubst(1 - cos(g)^2, sin(g)^2, ratsubst(1 - cos(f)^2, sin(f)^2, Y)),
+  is(ratsimp(eta1(Y)) = 0))$
+
+/* ---- the Lie operators --------------------------------------------------------------------------- */
+/* A function of (a, e, c, f, phi, g), with phi = f - l the equation of the centre, as a function of
+   the Delaunay variables: L = sqrt(a), G = L eta, H = G c. */
+s2 : 1 - c^2$
+AR : (1 + e*cos(f))/et^2$
+n : a^(-3/2)$
+fl : AR^2*et$
+fe : sin(f)*(2 + e*cos(f))/et^2$
+Dl(X) := diff(X, f)*fl + diff(X, phi)*(fl - 1)$
+De(X) := diff(X, e) + (diff(X, f) + diff(X, phi))*fe$
+DL(X) := 2*sqrt(a)*diff(X, a) + et^2/(e*sqrt(a))*De(X)$
+DG(X) := -et/(e*sqrt(a))*De(X) - c/(sqrt(a)*et)*diff(X, c)$
+DH(X) := 1/(sqrt(a)*et)*diff(X, c)$
+Dg(X) := diff(X, g)$
+PB(A, B) := Dl(A)*DL(B) - DL(A)*Dl(B) + Dg(A)*DG(B) - DG(A)*Dg(B)$
+P2(x) := (3*x^2 - 1)/2$  P3(x) := (5*x^3 - 3*x)/2$
+P4(x) := (35*x^4 - 30*x^2 + 3)/8$  P5(x) := (63*x^5 - 70*x^3 + 15*x)/8$
+Hn(k, Pk) := (AR/a)^(k + 1)*Pk(sqrt(s2)*sin(f + g))$
+H2 : Hn(2, P2)$
+K1 : (3*s2/4 - 1/2)/(a^3*et^3)$
+C : (3*s2/4 - 1/2)/(n*a^3*et^3)$
+W1 : C*(phi + e*sin(f)) - (3*s2/4)/(n*a^3*et^3)*(sin(2*f + 2*g)/2 + (e/2)*(sin(3*f + 2*g)/3 + sin(f + 2*g)))$
+
+/* One form for a trigonometric polynomial in f and g. */
+canon(X) := block([N],
+  N : num(ratsimp(X)),
+  N : ratexpand(trigexpand(trigexpand(ratexpand(N)))),
+  N : ratsubst(1 - cos(g)^2, sin(g)^2, ratsubst(1 - cos(f)^2, sin(f)^2, N)),
+  ratsimp(eta1(N)))$
+/* The l-average, dl = et^3/(1 + e cos f)^2 df. An integrand is P0(cos f) + sin(f) P1(cos f) once
+   sin^2 = 1 - cos^2; the second part is odd in f and averages to 0. The first, in u = 1 + e cos f,
+   is sum c_k u^k, and <u^k>_l = et^3 <u^(k - 2)>_f: 1 at k = 0, et^2 at k = 1, a polynomial
+   average above. A phi-linear term is integrated by parts, <phi Dl(Z)> = -<(fl - 1) Z>. */
+Mk(k) := if k = 0 then 1 else if k = 1 then et^2
+  else eta1(ratsimp(et^3*integrate(expand(trigreduce(expand((1 + e*cos(f))^(k - 2)))), f, 0, 2*%pi)/(2*%pi)))$
+lav(Y) := block([Y1, Y0, P, d],
+  Y1 : ratexpand(ratsubst(1 - cos(f)^2, sin(f)^2, expand(trigexpand(expand(trigexpand(Y)))))),
+  if hipow(Y1, sin(f)) > 1 then error("lav: sin f above the first power"),
+  Y0 : ratsubst(0, sin(f), Y1),
+  P : ratexpand(ratsubst((u - 1)/e, cos(f), Y0)),
+  if not freeof(f, P) then error("lav: f left after the substitution"),
+  if lopow(P, u) < 0 then error("lav: a negative power of 1 + e cos f"),
+  d : hipow(P, u),
+  eta1(ratsimp(sum(ratsimp(coeff(P, u, k))*Mk(k), k, 0, d))))$
+gav(Y) := ratsimp(integrate(expand(trigreduce(Y)), g, 0, 2*%pi)/(2*%pi))$
+
+/* ---- (1) secular -------------------------------------------------------------------------------- */
+must(vanishes(canon(n*Dl(W1) - (H2 - K1))) and vanishes(lav(H2) - K1),
+     "(1a) holds: n Dl(W1) = H2 - K1 and K1 = <H2>_l, identically")$
+X : PB(H2 + K1, W1)$
+must(vanishes(coeff(expand(X), phi, 1) - (Dl(H2)*DL(C) + Dg(H2)*DG(C))),
+     "(1b) holds: phi enters {H2 + K1; W1} only through Dl(H2) DL(C) + Dg(H2) DG(C)")$
+/* <{H2 + K1; W1}>_l with g free: Dg(H2) = n Dl(Dg(W1)) for the by-parts term. */
+Xl : ratsimp(lav(coeff(expand(X), phi, 0)) - DL(C)*lav(expand(H2*(fl - 1)))
+             - DG(C)*lav(expand(n*Dg(W1)*(fl - 1))))$
+K2 : gav(Xl)$
+H4l : lav(expand(Hn(4, P4)))$
+K4 : gav(H4l)$
+K : -1/(2*a) + J2*K1 + J2^2/2*K2 + J4*K4$
+DLs(X) := 2*sqrt(a)*diff(X, a) + et^2/(e*sqrt(a))*diff(X, e)$
+DGs(X) := -et/(e*sqrt(a))*diff(X, e) - c/(sqrt(a)*et)*diff(X, c)$
+DHs(X) := diff(X, c)/(sqrt(a)*et)$
+rates : bind(["dsl", "dsg", "dsh"], [])$
+n0 : a^(-3/2)$
+must(vanishes(DLs(K)/n0 - 1 - shipped("dsl", rates)) and vanishes(DGs(K)/n0 - shipped("dsg", rates))
+     and vanishes(DHs(K)/n0 - shipped("dsh", rates)),
+     "(1) holds: the shipped dsl, dsg, dsh are the rates of the second-order mean Hamiltonian, J2, J2^2 and J4 parts")$
+
+/* ---- (2) short period ----------------------------------------------------------------------------- */
+trig : append(rust_sincos("sfpp"), rust_sincos("s2gf"), rust_sincos("s2g2f"), rust_sincos("s2g3f"))$
+sp : bind(["eppcfpp", "eppcfpp_p1", "eppcfpp_p3", "eppcfpp_p1_3", "g2", "eppc2gf", "epps2gf", "eppc2g3f",
+           "epps2g3f", "w17", "w20", "w21", "w22", "d2a", "d2e", "d2i", "eppd2l", "sippd2h", "d2z"],
+          trig)$
+spmap : [gpp = g, fpp = f, lpp = f - phi]$
+W : J2*W1$
+sinI : sqrt(1 - c^2)$
+lie2 : [d2a = -2*sqrt(a)*Dl(W),
+        d2e = -(et^2/(e*sqrt(a))*Dl(W) - et/(e*sqrt(a))*Dg(W)),
+        d2i = -(c/(sqrt(a)*et)*Dg(W))/sinI,
+        eppd2l = e*DL(W),
+        sippd2h = sinI*DH(W),
+        d2z = DL(W) + DG(W) + DH(W)]$
+must(every(lambda([q], vanishes(canon(subst(spmap, shipped(string(lhs(q)), sp)) - rhs(q)))), lie2),
+     "(2) holds: d2a, d2e, d2i, e d2l, sin i d2h and d2z are J2 {y; W1}, identically")$
+
+/* ---- (3) long period ------------------------------------------------------------------------------ */
+P : ratsimp(trigreduce(ratsimp(J2^2/2*(Xl - K2) + J4*(H4l - K4) + J3*lav(expand(Hn(3, P3)))
+                               + J5*lav(expand(Hn(5, P5))))))$
+DgV : ratsimp(P/(J2*DG(K1)))$
+V : integrate(expand(trigreduce(DgV)), g)$
+must(vanishes(trigreduce(diff(V, g) - DgV)) and vanishes(gav(V)), "(3a) holds: Dg(V) = P/(J2 DG(K1)), V of zero mean in g")$
+lie3 : [d1e = et/(e*sqrt(a))*Dg(V), d1i = -c/(sqrt(a)*et*sinI)*Dg(V), eppd1l = e*DLs(V),
+        sippd1h = sinI*DHs(V), d1z = DLs(V) + DGs(V) + DHs(V)]$
+lp : bind(["ci2xt2", "ca", "cb", "cc", "cd", "ce", "cf", "p5p", "p5p2", "p5p4", "p5p10", "e2x3p4", "ci_o1pci",
+           "q1", "q2", "q5", "p2", "p3", "kf", "p4", "p5", "vle1", "vle2", "vle3", "vli1", "vli2", "vli3",
+           "vll2", "vlh1i", "vlh2i", "vlh3i", "vls1", "vls2", "vls3"], [])$
+cv(nm) := shipped(nm, lp)$
+must(in_source("let d1e = self.vle1 * c2gpp + self.vle2 * sgpp + self.vle3 * s3gpp;")
+     and in_source("let mut d1i = self.vli2 * sgpp + self.vli3 * s3gpp;")
+     and in_source("d1i += self.vli1 * c2gpp;")
+     and in_source("let eppd1l = self.n * (self.vle1 * s2gpp - self.vll2 * cgpp - self.vle3 * c3gpp);")
+     and in_source("let sippd1h = self.vlh1i * s2gpp + self.vlh2i * cgpp + self.vlh3i * c3gpp;")
+     and in_source("let d1z = self.vls1 * s2gpp + self.vls2 * cgpp + self.vls3 * c3gpp;"),
+     "(3b) holds: the long-period terms are the coefficients times cos 2g, sin g, sin 3g (e, i) and sin 2g, cos g, cos 3g (e l, sin i h, z)")$
+code3 : [d1e = cv("vle1")*cos(2*g) + cv("vle2")*sin(g) + cv("vle3")*sin(3*g),
+         d1i = cv("vli1")*cos(2*g) + cv("vli2")*sin(g) + cv("vli3")*sin(3*g),
+         eppd1l = et*(cv("vle1")*sin(2*g) - cv("vll2")*cos(g) - cv("vle3")*cos(3*g)),
+         sippd1h = cv("vlh1i")*sin(2*g) + cv("vlh2i")*cos(g) + cv("vlh3i")*cos(3*g),
+         d1z = cv("vls1")*sin(2*g) + cv("vls2")*cos(g) + cv("vls3")*cos(3*g)]$
+/* each J alone: J2 with J3 = J4 = J5 = 0, the others as the coefficient of their J */
+jpart(X, k) := if k = J2 then subst([J3 = 0, J4 = 0, J5 = 0], X) else ratcoef(ratexpand(X), k, 1)$
+must(every(lambda([k], every(lambda([q],
+       vanishes(trigreduce(jpart(rhs(q), k) - jpart(assoc(lhs(q), code3), k)))), lie3)), [J2, J3, J4, J5]),
+     "(3) holds: vle1 ... vls3 are {y; V} for J2, J3, J4 and J5 separately, T2 standing for 1/(1 - 5 cos^2 i)")$
+
+/* ---- (4) conservation ------------------------------------------------------------------------------ */
+tilt : -c*e/(et^2*sinI)$
+must(vanishes(cv("vli1") - tilt*cv("vle1")) and vanishes(cv("vli2") - tilt*cv("vle2"))
+     and vanishes(cv("vli3") - tilt*cv("vle3")),
+     "(4) holds: every long-period d1i is -(e cos i/(eta^2 sin i)) d1e, so G cos i is kept")$
+print("DONE")$

@@ -1,18 +1,16 @@
 /* The J2 secular rates both zonal mean-element propagators are built on, derived and subtracted.
 
    `spacelab-elements::brouwer_lyddane` carries Brouwer (1959) in Lyddane (1963) variables and
-   `::eckstein_hechler` carries Eckstein-Hechler in circular elements. Both are ports of Orekit and
-   both are validated against Orekit numerically. That is a *port* check -- it says the two agree,
-   not that either is right. This is the theory check on the part that dominates every answer they
-   give: the first-order J2 secular rates.
+   `::eckstein_hechler` carries Eckstein-Hechler in circular elements. An agreement with another
+   implementation says the two agree, not that either is right. This is the theory check on the
+   part that dominates every answer they give: the first-order J2 secular rates.
 
    Route, with no textbook result quoted: average the J2 disturbing function over the mean anomaly
    (a definite integral the CAS evaluates), apply Lagrange's planetary equations, then subtract each
    propagator's own first-order expressions in its own notation and variables.
 
-   Out of scope, and said so rather than left to be assumed: the J2^2, J4, J5 and J6 terms are
-   second order and need Brouwer's von Zeipel transformation, not an average. They stay covered by
-   the Orekit comparison until someone does that derivation.                                        */
+   Out of scope here: the J2^2, J4, J5 and J6 terms are second order and need a normalisation, not
+   an average. `brouwer_lyddane.mac` derives Brouwer-Lyddane's, with its periodic terms.          */
 
 assume(e > 0, e < 1, a > 0, p > 0, si > 0)$
 

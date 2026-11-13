@@ -13,6 +13,18 @@ root-mean-square distance over them.
 
 | Code | Version | Quantity | Unit | n | max | RMS | Test |
 |---|---|---|---|--:|--:|--:|---|
+| Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, position | m | 9 | 3.400e+04 | 2.390e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, velocity | m/s | 9 | 2.940e+01 | 1.741e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane LEO with M2 = 1e-14 rad/s2, 1 day, position | m | 9 | 3.400e+04 | 2.390e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::drag_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane LEO with M2 = 1e-14 rad/s2, 1 day, velocity | m/s | 9 | 2.940e+01 | 1.741e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::drag_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane e = 0.3, 8 weeks, position | m | 8 | 2.244e+05 | 1.338e+05 | `crates/spacelab-elements/src/brouwer_lyddane.rs::eccentric_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane e = 0.3, 8 weeks, velocity | m/s | 8 | 3.492e+02 | 2.091e+02 | `crates/spacelab-elements/src/brouwer_lyddane.rs::eccentric_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane mean a, LEO | m | 1 | 1.444e+01 | 1.444e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane mean e, LEO | 1 | 1 | 1.756e-03 | 1.756e-03 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane mean (i, w, raan, M), LEO | rad | 4 | 4.194e-02 | 2.965e-02 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane mean a, e = 0.3 | m | 1 | 1.754e+01 | 1.754e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane mean e, e = 0.3 | 1 | 1 | 5.629e-04 | 5.629e-04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
+| Orekit | 13.1.7 | Brouwer-Lyddane mean (i, w, raan, M), e = 0.3 | rad | 4 | 5.928e-04 | 4.096e-04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
 | pyerfa | not recorded | TAI−UTC on and around every leap second | s | 299 | 0.000e+00 | 0.000e+00 | `crates/spacelab-fa/tests/delta_at_oracle.rs::delta_at_agrees_with_pyerfa_on_every_transition` |
 | Orekit | 13.1.7 | GMST82, IERS_1996, epochs 2000-2029 outside leap seconds | rad | 10 | 3.868e-12 | 1.797e-12 | `crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_distance_to_orekit_outside_leap_seconds` |
 | Orekit | 13.1.7 | GMST82 inside a leap second, at the instant | rad | 2 | 1.213e-12 | 1.052e-12 | `crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_distance_to_orekit_inside_a_leap_second` |

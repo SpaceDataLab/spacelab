@@ -633,6 +633,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima earth_rotation_rate.mac" "expected 3 checks to hold, found $holds"
     fi
 
+    out=$(macf brouwer_lyddane.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9][ab]?\) holds:')
+    if [ "$holds" -eq 9 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima brouwer_lyddane.mac: the J2^2/J4 secular rates by Lie-Deprit, the short-period terms the brackets of a generator solving the homological equation, the long-period terms those of the g-generator, G cos i kept"
+    else
+        bad "maxima brouwer_lyddane.mac" "expected 9 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_down_leg.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
@@ -1160,6 +1168,7 @@ if have maxima; then
     mac_zeros wgs84_geodesy.mac 13 "WGS 84 derived constants and both geodetic maps"
     mac_zeros keplerian_elements.mac 31 "element <-> state maps invert each other on every branch; Kepler's equation"
     mac_zeros brouwer_m2_phipps.mac 7 "Phipps' along-track drag drift of a, e and the mean anomaly from Kepler's third law"
+    mac_zeros zonal_secular.mac 6 "the first-order J2 secular rates of both zonal mean-element propagators from Lagrange's equations"
     mac_zeros design_orbit.mac 5 "repeat-ground-track and sun-synchronous conditions, critical inclination"
     mac_zeros kepler_universal.mac 9 "universal-variable Kepler equation and f gdot - fdot g = 1"
     mac_zeros lifetime_exponential_decay.mac 5 "the exact erfi decay epoch solves the circular decay ODE"

@@ -2,10 +2,10 @@
 //!
 //! Brouwer's 1959 artificial-satellite theory in Lyddane's 1963 singularity-free variables, with
 //! Warren Phipps' 1992 `T2` approximation removing the critical-inclination (`i ≈ 63.4°`) singularity.
-//! A faithful port of Orekit's `BrouwerLyddanePropagator.BLModel` (secular rates + long- and
-//! short-period corrections), validated against Orekit's own propagator on two orbits —
-//! `tools/orekit-oracle/BlOracle.java` emits both, along with the mean elements Orekit's own
-//! `computeMeanOrbit` converges to.
+//! The code follows the layout and notation of Orekit's `BrouwerLyddanePropagator.BLModel`
+//! (secular rates + long- and short-period corrections). Four of its terms are not Orekit's, and
+//! neither is the inclination's assembly: the derivation below decides each, and Orekit's terms
+//! break the equations of motion they approximate (see *What checks the theory*).
 //!
 //! # Model
 //!
@@ -17,28 +17,39 @@
 //! The reported osculating Cartesian state is the standard Keplerian conversion of the osculating
 //! elements — the same state Orekit's propagator returns (its `KeplerianOrbit` carries element rates
 //! for the state-transition matrix, but the velocity `getPVCoordinates` reports is the Keplerian
-//! velocity of the osculating ellipse). This port matches Orekit to 4.1×10⁻⁶ m in position and
-//! 4.2×10⁻⁹ m/s in velocity across a 24 h propagation of a near-circular LEO, and to 2.2×10⁻⁴ m
-//! and 3.4×10⁻⁷ m/s across eight weeks at `e = 0.3`.
+//! velocity of the osculating ellipse). Against an integration of the J2–J5 equations of motion it
+//! stays within 366 m over three revolutions of a near-circular LEO and 2.2 km at `e = 0.3`: the
+//! along-track drift of a mean motion whose `a` lacks the short-period J2², J3 and J4 terms the
+//! theory leaves out.
 //!
-//! Construction is fallible. The fixed point does not converge for a near-equatorial, near-circular
-//! orbit — Orekit refuses the same inputs — so it is reported as [`BrouwerLyddaneError`] rather than
-//! returned as a set of mean elements the theory never reached.
+//! Construction is fallible. The fixed point does not converge within about 8° of retrograde
+//! equatorial, where Lyddane's `sin(i/2)` node variables divide by `cos(i/2)`, so that is reported
+//! as [`BrouwerLyddaneError`] rather than returned as a set of mean elements the theory never
+//! reached.
 //!
 //! The un-normalized zonal coefficients are `C_{n,0} = −J_n`: `c20 ≈ −1.0826×10⁻³` for Earth.
 //!
-//! # What checks the theory, as distinct from the port
+//! # What checks the theory
 //!
-//! The Orekit comparison says the two implementations agree; it cannot say either is right.
-//! `derivations/zonal_secular.mac` closes that gap for the part of the model that dominates every
-//! answer it gives. It averages the J2 disturbing function over the mean anomaly — a definite
-//! integral the CAS evaluates, not a result quoted from a textbook — applies Lagrange's planetary
-//! equations, and subtracts this module's own first-order `dsl`, `dsg` and `dsh` in their own
-//! `yp2`/`η`/`cos i` notation. All three residuals are **identically zero**, at symbolic `a`, `e`
-//! and `i`.
+//! An agreement with another implementation cannot say either is right. The derivations decide,
+//! in Delaunay variables from the zonal Hamiltonian, each against this module's own expressions
+//! read from the source:
 //!
-//! The J2², J4 and J5 terms are second order, need Brouwer's von Zeipel transformation rather than
-//! an average, and are **not** derived there. Those stay on the Orekit comparison.
+//! * `derivations/zonal_secular.mac`: the first-order J2 rates `dsl`, `dsg`, `dsh`, by averaging
+//!   the disturbing function and Lagrange's planetary equations. Residuals identically zero.
+//! * `derivations/brouwer_lyddane.mac` (1): their J2² part by a Lie–Deprit normalisation and the
+//!   J4 part by a first-order average. Residuals identically zero.
+//! * (2): the short-period generator solves the homological equation, and the six short-period
+//!   terms are its Lie brackets, so Hamilton's equations hold to first order in J2.
+//! * (3): the long-period generator divides the `g`-dependent part of the averaged J2², J3, J4
+//!   and J5 Hamiltonian by the J2 rate of `g`, and the long-period coefficients are its brackets,
+//!   with Phipps' `T2` standing for `1/(1 − 5 cos² i)`.
+//! * (4): every long-period `δi` is `−e cos i/(η² sin i)·δe`, the conservation of `G cos i`.
+//!
+//! Orekit's `BLModel` fails (2) in `δe` and `e·δl`, and (4) in two `δi` coefficients. Its
+//! propagation then drifts from the equations of motion at first order in J2: 38 km over three
+//! LEO revolutions, where this one stays within 25 m under J2 alone. Halving J2 halves Orekit's
+//! residual and quarters this one's.
 
 // Dense astrodynamics algebra ported verbatim from Orekit; single-letter names and long expressions
 // are the source's, kept for auditability.
@@ -291,9 +302,12 @@ impl BlModel {
         let vle1 = epp * n2 * q1;
         let vle2 = n2 * si * q5;
         let vle3 = -3.0 * epp * n2 * si * p4;
-        let vli1 = -epp * q1 / si;
+        // Every long-period δi is −e cos i/(η² sin i)·δe: the generator is free of l and h, so it
+        // keeps L and G cos i. Orekit's vli1 = −e q1/sin i and vli3 = −3e² cos i p4 break that
+        // (derivations/brouwer_lyddane.mac (4)).
+        let vli1 = -epp2 * ci * q1 / si;
         let vli2 = -epp * ci * q5;
-        let vli3 = -3.0 * epp2 * ci * p4;
+        let vli3 = 3.0 * epp2 * ci * p4;
         let vll2 = vle2 + 3.0 * epp * n2 * p3;
         let vlh1i = -si * q2;
         let vlh2i = epp * ci * q5 + si * p2;
@@ -411,15 +425,19 @@ impl BlModel {
         let d2a = app
             * (yp2 / n2)
             * ((eppcfpp_p1_3 - n3) * ci2x3m1 + eppcfpp_p1_3 * c2g2f * 3.0 * one_m_ci2);
+        // Brouwer's δe and e·δl, which Lagrange's equations for e and l decide at first order in J2
+        // (derivations/brouwer_lyddane.mac (2)). Orekit's BLModel multiplies only the e of
+        // (w20 + e) by cos(2g+2f), carries an extra e on cos(2g+f) and cos(2g+3f), and writes
+        // sin²i for 3cos²i − 1 on the sin f term of e·δl: 38 km over three LEO revolutions.
         let d2e = 0.5
             * yp2
-            * ((w20 + epp * t8) * ci2x3m1 + (w20 + epp * c2g2f) * 3.0 * one_m_ci2
-                - (3.0 * eppc2gf + eppc2g3f) * n2 * one_m_ci2);
+            * ((w20 + epp * t8) * ci2x3m1 + (w20 + epp) * c2g2f * 3.0 * one_m_ci2
+                - (3.0 * c2gf + c2g3f) * n2 * one_m_ci2);
         let d2i = 0.5 * yp2 * ci * si * (3.0 * (c2g2f + eppc2gf) + eppc2g3f);
         let eppd2l = -0.25
             * yp2
             * n3
-            * ((w22 + 1.0) * sfpp * 2.0 * one_m_ci2
+            * ((w22 + 1.0) * sfpp * 2.0 * ci2x3m1
                 + ((1.0 - w22) * s2gf + (w22 + 1.0 / 3.0) * s2g3f) * 3.0 * one_m_ci2);
         let sippd2h = 0.5 * yp2 * ci * si * (w21 - 6.0 * w17);
         let d2z = -(epp * eppd2l * (t8 - 1.0) / n3
@@ -439,7 +457,10 @@ impl BlModel {
         let e = libm::sqrt(de * de + dl * dl);
         let (slpp, clpp) = libm::sincos(lpp);
         let l = libm::atan2(de * slpp + dl * clpp, de * clpp - dl * slpp);
-        let i = libm::acos(clamp(1.0 - 2.0 * (di * di + dh * dh), -1.0, 1.0));
+        // sin(i/2) is the hypotenuse itself; Orekit's acos(1 − 2 sin²(i/2)) loses half the digits
+        // of a small i, and at 0.01° and 10⁻⁴° (measured) its fixed point stalls short of its
+        // tolerance.
+        let i = 2.0 * libm::asin(clamp(libm::sqrt(di * di + dh * dh), 0.0, 1.0));
         let (shpp, chpp) = libm::sincos(hpp);
         let h = libm::atan2(di * shpp + dh * chpp, di * chpp - dh * shpp);
         let g = z - l - h;
@@ -539,10 +560,10 @@ fn osculating_to_mean(
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum BrouwerLyddaneError {
-    /// The fixed point did not converge within [`MAX_CORRECTIONS`]. Measured: any orbit with
-    /// `i ≲ 2°` and `e ≲ 10⁻³`, where the short-period corrections in the node and in the
-    /// eccentricity vector are both larger than the elements they correct. Orekit's
-    /// `BrouwerLyddanePropagator` refuses the same inputs.
+    /// The fixed point did not converge within [`MAX_CORRECTIONS`]. Measured over `a` from 6 600
+    /// to 42 164 km, `e` to 0.8 and four `(ω, M)`: most orbits at `i ≥ 172°` (every one at
+    /// `e ≤ 0.01`) and none at `i ≤ 170°`, prograde equatorial included. Near retrograde
+    /// equatorial Lyddane's `sin(i/2)` node variables divide by `cos(i/2)`.
     MeanElementsDiverged {
         /// Corrections applied before giving up.
         corrections: u32,
@@ -595,7 +616,7 @@ impl BrouwerLyddane {
     /// # Errors
     ///
     /// Returns [`BrouwerLyddaneError::MeanElementsDiverged`] when the osculating→mean fixed point
-    /// does not converge — a near-equatorial, near-circular orbit.
+    /// does not converge — an orbit near retrograde equatorial.
     pub fn from_osculating_with_drag(
         osculating: &KeplerianElements,
         re: f64,
@@ -652,8 +673,7 @@ impl BrouwerLyddane {
     }
 
     /// Osculating Cartesian state `(r, v)` at `dt` seconds — the standard Keplerian conversion of the
-    /// osculating elements, which is exactly the state Orekit's propagator reports (matched to
-    /// ~10⁻⁹ m/s in velocity, ~10⁻⁶ m in position).
+    /// osculating elements, the state Orekit's propagator reports too.
     #[must_use]
     pub fn propagate(&self, dt: f64) -> (Vec3, Vec3) {
         els_to_keplerian(self.model.osculating(dt), self.model.mu).to_state()
@@ -813,29 +833,52 @@ mod tests {
         ),
     ];
 
-    #[test]
-    fn matches_orekit_reference() {
-        let osc = KeplerianElements::from_state(
+    fn leo() -> KeplerianElements {
+        KeplerianElements::from_state(
             Vec3::new(R0[0], R0[1], R0[2]),
             Vec3::new(V0[0], V0[1], V0[2]),
             MU,
-        );
-        let bl = BrouwerLyddane::from_osculating(&osc, RE, C20, C30, C40, C50).unwrap();
+        )
+    }
 
-        let mut max_dr = 0.0f64;
-        let mut max_dv = 0.0f64;
-        for (t, g) in GOLDEN {
-            let (r, v) = bl.propagate(t);
-            let dr = libm::sqrt((r.x - g[0]).powi(2) + (r.y - g[1]).powi(2) + (r.z - g[2]).powi(2));
-            let dv = libm::sqrt((v.x - g[3]).powi(2) + (v.y - g[4]).powi(2) + (v.z - g[5]).powi(2));
-            assert!(dr < 6e-6, "t={t}: position error {dr:.3e} m");
-            assert!(dv < 6e-9, "t={t}: velocity error {dv:.3e} m/s");
-            max_dr = max_dr.max(dr);
-            max_dv = max_dv.max(dv);
-        }
-        std::eprintln!(
-            "Brouwer-Lyddane vs Orekit: max |Δr| = {max_dr:.3e} m, |Δv| = {max_dv:.3e} m/s"
+    /// Position and velocity distances from `bl` to a table of Orekit states, as comparison rows.
+    fn state_rows(bl: &BrouwerLyddane, golden: &[(f64, [f64; 6])], what: &str) {
+        let (dr, dv): (std::vec::Vec<f64>, std::vec::Vec<f64>) = golden
+            .iter()
+            .map(|&(t, g)| {
+                let (r, v) = bl.propagate(t);
+                let dr = (r.x - g[0]).hypot(r.y - g[1]).hypot(r.z - g[2]);
+                let dv = (v.x - g[3]).hypot(v.y - g[4]).hypot(v.z - g[5]);
+                (dr, dv)
+            })
+            .unzip();
+        comparison_row(&std::format!("Brouwer-Lyddane {what}, position"), "m", &dr);
+        comparison_row(
+            &std::format!("Brouwer-Lyddane {what}, velocity"),
+            "m/s",
+            &dv,
         );
+    }
+
+    fn comparison_row(quantity: &str, unit: &str, d: &[f64]) {
+        let max = d.iter().copied().fold(0.0, f64::max);
+        #[allow(clippy::cast_precision_loss)]
+        let rms = (d.iter().map(|x| x * x).sum::<f64>() / d.len() as f64).sqrt();
+        std::println!(
+            "comparison | Orekit | 13.1.7 | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+            d.len()
+        );
+    }
+
+    /// The distance to Orekit's `BrouwerLyddanePropagator` on the near-circular LEO over a day.
+    /// Orekit's short-period δe and e·δl break Lagrange's equations at first order in J2, so the
+    /// two differ by tens of kilometres; [`the_propagation_follows_the_zonal_equations_of_motion`]
+    /// and `derivations/brouwer_lyddane.mac` decide.
+    #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn reference_distance_to_orekit() {
+        let bl = BrouwerLyddane::from_osculating(&leo(), RE, C20, C30, C40, C50).unwrap();
+        state_rows(&bl, &GOLDEN, "LEO, 1 day");
     }
 
     // Orekit BrouwerLyddanePropagator with M2 = 1e-14 rad/s² (orekit_brouwer_lyddane_m2.csv).
@@ -852,28 +895,16 @@ mod tests {
         (86400.0, [-1341393.148104778, -2514532.844971872, 6600821.920710811, -5332.728721797692, -4438.521729085552, -2705.291258844486]),
     ];
 
-    /// The empirical along-track drag term M2 matches Orekit's `BrouwerLyddanePropagator` with
-    /// M2 = 1e-14 rad/s² to round-off — validating the M2 code path (which is inert at M2 = 0).
+    /// The distance to Orekit's `BrouwerLyddanePropagator` with M2 = 1e-14 rad/s². The M2 path is
+    /// decided by [`the_m2_drift_is_phipps`] and `derivations/brouwer_m2_phipps.mac`.
     #[test]
-    fn matches_orekit_with_drag() {
-        let osc = KeplerianElements::from_state(
-            Vec3::new(R0[0], R0[1], R0[2]),
-            Vec3::new(V0[0], V0[1], V0[2]),
-            MU,
-        );
-        let bl =
-            BrouwerLyddane::from_osculating_with_drag(&osc, RE, C20, C30, C40, C50, 1e-14).unwrap();
-        let mut max_dr = 0.0f64;
-        for (t, g) in GOLDEN_M2 {
-            let (r, v) = bl.propagate(t);
-            let dr = libm::sqrt((r.x - g[0]).powi(2) + (r.y - g[1]).powi(2) + (r.z - g[2]).powi(2));
-            let dv = libm::sqrt((v.x - g[3]).powi(2) + (v.y - g[4]).powi(2) + (v.z - g[5]).powi(2));
-            assert!(dr < 6e-6, "t={t}: position error {dr:.3e} m");
-            assert!(dv < 6e-9, "t={t}: velocity error {dv:.3e} m/s");
-            max_dr = max_dr.max(dr);
-        }
-        std::eprintln!("Brouwer-Lyddane M2=1e-14 vs Orekit: max |Δr| = {max_dr:.3e} m");
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn drag_distance_to_orekit() {
+        let bl = BrouwerLyddane::from_osculating_with_drag(&leo(), RE, C20, C30, C40, C50, 1e-14)
+            .unwrap();
+        state_rows(&bl, &GOLDEN_M2, "LEO with M2 = 1e-14 rad/s2, 1 day");
     }
+
     /// The M2 drift is Phipps 1992's, read off the mean elements a day out: the mean anomaly gains
     /// exactly `M2·t²` (Eq. 2.38); `ȧ/a = −(2/3)·ṁ/m` with `ṁ = 2·M2` (Kepler's third law, Eqs 2.40–2.41);
     /// `ė/e = η²·ȧ/a` (Eq. 2.44 with his `σ = 1`, Eq. 2.45); and the angles' Brouwer rates do not see it.
@@ -945,8 +976,7 @@ mod tests {
 
     /// The long-period corrections are driven by the argument of perigee and carry powers of `e`, so
     /// on the near-circular reference orbit their third harmonic moves the state by less than a
-    /// micrometre over a day — under the port's own agreement floor with Orekit, where no assertion
-    /// can reach it. At `e = 0.3` over eight weeks the same terms are worth hundreds of metres.
+    /// micrometre over a day. At `e = 0.3` the same terms are worth hundreds of metres.
     fn eccentric() -> KeplerianElements {
         KeplerianElements {
             semi_major_axis: 7_200_000.0,
@@ -971,64 +1001,179 @@ mod tests {
         (4838400.0, [411552.473590451200, -4392657.814281062000, -2502973.278218806700, 9898.477168024183, 1867.588160342446, -518.332110160760]),
     ];
 
+    /// The distance to Orekit's `BrouwerLyddanePropagator` at `e = 0.3` over eight weeks, where
+    /// Orekit's long-period δi also departs from the conservation of `G cos i`.
     #[test]
-    fn matches_orekit_on_an_eccentric_orbit_over_eight_weeks() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn eccentric_distance_to_orekit() {
         let bl = BrouwerLyddane::from_osculating(&eccentric(), RE, C20, C30, C40, C50).unwrap();
-        let (mut max_dr, mut max_dv) = (0.0f64, 0.0f64);
-        for (t, g) in GOLDEN_ECC {
-            let (r, v) = bl.propagate(t);
-            let dr = libm::sqrt((r.x - g[0]).powi(2) + (r.y - g[1]).powi(2) + (r.z - g[2]).powi(2));
-            let dv = libm::sqrt((v.x - g[3]).powi(2) + (v.y - g[4]).powi(2) + (v.z - g[5]).powi(2));
-            assert!(dr < 3e-4, "t={t}: position error {dr:.3e} m");
-            assert!(dv < 5e-7, "t={t}: velocity error {dv:.3e} m/s");
-            max_dr = max_dr.max(dr);
-            max_dv = max_dv.max(dv);
-        }
-        std::eprintln!(
-            "Brouwer-Lyddane e=0.3 vs Orekit: max |Δr| = {max_dr:.3e} m, |Δv| = {max_dv:.3e} m/s"
-        );
+        state_rows(&bl, &GOLDEN_ECC, "e = 0.3, 8 weeks");
     }
 
-    /// Every other test here reads the mean elements only through the osculating state, and that
-    /// state is invariant under `(i, Ω, ω) → (−i, Ω ± π, ω ± π)` — the sign gauge of a Keplerian
-    /// element set. The propagator's entire internal state can therefore be reflected without moving
-    /// a single reported position. Orekit's own `computeMeanOrbit` fixes both the gauge and the
-    /// values; the angles are compared modulo 2π, which the reflection does not survive.
+    /// The distance to the mean elements Orekit's `computeMeanOrbit` converges to. Orekit's map
+    /// differs from Brouwer's, so its fixed point does too;
+    /// [`the_mean_elements_are_the_fixed_point_in_the_canonical_gauge`] decides.
     #[test]
-    fn the_converged_mean_elements_match_orekit() {
-        let leo = KeplerianElements::from_state(
-            Vec3::new(R0[0], R0[1], R0[2]),
-            Vec3::new(V0[0], V0[1], V0[2]),
-            MU,
-        );
-        for (osc, want, what) in [(leo, MEAN_LEO, "leo"), (eccentric(), MEAN_ECC, "eccentric")] {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn mean_elements_distance_to_orekit() {
+        for (osc, want, what) in [(leo(), MEAN_LEO, "LEO"), (eccentric(), MEAN_ECC, "e = 0.3")] {
             let mean = BrouwerLyddane::from_osculating(&osc, RE, C20, C30, C40, C50)
                 .unwrap()
                 .mean_elements();
+            comparison_row(
+                &std::format!("Brouwer-Lyddane mean a, {what}"),
+                "m",
+                &[libm::fabs(mean.semi_major_axis - want[0])],
+            );
+            comparison_row(
+                &std::format!("Brouwer-Lyddane mean e, {what}"),
+                "1",
+                &[libm::fabs(mean.eccentricity - want[1])],
+            );
             let got = [
-                mean.semi_major_axis,
-                mean.eccentricity,
                 mean.inclination.radians(),
                 mean.arg_periapsis.radians(),
                 mean.raan.radians(),
                 mean.mean_anomaly().radians(),
             ];
-            assert!(
-                libm::fabs(got[0] - want[0]) / want[0] < 1e-14,
-                "{what}: mean a {:.17e} vs {:.17e}",
-                got[0],
-                want[0]
+            let d: std::vec::Vec<f64> = (0..4)
+                .map(|k| libm::fabs(normalize_pi(got[k] - want[k + 2])))
+                .collect();
+            comparison_row(
+                &std::format!("Brouwer-Lyddane mean (i, w, raan, M), {what}"),
+                "rad",
+                &d,
             );
+        }
+    }
+
+    /// The mean elements are defined as the fixed point of the mean→osculating map: their
+    /// osculating image at the epoch is the state they were built from (G2). The state is
+    /// invariant under `(i, Ω, ω) → (−i, Ω ± π, ω ± π)`, so the internal elements are also pinned
+    /// to the canonical gauge `0 ≤ i ≤ π`, `0 ≤ e < 1`, which that reflection leaves.
+    #[test]
+    fn the_mean_elements_are_the_fixed_point_in_the_canonical_gauge() {
+        let mut worst = 0.0f64;
+        for osc in orbits() {
+            let bl = BrouwerLyddane::from_osculating(&osc, RE, C20, C30, C40, C50).unwrap();
+            let mean = bl.model.mean;
+            assert!((0.0..=PI).contains(&mean.i), "mean i = {}", mean.i);
+            assert!((0.0..1.0).contains(&mean.e), "mean e = {}", mean.e);
+            let (r, v) = bl.propagate(0.0);
+            let (r0, v0) = osc.to_state();
+            worst = worst.max((r.x - r0.x).hypot(r.y - r0.y).hypot(r.z - r0.z));
+            worst = worst.max(((v.x - v0.x).hypot(v.y - v0.y).hypot(v.z - v0.z)) * 1e3);
+        }
+        std::eprintln!("Brouwer-Lyddane fixed point: {worst:.3e} m (velocity as mm/s)");
+        // Measured 4.2e-9.
+        assert!(
+            worst < 2e-8,
+            "the osculating image is {worst:.3e} from the state"
+        );
+    }
+
+    /// Orbits across the regimes the theory covers: the near-circular sun-synchronous LEO, the
+    /// eccentric one, near-circular near-equatorial, and a moderate eccentricity at 63°, beside the
+    /// critical inclination where Phipps' `T2` stands for `1/(1 − 5 cos² i)`.
+    fn orbits() -> [KeplerianElements; 4] {
+        let base = eccentric();
+        [
+            leo(),
+            base,
+            KeplerianElements {
+                eccentricity: 1e-3,
+                inclination: Angle::from_degrees(0.01),
+                ..base
+            },
+            KeplerianElements {
+                eccentricity: 0.05,
+                inclination: Angle::from_degrees(63.0),
+                ..base
+            },
+        ]
+    }
+
+    /// The worst distance from the propagated state to an integration of the same zonal field —
+    /// point mass plus `J2..J5` by Legendre recurrence, Dormand–Prince 8(5,3) at 10⁻¹³ — sampled
+    /// each minute over three revolutions, m.
+    fn distance_to_the_equations_of_motion(osc: &KeplerianElements, c: [f64; 4]) -> f64 {
+        use spacelab_propagation::driver::{Controls, integrate};
+        use spacelab_propagation::forces::{Newtonian, Plain, PointMass, Zonal};
+        use spacelab_propagation::{Dop853, Tolerance};
+        let bl = BrouwerLyddane::from_osculating(osc, RE, c[0], c[1], c[2], c[3]).unwrap();
+        let (r0, v0) = osc.to_state();
+        let field = Newtonian((
+            PointMass { mu: MU },
+            Zonal {
+                mu: MU,
+                re: RE,
+                j: [-c[0], -c[1], -c[2], -c[3]],
+            },
+        ));
+        let minutes = (3.0 * osc.period() / 60.0).floor();
+        let traj = integrate(
+            &Dop853,
+            &Plain(field),
+            0.0,
+            &[r0.x, r0.y, r0.z, v0.x, v0.y, v0.z],
+            60.0 * minutes,
+            60.0,
+            Controls::new(Tolerance::new(1e-13, 1e-13), 1e-3),
+        )
+        .unwrap();
+        let mut worst = 0.0f64;
+        let mut t = 60.0;
+        while t <= 60.0 * minutes {
+            let y = traj.eval(t);
+            let (r, _) = bl.propagate(t);
+            worst = worst.max((r.x - y[0]).hypot(r.y - y[1]).hypot(r.z - y[2]));
+            t += 60.0;
+        }
+        worst
+    }
+
+    /// Brouwer's theory is the solution of the zonal equations of motion to first order in J2 in
+    /// its periodic terms, so the propagated state follows a numerical integration of the same
+    /// field to `O(J2²)`: tens of metres over three revolutions in LEO, kilometres where the
+    /// second-order drift grows with `e`. (S1)
+    #[test]
+    fn the_propagation_follows_the_zonal_equations_of_motion() {
+        let c = [C20, C30, C40, C50];
+        let d: std::vec::Vec<f64> = orbits()
+            .iter()
+            .map(|osc| distance_to_the_equations_of_motion(osc, c))
+            .collect();
+        std::eprintln!("Brouwer-Lyddane against the J2-J5 equations of motion: {d:?} m");
+        // Measured 366, 2230, 388, 458 m. Most of it is the along-track drift of a mean motion
+        // whose `a` lacks the short-period J3, J4 (each linear in its J, measured) and J2² terms
+        // the theory leaves out; a first-order defect is tens of kilometres here.
+        for (k, bound) in [1_500.0, 9_000.0, 1_600.0, 1_800.0].into_iter().enumerate() {
             assert!(
-                libm::fabs(got[1] - want[1]) < 1e-11,
-                "{what}: mean e {:.17e} vs {:.17e}",
-                got[1],
-                want[1]
+                d[k] < bound,
+                "orbit {k}: {:.3e} m from the equations of motion",
+                d[k]
             );
-            for (k, name) in [(2, "i"), (3, "pa"), (4, "raan"), (5, "m")] {
-                let d = libm::fabs(normalize_pi(got[k] - want[k]));
-                assert!(d < 1e-11, "{what}: mean {name} off by {d:.3e} rad");
-            }
+        }
+    }
+
+    /// The residual of [`the_propagation_follows_the_zonal_equations_of_motion`] is second order in
+    /// J2: halving J2 quarters it. A periodic term that breaks the equations of motion at first
+    /// order — Orekit's δe, e·δl — halves it instead. (S2)
+    #[test]
+    fn the_residual_is_second_order_in_j2() {
+        for osc in [eccentric(), leo()] {
+            let full = distance_to_the_equations_of_motion(&osc, [C20, 0.0, 0.0, 0.0]);
+            let half = distance_to_the_equations_of_motion(&osc, [0.5 * C20, 0.0, 0.0, 0.0]);
+            let ratio = full / half;
+            std::eprintln!(
+                "Brouwer-Lyddane J2 only: {full:.3e} m, at J2/2 {half:.3e} m, ratio {ratio:.3}"
+            );
+            // Measured 3.988 at e = 0.3 and 4.016 on the LEO; Orekit's map gives 1.97 at e = 0.3.
+            assert!(
+                (3.8..4.2).contains(&ratio),
+                "e = {}: ratio {ratio:.3}",
+                osc.eccentricity
+            );
         }
     }
 
@@ -1066,25 +1211,26 @@ mod tests {
             least >= 5,
             "the fixed point exited after {least} corrections"
         );
-        assert!(worst <= 96, "the fixed point took {worst} corrections");
+        assert!(worst <= 12, "the fixed point took {worst} corrections");
         assert!(
-            (29.5..30.5).contains(&mean),
+            (5.3..5.5).contains(&mean),
             "mean {mean:.2} corrections per case"
         );
     }
 
     /// The theory has a regime where the fixed point simply does not converge, and returning the
-    /// last iterate there is how a caller ends up propagating a negative eccentricity. Orekit's
-    /// `BrouwerLyddanePropagator` refuses the same inputs. (S2)
+    /// last iterate there is how a caller ends up propagating a state the theory never reached:
+    /// near retrograde equatorial, where Lyddane's `sin(i/2)` node variables divide by
+    /// `cos(i/2)`. (S2)
     #[test]
-    fn a_near_equatorial_near_circular_orbit_is_refused() {
+    fn a_retrograde_near_equatorial_orbit_is_refused() {
         let c = [0.0, 0.0, C20, C30, C40, C50];
         for &(e, i_deg) in &[
-            (0.0, 0.5),
-            (1e-6, 0.5),
-            (1e-4, 0.5),
-            (1e-3, 0.5),
-            (0.0, 1.0),
+            (0.0, 175.0),
+            (1e-6, 178.0),
+            (1e-3, 179.0),
+            (0.01, 179.9),
+            (0.1, 180.0),
         ] {
             let osc = Els {
                 a: 7_200_000.0,

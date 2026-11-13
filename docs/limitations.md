@@ -118,6 +118,12 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   the geocentric nadir, because changing what a bare half-angle means would silently move every
   existing footprint — and that no attitude *error* is modelled, this being the difference between two
   exact conventions rather than between a convention and a spacecraft.
+- **Brouwer–Lyddane carries its periodic terms to first order.** Its mean motion therefore lacks
+  the short-period `δa` of J2², J3 and J4, and the propagated state drifts along track from the
+  zonal equations of motion: **366 m** over three revolutions of a near-circular LEO and **2.2 km**
+  at `e = 0.3`, J2–J5 (`brouwer_lyddane.rs`, S1); halving J2 quarters the J2 part. The
+  osculating→mean fixed point does not converge within about 8° of retrograde equatorial, which is
+  refused as `MeanElementsDiverged`.
 - **SDTM-1's shipped field is fitted on eight satellites, and its envelope is theirs.**
   `sdtm::coefficients` was fitted on 365 214 rows of the TU Delft v02 corpus — CHAMP, GRACE A/B, GOCE,
   GRACE-FO C and Swarm A/B/C, 2000-07 to 2026-04, **225 to 545 km**, F10.7a **65.8 to 231.9**

@@ -576,12 +576,13 @@ fn the_c04_series_names_the_frame_the_orbit_is_in() {
 /// The whole 32-satellite product, when it has been fetched, on DE440 third bodies.
 ///
 /// One line per satellite, so the spread across the constellation — and any satellite in an eclipse
-/// season, where a cannonball SRP is at its worst — is visible rather than averaged away. The DE440
-/// ephemeris is what makes this table directly comparable to
-/// `tools/orekit-oracle/IgsOrbitFitOracle.java`, which reads the same kernel.
+/// season, where a cannonball SRP is at its worst — is visible rather than averaged away. The IGS
+/// final orbits decide.
 #[test]
 #[ignore = "needs snapshots from tools/fetch-validation-data.sh and tools/fetch-ephemeris.sh"]
 fn every_gps_satellite_in_the_daily_product() {
+    // DE440 third bodies also make this table comparable, as a distance, with
+    // `tools/orekit-oracle/IgsOrbitFitOracle.java`, which reads the same kernel.
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let path = root.join("../../data/validation/IGS0OPSFIN_20250010000_01D_15M_ORB.SP3");
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {

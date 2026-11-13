@@ -4914,6 +4914,14 @@ moment it is run. `just mutants-ledger --since REV` now reports every entry that
 and names code no entry excluded there. Over all 197 ledger commits this was the only one; it is
 re-anchored to `853:33`, where its mutant survives as argued. `--since HEAD` runs before each commit.
 
+Its first real use found the same drift inside `--rewrite` itself (F100). Two doc lines above
+`compute_max_ecc_pow` shifted three `*` mutants of one column, all excluded, by two lines: the entry
+for the third landed on the first one's code and claimed it, so it was not stale, and the two stale
+entries could not move onto mutants still claimed. Four anchors were left for a hand. `--rewrite` now
+moves every entry whose anchor names other code than it named at HEAD together with the stale ones,
+releases their claims while it places them, and writes the ledger line by line once every move is
+known; `tools/test_mutants_ledger.py` holds the case.
+
 #### A bare-basename anchor cannot be called broken, and two crates have an `iod.rs`
 
 The census on 2026-08-15 read **39 broken anchors** — the largest yet, and the reason it got that far
@@ -11129,8 +11137,8 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 336 modules, 250 name a check, 86 do not** — no physics
-module, 26 parsers, 5 generated and 55 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
+(`plans/16` Ф17.B orders them). **Today: 336 modules, 251 name a check, 85 do not** — no physics
+module, 26 parsers, 4 generated and 55 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
 the last 42 — GNSS, SLR, the NeQuick ionosphere, earthvision, signal, vision, sensors and
 astrometry (`earthvision/sfm.rs` and `cloud.rs` hold no formula of their own and moved to
 infrastructure) — and fixed what the gates found: the GLONASS `J2` was the ICD's 8-digit
@@ -11261,7 +11269,6 @@ crates/spacelab-ndm/src/oem.rs | parser | format reader/writer; conformance is t
 crates/spacelab-ndm/src/opm.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/density_data.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/driver.rs | infra | types, traits, drivers or re-exports; nothing to derive
-crates/spacelab-propagation/src/dsst/coefficients.rs | generated | emitted by a generator under derivations/ and sealed by table_seals.py; the seal is not named in the module doc
 crates/spacelab-propagation/src/dsst/mod.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/forces.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
@@ -11346,10 +11353,19 @@ Batch 10 (2026-11-13, Ф17.Q) parks Eckstein–Hechler's Orekit test. `derivatio
 decides the theory, and the J2–J6 equations of motion the propagated state (S1), its residual
 second order in `e` (S2) and the mean eccentricity vector's ellipse and rate over 60 days (S1).
 Orekit's `ly1`, the vector's rate without J2² and its ellipse without J2 fail them and are fixed here.
+Batch 11 (2026-11-13, Ф19.G) takes out Orekit's last thirteen. `derivations/dsst_coefficients.mac`
+proves each DSST coefficient recurrence its closed form in exact arithmetic — `Dₙˡ(χ) =
+χⁿ⁺ˡ (n−1)!/(n+l−1)! · dˡPₙ₋₁/dχˡ`, at `l = 0` the mean of `(a/r)ⁿ⁺¹`; `Rₙₘˡ` built on the Jacobi
+polynomial `P⁽ˡ⁻ᵐ,ˡ⁺ᵐ⁾ₙ₋ₗ(εγ)` — and writes the 7 712 values the module is held to (G1, G3); `Rₙₘˡ`
+loses seven digits where `m > l` and `εγ → 1`, rows no caller reaches.
+`derivations/conjunction_chan_series.gp` holds Chan's series at 80 digits by two routes, and the
+published Chan, Alfano and CDM values are that series rounded (G3). Knocke's comparison is parked;
+six convention tests are tagged (S2), the tesseral short-period entry point is held to `mean + η`
+against the correction its G2 gate decides, and two data tests name the data that decides them.
 
-**Today: 70
-comparator-decided tests of 3 717** — name 37, file 14, fixture 4, doc 15; 13 of them Orekit's (2 by
-name), 15 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+**Today: 57
+comparator-decided tests of 3 718** — name 35, file 14, fixture 4, doc 4; none of them Orekit's,
+5 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 The parked tests are the suite: `just compare` (`tools/compare.py`) runs each one alone, reads the
@@ -11379,8 +11395,6 @@ crates/spacelab-earthvision/tests/pyspectral_rayleigh.rs::without_the_ozone_the_
 crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs::our_slab_reproduces_radcalnets_modtran_toa_on_measured_scenes | name:modtran
 crates/spacelab-ephemeris/tests/neptune_lro.rs::a_day_of_the_selenocentric_model_tracks_neptune | name:neptune
 crates/spacelab-ephemeris/tests/neptune_lro.rs::the_full_week_against_neptune | name:neptune
-crates/spacelab-estimation/src/conjunction.rs::chan_degrades_where_patera_stays_exact_for_extreme_ellipses | doc:orekit
-crates/spacelab-estimation/src/conjunction.rs::chan_reproduces_published_reference_values | doc:orekit
 crates/spacelab-fa/src/cio.rs::cio_locator_matches_sofa_golden | name:sofa
 crates/spacelab-fa/src/cio.rs::cip_xy_matches_sofa_golden | name:sofa
 crates/spacelab-fa/src/cio.rs::era_matches_pyerfa_at_other_day_fractions | name:pyerfa
@@ -11399,19 +11413,9 @@ crates/spacelab-frames/tests/frames.rs::polar_motion_rejects_the_other_three_ord
 crates/spacelab-frames/tests/neptune_frames.rs::the_gcrf_state_matches_neptunes_own_reduction | file:neptune
 crates/spacelab-geometry/tests/qhull_cross_check.rs::every_construction_agrees_with_qhull_on_the_same_points | name:qhull
 crates/spacelab-ionosphere/tests/galileo_stec.rs::the_stec_matches_the_jrc_reference_in_every_month | name:jrc
-crates/spacelab-propagation/src/dsst/coefficients.rs::the_scalar_coefficients_and_upper_bounds_match_orekit | name:orekit
-crates/spacelab-propagation/src/dsst/tesseral.rs::resonance_window_is_one_part_in_ten_revolutions | doc:orekit
-crates/spacelab-propagation/src/dsst/tesseral.rs::zero_frequency_order_is_not_resonant | doc:orekit
-crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::osculating_adds_the_short_period_correction_to_the_mean | doc:orekit
-crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::the_mdaily_eccentricity_bound_follows_the_degree | doc:orekit
-crates/spacelab-propagation/src/dsst/tesseral_short_period.rs::the_resonant_term_is_excluded_from_the_short_period_sum | doc:orekit
-crates/spacelab-propagation/src/earth_radiation.rs::knocke_matches_orekit | name:orekit
 crates/spacelab-propagation/src/ephemeris.rs::both_bodies_reach_erfa_at_the_documented_accuracy | name:erfa
 crates/spacelab-propagation/src/geopotential.rs::validated_against_scipy_at_degree_70 | name:scipy
 crates/spacelab-propagation/src/ocean_tide.rs::admittance_weights_match_pyfes | name:pyfes
-crates/spacelab-propagation/src/spacecraft.rs::a_null_radiation_flux_returns_zero_and_the_threshold_is_strict | doc:orekit
-crates/spacelab-propagation/src/spacecraft.rs::an_array_edge_on_to_the_sun_falls_back_to_an_arbitrary_perpendicular | doc:orekit
-crates/spacelab-propagation/tests/measured_density.rs::the_three_hourly_ap_array_is_what_carries_the_storm | doc:orekit
 crates/spacelab-propagation/tests/measured_wind.rs::hwm14_and_our_field_are_scored_on_the_same_held_out_rows | name:hwm14
 crates/spacelab-propagation/tests/wam_ipe_product.rs::a_noaa_file_reads_as_scipy_reads_it | name:scipy
 crates/spacelab-sensors/tests/pyorbital_geoloc.rs::the_catalogue_reproduces_pyorbitals_scan_angles_and_pixel_times | file:pyorbital
@@ -11425,7 +11429,6 @@ crates/spacelab-slr/src/loading.rs::the_spline_matches_the_reference_routine_awa
 crates/spacelab-slr/src/loading.rs::the_tidal_arguments_match_the_reference_routine | doc:iers-oracle
 crates/spacelab-slr/src/troposphere.rs::the_zenith_delay_reproduces_the_iers_reference_routine | doc:iers-oracle
 crates/spacelab/tests/earth_orientation.rs::the_iss_ground_track_with_real_earth_orientation | fixture:skyfield
-crates/spacelab/tests/igs_orbit_fit.rs::every_gps_satellite_in_the_daily_product | doc:orekit
 crates/spacelab/tests/neptune_sentinel1b.rs::the_full_day_against_neptune | name:neptune
 crates/spacelab/tests/neptune_sentinel1b.rs::two_orbits_of_the_geocentric_model_track_neptune | name:neptune
 ```

@@ -689,6 +689,19 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima edl_entry_fixture.mac" "the fixtures do not hold"
     fi
 
+    # DSST's coefficients and truncation bounds: each recurrence is its closed form, and every row the
+    # module's gate reads is the closed form's value as this run prints it.
+    out=$(macf dsst_coefficients.mac)
+    holds=$(printf '%s' "$out" | grep -cE "^\([0-9]'?\) holds:")
+    fixture=../crates/spacelab-propagation/tests/fixtures/dsst_coefficients.csv
+    if [ "$holds" -eq 8 ] && printf '%s' "$out" | grep -q '^DONE' \
+        && diff -q <(printf '%s\n' "$out" | grep -E '^(dnl|rnml|vns|qns|gs|hs|jacobi_value|jacobi_deriv),') \
+            <(grep -v '^#' "$fixture") >/dev/null; then
+        ok "maxima dsst_coefficients.mac: V, Q, G/H, Jacobi, D and R recurrences are their closed forms; the 7712 fixture rows are their values"
+    else
+        bad "maxima dsst_coefficients.mac" "expected 8 checks and the fixture's rows, found $holds checks"
+    fi
+
     # The IERS Conventions (2010) Tables 5.3a/5.3b, which `tools/fetch-specs.sh` fetches as
     # digest-named snapshots; the pin is each file's SHA-256, so a table the IERS revised fails here.
     tab53a=../data/specs/iers-tab5.3a.6da73bfe.txt
@@ -963,6 +976,23 @@ sys.exit(0 if a == b else 1)
         rm -rf "$tmp"
     else
         skip "arb shadow_lens_arb.c" "a C compiler and FLINT"
+    fi
+
+    # Chan's series at 80 digits by two routes; every row it prints is in the test, verbatim.
+    out=$(timeout 300 gp -q -f conjunction_chan_series.gp </dev/null 2>&1)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:.*, 0 off$')
+    rows=$(printf '%s\n' "$out" | grep -E '^        \(')
+    n=$(printf '%s\n' "$rows" | grep -c .)
+    if [ "$holds" -eq 2 ] && [ "$n" -eq 16 ] && ! printf '%s' "$out" | grep -qF '***' \
+        && printf '%s' "$out" | grep -q '^DONE'; then
+        missing=$(printf '%s\n' "$rows" | grep -cvxF -f ../crates/spacelab-estimation/src/conjunction.rs)
+        if [ "$missing" -eq 0 ]; then
+            ok "pari conjunction_chan_series.gp: Chan's series by the Poisson mixture and the Rice integral, every published value that series rounded, the 16 rows in the test verbatim"
+        else
+            bad "pari conjunction_chan_series.gp" "$missing printed rows are not in src/conjunction.rs"
+        fi
+    else
+        bad "pari conjunction_chan_series.gp" "expected 2 clean checks and 16 rows and no error, found $holds and $n"
     fi
 else
     skip "pari checks" gp

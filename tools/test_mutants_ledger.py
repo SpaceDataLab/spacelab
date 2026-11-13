@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -85,7 +86,7 @@ def test_a_shift_onto_a_twin_operator_is_reported(root: pathlib.Path) -> None:
         "src/w.rs:4:21: replace - with + in north",
         "src/w.rs:5:21: replace - with + in north",
     ]
-    assert tool.transfers("HEAD", [entry], every) == 1
+    assert tool.transfers("HEAD", [entry], every) == [entry]
 
 
 @in_repo
@@ -102,7 +103,7 @@ def test_a_reanchor_that_reuses_a_string_is_not_a_transfer(root: pathlib.Path) -
         "src/w.rs:4:21: replace - with + in north",
         "src/w.rs:5:21: replace - with + in north",
     ]
-    assert tool.transfers("HEAD", moved, every) == 0
+    assert tool.transfers("HEAD", moved, every) == []
 
 
 @in_repo
@@ -135,8 +136,52 @@ def test_a_stale_anchor_does_not_take_a_claimed_mutant(root: pathlib.Path) -> No
     write(root, [entry], ["// one more line", *CROSS])
     mutant = "src/w.rs:5:21: replace - with + in north"
     tool.__dict__.update(function_spans=lambda path: {mutant: (2, 7)})
-    new, _ = tool.relocate(entry, [mutant], {mutant})
-    assert new is None
+    new, why = tool.relocate(entry, [mutant], {mutant})
+    assert new is None and "claimed" in why, why
+
+
+THREE = [
+    "fn f() {",
+    "    let a = x * y;",
+    "    let b = x * y;",
+    "    let c = x * y;",
+    "}",
+]
+
+
+def listing(every: list[str]) -> Callable[..., list[str]]:
+    """`cargo mutants --list` as the ledger on disk would make it answer."""
+
+    def mutant_list(*args: str) -> list[str]:
+        if "--no-config" in args:
+            return every
+        text = tool.LEDGER.read_text()
+        entries = [raw.replace("\\\\", "\\") for raw in tool.ENTRY.findall(text)]
+        return [m for m in every if not any(re.search(e, m) for e in entries)]
+
+    return mutant_list
+
+
+@in_repo
+def test_a_shift_moves_the_anchors_it_slid_onto_their_neighbours(
+    root: pathlib.Path,
+) -> None:
+    # Two lines above three same-shaped mutants, all excluded: the third entry lands on the first
+    # line's code and claims it, so the first two can only move once it has moved too.
+    ledger = [rf"w\.rs:{line}:15: replace \* with \+ in f" for line in (2, 3, 4)]
+    commit(root, ledger, THREE)
+    write(root, ledger, ["// one", "// two", *THREE])
+    every = [f"src/w.rs:{line}:15: replace * with + in f" for line in (4, 5, 6)]
+    tool.__dict__.update(
+        mutant_list=listing(every),
+        function_spans=lambda path: dict.fromkeys(every, (3, 7)),
+    )
+    assert tool.main(move_stale=True, since=None) == 0
+    text = tool.LEDGER.read_text()
+    now = [raw.replace("\\\\", "\\") for raw in tool.ENTRY.findall(text)]
+    assert now == [
+        rf"w\.rs:{line}:15: replace \* with \+ in f" for line in (4, 5, 6)
+    ], now
 
 
 if __name__ == "__main__":

@@ -1387,24 +1387,24 @@ exclude_re = [
     # ── dsst/coefficients.rs ───────────────────────────────────────────────────────────────────
     # `n − s` and `n + s` differ by `2s`, so they have the same parity and the branch picks the
     # same arm. `s ≤ n` throughout, so the subtraction cannot underflow.
-    "dsst/coefficients\\.rs:36:19: replace - with \\+ in compute_vns",
+    "dsst/coefficients\\.rs:38:19: replace - with \\+ in compute_vns",
 
     # `get_rnml` is private and reached with only two argument shapes: `irf` is the retrograde
     # factor, fixed at `+1` (`auxiliary::I`, and Orekit likewise never builds the retrograde
     # equinoctial set), and `eps` is `±1` at both call sites. Under those two, `x / irf ≡ x`, and
     # `k / eps ≡ k · eps` exactly for integers, because dividing by `±1` is negating or not.
-    "dsst/coefficients\\.rs:180:17: replace \\* with / in get_rnml",
-    "dsst/coefficients\\.rs:180:23: replace \\* with / in get_rnml",
-    "dsst/coefficients\\.rs:183:30: replace \\* with / in get_rnml",
-    "dsst/coefficients\\.rs:190:30: replace \\* with / in get_rnml",
-    "dsst/coefficients\\.rs:204:46: replace \\* with / in get_rnml",
+    "dsst/coefficients\\.rs:182:17: replace \\* with / in get_rnml",
+    "dsst/coefficients\\.rs:182:23: replace \\* with / in get_rnml",
+    "dsst/coefficients\\.rs:185:30: replace \\* with / in get_rnml",
+    "dsst/coefficients\\.rs:192:30: replace \\* with / in get_rnml",
+    "dsst/coefficients\\.rs:206:46: replace \\* with / in get_rnml",
     # The guard around the sliding window. It sits inside `n > l`, so the only value the mutants
     # can add is `n == l + 1`, and there the loop `for in_ in (l + 2)..=n` is empty: the block
     # declares its locals and writes nothing. `l * 1` and `l - 1` widen the condition to something
     # already implied by `n > l`, which is the same case again.
-    "dsst/coefficients\\.rs:192:14: replace > with >= in get_rnml",
-    "dsst/coefficients\\.rs:192:18: replace \\+ with - in get_rnml",
-    "dsst/coefficients\\.rs:192:18: replace \\+ with \\* in get_rnml",
+    "dsst/coefficients\\.rs:194:14: replace > with >= in get_rnml",
+    "dsst/coefficients\\.rs:194:18: replace \\+ with - in get_rnml",
+    "dsst/coefficients\\.rs:194:18: replace \\+ with \\* in get_rnml",
 
     # `compute_max_ecc_pow`'s `m ≥ l` arm is unreachable, and so is everything only it reads. The
     # coefficient is `Cₙ₀` at `m = 0` and zero otherwise, so `csnm == 0.0` breaks the `m` loop
@@ -1413,35 +1413,35 @@ exclude_re = [
     # `m = 0 < 1 ≤ l` always, `279:22` compares equal-or-less against strictly-less on values that
     # are never equal, and the whole `else` arm — with `haf_pwr`, which nothing else reads — is
     # dead. These are dead code, not a test gap; see the note in the commit that added them.
-    "dsst/coefficients\\.rs:255:32: replace - with / in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:255:37: replace \\* with \\+ in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:255:37: replace \\* with / in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:279:22: replace < with <= in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:290:25: replace \\* with \\+ in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:290:25: replace \\* with / in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:291:25: replace \\* with \\+ in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:291:25: replace \\* with / in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:291:46: replace \\+ with - in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:291:46: replace \\+ with \\* in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:291:51: replace / with % in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:291:51: replace / with \\* in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:291:71: replace \\* with \\+ in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:291:71: replace \\* with / in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:291:89: replace \\+ with - in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:291:89: replace \\+ with \\* in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:257:32: replace - with / in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:257:37: replace \\* with \\+ in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:257:37: replace \\* with / in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:281:22: replace < with <= in compute_max_ecc_pow",
     "dsst/coefficients\\.rs:292:25: replace \\* with \\+ in compute_max_ecc_pow",
     "dsst/coefficients\\.rs:292:25: replace \\* with / in compute_max_ecc_pow",
     "dsst/coefficients\\.rs:293:25: replace \\* with \\+ in compute_max_ecc_pow",
     "dsst/coefficients\\.rs:293:25: replace \\* with / in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:293:38: replace - with \\+ in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:293:38: replace - with / in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:293:46: replace \\+ with - in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:293:46: replace \\+ with \\* in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:293:51: replace / with % in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:293:51: replace / with \\* in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:293:71: replace \\* with \\+ in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:293:71: replace \\* with / in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:293:89: replace \\+ with - in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:293:89: replace \\+ with \\* in compute_max_ecc_pow",
     "dsst/coefficients\\.rs:294:25: replace \\* with \\+ in compute_max_ecc_pow",
     "dsst/coefficients\\.rs:294:25: replace \\* with / in compute_max_ecc_pow",
     "dsst/coefficients\\.rs:295:25: replace \\* with \\+ in compute_max_ecc_pow",
     "dsst/coefficients\\.rs:295:25: replace \\* with / in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:296:29: replace \\+ with - in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:296:29: replace \\+ with \\* in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:296:62: delete - in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:295:38: replace - with \\+ in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:295:38: replace - with / in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:296:25: replace \\* with \\+ in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:296:25: replace \\* with / in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:297:25: replace \\* with \\+ in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:297:25: replace \\* with / in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:298:29: replace \\+ with - in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:298:29: replace \\+ with \\* in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:298:62: delete - in compute_max_ecc_pow",
 
     # `m ≡ 0` also makes three sites in the live arm degenerate. `max_deg − m` and `max_deg + m`
     # are the same factorial argument. `get_rnml` returns bit-identical values for `eps = +1` and
@@ -1450,15 +1450,15 @@ exclude_re = [
     # together, which by induction negates `pnml`/`dpnml` on odd steps only — and both enter the
     # result squared. IEEE-754 multiplication and addition are exactly sign-symmetric, so this is
     # bit equality, not agreement to a tolerance.
-    "dsst/coefficients\\.rs:282:71: replace - with \\+ in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:287:62: delete - in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:284:71: replace - with \\+ in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:289:62: delete - in compute_max_ecc_pow",
     # The `m` loop runs its body once and leaves. `m -= 1` reaches `-1`, which is not `> 0`, so the
     # loop repeats — and `-1 != 0` makes `cnm` zero, which breaks on the next line. `1 < 0`, `1 ==
     # 0` and `1 >= 0` land in the same two places. Every arm exits with the same state.
-    "dsst/coefficients\\.rs:313:15: replace \\+= with -= in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:314:18: replace > with < in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:314:18: replace > with == in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:314:18: replace > with >= in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:315:15: replace \\+= with -= in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:316:18: replace > with < in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:316:18: replace > with == in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:316:18: replace > with >= in compute_max_ecc_pow",
 
     # `(max_deg − max_ecc) / 2` instead of `(max_deg − max_ecc − 1) / 2` lowers the first `l` by
     # two when the difference is even and leaves it alone when it is odd, so the mutant sweeps a
@@ -1466,7 +1466,7 @@ exclude_re = [
     # non-negative factors and `last_term` starts at `0.0`, so that extra term cannot trip the
     # descent break, and `max_ecc` records the *largest* `l` whose term clears the tolerance —
     # which is the same in both. Measured over the full fixture: 1134 states x 6 degrees, no move.
-    "dsst/coefficients\\.rs:275:48: replace - with / in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:277:48: replace - with / in compute_max_ecc_pow",
     # The descent break is an optimisation, not a decision. It is reached only once `term` has
     # already fallen below the tolerance, and past the peak the terms keep falling, so continuing
     # the sweep visits nothing that could raise `max_ecc` again. Breaking earlier can only lower
@@ -1474,9 +1474,9 @@ exclude_re = [
     # three arms — `<=`, `==`, `>` — return the identical order on every one of the 1134 states.
     # Measured, not proved: unimodality of the term sequence is a property of the expansion that
     # this file does not establish.
-    "dsst/coefficients\\.rs:300:32: replace < with <= in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:300:32: replace < with == in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:300:32: replace < with > in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:302:32: replace < with <= in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:302:32: replace < with == in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:302:32: replace < with > in compute_max_ecc_pow",
     # The `min(max_deg_top − 2)` clamp never binds. `l ≡ max_deg (mod 2)` and the sweep stops
     # before `l` reaches `max_deg`, so `max_ecc ≤ max_deg − 2 ≤ max_deg_top − 2` at both exits,
     # and `min` always picks `max_ecc`. Raising the bound is therefore invisible. Lowering it is
@@ -1484,9 +1484,9 @@ exclude_re = [
     # caught, because that return does carry values above `max_deg_top / 2` (order 4 at degree 6).
     # The final return is reached only when every term fell below the tolerance, which caps
     # `max_ecc` far below that.
-    "dsst/coefficients\\.rs:311:48: replace - with \\+ in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:325:29: replace - with \\+ in compute_max_ecc_pow",
-    "dsst/coefficients\\.rs:325:29: replace - with / in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:313:48: replace - with \\+ in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:327:29: replace - with \\+ in compute_max_ecc_pow",
+    "dsst/coefficients\\.rs:327:29: replace - with / in compute_max_ecc_pow",
     # Halley's step in the equinoctial Kepler solve, `shift = f0 * 2 f1 / (f1 * 2 f1 - f0 f2)`, with
     # the `2 f1` rebuilt as `2 + f1` or `2 / f1`. Every variant keeps the same fixed point: as
     # `f0 -> 0` the step collapses to `f0 / f1`, which is Newton, so all three converge to the root

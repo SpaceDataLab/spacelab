@@ -670,12 +670,6 @@ mod tests {
         let half_ulp = 2.0 * f64::EPSILON;
         f64::from_bits(half_ulp.to_bits() + 1)
     }
-    /// The port reproduces Orekit's grid element-for-element, so the match is near machine precision:
-    /// the measured worst-case relative error is 6.2e-15 (one case bit-identical), the residual being
-    /// libm vs Hipparchus `FastMath` transcendentals (sin/cos/acos/sqrt) across the ~250-element sum.
-    /// The 1e-12 gate leaves head-room for libm variation across platforms while still asserting a
-    /// near-exact match — three orders tighter than the 1e-9 target.
-    const TOL: f64 = 1e-12;
 
     fn model() -> crate::spacecraft::Cannonball {
         crate::spacecraft::Cannonball {
@@ -687,7 +681,7 @@ mod tests {
     }
 
     /// Per-component relative error against Orekit, reporting the actual max.
-    fn assert_close(label: &str, got: [f64; 3], want: [f64; 3], tol: f64) -> f64 {
+    fn relative_distance(label: &str, got: [f64; 3], want: [f64; 3]) -> f64 {
         let mut max_rel = 0.0_f64;
         for i in 0..3 {
             let rel = if want[i] == 0.0 {
@@ -698,20 +692,15 @@ mod tests {
             max_rel = nan_max(max_rel, rel);
         }
         std::println!("{label}: max rel err {max_rel:.3e}");
-        assert!(
-            max_rel < tol,
-            "{label}: got {got:?} want {want:?} max rel {max_rel:.3e} (tol {tol:.0e})"
-        );
         max_rel
     }
 
-    fn check(
+    fn orekit_distance(
         label: &str,
         sat: [f64; 3],
         sun: [f64; 3],
         offset: f64,
         want: [f64; 3],
-        tol: f64,
     ) -> f64 {
         let force = KnockeEarthRadiation {
             model: model(),
@@ -727,7 +716,7 @@ mod tests {
         let got = force
             .model
             .radiation(&flux, &unit_sun_dir(&force.sun, 0.0, &sat));
-        assert_close(label, got, want, tol)
+        relative_distance(label, got, want)
     }
 
     /// Lambert's cosine against a closed form, and Orekit's against its own. (G3)
@@ -1036,99 +1025,97 @@ mod tests {
         }
     }
 
-    /// Under Orekit's cosine, the Knocke acceleration matches Orekit's `KnockeRediffusedForceModel`
-    /// across several LEO geometries (varying satellite position, Sun position and epoch) to the
-    /// reported tolerance — the whole grid, the zonal + seasonal coefficients, and the
-    /// inverse-square flux. The cosine itself is checked against a closed form above.
+    /// The distance to Orekit's `KnockeRediffusedForceModel` under its own cosine, over four LEO
+    /// geometries (satellite, Sun and epoch varied): the grid, the zonal and seasonal coefficients
+    /// and the inverse-square flux the two share. The flux kernel and its exact sums decide
+    /// (`derivations/knocke_lambert.mac`, the cap and crown tests above).
     #[test]
-    fn knocke_matches_orekit() {
-        let mut worst = 0.0_f64;
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn distance_to_orekit() {
+        let distances = [
+            orekit_distance(
+                "leo_a",
+                [
+                    6.92813700000000000e+06,
+                    5.00000000000000000e+05,
+                    8.00000000000000000e+05,
+                ],
+                [
+                    2.48130578062755620e+10,
+                    -1.33033126695834660e+11,
+                    -5.76679652360023650e+10,
+                ],
+                1.32624001700000000e+09,
+                [
+                    2.94015057576616260e-08,
+                    3.84728234066039800e-09,
+                    4.50453560245457400e-09,
+                ],
+            ),
+            orekit_distance(
+                "leo_b",
+                [
+                    -2.60000000000000000e+06,
+                    6.10000000000000000e+06,
+                    3.30000000000000000e+06,
+                ],
+                [
+                    1.40582772297491300e+11,
+                    4.76689008168298950e+10,
+                    2.06631012656421000e+10,
+                ],
+                1.33488001700000000e+09,
+                [
+                    -8.52099195474536900e-09,
+                    1.56764053717160820e-08,
+                    8.95255158567258800e-09,
+                ],
+            ),
+            orekit_distance(
+                "leo_c",
+                [
+                    1.50000000000000000e+06,
+                    -3.00000000000000000e+06,
+                    6.40000000000000000e+06,
+                ],
+                [
+                    -1.45301436606392820e+11,
+                    3.68900047844084900e+10,
+                    1.59920286764724850e+10,
+                ],
+                1.34784001700000000e+09,
+                [
+                    4.12691043963339500e-09,
+                    -6.71916868774013900e-09,
+                    1.53440573254043100e-08,
+                ],
+            ),
+            orekit_distance(
+                "leo_d",
+                [
+                    4.50000000000000000e+06,
+                    4.50000000000000000e+06,
+                    -3.20000000000000000e+06,
+                ],
+                [
+                    9.52246165024761200e+10,
+                    -1.03190795973850110e+11,
+                    -4.47324028622748500e+10,
+                ],
+                1.32883201700000000e+09,
+                [
+                    1.62704842791831230e-08,
+                    2.03964099811250900e-08,
+                    -1.20168131068493200e-08,
+                ],
+            ),
+        ];
 
-        worst = worst.max(check(
-            "leo_a",
-            [
-                6.92813700000000000e+06,
-                5.00000000000000000e+05,
-                8.00000000000000000e+05,
-            ],
-            [
-                2.48130578062755620e+10,
-                -1.33033126695834660e+11,
-                -5.76679652360023650e+10,
-            ],
-            1.32624001700000000e+09,
-            [
-                2.94015057576616260e-08,
-                3.84728234066039800e-09,
-                4.50453560245457400e-09,
-            ],
-            TOL,
-        ));
-
-        worst = worst.max(check(
-            "leo_b",
-            [
-                -2.60000000000000000e+06,
-                6.10000000000000000e+06,
-                3.30000000000000000e+06,
-            ],
-            [
-                1.40582772297491300e+11,
-                4.76689008168298950e+10,
-                2.06631012656421000e+10,
-            ],
-            1.33488001700000000e+09,
-            [
-                -8.52099195474536900e-09,
-                1.56764053717160820e-08,
-                8.95255158567258800e-09,
-            ],
-            TOL,
-        ));
-
-        worst = worst.max(check(
-            "leo_c",
-            [
-                1.50000000000000000e+06,
-                -3.00000000000000000e+06,
-                6.40000000000000000e+06,
-            ],
-            [
-                -1.45301436606392820e+11,
-                3.68900047844084900e+10,
-                1.59920286764724850e+10,
-            ],
-            1.34784001700000000e+09,
-            [
-                4.12691043963339500e-09,
-                -6.71916868774013900e-09,
-                1.53440573254043100e-08,
-            ],
-            TOL,
-        ));
-
-        worst = worst.max(check(
-            "leo_d",
-            [
-                4.50000000000000000e+06,
-                4.50000000000000000e+06,
-                -3.20000000000000000e+06,
-            ],
-            [
-                9.52246165024761200e+10,
-                -1.03190795973850110e+11,
-                -4.47324028622748500e+10,
-            ],
-            1.32883201700000000e+09,
-            [
-                1.62704842791831230e-08,
-                2.03964099811250900e-08,
-                -1.20168131068493200e-08,
-            ],
-            TOL,
-        ));
-
-        std::println!("Knocke worst-case relative error vs Orekit: {worst:.3e}");
+        crate::dsst::comparison_row(
+            "Knocke acceleration under Orekit's cosine, largest component",
+            "relative",
+            &distances,
+        );
     }
 
     /// Earth radiation pushes the satellite *outward* — the reradiated flux comes from below, so the

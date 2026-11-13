@@ -2,6 +2,8 @@
 //!
 //! Ported from Orekit's `CoefficientsFactory` (Vₙₛ, Qₙₛ, GₛHₛ), `UpperBounds` (Dₙˡ, Rₙₘˡ) and the
 //! `DSSTZonal.computeMeanElementsTruncations` logic. All names follow Danielson / Orekit.
+//! `derivations/dsst_coefficients.mac` proves each recurrence here its closed form and writes the
+//! values the tests hold it to.
 
 use core::cmp::Ordering;
 use std::vec::Vec;
@@ -328,8 +330,8 @@ pub fn compute_max_ecc_pow(
 #[cfg(test)]
 // `unwrap`/`expect` on a malformed fixture is the right failure: the file is checked in beside the
 // test and a parse error in it is a broken checkout, not a runtime condition to recover from. The
-// exact float comparisons are deliberate — four of these eight kinds agree with Orekit bit for bit,
-// and that is the claim being asserted.
+// exact float comparisons are deliberate: a closed form's exact zeros and its poles are values, not
+// tolerances.
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::float_cmp)]
 mod tests {
     use spacelab_testkit::nan_max;
@@ -338,7 +340,7 @@ mod tests {
 
     use super::{compute_gs_hs, compute_qns, compute_vns, get_dnl, get_rnml, jacobi_value_deriv};
 
-    /// The `(k, h)` and `(alpha, beta)` pairs the oracle drives `computeGsHs` with, in its order.
+    /// The fixtures' `(k, h)` and `(alpha, beta)` pairs, which their `gs`/`hs` rows index.
     const KH: [(f64, f64); 4] = [(0.0, 0.0), (0.05, -0.02), (-0.3, 0.4), (0.6, 0.6)];
     const AB: [(f64, f64); 4] = [(1.0, 0.0), (0.6, -0.8), (-0.28, 0.96), (0.0, 1.0)];
     /// `(gs, hs)` as `compute_gs_hs` returns them, and the ragged `qns[n][s]` table.
@@ -349,24 +351,39 @@ mod tests {
     const QNS_N: usize = 12;
     const GS_ORDER: usize = 12;
 
-    /// Per-kind agreement with Orekit: `(kind, relative bound, absolute bound at an exact zero)`.
+    /// Per-kind distance from the closed forms: `(kind, relative bound, absolute bound at an exact
+    /// zero)`, each 3–5× its measured worst.
     ///
-    /// Separate bounds, because one number would hide what the measurement actually says. `Vₙₛ`,
-    /// `Qₙₛ`, `Gₛ` and `Hₛ` come out **bit for bit identical** — the recurrences only add and
-    /// multiply, and both sides evaluate them in the same order. The two Danielson bounds divide,
-    /// and land within `5.223e-16` (`Dₙˡ`) and `4.581e-16` (`Rₙₘˡ`). The Jacobi polynomials are the
-    /// outlier at `7.836e-14`, and that is cancellation rather than disagreement: at `l = 6` the
-    /// terms are `O(1)` and their sum is `O(0.09)`, so Orekit's Hipparchus Horner scheme and this
-    /// port's own land a rounding apart in the last digits that survive.
+    /// Separate bounds, because one number would hide what the measurement says. `Vₙₛ` lands within
+    /// `1.9e-16` of its exact value, `Dₙˡ` within `2.3e-15`, `Gₛ` `5.5e-15` and `Qₙₛ` `6.5e-15`.
+    /// `Hₛ` at `6.5e-14` and the Jacobi polynomials at `1.1e-13` (value) and `5.3e-14`
+    /// (derivative) are cancellation: `Hₛ` of `(0.6 − 0.6i)ˢ` and `P₆⁽⁴,⁰⁾(−0.8)` sum terms a hundred
+    /// times their result. `Rₙₘˡ` is the outlier at `4.3e-9`, and only where `m > l` and
+    /// `εγ = 0.9995`: there `P⁽ˡ⁻ᵐ,ˡ⁺ᵐ⁾ₙ₋ₗ` has a zero of order `m − l` at `εγ = 1`, which the
+    /// three-term recurrence reaches by cancellation, so its digits go as `(1 − εγ)^(m−l)`. No
+    /// caller reaches it — the zonal truncation passes `m = 0` in both argument orders — and at
+    /// every other row the recurrence holds `2.7e-13`.
     const BOUNDS: [(&str, f64, f64); 8] = [
-        ("dnl", 6.0e-16, 0.0),
-        ("rnml", 5.0e-16, 0.0),
-        ("vns", 0.0, 0.0),
-        ("qns", 0.0, 0.0),
-        ("gs", 0.0, 0.0),
-        ("hs", 0.0, 0.0),
-        ("jacobi_value", 8.0e-14, 0.0),
-        ("jacobi_deriv", 2.0e-14, 3.0e-16),
+        ("dnl", 1.0e-14, 0.0),
+        ("rnml", 1.5e-8, 0.0),
+        ("vns", 8.0e-16, 0.0),
+        ("qns", 2.5e-14, 0.0),
+        ("gs", 2.0e-14, 0.0),
+        ("hs", 2.5e-13, 0.0),
+        ("jacobi_value", 4.0e-13, 0.0),
+        ("jacobi_deriv", 2.0e-13, 8.0e-16),
+    ];
+
+    /// What each kind is, for the comparison rows.
+    const QUANTITY: [(&str, &str); 8] = [
+        ("dnl", "DSST upper bound Dₙˡ(χ)"),
+        ("rnml", "DSST upper bound Rₙₘˡ(γ)"),
+        ("vns", "DSST coefficient Vₙₛ"),
+        ("qns", "DSST coefficient Qₙₛ(γ)"),
+        ("gs", "DSST coefficient Gₛ"),
+        ("hs", "DSST coefficient Hₛ"),
+        ("jacobi_value", "DSST Jacobi polynomial Pₗ⁽ᵛ,ʷ⁾(γ)"),
+        ("jacobi_deriv", "DSST Jacobi polynomial derivative"),
     ];
 
     #[derive(Default)]
@@ -377,7 +394,84 @@ mod tests {
         abs_row: String,
     }
 
-    /// Every scalar coefficient and both Danielson bounds, against Orekit 13.1.7 at `%.17e`.
+    /// One fixture row, `kind,a,b,c,d,e,value`; unused columns are 0.
+    struct Row<'a> {
+        line: &'a str,
+        kind: &'a str,
+        a: f64,
+        b: i64,
+        c: i64,
+        d: i64,
+        e: i64,
+        want: f64,
+    }
+
+    fn fixture(name: &str) -> String {
+        let path = std::format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+        std::fs::read_to_string(path).expect("fixture")
+    }
+
+    fn rows(text: &str) -> Vec<Row<'_>> {
+        text.lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+            .map(|line| {
+                let f: Vec<&str> = line.split(',').collect();
+                assert_eq!(f.len(), 7, "malformed row: {line}");
+                Row {
+                    line,
+                    kind: f[0],
+                    a: f[1].parse().unwrap(),
+                    b: f[2].parse().unwrap(),
+                    c: f[3].parse().unwrap(),
+                    d: f[4].parse().unwrap(),
+                    e: f[5].parse().unwrap(),
+                    want: f[6].parse().unwrap(),
+                }
+            })
+            .collect()
+    }
+
+    /// This module's value for a row, with the tables a kind needs built once.
+    struct Module {
+        vns: Vec<Vec<f64>>,
+        qns: Vec<(f64, QnsTable)>,
+        gs_hs: Vec<((usize, usize), GsHs)>,
+    }
+
+    impl Module {
+        fn new() -> Self {
+            Self {
+                vns: compute_vns(VNS_ORDER),
+                qns: Vec::new(),
+                gs_hs: Vec::new(),
+            }
+        }
+
+        fn value(&mut self, row: &Row) -> f64 {
+            let (a, b, c, d, e) = (row.a, row.b, row.c, row.d, row.e);
+            match row.kind {
+                // `a` is chi, and the caller always forms the two arguments this way.
+                "dnl" => get_dnl(a * a, a * libm::pow(a * a / 2.0, c as f64), b, c),
+                "rnml" => get_rnml(a, b, c, d, e, 1),
+                "vns" => self.vns[b as usize][c as usize],
+                "qns" => qns_for(&mut self.qns, a)[b as usize][c as usize],
+                "gs" => gs_hs_for(&mut self.gs_hs, (c as usize, d as usize)).0[b as usize],
+                "hs" => gs_hs_for(&mut self.gs_hs, (c as usize, d as usize)).1[b as usize],
+                "jacobi_value" => jacobi_value_deriv(b as usize, c, d, a).0,
+                "jacobi_deriv" => jacobi_value_deriv(b as usize, c, d, a).1,
+                other => panic!("unknown kind {other}"),
+            }
+        }
+    }
+
+    /// Every scalar coefficient and both Danielson bounds, against their closed forms at the
+    /// inputs' doubles. `derivations/dsst_coefficients.mac` proves in exact arithmetic that each
+    /// recurrence here is its closed form at every index the fixture holds (G1): `Vₙₛ` Danielson's
+    /// double-factorial quotient, `Qₙₛ = dˢPₙ/dγˢ`, `Gₛ + iHₛ` the complex power
+    /// `(k + ih)ˢ(α − iβ)ˢ`, the Jacobi polynomial its explicit sum, `Dₙˡ(χ) =
+    /// χⁿ⁺ˡ (n−1)!/(n+l−1)! · dˡPₙ₋₁/dχˡ` (at `l = 0` the mean of `(a/r)ⁿ⁺¹`, integrated there), and
+    /// `Rₙₘˡ` built on `P⁽ˡ⁻ᵐ,ˡ⁺ᵐ⁾ₙ₋ₗ(εγ)`. It then writes the closed forms' values, exact or at 60
+    /// digits, to 25 (G3).
     ///
     /// These six functions decide *where the eccentricity series is truncated*, and until this test
     /// nothing in the suite looked at them: the DSST tests compare a propagated orbit, and by then
@@ -386,69 +480,28 @@ mod tests {
     /// small truncates too early and costs accuracy silently — and it is exactly the shape a
     /// mutation survives: `cargo mutants` left `34%` of this file alive against `2.2%` for
     /// [`super::super::zonal`], which is checked term by term.
-    ///
-    /// `tools/orekit-oracle/DsstCoefficientsOracle.java` writes the fixture. Every method it calls
-    /// is `public static` in Orekit, so the golden values are that library's own and not a second
-    /// reading of the same paper by the same person.
     #[test]
-    fn the_scalar_coefficients_and_upper_bounds_match_orekit() {
-        let text = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/orekit_dsst_coefficients.csv"
-        ))
-        .expect("fixture");
-
-        let vns = compute_vns(VNS_ORDER);
-        let mut qns_cache: Vec<(f64, QnsTable)> = Vec::new();
-        let mut gs_hs_cache: Vec<((usize, usize), GsHs)> = Vec::new();
-
+    fn the_scalar_coefficients_and_upper_bounds_are_their_closed_forms() {
+        let text = fixture("dsst_coefficients.csv");
+        let mut module = Module::new();
         let mut worst: Vec<(&str, Worst)> =
             BOUNDS.iter().map(|b| (b.0, Worst::default())).collect();
-        let mut rows = 0usize;
+        let mut count = 0usize;
 
-        for line in text.lines() {
-            if line.starts_with('#') || line.is_empty() {
-                continue;
-            }
-            let f: Vec<&str> = line.split(',').collect();
-            assert_eq!(f.len(), 7, "malformed row: {line}");
-            let a: f64 = f[1].parse().unwrap();
-            let (b, c, d, e): (i64, i64, i64, i64) = (
-                f[2].parse().unwrap(),
-                f[3].parse().unwrap(),
-                f[4].parse().unwrap(),
-                f[5].parse().unwrap(),
-            );
-            let want: f64 = f[6].parse().unwrap();
-
-            let got = match f[0] {
-                // `a` is chi, and the caller always forms the two arguments this way.
-                "dnl" => get_dnl(a * a, a * libm::pow(a * a / 2.0, c as f64), b, c),
-                "rnml" => get_rnml(a, b, c, d, e, 1),
-                "vns" => vns[b as usize][c as usize],
-                "qns" => qns_for(&mut qns_cache, a)[b as usize][c as usize],
-                "gs" => gs_hs_for(&mut gs_hs_cache, (c as usize, d as usize)).0[b as usize],
-                "hs" => gs_hs_for(&mut gs_hs_cache, (c as usize, d as usize)).1[b as usize],
-                "jacobi_value" => jacobi_value_deriv(b as usize, c, d, a).0,
-                "jacobi_deriv" => jacobi_value_deriv(b as usize, c, d, a).1,
-                other => panic!("unknown kind {other}"),
-            };
-
-            // Three regimes, because one measure does not fit them. Where the reference is infinite
-            // there is nothing to divide by — `getRnml` really is infinite at `gamma = -1` with
-            // `m * eps < 0`, a perfectly retrograde equatorial orbit — so only exact agreement
-            // counts. Where it is an exact zero the miss is absolute, because a polynomial that
-            // cancels to zero in one evaluation order lands a rounding away in another. Otherwise
-            // it is relative, and a NaN has to be admitted rather than dropped: `NaN > worst` is
-            // false, so the plain comparison would report perfect agreement for the one row that
-            // has none.
-            let w = &mut worst.iter_mut().find(|(k, _)| *k == f[0]).unwrap().1;
+        for row in rows(&text) {
+            let (got, want, line) = (module.value(&row), row.want, row.line);
+            // Three regimes, because one measure does not fit them. Where the closed form has a pole
+            // — `Rₙₘˡ` at `γ = −1` with `m·ε < 0`, a perfectly retrograde equatorial orbit — there is
+            // nothing to divide by, and the row holds IEEE's reading of the product, `∞` or, where
+            // the other factor is an exact zero, NaN; only that same value counts. Where the closed
+            // form is an exact zero the miss is absolute, because a polynomial that cancels to zero
+            // exactly lands a rounding away in floating point. Otherwise it is relative, and a NaN
+            // has to be admitted rather than dropped: `NaN > worst` is false, so the plain
+            // comparison would report perfect agreement for the one row that has none.
+            let w = &mut worst.iter_mut().find(|(k, _)| *k == row.kind).unwrap().1;
             let exact = got == want || (got.is_nan() && want.is_nan());
             if !want.is_finite() {
-                assert!(
-                    exact,
-                    "{line} -> got {got:.17e}, no tolerance at an infinity"
-                );
+                assert!(exact, "{line} -> got {got:.17e}, no tolerance at a pole");
             } else if want == 0.0 {
                 if libm::fabs(got) > w.abs {
                     w.abs = libm::fabs(got);
@@ -461,10 +514,10 @@ mod tests {
                     w.rel_row = std::format!("{line} -> got {got:.17e}");
                 }
             }
-            rows += 1;
+            count += 1;
         }
 
-        assert_eq!(rows, 7712, "fixture row count");
+        assert_eq!(count, 7712, "fixture row count");
         let mut report = String::new();
         for ((kind, rel_bound, abs_bound), (_, w)) in BOUNDS.iter().zip(worst.iter()) {
             use core::fmt::Write as _;
@@ -476,6 +529,53 @@ mod tests {
             }
         }
         assert!(report.is_empty(), "\n{report}");
+    }
+
+    /// `compute_qns` keeps one column past `s_max`, `Qₙ,ₛₘₐₓ₊₁ = dQₙ,ₛₘₐₓ/dγ`, which the zonal rates
+    /// read, and a narrower table is the wider one's prefix: each column's recurrence reads only its
+    /// own column and the diagonal. The closed forms decide the full table above; this pins the
+    /// width the callers ask for. (S2)
+    #[test]
+    fn a_narrower_qns_table_is_the_wider_ones_prefix_with_its_derivative_column() {
+        for gamma in [-0.8, 0.4, 0.9995] {
+            let wide = compute_qns(gamma, QNS_N, QNS_N);
+            for s_max in 0..QNS_N {
+                for (n, row) in compute_qns(gamma, QNS_N, s_max).iter().enumerate() {
+                    assert_eq!(
+                        row.len(),
+                        (n + 1).min(s_max + 2),
+                        "n = {n}, s_max = {s_max}"
+                    );
+                    assert_eq!(row[..], wide[n][..row.len()], "n = {n}, s_max = {s_max}");
+                }
+            }
+        }
+    }
+
+    /// The distance of each quantity to Orekit 13.1.7's `CoefficientsFactory` and `UpperBounds`,
+    /// whose values `tools/orekit-oracle/DsstCoefficientsOracle.java` writes to the fixture that
+    /// pairs line by line with the closed forms': relative, over the rows where Orekit's value is
+    /// finite and not zero.
+    #[test]
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn distance_to_orekit() {
+        let mut module = Module::new();
+        let mut distances: Vec<(&str, Vec<f64>)> =
+            QUANTITY.iter().map(|q| (q.0, Vec::new())).collect();
+        for row in rows(&fixture("orekit_dsst_coefficients.csv")) {
+            if row.want.is_finite() && row.want != 0.0 {
+                let got = module.value(&row);
+                let d = &mut distances
+                    .iter_mut()
+                    .find(|(k, _)| *k == row.kind)
+                    .unwrap()
+                    .1;
+                d.push(libm::fabs((got - row.want) / row.want));
+            }
+        }
+        for ((_, quantity), (_, d)) in QUANTITY.iter().zip(distances.iter()) {
+            crate::dsst::comparison_row(quantity, "relative", d);
+        }
     }
 
     /// Does the worst miss break its bound? A NaN does, and a bare `worst > bound` says it does

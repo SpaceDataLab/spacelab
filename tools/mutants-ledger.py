@@ -16,7 +16,10 @@ none.
 `--rewrite` moves a stale anchor to where its code went, and only when its proof provably went with
 it: the function cargo-mutants names is byte-identical to the one in the commit that last wrote the
 entry, and the anchor sits at the same place inside it. A function that changed is reported, never
-followed -- a proof does not survive the code it was written against.
+followed -- a proof does not survive the code it was written against. An edit shifts every anchor
+below it, and an anchor shifted onto a neighbour of the same shape is not stale -- it claims the
+neighbour's mutant -- so every entry whose anchor names other code than at HEAD moves with the
+stale ones, and none of them holds a mutant against another while they do.
 
 `--since REV` catches the drift no count can see: an anchor that moved onto *another* mutant of the
 same shape still claims exactly one, so it reconciles, while the proof above it now excuses code it
@@ -113,26 +116,38 @@ def named(lines: list[str] | None, pattern: str) -> tuple[str, int, str] | None:
     return text.strip(), int(anchor["col"]) - indent, anchor["tail"]
 
 
-def transfers(rev: str, entries: list[str], every: list[str]) -> int:
-    """Entries kept since `rev` whose anchor now names code that no entry excluded there."""
+def ledger_at(rev: str) -> list[str]:
     shown = git("show", f"{rev}:{LEDGER.relative_to(ROOT)}")
     if shown is None:
         raise SystemExit(f"no ledger at {rev}")
-    then = [raw.replace("\\\\", "\\") for raw in ENTRY.findall(shown)]
-    kept_entries = set(then)
-    excluded_then: dict[str, set[tuple[str, int, str] | None]] = {}
-    moved = 0
+    return [raw.replace("\\\\", "\\") for raw in ENTRY.findall(shown)]
+
+
+def shifted(rev: str, entries: list[str], every: list[str]) -> list[tuple[str, str]]:
+    """Entries kept since `rev` whose anchor now names other code than it named there, with the file."""
+    kept_entries = set(ledger_at(rev))
+    out: list[tuple[str, str]] = []
     for pattern in entries:
         hits = [line for line in every if re.search(pattern, line)]
         if pattern not in kept_entries or len(hits) != 1:
             continue
         path = hits[0].split(":", 1)[0]
+        before = named(lines_at(rev, path), pattern)
+        if before is not None and named(lines_at(None, path), pattern) != before:
+            out.append((pattern, path))
+    return out
+
+
+def transfers(rev: str, entries: list[str], every: list[str]) -> list[str]:
+    """Entries kept since `rev` whose anchor now names code that no entry excluded there."""
+    then = ledger_at(rev)
+    excluded_then: dict[str, set[tuple[str, int, str] | None]] = {}
+    moved: list[str] = []
+    for pattern, path in shifted(rev, entries, every):
         now, before = (
             named(lines_at(None, path), pattern),
             named(lines_at(rev, path), pattern),
         )
-        if before is None or now == before:
-            continue
         if path not in excluded_then:
             excluded_then[path] = {
                 named(lines_at(rev, path), entry)
@@ -142,9 +157,9 @@ def transfers(rev: str, entries: list[str], every: list[str]) -> int:
             }
         if now not in excluded_then[path]:
             print(f"  moved onto other code since {rev}: {pattern}")
-            print(f"      then: {before[0]}")
+            print(f"      then: {before[0] if before else None}")
             print(f"      now:  {now[0] if now else None}")
-            moved += 1
+            moved.append(pattern)
     return moved
 
 
@@ -165,9 +180,10 @@ def relocate(
         return None, "no commit wrote this entry"
     commit = log.strip()
     found: list[str] = []
+    taken: list[str] = []
     for name in every:
         hit = moved.search(name)
-        if hit is None or name in claimed or int(hit[2]) != col:
+        if hit is None or int(hit[2]) != col:
             continue
         path = name.split(":", 1)[0]
         span = function_spans(path).get(name)
@@ -177,9 +193,15 @@ def relocate(
         body = (ROOT / path).read_text().splitlines()[span[0] - 1 : span[1]]
         start = line - (int(hit[1]) - span[0]) - 1
         if start >= 0 and old.splitlines()[start : start + len(body)] == body:
-            found.append(f"{anchor['file']}:{hit[1]}:{col}: {anchor['tail']}")
+            target = taken if name in claimed else found
+            target.append(f"{anchor['file']}:{hit[1]}:{col}: {anchor['tail']}")
     if len(found) == 1:
         return found[0], f"function unchanged since {commit[:10]}"
+    if not found and taken:
+        return (
+            None,
+            f"its code is claimed by another entry: {taken[0].split(': ', 1)[0]}",
+        )
     if not found:
         return None, f"its function changed since {commit[:10]}: re-read the proof"
     return None, f"{len(found)} identical functions could hold it"
@@ -218,34 +240,47 @@ def main(move_stale: bool, since: str | None) -> int:
             bad += 1
 
     if since is not None:
-        bad += transfers(since, entries, every)
+        bad += len(transfers(since, entries, every))
 
     excluded = len(every) - len(kept)
     print(
         f"{len(entries)} entries, {excluded} mutants excluded, {len(claims)} claimed, {bad} broken"
     )
-    if stale and move_stale:
-        return rewrite(stale, every, set(claims))
+    if move_stale:
+        drifted = [pattern for pattern, _ in shifted("HEAD", entries, every)]
+        if stale or drifted:
+            held = {
+                hit
+                for hit, patterns in claims.items()
+                if not set(patterns) & set(drifted)
+            }
+            return rewrite(stale + drifted, every, held)
     return 1 if bad or len(entries) != excluded or len(claims) != excluded else 0
 
 
-def rewrite(stale: list[str], every: list[str], claimed: set[str]) -> int:
-    """Move each stale anchor `relocate` can place, then reconcile again from scratch."""
-    text = LEDGER.read_text()
-    moved = 0
-    for pattern in stale:
+def rewrite(movable: list[str], every: list[str], claimed: set[str]) -> int:
+    """Move each anchor `relocate` can place, then reconcile again from scratch.
+
+    The ledger is rewritten line by line once every move is known: a string replace in move order
+    would let one entry's new anchor collide with another's old one before that one moved.
+    """
+    moves: dict[str, str] = {}
+    for pattern in movable:
         new, why = relocate(pattern, every, claimed)
         if new is None:
             print(f"  left for a hand: {pattern} -- {why}")
             continue
-        old_entry = '"' + pattern.replace("\\", "\\\\") + '",'
-        assert text.count(old_entry) == 1, old_entry
-        text = text.replace(old_entry, '"' + new.replace("\\", "\\\\") + '",')
         claimed.add(next(name for name in every if re.search(new, name)))
+        moves[pattern] = new
         print(f"  moved: {pattern} -> {new.split(': ', 1)[0]} ({why})")
-        moved += 1
-    LEDGER.write_text(text)
-    print(f"{moved} of {len(stale)} stale anchors moved; reconciling again")
+    lines = LEDGER.read_text().splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if (m := ENTRY.match(line)) and (old := m[1].replace("\\\\", "\\")) in moves:
+            lines[i] = line.replace(m[1], moves[old].replace("\\", "\\\\"), 1)
+    LEDGER.write_text("".join(lines))
+    print(
+        f"{len(moves)} of {len(movable)} stale or drifted anchors moved; reconciling again"
+    )
     return main(move_stale=False, since=None)
 
 

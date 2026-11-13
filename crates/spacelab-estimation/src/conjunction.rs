@@ -694,43 +694,56 @@ mod tests {
         println!("worst: Foster–Patera {worst_fp:.2e}, Foster–grid {worst_fg:.2e}");
     }
 
-    /// Oracle (a), 2-D — Chan's method reproduces its published reference values. The twelve canonical
-    /// Chan cases (Chan 1997/2008, transcribed via Orekit's `Chan1997Test`) plus two Alfano-paper and
-    /// two operational (CSM/CDM) cases, spanning `Pc` from `10⁻²` to `10⁻²⁸`. Matching to the four
-    /// significant figures the references are quoted at exercises the cancellation-free series exactly
-    /// on the deep tails (cases 8, 10, CDM-2) where the naive form fails.
+    /// Chan's series at 80 digits, `derivations/conjunction_chan_series.gp` (3), verbatim.
+    const CHAN_SERIES: [(&str, f64); 16] = [
+        ("Chan 01", 9.7541134791321233e-3),
+        ("Chan 02", 9.1888295451067646e-3),
+        ("Chan 03", 6.5858882175785118e-3),
+        ("Chan 04", 6.1352747547658242e-3),
+        ("Chan 05", 1.5765867064906427e-5),
+        ("Chan 06", 1.0108802208417689e-5),
+        ("Chan 07", 6.4434448370136940e-8),
+        ("Chan 08", 3.2158958726704655e-27),
+        ("Chan 09", 3.0326495077481234e-6),
+        ("Chan 10", 9.6449306453521464e-28),
+        ("Chan 11", 1.0390516877357680e-4),
+        ("Chan 12", 1.5564947707410483e-9),
+        ("CSM 1", 1.8934294435524500e-3),
+        ("CDM 2", 2.2879764195898509e-20),
+        ("Alfano 3", 3.1263587828223145e-2),
+        ("Alfano 5", 8.7618497076272996e-184),
+    ];
+
+    /// Chan's method is its series on the published cases (G3). The twelve canonical Chan cases
+    /// (Chan 1997/2008), Alfano 2005 case 3 and two operational CSM/CDM cases span `Pc` from `10⁻²`
+    /// to `10⁻²⁸`. The reference is the series itself at 80 digits, by the Poisson mixture and by the
+    /// Rice integral (`derivations/conjunction_chan_series.gp`), which also shows every published
+    /// four- or five-figure value to be that series rounded. The cancellation-free sum holds it to
+    /// 2.8e-15 relative (bound 1e-14), deep tails included (cases 8, 10, CDM 2), where the naive
+    /// `1 − Σ` form loses every digit.
     #[test]
-    fn chan_reproduces_published_reference_values() {
-        // (miss_x, miss_y, sigma_x, sigma_y, radius, reference Pc, label)
+    fn chan_is_its_series_on_the_published_cases() {
+        // (miss_x, miss_y, sigma_x, sigma_y, radius, label)
         let cases = [
-            (0.0, 10.0, 25.0, 50.0, 5.0, 9.754e-3, "Chan 01"),
-            (10.0, 0.0, 25.0, 50.0, 5.0, 9.189e-3, "Chan 02"),
-            (0.0, 10.0, 25.0, 75.0, 5.0, 6.586e-3, "Chan 03"),
-            (10.0, 0.0, 25.0, 75.0, 5.0, 6.135e-3, "Chan 04"),
-            (0.0, 1000.0, 1000.0, 3000.0, 10.0, 1.577e-5, "Chan 05"),
-            (1000.0, 0.0, 1000.0, 3000.0, 10.0, 1.011e-5, "Chan 06"),
-            (0.0, 10000.0, 1000.0, 3000.0, 10.0, 6.443e-8, "Chan 07"),
-            (10000.0, 0.0, 1000.0, 3000.0, 10.0, 3.216e-27, "Chan 08"),
-            (0.0, 10000.0, 1000.0, 10000.0, 10.0, 3.033e-6, "Chan 09"),
-            (10000.0, 0.0, 1000.0, 10000.0, 10.0, 9.645e-28, "Chan 10"),
-            (0.0, 5000.0, 1000.0, 3000.0, 50.0, 1.039e-4, "Chan 11"),
-            (5000.0, 0.0, 1000.0, 3000.0, 50.0, 1.556e-9, "Chan 12"),
-            (
-                84.875546,
-                60.583685,
-                57.918666,
-                152.8814468,
-                10.3,
-                1.8934e-3,
-                "CSM 1",
-            ),
+            (0.0, 10.0, 25.0, 50.0, 5.0, "Chan 01"),
+            (10.0, 0.0, 25.0, 50.0, 5.0, "Chan 02"),
+            (0.0, 10.0, 25.0, 75.0, 5.0, "Chan 03"),
+            (10.0, 0.0, 25.0, 75.0, 5.0, "Chan 04"),
+            (0.0, 1000.0, 1000.0, 3000.0, 10.0, "Chan 05"),
+            (1000.0, 0.0, 1000.0, 3000.0, 10.0, "Chan 06"),
+            (0.0, 10000.0, 1000.0, 3000.0, 10.0, "Chan 07"),
+            (10000.0, 0.0, 1000.0, 3000.0, 10.0, "Chan 08"),
+            (0.0, 10000.0, 1000.0, 10000.0, 10.0, "Chan 09"),
+            (10000.0, 0.0, 1000.0, 10000.0, 10.0, "Chan 10"),
+            (0.0, 5000.0, 1000.0, 3000.0, 50.0, "Chan 11"),
+            (5000.0, 0.0, 1000.0, 3000.0, 50.0, "Chan 12"),
+            (84.875546, 60.583685, 57.918666, 152.8814468, 10.3, "CSM 1"),
             (
                 -692.362272,
                 4475.456261,
                 193.454603,
                 562.027293,
                 13.2,
-                2.2880e-20,
                 "CDM 2",
             ),
             (
@@ -739,23 +752,23 @@ mod tests {
                 1.4101830,
                 114.2585190,
                 15.0,
-                3.1264e-2,
-                "Alfano 3 (Chan)",
+                "Alfano 3",
             ),
         ];
         let mut worst = 0.0_f64;
-        for (mx, my, sx, sy, r, reference, label) in cases {
+        for (mx, my, sx, sy, r, label) in cases {
+            let (_, series) = CHAN_SERIES.iter().find(|(l, _)| *l == label).unwrap();
             let plane = EncounterPlane::from_diagonal(mx, my, sx, sy, r).unwrap();
             let chan = plane.probability_chan();
-            let rel = (chan - reference).abs() / reference;
+            let rel = (chan - series).abs() / series;
             worst = worst.max(rel);
-            println!("{label:16}: ref={reference:.4e} chan={chan:.4e} rel={rel:.2e}");
+            println!("{label:16}: series={series:.6e} chan={chan:.6e} rel={rel:.2e}");
             assert!(
-                rel < 1e-3,
-                "{label}: Chan {chan:.4e} vs ref {reference:.4e} = {rel:.2e}"
+                rel < 1e-14,
+                "{label}: Chan {chan:.6e} vs series {series:.6e} = {rel:.2e}"
             );
         }
-        println!("worst Chan relative error vs published (4-sig-fig) references: {worst:.2e}");
+        println!("worst Chan relative error vs the 80-digit series: {worst:.2e}");
     }
 
     /// Oracle (a), 3-D — the full projection pipeline reproduces the NASA CARA "Alfano" conjunction
@@ -1027,41 +1040,52 @@ mod tests {
         println!("worst CARA relative error (Foster vs published reference): {worst:.2e}");
     }
 
-    /// The documented Chan limitation, made concrete against an exact reference. Alfano paper cases 3
-    /// (`σ_y/σ_x ≈ 81`) and 5 (`≈ 4764`) are extreme ellipses; Patera reproduces the exact reference
-    /// `Pc` (Alfano 2007, via Orekit's `Alfano2005Test`), while Chan's equal-area approximation is off
-    /// by `3×` on case 3 and collapses to a meaningless underflow on case 5. This is why elongated
-    /// covariances call for the contour method, not the series.
+    /// The documented Chan limitation, made concrete against the exact `Pc` (G3). Alfano's cases 3
+    /// (`σ_y/σ_x ≈ 81`) and 5 (`≈ 4764`) are extreme ellipses. Patera and Foster reproduce the
+    /// defining integral (`derivations/conjunction_pc.gp`, 40 digits) — Patera to 3.3e-15, Foster to
+    /// 5.6e-14, bound 3e-13 — while Chan's equal-area series, itself 3.126e-2 and 8.76e-184 there
+    /// (`derivations/conjunction_chan_series.gp`), is a factor 3.2 low on case 3 and collapses on
+    /// case 5. This is why elongated covariances call for the contour method, not the series.
     #[test]
     fn chan_degrades_where_patera_stays_exact_for_extreme_ellipses() {
-        // Alfano 3: exact reference 0.10038.
+        // The defining integral at 40 digits, derivations/conjunction_pc.gp.
+        let (exact3, exact5) = (
+            1.0038295012567774197917971988345168920937e-1,
+            4.4509859522920124935224895793070288608893e-2,
+        );
         let a3 = EncounterPlane::from_diagonal(-3.8872073, 0.1591646, 1.4101830, 114.2585190, 15.0)
             .unwrap();
         let (p3, c3) = (a3.probability_patera(), a3.probability_chan());
-        println!("Alfano 3 (81:1): exact≈0.10038  patera={p3:.5e}  chan={c3:.5e}");
+        println!("Alfano 3 (81:1): exact={exact3:.5e}  patera={p3:.5e}  chan={c3:.5e}");
+        println!("Patera 3: {:.2e} relative", (p3 / exact3 - 1.0).abs());
         assert!(
-            (p3 - 0.10038).abs() < 1e-4,
-            "Patera should match the exact reference: {p3:.5e}"
+            (p3 / exact3 - 1.0).abs() < 3e-13,
+            "Patera should match the exact Pc: {p3:.5e}"
         );
         assert!(
             c3 < 0.5 * p3,
             "Chan must visibly under-predict here: {c3:.5e} vs {p3:.5e}"
         );
 
-        // Alfano 5: exact reference 0.044510; Chan underflows to ≈0.
+        // Alfano 5: Chan underflows to ≈0.
         let a5 = EncounterPlane::from_diagonal(-1.2217895, 2.1230067, 0.0373279, 177.8109003, 10.0)
             .unwrap();
         let (p5, c5) = (a5.probability_patera(), a5.probability_chan());
         let f5 = a5.probability_foster();
         println!(
-            "Alfano 5 (4764:1): exact≈0.044510  patera={p5:.5e}  foster={f5:.5e}  chan={c5:.5e}"
+            "Alfano 5 (4764:1): exact={exact5:.5e}  patera={p5:.5e}  foster={f5:.5e}  chan={c5:.5e}"
+        );
+        println!(
+            "Patera 5: {:.2e}, Foster 5: {:.2e} relative",
+            (p5 / exact5 - 1.0).abs(),
+            (f5 / exact5 - 1.0).abs()
         );
         assert!(
-            (p5 - 0.044510).abs() < 1e-4,
-            "Patera should match the exact reference: {p5:.5e}"
+            (p5 / exact5 - 1.0).abs() < 3e-13,
+            "Patera should match the exact Pc: {p5:.5e}"
         );
         assert!(
-            (f5 - 0.044510).abs() < 1e-4,
+            (f5 / exact5 - 1.0).abs() < 3e-13,
             "Foster's analytic radial should too: {f5:.5e}"
         );
         assert!(c5 < 1e-10, "Chan collapses for this aspect ratio: {c5:.5e}");

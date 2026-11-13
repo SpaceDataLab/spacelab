@@ -1285,9 +1285,10 @@ mod tests {
         }
     }
 
-    /// With the Sun exactly along the rotation axis the projection vanishes and Orekit falls back
-    /// to `axis.orthogonal()`. `normalize([1,2,3])·itself` is exactly `1.0`, so `f = 1 − d²` is
-    /// exactly zero here and the branch is reached rather than approached.
+    /// With the Sun exactly along the rotation axis the projection vanishes, and the array's normal
+    /// falls back to `orthogonal(axis)`, as Orekit's does. `normalize([1,2,3])·itself` is exactly
+    /// `1.0`, so `f = 1 − d²` is exactly zero here and the branch is reached rather than approached.
+    /// (S2)
     #[test]
     fn an_array_edge_on_to_the_sun_falls_back_to_an_arbitrary_perpendicular() {
         let axis = normalize([1.0, 2.0, 3.0]);
@@ -1859,7 +1860,7 @@ mod tests {
     /// smallest positive normal `f64`. Without that early return `1/|flux|` is infinite and the sum
     /// is NaN, so a zero flux must give exactly zero; and the comparison is strict, so `|flux|²`
     /// exactly *at* the threshold must still be evaluated. `2⁻⁵¹¹` squares to `2⁻¹⁰²²` with no
-    /// rounding, which puts the boundary within reach rather than near it.
+    /// rounding, which puts the boundary within reach rather than near it. (S2)
     #[test]
     fn a_null_radiation_flux_returns_zero_and_the_threshold_is_strict() {
         let bw = box_only();

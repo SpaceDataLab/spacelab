@@ -406,7 +406,7 @@ mod tests {
 
     /// Orekit's m-daily eccentricity bound is `min(4, degree − 2)`, but the 4×4 fixture sits on the one
     /// degree where `degree − 2` and `degree / 2` agree, so it pins the rule at a single point. Walk the
-    /// degrees the truncation is defined over instead.
+    /// degrees the truncation is defined over instead. (S2)
     #[test]
     fn the_mdaily_eccentricity_bound_follows_the_degree() {
         for (deg, want) in [(2, 0), (3, 1), (4, 2), (5, 3), (6, 4), (8, 4)] {
@@ -426,7 +426,7 @@ mod tests {
     /// LEO, where `resonant_orders` is empty, `j_res` is `0`, and the exclusion collapses onto the `j = 0`
     /// skip that the m-daily loop already owns. A GEO placed on the 1:1 resonance separates them: with
     /// `n = θ̇` the reciprocal `1/(j·n − m·θ̇)` runs to ~1e19 for `j = m`, so keeping any resonant term
-    /// moves the correction by ~1e15 over its true size.
+    /// moves the correction by ~1e15 over its true size. (S2)
     #[test]
     fn the_resonant_term_is_excluded_from_the_short_period_sum() {
         use libm::{cbrt, fabs};
@@ -452,17 +452,23 @@ mod tests {
         std::println!("GEO-resonant tesseral short period: {sp:?}");
     }
 
-    /// `osculating` is the public entry point and no test called it: the sign with which the correction
-    /// is applied was free. Against Orekit's own mean/δ pair it is not.
+    /// `osculating` is the public entry point, and the sign it applies the correction with is not a
+    /// convention: the correction `η` solves `n·∂η/∂λ = F − ⟨F⟩`, the osculating rate less the mean
+    /// one, so it is osculating minus mean (`tests/dsst_short_period_identity.rs` checks that
+    /// equation, G2). The entry point must therefore return `mean + η`, bit for bit. (S2)
     #[test]
     fn osculating_adds_the_short_period_correction_to_the_mean() {
         let tess = tesseral();
-        for k in 0..4 {
-            let osc = tess.osculating(MEAN[k], GMST);
+        for mean in MEAN {
+            let aux = DsstAuxiliary::new(mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], MU);
+            let eta = tess.short_period_correction(&aux, GMST);
+            assert!(
+                eta.iter().all(|c| *c != 0.0),
+                "a correction to apply: {eta:?}"
+            );
+            let osc = tess.osculating(mean, GMST);
             for i in 0..6 {
-                let want = MEAN[k][i] + DELTA[k][i];
-                let miss = (osc[i] - want).abs() / f64::EPSILON.mul_add(want.abs(), 1e-15);
-                assert!(miss < 8.0, "k={k} osc[{i}]: {miss:.2} ulps off mean + δ");
+                assert_eq!(osc[i], mean[i] + eta[i], "osc[{i}] is not mean + η");
             }
         }
     }

@@ -558,12 +558,13 @@ fn the_shipped_interval_covers_what_it_says_it_covers() {
 /// What resolving the geomagnetic driver at its native 3-hour cadence is worth, in the one place it
 /// can be seen: a storm that began at 17 UT, on a day whose average `Ap` is 105.
 ///
-/// The daily-`Ap` column is here because it is what Orekit's `NRLMSISE00` computes, so it is the
-/// number this crate has to reproduce before any claim about the array version means anything.
-/// Measured against `tools/orekit-oracle/DensityOracle.java`: 2.019 / 1.236 quiet and 2.086 / 1.346
-/// storm, against 2.019 / 1.235 and 2.087 / 1.346 here.
+/// The daily-`Ap` column is the baseline: the same model driven by the day's mean alone. The
+/// accelerometer-derived densities decide; the bands below are this model's measured fit to them.
 #[test]
 fn the_three_hourly_ap_array_is_what_carries_the_storm() {
+    // A distance, not a verdict: Orekit 13.1.7's `NRLMSISE00` on the daily driver
+    // (`tools/orekit-oracle/DensityOracle.java`) fits 2.019 / 1.236 quiet and 2.086 / 1.346 storm,
+    // against 2.019 / 1.235 and 2.087 / 1.346 here.
     let series = fixture_drivers();
     let d = series.view();
     let quiet = evaluations(GRACE_FO_QUIET, GRACE_FO, d);

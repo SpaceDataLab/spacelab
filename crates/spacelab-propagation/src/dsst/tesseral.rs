@@ -906,7 +906,8 @@ mod tests {
     /// bytecode). Both rate fixtures are commensurate to ~1e-8, hundreds of times deeper than the
     /// window, so the window's *width* was never observed — only that it accepts an exact
     /// resonance. Two GEO-like orbits placed either side of it are: at θ̇/n = 1.09 only m = 1 is
-    /// inside (0.09 ≤ 0.1) while m = 2..4 are 0.18, 0.27, 0.36 outside; at 1.11 nothing is.
+    /// inside (0.09 ≤ 0.1) while m = 2..4 are 0.18, 0.27, 0.36 outside; at 1.11 nothing is. The
+    /// expected sets are that arithmetic on the window, and the off-window rates its exact zero. (S2)
     #[test]
     fn resonance_window_is_one_part_in_ten_revolutions() {
         // n = √(µ/a³) ⇒ a = ∛(µ · (ratio/θ̇)²) for a prescribed ratio = θ̇/n.
@@ -940,7 +941,7 @@ mod tests {
     /// contribute is spurious. Around Earth the `j ≥ 1` test never decides anything on its own —
     /// an order that rounds to `j = 0` is always rejected by the tolerance as well, since
     /// `m·θ̇/n ≥ θ̇/n = period / 86164 s` and the window is at most 0.1. A body rotating 7000×
-    /// slower separates the two: `m·θ̇/n ≤ 5.5e-4` rounds to 0 and sits well inside the window.
+    /// slower separates the two: `m·θ̇/n ≤ 5.5e-4` rounds to 0 and sits well inside the window. (S2)
     #[test]
     fn zero_frequency_order_is_not_resonant() {
         let slow = tesseral_with_rate(1.0e-8);

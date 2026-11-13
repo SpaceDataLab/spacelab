@@ -1,38 +1,51 @@
-/* The truncation of the Stumpff series in spacelab-astro `kepler::stumpff`, certified (plans/17
+/* The Stumpff polynomials in spacelab-astro `kepler::stumpff`, generated and certified (plans/17
    Ф28.B).
 
-   Inside |w| <= 1/32 the code takes
-     C(w) ~ 1/2 - w/24 + w^2/720 - w^3/40320 + w^4/3628800,
-     S(w) ~ d6 - w/120 + w^2/5040 - w^3/362880 + w^4/39916800,
-   d6 the double `1.0 / 6.0` folds to; every other coefficient is exact (the divisions by 24, 120,
-   ... run at run time, and their rounding is evaluation error, not this file's). Each sign of w is
-   its own function of s = sqrt|w| in [0, sqrt(1/32)]: C = (1 - cos s)/s^2 and S = (s - sin s)/s^3
-   for w = s^2, (cosh s - 1)/s^2 and (sinh s - s)/s^3 for w = -s^2. supnorm_lib.sollya's `split`
-   encloses sup |p/f - 1| on each. S's bound is about three times its first dropped term, because
-   d6 alone is 2^-54 = 5.55e-17 off at w = 0.
+   Inside |w| <= 1/32 the code evaluates C(w) and S(w) as degree-4 polynomials in w with double
+   coefficients, STUMPFF_C_POLY and STUMPFF_S_POLY. They are fpminimax's best relative fit on
+   [-1/32; 1/32] to the Taylor polynomial to w^20, whose own truncation is below 1e-80 relative there.
+   They were generated at prec = 300. fpminimax's last two coefficients move with the working
+   precision (150, 200, 250, 300, 400, 600 and 1000 bits give seven different pairs), so this file
+   regenerates them at prec = 300 and prints whether it reproduces the committed doubles, but the
+   gate is the certified bound of the committed polynomial, whatever a regeneration gives.
+   approximation_supnorm.mac checks that the Rust literals parse to these doubles.
 
-   The CANDIDATE lines are not a gate (plans/17 Ф28.B part 2): fpminimax's degree-4 polynomial in w
-   with double coefficients, against the Taylor polynomial to w^20 (whose own truncation is below
-   1e-80 relative here), and supnorm's bound on it. C's is 16 times closer than the shipped series;
-   S's cannot beat the 2^-54 its constant term costs.
+   Each sign of w is its own function of s = sqrt|w| in [0, sqrt(1/32)]: C = (1 - cos s)/s^2 and
+   S = (s - sin s)/s^3 for w = s^2, (cosh s - 1)/s^2 and (sinh s - s)/s^3 for w = -s^2.
+   supnorm_lib.sollya's `split` encloses sup |p/f - 1| on each. S's bound is the 2^-54 its constant
+   term costs: that term is the double nearest 1/6, which fpminimax cannot improve on.
 
    cd derivations && timeout 300 sollya kepler_stumpff_supnorm.sollya                            */
 
 execute("supnorm_lib.sollya");
 
-d6 = round(1/6, D, RN);
-b = round(sqrt(1/32), prec, RU);
-
-split("kepler_stumpff_C_pos", x^2 * (1/2 - x^2/24 + x^4/720 - x^6/40320 + x^8/3628800), 1 - cos(x), b, 48);
-split("kepler_stumpff_C_neg", x^2 * (1/2 + x^2/24 + x^4/720 + x^6/40320 + x^8/3628800), cosh(x) - 1, b, 48);
-split("kepler_stumpff_S_pos", x^3 * (d6 - x^2/120 + x^4/5040 - x^6/362880 + x^8/39916800), x - sin(x), b, 48);
-split("kepler_stumpff_S_neg", x^3 * (d6 + x^2/120 + x^4/5040 + x^6/362880 + x^8/39916800), sinh(x) - x, b, 48);
+cc = [| 0.5, -0x1.55555555554fcp-5, 0x1.6c16c16c16cbcp-10, -0x1.a01a046ca0206p-16,
+        0x1.27e4f90f06504p-22 |];
+sc = [| 0x1.5555555555555p-3, -0x1.11111111110f5p-7, 0x1.a01a01a16f5a3p-13, -0x1.71de3c1124996p-19,
+        0x1.addbccc35eef3p-26 |];
 
 h = 1/32;
 tc = 0; ts = 0;
 for k from 0 to 20 do { tc = tc + (-x)^k / fact(2*k + 2); ts = ts + (-x)^k / fact(2*k + 3); };
-mc = supnorm(fpminimax(tc, 4, [|D, D, D, D, D|], [-h; h], relative), tc, [-h; h], relative, acc);
-ms = supnorm(fpminimax(ts, 4, [|D, D, D, D, D|], [-h; h], relative), ts, [-h; h], relative, acc);
-print("CANDIDATE kepler_stumpff_C fpminimax degree 4:", dec4(sup(mc), floor(log10(sup(mc))) - 3, true));
-print("CANDIDATE kepler_stumpff_S fpminimax degree 4:", dec4(sup(ms), floor(log10(sup(ms))) - 3, true));
+
+generated = proc(name, p, committed) {
+  var k, same;
+  same = true;
+  for k from 0 to 4 do if coeff(p, k) != committed[k] then same = false;
+  if same then print("GENERATED", name, ": fpminimax at prec = 300 gives the committed coefficients")
+  else print("GENERATED", name, ": fpminimax at prec = 300 now gives other coefficients", p);
+};
+
+poly = proc(a, y) { return a[0] + y * (a[1] + y * (a[2] + y * (a[3] + y * a[4]))); };
+
+prec = 300!;
+generated("kepler_stumpff_C", fpminimax(tc, 4, [|D, D, D, D, D|], [-h; h], relative), cc);
+generated("kepler_stumpff_S", fpminimax(ts, 4, [|D, D, D, D, D|], [-h; h], relative), sc);
+prec = 200!;
+
+b = round(sqrt(1/32), prec, RU);
+split("kepler_stumpff_C_pos", x^2 * poly(cc, x^2), 1 - cos(x), b, 48);
+split("kepler_stumpff_C_neg", x^2 * poly(cc, -x^2), cosh(x) - 1, b, 48);
+split("kepler_stumpff_S_pos", x^3 * poly(sc, x^2), x - sin(x), b, 48);
+split("kepler_stumpff_S_neg", x^3 * poly(sc, -x^2), sinh(x) - x, b, 48);
 quit;

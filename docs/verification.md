@@ -411,8 +411,8 @@ bound is missing or extra.
 
 | Series | Code | Domain | Certified sup \|p/f − 1\| | Claim in the code | Part 2 |
 |---|---|---|---|---|---|
-| Stumpff C, degree 4 in w | `spacelab-astro` `kepler::stumpff` | \|w\| ≤ 1/32 | [1.247, 1.248]e-16 for w ≥ 0, [1.241, 1.242]e-16 below | first dropped term 1.2e-16: holds | **candidate**: fpminimax's degree 4 reaches 7.810e-18, 16× closer |
-| Stumpff S, degree 4 in w | same | \|w\| ≤ 1/32 | [5.552, 5.553]e-17 for w ≥ 0, **[8.409, 8.411]e-17** below | 2.9e-17: the dropped term only; `1.0 / 6.0` adds 5.55e-17. **Comment corrected** | no: fpminimax reaches 5.561e-17, the 2⁻⁵⁴ of the constant term |
+| Stumpff C, degree 4 in w | `spacelab-astro` `kepler::stumpff` | \|w\| ≤ 1/32 | fpminimax: [7.809, 7.810]e-18 for w ≥ 0, [7.802, 7.803]e-18 below; the Taylor series it replaced: [1.247, 1.248]e-16 and [1.241, 1.242]e-16 | 7.81e-18: holds | **shipped**: 16× closer, in Horner's scheme (below) |
+| Stumpff S, degree 4 in w | same | \|w\| ≤ 1/32 | fpminimax: [5.551, 5.552]e-17 for w ≥ 0, [5.560, 5.561]e-17 below; the Taylor series: [5.552, 5.553]e-17 and **[8.409, 8.411]e-17**, whose comment said 2.9e-17 and was corrected in Part 1 | 5.57e-17, the 2⁻⁵⁴ of `1/6`: holds | **shipped** with C: no closer below the 2⁻⁵⁴ of its constant term, but in Horner's scheme |
 | c₂, c₃ with eight terms | `spacelab-propagation` `whfast::stumpff` | \|z\| ≤ 0.1 (the double) | c₂ [8.287, 8.288]e-28 and [8.154, 8.155]e-28; c₃ [5.551, 5.552]e-17, all 2⁻⁵⁴ from `1.0 / 6.0` | "eight terms saturate f64": holds, with room | no |
 | f32 C, S, degree 2 | `spacelab-gpu` Lambert WGSL | \|z\| ≤ 1e-6 (the f32) | C [4.960, 4.961]e-23; S [2.980, 2.981]e-8, the f32 `1.0 / 6.0`'s 2⁻²⁵ | none | no |
 | x − sin x to x²⁵/25! | `spacelab-propagation` `shadow::x_minus_sin` | [0, 2] | [1.124, 1.125]e-20 | under 1.2e-20: holds | no |
@@ -438,6 +438,21 @@ weight took `(1 − e^(−y/2))/y` directly, and the subtraction cancelled `2u/y
 conjunction at R/σ = 1.0001e-4 came back 4.2e-9 relative off its closed form `−expm1(−R²/2σ²)`.
 The weight is now `−expm1(−y/2)/y` there, and the same check from R/σ = 1.0001e-4 to 0.1 holds to
 2.3e-14 (bound 1e-13, `patera_keeps_its_contour_weight_digits_above_the_series_switch`).
+
+Part 2 replaced the Stumpff series of `kepler::stumpff`, the only series where fpminimax gains 4× or
+more. Its window now evaluates fpminimax's degree-4 polynomials with double coefficients
+(`STUMPFF_C_POLY`, `STUMPFF_S_POLY`) by Horner's scheme. The 16× smaller truncation of C is not the
+main gain. The Taylor series summed powers of w, and its five roundings near ½ cost up to 4.68u
+(u = 2⁻⁵³). In Horner's scheme the last addition dominates, because |w·q| is under 1/380 of the
+constant term. Over 400 001 samples of [−1/32, 1/32], measured in Julia against 256-bit values and
+replayed exactly in Maxima at the worst points, C's worst relative error falls from 4.68u to 1.07u
+and S's from 3.45u to 1.25u. The first-order bounds are 1.09u and 1.27u:
+`the_series_window_holds_c_and_s_to_their_derived_bounds` holds them at seven points against
+Maxima's values, and fails on the old series at 4.678u. Over [−1, 1], where up to three foldings
+unfold the window, C's worst falls from 4.40u to 3.03u and S's from 5.11u to 4.98u. fpminimax's last
+two coefficients move with Sollya's working precision: seven precisions from 150 to 1000 bits gave
+seven pairs. The Sollya file regenerates them at prec = 300, where they were made, and its gate is
+the certified bound of the committed doubles. approximation_supnorm.mac reads them from kepler.rs.
 
 Sollya is out of tree (D-21). It is never linked and never a dependency. The build is
 [Sollya 8.0](https://www.sollya.org/releases/sollya-8.0/sollya-8.0.tar.gz) (CeCILL-C), sha256

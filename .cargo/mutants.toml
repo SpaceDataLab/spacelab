@@ -725,8 +725,8 @@ exclude_re = [
     # takes the closed form where the baseline takes the reduced series, and passes the same
     # four-ulp comparison against the 60-digit value. Which side of the seam owns an exact `±1` is
     # not a property this function has.
-    "kepler\\.rs:77:10: replace > with >= in stumpff",
-    "kepler\\.rs:82:10: replace < with <= in stumpff",
+    "kepler\\.rs:98:10: replace > with >= in stumpff",
+    "kepler\\.rs:103:10: replace < with <= in stumpff",
 
     # NOT a proof, and not a tie either. `if z < -CLOSED_FORM_FLOOR` rewritten as `z == -1.0` sends
     # every `z < -1` down the argument-reduction path instead of the hyperbolic closed form — a real
@@ -738,31 +738,34 @@ exclude_re = [
     # `cosh` instead amplifies the half-ulp of `√−z` at the same rate as the unfolding doubles its
     # own error. Beyond `|z| ≈ 5e5` both overflow. A tolerance tight enough to separate them would
     # have to be tighter than either method can hold.
-    "kepler\\.rs:82:10: replace < with == in stumpff",
+    "kepler\\.rs:103:10: replace < with == in stumpff",
 
-    # `while |w| > SERIES_WINDOW`, tied to `>=`. The two differ only when `w` lands exactly on the
-    # window edge, and there the mutant folds once more and evaluates the series at `1/128`, where
-    # the first dropped term is smaller by `4^5`. A tie that can only improve the answer.
-    "kepler\\.rs:91:25: replace > with >= in stumpff",
+    # `while |w| > SERIES_WINDOW`, tied to `>=`. NOT equivalent: the two differ only when `w` lands
+    # exactly on the window edge `±1/32`, and there the mutant folds once more, evaluates the
+    # minimax polynomials at `±1/128` and unfolds once. Both answers sit inside the derived bounds of
+    # `the_series_window_holds_c_and_s_to_their_derived_bounds`, which asserts both edges: at
+    # `z = 1/32` the baseline is 0.401u off in `C` and the mutant 0.601u, `S` 0.333u for both; at
+    # `−1/32` they agree to the bit. Which side owns the edge is not a property of the function.
+    "kepler\\.rs:112:25: replace > with >= in stumpff",
 
     # `if alpha < -1e-9`, the hyperbolic/elliptic split of the initial guess, tied to `<=`. It ties
     # at `alpha == -1e-9` exactly, on a reciprocal semi-major axis computed as `2/r0 − v0²/μ`.
     # Measured over the budget test's nine conics and twelve spans: not one step of difference.
-    "kepler\\.rs:145:26: replace < with <= in universal_anomaly",
+    "kepler\\.rs:166:26: replace < with <= in universal_anomaly",
 
     # `if dir * kepler(outer).0 >= 0.0`, the bracket walk's sign test, rewritten as a quotient. For
     # finite nonzero `F` the two predicates are the same; they part only at `F == ±0`, where the
     # product gives `0 >= 0` and the quotient gives `±∞` — which needs a doubling to land exactly on
     # the root. Measured: one call in the budget test costs one extra step, 8.29 against 8.28 mean,
     # and no propagated state moves.
-    "kepler\\.rs:181:16: replace \\* with / in universal_anomaly",
+    "kepler\\.rs:202:16: replace \\* with / in universal_anomaly",
 
     # `if f < 0.0 { lo = chi } else { hi = chi }`, tied to `<=`. Provable, not measured. The two
     # differ only at `f == 0`, and there `chi` is the root: the baseline assigns `hi = chi` and the
     # mutant `lo = chi`, so either way `chi` remains an endpoint of a bracket that still contains it,
     # and the Newton step on the next line is `chi − 0/fp = chi`, which sets `settled` and returns.
     # Same double, same iteration count — which the budget test confirms.
-    "kepler\\.rs:206:14: replace < with <= in universal_anomaly",
+    "kepler\\.rs:227:14: replace < with <= in universal_anomaly",
 
     # --- crates/spacelab-elements/src/brouwer_lyddane.rs ---
 

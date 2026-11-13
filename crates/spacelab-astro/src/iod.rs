@@ -1402,7 +1402,7 @@ mod tests {
         // observed direction.
         for (seed, pinned) in [
             ((1.0e4_f64, 1.0e4), 9.572_028_909_276_205e-1),
-            ((1.0e5, 1.0e5), 9.601_328_172_723_819e-1),
+            ((1.0e5, 1.0e5), 9.601_328_172_723_822e-1),
             ((1.0e7, 1.0e5), 7.858_533_458_378_832e-1),
         ] {
             match gooding(&sightings, MU, false, seed) {

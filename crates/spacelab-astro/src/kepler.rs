@@ -19,9 +19,30 @@
 
 use spacelab_core::Vec3;
 
-/// Below this the five-term series is exact to within half an ulp; `1/32` is a power of four, so the
+/// Below this the two polynomials below hold `C` and `S`; `1/32` is a power of four, so the
 /// quartering that reduces `z` into this window is itself exact.
 const SERIES_WINDOW: f64 = 1.0 / 32.0;
+
+/// `C(w)` and `S(w)` on `|w| ≤ SERIES_WINDOW` as degree-4 polynomials in `w`, constant term first:
+/// Sollya's `fpminimax` with double coefficients, fitted to that window. Their relative error is
+/// certified at most 7.81e-18 for `C` and 5.57e-17 for `S`, which is `1/6`'s own rounding; the
+/// Taylor coefficients they replace left 1.25e-16 in `C`. Generated and checked by
+/// `derivations/kepler_stumpff_supnorm.sollya` and `derivations/approximation_supnorm.mac`; a new
+/// window needs new coefficients.
+const STUMPFF_C_POLY: [f64; 5] = [
+    0.5,
+    -0.041_666_666_666_666_05,
+    0.001_388_888_888_888_924_7,
+    -2.480_158_984_719_158_6e-5,
+    2.755_731_580_164_434_4e-7,
+];
+const STUMPFF_S_POLY: [f64; 5] = [
+    0.166_666_666_666_666_66,
+    -0.008_333_333_333_333_285,
+    0.000_198_412_698_450_595_43,
+    -2.755_732_119_449_556_7e-6,
+    2.502_106_323_302_596e-8,
+];
 
 /// Above this the closed forms have stopped cancelling and take over. See [`stumpff`].
 const CLOSED_FORM_FLOOR: f64 = 1.0;
@@ -92,11 +113,11 @@ pub(crate) fn stumpff(z: f64) -> (f64, f64) {
         w *= 0.25;
         folds += 1;
     }
-    // `C = Σ (−z)^k/(2k+2)!`, `S = Σ (−z)^k/(2k+3)!`, to `z⁴`: relative error ≤ 1.25e-16 for `C`,
-    // ≤ 8.5e-17 for `S`, most of it `1.0 / 6.0`'s 2⁻⁵⁴ (derivations/kepler_stumpff_supnorm.sollya).
-    let mut c = 0.5 - w / 24.0 + w * w / 720.0 - w * w * w / 40_320.0 + w * w * w * w / 3_628_800.0;
-    let mut s = 1.0 / 6.0 - w / 120.0 + w * w / 5040.0 - w * w * w / 362_880.0
-        + w * w * w * w / 39_916_800.0;
+    // Horner's scheme: the last addition's rounding is nearly the whole error, because `|w·q|` is
+    // under 1/380 of the constant term (see `the_series_window_holds_c_and_s_to_their_derived_bounds`).
+    let horner = |a: &[f64; 5]| a[0] + w * (a[1] + w * (a[2] + w * (a[3] + w * a[4])));
+    let mut c = horner(&STUMPFF_C_POLY);
+    let mut s = horner(&STUMPFF_S_POLY);
     for _ in 0..folds {
         let t = 1.0 - w * s;
         s = (s + c * t) * 0.25;
@@ -487,6 +508,73 @@ mod tests {
                 assert!(
                     d <= tol,
                     "{name}({z:e}): got {got:.17e}, want {want:.17e}, off by {d:.3e} (allowed {tol:.3e})"
+                );
+            }
+        }
+    }
+
+    /// Inside the series window `stumpff` is one Horner evaluation, and its error has a first-order
+    /// bound. The last addition rounds by at most `u = 2⁻⁵³` of `C`, which lies in
+    /// `[0.4986, 0.5014]`, and by at most `0.7512u` of `S`, in `[0.1664, 0.1670]`. The rest of the
+    /// evaluation is `w·q`, under `(1/32)(1/24)/0.4986` of `C` and `(1/32)(1/120)/0.1664` of `S`, so its
+    /// at most seven roundings add `0.0184u` and `0.0110u`. The polynomials' certified truncation adds
+    /// `0.0704u` and `0.5009u` (`derivations/kepler_stumpff_supnorm.sollya`). Hence `1.09u` and
+    /// `1.27u`.
+    ///
+    /// The points are where each method is worst over 400 001 samples of `[−1/32, 1/32]`, measured in
+    /// Julia and replayed exactly in Maxima. The Taylor series with powers this replaced was 4.68u out
+    /// in `C` at the first point and 3.45u in `S` at the second; Horner's scheme on the minimax
+    /// coefficients is 1.07u and 1.25u at the third and fourth. The references are each value at 60
+    /// digits from Maxima's series, split into a nearest double and the double nearest the rest.
+    #[test]
+    fn the_series_window_holds_c_and_s_to_their_derived_bounds() {
+        type DoubleDouble = (f64, f64);
+        const WINDOW: [(f64, DoubleDouble, DoubleDouble); 7] = [
+            (
+                -0.030_702_031_25,
+                (0.501_280_561_207_205_9, 3.831_382_680_440_745e-17),
+                (0.166_922_704_033_587_72, 1.698_557_591_955_807_5e-18),
+            ),
+            (
+                -0.030_465,
+                (0.501_270_664_751_816_4, -4.166_404_854_663_118e-17),
+                (0.166_920_725_894_651_37, 8.471_224_050_651_097e-18),
+            ),
+            (
+                -0.025_233_75,
+                (0.501_052_291_012_690_6, 5.151_596_370_601_753e-17),
+                (0.166_877_074_298_680_26, -6.502_678_042_964_537e-18),
+            ),
+            (
+                -6.182_812_500_000_016e-4,
+                (0.500_025_762_249_688_8, 2.996_083_500_908_667_5e-17),
+                (0.166_671_819_086_264_88, -4.615_863_446_259_337e-18),
+            ),
+            (
+                0.031_25,
+                (0.498_699_272_246_850_57, 2.222_095_692_654_242_5e-17),
+                (0.166_406_443_678_326_4, 6.143_952_575_354_043_5e-18),
+            ),
+            (
+                -0.031_25,
+                (0.501_303_440_427_286_1, -3.664_544_875_740_096e-18),
+                (0.166_927_277_179_856_28, 6.003_884_888_418_013e-18),
+            ),
+            (
+                0.015_625,
+                (0.499_349_297_322_940_6, 9.996_149_597_987_656e-18),
+                (0.166_536_506_763_422_74, -7.159_652_623_379_359e-19),
+            ),
+        ];
+        let u = f64::EPSILON / 2.0;
+        for (z, want_c, want_s) in WINDOW {
+            let (c, s) = stumpff(z);
+            for (name, got, (hi, lo), bound) in [("C", c, want_c, 1.09), ("S", s, want_s, 1.27)] {
+                // `got − hi` is exact: the two are a few ulps apart.
+                let off = ((got - hi) - lo).abs() / hi / u;
+                assert!(
+                    off <= bound,
+                    "{name}({z:e}) = {got:.17e} is {off:.3}u from {hi:.17e}, over {bound}u"
                 );
             }
         }

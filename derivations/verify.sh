@@ -1626,10 +1626,10 @@ fi
 # maximum inside Sollya's enclosure. Sollya is out of tree (D-21); without it the files are skipped.
 if have sollya; then
     sol_rows=$(cat <<'EOF'
-kepler_stumpff kepler_stumpff_C_pos 1248e-19
-kepler_stumpff kepler_stumpff_C_neg 1242e-19
-kepler_stumpff kepler_stumpff_S_pos 5553e-20
-kepler_stumpff kepler_stumpff_S_neg 8411e-20
+kepler_stumpff kepler_stumpff_C_pos 7810e-21
+kepler_stumpff kepler_stumpff_C_neg 7803e-21
+kepler_stumpff kepler_stumpff_S_pos 5552e-20
+kepler_stumpff kepler_stumpff_S_neg 5561e-20
 whfast_stumpff whfast_stumpff_c2_pos 8288e-31
 whfast_stumpff whfast_stumpff_c2_neg 8155e-31
 whfast_stumpff whfast_stumpff_c3_pos 5552e-20

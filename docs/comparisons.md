@@ -79,6 +79,7 @@ root-mean-square distance over them.
 | Orekit | not recorded | VMF3 mapping, 2018-11-25 12h, 38, 5 and 85 deg, (hydrostatic, wet) | relative | 6 | 1.094e-06 | 4.968e-07 | `crates/spacelab-gnss/src/models.rs::vmf3_distance_to_orekit` |
 | Orekit | not recorded | VMF3 5x5 grid, node (77.5, 2.5), (ah, aw, zhd, zwd) | relative | 4 | 1.549e-15 | 7.800e-16 | `crates/spacelab-gnss/src/vmf_grid.rs::vmf3_5x5_node_distance_to_orekit` |
 | Orekit | not recorded | MODIP, Galileo grid, five nodes and nine points between | deg | 14 | 4.583e-07 | 2.531e-07 | `crates/spacelab-ionosphere/src/modip.rs::galileo_distance_to_orekit` |
+| jrc | NeQuickG JRC 1.0 | NeQuick-G slant TEC, the Annex E cases in every month | relative | 1298 | 1.726e-13 | 2.075e-14 | `crates/spacelab-ionosphere/tests/galileo_stec.rs::stec_distance_to_jrc_in_every_month` |
 | Orekit | 13.1.7 | DSST upper bound Dₙˡ(χ) | relative | 252 | 5.223e-16 | 4.944e-17 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
 | Orekit | 13.1.7 | DSST upper bound Rₙₘˡ(γ) | relative | 2691 | 4.581e-16 | 4.019e-17 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
 | Orekit | 13.1.7 | DSST coefficient Vₙₛ | relative | 56 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
@@ -124,6 +125,11 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | DSST Sun and Moon short periods, osculating a | m | 4 | 1.304e-07 | 8.267e-08 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST Sun and Moon short periods, osculating k, h, q, p, λ | 1 | 20 | 1.208e-12 | 3.072e-13 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | Knocke acceleration under Orekit's cosine, largest component | relative | 4 | 6.244e-15 | 3.281e-15 | `crates/spacelab-propagation/src/earth_radiation.rs::distance_to_orekit` |
+| erfa | not recorded | the analytic Sun's direction | arcsec | 11 | 4.742e+01 | 1.744e+01 | `crates/spacelab-propagation/src/ephemeris.rs::both_bodies_distance_to_erfa` |
+| erfa | not recorded | the analytic Sun's range | m | 11 | 1.479e+07 | 6.409e+06 | `crates/spacelab-propagation/src/ephemeris.rs::both_bodies_distance_to_erfa` |
+| erfa | not recorded | the analytic Moon's direction | arcsec | 11 | 2.783e+02 | 1.105e+02 | `crates/spacelab-propagation/src/ephemeris.rs::both_bodies_distance_to_erfa` |
+| erfa | not recorded | the analytic Moon's range | m | 11 | 4.571e+05 | 1.972e+05 | `crates/spacelab-propagation/src/ephemeris.rs::both_bodies_distance_to_erfa` |
+| scipy | not recorded | the degree-70 XGM2019e acceleration at two points | relative | 6 | 1.563e-08 | 7.223e-09 | `crates/spacelab-propagation/src/geopotential.rs::degree_70_distance_to_scipy` |
 | Orekit | 13.1.7 | Harris–Priester density | relative | 16 | 4.233e-16 | 1.237e-16 | `crates/spacelab-propagation/src/harris_priester/mod.rs::density_distance_to_orekit` |
 | Orekit | 13.1.7 | constant thrust, flow rate | relative | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/maneuver.rs::constant_thrust_distance_to_orekit` |
 | Orekit | 13.1.7 | constant thrust, initial thrust acceleration | relative | 1 | 6.341e-16 | 6.341e-16 | `crates/spacelab-propagation/src/maneuver.rs::constant_thrust_distance_to_orekit` |
@@ -152,6 +158,8 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | box-wing SRP | relative | 5 | 1.278e-15 | 8.422e-16 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST zonal eccentricity cut over 1134 states | powers | 1134 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/tests/dsst_truncation.rs::the_eccentricity_truncation_order_distance_to_orekit` |
 | Orekit | 13.1.7 | eclipse masking ratio ν, Orekit's arrangement against the reference | 1 | 171 | 6.510e-07 | 7.041e-08 | `crates/spacelab-propagation/tests/shadow_lens.rs::orekit_masking_ratio_distance_to_the_reference` |
+| scipy | 1.16.2 | WAM-IPE density at grid nodes | relative | 6 | 1.332e-15 | 8.612e-16 | `crates/spacelab-propagation/tests/wam_ipe_product.rs::the_noaa_file_distance_to_scipy` |
+| scipy | 1.16.2 | WAM-IPE density off the grid | relative | 4 | 3.553e-15 | 1.776e-15 | `crates/spacelab-propagation/tests/wam_ipe_product.rs::the_noaa_file_distance_to_scipy` |
 | pyorbital | not recorded | scan roll and pitch, 11 instruments | rad | 1512 | 2.220e-16 | 1.221e-17 | `crates/spacelab-sensors/tests/pyorbital_geoloc.rs::scan_catalogue_distance_to_pyorbital` |
 | pyorbital | not recorded | pixel time offsets, 11 instruments | s | 756 | 1.000e-09 | 4.611e-10 | `crates/spacelab-sensors/tests/pyorbital_geoloc.rs::scan_catalogue_distance_to_pyorbital` |
 | pyorbital | not recorded | ground points of the direct sensor model, 11 instruments | m | 180 | 1.074e-03 | 6.042e-04 | `crates/spacelab-sensors/tests/pyorbital_geoloc.rs::direct_sensor_model_distance_to_pyorbital` |
@@ -163,6 +171,11 @@ root-mean-square distance over them.
 | skyfield | not recorded | ISS subpoint longitude, Eq. (C-1) kinematic terms removed | deg | 50 | 1.189e-09 | 1.077e-09 | `crates/spacelab-sgp4/tests/ground_track.rs::iss_ground_track_distance_to_skyfield` |
 | skyfield | not recorded | ISS subpoint height | m | 50 | 5.926e-08 | 2.733e-08 | `crates/spacelab-sgp4/tests/ground_track.rs::iss_ground_track_distance_to_skyfield` |
 | scipy | not recorded | the forward DCT-II of (1, 2, 3, 4, 5) | 1 | 5 | 1.776e-15 | 1.340e-15 | `crates/spacelab-signal/src/insar.rs::dct_distance_to_scipy` |
+| hardisp | IERS Conventions (2010) software | TDFRPH frequency of M2 K1 Ssa S2 | cycles/day | 4 | 0.000e+00 | 0.000e+00 | `crates/spacelab-slr/src/loading.rs::tidal_arguments_distance_to_tdfrph` |
+| hardisp | IERS Conventions (2010) software | TDFRPH argument of M2 K1 Ssa S2 | deg | 4 | 0.000e+00 | 0.000e+00 | `crates/spacelab-slr/src/loading.rs::tidal_arguments_distance_to_tdfrph` |
+| hardisp | IERS Conventions (2010) software | SPLINE second derivatives at six unequal knots | 1 | 6 | 0.000e+00 | 0.000e+00 | `crates/spacelab-slr/src/loading.rs::spline_distance_to_the_reference_routine` |
+| hardisp | IERS Conventions (2010) software | EVAL midway between the six knots | 1 | 5 | 1.110e-16 | 9.930e-17 | `crates/spacelab-slr/src/loading.rs::spline_distance_to_the_reference_routine` |
+| fculzd_hpa | IERS Conventions (2010) software | the Mendes-Pavlis zenith delay at McDonald | m | 3 | 2.220e-16 | 1.282e-16 | `crates/spacelab-slr/src/troposphere.rs::zenith_delay_distance_to_the_iers_routine` |
 | Orekit | 13.1.7 | ISS pass edges, mask 10 deg, IERS EOP | s | 6 | 9.237e-05 | 6.051e-05 | `crates/spacelab/tests/access_oracle.rs::iss_pass_edges_distance_to_orekit` |
 | Orekit | 13.1.7 | ISS pass edges, mask 10 deg, no EOP | s | 6 | 3.804e-02 | 2.311e-02 | `crates/spacelab/tests/access_oracle.rs::iss_pass_edges_distance_to_orekit` |
 | skyfield | not recorded | the ISS ground track with measured EOP, ΔUT1 | s | 50 | 2.963e-05 | 2.886e-05 | `crates/spacelab/tests/earth_orientation.rs::iss_ground_track_distance_to_skyfield` |

@@ -12,14 +12,19 @@
 //! is zero (nominal Earth rate), and no ITRF datum (Helmert) step is applied — this is the raw
 //! CIO-based terrestrial frame, which is what a from-scratch TEME→ITRF routine produces.
 //!
-//! Two comparisons, and they measure different things:
+//! Every test here is a comparator: it prints the distance to Orekit into `docs/comparisons.md`
+//! and decides nothing. The mathematics decides elsewhere:
 //!
-//! * **GMST82** is the same IAU-1982 series in both codes, so agreement is a *transcription*
-//!   check across two independent implementations (our Rust, Orekit's Java). It should be tight.
-//! * **TEME→ITRF** is *not* the same algorithm. Ours is Vallado's equinox path (TEME→PEF by
-//!   GMST82, PEF→ITRF by polar motion). Orekit's is the rigorous IERS chain through the CIO. The
-//!   gap between them is the inherited-convention error §1.2 warns about, and this test measures
-//!   its size rather than asserting it away.
+//! * **GMST82** is `derivations/gmst82.mac`, held by spacelab-fa's
+//!   `gmst_is_the_exact_rational_polynomial_reduced_to_a_turn`. Orekit evaluates the same IAU-1982
+//!   series in another form, so the distance is a few roundings of its `B·T` term.
+//! * **TEME→ITRF** is Eq. (C-1) of AIAA 2006-6753, `derivations/teme_c1.mac`, held by
+//!   `tests/teme_vallado_2006.rs`. Orekit's chain runs through the CIO instead, so the distance is
+//!   the convention gap §1.2 warns about.
+//! * **Inside a leap second** the naive coordinate puts `23:59:60.5` on the next day's
+//!   `00:00:00.5`, one second past the instant (spacelab-core's
+//!   `a_leap_second_label_is_exactly_one_day_in`); the row compares Orekit with our GMST82 at the
+//!   instant itself.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::cast_precision_loss)]
 
@@ -27,7 +32,7 @@ use spacelab_core::calendar::UtcDateTime;
 use spacelab_core::time::{Epoch, Tt, Ut1};
 use spacelab_core::{Angle, Mat3, Vec3};
 use spacelab_fa::gmst82;
-use spacelab_frames::{EARTH_ROTATION_RATE, Teme, teme_to_itrf};
+use spacelab_frames::{Teme, teme_to_itrf};
 use spacelab_testkit::nan_max;
 
 const FIXTURES: &str = include_str!("fixtures/orekit_teme_itrf.csv");
@@ -49,7 +54,6 @@ struct Row {
     xp: Angle,
     yp: Angle,
     gmst82_rad: f64,
-    diff_2010_1996: f64,
     matrix: Mat3,
     r_aiaa: Vec3,
     r_iss: Vec3,
@@ -90,7 +94,6 @@ fn parse_rows() -> Vec<Row> {
             xp: Angle::from_arcseconds(g(3)),
             yp: Angle::from_arcseconds(g(4)),
             gmst82_rad: g(5),
-            diff_2010_1996: g(6),
             matrix: m,
             r_aiaa: Vec3::new(g(16), g(17), g(18)),
             r_iss: Vec3::new(g(19), g(20), g(21)),
@@ -127,160 +130,82 @@ fn angle_diff(a: f64, b: f64) -> f64 {
     d.abs()
 }
 
-/// GMST82 outside a leap second: the same IAU-1982 series in both codes, so agreement is a
-/// transcription cross-check across two independent implementations of two *different valid
-/// evaluation forms* (ours is ERFA-compact; Orekit's is the Aoki day-fraction split).
-///
-/// The ceiling is derived, not tuned. Two forms of the same polynomial differ by roundings of its
-/// dominant term `B·T` (`B = 8640184.812866` s/century); in radians that is `ε·|B·T|·τ/86400`,
-/// which at 2029 (`T ≈ 0.3`) is about `4e-12` rad. Round up to `1e-11` rad — **2 nanometres of
-/// rotation at the equator**, far below anything a `f64` GMST resolves, and a wrong coefficient
-/// anywhere would miss by orders of magnitude more.
-#[test]
-fn gmst82_matches_orekit_iers1996_outside_leap_seconds() {
-    let rows = parse_rows();
-    assert!(rows.len() >= 12, "fixtures did not load");
-
-    let mut worst = 0.0_f64;
-    let mut checked = 0;
-    for r in &rows {
-        if r.utc.is_leap_second_label() {
-            continue;
-        }
-        let ours = gmst82(ut1_of(r)).radians();
-        let d = angle_diff(ours, r.gmst82_rad);
-        assert!(
-            d < 1e-11,
-            "GMST82 at {:?}: ours {ours:.15}, Orekit {:.15}, diff {d:.3e} rad exceeds 1e-11",
-            r.utc,
-            r.gmst82_rad
-        );
-        worst = nan_max(worst, d);
-        checked += 1;
-    }
-    assert!(
-        checked >= 10,
-        "expected at least 10 non-leap epochs, got {checked}"
-    );
+fn comparison_row(quantity: &str, unit: &str, distances: &[f64]) {
+    let max = distances.iter().copied().fold(0.0, nan_max);
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
     println!(
-        "GMST82 vs Orekit over {checked} non-leap epochs: worst {worst:.3e} rad \
-         ({:.4} nm at the equator)",
-        worst * 6_378_137.0 * 1e9
+        "comparison | Orekit | 13.1.7 | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
     );
 }
 
-/// GMST82 inside a leap second: the naive coordinate is off by *exactly* one leap second of Earth
-/// rotation, and this test proves it is exactly that and nothing more.
-///
-/// This is not a defect to hide. It is the measurable price of the naive coordinate's invariant,
-/// and pinning it to `EARTH_ROTATION_RATE × 1 s` is what distinguishes "a known 1-second aliasing"
-/// from "an unexplained kilometre." A caller who must be correct *inside* a leap second has to pass
-/// the calendar's `extra_second` disambiguation; the bare frame chain cannot know.
+/// The distance to Orekit's GMST82 (`IERS_1996`) outside leap seconds.
 #[test]
-fn gmst82_inside_a_leap_second_is_off_by_exactly_one_second_of_rotation() {
-    let rows = parse_rows();
-    let mut n = 0;
-    for r in rows.iter().filter(|r| r.utc.is_leap_second_label()) {
-        let d = angle_diff(gmst82(ut1_of(r)).radians(), r.gmst82_rad);
-        // `EARTH_ROTATION_RATE` is already ω⊕, the sidereal rate (7.292115e-5 rad/s). GMST advances
-        // by exactly `dGMST/dUT1 · 1 s = ω⊕ · 1 s` for one UT1-second of aliasing — the 1.00273790935
-        // day-length factor is what makes ω⊕ differ from 2π/86400 in the first place, so applying it
-        // again would double-count.
-        let one_second_of_rotation = EARTH_ROTATION_RATE * 1.0;
-        assert!(
-            (d - one_second_of_rotation).abs() < 1e-7,
-            "expected the leap-second aliasing to be exactly one second of rotation \
-             ({one_second_of_rotation:.6e} rad), measured {d:.6e} rad at {:?}",
-            r.utc
-        );
-        n += 1;
-    }
-    assert!(n >= 2, "expected the two mid-leap fixtures, got {n}");
-    println!(
-        "confirmed: an instant inside a leap second aliases by exactly 1 s of rotation ({n} fixtures)"
+#[ignore = "comparator: the distance to Orekit, not a verdict"]
+fn gmst82_distance_to_orekit_outside_leap_seconds() {
+    let d: Vec<f64> = parse_rows()
+        .iter()
+        .filter(|r| !r.utc.is_leap_second_label())
+        .map(|r| angle_diff(gmst82(ut1_of(r)).radians(), r.gmst82_rad))
+        .collect();
+    comparison_row(
+        "GMST82, IERS_1996, epochs 2000-2029 outside leap seconds",
+        "rad",
+        &d,
     );
 }
 
-/// TEME→ITRF: a *different* algorithm from Orekit's, so this measures the convention gap.
-///
-/// It does not assert a tight tolerance, because the two chains are not the same transformation.
-/// It asserts the gap is where physics says it should be — sub-metre in position, matching the
-/// centimetre-to-decimetre disagreement Orekit's own `ITRFProviderTest` documents against Vallado
-/// — and it *prints* the number, because the number is the finding.
+/// The distance to Orekit's GMST82 inside a leap second, ours taken at the instant itself: one
+/// second of UT1 before the naive coordinate's.
 #[test]
-fn teme_to_itrf_agrees_with_orekit_to_the_convention_floor() {
-    let rows = parse_rows();
-    let mut worst_pos = 0.0_f64;
-    let mut worst_mat = 0.0_f64;
-    let mut worst_vel = 0.0_f64;
-    let mut orekit_spread = 0.0_f64;
+#[ignore = "comparator: the distance to Orekit, not a verdict"]
+fn gmst82_distance_to_orekit_inside_a_leap_second() {
+    let d: Vec<f64> = parse_rows()
+        .iter()
+        .filter(|r| r.utc.is_leap_second_label())
+        .map(|r| {
+            let instant = Epoch::<Ut1>::from_ns_since_j2000(epoch_ns(r.utc, r.dut1 - 1.0));
+            angle_diff(gmst82(instant).radians(), r.gmst82_rad)
+        })
+        .collect();
+    comparison_row("GMST82 inside a leap second, at the instant", "rad", &d);
+}
 
-    for r in &rows {
+/// The distance from our TEME→ITRF (AIAA 2006-6753 Eq. (C-1)) to Orekit's `IERS_1996` chain through
+/// the CIO, outside leap seconds: position on the AIAA and ISS vectors, velocity on the AIAA state,
+/// and the worst matrix entry.
+#[test]
+#[ignore = "comparator: the distance to Orekit, not a verdict"]
+fn teme_to_itrf_distance_to_orekit() {
+    let (mut position, mut velocity, mut matrix) = (Vec::new(), Vec::new(), Vec::new());
+    for r in parse_rows()
+        .iter()
+        .filter(|r| !r.utc.is_leap_second_label())
+    {
         let t = teme_to_itrf(ut1_of(r), tt_of(r), r.xp, r.yp, 0.0);
         let m = t.rotation.matrix();
-
-        // matrix agreement, worst entry
         let mut me = 0.0_f64;
         for i in 0..3 {
             for j in 0..3 {
                 me = nan_max(me, (m.rows[i][j] - r.matrix.rows[i][j]).abs());
             }
         }
-
-        // position agreement on both test vectors, metres
+        matrix.push(me);
         let ours_aiaa = t.position(spacelab_frames::Position::<Teme>::new(R_TEME_AIAA));
         let ours_iss = t.position(spacelab_frames::Position::<Teme>::new(R_TEME_ISS));
-        let pe = (ours_aiaa.vector - r.r_aiaa)
-            .norm()
-            .max((ours_iss.vector - r.r_iss).norm());
-
-        // velocity agreement — this exercises the ω × r term, the part a naive rotation drops
+        position.push((ours_aiaa.vector - r.r_aiaa).norm());
+        position.push((ours_iss.vector - r.r_iss).norm());
         let ours_state = t.state(spacelab_frames::StateVector::<Teme>::new(
             R_TEME_AIAA,
             V_TEME,
         ));
-        let ve = (ours_state.velocity.vector - r.v_aiaa).norm();
-
-        if r.utc.is_leap_second_label() {
-            // Inside a leap second the naive coordinate is off by one second of rotation, which on
-            // the horizontal part of the test vector is |r_h|·ω·1s. Confirm the position error is
-            // exactly that and nothing more — same finding as the GMST test, projected onto a vector.
-            let r_h = (r.r_aiaa.x * r.r_aiaa.x + r.r_aiaa.y * r.r_aiaa.y).sqrt();
-            let expected = r_h * EARTH_ROTATION_RATE * 1.0;
-            assert!(
-                (pe - expected).abs() < 5.0,
-                "leap-second aliasing at {:?}: expected ~{expected:.1} m (|r_h|·ω·1s), got {pe:.1} m",
-                r.utc
-            );
-            continue;
-        }
-
-        worst_mat = nan_max(worst_mat, me);
-        worst_pos = nan_max(worst_pos, pe);
-        worst_vel = nan_max(worst_vel, ve);
-        orekit_spread = nan_max(orekit_spread, r.diff_2010_1996);
+        velocity.push((ours_state.velocity.vector - r.v_aiaa).norm());
     }
-
-    // Outside leap seconds, our Vallado equinox chain and Orekit's IERS CIO chain are two *different*
-    // algorithms for the same transformation. They agree to sub-metre — the known TEME-definition
-    // ambiguity Vallado documents at the metre level — with the disagreement flat across three
-    // decades rather than growing, which is the signature of a fixed convention offset, not a bug.
-    assert!(
-        worst_pos < 1.5,
-        "TEME→ITRF position disagreement {worst_pos:.3} m exceeds the 1.5 m convention floor — \
-         a growing or large gap would mean our chain is wrong, not merely a different convention"
+    comparison_row(
+        "TEME to ITRF position, AIAA and ISS vectors",
+        "m",
+        &position,
     );
-    assert!(
-        worst_vel < 5.0,
-        "velocity disagreement {worst_vel:.3} m/s is too large — the ω×r term is wrong"
-    );
-
-    println!(
-        "TEME→ITRF vs Orekit IERS_1996, 10 non-leap epochs: worst position {worst_pos:.4} m, \
-         velocity {worst_vel:.4e} m/s, matrix entry {worst_mat:.3e}"
-    );
-    println!(
-        "  (Orekit's own IERS_2010 vs IERS_1996 differs up to {orekit_spread:.3} m on this vector; \
-         TLE drifts 1–3 km/day)"
-    );
+    comparison_row("TEME to ITRF velocity, AIAA state", "m/s", &velocity);
+    comparison_row("TEME to ITRF matrix, worst entry", "1", &matrix);
 }

@@ -625,6 +625,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima modip_grid.mac" "expected 4 checks to hold, found $holds"
     fi
 
+    out=$(macf earth_rotation_rate.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima earth_rotation_rate.mac: EARTH_ROTATION_RATE is the nearest double to the ERA's rate, slowed by 1 - LOD/86400 per SI second; the G3 goldens at 40 digits"
+    else
+        bad "maxima earth_rotation_rate.mac" "expected 3 checks to hold, found $holds"
+    fi
+
 
     out=$(macf ocean_loading.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')

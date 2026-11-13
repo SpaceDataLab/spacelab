@@ -11,15 +11,15 @@
 //! dropped term all produce the same matrix; with them the fixture resolves each.
 //!
 //! LOD does not enter the ERFA pipeline at all — ERFA has no Earth-rotation rate — so the
-//! angular velocity is pinned against Orekit instead.
+//! angular velocity is decided by `derivations/earth_rotation_rate.mac` instead.
 
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::needless_range_loop,
-    // The LOD references are carried at their derived precision, not at f64's: truncating them to
-    // what clippy considers enough would make the literal, rather than the 60-digit evaluation,
-    // the thing under test.
+    // The rotation-rate goldens are carried at their derived precision, not at f64's: truncating
+    // them to what clippy considers enough would make the literal, rather than the 40-digit
+    // evaluation, the thing under test.
     clippy::excessive_precision
 )]
 
@@ -147,24 +147,27 @@ fn each_celestial_pole_offset_moves_the_matrix_by_its_own_size() {
     assert!(moved_by(mas(1.0), mas(1.0)) > 1.2 * moved_by(mas(1.0), zero));
 }
 
+/// The LODs of [`the_rotation_rate_is_the_era_rate_slowed_by_the_length_of_day`], seconds.
+const LOD_SECONDS: [f64; 4] = [0.0, 0.0018, -0.0005, 0.0035];
+
+/// `derivations/earth_rotation_rate.mac` (3): `EARTH_ROTATION_RATE · (1 − LOD/86400)` over the
+/// shipped double at [`LOD_SECONDS`], rad/s.
+const ROTATION_RATE_MAXIMA: [f64; 4] = [
+    7.292_115_146_706_979_139_732_546_224_55e-5,
+    7.292_114_994_787_913_583_337_147_480_12e-5,
+    7.292_115_188_906_719_572_064_601_431_34e-5,
+    7.292_114_851_308_796_113_408_159_777_05e-5,
+];
+
+/// The angular velocity is the Earth Rotation Angle's rate slowed by the length of day:
+/// `derivations/earth_rotation_rate.mac` (1)–(3) at 40 digits. (G3)
+///
+/// ERFA carries no rotation rate, so the pyerfa fixture above cannot see it. The ERA of IERS
+/// Conventions (2010) eq. (5.15) turns at `2π·1.00273781191135448/86400` rad per UT1 second, whose
+/// nearest double is `EARTH_ROTATION_RATE`, and LOD's definition puts `1 − LOD/86400` UT1 seconds in
+/// each SI second.
 #[test]
-fn the_lod_scaling_matches_orekit() {
-    // ERFA carries no rotation rate, so LOD needs a different lineage. Orekit 13.1.7
-    // (orekit-13.1.7.jar, SHA-1 dc3434a6936ae5decf96fcf58c02722c88ed50ff — the provenance
-    // tools/orekit-oracle/README.md records) computes it in TIRFProvider.getRotationRate:
-    //
-    //     20: ldc2_w   // double 7.292115146706979E-5d
-    //     23: dconst_1
-    //     24: dload_2  // LOD, seconds
-    //     25: ldc2_w   // double 86400.0d
-    //     28: ddiv  29: dsub  30: dmul        =>  AVE * (1 - LOD/86400)
-    //
-    // about Vector3D.PLUS_K. That is read from the shipped bytecode, not from documentation.
-    //
-    // The references below are that expression evaluated to 60 digits over the exact binary value
-    // of the constant (0x1.31da7d7cba179p-14), agreeing to every printed digit between mpmath and
-    // Maxima. 1e-18 sits three orders above the rounding of the rotation that carries ω into GCRF,
-    // and three orders below the ~1.5e-12 any wrong operator here would shift the rate by.
+fn the_rotation_rate_is_the_era_rate_slowed_by_the_length_of_day() {
     let tt = Epoch::<Tt>::from_days_since_j2000(8766.0);
     let ut1 = Epoch::<Ut1>::from_days_since_j2000(8765.6);
     let zero = Angle::from_radians(0.0);
@@ -173,31 +176,23 @@ fn the_lod_scaling_matches_orekit() {
     // chain and the TEME reduction. Whichever is left unchecked is the one that drifts.
     // (`CioInterpolator` writes it a third time; being `std`-gated, it is held against these two
     // in `cio_fast.rs`.)
-    for (lod, expected) in [
-        (0.0, 7.292_115_146_706_979e-5),
-        (0.0018, 7.292_114_994_787_913_583_337_152e-5),
-        (-0.0005, 7.292_115_188_906_719_572_064_602e-5),
-        (0.0035, 7.292_114_851_308_796_113_408_154e-5),
-    ] {
-        for (rate, who) in [
-            (
-                gcrf_to_itrf(ut1, tt, zero, zero, zero, zero, lod)
-                    .omega
-                    .norm(),
-                "gcrf_to_itrf",
-            ),
-            (
-                teme_to_itrf(ut1, tt, zero, zero, lod).omega.norm(),
-                "teme_to_itrf",
-            ),
+    let mut worst = 0.0_f64;
+    for (lod, expected) in LOD_SECONDS.into_iter().zip(ROTATION_RATE_MAXIMA) {
+        for rate in [
+            gcrf_to_itrf(ut1, tt, zero, zero, zero, zero, lod)
+                .omega
+                .norm(),
+            teme_to_itrf(ut1, tt, zero, zero, lod).omega.norm(),
         ] {
-            assert!(
-                (rate - expected).abs() < 1e-18,
-                "{who} at LOD {lod} s gave |ω| = {rate:.20e}, \
-                 Orekit's expression gives {expected:.20e}"
-            );
+            worst = worst.max((rate - expected).abs());
         }
     }
+    println!("rotation rate against earth_rotation_rate.mac at 40 digits: {worst:.3e} rad/s");
+    // Measured 1.4e-20 rad/s, one ulp of the rate.
+    assert!(
+        worst < 5e-20,
+        "rotation rate against earth_rotation_rate.mac: {worst:.3e} rad/s"
+    );
 
     // A positive LOD is a long day and must *slow* the Earth. 1.8 ms of it is 1.5e-12 rad/s, which
     // is 0.46 m of equatorial displacement after one day — above the metre-level agreement the

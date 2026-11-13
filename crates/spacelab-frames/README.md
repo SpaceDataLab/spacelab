@@ -7,7 +7,7 @@ Type-level reference frames: rotations that compose only when they should.
 Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
 decides — a derivation, an exact value, the equation that defines the quantity — and
 another code's output is a comparison, never the proof. This crate is verified in
-[§1 Time, Earth orientation & geodesy](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#1--time-earth-orientation--geodesy) (15 rows).
+[§1 Time, Earth orientation & geodesy](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#1--time-earth-orientation--geodesy) (16 rows).
 
 - API documentation: <https://docs.rs/spacelab-frames>
 - Homepage: <https://spacedatalab.org>

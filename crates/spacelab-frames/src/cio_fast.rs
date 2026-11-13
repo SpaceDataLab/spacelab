@@ -485,9 +485,9 @@ mod tests {
 
     #[test]
     fn the_interpolated_rate_carries_lod_exactly_as_the_scalar_chain_does() {
-        // `transform` writes `AVE * (1 - LOD/86400)` out for itself. `tests/cio_oracle.rs` pins
-        // that expression against Orekit 13.1.7's bytecode for the two public entry points; this
-        // requires the third to be bit-for-bit the same, which is what makes it inherit the oracle.
+        // `transform` writes `AVE * (1 - LOD/86400)` out for itself. `tests/cio_oracle.rs` holds
+        // that expression to `derivations/earth_rotation_rate.mac` for the two public entry points;
+        // this requires the third to be bit-for-bit the same, which is what makes it inherit that.
         let epoch_tt = Epoch::<Tt>::from_ns_since_j2000(788_400_000_000_000_000);
         let epoch_ut1 = Epoch::<Ut1>::from_ns_since_j2000(788_400_000_000_000_000 - 69_000_000_000);
         let zero = Angle::from_radians(0.0);

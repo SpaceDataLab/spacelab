@@ -14,6 +14,11 @@ root-mean-square distance over them.
 | Code | Version | Quantity | Unit | n | max | RMS | Test |
 |---|---|---|---|--:|--:|--:|---|
 | pyerfa | not recorded | TAI−UTC on and around every leap second | s | 299 | 0.000e+00 | 0.000e+00 | `crates/spacelab-fa/tests/delta_at_oracle.rs::delta_at_agrees_with_pyerfa_on_every_transition` |
+| Orekit | 13.1.7 | GMST82, IERS_1996, epochs 2000-2029 outside leap seconds | rad | 10 | 3.868e-12 | 1.797e-12 | `crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_distance_to_orekit_outside_leap_seconds` |
+| Orekit | 13.1.7 | GMST82 inside a leap second, at the instant | rad | 2 | 1.213e-12 | 1.052e-12 | `crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_distance_to_orekit_inside_a_leap_second` |
+| Orekit | 13.1.7 | TEME to ITRF position, AIAA and ISS vectors | m | 20 | 9.865e-01 | 7.645e-01 | `crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_distance_to_orekit` |
+| Orekit | 13.1.7 | TEME to ITRF velocity, AIAA state | m/s | 10 | 4.413e-04 | 4.236e-04 | `crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_distance_to_orekit` |
+| Orekit | 13.1.7 | TEME to ITRF matrix, worst entry | 1 | 10 | 8.522e-08 | 8.307e-08 | `crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_distance_to_orekit` |
 | Orekit | not recorded | GPT3 mapping coefficients a_h, a_w | 1 | 4 | 4.228e-10 | 3.196e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |
 | Orekit | not recorded | GPT3 temperatures T, Tm | K | 4 | 4.254e-10 | 2.724e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |
 | Orekit | not recorded | GPT3 pressures p, e | hPa | 4 | 4.986e-10 | 3.581e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |

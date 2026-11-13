@@ -1,0 +1,58 @@
+/* `crates/spacelab-frames`: the Earth's angular velocity, `EARTH_ROTATION_RATE * (1 - LOD/86400)`,
+   from the Earth Rotation Angle (plans/17 Ф19.G).
+
+   Orekit's TIRFProvider.getRotationRate, read from its bytecode, decided this until Ф19.G. The IERS
+   Conventions (2010) decide:
+     (1) the ERA, 2 pi (0.7790572732640 + 1.00273781191135448 Tu) with Tu in UT1 days (eq. 5.15),
+         turns at w0 = 2 pi 1.00273781191135448/86400 rad per second of UT1, and the shipped
+         EARTH_ROTATION_RATE is the double nearest w0;
+     (2) LOD = -86400 d(UT1 - TAI)/dTAI, so a second of TAI (and of TT) holds 1 - LOD/86400 seconds
+         of UT1 and the ERA turns at w0 (1 - LOD/86400) per SI second, the shipped expression in
+         teme.rs, cio.rs and cio_fast.rs; reading LOD as the day's excess duration instead,
+         86400/(86400 + LOD), moves the rate by w0 (LOD/86400)^2/(1 + LOD/86400), under 1.2e-19 rad/s
+         for |LOD| up to 3.5 ms;
+     (3) the goldens of the Rust G3 test at 40 digits: the rate at four LODs over the shipped double.
+
+   timeout 300 maxima --very-quiet -Q -b earth_rotation_rate.mac                                     */
+
+load("rust_literals.mac")$
+fpprec : 40$
+fpprintprec : 30$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+teme : "../crates/spacelab-frames/src/teme.rs"$
+cio : "../crates/spacelab-frames/src/cio.rs"$
+cio_fast : "../crates/spacelab-frames/src/cio_fast.rs"$
+oracle : "../crates/spacelab-frames/tests/cio_oracle.rs"$
+in_source(path, text) := block([s : openr(path), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+
+/* ---- (1) the ERA's rate ---------------------------------------------------------------------------- */
+era(tu) := 2*%pi*(7790572732640/10^13 + 100273781191135448/10^17*tu)$
+w0 : ratsimp(diff(era(tu), tu)/86400)$
+shipped : nearest_double(rust_rational(rust_scalar(teme, "EARTH_ROTATION_RATE")))$
+print("w0 =", bfloat(w0), "; the shipped double:", bfloat(shipped))$
+must(is(nearest_double(w0) = shipped),
+     "(1) holds: the ERA turns at 2 pi 1.00273781191135448/86400 rad per UT1 second and EARTH_ROTATION_RATE is its nearest double")$
+
+/* ---- (2) the length of day ------------------------------------------------------------------------- */
+/* dUT1/dTAI = 1 + d(UT1 - TAI)/dTAI = 1 - LOD/86400 by LOD's definition. */
+rate(lod) := w0*(1 + (-lod/86400))$
+excess(lod) := w0*86400/(86400 + lod)$
+gap : ratsimp(excess(lod) - rate(lod) - w0*(lod/86400)^2/(1 + lod/86400))$
+worst : bfloat(w0*(35/10000/86400)^2/(1 - 35/10000/86400))$
+print("the excess-duration reading moves the rate by at most", worst, "rad/s at |LOD| = 3.5 ms")$
+must(is(gap = 0) and is(worst < 12b-20)
+     and in_source(teme, "let omega = EARTH_ROTATION_RATE * (1.0 - lod_seconds / 86_400.0);")
+     and in_source(cio, "let rate = EARTH_ROTATION_RATE * (1.0 - lod_seconds / 86_400.0);")
+     and in_source(cio_fast, "let rate = EARTH_ROTATION_RATE * (1.0 - self.lod_seconds / 86_400.0);"),
+     "(2) holds: the ERA turns at w0 (1 - LOD/86400) per SI second, as shipped three times; the excess-duration reading differs by under 1.2e-19 rad/s")$
+
+/* ---- (3) the goldens ------------------------------------------------------------------------------- */
+lods : map(rust_rational, rust_table(oracle, "LOD_SECONDS"))$
+w : bfloat(map(lambda([l], shipped*(1 - l/86400)), lods))$
+print("ROTATION_RATE_MAXIMA", w)$
+must(is(lods = [0, 18/10000, -5/10000, 35/10000])
+     and transcribed(rust_table(oracle, "ROTATION_RATE_MAXIMA"), w),
+     "(3) holds: the Rust goldens are the shipped double times 1 - LOD/86400 at four LODs, to every digit shown")$
+print("DONE")$

@@ -14,7 +14,11 @@
      (3) the goldens of the Rust G3 test at 40 digits: tau, c tau, the range rate at emission and
          the instantaneous range |r(t_r) - s| at the five fixture rows the Rust test names,
          reception epochs 0 to 86 170 s, the inputs read from the fixture as the doubles Rust
-         parses them to.
+         parses them to. Each golden goes to the Arb pass of arb_balls.c exactly: the emission
+         eccentric anomaly E_e is the root of c (t_r - dt(E)) = |r(E) - s|, with dt(E) Kepler's
+         difference form solved for the time, and E at t_r the root of dt(E) = t_r, each certified
+         unique in a dyadic bracket (`arb_root`); tau, c tau, the range rate and the range are
+         explicit in the two roots.
 
    timeout 300 maxima --very-quiet -Q -b light_time_down_leg.mac                                     */
 
@@ -104,10 +108,37 @@ print("TAU_MAXIMA", column(1))$
 print("RANGE_MAXIMA", column(2))$
 print("RANGE_RATE_MAXIMA", column(3))$
 print("INSTANTANEOUS_RANGE_MAXIMA", column(4))$
+
+/* The exact path: the orbit's constants from the doubles, unrounded, and E the one unknown. */
+mu_q : nearest_double(rust_rational(rust_scalar(oracle, "MU")))$
+r0_q : firstn(epoch_state, 3)$  v0_q : rest(epoch_state, 3)$
+rn0_q : sqrt(vdot(r0_q, r0_q))$
+a_q : 1/(2/rn0_q - vdot(v0_q, v0_q)/mu_q)$
+n_q : sqrt(mu_q/a_q^3)$
+sigma0_q : vdot(r0_q, v0_q)/sqrt(mu_q)$
+dt_of(E) := (E + sigma0_q/sqrt(a_q)*(1 - cos(E)) - (1 - rn0_q/a_q)*sin(E))/n_q$
+r_of(E) := (1 - a_q/rn0_q*(1 - cos(E)))*r0_q + (dt_of(E) - (E - sin(E))/n_q)*v0_q$
+v_of(E) := block([rn : a_q + (rn0_q - a_q)*cos(E) + sigma0_q*sqrt(a_q)*sin(E)],
+  -sqrt(mu_q*a_q)/(rn*rn0_q)*sin(E)*r0_q + (1 - a_q/rn*(1 - cos(E)))*v0_q)$
+exact : makelist(block([p : picked[k], tr, s, sv, Ee, Er, tau, dr],
+  tr : p[1], s : [p[2], p[3], p[4]], sv : [p[5], p[6], p[7]],
+  Ee : concat('lt_Ee_, k - 1), Er : concat('lt_Er_, k - 1),
+  block([br : arb_bracket(kepler(tr - results[k][1]), 100)],
+    arb_root(Ee, c*(tr - dt_of(x)) - norm(r_of(x) - s), x, br[1], br[2], kepler(tr - results[k][1]))),
+  block([br : arb_bracket(kepler(tr), 100)], arb_root(Er, dt_of(x) - tr, x, br[1], br[2], kepler(tr))),
+  tau : tr - dt_of(Ee), dr : r_of(Ee) - s,
+  [tau, c*tau, vdot(dr, v_of(Ee) - sv)/norm(dr), norm(r_of(Er) - s)]), k, 1, length(picked))$
+exact_column(k) := map(lambda([x], x[k]), exact)$
+/* the two paths meet: the exact values at the roots' bigfloats against the 40-digit columns */
+path_gap : lmax(makelist(lmax(map(lambda([e, b], abs(bfloat(subst(arb_roots, e))/b - 1)),
+                                  exact_column(k), column(k))), k, 1, 4))$
+print("exact path - bigfloat path, worst relative (~0?):", path_gap)$
 must(is(map(lambda([p], p[1]), picked) = [0, 11740, 23960, 35710, 86170])
-     and transcribed(rust_table(oracle, "TAU_MAXIMA"), column(1))
-     and transcribed(rust_table(oracle, "RANGE_MAXIMA"), column(2))
-     and transcribed(rust_table(oracle, "RANGE_RATE_MAXIMA"), column(3))
-     and transcribed(rust_table(oracle, "INSTANTANEOUS_RANGE_MAXIMA"), column(4)),
+     and is(path_gap < 1b-30)
+     and certified("TAU_MAXIMA", rust_table(oracle, "TAU_MAXIMA"), exact_column(1))
+     and certified("RANGE_MAXIMA", rust_table(oracle, "RANGE_MAXIMA"), exact_column(2))
+     and certified("RANGE_RATE_MAXIMA", rust_table(oracle, "RANGE_RATE_MAXIMA"), exact_column(3))
+     and certified("INSTANTANEOUS_RANGE_MAXIMA", rust_table(oracle, "INSTANTANEOUS_RANGE_MAXIMA"),
+                   exact_column(4)),
      "(3) holds: the Rust goldens are tau, c tau, the range rate at emission and the instantaneous range at five epochs, to every digit shown")$
 print("DONE")$

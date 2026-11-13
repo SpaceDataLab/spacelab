@@ -128,6 +128,7 @@ def test_the_table_lists_every_row_and_marks_a_restricted_one() -> None:
     assert lines == [
         f"{shown} `crates/p/src/a.rs::loud` |",
         f"{shown} `crates/p/src/a.rs::loud` |",
+        f"{shown} `crates/q/src/c.rs::hidden` | {tool.PRIVATE}",
     ]
     assert text.rstrip().endswith("- `crates/p/tests/b.rs::silent`")
 

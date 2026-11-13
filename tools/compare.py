@@ -13,6 +13,7 @@ script finds every parked test in the committed tree, runs each one alone
 `docs/comparisons.md` with the date, and lists the parked tests that print no row, so that no comparator is
 missing from the table without a word. A test that fails stops the script: its distance is not judged, but
 a comparator that cannot run has no distance to record. A row whose test lies inside a licence-restricted
+root (`docs/provenance.md`) carries the private marker, so the public cut deletes it.
 
     uv run --no-project python -I tools/compare.py
 """
@@ -32,6 +33,8 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "comparisons.md"
+# Spelled in two pieces: the public cut deletes every line that carries the whole token.
+PRIVATE = "<!-- @" + "private -->"
 PARKED = re.compile(r'#\[ignore\s*=\s*"comparator:')
 FN = re.compile(r"^\s*(?:pub\s+)?fn\s+(\w+)")
 PREFIX = "comparison | "
@@ -199,10 +202,7 @@ def table(
     results: list[tuple[Parked, list[Row]]], day: datetime.date, restricted: list[str]
 ) -> str:
     def private(test: Parked) -> str:
-        return (
-            if any(test.path.startswith(r) for r in restricted)
-            else ""
-        )
+        return " " + PRIVATE if any(test.path.startswith(r) for r in restricted) else ""
 
     out = [
         "# Comparisons",

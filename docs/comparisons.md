@@ -44,6 +44,14 @@ root-mean-square distance over them.
 | Orekit | not recorded | VMF3 mapping, 2018-11-25 12h, 38, 5 and 85 deg, (hydrostatic, wet) | relative | 6 | 1.094e-06 | 4.968e-07 | `crates/spacelab-gnss/src/models.rs::vmf3_distance_to_orekit` |
 | Orekit | not recorded | VMF3 5x5 grid, node (77.5, 2.5), (ah, aw, zhd, zwd) | relative | 4 | 1.549e-15 | 7.800e-16 | `crates/spacelab-gnss/src/vmf_grid.rs::vmf3_5x5_node_distance_to_orekit` |
 | Orekit | not recorded | MODIP, Galileo grid, five nodes and nine points between | deg | 14 | 4.583e-07 | 2.531e-07 | `crates/spacelab-ionosphere/src/modip.rs::galileo_distance_to_orekit` |
+| Orekit | 13.1.7 | DSST upper bound Dₙˡ(χ) | relative | 252 | 5.223e-16 | 4.944e-17 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
+| Orekit | 13.1.7 | DSST upper bound Rₙₘˡ(γ) | relative | 2691 | 4.581e-16 | 4.019e-17 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
+| Orekit | 13.1.7 | DSST coefficient Vₙₛ | relative | 56 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
+| Orekit | 13.1.7 | DSST coefficient Qₙₛ(γ) | relative | 777 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
+| Orekit | 13.1.7 | DSST coefficient Gₛ | relative | 154 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
+| Orekit | 13.1.7 | DSST coefficient Hₛ | relative | 126 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Jacobi polynomial Pₗ⁽ᵛ,ʷ⁾(γ) | relative | 1558 | 7.836e-14 | 3.536e-15 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
+| Orekit | 13.1.7 | DSST Jacobi polynomial derivative | relative | 1333 | 1.974e-14 | 1.176e-15 | `crates/spacelab-propagation/src/dsst/coefficients.rs::distance_to_orekit` |
 | Orekit | 13.1.7 | DSST drag integration limits | rad | 2 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/drag.rs::integration_limits_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST drag Gauss order | nodes | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/dsst/drag.rs::gauss_order_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST drag mean element rates at a fixed state | relative | 6 | 2.140e-11 | 8.736e-12 | `crates/spacelab-propagation/src/dsst/drag.rs::fixed_state_rates_distance_to_orekit` |
@@ -80,6 +88,7 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | DSST Sun short periods, osculating k, h, q, p, λ | 1 | 20 | 2.842e-13 | 7.344e-14 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST Sun and Moon short periods, osculating a | m | 4 | 1.304e-07 | 8.267e-08 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST Sun and Moon short periods, osculating k, h, q, p, λ | 1 | 20 | 1.208e-12 | 3.072e-13 | `crates/spacelab-propagation/src/dsst/third_body_short_period.rs::sun_moon_short_period_distance_to_orekit` |
+| Orekit | 13.1.7 | Knocke acceleration under Orekit's cosine, largest component | relative | 4 | 6.244e-15 | 3.281e-15 | `crates/spacelab-propagation/src/earth_radiation.rs::distance_to_orekit` |
 | Orekit | 13.1.7 | Harris–Priester density | relative | 16 | 4.233e-16 | 1.237e-16 | `crates/spacelab-propagation/src/harris_priester/mod.rs::density_distance_to_orekit` |
 | Orekit | 13.1.7 | constant thrust, flow rate | relative | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/src/maneuver.rs::constant_thrust_distance_to_orekit` |
 | Orekit | 13.1.7 | constant thrust, initial thrust acceleration | relative | 1 | 6.341e-16 | 6.341e-16 | `crates/spacelab-propagation/src/maneuver.rs::constant_thrust_distance_to_orekit` |

@@ -1,0 +1,69 @@
+# The round-off of the last Newton step of the shipped Kepler solve, proved (plans/17 Ф28.C).
+#
+#   timeout 120 gappa kepler_roundoff.gappa     (Gappa 1.8.3; exit 1 and "not satisfied" on failure)
+#
+# Code: crates/spacelab-elements/src/keplerian.rs, `eccentric_from_mean`. One step from the iterate
+# E, in this order, each operation one IEEE double rounding to nearest-even (no FMA):
+#
+#   (sin_e, cos_e) = libm::sincos(E)
+#   f    = (E - e * sin_e) - M
+#   step = f / (1 - e * cos_e)
+#   E1   = E - step
+#
+# Domain: 0 <= e <= 0.99, M in [0, 2 pi) (`at_mean_anomaly` and `propagate` wrap it with `wrap_tau`),
+# E in [-0.001, 6.3], and the step starts near the root: |(E - e sin_e) - M| <= 1e-12. When the loop
+# stops by its rule, |step| < 1e-15, so the last step's residual is below 1e-15 (1 + e) < 2.1e-15
+# and the hypothesis holds with room. A run that ends on the 64-step cap instead (the code's own
+# test counts 9 of 2169 calls at e <= 0.999 oscillating on the threshold) satisfies it only as
+# measured there, not as proved here.
+#
+# Assumption: libm 0.2's `sincos` (musl's kernels) is within one ulp of the true sine and cosine.
+# For |sin E| < 1 one ulp is at most 2^-53, so sc and cc are modelled as reals within 2^-53 of
+# S = sin E and C = cos E, then rounded: libm's own result satisfies that with sc = SC.
+#
+# Result, against the exact Newton step from the same E (Fx = E - e S - M, Stepx = Fx / (1 - e C)):
+#   |f - Fx| <= 6.1e-16,  |step - Stepx| <= 6.1e-14,  |E1 - (E - Stepx)| <= 6.14e-14.
+# The 6.1e-14 is the rounding of E - e sin E, an ulp of an angle near 2 pi, divided by 1 - e cos E,
+# which is 0.01 at e = 0.99 and periapsis: the floor ulp(E) / (1 - e cos E) the code's test names.
+#
+# What the exact step leaves, by hand: Newton's remainder is F''(xi) / (2 F'(E)) (E - E*)^2 with
+# |F''| <= e and F' >= 1 - e, and |E - E*| <= |Fx| / (1 - e) <= (1e-12 + 6.1e-16) / 0.01. So
+# |E1 - E*| <= 6.14e-14 + 49.5 * (1.0006e-10)^2 < 6.15e-14 for the root E* of Kepler's equation.
+# Cross-checked on 48 (M, e) pairs, e = 0 ... 0.99 with M at 0, 1e-6, 1/2, 3, 3.14159265358979 and
+# 6.283185307, in `roundoff_samples.mac` against the root at 60 digits: worst observed 1.13e-14,
+# 0.18 of the bound.
+#
+# Gappa assumes 1 - e C and fp nonzero when it checks the rewrites: both are >= 0.01 - 2^-52 here.
+#
+# Not covered: that the loop reaches the stopping rule (convergence from the start M, or pi when
+# e >= 0.8, is the code's test, not this proof), and e > 0.99.
+
+@rnd = float<ieee_64, ne>;
+
+E = rnd(EE);
+M = rnd(MM);
+e = rnd(ee);
+sc = rnd(SC);
+cc = rnd(CC);
+
+es = rnd(e * sc);
+t1 = rnd(E - es);
+fc = rnd(t1 - M);
+ec = rnd(e * cc);
+fp = rnd(1 - ec);
+step = rnd(fc / fp);
+E1 = rnd(E - step);
+
+Fx = E - e * S - M;
+FPx = 1 - e * C;
+Stepx = Fx / FPx;
+
+{ E in [-0.001, 6.3] /\ M in [0, 6.2832] /\ e in [0, 0.99]
+  /\ S in [-1, 1] /\ C in [-1, 1] /\ |sc - S| <= 1b-53 /\ |cc - C| <= 1b-53
+  /\ t1 - M in [-1e-12, 1e-12]
+  -> |fc - Fx| <= 6.1e-16 /\ |step - Stepx| <= 6.1e-14 /\ |E1 - (E - Stepx)| <= 6.14e-14 }
+
+fc - Fx -> (fc - (t1 - M)) + (t1 - (E - es)) - (es - e * sc) - e * (sc - S);
+step - Stepx -> (step - fc / fp) + (fc - Fx) / fp + Fx * (FPx - fp) / (fp * FPx);
+fp - FPx -> (fp - (1 - ec)) - (ec - e * cc) - e * (cc - C);
+E1 - (E - Stepx) -> (E1 - (E - step)) + (Stepx - step);

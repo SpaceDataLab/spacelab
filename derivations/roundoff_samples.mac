@@ -1,0 +1,238 @@
+/* The observed round-off of the five hot-path kernels whose bounds the *_roundoff.gappa files prove
+   (plans/17 Ф28.C), at sample points that include each domain's edges.
+
+   Each kernel's f64 operations are replayed exactly: a +, -, *, / or sqrt of doubles is the double
+   nearest its exact rational (or exact square root), ties to even, as IEEE 754 rounds; floor is
+   exact. The libm functions that are not IEEE-exact -- sin, cos, atan2, hypot -- and CORE-MATH's
+   correctly rounded cbrt are replayed as the double nearest the true value (a 100-digit bigfloat),
+   so the observed errors are those of the arithmetic around them. The reference is the same
+   formula in exact or 60-digit arithmetic: the published decimals, the exact day fraction, exact
+   WGS 84 a and f, the true root of Kepler's equation. Each kernel must stay within its Gappa
+   bound at every point, and the largest observed/bound ratio is printed.
+
+   The replay was checked once against the shipped code at these points (2026-11-13): ERA, GMST82
+   and the Kepler loop bit for bit; Vermeille bit for bit except four results one ulp apart, each
+   traced to libm's atan2 (three) or hypot (one) returning the other neighbour of the true value,
+   inside the one-ulp model the proofs assume.
+
+   It also checks, on a grid of latitude and height from -100 km to GEO, the hypotheses
+   vermeille_roundoff.gappa proves by hand. Six `...: 0` lines: no point above a bound, per kernel,
+   and no grid point outside a hypothesis.
+
+   timeout 300 maxima --very-quiet --suppress-input-echo -Q -b roundoff_samples.mac               */
+
+fpprec : 60$
+display2d : false$
+linel : 4000$
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+
+nd(q) := nearest_double_q(q)$
+/* the double nearest sqrt(q), q a nonnegative rational, exactly */
+cr_sqrt(q) := block([e, X, m, two],
+  if q = 0 then return(0),
+  e : floor(floor_log2(q) / 2),
+  X : q * 4^(52 - e),
+  m : isqrt(floor(X)),
+  if m >= 2^53 then (e : e + 1, X : q * 4^(52 - e), m : isqrt(floor(X))),
+  if m < 2^52 then (e : e - 1, X : q * 4^(52 - e), m : isqrt(floor(X))),
+  two : (2 * m + 1)^2 / 4,
+  if X > two or (X = two and oddp(m)) then m : m + 1,
+  m * 2^(e - 52))$
+/* a libm function, replayed as the double nearest the true value */
+cr(expr) := block([fpprec : 100], nearest_double_bf(bfloat(expr)))$
+wrap_pi(a) := a - 2 * bfloat(%pi) * round(a / (2 * bfloat(%pi)))$
+
+TAU : cr(2 * %pi)$
+must(is(TAU = 884279719003555 / 2^47), "TAU is core::f64::consts::TAU, 6.283185307179586")$
+must(is(cr_sqrt(3) = cr(sqrt(3))) and is(cr_sqrt(2) = cr(sqrt(2))) and is(cr_sqrt(4) = 2),
+     "the exact sqrt rounding agrees with a 100-digit bigfloat")$
+
+/* ---- ERA (spacelab-fa cio.rs `era`) --------------------------------------------------------- */
+E0 : 7790572732640 / 10^13$
+E1 : 273781191135448 / 10^17$
+E0d : nd(E0)$
+E1d : nd(E1)$
+era_f64(D, F) := block([frac, tu, turns, f],
+  frac : nd(F),
+  tu : nd(D + frac),
+  turns : nd(nd(E0d + frac) + nd(E1d * tu)),
+  f : turns - floor(turns),
+  if f >= 1 then f : f - 1 else if f < 0 then f : nd(f + 1),
+  nd(f * TAU))$
+era_exact(D, F) := block([T : E0 + F + E1 * (D + F)], 2 * bfloat(%pi) * bfloat(T - floor(T)))$
+
+/* ---- GMST82 (spacelab-fa earth_rotation.rs `gmst82`) ----------------------------------------- */
+G0 : 6731054841 / 10^5$
+G1 : 8640184812866 / 10^6$
+G2 : 93104 / 10^6$
+G3 : -62 / 10^7$
+[G0d, G1d, G2d, G3d] : map(nd, [G0, G1, G2, G3])$
+WD : nd(TAU / 86400)$
+gmst_f64(D, F) := block([frac, c, p, seconds, k, red],
+  frac : nd(F),
+  c : nd(nd(D + frac) / 36525),
+  p : nd(nd(nd(nd(nd(G3d * c) + G2d) * c) + G1d) * c),
+  seconds : nd(nd(G0d + nd(86400 * frac)) + p),
+  k : floor(nd(seconds / 86400)),
+  red : nd(seconds - 86400 * k),
+  if red >= 86400 then red : nd(red - 86400) else if red < 0 then red : nd(red + 86400),
+  nd(red * WD))$
+gmst_exact(D, F) := block([c : (D + F) / 36525, S],
+  S : G0 + 86400 * F + ((G3 * c + G2) * c + G1) * c,
+  2 * bfloat(%pi) / 86400 * bfloat(S - 86400 * floor(S / 86400)))$
+
+/* day counts at the domain's edges (+-50 centuries), at J2000 and in between; exact day fractions
+   as the nanosecond clock gives them */
+ns : 86400 * 10^9$
+time_samples : [[-1826250, 0], [-1826250, 1/2], [-1826249, (ns - 1) / ns], [-36525, 123456789 / ns],
+                [-1, 3 / 4], [0, 0], [0, 1 / 3 - 1/(3 * ns)], [1, 1 / 7 - 1/(7 * ns)], [9131, 86399999999999 / ns],
+                [36525, 1 / 2], [730487, 41 / 43 - 41/(43 * ns)], [1826249, (ns - 1) / ns]]$
+time_samples : map(lambda([p], [p[1], round(p[2] * ns) / ns]), time_samples)$
+ERA_BOUND : 9.12b-12$
+GMST_BOUND : 1.37b-11$
+era_obs : map(lambda([p], abs(wrap_pi(bfloat(era_f64(p[1], p[2])) - era_exact(p[1], p[2])))), time_samples)$
+gmst_obs : map(lambda([p], abs(wrap_pi(bfloat(gmst_f64(p[1], p[2])) - gmst_exact(p[1], p[2])))), time_samples)$
+print("ERA observed", map(lambda([v], float(v)), era_obs))$
+print("GMST observed", map(lambda([v], float(v)), gmst_obs))$
+print("ERA worst observed/bound:", float(lmax(era_obs) / ERA_BOUND))$
+print("GMST worst observed/bound:", float(lmax(gmst_obs) / GMST_BOUND))$
+print("ERA points above its bound:", length(sublist(era_obs, lambda([v], is(v > ERA_BOUND)))))$
+print("GMST points above its bound:", length(sublist(gmst_obs, lambda([v], is(v > GMST_BOUND)))))$
+
+/* ---- Kepler (spacelab-elements keplerian.rs `eccentric_from_mean`) --------------------------- */
+PI_D : cr(%pi)$
+STOP : nd(10^-15)$
+/* `step` is a Maxima keyword, hence `dE` */
+kepler_f64(M, e) := block([E, dE, fin : false],
+  E : if e < nd(4/5) then M else PI_D,
+  for i thru 64 while not fin do (
+    dE : nd(nd(nd(E - nd(e * cr(sin(E)))) - M) / nd(1 - nd(e * cr(cos(E))))),
+    E : nd(E - dE),
+    if abs(dE) < STOP then fin : true),
+  if not fin then error("kepler_f64: no stop in 64 steps at", M, e),
+  E)$
+kepler_root(M, e) := if M = 0 then 0b0
+  else bf_find_root(x - e * sin(x) - M, x, 0, bfloat(2 * %pi))$
+KEPLER_BOUND : 6.15b-14$
+kepler_samples : apply(append, map(lambda([e], map(lambda([M], [nd(M), nd(e)]),
+  [0, 10^-6, 1/2, 3, 314159265358979 / 10^14, 6283185307 / 10^9])),
+  [0, 1/1000, 1/10, 1/2, 79/100, 4/5, 95/100, 99/100]))$
+kepler_obs : map(lambda([p], abs(bfloat(kepler_f64(p[1], p[2])) - kepler_root(p[1], p[2]))), kepler_samples)$
+print("Kepler worst observed at e <= 0.1:", float(lmax(firstn(kepler_obs, 18))),
+      " at e <= 0.99:", float(lmax(kepler_obs)))$
+print("Kepler worst observed/bound:", float(lmax(kepler_obs) / KEPLER_BOUND))$
+print("Kepler points above its bound:", length(sublist(kepler_obs, lambda([v], is(v > KEPLER_BOUND)))))$
+
+/* ---- Vermeille (spacelab-earth wgs84.rs `itrf_to_geodetic`) ---------------------------------- */
+A : 6378137$
+FL : 1000000000 / 298257223563$
+/* `1.0 / 298.257_223_563`: the decimal is a double before the division */
+Fd : nd(1 / nd(298257223563 / 10^9))$
+print("FLATTENING, in ulps from the double nearest 1/298.257223563 (two roundings; tests/wgs84.rs allows 1):",
+      (Fd - nd(FL)) * 2^61)$
+E2d : nd(Fd * nd(2 - Fd))$
+E4d : nd(E2d * E2d)$
+a2 : A * A$
+verm_f64(x, y, z) := block([sxy, pp, q, r, s, t, u, v, w, k, ke, d, hyp],
+  sxy : nd(nd(x * x) + nd(y * y)),
+  pp : nd(sxy / a2),
+  q : nd(nd(nd(nd(1 - E2d) / a2) * z) * z),
+  r : nd(nd(nd(pp + q) - E4d) / 6),
+  s : nd(nd(nd(E4d * pp) * q) / nd(nd(nd(4 * r) * r) * r)),
+  t : cr(nd(nd(1 + s) + cr_sqrt(nd(s * nd(2 + s)))) ^ (1/3)),
+  u : nd(r * nd(nd(1 + t) + nd(1 / t))),
+  v : cr_sqrt(nd(nd(u * u) + nd(E4d * q))),
+  w : nd(nd(E2d * nd(nd(u + v) - q)) / nd(2 * v)),
+  k : nd(cr_sqrt(nd(nd(u + v) + nd(w * w))) - w),
+  ke : nd(k + E2d),
+  d : nd(nd(k * cr_sqrt(sxy)) / ke),
+  hyp : cr(sqrt(d^2 + z^2)),
+  [2 * cr(atan2(z, nd(d + hyp))), nd(nd(nd(ke - 1) / k) * hyp)])$
+verm_exact(x, y, z) := block([e2 : FL * (2 - FL), e4, P, Q, R, S, T, U, V, W, K, D, HYP],
+  e4 : e2^2,
+  P : (x^2 + y^2) / a2, Q : (1 - e2) / a2 * z^2, R : (P + Q - e4) / 6,
+  S : bfloat(e4 * P * Q / (4 * R^3)),
+  T : (1 + S + sqrt(S * (2 + S)))^(1/3),
+  U : R * (1 + T + 1 / T), V : sqrt(U^2 + e4 * Q),
+  W : e2 * (U + V - Q) / (2 * V), K : sqrt(U + V + W^2) - W,
+  D : K * sqrt(bfloat(x^2 + y^2)) / (K + e2), HYP : sqrt(D^2 + z^2),
+  [2 * atan2(bfloat(z), D + HYP), (K + e2 - 1) / K * HYP, HYP])$
+/* the reference solves the defining equations: the forward map of (lat, h) returns (p, z) */
+forward_gap(x, y, z) := block([g : verm_exact(x, y, z), e2 : FL * (2 - FL), N],
+  N : A / sqrt(1 - e2 * sin(g[1])^2),
+  max(abs((N + g[2]) * cos(g[1]) - sqrt(bfloat(x^2 + y^2))), abs((N * (1 - e2) + g[2]) * sin(g[1]) - z)))$
+geod(lat, lon, h) := block([e2 : FL * (2 - FL), N, sl, cl],
+  [sl, cl] : [sin(bfloat(lat)), cos(bfloat(lat))],
+  N : A / sqrt(1 - e2 * sl^2),
+  map(lambda([c], nd(rationalize(c))),
+      [(N + h) * cl * cos(bfloat(lon)), (N + h) * cl * sin(bfloat(lon)), (N * (1 - e2) + h) * sl]))$
+deg : bfloat(%pi) / 180$
+verm_samples : [geod(1/10^7 * deg, 1 * deg, 0), geod(30 * deg, 10 * deg, 0), geod(45 * deg, 45 * deg, 100),
+                geod(60 * deg, 80 * deg, -100), geod(89.999 * deg, 7 * deg, 0), geod(-33 * deg, 151 * deg, 500000),
+                geod(51.5 * deg, 0.001 * deg, 2000000), geod(0.5 * deg, 75 * deg, 35786000),
+                geod(-89 * deg, 45 * deg, 35786000), geod(10 * deg, 89.99 * deg, -50000)]$
+verm_samples : map(lambda([p], map(abs, p)), verm_samples)$
+must(every(lambda([p], every(lambda([c], is(c >= 1/1000)), p)), verm_samples),
+     "every Vermeille sample has |x|, |y|, |z| >= 1 mm, inside the proof's domain")$
+gaps : map(lambda([p], forward_gap(p[1], p[2], p[3])), verm_samples)$
+print("Vermeille reference: forward map gap, worst (m):", float(lmax(gaps)))$
+must(is(lmax(gaps) < 10^-40), "the 60-digit reference solves the forward equations to 1e-40 m")$
+LAT_BOUND : 3.95b-15$
+H_REL_BOUND : 5.97b-15$
+verm_obs : map(lambda([p], block([c : verm_f64(p[1], p[2], p[3]), g : verm_exact(p[1], p[2], p[3])],
+  [abs(bfloat(c[1]) - g[1]), abs(bfloat(c[2]) - g[2]), abs(bfloat(c[2]) - g[2]) / g[3]])), verm_samples)$
+print("Vermeille latitude observed (rad)", map(lambda([o], float(o[1])), verm_obs))$
+print("Vermeille height observed (m)", map(lambda([o], float(o[2])), verm_obs))$
+print("Vermeille latitude worst observed/bound:", float(lmax(map(first, verm_obs)) / LAT_BOUND))$
+print("Vermeille height worst observed/bound:", float(lmax(map(third, verm_obs)) / H_REL_BOUND))$
+print("Vermeille points above a bound:",
+      length(sublist(verm_obs, lambda([o], is(o[1] > LAT_BOUND) or is(o[3] > H_REL_BOUND)))))$
+
+/* The hypotheses vermeille_roundoff.gappa proves by hand, on the exact quantities, over a grid of
+   latitude and geodetic height from -100 km to GEO; and the P + Q range that grid spans. The grid
+   stops 1e-7 deg short of the equator and the pole, as the proof's 1 mm floor on |z| and |x|, |y|
+   does. */
+verm_lemmas(phi, h) := block([e2 : bfloat(FL * (2 - FL)), e4, N, rho, z, P, Q, R, S, T, U, V, W, K],
+  e4 : e2^2,
+  N : A / sqrt(1 - e2 * sin(phi)^2),
+  rho : (N + h) * cos(phi), z : (N * (1 - e2) + h) * sin(phi),
+  P : rho^2 / a2, Q : (1 - e2) * z^2 / a2, R : (P + Q - e4) / 6,
+  S : e4 * P * Q / (4 * R^3), T : (1 + S + sqrt(S * (2 + S)))^(1/3),
+  U : R * (1 + T + 1 / T), V : sqrt(U^2 + e4 * Q),
+  W : e2 * (U + V - Q) / (2 * V), K : sqrt(U + V + W^2) - W,
+  [P + Q, T, (U + V) / V, Q / V, W, K, W / K, (U + V) / (U + V + W^2)])$
+lemma_box : [[0.955, 46], [1, 1.013], [1, 2], [0, 2], [0, 0.0067], [0.97, 6.82], [0, 0.00691], [0.9999, 1]]$
+lemma_grid : apply(append, map(lambda([h], map(lambda([la], verm_lemmas(la * deg, h)),
+  [1/10^7, 1/2, 1, 10, 30, 45, 60, 80, 89, 89.999, 90 - 1/10^7])),
+  [-100000, 0, 400000, 2000000, 20200000, 35786000]))$
+for i thru length(lemma_box) do
+  print("Vermeille lemma", i, "on the grid: from", float(lmin(map(lambda([g], g[i]), lemma_grid))),
+        "to", float(lmax(map(lambda([g], g[i]), lemma_grid))), " box", lemma_box[i])$
+print("Vermeille lemma violations on the grid:",
+      length(sublist(lemma_grid, lambda([g], not every(lambda([v, b], is(v >= b[1] and v <= b[2])), g, lemma_box)))))$
+
+/* ---- the geopotential recursion seed (spacelab-propagation geopotential.rs) ------------------ */
+RE : nd(63781363 / 10)$
+S3 : cr_sqrt(3)$
+seed_f64(x, y, z) := block([ir, ir2, v00],
+  ir : nd(1 / cr_sqrt(nd(nd(nd(x * x) + nd(y * y)) + nd(z * z)))),
+  ir2 : nd(ir * ir),
+  v00 : nd(RE * ir),
+  [v00, nd(nd(S3 * nd(nd(z * RE) * ir2)) * v00),
+   nd(S3 * nd(nd(nd(x * RE) * ir2) * v00)), nd(S3 * nd(nd(nd(y * RE) * ir2) * v00))])$
+seed_exact(x, y, z) := block([r : sqrt(bfloat(x^2 + y^2 + z^2))],
+  [RE / r, sqrt(3b0) * z * RE^2 / r^3, sqrt(3b0) * x * RE^2 / r^3, sqrt(3b0) * y * RE^2 / r^3])$
+seed_samples : map(lambda([p], map(lambda([c], nd(rationalize(bfloat(c)))), p)),
+  [[6245000, 1/1000, 1/1000], [4000000, 3000000, 3600000], [1/1000, 1/1000, 6245000],
+   [26000000, 30000000, 1000000], [-42164000, 1, 1/1000], [3e8, 2e8, -2e8], [1e8, -4e8, 1e8]])$
+seed_obs : map(lambda([p], block([c : seed_f64(p[1], p[2], p[3]), g : seed_exact(p[1], p[2], p[3])],
+  map(lambda([a, b], abs(bfloat(a) / b - 1)), c, g))), seed_samples)$
+SEED_V00_BOUND : 5.02b-16$
+SEED_BOUND : 1.9b-15$
+print("seed V00 worst relative observed:", float(lmax(map(first, seed_obs))),
+      " V10, V11, W11:", float(lmax(map(lambda([o], lmax(rest(o))), seed_obs))))$
+print("seed worst observed/bound:", float(max(lmax(map(first, seed_obs)) / SEED_V00_BOUND,
+                                             lmax(map(lambda([o], lmax(rest(o))), seed_obs)) / SEED_BOUND)))$
+print("seed points above a bound:", length(sublist(seed_obs,
+      lambda([o], is(o[1] > SEED_V00_BOUND) or is(lmax(rest(o)) > SEED_BOUND)))))$

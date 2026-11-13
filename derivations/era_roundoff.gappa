@@ -1,0 +1,52 @@
+# The round-off of the shipped Earth Rotation Angle, proved (plans/17 Ф28.C).
+#
+#   timeout 120 gappa era_roundoff.gappa        (Gappa 1.8.3; exit 1 and "not satisfied" on failure)
+#
+# Code: crates/spacelab-fa/src/cio.rs, `era` and `reduce_turns_to_radians`. With `(day, frac)` from
+# `Epoch::day_and_fraction` (crates/spacelab-core/src/time.rs), in this order, each operation one
+# IEEE double rounding to nearest-even (Rust never contracts a*b+c into an FMA):
+#
+#   tu    = day as f64 + frac
+#   turns = (0.779_057_273_264_0 + frac) + 0.002_737_811_911_354_48 * tu
+#   f     = turns - floor(turns)              exact; the clamps after it never fire
+#   angle = f * Angle::TAU                    TAU = core::f64::consts::TAU, the double nearest 2 pi
+#
+# Domain: |day| <= 1 826 250 (fifty Julian centuries either side of J2000, the span the docs quote
+# for GMST82), `frac` the double nearest the exact day fraction F = ns / 86 400 000 000 000 in [0, 1),
+# which is what `day_and_fraction` returns: `rem as f64` is exact below 2^53, one rounding divides.
+#
+# The exact angle is ERA(Tu) = 2 pi (0.7790572732640 + F + 0.00273781191135448 (day + F)) with the
+# published decimals, reduced by the same whole number of turns k = floor(turns) the code removes.
+# The angle is defined modulo 2 pi, so `angle - Exact` is the error modulo 2 pi.
+#
+# No assumption on any library function: the kernel calls only `floor`, which is exact.
+#
+# Result: |angle - ERA| <= 9.12e-12 rad over the domain. It grows with the day count: at the
+# domain's edge 0.0027 * tu is 5000 turns, and the roundings of tu, of the 0.0027... constant, of
+# that product and of the sum each sit at the scale of an ulp of it, 9.1e-13 turns. Cross-checked
+# at twelve epochs, the domain's edges among them, in `roundoff_samples.mac`: worst observed
+# 4.29e-12 rad, 0.47 of the bound.
+
+@rnd = float<ieee_64, ne>;
+
+D = int<ne>(DD);
+frac = rnd(F);
+
+C0 = rnd(0.7790572732640);
+C1 = rnd(0.00273781191135448);
+TAU = rnd(2 * pi);
+
+tu = rnd(D + frac);
+turns rnd= (C0 + frac) + C1 * tu;
+k = int<dn>(turns);
+f = rnd(turns - k);
+angle = rnd(f * TAU);
+
+Turns = (0.7790572732640 + F) + 0.00273781191135448 * (D + F);
+Exact = 2 * pi * (Turns - k);
+
+{ D in [-1826250, 1826250] /\ F in [0, 1]
+  /\ pi in [3.141592653589793238462643383279502884197, 3.141592653589793238462643383279502884198]
+  -> |angle - Exact| <= 9.12e-12 }
+
+angle - Exact -> (angle - f * TAU) + f * (TAU - 2 * pi) + 2 * pi * (f - (Turns - k));

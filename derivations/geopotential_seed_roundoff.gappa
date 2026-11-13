@@ -1,0 +1,80 @@
+# The round-off of the geopotential recursion's seed, proved (plans/17 Ф28.C).
+#
+#   timeout 120 gappa geopotential_seed_roundoff.gappa   (Gappa 1.8.3; exit 1 and "not satisfied")
+#
+# Code: crates/spacelab-propagation/src/geopotential.rs at f64: `harmonic_quantities`, and the rows
+# n = 0 and n = 1 of `geo_row` that every higher degree of the Gottlieb recursion is built on. In
+# this order, each operation one IEEE double rounding to nearest-even (no FMA):
+#
+#   inv_r  = 1 / sqrt((x * x + y * y) + z * z)        `.sqrt().recip()`: libm::sqrt, then 1.0 / x
+#   inv_r2 = inv_r * inv_r
+#   V00    = re * inv_r
+#   V10    = (rec_a[1][0] * ((z * re) * inv_r2)) * V00 - 0      the zonal column at n = 1
+#   V11    = sec[1] * (((x * re) * inv_r2) * V00 - ups * 0)      the sectorial diagonal at n = 1
+#   W11    = sec[1] * (xi * 0 + ((y * re) * inv_r2) * V00)
+#
+# rec_a[1][0] = sqrt(3.0 / 1.0) and sec[1] = sqrt(3.0), both the double nearest sqrt 3: libm's sqrt
+# is correctly rounded. The `- 0`, `ups * 0` and `xi * 0 +` terms are exact and drop out.
+#
+# Domain: x, y, z in [2^-500, 4.3e8] m, r^2 = x^2 + y^2 + z^2 in [3.9e13, 1.85e17] (r from 6245 km,
+# 133 km below the equatorial radius, to 430 000 km), re any double in [6.3e6, 6.4e6] m (the models'
+# 6 378 136.3 m among them). A negative coordinate flips signs exactly, so the bounds hold for
+# |x|, |y|, |z|; a zero coordinate makes its harmonic exactly zero. Coordinates in (0, 2^-500), where
+# a square underflows, are not covered.
+#
+# The exact seed is V00 = re / r, V10 = sqrt 3 z re^2 / r^3, V11 = sqrt 3 x re^2 / r^3,
+# W11 = sqrt 3 y re^2 / r^3 for the same double inputs. No assumption on any library function.
+#
+# Result, relative: |V00 / V00exact - 1| <= 5.02e-16 and V10, V11, W11 within 1.9e-15. Every higher
+# V_nm, W_nm is a sum of these seeds times recursion coefficients, so this is the floor the
+# recursion starts from, not a bound on it. Cross-checked at seven positions, the domain's edges
+# and coordinates near 1 mm among them, in `roundoff_samples.mac`: worst observed 1.54e-16 and
+# 4.47e-16, 0.31 of the bound.
+
+@rnd = float<ieee_64, ne>;
+
+x = rnd(xx);
+y = rnd(yy);
+z = rnd(zz);
+re = rnd(rre);
+s3 = rnd(sqrt(3));
+
+xx2 = rnd(x * x);
+yy2 = rnd(y * y);
+zz2 = rnd(z * z);
+sxy = rnd(xx2 + yy2);
+ss = rnd(sxy + zz2);
+sq = rnd(sqrt(ss));
+inv_r = rnd(1 / sq);
+inv_r2 = rnd(inv_r * inv_r);
+zeta = rnd(rnd(z * re) * inv_r2);
+v00 = rnd(re * inv_r);
+az = rnd(s3 * zeta);
+v10 = rnd(az * v00);
+xi = rnd(rnd(x * re) * inv_r2);
+xv = rnd(xi * v00);
+v11 = rnd(s3 * xv);
+ups = rnd(rnd(y * re) * inv_r2);
+yv = rnd(ups * v00);
+w11 = rnd(s3 * yv);
+
+Sxy = x * x + y * y;
+R2 = Sxy + z * z;
+SQ = sqrt(R2);
+IR = 1 / SQ;
+IR2 = IR * IR;
+ZETA = z * re * IR2;
+V00 = re * IR;
+AZ = sqrt(3) * ZETA;
+V10 = AZ * V00;
+XI = x * re * IR2;
+XV = XI * V00;
+V11 = sqrt(3) * XV;
+UPS = y * re * IR2;
+YV = UPS * V00;
+W11 = sqrt(3) * YV;
+
+{ x in [1b-500, 4.3e8] /\ y in [1b-500, 4.3e8] /\ z in [1b-500, 4.3e8] /\ re in [6.3e6, 6.4e6]
+  /\ R2 in [3.9e13, 1.85e17]
+  -> |v00 -/ V00| <= 5.02e-16 /\ |v10 -/ V10| <= 1.9e-15 /\ |v11 -/ V11| <= 1.9e-15
+     /\ |w11 -/ W11| <= 1.9e-15 }

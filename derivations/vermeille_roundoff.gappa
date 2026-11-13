@@ -1,0 +1,158 @@
+# The round-off of the shipped Vermeille ITRF -> geodetic conversion, proved (plans/17 Ф28.C).
+# The height's last rounding is in vermeille_height_roundoff.gappa; the latitude is closed by hand
+# below from this file's bound on `wd`.
+#
+#   timeout 120 gappa -Wno-null-denominator vermeille_roundoff.gappa   (exit 1, "not satisfied")
+#
+# Code: crates/spacelab-earth/src/wgs84.rs, `itrf_to_geodetic`. Each operation one IEEE double
+# rounding to nearest-even (no FMA), in the order Rust evaluates the source:
+#
+#   pp = (x*x + y*y) / a2                 a2 = 6378137^2, exact
+#   q  = ((1 - E2) / a2) * z * z          E2 = f (2 - f), E4 = E2 E2, f = 1.0 / 298.257_223_563:
+#   r  = ((pp + q) - E4) / 6                the decimal is a double before the division
+#   s  = ((E4 * pp) * q) / (((4 r) r) r)
+#   t  = cbrt((1 + s) + sqrt(s (2 + s)))
+#   u  = r ((1 + t) + 1/t),   v = sqrt(u u + E4 q)
+#   w  = (E2 ((u + v) - q)) / (2 v),   k = sqrt((u + v) + w w) - w
+#   d  = (k sqrt(x*x + y*y)) / (k + E2),   hyp = hypot(d, z)
+#   latitude = 2 atan2(z, d + hyp),   height = (((k + E2) - 1) / k) hyp
+#
+# Assumptions on libm 0.2: `sqrt` is correctly rounded (IEEE); `cbrt` is CORE-MATH's, correctly
+# rounded, so t = rnd(Tc) with Tc the real cube root of the computed argument; `hypot` and `atan2`
+# (musl) are within one ulp. `hyp` is modelled as rnd(Hc) with Hc within 2^-52 of sqrt(d^2 + z^2):
+# hypot's own result satisfies that with Hc = hyp.
+#
+# Domain: x, y, z in [1 mm, 4.3e7 m] and P + Q in [0.955, 46]. Flipping a coordinate's sign changes
+# no rounding magnitude (x and y are squared; z is squared, and `atan2` is odd in z), so this covers
+# |x|, |y|, |z|. P + Q grows with height at fixed latitude, and every point of geodetic height
+# -100 km to 35 786 km (GEO) has P + Q in [0.9558, 43.71] (`roundoff_samples.mac`, on a grid). Not
+# covered: a coordinate below 1 mm, the equator (z = 0) and the polar axis (x = y = 0) among them,
+# where s = 0 or q = 0 exactly; and the near-geocentre lens the code refuses.
+#
+# The exact quantities (capitals) are the same formulas in real arithmetic on the same double
+# inputs, with the exact WGS 84 e^2 = f (2 - f), f = 1/298.257223563; Vermeille's formulas are
+# exact, so the exact latitude and height are the geodetic ones.
+#
+# Hypotheses on the exact quantities, each proved by hand for P, Q >= 0, P + Q in [0.955, 46]:
+#  (1) R = (P + Q - e^4)/6 > 0, and S = e^4 P Q / (4 R^3) <= 13.5 e^4 (P+Q)^2 / (P+Q-e^4)^3 <= 6.34e-4
+#      (P Q <= (P+Q)^2/4, and the right side falls with P + Q), so T in [1, 1.0120].
+#  (2) U = R (1 + T + 1/T) >= 3R > 0 and V = sqrt(U^2 + e^4 Q) >= U, so UV / V = 1 + U/V in (1, 2].
+#  (3) Q <= U + V: with A = 3R <= U, A + sqrt(A^2 + e^4 Q) >= Q reduces, when Q > A, to
+#      e^4 >= Q - 2A = e^4 - P. So 0 <= UVQ <= UV <= 2V, Q / V in [0, 2] and
+#      W = e^2 UVQ / (2V) in [0, e^2] = [0, 0.006695].
+#  (4) UV >= 6R = P + Q - e^4 >= 0.95495 and W^2 <= e^4, so UV / SA in [0.99995, 1].
+#  (5) K = sqrt(SA) - W >= sqrt(0.95495) - e^2 = 0.97052; K <= sqrt(UV + e^4) with
+#      UV <= 2U + e^4 Q / (2U) <= 2 * 3.012 * 46/6 + 0.0022, so K <= 6.80; W / K <= e^2/0.97052 = 0.006898.
+#  (6) cbrt: this file proves |ac / Ax - 1| <= 3.21e-15, so |Tc / T - 1| <= 3.21e-15/3 (1 + 1e-15)
+#      < 1.071e-15. The ac goal does not read Tc (ac is computed before t), and the Tc hypothesis holds
+#      for Tc = T whatever the other variables are, so the implication proves ac's bound outright and
+#      then discharges the hypothesis: no circularity. The Hc hypothesis is the same: Hc = hyp.
+#  Gappa assumes the rewrites' denominators nonzero: V, K, KE, SA, UV and m = 2v, all >= 0.47 here.
+#
+# Results (relative unless absolute is said):
+#   k within 1.361e-15, d within 3.277e-15, hyp within 3.61e-15, wd = d + hyp within 3.721e-15;
+#   |w - W| <= 3.12e-17 absolute (w is not relatively accurate near the poles, where W -> 0 and
+#   (u + v) - q cancels, and it need not be: it enters k as an absolute term);
+#   HK = (KE - 1)/K in [-0.0241, 0.8539] and |hk - HK| <= 2.792e-15, for the height step.
+#
+# Latitude, by hand: z is exact and wd = WD (1 + delta), |delta| <= 3.721e-15. With a = z/WD,
+# |atan(a/(1+delta)) - atan(a)| <= a |delta| / ((1 - |delta|)(1 + a^2/(1+|delta|)^2))
+# <= |delta| (1 + |delta|) / (2 (1 - |delta|)), doubled 3.7211e-15. atan2(z, wd) < 1 because
+# wd >= hyp >= z (1 - 2^-52), so its one-ulp error is <= 2^-53, doubled 2^-52. Hence
+# |latitude - phi| <= 3.95e-15 rad. Height: vermeille_height_roundoff.gappa, |h - H| <= 5.97e-15 HYP,
+# HYP = sqrt(D^2 + z^2) <= |r|: 3.8e-8 m at the surface, 2.5e-7 m at GEO.
+# Cross-checked at ten points, 1e-7 deg to 89.999 deg of latitude and -50 km to GEO, in
+# `roundoff_samples.mac`: worst observed 9.3e-17 rad and 1.1e-16 HYP, 0.024 and 0.019 of the bounds.
+
+@rnd = float<ieee_64, ne>;
+
+x = rnd(xx);
+y = rnd(yy);
+z = rnd(zz);
+
+a2 = 40680631590769;
+fl = rnd(1 / rnd(298.257223563));
+E2 = rnd(fl * rnd(2 - fl));
+E4 = rnd(E2 * E2);
+cq = rnd(rnd(1 - E2) / a2);
+
+x2 = rnd(x * x);
+y2 = rnd(y * y);
+sxy = rnd(x2 + y2);
+pp = rnd(sxy / a2);
+cz = rnd(cq * z);
+q = rnd(cz * z);
+pq = rnd(pp + q);
+r = rnd(rnd(pq - E4) / 6);
+num = rnd(rnd(E4 * pp) * q);
+den = rnd(rnd(rnd(4 * r) * r) * r);
+s = rnd(num / den);
+s2 = rnd(s * rnd(2 + s));
+sq = rnd(sqrt(s2));
+ac = rnd(rnd(1 + s) + sq);
+t = rnd(Tc);
+tt = rnd(rnd(1 + t) + rnd(1 / t));
+u = rnd(r * tt);
+v = rnd(sqrt(rnd(rnd(u * u) + rnd(E4 * q))));
+uv = rnd(u + v);
+uvq = rnd(uv - q);
+n = rnd(E2 * uvq);
+m = rnd(2 * v);
+w = rnd(n / m);
+ww = rnd(w * w);
+sa = rnd(uv + ww);
+sk = rnd(sqrt(sa));
+k = rnd(sk - w);
+ke = rnd(k + E2);
+rxy = rnd(sqrt(sxy));
+d = rnd(rnd(k * rxy) / ke);
+hyp = rnd(Hc);
+wd = rnd(d + hyp);
+km = rnd(ke - 1);
+hk = rnd(km / k);
+
+f = 1 / 298.257223563;
+e2 = f * (2 - f);
+e4 = e2 * e2;
+Sxy = x * x + y * y;
+P = Sxy / a2;
+Q = (1 - e2) / a2 * z * z;
+PQ = P + Q;
+R = (PQ - e4) / 6;
+S = e4 * P * Q / (4 * R * R * R);
+Ax = 1 + S + sqrt(S * (2 + S));
+U = R * (1 + Tx + 1 / Tx);
+V = sqrt(U * U + e4 * Q);
+UV = U + V;
+UVQ = UV - Q;
+W = e2 * UVQ / (2 * V);
+SA = UV + W * W;
+SK = sqrt(SA);
+K = SK - W;
+KE = K + e2;
+Dd = K * sqrt(Sxy) / KE;
+HYP = sqrt(Dd * Dd + z * z);
+WD = Dd + HYP;
+HK = (KE - 1) / K;
+
+{ x in [1e-3, 4.3e7] /\ y in [1e-3, 4.3e7] /\ z in [1e-3, 4.3e7]
+  /\ PQ in [0.955, 46]
+  /\ Tx in [1, 1.013] /\ Tc -/ Tx in [-1.071e-15, 1.071e-15]
+  /\ UV / V in [1, 2] /\ Q / V in [0, 2] /\ W in [0, 0.0067]
+  /\ K in [0.97, 6.82] /\ W / K in [0, 0.00691] /\ UV / SA in [0.9999, 1]
+  /\ Hc -/ sqrt(d * d + z * z) in [-1b-52, 1b-52]
+  -> |ac -/ Ax| <= 3.21e-15 /\ |w - W| <= 3.12e-17 /\ |k -/ K| <= 1.361e-15 /\ |d -/ Dd| <= 3.277e-15
+     /\ |hyp -/ HYP| <= 3.61e-15 /\ |wd -/ WD| <= 3.721e-15
+     /\ HK in [-0.0241, 0.8539] /\ |hk - HK| <= 2.792e-15 }
+
+w - W -> (w - n / m) + (n - E2 * uvq) / m + (E2 - e2) * uvq / m + e2 * (uvq - UVQ) / m + W * (2 * V - m) / m;
+uvq - UVQ -> (uvq - (uv - q)) + (uv - UV) - (q - Q);
+(sa - SA) / SA -> (sa - (uv + ww)) / SA + (uv - UV) / UV * (UV / SA) + (ww - w * w) / SA + (w - W) * (w + W) / SA;
+(k - K) / K -> (k - (sk - w)) / K + (sk - SK) / SK * (SK / K) - (w - W) / K;
+SK / K -> 1 + W / K;
+(ke - KE) / KE -> (ke - (k + E2)) / KE + (k - K) / K * (K / KE) + (E2 - e2) / KE;
+K / KE -> 1 / (1 + e2 / K);
+(KE - 1) / K -> 1 - (1 - e2) / K;
+hk - HK -> (hk - km / k) + (km - (ke - 1)) / k + (ke - KE) / KE * (KE / K) * (K / k) - HK * ((k - K) / K) * (K / k);
+KE / K -> 1 + e2 / K;
+K / k -> 1 / (1 + (k - K) / K);

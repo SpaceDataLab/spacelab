@@ -1,0 +1,85 @@
+# The round-off of the shipped GMST (IAU 1982), proved (plans/17 Ф28.C).
+#
+#   timeout 120 gappa gmst82_roundoff.gappa     (Gappa 1.8.3; exit 1 and "not satisfied" on failure)
+#
+# Code: crates/spacelab-fa/src/earth_rotation.rs, `gmst82` and `reduce_seconds_to_radians`, with
+# `(day, frac)` and `julian_centuries` from crates/spacelab-core/src/time.rs. In this order, each
+# operation one IEEE double rounding to nearest-even (Rust never contracts into an FMA):
+#
+#   c       = (day as f64 + frac) / 36525
+#   seconds = (C0 + 86400 * frac) + ((C3 * c + C2) * c + C1) * c
+#   k       = floor(seconds / 86400)                 exact floor of a rounded quotient
+#   reduced = seconds - 86400 * k                    86400 k is an integer below 2^53, so exact
+#   reduced = reduced -/+ 86400 * j                  the clamp, j in {-1, 0, 1}
+#   angle   = reduced * (TAU / 86400)                TAU / 86400 rounded once, as a constant
+#
+# C0 ... C3 are the doubles nearest 67310.54841, 8640184.812866, 0.093104 and -6.2e-6 s.
+#
+# Domain: |day| <= 1 826 250 (fifty Julian centuries either side of J2000, the "five thousand years"
+# the doc comment's conditioning paragraph quotes), `frac` the double nearest the exact day fraction
+# F in [0, 1). The clamp is modelled by a free integer j in [-1, 1] with reduced + 86400 j in
+# [-1, 86401]: k misses floor(seconds / 86400) by at most one, because the quotient is within one
+# rounding of the exact one, and one clamp step puts the result back in [0, 86400].
+#
+# The exact angle is the published polynomial, GMST = 2 pi / 86400 * S with
+# S = 67310.54841 + 86400 F + ((-6.2e-6 Ce + 0.093104) Ce + 8640184.812866) Ce and Ce = (day + F) / 36525,
+# reduced by the same whole number of days k - j the code removes; the error is modulo 2 pi.
+#
+# No assumption on any library function: only `floor`, which is exact.
+#
+# Result: |angle - GMST| <= 1.37e-11 rad. Nearly all of it is the 8.64e6 * c product and the sum
+# that holds it: |seconds - S| <= 1.88e-7 s. This is the "about 1e-11 rad at 5000 years" of the doc
+# comment, now a bound. Cross-checked at twelve epochs, the domain's edges among them, in
+# `roundoff_samples.mac`: worst observed 5.83e-12 rad, 0.43 of the bound.
+
+@rnd = float<ieee_64, ne>;
+
+D = int<ne>(DD);
+frac = rnd(F);
+
+C0 = rnd(67310.54841);
+C1 = rnd(8640184.812866);
+C2 = rnd(0.093104);
+C3 = rnd(-6.2e-6);
+TAU = rnd(2 * pi);
+W = rnd(TAU / 86400);
+
+tu = rnd(D + frac);
+c = rnd(tu / 36525);
+p1 = rnd(C3 * c);
+p2 = rnd(p1 + C2);
+p3 = rnd(p2 * c);
+p4 = rnd(p3 + C1);
+p5 = rnd(p4 * c);
+s1 = rnd(86400 * frac);
+s2 = rnd(C0 + s1);
+seconds = rnd(s2 + p5);
+q = rnd(seconds / 86400);
+k = int<dn>(q);
+r1 = rnd(seconds - 86400 * k);
+j = int<ne>(JJ);
+r2 = rnd(r1 + 86400 * j);
+angle = rnd(r2 * W);
+
+Ce = (D + F) / 36525;
+P1 = -6.2e-6 * Ce;
+P2 = P1 + 0.093104;
+P3 = P2 * Ce;
+P4 = P3 + 8640184.812866;
+P5 = P4 * Ce;
+S1 = 86400 * F;
+S2 = 67310.54841 + S1;
+S = S2 + P5;
+Exact = 2 * pi / 86400 * (S - 86400 * (k - j));
+
+{ D in [-1826250, 1826250] /\ F in [0, 1] /\ j in [-1, 1] /\ r1 + 86400 * j in [-1, 86401]
+  /\ pi in [3.141592653589793238462643383279502884197, 3.141592653589793238462643383279502884198]
+  -> |seconds - S| <= 1.88e-7 /\ |angle - Exact| <= 1.37e-11 }
+
+r2 ~ S - 86400 * (k - j);
+angle - Exact -> (angle - r2 * W) + r2 * (W - 2 * pi / 86400) + 2 * pi / 86400 * (r2 - (S - 86400 * (k - j)));
+r2 - (S - 86400 * (k - j)) -> (r2 - (r1 + 86400 * j)) + (r1 - (seconds - 86400 * k)) + (seconds - S);
+c - Ce -> (c - tu / 36525) + (tu - (D + F)) / 36525;
+p1 - P1 -> (p1 - C3 * c) + (C3 + 6.2e-6) * c - 6.2e-6 * (c - Ce);
+p3 - P3 -> (p3 - p2 * c) + (p2 - P2) * c + P2 * (c - Ce);
+p5 - P5 -> (p5 - p4 * c) + (p4 - P4) * c + P4 * (c - Ce);

@@ -244,6 +244,48 @@ real IERS primary sources; `earth`'s strongest single check is cross-algorithm (
 Fukushima). `core` is analytic identities + bit-exact anchors + round-trips, as befits unit wrappers and
 calendar arithmetic.*
 
+### 1.1 Round-off on the hot path, proved rather than sampled (Ф28.C)
+
+The rows above measure each kernel's f64 error at chosen points. Five kernels that every propagation
+step or frame transform passes through now also have a bound on that error **over a whole domain**,
+proved by Gappa 1.8.3 on the shipped operation order: each `+ − × ÷ √` is one IEEE double rounding,
+and Rust never fuses a multiply-add. libm 0.2's `sqrt` and CORE-MATH `cbrt` are correctly rounded.
+`sin`, `cos`, `atan2` and `hypot` (musl's) are assumed to be within one ulp.
+Each file's header states the domain, the hypotheses and the hand lemmas the proof rests on.
+`derivations/roundoff_samples.mac` replays the same operations exactly at points that include each
+domain's edges. It holds the observed error against Maxima at 60 digits under each bound.
+On 2026-11-13 that replay was checked against the shipped functions. ERA, GMST82 and the Kepler loop
+matched bit for bit. Vermeille matched bit for bit apart from four results one ulp apart, each from
+libm's `atan2` or `hypot` landing on the other neighbour of the true value. The Vermeille proofs
+model that one-ulp error.
+
+| Kernel | Code | Domain | Proved bound | Observed / bound | Proof |
+|---|---|---|---|---|---|
+| ERA | `spacelab-fa` `era` | ±50 Julian centuries of UT1, the exact day fraction | **9.12e-12 rad**, modulo 2π | 4.29e-12 rad, 0.47 | derivations/era_roundoff.gappa |
+| GMST82 | `spacelab-fa` `gmst82` | ±50 Julian centuries | **1.37e-11 rad**, and 1.88e-7 s before the reduction: the "about 1e-11 rad at 5000 years" of its doc comment, now a bound | 5.83e-12 rad, 0.43 | derivations/gmst82_roundoff.gappa |
+| Kepler, last Newton step | `spacelab-elements` `eccentric_from_mean` | e ≤ 0.99, M in [0, 2π), the step's residual ≤ 1e-12 | **6.14e-14** from the exact Newton step. With the exact step's remainder, which is under 5e-19, the result is within 6.15e-14 of the root. This is the floor its test names, ulp(E)/(1 − e cos E), with E near 2π | 1.13e-14 at e = 0.99 with M near 2π, 0.18 | derivations/kepler_roundoff.gappa |
+| Vermeille | `spacelab-earth` `itrf_to_geodetic` | \|x\|, \|y\|, \|z\| ≥ 1 mm, geodetic height −100 km to GEO (P + Q in [0.955, 46]) | latitude **3.95e-15 rad**; height **5.97e-15·√(D² + z²)** ≤ 5.97e-15·\|r\|, so 3.8e-8 m at the surface and 2.5e-7 m at GEO | 9.3e-17 rad and 1.1e-16·√(D² + z²), 0.024 and 0.019 | derivations/vermeille_roundoff.gappa, derivations/vermeille_height_roundoff.gappa |
+| Geopotential seed | `spacelab-propagation` `harmonic_quantities`, `geo_row` at n ≤ 1 | r from 6 245 km to 430 000 km, any Rₑ in [6.3, 6.4] Mm | V̄₀₀ within **5.02e-16**; V̄₁₀, V̄₁₁, W̄₁₁ within **1.9e-15**, relative | 1.54e-16 and 4.47e-16, 0.31 | derivations/geopotential_seed_roundoff.gappa |
+
+No kernel is worse than its code or docs claim. Some parts are not covered:
+
+- **Kepler.** The proof does not show that the loop reaches its stopping rule. A run that ends on the
+  64-step cap meets the residual hypothesis only as its test measures it. Eccentricities above 0.99
+  are outside the domain.
+- **Vermeille.** A coordinate below 1 mm is outside the domain, including the equator and the polar
+  axis themselves. There `s` or `q` is exactly zero.
+- **Seed.** The proof bounds the seed only. The degree-n recursion built on it is not bounded.
+
+Two Vermeille steps cannot be bounded by a relative error, so the proof treats them differently.
+
+- **The `w` term.** `w = e²((u + v) − q)/(2v)` loses all relative accuracy toward the poles, where
+  `(u + v) − q` cancels. So the proof bounds `w`'s absolute error, 3.1e-17. That is all `k` sees.
+- **The final rounding.** `height = hk·hyp` passes through zero on the ellipsoid. That last
+  rounding is a second file. A hand lemma in it shows `hk` is either zero or at least 2⁻⁵⁶.
+
+The ratios are lowest for Vermeille: about 1/40 for latitude and 1/50 for height. The bound adds
+about thirty roundings at their worst case. Ten sample points rarely meet that case.
+
 ---
 
 ## 2 · Numerical propagation, forces & DSST

@@ -1540,5 +1540,27 @@ else
     skip "Ф17.B GAP gates" gap
 fi
 
+# ---------------------------------------------------------------------------------------------
+# 8. Ф28.C: the round-off of five hot-path kernels, proved. Each Gappa file proves its stated bound
+# on the shipped f64 operation order over the domain its header declares; roundoff_samples.mac
+# replays that order exactly at sample points and holds the observed error under each bound.
+# ---------------------------------------------------------------------------------------------
+if have gappa; then
+    for f in era gmst82 kepler vermeille vermeille_height geopotential_seed; do
+        out=$(timeout 120 gappa -Wno-null-denominator "${f}_roundoff.gappa" 2>&1)
+        rc=$?
+        if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -qE 'not satisfied|^Error'; then
+            ok "gappa ${f}_roundoff.gappa: the f64 round-off bound holds over its declared domain"
+        else
+            bad "gappa ${f}_roundoff.gappa" "a bound was not proved (exit $rc)"
+        fi
+    done
+else
+    skip "Ф28.C round-off proofs" gappa
+fi
+if have maxima; then
+    mac_zeros roundoff_samples.mac 6 "the replayed f64 kernels stay under their Gappa bounds at the domains' edges; the Vermeille hypotheses hold on a grid to GEO"
+fi
+
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ] || exit 1

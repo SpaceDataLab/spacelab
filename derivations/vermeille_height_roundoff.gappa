@@ -1,0 +1,32 @@
+# The last rounding of the shipped Vermeille height, proved (plans/17 Ф28.C).
+#
+#   timeout 120 gappa -Wno-null-denominator vermeille_height_roundoff.gappa   (exit 1, "not satisfied")
+#
+# Code: crates/spacelab-earth/src/wgs84.rs, `itrf_to_geodetic`: height = hk * hyp, one rounding, with
+# hk = ((k + E2) - 1) / k and hyp = hypot(d, z) as the code computes them. vermeille_roundoff.gappa
+# proves, over its domain, the four hypotheses on them used here: HK = (KE - 1)/K in
+# [-0.0241, 0.8539], |hk - HK| <= 2.792e-15, |hyp / HYP - 1| <= 3.61e-15, and HYP >= z >= 1 mm.
+#
+# hk is either 0 or at least 2^-56 in magnitude. ke = k + E2 >= 0.976 is a double above 1/2: for
+# ke <= 2, ke - 1 is exact (Sterbenz) and a multiple of 2^-53; for ke > 2 it is >= 1. And k < 8, so
+# a nonzero km gives |km / k| > 2^-56, a double, which a monotone rounding cannot cross. That bound
+# keeps hk * hyp clear of underflow, so its rounding is relative.
+#
+# Result: |height - H| <= 5.97e-15 HYP when hk != 0. When hk = 0 the height is exactly 0 and
+# |0 - H| / HYP = |HK| = |hk - HK| <= 2.792e-15. So |height - H| <= 5.97e-15 HYP everywhere on the
+# domain, H = (KE - 1)/K * HYP the exact geodetic height and HYP <= |r|.
+
+@rnd = float<ieee_64, ne>;
+
+hk = rnd(hk_);
+hyp = rnd(hyp_);
+h = rnd(hk * hyp);
+H = HK * HYP;
+
+{ HK in [-0.0241, 0.8539] /\ hk - HK in [-2.792e-15, 2.792e-15]
+  /\ HYP in [1e-3, 1e9] /\ hyp -/ HYP in [-3.61e-15, 3.61e-15]
+  /\ |hk| >= 1b-56
+  -> |(h - H) / HYP| <= 5.97e-15 }
+
+(h - H) / HYP -> (h - hk * hyp) / (hk * hyp) * hk * (hyp / HYP) + (hk - HK) * (hyp / HYP) + HK * ((hyp - HYP) / HYP);
+hyp / HYP -> 1 + (hyp - HYP) / HYP;

@@ -116,7 +116,7 @@ fn by_object() -> BTreeMap<(String, String), Vec<Record>> {
 fn plus_days(from: UtcDateTime, days: f64) -> UtcDateTime {
     #[allow(clippy::cast_possible_truncation)]
     let ns = from.naive_ns_since_j2000() + (days * 86_400.0 * 1.0e9) as i128;
-    UtcDateTime::from_naive_ns_since_j2000(ns, false)
+    UtcDateTime::from_naive_ns_since_j2000(ns, false).unwrap()
 }
 
 /// Separation of two element sets at one absolute instant, in metres. `None` if either refuses.

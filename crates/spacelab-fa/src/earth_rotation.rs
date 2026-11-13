@@ -145,7 +145,7 @@ mod tests {
     const TOL_RAD: f64 = 1e-9;
 
     fn at_days(days: f64) -> Epoch<Ut1> {
-        Epoch::from_days_since_j2000(days)
+        Epoch::from_days_since_j2000(days).unwrap()
     }
 
     /// The coefficients are the nearest `f64` to the published decimals — the exact
@@ -305,7 +305,8 @@ mod tests {
     /// near 1557 in `f64` resolves 2e-11 days, which moves `Ω` by 1e-12 rad.
     #[test]
     fn kinematic_equinox_terms_match_the_cas_at_the_appendix_c_epoch() {
-        let tt = Epoch::<Tt>::from_days_since_j2000(1556.5 + (28_288.386 + 64.184) / 86_400.0);
+        let tt =
+            Epoch::<Tt>::from_days_since_j2000(1556.5 + (28_288.386 + 64.184) / 86_400.0).unwrap();
         let got = equinox_kinematic_1982(tt).arcseconds();
         let want = 1.849_888_944_514_253e-3;
         assert!((got - want).abs() < 1e-15, "{got:.18e} against {want:.18e}");

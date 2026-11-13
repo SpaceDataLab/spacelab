@@ -38,10 +38,7 @@ fn tai_to_utc_refuses_before_the_table_and_answers_after_it() {
     let tai_ns = 1_000_000_000_000_000_000;
     assert_eq!(
         tai_to_utc(Epoch::<Tai>::from_ns_since_j2000(tai_ns)),
-        Ok(UtcDateTime::from_naive_ns_since_j2000(
-            tai_ns - 37_000_000_000,
-            false
-        )),
+        Ok(UtcDateTime::from_naive_ns_since_j2000(tai_ns - 37_000_000_000, false).unwrap()),
     );
 }
 

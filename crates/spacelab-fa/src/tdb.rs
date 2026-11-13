@@ -108,6 +108,7 @@ fn offset_ns(seconds: f64) -> i128 {
 mod tests {
     // Exact values to 25 digits as the derivation prints them.
     #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    #![allow(clippy::unwrap_used)] // a panicking test is a failing test
 
     use super::*;
 
@@ -143,7 +144,8 @@ mod tests {
     fn the_offset_is_its_series_summed_exactly() {
         let mut worst = (0.0_f64, 0.0_f64);
         for (days, want) in TDB_DAYS.into_iter().zip(TDB_EXACT) {
-            let miss = (tdb_minus_tt(Epoch::<Tt>::from_days_since_j2000(days)) - want).abs();
+            let miss =
+                (tdb_minus_tt(Epoch::<Tt>::from_days_since_j2000(days).unwrap()) - want).abs();
             if miss > worst.0 || miss.is_nan() {
                 worst = (miss, days);
             }
@@ -156,7 +158,7 @@ mod tests {
     fn the_offset_peaks_near_one_point_seven_milliseconds() {
         let mut worst = 0.0_f64;
         for d in 0..366 {
-            let tt = Epoch::<Tt>::from_days_since_j2000(f64::from(d));
+            let tt = Epoch::<Tt>::from_days_since_j2000(f64::from(d)).unwrap();
             worst = worst.max(tdb_minus_tt(tt).abs());
         }
         assert!(
@@ -168,7 +170,7 @@ mod tests {
     #[test]
     fn tt_and_tdb_round_trip_to_the_nanosecond() {
         for d in [-36_525.0, -1_000.5, 0.0, 1_234.75, 18_262.25, 36_525.0] {
-            let tt = Epoch::<Tt>::from_days_since_j2000(d);
+            let tt = Epoch::<Tt>::from_days_since_j2000(d).unwrap();
             let back = tdb_to_tt(tt_to_tdb(tt));
             assert_eq!(back, tt, "round trip drifted at day {d}");
         }
@@ -178,7 +180,7 @@ mod tests {
     /// conversion — which is the property that makes the tag worth carrying.
     #[test]
     fn the_conversion_actually_moves_the_epoch() {
-        let tt = Epoch::<Tt>::from_days_since_j2000(100.0);
+        let tt = Epoch::<Tt>::from_days_since_j2000(100.0).unwrap();
         let tdb = tt_to_tdb(tt);
         let moved = tdb.ns_since_j2000() - tt.ns_since_j2000();
         assert!(moved != 0, "TDB and TT cannot be the same instant here");
@@ -199,7 +201,7 @@ mod tests {
     fn the_epoch_moves_by_the_offset_the_series_computed() {
         let mut worst_ns = 0_i128;
         for d in [-36_525.0, -1_000.5, 0.0, 45.25, 91.75, 1_234.75, 36_525.0] {
-            let tt = Epoch::<Tt>::from_days_since_j2000(d);
+            let tt = Epoch::<Tt>::from_days_since_j2000(d).unwrap();
             let moved = tt_to_tdb(tt).ns_since_j2000() - tt.ns_since_j2000();
             #[allow(clippy::cast_precision_loss)] // |moved| < 2e6, exact in f64
             let seconds = (moved as f64) * 1e-9;

@@ -108,7 +108,7 @@ impl<'a> Scan<'a> {
     /// The satellite in ITRF, `t` seconds past the scan start.
     fn satellite_at(&self, t: f64) -> Vec3 {
         let ns = self.start_ns + (t * 1e9) as i128;
-        let label = UtcDateTime::from_naive_ns_since_j2000(ns, false);
+        let label = UtcDateTime::from_naive_ns_since_j2000(ns, false).unwrap();
         let teme = self
             .satellite
             .propagate_at(label)

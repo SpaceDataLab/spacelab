@@ -27,6 +27,8 @@ authors = ["SpaceDataLab"]
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
+# `just kani` compiles the bounded proofs under `cfg(kani)`.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

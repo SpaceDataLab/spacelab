@@ -96,6 +96,8 @@ pub enum LeapError {
     BeforeIntegerSecondEra,
     /// A `23:59:60` label on a day that had no leap second.
     SpuriousLeapSecond,
+    /// A TAI instant whose UTC year does not fit an `i32`.
+    OutsideCalendar,
 }
 
 impl fmt::Display for LeapError {
@@ -106,6 +108,9 @@ impl fmt::Display for LeapError {
             }
             Self::SpuriousLeapSecond => {
                 write!(f, "second 60 labelled on a day with no leap second")
+            }
+            Self::OutsideCalendar => {
+                write!(f, "the UTC year of this instant does not fit an i32")
             }
         }
     }
@@ -160,10 +165,11 @@ pub fn delta_at(utc: UtcDateTime) -> Result<i32, LeapError> {
 
 /// Whether a leap second was inserted at the end of this UTC day.
 fn day_ends_with_leap_second(utc: UtcDateTime) -> bool {
-    let tomorrow = civil_from_days(utc.days_from_civil() + 1);
-    TABLE
-        .iter()
-        .any(|entry| entry.year == tomorrow.0 && entry.month == tomorrow.1 && tomorrow.2 == 1)
+    civil_from_days(utc.days_from_civil() + 1).is_some_and(|tomorrow| {
+        TABLE
+            .iter()
+            .any(|entry| entry.year == tomorrow.0 && entry.month == tomorrow.1 && tomorrow.2 == 1)
+    })
 }
 
 /// The UTC calendar to TAI.
@@ -195,7 +201,8 @@ pub fn utc_to_tai(utc: UtcDateTime) -> Result<Epoch<Tai>, LeapError> {
 ///
 /// # Errors
 ///
-/// [`LeapError`] as for [`delta_at`].
+/// [`LeapError`] as for [`delta_at`], and [`LeapError::OutsideCalendar`] past 31 December of
+/// year `i32::MAX`.
 pub fn tai_to_utc(tai: Epoch<Tai>) -> Result<UtcDateTime, LeapError> {
     let tai_ns = tai.ns_since_j2000();
 
@@ -224,12 +231,13 @@ pub fn tai_to_utc(tai: Epoch<Tai>) -> Result<UtcDateTime, LeapError> {
     });
     let inside_leap = next.is_some_and(|c| naive >= month_start_naive_ns(c.year, c.month));
 
-    Ok(if inside_leap {
+    let label = if inside_leap {
         // Render one second earlier, then push the label from :59 to :60.
         UtcDateTime::from_naive_ns_since_j2000(naive - 1_000_000_000, true)
     } else {
         UtcDateTime::from_naive_ns_since_j2000(naive, false)
-    })
+    };
+    label.ok_or(LeapError::OutsideCalendar)
 }
 
 #[cfg(test)]
@@ -331,12 +339,27 @@ mod tests {
     }
 
     #[test]
+    fn a_tai_instant_past_the_calendar_has_no_utc_label() {
+        // The last UTC second of year i32::MAX converts both ways; one second later the year no
+        // longer fits, where the label's year once wrapped round to i32::MIN.
+        let last = utc(i32::MAX, 12, 31, 23, 59, 59.0);
+        let tai = utc_to_tai(last).unwrap();
+        assert_eq!(tai_to_utc(tai), Ok(last));
+        let past = Epoch::<Tai>::from_ns_since_j2000(tai.ns_since_j2000() + 1_000_000_000);
+        assert_eq!(tai_to_utc(past), Err(LeapError::OutsideCalendar));
+        assert_eq!(
+            tai_to_utc(Epoch::<Tai>::from_ns_since_j2000(i128::MAX)),
+            Err(LeapError::OutsideCalendar)
+        );
+    }
+
+    #[test]
     fn utc_tai_round_trips_across_every_transition() {
         for entry in TABLE.iter().skip(1) {
             for offset_s in [-2_i8, -1, 0, 1, 2] {
                 let base = utc(entry.year, entry.month, 1, 0, 0, 0.0);
                 let ns = base.naive_ns_since_j2000() + i128::from(offset_s) * 1_000_000_000;
-                let label = UtcDateTime::from_naive_ns_since_j2000(ns, false);
+                let label = UtcDateTime::from_naive_ns_since_j2000(ns, false).unwrap();
                 let Ok(tai) = utc_to_tai(label) else { continue };
                 let back = tai_to_utc(tai).unwrap();
                 assert_eq!(back.year(), label.year());
@@ -347,5 +370,40 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+// Bounded proofs, `just kani`. Each states its domain; overflow and NaN checks are Kani's own.
+// The unwinding bound covers the 28 table rows.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Every valid label with a whole second, `23:59:60` included; `ΔAT` lies in `10..=37`.
+    #[kani::proof]
+    #[kani::unwind(30)]
+    fn utc_to_tai_is_total() {
+        let second: u8 = kani::any();
+        let label = UtcDateTime::new(
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            f64::from(second),
+        );
+        if let Ok(utc) = label {
+            if let Ok(delta) = delta_at(utc) {
+                assert!((10..=37).contains(&delta));
+            }
+            let _ = utc_to_tai(utc);
+        }
+    }
+
+    /// Every `i128`.
+    #[kani::proof]
+    #[kani::unwind(30)]
+    fn tai_to_utc_is_total() {
+        let _ = tai_to_utc(Epoch::from_ns_since_j2000(kani::any()));
     }
 }

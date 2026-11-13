@@ -119,7 +119,7 @@ fn sar_incidence_band_restricts_access_to_a_subset_of_visibility() {
         .naive_ns_since_j2000();
     let sat_at = |t: f64| {
         let ns = start_ns + (t * 1e9) as i128;
-        let label = UtcDateTime::from_naive_ns_since_j2000(ns, false);
+        let label = UtcDateTime::from_naive_ns_since_j2000(ns, false).unwrap();
         let teme = sat.propagate_at(label).expect("propagates");
         let (transform, _) = teme_to_itrf_at(label, EopSource::Series(&series))
             .expect("the overpass lies inside the excerpt");

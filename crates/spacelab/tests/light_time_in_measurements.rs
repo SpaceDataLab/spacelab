@@ -89,7 +89,7 @@ fn transform_at(start_ns: i128, t: f64) -> Transform<Teme, Itrf> {
         LazyLock::new(|| EopSeries::parse_finals2000a(EOP).expect("the EOP excerpt parses"));
     let series = &*SERIES;
     let ns = start_ns + (t * 1e9) as i128;
-    let label = UtcDateTime::from_naive_ns_since_j2000(ns, false);
+    let label = UtcDateTime::from_naive_ns_since_j2000(ns, false).unwrap();
     let (transform, _) = teme_to_itrf_at(label, EopSource::Series(series))
         .expect("the scan lies inside the excerpt");
     transform
@@ -123,7 +123,7 @@ fn station_teme(start_ns: i128, t: f64) -> (Vec3, Vec3, Vec3) {
 fn iss_teme(satellite: &Satellite, start_ns: i128, t: f64) -> (Vec3, Vec3) {
     let ns = start_ns + (t * 1e9) as i128;
     let state = satellite
-        .propagate_at(UtcDateTime::from_naive_ns_since_j2000(ns, false))
+        .propagate_at(UtcDateTime::from_naive_ns_since_j2000(ns, false).unwrap())
         .expect("the ISS has not decayed");
     (state.position.vector, state.velocity.vector)
 }

@@ -523,6 +523,55 @@ issues. Three bear on this tree, and none enters code as a fact. Crouzeix's boun
   Hadamard matrix only for n ∈ {1, 4}). `spacelab-signal` has no code search for them to annotate.
   A search written later states both as conjectures.
 
+### 1.6 The time and calendar arithmetic, proved for every input (Ф28.I)
+
+Kani 0.68.0 (MIT/Apache, out of tree) checks every input of a function, not a sample. CBMC turns
+the code into a formula and proves that no input reaches an arithmetic overflow, a NaN or a failed
+assertion. `just kani` runs the proofs. Kani is not a CI step. Each proof states its domain in its
+doc comment.
+
+The proofs, and the callers of the functions they failed on, gave four defects. Each fix has a
+regression test, and the tests fail on the parent commit with the outputs quoted here.
+
+| Function | Defect | Fix |
+|---|---|---|
+| `calendar::days_from_civil` | The arithmetic ran in `i32`. `year − 1` overflowed for January and February of year `i32::MIN`, and `y − 399` for the first 399 years of `i32`. The documentation said "exact for every year in `i32`". | The arithmetic runs in `i64`. |
+| `calendar::civil_from_days` | `year as i32` wrapped past 31 December of year `i32::MAX`: the next day read as `(-2147483648, 1, 1)`. `days + 719 468` overflowed near `i64::MAX`. | Returns `Option`: `None` outside the `i32` years. |
+| `UtcDateTime::from_naive_ns_since_j2000`, `spacelab_fa::tai_to_utc` | The same wrap, and `ns + 12 h` overflowed near `i128::MAX`. `tai_to_utc` of the last `i128` panicked in a debug build. | Returns `Option`. `tai_to_utc` returns the new `LeapError::OutsideCalendar`. |
+| `Epoch::from_days_since_j2000` | The saturating casts turned NaN into J2000. An infinity overflowed. | Returns `Option`: `None` unless \|days\| < 2⁸⁰. |
+
+`tai_to_tt` and `tt_to_tai` keep their infallible signatures. Their `i128` addition overflows only
+within 32.184 s of the ends of `i128`, 5.4 × 10²¹ years from J2000, and the proof names that bound.
+`spacelab_sgp4::Satellite` now stores its epoch label when it is built, so `Satellite::epoch` needs
+no conversion.
+
+| Proof | Domain | Property, besides no overflow and no NaN |
+|---|---|---|
+| `calendar::days_from_civil_is_total` | every `i32` year, month `1..=12`, day `1..=31` | — |
+| `calendar::civil_from_days_is_total` | every `i64` | — |
+| `calendar::from_naive_ns_since_j2000_is_total` | every `i128`, both flags | — |
+| `time::from_days_since_j2000_is_total` | every `f64`, NaN and both infinities included | — |
+| `time::day_and_fraction_is_total` | every `i128` | fraction in [0, 1) |
+| `time::tai_tt_round_trip_is_exact` | every `i128` at least 32.184 s inside the end it moves towards | TAI → TT → TAI and TT → TAI → TT are the identity |
+| `leap_seconds::utc_to_tai_is_total` (`spacelab-fa`) | every valid label with a whole second, `23:59:60` included | `ΔAT` in `10..=37` |
+| `leap_seconds::tai_to_utc_is_total` (`spacelab-fa`) | every `i128` | — |
+| `kvn::day_of_year_is_total` (`spacelab-ndm`) | every `i32` year and `u32` ordinal | — |
+
+Two properties of `civil_from_days` are not Kani proofs: the month and day ranges, and the round
+trip `days_from_civil(civil_from_days(z)) = z`. CBMC did not settle them in 25 minutes, because
+each passes through a chain of nine divisions. They follow from the proofs and two tests. Both
+functions are periodic: 146 097 days later is the same date 400 years later, wherever no
+intermediate overflows.
+The proofs exclude the overflow, `civil_round_trips_over_four_centuries` checks one whole period,
+day by day, and `the_calendar_runs_from_the_first_to_the_last_i32_year` pins both ends. The CCSDS
+ordinal-day reader is the same case: its proof covers the overflow, and
+`every_ordinal_of_a_full_cycle_lands_in_its_own_year_or_is_refused` checks which ordinals it
+refuses, over one cycle and at both ends of `i32`.
+
+The TLE fields are parsed by the `sgp4` crate, not here. A proof that a repaired TLE checksum is
+valid for every 69-byte ASCII line did not settle in 25 minutes either: it runs UTF-8 validation
+and a heap copy over 69 symbolic bytes. The checksum tests stay as they are, and no proof was kept.
+
 ---
 
 ## 2 · Numerical propagation, forces & DSST

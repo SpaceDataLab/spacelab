@@ -163,6 +163,6 @@ fn vec3_operators_are_componentwise() {
 #[test]
 fn epoch_from_days_since_j2000_splits_before_scaling() {
     // 1.5 days is exactly 129 600 seconds = 1.296e14 ns from J2000.
-    let e = Epoch::<Tt>::from_days_since_j2000(1.5);
+    let e = Epoch::<Tt>::from_days_since_j2000(1.5).unwrap();
     assert_eq!(e.ns_since_j2000(), 129_600_000_000_000);
 }

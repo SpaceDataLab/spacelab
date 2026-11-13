@@ -103,7 +103,7 @@ fn iss() -> impl Fn(f64) -> Vec3 {
         .naive_ns_since_j2000();
     move |t: f64| {
         let ns = start_ns + (t * 1e9) as i128;
-        let label = UtcDateTime::from_naive_ns_since_j2000(ns, false);
+        let label = UtcDateTime::from_naive_ns_since_j2000(ns, false).unwrap();
         let teme = satellite
             .propagate_at(label)
             .expect("the ISS has not decayed");

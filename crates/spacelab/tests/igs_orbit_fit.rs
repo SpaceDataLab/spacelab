@@ -268,7 +268,8 @@ fn build_arc(sp3_text: &str, series: &EopSeries, sat: SatId) -> Arc {
     // so the UTC instant is the GPS one shifted by (TAI−UTC) − 19 s. Resolve that count from an
     // approximate UTC first: it can only be wrong within 18 s of midnight on a leap-second day, and
     // the table is stepwise constant over whole months either side.
-    let approx = UtcDateTime::from_naive_ns_since_j2000((start_gps * 1e9).round() as i128, false);
+    let approx =
+        UtcDateTime::from_naive_ns_since_j2000((start_gps * 1e9).round() as i128, false).unwrap();
     let gps_minus_utc =
         f64::from(delta_at(approx).expect("a tabulated leap-second count")) + GPS_MINUS_TAI;
 
@@ -277,6 +278,7 @@ fn build_arc(sp3_text: &str, series: &EopSeries, sat: SatId) -> Arc {
             ((start_gps + t - gps_minus_utc) * 1e9).round() as i128,
             false,
         )
+        .unwrap()
     };
 
     let mut observations = Vec::with_capacity(samples.len());

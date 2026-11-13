@@ -60,8 +60,8 @@ fn gcrf_to_itrf_distance_to_pyerfa_cio_pipeline() {
         assert_eq!(v.len(), 15, "row must be 6 params + 9 matrix elements");
 
         let xf = gcrf_to_itrf(
-            Epoch::<Ut1>::from_days_since_j2000(v[1]),
-            Epoch::<Tt>::from_days_since_j2000(v[0]),
+            Epoch::<Ut1>::from_days_since_j2000(v[1]).unwrap(),
+            Epoch::<Tt>::from_days_since_j2000(v[0]).unwrap(),
             Angle::from_arcseconds(v[2]),
             Angle::from_arcseconds(v[3]),
             mas(v[4]),
@@ -90,8 +90,8 @@ fn gcrf_to_itrf_distance_to_pyerfa_cio_pipeline() {
 /// twice and dropped `dY` would still reproduce a row where the two happen to be equal and opposite.
 #[test]
 fn each_celestial_pole_offset_moves_the_matrix_by_its_own_size() {
-    let tt = Epoch::<Tt>::from_days_since_j2000(8766.0);
-    let ut1 = Epoch::<Ut1>::from_days_since_j2000(8765.6);
+    let tt = Epoch::<Tt>::from_days_since_j2000(8766.0).unwrap();
+    let ut1 = Epoch::<Ut1>::from_days_since_j2000(8765.6).unwrap();
     let zero = Angle::from_radians(0.0);
     let pole = Angle::from_arcseconds(0.1);
 
@@ -146,8 +146,8 @@ const ROTATION_RATE_MAXIMA: [f64; 4] = [
 /// each SI second.
 #[test]
 fn the_rotation_rate_is_the_era_rate_slowed_by_the_length_of_day() {
-    let tt = Epoch::<Tt>::from_days_since_j2000(8766.0);
-    let ut1 = Epoch::<Ut1>::from_days_since_j2000(8765.6);
+    let tt = Epoch::<Tt>::from_days_since_j2000(8766.0).unwrap();
+    let ut1 = Epoch::<Ut1>::from_days_since_j2000(8765.6).unwrap();
     let zero = Angle::from_radians(0.0);
 
     // Both public entry points carry LOD, each writing the expression out for itself: the CIO

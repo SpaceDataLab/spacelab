@@ -174,12 +174,13 @@ pub fn nutation_06a(tt: Epoch<Tt>) -> (f64, f64) {
 mod tests {
     // Exact values to 25 digits as the derivation prints them, and verbatim SOFA and pyerfa values.
     #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    #![allow(clippy::unwrap_used)] // a panicking test is a failing test
 
     use super::*;
 
     /// The SOFA self-test epoch, TT JD 2400000.5 + 53736.0 (Julian century 0.06).
     fn sofa_tt() -> Epoch<Tt> {
-        Epoch::from_days_since_j2000(2191.5)
+        Epoch::from_days_since_j2000(2191.5).unwrap()
     }
 
     /// TT days since J2000 at which the series are held: `t = 0.06` (the SOFA self-test epoch), a
@@ -245,7 +246,7 @@ mod tests {
     fn both_nutations_are_their_series_summed_exactly() {
         let mut worst = (0.0_f64, String::new());
         for (days, want) in SERIES_DAYS.into_iter().zip(NUT_EXACT) {
-            let tt = Epoch::<Tt>::from_days_since_j2000(days);
+            let tt = Epoch::<Tt>::from_days_since_j2000(days).unwrap();
             let (psi_00a, eps_00a) = nutation_00a(tt);
             let (psi_06a, eps_06a) = nutation_06a(tt);
             for (i, got) in [psi_00a, eps_00a, psi_06a, eps_06a].into_iter().enumerate() {
@@ -323,7 +324,7 @@ mod tests {
         let distances: Vec<f64> = cases
             .iter()
             .flat_map(|&(days, psi_00a, eps_00a, psi_06a, eps_06a)| {
-                let tt = Epoch::<Tt>::from_days_since_j2000(days);
+                let tt = Epoch::<Tt>::from_days_since_j2000(days).unwrap();
                 let (p0, e0) = nutation_00a(tt);
                 let (p6, e6) = nutation_06a(tt);
                 [

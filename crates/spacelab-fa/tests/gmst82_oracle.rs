@@ -34,7 +34,8 @@ fn gmst82_distance_to_pyerfa_across_ten_millennia() {
             let expected: f64 = expected.trim().parse().expect("column 2 is a float");
             // The angle wraps, so compare on the circle rather than on the line.
             circular_distance(
-                gmst82(Epoch::<Ut1>::from_days_since_j2000(days)).radians(),
+                gmst82(Epoch::<Ut1>::from_days_since_j2000(days).expect("a finite day count"))
+                    .radians(),
                 expected,
             )
         })

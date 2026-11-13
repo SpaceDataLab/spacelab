@@ -293,7 +293,7 @@ fn parse_epoch(text: &str) -> Option<UtcDateTime> {
 /// nothing able to tell the two apart.
 fn day_of_year(year: i32, ordinal: u32) -> Option<(u8, u8)> {
     let days = calendar::days_from_civil(year, 1, 1) + i64::from(ordinal) - 1;
-    let (rolled_year, month, day) = calendar::civil_from_days(days);
+    let (rolled_year, month, day) = calendar::civil_from_days(days)?;
     (rolled_year == year).then_some((month, day))
 }
 
@@ -470,6 +470,27 @@ mod tests {
         assert_eq!((last.month(), last.day()), (12, 31));
     }
 
+    #[test]
+    fn every_ordinal_of_a_full_cycle_lands_in_its_own_year_or_is_refused() {
+        // `day_of_year` repeats every 400 years, the leap cycle, so one cycle is every case; the
+        // first and the last `i32` year add the ends of the calendar. An ordinal past 367 lands
+        // in a later year still.
+        for year in (2000..2400).chain([i32::MIN, i32::MAX]) {
+            let length = if calendar::is_leap_year(year) {
+                366
+            } else {
+                365
+            };
+            for ordinal in (0..=367).chain([u32::MAX]) {
+                assert_eq!(
+                    day_of_year(year, ordinal).is_some(),
+                    (1..=length).contains(&ordinal),
+                    "{year}-{ordinal}"
+                );
+            }
+        }
+    }
+
     /// A time code is three fields and a finite second, and either failure alone is a refusal.
     ///
     /// The two conditions are joined by `||` precisely so that neither can carry the other: with
@@ -581,5 +602,19 @@ mod tests {
                 assert_eq!(*entry, full[column][row]);
             }
         }
+    }
+}
+
+// Bounded proofs, `just kani`. Each states its domain; overflow checks are Kani's own.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Every `i32` year and `u32` ordinal. Which ordinals are refused is not asserted here: CBMC
+    /// did not settle it in 25 minutes, so
+    /// `every_ordinal_of_a_full_cycle_lands_in_its_own_year_or_is_refused` checks it.
+    #[kani::proof]
+    fn day_of_year_is_total() {
+        let _ = day_of_year(kani::any(), kani::any());
     }
 }

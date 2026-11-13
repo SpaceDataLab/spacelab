@@ -186,13 +186,14 @@ fn reduce_turns_to_radians(turns: f64) -> f64 {
 mod tests {
     // Exact values to 25 digits as the derivation prints them, and verbatim SOFA values.
     #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    #![allow(clippy::unwrap_used)] // a panicking test is a failing test
 
     use super::*;
 
     /// TT epoch (days since J2000) whose Julian-century value is exactly 0.06 — the
     /// SOFA self-test epoch, TT JD 2400000.5 + 53736.0.
     fn sofa_tt() -> Epoch<Tt> {
-        Epoch::from_days_since_j2000(2191.5)
+        Epoch::from_days_since_j2000(2191.5).unwrap()
     }
 
     /// TT days since J2000 at which the series are held: `t = 0.06` (the SOFA self-test epoch), a
@@ -257,7 +258,7 @@ mod tests {
     fn the_cip_is_its_series_summed_exactly() {
         let mut worst = (0.0_f64, 0.0_f64);
         for (days, want) in SERIES_DAYS.into_iter().zip(XY_EXACT) {
-            let (x, y) = cip_xy(Epoch::from_days_since_j2000(days));
+            let (x, y) = cip_xy(Epoch::from_days_since_j2000(days).unwrap());
             for miss in [(x - want[0]).abs(), (y - want[1]).abs()] {
                 if miss > worst.0 || miss.is_nan() {
                     worst = (miss, days);
@@ -272,7 +273,7 @@ mod tests {
     fn the_cio_locator_is_its_series_summed_exactly() {
         let mut worst = (0.0_f64, 0.0_f64);
         for ((days, xy), want) in SERIES_DAYS.into_iter().zip(XY_EXACT).zip(S_EXACT) {
-            let s = cio_locator_s(Epoch::from_days_since_j2000(days), xy[0], xy[1]);
+            let s = cio_locator_s(Epoch::from_days_since_j2000(days).unwrap(), xy[0], xy[1]);
             let miss = (s - want).abs();
             if miss > worst.0 || miss.is_nan() {
                 worst = (miss, days);
@@ -363,7 +364,8 @@ mod tests {
     fn era_is_its_linear_function_of_ut1_reduced_to_one_turn() {
         let mut worst = (0.0_f64, 0.0_f64);
         for (days, want) in ERA_DAYS.into_iter().zip(ERA_EXACT) {
-            let miss = (era(Epoch::<Ut1>::from_days_since_j2000(days)).radians() - want).abs();
+            let miss =
+                (era(Epoch::<Ut1>::from_days_since_j2000(days).unwrap()).radians() - want).abs();
             if miss > worst.0 || miss.is_nan() {
                 worst = (miss, days);
             }
@@ -375,7 +377,7 @@ mod tests {
     #[test]
     #[ignore = "comparator: the distance to SOFA, not a verdict"]
     fn era_distance_to_sofa() {
-        let got = era(Epoch::<Ut1>::from_days_since_j2000(2843.5)).radians();
+        let got = era(Epoch::<Ut1>::from_days_since_j2000(2843.5).unwrap()).radians();
         comparison_row(
             "sofa",
             "the ERA at the t_era00 epoch",
@@ -399,7 +401,7 @@ mod tests {
             (-0.75, 1.696_705_977_576_341_28e-1),
         ];
         let distances = cases.map(|(days, want)| {
-            (era(Epoch::<Ut1>::from_days_since_j2000(days)).radians() - want).abs()
+            (era(Epoch::<Ut1>::from_days_since_j2000(days).unwrap()).radians() - want).abs()
         });
         comparison_row(
             "pyerfa",

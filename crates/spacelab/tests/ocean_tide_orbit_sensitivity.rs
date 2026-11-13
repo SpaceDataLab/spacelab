@@ -104,7 +104,8 @@ fn build_arc(sp3_text: &str, eop_text: &str, sat: SatId, span: f64) -> Arc {
         .positions(sat)
         .expect("the file carries the satellite")
         .to_vec();
-    let approximate = UtcDateTime::from_naive_ns_since_j2000((start * 1e9).round() as i128, false);
+    let approximate = UtcDateTime::from_naive_ns_since_j2000((start * 1e9).round() as i128, false)
+        .expect("an SP3 epoch is on the calendar");
     let offset_to_utc = match sp3.time_system() {
         TimeSystem::Utc => 0.0,
         TimeSystem::Gps => {
@@ -115,7 +116,8 @@ fn build_arc(sp3_text: &str, eop_text: &str, sat: SatId, span: f64) -> Arc {
     let utc = UtcDateTime::from_naive_ns_since_j2000(
         ((start - offset_to_utc) * 1e9).round() as i128,
         false,
-    );
+    )
+    .expect("an SP3 epoch is on the calendar");
     let e = earth_orientation_at(utc, EopSource::Series(&series)).expect("the epoch is in range");
     let cio = CioInterpolator::new(
         e.orientation.ut1,

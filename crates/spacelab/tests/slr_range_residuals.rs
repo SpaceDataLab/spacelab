@@ -494,7 +494,8 @@ fn model_pass(
             continue;
         };
         let transmit = day_seconds + np.seconds_of_day;
-        let utc = UtcDateTime::from_naive_ns_since_j2000((transmit * 1e9).round() as i128, false);
+        let utc = UtcDateTime::from_naive_ns_since_j2000((transmit * 1e9).round() as i128, false)
+            .unwrap();
         let Some(o) = orientation_at(utc, series) else {
             declined.record(&session.station, "outside the Earth-orientation series", 1);
             continue;
@@ -833,7 +834,7 @@ fn ilrs_normal_points_on_lageos_are_modelled_to_centimetres() {
 
 /// The UTC calendar day an epoch belongs to, as `(year, month, day)`.
 fn calendar_day(epoch: f64) -> (i32, u8, u8) {
-    let d = UtcDateTime::from_naive_ns_since_j2000((epoch * 1e9).round() as i128, false);
+    let d = UtcDateTime::from_naive_ns_since_j2000((epoch * 1e9).round() as i128, false).unwrap();
     (d.year(), d.month(), d.day())
 }
 
@@ -932,7 +933,8 @@ fn harmonic_fit(points: &[(f64, f64)]) -> Option<Harmonic> {
 fn local_time_concentration(group: &[&Residual]) -> f64 {
     let (mut c, mut s) = (0.0, 0.0);
     for r in group {
-        let d = UtcDateTime::from_naive_ns_since_j2000((r.epoch * 1e9).round() as i128, false);
+        let d =
+            UtcDateTime::from_naive_ns_since_j2000((r.epoch * 1e9).round() as i128, false).unwrap();
         let utc = f64::from(d.hour()) + f64::from(d.minute()) / 60.0 + d.second() / 3600.0;
         let hours = (utc + r.longitude.to_degrees() / 15.0).rem_euclid(24.0);
         let a = core::f64::consts::TAU * hours / 24.0;

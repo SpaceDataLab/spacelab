@@ -5,7 +5,7 @@
 //! rather than silently truncate. (The `CioInterpolator` accessors are covered inline in
 //! `cio_fast.rs`, where the `std`/`test`-gated type is in scope.)
 
-#![allow(clippy::float_cmp)]
+#![allow(clippy::float_cmp, clippy::unwrap_used)]
 
 use spacelab_core::{Angle, Epoch, Tt, Ut1};
 use spacelab_frames::{Gcrf, Itrf, Orientation, Transform, gcrf_to_itrf, gcrf_to_itrf_into};
@@ -17,8 +17,8 @@ fn gcrf_to_itrf_into_agrees_with_the_scalar_path() {
         .map(|k| {
             let d = f64::from(k) * 0.05;
             Orientation {
-                ut1: Epoch::<Ut1>::from_days_since_j2000(d),
-                tt: Epoch::<Tt>::from_days_since_j2000(d),
+                ut1: Epoch::<Ut1>::from_days_since_j2000(d).unwrap(),
+                tt: Epoch::<Tt>::from_days_since_j2000(d).unwrap(),
                 xp: Angle::from_arcseconds(0.1 + d * 1e-5),
                 yp: Angle::from_arcseconds(0.3 - d * 1e-5),
                 lod_seconds: 0.001,

@@ -125,6 +125,7 @@ pub fn gcrf_to_itrf_into(epochs: &[Orientation], out: &mut [Transform<Gcrf, Itrf
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)] // a panicking test is a failing test
     use super::*;
 
     /// TT days since J2000 of the chain gate: `t = 0.06`, a century and half a century either side
@@ -288,8 +289,8 @@ mod tests {
         {
             let [xp, yp, dx, dy] = eop.map(Angle::from_arcseconds);
             let got = gcrf_to_itrf(
-                Epoch::<Ut1>::from_days_since_j2000(ut1),
-                Epoch::<Tt>::from_days_since_j2000(tt),
+                Epoch::<Ut1>::from_days_since_j2000(ut1).unwrap(),
+                Epoch::<Tt>::from_days_since_j2000(tt).unwrap(),
                 xp,
                 yp,
                 dx,

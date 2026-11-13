@@ -141,7 +141,7 @@ fn the_track_actually_moves() {
     for minute in 0..100 {
         let utc = UtcDateTime::new(2008, 9, 20, 12, 0, 0.0).unwrap();
         let ns = utc.naive_ns_since_j2000() + i128::from(minute) * 60_000_000_000;
-        let label = UtcDateTime::from_naive_ns_since_j2000(ns, false);
+        let label = UtcDateTime::from_naive_ns_since_j2000(ns, false).unwrap();
 
         let ut1 = Epoch::<Ut1>::from_ns_since_j2000(ns);
         let teme = satellite.propagate_at(label).unwrap();

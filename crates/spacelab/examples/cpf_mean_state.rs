@@ -170,7 +170,7 @@ fn zonal() -> DsstZonal {
 fn utc(mjd: i32, sod: f64) -> UtcDateTime {
     let ns = i128::from(mjd - MJD_J2000) * 86_400_000_000_000 - 43_200_000_000_000
         + (sod * 1e9).round() as i128;
-    UtcDateTime::from_naive_ns_since_j2000(ns, false)
+    UtcDateTime::from_naive_ns_since_j2000(ns, false).expect("a CPF epoch is on the calendar")
 }
 
 fn eop() -> EopSeries {

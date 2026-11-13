@@ -88,7 +88,7 @@ fn a_predicted_day_is_reported_as_predicted() {
     #[allow(clippy::cast_possible_truncation)]
     let mjd = predicted.mjd as i64;
     let days_from_civil = mjd - 40_587;
-    let (y, m, d) = spacelab_core::calendar::civil_from_days(days_from_civil);
+    let (y, m, d) = spacelab_core::calendar::civil_from_days(days_from_civil).unwrap();
     let utc = UtcDateTime::from_date(y, m, d).expect("a real date");
 
     match earth_orientation_at(utc, EopSource::Series(&series)) {
@@ -291,7 +291,7 @@ fn ut1_minus_tai_ns(series: &EopSeries, year: i32, month: u8, day: u8) -> [i128;
         .unwrap()
         .days_from_civil()
         + 1;
-    let (ny, nm, nd) = spacelab_core::calendar::civil_from_days(next);
+    let (ny, nm, nd) = spacelab_core::calendar::civil_from_days(next).unwrap();
     [
         UtcDateTime::new(year, month, day, 23, 59, 59.5).unwrap(),
         UtcDateTime::new(year, month, day, 23, 59, 60.5).unwrap(),

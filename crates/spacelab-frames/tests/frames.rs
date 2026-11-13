@@ -292,7 +292,7 @@ fn polar_motion_distance_to_pyerfa_pom00() {
 }
 #[test]
 fn the_tio_locator_is_minus_47_microarcseconds_per_century() {
-    let one_century = Epoch::<Tt>::from_days_since_j2000(36_525.0);
+    let one_century = Epoch::<Tt>::from_days_since_j2000(36_525.0).unwrap();
     assert!((tio_locator(one_century).arcseconds() - -47e-6).abs() < 1e-18);
     assert!(tio_locator(Epoch::<Tt>::J2000).arcseconds().abs() < 1e-30);
 }
@@ -328,8 +328,8 @@ fn every_frame_rotation_is_a_proper_rotation_over_a_century_and_all_polar_motion
                 let xp = -0.6 + f64::from(k) * 0.1;
                 let yp = -0.6 + f64::from(l) * 0.1;
                 let t = teme_to_itrf(
-                    Epoch::<Ut1>::from_days_since_j2000(day),
-                    Epoch::<Tt>::from_days_since_j2000(day),
+                    Epoch::<Ut1>::from_days_since_j2000(day).unwrap(),
+                    Epoch::<Tt>::from_days_since_j2000(day).unwrap(),
                     Angle::from_arcseconds(xp),
                     Angle::from_arcseconds(yp),
                     0.0,
@@ -367,8 +367,8 @@ fn every_frame_rotation_is_a_proper_rotation_over_a_century_and_all_polar_motion
 fn a_point_at_rest_on_the_equator_moves_at_465_metres_per_second() {
     const EQUATORIAL_RADIUS: f64 = 6_378_137.0;
 
-    let ut1 = Epoch::<Ut1>::from_days_since_j2000(1_234.5);
-    let tt = Epoch::<Tt>::from_days_since_j2000(1_234.5);
+    let ut1 = Epoch::<Ut1>::from_days_since_j2000(1_234.5).unwrap();
+    let tt = Epoch::<Tt>::from_days_since_j2000(1_234.5).unwrap();
     let to_teme = teme_to_itrf(
         ut1,
         tt,
@@ -397,8 +397,8 @@ fn the_pole_is_left_alone_by_sidereal_rotation() {
     // angular velocity vector the same in both frames, and hence the velocity
     // transform correct at the PEF stage.
     let r = teme_to_pef(
-        Epoch::<Ut1>::from_days_since_j2000(77.7),
-        Epoch::<Tt>::from_days_since_j2000(77.7),
+        Epoch::<Ut1>::from_days_since_j2000(77.7).unwrap(),
+        Epoch::<Tt>::from_days_since_j2000(77.7).unwrap(),
     );
     let pole = r * Position::<Teme>::new(Vec3::new(0.0, 0.0, 1.0));
     assert!((pole.vector.z - 1.0).abs() < 1e-15);
@@ -407,8 +407,8 @@ fn the_pole_is_left_alone_by_sidereal_rotation() {
 
 #[test]
 fn a_transform_and_its_inverse_return_the_state_untouched() {
-    let ut1 = Epoch::<Ut1>::from_days_since_j2000(-812.3);
-    let tt = Epoch::<Tt>::from_days_since_j2000(-812.3);
+    let ut1 = Epoch::<Ut1>::from_days_since_j2000(-812.3).unwrap();
+    let tt = Epoch::<Tt>::from_days_since_j2000(-812.3).unwrap();
     let t = teme_to_itrf(
         ut1,
         tt,
@@ -435,8 +435,8 @@ fn the_batch_path_agrees_with_the_scalar_path() {
         .map(|k| {
             let d = f64::from(k) * 0.017;
             Orientation {
-                ut1: Epoch::<Ut1>::from_days_since_j2000(d),
-                tt: Epoch::<Tt>::from_days_since_j2000(d),
+                ut1: Epoch::<Ut1>::from_days_since_j2000(d).unwrap(),
+                tt: Epoch::<Tt>::from_days_since_j2000(d).unwrap(),
                 xp: Angle::from_arcseconds(0.1 + d * 1e-5),
                 yp: Angle::from_arcseconds(0.3 - d * 1e-5),
                 // A realistic ~1 ms LOD, varied, so both paths must apply it identically.

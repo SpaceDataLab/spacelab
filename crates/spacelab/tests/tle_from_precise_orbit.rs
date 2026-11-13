@@ -154,7 +154,8 @@ fn teme_arc(sp3_text: &str, eop_text: &str, sat: SatId, min_spacing: f64) -> Arc
     // The file's own scale reaches UTC either by a constant (GNSS system times) or by the
     // leap-second table (UTC and GLONASS). Resolving it from an approximate UTC is safe: the count
     // can only be wrong within seconds of midnight on a leap-second day.
-    let approximate = UtcDateTime::from_naive_ns_since_j2000((start * 1e9).round() as i128, false);
+    let approximate =
+        UtcDateTime::from_naive_ns_since_j2000((start * 1e9).round() as i128, false).unwrap();
     let offset_to_utc = match sp3.time_system() {
         TimeSystem::Utc => 0.0,
         TimeSystem::Gps => {
@@ -168,6 +169,7 @@ fn teme_arc(sp3_text: &str, eop_text: &str, sat: SatId, min_spacing: f64) -> Arc
             ((start + t - offset_to_utc) * 1e9).round() as i128,
             false,
         )
+        .unwrap()
     };
     let epoch = utc_at(0.0);
     let epoch_ns = epoch.naive_ns_since_j2000();

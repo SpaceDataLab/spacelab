@@ -192,7 +192,8 @@ fn measure() -> BTreeMap<String, Residuals> {
 
     // GPS labels and UTC labels are the same calendar arithmetic offset by the leap-second count.
     #[allow(clippy::cast_possible_truncation)]
-    let approx = UtcDateTime::from_naive_ns_since_j2000((start_gps * 1e9).round() as i128, false);
+    let approx =
+        UtcDateTime::from_naive_ns_since_j2000((start_gps * 1e9).round() as i128, false).unwrap();
     let gps_minus_utc =
         f64::from(delta_at(approx).expect("a tabulated leap-second count")) + GPS_MINUS_TAI;
 
@@ -205,7 +206,8 @@ fn measure() -> BTreeMap<String, Residuals> {
         let utc = UtcDateTime::from_naive_ns_since_j2000(
             ((start_gps + t - gps_minus_utc) * 1e9).round() as i128,
             false,
-        );
+        )
+        .unwrap();
         let e = earth_orientation_at(utc, EopSource::Series(&series))
             .expect("the day is inside the EOP excerpt");
         let m = teme_to_itrf(

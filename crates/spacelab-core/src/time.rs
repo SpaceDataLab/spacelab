@@ -119,14 +119,27 @@ impl<S: TimeScale> Epoch<S> {
     ///
     /// Lossy by construction; prefer [`Self::from_ns_since_j2000`]. Provided for
     /// ingesting external data that never had more than `f64` days to give.
+    ///
+    /// `None` unless `|days| < 2⁸⁰`, 3.3 × 10²¹ years, which also refuses NaN and both
+    /// infinities. Inside that range the count fits an `i128` (Kani proof
+    /// `from_days_since_j2000_is_total`).
     #[must_use]
     #[allow(clippy::cast_possible_truncation)] // `whole` is integer-valued; `frac * NS_PER_DAY_F64` < 2^53
-    pub fn from_days_since_j2000(days: f64) -> Self {
+    pub fn from_days_since_j2000(days: f64) -> Option<Self> {
+        // 2⁸⁰ days are 1.04 × 10³⁸ ns, below `i128::MAX` = 1.70 × 10³⁸.
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "2⁸⁰ is a power of two, exact in f64"
+        )]
+        const LIMIT_DAYS: f64 = (1_u128 << 80) as f64;
+        if !days.is_finite() || days.abs() >= LIMIT_DAYS {
+            return None;
+        }
         // Split before scaling, so the integer part never enters a product.
         let whole = libm::trunc(days);
         let frac = days - whole;
         let ns = (whole as i128) * NS_PER_DAY + (frac * NS_PER_DAY_F64) as i128;
-        Self::from_ns_since_j2000(ns)
+        Some(Self::from_ns_since_j2000(ns))
     }
 
     /// Whole days since J2000, and the fraction of a day remaining, in `[0, 1)`.
@@ -164,12 +177,18 @@ const TT_MINUS_TAI_NS: i128 = 32_184_000_000;
 /// orientation data and return a `Result`. Conversions that are definitionally
 /// exact return a value; conversions that need measured data cannot pretend to.
 /// That asymmetry is visible in the types, which is the point.
+///
+/// Exact for every epoch up to `i128::MAX − 32 184 000 000` ns, 5.4 × 10²¹ years after
+/// J2000; only past it does the `i128` addition overflow (Kani proof
+/// `tai_tt_round_trip_is_exact`).
 #[must_use]
 pub const fn tai_to_tt(t: Epoch<Tai>) -> Epoch<Tt> {
     Epoch::from_ns_since_j2000(t.ns_since_j2000() + TT_MINUS_TAI_NS)
 }
 
 /// `TAI = TT - 32.184 s`. Exact, hence infallible.
+///
+/// Exact for every epoch down to `i128::MIN + 32 184 000 000` ns, as for [`tai_to_tt`].
 #[must_use]
 pub const fn tt_to_tai(t: Epoch<Tt>) -> Epoch<Tai> {
     Epoch::from_ns_since_j2000(t.ns_since_j2000() - TT_MINUS_TAI_NS)
@@ -177,6 +196,7 @@ pub const fn tt_to_tai(t: Epoch<Tt>) -> Epoch<Tai> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)] // a panicking test is a failing test
     use super::*;
 
     #[test]
@@ -203,6 +223,20 @@ mod tests {
     fn tai_tt_round_trips_exactly() {
         let tai = Epoch::<Tai>::from_ns_since_j2000(1_234_567_891_011);
         assert_eq!(tt_to_tai(tai_to_tt(tai)), tai);
+    }
+
+    #[test]
+    fn a_day_count_without_a_nanosecond_count_is_refused() {
+        // NaN once became J2000 through the saturating casts, and an infinity overflowed.
+        let limit = 1_208_925_819_614_629_174_706_176.0_f64;
+        for days in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, limit, -limit] {
+            assert_eq!(Epoch::<Tt>::from_days_since_j2000(days), None, "{days}");
+        }
+        let below = f64::from_bits(limit.to_bits() - 1);
+        let t = Epoch::<Tt>::from_days_since_j2000(-below).unwrap();
+        #[allow(clippy::cast_possible_truncation)] // `below` is integer-valued and below 2^80
+        let whole = below as i128;
+        assert_eq!(t.ns_since_j2000(), -whole * NS_PER_DAY);
     }
 
     #[test]
@@ -253,6 +287,38 @@ mod tests {
             #[allow(clippy::cast_possible_truncation)]
             let back = day * NS_PER_DAY + (frac * NS_PER_DAY_F64).round() as i128;
             assert_eq!(back, ns, "round trip failed for {ns}");
+        }
+    }
+}
+
+// Bounded proofs, `just kani`. Each states its domain; overflow and NaN checks are Kani's own.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Every `f64`, NaN and both infinities included.
+    #[kani::proof]
+    fn from_days_since_j2000_is_total() {
+        let _ = Epoch::<Tt>::from_days_since_j2000(kani::any());
+    }
+
+    /// Every `i128`; the fraction lies in `[0, 1)`.
+    #[kani::proof]
+    fn day_and_fraction_is_total() {
+        let (_, frac) = Epoch::<Tai>::from_ns_since_j2000(kani::any()).day_and_fraction();
+        assert!((0.0..1.0).contains(&frac));
+    }
+
+    /// Every `i128` at least 32.184 s inside the end it moves towards.
+    #[kani::proof]
+    fn tai_tt_round_trip_is_exact() {
+        let tai = Epoch::<Tai>::from_ns_since_j2000(kani::any());
+        if tai.ns_since_j2000() <= i128::MAX - TT_MINUS_TAI_NS {
+            assert_eq!(tt_to_tai(tai_to_tt(tai)), tai);
+        }
+        let tt = Epoch::<Tt>::from_ns_since_j2000(kani::any());
+        if tt.ns_since_j2000() >= i128::MIN + TT_MINUS_TAI_NS {
+            assert_eq!(tai_to_tt(tt_to_tai(tt)), tt);
         }
     }
 }

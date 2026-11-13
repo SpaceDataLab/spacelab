@@ -46,7 +46,8 @@ fn main() {
     );
     for step in 0..20 {
         let ns = start.naive_ns_since_j2000() + i128::from(step) * 5 * 60_000_000_000;
-        let utc = UtcDateTime::from_naive_ns_since_j2000(ns, false);
+        let utc =
+            UtcDateTime::from_naive_ns_since_j2000(ns, false).expect("2008 is on the calendar");
 
         let teme = satellite
             .propagate_at(utc)

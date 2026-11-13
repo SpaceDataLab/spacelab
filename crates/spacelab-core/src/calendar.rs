@@ -74,25 +74,40 @@ impl core::error::Error for CalendarError {}
 /// Howard Hinnant, *chrono-Compatible Low-Level Date Algorithms*, released to the
 /// public domain. <https://howardhinnant.github.io/date_algorithms.html>
 ///
-/// Exact for every year in `i32`, with no division by a non-constant and no table.
+/// Exact for every year in `i32`, with no division by a non-constant and no table. The
+/// arithmetic runs in `i64`, where no intermediate passes 8 × 10¹¹ (Kani proof
+/// `days_from_civil_is_total`).
 #[must_use]
 pub const fn days_from_civil(year: i32, month: u8, day: u8) -> i64 {
-    let y = if month <= 2 { year - 1 } else { year };
+    let y = year as i64 - if month <= 2 { 1 } else { 0 };
     let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = (y - era * 400) as i64; // [0, 399]
+    let yoe = y - era * 400; // [0, 399]
     let m = month as i64;
     let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + day as i64 - 1; // [0, 365]
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
-    era as i64 * 146_097 + doe - 719_468
+    era * 146_097 + doe - 719_468
 }
 
+/// The first and the last day of the calendar: 1 January of year `i32::MIN` and 31 December of
+/// year `i32::MAX`.
+const FIRST_DAY: i64 = days_from_civil(i32::MIN, 1, 1);
+const LAST_DAY: i64 = days_from_civil(i32::MAX, 12, 31);
+
 /// Inverse of [`days_from_civil`].
+///
+/// `None` before 1 January of year `i32::MIN` or after 31 December of year `i32::MAX`, where
+/// the year would not fit an `i32`. Inside that range no intermediate passes 8 × 10¹¹ (Kani
+/// proof `civil_from_days_is_total`).
 #[must_use]
-// `m` lies in 1..=12 and `d` in 1..=31 by construction of the algorithm, and `y`
-// is bounded by the input, which came from an `i32` year. The casts cannot lose
-// anything; the round-trip property test over a full 400-year cycle proves it.
+// `m` lies in 1..=12 and `d` in 1..=31 by construction of the algorithm, and `year` lies in
+// `i32` by the range check. The casts cannot lose anything: both functions are periodic over
+// 146 097 days with no overflow, so the round-trip test over a full 400-year cycle covers
+// every day, and the tests at both ends pin the range.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-pub const fn civil_from_days(days: i64) -> (i32, u8, u8) {
+pub const fn civil_from_days(days: i64) -> Option<(i32, u8, u8)> {
+    if days < FIRST_DAY || days > LAST_DAY {
+        return None;
+    }
     let z = days + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = z - era * 146_097; // [0, 146096]
@@ -103,7 +118,7 @@ pub const fn civil_from_days(days: i64) -> (i32, u8, u8) {
     let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
     let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
     let year = if m <= 2 { y + 1 } else { y };
-    (year as i32, m as u8, d as u8)
+    Some((year as i32, m as u8, d as u8))
 }
 
 /// Whether a proleptic Gregorian year is a leap year.
@@ -267,30 +282,33 @@ impl UtcDateTime {
     ///
     /// `extra_second` shifts a `23:59:59` label to `23:59:60`, which is how a leap
     /// second is rendered. The caller decides; this type cannot know.
+    ///
+    /// `None` when the instant falls outside the calendar's `i32` years, as for
+    /// [`civil_from_days`] (Kani proof `from_naive_ns_since_j2000_is_total`).
     #[must_use]
     #[allow(
         clippy::cast_precision_loss,
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss
     )] // `rem` is non-negative by `rem_euclid`, and each field is bounded by its unit
-    pub fn from_naive_ns_since_j2000(ns: i128, extra_second: bool) -> Self {
-        let ns = ns + NS_MIDNIGHT_TO_NOON;
-        let day = ns.div_euclid(NS_PER_DAY);
+    pub fn from_naive_ns_since_j2000(ns: i128, extra_second: bool) -> Option<Self> {
+        let ns = ns.checked_add(NS_MIDNIGHT_TO_NOON)?;
         let rem = ns.rem_euclid(NS_PER_DAY);
+        let day = i64::try_from(ns.div_euclid(NS_PER_DAY) + i128::from(UNIX_DAYS_TO_J2000)).ok()?;
 
-        let (year, month, dom) = civil_from_days(day as i64 + UNIX_DAYS_TO_J2000);
+        let (year, month, dom) = civil_from_days(day)?;
         let hour = (rem / (3_600 * 1_000_000_000)) as u8;
         let minute = (rem / (60 * 1_000_000_000) % 60) as u8;
         let second = (rem % (60 * 1_000_000_000)) as f64 / 1e9 + f64::from(u8::from(extra_second));
 
-        Self {
+        Some(Self {
             year,
             month,
             day: dom,
             hour,
             minute,
             second,
-        }
+        })
     }
 }
 
@@ -314,8 +332,8 @@ mod tests {
     fn epochs_are_where_we_think() {
         assert_eq!(days_from_civil(1970, 1, 1), 0);
         assert_eq!(days_from_civil(2000, 1, 1), UNIX_DAYS_TO_J2000);
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(UNIX_DAYS_TO_J2000), (2000, 1, 1));
+        assert_eq!(civil_from_days(0), Some((1970, 1, 1)));
+        assert_eq!(civil_from_days(UNIX_DAYS_TO_J2000), Some((2000, 1, 1)));
     }
 
     #[test]
@@ -323,7 +341,7 @@ mod tests {
         // One full Gregorian cycle either side of the Unix epoch: every leap rule
         // fires, including the 100- and 400-year exceptions.
         for z in -146_097_i64..=146_097 {
-            let (y, m, d) = civil_from_days(z);
+            let (y, m, d) = civil_from_days(z).unwrap();
             assert_eq!(days_from_civil(y, m, d), z, "round trip failed at day {z}");
         }
     }
@@ -334,18 +352,48 @@ mod tests {
         // negative branch of each era division -- `y - 399`, `z - 146_096`, the correction that
         // makes truncating division floor -- never runs. These days are all before year 0, which
         // is what "proleptic, negative before" in the doc comment claims to handle.
-        assert_eq!(civil_from_days(-719_468), (0, 3, 1));
+        assert_eq!(civil_from_days(-719_468), Some((0, 3, 1)));
         assert_eq!(days_from_civil(0, 3, 1), -719_468);
-        assert_eq!(civil_from_days(-719_469), (0, 2, 29)); // year 0 is a leap year
+        assert_eq!(civil_from_days(-719_469), Some((0, 2, 29))); // year 0 is a leap year
         assert_eq!(days_from_civil(-1, 12, 31), -719_529);
 
         assert!(
-            civil_from_days(-1_200_000).0 < -1_300,
+            civil_from_days(-1_200_000).unwrap().0 < -1_300,
             "the sweep must reach negative years"
         );
         for z in -1_200_000_i64..=-700_000 {
-            let (y, m, d) = civil_from_days(z);
+            let (y, m, d) = civil_from_days(z).unwrap();
             assert_eq!(days_from_civil(y, m, d), z, "round trip failed at day {z}");
+        }
+    }
+
+    #[test]
+    fn the_calendar_runs_from_the_first_to_the_last_i32_year() {
+        // In `i32`, `year - 1` overflowed for January and February of `i32::MIN`, and
+        // `y - 399` for its first 399 years. Past the last day, `year as i32` wrapped.
+        let first = days_from_civil(i32::MIN, 1, 1);
+        let last = days_from_civil(i32::MAX, 12, 31);
+        assert_eq!(civil_from_days(first), Some((i32::MIN, 1, 1)));
+        assert_eq!(civil_from_days(last), Some((i32::MAX, 12, 31)));
+        for outside in [first - 1, last + 1, i64::MIN, i64::MAX] {
+            assert_eq!(civil_from_days(outside), None, "day {outside}");
+        }
+        for z in (first..first + 1_000).chain(last - 1_000..=last) {
+            let (y, m, d) = civil_from_days(z).unwrap();
+            assert_eq!(days_from_civil(y, m, d), z, "round trip failed at day {z}");
+        }
+    }
+
+    #[test]
+    fn a_naive_coordinate_outside_the_calendar_has_no_label() {
+        let last = UtcDateTime::new(i32::MAX, 12, 31, 23, 59, 59.0).unwrap();
+        let ns = last.naive_ns_since_j2000();
+        assert_eq!(
+            UtcDateTime::from_naive_ns_since_j2000(ns, false),
+            Some(last)
+        );
+        for outside in [ns + 1_000_000_000, i128::MAX, i128::MIN] {
+            assert_eq!(UtcDateTime::from_naive_ns_since_j2000(outside, false), None);
         }
     }
 
@@ -385,8 +433,8 @@ mod tests {
         // same instant with and without it must differ by exactly one second in the label.
         let t = UtcDateTime::new(2016, 12, 31, 23, 59, 59.0).unwrap();
         let ns = t.naive_ns_since_j2000();
-        let ordinary = UtcDateTime::from_naive_ns_since_j2000(ns, false);
-        let leap = UtcDateTime::from_naive_ns_since_j2000(ns, true);
+        let ordinary = UtcDateTime::from_naive_ns_since_j2000(ns, false).unwrap();
+        let leap = UtcDateTime::from_naive_ns_since_j2000(ns, true).unwrap();
         assert_eq!((leap.hour(), leap.minute()), (23, 59));
         assert!((leap.second() - ordinary.second() - 1.0).abs() < 1e-9);
         assert!((leap.second() - 60.0).abs() < 1e-9, "{}", leap.second());
@@ -402,7 +450,7 @@ mod tests {
     fn naive_coordinate_round_trips() {
         let t = UtcDateTime::new(2016, 12, 31, 23, 59, 59.25).unwrap();
         let back = UtcDateTime::from_naive_ns_since_j2000(t.naive_ns_since_j2000(), false);
-        assert_eq!(back, t);
+        assert_eq!(back, Some(t));
     }
 
     #[test]
@@ -422,5 +470,34 @@ mod tests {
         assert!(UtcDateTime::from_date(2000, 2, 29).is_ok());
         assert!(UtcDateTime::new(2024, 1, 1, 24, 0, 0.0).is_err());
         assert!(UtcDateTime::new(2024, 1, 1, 0, 0, 61.0).is_err());
+    }
+}
+
+// Bounded proofs, `just kani`. Each states its domain; overflow and NaN checks are Kani's own.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Every `i32` year, month `1..=12` and day `1..=31`.
+    #[kani::proof]
+    fn days_from_civil_is_total() {
+        let month: u8 = kani::any();
+        let day: u8 = kani::any();
+        kani::assume((1..=12).contains(&month) && (1..=31).contains(&day));
+        let _ = days_from_civil(kani::any(), month, day);
+    }
+
+    /// Every `i64`. The month and day ranges are not asserted here: CBMC did not settle them in
+    /// 25 minutes, and they depend only on the day of the 400-year era, so
+    /// `civil_round_trips_over_four_centuries` checks all 146 097 of them.
+    #[kani::proof]
+    fn civil_from_days_is_total() {
+        let _ = civil_from_days(kani::any());
+    }
+
+    /// Every `i128` and both flags.
+    #[kani::proof]
+    fn from_naive_ns_since_j2000_is_total() {
+        let _ = UtcDateTime::from_naive_ns_since_j2000(kani::any(), kani::any());
     }
 }

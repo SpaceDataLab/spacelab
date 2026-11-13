@@ -89,6 +89,14 @@ _capi-matrix DIR CC CXX:
     cmake --build target/{{DIR}}
     ctest --test-dir target/{{DIR}} --output-on-failure
 
+# Kani 0.68.0 is out of tree (`cargo install --locked kani-verifier && cargo kani setup`) and is not
+# a CI step. Each proof states its domain in its doc comment.
+# The bounded proofs of the time and calendar arithmetic (Ф28.I, docs/verification.md §1.6).
+kani:
+    cargo kani -p spacelab-core
+    cargo kani -p spacelab-fa
+    cargo kani -p spacelab-ndm
+
 # ── README figures ────────────────────────────────────────────────────────────
 
 # The README figures and the numbers their captions quote, regenerated through a freshly built wheel

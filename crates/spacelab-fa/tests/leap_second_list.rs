@@ -60,7 +60,7 @@ fn parse() -> List {
                 u8::try_from(month).expect("month"),
                 d.parse().expect("day"),
             );
-            assert_eq!(civil_from_days(ntp_day(x)), date, "{line}");
+            assert_eq!(civil_from_days(ntp_day(x)), Some(date), "{line}");
             rows.push((ntp_day(x), dtai.parse().expect("TAI − UTC")));
         }
     }
@@ -72,7 +72,7 @@ fn parse() -> List {
 }
 
 fn delta_at_on(day: i64) -> i32 {
-    let (y, m, d) = civil_from_days(day);
+    let (y, m, d) = civil_from_days(day).expect("a list day is on the calendar");
     delta_at(UtcDateTime::from_date(y, m, d).expect("a date")).expect("inside the table")
 }
 
@@ -98,8 +98,8 @@ fn the_table_is_the_iers_list_until_it_expires() {
 #[test]
 fn the_list_is_valid_past_the_start_of_continuous_utc() {
     let list = parse();
-    assert_eq!(civil_from_days(list.updated), (2026, 7, 6));
-    assert_eq!(civil_from_days(list.expires), (2027, 6, 28));
+    assert_eq!(civil_from_days(list.updated), Some((2026, 7, 6)));
+    assert_eq!(civil_from_days(list.expires), Some((2027, 6, 28)));
     assert!(LIST.contains("File expires on 28 June 2027"));
     assert!(list.expires > days_from_civil(2027, 5, 20));
 }

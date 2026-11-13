@@ -105,14 +105,14 @@ fn instant() -> impl Strategy<Value = i128> {
 /// A label that is not inside a leap second.
 fn ordinary_label() -> impl Strategy<Value = UtcDateTime> {
     near(|(n, _)| n, naive(2027, 5, 20), naive(1972, 1, 1))
-        .prop_map(|n| UtcDateTime::from_naive_ns_since_j2000(n, false))
+        .prop_map(|n| UtcDateTime::from_naive_ns_since_j2000(n, false).unwrap())
 }
 
 /// A label inside a leap second: `23:59:60` plus a nanosecond fraction, on a day that had one.
 fn leap_label() -> impl Strategy<Value = UtcDateTime> {
     let starts: Vec<i128> = transitions().into_iter().map(|(n, _)| n).collect();
     (0..starts.len(), 0..S).prop_map(move |(k, fraction)| {
-        UtcDateTime::from_naive_ns_since_j2000(starts[k] - S + fraction, true)
+        UtcDateTime::from_naive_ns_since_j2000(starts[k] - S + fraction, true).unwrap()
     })
 }
 
@@ -145,7 +145,7 @@ proptest! {
     fn utc_is_tai_minus_37_s_from_2017(
         t in naive(2017, 1, 1) + 37 * S..naive(END_YEAR, 1, 1) + 37 * S,
     ) {
-        prop_assert_eq!(utc(t), UtcDateTime::from_naive_ns_since_j2000(t - 37 * S, false));
+        prop_assert_eq!(utc(t), UtcDateTime::from_naive_ns_since_j2000(t - 37 * S, false).unwrap());
     }
 }
 
@@ -154,8 +154,8 @@ fn every_leap_second_runs_from_23_59_60_to_midnight() {
     let steps = transitions();
     assert_eq!(steps.len(), 27);
     for (n, t) in steps {
-        let next = UtcDateTime::from_naive_ns_since_j2000(n, false);
-        let (y, m, d) = civil_from_days(next.days_from_civil() - 1);
+        let next = UtcDateTime::from_naive_ns_since_j2000(n, false).unwrap();
+        let (y, m, d) = civil_from_days(next.days_from_civil() - 1).unwrap();
         let eve = |second_ns: i64| (y, m, d, 23, 59, second_ns);
         let edges = [
             (t - S - 1, eve(59_999_999_999)),
@@ -186,8 +186,8 @@ fn twenty_seven_utc_days_are_one_second_long_and_none_after_2016() {
         .days_from_civil();
     let mut long_days = Vec::new();
     for day in first.days_from_civil()..last {
-        let (y, m, d) = civil_from_days(day);
-        let (ny, nm, nd) = civil_from_days(day + 1);
+        let (y, m, d) = civil_from_days(day).unwrap();
+        let (ny, nm, nd) = civil_from_days(day + 1).unwrap();
         let next = tai(UtcDateTime::from_date(ny, nm, nd).unwrap());
         let sixty = utc_to_tai(UtcDateTime::new(y, m, d, 23, 59, 60.0).unwrap());
         match next - midnight {

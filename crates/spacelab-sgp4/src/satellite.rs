@@ -248,6 +248,8 @@ pub struct Satellite {
     norad_id: NoradId,
     /// The element-set epoch, on the naive UTC coordinate. See the crate docs.
     epoch_naive_ns: i128,
+    /// The same epoch read back from that coordinate, as [`Self::epoch`] returns it.
+    epoch: UtcDateTime,
     constants: sgp4::Constants,
     convention: Convention,
     /// The Brouwer mean motion `n₀"`, rad/min — the un-Kozai'd value the model runs on.
@@ -320,6 +322,11 @@ impl Satellite {
             seconds,
         )
         .map_err(|_| PropagationError::UnusableElements)?;
+        let epoch_naive_ns = epoch.naive_ns_since_j2000();
+        // The naive coordinate has no leap-second labels in it by construction, so the
+        // extra-second flag is false for every epoch that can round-trip.
+        let epoch = UtcDateTime::from_naive_ns_since_j2000(epoch_naive_ns, false)
+            .ok_or(PropagationError::UnusableElements)?;
 
         // The gravity model is part of the convention, and the un-Kozai transformation
         // reads J₂ and kₑ from it — so the regime must be classified under the same
@@ -353,7 +360,8 @@ impl Satellite {
                 u32::try_from(elements.norad_id)
                     .map_err(|_| PropagationError::MalformedElements)?,
             ),
-            epoch_naive_ns: epoch.naive_ns_since_j2000(),
+            epoch_naive_ns,
+            epoch,
             constants,
             convention,
             brouwer_mean_motion: orbit.mean_motion,
@@ -399,10 +407,8 @@ impl Satellite {
     /// time scale needs it: an Earth-rotation angle is a function of UT1, and the only
     /// clock a TLE offers is this one.
     #[must_use]
-    pub fn epoch(&self) -> UtcDateTime {
-        // The naive coordinate has no leap-second labels in it by construction, so the
-        // extra-second flag is false for every epoch that can round-trip.
-        UtcDateTime::from_naive_ns_since_j2000(self.epoch_naive_ns, false)
+    pub const fn epoch(&self) -> UtcDateTime {
+        self.epoch
     }
 
     /// Minutes from the element-set epoch to a UTC label, on the naive coordinate.

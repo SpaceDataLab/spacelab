@@ -641,6 +641,14 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima brouwer_lyddane.mac" "expected 9 checks to hold, found $holds"
     fi
 
+    out=$(macf eckstein_hechler.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9][ab]?\) holds:')
+    if [ "$holds" -eq 11 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima eckstein_hechler.mac: the first-order short-period terms the brackets of Brouwer's generator to first order in e, da by the energy integral, the second-order rates at e = 0, the averaged long-period dynamics, the J2 part of the eccentricity ellipse"
+    else
+        bad "maxima eckstein_hechler.mac" "expected 11 checks to hold, found $holds"
+    fi
+
     out=$(macf light_time_down_leg.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then

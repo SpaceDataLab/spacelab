@@ -124,6 +124,13 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   at `e = 0.3`, J2–J5 (`brouwer_lyddane.rs`, S1); halving J2 quarters the J2 part. The
   osculating→mean fixed point does not converge within about 8° of retrograde equatorial, which is
   refused as `MeanElementsDiverged`.
+- **Eckstein–Hechler is a theory to first order in the eccentricity.** Its periodic terms stop at
+  `e`, and it carries J2² and J3–J6 short periods in `a` alone, so the propagated state leaves the
+  zonal equations of motion by **114 m** over three revolutions of a near-circular LEO and **1.4 km**
+  at `e = 0.05`, J2–J6 (`eckstein_hechler.rs`, S1); at small J2 the residual grows as `e²`. Its
+  secular rates are evaluated at `e = 0`, so the eccentricity vector's turning rate is short by the
+  factor `(1 − e²)⁻²` of the J2 rate, 2e² relative. Orbits with `e > 0.1`, near-equatorial or
+  within `|sin² i − 4/5| < 10⁻³` of the critical inclination are refused.
 - **SDTM-1's shipped field is fitted on eight satellites, and its envelope is theirs.**
   `sdtm::coefficients` was fitted on 365 214 rows of the TU Delft v02 corpus — CHAMP, GRACE A/B, GOCE,
   GRACE-FO C and Swarm A/B/C, 2000-07 to 2026-04, **225 to 545 km**, F10.7a **65.8 to 231.9**

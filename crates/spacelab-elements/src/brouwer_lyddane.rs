@@ -2,7 +2,7 @@
 //!
 //! Brouwer's 1959 artificial-satellite theory in Lyddane's 1963 singularity-free variables, with
 //! Warren Phipps' 1992 `T2` approximation removing the critical-inclination (`i ≈ 63.4°`) singularity.
-//! The code follows the layout and notation of Orekit's `BrouwerLyddanePropagator.BLModel`
+//! The code is a port of Orekit's `BrouwerLyddanePropagator.BLModel`, in its layout and notation
 //! (secular rates + long- and short-period corrections). Four of its terms are not Orekit's, and
 //! neither is the inclination's assembly: the derivation below decides each, and Orekit's terms
 //! break the equations of motion they approximate (see *What checks the theory*).

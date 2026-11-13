@@ -10,7 +10,8 @@
    propagator's own first-order expressions in its own notation and variables.
 
    Out of scope here: the J2^2, J4, J5 and J6 terms are second order and need a normalisation, not
-   an average. `brouwer_lyddane.mac` derives Brouwer-Lyddane's, with its periodic terms.          */
+   an average. `brouwer_lyddane.mac` derives Brouwer-Lyddane's and `eckstein_hechler.mac`
+   Eckstein-Hechler's, each with its periodic terms.                                               */
 
 assume(e > 0, e < 1, a > 0, p > 0, si > 0)$
 

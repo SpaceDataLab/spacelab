@@ -1,12 +1,12 @@
 //! Eckstein–Hechler analytical propagator: zonal geopotential J2–J6 in circular elements.
 //!
-//! Eckstein & Hechler's mean-element satellite theory (a faithful port of Orekit's
-//! `EcksteinHechlerPropagator.EHModel`): the orbit is carried as *mean* circular elements
-//! `(a, eₓ, e_y, i, Ω, α_M)` whose only motion is the secular drift of the node, latitude argument
-//! and eccentricity vector under J2/J2²/J4/J6; converting to *osculating* elements at a target time
-//! adds the analytic long- and short-period corrections in the latitude argument. Working in the
-//! circular (equinoctial-like) set `eₓ = e·cos ω`, `e_y = e·sin ω`, `α = ω + M` removes the small-
-//! eccentricity singularity that classical `(e, ω, M)` theory carries.
+//! Eckstein & Hechler's mean-element satellite theory, a port of Orekit's
+//! `EcksteinHechlerPropagator.EHModel` with three terms that are not Orekit's (below): the orbit is
+//! carried as *mean* circular elements `(a, eₓ, e_y, i, Ω, α_M)` whose only motion is the secular
+//! drift of the node, latitude argument and eccentricity vector under J2/J2²/J4/J6; converting to
+//! *osculating* elements at a target time adds the analytic long- and short-period corrections in the
+//! latitude argument. Working in the circular (equinoctial-like) set `eₓ = e·cos ω`, `e_y = e·sin ω`,
+//! `α = ω + M` removes the small-eccentricity singularity that classical `(e, ω, M)` theory carries.
 //!
 //! # Validity
 //!
@@ -18,32 +18,38 @@
 //!
 //! # Velocity
 //!
-//! Unlike [`crate::brouwer_lyddane`], the reported velocity is *not* the Keplerian velocity of the
-//! osculating ellipse: Orekit's Eckstein–Hechler evaluates the circular elements as explicit
-//! functions of time and differentiates them (its `UnivariateDerivative2`), so the velocity includes
-//! the time variation of the short-period terms (~10 m/s for a LEO). This port carries a first-order
-//! univariate dual `Ud` (value + d/dt) through the whole element→Cartesian chain to reproduce that
-//! exact velocity. Matched against Orekit's own propagator (`tools/orekit-oracle`,
-//! `orekit_eckstein_hechler.csv`) to ~10⁻⁶ m in position and ~10⁻⁹ m/s in velocity over a LEO orbit.
+//! The reported velocity is the time derivative of the reported position: the circular elements are
+//! explicit functions of time, and a first-order univariate dual `Ud` (value + d/dt) carries them
+//! through the element→Cartesian chain, as Orekit's `UnivariateDerivative2` does. For osculating
+//! elements that derivative is the Keplerian velocity of the ellipse they define; here the two agree
+//! to second order in J2 — 1.4 cm/s on a near-circular LEO, and halving J2 divides the gap by 4.
 //!
 //! The un-normalized zonal coefficients are `C_{n,0} = −J_n`; denormalize the embedded field's
 //! `C̄_{n,0}` by `√(2n+1)`.
 //!
-//! # What checks the theory, as distinct from the port
+//! # What checks the theory
 //!
-//! `derivations/zonal_secular.mac` derives the first-order J2 secular rates from the averaged
-//! disturbing function and Lagrange's planetary equations, then subtracts this module's own
-//! `omm_d`, `rdpom` and `rdl` at `e = 0` — the regime the circular theory is written for, since it
-//! refuses `e > 0.1`. All three residuals are **identically zero**. The latitude-argument check is
-//! the interesting one: `rdl` has to equal `1 + ω̇/n + Ṁ/n − 1` because `α = ω + M`, and it does,
-//! which ties this propagator's variables to [`crate::brouwer_lyddane`]'s through one derivation
-//! rather than through a shared ancestor.
+//! `derivations/eckstein_hechler.mac` reads every coefficient back from this file and holds it against
+//! the zonal Hamiltonian in Delaunay variables, with `brouwer_lyddane.mac`'s generator: (1) the
+//! first-order J2 short-period terms are its brackets to first order in e, less their mean; (2) `δa`
+//! keeps the energy integral — J2 to first order in e, J3–J6 and J2² at `e = 0`; (3) the secular rates
+//! of the node, the latitude argument and the eccentricity vector are those of the second-order mean
+//! Hamiltonian at `e = 0`, the latitude argument's referred to the theory's mean `a`; (4) the
+//! eccentricity vector's motion and the J3/J5 long-period terms are the first-order averaged
+//! dynamics; (5) the ellipse `eps1` has the J2 part the theory's mean elements give it.
+//! `derivations/zonal_secular.mac` holds the first-order rates of both zonal propagators.
 //!
-//! The J2², J4 and J6 terms are second order and are **not** derived there; they stay on the Orekit
-//! comparison.
+//! Three of Orekit's terms fail it: `ly1` is −7.5 for −6, an O(J2 e) term in α that left the residual
+//! against the equations of motion linear in e (13× the derived one at J2/100 and `e = 10⁻³`); the
+//! eccentricity vector turns without its J2² rate and on a circle without the J2 part of `eps1`, both
+//! of the order of the J4 terms the theory keeps (over 60 days at `i = 60°`, `e = 0.025`: the rate
+//! 7.6·10⁻⁴ relative, the ellipse 1.1·10⁻³ off). With them right, what an integration of the J2–J6
+//! equations of motion finds is the theory's truncation: J2 e², quadratic in e, and the J2² and J3–J6
+//! short-period terms it keeps in `a` alone — 114 m over three revolutions on a near-circular LEO,
+//! 1.4 km at `e = 0.05`.
 
-// Dense astrodynamics algebra ported verbatim from Orekit; single-letter names and long expressions
-// are the source's, kept for auditability.
+// Dense astrodynamics algebra in Orekit's layout; single-letter names and long expressions are the
+// source's, kept for auditability.
 #![allow(
     clippy::many_single_char_names,
     clippy::similar_names,
@@ -294,7 +300,7 @@ struct EhModel {
 
 impl EhModel {
     /// Build the model from mean circular elements. Returns [`EcksteinHechlerError`] in the three
-    /// regimes where the theory is invalid (verbatim from Orekit `EHModel`).
+    /// regimes where the theory is invalid (Orekit `EHModel`'s three guards).
     fn new(mean: Circular, re: f64, mu: f64, ck0: [f64; 7]) -> Result<Self, EcksteinHechlerError> {
         // preliminary processing
         let mut q = re / mean.a;
@@ -331,12 +337,18 @@ impl EhModel {
 
         let xnot_dot = libm::sqrt(mu / mean.a) / mean.a;
 
+        // The J2² term of the eccentricity vector's turning rate and the J2 term of its ellipse eps1
+        // are not Eckstein–Hechler's (nor Orekit's): the rate is the e = 0 limit of the second-order
+        // mean Hamiltonian, the ellipse the l-average of the J2 short- and long-period maps, both of
+        // the order of the J4 terms the theory keeps (derivations/eckstein_hechler.mac (3), (5)).
         let rdpom = -0.75 * g2 * (4.0 - 5.0 * sin_i2);
-        let rdpomp = 7.5 * g4 * (1.0 - 31.0 / 8.0 * sin_i2 + 49.0 / 16.0 * sin_i4)
+        let rdpomp = g2 * g2 * (13.5 - 507.0 / 16.0 * sin_i2 + 1185.0 / 64.0 * sin_i4)
+            + 7.5 * g4 * (1.0 - 31.0 / 8.0 * sin_i2 + 49.0 / 16.0 * sin_i4)
             - 13.125 * g6 * (1.0 - 8.0 * sin_i2 + 129.0 / 8.0 * sin_i4 - 297.0 / 32.0 * sin_i6);
 
         q = 3.0 / (32.0 * rdpom);
-        let eps1 = q * g4 * sin_i2 * (30.0 - 35.0 * sin_i2)
+        let eps1 = q * g2 * g2 * sin_i2 * (30.0 * sin_i2 - 26.0)
+            + q * g4 * sin_i2 * (30.0 - 35.0 * sin_i2)
             - 175.0 * q * g6 * sin_i2 * (1.0 - 3.0 * sin_i2 + 2.0625 * sin_i4);
         q = 3.0 * sin_i1 / (8.0 * rdpom);
         let eps2 = q * g3 * (4.0 - 5.0 * sin_i2) - q * g5 * (10.0 - 35.0 * sin_i2 + 26.25 * sin_i4);
@@ -403,7 +415,9 @@ impl EhModel {
             + 2.5 * g5 * cos_i1 * (4.0 - 14.0 * sin_i2 + 10.5 * sin_i4);
 
         let lx1 = qq * (7.0 - 77.0 / 8.0 * sin_i2);
-        let ly1 = qq * (55.0 / 8.0 * sin_i2 - 7.50);
+        // −6, not Orekit's −7.5: the J2 bracket of Brouwer's generator to first order in e
+        // (derivations/eckstein_hechler.mac (1)); −7.5 leaves an O(J2 e) term in α.
+        let ly1 = qq * (55.0 / 8.0 * sin_i2 - 6.0);
         let l2 = qq * (1.25 * sin_i2 - 0.5);
         let l3 = qq * (77.0 / 24.0 * sin_i2 - 7.0 / 6.0);
         let ll = g3 * (53.0 * sin_i2 - 4.0 - 57.5 * sin_i4)
@@ -916,23 +930,32 @@ mod tests {
         ),
     ];
 
+    fn comparison_row(quantity: &str, unit: &str, d: &[f64]) {
+        let max = d.iter().copied().fold(0.0, f64::max);
+        #[allow(clippy::cast_precision_loss)]
+        let rms = (d.iter().map(|x| x * x).sum::<f64>() / d.len() as f64).sqrt();
+        std::println!(
+            "comparison | Orekit | 13.1.7 | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+            d.len()
+        );
+    }
+
+    /// The distance to Orekit's `EcksteinHechlerPropagator` on the reference LEO. Orekit's `ly1`,
+    /// the eccentricity vector's rate without J2² and its ellipse without J2 are not the theory's
+    /// (`derivations/eckstein_hechler.mac`), so the two now differ by metres;
+    /// [`the_propagation_follows_the_zonal_equations_of_motion`] and the derivation decide.
     #[test]
-    fn matches_orekit_reference() {
+    #[ignore = "comparator: the distance to Orekit, not a verdict"]
+    fn reference_distance_to_orekit() {
         let eh = EcksteinHechler::from_osculating(&initial(), RE, C20, C30, C40, C50, C60).unwrap();
-        let mut max_dr = 0.0f64;
-        let mut max_dv = 0.0f64;
+        let (mut dr, mut dv) = (Vec::new(), Vec::new());
         for (t, g) in GOLDEN {
             let (r, v) = eh.propagate(t);
-            let dr = libm::sqrt((r.x - g[0]).powi(2) + (r.y - g[1]).powi(2) + (r.z - g[2]).powi(2));
-            let dv = libm::sqrt((v.x - g[3]).powi(2) + (v.y - g[4]).powi(2) + (v.z - g[5]).powi(2));
-            assert!(dr < 1e-3, "t={t}: position error {dr:.3e} m");
-            assert!(dv < 1e-6, "t={t}: velocity error {dv:.3e} m/s");
-            max_dr = max_dr.max(dr);
-            max_dv = max_dv.max(dv);
+            dr.push((r.x - g[0]).hypot(r.y - g[1]).hypot(r.z - g[2]));
+            dv.push((v.x - g[3]).hypot(v.y - g[4]).hypot(v.z - g[5]));
         }
-        std::eprintln!(
-            "Eckstein-Hechler vs Orekit: max |Δr| = {max_dr:.3e} m, |Δv| = {max_dv:.3e} m/s"
-        );
+        comparison_row("position, LEO, 8 states over 1.75 h", "m", &dr);
+        comparison_row("velocity, LEO, 8 states over 1.75 h", "m/s", &dv);
     }
 
     /// Non-Orekit anchor: the model's secular nodal rate `Ω̇ = ommD·xnotDot` reproduces the classic
@@ -957,6 +980,249 @@ mod tests {
         );
         assert!(rel < 5e-3, "node rate rel err {rel:.3e}");
         assert!(node_rate > 0.0, "i=98° is retrograde: node should advance");
+    }
+
+    /// The worst distance from the propagated state to an integration of the same zonal field —
+    /// point mass plus `J2..J6` by Legendre recurrence, Dormand–Prince 8(5,3) at 10⁻¹³ — sampled
+    /// each minute over three revolutions, m.
+    fn distance_to_the_equations_of_motion(osc: &KeplerianElements, c: [f64; 5]) -> f64 {
+        use spacelab_propagation::driver::{Controls, integrate};
+        use spacelab_propagation::forces::{Newtonian, Plain, PointMass, Zonal};
+        use spacelab_propagation::{Dop853, Tolerance};
+        let eh = EcksteinHechler::from_osculating(osc, RE, c[0], c[1], c[2], c[3], c[4]).unwrap();
+        let (r0, v0) = osc.to_state();
+        let field = Newtonian((
+            PointMass { mu: MU },
+            Zonal {
+                mu: MU,
+                re: RE,
+                j: [-c[0], -c[1], -c[2], -c[3], -c[4]],
+            },
+        ));
+        let minutes = (3.0 * osc.period() / 60.0).floor();
+        let traj = integrate(
+            &Dop853,
+            &Plain(field),
+            0.0,
+            &[r0.x, r0.y, r0.z, v0.x, v0.y, v0.z],
+            60.0 * minutes,
+            60.0,
+            Controls::new(Tolerance::new(1e-13, 1e-13), 1e-3),
+        )
+        .unwrap();
+        let mut worst = 0.0f64;
+        let mut t = 60.0;
+        while t <= 60.0 * minutes {
+            let y = traj.eval(t);
+            let (r, _) = eh.propagate(t);
+            worst = worst.max((r.x - y[0]).hypot(r.y - y[1]).hypot(r.z - y[2]));
+            t += 60.0;
+        }
+        worst
+    }
+
+    /// The orbits the dynamics tests run: the reference LEO, then near-circular to the theory's
+    /// eccentric edge at four inclinations.
+    fn orbits() -> [KeplerianElements; 4] {
+        let at = |e: f64, i: f64| KeplerianElements {
+            eccentricity: e,
+            inclination: Angle::from_degrees(i),
+            ..initial()
+        };
+        [initial(), at(1e-4, 75.0), at(0.01, 28.0), at(0.05, 50.0)]
+    }
+
+    /// The theory against the equations of motion it averages: the zonal field J2–J6, integrated from
+    /// the same osculating state over three revolutions. What it leaves is its truncation — the
+    /// short-period terms of order J2 e² and J2² — not a wrong term. (S1)
+    #[test]
+    fn the_propagation_follows_the_zonal_equations_of_motion() {
+        let bounds = [450.0, 360.0, 420.0, 5500.0];
+        for (osc, bound) in orbits().iter().zip(bounds) {
+            let d = distance_to_the_equations_of_motion(osc, [C20, C30, C40, C50, C60]);
+            std::eprintln!(
+                "EH vs the J2-J6 equations of motion, e = {}, i = {:.0}°: {d:.3} m",
+                osc.eccentricity,
+                osc.inclination.degrees()
+            );
+            assert!(d < bound, "e = {}: {d:.3} m", osc.eccentricity);
+        }
+    }
+
+    /// With J2 small enough that J2² is out of reach, the residual is linear in J2 and quadratic in
+    /// e: the theory is exact to first order in e. Orekit's `ly1` (−7.5) left an O(J2 e) term and the
+    /// ratio near 2. (S2)
+    #[test]
+    fn the_residual_is_second_order_in_the_eccentricity() {
+        let at = |e: f64| {
+            let osc = KeplerianElements {
+                eccentricity: e,
+                inclination: Angle::from_degrees(50.0),
+                ..initial()
+            };
+            distance_to_the_equations_of_motion(&osc, [0.01 * C20, 0.0, 0.0, 0.0, 0.0])
+        };
+        let (d1, d2, d4) = (at(0.002), at(0.004), at(0.008));
+        std::eprintln!(
+            "EH residual at J2/100, e = 0.002, 0.004, 0.008: {d1:.4e} {d2:.4e} {d4:.4e} m"
+        );
+        for r in [d2 / d1, d4 / d2] {
+            assert!(
+                (3.8..4.2).contains(&r),
+                "doubling e moved the residual {r:.3}×"
+            );
+        }
+    }
+
+    /// The velocity `propagate` reports is the time derivative of its position; for osculating
+    /// elements it is the Keplerian velocity of the ellipse they define. Near-circular, the gap is
+    /// second order in J2: halving J2 divides it by 4 (3.1 with Orekit's `ly1`). (S2)
+    #[test]
+    fn the_velocity_is_the_osculating_ellipse_s_to_second_order() {
+        let gap = |s: f64| {
+            let osc = KeplerianElements {
+                eccentricity: 1e-3,
+                inclination: Angle::from_degrees(50.0),
+                ..initial()
+            };
+            let eh =
+                EcksteinHechler::from_osculating(&osc, RE, s * C20, 0.0, 0.0, 0.0, 0.0).unwrap();
+            let mut worst = 0.0f64;
+            for k in 0..60 {
+                let t = 100.0 * f64::from(k);
+                let (_, v) = eh.propagate(t);
+                let (_, vk) = eh.osculating_at(t).to_state();
+                worst = worst.max((v.x - vk.x).hypot(v.y - vk.y).hypot(v.z - vk.z));
+            }
+            worst
+        };
+        let (g1, g2) = (gap(1.0), gap(0.5));
+        std::eprintln!("EH |v - v_kep| at J2, J2/2: {g1:.4e} {g2:.4e} m/s");
+        assert!(
+            (3.8..4.2).contains(&(g1 / g2)),
+            "halving J2 moved the gap {:.3}×",
+            g1 / g2
+        );
+    }
+
+    /// The mean eccentricity vector the theory carries against the one the dynamics produce: the
+    /// osculating vector of a J2 integration averaged over each revolution for 60 days, fitted by
+    /// `centre + amplitude·(cos, sin)(w t)`. It turns on the ellipse `eps1` describes, and at the rate
+    /// `rdpom + rdpomp` gives once the e² growth of the J2 rate (`(1 − e²)⁻²`, which the theory
+    /// leaves out at its order) is taken off. Without the J2² rate the remainder is 7.6e-4, without
+    /// the J2 part of `eps1` the ellipse is 1.1e-3 off. (S1)
+    #[test]
+    fn the_mean_eccentricity_vector_turns_on_the_shipped_ellipse() {
+        use spacelab_propagation::driver::{Controls, integrate};
+        use spacelab_propagation::forces::{Newtonian, Plain, PointMass, Zonal};
+        use spacelab_propagation::{Dop853, Tolerance};
+        let e = 0.025;
+        let osc = KeplerianElements {
+            eccentricity: e,
+            inclination: Angle::from_degrees(60.0),
+            ..initial()
+        };
+        let eh = EcksteinHechler::from_osculating(&osc, RE, C20, 0.0, 0.0, 0.0, 0.0).unwrap();
+        let m = &eh.model;
+        let (r0, v0) = osc.to_state();
+        let field = Newtonian((
+            PointMass { mu: MU },
+            Zonal {
+                mu: MU,
+                re: RE,
+                j: [-C20, 0.0, 0.0, 0.0, 0.0],
+            },
+        ));
+        let span = 60.0 * 86400.0;
+        let traj = integrate(
+            &Dop853,
+            &Plain(field),
+            0.0,
+            &[r0.x, r0.y, r0.z, v0.x, v0.y, v0.z],
+            span,
+            600.0,
+            Controls::new(Tolerance::new(1e-13, 1e-13), 1e-3),
+        )
+        .unwrap();
+        let period = TAU / (m.xnot_dot * m.a_md);
+        let mut ts = Vec::new();
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        let mut t0 = 0.0;
+        while t0 + period <= span {
+            let (mut sx, mut sy) = (0.0, 0.0);
+            for j in 0..64 {
+                let y = traj.eval(t0 + period * f64::from(j) / 64.0);
+                let st = KeplerianElements::from_state(
+                    Vec3::new(y[0], y[1], y[2]),
+                    Vec3::new(y[3], y[4], y[5]),
+                    MU,
+                );
+                let c = keplerian_to_circular(&st);
+                sx += c.ex;
+                sy += c.ey;
+            }
+            ts.push(t0 + 0.5 * period);
+            xs.push(sx / 64.0);
+            ys.push(sy / 64.0);
+            t0 += period;
+        }
+        // least squares on [1, cos wt, sin wt] by the normal equations; the residual picks w
+        let fit = |w: f64, v: &[f64]| -> ([f64; 3], f64) {
+            let mut n = [[0.0f64; 4]; 3];
+            for (t, y) in ts.iter().zip(v) {
+                let b = [1.0, (w * t).cos(), (w * t).sin()];
+                for r in 0..3 {
+                    for c in 0..3 {
+                        n[r][c] += b[r] * b[c];
+                    }
+                    n[r][3] += b[r] * y;
+                }
+            }
+            for k in 0..3 {
+                let pivot = n[k];
+                for row in n.iter_mut().skip(k + 1) {
+                    let f = row[k] / pivot[k];
+                    for (x, p) in row.iter_mut().zip(pivot).skip(k) {
+                        *x -= f * p;
+                    }
+                }
+            }
+            let mut s = [0.0; 3];
+            for k in (0..3).rev() {
+                s[k] = (n[k][3] - (k + 1..3).map(|c| n[k][c] * s[c]).sum::<f64>()) / n[k][k];
+            }
+            let ss = ts
+                .iter()
+                .zip(v)
+                .map(|(t, y)| (y - s[0] - s[1] * (w * t).cos() - s[2] * (w * t).sin()).powi(2))
+                .sum();
+            (s, ss)
+        };
+        let w0 = m.xnot_dot * (m.rdpom + m.rdpomp);
+        let (mut lo, mut hi) = (0.97 * w0, 1.03 * w0);
+        for _ in 0..200 {
+            let (m1, m2) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+            if fit(m1, &xs).1 + fit(m1, &ys).1 < fit(m2, &xs).1 + fit(m2, &ys).1 {
+                hi = m2;
+            } else {
+                lo = m1;
+            }
+        }
+        let w = 0.5 * (lo + hi);
+        let (fx, fy) = (fit(w, &xs).0, fit(w, &ys).0);
+        let ellipse = fy[1].hypot(fy[2]) / fx[1].hypot(fx[2]) - 1.0;
+        let rate = w / w0 - 1.0 - 2.0 * e * e;
+        std::eprintln!(
+            "EH mean e-vector over 60 days: ellipse {ellipse:.4e} (eps1 {:.4e}), rate remainder {rate:.3e}",
+            m.eps1
+        );
+        assert!(
+            (ellipse - m.eps1).abs() < 1.5e-5,
+            "ellipse {ellipse:.4e} against eps1 {:.4e}",
+            m.eps1
+        );
+        assert!(rate.abs() < 3e-4, "rate remainder {rate:.3e}");
     }
 
     #[test]
@@ -1128,7 +1394,9 @@ mod tests {
             "the fixed point exited after {least} corrections"
         );
         assert!(worst <= 6, "the fixed point took {worst} corrections");
-        assert!((5.00..5.06).contains(&mean), "mean {mean:.3} corrections");
+        // 5.033 with Orekit's ly1; the derived one moves the map, so six of the 30 cases take a sixth
+        // correction to reach 1e-13.
+        assert!((5.17..5.23).contains(&mean), "mean {mean:.3} corrections");
     }
 
     /// The loop exits on a conjunction — every one of the six corrections has to have collapsed —

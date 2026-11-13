@@ -768,23 +768,23 @@ exclude_re = [
     # arms return the same double (`lo` and `x` are the same value); `x > hi` against `>=` likewise.
     # Provable, not measured. `> ==` is not on this list: it stops clipping altogether and the unit
     # test on both ends kills it.
-    "brouwer_lyddane\\.rs:72:10: replace < with <= in clamp",
-    "brouwer_lyddane\\.rs:74:17: replace > with >= in clamp",
+    "brouwer_lyddane\\.rs:83:10: replace < with <= in clamp",
+    "brouwer_lyddane\\.rs:85:17: replace > with >= in clamp",
 
     # `if |moved| < 1e-15`, the Kepler solve's exit test, tied to `<=`. `moved` is a difference of
     # two doubles near `E`; landing on exactly `1e-15` is a single-representation coincidence.
     # Measured over the 803-sample budget grid: identical worst (55) and identical mean (19.90) to
     # the last digit, so not one call of the grid takes a different path.
-    "brouwer_lyddane\\.rs:123:30: replace < with <= in true_from_mean",
+    "brouwer_lyddane\\.rs:134:30: replace < with <= in true_from_mean",
 
     # The four convergence comparisons of the osculating→mean fixed point, each tied to `<=`. Each
     # compares a correction against `1e-13`; the corrections are differences of equinoctial elements
     # and hitting the threshold exactly is a single-representation coincidence. Measured over the
-    # 30-case budget grid: identical least (5), worst (96) and mean (29.87) corrections.
-    "brouwer_lyddane\\.rs:509:35: replace < with <= in osculating_to_mean",
-    "brouwer_lyddane\\.rs:510:38: replace < with <= in osculating_to_mean",
-    "brouwer_lyddane\\.rs:511:38: replace < with <= in osculating_to_mean",
-    "brouwer_lyddane\\.rs:512:31: replace < with <= in osculating_to_mean",
+    # 30-case budget grid: identical least (5), worst (8) and mean (5.40) corrections.
+    "brouwer_lyddane\\.rs:544:35: replace < with <= in osculating_to_mean",
+    "brouwer_lyddane\\.rs:545:38: replace < with <= in osculating_to_mean",
+    "brouwer_lyddane\\.rs:546:38: replace < with <= in osculating_to_mean",
+    "brouwer_lyddane\\.rs:547:31: replace < with <= in osculating_to_mean",
 
     # --- crates/spacelab-elements/src/eckstein_hechler.rs ---
 
@@ -792,14 +792,14 @@ exclude_re = [
     # one compares a correction against `1e-13`; the corrections are differences of circular
     # elements and landing on the threshold exactly is a single-representation coincidence. Measured
     # over the 30-case budget grid and the 20-case round-trip grid: identical least (5), worst (6)
-    # and mean (5.033) corrections, and all six round-trip residuals identical to the last digit.
+    # and mean (5.200) corrections, and all six round-trip residuals identical to the last digit.
     # `&& ||` is not on this list: the round-trip test kills all five.
-    "eckstein_hechler\\.rs:680:35: replace < with <= in osculating_to_mean",
-    "eckstein_hechler\\.rs:681:32: replace < with <= in osculating_to_mean",
-    "eckstein_hechler\\.rs:682:32: replace < with <= in osculating_to_mean",
-    "eckstein_hechler\\.rs:683:31: replace < with <= in osculating_to_mean",
-    "eckstein_hechler\\.rs:684:34: replace < with <= in osculating_to_mean",
-    "eckstein_hechler\\.rs:685:35: replace < with <= in osculating_to_mean",
+    "eckstein_hechler\\.rs:694:35: replace < with <= in osculating_to_mean",
+    "eckstein_hechler\\.rs:695:32: replace < with <= in osculating_to_mean",
+    "eckstein_hechler\\.rs:696:32: replace < with <= in osculating_to_mean",
+    "eckstein_hechler\\.rs:697:31: replace < with <= in osculating_to_mean",
+    "eckstein_hechler\\.rs:698:34: replace < with <= in osculating_to_mean",
+    "eckstein_hechler\\.rs:699:35: replace < with <= in osculating_to_mean",
 
     # --- crates/spacelab-elements/src/keplerian.rs ---
 

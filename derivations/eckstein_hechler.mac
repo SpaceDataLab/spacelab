@@ -1,0 +1,293 @@
+/* `crates/spacelab-elements`'s Eckstein-Hechler model (`eckstein_hechler.rs`) from the zonal
+   Hamiltonian, mu = Re = 1 (plans/17 Ф17.Q).
+
+   The model carries mean circular elements (a, ex, ey, i, Omega, alpha), ex + i ey = e exp(i omega),
+   alpha = omega + M, and adds periodic terms to first order in e. Every coefficient is read from the
+   Rust source, its decimal literals as exact rationals, its dual-number method chains as products and
+   sums; g_n = C_n0 (Re/a)^n = -J_n/a^n. The reference is the Delaunay machinery of
+   brouwer_lyddane.mac: the generator W1 (its (1a)), its brackets, the l-averages.
+
+     (1) short period: the shipped rda, rdex, rdey, rdxi, rdom, rdxl at first order in J2 are the
+         l-dependent part of J2 {y; W1}, written in the circular elements to first order in e. The
+         theory's mean elements are the alpha-averages of the osculating ones, so the l-independent
+         part, which the homological equation leaves free, is the gauge and drops out.
+     (2) energy: the zonal field keeps v^2/2 - U, so 1/a - 2 sum Jn Pn(sin phi)/r^(n+1) is a
+         constant along the osculating orbit the shipped map gives: J2 to first order in e, J3 ... J6
+         at e = 0, and J2^2 at e = 0, which holds the J2^2 part of rda.
+     (3) secular: Omega and alpha turn at the e = 0 rates of the second-order mean Hamiltonian
+         (J2, J2^2, J4, J6), alpha's referred to the theory's mean a, which (2) ties to Brouwer's
+         through the energy; the eccentricity vector turns at Brouwer's d g/dt at e = 0, which a
+         linear change of mean elements cannot move.
+     (4) long period: the shipped d/dt of (exm, eym) at t = 0, and of the J3, J5 terms qh ih, ql rl,
+         ql ll along it, are the first-order alpha-averaged dynamics to first order in e.
+     (5) the ellipse: Brouwer's final mean eccentricity vector turns on a circle; the theory's mean is
+         it plus the l-average of the J2 short-period map and the J2 part of the long-period one,
+         T = I + J2 A, so the theory's vector turns on an ellipse whose J2 part of eps1 is A22 - A11.
+
+   Orekit's EHModel, which this module otherwise follows, fails (1) in ly1 (-7.5 for -6), (3) in the
+   eccentricity vector's rate (no J2^2 term) and (5) (no J2 part in eps1) (F96).
+
+   timeout 1200 maxima --very-quiet -Q -b eckstein_hechler.mac                                      */
+
+display2d : false$
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+src : "../crates/spacelab-elements/src/eckstein_hechler.rs"$
+assume(e > 0, e < 1, a > 0, c > -1, c < 1, et > 0)$
+
+/* ---- reading the shipped expressions ------------------------------------------------------------ */
+/* The text of `let NAME = ...;` with whitespace and `self.` dropped and `mean.` as `mean_`. */
+rust_let(path, name) := block([s : openr(path), line, head : concat("let ", name, " ="), acc : false, at,
+                               done : false],
+  while not done and (line : readline(s)) # false do (
+    if acc = false then (at : ssearch(head, line),
+                         if at # false and (slength(line) < at + slength(head)
+                                            or charat(line, at + slength(head)) = " ")
+                         then acc : substring(line, at + slength(head)))
+    else acc : concat(acc, line),
+    if acc # false and ssearch(";", acc) # false then done : true),
+  close(s),
+  if acc = false then error("rust_let: no", name, "in", path),
+  ssubst("mean_", "mean.", ssubst("", "self.", ssubst("", " ", substring(acc, 1, ssearch(";", acc))))))$
+is_ident_char(ch) := alphacharp(ch) or digitcharp(ch) or ch = "_"$
+/* Every decimal literal as its exact rational, so that parse_string reads no float. */
+exact_literals(t) := block([out : "", k : 1, m : slength(t), j, ch],
+  while k <= m do (
+    ch : charat(t, k),
+    if digitcharp(ch) and (k = 1 or not is_ident_char(charat(t, k - 1))) then (
+      j : k,
+      while j <= m and (digitcharp(charat(t, j)) or charat(t, j) = "." or charat(t, j) = "_") do j : j + 1,
+      if j <= m and charat(t, j) = "e" then (j : j + 1, if charat(t, j) = "-" or charat(t, j) = "+" then j : j + 1,
+                                            while j <= m and digitcharp(charat(t, j)) do j : j + 1),
+      out : concat(out, "(", string(rust_rational(substring(t, k, j))), ")"),
+      k : j)
+    else (out : concat(out, ch), k : k + 1)),
+  out)$
+/* A method chain of the module's dual number, x.add(y).mulf(z), as the Maxima text ((x + y)*z). */
+close_paren(t, k) := block([d : 1, j : k],
+  while d > 0 do (j : j + 1, if charat(t, j) = "(" then d : d + 1 else if charat(t, j) = ")" then d : d - 1), j)$
+chain(t) := block([m : slength(t), k : 1, d : 0, out, j, nm],
+  while k <= m and not (d = 0 and charat(t, k) = "." and k < m and alphacharp(charat(t, k + 1))) do (
+    if charat(t, k) = "(" then d : d + 1 else if charat(t, k) = ")" then d : d - 1, k : k + 1),
+  out : concat("(", substring(t, 1, k), ")"),
+  while k <= m do (
+    j : ssearch("(", t, k), nm : substring(t, k + 1, j),
+    if member(nm, ["add", "addf"]) then out : concat("(", out, "+", chain(substring(t, j + 1, close_paren(t, j))), ")")
+    else if member(nm, ["sub", "subf"]) then out : concat("(", out, "-", chain(substring(t, j + 1, close_paren(t, j))), ")")
+    else if member(nm, ["mul", "mulf"]) then out : concat("(", out, "*", chain(substring(t, j + 1, close_paren(t, j))), ")")
+    else error("chain: method", nm),
+    k : close_paren(t, j) + 1),
+  out)$
+rust_expr(name) := parse_string(chain(exact_literals(rust_let(src, name))))$
+/* The bindings of `names`, each substituted into the later ones. */
+bind(names, pre) := block([defs : []],
+  for nm in names do defs : endcons(parse_string(nm) = subst(reverse(defs), subst(pre, rust_expr(nm))), defs),
+  reverse(defs))$
+in_source(text) := block([s : openr(src), line, hit : false],
+  while not hit and (line : readline(s)) # false do if ssearch(text, line) # false then hit : true,
+  close(s), hit)$
+
+/* ---- (0) the module's notation ------------------------------------------------------------------- */
+must(every(in_source, ["let ck0 = [0.0, 0.0, c20, c30, c40, c50, c60];", "let mut q = re / mean.a;",
+                       "let mut ql = q * q;", "let g2 = ck0[2] * ql;", "ql *= q;", "let g3 = ck0[3] * ql;",
+                       "let g4 = ck0[4] * ql;", "let g5 = ck0[5] * ql;", "let g6 = ck0[6] * ql;",
+                       "let (sin_i1, cos_i1) = libm::sincos(mean.i);",
+                       "let xnot_dot = libm::sqrt(mu / mean.a) / mean.a;"]),
+     "(0) holds: g_n = C_n0 (Re/a)^n = -J_n/a^n, xnot_dot = sqrt(mu/a^3), sin_i1 and cos_i1 of the mean i")$
+sI : sqrt(1 - c^2)$
+model : [g2 = -J2/a^2, g3 = -J3/a^3, g4 = -J4/a^4, g5 = -J5/a^5, g6 = -J6/a^6, sin_i1 = sI, cos_i1 = c]$
+must(every(in_source, ["q = 3.0 / (32.0 * rdpom);", "q = 3.0 * sin_i1 / (8.0 * rdpom);", "q = -qq * cos_i1;",
+                       "q = 0.5 * qq * sin_i1 * cos_i1;"]),
+     "(0a) holds: q is 3/(32 rdpom) in eps1, 3 sin i/(8 rdpom) in eps2, -qq cos i in rx1 ... rl, qq sin i cos i/2 in iy1 ... ih")$
+co : bind(["sin_i2", "sin_i4", "sin_i6", "rdpom", "rdpomp"], model)$
+co : append(co, bind(["eps1"], append([q = 3/(32*'rdpom)], model)))$
+co : append(co, bind(["eps2"], append([q = 3*'sin_i1/(8*'rdpom)], model)))$
+co : append(co, bind(["omm_d", "rdl", "a_md", "qq", "q_a", "q_b", "q_c", "q_d", "q_e", "kh", "kl", "ax1", "ay1", "as1",
+                      "ac2", "axy3", "as3", "ac4", "as5", "ac6", "ex1", "exx2", "exy2", "ex3", "ex4", "ey1", "eyx2",
+                      "eyy2", "ey3", "ey4"], model))$
+co : append(co, bind(["rx1", "ry1", "r2", "r3", "rl"], append([q = -'qq*'cos_i1], model)))$
+co : append(co, bind(["iy1", "ix1", "i2", "i3", "ih"], append([q = 1/2*'qq*'sin_i1*'cos_i1], model)))$
+co : append(co, bind(["lx1", "ly1", "l2", "l3", "ll"], model))$
+coef(nm) := block([v : parse_string(nm)], for k thru 6 do v : subst(co, subst(model, v)), ratsimp(v))$
+/* propagate_parameters at dt = 0: x = 0, so exm and eym are the mean ex and ey, xlm the mean alpha */
+pp : bind(["cl2", "sl2", "cl3", "sl3", "cl4", "sl4", "cl5", "sl5", "cl6", "qh", "ql", "exm_cl1", "exm_sl1", "eym_cl1",
+           "eym_sl1", "exm_cl2", "exm_sl2", "eym_cl2", "eym_sl2", "exm_cl3", "exm_sl3", "eym_cl3", "eym_sl3",
+           "exm_cl4", "exm_sl4", "eym_cl4", "eym_sl4", "rda", "rdex", "rdey", "rdom", "rdxi", "rdxl"],
+          [cl1 = cos(al), sl1 = sin(al), exm = ex, eym = ey])$
+must(every(in_source, ["let cl1 = xlm.cos();", "let sl1 = xlm.sin();", "rda.addf(1.0).mulf(self.mean.a),",
+                       "rdex.add(exm),", "rdey.add(eym),", "rdxi.addf(self.mean.i),", "rdom.add(omm),", "rdxl.add(xlm),"]),
+     "(0b) holds: the osculating set is a (1 + rda), ex + rdex, ey + rdey, i + rdxi, Omega + rdom, alpha + rdxl")$
+per(nm) := block([v : subst(pp, parse_string(nm))], for k thru 6 do v : subst(co, v), v)$
+
+/* ---- the Delaunay machinery of brouwer_lyddane.mac ----------------------------------------------- */
+gradef(et, e, -e/et)$
+s2 : 1 - c^2$
+AR : (1 + e*cos(f))/et^2$
+n : a^(-3/2)$
+fl : AR^2*et$
+fe : sin(f)*(2 + e*cos(f))/et^2$
+Dl(Y) := diff(Y, f)*fl + diff(Y, phi)*(fl - 1)$
+De(Y) := diff(Y, e) + (diff(Y, f) + diff(Y, phi))*fe$
+DL(Y) := 2*sqrt(a)*diff(Y, a) + et^2/(e*sqrt(a))*De(Y)$
+DG(Y) := -et/(e*sqrt(a))*De(Y) - c/(sqrt(a)*et)*diff(Y, c)$
+DH(Y) := 1/(sqrt(a)*et)*diff(Y, c)$
+Dg(Y) := diff(Y, g)$
+PB(A, B) := Dl(A)*DL(B) - DL(A)*Dl(B) + Dg(A)*DG(B) - DG(A)*Dg(B)$
+DLs(Y) := 2*sqrt(a)*diff(Y, a) + et^2/(e*sqrt(a))*diff(Y, e)$
+DGs(Y) := -et/(e*sqrt(a))*diff(Y, e) - c/(sqrt(a)*et)*diff(Y, c)$
+DHs(Y) := diff(Y, c)/(sqrt(a)*et)$
+P2(x) := (3*x^2 - 1)/2$  P3(x) := (5*x^3 - 3*x)/2$
+P4(x) := (35*x^4 - 30*x^2 + 3)/8$  P5(x) := (63*x^5 - 70*x^3 + 15*x)/8$
+P6(x) := (231*x^6 - 315*x^4 + 105*x^2 - 5)/16$
+Hn(k, Pk) := (AR/a)^(k + 1)*Pk(sqrt(s2)*sin(f + g))$
+H2 : Hn(2, P2)$
+K1 : (3*s2/4 - 1/2)/(a^3*et^3)$
+C : (3*s2/4 - 1/2)/(n*a^3*et^3)$
+W1 : C*(phi + e*sin(f)) - (3*s2/4)/(n*a^3*et^3)*(sin(2*f + 2*g)/2 + (e/2)*(sin(3*f + 2*g)/3 + sin(f + 2*g)))$
+canon(Y) := block([N],
+  N : num(ratsimp(Y)),
+  N : ratexpand(trigexpand(trigexpand(ratexpand(N)))),
+  N : ratsubst(1 - cos(g)^2, sin(g)^2, ratsubst(1 - cos(f)^2, sin(f)^2, N)),
+  ratsimp(ratsubst(1 - e^2, et^2, N)))$
+Mk(k) := if k = 0 then 1 else if k = 1 then et^2
+  else ratsubst(1 - e^2, et^2, ratsimp(et^3*integrate(expand(trigreduce(expand((1 + e*cos(f))^(k - 2)))), f, 0, 2*%pi)/(2*%pi)))$
+lav(Y) := block([Y1, Y0, P, d],
+  Y1 : ratexpand(ratsubst(1 - cos(f)^2, sin(f)^2, expand(trigexpand(expand(trigexpand(Y)))))),
+  if hipow(Y1, sin(f)) > 1 then error("lav: sin f above the first power"),
+  Y0 : ratsubst(0, sin(f), Y1),
+  P : ratexpand(ratsubst((u - 1)/e, cos(f), Y0)),
+  if not freeof(f, P) then error("lav: f left after the substitution"),
+  if lopow(P, u) < 0 then error("lav: a negative power of 1 + e cos f"),
+  d : hipow(P, u),
+  ratsubst(1 - e^2, et^2, ratsimp(sum(ratsimp(coeff(P, u, k))*Mk(k), k, 0, d))))$
+gav(Y) := ratsimp(integrate(expand(trigreduce(Y)), g, 0, 2*%pi)/(2*%pi))$
+must(canon(n*Dl(W1) - (H2 - K1)) = 0 and canon(lav(H2) - K1) = 0, "(1a) holds: n Dl(W1) = H2 - K1 and K1 = <H2>_l")$
+
+/* ---- (1) the first-order J2 map, to first order in e ----------------------------------------------- */
+W : J2*W1$
+br : [a = -2*sqrt(a)*Dl(W),
+      ex = cos(g)*(-(et^2/(e*sqrt(a))*Dl(W) - et/(e*sqrt(a))*Dg(W))) - e*sin(g)*DG(W),
+      ey = sin(g)*(-(et^2/(e*sqrt(a))*Dl(W) - et/(e*sqrt(a))*Dg(W))) + e*cos(g)*DG(W),
+      i = -(c/(sqrt(a)*et)*Dg(W))/sI,
+      Om = DH(W),
+      al = DL(W) + DG(W)]$
+/* f as a series in the mean anomaly l, to e^3: the 1/e of the l and g brackets needs e^2 inside */
+fser : l + 2*e*sin(l) + 5/4*e^2*sin(2*l) + e^3*(13/12*sin(3*l) - 1/4*sin(l))$
+in_l(Y) := block([Z : subst([et = sqrt(1 - e^2)], Y)],
+  Z : subst([f = fser], subst([phi = f - l], Z)),
+  Z : ratdisrep(taylor(Z, e, 0, 1)),
+  ratexpand(trigreduce(ratexpand(trigexpand(Z)))))$
+lmean(Y) := ratsimp(integrate(Y, l, 0, 2*%pi)/(2*%pi))$
+oscil(Y) := block([Z : in_l(Y)], ratexpand(Z - lmean(Z)))$
+to_eg(Y) := ratexpand(trigreduce(ratexpand(trigexpand(subst([ex = e*cos(g), ey = e*sin(g), al = l + g], Y)))))$
+first_j2(Y) := ratexpand(ratcoef(ratexpand(taylor(subst([J3 = 0, J4 = 0, J5 = 0, J6 = 0], Y), J2, 0, 1)), J2, 1)*J2)$
+shipped1 : [a = a*per("rda"), ex = per("rdex"), ey = per("rdey"), i = per("rdxi"), Om = per("rdom"), al = per("rdxl")]$
+gap1(y) := ratsimp(trigreduce(ratexpand(trigexpand(oscil(assoc(y, br)) - to_eg(first_j2(assoc(y, shipped1)))))))$
+must(every(lambda([y], gap1(y) = 0), [a, ex, ey, i, Om, al]),
+     "(1) holds: rda, rdex, rdey, rdxi, rdom, rdxl at first order in J2 are J2 {y; W1} less its l-mean, to first order in e")$
+
+/* ---- (2) the energy integral --------------------------------------------------------------------- */
+amean(Y) := ratsimp(integrate(Y, al, 0, 2*%pi)/(2*%pi))$
+trig_al(Y) := ratexpand(trigreduce(ratexpand(trigexpand(Y))))$
+lin(Y, k) := ratcoef(ratexpand(taylor(Y, k, 0, 1)), k, 1)$
+noJ : [J3 = 0, J4 = 0, J5 = 0, J6 = 0]$
+/* 1/a - 2 R(r, sin phi) at the osculating state, r and the latitude argument u to first order in e */
+energy(A, X, Y, S, L, R) := block([r : A*(1 - X*cos(L) - Y*sin(L)), u : L + 2*(X*sin(L) - Y*cos(L))],
+  1/A - 2*R(r, S*sin(u)))$
+R2(r, s) := J2*P2(s)/r^3$
+Q : energy(a*(1 + per("rda")), ex + per("rdex"), ey + per("rdey"), sI + c*per("rdxi"), al + per("rdxl"), R2)$
+QJ2 : lin(subst(append([ex = eps*ex, ey = eps*ey], noJ), Q), J2)$
+QJ2 : trig_al(ratdisrep(taylor(QJ2, eps, 0, 1)))$
+Pk : [3 = P3, 4 = P4, 5 = P5, 6 = P6]$
+gapJ(k) := block([Jk : concat(J, k), d],
+  d : lin(subst(append([ex = 0, ey = 0], delete(Jk = 0, noJ)), per("rda")), Jk),
+  d : subst(J2 = 0, ratsimp(d)),
+  d : trig_al(-d/a - 2*apply(assoc(k, Pk), [sI*sin(al)])/a^(k + 1)),
+  radcan(ratsimp(d - amean(d))))$
+Q0 : ratdisrep(taylor(subst(append([ex = 0, ey = 0], noJ), Q), J2, 0, 2))$
+Q0 : trig_al(ratsubst(1 - c^2, sI^2, ratexpand(ratcoef(ratexpand(Q0), J2, 2))))$
+must(ratsimp(QJ2 - amean(QJ2)) = 0 and every(lambda([k], gapJ(k) = 0), [3, 4, 5, 6]) and ratsimp(Q0 - amean(Q0)) = 0,
+     "(2) holds: 1/a - 2 sum Jn Pn(sin phi)/r^(n+1) is free of alpha: J2 to first order in e, J3 ... J6 and J2^2 at e = 0")$
+
+/* ---- (3) the secular rates at e = 0 ---------------------------------------------------------------- */
+X : PB(H2 + K1, W1)$
+Xl : ratsimp(lav(coeff(expand(X), phi, 0)) - DL(C)*lav(expand(H2*(fl - 1))) - DG(C)*lav(expand(n*Dg(W1)*(fl - 1))))$
+K2 : gav(Xl)$
+H3l : lav(expand(Hn(3, P3)))$  H4l : lav(expand(Hn(4, P4)))$
+H5l : lav(expand(Hn(5, P5)))$  H6l : lav(expand(Hn(6, P6)))$
+K4 : gav(H4l)$  K6 : gav(H6l)$
+n0 : a^(-3/2)$
+at0(Y) := ratsimp(subst([e = 0, et = 1], ratsimp(ratsubst(1 - e^2, et^2, ratsimp(Y)))))$
+Ks : -1/(2*a) + J2*K1 + J2^2/2*K2 + J4*K4 + J6*K6$
+rho_al : at0((DLs(Ks) + DGs(Ks))/n0)$
+rho_om : at0(DHs(Ks)/n0)$
+rho_g : at0(DGs(Ks)/n0)$
+/* The mean a: 1/a_E = <1/a_osc - 2 R> over the shipped map, which (2) makes the energy, and
+   1/a_E = 1/a_B - 2 K'(a_B) for Brouwer's a_B; a_B = a (1 + beta). */
+Rfull(r, s) := J2*P2(s)/r^3 + J4*P4(s)/r^5 + J6*P6(s)/r^7$
+QE : energy(a*(1 + per("rda")), per("rdex"), per("rdey"), sI + c*per("rdxi"), al + per("rdxl"), Rfull)$
+QE : subst([ex = 0, ey = 0, J3 = 0, J5 = 0], QE)$
+QE : ratdisrep(taylor(subst([J4 = t*J4, J6 = t*J6], QE), [J2, t], 0, 2))$
+QE : subst(t = 1, ratexpand(QE - ratcoef(ratcoef(ratexpand(QE), t, 1), J2, 1)*t*J2))$
+QE : amean(trig_al(ratsubst(1 - c^2, sI^2, ratexpand(QE))))$
+Kp : subst([e = 0, et = 1], J2*K1 + J2^2/2*K2 + J4*K4 + J6*K6)$
+eq : subst(a = a*(1 + b2*J2^2 + b4*J4 + b6*J6 + b1*J2), 1/a - 2*Kp) - QE$
+eq : ratexpand(ratdisrep(taylor(subst([J4 = t*J4, J6 = t*J6], eq), [J2, t], 0, 2)))$
+e1 : ratcoef(ratcoef(eq, t, 1), J2, 0)$
+sol : solve([ratcoef(eq, J2, 1), ratcoef(ratcoef(eq, J2, 2), t, 0), ratcoef(e1, J4, 1), ratcoef(e1, J6, 1)], [b1, b2, b4, b6])$
+beta : subst(sol[1], b2*J2^2 + b4*J4 + b6*J6 + b1*J2)$
+print("a_B/a - 1 =", beta)$
+second(Y) := ratsimp(taylor(Y, [J2, J4, J6], 0, 2))$
+must(second(coef("omm_d") - rho_om) = 0 and second(coef("a_md") - (rho_al - 3/2*beta)) = 0
+     and second(coef("rdpom") + coef("rdpomp") - rho_g) = 0,
+     "(3) holds: omm_d, a_md and rdpom + rdpomp are the e = 0 rates of the J2, J2^2, J4, J6 mean Hamiltonian, a_md at the mean a of (2)")$
+
+/* ---- (4) the first-order averaged dynamics --------------------------------------------------------- */
+Kav : J2*K1 + J3*H3l + J4*H4l + J5*H5l + J6*H6l$
+edot : et/(e*sqrt(a))*diff(Kav, g)$
+gdot : DGs(Kav)$
+idot : -(c/(sqrt(a)*et)*diff(Kav, g))/sI$
+e1(Y) := block([Z : ratsimp(ratsubst(1 - e^2, et^2, ratsimp(Y)))],
+  Z : ratdisrep(taylor(subst(et = sqrt(1 - e^2), Z), e, 0, 1)),
+  ratexpand(trigreduce(ratexpand(trigexpand(Z)))))$
+in_exy(Y) := ratsimp(ratsubst(ex, e*cos(g), ratsubst(ey, e*sin(g), ratexpand(trigexpand(Y)))))$
+d_ex : in_exy(e1(cos(g)*edot - e*sin(g)*gdot))$
+d_ey : in_exy(e1(sin(g)*edot + e*cos(g)*gdot))$
+d_i : in_exy(e1(idot))$
+d_om : in_exy(e1(DHs(Kav)))$
+d_al : in_exy(e1(DLs(Kav) + DGs(Kav)))$
+/* the shipped motion at t = 0: J2 to first order (J2^2 is (3) and (5)), J3 ... J6 to first order */
+order1(Y) := block([Z : subst([J3 = tt*J3, J4 = tt*J4, J5 = tt*J5, J6 = tt*J6], Y), Z0, Z1],
+  Z : ratsimp(ratdisrep(taylor(Z, tt, 0, 1))),
+  Z0 : ratsimp(ratdisrep(taylor(subst(tt = 0, Z), J2, 0, 1))),
+  Z1 : subst(J2 = 0, ratsimp(ratcoef(ratexpand(Z), tt, 1))),
+  ratsimp(Z0 + Z1))$
+wp : coef("rdpom") + coef("rdpomp")$
+sh_ex : n*wp*(coef("eps2") - (1 - coef("eps1"))*ey)$
+sh_ey : n*wp*(1 + coef("eps1"))*ex$
+lp35(Y) := ratsimp(Y - subst([J3 = 0, J5 = 0], Y))$
+/* sqrt(1 - c^2) enters through sin i: radcan clears what ratsimp leaves as (1 - c^2) times a polynomial */
+naught(Y) := is(radcan(ratsimp(Y)) = 0)$
+must(naught(order1(sh_ex) - d_ex) and naught(order1(sh_ey) - d_ey),
+     "(4a) holds: exm and eym turn as the first-order averaged J2 ... J6 Hamiltonian moves (ex, ey), to first order in e")$
+must(naught(order1(coef("kh")*coef("ih")*sh_ey) - d_i)
+     and naught(lp35(order1(coef("kl")*coef("rl")*sh_ex)) - lp35(d_om))
+     and naught(lp35(order1(coef("kl")*coef("ll")*sh_ex)) - lp35(d_al)),
+     "(4) holds: qh ih, ql rl and ql ll change as the averaged J3, J5 terms move i, Omega and alpha, to first order in e")$
+
+/* ---- (5) the J2 part of the ellipse --------------------------------------------------------------- */
+DgVJ2 : ratsimp(J2^2/2*(Xl - K2)/(J2*DG(K1)))$
+VJ2 : integrate(expand(trigreduce(DgVJ2)), g)$
+LPx : in_exy(e1(cos(g)*et/(e*sqrt(a))*diff(VJ2, g) - e*sin(g)*DGs(VJ2)))$
+LPy : in_exy(e1(sin(g)*et/(e*sqrt(a))*diff(VJ2, g) + e*cos(g)*DGs(VJ2)))$
+SPx : in_exy(ratexpand(trigreduce(ratexpand(trigexpand(lmean(in_l(assoc(ex, br))))))))$
+SPy : in_exy(ratexpand(trigreduce(ratexpand(trigexpand(lmean(in_l(assoc(ey, br))))))))$
+Tx : ratsimp(LPx + SPx)$  Ty : ratsimp(LPy + SPy)$
+eps1J2 : ratsimp(ratcoef(Ty, ey, 1) - ratcoef(Tx, ex, 1))$
+print("eps1, J2 part =", factor(eps1J2))$
+must(ratsimp(Tx - ratcoef(Tx, ex, 1)*ex - ratcoef(Tx, ey, 1)*ey) = 0 and ratsimp(Ty - ratcoef(Ty, ex, 1)*ex - ratcoef(Ty, ey, 1)*ey) = 0
+     and ratsimp(ratcoef(Tx, ey, 1) + ratcoef(Ty, ex, 1)) = 0,
+     "(5a) holds: the l-averaged J2 map from Brouwer's final mean (ex, ey) is linear in them and turns no axis")$
+must(ratsimp(first_j2(coef("eps1")) - eps1J2) = 0,
+     "(5) holds: eps1's J2 part is the difference of that map's ey and ex scalings")$
+print("DONE")$

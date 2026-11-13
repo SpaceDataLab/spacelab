@@ -185,10 +185,54 @@ print("NIELL_MAXIMA", niell_g)$
 print("GMF_MAXIMA", append(gmf_north, gmf_south))$
 print("VMF1_MAXIMA", append(vmf1_north, vmf1_south))$
 print("VMF3_MAXIMA", vmf3_g)$
+/* The same goldens on an exact path, for the Arb pass (plans/17 Ф28.A): rationals, %pi and the
+   trigonometric functions only, each harmonic by the closed form P_nm(sin phi) (cos, sin) m lambda
+   that (5) proves vmf3.m's recursion is. The branch on the hemisphere is decided on the rational
+   latitude. */
+gmf_series_x(A, B, lat, lon) := block([i : 0, acc : []],
+  for n : 0 thru 9 do for m : 0 thru n do (i : i + 1,
+    acc : cons((A[i]*cos(m*lon) + B[i]*sin(m*lon))*hm_legendre(n, m, sin(lat))/10^5, acc)),
+  apply("+", acc))$
+c_hydro_x(doy, lat) := block([phh, c11h, c10h],
+  if is(lat < 0) then (phh : %pi, c11h : 7/1000, c10h : 2/1000) else (phh : 0, c11h : 5/1000, c10h : 1/1000),
+  62/1000 + ((cos(doy/(36525/100)*2*%pi + phh) + 1)*c11h/2 + c10h)*(1 - cos(lat)))$
+gmf_x(mjd, lat, lon, h, zd) := block([doy : mjd - 44239 + 1 - 28, season, ah, aw, se : sin(%pi/2 - zd)],
+  season : cos(doy/(36525/100)*2*%pi),
+  ah : gmf_series_x(gmf_tables[1], gmf_tables[2], lat, lon)
+       + gmf_series_x(gmf_tables[3], gmf_tables[4], lat, lon)*season,
+  aw : gmf_series_x(gmf_tables[5], gmf_tables[6], lat, lon)
+       + gmf_series_x(gmf_tables[7], gmf_tables[8], lat, lon)*season,
+  [routine_m(ah, 29/10000, c_hydro_x(doy, lat), se) + height_correction(se, h),
+   routine_m(aw, 146/100000, 4391/100000, se)])$
+vmf1_x(ah, aw, mjd, lat, h, zd) := block([doy : mjd - 44239 + 1 - 28, se : sin(%pi/2 - zd)],
+  [routine_m(ah, 29/10000, c_hydro_x(doy, lat), se) + height_correction(se, h),
+   routine_m(aw, 146/100000, 4391/100000, se)])$
+vmf3_x(ah, aw, doy, lat, lon, el) := block([w : 2*%pi*doy/(36525/100), coef : [], se : sin(el)],
+  for k : 1 thru 4 do block([A : vmf3_tables[2*k - 1], B : vmf3_tables[2*k], terms : [], i : 0, s],
+    for n : 0 thru 12 do for m : 0 thru n do (i : i + 1,
+      terms : cons((A[i]*cos(m*lon) + B[i]*sin(m*lon))*hm_legendre(n, m, sin(lat)), terms)),
+    s : apply("+", terms),
+    coef : endcons(s[1] + s[2]*cos(w) + s[3]*sin(w) + s[4]*cos(2*w) + s[5]*sin(2*w), coef)),
+  [shipped_m(ah, coef[1], coef[3], se), shipped_m(aw, coef[2], coef[4], se)])$
+niell_x(lat_deg, h, doy, el) := block([cs : cos(2*%pi*(doy - 28)/(36525/100)), se : sin(el), abc, w],
+  abc : map(lambda([av, am], niell_interp(rtab(av), lat_deg) - niell_interp(rtab(am), lat_deg)*cs),
+            ["NIELL_AH_AVG", "NIELL_BH_AVG", "NIELL_CH_AVG"], ["NIELL_AH_AMP", "NIELL_BH_AMP", "NIELL_CH_AMP"]),
+  w : map(lambda([nm], niell_interp(rtab(nm), lat_deg)), ["NIELL_AW", "NIELL_BW", "NIELL_CW"]),
+  [shipped_m(abc[1], abc[2], abc[3], se) + height_correction(se, h), shipped_m(w[1], w[2], w[3], se)])$
+niell_xs : niell_x(48, 68, 1, 5*%pi/180)$
+gmf_xs : append(gmf_x(G_MJD, G_LAT, G_LON, G_HGT, G_ZD), gmf_x(G_MJD, -G_LAT, G_LON, G_HGT, G_ZD))$
+vmf1_xs : append(vmf1_x(V_AH, V_AW, G_MJD, G_LAT, V_HGT, G_ZD), vmf1_x(V_AH, V_AW, G_MJD, -G_LAT, V_HGT, G_ZD))$
+vmf3_xs : flatten(map(lambda([e], vmf3_x(rust_rational("0.00123462"), rust_rational("0.00047101"),
+                                         rust_rational("329.5"), 375*%pi/1800, 2775*%pi/1800, e*%pi/180)),
+                      [38, 5, 85]))$
+exact_gap : lmax(map(lambda([x, b], abs(bfloat(x) - b)), append(niell_xs, gmf_xs, vmf1_xs, vmf3_xs),
+                     append(niell_g, gmf_north, gmf_south, vmf1_north, vmf1_south, vmf3_g)))$
+print("the exact path against the 40-digit one, worst:", exact_gap)$
 tests_src : "../crates/spacelab-gnss/src/models.rs"$
-must(transcribed(rust_table(tests_src, "NIELL_MAXIMA"), niell_g)
-     and transcribed(rust_table(tests_src, "GMF_MAXIMA"), append(gmf_north, gmf_south))
-     and transcribed(rust_table(tests_src, "VMF1_MAXIMA"), append(vmf1_north, vmf1_south))
-     and transcribed(rust_table(tests_src, "VMF3_MAXIMA"), vmf3_g),
-     "(6) holds: the Rust goldens are Niell, GMF and VMF1 north and south and VMF3 at three elevations at 40 digits, to every digit shown")$
+must(is(exact_gap < 1b-35)
+     and certified("NIELL_MAXIMA", rust_table(tests_src, "NIELL_MAXIMA"), niell_xs)
+     and certified("GMF_MAXIMA", rust_table(tests_src, "GMF_MAXIMA"), gmf_xs)
+     and certified("VMF1_MAXIMA", rust_table(tests_src, "VMF1_MAXIMA"), vmf1_xs)
+     and certified("VMF3_MAXIMA", rust_table(tests_src, "VMF3_MAXIMA"), vmf3_xs),
+     "(6) holds: the Rust goldens are Niell, GMF and VMF1 north and south and VMF3 at three elevations at 40 digits, to every digit shown, and an exact path the Arb pass decides gives the same values")$
 print("DONE")$

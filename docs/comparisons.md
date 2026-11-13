@@ -13,6 +13,9 @@ root-mean-square distance over them.
 
 | Code | Version | Quantity | Unit | n | max | RMS | Test |
 |---|---|---|---|--:|--:|--:|---|
+| erfa | not recorded | the diurnally aberrated direction at 20 cases | rad | 20 | 6.206e-17 | 2.844e-17 | `crates/spacelab-astrometry/tests/aberration_erfa.rs::boost_distance_to_erfa` |
+| erfa | not recorded | the station speed at 20 cases | m/s | 20 | 5.684e-14 | 4.449e-14 | `crates/spacelab-astrometry/tests/aberration_erfa.rs::boost_distance_to_erfa` |
+| erfa | not recorded | the aberration shift at 20 cases | arcsec | 20 | 1.554e-11 | 5.321e-12 | `crates/spacelab-astrometry/tests/aberration_erfa.rs::boost_distance_to_erfa` |
 | basilisk | 2.11.1 | the MRP law at fixed-reference states (controlLawType 1) | N.m | 7 | 1.241e-16 | 5.275e-17 | `crates/spacelab-control/tests/basilisk_oracle.rs::mrp_law_distance_to_basilisk` |
 | basilisk | 2.11.1 | the MRP law at tracking states, with the feedforward it omits added | N.m | 3 | 3.103e-17 | 2.502e-17 | `crates/spacelab-control/tests/basilisk_oracle.rs::mrp_law_distance_to_basilisk` |
 | basilisk | 2.11.1 | controlLawType 0 minus 1 against -omega_BR x [I]omega_BN | N.m | 10 | 6.206e-17 | 2.635e-17 | `crates/spacelab-control/tests/basilisk_oracle.rs::default_law_gap_distance_to_basilisk` |
@@ -24,6 +27,10 @@ root-mean-square distance over them.
 | nasa42 | not recorded | the orbit's position against the closed-form circle it was started on | m | 84 | 7.638e-01 | 4.883e-01 | `crates/spacelab-control/tests/nasa42_oracle.rs::initial_attitude_and_orbit_distance_to_42` |
 | nasa42 | not recorded | the attitude over a 2000 s gravity-gradient arc, worst at each step | rad | 4 | 1.051e-06 | 1.013e-06 | `crates/spacelab-control/tests/nasa42_oracle.rs::gravity_gradient_arc_distance_to_42` |
 | nasa42 | not recorded | the body rate over a 2000 s gravity-gradient arc, worst at each step | rad/s | 4 | 1.313e-08 | 1.277e-08 | `crates/spacelab-control/tests/nasa42_oracle.rs::gravity_gradient_arc_distance_to_42` |
+| astropy | not recorded | polar-branch days on the wrong side | day | 6 | 0.000e+00 | 0.000e+00 | `crates/spacelab-coverage/tests/twilight_hour_angle.rs::polar_branch_distance_to_astropy` |
+| pyerfa | not recorded | geodetic latitude by Vermeille's inverse | rad | 505 | 2.604e-11 | 1.057e-11 | `crates/spacelab-earth/tests/geodetic.rs::geodetic_inverse_distance_to_pyerfa` |
+| pyerfa | not recorded | geodetic longitude | rad | 505 | 4.441e-16 | 1.016e-16 | `crates/spacelab-earth/tests/geodetic.rs::geodetic_inverse_distance_to_pyerfa` |
+| pyerfa | not recorded | ellipsoidal height | m | 505 | 4.768e-07 | 2.149e-08 | `crates/spacelab-earth/tests/geodetic.rs::geodetic_inverse_distance_to_pyerfa` |
 | Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, position | m | 9 | 3.400e+04 | 2.390e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
 | Orekit | 13.1.7 | Brouwer-Lyddane LEO, 1 day, velocity | m/s | 9 | 2.940e+01 | 1.741e+01 | `crates/spacelab-elements/src/brouwer_lyddane.rs::reference_distance_to_orekit` |
 | Orekit | 13.1.7 | Brouwer-Lyddane LEO with M2 = 1e-14 rad/s2, 1 day, position | m | 9 | 3.400e+04 | 2.390e+04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::drag_distance_to_orekit` |
@@ -54,6 +61,7 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | TEME to ITRF position, AIAA and ISS vectors | m | 20 | 9.865e-01 | 7.645e-01 | `crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_distance_to_orekit` |
 | Orekit | 13.1.7 | TEME to ITRF velocity, AIAA state | m/s | 10 | 4.413e-04 | 4.236e-04 | `crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_distance_to_orekit` |
 | Orekit | 13.1.7 | TEME to ITRF matrix, worst entry | 1 | 10 | 8.522e-08 | 8.307e-08 | `crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_distance_to_orekit` |
+| qhull | not recorded | hull vertices, facets and Delaunay triangles not shared | element | 8 | 0.000e+00 | 0.000e+00 | `crates/spacelab-geometry/tests/qhull_cross_check.rs::construction_distance_to_qhull` |
 | Orekit | not recorded | GPT3 mapping coefficients a_h, a_w | 1 | 4 | 4.228e-10 | 3.196e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |
 | Orekit | not recorded | GPT3 temperatures T, Tm | K | 4 | 4.254e-10 | 2.724e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |
 | Orekit | not recorded | GPT3 pressures p, e | hPa | 4 | 4.986e-10 | 3.581e-10 | `crates/spacelab-gnss/src/gpt3.rs::distance_to_orekits_matlab_reference_cases` |
@@ -148,6 +156,7 @@ root-mean-square distance over them.
 | skyfield | not recorded | ISS subpoint latitude | deg | 50 | 2.069e-08 | 1.253e-08 | `crates/spacelab-sgp4/tests/ground_track.rs::iss_ground_track_distance_to_skyfield` |
 | skyfield | not recorded | ISS subpoint longitude, Eq. (C-1) kinematic terms removed | deg | 50 | 1.189e-09 | 1.077e-09 | `crates/spacelab-sgp4/tests/ground_track.rs::iss_ground_track_distance_to_skyfield` |
 | skyfield | not recorded | ISS subpoint height | m | 50 | 5.926e-08 | 2.733e-08 | `crates/spacelab-sgp4/tests/ground_track.rs::iss_ground_track_distance_to_skyfield` |
+| scipy | not recorded | the forward DCT-II of (1, 2, 3, 4, 5) | 1 | 5 | 1.776e-15 | 1.340e-15 | `crates/spacelab-signal/src/insar.rs::dct_distance_to_scipy` |
 | Orekit | 13.1.7 | ISS pass edges, mask 10 deg, IERS EOP | s | 6 | 9.237e-05 | 6.051e-05 | `crates/spacelab/tests/access_oracle.rs::iss_pass_edges_distance_to_orekit` |
 | Orekit | 13.1.7 | ISS pass edges, mask 10 deg, no EOP | s | 6 | 3.804e-02 | 2.311e-02 | `crates/spacelab/tests/access_oracle.rs::iss_pass_edges_distance_to_orekit` |
 | Orekit | 13.1.7 | two-body position at reception | m | 470 | 8.829e-07 | 2.648e-07 | `crates/spacelab/tests/light_time_oracle.rs::two_body_distance_to_orekit` |

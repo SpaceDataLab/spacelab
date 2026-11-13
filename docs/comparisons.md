@@ -45,6 +45,8 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | Brouwer-Lyddane mean (i, w, raan, M), e = 0.3 | rad | 4 | 5.928e-04 | 4.096e-04 | `crates/spacelab-elements/src/brouwer_lyddane.rs::mean_elements_distance_to_orekit` |
 | Orekit | 13.1.7 | position, LEO, 8 states over 1.75 h | m | 8 | 3.144e+01 | 2.067e+01 | `crates/spacelab-elements/src/eckstein_hechler.rs::reference_distance_to_orekit` |
 | Orekit | 13.1.7 | velocity, LEO, 8 states over 1.75 h | m/s | 8 | 3.256e-02 | 3.246e-02 | `crates/spacelab-elements/src/eckstein_hechler.rs::reference_distance_to_orekit` |
+| neptune | not recorded | LRO position over 24 h, selenocentric force model | m | 25 | 2.394e+02 | 1.041e+02 | `crates/spacelab-ephemeris/tests/neptune_lro.rs::one_day_distance_to_neptune` |
+| neptune | not recorded | LRO position over 7 days, selenocentric force model | m | 169 | 7.399e+02 | 4.252e+02 | `crates/spacelab-ephemeris/tests/neptune_lro.rs::full_week_distance_to_neptune` |
 | sofa | not recorded | the CIP X, Y at the t_xy06 epoch | rad | 2 | 3.253e-19 | 2.550e-19 | `crates/spacelab-fa/src/cio.rs::cip_xy_distance_to_sofa` |
 | sofa | not recorded | the CIO locator s at the t_s06 epoch | rad | 1 | 1.323e-23 | 1.323e-23 | `crates/spacelab-fa/src/cio.rs::cio_locator_distance_to_sofa` |
 | sofa | not recorded | the ERA at the t_era00 epoch | rad | 1 | 0.000e+00 | 0.000e+00 | `crates/spacelab-fa/src/cio.rs::era_distance_to_sofa` |
@@ -56,6 +58,10 @@ root-mean-square distance over them.
 | pyerfa | not recorded | TAI−UTC on and around every leap second | s | 299 | 0.000e+00 | 0.000e+00 | `crates/spacelab-fa/tests/delta_at_oracle.rs::delta_at_agrees_with_pyerfa_on_every_transition` |
 | pyerfa | not recorded | TDB−TT at epochs over two centuries | s | 441 | 2.168e-19 | 5.357e-20 | `crates/spacelab-fa/tests/dtdb_oracle.rs::tdb_minus_tt_distance_to_pyerfa_over_two_centuries` |
 | pyerfa | not recorded | GMST82 at epochs over ten millennia | rad | 45 | 3.669e-12 | 1.172e-12 | `crates/spacelab-fa/tests/gmst82_oracle.rs::gmst82_distance_to_pyerfa_across_ten_millennia` |
+| pyerfa | not recorded | the GCRF→ITRF matrix, worst entry | 1 | 9 | 4.918e-14 | 2.337e-14 | `crates/spacelab-frames/tests/cio_oracle.rs::gcrf_to_itrf_distance_to_pyerfa_cio_pipeline` |
+| pyerfa | not recorded | the polar-motion matrix, worst entry | 1 | 32 | 0.000e+00 | 0.000e+00 | `crates/spacelab-frames/tests/frames.rs::polar_motion_distance_to_pyerfa_pom00` |
+| neptune | not recorded | the Sentinel-1B ITRF state in the GCRF, position | m | 1 | 1.335e-05 | 1.335e-05 | `crates/spacelab-frames/tests/neptune_frames.rs::gcrf_state_distance_to_neptune` |
+| neptune | not recorded | the Sentinel-1B ITRF state in the GCRF, velocity | m/s | 1 | 1.583e-07 | 1.583e-07 | `crates/spacelab-frames/tests/neptune_frames.rs::gcrf_state_distance_to_neptune` |
 | Orekit | 13.1.7 | GMST82, IERS_1996, epochs 2000-2029 outside leap seconds | rad | 10 | 3.868e-12 | 1.797e-12 | `crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_distance_to_orekit_outside_leap_seconds` |
 | Orekit | 13.1.7 | GMST82 inside a leap second, at the instant | rad | 2 | 1.213e-12 | 1.052e-12 | `crates/spacelab-frames/tests/orekit_oracle.rs::gmst82_distance_to_orekit_inside_a_leap_second` |
 | Orekit | 13.1.7 | TEME to ITRF position, AIAA and ISS vectors | m | 20 | 9.865e-01 | 7.645e-01 | `crates/spacelab-frames/tests/orekit_oracle.rs::teme_to_itrf_distance_to_orekit` |
@@ -159,6 +165,10 @@ root-mean-square distance over them.
 | scipy | not recorded | the forward DCT-II of (1, 2, 3, 4, 5) | 1 | 5 | 1.776e-15 | 1.340e-15 | `crates/spacelab-signal/src/insar.rs::dct_distance_to_scipy` |
 | Orekit | 13.1.7 | ISS pass edges, mask 10 deg, IERS EOP | s | 6 | 9.237e-05 | 6.051e-05 | `crates/spacelab/tests/access_oracle.rs::iss_pass_edges_distance_to_orekit` |
 | Orekit | 13.1.7 | ISS pass edges, mask 10 deg, no EOP | s | 6 | 3.804e-02 | 2.311e-02 | `crates/spacelab/tests/access_oracle.rs::iss_pass_edges_distance_to_orekit` |
+| skyfield | not recorded | the ISS ground track with measured EOP, ΔUT1 | s | 50 | 2.963e-05 | 2.886e-05 | `crates/spacelab/tests/earth_orientation.rs::iss_ground_track_distance_to_skyfield` |
+| skyfield | not recorded | the ISS ground track with measured EOP, latitude | deg | 50 | 2.567e-08 | 1.481e-08 | `crates/spacelab/tests/earth_orientation.rs::iss_ground_track_distance_to_skyfield` |
+| skyfield | not recorded | the ISS ground track with measured EOP, longitude | deg | 50 | 6.515e-07 | 6.454e-07 | `crates/spacelab/tests/earth_orientation.rs::iss_ground_track_distance_to_skyfield` |
+| skyfield | not recorded | the ISS ground track with measured EOP, height | m | 50 | 2.181e-06 | 1.202e-06 | `crates/spacelab/tests/earth_orientation.rs::iss_ground_track_distance_to_skyfield` |
 | Orekit | 13.1.7 | two-body position at reception | m | 470 | 8.829e-07 | 2.648e-07 | `crates/spacelab/tests/light_time_oracle.rs::two_body_distance_to_orekit` |
 | Orekit | 13.1.7 | two-body position at emission | m | 470 | 8.380e-07 | 2.623e-07 | `crates/spacelab/tests/light_time_oracle.rs::two_body_distance_to_orekit` |
 | Orekit | 13.1.7 | down-leg flight time | s | 470 | 2.078e-15 | 4.943e-16 | `crates/spacelab/tests/light_time_oracle.rs::flight_time_distance_to_orekit` |
@@ -167,6 +177,8 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | instantaneous range, against Orekit's instantaneous | m | 470 | 6.529e-07 | 1.498e-07 | `crates/spacelab/tests/light_time_oracle.rs::range_distance_to_orekit` |
 | Orekit | 13.1.7 | one-way range rate, light-time | m/s | 470 | 3.297e-09 | 7.063e-10 | `crates/spacelab/tests/light_time_oracle.rs::range_rate_distance_to_orekit` |
 | Orekit | 13.1.7 | one-way range rate, instantaneous convention | m/s | 470 | 1.694e-01 | 1.052e-01 | `crates/spacelab/tests/light_time_oracle.rs::range_rate_distance_to_orekit` |
+| neptune | not recorded | Sentinel-1B position over 3 h, geocentric force model | m | 19 | 4.852e-02 | 2.204e-02 | `crates/spacelab/tests/neptune_sentinel1b.rs::two_orbits_distance_to_neptune` |
+| neptune | not recorded | Sentinel-1B position over 24 h, geocentric force model | m | 145 | 4.722e-01 | 2.770e-01 | `crates/spacelab/tests/neptune_sentinel1b.rs::full_day_distance_to_neptune` |
 
 Parked comparator tests that print no row yet:
 

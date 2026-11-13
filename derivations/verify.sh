@@ -27,7 +27,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # literal they decide against a bigfloat, which the Arb pass after the Ф17.B gates decides in balls.
 ARB_IN=$(mktemp)
 trap 'rm -f "$ARB_IN"' EXIT
-arb_keep() { printf '%s\n' "$1" | grep -E '^ARB(VAR)? ' >> "$ARB_IN"; }
+arb_keep() { printf '%s\n' "$1" | grep -E '^ARB(VAR|LET)? ' >> "$ARB_IN"; }
 
 printf '\nRe-deriving every claim the source code attributes to a computer algebra system.\n\n'
 

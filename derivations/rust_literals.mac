@@ -225,24 +225,38 @@ arb_unary : ["sin", "cos", "tan", "asin", "acos", "atan", "exp", "log", "abs", "
    f(x) in [lo, hi] -- lo and hi dyadic rationals, value its bigfloat -- and prints
    `ARBVAR sym lo hi <f> ; <f'>`. arb_balls.c certifies that f changes sign on [lo, hi] and f' keeps
    away from zero there, so the root is unique, and narrows it to a ball; a value handed to
-   `certified` may then contain sym. `arb_bracket(v, bits)` is a dyadic [lo, hi] around a bigfloat. */
+   `certified` may then contain sym. `arb_bracket(v, bits)` is a dyadic [lo, hi] around a bigfloat.
+   Shared values: `arb_let(sym, e)` prints `ARBLET sym <e>`, which arb_balls.c evaluates once per
+   precision, and returns sym, so a value built by iteration (RK4 steps) out of earlier lets stays
+   linear in its length rather than growing as a tree. Each root and let keeps its bigfloat as the
+   property `arb_value`; `arb_value(e)` is e at those bigfloats, which `certified` checks. */
 arb_roots : []$
 arb_x : false$
+arb_defined(e) := symbolp(e) and get(e, 'arb_value) # false$
+arb_value(e) := bfloat(subst(map(lambda([v], v = get(v, 'arb_value)), sublist(listofvars(e), arb_defined)), e))$
 arb_bracket(v, bits) := [floor(v * 2^bits - 1) / 2^bits, ceiling(v * 2^bits + 1) / 2^bits]$
 arb_root(sym, f, x, lo, hi, value) := block([fx, dfx],
   if not (ratnump(lo) and ratnump(hi) and is(lo < hi)) then error("arb_root: lo < hi rationals for", sym),
-  if member(sym, map(lhs, arb_roots)) then error("arb_root: defined twice:", sym),
+  if arb_defined(sym) then error("arb_root: defined twice:", sym),
   block([arb_x : x], fx : arb_rpn(f), dfx : arb_rpn(diff(f, x))),
   printf(true, "ARBVAR ~a ~a ~a ~{~a~^ ~} ; ~{~a~^ ~}~%", sym, lo, hi, fx, dfx),
   arb_roots : endcons(sym = value, arb_roots),
+  put(sym, value, 'arb_value),
   value)$
+arb_let(sym, e) := block([rpn],
+  if arb_defined(sym) then error("arb_let: defined twice:", sym),
+  rpn : arb_rpn(e),
+  printf(true, "ARBLET ~a ~{~a~^ ~}~%", sym, rpn),
+  put(sym, arb_value(e), 'arb_value),
+  arb_roots : endcons(sym = get(sym, 'arb_value), arb_roots),
+  sym)$
 arb_emit(e) := block([inflag : true, o, a],
   if ratnump(e) then arb_out : cons(string(e), arb_out)
   else if e = %pi then arb_out : cons("pi", arb_out)
   else if e = %e then arb_out : cons("e", arb_out)
   else if floatnump(e) or bfloatp(e) then error("certified: a float, which bounds nothing:", e)
   else if arb_x # false and e = arb_x then arb_out : cons("x", arb_out)
-  else if symbolp(e) and member(e, map(lhs, arb_roots)) then arb_out : cons(concat("$", e), arb_out)
+  else if arb_defined(e) then arb_out : cons(concat("$", e), arb_out)
   else if atom(e) then error("certified: a free symbol:", e)
   else (o : op(e), a : args(e),
     if o = "+" or o = "*" then (
@@ -264,7 +278,7 @@ arb_emit(e) := block([inflag : true, o, a],
     else error("certified: no Arb counterpart for", o)))$
 arb_rpn(e) := block([arb_out : []], arb_emit(e), reverse(arb_out))$
 certified(name, literals, exact) :=
-  transcribed(literals, map(lambda([e], bfloat(subst(arb_roots, e))), exact)) and
+  transcribed(literals, map(arb_value, exact)) and
   (for i thru length(literals) do
      printf(true, "ARB ~a ~a ~a ~{~a~^ ~}~%", name, i - 1, rust_digits(literals[i]), arb_rpn(exact[i])),
    true)$

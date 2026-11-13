@@ -19,8 +19,11 @@
    unknown). It is certified, at each precision, by f(lo) and f(hi) of opposite
    decided signs and f' bounded away from zero on [lo, hi], so the root is
    unique; bisection on decided signs narrows it to a ball, and `$name` pushes
-   that ball in any later value. With -v it prints each ball, its precision and
-   the literal.
+   that ball in any later value. `ARBLET name token...` names a value shared by
+   later ones, evaluated once at each precision: a value built by iteration
+   (RK4 steps) then stays linear in its length. A root or a let may use only
+   names defined on earlier lines. With -v it prints each ball, its precision
+   and the literal.
 
      cc -O2 arb_balls.c -o arb_balls $(pkg-config --cflags --libs flint)
      timeout 300 maxima --very-quiet -Q -b derivation.mac | ./arb_balls
@@ -36,10 +39,11 @@
 #define NPREC 3
 static const slong precs[NPREC] = {256, 1024, 4096};
 
-/* a root-defined value: its bracket, f and f' in RPN, and its ball at each
-   precision once certified */
+/* a named value, a root (its bracket, f and f' in RPN) or a let (its value in
+   f), and its ball at each precision once certified */
 typedef struct {
   char *name;
+  int let;
   fmpq_t lo, hi;
   char **f, **d;
   int nf, nd, state[NPREC];
@@ -199,48 +203,61 @@ static int sign_at(var_t *v, const arf_t a, int pi) {
   return s;
 }
 
-/* The ball of the root `name` at precs[pi]: certified unique in its bracket,
-   then bisected while the midpoint's sign is decided. */
-static int var_ball(arb_t out, const char *name, int pi) {
-  var_t *v = NULL;
-  for (int i = 0; i < nvars && !v; i++)
+static var_t *find_var(const char *name) {
+  for (int i = 0; i < nvars; i++)
     if (!strcmp(vars[i].name, name))
-      v = &vars[i];
-  if (!v)
-    die("undefined root", name);
-  if (v->state[pi] == 0) {
-    slong prec = precs[pi];
-    arf_t a, b, m;
-    arb_t ab, d;
-    arf_init(a), arf_init(b), arf_init(m);
-    arb_init(ab), arb_init(d);
-    v->state[pi] = -1;
-    if (dyadic(a, v->lo) && dyadic(b, v->hi)) {
-      int sa = sign_at(v, a, pi), sb = sign_at(v, b, pi);
-      arb_set_interval_arf(ab, a, b, prec);
-      if (!evaluate(d, v->d, v->nd, pi, ab))
-        die("malformed root derivative of", v->name);
-      if (sa * sb < 0 && !arb_contains_zero(d)) {
-        for (slong it = 0; it < prec + 16; it++) {
-          arf_add(m, a, b, ARF_PREC_EXACT, ARF_RND_DOWN);
-          arf_mul_2exp_si(m, m, -1);
-          int sm = sign_at(v, m, pi);
-          if (sm == 0)
-            break;
-          if (sm == sa)
-            arf_swap(a, m);
-          else
-            arf_swap(b, m);
-        }
-        arb_set_interval_arf(v->ball[pi], a, b, prec);
-        v->state[pi] = 1;
+      return &vars[i];
+  return NULL;
+}
+
+/* A root's ball at precs[pi]: certified unique in its bracket, then bisected
+   while the midpoint's sign is decided. */
+static void root_ball(var_t *v, int pi) {
+  slong prec = precs[pi];
+  arf_t a, b, m;
+  arb_t ab, d;
+  arf_init(a), arf_init(b), arf_init(m);
+  arb_init(ab), arb_init(d);
+  if (dyadic(a, v->lo) && dyadic(b, v->hi)) {
+    int sa = sign_at(v, a, pi), sb = sign_at(v, b, pi);
+    arb_set_interval_arf(ab, a, b, prec);
+    if (!evaluate(d, v->d, v->nd, pi, ab))
+      die("malformed root derivative of", v->name);
+    if (sa * sb < 0 && !arb_contains_zero(d)) {
+      for (slong it = 0; it < prec + 16; it++) {
+        arf_add(m, a, b, ARF_PREC_EXACT, ARF_RND_DOWN);
+        arf_mul_2exp_si(m, m, -1);
+        int sm = sign_at(v, m, pi);
+        if (sm == 0)
+          break;
+        if (sm == sa)
+          arf_swap(a, m);
+        else
+          arf_swap(b, m);
       }
+      arb_set_interval_arf(v->ball[pi], a, b, prec);
+      v->state[pi] = 1;
     }
-    arf_clear(a), arf_clear(b), arf_clear(m);
-    arb_clear(ab), arb_clear(d);
+  }
+  arf_clear(a), arf_clear(b), arf_clear(m);
+  arb_clear(ab), arb_clear(d);
+}
+
+/* The ball of the root or let `name` at precs[pi], computed once. */
+static int var_ball(arb_t out, const char *name, int pi) {
+  var_t *v = find_var(name);
+  if (!v)
+    die("undefined name", name);
+  if (v->state[pi] == 0) {
+    v->state[pi] = -1;
+    if (!v->let)
+      root_ball(v, pi);
+    else if (evaluate(v->ball[pi], v->f, v->nf, pi, NULL))
+      v->state[pi] = 1;
     if (verbose || v->state[pi] < 0) {
-      printf("%s root %s at %ld bits: ",
-             v->state[pi] > 0 ? "ROOT" : "UNCERTIFIED", v->name, (long)prec);
+      printf(
+          "%s %s %s at %ld bits: ", v->state[pi] > 0 ? "BALL" : "UNCERTIFIED",
+          v->let ? "let" : "root", v->name, (long)precs[pi]);
       arb_printn(v->ball[pi], 40, 0);
       printf("\n");
     }
@@ -316,6 +333,32 @@ static void certify(char **tok, int n) {
   arb_clear(v);
 }
 
+/* tok[0..n) copied, each `$name` in it already defined: names go strictly
+   forward, so no value depends on itself */
+static char **copy_tokens(char **tok, int n) {
+  char **c = malloc(sizeof *c * (size_t)n);
+  for (int i = 0; i < n; i++) {
+    if (tok[i][0] == '$' && !find_var(tok[i] + 1))
+      die("undefined name", tok[i] + 1);
+    c[i] = strdup(tok[i]);
+  }
+  return c;
+}
+
+static var_t *new_var(const char *name, int let) {
+  if (find_var(name))
+    die("name defined twice", name);
+  vars = realloc(vars, sizeof *vars * (size_t)(nvars + 1));
+  var_t *v = &vars[nvars++];
+  memset(v, 0, sizeof *v);
+  v->name = strdup(name);
+  v->let = let;
+  fmpq_init(v->lo), fmpq_init(v->hi);
+  for (int p = 0; p < NPREC; p++)
+    arb_init(v->ball[p]);
+  return v;
+}
+
 /* ARBVAR name lo hi f... ; f'... */
 static void define_root(char **tok, int n) {
   int semi = -1;
@@ -324,26 +367,22 @@ static void define_root(char **tok, int n) {
       semi = i;
   if (n < 6 || semi < 4 || semi == n - 1)
     die("malformed root", n ? tok[0] : "");
-  for (int i = 0; i < nvars; i++)
-    if (!strcmp(vars[i].name, tok[0]))
-      die("root defined twice", tok[0]);
-  vars = realloc(vars, sizeof *vars * (size_t)(nvars + 1));
-  var_t *v = &vars[nvars++];
-  memset(v, 0, sizeof *v);
-  v->name = strdup(tok[0]);
-  fmpq_init(v->lo), fmpq_init(v->hi);
+  var_t *v = new_var(tok[0], 0);
   if (fmpq_set_str(v->lo, tok[1], 10) || fmpq_set_str(v->hi, tok[2], 10))
     die("malformed root bracket", tok[0]);
   fmpq_canonicalise(v->lo), fmpq_canonicalise(v->hi);
   v->nf = semi - 3, v->nd = n - semi - 1;
-  v->f = malloc(sizeof *v->f * (size_t)v->nf);
-  v->d = malloc(sizeof *v->d * (size_t)v->nd);
-  for (int i = 0; i < v->nf; i++)
-    v->f[i] = strdup(tok[3 + i]);
-  for (int i = 0; i < v->nd; i++)
-    v->d[i] = strdup(tok[semi + 1 + i]);
-  for (int p = 0; p < NPREC; p++)
-    arb_init(v->ball[p]);
+  v->f = copy_tokens(tok + 3, v->nf);
+  v->d = copy_tokens(tok + semi + 1, v->nd);
+}
+
+/* ARBLET name token... */
+static void define_let(char **tok, int n) {
+  if (n < 2)
+    die("malformed let", n ? tok[0] : "");
+  var_t *v = new_var(tok[0], 1);
+  v->nf = n - 1;
+  v->f = copy_tokens(tok + 1, v->nf);
 }
 
 int main(int argc, char **argv) {
@@ -353,11 +392,11 @@ int main(int argc, char **argv) {
   int ntok = 1024;
   char **tok = malloc(sizeof *tok * (size_t)ntok);
   while (getline(&line, &cap, stdin) > 0) {
-    int root = !strncmp(line, "ARBVAR ", 7);
-    if (strncmp(line, "ARB ", 4) && !root)
+    int root = !strncmp(line, "ARBVAR ", 7), let = !strncmp(line, "ARBLET ", 7);
+    if (strncmp(line, "ARB ", 4) && !root && !let)
       continue;
     int n = 0;
-    for (char *t = strtok(line + (root ? 7 : 4), " \t\r\n"); t;
+    for (char *t = strtok(line + (root || let ? 7 : 4), " \t\r\n"); t;
          t = strtok(NULL, " \t\r\n")) {
       if (n == ntok)
         tok = realloc(tok, sizeof *tok * (size_t)(ntok *= 2));
@@ -365,6 +404,8 @@ int main(int argc, char **argv) {
     }
     if (root)
       define_root(tok, n);
+    else if (let)
+      define_let(tok, n);
     else if (n < 4)
       die("short line", line);
     else

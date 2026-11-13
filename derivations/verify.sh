@@ -1358,6 +1358,27 @@ if have maxima; then
     fi
 
     mac_zeros cio_rotation.mac 8 "the CIO-based rotation as the IERS closed form in X, Y, s"
+    out=$(macf mendes_pavlis_zenith.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 2 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima mendes_pavlis_zenith.mac: the zenith delay's 26 constants are Mendes & Pavlis's decimals; ZENITH_EXACT is d_h and d_nh at the IERS test point"
+    else
+        bad "maxima mendes_pavlis_zenith.mac" "expected 2 checks to hold, found $holds"
+    fi
+    out=$(macf hardisp_goldens.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 3 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima hardisp_goldens.mac: M2, K1, Ssa and S2's exact Doodson sums at the published epoch; the clamped spline's defining equations solved exactly at six unequal knots"
+    else
+        bad "maxima hardisp_goldens.mac" "expected 3 checks to hold, found $holds"
+    fi
+    out=$(macf geopotential_degree70.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 2 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima geopotential_degree70.mac: each term an exact rational times Nbar_nm / r, its gradient the defining one; the degree-70 XGM2019e acceleration at two points"
+    else
+        bad "maxima geopotential_degree70.mac" "expected 2 checks to hold, found $holds"
+    fi
     mac_zeros gnss_combinations.mac 32 "IF, GF, wide/narrow-lane and MW combinations as exact rationals of the ICD carriers"
     mac_zeros gnss_cycle_slip.mac 13 "the slip predictor is the least-squares polynomial extrapolation"
     mac_zeros gnss_dop.mac 31 "DOP from the cofactor traces; closed forms for zenith-plus-ring geometries"

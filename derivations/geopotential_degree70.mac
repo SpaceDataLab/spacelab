@@ -1,0 +1,128 @@
+/* The degree-70 XGM2019e acceleration that spacelab-propagation/src/geopotential.rs's degree-70 test
+   holds `GeoPotential` to, from the defining sum in exact arithmetic (plans/17 Ф19.G).
+
+   U = (GM/r) sum_{n=0}^{70} (Re/r)^n sum_m Nbar_nm P_nm(sin phi) [C_nm cos m lambda + S_nm sin m lambda],
+   a = grad U, body-fixed; C_00 = 1 is the point mass and degree 1 is absent. P_nm is defined, without
+   the Condon-Shortley phase, as (1 - t^2)^(m/2) D^m P_n(t), with P_n's explicit sum
+   P_n(t) = 2^-n sum_k (-1)^k C(n,k) C(2n-2k,n) t^(n-2k), and Nbar_nm^2 = (2 - delta_m0)(2n+1)(n-m)!/(n+m)!.
+
+   With t = z/r, cos phi = rho/r and e^(i m lambda) = (x + i y)^m / rho^m, each term is
+   GM Re^n Nbar_nm A_nm R_nm / r^(2n+1), where A_nm = r^(n-m) D^m P_n(z/r) = sum_k q_k z^(n-m-2k) (r^2)^k
+   and R_nm = Re((C - i S)(x + i y)^m) are polynomials in x, y, z with rational coefficients. So the
+   gradient of each term is an exact rational times Nbar_nm / r: nothing is rounded before the last
+   bfloat, and no recursion is shared with the code's Cunningham-Gottlieb solid harmonics.
+
+     (1) the closed-form gradient below is the gradient of the defining term: for every n <= 6 and
+         m <= n, at the first test point, Maxima's diff of A_nm R_nm / r^(2n+1) agrees with it to
+         1e-50, and the term itself is the textbook (GM/r)(Re/r)^n Nbar_nm P_nm cos/sin form with
+         orthopoly's assoc_legendre_p (its (-1)^m removed) to 1e-50 for n <= 12;
+     (2) DEGREE_70_EXACT in geopotential.rs is the degree-70 acceleration at DEGREE_70_POINTS, from
+         MODEL_GM, MODEL_RE and the degree <= 70 rows of MODEL_COEFFS at the doubles the code reads,
+         each literal its value rounded to the digits it shows.
+
+   timeout 600 maxima --very-quiet -Q -b geopotential_degree70.mac                                  */
+
+fpprec : 80$
+display2d : false$
+linel : 4000$
+load("rust_literals.mac")$
+load("orthopoly")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+geo : "../crates/spacelab-propagation/src/geopotential.rs"$
+coeffs : "../crates/spacelab-propagation/src/geopotential_coeffs.rs"$
+d(x) := nearest_double(x)$
+nmax : 70$
+
+/* The degree <= nmax rows of MODEL_COEFFS, [n, m, C, S] at their doubles. */
+read_rows(path, top) := block([s : openr(path), line, inside : false, done : false, out : [], f, n],
+  while not done and (line : readline(s)) # false do (
+    if inside then (
+      if ssearch("];", line) # false then done : true
+      else (
+        f : sublist(map(lambda([e], strim(" ", e)),
+                        split(ssubst("", ")", ssubst("", "(", line)), ",", false)),
+                    lambda([e], slength(e) > 0)),
+        n : parse_string(f[1]),
+        if n > top then done : true
+        else out : cons([n, parse_string(f[2]), d(rust_rational(f[3])), d(rust_rational(f[4]))], out)))
+    else if ssearch("pub const MODEL_COEFFS:", line) # false then inside : true),
+  close(s),
+  reverse(out))$
+rows : append([[0, 0, 1, 0]], read_rows(coeffs, nmax))$
+must(is(length(rows) = 1 + (nmax + 1)*(nmax + 2)/2 - 3)
+     and is(rows[2] = [2, 0, d(rust_rational("-0.0004841694947475625")), 0])
+     and every(lambda([r], is(r[2] <= r[1])), rows),
+     "the point mass and every degree 2..70 row, each once")$
+GM : rust_rational(rust_scalar(coeffs, "MODEL_GM"))$
+RE : d(rust_rational(rust_scalar(coeffs, "MODEL_RE")))$
+
+nbar2(n, m) := (if m = 0 then 1 else 2)*(2*n + 1)*(n - m)!/(n + m)!$
+/* q_k: the coefficient of t^(n-2k-m) in D^m P_n(t). */
+q(n, m, k) := (-1)^k*binomial(n, k)*binomial(2*n - 2*k, n)*(n - 2*k)!/((n - 2*k - m)!*2^n)$
+
+/* One term's gradient over GM Re^n Nbar_nm / r^(2n+1), exact: [x, y, z] integers, cs = [C, S]. */
+term_gradient(p, n, m, cs) := block([x : p[1], y : p[2], z : p[3], r2, A : 0, A1 : 0, Az : 0, pk,
+                                     B, B1, R, Rx, Ry],
+  r2 : x^2 + y^2 + z^2,
+  for k : 0 thru floor((n - m)/2) do (
+    pk : n - m - 2*k,
+    A : A + q(n, m, k)*z^pk*r2^k,
+    if k > 0 then A1 : A1 + q(n, m, k)*z^pk*2*k*r2^(k - 1),
+    if pk > 0 then Az : Az + q(n, m, k)*pk*z^(pk - 1)*r2^k),
+  B : rectform((x + %i*y)^m),
+  B1 : if m = 0 then 0 else rectform(m*(x + %i*y)^(m - 1)),
+  R : cs[1]*realpart(B) + cs[2]*imagpart(B),
+  Rx : cs[1]*realpart(B1) + cs[2]*imagpart(B1),
+  Ry : cs[2]*realpart(B1) - cs[1]*imagpart(B1),
+  [x*A1*R + A*Rx - (2*n + 1)*A*R*x/r2,
+   y*A1*R + A*Ry - (2*n + 1)*A*R*y/r2,
+   (Az + z*A1)*R - (2*n + 1)*A*R*z/r2])$
+
+/* ---- (1) the closed form is the defining term and its gradient --------------------------------- */
+pts : map(rust_rational, rust_table(geo, "DEGREE_70_POINTS"))$
+P : [firstn(pts, 3), lastn(pts, 3)]$
+p1 : P[1]$
+r1 : sqrt(p1[1]^2 + p1[2]^2 + p1[3]^2)$
+term_value(p, n, m, cs) := block([x : p[1], y : p[2], z : p[3], A : 0],
+  for k : 0 thru floor((n - m)/2) do A : A + q(n, m, k)*z^(n - m - 2*k)*(x^2 + y^2 + z^2)^k,
+  A*(cs[1]*realpart(rectform((x + %i*y)^m)) + cs[2]*imagpart(rectform((x + %i*y)^m)))
+   /(x^2 + y^2 + z^2)^(n + 1/2))$
+worst_diff : 0$
+for n : 0 thru 6 do for m : 0 thru n do block([g, sym],
+  sym : term_value([X, Y, Z], n, m, [Cs, Ss]),
+  g : map(lambda([v], subst([X = p1[1], Y = p1[2], Z = p1[3]], diff(sym, v))), [X, Y, Z]),
+  g : g - term_gradient(p1, n, m, [Cs, Ss])/r1^(2*n + 1),
+  worst_diff : max(worst_diff, lmax(map(lambda([e],
+     max(abs(bfloat(coeff(expand(e), Cs))), abs(bfloat(coeff(expand(e), Ss))))), g))))$
+print("largest |diff - closed form| over n <= 6:", worst_diff)$
+lambda1 : atan2(p1[2], p1[1])$
+worst_value : 0$
+for n : 0 thru 12 do for m : 0 thru n do block([textbook, ours],
+  textbook : bfloat(r1^(-n - 1)*(-1)^m*assoc_legendre_p(n, m, p1[3]/r1)
+                    *(cos(m*lambda1) + 2*sin(m*lambda1))),
+  ours : bfloat(term_value(p1, n, m, [1, 2])),
+  worst_value : max(worst_value, abs(textbook - ours)*bfloat(r1^(n + 1))))$
+print("largest |textbook - closed form| r^(n+1) over n <= 12:", worst_value)$
+must(is(worst_diff < 10^-50) and is(worst_value < 10^-50),
+     "(1) holds: the closed-form term and gradient are the defining ones, n <= 6 by diff, n <= 12 against assoc_legendre_p")$
+
+/* ---- (2) the degree-70 acceleration ------------------------------------------------------------ */
+acceleration(p) := block([r2 : p[1]^2 + p[2]^2 + p[3]^2, total : [0b0, 0b0, 0b0]],
+  for row in rows do block([n : row[1], m : row[2]],
+    total : total + bfloat(sqrt(nbar2(n, m)))
+                * bfloat(RE^n*term_gradient(p, n, m, [row[3], row[4]])/r2^n)),
+  GM*total/bfloat(sqrt(r2)))$
+exact : flatten(map(acceleration, P))$
+
+lit(v) := block([a : abs(v), e, m, t],
+  if is(equal(v, 0)) then return("0.0"),
+  e : floor(float(log(bfloat(a)) / log(10b0))),
+  m : round(a * 10^(24 - e)),
+  if m >= 10^25 then (e : e + 1, m : round(a * 10^(24 - e))),
+  if m < 10^24 then (e : e - 1, m : round(a * 10^(24 - e))),
+  t : string(m),
+  concat(if is(v < 0) then "-" else "", charat(t, 1), ".", substring(t, 2), "e", e))$
+print("DEGREE_70_EXACT", simplode(map(lit, exact), ", "))$
+must(transcribed(rust_table(geo, "DEGREE_70_EXACT"), exact),
+     "(2) holds: DEGREE_70_EXACT is the degree-70 sum's gradient at DEGREE_70_POINTS, exact")$
+print("DONE")$

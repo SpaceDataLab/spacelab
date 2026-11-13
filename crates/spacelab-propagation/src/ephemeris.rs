@@ -725,27 +725,29 @@ mod tests {
         );
     }
 
-    fn assert_reaches_erfa(
-        label: &str,
-        evaluated: &[([f64; 3], Golden); 13],
-        angle_bar: f64,
-        range_bar: f64,
-    ) {
-        for &(got, (t, _, erfa)) in evaluated {
-            if libm::fabs(t) > CLAIMED_SPAN {
-                continue;
-            }
-            let angle = separation_arcsec(got, erfa);
-            let range = libm::fabs(norm(got) - norm(erfa));
-            assert!(
-                angle < angle_bar,
-                "{label} at t={t:e}: {angle:.1}\" from ERFA"
-            );
-            assert!(
-                range < range_bar,
-                "{label} at t={t:e}: {range:.0} m from ERFA in range"
-            );
-        }
+    /// The angle (arcsec) and range (m) distances to ERFA at the goldens inside [`CLAIMED_SPAN`].
+    fn erfa_distances(evaluated: &[([f64; 3], Golden); 13]) -> (Vec<f64>, Vec<f64>) {
+        evaluated
+            .iter()
+            .filter(|(_, (t, _, _))| libm::fabs(*t) <= CLAIMED_SPAN)
+            .map(|&(got, (_, _, erfa))| {
+                (
+                    separation_arcsec(got, erfa),
+                    libm::fabs(norm(got) - norm(erfa)),
+                )
+            })
+            .unzip()
+    }
+
+    /// One `comparison | ...` row of `tools/compare.py`.
+    fn comparison_row(quantity: &str, unit: &str, distances: &[f64]) {
+        let max = distances.iter().copied().fold(0.0, f64::max);
+        #[expect(clippy::cast_precision_loss, reason = "a count of a few distances")]
+        let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+        println!(
+            "comparison | erfa | not recorded | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+            distances.len()
+        );
     }
 
     /// (G2) The code is the printed solar series, precessed: the goldens' series column, which
@@ -761,26 +763,24 @@ mod tests {
         assert_is_the_series("Moon", &moon());
     }
 
-    /// The frame claim, made assertable. Dropping the precession leaves the Sun 5054″ (1.4°) from
-    /// ERFA at the ends of this span — 105× the bound below — while every accuracy test that
-    /// existed before, all of them at or near J2000 where precession is zero, still passes.
+    /// The distances to ERFA (`epv00`, `moon98`, precessed) at the goldens inside the claimed span:
+    /// the series' own accuracy, which the functions' docs quote.
     ///
-    /// The solar bar is 48″ rather than 56″ because the aberration term (#306) moved the sweep's
-    /// worst from 55.09″ to 47.42″, and the golden at `t = 3.069300822e9` is the epoch that worst
-    /// occurs at, so the bar is witnessed rather than merely asserted.
-    ///
-    /// This test is **not** what pins the aberration term, and it is worth saying which one is.
-    /// Removing `κ/r` and re-running leaves this test green: the term is a constant offset in
-    /// longitude, so against the several other error sources in a low-precision series it cancels at
-    /// some epochs and adds at others — over these eleven it takes the worst *down*, to 26.93″. What
-    /// it buys is the RMS and the worst over a dense sweep, neither of which eleven hand-picked
-    /// extremes can measure. The gate that does see the term is
-    /// [`the_solar_series_is_the_almanac_series_precessed_to_j2000`]: the derivation carries the same
-    /// `κ/r`, and 5e-12 leaves no room for a 20.5″ disagreement.
+    /// Dropping the precession leaves the Sun 5054″ (1.4°) from ERFA at the ends of this span; the
+    /// gate that decides the precession is [`the_solar_series_is_the_almanac_series_precessed_to_j2000`],
+    /// whose derivation carries it and the aberration term `κ/r`, and 5e-12 leaves no room for either.
     #[test]
-    fn both_bodies_reach_erfa_at_the_documented_accuracy() {
-        assert_reaches_erfa("Sun", &sun(), 48.0, 1.0e-4 * ASTRONOMICAL_UNIT);
-        assert_reaches_erfa("Moon", &moon(), 280.0, 460e3);
+    #[ignore = "comparator: the distance to erfa, not a verdict"]
+    fn both_bodies_distance_to_erfa() {
+        for (label, evaluated) in [("Sun", sun()), ("Moon", moon())] {
+            let (angle, range) = erfa_distances(&evaluated);
+            comparison_row(
+                &format!("the analytic {label}'s direction"),
+                "arcsec",
+                &angle,
+            );
+            comparison_row(&format!("the analytic {label}'s range"), "m", &range);
+        }
     }
 
     /// (G3) `ζ_A` and `z_A` are exact negatives at `t = 0` and `θ_A` is zero there, so the rotation

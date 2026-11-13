@@ -1,0 +1,74 @@
+/* The Mendes-Pavlis zenith delay of spacelab-slr/src/troposphere.rs at optical wavelengths, from
+   its equations in exact arithmetic (plans/17 Ф19.G): the values the zenith-delay test holds
+   `mendes_pavlis_zenith_delay` to.
+
+   Mendes & Pavlis (2004), Geophys. Res. Lett. 31, L14602, as adopted by IERS Conventions (2010)
+   chapter 9: with sigma = 1/lambda (lambda in µm),
+     f_s     = 1 - 0.00266 cos 2 phi - 0.00000028 H                                  eq (24)
+     f_h     = 0.01 C_CO2 [k1 (k0 + sigma^2)/(k0 - sigma^2)^2 + k3 (k2 + sigma^2)/(k2 - sigma^2)^2]
+     C_CO2   = 1 + 0.534e-6 (x_c - 450), x_c = 375 ppm                                eq (20)
+     f_nh    = 0.003101 (w0 + 3 w1 sigma^2 + 5 w2 sigma^4 + 7 w3 sigma^6)              eq (32)
+     d_h     = 0.002416579 f_h P_s / f_s,  d_nh = 1e-4 (5.316 f_nh - 3.759 f_h) e_s / f_s  eqs (26), (38)
+   with k0 = 238.0185, k1 = 19990.975, k2 = 57.362, k3 = 579.55174 (µm^-2), w0 = 295.235,
+   w1 = 2.6422, w2 = -0.032380, w3 = 0.004028.
+
+     (1) every constant mendes_pavlis_zenith_delay writes is the published decimal, in order;
+     (2) ZENITH_EXACT in troposphere.rs is d_h and d_nh at the IERS routine's own test point --
+         McDonald Observatory, 30.67166667 deg, 2010.344 m, 798.4188 hPa, 14.322 hPa, 0.532 µm --
+         at the doubles the test passes (the latitude as degrees * (pi/180) rounds it), each literal
+         its value rounded to the digits it shows.
+
+   timeout 300 maxima --very-quiet -Q -b mendes_pavlis_zenith.mac                                  */
+
+fpprec : 60$
+display2d : false$
+linel : 4000$
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+trop : "../crates/spacelab-slr/src/troposphere.rs"$
+dec(s) := rust_rational(s)$
+
+[k0, k1, k2, k3] : map(dec, ["238.0185", "19990.975", "57.362", "579.55174"])$
+[w0, w1, w2, w3] : map(dec, ["295.235", "2.6422", "-0.032380", "0.004028"])$
+x_c : 375$
+
+/* (1) in the order the function writes them: the eight dispersion constants and x_c; 1/lambda^2;
+   f_s; C_CO2; f_h's 0.01; f_nh; d_h; d_nh. A subtraction reads as a negative literal. */
+published : append([k0, k1, k2, k3, w0, w1, w2, w3, x_c], [1],
+                   [1, dec("-0.00266"), 2, dec("-0.00000028")],
+                   [1, dec("0.534e-6"), -450], [dec("0.01")],
+                   [dec("0.003101"), 3, 5, 7], [dec("2.416579e-3")],
+                   [dec("1e-4"), dec("5.316"), dec("-3.759")])$
+written : map(rust_rational, rust_literals_between(trop, "pub fn mendes_pavlis_zenith_delay(",
+                                                     "/// The FCULa mapping function"))$
+must(is(written = published),
+     "(1) holds: the 26 constants mendes_pavlis_zenith_delay writes are Mendes & Pavlis's decimals")$
+
+/* (2) */
+f_s(phi, h) := 1 - dec("0.00266") * cos(2 * phi) - dec("0.00000028") * h$
+f_h(lambda) := block([s2 : 1 / lambda^2],
+  dec("0.01") * (1 + dec("0.534e-6") * (x_c - 450))
+  * (k1 * (k0 + s2) / (k0 - s2)^2 + k3 * (k2 + s2) / (k2 - s2)^2))$
+f_nh(lambda) := block([s2 : 1 / lambda^2],
+  dec("0.003101") * (w0 + 3 * w1 * s2 + 5 * w2 * s2^2 + 7 * w3 * s2^3))$
+zenith(phi, h, p, e, lambda) :=
+  [bfloat(dec("2.416579e-3") * f_h(lambda) * p / f_s(phi, h)),
+   bfloat(dec("1e-4") * (dec("5.316") * f_nh(lambda) - dec("3.759") * f_h(lambda)) * e / f_s(phi, h))]$
+
+d(x) := nearest_double(x)$
+latitude : d(d(dec("30.67166667")) * d(d(%pi) / 180))$
+exact : zenith(latitude, d(dec("2010.344")), d(dec("798.4188")), d(dec("14.322")), d(dec("0.532")))$
+
+lit(v) := block([a : abs(v), e, m, t],
+  if is(equal(v, 0)) then return("0.0"),
+  e : floor(float(log(bfloat(a)) / log(10b0))),
+  m : round(a * 10^(24 - e)),
+  if m >= 10^25 then (e : e + 1, m : round(a * 10^(24 - e))),
+  if m < 10^24 then (e : e - 1, m : round(a * 10^(24 - e))),
+  t : string(m),
+  concat(if is(v < 0) then "-" else "", charat(t, 1), ".", substring(t, 2), "e", e))$
+print("ZENITH_EXACT", simplode(map(lit, exact), ", "))$
+print("total", lit(exact[1] + exact[2]))$
+must(transcribed(rust_table(trop, "ZENITH_EXACT"), exact),
+     "(2) holds: ZENITH_EXACT is d_h and d_nh at the IERS test point, exact")$
+print("DONE")$

@@ -1,0 +1,94 @@
+/* The values `spacelab-slr::loading`'s tests hold the HARDISP port to, from its mathematics in
+   exact arithmetic (plans/17 Ф19.G).
+
+     (1) ARGUMENTS_EXACT in loading.rs is the frequency (cycles per day) and the argument (degrees,
+         in [0, 360)) of M2, K1, Ssa and S2 at the reference program's first output epoch, 2009
+         June 25 01:10:45 UTC: the Doodson sums over the Delaunay polynomials and rates loading.rs
+         writes (ocean_loading.mac (1)-(2) hold them to SOFA's and to their derivatives), at the
+         doubles `epoch(0)` passes -- the day fraction and t rounded as its f64 arithmetic rounds
+         them;
+     (2) SPLINE_CURVATURE_EXACT and SPLINE_MIDPOINT_EXACT are the clamped cubic spline through
+         SPLINE_KNOTS and SPLINE_VALUES whose end slopes are those of the parabola through the three
+         end points (the end condition ocean_loading.mac (5) finds in SPLINE): the second
+         derivatives solved by linsolve from the defining equations -- the slope continuous at each
+         interior knot, the two end slopes -- not by the shipped elimination, and the spline at the
+         doubles `f64::midpoint` returns between neighbouring knots.
+
+   Each literal is its exact value rounded to the digits it shows.
+
+   timeout 300 maxima --very-quiet -Q -b hardisp_goldens.mac                                       */
+
+fpprec : 60$
+display2d : false$
+linel : 4000$
+load("rust_literals.mac")$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+src : "../crates/spacelab-slr/src/loading.rs"$
+d(x) := nearest_double(x)$
+
+lit(v) := block([a : abs(v), e, m, t],
+  if is(equal(v, 0)) then return("0.0"),
+  e : floor(float(log(bfloat(a)) / log(10b0))),
+  m : round(a * 10^(24 - e)),
+  if m >= 10^25 then (e : e + 1, m : round(a * 10^(24 - e))),
+  if m < 10^24 then (e : e - 1, m : round(a * 10^(24 - e))),
+  t : string(m),
+  concat(if is(v < 0) then "-" else "", charat(t, 1), ".", substring(t, 2), "e", e))$
+
+/* ---- (1) the tidal arguments ------------------------------------------------------------------- */
+c : map(rust_rational, rust_literals_between(src, "fn new(day_fraction: f64, t: f64)",
+                                             "let ds = df + domega;"))$
+must(is(length(c) = 35) and is(c[26] = 360), "the 25 coefficients, the day's 360 and nine rate terms")$
+[pl, plp, pF, pD, pOm] : makelist(sum(c[5*(k - 1) + j]*T^(j - 1), j, 1, 5), k, 1, 5)$
+[rl, rlp, rF, rD, rOm] : [c[27] + c[28]*T, c[29], c[30] + c[31]*T, c[32] + c[33]*T, c[34] + c[35]*T]$
+value : block([s : pF + pOm, h], h : s - pD, [360*FR - pD, s, h, s - pl, -pOm, h - plp])$
+rate : block([s : rF + rOm, h], h : s - rD, [1 - rD, s, h, s - rl, -rOm, h - rlp])$
+
+/* `epoch(0)`: (TEST_FIRST_EPOCH + 0) / 86400, then
+   (TEST_DAY_JD + day_fraction - 2451545 + TT_MINUS_UTC / 86400) / 36525, left to right. */
+jd : rust_rational(rust_scalar(src, "TEST_DAY_JD"))$
+first_epoch : rust_rational(rust_scalar(src, "TEST_FIRST_EPOCH"))$
+tt : rust_rational(rust_scalar(src, "TT_MINUS_UTC"))$
+fr : d(first_epoch / 86400)$
+t : d(d(d(d(jd + fr) - 2451545) + d(tt / 86400)) / 36525)$
+epoch0 : [FR = fr, T = t]$
+
+doodson : [[2, 0, 0, 0, 0, 0], [1, 1, 0, 0, 0, 0], [0, 0, 2, 0, 0, 0], [2, 2, -2, 0, 0, 0]]$
+wrap(theta) := theta - 360*floor(theta/360)$
+arguments : flatten(map(lambda([m],
+  [m . subst(epoch0, rate), wrap(m . subst(epoch0, value))]), doodson))$
+print("ARGUMENTS_EXACT", simplode(map(lambda([v], lit(bfloat(v))), arguments), ", "))$
+/* S2 is 2 cycles per day and 720 times the day fraction exactly, whatever the polynomials say. */
+must(is(arguments[7] = 2) and is(arguments[8] = wrap(720*fr)),
+     "(1) holds: S2's frequency is 2 and its argument 720 day fractions, exactly")$
+must(transcribed(rust_table(src, "ARGUMENTS_EXACT"), map(bfloat, arguments)),
+     "(1) holds: ARGUMENTS_EXACT is M2, K1, Ssa and S2's Doodson sums at epoch(0)'s doubles, exact")$
+
+/* ---- (2) the spline ------------------------------------------------------------------------------ */
+x : map(rust_rational, rust_table(src, "SPLINE_KNOTS"))$
+u : map(rust_rational, rust_table(src, "SPLINE_VALUES"))$
+n : length(x)$
+M : makelist(concat(m, i), i, 1, n)$
+piece(y, k) := block([above : x[k + 1] - y, below : y - x[k], w : x[k + 1] - x[k]],
+  (M[k]*above^3 + M[k + 1]*below^3)/(6*w) + below*(u[k + 1]/w - M[k + 1]*w/6)
+  + above*(u[k]/w - M[k]*w/6))$
+slope(k, at) := subst(y = at, diff(piece(y, k), y))$
+/* The parabola through three points, differentiated at one of them. */
+parabola_slope(xs, us, at) := subst(y = at, diff(sum(us[i]*product(
+  if j = i then 1 else (y - xs[j])/(xs[i] - xs[j]), j, 1, 3), i, 1, 3), y))$
+equations : append(
+  [slope(1, x[1]) = parabola_slope(firstn(x, 3), firstn(u, 3), x[1])],
+  makelist(slope(k - 1, x[k]) = slope(k, x[k]), k, 2, n - 1),
+  [slope(n - 1, x[n]) = parabola_slope(lastn(x, 3), lastn(u, 3), x[n])])$
+solved : linsolve(equations, M)$
+curvature : map(rhs, solved)$
+must(is(length(curvature) = n) and every(ratnump, curvature),
+     "the defining equations fix the six second derivatives as rationals")$
+midpoint : makelist(d((x[k] + x[k + 1])/2), k, 1, n - 1)$
+midvalues : makelist(subst(solved, piece(midpoint[k], k)), k, 1, n - 1)$
+print("SPLINE_CURVATURE_EXACT", simplode(map(lambda([v], lit(bfloat(v))), curvature), ", "))$
+print("SPLINE_MIDPOINT_EXACT", simplode(map(lambda([v], lit(bfloat(v))), midvalues), ", "))$
+must(transcribed(rust_table(src, "SPLINE_CURVATURE_EXACT"), map(bfloat, curvature))
+     and transcribed(rust_table(src, "SPLINE_MIDPOINT_EXACT"), map(bfloat, midvalues)),
+     "(2) holds: the curvature and midpoint goldens are the clamped spline's defining equations solved exactly")$
+print("DONE")$

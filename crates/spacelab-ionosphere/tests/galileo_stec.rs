@@ -1,4 +1,5 @@
-//! STEC oracle: reproduce the JRC reference implementation of NeQuick-G.
+//! NeQuick-G slant TEC: the ICD's Annex E table (G5), and the JRC reference implementation as a
+//! comparator.
 //!
 //! `fixtures/nequick_g_jrc_stec.tsv` carries the 108 Annex E cases of the Galileo ionospheric
 //! correction algorithm ICD (issue 1.2), each repeated for all twelve months, plus an
@@ -21,7 +22,6 @@ const FIXTURE: &str = include_str!("fixtures/nequick_g_jrc_stec.tsv");
 /// One fixture row: the case label, our STEC, the reference STEC, and the ICD table value.
 struct Case {
     label: String,
-    month: u32,
     stec: f64,
     jrc: f64,
     icd_table: Option<f64>,
@@ -49,7 +49,6 @@ fn cases() -> Vec<Case> {
         );
         Case {
             label: f[0].to_owned(),
-            month,
             stec,
             jrc: num(12),
             icd_table: (f[13] != "-").then(|| num(13)),
@@ -58,24 +57,25 @@ fn cases() -> Vec<Case> {
     .collect()
 }
 
-/// Every case, every month, agrees with the reference implementation to rounding.
+/// The relative distance to the JRC reference implementation, every case in every month.
 ///
-/// Measured worst case 1.7e-13 relative: the same Kronrod G7-K15 quadrature on the same CCIR and
-/// MODIP data, with the two codes differing only in the order of floating-point operations.
+/// The same Kronrod G7-K15 quadrature on the same CCIR and MODIP data, the two codes differing only
+/// in the order of floating-point operations. What decides the model is the ICD itself: its
+/// equations (`parameters.rs`, `ray.rs` and the Kronrod nodes in `galileo.rs`, all G2) and its
+/// Annex E table, below (G5).
 #[test]
-fn the_stec_matches_the_jrc_reference_in_every_month() {
+#[ignore = "comparator: the distance to jrc, not a verdict"]
+fn stec_distance_to_jrc_in_every_month() {
     let cases = cases();
     assert_eq!(cases.len(), 108 * 12 + 2);
-    for c in &cases {
-        assert!(
-            (c.stec - c.jrc).abs() <= 1.0e-10 * c.jrc,
-            "{} month {}: stec = {}, JRC {}",
-            c.label,
-            c.month,
-            c.stec,
-            c.jrc
-        );
-    }
+    let distances: Vec<f64> = cases.iter().map(|c| (c.stec / c.jrc - 1.0).abs()).collect();
+    let max = distances.iter().copied().fold(0.0, f64::max);
+    #[expect(clippy::cast_precision_loss, reason = "1298 distances")]
+    let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+    println!(
+        "comparison | jrc | NeQuickG JRC 1.0 | NeQuick-G slant TEC, the Annex E cases in every month | relative | {} | {max:.3e} | {rms:.3e}",
+        distances.len()
+    );
 }
 
 /// The ICD's printed Annex E values agree to the table's own departure from the reference. (G5)
@@ -83,7 +83,7 @@ fn the_stec_matches_the_jrc_reference_in_every_month() {
 /// Annex E prints two decimals, but its values are not the reference implementation's rounded:
 /// 39 of the 108 differ from it by more than the 0.005 TECU rounding, up to 0.038 TECU (medium
 /// solar activity, receiver at 40.19 E, 3.00 S). This is a check on the fixture's April rows
-/// against the publication, not a tighter claim than the JRC oracle above.
+/// against the publication, whose own departure from the JRC code is the comparator above.
 ///
 /// The table is Annex E of issue 1.2, pp. 49–51: E.1 high solar activity on pp. 49–50, E.2
 /// medium on pp. 50–51, E.3 low on p. 51, 36 rows each (PDF sha256 `15d22708…be334c9b2`). All

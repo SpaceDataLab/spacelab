@@ -15,7 +15,9 @@
 //! `a_nm = √[(2n−1)(2n+1)/((n−m)(n+m))]`, `b_nm = √[(2n+1)(n+m−1)(n−m−1)/((2n−3)(n−m)(n+m))]`, and the
 //! acceleration's degree-mixing picks up the closed-form ratios `N_nm/N_{n+1,m'}` below. Everything is
 //! checked: the tests reproduce the symbolic Maxima gradient oracle (`derivations/geopotential.mac`) at
-//! two points to 1e-9, cross-check a zonal-only model against the verified [`crate::forces::Zonal`],
+//! two points to 1e-9, hold the embedded degree-70 field to its exact sum
+//! (`derivations/geopotential_degree70.mac`) at two points to 2e-14, cross-check a zonal-only model
+//! against the verified [`crate::forces::Zonal`],
 //! confirm a near-pole evaluation is finite, and confirm a degree-70 field is stable and genuinely
 //! differs from degree 20 (where all modern models still agree) — and, one octave up, that a degree-120
 //! field is finite and differs from degree 70 by the short-wavelength terms.
@@ -758,34 +760,76 @@ mod tests {
         );
     }
 
-    /// The degree-70 field matches an INDEPENDENT implementation: `derivations/geopotential_validate.py`
-    /// evaluates the same `XGM2019e` coefficients with `SciPy` associated-Legendre functions and a numerical
-    /// gradient (nothing shared with the Cartesian solid-harmonic recursion here), and agrees to ~1e-8.
+    /// Two body-fixed points, about 660 and 340 km up, off every axis.
+    const DEGREE_70_POINTS: [[f64; 3]; 2] = [
+        [5_000_000.0, 3_500_000.0, 2_600_000.0],
+        [6_600_000.0, 1_200_000.0, 900_000.0],
+    ];
+    /// The degree-70 acceleration at [`DEGREE_70_POINTS`], m/s²: the defining spherical-harmonic sum's
+    /// gradient over `MODEL_COEFFS`' degree ≤ 70 rows, in exact arithmetic
+    /// (`derivations/geopotential_degree70.mac` (2)).
+    #[expect(
+        clippy::excessive_precision,
+        reason = "the derivation's 25 digits, read back by its transcription check"
+    )]
+    const DEGREE_70_EXACT: [[f64; 3]; 2] = [
+        [
+            -6.828633336252913862144750e0,
+            -4.780129214393606018061134e0,
+            -3.561529182683711712195607e0,
+        ],
+        [
+            -8.496057981545975891271601e0,
+            -1.544816066002173962920619e0,
+            -1.161867645140714098082734e0,
+        ],
+    ];
+    /// Relative, per component. The worst miss measured is 4.44e-15, 20 ε summed over 2553
+    /// terms; the bound is 4.5 times that.
+    const DEGREE_70_BOUND: f64 = 2.0e-14;
+
+    /// The degree-70 field is its defining spherical-harmonic sum, differentiated. (G3)
+    ///
+    /// The derivation writes each term as an exact rational times `N̄_nm / r` — the explicit-sum
+    /// Legendre polynomial and `(x + iy)^m` in place of any recursion — so it shares nothing with the
+    /// Cunningham–Gottlieb solid harmonics here.
     #[test]
-    fn validated_against_scipy_at_degree_70() {
+    fn the_degree_70_field_is_the_spherical_harmonic_sum_differentiated() {
         let g = GeoPotential::embedded(70).unwrap();
-        let cases = [
-            (
-                [5_000_000.0, 3_500_000.0, 2_600_000.0],
-                [-6.8286333121, -4.7801292054, -3.5615291595],
-            ),
-            (
-                [6_600_000.0, 1_200_000.0, 900_000.0],
-                [-8.4960579611, -1.5448160693, -1.1618676633],
-            ),
-        ];
-        for (r, expect) in cases {
-            let a = g.acceleration(0.0, &r, &[0.0; 3]);
+        let mut worst: f64 = 0.0;
+        for (r, exact) in DEGREE_70_POINTS.iter().zip(DEGREE_70_EXACT) {
+            let a = g.acceleration(0.0, r, &[0.0; 3]);
             for i in 0..3 {
-                let rel = (a[i] - expect[i]).abs() / expect[i].abs();
-                assert!(
-                    rel < 1e-6,
-                    "axis {i}: {} vs SciPy {} (rel {rel:.2e})",
-                    a[i],
-                    expect[i]
-                );
+                worst = worst.max((a[i] / exact[i] - 1.0).abs());
             }
         }
+        assert!(worst < DEGREE_70_BOUND, "worst relative miss {worst:e}");
+    }
+
+    /// The same acceleration against `derivations/geopotential_validate.py`: `SciPy`'s `lpmv`
+    /// associated-Legendre functions over the same coefficients and a numerical gradient, printed at
+    /// eleven significant digits.
+    #[test]
+    #[ignore = "comparator: the distance to scipy, not a verdict"]
+    fn degree_70_distance_to_scipy() {
+        let g = GeoPotential::embedded(70).unwrap();
+        let scipy = [
+            [-6.8286333121, -4.7801292054, -3.5615291595],
+            [-8.4960579611, -1.5448160693, -1.1618676633],
+        ];
+        let mut distances = Vec::new();
+        for (r, expect) in DEGREE_70_POINTS.iter().zip(scipy) {
+            let a = g.acceleration(0.0, r, &[0.0; 3]);
+            for i in 0..3 {
+                distances.push((a[i] / expect[i] - 1.0).abs());
+            }
+        }
+        let max = distances.iter().copied().fold(0.0, f64::max);
+        let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+        println!(
+            "comparison | scipy | not recorded | the degree-70 XGM2019e acceleration at two points | relative | {} | {max:.3e} | {rms:.3e}",
+            distances.len()
+        );
     }
 
     /// A near-polar evaluation is finite (the Cartesian solid-harmonic form is pole-nonsingular).

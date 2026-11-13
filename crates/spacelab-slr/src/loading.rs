@@ -46,7 +46,9 @@
 //! The published series pin the transcription at one epoch. `derivations/ocean_loading.mac` checks
 //! the parts behind it: the Delaunay polynomials against SOFA's, the rates as their derivatives,
 //! Darwin's relations and the textbook periods of the eleven specified constituents, and the end
-//! condition of `SPLINE`.
+//! condition of `SPLINE`. `derivations/hardisp_goldens.mac` writes the exact arguments at the
+//! published epoch and the exact spline at six unequal knots, which the tests hold the code to; the
+//! compiled `TDFRPH`, `SPLINE` and `EVAL` in `tools/iers-oracle/` are comparators.
 
 // The Delaunay arguments are l, l', F, D and Omega and the spline's variables x, u and n, in
 // every source that defines either. Renaming them to pass a lint would make the equations
@@ -667,20 +669,65 @@ mod tests {
         }
     }
 
-    /// The tidal arguments underneath, against `TDFRPH` itself at full precision.
+    /// Frequency (cycles per day) and argument (degrees) of M2, K1, Ssa and S2 at `epoch(0)`: the
+    /// Doodson sums over the Delaunay polynomials and rates `DoodsonArguments::new` writes, at the
+    /// doubles `epoch(0)` returns, in exact arithmetic (`derivations/hardisp_goldens.mac` (1)).
+    #[expect(
+        clippy::unreadable_literal,
+        reason = "the derivation's 25 digits, read back by its transcription check"
+    )]
+    const ARGUMENTS_EXACT: [f64; 8] = [
+        1.932273616056879669781730e0,
+        3.375204283079160461297375e2,
+        1.002737909309479944963622e0,
+        1.110071115525884915495816e2,
+        5.475818618959889927243412e-3,
+        1.866392231051769838763194e2,
+        2.000000000000000000000000e0,
+        3.537499999999999922284388e1,
+    ];
+    /// Relative. The worst miss measured is 2.2e-16, one rounding; the bound is 4.5 times that.
+    const FREQUENCY_BOUND: f64 = 1.0e-15;
+    /// Degrees. The worst miss measured is 9.83e-12, Ssa's: 1.35 ulps of the 45 900° the F
+    /// polynomial reaches at this epoch, which the Doodson sum cancels down to 187°. The bound is
+    /// 4.1 times that.
+    const ARGUMENT_BOUND: f64 = 4.0e-11;
+
+    /// The tidal arguments underneath the published series, against their exact values. (G3)
     ///
     /// The published displacement series pins the whole chain, but only to the half micron its
-    /// print format carries. These are the reference routine's own frequency and phase at the
-    /// same epoch, printed at seventeen digits by `tools/iers-oracle`, so a future disagreement
-    /// separates into "the epoch chain moved" and "the admittance spline moved" instead of being
-    /// one number that got worse. S2 is in the list because its phase is `720 x` the day fraction
-    /// exactly, so a wrong day fraction cannot hide in it.
-    ///
-    /// The tolerance is zero ULP, and that is the measured agreement rather than an aspiration:
-    /// the Delaunay polynomials are evaluated in the same Horner order as the reference, so the
-    /// two produce the same bits on all eight values.
+    /// print format carries. These separate a future disagreement into "the epoch chain moved" and
+    /// "the admittance spline moved" instead of one number that got worse. S2 is in the list
+    /// because its phase is `720 x` the day fraction exactly, so a wrong day fraction cannot hide
+    /// in it.
     #[test]
-    fn the_tidal_arguments_match_the_reference_routine() {
+    fn the_tidal_arguments_are_the_doodson_sums_of_the_delaunay_polynomials() {
+        let (day_fraction, t) = epoch(0);
+        let arguments = DoodsonArguments::new(day_fraction, t);
+        let doodson = [
+            [2, 0, 0, 0, 0, 0],
+            [1, 1, 0, 0, 0, 0],
+            [0, 0, 2, 0, 0, 0],
+            [2, 2, -2, 0, 0, 0],
+        ];
+        let (mut frequency_miss, mut argument_miss) = (0.0_f64, 0.0_f64);
+        for (multipliers, exact) in doodson.iter().zip(ARGUMENTS_EXACT.chunks(2)) {
+            let frequency = arguments.frequency(*multipliers);
+            frequency_miss = frequency_miss.max((frequency / exact[0] - 1.0).abs());
+            argument_miss = argument_miss.max((arguments.argument(*multipliers) - exact[1]).abs());
+        }
+        assert!(
+            frequency_miss < FREQUENCY_BOUND && argument_miss < ARGUMENT_BOUND,
+            "frequency {frequency_miss:e} relative, argument {argument_miss:e} deg"
+        );
+    }
+
+    /// The same eight values, against `TDFRPH` itself: the reference routine's frequency and phase
+    /// at the same epoch, printed at seventeen digits by `tools/iers-oracle`. The Delaunay
+    /// polynomials are evaluated in the reference's Horner order, so the two produce the same bits.
+    #[test]
+    #[ignore = "comparator: the distance to hardisp, not a verdict"]
+    fn tidal_arguments_distance_to_tdfrph() {
         let (day_fraction, t) = epoch(0);
         let arguments = DoodsonArguments::new(day_fraction, t);
         let cases = [
@@ -704,20 +751,27 @@ mod tests {
             ),
             ("S2", [2, 2, -2, 0, 0, 0], 2.0, 35.375),
         ];
-        for (name, doodson, frequency, argument) in cases {
-            assert_within_ulps(
-                arguments.frequency(doodson),
-                frequency,
-                0,
-                &format!("{name} freq"),
-            );
-            assert_within_ulps(
-                arguments.argument(doodson),
-                argument,
-                0,
-                &format!("{name} phase"),
-            );
-        }
+        let frequency: Vec<f64> = cases
+            .iter()
+            .map(|&(_, doodson, f, _)| (arguments.frequency(doodson) - f).abs())
+            .collect();
+        let argument: Vec<f64> = cases
+            .iter()
+            .map(|&(_, doodson, _, a)| (arguments.argument(doodson) - a).abs())
+            .collect();
+        hardisp_row("TDFRPH frequency of M2 K1 Ssa S2", "cycles/day", &frequency);
+        hardisp_row("TDFRPH argument of M2 K1 Ssa S2", "deg", &argument);
+    }
+
+    /// One `comparison | ...` row of `tools/compare.py` against the IERS `HARDISP` routines.
+    fn hardisp_row(quantity: &str, unit: &str, distances: &[f64]) {
+        let max = distances.iter().copied().fold(0.0, f64::max);
+        #[expect(clippy::cast_precision_loss, reason = "a few distances")]
+        let rms = (distances.iter().map(|d| d * d).sum::<f64>() / distances.len() as f64).sqrt();
+        println!(
+            "comparison | hardisp | IERS Conventions (2010) software | {quantity} | {unit} | {} | {max:.3e} | {rms:.3e}",
+            distances.len()
+        );
     }
 
     /// The documented range is half-open, and the constituent that sits on the open end is the
@@ -766,22 +820,72 @@ mod tests {
         );
     }
 
-    /// The spline, against `SPLINE` and `EVAL` themselves at six unequally spaced knots.
+    /// Six unequally spaced knots and the values the spline tests pass through them.
+    const SPLINE_KNOTS: [f64; 6] = [0.31, 0.62, 1.07, 1.55, 2.03, 2.40];
+    const SPLINE_VALUES: [f64; 6] = [0.70, -1.30, 0.45, -0.11, 0.93, -0.28];
+    /// The second derivatives at the knots and the spline at the doubles `f64::midpoint` returns
+    /// between them, of the clamped spline whose end slopes are the end parabolas', from its
+    /// defining equations in exact arithmetic (`derivations/hardisp_goldens.mac` (2)).
+    #[expect(
+        clippy::unreadable_literal,
+        reason = "the derivation's 25 digits, read back by its transcription check"
+    )]
+    const SPLINE_CURVATURE_EXACT: [f64; 6] = [
+        1.707236164550538113411171e1,
+        4.749081717305262199889599e1,
+        -3.430102991212995899307951e1,
+        2.519940536532231352977367e1,
+        -2.482992488249262845934850e1,
+        -6.774226747942874959514937e0,
+    ];
+    #[expect(
+        clippy::unreadable_literal,
+        reason = "the derivation's 25 digits, read back by its transcription check"
+    )]
+    const SPLINE_MIDPOINT_EXACT: [f64; 5] = [
+        -6.877825927789641734943388e-1,
+        -5.919332450210525981514168e-1,
+        3.010633934740299690827116e-1,
+        4.046794810472526475093178e-1,
+        5.954130223879142804181548e-1,
+    ];
+    /// Relative. The worst miss measured is 1.33e-15, the last knot's second derivative (11 ulps:
+    /// the end parabola's slope is a difference of nearby quotients); the bound is 3.75 times that.
+    const SPLINE_BOUND: f64 = 5.0e-15;
+
+    /// The spline is the clamped cubic spline its defining equations give, at six unequally
+    /// spaced knots. (G3)
     ///
     /// Six and not four on purpose. Every band this model splines has exactly four knots — three
     /// for the long-period species, which takes the straight-line branch, and four each for the
     /// diurnal and semi-diurnal — and at four the index arithmetic `n - 2` and `n / 2` agree, as
     /// do `n - 3` and `n / 3`. So the published displacement series cannot distinguish them and
     /// the general case would go untested if this test used the shape the model uses.
-    ///
-    /// The values are the `-fdefault-real-8` build of the reference, printed at seventeen digits
-    /// by `tools/iers-oracle`. The default build differs in the seventh digit because `SPLINE` and
-    /// `EVAL` declare their working variables `REAL`; the tolerance below is against the double
-    /// build, which is what this port computes.
     #[test]
-    fn the_spline_matches_the_reference_routine_away_from_four_knots() {
-        let x = [0.31, 0.62, 1.07, 1.55, 2.03, 2.40];
-        let u = [0.70, -1.30, 0.45, -0.11, 0.93, -0.28];
+    fn the_spline_is_the_clamped_spline_of_its_defining_equations() {
+        let (x, u) = (&SPLINE_KNOTS, &SPLINE_VALUES);
+        let mut curvature = [0.0; SPECIFIED_CONSTITUENTS];
+        spline_curvature(x, u, &mut curvature[..6]);
+        let mut worst: f64 = 0.0;
+        for (got, exact) in curvature.iter().zip(SPLINE_CURVATURE_EXACT) {
+            worst = worst.max((got / exact - 1.0).abs());
+        }
+        for (i, exact) in SPLINE_MIDPOINT_EXACT.iter().enumerate() {
+            let y = f64::midpoint(x[i], x[i + 1]);
+            let got = spline_evaluate(y, x, u, &curvature[..6]);
+            worst = worst.max((got / exact - 1.0).abs());
+        }
+        assert!(worst < SPLINE_BOUND, "worst relative miss {worst:e}");
+    }
+
+    /// The spline, against `SPLINE` and `EVAL` themselves at the same knots: the
+    /// `-fdefault-real-8` build of the reference, printed at seventeen digits by
+    /// `tools/iers-oracle`. The default build differs in the seventh digit because `SPLINE` and
+    /// `EVAL` declare their working variables `REAL`.
+    #[test]
+    #[ignore = "comparator: the distance to hardisp, not a verdict"]
+    fn spline_distance_to_the_reference_routine() {
+        let (x, u) = (SPLINE_KNOTS, SPLINE_VALUES);
         let want_curvature = [
             17.072_361_645_505_36,
             47.490_817_173_052_626,
@@ -800,22 +904,29 @@ mod tests {
 
         let mut curvature = [0.0; SPECIFIED_CONSTITUENTS];
         spline_curvature(&x, &u, &mut curvature[..6]);
-        for (i, want) in want_curvature.iter().enumerate() {
-            assert_within_ulps(curvature[i], *want, 8, &format!("second derivative {i}"));
-        }
-        for (i, want) in want_midpoint.iter().enumerate() {
-            let y = f64::midpoint(x[i], x[i + 1]);
-            assert_within_ulps(
-                spline_evaluate(y, &x, &u, &curvature[..6]),
-                *want,
-                8,
-                &format!("between knots {i} and {}", i + 1),
-            );
-        }
+        let second: Vec<f64> = want_curvature
+            .iter()
+            .zip(curvature)
+            .map(|(want, got)| (got - want).abs())
+            .collect();
+        let between: Vec<f64> = want_midpoint
+            .iter()
+            .enumerate()
+            .map(|(i, want)| {
+                let y = f64::midpoint(x[i], x[i + 1]);
+                (spline_evaluate(y, &x, &u, &curvature[..6]) - want).abs()
+            })
+            .collect();
+        hardisp_row(
+            "SPLINE second derivatives at six unequal knots",
+            "1",
+            &second,
+        );
+        hardisp_row("EVAL midway between the six knots", "1", &between);
     }
 
     /// At a knot the spline returns the value it was built from — independently of the curvature,
-    /// which is why the reference comparison above is the test that pins the arithmetic — and
+    /// which is why the defining-equations test above is the one that pins the arithmetic — and
     /// outside the knots it holds the endpoint rather than running a cubic off the end.
     #[test]
     fn the_spline_interpolates_its_knots_and_does_not_extrapolate() {

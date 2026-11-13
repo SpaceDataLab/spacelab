@@ -19,8 +19,10 @@
 //! renamed and re-expressed in Rust as that licence requires; the differences are the units taken at
 //! the boundary — radians rather than degrees for the angles, to match the rest of the workspace —
 //! and the return of the two zenith components as a struct instead of three out-parameters. Neither
-//! changes a number: both are checked against the reference routines' own published test cases and
-//! against the compiled Fortran itself in `tools/iers-oracle/`.
+//! changes a number. `derivations/mendes_pavlis_zenith.mac` reads the zenith delay's 26 constants
+//! back as the paper's decimals and writes its exact value at the reference routine's test point,
+//! which the zenith-delay test holds the code to; `FCUL_A`'s published test case decides the
+//! mapping function, and the compiled Fortran in `tools/iers-oracle/` is a comparator.
 
 // `FCULa` is the model's own name, not an item in this crate, and reads as prose everywhere it
 // appears.
@@ -189,36 +191,60 @@ mod tests {
         degrees * (PI / 180.0)
     }
 
-    /// The IERS routine `FCULZD_HPA` at its own published test point: McDonald Observatory,
-    /// 2009 August 14, at the 532 nm second harmonic.
+    /// The zenith delay at the IERS routine `FCULZD_HPA`'s own test point — McDonald Observatory,
+    /// 2009 August 14, the 532 nm second harmonic — `[hydrostatic, non-hydrostatic]` in metres: the
+    /// Mendes–Pavlis equations in exact arithmetic at the doubles the test passes, to 25 digits
+    /// (`derivations/mendes_pavlis_zenith.mac` reads this table back).
+    #[expect(
+        clippy::unreadable_literal,
+        reason = "the derivation's 25 digits, read back by its transcription check"
+    )]
+    const ZENITH_EXACT: [f64; 2] = [1.932995972236289676416914e0, 2.233752731683582900825962e-3];
+
+    /// Relative. The worst miss measured is 5.82e-16, the non-hydrostatic part (1.3e-18 m, three
+    /// ulps of its 2.2 mm); the hydrostatic part and the total are the nearest doubles. The bound is
+    /// 3.4 times that.
+    const ZENITH_BOUND: f64 = 2.0e-15;
+
+    fn mcdonald_zenith_delay() -> ZenithDelay {
+        mendes_pavlis_zenith_delay(radians(30.671_666_67), 2010.344, 798.4188, 14.322, 0.532)
+    }
+
+    /// The zenith delay is the Mendes–Pavlis equations evaluated. (G3)
     ///
-    /// **The expected values here are the compiled routine's, not the ones printed in its header
-    /// comment, because the two disagree.** Built with `gfortran -fdefault-real-8`, `FCULZD_HPA`
-    /// returns a zenith hydrostatic delay of `1.932_995_972_236_289_6` m; its header says
-    /// `1.932_992_176_591_644_462` m. That is 3.8 µm, two parts in 10⁶, and it is a constant
-    /// *ratio* across all three outputs — so it is the `f` gravity factor that divides them all,
-    /// and it is a stale value in the IERS distribution's documentation rather than anything a
-    /// caller can act on. The build flag is not the cause: a default `gfortran` build differs from
-    /// the double one by 1.6e-12 m, six orders below the gap. `FCUL_A`'s published value, by
-    /// contrast, matches its own code exactly. This port reproduces what the routine computes, to
-    /// one ULP; `tools/iers-oracle/` rebuilds the Fortran and prints both numbers.
+    /// The exact value also settles the reference routine's header: it prints a hydrostatic delay of
+    /// `1.932_992_176_591_644_462` m, 3.8 µm (two parts in 10⁶) from the equations, a constant ratio
+    /// across all three outputs and so a stale gravity factor `f` in the IERS distribution's
+    /// documentation. The compiled routine computes the equations' value, the comparator below.
     #[test]
-    fn the_zenith_delay_reproduces_the_iers_reference_routine() {
-        let z =
-            mendes_pavlis_zenith_delay(radians(30.671_666_67), 2010.344, 798.4188, 14.322, 0.532);
-        assert_within_ulps(
-            z.hydrostatic,
-            1.932_995_972_236_289_6,
-            4,
-            "zenith hydrostatic delay",
+    fn the_zenith_delay_is_the_mendes_pavlis_equations_evaluated() {
+        let z = mcdonald_zenith_delay();
+        let total = ZENITH_EXACT[0] + ZENITH_EXACT[1];
+        let misses = [
+            (z.hydrostatic / ZENITH_EXACT[0] - 1.0).abs(),
+            (z.non_hydrostatic / ZENITH_EXACT[1] - 1.0).abs(),
+            (z.total() / total - 1.0).abs(),
+        ];
+        let worst = misses.into_iter().fold(0.0, f64::max);
+        assert!(worst < ZENITH_BOUND, "{worst:.3e}, misses {misses:?}");
+    }
+
+    /// The distances to the compiled `FCULZD_HPA` (`gfortran -fdefault-real-8`), which
+    /// `tools/iers-oracle/` rebuilds and prints at seventeen digits.
+    #[test]
+    #[ignore = "comparator: the distance to fculzd_hpa, not a verdict"]
+    fn zenith_delay_distance_to_the_iers_routine() {
+        let z = mcdonald_zenith_delay();
+        let distances = [
+            (z.hydrostatic - 1.932_995_972_236_289_6).abs(),
+            (z.non_hydrostatic - 0.223_375_273_168_358_32e-2).abs(),
+            (z.total() - 1.935_229_724_967_973_2).abs(),
+        ];
+        let max = distances.into_iter().fold(0.0, f64::max);
+        let rms = (distances.iter().map(|d| d * d).sum::<f64>() / 3.0).sqrt();
+        println!(
+            "comparison | fculzd_hpa | IERS Conventions (2010) software | the Mendes-Pavlis zenith delay at McDonald | m | 3 | {max:.3e} | {rms:.3e}"
         );
-        assert_within_ulps(
-            z.non_hydrostatic,
-            0.223_375_273_168_358_32e-2,
-            4,
-            "zenith non-hydrostatic delay",
-        );
-        assert_within_ulps(z.total(), 1.935_229_724_967_973_2, 4, "zenith total delay");
     }
 
     /// (G5) The test case published in the header of the IERS routine `FCUL_A.F`, IERS

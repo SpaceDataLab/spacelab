@@ -138,6 +138,16 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | box-wing SRP | relative | 5 | 1.278e-15 | 8.422e-16 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST zonal eccentricity cut over 1134 states | powers | 1134 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/tests/dsst_truncation.rs::the_eccentricity_truncation_order_distance_to_orekit` |
 | Orekit | 13.1.7 | eclipse masking ratio ν, Orekit's arrangement against the reference | 1 | 171 | 6.510e-07 | 7.041e-08 | `crates/spacelab-propagation/tests/shadow_lens.rs::orekit_masking_ratio_distance_to_the_reference` |
+| pyorbital | not recorded | scan roll and pitch, 11 instruments | rad | 1512 | 2.220e-16 | 1.221e-17 | `crates/spacelab-sensors/tests/pyorbital_geoloc.rs::scan_catalogue_distance_to_pyorbital` |
+| pyorbital | not recorded | pixel time offsets, 11 instruments | s | 756 | 1.000e-09 | 4.611e-10 | `crates/spacelab-sensors/tests/pyorbital_geoloc.rs::scan_catalogue_distance_to_pyorbital` |
+| pyorbital | not recorded | ground points of the direct sensor model, 11 instruments | m | 180 | 1.074e-03 | 6.042e-04 | `crates/spacelab-sensors/tests/pyorbital_geoloc.rs::direct_sensor_model_distance_to_pyorbital` |
+| satellite.js | 4.1.4 | position on the catalogue's worst objects | m | 343 | 4.220e-05 | 2.281e-06 | `crates/spacelab-sgp4/tests/catalogue_oracle.rs::worst_objects_distance_to_satellite_js` |
+| satellite.js | 4.1.4 | velocity on the catalogue's worst objects | m/s | 343 | 3.077e-09 | 1.751e-10 | `crates/spacelab-sgp4/tests/catalogue_oracle.rs::worst_objects_distance_to_satellite_js` |
+| satellite.js | 4.1.4 | propagations or element sets one side refused | count | 9281045 | 0.000e+00 | 0.000e+00 | `crates/spacelab-sgp4/tests/catalogue_oracle.rs::refusal_disagreements_with_satellite_js` |
+| satellite.js | 4.1.4 | position under the IAU convention, eight objects | m | 56 | 3.781e+01 | 1.618e+01 | `crates/spacelab-sgp4/tests/catalogue_oracle.rs::iau_convention_distance_to_satellite_js` |
+| skyfield | not recorded | ISS subpoint latitude | deg | 50 | 2.069e-08 | 1.253e-08 | `crates/spacelab-sgp4/tests/ground_track.rs::iss_ground_track_distance_to_skyfield` |
+| skyfield | not recorded | ISS subpoint longitude, Eq. (C-1) kinematic terms removed | deg | 50 | 1.189e-09 | 1.077e-09 | `crates/spacelab-sgp4/tests/ground_track.rs::iss_ground_track_distance_to_skyfield` |
+| skyfield | not recorded | ISS subpoint height | m | 50 | 5.926e-08 | 2.733e-08 | `crates/spacelab-sgp4/tests/ground_track.rs::iss_ground_track_distance_to_skyfield` |
 | Orekit | 13.1.7 | ISS pass edges, mask 10 deg, IERS EOP | s | 6 | 9.237e-05 | 6.051e-05 | `crates/spacelab/tests/access_oracle.rs::iss_pass_edges_distance_to_orekit` |
 | Orekit | 13.1.7 | ISS pass edges, mask 10 deg, no EOP | s | 6 | 3.804e-02 | 2.311e-02 | `crates/spacelab/tests/access_oracle.rs::iss_pass_edges_distance_to_orekit` |
 | Orekit | 13.1.7 | two-body position at reception | m | 470 | 8.829e-07 | 2.648e-07 | `crates/spacelab/tests/light_time_oracle.rs::two_body_distance_to_orekit` |

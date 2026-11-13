@@ -405,7 +405,7 @@ pub(crate) fn get_max_ecc_pow(e: f64) -> usize {
     }
 }
 
-/// `base^exp` for an integer exponent (repeated multiplication; `exp` small, `|exp| ≤ max_degree`).
+/// `base^exp` by repeated multiplication, relative error at most `|exp|·u`; `|exp| ≤ 9` here.
 fn powi(base: f64, exp: i64) -> f64 {
     let mut acc = 1.0;
     let n = exp.unsigned_abs();

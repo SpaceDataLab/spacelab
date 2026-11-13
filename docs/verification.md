@@ -467,6 +467,36 @@ static. MPFR 4.2.2 and GMP 6.3.0 are the system's. All three are built in user s
 `CFLAGS=-std=gnu17` with GCC 15 or later: C23 reads its `int miniyyparse();` as a declaration
 with no parameters, which conflicts with the generated parser.
 
+### 1.4 Integer powers, bounded (Ф28.E)
+
+`f64::powi` compiles to LLVM's `powi`. LLVM expands a constant exponent inline, and a variable one
+calls compiler-builtins' `__powidf2`. Both use binary powering: square the base, multiply in the
+exponent's set bits, and divide 1 by the product when the exponent is negative.
+For x^k the relative error is at most (k − 1)u when k > 0 and |k|u when k < 0, to first order
+(u = 2⁻⁵³). The induction: if x^a and x^b carry (a − 1)u and (b − 1)u, their rounded product
+carries (a + b − 1)u, and a squaring is the case a = b. Repeated multiplication has the same bound.
+The bound grows with k. F52 records that libm's tests allow `powi` 500 000 ulp: the bound reaches
+that only for k of order 10⁶.
+
+Measured with a variable exponent, on 20 000 bases in [0.05, 2) for each k in [−20, 40], against
+256-bit values in Julia,
+with the worst samples recomputed exactly in Maxima. Rust's `powi` was bit-identical to binary
+powering on all 1 200 000 samples. Its worst error was 0.996 of the bound: 36.19u at k = 40,
+15.56u at k = 19, 15.41u at k = −20. Repeated multiplication stayed lower, 10.84u at k = 40 and
+6.87u at k = 19. Its roundings are independent and partly cancel, while a squaring doubles the
+error it is given.
+
+Library code has two variable exponents. Every other variable or two-digit exponent is in a test.
+
+| Site | Exponent | Bound | Verdict |
+|---|---|---|---|
+| `spacelab-propagation` `dsst::tesseral::powi`, repeated multiplication | (e²)^(α−1) with α ≤ ⌊max_ecc_pow/2⌋ ≤ 10, so at most 9; (1 + γ)^(±m), (1 + γ)^s and (χ²)ⁿ at most `max_degree`, which the Hansen kernel limits to 5 | 8u = 8.9e-16 relative | kept. Its comment said `\|exp\| ≤ max_degree`, which the e² powers exceed: corrected |
+| `spacelab-sgp4` `tle::decimal_point_assumed`, `10.0.powi(e)` | e = ⌊log₁₀\|v\|⌋ + 1; the field accepts only \|e\| ≤ 9 | 10^e is exact for 0 ≤ e ≤ 9, and 10^−e rounds once | kept. With the division and the scaling by 1e5, the mantissa can differ from the correctly rounded one only within 3u of a decimal tie. A value parsed from a TLE is never near one |
+
+The other library calls have a one-digit literal exponent: at most 8u, or 9u for a negative one.
+`spacelab-autodiff`'s `Dual::powi` and `HyperDual::powi` call `libm::pow`. Which elementary-function
+layer the `no_std` code uses (CORE-MATH or `libm`) is still open; this audit does not depend on it.
+
 ---
 
 ## 2 · Numerical propagation, forces & DSST

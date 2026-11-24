@@ -199,3 +199,31 @@ fn the_two_conventions_do_not_agree() {
     );
     println!("conventions differ by {separation:.1} m after 24 h on sat 00005");
 }
+
+/// The `sgp4` crate still refuses catalogue 11801's blank ephemeris-type column (column 63), which
+/// `twoline2rv` reads as `0`; with the `0` typed in, the same lines parse. Upstream fix:
+/// neuromorphicsystems/sgp4#24. When a release carries it, this test fails: bump the dependency and
+/// drop `blank_ephemeris_type_as_zero`.
+#[test]
+fn the_vendor_parser_still_refuses_a_blank_ephemeris_type() {
+    let line = CASES
+        .lines()
+        .find(|l| l.starts_with("1 11801"))
+        .expect("catalogue 11801");
+    let f: Vec<&str> = line.split('|').collect();
+    assert_eq!(
+        &f[0][62..63],
+        " ",
+        "the published line 1 has a blank column 63"
+    );
+    let zero = format!("{}0{}", &f[0][..62], &f[0][63..]);
+
+    let blank = sgp4::Elements::from_tle(None, f[0].as_bytes(), f[1].as_bytes());
+    let typed = sgp4::Elements::from_tle(None, zero.as_bytes(), f[1].as_bytes());
+
+    assert!(typed.is_ok(), "the lines with a 0 typed in: {typed:?}");
+    assert!(
+        blank.is_err(),
+        "sgp4 now reads the blank column: drop blank_ephemeris_type_as_zero"
+    );
+}

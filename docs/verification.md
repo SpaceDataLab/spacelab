@@ -397,8 +397,8 @@ or `tan` today; their rows are there for the round-off legs of Ф28.K–M.
 **`pow`.** It gets a domain check, not a constant. libm 0.2.16's `pow` is FreeBSD's. When
 2³¹ + 2¹¹ ≤ |y| < 2⁶⁴ + 2⁴⁴ and |x| is in [1 − 2⁻²¹, 1 + 2⁻²⁰), it approximates log x by a short
 series, and there it is 635 ulp off at a published input. `derivations/libm_pow_sites.tsv` reads all
-134 calls of `libm::pow` in `crates/` and writes down the range of each base and exponent: 80 in
-library code, 50 in tests and 4 in examples. 120 cannot reach that region, because the exponent is
+136 calls of `libm::pow` in `crates/` and writes down the range of each base and exponent: 80 in
+library code, 52 in tests and 4 in examples. 122 cannot reach that region, because the exponent is
 bounded far below 2³¹ or the base is far from 1. No caller in the tree passes an exponent anywhere
 near 2³¹. 14 calls take the exponent from their caller and do not refuse one above 2³¹, with a base
 that can be next to 1. They are open:

@@ -28,6 +28,7 @@ crates/spacelab-autodiff/src/hyperdual.rs	129	1	powi	src	self.value	self.value, 
 crates/spacelab-autodiff/src/hyperdual.rs	130	1	powi	src	self.value	self.value, any f64	f64::from(n - 1)	f64::from(n - 1), i32 -> [-2^31, 2^31-1]	out	i32 type bound |y| <= 2^31
 crates/spacelab-autodiff/src/hyperdual.rs	131	1	powi	src	self.value	self.value, any f64	f64::from(n - 2)	f64::from(n - 2), i32 -> [-2^31, 2^31-1]	out	i32 type bound |y| <= 2^31
 crates/spacelab-autodiff/src/scalar.rs	69	1	powf	src	self	self, any f64 (caller)	p	p forwarded: every generic S::powf / x.powf site instantiated at S = f64 (see # indirect): literals -1.5, 1.7, [1, 63], and radiometric.rs:761 (-k) / :951 (k-2) with k only checked > 0 and finite (radiometric.rs:740); reached in-workspace from the Python bridge solar_corona_delay(series=...) (spacelab-python/src/lib.rs:4767-4787) and C API sl_solar_corona_delay (spacelab-capi/src/lib.rs:10719-10764), which pass user exponents; public API: also any external caller	open	reachable from this workspace's own bindings: k = 2^31 + 2^12 + 0.5 (non-integer, > 64) sends radiometric.rs:951 to tanh-sinh with cos(theta) -> 1 at nodes near theta = 0
+crates/spacelab-constellation/src/analysis.rs	1126	1	one_and_two_sites_have_their_closed_forms	test	10.0	{10.0} literal	-f64::from(m)	[-13, -3]: m in 3..=13 (analysis.rs:1125)	out	|y| <= 13
 crates/spacelab-control/tests/formation_consensus.rs	87	1	random_graph	test	10.0	{10.0} literal	rng.unit()	[0, 1): Rng::unit (spacelab-estimation/src/sampling.rs:85-89)	out	|y| < 1
 crates/spacelab-coverage/src/observability.rs	247	1	airmass_kasten_young_1989	src	deg + 6.07995	>= 6.07995: deg >= 0 (h < 0 or NaN returns at observability.rs:243-245)	-1.6364	{-1.6364} literal	out	|y| = 1.6364
 crates/spacelab-coverage/src/photometry.rs	71	1	krisciunas_schaefer_airmass	src	1.0 - 0.96 * s * s	[0.04, 1]: 1 - 0.96 sin^2 Z	-0.5	{-0.5} literal	out	|y| = 0.5
@@ -69,6 +70,7 @@ crates/spacelab-estimation/src/radiometric.rs	848	1	solar_corona_delay	src	SOLAR
 crates/spacelab-estimation/src/richardson.rs	40	1	richardson2	src	t1	t1, caller-supplied, unchecked	alpha	alpha, caller-supplied, unchecked (pub fn richardson2, re-exported estimation/src/lib.rs:105); in-workspace alpha = 1.0 (richardson.rs:141, :150, :160-161); public API: also any external caller	open	no check on alpha or t1; t1 near 1 with |alpha| > 2^31 enters R
 crates/spacelab-estimation/src/richardson.rs	40	2	richardson2	src	t2	t2, caller-supplied, unchecked	alpha	alpha, as richardson.rs:40 occ 1	open	no check on alpha or t2
 crates/spacelab-estimation/src/richardson.rs	59	1	richardson_extrapolate	src	nodes[i]	nodes[i], caller-supplied (doc: positive and distinct, not checked)	alpha	alpha, caller-supplied, unchecked (pub fn richardson_extrapolate); in-workspace alpha in {1.0, -1.0} (richardson.rs:108, :122, :162); public API: also any external caller	open	no check on alpha or nodes
+crates/spacelab-estimation/src/robust.rs	825	1	at_zero_innovation_the_student_t_variance_is_r_n_over_n_plus_1_at_every_prior	test	10.0	{10.0} literal	f64::from(k)	[-17, 17]: k in -17..=17 (robust.rs:824)	out	|y| <= 17
 crates/spacelab-estimation/tests/process_noise_consistency.rs	351	1	dynamic_model_compensation_beats_every_tuning_of_a_white_acceleration_q	test	10.0	{10.0} literal	f64::from(quarter) / 4.0	[-7, -3]: quarter/4, quarter in -28..=-12 (process_noise_consistency.rs:350)	out	|y| <= 7
 crates/spacelab-gnss/src/models.rs	64	1	klobuchar_iono_delay	src	0.53 - e	0.53 - e, e = elevation in semicircles	3.0	{3.0} literal	out	|y| = 3
 crates/spacelab-gnss/src/models.rs	335	1	gmf_legendre	src	2.0	{2.0} literal	-(n as f64)	[-9, 0]: -n, n in 0..=9 (models.rs:324)	out	|y| <= 9
@@ -223,7 +225,7 @@ crates/spacelab-autodiff/tests/derivatives.rs	267	HyperDual<1>::powi -> hyperdua
 crates/spacelab-autodiff/tests/derivatives.rs	267	HyperDual<1>::powi -> hyperdual.rs:129-131	3	n = 3 -> {3, 2, 1}	out	|y| <= 3
 crates/spacelab-autodiff/tests/derivatives.rs	273	HyperDual<1>::powi -> hyperdual.rs:129-131	2	n = 2 -> {2, 1, 0}	out	|y| <= 2
 crates/spacelab-autodiff/tests/derivatives.rs	273	HyperDual<1>::powi -> hyperdual.rs:129-131	2	n = 2 -> {2, 1, 0}	out	|y| <= 2
-# gpu-bare-pow (not in the 134)
+# gpu-bare-pow (not in the 136)
 # path	line	context	exponent	verdict	justification
 crates/spacelab-gpu/src/lib.rs	455	WGSL source inside const LAMBERT_SHADER: &str = r"..." (lib.rs:424-517), fn tof_err	1.5 literal	out	WGSL builtin pow(f32) run by the GPU driver via wgpu/naga; not Rust, not libm
 crates/spacelab-gpu/src/lib.rs	572	WGSL source inside const SGP4_SHADER: &str = r"..." (lib.rs:529-638), fn main	3.0 literal	out	WGSL builtin pow(f32); not libm
@@ -240,6 +242,7 @@ crates/spacelab-gpu/src/lib.rs	591	WGSL source inside SGP4_SHADER (lib.rs:529-63
 #   crates/spacelab-autodiff/src/dual.rs	3
 #   crates/spacelab-autodiff/src/hyperdual.rs	4
 #   crates/spacelab-autodiff/src/scalar.rs	1
+#   crates/spacelab-constellation/src/analysis.rs	1
 #   crates/spacelab-control/tests/formation_consensus.rs	1
 #   crates/spacelab-coverage/src/observability.rs	1
 #   crates/spacelab-coverage/src/photometry.rs	17
@@ -254,6 +257,7 @@ crates/spacelab-gpu/src/lib.rs	591	WGSL source inside SGP4_SHADER (lib.rs:529-63
 #   crates/spacelab-estimation/examples/srukf_origin_sweep.rs	1
 #   crates/spacelab-estimation/src/radiometric.rs	1
 #   crates/spacelab-estimation/src/richardson.rs	3
+#   crates/spacelab-estimation/src/robust.rs	1
 #   crates/spacelab-estimation/tests/process_noise_consistency.rs	1
 #   crates/spacelab-gnss/src/models.rs	5
 #   crates/spacelab-ionosphere/src/parameters.rs	1
@@ -272,8 +276,8 @@ crates/spacelab-gpu/src/lib.rs	591	WGSL source inside SGP4_SHADER (lib.rs:529-63
 #   crates/spacelab-propagation/src/symplectic.rs	1
 #   crates/spacelab-propagation/src/taylor.rs	1
 #   crates/spacelab-propagation/tests/lightcurve.rs	2
-#   TOTAL	134
-# direct verdicts: out 120, open 14; kinds: src 80, test 50, example 4
+#   TOTAL	136
+# direct verdicts: out 122, open 14; kinds: src 80, test 52, example 4
 # largest |exponent| bounds:
 #   finite bound, any base: 2^31 = 2147483648 at dual.rs:85-86 and hyperdual.rs:129-131 (i32 type); hi(2^31) = 0x41e00000 is not > 0x41e00000, so still out
 #   next finite bound: 1023 (double_double.rs:381, base 2); largest finite bound on a site whose base is not pinned away from 1: 36 (dsst/gaussian_short_period.rs:762, base -b in [-1, -0.5])

@@ -14638,6 +14638,62 @@ mod tests {
         assert!(last_error().contains("no transfer arc"), "{}", last_error());
     }
 
+    /// The binding carries the conditioning of the crate's solver: 1e-5 rad short of a half turn,
+    /// and on a 1e-5 rad short arc, it returns the arc Lagrange's theorem gives at 100 digits
+    /// (`derivations/lambert_universal.gp`, `CONDITIONED_ARCS` of `spacelab_astro::lambert`) to
+    /// `16u/δ` of `|v1|`, `δ` the distance to the degenerate angle. Through the earlier chord
+    /// parameter and `y` both were refused with `SL_ERR_DOMAIN`.
+    #[test]
+    fn the_lambert_binding_solves_next_to_a_half_turn_and_on_a_short_arc() {
+        /// `(r1, r2, tof, v1, v2)`, km and s.
+        type Arc = ([f64; 3], [f64; 3], f64, [f64; 3], [f64; 3]);
+        let rows: [Arc; 2] = [
+            (
+                [5974.699314991947, 3201.585383727156, 2466.0114812987517],
+                [-7273.119570508919, -3897.2705455312175, -3001.858124614212],
+                3651.0239500783982,
+                [-4.246083195582607, 5.054541148717858, 4.137507765878255],
+                [3.700670878039359, -4.03830097106005, -3.311146688871541],
+            ),
+            (
+                [5326.410355657255, 3505.500152526996, 2721.805294786742],
+                [5326.366140774, 3505.541391958417, 2721.8392231670496],
+                0.009100279199550379,
+                [-4.858600322713788, 4.531685691613535, 3.728293865144129],
+                [-4.858658298791241, 4.531647535111542, 3.7282642389564113],
+            ),
+        ];
+        let v = |[x, y, z]: [f64; 3]| SlVec3 { x, y, z };
+        for (r1, r2, tof, w1, w2) in rows {
+            let (p1, p2) = (v(r1), v(r2));
+            let (a, b) = (to_vec3(p1), to_vec3(p2));
+            let dnu = a.cross(b).norm().atan2(a.dot(b));
+            let delta = dnu.min(core::f64::consts::PI - dnu);
+            let (mut v1, mut v2) = (v([0.0; 3]), v([0.0; 3]));
+            // SAFETY: all four pointers are to locals of the right type.
+            let status = unsafe {
+                sl_lambert(
+                    &raw const p1,
+                    &raw const p2,
+                    tof,
+                    398_600.0,
+                    true,
+                    &raw mut v1,
+                    &raw mut v2,
+                )
+            };
+            assert_eq!(status, SL_OK, "{delta:.1e} rad: {}", last_error());
+            let off = (to_vec3(v1) - to_vec3(v(w1)))
+                .norm()
+                .max((to_vec3(v2) - to_vec3(v(w2))).norm())
+                / to_vec3(v(w1)).norm();
+            assert!(
+                off <= 16.0 * f64::EPSILON / delta,
+                "{delta:.1e} rad: velocities off by {off:.3e} of |v1|"
+            );
+        }
+    }
+
     /// The four measurement bindings are their crate functions, and a null pointer gives the NaN
     /// the header promises rather than a zero that reads as "the satellite is at the station".
     #[test]

@@ -1,0 +1,133 @@
+/* Lambert's problem in Izzo's variable -- `lambert_multirev` and `izzo_tof` in
+   crates/spacelab-astro/src/lambert.rs -- the forms the code evaluates, and the minimum time of an
+   N-revolution family.
+
+   Izzo (2015) writes the transfer in the Lancaster-Blanchard variable x, with s the semi-perimeter,
+   c the chord, lambda^2 = 1 - c/s (negative past a half turn), a = (s/2)/(1 - x^2) and the time in
+   the unit T = t sqrt(2 mu/s^3). Lagrange's equation is then, on the ellipse (|x| < 1) with
+   x = cos th, alpha = 2 th, sin(beta/2) = lambda sin th,
+       T = [(alpha - sin alpha) - (beta - sin beta) + 2 pi N]/(2 sin^3 th),
+   and on the hyperbola (x > 1, N = 0) with x = cosh th, alpha = 2 th, sinh(beta/2) = lambda sinh th,
+       T = [(sinh alpha - alpha) - (sinh beta - beta)]/(2 sinh^3 th).
+   The code took 1 - c/s, which cancels within eps of a half turn and rounds below zero (NaN on 13 %
+   of random geometries at eps ~ 1e-9), and evaluated T as a^(3/2) times the bracket, which is
+   NaN at x = 1 and lost 2e-3 relative at |1 - x| = 1e-13.
+
+   Printed `<name>: 0`, each a residual that must vanish:
+     1.    s^2 (1 - c/s) = (r1 r2 + r1.r2)/2 = r1 r2 cos^2(dnu/2), with c^2 = r1^2 + r2^2 - 2 r1.r2:
+           lambda = sqrt(r1 r2) cos(dnu/2)/s = |A|/(sqrt(2) s), A the chord parameter of
+           lambert_universal.mac 32-35, with its sign;
+     2.    the same with |A| = k/sqrt(n1 n2 - d), k = |r1 x r2|, the form with no cancellation for
+           r1.r2 < 0 (Lagrange's identity, lambert_universal.mac 31);
+     3.    S(beta^2) = (beta - sin beta)/beta^3 is even in beta, so a signed beta = 2 asin(lambda w)
+           carries the sign of lambda for both conics;
+     4-5.  with w = sqrt(|1 - x^2|) and S the Stumpff function, the coded
+           T = [(alpha/w)^3 S(+-alpha^2) - (beta/w)^3 S(+-beta^2)]/2 + pi N/w^3
+           is Lagrange's equation on the ellipse and on the hyperbola (G1);
+     6-8.  its value at x = 1 from either side is 2/3 (1 - lambda^3), with no pole (G3);
+     9.    in seconds that is Euler's parabolic time (sqrt(2)/3) sqrt(s^3/mu) (1 -+ ((s - c)/s)^(3/2));
+     10-13. the exact parabola mu = 1 from periapsis r1 = (1, 0, 0) to r2 = (0, 2, 0) (p = 2,
+           nu = 90 deg): Barker's time 4 sqrt(2)/3 equals Euler's, with sqrt(s) = (1 + sqrt 5)/2 and
+           sqrt(s - c) = (sqrt 5 - 1)/2; lambda = (3 - sqrt 5)/2, and 2/3 (1 - lambda^3) in seconds is
+           that time (G3);
+     14-15. the exact long-way parabola mu = 1, p = 2, from nu = -90 deg at r1 = (0, -2, 0) to
+           nu = 2 atan 3 at r2 = (-8, 6, 0), a 233-degree transfer: Barker's time 40 sqrt(2)/3
+           equals Euler's with the minus sign turned, and lambda = -sqrt(r1 r2) cos(dnu/2)/s < 0;
+     16-17. Izzo's dT/dx = (3 T x - 2 + 2 lambda^3 x/y)/(1 - x^2), y = sqrt(1 - lambda^2 (1 - x^2)),
+           is the derivative of T on the ellipse for every N and on the hyperbola (G1);
+     18.   at x = 0 it is -2, so the minimum of an N-revolution family, the root of dT/dx = 0, lies
+           at x > 0, on the branch with alpha < pi.
+
+   The second engine is derivations/lambert_izzo.gp: the same identities at 100 digits, the 100-digit
+   time of flight at the doubles the tests probe, the minimum times by Lagrange's equation and by
+   dT/dx, and the multi-revolution arcs the module test holds the solver to.
+
+   Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/lambert_izzo.mac </dev/null */
+
+display2d : false$
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+assume(n1 > 0, n2 > 0, c > 0, th > 0, th < %pi, lam > -1, lam < 1, s > 0, mu > 0)$
+
+/* 1-2 */
+block([s : (n1 + n2 + c)/2],
+  zero("lambda_squared_is_r1r2_cos_squared_half_over_s_squared",
+       ratsimp(ratsubst(n1^2 + n2^2 - 2*d, c^2, expand(s^2*(1 - c/s) - (n1*n2 + d)/2)))),
+  zero("lambda_without_cancellation",
+       ratsimp(ratsubst(n1^2*n2^2 - d^2, k^2,
+                        (k/(sqrt(2)*s*sqrt(n1*n2 - d)))^2 - (n1*n2 + d)/(2*s^2)))))$
+
+/* 3 */
+zero("stumpff_s_of_beta_squared_is_even", ratsimp((b - sin(b))/b^3 - ((-b) - sin(-b))/(-b)^3))$
+
+/* 4-5: b stands for the signed beta. */
+block([w : sin(th), al : 2*th, TL, TN],
+  TL : (1/w^3)*((al - sin(al)) - (b - sin(b)) + 2*%pi*N)/2,
+  TN : ((al/w)^3*(al - sin(al))/al^3 - (b/w)^3*(b - sin(b))/b^3)/2 + %pi*N/w^3,
+  zero("ellipse_time_in_the_stumpff_form", ratsimp(TL - TN)))$
+block([w : sinh(th), al : 2*th, TL, TN],
+  TL : (1/w^3)*((sinh(al) - al) - (sinh(b) - b))/2,
+  TN : ((al/w)^3*(sinh(al) - al)/al^3 - (b/w)^3*(sinh(b) - b)/b^3)/2,
+  zero("hyperbola_time_in_the_stumpff_form", ratsimp(TL - TN)))$
+
+/* 6-8: `limit` returns 2/3 here, dropping lambda; the series is what is trusted. */
+block([te, th0],
+  te : taylor(((2*th - sin(2*th)) - (2*asin(lam*sin(th)) - sin(2*asin(lam*sin(th)))))
+              /(2*sin(th)^3), th, 0, 2),
+  zero("ellipse_time_at_x_to_one", ratsimp(coeff(te, th, 0) - 2/3*(1 - lam^3))),
+  zero("ellipse_time_has_no_pole_at_x_one",
+       ratsimp(coeff(te, th, -1)) + ratsimp(coeff(te, th, -2)) + ratsimp(coeff(te, th, -3))),
+  th0 : taylor(((sinh(2*th) - 2*th) - (sinh(2*asinh(lam*sinh(th))) - 2*asinh(lam*sinh(th))))
+               /(2*sinh(th)^3), th, 0, 2),
+  zero("hyperbola_time_at_x_to_one", ratsimp(coeff(th0, th, 0) - 2/3*(1 - lam^3))))$
+
+/* 9: sigma = +-1 the sense, q = sqrt((s - c)/s), lambda = sigma q. */
+zero("parabolic_time_is_euler_s",
+     ratsimp(subst(sigma^3 = sigma, expand(radcan(
+       sqrt(2)/3*sqrt(s^3/mu)*(1 - sigma*q^3)*sqrt(2*mu/s^3) - 2/3*(1 - (sigma*q)^3))))))$
+
+/* 10-13: the short-way parabola. */
+block([s : (3 + sqrt(5))/2, c : sqrt(5), rs : (1 + sqrt(5))/2, rsc : (sqrt(5) - 1)/2, lm],
+  zero("parabola_sqrt_s", ratsimp(expand(rs^2 - s))),
+  zero("parabola_sqrt_s_minus_c", ratsimp(expand(rsc^2 - (s - c)))),
+  zero("parabola_barker_is_euler",
+       ratsimp(radcan(sqrt(2)/3*(s*rs - (s - c)*rsc) - sqrt(2^3)/2*(1 + 1/3)))),
+  lm : sqrt(1*2)*cos(%pi/4)/s,
+  zero("parabola_time_from_two_thirds_one_minus_lambda_cubed",
+       ratsimp(radcan(2/3*(1 - lm^3)*s*rs/sqrt(2) - 4*sqrt(2)/3))))$
+
+/* 14-15: the long-way parabola. r1 = 2, r2 = 10, c = |(-8, 8, 0)| = 8 sqrt 2, s = 6 + 4 sqrt 2;
+   cos dnu = r1.r2/(r1 r2) = -12/20, dnu in (pi, 2 pi), so cos(dnu/2) = -sqrt((1 + cos dnu)/2). */
+block([r1 : 2, r2 : 10, c : 8*sqrt(2), s, rs : 2 + sqrt(2), cosh2, lm, t_barker, t_euler],
+  s : (r1 + r2 + c)/2,
+  cosh2 : -sqrt((1 - 12/20)/2),
+  lm : sqrt(r1*r2)*cosh2/s,
+  /* Barker, D = tan(nu/2) from -1 to 3: sqrt(p^3)/2 [D + D^3/3]. */
+  t_barker : sqrt(2^3)/2*((3 + 27/3) - (-1 - 1/3)),
+  /* sqrt(s) = 2 + sqrt 2, so sqrt(s^3/2) = s rs/sqrt 2. */
+  t_euler : 2/3*(1 - lm^3)*s*rs/sqrt(2),
+  zero("long_way_parabola_barker",
+       ratsimp(radcan(t_barker - 40*sqrt(2)/3)) + ratsimp(expand(rs^2 - s))),
+  zero("long_way_parabola_two_thirds_one_minus_lambda_cubed",
+       ratsimp(radcan(t_euler - t_barker))))$
+
+/* 16-17: dT/dx through th; B is beta, dB/dth from sin(B/2) = lam sin th and cos(B/2) = y, and
+   1 - cos B = 2 lam^2 sin^2 th (cosh B - 1 = 2 lam^2 sinh^2 th on the hyperbola). */
+block([T, dTdth, claim],
+  T : ((2*th - sin(2*th)) - (B - sin(B)) + 2*%pi*N)/(2*sin(th)^3),
+  dTdth : diff(T, th) + diff(T, B)*2*lam*cos(th)/y,
+  claim : (3*T*cos(th) - 2 + 2*lam^3*cos(th)/y)/sin(th)^2,
+  zero("ellipse_dtdx_is_izzo_s",
+       ratsimp(trigsimp(trigexpand(subst(cos(B) = 1 - 2*lam^2*sin(th)^2,
+                                         expand(-dTdth/sin(th) - claim)))))))$
+block([T, dTdth, claim],
+  T : ((sinh(2*th) - 2*th) - (sinh(B) - B))/(2*sinh(th)^3),
+  dTdth : diff(T, th) + diff(T, B)*2*lam*cosh(th)/y,
+  claim : (3*T*cosh(th) - 2 + 2*lam^3*cosh(th)/y)/(-sinh(th)^2),
+  zero("hyperbola_dtdx_is_izzo_s",
+       ratsimp(trigsimp(trigexpand(subst(cosh(B) = 1 + 2*lam^2*sinh(th)^2,
+                                         expand(dTdth/sinh(th) - claim)))))))$
+
+/* 18 */
+zero("dtdx_at_x_zero", ratsimp(subst(x = 0, (3*T*x - 2 + 2*lam^3*x/y)/(1 - x^2)) + 2))$

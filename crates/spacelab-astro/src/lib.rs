@@ -47,7 +47,7 @@ pub use iod::{
     IodError, Sighting, gauss, gibbs, gooding, herrick_gibbs, laplace, orbit_from_angles,
 };
 pub use kepler::propagate;
-pub use lambert::{lambert, lambert_multirev};
+pub use lambert::{LambertError, lambert, lambert_multirev};
 pub use lowthrust::{Steering, propagate_lowthrust};
 pub use optimal::{MinEnergyTransfer, min_energy_transfer, optimal_control_at};
 pub use patched::{BPlane, HyperbolicArc, b_plane, hyperbolic_arc, sphere_of_influence};

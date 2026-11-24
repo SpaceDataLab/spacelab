@@ -348,44 +348,34 @@ exclude_re = [
     # that remain are line drift only: `git diff` shows the enclosing regions untouched and the
     # anchored lines byte-identical, moved +13 and +135 by insertions above them.
 
-    # `if sin_dnu.abs() < 1e-12`, tied to `<=`. `Δν` is `acos(c)` or `τ − acos(c)`, and `acos` returns
-    # nothing between `0` and `acos(1 − 2⁻⁵³) = 1.4901161193847656e-8`, nor comes closer to `π` than
-    # the same amount. The reachable `|sin Δν|` is therefore `{0, 1.2246467991473532e-16,
-    # 2.4492935982947064e-16} ∪ [1.49e-8, 1]`, and the threshold sits in an empty gap four decades
-    # wide on either side: no input can make the two comparisons disagree. The `==` and `>` ties on
-    # the same site are ordinary survivors and are killed.
-    "lambert\\.rs:101:22: replace < with <= in lambert",
+    # Six more are gone under Ф28.L, which rewrote the code they were about: the `<=` and `==` ties
+    # of `|sin Δν| < 1e-12`, here and with the screens below (`lambert` now takes `|r1 × r2|` itself
+    # against `1e-12·r1·r2`, and the `acos` gap both arguments rested on is no longer in the path), the `a > 0` test and the two `λ < 0` signs of
+    # `izzo_tof` (now `F(α) − F(β)` over `w³` with `β` signed through the odd `asin`), and the
+    # `nb < 2` tie of the scan, which no longer collects two brackets. The re-seal judges whatever
+    # survives on the new sites fresh.
 
-    # `let a = 1.0 / (1.0 - x * x); if a > 0.0`. `a == 0` needs `1 − x²` infinite, and `izzo_tof` is
-    # private and only ever called on the scan domain `x ∈ [−1 + 1e-6, 20]`, where `1 − x²` lies in
-    # `[−399, 2e-6]`. At `x = ±1` exactly `a` is `±∞` and both forms agree.
-    "lambert\\.rs:373:10: replace > with >= in izzo_tof",
-
-    # `let beta = if lambda < 0.0 { -beta0 } else { beta0 }`, on both conics. At `λ == 0` we have
-    # `β₀ = 0`, and `β − sin β` is `+0.0` for `−0.0` as well as `+0.0` (likewise `β − sinh β`), so
-    # the two branches compute the same double. `λ = 0` is unreachable besides: it needs `c == s`,
-    # a collinear geometry the `|r1 × r2|` guard has already refused.
-    "lambert\\.rs:377:30: replace < with <= in izzo_tof",
-    "lambert\\.rs:386:30: replace < with <= in izzo_tof",
-
-    # The two sign tests of the scan and the bisection, `fa * fb < 0.0` and `fx * f(a) < 0.0`,
+    # The two sign tests of the scan and the bisection, `fa * fb < 0.0` and `f(x) * f(a) < 0.0`,
     # rewritten as quotients or tied to `<=`. For finite nonzero `b`, `a·b < 0` and `a/b < 0` are
-    # the same predicate; they part only where `b` is exactly `±0`. On the scan that means a grid
-    # sample landing exactly on the root — bounded search: 1 300 325 scans (5 revolution counts ×
-    # 4001 values of `λ` × 65 targets, 2.6e9 samples) produced no exact zero that the search had not
-    # constructed, and the mutant moves none of the 24 sweep arcs. In the bisection `f(a)` does
-    # reach `±0`, but only once `a` is already the correctly rounded root: measured, 4 of the 24
-    # arcs move and by at most 5.2 ulps of `v1`.
-    "lambert\\.rs:457:15: replace \\* with / in lambert_multirev",
-    "lambert\\.rs:457:20: replace < with <= in lambert_multirev",
-    "lambert\\.rs:476:17: replace \\* with / in lambert_multirev",
-    "lambert\\.rs:476:24: replace < with <= in lambert_multirev",
-
-    # `if fa * fb < 0.0 && nb < 2`, tied to `nb <= 2` — which would index `brackets[2]` and panic on
-    # a third sign change. The same 1 300 325-scan search never saw more than two: `T(x)` is
-    # monotone in `x` for `n_rev = 0` and unimodal for `n_rev ≥ 1`, so `T − T_target` has at most
-    # two roots. Not a proof of that structure, a bounded search over it.
-    "lambert\\.rs:457:32: replace < with <= in lambert_multirev",
+    # the same predicate; they part only where `b` is exactly `±0`.
+    #
+    # The scan, now `izzo_bracket`'s, runs for `n_rev = 0` only, where `T` is monotone and the first
+    # sign change is the one root; it parts from its mutants only on a grid sample landing exactly on
+    # that root.
+    # Bounded search, on the `T` before Ф28.L: 1 300 325 scans (2.6e9 samples) produced no exact
+    # zero the search had not constructed. After it, by hand (`<=` and `/` applied in turn): the 24
+    # arcs of the sweep and the 29 of `MULTIREV_ARCS` are bit-identical.
+    #
+    # In the bisection `f(a)` does reach `±0`: where the computed `T` is flat to its last bit, a run
+    # of doubles round to the target, and once `a` is in it the two spellings walk to different
+    # ends of the run. By hand after Ф28.L, `<=` moves 21 of those 53 arcs and `/` 14, by at most
+    # 24.4 ulps of `v1` — the width of the run, which is the `κ` with which `T` is computed, and
+    # inside the 64 ulps the 100-digit arcs of
+    # `every_multi_revolution_arc_is_the_one_lagrange_s_equation_gives_at_100_digits` allow.
+    "lambert\\.rs:565:19: replace \\* with / in izzo_bracket",
+    "lambert\\.rs:565:24: replace < with <= in izzo_bracket",
+    "lambert\\.rs:705:17: replace \\* with / in lambert_multirev",
+    "lambert\\.rs:705:24: replace < with <= in lambert_multirev",
 
     # --- `lambert.rs` again, the single-revolution solver as #290 and #292 left it. Twelve survivors,
     # three kinds, and the measurement that separates them is `examples/lambert_domain_probe.rs`:
@@ -396,7 +386,7 @@ exclude_re = [
     # ledgered — `the_bracket_never_reaches_one_whole_revolution` asserts the invariant they broke,
     # that no bracket reaches `z = 4π²`, which no count of the solver's had ever been able to see.
     #
-    # Four redundant screens. Each refuses an argument the closure check at the end of `lambert` also
+    # Three redundant screens. Each refuses an argument the closure check at the end of `lambert` also
     # refuses — fly the answer forward with `propagate` and require it to arrive at `r2` — so deleting
     # one changes which line says no, never the answer. They stay because a screen at the top of the
     # function is the contract, and because reaching the closure check costs a hundred Newton steps on
@@ -406,45 +396,37 @@ exclude_re = [
     # `+∞`. `no_transfer_is_solved_in_no_time` already presents 5 000 of those and the probe another
     # 5 616; every one is refused either way, because `y(z)` cannot reach a root that does not exist
     # and the arc the search settles on misses `r2` by a full radius.
-    "lambert\\.rs:81:26: replace && with \\|\\| in lambert",
-    "lambert\\.rs:81:33: replace > with >= in lambert",
-
-    # `sin_dnu.abs() < 1e-12`, rewritten as `== 1e-12` — the same site as the `<=` tie above, from the
-    # other side: it admits everything below the threshold except the threshold itself. The reachable
-    # `|sin Δν|` below 1e-12 is `{0, 1.2246467991473532e-16, 2.4492935982947064e-16}`, i.e. Δν of
-    # exactly 0, π or 2π. At 0, `1 − cos Δν` is `0` and `A = 0·∞` is `NaN`; at π and 2π `A` is 1e-16
-    # small and the transfer plane is undefined, so the velocity is normal to nothing in particular.
-    # All 432 exact-degenerate calls of the probe are refused either way.
-    "lambert\\.rs:101:22: replace < with == in lambert",
+    "lambert\\.rs:97:26: replace && with \\|\\| in lambert",
+    "lambert\\.rs:97:33: replace > with >= in lambert",
 
     # `!yz.is_finite() || yz <= 0.0`, weakened to `&&`, which lets a non-positive `y` through. It
     # cannot survive the arithmetic below it: `lg = A√(y/µ)` is `NaN` for `y < 0` and exactly `0` for
     # `y = 0`, so `v1` is `NaN` or `±∞`, `propagate` returns the same, and the closure check refuses a
     # non-finite miss. `Arc::solve` refuses these first in any case — at `y = 0` the residual is
     # `−√µ·tof`, a full scale from zero.
-    "lambert\\.rs:114:24: replace \\|\\| with && in lambert",
+    "lambert\\.rs:105:24: replace \\|\\| with && in lambert",
 
     # Two exact identities in the Stumpff-free `y`.
     #
     # `if z > 0.0 { cos(√z/2) } else { cosh(√z/2) }`, tied to `>=`. The branches part only at `z == 0`,
     # where `√0 = 0`, `cos 0 = cosh 0 = 1` — the same double. `z == −0.0` goes the other way and lands
     # on `cosh(−0.0) = 1` against `cos(−0.0) = 1`, also the same double.
-    "lambert\\.rs:182:25: replace > with >= in Arc::y",
+    "lambert\\.rs:265:25: replace > with >= in Arc::y",
 
     # `!(self.y(z) > 0.0 && (value >= 0.0 || value.is_nan()))`, tied to `y(z) >= 0.0`. They can part
     # only at `y(z) == 0`, and there `tof_err` is `(0/C)^1.5·S + A·√0 − √µ·tof = −√µ·tof` exactly —
     # strictly negative for the `tof > 0` the entry gate enforces and never `NaN`. So the inner
     # disjunction is false, the conjunction is false, and `below` is `true` under both spellings.
-    "lambert\\.rs:226:33: replace > with >= in Arc::probe",
+    "lambert\\.rs:309:33: replace > with >= in Arc::probe",
 
     # Three ties on an exact equality between two independently computed doubles, in the safeguarded
     # Newton loop. `newton > lo && newton < hi` parts from `>=`/`<=` only when the Newton iterate lands
     # bit-exactly on a bracket endpoint, which needs `residual/F′` to equal `z − lo` to the last bit;
     # `|residual| > 1e-8·√µ·tof` parts only when the two sides are the same double. Bounded search:
     # 38 890 solves across the probe and the long-way sweep, no tie.
-    "lambert\\.rs:336:55: replace > with >= in Arc::solve",
-    "lambert\\.rs:336:70: replace < with <= in Arc::solve",
-    "lambert\\.rs:362:58: replace > with >= in Arc::solve",
+    "lambert\\.rs:419:55: replace > with >= in Arc::solve",
+    "lambert\\.rs:419:70: replace < with <= in Arc::solve",
+    "lambert\\.rs:445:58: replace > with >= in Arc::solve",
 
     # --- `iod.rs`. One redundant screen and one exact equality.
     #

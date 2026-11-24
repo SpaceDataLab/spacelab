@@ -31,8 +31,7 @@ fn main() {
             for &tof in &tofs {
                 for prograde in [true, false] {
                     // Izzo decides which configurations are physically solvable at all.
-                    let Some((iv1, _)) = lambert_multirev(r1, r2, tof, MU, prograde, 0, false)
-                    else {
+                    let Ok((iv1, _)) = lambert_multirev(r1, r2, tof, MU, prograde, 0, false) else {
                         continue;
                     };
                     let izzo_miss = (propagate(r1, iv1, MU, tof).0 - r2).norm();

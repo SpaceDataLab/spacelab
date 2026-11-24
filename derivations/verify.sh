@@ -1329,7 +1329,8 @@ if have maxima; then
     mac_zeros cw.mac 19 "Clohessy-Wiltshire: closed form, unit determinant, limit of exact relative motion"
     mac_zeros lowthrust.mac 12 "low-thrust energy rate, tangential steering, Edelbaum's quasi-circular rate"
     mac_zeros optimal_pmp.mac 16 "minimum-energy PMP: optimal control, Hamilton's equations, primer equation"
-    mac_zeros lambert_universal.mac 30 "Lambert in universal variables: y(z), dF/dz, Kepler's equation, the Wronskian"
+    mac_zeros lambert_universal.mac 38 "Lambert in universal variables: y(z), dF/dz, Kepler's equation, the Wronskian; the chord parameter without cancellation at a half turn and y in its difference form on short arcs"
+    mac_zeros lambert_izzo.mac 18 "Lambert in Izzo's variable: lambda without 1 - c/s, the time of flight in Stumpff form with its parabolic limit 2/3 (1 - lambda^3), two exact parabolas, dT/dx and the minimum time of an N-revolution family"
     mac_zeros iod_classical.mac 29 "Gibbs, Herrick-Gibbs, Gauss and Laplace on their own models"
     mac_zeros transfer_excess_speed.mac 10 "hyperbolic excess speed and C3 on exact conics"
     mac_zeros patched_conics.mac 10 "sphere of influence, flyby hyperbola and the B-plane"
@@ -1532,7 +1533,7 @@ if have gp; then
         wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay split_conformal_coverage cluster_design_effect group_sequential_obf tle_kozai_recovery harris_priester_law \
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form analysis_alpha_exact \
         rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
-        cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal iod_classical patched_conics \
+        cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal lambert_izzo iod_classical patched_conics \
         targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step sdtm_column sdtm_composition sdtm_overcooling sdtm_nitric_flux sdtm_flux_memory gaussian_scores drag_error_growth central_difference \
         density_calibration_ridge \
         wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms \

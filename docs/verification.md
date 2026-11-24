@@ -1325,8 +1325,11 @@ change to the seed or the corrector shows that the fixture must be generated aga
 | astro | Lambert arc re-propagates to target; Izzo N=0 ≡ UV | Izzo 2015; universal-variable Lambert | self-consistency (independent propagator) | dr < 1e-3 km / dv < 1e-6 km·s⁻¹ | src/lambert.rs |
 | astro | Lambert bracket — short and hyperbolic arcs | Curtis Alg. 5.2 (universal variables); Numerical Recipes `rtsafe` (safeguarded Newton) | self-consistency: propagate the returned `v1` for `tof` and land on `r2` | 6 s / 44 km arc closes to 3.1e-8 m·s⁻¹; the previously-refused 50–236 s arcs to 3.5e-10 of scale | src/lambert.rs |
 | astro | Lambert refusal floor | `y = 0` degeneracy of the universal-variable formulation | bisection on the tof at which a solution first exists | 0.1347 s the short way, 0.2514 s the long way, on a 20 000 km chord | src/lambert.rs |
-| astro | Lambert long-way sweep — refusals and misses as Δν → 2π | Curtis Eq. 5.38 evaluated through the half-angle identities; closure gate on the returned arc | 25 270 arcs Izzo solves to 1e-9 of the radius, each re-flown through `kepler::propagate` | refused 354 → 111, answers missing r2 by > 1e-6 of its radius 28 → 0, worst accepted 9.3e-7 | examples/lambert_longway_sweep.rs |
+| astro | Lambert long-way sweep — refusals and misses as Δν → 2π | Curtis Eq. 5.38 evaluated through the half-angle identities; closure gate on the returned arc | 25 270 arcs Izzo solves to 1e-9 of the radius, each re-flown through `kepler::propagate` (25 264 after Ф28.L, §3.5) | refused 354 → 111 → **76**, answers missing r2 by > 1e-6 of its radius 28 → 0, worst accepted 9.3e-7 → **6.0e-7**; without the gate 43 → 8 wrong answers | examples/lambert_longway_sweep.rs |
 | astro | Lambert domain fingerprint — the guards no count can see | Curtis Alg. 5.2 as #290/#292 left it | differential: nine surviving mutants applied one at a time, output hashed over 13 620 calls | nine bit-identical; the two ceiling mutants move the hash and are now killed by `the_bracket_never_reaches_one_whole_revolution` | examples/lambert_domain_probe.rs |
+| astro | Lambert chord parameter `A` and short-arc `y` — G1 | `A = √(r1 r2 + r1·r2)`, or `‖r1×r2‖/√(r1 r2 − r1·r2)` past a quarter turn (Lagrange's identity), negated the long way; `y` on short arcs as `(√r1 − √r2)² + 2√(r1 r2)[sin²((h−ψ)/2) + sin²((h+ψ)/2)]` | **Maxima** `derivations/lambert_universal.mac` 31–38; PARI/GP `lambert_universal.gp` at 100 digits (4.3e-115, 8.1e-115), and the 100-digit arcs 1e-5 and 1e-7 rad from a half turn and on 1e-5, 1e-6 rad short arcs | `A` ≤ 4u/ε of its 100-digit value (0.16 measured; Curtis's form 1.0e-10 relative at ε = 1e-3, 470× the bound); both solvers ≤ 16u/δ of the 100-digit arc (1.41 measured; before: refused) | src/lambert.rs |
+| astro | Izzo `T(x, λ, N)` next to and at the parabola — G1, G3 | Lagrange's equation as `[F(α) − F(β)]/2/w³ + πN/w³`, `F(u) = u³S(±u²)` below \|u\| = 1; at `x = 1` Euler's ⅔(1 − λ³); λ = √(r1 r2)·cos(Δν/2)/s | **Maxima** `derivations/lambert_izzo.mac` (18 identities: the Stumpff forms, the `x → 1` limit by series, Euler's time, two exact parabolas, dT/dx); PARI/GP `lambert_izzo.gp`: `T` at 100 digits with the condition number `κ` of its subtraction | 52 doubles beside `x = 1` ≤ 8κ ulps (2.47κ measured; before: 55κ at x = 0.999); `T(1, λ)` ≤ 1 ulp of ⅔(1 − λ³) (before: NaN); the two exact parabolas through both solvers ≤ 16 ulps of `v1` (2.12 measured) | src/lambert.rs |
+| astro | `lambert_multirev` — G2, S2 | Lagrange's time equation on the branch named; the minimum time of an N-revolution family at the root of dT/dx = 0, below which a typed `LambertError::BelowMinimumTime` | PARI/GP `lambert_izzo.gp` §4–5: 12 minimum times by Lagrange's equation and by dT/dx (agreeing to 1e-115), 29 arcs N = 0–2 on both branches solved at 100 digits and closed by propagation to 1e-97 | 29 arcs ≤ 64 ulps of `v1` (18.8 measured; a 1.5e-9 rad half turn was refused before); `t_min` ≤ 16 ulps (1.55); `t_min(1 − 1e-9)` refused with the minimum, `t_min(1 + 1e-9)` solved on both branches and closed to 1.6e-14 of `|r2| + tof·|v1|`; 320 arcs N = 0–3 from 1.01 to 4 `t_min` closed by `kepler::propagate` to 4.7e-15 of that scale | src/lambert.rs |
 | coverage | air mass — Kasten & Young (1989) against Young (1994) | Applied Optics 28, 4735 (apparent altitude); Applied Optics 33, 1108 (true zenith angle) | cross-model: the two published fits joined through Sæmundsson (1986) refraction, which neither used | 6.0e-3 relative at the horizon, 6.2e-4 above 10°; feeding either the other's argument is 20 % at the horizon | src/observability.rs |
 | coverage | rise/set and twilight — polar day and polar night | Astronomical Almanac standard altitudes (−34′, −50′); IAU 2000 ERA rate 15.041 067 178 670 °/h | property: the `\|cos H\| > 1` branches at Tromsø (69.65° N) at both solstices | `AlwaysAbove` / `AlwaysBelow` rather than a NaN; equatorial equinox arc exactly π/2 | src/observability.rs |
 | coverage | air mass and refraction — the four fits against a numerically integrated ray | U.S. Standard Atmosphere 1976 (the seven-layer hydrostatic formulation, from its own constants); Gladstone–Dale; the spherical ray invariant `n r sin ψ = const`; Ciddor (1996) dry-air refractivity | first principles: two quadratures under the `r = r₀ + u²` substitution that cancels the horizon singularity exactly, sharing no coefficient with any fit under test | Kasten & Young 0.63 % at the apparent horizon and 0.16 % above 0.5°; Young 1994 0.05 % where defined; **both refraction fits run high everywhere** — Sæmundsson +0.43 % to +4.79 %, Bennett +0.58 % to +3.27 %, tightest at 2°–3° and worst at 40°–50° (#293) | tests/integrated_airmass.rs |
@@ -1335,7 +1338,7 @@ change to the seed or the corrector shows that the fixture must be generated aga
 | coverage | optical detectability — CCD equation and V zero point | Bessell (1990) V band; Bessell, Castelli & Plez (1998) flux; standard CCD equation | derived zero point vs the published "about 1e10 photons·s⁻¹·m⁻²"; regime scalings | 8.366e9; 4× exposure gives 2.006–2.099× SNR (read-noise floor), 1 m/30 s/dark sky reaches V = 21.35 at SNR 5 | src/photometry.rs |
 | astro | IOD — Gibbs / Herrick–Gibbs crossover | Gibbs (exact); Herrick–Gibbs (Taylor) | velocity error of both against a propagated truth, swept over transfer angle | ordering flips between 0.42° and 0.49° | tests/initial_orbit_determination.rs |
 | astro | IOD — Gauss error order | Curtis Alg. 5.5 (`f`/`g` series truncation) | fitted log-log slope over five arc lengths, not the series' order | slopes 2.000 / 2.003 / 2.021 / 2.124 — square, not cube | tests/initial_orbit_determination.rs |
-| astro | IOD — Gauss vs Gooding accuracy | Gooding 1993/1997 (Newton on ρ₁, ρ₃ closed by Lambert) | propagated truth on a 700 km orbit, 0.1 %–25 % of a period | Gauss 10.1 m → 720 km; Gooding 3.2e-4 m → 1.5e-9 m | tests/initial_orbit_determination.rs |
+| astro | IOD — Gauss vs Gooding accuracy | Gooding 1993/1997 (Newton on ρ₁, ρ₃ closed by Lambert) | propagated truth on a 700 km orbit, 0.1 %–25 % of a period | Gauss 10.1 m → 720 km; Gooding 2.8e-4 m → 2.1e-9 m (3.2e-4 m → 1.5e-9 m before Ф28.L's Lambert, §3.5) | tests/initial_orbit_determination.rs |
 | astro | IOD — Laplace vs Gauss, and where the received ordering fails | Laplace's derivative construction: a quadratic through the three lines of sight, `L̇` and `L̈` projected onto the equation of motion | propagated truth on the same 700 km orbit, plus a **paired** 2 000-trial noise experiment (1″ Gaussian per angle, both methods on byte-identical sightings) | position 12.3 m → 634 km, so Laplace loses below **18.96 %–20.00 %** of a period (bracketed by a 40-step sweep) and wins above it — but its velocity is worse at every arc, 1.96× to 2.50×, so it is never the better estimate of the *state*. Under noise on a short arc the two are a tie the literature does not predict: Laplace takes 49.0 % of pairs at 0.5 % of a period and 48.8 % at 1 %, against a 1.1 pp standard error, collapsing to 1.1 % by 5 % where truncation is back in charge (#285) | tests/initial_orbit_determination.rs |
 | astro | Kepler reversibility / energy+h conserved / one-period closure | two-body invariants (energy, h) | self-consistency + invariants | ΔE < 1e-9; closes < 1e-3 km | src/kepler.rs |
 | astro | CR3BP Jacobi constant conserved (RK4); halo/Lyapunov closure; monodromy hyperbolicity | Jacobi integral; Floquet theory | property (invariant / dynamical systems) | Jacobi < 1e-6; reciprocal pair to 1e-2 | src/cr3bp.rs, periodic.rs |
@@ -1507,6 +1510,7 @@ been shown to be equivalent.** It has been shown that no test looks. Hashing the
 distinction into a fifteen-second measurement, and it is the difference between eleven ledger entries
 and nine ledger entries plus a real test.
 
+
 ### 3.4 A round trip is exact in some units and not in others, and the test has to say which
 
 `spacelab-ndm` writes the two messages it reads, so `parse(write(parse(text)))` is checkable against
@@ -1536,7 +1540,49 @@ than a bug: `-0.873160 km × 1000` is `-873.1600000000001 m`, not `-873.16`. Mul
 a thousand is itself a rounding in binary. What survives exactly is the kilometre the file stated,
 which is why the assertion is on the round trip and not on the metre.
 
----
+### 3.5 The chord parameter, the parabola, and the gate `lambert_multirev` never had
+
+Ф28.L. Four subtractions, each worth more than the solvers' own error, and a solver with no gate.
+
+**The chord parameter** was `A = sin Δν·√(r1 r2/(1 − cos Δν))`, with `cos Δν` from a dot product.
+Near a half turn that carries `u/ε²`: 1.0e-10 relative at `ε = 1e-3`, 1.2e-6 at `ε = 1e-5`, and the
+closure gate then refused every arc within about 1e-5 rad of 180°. Near a whole revolution the same
+form carries `cos Δν`'s rounding up `1/(1 − cos Δν)` times: at Δν = 355° the 60 000 s arc closed to
+4.2e-9 of the radius and the 6e6 s arc was refused. `A² = r1 r2 + r1·r2`, and past a quarter turn
+`|r1 × r2|²/(r1 r2 − r1·r2)`, whose denominator adds like-signed terms (`lambert_universal.mac`
+31–35). Now 0.16 `u/ε` against the 100-digit value; the 355° arcs close to 1.1e-11 at 60 000 s and
+1.3e-7 at 6e6 s, and agree with Izzo to 2.4e-14; the refusal moved to 2e7 s. The long-way sweep
+refuses 76 of 25 264 (from 111 of 25 270) and accepts nothing worse than 6.0e-7; without the gate it
+answers 8 wrong, not 43. The six arcs the sweep no longer considers are 6e6 s cases whose Izzo
+reference closes only at the sweep's own 1e-9 threshold.
+
+**`y` on a short arc**, `r1 + r2 − √2·A·cos(√z/2)`, is two terms that agree to `O(Δν²)` near the root;
+`v1` lost 1.7e-6 at Δν = 1e-5 and the arc was refused. Its difference form (`lambert_universal.mac`
+36–38) has no subtraction left.
+
+**λ of `lambert_multirev`** was `√(1 − c/s)`, which cancels within ε of a half turn: on 13 % of random
+geometries at ε ~ 1e-9 it rounded below zero and λ was NaN. It is now `|A|/(√2 s)` with the same `A`.
+
+**`izzo_tof`** evaluated `a^{3/2}` times Lagrange's bracket: NaN at `x = 1`, 86 ulps (55κ) at
+`x = 0.999, λ = 0.6`, 9.6 ulps at `x = 1.02, λ = −0.75`. It is now `[F(α) − F(β)]/2/w³` with `F(u) = u − sin u`
+or `sinh u − u` taken through the Stumpff series below `|u| = 1`, and at `x = 1` its limit
+⅔(1 − λ³), Euler's parabolic time (`lambert_izzo.mac` 4–15). What remains is the `κ` of the one
+subtraction the problem has.
+
+**The gate.** `lambert_multirev` scanned 2 000 cells for sign changes. Below the minimum time of an
+N-revolution family it returned `None` like any other failure, and a part in 100 above it the two
+roots sit in one cell, so the scan found neither: of 320 arcs from 1.01 to 4 `t_min`, the old solver
+failed the first it met. Its minimum is now the root of Izzo's `dT/dx` (`lambert_izzo.mac` 16–18,
+checked against the minimum of Lagrange's equation at 100 digits in `lambert_izzo.gp` §4), each
+branch is bracketed between it and its end, and below it the refusal is
+`LambertError::BelowMinimumTime { minimum }`, in the caller's seconds. A planted defect at the
+threshold — refusing only below `t_min(1 − 1e-6)` — returns an `Ok` arc a part in 1e9 below the
+minimum, which no transfer has.
+
+`lambert_multirev` now returns `Result<(Vec3, Vec3), LambertError>`; `lambert` keeps its `Option`.
+The C ABI and the Python bridge expose `lambert` only, and each carries the 1e-5 rad half turn and
+short arc as a test (`the_lambert_binding_solves_next_to_a_half_turn_and_on_a_short_arc`,
+`test_lambert_solves_next_to_a_half_turn_and_on_a_short_arc`), refused before.
 
 ---
 
@@ -4726,7 +4772,7 @@ phantom to avoid — the blind spot of #260, convenient for once.
 | `sl_teme_to_itrf`, `sl_gcrf_to_itrf` | §1 transforms | the `spacelab-frames` function the binding calls | bit-exact | src/lib.rs |
 | `sl_itrf_to_geodetic` / `sl_geodetic_to_itrf` | WGS84 | round-trip, and the crate function | 3 637 891.0 m ± 1.0 measured; round-trip < 1e-6 | src/lib.rs, tests/cpp/smoke.cpp |
 | `sl_sgp4_*` (open / at / batch / one-shot) | §2 SGP4 | the `Sgp4` propagator; batch ≡ singles | bit-exact; ISS radius 6 720 189.23 m ± 0.01 | src/lib.rs, tests/cpp/smoke.cpp |
-| `sl_lambert` | §3 Izzo | closure: fly the returned `v1`, arrive at `r2` | < 1e-6 m | src/lib.rs, tests/cpp/smoke.cpp |
+| `sl_lambert` | §3 Izzo | closure: fly the returned `v1`, arrive at `r2`; 1e-5 rad from a half turn and on a 1e-5 rad short arc, the 100-digit arc (§3.5) | < 1e-6 m; ≤ 16u/δ of `\|v1\|` | src/lib.rs, tests/cpp/smoke.cpp |
 | `sl_walker`, `sl_street_of_coverage` | §4 generators | the two-call protocol delivers what the crate generated; every state on the design radius | exact count; ± 1.0 m | src/lib.rs, tests/cpp/smoke.cpp |
 | `sl_flower`, `sl_lattice_flower`, `sl_draim`, `sl_draim_geometry` | §4 the three remaining families | the lattice's own containment property — a circular lattice `(No, Nso, Nc) = (P, S, F)` is a Walker Delta `i: T/P/F` satellite for satellite — plus Kepler's third law for Draim's orbit, so neither is checked against itself | position agreement < 1e-6 m over 24 satellites; `a` to 1e-12 relative of `(mu·(T/2π)²)^(1/3)` | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
 | `sl_alpha_characteristic`, `sl_minimum_walker` | §4 Mozhaev α-characteristic | the search answers with a complete `sl_walker_params`, so its own answer is fed back to `sl_walker` and the constellation that comes out is measured against the footprint that was asked for | the upper end of the returned design's α enclosure ≤ the 0.6 rad requested, total within the budget; 0.5 rad, which the sampled α once granted within 40 satellites, and an unreachable footprint are `SL_ERR_DOMAIN`; `fold` 0 or above `n` and a zero tolerance are `SL_ERR_INVALID_ARGUMENT`, nothing written | src/lib.rs, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
@@ -4894,7 +4940,7 @@ absent, and the distinction is the kind of thing that reads as coverage when it 
 
 | Component | Specification | Check | Residual / tol | Test file |
 |---|---|---|---|---|
-| Lambert | two-body flow — units and argument order | closure: fly the returned `v1` and arrive at `r2` | < 1e-6 m (swapped `r1`/`r2` gives 3.4e6) | tests/bindings.py |
+| Lambert | two-body flow — units and argument order; the conditioning of §3.5 | closure: fly the returned `v1` and arrive at `r2`; 1e-5 rad from a half turn and on a 1e-5 rad short arc, the 100-digit arc | < 1e-6 m (swapped `r1`/`r2` gives 3.4e6); ≤ 16u/δ of `\|v1\|` | tests/bindings.py |
 | Two-body / IAS15 dense ephemerides | Kepler solution; dense-output contract | the Kepler solution at an interior time | < 1e-3 m; `eval(t1)` ≡ `final_state()` | tests/bindings.py |
 | DSST zonal mean | zonal-field theory (no secular `a`) | analytic property (no secular `a` in a zonal field) | bit-exact | tests/bindings.py |
 | DSST short-period, full DSST | mean-vs-osculating definition | mean-vs-osculating offset; sensitivity to A/m and epoch | 1–30 km; non-zero | tests/bindings.py |

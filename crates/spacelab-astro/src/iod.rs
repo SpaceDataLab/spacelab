@@ -49,7 +49,7 @@
 //!     arc            0.1 %      1 %       5 %       10 %      25 %
 //!     Gauss          10.1 m    1009 m    25.3 km   103 km    720 km
 //!     Laplace        12.3 m    1231 m    30.5 km   119 km    634 km
-//!     Gooding       3.2e-4 m  1.2e-6 m  1.6e-8 m  2.8e-7 m  1.5e-9 m
+//!     Gooding       2.8e-4 m  1.5e-6 m  5.2e-8 m  2.8e-7 m  2.1e-9 m
 //! ```
 //!
 //! **Gauss's error grows as the square of the arc, not the cube.** Measured log-log slopes over the
@@ -60,7 +60,7 @@
 //!
 //! Gooding is exact to the iteration's own convergence floor at every arc length, because it solves
 //! the two-body problem rather than approximating it. That floor is not flat: it is worst on the
-//! shortest arc, where a 1e-13 rad angular residual divides by a 6.3e-3 rad arc to leave 3.2e-4 m of
+//! shortest arc, where a 1e-13 rad angular residual divides by a 6.3e-3 rad arc to leave 2.8e-4 m of
 //! range. Even there it beats Gauss by four orders of magnitude, and by eleven at 10 %.
 //!
 //! Gate: `derivations/iod_classical.mac` proves Gibbs exact on every conic, Herrick–Gibbs exact on
@@ -329,7 +329,7 @@ pub fn gauss(sightings: &[Sighting; 3], mu: f64) -> Result<(Vec3, Vec3), IodErro
 ///     arc                0.1 %      1 %       5 %       10 %      25 %
 ///     Gauss   position   10.1 m    1009 m    25.3 km   103 km    720 km
 ///     Laplace position   12.3 m    1231 m    30.5 km   119 km    634 km
-///     Gooding position  3.2e-4 m  1.2e-6 m  1.6e-8 m  2.8e-7 m  1.5e-9 m
+///     Gooding position  2.8e-4 m  1.5e-6 m  5.2e-8 m  2.8e-7 m  2.1e-9 m
 ///
 ///     Gauss   velocity  0.0134    1.338     33.0      126.4     540.9   m/s
 ///     Laplace velocity  0.0262    2.622     65.0      253.7     1354    m/s
@@ -1347,34 +1347,34 @@ mod tests {
             (
                 (1.0e6_f64, 1.0e6),
                 [
-                    7.078_137_000_000_139e6,
-                    -2.668_821_252_882_480_6e-7,
+                    7.078_137_000_000_137e6,
+                    -2.656_015_567_481_518e-7,
                     -9.196_810_424_327_85e-8,
-                    -7.275_957_614_183_426e-12,
-                    -1.070_328_380_348_894_4e3,
-                    7.427_564_398_137_589e3,
+                    -1.364_242_052_659_392_4e-11,
+                    -1.070_328_380_348_886_9e3,
+                    7.427_564_398_137_592e3,
                 ],
             ),
             (
                 (2.0e7, 2.0e7),
                 [
-                    7.078_136_999_999_934e6,
-                    1.262_524_165_213_108e-7,
-                    4.400_499_165_058_136e-8,
-                    4.547_473_508_864_641e-13,
-                    -1.070_328_380_348_828_2e3,
-                    7.427_564_398_136_982e3,
+                    7.078_136_999_999_932e6,
+                    1.329_462_975_263_595_6e-7,
+                    4.423_782_229_423_523e-8,
+                    0.0,
+                    -1.070_328_380_348_825_7e3,
+                    7.427_564_398_136_966e3,
                 ],
             ),
             (
                 (1.0e5, 1.0e7),
                 [
                     7.078_137_000_000_1e6,
-                    -2.011_074_684_560_299e-7,
+                    -2.030_865_289_270_877_8e-7,
                     6.752_088_665_962_219e-9,
-                    2.723_936_631_809_92e-10,
-                    -1.070_328_380_349_368_4e3,
-                    7.427_564_398_137_309e3,
+                    2.701_199_264_265_597e-10,
+                    -1.070_328_380_349_368_2e3,
+                    7.427_564_398_137_312e3,
                 ],
             ),
         ] {
@@ -1401,9 +1401,9 @@ mod tests {
         // both of these stall around 0.96 rad, three quarters of a right angle away from the
         // observed direction.
         for (seed, pinned) in [
-            ((1.0e4_f64, 1.0e4), 9.572_028_909_276_205e-1),
-            ((1.0e5, 1.0e5), 9.601_328_172_723_822e-1),
-            ((1.0e7, 1.0e5), 7.858_533_458_378_832e-1),
+            ((1.0e4_f64, 1.0e4), 9.572_028_909_268_555e-1),
+            ((1.0e5, 1.0e5), 9.601_328_172_703_223e-1),
+            ((1.0e7, 1.0e5), 7.858_533_458_287_102e-1),
         ] {
             match gooding(&sightings, MU, false, seed) {
                 Err(IodError::DidNotConverge { residual }) => {

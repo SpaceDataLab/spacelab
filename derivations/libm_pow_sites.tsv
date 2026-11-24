@@ -10,9 +10,9 @@ crates/spacelab-astro/src/cr3bp.rs	318	1	every_mass_ratio_puts_the_three_roots_i
 crates/spacelab-astro/src/iod.rs	425	1	laplace	src	hi / lo	hi/lo = 1000*scale/(0.01*scale) = 1e5 (iod.rs:424); NaN if scale = 0	i as f64 / SAMPLES as f64	[0, 1]: i/SAMPLES, i in 1..=SAMPLES and i-1 (iod.rs:427-431), SAMPLES = 4096 (iod.rs:454)	out	|y| <= 1; base 1e5 also outside the |x| band
 crates/spacelab-astro/src/iod.rs	503	1	gauss_ranges	src	hi / lo	hi/lo = 1e5 (iod.rs:502); NaN if scale = 0	i as f64 / SAMPLES as f64	[0, 1]: i/SAMPLES, i in 1..=SAMPLES and i-1 (iod.rs:507-511), SAMPLES = 4096 (iod.rs:454)	out	|y| <= 1
 crates/spacelab-astro/src/iod.rs	1040	1	gibbs_and_herrick_gibbs_agree_with_the_truth_in_their_own_regimes	test	r0.norm()	|r0| of the test reference orbit, m	3.0	{3.0} literal	out	|y| = 3
-crates/spacelab-astro/src/lambert.rs	195	1	tof_err	src	yz / c	y(z)/C(z), caller geometry	1.5	{1.5} literal	out	|y| = 1.5
-crates/spacelab-astro/src/lambert.rs	207	1	dfdz	src	y0	y(0), caller geometry	1.5	{1.5} literal	out	|y| = 1.5
-crates/spacelab-astro/src/lambert.rs	210	1	dfdz	src	yz / c	y(z)/C(z), caller geometry	1.5	{1.5} literal	out	|y| = 1.5
+crates/spacelab-astro/src/lambert.rs	278	1	tof_err	src	yz / c	y(z)/C(z), caller geometry	1.5	{1.5} literal	out	|y| = 1.5
+crates/spacelab-astro/src/lambert.rs	290	1	dfdz	src	y0	y(0), caller geometry	1.5	{1.5} literal	out	|y| = 1.5
+crates/spacelab-astro/src/lambert.rs	293	1	dfdz	src	yz / c	y(z)/C(z), caller geometry	1.5	{1.5} literal	out	|y| = 1.5
 crates/spacelab-astro/src/patched.rs	30	1	sphere_of_influence	src	planet_to_sun_mass_ratio	caller-supplied mass ratio, unchecked (pub fn patched.rs:29)	0.4	{0.4} literal	out	|y| = 0.4
 crates/spacelab-astro/src/richardson.rs	335	1	the_amplitude_constraint_has_a_real_root_at_every_mass_ratio	test	10.0	{10.0} literal	-f64::from(e) / 10.0	[-14, 0]: -e/10, e in 0..=140 (richardson.rs:334)	out	|y| <= 14; base 10 also outside the |x| band
 crates/spacelab-astro/tests/initial_orbit_determination.rs	77	1	period	test	r.norm()	|r| of test states, m	3.0	{3.0} literal	out	|y| = 3

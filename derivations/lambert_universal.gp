@@ -147,3 +147,70 @@ dbl(x) = my(e = exponent(x)); round(x * 2^(52 - e)) / 2^(52 - e);
 }
 printf("worst relative miss including the exact conics: %.3g\n", worst);
 if (worst > 10^-80, print("FAIL: an exact-conic arc does not solve the boundary-value problem"));
+
+/* plans/18 Ф28.L: the forms of A and y of lambert_universal.mac 31-38 at 100 digits, and the
+   fixtures of the near-half-turn and short-arc tests.
+
+   A = sin(dnu) sqrt(r1 r2/(1 - cos dnu)) is checked against sqrt(r1 r2 + r1.r2), against
+   |r1 x r2|/sqrt(r1 r2 - r1.r2) and against sqrt(2 r1 r2) cos(dnu/2), with the sign by the sense;
+   y = r1 + r2 - sqrt(2) A cos(psi) against its difference form on the short way. Random geometries
+   on both senses and z across (0, 4 pi^2). */
+setrand(20261124);
+rnd(lo, hi) = lo + (hi - lo) * random(1.);
+{
+  my(wa = 0, wy = 0);
+  for (k = 1, 40,
+    my(r1v = [rnd(-9e3, 9e3), rnd(-9e3, 9e3), rnd(-9e3, 9e3)],
+       r2v = [rnd(-4e4, 4e4), rnd(-4e4, 4e4), rnd(-4e4, 4e4)],
+       r1 = sqrt(r1v * r1v~), r2 = sqrt(r2v * r2v~), d = r1v * r2v~, kk, h, A);
+    kk = sqrt(cross(r1v, r2v) * cross(r1v, r2v)~);
+    wa = max(wa, abs(kk^2 - (r1^2 * r2^2 - d^2)) / (r1 * r2)^2);
+    for (pro = 0, 1,
+      my(dnu = transfer_angle(r1v, r2v, pro), sg = if (dnu > Pi, -1, 1), absa);
+      A = sin(dnu) * sqrt(r1 * r2 / (1 - cos(dnu)));
+      absa = if (d < 0, kk / sqrt(r1 * r2 - d), sqrt(r1 * r2 + d));
+      wa = max(wa, abs(A - sg * absa) / abs(A));
+      wa = max(wa, abs(A - sqrt(2 * r1 * r2) * cos(dnu / 2)) / abs(A));
+      if (sg > 0 && d > 0,
+        h = arg(d + I * kk) / 2;
+        wa = max(wa, abs(h - dnu / 2));
+        for (j = 1, 5,
+          my(psi = rnd(0, Pi) / 1, gap, y0, y1);
+          gap = ((r1v - r2v) * (r1v + r2v)~ / (r1 + r2))^2 / (sqrt(r1) + sqrt(r2))^2;
+          y0 = r1 + r2 - sqrt(2) * A * cos(psi);
+          y1 = gap + 2 * sqrt(r1 * r2) * (sin((h - psi) / 2)^2 + sin((h + psi) / 2)^2);
+          wy = max(wy, abs(y1 / y0 - 1))))));
+  printf("A and y at 100 digits: A forms %.3g, y difference form %.3g\n", wa, wy);
+  if (wa > 10^-90 || wy > 10^-90, print("FAIL: a form of A or y does not hold"));
+}
+
+/* The test geometries: an ellipse in a tilted plane, periapsis along (6000, 2000, 1500), the
+   positions rounded to doubles and the time of flight to the double nearest Kepler's. */
+plane_e1 = [6000, 2000, 1500] / sqrt(6000^2 + 2000^2 + 1500^2);
+plane_e2 = [1000, 5000, 4000] - ([1000, 5000, 4000] * plane_e1~) * plane_e1;
+plane_e2 = plane_e2 / sqrt(plane_e2 * plane_e2~);
+conic_point(a, e, nu) = apply(dbl, a * (1 - e^2) / (1 + e * cos(nu)) * (cos(nu) * plane_e1 + sin(nu) * plane_e2));
+mean_anomaly(e, nu) = my(E = 2 * arg(sqrt(1 + e) * cos(nu / 2) + I * sqrt(1 - e) * sin(nu / 2))); E - e * sin(E);
+conic_arc(a, e, nu1, nu2) = [conic_point(a, e, nu1), conic_point(a, e, nu2), dbl(sqrt(a^3 / mu) * (mean_anomaly(e, nu2) - mean_anomaly(e, nu1)))];
+chord_parameter(r1v, r2v) = {
+  my(dnu = transfer_angle(r1v, r2v, 1), r1 = sqrt(r1v * r1v~), r2 = sqrt(r2v * r2v~));
+  sin(dnu) * sqrt(r1 * r2 / (1 - cos(dnu)));
+}
+mu = 398600;
+{
+  print("    // HALF_TURN_CHORD_PARAMETER, (r1, r2, A, pi - dnu): a = 8000, e = 1/10, from nu = 1/5");
+  foreach ([10^-3, 10^-5, 10^-7, 10^-9], eps,
+    my(g = conic_arc(8000, 1 / 10, 1 / 5, 1 / 5 + Pi - eps));
+    printf("    (%s, %s, %s, %s),\n", vfmt(g[1]), vfmt(g[2]), fmt(chord_parameter(g[1], g[2])),
+           fmt(Pi - transfer_angle(g[1], g[2], 1))));
+  print("    // CONDITIONED_ARCS, (r1, r2, tof, v1, v2): half turns (a = 8000, e = 1/10, from nu = 1/5)");
+  print("    // and short arcs (a = 7000, e = 1/100, from nu = 3/10), prograde");
+  worst = 0;
+  foreach ([[8000, 1 / 10, 1 / 5, Pi - 10^-5], [8000, 1 / 10, 1 / 5, Pi - 10^-7],
+            [7000, 1 / 100, 3 / 10, 10^-5], [7000, 1 / 100, 3 / 10, 10^-6]], cs,
+    my(g = conic_arc(cs[1], cs[2], cs[3], cs[3] + cs[4]), v = arc(mu, g[1], g[2], g[3], 1));
+    check(mu, g[1], g[2], g[3], v);
+    printf("    (%s, %s, %s, %s, %s),\n", vfmt(g[1]), vfmt(g[2]), fmt(g[3]), vfmt(v[1]), vfmt(v[2])));
+  printf("conditioned arcs propagated by the universal Kepler equation, worst relative miss: %.3g\n", worst);
+  if (worst > 10^-80, print("FAIL: a conditioned arc does not solve the boundary-value problem"));
+}

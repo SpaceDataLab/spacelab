@@ -5,16 +5,28 @@
 //! universal-variable formulation (Bate–Mueller–White; Curtis, *Orbital Mechanics for Engineering
 //! Students*, Algorithm 5.2) reuses the Stumpff functions of [`crate::kepler`] and covers the single
 //! revolution across ellipse and hyperbola through one iteration on the universal variable `z`.
-//! Multi-revolution transfers (Izzo's Householder method) are a later extension.
+//! [`lambert_multirev`] solves for `N ≥ 0` complete revolutions in Izzo's variable `x` (Izzo 2015,
+//! the Lancaster–Blanchard form of Lagrange's equation), on either branch of an `N`-revolution
+//! family, and refuses a time of flight below the family's minimum with
+//! [`LambertError::BelowMinimumTime`].
 //!
 //! Gate: `derivations/lambert_universal.mac` shows that the coded `y(z)` is Curtis's quotient,
 //! that `dfdz` is `dF/dz` with its `z → 0` branch the limit, and that the arc `(r1, v1)` built from
 //! the root has `α χ² = z` and satisfies the universal Kepler equation from `r1` to `r2` — the
 //! solution is the two-body boundary-value problem's — with `f ġ − ḟ g = 1`. It also builds an
-//! ellipse and a hyperbola in closed form. `derivations/lambert_universal.gp` solves the test sweep
+//! ellipse and a hyperbola in closed form, and derives the forms of `A` and `y` that do not cancel
+//! near a half turn and on short arcs. `derivations/lambert_universal.gp` solves the test sweep
 //! at 100 digits by Lagrange's theorem instead and closes every arc by propagation. The module tests
 //! `the_arc_is_the_one_lagrange_s_theorem_gives_at_100_digits` (G2) and
 //! `the_arc_is_the_exact_conic_it_was_built_from` (G3) hold both solvers to them.
+//!
+//! `derivations/lambert_izzo.mac` derives the multi-revolution solver's `λ` without `1 − c/s`, its
+//! time of flight in Stumpff form with the parabolic limit `⅔(1 − λ³)` at `x = 1`, and Izzo's
+//! `dT/dx`. `derivations/lambert_izzo.gp` solves Lagrange's equation at 100 digits on each branch,
+//! finds each family's minimum time two ways, and closes every arc by propagation. The module tests
+//! `every_multi_revolution_arc_is_the_one_lagrange_s_equation_gives_at_100_digits` (G2),
+//! `the_time_of_flight_at_x_equal_one_is_the_parabolic_time` (G3) and
+//! `a_time_below_the_family_s_minimum_is_refused_and_one_above_is_solved` (S2) hold it to them.
 
 // Single-letter names are the standard notation of the universal-variable formulation.
 #![allow(
@@ -58,10 +70,14 @@ const DOUBLING_RUNGS: usize = 8;
 /// it and a closure test can.
 ///
 /// One part in 1e6 of the radius is a metre on a low Earth orbit, and the gate is load-bearing at
-/// that level: over the 25 270-case sweep of `examples/lambert_longway_sweep.rs` the solver without
-/// it answers 43 near-whole-revolution arcs with a miss above the tolerance, and with it refuses
-/// those 43 and returns nothing worse than 9.3e-7. Callers who need them should use
-/// [`lambert_multirev`], whose Lancaster–Blanchard variable does not crowd at one revolution.
+/// that level: over the 25 264-case sweep of `examples/lambert_longway_sweep.rs` the solver without
+/// it answers 8 near-whole-revolution arcs with a miss above the tolerance, and with it refuses
+/// those 8 and returns nothing worse than 6.0e-7. It was 43 of 25 270 and 9.3e-7 while the chord
+/// parameter was `sin Δν·√(r1 r2/(1 − cos Δν))`, which near a whole revolution carried `cos Δν`'s
+/// rounding up by `1/(1 − cos Δν)`; the six cases the sweep no longer considers are those whose
+/// [`lambert_multirev`] reference itself closes only at the example's 1e-9 threshold. Callers who
+/// need the refused arcs should use [`lambert_multirev`], whose Lancaster–Blanchard variable does
+/// not crowd at one revolution.
 const CLOSURE_TOLERANCE: f64 = 1e-6;
 
 /// Solve Lambert's problem for the departure and arrival velocities `(v1, v2)`.
@@ -81,33 +97,8 @@ pub fn lambert(r1: Vec3, r2: Vec3, tof: f64, mu: f64, prograde: bool) -> Option<
     if !(tof.is_finite() && tof > 0.0) {
         return None;
     }
-    let r1n = r1.norm();
-    let r2n = r2.norm();
-    let cross_z = r1.x * r2.y - r1.y * r2.x;
-    let cos_dnu = (r1.dot(r2) / (r1n * r2n)).clamp(-1.0, 1.0);
-    let acos = libm::acos(cos_dnu);
-    let tau = core::f64::consts::TAU;
-    // Transfer angle, resolved to (0, 2π) by the sense of the out-of-plane component.
-    let dnu = if prograde {
-        if cross_z >= 0.0 { acos } else { tau - acos }
-    } else if cross_z < 0.0 {
-        acos
-    } else {
-        tau - acos
-    };
-
-    let sin_dnu = libm::sin(dnu);
-    // A = 0 at a 0° or 180° transfer: the plane is undefined and the method is singular.
-    if sin_dnu.abs() < 1e-12 {
-        return None;
-    }
-    let arc = Arc {
-        r1n,
-        r2n,
-        a: sin_dnu * libm::sqrt(r1n * r2n / (1.0 - cos_dnu)),
-        sqmu: libm::sqrt(mu),
-        tof,
-    };
+    let arc = Arc::new(r1, r2, tof, mu, prograde)?;
+    let (r1n, r2n) = (arc.r1n, arc.r2n);
     let (z, _) = arc.solve()?;
 
     let yz = arc.y(z);
@@ -141,10 +132,37 @@ pub fn lambert(r1: Vec3, r2: Vec3, tof: f64, mu: f64, prograde: bool) -> Option<
     Some((v1, v2))
 }
 
-/// A single-revolution arc as the universal-variable iteration sees it: the two radii, the chord
-/// parameter `A = sin Δν · √(r1 r2 / (1 − cos Δν))`, `√µ`, and the time of flight to match.
+/// `|A| = √(r1 r2 + r1·r2) = √(2 r1 r2)·|cos(Δν/2)|`, the magnitude of Lambert's chord parameter,
+/// from the radii, `r1·r2` and `|r1 × r2|`.
 ///
-/// The three functions below share all five values, which is why they are a type rather than three
+/// Curtis writes `A = sin Δν · √(r1 r2/(1 − cos Δν))`, and with `cos Δν` from a dot product that is
+/// `r1 r2 + r1·r2` formed as a difference of near-equal numbers within `ε` of a half turn: it lost
+/// `u/ε²`, 1.2e-6 relative at `ε = 1e-5`, and [`CLOSURE_TOLERANCE`] then refused every arc within
+/// about 1e-5 rad of 180°. Past a quarter turn the same quantity is `|r1 × r2|²/(r1 r2 − r1·r2)`
+/// (Lagrange's identity), whose denominator adds like-signed terms, so the error left is the `u/ε`
+/// with which the cross product of two near-antiparallel vectors carries their doubles.
+/// `derivations/lambert_universal.mac` 31–35 and `derivations/lambert_izzo.mac` 1–2.
+fn chord_parameter_magnitude(r1n: f64, r2n: f64, dot: f64, cross_n: f64) -> f64 {
+    if dot < 0.0 {
+        cross_n / libm::sqrt(r1n * r2n - dot)
+    } else {
+        libm::sqrt(r1n * r2n + dot)
+    }
+}
+
+/// What the difference form of [`Arc::y`] needs on a short arc, `r1·r2 > 0` the short way round:
+/// `(√r1 − √r2)²`, `√(r1 r2)` and the half transfer angle `h = Δν/2`.
+#[derive(Clone, Copy)]
+struct ShortArc {
+    gap: f64,
+    mean: f64,
+    half: f64,
+}
+
+/// A single-revolution arc as the universal-variable iteration sees it: the two radii, the chord
+/// parameter `A = √(2 r1 r2)·cos(Δν/2)`, the short-arc terms, `√µ`, and the time of flight to match.
+///
+/// The three functions below share all of them, which is why they are a type rather than three
 /// signatures. They were closures inside [`lambert`] and could only be reached through it — and
 /// [`Self::dfdz`] cannot be reached through it at all, since the iteration runs to a fixed point and
 /// the derivative decides only how fast `z` arrives, never where.
@@ -153,11 +171,56 @@ struct Arc {
     r1n: f64,
     r2n: f64,
     a: f64,
+    short: Option<ShortArc>,
     sqmu: f64,
     tof: f64,
 }
 
 impl Arc {
+    /// The arc [`lambert`] iterates on, or `None` where the transfer plane is undefined.
+    ///
+    /// `A` is [`chord_parameter_magnitude`] with the sign of `cos(Δν/2)`: positive the short way
+    /// round, negative past `Δν = π`, which is the side `prograde` and the sense of `r1 × r2` put
+    /// the transfer on. Nothing here takes `Δν` itself, so nothing here goes through `acos`, which
+    /// returned exactly `0` or `π` within 1.49e-8 rad of either and put a band of that width around
+    /// both degenerate angles. The refusal is now what it says: `|sin Δν| = |r1 × r2|/(r1 r2)` at
+    /// most 1e-12, where `A` and the `g` it divides by are zero.
+    fn new(r1: Vec3, r2: Vec3, tof: f64, mu: f64, prograde: bool) -> Option<Self> {
+        let r1n = r1.norm();
+        let r2n = r2.norm();
+        let cross = r1.cross(r2);
+        let cross_n = cross.norm();
+        if cross_n.is_nan() || cross_n <= 1e-12 * r1n * r2n {
+            return None;
+        }
+        let dot = r1.dot(r2);
+        let long_way = if prograde {
+            cross.z < 0.0
+        } else {
+            cross.z >= 0.0
+        };
+        let magnitude = chord_parameter_magnitude(r1n, r2n, dot, cross_n);
+        // The radii's difference through the vectors carries the chord's relative error, where
+        // `r1n − r2n` would carry `u (r1 + r2)/(r1 − r2)`.
+        let short = (!long_way && dot > 0.0).then(|| {
+            let diff = (r1 - r2).dot(r1 + r2) / (r1n + r2n);
+            let gap = diff / (libm::sqrt(r1n) + libm::sqrt(r2n));
+            ShortArc {
+                gap: gap * gap,
+                mean: libm::sqrt(r1n * r2n),
+                half: 0.5 * libm::atan2(cross_n, dot),
+            }
+        });
+        Some(Self {
+            r1n,
+            r2n,
+            a: if long_way { -magnitude } else { magnitude },
+            short,
+            sqmu: libm::sqrt(mu),
+            tof,
+        })
+    }
+
     /// `y(z)`, the chord-normal distance the arc reaches (Curtis Eq. 5.38).
     ///
     /// Curtis writes it as `r1 + r2 + A(zS(z) − 1)/√C(z)`, and both halves of that quotient vanish
@@ -176,9 +239,29 @@ impl Arc {
     ///
     /// Evaluated through the Stumpff pair instead, the same expression is a `0/0` in which `C` is
     /// 1.25e-19 a part in 1e9 below `4π²`, and what the quotient loses there the search cannot get
-    /// back: holding everything else fixed, `examples/lambert_longway_sweep.rs` refuses 227 of its
-    /// 25 270 arcs with the Curtis quotient and 111 with the form below.
+    /// back: holding everything else fixed, `examples/lambert_longway_sweep.rs` refused 227 of its
+    /// 25 270 arcs with the Curtis quotient and 111 with the form below; with the chord parameter
+    /// in the form of `chord_parameter_magnitude` it refuses 76 of 25 264.
+    ///
+    /// On a short arc that form cancels in its turn: with `A = √(2 r1 r2)·cos h`, `h = Δν/2`, it is
+    /// `r1 + r2 − 2√(r1 r2)·cos h·cos ψ`, `ψ = √z/2`, two terms that agree to `O(Δν²)` near the
+    /// root, and `v1` lost 1.7e-6 at `Δν = 1e-5`. Written out,
+    ///
+    /// ```text
+    /// y = (√r1 − √r2)² + 2√(r1 r2)·[sin²((h − ψ)/2) + sin²((h + ψ)/2)]
+    /// ```
+    ///
+    /// is a sum of non-negative terms (`derivations/lambert_universal.mac` 36–38). It is used where
+    /// the cancellation lives — the short way with `r1·r2 > 0`, so `h < π/4`, and `z ≥ 0`.
     fn y(self, z: f64) -> f64 {
+        if let Some(short) = self.short
+            && z >= 0.0
+        {
+            let psi = 0.5 * libm::sqrt(z);
+            let below = libm::sin(0.5 * (short.half - psi));
+            let above = libm::sin(0.5 * (short.half + psi));
+            return short.gap + 2.0 * short.mean * (below * below + above * above);
+        }
         let half = if z > 0.0 {
             libm::cos(0.5 * libm::sqrt(z))
         } else {
@@ -367,34 +450,199 @@ impl Arc {
 }
 
 /// The nondimensional time of flight `T(x)` of the Izzo/Lancaster–Blanchard formulation, for `n_rev`
-/// full revolutions, using the Lagrange form (valid away from `x = 1`).
+/// full revolutions, in the unit `T = t·√(2µ/s³)`, `s` the semi-perimeter.
+///
+/// Lagrange's equation in Izzo's variable is `a^{3/2}[(α − sin α) − (β − sin β) + 2πN]/2` with
+/// `a = 1/(1 − x²)`, `α = 2 acos x`, `β = 2 asin(λ√(1 − x²))`, and its `sinh` form on the
+/// hyperbola. Evaluated that way it is `∞·0` at the parabola `x = 1`, which came back as NaN, and
+/// near it `α − sin α` keeps only the digits above `α³/6`. Here `w = √|1 − x²|` is formed as
+/// `(1 − x)(1 + x)`, so it is exact to a rounding up to the parabola, and
+///
+/// ```text
+/// T = [(F(α) − F(β))/2 + πN]/w³,    F(u) = u − sin u (ellipse),  sinh u − u (hyperbola),
+/// ```
+///
+/// with `F(u) = u³ S(±u²)` below `|u| = 1`, `S` the Stumpff function, whose series [`stumpff_s`]
+/// holds there (`derivations/lambert_izzo.mac` 4–5). The quotient then has no cancellation left but
+/// the one `λ → 1` puts in the problem, up to `x = 1` itself, where it is `0/0` and takes its limit
+/// `⅔(1 − λ³)`, Euler's parabolic time (G3, `lambert_izzo.mac` 6–15) — for `n_rev = 0`, the only
+/// family that reaches the parabola. `β` carries the sign of `λ`, negative the long way round,
+/// through `asin` and `asinh`, which are odd, as `F` is.
 fn izzo_tof(x: f64, lambda: f64, n_rev: usize) -> f64 {
-    let a = 1.0 / (1.0 - x * x);
-    if a > 0.0 {
-        // Ellipse.
-        let alpha = 2.0 * libm::acos(x);
-        let beta0 = 2.0 * libm::asin(libm::sqrt(lambda * lambda * (1.0 - x * x)));
-        let beta = if lambda < 0.0 { -beta0 } else { beta0 };
-        a * libm::sqrt(a)
-            * ((alpha - libm::sin(alpha)) - (beta - libm::sin(beta))
-                + core::f64::consts::TAU * n_rev as f64)
-            / 2.0
+    let ellipse = x < 1.0;
+    let w = libm::sqrt(if ellipse {
+        (1.0 - x) * (1.0 + x)
     } else {
-        // Hyperbola (n_rev = 0 only).
-        let alpha = 2.0 * libm::acosh(x);
-        let beta0 = 2.0 * libm::asinh(libm::sqrt(-lambda * lambda * (1.0 - x * x)));
-        let beta = if lambda < 0.0 { -beta0 } else { beta0 };
-        -a * libm::sqrt(-a) * ((beta - libm::sinh(beta)) - (alpha - libm::sinh(alpha))) / 2.0
+        (x - 1.0) * (x + 1.0)
+    });
+    if n_rev == 0 && w == 0.0 {
+        return 2.0 / 3.0 * (1.0 - lambda * lambda * lambda);
+    }
+    let bracket = if ellipse {
+        x_minus_sin(2.0 * libm::acos(x)) - x_minus_sin(2.0 * libm::asin(lambda * w))
+    } else {
+        sinh_minus_x(2.0 * libm::acosh(x)) - sinh_minus_x(2.0 * libm::asinh(lambda * w))
+    };
+    (0.5 * bracket + core::f64::consts::PI * n_rev as f64) / (w * w * w)
+}
+
+/// `u − sin u`, as `u³ S(u²)` where the difference cancels.
+fn x_minus_sin(u: f64) -> f64 {
+    if libm::fabs(u) <= 1.0 {
+        u * u * u * stumpff_s(u * u)
+    } else {
+        u - libm::sin(u)
     }
 }
+
+/// `sinh u − u`, as `u³ S(−u²)` where the difference cancels.
+fn sinh_minus_x(u: f64) -> f64 {
+    if libm::fabs(u) <= 1.0 {
+        u * u * u * stumpff_s(-u * u)
+    } else {
+        libm::sinh(u) - u
+    }
+}
+
+/// The `x` at which the `n_rev`-revolution time of flight is least, `n_rev ≥ 1`: the root of
+/// `dT/dx = (3Tx − 2 + 2λ³x/y)/(1 − x²)`, `y = √(1 − λ²(1 − x²))` (Izzo 2015, Eq. 22; derived in
+/// `derivations/lambert_izzo.mac` 16–17).
+///
+/// `T` tends to `∞` at both ends of `(−1, 1)` and has one minimum between, so the numerator is
+/// negative at `lo` and positive at `hi` and bisection to adjacent doubles finds the root. Where
+/// on the flat bottom the doubles stop is immaterial: `T` moves by the square of that distance.
+fn minimum_time_x(lambda: f64, n_rev: usize, lo: f64, hi: f64) -> f64 {
+    let slope = |x: f64| {
+        let y = libm::sqrt(1.0 - lambda * lambda * ((1.0 - x) * (1.0 + x)));
+        3.0 * izzo_tof(x, lambda, n_rev) * x - 2.0 + 2.0 * lambda * lambda * lambda * x / y
+    };
+    let (mut a, mut b) = (lo, hi);
+    let mut x = f64::midpoint(a, b);
+    for _ in 0..100 {
+        if slope(x) < 0.0 {
+            a = x;
+        } else {
+            b = x;
+        }
+        let next = f64::midpoint(a, b);
+        #[expect(
+            clippy::float_cmp,
+            reason = "the fixed point is exactly where the step stops moving `x`"
+        )]
+        let settled = next == x;
+        if settled {
+            break;
+        }
+        x = next;
+    }
+    x
+}
+
+/// The interval of Izzo's `x` that holds the root of `T(x) = t_target` on the branch asked for.
+///
+/// `n_rev = 0`: `x ∈ (−1, ∞)` and `T` falls monotonically from `∞` to `0`, so a coarse scan brackets
+/// the one sign change. `n_rev ≥ 1`: `x ∈ (−1, 1)`, `T` has one minimum, and the two roots lie on
+/// either side of it — bracketed exactly, where a scan misses a pair closer than its step, which near
+/// the minimum time they always are. Below that minimum the refusal carries it, divided by `unit`
+/// back into the caller's time.
+fn izzo_bracket(
+    lambda: f64,
+    n_rev: usize,
+    t_target: f64,
+    unit: f64,
+    long_branch: bool,
+) -> Result<(f64, f64), LambertError> {
+    let lo = -1.0 + 1e-6;
+    let f = |x: f64| izzo_tof(x, lambda, n_rev) - t_target;
+    if n_rev == 0 {
+        let hi = 20.0;
+        let steps = 2000;
+        let mut xa = lo;
+        let mut fa = f(xa);
+        for k in 1..=steps {
+            let xb = lo + (hi - lo) * f64::from(k) / f64::from(steps);
+            let fb = f(xb);
+            if fa * fb < 0.0 {
+                return Ok((xa, xb));
+            }
+            xa = xb;
+            fa = fb;
+        }
+        return Err(LambertError::OutOfRange);
+    }
+    let hi = 1.0 - 1e-6;
+    let x_min = minimum_time_x(lambda, n_rev, lo, hi);
+    let t_min = izzo_tof(x_min, lambda, n_rev);
+    if t_min > t_target {
+        return Err(LambertError::BelowMinimumTime {
+            minimum: t_min / unit,
+        });
+    }
+    let (bracket, end) = if long_branch {
+        ((x_min, hi), hi)
+    } else {
+        ((lo, x_min), lo)
+    };
+    let at_end = f(end);
+    if at_end.is_nan() || at_end <= 0.0 {
+        return Err(LambertError::OutOfRange);
+    }
+    Ok(bracket)
+}
+
+/// Why [`lambert_multirev`] returned no transfer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LambertError {
+    /// The time of flight is not finite and positive.
+    InvalidTimeOfFlight,
+    /// `r1` and `r2` coincide, or are parallel or antiparallel: the transfer plane is undefined.
+    NoTransferPlane,
+    /// No transfer with `n_rev` revolutions is that fast. The family's least time of flight is the
+    /// root of `dT/dx = 0` in Izzo's variable; below it the time equation has no root.
+    BelowMinimumTime {
+        /// The least time of flight of the family, in the caller's unit.
+        minimum: f64,
+    },
+    /// The transfer exists, but its root lies outside the interval the solver searches, `x` from
+    /// `−1 + 1e-6` to `20` for zero revolutions and to `1 − 1e-6` for more: a time of flight
+    /// beyond about a billion times `√(s³/2µ)`, or a hyperbola faster than `x = 20` carries.
+    OutOfRange,
+}
+
+impl core::fmt::Display for LambertError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::InvalidTimeOfFlight => write!(f, "the time of flight is not finite and positive"),
+            Self::NoTransferPlane => write!(
+                f,
+                "the positions are coincident, parallel or antiparallel; the transfer plane is undefined"
+            ),
+            Self::BelowMinimumTime { minimum } => write!(
+                f,
+                "the time of flight is below the {minimum:e} the revolution count needs at least"
+            ),
+            Self::OutOfRange => write!(
+                f,
+                "the transfer's root lies outside the interval of x the solver searches"
+            ),
+        }
+    }
+}
+
+impl core::error::Error for LambertError {}
 
 /// Solve Lambert's problem allowing `n_rev` complete revolutions (Izzo formulation).
 ///
 /// For `n_rev = 0` this is a single-revolution transfer (matching [`lambert`]); for `n_rev ≥ 1` two
-/// solutions exist and `long_branch` selects the higher-`x` (shorter, higher-energy) branch when
-/// `true`. `prograde` and the geometry fix the transfer sense. Returns `None` on a degenerate
-/// geometry, or when no `n_rev`-revolution transfer exists for the given time of flight.
-#[must_use]
+/// solutions exist above the family's minimum time and `long_branch` selects the higher-`x` (shorter,
+/// higher-energy) branch when `true`. `prograde` and the geometry fix the transfer sense.
+///
+/// # Errors
+///
+/// [`LambertError::InvalidTimeOfFlight`] unless `tof` is finite and positive;
+/// [`LambertError::NoTransferPlane`] when the chord or `|r1 × r2|` is below `1e-12`;
+/// [`LambertError::BelowMinimumTime`] when `n_rev ≥ 1` revolutions cannot be flown in `tof`;
+/// [`LambertError::OutOfRange`] when the root lies outside the interval the solver searches.
 pub fn lambert_multirev(
     r1: Vec3,
     r2: Vec3,
@@ -403,7 +651,10 @@ pub fn lambert_multirev(
     prograde: bool,
     n_rev: usize,
     long_branch: bool,
-) -> Option<(Vec3, Vec3)> {
+) -> Result<(Vec3, Vec3), LambertError> {
+    if !(tof.is_finite() && tof > 0.0) {
+        return Err(LambertError::InvalidTimeOfFlight);
+    }
     let r1n = r1.norm();
     let r2n = r2.norm();
     let c = Vec3::new(r2.x - r1.x, r2.y - r1.y, r2.z - r1.z);
@@ -413,17 +664,21 @@ pub fn lambert_multirev(
     // `s = (r1n + r2n + cn)/2 ≥ cn`, and a second test on `s` could never fire once this one has
     // passed — it read as a guard while guarding nothing.
     if cn < 1e-12 {
-        return None;
+        return Err(LambertError::NoTransferPlane);
     }
     let i_r1 = r1.scale(1.0 / r1n);
     let i_r2 = r2.scale(1.0 / r2n);
     let cross = r1.cross(r2);
     let cross_n = cross.norm();
     if cross_n < 1e-12 {
-        return None; // 0° or 180° transfer
+        return Err(LambertError::NoTransferPlane); // 0° or 180° transfer
     }
     let i_h = cross.scale(1.0 / cross_n);
-    let mut lambda = libm::sqrt(1.0 - cn / s);
+    // λ = √(r1 r2)·cos(Δν/2)/s = |A|/(√2 s), the sign below. As `√(1 − c/s)` it cancelled within
+    // ε of a half turn, where λ ≈ ε/4: on 13 % of random geometries at ε ~ 1e-9 `1 − c/s` rounded
+    // below zero and λ was NaN, and elsewhere it was off by up to 1.7e-8 absolute.
+    let mut lambda =
+        chord_parameter_magnitude(r1n, r2n, r1.dot(r2), cross_n) / (core::f64::consts::SQRT_2 * s);
     let (mut i_t1, mut i_t2);
     if i_h.z < 0.0 {
         lambda = -lambda;
@@ -439,36 +694,10 @@ pub fn lambert_multirev(
         i_t2 = i_t2.scale(-1.0);
     }
 
-    let t_target = libm::sqrt(2.0 * mu / (s * s * s)) * tof;
-
-    // Root-find x. n_rev=0: x ∈ (−1, ∞); n_rev≥1: x ∈ (−1, 1) with two roots. A coarse scan brackets
-    // the sign change of T(x) − T_target (T decreases in x), then bisection refines.
-    let hi = if n_rev == 0 { 20.0 } else { 1.0 - 1e-6 };
-    let lo = -1.0 + 1e-6;
-    let steps = 2000;
+    let unit = libm::sqrt(2.0 * mu / (s * s * s));
+    let t_target = unit * tof;
     let f = |x: f64| izzo_tof(x, lambda, n_rev) - t_target;
-    let mut brackets = [(0.0, 0.0); 2];
-    let mut nb = 0;
-    let mut xa = lo;
-    let mut fa = f(xa);
-    for k in 1..=steps {
-        let xb = lo + (hi - lo) * f64::from(k) / f64::from(steps);
-        let fb = f(xb);
-        if fa * fb < 0.0 && nb < 2 {
-            brackets[nb] = (xa, xb);
-            nb += 1;
-        }
-        xa = xb;
-        fa = fb;
-    }
-    if nb == 0 {
-        return None; // no transfer for this tof / n_rev
-    }
-    let (mut a, mut b) = if n_rev >= 1 && long_branch && nb == 2 {
-        brackets[1]
-    } else {
-        brackets[0]
-    };
+    let (mut a, mut b) = izzo_bracket(lambda, n_rev, t_target, unit, long_branch)?;
     // Bisect until the bracket is one ulp wide. Stopping on an absolute residual instead leaves
     // whatever `x`-error that residual is worth, which is two orders of magnitude at `T ~ 1`.
     let mut x = f64::midpoint(a, b);
@@ -509,7 +738,7 @@ pub fn lambert_multirev(
         vr2 * i_r2.y + vt2 * i_t2.y,
         vr2 * i_r2.z + vt2 * i_t2.z,
     );
-    Some((v1, v2))
+    Ok((v1, v2))
 }
 
 #[cfg(test)]
@@ -561,30 +790,31 @@ mod tests {
     /// slower, so the sweep crosses the parabolic boundary the Stumpff branches hinge on.
     const TOFS: [f64; 6] = [400.0, 1000.0, 3000.0, 10_000.0, 40_000.0, 120_000.0];
 
-    /// `T(x, λ, N)` of the Lancaster–Blanchard form, evaluated at 60 decimal digits with `mpmath`,
-    /// with the ulp budget each entry is entitled to. The table spans both conics and both signs of
-    /// `λ`. The budget is one ulp per digit the Lagrange form cancels away: at `x = 1.02` the
-    /// hyperbolic arc is near-parabolic, `sinh α − α` loses `sinh α / (sinh α − α) ≈ 38` in the
-    /// leading term alone, and no rearrangement of *this* form recovers it.
-    const IZZO_TOF: [(f64, f64, usize, f64, i64); 18] = [
-        (0.0, 0.5, 0, 1.480_210_253_088_817_069_536_076, 8),
-        (-0.9, 0.3, 0, 37.206_019_284_720_004_453_133_41, 8),
-        (0.5, 0.9, 0, 0.321_388_255_499_988_662_800_457_6, 8),
-        (0.75, 0.45, 0, 0.720_803_136_724_604_010_795_098_4, 8),
-        (-0.25, 0.8, 0, 1.839_046_851_196_585_578_166_719, 8),
-        (0.3, 0.2, 1, 4.742_432_784_142_829_841_881_213, 8),
-        (-0.5, 0.7, 2, 13.304_338_152_135_505_434_784_57, 8),
-        (0.0, -0.5, 0, 1.661_382_400_500_976_168_926_567, 8),
-        (-0.7, -0.8, 0, 8.196_593_203_105_028_973_287_010, 8),
-        (0.4, -0.3, 1, 5.128_706_840_676_636_927_341_485, 8),
-        (0.6, -0.95, 3, 20.002_821_794_501_325_325_060_31, 8),
-        (1.05, 0.2, 0, 0.641_895_856_066_700_313_464_885_6, 8),
-        (1.5, 0.4, 0, 0.470_995_876_202_493_818_440_098_0, 8),
-        (3.0, 0.9, 0, 0.062_954_358_790_311_366_604_606_37, 8),
-        (12.0, 0.6, 0, 0.053_223_462_297_644_230_998_104_63, 8),
-        (1.5, -0.4, 0, 0.551_695_512_712_693_257_113_715_7, 8),
-        (2.5, -0.85, 0, 0.582_361_552_596_315_904_638_422_8, 8),
-        (1.02, -0.75, 0, 0.938_112_673_030_687_534_538_148_1, 64),
+    /// `T(x, λ, N)` of the Lancaster–Blanchard form, Lagrange's equation at 100 digits
+    /// (`derivations/lambert_izzo.gp` §2, which also holds the literals to it, to 2e-25), on both
+    /// conics and both signs of `λ`, with the condition number `κ` of the equation's one subtraction,
+    /// `F(α) − F(β) + 2πN`: `(x, λ, N, T, κ)`. `κ` is the factor by which the rounding of the two
+    /// terms reaches `T`, and it is the problem's: it grows as `λ → 1`, the chord to zero.
+    #[rustfmt::skip]
+    const IZZO_TOF: [(f64, f64, usize, f64, f64); 18] = [
+        (0.0, 0.5, 0, 1.480210253088817069536076, 1.122),
+        (-0.9, 0.3, 0, 37.20601928472000445313341, 1.001),
+        (0.5, 0.9, 0, 0.3213882554999886628004576, 4.884),
+        (0.75, 0.45, 0, 0.7208031367246040107950984, 1.173),
+        (-0.25, 0.8, 0, 1.839046851196585578166719, 1.475),
+        (0.3, 0.2, 1, 4.742432784142829841881213, 1.002),
+        (-0.5, 0.7, 2, 13.30433815213550543478457, 1.039),
+        (0.0, -0.5, 0, 1.661382400500976168926567, 1.000),
+        (-0.7, -0.8, 0, 8.196593203105028973287010, 1.000),
+        (0.4, -0.3, 1, 5.128706840676636927341485, 1.000),
+        (0.6, -0.95, 3, 20.00282179450132532506031, 1.000),
+        (1.05, 0.2, 0, 0.6418958560667003134648856, 1.017),
+        (1.5, 0.4, 0, 0.4709958762024938184400980, 1.171),
+        (3.0, 0.9, 0, 0.06295435879031136660460637, 8.438),
+        (12.0, 0.6, 0, 0.05322346229764423099810463, 2.084),
+        (1.5, -0.4, 0, 0.5516955127126932571137157, 1.000),
+        (2.5, -0.85, 0, 0.5823615525963159046384228, 1.000),
+        (1.02, -0.75, 0, 0.9381126730306875345381481, 1.000),
     ];
 
     /// Curtis, Example 5.2: a one-hour prograde transfer.
@@ -609,6 +839,11 @@ mod tests {
     /// prints a bare `false`.
     const PROGRADE: bool = true;
     const RETROGRADE: bool = false;
+
+    /// The branch of a `MULTIREV_ARCS` row, `long_branch` of [`lambert_multirev`], named for the
+    /// same reason.
+    const HIGH_X: bool = true;
+    const LOW_X: bool = false;
 
     /// One Lambert arc and its two velocities: `(r1, r2, tof, prograde, v1, v2)`.
     type LagrangeArc = ([f64; 3], [f64; 3], f64, bool, [f64; 3], [f64; 3]);
@@ -1454,16 +1689,19 @@ mod tests {
         }
     }
 
-    /// The Lancaster–Blanchard time of flight against a 60-digit evaluation of its closed form, on
-    /// the ellipse and the hyperbola and for both signs of `λ`.
+    /// The Lancaster–Blanchard time of flight against Lagrange's equation at 100 digits, on the
+    /// ellipse and the hyperbola and for both signs of `λ`. The budget is 8 ulps per unit of `κ`:
+    /// over 3 000 random points of `x ∈ (−1, 20)`, `λ ∈ (−0.99, 0.99)`, `N ≤ 3` the worst was 4.8
+    /// `κ` ulps, where the Lagrange form it replaced reached 17.5 on the ellipse and was unbounded
+    /// near `x = 1`.
     #[test]
     fn the_nondimensional_time_of_flight_matches_its_closed_form_on_both_conics() {
-        for &(x, lambda, n_rev, want, ulps) in &IZZO_TOF {
-            assert_within_ulps(
-                izzo_tof(x, lambda, n_rev),
-                want,
-                ulps,
-                &format!("T(x = {x}, lambda = {lambda}, N = {n_rev})"),
+        for (x, lambda, n_rev, want, kappa) in IZZO_TOF {
+            let got = izzo_tof(x, lambda, n_rev);
+            assert!(
+                ulps(got, want) <= 8.0 * kappa,
+                "T(x = {x}, lambda = {lambda}, N = {n_rev}): {got:e} against {want:e}, {:.1} ulps",
+                ulps(got, want)
             );
         }
     }
@@ -1476,7 +1714,9 @@ mod tests {
             for prograde in [true, false] {
                 for &tof in &TOFS {
                     let (v1, v2) = lambert_multirev(r1, r2, tof, MU_EARTH_KM, prograde, 0, false)
-                        .unwrap_or_else(|| panic!("no arc at tof {tof} s, prograde {prograde}"));
+                        .unwrap_or_else(|e| {
+                            panic!("no arc at tof {tof} s, prograde {prograde}: {e}")
+                        });
                     let (v1u, _) = lambert(r1, r2, tof, MU_EARTH_KM, prograde).expect("uv arc");
                     let d = (v1 - v1u).norm();
                     assert!(
@@ -1546,16 +1786,19 @@ mod tests {
     ///
     /// Both solvers are asked, because agreement between two formulations that crowd at different
     /// places is the evidence: Izzo's Lancaster–Blanchard variable has no singularity at one
-    /// revolution at all. At 60 000 s the two departure velocities agree to 1.9e-12 relative and the
-    /// arc closes to 4.2e-9 of the radius; at 600 000 s they agree to 1.9e-12 and it closes to
-    /// 2.2e-7. At 6e6 s — a 714 000 km semi-major axis, `e ≈ 0.99` — the closure test refuses,
-    /// which is the third case above and the honest end of what `z` can carry.
+    /// revolution at all. At 60 000 s the two departure velocities agree to 4.8e-15 relative and the
+    /// arc closes to 1.1e-11 of the radius; at 600 000 s to 6.4e-14 and 7.5e-9; at 6e6 s — a
+    /// 714 000 km semi-major axis, `e ≈ 0.99` — to 2.4e-14 and 1.3e-7. The last was refused, and
+    /// the first two closed to 4.2e-9 and 2.2e-7, while `A` was `sin Δν·√(r1 r2/(1 − cos Δν))`:
+    /// `1 − cos 355° = 0.0038` carried `cos Δν`'s rounding up 260 times, and near a whole revolution
+    /// the arc is that sensitive to `A`. At 2e7 s the closure test refuses, the honest end of what
+    /// `z` can carry.
     #[test]
     fn the_long_way_round_is_solved_where_the_root_crowds_the_whole_revolution() {
         let r1 = Vec3::new(7000.0, 0.0, 0.0);
         let dnu = 5f64.to_radians();
         let r2 = Vec3::new(7000.0 * dnu.cos(), 7000.0 * dnu.sin(), 0.0);
-        for (tof, bound) in [(60_000.0, 1e-8), (600_000.0, 5e-7)] {
+        for (tof, bound) in [(60_000.0, 5e-11), (600_000.0, 3e-8), (6.0e6, 5e-7)] {
             let (v1, _) = lambert(r1, r2, tof, MU_EARTH_KM, false)
                 .unwrap_or_else(|| panic!("no long-way arc at tof {tof} s"));
             let miss = (propagate(r1, v1, MU_EARTH_KM, tof).0 - r2).norm() / r2.norm();
@@ -1564,25 +1807,24 @@ mod tests {
                 "long-way arc missed r2 by {miss:.3e} at {tof} s"
             );
             let (w1, _) = lambert_multirev(r1, r2, tof, MU_EARTH_KM, false, 0, false)
-                .unwrap_or_else(|| panic!("no Izzo arc at tof {tof} s"));
+                .unwrap_or_else(|e| panic!("no Izzo arc at tof {tof} s: {e}"));
             let d = (w1 - v1).norm() / v1.norm();
             assert!(
-                d < 1e-11,
+                d < 1e-12,
                 "the two solvers differ by {d:.3e} at tof {tof} s"
             );
         }
 
-        // The third of the ticket's cases is past what `z` can resolve, and is refused rather than
-        // answered. Izzo still solves it, which is the whole reason the refusal is the right answer
-        // and not a gap.
+        // Past what `z` can resolve the arc is refused rather than answered. Izzo still solves it,
+        // which is the whole reason the refusal is the right answer and not a gap.
         assert!(
-            lambert(r1, r2, 6.0e6, MU_EARTH_KM, false).is_none(),
-            "6e6 s is past the resolution of z and must be refused"
+            lambert(r1, r2, 2.0e7, MU_EARTH_KM, false).is_none(),
+            "2e7 s is past the resolution of z and must be refused"
         );
-        let (w1, _) = lambert_multirev(r1, r2, 6.0e6, MU_EARTH_KM, false, 0, false)
+        let (w1, _) = lambert_multirev(r1, r2, 2.0e7, MU_EARTH_KM, false, 0, false)
             .expect("Izzo solves what the universal variable cannot");
-        let miss = (propagate(r1, w1, MU_EARTH_KM, 6.0e6).0 - r2).norm() / r2.norm();
-        assert!(miss < 1e-9, "the Izzo arc missed r2 by {miss:.3e} at 6e6 s");
+        let miss = (propagate(r1, w1, MU_EARTH_KM, 2.0e7).0 - r2).norm() / r2.norm();
+        assert!(miss < 1e-8, "the Izzo arc missed r2 by {miss:.3e} at 2e7 s");
     }
 
     /// The two senses are always two different arcs — one each way round. That stays true on the
@@ -1604,7 +1846,7 @@ mod tests {
                     let (v1, _) = lambert(r1, r2, tof, MU_EARTH_KM, prograde)
                         .unwrap_or_else(|| panic!("no arc at tof {tof} s, prograde {prograde}"));
                     let (w1, _) = lambert_multirev(r1, r2, tof, MU_EARTH_KM, prograde, 0, false)
-                        .unwrap_or_else(|| panic!("no Izzo arc at tof {tof} s"));
+                        .unwrap_or_else(|e| panic!("no Izzo arc at tof {tof} s: {e}"));
                     let d = (w1 - v1).norm();
                     assert!(
                         d < 1e-10 * v1.norm(),
@@ -1652,8 +1894,8 @@ mod tests {
     }
 
     /// The Izzo solver refuses geometries with no transfer plane and revolution counts the time of
-    /// flight cannot support. The near-coincident case is the one the chord guard exists for: the
-    /// positions are 0.1 pm apart, which the cross product alone does not resolve.
+    /// flight cannot support, and says which. The near-coincident case is the one the chord guard
+    /// exists for: the positions are 0.1 pm apart, which the cross product alone does not resolve.
     #[test]
     fn the_izzo_solver_refuses_degenerate_geometries_and_impossible_revolution_counts() {
         let r1 = Vec3::new(7000.0, 0.0, 0.0);
@@ -1667,10 +1909,13 @@ mod tests {
             ),
         ];
         for (name, r2, n_rev) in cases {
-            assert!(
-                lambert_multirev(r1, r2, 3600.0, MU_EARTH_KM, true, n_rev, false).is_none(),
-                "expected no solution for the {name} case"
-            );
+            let got = lambert_multirev(r1, r2, 3600.0, MU_EARTH_KM, true, n_rev, false);
+            let typed = match got {
+                Err(LambertError::NoTransferPlane) => n_rev == 0,
+                Err(LambertError::BelowMinimumTime { minimum }) => n_rev == 3 && minimum > 3600.0,
+                _ => false,
+            };
+            assert!(typed, "the {name} case returned {got:?}");
         }
     }
 
@@ -1713,8 +1958,9 @@ mod tests {
                     lambert(r1, r2, tof, MU_EARTH_KM, true).is_none(),
                     "single-rev solved tof = {tof}"
                 );
-                assert!(
-                    lambert_multirev(r1, r2, tof, MU_EARTH_KM, true, 0, false).is_none(),
+                assert_eq!(
+                    lambert_multirev(r1, r2, tof, MU_EARTH_KM, true, 0, false),
+                    Err(LambertError::InvalidTimeOfFlight),
                     "izzo solved tof = {tof}"
                 );
             }
@@ -1722,27 +1968,9 @@ mod tests {
     }
 
     /// The `Arc` the public solver builds for one of the sweep geometries, so the iteration and its
-    /// derivative can be reached directly. Transcribed from [`lambert`]'s prologue.
+    /// derivative can be reached directly.
     fn arc_of(r1: Vec3, r2: Vec3, tof: f64, prograde: bool) -> Arc {
-        let (r1n, r2n) = (r1.norm(), r2.norm());
-        let cross_z = r1.x * r2.y - r1.y * r2.x;
-        let cos_dnu = (r1.dot(r2) / (r1n * r2n)).clamp(-1.0, 1.0);
-        let acos = libm::acos(cos_dnu);
-        let tau = core::f64::consts::TAU;
-        let dnu = if prograde {
-            if cross_z >= 0.0 { acos } else { tau - acos }
-        } else if cross_z < 0.0 {
-            acos
-        } else {
-            tau - acos
-        };
-        Arc {
-            r1n,
-            r2n,
-            a: libm::sin(dnu) * libm::sqrt(r1n * r2n / (1.0 - cos_dnu)),
-            sqmu: libm::sqrt(MU_EARTH_KM),
-            tof,
-        }
+        Arc::new(r1, r2, tof, MU_EARTH_KM, prograde).expect("a geometry with a transfer plane")
     }
 
     /// Every case of the sweep, as the iteration sees it.
@@ -1813,7 +2041,10 @@ mod tests {
                 let r2 = Vec3::new(r2n * libm::cos(dnu), r2n * libm::sin(dnu), 0.0);
                 for tof in [60.0_f64, 3600.0, 6e5, 6e6] {
                     for pro in [true, false] {
-                        let arc = arc_of(r1, r2, tof, pro);
+                        // 180° has no transfer plane, and `lambert` refuses it before any bracket.
+                        let Some(arc) = Arc::new(r1, r2, tof, MU_EARTH_KM, pro) else {
+                            continue;
+                        };
                         let Some((lo, hi)) = arc.bracket() else {
                             continue;
                         };
@@ -1910,7 +2141,7 @@ mod tests {
         );
         for ((r1, r2), tof) in [(chord, 1000.0), (plane, 0.01)] {
             assert!(
-                lambert_multirev(r1, r2, tof, MU_EARTH_KM, true, 0, false).is_some(),
+                lambert_multirev(r1, r2, tof, MU_EARTH_KM, true, 0, false).is_ok(),
                 "a transfer sitting exactly on the floor was refused"
             );
         }
@@ -1942,5 +2173,474 @@ mod tests {
             bracketed, 20,
             "the sweep stopped covering both sides of z = 0"
         );
+    }
+
+    /// The chord parameter `A` at four geometries `ε = π − Δν` from a half turn, `ε` from 1e-3 to
+    /// 1e-9, with `A` and `ε` of the rounded inputs at 100 digits: `derivations/lambert_universal.gp`
+    /// (an ellipse `a = 8000`, `e = 1/10` in a tilted plane, from `ν = 1/5`).
+    type ChordRow = ([f64; 3], [f64; 3], f64, f64);
+    #[rustfmt::skip]
+    const HALF_TURN_CHORD_PARAMETER: [ChordRow; 4] = [
+        ([5974.699314991947176167741, 3201.585383727156113309320, 2466.011481298751732538221], [-7278.142952334410438197665, -3891.782426811342247674474, -2997.358325967428299918538], 5.627438843804057132305699, 0.0009999999999999982989955449),
+        ([5974.699314991947176167741, 3201.585383727156113309320, 2466.011481298751732538221], [-7273.119570508919423446059, -3897.270545531217521784129, -3001.858124614212101732846], 0.05627377876677908560904413, 9.999999999992352284393373e-6),
+        ([5974.699314991947176167741, 3201.585383727156113309320, 2466.011481298751732538221], [-7273.069297876281780190766, -3897.325404136211091099540, -3001.903105147378937545000], 0.0005627377263706891664315383, 1.000000000092437755546228e-7),
+        ([5974.699314991947176167741, 3201.585383727156113309320, 2466.011481298751732538221], [-7273.068795146074990043417, -3897.325952720001623674762, -3001.903554950964462477714], 5.627377208753631083399044e-6, 9.999999914173621598894867e-10),
+    ];
+
+    /// Two arcs near a half turn (`ε` = 1e-5, 1e-7, same ellipse) and two short arcs (`Δν` = 1e-5,
+    /// 1e-6 on `a = 7000`, `e = 1/100`, from `ν = 3/10`), solved at 100 digits by Lagrange's theorem
+    /// and closed by propagation in `derivations/lambert_universal.gp`: `(r1, r2, tof, v1, v2)`.
+    type ConditionedArc = ([f64; 3], [f64; 3], f64, [f64; 3], [f64; 3]);
+    #[rustfmt::skip]
+    const CONDITIONED_ARCS: [ConditionedArc; 4] = [
+        ([5974.699314991947176167741, 3201.585383727156113309320, 2466.011481298751732538221], [-7273.119570508919423446059, -3897.270545531217521784129, -3001.858124614212101732846], 3651.023950078398229379673, [-4.246083195582606909858931, 5.054541148717857784932724, 4.137507765878255070161449], [3.700670878039358920815984, -4.038300971060049907025663, -3.311146688871541222974586]),
+        ([5974.699314991947176167741, 3201.585383727156113309320, 2466.011481298751732538221], [-7273.069297876281780190766, -3897.325404136211091099540, -3001.903105147378937545000], 3651.037534706469614320667, [-4.246083195548371617057054, 5.054541147177273384719584, 4.137507767795426881067365], [3.700729053304269517066541, -4.038269796481149410782788, -3.311122679307051220863110]),
+        ([5326.410355657255422556773, 3505.500152526995861990144, 2721.805294786741796997376], [5326.366140774000086821616, 3505.541391958417079877108, 2721.839223167049567564391], 0.009100279199550379005678735, [-4.858600322713788264227000, 4.531685691613534483699758, 3.728293865144129084044200], [-4.858658298791240977913491, 4.531647535111542407661273, 3.728264238956411392830121]),
+        ([5326.410355657255422556773, 3505.500152526995861990144, 2721.805294786741796997376], [5326.405934192788663494866, 3505.504276485654827411054, 2721.808687636815648147603], 0.0009100278959799462620214316, [-4.858600322350830616464859, 4.531685691556924932192853, 3.728293865346473073206667], [-4.858606119980309159269656, 4.531681875926875011372758, 3.728290902744280789383657]),
+    ];
+
+    /// `T(x, λ, N)` at the doubles next to the parabola `x = 1`, from Lagrange's equation at 100
+    /// digits (`derivations/lambert_izzo.gp` §3), with the condition number `κ` of the equation's
+    /// one subtraction: `(x, λ, T, κ)`.
+    #[rustfmt::skip]
+    const NEAR_PARABOLA: [(f64, f64, f64, f64); 52] = [
+        (0.99900000000000011, 0.6, 0.5230357949262925489338788, 1.551),
+        (0.99999900000000008, 0.6, 0.5226670355628987786108234, 1.551),
+        (0.99999999000000006, 0.6, 0.5226666703556266834469480, 1.551),
+        (0.99999999989999999, 0.6, 0.5226666667035562857084587, 1.551),
+        (0.99999999999990008, 0.6, 0.5226666666667035427688385, 1.551),
+        (0.99999999999999989, 0.6, 0.5226666666666667236095615, 1.551),
+        (1.0000000000000000, 0.6, 0.5226666666666666826538782, 1.551),
+        (1.0000000000000002, 0.6, 0.5226666666666666007425116, 1.551),
+        (1.0000000000000999, 0.6, 0.5226666666666298225389179, 1.551),
+        (1.0000000001000000, 0.6, 0.5226666666297770796039403, 1.551),
+        (1.0000000099999999, 0.6, 0.5226666629777067282860422, 1.551),
+        (1.0000009999999999, 0.6, 0.5226662977708988390397139, 1.551),
+        (1.0009999999999999, 0.6, 0.5222980026595272273517125, 1.551),
+        (0.99900000000000011, -0.6, 0.8110979958040046957871804, 1.000),
+        (0.99999900000000008, -0.6, 0.8106670977708916320202356, 1.000),
+        (0.99999999000000006, -0.6, 0.8106666709777066469809030, 1.000),
+        (0.99999999989999999, -0.6, 0.8106666667097770542486758, 1.000),
+        (0.99999999999990008, -0.6, 0.8106666666667097266222678, 1.000),
+        (0.99999999999999989, -0.6, 0.8106666666666666985416138, 1.000),
+        (1.0000000000000000, -0.6, 0.8106666666666666506794551, 1.000),
+        (1.0000000000000002, -0.6, 0.8106666666666665549551378, 1.000),
+        (1.0000000000000999, -0.6, 0.8106666666666235747366424, 1.000),
+        (1.0000000001000000, -0.6, 0.8106666666235562471147348, 1.000),
+        (1.0000000099999999, -0.6, 0.8106666623556266993813438, 1.000),
+        (1.0000009999999999, -0.6, 0.8106662355628917027100293, 1.000),
+        (1.0009999999999999, -0.6, 0.8102357875628335364634137, 1.000),
+        (0.99900000000000011, 0.95, 0.09517390507473709519295696, 13.018),
+        (0.99999900000000008, 0.95, 0.09508342382104244632697441, 13.023),
+        (0.99999999000000006, 0.95, 0.09508333423820966639609761, 13.023),
+        (0.99999999989999999, 0.95, 0.09508333334238217674097409, 13.023),
+        (0.99999999999990008, 0.95, 0.09508333333334245502146039, 13.023),
+        (0.99999999999999989, 0.95, 0.09508333333333342353758018, 13.023),
+        (1.0000000000000000, 0.95, 0.09508333333333341349143571, 13.023),
+        (1.0000000000000002, 0.95, 0.09508333333333339339914677, 13.023),
+        (1.0000000000000999, 0.95, 0.09508333333332437196141103, 13.023),
+        (1.0000000001000000, 0.95, 0.09508333332428465024357814, 13.023),
+        (1.0000000099999999, 0.95, 0.09508333242845717739481430, 13.023),
+        (1.0000009999999999, 0.95, 0.09508324284579246106278914, 13.023),
+        (1.0009999999999999, 0.95, 0.09499292967247104236920686, 13.028),
+        (0.99900000000000011, -0.95, 1.238959885655560149528102, 1.000),
+        (0.99999900000000008, -0.95, 1.238250709512747964304085, 1.000),
+        (0.99999999000000006, -0.95, 1.238250007095123664031753, 1.000),
+        (0.99999999989999999, -0.95, 1.238250000070951163216160, 1.000),
+        (0.99999999999990008, -0.95, 1.238250000000070814369646, 1.000),
+        (0.99999999999999989, -0.95, 1.238249999999999998613595, 1.000),
+        (1.0000000000000000, -0.95, 1.238249999999999919841898, 1.000),
+        (1.0000000000000002, -0.95, 1.238249999999999762298503, 1.000),
+        (1.0000000000000999, -0.95, 1.238249999999929025314149, 1.000),
+        (1.0000000001000000, -0.95, 1.238249999929048676475097, 1.000),
+        (1.0000000099999999, -0.95, 1.238249992904876250272572, 1.000),
+        (1.0000009999999999, -0.95, 1.238249290487998080686954, 1.000),
+        (1.0009999999999999, -0.95, 1.237540860549889721445919, 1.000),
+    ];
+
+    /// The least time of flight of each `N`-revolution family, the minimum of Lagrange's equation at
+    /// 100 digits, which `derivations/lambert_izzo.gp` §4 also finds as the root of Izzo's `dT/dx`
+    /// and agrees with to 1e-115: `(geometry index into MULTIREV_GEOMETRIES, prograde, N, t_min)`.
+    #[rustfmt::skip]
+    const MINIMUM_TIMES: [(usize, bool, usize, f64); 12] = [
+        (0, PROGRADE, 1, 9302.621563421778164293195),
+        (0, PROGRADE, 2, 15866.25342541269979173278),
+        (0, PROGRADE, 3, 22357.86550009264789483184),
+        (0, RETROGRADE, 1, 9422.081966674056984523967),
+        (0, RETROGRADE, 2, 15985.78052989836772947771),
+        (0, RETROGRADE, 3, 22477.41007313714738512720),
+        (1, PROGRADE, 1, 4697.472596821732873642248),
+        (1, PROGRADE, 2, 8102.902678944104841198308),
+        (1, PROGRADE, 3, 11471.18217741325526525274),
+        (1, RETROGRADE, 1, 5018.369904929783449880600),
+        (1, RETROGRADE, 2, 8424.431161844781279402131),
+        (1, RETROGRADE, 3, 11792.87651659091571985435),
+    ];
+
+    /// The two geometries of `MINIMUM_TIMES`.
+    const MULTIREV_GEOMETRIES: [(Vec3, Vec3); 2] = [
+        (
+            Vec3 {
+                x: 8000.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Vec3 {
+                x: -2000.0,
+                y: 8000.0,
+                z: 3000.0,
+            },
+        ),
+        (
+            Vec3 {
+                x: 6000.0,
+                y: 2000.0,
+                z: 1500.0,
+            },
+            Vec3 {
+                x: 1000.0,
+                y: 5000.0,
+                z: 4000.0,
+            },
+        ),
+    ];
+
+    /// One multi-revolution arc: `(r1, r2, tof, prograde, n_rev, long_branch, v1, v2)`.
+    type MultirevArc = (
+        [f64; 3],
+        [f64; 3],
+        f64,
+        bool,
+        usize,
+        bool,
+        [f64; 3],
+        [f64; 3],
+    );
+
+    /// Every branch of `MULTIREV_GEOMETRIES` for `N` = 0, 1, 2, both senses, at times of flight on
+    /// both sides of each family's minimum-energy time, and the near-half-turn geometry
+    /// (`π − Δν = 1.5e-9`) on which `1 − c/s` rounded below zero: solved at 100 digits by Lagrange's
+    /// equation in its own variable on the branch named, and closed by propagation, in
+    /// `derivations/lambert_izzo.gp` §5.
+    #[rustfmt::skip]
+    const MULTIREV_ARCS: [MultirevArc; 29] = [
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 3600.000000000000000000000, PROGRADE, 0, LOW_X, [2.970662637551662682734492, 5.774448490799108682903637, 2.165418184049665756088864], [-4.895835063344011908239369, -3.514453709820387098657072, -1.317920141182645161996402]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 9500.000000000000000000000, PROGRADE, 1, LOW_X, [2.182190245682532646982994, 6.042998305090253720702135, 2.266124364408845145263301], [-5.334721638695905407278939, -2.833106665577393253692785, -1.062414999591522470134794]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 9500.000000000000000000000, PROGRADE, 1, HIGH_X, [0.6989346462145072013654281, 6.586689144233182849362754, 2.470008429087443568511033], [-6.197502210317909657679085, -1.556747735661092766734678, -0.5837804008729097875255043]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 14000.00000000000000000000, PROGRADE, 1, LOW_X, [4.803095689167012135764747, 5.203266099519307707256191, 1.951224787319740390221072], [-3.926937506907304739737380, -5.105314370448011870075245, -1.914492888918004451278217]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 14000.00000000000000000000, PROGRADE, 1, HIGH_X, [-1.380169724884940583296231, 7.434813347638514062267487, 2.788055005364442773350307], [-7.489897522051458917289080, 0.2203366976517794200863751, 0.08262626161941728253239068]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 20000.00000000000000000000, PROGRADE, 2, LOW_X, [4.330163417228450004918462, 5.343770733199087279854503, 2.003914024949657729945439], [-4.170329595056503945213813, -4.693764552570333338562760, -1.760161707213875001961035]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 20000.00000000000000000000, PROGRADE, 2, HIGH_X, [-0.4898578494807611139245032, 7.059309645683605677174880, 2.647241117131352128940580], [-6.924578531351753729526930, -0.5389244573274077905918024, -0.2020966714977779214719259]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 3600.000000000000000000000, RETROGRADE, 0, LOW_X, [-1.899362746420236758958556, -6.142763046661228127113595, -2.303536142497960547667598], [5.495466816719323923983111, 2.589184919767616812521936, 0.9709443449128563046957261]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 9500.000000000000000000000, RETROGRADE, 1, LOW_X, [-2.818584112155820826442972, -5.825156714401365351356647, -2.184433767900512006758742], [4.979435409706922926845377, 3.382885218777769698045078, 1.268581957041663636766904]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 9500.000000000000000000000, RETROGRADE, 1, HIGH_X, [-3.769152572130378883548384, -5.516614582061647909501189, -2.068730468273117966062946], [4.465007183114974537590420, 4.206429595786693487643074, 1.577411098420010057866153]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 14000.00000000000000000000, RETROGRADE, 1, LOW_X, [0.009409213407498504435232032, -6.864333650423221288354010, -2.574125118908707983132754], [6.626903072263124225598711, 0.9497223126403882510211971, 0.3561458672401455941329489]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 14000.00000000000000000000, RETROGRADE, 1, HIGH_X, [-6.182602511819540317588844, -4.819649712094341056065894, -1.807368642035377896024710], [3.242291098772907648612153, 6.309434453285733629814965, 2.366037919982150111180612]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 20000.00000000000000000000, RETROGRADE, 2, LOW_X, [-0.4459324949587460329650534, -6.684514368611448380983713, -2.506692888229293142868892], [6.349577735389910265697371, 1.339746532886152461145368, 0.5024049498323071729295130]),
+        ([8000.000000000000000000000, 0.0, 0.0], [-2000.000000000000000000000, 8000.000000000000000000000, 3000.000000000000000000000], 20000.00000000000000000000, RETROGRADE, 2, HIGH_X, [-5.242385969646618076005016, -5.076930458228480785700527, -1.903848921835680294637698], [3.704887614372878908771935, 5.488171375422407507714367, 2.058064265783402815392888]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 3600.000000000000000000000, PROGRADE, 0, LOW_X, [4.487252819722471211542561, 4.821715139461940624407553, 3.794463008144015301549952], [-4.909318239772895027335977, -4.590806001537773813319688, -3.601374139811195117358035]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 5100.000000000000000000000, PROGRADE, 1, LOW_X, [1.532815685816215430035093, 4.845693027586030571527304, 3.866488759920627862298100], [-5.676971901952998506802159, -2.376332715881239964917159, -1.808178577012549998472678]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 5100.000000000000000000000, PROGRADE, 1, HIGH_X, [-1.935331673107803457681880, 5.338123536635158053846986, 4.324123050387319926442790], [-7.158703924584142893535872, 0.1058849431058407707663119, 0.2129201136490531710360698]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 9000.000000000000000000000, PROGRADE, 1, LOW_X, [4.738222135308154227007676, 4.834569594435638207129324, 3.800310885969563662389498], [-4.862730710863302177317153, -4.782680258318990097825174, -3.756390730598058075443137]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 9000.000000000000000000000, PROGRADE, 1, HIGH_X, [-4.290732570332036841730016, 5.957345137666162235310263, 4.863772567237666739833783], [-8.521159784923285591751190, 1.719737042044619136565662, 1.534095119230913334592964]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 10000.00000000000000000000, PROGRADE, 2, LOW_X, [3.075616823786005926925622, 4.791029992635771237446321, 3.795013086514708924252836], [-5.223405050246970250519671, -3.522078942992235681771673, -2.736966917578636346950101]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 10000.00000000000000000000, PROGRADE, 2, HIGH_X, [-2.458236883023714774243003, 5.456851856935183535513919, 4.428867329376910247720881], [-7.437737138138865618636332, 0.4688992169642026683878590, 0.5096107482415711731444640]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 3600.000000000000000000000, RETROGRADE, 0, LOW_X, [2.424532809346644448846352, -5.448863037179587354726529, -4.421845883614787060920360], [7.419331587092296993783611, -0.4455859063093280571338273, -0.4905481673395010636572471]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 5100.000000000000000000000, RETROGRADE, 1, LOW_X, [-1.161868489074682141386158, -4.873553536728364985827809, -3.895500726137531111086879], [5.804431011182223958608520, 2.104570813690294160848062, 1.587522421515732379992040]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 5100.000000000000000000000, RETROGRADE, 1, HIGH_X, [-2.793573992003126469408575, -4.793863291127917982594875, -3.802326323370592549060014], [5.297369081176583024330684, 3.310813643121660164901322, 2.565879372487466507075514]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 9000.000000000000000000000, RETROGRADE, 1, LOW_X, [2.820076936789090515601759, -5.545484871207516398468534, -4.506551716805845150833675], [7.638920243183514488563765, -0.7184618849057069791958949, -0.7137447332846487241496256]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 9000.000000000000000000000, RETROGRADE, 1, HIGH_X, [-6.091296696339854526794413, -4.938646281010617507388599, -3.859781891948891666173081], [4.655043984567266753235207, 5.825935629452337775433269, 4.598429631085498806093962]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 10000.00000000000000000000, RETROGRADE, 2, LOW_X, [1.123974988774327221766458, -5.176456636178528263724388, -4.179723636014430340881499], [6.753953675068045432781848, 0.4630785807204031380299940, 0.2515104010241088531887122]),
+        ([6000.000000000000000000000, 2000.000000000000000000000, 1500.000000000000000000000], [1000.000000000000000000000, 5000.000000000000000000000, 4000.000000000000000000000], 10000.00000000000000000000, RETROGRADE, 2, HIGH_X, [-4.035748083857048107333788, -4.804045997438638101703554, -3.788327175015744044095110], [4.999954858543107061028173, 4.246994475797802909587117, 3.323478509863536140542716]),
+        ([5974.699314991947176167741, 3201.585383727156113309320, 2466.011481298751732538221], [-7273.068797685116805951111, -3897.325949949376536096679, -3001.903552679229051136645], 3651.037669866628220916027, PROGRADE, 0, LOW_X, [-4.246083192866958655451662, 5.054541026513750495004759, 4.137507917954474353749989], [3.700729629914363094400195, -4.038269387197204949194431, -3.311122563759548711099668]),
+    ];
+
+    /// The ulps of `want` by which `got` misses it.
+    fn ulps(got: f64, want: f64) -> f64 {
+        (got - want).abs() / (want.abs() * f64::EPSILON)
+    }
+
+    /// (G1, on the numbers) `A` near a half turn keeps the digits its inputs carry. The cross product
+    /// of two near-antiparallel doubles holds `|r1 × r2|` to `u/ε` relative and no better, so that is
+    /// the floor of any form; Curtis's `sin Δν·√(r1 r2/(1 − cos Δν))` took `cos Δν` from a dot
+    /// product and lost `u/ε²`. The bound is `4u/ε`; measured, the worst is 0.16 `u/ε` at `ε = 1e-3`.
+    #[test]
+    fn the_chord_parameter_near_a_half_turn_keeps_the_digits_its_inputs_carry() {
+        for (r1, r2, want, eps) in HALF_TURN_CHORD_PARAMETER {
+            let arc = Arc::new(vec3(r1), vec3(r2), 3600.0, MU_EARTH_KM, true)
+                .expect("a half turn short of 1e-9 still has a plane");
+            let rel = (arc.a - want).abs() / want;
+            println!(
+                "chord parameter at pi - {eps:.1e}: {:.2} u/eps",
+                rel * eps / f64::EPSILON
+            );
+            assert!(
+                rel <= 4.0 * f64::EPSILON / eps,
+                "A at pi - {eps:e}: {} against {want}, {rel:.3e} relative",
+                arc.a
+            );
+        }
+    }
+
+    /// (G2) Both solvers return the 100-digit arc near a half turn and on short arcs. Near a half
+    /// turn the universal-variable solver refused every arc within about 1e-5 rad: `A` was off by
+    /// 1.2e-6 there and the arc missed `r2` by more than `CLOSURE_TOLERANCE`. On a short arc
+    /// `y(z) = r1 + r2 − √2·A·cos(√z/2)` cancelled and `v1` was off by 1.7e-6 at `Δν = 1e-5`.
+    ///
+    /// The bound is the conditioning of the rounded inputs, `u/δ` with `δ` the smaller of `Δν` and
+    /// `π − Δν`: both solvers form `v1` from `r2 − f·r1` and a `g` proportional to `A`, which is
+    /// `O(δ)` there. Measured, the worst is 1.41 `u/δ`; the bound is 16.
+    #[test]
+    fn the_arcs_near_a_half_turn_and_on_short_arcs_are_the_ones_lagrange_s_theorem_gives() {
+        for (r1, r2, tof, v1, v2) in CONDITIONED_ARCS {
+            let (r1, r2) = (vec3(r1), vec3(r2));
+            let dnu = libm::atan2(r1.cross(r2).norm(), r1.dot(r2));
+            let delta = dnu.min(core::f64::consts::PI - dnu);
+            let scale = vec3(v1).norm();
+            let universal = lambert(r1, r2, tof, MU_EARTH_KM, true)
+                .unwrap_or_else(|| panic!("no arc at {delta:.1e} rad from a degenerate angle"));
+            let izzo = lambert_multirev(r1, r2, tof, MU_EARTH_KM, true, 0, false)
+                .unwrap_or_else(|e| panic!("no Izzo arc at {delta:.1e} rad: {e}"));
+            for (name, (got1, got2)) in [("universal", universal), ("izzo", izzo)] {
+                let d = (got1 - vec3(v1)).norm().max((got2 - vec3(v2)).norm()) / scale;
+                println!(
+                    "{name} at {delta:.1e} rad: {:.3} u/delta",
+                    d * delta / f64::EPSILON
+                );
+                assert!(
+                    d <= 16.0 * f64::EPSILON / delta,
+                    "{name} at {delta:.1e} rad: velocity off by {d:.3e} of |v1|"
+                );
+            }
+        }
+    }
+
+    /// (G2) `T` at the doubles next to the parabola is Lagrange's equation at 100 digits. Evaluated
+    /// as `a^{3/2}` times the bracket it was NaN at `x = 1` and lost `α³/6`'s worth of digits near
+    /// it. The budget is 8 ulps per unit of the condition number `κ` of the equation's one
+    /// subtraction (`derivations/lambert_izzo.gp`); measured, the worst is 2.47 `κ` ulps.
+    #[test]
+    fn the_time_of_flight_next_to_the_parabola_is_lagrange_s_at_100_digits() {
+        let mut worst = 0.0_f64;
+        for (x, lambda, want, kappa) in NEAR_PARABOLA {
+            let got = izzo_tof(x, lambda, 0);
+            let off = ulps(got, want);
+            assert!(
+                off <= 8.0 * kappa,
+                "T(x = {x:e}, lambda = {lambda}): {got:e} against {want:e}, {off:.1} ulps"
+            );
+            worst = worst.max(off / kappa);
+        }
+        println!("T next to x = 1: worst {worst:.2} kappa ulps");
+    }
+
+    /// (G3) At `x = 1` the time of flight is its limit `⅔(1 − λ³)` (`derivations/lambert_izzo.mac`
+    /// 6–8), for both signs of `λ`, and in seconds that is Euler's parabolic time. Two parabolas in
+    /// closed form (`lambert_izzo.mac` 10–15, `µ = 1`, `p = 2`): the short way from periapsis
+    /// `(1, 0, 0)` to `(0, 2, 0)` in `4√2/3` with `v1 = (0, √2, 0)`, `v2 = (−1, 1, 0)/√2`, and the
+    /// long way, 233°, from `(0, −2, 0)` to `(−8, 6, 0)` in `40√2/3` with `v1 = (1, 1, 0)/√2`,
+    /// `v2 = (−0.6, 0.2, 0)/√2`. Rounding the times to doubles moves the answers by 9.7e-18 and
+    /// 2.6e-17 of `|v1|` (`derivations/lambert_izzo.gp` §6), so the bound is the solvers' own, 16
+    /// ulps of `|v1|`; measured, 2.12.
+    #[test]
+    fn the_time_of_flight_at_x_equal_one_is_the_parabolic_time() {
+        for lambda in [-0.999, -0.75, -0.5, -0.1, 0.0, 0.1, 0.5, 0.75, 0.999] {
+            let want = 2.0 / 3.0 * (1.0 - lambda * lambda * lambda);
+            assert_within_ulps(
+                izzo_tof(1.0, lambda, 0),
+                want,
+                1,
+                &format!("T(1, {lambda})"),
+            );
+        }
+        let half = core::f64::consts::FRAC_1_SQRT_2;
+        let cases = [
+            (
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0),
+                4.0 * core::f64::consts::SQRT_2 / 3.0,
+                Vec3::new(0.0, core::f64::consts::SQRT_2, 0.0),
+                Vec3::new(-half, half, 0.0),
+            ),
+            (
+                Vec3::new(0.0, -2.0, 0.0),
+                Vec3::new(-8.0, 6.0, 0.0),
+                40.0 * core::f64::consts::SQRT_2 / 3.0,
+                Vec3::new(half, half, 0.0),
+                Vec3::new(-0.6 * half, 0.2 * half, 0.0),
+            ),
+        ];
+        for (r1, r2, tof, v1, v2) in cases {
+            let tol = 16.0 * f64::EPSILON * v1.norm();
+            let izzo = lambert_multirev(r1, r2, tof, 1.0, true, 0, false)
+                .unwrap_or_else(|e| panic!("no parabola to {r2:?}: {e}"));
+            let universal = lambert(r1, r2, tof, 1.0, true).expect("a parabola is solvable");
+            for (name, (got1, got2)) in [("izzo", izzo), ("universal", universal)] {
+                let (d1, d2) = ((got1 - v1).norm(), (got2 - v2).norm());
+                println!(
+                    "{name} parabola to {r2:?}: {:.2} ulps of |v1|",
+                    d1.max(d2) / (f64::EPSILON * v1.norm())
+                );
+                assert!(
+                    d1 <= tol && d2 <= tol,
+                    "{name} parabola to {r2:?}: v1 off by {d1:.3e}, v2 by {d2:.3e}, bound {tol:.3e}"
+                );
+            }
+        }
+    }
+
+    /// (G2) Every multi-revolution arc is the root of Lagrange's equation at 100 digits on the
+    /// branch the solver reports, and lands on `r2` (`derivations/lambert_izzo.gp` §5). Before
+    /// this the solver had no derivation gate at all, and on the near-half-turn row it returned
+    /// nothing, `1 − c/s` having rounded below zero.
+    ///
+    /// The bound: 64 ulps of `|v1|`, the universal solver's, on every row but the near-half-turn
+    /// one, where the transfer plane is known to `u/ε` from the rounded inputs and the bound is
+    /// `16u/ε`, `ε = 1.5e-9`. Measured, 18.8 ulps.
+    #[test]
+    fn every_multi_revolution_arc_is_the_one_lagrange_s_equation_gives_at_100_digits() {
+        let mut worst = 0.0_f64;
+        for (r1, r2, tof, prograde, n_rev, long_branch, v1, v2) in MULTIREV_ARCS {
+            let (r1, r2) = (vec3(r1), vec3(r2));
+            let (got1, got2) =
+                lambert_multirev(r1, r2, tof, MU_EARTH_KM, prograde, n_rev, long_branch)
+                    .unwrap_or_else(|e| {
+                        panic!("no arc at tof {tof} s, N = {n_rev}, long {long_branch}: {e}")
+                    });
+            let d = (got1 - vec3(v1)).norm().max((got2 - vec3(v2)).norm()) / vec3(v1).norm();
+            let sin = r1.cross(r2).norm() / (r1.norm() * r2.norm());
+            let bound = if sin < 1e-6 {
+                16.0 * f64::EPSILON / sin
+            } else {
+                worst = worst.max(d / f64::EPSILON);
+                64.0 * f64::EPSILON
+            };
+            assert!(
+                d <= bound,
+                "tof {tof} s, prograde {prograde}, N = {n_rev}, long {long_branch}: velocity off \
+                 by {d:.3e} of |v1|, bound {bound:.3e}"
+            );
+        }
+        println!("multi-revolution arcs: worst {worst:.1} ulps of |v1|");
+    }
+
+    /// (G2) The least time of flight the solver reports is the minimum of Lagrange's equation at
+    /// 100 digits, which the `.gp` also finds as the root of Izzo's `dT/dx` (`derivations/
+    /// lambert_izzo.mac` 16–18 derive that derivative). `T` is flat at its minimum, so where the
+    /// bisection on `dT/dx` stops is immaterial to it; the bound is 16 ulps; measured,
+    /// 1.55 ulps.
+    #[test]
+    fn the_minimum_time_of_each_family_is_the_minimum_of_lagrange_s_equation() {
+        for (geometry, prograde, n_rev, want) in MINIMUM_TIMES {
+            let (r1, r2) = MULTIREV_GEOMETRIES[geometry];
+            let got = lambert_multirev(r1, r2, 0.5 * want, MU_EARTH_KM, prograde, n_rev, false);
+            let Err(LambertError::BelowMinimumTime { minimum }) = got else {
+                panic!("half the minimum time solved: {got:?}");
+            };
+            println!(
+                "t_min geometry {geometry} prograde {prograde} N {n_rev}: {:.2} ulps",
+                ulps(minimum, want)
+            );
+            assert!(
+                ulps(minimum, want) <= 16.0,
+                "geometry {geometry}, prograde {prograde}, N = {n_rev}: minimum {minimum} s \
+                 against {want} s"
+            );
+        }
+    }
+
+    /// (S2) A time of flight a part in 1e9 below a family's minimum is refused, and says so with the
+    /// minimum; a part in 1e9 above it, both branches are solved and both arcs arrive. The scan this
+    /// replaced sampled `x` every 1e-3, and the two roots a part in 1e9 above the minimum are about
+    /// 1e-4 apart, so it found neither and returned nothing on both sides of the minimum alike.
+    ///
+    /// Above the minimum the two roots are `O(√δT)` from it, and where `T` is that flat `x` is fixed
+    /// only to `√u`: each arc is then the exact arc of a time within a rounding of the one asked
+    /// for, so it still arrives, while its `v1` can sit `√u` from the true root's. The bound on the
+    /// arrival is the sweep's, 1e-12 of the arc's scale `|r2| + tof·|v1|`; measured, 1.6e-14.
+    #[test]
+    fn a_time_below_the_family_s_minimum_is_refused_and_one_above_is_solved() {
+        let mut worst = 0.0_f64;
+        for (geometry, prograde, n_rev, t_min) in MINIMUM_TIMES {
+            let (r1, r2) = MULTIREV_GEOMETRIES[geometry];
+            let below = t_min * (1.0 - 1e-9);
+            let got = lambert_multirev(r1, r2, below, MU_EARTH_KM, prograde, n_rev, false);
+            assert!(
+                matches!(got, Err(LambertError::BelowMinimumTime { minimum }) if minimum > below),
+                "geometry {geometry}, prograde {prograde}, N = {n_rev}: {got:?} below the minimum"
+            );
+            let above = t_min * (1.0 + 1e-9);
+            let arcs = [false, true].map(|long| {
+                let (v1, _) = lambert_multirev(r1, r2, above, MU_EARTH_KM, prograde, n_rev, long)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "geometry {geometry}, N = {n_rev}, long {long}: {e} above the minimum"
+                        )
+                    });
+                let miss = (propagate(r1, v1, MU_EARTH_KM, above).0 - r2).norm()
+                    / (r2.norm() + above * v1.norm());
+                worst = worst.max(miss);
+                assert!(
+                    miss <= 1e-12,
+                    "geometry {geometry}, N = {n_rev}, long {long}: missed r2 by {miss:.3e}"
+                );
+                v1
+            });
+            assert!(
+                (arcs[0] - arcs[1]).norm() > 0.0,
+                "geometry {geometry}, N = {n_rev}: the two branches returned one arc"
+            );
+        }
+        println!("a part in 1e9 above the minimum: worst miss {worst:.3e} of scale");
+    }
+
+    /// (G2, closure) Every arc the multi-revolution solver returns over a sweep of both geometries of
+    /// `MULTIREV_GEOMETRIES` and `GEOMETRIES`, `N` from 0 to 3, both senses and both branches, at
+    /// times of flight from 1.01 to 4 times each family's minimum, is carried onto `r2` by the gated
+    /// universal propagator, `crate::kepler::propagate`. The bound is 1e-12 of the arc's scale
+    /// `|r2| + tof·|v1|`; measured, 4.7e-15.
+    #[test]
+    fn every_multi_revolution_arc_closes_through_the_universal_propagator() {
+        let mut worst = 0.0_f64;
+        let mut flown = 0usize;
+        for (r1, r2) in MULTIREV_GEOMETRIES.into_iter().chain(GEOMETRIES) {
+            for prograde in [true, false] {
+                for n_rev in 0..=3 {
+                    // The family's minimum, or for N = 0 an hour, as the unit of the sweep.
+                    let unit =
+                        match lambert_multirev(r1, r2, 1.0, MU_EARTH_KM, prograde, n_rev, false) {
+                            Err(LambertError::BelowMinimumTime { minimum }) => minimum,
+                            _ => 3600.0,
+                        };
+                    for k in [1.01, 1.1, 1.5, 2.0, 4.0] {
+                        let tof = k * unit;
+                        for long in [false, true] {
+                            let (v1, v2) =
+                                lambert_multirev(r1, r2, tof, MU_EARTH_KM, prograde, n_rev, long)
+                                    .unwrap_or_else(|e| {
+                                        panic!("no arc at {k} t_min, N = {n_rev}, long {long}: {e}")
+                                    });
+                            let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof);
+                            let scale = r2.norm() + tof * v1.norm();
+                            let miss = (rf - r2).norm() / scale;
+                            let dv = (vf - v2).norm() / v1.norm();
+                            worst = worst.max(miss);
+                            flown += 1;
+                            assert!(
+                                miss <= 1e-12 && dv <= 1e-9,
+                                "{k} t_min, prograde {prograde}, N = {n_rev}, long {long}: \
+                                 missed r2 by {miss:.3e} of scale, v2 by {dv:.3e} of |v1|"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            flown,
+            4 * 2 * 4 * 5 * 2,
+            "the sweep stopped covering its cases"
+        );
+        println!("{flown} multi-revolution arcs: worst miss {worst:.3e} of scale");
     }
 }

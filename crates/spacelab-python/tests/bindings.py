@@ -103,6 +103,43 @@ def test_lambert_closes_the_transfer_it_solves():
     assert far(arrival, r2) < 1e-6, far(arrival, r2)
 
 
+def test_lambert_solves_next_to_a_half_turn_and_on_a_short_arc():
+    # 1e-5 rad short of a half turn and on a 1e-5 rad short arc (km, mu = 398600), the arc is the
+    # one Lagrange's theorem gives at 100 digits (derivations/lambert_universal.gp), within 16u/delta
+    # of |v1|, delta the distance to the degenerate angle. The values are not copied from the
+    # implementation, which refused both before its chord parameter and y lost their cancellation.
+    rows = [
+        (
+            [5974.699314991947, 3201.585383727156, 2466.0114812987517],
+            [-7273.119570508919, -3897.2705455312175, -3001.858124614212],
+            3651.0239500783982,
+            [-4.246083195582607, 5.054541148717858, 4.137507765878255],
+            [3.700670878039359, -4.03830097106005, -3.311146688871541],
+        ),
+        (
+            [5326.410355657255, 3505.500152526996, 2721.805294786742],
+            [5326.366140774, 3505.541391958417, 2721.8392231670496],
+            0.009100279199550379,
+            [-4.858600322713788, 4.531685691613535, 3.728293865144129],
+            [-4.858658298791241, 4.531647535111542, 3.7282642389564113],
+        ),
+    ]
+    for r1, r2, tof, w1, w2 in rows:
+        cross = [
+            r1[1] * r2[2] - r1[2] * r2[1],
+            r1[2] * r2[0] - r1[0] * r2[2],
+            r1[0] * r2[1] - r1[1] * r2[0],
+        ]
+        dnu = math.atan2(norm(cross), sum(a * b for a, b in zip(r1, r2, strict=True)))
+        delta = min(dnu, math.pi - dnu)
+        v1, v2 = sl.lambert(r1, r2, tof, 398600.0, True)
+        off = max(
+            norm([a - b for a, b in zip(v1, w1, strict=True)]),
+            norm([a - b for a, b in zip(v2, w2, strict=True)]),
+        ) / norm(w1)
+        assert off <= 16.0 * sys.float_info.epsilon / delta, (delta, off)
+
+
 def test_nrlmsise00_density_falls_with_altitude_and_uses_every_argument():
     base = {"doy": 80, "sec": 43200.0, "lat_deg": 35.0, "lon_deg": 140.0}
     profile = [

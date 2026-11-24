@@ -24,6 +24,7 @@ gates:
         "mutants-ledger  uv run --no-project python -I tools/mutants-ledger.py --since HEAD"
         "sdtm-freeze     uv run --no-project python -I tools/check-sdtm-freeze.py"
         "set-numbers     uv run --no-project python -I tools/check-set-numbers.py --check"
+        "readme          uv run --no-project python -I tools/gen-readme.py --check"
     )
     logs=$(mktemp -d)
     trap 'rm -rf "$logs"' EXIT

@@ -13,6 +13,9 @@
    (musl's) are assumed within one ulp, a relative 2u; x_minus_sin is within 1.245 u below x = 2
    (x_minus_sin_roundoff.mac) and 1 + 2|sin x|/(x - sin x) u above it (sin's ulp and the
    subtraction). To first order A_computed - A = sum_i s_i delta_i, s_i = dA/d delta_i at 0.
+   H-libm (h_libm.txt, Ф28.J) refutes the one ulp for atan2: row shadow_atan2 measures 1.549 ulp
+   on this domain. With H-libm's constants the kappa-free part reaches 21.08 > c1 = 18, so the
+   gate is not shown under H-libm (docs/verification.md §1.2, open).
 
    (1) The 23 sensitivities, by differentiating the perturbed computation, in the chord frame:
        the common chord has half-length w = 1, the centres lie m_S = cot a and m_E = cot b from it

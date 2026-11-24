@@ -1,0 +1,43 @@
+# H-libm: the hypothesis on libm 0.2.16 (the version Cargo.lock pins) that the round-off proofs
+# take, one constant per function and domain (plans/18 Ф28.J; docs/verification.md §1.1):
+#
+#   |r - f(x)| <= constant * ulp(f(x)) for every double x of the domain,
+#   r libm's answer, f the true function, ulp(y) = 2^(max(floor(log2 |y|), -1022) - 52).
+#
+# A measurement is a tested hypothesis, not a proof. `measured` is the largest error that
+# libm_hypothesis_arb.c finds in Arb balls; PARI/GP at 600 digits recomputes each row's worst
+# input and agrees (libm_hypothesis.gp). `constant` is `measured` rounded up to the next 1/64 ulp,
+# and 1/2 for sqrt and cbrt, which are correctly rounded (sqrt is the IEEE `sqrtsd` on x86_64,
+# cbrt is CORE-MATH's). verify.sh §9 fails if any point is above its row's constant, and if
+# `measured` is not what the run finds. A larger error may exist where no point falls. The
+# published largest known errors (Gladman et al., August 2026) are among the points, so for
+# atan2, hypot, tan, sin, cos, exp, acos, asin and atan the row's worst is a published input.
+#
+# A result that rests on a constant here says "under H-libm".
+#
+# row              function   constant  measured  domain; who takes the constant
+kepler_sin         sincos_sin 0.78125   0.767441  E in [-0.001, 6.3], the doubles next to pi/2, pi, 3pi/2, 2pi among them; kepler_roundoff.gappa, kepler_roundoff.fptaylor
+kepler_cos         sincos_cos 0.765625  0.752090  the same; the same
+vermeille_hypot    hypot      1.03125   1.030306  (d, z) in [1 mm, 6.1e7 m] x [1 mm, 4.3e7 m], near-equal pairs and the published pairs scaled in; vermeille_roundoff.gappa
+vermeille_atan2    atan2      1.5625    1.549080  atan2(z, w), 1 mm <= z <= w <= 1.3e8 m, the published pair scaled in; the latitude in vermeille_roundoff.gappa
+vermeille_cbrt     cbrt       0.5       0.499994  [1, 1.0364]; vermeille_roundoff.gappa
+sqrt_all           sqrt       0.5       0.500000  every positive double, subnormals included; every *_roundoff.gappa
+shadow_atan2       atan2      1.5625    1.549080  atan2(h, t), h in [2^-60, 16], |t| in [2^-60, 16], either sign; shadow_lens_budget.mac and shadow_lens_roundoff.fptaylor, which still assume 1 ulp (open)
+shadow_sin         sin        0.765625  0.752546  [2, 2 pi], the doubles next to pi, 3pi/2, 2pi among them; the same, assuming 1 ulp (open)
+sin_all            sin        0.84375   0.830759  every finite double: uniform on [-2 pi, 2 pi], log-uniform in [2^-26, 2^21] and over every binade, the published inputs; any other call
+cos_all            cos        0.84375   0.833134  the same; any other call
+tan_all            tan        1.015625  1.011659  the same; any other call
+sincos_sin_all     sincos_sin 0.84375   0.830759  the same; any other call
+sincos_cos_all     sincos_cos 0.84375   0.833134  the same; any other call
+sin_hard           sin        0.71875   0.715743  the doubles nearest multiples of pi/2: 4 per binade from 1 to 2^1024 from the continued fraction of 2/pi, their neighbours, both signs, and both sides of j pi/2 for j <= 256
+cos_hard           cos        0.75      0.747092  the same
+tan_hard           tan        0.734375  0.728196  the same
+sincos_sin_hard    sincos_sin 0.71875   0.715743  the same
+sincos_cos_hard    sincos_cos 0.75      0.747092  the same
+atan2_all          atan2      1.5625    1.549080  every quadrant, |x| over every binade, |y/x| in [2^-60, 2^60], the published pair; any other call
+hypot_all          hypot      1.03125   1.030306  every scale, subnormals included, |y/x| in [2^-60, 1], the published pairs; any other call
+exp_all            exp        0.953125  0.948330  [-745.13, 709.78] uniform, |x| log-uniform in [2^-60, 512], the published inputs; any call
+log_all            log        0.71875   0.718578  every positive double, and 1 +- t for t in [2^-52, 1/2]; any call
+acos_all           acos       0.9375    0.929811  [-1, 1] uniform, 1 - t for t in [2^-53, 1/2], |x| in [2^-60, 1/2], both signs; any call
+asin_all           asin       0.984375  0.980823  the same; any call
+atan_all           atan       0.875     0.860245  |x| in [2^-30, 2^30] and over every binade, both signs; any call

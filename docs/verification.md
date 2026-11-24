@@ -252,28 +252,36 @@ real IERS primary sources; `earth`'s strongest single check is cross-algorithm (
 Fukushima). `core` is analytic identities + bit-exact anchors + round-trips, as befits unit wrappers and
 calendar arithmetic.*
 
-### 1.1 Round-off on the hot path, proved rather than sampled (Ф28.C)
+### 1.1 Round-off on the hot path, proved rather than sampled (Ф28.C), under H-libm (Ф28.J)
 
 The rows above measure each kernel's f64 error at chosen points. Five kernels that every propagation
 step or frame transform passes through now also have a bound on that error **over a whole domain**,
 proved by Gappa 1.8.3 on the shipped operation order: each `+ − × ÷ √` is one IEEE double rounding,
-and Rust never fuses a multiply-add. libm 0.2's `sqrt` and CORE-MATH `cbrt` are correctly rounded.
-`sin`, `cos`, `atan2` and `hypot` (musl's) are assumed to be within one ulp.
+and Rust never fuses a multiply-add. Three of the six proofs also call libm functions that are not
+correctly rounded: `sincos` (Kepler), `hypot` and `atan2` (Vermeille). For each one the proof takes a
+constant from **H-libm**, a measured hypothesis on libm 0.2.16 (below), so those bounds hold
+**under H-libm**. ERA, GMST82 and the seed call only `floor`, which is exact, and `sqrt`, which is
+the IEEE operation. They rest on no measurement.
 Each file's header states the domain, the hypotheses and the hand lemmas the proof rests on.
 `derivations/roundoff_samples.mac` replays the same operations exactly at points that include each
 domain's edges. It holds the observed error against Maxima at 60 digits under each bound.
 On 2026-11-13 that replay was checked against the shipped functions. ERA, GMST82 and the Kepler loop
 matched bit for bit. Vermeille matched bit for bit apart from four results one ulp apart, each from
-libm's `atan2` or `hypot` landing on the other neighbour of the true value. The Vermeille proofs
-model that one-ulp error.
+libm's `atan2` or `hypot` landing on the other neighbour of the true value. H-libm's constants
+cover them.
 
 | Kernel | Code | Domain | Proved bound | Observed / bound | Proof |
 |---|---|---|---|---|---|
 | ERA | `spacelab-fa` `era` | ±50 Julian centuries of UT1, the exact day fraction | **9.12e-12 rad**, modulo 2π | 4.29e-12 rad, 0.47 | derivations/era_roundoff.gappa |
 | GMST82 | `spacelab-fa` `gmst82` | ±50 Julian centuries | **1.37e-11 rad**, and 1.88e-7 s before the reduction: the "about 1e-11 rad at 5000 years" of its doc comment, now a bound | 5.83e-12 rad, 0.43 | derivations/gmst82_roundoff.gappa |
-| Kepler, last Newton step | `spacelab-elements` `eccentric_from_mean` | e ≤ 0.99, M in [0, 2π), the step's residual ≤ 1e-12 | **6.14e-14** from the exact Newton step. With the exact step's remainder, which is under 5e-19, the result is within 6.15e-14 of the root. This is the floor its test names, ulp(E)/(1 − e cos E), with E near 2π | 1.13e-14 at e = 0.99 with M near 2π, 0.18 | derivations/kepler_roundoff.gappa |
-| Vermeille | `spacelab-earth` `itrf_to_geodetic` | \|x\|, \|y\|, \|z\| ≥ 1 mm, geodetic height −100 km to GEO (P + Q in [0.955, 46]) | latitude **3.95e-15 rad**; height **5.97e-15·√(D² + z²)** ≤ 5.97e-15·\|r\|, so 3.8e-8 m at the surface and 2.5e-7 m at GEO | 9.3e-17 rad and 1.1e-16·√(D² + z²), 0.024 and 0.019 | derivations/vermeille_roundoff.gappa, derivations/vermeille_height_roundoff.gappa |
+| Kepler, last Newton step | `spacelab-elements` `eccentric_from_mean` | e ≤ 0.99, M in [0, 2π), the step's residual ≤ 1e-12 | **5.90e-14** from the exact Newton step, under H-libm. With the exact step's remainder, which is under 5e-19, the result is still within 5.90e-14 of the root. This is the floor its test names, ulp(E)/(1 − e cos E), with E near 2π | 1.13e-14 at e = 0.99 with M near 2π, 0.19 | derivations/kepler_roundoff.gappa |
+| Vermeille | `spacelab-earth` `itrf_to_geodetic` | \|x\|, \|y\|, \|z\| ≥ 1 mm, geodetic height −100 km to GEO (P + Q in [0.955, 46]) | latitude **4.08e-15 rad**; height **5.98e-15·√(D² + z²)** ≤ 5.98e-15·\|r\|, so 3.8e-8 m at the surface and 2.5e-7 m at GEO; both under H-libm | 9.3e-17 rad and 1.1e-16·√(D² + z²), 0.023 and 0.019 | derivations/vermeille_roundoff.gappa, derivations/vermeille_height_roundoff.gappa |
 | Geopotential seed | `spacelab-propagation` `harmonic_quantities`, `geo_row` at n ≤ 1 | r from 6 245 km to 430 000 km, any Rₑ in [6.3, 6.4] Mm | V̄₀₀ within **5.02e-16**; V̄₁₀, V̄₁₁, W̄₁₁ within **1.9e-15**, relative | 1.54e-16 and 4.47e-16, 0.31 | derivations/geopotential_seed_roundoff.gappa |
+
+Under the one-ulp assumption that H-libm replaces, the Kepler bound was 6.14e-14 (6.15e-14 from the
+root), and the Vermeille bounds were 3.95e-15 rad and 5.97e-15·√(D² + z²). The Kepler bound fell:
+on its domain libm's `sincos` is measured below one ulp. The Vermeille bounds rose: `atan2` and
+`hypot` are measured above it. ERA, GMST82 and the seed did not change.
 
 No kernel is worse than its code or docs claim. Some parts are not covered:
 
@@ -291,16 +299,126 @@ Two Vermeille steps cannot be bounded by a relative error, so the proof treats t
 - **The final rounding.** `height = hk·hyp` passes through zero on the ellipsoid. That last
   rounding is a second file. A hand lemma in it shows `hk` is either zero or at least 2⁻⁵⁶.
 
-The ratios are lowest for Vermeille: about 1/40 for latitude and 1/50 for height. The bound adds
+The latitude itself is closed by hand from Gappa's bound on `d + hyp` and `atan2`'s constant.
+`roundoff_samples.mac` redoes that sum in exact rationals: 3.7281e-15 + 3.4695e-16 ≤ 4.08e-15.
+
+The ratios are lowest for Vermeille: about 1/44 for latitude and 1/52 for height. The bound adds
 about thirty roundings at their worst case. Ten sample points rarely meet that case.
+
+#### H-libm: the hypothesis on libm, and the test that holds it (Ф28.J)
+
+Until Ф28.J the proofs assumed that `sin`, `cos`, `atan2` and `hypot` are within one ulp. For the
+shipped crate that is false: libm 0.2.16's `atan2` errs by 1.549 ulp and its `hypot` by 1.030 ulp at
+inputs inside the Vermeille domain (F105). H-libm replaces the assumption:
+
+> For each row of `derivations/h_libm.txt`, |r − f(x)| ≤ c·ulp(f(x)) for every double x of the
+> row's domain. Here r is libm 0.2.16's answer, f the true function, c the row's constant and
+> ulp(y) = 2^(max(⌊log₂|y|⌋, −1022) − 52).
+
+H-libm is a **measurement**: a tested hypothesis, not a proof. A larger error may exist at an input
+that no point hits. Each constant is the largest error found, rounded up to the next 1/64 ulp. For
+`sqrt` and `cbrt` it is ½, because both are correctly rounded: `sqrt` is the IEEE `sqrtsd` on
+x86-64, `cbrt` is CORE-MATH's. The measurement agrees with both.
+
+**The test.** `derivations/libm_hypothesis_arb.c` draws 8 976 478 inputs over the 25 rows. The draw
+is deterministic and calls no libm. The shipped libm answers them through `spacelab-core`'s
+`libm_eval` example, which builds against `Cargo.lock`. The C file then computes each error in Arb
+balls (FLINT 3.4.0) to 2⁻⁷⁰ ulp. Near a power of two it takes the smaller ulp, so a doubtful error
+comes out larger, not smaller. `derivations/verify.sh` §9 runs it. It fails if one point is above
+its row's constant. The same run against the table with every constant halved must refute all 25
+rows; that planted defect stays in the script (rule 16). With every constant above one set to one,
+the old assumption, six rows fail: `vermeille_atan2` (174 points), `shadow_atan2` (479),
+`atan2_all` (45), `vermeille_hypot` (4), `hypot_all` (3) and `tan_all` (1). PARI/GP at 600 digits
+recomputes each row's worst point and agrees with Arb to the six decimals printed
+(`derivations/libm_hypothesis.gp`).
+The script also checks that `h_libm.txt` and the table below print what the run finds.
+
+**The points.** The proof rows get 0.5 to 1.25 million points each, `cbrt` and `sqrt` 100 000, and
+each other row 200 000: uniform, log-uniform over the binades, near-equal pairs for `hypot`, and the
+domain's edges. The published
+largest known errors are among them (Gladman, Innocente, Mather, Ozaki and Zimmermann, *Accuracy of
+Mathematical Functions in Single, Double, Double Extended, and Quadruple Precision*, August 2026,
+Tables 3, 7 and 9). These are the inputs for musl 1.2.6, OpenLibm 0.8.7 and FreeBSD 15.1, whose code
+libm 0.2.16 ports. They set the maximum of 15 of the 25 rows. The random points alone reach
+1.373 ulp for `atan2` on the Vermeille domain, against the published input's 1.549.
+
+**The hard arguments.** `sin`, `cos` and `tan` reduce their argument modulo π/2, and the reduction
+cancels most at the doubles nearest a multiple of π/2. For x = m·2^k with m in [2⁵², 2⁵³), x is near
+jπ/2 when mθ is near an integer, θ the fractional part of 2^(k+1)/π. The best m come from the
+continued fraction of θ. For every binade from 1 to 2¹⁰²⁴ the C file keeps the four nearest, their
+neighbours and both signs, and it adds both sides of jπ/2 for j ≤ 256: 25 320 points per function.
+The nearest is 6381956970095103·2⁷⁹⁷, 4.687e-19 (2⁻⁶⁰·⁸⁹) from a multiple of π/2. PARI finds the
+same double from its own continued fraction. On these points the worst error is 0.716 ulp for
+`sin`, 0.728 for `tan` and 0.747 for `cos`, below their `all` rows: the reduction shows no loss
+there.
+
+| Row | Function | Domain | Measured (ulp) | Constant (ulp) | Taken by |
+|---|---|---|---|---|---|
+| `kepler_sin` | `sincos`, the sine | E in [−0.001, 6.3] | 0.767441 | **0.78125** | kepler_roundoff.gappa and .fptaylor |
+| `kepler_cos` | `sincos`, the cosine | the same | 0.752090 | **0.765625** | the same |
+| `vermeille_hypot` | `hypot` | (d, z) in [1 mm, 6.1e7 m] × [1 mm, 4.3e7 m] | 1.030306 | **1.03125** | vermeille_roundoff.gappa |
+| `vermeille_atan2` | `atan2` | atan2(z, w), 1 mm ≤ z ≤ w ≤ 1.3e8 m | 1.549080 | **1.5625** | the Vermeille latitude |
+| `vermeille_cbrt` | `cbrt` | [1, 1.0364] | 0.499994 | **0.5** | vermeille_roundoff.gappa |
+| `sqrt_all` | `sqrt` | every positive double | 0.500000 | **0.5** | every proof |
+| `shadow_atan2` | `atan2` | atan2(h, t), h and \|t\| in [2⁻⁶⁰, 16], t of either sign | 1.549080 | **1.5625** | the shadow lens (§1.2, open) |
+| `shadow_sin` | `sin` | [2, 2π] | 0.752546 | **0.765625** | the shadow lens (§1.2, open) |
+| `sin_all` | `sin` | every finite double | 0.830759 | **0.84375** | any other call |
+| `cos_all` | `cos` | every finite double | 0.833134 | **0.84375** | any other call |
+| `tan_all` | `tan` | every finite double | 1.011659 | **1.015625** | any other call |
+| `sincos_sin_all` | `sincos`, the sine | every finite double | 0.830759 | **0.84375** | any other call |
+| `sincos_cos_all` | `sincos`, the cosine | every finite double | 0.833134 | **0.84375** | any other call |
+| `sin_hard` | `sin` | the doubles nearest multiples of π/2 | 0.715743 | **0.71875** | — |
+| `cos_hard` | `cos` | the same | 0.747092 | **0.75** | — |
+| `tan_hard` | `tan` | the same | 0.728196 | **0.734375** | — |
+| `sincos_sin_hard` | `sincos`, the sine | the same | 0.715743 | **0.71875** | — |
+| `sincos_cos_hard` | `sincos`, the cosine | the same | 0.747092 | **0.75** | — |
+| `atan2_all` | `atan2` | every quadrant and binade, \|y/x\| in [2⁻⁶⁰, 2⁶⁰] | 1.549080 | **1.5625** | any other call |
+| `hypot_all` | `hypot` | every binade, subnormals included, \|y/x\| in [2⁻⁶⁰, 1] | 1.030306 | **1.03125** | any other call |
+| `exp_all` | `exp` | [−745.13, 709.78] | 0.948330 | **0.953125** | any call |
+| `log_all` | `log` | every positive double, and 1 ± t for t in [2⁻⁵², ½] | 0.718578 | **0.71875** | any call |
+| `acos_all` | `acos` | [−1, 1], next to ±1 and next to 0 | 0.929811 | **0.9375** | any call |
+| `asin_all` | `asin` | the same | 0.980823 | **0.984375** | any call |
+| `atan_all` | `atan` | every finite double | 0.860245 | **0.875** | any call |
+
+A call outside a proof domain takes its function's `all` row; for `sin`, `cos`, `tan` and `sincos`
+the `all` constant is also above the `hard` one. No proof calls `exp`, `log`, `acos`, `asin`, `atan`
+or `tan` today; their rows are there for the round-off legs of Ф28.K–M.
+
+**`pow`.** It gets a domain check, not a constant. libm 0.2.16's `pow` is FreeBSD's. When
+2³¹ + 2¹¹ ≤ |y| < 2⁶⁴ + 2⁴⁴ and |x| is in [1 − 2⁻²¹, 1 + 2⁻²⁰), it approximates log x by a short
+series, and there it is 635 ulp off at a published input. `derivations/libm_pow_sites.tsv` reads all
+134 calls of `libm::pow` in `crates/` and writes down the range of each base and exponent: 80 in
+library code, 50 in tests and 4 in examples. 120 cannot reach that region, because the exponent is
+bounded far below 2³¹ or the base is far from 1. No caller in the tree passes an exponent anywhere
+near 2³¹. 14 calls take the exponent from their caller and do not refuse one above 2³¹, with a base
+that can be next to 1. They are open:
+
+- the five generic forwarders, `Scalar::powf` for f64, `Dual::powf`, `HyperDual::powf`,
+  `DoubleDouble::powf` (a base at or below 0 only) and the Taylor jet's `powf`. Through them the
+  corona series of `radiometric.rs` passes a user's exponent k, from the Python and C bindings as
+  well; `CoronaSeries::new` checks only that k is positive and finite.
+- `mie.rs` (the gamma size distribution's (1 − 3v)/v, v not held in (0, 1/3)), `richardson.rs`
+  (three calls, α unchecked), `harris_priester` (n − 2, a public field), `lightcurve` (the Phong
+  exponent, a public field) and `sdtm`'s storm gain (checked only for finiteness);
+- `dtm2020` and `nrlmsise00`'s diffusive profile, (T₁₂₀/T)^(1 + α + γ): as the temperature gradient
+  vanishes, γ grows without bound and the base goes to 1 at the same time.
+
+A result through an open call is not covered by any constant. `verify.sh` §9 fails when the calls of
+`libm::pow` per file differ from the ledger, so a new call is read before it is committed.
+
+**Rule 13.** A result that takes a constant from H-libm says "under H-libm": the Kepler and
+Vermeille bounds above, FPTaylor's Kepler bound in §1.2, and `shadow::x_minus_sin`'s bound above
+x = 2, which takes libm's `sin` within one ulp (row `shadow_sin`).
 
 ### 1.2 The same bounds from a second tool, and the shadow lens (Ф28.D)
 
 FPTaylor bounds the same kernels a second way. It bounds round-off with a symbolic Taylor form and
 a global branch-and-bound optimiser. Gappa uses interval arithmetic and rewriting. The two tools
 share no code. Each FPTaylor input has the kernel, the operation order and the domain of its Gappa
-file. libm's `sin`, `cos` and `atan2` are within one ulp, which FPTaylor states as a relative error
-of at most 2⁻⁵². `derivations/verify.sh` §8 runs each input. It fails if a bound comes out above
+file. For Kepler, libm's `sin` and `cos` take H-libm's constants (§1.1): c ulp is at most a
+relative error of 2c·2⁻⁵³, which FPTaylor states as `rnd[64, ne, 2c]`. The shadow lens input still
+states one ulp for `sin` and `atan2`, a relative 2⁻⁵², which H-libm refutes for `atan2` (below).
+`derivations/verify.sh` §8 runs each input. It fails if a bound comes out above
 the value that the input's header states.
 
 FPTaylor is out of tree (D-21). It is never linked and never a dependency. The build is FPTaylor
@@ -315,12 +433,12 @@ INTERVAL C library is compiled with `-std=gnu11 -fPIC`, because glibc's C23 head
 |---|---|---|---|---|---|
 | ERA | **9.093e-12 rad** | 9.12e-12 rad | 0.997 | 0.47 | derivations/era_roundoff.fptaylor |
 | GMST82 | **1.3635e-11 rad**, and 1.874e-7 s before the reduction | 1.37e-11 rad, 1.88e-7 s | 0.995 | 0.43 | derivations/gmst82_roundoff.fptaylor |
-| Kepler, last Newton step | **4.530e-14**, with f within 6.130e-16 and the step within 4.486e-14 | 6.14e-14, 6.1e-16, 6.1e-14 | 0.738 | 0.25 | derivations/kepler_roundoff.fptaylor |
-| Vermeille | not expressible | 3.95e-15 rad; 5.97e-15·√(D² + z²) | — | — | — |
+| Kepler, last Newton step | **4.522e-14**, with f within 5.890e-16 and the step within 4.477e-14, under H-libm | 5.90e-14, 5.86e-16, 5.86e-14 | 0.766 | 0.25 | derivations/kepler_roundoff.fptaylor |
+| Vermeille | not expressible | 4.08e-15 rad; 5.98e-15·√(D² + z²) | — | — | — |
 | Geopotential seed | V̄₀₀ within **5.020e-16**; V̄₁₀, V̄₁₁, W̄₁₁ within **1.950e-15**, relative | 5.02e-16; 1.9e-15 | 1.000; 1.026 | 0.31; 0.23 | derivations/geopotential_seed_roundoff.fptaylor |
 
 The two tools agree within 3 % on ERA, GMST82 and the seed. Neither tool's bound is below an error
-that `roundoff_samples.mac` observed. FPTaylor's Kepler bound is 26 % lower than Gappa's, because
+that `roundoff_samples.mac` observed. FPTaylor's Kepler bound is 23 % lower than Gappa's, because
 FPTaylor states the libm error relative to the result. A small `sin` or `cos` then carries a small
 error.
 
@@ -394,6 +512,17 @@ finds no point above the gate: the worst is 0.408 of it (near external tangency,
 rows off the grid: the three points above, the old code's worst point, and each pair's worst
 from the scan. The old code passes the new lens gate too (its worst scan point comes to 0.41 of
 it); the old series fails the new `x − sin x` bound, 4.44 against 0.75 ulp.
+
+**Under H-libm the gate is not shown (open).** The budget and the FPTaylor lens inputs give libm's
+`atan2` and `sin` one ulp each, a relative 2u. H-libm refutes that for `atan2` on the lens's
+domain: row `shadow_atan2` measures 1.549 ulp and takes 1.5625, a relative 3.125u. `sin` on
+[2, 2π] stays below one ulp (row `shadow_sin`, 0.765625). With H-libm's two constants in place of
+2u, the budget's κ-free part reaches 21.08 at a = b = 0.690, where the old model gives 17.92 at
+a = b = 0.698. That is a point value, found on a grid and recomputed in Maxima at 40 digits; it is a
+lower bound on the new maximum. So `c₁ = 18` does not hold under H-libm, and the gate `18 + 2κ` is
+not established. The measured worst is still 0.408 of it. Re-deriving the budget, its hand-bounded
+strips, `shadow_lens_budget_arb.c` and the FPTaylor lens inputs with H-libm's constants, and with
+them `c₁`, is open.
 
 ### 1.3 Each shipped series' approximation error, certified (Ф28.B)
 

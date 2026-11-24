@@ -17,10 +17,13 @@
 #   d  = (k sqrt(x*x + y*y)) / (k + E2),   hyp = hypot(d, z)
 #   latitude = 2 atan2(z, d + hyp),   height = (((k + E2) - 1) / k) hyp
 #
-# Assumptions on libm 0.2: `sqrt` is correctly rounded (IEEE); `cbrt` is CORE-MATH's, correctly
-# rounded, so t = rnd(Tc) with Tc the real cube root of the computed argument; `hypot` and `atan2`
-# (musl) are within one ulp. `hyp` is modelled as rnd(Hc) with Hc within 2^-52 of sqrt(d^2 + z^2):
-# hypot's own result satisfies that with Hc = hyp.
+# Assumptions on libm 0.2.16, under H-libm (derivations/h_libm.txt, plans/18 Ф28.J), a measured
+# hypothesis and not a proof: `sqrt` is correctly rounded, the IEEE operation (row sqrt_all);
+# `cbrt` is CORE-MATH's, correctly rounded (row vermeille_cbrt), so t = rnd(Tc) with Tc the real
+# cube root of the computed argument; on this domain `hypot` (musl's) is within 1.03125 ulp (row
+# vermeille_hypot) and `atan2` (FreeBSD's) within 1.5625 ulp (row vermeille_atan2). An ulp of a
+# result y is at most 2^-52 y, so `hyp` is modelled as rnd(Hc) with Hc within 66 * 2^-58 =
+# 1.03125 * 2^-52, relative, of sqrt(d^2 + z^2): hypot's own result satisfies that with Hc = hyp.
 #
 # Domain: x, y, z in [1 mm, 4.3e7 m] and P + Q in [0.955, 46]. Flipping a coordinate's sign changes
 # no rounding magnitude (x and y are squared; z is squared, and `atan2` is odd in z), so this covers
@@ -50,19 +53,21 @@
 #  Gappa assumes the rewrites' denominators nonzero: V, K, KE, SA, UV and m = 2v, all >= 0.47 here.
 #
 # Results (relative unless absolute is said):
-#   k within 1.361e-15, d within 3.277e-15, hyp within 3.61e-15, wd = d + hyp within 3.721e-15;
+#   k within 1.361e-15, d within 3.277e-15, hyp within 3.617e-15, wd = d + hyp within 3.728e-15;
 #   |w - W| <= 3.12e-17 absolute (w is not relatively accurate near the poles, where W -> 0 and
 #   (u + v) - q cancels, and it need not be: it enters k as an absolute term);
 #   HK = (KE - 1)/K in [-0.0241, 0.8539] and |hk - HK| <= 2.792e-15, for the height step.
 #
-# Latitude, by hand: z is exact and wd = WD (1 + delta), |delta| <= 3.721e-15. With a = z/WD,
-# |atan(a/(1+delta)) - atan(a)| <= a |delta| / ((1 - |delta|)(1 + a^2/(1+|delta|)^2))
-# <= |delta| (1 + |delta|) / (2 (1 - |delta|)), doubled 3.7211e-15. atan2(z, wd) < 1 because
-# wd >= hyp >= z (1 - 2^-52), so its one-ulp error is <= 2^-53, doubled 2^-52. Hence
-# |latitude - phi| <= 3.95e-15 rad. Height: vermeille_height_roundoff.gappa, |h - H| <= 5.97e-15 HYP,
-# HYP = sqrt(D^2 + z^2) <= |r|: 3.8e-8 m at the surface, 2.5e-7 m at GEO.
+# Latitude, by hand, under H-libm: z is exact and wd = WD (1 + delta), |delta| <= 3.728e-15. With
+# a = z/WD, |atan(a/(1+delta)) - atan(a)| <= a |delta| / ((1 - |delta|)(1 + a^2/(1+|delta|)^2))
+# <= |delta| (1 + |delta|) / (2 (1 - |delta|)), doubled 3.7281e-15. atan2(z, wd) < 1 because
+# wd >= hyp >= z (1 - 1.03125 * 2^-52), so its error of at most 1.5625 ulp is <= 1.5625 * 2^-53,
+# doubled 1.5625 * 2^-52 = 3.4695e-16. Hence |latitude - phi| <= 4.0751e-15 <= 4.08e-15 rad
+# (`roundoff_samples.mac` redoes this sum in exact rationals). Height:
+# vermeille_height_roundoff.gappa, |h - H| <= 5.98e-15 HYP, HYP = sqrt(D^2 + z^2) <= |r|: 3.8e-8 m
+# at the surface, 2.5e-7 m at GEO.
 # Cross-checked at ten points, 1e-7 deg to 89.999 deg of latitude and -50 km to GEO, in
-# `roundoff_samples.mac`: worst observed 9.3e-17 rad and 1.1e-16 HYP, 0.024 and 0.019 of the bounds.
+# `roundoff_samples.mac`: worst observed 9.3e-17 rad and 1.1e-16 HYP, 0.023 and 0.019 of the bounds.
 
 @rnd = float<ieee_64, ne>;
 
@@ -140,9 +145,9 @@ HK = (KE - 1) / K;
   /\ Tx in [1, 1.013] /\ Tc -/ Tx in [-1.071e-15, 1.071e-15]
   /\ UV / V in [1, 2] /\ Q / V in [0, 2] /\ W in [0, 0.0067]
   /\ K in [0.97, 6.82] /\ W / K in [0, 0.00691] /\ UV / SA in [0.9999, 1]
-  /\ Hc -/ sqrt(d * d + z * z) in [-1b-52, 1b-52]
+  /\ Hc -/ sqrt(d * d + z * z) in [-66b-58, 66b-58]
   -> |ac -/ Ax| <= 3.21e-15 /\ |w - W| <= 3.12e-17 /\ |k -/ K| <= 1.361e-15 /\ |d -/ Dd| <= 3.277e-15
-     /\ |hyp -/ HYP| <= 3.61e-15 /\ |wd -/ WD| <= 3.721e-15
+     /\ |hyp -/ HYP| <= 3.617e-15 /\ |wd -/ WD| <= 3.728e-15
      /\ HK in [-0.0241, 0.8539] /\ |hk - HK| <= 2.792e-15 }
 
 w - W -> (w - n / m) + (n - E2 * uvq) / m + (E2 - e2) * uvq / m + e2 * (uvq - UVQ) / m + W * (2 * V - m) / m;

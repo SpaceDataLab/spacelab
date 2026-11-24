@@ -1,0 +1,305 @@
+# Every call of libm 0.2.16's `pow` in crates/, its base and exponent ranges as the code bounds them, read site by site at 230742e on 2026-11-24 (plans/18 Ф28.J). pow gets this domain check, not an H-libm constant.
+# Region R, read in libm-0.2.16/src/math/pow.rs:226-262, where pow approximates log x by a short series and is 635 ulp off at a published input (Gladman et al., August 2026, Table 7):
+#   the short log series (pow.rs:256-262) runs iff 0x41e00000 < hi(|y|) <= 0x43f00000 (pow.rs:227, :229) AND 0x3fefffff <= hi(|x|) <= 0x3ff00000 (pow.rs:241, :248).
+#   In values: |y| in [2^31 + 2^11, 2^64 + 2^44) = [2147485696, ~1.8447e19] and |x| in [1 - 2^-21, 1 + 2^-20) (last double below 1 + 2^-20 included).
+#   Excluded earlier: y = 0 (pow.rs:105), x = +1 (:110), NaN (:115-121), x = -1/0/inf (:190-210); x < 0 with non-integer y -> NaN (:213-218). |y| = 2^31 exactly (hi = 0x41e00000) takes the normal path.
+#   For hi(|y|) > 0x43f00000 pow returns over/underflow (:229-238) without the series; for |x| outside the band it returns over/underflow (:240-254).
+# Verdict: out = cannot enter R (reason given); open = R not excluded by the code. 'public API' = the exponent also comes from any external caller.
+# Columns: path	line	occ	fn	kind	base	base_range	exponent	exponent_range	verdict	justification
+crates/spacelab-astro/src/cr3bp.rs	318	1	every_mass_ratio_puts_the_three_roots_in_their_own_regions	test	2e-9	{2e-9} literal	f64::from(48 - k) / 48.0	[0, 1]: (48-k)/48, k in 0..=48 (cr3bp.rs:317)	out	|y| <= 1
+crates/spacelab-astro/src/iod.rs	425	1	laplace	src	hi / lo	hi/lo = 1000*scale/(0.01*scale) = 1e5 (iod.rs:424); NaN if scale = 0	i as f64 / SAMPLES as f64	[0, 1]: i/SAMPLES, i in 1..=SAMPLES and i-1 (iod.rs:427-431), SAMPLES = 4096 (iod.rs:454)	out	|y| <= 1; base 1e5 also outside the |x| band
+crates/spacelab-astro/src/iod.rs	503	1	gauss_ranges	src	hi / lo	hi/lo = 1e5 (iod.rs:502); NaN if scale = 0	i as f64 / SAMPLES as f64	[0, 1]: i/SAMPLES, i in 1..=SAMPLES and i-1 (iod.rs:507-511), SAMPLES = 4096 (iod.rs:454)	out	|y| <= 1
+crates/spacelab-astro/src/iod.rs	1040	1	gibbs_and_herrick_gibbs_agree_with_the_truth_in_their_own_regimes	test	r0.norm()	|r0| of the test reference orbit, m	3.0	{3.0} literal	out	|y| = 3
+crates/spacelab-astro/src/lambert.rs	195	1	tof_err	src	yz / c	y(z)/C(z), caller geometry	1.5	{1.5} literal	out	|y| = 1.5
+crates/spacelab-astro/src/lambert.rs	207	1	dfdz	src	y0	y(0), caller geometry	1.5	{1.5} literal	out	|y| = 1.5
+crates/spacelab-astro/src/lambert.rs	210	1	dfdz	src	yz / c	y(z)/C(z), caller geometry	1.5	{1.5} literal	out	|y| = 1.5
+crates/spacelab-astro/src/patched.rs	30	1	sphere_of_influence	src	planet_to_sun_mass_ratio	caller-supplied mass ratio, unchecked (pub fn patched.rs:29)	0.4	{0.4} literal	out	|y| = 0.4
+crates/spacelab-astro/src/richardson.rs	335	1	the_amplitude_constraint_has_a_real_root_at_every_mass_ratio	test	10.0	{10.0} literal	-f64::from(e) / 10.0	[-14, 0]: -e/10, e in 0..=140 (richardson.rs:334)	out	|y| <= 14; base 10 also outside the |x| band
+crates/spacelab-astro/tests/initial_orbit_determination.rs	77	1	period	test	r.norm()	|r| of test states, m	3.0	{3.0} literal	out	|y| = 3
+crates/spacelab-astro/tests/initial_orbit_determination.rs	627	1	laplace_overtakes_gauss_only_past_a_fifth_of_a_period	test	8.0	{8.0} literal	f64::from(step) / 39.0	[0, 1]: step/39, step in 0..40 (initial_orbit_determination.rs:625)	out	|y| <= 1
+crates/spacelab-astro/tests/initial_orbit_determination.rs	747	1	gibbs_and_herrick_gibbs_swap_places_at_a_measurable_transfer_angle	test	1000.0	{1000.0} literal	f64::from(step) / 47.0	[0, 1]: step/47, step in 0..48 (initial_orbit_determination.rs:745)	out	|y| <= 1
+crates/spacelab-autodiff/src/double_double.rs	316	1	powf	src	self.hi	self.hi <= 0 (guard double_double.rs:315), i.e. (-inf, 0]; the R band includes x in (-(1+2^-20), -(1-2^-21)]	p	p forwarded from Scalar::powf for DoubleDouble (impl double_double.rs:284): union over generic Scalar::powf sites, see # indirect; no in-workspace call reaches this branch (only DoubleDouble powf calls are double_double.rs:781/786, all with base > 0); public API: also any external caller, p unchecked	open	public trait method, p unchecked; e.g. generic CoronaSeries::electron_density::<DoubleDouble> (radiometric.rs:758-763) with radius near -R_sun and an even-integer exponent >= 2^53 enters R
+crates/spacelab-autodiff/src/double_double.rs	381	1	exp	src	2.0	{2.0} literal	m	[-1023, 1023]: m = floor(hi/ln2 + 0.5) with -709 < hi < 709 (guards double_double.rs:338-343, :347)	out	base 2 is outside the |x| band; |y| <= 1023
+crates/spacelab-autodiff/src/dual.rs	85	1	powi	src	self.value	self.value, any f64 (caller)	f64::from(n)	f64::from(n), n: i32 -> [-2^31, 2^31-1]; in-workspace n = 3 (autodiff/tests/derivatives.rs:44)	out	i32 type bound: |y| <= 2^31 has high word <= 0x41e00000, R needs > 0x41e00000 (pow.rs:227); holds for any external caller
+crates/spacelab-autodiff/src/dual.rs	86	1	powi	src	self.value	self.value, any f64 (caller)	f64::from(n - 1)	f64::from(n - 1), i32 arithmetic -> [-2^31, 2^31-1] (n = i32::MIN overflows: panic in debug, wraps to i32::MAX in release)	out	i32 type bound |y| <= 2^31 (see dual.rs:85)
+crates/spacelab-autodiff/src/dual.rs	94	1	powf	src	self.value	self.value, any f64 (doc dual.rs:91 says x > 0 at every call site; not checked)	p	p forwarded: Dual::powf callers = Scalar for Dual (scalar.rs:101-102) generic sites + direct calls (autodiff/tests/derivatives.rs:43, p = 2.5); union includes radiometric.rs:761/:951 where p = -k or k-2 with k only checked > 0 and finite (radiometric.rs:740); SolarCoronaDelay::delta lifts to Dual (modifier.rs:601-616, :676-685); public API: also any external caller	open	exponent unbounded above through the corona series (public CoronaSeries::new, SolarCoronaDelay::new) and through any direct Dual::powf call
+crates/spacelab-autodiff/src/hyperdual.rs	120	1	powf	src	self.value	self.value, any f64 (doc hyperdual.rs:116 says x > 0; not checked)	p	p forwarded: Scalar for HyperDual (scalar.rs:134-135) generic sites + direct calls (autodiff/tests/derivatives.rs:262, :277, p = 2.5); public API: also any external caller	open	same generic route as dual.rs:94 (radiometric.rs:761/:951 instantiated at HyperDual); p unchecked
+crates/spacelab-autodiff/src/hyperdual.rs	129	1	powi	src	self.value	self.value, any f64	f64::from(n)	f64::from(n), n: i32 -> [-2^31, 2^31-1]; in-workspace n in {2, 3} (autodiff/tests/derivatives.rs:267, :273)	out	i32 type bound |y| <= 2^31 (high word <= 0x41e00000)
+crates/spacelab-autodiff/src/hyperdual.rs	130	1	powi	src	self.value	self.value, any f64	f64::from(n - 1)	f64::from(n - 1), i32 -> [-2^31, 2^31-1]	out	i32 type bound |y| <= 2^31
+crates/spacelab-autodiff/src/hyperdual.rs	131	1	powi	src	self.value	self.value, any f64	f64::from(n - 2)	f64::from(n - 2), i32 -> [-2^31, 2^31-1]	out	i32 type bound |y| <= 2^31
+crates/spacelab-autodiff/src/scalar.rs	69	1	powf	src	self	self, any f64 (caller)	p	p forwarded: every generic S::powf / x.powf site instantiated at S = f64 (see # indirect): literals -1.5, 1.7, [1, 63], and radiometric.rs:761 (-k) / :951 (k-2) with k only checked > 0 and finite (radiometric.rs:740); reached in-workspace from the Python bridge solar_corona_delay(series=...) (spacelab-python/src/lib.rs:4767-4787) and C API sl_solar_corona_delay (spacelab-capi/src/lib.rs:10719-10764), which pass user exponents; public API: also any external caller	open	reachable from this workspace's own bindings: k = 2^31 + 2^12 + 0.5 (non-integer, > 64) sends radiometric.rs:951 to tanh-sinh with cos(theta) -> 1 at nodes near theta = 0
+crates/spacelab-control/tests/formation_consensus.rs	87	1	random_graph	test	10.0	{10.0} literal	rng.unit()	[0, 1): Rng::unit (spacelab-estimation/src/sampling.rs:85-89)	out	|y| < 1
+crates/spacelab-coverage/src/observability.rs	247	1	airmass_kasten_young_1989	src	deg + 6.07995	>= 6.07995: deg >= 0 (h < 0 or NaN returns at observability.rs:243-245)	-1.6364	{-1.6364} literal	out	|y| = 1.6364
+crates/spacelab-coverage/src/photometry.rs	71	1	krisciunas_schaefer_airmass	src	1.0 - 0.96 * s * s	[0.04, 1]: 1 - 0.96 sin^2 Z	-0.5	{-0.5} literal	out	|y| = 0.5
+crates/spacelab-coverage/src/photometry.rs	108	1	moon_illuminance	src	10.0	{10.0} literal	-0.4 * (3.84 + 0.026 * deg + 4.0e-9 * deg * deg * deg * deg)	(-inf, -1.536]: -0.4(3.84 + 0.026 deg + 4e-9 deg^4), deg = |alpha| in degrees, caller-supplied, unchecked (photometry.rs:106-107)	out	base 10 is outside the |x| band (high word 0x40240000): for |y| > 2^31 pow returns over/underflow at pow.rs:240-254, never the series
+crates/spacelab-coverage/src/photometry.rs	125	1	moon_scattering	src	10.0	{10.0} literal	5.36	{5.36} literal	out	|y| = 5.36
+crates/spacelab-coverage/src/photometry.rs	127	1	moon_scattering	src	10.0	{10.0} literal	6.15 - deg / 40.0	(-inf, 5.9): 6.15 - deg/40 with deg > 10 (photometry.rs:126), deg = |rho| caller-supplied, unchecked	out	base 10 is outside the |x| band (high word 0x40240000): for |y| > 2^31 pow returns over/underflow at pow.rs:240-254, never the series
+crates/spacelab-coverage/src/photometry.rs	156	1	dark_nanolambert	src	10.0	{10.0} literal	-0.4 * self.extinction_coefficient * (x - 1.0)	-0.4 k (X - 1), X in [1, 5] (photometry.rs:70-71), k = pub field extinction_coefficient (photometry.rs:142), unchecked	out	base 10 is outside the |x| band (high word 0x40240000): for |y| > 2^31 pow returns over/underflow at pow.rs:240-254, never the series
+crates/spacelab-coverage/src/photometry.rs	180	1	moon_nanolambert	src	10.0	{10.0} literal	-0.4 * k * krisciunas_schaefer_airmass(moon_zenith_angle)	-0.4 k X, X in [1, 5], k = pub field, unchecked	out	base 10 is outside the |x| band (high word 0x40240000): for |y| > 2^31 pow returns over/underflow at pow.rs:240-254, never the series
+crates/spacelab-coverage/src/photometry.rs	185	1	moon_nanolambert	src	10.0	{10.0} literal	-0.4 * k * krisciunas_schaefer_airmass(target_zenith_angle)	-0.4 k X, X in [1, 5], k = pub field, unchecked	out	base 10 is outside the |x| band (high word 0x40240000): for |y| > 2^31 pow returns over/underflow at pow.rs:240-254, never the series
+crates/spacelab-coverage/src/photometry.rs	240	1	at	src	10.0	{10.0} literal	-0.4 * beta_mag_per_rad * a	-0.4 beta a, a in [0, pi] (clamp photometry.rs:234), beta = pub variant field, unchecked	out	base 10 is outside the |x| band (high word 0x40240000): for |y| > 2^31 pow returns over/underflow at pow.rs:240-254, never the series
+crates/spacelab-coverage/src/photometry.rs	334	1	source_electrons	src	10.0	{10.0} literal	-0.4 * v_mag	-0.4 v_mag, v_mag caller-supplied, unchecked (pub fn photometry.rs:332)	out	base 10 is outside the |x| band (high word 0x40240000): for |y| > 2^31 pow returns over/underflow at pow.rs:240-254, never the series
+crates/spacelab-coverage/src/photometry.rs	619	1	the_lunar_illuminance_carries_exactly_the_published_phase_law	test	10.0	{10.0} literal	-0.4 * dm	[-3.55, 0]: dm = lunar_v_magnitude(alpha) - lunar_v_magnitude(0) <= 0.026*180 + 4e-9*180^4 = 8.88, alpha in {0..180 deg} (photometry.rs:615)	out	|y| <= 3.6
+crates/spacelab-coverage/src/photometry.rs	970	1	the_scattering_function_is_the_published_two_branch_form	test	10.0	{10.0} literal	5.36	{5.36} literal	out	|y| = 5.36
+crates/spacelab-coverage/src/photometry.rs	973	1	the_scattering_function_is_the_published_two_branch_form	test	10.0	{10.0} literal	6.15 - rho_deg / 40.0	[2.4, 5.89]: 6.15 - rho_deg/40, rho_deg in {10.5, 30, 60, 90, 150} (photometry.rs:967, branch :972)	out	|y| <= 5.9
+crates/spacelab-coverage/src/photometry.rs	987	1	the_scattering_function_is_the_published_two_branch_form	test	10.0	{10.0} literal	5.36	{5.36} literal	out	|y| = 5.36
+crates/spacelab-coverage/src/photometry.rs	992	1	the_scattering_function_is_the_published_two_branch_form	test	10.0	{10.0} literal	5.9	{5.9} literal	out	|y| = 5.9
+crates/spacelab-coverage/src/photometry.rs	1008	1	the_moonless_background_composes_extinction_with_path_length	test	10.0	{10.0} literal	-0.4 * sky.extinction_coefficient * (x - 1.0)	[-0.276, 0]: k = 0.172 (dark_site photometry.rs:484), X in [1, 5]	out	|y| < 1
+crates/spacelab-coverage/src/photometry.rs	1035	1	the_moon_term_extinguishes_along_both_paths	test	10.0	{10.0} literal	-0.4 * k * krisciunas_schaefer_airmass(moon_z)	[-0.344, -0.068]: k = 0.172, X(30 deg) in [1, 5]	out	|y| < 1
+crates/spacelab-coverage/src/photometry.rs	1036	1	the_moon_term_extinguishes_along_both_paths	test	10.0	{10.0} literal	-0.4 * k * krisciunas_schaefer_airmass(target_z)	[-0.344, -0.068]: k = 0.172, X(60 deg) in [1, 5]	out	|y| < 1
+crates/spacelab-earthvision/examples/layer_arrangement.rs	114	1	tau_aerosol	example	self.wavelength_nm / 550.0	[0.745, 3.873]: wavelength 410..2130 nm (tests/fixtures/radcalnet_toa.txt col 4, computed with awk) / 550	-self.angstrom	[-1.835, -0.098]: -angstrom, angstrom = col 10 of radcalnet_toa.txt (layer_arrangement.rs:119, :133), min 0.098 max 1.835 (awk over 504 rows)	out	|y| <= 1.84
+crates/spacelab-earthvision/examples/radcalnet_error_budget.rs	136	1	tau_aerosol	example	self.wavelength_nm / 550.0	[0.745, 3.873]: wavelength 410..2130 nm / 550 (radcalnet_toa.txt + radcalnet_holdout.txt)	-self.angstrom	[-2.4712, -0.098]: angstrom col 10 of both fixtures (radcalnet_error_budget.rs:194, :199, :227) in [0.098, 2.3535], plus the perturbation moved.angstrom += angstrom_unc (:176), max per-row angstrom+unc = 2.4712 (awk)	out	|y| <= 2.48
+crates/spacelab-earthvision/examples/radcalnet_error_budget.rs	778	1	report_sphericity	example	96.07995 - z	96.07995 - z, z = solar zenith in degrees from fixtures	-1.6364	{-1.6364} literal	out	|y| = 1.6364
+crates/spacelab-earthvision/src/camera.rs	2051	1	solve_dense_returns_the_solution_it_was_given_and_refuses_a_singular_system	test	2.0	{2.0} literal	f64::from(exponent)	{-12, -6, 0, 6, 12} (camera.rs:2050)	out	|y| <= 12
+crates/spacelab-earthvision/src/geometry.rs	51	1	air_mass	src	96.079_95 - z_deg	96.07995 - z_deg, z caller-supplied Angle	-1.6364	{-1.6364} literal	out	|y| = 1.6364
+crates/spacelab-earthvision/src/geometry.rs	181	1	the_geometry_reports_every_angle_its_directions_encode	test	96.079_95 - 35.0	{61.07995} literal expression	-1.6364	{-1.6364} literal	out	|y| = 1.6364
+crates/spacelab-earthvision/src/mie.rs	163	1	density	src	r	r = quadrature node in [re*v*0.02, re*(1+12v)] (radius_range mie.rs:184-186; nodes mie.rs:421-422), re and v caller-supplied	exponent	(1 - 3v)/v (mie.rs:162), v = SizeDistribution::Gamma.effective_variance, a pub enum field; phase_on_grid checks only wavelength and r_min > 0, r_max > r_min (mie.rs:396-402); doc v in (0, 1/3) (mie.rs:142) is not enforced. In-workspace v in {0.1, 0.25, 0.3} (mie.rs:862, :913, :957, :994, :1106, :1173; tests/phase_function_slab.rs:220) -> [0.333, 7]; public API: also any external caller	open	v -> 0+ makes |y| unbounded: re = 1, v = 1e-12 puts nodes in [1-2^-21, 1+2^-20) with y ~ 1e12 -> R
+crates/spacelab-earthvision/src/mie.rs	774	1	the_rayleigh_extinction_of_an_absorbing_sphere_is_four_x_im_k	test	x	x in {1e-4, 1e-3, 1e-2} (mie.rs:765)	4.0	{4.0} literal	out	|y| = 4
+crates/spacelab-earthvision/src/mie.rs	796	1	the_rayleigh_limit_is_recovered	test	x	x in {1e-3, 1e-2} (mie.rs:790)	4.0	{4.0} literal	out	|y| = 4
+crates/spacelab-earthvision/src/mie.rs	937	1	a_droplet_has_a_forward_peak_no_henyey_greenstein_of_the_same_g_can_match	test	1.0 + g * g - 2.0 * g	(1 - g)^2, g = computed asymmetry	1.5	{1.5} literal	out	|y| = 1.5
+crates/spacelab-earthvision/src/phase.rs	838	1	a_legendre_expansion_reproduces_the_function_whose_moments_it_holds	test	g	{0.5} (phase.rs:837)	l as f64	[0, 47]: l in 0..48 (phase.rs:838)	out	|y| <= 47
+crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs	292	1	tau_aerosol	test	self.wavelength_nm / 550.0	[0.745, 3.873]: wavelength 410..2130 nm / 550 (fixtures radcalnet_toa.txt, radcalnet_holdout.txt; :349, :356)	-self.angstrom	[-2.4712, -0.098]: angstrom col 10 (:385) in [0.098, 2.3535], plus Input::Angstrom perturbation += angstrom_unc (:331), max angstrom+unc 2.4712 (awk)	out	|y| <= 2.48
+crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs	711	1	scene_toa	test	band.wavelength_nm / 550.0	[0.727, 4.364]: band wavelength 400..2400 nm (radcalnet_absorption.txt band rows) / 550	-scene.angstrom	[-1.835, -0.098]: scene angstrom = col 8 of radcalnet_absorption.txt scene rows (:445), 42 scenes, min 0.098 max 1.835 (awk)	out	|y| <= 1.84
+crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs	1044	1	absorption_spectrum	test	band.wavelength_nm / 550.0	[0.727, 4.364]: band wavelength 400..2400 nm / 550	-scenes[i].angstrom	[-1.835, -0.098]: scenes[i].angstrom from radcalnet_absorption.txt (:445)	out	|y| <= 1.84
+crates/spacelab-elements/src/brouwer_lyddane.rs	159	1	t2	src	BETA	{0.048828125} BETA (brouwer_lyddane.rs:82)	f64::from(i)	[0, 12]: i in 0..=12 (brouwer_lyddane.rs:156)	out	|y| <= 12
+crates/spacelab-elements/src/brouwer_lyddane.rs	159	2	t2	src	x2	[0, 16]: x2 = (1 - 5 cos^2 i)^2 (brouwer_lyddane.rs:152-153)	f64::from(i)	[0, 12]: i in 0..=12 (brouwer_lyddane.rs:156)	out	|y| <= 12
+crates/spacelab-elements/src/brouwer_lyddane.rs	163	1	t2	src	2.0	{2.0} literal	f64::from(i)	[0, 10]: i in 0..=10 (brouwer_lyddane.rs:162)	out	|y| <= 10
+crates/spacelab-estimation/examples/srukf_origin_sweep.rs	31	1	main	example	10.0	{10.0} literal	f64::from(exponent)	[0, 9]: exponent in 0..=9 (srukf_origin_sweep.rs:30)	out	|y| <= 9
+crates/spacelab-estimation/src/radiometric.rs	848	1	solar_corona_delay	src	SOLAR_RADIUS	{696e6} SOLAR_RADIUS (radiometric.rs:652)	term.exponent	(0, f64::MAX]: term.exponent, checked only > 0 and finite (CoronaSeries::new radiometric.rs:740); user-supplied through spacelab-python/src/lib.rs:4767 and spacelab-capi/src/lib.rs:10719; in-workspace {2, 2.7, 3, 4, 6}	out	base 6.96e8 is outside the |x| band: for |y| > 2^31 pow returns overflow at pow.rs:247-254
+crates/spacelab-estimation/src/richardson.rs	40	1	richardson2	src	t1	t1, caller-supplied, unchecked	alpha	alpha, caller-supplied, unchecked (pub fn richardson2, re-exported estimation/src/lib.rs:105); in-workspace alpha = 1.0 (richardson.rs:141, :150, :160-161); public API: also any external caller	open	no check on alpha or t1; t1 near 1 with |alpha| > 2^31 enters R
+crates/spacelab-estimation/src/richardson.rs	40	2	richardson2	src	t2	t2, caller-supplied, unchecked	alpha	alpha, as richardson.rs:40 occ 1	open	no check on alpha or t2
+crates/spacelab-estimation/src/richardson.rs	59	1	richardson_extrapolate	src	nodes[i]	nodes[i], caller-supplied (doc: positive and distinct, not checked)	alpha	alpha, caller-supplied, unchecked (pub fn richardson_extrapolate); in-workspace alpha in {1.0, -1.0} (richardson.rs:108, :122, :162); public API: also any external caller	open	no check on alpha or nodes
+crates/spacelab-estimation/tests/process_noise_consistency.rs	351	1	dynamic_model_compensation_beats_every_tuning_of_a_white_acceleration_q	test	10.0	{10.0} literal	f64::from(quarter) / 4.0	[-7, -3]: quarter/4, quarter in -28..=-12 (process_noise_consistency.rs:350)	out	|y| <= 7
+crates/spacelab-gnss/src/models.rs	64	1	klobuchar_iono_delay	src	0.53 - e	0.53 - e, e = elevation in semicircles	3.0	{3.0} literal	out	|y| = 3
+crates/spacelab-gnss/src/models.rs	335	1	gmf_legendre	src	2.0	{2.0} literal	-(n as f64)	[-9, 0]: -n, n in 0..=9 (models.rs:324)	out	|y| <= 9
+crates/spacelab-gnss/src/models.rs	335	2	gmf_legendre	src	1.0 - t2	[0, 1]: 1 - t^2, t a sine/cosine of latitude	0.5 * m as f64	[0, 4.5]: 0.5 m, m in 0..=n <= 9 (models.rs:324-325)	out	|y| <= 4.5
+crates/spacelab-gnss/src/models.rs	5292	1	vmf3_legendre	src	2.0	{2.0} literal	-(n as f64)	[-12, 0]: -n, n in 0..=12 (models.rs:5281)	out	|y| <= 12
+crates/spacelab-gnss/src/models.rs	5292	2	vmf3_legendre	src	1.0 - t2	[0, 1]: 1 - t^2	0.5 * m as f64	[0, 6]: 0.5 m, m in 0..=n <= 12 (models.rs:5281-5282)	out	|y| <= 6
+crates/spacelab-ionosphere/src/itu.rs	535	1	the_gauss_richardson_rule_is_exact_for_quintics	test	x(gp)	x(gp) = (alt - 100 km)/900 km on the test ray	5.0	{5.0} literal	out	|y| = 5
+crates/spacelab-ionosphere/src/itu.rs	537	1	the_gauss_richardson_rule_is_exact_for_quintics	test	x(gp)	x(gp), as above	6.0	{6.0} literal	out	|y| = 6
+crates/spacelab-ionosphere/src/parameters.rs	190	1	compute_fo_e	src	libm::cos(xeff)	cos(xeff), [-1, 1]	0.6	{0.6} literal	out	|y| = 0.6
+crates/spacelab-propagation/src/dsst/coefficients.rs	186	1	get_rnml	src	sininc	[0.03, 1]: max(0.03, sqrt(1 - gamma^2)) (coefficients.rs:184)	(l - mei) as f64	l - mei. Callers: compute_max_ecc_pow (coefficients.rs:288-289, :297-298) and test Module::value (:455). In compute_max_ecc_pow only m = 0 runs (zonal c_n0: cnm = 0 for m != 0 breaks at coefficients.rs:271-274), so mei = 0, the m < l branch always runs (l >= 1), exponent = l in [1, max_degree - 1]; max_degree caller-supplied, unchecked (pub fn :230). Production caller DsstZonal::max_ecc_pow (zonal.rs:111) has max_degree = c_n0.len() - 1 (zonal.rs:68). Test rows: |l - mei| <= 24 (b, c, d <= 12 in both fixtures, awk)	out	no value check; excluded by resource bound only: DsstZonal::new allocates compute_vns(N+1) = (N+1)^2 f64 (coefficients.rs:31, zonal.rs:69), impossible for N >= 2^31; a direct pub call needs a c_n0 slice of > 2^31 entries (indexed :271) plus 3 vecs of N+1 f64 (:248-250, ~64 GiB) and reaches l >= 2^31 only after ~2^60 iterations of get_rnml's inner loop (:201) for the smaller l
+crates/spacelab-propagation/src/dsst/coefficients.rs	187	1	get_rnml	src	onepig	[0, 2]: 1 + gamma*irf, irf = 1 (coefficients.rs:262)	mei as f64	mei = m*eps*irf: 0 in compute_max_ecc_pow (m = 0 only, see :186); test rows |d*e| <= 12	out	|y| <= 12
+crates/spacelab-propagation/src/dsst/coefficients.rs	454	1	value	test	a * a / 2.0	[0.5, 2.645]: a^2/2, a = chi in [1, 2.3] (dnl rows of tests/fixtures/dsst_coefficients.csv and orekit_dsst_coefficients.csv, awk)	c as f64	[0, 12]: c of the dnl rows (both fixtures, 252 rows each, awk)	out	|y| <= 12
+crates/spacelab-propagation/src/dsst/gaussian.rs	660	1	the_smoothstep_rule_carries_the_contact_powers	test	x * (1.0 - x)	x(1 - x), x in [0, 1] quadrature nodes	1.5	{1.5} literal	out	|y| = 1.5
+crates/spacelab-propagation/src/dsst/gaussian_short_period.rs	762	1	rho_sigma_match_the_closed_form	test	-b	[-1, -0.5]: -b, b = 1/(1 + B), B in (0, 1]	jf	[1, 36]: jf = j, j in 1..=3*JMAX, JMAX = 12 (gaussian_short_period.rs:54, loop :760)	out	|y| <= 36 (integer, so x < 0 is defined)
+crates/spacelab-propagation/src/dsst/gaussian_short_period.rs	762	2	rho_sigma_match_the_closed_form	test	r	r = hypot(k, h) of the test states	jf	[1, 36]: as occ 1	out	|y| <= 36
+crates/spacelab-propagation/src/dsst/short_period.rs	1022	1	rho_sigma_match_the_polar_closed_form	test	modulus	modulus = e/(1 + B) of MEAN[0]	jf	[1, 13]: j in 1..=j_max, j_max = 2*6 + 1 (short_period.rs:1015, :1020)	out	|y| <= 13
+crates/spacelab-propagation/src/dsst/third_body.rs	616	1	at	test	self.aor / (2.0 * x2)	aor/(2 chi^2), state-dependent	n as f64	[2, 21]: n in 2..MAX_POWER, MAX_POWER = 22 (third_body.rs:50, scan :635; the only caller of at() is :638)	out	|y| <= 21
+crates/spacelab-propagation/src/dsst/third_body.rs	624	1	at	test	eo2	eo2 = max(0.0025, e/2) (third_body.rs:615)	m as f64	[0, 21]: m in 0..=n, n <= 21 (third_body.rs:636-637)	out	|y| <= 21
+crates/spacelab-propagation/src/dsst/third_body.rs	625	1	at	test	0.5 * x2	0.5 chi^2, state-dependent	m as f64	[0, 21]: m <= n <= 21	out	|y| <= 21
+crates/spacelab-propagation/src/dtm2020/mod.rs	298	1	dtm2020	src	t120tz	t120tz = t120/tz (dtm2020/mod.rs:290); tz -> t120 as zeta -> 0, i.e. alti -> 120 km or sigma -> 0 (mod.rs:271-276), so the base can sit at 1	upapg	upapg = 1 + ALEFA[i] + gamma (mod.rs:297), ALEFA in {-0.40, -0.38, 0} (mod.rs:85), gamma = MA[i]*glb (mod.rs:296), glb = GSURF/(1+zlb/RE)^2/(sigma*RGAS*tinf) (mod.rs:289), sigma = tp120/(tinf - t120) (mod.rs:271): gamma = MA*944.6*(tinf - t120)/(831.4*tp120*tinf), MA <= 32. tinf, t120, tp120 are fitted gldtm polynomials (mod.rs:265-267) of Dtm2020Input, whose pub fields dtm2020() never checks (mod.rs:176); at the leading coefficients (TP[1] = 16.44, T0[1] = 380, tables.rs:31-34) gamma ~ <= 2.2	open	public API, inputs unchecked: as tp120 -> 0 gamma is unbounded AND sigma*zeta -> 0 drives the base to 1, the two together; physically gamma = O(1)
+crates/spacelab-propagation/src/dtm2020/mod.rs	1086	1	the_profile_starts_at_its_lower_boundary	test	t120 / out.t_alt	t120/out.t_alt at z in {150, 300, 600, 1000} km (mod.rs:1078), t_alt > t120 above the boundary	1.0 + ALEFA[i] + gamma	1 + ALEFA[i] + gamma, gamma = MA[i]*glb/(sigma*RGAS*tinf) (mod.rs:1085) with sigma, tinf from profile_sigma (mod.rs:992-998) over the 12 fixed GOLDEN rows (mod.rs:581-594); same quantity as mod.rs:298, ~ <= 2.2 at leading coefficients (estimate, not evaluated numerically)	out	fixed test inputs only, physically |y| = O(1); bound is an estimate from TP[1] = 16.44 K/km, not a computed value
+crates/spacelab-propagation/src/harris_priester/mod.rs	122	1	harris_priester	src	cpsi2	cpsi2 = sqrt((1 + cos psi)/2) in (1e-12, 1] (MIN_COS harris_priester/mod.rs:53, guard :121); -> 1 at the bulge apex	model.n - 2.0	model.n - 2, n = pub field HarrisPriester.n (mod.rs:66), unchecked; in-workspace n in {2, 4, 6} (tests mod.rs:221, :237, :268-270, :311, :537 and GOLDEN/LAW tables) -> {0, 2, 4}; public API (re-exported propagation/src/lib.rs:136): also any external caller	open	n unchecked; n - 2 > 2^31 + 2^11 with the satellite near the bulge apex enters R
+crates/spacelab-propagation/src/harris_priester/mod.rs	135	1	harris_priester	src	ALT_RHO[ia + 1][1] / ALT_RHO[ia][1]	[0.0501, 0.8344]: consecutive ALT_RHO column-1 ratios (harris_priester/tables.rs:9-60, computed with awk; min |ratio - 1| = 0.166)	dh	dh: [0, 1] inside the table; < 0 only below 100 km where ia = 0 (loop mod.rs:127-130) and base = 0.0501; pos_alt <= 1000 km else return (mod.rs:100-103)	out	base never within 0.166 of 1, so R's |x| band is never met whatever dh is
+crates/spacelab-propagation/src/harris_priester/mod.rs	139	1	harris_priester	src	ALT_RHO[ia + 1][2] / ALT_RHO[ia][2]	[0.0501, 0.8344]: consecutive ALT_RHO column-2 ratios (awk)	dh	dh, as mod.rs:135	out	base never within 0.166 of 1
+crates/spacelab-propagation/src/lightcurve.rs	227	1	radiant_intensity	src	cos_lobe	cos_lobe in [0, 1] (dot of mirror and observer directions, max(0) lightcurve.rs:225); = 1 at the mirror direction	exponent	specular_exponent[i], pub field (lightcurve.rs:196), unchecked; doc 'Large is a mirror' (:193). In-workspace {0, 1, 8, 12, 40, 60} (tests/lightcurve.rs:79, :141, :165, :204, :303, :515); public API: also any external caller	open	Phong exponent unchecked; a near-mirror exponent > 2^31 + 2^11 with the observer within ~1e-3 rad of the glint enters R
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	327	1	dnet	src	1.0 + libm::exp(ylog)	[1 + 4.54e-5, 1 + 22026.5]: 1 + exp(ylog), ylog in [-10, 10] (nrlmsise00/mod.rs:320-325)	1.0 / a	[-0.3946, 0.9982]: 1/a = (xmm - xm)/zhm, zhm = PDM[2][3]*PDL[1][5] = 28 (mod.rs:1181), xmm = PDM[2][4] = 28.95 (mod.rs:1156), xm in {28, 4, 16, 32, 40, 1, 14} (dnet calls mod.rs:1230-1650); test calls (mod.rs:6015-6066, :2561-2564) give |1/a| <= 0.891	out	|y| < 1; base also >= 1 + 4.5e-5, outside the |x| band
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	374	1	scalh	src	1.0 + alt / re	1 + alt/re	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	548	1	densm	src	(re + z2) / (re + z1)	((re + z2)/(re + z1)), node altitudes	2.0	{2.0} literal	out	|y| = 2 (pow.rs:181 returns x*x)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	554	1	densm	src	1.0 + z1 / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	582	1	densm	src	(re + z2) / (re + z1)	((re + z2)/(re + z1)), node altitudes	2.0	{2.0} literal	out	|y| = 2 (pow.rs:181 returns x*x)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	588	1	densm	src	1.0 + z1 / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	636	1	densu	src	(re + zlb) / (re + za)	(re + zlb)/(re + za)	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	656	1	densu	src	(re + z2) / (re + z1)	((re + z2)/(re + z1)), node altitudes	2.0	{2.0} literal	out	|y| = 2 (pow.rs:181 returns x*x)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	667	1	densu	src	1.0 + zlb / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	676	1	densu	src	tlb / tt	tlb/tt, tt = tinf - (tinf - tlb) exp(-s2 zg2) (mod.rs:627); -> 1 as s2*zg2 -> 0	1.0 + alpha + gamma	1 + alpha + gamma; alpha in {-1.38, -1, -0.83, -0.38, 0, 0.17} (densu args from alpha[] mod.rs:1067, alpha[i] - 1 and 0.0); gamma = xm*glb/(s2*rgas*tinf) (mod.rs:668), xm <= 40, s2 = s = g0v/(tinf - tlb) (mod.rs:1102); tinf, g0v, tlb are fitted globe7 polynomials of Nrlmsise00Input (mod.rs:1088-1101), whose magnitudes are not bounded: input_out_of_domain (mod.rs:244-262) flags only negative/non-finite/doy/lat, and is a report, not a refusal (doc mod.rs:162)	open	public API, inputs unrefused: g0v -> 0 makes gamma unbounded and simultaneously s2 -> 0 drives tt -> tlb (base -> 1); physically gamma = O(1)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	682	1	densu	src	1.0 + z1 / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	689	1	densu	src	t1 / tz	t1/tz, temperatures	1.0 + alpha	[-0.38, 1.17]: 1 + alpha, alpha as at mod.rs:676	out	|y| <= 1.17
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	701	1	sumex	src	ex	ex = exp(-10800 p24)-type kernel ratio in (0, 1)	19.0	{19.0} literal	out	|y| = 19
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	701	2	sumex	src	ex	ex, as above	0.5	{0.5} literal	out	|y| = 0.5 (sqrt at pow.rs:185)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	709	1	sg0	src	ex	ex	3.0	{3.0} literal	out	|y| = 3
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	710	1	sg0	src	ex	ex	4.0	{4.0} literal	out	|y| = 4
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	710	2	sg0	src	ex	ex	12.0	{12.0} literal	out	|y| = 12
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	711	1	sg0	src	ex	ex	8.0	{8.0} literal	out	|y| = 8
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	774	1	globe7	src	l.dfa	l.dfa = f107a - 150	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	1135	1	gts7_impl	src	PTM[4] * PTL[3][0]	PTM[4]*PTL[3][0], table constant	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	1142	1	gts7_impl	src	PTM[4] * PTL[3][0]	PTM[4]*PTL[3][0], table constant	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	1817	1	gtd7	src	PMA[2][0] * PAVGM[2]	PMA[2][0]*PAVGM[2], table constant	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	1852	1	gtd7	src	PMA[6][0] * PAVGM[6]	PMA[6][0]*PAVGM[6], table constant	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	2582	1	the_turbopause_blend_answers_at_a_vanishing_density	test	libm::pow(dd, a) + libm::pow(dm, a)	dd^a + dm^a, dd, dm in {1e6, 1.2e6, 2e6} (mod.rs:2580)	1.0 / a	[-0.395, 0.891]: 1/a, a = 28/(28.95 - xm), xm in {4, 28, 32, 40} (mod.rs:2561-2564) -> a in {1.122, 29.47, -9.180, -2.534}	out	|y| < 1
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	2582	2	the_turbopause_blend_answers_at_a_vanishing_density	test	dd	dd in {1e6, 1.2e6, 2e6}	a	a in {1.122, 29.47, -9.180, -2.534}	out	|y| <= 29.5
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	2582	3	the_turbopause_blend_answers_at_a_vanishing_density	test	dm	dm in {1e6, 1.2e6, 2e6}	a	a in {1.122, 29.47, -9.180, -2.534}	out	|y| <= 29.5
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	2917	1	densu_solves_the_diffusive_equilibrium_law_on_both_branches	test	1.0 + z / re	1 + z/re, z in {80..600} km (mod.rs:2913)	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	6013	1	the_turbopause_blend_is_the_power_mean_of_its_two_densities	test	libm::pow(dd, a) + libm::pow(dm, a)	dd^a + dm^a	1.0 / a	[0.1, 0.857]: 1/a, a in {4.583, 3.571, 1.167, 1.481} (mod.rs:6015-6020), 4.583 (:6037), 10 (:6065)	out	|y| < 1
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	6013	2	the_turbopause_blend_is_the_power_mean_of_its_two_densities	test	dd	dd in {1e-3, 1, 7.5, 1e3, 5, ...} test values	a	a in {1.167, 1.481, 3.571, 4.583, 10}	out	|y| <= 10
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	6013	3	the_turbopause_blend_is_the_power_mean_of_its_two_densities	test	dm	dm test values	a	a in {1.167, 1.481, 3.571, 4.583, 10}	out	|y| <= 10
+crates/spacelab-propagation/src/rkn1210.rs	156	1	integrate	src	ratio	ratio = 1/err or 5 (rkn1210.rs:155)	1.0 / 11.0	{1/11} literal	out	|y| < 1
+crates/spacelab-propagation/src/rkn1210.rs	366	1	tightening_the_tolerance_costs_steps_at_the_estimator_order	test	10.0	{10.0} literal	4.0 / 11.0	{4/11} literal	out	|y| < 1
+crates/spacelab-propagation/src/rkn1210.rs	400	1	a_step_below_the_floor_ramps_back_geometrically	test	5.0	{5.0} literal	1.0 / 11.0	{1/11} literal	out	|y| < 1
+crates/spacelab-propagation/src/sdtm/mod.rs	438	1	gain	src	f107a / REFERENCE_F107	f107a/150 (REFERENCE_F107 sdtm/mod.rs:533), f107a caller-supplied; = 1 at f107a = 150	exponent	StormGain::FluxPower.exponent, a pub enum field; pub fn gain (mod.rs:435) has no check, with_storm_gain checks only is_finite (mod.rs:457, :692). In-workspace -1.2993 (sdtm/coefficients.rs:78-79), -1.2794 (sdtm/solar_wind_coefficients.rs:85-86), tests -1.3, 0 (mod.rs:1650, :1673, :1713); examples read gain_exponent from a user-given file (spacelab/examples/orbit_prediction.rs:130, spacelab-propagation/examples/blind_rows.rs:141); public API: also any external caller	open	finite but unbounded exponent; f107a within ~1.4e-4 sfu of 150 puts the base in the |x| band
+crates/spacelab-propagation/src/sdtm/mod.rs	855	1	profile	src	ratio	T0/T(z) temperature ratio	1.0 + s.thermal_diffusion	{1.0, 0.62}: 1 + thermal_diffusion over the immutable pub static BOUNDARY (sdtm/mod.rs:131-157: 0.0 x4, -0.38)	out	|y| <= 1
+crates/spacelab-propagation/src/sdtm/solar_wind.rs	47	1	coupling	src	self.speed	solar-wind speed / field magnitude / |sin| (caller)	4.0 / 3.0	{4/3} literal	out	|y| < 3
+crates/spacelab-propagation/src/sdtm/solar_wind.rs	48	1	coupling	src	transverse	solar-wind speed / field magnitude / |sin| (caller)	2.0 / 3.0	{2/3} literal	out	|y| < 3
+crates/spacelab-propagation/src/sdtm/solar_wind.rs	49	1	coupling	src	libm::fabs(libm::sin(half_clock))	solar-wind speed / field magnitude / |sin| (caller)	8.0 / 3.0	{8/3} literal	out	|y| < 3
+crates/spacelab-propagation/src/sdtm/solar_wind.rs	269	1	the_coupling_agrees_with_its_half_angle_form_in_every_quadrant	test	speed	test speeds {300, 550, 900}, field {2, 9, 40}, half-angle term in [0, 1]	4.0 / 3.0	{4/3} literal	out	|y| < 2
+crates/spacelab-propagation/src/sdtm/solar_wind.rs	270	1	the_coupling_agrees_with_its_half_angle_form_in_every_quadrant	test	libm::hypot(by, bz)	test speeds {300, 550, 900}, field {2, 9, 40}, half-angle term in [0, 1]	2.0 / 3.0	{2/3} literal	out	|y| < 2
+crates/spacelab-propagation/src/sdtm/solar_wind.rs	271	1	the_coupling_agrees_with_its_half_angle_form_in_every_quadrant	test	half	test speeds {300, 550, 900}, field {2, 9, 40}, half-angle term in [0, 1]	4.0 / 3.0	{4/3} literal	out	|y| < 2
+crates/spacelab-propagation/src/solid_tide.rs	253	1	delta_cs	src	self.re_earth / r	re_earth/r, Moon/Sun distance ratio	(n + 1) as f64	{3, 4}: n + 1, n in 2..=3 (solid_tide.rs:252)	out	|y| <= 4
+crates/spacelab-propagation/src/symplectic.rs	157	1	triple_jump	src	2.0	{2.0} literal	1.0 / f64::from(order + 1)	{1/5, 1/7}: 1/(order + 1), order in {4, 6} (symplectic.rs:182, :198-199, :245-246); (0, 1] for any u32 order	out	|y| <= 1; base 2 also outside the |x| band
+crates/spacelab-propagation/src/taylor.rs	194	1	powf	src	self.c[0]	self.c[0], the jet's value, any f64	p	p forwarded from Scalar for Jet (taylor.rs:156, :191): in-workspace taylor tests p = 1.7 (taylor.rs:574), +-1.5 (:628-629), ScalarSystem evals -1.5 (taylor.rs:722, tests/stm.rs:26, ...); public API (pub struct Jet taylor.rs:60): also any external caller, including generic radiometric.rs:761/:951 instantiated at Jet	open	p unchecked; no in-workspace call exceeds |p| = 1.7, so only external callers reach R
+crates/spacelab-propagation/tests/lightcurve.rs	54	1	the_magnitude_zero_point_agrees_with_the_photometric_route	test	10.0	{10.0} literal	-0.4 * SUN_V_MAGNITUDE	{10.696}: -0.4 * SUN_V_MAGNITUDE, SUN_V_MAGNITUDE = -26.74 (propagation/src/lightcurve.rs:75)	out	|y| = 10.7
+crates/spacelab-propagation/tests/lightcurve.rs	243	1	a_mirror_glints_only_near_the_mirror_direction	test	libm::cos(psi)	[0.819, 0.99939]: cos(psi), psi in {2, 5, 10, 20, 35} deg (tests/lightcurve.rs:240)	exponent	{60.0} (tests/lightcurve.rs:204)	out	|y| = 60
+# indirect
+# Every .powf( call (77 occurrences on 74 lines; 3 are inside comments) plus the path call S::powf at autodiff/tests/scalar_and_operators.rs:19, and every .powi( whose receiver is Dual/HyperDual (5; Jet and Scalar have no powi; the local Dual in dsst/third_body_short_period.rs:1037 uses std f64::powi).
+# Routing: a generic S: Scalar receiver dispatches to scalar.rs:69 (f64), dual.rs:94, hyperdual.rs:120, double_double.rs:316 (only when hi <= 0), taylor.rs:194 (Jet). A concrete f64 receiver resolves to the inherent std f64::powf (inherent beats the Scalar trait method; every module holding one builds only with std), i.e. the platform pow, not the libm crate.
+# Columns: path	line	receiver	exponent	exponent_range	verdict	justification
+crates/spacelab-autodiff/src/double_double.rs	781	DoubleDouble	p	p in {0.5, 10, 3, 1/3, 2.5, 2} (POWF_REF double_double.rs:758-777)	out	bases {2, 10, 3, 1.5, e} > 0 take the exp(p ln x) path (double_double.rs:318), never double_double.rs:316
+crates/spacelab-autodiff/src/double_double.rs	786	DoubleDouble	0.5	{0.5} literal	out	base 2 > 0: exp/ln path, never libm::pow
+crates/spacelab-autodiff/tests/derivatives.rs	43	Dual<1> (var(1.7)) -> dual.rs:94	2.5	{2.5} literal	out	|y| = 2.5
+crates/spacelab-autodiff/tests/derivatives.rs	43	f64 literal 1.7	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-autodiff/tests/derivatives.rs	98	generic S: Scalar (kepler_accel) -> scalar.rs:69 / dual.rs:94 / hyperdual.rs:120	-1.5	{-1.5} literal	out	|y| = 1.5
+crates/spacelab-autodiff/tests/derivatives.rs	238	f64 (x0)	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-autodiff/tests/derivatives.rs	262	HyperDual<1> -> hyperdual.rs:120	2.5	{2.5} literal	out	|y| = 2.5
+crates/spacelab-autodiff/tests/derivatives.rs	262	f64 (x0)	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-autodiff/tests/derivatives.rs	277	HyperDual<1> -> hyperdual.rs:120	2.5	{2.5} literal	out	|y| = 2.5
+crates/spacelab-autodiff/tests/derivatives.rs	277	f64 (x0)	0.5	{0.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-autodiff/tests/scalar_and_operators.rs	37	f64 (x = 0.7)	p	{1.7}: p (scalar_and_operators.rs:31)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-elements/tests/keplerian_properties.rs	99	f64 literal 10.0	e_exp	[-12, -0.3): proptest e_exp (keplerian_properties.rs:90)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-elements/tests/keplerian_properties.rs	100	f64 literal 10.0	i_exp	[-12, -0.3): proptest i_exp (keplerian_properties.rs:91)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-elements/tests/keplerian_properties.rs	160	f64 literal 10.0	-12.0	{-12} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-elements/tests/keplerian.rs	477	f64	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-estimation/src/radiometric.rs	761	generic S: Scalar -> scalar.rs:69 (f64) / dual.rs:94 / hyperdual.rs:120 / taylor.rs:194 (Jet) / double_double.rs:316 (DoubleDouble, base <= 0 only)	-term.exponent	-k, k = term.exponent in (0, f64::MAX]: only check is > 0 and finite (CoronaSeries::new radiometric.rs:740); base radius/R_sun, radius caller-supplied (pub fn electron_density radiometric.rs:758). In-workspace k in {2, 2.7, 3, 6} (tests radiometric.rs:1527-1531, :1575-1586, AKSIM_PAVLOV_2022 :687-693); public API: also any external caller	open	radius within 2^-21 relative of R_sun and k > 2^31 + 2^11 enters R
+crates/spacelab-estimation/src/radiometric.rs	848	generic S: Scalar	1.0 - term.exponent	1 - k, k in (0, f64::MAX] (radiometric.rs:740)	out	base impact >= SOLAR_RADIUS = 696e6 (check radiometric.rs:835), outside the |x| band; for DoubleDouble hi > 0 takes the exp/ln path
+crates/spacelab-estimation/src/radiometric.rs	918	generic S: Scalar	order - 1.0	[1, 63]: order - 1, order = n with n in 2..=64 (integer_power admits whole numbers in [0, 64], radiometric.rs:900-902; loop steps from parity + 2, :916)	out	|y| <= 63
+crates/spacelab-estimation/src/radiometric.rs	951	generic S: Scalar -> scalar.rs:69 (f64) / dual.rs:94 (SolarCoronaDelay::delta lifts to Dual, modifier.rs:601-616, :676-685) / others	power	power = k - 2 for every k whose k - 2 is not a whole number in [0, 64] (radiometric.rs:877, :900-902), k only checked > 0 and finite (radiometric.rs:740) -> (-2, f64::MAX); user-supplied through the Python bridge solar_corona_delay(series=...) (spacelab-python/src/lib.rs:4767-4787) and C API sl_solar_corona_delay (spacelab-capi/src/lib.rs:10719-10764). In-workspace k = 2.7 -> 0.7 (radiometric.rs:1527, :1585)	open	base cos(theta), theta = middle + half*node (radiometric.rs:942-950) lies near 0 whenever the bounds straddle 0; a non-integer k > 2^31 + 2^11 + 2 then enters R; reachable from this workspace's own bindings
+crates/spacelab-estimation/tests/ephemeris_observables.rs	74	generic S: Scalar (eval<S: Scalar>)	-1.5	{-1.5} literal	out	|y| = 1.5
+crates/spacelab-estimation/tests/imm_manoeuvre.rs	32	f64	-1.5	{-1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-estimation/tests/imm_manoeuvre.rs	90	f64	-1.5	{-1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-estimation/tests/measurement_modifiers.rs	33	generic S: Scalar (eval<S: Scalar>)	-1.5	{-1.5} literal	out	|y| = 1.5
+crates/spacelab-estimation/tests/multistatic_observables.rs	78	generic S: Scalar (eval<S: Scalar>)	-1.5	{-1.5} literal	out	|y| = 1.5
+crates/spacelab-estimation/tests/orbit_determination.rs	29	generic S: Scalar (eval<S: Scalar>)	-1.5	{-1.5} literal	out	|y| = 1.5
+crates/spacelab-gpu/src/batch_sgp4.rs	78	f64 (std-only crate)	2.0 / 3.0	{2/3} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-gpu/src/batch_sgp4.rs	79	f64 (std-only crate)	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-gpu/src/batch_sgp4.rs	93	f64 (std-only crate)	2.0 / 3.0	{2/3} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-gpu/src/batch_sgp4.rs	109	f64 (std-only crate)	3.5	{3.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-gpu/src/batch_sgp4.rs	264	f64 (std-only crate)	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/examples/column_on2.rs	171	f64	1.0 + s.thermal_diffusion	{1.0, 0.62}: 1 + thermal_diffusion over BOUNDARY (sdtm/mod.rs:131-157)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/driver.rs	455	f64 (std-gated module, propagation/src/lib.rs:88-89)	expo1	expo1 = step_exponent - 0.75 beta (driver.rs:426): {0.125} DOP853 (dop853.rs:74-75), {0.17} DOPRI5 (dopri5.rs:190-195); pub trait Method (driver.rs:38): external methods choose their own	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/driver.rs	456	f64	beta	beta in {0, 0.04} (driver.rs:49-50, dopri5.rs:194-195)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/gbs.rs	164	f64	expo	(0, 1]: 1/(2j - 1), j >= 1 (gbs.rs:162)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/gbs.rs	178	f64	expo	(0, 1]: 1/(2 kmax_try - 1) (gbs.rs:177)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/ias15.rs	299	f64	1.0 / 7.0	{1/7} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/jacchia_bowman/model.rs	166	f64 literal 10 (module uses std::f64::consts, builds only with feature std)	sa + sl	sa + sl, semiannual + seasonal-latitudinal log10 terms	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached; base 10 also outside the |x| band
+crates/spacelab-propagation/src/jacchia_bowman/profile.rs	56	f64	PROFILE_N	{2.5} PROFILE_N (jacchia_bowman/constants.rs:108)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/jacchia_bowman/profile.rs	66	f64	PROFILE_N	{2.5} PROFILE_N (constants.rs:108)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/jacchia_bowman/static_model.rs	144	f64	1.0 + alpha	{1.0, 0.62}: 1 + alpha, alpha in {0, ALPHA_HE = -0.38} (static_model.rs:155-159, constants.rs:114)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/jacchia_bowman/static_model.rs	147	f64 literal 10	log10_hydrogen_500(t500)	log10_hydrogen_500(t500), quadratic in log10 T (static_model.rs:90-93)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached; base 10 also outside the |x| band
+crates/spacelab-propagation/src/jacchia_bowman/variations.rs	41	f64	FS_WEIGHT_EXP	{0.25} FS_WEIGHT_EXP (constants.rs:161)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/jacchia_bowman/variations.rs	71	f64	DIURNAL_M	{2.5} DIURNAL_M (constants.rs:126)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/jacchia_bowman/variations.rs	72	f64	DIURNAL_M	{2.5} DIURNAL_M (constants.rs:126)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/jacchia_bowman/variations.rs	73	f64	DIURNAL_N	{3.0} DIURNAL_N (constants.rs:128)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/mercurius.rs	144	f64 (std-gated module, lib.rs:100-101)	-1.5	{-1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/taylor.rs	336	f64	1.0 / order as f64	(0, 1/2]: 1/order, order = M - 1 (taylor.rs:308) with M >= 3 (checks taylor.rs:395, :466)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/taylor.rs	341	f64	1.0 / (order - 1) as f64	(0, 1]: 1/(order - 1), order >= 2	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/taylor.rs	575	Jet<8> -> taylor.rs:194	p	{1.7}: p (taylor.rs:574)	out	|y| = 1.7
+crates/spacelab-propagation/src/taylor.rs	578	f64 (x0)	p - k as f64	[-5.3, 1.7]: 1.7 - k, k in 0..M, M = 8 (taylor.rs:508)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/taylor.rs	598	f64 (x0)	k as f64	[1, 7]: k in 1..M, M = 8	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/taylor.rs	633	Jet<8> -> taylor.rs:194	p	{1.5, -1.5} (taylor.rs:628-629)	out	|y| = 1.5
+crates/spacelab-propagation/src/taylor.rs	722	generic S: Scalar (eval<S: Scalar>)	-1.5	{-1.5} literal	out	|y| = 1.5
+crates/spacelab-propagation/src/whfast.rs	403	f64 (std-gated module, lib.rs:112-113)	-1.5	{-1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/src/whfast.rs	1062	none: doc comment	-1.5	n/a	out	inside a // comment, not a call
+crates/spacelab-propagation/tests/dop853.rs	37	f64	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/dsst_short_period_identity.rs	266	f64	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/dsst_short_period_identity.rs	277	f64	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/dsst_short_period_identity.rs	278	f64	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/dsst_short_period_identity.rs	604	f64	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/event_integration.rs	19	f64	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/ias15.rs	835	f64	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/integrators.rs	622	none: doc comment	expo1	n/a	out	inside a /// comment, not a call
+crates/spacelab-propagation/tests/integrators.rs	700	none: doc comment	expo1	n/a	out	inside a /// comment, not a call
+crates/spacelab-propagation/tests/jacchia_bowman_g1_g2_static.rs	375	f64	m	{2.5}: m = DIURNAL_M (jacchia_bowman_g1_g2_static.rs:364)	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/jacchia_bowman_g1_g2_static.rs	376	f64	m	{2.5}: m = DIURNAL_M	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/jacchia_bowman_g1_g2_static.rs	378	f64	n	{3.0}: n = DIURNAL_N	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/jacchia_bowman_g2_model.rs	62	f64	0.25	{0.25} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/jacchia_bowman_g2_model.rs	83	f64	0.25	{0.25} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/jacchia_bowman_g2_model.rs	156	f64 literal 10	t.semiannual_log10 + t.seasonal_latitudinal_log10	test-table log10 terms	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached; base 10 also outside the |x| band
+crates/spacelab-propagation/tests/jacchia_bowman_g2_model.rs	229	f64 literal 10	max_r	max |d log10 rho| at band edges	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached; base 10 also outside the |x| band
+crates/spacelab-propagation/tests/mercurius.rs	28	f64	-1.5	{-1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/mercurius.rs	44	f64	-1.5	{-1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-propagation/tests/mercurius.rs	268	generic S: spacelab_autodiff::Scalar (acceleration<S>)	-1.5	{-1.5} literal	out	|y| = 1.5
+crates/spacelab-propagation/tests/stm.rs	26	generic S: Scalar (eval<S: Scalar>)	-1.5	{-1.5} literal	out	|y| = 1.5
+crates/spacelab-sgp4/tests/regime.rs	221	f64	2.0 / 3.0	{2/3} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-sgp4/tests/regime.rs	222	f64	1.5	{1.5} literal	out	concrete f64 receiver: inherent std f64::powf (llvm.pow, platform libm), not the libm crate; libm::pow is not reached
+crates/spacelab-autodiff/tests/scalar_and_operators.rs	19	S in {f64, Dual<1>, HyperDual<1>} (scalar_and_operators.rs:38-40) -> scalar.rs:69 / dual.rs:94 / hyperdual.rs:120 [S::powf path call, not counted in the 77]	s, p	{1.7}: p (scalar_and_operators.rs:31)	out	|y| = 1.7
+crates/spacelab-autodiff/tests/derivatives.rs	44	Dual<1>::powi -> dual.rs:85-86	3	n = 3 -> pow exponents {3, 2}	out	|y| <= 3
+crates/spacelab-autodiff/tests/derivatives.rs	267	HyperDual<1>::powi -> hyperdual.rs:129-131	3	n = 3 -> {3, 2, 1}	out	|y| <= 3
+crates/spacelab-autodiff/tests/derivatives.rs	267	HyperDual<1>::powi -> hyperdual.rs:129-131	3	n = 3 -> {3, 2, 1}	out	|y| <= 3
+crates/spacelab-autodiff/tests/derivatives.rs	273	HyperDual<1>::powi -> hyperdual.rs:129-131	2	n = 2 -> {2, 1, 0}	out	|y| <= 2
+crates/spacelab-autodiff/tests/derivatives.rs	273	HyperDual<1>::powi -> hyperdual.rs:129-131	2	n = 2 -> {2, 1, 0}	out	|y| <= 2
+# gpu-bare-pow (not in the 134)
+# path	line	context	exponent	verdict	justification
+crates/spacelab-gpu/src/lib.rs	455	WGSL source inside const LAMBERT_SHADER: &str = r"..." (lib.rs:424-517), fn tof_err	1.5 literal	out	WGSL builtin pow(f32) run by the GPU driver via wgpu/naga; not Rust, not libm
+crates/spacelab-gpu/src/lib.rs	572	WGSL source inside const SGP4_SHADER: &str = r"..." (lib.rs:529-638), fn main	3.0 literal	out	WGSL builtin pow(f32); not libm
+crates/spacelab-gpu/src/lib.rs	591	WGSL source inside SGP4_SHADER (lib.rs:529-638)	1.5 literal	out	WGSL builtin pow(f32); not libm
+# summary
+# direct rows per file (path	count):
+#   crates/spacelab-astro/src/cr3bp.rs	1
+#   crates/spacelab-astro/src/iod.rs	3
+#   crates/spacelab-astro/src/lambert.rs	3
+#   crates/spacelab-astro/src/patched.rs	1
+#   crates/spacelab-astro/src/richardson.rs	1
+#   crates/spacelab-astro/tests/initial_orbit_determination.rs	3
+#   crates/spacelab-autodiff/src/double_double.rs	2
+#   crates/spacelab-autodiff/src/dual.rs	3
+#   crates/spacelab-autodiff/src/hyperdual.rs	4
+#   crates/spacelab-autodiff/src/scalar.rs	1
+#   crates/spacelab-control/tests/formation_consensus.rs	1
+#   crates/spacelab-coverage/src/observability.rs	1
+#   crates/spacelab-coverage/src/photometry.rs	17
+#   crates/spacelab-earthvision/examples/layer_arrangement.rs	1
+#   crates/spacelab-earthvision/examples/radcalnet_error_budget.rs	2
+#   crates/spacelab-earthvision/src/camera.rs	1
+#   crates/spacelab-earthvision/src/geometry.rs	2
+#   crates/spacelab-earthvision/src/mie.rs	4
+#   crates/spacelab-earthvision/src/phase.rs	1
+#   crates/spacelab-earthvision/tests/radcalnet_measured_radiance.rs	3
+#   crates/spacelab-elements/src/brouwer_lyddane.rs	3
+#   crates/spacelab-estimation/examples/srukf_origin_sweep.rs	1
+#   crates/spacelab-estimation/src/radiometric.rs	1
+#   crates/spacelab-estimation/src/richardson.rs	3
+#   crates/spacelab-estimation/tests/process_noise_consistency.rs	1
+#   crates/spacelab-gnss/src/models.rs	5
+#   crates/spacelab-ionosphere/src/itu.rs	2
+#   crates/spacelab-ionosphere/src/parameters.rs	1
+#   crates/spacelab-propagation/src/dsst/coefficients.rs	3
+#   crates/spacelab-propagation/src/dsst/gaussian.rs	1
+#   crates/spacelab-propagation/src/dsst/gaussian_short_period.rs	2
+#   crates/spacelab-propagation/src/dsst/short_period.rs	1
+#   crates/spacelab-propagation/src/dsst/third_body.rs	3
+#   crates/spacelab-propagation/src/dtm2020/mod.rs	2
+#   crates/spacelab-propagation/src/harris_priester/mod.rs	3
+#   crates/spacelab-propagation/src/lightcurve.rs	1
+#   crates/spacelab-propagation/src/nrlmsise00/mod.rs	30
+#   crates/spacelab-propagation/src/rkn1210.rs	3
+#   crates/spacelab-propagation/src/sdtm/mod.rs	2
+#   crates/spacelab-propagation/src/sdtm/solar_wind.rs	6
+#   crates/spacelab-propagation/src/solid_tide.rs	1
+#   crates/spacelab-propagation/src/symplectic.rs	1
+#   crates/spacelab-propagation/src/taylor.rs	1
+#   crates/spacelab-propagation/tests/lightcurve.rs	2
+#   TOTAL	134
+# direct verdicts: out 120, open 14; kinds: src 80, test 50, example 4
+# largest |exponent| bounds:
+#   finite bound, any base: 2^31 = 2147483648 at dual.rs:85-86 and hyperdual.rs:129-131 (i32 type); hi(2^31) = 0x41e00000 is not > 0x41e00000, so still out
+#   next finite bound: 1023 (double_double.rs:381, base 2); largest finite bound on a site whose base is not pinned away from 1: 36 (dsst/gaussian_short_period.rs:762, base -b in [-1, -0.5])
+#   unbounded exponent but base excluded from the |x| band: photometry.rs:108, :127, :156, :180, :185, :240, :334 (base 10); radiometric.rs:848 (base 6.96e8)
+#   unbounded exponent with a base that reaches the band: every open row below
+# open direct rows (14):
+#   crates/spacelab-autodiff/src/double_double.rs:316 occ 1 (powf)
+#   crates/spacelab-autodiff/src/dual.rs:94 occ 1 (powf)
+#   crates/spacelab-autodiff/src/hyperdual.rs:120 occ 1 (powf)
+#   crates/spacelab-autodiff/src/scalar.rs:69 occ 1 (powf)
+#   crates/spacelab-earthvision/src/mie.rs:163 occ 1 (density)
+#   crates/spacelab-estimation/src/richardson.rs:40 occ 1 (richardson2)
+#   crates/spacelab-estimation/src/richardson.rs:40 occ 2 (richardson2)
+#   crates/spacelab-estimation/src/richardson.rs:59 occ 1 (richardson_extrapolate)
+#   crates/spacelab-propagation/src/dtm2020/mod.rs:298 occ 1 (dtm2020)
+#   crates/spacelab-propagation/src/harris_priester/mod.rs:122 occ 1 (harris_priester)
+#   crates/spacelab-propagation/src/lightcurve.rs:227 occ 1 (radiant_intensity)
+#   crates/spacelab-propagation/src/nrlmsise00/mod.rs:676 occ 1 (densu)
+#   crates/spacelab-propagation/src/sdtm/mod.rs:438 occ 1 (gain)
+#   crates/spacelab-propagation/src/taylor.rs:194 occ 1 (powf)
+# open indirect rows (2): crates/spacelab-estimation/src/radiometric.rs:761 (electron_density, -k), crates/spacelab-estimation/src/radiometric.rs:951 (tanh-sinh cos^(k-2)); :951 is reachable from spacelab-python solar_corona_delay(series=...) and spacelab-capi sl_solar_corona_delay
+# out rows that rest on something weaker than a value check: dsst/coefficients.rs:186 (resource bound: >= 2^31-entry c_n0 slice, ~64 GiB, ~2^60 loop iterations first); dtm2020/mod.rs:1086 (fixed test inputs, gamma bound estimated from TP[1], not computed)
+# region R as confirmed: 0x41e00000 < hi(|y|) <= 0x43f00000 and 0x3fefffff <= hi(|x|) <= 0x3ff00000, x != +-1, i.e. |y| in [2^31 + 2^11, 2^64 + 2^44), |x| in [1 - 2^-21, 1 + 2^-20)

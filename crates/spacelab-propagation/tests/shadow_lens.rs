@@ -237,6 +237,10 @@ fn ulp(x: f64) -> f64 {
 /// `Σ bᵢ|sᵢ|/A ≤ c₁ + c₂κ` with `c₁ = 18`, `c₂ = 2`, in units of `u`. The bound is relative, so it
 /// holds in ulp of `A` as well (`u·A < ulp(A)`).
 ///
+/// The one ulp for `atan2` is not what H-libm states: row `shadow_atan2` of
+/// `derivations/h_libm.txt` measures 1.549 ulp on this domain. So `c₁ = 18` is not yet shown
+/// under H-libm (`docs/verification.md` §1.2).
+///
 /// `c₂ = 2` is the least value that leaves `c₁` finite. When the occulter's edge straightens through
 /// the Sun's centre, `κ` grows without bound. There the roundings of `r_E ± r_S` count `κ`, the
 /// rounding of their product `κ/2` and the rounding of `d²` `κ/2`. `c₁ = 18` is above the 17.93

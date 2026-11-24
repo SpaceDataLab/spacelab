@@ -94,7 +94,8 @@ fn divide(hi: f64, lo: f64, k: f64) -> (f64, f64) {
 /// before the last rounding is within `0.245u` of `x − sin x`, so the result is within `1.245u`
 /// relative and `0.745` ulp for `x ≥ 2⁻¹⁸⁰` (`derivations/x_minus_sin_roundoff.mac`). Above `x = 2`,
 /// `|sin x|` is at most `0.84` of `x − sin x`, so the subtraction keeps its digits: within
-/// `1 + 2|sin x|/(x − sin x) ≤ 2.67` u, libm's ulp of `sin x` and one rounding.
+/// `1 + 2|sin x|/(x − sin x) ≤ 2.67` u, libm's ulp of `sin x` and one rounding. That holds under
+/// H-libm, which measures libm's `sin` below one ulp on `[2, 2π]` (`derivations/h_libm.txt`).
 fn x_minus_sin(x: f64) -> f64 {
     if x < 2.0 {
         let (x2, x2l) = two_product(x, x);
@@ -321,7 +322,7 @@ mod tests {
 
     /// Each branch within its proved bound: the series within 0.745 ulp
     /// (`derivations/x_minus_sin_roundoff.mac`), the subtraction within `1 + 2|sin x|/(x − sin x)`
-    /// ulp, one rounding and libm's one ulp of `sin x`.
+    /// ulp, one rounding and libm's one ulp of `sin x`, under H-libm (row `shadow_sin`).
     #[test]
     fn x_minus_sin_is_within_its_proved_bound_of_the_reference() {
         let (mut series, mut direct) = (0.0_f64, 0.0_f64);

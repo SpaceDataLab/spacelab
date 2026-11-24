@@ -1611,7 +1611,7 @@ if have fptaylor; then
     done <<'EOF'
 era abs 1.447e-12 1.237e-15
 gmst82 abs 1.874e-7 6.982e-15
-kepler abs 6.130e-16 4.486e-14 4.530e-14
+kepler abs 5.890e-16 4.477e-14 4.522e-14
 geopotential_seed rel 3.910e-16 3.910e-16 3.634e-16
 shadow_lens rel-u 2.986e-16 3.624e-14 7.617e-14 1.692e-13 2.441e-13
 EOF
@@ -1675,6 +1675,82 @@ if have maxima; then
     mac_zeros approximation_supnorm.mac 28 "each series' worst error, found at fpprec 120, lies inside Sollya's enclosure"
     mac_zeros pade66_backward_error.mac 7 "the [6/6] Padé approximant's backward error is at most 0.385u for every A, normal or not"
     mac_zeros taylor_model_enclosures.mac 6 "the Kepler box holds the exact solution, the J2 and CR3BP fields are their potentials' gradients, the J2 box conserves h_z"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# 9. Ф28.J: H-libm, the accuracy of libm 0.2.16 that the round-off proofs above take as a
+# hypothesis (h_libm.txt). libm_hypothesis_arb.c generates the inputs, the shipped libm answers
+# them (spacelab-core's libm_eval example, built against Cargo.lock), and the C file decides each
+# error in Arb balls: one point above its row's constant fails. A measurement is a tested
+# hypothesis, not a proof. Rule 16's planted defect stays: the same inputs against the table with
+# every constant halved must refute every row. PARI/GP recomputes each row's worst point and the
+# hardest argument of the reduction by pi/2. The table's `measured` column, and §1.1's copy of it,
+# must be what the run finds. `pow` gets a domain check instead of a constant: libm_pow_sites.tsv
+# reads its base and exponent ranges at every call, and its calls per file must be the tree's.
+# ---------------------------------------------------------------------------------------------
+if have cargo && have cc && pkg-config --exists flint 2>/dev/null; then
+    tmp=$(mktemp -d)
+    rows=$(grep -c '^[a-z]' h_libm.txt)
+    libm_eval() { timeout 900 cargo run -q --release --manifest-path ../Cargo.toml -p spacelab-core --example libm_eval; }
+    # shellcheck disable=SC2046 # pkg-config prints separate flags
+    if cc -O2 libm_hypothesis_arb.c -o "$tmp/hl" $(pkg-config --cflags --libs flint) -lm 2>"$tmp/build.log" \
+        && timeout 1800 cargo build -q --release --manifest-path ../Cargo.toml -p spacelab-core \
+            --example libm_eval 2>>"$tmp/build.log"; then
+        report=$(timeout 120 "$tmp/hl" gen | libm_eval | timeout 900 "$tmp/hl" check h_libm.txt 2>&1)
+        rc=$?
+        if [ "$rc" -eq 0 ] && printf '%s\n' "$report" | grep -q "^HOLDS $rows rows"; then
+            ok "arb libm_hypothesis_arb.c: H-libm $(printf '%s\n' "$report" | tail -n 1 | tr '[:upper:]' '[:lower:]'), libm 0.2.16 against Arb balls"
+        else
+            bad "arb libm_hypothesis_arb.c" "$(printf '%s\n' "$report" | grep -E 'ABOVE|UNDECIDED|REFUTED|not in|malformed' | head -n 5)"
+        fi
+        awk '/^[a-z]/ { $3 = $3 / 2 } 1' h_libm.txt > "$tmp/planted.txt"
+        planted=$(timeout 120 "$tmp/hl" gen | libm_eval | timeout 900 "$tmp/hl" check "$tmp/planted.txt" 2>&1)
+        if printf '%s\n' "$planted" | grep -q "^REFUTED $rows of $rows rows"; then
+            ok "arb libm_hypothesis_arb.c, planted: with every constant halved, all $rows rows are refuted"
+        else
+            bad "arb libm_hypothesis_arb.c, planted" "a halved constant was not refuted: $(printf '%s\n' "$planted" | tail -n 1)"
+        fi
+        stale=$(printf '%s\n' "$report" | awk 'NR == FNR { if (/^[a-z]/) m[$1] = $4; next }
+            /^ROW/ { split($5, v, "="); if (v[2] != m[$2]) printf "%s ", $2 }' h_libm.txt -)
+        while read -r row _ constant measured _; do
+            grep -F "| \`$row\` |" ../docs/verification.md | grep -qF "| $measured | **$constant** |" \
+                || stale="$stale$row (verification.md) "
+        done < <(grep '^[a-z]' h_libm.txt)
+        if [ -z "$stale" ]; then
+            ok "h_libm.txt: every row's measured maximum is what the run finds, and §1.1 prints the same table"
+        else
+            bad "h_libm.txt" "stale rows: $stale"
+        fi
+        if have gp; then
+            calls=$(printf '%s\n' "$report" | awk '/^ROW/ { n++; a2 = ""; r = $10; if ($9 != "->") { a2 = $9; r = $11 }
+                split($5, m, "="); printf "worst(%d, \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", %s);\n", n, $2, $3, $8, a2, r, m[2] }')
+            hardest=$(timeout 120 "$tmp/hl" hard | awk -v n="$rows" '/^HARDEST/ { printf "hardest(%d, %s, %s, %s);\n", n + 1, $2, $3, $4 }')
+            out=$({ cat libm_hypothesis.gp; printf '%s\n%s\n' "$calls" "$hardest"; } | timeout 300 gp -q -f 2>&1)
+            holds=$(printf '%s\n' "$out" | grep -c '^([0-9]*) holds:')
+            if [ "$holds" -eq $((rows + 1)) ] && ! printf '%s' "$out" | grep -qF '***'; then
+                ok "pari libm_hypothesis.gp: each row's worst error recomputed at 600 digits as Arb found it; $(printf '%s\n' "$out" | tail -n 1 | sed 's/^([0-9]*) holds: //')"
+            else
+                bad "pari libm_hypothesis.gp" "expected $((rows + 1)) checks to hold, found $holds"
+            fi
+        else
+            skip "pari libm_hypothesis.gp" gp
+        fi
+    else
+        bad "Ф28.J H-libm" "$(cat "$tmp/build.log")"
+    fi
+    rm -rf "$tmp"
+else
+    skip "Ф28.J H-libm measurement" "cargo, a C compiler and FLINT"
+fi
+# pow's domain check, with its planted defect: the ledger without its first row must not match.
+pow_tree=$(cd .. && grep -ro --include='*.rs' 'libm::pow(' crates | cut -d: -f1 | sort | uniq -c)
+pow_ledger=$(awk -F'\t' '/^# indirect/ { exit } /^crates\// { print $1 }' libm_pow_sites.tsv | sort | uniq -c)
+pow_planted=$(awk -F'\t' '/^# indirect/ { exit } /^crates\// { print $1 }' libm_pow_sites.tsv | sed 1d | sort | uniq -c)
+pow_open=$(awk -F'\t' '/^# indirect/ { exit } /^crates\// && $10 == "open"' libm_pow_sites.tsv | grep -c .)
+if [ "$pow_tree" = "$pow_ledger" ] && [ "$pow_tree" != "$pow_planted" ]; then
+    ok "libm_pow_sites.tsv: all $(printf '%s\n' "$pow_tree" | awk '{ s += $1 } END { print s }') calls of libm::pow read, with base and exponent ranges; $pow_open do not exclude |y| > 2^31 with x next to 1"
+else
+    bad "libm_pow_sites.tsv" "the ledger's calls per file are not the tree's: $(diff <(printf '%s\n' "$pow_ledger") <(printf '%s\n' "$pow_tree") | grep '^[<>]' | head -n 3)"
 fi
 
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"

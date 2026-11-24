@@ -13,7 +13,10 @@
    The replay was checked once against the shipped code at these points (2026-11-13): ERA, GMST82
    and the Kepler loop bit for bit; Vermeille bit for bit except four results one ulp apart, each
    traced to libm's atan2 (three) or hypot (one) returning the other neighbour of the true value,
-   inside the one-ulp model the proofs assume.
+   inside the constants the proofs take from H-libm (h_libm.txt, plans/18 Ф28.J).
+
+   It also redoes, in exact rationals, the hand step that closes the Vermeille latitude under
+   H-libm: wd's relative bound from vermeille_roundoff.gappa through atan, plus atan2's constant.
 
    It also checks, on a grid of latitude and height from -100 km to GEO, the hypotheses
    vermeille_roundoff.gappa proves by hand. Six `...: 0` lines: no point above a bound, per kernel,
@@ -114,7 +117,7 @@ kepler_f64(M, e) := block([E, dE, fin : false],
   E)$
 kepler_root(M, e) := if M = 0 then 0b0
   else bf_find_root(x - e * sin(x) - M, x, 0, bfloat(2 * %pi))$
-KEPLER_BOUND : 6.15b-14$
+KEPLER_BOUND : 5.90b-14$
 kepler_samples : apply(append, map(lambda([e], map(lambda([M], [nd(M), nd(e)]),
   [0, 10^-6, 1/2, 3, 314159265358979 / 10^14, 6283185307 / 10^9])),
   [0, 1/1000, 1/10, 1/2, 79/100, 4/5, 95/100, 99/100]))$
@@ -178,8 +181,15 @@ must(every(lambda([p], every(lambda([c], is(c >= 1/1000)), p)), verm_samples),
 gaps : map(lambda([p], forward_gap(p[1], p[2], p[3])), verm_samples)$
 print("Vermeille reference: forward map gap, worst (m):", float(lmax(gaps)))$
 must(is(lmax(gaps) < 10^-40), "the 60-digit reference solves the forward equations to 1e-40 m")$
-LAT_BOUND : 3.95b-15$
-H_REL_BOUND : 5.97b-15$
+LAT_BOUND : 4.08b-15$
+H_REL_BOUND : 5.98b-15$
+/* the latitude's hand closure (vermeille_roundoff.gappa): 2 atan2(z, wd) with |wd/WD - 1| <= delta
+   moves by at most delta (1 + delta)/(1 - delta), and atan2's result, below 1, errs by at most
+   H-libm's 1.5625 ulp <= 1.5625 * 2^-53, doubled */
+LAT_DELTA : 3728 / 10^18$
+LAT_ATAN2 : 100/64 * 2^-52$
+must(is(LAT_DELTA * (1 + LAT_DELTA) / (1 - LAT_DELTA) + LAT_ATAN2 <= 408 / 10^17),
+     "the Vermeille latitude closes under H-libm: 3.7281e-15 + 3.4695e-16 <= 4.08e-15")$
 verm_obs : map(lambda([p], block([c : verm_f64(p[1], p[2], p[3]), g : verm_exact(p[1], p[2], p[3])],
   [abs(bfloat(c[1]) - g[1]), abs(bfloat(c[2]) - g[2]), abs(bfloat(c[2]) - g[2]) / g[3]])), verm_samples)$
 print("Vermeille latitude observed (rad)", map(lambda([o], float(o[1])), verm_obs))$

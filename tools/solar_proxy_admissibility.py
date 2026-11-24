@@ -52,8 +52,9 @@ proxy is measuring something F10.7 is not.
 
     uv run --no-project --with netCDF4 --with numpy python tools/solar_proxy_admissibility.py --fetch
 
-`--fetch` downloads what is missing into the cache (about 25 MB, most of it SDO/EVE); without it the
-script reads the cache and fails with the URL of whatever is absent.
+`--fetch` downloads what is missing into the cache (about 25 MB, most of it SDO/EVE), and asks for
+CelesTrak's `SW-All.csv` through `tools/fetch-density-data.sh --sw-all`, which keeps CelesTrak's usage
+policy; without it the script reads the cache and fails with the URL of whatever is absent.
 """
 
 from __future__ import annotations
@@ -61,8 +62,10 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import os
 import pathlib
 import re
+import subprocess
 import sys
 import urllib.request
 
@@ -77,7 +80,6 @@ EUVS = {
     "g19": f"{GOES_BASE}/goes19/l2/data/euvs-l2-avg1d_science/sci_euvs-l2-avg1d_g19_s20240920_e20260910_v1-0-7.nc",
 }
 OTHER = {
-    "SW-All.csv": "https://celestrak.org/SpaceData/SW-All.csv",
     "lisird_lemr.nt": "https://lasp.colorado.edu/lemr/lisird/lisird",
     "MgII_composite.dat": "https://www.iup.uni-bremen.de/gome/solar/MgII_composite.dat",
     "composite_lyman_alpha.csv": "https://lasp.colorado.edu/lisird/latis/dap/composite_lyman_alpha.csv",
@@ -135,6 +137,25 @@ def fetch(name: str, url: str, allow: bool) -> pathlib.Path:
     request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=300) as response:
         path.write_bytes(response.read())
+    return path
+
+
+def sw_all(allow: bool) -> pathlib.Path:
+    """CelesTrak's SW-All.csv, asked for only through the client that keeps CelesTrak's usage policy.
+
+    urllib follows a 301 in silence and keeps no validators, so this file never goes through `fetch`.
+    """
+    path = CACHE / "SW-All.csv"
+    if not allow:
+        if not path.exists():
+            sys.exit(
+                f"{path} is absent; re-run with --fetch (fetch-density-data.sh --sw-all)"
+            )
+        return path
+    script = pathlib.Path(__file__).resolve().parent / "fetch-density-data.sh"
+    env = os.environ | {"DENSITY_DIR": str(CACHE)}
+    if subprocess.run([str(script), "--sw-all"], env=env, check=False).returncode != 0:
+        sys.exit(f"{script.name} --sw-all stopped; CelesTrak's answer is printed above")
     return path
 
 
@@ -320,6 +341,7 @@ def main() -> None:
     argument = parser.parse_args()
 
     paths = {name: fetch(name, url, argument.fetch) for name, url in OTHER.items()}
+    paths["SW-All.csv"] = sw_all(argument.fetch)
     stated: dict[str, str] = {}
     series: dict[str, dict[dt.date, float]] = {}
     for satellite, url in EUVS.items():

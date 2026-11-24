@@ -29,7 +29,8 @@
 # USAGE POLICY, which this script exists partly to encode
 #
 # Nothing here retries or loops. A non-200 stops the script, and the provider's message is printed,
-# not swallowed: it says why. A URL fetched successfully less than two hours ago is not requested
+# not swallowed: it says why. No redirect is followed: a 301 stops it too, with its Location
+# (tools/celestrak.sh). A URL fetched successfully less than two hours ago is not requested
 # again, because the answer could be that 403; the copy on disk is kept, as current as a repeat.
 #
 # Usage: tools/fetch-supgp.sh [SOURCE ...]     (default: GPS-A CPF SpaceX-E OneWeb-E Iridium-E), CSV
@@ -40,6 +41,9 @@
 # hold no object numbered 100000 or above. FORMAT=xml|kvn|json overrides CSV in the first form.
 
 set -euo pipefail
+
+# shellcheck source-path=SCRIPTDIR source=celestrak.sh
+source "$(dirname "${BASH_SOURCE[0]}")/celestrak.sh"
 
 DEST="${SUPGP_DIR:-data/supgp}"
 BASE="${SUPGP_URL:-https://celestrak.org/NORAD/elements/supplemental/sup-gp.php}"
@@ -60,19 +64,8 @@ fetch() {
       return 0
     fi
   fi
-  local status
-  status="$(curl -sS -L --max-time 300 -o "$out.part" -w '%{http_code}' "$url")" || {
-    echo "$label: no answer from Celestrak (curl failed); stopping" >&2
-    rm -f "$out.part"
-    exit 1
-  }
-  if [[ "$status" != 200 ]]; then
-    echo "$label: Celestrak answered HTTP $status; stopping, as its usage policy asks. Its message:" >&2
-    head -c 2000 "$out.part" | tr -cd '[:print:]\n' | sed 's/^/  | /' >&2
-    echo >&2
-    rm -f "$out.part"
-    exit 1
-  fi
+  celestrak_get "$url" "$out" "$label"
+  rm -f "$out.http.part"
   local records
   if [[ "$format" == tle ]]; then
     records="$(grep -c '^1 ' "$out.part" || true)"

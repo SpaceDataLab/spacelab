@@ -26,6 +26,9 @@
 
 set -euo pipefail
 
+# shellcheck source-path=SCRIPTDIR source=celestrak.sh
+source "$(dirname "${BASH_SOURCE[0]}")/celestrak.sh"
+
 URL="${1:-${SATELLITE_JS_URL:-https://celestrak.org/software/SGP4/satellite.js}}"
 DEST="${SATELLITE_JS_DIR:-data/oracles/satellite-js}"
 # The pin is a content digest, not a version string: Celestrak serves this path without a version in
@@ -36,10 +39,8 @@ mkdir -p "$DEST"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-if ! curl -sS -L --fail --max-time 300 -o "$tmp/satellite.js" "$URL"; then
-  echo "could not fetch $URL" >&2
-  exit 1
-fi
+celestrak_get "$URL" "$tmp/satellite.js" satellite.js
+mv "$tmp/satellite.js.part" "$tmp/satellite.js"
 
 sha="$(sha256sum "$tmp/satellite.js" | cut -d' ' -f1)"
 bytes="$(stat -c%s "$tmp/satellite.js")"

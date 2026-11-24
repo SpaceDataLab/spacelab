@@ -54,7 +54,8 @@ gates:
     printf '%s\n' "${rows[@]}"
     exit "$red"
 
-# Rule 16 (plans/18 Ф10.P): each checker of `gates`, and the public cut, fails on a planted violation.
+# Rule 16 (plans/18 Ф10.P): each checker of `gates`, the public cut, and the CelesTrak client fail on a
+# planted violation.
 checker-tests:
     uv run --no-project python -I tools/test_check_provenance.py
     uv run --no-project python -I tools/test_check_comparators.py
@@ -64,6 +65,7 @@ checker-tests:
     uv run --no-project python -I tools/test_check_sdtm_freeze.py
     uv run --no-project python -I tools/test_check_set_numbers.py
     uv run --no-project python -I tools/test_check_dtm_numbers.py
+    uv run --no-project python -I tools/test_celestrak_client.py
 
 # D-30: SDTM-1's frozen code and, with the corpus on disk, its frozen data. A deliberate change writes
 # a new baseline with `tools/check-sdtm-freeze.py --write` and a row in `docs/sdtm-selection-ledger.md`.

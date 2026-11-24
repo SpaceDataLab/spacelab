@@ -3346,8 +3346,8 @@ exclude_re = [
     # `wgpu::BufferUsages` is a bitflag set and both operands of each of these are single, distinct
     # bits, so exclusive-or and or produce the same mask. The buffers are created with exactly the
     # usages they are then used with, and the GPU tests exercise both.
-    "lib\\.rs:874:48: replace \\| with \\^ in Gpu::output",
-    "lib\\.rs:899:49: replace \\| with \\^ in Gpu::run",
+    "lib\\.rs:902:48: replace \\| with \\^ in Gpu::output",
+    "lib\\.rs:927:49: replace \\| with \\^ in Gpu::run",
 
     # Four tolerance comparisons whose two forms differ only on the tie, and the tie is an exact
     # `f64` equality with a literal that the quantity being compared never produces: the Newton

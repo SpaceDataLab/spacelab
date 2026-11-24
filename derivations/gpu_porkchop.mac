@@ -1,0 +1,116 @@
+/* The f32 Lambert kernel of crates/spacelab-gpu/src/lib.rs (`LAMBERT_SHADER`), F115 and C3 rows 1
+   and 10 of plan 18 (Ф28.M): each form the kernel evaluates is the quantity it replaces.
+
+   The kernel solves F(z) = (y/C)^(3/2) S + A sqrt(y) - sqrt(mu) t = 0 by bisection, with
+       C(z) = 2 sin^2(sqrt(z)/2)/z            (z > 1),   C(z) = 2 sinh^2(sqrt(-z)/2)/(-z)   (z < -1),
+       S(z) = (sqrt(z) - sin sqrt(z))/z^(3/2)  (z > 1),   S(z) = (sinh sqrt(-z) - sqrt(-z))/(-z)^(3/2),
+       C, S = their series to z^4 within |z| <= 1,
+       y(z) = r1 + r2 - sqrt(2) A cos(sqrt(z)/2)  (z > 0),   r1 + r2 - sqrt(2) A cosh(sqrt(-z)/2),
+       A = sqrt(r1 r2 (1 + cos dnu)),  or  sin dnu sqrt(r1 r2/(1 - cos dnu)) when cos dnu < 0,
+   sin dnu = |u1 x u2| and cos dnu = u1.u2 from the unit vectors, A negative on the long way. On the
+   short way the bracket starts at z_min = -(2 acosh((r1 + r2)/(sqrt(2) A)))^2, and a z with y <= 0
+   counts as below the root.
+
+   Printed `<name>: 0`, each a residual that must vanish:
+     1-2.   C's half-angle forms are (1 - cos w)/w^2 and (cosh w - 1)/w^2, z = w^2 and z = -w^2:
+            the forms the kernel shipped, without their subtraction (G1);
+     3-6.   the kernel's degree-4 polynomials, read from its text in lib.rs, are the Taylor series
+            of C and S to z^4 on both branches (G1; their truncation and f32 coefficients are
+            gpu_stumpff_supnorm.sollya's);
+     7-10.  sqrt(C) = sqrt(2) sin(w/2)/w (sinh on the hyperbola), and with it Curtis's quotient
+            r1 + r2 + A (z S - 1)/sqrt(C), which the kernel shipped, is the cos/cosh form (G1);
+     11.    y(z_min) = 0: the short way's bracket starts on the edge of the domain;
+     12-13. dy/dz = sqrt(2) A sinh(w/2)/(4 w) on z = -w^2 and sqrt(2) A sin(w/2)/(4 w) on z = w^2,
+            both positive for A > 0 and 0 < w < 2 pi: y rises with z on the short way;
+     14.    F = -sqrt(mu) t where y = 0. With 12-13, every z with y <= 0 lies below the root on the
+            short way, which is what the kernel's predicate says;
+     15.    (r1 + r2)^2 - 2 A^2 = (r1 - r2)^2 + 4 r1 r2 sin^2(dnu/2) >= 0, so the argument of acosh
+            is at least 1 and z_min exists; the kernel's max(., 1) only absorbs rounding;
+     16.    Lagrange's identity |u1 x u2|^2 + (u1.u2)^2 = |u1|^2 |u2|^2: the cross and dot products
+            of unit vectors are sin dnu and cos dnu;
+     17.    the two forms of A have the same square, sin^2 dnu r1 r2/(1 - cos dnu) = r1 r2 (1 + cos dnu),
+            and the same square as the shipped sin(acos c) sqrt(r1 r2/(1 - c)) (G1);
+     18.    r1 r2 (1 + cos dnu) = 2 r1 r2 cos^2(dnu/2): A is Lagrange's sqrt(2 r1 r2) cos(dnu/2).
+   Then the shipped bracket's failure on the crate's test grid: on its first cell (r1 = 1 au,
+   r2 = 1.524 au, dnu = 0.5 rad, short way) y(-50) < 0, so the shipped F(-50) was NaN there.
+
+   The second engine, the grid's counts and the 100-digit reference cell are in
+   derivations/gpu_porkchop.gp.
+
+   Run: cd derivations && timeout 300 maxima --very-quiet --suppress-input-echo -Q -b gpu_porkchop.mac </dev/null */
+
+display2d : false$
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+assume(w > 0, w < 2*%pi, r1 > 0, r2 > 0, A > 0)$
+ell(x) := ratsimp(trigsimp(trigreduce(trigexpand(ratsimp(x)))))$
+hyp(x) := ratsimp(radcan(exponentialize(ratsimp(x))))$
+
+/* 1-2 */
+zero("gpu_c_half_angle_ellipse", ell((1 - cos(w))/w^2 - 2*sin(w/2)^2/w^2))$
+zero("gpu_c_half_angle_hyperbola", hyp((cosh(w) - 1)/w^2 - 2*sinh(w/2)^2/w^2))$
+
+/* 3-6: the Horner polynomials read from the kernel's text, each `n.0` the integer n, so that the
+   coefficients are exact here (their f32 rounding is the Sollya file's) */
+wgsl_return(head) := block([s : openr("../crates/spacelab-gpu/src/lib.rs"), line, out : false, at],
+  while out = false and (line : readline(s)) # false do
+    if ssearch(head, line) # false then (
+      at : ssearch("return ", line),
+      out : substring(line, at + 7, ssearch(";", line))),
+  close(s),
+  if out = false then error("no WGSL line", head),
+  parse_string(ssubst("1/2", "0.5", ssubst("", ".0", out))))$
+pcz : wgsl_return("return 0.5 + z * (")$
+psz : wgsl_return("return 1.0 / 6.0 + z * (")$
+pc(x) := subst(z = x, pcz)$
+ps(x) := subst(z = x, psz)$
+ser(f) := ratdisrep(taylor(f, w, 0, 8))$
+zero("gpu_c_series_ellipse", ratsimp(ser((1 - cos(w))/w^2) - pc(w^2)))$
+zero("gpu_c_series_hyperbola", ratsimp(ser((cosh(w) - 1)/w^2) - pc(-w^2)))$
+zero("gpu_s_series_ellipse", ratsimp(ser((w - sin(w))/w^3) - ps(w^2)))$
+zero("gpu_s_series_hyperbola", ratsimp(ser((sinh(w) - w)/w^3) - ps(-w^2)))$
+
+/* 7-10 */
+Ce : (1 - cos(w))/w^2$  Se : (w - sin(w))/w^3$  sCe : sqrt(2)*sin(w/2)/w$
+Ch : (cosh(w) - 1)/w^2$ Sh : (sinh(w) - w)/w^3$ sCh : sqrt(2)*sinh(w/2)/w$
+zero("gpu_sqrt_c_ellipse", ell(sCe^2 - Ce))$
+zero("gpu_y_ellipse", ell((r1 + r2 + A*(w^2*Se - 1)/sCe) - (r1 + r2 - sqrt(2)*A*cos(w/2))))$
+zero("gpu_sqrt_c_hyperbola", hyp(sCh^2 - Ch))$
+zero("gpu_y_hyperbola", hyp((r1 + r2 + A*(-w^2*Sh - 1)/sCh) - (r1 + r2 - sqrt(2)*A*cosh(w/2))))$
+
+/* 11: z_min = -w_min^2 with w_min = 2 acosh(q), q = (r1 + r2)/(sqrt(2) A) */
+yh(w) := r1 + r2 - sqrt(2)*A*cosh(w/2)$
+zero("gpu_y_vanishes_at_z_min", ratsimp(subst(q = (r1 + r2)/(sqrt(2)*A), yh(2*acosh(q)))))$
+
+/* 12-13: d/dz = -(1/(2w)) d/dw on z = -w^2, (1/(2w)) d/dw on z = w^2 */
+zero("gpu_y_rises_hyperbola", ratsimp(-diff(yh(w), w)/(2*w) - sqrt(2)*A*sinh(w/2)/(4*w)))$
+zero("gpu_y_rises_ellipse",
+     ratsimp(diff(r1 + r2 - sqrt(2)*A*cos(w/2), w)/(2*w) - sqrt(2)*A*sin(w/2)/(4*w)))$
+
+/* 14 */
+F(y, c, s) := (y/c)^(3/2)*s + A*sqrt(y) - sqrt(mu)*t$
+zero("gpu_residual_on_the_edge", ratsimp(F(0, c, s) + sqrt(mu)*t))$
+
+/* 15: A^2 = r1 r2 (1 + cos d) */
+zero("gpu_acosh_argument_at_least_one",
+     ell((r1 + r2)^2 - 2*r1*r2*(1 + cos(d)) - ((r1 - r2)^2 + 4*r1*r2*sin(d/2)^2)))$
+
+/* 16 */
+u : [u1, u2, u3]$  v : [v1, v2, v3]$
+cr : [u[2]*v[3] - u[3]*v[2], u[3]*v[1] - u[1]*v[3], u[1]*v[2] - u[2]*v[1]]$
+zero("gpu_lagrange_identity", expand(cr.cr + (u.v)^2 - (u.u)*(v.v)))$
+
+/* 17: sin dnu = sqrt(1 - c^2) for dnu in [0, pi], which is also what the shipped sin(acos c) is */
+must(is(equal(sin(acos(c)), sqrt(1 - c^2))), "the shipped sin(acos(c)) is sqrt(1 - c^2)")$
+zero("gpu_chord_parameter_forms", ratsimp((sqrt(1 - c^2) * sqrt(r1*r2/(1 - c)))^2 - r1*r2*(1 + c)))$
+
+/* 18 */
+zero("gpu_chord_parameter_half_angle", ell(r1*r2*(1 + cos(d)) - 2*r1*r2*cos(d/2)^2))$
+
+/* The shipped bracket on the test grid's first cell, in au: y(-50) < 0. */
+block([a1 : sqrt(2 * 1 * 1524/1000) * cos(1/4), y50],
+  y50 : bfloat(1 + 1524/1000 - sqrt(2) * a1 * cosh(sqrt(50)/2)),
+  print("first test cell: A =", float(a1), "au, y(-50) =", float(y50), "au"),
+  must(is(y50 < 0), "the shipped lower end z = -50 lies below the y = 0 edge on that cell"))$

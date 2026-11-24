@@ -715,7 +715,7 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
     arb_keep "$out"
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 6 ] && printf '%s' "$out" | grep -q '^DONE'; then
-        ok "maxima constants_readback.mac: WGS 84's copies, 2^±53, the conjunction width, the GPU SGP4 set, SGP4's resonance window and Mars's GM are their sources' values"
+        ok "maxima constants_readback.mac: WGS 84's copies, 2^±53, the conjunction width, the GPU kernels' constants, SGP4's resonance window and Mars's GM are their sources' values"
     else
         bad "maxima constants_readback.mac" "expected 6 checks to hold, found $holds"
     fi
@@ -1331,6 +1331,7 @@ if have maxima; then
     mac_zeros optimal_pmp.mac 16 "minimum-energy PMP: optimal control, Hamilton's equations, primer equation"
     mac_zeros lambert_universal.mac 38 "Lambert in universal variables: y(z), dF/dz, Kepler's equation, the Wronskian; the chord parameter without cancellation at a half turn and y in its difference form on short arcs"
     mac_zeros lambert_izzo.mac 18 "Lambert in Izzo's variable: lambda without 1 - c/s, the time of flight in Stumpff form with its parabolic limit 2/3 (1 - lambda^3), two exact parabolas, dT/dx and the minimum time of an N-revolution family"
+    mac_zeros gpu_porkchop.mac 18 "the f32 Lambert kernel: C in half-angle form, the degree-4 Stumpff series, y without Curtis's quotient, the short way's bracket from the y = 0 edge where y rises with z, A from the unit vectors"
     mac_zeros iod_classical.mac 29 "Gibbs, Herrick-Gibbs, Gauss and Laplace on their own models"
     mac_zeros transfer_excess_speed.mac 10 "hyperbolic excess speed and C3 on exact conics"
     mac_zeros patched_conics.mac 10 "sphere of influence, flyby hyperbola and the B-plane"
@@ -1533,7 +1534,7 @@ if have gp; then
         wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay split_conformal_coverage cluster_design_effect group_sequential_obf tle_kozai_recovery harris_priester_law \
         soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form analysis_alpha_exact \
         rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
-        cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal lambert_izzo iod_classical patched_conics \
+        cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal lambert_izzo gpu_porkchop iod_classical patched_conics \
         targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step sdtm_column sdtm_composition sdtm_overcooling sdtm_nitric_flux sdtm_flux_memory gaussian_scores drag_error_growth central_difference \
         density_calibration_ridge \
         wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms \
@@ -1646,10 +1647,10 @@ whfast_stumpff whfast_stumpff_c2_pos 8288e-31
 whfast_stumpff whfast_stumpff_c2_neg 8155e-31
 whfast_stumpff whfast_stumpff_c3_pos 5552e-20
 whfast_stumpff whfast_stumpff_c3_neg 5552e-20
-gpu_stumpff gpu_stumpff_C_pos 4961e-26
-gpu_stumpff gpu_stumpff_C_neg 4961e-26
+gpu_stumpff gpu_stumpff_C_pos 1888e-12
+gpu_stumpff gpu_stumpff_C_neg 1517e-12
 gpu_stumpff gpu_stumpff_S_pos 2981e-11
-gpu_stumpff gpu_stumpff_S_neg 2981e-11
+gpu_stumpff gpu_stumpff_S_neg 3040e-11
 shadow_x_minus_sin shadow_x_minus_sin 1125e-23
 small_angle attitude_exp_so3_a 8334e-38
 small_angle attitude_exp_so3_b 2778e-38

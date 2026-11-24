@@ -3,7 +3,7 @@
 
    The tables have their derivations; these are the constants written once or twice across the
    crates: the WGS 84 ellipsoid in seven of them, two powers of two, the conjunction width, the
-   GPU kernels' SGP4 constants, SGP4's resonance window and the Mars GM of the entry model. Each
+   GPU kernels' constants, SGP4's resonance window and the Mars GM of the entry model. Each
    must be its source's value rounded to the digits it shows (`certified`, which hands the exact value
    to the Arb pass of arb_balls.c, the erfc root of (3) by `arb_root`), or the double nearest it
    (`same_doubles`) where the text carries a double's 17 digits.
@@ -94,18 +94,19 @@ must(certified("DURATION_WIDTHS",
                [2 * sqrt(2) * 'erfc_tail]),
      "(3) holds: DURATION_WIDTHS is 2 sqrt(2) erfc^-1(1e-6) to its 40 digits")$
 
-/* ---- (4) the GPU kernels' SGP4 constants ---------------------------------------------------------
+/* ---- (4) the GPU kernels' constants --------------------------------------------------------------
    WGS-72, the geopotential of Vallado et al. (2006), AIAA 2006-6753, and of the element sets:
    μ = 398600.8 km³/s², Rₑ = 6378.135 km, J2 = 0.001082616, and xke = 60/√(Rₑ³/μ) in Earth
-   radii^(3/2) per minute; and 2π, which each of the two kernels declares. */
+   radii^(3/2) per minute; 2π, which the SGP4 kernel declares; and the Lambert kernel's √2. */
 
 gpu : src("spacelab-gpu", "lib.rs")$
 re72 : 6378135 / 1000$
 must(certified("GPU_KE", [rust_scalar(gpu, "KE")], [60 / sqrt(re72^3 / (3986008 / 10))])
      and same_rationals([rust_scalar(gpu, "AE")], [re72])
      and same_rationals([rust_scalar(gpu, "J2")], [1082616 / 10^9])
-     and certified("GPU_TAU", rust_scalars(gpu, "TAU"), [2 * %pi, 2 * %pi]),
-     "(4) holds: the kernels' xke follows from WGS-72's mu and radius, AE and J2 are WGS-72's, TAU is 2 pi")$
+     and certified("GPU_TAU", rust_scalars(gpu, "TAU"), [2 * %pi])
+     and certified("GPU_SQRT2", [rust_scalar(gpu, "SQRT2")], [sqrt(2)]),
+     "(4) holds: the kernels' xke follows from WGS-72's mu and radius, AE and J2 are WGS-72's, TAU is 2 pi, SQRT2 is sqrt 2")$
 
 /* ---- (5) SGP4's 24-hour resonance window ----------------------------------------------------------
    0.2° and 0.3° per minute, in rad/min, cut (not rounded) at the tenth decimal: the edges as the

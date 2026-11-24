@@ -405,9 +405,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 ";
 
-/// Sentinel (m²/s²) written when a Lambert cell has no single-revolution solution — including a narrow
-/// band around the 0°/180° transfer singularity, where the geometry is too ill-conditioned for `f32`
-/// (the useless high-energy ridge; refine on the CPU if ever needed).
+/// Sentinel (m²/s²) written when a Lambert cell has no single-revolution solution. The `f32` kernel
+/// also writes it where it does not answer: a narrow band around the 0°/180° transfer singularity,
+/// `|sin Δν| < 1e-2`, where the geometry is too ill-conditioned for `f32` (the useless high-energy
+/// ridge; refine on the CPU if ever needed); a long-way transfer whose root lies below `z = −50`, a
+/// hyperbolic arc whose residual `f32` cannot resolve; and a root at or above `z = 39`, next to a
+/// whole revolution.
 pub const PORKCHOP_NO_SOLUTION: f32 = 3.0e30;
 
 #[repr(C)]
@@ -419,8 +422,9 @@ struct PorkchopParams {
     prograde: u32,
 }
 
-// A faithful f32 port of `spacelab_astro::lambert` (universal-variable / Stumpff, Newton on z with an
-// upward bracket) — one thread per (departure, arrival) cell, output = departure C3 = |v₁ − v_dep|².
+// An f32 port of `spacelab_astro::lambert` (universal variables, the chord parameter, `y(z)` and the
+// Stumpff pair in the forms that solver uses, bisection on z) — one thread per (departure, arrival)
+// cell, output = departure C3 = |v₁ − v_dep|². The identities are in derivations/gpu_porkchop.mac.
 const LAMBERT_SHADER: &str = r"
 struct Body { r: vec3<f32>, v: vec3<f32> };
 struct Params { n_dep: u32, n_arr: u32, mu: f32, prograde: u32 };
@@ -431,28 +435,47 @@ struct Params { n_dep: u32, n_arr: u32, mu: f32, prograde: u32 };
 @group(0) @binding(3) var<storage, read_write> out_c3: array<f32>;
 @group(0) @binding(4) var<uniform>             params: Params;
 
-// 2π; derivations/constants_readback.mac reads it back.
-const TAU: f32 = 6.28318530717959;
+// √2; derivations/constants_readback.mac reads it back.
+const SQRT2: f32 = 1.4142135623730950488016887242096980786;
 const SENTINEL: f32 = 3.0e30;
 
+// The Stumpff pair. Within |z| ≤ 1 both are their series to z⁴, whose truncation and f32
+// coefficients derivations/gpu_stumpff_supnorm.sollya bounds below 2⁻²⁴. Beyond it C is the
+// half-angle form 2 sin²(√z/2)/z, sinh below zero, which has no subtraction: 1 − cos√z loses digits
+// as z nears 4π², and the bracket runs to 39. S keeps its closed form, which beyond |z| = 1 loses
+// less than a factor of 7 to its subtraction.
 fn stumpff_c(z: f32) -> f32 {
-    if (z > 1e-6) { let s = sqrt(z); return (1.0 - cos(s)) / z; }
-    if (z < -1e-6) { let s = sqrt(-z); return (cosh(s) - 1.0) / (-z); }
-    return 0.5 - z / 24.0 + z * z / 720.0;
+    if (abs(z) <= 1.0) {
+        return 0.5 + z * (-1.0 / 24.0 + z * (1.0 / 720.0 + z * (-1.0 / 40320.0 + z * (1.0 / 3628800.0))));
+    }
+    if (z > 0.0) { let h = sin(0.5 * sqrt(z)); return 2.0 * h * h / z; }
+    let h = sinh(0.5 * sqrt(-z));
+    return 2.0 * h * h / (-z);
 }
 fn stumpff_s(z: f32) -> f32 {
-    if (z > 1e-6) { let s = sqrt(z); return (s - sin(s)) / (s * z); }
-    if (z < -1e-6) { let s = sqrt(-z); return (sinh(s) - s) / (s * (-z)); }
-    return 1.0 / 6.0 - z / 120.0 + z * z / 5040.0;
+    if (abs(z) <= 1.0) {
+        return 1.0 / 6.0 + z * (-1.0 / 120.0 + z * (1.0 / 5040.0 + z * (-1.0 / 362880.0 + z * (1.0 / 39916800.0))));
+    }
+    if (z > 0.0) { let s = sqrt(z); return (s - sin(s)) / (s * z); }
+    let s = sqrt(-z);
+    return (sinh(s) - s) / (s * (-z));
 }
+// y(z) = r1 + r2 + A(zS − 1)/√C, as r1 + r2 − √2·A·cos(√z/2) (cosh(√−z/2) below zero).
 fn yfun(z: f32, a: f32, r1n: f32, r2n: f32) -> f32 {
-    return r1n + r2n + a * (z * stumpff_s(z) - 1.0) / sqrt(stumpff_c(z));
+    if (z > 0.0) { return r1n + r2n - SQRT2 * a * cos(0.5 * sqrt(z)); }
+    return r1n + r2n - SQRT2 * a * cosh(0.5 * sqrt(-z));
 }
 fn tof_err(z: f32, a: f32, r1n: f32, r2n: f32, sqmu: f32, tof: f32) -> f32 {
     let c = stumpff_c(z);
     let s = stumpff_s(z);
     let yz = yfun(z, a, r1n, r2n);
     return pow(yz / c, 1.5) * s + a * sqrt(yz) - sqmu * tof;
+}
+// Whether z lies below the root. On the short way (A > 0) y rises with z and is positive at the
+// root, so a z with y ≤ 0 — where sqrt(y) is NaN — lies below it. On the long way y > 0 everywhere.
+fn below_root(z: f32, a: f32, r1n: f32, r2n: f32, sqmu: f32, tof: f32) -> bool {
+    if (!(yfun(z, a, r1n, r2n) > 0.0)) { return a > 0.0; }
+    return tof_err(z, a, r1n, r2n, sqmu, tof) < 0.0;
 }
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -468,36 +491,41 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let r1n = length(r1);
     let r2n = length(r2);
-    let cross_z = r1.x * r2.y - r1.y * r2.x;
-    let cos_dnu = clamp(dot(r1, r2) / (r1n * r2n), -1.0, 1.0);
-    let acos_v = acos(cos_dnu);
-    var dnu: f32 = TAU - acos_v;
-    if (params.prograde == 1u) {
-        if (cross_z >= 0.0) { dnu = acos_v; }
-    } else {
-        if (cross_z < 0.0) { dnu = acos_v; }
-    }
-    let sin_dnu = sin(dnu);
-    // Mask a narrow band around the 0°/180° transfer singularity (a → 0, plane undefined): there the
+    // The angle's sine and cosine from the unit vectors: r1 × r2 itself overflows f32 in length() at
+    // heliocentric distances.
+    let u1 = r1 / r1n;
+    let u2 = r2 / r2n;
+    let n = cross(u1, u2);
+    let sin_dnu = length(n);
+    let cos_dnu = dot(u1, u2);
+    var long_way = n.z < 0.0;
+    if (params.prograde == 0u) { long_way = n.z >= 0.0; }
+    // Mask a narrow band around the 0°/180° transfer singularity (plane undefined): there the
     // problem is so ill-conditioned that f32 cannot track f64 — the ridge is not a usable transfer and
     // is refined on the CPU if ever needed.
-    if (abs(sin_dnu) < 1e-2) { out_c3[idx] = SENTINEL; return; }
-    let a = sin_dnu * sqrt(r1n * r2n / (1.0 - cos_dnu));
+    if (sin_dnu < 1e-2) { out_c3[idx] = SENTINEL; return; }
+    // Lambert's A = √(r1 r2 (1 + cos Δν)), and past a quarter turn sin Δν·√(r1 r2/(1 − cos Δν)), so
+    // that neither form subtracts near-equal numbers; negative on the long way.
+    var a: f32 = sqrt(r1n * r2n * (1.0 + cos_dnu));
+    if (cos_dnu < 0.0) { a = sin_dnu * sqrt(r1n * r2n / (1.0 - cos_dnu)); }
+    if (long_way) { a = -a; }
     let sqmu = sqrt(params.mu);
 
-    // Single-revolution root by bisection on the monotone tof(z), z in [-50, 39) — below the 4π²
-    // multi-rev singularity. Robust in f32, where Newton diverges to a spurious root on the
-    // ill-conditioned cells (near-singular geometry) that a porkchop grid is full of. A cell whose
-    // required time of flight lies outside [tof(-50), tof(39)) has no single-rev solution → sentinel.
+    // Single-revolution root by bisection on the monotone tof(z), below the 4π² multi-rev singularity.
+    // Robust in f32, where Newton diverges to a spurious root on the ill-conditioned cells
+    // (near-singular geometry) that a porkchop grid is full of. On the short way the bracket starts
+    // at z_min = −(2 acosh((r1 + r2)/(√2 A)))², where y = 0, so it holds every root. On the long way
+    // y has no zero and the bracket starts at −50. Below it the root is a hyperbolic arc whose
+    // residual is a difference of two terms 16 (z = −47) to 700 (z = −222) times √µ·tof; carried
+    // there by doubling, the kernel erred against the f64 solver by up to 7e-3 on the test grid and
+    // answered 64 cells that solver refuses. Such a cell is refused, and so is a root at or above 39.
     var zlo: f32 = -50.0;
+    if (a > 0.0) { let t = 2.0 * acosh(max((r1n + r2n) / (SQRT2 * a), 1.0)); zlo = -t * t; }
     var zhi: f32 = 39.0;
-    // Long-way transfers (a < 0) drive y(z) negative at large z, where sqrt(y) is NaN; keep zlo the
-    // largest z with BOTH y > 0 and tof_err < 0, so the bracket stays inside the valid region and
-    // converges to the root from below. A cell with no such root is masked by the final gate.
-    if (!(tof_err(zlo, a, r1n, r2n, sqmu, tof) < 0.0)) { out_c3[idx] = SENTINEL; return; }
+    if (!below_root(zlo, a, r1n, r2n, sqmu, tof)) { out_c3[idx] = SENTINEL; return; }
     for (var it: i32 = 0; it < 70; it = it + 1) {
         let zm = 0.5 * (zlo + zhi);
-        if (yfun(zm, a, r1n, r2n) > 0.0 && tof_err(zm, a, r1n, r2n, sqmu, tof) < 0.0) {
+        if (below_root(zm, a, r1n, r2n, sqmu, tof)) {
             zlo = zm;
         } else {
             zhi = zm;
@@ -1270,8 +1298,60 @@ mod tests {
         );
     }
 
+    /// `√µ·(t(z) − tof)` at a fixed `z ≠ 0`, in `f64` and in the forms of the kernel and of
+    /// `spacelab_astro::lambert`: which side of a cell's root `z` lies on.
+    fn residual(z: f64, r1n: f64, r2n: f64, a: f64, sqmu_tof: f64) -> f64 {
+        let x = z.abs().sqrt();
+        let (c, s, h) = if z > 0.0 {
+            let half = (0.5 * x).sin();
+            (
+                2.0 * half * half / z,
+                (x - x.sin()) / (x * z),
+                (0.5 * x).cos(),
+            )
+        } else {
+            let half = (0.5 * x).sinh();
+            (
+                2.0 * half * half / -z,
+                (x.sinh() - x) / (x * -z),
+                (0.5 * x).cosh(),
+            )
+        };
+        let y = r1n + r2n - core::f64::consts::SQRT_2 * a * h;
+        (y / c).powf(1.5) * s + a * y.sqrt() - sqmu_tof
+    }
+
+    /// The `f32` porkchop against the `f64` one, branch by branch, in both senses (F115).
+    ///
+    /// A pooled comparison passes on one branch alone. The kernel's bisection once started at
+    /// `z = −50`, where `y < 0` on every short-way cell of this grid, and refused all 1 283 of them,
+    /// while the 568 long-way cells it solved carried a pooled count and a pooled worst error. Here
+    /// each branch is held cell by cell: the kernel answers no cell its comparator refuses, and it
+    /// answers every cell its comparator solves outside the `|sin Δν| < 1e-2` mask whose root lies in
+    /// the kernel's bracket. The `f64` residual at the bracket's fixed ends says which cells those
+    /// are; `derivations/gpu_porkchop.gp` gets the same counts from it at 100 digits (S1).
+    ///
+    /// The comparator is the CPU path except at one cell, departure 46 and arrival 62 retrograde,
+    /// which the CPU refuses although its arc is right: its `z` is the 100-digit one to 2e-16, but
+    /// the closure check's `propagate` stops at its iteration cap on this 252 km/s arc and misses
+    /// `r2` by 13 719 km. There the comparator is the C3 that `gpu_porkchop.gp` solves at 100 digits
+    /// and checks by Kepler's equation.
     #[test]
     fn gpu_matches_cpu_porkchop() {
+        #[derive(Debug, Default)]
+        struct Branch {
+            cells: u32,
+            reference: u32,
+            gpu: u32,
+            owed: u32,
+            gpu_only: u32,
+            missed: u32,
+            worst: f64,
+        }
+        // derivations/gpu_porkchop.gp, at 100 digits.
+        const STALLED: (usize, usize, f64) = (46, 62, 78_650_740_366.479_72);
+        // The measured worst is 1.3e-4, on the long way next to z = −50, over three adapters.
+        const BOUND: f64 = 1e-3;
         let Some(gpu) = Gpu::new() else {
             eprintln!("no GPU available, skipping");
             return;
@@ -1287,29 +1367,66 @@ mod tests {
             .map(|k| ((160.0 + f64::from(k) * 5.0) * DAY) as f32)
             .collect();
         let mu = MU_SUN as f32;
-        let g = gpu.porkchop_c3(&dep, &arr, &dep_t, &arr_t, mu, true);
-        let c = porkchop_c3_cpu(&dep, &arr, &dep_t, &arr_t, mu, true);
-        assert_eq!(g.len(), c.len());
-        let (mut compared, mut worst) = (0u32, 0.0f64);
-        for (gi, ci) in g.iter().zip(&c) {
-            // Compare only cells both solvers resolved to a meaningful launch energy.
-            if *gi < 1e29 && *ci < 1e29 && *ci > 1.0e6 {
-                worst = nan_max(
-                    worst,
-                    (f64::from(*gi) - f64::from(*ci)).abs() / f64::from(*ci),
+        let sqmu = f64::from(mu).sqrt();
+        for (prograde, owed) in [(true, [1273, 562]), (false, [754, 1273])] {
+            let g = gpu.porkchop_c3(&dep, &arr, &dep_t, &arr_t, mu, prograde);
+            let c = porkchop_c3_cpu(&dep, &arr, &dep_t, &arr_t, mu, prograde);
+            assert_eq!(g.len(), c.len());
+            let mut branches = [Branch::default(), Branch::default()];
+            for (i, di) in dep.iter().enumerate() {
+                for (j, aj) in arr.iter().enumerate() {
+                    let k = i * arr.len() + j;
+                    let tof = f64::from(arr_t[j] - dep_t[i]);
+                    let solved = g[k] < 1e29;
+                    if tof <= 0.0 {
+                        assert!(c[k] >= 1e29 && !solved, "cell {k} has no time of flight");
+                        continue;
+                    }
+                    let reference = if !prograde && (i, j) == (STALLED.0, STALLED.1) {
+                        Some(STALLED.2)
+                    } else {
+                        (c[k] < 1e29).then_some(f64::from(c[k]))
+                    };
+                    let (r1, r2) = (vec3(di.r), vec3(aj.r));
+                    let (r1n, r2n, cross, dot) = (r1.norm(), r2.norm(), r1.cross(r2), r1.dot(r2));
+                    let short = (cross.z >= 0.0) == prograde;
+                    let magnitude = if dot < 0.0 {
+                        cross.norm() / (r1n * r2n - dot).sqrt()
+                    } else {
+                        (r1n * r2n + dot).sqrt()
+                    };
+                    let a = if short { magnitude } else { -magnitude };
+                    let in_bracket = (short || residual(-50.0, r1n, r2n, a, sqmu * tof) < 0.0)
+                        && residual(39.0, r1n, r2n, a, sqmu * tof) > 0.0;
+                    // The kernel decides the mask in `f32`, a few parts in 1e7 of `sin Δν` from here.
+                    let unmasked = cross.norm() / (r1n * r2n) >= 1.0e-2 * (1.0 + 1e-4);
+                    let owes = reference.is_some() && in_bracket && unmasked;
+                    let b = &mut branches[usize::from(!short)];
+                    b.cells += 1;
+                    b.reference += u32::from(reference.is_some());
+                    b.gpu += u32::from(solved);
+                    b.owed += u32::from(owes);
+                    b.gpu_only += u32::from(solved && reference.is_none());
+                    b.missed += u32::from(owes && !solved);
+                    if let (true, Some(want)) = (solved, reference) {
+                        b.worst = nan_max(b.worst, (f64::from(g[k]) - want).abs() / want);
+                    }
+                }
+            }
+            for ((name, b), owed) in ["short way", "long way"].iter().zip(&branches).zip(owed) {
+                let sense = if prograde { "prograde" } else { "retrograde" };
+                eprintln!("{sense}, {name}: {b:?}");
+                assert!(
+                    b.gpu_only == 0 && b.missed == 0 && b.owed == owed,
+                    "{sense}, {name}: a cell solved without a reference, or one owed and refused: {b:?}"
                 );
-                compared += 1;
+                assert!(
+                    b.worst < BOUND,
+                    "{sense}, {name}: worst relative C3 error {:.3e} is not under {BOUND:.0e}",
+                    b.worst
+                );
             }
         }
-        assert!(
-            compared > 200,
-            "too few converged cells to compare: {compared}"
-        );
-        // f32 Lambert vs the f64 oracle: C3 is a difference of ~30 km/s velocities, so allow a few %.
-        assert!(
-            worst < 0.05,
-            "GPU porkchop worst relative C3 error {worst:.3e} exceeds 5% ({compared} cells)"
-        );
     }
 
     /// The near-Earth satellites of the official verification set, as batch elements.

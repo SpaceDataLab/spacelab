@@ -713,24 +713,22 @@ template <class T, class Call> [[nodiscard]] inline result<std::vector<T>> sized
     return s == SL_OK ? result<draim_orbit>(out) : detail::failure<draim_orbit>(s);
 }
 
-[[nodiscard]] inline result<double> try_alpha_characteristic(std::span<const state> states,
-                                                             double mu = mu_earth,
-                                                             std::uint32_t fold = 1,
-                                                             std::uint32_t grid_points = 500,
-                                                             std::uint32_t time_samples = 60) {
-    double out = 0.0;
+[[nodiscard]] inline result<std::array<double, SL_ALPHA_ENCLOSURE>>
+try_alpha_characteristic(std::span<const state> states, double mu = mu_earth,
+                         std::uint32_t fold = 1, double tolerance_rad = 1e-8) {
+    using enclosure = std::array<double, SL_ALPHA_ENCLOSURE>;
+    enclosure out{};
     const ::sl_status s = ::sl_alpha_characteristic(states.data(), states.size(), mu, fold,
-                                                    grid_points, time_samples, &out);
-    return s == SL_OK ? result<double>(out) : detail::failure<double>(s);
+                                                    tolerance_rad, out.data());
+    return s == SL_OK ? result<enclosure>(out) : detail::failure<enclosure>(s);
 }
 
 [[nodiscard]] inline result<walker_params>
 try_minimum_walker(double max_footprint_rad, double inclination_rad, double semi_major_axis_m,
-                   double mu = mu_earth, std::uint32_t fold = 1, std::uint32_t max_total = 40,
-                   std::uint32_t grid_points = 200, std::uint32_t time_samples = 20) {
+                   double mu = mu_earth, std::uint32_t fold = 1, std::uint32_t max_total = 40) {
     walker_params out{};
     const ::sl_status s = ::sl_minimum_walker(max_footprint_rad, inclination_rad, semi_major_axis_m,
-                                              mu, fold, max_total, grid_points, time_samples, &out);
+                                              mu, fold, max_total, &out);
     return s == SL_OK ? result<walker_params>(out) : detail::failure<walker_params>(s);
 }
 
@@ -752,19 +750,18 @@ try_minimum_walker(double max_footprint_rad, double inclination_rad, double semi
     return detail::unwrap(try_draim_geometry(p));
 }
 
-[[nodiscard]] inline double alpha_characteristic(std::span<const state> states,
-                                                 double mu = mu_earth, std::uint32_t fold = 1,
-                                                 std::uint32_t grid_points = 500,
-                                                 std::uint32_t time_samples = 60) {
-    return detail::unwrap(try_alpha_characteristic(states, mu, fold, grid_points, time_samples));
+[[nodiscard]] inline std::array<double, SL_ALPHA_ENCLOSURE>
+alpha_characteristic(std::span<const state> states, double mu = mu_earth, std::uint32_t fold = 1,
+                     double tolerance_rad = 1e-8) {
+    return detail::unwrap(try_alpha_characteristic(states, mu, fold, tolerance_rad));
 }
 
-[[nodiscard]] inline walker_params
-minimum_walker(double max_footprint_rad, double inclination_rad, double semi_major_axis_m,
-               double mu = mu_earth, std::uint32_t fold = 1, std::uint32_t max_total = 40,
-               std::uint32_t grid_points = 200, std::uint32_t time_samples = 20) {
+[[nodiscard]] inline walker_params minimum_walker(double max_footprint_rad, double inclination_rad,
+                                                  double semi_major_axis_m, double mu = mu_earth,
+                                                  std::uint32_t fold = 1,
+                                                  std::uint32_t max_total = 40) {
     return detail::unwrap(try_minimum_walker(max_footprint_rad, inclination_rad, semi_major_axis_m,
-                                             mu, fold, max_total, grid_points, time_samples));
+                                             mu, fold, max_total));
 }
 
 #endif

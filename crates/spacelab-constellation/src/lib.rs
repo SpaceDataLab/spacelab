@@ -24,7 +24,9 @@
 //!   space-visibility geometry and the launch-cost objective.
 //!
 //! Plus the Mozhaev classification of symmetry groups ([`PointGroup`], [`MozhaevSymbol`]) and, behind
-//! the `std` feature, the α-characteristic coverage figure of merit ([`alpha_characteristic`]).
+//! the `std` feature, the α-characteristic coverage figure of merit as an enclosure
+//! ([`alpha_characteristic`], [`covering_radius`] at one instant) and the cheapest Walker Delta proven
+//! to reach a footprint ([`minimum_walker`]).
 
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 
@@ -40,7 +42,9 @@ pub mod symmetric;
 pub mod walker;
 
 #[cfg(any(feature = "std", test))]
-pub use analysis::{alpha_characteristic, minimum_walker};
+pub use analysis::{
+    AlphaEnclosure, AlphaError, alpha_characteristic, covering_radius, minimum_walker,
+};
 pub use draim::DraimTetrahedral;
 pub use flower::FlowerConstellation;
 pub use lattice::LatticeFlower;

@@ -571,13 +571,15 @@ void the_new_families_generate_what_they_promise() {
 
     /* The search answers with a design, so the design goes straight back into the generator, and
      * the constellation it builds is measured against the footprint that was asked for. */
-    const double footprint = 0.5;
-    const spacelab::walker_params best =
-        spacelab::minimum_walker(footprint, 60.0 * M_PI / 180.0, spacelab::re_earth + 1200e3,
-                                 spacelab::mu_earth, 1, 40, 120, 12);
+    const double footprint = 0.6;
+    const spacelab::walker_params best = spacelab::minimum_walker(
+        footprint, 60.0 * M_PI / 180.0, spacelab::re_earth + 1200e3, spacelab::mu_earth, 1, 40);
     const std::vector<spacelab::state> cheapest = spacelab::walker(best);
     CHECK(cheapest.size() == static_cast<std::size_t>(best.planes) * best.per_plane);
-    CHECK(spacelab::alpha_characteristic(cheapest, spacelab::mu_earth, 1, 120, 12) <= footprint);
+    const std::array<double, SL_ALPHA_ENCLOSURE> alpha =
+        spacelab::alpha_characteristic(cheapest, spacelab::mu_earth, 1, 1e-6);
+    CHECK(alpha[0] <= alpha[1]);
+    CHECK(alpha[1] <= footprint);
 }
 
 /*

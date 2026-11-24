@@ -35,8 +35,9 @@ use spacelab_astro::{
 use spacelab_astrometry::reduce::Aberration;
 use spacelab_autodiff::{DoubleDouble, Scalar};
 use spacelab_constellation::{
-    DraimTetrahedral, FlowerConstellation, LatticeFlower, StreetOfCoverage, Walker, WalkerPattern,
-    alpha_characteristic as constellation_alpha, minimum_walker as constellation_minimum_walker,
+    AlphaError, DraimTetrahedral, FlowerConstellation, LatticeFlower, StreetOfCoverage, Walker,
+    WalkerPattern, alpha_characteristic as constellation_alpha,
+    minimum_walker as constellation_minimum_walker,
 };
 use spacelab_control::attitude::{AttitudeError, ControlLaw, MrpLyapunov, QuaternionPd};
 use spacelab_control::closed_loop::{AttitudeLoop, AttitudeState};
@@ -213,7 +214,7 @@ use spacelab_vision::detect::{
 };
 
 /// The ABI revision. Must equal `SL_ABI_VERSION` in `spacelab.h`; a test checks that it does.
-const ABI_VERSION: u32 = 2;
+const ABI_VERSION: u32 = 3;
 
 /// The longest NUL-terminated string this library will scan for a terminator. Past it the input is
 /// rejected rather than read on: there is no way to learn a C string's buffer length, so a bound is
@@ -3202,47 +3203,59 @@ fn check_positions(who: &str, states: &[SlState]) -> Result<(), i32> {
     Ok(())
 }
 
-/// What the α-characteristic needs before it samples anything: satellites to sample, a gravitational
-/// parameter to turn them into orbits, and three counts that are loop bounds.
+/// What the α-characteristic needs before it runs: satellites, a gravitational parameter to turn
+/// them into orbits, a fold no larger than the satellite count, and a tolerance to stop at.
 fn check_alpha_inputs(
     who: &str,
     n: usize,
     mu: f64,
     fold: u32,
-    grid_points: u32,
-    time_samples: u32,
+    tolerance_rad: f64,
 ) -> Result<(), i32> {
     check_nonzero(who, "n", n)?;
     check_positive(who, "mu", mu, SL_ERR_INVALID_ARGUMENT)?;
     check_nonzero(who, "fold", fold)?;
-    check_nonzero(who, "grid_points", grid_points)?;
-    check_nonzero(who, "time_samples", time_samples)
+    check_positive(who, "tolerance_rad", tolerance_rad, SL_ERR_INVALID_ARGUMENT)
 }
 
-/// The α-characteristic of a delta system: the smallest footprint half-angle at which the given
-/// satellites continuously `fold`-fold cover the sphere, radians.
+/// The status and message an [`AlphaError`] becomes: a state that is not on a two-body ellipse is a
+/// number the model has nothing to say about; everything else is a malformed request.
+fn alpha_failure(who: &str, error: AlphaError) -> i32 {
+    let status = match error {
+        AlphaError::BadOrbit { .. } => SL_ERR_DOMAIN,
+        _ => SL_ERR_INVALID_ARGUMENT,
+    };
+    fail(status, format!("{who}: {error}"))
+}
+
+/// How many doubles `sl_alpha_characteristic` writes.
+pub const SL_ALPHA_ENCLOSURE: usize = 2;
+
+/// The α-characteristic of a delta system: an enclosure `[lower, upper]` of the smallest footprint
+/// half-angle at which the given satellites continuously `fold`-fold cover the sphere, radians, over
+/// one period of the first satellite. Exact in space, a Lipschitz branch and bound in time, stopped
+/// at `tolerance_rad` or its budget; under H-libm, not outward-rounded.
 ///
 /// # Safety
-/// `states` is readable for `n` `sl_state`; `out_rad` is writable for one `double`.
+/// `states` is readable for `n` `sl_state`; `out` is writable for `SL_ALPHA_ENCLOSURE` doubles.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sl_alpha_characteristic(
     states: *const SlState,
     n: usize,
     mu: f64,
     fold: u32,
-    grid_points: u32,
-    time_samples: u32,
-    out_rad: *mut f64,
+    tolerance_rad: f64,
+    out: *mut f64,
 ) -> i32 {
     guard(|| {
-        if states.is_null() || out_rad.is_null() {
+        if states.is_null() || out.is_null() {
             return fail(
                 SL_ERR_INVALID_ARGUMENT,
                 "sl_alpha_characteristic: null pointer",
             );
         }
         const WHO: &str = "sl_alpha_characteristic";
-        if let Err(status) = check_alpha_inputs(WHO, n, mu, fold, grid_points, time_samples) {
+        if let Err(status) = check_alpha_inputs(WHO, n, mu, fold, tolerance_rad) {
             return status;
         }
         // SAFETY: the caller states `states` is readable for `n`.
@@ -3255,14 +3268,24 @@ pub unsafe extern "C" fn sl_alpha_characteristic(
             let (r, v) = (to_vec3(s.position), to_vec3(s.velocity));
             elements.push(KeplerianElements::from_state(r, v, mu));
         }
-        let alpha = constellation_alpha(&elements, fold, grid_points, time_samples);
-        // SAFETY: checked non-null; written only now that the answer exists.
-        unsafe { *out_rad = alpha };
+        let alpha = match constellation_alpha(&elements, fold, tolerance_rad) {
+            Ok(alpha) => alpha,
+            Err(error) => return alpha_failure(WHO, error),
+        };
+        // SAFETY: checked non-null; the caller states it is writable for two doubles, written only
+        // now that the answer exists.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                [alpha.lower, alpha.upper].as_ptr(),
+                out,
+                SL_ALPHA_ENCLOSURE,
+            );
+        }
         SL_OK
     })
 }
 
-/// The search's inputs: a footprint to clear, the orbit to fly it from, and four counts that bound
+/// The search's inputs: a footprint to clear, the orbit to fly it from, and two counts that bound
 /// the search. The counts arrive as a named table because a refusal that says which one was zero is
 /// the difference between a fixed call and a bisected one.
 fn check_minimum_walker_inputs(
@@ -3270,7 +3293,7 @@ fn check_minimum_walker_inputs(
     max_footprint_rad: f64,
     semi_major_axis_m: f64,
     mu: f64,
-    counts: [(&str, u32); 4],
+    counts: [(&str, u32); 2],
 ) -> Result<(), i32> {
     check_positive(
         who,
@@ -3291,7 +3314,9 @@ fn check_minimum_walker_inputs(
     Ok(())
 }
 
-/// The fewest-satellite Walker Delta whose α-characteristic clears `max_footprint_rad`.
+/// The fewest-satellite Walker Delta whose α-characteristic is proven to clear `max_footprint_rad`:
+/// accepted on the upper end of its enclosure, decided on dot products against the footprint's
+/// cosine.
 ///
 /// Writes the design into `out`, whose `pattern`, `inclination_rad`, `semi_major_axis_m` and `mu`
 /// are the ones asked for and whose `planes`, `per_plane` and `phasing` are the answer — so the
@@ -3307,43 +3332,42 @@ pub unsafe extern "C" fn sl_minimum_walker(
     mu: f64,
     fold: u32,
     max_total: u32,
-    grid_points: u32,
-    time_samples: u32,
     out: *mut SlWalkerParams,
 ) -> i32 {
     guard(|| {
+        const WHO: &str = "sl_minimum_walker";
         if out.is_null() {
             return fail(SL_ERR_INVALID_ARGUMENT, "sl_minimum_walker: null out");
         }
         if let Err(status) = check_minimum_walker_inputs(
-            "sl_minimum_walker",
+            WHO,
             max_footprint_rad,
             semi_major_axis_m,
             mu,
-            [
-                ("fold", fold),
-                ("max_total", max_total),
-                ("grid_points", grid_points),
-                ("time_samples", time_samples),
-            ],
+            [("fold", fold), ("max_total", max_total)],
         ) {
             return status;
         }
-        let Some(w) = constellation_minimum_walker(
+        if let Err(status) = check_finite(WHO, "inclination_rad", inclination_rad) {
+            return status;
+        }
+        let found = match constellation_minimum_walker(
             max_footprint_rad,
             Angle::from_radians(inclination_rad),
             semi_major_axis_m,
             mu,
             fold,
             max_total,
-            grid_points,
-            time_samples,
-        ) else {
+        ) {
+            Ok(found) => found,
+            Err(error) => return alpha_failure(WHO, error),
+        };
+        let Some(w) = found else {
             return fail(
                 SL_ERR_DOMAIN,
                 format!(
-                    "no Walker Delta of at most {max_total} satellites reaches a footprint of \
-                     {max_footprint_rad} rad at this altitude"
+                    "no Walker Delta of at most {max_total} satellites is proven to reach a \
+                     footprint of {max_footprint_rad} rad at this altitude"
                 ),
             );
         };
@@ -13938,6 +13962,12 @@ mod tests {
             TLE_LINE_BYTES,
             "SL_TLE_LINE_BYTES"
         );
+        // `sl_alpha_characteristic` writes this many doubles into a caller's array of this size.
+        assert_eq!(
+            usize::try_from(define_i32("SL_ALPHA_ENCLOSURE")).expect("a positive length"),
+            SL_ALPHA_ENCLOSURE,
+            "SL_ALPHA_ENCLOSURE"
+        );
 
         assert_eq!(sl_abi_version(), ABI_VERSION);
     }
@@ -16558,10 +16588,11 @@ mod tests {
 
     /// `sl_minimum_walker` answers with a design, not with three numbers: the result is handed
     /// straight back to `sl_walker` and the constellation it builds is measured against the
-    /// footprint that was asked for.
+    /// footprint that was asked for. 0.5 rad, which a sampled α once granted within 40
+    /// satellites, is now refused: no design of at most 60 is proven to reach it.
     #[test]
     fn the_minimum_walker_is_a_design_that_covers_what_was_asked_of_it() {
-        let (a, inc, footprint) = (RE_EARTH + 1_200e3, 60.0_f64.to_radians(), 0.5);
+        let (a, inc, footprint) = (RE_EARTH + 1_200e3, 60.0_f64.to_radians(), 0.6);
         let mut design = SlWalkerParams {
             pattern: 0,
             inclination_rad: 0.0,
@@ -16572,9 +16603,8 @@ mod tests {
             mu: 0.0,
         };
         // SAFETY: the out-pointer is to a local of the right type.
-        let status = unsafe {
-            sl_minimum_walker(footprint, inc, a, MU_EARTH, 1, 40, 120, 12, &raw mut design)
-        };
+        let status =
+            unsafe { sl_minimum_walker(footprint, inc, a, MU_EARTH, 1, 40, &raw mut design) };
         assert_eq!(status, SL_OK, "{}", last_error());
         assert_eq!(design.pattern, WALKER_DELTA);
         assert_eq!(design.inclination_rad, inc);
@@ -16587,37 +16617,58 @@ mod tests {
             unsafe { sl_walker(&raw const design, out, cap, len) }
         })
         .expect("the answer is a Walker input");
-        let mut alpha = 0.0;
-        // SAFETY: `states` is a live Vec of its own length; `alpha` is a local.
+        let mut alpha = [0.0; SL_ALPHA_ENCLOSURE];
+        // SAFETY: `states` is a live Vec of its own length; `alpha` is a local of the stated size.
         let status = unsafe {
             sl_alpha_characteristic(
                 states.as_ptr(),
                 states.len(),
                 MU_EARTH,
                 1,
-                120,
-                12,
-                &raw mut alpha,
+                1e-6,
+                alpha.as_mut_ptr(),
             )
         };
         assert_eq!(status, SL_OK, "{}", last_error());
+        assert!(alpha[0] <= alpha[1], "{alpha:?} is not an enclosure");
+        // The upper end, the proven side, is what is held to the footprint.
         assert!(
-            alpha <= footprint,
-            "the design the search returned needs {alpha} rad, more than the {footprint} asked for"
+            alpha[1] <= footprint,
+            "the design the search returned may need {alpha:?} rad, more than the {footprint} asked \
+             for"
         );
+
+        // SAFETY: the out-pointer is to a local of the right type.
+        let status = unsafe { sl_minimum_walker(0.5, inc, a, MU_EARTH, 1, 40, &raw mut design) };
+        assert_eq!(status, SL_ERR_DOMAIN, "{}", last_error());
 
         // A footprint of zero is not a search that fails, it is a search that was never posed --
         // and the two are different status codes, which is what separates a fixed call from a
         // bisected one.
         // SAFETY: the out-pointer is to a local of the right type.
-        let status =
-            unsafe { sl_minimum_walker(0.0, inc, a, MU_EARTH, 1, 4, 60, 6, &raw mut design) };
+        let status = unsafe { sl_minimum_walker(0.0, inc, a, MU_EARTH, 1, 4, &raw mut design) };
         assert_eq!(status, SL_ERR_INVALID_ARGUMENT, "{}", last_error());
+        // So are a zero fold and a zero budget, each refused by name.
+        for (fold, max_total, name) in [(0, 4, "fold"), (1, 0, "max_total")] {
+            // SAFETY: the out-pointer is to a local of the right type.
+            let status = unsafe {
+                sl_minimum_walker(
+                    footprint,
+                    inc,
+                    a,
+                    MU_EARTH,
+                    fold,
+                    max_total,
+                    &raw mut design,
+                )
+            };
+            assert_eq!(status, SL_ERR_INVALID_ARGUMENT, "{}", last_error());
+            assert!(last_error().contains(name), "{}", last_error());
+        }
 
         // A footprint no constellation of four can reach is a named domain failure, not a design.
         // SAFETY: the out-pointer is to a local of the right type.
-        let status =
-            unsafe { sl_minimum_walker(0.05, inc, a, MU_EARTH, 1, 4, 60, 6, &raw mut design) };
+        let status = unsafe { sl_minimum_walker(0.05, inc, a, MU_EARTH, 1, 4, &raw mut design) };
         assert_eq!(status, SL_ERR_DOMAIN);
         assert!(
             last_error().contains("at most 4 satellites"),
@@ -16994,24 +17045,32 @@ mod tests {
 
         // The α-characteristic and the aggregate refuse an empty population rather than inventing
         // an answer for it.
-        let mut alpha = 0.0;
+        let mut alpha = [0.0; SL_ALPHA_ENCLOSURE];
+        let out = alpha.as_mut_ptr();
         // SAFETY: `cell` is a live local; a count of zero is what is being rejected.
         assert_eq!(
-            unsafe {
-                sl_alpha_characteristic(&raw const cell, 0, MU_EARTH, 1, 10, 10, &raw mut alpha)
-            },
+            unsafe { sl_alpha_characteristic(&raw const cell, 0, MU_EARTH, 1, 1e-6, out) },
             SL_ERR_INVALID_ARGUMENT
         );
         // SAFETY: as above, with a mu that cannot be a gravitational parameter.
         assert_eq!(
-            unsafe { sl_alpha_characteristic(&raw const cell, 1, 0.0, 1, 10, 10, &raw mut alpha) },
+            unsafe { sl_alpha_characteristic(&raw const cell, 1, 0.0, 1, 1e-6, out) },
             SL_ERR_INVALID_ARGUMENT
         );
         // SAFETY: as above, with a fold nobody can cover zero times.
         assert_eq!(
-            unsafe {
-                sl_alpha_characteristic(&raw const cell, 1, MU_EARTH, 0, 10, 10, &raw mut alpha)
-            },
+            unsafe { sl_alpha_characteristic(&raw const cell, 1, MU_EARTH, 0, 1e-6, out) },
+            SL_ERR_INVALID_ARGUMENT
+        );
+        // SAFETY: as above, with a fold above the one satellite given.
+        assert_eq!(
+            unsafe { sl_alpha_characteristic(&raw const cell, 1, MU_EARTH, 2, 1e-6, out) },
+            SL_ERR_INVALID_ARGUMENT
+        );
+        assert!(last_error().contains("fold 2 exceeds"), "{}", last_error());
+        // SAFETY: as above, with a tolerance the branch and bound cannot stop at.
+        assert_eq!(
+            unsafe { sl_alpha_characteristic(&raw const cell, 1, MU_EARTH, 1, 0.0, out) },
             SL_ERR_INVALID_ARGUMENT
         );
 
@@ -17028,21 +17087,15 @@ mod tests {
             }
             // SAFETY: `broken` is a live local; the non-finite component is what is being rejected.
             assert_eq!(
-                unsafe {
-                    sl_alpha_characteristic(
-                        &raw const broken,
-                        1,
-                        MU_EARTH,
-                        1,
-                        10,
-                        10,
-                        &raw mut alpha,
-                    )
-                },
+                unsafe { sl_alpha_characteristic(&raw const broken, 1, MU_EARTH, 1, 1e-6, out) },
                 SL_ERR_INVALID_ARGUMENT,
                 "a non-finite component {axis} of the position was accepted"
             );
         }
+        assert_eq!(
+            alpha, [0.0; SL_ALPHA_ENCLOSURE],
+            "a refusal wrote its out-pointer"
+        );
     }
     // ── GNSS, ionosphere and troposphere ──────────────────────────────────────────────────────
 

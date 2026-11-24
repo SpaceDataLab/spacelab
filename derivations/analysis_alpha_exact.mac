@@ -1,0 +1,122 @@
+/* The exact alpha-characteristic of `crates/spacelab-constellation/src/analysis.rs`.
+
+   alpha_k of a site set is the largest, over the sphere, of the k-th smallest angular distance to
+   the sites. Its maximum sits at a candidate: a pole of the plane through three sites, the antipode
+   of the midpoint of two non-antipodal sites, the antipode of a site, or a point of the great circle
+   half-way between an antipodal pair. In dot-product form alpha_k = acos(min over candidates of
+   c_k), c_k the k-th largest dot product with the sites, which is the comparison the code decides on.
+
+   This file runs that algorithm in exact arithmetic on the regular polyhedra (G3) and derives the
+   identities the code rests on: the two-site form, the end of an antipodal pair's ridge, the Walker
+   shift that is a rotation, the relative angular velocity of a Walker pattern, the true-anomaly
+   rate, and the angle bound of the move onto a representative. Every identity prints `<name>: 0`.
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/analysis_alpha_exact.mac </dev/null */
+
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+fpprec: 50$
+simp0(e) := radcan(ratsimp(e))$
+
+/* ---- The candidate set in exact arithmetic ---- */
+dotp(a, b) := simp0(a . b)$
+crossp(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+nrm(v) := simp0(v / sqrt(dotp(v, v)))$
+iszero(v) := is(simp0(dotp(v, v)) = 0)$
+/* two points of the great circle orthogonal to r: r x e, e a coordinate axis not along r */
+equator(r) := block([e: if simp0(r[1]^2) < 1/2 then [1, 0, 0] else [0, 1, 0], u1],
+  u1: nrm(crossp(r, e)), [u1, nrm(crossp(r, u1))])$
+candidates(S) := block([n: length(S), c: []],
+  for i: 1 thru n do (
+    c: cons(-S[i], c),
+    for j: i + 1 thru n do (
+      block([m: S[i] + S[j]],
+        if iszero(m) then c: append(equator(S[i]), c) else c: cons(nrm(-m), c)),
+      for l: j + 1 thru n do
+        block([p: crossp(S[j] - S[i], S[l] - S[i])],
+          if not iszero(p) then c: append([nrm(p), nrm(-p)], c)))),
+  c)$
+/* the k-th largest dot product of x with the sites, ordered by a 50-digit value */
+kth(x, S, k) := block([d: map(lambda([s], dotp(x, s)), S)],
+  d: sort(d, lambda([a, b], is(bfloat(a) > bfloat(b)))), d[k])$
+cmin(S, k) := block([v: map(lambda([x], kth(x, S, k)), candidates(S))],
+  first(sort(v, lambda([a, b], is(bfloat(a) < bfloat(b))))))$
+
+r3: sqrt(3)$
+tet: map(lambda([v], v / r3), [[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]])$
+oct: [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]$
+
+/* G3: alpha_k = acos(c_min). The dot-product form is decided exactly; the angle form follows from
+   acos(-x) = pi - acos(x), checked in the line after. */
+chk("tetrahedron_k1_is_acos_1_3", simp0(cmin(tet, 1) - 1/3))$
+chk("tetrahedron_k2_is_pi_minus_acos_1_3", simp0(cmin(tet, 2) + 1/3))$
+chk("tetrahedron_k3_is_pi_minus_acos_1_sqrt3", simp0(cmin(tet, 3) + 1/r3))$
+chk("tetrahedron_k4_is_pi", simp0(cmin(tet, 4) + 1))$
+chk("octahedron_k1_is_acos_1_sqrt3", simp0(cmin(oct, 1) - 1/r3))$
+chk("octahedron_k2_is_half_pi", simp0(cmin(oct, 2)))$
+chk("octahedron_k3_is_half_pi", simp0(cmin(oct, 3)))$
+chk("octahedron_k4_is_pi_minus_acos_1_sqrt3", simp0(cmin(oct, 4) + 1/r3))$
+chk("octahedron_k5_is_three_quarter_pi", simp0(cmin(oct, 5) + 1/sqrt(2)))$
+chk("octahedron_k6_is_pi", simp0(cmin(oct, 6) + 1))$
+chk("acos_reflection", block([d: bfloat(acos(-1/3) - (%pi - acos(1/3))) + bfloat(acos(-1/r3) - (%pi - acos(1/r3)))],
+  if abs(d) < 1b-45 then 0 else d))$
+
+/* ---- Two sites d apart, k = 1: the anti-midpoint x, at pi - d/2 from both ---- */
+block([a: [1, 0, 0], b: [cos(d), sin(d), 0], m, x],
+  m: a + b,
+  x: -m / sqrt(m . m),
+  chk("two_sites_equidistant", trigsimp(x . a - x . b)),
+  /* x.a = -|a + b|/2, the code's `two_site_dot` */
+  chk("two_sites_dot_is_minus_half_the_sum", trigsimp(x . a + sqrt(m . m)/2)),
+  /* |a + b|^2 = (2 cos(d/2))^2, and cos(d/2) >= 0 on [0, pi], so x.a = -cos(d/2) */
+  chk("two_sites_sum_is_twice_half_cosine", trigsimp(trigexpand(ev(m . m - 4*cos(d/2)^2, d = 2*h)))),
+  /* -cos(d/2) = cos(pi - d/2), with pi - d/2 in [pi/2, pi]: alpha = pi - d/2 */
+  chk("two_sites_alpha_is_pi_minus_half_d", trigsimp(trigexpand(cos(%pi - d/2) + cos(d/2)))),
+  /* antipodal (d = pi): alpha = pi/2, Walker 2/1/0 at every instant */
+  chk("antipodal_pair_is_half_pi", ev(%pi - d/2, d = %pi) - %pi/2))$
+
+/* ---- An antipodal pair p, -p: its ridge, the circle orthogonal to p, ends where a third site q
+   is at pi/2, which is the pole of the plane through p, -p and q ---- */
+block([p: [p1, p2, p3], q: [q1, q2, q3], pole],
+  pole: crossp(-p - p, q - p),
+  chk("ridge_end_is_a_pole", expand((pole + 2*crossp(p, q)) . (pole + 2*crossp(p, q)))),
+  chk("ridge_end_is_orthogonal_to_the_pair", expand(crossp(p, q) . p)),
+  chk("ridge_end_is_orthogonal_to_the_third_site", expand(crossp(p, q) . q)))$
+
+/* ---- Walker Delta T/P/F, T = P S: plane p sits at node 2 pi p/P, slot s at argument of latitude
+   u(p, s, t) = 2 pi s/S + 2 pi F p/T + n t, and the satellite at Rz(2 pi p/P) Rx(i) (cos u, sin u, 0).
+   Shifting time by 2 pi F/(T n) moves u(p, s) onto u(p + 1, s), and Rz(2 pi/P) Rz(2 pi p/P) is
+   Rz(2 pi (p + 1)/P): the shifted pattern turned by 2 pi/P is the pattern. Plane P is plane 0 with
+   its slots advanced by F. ---- */
+rz(a) := matrix([cos(a), -sin(a), 0], [sin(a), cos(a), 0], [0, 0, 1])$
+u(p, s, t) := 2*%pi*s/S + 2*%pi*F*p/(P*S) + n*t$
+msq(m) := block([v: list_matrix_entries(m)], v . v)$
+chk("walker_shift_moves_a_slot_to_the_next_plane", ratsimp(u(p, s, t + 2*%pi*F/(P*S*n)) - u(p + 1, s, t)))$
+/* turns about one axis add, for any two angles and so for 2 pi/P and 2 pi p/P */
+chk("node_turns_compose", trigsimp(trigexpand(msq(rz(a1) . rz(a2) - rz(a1 + a2)))))$
+chk("walker_last_plane_wraps_to_the_first", ratsimp(u(P, s, t) - u(0, s + F, t)))$
+chk("walker_full_turn_is_the_identity", msq(rz(2*%pi) - ident(3)))$
+
+/* ---- The relative angular velocity. A direction turning at omega about h moves, in a frame
+   turning at W, at |(omega h - W) x s| <= |omega h - W| for unit s (Lagrange's identity). For a
+   Walker pattern of P >= 2 planes the mean normal is cos(i) z, so the bound is n sin(i). ---- */
+block([a: [a1, a2, a3], s: [s1, s2, s3]],
+  chk("lagrange_identity", expand(crossp(a, s) . crossp(a, s) - ((a . a)*(s . s) - (a . s)^2))))$
+block([h: [sin(inc)*sin(om), -sin(inc)*cos(om), cos(inc)], w: [0, 0, cos(inc)]],
+  chk("walker_relative_rate_is_n_sin_i", trigsimp(expand((h - w) . (h - w) - sin(inc)^2))),
+  chk("walker_mean_normal_is_polar", block([r: sum(abs(bfloat(sum(sin(2*%pi*j/PP), j, 0, PP - 1)))
+      + abs(bfloat(sum(cos(2*%pi*j/PP), j, 0, PP - 1))), PP, 2, 12)],
+    if r < 1b-45 then 0 else r)))$
+
+/* ---- The true-anomaly rate nu' = h/r^2 = n (1 + e cos nu)^2/(1 - e^2)^(3/2), between its values
+   at apoapsis and periapsis. ---- */
+assume(a > 0, mu > 0, e > 0, e < 1)$
+block([n: sqrt(mu/a^3), p: a*(1 - e^2), r, rate],
+  r: p/(1 + e*cos(nu)),
+  rate: sqrt(mu*p)/r^2,
+  chk("true_anomaly_rate", radcan(rate - n*(1 + e*cos(nu))^2/(1 - e^2)^(3/2))))$
+
+/* ---- The move onto a representative: a chord c <= 1 subtends 2 asin(c/2) <= c (1 + c). The
+   difference vanishes at 0 and its derivative is non-negative: 1/sqrt(1 - c^2/4) <= 1 + 2c, i.e.
+   (1 + 2c)^2 (1 - c^2/4) - 1 = c (4 + 15 c/4 - c^2 - c^3), whose bracket is at least 7/4 on
+   [0, 1]. ---- */
+chk("snap_angle_bound_expansion", expand((1 + 2*c)^2*(1 - c^2/4) - 1 - c*(4 + 15*c/4 - c^2 - c^3)))$
+chk("snap_angle_bound_bracket_at_one", (4 + 15/4 - 1 - 1) - 23/4)$

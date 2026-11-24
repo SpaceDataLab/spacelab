@@ -54,7 +54,7 @@ extern "C" {
  * `sl_abi_version()` at start-up if you load the shared object dynamically; a static link cannot
  * skew, but a `dlopen` can, and a struct that grew a field is not detectable any other way.
  */
-#define SL_ABI_VERSION 2U
+#define SL_ABI_VERSION 3U
 
 uint32_t sl_abi_version(void);
 
@@ -762,26 +762,34 @@ typedef struct sl_draim_orbit {
 
 sl_status sl_draim_geometry(const sl_draim_params *p, sl_draim_orbit *out);
 
-/*
- * The alpha-characteristic of a delta system (Mozhaev): the smallest sub-satellite footprint
- * half-angle, in radians, at which those `n` satellites continuously `fold`-fold cover the sphere.
- * Evaluated on a `grid_points` x `time_samples` space-time grid, so both control the cost and the
- * sharpness of the answer; 500 and 60 are reasonable.
- */
-sl_status sl_alpha_characteristic(const sl_state *states, size_t n, double mu, uint32_t fold,
-                                  uint32_t grid_points, uint32_t time_samples, double *out_rad);
+/* How many doubles `sl_alpha_characteristic` writes. */
+#define SL_ALPHA_ENCLOSURE 2
 
 /*
- * The fewest-satellite Walker Delta whose alpha-characteristic clears `max_footprint_rad` — the
- * cheapest constellation that continuously `fold`-fold covers the sphere with that sensor, at that
- * orbit. `SL_ERR_DOMAIN` if no design of at most `max_total` satellites reaches it.
+ * The alpha-characteristic of a delta system (Mozhaev): the smallest sub-satellite footprint
+ * half-angle, in radians, at which those `n` satellites continuously `fold`-fold cover the sphere,
+ * over one period of the first satellite. Written as an enclosure, `out[0] <= alpha <= out[1]`:
+ * exact over the sphere, a Lipschitz branch and bound in time that stops when the enclosure is
+ * narrower than `tolerance_rad` or after 65 536 instants (wider, still an enclosure). Under H-libm,
+ * not outward-rounded. `SL_ERR_INVALID_ARGUMENT` for `fold` zero or above `n`; `SL_ERR_DOMAIN` for a
+ * state that is not on a two-body ellipse. Nothing is written on failure.
+ */
+sl_status sl_alpha_characteristic(const sl_state *states, size_t n, double mu, uint32_t fold,
+                                  double tolerance_rad, double *out);
+
+/*
+ * The fewest-satellite Walker Delta whose alpha-characteristic is proven not to exceed
+ * `max_footprint_rad` -- the cheapest constellation that continuously `fold`-fold covers the sphere
+ * with that sensor, at that orbit. A design is accepted on the upper end of its enclosure, decided on
+ * dot products against the footprint's cosine; one the decision cannot settle within its budget is
+ * not accepted. `SL_ERR_DOMAIN` if no design of at most `max_total` satellites is accepted.
  *
  * The answer is written as a complete `sl_walker_params`, so it can be handed straight to
  * `sl_walker` rather than reassembled from three numbers.
  */
 sl_status sl_minimum_walker(double max_footprint_rad, double inclination_rad,
                             double semi_major_axis_m, double mu, uint32_t fold, uint32_t max_total,
-                            uint32_t grid_points, uint32_t time_samples, sl_walker_params *out);
+                            sl_walker_params *out);
 
 /* ---- Coverage ---- */
 

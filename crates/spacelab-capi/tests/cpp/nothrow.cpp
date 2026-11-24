@@ -357,7 +357,7 @@ void the_new_families_still_generate_what_they_promise() {
 
     /* A footprint four satellites cannot reach is a status, and the caller branches on it. */
     const spacelab::result<spacelab::walker_params> impossible = spacelab::try_minimum_walker(
-        0.05, 60.0 * M_PI / 180.0, spacelab::re_earth + 1200e3, spacelab::mu_earth, 1, 4, 60, 6);
+        0.05, 60.0 * M_PI / 180.0, spacelab::re_earth + 1200e3, spacelab::mu_earth, 1, 4);
     CHECK(!impossible);
     CHECK(impossible.error() == SL_ERR_DOMAIN);
 }

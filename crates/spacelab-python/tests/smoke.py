@@ -542,12 +542,19 @@ def test_constellation_generators():
     _a_d, rp, ra = sl.draim_geometry()
     assert rp > re and ra > rp
 
-    # alpha-characteristic of the SoC constellation is within its own footprint theta.
-    a1 = sl.alpha_characteristic(soc, mu, 1, 400, 40)
-    assert 0.0 < a1 <= theta + 1e-3
+    # alpha-characteristic of the SoC constellation is within its own footprint theta: an enclosure
+    # (lower, upper), and its upper end, the proven side, is what is held to theta.
+    lo, hi = sl.alpha_characteristic(soc, mu, 1, 1e-6)
+    assert 0.0 < lo <= hi <= theta
+    try:
+        sl.alpha_characteristic(soc, mu, len(soc) + 1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a fold above the satellite count should raise ValueError")
 
     # minimum-satellite Walker for a generous footprint over a bounded search.
-    mw = sl.minimum_walker(1.2, math.radians(70), re + 20_000e3, mu, 1, 12, 250, 30)
+    mw = sl.minimum_walker(1.2, math.radians(70), re + 20_000e3, mu, 1, 12)
     assert mw is not None and mw[3] <= 12  # (planes, per_plane, phasing, total)
 
     try:

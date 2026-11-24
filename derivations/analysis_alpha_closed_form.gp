@@ -1,6 +1,7 @@
-\\ Second engine for analysis_alpha_closed_form.mac: the sampled alpha-characteristic evaluated from
-\\ its definition on vectors (positions, a Fibonacci grid, sort, worst case) at 60 digits, against
-\\ the closed forms. Prints `<name>: 0` when they agree to 1e-50.
+\\ Second engine for analysis_alpha_closed_form.mac: the sampled alpha-characteristic, the test-only
+\\ comparator of analysis.rs, evaluated from its definition on vectors (positions, a Fibonacci grid,
+\\ sort, worst case) at 60 digits, against the closed forms. Prints `<name>: 0` when they agree to
+\\ 1e-50.
 \\ Run: timeout 120 gp -q -f derivations/analysis_alpha_closed_form.gp </dev/null
 default(realprecision, 60);
 fib(k, n) = my(z = 1 - (2*k + 1)/n, r = sqrt(1 - z^2), f = Pi*(3 - sqrt(5))*k); [r*cos(f), r*sin(f), z];

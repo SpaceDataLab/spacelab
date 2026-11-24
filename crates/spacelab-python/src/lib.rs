@@ -2792,33 +2792,39 @@ fn draim_constellation(
 
 /// The α-characteristic (radians) of a delta-system given its satellites' inertial states `(r, v)` at
 /// epoch and `mu`: the smallest sub-satellite footprint at which the constellation continuously
-/// `fold`-fold covers the sphere. Evaluated on a `grid_points` × `time_samples` space-time grid.
+/// `fold`-fold covers the sphere, over one period of the first satellite. Returns an enclosure
+/// `(lower, upper)`: exact over the sphere, a Lipschitz branch and bound in time that stops at
+/// `tolerance` or after 65 536 instants. Under H-libm, not outward-rounded. `ValueError` for a fold
+/// of zero or above the satellite count, a state off a two-body ellipse, or a bad tolerance.
 #[pyfunction]
-#[pyo3(signature = (states, mu, fold = 1, grid_points = 500, time_samples = 60))]
+#[pyo3(signature = (states, mu, fold = 1, tolerance = 1e-8))]
 fn alpha_characteristic(
     states: Vec<([f64; 3], [f64; 3])>,
     mu: f64,
     fold: u32,
-    grid_points: u32,
-    time_samples: u32,
-) -> f64 {
+    tolerance: f64,
+) -> PyResult<(f64, f64)> {
     let sats: Vec<KeplerianElements> = states
         .iter()
         .map(|(r, v)| KeplerianElements::from_state(vec3(*r), vec3(*v), mu))
         .collect();
-    spacelab_constellation::alpha_characteristic(&sats, fold, grid_points, time_samples)
+    spacelab_constellation::alpha_characteristic(&sats, fold, tolerance)
+        .map(|alpha| (alpha.lower, alpha.upper))
+        .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
-/// The fewest-satellite Walker Delta system whose α-characteristic is within `max_footprint`
-/// (radians) — the cheapest constellation that continuously `fold`-fold covers the sphere with that
-/// sensor footprint, at the common orbit. Returns `(planes, per_plane, phasing, total)`, or `None`.
+/// The fewest-satellite Walker Delta system whose α-characteristic is proven not to exceed
+/// `max_footprint` (radians) — the cheapest constellation that continuously `fold`-fold covers the
+/// sphere with that sensor footprint, at the common orbit. A design is accepted on the upper end of
+/// its enclosure; one the decision cannot settle within its budget is not accepted. Returns
+/// `(planes, per_plane, phasing, total)`, or `None`. `ValueError` for a fold of zero, a NaN
+/// footprint, or an orbit that is not finite and positive.
 // Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
     max_footprint, inclination, semi_major_axis, mu = 3.986_004_418e14,
-    fold = 1, max_total = 24, grid_points = 400, time_samples = 40,
+    fold = 1, max_total = 24,
 ))]
-#[allow(clippy::too_many_arguments)]
 fn minimum_walker(
     max_footprint: f64,
     inclination: f64,
@@ -2826,9 +2832,7 @@ fn minimum_walker(
     mu: f64,
     fold: u32,
     max_total: u32,
-    grid_points: u32,
-    time_samples: u32,
-) -> Option<(u32, u32, u32, u32)> {
+) -> PyResult<Option<(u32, u32, u32, u32)>> {
     spacelab_constellation::minimum_walker(
         max_footprint,
         Angle::from_radians(inclination),
@@ -2836,10 +2840,9 @@ fn minimum_walker(
         mu,
         fold,
         max_total,
-        grid_points,
-        time_samples,
     )
-    .map(|w| (w.planes, w.per_plane, w.phasing, w.total()))
+    .map(|found| found.map(|w| (w.planes, w.per_plane, w.phasing, w.total())))
+    .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 /// The Draim orbit geometry for the given `period` (s), eccentricity and inclination: returns
@@ -10725,9 +10728,9 @@ mod interpreter_tests {
     #[test]
     fn the_minimum_walker_is_a_walker_that_meets_the_footprint_it_was_given() {
         let (footprint, inc, a, mu) = (1.2, 1.1, 7_200e3, 3.986_004_418e14);
-        let (planes, per_plane, phasing, total) =
-            minimum_walker(footprint, inc, a, mu, 1, 12, 200, 20)
-                .expect("a 1.2 rad footprint is coverable with at most 12 satellites");
+        let (planes, per_plane, phasing, total) = minimum_walker(footprint, inc, a, mu, 1, 12)
+            .expect("the inputs are valid")
+            .expect("a 1.2 rad footprint is coverable with at most 12 satellites");
         assert_eq!(total, planes * per_plane, "the total is not the product");
         assert!(
             (4..=12).contains(&total),
@@ -10738,22 +10741,35 @@ mod interpreter_tests {
         let states = walker_constellation("delta", inc, planes, per_plane, phasing, a, mu)
             .expect("delta is a pattern");
         assert_eq!(states.len(), total as usize);
-        let alpha = alpha_characteristic(states, mu, 1, 200, 20);
+        let (lower, upper) = alpha_characteristic(states, mu, 1, 1e-8).expect("valid states");
+        assert!(lower <= upper, "[{lower}, {upper}] is not an enclosure");
         assert!(
-            alpha <= footprint,
-            "the winner needs {alpha} rad, more than the {footprint} rad asked for"
+            upper <= footprint,
+            "the winner may need {upper} rad, more than the {footprint} rad asked for"
         );
 
         // Nothing covers the sphere with a pinhole footprint from twelve satellites.
-        assert!(minimum_walker(0.05, inc, a, mu, 1, 12, 200, 20).is_none());
+        assert!(
+            minimum_walker(0.05, inc, a, mu, 1, 12)
+                .expect("the inputs are valid")
+                .is_none()
+        );
+        // A fold of zero, and a fold above the satellites given, are refused, not answered.
+        assert!(minimum_walker(footprint, inc, a, mu, 0, 12).is_err());
+        let one = walker_constellation("delta", inc, 1, 1, 0, a, mu).expect("delta is a pattern");
+        assert!(alpha_characteristic(one, mu, 2, 1e-8).is_err());
 
         // More satellites see more sky, so the α-characteristic has to fall as the constellation
         // grows -- a monotonicity no constant return value can reproduce.
         let small = walker_constellation("delta", inc, 2, 2, 1, a, mu).expect("delta is a pattern");
         let large = walker_constellation("delta", inc, 6, 6, 3, a, mu).expect("delta is a pattern");
         let (alpha_small, alpha_large) = (
-            alpha_characteristic(small, mu, 1, 200, 20),
-            alpha_characteristic(large, mu, 1, 200, 20),
+            alpha_characteristic(small, mu, 1, 1e-8)
+                .expect("valid states")
+                .0,
+            alpha_characteristic(large, mu, 1, 1e-8)
+                .expect("valid states")
+                .1,
         );
         assert!(
             alpha_large < alpha_small,

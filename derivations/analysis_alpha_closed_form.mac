@@ -1,6 +1,8 @@
-/* Closed forms of the sampled alpha-characteristic (`crates/spacelab-constellation/src/analysis.rs`)
-   for configurations small enough to evaluate by hand. alpha_L is the worst, over the sampled
-   directions and instants, of the L-th smallest angular distance to a satellite.
+/* Closed forms of the sampled alpha-characteristic for configurations small enough to evaluate by
+   hand. The sampler is a test-only comparator, `sampled_alpha` in the tests of
+   `crates/spacelab-constellation/src/analysis.rs`; the library computes the exact value
+   (analysis_alpha_exact.mac). alpha_L is the worst, over the sampled directions and instants, of the
+   L-th smallest angular distance to a satellite.
    Every identity prints `<name>: 0`.
    Run: timeout 120 maxima --very-quiet -Q -b derivations/analysis_alpha_closed_form.mac </dev/null */
 

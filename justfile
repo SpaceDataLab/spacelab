@@ -51,6 +51,15 @@ gates:
     printf '%s\n' "${rows[@]}"
     exit "$red"
 
+# Rule 16 (plans/18 Ф10.P): each checker of `gates`, and the public cut, fails on a planted violation.
+checker-tests:
+    uv run --no-project python -I tools/test_check_provenance.py
+    uv run --no-project python -I tools/test_check_comparators.py
+    uv run --no-project python -I tools/test_check_derivations.py
+    uv run --no-project python -I tools/test_check_constants.py
+    uv run --no-project python -I tools/test_mutants_ledger.py
+    uv run --no-project python -I tools/test_check_sdtm_freeze.py
+
 # D-30: SDTM-1's frozen code and, with the corpus on disk, its frozen data. A deliberate change writes
 # a new baseline with `tools/check-sdtm-freeze.py --write` and a row in `docs/sdtm-selection-ledger.md`.
 freeze:

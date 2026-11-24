@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -101,6 +102,28 @@ def test_absent_data_passes_unless_it_is_required() -> None:
 def test_a_missing_coefficient_file_fails() -> None:
     found = problems_after(lambda root: (root / COEFFICIENTS).unlink())
     assert len(found) == 1 and "gone" in found[0], found
+
+
+def test_the_command_exits_1_on_a_changed_coefficient() -> None:
+    """Rule 16 of `plans/18`: the exit code `just gates` reads, green and then red."""
+
+    def gate(root: Path) -> subprocess.CompletedProcess[str]:
+        script = Path(__file__).with_name("check-sdtm-freeze.py")
+        return subprocess.run(
+            [sys.executable, "-I", str(script), "--root", str(root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        build(root)
+        clean = gate(root)
+        edit(root, COEFFICIENTS, "1.5", "1.50001")
+        planted = gate(root)
+    assert clean.returncode == 0, clean.stdout
+    assert planted.returncode == 1 and "changed" in planted.stdout, planted.stdout
 
 
 if __name__ == "__main__":

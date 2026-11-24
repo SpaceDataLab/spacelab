@@ -2,13 +2,20 @@
 """The constants sweep's literal, item, test-region and citation rules, on hand-made inputs.
 
 uv run --no-project python -I tools/test_check_constants.py
+
+The last tests plant one violation each in a throwaway repository and run a copy of the checker in
+it: rule 16 of `plans/18`, the exit code `just gates` reads, shown red.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import pathlib
+import shutil
+import subprocess
 import sys
+import tempfile
+from collections.abc import Callable
 
 HERE = pathlib.Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location(
@@ -134,6 +141,98 @@ def test_a_named_path_may_give_its_extensions_in_braces() -> None:
     assert tool.exists("derivations/gauss_legendre_tables")
     assert tool.exists("tools/check-constants.py")
     assert not tool.exists("derivations/no_such_derivation")
+
+
+SOURCE = "crates/x/src/lib.rs"
+TREE = {
+    "derivations/table_seals.py": "TABLES = []\n",
+    "docs/verification.md": "\n".join(
+        [
+            "### 12.2 · Long literals without a named source",
+            "",
+            "```text",
+            f"{SOURCE}::RATIO | 1",
+            "```",
+            "",
+        ]
+    ),
+    SOURCE: "\n".join(
+        [
+            "//! A scratch crate.",
+            "",
+            "/// The equatorial radius of WGS 84.",
+            "pub const RADIUS: f64 = 6_378_137.0;",
+            "",
+            "pub const RATIO: f64 = 1.234_567_89;",
+            "",
+        ]
+    ),
+}
+
+
+def gate(plant: Callable[[pathlib.Path], None]) -> tuple[int, str]:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        for name, text in TREE.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text, encoding="utf-8")
+        (root / "tools").mkdir()
+        shutil.copy(HERE / "check-constants.py", root / "tools")
+        plant(root)
+        # The sweep reads the library sources through `git ls-files`.
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+        done = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                str(root / "tools" / "check-constants.py"),
+                "--check",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return done.returncode, done.stdout + done.stderr
+
+
+def edit(root: pathlib.Path, old: str, new: str) -> None:
+    text = (root / SOURCE).read_text(encoding="utf-8")
+    assert old in text, old
+    (root / SOURCE).write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def test_the_gate_passes_the_untouched_tree() -> None:
+    code, out = gate(lambda _root: None)
+    assert code == 0, out
+
+
+def test_the_gate_fails_on_a_new_literal_without_a_source() -> None:
+    code, out = gate(
+        lambda root: edit(
+            root,
+            "pub const RATIO",
+            "pub const GAIN: f64 = 9.876_543_21;\npub const RATIO",
+        )
+    )
+    want = f"{SOURCE}::GAIN: 1 literals without a source, the ledger allows 0"
+    assert code == 1 and want in out, out
+
+
+def test_the_gate_fails_when_a_literal_loses_its_citation() -> None:
+    code, out = gate(lambda root: edit(root, "of WGS 84.", "of the Earth."))
+    want = f"{SOURCE}::RADIUS: 1 literals without a source, the ledger allows 0"
+    assert code == 1 and want in out, out
+
+
+def test_the_gate_fails_when_the_ledger_is_higher_than_the_sweep() -> None:
+    code, out = gate(
+        lambda root: edit(
+            root, "pub const RATIO", "// IERS Conventions (2010).\npub const RATIO"
+        )
+    )
+    want = f"{SOURCE}::RATIO: the ledger lists 1, the sweep finds 0 -- lower the entry"
+    assert code == 1 and want in out, out
 
 
 if __name__ == "__main__":

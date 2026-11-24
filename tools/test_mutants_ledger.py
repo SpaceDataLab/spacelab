@@ -2,6 +2,9 @@
 """The ledger's `--rewrite` and `--since` decisions, on throwaway git repositories.
 
 uv run --no-project python -I tools/test_mutants_ledger.py
+
+The last test runs a copy of the tool under a real `cargo mutants`: rule 16 of `plans/18`, the exit
+code `just gates` reads, shown red on a planted drift.
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -182,6 +186,39 @@ def test_a_shift_moves_the_anchors_it_slid_onto_their_neighbours(
     assert now == [
         rf"w\.rs:{line}:15: replace \* with \+ in f" for line in (4, 5, 6)
     ], now
+
+
+@in_repo
+def test_the_command_exits_1_on_an_anchor_slid_onto_its_twin(
+    root: pathlib.Path,
+) -> None:
+    # After the shift the entry still claims exactly one mutant, so the count passes and only
+    # `--since` sees that the proof now excuses other code.
+    (root / "Cargo.toml").write_text(
+        '[package]\nname = "w"\nversion = "0.0.0"\nedition = "2024"\n\n[workspace]\n'
+    )
+    (root / "src" / "lib.rs").write_text("mod w;\n")
+    (root / "tools").mkdir()
+    shutil.copy(HERE / "mutants-ledger.py", root / "tools")
+    entry = r"w\.rs:4:21: replace - with \+ in north"
+    commit(root, [entry], CROSS)
+
+    def gate(*args: str) -> tuple[int, str]:
+        done = subprocess.run(
+            [sys.executable, "-I", str(root / "tools" / "mutants-ledger.py"), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return done.returncode, done.stdout + done.stderr
+
+    code, out = gate("--since", "HEAD")
+    assert code == 0, out
+    write(root, [entry], ["// one more line", *CROSS])
+    code, out = gate()
+    assert code == 0, out
+    code, out = gate("--since", "HEAD")
+    assert code == 1 and f"moved onto other code since HEAD: {entry}" in out, out
 
 
 if __name__ == "__main__":

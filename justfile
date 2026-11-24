@@ -9,6 +9,48 @@ default:
 # fmt, clippy and the test suite, cheapest first.
 check: fmt lint test test-optional-features capi
 
+# The per-task static checks (plans/18 §1.6, rule 15): run before every commit of a task, and a red row
+# is not committed. Every check runs even after one is red, so one table shows them all; the recipe
+# exits 1 if any row is red. A check joins in the ticket that writes it: one line in `checks`.
+gates:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    checks=(
+        "fmt             cargo fmt --all -- --check"
+        "provenance      uv run --no-project python -I tools/check-provenance.py --check"
+        "comparators     uv run --no-project python -I tools/check-comparators.py --check"
+        "derivations     uv run --no-project python -I tools/check-derivations.py --check"
+        "constants       uv run --no-project python -I tools/check-constants.py --check"
+        "mutants-ledger  uv run --no-project python -I tools/mutants-ledger.py --since HEAD"
+        "sdtm-freeze     uv run --no-project python -I tools/check-sdtm-freeze.py"
+    )
+    logs=$(mktemp -d)
+    trap 'rm -rf "$logs"' EXIT
+    rows=()
+    red=0
+    for entry in "${checks[@]}"; do
+        read -r name cmd <<<"$entry"
+        start=${EPOCHREALTIME/[.,]/}
+        # Bounded, so a hung check ends red instead of holding the commit.
+        timeout 1800 bash -c "$cmd" >"$logs/$name" 2>&1
+        code=$?
+        us=$(( ${EPOCHREALTIME/[.,]/} - start ))
+        if [ "$code" -eq 0 ]; then
+            status=green
+        else
+            status="red ($code)"
+            [ "$code" -eq 124 ] && status="red (timeout)"
+            red=1
+            echo "── $name: $cmd"
+            cat "$logs/$name"
+            echo
+        fi
+        rows+=("$(printf '%-16s %-14s %6d.%ds' "$name" "$status" $(( us / 1000000 )) $(( us / 100000 % 10 )))")
+    done
+    printf '%-16s %-14s %9s\n' check status time
+    printf '%s\n' "${rows[@]}"
+    exit "$red"
+
 # D-30: SDTM-1's frozen code and, with the corpus on disk, its frozen data. A deliberate change writes
 # a new baseline with `tools/check-sdtm-freeze.py --write` and a row in `docs/sdtm-selection-ledger.md`.
 freeze:

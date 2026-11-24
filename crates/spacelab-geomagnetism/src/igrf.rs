@@ -37,7 +37,7 @@
     clippy::cast_precision_loss
 )]
 
-use libm::{acos, atan2, cos, sin, sqrt};
+use libm::{atan2, cos, hypot, sin, sqrt};
 
 use crate::igrf14_coeffs::{G_2025, G_SV, H_2025, H_SV};
 
@@ -47,6 +47,13 @@ const REFERENCE_RADIUS_KM: f64 = 6371.2;
 const REFERENCE_EPOCH: f64 = 2025.0;
 /// Maximum spherical-harmonic degree/order of IGRF-14.
 const MAX_DEGREE: usize = 13;
+/// `|sin θ|` at and below which `B_φ` takes its on-axis limit instead of dividing by `sin θ`.
+///
+/// The limit drops the m ≥ 2 terms, which are O(θ): about 6e3 nT per radian of colatitude, so a
+/// threshold of 1e-12 put 6e-9 nT of truncation where the round-off is 1e-11 nT. Above this value
+/// `Pⁿ₁` and `Pⁿ₂`, of order sin θ and sin² θ, are normal doubles and the quotient keeps its
+/// relative accuracy; below it the dropped terms are under 1e-150 nT.
+const AXIS_SIN: f64 = 1.491_668_146_240_041_3e-154;
 
 /// Schmidt semi-normalised associated Legendre functions `Pⁿₘ(cos θ)` and their `θ`-derivatives, for
 /// geocentric colatitude `colatitude` (rad). Returned as `[n][m]` tables (`n, m ≤ 13`); the recursion
@@ -93,11 +100,15 @@ fn schmidt_legendre(colatitude: f64) -> ([[f64; 14]; 14], [[f64; 14]; 14]) {
 
 /// The geocentric field components `[B_r, B_θ, B_φ]` in **nanotesla** at geocentric colatitude
 /// `colatitude` (rad), east `longitude` (rad), geocentric `radius_km` (km) and decimal `year`.
+///
+/// On the polar axis (`|sin θ| ≤ 1.5e-154`, the square root of the smallest normal double) `B_φ`
+/// takes the limit of `(m/sin θ)·Pⁿₘ`:
+/// `cos θ·dPⁿ₁/dθ` for m = 1 and 0 for m ≥ 2 (`derivations/igrf_synthesis.mac` §6).
 #[must_use]
 pub fn field_geocentric(colatitude: f64, longitude: f64, radius_km: f64, year: f64) -> [f64; 3] {
     let dt = year - REFERENCE_EPOCH;
     let (p, dp) = schmidt_legendre(colatitude);
-    let sinth = sin(colatitude);
+    let (sinth, costh) = (sin(colatitude), cos(colatitude));
     let ratio = REFERENCE_RADIUS_KM / radius_km;
 
     let (mut b_r, mut b_theta, mut b_phi) = (0.0, 0.0, 0.0);
@@ -112,8 +123,12 @@ pub fn field_geocentric(colatitude: f64, longitude: f64, radius_km: f64, year: f
 
             b_r += ratio_pow * (n as f64 + 1.0) * p[n][m] * gh_cos;
             b_theta -= ratio_pow * dp[n][m] * gh_cos;
-            if sinth.abs() > 1e-12 {
+            if sinth.abs() > AXIS_SIN {
                 b_phi += ratio_pow * (m as f64 / sinth) * p[n][m] * (g * sin_mphi - h * cos_mphi);
+            } else if m == 1 {
+                // On the axis `Pⁿ₁/sin θ` is 0/0, and its limit is `cos θ·dPⁿ₁/dθ` (l'Hôpital, with
+                // cos θ = ±1 there); for m ≥ 2 the quotient carries sin^(m−1) θ and vanishes.
+                b_phi += ratio_pow * costh * dp[n][1] * (g * sin_mphi - h * cos_mphi);
             }
         }
         ratio_pow *= ratio;
@@ -130,7 +145,8 @@ pub fn field_ecef(position: [f64; 3], year: f64) -> [f64; 3] {
     if r == 0.0 {
         return [0.0; 3];
     }
-    let colatitude = acos(position[2] / r);
+    // Not `acos(z/r)`: it returns exactly 0 within 1.5e-8 rad of the axis, where `z/r` rounds to 1.
+    let colatitude = atan2(hypot(position[0], position[1]), position[2]);
     let longitude = atan2(position[1], position[0]);
     let [b_r, b_theta, b_phi] = field_geocentric(colatitude, longitude, r / 1000.0, year);
 
@@ -215,34 +231,132 @@ mod tests {
         }
     }
 
-    /// On the polar axis the east component is not computed at all, and `B_r` collapses to a sum
-    /// over the zonal coefficients that the test can do by hand.
+    /// (G3) On the polar axis every component is a closed-form sum over the sealed table.
     ///
-    /// At `θ = 0` every `Pⁿₘ` with `m ≥ 1` vanishes and `Pⁿ₀(1) = 1`, so at the reference radius
-    /// `B_r = Σ (n+1)·gⁿ₀(t)` — a check on the secular-variation arithmetic that needs no external
-    /// model, only the sealed table. The `sin θ` guard is exercised on the one input that can
-    /// distinguish `>` from `>=`: `sin(1e-12)` rounds to exactly `1e-12` (the cubic correction is
-    /// 25 orders of magnitude below the ulp), so a `>=` there admits the division and writes a
-    /// non-zero `B_φ` where the contract says the term is dropped.
+    /// At `θ = 0` and `θ = π` only two orders survive. `Pⁿ₀(±1) = (±1)ⁿ`, so at the reference
+    /// radius `B_r = Σ (n+1)(±1)ⁿ gⁿ₀(t)`. Every `dPⁿₘ/dθ` but `m = 1` vanishes, and `dPⁿ₁/dθ` is
+    /// `√(n(n+1)/2)` north, `(−1)ⁿ√(n(n+1)/2)` south. `B_φ`'s `Pⁿ₁/sin θ` is `0/0` there; its limit
+    /// is `cos θ·dPⁿ₁/dθ = cⁿ⁺¹√(n(n+1)/2)` with `c = cos θ = ±1`
+    /// (`derivations/igrf_synthesis.mac` §6). So
+    ///
+    /// ```text
+    /// B_θ = −Σ c·L_n (gⁿ₁ cos φ + hⁿ₁ sin φ),   B_φ = Σ L_n (gⁿ₁ sin φ − hⁿ₁ cos φ),   L_n = cⁿ⁺¹√(n(n+1)/2).
+    /// ```
+    ///
+    /// The test sums these by hand, with no recursion and no division. The east component used to
+    /// be dropped on the axis: 103.8 nT short north and 7 224 nT south at 6771 km. Both 2025 and
+    /// 2030 are checked, so the secular-variation arithmetic is in the sums too. Measured: 8.8e-16
+    /// relative at worst.
     #[test]
-    fn the_polar_axis_drops_the_east_component_and_leaves_a_zonal_sum() {
+    fn on_the_polar_axis_every_component_is_its_closed_form_limit() {
+        let longitude = 0.7_f64;
         for year in [2025.0, 2030.0] {
             let dt = year - REFERENCE_EPOCH;
-            let want_b_r: f64 = (1..=MAX_DEGREE)
-                .map(|n| (n as f64 + 1.0) * (G_2025[n][0] + dt * G_SV[n][0]))
-                .sum();
-            let b = field_geocentric(0.0, 0.7, REFERENCE_RADIUS_KM, year);
-            assert!(
-                (b[0] - want_b_r).abs() < 1e-9 * want_b_r.abs(),
-                "{year}: B_r {} vs the zonal sum {want_b_r}",
-                b[0],
-            );
-            assert_eq!(b[2].to_bits(), 0.0_f64.to_bits(), "{year}: B_φ is not +0");
+            for (colatitude, c) in [(0.0, 1.0_f64), (core::f64::consts::PI, -1.0)] {
+                let (mut b_r, mut b_theta, mut b_phi) = (0.0, 0.0, 0.0);
+                for n in 1..=MAX_DEGREE {
+                    let sign = if n % 2 == 0 { 1.0 } else { c };
+                    let g0 = G_2025[n][0] + dt * G_SV[n][0];
+                    let g1 = G_2025[n][1] + dt * G_SV[n][1];
+                    let h1 = H_2025[n][1] + dt * H_SV[n][1];
+                    let limit = sign * c * sqrt((n * (n + 1)) as f64 / 2.0);
+                    b_r += (n as f64 + 1.0) * sign * g0;
+                    b_theta -= c * limit * (g1 * cos(longitude) + h1 * sin(longitude));
+                    b_phi += limit * (g1 * sin(longitude) - h1 * cos(longitude));
+                }
+                let got = field_geocentric(colatitude, longitude, REFERENCE_RADIUS_KM, year);
+                for (k, want) in [b_r, b_theta, b_phi].into_iter().enumerate() {
+                    assert!(
+                        (got[k] - want).abs() < 1e-14 * want.abs(),
+                        "{year}, colatitude {colatitude}: component {k} {} against {want}",
+                        got[k],
+                    );
+                }
+            }
         }
-        // The threshold itself: `sin θ` is exactly the guard value here, and the guard excludes it.
-        let b = field_geocentric(1e-12, 0.7, REFERENCE_RADIUS_KM, 2025.0);
-        assert_eq!(sin(1e-12).to_bits(), 1e-12_f64.to_bits());
-        assert_eq!(b[2].to_bits(), 0.0_f64.to_bits(), "B_φ at sin θ = 1e-12");
+    }
+
+    /// (G3) `field_ecef` on the polar axis and within a metre of it, against
+    /// `derivations/igrf_synthesis.mac` §6 at 60 digits (nT, epoch 2025.0, 6771.2 km).
+    ///
+    /// On the axis the horizontal field is the closed form `−Σ (a/r)ⁿ⁺² √(n(n+1)/2) (gⁿ₁, hⁿ₁)`,
+    /// with the factor `(−1)ⁿ⁺¹` on the south axis. Off it, by `2⁻ᵏ (1, 2)` m for k = 21, 14, 7, 5
+    /// and 0, the reference is `−∇V` at the exact position. `acos(z/r)` returned a colatitude of
+    /// exactly 0 within 0.1 m of the axis, and the east component was dropped there: the north axis
+    /// read (−1151.5, 0.0) nT for (−1151.5, 103.8), and 2⁻²¹ m off it, at longitude 1.107 rad, the
+    /// horizontal field was about 1000 nT wrong. A position built from a latitude of ±90° lies
+    /// 4e-10 m off the axis, inside that band; its field is the axis value to 1e-12 nT. Measured:
+    /// 2.2e-11 nT at worst, six ulps of the 4.8e4 nT vertical component.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn the_ecef_field_on_and_beside_the_polar_axis_is_its_closed_form() {
+        const R: f64 = 6_771_200.0;
+        const NORTH: [f64; 3] = [
+            -1.151_547_607_136_706_617_179_656_736_269_532e3,
+            1.037_578_257_798_808_756_172_236_696_900_194e2,
+            -4.792_238_942_664_172_145_396_781_761_202_037e4,
+        ];
+        const SOUTH: [f64; 3] = [
+            1.075_430_758_645_771_036_249_069_251_678_241e4,
+            -7.224_120_924_918_786_541_950_305_843_499_910e3,
+            -4.285_276_937_750_965_403_984_691_623_266_732e4,
+        ];
+        #[rustfmt::skip]
+        let near: [(i32, f64, [f64; 3]); 10] = [
+            (21, R, [-1.151_547_607_141_951_637_685_994_510_937_858e3, 1.037_578_257_716_629_978_880_850_863_120_616e2, -4.792_238_942_664_178_131_935_418_683_985_324e4]),
+            (21, -R, [1.075_430_758_646_286_532_447_646_370_659_367e4, -7.224_120_924_909_817_364_481_726_718_741_380e3, -4.285_276_937_750_942_991_820_667_858_303_115e4]),
+            (14, R, [-1.151_547_607_808_069_241_988_955_307_256_515e3, 1.037_578_247_279_925_262_845_821_190_772_312e2, -4.792_238_942_664_938_422_338_335_960_883_229e4]),
+            (14, -R, [1.075_430_758_711_754_549_665_515_765_314_365e4, -7.224_120_923_770_731_825_972_288_438_211_614e3, -4.285_276_937_748_096_646_984_156_081_282_087e4]),
+            (7, R, [-1.151_547_693_071_122_561_040_838_732_729_017e3, 1.037_576_911_381_721_134_783_490_494_041_828e2, -4.792_238_942_762_255_528_839_838_054_670_268e4]),
+            (7, -R, [1.075_430_767_091_660_730_211_676_728_109_483e4, -7.224_120_777_967_782_898_575_558_102_455_113e3, -4.285_276_937_383_764_417_908_563_472_207_377e4]),
+            (5, R, [-1.151_547_950_874_370_008_877_900_551_467_896e3, 1.037_572_872_130_452_518_387_626_772_055_803e2, -4.792_238_943_056_504_892_109_528_320_675_909e4]),
+            (5, -R, [1.075_430_792_429_329_529_783_340_486_987_234e4, -7.224_120_337_114_771_990_360_374_147_422_021e3, -4.285_276_936_282_160_371_084_586_323_354_482e4]),
+            (0, R, [-1.151_558_606_741_427_580_987_813_666_769_948e3, 1.037_405_916_403_800_881_892_124_641_280_231e2, -4.792_238_955_217_779_022_814_655_202_586_337e4]),
+            (0, -R, [1.075_431_839_719_269_418_814_742_572_055_020e4, -7.224_102_115_190_349_875_099_929_262_315_368e3, -4.285_276_890_747_764_502_318_964_104_789_088e4]),
+        ];
+        let check = |position: [f64; 3], want: [f64; 3], what: &str| {
+            let got = field_ecef(position, 2025.0);
+            for k in 0..3 {
+                let got_nt = got[k] * 1e9;
+                assert!(
+                    (got_nt - want[k]).abs() < 5e-11,
+                    "{what}: component {k} {got_nt} nT against {} nT",
+                    want[k]
+                );
+            }
+        };
+        check([0.0, 0.0, R], NORTH, "north axis");
+        check([0.0, 0.0, -R], SOUTH, "south axis");
+        for (k, z, want) in near {
+            let off = libm::ldexp(1.0, -k);
+            check(
+                [off, 2.0 * off, z],
+                want,
+                &format!("2^-{k} (1, 2) m from z = {z}"),
+            );
+        }
+        for (latitude, want) in [(90.0_f64, NORTH), (-90.0, SOUTH)] {
+            let phi = latitude.to_radians();
+            check(
+                [R * cos(phi), 0.0, R * sin(phi)],
+                want,
+                &format!("latitude {latitude}"),
+            );
+        }
+        // Off the axis but inside the limit's band: sin θ = 4.4e-164, where the field is the axis
+        // value to 1e-150 nT. The band is where sin² θ leaves the normal doubles.
+        assert_eq!(AXIS_SIN.to_bits(), sqrt(f64::MIN_POSITIVE).to_bits());
+        let off = libm::ldexp(1.0, -520);
+        check(
+            [off, 2.0 * off, R],
+            NORTH,
+            "2^-520 (1, 2) m from the north axis",
+        );
+        check(
+            [off, 2.0 * off, -R],
+            SOUTH,
+            "2^-520 (1, 2) m from the south axis",
+        );
     }
 
     /// The geocentric → ECEF rotation, by projection onto an independently built triad.
@@ -258,7 +372,7 @@ mod tests {
         let pos = [4.0e6, 2.0e6, 5.0e6];
         let year = 2027.5;
         let r = sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
-        let (colat, lon) = (acos(pos[2] / r), atan2(pos[1], pos[0]));
+        let (colat, lon) = (libm::acos(pos[2] / r), atan2(pos[1], pos[0]));
         let (st, ct) = (sin(colat), cos(colat));
         let (sl, cl) = (sin(lon), cos(lon));
         let triad = [

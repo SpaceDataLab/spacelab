@@ -17848,6 +17848,92 @@ mod tests {
         );
     }
 
+    /// The two fixes of plans/18 Ф28.K that reach the C ABI, through it. On the polar axis the IGRF
+    /// field is its closed-form limit (`spacelab_geomagnetism::igrf`'s axis test, Maxima at 60
+    /// digits): the code took the colatitude from `acos(z/r)` and dropped `B_φ` there, which put
+    /// 0 nT where 103.76 nT belongs. A 1e-9 rad error rotation reports its angle: `2·acos(q₀)`
+    /// returned 0 below 2e-8 rad. The matrix is the exact rotation rounded to doubles and the
+    /// angle the exact angle of those doubles (`derivations/attitude_control.mac` item 8), within
+    /// `spacelab_control::attitude`'s derived 2.6e-15.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn the_field_on_the_polar_axis_and_a_nanoradian_error_angle_reach_the_c_abi() {
+        const R: f64 = 6_771_200.0;
+        for (z, want) in [
+            (
+                R,
+                [
+                    -1.151_547_607_136_706_617e3,
+                    1.037_578_257_798_808_756e2,
+                    -4.792_238_942_664_172_145e4,
+                ],
+            ),
+            (
+                -R,
+                [
+                    1.075_430_758_645_771_036e4,
+                    -7.224_120_924_918_786_542e3,
+                    -4.285_276_937_750_965_404e4,
+                ],
+            ),
+        ] {
+            let position = SlVec3 { x: 0.0, y: 0.0, z };
+            let mut b = SlVec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            };
+            // SAFETY: both pointers are to live locals of the right type.
+            let status = unsafe { sl_igrf_field_ecef(&raw const position, 2025.0, &raw mut b) };
+            assert_eq!(status, SL_OK, "{}", last_error());
+            for (k, got) in [b.x, b.y, b.z].into_iter().enumerate() {
+                assert!(
+                    (got * 1e9 - want[k]).abs() < 5e-11,
+                    "z = {z}: component {k} {} nT against {} nT",
+                    got * 1e9,
+                    want[k]
+                );
+            }
+        }
+
+        let rotation = [
+            1.0,
+            -2.857_142_858_979_592_003_872_761e-10,
+            8.571_428_570_816_326_846_491_334e-10,
+            2.857_142_855_306_122_194_603_862e-10,
+            1.0,
+            4.285_714_286_938_775_326_786_492e-10,
+            -8.571_428_572_040_816_782_914_301e-10,
+            -4.285_714_284_489_795_970_928_442e-10,
+            1.0,
+        ];
+        let identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let rest = SlVec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let mut mrp = rest;
+        let mut angle = -1.0;
+        // SAFETY: two nine-double matrices, live locals for the rest.
+        let status = unsafe {
+            sl_attitude_error_mrp(
+                rotation.as_ptr(),
+                identity.as_ptr(),
+                &raw const rest,
+                &raw const rest,
+                &raw mut mrp,
+                &raw mut angle,
+            )
+        };
+        assert_eq!(status, SL_OK, "{}", last_error());
+        let want = 1.000_000_000_000_000_028_963_323e-9;
+        assert!(
+            (angle / want - 1.0).abs() <= 2.6e-15,
+            "a 1e-9 rad error reported {angle:e} rad"
+        );
+    }
+
     /// The CelesTrak space-weather product, as vendored for the propagation crate's own tests. The
     /// C ABI reads the same bytes the Python bridge does, so a divergence between the two is a
     /// difference in the binding rather than in the file.

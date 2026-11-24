@@ -332,8 +332,20 @@ fn huber_weight(prior: f64, noise: f64, innovation: f64, tuning: f64) -> f64 {
 ///     (n+1) f² − [(n+1)p + nR] f − Rν² = 0,
 /// ```
 ///
-/// whose positive root is closed-form — no iteration, and no cancellation, since the constant term is
-/// negative and the two terms under the root therefore add. `R_eff = f − p`.
+/// whose positive root is closed-form, with no iteration. `R_eff = f − p` is not formed as that
+/// difference: when the prior is far above the noise, `f ≈ p` and the subtraction cancels, down to
+/// exactly 0 from `p/R ≈ 1e16`. Substituting `f = r + p` gives the quadratic in `r = R_eff` itself,
+///
+/// ```text
+///     a r² + B r − q = 0,    a = n + 1,  B = a p − n R,  q = R (n p + ν²) ≥ 0,
+/// ```
+///
+/// with the same discriminant, and its root is taken as `2q/(B + √(B² + 4aq))` for `B ≥ 0` and as
+/// `(√(B² + 4aq) − B)/(2a)` for `B < 0`: two forms of one number in which no subtraction of like
+/// signs is left, apart from `B` itself (`derivations/robust_weights.mac` item 8).
+/// Its relative round-off is at most 2.112e-15 for `B ≥ 0` and 1.722e-15 for `B < 0`
+/// (`derivations/student_t_b_pos_roundoff.gappa`, `student_t_b_neg_roundoff.gappa`; for
+/// `p/R ≤ 2⁶⁰`, `ν²/R ≤ 2⁸⁰` and `2⁻¹⁰ ≤ n ≤ 2²⁰`).
 ///
 /// Two consequences worth stating. At `ν = 0` it returns `R·n/(n+1)`, *less* than nominal, because the
 /// Student-t scale is not its variance. And as `|ν| → ∞`, `f → |ν|√(R/(n+1))`, so the gain falls as
@@ -341,10 +353,14 @@ fn huber_weight(prior: f64, noise: f64, innovation: f64, tuning: f64) -> f64 {
 /// function that neither of the other two policies has.
 fn student_t_variance(prior: f64, noise: f64, innovation: f64, dof: f64) -> f64 {
     let a = dof + 1.0;
-    let b = a * prior + noise * dof;
-    let discriminant = b * b + 4.0 * a * noise * innovation * innovation;
-    let f = (b + libm::sqrt(discriminant)) / (2.0 * a);
-    f - prior
+    let b = a * prior - dof * noise;
+    let q = noise * (dof * prior + innovation * innovation);
+    let root = libm::sqrt(b * b + 4.0 * a * q);
+    if b >= 0.0 {
+        2.0 * q / (b + root)
+    } else {
+        (root - b) / (2.0 * a)
+    }
 }
 
 impl RobustPolicy {
@@ -521,6 +537,11 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
 
     use super::*;
+
+    /// `student_t_variance`'s round-off, at most 2.112e-15 relative (the two Gappa proofs its
+    /// documentation names), plus the fixture's rounding and the test's quotient
+    /// (`derivations/robust_weights.mac` item 8).
+    const STUDENT_T_BOUND: f64 = 2.4e-15;
 
     /// (G3) The gate is the Wilson–Hilferty cube of the `Φ(z)` quantile, and that cube is off the
     /// exact quantile by what [`chi_square_gate`] documents. Both columns are
@@ -783,6 +804,136 @@ mod tests {
             assert!(
                 (got / variance - 1.0).abs() <= 4.0 * f64::EPSILON,
                 "p = {prior}, R = {noise}, ν = {innovation}, n = {dof}: {got} against {variance}"
+            );
+        }
+    }
+
+    /// (G3) At zero innovation the Student-t variance is `R·n/(n+1)` for every prior, on both sides
+    /// of the branch `B = (n+1)p − nR = 0`.
+    ///
+    /// `derivations/robust_weights.mac` item 8 shows both root forms reduce to it at `ν = 0`. The
+    /// one-branch form `f − p` subtracted two nearly equal numbers once the prior `p` was far above
+    /// the noise `R`: it returned exactly 0 from `p/R ≈ 1e16`, and a zero effective variance tells
+    /// the square-root update the observation is exact. The sweep runs `p/R` over every decade from
+    /// 1e-17 to 1e17, and `p = 0`, at four noise levels and four degrees of freedom.
+    #[test]
+    fn at_zero_innovation_the_student_t_variance_is_r_n_over_n_plus_1_at_every_prior() {
+        for noise in [1.0, 0.3, 7.5e5, 2.0e-9] {
+            for dof in [1.0, 2.5, 5.0, 30.0] {
+                let want = noise * dof / (dof + 1.0);
+                for k in -17..=17 {
+                    for prior in [0.0, noise * libm::pow(10.0, f64::from(k))] {
+                        let got = student_t_variance(prior, noise, 0.0, dof);
+                        assert!(
+                            (got / want - 1.0).abs() <= STUDENT_T_BOUND + 2.0 * f64::EPSILON,
+                            "p = {prior:e}, R = {noise:e}, n = {dof}: {got:e} against {want:e}"
+                        );
+                    }
+                }
+            }
+        }
+        // Through the public policy, at the prior where the old form returned 0.
+        let policy = RobustPolicy::StudentT {
+            degrees_of_freedom: 5.0,
+        };
+        let got = policy.effective_variance(1e16, 1.0, 0.0);
+        assert!(
+            got.is_some_and(
+                |v| (v / (5.0 / 6.0) - 1.0).abs() <= STUDENT_T_BOUND + 2.0 * f64::EPSILON
+            ),
+            "{got:?}"
+        );
+    }
+
+    /// (G3) The Student-t variance against its root at 40 digits, every decade of `p/R` from 1e-17
+    /// to 1e17 and `p = 0`, at one sigma and at thirty (`derivations/robust_weights.mac` item 8,
+    /// recomputed by `robust_weights.gp`). `B < 0` below `p/R = n/(n+1)` and `B ≥ 0` from there, so
+    /// both of the code's forms are read, and the last row has `B = 0` exactly. The form `f − p`
+    /// was 7.1e-4 off at `p/R = 1e12` and returned 0 from 1e16.
+    #[test]
+    #[allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    fn the_student_t_variance_is_the_root_at_every_decade() {
+        #[rustfmt::skip]
+        let rows: [(f64, f64, f64, f64, f64); 73] = [
+            (1e-17, 1.0, 1.0, 5.0, 9.9999999999999999857142857e-1),
+            (1e-17, 1.0, 30.0, 5.0, 1.2671200974877285528181387e+1),
+            (1e-16, 1.0, 1.0, 5.0, 9.9999999999999998571428571e-1),
+            (1e-16, 1.0, 30.0, 5.0, 1.2671200974877285484711433e+1),
+            (1e-15, 1.0, 1.0, 5.0, 9.9999999999999985714285714e-1),
+            (1e-15, 1.0, 30.0, 5.0, 1.2671200974877285050011892e+1),
+            (1e-14, 1.0, 1.0, 5.0, 9.9999999999999857142857143e-1),
+            (1e-14, 1.0, 30.0, 5.0, 1.2671200974877280703016482e+1),
+            (1e-13, 1.0, 1.0, 5.0, 9.9999999999998571428571429e-1),
+            (1e-13, 1.0, 30.0, 5.0, 1.2671200974877237233062384e+1),
+            (1e-12, 1.0, 1.0, 5.0, 9.9999999999985714285714296e-1),
+            (1e-12, 1.0, 30.0, 5.0, 1.2671200974876802533521405e+1),
+            (1e-11, 1.0, 1.0, 5.0, 9.9999999999857142857143907e-1),
+            (1e-11, 1.0, 30.0, 5.0, 1.2671200974872455538111612e+1),
+            (1e-10, 1.0, 1.0, 5.0, 9.9999999998571428571533528e-1),
+            (1e-10, 1.0, 30.0, 5.0, 1.2671200974828985584013779e+1),
+            (1e-9, 1.0, 1.0, 5.0, 9.9999999985714285724781340e-1),
+            (1e-9, 1.0, 30.0, 5.0, 1.2671200974394286043044521e+1),
+            (1e-8, 1.0, 1.0, 5.0, 9.9999999857142858192419816e-1),
+            (1e-8, 1.0, 30.0, 5.0, 1.2671200970047290634259744e+1),
+            (1e-7, 1.0, 1.0, 5.0, 9.9999998571428676384833289e-1),
+            (1e-7, 1.0, 30.0, 5.0, 1.2671200926577336637191636e+1),
+            (1e-6, 1.0, 1.0, 5.0, 9.9999985714296209906111199e-1),
+            (1e-6, 1.0, 30.0, 5.0, 1.2671200491877805744476289e+1),
+            (1e-5, 1.0, 1.0, 5.0, 9.9999857143906699113482842e-1),
+            (1e-5, 1.0, 30.0, 5.0, 1.2671196144883404613883576e+1),
+            (1e-4, 1.0, 1.0, 5.0, 9.9998571533521271197955752e-1),
+            (1e-4, 1.0, 30.0, 5.0, 1.2671152675030172951513878e+1),
+            (1e-3, 1.0, 1.0, 5.0, 9.9985724774918203231565354e-1),
+            (1e-3, 1.0, 30.0, 5.0, 1.2670717985575808098061863e+1),
+            (1e-2, 1.0, 1.0, 5.0, 9.9858186023763262825495618e-1),
+            (1e-2, 1.0, 30.0, 5.0, 1.2666371998814713782161872e+1),
+            (1e-1, 1.0, 1.0, 5.0, 9.8670250792460914464556481e-1),
+            (1e-1, 1.0, 30.0, 5.0, 1.2623002896461351020405623e+1),
+            (1e0, 1.0, 1.0, 5.0, 9.2013288156602462334402009e-1),
+            (1e0, 1.0, 30.0, 5.0, 1.2198371669547080166644113e+1),
+            (1e1, 1.0, 1.0, 5.0, 8.4869616257742105669000093e-1),
+            (1e1, 1.0, 30.0, 5.0, 8.8084655666568310865407465e+0),
+            (1e2, 1.0, 1.0, 5.0, 8.3498619880145641716400060e-1),
+            (1e2, 1.0, 30.0, 5.0, 2.2996145183238407710774625e+0),
+            (1e3, 1.0, 1.0, 5.0, 8.3349986119904704185040617e-1),
+            (1e3, 1.0, 30.0, 5.0, 9.8318600028907646518723598e-1),
+            (1e4, 1.0, 1.0, 5.0, 8.3334999861119907137319579e-1),
+            (1e4, 1.0, 30.0, 5.0, 8.4833206094318285442700941e-1),
+            (1e5, 1.0, 1.0, 5.0, 8.3333499998611119907380401e-1),
+            (1e5, 1.0, 30.0, 5.0, 8.3483332081093806229754866e-1),
+            (1e6, 1.0, 1.0, 5.0, 8.3333349999986111119907405e-1),
+            (1e6, 1.0, 30.0, 5.0, 8.3348333320831093755616985e-1),
+            (1e7, 1.0, 1.0, 5.0, 8.3333334999999861111119907e-1),
+            (1e7, 1.0, 30.0, 5.0, 8.3334833333208331093750562e-1),
+            (1e8, 1.0, 1.0, 5.0, 8.3333333499999998611111120e-1),
+            (1e8, 1.0, 30.0, 5.0, 8.3333483333332083331093750e-1),
+            (1e9, 1.0, 1.0, 5.0, 8.3333333349999999986111111e-1),
+            (1e9, 1.0, 30.0, 5.0, 8.3333348333333320833331094e-1),
+            (1e10, 1.0, 1.0, 5.0, 8.3333333334999999999861111e-1),
+            (1e10, 1.0, 30.0, 5.0, 8.3333334833333333208333331e-1),
+            (1e11, 1.0, 1.0, 5.0, 8.3333333333499999999998611e-1),
+            (1e11, 1.0, 30.0, 5.0, 8.3333333483333333332083333e-1),
+            (1e12, 1.0, 1.0, 5.0, 8.3333333333349999999999986e-1),
+            (1e12, 1.0, 30.0, 5.0, 8.3333333348333333333320833e-1),
+            (1e13, 1.0, 1.0, 5.0, 8.3333333333335000000000000e-1),
+            (1e13, 1.0, 30.0, 5.0, 8.3333333334833333333333208e-1),
+            (1e14, 1.0, 1.0, 5.0, 8.3333333333333500000000000e-1),
+            (1e14, 1.0, 30.0, 5.0, 8.3333333333483333333333332e-1),
+            (1e15, 1.0, 1.0, 5.0, 8.3333333333333350000000000e-1),
+            (1e15, 1.0, 30.0, 5.0, 8.3333333333348333333333333e-1),
+            (1e16, 1.0, 1.0, 5.0, 8.3333333333333335000000000e-1),
+            (1e16, 1.0, 30.0, 5.0, 8.3333333333334833333333333e-1),
+            (1e17, 1.0, 1.0, 5.0, 8.3333333333333333500000000e-1),
+            (1e17, 1.0, 30.0, 5.0, 8.3333333333333483333333333e-1),
+            (0.0, 1.0, 1.0, 5.0, 1.0000000000000000000000000e+0),
+            (0.0, 1.0, 30.0, 5.0, 1.2671200974877285533011382e+1),
+            (5.0, 6.0, 1.0, 5.0, 5.0990195135927848300282241e+0),
+        ];
+        for (prior, noise, innovation, dof, want) in rows {
+            let got = student_t_variance(prior, noise, innovation, dof);
+            assert!(
+                (got / want - 1.0).abs() <= STUDENT_T_BOUND,
+                "p = {prior:e}, R = {noise}, ν = {innovation}, n = {dof}: {got:e} against {want:e}"
             );
         }
     }

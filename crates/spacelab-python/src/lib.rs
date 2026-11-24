@@ -7769,6 +7769,66 @@ mod tests {
         }
     }
 
+    /// The two fixes of plans/18 Ф28.K that reach Python, through the bindings. A 1e-9 rad error
+    /// rotation reports its angle, where `2·acos(q₀)` returned 0 below 2e-8 rad: the matrix is the
+    /// exact rotation rounded to doubles and the angle the exact angle of those doubles
+    /// (`derivations/attitude_control.mac` item 8), within `spacelab_control::attitude`'s derived
+    /// 2.6e-15. On the polar axis the IGRF field is its closed-form limit
+    /// (`spacelab_geomagnetism::igrf`'s axis test, Maxima at 60 digits), where `acos(z/r)` dropped
+    /// `B_φ` and put 0 nT in place of 103.76 nT.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn a_nanoradian_error_angle_and_the_field_on_the_polar_axis_reach_python() {
+        let rotation = [
+            1.0,
+            -2.857_142_858_979_592_003_872_761e-10,
+            8.571_428_570_816_326_846_491_334e-10,
+            2.857_142_855_306_122_194_603_862e-10,
+            1.0,
+            4.285_714_286_938_775_326_786_492e-10,
+            -8.571_428_572_040_816_782_914_301e-10,
+            -4.285_714_284_489_795_970_928_442e-10,
+            1.0,
+        ];
+        let identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let (_, angle) = attitude_error_mrp(rotation, identity, [0.0; 3], [0.0; 3]);
+        let want = 1.000_000_000_000_000_028_963_323e-9;
+        assert!(
+            (angle / want - 1.0).abs() <= 2.6e-15,
+            "a 1e-9 rad error reported {angle:e} rad"
+        );
+
+        const R: f64 = 6_771_200.0;
+        for (z, want) in [
+            (
+                R,
+                [
+                    -1.151_547_607_136_706_617e3,
+                    1.037_578_257_798_808_756e2,
+                    -4.792_238_942_664_172_145e4,
+                ],
+            ),
+            (
+                -R,
+                [
+                    1.075_430_758_645_771_036e4,
+                    -7.224_120_924_918_786_542e3,
+                    -4.285_276_937_750_965_404e4,
+                ],
+            ),
+        ] {
+            let (bx, by, bz) = igrf_field_ecef(0.0, 0.0, z, 2025.0);
+            for (k, got) in [bx, by, bz].into_iter().enumerate() {
+                assert!(
+                    (got * 1e9 - want[k]).abs() < 5e-11,
+                    "z = {z}: component {k} {} nT against {} nT",
+                    got * 1e9,
+                    want[k]
+                );
+            }
+        }
+    }
+
     /// The equatorial case above cannot see the orbit-plane rotation at all: with `inc = raan =
     /// phase = 0` every cross term in `sat_at` is multiplied by `sin i = 0` or `sin Ω = 0`, so the
     /// analytic ECI→ECEF propagation reduces to `a·(cos u, sin u, 0)` and a mutation of any of the

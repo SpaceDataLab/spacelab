@@ -1,0 +1,104 @@
+/* The round-off of `so3_log` and of `AttitudeError::angle`, closed by hand from the bounds that
+   shepperd_roundoff.gappa proves (plans/18 Ф28.K, F117 and F119). Under H-libm, not outward-rounded:
+   it rests on a measured constant for `atan2`, and Maxima adds the lemmas' bounds below in exact
+   rationals.
+
+   timeout 120 maxima --very-quiet -Q -b rotation_angle_roundoff.mac
+
+   Code. crates/spacelab-estimation/src/se3.rs, `so3_log`:
+     (w, x, y, z) = shepperd_quaternion(R), w >= 0;   s = sqrt((x x + y y) + z z);
+     k = (2 atan2(s, w)) / s, or 2 when s = 0;        phi = (k x, k y, k z).
+   crates/spacelab-control/src/attitude.rs, `AttitudeError::angle`, on `quaternion_of`'s output:
+     s = sqrt(fma(x, x, fma(y, y, z z)));             angle = 2 atan2(s, w).
+   Each operation one IEEE double rounding to nearest-even, |delta| <= u = 2^-53; doubling is exact.
+   Assumption, under H-libm (derivations/h_libm.txt, row atan2_all, a measured hypothesis and not a
+   proof): libm's atan2 is within 1.5625 ulp, so it returns t (1 + d_a), |d_a| <= a = 1.5625 * 2^-52,
+   t = atan2(s, w) the true function of the computed s and w. `sqrt` is correctly rounded (row
+   sqrt_all).
+
+   Domain: shepperd_roundoff.gappa's -- any double matrix with every |m_ij| <= 1.001 whose
+   numerators m_jk -+ m_kj are each 0 or at least 2^-500 in magnitude. Then every nonzero quaternion
+   component is at least 2^-502, its square and t are normal doubles, and nothing overflows.
+   The exact values are Shepperd's quaternion (W, V) of the same doubles on the branch the code
+   takes, S = |V|, T = atan2(S, W), Phi = 2 T V/S and the angle 2 T. For a computed x and its exact
+   X, e(x) = ln(x/X); a relative bound r gives |e| <= -ln(1 - r) <= L(r) = r/(1 - r), and a bound
+   |e| <= E gives a relative error <= exp(E) - 1 <= E/(1 - E).
+
+   (1) The norm. Every term of either dot product is a nonnegative square that passes through at
+       most three roundings (plain: x x, then two sums; fma: z z, then two fused steps), so the
+       computed sum is the sum of the computed squares times a factor in [(1 - u)^3, (1 + u)^3].
+       With every component within r of its exact value, s/S is in
+       [(1 - r)(1 - u)^(5/2), (1 + r)(1 + u)^(5/2)], the last factor sqrt's own rounding:
+       |e(s)| <= L(r) + (5/2) L(u).
+   (2) atan2. For x > 0, y > 0, t = atan2(y, x) is in (0, pi/2] and
+       d ln t = c(t) (d ln y - d ln x),  c(t) = sin(2t)/(2t) in [0, 1].
+       On the segment from (ln S, ln W) to (ln s, ln w) both stay positive -- w and W have one sign,
+       since rounding keeps it, and the sign fix makes it positive -- so ln(t/T) = cbar (e(s) - e(w))
+       with cbar in [0, 1]. Hence |ln(t/T)| <= |e(s)| + |e(w)|, and
+       ln(t/T) - e(s) = (cbar - 1) e(s) - cbar e(w), a convex combination of -e(s) and -e(w):
+       |ln(t/T) - e(s)| <= max(|e(s)|, |e(w)|). At W = 0, a half-turn, w = 0 too and t = T = pi/2,
+       where both hold. At S = 0, s = 0 too, and both functions return exactly 0.
+   (3) so3_log. phi_i/Phi_i = (t/T)(S/s)(1 + d_a)(1 + d_div)(x_i/X_i)(1 + d_mul), so by (2)
+       |e(phi_i)| <= max(|e(s)|, |e(w)|) + L(a) + 2 L(u) + |e(x_i)|, a componentwise relative
+       bound; |Phi| = 2 T <= pi turns it into an absolute one.
+   (4) angle. angle/(2 T) = (t/T)(1 + d_a): |e| <= |e(s)| + |e(w)| + L(a). On its own stored
+       quaternion, which it takes as exact, e(w) = 0 and r = 0.
+   Each bound is taken over both kinds of Shepperd branch, with shepperd_roundoff.gappa's numbers:
+   branch 0 has w its own component (r_own0) and x, y, z the others (r_o0); a vector branch has w
+   and two vector components among the others (r_o) and one its own (r_own <= r_o).
+
+   (5) The tests' tolerances. Each fixture is the exact value at 40 digits, which Rust reads as the
+       nearest double. `so3_log`'s test takes max |got_i - want_i|, exact by Sterbenz, against a
+       constant: it needs the bound of (3) times pi plus 2^-52, half an ulp of a value below 4.
+       `angle`'s test takes |got/want - 1|, where want is within u of the exact angle and the
+       quotient rounds once (the subtraction is exact): it needs (rho + u)/(1 - u) + u (1 + that).
+       A literal is read as its nearest double, at least (1 - u) times its decimal value.          */
+
+fpprec : 30$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+show(name, v) := print(name, "=", bfloat(v))$
+u : 2^-53$
+a : 25/16 * 2^-52$
+L(r) := r/(1 - r)$
+E2rel(e) := e/(1 - e)$
+
+/* shepperd_roundoff.gappa's stated results */
+r_own : 504/10^18$  r_o : 838/10^18$  r_own0 : 393/10^18$  r_o0 : 726/10^18$
+must(is(r_own <= r_o), "(0) holds: a vector branch's own component is inside the others' bound")$
+
+/* (1) */
+es(r) := L(r) + 5/2*L(u)$
+es_vec : es(r_o)$   es_0 : es(r_o0)$
+show("|e(s)| / u, vector branch", es_vec/u)$
+show("|e(s)| / u, branch 0", es_0/u)$
+must(is(es_vec < 101/10*u) and is(es_0 < 91/10*u), "(1) holds: |e(s)| under 10.1 u and 9.1 u")$
+
+/* (3) */
+lam_log_vec : max(es_vec, L(r_o)) + L(a) + 2*L(u) + L(r_o)$
+lam_log_0 : max(es_0, L(r_own0)) + L(a) + 2*L(u) + L(r_o0)$
+rho_log : E2rel(max(lam_log_vec, lam_log_0))$
+show("so3_log relative bound / u", rho_log/u)$
+show("so3_log relative bound", rho_log)$
+must(is(rho_log < 2530/10^18), "(3) holds: so3_log is within 2.53e-15 of Phi, relative, componentwise")$
+
+/* (4) */
+rho_ang : E2rel(max(es_vec + L(r_o), es_0 + L(r_own0)) + L(a))$
+rho_ang_own : E2rel(5/2*L(u) + L(a))$
+show("angle relative bound / u", rho_ang/u)$
+show("angle relative bound", rho_ang)$
+show("angle on its own quaternion, relative bound", rho_ang_own)$
+must(is(rho_ang < 2310/10^18) and is(rho_ang_own < 625/10^18),
+     "(4) holds: the angle is within 2.31e-15 relative through Shepperd's extraction, 6.25e-16 on its own quaternion")$
+
+/* (5) */
+pi_up : 355/113$
+must(is(pi_up > %pi), "(5) holds: 355/113 is above pi")$
+need_log : rho_log*pi_up + 2^-52$
+need_ang : block([g : (rho_ang + u)/(1 - u)], g + u*(1 + g))$
+show("so3_log test needs", need_log)$
+show("angle test needs", need_ang)$
+LOG_HALF_TURN_BOUND : 82/10^16$
+ANGLE_BOUND : 26/10^16$
+must(is((1 - u)*LOG_HALF_TURN_BOUND >= need_log) and is((1 - u)*ANGLE_BOUND >= need_ang),
+     "(5) holds: the tests' constants 8.2e-15 and 2.6e-15 cover the bounds and the fixtures' rounding")$
+print("DONE")$

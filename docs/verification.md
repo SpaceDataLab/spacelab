@@ -277,6 +277,9 @@ cover them.
 | Kepler, last Newton step | `spacelab-elements` `eccentric_from_mean` | e ≤ 0.99, M in [0, 2π), the step's residual ≤ 1e-12 | **5.90e-14** from the exact Newton step, under H-libm. With the exact step's remainder, which is under 5e-19, the result is still within 5.90e-14 of the root. This is the floor its test names, ulp(E)/(1 − e cos E), with E near 2π | 1.13e-14 at e = 0.99 with M near 2π, 0.19 | derivations/kepler_roundoff.gappa |
 | Vermeille | `spacelab-earth` `itrf_to_geodetic` | \|x\|, \|y\|, \|z\| ≥ 1 mm, geodetic height −100 km to GEO (P + Q in [0.955, 46]) | latitude **4.08e-15 rad**; height **5.98e-15·√(D² + z²)** ≤ 5.98e-15·\|r\|, so 3.8e-8 m at the surface and 2.5e-7 m at GEO; both under H-libm | 9.3e-17 rad and 1.1e-16·√(D² + z²), 0.023 and 0.019 | derivations/vermeille_roundoff.gappa, derivations/vermeille_height_roundoff.gappa |
 | Geopotential seed | `spacelab-propagation` `harmonic_quantities`, `geo_row` at n ≤ 1 | r from 6 245 km to 430 000 km, any Rₑ in [6.3, 6.4] Mm | V̄₀₀ within **5.02e-16**; V̄₁₀, V̄₁₁, W̄₁₁ within **1.9e-15**, relative | 1.54e-16 and 4.47e-16, 0.31 | derivations/geopotential_seed_roundoff.gappa |
+| Student-t variance | `spacelab-estimation` `robust::student_t_variance` | p/R ≤ 2⁶⁰, ν²/R ≤ 2⁸⁰, 2⁻¹⁰ ≤ n ≤ 2²⁰ | **2.112e-15** relative for B ≥ 0, **1.722e-15** for B < 0 | 2.2e-16, 0.11, on the decade sweep | derivations/student_t_b_pos_roundoff.gappa, derivations/student_t_b_neg_roundoff.gappa |
+| SO(3) logarithm | `spacelab-estimation` `se3::so3_log` | any double matrix with \|mᵢⱼ\| ≤ 1.001 whose skew and symmetric numerators are 0 or ≥ 2⁻⁵⁰⁰ | **2.53e-15** relative, per component, from the exact logarithm of the same doubles; under H-libm | 3.3e-16 relative, 0.13, π − 1e-1 to π − 1e-10 | derivations/shepperd_roundoff.gappa, derivations/rotation_angle_roundoff.mac |
+| Attitude error angle | `spacelab-control` `AttitudeError::angle` after `new` | the same | **2.31e-15** relative from the exact angle; **6.25e-16** from the stored quaternion's; under H-libm | 2.2e-16, 0.096, 1e-1 to 1e-10 rad | the same |
 
 Under the one-ulp assumption that H-libm replaces, the Kepler bound was 6.14e-14 (6.15e-14 from the
 root), and the Vermeille bounds were 3.95e-15 rad and 5.97e-15·√(D² + z²). The Kepler bound fell:
@@ -301,6 +304,13 @@ Two Vermeille steps cannot be bounded by a relative error, so the proof treats t
 
 The latitude itself is closed by hand from Gappa's bound on `d + hyp` and `atan2`'s constant.
 `roundoff_samples.mac` redoes that sum in exact rationals: 3.7281e-15 + 3.4695e-16 ≤ 4.08e-15.
+
+The last three rows (Ф28.K) bound rewrites that removed a cancellation. Gappa proves the
+Student-t root and Shepperd's quaternion extraction, where the matrix entries cancel. The norm,
+`atan2` and the last products of `so3_log` and `angle` are closed by hand in
+`rotation_angle_roundoff.mac`, in exact rationals. Its lemma: for x, y > 0, atan2(y, x) changes its
+logarithm by at most the sum of the changes in ln y and ln x. Each test's tolerance is the proved
+bound plus the rounding of its 25-digit reference, checked in the same files.
 
 The ratios are lowest for Vermeille: about 1/44 for latitude and 1/52 for height. The bound adds
 about thirty roundings at their worst case. Ten sample points rarely meet that case.
@@ -557,7 +567,7 @@ bound is missing or extra.
 | the same two at θ = 1e-3 | same, the comment on raising the threshold | θ ≤ 1e-3 | [8.333, 8.334]e-15, [2.777, 2.778]e-15 | 2.8e-15 for b, the comment's subject: holds | — |
 | cos(θ/2) ≈ 1 − θ²/8, sin(θ/2)/θ ≈ ½ | `spacelab-estimation` `lie::from_rotation_vector` | θ < 1e-8 | [2.604, 2.605]e-35, [4.166, 4.167]e-18 | none | no |
 | sin θ/θ ≈ 1 in `so3_exp`; (1 − cos θ)/θ² ≈ ½, (θ − sin θ)/θ³ ≈ 1/6 in `left_jacobian` | `spacelab-estimation` `se3` | θ < 1e-8 | [1.666, 1.667]e-17; [8.333, 8.334]e-18, [5.551, 5.552]e-17 | none | no |
-| 1/θ² − (1 + cos θ)/(2θ sin θ) ≈ 1/12; θ/(2 sin θ) ≈ ½ | `se3` `left_jacobian_inv`, `so3_log` | θ < 1e-8 | [5.717, 5.718]e-17, [1.666, 1.667]e-17 | none | no |
+| 1/θ² − (1 + cos θ)/(2θ sin θ) ≈ 1/12 | `se3` `left_jacobian_inv` | θ < 1e-8 | [5.717, 5.718]e-17 | none | no |
 | (1 − e^(−y/2))/y ≈ ½ − y/8 + y²/48 | `spacelab-estimation` `conjunction` | y = r² < 1e-8 | [5.208, 5.209]e-27 | none | no |
 | sin t to t²⁹/29! | `spacelab-autodiff` `double_double::sin_series` | \|t\| ≤ π/4 | [9.616, 9.617]e-38, under DD_EPS = 2⁻¹⁰⁴ = 4.93e-32 | "fourteen terms suffice": holds | no |
 | eʳ − 1 to r⁹/9! | `double_double::exp` | \|r\| ≤ ln2/1024 | [8.224, 8.225]e-36, under DD_EPS | "seven terms is what that bound costs": holds | no |

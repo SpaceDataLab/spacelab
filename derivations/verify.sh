@@ -1366,9 +1366,9 @@ if have maxima; then
     mac_zeros unscented_transform.mac 9 "sigma points reproduce mean and covariance; exactness on quadratics"
     mac_zeros hinf_riccati.mac 6 "the H-infinity Riccati recursion, Kalman at gamma = 0, the prior's threshold"
     mac_zeros chi_square_quantiles.mac 4 "NEES/NIS quadratic forms and exact chi-square quantiles"
-    mac_zeros robust_weights.mac 22 "Huber and Student-t weights from their defining equations, limits and efficiency"
+    mac_zeros robust_weights.mac 28 "Huber and Student-t weights from their defining equations, limits and efficiency; the Student-t root without f - p, and its tests' tolerance"
     mac_zeros lie_quaternion.mac 12 "quaternion product, passive Rodrigues matrix, exp and log"
-    mac_zeros se3_exponential.mac 22 "SE(3) exponential, both Jacobians and the adjoint from their series"
+    mac_zeros se3_exponential.mac 28 "SE(3) exponential, both Jacobians and the adjoint from their series; the logarithm through Shepperd's quaternion, pi at the half-turn"
     mac_zeros se23_invariant_navigation.mac 19 "SE2(3) group-affine strapdown and the invariant error dynamics"
     mac_zeros iekf_attitude.mac 8 "invariant EKF: state-independent error transition and H = [r]x"
     mac_zeros mekf_attitude.mac 8 "multiplicative EKF: error kinematics, H, Q and the norm-preserving reset"
@@ -1386,7 +1386,7 @@ if have maxima; then
     mac_zeros exact_predicates.mac 18 "orient and in-sphere predicates as exact determinants; the filter bound"
     mac_zeros hull_delaunay.mac 10 "Delaunay and convex hull against their brute-force definitions"
     mac_zeros spherical_triangle.mac 14 "spherical excess as the solid angle of a triangle"
-    mac_zeros igrf_synthesis.mac 37 "IGRF field as minus the gradient of the Schmidt-normalised potential"
+    mac_zeros igrf_synthesis.mac 42 "IGRF field as minus the gradient of the Schmidt-normalised potential, and its limit on the polar axis"
     # Diurnal aberration at aberration_erfa.rs's five stations: speed and the shift across the motion.
     out=$(timeout 300 maxima --very-quiet --suppress-input-echo -Q -b diurnal_aberration.mac </dev/null 2>&1)
     arb_keep "$out"
@@ -1406,7 +1406,7 @@ if have maxima; then
     else
         bad "maxima slab_doubling.mac" "expected 6 checks to hold, found $holds"
     fi
-    mac_zeros attitude_control.mac 18 "attitude error kinematics, the Lyapunov derivative and the PD loop"
+    mac_zeros attitude_control.mac 22 "attitude error kinematics, the Lyapunov derivative and the PD loop; the error angle as 2 atan2(|q_v|, q0)"
     mac_zeros gmst82.mac 10 "GMST 1982 as the exact rational polynomial"
     out=$(macf gcrf_itrf_chain.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
@@ -1571,7 +1571,8 @@ fi
 # replays that order exactly at sample points and holds the observed error under each bound.
 # ---------------------------------------------------------------------------------------------
 if have gappa; then
-    for f in era gmst82 kepler vermeille vermeille_height geopotential_seed; do
+    for f in era gmst82 kepler vermeille vermeille_height geopotential_seed shepperd student_t_b_pos \
+        student_t_b_neg; do
         out=$(timeout 120 gappa -Wno-null-denominator "${f}_roundoff.gappa" 2>&1)
         rc=$?
         if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -qE 'not satisfied|^Error'; then
@@ -1585,6 +1586,14 @@ else
 fi
 if have maxima; then
     mac_zeros roundoff_samples.mac 6 "the replayed f64 kernels stay under their Gappa bounds at the domains' edges; the Vermeille hypotheses hold on a grid to GEO"
+    # Ф28.K: so3_log and AttitudeError::angle, closed by hand from shepperd_roundoff.gappa's bounds.
+    out=$(macf rotation_angle_roundoff.mac)
+    holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+    if [ "$holds" -eq 6 ] && printf '%s' "$out" | grep -q '^DONE'; then
+        ok "maxima rotation_angle_roundoff.mac: so3_log within 2.53e-15 and the error angle within 2.31e-15, relative, under H-libm; the tests' tolerances cover both"
+    else
+        bad "maxima rotation_angle_roundoff.mac" "expected 6 bounds to hold, found $holds"
+    fi
 fi
 # Ф28.D: the same kernels and the shadow lens under FPTaylor, a static analysis independent of Gappa.
 # Each row is an input, its error mode and, per expression in order, the bound its header states
@@ -1652,7 +1661,6 @@ small_angle se3_left_jacobian_a 8334e-21
 small_angle se3_left_jacobian_b 5552e-20
 small_angle conjunction_h 5209e-30
 small_angle se3_left_jacobian_inv_c 5718e-20
-small_angle se3_so3_log 1667e-20
 double_double_series dd_sin_14_terms 9617e-41
 double_double_series dd_expm1_7_terms 8225e-39
 process_noise_pade process_noise_pade66_scalar 2133e-20
@@ -1674,7 +1682,7 @@ else
     skip "Ф28.B Sollya supnorm certificates" sollya
 fi
 if have maxima; then
-    mac_zeros approximation_supnorm.mac 28 "each series' worst error, found at fpprec 120, lies inside Sollya's enclosure"
+    mac_zeros approximation_supnorm.mac 27 "each series' worst error, found at fpprec 120, lies inside Sollya's enclosure"
     mac_zeros pade66_backward_error.mac 7 "the [6/6] Padé approximant's backward error is at most 0.385u for every A, normal or not"
     mac_zeros taylor_model_enclosures.mac 6 "the Kepler box holds the exact solution, the J2 and CR3BP fields are their potentials' gradients, the J2 box conserves h_z"
 fi

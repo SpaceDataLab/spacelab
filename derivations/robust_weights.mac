@@ -21,7 +21,17 @@
  *   6. the vector Student-t scale (n + d^2)/(n + dim) is the reciprocal of the multivariate E-step,
  *      equals 1 at d^2 = dim, and is the scalar E-step's at dim = 1 (G1);
  *   7. the Gaussian efficiency of the Huber estimator, (2 Phi(c) - 1)^2 / E[psi^2], is 0.9500 at
- *      c = 1.345 -- the "95 %" of the RobustPolicy::Huber doc (G3); E[psi^2] by integration.
+ *      c = 1.345 -- the "95 %" of the RobustPolicy::Huber doc (G3); E[psi^2] by integration;
+ *   8. the form the code evaluates (plans/18 Ф28.K, F118): r = f - p solves a r^2 + B r - q = 0 with
+ *      a = n + 1, B = a p - n R, q = R (n p + nu^2), whose discriminant B^2 + 4 a q is item 4's;
+ *      its positive root is 2q/(B + sqrt(B^2 + 4aq)) = (sqrt(B^2 + 4aq) - B)/(2a), item 4's root
+ *      minus p, and the code takes the first form for B >= 0 and the second for B < 0, so neither
+ *      subtracts two numbers of one sign (G1). At nu = 0 both forms are R n/(n + 1) for every
+ *      p >= 0 (G3). The tests' tolerance 2.4e-15 covers the round-off the two Gappa proofs bound,
+ *      2.112e-15 relative (student_t_b_pos_roundoff.gappa, student_t_b_neg_roundoff.gappa), with
+ *      the fixture's rounding and the test's quotient. It prints the decade sweep
+ *      `the_student_t_variance_is_the_root_at_every_decade` asserts: p/R = 10^k, k = -17..17, and
+ *      p = 0, at 80 digits of which 63 survive the cancellation.
  * derivations/robust_weights.gp is the second engine: the Huber roots and Student-t variances at
  * 60 digits that `robust.rs::the_weights_are_the_roots_of_their_defining_equations` asserts, the
  * efficiency, and both influence asymptotes.
@@ -92,3 +102,46 @@ fpprec : 30$
 eff : bfloat(subst(c = 1345/1000, (2 * cdf(c) - 1)^2 / epsi2))$
 printf(true, "Huber Gaussian efficiency at c = 1.345: ~a~%", eff)$
 zero("huber_1345_is_95_percent_efficient", if abs(eff - 0.95b0) < 5b-4 then 0 else 1)$
+
+/* 8. the code's root, without the cancellation of f - p */
+aa8 : n + 1$
+B8 : aa8 * p - n * r$
+q8 : r * (n * p + nu^2)$
+D8 : B8^2 + 4 * aa8 * q8$
+zero("student_t_r_is_f_minus_p_and_solves_a_r2_plus_b_r_minus_q",
+  ratsimp(subst(f = x + p, quad) - (aa8 * x^2 + B8 * x - q8)))$
+zero("student_t_discriminant_is_item_4s", expand(D8 - (bb^2 + 4 * aa * r * nu^2)))$
+zero("student_t_both_root_forms_agree", ratsimp(((sqrt(D8) - B8) / (2 * aa8)) * (B8 + sqrt(D8)) - 2 * q8))$
+zero("student_t_code_root_is_item_4s_root_minus_p",
+  ratsimp(subst(sqrt(D8) = sqrt(bb^2 + 4 * aa * r * nu^2), (sqrt(D8) - B8) / (2 * aa8)) - (froot - p)))$
+zero("student_t_both_forms_are_r_n_over_n_plus_1_at_zero_innovation",
+  block([s0 : aa8 * p + n * r],
+    expand(subst(nu = 0, D8) - s0^2)^2
+    + ratsimp(subst(nu = 0, 2 * q8) / (B8 + s0) - r * n / (n + 1))^2
+    + ratsimp((s0 - B8) / (2 * aa8) - r * n / (n + 1))^2))$
+
+/* The tests' tolerance B: the Gappa bound rho, the fixture read as its nearest double (within u
+   of the root), and got/want rounded once, the subtraction from 1 being exact; at nu = 0 the
+   reference R n/(n + 1) is formed in two roundings instead and the tolerance is B + 2 eps. A literal
+   is at least (1 - u) times its decimal value, and B + 2 eps rounds once. */
+block([u : 2^-53, rho : 2112/10^18, B : 24/10^16, g, g0],
+  g : (rho + u)/(1 - u),
+  g0 : ((1 + rho) - (1 - u)^2)/(1 - u)^2,
+  zero("student_t_test_tolerances_cover_the_gappa_bound_and_the_fixture_rounding",
+    (if is((1 - u)*B >= g + u*(1 + g)) then 0 else 1)
+    + (if is((1 - u)*((1 - u)*B + 4*u) >= g0 + u*(1 + g0)) then 0 else 1)))$
+
+/* The decade sweep at the exact doubles the test passes, R = 1, n = 5, nu = 1 and 30. */
+f64(x) := if x = 0 then 0 else block([e : floor(log(abs(x)) / log(2)), m],
+  if 2^e > abs(x) then e : e - 1, if 2^(e + 1) <= abs(x) then e : e + 1,
+  m : round(x * 2^(52 - e)), m * 2^(e - 52))$
+student_r(pp, rr, vv, nn) := block([a0 : nn + 1, b0, q0, d0],
+  b0 : a0 * pp - nn * rr, q0 : rr * (nn * pp + vv^2), d0 : b0^2 + 4 * a0 * q0,
+  (sqrt(d0) - b0) / (2 * a0))$
+/* 80 digits, since for B > 0 this form cancels up to 17 of them; the test reads 25. */
+fpprec : 80$
+for k : -17 thru 17 do for vv in [1, 30] do
+  printf(true, "studentt 1e~d 1 ~d 5 ~a~%", k, vv, bfloat(student_r(f64(10^k), 1, vv, 5)))$
+for vv in [1, 30] do printf(true, "studentt 0 1 ~d 5 ~a~%", vv, bfloat(student_r(0, 1, vv, 5)))$
+printf(true, "studentt 5 6 1 5 ~a~%", bfloat(student_r(5, 6, 1, 5)))$
+

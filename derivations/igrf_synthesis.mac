@@ -149,3 +149,63 @@ field(theta, lam, rad, year) := block([dt : year - 2025, br : 0, bt : 0, bp : 0,
 /* Doubles in radians and kilometres, so the reference is the field at the very inputs the test passes. */
 points : [[1, 1/2, 27085/4, 2025], [7/4, 7/2, 13143/2, 2030], [21/8, 21/4, 7000, 55/2 + 2000]]$
 for q in points do printf(true, "field ~a ~a~%", q, apply(field, q))$
+
+/* ---- 6. the polar axis (plans/18 Ф28.K, F116) ------------------------------------------------ */
+/* On the axis sin(theta) = 0 and B_phi's (m/sin theta) P_n^m is 0/0. P_n^1 = sin(theta) times a
+   polynomial in cos(theta), so P_n^1/sin(theta) has a limit, and by l'Hopital it is
+   dP_n^1/dtheta / cos(theta) = cos(theta) dP_n^1/dtheta, as cos(theta) = +-1 there (G1). The limit
+   is sqrt(n(n+1)/2) on the north axis and (-1)^(n+1) sqrt(n(n+1)/2) on the south (G3). For m >= 2,
+   P_n^m/sin(theta) carries sin(theta)^(m-1) and vanishes, and dP_n^m/dtheta vanishes on the axis for
+   every m but 1 (G3). */
+block([bad : 0],
+  for n : 1 thru N do for c0 in [1, -1] do
+    if radcan(subst([s = 0, c = c0], ratsimp(schmidt(n, 1) / s))
+              - c0 * subst([s = 0, c = c0], dtheta(schmidt(n, 1)))) # 0 then bad : bad + 1,
+  zero("p_n1_over_sin_theta_is_cos_theta_dp_n1_dtheta_on_both_axes_through_degree_13", bad))$
+block([bad : 0],
+  for n : 1 thru N do for c0 in [1, -1] do
+    if radcan(subst([s = 0, c = c0], ratsimp(schmidt(n, 1) / s)) - c0^(n + 1) * sqrt(n*(n + 1)/2)) # 0
+    then bad : bad + 1,
+  zero("the_axis_limit_is_sqrt_n_n_plus_1_over_2_times_minus_1_to_the_n_plus_1_on_the_south", bad))$
+block([bad : 0],
+  for n : 2 thru N do for m : 2 thru n do for c0 in [1, -1] do
+    if subst([s = 0, c = c0], ratsimp(schmidt(n, m) / s)) # 0 then bad : bad + 1,
+  zero("p_nm_over_sin_theta_vanishes_on_the_axis_for_m_from_2", bad))$
+block([bad : 0],
+  for n : 1 thru N do for m : 0 thru n do for c0 in [1, -1] do
+    if m # 1 and subst([s = 0, c = c0], dtheta(schmidt(n, m))) # 0 then bad : bad + 1,
+  zero("dp_nm_dtheta_vanishes_on_the_axis_for_every_m_but_1", bad))$
+/* One degree's m = 1 term through field_ecef's rotation on the axis (cos(theta) = c0 = +-1,
+   sin(theta) = 0): B_theta = -w D (g cos la + h sin la) with D = dP_n^1/dtheta, the code's limit
+   B_phi = w c0 D (g sin la - h cos la). The horizontal ECEF field is -w c0 D (g, h) at every
+   longitude la, and c0 D is the limit above: the closed form -sum (a/r)^(n+2) sqrt(n(n+1)/2) (g, h),
+   with the factor (-1)^(n+1) on the south axis (G1). */
+block([bt, bp, ex, ey],
+  bt : -w * D * (g*cos(la) + h*sin(la)),
+  bp : w * c0 * D * (g*sin(la) - h*cos(la)),
+  ex : bt*c0*cos(la) - bp*sin(la),
+  ey : bt*c0*sin(la) + bp*cos(la),
+  zero("on_the_axis_the_horizontal_ecef_field_is_minus_w_c0_d_g_h_at_every_longitude",
+    trigsimp(ratsubst(1, c0^2, expand((ex + w*c0*D*g)^2 + (ey + w*c0*D*h)^2)))))$
+
+/* The axis field in closed form, and field_ecef's reference at the exact double positions the
+   module test passes near the axis, both in nT at 60 digits, epoch 2025.0. */
+fpprec : 60$
+axis_field(rad, c0) := block([x : 0, y : 0, z : 0],
+  for n : 1 thru N do block([w : (aref/rad)^(n + 2)],
+    x : x - w * c0^(n + 1) * sqrt(n*(n + 1)/2) * G[n, 1],
+    y : y - w * c0^(n + 1) * sqrt(n*(n + 1)/2) * H[n, 1],
+    z : z + w * c0^(n + 1) * (n + 1) * G[n, 0]),
+  bfloat([x, y, z]))$
+ecef_field(px, py, pz) := block([rr, th, la, b, st, ct, sl, cl],
+  rr : bfloat(sqrt(px^2 + py^2 + pz^2)),
+  th : bfloat(atan2(sqrt(px^2 + py^2), pz)),
+  la : if px = 0 and py = 0 then 0 else bfloat(atan2(py, px)),
+  b : field(th, la, rr / 1000, 2025),
+  st : bfloat(sin(th)), ct : bfloat(cos(th)), sl : bfloat(sin(la)), cl : bfloat(cos(la)),
+  [b[1]*st*cl + b[2]*ct*cl - b[3]*sl, b[1]*st*sl + b[2]*ct*sl + b[3]*cl, b[1]*ct - b[2]*st])$
+printf(true, "axis north 6771.2 km ~a~%", axis_field(67712/10, 1))$
+printf(true, "axis south 6771.2 km ~a~%", axis_field(67712/10, -1))$
+/* Off the axis by 2^-21 (1, 2) m to 2^-6 (1, 2) m, at longitude atan2(2, 1) = 1.107 rad, and 1 m. */
+for k in [21, 14, 7, 5, 0] do for z0 in [6771200, -6771200] do
+  printf(true, "near ~d ~d ~a~%", k, z0, ecef_field(2^(-k), 2^(1 - k), z0))$

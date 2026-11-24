@@ -6,7 +6,7 @@
  *     V(phi)   = I + b K + c K^2,           c = (th - sin th)/th^3,
  *     V(phi)^-1 = I - K/2 + d K^2,          d = 1/th^2 - (1 + cos th)/(2 th sin th),
  * with the series I + K + K^2/2, I + K/2 + K^2/6 and I - K/2 + K^2/12 below th = 1e-8, and
- *     Log(R) = th/(2 sin th) vee(R - R^T),  th = acos((tr R - 1)/2),
+ *     Log(R) = 2 atan2(|v|, w) v/|v|,  (w, v) Shepperd's unit quaternion of R with w >= 0,
  *     SE(3): Exp(rho, phi) = (Exp(phi), V(phi) rho),   Ad_g = [[R, [t]x R], [0, R]].
  *
  * Shown here, each line printing `<name>: 0`:
@@ -21,11 +21,22 @@
  *   5. tr Exp(th n) = 1 + 2 cos th and vee(Exp - Exp^T) = 2 sin th n, so the logarithm inverts the
  *      exponential on th in (0, pi);
  *   6. g xi^ g^-1 = (Ad_g xi)^ on the 4x4 algebra, for a rotation parametrised by a quaternion so
- *      that R^T R = I identically -- the adjoint identity g Exp(xi) g^-1 = Exp(Ad_g xi) term by term.
+ *      that R^T R = I identically -- the adjoint identity g Exp(xi) g^-1 = Exp(Ad_g xi) term by term;
+ *   7. the logarithm through the quaternion (plans/18 Ф28.K, F117): Shepperd's four candidates on
+ *      Exp(th n) are 4 cos^2(th/2) and 4 sin^2(th/2) n_i^2, and its numerators 4 cos(th/2) sin(th/2) n_i
+ *      and 4 sin^2(th/2) n_i n_j, so it returns +-(cos(th/2), sin(th/2) n) (G1; the branch algebra
+ *      for a general unit quaternion is derivations/attitude_control.mac item 2); 2 atan2(sin(th/2),
+ *      cos(th/2)) = th on (0, pi), so 2 atan2(|v|, w) v/|v| = th n (G1); at the half-turn the
+ *      candidates are 0 and 4 n_i^2 and every skew numerator is 0, so w = 0 and the angle is
+ *      2 atan2(|v|, 0) = pi exactly, where th/(2 sin th) was 0/0 (G3).
  * Then it prints the fixture of `the_exponential_and_both_jacobians_are_their_series_definitions` in
  * se3.rs: Exp, V and V^-1 at phi = (3/10, -7/10, 11/10), and Exp(rho, phi)'s translation at
  * rho = (1, -2, 1/2), summed from the series to k = 80 at 50 digits. derivations/se3_exponential.gp
- * sums the same series at 100 digits and compares them with the closed forms.
+ * sums the same series at 100 digits and compares them with the closed forms. Last, the fixture of
+ * `the_logarithm_near_and_at_the_half_turn_is_the_rotation_vector`: Exp(th n) rounded to doubles
+ * for th = pi - 10^-k, k = 1..10, n cycling over (2, -3, 6)/7, (6, 2, -3)/7 and (-3, 6, 2)/7, and
+ * the exact logarithm of those doubles through Shepperd's quaternion at 60 digits, the value
+ * rotation_angle_roundoff.mac bounds the code against; se3_exponential.gp recomputes it.
  *
  * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/se3_exponential.mac </dev/null
  */
@@ -126,3 +137,57 @@ for i : 1 thru 3 do for j : 1 thru 3 do printf(true, "Exp[~d][~d] = ~a~%", i - 1
 for i : 1 thru 3 do for j : 1 thru 3 do printf(true, "V[~d][~d] = ~a~%", i - 1, j - 1, jacS[i, j])$
 for i : 1 thru 3 do for j : 1 thru 3 do printf(true, "Vinv[~d][~d] = ~a~%", i - 1, j - 1, jinvS[i, j])$
 for i : 1 thru 3 do printf(true, "t[~d] = ~a~%", i - 1, transS[i, 1])$
+
+/* 7. the logarithm through Shepperd's quaternion, on the rational axis of item 5 */
+assume(th > 0, th < %pi)$
+trs : mat_trace(Rn)$
+c2 : cos(th/2)$ s2 : sin(th/2)$
+zero("shepperd_candidates_on_exp_are_four_half_angle_squares",
+  trigsimp(trigreduce(ratsimp((1 + trs - 4*c2^2)^2
+    + sum((1 + 2*Rn[i, i] - trs - 4*s2^2*nax[i]^2)^2, i, 1, 3)))))$
+zero("shepperd_numerators_on_exp_are_four_half_angle_products",
+  trigsimp(trigreduce(ratsimp(sum((vee(Rn - transpose(Rn))[i] - 4*c2*s2*nax[i])^2, i, 1, 3)
+    + (Rn[1, 2] + Rn[2, 1] - 4*s2^2*nax[1]*nax[2])^2 + (Rn[1, 3] + Rn[3, 1] - 4*s2^2*nax[1]*nax[3])^2
+    + (Rn[2, 3] + Rn[3, 2] - 4*s2^2*nax[2]*nax[3])^2))))$
+zero("log_angle_is_two_atan2_of_the_half_angle_pair", 2*atan2(sin(th/2), cos(th/2)) - th)$
+forget(th > 0, th < %pi)$
+Rpi : subst(th = %pi, Rn)$
+trpi : mat_trace(Rpi)$
+zero("at_the_half_turn_the_candidates_are_0_and_4_n_squared",
+  ratsimp((1 + trpi)^2 + sum((1 + 2*Rpi[i, i] - trpi - 4*nax[i]^2)^2, i, 1, 3)))$
+zero("at_the_half_turn_every_skew_numerator_vanishes",
+  ratsimp(sum(vee(Rpi - transpose(Rpi))[i]^2, i, 1, 3)))$
+zero("at_the_half_turn_the_angle_is_pi", 2*atan2(1, 0) - %pi)$
+
+/* The fixture: Exp(th n) rounded to doubles, th = pi - 10^-k, and the exact logarithm of those
+   doubles at 60 digits; `moved` is how far rounding the matrix moved it from th n. */
+fpprec : 60$
+f64(x) := if x = 0 then 0 else block([e : floor(log(abs(x)) / log(2)), m],
+  if 2^e > abs(x) then e : e - 1, if 2^(e + 1) <= abs(x) then e : e + 1,
+  m : round(x * 2^(52 - e)), m * 2^(e - 52))$
+/* Shepperd's quaternion of a row-major list of nine exact entries, on the branch the code takes,
+   and from it [angle, rotation vector]; the largest candidate must clear the next by 2^-48, more
+   than the code's candidate error (shepperd_roundoff.gappa), so the code takes this branch too. */
+shepperd_log(m) := block([tr, cs, b, rt, h, q, s, srt],
+  tr : m[1] + m[5] + m[9],
+  cs : [1 + tr, 1 + 2*m[1] - tr, 1 + 2*m[5] - tr, 1 + 2*m[9] - tr],
+  b : 1, for i : 2 thru 4 do if cs[i] > cs[b] then b : i,
+  srt : sort(cs),
+  if srt[4] - srt[3] <= 2^-48 then error("candidates within 2^-48 of a tie"),
+  rt : bfloat(sqrt(cs[b])), h : 1/(2*rt),
+  q : if b = 1 then [rt/2, (m[8] - m[6])*h, (m[3] - m[7])*h, (m[4] - m[2])*h]
+      else if b = 2 then [(m[8] - m[6])*h, rt/2, (m[2] + m[4])*h, (m[3] + m[7])*h]
+      else if b = 3 then [(m[3] - m[7])*h, (m[2] + m[4])*h, rt/2, (m[6] + m[8])*h]
+      else [(m[4] - m[2])*h, (m[3] + m[7])*h, (m[6] + m[8])*h, rt/2],
+  if q[1] < 0 then q : -q,
+  s : sqrt(q[2]^2 + q[3]^2 + q[4]^2),
+  [2*atan2(s, q[1]), 2*atan2(s, q[1])/s * rest(q)])$
+axes : [[2, -3, 6]/7, [6, 2, -3]/7, [-3, 6, 2]/7]$
+for k : 1 thru 10 do block([nk : axes[mod(k - 1, 3) + 1], t, E, Ed, lg],
+  t : %pi - 10^(-k),
+  E : ident(3) + sin(t)*hat(nk) + (1 - cos(t))*hat(nk) . hat(nk),
+  Ed : map(lambda([x], f64(bfloat(x))), flatten(args(E))),
+  lg : shepperd_log(Ed),
+  printf(true, "halfturn ~d ~a ~a moved ~a~%", k, bfloat(Ed), bfloat(lg[2]),
+    bfloat(lmax(abs(lg[2] - t*nk)))))$
+

@@ -3833,21 +3833,18 @@ exclude_re = [
 
     # --- `estimation/se3.rs`. The small-angle split, at the split and one decade wide of it.
     #
-    # `theta2 < EPS * EPS` → `<=` (and `theta < EPS` → `<=` in `so3_log`) moves the branch at one
-    # value of the argument, `‖φ‖ = 1e-8` to the bit, and there both branches return the same
-    # matrix. Measured: for the axis representative `φ = (1e-8, 0, 0)` — the only one whose squared
-    # norm lands on `EPS*EPS` without being searched for — `so3_exp`, `left_jacobian` and
+    # `theta2 < EPS * EPS` → `<=` moves the branch at one value of the argument, `‖φ‖ = 1e-8` to
+    # the bit, and there both branches return the same matrix. Measured: for the axis representative
+    # `φ = (1e-8, 0, 0)` — the only one whose squared norm lands on `EPS*EPS` without being searched
+    # for — `so3_exp`, `left_jacobian` and
     # `left_jacobian_inv` agree bit for bit across the split, because every closed-form coefficient
     # rounds to its series value there (`sin θ/θ = 1`, `2 sin²(θ/2)/θ² = 0.5`, and `1 − cos θ` is
     # itself below an ulp of 1). For a searched non-axis representative,
     # `φ = (1.1475409836065575e-9, 9.93393928363483e-9, 0)`, the largest gap is 5.7e-18 — nine
-    # decades under the 1e-11 this module's own adjoint test carries. `so3_log` is the same
-    # statement arithmetically: at `θ = 1e-8`, `sin θ == θ` exactly in f64, so `0.5·θ/sin θ` is the
-    # `0.5` the small branch uses.
+    # decades under the 1e-11 this module's own adjoint test carries.
     "se3\\.rs:68:15: replace < with <= in so3_exp",
-    "se3\\.rs:87:14: replace < with <= in so3_log",
-    "se3\\.rs:102:15: replace < with <= in left_jacobian",
-    "se3\\.rs:127:15: replace < with <= in left_jacobian_inv",
+    "se3\\.rs:163:15: replace < with <= in left_jacobian",
+    "se3\\.rs:188:15: replace < with <= in left_jacobian_inv",
 
     # `EPS * EPS` → `EPS + EPS` widens `left_jacobian_inv`'s series band from `θ < 1e-8` to
     # `θ < 1.4e-4`, and over that band the series is the *better* of the two. Measured relative
@@ -3859,7 +3856,7 @@ exclude_re = [
     # stays at 1e-16 absolute on a matrix of order one for both. Recorded rather than adopted —
     # `EPS` is shared with `so3_exp`, whose third-order series does *not* hold to 1.4e-4 (widening
     # its band is caught), so moving this split is a separate change with its own constant.
-    "se3\\.rs:127:21: replace \\* with \\+ in left_jacobian_inv",
+    "se3\\.rs:188:21: replace \\* with \\+ in left_jacobian_inv",
 
     # --- `estimation/srukf.rs`. A rank-one downdate does not see the sign of its vector.
     #
@@ -3928,10 +3925,10 @@ exclude_re = [
     #
     # Both `+0.0` reads are multiplied by `costh`, giving the same signed zero the original does, so
     # the two tables are bit-identical and nothing downstream can differ.
-    "igrf\\.rs:68:33: replace \\* with / in schmidt_legendre",
-    "igrf\\.rs:69:41: replace - with \\+ in schmidt_legendre",
-    "igrf\\.rs:69:41: replace - with / in schmidt_legendre",
-    "igrf\\.rs:74:57: replace \\* with / in schmidt_legendre",
+    "igrf\\.rs:75:33: replace \\* with / in schmidt_legendre",
+    "igrf\\.rs:76:41: replace - with \\+ in schmidt_legendre",
+    "igrf\\.rs:76:41: replace - with / in schmidt_legendre",
+    "igrf\\.rs:81:57: replace \\* with / in schmidt_legendre",
 
     # --- `gnss/gpt3.rs`. The eastern clamp cannot bind.
     #
@@ -4590,11 +4587,11 @@ exclude_re = [
     # `normalized > threshold` -> `>=` in `ChiSquareInflation`. The two branches differ only where
     # `normalized == threshold`, and there the taken branch computes `normalized / threshold`, which is
     # `1.0` — the same factor the `else` supplies. The mutant is the same function.
-    "robust\\.rs:380:37: replace > with >= in RobustPolicy::effective_variance",
+    "robust\\.rs:396:37: replace > with >= in RobustPolicy::effective_variance",
 
     # `*component += weight * value` -> `-=` while accumulating `projected = Sᵀh`. The only consumer is
     # `prior = Σ projected²` on the next line, so negating every component leaves it identical.
-    "robust\\.rs:489:24: replace \\+= with -= in robust_update",
+    "robust\\.rs:505:24: replace \\+= with -= in robust_update",
 
     # `acc += k[a][c] * sy[c][j]` -> `-=` while forming `U = K S_y`. Each column of `U` is passed to
     # `cholupdate(&mut self.s, &col, -1.0)`, whose effect is the rank-1 downdate `S Sᵀ − col colᵀ`:

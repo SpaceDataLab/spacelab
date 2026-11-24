@@ -25,8 +25,18 @@
  *   7. small angles: v = sin(t/2) n -> t n/2 and sigma = tan(t/4) n -> t n/4, so the PD law's
  *      stiffness is K/2 and the MRP law's K/4 (G3); the PD loop I t'' + P t' + (K/2) t = 0 has
  *      w_n = sqrt(K/(2I)), zeta = P/sqrt(2 I K), critical damping at P = sqrt(2 I K), and then
- *      t(s) = t0 (1 + w_n s) exp(-w_n s) is its solution from rest (G2).
- * derivations/attitude_control.gp re-checks (2), (5) and (6) in exact rationals at random states.
+ *      t(s) = t0 (1 + w_n s) exp(-w_n s) is its solution from rest (G2);
+ *   8. the error angle (plans/18 Ф28.K, F119): for q0 in (0, 1) and |v| = sqrt(1 - q0^2),
+ *      2 atan2(|v|, q0) has the cosine and sine of 2 acos(q0), and both lie in (0, pi), so the two
+ *      are one function; on the half-angle pair tan(t/2) = |v|/q0, so 2 atan2(|v|, q0) = t (G1).
+ *      acos is ill-conditioned at q0 -> 1: cos(5e-9) rounds to 1, so 2 acos(q0) returned 0 for every
+ *      angle up to 2e-8 rad, while |v| = sin(t/2) keeps its relative accuracy. It prints the fixture
+ *      of `the_error_angle_is_the_rotation_angle_at_every_decade`: Rodrigues' exp(t [n]x) rounded
+ *      to doubles for t = 10^-k, k = 1..10, n cycling over (2, -3, 6)/7, (6, 2, -3)/7, (-3, 6, 2)/7,
+ *      and the exact angle of those doubles through Shepperd's quaternion at 60 digits, the value
+ *      rotation_angle_roundoff.mac bounds the code against.
+ * derivations/attitude_control.gp re-checks (2), (5) and (6) in exact rationals at random states,
+ * and recomputes the fixture of (8).
  *
  * Run: timeout 300 maxima --very-quiet -Q -b derivations/attitude_control.mac </dev/null
  */
@@ -127,3 +137,50 @@ zero("critically_damped_response_solves_the_loop",
   radcan(subst([K = 2*Ia*wn^2], subst([P = sqrt(2*Ia*K)], Ia*diff(th, tt, 2) + P*diff(th, tt) + (K/2)*th))))$
 zero("critically_damped_response_starts_at_rest",
   subst(tt = 0, th) - t0 + subst(tt = 0, diff(th, tt)))$
+
+/* ---- 8. the error angle --------------------------------------------------------------------- */
+
+assume(qw8 > 0, qw8 < 1)$
+vn8 : sqrt(1 - qw8^2)$
+zero("two_atan2_has_the_cosine_of_two_acos",
+  ratsimp(trigexpand(cos(2*atan2(vn8, qw8))) - trigexpand(cos(2*acos(qw8)))))$
+zero("two_atan2_has_the_sine_of_two_acos",
+  ratsimp(trigexpand(sin(2*atan2(vn8, qw8))) - trigexpand(sin(2*acos(qw8)))))$
+forget(qw8 > 0, qw8 < 1)$
+assume(ta8 > 0, ta8 < %pi)$
+zero("half_angle_tangent_is_vector_norm_over_scalar", trigsimp(tan(ta8/2) - sin(ta8/2)/cos(ta8/2)))$
+zero("two_atan2_of_the_half_angle_pair_is_the_angle", 2*atan2(sin(ta8/2), cos(ta8/2)) - ta8)$
+forget(ta8 > 0, ta8 < %pi)$
+/* The fixture: exp(t [n]x) rounded to doubles, t = 10^-k, and the exact angle of those doubles
+   through Shepperd's quaternion at 60 digits; `moved` is how far, relative, rounding the matrix
+   moved it from t. */
+fpprec : 60$
+f64(x) := if x = 0 then 0 else block([e : floor(log(abs(x)) / log(2)), m],
+  if 2^e > abs(x) then e : e - 1, if 2^(e + 1) <= abs(x) then e : e + 1,
+  m : round(x * 2^(52 - e)), m * 2^(e - 52))$
+/* Shepperd's quaternion of a row-major list of nine exact entries, on the branch the code takes,
+   and from it [angle, rotation vector]; the largest candidate must clear the next by 2^-48, more
+   than the code's candidate error (shepperd_roundoff.gappa), so the code takes this branch too. */
+shepperd_log(m) := block([tr, cs, b, rt, h, q, s, srt],
+  tr : m[1] + m[5] + m[9],
+  cs : [1 + tr, 1 + 2*m[1] - tr, 1 + 2*m[5] - tr, 1 + 2*m[9] - tr],
+  b : 1, for i : 2 thru 4 do if cs[i] > cs[b] then b : i,
+  srt : sort(cs),
+  if srt[4] - srt[3] <= 2^-48 then error("candidates within 2^-48 of a tie"),
+  rt : bfloat(sqrt(cs[b])), h : 1/(2*rt),
+  q : if b = 1 then [rt/2, (m[8] - m[6])*h, (m[3] - m[7])*h, (m[4] - m[2])*h]
+      else if b = 2 then [(m[8] - m[6])*h, rt/2, (m[2] + m[4])*h, (m[3] + m[7])*h]
+      else if b = 3 then [(m[3] - m[7])*h, (m[2] + m[4])*h, rt/2, (m[6] + m[8])*h]
+      else [(m[4] - m[2])*h, (m[3] + m[7])*h, (m[6] + m[8])*h, rt/2],
+  if q[1] < 0 then q : -q,
+  s : sqrt(q[2]^2 + q[3]^2 + q[4]^2),
+  [2*atan2(s, q[1]), 2*atan2(s, q[1])/s * rest(q)])$
+axes : [[2, -3, 6]/7, [6, 2, -3]/7, [-3, 6, 2]/7]$
+for k : 1 thru 10 do block([nk : axes[mod(k - 1, 3) + 1], ang, E, Ed, lg],
+  ang : 10^(-k),
+  E : id3 + sin(ang)*skew(nk) + (1 - cos(ang))*skew(nk) . skew(nk),
+  Ed : map(lambda([x], f64(bfloat(x))), flatten(args(E))),
+  lg : shepperd_log(Ed),
+  printf(true, "smallangle ~d ~a ~a moved ~a~%", k, bfloat(Ed), bfloat(lg[1]),
+    bfloat(abs(lg[1]/ang - 1))))$
+

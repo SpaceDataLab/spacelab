@@ -1,0 +1,81 @@
+# The round-off of the Student-t effective variance, B < 0 branch, proved (plans/18 Ф28.K, F118):
+# the code, model, domain, exact quantities and hand-proved hypotheses are those of
+# student_t_b_pos_roundoff.gappa; only the last three operations differ,
+#
+#   r = (root - b) / (2 a),   2 a exact,   against Rx = (RT - Bx)/(2 A).
+#
+#   timeout 120 gappa -Wno-null-denominator student_t_b_neg_roundoff.gappa
+#
+# Result: |r - Rx| <= 1.722e-15 Rx for computed b < 0 (Gappa finds 1.7217e-15). At p = v = 0 the
+# code returns R n/(n + 1) from root = |b| and Rx is the same.
+
+@rnd = float<ieee_64, ne>;
+
+p = rnd(pp);
+R = rnd(RR);
+v = rnd(vv);
+n = rnd(nn);
+
+a = rnd(n + 1);
+t1 = rnd(a * p);
+t2 = rnd(n * R);
+b = rnd(t1 - t2);
+t3 = rnd(n * p);
+t4 = rnd(v * v);
+t5 = rnd(t3 + t4);
+q = rnd(R * t5);
+b2 = rnd(b * b);
+fa = rnd(4 * a);
+t6 = rnd(fa * q);
+ds = rnd(b2 + t6);
+root = rnd(sqrt(ds));
+nm = rnd(root - b);
+twoa = rnd(2 * a);
+r = rnd(nm / twoa);
+
+A = n + 1;
+X = A * p;
+Y = n * R;
+S = X + Y;
+Bx = X - Y;
+W = v * v;
+NP = n * p;
+Q = R * (NP + W);
+AQ = 4 * A * Q;
+DS = Bx * Bx + AQ;
+RT = sqrt(DS);
+EB = (b - Bx) / S;
+Nm = RT - Bx;
+Rx = Nm / (2 * A);
+
+{ p in [0, 0x1p60] /\ R in [1, 4] /\ v in [0, 0x1p40] /\ n in [0x1p-10, 0x1p20]
+  /\ X / S in [0, 1] /\ Y / S in [0, 1] /\ NP / (NP + W) in [0, 1] /\ W / (NP + W) in [0, 1]
+  /\ S / RT in [0, 1] /\ Bx / RT in [-1, 1] /\ AQ / DS in [0, 1] /\ RT * RT / DS in [1, 1]
+  /\ b in [-0x1p90, 0]
+  -> r -/ Rx in [-1.722e-15, 1.722e-15] }
+
+$ p in (0x1p-500), v in (0x1p-500);
+$ b in (-0x1p-200, 0x1p-200);
+
+(q - Q) / Q -> (q - R * t5) / (R * t5) * (t5 / (NP + W)) + (t5 - (NP + W)) / (NP + W);
+t5 / (NP + W) -> 1 + (t5 - (NP + W)) / (NP + W);
+(t5 - (NP + W)) / (NP + W) -> (t5 - (t3 + t4)) / (t3 + t4) * ((t3 + t4) / (NP + W)) + (t3 - NP) / NP * (NP / (NP + W)) + (t4 - W) / (NP + W);
+(t3 + t4) / (NP + W) -> 1 + (t3 - NP) / NP * (NP / (NP + W)) + (t4 - W) / (NP + W);
+(t4 - W) / (NP + W) -> (t4 - W) / W * (W / (NP + W));
+
+EB -> (b - (t1 - t2)) / (t1 - t2) * ((t1 - t2) / S) + (t1 - X) / S - (t2 - Y) / Y * (Y / S);
+(t1 - t2) / S -> X / S - Y / S + (t1 - X) / S - (t2 - Y) / Y * (Y / S);
+(t1 - X) / S -> (t1 - X) / X * (X / S);
+t1 - X -> (t1 - a * p) + (a - A) * p;
+
+(ds - DS) / DS -> (ds - (b2 + t6)) / (b2 + t6) * ((b2 + t6) / DS) + (b2 - b * b) / DS + (b * b - Bx * Bx) / DS + (t6 - AQ) / DS;
+(b2 + t6) / DS -> 1 + (b2 - b * b) / DS + (b * b - Bx * Bx) / DS + (t6 - AQ) / DS;
+(t6 - AQ) / DS -> (t6 - AQ) / AQ * (AQ / DS);
+(t6 - AQ) / DS -> t6 / DS - AQ / DS;
+(b2 - b * b) / DS -> (b2 - b * b) / (b * b) * (b * b / DS);
+b * b / DS -> (Bx / RT + EB * (S / RT)) * (Bx / RT + EB * (S / RT)) * (RT * RT / DS);
+(b * b - Bx * Bx) / DS -> EB * (2 * (Bx / RT) + EB * (S / RT)) * (S / RT) * (RT * RT / DS);
+
+Nm / RT -> 1 - b / RT + EB * (S / RT);
+(nm - Nm) / Nm -> (nm - (root - b)) / (root - b) * ((root - b) / Nm) + (root - RT) / RT / (Nm / RT) - EB * (S / RT) / (Nm / RT);
+(root - b) / Nm -> 1 + (root - RT) / RT / (Nm / RT) - EB * (S / RT) / (Nm / RT);

@@ -52,3 +52,47 @@ printf("states where q' = 1/2 q (x) w does not give R' = R [w]x: %d\n", off_kin)
 printf("states off the MRP kinematics: %d\n", off_mrp);
 printf("states where V' + P w.w is not exactly zero: %d\n", off_lyap);
 printf("states where Rr^T R lacks, or R Rr^T has, body-rate kinematics: %d\n", off_err);
+
+/* Item 8's fixture (plans/18 Ф28.K, F119), from Rodrigues' formula here: exp(t [n]x) for t = 10^-k
+   rounded to doubles, and the exact angle of those doubles through Shepperd's quaternion, against
+   the 40 digits attitude_control.mac prints and attitude.rs's test reads at 25. */
+default(realprecision, 100);
+f64(x) = { my(e, k); if (x == 0, return(0)); e = exponent(x * 1.); k = 52 - e; round(x * 2^k) / 2^k; }
+\\ Shepperd's quaternion of an exact 3x3 matrix on the branch the code takes, sign-fixed to w >= 0,
+\\ and from it [angle, rotation vector]; atan2(s, w) is arg(w + i s), w >= 0.
+shep(m) = {
+  my(tr = m[1, 1] + m[2, 2] + m[3, 3], b = 1, c, rt, h, q, s, t);
+  c = [1 + tr, 1 + 2 * m[1, 1] - tr, 1 + 2 * m[2, 2] - tr, 1 + 2 * m[3, 3] - tr];
+  for (i = 2, 4, if (c[i] > c[b], b = i));
+  rt = sqrt(c[b]); h = 1 / (2 * rt);
+  q = if (b == 1, [rt / 2, (m[3, 2] - m[2, 3]) * h, (m[1, 3] - m[3, 1]) * h, (m[2, 1] - m[1, 2]) * h],
+      if (b == 2, [(m[3, 2] - m[2, 3]) * h, rt / 2, (m[1, 2] + m[2, 1]) * h, (m[1, 3] + m[3, 1]) * h],
+      if (b == 3, [(m[1, 3] - m[3, 1]) * h, (m[1, 2] + m[2, 1]) * h, rt / 2, (m[2, 3] + m[3, 2]) * h],
+                  [(m[2, 1] - m[1, 2]) * h, (m[1, 3] + m[3, 1]) * h, (m[2, 3] + m[3, 2]) * h, rt / 2])));
+  if (q[1] < 0, q = -q);
+  s = sqrt(q[2]^2 + q[3]^2 + q[4]^2);
+  t = 2 * arg(q[1] + s * sqrt(-1));
+  [t, t / s * [q[2], q[3], q[4]]];
+}
+rod(n, t) = { my(K = [0, -n[3], n[2]; n[3], 0, -n[1]; -n[2], n[1], 0]); matid(3) + sin(t) * K + (1 - cos(t)) * K^2; }
+axes = [[2, -3, 6] / 7, [6, 2, -3] / 7, [-3, 6, 2] / 7];
+{
+SA = [9.999999999999999922211909320346093716959e-2,
+  9.999999999999999853704149996642222866048e-3,
+  1.000000000000000011880823284430709661740e-3,
+  1.000000000000000011924442406521109310542e-4,
+  1.000000000000000015998175552110046657130e-5,
+  9.999999999999999961845499646950247053584e-7,
+  1.000000000000000045410046869680871585447e-7,
+  9.999999999999999416880321351070552065589e-9,
+  1.000000000000000028963322798655232924639e-9,
+  1.000000000000000013351547783698234295070e-10];
+}
+{
+my(off = 0, worst = 0.);
+for (k = 1, 10,
+  my(n = axes[(k - 1) % 3 + 1], m = matrix(3, 3, i, j, f64(rod(n, 10^-k)[i, j])), d);
+  d = abs(shep(m)[1] / SA[k] - 1); worst = max(worst, d); if (d > 1e-38, off++));
+printf("small-angle error angles off Maxima's by more than 1e-38 relative: %d off (largest %.3g)\n", off, worst);
+if (off, print("FAIL: the fixture disagrees with Maxima's"));
+}

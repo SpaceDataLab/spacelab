@@ -1,0 +1,107 @@
+# The round-off of the Student-t effective variance, B >= 0 branch, proved (plans/18 Ф28.K, F118).
+# The B < 0 branch is student_t_b_neg_roundoff.gappa, with the same model and hypotheses.
+#
+#   timeout 120 gappa -Wno-null-denominator student_t_b_pos_roundoff.gappa
+#
+# Code: crates/spacelab-estimation/src/robust.rs, `student_t_variance(p, R, v, n)`. Each operation
+# one IEEE double rounding to nearest-even (no FMA), in the order Rust evaluates the source:
+#
+#   a = n + 1,   b = a p - n R,   q = R ((n p) + v v),   root = sqrt(b b + (4 a) q)
+#   b >= 0:  r = (2 q) / (b + root)          b < 0:  r = (root - b) / (2 a)
+#
+# 4 a and 2 q are exact. `sqrt` is the IEEE operation, correctly rounded (derivations/h_libm.txt,
+# row sqrt_all); nothing else here is a libm call, so the bound needs no other H-libm constant.
+#
+# Domain: R in [1, 4], p in [0, 2^60], v in [0, 2^40], n in [2^-10, 2^20], every input a double.
+# Scaling p and R by 4^j and v by 2^j scales b and root by 4^j and q by 16^j, every rounding
+# exactly, so the bound holds for every R > 0 with p/R in [0, 2^60] and v^2/R in [0, 2^80] while
+# nothing underflows or overflows; the sign of v does not enter. Not covered: n below 2^-10.
+#
+# The exact quantities (capitals) are the same formulas in real arithmetic on the same doubles, with
+# A = n + 1 exact, X = A p, Y = n R, S = X + Y, Bx = X - Y, Q = R (n p + v^2), DS = Bx^2 + 4 A Q,
+# RT = sqrt(DS), and Rx the exact positive root of A r^2 + Bx r - Q = 0, 2 Q/(Bx + RT) = (RT - Bx)/(2 A)
+# (robust_weights.mac item 8).
+#
+# Hypotheses on the exact quantities, each proved by hand: X, Y, n p, v^2 >= 0, so X/S, Y/S,
+# NP/(NP + W) and W/(NP + W) are in [0, 1] (0/0 does not arise: the split below keeps p and v off
+# 0, and at p = v = 0 the code returns exactly 0 = Rx -- b = -n R < 0, q = 0, root = |b|). The
+# discriminant is DS = (X + Y)^2 + 4 A R v^2, because 4 A Q = 4 X Y + 4 A R v^2: so RT >= S, which
+# gives S/RT in [0, 1], Bx/RT in [-1, 1] and AQ/DS in [0, 1]; and RT^2/DS = 1, which the hints
+# carry as an explicit factor, since Gappa does not simplify sqrt(DS)^2.
+#
+# Result: |r - Rx| <= 2.112e-15 Rx for computed b >= 0 (the code's branch condition), and
+# student_t_b_neg_roundoff.gappa: <= 1.722e-15 Rx for b < 0. Gappa finds 2.1103e-15 and
+# 1.7217e-15. robust_weights.mac item 8 takes the larger, 2.112e-15, for the test tolerance.
+
+@rnd = float<ieee_64, ne>;
+
+p = rnd(pp);
+R = rnd(RR);
+v = rnd(vv);
+n = rnd(nn);
+
+a = rnd(n + 1);
+t1 = rnd(a * p);
+t2 = rnd(n * R);
+b = rnd(t1 - t2);
+t3 = rnd(n * p);
+t4 = rnd(v * v);
+t5 = rnd(t3 + t4);
+q = rnd(R * t5);
+b2 = rnd(b * b);
+fa = rnd(4 * a);
+t6 = rnd(fa * q);
+ds = rnd(b2 + t6);
+root = rnd(sqrt(ds));
+den = rnd(b + root);
+num = rnd(2 * q);
+r = rnd(num / den);
+
+A = n + 1;
+X = A * p;
+Y = n * R;
+S = X + Y;
+Bx = X - Y;
+W = v * v;
+NP = n * p;
+Q = R * (NP + W);
+AQ = 4 * A * Q;
+DS = Bx * Bx + AQ;
+RT = sqrt(DS);
+EB = (b - Bx) / S;
+Dn = Bx + RT;
+Rx = 2 * Q / Dn;
+
+{ p in [0, 0x1p60] /\ R in [1, 4] /\ v in [0, 0x1p40] /\ n in [0x1p-10, 0x1p20]
+  /\ X / S in [0, 1] /\ Y / S in [0, 1] /\ NP / (NP + W) in [0, 1] /\ W / (NP + W) in [0, 1]
+  /\ S / RT in [0, 1] /\ Bx / RT in [-1, 1] /\ AQ / DS in [0, 1] /\ RT * RT / DS in [1, 1]
+  /\ b in [0, 0x1p90]
+  -> r -/ Rx in [-2.112e-15, 2.112e-15] }
+
+# Split p and v off 0 together: the relative errors of n p and v v have no bound at 0. Split b
+# off 0: b b has no relative bound there either.
+$ p in (0x1p-500), v in (0x1p-500);
+$ b in (-0x1p-200, 0x1p-200);
+
+(q - Q) / Q -> (q - R * t5) / (R * t5) * (t5 / (NP + W)) + (t5 - (NP + W)) / (NP + W);
+t5 / (NP + W) -> 1 + (t5 - (NP + W)) / (NP + W);
+(t5 - (NP + W)) / (NP + W) -> (t5 - (t3 + t4)) / (t3 + t4) * ((t3 + t4) / (NP + W)) + (t3 - NP) / NP * (NP / (NP + W)) + (t4 - W) / (NP + W);
+(t3 + t4) / (NP + W) -> 1 + (t3 - NP) / NP * (NP / (NP + W)) + (t4 - W) / (NP + W);
+(t4 - W) / (NP + W) -> (t4 - W) / W * (W / (NP + W));
+
+EB -> (b - (t1 - t2)) / (t1 - t2) * ((t1 - t2) / S) + (t1 - X) / S - (t2 - Y) / Y * (Y / S);
+(t1 - t2) / S -> X / S - Y / S + (t1 - X) / S - (t2 - Y) / Y * (Y / S);
+(t1 - X) / S -> (t1 - X) / X * (X / S);
+t1 - X -> (t1 - a * p) + (a - A) * p;
+
+(ds - DS) / DS -> (ds - (b2 + t6)) / (b2 + t6) * ((b2 + t6) / DS) + (b2 - b * b) / DS + (b * b - Bx * Bx) / DS + (t6 - AQ) / DS;
+(b2 + t6) / DS -> 1 + (b2 - b * b) / DS + (b * b - Bx * Bx) / DS + (t6 - AQ) / DS;
+(t6 - AQ) / DS -> (t6 - AQ) / AQ * (AQ / DS);
+(t6 - AQ) / DS -> t6 / DS - AQ / DS;
+(b2 - b * b) / DS -> (b2 - b * b) / (b * b) * (b * b / DS);
+b * b / DS -> (Bx / RT + EB * (S / RT)) * (Bx / RT + EB * (S / RT)) * (RT * RT / DS);
+(b * b - Bx * Bx) / DS -> EB * (2 * (Bx / RT) + EB * (S / RT)) * (S / RT) * (RT * RT / DS);
+
+Dn / RT -> 1 + b / RT - EB * (S / RT);
+(den - Dn) / Dn -> (den - (b + root)) / (b + root) * ((b + root) / Dn) + EB * (S / RT) / (Dn / RT) + (root - RT) / RT / (Dn / RT);
+(b + root) / Dn -> 1 + EB * (S / RT) / (Dn / RT) + (root - RT) / RT / (Dn / RT);

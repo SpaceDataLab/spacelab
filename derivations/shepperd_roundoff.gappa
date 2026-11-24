@@ -1,0 +1,100 @@
+# The round-off of Shepperd's quaternion extraction, proved (plans/18 Ф28.K, F117 and F119): the
+# step of `so3_log` and `AttitudeError::angle` where the matrix entries cancel.
+# rotation_angle_roundoff.mac closes the norm, `atan2` and the last products by hand from the
+# bounds proved here.
+#
+#   timeout 120 gappa -Wno-null-denominator shepperd_roundoff.gappa
+#
+# Code: crates/spacelab-estimation/src/se3.rs, `shepperd_quaternion`, and
+# crates/spacelab-control/src/attitude.rs, `quaternion_of`: the same operations, each one IEEE
+# double rounding to nearest-even (no FMA), in the order Rust evaluates the source:
+#
+#   trace = (m00 + m11) + m22
+#   c0 = 1 + trace,   ci = (1 + 2 m_ii) - trace for i = 1, 2, 3     (2 m_ii is exact)
+#   b = the first index of the largest c;  root = sqrt(c_b);  half = 0.5 / root
+#   component b = 0.5 root (exact); every other component = (m_jk -+ m_kj) * half
+#
+# The guards `c_b.max(0.0)` and `root.max(f64::MIN_POSITIVE)` never act on this domain, where
+# c_b >= 0.99. The sign fix to w >= 0 negates all four components, exactly. `sqrt` is the IEEE
+# operation, correctly rounded (derivations/h_libm.txt, row sqrt_all).
+#
+# Domain: any double matrix with every |m_ij| <= 1.001, orthogonal or not (a rotation rounded to
+# doubles has |m_ij| <= 1), whose numerators m_jk -+ m_kj are each 0 or at least 2^-500 in
+# magnitude. Not covered: a nonzero numerator below 2^-500, where its product with `half` may round
+# as a subnormal, with an absolute error of 2^-1075 but no relative bound.
+#
+# The exact quantities (capitals) are the same formulas in real arithmetic on the same doubles, on
+# the branch the code takes. Four parts, on independent copies of the variables, so that no part
+# rests on another's hypothesis:
+#  (T) the trace in the shipped order, for entries in the box;
+#  (K) each candidate, from any double trace within 2^-51 of the exact one -- the box and that
+#      bound are symmetric in the three diagonal entries, so one vector candidate stands for all
+#      three, whichever place its entry has in the trace sum;
+#  (V) a vector branch and (Z) branch 0, each given its exact candidate C in [0.99, 4.01].
+# That hypothesis, by hand: the four exact candidates sum to 4 for every matrix,
+# (1 + tr) + sum_i (1 + 2 m_ii - tr) = 4. The code takes the largest computed candidate, which is
+# at least the mean of the four, so by (K) c_b >= 1 - (2^-50 + 3 * 5 * 2^-52)/4 and
+# C_b >= c_b - 5 * 2^-52 > 1 - 2^-48. Above, C_b <= 1 + 3 * 1.001 < 4.01.
+#
+# Results, each relative to the exact component of the same branch on the same doubles (x -/ X is
+# (x - X)/X), for a positive numerator; rounding to nearest is odd, so they hold for a negative one,
+# and a zero numerator gives an exact 0:
+#   vector branch: its own component 5.04e-16, half 6.15e-16, each other component 8.38e-16;
+#   branch 0:      w 3.93e-16, half 5.04e-16, each vector component 7.26e-16.
+# rotation_angle_roundoff.mac takes these values as written here.
+
+@rnd = float<ieee_64, ne>;
+
+# (T)
+d0 = rnd(dd0); d1 = rnd(dd1); d2 = rnd(dd2);
+trs = rnd(rnd(d0 + d1) + d2);
+TRS = d0 + d1 + d2;
+
+# (K)
+ka = rnd(xka); kb = rnd(xkb); kc = rnd(xkc); tk = rnd(xtk);
+TK = ka + kb + kc;
+ck = rnd(rnd(1 + 2 * kb) - tk);
+CK = 1 + 2 * kb - TK;
+ck0 = rnd(1 + tk);
+CK0 = 1 + TK;
+
+# (V): mb is the branch's diagonal entry, NM any exact numerator m_jk -+ m_kj of two box entries
+ma = rnd(xa); mb = rnd(xb); mc = rnd(xc); tr = rnd(xtr);
+TR = ma + mb + mc;
+c = rnd(rnd(1 + 2 * mb) - tr);
+C = 1 + 2 * mb - TR;
+root = rnd(sqrt(c));
+half = rnd(0.5 / root);
+own = rnd(0.5 * root);
+OWN = 0.5 * sqrt(C);
+HALF = 0.5 / sqrt(C);
+nm = rnd(NM);
+o = rnd(nm * half);
+O = NM * HALF;
+
+# (Z)
+za = rnd(xza); zb = rnd(xzb); zc = rnd(xzc); tz = rnd(xtz);
+TZ = za + zb + zc;
+c0 = rnd(1 + tz);
+C0 = 1 + TZ;
+root0 = rnd(sqrt(c0));
+half0 = rnd(0.5 / root0);
+own0 = rnd(0.5 * root0);
+OWN0 = 0.5 * sqrt(C0);
+HALF0 = 0.5 / sqrt(C0);
+nz = rnd(NZ);
+o0 = rnd(nz * half0);
+O0 = NZ * HALF0;
+
+{ d0 in [-1.001, 1.001] /\ d1 in [-1.001, 1.001] /\ d2 in [-1.001, 1.001]
+  /\ ka in [-1.001, 1.001] /\ kb in [-1.001, 1.001] /\ kc in [-1.001, 1.001]
+  /\ tk - TK in [-0x1p-51, 0x1p-51]
+  /\ ma in [-1.001, 1.001] /\ mb in [-1.001, 1.001] /\ mc in [-1.001, 1.001]
+  /\ tr - TR in [-0x1p-51, 0x1p-51] /\ C in [0.99, 4.01] /\ NM in [0x1p-500, 2.002]
+  /\ za in [-1.001, 1.001] /\ zb in [-1.001, 1.001] /\ zc in [-1.001, 1.001]
+  /\ tz - TZ in [-0x1p-51, 0x1p-51] /\ C0 in [0.99, 4.01] /\ NZ in [0x1p-500, 2.002]
+  -> |trs - TRS| <= 0x1p-51 /\ |ck - CK| <= 0x5p-52 /\ |ck0 - CK0| <= 0x1p-50
+  /\ own -/ OWN in [-5.04e-16, 5.04e-16] /\ half -/ HALF in [-6.15e-16, 6.15e-16]
+  /\ o -/ O in [-8.38e-16, 8.38e-16]
+  /\ own0 -/ OWN0 in [-3.93e-16, 3.93e-16] /\ half0 -/ HALF0 in [-5.04e-16, 5.04e-16]
+  /\ o0 -/ O0 in [-7.26e-16, 7.26e-16] }

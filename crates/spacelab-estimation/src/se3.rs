@@ -76,21 +76,82 @@ pub fn so3_exp(phi: V3) -> M3 {
     }
 }
 
-/// `Log: SO(3) → so(3)`, the rotation vector of a rotation matrix.
+/// The unit quaternion `(w, x, y, z)` of a rotation matrix, `R = (w² − v·v) I + 2 v vᵀ + 2w [v]×`,
+/// sign-fixed to `w ≥ 0`.
+///
+/// Shepperd's branch: the four candidates `1 + tr R` and `1 + 2Rᵢᵢ − tr R` are `4w²` and `4vᵢ²`,
+/// they sum to 4, and the root of the largest, at least 1, is the one divided by. The same
+/// arithmetic as `spacelab_control::attitude`'s `quaternion_of`, on this module's row-major `M3`.
+fn shepperd_quaternion(m: &M3) -> [f64; 4] {
+    let trace = m[0][0] + m[1][1] + m[2][2];
+    let candidates = [
+        1.0 + trace,
+        1.0 + 2.0 * m[0][0] - trace,
+        1.0 + 2.0 * m[1][1] - trace,
+        1.0 + 2.0 * m[2][2] - trace,
+    ];
+    let mut best = 0;
+    for (i, &c) in candidates.iter().enumerate() {
+        if c > candidates[best] {
+            best = i;
+        }
+    }
+    let root = libm::sqrt(candidates[best].max(0.0));
+    let half = 0.5 / root.max(f64::MIN_POSITIVE);
+    let mut q = match best {
+        0 => [
+            0.5 * root,
+            (m[2][1] - m[1][2]) * half,
+            (m[0][2] - m[2][0]) * half,
+            (m[1][0] - m[0][1]) * half,
+        ],
+        1 => [
+            (m[2][1] - m[1][2]) * half,
+            0.5 * root,
+            (m[0][1] + m[1][0]) * half,
+            (m[0][2] + m[2][0]) * half,
+        ],
+        2 => [
+            (m[0][2] - m[2][0]) * half,
+            (m[0][1] + m[1][0]) * half,
+            0.5 * root,
+            (m[1][2] + m[2][1]) * half,
+        ],
+        _ => [
+            (m[1][0] - m[0][1]) * half,
+            (m[0][2] + m[2][0]) * half,
+            (m[1][2] + m[2][1]) * half,
+            0.5 * root,
+        ],
+    };
+    if q[0] < 0.0 {
+        for x in &mut q {
+            *x = -*x;
+        }
+    }
+    q
+}
+
+/// `Log: SO(3) → so(3)`, the rotation vector of a rotation matrix: `2·atan2(‖v‖, w)·v/‖v‖` on
+/// Shepperd's quaternion `(w, v)`, `w ≥ 0`, so the angle is in `[0, π]`.
+///
+/// Not `acos((tr R − 1)/2)` and `θ/(2 sin θ)·(R − Rᵀ)∨`: the first loses the angle as `u/ε²` within
+/// `ε` of a half-turn, and the second is `0/0` at it, where it returned the zero vector. Here the
+/// half-turn comes out as `π` to the bit, because `w = 0` there and `2·atan2(‖v‖, 0) = π`.
+/// Gate: `derivations/se3_exponential.mac` item 7 (G1, G3). Round-off, under H-libm and not
+/// outward-rounded: each component within 2.53e-15, relative, of the exact logarithm of the same
+/// doubles (`derivations/rotation_angle_roundoff.mac`, `shepperd_roundoff.gappa`).
 #[must_use]
 pub fn so3_log(r: &M3) -> V3 {
-    let trace = r[0][0] + r[1][1] + r[2][2];
-    let cos_theta = 0.5 * (trace - 1.0);
-    let cos_theta = cos_theta.clamp(-1.0, 1.0);
-    let theta = libm::acos(cos_theta);
-    let axis = [r[2][1] - r[1][2], r[0][2] - r[2][0], r[1][0] - r[0][1]];
-    if theta < EPS {
-        // near identity: ½·(off-diagonal skew) is already the rotation vector
-        [0.5 * axis[0], 0.5 * axis[1], 0.5 * axis[2]]
+    let [w, x, y, z] = shepperd_quaternion(r);
+    let sin_half = libm::sqrt(dot([x, y, z], [x, y, z]));
+    // `2·atan2(s, w)/s → 2/w` as `s → 0`, and `w = 1` there.
+    let k = if sin_half > 0.0 {
+        2.0 * libm::atan2(sin_half, w) / sin_half
     } else {
-        let s = 0.5 * theta / libm::sin(theta);
-        [s * axis[0], s * axis[1], s * axis[2]]
-    }
+        2.0
+    };
+    [k * x, k * y, k * z]
 }
 
 /// The SO(3) left Jacobian `V(φ)` (relates the algebra translation to the group translation).
@@ -256,6 +317,12 @@ mod tests {
             .max((a[2] - b[2]).abs())
     }
 
+    /// `so3_log`'s round-off, under H-libm and not outward-rounded: each component within 2.53e-15
+    /// of the exact logarithm of the same doubles, relative, so within 2.53e-15·π absolute, plus
+    /// half an ulp for the fixture's own rounding (`derivations/rotation_angle_roundoff.mac` (3),
+    /// (5), from `derivations/shepperd_roundoff.gappa`).
+    const LOG_HALF_TURN_BOUND: f64 = 8.2e-15;
+
     fn max_se3_diff(a: &Se3, b: &Se3) -> f64 {
         max_m3_diff(&a.rotation, &b.rotation).max(max_v3_diff(a.translation, b.translation))
     }
@@ -347,6 +414,71 @@ mod tests {
                 &eye3(),
             );
             assert!(d < 1e-13, "V·V⁻¹ at θ = {theta:e}: {d:.3e}");
+        }
+    }
+
+    /// (G3) The logarithm at and near the half-turn, against the rotation vector it inverts.
+    ///
+    /// `acos` of the trace loses the angle as `u/ε²` within `ε` of `π`, and `θ/(2 sin θ)` is `0/0`
+    /// at `π`: the half-turn `diag(1, −1, −1)` came back as the zero vector, and the error was 8.5e-9
+    /// at `ε = 1e-4` and 1.2e-2 at `ε = 1e-7`. The fixture is `derivations/se3_exponential.mac`
+    /// item 7: `Exp(θ n)` for `θ = π − 10⁻ᵏ`, k = 1..10, rounded to doubles, the axis cycling so
+    /// that each of Shepperd's three vector branches is taken, and beside it the exact logarithm of
+    /// those doubles at 25 digits, which rounding the matrix moved at most 6.1e-17 from `θ n`. The
+    /// tolerance is then the proved round-off alone.
+    #[test]
+    #[allow(
+        clippy::excessive_precision,
+        clippy::unreadable_literal,
+        clippy::float_cmp
+    )]
+    fn the_logarithm_near_and_at_the_half_turn_is_the_rotation_vector() {
+        // Exactly a half-turn about each coordinate axis: π to the bit, as `2·atan2(1, 0)` is.
+        for (axis, r) in [
+            [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]],
+            [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]],
+            [[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]],
+        ]
+        .iter()
+        .enumerate()
+        {
+            let mut want = [0.0; 3];
+            want[axis] = core::f64::consts::PI;
+            assert_eq!(so3_log(r), want, "half-turn about axis {axis}");
+        }
+        // About (x̂ + ŷ)/√2: two of Shepperd's candidates tie at 2.
+        let phi = so3_log(&[[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]]);
+        let norm = libm::sqrt(dot(phi, phi));
+        assert!(
+            (norm - core::f64::consts::PI).abs() <= 2.0 * f64::EPSILON * core::f64::consts::PI,
+            "|Log| = {norm} at the half-turn about (1, 1, 0)/√2"
+        );
+        assert!(
+            (phi[0] - phi[1]).abs() <= 2.0 * f64::EPSILON && phi[2] == 0.0,
+            "{phi:?}"
+        );
+
+        #[rustfmt::skip]
+        let fixture: [(i32, [f64; 9], [f64; 3]); 10] = [
+            (1, [-8.321466823981868987658572e-1, -3.298577243027538408171040e-1, 4.457866986480187310171175e-1, -1.587147243367627025278921e-1, -6.285748287983883297869170e-1, -7.613825062869399307174945e-1, 5.313581986310143001617234e-1, -7.043348396316095882951913e-1, 4.707131806405237539614461e-1], [8.690264724542266626139757e-1, -1.303539708681339969236467e0, 2.607079417362679889103940e0]),
+            (2, [4.694010202976194312540770e-1, 4.940693164289282068857290e-1, -7.318184151188089625605926e-1, 4.854980307139282191819518e-1, -8.366887758928558405102649e-1, -2.534631225007141219762730e-1, -7.375326055954757320520798e-1, -2.363205510707141188131430e-1, -6.326122452380941174610030e-1], [2.684222274505537066513231e0, 8.947407581685123217016710e-1, -1.342111137252768533256616e0]),
+            (3, [-6.326526530612585075274978e-1, -7.349794081156615366268170e-1, -2.440407552449030403884933e-1, -7.344079796394711312501613e-1, 4.693878877550909933802359e-1, 4.902243672755204340063528e-1, -2.457550406734745063186409e-1, 4.893672245612347149190668e-1, -8.367342346939158348462229e-1], [-1.345968280109911377999050e0, 2.691936560219822755998099e0, 8.973121867399409525650804e-1]),
+            (4, [-8.367346892857142615085309e-1, -2.449836728570000121685268e-1, 4.897530600000714051667217e-1, -2.448122442858571556900671e-1, -6.326530571428571336767277e-1, -7.347224471428095426972504e-1, 4.898387742856428750393150e-1, -7.346653042857619331229557e-1, 4.693877564285714454328513e-1], [8.975693295970837763004945e-1, -1.346353994395625715313872e0, 2.692707988791251328901484e0]),
+            (5, [4.693877551153061156163915e-1, 4.898002040693876790733441e-1, -7.346910203897959457108868e-1, 4.897916326408163767425208e-1, -8.367346938316326809825796e-1, -2.449065306061223024070017e-1, -7.346967346755101102573349e-1, -2.448893877489797255009307e-1, -6.326530611836734818709260e-1], [2.692785131648394237989632e0, 8.975950438827980454201526e-1, -1.346392565824197042697935e0]),
+            (6, [-6.326530612240816031643931e-1, -7.346941632651224907135656e-1, -2.448971020407550991393464e-1, -7.346935918365510298499998e-1, 4.693877551021734539915542e-1, 4.897963469386530377391864e-1, -2.448988163264693984633169e-1, 4.897954897957959019549889e-1, -8.367346938770918729488812e-1], [-1.346396422967054287256023e0, 2.692792845934108472782581e0, 8.975976153113694570177051e-1]),
+            (7, [-8.367346938775463982551628e-1, -2.448980448979585777813384e-1, 4.897958755102028716166274e-1, -2.448978734693871561756140e-1, -6.326530612244857243453566e-1, -7.346939061224471156918980e-1, 4.897959612244885962972774e-1, -7.346938489795900029122322e-1, 4.693877551020421701188923e-1], [8.975978724542266749775086e-1, -1.346396808681339936169142e0, 2.692793617362679923203031e0]),
+            (8, [4.693877551020408378512627e-1, 4.897959226530612109051788e-1, -7.346938746938774800199212e-1, 4.897959140816326439882289e-1, -8.367346938775509501695637e-1, -2.448979677551020306403018e-1, -7.346938804081633023201903e-1, -2.448979506122448968064020e-1, -6.326530612244897211482453e-1], [2.692793694505537052556301e0, 8.975978981685123678070165e-1, -1.346396847252768551710525e0]),
+            (9, [-6.326530612244898321705477e-1, -7.346938778367346767339541e-1, -2.448979583265306070316569e-1, -7.346938772653061056061574e-1, 4.693877551020408378512627e-1, 4.897959187959183835481269e-1, -2.448979600408163204150469e-1, 4.897959179387755268564320e-1, -8.367346938775510611918662e-1], [-1.346396851109911325854777e0, 2.692793702219822804303800e0, 8.975979007399409347679333e-1]),
+            (10, [-8.367346938775510611918662e-1, -2.448979592693877604947517e-1, 4.897959183244898206943674e-1, -2.448979590979591947075278e-1, -6.326530612244898321705477e-1, -7.346938775795918141753305e-1, 4.897959184102040897101915e-1, -7.346938775224489681647810e-1, 4.693877551020408378512627e-1], [8.975979009970837927006276e-1, -1.346396851495625612753818e0, 2.692793702991251378101883e0]),
+        ];
+        for (k, e, want) in fixture {
+            let r = [[e[0], e[1], e[2]], [e[3], e[4], e[5]], [e[6], e[7], e[8]]];
+            let got = so3_log(&r);
+            let d = max_v3_diff(got, want);
+            assert!(
+                d <= LOG_HALF_TURN_BOUND,
+                "θ = π − 1e-{k}: Log off by {d:.3e} ({got:?} against {want:?})"
+            );
         }
     }
 

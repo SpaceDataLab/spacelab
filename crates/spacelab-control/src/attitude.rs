@@ -197,10 +197,19 @@ impl AttitudeError {
         ]
     }
 
-    /// The principal rotation angle of the error, in radians, on `[0, π]`.
+    /// The principal rotation angle of the error, in radians, on `[0, π]`: `2·atan2(‖q_v‖, q₀)`.
+    ///
+    /// Not `2·acos(q₀)`, the same function in exact arithmetic (`derivations/attitude_control.mac`
+    /// item 8): `q₀ = cos(θ/2)` rounds to 1 below θ = 2e-8 rad, where that form returned 0, while
+    /// `‖q_v‖ = sin(θ/2)` keeps its relative accuracy at every angle.
+    /// Its round-off, under H-libm and not outward-rounded, is within 6.25e-16 of the exact angle
+    /// of the stored quaternion, relative, and within 2.31e-15 of the exact angle of the error
+    /// rotation [`Self::new`] formed (`derivations/rotation_angle_roundoff.mac`,
+    /// `shepperd_roundoff.gappa`).
     #[must_use]
     pub fn angle(&self) -> f64 {
-        2.0 * libm::acos(self.quaternion[0].clamp(-1.0, 1.0))
+        let v = self.quaternion_vector();
+        2.0 * libm::atan2(libm::sqrt(dot(v, v)), self.quaternion[0])
     }
 
     /// `δω = ω − ω_ref`, body axes.
@@ -374,6 +383,11 @@ mod tests {
     use spacelab_propagation::attitude::exp_so3;
 
     const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    /// The error angle's round-off through `quaternion_of`, under H-libm and not outward-rounded:
+    /// within 2.31e-15 of the exact angle of the same doubles, relative, plus the fixture's rounding
+    /// and the test's quotient (`derivations/rotation_angle_roundoff.mac` (4), (5), from
+    /// `derivations/shepperd_roundoff.gappa`).
+    const ANGLE_BOUND: f64 = 2.6e-15;
 
     fn inertia() -> Inertia {
         Inertia::principal([10.0, 12.0, 8.0]).expect("positive definite")
@@ -429,6 +443,40 @@ mod tests {
         );
         assert_eq!(q[0], libm::cos(angle / 2.0), "q0 is cos(theta/2) exactly");
         assert!((q[3] - libm::sin(angle / 2.0)).abs() < 1e-15);
+    }
+
+    /// (G3) The error angle against the rotation angle, every decade from 1e-1 to 1e-10 rad.
+    ///
+    /// The fixture is `derivations/attitude_control.mac` item 8: Rodrigues' `exp(θ [n]×)` for
+    /// `θ = 10⁻ᵏ`, the axis cycling over three generic directions, rounded to doubles, and beside it
+    /// the exact angle of those doubles at 25 digits, which rounding the matrix moved at most
+    /// 5.9e-17 from `θ`, relative. `2·acos(q₀)` returned 0 for every angle up to 2e-8 rad, because
+    /// `q₀ = cos(θ/2)` rounds to 1 there, and was 3.2 % off at 1e-7; `2·atan2(‖q_v‖, q₀)` reads the
+    /// angle from `‖q_v‖ = sin(θ/2)`, which keeps its relative accuracy at every scale.
+    #[test]
+    #[allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    fn the_error_angle_is_the_rotation_angle_at_every_decade() {
+        #[rustfmt::skip]
+        let fixture: [(i32, [f64; 9], f64); 10] = [
+            (1, [9.954119885206359485962935e-1, -8.618323484691077507324763e-2, -4.156228026366735189833790e-2, 8.495976511908034933817646e-2, 9.959217675738986086386717e-1, -3.035903791941082369154614e-2, 4.400921971932820336848025e-2, 2.668862873591954995577957e-2, 9.986745744615170838898166e-1], 9.999999999999999922211909e-2),
+            (2, [9.999867348044213510860345e-1, 4.297887653418706530028537e-3, 2.838728044455271493085036e-3, -4.273398061581291582089470e-3, 9.999540820153048903407011e-1, -8.577408112959351849102774e-3, -2.875462432211393914993636e-3, 8.565163317040644375133240e-3, 9.999591840136042852904552e-1], 9.999999999999999853704150e-3),
+            (3, [9.999995918367686753569501e-1, -2.858979115493220988890311e-4, 8.570814898010275248788070e-4, 2.855305646411588466580811e-4, 9.999998673469497889598756e-1, 4.286938061122484689390022e-4, -8.572039387704153117625294e-4, -4.284489081734729493816660e-4, 9.999995408163647736543567e-1], 1.000000000000000011880823e-3),
+            (4, [9.999999954081633113389671e-1, -8.571489781632601748836281e-5, -4.285591829591938980211635e-5, 8.571367332653112504521620e-5, 9.999999959183673015061800e-1, -2.857326525850186919658000e-5, 4.285836727550918146467315e-5, 2.856959178911717831461300e-5, 9.999999986734693369072602e-1], 1.000000000000000011924442e-4),
+            (5, [9.999999999867347222348712e-1, 4.285726530540815920416152e-6, 2.857124489748299327895485e-6, -4.285702040744897810525121e-6, 9.999999999540816197907134e-1, -8.571434693734693681930505e-6, -2.857161224442176916248504e-6, 8.571422448836735474017937e-6, 9.999999999591836497003783e-1], 1.000000000000000015998176e-5),
+            (6, [9.999999999995918820161478e-1, -2.857144693877074615432797e-7, 8.571427959182245165858580e-7, 2.857141020407686877773318e-7, 9.999999999998673283485573e-1, 4.285715510203367253039242e-7, -8.571429183672040901946542e-7, -4.285713061223775251467726e-7, 9.999999999995408117570150e-1], 9.999999999999999961845500e-7),
+            (7, [9.999999999999954480855990e-1, -8.571428632653047418668433e-8, -4.285714163265299109974323e-8, 8.571428510204068003878314e-8, 9.999999999999958921748089e-1, -2.857143040816321692609636e-8, 4.285714408163257939554560e-8, 2.857142673469383117367035e-8, 9.999999999999986677323704e-1], 1.000000000000000045410047e-7),
+            (8, [1.000000000000000000000000e0, 4.285714297959183513822272e-9, 2.857142838775510224242921e-9, -4.285714273469388094085392e-9, 1.000000000000000000000000e0, -8.571428577551020049251578e-9, -2.857142875510204181028855e-9, 8.571428565306121512202525e-9, 1.000000000000000000000000e0], 9.999999999999999416880321e-9),
+            (9, [1.000000000000000000000000e0, -2.857142858979592003872761e-10, 8.571428570816326846491334e-10, 2.857142855306122194603862e-10, 1.000000000000000000000000e0, 4.285714286938775326786492e-10, -8.571428572040816782914301e-10, -4.285714284489795970928442e-10, 1.000000000000000000000000e0], 1.000000000000000028963323e-9),
+            (10, [1.000000000000000000000000e0, -8.571428571489795846234871e-11, -4.285714285591836551817594e-11, 8.571428571367347266182881e-11, 1.000000000000000000000000e0, -2.857142857326530486304180e-11, 4.285714285836735004391282e-11, 2.857142856959183776795928e-11, 1.000000000000000000000000e0], 1.000000000000000013351548e-10),
+        ];
+        for (k, e, want) in fixture {
+            let r = [[e[0], e[1], e[2]], [e[3], e[4], e[5]], [e[6], e[7], e[8]]];
+            let got = AttitudeError::new(&r, &IDENTITY, [0.0; 3], [0.0; 3]).angle();
+            assert!(
+                (got / want - 1.0).abs() <= ANGLE_BOUND,
+                "θ = 1e-{k}: the error angle is {got:e} against {want:e}"
+            );
+        }
     }
 
     /// The sign fix is not cosmetic. A rotation of 350° about `+ẑ` and one of `−10°` are the same

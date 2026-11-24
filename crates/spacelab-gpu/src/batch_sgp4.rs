@@ -58,11 +58,17 @@ pub struct Sgp4Sat {
 }
 
 impl Sgp4Sat {
-    /// Initialise from a parsed element set, or `None` if it is deep-space or out of range. Mirrors
-    /// `sgp4::Constants::from_elements` (un-Kozai → `Constants::new` → `near_earth::constants`).
+    /// Initialise from a parsed element set, or `None` if it is deep-space, out of range, or an
+    /// SGP4-XP set (ephemeris type 4), which `spacelab_sgp4::Satellite::from_elements` refuses too.
+    /// Mirrors `sgp4::Constants::from_elements` (un-Kozai → `Constants::new` →
+    /// `near_earth::constants`).
     #[must_use]
     #[allow(clippy::similar_names, clippy::too_many_lines)]
     pub fn from_elements(el: &sgp4::Elements) -> Option<Self> {
+        // An SGP4-XP set gives `B*` and the mean motion other meanings, so SGP4 would misread it.
+        if el.ephemeris_type == 4 {
+            return None;
+        }
         let inc = el.inclination * (PI / 180.0);
         let raan = el.right_ascension * (PI / 180.0);
         let ecc = el.eccentricity;
@@ -606,6 +612,23 @@ mod tests {
             };
             assert!(Sgp4Sat::from_elements(&el).is_none(), "{what} was accepted");
         }
+        // The CPU path's gate (Ф20.Q): ephemeris type 4 marks an SGP4-XP set; type 2 is kept.
+        let xp = sgp4::Elements {
+            ephemeris_type: 4,
+            ..good.clone()
+        };
+        assert!(
+            Sgp4Sat::from_elements(&xp).is_none(),
+            "an SGP4-XP set was accepted"
+        );
+        let type2 = sgp4::Elements {
+            ephemeris_type: 2,
+            ..good.clone()
+        };
+        assert!(
+            Sgp4Sat::from_elements(&type2).is_some(),
+            "a type-2 set was refused"
+        );
     }
 
     /// The `pl < 0` bail-out — the osculating semi-latus rectum going negative, after which the

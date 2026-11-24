@@ -11,10 +11,13 @@
 //!   `NORAD_CAT_ID` as an integer.
 //! * **`BSTAR`, `MEAN_MOTION_DOT` and `MEAN_MOTION_DDOT` are printed into fixed-width exponential
 //!   fields** that drop digits the fit produced. OMM prints them at source precision.
-//! * **`MEAN_ELEMENT_THEORY` has nowhere to live in 138 columns.** A TLE is silent about which
-//!   propagator its elements were fitted for, so a caller cannot tell SGP4 elements from SGP4-XP
-//!   elements, and both look like orbits. OMM states it, and [`parse_omm_kvn`] refuses anything this
-//!   crate does not implement rather than propagating it plausibly.
+//! * **The theory is one digit in a TLE.** All a TLE says about the propagator its elements were
+//!   fitted for is column 63, the ephemeris type: `0` for SGP4, `4` for SGP4-XP (Payne et al.,
+//!   *Improvements to the SGP4 propagator (SGP4-XP)*, AMOS 2022, §4). Both kinds look like orbits.
+//!   OMM names the theory in `MEAN_ELEMENT_THEORY` and carries the digit in `EPHEMERIS_TYPE`. Both
+//!   readers here refuse a record that either keyword marks as a theory this crate does not
+//!   implement, rather than propagating it plausibly; [`Satellite::from_elements`] refuses an
+//!   SGP4-XP set whatever it was read from.
 //!
 //! # The two encodings, and the two that are missing
 //!
@@ -32,12 +35,15 @@
 //! characters, the same record in XML is ~1 200, and JSON is roughly three times CSV.
 //!
 //! [`Satellite::from_tle`]: crate::Satellite::from_tle
+//! [`Satellite::from_elements`]: crate::Satellite::from_elements
 
 use core::fmt;
 use core::str::FromStr;
 
 use sgp4::chrono::{NaiveDate, NaiveDateTime};
 use sgp4::{Classification, Elements};
+
+use crate::satellite::SGP4_XP_EPHEMERIS_TYPE;
 
 /// Why an OMM record could not be read.
 ///
@@ -77,9 +83,10 @@ pub enum OmmError {
     },
     /// The record declares mean elements this crate does not propagate.
     ///
-    /// `MEAN_ELEMENT_THEORY` is the field a TLE cannot carry, and honouring it is the reason to
-    /// prefer OMM. SGP4-XP in particular reads its drag parameter from `BTERM` rather than `BSTAR`
-    /// and is a different model; feeding its elements to SGP4 produces an orbit-shaped wrong answer.
+    /// Either keyword can declare them: `MEAN_ELEMENT_THEORY` naming anything but SGP4, or
+    /// `EPHEMERIS_TYPE = 4`, the digit that marks SGP4-XP. SGP4-XP in particular reads its drag
+    /// parameter from `BTERM` rather than `BSTAR` and is a different model; feeding its elements to
+    /// SGP4 produces an orbit-shaped wrong answer.
     UnsupportedTheory {
         /// Record number, counting from 1 in file order.
         record: usize,
@@ -106,7 +113,7 @@ impl fmt::Display for OmmError {
             ),
             Self::UnsupportedTheory { record } => write!(
                 f,
-                "record {record} declares a MEAN_ELEMENT_THEORY this crate does not propagate"
+                "record {record} declares mean elements of a theory this crate does not propagate"
             ),
         }
     }
@@ -301,6 +308,10 @@ impl<'a> Fields<'a> {
                 return Err(OmmError::UnsupportedTheory { record });
             }
         }
+        let ephemeris_type = optional(self.ephemeris_type, "EPHEMERIS_TYPE", record)?;
+        if ephemeris_type == SGP4_XP_EPHEMERIS_TYPE {
+            return Err(OmmError::UnsupportedTheory { record });
+        }
 
         let epoch = self
             .epoch
@@ -350,7 +361,7 @@ impl<'a> Fields<'a> {
             mean_anomaly: required(self.mean_anomaly, "MEAN_ANOMALY", record)?,
             mean_motion: required(self.mean_motion, "MEAN_MOTION", record)?,
             revolution_number: optional(self.rev_at_epoch, "REV_AT_EPOCH", record)?,
-            ephemeris_type: optional(self.ephemeris_type, "EPHEMERIS_TYPE", record)?,
+            ephemeris_type,
         })
     }
 }
@@ -556,6 +567,51 @@ MEAN_MOTION_DDOT = 0\n";
             parse_omm_kvn(kvn),
             Err(OmmError::UnsupportedTheory { record: 1 })
         );
+    }
+
+    /// `EPHEMERIS_TYPE = 4` marks SGP4-XP elements as `MEAN_ELEMENT_THEORY = SGP4-XP` does, and a
+    /// record can carry the one without the other, or contradict it (F107).
+    #[test]
+    fn an_ephemeris_type_of_4_is_refused_whatever_the_theory_keyword_says() {
+        for xp in ["4", "04"] {
+            let csv = CSV.replace(",313.2307,0,U,", &format!(",313.2307,{xp},U,"));
+            assert_eq!(
+                parse_omm_csv(&csv),
+                Err(OmmError::UnsupportedTheory { record: 1 }),
+                "{xp}"
+            );
+        }
+        let kvn = "CCSDS_OMM_VERS = 2.0\n\
+MEAN_ELEMENT_THEORY = SGP4\n\
+EPHEMERIS_TYPE = 4\n\
+EPOCH = 2026-08-14T19:49:00\n\
+MEAN_MOTION = 15.49444701\n\
+ECCENTRICITY = .00075677\n\
+INCLINATION = 51.6328\n\
+RA_OF_ASC_NODE = 9.8801\n\
+ARG_OF_PERICENTER = 46.9314\n\
+MEAN_ANOMALY = 313.2307\n\
+NORAD_CAT_ID = 25544\n\
+BSTAR = .10032188E-3\n\
+MEAN_MOTION_DOT = .5167E-4\n\
+MEAN_MOTION_DDOT = 0\n";
+        assert_eq!(
+            parse_omm_kvn(kvn),
+            Err(OmmError::UnsupportedTheory { record: 1 })
+        );
+    }
+
+    /// Types 0 and 2 parse as before and an absent type reads as 0; only the field itself differs.
+    #[test]
+    fn ephemeris_types_0_2_and_absent_parse_to_the_same_elements() {
+        let reference = parse_omm_csv(CSV).unwrap();
+        for (field, ephemeris_type) in [("2", 2), ("", 0)] {
+            let csv = CSV.replace(",313.2307,0,U,", &format!(",313.2307,{field},U,"));
+            let mut parsed = parse_omm_csv(&csv).unwrap();
+            assert_eq!(parsed[0].ephemeris_type, ephemeris_type);
+            parsed[0].ephemeris_type = 0;
+            assert_eq!(parsed, reference);
+        }
     }
 
     #[test]

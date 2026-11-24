@@ -197,6 +197,21 @@ def test_sgp4_batch_returns_an_ephemeris_table():
         assert 6.6e6 < norm(r) < 7.0e6
 
 
+def test_sgp4_refuses_an_sgp4_xp_element_set():
+    # The ISS set with a 4 in column 63, the ephemeris type that marks SGP4-XP (Ф20.Q).
+    xp = "1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 4  2921"
+    for call in (
+        lambda: sl.sgp4_propagate(xp, ISS[1], 0.0),
+        lambda: sl.sgp4_propagate_batch(xp, ISS[1], [0.0]),
+    ):
+        try:
+            call()
+        except ValueError as e:
+            assert "Sgp4XpElements" in str(e), e
+        else:
+            raise AssertionError("an SGP4-XP element set was propagated")
+
+
 def test_measurement_range_is_the_euclidean_distance():
     sat = [7_000e3, 0.0, 0.0, 0.0, 0.0, 0.0]
     station = [6_378e3, 0.0, 0.0]

@@ -180,7 +180,7 @@ use spacelab_propagation::{
     speed_ratio as sentman_speed_ratio, step2_corrections,
 };
 use spacelab_sgp4::tle::{TleBuilder, TleModel, seed_elements};
-use spacelab_sgp4::{Convention, Satellite};
+use spacelab_sgp4::{Convention, PropagationError, Satellite};
 use spacelab_signal::csa::{CsaParams, chirp_scaling_focus as sig_csa_focus};
 use spacelab_signal::fft::Complex as SigComplex;
 use spacelab_signal::insar::{
@@ -806,6 +806,10 @@ pub unsafe extern "C" fn sl_sgp4_open(
                 // SAFETY: checked non-null; written only now that the handle exists.
                 unsafe { *out = handle };
                 SL_OK
+            }
+            // Well-formed, and outside the model: SGP4 has no answer for an SGP4-XP set.
+            Err(e @ PropagationError::Sgp4XpElements) => {
+                fail(SL_ERR_DOMAIN, format!("sl_sgp4_open: {e}"))
             }
             Err(e) => fail(SL_ERR_PARSE, format!("sl_sgp4_open: invalid TLE: {e:?}")),
         }
@@ -14359,6 +14363,31 @@ mod tests {
         unsafe { sl_sgp4_close(handle) };
         // SAFETY: documented as a no-op, and the only way to write cleanup that cannot double-free.
         unsafe { sl_sgp4_close(core::ptr::null_mut()) };
+    }
+
+    /// The Rust gate on SGP4-XP sets (Ф20.Q) holds at the C boundary: the ISS set with a `4` in
+    /// column 63 and its checksum recomputed is well-formed and outside the model, so both the
+    /// handle and the one-shot form answer `SL_ERR_DOMAIN`, hand back no handle and write nothing.
+    #[test]
+    fn an_sgp4_xp_element_set_is_a_domain_refusal_on_both_sgp4_entry_points() {
+        let l1 = c"1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 4  2921";
+        let l2 = std::ffi::CString::new(LINE2).expect("no interior NUL");
+        let mut handle: *mut SlSgp4 = core::ptr::null_mut();
+        // SAFETY: NUL-terminated strings and a local out pointer.
+        let status = unsafe { sl_sgp4_open(l1.as_ptr(), l2.as_ptr(), &raw mut handle) };
+        assert_eq!(status, SL_ERR_DOMAIN);
+        assert!(
+            handle.is_null(),
+            "a refused open must not hand back a handle"
+        );
+        assert!(last_error().contains("SGP4-XP"), "{}", last_error());
+
+        let sentinel = state([-1.0; 3], [-1.0; 3]);
+        let mut out = sentinel;
+        // SAFETY: NUL-terminated strings and a local out pointer.
+        let status = unsafe { sl_sgp4_propagate(l1.as_ptr(), l2.as_ptr(), 0.0, &raw mut out) };
+        assert_eq!(status, SL_ERR_DOMAIN);
+        assert_eq!(out, sentinel, "a refused call must write nothing");
     }
 
     /// A TLE line with no terminator inside the bound is refused rather than scanned onward. The

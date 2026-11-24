@@ -66,6 +66,7 @@ fn every_error_prints_a_distinct_non_empty_message() {
         PropagationError::UnusableElements,
         PropagationError::Diverged,
         PropagationError::Decayed,
+        PropagationError::Sgp4XpElements,
     ];
     let messages: Vec<String> = all.iter().map(ToString::to_string).collect();
     assert!(messages.iter().all(|m| !m.is_empty()));

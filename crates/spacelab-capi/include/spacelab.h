@@ -254,7 +254,9 @@ typedef struct sl_sgp4 sl_sgp4;
 /*
  * Parse a TLE. `line1` and `line2` are NUL-terminated; anything longer than 4096 bytes without a
  * terminator is rejected rather than read past. On success `*out` owns a handle that
- * `sl_sgp4_close` must free. Returns `SL_ERR_PARSE` if the element set is malformed.
+ * `sl_sgp4_close` must free. Returns `SL_ERR_PARSE` if the element set is malformed, and
+ * `SL_ERR_DOMAIN` if it is an SGP4-XP set (ephemeris type 4 in column 63 of line 1), which SGP4
+ * does not propagate.
  */
 sl_status sl_sgp4_open(const char *line1, const char *line2, sl_sgp4 **out);
 

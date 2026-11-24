@@ -47,6 +47,14 @@ pub enum PropagationError {
     /// without it the propagator cheerfully returns positions inside the planet —
     /// six of them, in the published verification set.
     Decayed,
+    /// The element set was fitted for SGP4-XP, not for SGP4: its ephemeris type is 4.
+    ///
+    /// An SGP4-XP set gives the TLE's columns other meanings: `n̈/6` is a solar-radiation-pressure
+    /// coefficient, `B*` a ballistic coefficient, and the mean motion Brouwer's rather than
+    /// Kozai's. SGP4 reads them without complaint, and its answer is an orbit and is wrong (Payne
+    /// et al., *Improvements to the SGP4 propagator (SGP4-XP)*, AMOS 2022, §4). SGP4-XP itself has
+    /// no public specification to implement.
+    Sgp4XpElements,
 }
 
 impl fmt::Display for PropagationError {
@@ -57,11 +65,21 @@ impl fmt::Display for PropagationError {
             Self::UnusableElements => write!(f, "the element set is outside SGP4's domain"),
             Self::Diverged => write!(f, "SGP4 diverged: the mean elements left its domain"),
             Self::Decayed => write!(f, "the object has re-entered"),
+            Self::Sgp4XpElements => write!(
+                f,
+                "the element set is SGP4-XP (ephemeris type 4), which SGP4 does not propagate"
+            ),
         }
     }
 }
 
 impl core::error::Error for PropagationError {}
+
+/// The ephemeris type, column 63 of line 1 and `EPHEMERIS_TYPE` in OMM, that marks an element set
+/// fitted for SGP4-XP; a legacy SGP4 set carries 0 (Payne et al., AMOS 2022, §4). It is the only
+/// value refused: a blank column is read as 0, and 2, SGP4's number among the ephemeris programs of
+/// Spacetrack Report No. 3 (§12), propagates as before.
+pub(crate) const SGP4_XP_EPHEMERIS_TYPE: u8 = 4;
 
 /// Which constants and expressions SGP4 is evaluated with.
 ///
@@ -263,6 +281,7 @@ impl Satellite {
     /// # Errors
     ///
     /// [`PropagationError::MalformedElements`] if the lines do not parse,
+    /// [`PropagationError::Sgp4XpElements`] for an SGP4-XP element set,
     /// [`PropagationError::UnusableElements`] if SGP4 rejects them.
     pub fn from_tle(line1: &str, line2: &str) -> Result<Self, PropagationError> {
         for line in [line1, line2] {
@@ -283,6 +302,7 @@ impl Satellite {
     /// # Errors
     ///
     /// [`PropagationError::MalformedElements`] if the lines do not parse,
+    /// [`PropagationError::Sgp4XpElements`] for an SGP4-XP element set,
     /// [`PropagationError::UnusableElements`] if SGP4 rejects them.
     pub fn from_tle_unchecked(line1: &str, line2: &str) -> Result<Self, PropagationError> {
         // The underlying parser validates the checksum itself and has no way to be
@@ -299,8 +319,12 @@ impl Satellite {
 
     /// Build from a parsed element set, whether from a TLE or from OMM.
     ///
+    /// Every constructor ends here, so this is where an SGP4-XP set is refused, whatever text it
+    /// was read from.
+    ///
     /// # Errors
     ///
+    /// [`PropagationError::Sgp4XpElements`] if the ephemeris type is 4,
     /// [`PropagationError::UnusableElements`] if SGP4 rejects the elements, or the
     /// epoch cannot be expressed on the Gregorian calendar.
     pub fn from_elements(
@@ -308,6 +332,10 @@ impl Satellite {
         convention: Convention,
     ) -> Result<Self, PropagationError> {
         use sgp4::chrono::{Datelike, Timelike};
+
+        if elements.ephemeris_type == SGP4_XP_EPHEMERIS_TYPE {
+            return Err(PropagationError::Sgp4XpElements);
+        }
 
         let dt = elements.datetime;
         let seconds = f64::from(dt.second()) + f64::from(dt.nanosecond()) * 1e-9;

@@ -368,6 +368,8 @@ best model finds the answer instead of a gap. `docs/provenance.md` holds the rea
   cannot publish. Substitute: the same as above; DTM2020's numbers are cited with their date.
 - **SGP4-XP.** No public algorithm specification exists, so there is nothing to implement from.
   Substitute: SGP4 with SupGP element sets, and a learned corrector on open data (`plans/16` Ф8.D).
+  An SGP4-XP element set (ephemeris type 4) is refused, not propagated with SGP4, by every SGP4
+  entry point: the Rust constructors, both OMM readers, the GPU batch, the C ABI and Python.
 - **HWM14.** CC BY-NC-ND: no derivatives, no commercial use. Substitute: our own wind model fitted
   to TU Delft's CC BY 4.0 crosswinds; HWM14 is run as an oracle.
 - **MT_CKD.** Research-only; "may not be incorporated into proprietary software … or commercial

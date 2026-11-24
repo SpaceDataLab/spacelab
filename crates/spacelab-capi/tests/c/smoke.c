@@ -187,6 +187,12 @@ static void a_failure_is_a_status_and_a_readable_message(void) {
     CHECK(sl_sgp4_open("...", "...", &sat) == SL_ERR_PARSE);
     CHECK(sat == (sl_sgp4 *)0x1);
 
+    /* An SGP4-XP set -- the same lines with a 4 in column 63 and the checksum recomputed -- is
+     * well-formed and outside the model: a domain refusal, not a parse failure. */
+    CHECK(sl_sgp4_open("1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 4  2921",
+                       LINE2, &sat) == SL_ERR_DOMAIN);
+    CHECK(sat == (sl_sgp4 *)0x1);
+
     CHECK(sl_sgp4_propagate_at(NULL, 0.0, &out) == SL_ERR_INVALID_ARGUMENT);
     CHECK(sl_sgp4_propagate(LINE1, LINE2, 0.0, NULL) == SL_ERR_INVALID_ARGUMENT);
 }

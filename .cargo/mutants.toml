@@ -3366,8 +3366,8 @@ exclude_re = [
     # knots, so moving either comparison onto the tie changes nothing: at 98 the first piece gives the
     # constant 20 and the second `98 - 78 = 20`; at 156 the second gives `156 - 78 = 78` and the third
     # the constant 78. Vallado's code chooses the pieces the same way for the same reason.
-    "batch_sgp4\\.rs:96:24: replace < with <= in Sgp4Sat::from_elements",
-    "batch_sgp4\\.rs:98:22: replace < with <= in Sgp4Sat::from_elements",
+    "batch_sgp4\\.rs:102:24: replace < with <= in Sgp4Sat::from_elements",
+    "batch_sgp4\\.rs:104:22: replace < with <= in Sgp4Sat::from_elements",
 
     # `parallel_fill` picks between a serial loop and a chunked one, and the two are specified and
     # tested to produce bit-identical output -- `parallel_cpu_paths_are_bit_identical_to_serial`
@@ -3395,10 +3395,10 @@ exclude_re = [
     # terms; the branch either side of the tie is what the tests exercise, and
     # `the_branch_boundaries_a_tle_cannot_express_agree_with_the_sgp4_crate` puts an element set
     # inside the third guard band on purpose.
-    "batch_sgp4\\.rs:150:38: replace > with >= in Sgp4Sat::from_elements",
-    "batch_sgp4\\.rs:275:28: replace < with <= in Sgp4Sat::propagate",
-    "batch_sgp4\\.rs:282:15: replace < with <= in Sgp4Sat::propagate",
-    "batch_sgp4\\.rs:298:15: replace < with <= in Sgp4Sat::propagate",
+    "batch_sgp4\\.rs:156:38: replace > with >= in Sgp4Sat::from_elements",
+    "batch_sgp4\\.rs:281:28: replace < with <= in Sgp4Sat::propagate",
+    "batch_sgp4\\.rs:288:15: replace < with <= in Sgp4Sat::propagate",
+    "batch_sgp4\\.rs:304:15: replace < with <= in Sgp4Sat::propagate",
 
     # A porkchop cell with `tof = 0` is refused either way: `spacelab_astro::lambert` validates its
     # own time of flight, so the mutated branch calls it and gets `None`, which `map_or` turns into
@@ -3825,18 +3825,18 @@ exclude_re = [
     # degrees-to-radians factor on those three angles feeds a value nothing observes. (The
     # inclination's factor does reach `n₀"`, and is pinned by
     # `the_brouwer_mean_motion_is_the_published_un_kozai_recursion`.)
-    "satellite\\.rs:350:38: replace \\* with / in Satellite::from_elements",
-    "satellite\\.rs:350:38: replace \\* with \\+ in Satellite::from_elements",
-    "satellite\\.rs:352:42: replace \\* with / in Satellite::from_elements",
-    "satellite\\.rs:352:42: replace \\* with \\+ in Satellite::from_elements",
-    "satellite\\.rs:353:35: replace \\* with / in Satellite::from_elements",
-    "satellite\\.rs:353:35: replace \\* with \\+ in Satellite::from_elements",
+    "satellite\\.rs:378:38: replace \\* with / in Satellite::from_elements",
+    "satellite\\.rs:378:38: replace \\* with \\+ in Satellite::from_elements",
+    "satellite\\.rs:380:42: replace \\* with / in Satellite::from_elements",
+    "satellite\\.rs:380:42: replace \\* with \\+ in Satellite::from_elements",
+    "satellite\\.rs:381:35: replace \\* with / in Satellite::from_elements",
+    "satellite\\.rs:381:35: replace \\* with \\+ in Satellite::from_elements",
 
     # `norm() < WGS72_EQUATORIAL_RADIUS_M` → `<=` is the re-entry test at a radius equal to the
     # reference equator to the bit. SGP4 arrives there through eight transcendental terms; no
     # element set in the published verification file lands within 10⁻⁹ m of it, and an object
     # sitting exactly on the reference surface is decayed either way you answer.
-    "satellite\\.rs:463:28: replace < with <= in Satellite::propagate_minutes",
+    "satellite\\.rs:491:28: replace < with <= in Satellite::propagate_minutes",
 
     # The `propagate_many_into` guard chooses how the work is split, not what it computes. Both
     # branches assign satellite `i`, epoch `j` to `out[i·t + j]` and call the same
@@ -3847,9 +3847,9 @@ exclude_re = [
     # `either_empty_side_of_the_batch_takes_the_sequential_path`, which is what leaves only these
     # three: each still refuses both degenerate shapes and differs from the original solely in
     # which non-degenerate batches it hands to threads.
-    "satellite\\.rs:590:16: replace <= with > in propagate_many_into",
-    "satellite\\.rs:590:41: replace < with <= in propagate_many_into",
-    "satellite\\.rs:590:45: replace \\* with \\+ in propagate_many_into",
+    "satellite\\.rs:618:16: replace <= with > in propagate_many_into",
+    "satellite\\.rs:618:41: replace < with <= in propagate_many_into",
+    "satellite\\.rs:618:45: replace \\* with \\+ in propagate_many_into",
 
     # --- `estimation/se3.rs`. The small-angle split, at the split and one decade wide of it.
     #
@@ -4171,20 +4171,20 @@ exclude_re = [
     # `propagate_ias15_dense` appears once, not twice: IAS15 predicts its b-polynomial from the first
     # step, so `%` there does move the answer far enough for
     # `interpreter_tests::the_dense_ephemerides_interpolate_the_orbit_they_integrated` to catch it.
-    "lib\\.rs:992:19: replace / with \\* in propagate_ias15_dense",
-    "lib\\.rs:1020:18: replace / with % in propagate_dense",
-    "lib\\.rs:1020:18: replace / with \\* in propagate_dense",
-    "lib\\.rs:1114:18: replace / with % in propagate_geopotential_dense",
-    "lib\\.rs:1114:18: replace / with \\* in propagate_geopotential_dense",
-    "lib\\.rs:1223:18: replace / with % in propagate_geopotential_itrf_dense",
-    "lib\\.rs:1223:18: replace / with \\* in propagate_geopotential_itrf_dense",
-    "lib\\.rs:1286:18: replace / with % in propagate_j2_itrf_dense",
-    "lib\\.rs:1286:18: replace / with \\* in propagate_j2_itrf_dense",
-    "lib\\.rs:1543:18: replace / with % in propagate_relativistic_dense",
-    "lib\\.rs:2174:18: replace / with % in propagate_drag_dense",
-    "lib\\.rs:2174:18: replace / with \\* in propagate_drag_dense",
-    "lib\\.rs:2253:18: replace / with % in propagate_luni_solar_dense",
-    "lib\\.rs:2253:18: replace / with \\* in propagate_luni_solar_dense",
+    "lib\\.rs:993:19: replace / with \\* in propagate_ias15_dense",
+    "lib\\.rs:1021:18: replace / with % in propagate_dense",
+    "lib\\.rs:1021:18: replace / with \\* in propagate_dense",
+    "lib\\.rs:1115:18: replace / with % in propagate_geopotential_dense",
+    "lib\\.rs:1115:18: replace / with \\* in propagate_geopotential_dense",
+    "lib\\.rs:1224:18: replace / with % in propagate_geopotential_itrf_dense",
+    "lib\\.rs:1224:18: replace / with \\* in propagate_geopotential_itrf_dense",
+    "lib\\.rs:1287:18: replace / with % in propagate_j2_itrf_dense",
+    "lib\\.rs:1287:18: replace / with \\* in propagate_j2_itrf_dense",
+    "lib\\.rs:1544:18: replace / with % in propagate_relativistic_dense",
+    "lib\\.rs:2175:18: replace / with % in propagate_drag_dense",
+    "lib\\.rs:2175:18: replace / with \\* in propagate_drag_dense",
+    "lib\\.rs:2254:18: replace / with % in propagate_luni_solar_dense",
+    "lib\\.rs:2254:18: replace / with \\* in propagate_luni_solar_dense",
 
     # --- `spacelab-capi`. Both patterns carry the crate path, unlike the `lib\.rs:` forms above:
     # --- two crates now have a mutated `lib.rs`, and a bare line:col would match either.

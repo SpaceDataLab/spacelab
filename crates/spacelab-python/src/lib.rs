@@ -303,8 +303,8 @@ fn libration_points(mu: f64) -> [[f64; 3]; 5] {
 }
 
 /// SGP4/SDP4 propagation of a two-line element set to a signed offset `minutes` from its epoch.
-/// Returns `(r, v)` in the TEME frame (metres, metres/second). Raises `ValueError` on a malformed TLE
-/// or a propagation failure (decayed orbit, etc.).
+/// Returns `(r, v)` in the TEME frame (metres, metres/second). Raises `ValueError` on a malformed TLE,
+/// an SGP4-XP element set (ephemeris type 4), or a propagation failure (decayed orbit, etc.).
 #[pyfunction]
 fn sgp4_propagate(line1: &str, line2: &str, minutes: f64) -> PyResult<([f64; 3], [f64; 3])> {
     let sat = Satellite::from_tle(line1, line2)
@@ -799,6 +799,7 @@ fn geodetic_to_itrf(latitude_deg: f64, longitude_deg: f64, height_m: f64) -> [f6
 
 /// SGP4 propagation of one TLE to many minute-offsets from its epoch — a satellite ephemeris table.
 /// Returns `[(r, v), …]` in TEME (m, m/s), one per entry of `minutes`. The element set is parsed once.
+/// Raises `ValueError` as `sgp4_propagate` does.
 #[pyfunction]
 fn sgp4_propagate_batch(
     py: Python<'_>,

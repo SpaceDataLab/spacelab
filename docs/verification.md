@@ -36,6 +36,14 @@ Many rows below are still checked only against a comparator. Such a row's residu
 not a proof of correctness; the rows are being re-based on mathematical checks one module at a time,
 and the gate kinds of the next section tell which a row already has.
 
+**JB2008 acknowledgement (interim).** This document prints JB2008 numbers computed with the index
+files `SOLFSMY.TXT` and `DTCFILE.TXT` of Space Environment Technologies (SET) as input. JB2008 is
+the model of Bowman et al. (2008), "A New Empirical Thermospheric Density Model JB2008 Using New
+Solar and Geomagnetic Indices", AIAA 2008-6438. The numbers are published under §7 of SET's JB2008
+License Agreement of 2026-10-15, which allows them in publications and reports with the
+acknowledgement and citation of SET's JB2008 Publication Acknowledgement (Notice to Users). That
+text was requested from SET on 2026-10-26; it replaces this note when it arrives.
+
 ## How to read the *Check* column
 
 | Kind | What it is | Decides? |
@@ -6953,7 +6961,7 @@ that is what the verdicts rest on rather than on someone's reading of a web page
 | Viereck composite Mg II, SORCE Mg II, SOHO/SEM, CLS F30 | **no licence stated** (LISIRD catalogue) | various | — | **rejected: terms** |
 | USGS Dst4, Dst3 | U.S. public domain, credit "U.S. Geological Survey" (`usgs-dst`) | 2015-09-24 → | **~45 min** (2026-10-28) | **admitted from 2015-09, screened**: the 2026-09 "all-null" was the wrong element id (Ф14.O); the hourly product carries artefacts (§10.7) |
 | WDC Kyoto Dst | *"does not allow commercial applications of the geomagnetic indices"* | 1957– | — | **rejected: terms** → oracle |
-| SET SOLFSMY / DTCFILE (S10, M10, Y10, ΔTc) | no terms stated anywhere | 1997– | 1 d | **rejected: terms** → JB2008 validation only |
+| SET SOLFSMY / DTCFILE (S10, M10, Y10, ΔTc) | SET's JB2008 License Agreement (2026-10-15): part of the licensed Software, for the licensee's own research and internal use; the index files may not be redistributed "in whole or in part, as standalone data products or as part of any commercial product or service without the written permission of SpaceWx" (§6; `set-jb2008-indices`). The files themselves state none | 1997– | 1 d | **rejected: terms** → JB2008 validation only |
 
 **So the admitted set is F10.7 with its 81-day mean, and Hp60/ap — over the whole corpus — plus EUV
 from 2010-04-30 and a second, independent EUV source from 2017-02-07.** CHAMP (2000–2010) and the first
@@ -9857,7 +9865,7 @@ each reads measured indices, and two read indices from after the instant.
 | **SDTM-1, frozen at 2020** | F10.7 of the day before, its trailing 81-day mean, 3-hourly `ap` | ours: public | **21.2 %** | 21.2 % | 26.5 % | 20.4 | 0.980 |
 | SDTM-1 with the solar wind (D-27), frozen at 2020 | as above, with hourly `ap60` and OMNI's hourly solar wind | ours, OMNI CC0: public | **20.9 %** | 20.8 % | 26.6 % | 20.0 | 0.987 |
 | NRLMSISE-00 | F10.7 of the day before, its *centred* 81-day mean (40 days ahead), the storm-time `ap[]` | NRL's public-domain code, our port: public | 44.9 % | 24.4 % | 34.9 % | 33.2 | 1.310 |
-| JB2008, clean-room (Ф18.A′) | SET's F10/S10/M10/Y10 at their lags, *centred* 81-day means, hourly `ΔTc` from `Dst` | our code; SET's indices state no terms: public | 26.4 % | 27.5 % | 30.5 % | 27.5 | 1.020 |
+| JB2008, clean-room (Ф18.A′) | SET's F10/S10/M10/Y10 at their lags, *centred* 81-day means, hourly `ΔTc` from `Dst` | our code on SET's index files: public under §7 of SET's agreement, with its acknowledgement; provisional (D-38) | 26.4 % | 27.5 % | 30.5 % | 27.5 | 1.020 |
 
 Not run, each with its reason. **NRLMSIS 2.x:** its licence and patent keep it to validation (D-30 (c)), its
 code is not in the tree, and running it needs a new dependency, which is the user's call. **WAM-IPE:** waits for

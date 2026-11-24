@@ -143,6 +143,14 @@ implementation. The Swarm files exercise the UTC branch of the time-scale column
 form of the product; the GRACE-FO files exercise GPS time and twelve columns. Full tables and
 interpretation in `docs/verification.md` §10.2.
 
+**JB2008 acknowledgement (interim).** This document prints JB2008 numbers computed with the index
+files `SOLFSMY.TXT` and `DTCFILE.TXT` of Space Environment Technologies (SET) as input. JB2008 is
+the model of Bowman et al. (2008), "A New Empirical Thermospheric Density Model JB2008 Using New
+Solar and Geomagnetic Indices", AIAA 2008-6438. The numbers are published under §7 of SET's JB2008
+License Agreement of 2026-10-15, which allows them in publications and reports with the
+acknowledgement and citation of SET's JB2008 Publication Acknowledgement (Notice to Users). That
+text was requested from SET on 2026-10-26; it replaces this note when it arrives.
+
 ---
 
 # Light-time oracle (`OrekitLightTimeOracle.java`)

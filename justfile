@@ -23,6 +23,7 @@ gates:
         "constants       uv run --no-project python -I tools/check-constants.py --check"
         "mutants-ledger  uv run --no-project python -I tools/mutants-ledger.py --since HEAD"
         "sdtm-freeze     uv run --no-project python -I tools/check-sdtm-freeze.py"
+        "set-numbers     uv run --no-project python -I tools/check-set-numbers.py --check"
     )
     logs=$(mktemp -d)
     trap 'rm -rf "$logs"' EXIT
@@ -59,12 +60,14 @@ checker-tests:
     uv run --no-project python -I tools/test_check_constants.py
     uv run --no-project python -I tools/test_mutants_ledger.py
     uv run --no-project python -I tools/test_check_sdtm_freeze.py
+    uv run --no-project python -I tools/test_check_set_numbers.py
 
 # D-30: SDTM-1's frozen code and, with the corpus on disk, its frozen data. A deliberate change writes
 # a new baseline with `tools/check-sdtm-freeze.py --write` and a row in `docs/sdtm-selection-ledger.md`.
 freeze:
     uv run --no-project python -I tools/check-sdtm-freeze.py
     uv run --no-project python -I tools/test_check_sdtm_freeze.py
+    uv run --no-project python -I tools/test_check_set_numbers.py
 
 freeze-data:
     uv run --no-project python -I tools/check-sdtm-freeze.py --data
@@ -92,6 +95,12 @@ compare:
 constants:
     uv run --no-project python -I tools/test_check_constants.py
     uv run --no-project python -I tools/check-constants.py --check
+
+# Ф14.V (D-38): a public document or comment block that prints a JB2008 number, which has SET's
+# index files as input, carries the interim acknowledgement, and no public line gives those files no terms.
+set-numbers:
+    uv run --no-project python -I tools/test_check_set_numbers.py
+    uv run --no-project python -I tools/check-set-numbers.py --check
 
 fmt:
     cargo fmt --all -- --check

@@ -378,6 +378,14 @@ best model finds the answer instead of a gap. `docs/provenance.md` holds the rea
   NRLMSISE-00 with the calibration layer, and JB2008's indices rebuilt from open series to the
   published definitions (`plans/16` Ф18.A). NOAA's public WAM-IPE nowcast, measured as a feed, does
   not help as it stands (`docs/verification.md` §10.18).
+
+  **JB2008 acknowledgement (interim).** This document prints JB2008 numbers computed with the index
+  files `SOLFSMY.TXT` and `DTCFILE.TXT` of Space Environment Technologies (SET) as input. JB2008 is
+  the model of Bowman et al. (2008), "A New Empirical Thermospheric Density Model JB2008 Using New
+  Solar and Geomagnetic Indices", AIAA 2008-6438. The numbers are published under §7 of SET's JB2008
+  License Agreement of 2026-10-15, which allows them in publications and reports with the
+  acknowledgement and citation of SET's JB2008 Publication Acknowledgement (Notice to Users). That
+  text was requested from SET on 2026-10-26; it replaces this note when it arrives.
 - **Kyoto Dst, and forecast troposphere products.** WDC Kyoto "does not allow commercial
   applications" of its indices; TU Wien's VMF *forecast* products are non-commercial. Substitute:
   GFZ's Hp30 / Hp60 (CC BY 4.0) as the storm driver, and GPT3 for a troposphere without a grid.

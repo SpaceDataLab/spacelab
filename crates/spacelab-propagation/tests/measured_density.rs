@@ -8,6 +8,14 @@
 //! Environment Technologies' S10/M10/Y10 and hourly `ΔTc` for JB2008 — each at the lag it was fitted
 //! with.
 //!
+//! JB2008 acknowledgement (interim). This comment prints JB2008 numbers computed with the index
+//! files `SOLFSMY.TXT` and `DTCFILE.TXT` of Space Environment Technologies (SET) as input. JB2008
+//! is the model of Bowman et al. (2008), "A New Empirical Thermospheric Density Model JB2008 Using
+//! New Solar and Geomagnetic Indices", AIAA 2008-6438. The numbers are published under §7 of SET's
+//! JB2008 License Agreement of 2026-10-15, which allows them in publications and reports with the
+//! acknowledgement and citation of SET's JB2008 Publication Acknowledgement (Notice to Users). That
+//! text was requested from SET on 2026-10-26; it replaces this note when it arrives.
+//!
 //! Two days are committed as fixtures and always run: 2019-01-01, the floor of the solar minimum
 //! between cycles 24 and 25, and 2024-05-10, the onset of the Gannon superstorm (Kp 9, Dst −412 nT).
 //! One is the easiest day these models will ever see and the other is the hardest, which is the
@@ -625,6 +633,14 @@ fn the_three_hourly_ap_array_is_what_carries_the_storm() {
 /// Degree 1 — four coefficients, a scale plus one sun-fixed dipole. A single day's track covers a
 /// narrow band of local solar time, and measured out of sample, degree 2 and 3 are no better on any
 /// model and worse on most.
+///
+/// JB2008 acknowledgement (interim). This comment prints JB2008 numbers computed with the index
+/// files `SOLFSMY.TXT` and `DTCFILE.TXT` of Space Environment Technologies (SET) as input. JB2008
+/// is the model of Bowman et al. (2008), "A New Empirical Thermospheric Density Model JB2008 Using
+/// New Solar and Geomagnetic Indices", AIAA 2008-6438. The numbers are published under §7 of SET's
+/// JB2008 License Agreement of 2026-10-15, which allows them in publications and reports with the
+/// acknowledgement and citation of SET's JB2008 Publication Acknowledgement (Notice to Users). That
+/// text was requested from SET on 2026-10-26; it replaces this note when it arrives.
 ///
 /// Measured, base → calibrated on the held-out half:
 ///

@@ -200,8 +200,9 @@ def public_lines(text: str, where: str = "") -> list[str | None]:
 
 
 def public_files(
-    root: pathlib.Path, skip: tuple[str, ...] = SELF
+    root: pathlib.Path, skip: tuple[str, ...] = SELF, every: bool = False
 ) -> dict[str, list[str | None]]:
+    """The public view of each file, by its path; `every` takes every text file, not the suffixes."""
     listed = subprocess.run(
         [
             "git",
@@ -224,9 +225,12 @@ def public_files(
         suffix = path.suffix
         if rel.startswith(excluded) or rel in skip + CUT or not path.is_file():
             continue
-        if suffix not in DOCUMENT and suffix not in COMMENT:
+        if not every and suffix not in DOCUMENT and suffix not in COMMENT:
             continue
-        lines = public_lines(path.read_text(encoding="utf-8", errors="replace"), rel)
+        data = path.read_bytes()
+        if b"\0" in data:
+            continue
+        lines = public_lines(data.decode("utf-8", errors="replace"), rel)
         if rel in REGISTERS:
             lines = [
                 None if x is not None and x.strip().startswith(excluded) else x
@@ -237,9 +241,18 @@ def public_files(
 
 
 def hits(
-    lines: list[str | None], name: re.Pattern[str] = NAME
+    lines: list[str | None], name: re.Pattern[str] = NAME, own: bool = False
 ) -> list[tuple[int, str, bool]]:
-    """`(line number, kind, narrow)` for every wide hit of `name`; kind is `named` or `column`."""
+    """`(line number, kind, narrow)` for every wide hit of `name`; kind is `named` or `column`.
+
+    `own` also cuts what `name` matches before looking for a digit, for a name that holds one.
+    """
+
+    def has_number(text: str) -> bool:
+        return bool(
+            DIGIT.search(NOT_A_NUMBER.sub("", name.sub("", text) if own else text))
+        )
+
     found = []
     column = None
     for i, line in enumerate(lines):
@@ -250,19 +263,22 @@ def hits(
         if not is_row:
             column = None
         narrow = bool(name.search(line) and PERCENT.search(line))
-        following = next((x for x in lines[i + 1 :] if x is not None), "")
-        if is_row and name.search(line) and RULE.search(following):
+        # The next public line, read only for a row that names the model: copying the rest of the
+        # list on every line is quadratic, and a data file runs to 10^5 lines.
+        if (
+            is_row
+            and name.search(line)
+            and RULE.search(next((x for x in lines[i + 1 :] if x is not None), ""))
+        ):
             cells = BORDER.split(body)
             column = next((k for k, c in enumerate(cells) if name.search(c)), None)
             continue
         if is_row and column is not None and not RULE.search(line):
             cells = BORDER.split(body)
-            if column < len(cells) and DIGIT.search(
-                NOT_A_NUMBER.sub("", cells[column])
-            ):
+            if column < len(cells) and has_number(cells[column]):
                 found.append((i + 1, "column", narrow))
                 continue
-        if name.search(line) and DIGIT.search(NOT_A_NUMBER.sub("", line)):
+        if name.search(line) and has_number(line):
             found.append((i + 1, "named", narrow))
     return found
 

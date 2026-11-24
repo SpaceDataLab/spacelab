@@ -171,9 +171,14 @@ def mentions(excluded: list[str], names: list[str]) -> set[str]:
     return found
 
 
-def data_rows() -> list[dict]:
-    """The machine-readable half of the data register: one row per source."""
-    text = REGISTER.read_text(encoding="utf-8")
+def data_rows(text: str | None = None) -> list[dict]:
+    """The machine-readable half of the data register: one row per source.
+
+    A row is `key | verdict | read DATE | hosts ... | paths ... | class CLASS`, and a class that
+    forbids printing the source's numbers adds `| names REGEX` (`tools/check-classes.py`).
+    """
+    if text is None:
+        text = REGISTER.read_text(encoding="utf-8")
     if DATA not in text:
         raise SystemExit(f"{REGISTER.name} has no '{DATA}' section")
     body = text.split(DATA, 1)[1].split("```")[1]
@@ -183,11 +188,16 @@ def data_rows() -> list[dict]:
         if not line or line == "text":
             continue
         parts = [p.strip() for p in line.split(" | ")]
-        if len(parts) != 5:
+        if len(parts) not in (6, 7) or not parts[5].startswith("class "):
             raise SystemExit(
-                f"malformed data-register row (want 5 ' | ' fields): {line}"
+                f"malformed data-register row (want 'key | verdict | read | hosts | paths | class' "
+                f"and an optional '| names'): {line}"
             )
-        key, verdict, read, hosts, paths = parts
+        if len(parts) == 7 and not parts[6].startswith("names "):
+            raise SystemExit(
+                f"malformed data-register row (7th field is not names): {line}"
+            )
+        key, verdict, read, hosts, paths = parts[:5]
         rows.append(
             {
                 "key": key,
@@ -199,6 +209,10 @@ def data_rows() -> list[dict]:
                 "paths": []
                 if paths == "paths -"
                 else paths.removeprefix("paths").split(),
+                "class": parts[5].removeprefix("class").strip(),
+                "names": parts[6].removeprefix("names").strip()
+                if len(parts) == 7
+                else "",
             }
         )
     return rows

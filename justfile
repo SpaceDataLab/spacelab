@@ -24,7 +24,7 @@ gates:
         "mutants-ledger  uv run --no-project python -I tools/mutants-ledger.py --since HEAD"
         "sdtm-freeze     uv run --no-project python -I tools/check-sdtm-freeze.py"
         "set-numbers     uv run --no-project python -I tools/check-set-numbers.py --check"
-        "dtm-numbers     uv run --no-project python -I tools/check-dtm-numbers.py --check"
+        "classes         uv run --no-project python -I tools/check-classes.py --check"
         "readme          uv run --no-project python -I tools/gen-readme.py --check"
     )
     logs=$(mktemp -d)
@@ -64,7 +64,7 @@ checker-tests:
     uv run --no-project python -I tools/test_mutants_ledger.py
     uv run --no-project python -I tools/test_check_sdtm_freeze.py
     uv run --no-project python -I tools/test_check_set_numbers.py
-    uv run --no-project python -I tools/test_check_dtm_numbers.py
+    uv run --no-project python -I tools/test_check_classes.py
     uv run --no-project python -I tools/test_celestrak_client.py
 
 # D-30: SDTM-1's frozen code and, with the corpus on disk, its frozen data. A deliberate change writes
@@ -107,11 +107,12 @@ set-numbers:
     uv run --no-project python -I tools/test_check_set_numbers.py
     uv run --no-project python -I tools/check-set-numbers.py --check
 
-# Ф14.Z (D-32): no public line prints a number computed from DTM2020, whose licence forbids it; a
-# table keeps the model's column in the development tree with a column marker in its header cell.
-dtm-numbers:
-    uv run --no-project python -I tools/test_check_dtm_numbers.py
-    uv run --no-project python -I tools/check-dtm-numbers.py --check
+# Ф14.X (rule 18): every data source has a publication class in docs/provenance.md, and no public line
+# prints a number of a `number-private` source, found by its register row's `names`; a table keeps
+# such a column in the development tree with a column marker in its header cell.
+classes:
+    uv run --no-project python -I tools/test_check_classes.py
+    uv run --no-project python -I tools/check-classes.py --check
 
 fmt:
     cargo fmt --all -- --check

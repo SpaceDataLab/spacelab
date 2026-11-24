@@ -26,6 +26,7 @@ gates:
         "set-numbers     uv run --no-project python -I tools/check-set-numbers.py --check"
         "classes         uv run --no-project python -I tools/check-classes.py --check"
         "readme          uv run --no-project python -I tools/gen-readme.py --check"
+        "claims          uv run --no-project python -I tools/check-claims.py --check"
     )
     logs=$(mktemp -d)
     trap 'rm -rf "$logs"' EXIT
@@ -65,6 +66,7 @@ checker-tests:
     uv run --no-project python -I tools/test_check_sdtm_freeze.py
     uv run --no-project python -I tools/test_check_set_numbers.py
     uv run --no-project python -I tools/test_check_classes.py
+    uv run --no-project python -I tools/test_check_claims.py
     uv run --no-project python -I tools/test_celestrak_client.py
 
 # D-30: SDTM-1's frozen code and, with the corpus on disk, its frozen data. A deliberate change writes
@@ -113,6 +115,12 @@ set-numbers:
 classes:
     uv run --no-project python -I tools/test_check_classes.py
     uv run --no-project python -I tools/check-classes.py --check
+
+# Ф32.K (rule 17): each counted statement of the README and the ledger -- a count, a size, a version --
+# against the tree it describes, and no badge of a workflow that no push starts.
+claims:
+    uv run --no-project python -I tools/test_check_claims.py
+    uv run --no-project python -I tools/check-claims.py --check
 
 fmt:
     cargo fmt --all -- --check

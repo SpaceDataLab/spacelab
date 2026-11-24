@@ -109,6 +109,30 @@ set. `density_calibration.rs` and the 348 693 rows of TU Delft accelerometer and
 are most of what a DTM-class fit needs. That is research rather than a ticket, and it is the same line
 as the open density-calibration layer that already stands in for HASDM.
 
+**Its numbers stay in the development tree too (`plans/18` D-32).** A number computed by running
+DTM2020 is class `number-private`: a score, a ratio, a correlation, a table column, a ranking against
+it, and the stretch target its MAPE set for SDTM-1 with that target's verdict. The development tree
+keeps each behind a private marker, a table keeps a DTM2020 column behind a column marker the public
+cut drops, and the public tree prints none. `tools/check-dtm-numbers.py --check` fails where the public
+view holds one. A line that names DTM2020 with no number stays, and so does a number a third party
+published about it, cited.
+
+**What release 0.3.0 already carries (D-58).** Read on 2026-11-24 at tag `v0.3.0` (public `8da2422`)
+with `tools/check-dtm-numbers.py`, whose wide pattern is an upper bound: `docs/verification.md` holds
+15 lines that name DTM2020 beside a percentage and 50 by the wide pattern, `docs/limitations.md` one
+number, the comments of `crates/spacelab-propagation/tests/measured_density.rs` 3 and 8, and a
+comment of `.cargo/mutants.toml` the model's measured density floor. One line is inside a published
+package: line 8 of `src/sdtm/mod.rs` in `spacelab-propagation` 0.3.0 on crates.io
+(`spacelab-propagation-0.3.0.crate`, sha256
+`94c25a7b00d10408c573dbcbfadfd65fd1581719d5fd722fc2c5bae0544645c1`), a module doc that prints
+DTM2020's pooled MAPE, of the kind docs.rs renders; no other file of that package prints a DTM2020
+number. PyPI's `spacedatalab` 0.3.0 prints none: its source archive (`spacedatalab-0.3.0.tar.gz`,
+sha256 `b06061fd4538951d831fa25b620365dc2a5ad22bba6b6d0e9ffb2c197ece8529`) holds the wrapper crate and
+its READMEs only, and the extension module of the `cp311-abi3-manylinux_2_28_x86_64` wheel holds no
+string naming DTM2020. Nothing is yanked: a yank stops new resolutions and removes no stored file and
+nothing from the tag, and it is the owner's act. The 0.4.0 release notes are to say so (`plans/18`
+Ф32.A).
+
 ## 2 · NRLMSISE-00 — re-based on the source of record, and the re-basing is a measurement
 
 Brodowski's C package states no terms at all. There is no `COPYING`, the source header names the
@@ -367,7 +391,7 @@ agreement the user has to accept in person); **unread** (a claim, not a reading,
 | `hitran` | HITRAN line parameters behind the gas-transmittance fit | Free with citation; the lines are cached under `~/.cache/spacelab/hitran` and never enter the tree — only our exponential-sum fit does | **internal-only** |
 | `mt-ckd` | AER MT_CKD water-vapour continuum | Research-only; "may not be incorporated into proprietary software … or commercial software … without the express written consent of AER" — oracle, cached outside the tree, nothing derived from it committed | **internal-only** |
 | `nrlmsis2` | NRLMSIS 2.0 / 2.1 via `pymsis` | NRL licence: no non-academic commercial use, no modification, no dissemination; US 10,641,925 B2 (family: EP withdrawn, AU granted, US to 2039) — validation only | **internal-only** |
-| `dtm2020` | DTM2020 code and `DTM_2020_F107_Kp.dat` | §1 — excluded from the public tree; research use only | **restricted** |
+| `dtm2020` | DTM2020 code and `DTM_2020_F107_Kp.dat` | §1 — excluded from the public tree; research use only. A number computed from it is `number-private` (D-32): the public tree prints none, and `tools/check-dtm-numbers.py --check` fails where it would. Tag `v0.3.0` already carries some, one line of them in the published `spacelab-propagation` 0.3.0 (D-58, §1) | **restricted** |
 | `wdc-kyoto` | WDC Kyoto Dst / AE / SYM-H | "The WDC Kyoto does not allow commercial applications of the geomagnetic indices" (read 2026-09-05). Not fetched by any script | **restricted** |
 | `esa-swarm-dns` | ESA's own Swarm Level-2 thermospheric density products (`SW_OPER_DNSxPOD_2_`, `DNSxACC_2_`) on `swarm-diss.eo.esa.int` — 4608 daily files per satellite, 2013-11-28 → 2026-07-31, 643 MB for Swarm A alone. The fallback for `tudelft-thermosphere`, whose server has refused connections on five probes between 2026-09-05 and 2026-09-14 | Read 2026-09-14 from the two documents the download page itself links. The *Data Policy* (ESA/PB-EO(2010)54) is permissive in intent — use "be it scientific, for public good or **commercial**", "full and open access … free of charge" — but access is "granted upon electronic on-line registration and the user accepting the ESA Terms & Conditions", and those (ESA-EOPG-PDGS-PR-1 Issue 1.1, 2023-09-20) add three clauses no register row can decide: **B.6(a)** "Use all ESA EO data accessed exclusively for their own EO research and applications purposes"; **C.2** mark "all ESA EO data and analysed information … © ESA (year of reception)"; **C.5** any IP emerging from direct use carries a "worldwide, free of charge, irrevocable, and non-exclusive licence" to ESA, with patent filings notified within two months. A fitted coefficient set is plausibly "analysed information" and certainly "own intellectual property" | **user-decision** |
 | `usgs-dst` | USGS Geomagnetism Program web service, virtual observatory `USGS`, elements `Dst3` ("3-channel Dst") and `Dst4` ("4-channel Dst") as `/ws/elements/` lists them; method Rigler (2017), doi:10.3133/ofr20171037. The 2026-09-06 probes asked for `DST`, which is not an element, and read its all-`null` answer as an empty index. `tools/fetch-usgs-dst.sh` fetches the hourly series from the filter endpoint, `/ws/algorithms/filter/` with `type=variation`, `input_sampling_period=60` and `output_sampling_period=3600`, one calendar month per request, sequentially, into the git-ignored `data/validation/density/usgs-dst/` — the route and the load USGS (E. J. Rigler) gave and agreed to on 2026-10-27; `/ws/data/` holds the 1-minute series only. The Gannon-storm week is committed as `usgs_dst_gannon.txt` | U.S. public domain: "USGS-authored or produced data and information are considered to be in the U.S. Public Domain", and credit to "U.S. Geological Survey" is asked (usgs.gov, *Copyrights and Credits*, read 2026-10-25); the fixture header carries the credit and the citation. Fetched 2026-10-28, 2015-09 → 2026-10, 97 896 hours; values from 2015-09-24. The `variation` product carries unscreened artefacts (`verification.md` §10.7), reported to USGS | **ship** |
@@ -476,7 +500,8 @@ tree is cut from the development tree by a script, never edited by hand.
   NeQuick-G does not need them: its CCIR maps and MODIP grid are the Galileo ICD's own.
 
 Where this documentation quotes a number measured with one of these models, the number is the
-development tree's and is reproducible only there.
+development tree's and is reproducible only there. The public tree quotes none measured with DTM2020
+(§1, D-32).
 
 
 ## The covered set

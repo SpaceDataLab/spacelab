@@ -211,10 +211,12 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   field is checked only through these lifetimes**, never against a measured density. The conformal re-entry
   window covers inside its stated band at every lead for both models; the analog ensemble alone is too narrow.
   The sample holds objects that did come down.
-- **On years it was not fitted on, SDTM-1 is ahead of NRLMSISE-00 and JB2008, not of every model.** Fitted
+- **On years it was not fitted on, SDTM-1 is ahead of NRLMSISE-00 and JB2008.** Fitted
   on the rows before 2020 and scored on 109 221 rows of 2020–2026 at 419–542 km, it reads 21.2 % MAPE against
   NRLMSISE-00's 44.9 % and the clean-room JB2008's 26.4 % (`docs/verification.md` §10.38). In storm time,
-  24 storms do not resolve its lead. DTM2020, which no open release can carry, is not behind it on these rows.
+  24 storms do not resolve its lead.
+  DTM2020 was run on these rows in the development tree, and its licence keeps that comparison out of the
+  public release (`docs/provenance.md` §1, D-32).
   NRLMSIS 2.x, WAM-IPE and TIE-GCM were not run, each for a stated reason.
 - **Before 2001 SDTM-1 may read too thin.** It is fitted on 2001–2026 and has no secular term. GFZ-1, a sphere of
   known area-to-mass that decayed in 1995–1999, needs a drag coefficient of 2.84–3.51 under SDTM-1 for its true
@@ -363,9 +365,10 @@ best model finds the answer instead of a gap. `docs/provenance.md` holds the rea
   (a US Government work, re-based on the NRL FORTRAN) with the calibration layer, and our own
   thermosphere model on open data (`plans/16` Ф15). NRLMSIS 2.1 remains a dated oracle number.
 - **DTM2020.** CNES / Met Office / Elecnor Deimos licence: academic, non-commercial only; no
-  modification; no dissemination "or any of its supporting data". It is the most accurate model in
-  the density campaign (20.2 % against 25.5 % for JB2008) and it is the one file this repository
-  cannot publish. Substitute: the same as above; DTM2020's numbers are cited with their date.
+  modification; no dissemination "or any of its supporting data".
+  The development tree runs it as a comparator, and the public release prints no number computed from
+  it: the register gives them the class `number-private` (`docs/provenance.md` §1, D-32). Substitute:
+  the same as above.
 - **SGP4-XP.** No public algorithm specification exists, so there is nothing to implement from.
   Substitute: SGP4 with SupGP element sets, and a learned corrector on open data (`plans/16` Ф8.D).
   An SGP4-XP element set (ephemeris type 4) is refused, not propagated with SGP4, by every SGP4

@@ -24,6 +24,7 @@ gates:
         "mutants-ledger  uv run --no-project python -I tools/mutants-ledger.py --since HEAD"
         "sdtm-freeze     uv run --no-project python -I tools/check-sdtm-freeze.py"
         "set-numbers     uv run --no-project python -I tools/check-set-numbers.py --check"
+        "dtm-numbers     uv run --no-project python -I tools/check-dtm-numbers.py --check"
         "readme          uv run --no-project python -I tools/gen-readme.py --check"
     )
     logs=$(mktemp -d)
@@ -62,13 +63,13 @@ checker-tests:
     uv run --no-project python -I tools/test_mutants_ledger.py
     uv run --no-project python -I tools/test_check_sdtm_freeze.py
     uv run --no-project python -I tools/test_check_set_numbers.py
+    uv run --no-project python -I tools/test_check_dtm_numbers.py
 
 # D-30: SDTM-1's frozen code and, with the corpus on disk, its frozen data. A deliberate change writes
 # a new baseline with `tools/check-sdtm-freeze.py --write` and a row in `docs/sdtm-selection-ledger.md`.
 freeze:
     uv run --no-project python -I tools/check-sdtm-freeze.py
     uv run --no-project python -I tools/test_check_sdtm_freeze.py
-    uv run --no-project python -I tools/test_check_set_numbers.py
 
 freeze-data:
     uv run --no-project python -I tools/check-sdtm-freeze.py --data
@@ -102,6 +103,12 @@ constants:
 set-numbers:
     uv run --no-project python -I tools/test_check_set_numbers.py
     uv run --no-project python -I tools/check-set-numbers.py --check
+
+# Ф14.Z (D-32): no public line prints a number computed from DTM2020, whose licence forbids it; a
+# table keeps the model's column in the development tree with a column marker in its header cell.
+dtm-numbers:
+    uv run --no-project python -I tools/test_check_dtm_numbers.py
+    uv run --no-project python -I tools/check-dtm-numbers.py --check
 
 fmt:
     cargo fmt --all -- --check

@@ -2255,26 +2255,6 @@ exclude_re = [
     # two paths is 1.637e-16 -- under one ULP. Everywhere off a node the branch is the same one.
     "harris_priester/mod\\.rs:129:45: replace > with >= in harris_priester",
 
-    # DTM2020, the same five guards of the same local-exponential lift, for a reason Harris-Priester's
-    # proof does not cover: the model has no table ceiling, so it cannot return a zero density at the
-    # top of its range the way the Harris-Priester table can.
-    #
-    # `density` computes `H = -10 000 / ln(rho_up/rho0)` and falls back to 50 km when
-    # `!(rho0 > 0 && rho_up > 0)` or when `!(hh.is_finite() && hh > 1000)`. Each entry below weakens
-    # one comparison from `>` to `>=`, or widens one `&&` to `||`. A `>=` differs from `>` only where
-    # the operand is exactly on the boundary; `||` differs from `&&` only where the two operands
-    # disagree, which for a pair that is always both-true is nowhere.
-    #
-    # Both premises are swept, not assumed, by
-    # `dtm2020::tests::neither_lift_guard_comes_near_its_boundary_anywhere_in_the_models_range`:
-    # every 10 km of the model's valid range, at three latitude/local-time points, under both a quiet
-    # Sun and a severe storm. Measured floor -- 120-1500 km: min rho = 1.582e-16 kg/m^3,
-    # min H = 9318.3 m. Density is a sum of positive exponentials of per-constituent number
-    # densities, so it reaches zero only by underflow, and 1.6e-16 is 307 orders above f64's 5e-324.
-    # `H` is `kT/mg`, tens of kilometres through the thermosphere and 9.3 km at its coldest, heaviest
-    # point -- the 1000 m boundary is never approached, let alone landed on. The test asserts a bound
-    # at roughly half the measured floor, so the premise stays checked without becoming a change
-    # detector.
 
     # `exp_so3`'s small-angle branch: the threshold itself and the two Taylor corrections inside it.
     # All four are unrepresentable-difference equivalences, verified in f64 rather than argued.
@@ -5521,7 +5501,7 @@ exclude_re = [
     # unreachable, and an assertion on `weight(0.0).is_sign_negative()` would be pinning IEEE-754's
     # sign rule rather than the kernel's causality. The `>`-side of the same branch is caught by
     # `the_storm_kernel_has_unit_gain_a_delayed_onset_and_the_peak_the_algebra_gives`.
-    "crates/spacelab-propagation/src/sdtm/mod\\.rs:209:16: replace < with <= in StormKernel::weight",
+    "crates/spacelab-propagation/src/sdtm/mod\\.rs:208:16: replace < with <= in StormKernel::weight",
 
     # `self.heights.locate(height_km, 0, self.heights.count - 1)` in `WamIpeField::density`, the
     # upper node rewritten to `count + 1` or `count / 1`. `density` has already returned `None`

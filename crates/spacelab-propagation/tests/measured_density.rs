@@ -31,13 +31,14 @@
 //! | NRLMSISE-00, 3-hourly `ap` array | 2.034 ± 1.264 | **1.661 ± 0.793** | — | — |
 //! | NRLMSISE-00, daily `Ap` | 2.019 ± 1.235 | 2.087 ± 1.346 | 2.019 ± 1.236 | 2.086 ± 1.346 |
 //! | JB2008 | 1.359 ± 0.652 | 1.133 ± 0.297 | 1.358 ± 0.645 | 1.156 ± 0.312 |
-//! | DTM2020 (Orekit ships DTM2000) | 1.056 ± 0.316 | 1.189 ± 0.361 | 2.163 ± 1.661 | 2.243 ± 1.725 |
+//! | Orekit's DTM2000 | — | — | 2.163 ± 1.661 | 2.243 ± 1.725 |
 //! | SDTM-1, ours, **in sample** | 0.925 ± 0.275 | 1.235 ± 0.352 | — | — |
 //!
-//! On the literature's own metric, MAPE: 103.4 / 102.0 / 47.6 / 23.8 / **22.4 %** quiet and 68.2 /
-//! 114.7 / **20.6** / 24.1 / 26.7 % storm, in the table's order.
+//! On the literature's own metric, MAPE: 103.4 / 102.0 / 47.6 /
+//! **22.4 %** quiet and 68.2 / 114.7 / **20.6** /
+//! 26.7 % storm, in the table's order.
 //!
-//! Five findings, and none of them could come from a component test:
+//! The findings, and none of them could come from a component test:
 //!
 //! 1. **Driven identically, this crate's NRLMSISE-00 and Orekit's agree to 1e-3 relative** — 2.019
 //!    against 2.019 quiet, 2.087 against 2.086 storm. So does JB2008, to 5e-3. The models are not in
@@ -47,18 +48,15 @@
 //!    so the daily average inflates the eighteen quiet hours before it. Resolving `ap` at its native
 //!    3-hour cadence takes the bias from 2.087 to 1.661 and the RMS from 1.346 to 0.793. That is
 //!    what the sub-daily driver bought, measured.
-//! 3. **All three models run high against this product, and NRLMSISE-00 runs high by a factor of
+//! 3. **The models run high against this product, and NRLMSISE-00 runs high by a factor of
 //!    two at solar minimum.** The 2018–2020 minimum was among the deepest on record and
-//!    NRLMSISE-00's fit predates it; this is the same shortfall that motivated NRLMSIS 2.x. The
-//!    caveat belongs with the number: DTM2020's 1.085 is *not* independent evidence, because
-//!    DTM2020 was fitted on this data family. JB2008 and NRLMSISE-00 are independent of it and read
-//!    1.36 and 2.03.
-//! 4. **Twenty years of refitting is worth more than any of it.** Orekit's DTM2000 reads 2.16 and
-//!    2.24 where spacelab's DTM2020 port, which the public release does not carry, reads 1.06 and 1.19.
+//!    NRLMSISE-00's fit predates it; this is the same shortfall that motivated NRLMSIS 2.x.
+//!    JB2008 and NRLMSISE-00
+//!    read 1.36 and 2.03 on the quiet day.
 //! 5. **Our own model is the only one not biased high at the minimum, and that is what being fitted
-//!    on a corpus containing one buys.** SDTM-1 reads 0.925 ± 0.275 and 22.4 % where DTM2020 reads
-//!    1.056 ± 0.316 and 23.8 % and NRLMSISE-00 reads 2.034 and 103.4 %. On the storm day it is last
-//!    of the three, 26.7 % against JB2008's 20.6 %, with a two-constant `ap` kernel against JB2008's
+//!    on a corpus containing one buys.** SDTM-1 reads 0.925 ± 0.275 and 22.4 %
+//!    and NRLMSISE-00 reads 2.034 and 103.4 %. On the storm day it is
+//!    behind JB2008, 26.7 % against 20.6 %, with a two-constant `ap` kernel against JB2008's
 //!    Dst-derived `ΔTc`. Both numbers are **in sample** — `plans/16` Ф15.D fitted SDTM-1 on these
 //!    twelve files, and `docs/verification.md` §10.10 is where its held-out numbers are.
 //!
@@ -69,14 +67,14 @@
 //!
 //! **The bias is a property of the models, not of the instrument.** GRACE-FO C, from an accelerometer
 //! at 480–540 km, and Swarm A, from the drag signature in a precise orbit at 420–480 km, put
-//! NRLMSISE-00 at 1.497 and 1.472, JB2008 at 1.116 and 1.139, DTM2020 at 1.032 and 1.011 — two
-//! unrelated ways of measuring density agreeing on the error to within 2%.
+//! NRLMSISE-00 at 1.497 and 1.472 and JB2008 at 1.116 and 1.139
+//! — two unrelated ways of measuring density agreeing on the error to within 2%.
 //!
-//! **On MAPE, SDTM-1 is below NRLMSISE-00 in every bin and best of the five in the storm bin.** Pooled
-//! 21.2 % against JB2008's 25.5 % and DTM2020's 20.2 %; 28.7 % at `Ap` ≥ 50 against their 31.0 % and
-//! 30.5 % over 19 126 evaluations; and last of the three modern models at both flux extremes, which are
-//! the two bins the corpus samples with one month each. In sample, and `docs/verification.md` §10.2 and
-//! §10.11 carry the rest.
+//! **On MAPE, SDTM-1 is below NRLMSISE-00 in every bin and best of the models in the storm bin.**
+//! Pooled it reads 21.2 % against JB2008's 25.5 %, and 28.7 % at `Ap` ≥ 50 against JB2008's 31.0 %
+//! over 19 126 evaluations.
+//! At high flux it is behind JB2008, in one of the two bins the corpus samples with one month each.
+//! In sample, and `docs/verification.md` §10.2 and §10.11 carry the rest.
 
 #![allow(
     clippy::expect_used,
@@ -426,8 +424,7 @@ fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storm
         }
     }
 
-    // Solar minimum: NRLMSISE-00 is out by a factor of two at 490 km, JB2008 by a third, and only
-    // DTM2020 — fitted on this data family, so not an independent witness — is close.
+    // Solar minimum: NRLMSISE-00 is out by a factor of two at 490 km, JB2008 by a third.
     let by = |m, set: &[Evaluation]| fit_of(m, set);
     let msis_quiet = by(Model::Nrlmsise00DailyAp, &quiet);
     assert!(
@@ -457,9 +454,8 @@ fn the_three_atmospheres_are_measured_against_grace_fo_when_quiet_and_when_storm
         }
     }
 
-    // SDTM-1 against DTM2020, the model it has to reach. The corpus field is behind it on both days:
-    // 25.9 % against 23.8 % quiet (bias 1.103 against 1.056), 36.2 % against 24.1 % on the storm day
-    // (bias 1.340). The storm day is the flux, not the storm: F10.7 of the previous day is 233.2 sfu
+    // The corpus field reads 25.9 % quiet (bias 1.103) and 36.2 % on the storm day (bias 1.340).
+    // The storm day is the flux, not the storm: F10.7 of the previous day is 233.2 sfu
     // against an 81-day trailing mean of 162.9, a daily excess only 0.76 % of the corpus rows reach.
     // Linear, that excess carried the model 1.31–1.45 times too dense from 00 to 15 UT, before the
     // storm begins (55.2 % on the day); saturated (`sdtm::FluxExcess`, `docs/verification.md`
@@ -648,12 +644,11 @@ fn the_three_hourly_ap_array_is_what_carries_the_storm() {
 /// |---|---|---|---|---|
 /// | NRLMSISE-00 | 1.908 → 0.944 | 1.076 → 0.311 | 1.622 → 0.969 | 0.838 → 0.314 |
 /// | JB2008 | 1.571 → 1.483 | 0.793 → 0.776 | 1.106 → 0.995 | 0.339 → 0.379 |
-/// | DTM2020 | 1.059 → 1.010 | 0.284 → 0.344 | 1.338 → 0.964 | 0.561 → 0.322 |
 ///
 /// So the honest answer to "does the calibration beat the base model out of sample" is: it removes
 /// the bias every time, and it removes the scatter only where the base model's error has sun-fixed
-/// structure to remove. Where the base model is already nearly unbiased — JB2008, and DTM2020 on
-/// the quiet day — fitting four coefficients to half a day costs more in variance than it recovers.
+/// structure to remove. Where the base model is already nearly unbiased — JB2008,
+/// — fitting four coefficients to half a day costs more in variance than it recovers.
 #[test]
 fn the_sun_fixed_calibration_removes_the_bias_out_of_sample() {
     let series = fixture_drivers();
@@ -1509,8 +1504,7 @@ fn every_downloaded_month_stratified_by_flux_and_storm_level() {
 /// family's pooled coverage is not a floor for a cell: it averages the cells, and a single storm can
 /// sit below it. On the shipped field five cells cover 85.7 to 93.0 %. The lowest is the low-flux
 /// storm cell, and it is one storm day, 2021-11-04: the model's geometric-mean ratio to the
-/// measurement is 0.84 (GRACE-FO C) and 0.82 (Swarm A), against DTM2020's 0.69–0.70 and the previous
-/// field's 0.75.
+/// measurement is 0.84 (GRACE-FO C) and 0.82 (Swarm A), against the previous field's 0.75.
 ///
 /// The sixth, high flux in storm time, covers **80.8 %**, and is held to that measured value instead:
 /// its σ, measured over the corpus, is too narrow for these months. It was 83.5 % before the storm's
@@ -1564,8 +1558,7 @@ fn the_interval_covers_every_regime(all: &[Evaluation]) {
 /// Acciarini et al., *Space Weather* **22**, e2023SW003652 (2024) report 40–60 % MAPE for empirical
 /// models and ~20 % for a machine-learned one, on POD densities from the same satellite family.
 /// NRLMSISE-00 landing inside their empirical band is the check that this campaign measures what
-/// theirs measured; DTM2020 reaching their ML figure with no learned component is the finding, and it
-/// is not independent evidence, because DTM2020 was fitted on this data family.
+/// theirs measured.
 fn mape_against_the_published_band(all: &[Evaluation]) {
     println!("\n== mean absolute percentage error ==");
     print!("{:<30} {:>8}", "bin", "n");

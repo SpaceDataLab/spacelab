@@ -6163,8 +6163,10 @@ Bowman's FORTRAN,
 which establishes that the code is the model. It says nothing about whether the model is the
 thermosphere. This section is the other question.
 
-**DTM2020's columns, here and in §10.3-§10.17, were measured with spacelab's DTM2020 port, which the
-public release does not carry**: the CNES licence does not allow redistribution (`docs/limitations.md`).
+**The public release prints no number computed from DTM2020.** CNES's licence forbids disseminating
+the model "or any of its supporting data", and the register gives every number computed from it the
+class `number-private` (`docs/provenance.md` §1, D-32): its rows, columns and comparisons stay in the
+development tree.
 The other models' columns come from code the public release carries.
 
 The measurement is the **TU Delft neutral-density product, version 02** (Siemes et al., *J. Space
@@ -6189,65 +6191,71 @@ relative error:
 | NRLMSISE-00, 3-hourly `ap` array | 2.034 ± 1.264 | **1.661 ± 0.793** | — | — |
 | NRLMSISE-00, daily `Ap` | 2.019 ± 1.235 | 2.087 ± 1.346 | 2.019 ± 1.236 | 2.086 ± 1.346 |
 | JB2008 | 1.359 ± 0.652 | 1.133 ± 0.297 | 1.358 ± 0.645 | 1.156 ± 0.312 |
-| DTM2020 *(Orekit ships DTM2000)* | 1.056 ± 0.316 | 1.189 ± 0.361 | 2.163 ± 1.661 | 2.243 ± 1.725 |
+| Orekit's DTM2000 | — | — | 2.163 ± 1.661 | 2.243 ± 1.725 |
 | **SDTM-1 pilot (§10.10) — in sample** | **0.927 ± 0.274** | 1.257 ± 0.383 | — | — |
 | SDTM-1 shipped corpus field (§10.26) | 1.096 ± 0.341 | 1.455 ± 0.660 | — | — |
 
-On MAPE, the metric the density literature reports, in the same order: 103.4 / 102.0 / 47.6 / 23.8 /
-**22.1 %** on the quiet day and 68.2 / 114.7 / **20.6** / 24.1 / 30.1 % on the storm day. SDTM-1's two
+On MAPE, the metric the density literature reports, in the same order: 103.4 / 102.0 / 47.6 /
+**22.1 %** on the quiet day and 68.2 / 114.7 / **20.6** /
+30.1 % on the storm day. SDTM-1's two
 numbers are **in sample** — Ф15.D fitted it on these twelve files (§10.10) — and they are here because
 they answer a question the held-out splits cannot: how much of this measurement the form can absorb at
 all, and in which regime. The answer is that at the deep minimum it absorbs more of it than any of the
-three literature models, including the one fitted on this data family, and that under the Gannon storm
+literature models in this table,
+and that under the Gannon storm
 it does not — and the storm-day number is the one place §10.15's storm regressor is *worse* than the
 linear one it replaced (30.1 % against 26.7 %, bias 1.257 against 1.06), on a day of sustained moderate
 activity ending in the `ap` 400 peak.
 
 **The full campaign** — 348 693 evaluations, one row in six of all twelve product files:
 
-| bin | n | NRLMSISE-00 `ap[]` | JB2008 | DTM2020 |
-|---|---|---|---|---|
-| F10.7 < 100 | 122 475 | 1.853 ± 1.117 | 1.305 ± 0.572 | 1.021 ± 0.324 |
-| 100 ≤ F10.7 < 175 | 185 898 | 1.270 ± 0.406 | 1.034 ± 0.236 | 1.020 ± 0.237 |
-| F10.7 ≥ 175 | 40 320 | 1.410 ± 0.585 | 0.970 ± 0.264 | 1.075 ± 0.311 |
-| `Ap` < 15 (quiet) | 276 116 | 1.527 ± 0.797 | 1.122 ± 0.402 | 1.030 ± 0.270 |
-| 15 ≤ `Ap` < 50 (active) | 53 451 | 1.352 ± 0.511 | 1.097 ± 0.320 | 0.971 ± 0.270 |
-| `Ap` ≥ 50 (G2 storm or worse) | 19 126 | 1.354 ± 0.636 | 1.186 ± 0.410 | 1.134 ± 0.414 |
-| **F10.7 ≥ 175 and `Ap` ≥ 50** | 5 760 | **1.782 ± 1.002** | 1.102 ± 0.402 | 1.303 ± 0.544 |
-| GRACE-FO C, accelerometer | 261 602 | 1.497 ± 0.756 | 1.116 ± 0.384 | 1.032 ± 0.281 |
-| Swarm A, orbit determination | 87 091 | 1.472 ± 0.741 | 1.139 ± 0.410 | 1.011 ± 0.276 |
+| bin | n | NRLMSISE-00 `ap[]` | JB2008 |
+|---|---|---|---|
+| F10.7 < 100 | 122 475 | 1.853 ± 1.117 | 1.305 ± 0.572 |
+| 100 ≤ F10.7 < 175 | 185 898 | 1.270 ± 0.406 | 1.034 ± 0.236 |
+| F10.7 ≥ 175 | 40 320 | 1.410 ± 0.585 | 0.970 ± 0.264 |
+| `Ap` < 15 (quiet) | 276 116 | 1.527 ± 0.797 | 1.122 ± 0.402 |
+| 15 ≤ `Ap` < 50 (active) | 53 451 | 1.352 ± 0.511 | 1.097 ± 0.320 |
+| `Ap` ≥ 50 (G2 storm or worse) | 19 126 | 1.354 ± 0.636 | 1.186 ± 0.410 |
+| **F10.7 ≥ 175 and `Ap` ≥ 50** | 5 760 | **1.782 ± 1.002** | 1.102 ± 0.402 |
+| GRACE-FO C, accelerometer | 261 602 | 1.497 ± 0.756 | 1.116 ± 0.384 |
+| Swarm A, orbit determination | 87 091 | 1.472 ± 0.741 | 1.139 ± 0.410 |
 
-**And the same 348 693 evaluations on MAPE, with SDTM-1 as a fifth column.** Ф15.E's gate asks whether
+**And the same 348 693 evaluations on MAPE, with SDTM-1 beside them.** Ф15.E's gate asks whether
 our own model is below NRLMSISE-00 in every bin; this is the table that answers it. SDTM-1's numbers are
 **in sample** — these are the twelve months Ф15.D fitted it on (§10.10) — but not trivially so: the fit
 saw 8 170 rows at one-hour spacing and this is every sixth row of the full product, 43 times as many,
 so the 20.3 % here against 19.3 % there is what the hourly decimation cost.
 
-| bin | n | NRLMSISE-00 `ap[]` | NRLMSISE-00 `Ap` | JB2008 | DTM2020 | SDTM-1 pilot, in sample | SDTM-1 shipped (§10.28) |
-|---|---|---|---|---|---|---|---|
-| all | 348 693 | 51.7 % | 52.7 % | 25.5 % | **20.2 %** | 20.3 % | 21.5 % |
-| F10.7 < 100 | 122 475 | 86.2 % | 88.7 % | 39.0 % | **22.4 %** | 24.2 % | 24.9 % |
-| 100 ≤ F10.7 < 175 | 185 898 | 30.7 % | 30.8 % | 17.7 % | 18.2 % | **16.7 %** | 19.0 % |
-| F10.7 ≥ 175 | 40 320 | 43.6 % | 44.5 % | **20.8 %** | 22.6 % | 24.9 % | 22.8 % |
-| `Ap` < 15 (quiet) | 276 116 | 54.9 % | 55.4 % | 25.8 % | **19.1 %** | 19.9 % | 21.0 % |
-| 15 ≤ `Ap` < 50 (active) | 53 451 | 37.3 % | 39.8 % | 22.2 % | 21.6 % | **19.0 %** | 21.7 % |
-| `Ap` ≥ 50 (G2 or worse) | 19 126 | 44.3 % | 49.8 % | 31.0 % | 30.5 % | 29.2 % | **28.5 %** |
+| bin | n | NRLMSISE-00 `ap[]` | NRLMSISE-00 `Ap` | JB2008 | SDTM-1 pilot, in sample | SDTM-1 shipped (§10.28) |
+|---|---|---|---|---|---|---|
+| all | 348 693 | 51.7 % | 52.7 % | 25.5 % | **20.3 %** | 21.5 % |
+| F10.7 < 100 | 122 475 | 86.2 % | 88.7 % | 39.0 % | **24.2 %** | 24.9 % |
+| 100 ≤ F10.7 < 175 | 185 898 | 30.7 % | 30.8 % | 17.7 % | **16.7 %** | 19.0 % |
+| F10.7 ≥ 175 | 40 320 | 43.6 % | 44.5 % | **20.8 %** | 24.9 % | 22.8 % |
+| `Ap` < 15 (quiet) | 276 116 | 54.9 % | 55.4 % | 25.8 % | **19.9 %** | 21.0 % |
+| 15 ≤ `Ap` < 50 (active) | 53 451 | 37.3 % | 39.8 % | 22.2 % | **19.0 %** | 21.7 % |
+| `Ap` ≥ 50 (G2 or worse) | 19 126 | 44.3 % | 49.8 % | 31.0 % | 29.2 % | **28.5 %** |
+
+Bold: the lowest of the columns the public release prints.
 
 **The shipped field since §10.25** is the corpus fit, not the pilot. Since §10.26 its daily flux
 excess saturates, and since §10.28 its storm driver carries the flux gain. On these rows — twelve of
 the corpus's 1 051 satellite-months — it is still below NRLMSISE-00 in every bin. It is behind the
 pilot, which was fitted on exactly these months, in every bin but high flux and storm time. In the
-storm bin it is now the lowest of all, 28.5 % against JB2008's 31.0 % and DTM2020's 30.5 %; before
-the gain it was 33.5 %. The readings below are the pilot's.
+storm bin it is now the lowest of all, 28.5 % against JB2008's 31.0 %
+— before the gain it was 33.5 %. The readings below are the pilot's.
 
 Three readings, and the third is the one that matters for Ф15.E:
 
 * **SDTM-1 is below NRLMSISE-00 in every bin, by a factor of 1.8 to 3.6.** That criterion holds.
-* **Pooled, it is level with DTM2020 to a tenth of a point** — 20.3 % against 20.2 % over 348 693
-  evaluations — and it is best of the five in the three bins where the thermosphere is disturbed or
-  ordinary: moderate flux 16.7 %, active 19.0 %, and *storm* 29.2 %, where it beats both DTM2020
-  (30.5 %) and JB2008 (31.0 %). A two-constant causal kernel on open `ap`, on the log-activity scale
-  §10.15 chose, is level with the model fitted on this data family and ahead of JB2008's Dst-derived
+* **Pooled, it reads 20.3 % over 348 693 evaluations**,
+  and it is best of the
+  models in the three bins where the thermosphere is disturbed or
+  ordinary: moderate flux 16.7 %, active 19.0 %, and *storm* 29.2 %, where it beats
+  JB2008 (31.0 %). A two-constant causal kernel on open `ap`, on the log-activity scale
+  §10.15 chose, is
+  ahead of JB2008's Dst-derived
   `ΔTc` over 19 126 storm evaluations. That is the single most useful thing this table says.
 * **And the 0.9 points §10.15 bought came from the quiet bins, not the storm ones** — which was not the
   intent and is the more interesting half. Against the linear storm regressor, `Ap` < 15 goes
@@ -6258,12 +6266,11 @@ Three readings, and the third is the one that matters for Ф15.E:
   storm rows and distorts the quiet baseline to pay for them, and on the log scale the quiet range
   `ap` 0–15 occupies most of the regressor instead of a hundredth of it. Fixing how a model sees a
   storm is what made it better at not being in one.
-* **It is worst of the three modern models at both flux extremes** — 24.2 % at F10.7 < 100 against
-  DTM2020's 22.4 %, and 24.9 % at F10.7 ≥ 175 against JB2008's 20.8 %. Those are the two bins the
-  corpus samples with one month each (§10.10's fold table), so this is the same finding as the
-  calendar-month split, on a different axis.
+* **At high flux it is behind JB2008**, 24.9 % at F10.7 ≥ 175 against 20.8 %. That bin and
+  F10.7 < 100 are the two the corpus samples with one month each (§10.10's fold table), so this is
+  the same finding as the calendar-month split, on a different axis.
 
-Seven findings, none of which a component test could produce:
+The findings, none of which a component test could produce:
 
 - **Driven identically, this crate's models and Orekit's agree to 1e-3 relative.** On the fixture days,
   where both sides evaluate every row: NRLMSISE-00 2.019 against 2.019 and 2.087 against 2.086,
@@ -6277,34 +6284,29 @@ Seven findings, none of which a component test could produce:
   average inflates the eighteen quiet hours before it. Resolving `ap` at its native 3-hour cadence
   moves the bias 2.087 → **1.661** and the RMS 1.346 → **0.793**. That is what the sub-daily driver
   (#142) bought, measured against the thermosphere rather than against another model.
-- **All three run high, and NRLMSISE-00 runs high by a factor of two at solar minimum.** The
+- **They run high, and NRLMSISE-00 runs high by a factor of two at solar minimum.** The
   2018–2020 minimum was among the deepest on record and NRLMSISE-00's fit predates it; this is the
   shortfall that motivated NRLMSIS 2.x, which is patent- and licence-encumbered and deliberately not
-  ported (see §9). The caveat belongs with the number: **DTM2020's 1.08 is not independent evidence**,
-  because DTM2020 was fitted on this very data family. JB2008 and NRLMSISE-00 are independent of it
-  and read 1.31 and 1.85 in the same bin.
+  ported (see §9).
+  JB2008 and NRLMSISE-00
+  read 1.31 and 1.85 in the F10.7 < 100 bin.
 - **The bias is a property of the models, not of the instrument.** GRACE-FO C measures density with an
   accelerometer at 480–540 km; Swarm A infers it from the drag signature in a precise orbit at
   420–480 km. Two unrelated measurement techniques, at different altitudes, in different time scales
-  (GPS and UTC), put the same three models within **2%** of each other — 1.497/1.472,
-  1.116/1.139, 1.032/1.011. Neither the accelerometer calibration nor the POD drag inversion is
+  (GPS and UTC), put the same models within **2%** of each other — 1.497/1.472 and 1.116/1.139.
+  Neither the accelerometer calibration nor the POD drag inversion is
   carrying the result.
-- **Twenty years of refitting is worth more than any of the above.** Orekit's DTM2000 reads 2.16 and
-  2.24 on the fixture days where DTM2020 reads 1.06 and 1.19, and 2.37 against 1.20 on 2019-01.
 - **Where the error hurts most, it is worst.** High flux *and* a storm — the regime that decides a
-  re-entry prediction or a conjunction screening — is the only bin where NRLMSISE-00 exceeds 1.78 and
-  DTM2020 exceeds 1.30. Aggregate skill over a whole month hides it; that is why the table is
+  re-entry prediction or a conjunction screening — is the only bin where NRLMSISE-00 exceeds 1.78.
+  Aggregate skill over a whole month hides it; that is why the table is
   stratified rather than summed.
 
 - **Each model wants its own 81-day mean, and the two are different columns.** NRLMSISE-00's Fortran
   header says `F107A - 81 day AVERAGE OF F10.7 FLUX (centered on day DDD)`; DTM2020's says
   `fbar(1)=mean flux of last 81 days at t`, which is the *trailing* mean, and the SWAMI documentation
   repeats it. CelesTrak publishes both — `F10.7_OBS_CENTER81` and `F10.7_OBS_LAST81` — and this
-  campaign was driving DTM2020 from the centred one. Correcting it moved DTM2020 from 1.068 ± 0.302
-  to **1.032 ± 0.281** on GRACE-FO C and from 1.044 ± 0.294 to **1.011 ± 0.276** on Swarm A, with the
-  largest single move at high flux, 1.196 ± 0.404 → **1.075 ± 0.311**; every bias moved toward 1 and
-  every RMS shrank. The NRLMSISE-00 and JB2008 columns are byte-identical across the two runs, which
-  is the control: nothing but DTM2020's driver changed. Neither model's specification states whether
+  campaign was driving DTM2020 from the centred one.
+  Neither model's specification states whether
   it wants the *observed* or the 1-AU-*adjusted* flux — NRLMSISE-00's does ("the actual distance of
   the Earth from the Sun rather than the radio flux at 1 AU", so: observed) and DTM2020's does not.
   Both are driven from the observed column; for DTM2020 that is an assumption, not a citation.
@@ -6321,14 +6323,11 @@ correction on the first half of a day and is scored on the second, never on what
 |---|---|---|---|
 | quiet | NRLMSISE-00 `ap[]` | 1.908 → **0.944** | 1.076 → **0.311** |
 | quiet | JB2008 | 1.571 → 1.483 | 0.793 → 0.776 |
-| quiet | DTM2020 | 1.031 → 1.010 | 0.270 → 0.345 |
 | storm | NRLMSISE-00 `ap[]` | 1.622 → **0.969** | 0.838 → **0.314** |
 | storm | JB2008 | 1.106 → 0.995 | 0.339 → 0.379 |
-| storm | DTM2020 | 1.164 → 0.985 | 0.423 → 0.333 |
 
 It removes the bias every time, out of sample. It removes the *scatter* only where the base model's
-error has sun-fixed structure — a 3.5× RMS reduction on NRLMSISE-00, nothing on JB2008, and on quiet
-DTM2020 the RMS gets slightly worse, because four coefficients fitted on half a day are not free.
+error has sun-fixed structure — a 3.5× RMS reduction on NRLMSISE-00 and nothing on JB2008.
 
 **On the literature's metric.** Everything above is bias and RMS on the ratio, which is this repo's
 own convention and comparable only with itself. The density-modelling literature reports **MAPE**,
@@ -6347,27 +6346,23 @@ rows can be set beside a published bar. Two bars are relevant:
 The same rows as the two tables above, on MAPE — the 348 693-evaluation campaign first, then the two
 fixture days:
 
-| bin | n | NRLMSISE-00 `ap[]` | NRLMSISE-00 `Ap` | JB2008 | DTM2020 |
-|---|---|---|---|---|---|
-| **all** | 348 693 | **51.7 %** | 52.7 % | **25.5 %** | **20.2 %** |
-| F10.7 < 100 | 122 475 | 86.2 % | 88.7 % | 39.0 % | 22.4 % |
-| 100 ≤ F10.7 < 175 | 185 898 | 30.7 % | 30.8 % | 17.7 % | 18.2 % |
-| F10.7 ≥ 175 | 40 320 | 43.6 % | 44.5 % | 20.8 % | 22.6 % |
-| `Ap` < 15 (quiet) | 276 116 | 54.9 % | 55.4 % | 25.8 % | 19.1 % |
-| 15 ≤ `Ap` < 50 (active) | 53 451 | 37.3 % | 39.8 % | 22.2 % | 21.6 % |
-| `Ap` ≥ 50 (G2 or worse) | 19 126 | 44.3 % | 49.8 % | 31.0 % | 30.5 % |
-| fixture day, 2019-01-01 quiet | 720 | 103.4 % | 102.0 % | 47.6 % | 23.8 % |
-| fixture day, 2024-05-10 storm | 720 | **68.2 %** | 114.7 % | 20.6 % | 24.1 % |
+| bin | n | NRLMSISE-00 `ap[]` | NRLMSISE-00 `Ap` | JB2008 |
+|---|---|---|---|---|
+| **all** | 348 693 | **51.7 %** | 52.7 % | **25.5 %** |
+| F10.7 < 100 | 122 475 | 86.2 % | 88.7 % | 39.0 % |
+| 100 ≤ F10.7 < 175 | 185 898 | 30.7 % | 30.8 % | 17.7 % |
+| F10.7 ≥ 175 | 40 320 | 43.6 % | 44.5 % | 20.8 % |
+| `Ap` < 15 (quiet) | 276 116 | 54.9 % | 55.4 % | 25.8 % |
+| 15 ≤ `Ap` < 50 (active) | 53 451 | 37.3 % | 39.8 % | 22.2 % |
+| `Ap` ≥ 50 (G2 or worse) | 19 126 | 44.3 % | 49.8 % | 31.0 % |
+| fixture day, 2019-01-01 quiet | 720 | 103.4 % | 102.0 % | 47.6 % |
+| fixture day, 2024-05-10 storm | 720 | **68.2 %** | 114.7 % | 20.6 % |
 
-Six findings:
+What it says:
 
 - **NRLMSISE-00 lands inside the published empirical band**, 51.7 % against 40–60 %. That is not a
   result about the model, it is the *control*: it says this campaign and Acciarini's are measuring
   the same quantity on the same kind of data, which is what makes the remaining rows readable at all.
-- **DTM2020 reaches the machine-learned figure with no learned component**, 20.2 % against ~20 %.
-  The caveat that governs the bias table governs this one harder: **DTM2020 was fitted on this data
-  family**, so its number is interpolation, not skill against an unseen thermosphere. JB2008 is
-  independent of it and reads 25.5 %.
 - **A single pooled MAPE is mostly a statement about which months are in it.** NRLMSISE-00 moves
   from 86.2 % at low flux to 30.7 % at moderate — a factor of 2.8 across bins of the same campaign,
   wider than the entire 40–60 % published band. Choosing six different months would move our pooled
@@ -6381,14 +6376,15 @@ Six findings:
   |---|---|---|
   | NRLMSISE-00 `ap[]` | 51.7 % | **28.9 %** |
   | JB2008 | 25.5 % | 24.1 % |
-  | DTM2020 | 20.2 % | 20.7 % |
 
   Four sun-fixed coefficients take NRLMSISE-00 from the middle of the empirical band to below it, on
-  arcs the fit never saw — and do nothing for JB2008 and slightly harm DTM2020. That asymmetry is the
+  arcs the fit never saw — and do nothing for JB2008.
+  That asymmetry is the
   result, not a disappointment: a correction with four degrees of freedom can only remove error that
-  has the structure those four describe, and by DTM2020 there is none of it left.
+  has the structure those four describe.
 - **The split is worth measuring, not assuming.** Keying the held-out arc by a fixed 40 000-row block
-  instead of by product file reports 28.6 % / 23.9 % / 20.6 % — every model better by 0.2–0.5 points.
+  instead of by product file reports 28.6 % / 23.9 %
+  — every model better by 0.2–0.5 points.
   That gap is the leakage from a block straddling two files, so each half of a month trains on the
   other. The honest split is the one that scores worse, which is the only direction that check can
   usefully fail in.
@@ -6397,7 +6393,7 @@ Six findings:
 
 One property of the metric itself, since it is now a headline number: **MAPE on a ratio is
 asymmetric.** A model high by a factor of two scores 100 %; one low by a factor of two scores 50 %.
-All three models here run high in every bin, so nothing is being flattered — but our numbers are not
+The models here run high in every bin, so nothing is being flattered — but our numbers are not
 directly comparable with those of a model that under-predicts, and the published bars do not state
 the sign of their errors.
 
@@ -7137,7 +7133,8 @@ Put on the axis that matters, through the SDTM-1 profile at `T∞ = 1058 K` (the
 **This is an upper bound and is written down as one.** It assumes the whole residual maps to `T∞` at a
 published slope; it is not a prediction that an EUV term will improve the fit by 10 % of density. What
 it does establish is that the quantity is the same order as the entire error budget of the best
-available model (DTM2020's 20.2 % MAPE, §10.2), which is why Ф15.B's answer is not "F10.7 is enough":
+available model,
+which is why Ф15.B's answer is not "F10.7 is enough":
 it is that **SDTM-1 v1 is fitted on F10.7 and Hp60 because those are what the whole corpus admits**, and
 that an EUV term is worth building the moment either the fit is restricted to 2010-onwards missions or
 IUP Bremen answers the letter.
@@ -7346,8 +7343,10 @@ or the registered ESA Swarm fallback — is what changes it.
 *Rerun on held-out missions in §10.21, on the whole archive.*
 
 `plans/16` Ф15.E set the bar before the fit ran: **pooled held-out-mission MAPE ≤ 25.5 %** (JB2008's
-published figure), **below NRLMSISE-00 in every bin**, and **no regime-edge bin above 40 %**, with
-20.2 % (DTM2020's) as the stretch. This is that gate, evaluated, and the verdict is **not passed** —
+published figure), **below NRLMSISE-00 in every bin**, and **no regime-edge bin above 40 %**. It also
+set a stretch target against a model whose licence forbids printing its numbers (D-32), so the public
+release prints neither the target nor its verdict.
+This is that gate, evaluated, and the verdict is **not passed** —
 with the useful part being *which* criterion fails and why.
 
 **A held-out-*mission* number cannot be produced from this corpus, and the nearest thing to it fails.**
@@ -7377,12 +7376,12 @@ previously had not, which is a statement about the nuisance and not about the st
 
 **Below NRLMSISE-00 in every bin: yes, by a factor of 1.8 to 3.6.** That criterion holds, and §10.2's
 new MAPE table is the measurement — 348 693 evaluations, identical rows and identical drivers for all
-five models. Pooled, SDTM-1 reads **20.3 %** against JB2008's 25.5 % and DTM2020's **20.2 %** — level
-with the model fitted on this data family, to a tenth of a point — and it is *best of the five* in the
+models. Pooled, SDTM-1 reads **20.3 %** against JB2008's 25.5 %,
+and it is *best of the models* in the
 moderate-flux, geomagnetically-active and **storm** bins (16.7 %, 19.0 %, 29.2 % — the last against
-DTM2020's 30.5 % and JB2008's 31.0 % over 19 126 evaluations at `Ap` ≥ 50).
-It is last of the three modern models at both flux extremes, which are the two bins this corpus samples
-with one month each. Every one of those numbers is **in sample** and labelled so everywhere it appears:
+JB2008's 31.0 % over 19 126 evaluations at `Ap` ≥ 50).
+At high flux it is behind JB2008, in one of the two bins this corpus samples with one month each.
+Every one of those numbers is **in sample** and labelled so everywhere it appears:
 it is evidence about what the form can absorb and in which regime, not about generalisation.
 
 **No regime-edge bin above 40 %: fails, at the one edge this corpus has.** Held out by satellite-month
@@ -7392,8 +7391,8 @@ months that do not include it.
 
 **So the gate stands open, and D-12's fallback applies:** the open-release cut ships calibrated
 NRLMSISE-00 (28.9 %) as its headline density model, with SDTM-1 present, documented at 50.1 %, and
-explicitly not the default. What would close the gate is not a better form — the form absorbs this data
-better than DTM2020 at the minimum (§10.2) — but a corpus with **altitude leverage** and more than five
+explicitly not the default. What would close the gate is not a better form
+but a corpus with **altitude leverage** and more than five
 positions in the year: CHAMP at 300–450 km, GOCE at 250, GRACE A/B and Swarm B/C, which is Ф15.A, which
 is blocked on an archive that has refused connections since 2026-09-05. The registered alternative is
 ESA's own Swarm density product, whose terms are a user decision (`docs/provenance.md`,
@@ -7477,7 +7476,8 @@ mismatch is a build failure in the crate that owns both halves.
 
 **One number falls out of Ф15.F that belongs to Ф15.D.** The same campaign runs the four-coefficient
 sun-fixed calibration layer of §4 over each model, held out by satellite-month: NRLMSISE-00 goes
-51.7 % → **28.9 %**, JB2008 25.5 % → 24.1 %, DTM2020 20.2 % → 20.7 %, and SDTM-1 20.3 % → **20.1 %**.
+51.7 % → **28.9 %**, JB2008 25.5 % → 24.1 %,
+and SDTM-1 20.3 % → **20.1 %**.
 Our own model gains 0.2 points where NRLMSISE-00 gains 22.8, which is the direct evidence that SDTM-1's
 own sun-fixed harmonics have already absorbed the structure that layer exists to remove. A model whose
 error still had a large sun-fixed component would show the opposite, and the pilot's did.
@@ -7691,8 +7691,8 @@ is the model: the fitted recovery constant lengthened from 1.94 h to 2.73 h when
 the log-activity scale, and a longer memory is what buys the amplitude and what puts the modelled peak
 10.5 h late on the one storm steep enough to show it.
 
-**The peak is the number that fails — and four other models fail it too.** The campaign runs all five
-configurations through the same protocol, on all eight storms and both missions. Once each is debiased
+**The peak is the number that fails — and the other models fail it too.** The campaign runs every
+configuration through the same protocol, on all eight storms and both missions. Once each is debiased
 on its own pre-storm window, *every* model is within 5 % of unity and their scatter is within a few
 points of one another:
 
@@ -7701,13 +7701,15 @@ points of one another:
 | NRLMSISE-00 `ap[]` | 1.007 | 10.3 % | 20.4 % | 0.886 | 0.986 | 10.8 % | 23.4 % | 0.898 |
 | NRLMSISE-00 daily `Ap` | 1.036 | 10.1 % | 24.5 % | 0.830 | 1.019 | 10.2 % | 27.5 % | 0.843 |
 | JB2008 | 0.978 | **8.2 %** | 21.4 % | 0.894 | 0.967 | **8.6 %** | 25.3 % | 0.893 |
-| DTM2020 | 1.014 | 10.9 % | **19.2 %** | 0.897 | 1.000 | 11.2 % | **22.6 %** | 0.895 |
-| SDTM-1, in sample | 1.018 | 9.1 % | 19.4 % | **0.903** | 1.008 | 9.5 % | 22.7 % | **0.904** |
+| SDTM-1, in sample | 1.018 | 9.1 % | **19.4 %** | **0.903** | 1.008 | 9.5 % | **22.7 %** | **0.904** |
+
+Bold: the best of the rows the public release prints.
 
 **That table is the strongest single argument for debiasing in this document.** NRLMSISE-00 is the model
 §10.2 measures at 51.7 % pooled MAPE, three times SDTM-1's — and here, with a scale factor from twelve
-hours of pre-storm data, its storm response is as good as anybody's (20.4 % against DTM2020's 19.2 %,
-correlation 0.886 against 0.897). Nearly all of its famous error is a *level* error, not a failure to
+hours of pre-storm data, its storm response is as good as anybody's: 20.4 % mean StD and correlation
+0.886 on Swarm A.
+Nearly all of NRLMSISE-00's famous error is a *level* error, not a failure to
 follow a storm. Bruinsma & Laurens say the same thing about their own scale factors; this is that result
 reproduced on an independent implementation and a different set of storms.
 
@@ -7718,11 +7720,10 @@ And the timing, over all 16 comparisons per model:
 | NRLMSISE-00 `ap[]` | 6.1 h | 31.5 | 42.8 % | 65.5 % | 4.6 h | 16.5 |
 | NRLMSISE-00 daily `Ap` | 13.0 h | 49.5 | 63.1 % | 80.1 % | 16.8 h | 36.0 |
 | **JB2008** | **5.1 h** | 42.0 | **23.7 %** | 69.8 % | **2.6 h** | 7.5 |
-| DTM2020 | 6.7 h | 45.0 | 33.5 % | 115.8 % | 6.8 h | 18.0 |
 | SDTM-1, in sample | 6.1 h | 42.0 | 38.4 % | **59.4 %** | 6.2 h | 15.0 |
 
-So the under-peaking is not ours: four of the five models miss the peak enhancement by a third to two
-thirds on average, and the exception is **JB2008 at 23.7 %** — which is also the only one of the five
+So the under-peaking is not ours: every model but one misses the peak enhancement by a third to two
+thirds on average, and the exception is **JB2008 at 23.7 %** — which is also the only one
 whose geomagnetic input is not `ap`. Its `ΔTc` is derived from `Dst` at *hourly* cadence and enters as an
 exospheric-temperature correction; a 3-hourly `ap` cannot resolve a peak that rises and falls inside one
 interval, and the May 2024 storm did exactly that. JB2008 also wins the recovery half-time by a factor
@@ -8557,8 +8558,7 @@ that holds out GRACE. Pooled, fixed `σ` reads 23.9 % and fitted `σ` 23.5 %.
 **Verdict, criterion by criterion:**
 
 1. **Pooled held-out-mission MAPE ≤ 25.5 %: passes**, at 23.5 % raw. Every fold but GRACE-FO is
-   under the bar on its own, and GRACE-FO is 0.4 points over. The stretch target, 20.2 %, is not
-   reached.
+   under the bar on its own, and GRACE-FO is 0.4 points over.
 2. **Below NRLMSISE-00 in every bin: fails in one bin**, `Ap` ≥ 50, by 1.1 points (36.5 % against
    35.4 %). Every other bin passes by 9 to 39 points. The storm bin is 1.2 % of the rows. Debiased,
    NRLMSISE-00 reads 25.4 % there: its storm *shape* is better than SDTM-1's, and what keeps the two
@@ -8999,16 +8999,16 @@ day.
 
 **On the §10.2 campaign** (348 693 rows, in sample):
 
-| | SDTM-1, §10.26 | SDTM-1, shipped | JB2008 | DTM2020 | NRLMSISE-00 |
-|---|---|---|---|---|---|
-| all | 21.9 % | **21.5 %** | 25.5 % | 20.2 % | 51.7 % |
-| flux low / moderate / high | 25.4 / 19.5 / 22.6 % | 24.9 / 19.0 / 22.8 % | 39.0 / 17.7 / 20.8 % | 22.4 / 18.2 / 22.6 % | 86.2 / 30.7 / 43.6 % |
-| geomag quiet / active | 20.9 / 23.0 % | 21.0 / 21.7 % | 25.8 / 22.2 % | 19.1 / 21.6 % | 54.9 / 37.3 % |
-| geomag storm | 33.5 % | **28.5 %** | 31.0 % | 30.5 % | 44.3 % |
-| Ф15.H, 16 comparisons: mean peak error | 39.3 % | **26.2 %** | 23.7 % | 33.5 % | 42.8 % |
-| Ф15.H: mean onset error | 4.7 h | 5.3 h | 5.1 h | 6.7 h | 6.1 h |
+| | SDTM-1, §10.26 | SDTM-1, shipped | JB2008 | NRLMSISE-00 |
+|---|---|---|---|---|
+| all | 21.9 % | **21.5 %** | 25.5 % | 51.7 % |
+| flux low / moderate / high | 25.4 / 19.5 / 22.6 % | 24.9 / 19.0 / 22.8 % | 39.0 / 17.7 / 20.8 % | 86.2 / 30.7 / 43.6 % |
+| geomag quiet / active | 20.9 / 23.0 % | 21.0 / 21.7 % | 25.8 / 22.2 % | 54.9 / 37.3 % |
+| geomag storm | 33.5 % | **28.5 %** | 31.0 % | 44.3 % |
+| Ф15.H, 16 comparisons: mean peak error | 39.3 % | **26.2 %** | 23.7 % | 42.8 % |
+| Ф15.H: mean onset error | 4.7 h | 5.3 h | 5.1 h | 6.1 h |
 
-In storm time SDTM-1 is now the best of the five models on these months. The onset gets worse by
+In storm time SDTM-1 is now ahead of JB2008 and NRLMSISE-00 on these months.
 0.6 h on average; one comparison, 2022-04-10, is 37.5 h off. The peak error is in sample here, and
 still above JB2008's.
 
@@ -9022,8 +9022,8 @@ prints both lines.
 The campaign test held every cell to the worst family's *pooled* coverage, 87 %. That compares one
 cell with an average over cells, and on this field regime 1 fails it. That cell is one storm day,
 2021-11-04, 1 894 rows, at 85.7 %. On that day the model moved closer to the measurement, not
-further. Its geometric-mean ratio went from 0.75 to 0.84 on GRACE-FO C and from 0.75 to 0.82 on Swarm A;
-DTM2020 reads 0.69–0.70. The cell's `σ` narrowed, 0.371 to 0.284, because the corpus's 290 low-flux
+further. Its geometric-mean ratio went from 0.75 to 0.84 on GRACE-FO C and from 0.75 to 0.82 on Swarm A.
+The cell's `σ` narrowed, 0.371 to 0.284, because the corpus's 290 low-flux
 storm days improved. The floor is now per cell: the worst held-out family's coverage in that cell,
 rounded down. Regime 5 is held to its measured value as before, now 0.80 against 80.8 %. The
 high-flux storm cell is still the one where the interval under-covers on these months.
@@ -12345,7 +12345,7 @@ the numbers they produced are the ones the rows above claim:
 |---|---|---|
 | `eop` | fresh `finals2000A` (MJD 41684..61659, 20 026 lines), then both tests | 19 920 rows parse; worst \|A−B\| in `xp` after 2000 = 5.56e-4 arcsec. Ignoring EOP displaces the ISS ground point by 236.7 m; with it, worst dlat 2.6e-8°, dlon 1.3e-7°, dh 2.2e-6 m |
 | `orbit-fit` | `igs_orbit_fit`, both ignored tests, release | mean 3D RMS **0.250 m** over 32 GPS satellites, worst 0.612 m (G31) |
-| `density` | `measured_density`, release, 12 satellite-months | 348 693 rows; MAPE base → calibrated: NRLMSISE-00 51.7 → 28.9 %, JB2008 25.5 → 24.1 %; DTM2020, which the public release does not carry, 20.2 → 20.7 % |
+| `density` | `measured_density`, release, 12 satellite-months | 348 693 rows; MAPE base → calibrated: NRLMSISE-00 51.7 → 28.9 %, JB2008 25.5 → 24.1 % |
 | `wind` | `measured_wind`, both ignored tests, release, with `gfortran` and the fetched HWM14 | 2 passed in 315 s; held-out RMS 53.2 m/s equatorial rising to 147.3 m/s poleward of 65° |
 | `long-integrations` | `neptune_sentinel1b` and `neptune_lro`, release | Sentinel-1B vs NEPTUNE over 24 h: worst **0.47 m**. LRO vs NEPTUNE over 7 days: worst **739.9 m**, final 736.9 m |
 

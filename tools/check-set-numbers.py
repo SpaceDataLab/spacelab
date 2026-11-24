@@ -46,8 +46,16 @@ ROW_RECORDS = ("§7", "Notice to Users", "`number-public`", "provisional")
 # Spelled in parts: the cut deletes every line that carries a marker, and this file ships.
 LINE = "@" + "private"
 BEGIN, END = LINE + "-begin", LINE + "-end"
+# In a table's header cell: the cut drops that column from the header and every row below it.
+COLUMN = LINE + "-column"
+# A cell border; `\|` is a pipe inside a cell.
+BORDER = re.compile(r"(?<!\\)\|")
 # This check and its test quote the sentences and plant the numbers they refuse.
 SELF = ("tools/check-set-numbers.py", "tools/test_check_set_numbers.py")
+# The files the public cut deletes besides the release block's roots.
+CUT = ("tools/cut-public-tree.py", "CHANGELOG.md")
+# The registers whose lines naming a deleted root the cut drops.
+REGISTERS = ("docs/provenance.md", "docs/verification.md")
 
 DOCUMENT = {".md", ".tex"}
 COMMENT = {
@@ -73,7 +81,7 @@ PERCENT = re.compile(r"\d\s?%")
 # findings, dates, paths and code spans, counts with a unit, versions: `plans/18` M0-11's probe, and
 # a paper's AIAA number, which the acknowledgement itself cites.
 NOT_A_NUMBER = re.compile(
-    r"DTM-?20\d\d|JB2008|NRLMSISE?-?\d*(\.\d)?|SDTM-\d|GRACE-FO|§\s?\d+(\.\d+)*|Ф\d+\.[A-Z]+(-\d)?|D-\d+"
+    r"(?i:dtm)-?20\d\d|JB2008|NRLMSISE?-?\d*(\.\d)?|SDTM-\d|GRACE-FO|§\s?\d+(\.\d+)*|Ф\d+\.[A-Z]+(-\d)?|D-\d+"
     r"|AIAA \d{4}-\d+|F\d{2,3}\b|\b(19|20)\d\d(-\d\d){0,2}\b|plans/\d+|`[^`]*`"
     r"|\b\d+ (km|h|days?|months?|storms?|rows|files|satellites?)\b"
     r"|Orekit \d+(\.\d+)*|v\d+(\.\d+)+|\b0\.\d\.\d\b|#\d+|\bL\d\b|\bB\d\b|\(\d\)|\b\d\.\s"
@@ -154,23 +162,46 @@ def load_checker(root: pathlib.Path):
     return module
 
 
-def public_lines(text: str) -> list[str | None]:
-    """The file's lines, `None` where the public cut deletes one."""
+def without_columns(line: str, columns: set[int]) -> str:
+    """A table row without the cells at `columns`, counted from the text before its first border."""
+    start = line.index("|")
+    cells = BORDER.split(line[start:])
+    return line[:start] + "|".join(c for k, c in enumerate(cells) if k not in columns)
+
+
+def public_lines(text: str, where: str = "") -> list[str | None]:
+    """The file's lines as the public cut writes them, `None` where it deletes one."""
     out: list[str | None] = []
     inside = False
-    for line in text.splitlines():
+    columns: set[int] = set()
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.lstrip("/!#* ").startswith("|"):
+            columns = set()
         if BEGIN in line:
             inside = True
             out.append(None)
         elif END in line:
             inside = False
             out.append(None)
+        elif inside:
+            out.append(None)
+        elif COLUMN in line:
+            if not line.lstrip("/!#* ").startswith("|"):
+                raise SystemExit(f"{where}:{n}: {COLUMN} outside a table row")
+            start = line.index("|")
+            cells = BORDER.split(line[start:])
+            columns = {k for k, c in enumerate(cells) if COLUMN in c}
+            out.append(without_columns(line, columns))
+        elif LINE in line:
+            out.append(None)
         else:
-            out.append(None if inside or LINE in line else line)
+            out.append(without_columns(line, columns) if columns else line)
     return out
 
 
-def public_files(root: pathlib.Path) -> dict[str, list[str | None]]:
+def public_files(
+    root: pathlib.Path, skip: tuple[str, ...] = SELF
+) -> dict[str, list[str | None]]:
     listed = subprocess.run(
         [
             "git",
@@ -191,16 +222,24 @@ def public_files(root: pathlib.Path) -> dict[str, list[str | None]]:
     for rel in sorted(p for p in listed if p):
         path = root / rel
         suffix = path.suffix
-        if rel.startswith(excluded) or rel in SELF or not path.is_file():
+        if rel.startswith(excluded) or rel in skip + CUT or not path.is_file():
             continue
         if suffix not in DOCUMENT and suffix not in COMMENT:
             continue
-        files[rel] = public_lines(path.read_text(encoding="utf-8", errors="replace"))
+        lines = public_lines(path.read_text(encoding="utf-8", errors="replace"), rel)
+        if rel in REGISTERS:
+            lines = [
+                None if x is not None and x.strip().startswith(excluded) else x
+                for x in lines
+            ]
+        files[rel] = lines
     return files
 
 
-def hits(lines: list[str | None]) -> list[tuple[int, str, bool]]:
-    """`(line number, kind, narrow)` for every wide hit; kind is `named` or `column`."""
+def hits(
+    lines: list[str | None], name: re.Pattern[str] = NAME
+) -> list[tuple[int, str, bool]]:
+    """`(line number, kind, narrow)` for every wide hit of `name`; kind is `named` or `column`."""
     found = []
     column = None
     for i, line in enumerate(lines):
@@ -210,20 +249,20 @@ def hits(lines: list[str | None]) -> list[tuple[int, str, bool]]:
         is_row = body.startswith("|")
         if not is_row:
             column = None
-        narrow = bool(NAME.search(line) and PERCENT.search(line))
+        narrow = bool(name.search(line) and PERCENT.search(line))
         following = next((x for x in lines[i + 1 :] if x is not None), "")
-        if is_row and NAME.search(line) and RULE.search(following):
-            cells = body.split("|")
-            column = next((k for k, c in enumerate(cells) if NAME.search(c)), None)
+        if is_row and name.search(line) and RULE.search(following):
+            cells = BORDER.split(body)
+            column = next((k for k, c in enumerate(cells) if name.search(c)), None)
             continue
         if is_row and column is not None and not RULE.search(line):
-            cells = body.split("|")
+            cells = BORDER.split(body)
             if column < len(cells) and DIGIT.search(
                 NOT_A_NUMBER.sub("", cells[column])
             ):
                 found.append((i + 1, "column", narrow))
                 continue
-        if NAME.search(line) and DIGIT.search(NOT_A_NUMBER.sub("", line)):
+        if name.search(line) and DIGIT.search(NOT_A_NUMBER.sub("", line)):
             found.append((i + 1, "named", narrow))
     return found
 

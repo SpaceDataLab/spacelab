@@ -4,10 +4,9 @@
 //! densities cannot be used: DTM2020's licence is academic and non-commercial and forbids
 //! dissemination of the coefficients, and NRLMSIS 2.x adds a patent to the same restrictions
 //! (`docs/provenance.md`, `docs/limitations.md`). What remains in the open — NRLMSISE-00 — is
-//! 51.7 % mean absolute error on the twelve satellite-months of `docs/verification.md` §10.2 against
-//! DTM2020's 20.2 %, and at 400 km a fractional density error `ε` puts `Δs ≈ 1.5·ε·a_drag·t²` of
-//! along-track error into a prediction, which is kilometres a day. So the gap is worth closing
-//! rather than inheriting.
+//! 51.7 % mean absolute error on the twelve satellite-months of `docs/verification.md` §10.2,
+//! and at 400 km a fractional density error `ε` puts `Δs ≈ 1.5·ε·a_drag·t²` of along-track error
+//! into a prediction, which is kilometres a day. So the gap is worth closing rather than inheriting.
 //!
 //! # The form
 //!

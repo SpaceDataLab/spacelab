@@ -76,8 +76,8 @@ freeze:
 freeze-data:
     uv run --no-project python -I tools/check-sdtm-freeze.py --data
 
-# The evaluation harness's leak tests, the clustered intervals' laws, the residual maps' coordinates and the
-# exact nitric-oxide step (Ф30.B, Ф30.C, Ф23.O, Ф23.Q).
+# The evaluation harness's leak tests, the clustered intervals' laws, the residual maps' coordinates, the
+# exact nitric-oxide step and the blind runner's amended rules (Ф30.B, Ф30.C, Ф23.O, Ф23.Q, Ф30.N).
 # Under the pinned analysis environment, `tools/pyproject.toml` and its `uv.lock` (Ф30.K).
 harness:
     uv run --project tools --locked python -I tools/test_evaluate_sdtm.py
@@ -85,6 +85,7 @@ harness:
     uv run --project tools --locked python -I tools/test_residual_maps.py
     uv run --project tools --locked python -I tools/test_no_step_accuracy.py
     uv run --project tools --locked python -I tools/test_column_on2.py
+    uv run --project tools --locked python -I tools/test_score_blind.py
     cargo run -q -p spacelab-propagation --release --example column_on2 -- --check
     cargo run -q -p spacelab --release --example cpf_mean_state -- --check
 

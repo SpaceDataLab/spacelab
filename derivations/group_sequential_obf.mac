@@ -1,0 +1,96 @@
+/* The group-sequential rule of SDTM-1's blind test (docs/sdtm1-blind-protocol.md §9 A2; plans/18 Ф30.N).
+
+   (a) The canonical joint law. S_k sums the paired differences of the rows read by look k. Under the
+       working model of (b) a cluster of n_c rows adds n_c m_c, of variance n_c^2 tau^2, and clusters are
+       independent, so Var S_k = tau^2 V_k with V_k = sum n_c^2, S_j = S_i + D with D independent of S_i,
+       and Z_k = S_k / sqrt(V_k) has corr(Z_i, Z_j) = sqrt(V_i / V_j) for i < j (ni, nj below): the bounds
+       follow the realised clusters through this correlation and nothing else. Equal clusters make V_k
+       proportional to the count.
+   (b) The reference law. A cluster mean m_j with weight w_j = n_j / N (rows) and the working model
+       m_j iid (0, tau^2): r_j = m_j - sum_k w_k m_k has E r_j^2 = tau^2 (1 - 2 w_j + sum w^2), so
+       V = sum_j c_j r_j^2 with c_j = w_j^2 / (1 - 2 w_j + sum w^2) (CR2) is unbiased for
+       Var(sum w_j m_j) = tau^2 sum w^2. V = m' A m is a Gaussian quadratic form: E = tau^2 tr A and
+       Var = 2 tau^4 tr A^2 (Isserlis), and Satterthwaite's match of a chi^2_nu / nu gives
+       nu = tr(A)^2 / tr(A^2) (Bell and McCaffrey 2002), which is K - 1 for equal weights.
+   (c) The O'Brien-Fleming constant for three equal looks at a two-sided 0.05, the registered bounds
+       and the level facts the protocol quotes; group_sequential_obf.gp recomputes them at 30 digits.
+
+   Each check prints `<name>: 0`.
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/group_sequential_obf.mac */
+display2d:false$
+ratprint:false$
+
+/* (a) */
+assume(ni > 0, nj > ni)$
+cov_ij: ni$                             /* Cov(S_i, S_i + D) = Var(S_i) = V_i, with tau = 1 */
+print("canonical correlation:", radcan(cov_ij / sqrt(ni * nj) - sqrt(ni / nj)))$
+forget(ni > 0, nj > ni)$
+
+/* (b) Isserlis: E[(x'Ax)^2] = (tr A)^2 + 2 tr(A^2) for x ~ N(0, I), on a general symmetric 3 x 3 A. */
+A: matrix([a11, a12, a13], [a12, a22, a23], [a13, a23, a33])$
+isserlis(i, j, k, l):= kron_delta(i, j) * kron_delta(k, l) + kron_delta(i, k) * kron_delta(j, l)
+    + kron_delta(i, l) * kron_delta(j, k)$
+second_moment: sum(sum(sum(sum(A[i, j] * A[k, l] * isserlis(i, j, k, l), l, 1, 3), k, 1, 3), j, 1, 3), i, 1, 3)$
+print("quadratic form variance:", expand(second_moment - mat_trace(A)^2 - 2 * mat_trace(A . A)))$
+
+/* Satterthwaite: a chi^2_nu with a nu = tr A, 2 a^2 nu = 2 tr A^2. */
+sol: solve([a * nu = L1, 2 * a^2 * nu = 2 * L2], [a, nu])$
+sol: sublist(sol, lambda([s], rhs(s[2]) # 0))$
+print("satterthwaite nu:", ratsimp(subst(first(sol), nu) - L1^2 / L2))$
+
+/* CR2 under the working model, four symbolic weights. */
+w: [w1, w2, w3, w4]$
+s2: lsum(x^2, x, w)$
+moment_r(j):= sum((kron_delta(j, k) - w[k])^2, k, 1, 4)$
+print("E r_j^2:", expand(sum((moment_r(j) - (1 - 2 * w[j] + s2))^2, j, 1, 4)))$
+c(j):= w[j]^2 / (1 - 2 * w[j] + s2)$
+print("CR2 unbiased (tr A = sum w^2):", ratsimp(sum(c(j) * moment_r(j), j, 1, 4) - s2))$
+
+/* Equal weights give the one-sample t: nu = K - 1, K = 2 .. 12, in exact rationals. */
+nu_equal(K):= block([wk: 1 / K, sk, ck, Bjk],
+    sk: K * wk^2,
+    ck: wk^2 / (1 - 2 * wk + sk),
+    Bjk(j, k):= kron_delta(j, k) - 2 * wk + sk,
+    (K * ck * Bjk(1, 1))^2 / sum(sum(ck^2 * Bjk(j, k)^2, k, 1, K), j, 1, K))$
+print("equal weights nu = K - 1:", lsum(abs(nu_equal(K) - (K - 1)), K, makelist(K, K, 2, 12)))$
+
+/* (c) P0(some |Z_k| >= z_k) at t = (t1, t2, 1): inner integral by quad_qags, outer by Simpson. */
+Phi(x):= (1 + erf(x / sqrt(2))) / 2$
+phi(x):= exp(-x^2 / 2) / sqrt(2 * %pi)$
+cross(z1, z2, z3, t1, t2):= block([b1, b2, s12, s23, inner, n: 400, h, acc: 0.0],
+    b1: float(z1 * sqrt(t1)), b2: float(z2 * sqrt(t2)),
+    s12: float(sqrt(t2 - t1)), s23: float(sqrt(1 - t2)),
+    inner(xv):= first(quad_qags(phi((y - xv) / s12) / s12 * (Phi((z3 - y) / s23) - Phi((-z3 - y) / s23)),
+        y, -b2, b2, 'epsrel = 1e-12)),
+    h: 2 * b1 / n,
+    for i: 0 thru n do block([xv: -b1 + i * h],
+        acc: acc + (if i = 0 or i = n then 1 elseif oddp(i) then 4 else 2)
+            * float(phi(xv / sqrt(t1)) / sqrt(t1)) * inner(xv)),
+    1 - acc * h / 3)$
+level_equal(c):= cross(c * sqrt(3), c * sqrt(3 / 2), c, 1 / 3, 2 / 3)$
+C: find_root(lambda([c], level_equal(c) - 0.05), 2.0, 2.01, 'abserr = 1e-12)$
+print("C =", C)$
+print("C rounds to 2.004036:", round(C * 10^6) - 2004036)$
+print("bounds rounded up are 3.4711, 2.4545, 2.0041:",
+    lsum(abs(x), x, [ceiling(C * sqrt(3.0) * 10^4) - 34711, ceiling(C * sqrt(1.5) * 10^4) - 24545,
+        ceiling(C * 10^4) - 20041]))$
+level_down: cross(3.471, 2.454, 2.004, 1 / 3, 2 / 3)$
+level_up: cross(3.4711, 2.4545, 2.0041, 1 / 3, 2 / 3)$
+print("level rounded down", level_down, ", up", level_up)$
+print("level rounded down is 0.050012:", round(level_down * 10^6) - 50012)$
+print("level rounded up is 0.0499923:", round(level_up * 10^7) - 499923)$
+p: map(lambda([z], float(2 * (1 - Phi(z)))), [3.4711, 2.4545, 2.0041])$
+print("first look's level is 0.00052:", round(p[1] * 10^5) - 52)$
+/* The range over all fractions: the union bound is attained when the looks coincide, Sidak's
+   inequality when they are independent. */
+print("range low is 0.0451:", round(p[3] * 10^4) - 451)$
+print("range high is 0.0590:", round((1 - (1 - p[1]) * (1 - p[2]) * (1 - p[3])) * 10^4) - 590)$
+level_tenth: cross(3.4711, 2.4545, 2.0041, 1 / 10, 3 / 10)$
+print("level at (1/10, 3/10)", level_tenth)$
+print("level at (1/10, 3/10) is 0.0554:", round(level_tenth * 10^4) - 554)$
+/* The spend of look 2 at equal information: two looks at t = 1/2, to nine digits against PARI. */
+spend2: block([b1: float(3.4711 * sqrt(1 / 2)), s: float(sqrt(1 / 2))],
+    1 - first(quad_qags(phi(x / s) / s * (Phi((2.4545 - x) / s) - Phi((-2.4545 - x) / s)), x, -b1, b1,
+        'epsrel = 1e-13)))$
+print("SPEND", [p[1], spend2, level_up])$
+print("spend of look 2 is 0.0143174725:", round(spend2 * 10^10) - 143174725)$

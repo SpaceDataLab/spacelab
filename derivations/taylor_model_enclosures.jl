@@ -1,5 +1,5 @@
-#= Validated enclosures of three short arcs, the test vectors every integrator in
-   spacelab-propagation is held to (plans/17 Ф28.H).
+#= Validated enclosures of three short arcs, the test vectors four integrators of
+   spacelab-propagation are held to: DOP853, Taylor, RKN12(10) and IAS15 (plans/17 Ф28.H).
 
    TaylorModels.jl integrates the flow with Taylor models in time and returns, at the end of the
    arc, an interval box that contains the exact solution from the given initial state (Benet,

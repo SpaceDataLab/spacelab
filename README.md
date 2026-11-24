@@ -4,7 +4,6 @@
 [![docs.rs](https://img.shields.io/docsrs/spacelab)](https://docs.rs/spacelab)
 [![PyPI](https://img.shields.io/pypi/v/spacedatalab)](https://pypi.org/project/spacedatalab/)
 [![Python](https://img.shields.io/pypi/pyversions/spacedatalab)](https://pypi.org/project/spacedatalab/)
-[![ci](https://github.com/SpaceDataLab/spacelab/actions/workflows/ci.yml/badge.svg)](https://github.com/SpaceDataLab/spacelab/actions/workflows/ci.yml)
 [![wheels](https://github.com/SpaceDataLab/spacedatalab/actions/workflows/wheels.yml/badge.svg)](https://github.com/SpaceDataLab/spacedatalab/actions/workflows/wheels.yml)
 [![MSRV 1.94](https://img.shields.io/badge/MSRV-1.94-orange)](Cargo.toml)
 [![no_std core](https://img.shields.io/badge/core-no__std-informational)](crates/spacelab-core)
@@ -40,7 +39,7 @@ precise orbit** for 2025-01-01, post-fit residual in metres of real orbit.
 
 | Third bodies | radial | along | cross | 3D RMS |
 |---|---|---|---|---|
-| analytic Sun + Moon (committed fixture, runs in CI) | 0.175 | 0.221 | 0.105 | **0.300 m** |
+| analytic Sun + Moon (committed fixture, runs in the test suite) | 0.175 | 0.221 | 0.105 | **0.300 m** |
 | DE440 kernel | 0.054 | 0.063 | 0.045 | **0.094 m** |
 | Orekit 13.1.7, its own fit of the same file | 0.053 | 0.062 | 0.065 | **0.105 m** |
 
@@ -75,10 +74,13 @@ the Python bindings by [`tools/gen-figures.py`](tools/gen-figures.py):
 - **Mathematics decides; other codes compare.** A formula is verified by its derivation, an exact
   value or the equation that defines it. Orekit, ERFA and NEPTUNE are comparisons, published as
   distances, and the ledger names the code behind every row that still rests on one.
-- **Mutation-tested.** Every crate has been through `cargo mutants`; each survivor is killed or
-  argued equivalent in a ledger.
-- **Lean by design.** A `no_std`, stack-allocated core: a degree-120 geopotential propagation holds
-  about 0.84 MB and allocates nothing.
+- **Mutation-tested, crate by crate.** 26 of the 33 crates are in the whole-crate mutation gate,
+  which fails on any survivor that is not argued equivalent in a ledger. It runs on request, not on
+  every push. The other 7 are outside it for the reasons
+  [§8](docs/verification.md#8--mutation-testing--would-the-suite-notice-a-wrong-answer) of the
+  ledger gives; `spacelab-geometry` is one of them, with survivors still open.
+- **Lean by design.** The core crates are `no_std`. A degree-120 geopotential allocates its seven
+  tables once, 833 504 bytes on the heap, and evaluating it allocates nothing.
 
 Each point is argued in full in [`docs/design.md`](docs/design.md).
 

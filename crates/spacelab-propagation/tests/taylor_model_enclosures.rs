@@ -1,4 +1,5 @@
-//! Every integrator against validated enclosures of the exact flow (plans/17 Ф28.H).
+//! DOP853, Taylor, RKN12(10) and IAS15 against validated enclosures of the exact flow (plans/17
+//! Ф28.H). The crate's other integrators are not held to them yet.
 //!
 //! `derivations/taylor_model_enclosures.jl` encloses, with TaylorModels.jl, the exact state at the
 //! end of three dimensionless arcs: a Kepler orbit, a J2 orbit and the Earth–Moon L1 halo. Each

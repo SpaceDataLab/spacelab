@@ -8,13 +8,15 @@ edition = "2024"
 # Measured, not guessed, and it was 1.96 until it was measured. `cargo check --workspace
 # --all-targets --ignore-rust-version` on each toolchain in turn: 1.93 fails, 1.94 and 1.95 pass.
 #
-# The failure at 1.93 is not ours. `h3o` 0.10 -- `spacelab-grid`'s H3 cell library -- calls
-# `f64::mul_add` inside a `const fn`, and that became const-stable in 1.94. Our own code compiles on
+# The failure at 1.93 is not ours. `h3o` -- `spacelab-grid`'s H3 cell library -- calls
+# `f64::mul_add` inside a `const fn`, and that became const-stable in 1.94. That was measured on
+# `h3o` 0.10. 0.11, the version in the lock, keeps the same `const fn` (`src/math/functions-std.rs`),
+# and `cargo check -p spacelab-grid --all-targets` passes with it on 1.94.0. Our own code compiles on
 # 1.93: the floor it sets is `str::floor_char_boundary`, used by the SINEX-bias proptest to cut a
-# fixture at an arbitrary byte, and that stabilised in 1.93. So the workspace promise is one release
-# above what the workspace itself needs, and a `h3o` bump can move it again with no commit here
-# doing it -- which is why `ci.yml`'s `msrv` job builds at exactly this version rather than trusting
-# the number.
+# fixture at an arbitrary byte, and that stabilised in 1.93.
+# So the workspace promise is one release above what the workspace itself needs, and a `h3o` bump
+# can move it again with no commit here doing it -- which is why `ci.yml`'s `msrv` job builds at
+# exactly this version rather than trusting the number.
 rust-version = "1.94"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/SpaceDataLab/spacelab"

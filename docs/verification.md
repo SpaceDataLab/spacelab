@@ -1233,11 +1233,12 @@ corpus with a split named in advance. The one claim the form does make on its ow
 it carries no effective-mass profile and no multi-source collation or weighting, which is what keeps it
 clear of US 10 641 925 B2's claims (`docs/provenance.md`).
 
-### 2.7 Every integrator inside a validated enclosure of the exact flow (Ф28.H)
+### 2.7 Four integrators inside a validated enclosure of the exact flow (Ф28.H)
 
 The integrator rows above compare an integrator with another integrator, or with a closed form that
 exists only for two bodies. A validated integrator gives a third kind of reference: a box that
-contains the exact solution, with a proof. `derivations/taylor_model_enclosures.jl` runs
+contains the exact solution, with a proof. Four integrators of the table above are held to it:
+DOP853, Taylor, RKN12(10) and IAS15. The others have no enclosure yet. `derivations/taylor_model_enclosures.jl` runs
 TaylorModels.jl 0.13.1 with IntervalArithmetic.jl 1.0.14 on Julia 1.13.1 (Benet, Forets, Sanders &
 Schilling 2019). Order 25 in time and order 1 in the initial box give these enclosures:
 
@@ -4909,11 +4910,11 @@ are deliberately **self-checking rather than golden**: a copied constant agrees 
 argument, so instead each one either feeds a solver the answer to its own question, asserts an
 invariant only the correct wiring satisfies, or injects a bias the routine must recover exactly.
 
-There is now a Rust-side rung under them as well — 102 `#[test]` in `lib.rs`, written to the same
-rule and measured by mutation rather than by coverage. Forty of them need an interpreter in the
+There is now a Rust-side rung under them as well — 113 `#[test]` in `lib.rs`, written to the same
+rule and measured by mutation rather than by coverage. 43 of them need an interpreter in the
 test process and are gated behind `test-interpreter`, which is what
 `cargo test -p spacelab-python --no-default-features --features test-interpreter` turns on; the other
-62 run in an ordinary `cargo test --workspace`. One of the forty also needs `onnx`, because
+70 run in an ordinary `cargo test --workspace`. One of the 43 also needs `onnx`, because
 `cloud_mask` is only compiled with it. What they reach and what they cannot is `spacelab-python`'s
 entry in §8.
 
@@ -5142,8 +5143,8 @@ and an advisories verdict that refreshed without a commit.
 
 Two jobs, because they fail in opposite directions.
 
-The **full-crate job** names the crates taken to zero survivors — **twenty-six** of the workspace's
-thirty-two, `cargo metadata`'s count rather than an estimate — and
+The **full-crate job** names the crates taken to zero survivors — **26** of the workspace's 33,
+counted from the job's `-p` list and the workspace members by `tools/check-claims.py` — and
 re-measures all of them on every run. It is the only thing that can see a regression whose cause
 lies outside the diff: a changed constant three crates away, a test weakened somewhere unrelated.
 Its limit is that a crate cannot join it until it has been sealed, which costs hours per crate.
@@ -5183,8 +5184,8 @@ lane crosses the ceiling on its own, which is why the counts are in the job's co
 
 **What the admission audit found is worth more than the job.** Of the twelve crates that a reading
 of §8 says are sealed-but-ungated, five cannot be admitted, and not for one shared reason (a sixth,
-the `spacelab` facade, is out on the gate's own rule rather than on a limit, and the six together are
-exactly the workspace members the job does not name):
+the `spacelab` facade, is out on the gate's own rule rather than on a limit, and the six together were
+exactly the workspace members the job did not name when the audit ran):
 `spacelab-gpu` (1 112) is clean but hardware-gated, so a runner with no device would measure the
 gate rather than the kernels; `spacelab-earthvision` is now 5 020 mutants against the 2 507
 `ev-onnx` sealed, and only its most recent campaign ends on a clean control — `reseal4-gas-kdist` at
@@ -5195,7 +5196,9 @@ is *open*, not stale, at `reseal4-predicates`' 51 error-bound survivors; `spacel
 means naming those, not the package; and `spacelab-python` (19 225) needs two feature switches to be
 measurable at all. A sixth, the `spacelab` facade, is out on the gate's own rule rather than on a
 limit: §8's table records `facade-seal2` at zero and a later block, `gate-face3`, is not in it, so
-there is no current verdict to admit it on.
+there is no current verdict to admit it on. A seventh member joined after this audit:
+`spacelab-python-harness` (2026-10-23), which only loads the bridge for this repository's Python
+tests and has no mutation block.
 
 The full-crate job **never runs on a push**, and that is a measurement rather than a preference.
 Run 31132180464 took **three hours one minute** for 6 444 mutants — 1.69 s each — and the current
@@ -5895,8 +5898,10 @@ clusters were written against the geometry rather than against stored values —
 `GDOP² = PDOP² + TDOP²` and `PDOP² = HDOP² + VDOP²`, the spherical law of sines behind the swath
 tuple, the three canonical scatterers of the Pauli decomposition, a projection round trip through
 `triangulate`, Kepler's third law behind `draim_geometry` — and they kill **all 856** of those
-clusters' mutants (860 in scope, 4 unviable, 0 survivors). The reachable backlog is now **689**, and
-its tail is flatter: no remaining cluster is above 43, so the next tranche buys less per test.
+clusters' mutants (860 in scope, 4 unviable, 0 survivors). The reachable backlog was then **689**, and
+its tail was flatter: no remaining cluster was above 43, so the next tranche bought less per test. The
+#257 campaign closed it: rows `py257-a` … `py257-g` and `gate-py2` above, the whole crate with ten
+survivors, all of them `cloud_mask` and all unviable under `onnx` (`py257-onnx`).
 
 One negative result from that exercise is worth more than the counts. The first version of the
 coverage test flew an equatorial orbit with zero node and zero phase, and left 27 mutants alive —
@@ -8785,7 +8790,12 @@ after the archive's end.
 
 The shipped coefficients and the Rust evaluator were unchanged at this step; §10.25 ships the state.
 
-### 10.25 The corpus field ships, with nitric-oxide cooling (Ф23.B, step 4)
+### 10.25 The corpus field enters the repository, with nitric-oxide cooling (Ф23.B, step 4)
+
+**In the repository, not in a release.** Release 0.3.0 (2026-10-26) carries the pilot field of
+§10.10. The corpus field below, its storm gain (§10.28), its envelope and drag bridges (§10.29) and
+the solar-wind field (§10.32) came after it, so no published crate or wheel holds them yet. "Ships"
+and "shipped" in these sections mean the code in this repository.
 
 **What changed in the library.** A fitted field now owns a `sdtm::StormResponse`: the two-constant
 `StormKernel`, or `NitricOxideCooling`, the §10.24 state. Both run over the caller's `ap` history with
@@ -8990,7 +9000,7 @@ The shipped coefficients and the Rust evaluator are unchanged at this step. Next
 `sdtm/`, derived in Maxima, and the shipped field refitted on `storm-log1-lin`; then the large-storm
 under-reach.
 
-### 10.28 The storm's flux gain ships (Ф23.B, step 6)
+### 10.28 The storm's flux gain enters the repository (Ф23.B, step 6)
 
 **What changed in the library.** A fitted field now owns a `sdtm::StormGain`: `Unity`, or
 `FluxPower { exponent }`, which multiplies the storm driver by `g = (F10.7a/150)^κ` before the
@@ -9345,7 +9355,7 @@ fixed at 1, fixed at ½, and fitted from two starts. The rows above are the plan
 fitted and the solar wind alone; the second start is chosen by the training cost. The shipped
 coefficients and the Rust evaluator are unchanged.
 
-### 10.32 The solar-wind field ships, opt-in (Ф23.I)
+### 10.32 The solar-wind field enters the repository, opt-in (Ф23.I)
 
 `plans/17` D-27 adds §10.31's drive to the library as a second SDTM-1 field, for reconstruction and
 nowcasting. The 3-hourly field stays the default and the forecast path: `sdtm::coefficients` and its
@@ -11776,8 +11786,8 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today: 336 modules, 251 name a check, 85 do not** — no physics
-module, 26 parsers, 4 generated and 55 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
+(`plans/16` Ф17.B orders them). **Today, in the public tree: 331 modules, 246 name a check, 85 do
+not** — no physics module, 26 parsers, 4 generated and 55 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
 the last 42 — GNSS, SLR, the NeQuick ionosphere, earthvision, signal, vision, sensors and
 astrometry (`earthvision/sfm.rs` and `cloud.rs` hold no formula of their own and moved to
 infrastructure) — and fixed what the gates found: the GLONASS `J2` was the ICD's 8-digit
@@ -12108,8 +12118,8 @@ it — AB8 and AM8, IAS15's H, c and d, GRK4T's tableau, three named constants, 
 and the Earth's rotation rate where an input needs them — the closest at 0.986 of a half ulp.
 
 **Today: 2
-comparator-decided tests of 3 735** — name 2, file 0, fixture 0, doc 0; none of them Orekit's,
-2 in `spacelab-propagation`. The CI step fails on a comparator-decided test missing from the block below
+comparator-decided tests** — name 2, file 0, fixture 0, doc 0; none of them Orekit's,
+2 in `spacelab-propagation`; `tools/check-comparators.py` prints how many tests it read. The CI step fails on a comparator-decided test missing from the block below
 and on an entry that is no longer one, so the count can only fall: a test leaves when it is parked
 in the comparator suite or rewritten against its module's math gate (`plans/17` Ф19.C, Ф19.D).
 The parked tests are the suite: `just compare` (`tools/compare.py`) runs each one alone, reads the
@@ -12193,13 +12203,14 @@ six of them. Solved on `erfc` itself, with PARI/GP's `solve` agreeing, it ends �
 double is unchanged. The entry model's Mars GM, 4.282837e13 and called "DE-grade", is DE440's
 42828.375816 km³/s² cut at seven digits, 1.4e-7 relative below it. It is now DE440's value, and a
 new `derivations/edl_entry_fixture.mac` regenerates the entry-equation fixtures; at the old GM it
-reproduces the old fixtures digit for digit. Eight literals stay open, each for a reason: the
-Sun-synchronous rate's 365.2422-day year and three scan periods, whose documents are not to hand;
-DSST's SRP reference distance, which is Orekit's convention and no document's; the reference radius
-of the frozen SDTM-1 code, which a comment would unfreeze; and two in private code. **Today: 8 open
-literals in 8 items.** `--check` fails on an item with more open literals than its entry, on a new
-item and on an entry the sweep no longer matches, so the count can only fall: an entry leaves when
-its literals name the derivation that checks them or the document they are copied from.
+reproduces the old fixtures digit for digit. In the public tree six literals stay open, each for a
+reason: the Sun-synchronous rate's 365.2422-day year and three scan periods, whose documents are not
+to hand; DSST's SRP reference distance, which is Orekit's convention and no document's; and the
+reference radius of the frozen SDTM-1 code, which a comment would unfreeze. **Today: 6 open literals
+in 6 items.**
+`--check` fails on an item with more open literals than its entry, on a new item and on an entry the
+sweep no longer matches, so the count can only fall: an entry leaves when its literals name the
+derivation that checks them or the document they are copied from.
 
 ```text
 crates/spacelab-elements/src/design.rs::SUN_SYNCHRONOUS_NODE_RATE | 1
@@ -12379,20 +12390,22 @@ The oracle-generating code is vendored so every number here is regenerable:
   the default six months plus 66 MB of Hpo, into gitignored `data/validation/density/`.
 
 Run the whole suite with `cargo test --workspace`; every non-`#[ignore]` row above is enforced on each
-run. Eleven tests carry `#[ignore]`, and ten of them now run **weekly in CI** —
-`.github/workflows/weekly.yml`, Sunday 05:00 UTC and on demand, in five independent jobs (`eop`,
-`orbit-fit`, `density`, `wind`, `long-integrations`) so that one dead upstream cannot hide the other
-four. Each job runs its own `tools/fetch-*.sh` first and fails on a download that does not arrive: a
-rotted URL is the finding this workflow exists to surface, not a condition to skip past. The
-eleventh, `lambda`'s timing table, stays out deliberately — its own doc comment says it is a
-measurement and not a check, and a timing assertion on a shared runner turns contention into a red
-build.
+run. 20 tests carry an `#[ignore]` that does not park a comparator (§12.1 parks those), and
+`.github/workflows/weekly.yml` runs 14 of them in 6 independent jobs (`eop`, `orbit-fit`, `density`,
+`wind`, `broadcast-nav`, `long-integrations`), so that one dead upstream cannot hide the others. It
+runs on request, not on a schedule (§8). Each job runs its own `tools/fetch-*.sh` first and fails on
+a download that does not arrive: a rotted URL is the finding this workflow exists to surface, not a
+condition to skip past. `lambda`'s timing table stays out deliberately — its own doc comment says it
+is a measurement and not a check, and a timing assertion on a shared runner turns contention into a
+red build. The other five, in `ocean_tide_orbit_sensitivity`, `operational_path` and
+`wam_ipe_product`, are run by hand.
 
-The gap this closes was **silent, not red**. Nothing ran those ten before: they are gated on
+The gap the workflow closed was **silent, not red**. Nothing ran those tests before: they are gated on
 downloads `ci.yml` deliberately does not make, so the gate never opened, and a fetch script whose
 upstream moved, a product whose format changed, or a validation number that drifted would each have
-sat undetected for as long as nobody ran it by hand. The GPU rows remain hardware-gated and are not
-in this workflow; a hosted runner has no GPU.
+sat undetected for as long as nobody ran it by hand. Since the schedule was removed the silence is
+back between runs: they run when somebody dispatches the workflow. The GPU rows remain
+hardware-gated and are not in this workflow; a hosted runner has no GPU.
 
 Every job's steps were run locally before the file was committed, rather than assumed to work, and
 the numbers they produced are the ones the rows above claim:

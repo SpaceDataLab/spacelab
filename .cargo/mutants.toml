@@ -2998,11 +2998,11 @@ exclude_re = [
     # mutants substitute an unread value. `value` is a convex combination of `temp2` and
     # `0.85·temp2` and is therefore non-negative, so `<=` swaps only 1e-6 for 0.0 and `==` swaps
     # every `v < 1e-6` back to `v` -- in both cases another element of [0, 1e-6]. Trace the two
-    # consumers: `nm_f1` at line 77, which `compute_layer_amplitudes` reads only at lines 302 and
-    # 305, inside the `fo_f1 >= 0.5` arm; and `p.fo_f1 < 0.5` at line 294 itself. Since 1e-6 < 0.5
-    # every substituted value takes the no-F1 arm, where `nm_f1` is never read, and neither
-    # `fo_f1` nor `nm_f1` is stored in `NeQuickParameters`. The clamp becomes load-bearing the
-    # moment anything reads either for its own sake, which is why it stays.
+    # consumers: `nm_f1` in `NeQuickParameters::new`, which `compute_layer_amplitudes` reads only
+    # inside the arm `AmplitudeRules::has_f1_layer` opens, and that test itself, which needs
+    # `fo_f1 >= 0.5`. Since 1e-6 < 0.5 every substituted value takes the no-F1 arm, where `nm_f1` is
+    # never read, and neither `fo_f1` nor `nm_f1` is stored in `NeQuickParameters`. The clamp becomes
+    # load-bearing the moment anything reads either for its own sake, which is why it stays.
     "parameters\\.rs:280:14: replace < with <= in compute_fo_f1",
     "parameters\\.rs:280:14: replace < with == in compute_fo_f1",
 

@@ -242,7 +242,6 @@ REVIEWED: list[tuple[str, str, str]] = [
     ),
     ("docs/limitations.md", "- **NRLMSIS 2.0 / 2.1.** The NRL licence", "versions"),
     ("docs/limitations.md", "US 10,641,925 B2 claims", "a patent number"),
-    ("docs/limitations.md", "remains a dated oracle number", "a ticket family, Ф15"),
     (
         "docs/provenance.md",
         "| `nrlmsis2` | NRLMSIS 2.0 / 2.1 via",

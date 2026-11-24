@@ -151,11 +151,15 @@ intermediates, and the worst observed deviation uses about 10% of it.
 ## Before opening a pull request
 
 ```sh
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test --workspace
+just check                # fmt, clippy, the whole suite, the optional features, the C ABI
+just gates                # the static checks: provenance, comparators, derivations, constants, claims, ...
+just checker-tests        # each of those checks fails on a planted violation
+./derivations/verify.sh   # re-runs the derivations with the engines it finds; a missing one skips
 cargo deny check
 ```
+
+No CI job runs on a push or a pull request, so these are the gate. A change that touches a
+derivation runs `derivations/verify.sh`; the others run on every change.
 
 If a commit implements an equation from a book, state in the commit body which
 equation, and whether the errata touch it.

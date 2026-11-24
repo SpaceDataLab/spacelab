@@ -2,8 +2,8 @@
 # Re-derive everything the code claims was derived, and fail loudly if it is not.
 #
 # A comment saying "proved in Maxima" is worth nothing unless something re-runs Maxima. This is
-# that something. It is not part of `cargo test` — it needs a computer algebra system — so it runs
-# as its own CI job, and any failure here means a doc comment is now a lie.
+# that something. It is not part of `cargo test` — it needs a computer algebra system — and no CI job
+# runs it: it is run by hand, and any failure here means a doc comment is now a lie.
 #
 #   ./derivations/verify.sh
 #

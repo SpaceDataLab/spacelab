@@ -154,14 +154,21 @@ scope:
   secular rates are evaluated at `e = 0`, so the eccentricity vector's turning rate is short by the
   factor `(1 − e²)⁻²` of the J2 rate, 2e² relative. Orbits with `e > 0.1`, near-equatorial or
   within `|sin² i − 4/5| < 10⁻³` of the critical inclination are refused.
-- **SDTM-1's shipped field is fitted on eight satellites, and its envelope is theirs.**
-  `sdtm::coefficients` was fitted on 365 214 rows of the TU Delft v02 corpus — CHAMP, GRACE A/B, GOCE,
+- **SDTM-1's corpus field is fitted on eight satellites, and its envelope is theirs.** It is in the
+  repository and in no release yet: release 0.3.0 carries the pilot field, and the corpus field, its
+  storm gain, its envelope, the drag bridges and the solar-wind field came after it
+  (`docs/verification.md` §10.25). `sdtm::coefficients` was fitted on 365 214 rows of the TU Delft v02 corpus — CHAMP, GRACE A/B, GOCE,
   GRACE-FO C and Swarm A/B/C, 2000-07 to 2026-04, **225 to 545 km**, F10.7a **65.8 to 231.9**
   (`docs/verification.md` §10.25–§10.28). With each mission family held out it holds **20.8 %** MAPE
   pooled, against NRLMSISE-00's 50.1 % on the same rows, and is below NRLMSISE-00 in every flux and
   storm bin (§10.28). Outside 225–545 km the profile is an extrapolation of the Bates form. The boundary
   scale sits on its fit bound, as in every fold. The levels of the eight instruments differ by up to
-  9.4 % (`SATELLITE_SCALE`); the field is GRACE-FO C's. `sdtm::coefficients::UNCERTAINTY` is the width
+  9.4 % (`SATELLITE_SCALE`); the field is GRACE-FO C's. Those densities are the producer's newest
+  reprocessing, v02c, which sits below v02 where both exist: 4.4 % at the median on the same instants,
+  24 % in the lowest density tercile of June 2018. Which version is right is not known. Fitted on v02,
+  the other families' held-out MAPE is 0.33 points worse [+0.15, +0.52], so the field stays on v02c
+  (§10.45).
+  `sdtm::coefficients::UNCERTAINTY` is the width
   that goes with this — `σ` of `ln(model/measured)` 0.23 to 0.29 by regime, whose 90 % interval covers
   87.8 to 99.6 % of each family held out, and 89.0 to 90.9 % of each regime. The daily flux excess
   saturates at about 26 sfu (`sdtm::FluxExcess`, §10.26), which took the 0.76 % of rows with an excess
@@ -210,7 +217,7 @@ scope:
   Neither the nitric oxide's drive nor a fast uncooled mode lifts the largest storms (§10.30). Driven
   half by the measured solar wind and half by `ap60`, a held-out fit lifts them to 0.94 of the
   observed peak at the median, with the pooled error 20.75 → 20.45 % and the storm-day rows 23.4 →
-  23.7 % (§10.31). That field ships opt-in as `sdtm::solar_wind_coefficients` (§10.32), for
+  23.7 % (§10.31). That field is in the repository, opt-in, as `sdtm::solar_wind_coefficients` (§10.32), for
   reconstruction and nowcasting. It cannot drive a prediction: the solar wind is measured less than
   an hour before it reaches the Earth.
 - **SDTM-1 does not overcool after a storm, and its saturated flux excess hides a sustained
@@ -221,7 +228,10 @@ scope:
   measured density fell 28–33 % as the daily flux fell from 257 to 190 sfu; SDTM-1 fell at most 3 %,
   because both spans are past the saturation of its daily excess (§10.26), and NRLMSISE-00 fell
   25–26 % (`docs/verification.md` §10.34). **In the days after a severe storm the measured density
-  can be up to a third below SDTM-1's.** Over the 630 storm comparisons SDTM-1 is not too dense
+  can be up to a third below SDTM-1's.** The drop is not in the storm state's dynamics: four rival
+  terms held out — a boundary-oxygen factor, a quiet offset, a linear storm state and a flux-scaled
+  nitric-oxide time — take 12 May 2024 at best to 9.4 % below the quiet day, against the 25–27 %
+  measured (§10.46). Over the 630 storm comparisons SDTM-1 is not too dense
   after a storm on average: its post-storm `⟨O/C⟩`, measured over the model divided by its pre-storm
   level, is 1.009–1.083 in every bin of the storm's peak `ap`. So these are events, not a bias of the
   post-storm phase.
@@ -241,11 +251,34 @@ scope:
   DTM2020 was run on these rows in the development tree, and its licence keeps that comparison out of the
   public release (`docs/provenance.md` §1, D-32).
   NRLMSIS 2.x, WAM-IPE and TIE-GCM were not run, each for a stated reason.
-- **Before 2001 SDTM-1 may read too thin.** It is fitted on 2001–2026 and has no secular term. GFZ-1, a sphere of
-  known area-to-mass that decayed in 1995–1999, needs a drag coefficient of 2.84–3.51 under SDTM-1 for its true
-  lifetime, against 2.23–2.37 for a smooth sphere; NRLMSISE-00 needs 2.23–2.61. Starshine 3, in 2001–2003, needs
-  2.16–2.33 under SDTM-1 (`docs/verification.md` §10.39). One sphere is not a trend: for a date before 2001, check
-  SDTM-1 against NRLMSISE-00.
+- **SDTM-1 is thin at 200–350 km near solar minimum, in its own years and before them.** A smooth sphere of
+  known area-to-mass needs a drag coefficient of 2.23–2.37 for its true lifetime. ANDE's spheres, which decayed
+  in 2007–2010 inside SDTM-1's fitted years, need 2.49–2.96 under SDTM-1: it is too thin there by roughly
+  7–25 %, and NRLMSISE-00, at 1.66–2.15, too dense. It is not fitted before 2001 and has no secular term, and
+  there it is thin as well: ODERACS (1994–1996) needs 2.77–3.17 and GFZ-1 (1995–1999) 2.84–3.51 under SDTM-1,
+  NRLMSISE-00 1.89–2.29 and 2.23–2.61 (`docs/verification.md` §10.39, §10.43). Both models need about 11 % less
+  in 2007–2010 than in 1994–1996: that is the era's share, and the rest of SDTM-1's deficit stays in its own
+  years. Starshine 3, at solar maximum in 2001–2003, needs 2.16–2.33 under SDTM-1. Ten spheres from four
+  launches carry no interval, and below 225 km the field has no measured rows. For a low orbit near solar
+  minimum, or a date before 2001, check SDTM-1 against NRLMSISE-00.
+- **For a 1–3-day orbit prediction with a fitted drag scale, SDTM-1 is not better than NRLMSISE-00.** On 598
+  TU Delft arcs of GRACE-FO C and Swarm at 419–543 km in 2020–2026, with the state and a drag scale fitted on
+  the 24 h before and held, the median 72 h along-track error is 1 794 m under SDTM-1 and 1 802 m under
+  NRLMSISE-00; the median of `ln(error under SDTM-1 / error under NRLMSISE-00)` is −0.014 [−0.071, +0.012]
+  (`docs/verification.md` §10.57). The fitted scale absorbs the density's level, where SDTM-1 is ahead, and its
+  day-to-day variation is no closer to the truth. No arc below 420 km was tested.
+- **SDTM-1 reads part of the quiet latitude structure wrong.** On quiet days CHAMP and GOCE measure a contrast
+  that SDTM-1 lacks: `100 ×` the mean `ln(model/measured)` at `|lat|` ≥ 60° minus that at `|lat|` < 40° is
+  +11.4 and +12.1, +17 in the winter hemisphere, where NRLMSISE-00 reads −1.1 and +4.5. Above 400 km at low flux
+  the sign turns. No latitude term tested held out removes it on every family (`docs/verification.md` §10.49).
+- **SDTM-1's 90 % interval does not cover every satellite family at 90 %.** Held out by family, the worst
+  family in each of the six cells is covered 82.2–87.8 %. No interval built from the model's inputs reaches
+  90 % for every family: six cells, a continuous `σ(x)` and split-conformal rivals all leave one family wider
+  than the rest in each cell (`docs/verification.md` §10.50).
+- **SDTM-1's composition is Jacchia's at 120 km, held fixed, and it is not a product.** Its column O/N₂ is
+  52 % below GOLD's in every storm phase and latitude band, 0.49 against 1.04, where NRLMSISE-00 is 6–15 % below;
+  its column does not respond to a storm, and at a fixed height its storm response is heating alone
+  (`docs/verification.md` §10.42). The fit reads total mass density, which these errors can leave right.
 - **SDTM-1's solar-wind field reconstructs and nowcasts; it does not forecast.**
   `sdtm::solar_wind_coefficients` (§10.32) runs its storm state hourly on `(1 − s)·ap60 + s·N`,
   `s` = 0.500, over 336 hours (fourteen days) of history that end at the hour before the sample. It
@@ -375,6 +408,26 @@ scope:
   the shift. **What remains** is that the geometric mask is still the default when a caller passes a
   bare number, because changing that would silently move every existing caller's answer.
 
+## What release 0.3.0 still carries
+
+Release 0.3.0 (crates.io and PyPI, 2026-10-26) holds these defects. The repository corrects all but
+the first, and the corrections reach a user with the next release.
+
+- **The GPU porkchop solves no short-way transfer of most geometries.** Its bisection starts at
+  `z = −50`, where `y(z)` is negative on the short way, so the cell is refused at once
+  (`spacelab-gpu`, `LAMBERT_SHADER`). The crate's test passes on its long-way cells. Open in the
+  repository too.
+- **Four functions lost every digit on part of their domain and said nothing.** `igrf::field_ecef`
+  dropped the east component within 1.5e-8 rad of the polar axis (0.1 m at 6 771 km), the poles
+  included; `so3_log` returned the zero vector for an exact half-turn, and `Se3::log` and
+  `Se23::log` with it; `RobustPolicy::StudentT` gave a zero variance once the prior exceeded the noise
+  by about 1e16, so the update took the observation as exact; `AttitudeError::angle` returned 0 below
+  about 2e-8 rad.
+  Each now uses a form with no cancellation there; `docs/verification.md` §1.1 bounds the round-off
+  of three of the rewrites.
+- **An SGP4-XP element set (ephemeris type 4) was propagated with SGP4.** Every entry point now
+  refuses it (`docs/verification.md` §3).
+
 ## What cannot ship, and why
 
 Some of the best models in this domain are not in the tree, or are in it and cannot leave it, for
@@ -386,14 +439,15 @@ best model finds the answer instead of a gap. `docs/provenance.md` holds the rea
   modification or improvement" and dissemination; a Fortran-to-Rust port is a prohibited
   modification, and US 10,641,925 B2 claims the model's estimation method. Substitute: NRLMSISE-00
   (a US Government work, re-based on the NRL FORTRAN) with the calibration layer, and our own
-  thermosphere model on open data (`plans/16` Ф15). NRLMSIS 2.1 remains a dated oracle number.
+  thermosphere model on open data, SDTM-1 (`docs/verification.md` §10). NRLMSIS 2.1 remains a dated
+  comparator number.
 - **DTM2020.** CNES / Met Office / Elecnor Deimos licence: academic, non-commercial only; no
   modification; no dissemination "or any of its supporting data".
   The development tree runs it as a comparator, and the public release prints no number computed from
   it: the register gives them the class `number-private` (`docs/provenance.md` §1, D-32). Substitute:
   the same as above.
 - **SGP4-XP.** No public algorithm specification exists, so there is nothing to implement from.
-  Substitute: SGP4 with SupGP element sets, and a learned corrector on open data (`plans/16` Ф8.D).
+  Substitute: SGP4 with SupGP element sets; a learned corrector on open data is planned and not built.
   An SGP4-XP element set (ephemeris type 4) is refused, not propagated with SGP4, by every SGP4
   entry point: the Rust constructors, both OMM readers, the GPU batch, the C ABI and Python.
 - **HWM14.** CC BY-NC-ND: no derivatives, no commercial use. Substitute: our own wind model fitted
@@ -408,9 +462,9 @@ best model finds the answer instead of a gap. `docs/provenance.md` holds the rea
   public tree carries no JB2008 port and no excerpt of those files, and every JB2008 number in these
   documents was measured in the development tree. The HASDM database is "for research purposes only"
   with commercial use "only through an explicit agreement with SET". Substitute: SDTM-1 and
-  NRLMSISE-00 with the calibration layer, and JB2008's indices rebuilt from open series to the
-  published definitions (`plans/16` Ф18.A). NOAA's public WAM-IPE nowcast, measured as a feed, does
-  not help as it stands (`docs/verification.md` §10.18).
+  NRLMSISE-00 with the calibration layer, and JB2008 written from its papers, which still takes SET's
+  index files as its drivers (`docs/verification.md` §10.19). NOAA's public WAM-IPE nowcast, measured
+  as a feed, does not help as it stands (`docs/verification.md` §10.18).
 
   **JB2008 acknowledgement (interim).** This document prints JB2008 numbers computed with the index
   files `SOLFSMY.TXT` and `DTCFILE.TXT` of Space Environment Technologies (SET) as input. JB2008 is

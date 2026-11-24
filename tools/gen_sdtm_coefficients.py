@@ -746,6 +746,13 @@ PHASES = ((-30.0, -18.0), (-18.0, 0.0), (0.0, 36.0), (36.0, 48.0))
 SCORED_PHASES = {2: "onset", 3: "main and recovery", 4: "post-storm"}
 """The phases scored apart, by number. Phase 1 is the debiasing window: its `<O/C>` is 1 by design."""
 
+OC_LEGEND = (
+    "<O/C>: measured over debiased model, the model divided by its pre-storm level; "
+    "level: model/measured over the pre-storm phase; peak M/O: model over measured storm enhancement"
+)
+"""What each printed storm ratio divides by what. `ln(model/measured) = ln(level) - ln<O/C>`, so `<O/C>`
+above 1 is a model *below* the measurement once its pre-storm level is removed."""
+
 PHASE_RECORD = (
     "t0",
     "peak_ap",
@@ -756,8 +763,12 @@ PHASE_RECORD = (
     "log_mean",
     "scatter",
     "R",
+    "log_level",
 )
-"""One comparison's statistics in one scored phase, as `storm_assessment` returns them."""
+"""One comparison's statistics in one scored phase, as `storm_assessment` returns them. `log_mean` is
+`ln<O/C>`, the mean debiased `ln(measured/model)`; `log_level` is the comparison's pre-storm level, the
+mean `ln(model/measured)` over phase 1 that the debiasing removes, so the phase's mean
+`ln(model/measured)` is `log_level - log_mean` on the same pairs."""
 
 
 def storm_onsets(ap: np.ndarray, epoch: pd.Timestamp) -> list[dict]:
@@ -898,7 +909,8 @@ def storm_statistics(
     """Bruinsma & Laurens (2024) Eq. (1) on a set of kept pairs: `ln <O/C>`, the StD of `ln(O/C)`
     about it in per cent, and the Pearson R of the observed and the debiased computed density.
 
-    `log_ratio` is the debiased `ln(O/C)`, so the computed density is `observed * exp(-log_ratio)`.
+    `log_ratio` is the debiased `ln(O/C)`, observed (measured) over the debiased computed (model)
+    density, so the computed density is `observed * exp(-log_ratio)`.
     An empty set has no statistic, and one pair has no correlation: those are `nan`.
     """
     if observed.size == 0:
@@ -933,10 +945,11 @@ def storm_assessment(
     observed = rows.rho.to_numpy()
     records: list[tuple] = []
     print(f"\n== storm assessment on the {label} residual ==")
+    print(OC_LEGEND)
     print(
         "t0                   peak ap  type  mission      "
         "n   <O/C>   StD %     R   P2 <O/C>  P3 <O/C>  P4 <O/C>"
-        "  onset h  peak M/O  d(half) h"
+        "  onset h  peak M/O  d(half) h   level"
     )
     seen = 0
     collected: dict[str, list[float]] = {
@@ -974,6 +987,7 @@ def storm_assessment(
                     k,
                     int(m.sum()),
                     *per_phase[k],
+                    shift,
                 )
                 for k, m in in_phase.items()
                 if m.sum() >= 2
@@ -1016,7 +1030,7 @@ def storm_assessment(
                 f"{'MP' if storm['multiple_peak'] else 'SP'}    {mission:<12}"
                 f"{int(keep.sum()):6d}{mean_ratio:8.3f}{scatter:8.1f}{correlation:7.3f}"
                 + "".join(f"{np.exp(x[0]):10.3f}" for x in per_phase.values())
-                + f"{onset:9.1f}{peak_ratio:10.3f}{delta_tau:10.1f}"
+                + f"{onset:9.1f}{peak_ratio:10.3f}{delta_tau:10.1f}{np.exp(shift):8.3f}"
             )
     table = pd.DataFrame.from_records(records, columns=PHASE_RECORD)
     if seen == 0:
@@ -1056,6 +1070,7 @@ def phase_scorecard(records: pd.DataFrame, label: str) -> None:
         f"\n== per-phase scorecard, {label}: {records.t0.nunique()} storms, "
         f"{len(records[['t0', 'mission']].drop_duplicates())} comparisons =="
     )
+    print(OC_LEGEND)
     print("phase              mission     n   <O/C>  StD<O/C> %  mean StD %  mean R")
     for phase, name in SCORED_PHASES.items():
         here = records[records.phase == phase]

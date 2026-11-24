@@ -145,7 +145,11 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   of 70 sfu or more from 167 % to 25 % MAPE. **One regime is still known to be poor: high flux in storm
   time.** There the 90 % interval covers 80.8 % of the §10.2 campaign, and on 2024-05-10 (233 against
   163 sfu) the model is 1.22–1.41 times too dense before the storm begins and 36.2 % MAPE over the
-  day. **Inside 225–545 km and F10.7a 65.8–231.9 sfu SDTM-1 is the recommended model; NRLMSISE-00 is
+  day. That level before the storm carries most of the misses, not the storm: held out, 21 of the
+  campaign rows the interval misses with the model too dense lie in a storm window, and 17 of them fall
+  inside it once the model is divided by its level before that storm. Inside the storms of May 2024 and
+  June 2025 the model so divided is below the measurement (`docs/verification.md` §10.48). **Inside
+  225–545 km and F10.7a 65.8–231.9 sfu SDTM-1 is the recommended model; NRLMSISE-00 is
   the baseline everywhere and the model to use outside that envelope** (`docs/verification.md`
   §10.28). The envelope is `sdtm::coefficients::ENVELOPE`, `sdtm1_envelope()` and `sl_sdtm1_envelope`
   in the bridges, and each bridge has an SDTM-1 drag constructor beside the NRLMSISE-00 one; neither
@@ -195,8 +199,9 @@ offset that is zero in exact arithmetic, so what it multiplies is rounding. Pref
   because both spans are past the saturation of its daily excess (§10.26), and NRLMSISE-00 fell
   25–26 % (`docs/verification.md` §10.34). **In the days after a severe storm the measured density
   can be up to a third below SDTM-1's.** Over the 630 storm comparisons SDTM-1 is not too dense
-  after a storm on average: its post-storm `⟨O/C⟩` is 1.009–1.083 in every bin of the storm's peak
-  `ap`. So these are events, not a bias of the post-storm phase.
+  after a storm on average: its post-storm `⟨O/C⟩`, measured over the model divided by its pre-storm
+  level, is 1.009–1.083 in every bin of the storm's peak `ap`. So these are events, not a bias of the
+  post-storm phase.
 - **For a lifetime with a fitted ballistic coefficient, SDTM-1 is not better than NRLMSISE-00.** On 146
   held-out re-entries, one object a launch, SDTM-1's median `|ln T/T_true|` is 0.025 [0.004, 0.042] larger
   and its mean 0.010 [−0.003, 0.023] larger (`docs/verification.md` §10.37). A fitted coefficient absorbs the

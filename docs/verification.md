@@ -770,7 +770,7 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | One level per satellite, or a scale each | Ф30.G: what the shipped per-satellite scales buy held out, the most any scale could buy, and one level for every satellite, on the five family folds | `no_scales` is the shipped field on one level (`tools/test_evaluate_sdtm.py`) | the scales stay: one level costs +0.47 [+0.22, +0.73] points; the best constant per satellite bounds any scale at 0.35 points; the training mean is the wrong level (21.43 %); GOCE's scale runs +4.4 to +19.4 %; GRACE-FO C's v02c sits below its v02 by about −4 × 10⁻¹⁵ kg m⁻³, 4.4 % at the median and 24 % in the lowest density tercile of June 2018 (F72); the other seven satellites miss v02 less (21.9 against 24.2 %), but fitting on v02 costs the other families +0.33 [+0.15, +0.52], a level effect, and raises their level below F10.7a 80 by 2.6–4.4 %, about 4 of the spheres' 7–25 % (§10.45) | tools/satellite-scale.py, tools/density-versions.py, tools/corpus-variant.py, tools/low-flux-level.py |
 | The post-storm drop, four rivals | Ф23.J: a boundary-oxygen factor, a quiet offset δ, a linear form and the nitric oxide's time scaled by the flux, each added to the shipped form and fitted on the family and storm-out folds, then on §10.33's storm protocol and §10.34's named cases | each rival's step, fixed points and limits in Maxima and PARI/GP (`sdtm_composition`, `sdtm_overcooling`, `sdtm_nitric_flux`); `kn` held at Wang et al.'s middle to 30 digits in both | no rival reproduces the drop: 12 May 2024 at best −9.4 % against −25 to −27 % measured; δ fits to 0, linear costs +3.07 points in main and recovery, composition is unstable and raises the post-storm `⟨O/C⟩` to 1.126 at `ap` ≥ 300; the fitted `kn` sits at its bound 3 (a ratio of 23, Wang et al. 3–4); held at their 1.1933 with no parameter added it wins every paired measure (−0.06 [−0.09, −0.03] on the families, −0.77 [−0.99, −0.57] in main and recovery, −0.45 [−0.83, −0.05] on the storm folds) but lifts the post-storm `⟨O/C⟩` 0.1–0.9 points; shipping it is D-35 (§10.46) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/ablation-table.py |
 | Thinning: the fit at 10 min, 30 min and 2 h | Ф30.E: the shipped form refitted on every 5th, 15th and 60th row of the 120 s corpus, one family fold at a time, each scored on the same held-out rows and on §10.33's storm windows at 120 s | the peak memory of every run measured before the grid was chosen: linear in the rows, 11.05–15.17 GB at 10 min, so the 120 s corpus (55–76 GB) does not fit in 38.6 GB | thinning does not move the error: each family's MAPE within 0.03 points across the three steps, the storm onset unchanged, the peak error by 0.002 (better on 280 of 599 storms), the fitted kernel within 0.2 h, 0.2 h, 1 `ap` and 0.006 in `κ`; F62 is answered for the estimates (§10.47) | tools/fit-sdtm-corpus.py, tools/thinning-table.py |
-| The daily flux's memory | Ф23.L: the daily F10.7 through a first-order filter before `T∞`, with the heating time (no parameter) or its own, on the family and storm-out folds; the interval's coverage by regime held out, on the corpus and on §10.2's campaign rows | the filter's daily step, its `τ → 0` limit, `lfilter`'s recursion and a spike's conserved flux in Maxima (9 identities) and PARI/GP; `tools/regime-coverage.py` reproduces §10.28's held-out coverage digit for digit | its own time is 26–35 h; pre-storm MAPE 20.79 → 19.91 %, family −0.07 [−0.13, −0.01] with the heating time, storm folds span 0; regime 5 stays at 84.4 % on the campaign rows against the 88 % target, because the cell misses through a storm-time excess (May 2024 1.124, June 2025 1.195 model/measured), not the flux (§10.48) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/regime-coverage.py |
+| The daily flux's memory | Ф23.L: the daily F10.7 through a first-order filter before `T∞`, with the heating time (no parameter) or its own, on the family and storm-out folds; the interval's coverage by regime held out, on the corpus and on §10.2's campaign rows | the filter's daily step, its `τ → 0` limit, `lfilter`'s recursion and a spike's conserved flux in Maxima (9 identities) and PARI/GP; `tools/regime-coverage.py` reproduces §10.28's held-out coverage digit for digit | its own time is 26–35 h; pre-storm MAPE 20.79 → 19.91 %, family −0.07 [−0.13, −0.01] with the heating time, storm folds span 0; regime 5 stays at 84.4 % on the campaign rows against the 88 % target; the model's level before the storm carries most misses, 17 of the 21 too-dense misses in a storm window fall inside once it is removed, and in the storm the model divided by that level is low, not high (§10.48, corrected by Ф23.Z) | tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py, tools/regime-coverage.py |
 | The quiet latitude structure | Ф23.V: the high-minus-low latitude contrast of the held-out residual on the quiet rows, by season, by height and, read after, by flux; two latitude rows of the form fixed before their folds (`degree3`, `boundary_latitude`) and three read after (`flux_latitude`, `flux_boundary_latitude`, `no_swarm`); the measured density boxcar-smoothed as Swarm's GPS densities are | the rule written into the tool before each run; `smoothing_shift` exact to 1e-13 on a synthetic series with a gap; `no_swarm`'s Swarm fold equals the shipped one to 1e-11 | CHAMP +11.4, GOCE +12.1 in both seasons (winter +17), +7 to +16 at F10.7a ≥ 100 at every height, negative only below 100 sfu above 400 km; no row meets the rule (`degree3` −0.08, `boundary_latitude` −0.03 and GOCE overshot); `flux_boundary_latitude` −0.31 [−0.37, −0.25], after the data → blind months (Ф23.X); Swarm's resolution moves CHAMP/GOCE by 2 points only (Ф23.Y) (§10.49) | tools/latitude-contrast.py, tools/fit-sdtm-corpus.py, tools/evaluate-sdtm.py |
 | Uncertainty beyond six bins | Ф30.I: the shipped six-cell σ against a continuous `ln σ(x)` in the model's inputs and two split-conformal rivals, each built from the other four families' held-out residuals; coverage, half-width, log score and CRPS by cell, family, height, storm phase and the campaign rows; the five fold fits' spread as the parameter part | the normal CRPS from `E|X − y| − E|X − X′|/2` in Maxima (18 identities) and against its defining integral in PARI/GP to 1e-45; Python against PARI to 16 digits; the σ fit recovers a known β; each fold refit reproduces its saved residual to 7e-15 | no method meets the target (the worst family per cell 78–88 %): the limitation stays printed; `continuous` log score −0.019 [−0.027, −0.011], CRPS −0.060 [−0.082, −0.038], GOCE 99.6 → 90.6 %, campaign regime 5 84.4 → 89.4 %; conformal adds nothing (q 1.61–1.63); the parameter part is ≤ 1.5 % of σ² (§10.50) | tools/uncertainty-scores.py, derivations/gaussian_scores.mac |
 | Other benchmarks' cases | Ф25.E: STORM-AI's 4 537 evaluation cases (CC BY 4.0) and AETHER-P3 Nowcast's twelve, as manifests and `windows` folds that keep out every satellite inside any case's span, the benchmarks' held-out satellites and, for AETHER-P3, every row from 2024; SDTM-1 on persistence and on reconstruction against NRLMSISE-00 and the clean-room JB2008 on measured indices | the orbit-mean operator on the measured density against STORM-AI's target (median 0.29 %, 99th percentile 2.3 %); the case count per subset and satellite against the devkit; our NRLMSISE-00 and JB2008 against AETHER-P3's Table 9 (means 0.428 / 0.434 and 0.213 / 0.220); `LeakError` on a padded, held-out or late row | private set: SDTM-1 persistence RMSE 36 % below JB2008; Phase 1.2 52 % above it, the fold having no deep minimum (median ln ratio +0.33 in 2018–2020); AETHER-P3 RE 0.250, between JB2008 0.213 and NRLMSISE-00 0.428, behind HASDM 0.147 and AETHER-P3 0.116 (§10.51) | tools/benchmark-splits.py, tools/evaluate-sdtm.py, tools/test_evaluate_sdtm.py |
@@ -6185,7 +6185,7 @@ bins; it does not read a height dependence out of them.
 **Calibration.** `DensityCorrection` (#135–#140) fits a degree-1 sun-fixed spherical-harmonic
 correction on the first half of a day and is scored on the second, never on what it was fitted to:
 
-| day | model | bias, base → calibrated | RMS, base → calibrated |
+| day | model | bias (mean model/measured), base → calibrated | RMS, base → calibrated |
 |---|---|---|---|
 | quiet | NRLMSISE-00 `ap[]` | 1.908 → **0.944** | 1.076 → **0.311** |
 | quiet | JB2008 | 1.571 → 1.483 | 0.793 → 0.776 |
@@ -6289,7 +6289,7 @@ Recorded as available and unused.
 
 | Component | Specification source | Check | Residual / tol | Where |
 |---|---|---|---|---|
-| NRLMSISE-00 / JB2008 vs measurement, quiet + storm | the models' own primary sources (§2) | **TU Delft v02 GRACE-FO C accelerometer density** | bias > 1 on both days; JB2008 < 1.6, NRLMSISE-00 < 2.5 | tests/measured_density.rs |
+| NRLMSISE-00 / JB2008 vs measurement, quiet + storm | the models' own primary sources (§2) | **TU Delft v02 GRACE-FO C accelerometer density** | bias (mean model/measured) > 1 on both days; JB2008 < 1.6, NRLMSISE-00 < 2.5 | tests/measured_density.rs |
 | Same days, same indices, independent lineage | — | **Orekit 13.1.7** `NRLMSISE00`/`JB2008`/`DTM2000`, its own loaders, frames, Sun and model code | ≤ 1e-3 relative in bias (NRLMSISE-00), ≤ 5e-3 (JB2008) | tools/orekit-oracle/DensityOracle.java |
 | Sub-daily geomagnetic driver | NRLMSISE-00 `switches[9] = -1` storm mode | the storm day itself | 3-hourly array must beat daily `Ap` by > 0.2 in bias and > 0.3 in RMS | tests/measured_density.rs |
 | Sun-fixed calibration, out of sample | — | second half of a day the fit never saw | \|bias − 1\| < 0.1 for every model; NRLMSISE-00 RMS at least halved | tests/measured_density.rs |
@@ -7475,7 +7475,9 @@ is the cross-check, because everything reported here hangs off `t0`.
 **Held out by calendar month** — the model refitted without the month each storm falls in, which is the
 only honest way to ask this of a model whose corpus is six months long. Evaluated at the products' own
 120 s cadence rather than the fit's sample, because every timing number below is read off an orbit
-average and the fitted sample is one observation per 64 minutes.
+average and the fitted sample is one observation per 64 minutes. In this section's tables `⟨O/C⟩`, and
+`P2`–`P4` per phase, is measured over the debiased model; peak M/O is the model's peak enhancement over the
+measured one, each the highest orbit mean after the onset begins less the pre-storm mean.
 
 | storm | mission | n | `⟨O/C⟩` | StD % | R | P2 | P3 | P4 | onset h | peak M/O | Δ half h |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -7655,7 +7657,8 @@ time constant, not two, and the second is faster than the sampling.
 
 The two tables that follow are both fitted with the **linear** storm regressor `s = storm/100`, which is
 what shipped when §10.14 was written and what §10.14 now reports having replaced; the third compares
-that form against its candidate replacements.
+that form against its candidate replacements. As in §10.14, `⟨O/C⟩` is measured over the debiased model and
+the peak error is `|peak M/O − 1|`, M/O the model's peak enhancement over the measured one.
 
 | driver, held out by calendar month | pooled MAPE (satellite-month / calendar-month) | `⟨O/C⟩` | StD `⟨O/C⟩` | peak within ±25 % | mean peak error | worst |
 |---|---|---|---|---|---|---|
@@ -8009,7 +8012,8 @@ late peak was measuring. That is a claim about **what the residual is a function
 premise is far cheaper than building the model. The premise fails, and what replaces it is a different split entirely.
 
 **Step 0 — the peak error is not a function of activity.** Over the sixteen held-out comparisons of
-§10.14's protocol, against the log of each storm's peak `ap`:
+§10.14's protocol, against the log of each storm's peak `ap`. In this section M/O is the model's peak
+enhancement over the measured one and `⟨O/C⟩` is measured over the debiased model, as in §10.14:
 
 | quantity | Pearson r against `ln(peak ap)` |
 |---|---|
@@ -8230,9 +8234,10 @@ two months it is the month again.
 **Through a storm, debiased: too slow and too weak.** The storm protocol of §10.14 (Bruinsma & Laurens
 2024) scores the four storms of the two months whose pre-storm phase has data (the one at 2025-06-01
 07:30 has none). Each model is first scaled to the measurements on its pre-storm phase, `[−30, −18] h`
-from the first `ap` peak; the statistics below are over all four phases. The bases are scored on the
-same rows as WAM-IPE. The Gannon storm is scored twice, from the hourly files and from every one of the
-product's 10-minute files over its window (667 files, `tools/wam-ipe-storm.sha256`).
+from the first `ap` peak; the statistics below are over all four phases, `⟨O/C⟩` measured over the
+debiased model. The bases are scored on the same rows as WAM-IPE. The Gannon storm is scored twice, from
+the hourly files and from every one of the product's 10-minute files over its window (667 files,
+`tools/wam-ipe-storm.sha256`).
 
 | storm `t0`, peak `ap` | model | GRACE-FO C `⟨O/C⟩` | StD % | R | Swarm A `⟨O/C⟩` | StD % | R |
 |---|---|---|---|---|---|---|---|
@@ -8399,7 +8404,7 @@ falls from 24.0 % to 13.2 % raw, and the GOCE log scale the fixed-`σ` fit neede
 bound) returns to 1.04. The fitted value is 0.034–0.037 /km on four folds and 0.022 /km on the fold
 that holds out GRACE. Pooled, fixed `σ` reads 23.9 % and fitted `σ` 23.5 %.
 
-| held-out family | rows | SDTM-1 raw | SDTM-1 debiased | bias | NRLMSISE-00 | NRLMSISE-00 debiased | fitted `σ` (/km) |
+| held-out family | rows | SDTM-1 raw | SDTM-1 debiased | bias (geometric mean model/measured) | NRLMSISE-00 | NRLMSISE-00 debiased | fitted `σ` (/km) |
 |---|---|---|---|---|---|---|---|
 | CHAMP | 40 884 | 21.5 % | 20.9 % | 1.027 | 43.9 % | 20.0 % | 0.0368 |
 | GOCE | 15 280 | **13.2 %** | 12.3 % | 0.926 | 30.4 % | 18.3 % | 0.0338 |
@@ -8466,7 +8471,7 @@ flare days of §10.21); they are dropped from both models.
 
 | statistic, 630 comparisons | SDTM-1, held-out mission | NRLMSISE-00 `ap[]` |
 |---|---|---|
-| ⟨O/C⟩ after the phase-1 debiasing | 1.007 | 1.056 |
+| ⟨O/C⟩, measured over the model debiased on phase 1 | 1.007 | 1.056 |
 | StD of the per-storm ⟨O/C⟩ | 18.2 % | 13.1 % |
 | mean in-storm StD | 21.2 % | 21.2 % |
 | mean Pearson R | 0.870 | 0.869 |
@@ -8507,7 +8512,8 @@ model and §10.14's best on the peak, is not run on these rows (§10.21).
 
 §10.21 fails on the storm-day level and §10.22 on the largest peaks. Before a state equation is
 built, the cheaper question: is the regressor's shape what caps them? The two §10.15 alternatives to
-`storm-log1` were refitted on the same folds, rows and protocol (`--caps`):
+`storm-log1` were refitted on the same folds, rows and protocol (`--caps`); the peak ratio is the model's
+peak enhancement over the measured one (§10.22):
 
 | caps | storm term | pooled held-out | `Ap` ≥ 50 bin (NRLMSISE-00 35.4 %) | peak within ±25 % | peak ratio, median | at `ap` ≥ 300 | recovery within ±6 h |
 |---|---|---|---|---|---|---|---|
@@ -8533,10 +8539,10 @@ set is promoted on this evidence.
 
 **Which way the storm error points.** Before a cooling term is added, its sign has to be right: plans/17
 warned that cooling lowers later peaks and could deepen the multiple-peak under-reach. The per-phase
-⟨O/C⟩ of §10.22 answers it. Under `storm-log1` the median O/C in phase 3 (main and recovery) and
-phase 4 (post-storm) is 0.89–0.94 for multiple-peak storms and for storms with `ap` ≥ 150 — the model
-is too *dense* after the peak while it under-reaches the peak itself. Removing density late in a
-strong storm is what nitric-oxide cooling does, so the sign is right.
+⟨O/C⟩ of §10.22, measured over the debiased model, answers it. Under `storm-log1` the median ⟨O/C⟩ in
+phase 3 (main and recovery) and phase 4 (post-storm) is 0.89–0.94 for multiple-peak storms and for storms
+with `ap` ≥ 150 — the model is too *dense* after the peak while it under-reaches the peak itself. Removing
+density late in a strong storm is what nitric-oxide cooling does, so the sign is right.
 
 **The state** (`derivations/sdtm_no_cooling.mac`, after Weimer et al. 2015/2020/2023, in the driver's
 units): `dD/dt = (H − D)/τ_h − D N/(τ_h H_s)` and `dN/dt = (H − N)/τ_NO`, `H` the 3-hourly `ap` held
@@ -8555,7 +8561,8 @@ reference steps at 60 digits; `cooling_grid` in `tools/fit-sdtm-corpus.py` match
 One parameter more than the kernel: `τ_h`, `τ_NO`, `H_s`.
 
 **On the §10.21 folds and the §10.22 storms** (`--fit-sigma --cooling --storms`; the other thinning
-phase in brackets):
+phase in brackets). The peak ratio is the model's peak enhancement over the measured one, `⟨O/C⟩` measured
+over the debiased model:
 
 | | `storm-log1` (§10.21–22) | `storm-log` (§10.23) | **cooling** |
 |---|---|---|---|
@@ -8568,7 +8575,7 @@ phase in brackets):
 | peak ratio, median | 0.98 | 0.65 | 1.13 (1.11) |
 | peak ratio at `ap` ≥ 300 | 0.73 | 0.28 | **0.97** (0.95) |
 | onset within ±3 h, multiple-peak | 52 % | 47 % | **65 %** |
-| phase 3 / 4 O/C, `ap` ≥ 150 | 0.89 / 0.92 | 1.00 / 0.90 | **1.01 / 1.03** |
+| phase 3 / 4 `⟨O/C⟩`, `ap` ≥ 150 | 0.89 / 0.92 | 1.00 / 0.90 | **1.01 / 1.03** |
 
 Fitted on every fold: `τ_h` 20.7–25.4 h, `H_s` 11–17 `ap`, `τ_NO` 15.7–31.6 h on four folds and
 80–84 h on the fold that holds Swarm out, so `τ_NO` is the least identified of the three. With
@@ -8645,8 +8652,8 @@ time: 2.1 % of the rows, and the widest cells.
 
 | | pilot, fitted on these months (§10.10) | corpus field |
 |---|---|---|
-| 2019-01-01, quiet: MAPE / bias | 22.1 % / 0.927 | 26.2 % / 1.110 |
-| 2024-05-10, Gannon onset: MAPE / bias | 30.1 % / 1.235 | **55.2 % / 1.546** |
+| 2019-01-01, quiet: MAPE / mean model/measured | 22.1 % / 0.927 | 26.2 % / 1.110 |
+| 2024-05-10, Gannon onset: MAPE / mean model/measured | 30.1 % / 1.235 | **55.2 % / 1.546** |
 
 The storm day is the flux, not the storm. F10.7 of the previous day is 233.2 sfu against a trailing
 81-day mean of 162.9, a daily excess `d` = 0.70 that only 0.76 % of the corpus rows reach. From 00 to
@@ -8721,13 +8728,15 @@ from the fold that held its family out), split three ways. By type and strength 
 ratio is 1.55 for single-peak storms at `ap` 150–299 (37 comparisons), 1.17 for single-peak storms
 below 150 (341), and 0.96 for multiple-peak storms at 300 and above (33). By epoch it is 1.26 / 1.46
 (multiple / single peak) in 2000–04, 0.72 / 0.81 in 2005–10, 1.02 / 1.07 in 2011–15, 0.80 / 0.76 in
-2016–20 and 1.41 / 1.56 in 2021–26: it follows the solar cycle. By the storm day's 81-day mean flux:
+2016–20 and 1.41 / 1.56 in 2021–26: it follows the solar cycle. By the storm day's 81-day mean flux, the
+peak ratio being the model's peak enhancement over the measured one and `⟨O/C⟩` measured over the debiased
+model:
 
 | F10.7a | < 80 | 80–110 | 110–150 | 150–200 | ≥ 200 |
 |---|---|---|---|---|---|
 | comparisons | 60 | 155 | 213 | 169 | 33 |
 | median peak ratio | 0.71 | 0.89 | 1.15 | 1.62 | 2.36 |
-| phase 3 O/C | 1.29 | 1.10 | 1.00 | 0.90 | 0.80 |
+| phase 3 `⟨O/C⟩` | 1.29 | 1.10 | 1.00 | 0.90 | 0.80 |
 
 So the "minor-storm overshoot" is a trend with the flux. The minor storms carry most of the count, and
 the years since 2021 are high-flux years. Low-flux storms are under-reached, not over.
@@ -8847,8 +8856,8 @@ GRACE-FO 87.8, Swarm 91.4 %).
 
 | | §10.26 | shipped |
 |---|---|---|
-| 2019-01-01, quiet: MAPE / bias | 25.6 % / 1.096 | 25.9 % / 1.103 |
-| 2024-05-10, Gannon onset: MAPE / bias | 46.3 % / 1.455 | **36.2 % / 1.340** |
+| 2019-01-01, quiet: MAPE / mean model/measured | 25.6 % / 1.096 | 25.9 % / 1.103 |
+| 2024-05-10, Gannon onset: MAPE / mean model/measured | 46.3 % / 1.455 | **36.2 % / 1.340** |
 
 The storm day's flux is 162.9 sfu, where `g` is 0.898. From 00 to 15 UT, before the storm, the hours
 read 1.22–1.41, about as before: that is the flux excess, not the storm. The storm hours carry the
@@ -8901,7 +8910,7 @@ held-out folds:
 |---|---|---|
 | held out by mission family, MAPE raw / debiased | **20.8 / 21.0 %** | 50.1 / 28.4 % |
 | storm peaks within ±25 %, of 630 | **357** | 94 |
-| median peak ratio, all / `ap ≥ 300` | **1.00 / 0.63** | 0.59 / 0.43 |
+| median peak ratio (model over measured enhancement), all / `ap ≥ 300` | **1.00 / 0.63** | 0.59 / 0.43 |
 | peak closer to the measurement, all / `ap ≥ 300` | **482 / 29** | 148 / 4 |
 
 SDTM-1 is below NRLMSISE-00 in every flux, storm and family bin raw. Debiased, which is what a
@@ -8995,14 +9004,15 @@ the second, and its one survivor the third. Each has its test now, and the contr
 **Where it is.** §10.28's shipped form on the corpus folds (`--fit-sigma --cooling
 --excess-saturation fit --storm-gain input-power --caps storm-log1-lin --storms`), its 630 storm
 comparisons split by the storm's first-day mean `ap`, the mean of the eight 3-hourly values from
-`t0`:
+`t0`. The peak ratio is the model's peak enhancement over the measured one; `⟨O/C⟩` is measured over the
+debiased model:
 
 | first-day mean `ap` | < 50 | 50–80 | 80–120 | 120–180 | ≥ 180 |
 |---|---|---|---|---|---|
 | comparisons | 362 | 157 | 80 | 20 | 11 |
 | median peak ratio | 1.04 | 1.00 | 0.87 | 0.69 | 0.64 |
-| phase 2 O/C | 1.06 | 1.03 | 1.05 | 1.01 | 1.01 |
-| phase 3 O/C | 0.99 | 0.99 | 1.09 | 1.10 | 1.09 |
+| phase 2 `⟨O/C⟩` | 1.06 | 1.03 | 1.05 | 1.01 | 1.01 |
+| phase 3 `⟨O/C⟩` | 0.99 | 0.99 | 1.09 | 1.10 | 1.09 |
 
 The ratio follows the storm's sustained strength; the flux trend is gone since §10.27. The timing is
 right: in every bin the model's orbit-averaged peak comes 1.5 h after the measured one at the
@@ -9025,7 +9035,7 @@ On a two-day `ap` 300 storm the model's peak `D` is then 124 against 76 (Maxima)
 w)·D + w·F` (`--fast-heating`). `F` takes the nitric-oxide step of `derivations/sdtm_no_cooling.mac`
 §1. Both reduce to the shipped form bit for bit, at `mix = 1` and at `w = 0`. Every row is held out
 by mission family. The four bins are the median peak ratio by first-day mean `ap`; the last column
-is phase 3's O/C at ≥ 120:
+is phase 3's `⟨O/C⟩`, measured over the debiased model, at ≥ 120:
 
 | storm state | pooled | `Ap ≥ 50` | peak ±25 % | peak ±3 h | recovery ±6 h | < 80 | 80–120 | 120–180 | ≥ 180 | phase 3 |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -9096,7 +9106,8 @@ low where the solar wind is stronger than the index. Regressed out, the ratio na
 comparisons). A sum over a window can only rank storms; the fit can also use the timing.
 
 **The fit.** The same folds and storms as §10.30, every row held out by mission family. The four
-bins are the median peak ratio by first-day mean `ap`; the last column is phase 3's O/C at ≥ 120:
+bins are the median peak ratio, the model's peak enhancement over the measured one, by first-day mean
+`ap`; the last column is phase 3's `⟨O/C⟩`, measured over the debiased model, at ≥ 120:
 
 | storm drive | pooled | `Ap ≥ 50` | peak ±25 % | peak ±3 h | recovery ±6 h | < 80 | 80–120 | 120–180 | ≥ 180 | phase 3 |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -9254,9 +9265,9 @@ physics models — MSIS, DTM, JB2008, WAM-IPE, WACCM-X, GITM, CTIPe, TIE-GCM —
 2001–2023 against the TU Delft densities of CHAMP, GOCE, GRACE, GRACE-FO and Swarm A. Bruinsma and
 Laurens are among its authors, and the protocol is the one §10.14 implements: storms at `ap` ≥ 80,
 phases from the peak `ap`, each model scaled to the measurements on the pre-storm phase, then the
-debiased mean O/C, the standard deviation and the Pearson correlation in the onset, the main and
-recovery, and the post-storm phase. This section puts SDTM-1 in that form, so that the article can
-set our numbers beside theirs.
+debiased mean O/C (measured over the debiased model), the standard deviation and the Pearson correlation
+in the onset, the main and recovery, and the post-storm phase. This section puts SDTM-1 in that form, so
+that the article can set our numbers beside theirs.
 
 **What was read.** The article's abstract (from OpenAlex) and its EGU25-1673 abstract. The tables
 were not: the publisher and DOAJ answer 403 to a script, the TU Delft repository copy did not answer,
@@ -9288,7 +9299,7 @@ the whole-storm counts of both shipped fields: 357, 429 and 477/600 (§10.28), a
 
 **By phase, on Wang et al.'s scope**: 168 storms reach `ap` 80 with `t0` in 2001–2023, and **166**
 have all four phases on at least one of the five satellites, **293** comparisons. Every SDTM-1 row is
-held out by mission family (§10.21):
+held out by mission family (§10.21). `⟨O/C⟩` is measured over the debiased model:
 
 | phase | model | comparisons | `⟨O/C⟩` | StD `⟨O/C⟩` | mean StD | mean R |
 |---|---|---|---|---|---|---|
@@ -9449,7 +9460,7 @@ NRLMSISE-00 rises 48–58 %, about half. The solar-wind field rises 140–188 %,
 highest orbit on 3 February at 12:45, 30 h before the measured one. A relative enhancement grows with
 height, so Berger et al.'s 20–30 % at 210 km is context, not a target.
 
-The named storms, `⟨O/C⟩` per phase over their satellites:
+The named storms, `⟨O/C⟩` (measured over the debiased model) per phase over their satellites:
 
 | storm | satellites | phase | SDTM-1, 3-hourly `ap` | SDTM-1, solar wind | NRLMSISE-00 |
 |---|---|---|---|---|---|
@@ -9692,7 +9703,7 @@ have not happened (§10.5), does not help density either. It is measured here fo
 
 **§10.33's phases, with the storm as the cluster.** These read the 120 s rows, not the harness's, and the five
 folds' storm tables (`cluster-intervals.py --phases`). On Wang et al.'s scope, where both models scored the
-comparison, the interval resampling whole storms:
+comparison, the interval resampling whole storms; `⟨O/C⟩` is measured over the debiased model:
 
 | phase | comparisons, storms | SDTM-1 `⟨O/C⟩` | NRLMSISE-00 `⟨O/C⟩` | SDTM-1's `\|ln⟨O/C⟩\|` minus NRLMSISE-00's | spread of `ln`, SDTM-1 minus NRLMSISE-00 |
 |---|---|---|---|---|---|
@@ -9858,7 +9869,8 @@ operational model, the one driven by F10.7 and Kp, was fitted on data up to 2019
 read from the abstract). So no model here saw these rows. Every model answers every row.
 
 Each model is driven as §10.2 drives it, and the drivers are the input mode. All modes are reconstruction:
-each reads measured indices, and two read indices from after the instant.
+each reads measured indices, and two read indices from after the instant. `M/O` is model over measured
+density.
 
 | model | input mode | its number | MAPE | each satellite's mean removed | `Ap` ≥ 50 | 100 · mean `\|ln M/O\|` | median `M/O` |
 |---|---|---|---|---|---|---|---|
@@ -10528,7 +10540,10 @@ windows and 27-day blocks:
 | `nitric_flux_wang` | −0.06 [−0.09, −0.03] | −0.02 [−0.05, +0.00] spans 0 | −0.77 [−0.99, −0.57] | −0.45 [−0.83, −0.05] |
 
 §10.33's storm protocol and §10.34's named cases, held out by family (`--storms --rival`); 204 storms, 630
-comparisons. `⟨O/C⟩` is the mean model/measured, then its scatter `StD⟨O/C⟩`:
+comparisons. `⟨O/C⟩` is the geometric mean of measured over the debiased model, the model divided by its
+pre-storm level (§10.14), then its scatter `StD⟨O/C⟩`. Above 1 the model is below the measurement once its
+level is removed: the shipped field's 1.107 in main and recovery at `ap` ≥ 300 is a storm response about a
+tenth low, not high (corrected 2026-11-24, Ф23.Z; §10.48 prints the split):
 
 | field | all | main and recovery | post-storm | post-storm `⟨O/C⟩` by peak `ap`: 80–100, 100–150, 150–200, 200–300, ≥ 300 | main and recovery, `ap` ≥ 300 |
 |---|---|---|---|---|---|
@@ -10680,11 +10695,57 @@ Findings:
   move, and on the storm folds both intervals span 0.
 - **It does not move regime 5.** On the corpus the cell stays at 90.7–90.8 %; on the campaign rows at 84.4 % for
   all three fields. The target, 88 %, is not met.
-- **Regime 5 misses through a storm-time excess, not through the flux.** On the campaign rows the cell holds 24
-  rows of April 2023, covered 91.7 % at a median model/measured 0.870, 78 of May 2024, 79.5 % at 1.124, and 58 of
-  June 2025, 87.9 % at 1.195. The model sits above the measurement in large storms at high flux: §10.46's main
-  and recovery `⟨O/C⟩` at `ap` ≥ 300 is 1.107 (F73). A flux term cannot remove a storm-time bias, so the measured-EUV
-  arm (GOES XRS or the Lyman-α composite) was not run.
+- **Regime 5 misses through the model's level before the storm, not through a storm-time excess.** *Corrected
+  2026-11-24 (Ф23.Z): this finding first read §10.46's `⟨O/C⟩` as model over measured.* On the campaign rows the
+  cell holds 24 rows of April 2023, covered 91.7 % at a median model/measured 0.870, 78 of May 2024, 79.5 % at
+  1.124, and 58 of June 2025, 87.9 % at 1.195. Those medians are not debiased. Before the storms of 10 May 2024
+  and 1 June 2025 the model reads 1.31–1.44 times the measurement, and inside their windows the measured density
+  is 1.07–1.17 times the model divided by that level: in the storm the model is low. Of the 25 misses, 21 have
+  the model above the measurement and a level; 17 of them fall inside their band once the level is removed. At
+  `ap` ≥ 300, §10.46's main and recovery `⟨O/C⟩` of 1.107 is measured over the debiased model: the storm response
+  is about a tenth low, the direction of the peak ratio 0.63 (§10.29). The split below shows both. So the flux
+  side is not excluded, and the measured-EUV arm (GOES XRS or the Lyman-α composite) was not run for a reason
+  that does not hold.
+
+**The split behind the sign (Ф23.Z, 2026-11-24).** The protocol divides the model by its level over the
+pre-storm phase, so on the same pairs `ln(model/measured) = ln(level) − ln⟨O/C⟩`: the level is model/measured
+before the storm, `⟨O/C⟩` is measured over the model so divided. `tools/fit-sdtm-corpus.py --storms` keeps the
+level in its storm table and prints the split at peak `ap` ≥ 300, each comparison and the geometric mean. Rerun
+for the shipped field, the five tables equal those behind §10.46 in every column they had. Over the 33
+comparisons at `ap` ≥ 300:
+
+| phase | level, model/measured before the storm | `⟨O/C⟩`, measured over the debiased model | model/measured |
+|---|---|---|---|
+| onset | 1.133 | 1.032 | 1.098 |
+| main and recovery | 1.133 | **1.107** | 1.023 |
+| post-storm | 1.133 | 1.083 | 1.046 |
+
+In main and recovery the measured density is above the debiased model in 28 of the 33; the model's raw ratio is
+above 1 in only 16, carried by a level that is above 1 in 24. On 10 May 2024 the four satellites read a level of
+1.35–1.38, an `⟨O/C⟩` of 1.07–1.16 and a raw 1.17–1.29.
+
+`tools/regime-coverage.py` splits regime 5's campaign rows the same way, on the same held-out step-60 rows: the
+level is the satellite's mean over the pre-storm phase of the storm whose window holds the row (six rows a
+window), and a row in two windows belongs to the later storm.
+
+| storm `t0`, peak `ap` | satellite | rows | covered | level | median model/measured | median measured over the debiased model |
+|---|---|---|---|---|---|---|
+| 2023-04-23 19:30, 236 | GRACE-FO C | 12 | 91.7 % | 1.133 | 0.848 | 1.337 |
+| | Swarm A | 12 | 91.7 % | 1.154 | 0.926 | 1.246 |
+| 2024-05-02 16:30, 111 | GRACE-FO C | 8 | 75.0 % | 1.049 | 1.347 | 0.779 |
+| | Swarm A | 8 | 100.0 % | 1.052 | 1.262 | 0.833 |
+| 2024-05-10 19:30, 400 | GRACE-FO C | 20 | 85.0 % | 1.329 | 1.143 | 1.163 |
+| | Swarm A | 20 | 55.0 % | 1.312 | 1.231 | 1.065 |
+| 2024-05-16 07:30, 80 | GRACE-FO C | 10 | 100.0 % | 1.066 | 1.006 | 1.060 |
+| | Swarm A | 10 | 100.0 % | 0.951 | 0.983 | 0.967 |
+| 2025-06-01 07:30, 179 | GRACE-FO C | 30 | 83.3 % | 1.435 | 1.240 | 1.157 |
+| | Swarm A | 28 | 92.9 % | 1.384 | 1.184 | 1.169 |
+
+Two rows of 6 May 2024 lie outside every storm window; both are misses, at 1.74 and 1.84, with no level. The
+tool prints each of the 25 misses with its two parts. Once the level is removed, 17 of the 21 misses with the
+model above the measurement and a level fall inside their band. The other four are the two rows of the
+2024-05-02 storm, where the debiased model is itself high (0.56 and 0.66 measured over it), and two in the
+Gannon main phase at 2.19 and 2.27. Neither of the two misses with the model below the measurement does.
 
 Run (the harness folds stay under `data/validation/sdtm-eval/`):
 
@@ -10694,6 +10755,14 @@ Run (the harness folds stay under `data/validation/sdtm-eval/`):
     # the eleven storm-out folds: --kind storm --field F --only storm-...
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/regime-coverage.py --fields default flux_memory flux_memory_fit
     uv run --no-project --with numpy --with pandas --with scipy python -I tools/ablation-table.py
+    # the split (Ф23.Z): the shipped field's storm tables, one family held out each, then pooled
+    for s in CHAMP GOCE GRACE GRACE-FO Swarm; do
+      uv run --project tools --locked python -I tools/fit-sdtm-corpus.py --fit-sigma --cooling --excess-saturation fit \
+        --storm-gain input-power --caps storm-log1-lin --storms --folds $s \
+        --storm-table data/validation/sdtm-eval/storm-tables/default-$s.csv
+    done
+    uv run --project tools --locked python -I tools/fit-sdtm-corpus.py --scorecard data/validation/sdtm-eval/storm-tables/default-*.csv
+    uv run --project tools --locked python -I tools/regime-coverage.py --fields default
 
 ### 10.49 The quiet latitude structure (Ф23.V)
 

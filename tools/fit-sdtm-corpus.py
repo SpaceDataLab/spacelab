@@ -1933,6 +1933,7 @@ def main() -> None:
         scorecards(table)
         named_storms(table)
         by_storm_size(table)
+        level_split(table)
         return
     if argument.storm_table and not argument.storms:
         sys.exit("--storm-table writes what --storms scores: give both")
@@ -2254,6 +2255,7 @@ def storms(
     scorecards(table)
     named_storms(table)
     by_storm_size(table)
+    level_split(table)
     if argument.storm_table:
         table.to_csv(argument.storm_table, index=False)
         print(f"wrote {len(table)} per-phase rows to {argument.storm_table}")
@@ -2425,6 +2427,7 @@ def named_storms(table: pd.DataFrame) -> None:
         + " | ".join(models)
         + " =="
     )
+    print(g.OC_LEGEND)
     for t0, name in NAMED_STORMS.items():
         here = table[table.t0 == t0]
         if here.empty:
@@ -2460,6 +2463,7 @@ def by_storm_size(table: pd.DataFrame) -> None:
     """
     bins = list(itertools.pairwise([*PEAK_AP_EDGES, np.inf]))
     print("\n== per-phase <O/C> by peak ap (Ф23.D), comparisons in brackets ==")
+    print(g.OC_LEGEND)
     print(
         f"{'':<42}"
         + "".join(
@@ -2475,6 +2479,63 @@ def by_storm_size(table: pd.DataFrame) -> None:
                 part = here[(here.peak_ap >= lo) & (here.peak_ap < hi)]
                 cells.append(f"{np.exp(part.log_mean.mean()):9.3f} ({len(part):3d})")
             print(f"{model:<24}{name:<18}" + "".join(cells))
+
+
+def level_split(table: pd.DataFrame) -> None:
+    """The two parts of each phase's mean `ln(model/measured)` at the largest storms (`plans/18` Ф23.Z).
+
+    `<O/C>` is measured over the model divided by its pre-storm level, so `ln(model/measured) =
+    ln(level) - ln<O/C>` on the same pairs: a `<O/C>` above 1 is a model below the measurement in the storm,
+    whatever its level. Each comparison at the last `PEAK_AP_EDGES` bin is printed with its level, then
+    each scored phase's `<O/C>` and the model/measured it makes with the level, and the geometric means.
+    """
+    if "log_level" not in table.columns:
+        print(
+            "\n== the level split: this storm table has no pre-storm level; rerun --storms =="
+        )
+        return
+    edge = PEAK_AP_EDGES[-1]
+    for model in table.model.unique():
+        here = table[(table.model == model) & (table.peak_ap >= edge)]
+        if here.empty:
+            print(f"\n== {model}: no comparison at peak ap >= {edge:g} to split ==")
+            continue
+        wide = here.pivot_table(
+            index=["t0", "mission", "peak_ap"],
+            columns="phase",
+            values=["log_mean", "log_level"],
+        ).sort_index()
+        print(
+            f"\n== {model}: the split at peak ap >= {edge:g} (Ф23.Z), "
+            f"{len(wide)} comparisons; ln(model/measured) = ln(level) - ln<O/C> =="
+        )
+        print(g.OC_LEGEND)
+        print(
+            f"{'t0':<17} {'sat':<3} {'peak ap':>7} {'level':>7}"
+            + "".join(
+                f" {name + ' <O/C>':>26} {'model/measured':>15}"
+                for name in g.SCORED_PHASES.values()
+            )
+        )
+        level = wide["log_level"].mean(axis=1)
+        for (t0, mission, peak), row in wide.iterrows():
+            cells = "".join(
+                f" {np.exp(row['log_mean', k]):26.3f}"
+                f" {np.exp(row['log_level', k] - row['log_mean', k]):15.3f}"
+                if np.isfinite(row["log_mean", k])
+                else f" {'-':>26} {'-':>15}"
+                for k in g.SCORED_PHASES
+            )
+            print(
+                f"{t0:%Y-%m-%d %H:%M} {mission:<3} {peak:7.0f}"
+                f" {np.exp(row['log_level'].mean()):7.3f}" + cells
+            )
+        cells = "".join(
+            f" {np.exp(wide['log_mean', k].mean()):20.3f} ({wide['log_mean', k].count():2d})"
+            f" {np.exp((wide['log_level', k] - wide['log_mean', k]).mean()):15.3f}"
+            for k in g.SCORED_PHASES
+        )
+        print(f"{'geometric mean':<29} {np.exp(level.mean()):7.3f}" + cells)
 
 
 def scorecards(table: pd.DataFrame) -> None:

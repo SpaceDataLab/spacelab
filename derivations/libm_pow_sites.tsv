@@ -75,8 +75,6 @@ crates/spacelab-gnss/src/models.rs	335	1	gmf_legendre	src	2.0	{2.0} literal	-(n 
 crates/spacelab-gnss/src/models.rs	335	2	gmf_legendre	src	1.0 - t2	[0, 1]: 1 - t^2, t a sine/cosine of latitude	0.5 * m as f64	[0, 4.5]: 0.5 m, m in 0..=n <= 9 (models.rs:324-325)	out	|y| <= 4.5
 crates/spacelab-gnss/src/models.rs	5292	1	vmf3_legendre	src	2.0	{2.0} literal	-(n as f64)	[-12, 0]: -n, n in 0..=12 (models.rs:5281)	out	|y| <= 12
 crates/spacelab-gnss/src/models.rs	5292	2	vmf3_legendre	src	1.0 - t2	[0, 1]: 1 - t^2	0.5 * m as f64	[0, 6]: 0.5 m, m in 0..=n <= 12 (models.rs:5281-5282)	out	|y| <= 6
-crates/spacelab-ionosphere/src/itu.rs	535	1	the_gauss_richardson_rule_is_exact_for_quintics	test	x(gp)	x(gp) = (alt - 100 km)/900 km on the test ray	5.0	{5.0} literal	out	|y| = 5
-crates/spacelab-ionosphere/src/itu.rs	537	1	the_gauss_richardson_rule_is_exact_for_quintics	test	x(gp)	x(gp), as above	6.0	{6.0} literal	out	|y| = 6
 crates/spacelab-ionosphere/src/parameters.rs	190	1	compute_fo_e	src	libm::cos(xeff)	cos(xeff), [-1, 1]	0.6	{0.6} literal	out	|y| = 0.6
 crates/spacelab-propagation/src/dsst/coefficients.rs	186	1	get_rnml	src	sininc	[0.03, 1]: max(0.03, sqrt(1 - gamma^2)) (coefficients.rs:184)	(l - mei) as f64	l - mei. Callers: compute_max_ecc_pow (coefficients.rs:288-289, :297-298) and test Module::value (:455). In compute_max_ecc_pow only m = 0 runs (zonal c_n0: cnm = 0 for m != 0 breaks at coefficients.rs:271-274), so mei = 0, the m < l branch always runs (l >= 1), exponent = l in [1, max_degree - 1]; max_degree caller-supplied, unchecked (pub fn :230). Production caller DsstZonal::max_ecc_pow (zonal.rs:111) has max_degree = c_n0.len() - 1 (zonal.rs:68). Test rows: |l - mei| <= 24 (b, c, d <= 12 in both fixtures, awk)	out	no value check; excluded by resource bound only: DsstZonal::new allocates compute_vns(N+1) = (N+1)^2 f64 (coefficients.rs:31, zonal.rs:69), impossible for N >= 2^31; a direct pub call needs a c_n0 slice of > 2^31 entries (indexed :271) plus 3 vecs of N+1 f64 (:248-250, ~64 GiB) and reaches l >= 2^31 only after ~2^60 iterations of get_rnml's inner loop (:201) for the smaller l
 crates/spacelab-propagation/src/dsst/coefficients.rs	187	1	get_rnml	src	onepig	[0, 2]: 1 + gamma*irf, irf = 1 (coefficients.rs:262)	mei as f64	mei = m*eps*irf: 0 in compute_max_ecc_pow (m = 0 only, see :186); test rows |d*e| <= 12	out	|y| <= 12
@@ -88,8 +86,6 @@ crates/spacelab-propagation/src/dsst/short_period.rs	1022	1	rho_sigma_match_the_
 crates/spacelab-propagation/src/dsst/third_body.rs	616	1	at	test	self.aor / (2.0 * x2)	aor/(2 chi^2), state-dependent	n as f64	[2, 21]: n in 2..MAX_POWER, MAX_POWER = 22 (third_body.rs:50, scan :635; the only caller of at() is :638)	out	|y| <= 21
 crates/spacelab-propagation/src/dsst/third_body.rs	624	1	at	test	eo2	eo2 = max(0.0025, e/2) (third_body.rs:615)	m as f64	[0, 21]: m in 0..=n, n <= 21 (third_body.rs:636-637)	out	|y| <= 21
 crates/spacelab-propagation/src/dsst/third_body.rs	625	1	at	test	0.5 * x2	0.5 chi^2, state-dependent	m as f64	[0, 21]: m <= n <= 21	out	|y| <= 21
-crates/spacelab-propagation/src/dtm2020/mod.rs	298	1	dtm2020	src	t120tz	t120tz = t120/tz (dtm2020/mod.rs:290); tz -> t120 as zeta -> 0, i.e. alti -> 120 km or sigma -> 0 (mod.rs:271-276), so the base can sit at 1	upapg	upapg = 1 + ALEFA[i] + gamma (mod.rs:297), ALEFA in {-0.40, -0.38, 0} (mod.rs:85), gamma = MA[i]*glb (mod.rs:296), glb = GSURF/(1+zlb/RE)^2/(sigma*RGAS*tinf) (mod.rs:289), sigma = tp120/(tinf - t120) (mod.rs:271): gamma = MA*944.6*(tinf - t120)/(831.4*tp120*tinf), MA <= 32. tinf, t120, tp120 are fitted gldtm polynomials (mod.rs:265-267) of Dtm2020Input, whose pub fields dtm2020() never checks (mod.rs:176); at the leading coefficients (TP[1] = 16.44, T0[1] = 380, tables.rs:31-34) gamma ~ <= 2.2	open	public API, inputs unchecked: as tp120 -> 0 gamma is unbounded AND sigma*zeta -> 0 drives the base to 1, the two together; physically gamma = O(1)
-crates/spacelab-propagation/src/dtm2020/mod.rs	1086	1	the_profile_starts_at_its_lower_boundary	test	t120 / out.t_alt	t120/out.t_alt at z in {150, 300, 600, 1000} km (mod.rs:1078), t_alt > t120 above the boundary	1.0 + ALEFA[i] + gamma	1 + ALEFA[i] + gamma, gamma = MA[i]*glb/(sigma*RGAS*tinf) (mod.rs:1085) with sigma, tinf from profile_sigma (mod.rs:992-998) over the 12 fixed GOLDEN rows (mod.rs:581-594); same quantity as mod.rs:298, ~ <= 2.2 at leading coefficients (estimate, not evaluated numerically)	out	fixed test inputs only, physically |y| = O(1); bound is an estimate from TP[1] = 16.44 K/km, not a computed value
 crates/spacelab-propagation/src/harris_priester/mod.rs	122	1	harris_priester	src	cpsi2	cpsi2 = sqrt((1 + cos psi)/2) in (1e-12, 1] (MIN_COS harris_priester/mod.rs:53, guard :121); -> 1 at the bulge apex	model.n - 2.0	model.n - 2, n = pub field HarrisPriester.n (mod.rs:66), unchecked; in-workspace n in {2, 4, 6} (tests mod.rs:221, :237, :268-270, :311, :537 and GOLDEN/LAW tables) -> {0, 2, 4}; public API (re-exported propagation/src/lib.rs:136): also any external caller	open	n unchecked; n - 2 > 2^31 + 2^11 with the satellite near the bulge apex enters R
 crates/spacelab-propagation/src/harris_priester/mod.rs	135	1	harris_priester	src	ALT_RHO[ia + 1][1] / ALT_RHO[ia][1]	[0.0501, 0.8344]: consecutive ALT_RHO column-1 ratios (harris_priester/tables.rs:9-60, computed with awk; min |ratio - 1| = 0.166)	dh	dh: [0, 1] inside the table; < 0 only below 100 km where ia = 0 (loop mod.rs:127-130) and base = 0.0501; pos_alt <= 1000 km else return (mod.rs:100-103)	out	base never within 0.166 of 1, so R's |x| band is never met whatever dh is
 crates/spacelab-propagation/src/harris_priester/mod.rs	139	1	harris_priester	src	ALT_RHO[ia + 1][2] / ALT_RHO[ia][2]	[0.0501, 0.8344]: consecutive ALT_RHO column-2 ratios (awk)	dh	dh, as mod.rs:135	out	base never within 0.166 of 1
@@ -260,14 +256,12 @@ crates/spacelab-gpu/src/lib.rs	591	WGSL source inside SGP4_SHADER (lib.rs:529-63
 #   crates/spacelab-estimation/src/richardson.rs	3
 #   crates/spacelab-estimation/tests/process_noise_consistency.rs	1
 #   crates/spacelab-gnss/src/models.rs	5
-#   crates/spacelab-ionosphere/src/itu.rs	2
 #   crates/spacelab-ionosphere/src/parameters.rs	1
 #   crates/spacelab-propagation/src/dsst/coefficients.rs	3
 #   crates/spacelab-propagation/src/dsst/gaussian.rs	1
 #   crates/spacelab-propagation/src/dsst/gaussian_short_period.rs	2
 #   crates/spacelab-propagation/src/dsst/short_period.rs	1
 #   crates/spacelab-propagation/src/dsst/third_body.rs	3
-#   crates/spacelab-propagation/src/dtm2020/mod.rs	2
 #   crates/spacelab-propagation/src/harris_priester/mod.rs	3
 #   crates/spacelab-propagation/src/lightcurve.rs	1
 #   crates/spacelab-propagation/src/nrlmsise00/mod.rs	30
@@ -294,7 +288,6 @@ crates/spacelab-gpu/src/lib.rs	591	WGSL source inside SGP4_SHADER (lib.rs:529-63
 #   crates/spacelab-estimation/src/richardson.rs:40 occ 1 (richardson2)
 #   crates/spacelab-estimation/src/richardson.rs:40 occ 2 (richardson2)
 #   crates/spacelab-estimation/src/richardson.rs:59 occ 1 (richardson_extrapolate)
-#   crates/spacelab-propagation/src/dtm2020/mod.rs:298 occ 1 (dtm2020)
 #   crates/spacelab-propagation/src/harris_priester/mod.rs:122 occ 1 (harris_priester)
 #   crates/spacelab-propagation/src/lightcurve.rs:227 occ 1 (radiant_intensity)
 #   crates/spacelab-propagation/src/nrlmsise00/mod.rs:676 occ 1 (densu)

@@ -5,7 +5,8 @@
 //! [`spacelab_sensors::Constraint`]) are pieces; this is where they compose. The scan is the *correct
 //! primitive* from the design: rather than sampling `g(t)` on a fixed grid and hoping a short pass
 //! falls on a sample, it steps by `|g| / max_rate` — an interval the switching function provably
-//! cannot cross, because `max_rate` bounds `|dg/dt|` — so **no pass, however short, is stepped over**.
+//! cannot cross, because `max_rate` bounds `|dg/dt|` — so **no pass is stepped over unless it is
+//! shorter than the step floor**, a billionth of the scan span (see [`windows`]).
 //! Each sign change is then bracketed and refined to `tol` seconds by Brent. This is the consumer the
 //! sensors' [`max_rate`](spacelab_sensors::Constraint::max_rate) bound was built for.
 //!
@@ -20,7 +21,7 @@
 use spacelab_core::Vec3;
 use spacelab_sensors::{AccessGeometry, Constraint, OrbitBound};
 
-use crate::root::{advancing_step, brent};
+use crate::root::{brent, rate_bound_floor, rate_bounded_step};
 
 /// One interval of coverage, in the caller's time base (seconds from its reference epoch).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,13 +69,13 @@ where
     G: FnMut(f64) -> f64,
     E: FnMut(Window),
 {
-    let h_min = advancing_step(t0, t1, (t1 - t0) * 1e-9);
+    let h_min = rate_bound_floor(t0, t1);
     let mut t = t0;
     let mut g_prev = g(t0);
     let mut open = if g_prev >= 0.0 { Some(t0) } else { None };
 
     while t < t1 {
-        let step = (libm::fabs(g_prev) / max_rate).max(h_min);
+        let step = rate_bounded_step(g_prev, max_rate, h_min);
         let t_next = (t + step).min(t1);
         let g_next = g(t_next);
 

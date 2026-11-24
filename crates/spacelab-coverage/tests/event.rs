@@ -3,11 +3,26 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::float_cmp)]
 
 use core::f64::consts::PI;
-use spacelab_coverage::{Event, EventKind, find_events};
+use spacelab_coverage::{Event, EventKind, ScanError, find_events, find_events_rate_bounded};
 
 fn collect<F: FnMut(f64) -> f64>(g: F, t0: f64, t1: f64, step: f64, tol: f64) -> Vec<Event> {
     let mut v = Vec::new();
     find_events(g, t0, t1, step, tol, |e| v.push(e));
+    v
+}
+
+/// The rate-bounded scan's events, with its returned count held to the number it emitted.
+fn collect_bounded<F: FnMut(f64) -> f64>(
+    g: F,
+    max_rate: f64,
+    t0: f64,
+    t1: f64,
+    tol: f64,
+) -> Vec<Event> {
+    let mut v = Vec::new();
+    let returned = find_events_rate_bounded(g, max_rate, t0, t1, tol, |e| v.push(e))
+        .expect("the arguments are valid");
+    assert_eq!(returned as usize, v.len(), "returned count against emitted");
     v
 }
 
@@ -195,5 +210,108 @@ fn an_empty_interval_is_rejected_before_g_is_evaluated() {
     assert_eq!(
         calls, 0,
         "g was evaluated {calls} times on an empty interval"
+    );
+}
+
+/// The planted pair (rule 16): a pass whose two crossings lie inside one fixed step. `find_events`
+/// misses both, as its doc states; the rate-bounded scan finds both at `t_c ∓ √A` exactly. (G3)
+#[test]
+fn a_pair_inside_one_fixed_step_is_missed_by_the_fixed_scan_and_found_by_the_rate_bound() {
+    // Crossings at 4.72 and 4.82. The fixed samples 0.02 + 0.5·k put 4.52 and 5.02 around them, and
+    // g = A − 0.0625 < 0 at both: no sign change, no event.
+    let (a, tc) = (0.0025_f64, 4.77_f64);
+    let g = move |t: f64| a - (t - tc) * (t - tc);
+    let (t0, t1) = (0.02, 10.0);
+    // |dg/dt| = 2·|t − tc| ≤ 2·max(tc − t0, t1 − tc) = 10.46 on [t0, t1].
+    let max_rate = 11.0;
+
+    let fixed = collect(g, t0, t1, 0.5, 1e-12);
+    assert!(
+        fixed.is_empty(),
+        "the fixed scan reports neither crossing: {fixed:?}"
+    );
+
+    let bounded = collect_bounded(g, max_rate, t0, t1, 1e-12);
+    assert_eq!(bounded.len(), 2, "both crossings: {bounded:?}");
+    assert_eq!(bounded[0].kind, EventKind::Rising);
+    assert_eq!(bounded[1].kind, EventKind::Falling);
+    assert!(
+        (bounded[0].at.estimate() - (tc - a.sqrt())).abs() < 1e-11,
+        "rise at {}",
+        bounded[0].at.estimate()
+    );
+    assert!(
+        (bounded[1].at.estimate() - (tc + a.sqrt())).abs() < 1e-11,
+        "set at {}",
+        bounded[1].at.estimate()
+    );
+}
+
+/// The guarantee rests on the bound. The same pass with a bound a hundred times too small: the first
+/// step, `|g(t0)| / max_rate ≈ 205`, jumps the whole span.
+#[test]
+fn an_understated_rate_bound_loses_the_pair() {
+    let (a, tc) = (0.0025_f64, 4.77_f64);
+    let g = move |t: f64| a - (t - tc) * (t - tc);
+    let ev = collect_bounded(g, 0.11, 0.02, 10.0, 1e-12);
+    assert!(ev.is_empty(), "a false bound is no guarantee: {ev:?}");
+}
+
+/// `|d sin/dt| ≤ 1`, a tight bound: the zeros on `[0.5, 7]` are π and 2π exactly. (G3)
+#[test]
+fn the_rate_bounded_scan_lands_on_the_zeros_of_a_sine() {
+    let ev = collect_bounded(f64::sin, 1.0, 0.5, 7.0, 1e-12);
+    assert_eq!(ev.len(), 2, "two zeros of sin on [0.5, 7]: {ev:?}");
+    assert_eq!(ev[0].kind, EventKind::Falling);
+    assert_eq!(ev[1].kind, EventKind::Rising);
+    assert!((ev[0].at.estimate() - PI).abs() < 1e-11);
+    assert!((ev[1].at.estimate() - 2.0 * PI).abs() < 1e-11);
+}
+
+/// Rule 23: each refusal is typed, and `g` is never evaluated to reach it. The scan bounds sit at
+/// `2⁵²`, where four ulps make the step floor about 4 s, so a guard that let a case through would end
+/// in two steps with `Ok(0)` rather than hang.
+#[test]
+fn bad_arguments_are_refused_by_type_before_g_is_evaluated() {
+    let (t0, t1) = (4_503_599_627_370_496.0_f64, 4_503_599_627_370_504.0_f64);
+    let cases = [
+        (0.0, t0, t1, 1e-9, ScanError::BadRate),
+        (-1.0, t0, t1, 1e-9, ScanError::BadRate),
+        (f64::NAN, t0, t1, 1e-9, ScanError::BadRate),
+        (f64::INFINITY, t0, t1, 1e-9, ScanError::BadRate),
+        (1.0, t0, t0, 1e-9, ScanError::BadInterval),
+        (1.0, t1, t0, 1e-9, ScanError::BadInterval),
+        (1.0, f64::NEG_INFINITY, t1, 1e-9, ScanError::BadInterval),
+        (1.0, t0, f64::INFINITY, 1e-9, ScanError::BadInterval),
+        (1.0, t0, f64::NAN, 1e-9, ScanError::BadInterval),
+        (1.0, f64::NAN, t1, 1e-9, ScanError::BadInterval),
+        // The floor underflows to zero: (1e-316)·1e-9 and 4ε·1e-316 both round to 0.
+        (1.0, 0.0, 1e-316, 1e-9, ScanError::BadInterval),
+        (1.0, t0, t1, 0.0, ScanError::BadTolerance),
+        (1.0, t0, t1, -1e-9, ScanError::BadTolerance),
+        (1.0, t0, t1, f64::NAN, ScanError::BadTolerance),
+        (1.0, t0, t1, f64::INFINITY, ScanError::BadTolerance),
+    ];
+    for (max_rate, a, b, tol, want) in cases {
+        let mut calls = 0;
+        let got = find_events_rate_bounded(
+            |t: f64| {
+                calls += 1;
+                1.0 + t.abs()
+            },
+            max_rate,
+            a,
+            b,
+            tol,
+            |_| {},
+        );
+        assert_eq!(got, Err(want), "max_rate {max_rate}, [{a}, {b}], tol {tol}");
+        assert_eq!(calls, 0, "g evaluated on a refused call: {want:?}");
+    }
+
+    // Just above the underflow the floor is the subnormal 1e-319, and the scan runs.
+    assert_eq!(
+        find_events_rate_bounded(f64::sin, 1.0, 0.0, 1e-310, 1e-320, |_| {}),
+        Ok(0)
     );
 }

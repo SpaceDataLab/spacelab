@@ -238,6 +238,24 @@ pub(crate) fn advancing_step(t0: f64, t1: f64, h: f64) -> f64 {
     h.max(4.0 * f64::EPSILON * t0.abs().max(t1.abs()))
 }
 
+/// The floor of a rate-bounded scan over `[t0, t1]`: a billionth of the span, raised by
+/// [`advancing_step`]. Without it the step toward a zero shrinks without end; with it, two
+/// crossings closer together than the floor can share one step.
+#[must_use]
+pub(crate) fn rate_bound_floor(t0: f64, t1: f64) -> f64 {
+    advancing_step(t0, t1, (t1 - t0) * 1e-9)
+}
+
+/// The next step of a rate-bounded scan from a sample `g`, raised to `floor`.
+///
+/// If `|dg/dt| ≤ max_rate`, then `|g(t + s)| ≥ |g(t)| − max_rate·s > 0` for every
+/// `s < |g(t)| / max_rate`: `g` cannot reach zero before the end of this step. So a step longer than
+/// the floor holds at most one crossing, at its end.
+#[must_use]
+pub(crate) fn rate_bounded_step(g: f64, max_rate: f64, floor: f64) -> f64 {
+    (libm::fabs(g) / max_rate).max(floor)
+}
+
 /// Order two abscissae into a [`Bracket`] with `lo < hi`.
 fn bracket_of(x0: f64, f0: f64, x1: f64, f1: f64, evaluations: u32) -> Bracket {
     if x0 <= x1 {

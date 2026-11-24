@@ -33,7 +33,7 @@ pub use detectors::{
     CircularFovDetector, EARTH_EQUATORIAL_RADIUS, EclipseDetector, EclipseKind, ElevationDetector,
     SUN_RADIUS,
 };
-pub use event::{Event, EventKind, find_events};
+pub use event::{Event, EventKind, ScanError, find_events, find_events_rate_bounded};
 pub use fom::{ConstellationFom, constellation_fom};
 pub use metrics::{CoverageMetrics, metrics};
 pub use observability::{

@@ -273,7 +273,7 @@ exclude_re = [
     # `let kind = if sign_next > 0 { Rising } else { Falling }`, reached only inside
     # `sign_prev != 0 && sign_next != 0 && sign_prev != sign_next`. `sign_of` returns `-1`, `0` or
     # `+1`, so `sign_next ∈ {−1, +1}` here and `> 0` and `>= 0` agree on both.
-    "event\\.rs:70:41: replace > with >= in find_events",
+    "event\\.rs:187:41: replace > with >= in scan",
 
     # --- `brent`'s acceptance rule. Proved unreachable or provably indistinguishable. ---
 

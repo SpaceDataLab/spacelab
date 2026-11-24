@@ -103,6 +103,29 @@ The covariance-form `unscented_transform` gives out two decades earlier than the
 offset that is zero in exact arithmetic, so what it multiplies is rounding. Prefer
 `SquareRootUnscentedKalman` when the state is large.
 
+## What an event scan can miss
+
+`spacelab_coverage::find_events` samples `g(t)` at a fixed step and refines each sign change between
+two samples by Brent. **Two crossings inside one step are not reported.** Both samples then lie on
+the same side of zero, so a pass, an eclipse or a contact shorter than the step is lost, and nothing
+in the result shows it. An odd number of crossings inside one step is reported as one. The step is
+the caller's choice, and the scan cannot check it. `tests/event.rs` plants a pass 0.1 long between
+two samples 0.5 apart, and the fixed scan reports nothing.
+
+`access::windows` avoids this limit, down to a floor. It steps by `|g| / max_rate`, where
+`max_rate` bounds `|dg/dt|`, and `g` cannot reach zero before the end of such a step.
+`find_events_rate_bounded` uses the same step rule for any event function with a rate bound, and on
+the planted pass it finds both crossings at their exact times. The guarantee of both scans has a
+scope:
+
+- It holds only if `max_rate` bounds the rate of the `g` that is evaluated. With a bound a hundred
+  times too small, the same test loses the pass again.
+- The step never falls below a floor: a billionth of the scan span, and at least four ulps of its
+  bounds. Two crossings closer together than the floor can still share a step. Over one day the
+  floor is 86 µs.
+- A loose bound costs steps, not answers. Near a crossing where `|dg/dt|` is the fraction `r` of
+  `max_rate`, each step closes only the fraction `r` of the distance that remains.
+
 ## Modelling simplifications currently in force
 
 - **Two nadirs, now both expressible.** Cell zeniths use the geodetic normal, while `Cone` and

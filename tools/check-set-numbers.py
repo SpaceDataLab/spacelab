@@ -56,6 +56,8 @@ SELF = ("tools/check-set-numbers.py", "tools/test_check_set_numbers.py")
 CUT = ("tools/cut-public-tree.py", "CHANGELOG.md")
 # The registers whose lines naming a deleted root the cut drops.
 REGISTERS = ("docs/provenance.md", "docs/verification.md")
+# The per-site ledgers whose rows, data or comment, in a deleted root the cut drops.
+SITE_LEDGERS = ("derivations/libm_pow_sites.tsv",)
 
 DOCUMENT = {".md", ".tex"}
 COMMENT = {
@@ -234,6 +236,13 @@ def public_files(
         if rel in REGISTERS:
             lines = [
                 None if x is not None and x.strip().startswith(excluded) else x
+                for x in lines
+            ]
+        if rel in SITE_LEDGERS:
+            lines = [
+                None
+                if x is not None and x.lstrip("#").lstrip().startswith(excluded)
+                else x
                 for x in lines
             ]
         files[rel] = lines

@@ -237,27 +237,6 @@ REVIEWED: list[tuple[str, str, str]] = [
     ),
     (
         "derivations/libm_pow_sites.tsv",
-        "every_mass_ratio_puts_the_three_roots_in_their_own_regions",
-        "a table of libm call sites: other modules' line numbers and literals",
-    ),
-    (
-        "derivations/libm_pow_sites.tsv",
-        "ALEFA in {-0.40, -0.38, 0}",
-        "a call site's line numbers and the thermal-diffusion factors in its code, no output",
-    ),
-    (
-        "derivations/libm_pow_sites.tsv",
-        "the_profile_starts_at_its_lower_boundary",
-        "a call site's line numbers and the test's altitudes, no output",
-    ),
-    (
-        "derivations/libm_pow_sites.tsv",
-        "/mod.rs\t2",
-        "a count of call sites",
-    ),
-    ("derivations/libm_pow_sites.tsv", "mod.rs:298 occ 1", "a line number"),
-    (
-        "derivations/libm_pow_sites.tsv",
         "(fixed test inputs, gamma bound estimated",
         "line numbers and resource bounds",
     ),

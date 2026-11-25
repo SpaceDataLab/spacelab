@@ -18,9 +18,14 @@
 #![allow(clippy::cast_precision_loss)] // N is a small state dimension, exactly representable
 #![allow(clippy::many_single_char_names)] // i, j, s, f are the algorithm's own names
 
-use crate::dop853_consts::{A, B, C, D, E3, E5};
+#[cfg(feature = "std")]
+use crate::Tolerance;
+use crate::dop853_consts::{A, B, C};
+#[cfg(feature = "std")]
+use crate::dop853_consts::{D, E3, E5};
+#[cfg(feature = "std")]
 use crate::driver::{Method, MethodStep};
-use crate::{DenseOutput, DynamicalSystem, Tolerance};
+use crate::{DenseOutput, DynamicalSystem};
 
 const N_STAGES: usize = 12;
 const N_EXTENDED: usize = 16;
@@ -68,6 +73,7 @@ impl Dop853 {
     pub const EXTENDED_STAGES: usize = N_EXTENDED;
 }
 
+#[cfg(feature = "std")]
 impl<const N: usize> Method<N> for Dop853 {
     type Dense = Dop853Dense<N>;
 

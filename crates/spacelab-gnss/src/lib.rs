@@ -43,6 +43,7 @@ pub mod ntrip;
 
 #[cfg(any(feature = "std", test))]
 pub mod rinex;
+#[cfg(any(feature = "std", test))]
 pub mod rinex4;
 
 #[cfg(any(feature = "std", test))]

@@ -19,7 +19,7 @@ libm = "0.2"
 # the f64 geopotential hot loop. The geopotential is flop-bound (measured: layout is speed-neutral),
 # so lane parallelism is the only speed lever; accuracy is unaffected (the model is validated to a
 # 1e-9 tolerance, SIMD reorder changes ~1e-16). pulp (runtime AVX-512 dispatch) is the future upgrade.
-wide = "1.7"
+wide = { version = "1.7", default-features = false }
 spacelab-coverage = { path = "../spacelab-coverage", version = "0.3.0" }
 spacelab-autodiff = { path = "../spacelab-autodiff", version = "0.3.0" }
 # Centred-dipole magnetic coordinates for the high-latitude block of the wind model. `no_std`.
@@ -27,7 +27,7 @@ spacelab-geomagnetism = { path = "../spacelab-geomagnetism", version = "0.3.0", 
 
 [features]
 default = ["std"]
-std = []
+std = ["wide/std"]
 
 [dev-dependencies]
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }

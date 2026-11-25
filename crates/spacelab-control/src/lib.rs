@@ -65,4 +65,6 @@ pub use delayed::{
 pub use formation::{ConsensusNetwork, DelayBound, Graph, GraphError, Protocol};
 pub use latency::{History, Latency};
 pub use margin::{DelayMargin, SecondOrderLoop, SmallAngleGains, worst_principal_axis};
-pub use orbit::{ElementFeedback, Lqr, LqrError, clohessy_wiltshire_plant, lqr};
+#[cfg(feature = "std")]
+pub use orbit::ElementFeedback;
+pub use orbit::{Lqr, LqrError, clohessy_wiltshire_plant, lqr};

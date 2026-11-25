@@ -32,6 +32,7 @@
     clippy::similar_names
 )]
 
+#[cfg(feature = "std")]
 use crate::driver::IntegrationError;
 use crate::rkn1210_consts::{A, B, BHAT, BP, BPHAT, C};
 
@@ -84,6 +85,7 @@ pub fn step<const D: usize, F: Fn(f64, &[f64; D]) -> [f64; D]>(
     (r_new, v_new, libm::sqrt(err_pos2), libm::sqrt(err_vel2))
 }
 
+#[cfg(feature = "std")]
 fn norm<const D: usize>(x: &[f64; D]) -> f64 {
     libm::sqrt(x.iter().map(|v| v * v).sum())
 }
@@ -107,6 +109,7 @@ fn norm<const D: usize>(x: &[f64; D]) -> f64 {
 // The Nystrom form splits the state into position and velocity, so the same seven controls the
 // first-order integrators take arrive here as eight.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "std")]
 pub fn integrate<const D: usize, F: Fn(f64, &[f64; D]) -> [f64; D]>(
     accel: &F,
     t0: f64,

@@ -11965,8 +11965,8 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today, in the public tree: 333 modules, 248 name a check, 85 do
-not** — no physics module, 26 parsers, 4 generated and 55 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
+(`plans/16` Ф17.B orders them). **Today, in the public tree: 334 modules, 248 name a check, 86 do
+not** — no physics module, 26 parsers, 4 generated and 56 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
 the last 42 — GNSS, SLR, the NeQuick ionosphere, earthvision, signal, vision, sensors and
 astrometry (`earthvision/sfm.rs` and `cloud.rs` hold no formula of their own and moved to
 infrastructure) — and fixed what the gates found: the GLONASS `J2` was the ICD's 8-digit
@@ -12098,6 +12098,7 @@ crates/spacelab-ndm/src/opm.rs | parser | format reader/writer; conformance is t
 crates/spacelab-propagation/src/density_data.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula
 crates/spacelab-propagation/src/driver.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/dsst/mod.rs | infra | types, traits, drivers or re-exports; nothing to derive
+crates/spacelab-propagation/src/float.rs | infra | the std and libm routes of three exact or once-rounded IEEE 754 operations; S2 in `just no-std`
 crates/spacelab-propagation/src/forces.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/linalg.rs | infra | types, traits, drivers or re-exports; nothing to derive
 crates/spacelab-propagation/src/netcdf_classic.rs | parser | format reader/writer; conformance is the crate's fixture tests, not a formula

@@ -175,7 +175,7 @@ pub struct ShadrHeader {
 /// test as well. Past the guard the cast is exact, which is why it is the only one in the module.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn header_count(value: f64) -> Option<usize> {
-    if !(0.0..=1.0e6).contains(&value) || value.fract() != 0.0 {
+    if !(0.0..=1.0e6).contains(&value) || crate::float::fract(value) != 0.0 {
         return None;
     }
     Some(value as usize)

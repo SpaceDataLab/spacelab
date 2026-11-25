@@ -278,7 +278,7 @@ pub fn nrlmsise_ap_array(
 ) -> Option<[f64; 7]> {
     let target = find(days, year, month, day)?;
     let subinterval = if sec.is_finite() {
-        (sec / 10_800.0).floor().clamp(0.0, 7.0) as i64
+        crate::float::floor(sec / 10_800.0).clamp(0.0, 7.0) as i64
     } else {
         0
     };
@@ -326,7 +326,7 @@ pub fn sdtm_ap_history<const N: usize>(
     sec: f64,
 ) -> Option<[f64; N]> {
     let subinterval = if sec.is_finite() {
-        (sec / THREE_HOURLY_CADENCE).floor().clamp(0.0, 7.0) as i64
+        crate::float::floor(sec / THREE_HOURLY_CADENCE).clamp(0.0, 7.0) as i64
     } else {
         0
     };

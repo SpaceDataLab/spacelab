@@ -226,7 +226,7 @@ impl OrbitCorrection {
     #[must_use]
     pub fn at(&self, tow: f64) -> [f64; 3] {
         let dt = tow - self.reference;
-        core::array::from_fn(|i| self.delta_rate[i].mul_add(dt, self.delta[i]))
+        core::array::from_fn(|i| mul_add(self.delta_rate[i], dt, self.delta[i]))
     }
 }
 
@@ -246,9 +246,11 @@ impl ClockCorrection {
     #[must_use]
     pub fn at(&self, tow: f64) -> f64 {
         let dt = tow - self.reference;
-        self.coefficients[2]
-            .mul_add(dt, self.coefficients[1])
-            .mul_add(dt, self.coefficients[0])
+        mul_add(
+            mul_add(self.coefficients[2], dt, self.coefficients[1]),
+            dt,
+            self.coefficients[0],
+        )
     }
 
     /// The correction at `tow` as a clock offset in **seconds**, ready to be added to the broadcast
@@ -764,6 +766,20 @@ impl<'a> Iterator for RtcmDecoder<'a> {
             self.rejected += 1;
         }
         None
+    }
+}
+
+/// `a·b + c`, rounded once: `f64::mul_add` with `std`, `libm::fma` without it. Both are IEEE 754
+/// fusedMultiplyAdd, so the two builds return the same bits (`just no-std` checks it on a sweep).
+#[inline]
+fn mul_add(a: f64, b: f64, c: f64) -> f64 {
+    #[cfg(feature = "std")]
+    {
+        a.mul_add(b, c)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        libm::fma(a, b, c)
     }
 }
 

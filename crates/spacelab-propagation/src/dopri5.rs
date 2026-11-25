@@ -184,6 +184,7 @@ impl Dopri5 {
     }
 }
 
+#[cfg(feature = "std")]
 impl<const N: usize> crate::driver::Method<N> for Dopri5 {
     type Dense = Dopri5Dense<N>;
 

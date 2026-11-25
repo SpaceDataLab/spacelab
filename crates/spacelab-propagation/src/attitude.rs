@@ -437,7 +437,7 @@ pub fn integrate_attitude_torqued(
     let mut w = w0;
     for step in 0..steps {
         #[allow(clippy::cast_precision_loss)]
-        let t = dt.mul_add(step as f64, t0);
+        let t = crate::float::mul_add(dt, step as f64, t0);
         let (rn, wn) = rkmk4_step_torqued(&r, w, t, inertia, dt, &mut moment);
         r = rn;
         w = wn;

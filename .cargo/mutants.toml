@@ -2027,7 +2027,7 @@ exclude_re = [
     # Separating them needs a problem whose Newton residual stalls above 1e-12 in absolute terms
     # while the state is large enough for the relative term to matter — a fixture built against the
     # value of `NEWTON_TOL` rather than against any model, and one that would have to be rebuilt
-    # whenever that constant moved. Same ground as `dop853.rs:135:43`.
+    # whenever that constant moved. Same ground as `dop853.rs:141:43`.
     "radau\\.rs:148:16: replace \\+= with \\*= in radau_step",
     "radau\\.rs:151:43: replace \\+ with \\* in radau_step",
 
@@ -2521,8 +2521,8 @@ exclude_re = [
     # exact negation -- IEEE-754 round-to-nearest is sign-symmetric, so `fl(-a - b) = -fl(a + b)`
     # at every step of the induction -- and the square erases it. The two mutants are equivalent
     # bit for bit in `err5_2`/`err3_2`, and there is nothing else downstream of `e5` or `e3`.
-    "dop853\\.rs:126:20: replace \\+= with -= in <impl Method<N> for Dop853>::try_step",
-    "dop853\\.rs:127:20: replace \\+= with -= in <impl Method<N> for Dop853>::try_step",
+    "dop853\\.rs:132:20: replace \\+= with -= in <impl Method<N> for Dop853>::try_step",
+    "dop853\\.rs:133:20: replace \\+= with -= in <impl Method<N> for Dop853>::try_step",
 
     # The zero guard `err5_2 == 0.0 && err3_2 == 0.0` exists so the norm never divides 0 by 0. Both
     # accumulators are sums of squares, hence non-negative, so `denom = err5_2 + 0.01 * err3_2` is
@@ -2538,7 +2538,7 @@ exclude_re = [
     # own coefficients (a quintic with its quartic term tuned to cancel the 3rd-order functional),
     # which is a test of the constants rather than of the model, and would have to be re-solved
     # whenever `tools/gen_dop853.py` regenerates them.
-    "dop853\\.rs:135:43: replace && with \\|\\| in <impl Method<N> for Dop853>::try_step",
+    "dop853\\.rs:141:43: replace && with \\|\\| in <impl Method<N> for Dop853>::try_step",
 
     # --- `ias15.rs`. What is left of the nineteen survivors the progress-invariant run recorded: the
     # --- rest are killed by the NaN guard, the unit-invariance pair, the oversized-step fixture, the
@@ -3299,8 +3299,8 @@ exclude_re = [
     # bit-for-bit `-(sum)`. Squaring erases the sign. Measured over 200 000 random 17-term runs
     # spanning 1e-20..1e20 with mixed signs: the negation was exact in 200 000 of 200 000 and the
     # squared error norm bit-identical in 200 000 of 200 000.
-    "rkn1210\\.rs:76:18: replace \\+= with -= in step",
-    "rkn1210\\.rs:77:19: replace \\+= with -= in step",
+    "rkn1210\\.rs:77:18: replace \\+= with -= in step",
+    "rkn1210\\.rs:78:19: replace \\+= with -= in step",
 
     # The endpoint clamp `if t + h > t1 { h = t1 - t }` becomes `>=`, so it also fires on the tie
     # where `t + h` rounds to exactly `t1`. There the clamp replaces `h` with `t1 - t`, and
@@ -3308,7 +3308,7 @@ exclude_re = [
     # interval of `h` that rounds to `t1`, at magnitudes 2^-20 .. 2^43 (131 008 samples), the worst
     # was 0.499512 ulp(t1). That is the same magnitude the `t += h` update itself rounds by, so a
     # test that told the two apart would be pinning which side of a tie the platform lands on.
-    "rkn1210\\.rs:139:18: replace > with >= in integrate",
+    "rkn1210\\.rs:142:18: replace > with >= in integrate",
 
     # --- spacelab-gnss: models.rs ---------------------------------------------------------------
     #
@@ -5399,9 +5399,9 @@ exclude_re = [
     # No test can separate these, because there is no input on which the two operators disagree. The
     # `|` stays because it is what the assembly *means*; an `^` would be a reader's puzzle.
     "crates/spacelab-gnss/src/rtcm\\.rs:147:34: replace \\| with \\^ in Bits<'a>::u64",
-    "crates/spacelab-gnss/src/rtcm\\.rs:745:63: replace \\| with \\^ in <impl Iterator for RtcmDecoder<'a>>::next",
-    "crates/spacelab-gnss/src/rtcm\\.rs:753:17: replace \\| with \\^ in <impl Iterator for RtcmDecoder<'a>>::next",
-    "crates/spacelab-gnss/src/rtcm\\.rs:754:17: replace \\| with \\^ in <impl Iterator for RtcmDecoder<'a>>::next",
+    "crates/spacelab-gnss/src/rtcm\\.rs:747:63: replace \\| with \\^ in <impl Iterator for RtcmDecoder<'a>>::next",
+    "crates/spacelab-gnss/src/rtcm\\.rs:755:17: replace \\| with \\^ in <impl Iterator for RtcmDecoder<'a>>::next",
+    "crates/spacelab-gnss/src/rtcm\\.rs:756:17: replace \\| with \\^ in <impl Iterator for RtcmDecoder<'a>>::next",
     "crates/spacelab-gnss/src/ntrip\\.rs:94:41: replace \\| with \\^ in base64",
     "crates/spacelab-gnss/src/ntrip\\.rs:94:66: replace \\| with \\^ in base64",
 
@@ -5418,7 +5418,7 @@ exclude_re = [
     # candidates 1 and 2 are both `2` and both branches return `(0, 1/√2, 1/√2, 0)`. What differs is
     # which of `0.5·√2` and `2·(0.5/√2)` lands in which slot, and those agree to the last ulp. A
     # test that separated them would be pinning the rounding of `√2`, not the branch rule.
-    "crates/spacelab-control/src/attitude\\.rs:98:14: replace > with >= in quaternion_of",
+    "crates/spacelab-control/src/attitude\\.rs:102:14: replace > with >= in quaternion_of",
 
     # `*m = c / norm` over a Jacobi eigenvector column, with `norm` its own Frobenius length.
     #
@@ -5456,7 +5456,7 @@ exclude_re = [
     # mutant runs the identical number of iterations (15 and 3) and lands on the identical
     # `sign(H)`. The two mutants of the same predicate that *do* change the count, `<` and `==`, are
     # caught by `the_norm_scaling_costs_the_iterations_the_measurement_says_it_does`.
-    "crates/spacelab-control/src/orbit\\.rs:311:31: replace > with >= in matrix_sign",
+    "crates/spacelab-control/src/orbit\\.rs:310:31: replace > with >= in matrix_sign",
 
     # `for j in (i + 1)..N` in the symmetrisation of `P`, rewritten to `(i * 1)..N`. The extra
     # iteration is `j == i`, which computes `f64::midpoint(p[i][i], p[i][i])` and writes it back
@@ -5466,7 +5466,7 @@ exclude_re = [
     # rewrite in `is_symmetric` is *not* equivalent, because `NaN != NaN` on the diagonal is
     # observable, and it is caught by
     # `a_matrix_is_symmetric_about_its_off_diagonal_pairs_and_not_its_diagonal`.
-    "crates/spacelab-control/src/orbit\\.rs:395:21: replace \\+ with \\* in stable_subspace_solution",
+    "crates/spacelab-control/src/orbit\\.rs:394:21: replace \\+ with \\* in stable_subspace_solution",
 
     # `magnitude < f64::MIN_POSITIVE`, where `magnitude = √(d₀² + d₁² + d₂²)`. The sum of squares is
     # either `0` or at least `2⁻¹⁰⁷⁴`, so its square root is either `0` or at least `2⁻⁵³⁷` — five
@@ -5475,7 +5475,7 @@ exclude_re = [
     # the same comparison *is* killable, because a non-zero `d ≈ 1e-197` whose squares underflow
     # gives `magnitude == 0`, and
     # `a_command_whose_magnitude_underflowed_is_refused_rather_than_scaled` kills it.
-    "crates/spacelab-control/src/orbit\\.rs:692:48: replace < with <= in ElementFeedback::acceleration",
+    "crates/spacelab-control/src/orbit\\.rs:693:48: replace < with <= in ElementFeedback::acceleration",
 
     # The saturation branch, `if commanded > self.max_acceleration`, where
     # `commanded = p·‖d‖`. `>` and `>=` differ only when the product is bit-exactly the limit, and
@@ -5486,7 +5486,7 @@ exclude_re = [
     # is a property of `f64` division and not of the controller. The `*`→`/` mutant of `commanded`
     # is a real difference and is caught by
     # `the_saturated_command_is_exactly_the_limit_and_the_branch_reads_the_product`.
-    "crates/spacelab-control/src/orbit\\.rs:697:35: replace > with >= in ElementFeedback::acceleration",
+    "crates/spacelab-control/src/orbit\\.rs:698:35: replace > with >= in ElementFeedback::acceleration",
 
     # `if lag < 0.0 { return 0.0 }` in `StormKernel::weight`, rewritten to `<=`. At `lag == 0.0` the
     # unmutated body runs and computes `(e^{-0/τ_r} − e^{-0/τ_o})/(τ_r − τ_o)`. `-0.0/τ` is `-0.0`

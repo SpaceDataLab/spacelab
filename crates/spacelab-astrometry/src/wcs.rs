@@ -105,8 +105,8 @@ fn power(base: f64, exponent: usize) -> f64 {
 pub fn deproject(xi: f64, eta: f64, ra0: f64, dec0: f64) -> (f64, f64) {
     let (sin_dec0, cos_dec0) = (libm::sin(dec0), libm::cos(dec0));
     let denominator = libm::sqrt(1.0 + xi * xi + eta * eta);
-    let dec = libm::asin(eta.mul_add(cos_dec0, sin_dec0) / denominator);
-    let ra = ra0 + libm::atan2(xi, eta.mul_add(-sin_dec0, cos_dec0));
+    let dec = libm::asin(mul_add(eta, cos_dec0, sin_dec0) / denominator);
+    let ra = ra0 + libm::atan2(xi, mul_add(eta, -sin_dec0, cos_dec0));
     (ra, dec)
 }
 
@@ -204,14 +204,14 @@ impl TanSip {
         // Linear part: [ξ; η] ≈ [a0; b0] + J·[u; v].
         let (a1, a2) = (self.xi[1], self.xi[2]);
         let (b1, b2) = (self.eta[1], self.eta[2]);
-        let determinant = a1.mul_add(b2, -(a2 * b1));
+        let determinant = mul_add(a1, b2, -(a2 * b1));
         if determinant == 0.0 || !determinant.is_finite() {
             return None;
         }
         let solve = |dxi: f64, deta: f64| {
             (
-                b2.mul_add(dxi, -(a2 * deta)) / determinant,
-                a1.mul_add(deta, -(b1 * dxi)) / determinant,
+                mul_add(b2, dxi, -(a2 * deta)) / determinant,
+                mul_add(a1, deta, -(b1 * dxi)) / determinant,
             )
         };
         let (mut u, mut v) = solve(xi - self.xi[0], eta - self.eta[0]);
@@ -235,7 +235,7 @@ impl TanSip {
     pub fn plate_scale(&self) -> f64 {
         let (a1, a2) = (self.xi[1], self.xi[2]);
         let (b1, b2) = (self.eta[1], self.eta[2]);
-        libm::sqrt(libm::fabs(a1.mul_add(b2, -(a2 * b1))))
+        libm::sqrt(libm::fabs(mul_add(a1, b2, -(a2 * b1))))
     }
 }
 
@@ -461,4 +461,18 @@ fn cholesky_inverse(lower: &[f64], n: usize) -> Vec<f64> {
         }
     }
     inverse
+}
+
+/// `a·b + c`, rounded once: `f64::mul_add` with `std`, `libm::fma` without it. Both are IEEE 754
+/// fusedMultiplyAdd, so the two builds return the same bits (`just no-std` checks it on a sweep).
+#[inline]
+fn mul_add(a: f64, b: f64, c: f64) -> f64 {
+    #[cfg(feature = "std")]
+    {
+        a.mul_add(b, c)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        libm::fma(a, b, c)
+    }
 }

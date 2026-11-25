@@ -179,6 +179,77 @@ _capi-matrix DIR CC CXX:
     cmake --build target/{{DIR}}
     ctest --test-dir target/{{DIR}} --output-on-failure
 
+# Ф32.E (F109): every crate whose lib.rs declares `no_std` builds with `--no-default-features` for a
+# bare-metal target, which has no `std` at all, and for wasm, and does so warning-free. Each crate
+# builds alone, because a workspace build unifies features and turns `std` on for the crates that ask
+# for it. Then S2: each crate with an `examples/no_std_bits.rs` prints its kernels' bits once with
+# `std` and once without, and the two outputs must be equal, so the `libm` route a `no_std` build
+# takes returns what the `std` method returns. The route each run took is checked, so the comparison
+# is never a run against itself.
+#
+# Not in `gates`, which holds static checks: this compiles every such crate twice. Not in `check`
+# either until Ф32.B gives it a CI job. It needs both targets on the pinned toolchain:
+#     rustup target add thumbv7em-none-eabihf wasm32-unknown-unknown
+no-std:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    targets=(thumbv7em-none-eabihf wasm32-unknown-unknown)
+    installed=$(rustup target list --installed)
+    for t in "${targets[@]}"; do
+        grep -qx "$t" <<<"$installed" \
+            || { echo "no-std: $t is not installed for $(rustc --version): rustup target add $t"; exit 1; }
+    done
+    logs=$(mktemp -d)
+    trap 'rm -rf "$logs"' EXIT
+    # Kept negative (rule 16): on the bare-metal target an empty `no_std` crate builds and one that
+    # links `std` does not, or a green build there would prove nothing about a `std` leak through a
+    # dependency.
+    probe() { printf '#![no_std]\n%s\n' "$1" | rustc --edition 2024 --crate-type lib --emit metadata \
+        --target thumbv7em-none-eabihf --out-dir "$logs" - >/dev/null 2>&1; }
+    if ! probe "" || probe "extern crate std;"; then
+        echo "no-std: thumbv7em-none-eabihf does not refuse std, so a green build there proves nothing"; exit 1
+    fi
+    mapfile -t crates < <(grep -lE '^#!\[(no_std|cfg_attr\(.*no_std\))\]' crates/*/src/lib.rs | cut -d/ -f2)
+    [ "${#crates[@]}" -gt 0 ] || { echo "no-std: no crate declares no_std, so this checks nothing"; exit 1; }
+    red=0
+    for t in "${targets[@]}"; do
+        for c in "${crates[@]}"; do
+            if RUSTFLAGS="-D warnings" cargo build -q -p "$c" --lib --no-default-features --target "$t" \
+                >"$logs/build" 2>&1; then
+                printf '%-24s %-24s green\n' "$c" "$t"
+            else
+                printf '%-24s %-24s red\n' "$c" "$t"; red=1
+                grep -E -A1 '^error' "$logs/build" | grep -E '^error|-->' | head -n 20
+            fi
+        done
+    done
+    mapfile -t bits < <(ls crates/*/examples/no_std_bits.rs | cut -d/ -f2)
+    [ "${#bits[@]}" -gt 0 ] || { echo "no-std: no examples/no_std_bits.rs, so S2 checks nothing"; exit 1; }
+    for c in "${bits[@]}"; do
+        rm -f "$logs"/std* "$logs"/libm*
+        if ! cargo run -q -p "$c" --example no_std_bits >"$logs/std" 2>"$logs/std.route" \
+            || ! cargo run -q -p "$c" --no-default-features --example no_std_bits >"$logs/libm" 2>"$logs/libm.route"; then
+            printf '%-24s S2 red: the example did not run\n' "$c"; red=1
+            cat "$logs/std.route" "$logs/libm.route" 2>/dev/null | grep -E -A1 '^error' | grep -E '^error|-->' | head -n 20
+            continue
+        fi
+        n=$(grep -c . "$logs/std")
+        # stderr also carries cargo's own warnings; the route is the example's one line.
+        with=$(grep '^route: ' "$logs/std.route")
+        without=$(grep '^route: ' "$logs/libm.route")
+        if [ "$with" != "route: std" ] || [ "$without" != "route: libm" ]; then
+            printf '%-24s S2 red: the runs took routes "%s" and "%s"\n' "$c" "$with" "$without"; red=1
+        elif [ "$n" -gt 0 ] && cmp -s "$logs/std" "$logs/libm"; then
+            printf '%-24s S2 green: %d lines, %d values, the same bits with and without std\n' "$c" "$n" \
+                "$(awk '{ n += NF - 2 } END { print n }' "$logs/std")"
+        else
+            printf '%-24s S2 red: %d lines with std, %d without; first differences:\n' "$c" "$n" \
+                "$(grep -c . "$logs/libm")"; red=1
+            diff "$logs/std" "$logs/libm" | head -n 6 | cut -c1-160
+        fi
+    done
+    exit "$red"
+
 # Kani 0.68.0 is out of tree (`cargo install --locked kani-verifier && cargo kani setup`) and is not
 # a CI step. Each proof states its domain in its doc comment.
 # The bounded proofs of the time and calendar arithmetic (Ф28.I, docs/verification.md §1.6).

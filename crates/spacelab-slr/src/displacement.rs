@@ -393,8 +393,11 @@ pub fn solid_earth_tide_displacement(
     let x2 = |cos: f64| 3.0 * l2 * cos;
     let x3 = |cos: f64| 1.5 * L3 * (5.0 * cos * cos - 1.0);
 
-    let fac2_sun = MASS_RATIO_SUN * EARTH_RADIUS * (EARTH_RADIUS / r_sun).powi(3);
-    let fac2_moon = MASS_RATIO_MOON * EARTH_RADIUS * (EARTH_RADIUS / r_moon).powi(3);
+    // `powi` is std-only. Its `std` routes, LLVM's expansion of a constant exponent and
+    // compiler-builtins' `__powidf2`, both evaluate `x·(x·x)`: these two products, to the bit.
+    let cube = |x: f64| x * x * x;
+    let fac2_sun = MASS_RATIO_SUN * EARTH_RADIUS * cube(EARTH_RADIUS / r_sun);
+    let fac2_moon = MASS_RATIO_MOON * EARTH_RADIUS * cube(EARTH_RADIUS / r_moon);
     let fac3_sun = fac2_sun * (EARTH_RADIUS / r_sun);
     let fac3_moon = fac2_moon * (EARTH_RADIUS / r_moon);
 

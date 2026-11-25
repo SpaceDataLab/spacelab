@@ -65,7 +65,7 @@ fn cross(a: Vec3, b: Vec3) -> Vec3 {
 }
 
 fn dot(a: Vec3, b: Vec3) -> f64 {
-    a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
+    mul_add(a[0], b[0], mul_add(a[1], b[1], a[2] * b[2]))
 }
 
 /// `Aᵀ · B`, the composition that expresses "how far `b` is from `a`" for two inertial-from-body
@@ -74,7 +74,11 @@ fn transpose_mul(a: &Mat3, b: &Mat3) -> Mat3 {
     let mut out = [[0.0; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
-            out[i][j] = a[0][i].mul_add(b[0][j], a[1][i].mul_add(b[1][j], a[2][i] * b[2][j]));
+            out[i][j] = mul_add(
+                a[0][i],
+                b[0][j],
+                mul_add(a[1][i], b[1][j], a[2][i] * b[2][j]),
+            );
         }
     }
     out
@@ -292,7 +296,7 @@ impl ControlLaw for QuaternionPd {
         let w = error.rate();
         let mut out = [0.0; 3];
         for i in 0..3 {
-            out[i] = -self.proportional.mul_add(q[i], self.derivative * w[i]);
+            out[i] = -mul_add(self.proportional, q[i], self.derivative * w[i]);
         }
         out
     }
@@ -360,7 +364,7 @@ impl ControlLaw for MrpLyapunov {
         let gyroscopic = cross(omega, inertia.apply(omega));
         let mut out = [0.0; 3];
         for i in 0..3 {
-            out[i] = (-self.proportional).mul_add(s[i], -(self.derivative * w[i])) + gyroscopic[i];
+            out[i] = mul_add(-self.proportional, s[i], -(self.derivative * w[i])) + gyroscopic[i];
         }
         out
     }
@@ -373,6 +377,20 @@ impl SmallAngleGains for MrpLyapunov {
     /// like a plain PD.
     fn small_angle_gains(&self) -> (f64, f64) {
         (0.25 * self.proportional, self.derivative)
+    }
+}
+
+/// `a·b + c`, rounded once: `f64::mul_add` with `std`, `libm::fma` without it. Both are IEEE 754
+/// fusedMultiplyAdd, so the two builds return the same bits (`just no-std` checks it on a sweep).
+#[inline]
+fn mul_add(a: f64, b: f64, c: f64) -> f64 {
+    #[cfg(feature = "std")]
+    {
+        a.mul_add(b, c)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        libm::fma(a, b, c)
     }
 }
 

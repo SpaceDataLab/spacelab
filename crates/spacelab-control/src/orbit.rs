@@ -56,10 +56,9 @@
 // `spacelab_astro::cw` carry, for the same reason.
 #![allow(clippy::many_single_char_names, clippy::needless_range_loop)]
 
-use spacelab_propagation::{
-    dsst::{auxiliary::DsstAuxiliary, gaussian::variational_matrix},
-    linalg::lu_factor,
-};
+#[cfg(feature = "std")]
+use spacelab_propagation::dsst::{auxiliary::DsstAuxiliary, gaussian::variational_matrix};
+use spacelab_propagation::linalg::lu_factor;
 
 /// Why an optimal gain could not be produced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -620,6 +619,7 @@ pub fn clohessy_wiltshire_plant(mean_motion: f64) -> Option<LinearPlant<6, 3>> {
 /// single unit and `W` is what makes the sum meaningful. Bryson's rule — weight each element by the
 /// reciprocal square of the error the mission is willing to tolerate in it — turns `V` into a
 /// dimensionless count of tolerances and is the intended way to set them.
+#[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ElementFeedback {
     weights: [f64; 6],
@@ -627,6 +627,7 @@ pub struct ElementFeedback {
     max_acceleration: f64,
 }
 
+#[cfg(feature = "std")]
 impl ElementFeedback {
     /// `None` unless every weight is finite and non-negative with at least one strictly positive,
     /// and both the proportional gain and the acceleration limit are finite and strictly positive.
@@ -733,6 +734,7 @@ impl ElementFeedback {
 /// command; `decrease_rate` recomputed `dᵀu` from that zero command and a still-NaN `e`, and
 /// `NaN · 0` is `NaN`, so the law reported an undefined Lyapunov rate for an input it had already
 /// declined to act on. An estimator that diverges is the way that input arrives.
+#[cfg(feature = "std")]
 fn usable_error(error: &[f64; 6]) -> Option<[f64; 6]> {
     if !error.iter().all(|e| e.is_finite()) {
         return None;
@@ -743,6 +745,7 @@ fn usable_error(error: &[f64; 6]) -> Option<[f64; 6]> {
 }
 
 /// Wrap an angle to `(−π, π]`.
+#[cfg(feature = "std")]
 fn wrap_to_pi(angle: f64) -> f64 {
     let tau = core::f64::consts::TAU;
     let wrapped = angle - tau * libm::floor(angle / tau + 0.5);

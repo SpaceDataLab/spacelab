@@ -31,17 +31,29 @@ pub mod density_calibration;
 pub mod density_data;
 pub mod density_rom;
 pub mod dop853;
+#[cfg_attr(
+    not(feature = "std"),
+    expect(
+        dead_code,
+        reason = "the error and dense tables serve only the std driver's step"
+    )
+)]
 pub(crate) mod dop853_consts;
 pub mod dopri5;
 pub mod drag_coefficient;
+#[cfg(feature = "std")]
 pub mod earth_radiation;
 pub mod ephemeris;
+mod float;
 pub mod forces;
 pub mod geopotential;
 pub mod geopotential_coeffs;
 pub mod harris_priester;
+#[cfg(feature = "std")]
 pub mod jacchia_bowman;
+#[cfg(feature = "std")]
 pub mod lifetime;
+#[cfg(feature = "std")]
 pub mod lifetime_drivers;
 pub mod lightcurve;
 pub mod linalg;
@@ -129,6 +141,7 @@ pub use dsst::{
     DsstAuxiliary, DsstError, DsstMeanPropagator, DsstSolarRadiationPressure, DsstTesseral,
     DsstThirdBody, DsstZonal,
 };
+#[cfg(feature = "std")]
 pub use earth_radiation::{AngularResolution, KnockeEarthRadiation};
 pub use geopotential::GeoPotential;
 pub use harris_priester::{HarrisPriester, HarrisPriesterAtmosphere, harris_priester};

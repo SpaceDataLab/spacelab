@@ -1468,6 +1468,7 @@ if have maxima; then
     mac_zeros gauss2_richardson.mac 18 "the two-point Gauss rule and its Richardson extrapolation"
     mac_zeros swath_sphere.mac 12 "the swath edge as the near root of the line-of-sight quadratic"
     mac_zeros observation_geometry.mac 11 "ENU sun/sensor angles, the scattering angle and Kasten-Young air mass"
+    mac_zeros angle_from_vectors.mac 9 "angles from atan2 of the cross and dot products, not acos or asin of the dot product"
     mac_zeros stereo_disparity.mac 11 "disparity f B / z on a rectified pair and the sub-pixel parabola vertex"
     mac_zeros plane_sweep_homography.mac 9 "the plane-induced homography and the gain-invariant patch score"
     mac_zeros pinhole_collinearity.mac 20 "the collinearity equations, their Jacobians and the Schur step"
@@ -1552,7 +1553,7 @@ if have gp; then
         conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \
         hull_delaunay spherical_triangle igrf_synthesis geomagnetic_dipole attitude_control gmst82 \
         cio_rotation gnss_combinations gpt3_evaluation gps_broadcast_orbit glonass_pz90_motion slr_two_way_range \
-        kronrod_g7k15 cll_panel nequick_fourier gauss2_richardson swath_sphere observation_geometry \
+        kronrod_g7k15 cll_panel nequick_fourier gauss2_richardson swath_sphere observation_geometry angle_from_vectors \
         stereo_disparity pinhole_collinearity rpc_bias_affine ortho_bilinear_dem \
         ray_ellipsoid_geolocation gnomonic_tan_plate quad_hash source_moments \
         relativistic_aberration detection_box_geometry harris_structure_tensor edge_mtf \

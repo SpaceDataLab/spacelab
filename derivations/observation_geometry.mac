@@ -3,9 +3,11 @@
  * In a local frame with up U, north N and east E = N x U, a direction at zenith angle z and azimuth a
  * (from north toward east) is
  *     d(z, a) = sin z cos a N + sin z sin a E + cos z U.
- * The code reads z = acos(d.U), a = atan2(d.E, d.N), the relative azimuth a_v - a_s, the scattering
- * angle Theta = acos(-to_sun . to_sensor) between the incident (-to_sun) and the scattered
- * (to_sensor) propagation directions, and the Kasten & Young (1989, Appl. Opt. 28, 4735) air mass
+ * The code reads z as the angle between d and U, a = atan2(d.E, d.N), the relative azimuth a_v - a_s,
+ * the scattering angle Theta between the incident (-to_sun) and the scattered (to_sensor) propagation
+ * directions, whose cosine is -to_sun . to_sensor -- both angles by atan2 of the cross and dot
+ * products, derivations/angle_from_vectors.mac -- and the Kasten & Young (1989, Appl. Opt. 28, 4735)
+ * air mass
  *     m(z) = 1 / (cos z + a (b - z_deg)^(-c)),  a = 0.50572, b = 96.07995 (= 90 + 6.07995 deg),
  *     c = 1.6364,
  * the constants as printed there. Shown here, each line printing `<name>: 0`:

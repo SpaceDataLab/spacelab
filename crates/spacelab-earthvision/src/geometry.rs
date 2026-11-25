@@ -51,6 +51,13 @@ pub fn air_mass(angle: Angle) -> f64 {
     1.0 / (libm::cos(z) + 0.50572 * libm::pow(96.079_95 - z_deg, -1.6364))
 }
 
+/// The angle between `a` and `b`, `atan2(|a × b|, a·b)`. `acos` of the dot product loses `√(2u)` of
+/// angle next to `0` and `π`, where the cosine is flat: the nadir view, the sun overhead, forward
+/// scatter and the backscatter hot spot (`derivations/angle_from_vectors.mac`).
+fn angle_between(a: Vec3, b: Vec3) -> f64 {
+    libm::atan2(a.cross(b).norm(), a.dot(b))
+}
+
 /// Compute the [`ObservationGeometry`] from the sun and sensor directions at a ground point.
 #[must_use]
 pub fn observation_geometry(
@@ -60,14 +67,14 @@ pub fn observation_geometry(
     north: Vec3,
 ) -> ObservationGeometry {
     let east = north.cross(zenith); // right-handed ENU: E = N × U
-    let solar_zenith = libm::acos(to_sun.dot(zenith).clamp(-1.0, 1.0));
-    let view_zenith = libm::acos(to_sensor.dot(zenith).clamp(-1.0, 1.0));
+    let solar_zenith = angle_between(to_sun, zenith);
+    let view_zenith = angle_between(to_sensor, zenith);
     // Azimuths measured from north toward east; the vertical component cancels in the ratio.
     let sun_az = libm::atan2(to_sun.dot(east), to_sun.dot(north));
     let view_az = libm::atan2(to_sensor.dot(east), to_sensor.dot(north));
     // The scattering angle is between the photon's incident propagation (−to_sun) and its scattered
     // propagation (to_sensor).
-    let scattering = libm::acos((-to_sun.dot(to_sensor)).clamp(-1.0, 1.0));
+    let scattering = angle_between(-to_sun, to_sensor);
     ObservationGeometry {
         solar_zenith: Angle::from_radians(solar_zenith),
         view_zenith: Angle::from_radians(view_zenith),
@@ -237,6 +244,75 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /// (S1) The three angles keep their digits next to `0` and `π` (Ф28.N, C3 row 15). `A` is the
+    /// double nearest `u = (2, −3, 6)/7` and each `b` the doubles nearest `cos t·u + sin t·w`,
+    /// `w = (3, 6, 2)/7`, at `t = 10⁻ᵏ` and `π − 10⁻ᵏ`, k = 1..12; `derivations/angle_from_vectors.gp`
+    /// gives the angle between `A` and `b` at 100 digits. `to_sun = b`, `to_sensor = −A`,
+    /// `zenith = A` puts it in the solar zenith and the scattering angle, `to_sun = −A`,
+    /// `to_sensor = b` in the view zenith and again the scattering angle. The bound is 2u of
+    /// absolute error, the cross product's rounding, which `atan2` passes on unamplified
+    /// (`derivations/angle_from_vectors.mac` 4), plus one ulp of the angle for the two roundings
+    /// of the result and of the reference. Measured: at most 0.31 u next to 0, and exact or one ulp
+    /// of π next to π. `acos` of the dot product was 4.9 u off at 1e-1, 930 u at 1e-3, 4.4e7 u
+    /// (4.9e-9 rad) at 1e-8 and 1.9e8 u (2.1e-8 rad) at 1e-11; next to π, 16 u at `π − 10⁻¹` and
+    /// 1.3e8 u (1.5e-8 rad) at `π − 10⁻¹²`.
+    #[test]
+    fn the_angles_keep_their_digits_next_to_zero_and_pi() {
+        const A: [f64; 3] = [
+            0.2857142857142856984253854,
+            -0.4285714285714285476380780,
+            0.8571428571428570952761561,
+        ];
+        #[rustfmt::skip]
+        const ROWS: [([f64; 3], f64); 24] = [
+        ([0.3270726543566480071234537, -0.3408588565647297508043323, 0.8813845464231158111090281], 0.1000000000000000135927475),
+        ([0.2899856429765472198845089, -0.4199787144635708235895777, 0.8599570955954749518213021], 0.009999999999999996030332443),
+        ([0.2861427142142975998950760, -0.4277140715714464191954391, 0.8574281428095594792537781], 0.0009999999999999788124737479),
+        ([0.2857571414285000055421904, -0.4284857121430000193029741, 0.8571714242856666166048285], 9.999999999997153007459013e-5),
+        ([0.2857185714142856380881597, -0.4285628571214287196866621, 0.8571457142428571263081949], 1.000000000000220366168395e-5),
+        ([0.2857147142855714361253661, -0.4285705714283571388101279, 0.8571431428567143351315849], 1.000000000020992123939867e-6),
+        ([0.2857143285714271452313540, -0.4285713428571407135336813, 0.8571428857142814328184954], 1.000000000028757327186489e-7),
+        ([0.2857142899999999818838603, -0.4285714199999999807211282, 0.8571428599999999509151394], 9.999999994736441743814509e-9),
+        ([0.2857142861428571545268085, -0.4285714277142856909463831, 0.8571428574285714363512056], 1.000000027229219767499213e-9),
+        ([0.2857142857571428606888730, -0.4285714284857142786222539, 0.8571428571714285737925820], 1.000000082740370999087040e-10),
+        ([0.2857142857185714368561946, -0.4285714285628571262876108, 0.8571428571457142542300289], 1.000000875758074940703406e-11),
+        ([0.2857142857147143000240419, -0.4285714285705714554630674, 0.8571428571431428666826946], 9.999858085701168821672939e-13),
+        ([-0.2415011543736524379788477, 0.5120018565307208335823930, -0.8243368797677854686867249], 3.041592653589793280895418),
+        ([-0.2814143572615472321807317, 0.4371212858935708545082832, -0.8542429051188082933521173], 3.131592653589793210951140),
+        ([-0.2852855715000118808077900, 0.4294283570000178573700111, -0.8568567143333690738771224], 3.140592653589793243853290),
+        ([-0.2856714271429285911807483, 0.4286571407141428480258583, -0.8571142814286190070305338], 3.141492653589793243142076),
+        ([-0.2857099999857143357573364, 0.4285799999785712688371575, -0.8571399999571428507394444], 3.141582653589793228327945),
+        ([-0.2857138571427143003411686, 0.4285722857140714103785228, -0.8571425714281428742680191], 3.141591653589793265051474),
+        ([-0.2857142428571414205507040, 0.4285715142857121628949812, -0.8571428285714243200388296], 3.141592553589793227656749),
+        ([-0.2857142814285714149669104, 0.4285714371428571145550279, -0.8571428542857142396371728], 3.141592643589793243726202),
+        ([-0.2857142852857142978351135, 0.4285714294285714043297730, -0.8571428568571428652234090], 3.141592652589793266744575),
+        ([-0.2857142856714285916730489, 0.4285714286571428721650534, -0.8571428571142857277820326], 3.141592653489793238118769),
+        ([-0.2857142857100000155057273, 0.4285714285800000244996966, -0.8571428571400000473445857], 3.141592653579793237635240),
+        ([-0.2857142857138571523378801, 0.4285714285722856953242399, -0.8571428571425714348919200], 3.141592653588793260584364),
+        ];
+        let a = Vec3::new(A[0], A[1], A[2]);
+        let north = Vec3::new(1.0, 0.0, 0.0);
+        let u = f64::EPSILON / 2.0;
+        for (b, want) in ROWS {
+            let b = Vec3::new(b[0], b[1], b[2]);
+            let lit = observation_geometry(b, -a, a, north);
+            let seen = observation_geometry(-a, b, a, north);
+            let bound = 2.0 * u + (want.next_up() - want);
+            for (name, got) in [
+                ("solar zenith", lit.solar_zenith.radians()),
+                ("scattering angle", lit.scattering_angle.radians()),
+                ("view zenith", seen.view_zenith.radians()),
+                ("scattering angle", seen.scattering_angle.radians()),
+            ] {
+                assert!(
+                    (got - want).abs() <= bound,
+                    "{name} at {want:e}: {got:.17e}, {:.3} u off",
+                    (got - want).abs() / u
+                );
             }
         }
     }

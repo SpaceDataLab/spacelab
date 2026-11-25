@@ -1113,6 +1113,25 @@ void the_access_surface_reports_its_refusals_as_statuses() {
     CHECK(!before && before.error() == SL_ERR_DOMAIN);
 }
 
+void the_tabulated_access_reports_its_refusals_as_statuses() {
+    const std::array<double, 3> times{0.0, 60.0, 120.0};
+    const std::array<spacelab::vec3, 3> positions{
+        {{6878137.0, -420e3, 0.0}, {6878137.0, 0.0, 0.0}, {6878137.0, 420e3, 0.0}}};
+    const std::array<spacelab::vec3, 3> velocities{
+        {{0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}}};
+    const std::array<spacelab::geodetic, 1> station{{{0.0, 0.0, 0.0}}};
+    const spacelab::result<std::vector<spacelab::station_window>> pass =
+        spacelab::try_access_tabulated(times, positions, velocities, station, 1.0471975511965976);
+    CHECK(pass && pass->size() == 1);
+    const std::array<double, 3> repeated{0.0, 60.0, 60.0};
+    const spacelab::result<std::vector<spacelab::station_window>> twice =
+        spacelab::try_access_tabulated(repeated, positions, velocities, station, 1.0);
+    CHECK(!twice && twice.error() == SL_ERR_INVALID_ARGUMENT);
+    const spacelab::result<std::vector<spacelab::station_window>> masked =
+        spacelab::try_access_tabulated(times, positions, velocities, station, 2.0);
+    CHECK(!masked && masked.error() == SL_ERR_INVALID_ARGUMENT);
+}
+
 } // namespace
 
 int main() {
@@ -1137,6 +1156,7 @@ int main() {
     the_control_surface_reports_every_wall_as_a_status();
     the_time_surface_reports_its_refusals_as_statuses();
     the_access_surface_reports_its_refusals_as_statuses();
+    the_tabulated_access_reports_its_refusals_as_statuses();
 
     if (failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failures);

@@ -1936,6 +1936,35 @@ void the_access_wrapper_sizes_its_windows_and_refuses_a_mask() {
     CHECK(refused);
 }
 
+void the_tabulated_access_wrapper_sizes_its_windows_and_refuses_unequal_arrays() {
+    const std::array<double, 3> times{0.0, 60.0, 120.0};
+    const std::array<spacelab::vec3, 3> positions{
+        {{6878137.0, -420e3, 0.0}, {6878137.0, 0.0, 0.0}, {6878137.0, 420e3, 0.0}}};
+    const std::array<spacelab::vec3, 3> velocities{
+        {{0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}}};
+    const std::array<spacelab::geodetic, 2> stations{{{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}}};
+    const double mask = std::bit_cast<double>(0x3ff0c152382d7365ULL);
+    const double tol = std::bit_cast<double>(0x3f1a36e2eb1c432dULL);
+    const std::vector<spacelab::station_window> windows =
+        spacelab::access_tabulated(times, positions, velocities, stations, mask, tol);
+    CHECK(windows.size() == 2);
+    CHECK(windows.at(0).station == 0 && windows.at(1).station == 1);
+    CHECK(std::bit_cast<std::uint64_t>(windows.at(1).rise_s) == 0x4032c2bce8540c6bU);
+    CHECK(std::bit_cast<std::uint64_t>(windows.at(1).set_s) == 0x40594f50c5a16c95U);
+    CHECK(spacelab::access_tabulated(times, positions, velocities,
+                                     std::span<const spacelab::geodetic>{}, mask)
+              .empty());
+
+    bool refused = false;
+    try {
+        (void)spacelab::access_tabulated(times, std::span(positions).first(2), velocities, stations,
+                                         mask);
+    } catch (const spacelab::error &e) {
+        refused = e.status() == SL_ERR_INVALID_ARGUMENT;
+    }
+    CHECK(refused);
+}
+
 } // namespace
 
 /*
@@ -1987,6 +2016,7 @@ int main() {
         the_control_wrapper_closes_the_loop_and_carries_its_refusals();
         the_time_wrapper_owns_its_series_and_keeps_the_leap_second();
         the_access_wrapper_sizes_its_windows_and_refuses_a_mask();
+        the_tabulated_access_wrapper_sizes_its_windows_and_refuses_unequal_arrays();
     } catch (const spacelab::error &e) {
         std::fprintf(stderr, "FAIL: uncaught spacelab::error, status %d: %s\n", e.status(),
                      e.what());

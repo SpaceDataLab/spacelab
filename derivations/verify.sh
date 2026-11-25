@@ -1305,6 +1305,7 @@ if have maxima; then
     mac_zeros wgs84_geodesy.mac 13 "WGS 84 derived constants and both geodetic maps"
     mac_zeros ellipsoid_geodesic.mac 43 "geodesic integrands from the metric and Clairaut, the series to sixth order as Karney prints them and against the elliptic-integral form at 50 digits (G1), the astroid root"
     mac_zeros access_station_geometry.mac 12 "a station is its foot plus h along the geodetic normal, that normal is the ellipsoid's, g is the elevation's sign, and the pieces of SGP4's speed bound"
+    mac_zeros access_hermite_speed.mac 12 "the cubic Hermite interpolant of a tabulated ephemeris takes its samples, is de Casteljau's Bezier curve, and its velocity is a convex combination of v0, c, v1; its h^4/384 error kernel"
     mac_zeros keplerian_elements.mac 44 "element <-> state maps invert each other on every branch; Kepler's equation, and its near-parabolic forms"
     mac_zeros brouwer_m2_phipps.mac 7 "Phipps' along-track drag drift of a, e and the mean anomaly from Kepler's third law"
     mac_zeros zonal_secular.mac 6 "the first-order J2 secular rates of both zonal mean-element propagators from Lagrange's equations"
@@ -1565,6 +1566,7 @@ if have gp; then
     second_engine radiometric_corona.gp "the corona electron column in arc length against its closed form"
     second_engine rpc00b_inverse.gp "the RPC inverse roots on the Pleiades fixture at 60 digits"
     second_engine access_station_geometry.gp "the station geometry and SGP4's speed bound at 60 digits on 200 points"
+    second_engine access_hermite_speed.gp "the Hermite interpolant's identities at 60 digits on 200 intervals, and its sampled speed under the hull bound"
 else
     skip "Ф17.B PARI gates" gp
 fi

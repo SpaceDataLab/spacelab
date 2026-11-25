@@ -1085,8 +1085,8 @@ sl_status sl_figures_of_merit(const sl_coverage_metrics *cells, size_t n, const 
 
 /* ---- Access on any ephemeris (Ф31.C) ---- */
 
-/* One access window of one station: its index in the stations array, and the window in seconds
- * past the scan's start. */
+/* One access window of one station: its index in the stations array, and the window in seconds on
+ * the scan's clock -- past the start label for SGP4, the table's own for a table. */
 typedef struct {
     size_t station;
     double rise_s;
@@ -1120,6 +1120,36 @@ sl_status sl_access_sgp4(const sl_sgp4 *sat, const sl_eop_series *eop,
                          const sl_utc_datetime *start, double span_s, const sl_geodetic *stations,
                          size_t n_stations, double mask_rad, double tol_s, sl_station_window *out,
                          size_t cap, size_t *out_len);
+
+/*
+ * The windows on [times[0], times[n_samples - 1]] in which a tabulated ephemeris stands at least
+ * `mask_rad` above the geodetic horizon of each of `n_stations` stations on WGS 84, every edge
+ * refined to `tol_s` seconds. The table is `n_samples` ITRF positions (m) and velocities (m/s) at
+ * strictly increasing `times` (s): an OEM, an SP3 file with velocity records, or a numerical
+ * propagator's output, taken to ITRF by the caller. Windows come on the table's own time
+ * coordinate, grouped by station, in station order, and in time order within a station; one open
+ * at the first or the last sample is clamped to it. Two-call protocol.
+ *
+ * Between two samples the trajectory is the cubic Hermite interpolant of their positions and
+ * velocities, which takes every sample exactly. The windows are the interpolant's; its distance
+ * from the true trajectory is at most h^4 max|d^4 r / dt^4| / 384 on a step h. The station and
+ * the mask are as in `sl_access_sgp4`.
+ *
+ * What the scan guarantees: no window of the interpolant at least a billionth of the span long is
+ * missed. Its rate bound is proved, not assumed: on each interval the interpolant's velocity is a
+ * convex combination of v0, 3 (r1 - r0) / h - v0 - v1 and v1, so the largest of their norms
+ * bounds it. The windows are the Rust API's to the bit.
+ *
+ * SL_ERR_INVALID_ARGUMENT for a null pointer or a zero `n_stations`; for fewer than two samples,
+ * a time not finite or not above the one before it, or a sample coordinate not finite; and for a
+ * latitude outside [-pi/2, pi/2] or a station coordinate not finite, a mask not strictly inside
+ * (-pi/2, pi/2), or a tolerance not finite and positive. The message names the station where it
+ * is one. A refused scan writes nothing, `*out_len` included.
+ */
+sl_status sl_access_tabulated(const double *times, const sl_vec3 *positions,
+                              const sl_vec3 *velocities, size_t n_samples,
+                              const sl_geodetic *stations, size_t n_stations, double mask_rad,
+                              double tol_s, sl_station_window *out, size_t cap, size_t *out_len);
 
 /* ---- Semi-analytical propagation (DSST) ---- */
 

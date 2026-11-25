@@ -4558,7 +4558,8 @@ pub unsafe extern "C" fn sl_figures_of_merit(
 
 // ── Access on any ephemeris (Ф31.C) ───────────────────────────────────────────────────────────
 
-/// `sl_station_window`: one access window of one station, seconds past the scan's start.
+/// `sl_station_window`: one access window of one station, in seconds on the scan's clock: past the
+/// start label for SGP4, the table's own for a table.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SlStationWindow {
@@ -4579,7 +4580,8 @@ fn access_status(e: &spacelab::access::AccessError) -> i32 {
         AccessError::Station
         | AccessError::Mask
         | AccessError::Interval
-        | AccessError::Tolerance => SL_ERR_INVALID_ARGUMENT,
+        | AccessError::Tolerance
+        | AccessError::Samples => SL_ERR_INVALID_ARGUMENT,
         AccessError::EarthOrientation { .. } => SL_ERR_DOMAIN,
         AccessError::Propagation { .. } => SL_ERR_COMPUTE,
     }
@@ -4641,6 +4643,78 @@ pub unsafe extern "C" fn sl_access_sgp4(
                             mask_rad,
                             tol_s,
                         )
+                    });
+            match windows {
+                Ok(windows) => found.extend(windows.iter().map(|w| SlStationWindow {
+                    station: i,
+                    rise_s: w.rise,
+                    set_s: w.set,
+                })),
+                Err(e) => return fail(access_status(&e), format!("{WHO}: station {i}: {e}")),
+            }
+        }
+        // SAFETY: forwarding the caller's own contract on `out`, `cap` and `out_len`.
+        unsafe { deliver(&found, out, cap, out_len) }
+    })
+}
+
+/// The access windows of a tabulated ITRF ephemeris over `n_stations` stations on WGS 84. See the
+/// header.
+///
+/// # Safety
+/// `times`, `positions` and `velocities` are readable for `n_samples` each; `stations` is readable
+/// for `n_stations`; `out` is null or writable for `cap` windows; `out_len` is writable for one
+/// `size_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_access_tabulated(
+    times: *const f64,
+    positions: *const SlVec3,
+    velocities: *const SlVec3,
+    n_samples: usize,
+    stations: *const SlGeodetic,
+    n_stations: usize,
+    mask_rad: f64,
+    tol_s: f64,
+    out: *mut SlStationWindow,
+    cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    guard(|| {
+        const WHO: &str = "sl_access_tabulated";
+        if times.is_null()
+            || positions.is_null()
+            || velocities.is_null()
+            || stations.is_null()
+            || out_len.is_null()
+        {
+            return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null pointer"));
+        }
+        if let Err(status) = check_nonzero(WHO, "n_stations", n_stations) {
+            return status;
+        }
+        // SAFETY: checked non-null; the caller states each is readable for its count.
+        let (times, positions, velocities, stations) = unsafe {
+            (
+                core::slice::from_raw_parts(times, n_samples),
+                core::slice::from_raw_parts(positions, n_samples),
+                core::slice::from_raw_parts(velocities, n_samples),
+                core::slice::from_raw_parts(stations, n_stations),
+            )
+        };
+        let table = match spacelab::access::Tabulated::new(
+            times.to_vec(),
+            positions.iter().copied().map(to_vec3).collect(),
+            velocities.iter().copied().map(to_vec3).collect(),
+        ) {
+            Ok(table) => table,
+            Err(e) => return fail(access_status(&e), format!("{WHO}: {e}")),
+        };
+        let mut found = Vec::new();
+        for (i, g) in stations.iter().enumerate() {
+            let windows =
+                spacelab::access::Station::geodetic(g.latitude_rad, g.longitude_rad, g.height_m)
+                    .and_then(|station| {
+                        spacelab::access::tabulated_windows(&table, &station, mask_rad, tol_s)
                     });
             match windows {
                 Ok(windows) => found.extend(windows.iter().map(|w| SlStationWindow {

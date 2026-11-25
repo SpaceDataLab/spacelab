@@ -278,7 +278,7 @@ fn both_bridges_name_the_same_time_surface() {
 /// whole, so a scan added to one bridge and not the other fails here.
 #[test]
 fn both_bridges_name_the_same_access_surface() {
-    const FUNCTIONS: [&str; 1] = ["access_sgp4"];
+    const FUNCTIONS: [&str; 2] = ["access_sgp4", "access_tabulated"];
 
     let header = read("include/spacelab.h");
     let (_, section) = header
@@ -322,6 +322,7 @@ fn both_bridges_name_the_same_access_surface() {
     let registrations: String = bridge.split_whitespace().collect();
     for registered in [
         "wrap_pyfunction!(access_sgp4,",
+        "wrap_pyfunction!(access_tabulated,",
         "m.add(\"PropagationError\",m.py().get_type::<PropagationError>())",
     ] {
         assert!(

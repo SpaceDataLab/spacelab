@@ -1,9 +1,10 @@
-//! Access windows of a ground station on the WGS-84 ellipsoid, from an SGP4 element set (Ф31.C).
+//! Access windows of a ground station on the WGS-84 ellipsoid, from an SGP4 element set or a
+//! tabulated ephemeris (Ф31.C).
 //!
 //! This is the Rust API the two bridges return to the bit. It composes three pieces that exist
-//! elsewhere: the satellite's ITRF position from [`teme_to_itrf_at`], the elevation constraint
-//! [`ElevationMask`] about the station's geodetic normal, and the rate-bounded scan
-//! [`spacelab_coverage::windows`].
+//! elsewhere: the satellite's ITRF position, from SGP4 and [`teme_to_itrf_at`] or from a table's
+//! interpolant ([`Tabulated`]); the elevation constraint [`ElevationMask`] about the station's
+//! geodetic normal; and the rate-bounded scan [`spacelab_coverage::windows`].
 //!
 //! # The model
 //!
@@ -15,10 +16,21 @@
 //! for the line of sight `d`. Refraction is the caller's: an apparent mask converts to one geometric
 //! mask exactly (`spacelab_coverage::Refraction::geometric`).
 //!
+//! # The tabulated source
+//!
+//! An OEM, an SP3 file with velocity records, or a numerical propagator's output reaches the scan
+//! as a table: strictly increasing times, and ITRF positions and velocities at them. The frame and
+//! the time scale are the caller's; the windows come back on the table's own time coordinate.
+//! Between two samples the trajectory is the cubic Hermite interpolant of their positions and
+//! velocities, evaluated by de Casteljau so that it takes every sample exactly
+//! (`derivations/access_hermite_speed.mac`). The windows are the interpolant's. Its distance from a
+//! smooth trajectory is at most `h⁴ max|r⁗| / 384` on a step `h`, which is the caller's to judge
+//! from the sampling.
+//!
 //! # The clock
 //!
-//! A scan runs on the naive UTC coordinate, seconds past the start label, which is the clock SGP4
-//! itself measures from its epoch (`Satellite::minutes_since_epoch`). Every UTC day on it is
+//! An SGP4 scan runs on the naive UTC coordinate, seconds past the start label, which is the clock
+//! SGP4 itself measures from its epoch (`Satellite::minutes_since_epoch`). Every UTC day on it is
 //! 86 400 s long, so a window that spans a leap second reads one second short, and a `23:59:60`
 //! start label is the first second of the next day. Leap seconds end on 2027-05-20.
 //!
@@ -33,6 +45,13 @@
 //! orbit) and by the drag and luni-solar drift over the span; the margin covers both by a wide
 //! factor, and `tests/bridge_access_reference.rs` samples `|dg/dt|` on every reference case and
 //! holds it under the bound. It is tested there, not proved for SGP4's formulas.
+//!
+//! For a table the speed bound is proved, not assumed: on each interval the interpolant's velocity
+//! is a convex combination of `v₀`, `3(r₁ − r₀)/h − v₀ − v₁` and `v₁` (its Bézier hull), so the
+//! largest of their norms over the table bounds it (`derivations/access_hermite_speed.mac`). The
+//! scan then misses no window of the interpolant at least its step floor long. That holds in exact
+//! arithmetic: a grazing window in which `g` rises above zero by less than its own rounding,
+//! nanometres, can be lost, as in any floating-point scan.
 //!
 //! Each edge is a Brent root of `g`, to the abscissa tolerance the caller gives.
 
@@ -71,6 +90,10 @@ pub enum AccessError {
     Interval,
     /// The tolerance is not finite and positive.
     Tolerance,
+    /// A table has fewer than two samples, arrays of unequal lengths, a time that is not finite or
+    /// not above the one before it, or a coordinate that is not finite, or its speed bound
+    /// overflows.
+    Samples,
     /// The Earth's orientation could not be established at a probed instant.
     EarthOrientation {
         /// Seconds past the start label.
@@ -100,6 +123,11 @@ impl fmt::Display for AccessError {
                 "the span is not finite and positive, or it ends outside the calendar"
             ),
             Self::Tolerance => write!(f, "the tolerance is not finite and positive"),
+            Self::Samples => write!(
+                f,
+                "the table needs two or more samples with strictly increasing finite times and \
+                 finite positions and velocities, as many of each"
+            ),
             Self::EarthOrientation { at_seconds, error } => {
                 write!(f, "at {at_seconds} s past the start: {error}")
             }
@@ -304,4 +332,147 @@ pub fn sgp4_windows(
         Some(e) => Err(e),
         None => Ok(found),
     }
+}
+
+/// The relative margin on a computed rate bound. The roundings of a table's speed bound, a
+/// subtraction, a product, a quotient, two subtractions and a norm, move it by under ten units in
+/// the last place, and those of the mask's factor by two more; sixty-four cover either, and the
+/// margin changes the scan's step by under one part in 10¹³.
+const TABLE_BOUND_ROUNDING: f64 = 1.0 + 64.0 * f64::EPSILON;
+
+/// A tabulated ephemeris: ITRF positions (m) and velocities (m/s) at strictly increasing times (s),
+/// joined by the cubic Hermite interpolant of each interval. The module documentation states the
+/// model and what a scan of it guarantees.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tabulated {
+    times: Vec<f64>,
+    positions: Vec<Vec3>,
+    velocities: Vec<Vec3>,
+    speed_bound: f64,
+}
+
+impl Tabulated {
+    /// The table of `positions` and `velocities` at `times`.
+    ///
+    /// # Errors
+    ///
+    /// [`AccessError::Samples`] for fewer than two samples, arrays of unequal lengths, a time that
+    /// is not finite or not above the one before it, a coordinate that is not finite, or a speed
+    /// bound that overflows.
+    pub fn new(
+        times: Vec<f64>,
+        positions: Vec<Vec3>,
+        velocities: Vec<Vec3>,
+    ) -> Result<Self, AccessError> {
+        let finite = |v: &Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if times.len() < 2
+            || positions.len() != times.len()
+            || velocities.len() != times.len()
+            || !times.iter().all(|t| t.is_finite())
+            || !times.windows(2).all(|w| w[0] < w[1])
+            || !positions.iter().all(finite)
+            || !velocities.iter().all(finite)
+        {
+            return Err(AccessError::Samples);
+        }
+        let mut speed_bound = 0.0_f64;
+        for i in 0..times.len() - 1 {
+            let (v0, v1) = (velocities[i], velocities[i + 1]);
+            let hull =
+                (positions[i + 1] - positions[i]).scale(3.0 / (times[i + 1] - times[i])) - v0 - v1;
+            speed_bound = speed_bound.max(v0.norm()).max(hull.norm()).max(v1.norm());
+        }
+        if !speed_bound.is_finite() {
+            return Err(AccessError::Samples);
+        }
+        Ok(Self {
+            times,
+            positions,
+            velocities,
+            speed_bound: speed_bound * TABLE_BOUND_ROUNDING,
+        })
+    }
+
+    /// The first and last sample times: the span a scan covers.
+    #[must_use]
+    pub fn span(&self) -> (f64, f64) {
+        (self.times[0], self.times[self.times.len() - 1])
+    }
+
+    /// A bound on the interpolant's speed over the whole table, m/s: the largest norm of any
+    /// interval's Bézier hull of velocities, rounded outward.
+    #[must_use]
+    pub const fn speed_bound(&self) -> f64 {
+        self.speed_bound
+    }
+
+    /// The interpolant's ITRF position at `t`, or `None` outside [`Tabulated::span`].
+    #[must_use]
+    pub fn position(&self, t: f64) -> Option<Vec3> {
+        let (first, last) = self.span();
+        (first..=last).contains(&t).then(|| self.at(t))
+    }
+
+    /// The interpolant at `t`, which the caller keeps inside the span.
+    fn at(&self, t: f64) -> Vec3 {
+        // The interval [t_i, t_{i+1}] holding t; the last sample belongs to the last interval.
+        let i = self
+            .times
+            .partition_point(|&x| x <= t)
+            .clamp(1, self.times.len() - 1)
+            - 1;
+        let (t0, t1) = (self.times[i], self.times[i + 1]);
+        let h = t1 - t0;
+        let tau = (t - t0) / h;
+        let third = h / 3.0;
+        let b0 = self.positions[i];
+        let b3 = self.positions[i + 1];
+        let b1 = b0 + self.velocities[i].scale(third);
+        let b2 = b3 - self.velocities[i + 1].scale(third);
+        // Each lerp as (1 − τ)a + τb, so that τ = 0 and τ = 1 return a and b exactly.
+        let lerp = |a: Vec3, b: Vec3| a.scale(1.0 - tau) + b.scale(tau);
+        let (c01, c12, c23) = (lerp(b0, b1), lerp(b1, b2), lerp(b2, b3));
+        lerp(lerp(c01, c12), lerp(c12, c23))
+    }
+}
+
+/// The bound on `|dg/dt|` for a table under `mask`: `(1 + |sin ε_min|)` times its speed bound,
+/// rounded outward.
+#[must_use]
+pub fn tabulated_rate_bound(ephemeris: &Tabulated, mask: &ElevationMask) -> f64 {
+    (1.0 + libm::fabs(mask.sin_min())) * ephemeris.speed_bound() * TABLE_BOUND_ROUNDING
+}
+
+/// The windows on the table's span in which its interpolant stands at least `mask_rad` above the
+/// geodetic horizon of `station`, each edge refined to `tol_seconds`.
+///
+/// Times are on the table's own coordinate. A window open at the first or the last sample is
+/// clamped to it. The scan is [`spacelab_coverage::windows`] with [`tabulated_rate_bound`], which
+/// bounds the interpolant's rate (the module documentation).
+///
+/// # Errors
+///
+/// [`AccessError::Mask`] or [`AccessError::Tolerance`] for the arguments. A table is checked when
+/// it is built, so a scan of one refuses nothing else.
+pub fn tabulated_windows(
+    ephemeris: &Tabulated,
+    station: &Station,
+    mask_rad: f64,
+    tol_seconds: f64,
+) -> Result<Vec<Window>, AccessError> {
+    let mask = elevation_mask(mask_rad)?;
+    if !(tol_seconds.is_finite() && tol_seconds > 0.0) {
+        return Err(AccessError::Tolerance);
+    }
+    let (first, last) = ephemeris.span();
+    let mut found = Vec::new();
+    windows(
+        |t| station.g(&mask, ephemeris.at(t)),
+        tabulated_rate_bound(ephemeris, &mask),
+        first,
+        last,
+        tol_seconds,
+        |w| found.push(w),
+    );
+    Ok(found)
 }

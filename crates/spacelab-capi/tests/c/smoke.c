@@ -2880,6 +2880,50 @@ static void the_access_windows_answer_the_rust_values_to_the_bit(void) {
     sl_sgp4_close(sat);
 }
 
+/*
+ * A straight pass 500 km over the equator at 0 E above a 60 deg mask, and a fixed point 20 km over
+ * (35 N, 33 E): the tables `straight-pass-over-the-equator` and `fixed-point-20km-up` of
+ * `crates/spacelab/tests/fixtures/bridge_access_tabulated_reference.tsv`. The Rust suite holds
+ * every window of that file to the bit through `tests/access.rs`; this holds these to the same bits
+ * through the header's layout of `sl_vec3` arrays.
+ */
+static void the_tabulated_access_windows_answer_the_rust_values_to_the_bit(void) {
+    const double times[3] = {0.0, 60.0, 120.0};
+    const sl_vec3 positions[3] = {
+        {6878137.0, -420e3, 0.0}, {6878137.0, 0.0, 0.0}, {6878137.0, 420e3, 0.0}};
+    const sl_vec3 velocities[3] = {{0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}};
+    const sl_geodetic equator = {0.0, 0.0, 0.0};
+    const double mask = double_of(UINT64_C(0x3ff0c152382d7365)); /* 60 deg */
+    const double tol = double_of(UINT64_C(0x3f1a36e2eb1c432d)); /* 1e-4 s */
+    sl_station_window pass[1];
+    size_t len = 0;
+    CHECK(sl_access_tabulated(times, positions, velocities, 3, &equator, 1, mask, tol, pass, 1,
+                              &len) == SL_OK);
+    CHECK(len == 1 && pass[0].station == 0);
+    CHECK(bits_of(pass[0].rise_s) == UINT64_C(0x4032c2bce8540c6b));
+    CHECK(bits_of(pass[0].set_s) == UINT64_C(0x40594f50c5a16c95));
+
+    const double still_times[2] = {0.0, 600.0};
+    const sl_vec3 up = {double_of(UINT64_C(0x4150c9364176bcda)),
+                        double_of(UINT64_C(0x4145cd48bc3ab8eb)),
+                        double_of(UINT64_C(0x414bd79d3813d415))};
+    const sl_vec3 still[2] = {up, up};
+    const sl_vec3 rest[2] = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+    const sl_geodetic stations[2] = {
+        {double_of(UINT64_C(0x3fe38c35418a5bf6)), double_of(UINT64_C(0x3fe26e40d7653223)), 0.0},
+        {double_of(UINT64_C(0xbfe38c35418a5bf6)), double_of(UINT64_C(0xc004866b1e6ae08f)), 0.0}};
+    const double ten = double_of(UINT64_C(0x3fc657184ae74487)); /* 10 deg */
+    sl_station_window held[2];
+    CHECK(sl_access_tabulated(still_times, still, rest, 2, stations, 2, ten, tol, held, 2, &len) ==
+          SL_OK);
+    CHECK(len == 1 && held[0].station == 0 && held[0].rise_s == 0.0 && held[0].set_s == 600.0);
+
+    size_t untouched = 99;
+    CHECK(sl_access_tabulated(times, positions, velocities, 1, &equator, 1, mask, tol, NULL, 0,
+                              &untouched) == SL_ERR_INVALID_ARGUMENT);
+    CHECK(untouched == 99);
+}
+
 int main(void) {
     the_layout_is_the_one_the_library_assumes();
     the_version_string_sizes_itself();
@@ -2912,6 +2956,7 @@ int main(void) {
     the_control_surface_closes_its_own_loop();
     the_time_scales_answer_the_rust_values_to_the_bit();
     the_access_windows_answer_the_rust_values_to_the_bit();
+    the_tabulated_access_windows_answer_the_rust_values_to_the_bit();
 
     if (failures != 0) {
         fprintf(stderr, "%d check(s) failed\n", failures);

@@ -1118,6 +1118,30 @@ try_figures_of_merit(std::span<const coverage_metrics> cells,
     return s == SL_OK ? result<constellation_fom>(out) : detail::failure<constellation_fom>(s);
 }
 
+/*
+ * The access windows of a tabulated ITRF ephemeris over `stations` on WGS 84; see
+ * `sl_access_tabulated`. The three sample arrays must be as long as each other; no station is an
+ * empty answer.
+ */
+[[nodiscard]] inline result<std::vector<station_window>>
+try_access_tabulated(std::span<const double> times, std::span<const vec3> positions,
+                     std::span<const vec3> velocities, std::span<const geodetic> stations,
+                     double mask_rad, double tol_s = 1e-3) {
+    using many = std::vector<station_window>;
+    if (positions.size() != times.size() || velocities.size() != times.size()) {
+        return detail::failure<many>(SL_ERR_INVALID_ARGUMENT);
+    }
+    if (stations.empty()) {
+        return many{};
+    }
+    return detail::sized<station_window>(
+        [&](station_window *out, std::size_t cap, std::size_t *len) {
+            return ::sl_access_tabulated(times.data(), positions.data(), velocities.data(),
+                                         times.size(), stations.data(), stations.size(), mask_rad,
+                                         tol_s, out, cap, len);
+        });
+}
+
 #if defined(__cpp_exceptions)
 
 [[nodiscard]] inline double refraction_apparent(double true_altitude_rad,
@@ -1173,6 +1197,14 @@ coverage(const ground_track &orbit, const sensor &instrument, std::span<const st
 [[nodiscard]] inline constellation_fom figures_of_merit(std::span<const coverage_metrics> cells,
                                                         std::span<const double> weights = {}) {
     return detail::unwrap(try_figures_of_merit(cells, weights));
+}
+
+[[nodiscard]] inline std::vector<station_window>
+access_tabulated(std::span<const double> times, std::span<const vec3> positions,
+                 std::span<const vec3> velocities, std::span<const geodetic> stations,
+                 double mask_rad, double tol_s = 1e-3) {
+    return detail::unwrap(
+        try_access_tabulated(times, positions, velocities, stations, mask_rad, tol_s));
 }
 
 #endif

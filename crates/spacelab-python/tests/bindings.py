@@ -2580,6 +2580,117 @@ def test_access_windows_return_the_rust_reference_to_the_bit():
         raise AssertionError("a malformed TLE was answered")
 
 
+def _access_tables():
+    """The tables of `bridge_access_tabulated_reference.tsv`, each with its samples, stations and
+    the Rust answer."""
+    path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "spacelab",
+        "tests",
+        "fixtures",
+        "bridge_access_tabulated_reference.tsv",
+    )
+    tables, rows = [], 0
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("#"):
+                continue
+            rows += 1
+            f = line.rstrip("\n").split("\t")
+            if f[0] == "table":
+                tables.append(
+                    {
+                        "name": f[1],
+                        "count": int(f[2]),
+                        "mask": _f64_of(f[3]),
+                        "tol": _f64_of(f[4]),
+                        "times": [],
+                        "positions": [],
+                        "velocities": [],
+                        "stations": [],
+                        "windows": [],
+                        "refused": None,
+                    }
+                )
+                continue
+            table = tables[-1]
+            assert f[1] == table["name"], f"a row outside its table: {line}"
+            if f[0] == "sample":
+                x = [_f64_of(h) for h in f[3:10]]
+                table["times"].append(x[0])
+                table["positions"].append(tuple(x[1:4]))
+                table["velocities"].append(tuple(x[4:7]))
+            elif f[0] == "station":
+                table["stations"].append(tuple(_f64_of(x) for x in f[3:6]))
+            elif f[0] == "window":
+                table["windows"].append((int(f[2]), f[3], f[4]))
+            elif f[0] == "refused":
+                table["refused"] = f[2]
+            else:
+                raise AssertionError(f"an unknown row kind {f[0]}")
+    return tables, rows
+
+
+def test_tabulated_access_windows_return_the_rust_reference_to_the_bit():
+    """Every table of the Rust API's tabulated access reference, through the bridge, to the bit.
+
+    `crates/spacelab/tests/bridge_access_tabulated.rs` holds the file to `spacelab::access` and the
+    API to its mathematics; the C ABI's `tests/access.rs` holds the C ABI to the same file. Here the
+    whole station list goes in one call and then each station alone: every window must come back
+    with the same bits in the same order, every refusal as a plain `ValueError`, and every row of
+    the file is counted. Arrays of unequal lengths, which the file cannot carry, are refused too.
+    """
+    tables, rows = _access_tables()
+    counted, windows, refusals = 0, 0, 0
+    for table in tables:
+        assert table["count"] == len(table["times"]), table["name"]
+        counted += 1 + len(table["times"]) + len(table["stations"]) + len(table["windows"])
+        counted += table["refused"] is not None
+        args = (table["times"], table["positions"], table["velocities"])
+        tail = (table["mask"], table["tol"])
+        if table["refused"] is not None:
+            kind = table["refused"]
+            assert kind in _ACCESS_REFUSAL or kind == "samples", kind
+            try:
+                sl.access_tabulated(*args, table["stations"], *tail)
+            except ValueError as e:
+                assert type(e) is ValueError, (
+                    f"{table['name']}: {kind} raised {type(e).__name__}: {e}"
+                )
+                refusals += 1
+                continue
+            raise AssertionError(f"{table['name']}: {kind} was answered")
+        got = [
+            (i, _bits(rise), _bits(set_))
+            for i, rise, set_ in sl.access_tabulated(*args, table["stations"], *tail)
+        ]
+        assert got == table["windows"], table["name"]
+        windows += len(got)
+        for i, station in enumerate(table["stations"]):
+            alone = [
+                (_bits(r), _bits(t)) for _, r, t in sl.access_tabulated(*args, [station], *tail)
+            ]
+            assert alone == [(r, t) for j, r, t in table["windows"] if j == i], (
+                f"{table['name']}: station {i} alone"
+            )
+    assert counted == rows, "a row of the reference was not read"
+    assert windows > 40 and refusals >= 9, "the reference lost its cases"
+    first = tables[0]
+    assert (
+        sl.access_tabulated(first["times"], first["positions"], first["velocities"], [], 0.0) == []
+    )
+    try:
+        sl.access_tabulated(
+            first["times"], first["positions"][:-1], first["velocities"], [(0.0, 0.0, 0.0)], 0.0
+        )
+    except ValueError as e:
+        assert type(e) is ValueError, e
+    else:
+        raise AssertionError("arrays of unequal lengths were answered")
+
+
 def test_every_export_is_named_by_a_test():
     """No public binding may exist without a test file naming it.
 

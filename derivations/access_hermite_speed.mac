@@ -1,0 +1,66 @@
+/* The cubic Hermite interpolant and its speed bound in crates/spacelab/src/access.rs (Ф31.C).
+
+   On a sample interval [t_i, t_i + h] with positions r0, r1 and velocities v0, v1 (one coordinate;
+   the three coordinates are alike), tau = (t - t_i) / h in [0, 1] and the interpolant is
+       H(tau) = (2 tau^3 - 3 tau^2 + 1) r0 + (tau^3 - 2 tau^2 + tau) h v0
+              + (3 tau^2 - 2 tau^3) r1 + (tau^3 - tau^2) h v1.
+   access.rs evaluates it by de Casteljau on the Bezier points
+       b0 = r0, b1 = r0 + h v0 / 3, b2 = r1 - h v1 / 3, b3 = r1,
+   each lerp written (1 - tau) a + tau b, so tau = 0 and tau = 1 return the samples exactly. Its
+   speed bound is max(|v0|, |c|, |v1|) over every interval, c = 3 (r1 - r0) / h - v0 - v1. The
+   claims, each a residual that must reduce to 0:
+     1-4  H(0) = r0, H(1) = r1, H'(0) / h = v0, H'(1) / h = v1: the interpolant takes the samples;
+     5    H equals the cubic Bezier curve on b0..b3 (Bernstein form);
+     6    de Casteljau's three rounds of lerps equal that Bernstein form;
+     7    dH/dt = H'(tau) / h = v0 (1 - tau)^2 + c 2 tau (1 - tau) + v1 tau^2;
+     8    (1 - tau)^2 + 2 tau (1 - tau) + tau^2 = 1.
+   By 7 and 8 the velocity of the interpolant is, at every tau in [0, 1], a combination of the
+   vectors v0, c, v1 with weights that are non-negative there and sum to 1, so its norm is at most
+   max(|v0|, |c|, |v1|) (the triangle inequality); the speed at the ends is |v0| and |v1|, so the
+   bound is reached wherever one of them is the largest of the three. With the
+   station fixed in ITRF, |dg/dt| <= (1 + |sin eps_min|) |rdot| (derivations/step_bound.mac).
+     9    the interpolant reproduces a cubic r(t) = a0 + a1 t + a2 t^2 + a3 t^3 sampled with r';
+    10    for r(t) = t^4 on [0, h] the error r - H is h^4 tau^2 (1 - tau)^2;
+    11-12 tau^2 (1 - tau)^2 is 1/16 at tau = 1/2 and stationary there, its maximum on [0, 1].
+   By 9-12 and the Peano kernel of the two-point Hermite rule, the interpolant is within
+   h^4 max|r''''| / 384 of a smooth trajectory: the windows are the interpolant's, and the
+   distance of the interpolant from the truth is the sampling step's. */
+
+declare([tau, h, r0, r1, v0, v1, a0, a1, a2, a3, t0], real)$
+assume(h > 0)$
+
+H(x) := (2*x^3 - 3*x^2 + 1) * r0 + (x^3 - 2*x^2 + x) * h * v0
+      + (3*x^2 - 2*x^3) * r1 + (x^3 - x^2) * h * v1$
+dH : diff(H(tau), tau)$
+
+print("H(0) - r0:", ratsimp(H(0) - r0))$
+print("H(1) - r1:", ratsimp(H(1) - r1))$
+print("H'(0) / h - v0:", ratsimp(subst(tau = 0, dH) / h - v0))$
+print("H'(1) / h - v1:", ratsimp(subst(tau = 1, dH) / h - v1))$
+
+b0 : r0$ b1 : r0 + h * v0 / 3$ b2 : r1 - h * v1 / 3$ b3 : r1$
+bez : (1 - tau)^3 * b0 + 3 * tau * (1 - tau)^2 * b1 + 3 * tau^2 * (1 - tau) * b2 + tau^3 * b3$
+print("H - Bezier(b0..b3):", ratsimp(H(tau) - bez))$
+
+lerp(a, b) := (1 - tau) * a + tau * b$
+c01 : lerp(b0, b1)$ c12 : lerp(b1, b2)$ c23 : lerp(b2, b3)$
+d012 : lerp(c01, c12)$ d123 : lerp(c12, c23)$
+print("de Casteljau - Bezier:", ratsimp(lerp(d012, d123) - bez))$
+
+c : 3 * (r1 - r0) / h - v0 - v1$
+print("dH/dt - Bernstein form on (v0, c, v1):",
+      ratsimp(dH / h - (v0 * (1 - tau)^2 + c * 2 * tau * (1 - tau) + v1 * tau^2)))$
+print("Bernstein weights of degree 2 - 1:", ratsimp((1 - tau)^2 + 2 * tau * (1 - tau) + tau^2 - 1))$
+
+cubic(t) := a0 + a1 * t + a2 * t^2 + a3 * t^3$
+dcubic(t) := a1 + 2 * a2 * t + 3 * a3 * t^2$
+print("H on a sampled cubic - the cubic:",
+      ratsimp(subst([r0 = cubic(t0), r1 = cubic(t0 + h), v0 = dcubic(t0), v1 = dcubic(t0 + h)],
+                    H(tau)) - cubic(t0 + h * tau)))$
+
+print("t^4 - H on t^4 - h^4 tau^2 (1 - tau)^2:",
+      ratsimp((h * tau)^4 - subst([r0 = 0, r1 = h^4, v0 = 0, v1 = 4 * h^3], H(tau))
+              - h^4 * tau^2 * (1 - tau)^2))$
+kernel : tau^2 * (1 - tau)^2$
+print("kernel(1/2) - 1/16:", ratsimp(subst(tau = 1/2, kernel) - 1/16))$
+print("kernel'(1/2):", ratsimp(subst(tau = 1/2, diff(kernel, tau))))$

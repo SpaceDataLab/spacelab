@@ -312,6 +312,7 @@ fn kind(e: &AccessError) -> &'static str {
         AccessError::Mask => "mask",
         AccessError::Interval => "interval",
         AccessError::Tolerance => "tolerance",
+        AccessError::Samples => panic!("an SGP4 scan has no table to refuse"),
         AccessError::EarthOrientation { error, .. } => match error {
             EarthOrientationError::Leap(LeapError::BeforeIntegerSecondEra) => "before-1972",
             EarthOrientationError::Leap(LeapError::SpuriousLeapSecond) => "spurious-leap-second",

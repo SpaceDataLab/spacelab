@@ -5776,7 +5776,8 @@ fn access_err(e: &spacelab::access::AccessError, message: String) -> PyErr {
         AccessError::Station
         | AccessError::Mask
         | AccessError::Interval
-        | AccessError::Tolerance => PyValueError::new_err(message),
+        | AccessError::Tolerance
+        | AccessError::Samples => PyValueError::new_err(message),
         AccessError::EarthOrientation { error, .. } => match error {
             spacelab::EarthOrientationError::Leap(_) => LeapSecondError::new_err(message),
             spacelab::EarthOrientationError::Eop(e) => eop_err(e, message),
@@ -5840,6 +5841,59 @@ fn access_sgp4(
                     spacelab::access::sgp4_windows(
                         &satellite, source, start, span_s, &station, mask_rad, tol_s,
                     )
+                })
+                .map_err(|e| access_err(&e, format!("station {i}: {e}")))?;
+            found.extend(windows.iter().map(|w| (i, w.rise, w.set)));
+        }
+        Ok(found)
+    })
+}
+
+/// The access windows of a tabulated ITRF ephemeris over `stations` on WGS 84, as `(station,
+/// rise_s, set_s)` tuples grouped by station in the order given, and in time order within each.
+///
+/// The table is `positions` (m) and `velocities` (m/s), each an `(x, y, z)` in ITRF, at strictly
+/// increasing `times` (s): an OEM, an SP3 file with velocity records, or a numerical propagator's
+/// output, taken to ITRF by the caller. Between two samples the trajectory is the cubic Hermite
+/// interpolant of their positions and velocities, which takes every sample exactly; the windows
+/// are the interpolant's, on the table's own time coordinate, and one open at the first or the
+/// last sample is clamped to it. Its distance from the true trajectory is at most
+/// `h^4 max|d^4 r / dt^4| / 384` on a step `h`. Stations and the mask are as in `access_sgp4`.
+///
+/// No window of the interpolant at least a billionth of the span long is missed. The scan's rate
+/// bound is proved, not assumed: on each interval the interpolant's velocity is a convex
+/// combination of `v0`, `3 (r1 - r0) / h - v0 - v1` and `v1`, so the largest of their norms
+/// bounds it. The windows are the Rust API's to the bit.
+///
+/// Raises `ValueError` for fewer than two samples, arrays of unequal lengths, a time not finite or
+/// not above the one before it, a sample coordinate not finite, a latitude outside
+/// `[-pi/2, pi/2]` or a station coordinate not finite, a mask not strictly inside
+/// `(-pi/2, pi/2)`, or a tolerance not finite and positive. The message names the station where it
+/// is one.
+#[pyfunction]
+#[pyo3(signature = (times, positions, velocities, stations, mask_rad, tol_s = 1e-3))]
+fn access_tabulated(
+    py: Python<'_>,
+    times: Vec<f64>,
+    positions: Vec<(f64, f64, f64)>,
+    velocities: Vec<(f64, f64, f64)>,
+    stations: Vec<(f64, f64, f64)>,
+    mask_rad: f64,
+    tol_s: f64,
+) -> PyResult<Vec<(usize, f64, f64)>> {
+    let vec = |&(x, y, z): &(f64, f64, f64)| Vec3::new(x, y, z);
+    let table = spacelab::access::Tabulated::new(
+        times,
+        positions.iter().map(vec).collect(),
+        velocities.iter().map(vec).collect(),
+    )
+    .map_err(|e| access_err(&e, e.to_string()))?;
+    py.detach(|| {
+        let mut found = Vec::new();
+        for (i, &(latitude, longitude, height)) in stations.iter().enumerate() {
+            let windows = spacelab::access::Station::geodetic(latitude, longitude, height)
+                .and_then(|station| {
+                    spacelab::access::tabulated_windows(&table, &station, mask_rad, tol_s)
                 })
                 .map_err(|e| access_err(&e, format!("station {i}: {e}")))?;
             found.extend(windows.iter().map(|w| (i, w.rise, w.set)));
@@ -6953,6 +7007,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("EopRangeError", m.py().get_type::<EopRangeError>())?;
     m.add("PropagationError", m.py().get_type::<PropagationError>())?;
     m.add_function(wrap_pyfunction!(access_sgp4, m)?)?;
+    m.add_function(wrap_pyfunction!(access_tabulated, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tai, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tt, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tdb, m)?)?;
@@ -10248,7 +10303,7 @@ mod interpreter_tests {
             .expect("an IERS fixture");
             let series = PyEopSeries::parse_finals2000a(&finals).expect("the fixture parses");
             let one = vec![(0.61, 0.57, 0.0)];
-            let cases: [(PyResult<Vec<(usize, f64, f64)>>, &str); 6] = [
+            let cases = [
                 (
                     access_sgp4(py, L1, L2, start, 3_600.0, one.clone(), 2.0, 1e-3, None),
                     "ValueError",
@@ -10318,6 +10373,121 @@ mod interpreter_tests {
                 let e = result.expect_err("a refused scan");
                 let name = e.get_type(py).name().expect("a type name").to_string();
                 assert_eq!(name, kind, "{e}");
+            }
+        });
+    }
+
+    /// The tabulated scan across the bridge: a two-body orbit sampled every two minutes for twelve
+    /// hours returns the Rust API's windows to the bit, and every refusal of a table, a station, a
+    /// mask or a tolerance is a plain `ValueError`.
+    #[test]
+    fn the_tabulated_scan_is_the_rust_api_and_refuses_with_value_error() {
+        const MU: f64 = 3.986_004_418e14;
+        let radius = 7_078_137.0_f64;
+        let n = (MU / radius.powi(3)).sqrt();
+        let (si, ci) = 98.2_f64.to_radians().sin_cos();
+        let (mut times, mut positions, mut velocities) = (Vec::new(), Vec::new(), Vec::new());
+        for k in 0..361_u32 {
+            let t = f64::from(k) * 120.0;
+            let (su, cu) = (n * t).sin_cos();
+            let (st, ct) = (7.292_115e-5 * t).sin_cos();
+            let (x, y, z) = (radius * cu, radius * su * ci, radius * su * si);
+            let (vx, vy, vz) = (-radius * n * su, radius * n * cu * ci, radius * n * cu * si);
+            let (xe, ye) = (ct * x + st * y, -st * x + ct * y);
+            times.push(t);
+            positions.push((xe, ye, z));
+            velocities.push((
+                ct * vx + st * vy + 7.292_115e-5 * ye,
+                -st * vx + ct * vy - 7.292_115e-5 * xe,
+                vz,
+            ));
+        }
+        let stations = vec![(1.365, 0.27, 500.0), (0.61, 0.57, 0.0)];
+        Python::attach(|py| {
+            let got = access_tabulated(
+                py,
+                times.clone(),
+                positions.clone(),
+                velocities.clone(),
+                stations.clone(),
+                0.1,
+                1e-4,
+            )
+            .expect("an answered scan");
+            let v = |&(x, y, z): &(f64, f64, f64)| Vec3::new(x, y, z);
+            let table = spacelab::access::Tabulated::new(
+                times.clone(),
+                positions.iter().map(v).collect(),
+                velocities.iter().map(v).collect(),
+            )
+            .expect("a table");
+            let mut want = Vec::new();
+            for (i, &(lat, lon, h)) in stations.iter().enumerate() {
+                let station = spacelab::access::Station::geodetic(lat, lon, h).expect("a station");
+                let windows = spacelab::access::tabulated_windows(&table, &station, 0.1, 1e-4)
+                    .expect("an answered scan");
+                want.extend(
+                    windows
+                        .iter()
+                        .map(|w| (i, w.rise.to_bits(), w.set.to_bits())),
+                );
+            }
+            let got_bits: Vec<_> = got
+                .iter()
+                .map(|&(i, r, s)| (i, r.to_bits(), s.to_bits()))
+                .collect();
+            assert!(want.len() > 4, "too few windows to mean anything");
+            assert_eq!(got_bits, want);
+
+            let mut repeated = times.clone();
+            repeated[2] = repeated[1];
+            let one = vec![(0.61, 0.57, 0.0)];
+            let p = positions.clone();
+            let w = velocities.clone();
+            let refused = [
+                access_tabulated(
+                    py,
+                    times[..1].to_vec(),
+                    p[..1].to_vec(),
+                    w[..1].to_vec(),
+                    one.clone(),
+                    0.1,
+                    1e-4,
+                ),
+                access_tabulated(
+                    py,
+                    times.clone(),
+                    p[..9].to_vec(),
+                    w.clone(),
+                    one.clone(),
+                    0.1,
+                    1e-4,
+                ),
+                access_tabulated(py, repeated, p.clone(), w.clone(), one.clone(), 0.1, 1e-4),
+                access_tabulated(
+                    py,
+                    times.clone(),
+                    p.clone(),
+                    w.clone(),
+                    vec![(2.0, 0.0, 0.0)],
+                    0.1,
+                    1e-4,
+                ),
+                access_tabulated(
+                    py,
+                    times.clone(),
+                    p.clone(),
+                    w.clone(),
+                    one.clone(),
+                    2.0,
+                    1e-4,
+                ),
+                access_tabulated(py, times.clone(), p, w, one, 0.1, 0.0),
+            ];
+            for result in refused {
+                let e = result.expect_err("a refused scan");
+                let name = e.get_type(py).name().expect("a type name").to_string();
+                assert_eq!(name, "ValueError", "{e}");
             }
         });
     }

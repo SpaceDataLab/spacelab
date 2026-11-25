@@ -1377,28 +1377,36 @@ sl_status sl_vmf3_mapping(double ah, double aw, double latitude_rad, double long
 /* ---- Atmospheres, tides, density calibration and space weather ---- */
 
 /*
- * NRLMSISE-00 total mass density, kg/m^3. `doy` is the day of year, `sec` UT seconds into the day,
- * the altitude kilometres and the two angles degrees -- the model's own units, not this header's
- * SI, because they are what the published subroutine takes and translating them here would hide a
- * conversion inside a binding. Total.
+ * NRLMSISE-00 total mass density, kg/m^3, written to `out`. `doy` is the day of year, `sec` UT
+ * seconds into the day, the altitude kilometres and the two angles degrees -- the model's own
+ * units, not this header's SI, because they are what the published subroutine takes and
+ * translating them here would hide a conversion inside a binding.
  *
  * The local solar time the model needs is derived from `sec` and the longitude.
  *
- * A non-finite argument answers NaN. The published subroutine does not propagate one -- measured,
- * a NaN altitude comes back as 2.9e-3 kg/m^3, which is a sea-level density and so a plausible
- * number rather than an obvious failure.
+ * A non-finite argument is `SL_ERR_INVALID_ARGUMENT`. The published subroutine does not propagate
+ * one -- measured, a NaN altitude comes back as 2.9e-3 kg/m^3, which is a sea-level density and so
+ * a plausible number rather than an obvious failure.
+ *
+ * `SL_ERR_DOMAIN` where the model has no temperature profile: above 123.435 km it needs
+ * T_inf > T_lb > 0 and a positive gradient, and a flare-contaminated daily F10.7 breaks the first
+ * (707.6 sfu against an 81-day mean of 98.8 puts T_inf near 10 K). The published subroutine returns
+ * NaN, an infinity or the density of a profile with no exosphere there. `out` is written only on
+ * `SL_OK`.
  */
-double sl_nrlmsise00_density(int32_t doy, double sec, double altitude_km, double latitude_deg,
-                             double longitude_deg, double f107, double f107a, double ap);
+sl_status sl_nrlmsise00_density(int32_t doy, double sec, double altitude_km, double latitude_deg,
+                                double longitude_deg, double f107, double f107a, double ap,
+                                double *out);
 
 /* How many doubles `sl_sdtm1_density_interval` writes. */
 #define SL_SDTM1_INTERVAL 2
 
 /*
  * SDTM-1 total mass density, kg/m^3 -- this library's own thermosphere model, fitted to open
- * accelerometer densities. Same argument shape and same units as `sl_nrlmsise00_density`, except
- * that the day of year is a double so it can carry a fraction, and that the geomagnetic argument is
- * not an index: `storm` is `sl_sdtm1_storm_response` over the `ap` history.
+ * accelerometer densities. Same arguments and same units as `sl_nrlmsise00_density`, except that
+ * the day of year is a double so it can carry a fraction, that the geomagnetic argument is not an
+ * index -- `storm` is `sl_sdtm1_storm_response` over the `ap` history -- and that the density is
+ * the return value rather than an out-parameter.
  *
  * `f107` is the previous day's observed 10.7 cm flux and `f107a` its 81-day TRAILING mean -- the
  * fit's convention, not the centred mean NRLMSISE-00 specifies. Total; a non-finite argument

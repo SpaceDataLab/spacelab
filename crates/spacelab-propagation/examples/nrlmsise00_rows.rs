@@ -3,7 +3,8 @@
 //! `cargo run -p spacelab-propagation --release --example nrlmsise00_rows -- SW-All.csv < rows > rho`
 //!
 //! Each input line is `year month day seconds_of_day altitude_km latitude_deg longitude_deg lst_h`;
-//! each output line is the density in kg/m³, or `nan` where the feed lacks a day the model needs.
+//! each output line is the density in kg/m³, or `nan` where the feed lacks a day the model needs or
+//! the model refuses the row (`Nrlmsise00Error`: no temperature profile, as on a flare day).
 //! The drivers are the ones `tests/measured_density.rs` scores NRLMSISE-00 with (§10.2): the 81-day
 //! *centred* F10.7, the previous day's observed F10.7, and the storm-time `ap[]` history
 //! (`switches[9] = -1`) through `gtd7d`, whose total carries anomalous oxygen.
@@ -75,7 +76,9 @@ fn main() {
                 ap_array: Some(ap_array),
             };
             // `d[5]` is g/cm³ under the default switches.
-            Some(gtd7d(&input, &storm).d[5] * 1000.0)
+            gtd7d(&input, &storm)
+                .ok()
+                .map(|output| output.d[5] * 1000.0)
         });
         writeln!(out, "{}", rho.unwrap_or(f64::NAN)).expect("writable stdout");
     }

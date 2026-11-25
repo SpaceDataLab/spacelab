@@ -367,8 +367,10 @@ impl<const K: usize> ScenarioAtmosphere<'_, K> {
             ap: state.ap,
             ap_array: None,
         };
-        // d[5] is g/cm3 from gtd7d, anomalous oxygen included.
-        gtd7d(&input, &Nrlmsise00Flags::default()).d[5] * 1_000.0
+        // d[5] is g/cm3 from gtd7d, anomalous oxygen included. A refusal (`Nrlmsise00Error`, a
+        // flare-contaminated F10.7 in the history) has no density and `DecayAtmosphere` no channel
+        // for it, so it is NaN, and the run comes back `Lifetime::Unresolved` (`docs/limitations.md`).
+        gtd7d(&input, &Nrlmsise00Flags::default()).map_or(f64::NAN, |output| output.d[5] * 1_000.0)
     }
 }
 
@@ -693,7 +695,7 @@ mod tests {
             ap: state.ap,
             ap_array: None,
         };
-        let want = gtd7d(&input, &Nrlmsise00Flags::default()).d[5] * 1_000.0;
+        let want = gtd7d(&input, &Nrlmsise00Flags::default()).unwrap().d[5] * 1_000.0;
         let got = a.density_held(segment_start, t, position);
         assert!((got / want - 1.0).abs() < 1.0e-12, "{got} {want}");
         // Past the jump, the held read and the read at `t` differ: the next day's flux has arrived.
@@ -814,7 +816,7 @@ mod tests {
             ap: state.ap,
             ap_array: None,
         };
-        let want = gtd7d(&input, &Nrlmsise00Flags::default()).d[5] * 1_000.0;
+        let want = gtd7d(&input, &Nrlmsise00Flags::default()).unwrap().d[5] * 1_000.0;
         assert_eq!(a.density(0.0, position), want);
     }
 

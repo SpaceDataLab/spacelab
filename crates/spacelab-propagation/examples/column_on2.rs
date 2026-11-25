@@ -294,8 +294,8 @@ fn msis_at(
             ap: today.ap,
             ap_array: Some(ap_array),
         };
-        let d = gtd7(&input, &flags).d;
-        [d[1] * 1e6, d[2] * 1e6]
+        // A refusal (`Nrlmsise00Error`, no temperature profile) has no densities: NaN.
+        gtd7(&input, &flags).map_or([f64::NAN; 2], |o| [o.d[1] * 1e6, o.d[2] * 1e6])
     };
     match local {
         Some(z) => {

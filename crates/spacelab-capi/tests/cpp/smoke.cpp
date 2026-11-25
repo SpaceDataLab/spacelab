@@ -780,6 +780,16 @@ void the_atmosphere_wrapper_answers_what_the_formulas_say() {
     CHECK(spacelab::nrlmsise00_density(172, 29000.0, 200.0, 0.0, 0.0, 150.0, 150.0, 4.0) >
           spacelab::nrlmsise00_density(172, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 4.0));
 
+    /* A flare day's F10.7 leaves the model without a temperature profile: a throw, not a number. */
+    bool refused = false;
+    try {
+        (void)spacelab::nrlmsise00_density(253, 57600.0, 400.0, -5.0, 0.0, 707.6, 98.8, 33.0);
+    } catch (const spacelab::error &e) {
+        refused = true;
+        CHECK(e.status() == SL_ERR_DOMAIN);
+    }
+    CHECK(refused);
+
     /* SDTM-1 through the span overload: a constant index history sits on the cooling state's steady
      * state, below the index, the same at the default 3-hourly cadence and at an hourly one. */
     const std::array<double, 16> quiet_ap{5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0,

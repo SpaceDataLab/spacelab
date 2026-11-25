@@ -848,6 +848,7 @@ force's `Dual` value equals its f64 value bit for bit.
 |---|---|---|---|---|
 | NRLMSISE-00 (gtd7/gtd7d) | Picone et al. 2002 and Hedin 1987/1991 for the structure; NRL's `nrlmsise00_sub.for` `BLOCK DATA GTD7BK` for the coefficients. The harmonic expansions in `globe7`/`glob7s` are still the program's in practice ⚠ | **data:** `tables.rs` regenerated from the pinned FORTRAN (sha256) is byte-identical, 3 290 values (`derivations/verify.sh`). **(G2/G3) structure:** `derivations/nrlmsise00_structure.mac` — 20 identities: Bates–Walker ODE and limits, the diffusive closed form solves `d ln n/dz = −(1+α) d ln T/dz − m g/(R T)`, the spline end slopes, `dnet` and `ccor` limits; `densu` solves the same law by central differences on both branches. **Comparators:** Brodowski's C over 496 points (tripwire for the harmonics, D-22) and NRL's 17 printed outputs (parked, Ф19.C) | 20 identities = 0; ODE residual < 1e-7 of the gravity term; sweep < 1e-14 | derivations/, src/nrlmsise00/mod.rs |
 | NRLMSISE-00 drag wrapper | internal API contract (gtd7d + hydrostatic gradient) | underlying gtd7d value + analytic scale-height gradient | value < 1e-12 rel; gradient < 1e-6 | tests/nrlmsise00_atmosphere.rs |
+| NRLMSISE-00 at a flare F10.7 (F128, Ф23.AJ) | the Bates–Walker profile is defined for `T∞ > T_lb > 0`, `g0 > 0` (`nrlmsise00_structure.mac`); `globe7`'s F10.7 term is concave in the daily flux | **(G3)** `derivations/nrlmsise00_flux_domain.mac`, 34 checks: `T∞`, `T_lb`, `g0` exact at four inputs, 707.6 and 573.4 sfu — two CHAMP rows of 2005-09-10 and 2006-12-07 under the `ap` array, two bridge inputs under daily `Ap` — `T∞ < T_lb` at each, the flux where `T∞ = T_lb`, no exospheric limit when `σ < 0`, the port's old NaN as `∞·0` over that profile; PARI/GP recomputes the profile at 60 digits and bisects for the boundary. `the_flare_rows_have_no_temperature_profile` holds all three entry points to `Nrlmsise00Error::NoTemperatureProfile` at the rows and to an answer 0.01 sfu inside the boundary; the C, C++ and Python bridges refuse the same inputs | `T∞`, `T_lb` < 1e-9 K; boundary ± 0.01 sfu | derivations/, src/nrlmsise00/mod.rs, tests/nrlmsise00_atmosphere.rs, spacelab-capi, tests/bindings.py |
 | Harris-Priester | Harris & Priester 1962 table (Montenbruck–Gill appendix) | Orekit reference density (Montenbruck–Gill table) | max_rel < 1e-11 | src/harris_priester/mod.rs |
 | Atmospheric drag force | drag-equation definition; King-Hele Δa | King-Hele Δa; co-rotation; dissipative STM detΦ<1 | energy monotone; detΦ < 1−1e-6 | tests/drag.rs |
 
@@ -8649,6 +8650,18 @@ promote a corpus fit has not passed.
 observed F10.7 is 707.6 and 573.4 sfu — the 2005-09-09 and 2006-12-06 X-class flares in Penticton's
 noon measurement. At 2–3 rows of those days the model returns NaN; at 500 sfu the same row is finite.
 Those rows are dropped from both models. Whether the reference C does the same is not checked here.
+
+*Correction (F128, Ф23.AJ).* The NaN is the model leaving its domain, not a fault of the port:
+`globe7`'s F10.7 term is concave in the daily flux, so these fluxes put `T∞` below `T_lb` and the
+Bates–Walker profile has no exosphere (`derivations/nrlmsise00_flux_domain.mac`). NRL's FORTRAN,
+compiled with gfortran in its own single precision, returns a NaN total density at both CHAMP rows
+of that file: `T∞` 9.7214 K and `T` 1.2386e7 K at 375 km on the first, `T` = +∞ on the second. On
+the rest of those days, and on 2011-03-08 (F10.7
+938.6 on 03-07), the port answered a finite density over that profile, and those rows were scored
+above. `gtd7d` now refuses all of them: over the whole archive, 21 912 607 rows, 3 967 rows that had
+a finite answer are refused (1 969 on 2005-09-10, 29 on 2006-12-07, 1 969 on 2011-03-08), the 143
+that were NaN stay unanswered, and every other row is bit-identical. The scores of this section and
+§10.22 are not rerun with the refusal.
 
 ### 10.22 Every storm the archive covers, on held-out missions (Ф15.H)
 

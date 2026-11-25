@@ -69,8 +69,8 @@ fn expected_pair(t: f64, alt_km: f64) -> (f64, f64) {
     let mut up = base;
     up.alt = alt_km + 10.0;
     (
-        gtd7d(&base, &flags).d[5] * 1000.0,
-        gtd7d(&up, &flags).d[5] * 1000.0,
+        gtd7d(&base, &flags).expect("inside the domain").d[5] * 1000.0,
+        gtd7d(&up, &flags).expect("inside the domain").d[5] * 1000.0,
     )
 }
 
@@ -126,4 +126,62 @@ fn the_scalar_gradient_is_the_local_minus_rho_over_h() {
         h_scale > 10_000.0 && h_scale < 200_000.0,
         "unphysical scale height {h_scale} m",
     );
+}
+
+/// Where the model refuses — a flare-contaminated daily F10.7 leaves it without a temperature
+/// profile above 123.435 km — the wrapper answers NaN, because [`Atmosphere`] has no channel for a
+/// refusal. What keeps that NaN out of an ephemeris is the adaptive driver: it rejects a step whose
+/// error norm is NaN and stops with `StepUnderflow` at the epoch. The same orbit under a quiet sun
+/// integrates, so the stop is the refusal and not the setup. Row C of
+/// `derivations/nrlmsise00_flux_domain.mac`: 2005-09-10 (day 253) at 16:00 UT, 5° S on the prime
+/// meridian, F10.7 707.6 sfu against a mean of 98.8.
+#[test]
+fn a_refused_density_stops_the_adaptive_driver() {
+    use spacelab_propagation::Tolerance;
+    use spacelab_propagation::driver::{Controls, IntegrationError, integrate_dop853};
+    use spacelab_propagation::forces::{Drag, Newtonian, NoWind, Plain, PointMass};
+
+    const MU: f64 = 3.986_004_418e14;
+    let run = |f107: f64, f107a: f64| {
+        let atmosphere = Nrlmsise00Atmosphere {
+            doy0: 253,
+            sec0: 57_600.0,
+            f107,
+            f107a,
+            ap: 33.0,
+            geodetic: |_t: f64, r: [f64; 3]| {
+                let mag = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt();
+                ((mag - RE_M) / 1000.0, -5.0, 0.0)
+            },
+        };
+        let rho = atmosphere.density::<f64>(0.0, &[RE_M + 400_000.0, 0.0, 0.0]);
+        let sys = Plain(Newtonian((
+            PointMass { mu: MU },
+            Drag {
+                ballistic_coefficient: 0.02,
+                earth_rotation_rate: 7.292_115e-5,
+                atmosphere,
+                wind: NoWind,
+            },
+        )));
+        let a = RE_M + 400_000.0;
+        let y0 = [a, 0.0, 0.0, 0.0, (MU / a).sqrt(), 0.0];
+        let tol = Tolerance::new(1e-9, 1e-9);
+        let outcome = integrate_dop853(&sys, 0.0, &y0, 600.0, 10.0, Controls::new(tol, 1e-3));
+        (rho, outcome.map(|_| ()))
+    };
+
+    let (rho, outcome) = run(707.6, 98.8);
+    assert!(
+        rho.is_nan(),
+        "the wrapper answered {rho} kg/m³ on a refused input"
+    );
+    assert!(
+        matches!(outcome, Err(IntegrationError::StepUnderflow { t }) if t == 0.0),
+        "{outcome:?}"
+    );
+
+    let (rho, outcome) = run(150.0, 150.0);
+    assert!(rho > 0.0, "{rho}");
+    assert!(outcome.is_ok(), "{outcome:?}");
 }

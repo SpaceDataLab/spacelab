@@ -33,6 +33,10 @@
 //! total mass density for drag, including anomalous oxygen) and [`gts7`] (thermospheric part). The
 //! tables index 1:1 with the FORTRAN arrays, zero-based rather than one-based because Rust is.
 //!
+//! All three refuse with [`Nrlmsise00Error`] where the input leaves the model without a temperature
+//! profile — `T∞ > T_lb > 0` and `g0 > 0` failing, as a flare-contaminated daily F10.7 makes them —
+//! where the FORTRAN returns NaN, an infinity or the density of a profile with no exosphere.
+//!
 //! Gated by its data and its structure: `derivations/verify.sh` regenerates the tables from the
 //! pinned FORTRAN and compares them byte for byte, and `derivations/nrlmsise00_structure.mac`
 //! proves the Bates–Walker profile, the diffusive closed form and the turbopause blend against the
@@ -159,7 +163,9 @@ pub struct Nrlmsise00Output {
     /// no physical evaluation reaches. Flagging is what makes the rest of this module's
     /// unreachability claims true statements rather than statements about a grid.
     ///
-    /// It is a report, not a refusal: the outputs are still whatever the reference would produce.
+    /// It is a report, not a refusal: the outputs are still whatever the reference would produce,
+    /// unless the input leaves the model without a temperature profile, which is refused with
+    /// [`Nrlmsise00Error`] whatever this flag says.
     /// Set when `doy` is outside `1..=366`, when `alt` is negative, when `|g_lat| > 90`, when
     /// `f107a`, `f107`, `ap` or any [`Nrlmsise00Input::ap_array`] entry is negative, or when any
     /// `f64` input is not finite. A longitude at or below `-1000` is *not* flagged — that is the
@@ -167,6 +173,57 @@ pub struct Nrlmsise00Output {
     /// `the_longitude_sentinel_includes_its_own_boundary`.
     pub input_out_of_domain: bool,
 }
+
+/// Why NRLMSISE-00 has no answer at an input.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Nrlmsise00Error {
+    /// The model's thermosphere is a Bates–Walker temperature profile, `T = T∞ − (T∞ − T_lb)
+    /// e^{−σζ}` with `σ = g0/(T∞ − T_lb)`, rising from `T_lb` at 120 km to the exospheric
+    /// temperature `T∞`; every density above `za` = 123.435 km is the hydrostatic closed form over
+    /// it. It exists only for `T∞ > T_lb > 0` and `g0 > 0` — the hypotheses
+    /// `derivations/nrlmsise00_structure.mac` proves the profile and the closed form under — and the
+    /// three are fitted polynomials of the input that nothing keeps there.
+    ///
+    /// The one that leaves first is `T∞`: its F10.7 term is concave in the daily flux's departure
+    /// from the 81-day mean, `0.00166·ΔF − 5.54e-6·ΔF²` at `F10.7a = 150`, so a flare-contaminated
+    /// daily flux drives `T∞` down through `T_lb` and through zero: a previous-day F10.7 of
+    /// 707.6 sfu against a mean of 98.8 (2005-09-10) gives `T∞ = 9.7 K` on a CHAMP row at 375 km.
+    /// Below `T_lb` the profile has no exospheric limit — `σ < 0`, and `T` grows as `e^{|σ|ζ}`, to
+    /// `1.24e7 K` at that row — so `T∞` is not the exospheric temperature and the closed forms are
+    /// not the model's densities, though they still evaluate to numbers. The reference FORTRAN
+    /// returns NaN, `±∞` or a finite density of such a profile there, as this port did.
+    /// `derivations/nrlmsise00_flux_domain.mac` evaluates the chain exactly at four such inputs and
+    /// gives the flux at which each one leaves the domain.
+    ///
+    /// At and below 123.435 km, where the profile joins the lower-thermosphere spline, the model holds
+    /// `T∞` at its global mean, so a flare day still has answers there.
+    NoTemperatureProfile {
+        /// The exospheric temperature `T∞` the model computed, K.
+        t_inf: f64,
+        /// The 120 km temperature `T_lb`, K.
+        t_lb: f64,
+        /// The 120 km temperature gradient `g0`, K/km.
+        gradient: f64,
+    },
+}
+
+impl core::fmt::Display for Nrlmsise00Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::NoTemperatureProfile {
+                t_inf,
+                t_lb,
+                gradient,
+            } => write!(
+                f,
+                "NRLMSISE-00 has no temperature profile here: T_inf {t_inf} K, T_lb {t_lb} K and \
+                 gradient {gradient} K/km do not satisfy T_inf > T_lb > 0 and gradient > 0"
+            ),
+        }
+    }
+}
+
+impl core::error::Error for Nrlmsise00Error {}
 
 /// Model switches. Standard values are 0 for `switches[0]` and 1 for `switches[1..24]`
 /// ([`Default`]). A value of 2 means "main effects off but cross terms on"; `switches[9] == -1`
@@ -1061,7 +1118,14 @@ struct Gts7Result {
 }
 
 /// Thermospheric portion of NRLMSISE-00 (`alt > 72.5 km`). `gsurf`/`re` come from `glatf`.
-fn gts7_impl(input: &Nrlmsise00Input, sw: &Sw, gsurf: f64, re: f64) -> Gts7Result {
+///
+/// Refuses with [`Nrlmsise00Error::NoTemperatureProfile`] where the profile does not exist.
+fn gts7_impl(
+    input: &Nrlmsise00Input,
+    sw: &Sw,
+    gsurf: f64,
+    re: f64,
+) -> Result<Gts7Result, Nrlmsise00Error> {
     let dgtr = 1.74533E-2;
     let dr = 1.72142E-2;
     let alpha = [-0.38, 0.0, 0.0, 0.0, 0.17, 0.0, -0.38, 0.0, 0.0];
@@ -1099,6 +1163,18 @@ fn gts7_impl(input: &Nrlmsise00Input, sw: &Sw, gsurf: f64, re: f64) -> Gts7Resul
         PTM[3] * PS[0]
     };
     let tlb = PTM[1] * (1.0 + sw.sw[17] * globe7(&mut l, &PD[3], input, sw)) * PD[3][0];
+    // Every `densu` below evaluates the Bates–Walker profile, which `T∞ > T_lb > 0` and `g0 > 0`
+    // define. Outside them `σ = s` is negative or infinite, `e^{−σζ}` overflows, and `densu`
+    // returns `∞·0`, `0·∞` or the density of a profile with no exosphere (see the error type).
+    // Written as one positive test so that a NaN among the three is refused too.
+    let profile_exists = tlb > 0.0 && tinf > tlb && g0v > 0.0;
+    if !profile_exists {
+        return Err(Nrlmsise00Error::NoTemperatureProfile {
+            t_inf: tinf,
+            t_lb: tlb,
+            gradient: g0v,
+        });
+    }
     let s = g0v / (tinf - tlb);
 
     // Lower thermosphere temperatures (unimportant for density above 300 km)
@@ -1726,20 +1802,29 @@ fn gts7_impl(input: &Nrlmsise00Input, sw: &Sw, gsurf: f64, re: f64) -> Gts7Resul
     }
 
     output.out_of_range = held;
-    Gts7Result {
+    Ok(Gts7Result {
         output,
         dm28,
         tn1_4: meso_tn1[4],
         tgn1_1: meso_tgn1[1],
         lpoly: l,
-    }
+    })
 }
 
 /// Neutral atmosphere from the surface to the lower exosphere.
 ///
 /// `output.d[5]` is the mass density of He, O, N2, O2, Ar, H and N (it excludes anomalous oxygen;
 /// use [`gtd7d`] for the drag-effective total).
-pub fn gtd7(input: &Nrlmsise00Input, flags: &Nrlmsise00Flags) -> Nrlmsise00Output {
+///
+/// # Errors
+///
+/// [`Nrlmsise00Error::NoTemperatureProfile`] where the input leaves the model without a
+/// temperature profile: `T∞ > T_lb > 0` and `g0 > 0` fail, which a flare-contaminated daily
+/// F10.7 does above 123.435 km.
+pub fn gtd7(
+    input: &Nrlmsise00Input,
+    flags: &Nrlmsise00Flags,
+) -> Result<Nrlmsise00Output, Nrlmsise00Error> {
     let sw = Sw::from_flags(flags);
     let mn3 = ZN3.len();
     let zn3 = ZN3;
@@ -1761,7 +1846,7 @@ pub fn gtd7(input: &Nrlmsise00Input, flags: &Nrlmsise00Flags) -> Nrlmsise00Outpu
     };
     let mut sinput = *input;
     sinput.alt = altt;
-    let gts = gts7_impl(&sinput, &sw, gsurf, re);
+    let gts = gts7_impl(&sinput, &sw, gsurf, re)?;
     let soutput = gts.output;
 
     let dm28m = if sw.sw[0] != 0.0 {
@@ -1781,7 +1866,7 @@ pub fn gtd7(input: &Nrlmsise00Input, flags: &Nrlmsise00Flags) -> Nrlmsise00Outpu
     };
     if input.alt >= zn2[0] {
         output.d = soutput.d;
-        return output;
+        return Ok(output);
     }
 
     // Lower mesosphere / upper stratosphere (between zn3[0] and zn2[0])
@@ -1935,14 +2020,21 @@ pub fn gtd7(input: &Nrlmsise00Input, flags: &Nrlmsise00Flags) -> Nrlmsise00Outpu
     output.t[1] = tz;
     output.out_of_range = held;
 
-    output
+    Ok(output)
 }
 
 /// Like [`gtd7`] but `output.d[5]` is the effective total mass density for drag, which includes
 /// anomalous oxygen (`d[8]`) and so can differ above ~500 km.
-pub fn gtd7d(input: &Nrlmsise00Input, flags: &Nrlmsise00Flags) -> Nrlmsise00Output {
+///
+/// # Errors
+///
+/// As [`gtd7`].
+pub fn gtd7d(
+    input: &Nrlmsise00Input,
+    flags: &Nrlmsise00Flags,
+) -> Result<Nrlmsise00Output, Nrlmsise00Error> {
     let sw = Sw::from_flags(flags);
-    let mut output = gtd7(input, flags);
+    let mut output = gtd7(input, flags)?;
     output.d[5] = 1.66E-24
         * (4.0 * output.d[0]
             + 16.0 * output.d[1]
@@ -1955,22 +2047,32 @@ pub fn gtd7d(input: &Nrlmsise00Input, flags: &Nrlmsise00Flags) -> Nrlmsise00Outp
     if sw.sw[0] != 0.0 {
         output.d[5] /= 1000.0;
     }
-    output
+    Ok(output)
 }
 
 /// Thermospheric portion of NRLMSISE-00 (intended for `alt > 72.5 km`). Sets up the latitude
 /// gravity variation itself so it is safe to call standalone.
-pub fn gts7(input: &Nrlmsise00Input, flags: &Nrlmsise00Flags) -> Nrlmsise00Output {
+///
+/// # Errors
+///
+/// As [`gtd7`].
+pub fn gts7(
+    input: &Nrlmsise00Input,
+    flags: &Nrlmsise00Flags,
+) -> Result<Nrlmsise00Output, Nrlmsise00Error> {
     let sw = Sw::from_flags(flags);
     let xlat = if sw.sw[2] == 0.0 { 45.0 } else { input.g_lat };
     let (gsurf, re) = glatf(xlat);
-    let mut output = gts7_impl(input, &sw, gsurf, re).output;
+    let mut output = gts7_impl(input, &sw, gsurf, re)?.output;
     output.input_out_of_domain = input_out_of_domain(input);
-    output
+    Ok(output)
 }
 
 #[cfg(test)]
 mod tests {
+    // A refusal where a test expects an answer is that test's failure.
+    #![allow(clippy::expect_used)]
+
     use super::*;
     use spacelab_testkit::nan_max;
 
@@ -2293,8 +2395,8 @@ mod tests {
                     switches: self.switches,
                 },
             );
-            let a = gtd7(&input, &flags);
-            let d = gtd7d(&input, &flags);
+            let a = gtd7(&input, &flags).expect("inside the domain");
+            let d = gtd7d(&input, &flags).expect("inside the domain");
             (
                 [
                     a.d[0], a.d[1], a.d[2], a.d[3], a.d[4], a.d[5], a.d[6], a.d[7], a.d[8], a.t[0],
@@ -2484,7 +2586,10 @@ mod tests {
                     flags.switches[2] = latitude_gravity;
                     let mut input = base_input();
                     (input.alt, input.g_lat) = (alt, lat);
-                    let (a, b) = (gts7(&input, &flags), gtd7(&input, &flags));
+                    let (a, b) = (
+                        gts7(&input, &flags).expect("inside the domain"),
+                        gtd7(&input, &flags).expect("inside the domain"),
+                    );
                     assert_eq!(a.d, b.d, "{alt} km, {lat}°, sw2 {latitude_gravity}");
                     assert_eq!(a.t, b.t, "{alt} km, {lat}°, sw2 {latitude_gravity}");
                 }
@@ -2514,8 +2619,8 @@ mod tests {
             let mut input = base_input();
             input.alt = alt;
             for (name, o) in [
-                ("gtd7", gtd7(&input, &flags)),
-                ("gts7", gts7(&input, &flags)),
+                ("gtd7", gtd7(&input, &flags).expect("inside the domain")),
+                ("gts7", gts7(&input, &flags).expect("inside the domain")),
             ] {
                 let want = AMU
                     * (4.0 * o.d[0]
@@ -2529,7 +2634,7 @@ mod tests {
             }
             // …and `gtd7d` carries one more species into the same sum, which is the only thing
             // separating the two entry points.
-            let d = gtd7d(&input, &flags);
+            let d = gtd7d(&input, &flags).expect("inside the domain");
             let want = AMU
                 * (4.0 * d.d[0]
                     + 16.0 * d.d[1]
@@ -2604,9 +2709,9 @@ mod tests {
         let flags = Nrlmsise00Flags::default();
         let clean = base_input();
         for (name, o) in [
-            ("gtd7", gtd7(&clean, &flags)),
-            ("gtd7d", gtd7d(&clean, &flags)),
-            ("gts7", gts7(&clean, &flags)),
+            ("gtd7", gtd7(&clean, &flags).expect("inside the domain")),
+            ("gtd7d", gtd7d(&clean, &flags).expect("inside the domain")),
+            ("gts7", gts7(&clean, &flags).expect("inside the domain")),
         ] {
             assert!(!o.input_out_of_domain, "{name}: the base case is in domain");
         }
@@ -2637,11 +2742,17 @@ mod tests {
                 i.ap_array = Some([4.0, 4.0, 4.0, f64::INFINITY, 4.0, 4.0, 4.0]);
             }),
         ];
+        // A breakage that also takes the temperature profile away is refused rather than flagged,
+        // so each entry point must do one or the other, and the flag itself is asserted directly.
         for (name, break_it) in breakages {
             let mut input = clean;
             break_it(&mut input);
+            assert!(input_out_of_domain(&input), "{name}");
             for entry in [gtd7, gtd7d, gts7] {
-                assert!(entry(&input, &flags).input_out_of_domain, "{name}");
+                assert!(
+                    entry(&input, &flags).map_or(true, |o| o.input_out_of_domain),
+                    "{name}"
+                );
             }
         }
 
@@ -2668,7 +2779,172 @@ mod tests {
             let mut input = clean;
             adjust(&mut input);
             for entry in [gtd7, gtd7d, gts7] {
-                assert!(!entry(&input, &flags).input_out_of_domain, "{name}");
+                assert!(
+                    !entry(&input, &flags)
+                        .expect("inside the domain")
+                        .input_out_of_domain,
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    // The four flare inputs of `derivations/nrlmsise00_flux_domain.mac`, which computes these values
+    // at fpprec 50 and checks that each literal is its value rounded to the digits shown: `T∞`,
+    // `T_lb`, and the daily F10.7 at which the row's `T∞` meets its `T_lb`.
+    const ROW_A_T_INF: f64 = 9.72126691988438;
+    const ROW_A_T_LB: f64 = 392.035796875903;
+    const ROW_A_BOUNDARY: f64 = 624.105113371272;
+    const ROW_B_T_INF: f64 = 434.049442515950;
+    const ROW_B_T_LB: f64 = 436.534994298508;
+    const ROW_B_BOUNDARY: f64 = 572.538116093167;
+    const ROW_C_T_INF: f64 = -138.983804778408;
+    const ROW_C_T_LB: f64 = 450.649274785256;
+    const ROW_C_BOUNDARY: f64 = 596.171465981400;
+    const ROW_D_T_INF: f64 = 399.007476763381;
+    const ROW_D_T_LB: f64 = 433.187885088127;
+    const ROW_D_BOUNDARY: f64 = 561.274943635351;
+
+    /// The flare rows, each `(input, flags, T∞, T_lb, boundary flux)`. A and B are CHAMP rows of
+    /// `tools/fit-sdtm-corpus.py` on 2005-09-10 and 2006-12-07 under the storm-time `ap` array, on
+    /// which the model returned NaN; C and D are daily-`Ap` inputs at 400 km with the local time the
+    /// bridges derive, `sec/3600 + lon/15`.
+    fn flare_rows() -> [(Nrlmsise00Input, Nrlmsise00Flags, f64, f64, f64); 4] {
+        let mut storm = Nrlmsise00Flags::default();
+        storm.switches[9] = -1;
+        let daily = Nrlmsise00Flags::default();
+        let a = Nrlmsise00Input {
+            year: 2005,
+            doy: 253,
+            sec: 2507.0,
+            alt: 374.996554,
+            g_lat: -54.04366595,
+            g_long: 141.81501274,
+            lst: 10.199,
+            f107a: 98.8,
+            f107: 707.6,
+            ap: 33.0,
+            ap_array: Some([33.0, 9.0, 18.0, 32.0, 32.0, 8.875, 7.25]),
+        };
+        let b = Nrlmsise00Input {
+            year: 2006,
+            doy: 341,
+            sec: 1786.0,
+            alt: 354.024071,
+            g_lat: 35.51414905,
+            g_long: 59.92934048,
+            lst: 4.638,
+            f107a: 91.5,
+            f107: 573.4,
+            ap: 25.0,
+            ap_array: Some([25.0, 48.0, 22.0, 39.0, 18.0, 17.625, 2.0]),
+        };
+        let c = Nrlmsise00Input {
+            year: 0,
+            sec: 57_600.0,
+            alt: 400.0,
+            g_lat: -5.0,
+            g_long: 0.0,
+            lst: 16.0,
+            ap_array: None,
+            ..a
+        };
+        let d = Nrlmsise00Input {
+            year: 0,
+            sec: 79_200.0,
+            alt: 400.0,
+            g_lat: 35.0,
+            g_long: 105.0,
+            lst: 29.0,
+            ap_array: None,
+            ..b
+        };
+        [
+            (a, storm, ROW_A_T_INF, ROW_A_T_LB, ROW_A_BOUNDARY),
+            (b, storm, ROW_B_T_INF, ROW_B_T_LB, ROW_B_BOUNDARY),
+            (c, daily, ROW_C_T_INF, ROW_C_T_LB, ROW_C_BOUNDARY),
+            (d, daily, ROW_D_T_INF, ROW_D_T_LB, ROW_D_BOUNDARY),
+        ]
+    }
+
+    /// (G3) At each flare row the exospheric temperature is below the 120 km one, so the
+    /// Bates–Walker profile has no exospheric limit and the model has no value there: every entry
+    /// point refuses, and the refusal carries the `T∞` and `T_lb` that
+    /// `derivations/nrlmsise00_flux_domain.mac` computes exactly, to `1e-9` K — an f64 evaluation
+    /// of `1027 K × (1 + G)` is good to about `1e-12` K. The boundary is the derivation's too:
+    /// 0.01 sfu below the flux at which `T∞` meets `T_lb` the row is answered, finite and
+    /// non-negative, and 0.01 sfu above it it is refused, a margin of about 0.03 K in `T∞ − T_lb`.
+    /// Without the refusal rows A and B came back NaN and rows C and D as numbers of a profile
+    /// with no exosphere.
+    #[test]
+    fn the_flare_rows_have_no_temperature_profile() {
+        for (k, (input, flags, t_inf, t_lb, boundary)) in flare_rows().into_iter().enumerate() {
+            for entry in [gtd7, gtd7d, gts7] {
+                match entry(&input, &flags) {
+                    Err(Nrlmsise00Error::NoTemperatureProfile {
+                        t_inf: got_inf,
+                        t_lb: got_lb,
+                        gradient,
+                    }) => {
+                        assert!((got_inf - t_inf).abs() < 1e-9, "row {k}: T∞ {got_inf}");
+                        assert!((got_lb - t_lb).abs() < 1e-9, "row {k}: T_lb {got_lb}");
+                        assert!(gradient > 0.0, "row {k}: only T∞ leaves the domain here");
+                    }
+                    Ok(output) => panic!("row {k} answered {output:?}"),
+                }
+            }
+            let at = |f107: f64| gtd7d(&Nrlmsise00Input { f107, ..input }, &flags);
+            let inside = at(boundary - 0.01).expect("inside the domain below the boundary");
+            assert!(
+                inside
+                    .d
+                    .iter()
+                    .chain(&inside.t)
+                    .all(|v| v.is_finite() && *v >= 0.0),
+                "row {k}: {inside:?}"
+            );
+            assert!(at(boundary + 0.01).is_err(), "row {k} above the boundary");
+        }
+    }
+
+    /// (S2) The gradient hypothesis refuses on its own. With `F10.7a = −250` (outside the input
+    /// contract, which only flags it) and `Ap = 10⁴`, `T∞ > T_lb > 0` but the 120 km gradient is
+    /// negative, so `σ < 0` and the profile would fall through zero above 120 km;
+    /// `derivations/nrlmsise00_flux_domain.mac`'s globe7 gives `T∞ = 10 399 K`, `T_lb = 3 330 K`,
+    /// `g0 = −2.63 K/km` at this point.
+    #[test]
+    fn a_falling_boundary_gradient_is_refused() {
+        let input = Nrlmsise00Input {
+            g_lat: 45.0,
+            g_long: 0.0,
+            lst: 29_000.0 / 3_600.0,
+            f107a: -250.0,
+            f107: 47.0,
+            ap: 10_000.0,
+            ..base_input()
+        };
+        match gtd7d(&input, &Nrlmsise00Flags::default()) {
+            Err(Nrlmsise00Error::NoTemperatureProfile {
+                t_inf,
+                t_lb,
+                gradient,
+            }) => assert!(
+                t_inf > t_lb && t_lb > 0.0 && gradient < 0.0,
+                "{t_inf} {t_lb} {gradient}"
+            ),
+            Ok(output) => panic!("answered {output:?}"),
+        }
+    }
+
+    /// (S2) At and below 123.435 km, where the profile joins the lower-thermosphere spline, the
+    /// model holds `T∞` at its global mean, so a flare row is answered there.
+    #[test]
+    fn a_flare_row_is_answered_below_the_spline_join() {
+        for (input, flags, ..) in flare_rows() {
+            for alt in [123.435, 110.0, 80.0, 30.0] {
+                let output = gtd7d(&Nrlmsise00Input { alt, ..input }, &flags)
+                    .expect("T∞ is the global mean here");
+                assert!(output.d[5].is_finite() && output.d[5] > 0.0, "{alt} km");
             }
         }
     }
@@ -2948,7 +3224,7 @@ mod tests {
                 g_long,
                 ..base_input()
             };
-            let o = gtd7(&input, &flags);
+            let o = gtd7(&input, &flags).expect("inside the domain");
             (o.d, o.t)
         };
         for alt in [50.0, 400.0] {
@@ -5980,14 +6256,14 @@ mod tests {
         for alt in [0.0, 30.0, 62.5, 65.0, 72.0] {
             let input = Nrlmsise00Input { alt, ..base };
             flags.switches[15] = 0;
-            let off = gtd7d(&input, &flags);
+            let off = gtd7d(&input, &flags).expect("inside the domain");
             for (k, d) in off.d.iter().enumerate() {
                 assert!(d.is_finite(), "density {k} = {d:e} at {alt} km, mixing off");
             }
             assert!(off.d[5] > 0.0, "mass density {:e} at {alt} km", off.d[5]);
 
             flags.switches[15] = 1;
-            let on = gtd7d(&input, &flags);
+            let on = gtd7d(&input, &flags).expect("inside the domain");
             // Mixing off is not the same model — `dnet` no longer blends the two N2 profiles — so
             // the densities differ. What must *not* differ is the temperature, which never sees
             // `switches[15]`, and the finiteness above.
@@ -6547,7 +6823,7 @@ mod tests {
                                     ap,
                                     ap_array: None,
                                 };
-                                let o = gtd7d(&input, &flags);
+                                let o = gtd7d(&input, &flags).expect("inside the domain");
                                 let at = format!(
                                     "{alt} km, {lat}°, {g_long}°, doy {doy}, ap {ap}, F10.7 {f107}"
                                 );
@@ -6618,7 +6894,7 @@ mod tests {
                             ap,
                             ap_array: None,
                         };
-                        let o = gtd7d(&input, &flags);
+                        let o = gtd7d(&input, &flags).expect("inside the domain");
                         let at = format!("{alt} km, {lat}°, ap {ap}, F10.7 {f107}");
                         assert!(!o.out_of_range, "the bound engaged at {at}");
                         assert!(o.t[1] > 0.0 && o.t[1] <= o.t[0], "{} K at {at}", o.t[1]);
@@ -6666,10 +6942,10 @@ mod tests {
             };
             let (mut worst, mut engaged) = (0.0f64, false);
             let mut z = 100.0;
-            let mut previous = gtd7(&at(z), &flags);
+            let mut previous = gtd7(&at(z), &flags).expect("inside the domain");
             while z < 130.0 {
                 z += step;
-                let o = gtd7(&at(z), &flags);
+                let o = gtd7(&at(z), &flags).expect("inside the domain");
                 engaged |= o.out_of_range;
                 worst = worst.max(libm::fabs(o.d[5] / previous.d[5] - 1.0));
                 previous = o;
@@ -6761,7 +7037,9 @@ mod tests {
         let mut previous = 0.0;
         let mut z = 108.0;
         while z <= 121.0 {
-            let d8 = gts7(&at(z, -90.0, 300.0, 250.0), &flags).d[8];
+            let d8 = gts7(&at(z, -90.0, 300.0, 250.0), &flags)
+                .expect("inside the domain")
+                .d[8];
             assert!(
                 d8 > previous,
                 "anomalous oxygen {d8} at {z} km, after {previous}"
@@ -6771,8 +7049,18 @@ mod tests {
         }
         // A quiet point and a high one, where the reference is well-formed and we match it: without
         // these, "positive" would be satisfied by a routine that had stopped modelling anything.
-        assert!(gtd7(&at(113.0, 45.0, 4.0, 150.0), &flags).d[8] > 0.0);
-        assert!(gtd7(&at(400.0, -90.0, 300.0, 250.0), &flags).d[8] > 0.0);
+        assert!(
+            gtd7(&at(113.0, 45.0, 4.0, 150.0), &flags)
+                .expect("inside the domain")
+                .d[8]
+                > 0.0
+        );
+        assert!(
+            gtd7(&at(400.0, -90.0, 300.0, 250.0), &flags)
+                .expect("inside the domain")
+                .d[8]
+                > 0.0
+        );
     }
 
     /// The one field [`Nrlmsise00Output::out_of_range`] does not cover is negligible where it is
@@ -6809,7 +7097,8 @@ mod tests {
                         // `gtd7d` rather than `gtd7`: it is the entry point that folds `d[8]` into
                         // the mass density a drag model integrates, so it is where a tail that was
                         // not negligible would actually do damage.
-                        let o = gtd7d(&at(alt, lat, ap, f107, 196), &flags);
+                        let o =
+                            gtd7d(&at(alt, lat, ap, f107, 196), &flags).expect("inside the domain");
                         assert!(o.d[8] >= 0.0, "anomalous oxygen {} at {alt} km", o.d[8]);
                         largest = largest.max(o.d[8]);
                     }
@@ -6824,7 +7113,12 @@ mod tests {
         // …and not vacuous: the band really is evaluated, not returning zeros.
         assert!(largest > 1.0e-31, "largest tail value {largest:e}");
         // Where the model does claim anomalous oxygen, the same field is thirty-three orders larger.
-        assert!(gtd7d(&at(400.0, -90.0, 300.0, 250.0, 105), &flags).d[8] > 1.0e3);
+        assert!(
+            gtd7d(&at(400.0, -90.0, 300.0, 250.0, 105), &flags)
+                .expect("inside the domain")
+                .d[8]
+                > 1.0e3
+        );
     }
 
     /// Comparator: the authors' 17 printed outputs are what NRL's code prints, and no document
@@ -6864,7 +7158,7 @@ mod tests {
         let (mut max_rel, mut sum_sq, mut n) = (0.0f64, 0.0f64, 0usize);
         for i in 0..17 {
             let flags = if i < 15 { &flags_default } else { &flags_ap };
-            let out = gtd7(&inputs[i], flags);
+            let out = gtd7(&inputs[i], flags).expect("inside the domain");
             let got = [
                 out.d[0], out.d[1], out.d[2], out.d[3], out.d[4], out.d[5], out.d[6], out.d[7],
                 out.d[8], out.t[0], out.t[1],

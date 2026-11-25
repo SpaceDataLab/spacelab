@@ -488,8 +488,16 @@ void the_gnss_wrapper_still_reads_a_file_and_refuses_a_geometry() {
 
 /* The same half without exceptions: every fallible call is a `result` the caller branches on. */
 void the_atmosphere_wrapper_still_answers_without_exceptions() {
-    CHECK(spacelab::nrlmsise00_density(172, 29000.0, 200.0, 0.0, 0.0, 150.0, 150.0, 4.0) >
-          spacelab::nrlmsise00_density(172, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 4.0));
+    const spacelab::result<double> low =
+        spacelab::try_nrlmsise00_density(172, 29000.0, 200.0, 0.0, 0.0, 150.0, 150.0, 4.0);
+    const spacelab::result<double> high =
+        spacelab::try_nrlmsise00_density(172, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 4.0);
+    CHECK(low && high && *low > *high);
+    /* A flare day's F10.7 leaves the model without a temperature profile: the branch, not a NaN. */
+    const spacelab::result<double> flare =
+        spacelab::try_nrlmsise00_density(341, 79200.0, 400.0, 35.0, 105.0, 573.4, 91.5, 25.0);
+    CHECK(!flare);
+    CHECK(flare.error() == SL_ERR_DOMAIN);
     CHECK_NEAR(spacelab::molecular_speed_ratio(7600.0, 1000.0, 0.016), 7.4549, 1e-3);
 
     /* SDTM-1's three total functions need no `result`; its interval does, and here it is the branch

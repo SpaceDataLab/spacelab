@@ -1562,6 +1562,11 @@ fn propagate_relativistic_dense(
 /// into the day, `alt_km` the geodetic altitude, `lat_deg`/`lon_deg` the geodetic latitude/longitude;
 /// `f107`/`f107a`/`ap` are the space-weather drivers. Local solar time is derived as `sec/3600 +
 /// lon/15`. This is the raw model, exposed for validation against reference implementations.
+///
+/// Raises `ValueError` where the model has no temperature profile: above 123.435 km it needs
+/// `T∞ > T_lb > 0` and a positive gradient, and a flare-contaminated daily F10.7 breaks the first
+/// (707.6 sfu against an 81-day mean of 98.8 puts `T∞` near 10 K). The published subroutine returns
+/// NaN, an infinity or the density of a profile with no exosphere there.
 #[pyfunction]
 #[pyo3(signature = (doy, sec, alt_km, lat_deg, lon_deg, f107 = 150.0, f107a = 150.0, ap = 4.0))]
 #[allow(clippy::too_many_arguments)] // day of year, UT, three geodetic coordinates, three space-weather
@@ -1574,7 +1579,7 @@ fn nrlmsise00_density(
     f107: f64,
     f107a: f64,
     ap: f64,
-) -> f64 {
+) -> PyResult<f64> {
     let input = Nrlmsise00Input {
         year: 0,
         doy,
@@ -1588,7 +1593,9 @@ fn nrlmsise00_density(
         ap,
         ap_array: None,
     };
-    gtd7d(&input, &Nrlmsise00Flags::default()).d[5] * 1000.0 // g/cm³ → kg/m³
+    gtd7d(&input, &Nrlmsise00Flags::default())
+        .map(|output| output.d[5] * 1000.0) // g/cm³ → kg/m³
+        .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 /// **SDTM-1** total mass density (kg/m³) at a geodetic point and epoch — this library's own
@@ -8259,52 +8266,6 @@ mod tests {
         );
     }
 
-    /// The NRLMSISE-00 wrapper's job is to fill the model's input record and convert its units, so
-    /// the oracle is the model itself called with a record built here: the local solar time is
-    /// `sec/3600 + lon/15` — hours of UT plus hours of longitude — and the output is `d[5]` in g/cm³
-    /// scaled to kg/m³. A longitude 15° east of the reference at an hour earlier is the same local
-    /// time, which is the second, unit-free way the same wiring shows.
-    #[test]
-    fn the_density_wrapper_fills_the_model_record_and_converts_to_si() {
-        let (doy, sec, alt, lat, lon) = (172, 29_000.0, 400.0, 60.0, -70.0);
-        let (f107a, f107, ap) = (150.0, 150.0, 4.0);
-        let reference = gtd7d(
-            &Nrlmsise00Input {
-                year: 0,
-                doy,
-                sec,
-                alt,
-                g_lat: lat,
-                g_long: lon,
-                lst: sec / 3600.0 + lon / 15.0,
-                f107a,
-                f107,
-                ap,
-                ap_array: None,
-            },
-            &Nrlmsise00Flags::default(),
-        )
-        .d[5];
-        let got = nrlmsise00_density(doy, sec, alt, lat, lon, f107, f107a, ap);
-        assert!(
-            (got - reference * 1000.0).abs() < 1e-24,
-            "{got} against {reference} g/cm³"
-        );
-        // Thermospheric density at 400 km is ~1e-12 kg/m³; in g/cm³ it would be ~1e-15. The bound
-        // spans three decades either way, so it fixes the conversion without pinning the model.
-        assert!(
-            (1e-14..1e-10).contains(&got),
-            "not a kg/m³ thermospheric density: {got}"
-        );
-        // An hour earlier, fifteen degrees east: the same local solar time, so the diurnal terms
-        // land in the same place and only the explicit `sec` moves the answer at all.
-        let shifted = nrlmsise00_density(doy, sec - 3600.0, alt, lat, lon + 15.0, f107, f107a, ap);
-        assert!(
-            (shifted / got - 1.0).abs() < 0.05,
-            "same local time gave {shifted} against {got}"
-        );
-    }
-
     /// The bridge's SDTM-1 wrapper does one thing the model does not: it assembles the evaluation
     /// point out of the coordinates a caller already has. Each of its four conversions is asserted as
     /// a **value**, because the metamorphic form — two calls a half-day and 180 degrees apart, which
@@ -9804,6 +9765,55 @@ trnd   3    1  4.000000000000e-12 -2.000000000000e-12 1.0e-13 1.0e-13
 #[cfg(all(test, feature = "test-interpreter"))]
 mod interpreter_tests {
     use super::*;
+
+    /// The NRLMSISE-00 wrapper's job is to fill the model's input record and convert its units, so
+    /// the oracle is the model itself called with a record built here: the local solar time is
+    /// `sec/3600 + lon/15` — hours of UT plus hours of longitude — and the output is `d[5]` in g/cm³
+    /// scaled to kg/m³. A longitude 15° east of the reference at an hour earlier is the same local
+    /// time, which is the second, unit-free way the same wiring shows.
+    #[test]
+    fn the_density_wrapper_fills_the_model_record_and_converts_to_si() {
+        let (doy, sec, alt, lat, lon) = (172, 29_000.0, 400.0, 60.0, -70.0);
+        let (f107a, f107, ap) = (150.0, 150.0, 4.0);
+        let reference = gtd7d(
+            &Nrlmsise00Input {
+                year: 0,
+                doy,
+                sec,
+                alt,
+                g_lat: lat,
+                g_long: lon,
+                lst: sec / 3600.0 + lon / 15.0,
+                f107a,
+                f107,
+                ap,
+                ap_array: None,
+            },
+            &Nrlmsise00Flags::default(),
+        )
+        .expect("inside the domain")
+        .d[5];
+        let got = nrlmsise00_density(doy, sec, alt, lat, lon, f107, f107a, ap)
+            .expect("inside the domain");
+        assert!(
+            (got - reference * 1000.0).abs() < 1e-24,
+            "{got} against {reference} g/cm³"
+        );
+        // Thermospheric density at 400 km is ~1e-12 kg/m³; in g/cm³ it would be ~1e-15. The bound
+        // spans three decades either way, so it fixes the conversion without pinning the model.
+        assert!(
+            (1e-14..1e-10).contains(&got),
+            "not a kg/m³ thermospheric density: {got}"
+        );
+        // An hour earlier, fifteen degrees east: the same local solar time, so the diurnal terms
+        // land in the same place and only the explicit `sec` moves the answer at all.
+        let shifted = nrlmsise00_density(doy, sec - 3600.0, alt, lat, lon + 15.0, f107, f107a, ap)
+            .expect("inside the domain");
+        assert!(
+            (shifted / got - 1.0).abs() < 0.05,
+            "same local time gave {shifted} against {got}"
+        );
+    }
 
     /// Speed of light, m/s — the constant the two differenced observables are stated in.
     const LIGHT: f64 = 299_792_458.0;

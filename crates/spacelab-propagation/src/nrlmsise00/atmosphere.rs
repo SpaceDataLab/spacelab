@@ -20,6 +20,12 @@
 //! tests below step. The module tests `the_density_at_the_named_point_is_the_model_converted_to_si`
 //! (G3) and `the_gradient_the_stm_reads_is_minus_rho_over_the_scale_height` (G1) hold the shipped
 //! wrapper to it; the model's own structure is gated in `super`.
+//!
+//! Where the model refuses ([`super::Nrlmsise00Error`]: no temperature profile, as on a day whose
+//! previous-day F10.7 carries a flare) the density is NaN. [`Atmosphere`] has no channel for a
+//! refusal, so this path is not under the typed refusal (`docs/limitations.md`); the adaptive drivers
+//! reject a step whose error norm is NaN and stop with `IntegrationError::StepUnderflow` there,
+//! which `a_refused_density_stops_the_adaptive_driver` pins.
 
 #![allow(clippy::cast_possible_truncation)] // day-of-year advance is a small, in-range integer
 
@@ -70,11 +76,12 @@ impl<G: Fn(f64, [f64; 3]) -> (f64, f64, f64)> Nrlmsise00Atmosphere<G> {
         let flags = Nrlmsise00Flags::default();
         let mut up = base;
         up.alt = alt + 10.0;
-        // d[5] is g/cm³ from gtd7d (includes anomalous oxygen); ×1000 → kg/m³.
-        (
-            gtd7d(&base, &flags).d[5] * 1000.0,
-            gtd7d(&up, &flags).d[5] * 1000.0,
-        )
+        // d[5] is g/cm³ from gtd7d (includes anomalous oxygen); ×1000 → kg/m³. A refusal is NaN
+        // here: see the module docs.
+        let rho = |input: &Nrlmsise00Input| {
+            gtd7d(input, &flags).map_or(f64::NAN, |output| output.d[5] * 1000.0)
+        };
+        (rho(&base), rho(&up))
     }
 }
 
@@ -101,6 +108,7 @@ impl<G: Fn(f64, [f64; 3]) -> (f64, f64, f64)> Atmosphere for Nrlmsise00Atmospher
 #[cfg(test)]
 mod tests {
     #![allow(clippy::float_cmp)] // several assertions here are exact by construction
+    #![allow(clippy::expect_used)] // a refusal where a test expects an answer is that test's failure
 
     use super::*;
     use crate::nrlmsise00::{Nrlmsise00Input, gtd7d};
@@ -145,7 +153,10 @@ mod tests {
             ap,
             ap_array: None,
         };
-        gtd7d(&input, &Nrlmsise00Flags::default()).d[5] * 1_000.0
+        gtd7d(&input, &Nrlmsise00Flags::default())
+            .expect("inside the domain")
+            .d[5]
+            * 1_000.0
     }
 
     /// (G3) At the point the geodetic closure names, the exponential lift is `exp(0)`

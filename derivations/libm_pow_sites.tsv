@@ -92,36 +92,36 @@ crates/spacelab-propagation/src/harris_priester/mod.rs	122	1	harris_priester	src
 crates/spacelab-propagation/src/harris_priester/mod.rs	135	1	harris_priester	src	ALT_RHO[ia + 1][1] / ALT_RHO[ia][1]	[0.0501, 0.8344]: consecutive ALT_RHO column-1 ratios (harris_priester/tables.rs:9-60, computed with awk; min |ratio - 1| = 0.166)	dh	dh: [0, 1] inside the table; < 0 only below 100 km where ia = 0 (loop mod.rs:127-130) and base = 0.0501; pos_alt <= 1000 km else return (mod.rs:100-103)	out	base never within 0.166 of 1, so R's |x| band is never met whatever dh is
 crates/spacelab-propagation/src/harris_priester/mod.rs	139	1	harris_priester	src	ALT_RHO[ia + 1][2] / ALT_RHO[ia][2]	[0.0501, 0.8344]: consecutive ALT_RHO column-2 ratios (awk)	dh	dh, as mod.rs:135	out	base never within 0.166 of 1
 crates/spacelab-propagation/src/lightcurve.rs	227	1	radiant_intensity	src	cos_lobe	cos_lobe in [0, 1] (dot of mirror and observer directions, max(0) lightcurve.rs:225); = 1 at the mirror direction	exponent	specular_exponent[i], pub field (lightcurve.rs:196), unchecked; doc 'Large is a mirror' (:193). In-workspace {0, 1, 8, 12, 40, 60} (tests/lightcurve.rs:79, :141, :165, :204, :303, :515); public API: also any external caller	open	Phong exponent unchecked; a near-mirror exponent > 2^31 + 2^11 with the observer within ~1e-3 rad of the glint enters R
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	327	1	dnet	src	1.0 + libm::exp(ylog)	[1 + 4.54e-5, 1 + 22026.5]: 1 + exp(ylog), ylog in [-10, 10] (nrlmsise00/mod.rs:320-325)	1.0 / a	[-0.3946, 0.9982]: 1/a = (xmm - xm)/zhm, zhm = PDM[2][3]*PDL[1][5] = 28 (mod.rs:1181), xmm = PDM[2][4] = 28.95 (mod.rs:1156), xm in {28, 4, 16, 32, 40, 1, 14} (dnet calls mod.rs:1230-1650); test calls (mod.rs:6015-6066, :2561-2564) give |1/a| <= 0.891	out	|y| < 1; base also >= 1 + 4.5e-5, outside the |x| band
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	374	1	scalh	src	1.0 + alt / re	1 + alt/re	2.0	{2.0} literal	out	|y| = 2
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	548	1	densm	src	(re + z2) / (re + z1)	((re + z2)/(re + z1)), node altitudes	2.0	{2.0} literal	out	|y| = 2 (pow.rs:181 returns x*x)
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	554	1	densm	src	1.0 + z1 / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	582	1	densm	src	(re + z2) / (re + z1)	((re + z2)/(re + z1)), node altitudes	2.0	{2.0} literal	out	|y| = 2 (pow.rs:181 returns x*x)
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	588	1	densm	src	1.0 + z1 / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	636	1	densu	src	(re + zlb) / (re + za)	(re + zlb)/(re + za)	2.0	{2.0} literal	out	|y| = 2
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	656	1	densu	src	(re + z2) / (re + z1)	((re + z2)/(re + z1)), node altitudes	2.0	{2.0} literal	out	|y| = 2 (pow.rs:181 returns x*x)
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	667	1	densu	src	1.0 + zlb / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	676	1	densu	src	tlb / tt	tlb/tt, tt = tinf - (tinf - tlb) exp(-s2 zg2) (mod.rs:627); -> 1 as s2*zg2 -> 0	1.0 + alpha + gamma	1 + alpha + gamma; alpha in {-1.38, -1, -0.83, -0.38, 0, 0.17} (densu args from alpha[] mod.rs:1067, alpha[i] - 1 and 0.0); gamma = xm*glb/(s2*rgas*tinf) (mod.rs:668), xm <= 40, s2 = s = g0v/(tinf - tlb) (mod.rs:1102); tinf, g0v, tlb are fitted globe7 polynomials of Nrlmsise00Input (mod.rs:1088-1101), whose magnitudes are not bounded: input_out_of_domain (mod.rs:244-262) flags only negative/non-finite/doy/lat, and is a report, not a refusal (doc mod.rs:162)	open	public API, inputs unrefused: g0v -> 0 makes gamma unbounded and simultaneously s2 -> 0 drives tt -> tlb (base -> 1); physically gamma = O(1)
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	682	1	densu	src	1.0 + z1 / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	689	1	densu	src	t1 / tz	t1/tz, temperatures	1.0 + alpha	[-0.38, 1.17]: 1 + alpha, alpha as at mod.rs:676	out	|y| <= 1.17
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	701	1	sumex	src	ex	ex = exp(-10800 p24)-type kernel ratio in (0, 1)	19.0	{19.0} literal	out	|y| = 19
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	701	2	sumex	src	ex	ex, as above	0.5	{0.5} literal	out	|y| = 0.5 (sqrt at pow.rs:185)
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	709	1	sg0	src	ex	ex	3.0	{3.0} literal	out	|y| = 3
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	710	1	sg0	src	ex	ex	4.0	{4.0} literal	out	|y| = 4
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	710	2	sg0	src	ex	ex	12.0	{12.0} literal	out	|y| = 12
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	711	1	sg0	src	ex	ex	8.0	{8.0} literal	out	|y| = 8
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	774	1	globe7	src	l.dfa	l.dfa = f107a - 150	2.0	{2.0} literal	out	|y| = 2
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	1135	1	gts7_impl	src	PTM[4] * PTL[3][0]	PTM[4]*PTL[3][0], table constant	2.0	{2.0} literal	out	|y| = 2
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	1142	1	gts7_impl	src	PTM[4] * PTL[3][0]	PTM[4]*PTL[3][0], table constant	2.0	{2.0} literal	out	|y| = 2
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	1817	1	gtd7	src	PMA[2][0] * PAVGM[2]	PMA[2][0]*PAVGM[2], table constant	2.0	{2.0} literal	out	|y| = 2
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	1852	1	gtd7	src	PMA[6][0] * PAVGM[6]	PMA[6][0]*PAVGM[6], table constant	2.0	{2.0} literal	out	|y| = 2
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	2582	1	the_turbopause_blend_answers_at_a_vanishing_density	test	libm::pow(dd, a) + libm::pow(dm, a)	dd^a + dm^a, dd, dm in {1e6, 1.2e6, 2e6} (mod.rs:2580)	1.0 / a	[-0.395, 0.891]: 1/a, a = 28/(28.95 - xm), xm in {4, 28, 32, 40} (mod.rs:2561-2564) -> a in {1.122, 29.47, -9.180, -2.534}	out	|y| < 1
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	2582	2	the_turbopause_blend_answers_at_a_vanishing_density	test	dd	dd in {1e6, 1.2e6, 2e6}	a	a in {1.122, 29.47, -9.180, -2.534}	out	|y| <= 29.5
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	2582	3	the_turbopause_blend_answers_at_a_vanishing_density	test	dm	dm in {1e6, 1.2e6, 2e6}	a	a in {1.122, 29.47, -9.180, -2.534}	out	|y| <= 29.5
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	2917	1	densu_solves_the_diffusive_equilibrium_law_on_both_branches	test	1.0 + z / re	1 + z/re, z in {80..600} km (mod.rs:2913)	2.0	{2.0} literal	out	|y| = 2
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	6013	1	the_turbopause_blend_is_the_power_mean_of_its_two_densities	test	libm::pow(dd, a) + libm::pow(dm, a)	dd^a + dm^a	1.0 / a	[0.1, 0.857]: 1/a, a in {4.583, 3.571, 1.167, 1.481} (mod.rs:6015-6020), 4.583 (:6037), 10 (:6065)	out	|y| < 1
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	6013	2	the_turbopause_blend_is_the_power_mean_of_its_two_densities	test	dd	dd in {1e-3, 1, 7.5, 1e3, 5, ...} test values	a	a in {1.167, 1.481, 3.571, 4.583, 10}	out	|y| <= 10
-crates/spacelab-propagation/src/nrlmsise00/mod.rs	6013	3	the_turbopause_blend_is_the_power_mean_of_its_two_densities	test	dm	dm test values	a	a in {1.167, 1.481, 3.571, 4.583, 10}	out	|y| <= 10
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	384	1	dnet	src	1.0 + libm::exp(ylog)	[1 + 4.54e-5, 1 + 22026.5]: 1 + exp(ylog), ylog in [-10, 10] (nrlmsise00/mod.rs:377-382)	1.0 / a	[-0.3946, 0.9982]: 1/a = (xmm - xm)/zhm, zhm = PDM[2][3]*PDL[1][5] = 28 (mod.rs:1257), xmm = PDM[2][4] = 28.95 (mod.rs:1232), xm in {28, 4, 16, 32, 40, 1, 14} (dnet calls mod.rs:1306-1726); test calls (mod.rs:6291-6342, :2666-2669) give |1/a| <= 0.891	out	|y| < 1; base also >= 1 + 4.5e-5, outside the |x| band
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	431	1	scalh	src	1.0 + alt / re	1 + alt/re	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	605	1	densm	src	(re + z2) / (re + z1)	((re + z2)/(re + z1)), node altitudes	2.0	{2.0} literal	out	|y| = 2 (pow.rs:181 returns x*x)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	611	1	densm	src	1.0 + z1 / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	639	1	densm	src	(re + z2) / (re + z1)	((re + z2)/(re + z1)), node altitudes	2.0	{2.0} literal	out	|y| = 2 (pow.rs:181 returns x*x)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	645	1	densm	src	1.0 + z1 / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	693	1	densu	src	(re + zlb) / (re + za)	(re + zlb)/(re + za)	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	713	1	densu	src	(re + z2) / (re + z1)	((re + z2)/(re + z1)), node altitudes	2.0	{2.0} literal	out	|y| = 2 (pow.rs:181 returns x*x)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	724	1	densu	src	1.0 + zlb / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	733	1	densu	src	tlb / tt	tlb/tt, tt = tinf - (tinf - tlb) exp(-s2 zg2) (mod.rs:684); -> 1 as s2*zg2 -> 0	1.0 + alpha + gamma	1 + alpha + gamma; alpha in {-1.38, -1, -0.83, -0.38, 0, 0.17} (densu args from alpha[] mod.rs:1131, alpha[i] - 1 and 0.0); gamma = xm*glb/(s2*rgas*tinf) (mod.rs:725), xm <= 40, s2 = s = g0v/(tinf - tlb) (mod.rs:1178); tinf, g0v, tlb are fitted globe7 polynomials of Nrlmsise00Input (mod.rs:1152-1165), whose magnitudes are not bounded: input_out_of_domain (mod.rs:301-319) flags only negative/non-finite/doy/lat, and is a report, not a refusal (doc mod.rs:166); gts7_impl refuses only tinf > tlb > 0 and g0v > 0 failing (mod.rs:1170)	open	public API, g0v > 0 the only bound: g0v -> 0+ makes gamma unbounded and simultaneously s2 -> 0 drives tt -> tlb (base -> 1); physically gamma = O(1)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	739	1	densu	src	1.0 + z1 / re	1 + z/re, node altitude	2.0	{2.0} literal	out	|y| = 2 (x*x at pow.rs:181)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	746	1	densu	src	t1 / tz	t1/tz, temperatures	1.0 + alpha	[-0.38, 1.17]: 1 + alpha, alpha as at mod.rs:733	out	|y| <= 1.17
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	758	1	sumex	src	ex	ex = exp(-10800 p24)-type kernel ratio in (0, 1)	19.0	{19.0} literal	out	|y| = 19
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	758	2	sumex	src	ex	ex, as above	0.5	{0.5} literal	out	|y| = 0.5 (sqrt at pow.rs:185)
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	766	1	sg0	src	ex	ex	3.0	{3.0} literal	out	|y| = 3
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	767	1	sg0	src	ex	ex	4.0	{4.0} literal	out	|y| = 4
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	767	2	sg0	src	ex	ex	12.0	{12.0} literal	out	|y| = 12
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	768	1	sg0	src	ex	ex	8.0	{8.0} literal	out	|y| = 8
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	831	1	globe7	src	l.dfa	l.dfa = f107a - 150	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	1211	1	gts7_impl	src	PTM[4] * PTL[3][0]	PTM[4]*PTL[3][0], table constant	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	1218	1	gts7_impl	src	PTM[4] * PTL[3][0]	PTM[4]*PTL[3][0], table constant	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	1902	1	gtd7	src	PMA[2][0] * PAVGM[2]	PMA[2][0]*PAVGM[2], table constant	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	1937	1	gtd7	src	PMA[6][0] * PAVGM[6]	PMA[6][0]*PAVGM[6], table constant	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	2687	1	the_turbopause_blend_answers_at_a_vanishing_density	test	libm::pow(dd, a) + libm::pow(dm, a)	dd^a + dm^a, dd, dm in {1e6, 1.2e6, 2e6} (mod.rs:2685)	1.0 / a	[-0.395, 0.891]: 1/a, a = 28/(28.95 - xm), xm in {4, 28, 32, 40} (mod.rs:2666-2669) -> a in {1.122, 29.47, -9.180, -2.534}	out	|y| < 1
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	2687	2	the_turbopause_blend_answers_at_a_vanishing_density	test	dd	dd in {1e6, 1.2e6, 2e6}	a	a in {1.122, 29.47, -9.180, -2.534}	out	|y| <= 29.5
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	2687	3	the_turbopause_blend_answers_at_a_vanishing_density	test	dm	dm in {1e6, 1.2e6, 2e6}	a	a in {1.122, 29.47, -9.180, -2.534}	out	|y| <= 29.5
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	3193	1	densu_solves_the_diffusive_equilibrium_law_on_both_branches	test	1.0 + z / re	1 + z/re, z in {80..600} km (mod.rs:3189)	2.0	{2.0} literal	out	|y| = 2
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	6289	1	the_turbopause_blend_is_the_power_mean_of_its_two_densities	test	libm::pow(dd, a) + libm::pow(dm, a)	dd^a + dm^a	1.0 / a	[0.1, 0.857]: 1/a, a in {4.583, 3.571, 1.167, 1.481} (mod.rs:6291-6296), 4.583 (:6313), 10 (:6341)	out	|y| < 1
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	6289	2	the_turbopause_blend_is_the_power_mean_of_its_two_densities	test	dd	dd in {1e-3, 1, 7.5, 1e3, 5, ...} test values	a	a in {1.167, 1.481, 3.571, 4.583, 10}	out	|y| <= 10
+crates/spacelab-propagation/src/nrlmsise00/mod.rs	6289	3	the_turbopause_blend_is_the_power_mean_of_its_two_densities	test	dm	dm test values	a	a in {1.167, 1.481, 3.571, 4.583, 10}	out	|y| <= 10
 crates/spacelab-propagation/src/rkn1210.rs	156	1	integrate	src	ratio	ratio = 1/err or 5 (rkn1210.rs:155)	1.0 / 11.0	{1/11} literal	out	|y| < 1
 crates/spacelab-propagation/src/rkn1210.rs	366	1	tightening_the_tolerance_costs_steps_at_the_estimator_order	test	10.0	{10.0} literal	4.0 / 11.0	{4/11} literal	out	|y| < 1
 crates/spacelab-propagation/src/rkn1210.rs	400	1	a_step_below_the_floor_ramps_back_geometrically	test	5.0	{5.0} literal	1.0 / 11.0	{1/11} literal	out	|y| < 1
@@ -294,7 +294,7 @@ crates/spacelab-gpu/src/lib.rs	591	WGSL source inside SGP4_SHADER (lib.rs:529-63
 #   crates/spacelab-estimation/src/richardson.rs:59 occ 1 (richardson_extrapolate)
 #   crates/spacelab-propagation/src/harris_priester/mod.rs:122 occ 1 (harris_priester)
 #   crates/spacelab-propagation/src/lightcurve.rs:227 occ 1 (radiant_intensity)
-#   crates/spacelab-propagation/src/nrlmsise00/mod.rs:676 occ 1 (densu)
+#   crates/spacelab-propagation/src/nrlmsise00/mod.rs:733 occ 1 (densu)
 #   crates/spacelab-propagation/src/sdtm/mod.rs:438 occ 1 (gain)
 #   crates/spacelab-propagation/src/taylor.rs:194 occ 1 (powf)
 # open indirect rows (2): crates/spacelab-estimation/src/radiometric.rs:761 (electron_density, -k), crates/spacelab-estimation/src/radiometric.rs:951 (tanh-sinh cos^(k-2)); :951 is reachable from spacelab-python solar_corona_delay(series=...) and spacelab-capi sl_solar_corona_delay

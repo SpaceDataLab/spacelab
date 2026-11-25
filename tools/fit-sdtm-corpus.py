@@ -2132,8 +2132,9 @@ def main() -> None:
     scored = np.isfinite(held)
     msis[scored] = nrlmsise00(rows[scored]) - arg["ln_rho"][scored]
     # Both models are scored on the same rows. NRLMSISE-00 has no answer where the feed lacks a day
-    # it reads, or where its own temperature profile fails: on 2005-09-10 the previous day's F10.7 is
-    # the 707.6 sfu of the 2005-09-09 X-class flare, and the profile returns NaN on part of that day.
+    # it reads, or where it has no temperature profile: on 2005-09-10 the previous day's F10.7 is the
+    # 707.6 sfu of the 2005-09-09 X-class flare, T_inf falls below T_lb, and the evaluator refuses
+    # every row above 123.435 km (`Nrlmsise00Error`; `derivations/nrlmsise00_flux_domain.mac`).
     done = scored & np.isfinite(msis)
     for day, n in rows[scored & ~done].t.dt.date.value_counts().sort_index().items():
         print(

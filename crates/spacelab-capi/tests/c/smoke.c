@@ -1032,6 +1032,9 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
     double interval[SL_SDTM1_INTERVAL];
     double envelope[SL_SDTM1_ENVELOPE];
     double density_400 = 0.0;
+    double rho_200 = 0.0;
+    double rho_400 = 0.0;
+    double rho_refused = -1.0;
     double sw_ap60[16];
     double sw_speed[16];
     double sw_by[16];
@@ -1039,12 +1042,24 @@ static void the_atmosphere_models_answer_what_their_formulas_say(void) {
     double wind_storm = 0.0;
 
     /* The thermosphere thins with height, in kg/m^3 and not the model's own g/cm^3 -- and a NaN
-     * argument is NaN out, which the model on its own does not do. */
-    CHECK(sl_nrlmsise00_density(172, 29000.0, 200.0, 0.0, 0.0, 150.0, 150.0, 4.0) >
-          sl_nrlmsise00_density(172, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 4.0));
-    CHECK(sl_nrlmsise00_density(172, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 4.0) > 1e-13);
-    CHECK(sl_nrlmsise00_density(172, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 4.0) < 1e-11);
-    CHECK(isnan(sl_nrlmsise00_density(172, 29000.0, NAN, 0.0, 0.0, 150.0, 150.0, 4.0)));
+     * argument is refused, which the model on its own does not do. */
+    CHECK(sl_nrlmsise00_density(172, 29000.0, 200.0, 0.0, 0.0, 150.0, 150.0, 4.0, &rho_200) ==
+          SL_OK);
+    CHECK(sl_nrlmsise00_density(172, 29000.0, 400.0, 0.0, 0.0, 150.0, 150.0, 4.0, &rho_400) ==
+          SL_OK);
+    CHECK(rho_200 > rho_400);
+    CHECK(rho_400 > 1e-13);
+    CHECK(rho_400 < 1e-11);
+    CHECK(sl_nrlmsise00_density(172, 29000.0, NAN, 0.0, 0.0, 150.0, 150.0, 4.0, &rho_refused) ==
+          SL_ERR_INVALID_ARGUMENT);
+    /* A flare day's F10.7 -- 707.6 sfu on 2005-09-10, 573.4 on 2006-12-07, each against its 81-day
+     * mean -- puts T_inf below T_lb, and above 123.435 km the model has no temperature profile:
+     * refused, nothing written. */
+    CHECK(sl_nrlmsise00_density(253, 57600.0, 400.0, -5.0, 0.0, 707.6, 98.8, 33.0, &rho_refused) ==
+          SL_ERR_DOMAIN);
+    CHECK(sl_nrlmsise00_density(341, 79200.0, 400.0, 35.0, 105.0, 573.4, 91.5, 25.0,
+                                &rho_refused) == SL_ERR_DOMAIN);
+    CHECK(rho_refused == -1.0);
 
     /* SDTM-1, this library's own model. Its storm state cools: a constant index history sits on the
      * steady state H/(1 + H/H_s) from the first step, below the index itself and the same at any

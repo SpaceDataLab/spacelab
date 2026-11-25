@@ -305,6 +305,24 @@ scope:
   model changes the inferred density by the ratio of the drag coefficients. The coefficients use one
   mean molar mass, not a speed ratio per species. The Python and C bridges expose `sentman_panel`
   only.
+- **NRLMSISE-00 has no answer above 123.435 km on a flare day, and only its direct calls refuse
+  with a type.** The model's thermosphere is the Bates–Walker profile, which exists only where
+  `T∞ > T_lb > 0` and its gradient `g0 > 0`. The daily F10.7 term of `T∞` is concave
+  (`0.00166·ΔF − 5.54e-6·ΔF²` at F10.7a = 150), so a previous-day flux measured during a flare pulls
+  `T∞` below `T_lb`: 707.6 sfu against an 81-day mean of 98.8 (2005-09-10) gives `T∞` = 9.7 K on a
+  CHAMP row at 375 km. At an 81-day mean of 90–100 sfu the edge lies between 561 and 625 sfu
+  (`derivations/nrlmsise00_flux_domain.mac`, four rows). There `gtd7`, `gtd7d` and `gts7` return
+  `Nrlmsise00Error::NoTemperatureProfile`, `sl_nrlmsise00_density` returns `SL_ERR_DOMAIN`, and the
+  Python `nrlmsise00_density` raises `ValueError`. NRL's subroutine returns NaN, an infinity or the
+  density of a profile with no exosphere. At and below 123.435 km the model holds `T∞` at its global
+  mean, so the same day still has an answer there. **Two paths have no error channel and answer NaN
+  instead:** the drag wrapper `Nrlmsise00Atmosphere`, because the `Atmosphere` trait returns a bare
+  density, and the lifetime drivers' `ScenarioAtmosphere`. In a drag run the adaptive driver rejects
+  the NaN step and stops with `StepUnderflow` (C `SL_ERR_COMPUTE`, Python `ValueError`); a lifetime
+  run comes back `Lifetime::Unresolved`, the outcome for a density that does not evaluate. In the
+  TU Delft archive this affects 2005-09-10, 2006-12-07 and 2011-03-08 (`docs/verification.md`
+  §10.21). Screening a flare-contaminated daily F10.7 is the caller's data decision; the library
+  does not replace the value.
 - **In the drag path an empirical atmosphere contributes a radial density gradient and no horizontal one.**
   `Drag`'s state-transition matrix needs `∂ρ/∂r`, and four of the five atmospheres exist only in `f64`,
   so each wrapper lifts the value through a local exponential `ρ = ρ₀·exp(−(|r| − |r₀|)/H)`. Two things

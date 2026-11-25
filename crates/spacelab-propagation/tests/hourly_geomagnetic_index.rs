@@ -190,7 +190,7 @@ fn inside_one_three_hour_interval_the_modelled_density_moves_and_the_published_d
         let mut storm = Nrlmsise00Flags::default();
         storm.switches[9] = -1;
 
-        let rho_pub = gtd7d(&base, &storm).d[5] * 1000.0;
+        let rho_pub = gtd7d(&base, &storm).expect("inside the domain").d[5] * 1000.0;
         let rho_res = gtd7d(
             &Nrlmsise00Input {
                 ap_array: Some(sharpened),
@@ -198,6 +198,7 @@ fn inside_one_three_hour_interval_the_modelled_density_moves_and_the_published_d
             },
             &storm,
         )
+        .expect("inside the domain")
         .d[5]
             * 1000.0;
         println!(

@@ -1,0 +1,276 @@
+/* NRLMSISE-00 at extreme F10.7 (plans/18 Ф23.AJ, finding F128): where the model leaves its domain.
+
+   NRLMSISE-00's thermosphere is the Bates-Walker profile T = Tinf - (Tinf - Tlb) exp(-sigma xi),
+   sigma = g0/(Tinf - Tlb), and every density above za is the hydrostatic closed form over it.
+   nrlmsise00_structure.mac proves both under Tinf > Tlb > 0 and sigma > 0. Part 1 shows what
+   happens outside: with sigma < 0 the profile has no exospheric limit. Part 2 evaluates the three
+   fitted quantities Tinf, Tlb and g0 exactly at four inputs whose previous-day F10.7 is a flare
+   (707.6 sfu on 2005-09-10, 573.4 sfu on 2006-12-07) and shows Tinf < Tlb at each, so the model has
+   no value there and `gts7_impl` refuses (`Nrlmsise00Error::NoTemperatureProfile`). Rows A and B
+   are a CHAMP corpus row of each day under the storm-time `ap` array (the rows on which
+   `tools/fit-sdtm-corpus.py` got NaN); rows C and D are bridge inputs under the daily `Ap`, with the
+   local time the bridges derive. Part 3 shows why the port returned NaN rather than a number at A
+   and B. Part 4 checks the test module's literals against these values.
+
+   GLOBE7 is transcribed here from NRL's FORTRAN (`nrlmsise00_sub.for`, FUNCTION GLOBE7), with its
+   1-based P indices, independently of `mod.rs`'s `globe7`; only the coefficient tables are read from
+   `tables.rs`, which verify.sh regenerates byte for byte from that FORTRAN. Every coefficient and
+   input is the exact rational its decimal text denotes; sin, cos and exp are bigfloats at fpprec 50.
+   PARI/GP recomputes Part 2 at 60 digits in nrlmsise00_flux_domain.gp.
+
+   Every check prints `<name>: 0`; verify.sh counts them. */
+
+load("rust_literals.mac")$
+fpprec : 50$
+tables : "../crates/spacelab-propagation/src/nrlmsise00/tables.rs"$
+module : "../crates/spacelab-propagation/src/nrlmsise00/mod.rs"$
+
+/* ---- Part 1: the profile outside its hypotheses ---- */
+
+Tb(s) := Tinf - (Tinf - Tl)*exp(-sigma*s)$
+/* With g0 > 0, sigma = g0/(Tinf - Tl) has the sign of Tinf - Tl. */
+assume(g0 > 0, Tl > 0)$
+assume(Tinf > Tl)$ above : is(g0/(Tinf - Tl) > 0)$ forget(Tinf > Tl)$
+assume(Tinf < Tl)$ below : is(g0/(Tinf - Tl) < 0)$ forget(Tinf < Tl)$
+print("sigma has the sign of Tinf - Tl, given g0 > 0: ", if above and below then 0 else 1)$
+/* Below Tl the profile has no limit: it grows as exp(|sigma| xi), with Tl - Tinf as the factor. */
+assume(sigma < 0, Tinf < Tl)$
+print("no exospheric limit when sigma < 0: ", if limit(Tb(s), s, inf) = inf then 0 else 1)$
+print("it grows as (Tl - Tinf) exp(|sigma| xi): ",
+      ratsimp(limit(Tb(s)*exp(sigma*s), s, inf) - (Tl - Tinf)))$
+forget(sigma < 0, Tinf < Tl)$
+/* Inside, the limit is Tinf, as nrlmsise00_structure.mac proves; restated so the contrast is here. */
+assume(sigma > 0, Tinf > Tl)$
+print("exospheric limit Tinf when sigma > 0: ", limit(Tb(s), s, inf) - Tinf)$
+forget(sigma > 0, Tinf > Tl)$
+
+/* ---- Part 2: Tinf, Tlb and g0 at the four inputs ---- */
+
+/* `pub static NAME: ... = [ ... ];` of tables.rs, flattened, as exact rationals. */
+static_table(path, name) := block([s : openr(path), line, inside : false, done : false, out : [],
+                                   head : concat("static ", name, ":"), at, body],
+  while not done and (line : readline(s)) # false do (
+    body : false,
+    if inside then body : line
+    else if ssearch(head, line) # false then (
+      inside : true,
+      at : ssearch("= [", line),
+      body : if at = false then "" else substring(line, at + 3)),
+    if body # false then (
+      at : ssearch("];", body),
+      if at # false then (done : true, body : substring(body, 1, at)),
+      for c in ["[", "]", ";"] do body : ssubst(",", c, body),
+      out : append(out, map(lambda([e], rust_rational(strim(" ", e))),
+                            sublist(split(body, ",", false), rust_is_number))))),
+  close(s),
+  if not done then error("static_table: no complete table", name, "in", path),
+  out)$
+
+PT : static_table(tables, "PT")$
+PS : static_table(tables, "PS")$
+PDALL : static_table(tables, "PD")$
+PTM : static_table(tables, "PTM")$
+/* FORTRAN PD(1,4): the fourth 150-entry row, which GTS7 reads for Tlb. */
+PD4 : makelist(PDALL[3*150 + k], k, 1, 150)$
+print("table sizes 150 150 1350 50: ",
+      if [length(PT), length(PS), length(PDALL), length(PTM)] = [150, 150, 1350, 50] then 0 else 1)$
+
+DGTR : 174533/10^7$  DR : 172142/10^7$  HR : 2618/10^4$  SR : 72722/10^9$
+
+/* FUNCTION GLOBE7 with every switch on (SW = SWC = 1), and SW(9) = -1 when `storm` is true.
+   `inp` is [day, sec, lat, lon, tloc, f107a, f107, ap, aparr, storm], aparr = AP(1..7). F10.7 may
+   be a symbol: the result is then a polynomial in it. */
+globe7(P, inp) := block([day, sec, lat, lon, tloc, f107a, f107, ap, aparr, storm, c, s, c2, c4, s2,
+                         stloc, ctloc, s2tloc, c2tloc, s3tloc, c3tloc, cd14, cd18, cd32, cd39, df,
+                         dfa, f1, f2, T, t71, t72, t81, t82, apd, p44, p45, apdf, exp1, p25, g0f,
+                         sumex, sg0, apt1, pl],
+  local(pl),
+  [day, sec, lat, lon, tloc, f107a, f107, ap, aparr, storm] : inp,
+  T : makelist(0, k, 1, 14),
+  c : bfloat(sin(lat*DGTR)), s : bfloat(cos(lat*DGTR)),
+  c2 : c*c, c4 : c2*c2, s2 : s*s,
+  pl[2,1] : c,
+  pl[3,1] : (3*c2 - 1)/2,
+  pl[4,1] : (5*c*c2 - 3*c)/2,
+  pl[5,1] : (35*c4 - 30*c2 + 3)/8,
+  pl[6,1] : (63*c2*c2*c - 70*c2*c + 15*c)/8,
+  pl[7,1] : (11*c*pl[6,1] - 5*pl[5,1])/6,
+  pl[2,2] : s,
+  pl[3,2] : 3*c*s,
+  pl[4,2] : 3/2*(5*c2 - 1)*s,
+  pl[5,2] : 5/2*(7*c2*c - 3*c)*s,
+  pl[6,2] : 15/8*(21*c4 - 14*c2 + 1)*s,
+  pl[7,2] : (11*c*pl[6,2] - 6*pl[5,2])/5,
+  pl[3,3] : 3*s2,
+  pl[4,3] : 15*s2*c,
+  pl[5,3] : 15/2*(7*c2 - 1)*s2,
+  pl[6,3] : 3*c*pl[5,3] - 2*pl[4,3],
+  pl[7,3] : (11*c*pl[6,3] - 7*pl[5,3])/4,
+  pl[8,3] : (13*c*pl[7,3] - 8*pl[6,3])/5,
+  pl[4,4] : 15*s2*s,
+  pl[5,4] : 105*s2*s*c,
+  pl[6,4] : (9*c*pl[5,4] - 7*pl[4,4])/2,
+  pl[7,4] : (11*c*pl[6,4] - 8*pl[5,4])/3,
+  stloc : bfloat(sin(HR*tloc)), ctloc : bfloat(cos(HR*tloc)),
+  s2tloc : bfloat(sin(2*HR*tloc)), c2tloc : bfloat(cos(2*HR*tloc)),
+  s3tloc : bfloat(sin(3*HR*tloc)), c3tloc : bfloat(cos(3*HR*tloc)),
+  cd14 : bfloat(cos(DR*(day - P[14]))), cd18 : bfloat(cos(2*DR*(day - P[18]))),
+  cd32 : bfloat(cos(DR*(day - P[32]))), cd39 : bfloat(cos(2*DR*(day - P[39]))),
+  /* F10.7 EFFECT */
+  df : f107 - f107a, dfa : f107a - 150,
+  T[1] : P[20]*df*(1 + P[60]*dfa) + P[21]*df*df + P[22]*dfa + P[30]*dfa^2,
+  f1 : 1 + (P[48]*dfa + P[20]*df + P[21]*df*df),
+  f2 : 1 + (P[50]*dfa + P[20]*df + P[21]*df*df),
+  /* TIME INDEPENDENT, SYMMETRICAL ANNUAL AND SEMIANNUAL, ASYMMETRICAL ANNUAL AND SEMIANNUAL */
+  T[2] : (P[2]*pl[3,1] + P[3]*pl[5,1] + P[23]*pl[7,1]) + P[15]*pl[3,1]*dfa + P[27]*pl[2,1],
+  T[3] : P[19]*cd32,
+  T[4] : (P[16] + P[17]*pl[3,1])*cd18,
+  T[5] : f1*(P[10]*pl[2,1] + P[11]*pl[4,1])*cd14,
+  T[6] : P[38]*pl[2,1]*cd39,
+  /* DIURNAL, SEMIDIURNAL, TERDIURNAL */
+  t71 : P[12]*pl[3,2]*cd14, t72 : P[13]*pl[3,2]*cd14,
+  T[7] : f2*((P[4]*pl[2,2] + P[5]*pl[4,2] + P[28]*pl[6,2] + t71)*ctloc
+            + (P[7]*pl[2,2] + P[8]*pl[4,2] + P[29]*pl[6,2] + t72)*stloc),
+  t81 : (P[24]*pl[4,3] + P[36]*pl[6,3])*cd14, t82 : (P[34]*pl[4,3] + P[37]*pl[6,3])*cd14,
+  T[8] : f2*((P[6]*pl[3,3] + P[42]*pl[5,3] + t81)*c2tloc
+            + (P[9]*pl[3,3] + P[43]*pl[5,3] + t82)*s2tloc),
+  T[14] : f2*((P[40]*pl[4,4] + (P[94]*pl[5,4] + P[47]*pl[7,4])*cd14)*s3tloc
+             + (P[41]*pl[4,4] + (P[95]*pl[5,4] + P[49]*pl[7,4])*cd14)*c3tloc),
+  /* MAGNETIC ACTIVITY */
+  if not storm then (
+    apd : ap - 4, p44 : P[44], p45 : P[45],
+    if p44 < 0 then p44 : 1/10^5,
+    apdf : apd + (p45 - 1)*(apd + (bfloat(exp(-p44*apd)) - 1)/p44),
+    T[9] : apdf*(P[33] + P[46]*pl[3,1] + P[35]*pl[5,1]
+                 + (P[101]*pl[2,1] + P[102]*pl[4,1] + P[103]*pl[6,1])*cd14
+                 + (P[122]*pl[2,2] + P[123]*pl[4,2] + P[124]*pl[6,2])*bfloat(cos(HR*(tloc - P[125])))))
+  else if P[52] # 0 then (
+    exp1 : bfloat(exp(-10800*abs(P[52])/(1 + P[139]*(45 - abs(lat))))),
+    if exp1 > 99999/100000 then exp1 : 99999/100000,
+    p25 : max(P[25], 1/10^4),
+    g0f(a) := a - 4 + (P[26] - 1)*(a - 4 + (bfloat(exp(-abs(p25)*(a - 4))) - 1)/abs(p25)),
+    sumex(ex) := 1 + (1 - ex^19)/(1 - ex)*sqrt(ex),
+    sg0(ex) := (g0f(aparr[2]) + (g0f(aparr[3])*ex + g0f(aparr[4])*ex*ex + g0f(aparr[5])*ex^3
+                + (g0f(aparr[6])*ex^4 + g0f(aparr[7])*ex^12)*(1 - ex^8)/(1 - ex)))/sumex(ex),
+    apt1 : sg0(exp1),
+    T[9] : apt1*(P[51] + P[97]*pl[3,1] + P[55]*pl[5,1]
+                 + (P[126]*pl[2,1] + P[127]*pl[4,1] + P[128]*pl[6,1])*cd14
+                 + (P[129]*pl[2,2] + P[130]*pl[4,2] + P[131]*pl[6,2])*bfloat(cos(HR*(tloc - P[132]))))),
+  /* LONGITUDINAL; UT AND MIXED UT, LONGITUDE; UT, LONGITUDE MAGNETIC ACTIVITY */
+  T[11] : (1 + P[81]*dfa)*((P[65]*pl[3,2] + P[66]*pl[5,2] + P[67]*pl[7,2] + P[104]*pl[2,2]
+                            + P[105]*pl[4,2] + P[106]*pl[6,2]
+                            + (P[110]*pl[2,2] + P[111]*pl[4,2] + P[112]*pl[6,2])*cd14)
+                           *bfloat(cos(DGTR*lon))
+                           + (P[91]*pl[3,2] + P[92]*pl[5,2] + P[93]*pl[7,2] + P[107]*pl[2,2]
+                              + P[108]*pl[4,2] + P[109]*pl[6,2]
+                              + (P[113]*pl[2,2] + P[114]*pl[4,2] + P[115]*pl[6,2])*cd14)
+                           *bfloat(sin(DGTR*lon))),
+  T[12] : (1 + P[96]*pl[2,1])*(1 + P[82]*dfa)*(1 + P[120]*pl[2,1]*cd14)
+          *((P[69]*pl[2,1] + P[70]*pl[4,1] + P[71]*pl[6,1])*bfloat(cos(SR*(sec - P[72]))))
+          + (P[77]*pl[4,3] + P[78]*pl[6,3] + P[79]*pl[8,3])
+            *bfloat(cos(SR*(sec - P[80]) + 2*DGTR*lon))*(1 + P[138]*dfa),
+  if not storm then
+    T[13] : apdf*(1 + P[121]*pl[2,1])*((P[61]*pl[3,2] + P[62]*pl[5,2] + P[63]*pl[7,2])
+                                       *bfloat(cos(DGTR*(lon - P[64]))))
+            + apdf*(P[116]*pl[2,2] + P[117]*pl[4,2] + P[118]*pl[6,2])*cd14
+              *bfloat(cos(DGTR*(lon - P[119])))
+            + apdf*(P[84]*pl[2,1] + P[85]*pl[4,1] + P[86]*pl[6,1])*bfloat(cos(SR*(sec - P[76])))
+  else if P[52] # 0 then
+    T[13] : apt1*(1 + P[133]*pl[2,1])*((P[53]*pl[3,2] + P[99]*pl[5,2] + P[68]*pl[7,2])
+                                       *bfloat(cos(DGTR*(lon - P[98]))))
+            + apt1*(P[134]*pl[2,2] + P[135]*pl[4,2] + P[136]*pl[6,2])*cd14
+              *bfloat(cos(DGTR*(lon - P[137])))
+            + apt1*(P[56]*pl[2,1] + P[57]*pl[4,1] + P[58]*pl[6,1])*bfloat(cos(SR*(sec - P[59]))),
+  P[31] + apply("+", T))$
+
+/* GTS7 above ZA: TINF = PTM(1) PT(1) (1 + GLOBE7(PT)), G0 = PTM(4) PS(1) (1 + GLOBE7(PS)),
+   TLB = PTM(2) (1 + GLOBE7(PD(1,4))) PD(1,4). */
+profile(inp) := [PTM[1]*PT[1]*(1 + globe7(PT, inp)), PTM[2]*(1 + globe7(PD4, inp))*PD4[1],
+                 PTM[4]*PS[1]*(1 + globe7(PS, inp))]$
+
+dec(t) := rust_decimal(t)$
+rows : [
+  ["A", [253, 2507, dec("374.996554"), dec("-54.04366595"), dec("141.81501274"), dec("10.199"), dec("98.8"),
+         dec("707.6"), 33, [33, 9, 18, 32, 32, dec("8.875"), dec("7.25")], true]],
+  ["B", [341, 1786, dec("354.024071"), dec("35.51414905"), dec("59.92934048"), dec("4.638"), dec("91.5"),
+         dec("573.4"), 25, [25, 48, 22, 39, 18, dec("17.625"), 2], true]],
+  ["C", [253, 57600, 400, -5, 0, 57600/3600 + 0/15, dec("98.8"), dec("707.6"), 33, [], false]],
+  ["D", [341, 79200, 400, 35, 105, 79200/3600 + 105/15, dec("91.5"), dec("573.4"), 25, [], false]]]$
+/* The GLOBE7 argument list of a row: [day, sec, lat, lon, tloc, f107a, f107, ap, aparr, storm]. */
+g7in(r) := [r[1], r[2], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]]$
+
+prof : makelist(block([v : profile(g7in(r[2]))],
+  printf(true, "row ~a: Tinf = ~a K, Tlb = ~a K, g0 = ~a K/km~%", r[1],
+         bfloat(v[1]), bfloat(v[2]), bfloat(v[3])),
+  print(concat("row ", r[1], " Tinf < Tlb, so no profile: "), if is(v[1] < v[2]) then 0 else 1),
+  print(concat("row ", r[1], " Tlb > 0 and g0 > 0, so Tinf alone breaks the profile: "),
+        if is(v[2] > 0) and is(v[3] > 0) then 0 else 1),
+  v), r, rows)$
+print("row C's Tinf is below 0 K: ", if is(prof[3][1] < 0) then 0 else 1)$
+
+/* The flux at which each row leaves the domain: Tinf - Tlb is a quadratic in the daily F10.7 with
+   everything else held, positive at F10.7 = F10.7a, and its root between there and the row's flux
+   is where Tinf meets Tlb. */
+boundary(r) := block([inp : g7in(r[2]), q, a, b, c0, disc, roots],
+  inp[7] : 'F,
+  q : expand(bfloat(profile(inp)[1] - profile(inp)[2])),
+  [a, b, c0] : [coeff(q, 'F, 2), coeff(q, 'F, 1), coeff(q, 'F, 0)],
+  disc : b^2 - 4*a*c0,
+  roots : [(-b - sqrt(disc))/(2*a), (-b + sqrt(disc))/(2*a)],
+  roots : sublist(roots, lambda([x], is(x > inp[6]) and is(x < r[2][8]))),
+  if length(roots) # 1 then error("boundary: not one root inside", r[1]),
+  printf(true, "row ~a: Tinf = Tlb at F10.7 = ~a sfu~%", r[1], roots[1]),
+  print(concat("row ", r[1], " in the domain at F10.7a: "),
+        if is(subst('F = inp[6], q) > 0) then 0 else 1),
+  roots[1])$
+fluxes : map(boundary, rows)$
+
+/* ---- Part 3: why the port's f64 returned NaN at rows A and B ---- */
+
+/* GLATF and the ZETA statement function, as GTS7 and DENSU have them. */
+glatf(lat) := block([c2 : bfloat(cos(2*DGTR*lat)), gv],
+  gv : 980616/1000*(1 - 26373/10^7*c2),
+  [gv, 2*gv/(3085462/10^12 + 227/10^11*c2)/10^5])$
+geozeta(re, zz, zl) := (zz - zl)*(re + zl)/(re + zz)$
+ZLB : PTM[6]$
+RGAS : 8314/10$
+/* Row A, molecular nitrogen (xm = 28, alpha = 0): the Bates temperature at the row, and the two
+   factors of densu's DENSA = DLB (TLB/TT)^(1 + alpha + gamma) EXPL in log10. Each leaves the f64
+   range -- the first above 1.8e308, the second below the 4.9e-324 subnormal -- so the f64 product
+   is inf times 0 = NaN, while their sum, the log of the closed form, is a finite number: the
+   formula evaluates, it is the profile under it that is not the model's. */
+block([v : prof[1], r : rows[1][2], gre, sig, z2, tt, gam, lpow, lexp],
+  gre : glatf(r[4]),
+  sig : v[3]/(v[1] - v[2]),
+  z2 : geozeta(gre[2], r[3], ZLB),
+  tt : v[1] - (v[1] - v[2])*bfloat(exp(-sig*z2)),
+  gam : 28*(gre[1]/(1 + ZLB/gre[2])^2)/(sig*RGAS*v[1]),
+  lpow : (1 + gam)*log(v[2]/tt)/log(10b0),
+  lexp : -sig*gam*z2/log(10b0),
+  printf(true, "row A: T(~a km) = ~a K; log10 (Tlb/T)^(1+gamma) = ~a, log10 exp(-sigma gamma xi) = ~a~%",
+         bfloat(r[3]), tt, lpow, lexp),
+  print("row A: (Tlb/T)^(1+gamma) overflows f64: ", if lpow > 308.26 then 0 else 1),
+  print("row A: exp(-sigma gamma xi) underflows f64 below the least subnormal: ",
+        if lexp < -323.31 then 0 else 1),
+  print("row A: their product is finite: ", if abs(lpow + lexp) < 300 then 0 else 1))$
+/* Row B, anomalous oxygen: densu runs the Bates profile with Tinf = Tlb = tho (PDM(10,8) PDL(7,1)),
+   so T = tho - 0*exp(-sigma xi) = tho exactly; sigma < 0 sends exp(-sigma xi) past the f64 range and
+   0*inf is NaN in the port. */
+block([v : prof[2], r : rows[2][2], gre, sig, z2],
+  gre : glatf(r[4]),
+  sig : v[3]/(v[1] - v[2]),
+  z2 : geozeta(gre[2], r[3], ZLB),
+  printf(true, "row B: sigma = ~a /km, log10 exp(-sigma xi) = ~a~%", sig, -sig*z2/log(10b0)),
+  print("row B: exp(-sigma xi) overflows f64: ", if -sig*z2/log(10b0) > 308.26 then 0 else 1))$
+
+/* ---- Part 4: the test module's literals ---- */
+
+/* `the_flare_rows_have_no_temperature_profile` holds Tinf, Tlb and the boundary flux of each row as
+   literals; each must be this file's value to the digits it shows. */
+lits : [["ROW_A_T_INF", prof[1][1]], ["ROW_A_T_LB", prof[1][2]], ["ROW_A_BOUNDARY", fluxes[1]],
+        ["ROW_B_T_INF", prof[2][1]], ["ROW_B_T_LB", prof[2][2]], ["ROW_B_BOUNDARY", fluxes[2]],
+        ["ROW_C_T_INF", prof[3][1]], ["ROW_C_T_LB", prof[3][2]], ["ROW_C_BOUNDARY", fluxes[3]],
+        ["ROW_D_T_INF", prof[4][1]], ["ROW_D_T_LB", prof[4][2]], ["ROW_D_BOUNDARY", fluxes[4]]]$
+for l in lits do
+  print(concat("mod.rs ", l[1], " is the exact value to its digits: "),
+        if transcribed([rust_scalar(module, l[1])], [l[2]]) then 0 else 1)$

@@ -137,7 +137,8 @@ pub use maneuver::{
     ImpulsiveManeuver, PolynomialSignal,
 };
 pub use nrlmsise00::{
-    Nrlmsise00Atmosphere, Nrlmsise00Flags, Nrlmsise00Input, Nrlmsise00Output, gtd7, gtd7d,
+    Nrlmsise00Atmosphere, Nrlmsise00Error, Nrlmsise00Flags, Nrlmsise00Input, Nrlmsise00Output,
+    gtd7, gtd7d,
 };
 pub use ocean_tide::OceanTide;
 pub use relativity::{DeSitter, LenseThirring, Schwarzschild};

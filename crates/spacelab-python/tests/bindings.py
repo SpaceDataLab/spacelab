@@ -166,6 +166,26 @@ def test_nrlmsise00_density_falls_with_altitude_and_uses_every_argument():
         assert sl.nrlmsise00_density(**varied) != reference, name
 
 
+def test_nrlmsise00_density_refuses_a_flare_day_above_the_spline_join():
+    # A flare day's F10.7 against its 81-day mean (707.6 sfu on 2005-09-10, 573.4 on 2006-12-07)
+    # puts T_inf below T_lb: above 123.435 km the model has no temperature profile and the
+    # published subroutine answers NaN or a number from a profile with no exosphere. Below the join
+    # the model holds T_inf at its global mean, so the same day still has a density there.
+    for doy, sec, lat_deg, lon_deg, f107, f107a, ap in (
+        (253, 57600.0, -5.0, 0.0, 707.6, 98.8, 33.0),
+        (341, 79200.0, 35.0, 105.0, 573.4, 91.5, 25.0),
+    ):
+        day = {"doy": doy, "sec": sec, "lat_deg": lat_deg, "lon_deg": lon_deg}
+        drivers = {"f107": f107, "f107a": f107a, "ap": ap}
+        try:
+            sl.nrlmsise00_density(alt_km=400.0, **day, **drivers)
+        except ValueError as refused:
+            assert "no temperature profile" in str(refused), str(refused)
+        else:
+            raise AssertionError(f"F10.7 {f107} sfu at 400 km was answered")
+        assert sl.nrlmsise00_density(alt_km=110.0, **day, **drivers) > 0.0, f107
+
+
 def test_sdtm1_is_a_profile_a_temperature_a_kernel_and_an_interval():
     base = {"doy": 80.0, "sec": 43200.0, "lat_deg": 35.0, "lon_deg": 140.0}
     profile = [

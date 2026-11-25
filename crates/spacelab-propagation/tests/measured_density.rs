@@ -257,8 +257,14 @@ fn evaluate(o: &DensityObservation, satellite: &'static str, d: Drivers<'_>) -> 
     let mut storm_flags = Nrlmsise00Flags::default();
     storm_flags.switches[9] = -1;
     // `d[5]` is in g/cm³ under the default (non-metric) switch.
-    let rho_msis_array = gtd7d(&msis_input, &storm_flags).d[5] * 1000.0;
-    let rho_msis_daily = gtd7d(&msis_input, &Nrlmsise00Flags::default()).d[5] * 1000.0;
+    let rho_msis_array = gtd7d(&msis_input, &storm_flags)
+        .expect("inside the domain")
+        .d[5]
+        * 1000.0;
+    let rho_msis_daily = gtd7d(&msis_input, &Nrlmsise00Flags::default())
+        .expect("inside the domain")
+        .d[5]
+        * 1000.0;
 
     // SDTM-1, ours — through the same entry point an operational caller uses, so that this campaign
     // scores the conventions the library applies rather than a second copy of them. Those are

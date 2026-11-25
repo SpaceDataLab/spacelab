@@ -1361,6 +1361,7 @@ if have maxima; then
     mac_zeros attitude_law_frames.mac 75 "every attitude law is an orthonormal right-handed frame"
     mac_zeros analytic_ephemeris.mac 33 "the analytic Sun and Moon series and their precession to J2000"
     mac_zeros thermosphere_legendre_terms.mac 30 "Legendre and local-time terms of a thermosphere expansion"
+    mac_zeros nrlmsise00_flux_domain.mac 34 "NRLMSISE-00 at a flare F10.7: Tinf falls below Tlb, the Bates-Walker profile has no exospheric limit, the port's NaN is inf*0 over it, and the test's refusal literals"
     mac_zeros kalman_square_root.mac 10 "the square-root Kalman array: Joseph, information form, the trace-minimising gain"
     mac_zeros rts_smoother.mac 5 "RTS and fixed-lag smoothing equal the joint-Gaussian conditional"
     mac_zeros consider_covariance.mac 4 "the consider covariance is the error covariance and reduces at Pcc = 0"
@@ -1537,7 +1538,7 @@ if have gp; then
         cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal lambert_izzo gpu_porkchop iod_classical patched_conics \
         targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step sdtm_column sdtm_composition sdtm_overcooling sdtm_nitric_flux sdtm_flux_memory gaussian_scores drag_error_growth central_difference \
         density_calibration_ridge \
-        wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms \
+        wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms nrlmsise00_flux_domain \
         chi_square_quantiles robust_weights se3_exponential particle_resampling sampling_transforms \
         conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \
         hull_delaunay spherical_triangle igrf_synthesis geomagnetic_dipole attitude_control gmst82 \

@@ -1685,12 +1685,26 @@ second_order_ionospheric_delay(double latitude_rad, double longitude_rad, double
 
 /* ---- Atmospheres, tides, density calibration and space weather ---- */
 
+[[nodiscard]] inline result<double> try_nrlmsise00_density(std::int32_t doy, double sec,
+                                                           double altitude_km, double latitude_deg,
+                                                           double longitude_deg, double f107,
+                                                           double f107a, double ap) {
+    double out = 0.0;
+    const ::sl_status s = ::sl_nrlmsise00_density(doy, sec, altitude_km, latitude_deg,
+                                                  longitude_deg, f107, f107a, ap, &out);
+    return s == SL_OK ? result<double>(out) : detail::failure<double>(s);
+}
+
+#if defined(__cpp_exceptions)
+
 [[nodiscard]] inline double nrlmsise00_density(std::int32_t doy, double sec, double altitude_km,
                                                double latitude_deg, double longitude_deg,
-                                               double f107, double f107a, double ap) noexcept {
-    return ::sl_nrlmsise00_density(doy, sec, altitude_km, latitude_deg, longitude_deg, f107, f107a,
-                                   ap);
+                                               double f107, double f107a, double ap) {
+    return detail::unwrap(try_nrlmsise00_density(doy, sec, altitude_km, latitude_deg, longitude_deg,
+                                                 f107, f107a, ap));
 }
+
+#endif
 
 [[nodiscard]] inline double sdtm1_density(double doy, double sec, double altitude_km,
                                           double latitude_deg, double longitude_deg, double f107,

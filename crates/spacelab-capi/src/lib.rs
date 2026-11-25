@@ -5248,19 +5248,23 @@ unsafe fn borrow_density_samples(samples: *const SlDensitySample, n: usize) -> V
         .collect()
 }
 
-/// NRLMSISE-00 total mass density, kg/m³, at one place and time. Total.
+/// NRLMSISE-00 total mass density, kg/m³, at one place and time, written to `out`.
 ///
 /// `sec` is UT seconds into the day; the local solar time the model needs is derived from it and
 /// the longitude, exactly as the Python bridge does, so the two answer the same number.
 ///
-/// A non-finite argument answers NaN. The published subroutine does not propagate one — measured
-/// here, a NaN altitude comes back as 2.9e-3 kg/m³, which is a sea-level density and a plausible
-/// number rather than an obvious failure. Returning NaN is the honest answer a total function can
-/// give, and the check belongs at this boundary because it is the one place a caller's arithmetic
-/// stops being Rust's problem.
+/// A non-finite argument is `SL_ERR_INVALID_ARGUMENT`. The published subroutine does not propagate
+/// one — measured here, a NaN altitude comes back as 2.9e-3 kg/m³, which is a sea-level density and
+/// a plausible number rather than an obvious failure — and the check belongs at this boundary
+/// because it is the one place a caller's arithmetic stops being Rust's problem. An input the model
+/// refuses (`Nrlmsise00Error`: no temperature profile, as a flare-contaminated daily F10.7 makes) is
+/// `SL_ERR_DOMAIN`. Nothing is written unless the answer exists.
+///
+/// # Safety
+/// `out` is writable for one double.
 #[allow(clippy::too_many_arguments)] // a day, a time, three coordinates and three solar-activity indices
 #[unsafe(no_mangle)]
-pub extern "C" fn sl_nrlmsise00_density(
+pub unsafe extern "C" fn sl_nrlmsise00_density(
     doy: i32,
     sec: f64,
     altitude_km: f64,
@@ -5269,8 +5273,13 @@ pub extern "C" fn sl_nrlmsise00_density(
     f107: f64,
     f107a: f64,
     ap: f64,
-) -> f64 {
-    guard_f64(|| {
+    out: *mut f64,
+) -> i32 {
+    guard(|| {
+        const WHO: &str = "sl_nrlmsise00_density";
+        if out.is_null() {
+            return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null out pointer"));
+        }
         let arguments = [
             sec,
             altitude_km,
@@ -5281,7 +5290,10 @@ pub extern "C" fn sl_nrlmsise00_density(
             ap,
         ];
         if arguments.iter().any(|v| !v.is_finite()) {
-            return f64::NAN;
+            return fail(
+                SL_ERR_INVALID_ARGUMENT,
+                format!("{WHO}: an argument is not finite"),
+            );
         }
         let input = Nrlmsise00Input {
             year: 0,
@@ -5296,7 +5308,14 @@ pub extern "C" fn sl_nrlmsise00_density(
             ap,
             ap_array: None,
         };
-        gtd7d(&input, &Nrlmsise00Flags::default()).d[5] * 1000.0 // g/cm³ → kg/m³
+        match gtd7d(&input, &Nrlmsise00Flags::default()) {
+            Ok(output) => {
+                // SAFETY: checked non-null; written only now that the answer exists.
+                unsafe { *out = output.d[5] * 1000.0 }; // g/cm³ → kg/m³
+                SL_OK
+            }
+            Err(e) => fail(SL_ERR_DOMAIN, format!("{WHO}: {e}")),
+        }
     })
 }
 
@@ -18031,18 +18050,80 @@ mod tests {
         h[0].atan2(-h[1])
     }
 
+    /// The density, or the status and nothing written.
+    #[allow(clippy::too_many_arguments)]
+    fn nrlmsise00_at(
+        doy: i32,
+        sec: f64,
+        altitude_km: f64,
+        latitude_deg: f64,
+        longitude_deg: f64,
+        f107: f64,
+        f107a: f64,
+        ap: f64,
+    ) -> Result<f64, (i32, f64)> {
+        let mut out = -1.0;
+        // SAFETY: `out` is a live local.
+        let status = unsafe {
+            sl_nrlmsise00_density(
+                doy,
+                sec,
+                altitude_km,
+                latitude_deg,
+                longitude_deg,
+                f107,
+                f107a,
+                ap,
+                &raw mut out,
+            )
+        };
+        if status == SL_OK {
+            Ok(out)
+        } else {
+            Err((status, out))
+        }
+    }
+
     #[test]
     fn the_thermosphere_thins_with_height_and_answers_in_si() {
         let at = |altitude_km: f64| {
-            sl_nrlmsise00_density(172, 29_000.0, altitude_km, 0.0, 0.0, 150.0, 150.0, 4.0)
+            nrlmsise00_at(172, 29_000.0, altitude_km, 0.0, 0.0, 150.0, 150.0, 4.0)
         };
-        let (low, mid, high) = (at(200.0), at(400.0), at(600.0));
+        let (low, mid, high) = (at(200.0).unwrap(), at(400.0).unwrap(), at(600.0).unwrap());
         assert!(low > mid && mid > high, "{low} {mid} {high}");
         // kg/m³, not the model's own g/cm³: 400 km at moderate flux is a few times 1e-12.
         assert!((1e-13..1e-11).contains(&mid), "{mid}");
         // The model itself answers a sea-level 2.9e-3 kg/m³ for a NaN altitude; the binding
         // refuses rather than passing that on.
-        assert!(at(f64::NAN).is_nan());
+        assert_eq!(at(f64::NAN), Err((SL_ERR_INVALID_ARGUMENT, -1.0)));
+    }
+
+    /// A flare day's F10.7 against its 81-day mean leaves the model without a temperature profile
+    /// above 123.435 km (`derivations/nrlmsise00_flux_domain.mac`, rows C and D, the inputs this
+    /// binding builds): `SL_ERR_DOMAIN`, a message that names it, and nothing written. The model's
+    /// own refusal is tested in `spacelab-propagation`; this is that the binding passes it on.
+    #[test]
+    fn a_flare_day_is_refused_with_the_model_reason() {
+        let rows = [
+            (253, 57_600.0, -5.0, 0.0, 707.6, 98.8, 33.0),
+            (341, 79_200.0, 35.0, 105.0, 573.4, 91.5, 25.0),
+        ];
+        for (doy, sec, lat, lon, f107, f107a, ap) in rows {
+            assert_eq!(
+                nrlmsise00_at(doy, sec, 400.0, lat, lon, f107, f107a, ap),
+                Err((SL_ERR_DOMAIN, -1.0)),
+                "F10.7 {f107}"
+            );
+            let message = last_error();
+            assert!(
+                message.starts_with("sl_nrlmsise00_density: ")
+                    && message.contains("temperature profile"),
+                "{message}"
+            );
+            // Below the spline join the model holds T_inf at its global mean and answers.
+            let below = nrlmsise00_at(doy, sec, 110.0, lat, lon, f107, f107a, ap);
+            assert!(below.is_ok_and(|rho| rho > 0.0), "{below:?}");
+        }
     }
 
     /// The binding computes the local solar time the model needs -- `sec/3600 + longitude/15` --
@@ -18059,7 +18140,7 @@ mod tests {
             for k in 0..48 {
                 let sec = f64::from(k) * 1_800.0;
                 let d =
-                    sl_nrlmsise00_density(172, sec, 400.0, 0.0, longitude_deg, 150.0, 150.0, 4.0);
+                    nrlmsise00_at(172, sec, 400.0, 0.0, longitude_deg, 150.0, 150.0, 4.0).unwrap();
                 if d > peak.1 {
                     peak = (sec / 3_600.0, d);
                 }

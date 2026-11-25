@@ -5,6 +5,7 @@
 //! The oracle is the analytic geometry of the atmosphere arc, verified on real LEO equinoctial states.
 
 #![allow(clippy::float_cmp)] // the above-atmosphere guard returns a literal exact [0.0, 0.0]
+#![allow(clippy::unwrap_used)]
 
 use spacelab_propagation::dsst::DsstAtmosphericDrag;
 use spacelab_propagation::{DsstAuxiliary, DsstSolarRadiationPressure};
@@ -25,7 +26,7 @@ fn drag_limits_vanish_above_the_atmosphere() {
     // perigee = a(1−e). With a = 8000 km and e ≈ 0.007, perigee ≈ 7943 km > rbar (7378 km): the whole
     // orbit is above the atmosphere, so there is no arc to integrate — both limits collapse to zero.
     let drag = DsstAtmosphericDrag::new(2.2, 10.0 / 1000.0, MU);
-    let ll = drag.l_limits(&aux(8_000_000.0, 0.005, 0.005));
+    let ll = drag.l_limits(&aux(8_000_000.0, 0.005, 0.005)).unwrap();
     assert_eq!(ll, [0.0, 0.0]);
 }
 
@@ -35,7 +36,7 @@ fn drag_limits_are_a_partial_arc_when_the_orbit_straddles_rbar() {
     // out of the atmosphere, so the limits bound a *proper* arc — a non-empty span strictly under a full
     // revolution (unlike the golden full-circle orbit whose span is exactly 2π).
     let drag = DsstAtmosphericDrag::new(2.2, 10.0 / 1000.0, MU);
-    let ll = drag.l_limits(&aux(DEFAULT_RBAR, 0.03, 0.04));
+    let ll = drag.l_limits(&aux(DEFAULT_RBAR, 0.03, 0.04)).unwrap();
     let span = ll[1] - ll[0];
     assert!(span > 0.0, "entry must precede exit: {ll:?}");
     assert!(
@@ -51,7 +52,9 @@ fn srp_with_reference_builds_a_working_force() {
     const AU: f64 = 1.495_978_707e11;
     const P_REF: f64 = 4.56e-6;
     let srp = DsstSolarRadiationPressure::with_reference(1.5, 10.0 / 1000.0, MU, RE, AU, P_REF);
-    let rates = srp.mean_element_rates(&aux(7_000_000.0, 0.01, 0.0), [AU, 0.0, 0.0]);
+    let rates = srp
+        .mean_element_rates(&aux(7_000_000.0, 0.01, 0.0), [AU, 0.0, 0.0])
+        .unwrap();
     assert!(rates.iter().all(|r| r.is_finite()), "rates: {rates:?}");
     // SRP perturbs a LEO's semi-major axis at the sub-µm/s level, not zero and not divergent.
     assert!(rates[0].abs() < 1.0e-3);

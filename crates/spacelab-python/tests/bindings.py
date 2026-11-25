@@ -331,6 +331,33 @@ def test_dsst_full_wires_the_third_body_and_radiation_pressure():
         assert 1e3 < abs(o[0] - m[0]) < 3e4, o[0] - m[0]
 
 
+def test_dsst_raises_value_error_on_what_the_library_refuses():
+    # Each of these panicked inside the library before, and reached Python as a PanicException,
+    # which is not an Exception and which no `except ValueError` catches.
+    initial = [7000e3, 1e-3, 2e-3, 0.4, 0.1, 0.5]
+    parabolic = [7000e3, 1.0, 0.0, 0.4, 0.1, 0.5]
+    grazing = [7000e3, 1.0 - 1e-12, 0.0, 0.4, 0.1, 0.5]
+    cases = [
+        ([math.nan] * 6, [3600.0], ZONALS),
+        (parabolic, [3600.0], ZONALS),
+        (grazing, [3600.0], ZONALS),
+        (initial, [0.0, -60.0], ZONALS),
+        (initial, [3600.0], []),
+    ]
+    calls = [
+        lambda s, t, j: sl.dsst_zonal_propagate_mean(s, t, j=j),
+        lambda s, t, j: sl.dsst_zonal_propagate_osculating(s, t, j=j),
+        lambda s, t, j: sl.dsst_propagate_mean_full(s, t, 0.0, j=j),
+        lambda s, t, j: sl.dsst_propagate_osculating_full(s, t, 0.0, j=j),
+    ]
+    for state, times, j in cases:
+        for call in calls:
+            try:
+                answer = call(state, times, j)
+            except ValueError:
+                continue
+            raise AssertionError(f"{state} over {times} with J {j} answered {answer}")
+
 def test_solid_tide_step2_is_periodic_in_sidereal_time():
     delaunay = [1.0, 2.0, 3.0, 4.0, 5.0]
     corrections = sl.solid_tide_step2(0.7, delaunay)

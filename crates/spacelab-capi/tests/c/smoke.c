@@ -443,6 +443,17 @@ static void the_mean_elements_are_mean_and_the_osculating_ones_are_not(void) {
     sl_dsst_params_init(&p);
     CHECK(sl_dsst_zonal_mean(&p, initial, times, 0, untouched) == SL_ERR_INVALID_ARGUMENT);
     CHECK(untouched[0] == -1.0);
+
+    /* What DSST cannot propagate is a status rather than SL_ERR_PANIC: no state, no ellipse to
+     * step through at e = 1 - 1e-12, and a span that runs backwards. */
+    const double nan_state[6] = {NAN, NAN, NAN, NAN, NAN, NAN};
+    CHECK(sl_dsst_zonal_mean(&p, nan_state, times, 1, untouched) == SL_ERR_INVALID_ARGUMENT);
+    const double grazing[6] = {7.0e6, 1.0 - 1e-12, 0.0, tan(inclination / 2.0), 0.0, 0.0};
+    CHECK(sl_dsst_zonal_mean(&p, grazing, times, 1, untouched) == SL_ERR_COMPUTE);
+    CHECK(sl_dsst_osculating(&p, grazing, times, 1, untouched) == SL_ERR_COMPUTE);
+    const double backwards[1] = {-60.0};
+    CHECK(sl_dsst_mean(&p, initial, backwards, 1, untouched) == SL_ERR_DOMAIN);
+    CHECK(untouched[0] == -1.0);
     sl_dsst_params_init(NULL); /* documented no-op */
 }
 

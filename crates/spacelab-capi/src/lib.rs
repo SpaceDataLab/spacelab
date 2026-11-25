@@ -179,9 +179,9 @@ use spacelab_sensors::{AgileOptical, ElevationMask, OrbitBound, SideLookingSAR};
 // still says 70 for a table that has held 120 since the un-truncation work.
 use spacelab_propagation::geopotential_coeffs::{MODEL_GM, MODEL_MAX_DEGREE, MODEL_RE};
 use spacelab_propagation::{
-    DeSitter, Dop853, DsstMeanPropagator, DsstSolarRadiationPressure, DsstTesseral, DsstThirdBody,
-    DsstZonal, GeoPotential, LenseThirring, MeanPole, Nrlmsise00Atmosphere, Nrlmsise00Flags,
-    Nrlmsise00Input, Schwarzschild, SolidEarthTide, Tolerance,
+    DeSitter, Dop853, DsstError, DsstMeanPropagator, DsstSolarRadiationPressure, DsstTesseral,
+    DsstThirdBody, DsstZonal, GeoPotential, LenseThirring, MeanPole, Nrlmsise00Atmosphere,
+    Nrlmsise00Flags, Nrlmsise00Input, Schwarzschild, SolidEarthTide, Tolerance,
     conventional_zonal_coefficients as tvg_conventional, gtd7d, ocean_pole_tide_corrections,
     pole_tide_corrections, secular_zonal_correction as tvg_secular, sentman_panel,
     speed_ratio as sentman_speed_ratio, step2_corrections,
@@ -2564,7 +2564,22 @@ fn dsst_zonal_field(who: &str, p: &SlDsstParams) -> Result<DsstZonal, i32> {
             format!("{who}: J{} is not finite", i + 2),
         ));
     }
-    Ok(DsstZonal::from_j(p.mu, p.earth_radius_m, j))
+    DsstZonal::from_j(p.mu, p.earth_radius_m, j).map_err(|e| dsst_status(who, &e))
+}
+
+/// The status a DSST refusal crosses the boundary as. A state that is not an ellipse, or a span
+/// that runs backwards, is a question with no answer here; a field the library refuses is a bad
+/// argument; the rest started and failed.
+fn dsst_status(who: &str, e: &DsstError) -> i32 {
+    let status = match e {
+        DsstError::MeanState { .. } | DsstError::Span { .. } => SL_ERR_DOMAIN,
+        DsstError::ZonalField { .. }
+        | DsstError::TesseralField { .. }
+        | DsstError::Truncation { .. }
+        | DsstError::GaussOrder { .. } => SL_ERR_INVALID_ARGUMENT,
+        _ => SL_ERR_COMPUTE,
+    };
+    fail(status, format!("{who}: {e}"))
 }
 
 /// The remaining scalars the combined propagator reads, checked once for all four entry points.
@@ -2629,7 +2644,7 @@ fn check_mean_equinoctial(who: &str, y0: &[f64; 6]) -> Result<(), i32> {
 unsafe fn dsst_sample(
     who: &str,
     req: DsstRequest,
-    step: impl Fn([f64; 6], f64) -> [f64; 6],
+    step: impl Fn([f64; 6], f64) -> Result<[f64; 6], DsstError>,
 ) -> i32 {
     let DsstRequest {
         initial,
@@ -2657,8 +2672,16 @@ unsafe fn dsst_sample(
     if let Err(status) = check_all_finite(who, "times_seconds", times) {
         return status;
     }
-    for (i, &t) in times.iter().enumerate() {
-        let y = step(y0, t);
+    // An epoch can still fail once propagated, so the answers are held until all of them exist.
+    let states = match times
+        .iter()
+        .map(|&t| step(y0, t))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(states) => states,
+        Err(e) => return dsst_status(who, &e),
+    };
+    for (i, y) in states.iter().enumerate() {
         // SAFETY: the caller states `out` is writable for `6 * n` doubles, and `i < n`.
         unsafe { core::ptr::copy_nonoverlapping(y.as_ptr(), out.add(i * 6), 6) };
     }
@@ -2694,13 +2717,16 @@ unsafe fn dsst_combined_sample(
     let moon_tb = DsstThirdBody::new(p.mu, p.mu_moon);
     let srp =
         DsstSolarRadiationPressure::new(p.reflectivity, p.area_over_mass, p.mu, p.earth_radius_m);
-    let tesseral = DsstTesseral::new(
+    let tesseral = match DsstTesseral::new(
         p.mu,
         p.earth_radius_m,
         spacelab_frames::EARTH_ROTATION_RATE,
         std::vec![std::vec![0.0; 3]; 3],
         std::vec![std::vec![0.0; 3]; 3],
-    );
+    ) {
+        Ok(tesseral) => tesseral,
+        Err(e) => return dsst_status(who, &e),
+    };
     let sun = AnalyticSun {
         epoch_j2000_seconds: p.epoch_j2000_seconds,
     };
@@ -11329,8 +11355,8 @@ unsafe fn read_decay(
             format!("{who}: null pointer"),
         ));
     }
-    // `DsstZonal::new` asserts on a short list, and an assertion across the ABI is an abort rather
-    // than a status, so the length is checked here, where it can still be reported.
+    // `DsstZonal::new` refuses a short list too; checked here first so the message names the
+    // parameter the caller passed.
     check_at_least(who, "zonal_count", zonal_count, 3)?;
     // SAFETY: checked non-null; the caller states the extents.
     let (p, state, zonal_slice) = unsafe {
@@ -11367,7 +11393,8 @@ unsafe fn read_decay(
         p,
         state,
         CapiDecay {
-            zonal: DsstZonal::new(p.mu, p.body_radius, zonal_slice.to_vec()),
+            zonal: DsstZonal::new(p.mu, p.body_radius, zonal_slice.to_vec())
+                .map_err(|e| dsst_status(who, &e))?,
             drag: DsstAtmosphericDrag::new(p.cd, p.area_over_mass, p.mu),
             mu: p.mu,
             body_radius: p.body_radius,
@@ -16470,6 +16497,70 @@ mod tests {
                 )
             },
             SL_ERR_INVALID_ARGUMENT
+        );
+    }
+
+    /// What the library refuses comes back as a status rather than `SL_ERR_PANIC`: a negative
+    /// epoch, an eccentricity of 1, and the step collapse at `e = 1 − 1e-12` each panicked inside
+    /// the library before. A request refused at its last epoch writes nothing at all.
+    #[test]
+    fn a_dsst_refusal_is_a_status_not_a_panic() {
+        type Entry = unsafe extern "C" fn(
+            *const SlDsstParams,
+            *const f64,
+            *const f64,
+            usize,
+            *mut f64,
+        ) -> i32;
+        let entries: [Entry; 4] = [
+            sl_dsst_zonal_mean,
+            sl_dsst_zonal_osculating,
+            sl_dsst_mean,
+            sl_dsst_osculating,
+        ];
+        let p = default_dsst();
+        let y0 = leo_equinoctial();
+        let mut parabolic = y0;
+        parabolic[1] = 1.0;
+        let mut grazing = y0;
+        grazing[1] = 1.0 - 1e-12;
+        for entry in entries {
+            assert_eq!(
+                dsst_run(entry, &p, &[f64::NAN; 6], &[3600.0]),
+                Err(SL_ERR_INVALID_ARGUMENT)
+            );
+            assert_eq!(
+                dsst_run(entry, &p, &parabolic, &[3600.0]),
+                Err(SL_ERR_DOMAIN)
+            );
+            assert!(
+                last_error().contains("not a finite ellipse"),
+                "{}",
+                last_error()
+            );
+            assert_eq!(
+                dsst_run(entry, &p, &grazing, &[3600.0]),
+                Err(SL_ERR_COMPUTE)
+            );
+            assert_eq!(dsst_run(entry, &p, &y0, &[0.0, -60.0]), Err(SL_ERR_DOMAIN));
+            assert!(last_error().contains("forward only"), "{}", last_error());
+        }
+
+        let mut out = [7.0_f64; 12];
+        // SAFETY: `y0` is six doubles, the times two, and `out` twelve.
+        let status = unsafe {
+            sl_dsst_zonal_mean(
+                &raw const p,
+                y0.as_ptr(),
+                [3600.0, -60.0].as_ptr(),
+                2,
+                out.as_mut_ptr(),
+            )
+        };
+        assert_eq!(status, SL_ERR_DOMAIN);
+        assert_eq!(
+            out, [7.0; 12],
+            "the answered first epoch was written anyway"
         );
     }
 

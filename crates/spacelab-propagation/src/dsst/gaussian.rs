@@ -31,6 +31,7 @@
 
 use libm::{cos, sin, sqrt};
 
+use super::DsstError;
 use super::auxiliary::{DsstAuxiliary, I};
 
 /// Available orders for Gauss quadrature (`AbstractGaussianContribution.GAUSS_ORDER`).
@@ -65,7 +66,7 @@ where
     F: Fn(&NodeState) -> [f64; 3],
 {
     if low < high {
-        let mut rate = integrate(MAX_GAUSS_ORDER, aux, low, high, &accel);
+        let mut rate = integrate_rule(aux, gauss_nodes(Rule::MAX, low, high), &accel);
         let coef = 1.0 / (2.0 * core::f64::consts::PI * aux.big_b);
         for r in &mut rate {
             *r *= coef;
@@ -87,13 +88,13 @@ where
 {
     if low < high {
         let coef = 1.0 / (2.0 * core::f64::consts::PI * aux.big_b);
-        let mut reference = integrate(MAX_GAUSS_ORDER, aux, low, high, &accel);
+        let mut reference = integrate_rule(aux, gauss_nodes(Rule::MAX, low, high), &accel);
         for r in &mut reference {
             *r *= coef;
         }
         // GAUSS_ORDER[0 .. MAX_ORDER_RANK] — the max order itself is excluded from the search.
-        for &order in &GAUSS_ORDER[..GAUSS_ORDER.len() - 1] {
-            let mut current = integrate(order, aux, low, high, &accel);
+        for &rule in &Rule::ALL[..Rule::ALL.len() - 1] {
+            let mut current = integrate_rule(aux, gauss_nodes(rule, low, high), &accel);
             for r in &mut current {
                 *r *= coef;
             }
@@ -102,7 +103,7 @@ where
                 max_diff = max_diff.max((reference[i] - current[i]).abs());
             }
             if max_diff < threshold {
-                return order;
+                return rule.order();
             }
         }
     }
@@ -114,15 +115,21 @@ where
 /// nodes/weights are affinely mapped to `[low, high]` and summed with the same compensated (Kahan)
 /// accumulation as Orekit's `basicIntegrate`, so the result matches term-for-term.
 ///
-/// # Panics
+/// # Errors
 ///
-/// If `order` is not one of [`GAUSS_ORDER`].
-#[must_use]
-pub fn integrate<F>(order: usize, aux: &DsstAuxiliary, low: f64, high: f64, accel: &F) -> [f64; 6]
+/// [`DsstError::GaussOrder`] if `order` is not one of [`GAUSS_ORDER`].
+pub fn integrate<F>(
+    order: usize,
+    aux: &DsstAuxiliary,
+    low: f64,
+    high: f64,
+    accel: &F,
+) -> Result<[f64; 6], DsstError>
 where
     F: Fn(&NodeState) -> [f64; 3],
 {
-    integrate_rule(aux, gauss_nodes(order, low, high), accel)
+    let rule = Rule::of(order).ok_or(DsstError::GaussOrder { order })?;
+    Ok(integrate_rule(aux, gauss_nodes(rule, low, high), accel))
 }
 
 /// [`integrate`] over any rule given as `(L, weight)` pairs: the same integrand and the same
@@ -157,14 +164,10 @@ where
     s
 }
 
-/// The `order`-point Gauss–Legendre rule on `[low, high]` as `(L, weight)` pairs, the `[-1, 1]`
-/// table mapped affinely (`GaussQuadrature.transform`).
-///
-/// # Panics
-///
-/// If `order` is not one of [`GAUSS_ORDER`].
-pub(crate) fn gauss_nodes(order: usize, low: f64, high: f64) -> impl Iterator<Item = (f64, f64)> {
-    let (points, weights) = nodes_weights(order);
+/// The Gauss–Legendre `rule` on `[low, high]` as `(L, weight)` pairs, the `[-1, 1]` table mapped
+/// affinely (`GaussQuadrature.transform`).
+pub(crate) fn gauss_nodes(rule: Rule, low: f64, high: f64) -> impl Iterator<Item = (f64, f64)> {
+    let (points, weights) = rule.nodes_weights();
     let scale = (high - low) / 2.0;
     let shift = low + scale;
     points
@@ -173,7 +176,7 @@ pub(crate) fn gauss_nodes(order: usize, low: f64, high: f64) -> impl Iterator<It
         .map(move |(x, w)| (x * scale + shift, w * scale))
 }
 
-/// The `order`-point Gauss–Legendre rule on `[low, high]` after the substitution
+/// The Gauss–Legendre `rule` on `[low, high]` after the substitution
 /// `L = low + (high − low)(3t² − 2t³)`, `t ∈ [0, 1]`, as `(L, weight)` pairs.
 ///
 /// The lit fraction of the Sun's disc behaves like `(L − L₀)^{3/2}` at a shadow contact `L₀`: the
@@ -186,16 +189,12 @@ pub(crate) fn gauss_nodes(order: usize, low: f64, high: f64) -> impl Iterator<It
 ///
 /// Each node is measured from the nearer end, `u = (1 − |x|)/2`, so a node close to a contact
 /// keeps its distance to it to full relative precision.
-///
-/// # Panics
-///
-/// If `order` is not one of [`GAUSS_ORDER`].
 pub(crate) fn smoothstep_nodes(
-    order: usize,
+    rule: Rule,
     low: f64,
     high: f64,
 ) -> impl Iterator<Item = (f64, f64)> {
-    let (points, weights) = nodes_weights(order);
+    let (points, weights) = rule.nodes_weights();
     let width = high - low;
     points.iter().zip(weights).map(move |(x, w)| {
         let u = (1.0 - x.abs()) / 2.0;
@@ -373,21 +372,64 @@ where
     ([deriv0, deriv1, deriv2, deriv3, deriv4, deriv5], roa2)
 }
 
-/// Node points and weights for a supported Gauss order.
-///
-/// # Panics
-///
-/// If `order` is not one of [`GAUSS_ORDER`].
-pub(crate) fn nodes_weights(order: usize) -> (&'static [f64], &'static [f64]) {
-    match order {
-        12 => (&POINTS_12, &WEIGHTS_12),
-        16 => (&POINTS_16, &WEIGHTS_16),
-        20 => (&POINTS_20, &WEIGHTS_20),
-        24 => (&POINTS_24, &WEIGHTS_24),
-        32 => (&POINTS_32, &WEIGHTS_32),
-        40 => (&POINTS_40, &WEIGHTS_40),
-        48 => (&POINTS_48, &WEIGHTS_48),
-        _ => panic!("unsupported Gauss order {order}"),
+/// A tabulated Gauss–Legendre rule, named by its number of points: [`GAUSS_ORDER`] as a type, so
+/// that inside the crate an order with no table cannot be asked for, and only [`integrate`], which
+/// takes the order as a number, has an order to refuse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rule {
+    P12,
+    P16,
+    P20,
+    P24,
+    P32,
+    P40,
+    P48,
+}
+
+impl Rule {
+    /// Every rule, fewest points first: the orders of [`GAUSS_ORDER`].
+    pub(crate) const ALL: [Self; 7] = [
+        Self::P12,
+        Self::P16,
+        Self::P20,
+        Self::P24,
+        Self::P32,
+        Self::P40,
+        Self::P48,
+    ];
+
+    /// The rule of [`MAX_GAUSS_ORDER`] points.
+    pub(crate) const MAX: Self = Self::P48;
+
+    /// The `order`-point rule, if one is tabulated.
+    pub(crate) fn of(order: usize) -> Option<Self> {
+        Self::ALL.into_iter().find(|rule| rule.order() == order)
+    }
+
+    /// The number of points.
+    pub(crate) const fn order(self) -> usize {
+        match self {
+            Self::P12 => 12,
+            Self::P16 => 16,
+            Self::P20 => 20,
+            Self::P24 => 24,
+            Self::P32 => 32,
+            Self::P40 => 40,
+            Self::P48 => 48,
+        }
+    }
+
+    /// The nodes and weights on `[-1, 1]`.
+    pub(crate) fn nodes_weights(self) -> (&'static [f64], &'static [f64]) {
+        match self {
+            Self::P12 => (&POINTS_12, &WEIGHTS_12),
+            Self::P16 => (&POINTS_16, &WEIGHTS_16),
+            Self::P20 => (&POINTS_20, &WEIGHTS_20),
+            Self::P24 => (&POINTS_24, &WEIGHTS_24),
+            Self::P32 => (&POINTS_32, &WEIGHTS_32),
+            Self::P40 => (&POINTS_40, &WEIGHTS_40),
+            Self::P48 => (&POINTS_48, &WEIGHTS_48),
+        }
     }
 }
 
@@ -515,6 +557,7 @@ const WEIGHTS_40: [f64; 40] = [0.004521277098533191, 0.010498284531152813, 0.016
 const WEIGHTS_48: [f64; 48] = [0.0031533460523058385, 0.0073275539012762625, 0.01147723457923454, 0.015579315722943849, 0.01961616045735553, 0.02357076083932438, 0.027426509708356948, 0.03116722783279809, 0.03477722256477044, 0.03824135106583071, 0.04154508294346475, 0.04467456085669428, 0.04761665849249048, 0.05035903555385447, 0.05289018948519367, 0.055199503699984165, 0.057277292100403214, 0.059114839698395635, 0.06070443916589388, 0.062039423159892665, 0.06311419228625402, 0.06392423858464819, 0.06446616443595009, 0.06473769681268392, 0.06473769681268392, 0.06446616443595009, 0.06392423858464819, 0.06311419228625402, 0.062039423159892665, 0.06070443916589388, 0.059114839698395635, 0.057277292100403214, 0.055199503699984165, 0.05289018948519367, 0.05035903555385447, 0.04761665849249048, 0.04467456085669428, 0.04154508294346475, 0.03824135106583071, 0.03477722256477044, 0.03116722783279809, 0.027426509708356948, 0.02357076083932438, 0.01961616045735553, 0.015579315722943849, 0.01147723457923454, 0.0073275539012762625, 0.0031533460523058385];
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use libm::exp2;
     use spacelab_autodiff::{DoubleDouble, Scalar};
@@ -602,6 +645,32 @@ mod tests {
         p
     }
 
+    /// `Rule` is [`GAUSS_ORDER`] as a type: the same seven orders, fewest points first, each found
+    /// by its count with a table of that many points, no count between them found, and the largest
+    /// [`MAX_GAUSS_ORDER`]. `integrate` refuses exactly the counts `Rule::of` does not find.
+    #[test]
+    fn the_rules_are_the_gauss_orders() {
+        let orders: Vec<usize> = Rule::ALL.iter().map(|rule| rule.order()).collect();
+        assert_eq!(orders, GAUSS_ORDER);
+        assert_eq!(Rule::MAX.order(), MAX_GAUSS_ORDER);
+        for rule in Rule::ALL {
+            assert_eq!(Rule::of(rule.order()), Some(rule));
+            let (points, weights) = rule.nodes_weights();
+            assert_eq!((points.len(), weights.len()), (rule.order(), rule.order()));
+        }
+        let aux = DsstAuxiliary::new(7.2e6, 0.01, 0.02, 0.1, 0.2, 0.3, 3.986_004_415e14);
+        let accel = |_: &NodeState| [1e-7, 0.0, 0.0];
+        for order in 0..=64 {
+            let got = integrate(order, &aux, 0.0, 1.0, &accel);
+            if GAUSS_ORDER.contains(&order) {
+                assert!(got.is_ok(), "order {order}: {got:?}");
+            } else {
+                assert_eq!(Rule::of(order), None);
+                assert_eq!(got, Err(DsstError::GaussOrder { order }));
+            }
+        }
+    }
+
     /// (G3) Every tabulated node is a root of `Pₙ` and every tabulated weight is `2/((1−xᵢ²)Pₙ′(xᵢ)²)`,
     /// for **all seven** supported orders — checked against a from-scratch double-double
     /// reconstruction of the rule, not against anything this module computes.
@@ -621,7 +690,7 @@ mod tests {
         let mut worst_node = 0.0_f64;
         let mut worst_weight = 0.0_f64;
         for &order in &GAUSS_ORDER {
-            let (points, weights) = nodes_weights(order);
+            let (points, weights) = Rule::of(order).unwrap().nodes_weights();
             let (ref_x, ref_w) = reference_rule(order);
             for i in 0..order {
                 worst_node = nan_max(worst_node, ulps(points[i], ref_x[i]));
@@ -662,8 +731,8 @@ mod tests {
             let sum: f64 = rule.map(|(x, w)| w * f(x)).sum();
             ((sum - exact) / exact).abs()
         };
-        let smoothstep = |order| miss(&mut smoothstep_nodes(order, 0.0, 1.0));
-        let plain = |order| miss(&mut gauss_nodes(order, 0.0, 1.0));
+        let smoothstep = |order| miss(&mut smoothstep_nodes(Rule::of(order).unwrap(), 0.0, 1.0));
+        let plain = |order| miss(&mut gauss_nodes(Rule::of(order).unwrap(), 0.0, 1.0));
         assert!(smoothstep(12) < 1e-13, "order 12: {:.3e}", smoothstep(12));
         for &order in &GAUSS_ORDER[1..] {
             assert!(
@@ -689,7 +758,7 @@ mod tests {
         let mut worst = 0.0_f64;
         let mut weakest_beyond = f64::INFINITY;
         for &order in &GAUSS_ORDER {
-            let (points, weights) = nodes_weights(order);
+            let (points, weights) = Rule::of(order).unwrap().nodes_weights();
             let quadrature = |m: usize| -> f64 {
                 (0..order)
                     .map(|i| weights[i] * legendre(m, points[i]))
@@ -910,7 +979,7 @@ mod tests {
         let coef = 1.0 / (2.0 * core::f64::consts::PI * aux.big_b);
 
         let scaled = |order: usize| {
-            let mut r = integrate(order, &aux, low, high, &accel);
+            let mut r = integrate(order, &aux, low, high, &accel).unwrap();
             for x in &mut r {
                 *x *= coef;
             }

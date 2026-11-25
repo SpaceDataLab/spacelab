@@ -126,8 +126,8 @@ pub use drag_coefficient::{
 };
 #[cfg(feature = "std")]
 pub use dsst::{
-    DsstAuxiliary, DsstMeanPropagator, DsstSolarRadiationPressure, DsstTesseral, DsstThirdBody,
-    DsstZonal,
+    DsstAuxiliary, DsstError, DsstMeanPropagator, DsstSolarRadiationPressure, DsstTesseral,
+    DsstThirdBody, DsstZonal,
 };
 pub use earth_radiation::{AngularResolution, KnockeEarthRadiation};
 pub use geopotential::GeoPotential;

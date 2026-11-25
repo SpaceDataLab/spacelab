@@ -66,6 +66,7 @@ use libm::{cos, sin};
 
 use super::auxiliary::{DsstAuxiliary, I};
 use super::tesseral::{DsstTesseral, GHmsj, get_max_ecc_pow};
+use super::{DsstError, mean_state};
 
 /// The short-period truncation orders Orekit's `DSSTTesseral` default constructor derives from the
 /// field degree/order. Orekit field names are kept for auditability.
@@ -300,8 +301,12 @@ impl DsstTesseral {
     /// The osculating equinoctial state `mean + short-period` for a **mean** equinoctial state
     /// `[a, k, h, q, p, λ]`, with `gmst` the central-body rotation angle θ at the epoch. Mirrors
     /// [`super::third_body::DsstThirdBody::osculating`].
-    #[must_use]
-    pub fn osculating(&self, mean: [f64; 6], gmst: f64) -> [f64; 6] {
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::MeanState`] when `mean` is not a finite ellipse.
+    pub fn osculating(&self, mean: [f64; 6], gmst: f64) -> Result<[f64; 6], DsstError> {
+        let mean = mean_state(mean)?;
         let aux = DsstAuxiliary::new(
             mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], self.mu,
         );
@@ -310,11 +315,12 @@ impl DsstTesseral {
         for i in 0..6 {
             osc[i] += sp[i];
         }
-        osc
+        Ok(osc)
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -380,7 +386,7 @@ mod tests {
             cnm[n][m] = c;
             snm[n][m] = s;
         }
-        DsstTesseral::new(MU, AE, RATE, cnm, snm)
+        DsstTesseral::new(MU, AE, RATE, cnm, snm).unwrap()
     }
 
     /// The distance to Orekit's default short-period cuts for the unnormalized 4×4 field: order 4,
@@ -411,7 +417,7 @@ mod tests {
     fn the_mdaily_eccentricity_bound_follows_the_degree() {
         for (deg, want) in [(2, 0), (3, 1), (4, 2), (5, 3), (6, 4), (8, 4)] {
             let empty = std::vec![std::vec![0.0; deg + 1]; deg + 1];
-            let field = DsstTesseral::new(MU, AE, RATE, empty.clone(), empty);
+            let field = DsstTesseral::new(MU, AE, RATE, empty.clone(), empty).unwrap();
             let trunc = SpTruncation::from(&field);
             assert_eq!(
                 trunc.max_ecc_pow_mdaily_sp, want,
@@ -466,7 +472,7 @@ mod tests {
                 eta.iter().all(|c| *c != 0.0),
                 "a correction to apply: {eta:?}"
             );
-            let osc = tess.osculating(mean, GMST);
+            let osc = tess.osculating(mean, GMST).unwrap();
             for i in 0..6 {
                 assert_eq!(osc[i], mean[i] + eta[i], "osc[{i}] is not mean + η");
             }

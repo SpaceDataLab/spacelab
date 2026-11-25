@@ -37,18 +37,13 @@
 
 use std::vec::Vec;
 
-use libm::{atan, cos, fabs, sin, sqrt};
+use libm::{cos, sin};
 
-use super::auxiliary::{DsstAuxiliary, I};
+use super::auxiliary::{DsstAuxiliary, I, eccentric_to_true, mean_to_eccentric};
 use super::coefficients;
 use super::hansen::HansenZonal;
 use super::zonal::DsstZonal;
-
-/// Convergence tolerance for the equinoctial Kepler solve (Orekit
-/// `EquinoctialLongitudeArgumentUtility.TOLERANCE_CONVERGENCE`).
-const KEPLER_TOLERANCE: f64 = 1.0e-11;
-/// Maximum iterations for the equinoctial Kepler solve (Orekit `MAXIMUM_ITERATION`).
-const KEPLER_MAX_ITER: usize = 50;
+use super::{DsstError, mean_state};
 
 /// Cⱼ(x, y) + i·Sⱼ(x, y) = (x + i·y)ʲ (Danielson 2.5.3-(5)) with the partial derivatives
 /// ∂Cⱼ/∂x = j·Cⱼ₋₁, ∂Sⱼ/∂x = j·Sⱼ₋₁, ∂Cⱼ/∂y = −j·Sⱼ₋₁, ∂Sⱼ/∂y = j·Cⱼ₋₁. Orekit's `CjSjCoefficient`.
@@ -763,43 +758,15 @@ fn compute_cij_sij(
     (cij, sij)
 }
 
-/// Eccentric → true longitude argument (Orekit `EquinoctialLongitudeArgumentUtility.eccentricToTrue`).
-fn eccentric_to_true(ex: f64, ey: f64, le: f64) -> f64 {
-    let epsilon = sqrt(1.0 - ex * ex - ey * ey);
-    let (s, c) = (sin(le), cos(le));
-    let num = ex * s - ey * c;
-    let den = epsilon + 1.0 - ex * c - ey * s;
-    le + 2.0 * atan(num / den)
-}
-
-/// Mean → eccentric longitude argument via the equinoctial Kepler equation
-/// λ = LE − k·sin(LE) + h·cos(LE), solved with Orekit's Danby-style step (`meanToEccentric`).
-///
-/// # Panics
-///
-/// If the iteration does not converge within [`KEPLER_MAX_ITER`] (only for e ≈ 1, outside the
-/// DSST-zonal LEO regime this module targets).
-fn mean_to_eccentric(ex: f64, ey: f64, lm: f64) -> f64 {
-    let mut le = lm;
-    let mut le_m_lm = 0.0;
-    for _ in 0..KEPLER_MAX_ITER {
-        let (s, c) = (sin(le), cos(le));
-        let f2 = ex * s - ey * c;
-        let f1 = 1.0 - ex * c - ey * s;
-        let f0 = le_m_lm - f2;
-        let f12 = 2.0 * f1;
-        let shift = f0 * f12 / (f1 * f12 - f0 * f2);
-        le_m_lm -= shift;
-        le = lm + le_m_lm;
-        if fabs(shift) <= KEPLER_TOLERANCE {
-            return le;
-        }
-    }
-    panic!("equinoctial Kepler solve did not converge (e too close to 1)");
-}
-
 /// Compute the six equinoctial short-period corrections `[Δa, Δk, Δh, Δq, Δp, Δλ]` at the mean state.
-pub(crate) fn short_period_correction(zonal: &DsstZonal, mean_aux: &DsstAuxiliary) -> [f64; 6] {
+///
+/// # Errors
+///
+/// [`DsstError::Kepler`] when the mean state has no eccentric longitude.
+pub(crate) fn short_period_correction(
+    zonal: &DsstZonal,
+    mean_aux: &DsstAuxiliary,
+) -> Result<[f64; 6], DsstError> {
     let n_max = zonal.max_degree();
     let s_max = 4.min(n_max - 1); // maxEccPowShortPeriodics
     let j_max = 2 * n_max + 1; // maxFrequencyShortPeriodics
@@ -818,7 +785,7 @@ pub(crate) fn short_period_correction(zonal: &DsstZonal, mean_aux: &DsstAuxiliar
 
     // Evaluate at the mean state's true longitude L = Lv(mean); the equation-of-centre term uses
     // L − λ_M (Orekit `ZonalShortPeriodicCoefficients.value`).
-    let le = mean_to_eccentric(mean_aux.k, mean_aux.h, mean_aux.lambda);
+    let le = mean_to_eccentric(mean_aux.k, mean_aux.h, mean_aux.lambda)?;
     let lv = eccentric_to_true(mean_aux.k, mean_aux.h, le);
     let center = lv - mean_aux.lambda;
 
@@ -833,47 +800,65 @@ pub(crate) fn short_period_correction(zonal: &DsstZonal, mean_aux: &DsstAuxiliar
             sp[i] += cij[j][i] * c + sij[j][i] * s;
         }
     }
-    sp
+    Ok(sp)
 }
 
 impl DsstZonal {
     /// The six equinoctial short-period corrections `[Δa, Δk, Δh, Δq, Δp, Δλ]` for the zonal field at
     /// the given **mean** state, evaluated at the mean state's true longitude (Orekit's
     /// `ZonalShortPeriodicCoefficients.value(meanOrbit)`).
-    #[must_use]
-    pub fn short_period_correction(&self, mean_aux: &DsstAuxiliary) -> [f64; 6] {
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::Kepler`] when the state has no eccentric longitude: `e = √(k² + h²)` not
+    /// below 1, a non-finite `k`, `h` or `λ`, or an `e` so near 1 that the solve does not converge.
+    pub fn short_period_correction(&self, mean_aux: &DsstAuxiliary) -> Result<[f64; 6], DsstError> {
         short_period_correction(self, mean_aux)
     }
 
     /// The osculating equinoctial state `mean + short-period` for a **mean** equinoctial state
     /// `[a, k, h, q, p, λ]` (Orekit's `MeanPlusShortPeriodicMapper`, `PositionAngleType.MEAN`, so the
     /// sixth element is the osculating mean longitude).
-    #[must_use]
-    pub fn osculating(&self, mean: [f64; 6]) -> [f64; 6] {
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::MeanState`] when `mean` is not a finite ellipse, and as
+    /// [`Self::short_period_correction`].
+    pub fn osculating(&self, mean: [f64; 6]) -> Result<[f64; 6], DsstError> {
+        let mean = mean_state(mean)?;
         let aux = DsstAuxiliary::new(
             mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], self.mu,
         );
-        let sp = self.short_period_correction(&aux);
+        let sp = self.short_period_correction(&aux)?;
         let mut osc = mean;
         for i in 0..6 {
             osc[i] += sp[i];
         }
-        osc
+        Ok(osc)
     }
 
     /// Semi-analytically propagate a **mean** equinoctial state forward by `dt` seconds and return
     /// the **osculating** equinoctial state `[a, k, h, q, p, λ]` — the DSST OSCULATING output.
-    #[must_use]
-    pub fn propagate_osculating(&self, initial_mean: [f64; 6], dt: f64) -> [f64; 6] {
-        self.osculating(self.propagate_mean(initial_mean, dt))
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::propagate_mean`], then as [`Self::osculating`].
+    pub fn propagate_osculating(
+        &self,
+        initial_mean: [f64; 6],
+        dt: f64,
+    ) -> Result<[f64; 6], DsstError> {
+        self.osculating(self.propagate_mean(initial_mean, dt)?)
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::dsst::DsstAuxiliary;
     use core::f64::consts::{PI, TAU};
+    use libm::sqrt;
 
     // Golden fixtures from Orekit 13 (`tools/orekit-oracle`), the same degree-6 zonal field and MEAN
     // equinoctial LEO as the `dsst` module tests. `MEAN` is the MEAN DSSTPropagator state
@@ -928,7 +913,7 @@ mod tests {
     /// The same field truncated to `degree`, which is how Orekit's oracle was run for each `SP` row.
     fn zonal_of_degree(degree: usize) -> DsstZonal {
         let all = std::vec![0.0, 0.0, C20, C30, C40, C50, C60];
-        DsstZonal::new(MU, AE, all[..=degree].to_vec())
+        DsstZonal::new(MU, AE, all[..=degree].to_vec()).unwrap()
     }
 
     fn aux_at(mean: [f64; 6]) -> DsstAuxiliary {
@@ -951,7 +936,7 @@ mod tests {
         for (d, row) in SP.iter().enumerate() {
             let z = zonal_of_degree(d + 2);
             for k in 0..MEAN.len() {
-                let sp = z.short_period_correction(&aux_at(MEAN[k]));
+                let sp = z.short_period_correction(&aux_at(MEAN[k])).unwrap();
                 da.push((sp[0] - row[k][0]).abs());
                 rest.extend((1..6).map(|i| (sp[i] - row[k][i]).abs()));
             }
@@ -987,7 +972,9 @@ mod tests {
         let (mut acc, mut amp) = ([0.0f64; 6], [0.0f64; 6]);
         for g in 0..NGRID {
             let lambda = TAU * (g as f64) / (NGRID as f64);
-            let sp = z.short_period_correction(&aux_at([m[0], m[1], m[2], m[3], m[4], lambda]));
+            let sp = z
+                .short_period_correction(&aux_at([m[0], m[1], m[2], m[3], m[4], lambda]))
+                .unwrap();
             for i in 0..6 {
                 acc[i] += sp[i];
                 amp[i] = amp[i].max(sp[i].abs());
@@ -1061,7 +1048,7 @@ mod tests {
                 let (k, h) = (ecc * cos(varpi), ecc * sin(varpi));
                 for g in 0..97u16 {
                     let lambda = -PI + TAU * f64::from(g) / 97.0;
-                    let le = mean_to_eccentric(k, h, lambda);
+                    let le = mean_to_eccentric(k, h, lambda).unwrap();
                     max_res = max_res.max(((le - k * sin(le) + h * cos(le)) - lambda).abs());
 
                     let mean_anom = lambda - varpi;
@@ -1159,7 +1146,8 @@ mod tests {
                 MU,
                 AE,
                 std::vec![0.0, 0.0, C20, C30, C40, C50, C60][..=n_max].to_vec(),
-            );
+            )
+            .unwrap();
             let (s_max, j_max) = (4.min(n_max - 1), 2 * n_max + 1);
             let j_top = (2 * n_max - 1).min(n_max + s_max);
 

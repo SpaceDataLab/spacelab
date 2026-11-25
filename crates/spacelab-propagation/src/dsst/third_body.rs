@@ -42,6 +42,7 @@
 
 use std::vec::Vec;
 
+use super::DsstError;
 use super::auxiliary::{DsstAuxiliary, I};
 use super::coefficients;
 
@@ -82,7 +83,7 @@ const SMALL_TRUNCATION_TOLERANCE: f64 = 1.9e-6;
 /// `K'(s) = 0`, `K'(s+1) = (−1)ˢ·2·((2s+1)!!/(s+2)!)·B³`, and for n ≥ s+2
 /// `K'(n) = a·K'(n−1) + b·B²·K'(n−2) − 2b·B³·K(n−2)`.
 #[derive(Debug, Clone)]
-pub struct HansenThirdBody {
+pub(crate) struct HansenThirdBody {
     values: Vec<f64>,
     derivs: Vec<f64>,
 }
@@ -91,7 +92,7 @@ impl HansenThirdBody {
     /// Compute all third-body kernels and χ-derivatives for order `s` up to degree `n_max` at the
     /// given `b = B = √(1 − e²)` (Orekit's `chitm1 = χ⁻¹`).
     #[must_use]
-    pub fn new(n_max: usize, s: usize, b: f64) -> Self {
+    pub(crate) fn new(n_max: usize, s: usize, b: f64) -> Self {
         let mut values = std::vec![0.0; n_max + 1];
         let mut derivs = std::vec![0.0; n_max + 1];
         let bb = b * b;
@@ -129,13 +130,13 @@ impl HansenThirdBody {
 
     /// The third-body Hansen kernel K₀ⁿˢ.
     #[must_use]
-    pub fn value(&self, n: usize) -> f64 {
+    pub(crate) fn value(&self, n: usize) -> f64 {
         self.values[n]
     }
 
     /// The χ-derivative dK₀ⁿˢ/dχ.
     #[must_use]
-    pub fn derivative(&self, n: usize) -> f64 {
+    pub(crate) fn derivative(&self, n: usize) -> f64 {
         self.derivs[n]
     }
 }
@@ -155,12 +156,50 @@ pub(crate) struct ThirdBodyPotential {
 }
 
 /// The eccentricity/`a/R₃` truncation orders fixed by `DSSTThirdBodyStaticContext`.
+///
+/// The series reads the Vₙₛ table and the Hansen kernels up to these powers, so they are checked
+/// once, where they are made: [`ThirdBodyTruncation::new`] or [`DsstThirdBody::truncation`].
 #[derive(Debug, Clone, Copy)]
 pub struct ThirdBodyTruncation {
     /// Max power of `a/R₃` in the series (`maxAR3Pow`), the highest harmonic degree retained.
-    pub max_ar3_pow: usize,
+    pub(crate) max_ar3_pow: usize,
     /// Max power of the eccentricity in the series (`maxEccPow`).
-    pub max_ecc_pow: usize,
+    pub(crate) max_ecc_pow: usize,
+}
+
+impl ThirdBodyTruncation {
+    /// A truncation at `(a/R₃)^max_ar3_pow` and `e^max_ecc_pow`.
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::Truncation`] unless `max_ar3_pow < 22` (`MAX_POWER`, the extent of the
+    /// precomputed Vₙₛ table) and `max_ecc_pow ≤ max_ar3_pow` (a Hansen kernel of order `s` starts
+    /// at degree `s`).
+    pub fn new(max_ar3_pow: usize, max_ecc_pow: usize) -> Result<Self, DsstError> {
+        if max_ar3_pow < MAX_POWER && max_ecc_pow <= max_ar3_pow {
+            Ok(Self {
+                max_ar3_pow,
+                max_ecc_pow,
+            })
+        } else {
+            Err(DsstError::Truncation {
+                max_ar3_pow,
+                max_ecc_pow,
+            })
+        }
+    }
+
+    /// Max power of `a/R₃` in the series (`maxAR3Pow`), the highest harmonic degree retained.
+    #[must_use]
+    pub fn max_ar3_pow(&self) -> usize {
+        self.max_ar3_pow
+    }
+
+    /// Max power of the eccentricity in the series (`maxEccPow`).
+    #[must_use]
+    pub fn max_ecc_pow(&self) -> usize {
+        self.max_ecc_pow
+    }
 }
 
 /// One third body's (Sun or Moon) contribution to the DSST mean-element rates.

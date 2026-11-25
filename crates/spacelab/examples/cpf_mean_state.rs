@@ -137,7 +137,7 @@ fn classical(s: [f64; 6]) -> [f64; 6] {
 fn mean_of(zonal: &DsstZonal, osculating: [f64; 6]) -> [f64; 6] {
     let mut mean = osculating;
     for _ in 0..PASSES {
-        let image = zonal.osculating(mean);
+        let image = zonal.osculating(mean).expect("an elliptic state");
         let mut step = 0.0_f64;
         for i in 0..6 {
             let delta = if i == 5 {
@@ -160,7 +160,7 @@ fn zonal() -> DsstZonal {
         .zip(C_BAR)
         .map(|(n, c): (u32, f64)| -f64::from(2 * n + 1).sqrt() * c)
         .collect();
-    DsstZonal::from_j(MU, RE, &j)
+    DsstZonal::from_j(MU, RE, &j).expect("a zonal field")
 }
 
 #[expect(
@@ -189,7 +189,7 @@ fn eop() -> EopSeries {
 /// central difference and the inversion.
 fn check(zonal: &DsstZonal) {
     let mean = [6_778_000.0, 0.0012, -0.0009, 0.21, 0.37, 2.4];
-    let osculating = zonal.osculating(mean);
+    let osculating = zonal.osculating(mean).expect("an elliptic state");
     let elements = classical(osculating);
     let (position, true_velocity) = KeplerianElements {
         semi_major_axis: elements[0],

@@ -418,7 +418,7 @@ fn crown_moments<S: Scalar>(
     let rr = r_norm * r_norm;
     let rrr_r = rr * r_norm * big_r;
     if width.value() < inner.s.value() {
-        let (points, weights) = crate::dsst::gaussian::nodes_weights(12);
+        let (points, weights) = crate::dsst::gaussian::Rule::P12.nodes_weights();
         let far = (r_norm + big_r) * (r_norm + big_r);
         let zero = S::from_f64(0.0);
         let (mut view, mut versine, mut across) = (zero, zero, zero);

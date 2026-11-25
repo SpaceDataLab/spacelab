@@ -46,9 +46,9 @@ use std::vec::Vec;
 
 use libm::{cos, sin};
 
-use super::auxiliary::DsstAuxiliary;
-use super::gaussian::{self, NodeState};
-use super::srp::mean_to_true;
+use super::DsstError;
+use super::auxiliary::{DsstAuxiliary, mean_to_true};
+use super::gaussian::{self, NodeState, Rule};
 
 /// Maximum value of the Fourier index `j` (`AbstractGaussianContribution.JMAX`).
 const JMAX: usize = 12;
@@ -56,7 +56,9 @@ const JMAX: usize = 12;
 /// Nodes of the Fourier quadrature, whatever order the mean rates settle on: the most
 /// [`gaussian::GAUSS_ORDER`] offers. The integrand carries `cos(JMAX·L)` on top of the force's own
 /// harmonics; `fourier_coefficients_of_the_exponential_are_bessel_functions` measures the rules.
-const SHORT_PERIOD_ORDER: usize = gaussian::MAX_GAUSS_ORDER;
+const SHORT_PERIOD_RULE: Rule = Rule::MAX;
+/// The number of nodes of [`SHORT_PERIOD_RULE`], which the periodic trapezoid takes too.
+const SHORT_PERIOD_ORDER: usize = SHORT_PERIOD_RULE.order();
 
 /// The six equinoctial short-period corrections `[Δa, Δk, Δh, Δq, Δp, Δλ]` (Orekit ordering) of a
 /// Gaussian contribution at the given **mean** state, for the true-longitude integration window `ll`
@@ -64,8 +66,15 @@ const SHORT_PERIOD_ORDER: usize = gaussian::MAX_GAUSS_ORDER;
 ///
 /// Returns zeros when `ll[0] ≥ ll[1]`: for drag, the whole orbit is above the atmosphere, so `F`
 /// vanishes.
-#[must_use]
-pub(crate) fn short_period_correction<F>(aux: &DsstAuxiliary, ll: [f64; 2], accel: F) -> [f64; 6]
+///
+/// # Errors
+///
+/// [`DsstError::Kepler`] when the mean state has no true longitude to evaluate the series at.
+pub(crate) fn short_period_correction<F>(
+    aux: &DsstAuxiliary,
+    ll: [f64; 2],
+    accel: F,
+) -> Result<[f64; 6], DsstError>
 where
     F: Fn(&NodeState) -> [f64; 3],
 {
@@ -75,13 +84,16 @@ where
 /// [`short_period_correction`] with the Fourier coefficients taken on a given rule, true longitudes
 /// `nodes` and their `weights`, instead of on a window. `F` is zero away from the nodes' support:
 /// for SRP, the umbra between the lit pieces of the orbit. An empty rule returns zeros.
-#[must_use]
+///
+/// # Errors
+///
+/// As [`short_period_correction`].
 pub(crate) fn short_period_correction_on<F>(
     aux: &DsstAuxiliary,
     nodes: &[f64],
     weights: &[f64],
     accel: F,
-) -> [f64; 6]
+) -> Result<[f64; 6], DsstError>
 where
     F: Fn(&NodeState) -> [f64; 3],
 {
@@ -91,12 +103,16 @@ where
 }
 
 /// [`short_period_correction`] of the six rates `rates(L)` at true longitude `L`, zero outside `ll`.
-fn short_periods(aux: &DsstAuxiliary, ll: [f64; 2], rates: impl Fn(f64) -> [f64; 6]) -> [f64; 6] {
+fn short_periods(
+    aux: &DsstAuxiliary,
+    ll: [f64; 2],
+    rates: impl Fn(f64) -> [f64; 6],
+) -> Result<[f64; 6], DsstError> {
     if ll[0] < ll[1] {
         let (nodes, weights) = quadrature(ll);
         short_periods_on(aux, &nodes, &weights, rates)
     } else {
-        [0.0; 6]
+        Ok([0.0; 6])
     }
 }
 
@@ -106,9 +122,9 @@ fn short_periods_on(
     nodes: &[f64],
     weights: &[f64],
     rates: impl Fn(f64) -> [f64; 6],
-) -> [f64; 6] {
+) -> Result<[f64; 6], DsstError> {
     if nodes.is_empty() {
-        return [0.0; 6];
+        return Ok([0.0; 6]);
     }
     let (rho, sigma) = compute_rho_sigma(aux);
     let (ccoef, scoef) = fourier_coefficients(nodes, weights, rates);
@@ -159,13 +175,13 @@ fn quadrature(ll: [f64; 2]) -> (Vec<f64>, Vec<f64>) {
             .map(|i| (ll[0] + step * i as f64, step))
             .unzip()
     } else {
-        gauss_legendre(ll, SHORT_PERIOD_ORDER)
+        gauss_legendre(ll, SHORT_PERIOD_RULE)
     }
 }
 
-/// Gauss–Legendre nodes and weights of `order` points mapped to `ll`.
-fn gauss_legendre(ll: [f64; 2], order: usize) -> (Vec<f64>, Vec<f64>) {
-    let (points, weights) = gaussian::nodes_weights(order);
+/// The Gauss–Legendre `rule`'s nodes and weights mapped to `ll`.
+fn gauss_legendre(ll: [f64; 2], rule: Rule) -> (Vec<f64>, Vec<f64>) {
+    let (points, weights) = rule.nodes_weights();
     let scale = (ll[1] - ll[0]) / 2.0;
     let shift = ll[0] + scale;
     points
@@ -422,9 +438,9 @@ impl StoredCoefficients {
     /// The six short-period corrections evaluated at the mean state (Orekit
     /// `GaussianShortPeriodicCoefficients.value`): the Fourier sum over the **true** longitude L = Lᵥ
     /// plus the `(L − λ)·Dᵢ¹ + (L − λ)²·Dᵢ²` polynomial part.
-    fn value(&self, aux: &DsstAuxiliary) -> [f64; 6] {
+    fn value(&self, aux: &DsstAuxiliary) -> Result<[f64; 6], DsstError> {
         // L = Lᵥ (meanOrbit.getLv()); center = L − λ.
-        let l = mean_to_true(aux.k, aux.h, aux.lambda);
+        let l = mean_to_true(aux.k, aux.h, aux.lambda)?;
         let center = l - aux.lambda;
         let center2 = center * center;
 
@@ -439,11 +455,12 @@ impl StoredCoefficients {
                 spv[i] += self.cij[j][i] * c + self.sij[j][i] * s;
             }
         }
-        spv
+        Ok(spv)
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use spacelab_testkit::nan_max;
 
@@ -452,8 +469,8 @@ mod tests {
     use super::super::drag::{Atmosphere, DsstAtmosphericDrag};
     use super::super::srp::DsstSolarRadiationPressure;
     use super::{
-        DsstAuxiliary, JMAX, SHORT_PERIOD_ORDER, compute_rho_sigma, cos, fourier_coefficients,
-        gauss_legendre, gaussian, quadrature, short_periods, sin,
+        DsstAuxiliary, JMAX, Rule, SHORT_PERIOD_ORDER, SHORT_PERIOD_RULE, compute_rho_sigma, cos,
+        fourier_coefficients, gauss_legendre, gaussian, quadrature, short_periods, sin,
     };
 
     // Orekit 13's OSCULATING `DSSTPropagator` (`tools/orekit-oracle`, orekit_dsst_srp_sp.csv /
@@ -566,7 +583,7 @@ mod tests {
         let srp = DsstSolarRadiationPressure::new(CR, SRP_AOM, MU, AE);
         let (da, rest) = distance(
             "DSST SRP short periods",
-            (0..4).map(|k| (srp.osculating(SRP_MEAN[k], SRP_SUN[k]), SRP_OSC[k])),
+            (0..4).map(|k| (srp.osculating(SRP_MEAN[k], SRP_SUN[k]).unwrap(), SRP_OSC[k])),
         );
         std::println!("SRP short periods vs Orekit 13: |Δa| {da:.2e} m, others {rest:.2e}");
     }
@@ -586,7 +603,12 @@ mod tests {
         };
         let (da, rest) = distance(
             "DSST drag short periods",
-            (0..4).map(|k| (drag.osculating(DRAG_MEAN[k], &atmosphere), DRAG_OSC[k])),
+            (0..4).map(|k| {
+                (
+                    drag.osculating(DRAG_MEAN[k], &atmosphere).unwrap(),
+                    DRAG_OSC[k],
+                )
+            }),
         );
         std::println!("drag short periods vs Orekit 13: |Δa| {da:.2e} m, others {rest:.2e}");
     }
@@ -644,18 +666,14 @@ mod tests {
         let turn = [-PI + 0.4, PI + 0.4];
         for (z, bessel) in &BESSEL_I {
             let shipped = worst(quadrature(turn), *z, bessel);
-            let gauss = worst(gauss_legendre(turn, SHORT_PERIOD_ORDER), *z, bessel);
-            let twelve = worst(gauss_legendre(turn, 12), *z, bessel);
+            let gauss = worst(gauss_legendre(turn, SHORT_PERIOD_RULE), *z, bessel);
+            let twelve = worst(gauss_legendre(turn, Rule::P12), *z, bessel);
             std::println!(
                 "z = {z}: trapezoid {shipped:.2e}, Gauss-Legendre {gauss:.2e} at {SHORT_PERIOD_ORDER} nodes and {twelve:.2e} at 12"
             );
             assert!(shipped < 4e-15, "z = {z}: {shipped:.3e} of 2I₀(z)");
         }
-        let gauss = worst(
-            gauss_legendre(turn, SHORT_PERIOD_ORDER),
-            5.0,
-            &BESSEL_I[1].1,
-        );
+        let gauss = worst(gauss_legendre(turn, SHORT_PERIOD_RULE), 5.0, &BESSEL_I[1].1);
         assert!(gauss > 1e-11, "Gauss-Legendre at z = 5: {gauss:.3e}");
     }
 
@@ -676,7 +694,7 @@ mod tests {
         for (k, h) in [(0.008, -0.006), (0.08, -0.06)] {
             for lam in [0.3, 1.9, 4.4] {
                 let aux = DsstAuxiliary::new(7.2e6, k, h, 0.3, 0.35, lam, MU);
-                let eta = short_periods(&aux, [-PI, PI], |_| rates);
+                let eta = short_periods(&aux, [-PI, PI], |_| rates).unwrap();
                 for (i, (&got, &c)) in eta.iter().zip(&rates).enumerate() {
                     assert!(
                         got.abs() < 1e-14 * c.abs() / aux.n,
@@ -720,7 +738,8 @@ mod tests {
                         let mut f = [0.0; 6];
                         f[driven] = cos(l);
                         f
-                    });
+                    })
+                    .unwrap();
                     let scale = [1.0 / n, 1.0 / n, 1.0 / n, 1.0 / n, 1.0 / n, 1.5 / (a * n)];
                     for i in 0..6 {
                         worst = nan_max(worst, (got[i] - want[i]).abs() / scale[i]);

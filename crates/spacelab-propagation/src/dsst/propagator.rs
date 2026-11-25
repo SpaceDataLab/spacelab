@@ -13,7 +13,7 @@
 
 use super::auxiliary::DsstAuxiliary;
 use super::tesseral::DsstTesseral;
-use super::{DsstSolarRadiationPressure, DsstThirdBody, DsstZonal};
+use super::{DsstError, DsstSolarRadiationPressure, DsstThirdBody, DsstZonal, mean_state, span};
 use crate::driver::{Controls, integrate_dop853};
 use crate::{DynamicalSystem, Tolerance};
 
@@ -48,27 +48,6 @@ pub const MEAN_FROM_OSCULATING_PASSES: usize = 50;
 /// `a`, absolute in `k, h, q, p, λ`.
 pub const MEAN_FROM_OSCULATING_TOLERANCE: f64 = 1e-14;
 
-/// [`DsstMeanPropagator::mean_from_osculating`] did not converge.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MeanFromOsculatingError {
-    /// The last pass's largest correction (relative in `a`, absolute elsewhere); NaN when a
-    /// correction was not finite.
-    pub step: f64,
-}
-
-impl core::fmt::Display for MeanFromOsculatingError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "the mean state did not converge: after {MEAN_FROM_OSCULATING_PASSES} passes the last \
-             correction was {:e}, above {MEAN_FROM_OSCULATING_TOLERANCE:e}",
-            self.step
-        )
-    }
-}
-
-impl core::error::Error for MeanFromOsculatingError {}
-
 impl<E, G> DsstMeanPropagator<'_, E, G>
 where
     E: Fn(f64) -> ([f64; 3], [f64; 3]),
@@ -76,21 +55,22 @@ where
 {
     /// Propagate a MEAN equinoctial state `[a, k, h, q, p, λ]` forward by `dt` seconds.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If the DOP853 driver fails, which a smooth mean-element ODE with `dt > 0` does not produce
-    /// (only non-finite controls or a step underflow would trip it).
-    #[must_use]
-    #[allow(clippy::expect_used)] // the invariant above holds; a smooth mean-element ODE cannot fail
-    pub fn propagate(&self, initial: [f64; 6], dt: f64) -> [f64; 6] {
-        if dt == 0.0 {
-            return initial;
+    /// [`DsstError::MeanState`] when `initial` is not a finite ellipse, [`DsstError::Span`] when
+    /// `dt` is negative or not finite, and [`DsstError::Integration`] when DOP853 does not reach
+    /// `dt`: the step collapses (a state the mean rates cannot follow, including one the SRP window
+    /// has no eccentric longitude for) or the run passes its step budget.
+    pub fn propagate(&self, initial: [f64; 6], dt: f64) -> Result<[f64; 6], DsstError> {
+        let initial = mean_state(initial)?;
+        if span(dt)? == 0.0 {
+            return Ok(initial);
         }
         // Match DsstZonal::propagate_mean so an only-zonal configuration reproduces it.
         let tol = Tolerance::new(1e-14, 1e-12);
         integrate_dop853(self, 0.0, &initial, dt, 60.0, Controls::new(tol, 1e-6))
-            .expect("DSST combined mean propagation")
-            .final_state()
+            .map(|trajectory| trajectory.final_state())
+            .map_err(DsstError::Integration)
     }
 
     /// Propagate a MEAN state forward by `dt` and return the OSCULATING equinoctial state: the
@@ -98,9 +78,12 @@ where
     /// Sun + Moon + SRP + tesseral). The short-period corrections are first-order generating-function
     /// terms and superpose linearly, so `osculating = mean + Σᵢ (oscᵢ(mean) − mean)`. Drag's
     /// short-period is not included (drag is not a mean-rate contribution of this propagator).
-    #[must_use]
-    pub fn propagate_osculating(&self, initial: [f64; 6], dt: f64) -> [f64; 6] {
-        self.osculating_at(self.propagate(initial, dt), dt)
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::propagate`], then as [`Self::osculating_at`].
+    pub fn propagate_osculating(&self, initial: [f64; 6], dt: f64) -> Result<[f64; 6], DsstError> {
+        self.osculating_at(self.propagate(initial, dt)?, dt)
     }
 
     /// The MEAN state whose osculating image at `t` seconds since the epoch is `osculating`: the
@@ -110,23 +93,20 @@ where
     ///
     /// # Errors
     ///
-    /// [`MeanFromOsculatingError`] when [`MEAN_FROM_OSCULATING_PASSES`] passes leave a last
+    /// [`DsstError::MeanFromOsculating`] when [`MEAN_FROM_OSCULATING_PASSES`] passes leave a last
     /// correction above [`MEAN_FROM_OSCULATING_TOLERANCE`], or a non-finite one: a state so close
     /// to the central body, or so eccentric, that the short-period map is no contraction there.
-    ///
-    /// # Panics
-    ///
-    /// As [`Self::osculating_at`] does, on a state with no Kepler solution (non-finite, or `e`
-    /// at 1).
+    /// As [`Self::osculating_at`] when `osculating`, or a pass's mean state, is not a finite
+    /// ellipse or has no eccentric longitude.
     pub fn mean_from_osculating(
         &self,
         osculating: [f64; 6],
         t: f64,
-    ) -> Result<[f64; 6], MeanFromOsculatingError> {
+    ) -> Result<[f64; 6], DsstError> {
         let mut mean = osculating;
         let mut step = f64::INFINITY;
         for _ in 0..MEAN_FROM_OSCULATING_PASSES {
-            let image = self.osculating_at(mean, t);
+            let image = self.osculating_at(mean, t)?;
             step = 0.0;
             for i in 0..6 {
                 let delta = osculating[i] - image[i];
@@ -146,21 +126,26 @@ where
                 return Ok(mean);
             }
         }
-        Err(MeanFromOsculatingError { step })
+        Err(DsstError::MeanFromOsculating { step })
     }
 
     /// The OSCULATING equinoctial state of the MEAN state `mean` at `t` seconds since the epoch:
     /// `mean` plus the sum of each contribution's short-period correction.
-    #[must_use]
-    pub fn osculating_at(&self, mean: [f64; 6], t: f64) -> [f64; 6] {
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::MeanState`] when `mean` is not a finite ellipse, and [`DsstError::Kepler`]
+    /// when its eccentric longitude does not converge.
+    pub fn osculating_at(&self, mean: [f64; 6], t: f64) -> Result<[f64; 6], DsstError> {
+        let mean = mean_state(mean)?;
         let (sun_pos, moon_pos) = (self.ephemeris)(t);
         let gmst = (self.gmst)(t);
         let contributions = [
-            self.zonal.osculating(mean),
-            self.sun.osculating(mean, sun_pos),
-            self.moon.osculating(mean, moon_pos),
-            self.srp.osculating(mean, sun_pos),
-            self.tesseral.osculating(mean, gmst),
+            self.zonal.osculating(mean)?,
+            self.sun.osculating(mean, sun_pos)?,
+            self.moon.osculating(mean, moon_pos)?,
+            self.srp.osculating(mean, sun_pos)?,
+            self.tesseral.osculating(mean, gmst)?,
         ];
         let mut osc = mean;
         for c in contributions {
@@ -168,7 +153,7 @@ where
                 osc[i] += c[i] - mean[i];
             }
         }
-        osc
+        Ok(osc)
     }
 }
 
@@ -185,7 +170,13 @@ where
         let z = self.zonal.mean_element_rates(&aux);
         let s = self.sun.mean_element_rates(&aux, sun_pos);
         let m = self.moon.mean_element_rates(&aux, moon_pos);
-        let r = self.srp.mean_element_rates(&aux, sun_pos);
+        // A stage state with no eccentric longitude has no SRP window, so no rates. NaN is what
+        // the driver reads as a step to reject: a trial stage that overshot is retried shorter, and
+        // a state that stays refused ends the run as `StepUnderflow`.
+        let r = self
+            .srp
+            .mean_element_rates(&aux, sun_pos)
+            .unwrap_or([f64::NAN; 6]);
         let te = self.tesseral.mean_element_rates(&aux, gmst);
 
         for i in 0..6 {
@@ -197,6 +188,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use spacelab_testkit::nan_max;
 
@@ -215,7 +207,7 @@ mod tests {
     const OMEGA_EARTH: f64 = 7.292115e-5;
 
     fn zonal() -> DsstZonal {
-        DsstZonal::new(MU, AE, vec![0.0, 0.0, C20, C30, C40, C50, C60])
+        DsstZonal::new(MU, AE, vec![0.0, 0.0, C20, C30, C40, C50, C60]).unwrap()
     }
 
     /// With every non-central contribution nulled (zero third-body mass, zero area-to-mass, zero
@@ -235,7 +227,8 @@ mod tests {
             OMEGA_EARTH,
             vec![vec![0.0; 4]; 4],
             vec![vec![0.0; 4]; 4],
-        );
+        )
+        .unwrap();
         let prop = DsstMeanPropagator {
             zonal: &z,
             sun: &sun,
@@ -258,8 +251,8 @@ mod tests {
         let mut max_a = 0.0f64;
         let mut max_comp = 0.0f64;
         for &t in &[3600.0, 21600.0, 86400.0] {
-            let got = prop.propagate(init, t);
-            let want = z.propagate_mean(init, t);
+            let got = prop.propagate(init, t).unwrap();
+            let want = z.propagate_mean(init, t).unwrap();
             max_a = max_a.max((got[0] - want[0]).abs());
             for i in 1..6 {
                 max_comp = max_comp.max((got[i] - want[i]).abs());
@@ -296,7 +289,8 @@ mod tests {
             OMEGA_EARTH,
             vec![vec![0.0; 4]; 4],
             vec![vec![0.0; 4]; 4],
-        );
+        )
+        .unwrap();
         let prop = DsstMeanPropagator {
             zonal: &z,
             sun: &sun,
@@ -317,8 +311,8 @@ mod tests {
         ];
         let mut max_da = 0.0f64;
         for &t in &[3600.0, 21600.0, 86400.0] {
-            let got = prop.propagate_osculating(init, t);
-            let want = z.propagate_osculating(init, t);
+            let got = prop.propagate_osculating(init, t).unwrap();
+            let want = z.propagate_osculating(init, t).unwrap();
             max_da = max_da.max((got[0] - want[0]).abs());
             assert!(
                 (got[0] - want[0]).abs() < 1e-3,
@@ -378,9 +372,9 @@ mod tests {
         let mut snm = vec![vec![0.0; 3]; 3];
         cnm[2][2] = 1.5e-6;
         snm[2][2] = -9.0e-7;
-        let tess = DsstTesseral::new(MU, AE, OMEGA_EARTH, cnm, snm);
+        let tess = DsstTesseral::new(MU, AE, OMEGA_EARTH, cnm, snm).unwrap();
         // Nulled counterparts: same shapes, no force.
-        let z0 = DsstZonal::new(MU, AE, vec![0.0; 7]);
+        let z0 = DsstZonal::new(MU, AE, vec![0.0; 7]).unwrap();
         let tb0 = DsstThirdBody::new(MU, 0.0);
         let srp0 = DsstSolarRadiationPressure::new(1.5, 0.0, MU, AE);
         let tess0 = DsstTesseral::new(
@@ -389,7 +383,8 @@ mod tests {
             OMEGA_EARTH,
             vec![vec![0.0; 3]; 3],
             vec![vec![0.0; 3]; 3],
-        );
+        )
+        .unwrap();
 
         let init = [4.2164172e7, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 0.5];
         let deriv = |zonal: &DsstZonal,
@@ -419,7 +414,7 @@ mod tests {
             ("zonal", z.mean_element_rates(&aux)),
             ("sun", sun.mean_element_rates(&aux, sun_pos)),
             ("moon", moon.mean_element_rates(&aux, moon_pos)),
-            ("srp", srp.mean_element_rates(&aux, sun_pos)),
+            ("srp", srp.mean_element_rates(&aux, sun_pos).unwrap()),
             ("tesseral", tess.mean_element_rates(&aux, gmst(T))),
         ];
         let without = [
@@ -471,7 +466,7 @@ mod tests {
         let mut snm = vec![vec![0.0; 3]; 3];
         cnm[2][2] = 1.5e-6;
         snm[2][2] = -9.0e-7;
-        let tess = DsstTesseral::new(MU, AE, OMEGA_EARTH, cnm, snm);
+        let tess = DsstTesseral::new(MU, AE, OMEGA_EARTH, cnm, snm).unwrap();
         let prop = DsstMeanPropagator {
             zonal: &z,
             sun: &sun,
@@ -497,7 +492,7 @@ mod tests {
         // Near-circular, near-equatorial GEO mean state.
         let a0 = 4.2164172e7;
         let init = [a0, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 0.5];
-        let got = prop.propagate(init, 86400.0);
+        let got = prop.propagate(init, 86400.0).unwrap();
         assert!(
             got.iter().all(|v| v.is_finite()),
             "non-finite state: {got:?}"
@@ -518,7 +513,7 @@ mod tests {
             DsstThirdBody::new(MU, 1.32712440018e20),
             DsstThirdBody::new(MU, 4.902800066e12),
             DsstSolarRadiationPressure::new(1.5, 0.02, MU, AE),
-            DsstTesseral::new(MU, AE, OMEGA_EARTH, cnm, snm),
+            DsstTesseral::new(MU, AE, OMEGA_EARTH, cnm, snm).unwrap(),
         )
     }
 
@@ -571,11 +566,11 @@ mod tests {
         let (mut worst_back, mut worst_image, mut least_eta) = (0.0f64, 0.0f64, f64::INFINITY);
         for mean in [LEO, GEO] {
             for &t in &[0.0, 3600.0, 21600.0] {
-                let osc = prop.osculating_at(mean, t);
+                let osc = prop.osculating_at(mean, t).unwrap();
                 let back = prop
                     .mean_from_osculating(osc, t)
                     .expect("the short-period map is a contraction here");
-                let image = prop.osculating_at(back, t);
+                let image = prop.osculating_at(back, t).unwrap();
                 let mut eta = 0.0f64;
                 for i in 0..6 {
                     let scale = if i == 0 { mean[0] } else { 1.0 };
@@ -618,8 +613,11 @@ mod tests {
         let mut worst = 0.0f64;
         for mean in [LEO, GEO] {
             for &t in &[7200.0, 43200.0] {
-                let at = prop.propagate(mean, t);
-                let (ahead, behind) = (prop.propagate(mean, t + H), prop.propagate(mean, t - H));
+                let at = prop.propagate(mean, t).unwrap();
+                let (ahead, behind) = (
+                    prop.propagate(mean, t + H).unwrap(),
+                    prop.propagate(mean, t - H).unwrap(),
+                );
                 let mut rate = [0.0; 6];
                 prop.derivative(t, &at, &mut rate);
                 for i in 0..6 {

@@ -47,17 +47,12 @@
 
 use std::vec::Vec;
 
-use libm::{cos, fabs, sin, sqrt};
+use libm::{cos, sin, sqrt};
 
-use super::auxiliary::{DsstAuxiliary, I};
+use super::auxiliary::{DsstAuxiliary, I, mean_to_eccentric};
 use super::coefficients::{compute_qns, factorial, jacobi_value_deriv};
 use super::third_body::{DsstThirdBody, ThirdBodyPotential};
-
-/// Convergence tolerance for the equinoctial Kepler solve (Orekit
-/// `EquinoctialLongitudeArgumentUtility.TOLERANCE_CONVERGENCE`).
-const KEPLER_TOLERANCE: f64 = 1.0e-11;
-/// Maximum iterations for the equinoctial Kepler solve (Orekit `MAXIMUM_ITERATION`).
-const KEPLER_MAX_ITER: usize = 50;
+use super::{DsstError, mean_state};
 /// Maximum eccentricity power used by the short-period Fourier/`Gₙₛ` sums (`MAX_ECCPOWER_SP`).
 const MAX_ECCPOWER_SP: usize = 4;
 
@@ -685,33 +680,6 @@ fn one_element_row(
     ]
 }
 
-/// Mean → eccentric longitude argument via the equinoctial Kepler equation
-/// λ = LE − k·sin(LE) + h·cos(LE), solved with Orekit's Danby-style step (`meanToEccentric`). Third
-/// bodies expand the short-period series in the eccentric longitude F = LE (`meanOrbit.getLE()`).
-///
-/// # Panics
-///
-/// If the iteration does not converge within [`KEPLER_MAX_ITER`] (only for e ≈ 1, outside the
-/// third-body LEO regime this module targets).
-fn mean_to_eccentric(ex: f64, ey: f64, lm: f64) -> f64 {
-    let mut le = lm;
-    let mut le_m_lm = 0.0;
-    for _ in 0..KEPLER_MAX_ITER {
-        let (s, c) = (sin(le), cos(le));
-        let f2 = ex * s - ey * c;
-        let f1 = 1.0 - ex * c - ey * s;
-        let f0 = le_m_lm - f2;
-        let f12 = 2.0 * f1;
-        let shift = f0 * f12 / (f1 * f12 - f0 * f2);
-        le_m_lm -= shift;
-        le = lm + le_m_lm;
-        if fabs(shift) <= KEPLER_TOLERANCE {
-            return le;
-        }
-    }
-    panic!("equinoctial Kepler solve did not converge (e too close to 1)");
-}
-
 /// Euclidean norm of a 3-vector.
 fn norm(v: [f64; 3]) -> f64 {
     sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
@@ -724,11 +692,15 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 
 /// Compute the six equinoctial short-period corrections `[Δa, Δk, Δh, Δq, Δp, Δλ]` from one third body
 /// at the given mean state and geocentric inertial body position.
+///
+/// # Errors
+///
+/// [`DsstError::Kepler`] when the mean state has no eccentric longitude.
 pub(crate) fn short_period_correction(
     tb: &DsstThirdBody,
     aux: &DsstAuxiliary,
     body_pos: [f64; 3],
-) -> [f64; 6] {
+) -> Result<[f64; 6], DsstError> {
     let r3 = norm(body_pos);
     let trunc = tb.truncation(aux, r3);
     let n_max = trunc.max_ar3_pow;
@@ -772,7 +744,7 @@ pub(crate) fn short_period_correction(
     let (cij, sij) = compute_cij_sij(&ctx, &cj_coefs, &sj_coefs, j_max);
 
     // Evaluate the Fourier series at the eccentric longitude F = LE (Orekit `value`).
-    let f = mean_to_eccentric(aux.k, aux.h, aux.lambda);
+    let f = mean_to_eccentric(aux.k, aux.h, aux.lambda)?;
     let mut sp = cij[0];
     for j in 1..=max_freq_f {
         let jf = j as f64 * f;
@@ -781,15 +753,23 @@ pub(crate) fn short_period_correction(
             sp[i] += cij[j][i] * c + sij[j][i] * s;
         }
     }
-    sp
+    Ok(sp)
 }
 
 impl DsstThirdBody {
     /// The six equinoctial short-period corrections `[Δa, Δk, Δh, Δq, Δp, Δλ]` for this third body at
     /// the given **mean** state and geocentric inertial body position `body_pos` (m), evaluated at the
     /// mean state's eccentric longitude (Orekit's `ThirdBodyShortPeriodicCoefficients.value`).
-    #[must_use]
-    pub fn short_period_correction(&self, aux: &DsstAuxiliary, body_pos: [f64; 3]) -> [f64; 6] {
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::Kepler`] when the state has no eccentric longitude: `e = √(k² + h²)` not
+    /// below 1, a non-finite `k`, `h` or `λ`, or an `e` so near 1 that the solve does not converge.
+    pub fn short_period_correction(
+        &self,
+        aux: &DsstAuxiliary,
+        body_pos: [f64; 3],
+    ) -> Result<[f64; 6], DsstError> {
         short_period_correction(self, aux, body_pos)
     }
 
@@ -797,21 +777,27 @@ impl DsstThirdBody {
     /// `[a, k, h, q, p, λ]` and this third body's inertial position `body_pos` (m). Mirrors
     /// [`super::zonal::DsstZonal::osculating`]; for both the Sun and the Moon the caller sums each
     /// body's short-period δ (as with the mean rates).
-    #[must_use]
-    pub fn osculating(&self, mean: [f64; 6], body_pos: [f64; 3]) -> [f64; 6] {
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::MeanState`] when `mean` is not a finite ellipse, and as
+    /// [`Self::short_period_correction`].
+    pub fn osculating(&self, mean: [f64; 6], body_pos: [f64; 3]) -> Result<[f64; 6], DsstError> {
+        let mean = mean_state(mean)?;
         let aux = DsstAuxiliary::new(
             mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], self.mu,
         );
-        let sp = self.short_period_correction(&aux, body_pos);
+        let sp = self.short_period_correction(&aux, body_pos)?;
         let mut osc = mean;
         for i in 0..6 {
             osc[i] += sp[i];
         }
-        osc
+        Ok(osc)
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::super::third_body::ThirdBodyTruncation;
     use super::*;
@@ -947,7 +933,8 @@ mod tests {
         let s = sun();
         let (mut da, mut rest) = (std::vec::Vec::new(), std::vec::Vec::new());
         for k in 0..4 {
-            let (a, others) = osc_distances(s.osculating(SUN_MEAN[k], SUN_POS[k]), SUN_OSC[k]);
+            let (a, others) =
+                osc_distances(s.osculating(SUN_MEAN[k], SUN_POS[k]).unwrap(), SUN_OSC[k]);
             da.push(a);
             rest.extend(others);
         }
@@ -977,8 +964,8 @@ mod tests {
                 BOTH_MEAN[k][5],
                 MU,
             );
-            let dsun = s.short_period_correction(&aux, BOTH_SUN_POS[k]);
-            let dmoon = m.short_period_correction(&aux, BOTH_MOON_POS[k]);
+            let dsun = s.short_period_correction(&aux, BOTH_SUN_POS[k]).unwrap();
+            let dmoon = m.short_period_correction(&aux, BOTH_MOON_POS[k]).unwrap();
             let mut osc = BOTH_MEAN[k];
             for i in 0..6 {
                 osc[i] += dsun[i] + dmoon[i];
@@ -1477,7 +1464,7 @@ mod tests {
         let (mut sum, mut amp) = (0.0_f64, 0.0_f64);
         for i in 0..N {
             let lm = core::f64::consts::TAU * i as f64 / N as f64;
-            let f = mean_to_eccentric(CK, CH, lm);
+            let f = mean_to_eccentric(CK, CH, lm).unwrap();
             let g = (1..=C_JMAX as i64).fold(fr.c0lambda(), |acc, j| {
                 acc + fr.cjlambda(j) * cos(j as f64 * f) + fr.sjlambda(j) * sin(j as f64 * f)
             });
@@ -1559,7 +1546,7 @@ mod tests {
                 // λ is kept inside one revolution so the residual is not measured through the
                 // cancellation of two large longitudes: `LE − λ` is of order e whatever λ is.
                 let lm = core::f64::consts::TAU * i as f64 / N as f64;
-                let le = mean_to_eccentric(k, h, lm);
+                let le = mean_to_eccentric(k, h, lm).unwrap();
                 let residual = (le - k * sin(le) + h * cos(le) - lm).abs();
                 assert!(
                     residual < 1e-15,
@@ -1589,7 +1576,7 @@ mod tests {
         for i in 0..N {
             let lm = core::f64::consts::TAU * i as f64 / N as f64;
             let aux = DsstAuxiliary::new(A0, CK, CH, CQ, CP, lm, MU);
-            let sp = m.short_period_correction(&aux, BOTH_MOON_POS[0]);
+            let sp = m.short_period_correction(&aux, BOTH_MOON_POS[0]).unwrap();
             for e in 0..6 {
                 sum[e] += sp[e];
                 amp[e] = amp[e].max(sp[e].abs());
@@ -1787,7 +1774,7 @@ mod tests {
         let (mut worst, mut amp) = (0.0_f64, 0.0_f64);
         for i in 0..N {
             let lm = core::f64::consts::TAU * i as f64 / N as f64;
-            let f = mean_to_eccentric(CK, CH, lm);
+            let f = mean_to_eccentric(CK, CH, lm).unwrap();
             let dfdl = 1.0 / (1.0 - CK * cos(f) - CH * sin(f));
             let mut exact = 0.0;
             let mut series = fr.c0lambda();

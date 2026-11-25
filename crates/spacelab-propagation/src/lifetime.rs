@@ -324,7 +324,13 @@ impl<A: DecayAtmosphere> DynamicalSystem<6> for DecaySystem<'_, A> {
             segment_start: self.segment_start,
             t,
         };
-        let drag = self.model.drag.mean_element_rates(&aux, &at);
+        // A state with no eccentric longitude has no full-circle drag window, so no rates. NaN is
+        // what the driver reads as a step to reject (see `DsstMeanPropagator`'s right-hand side).
+        let drag = self
+            .model
+            .drag
+            .mean_element_rates(&aux, &at)
+            .unwrap_or([f64::NAN; 6]);
         for i in 0..6 {
             dydt[i] = zonal[i] + drag[i];
         }
@@ -791,7 +797,7 @@ mod tests {
     /// A zonal field with `J2` only, and one with no field at all — the second is what isolates
     /// drag so the analytic decay law applies.
     fn zonal(j2: bool) -> DsstZonal {
-        DsstZonal::new(MU, AE, vec![0.0, 0.0, if j2 { C20 } else { 0.0 }])
+        DsstZonal::new(MU, AE, vec![0.0, 0.0, if j2 { C20 } else { 0.0 }]).unwrap()
     }
 
     /// `ρ = ρ₀·exp(−(r − r₀)/H)` about the spherical radius, co-rotating about `ẑ`.

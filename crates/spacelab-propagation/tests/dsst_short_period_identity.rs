@@ -304,7 +304,7 @@ fn zonal_short_periods_solve_their_defining_equation() {
         -2.272_9e-7,
         5.406_8e-7,
     ];
-    let zonal = DsstZonal::from_j(MU, RE, &j);
+    let zonal = DsstZonal::from_j(MU, RE, &j).expect("a zonal field");
     let coeffs: Vec<(usize, usize, f64, f64)> = j
         .iter()
         .enumerate()
@@ -316,7 +316,11 @@ fn zonal_short_periods_solve_their_defining_equation() {
             mean,
             1,
             0.0,
-            |l, _| zonal.short_period_correction(&aux(mean, l)),
+            |l, _| {
+                zonal
+                    .short_period_correction(&aux(mean, l))
+                    .expect("an elliptic state")
+            },
             |_, r, _| perturbing(geo.acceleration_simd(&r), r),
         );
         assert_verdicts("zonal", &v, bound);
@@ -335,7 +339,10 @@ fn third_body_short_periods_solve_their_defining_equation() {
             mean,
             1,
             0.0,
-            |l, _| moon.short_period_correction(&aux(mean, l), s),
+            |l, _| {
+                moon.short_period_correction(&aux(mean, l), s)
+                    .expect("an elliptic state")
+            },
             |_, r, _| tide(mu3, s, r),
         );
         assert_verdicts("third body", &v, bound);
@@ -357,7 +364,10 @@ fn the_third_body_residual_is_the_distance_cut() {
                 mean,
                 1,
                 0.0,
-                |l, _| moon.short_period_correction(&aux(mean, l), s),
+                |l, _| {
+                    moon.short_period_correction(&aux(mean, l), s)
+                        .expect("an elliptic state")
+                },
                 |_, r, _| tide(mu3, s, r),
             );
             v.iter().map(|e| e.residual).fold(0.0, f64::max)
@@ -404,7 +414,7 @@ impl TesseralField {
             snm[n][m] = s;
         }
         Self {
-            dsst: DsstTesseral::new(MU, RE, THETA_DOT, cnm, snm),
+            dsst: DsstTesseral::new(MU, RE, THETA_DOT, cnm, snm).expect("a degree-4 field"),
             geo: GeoPotential::from_unnormalized(MU, RE, 4, &TESSERALS)
                 .expect("degree 4 is supported"),
         }
@@ -474,7 +484,7 @@ fn largest(residuals: [f64; 6]) -> f64 {
 #[test]
 fn zonal_mean_rates_are_the_orbit_average_of_gauss_rates() {
     let j2 = 1.082_626_7e-3;
-    let zonal = DsstZonal::from_j(MU, RE, &[j2]);
+    let zonal = DsstZonal::from_j(MU, RE, &[j2]).expect("a zonal field");
     let geo = GeoPotential::from_unnormalized(MU, RE, 2, &[(2, 0, -j2, 0.0)])
         .expect("degree 2 is supported");
     for mean in [LEO, [2.6e7, 0.15, -0.2, 0.3, -0.25]] {
@@ -487,7 +497,7 @@ fn zonal_mean_rates_are_the_orbit_average_of_gauss_rates() {
         assert!(largest(r) < 5e-11, "J2 at {mean:?}: {r:?}");
     }
     let j = [j2, -2.532_4e-6, -1.619_6e-6, -2.272_9e-7, 5.406_8e-7];
-    let zonal = DsstZonal::from_j(MU, RE, &j);
+    let zonal = DsstZonal::from_j(MU, RE, &j).expect("a zonal field");
     let coeffs: Vec<(usize, usize, f64, f64)> = j
         .iter()
         .enumerate()
@@ -514,10 +524,7 @@ fn third_body_mean_rates_are_the_orbit_average_of_gauss_rates() {
     let mu3 = 4.902_800_066e12;
     let moon = DsstThirdBody::new(MU, mu3);
     let s = [2.1e8, -3.0e8, 1.1e8];
-    let raised = ThirdBodyTruncation {
-        max_ar3_pow: 8,
-        max_ecc_pow: 8,
-    };
+    let raised = ThirdBodyTruncation::new(8, 8).expect("8 ≤ 8 < 22");
     for (mean, default_bound, raised_bound) in [
         (LEO, 5e-5, 5e-11),
         ([4.2164e7, 0.02, -0.01, 0.05, -0.03], 2e-6, 2e-7),
@@ -755,7 +762,9 @@ fn drag_mean_rates_are_the_average_over_the_atmospheric_arc() {
         ("inside", LEO, [0.0, TAU]),
         ("leaving", eccentric, arc_below(eccentric, drag.rbar)),
     ] {
-        let got = drag.mean_element_rates(&aux(mean, 0.5), &AIR);
+        let got = drag
+            .mean_element_rates(&aux(mean, 0.5), &AIR)
+            .expect("an elliptic state");
         let want = mean_rate(mean, m1, m2, &drag_like);
         let worst = worst_rate_difference(mean[0], got, want);
         assert!(worst < 1e-9, "{label}: {worst:.3e}, {got:?} vs {want:?}");
@@ -860,7 +869,9 @@ fn srp_mean_rates_are_the_average_over_a_sunlit_orbit() {
     let w = cross(f, g);
     let s = dot(SUN, SUN).sqrt();
     let sun = [s * w[0], s * w[1], s * w[2]];
-    let got = srp.mean_element_rates(&aux(SRP_LEO, SRP_LAMBDA), sun);
+    let got = srp
+        .mean_element_rates(&aux(SRP_LEO, SRP_LAMBDA), sun)
+        .expect("an elliptic state");
     let want = mean_rate(SRP_LEO, 0.0, TAU, &|r, _| {
         cannonball(sun, r, lighting(sun, r))
     });
@@ -935,7 +946,9 @@ fn srp_mean_rates_are_the_average_over_the_conical_shadow() {
         penumbra_entry,
         umbra_entry,
     ]);
-    let got = srp.mean_element_rates(&aux(SRP_LEO, SRP_LAMBDA), SUN);
+    let got = srp
+        .mean_element_rates(&aux(SRP_LEO, SRP_LAMBDA), SUN)
+        .expect("an elliptic state");
     let worst = worst_rate_difference(SRP_LEO[0], got, want);
     assert!(worst < 1e-10, "{worst:.3e}, {got:?} vs {want:?}");
 }
@@ -998,7 +1011,14 @@ fn srp_residuals(mean: [f64; 5], beta: f64, lift: f64) -> [Verdict; 6] {
         mean,
         1,
         0.0,
-        |l, _| eta_of(mean, l, srp.osculating([a, k, h, q, p, l], sun)),
+        |l, _| {
+            eta_of(
+                mean,
+                l,
+                srp.osculating([a, k, h, q, p, l], sun)
+                    .expect("an elliptic state"),
+            )
+        },
         |_, r, _| cannonball(sun, r, 1.0).map(|x| lift * x),
     )
 }
@@ -1052,7 +1072,14 @@ fn drag_residuals(mean: [f64; 5], air: &Exponential, rbar: f64) -> [Verdict; 6] 
         mean,
         1,
         0.0,
-        |l, _| eta_of(mean, l, drag.osculating([a, k, h, q, p, l], air)),
+        |l, _| {
+            eta_of(
+                mean,
+                l,
+                drag.osculating([a, k, h, q, p, l], air)
+                    .expect("an elliptic state"),
+            )
+        },
         |_, r, v| {
             if dot(r, r).sqrt() < rbar {
                 drag_through(air, AREA_OVER_MASS * LIFT, r, v)

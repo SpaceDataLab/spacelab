@@ -86,7 +86,8 @@ fn the_eccentricity_truncation_order_distance_to_orekit() {
                 let max_degree: usize = f[7].parse().expect("max degree");
                 let want: usize = f[8].parse().expect("truncation order");
                 let aux = DsstAuxiliary::new(v[0], v[1], v[2], v[3], v[4], v[5], MODEL_GM);
-                let zonal = DsstZonal::new(MODEL_GM, MODEL_RE, c_n0[..=max_degree].to_vec());
+                let zonal = DsstZonal::new(MODEL_GM, MODEL_RE, c_n0[..=max_degree].to_vec())
+                    .expect("a zonal field");
                 let got = zonal.max_ecc_pow(&aux);
                 distances.push(got.abs_diff(want) as f64);
                 if got != want {

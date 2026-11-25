@@ -193,7 +193,9 @@ fn mean_elements(zonal: &DsstZonal, r: [f64; 3], v: [f64; 3]) -> [f64; 6] {
     let osculating = state_to_equinoctial(r, v);
     let mut mean = osculating;
     for _ in 0..8 {
-        let correction = zonal.short_period_correction(&auxiliary(mean));
+        let correction = zonal
+            .short_period_correction(&auxiliary(mean))
+            .expect("an elliptic state");
         let mut next = [0.0; 6];
         let mut change = 0.0_f64;
         for i in 0..6 {
@@ -414,7 +416,7 @@ fn run(
     zonal: &DsstZonal,
     period: f64,
 ) -> Outcome {
-    let (r0, v0) = keplerian(zonal.osculating(*target)).to_state();
+    let (r0, v0) = keplerian(zonal.osculating(*target).expect("an elliptic state")).to_state();
     let mut y = [r0.x, r0.y, r0.z, v0.x, v0.y, v0.z, 0.0];
 
     let controls = Controls::new(Tolerance::new(1e-9, 1e-11), 1e-4);
@@ -530,7 +532,7 @@ fn wrap_to_pi(angle: f64) -> f64 {
 #[allow(clippy::too_many_lines)] // one end-to-end integration scenario
 fn holding_the_ground_track_costs_the_drag_makeup_and_no_more() {
     let orbit = sun_synchronous_repeat(REPEAT.0, REPEAT.1);
-    let zonal = DsstZonal::from_j(MU, RE, &[J2_COEFF]);
+    let zonal = DsstZonal::from_j(MU, RE, &[J2_COEFF]).expect("a J2 field");
     let target = equinoctial(&orbit);
 
     let period = core::f64::consts::TAU / orbit.draconitic_mean_motion(RE, J2_COEFF);

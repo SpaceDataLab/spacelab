@@ -46,9 +46,10 @@ use std::vec::Vec;
 
 use libm::{atan, atan2, cbrt, copysign, cos, fabs, floor, sin, sqrt};
 
-use super::auxiliary::DsstAuxiliary;
-use super::gaussian::{self, NodeState};
+use super::auxiliary::{DsstAuxiliary, mean_to_true};
+use super::gaussian::{self, NodeState, Rule};
 use super::gaussian_short_period;
+use super::{DsstError, mean_state};
 use crate::shadow;
 
 /// Default reference distance for the solar radiation pressure (m) — `DSSTSolarRadiationPressure.D_REF`.
@@ -66,7 +67,7 @@ const S_ZERO: f64 = 1.0e-6;
 /// Gauss–Legendre order on a penumbra piece, after [`gaussian::smoothstep_nodes`]: every penumbra
 /// piece measured reaches the rounding of its integrand by order 32, and 40 keeps a step of margin
 /// (`the_penumbra_rule_has_converged`).
-const PENUMBRA_ORDER: usize = 40;
+const PENUMBRA_ORDER: Rule = Rule::P40;
 
 /// Solar-radiation-pressure contribution to the DSST mean-element rates (cannonball spacecraft).
 ///
@@ -149,10 +150,19 @@ impl DsstSolarRadiationPressure {
     ///
     /// The average `(1/2π)∫νF dλ` over the whole orbit, taken in the true longitude on the pieces
     /// between the shadow contacts (module doc). Zero when no piece sees the Sun.
-    #[must_use]
-    pub fn mean_element_rates(&self, aux: &DsstAuxiliary, sun_pos: [f64; 3]) -> [f64; 6] {
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::Kepler`] when the state has no eccentric longitude to centre the whole turn
+    /// on: `e = √(k² + h²)` not below 1, a non-finite `k`, `h` or `λ`, or an `e` so near 1 that
+    /// the solve does not converge.
+    pub fn mean_element_rates(
+        &self,
+        aux: &DsstAuxiliary,
+        sun_pos: [f64; 3],
+    ) -> Result<[f64; 6], DsstError> {
         let accel = self.acceleration(sun_pos);
-        match self.window(aux, sun_pos) {
+        Ok(match self.window(aux, sun_pos)? {
             Window::FullTurn(ll) => gaussian::mean_element_rates(aux, ll[0], ll[1], accel),
             Window::Pieces(pieces) => {
                 let (nodes, weights) = rule(&pieces);
@@ -167,7 +177,7 @@ impl DsstSolarRadiationPressure {
                 }
                 rate
             }
-        }
+        })
     }
 
     /// The per-node cannonball SRP acceleration closure `q(node) = scale·λ·k_ref·(r − r☉)/|r − r☉|³`,
@@ -203,24 +213,31 @@ impl DsstSolarRadiationPressure {
     /// `[a, k, h, q, p, λ]` and this SRP model's Sun position `sun_pos` (m). The short-period
     /// Fourier coefficients are taken on the pieces the mean rates integrate, by the shared
     /// Gaussian engine ([`gaussian_short_period`]).
-    #[must_use]
-    pub fn osculating(&self, mean: [f64; 6], sun_pos: [f64; 3]) -> [f64; 6] {
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::MeanState`] when `mean` is not a finite ellipse, and [`DsstError::Kepler`] when
+    /// its eccentric longitude does not converge.
+    pub fn osculating(&self, mean: [f64; 6], sun_pos: [f64; 3]) -> Result<[f64; 6], DsstError> {
+        let mean = mean_state(mean)?;
         let aux = DsstAuxiliary::new(
             mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], self.mu,
         );
         let accel = self.acceleration(sun_pos);
-        let sp = match self.window(&aux, sun_pos) {
-            Window::FullTurn(ll) => gaussian_short_period::short_period_correction(&aux, ll, accel),
+        let sp = match self.window(&aux, sun_pos)? {
+            Window::FullTurn(ll) => {
+                gaussian_short_period::short_period_correction(&aux, ll, accel)?
+            }
             Window::Pieces(pieces) => {
                 let (nodes, weights) = rule(&pieces);
-                gaussian_short_period::short_period_correction_on(&aux, &nodes, &weights, accel)
+                gaussian_short_period::short_period_correction_on(&aux, &nodes, &weights, accel)?
             }
         };
         let mut osc = mean;
         for i in 0..6 {
             osc[i] += sp[i];
         }
-        osc
+        Ok(osc)
     }
 
     /// The pieces of the orbit the averages run over: between consecutive contacts, each lit,
@@ -233,11 +250,11 @@ impl DsstSolarRadiationPressure {
     /// A contact the quartic admits in error can only split a piece in two of the same kind; only a
     /// missed one merges two kinds, and the quartic misses a pair only where it merges into a double
     /// root, at a graze whose depth is at the rounding.
-    fn window(&self, aux: &DsstAuxiliary, sun_pos: [f64; 3]) -> Window {
-        let lvn = normalize_angle(mean_to_true(aux.k, aux.h, aux.lambda), 0.0);
+    fn window(&self, aux: &DsstAuxiliary, sun_pos: [f64; 3]) -> Result<Window, DsstError> {
+        let lvn = normalize_angle(mean_to_true(aux.k, aux.h, aux.lambda)?, 0.0);
         let full = Window::FullTurn([-PI + lvn, PI + lvn]);
         let Some((mut contacts, umbra)) = self.contacts(aux, sun_pos) else {
-            return full;
+            return Ok(full);
         };
         let first = contacts[0].l;
         for c in &mut contacts {
@@ -275,11 +292,11 @@ impl DsstSolarRadiationPressure {
                 }
             }
         }
-        if shadowed {
+        Ok(if shadowed {
             Window::Pieces(pieces)
         } else {
             full
-        }
+        })
     }
 
     /// The crossings of the orbit with the penumbra cone and the umbra cone, in no particular order,
@@ -517,11 +534,7 @@ fn rule(pieces: &[Piece]) -> (Vec<f64>, Vec<f64>) {
                 piece.high,
             ));
         } else {
-            out.extend(gaussian::gauss_nodes(
-                gaussian::MAX_GAUSS_ORDER,
-                piece.low,
-                piece.high,
-            ));
+            out.extend(gaussian::gauss_nodes(Rule::MAX, piece.low, piece.high));
         }
     }
     out
@@ -538,55 +551,6 @@ fn position(aux: &DsstAuxiliary, l: f64) -> [f64; 3] {
 fn normalize(v: [f64; 3]) -> [f64; 3] {
     let n = gaussian::norm(v);
     [v[0] / n, v[1] / n, v[2] / n]
-}
-
-/// Equinoctial mean → true longitude: solve Kepler for the eccentric longitude, then convert to true
-/// (`EquinoctialLongitudeArgumentUtility.meanToEccentric` + `eccentricToTrue`). `ex = k`, `ey = h`.
-///
-/// Shared with [`super::drag`] (both need Orekit's `EquinoctialOrbit.getLv()` for the full-circle
-/// `getLLimits` centre).
-pub(super) fn mean_to_true(ex: f64, ey: f64, lm: f64) -> f64 {
-    let le = mean_to_eccentric(ex, ey, lm);
-    eccentric_to_true(ex, ey, le)
-}
-
-/// Equinoctial Kepler solve (`EquinoctialLongitudeArgumentUtility.meanToEccentric`).
-fn mean_to_eccentric(ex: f64, ey: f64, lm: f64) -> f64 {
-    const TOLERANCE_CONVERGENCE: f64 = 1.0e-11;
-    const MAXIMUM_ITERATION: usize = 50;
-
-    let mut le = lm;
-    let mut le_m_lm = 0.0_f64;
-    let mut iter = 0;
-    loop {
-        let sin_le = sin(le);
-        let cos_le = cos(le);
-        let f2 = ex * sin_le - ey * cos_le;
-        let f1 = 1.0 - ex * cos_le - ey * sin_le;
-        let f0 = le_m_lm - f2;
-
-        let f12 = 2.0 * f1;
-        let shift = f0 * f12 / (f1 * f12 - f0 * f2);
-
-        le_m_lm -= shift;
-        le = lm + le_m_lm;
-
-        iter += 1;
-        if fabs(shift) <= TOLERANCE_CONVERGENCE || iter >= MAXIMUM_ITERATION {
-            break;
-        }
-    }
-    le
-}
-
-/// Equinoctial eccentric → true longitude (`EquinoctialLongitudeArgumentUtility.eccentricToTrue`).
-fn eccentric_to_true(ex: f64, ey: f64, le: f64) -> f64 {
-    let epsilon = sqrt(1.0 - ex * ex - ey * ey);
-    let sin_le = sin(le);
-    let cos_le = cos(le);
-    let num = ex * sin_le - ey * cos_le;
-    let den = epsilon + 1.0 - ex * cos_le - ey * sin_le;
-    le + 2.0 * atan(num / den)
 }
 
 /// Reduce an angle to `[center − π, center + π)` (Hipparchus `MathUtils.normalizeAngle`). Shared with
@@ -810,9 +774,11 @@ fn precision_equals(x: f64, y: f64) -> bool {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::float_cmp)] // the umbra and full-Sun answers are exact by construction
+    #![allow(clippy::unwrap_used)]
 
     use spacelab_testkit::nan_max;
 
+    use super::super::auxiliary::{eccentric_to_true, mean_to_eccentric};
     use super::*;
 
     // Golden fixtures from Orekit 13 (`tools/orekit-oracle`, orekit_dsst_srp.csv): a cannonball SRP
@@ -909,7 +875,7 @@ mod tests {
     #[test]
     #[ignore = "comparator: the distance to Orekit, not a verdict"]
     fn fixed_state_rates_distance_to_orekit() {
-        let got = srp().mean_element_rates(&aux(), SUN_POS);
+        let got = srp().mean_element_rates(&aux(), SUN_POS).unwrap();
         let rel: [f64; 6] = core::array::from_fn(|i| libm::fabs((got[i] - RATES[i]) / RATES[i]));
         std::println!(
             "SRP mean rates vs Orekit 13: da {:.3e} dk {:.3e} dh {:.3e} dq {:.3e} dp {:.3e} dλ {:.3e}",
@@ -1250,7 +1216,7 @@ mod tests {
                 for mi in 0..48_u32 {
                     let ecc_anom = f64::from(mi) * (TAU / 48.0);
                     let mean_anom = ecc_anom - e * sin(ecc_anom);
-                    let le = mean_to_eccentric(ex, ey, mean_anom + peri);
+                    let le = mean_to_eccentric(ex, ey, mean_anom + peri).unwrap();
                     worst_e = nan_max(
                         worst_e,
                         libm::fabs(normalize_angle(le - (ecc_anom + peri), 0.0)),
@@ -1459,7 +1425,7 @@ mod tests {
         let nu = |l: f64| shadow::lighting_ratio(position(aux, l), sun, AE);
         let interior =
             |low: f64, high: f64| (1..8_u32).map(move |i| low + (high - low) * f64::from(i) / 8.0);
-        match model.window(aux, sun) {
+        match model.window(aux, sun).unwrap() {
             Window::FullTurn(ll) => {
                 let lv = true_longitude_classical(aux.k, aux.h, aux.lambda);
                 let lvn = lv - TAU * libm::round(lv / TAU);
@@ -1525,7 +1491,7 @@ mod tests {
                 let aux = DsstAuxiliary::new(a, k, h, q, p, lambda, MU);
                 for sun in suns(&aux) {
                     assert_window(&model, &aux, sun);
-                    match model.window(&aux, sun) {
+                    match model.window(&aux, sun).unwrap() {
                         Window::FullTurn(_) => full += 1,
                         Window::Pieces(_) => pieces += 1,
                     }
@@ -1584,7 +1550,7 @@ mod tests {
                 piece.low + width * f64::from(i)
             }
         };
-        (0..parts).flat_map(move |i| gaussian::smoothstep_nodes(48, edge(i), edge(i + 1)))
+        (0..parts).flat_map(move |i| gaussian::smoothstep_nodes(Rule::P48, edge(i), edge(i + 1)))
     }
 
     /// Every penumbra piece of the sweep at [`PENUMBRA_ORDER`] against the same piece in eight parts
@@ -1602,7 +1568,7 @@ mod tests {
         for [a, k, h, q, p] in ORBITS {
             let aux = DsstAuxiliary::new(a, k, h, q, p, 0.0, MU);
             for sun in suns(&aux) {
-                let Window::Pieces(pieces) = model.window(&aux, sun) else {
+                let Window::Pieces(pieces) = model.window(&aux, sun).unwrap() else {
                     continue;
                 };
                 let accel = model.acceleration(sun);
@@ -1620,18 +1586,20 @@ mod tests {
                         )
                     };
                     worst = nan_max(worst, miss(PENUMBRA_ORDER));
-                    worst_24 = nan_max(worst_24, miss(24));
+                    worst_24 = nan_max(worst_24, miss(Rule::P24));
                 }
             }
         }
         assert!(count > 0, "the sweep reached no penumbra");
         assert!(
             worst < 2e-13,
-            "penumbra rule at order {PENUMBRA_ORDER}: {worst:.3e}"
+            "penumbra rule at order {}: {worst:.3e}",
+            PENUMBRA_ORDER.order()
         );
         std::println!(
-            "penumbra rule over {count} pieces: order {PENUMBRA_ORDER} {worst:.3e}, order 24 \
-             {worst_24:.3e}"
+            "penumbra rule over {count} pieces: order {} {worst:.3e}, order 24 \
+             {worst_24:.3e}",
+            PENUMBRA_ORDER.order()
         );
     }
 
@@ -1668,7 +1636,7 @@ mod tests {
                     if piece.penumbra {
                         in_parts(piece, m).collect()
                     } else {
-                        gaussian::gauss_nodes(48, piece.low, piece.high).collect()
+                        gaussian::gauss_nodes(Rule::P48, piece.low, piece.high).collect()
                     }
                 })
                 .collect();
@@ -1677,13 +1645,13 @@ mod tests {
         let (mut worst, mut settle) = (0.0_f64, 0.0_f64);
         for delta in [1e-4, 1e-6, 1e-8, 1e-10, -1e-6, -1e-10] {
             let sun = sun_on_the_triad(&aux, hi * (1.0 + delta), phi);
-            let Window::Pieces(pieces) = model.window(&aux, sun) else {
+            let Window::Pieces(pieces) = model.window(&aux, sun).unwrap() else {
                 panic!("δ = {delta:e}: the orbit misses the shadow");
             };
             let accel = model.acceleration(sun);
             let (reference, magnitude) = composite(&pieces, &accel, 64);
             let (coarse, _) = composite(&pieces, &accel, 32);
-            let got = model.mean_element_rates(&aux, sun);
+            let got = model.mean_element_rates(&aux, sun).unwrap();
             let coef = 1.0 / (2.0 * PI * aux.big_b);
             settle = nan_max(settle, rate_distance(aux.sma, coarse, reference, magnitude));
             let scaled = |x: [f64; 6]| x.map(|v| coef * v);
@@ -1757,7 +1725,7 @@ mod tests {
         let mut worst = 0.0_f64;
         for (name, [a, k, h, q, p], sun) in FOURIER_ORBITS {
             let aux = DsstAuxiliary::new(a, k, h, q, p, 0.0, MU);
-            let Window::Pieces(pieces) = model.window(&aux, sun) else {
+            let Window::Pieces(pieces) = model.window(&aux, sun).unwrap() else {
                 panic!("{name}: the orbit misses the shadow");
             };
             let (nodes, weights) = rule(&pieces);

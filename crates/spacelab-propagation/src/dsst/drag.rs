@@ -40,10 +40,11 @@
 
 use libm::{acos, atan2};
 
-use super::auxiliary::DsstAuxiliary;
+use super::auxiliary::{DsstAuxiliary, mean_to_true};
 use super::gaussian::{self, NodeState};
 use super::gaussian_short_period;
-use super::srp::{mean_to_true, normalize_angle};
+use super::srp::normalize_angle;
+use super::{DsstError, mean_state};
 
 /// Default upper altitude for atmospheric drag (m) — `DSSTAtmosphericDrag.DEFAULT_MAX_ATMOSPHERE_ALTITUDE`.
 pub const DEFAULT_MAX_ATMOSPHERE_ALTITUDE: f64 = 1_000_000.0;
@@ -120,25 +121,41 @@ impl DsstAtmosphericDrag {
     /// Mirrors a fixed-state Orekit `getMeanElementRate`: the integration limits are set by
     /// [`Self::l_limits`], then the drag acceleration is averaged by order-48 Gauss quadrature. Returns
     /// zeros when the whole orbit is above the atmosphere (`L_low ≥ L_high`).
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::l_limits`].
     pub fn mean_element_rates<A: Atmosphere>(
         &self,
         aux: &DsstAuxiliary,
         atmosphere: &A,
-    ) -> [f64; 6] {
-        let ll = self.l_limits(aux);
+    ) -> Result<[f64; 6], DsstError> {
+        let ll = self.l_limits(aux)?;
         let accel = self.acceleration(atmosphere);
-        gaussian::mean_element_rates(aux, ll[0], ll[1], accel)
+        Ok(gaussian::mean_element_rates(aux, ll[0], ll[1], accel))
     }
 
     /// The Gauss-quadrature order Orekit would fix for this state (`getMeanElementRate`'s `isDirty`
     /// selection). The returned mean rate is always the order-48 result; a propagation caches this
     /// order for later steps. Exposed for validation against Orekit.
-    #[must_use]
-    pub fn gauss_order<A: Atmosphere>(&self, aux: &DsstAuxiliary, atmosphere: &A) -> usize {
-        let ll = self.l_limits(aux);
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::l_limits`].
+    pub fn gauss_order<A: Atmosphere>(
+        &self,
+        aux: &DsstAuxiliary,
+        atmosphere: &A,
+    ) -> Result<usize, DsstError> {
+        let ll = self.l_limits(aux)?;
         let accel = self.acceleration(atmosphere);
-        gaussian::select_order(aux, ll[0], ll[1], accel, GAUSS_THRESHOLD)
+        Ok(gaussian::select_order(
+            aux,
+            ll[0],
+            ll[1],
+            accel,
+            GAUSS_THRESHOLD,
+        ))
     }
 
     /// The osculating equinoctial state `mean + short-period` for a **mean** equinoctial state
@@ -146,19 +163,31 @@ impl DsstAtmosphericDrag {
     /// [`super::third_body::DsstThirdBody::osculating`]: the same atmospheric-arc limits the mean rates
     /// use feed the shared Gaussian short-period engine
     /// (`gaussian_short_period::short_period_correction`).
-    #[must_use]
-    pub fn osculating<A: Atmosphere>(&self, mean: [f64; 6], atmosphere: &A) -> [f64; 6] {
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::MeanState`] when `mean` is not a finite ellipse, and [`DsstError::Kepler`] when
+    /// its eccentric longitude does not converge.
+    pub fn osculating<A: Atmosphere>(
+        &self,
+        mean: [f64; 6],
+        atmosphere: &A,
+    ) -> Result<[f64; 6], DsstError> {
+        let mean = mean_state(mean)?;
         let aux = DsstAuxiliary::new(
             mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], self.mu,
         );
-        let ll = self.l_limits(&aux);
-        let sp =
-            gaussian_short_period::short_period_correction(&aux, ll, self.acceleration(atmosphere));
+        let ll = self.l_limits(&aux)?;
+        let sp = gaussian_short_period::short_period_correction(
+            &aux,
+            ll,
+            self.acceleration(atmosphere),
+        )?;
         let mut osc = mean;
         for i in 0..6 {
             osc[i] += sp[i];
         }
-        osc
+        Ok(osc)
     }
 
     /// The per-node drag acceleration closure `q(node) = ½·ρ·dragCoeff·(S/m)·|v_rel|·v_rel`, with
@@ -190,20 +219,25 @@ impl DsstAtmosphericDrag {
     /// the atmosphere, quadrature skipped); apogee below `rbar` ⇒ the full circle `[-π + L_v, π + L_v]`
     /// (the whole orbit is inside); otherwise the atmospheric arc `[ω − f_b, ω + f_b]` with
     /// `f_b = acos(((a(1−e²)/rbar) − 1)/e)` and `ω = atan2(h, k)`.
-    #[must_use]
-    pub fn l_limits(&self, aux: &DsstAuxiliary) -> [f64; 2] {
+    ///
+    /// # Errors
+    ///
+    /// [`DsstError::Kepler`] on the full-circle branch when the state has no eccentric longitude
+    /// to centre it on: `e = √(k² + h²)` not below 1, a non-finite `k`, `h` or `λ`, or an `e` so
+    /// near 1 that the solve does not converge.
+    pub fn l_limits(&self, aux: &DsstAuxiliary) -> Result<[f64; 2], DsstError> {
         use core::f64::consts::PI;
 
         let perigee = aux.sma * (1.0 - aux.ecc);
         // Trajectory entirely out of the atmosphere.
         if perigee > self.rbar {
-            return [0.0, 0.0];
+            return Ok([0.0, 0.0]);
         }
         let apogee = aux.sma * (1.0 + aux.ecc);
         // Trajectory entirely within the atmosphere: full circle centred on the true longitude.
         if apogee < self.rbar {
-            let lvn = normalize_angle(mean_to_true(aux.k, aux.h, aux.lambda), 0.0);
-            return [-PI + lvn, PI + lvn];
+            let lvn = normalize_angle(mean_to_true(aux.k, aux.h, aux.lambda)?, 0.0);
+            return Ok([-PI + lvn, PI + lvn]);
         }
         // Trajectory partially within the atmosphere: the arc between atmosphere entry and exit.
         // The cosine is mathematically in `[-1, 1]` on this branch — it reaches an endpoint exactly at
@@ -213,11 +247,12 @@ impl DsstAtmosphericDrag {
         let cos_fb = ((aux.sma * (1.0 - aux.ecc * aux.ecc) / self.rbar) - 1.0) / aux.ecc;
         let fb = acos(cos_fb.clamp(-1.0, 1.0));
         let ww = atan2(aux.h, aux.k);
-        [ww - fb, ww + fb]
+        Ok([ww - fb, ww + fb])
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -296,7 +331,7 @@ mod tests {
     #[test]
     #[ignore = "comparator: the distance to Orekit, not a verdict"]
     fn integration_limits_distance_to_orekit() {
-        let ll = drag().l_limits(&aux());
+        let ll = drag().l_limits(&aux()).unwrap();
         super::super::comparison_row(
             "DSST drag integration limits",
             "rad",
@@ -327,10 +362,14 @@ mod tests {
 
         // Entirely above the atmosphere: the quadrature is skipped.
         let high = DsstAuxiliary::new(4.2164e7, 1.0e-3, -5.0e-4, HX0, HY0, 3.0, MU);
-        assert_eq!(drag().l_limits(&high), [0.0, 0.0], "perigee above rbar");
+        assert_eq!(
+            drag().l_limits(&high).unwrap(),
+            [0.0, 0.0],
+            "perigee above rbar"
+        );
 
         // Partially within: the arc from atmosphere entry to exit.
-        let ll = drag().l_limits(&low);
+        let ll = drag().l_limits(&low).unwrap();
         let mut worst = 0.0_f64;
         for l in ll {
             worst = nan_max(worst, fabs(radius(&low, l) - RBAR) / RBAR);
@@ -347,11 +386,15 @@ mod tests {
 
         // Grazing at perigee: a zero-width arc there, not the `[0, 0]` skip.
         let graze = DsstAtmosphericDrag::with_rbar(CD, AREA / MASS, MU, low.sma * (1.0 - low.ecc));
-        assert_eq!(graze.l_limits(&low), [ww, ww], "grazing perigee");
+        assert_eq!(graze.l_limits(&low).unwrap(), [ww, ww], "grazing perigee");
 
         // Grazing at apogee: the full circle centred on perigee, not on the current true longitude.
         let dip = DsstAtmosphericDrag::with_rbar(CD, AREA / MASS, MU, low.sma * (1.0 + low.ecc));
-        assert_eq!(dip.l_limits(&low), [ww - PI, ww + PI], "grazing apogee");
+        assert_eq!(
+            dip.l_limits(&low).unwrap(),
+            [ww - PI, ww + PI],
+            "grazing apogee"
+        );
     }
 
     /// The distance to Orekit's cached Gauss order: Orekit's heuristic, which no mathematics fixes; the
@@ -359,7 +402,7 @@ mod tests {
     #[test]
     #[ignore = "comparator: the distance to Orekit, not a verdict"]
     fn gauss_order_distance_to_orekit() {
-        let ours = drag().gauss_order(&aux(), &atmosphere());
+        let ours = drag().gauss_order(&aux(), &atmosphere()).unwrap();
         super::super::comparison_row(
             "DSST drag Gauss order",
             "nodes",
@@ -373,7 +416,7 @@ mod tests {
     #[test]
     #[ignore = "comparator: the distance to Orekit, not a verdict"]
     fn fixed_state_rates_distance_to_orekit() {
-        let got = drag().mean_element_rates(&aux(), &atmosphere());
+        let got = drag().mean_element_rates(&aux(), &atmosphere()).unwrap();
         let d: [f64; 6] = core::array::from_fn(|i| {
             if RATES[i] == 0.0 {
                 got[i].abs()

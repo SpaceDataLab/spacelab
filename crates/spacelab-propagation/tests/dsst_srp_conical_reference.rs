@@ -11,6 +11,8 @@
 //! `a` so that all six are rates of angles, against the largest magnitude `(1/2π)∫|νFᵢ| dλ`: the
 //! scale of the rounding of the shipped sum.
 
+#![allow(clippy::expect_used)]
+
 use spacelab_propagation::dsst::{DsstAuxiliary, DsstSolarRadiationPressure};
 
 const MU: f64 = 3.986_004_415e14;
@@ -44,7 +46,9 @@ fn the_rates_are_the_average_over_the_conical_shadow() {
     let srp = DsstSolarRadiationPressure::new(CR, AREA_OVER_MASS, MU, AE);
     let mut worst = 0.0_f64;
     for (name, [a, k, h, q, p], sun, want, magnitude) in REFERENCE {
-        let got = srp.mean_element_rates(&DsstAuxiliary::new(a, k, h, q, p, 0.0, MU), sun);
+        let got = srp
+            .mean_element_rates(&DsstAuxiliary::new(a, k, h, q, p, 0.0, MU), sun)
+            .expect("an elliptic state");
         let weight = |i: usize| if i == 0 { 1.0 / a } else { 1.0 };
         let scale = (0..6).fold(0.0_f64, |m, i| m.max(weight(i) * magnitude[i]));
         let miss = (0..6).fold(0.0_f64, |m, i| m.max(weight(i) * (got[i] - want[i]).abs())) / scale;

@@ -48,6 +48,7 @@ use std::vec::Vec;
 
 use libm::{cos, round, scalbn, sin};
 
+use super::DsstError;
 use super::auxiliary::{DsstAuxiliary, I};
 use super::coefficients::{compute_vns, factorial, jacobi_value_deriv};
 
@@ -61,7 +62,8 @@ const MIN_PERIOD_IN_SECONDS: f64 = 864_000.0;
 /// Holds `µ`, the reference radius `Rₑ`, the central-body rotation rate `θ̇`, and the
 /// **unnormalized** `Cₙₘ`/`Sₙₘ` coefficients as ragged `[n][m]` tables (`n = 0..=max_degree`,
 /// `m = 0..=n`). `max_frequency` mirrors Orekit's `maxFrequencyShortPeriodics` default
-/// `min(12, max_degree + 4)`, the upper bound `j` may take in the resonance search.
+/// `min(12, max_degree + 4)`, the upper bound `j` may take in the resonance search. The tables are
+/// fixed at construction, which checks their shape.
 #[derive(Debug, Clone)]
 pub struct DsstTesseral {
     /// Gravitational parameter `µ`, m³/s².
@@ -71,9 +73,9 @@ pub struct DsstTesseral {
     /// Central-body rotation rate `θ̇`, rad/s.
     pub central_body_rotation_rate: f64,
     /// Unnormalized `Cₙₘ`, ragged `[n][m]`.
-    pub cnm: Vec<Vec<f64>>,
+    pub(crate) cnm: Vec<Vec<f64>>,
     /// Unnormalized `Sₙₘ`, ragged `[n][m]`.
-    pub snm: Vec<Vec<f64>>,
+    pub(crate) snm: Vec<Vec<f64>>,
     /// Maximum harmonic degree.
     pub(crate) max_degree: usize,
     /// Maximum harmonic order.
@@ -91,24 +93,32 @@ impl DsstTesseral {
     /// `max_degree = cnm.len() - 1` and `max_order = max_degree` (a full square field). The
     /// resonance-search bound `max_frequency` is Orekit's default `min(12, max_degree + 4)`.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If `cnm`/`snm` disagree in shape or the field is below degree 2.
-    #[must_use]
+    /// [`DsstError::TesseralField`] if the field is below degree 2, `cnm` and `snm` hold a
+    /// different number of degrees, or a row `n ≥ 2` of either is shorter than `n + 1`: the sums
+    /// read `Cₙₘ` and `Sₙₘ` for every `2 ≤ m ≤ n ≤ max_degree`.
     pub fn new(
         mu: f64,
         re: f64,
         central_body_rotation_rate: f64,
         cnm: Vec<Vec<f64>>,
         snm: Vec<Vec<f64>>,
-    ) -> Self {
-        assert!(cnm.len() >= 3, "DsstTesseral needs at least degree 2");
-        assert_eq!(cnm.len(), snm.len(), "Cnm/Snm degree mismatch");
+    ) -> Result<Self, DsstError> {
+        let degrees = cnm.len().min(snm.len());
+        if degrees < 3 || cnm.len() != snm.len() {
+            return Err(DsstError::TesseralField {
+                degree: degrees.max(2),
+            });
+        }
+        if let Some(degree) = (2..degrees).find(|&n| cnm[n].len() <= n || snm[n].len() <= n) {
+            return Err(DsstError::TesseralField { degree });
+        }
         let max_degree = cnm.len() - 1;
         let max_order = max_degree;
         let max_frequency = (max_degree + 4).min(12);
         let vns = compute_vns(max_degree + 1);
-        Self {
+        Ok(Self {
             mu,
             re,
             central_body_rotation_rate,
@@ -118,7 +128,7 @@ impl DsstTesseral {
             max_order,
             max_frequency,
             vns,
-        }
+        })
     }
 
     /// The six mean-element rates `[da/dt, dk/dt, dh/dt, dq/dt, dp/dt, dλ/dt]` (Orekit equinoctial
@@ -730,6 +740,7 @@ impl GHmsj {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -815,7 +826,7 @@ mod tests {
             cnm[n][m] = c;
             snm[n][m] = s;
         }
-        DsstTesseral::new(MU, AE, rate, cnm, snm)
+        DsstTesseral::new(MU, AE, rate, cnm, snm).unwrap()
     }
 
     fn aux(state: &[f64; 6]) -> DsstAuxiliary {

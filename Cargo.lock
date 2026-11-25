@@ -2912,6 +2912,7 @@ version = "0.3.0"
 dependencies = [
  "criterion",
  "libm",
+ "proptest",
  "spacelab-autodiff",
  "spacelab-core",
  "spacelab-coverage",

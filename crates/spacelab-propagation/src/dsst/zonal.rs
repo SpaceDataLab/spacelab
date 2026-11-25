@@ -17,6 +17,7 @@ use std::vec::Vec;
 use super::auxiliary::{DsstAuxiliary, I};
 use super::coefficients;
 use super::hansen::HansenZonal;
+use super::{DsstError, mean_state, span};
 use crate::driver::{Controls, integrate_dop853};
 use crate::{DynamicalSystem, Tolerance};
 
@@ -38,7 +39,8 @@ pub(crate) struct PotentialDerivatives {
 ///
 /// Holds the gravitational parameter `µ`, the reference radius `Rₑ`, and the **unnormalized** zonal
 /// coefficients `Cₙ₀` indexed by degree `n` (`c_n0[0]`, `c_n0[1]` unused). The maximum degree is
-/// `c_n0.len() - 1`. Note `Jₙ = −Cₙ₀`; [`DsstZonal::from_j`] builds from `Jₙ` directly.
+/// `c_n0.len() - 1`. Note `Jₙ = −Cₙ₀`; [`DsstZonal::from_j`] builds from `Jₙ` directly. The
+/// coefficients are fixed at construction, because the degree and the Vₙₛ table are sized from them.
 #[derive(Debug, Clone)]
 pub struct DsstZonal {
     /// Gravitational parameter `µ`, m³/s².
@@ -46,7 +48,7 @@ pub struct DsstZonal {
     /// Reference (equatorial) radius `Rₑ`, m.
     pub re: f64,
     /// Unnormalized zonal coefficients `Cₙ₀`, indexed by degree `n`.
-    pub c_n0: Vec<f64>,
+    pub(crate) c_n0: Vec<f64>,
     /// Maximum harmonic degree.
     max_degree: usize,
     /// Maximum harmonic order (always 0 for a pure zonal field).
@@ -59,33 +61,35 @@ impl DsstZonal {
     /// Build from `µ`, `Rₑ` and the **unnormalized** zonal coefficients `Cₙ₀` indexed by degree
     /// (`c_n0[0]`, `c_n0[1]` ignored; length ≥ 3, giving `max_degree = c_n0.len() - 1`).
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If `c_n0.len() < 3` (need at least J2).
-    #[must_use]
-    pub fn new(mu: f64, re: f64, c_n0: Vec<f64>) -> Self {
-        assert!(c_n0.len() >= 3, "DsstZonal needs at least degree 2 (J2)");
+    /// [`DsstError::ZonalField`] if `c_n0.len() < 3`: there is no J2.
+    pub fn new(mu: f64, re: f64, c_n0: Vec<f64>) -> Result<Self, DsstError> {
+        if c_n0.len() < 3 {
+            return Err(DsstError::ZonalField { len: c_n0.len() });
+        }
         let max_degree = c_n0.len() - 1;
         let vns = coefficients::compute_vns(max_degree + 1);
-        Self {
+        Ok(Self {
             mu,
             re,
             c_n0,
             max_degree,
             max_order: 0,
             vns,
-        }
+        })
     }
 
     /// Build from `µ`, `Rₑ` and the zonal `Jₙ` coefficients `[J2, J3, …, Jₙ]` (slice indexed from
     /// degree 2), setting `Cₙ₀ = −Jₙ`.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If `j` is empty.
-    #[must_use]
-    pub fn from_j(mu: f64, re: f64, j: &[f64]) -> Self {
-        assert!(!j.is_empty(), "DsstZonal needs at least J2");
+    /// [`DsstError::ZonalField`] if `j` is empty: there is no J2.
+    pub fn from_j(mu: f64, re: f64, j: &[f64]) -> Result<Self, DsstError> {
+        if j.is_empty() {
+            return Err(DsstError::ZonalField { len: 0 });
+        }
         let mut c_n0 = std::vec![0.0; j.len() + 2];
         for (i, &jn) in j.iter().enumerate() {
             c_n0[i + 2] = -jn;
@@ -243,15 +247,16 @@ impl DsstZonal {
     /// (Orekit's auto-added `DSSTNewtonianAttraction` supplies the mean-longitude rate `n`). The
     /// eccentricity-power truncation is fixed once from the initial state, exactly as Orekit does.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If the DOP853 driver fails (only on non-finite controls or a step underflow, which a smooth
-    /// mean-element ODE with `dt > 0` does not produce).
-    #[must_use]
-    #[allow(clippy::expect_used)] // the invariant is documented above; a smooth ODE cannot fail here
-    pub fn propagate_mean(&self, initial: [f64; 6], dt: f64) -> [f64; 6] {
-        if dt == 0.0 {
-            return initial;
+    /// [`DsstError::MeanState`] when `initial` is not a finite ellipse, [`DsstError::Span`] when
+    /// `dt` is negative or not finite, and [`DsstError::Integration`] when DOP853 does not reach
+    /// `dt`: the step collapses (a state the mean rates cannot follow, such as one whose perigee
+    /// lies deep inside the body) or the run passes its step budget.
+    pub fn propagate_mean(&self, initial: [f64; 6], dt: f64) -> Result<[f64; 6], DsstError> {
+        let initial = mean_state(initial)?;
+        if span(dt)? == 0.0 {
+            return Ok(initial);
         }
         let aux0 = DsstAuxiliary::new(
             initial[0], initial[1], initial[2], initial[3], initial[4], initial[5], self.mu,
@@ -263,8 +268,8 @@ impl DsstZonal {
         };
         let tol = Tolerance::new(1e-14, 1e-12);
         let traj = integrate_dop853(&ode, 0.0, &initial, dt, 60.0, Controls::new(tol, 1e-6))
-            .expect("DSST zonal mean propagation");
-        traj.final_state()
+            .map_err(DsstError::Integration)?;
+        Ok(traj.final_state())
     }
 }
 

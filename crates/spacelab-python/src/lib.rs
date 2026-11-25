@@ -176,11 +176,11 @@ use spacelab_propagation::space_weather::{
 use spacelab_propagation::symplectic::yoshida8_scalar;
 use spacelab_propagation::time_variable_gravity::{TimeVariableField, parse_icgem_time_variable};
 use spacelab_propagation::{
-    DeSitter, Dop853, DsstMeanPropagator, DsstSolarRadiationPressure, DsstTesseral, DsstThirdBody,
-    DsstZonal, GeoPotential, LenseThirring, Nrlmsise00Atmosphere, Nrlmsise00Flags, Nrlmsise00Input,
-    Schwarzschild, SolidEarthTide, Tolerance, conventional_zonal_coefficients as tvg_conventional,
-    gtd7d, secular_zonal_correction as tvg_secular, sentman_panel,
-    speed_ratio as sentman_speed_ratio,
+    DeSitter, Dop853, DsstError, DsstMeanPropagator, DsstSolarRadiationPressure, DsstTesseral,
+    DsstThirdBody, DsstZonal, GeoPotential, LenseThirring, Nrlmsise00Atmosphere, Nrlmsise00Flags,
+    Nrlmsise00Input, Schwarzschild, SolidEarthTide, Tolerance,
+    conventional_zonal_coefficients as tvg_conventional, gtd7d,
+    secular_zonal_correction as tvg_secular, sentman_panel, speed_ratio as sentman_speed_ratio,
 };
 use spacelab_sensors::{AgileOptical, ElevationMask, OrbitBound, SideLookingSAR};
 use spacelab_sgp4::tle::{TleBuilder, TleModel, seed_elements};
@@ -2352,6 +2352,7 @@ fn brouwer_lyddane_propagate(
 /// `p=tan(i/2)·sin Ω`, `λ=M+ϖ`), returns the mean equinoctial state at each time in `times` (seconds).
 /// `j` is `[J2, J3, …]`. The orbit-averaged rates are integrated with large steps — cheap over long
 /// arcs, capturing the secular drift (node regression, apsidal precession) without short-period noise.
+/// Raises `ValueError` for a state that is not an ellipse, a negative time, or a field without J2.
 // Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
@@ -2365,19 +2366,21 @@ fn dsst_zonal_propagate_mean(
     mu: f64,
     re: f64,
     j: Vec<f64>,
-) -> Vec<[f64; 6]> {
-    let zonal = DsstZonal::from_j(mu, re, &j);
+) -> PyResult<Vec<[f64; 6]>> {
+    let zonal = DsstZonal::from_j(mu, re, &j).map_err(value_err)?;
     py.detach(|| {
         times
             .iter()
             .map(|&t| zonal.propagate_mean(initial, t))
-            .collect()
+            .collect::<Result<_, DsstError>>()
     })
+    .map_err(value_err)
 }
 
 /// DSST **osculating** propagation under the zonal geopotential J2–Jn: the mean-element drift plus the
 /// analytic short-period corrections. Given an initial *mean* equinoctial state `[a, k, h, q, p, λ]`,
 /// returns the *osculating* equinoctial state at each time — the full DSST OSCULATING output.
+/// Raises `ValueError` as `dsst_zonal_propagate_mean` does.
 // Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
@@ -2391,14 +2394,15 @@ fn dsst_zonal_propagate_osculating(
     mu: f64,
     re: f64,
     j: Vec<f64>,
-) -> Vec<[f64; 6]> {
-    let zonal = DsstZonal::from_j(mu, re, &j);
+) -> PyResult<Vec<[f64; 6]>> {
+    let zonal = DsstZonal::from_j(mu, re, &j).map_err(value_err)?;
     py.detach(|| {
         times
             .iter()
             .map(|&t| zonal.propagate_osculating(initial, t))
-            .collect()
+            .collect::<Result<_, DsstError>>()
     })
+    .map_err(value_err)
 }
 
 /// IERS 2010 solid-tide Step-2 (frequency-dependent) corrections to the degree-2 geopotential
@@ -2458,6 +2462,8 @@ fn ocean_pole_tide(xp: f64, yp: f64, t: f64, mean_pole: &str) -> PyResult<[f64; 
 /// mean rate is identically zero away from a tesseral resonance, i.e. for every orbit except
 /// repeat-ground-track ones (GEO, GPS), so this is the full conservative mean rate for the common
 /// LEO/MEO/HEO case. Each summed contribution is individually bit-exact against Orekit.
+/// Raises `ValueError` for a state that is not an ellipse, a negative time, a field without J2, or
+/// an integration that fails.
 // Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
@@ -2477,11 +2483,11 @@ fn dsst_propagate_mean_full(
     j: Vec<f64>,
     cr: f64,
     area_over_mass: f64,
-) -> Vec<[f64; 6]> {
+) -> PyResult<Vec<[f64; 6]>> {
     // GM of the Sun (DE405) and the Moon (DE430): derivations/binding_defaults.mac.
     const MU_SUN: f64 = 1.327_124_400_18e20;
     const MU_MOON: f64 = 4.902_800_066e12;
-    let zonal = DsstZonal::from_j(mu, re, &j);
+    let zonal = DsstZonal::from_j(mu, re, &j).map_err(value_err)?;
     let sun_tb = DsstThirdBody::new(mu, MU_SUN);
     let moon_tb = DsstThirdBody::new(mu, MU_MOON);
     let srp = DsstSolarRadiationPressure::new(cr, area_over_mass, mu, re);
@@ -2492,7 +2498,8 @@ fn dsst_propagate_mean_full(
         EARTH_ROTATION_RATE,
         std::vec![std::vec![0.0; 3]; 3],
         std::vec![std::vec![0.0; 3]; 3],
-    );
+    )
+    .map_err(value_err)?;
     let sun = AnalyticSun {
         epoch_j2000_seconds,
     };
@@ -2509,7 +2516,13 @@ fn dsst_propagate_mean_full(
         gmst: |_t: f64| 0.0, // unused: the tesseral field is zero
         mu,
     };
-    py.detach(|| times.iter().map(|&t| prop.propagate(initial, t)).collect())
+    py.detach(|| {
+        times
+            .iter()
+            .map(|&t| prop.propagate(initial, t))
+            .collect::<Result<_, DsstError>>()
+    })
+    .map_err(value_err)
 }
 
 /// Combined DSST **osculating** propagation: the mean propagation of [`dsst_propagate_mean_full`]
@@ -2517,6 +2530,7 @@ fn dsst_propagate_mean_full(
 /// returned equinoctial states are osculating rather than mean. Given an initial *mean* equinoctial
 /// state `[a, k, h, q, p, λ]`, returns the osculating state at each requested time. The tesseral
 /// short-period is zero here (non-resonant, zero field); drag is not part of this propagator.
+/// Raises `ValueError` as `dsst_propagate_mean_full` does.
 // Defaults: derivations/binding_defaults.mac reads each back against its source.
 #[pyfunction]
 #[pyo3(signature = (
@@ -2536,11 +2550,11 @@ fn dsst_propagate_osculating_full(
     j: Vec<f64>,
     cr: f64,
     area_over_mass: f64,
-) -> Vec<[f64; 6]> {
+) -> PyResult<Vec<[f64; 6]>> {
     // GM of the Sun (DE405) and the Moon (DE430): derivations/binding_defaults.mac.
     const MU_SUN: f64 = 1.327_124_400_18e20;
     const MU_MOON: f64 = 4.902_800_066e12;
-    let zonal = DsstZonal::from_j(mu, re, &j);
+    let zonal = DsstZonal::from_j(mu, re, &j).map_err(value_err)?;
     let sun_tb = DsstThirdBody::new(mu, MU_SUN);
     let moon_tb = DsstThirdBody::new(mu, MU_MOON);
     let srp = DsstSolarRadiationPressure::new(cr, area_over_mass, mu, re);
@@ -2550,7 +2564,8 @@ fn dsst_propagate_osculating_full(
         EARTH_ROTATION_RATE,
         std::vec![std::vec![0.0; 3]; 3],
         std::vec![std::vec![0.0; 3]; 3],
-    );
+    )
+    .map_err(value_err)?;
     let sun = AnalyticSun {
         epoch_j2000_seconds,
     };
@@ -2571,8 +2586,9 @@ fn dsst_propagate_osculating_full(
         times
             .iter()
             .map(|&t| prop.propagate_osculating(initial, t))
-            .collect()
+            .collect::<Result<_, DsstError>>()
     })
+    .map_err(value_err)
 }
 
 /// Walker constellation `i: T/P/F` — returns each satellite's inertial state `(r, v)` (SI) at the
@@ -5056,15 +5072,15 @@ fn decay_model(
     body_radius: f64,
     reentry_altitude: f64,
 ) -> PyResult<Decay> {
-    // `DsstZonal::new` asserts on a short list, and an assertion across the FFI boundary is an
-    // abort rather than an exception -- so the length is checked here, where it can be said.
+    // `DsstZonal::new` refuses a short list too; checked here first so the message says what the
+    // list has to hold.
     if zonals.len() < 3 {
         return Err(PyValueError::new_err(
             "zonals must run to at least degree 2 (J2), i.e. `[0.0, 0.0, C20]`",
         ));
     }
     Ok(Decay {
-        zonal: DsstZonal::new(mu, body_radius, zonals),
+        zonal: DsstZonal::new(mu, body_radius, zonals).map_err(value_err)?,
         drag: DsstAtmosphericDrag::new(cd, area_over_mass, mu),
         mu,
         body_radius,
@@ -10375,8 +10391,7 @@ mod interpreter_tests {
                     < seconds,
                 "a frozen atmosphere must bring it down sooner than a co-rotating one"
             );
-            // `DsstZonal::new` asserts on a list that stops short of J2, and an assertion across the
-            // FFI boundary is an abort rather than an exception -- so the length is refused here.
+            // A zonal list that stops short of J2 is an exception, not a panic.
             assert!(
                 decay(vec![0.0, 0.0], 1.0, EARTH_ROTATION_RATE).is_err(),
                 "a zonal list that stops short of J2 is not a zonal field"
@@ -11892,9 +11907,11 @@ def one_row(x):
         let j = std::vec![0.0, 0.0, 1.082_626_68e-3, -2.532_656_49e-6];
 
         Python::attach(|py| {
-            let mean = dsst_zonal_propagate_mean(py, initial, times.clone(), mu, re, j.clone());
+            let mean = dsst_zonal_propagate_mean(py, initial, times.clone(), mu, re, j.clone())
+                .expect("a LEO propagates");
             let osculating =
-                dsst_zonal_propagate_osculating(py, initial, times.clone(), mu, re, j.clone());
+                dsst_zonal_propagate_osculating(py, initial, times.clone(), mu, re, j.clone())
+                    .expect("a LEO propagates");
             assert_eq!(mean.len(), times.len(), "one mean state per epoch");
             assert_eq!(
                 osculating.len(),
@@ -11938,7 +11955,8 @@ def one_row(x):
                 j.clone(),
                 cr,
                 area_over_mass,
-            );
+            )
+            .expect("a LEO propagates");
             let full_osculating = dsst_propagate_osculating_full(
                 py,
                 initial,
@@ -11949,7 +11967,8 @@ def one_row(x):
                 j,
                 cr,
                 area_over_mass,
-            );
+            )
+            .expect("a LEO propagates");
             assert_eq!(full_mean.len(), times.len());
             assert_eq!(full_osculating.len(), times.len());
             assert_eq!(
@@ -11965,6 +11984,65 @@ def one_row(x):
                 (full_osculating[1][0] - full_mean[1][0]).abs() > 1.0,
                 "the full osculating output carries no short-period correction"
             );
+        });
+    }
+
+    /// What the library refuses is a `ValueError`, not a `PanicException`: a NaN state, an
+    /// eccentricity of 1, the step collapse at `e = 1 − 1e-12`, a negative time and a field without
+    /// J2 each panicked inside the library before.
+    #[test]
+    fn the_dsst_bindings_raise_on_what_the_library_refuses() {
+        let initial = [7_200e3, 1.0e-3, 5.0e-4, 0.2, 0.1, 0.3];
+        let (mu, re) = (3.986_004_415e14, 6_378_136.3);
+        let j = std::vec![1.082_626_68e-3];
+        let mut parabolic = initial;
+        parabolic[1] = 1.0;
+        let mut grazing = initial;
+        grazing[1] = 1.0 - 1e-12;
+        Python::attach(|py| {
+            for (state, times) in [
+                ([f64::NAN; 6], std::vec![3600.0]),
+                (parabolic, std::vec![3600.0]),
+                (grazing, std::vec![3600.0]),
+                (initial, std::vec![0.0, -60.0]),
+            ] {
+                let zonal = |j: &[f64]| {
+                    [
+                        dsst_zonal_propagate_mean(py, state, times.clone(), mu, re, j.to_vec()),
+                        dsst_zonal_propagate_osculating(
+                            py,
+                            state,
+                            times.clone(),
+                            mu,
+                            re,
+                            j.to_vec(),
+                        ),
+                    ]
+                };
+                let full = |f: fn(
+                    Python<'_>,
+                    [f64; 6],
+                    Vec<f64>,
+                    f64,
+                    f64,
+                    f64,
+                    Vec<f64>,
+                    f64,
+                    f64,
+                ) -> PyResult<Vec<[f64; 6]>>| {
+                    f(py, state, times.clone(), 0.0, mu, re, j.clone(), 1.5, 0.02)
+                };
+                for got in zonal(&j).into_iter().chain([
+                    full(dsst_propagate_mean_full),
+                    full(dsst_propagate_osculating_full),
+                ]) {
+                    assert!(got.is_err(), "{state:?} over {times:?} answered {got:?}");
+                }
+                assert!(
+                    zonal(&[]).iter().all(PyResult::is_err),
+                    "a field without J2 answered"
+                );
+            }
         });
     }
 

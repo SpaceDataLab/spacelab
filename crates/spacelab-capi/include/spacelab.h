@@ -1120,8 +1120,8 @@ void sl_dsst_params_init(sl_dsst_params *p);
  * `lambda = M + varpi`; `a` is metres and the rest are dimensionless or radians.
  *
  * Every one of the four calls below takes that state in `initial`, propagates it to each of the `n`
- * epochs in `times_seconds` (seconds from the initial epoch, in any order, positive or negative),
- * and writes `6 * n` doubles to `out` — one sextuple per epoch, in the order asked for.
+ * epochs in `times_seconds` (seconds after the initial epoch, zero or positive, in any order), and
+ * writes `6 * n` doubles to `out` — one sextuple per epoch, in the order asked for.
  *
  * The `_mean` calls answer in mean elements: the orbit-averaged drift, integrated with steps far
  * longer than an orbit. That is what makes DSST cheap over long arcs, and it is the right answer
@@ -1137,8 +1137,10 @@ void sl_dsst_params_init(sl_dsst_params *p);
  * these propagators.
  *
  * A non-finite input, a `zonal_count` outside 1..=SL_DSST_MAX_ZONAL or `n == 0` is
- * `SL_ERR_INVALID_ARGUMENT`; a non-positive semi-major axis is `SL_ERR_DOMAIN`. Nothing is written
- * to `out` unless every epoch was accepted.
+ * `SL_ERR_INVALID_ARGUMENT`; a non-positive semi-major axis, an eccentricity `sqrt(k^2 + h^2)` of
+ * 1 or more, or a negative epoch is `SL_ERR_DOMAIN`; a propagation that starts and fails, as the
+ * integrator's step does when it collapses close to e = 1, is `SL_ERR_COMPUTE`. Nothing is written
+ * to `out` unless every epoch was answered.
  */
 sl_status sl_dsst_zonal_mean(const sl_dsst_params *params, const double *initial,
                              const double *times_seconds, size_t n, double *out);

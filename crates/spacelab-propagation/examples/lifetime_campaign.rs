@@ -228,7 +228,7 @@ fn main() {
         .zip(C_BAR)
         .map(|(n, c): (u32, f64)| -f64::from(2 * n + 1).sqrt() * c)
         .collect();
-    let zonal = DsstZonal::from_j(MU, RE, &j);
+    let zonal = DsstZonal::from_j(MU, RE, &j).expect("a zonal field");
     for line in std::io::stdin().lock().lines() {
         let line = line.expect("a job");
         let cells: Vec<&str> = line.split('\t').collect();

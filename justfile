@@ -79,7 +79,8 @@ freeze-data:
     uv run --no-project python -I tools/check-sdtm-freeze.py --data
 
 # The evaluation harness's leak tests, the clustered intervals' laws, the residual maps' coordinates, the
-# exact nitric-oxide step and the blind runner's amended rules (Ф30.B, Ф30.C, Ф23.O, Ф23.Q, Ф30.N).
+# exact nitric-oxide step, the blind runner's amended rules and the lifetime worker's field read back
+# (Ф30.B, Ф30.C, Ф23.O, Ф23.Q, Ф30.N, Ф30.O).
 # Under the pinned analysis environment, `tools/pyproject.toml` and its `uv.lock` (Ф30.K).
 harness:
     uv run --project tools --locked python -I tools/test_evaluate_sdtm.py
@@ -90,6 +91,15 @@ harness:
     uv run --project tools --locked python -I tools/test_score_blind.py
     cargo run -q -p spacelab-propagation --release --example column_on2 -- --check
     cargo run -q -p spacelab --release --example cpf_mean_state -- --check
+    cargo run -q -p spacelab-propagation --release --example lifetime_campaign -- --check-field
+
+# Ф30.O: the spheres and lifetimes kinds of `tools/evaluate-sdtm.py` against §10.37, §10.39 and §10.43, and
+# a field exported twice. Needs `data/validation/reentry/`; `--full` runs the whole regression row, two
+# to three hours on four cores.
+kinds *args:
+    cargo build -q -p spacelab-propagation --release --example lifetime_campaign
+    cargo build -q -p spacelab --release --example cpf_mean_state
+    uv run --project tools --locked python -I tools/test_sdtm_kinds.py {{args}}
 
 # The comparator suite (Ф19.C): every test parked as a comparator, run, and its distances written to
 # docs/comparisons.md. On demand, never a gate: a distance to another code decides nothing.

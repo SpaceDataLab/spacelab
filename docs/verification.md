@@ -11688,6 +11688,107 @@ Run, after `tools/evaluate-sdtm.py run --kind frozen` (results stay under `data/
     uv run --project tools --locked python -I tools/orbit-pilot.py run [--calibrated]
     uv run --project tools --locked python -I tools/orbit-pilot.py score
 
+### 10.58 The spheres and the lifetime calibration as harness kinds (Ф30.O)
+
+§10.37, §10.39 and §10.43 score the shipped field only: the lifetime worker has it compiled in. A field
+that a harness fold fits (§10.36) is scored on corpus rows, and the corpus has no row below 225 km, where
+the spheres and the re-entries spend their last days (F126). Two kinds of `tools/evaluate-sdtm.py` now
+score any exported field there. They read no corpus row.
+
+**What was added.**
+
+- `examples/lifetime_campaign.rs --field FIELD` reads a field in the format that `evaluate-sdtm.py export`
+  writes, as `blind_rows.rs` and `orbit_prediction.rs` do. It builds the field through the same checked
+  constructors. It refuses a duplicate key and any key the 3-hourly field does not have, so the solar-wind
+  export (`share`, the coupling knots) is refused; the satellite scales (`scale_*`) are ignored. All else is
+  the shipped worker's: 120 three-hourly intervals of storm history, the decay envelope (120–545 km) and
+  NRLMSISE-00 outside it. `--write-field` writes the shipped field in that format. `--check-field`, in
+  `just harness`, reads it back bit for bit and checks that the field written to six digits does not read
+  back.
+- `spheres [--field-file F] [--msis]`: on §10.39's protocol, the `C_d` at which the field's lifetime equals
+  the true one, for the 14 spheres of §10.39 and §10.43 at each lead, and §10.43's arms.
+- `lifetimes [--field-file F] [--msis] [--against T]`: on §10.37's calibration part, `|ln T/T_true|`, T the
+  predicted and `T_true` the true remaining time, under the measured indices and under persistence, by lead;
+  and the field minus NRLMSISE-00, paired by launch with §10.37's bootstrap. The test part is not run
+  (rule 24). Without `--msis`, NRLMSISE-00's errors are the ones §10.37's run recorded, because they do not
+  depend on the field. `--against` pairs the field with another field's run.
+
+A harness export reads: `default/frozen-2020.field`, with its seven satellite scales, builds a field, and
+`solar_wind/frozen-2020.field` stops at "share is not a key of the 3-hourly field".
+
+**The regression row** (`just kinds --full`, `tools/test_sdtm_kinds.py`). The baseline is the shipped
+field, written by `--write-field` and read back as a file. The test reads the printed numbers from this
+document and compares them at the printed digits. On four processes, beside other jobs, the spheres took
+30 min and the calibration part 1 h 54 min.
+
+| printed in | numbers | reproduced |
+|---|---|---|
+| §10.39, 4 spheres, 13 leads | true remaining days, and the `C_d` each model needs | all 39 |
+| §10.43, 10 spheres, 34 leads | the same | all 102 |
+| §10.43, the four arms | each model's median and range | all 20 |
+| §10.43, "SDTM-1 2.93 to 2.61, NRLMSISE-00 2.04 to 1.84" | the medians at leads up to 90 days | all 4 |
+| §10.37, the calibration row, 220 objects | the three paired cells: +0.014 [+0.003, +0.024], +0.025 [+0.009, +0.035], +0.038 [+0.024, +0.052] | all 3, with SDTM-1 rerun through the file |
+
+The tools print `C_d` to three decimals and days to two, and the document rounded those half up where it
+prints fewer. The test does the same. Rounded straight from the double, two values miss by one in the last
+digit: Starshine 2 at 30 days under NRLMSISE-00 is 2.1647, printed 2.17 from the tool's 2.165, and the top of
+ANDE's NRLMSISE-00 range is 2.1449, printed 2.15 from 2.145.
+
+**S2: a field exported twice gives the same scores.** The shipped field compiled in and the same field read
+from its file give the worker's output bit for bit. This holds for ODERACS E's lifetimes at four leads and
+nine `C_d`, and for the fitted `B` and both lifetimes of the 55 calibration objects at 7 days. The same field
+written to six digits gives other lifetimes at three of the four leads, so the check can fail.
+
+**The planted defects (rule 16).** Each check is run on a defect it must see.
+
+| defect | what it does | check | result |
+|---|---|---|---|
+| the reader takes `heating_s` for the nitric-oxide time and back, planted in the Rust and reverted | ODERACS E's lifetimes move by up to 1.1 % | `--check-field`; S2 | panics, exit 101; S2 on spheres and on lifetimes fails (4 and 55 mismatches); reverted, all pass |
+| the boundary scale read as the logarithm the fit holds it as | the field is 3.3 times as dense | §10.39's Starshine 3 | every lead is outside the `C_d` grid |
+| the field written to six digits | — | S2 | 3 of 4 leads differ |
+| SDTM-1's observed and persistence errors exchanged | — | §10.37's row, from the recorded errors | `+0.198 [+0.151, +0.249]` against `+0.014 [+0.003, +0.024]` |
+
+The swap of the two times is S2's defect and not the regression's: it leaves Starshine 3's `C_d` at its two
+printed decimals. The two times set how fast the storm response reaches its steady state `H/(1 + H/H_s)`,
+and that state does not depend on them.
+
+**Ф23.AJ moves none of these numbers.** Over 1958–2026-09 the refusal fires on three days only:
+2005-09-10, part of 2006-12-07, and 2011-03-08. A scan of every day, 36 points at 400 km, through the
+evaluator finds the same days as Ф23.AJ's scan of the archive. No sphere flies on them: the runs cover 1994–2003 and 2007–2010, and
+ANDE-RR's earliest state is after 2006-12-07. Of §10.37's 800 jobs, 10 would cross one of the days if run to
+the horizon. All 10 failed their `B` fit, whose window touches none of the days, so they still fail, and
+none is in the calibration part. No calibration run under the measured indices or under persistence
+touches a refused day. Rerun after Ф23.AJ, NRLMSISE-00's 222 calibration errors equal the ones §10.37's run
+recorded, at the six digits `scores.tsv` keeps.
+
+**The `cases` crash of pass 9.** It is reproduced at `ba33eac`, the parent of `a2ebeb6`.
+`fit-sdtm-corpus.py --folds GOCE --storms` writes its storm tables and then stops in `cases`:
+`CorpusModel.__init__` takes `arg["interval"].min()` of an empty array (`ValueError: zero-size array to
+reduction operation minimum which has no identity`). The cause: `cases` scores the named storms on the
+held-out families' rows, GOCE flew none of them, and the selection was handed on empty. `a2ebeb6` (Ф30.E)
+makes `cases` say "no held-out family flew one" and return, since an empty selection is an answer, not a
+fault of the model. At `0b84338` the same command ends with that line and exit 0, its fold line equal to the
+crashing run's (24.0 % raw, 12.2 % debiased).
+
+**What this does not do.**
+
+- It does not score the test part of §10.37. That part was opened once (§10.37, ledger row 9).
+- The storm history is the shipped 120 intervals, 15 days. With a nitric-oxide time of 40 h, the state it
+  drops weighs `e^−9`. A field with a slower nitric-oxide time needs a longer history.
+- It has no kind for the analog ensemble or the conformal window: the calibration score is the observed and
+  the persistence error only.
+- The solar-wind field is refused, because the worker has no hourly driver.
+- The field reader is now in three examples: `blind_rows.rs`, `orbit_prediction.rs` and
+  `lifetime_campaign.rs`. A shared reader would be new library API, a choice this ticket does not make.
+
+Run (element sets and results stay under `data/`, never committed):
+
+    cargo build -p spacelab-propagation --release --example lifetime_campaign
+    cargo build -p spacelab --release --example cpf_mean_state
+    uv run --project tools --locked python -I tools/evaluate-sdtm.py spheres [--field-file F] [--msis]
+    uv run --project tools --locked python -I tools/evaluate-sdtm.py lifetimes [--field-file F] [--msis]
+    just kinds [--full | --only quick | --only spheres | --only lifetimes]
+
 ---
 
 ## 11 · Published errata as a second opinion

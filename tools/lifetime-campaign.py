@@ -18,6 +18,9 @@ way to know the truth, and it means the coverage below is of objects that did co
     tools/lifetime-campaign.py spheres  # Ф23.T: spheres of known area-to-mass, no fitted coefficient
     tools/lifetime-campaign.py halves   # Ф23.S (1): B above and below 225 km on the calibration decays
 
+`tools/evaluate-sdtm.py spheres` and `lifetimes` run the spheres and the calibration part for any exported
+field, through `sphere_needs` and `calibration_scores` (Ф30.O).
+
 Standard library only. Raw element sets stay under `data/`.
 """
 
@@ -622,12 +625,9 @@ def score(_args) -> int:
     return 0
 
 
-def paired_table(draws: int = 4000, seed: int = 20261111) -> None:
-    """SDTM-1 minus NRLMSISE-00 in `|ln T/T_true|` on the objects both fitted, launches resampled.
-
-    One object per launch, so resampling objects is resampling launches. Mean and median of the
-    difference's two sides, each with its 95 % percentile interval, by part and by lead.
-    """
+def paired_table() -> None:
+    """SDTM-1 minus NRLMSISE-00 in `|ln T/T_true|` on the objects both fitted: `paired_lines` on
+    `scores.tsv`."""
     by: dict[tuple[str, int, str], dict[str, dict[str, str]]] = {}
     with (OUT / "scores.tsv").open() as handle:
         for r in csv.DictReader(handle, delimiter="\t"):
@@ -638,18 +638,38 @@ def paired_table(draws: int = 4000, seed: int = 20261111) -> None:
         "\nSDTM-1 minus NRLMSISE-00, paired by launch: part | leads | objects | "
         "mean, observed | median, observed | mean, persistence"
     )
+    for line in paired_lines(by, ("test", "cal")):
+        print(line)
+
+
+def paired_lines(
+    by: dict[tuple[str, int, str], dict[str, dict[str, str]]],
+    parts: tuple[str, ...],
+    first: str = "sdtm",
+    second: str = "msis",
+    draws: int = 4000,
+    seed: int = 20261111,
+) -> list[str]:
+    """`first` minus `second` in `|ln T/T_true|` on the objects both have, launches resampled.
+
+    `by` maps `(part, lead, launch)` to each model's row, its errors as `scores.tsv` writes them; the
+    resampling draws from the pairs in `by`'s order. One object per launch, so resampling objects is
+    resampling launches. Mean and median of the difference's two sides, each with its 95 % percentile
+    interval, by part and by lead.
+    """
+    lines = []
     groups = {
         "<= 90 d": lambda lead: lead <= 90,
         "365 d": lambda lead: lead == 365,
         "1095 d": lambda lead: lead == 1095,
         "all": lambda lead: True,
     }
-    for part in ("test", "cal"):
+    for part in parts:
         for name, wanted in groups.items():
             pairs = [
-                (v["sdtm"], v["msis"])
+                (v[first], v[second])
                 for (split, lead, _), v in by.items()
-                if split == part and wanted(lead) and "sdtm" in v and "msis" in v
+                if split == part and wanted(lead) and first in v and second in v
             ]
             if not pairs:
                 continue
@@ -673,7 +693,8 @@ def paired_table(draws: int = 4000, seed: int = 20261111) -> None:
                     quantile(sorted(spread), 0.975),
                 )
                 cells.append(f"{stat(a) - stat(b):+.3f} [{low:+.3f}, {high:+.3f}]")
-            print(f"{part} | {name} | {len(pairs)} | " + " | ".join(cells))
+            lines.append(f"{part} | {name} | {len(pairs)} | " + " | ".join(cells))
+    return lines
 
 
 def unix(*when: int) -> float:
@@ -874,11 +895,12 @@ def needed_cd(lifetimes: dict[float, float], truth: float) -> float | None:
     return None
 
 
-def spheres(args) -> int:
+def sphere_jobs(chosen, models: tuple[str, ...]) -> tuple[list[str], dict]:
+    """The jobs of `chosen` spheres under `models`, one a lead and a `C_d` of `SPHERE_CD`, and each
+    `(number, lead)`'s true remaining time, s."""
     catalogue = read_catalogue()
     jobs = []
     truth = {}
-    chosen = [s for s in SPHERES if not args.objects or s[0] in args.objects]
     for number, name, mass, diameter, _ in chosen:
         decay = decay_time(catalogue[number]["DDate"])
         sets = (
@@ -903,7 +925,7 @@ def spheres(args) -> int:
             t0, state = sets[k]
             truth[(number, lead)] = decay - t0
             horizon = (4.0 * lead + 60.0) * DAY
-            for model in MODELS:
+            for model in models:
                 jobs += [
                     case_job(
                         f"{number}|{lead}|{cd}",
@@ -916,13 +938,38 @@ def spheres(args) -> int:
                     )
                     for cd in SPHERE_CD
                 ]
-    print(f"{len(jobs)} jobs", flush=True)
-    with concurrent.futures.ProcessPoolExecutor(args.processes) as pool:
-        lines = [
+    return jobs, truth
+
+
+def run_jobs(
+    jobs: list[str], processes: int, extra: tuple[str, ...]
+) -> list[list[str]]:
+    """The worker's lines for `jobs`, one job a worker process at a time, in the jobs' order.
+
+    Threads, not processes, wait on the workers: the work is in the worker, and a thread needs no
+    pickled copy of this module, which `tools/evaluate-sdtm.py` loads from its path.
+    """
+    with concurrent.futures.ThreadPoolExecutor(processes) as pool:
+        return [
             line.split("\t")
-            for chunk in pool.map(run_chunk, ([job] for job in jobs))
+            for chunk in pool.map(
+                run_chunk,
+                ([job] for job in jobs),
+                *(itertools.repeat(argument) for argument in extra),
+            )
             for line in chunk.splitlines()
         ]
+
+
+def sphere_needs(
+    chosen, models: tuple[str, ...], processes: int, extra: tuple[str, ...] = ()
+) -> tuple[dict, dict, dict]:
+    """`(truth, lifetimes, needed)` for `chosen` spheres: the true remaining time, s, by
+    `(number, lead)`; the lifetime, s, by `(number, lead, model)` and `C_d`; and the `C_d` each model
+    needs, `None` outside the grid. `extra` goes to the worker, as `("--field", path)`."""
+    jobs, truth = sphere_jobs(chosen, models)
+    print(f"{len(jobs)} jobs", flush=True)
+    lines = run_jobs(jobs, processes, extra)
     # A worker line is `id member B seconds`; the job lines name the model in the same order.
     lifetimes: dict[tuple[int, int, str], dict[float, float]] = {}
     for job, line in zip(jobs, lines, strict=True):
@@ -930,6 +977,16 @@ def spheres(args) -> int:
         number, lead, cd = key.split("|")
         seconds = float(line[3]) if line[3] not in ("", "nan") else math.inf
         lifetimes.setdefault((int(number), int(lead), model), {})[float(cd)] = seconds
+    needed = {
+        (number, lead, model): needed_cd(by_cd, truth[(number, lead)])
+        for (number, lead, model), by_cd in lifetimes.items()
+    }
+    return truth, lifetimes, needed
+
+
+def spheres(args) -> int:
+    chosen = [s for s in SPHERES if not args.objects or s[0] in args.objects]
+    truth, lifetimes, needed = sphere_needs(chosen, MODELS, args.processes)
     print(
         "sphere | A/m m2/kg | lead d | true remaining d | model | lifetime at C_d 2.1 / 2.4 / 2.7, d | "
         "C_d it needs"
@@ -941,13 +998,95 @@ def spheres(args) -> int:
             t_true = truth[(number, lead)]
             for model in MODELS:
                 by_cd = lifetimes[(number, lead, model)]
-                cd = needed_cd(by_cd, t_true)
+                cd = needed[(number, lead, model)]
                 print(
                     f"{name} | {math.pi * diameter**2 / 4.0 / mass:.5f} | {lead} | {t_true / DAY:.2f} | {model} | "
                     + " / ".join(f"{by_cd[c] / DAY:.2f}" for c in (2.1, 2.4, 2.7))
                     + f" | {'outside 1.2-3.6' if cd is None else f'{cd:.3f}'}"
                 )
     return 0
+
+
+def recorded_calibration() -> dict[tuple[str, int, str], dict[str, dict[str, str]]]:
+    """§10.37's calibration part as `score` wrote it to `scores.tsv`, in its order: each model's errors by
+    `("cal", lead, launch)`.
+
+    `score` drew the part from each lead's launches, the earlier 60 %, and that run fixed it: a later field
+    is scored on the same objects, and the test part stays closed.
+    """
+    part: dict[tuple[str, int, str], dict[str, dict[str, str]]] = {}
+    with (OUT / "scores.tsv").open() as handle:
+        for r in csv.DictReader(handle, delimiter="\t"):
+            if r["split"] == "cal":
+                part.setdefault(("cal", int(r["lead"]), r["object_launch"]), {})[
+                    r["model"]
+                ] = r
+    return part
+
+
+def calibration_scores(
+    models: tuple[str, ...],
+    processes: int,
+    extra: tuple[str, ...] = (),
+    leads: tuple[int, ...] = LEADS_DAYS,
+) -> dict[tuple[str, int, str], dict[str, dict[str, str]]]:
+    """Each model's errors on §10.37's calibration part, as `paired_lines` reads them.
+
+    The jobs are `select`'s, with the measured indices and persistence only: the analog ensemble is the
+    Sun's forecast, not the field's. An object whose fit or run broke down has no row, as in `score`.
+    The errors are written as `score` writes them to `scores.tsv`, so a table of them reproduces its.
+    `extra` goes to the worker, as `("--field", path)`; `leads` picks a part of the part.
+    """
+    catalogue = read_catalogue()
+    order = [
+        (lead, launch) for _, lead, launch in recorded_calibration() if lead in leads
+    ]
+    part = set(order)
+    jobs = []
+    for line in (OUT / "jobs.tsv").read_text().splitlines():
+        cells = line.split("\t")
+        name, lead, model = cells[0].split("|")
+        if (
+            model in models
+            and (int(lead), catalogue[int(name[1:])]["Launch_Tag"]) in part
+        ):
+            cells[17] = "O;P"
+            jobs.append(cells)
+    print(f"{len(jobs)} jobs", flush=True)
+    lines = run_jobs(["\t".join(cells) for cells in jobs], processes, extra)
+    runs: dict[str, dict[str, str]] = {}
+    for key, index, b, seconds in lines:
+        runs.setdefault(key, {"b": b})[index] = seconds
+    by: dict[tuple[str, int, str], dict[str, dict[str, str]]] = {
+        ("cal", lead, launch): {} for lead, launch in order
+    }
+    for cells in jobs:
+        key = cells[0]
+        name, lead, model = key.split("|")
+        found = runs[key]
+        if "fit" in found or found["0"] == "nan" or found["1"] == "nan":
+            continue
+        decay = decay_time(catalogue[int(name[1:])]["DDate"])
+        # `select` made no job for an object without a decay date.
+        assert decay is not None, key
+        truth = decay - float(cells[9])
+        horizon = float(cells[16])
+        # `ln(T/T_true)`, a survivor's `T` at the horizon, as in `score`.
+        observed, persistence = (
+            math.log(min(math.inf if t == "" else float(t), horizon) / truth)
+            for t in (found["0"], found["1"])
+        )
+        launch = catalogue[int(name[1:])]["Launch_Tag"]
+        by[("cal", int(lead), launch)][model] = {
+            "ln_observed": f"{abs(observed):.6g}",
+            "ln_persistence": f"{abs(persistence):.6g}",
+            "signed_observed": f"{observed:.6g}",
+            # The worker's own text, which reads back exactly.
+            "b": found["b"],
+            "seconds_observed": found["0"],
+            "seconds_persistence": found["1"],
+        }
+    return by
 
 
 def calibration_objects(catalogue) -> dict[str, int]:

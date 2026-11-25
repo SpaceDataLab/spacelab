@@ -17,6 +17,17 @@ any of them is read:
   by `pad_hours`, is out of training on every satellite; the `hold_out` satellites are out entirely, and
   with `until` so is every row from then on. The scored rows are each case's own satellite inside its span.
 
+Two kinds read no corpus row. They score a field below 350 km, where no fold has a row, on the objects
+`tools/lifetime-campaign.py` runs (`plans/18` Ф30.O). A field enters them as a file `export` writes, or as
+`lifetime_campaign --write-field` writes the shipped one; with no file they read the shipped field compiled in:
+
+* `spheres`: the drag coefficient at which the field's lifetime of each sphere of known area-to-mass equals
+  the true one (`docs/verification.md` §10.39, §10.43), by sphere and lead, and its median by arm;
+* `lifetimes`: the error `|ln T/T_true|` of a lifetime with its ballistic coefficient fitted to the decay
+  already seen, on §10.37's calibration part only, under the measured indices and under persistence, by lead,
+  and paired by launch against NRLMSISE-00 and against another field's run (`--against`). NRLMSISE-00's
+  errors are the ones §10.37's run recorded, since they do not depend on the field; `--msis` runs them again.
+
 Inside each fold everything derived from the data is rebuilt from the training rows or the training hours:
 the ridge's scale and, for the solar-wind field, the coupling map. `guard` and `guard_map` refuse a fold
 that breaks this, and `tools/test_evaluate_sdtm.py` holds them to it with deliberate leaks. This is
@@ -27,6 +38,8 @@ reconstruction: every fold reads the measured indices, as `plans/17` rule 12 say
     tools/evaluate-sdtm.py run --kind origin [--field solar_wind]
     tools/evaluate-sdtm.py summary [--field default]
     tools/evaluate-sdtm.py export --split frozen-2020 [--field solar_wind]   # for a Rust caller (Ф30.H, J)
+    tools/evaluate-sdtm.py spheres [--field-file F] [--msis] [--out T]    # needs the lifetime worker built
+    tools/evaluate-sdtm.py lifetimes [--field-file F] [--msis] [--against T] [--out T]
 
 Run under `uv run --project tools --locked python -I`. Results stay under
 `data/`, which is never committed.
@@ -676,6 +689,183 @@ def command_export(args) -> int:
     return 0
 
 
+def lifetime_campaign():
+    """`tools/lifetime-campaign.py`, whose jobs and worker the two field kinds run."""
+    spec = importlib.util.spec_from_file_location(
+        "lifetime_campaign", HERE / "lifetime-campaign.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["lifetime_campaign"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# §10.43's arms: the spheres of one era and one surface, by catalogue number. Starshine 1 and 2 are
+# 68 % mirrors, whose edges raise the physical `C_d` by an amount nobody has measured (§10.39).
+SPHERE_ARMS = {
+    "GFZ-1, 1995-1999": (23558,),
+    "ODERACS, 1994-1996": (22994, 22995, 23471, 22990, 22991, 23472),
+    "Starshine 1 and 2, 1999-2002": (25769, 26996),
+    "Starshine 3, 2001-2003": (26929,),
+    "ANDE, 2007-2010": (29664, 29667, 35694, 35693),
+}
+MODEL_NAMES = {"sdtm": "SDTM-1", "msis": "NRLMSISE-00"}
+
+
+def worker_field(args) -> tuple[str, ...]:
+    """The worker's arguments that read `--field-file`; none for the shipped field."""
+    if args.field_file is None:
+        return ()
+    return ("--field", str(args.field_file.resolve()))
+
+
+def field_label(args) -> str:
+    return (
+        "the shipped field, compiled in"
+        if args.field_file is None
+        else str(args.field_file)
+    )
+
+
+def sphere_rows(lc, chosen, models, processes, extra) -> list[dict[str, Any]]:
+    """One row a sphere and lead: its true remaining time, d, and the `C_d` each model needs."""
+    truth, _, needed = lc.sphere_needs(chosen, models, processes, extra)
+    rows = []
+    for number, name, *_ in chosen:
+        for lead in lc.LEADS_DAYS:
+            if (number, lead) in truth:
+                rows.append(
+                    {
+                        "number": number,
+                        "sphere": name,
+                        "lead": lead,
+                        "true_d": truth[(number, lead)] / lc.DAY,
+                        **{model: needed[(number, lead, model)] for model in models},
+                    }
+                )
+    return rows
+
+
+def arm_lines(rows: list[dict[str, Any]], models: tuple[str, ...]) -> list[str]:
+    """Each arm's needed `C_d`: median and range over its spheres and leads, and the median at leads of
+    90 days or less."""
+    lines = []
+    for arm, numbers in SPHERE_ARMS.items():
+        mine = [r for r in rows if r["number"] in numbers]
+        if not mine:
+            continue
+        cells = []
+        for model in models:
+            every = [r[model] for r in mine if r[model] is not None]
+            short = [r[model] for r in mine if r[model] is not None and r["lead"] <= 90]
+            if not every:
+                cells.append("— | —")
+                continue
+            cells.append(
+                f"{np.median(every):.3f} ({min(every):.3f}-{max(every):.3f}) | "
+                + (f"{np.median(short):.3f}" if short else "—")
+            )
+        spheres = len({r["number"] for r in mine})
+        lines.append(f"{arm} | {spheres} | " + " | ".join(cells))
+    return lines
+
+
+def command_spheres(args) -> int:
+    lc = lifetime_campaign()
+    chosen = [s for s in lc.SPHERES if not args.objects or s[0] in args.objects]
+    models = ("sdtm", "msis") if args.msis else ("sdtm",)
+    print(f"field: {field_label(args)}", flush=True)
+    rows = sphere_rows(lc, chosen, models, args.processes, worker_field(args))
+    print(
+        "sphere | lead d | true remaining d | "
+        + " | ".join(f"C_d {MODEL_NAMES[m]} needs" for m in models)
+    )
+    for r in rows:
+        print(
+            f"{r['sphere']} | {r['lead']} | {r['true_d']:.2f} | "
+            + " | ".join(
+                "outside 1.2-3.6" if r[m] is None else f"{r[m]:.3f}" for m in models
+            )
+        )
+    print(
+        "\narm | spheres | "
+        + " | ".join(
+            f"C_d {MODEL_NAMES[m]} needs, median (range) | at leads <= 90 d, median"
+            for m in models
+        )
+    )
+    print("\n".join(arm_lines(rows, models)))
+    if args.out is not None:
+        pd.DataFrame(rows).to_csv(args.out, sep="\t", index=False)
+    return 0
+
+
+def calibration_lines(lc, by, models: tuple[str, ...]) -> list[str]:
+    """Each model's own error on the calibration part, by lead."""
+    lines = []
+    for model in models:
+        for lead in lc.LEADS_DAYS:
+            rows = [v[model] for (_, k, _), v in by.items() if k == lead and model in v]
+            if not rows:
+                continue
+            observed = [float(r["ln_observed"]) for r in rows]
+            lines.append(
+                f"{MODEL_NAMES.get(model, model)} | {lead} | {len(rows)} | {np.median(observed):.3f} | "
+                f"{np.mean(observed):.3f} | {np.median([float(r['signed_observed']) for r in rows]):+.3f} | "
+                f"{np.median([float(r['ln_persistence']) for r in rows]):.3f}"
+            )
+    return lines
+
+
+def command_lifetimes(args) -> int:
+    lc = lifetime_campaign()
+    models = ("sdtm", "msis") if args.msis else ("sdtm",)
+    print(f"field: {field_label(args)}", flush=True)
+    by = lc.calibration_scores(
+        models, args.processes, worker_field(args), tuple(args.leads)
+    )
+    if not args.msis:
+        recorded = lc.recorded_calibration()
+        for key, v in by.items():
+            if "msis" in recorded[key]:
+                v["msis"] = recorded[key]["msis"]
+    print(
+        "§10.37's calibration part, |ln T/T_true|, T the predicted and T_true the true remaining time\n"
+        "model | lead d | objects | median, observed | mean, observed | median ln(T/T_true), observed | "
+        "median, persistence"
+    )
+    print("\n".join(calibration_lines(lc, by, models)))
+    if args.against is not None:
+        other = pd.read_csv(args.against, sep="\t", dtype=str, keep_default_na=False)
+        for r in other[other.model == "sdtm"].itertuples():
+            key = ("cal", int(r.lead), r.launch)
+            if key in by:
+                by[key]["against"] = {
+                    "ln_observed": r.ln_observed,
+                    "ln_persistence": r.ln_persistence,
+                }
+    msis = "NRLMSISE-00" if args.msis else "NRLMSISE-00 as §10.37's run recorded it"
+    for second, label in (("msis", msis), ("against", str(args.against))):
+        lines = lc.paired_lines(by, ("cal",), first="sdtm", second=second)
+        if lines:
+            print(
+                f"\nthis field minus {label}, paired by launch: part | leads | objects | "
+                "mean, observed | median, observed | mean, persistence"
+            )
+            print("\n".join(lines))
+    if args.out is not None:
+        pd.DataFrame(
+            [
+                {"lead": lead, "launch": launch, "model": model, **row}
+                for (_, lead, launch), v in by.items()
+                for model, row in v.items()
+                if model in models
+            ]
+        ).to_csv(args.out, sep="\t", index=False)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(required=True)
@@ -701,6 +891,44 @@ def main() -> int:
     export.add_argument("--split", required=True)
     export.add_argument("--field", default="default", choices=sorted(FIELDS))
     export.set_defaults(func=command_export)
+    for name, command in (
+        ("spheres", command_spheres),
+        ("lifetimes", command_lifetimes),
+    ):
+        kind = sub.add_parser(name)
+        kind.add_argument(
+            "--field-file",
+            type=pathlib.Path,
+            help="a field as export or lifetime_campaign --write-field writes it; none reads the "
+            "shipped field compiled in",
+        )
+        kind.add_argument(
+            "--msis", action="store_true", help="NRLMSISE-00 too, the comparator"
+        )
+        kind.add_argument(
+            "--out", type=pathlib.Path, help="write the rows as a tab-separated table"
+        )
+        kind.add_argument("--processes", type=int, default=4)
+        kind.set_defaults(func=command)
+    sub.choices["spheres"].add_argument(
+        "--objects",
+        type=int,
+        nargs="+",
+        metavar="N",
+        help="only these catalogue numbers",
+    )
+    sub.choices["lifetimes"].add_argument(
+        "--leads",
+        type=int,
+        nargs="+",
+        default=(7, 30, 90, 365, 1095),
+        help="only these leads, days",
+    )
+    sub.choices["lifetimes"].add_argument(
+        "--against",
+        type=pathlib.Path,
+        help="another field's lifetimes --out table, to pair this field with launch by launch",
+    )
     args = parser.parse_args()
     return args.func(args)
 

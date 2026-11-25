@@ -32,7 +32,10 @@
 //! ([`walker_min_separation`]), with the verdict whether the shell keeps a keep-out distance.
 //!
 //! And for a repeat ground track ([`RepeatTrack`], `no_std`): the exact gaps between its equator
-//! crossings after any number of revolutions, its sub-cycles, and whether a swath closes the equator.
+//! crossings after any number of revolutions, its sub-cycles, and whether a swath closes the equator;
+//! and for one circular orbit over a ground point ([`long_run_coverage`], `no_std`): the fraction of
+//! time covered, the passes per revolution, the mean pass and the mean gap, as integrals when the
+//! rates are declared incommensurate and as finite sums over a repeat cycle when they are not.
 
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 
@@ -43,6 +46,7 @@ pub mod flower;
 #[cfg(any(feature = "std", test))]
 pub mod kfold;
 pub mod lattice;
+pub mod long_run;
 pub mod mozhaev;
 #[cfg(any(feature = "std", test))]
 mod outward;
@@ -62,6 +66,9 @@ pub use flower::FlowerConstellation;
 #[cfg(any(feature = "std", test))]
 pub use kfold::{CapError, KfoldAreas, SphericalCap, kfold_areas};
 pub use lattice::LatticeFlower;
+pub use long_run::{
+    LongRun, LongRunError, LongRunGeometry, LongRunStats, Rates, long_run_coverage,
+};
 pub use mozhaev::{GroupType, MozhaevSymbol, PointGroup};
 pub use repeat_track::{
     Gap, GapSet, Nodes, RepeatTrack, RepeatTrackError, SubCycle, SubCycles, Swath,

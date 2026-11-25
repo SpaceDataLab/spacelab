@@ -1388,6 +1388,7 @@ if have maxima; then
     mac_zeros walker_min_separation.mac 27 "the minimum distance inside a Walker shell: cos psi = A + B cos(u_a + u_b) from the two circular motions, B <= 0, the half-angle at the minimum and its rho/phi form, the swap and full-turn symmetries, the Walker pair classes as cosets of step pi/S, the special cases, the scan's rate bound"
     mac_zeros outward_rounding.mac 39 "the outward-rounded enclosures' hand lemmas: libm_iv's slack, PI below pi, the error-free residuals' grid, the k-fold integrand's Lipschitz bound, arcs' symmetric difference, the band, asin bounds, a computed length within 2.6u, the cross product's rounding, the sites' closed forms and Kepler's a-posteriori step"
     mac_zeros repeat_track_gaps.mac 20 "a repeat track's crossings in half-slots from the rates at both nodes, sin i' from the Earth-fixed velocity, the three-distance residue steps, the swath rule from the tangent plane, its decision form and planar limit"
+    mac_zeros long_run_coverage.mac 32 "long-run coverage from the visibility condition: Delta and its half-angle form, the rates, the widest latitude, the u -> pi - u symmetry, Weyl's average, the hemisphere, and the polar-equatorial closed forms (Leibniz, elliptic K, the turning point's quadratic)"
     mac_zeros mozhaev_point_groups.mac 12 "Mozhaev point groups are the rotation groups of their polyhedra"
     mac_zeros symmetric_regularity.mac 6 "orbit-stabilizer plane counts and staggered-arm regularity"
     mac_zeros rk4_order.mac 9 "RK4 meets every order condition through 4 and none of order 5"
@@ -1609,7 +1610,7 @@ if have gp; then
     for f in access_horizon_crossing root_reference_roots event_geometry box_wing_momentum brouwer_m2_phipps h3_definition photometry_closed_forms observability_diurnal_arc \
         elevation_footprint cone_footprint comms_link_budget sar_incidence scan_catalogue \
         wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay split_conformal_coverage cluster_design_effect group_sequential_obf group_sequential_skew tle_kozai_recovery harris_priester_law \
-        soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form analysis_alpha_exact kfold_coverage_area walker_min_separation outward_rounding repeat_track_gaps \
+        soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form analysis_alpha_exact kfold_coverage_area walker_min_separation outward_rounding repeat_track_gaps long_run_coverage \
         rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
         cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal lambert_izzo gpu_porkchop iod_classical patched_conics \
         targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step sdtm_column sdtm_composition sdtm_overcooling sdtm_nitric_flux sdtm_flux_memory gaussian_scores drag_error_growth central_difference \

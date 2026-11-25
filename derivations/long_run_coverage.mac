@@ -1,0 +1,116 @@
+/* The long-run coverage statistics of `crates/spacelab-constellation/src/long_run.rs` (plan 18
+   Ф31.F), derived from the visibility condition.
+
+   A circular orbit, argument of latitude u as the clock, inclination i; x the longitude of the
+   ascending node east of the ground point G at latitude phi, x = x0 - kappa u. The satellite's
+   direction in the Earth-fixed frame of G's meridian is R3(x) (cos u, cos i sin u, sin i sin u);
+   G is covered when G . S >= cos(lambda).
+
+   This file derives what the code and its second engine use: the sub-satellite latitude and the
+   longitude alpha east of the node; the covered set as |x + alpha| <= Delta with the arccos form
+   of Delta and its half-angle form; the rates alpha' and phi_s', the slope of Delta and where it
+   vanishes (the widest latitude); where alpha' = kappa; the symmetry u -> pi - u that gives the
+   descending half from the ascending one; Weyl's time average; the torus area; the hemisphere's
+   P = 1/2; and G3, a polar orbit over an equatorial point: dP/dlambda by Leibniz, the elliptic
+   K by the substitution sin u = sin(lambda) sin(theta), and the quadratic for the turning point
+   of h+. Every identity prints `<name>: 0`.
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/long_run_coverage.mac </dev/null */
+
+display2d: false$
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+simp0(e) := ratsimp(trigsimp(trigreduce(trigexpand(e))))$
+simp1(e) := ratsimp(trigexpand(trigreduce(e)))$
+simp2(e) := ratsimp(trigsimp(e))$
+
+/* ---- 1. The visibility condition on the torus ---- */
+G: [cos(phi), 0, sin(phi)]$
+rot(v, t) := [v[1]*cos(t) - v[2]*sin(t), v[1]*sin(t) + v[2]*cos(t), v[3]]$
+S: rot([cos(u), cos(i)*sin(u), sin(i)*sin(u)], x)$
+/* the sub-satellite point: latitude phis, longitude x + alpha, with
+   cos(phis) cos(alpha) = cos u, cos(phis) sin(alpha) = cos i sin u */
+Ssub: [cs*cos(x + al), cs*sin(x + al), sin(i)*sin(u)]$
+sub_alpha(e) := subst([cos(al) = cos(u)/cs, sin(al) = cos(i)*sin(u)/cs], trigexpand(e))$
+chk("the_track_is_at_longitude_x_plus_alpha", ratsimp(sub_alpha(Ssub[1] - S[1])) + ratsimp(sub_alpha(Ssub[2] - S[2])))$
+chk("cos_phis_squared_is_one_minus_sin_i_sin_u_squared",
+    simp0(cos(u)^2 + cos(i)^2*sin(u)^2 - (1 - sin(i)^2*sin(u)^2)))$
+/* G . S - cos(lambda) = cos(phi) cos(phis) (cos(l) - C), l = x + alpha the longitude east of G */
+Sl: [cos(ps)*cos(l), cos(ps)*sin(l), sin(ps)]$
+C: (cos(lam) - sin(phi)*sin(ps))/(cos(phi)*cos(ps))$
+chk("visibility_is_cos_l_at_least_c", ratsimp(G . Sl - cos(lam) - cos(phi)*cos(ps)*(cos(l) - C)))$
+/* the half-angle form: (1 - C) cos(phi) cos(ps) = 2 sin a sin b, (1 + C) cos(phi) cos(ps) = 2 cos c cos d */
+a: (lam + phi - ps)/2$  b: (lam - phi + ps)/2$  c: (phi + ps + lam)/2$  d: (phi + ps - lam)/2$
+chk("one_minus_c_is_two_sin_a_sin_b", simp1(ratsimp((1 - C)*cos(phi)*cos(ps)) - 2*sin(a)*sin(b)))$
+chk("one_plus_c_is_two_cos_c_cos_d", simp1(ratsimp((1 + C)*cos(phi)*cos(ps)) - 2*cos(c)*cos(d)))$
+/* the band edges: a = 0, b = 0, c = pi/2, d = -pi/2 */
+chk("band_edges_a_b_c_d", ratsimp(subst(ps = phi + lam, a)) + ratsimp(subst(ps = phi - lam, b))
+    + ratsimp(subst(ps = %pi - lam - phi, c) - %pi/2) + ratsimp(subst(ps = lam - %pi - phi, d) + %pi/2))$
+
+/* ---- 2. The rates ---- */
+cosps(u) := sqrt(1 - sin(i)^2*sin(u)^2)$
+chk("alpha_prime_is_cos_i_over_one_minus_sin2i_sin2u",
+    simp2(diff(atan(cos(i)*tan(u)), u) - cos(i)/(1 - sin(i)^2*sin(u)^2)))$
+chk("phis_prime_is_sin_i_cos_u_over_cos_phis",
+    ratsimp(diff(asin(sin(i)*sin(u)), u) - sin(i)*cos(u)/cosps(u)))$
+dC: (cos(lam)*sin(ps) - sin(phi))/(cos(phi)*cos(ps)^2)$
+chk("c_prime_in_phis", simp2(diff(C, ps) - dC))$
+chk("the_widest_latitude_is_sin_phis_sin_phi_over_cos_lambda",
+    ratsimp(subst(sin(ps) = sin(phi)/cos(lam), num(ratsimp(dC)))))$
+/* Delta' = -C'(phis) phis' / sin(Delta), sin(Delta) = sqrt(1 - C^2) */
+chk("delta_prime_is_minus_c_prime_over_sin_delta",
+    ratsimp(diff(acos(C), ps) + diff(C, ps)/sqrt(1 - C^2)))$
+/* alpha' = kappa where sin^2 v = (1 - cos i / kappa)/sin^2 i */
+chk("alpha_prime_is_kappa_there",
+    ratsimp(cos(i)/(1 - sin(i)^2*((1 - cos(i)/kappa)/sin(i)^2)) - kappa))$
+
+/* ---- 3. The symmetry u -> pi - u ---- */
+chk("phis_of_pi_minus_v_is_phis_of_v", simp0(sin(i)*sin(%pi - v) - sin(i)*sin(v)))$
+chk("tan_alpha_of_pi_minus_v_is_minus_tan_alpha_of_v", simp0(cos(i)*tan(%pi - v) + cos(i)*tan(v)))$
+/* with alpha(pi - v) = sigma pi - alpha(v) (the continued branch) and Delta(pi - v) = Delta(v),
+   h+-(pi - v) = (kappa - sigma) pi - h-+(v) */
+hpm(s, t, A, D) := kappa*t - A + s*D$
+chk("h_plus_of_pi_minus_v", ratsimp(hpm(1, %pi - v, sigma*%pi - Av, Dv) - ((kappa - sigma)*%pi - hpm(-1, v, Av, Dv))))$
+chk("h_minus_of_pi_minus_v", ratsimp(hpm(-1, %pi - v, sigma*%pi - Av, Dv) - ((kappa - sigma)*%pi - hpm(1, v, Av, Dv))))$
+
+/* ---- 4. The time average and the torus ---- */
+assume(w > 0, T > 0)$
+chk("weyl_time_average_of_exp_i_w_t", ratsimp(integrate(exp(%i*w*t), t, 0, T)/T - (exp(%i*w*T) - 1)/(%i*w*T)))$
+/* the covered x at u: an interval of length 2 Delta; P = (1/4 pi^2) int 2 Delta du = (1/2 pi^2) int Delta */
+chk("covered_measure_at_u_is_two_delta", integrate(1, xx, -Dl, Dl) - 2*Dl)$
+/* a hemisphere: C(-phis) = -C(phis), so Delta(-phis) = pi - Delta(phis), and phis(u + pi) = -phis(u) */
+chk("hemisphere_c_is_odd_in_phis", ratsimp(subst(lam = %pi/2, C + subst(ps = -ps, C))))$
+chk("hemisphere_acos_of_minus_c", ratsimp(acos(-y0) - (%pi - acos(y0))))$
+chk("phis_of_u_plus_pi_is_minus_phis", simp0(sin(i)*sin(u + %pi) + sin(i)*sin(u)))$
+
+/* ---- 5. G3: a polar orbit over an equatorial point ---- */
+/* i = pi/2, phi = 0: alpha = 0 on the ascending half, phis = u, C = cos(lambda)/cos(u) */
+chk("polar_equatorial_c", ratsimp(subst([phi = 0, ps = u], C) - cos(lam)/cos(u)))$
+/* Leibniz: d/dlambda int_0^lambda acos(cos lambda / cos u) du = acos(1) + sin(lambda) int du/sqrt(cos^2 u - cos^2 lambda) */
+assume(lam > 0, lam < %pi/2, u > 0, u < lam)$
+chk("leibniz_boundary_term", acos(subst(u = lam, cos(lam)/cos(u))))$
+integrand: diff(acos(cos(lam)/cos(u)), lam)$
+chk("leibniz_integrand", ratsimp(integrand^2 - sin(lam)^2/(cos(u)^2 - cos(lam)^2)))$
+/* the root taken positively: the integrand is positive at a sample point inside the triangle */
+chk("leibniz_integrand_is_the_positive_root",
+    if abs(float(subst([lam = 1, u = 1/2], integrand - sin(lam)/sqrt(cos(u)^2 - cos(lam)^2)))) < 1e-14 then 0 else 1)$
+/* sin u = sin(lambda) sin(theta) turns the integral into K(sin lambda) */
+forget(u > 0, u < lam)$
+assume(th > 0, th < %pi/2)$
+us: asin(sin(lam)*sin(th))$
+chk("substitution_cos2u_minus_cos2lambda", simp0(cos(us)^2 - cos(lam)^2 - sin(lam)^2*cos(th)^2))$
+chk("substitution_gives_k",
+    ratsimp((diff(us, th)/(sin(lam)*cos(th)))^2 - 1/(1 - sin(lam)^2*sin(th)^2)))$
+/* the turning point of h+ = kappa u + Delta: Delta' = -kappa, squared, in y = cos^2 u:
+   kappa^2 y^2 + cos^2(lambda)(1 - kappa^2) y - cos^2(lambda) = 0 */
+dD: -cos(lam)*sin(u)/(cos(u)*sqrt(cos(u)^2 - cos(lam)^2))$
+chk("polar_delta_prime_squared",
+    ratsimp(diff(acos(cos(lam)/cos(u)), u)^2 - dD^2))$
+chk("the_quadratic_in_cos2u",
+    ratsimp(subst([cos(u) = sqrt(Y), sin(u) = sqrt(1 - Y)], dD^2 - kappa^2)
+            - (cos(lam)^2*(1 - Y) - kappa^2*Y*(Y - cos(lam)^2))/(Y*(Y - cos(lam)^2))))$
+chk("is_minus_kappa2_y2_plus_cos2lambda_one_minus_kappa2_y_minus_cos2lambda",
+    ratsimp((cos(lam)^2*(1 - Y) - kappa^2*Y*(Y - cos(lam)^2))
+            + (kappa^2*Y^2 + cos(lam)^2*(1 - kappa^2)*Y - cos(lam)^2)))$
+yy: (-cl2*(1 - kappa^2) + sqrt(cl2^2*(1 - kappa^2)^2 + 4*kappa^2*cl2))/(2*kappa^2)$
+chk("its_positive_root", ratsimp(radcan(kappa^2*yy^2 + cl2*(1 - kappa^2)*yy - cl2)))$
+/* h+ rises from -kappa lambda to its turn and falls to kappa lambda: TV = 2 h+(u*) */
+chk("polar_tv_is_twice_the_turn", ratsimp((hs - (-kappa*lam)) + (hs - kappa*lam) - 2*hs))$

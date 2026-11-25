@@ -4912,11 +4912,11 @@ are deliberately **self-checking rather than golden**: a copied constant agrees 
 argument, so instead each one either feeds a solver the answer to its own question, asserts an
 invariant only the correct wiring satisfies, or injects a bias the routine must recover exactly.
 
-There is now a Rust-side rung under them as well — 113 `#[test]` in `lib.rs`, written to the same
-rule and measured by mutation rather than by coverage. 44 of them need an interpreter in the
+There is now a Rust-side rung under them as well — 114 `#[test]` in `lib.rs`, written to the same
+rule and measured by mutation rather than by coverage. 45 of them need an interpreter in the
 test process and are gated behind `test-interpreter`, which is what
 `cargo test -p spacelab-python --no-default-features --features test-interpreter` turns on; the other
-69 run in an ordinary `cargo test --workspace`. One of the 44 also needs `onnx`, because
+69 run in an ordinary `cargo test --workspace`. One of the 45 also needs `onnx`, because
 `cloud_mask` is only compiled with it. What they reach and what they cannot is `spacelab-python`'s
 entry in §8.
 

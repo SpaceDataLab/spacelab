@@ -1386,6 +1386,7 @@ if have maxima; then
     mac_zeros analysis_alpha_exact.mac 29 "the exact alpha-characteristic: the polyhedra from its candidate set, two sites, an antipodal ridge's end, the Walker shift as a rotation, the rates in time"
     mac_zeros kfold_coverage_area.mac 48 "the exact k-fold coverage area: the 1-form, the arc integral's atan2 form and its positive denominator, the crossing points and the arcs' half-angles by the half-angle formula, the polyhedra lenses, Girard's angle, the coincidence threshold as a power of two"
     mac_zeros walker_min_separation.mac 27 "the minimum distance inside a Walker shell: cos psi = A + B cos(u_a + u_b) from the two circular motions, B <= 0, the half-angle at the minimum and its rho/phi form, the swap and full-turn symmetries, the Walker pair classes as cosets of step pi/S, the special cases, the scan's rate bound"
+    mac_zeros outward_rounding.mac 39 "the outward-rounded enclosures' hand lemmas: libm_iv's slack, PI below pi, the error-free residuals' grid, the k-fold integrand's Lipschitz bound, arcs' symmetric difference, the band, asin bounds, a computed length within 2.6u, the cross product's rounding, the sites' closed forms and Kepler's a-posteriori step"
     mac_zeros mozhaev_point_groups.mac 12 "Mozhaev point groups are the rotation groups of their polyhedra"
     mac_zeros symmetric_regularity.mac 6 "orbit-stabilizer plane counts and staggered-arm regularity"
     mac_zeros rk4_order.mac 9 "RK4 meets every order condition through 4 and none of order 5"
@@ -1607,7 +1608,7 @@ if have gp; then
     for f in access_horizon_crossing root_reference_roots event_geometry box_wing_momentum brouwer_m2_phipps h3_definition photometry_closed_forms observability_diurnal_arc \
         elevation_footprint cone_footprint comms_link_budget sar_incidence scan_catalogue \
         wgs84_geodesy keplerian_elements design_orbit kepler_universal lifetime_exponential_decay split_conformal_coverage cluster_design_effect group_sequential_obf group_sequential_skew tle_kozai_recovery harris_priester_law \
-        soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form analysis_alpha_exact kfold_coverage_area walker_min_separation \
+        soc_street_geometry flower_phasing draim_tetrahedral shell_surveillance analysis_alpha_closed_form analysis_alpha_exact kfold_coverage_area walker_min_separation outward_rounding \
         rk4_order rkn1210_order gauss_jackson8_generating symplectic_composition taylor_jet_recurrences \
         cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal lambert_izzo gpu_porkchop iod_classical patched_conics \
         targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step sdtm_column sdtm_composition sdtm_overcooling sdtm_nitric_flux sdtm_flux_memory gaussian_scores drag_error_growth central_difference \
@@ -1697,8 +1698,9 @@ fi
 # replays that order exactly at sample points and holds the observed error under each bound.
 # ---------------------------------------------------------------------------------------------
 if have gappa; then
+    # alpha_dot (Ф28.V): the a-priori margin of the α-characteristic enclosure's dot products.
     for f in era gmst82 kepler vermeille vermeille_height geopotential_seed shepperd student_t_b_pos \
-        student_t_b_neg; do
+        student_t_b_neg alpha_dot; do
         out=$(timeout 120 gappa -Wno-null-denominator "${f}_roundoff.gappa" 2>&1)
         rc=$?
         if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -qE 'not satisfied|^Error'; then
@@ -1709,6 +1711,36 @@ if have gappa; then
     done
 else
     skip "Ф28.C round-off proofs" gappa
+fi
+# Ф28.V, S2: the outward-rounded enclosures of kfold_areas and covering_radius, and the site balls
+# of the alpha enclosure, hold the 60-digit values on the degenerate families and on random inputs
+# (enclosure_s2.rs prints them, enclosure_s2.gp recomputes them). Containment is evidence of how the
+# proof reads the code, not the proof. Rule 16: the same lines with every enclosure collapsed to a
+# point (the k-fold areas rounded to nearest, alpha's midpoint) must be refuted.
+if have cargo && have gp; then
+    s2() { timeout 1800 cargo run -q --release --manifest-path ../Cargo.toml -p spacelab-constellation \
+        --features std --example enclosure_s2 -- "$@"; }
+    s2_sites() { SPACELAB_S2_SITES=2000 timeout 1800 cargo test -q --release --manifest-path ../Cargo.toml \
+        -p spacelab-constellation --features std --lib s2_site_lines -- --nocapture 2>/dev/null \
+        | grep '^S('; }
+    out=$({ cat enclosure_s2.gp; s2 kfold 20000 1; s2 alpha 20000 2; s2_sites; echo 'report();'; } \
+        | timeout 1800 gp -q 2>&1)
+    held=$(printf '%s\n' "$out" | grep -cE '^S2 (kfold level|alpha|site): [0-9]+ checked, 0 missed')
+    if [ "$held" -eq 3 ] && ! printf '%s' "$out" | grep -qF '***'; then
+        ok "pari enclosure_s2.gp: every enclosure holds its 60-digit value; $(printf '%s\n' "$out" | grep '^S2 ' | tr '\n' ' ')"
+    else
+        bad "pari enclosure_s2.gp" "$(printf '%s\n' "$out" | grep -E '^S2|\*\*\*' | head -n 5)"
+    fi
+    planted=$({ cat enclosure_s2.gp; s2 kfold-planted 2000 1; s2 alpha-planted 2000 2; echo 'report();'; } \
+        | timeout 1800 gp -q 2>&1)
+    refuted=$(printf '%s\n' "$planted" | grep -cE '^S2 (kfold level|alpha): [0-9]+ checked, [1-9][0-9]* missed')
+    if [ "$refuted" -eq 2 ]; then
+        ok "pari enclosure_s2.gp, planted: enclosures collapsed to a point are refuted for the k-fold areas and alpha"
+    else
+        bad "pari enclosure_s2.gp, planted" "a collapsed enclosure was not refuted: $(printf '%s\n' "$planted" | grep '^S2 ' | tr '\n' ' ')"
+    fi
+else
+    skip "Ф28.V S2 containment" "cargo or gp"
 fi
 if have maxima; then
     mac_zeros roundoff_samples.mac 6 "the replayed f64 kernels stay under their Gappa bounds at the domains' edges; the Vermeille hypotheses hold on a grid to GEO"

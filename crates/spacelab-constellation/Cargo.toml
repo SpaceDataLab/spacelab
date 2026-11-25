@@ -32,5 +32,9 @@ spacelab-testkit = { path = "../spacelab-testkit" }
 spacelab-coverage = { path = "../spacelab-coverage", features = ["std"] }
 spacelab-sensors = { path = "../spacelab-sensors" }
 
+[[example]]
+name = "enclosure_s2"
+required-features = ["std"]
+
 [lints]
 workspace = true

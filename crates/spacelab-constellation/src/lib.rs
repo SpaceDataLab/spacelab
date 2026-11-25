@@ -41,6 +41,8 @@ pub mod flower;
 pub mod kfold;
 pub mod lattice;
 pub mod mozhaev;
+#[cfg(any(feature = "std", test))]
+mod outward;
 pub mod separation;
 pub mod shell;
 pub mod soc;

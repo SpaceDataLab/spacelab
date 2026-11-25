@@ -24,30 +24,43 @@
 //! antipode are moved onto one representative (or its antipode) before the candidates are built:
 //! near such a pair a candidate's location is ill-conditioned (an anti-midpoint at `π − δ` moves by
 //! `ε/δ`), while `α` itself is 1-Lipschitz in the sites. The move `Δ` widens the upper end by `2Δ`.
-//! Every other candidate carries a first-order bound `λ` on its distance from the exact critical point
-//! it computes, and every dot product a rounding allowance `γ = 32u`: the lower end is the best
-//! candidate, the upper end adds `λ`, `γ` and `2Δ`.
+//! Every other candidate carries a bound `λ` on its distance from the exact critical point it
+//! computes, and every dot product an allowance `γ`: the lower end is the best candidate, the upper
+//! end adds `λ`, `γ` and `2Δ`.
+//!
+//! **The sites' own error.** Every site is a direction computed in doubles; `e` bounds its distance
+//! from the exact one, a posteriori: for given sites the exact unit vector of the input, for a
+//! satellite the exact two-body direction at the instant (Kepler's equation's residual at the
+//! computed eccentric anomaly, divided by its least slope `1 − e`), for a Walker slot the exact
+//! pattern's angles `2πp/P` and `2πs/S + 2πFp/T`. `λ` and `Δ` take `e`; `γ = 7u + |x|·e + ||x| − 1|`
+//! for a candidate `x`, the `7u` the rounding of a dot product of vectors no longer than `1 + 2⁻⁴⁰`
+//! per component, proved by Gappa (`derivations/alpha_dot_roundoff.gappa`): the one a-priori margin,
+//! kept because the dot products are the hot loop.
 //!
 //! **Time: Lipschitz branch and bound.** Each direction turns about its fixed orbit normal `ĥ_i` at its
 //! true-anomaly rate `ν̇_i`. In a frame turning at `W`, the mean of the `ν̇_i ĥ_i`, site `i` moves at
 //! most `|ν̇_i ĥ_i − W|`, so `α_k(t)` is Lipschitz with the largest of these, `L` (zero for one plane,
-//! which turns rigidly). On `[a, b]`, `α_k` is at most the crossing of the two cones of slope `L` on
-//! the end values, so branch and bound closes an enclosure of the worst case. A plane's satellites
-//! alone cover no better than all of them, and turn rigidly, so the α of any plane with more than `k`
-//! satellites caps the whole span without splitting it: that closes plateaus such as Walker 4/2/1's
-//! π/2. A first-order bound pays for a smooth peak of curvature `κ` about `L/√(κm)` instants to
-//! settle a margin `m`, and for a plateau no single plane holds about `L·span/m`; past its budget the
-//! enclosure is reported wider, and the decision declines.
+//! which turns rigidly; any `W` gives a bound, and `ĥ_i` and `ν̇_i` enter as intervals). On
+//! `[a, b]`, `α_k` is at most the crossing of the two cones of slope `L` on the end values, so branch
+//! and bound closes an enclosure of the worst case. A plane's satellites alone cover no better than
+//! all of them, and turn rigidly, so the α of any plane with more than `k` satellites caps the whole
+//! span without splitting it: that closes plateaus such as Walker 4/2/1's π/2. A first-order bound
+//! pays for a smooth peak of curvature `κ` about `L/√(κm)` instants to settle a margin `m`, and for a
+//! plateau no single plane holds about `L·span/m`; past its budget the enclosure is reported wider,
+//! and the decision declines.
 //!
 //! **The decision.** [`minimum_walker`] accepts a design only on the upper end, and compares dot
 //! products with cosines, so no inverse function is in the decision: `α_k ≤ θ` on a time interval of
 //! half-width `h` holds when at every candidate the `k`-th largest dot product with the sites is at
 //! least `cos(θ − Lh − λ − 2Δ) + γ`. It refuses on a candidate whose dot product plus `γ` is below
-//! `cos θ`, and does not accept a design it can decide neither way within its budget.
+//! `cos θ`, and does not accept a design it can decide neither way within its budget. The design it
+//! certifies is the exact Walker pattern, not the doubles its elements round to.
 //!
-//! Every enclosure here is **under H-libm, not outward-rounded** ([`AlphaEnclosure::LABEL`]): the
-//! sites and `θ` pass through `libm`'s `sin` and `cos`, the reported ends through `acos`, and the
-//! arithmetic rounds to nearest with the first-order allowances above.
+//! Every enclosure here is **outward-rounded under H-libm** ([`AlphaEnclosure::LABEL`], plan 18
+//! Ф28.V): each end, each allowance and each time slack is rounded down or up, away from the side it
+//! bounds, the direction read from each operation's exact residual (`outward`); the sites, `θ` and
+//! the reported ends pass through `libm`'s `sin`, `cos`, `atan2` and `acos` widened by their measured
+//! H-libm constants (`docs/verification.md` §1.1), which is the hypothesis the label names.
 //!
 //! This is design-time analysis (it allocates), so it lives behind the crate's `std` feature; the
 //! generators stay `no_std`.
@@ -59,15 +72,19 @@ use std::collections::{BinaryHeap, VecDeque};
 use spacelab_core::{Angle, Vec3};
 use spacelab_elements::KeplerianElements;
 
+use crate::outward::{self, Iv, IvVec, down, up};
 use crate::walker::{Walker, WalkerPattern};
 
 const PI: f64 = core::f64::consts::PI;
 /// The unit roundoff of `f64`.
 const U: f64 = f64::EPSILON / 2.0;
-/// How far from unit length a vector normalised here may be.
-const ETA: f64 = 6.0 * U;
-/// The rounding allowance on a dot product of two vectors normalised here.
-const GAMMA: f64 = 32.0 * U;
+/// `|fl(a·b) − a·b| ≤ 7u` for [`dot`] on vectors whose components are at most [`DOT_RANGE`] in
+/// magnitude, proved by Gappa over that whole domain (`derivations/alpha_dot_roundoff.gappa`).
+const DOT_ERR: f64 = 7.0 * U;
+/// `1 + 2⁻⁴⁰`: the components [`DOT_ERR`] covers.
+const DOT_RANGE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
+/// `6η`, `η = 2⁻¹⁰⁷⁴`: what six underflowed products can lose beyond their relative error.
+const SIX_ETA: f64 = f64::from_bits(6);
 /// Two sites closer than this chord to each other, or to each other's antipode, are moved onto one
 /// representative. `2^-25` balances the move it costs against the `ε/δ` location error it avoids.
 pub const SNAP_CHORD: f64 = 1.0 / 33_554_432.0;
@@ -142,10 +159,10 @@ pub struct AlphaEnclosure {
 }
 
 impl AlphaEnclosure {
-    /// What the enclosure rests on: the `libm` elementary functions within their measured error
-    /// (H-libm), and round-to-nearest arithmetic with first-order allowances rather than outward
-    /// rounding.
-    pub const LABEL: &'static str = "under H-libm, not outward-rounded";
+    /// What the enclosure rests on: outward rounding of every `+ − × ÷ √` that sets an end, a
+    /// Gappa-proved margin on the dot products, and the `libm` elementary functions within their
+    /// measured error (H-libm, a tested hypothesis).
+    pub const LABEL: &'static str = "outward-rounded under H-libm";
 }
 
 /// The `k`-fold covering radius of a fixed set of sites: the α-characteristic at one instant.
@@ -159,14 +176,17 @@ impl AlphaEnclosure {
 pub fn covering_radius(sites: &[Vec3], fold: u32) -> Result<AlphaEnclosure, AlphaError> {
     let k = check_fold(fold, sites.len())?;
     let mut unit_sites = Vec::with_capacity(sites.len());
+    let mut err = 0.0_f64;
     for (i, &s) in sites.iter().enumerate() {
         let len = norm(s);
         if !(len.is_finite() && len > 0.0) {
             return Err(AlphaError::BadSite { site: i });
         }
-        unit_sites.push(s.scale(1.0 / len));
+        let u = s.scale(1.0 / len);
+        err = err.max(IvVec::of(s).unit().reach(u));
+        unit_sites.push(u);
     }
-    let (lower, upper) = instant_enclosure(&unit_sites, k, &mut Workspace::default());
+    let (lower, upper) = instant_enclosure(&unit_sites, err, k, &mut Workspace::default());
     Ok(AlphaEnclosure { lower, upper })
 }
 
@@ -195,11 +215,12 @@ pub fn alpha_characteristic(
     if k == sats.len() {
         return Ok(AlphaEnclosure {
             lower: PI,
-            upper: PI.next_up(),
+            upper: outward::PI.hi,
         });
     }
     let motion = Motion::new(sats);
-    Ok(motion.enclose(k, sats[0].period(), tolerance))
+    let period = outward::TAU / mean_motion(&sats[0]);
+    Ok(motion.enclose(k, period.hi, period.lo, tolerance))
 }
 
 /// Search for the Walker Delta system with the fewest satellites whose α-characteristic is proven not
@@ -279,23 +300,24 @@ fn walker_verdict(w: &Walker, fold: u32, theta: f64, sats: &mut Vec<KeplerianEle
         // α is positive; and for k = n it is π itself, above every footprint not above `PI`.
         return Verdict::Exceeds;
     }
-    let motion = Motion::new(sats);
+    let motion = Motion::walker(w, sats);
     motion.decide(k, walker_symmetry_span(w), theta)
 }
 
-/// The time after which a Walker Delta pattern repeats up to a rotation about the polar axis, seconds.
+/// An upper bound of the time after which a Walker Delta pattern repeats up to a rotation about the
+/// polar axis, seconds.
 ///
 /// With `T = P·S` and `F` taken mod `P`, advancing every argument of latitude by `2π/S` relabels the
 /// slots, and by `2πF/T` gives the pattern turned by `2π/P` with the planes relabelled
 /// (`derivations/analysis_alpha_exact.mac`, and `walker_shift_is_a_rotation` in its `.gp`). Their
 /// integer combinations include `2π·gcd(P, F)/T`, and α is invariant under rotation, so one such
-/// span is every instant.
+/// span is every instant; a longer one covers it too.
 fn walker_symmetry_span(w: &Walker) -> f64 {
     debug_assert_eq!(w.pattern, WalkerPattern::Delta);
     let (planes, total) = (w.planes, w.total());
     let g = gcd(planes, w.phasing % planes);
-    let n = libm::sqrt(w.mu / (w.semi_major_axis * w.semi_major_axis * w.semi_major_axis));
-    core::f64::consts::TAU * f64::from(g) / (f64::from(total) * n)
+    let n = mean_motion_of(w.semi_major_axis, w.mu);
+    (outward::TAU * Iv::point(f64::from(g)) / (Iv::point(f64::from(total)) * n)).hi
 }
 
 const fn gcd(mut a: u32, mut b: u32) -> u32 {
@@ -305,6 +327,16 @@ const fn gcd(mut a: u32, mut b: u32) -> u32 {
         b = r;
     }
     a
+}
+
+/// The exact mean motion `√(μ/a³)` of the elements' doubles, as an interval.
+fn mean_motion(e: &KeplerianElements) -> Iv {
+    mean_motion_of(e.semi_major_axis, e.mu)
+}
+
+fn mean_motion_of(a: f64, mu: f64) -> Iv {
+    let a = Iv::point(a);
+    (Iv::point(mu) / (a * a * a)).sqrt()
 }
 
 fn check_fold(fold: u32, sites: usize) -> Result<usize, AlphaError> {
@@ -361,9 +393,20 @@ enum Instant {
     Unknown,
 }
 
+/// Where a satellite really is: the exact direction its elements or its Walker slot give.
+#[derive(Clone, Copy)]
+enum Truth {
+    /// A circular orbit: the node and the argument of latitude at `t = 0`, as intervals that hold
+    /// the exact angles.
+    Circular { raan: Iv, u0: Iv },
+    /// An ellipse whose elements' doubles are the exact orbit.
+    Elliptic,
+}
+
 /// The satellites as moving sites, with the Lipschitz constant of `α_k` in time.
 struct Motion<'a> {
     sats: &'a [KeplerianElements],
+    truths: Vec<Truth>,
     /// rad/s.
     lipschitz: f64,
     /// Satellites that turn together — one plane, one rate — with their own relative rate (rad/s).
@@ -371,15 +414,63 @@ struct Motion<'a> {
 }
 
 impl<'a> Motion<'a> {
+    /// The elements' doubles as the exact orbits.
     fn new(sats: &'a [KeplerianElements]) -> Self {
-        let turns: Vec<Turn> = sats.iter().map(Turn::of).collect();
+        let truths = sats
+            .iter()
+            .map(|e| {
+                if e.eccentricity == 0.0 {
+                    Truth::Circular {
+                        raan: Iv::point(e.raan.radians()),
+                        u0: Iv::point(e.arg_periapsis.radians())
+                            + Iv::point(e.true_anomaly.radians()),
+                    }
+                } else {
+                    Truth::Elliptic
+                }
+            })
+            .collect();
+        Self::with_truths(sats, truths)
+    }
+
+    /// The exact Walker pattern `w`, whose slots `sats` holds plane-major as [`Walker::generate`]
+    /// emits them: plane `p` at node `2πp/P` (`πp/P` for a Star), slot `s` at argument of latitude
+    /// `2πs/S + 2πFp/T`.
+    fn walker(w: &Walker, sats: &'a [KeplerianElements]) -> Self {
+        let (planes, per_plane) = (f64::from(w.planes), f64::from(w.per_plane));
+        let total = Iv::point(planes * per_plane);
+        let span = match w.pattern {
+            WalkerPattern::Delta => outward::TAU,
+            WalkerPattern::Star => outward::PI,
+        };
+        let phasing = f64::from(w.phasing % w.planes.max(1));
+        let truths = (0..sats.len())
+            .map(|i| {
+                let i = u32::try_from(i).unwrap_or(u32::MAX);
+                let (p, s) = (f64::from(i / w.per_plane), f64::from(i % w.per_plane));
+                Truth::Circular {
+                    raan: span * Iv::point(p) / Iv::point(planes),
+                    u0: outward::TAU * Iv::point(s) / Iv::point(per_plane)
+                        + outward::TAU * Iv::point(phasing * p) / total,
+                }
+            })
+            .collect();
+        Self::with_truths(sats, truths)
+    }
+
+    fn with_truths(sats: &'a [KeplerianElements], truths: Vec<Truth>) -> Self {
+        let turns: Vec<Turn> = sats
+            .iter()
+            .zip(&truths)
+            .map(|(e, &t)| Turn::of(e, t))
+            .collect();
         let mut members: Vec<Vec<usize>> = Vec::new();
         for (i, t) in turns.iter().enumerate() {
             // Any partition is sound, since each group carries its own rate; this one puts a plane's
             // satellites together, whose group then turns rigidly at a rate of rounding size.
-            let v = t.mean_velocity();
+            let v = t.mean;
             match members.iter_mut().find(|g| {
-                let first = turns[g[0]].mean_velocity();
+                let first = turns[g[0]].mean;
                 norm(v - first) <= 1e-9 * norm(first)
             }) {
                 Some(g) => g.push(i),
@@ -396,26 +487,69 @@ impl<'a> Motion<'a> {
             .collect();
         Self {
             sats,
+            truths,
             lipschitz: relative_rate(&turns),
             groups,
         }
     }
 
-    fn sites_at(&self, t: f64, out: &mut Vec<Vec3>) {
+    /// The sites at `t`; returns the largest distance of one from its exact direction.
+    fn sites_at(&self, t: f64, out: &mut Vec<Vec3>) -> f64 {
         out.clear();
-        for e in self.sats {
-            out.push(unit(e.propagate(t).to_state().0));
+        let mut err = 0.0_f64;
+        for i in 0..self.sats.len() {
+            let (s, e) = self.site(i, t);
+            err = err.max(e);
+            out.push(s);
+        }
+        err
+    }
+
+    /// The `(lower, upper)` enclosure of `α_k` at the instant `t`.
+    fn instant(&self, t: f64, k: usize, sites: &mut Vec<Vec3>, ws: &mut Workspace) -> (f64, f64) {
+        let err = self.sites_at(t, sites);
+        instant_enclosure(sites, err, k, ws)
+    }
+
+    /// Satellite `i`'s site at `t`, the centre of a box that holds its exact direction, and an upper
+    /// bound of the distance between them. A circular orbit's direction is closed-form in `t`; an
+    /// ellipse's starts from the doubles' Kepler solution, which [`kepler_direction`] bounds a
+    /// posteriori.
+    fn site(&self, i: usize, t: f64) -> (Vec3, f64) {
+        let sat = &self.sats[i];
+        let incl = sat.inclination.radians();
+        let exact = match self.truths[i] {
+            Truth::Circular { raan, u0 } => {
+                Some(direction(raan, incl, u0 + mean_motion(sat) * Iv::point(t)))
+            }
+            Truth::Elliptic => kepler_direction(sat, t, sat.propagate(t).true_anomaly.radians()),
+        };
+        match exact {
+            Some(exact) => {
+                let centre = Vec3::new(exact.x.mid(), exact.y.mid(), exact.z.mid());
+                (centre, exact.reach(centre))
+            }
+            None => (unit(sat.propagate(t).to_state().0), f64::INFINITY),
         }
     }
 
-    /// The groups with more than `k` members, each with its sites at `t = 0` and its rate.
-    fn rigid_groups(&self, k: usize) -> impl Iterator<Item = (Vec<Vec3>, f64)> + '_ {
+    /// The groups with more than `k` members, each with its sites at `t = 0`, their error, and the
+    /// group's rate.
+    fn rigid_groups(&self, k: usize) -> impl Iterator<Item = (Vec<Vec3>, f64, f64)> + '_ {
         self.groups
             .iter()
             .filter(move |(g, _)| g.len() > k)
             .map(|(g, rate)| {
-                let sites = g.iter().map(|&i| unit(self.sats[i].to_state().0)).collect();
-                (sites, *rate)
+                let mut err = 0.0_f64;
+                let sites = g
+                    .iter()
+                    .map(|&i| {
+                        let (s, e) = self.site(i, 0.0);
+                        err = err.max(e);
+                        s
+                    })
+                    .collect();
+                (sites, err, *rate)
             })
     }
 
@@ -425,34 +559,37 @@ impl<'a> Motion<'a> {
     /// bound cannot, such as Walker 4/2/1, whose antipodal pairs hold `α₁` at π/2 at every instant.
     fn ceiling(&self, k: usize, span: f64, ws: &mut Workspace) -> f64 {
         self.rigid_groups(k)
-            .fold(PI.next_up(), |best, (sites, rate)| {
-                best.min(instant_enclosure(&sites, k, ws).1 + rate * span)
+            .fold(outward::PI.hi, |best, (sites, err, rate)| {
+                let at_zero = instant_enclosure(&sites, err, k, ws).1;
+                best.min(up(at_zero + up(rate * span)))
             })
     }
 
-    /// Best-first branch and bound for the worst case of `α_k` over `[0, span]`.
-    fn enclose(&self, k: usize, span: f64, tolerance: f64) -> AlphaEnclosure {
+    /// Best-first branch and bound for the worst case of `α_k` over `[0, span]`; only instants up to
+    /// `horizon` raise the lower end.
+    fn enclose(&self, k: usize, span: f64, horizon: f64, tolerance: f64) -> AlphaEnclosure {
         let mut ws = Workspace::default();
         let mut sites = Vec::with_capacity(self.sats.len());
-        let mut eval = |t: f64, ws: &mut Workspace| {
-            self.sites_at(t, &mut sites);
-            instant_enclosure(&sites, k, ws)
-        };
         let mut heap = BinaryHeap::new();
         let ceiling = self.ceiling(k, span, &mut ws);
         let step = span / f64::from(START_INTERVALS);
-        let (mut lower, mut ua) = eval(0.0, &mut ws);
+        let (mut lower, mut ua) = self.instant(0.0, k, &mut sites, &mut ws);
         let mut a = 0.0;
         let mut evaluations = 1;
+        let raise = |lower: &mut f64, t: f64, lo: f64| {
+            if t <= horizon {
+                *lower = lower.max(lo);
+            }
+        };
         for j in 1..=START_INTERVALS {
             let b = if j == START_INTERVALS {
                 span
             } else {
                 step * f64::from(j)
             };
-            let (lo, ub) = eval(b, &mut ws);
+            let (lo, ub) = self.instant(b, k, &mut sites, &mut ws);
             evaluations += 1;
-            lower = lower.max(lo);
+            raise(&mut lower, b, lo);
             heap.push(Piece::new(a, b, ua, ub, self.lipschitz));
             (a, ua) = (b, ub);
         }
@@ -462,9 +599,9 @@ impl<'a> Motion<'a> {
             }
             let Some(p) = heap.pop() else { break };
             let m = p.a.midpoint(p.b);
-            let (lo, um) = eval(m, &mut ws);
+            let (lo, um) = self.instant(m, k, &mut sites, &mut ws);
             evaluations += 1;
-            lower = lower.max(lo);
+            raise(&mut lower, m, lo);
             heap.push(Piece::new(p.a, m, p.ua, um, self.lipschitz));
             heap.push(Piece::new(m, p.b, um, p.ub, self.lipschitz));
         }
@@ -479,10 +616,10 @@ impl<'a> Motion<'a> {
     fn decide(&self, k: usize, span: f64, theta: f64) -> Verdict {
         let mut ws = Workspace::default();
         let mut sites = Vec::with_capacity(self.sats.len());
-        let cos_theta = libm::cos(theta);
-        for (group, rate) in self.rigid_groups(k) {
-            if instant_verdict(&group, k, cos_theta, theta - rate * span, &mut ws) == Instant::Holds
-            {
+        let cos_theta = outward::cos(Iv::point(theta)).lo;
+        for (group, err, rate) in self.rigid_groups(k) {
+            let slack = down(theta - up(rate * span));
+            if instant_verdict(&group, err, k, cos_theta, slack, &mut ws) == Instant::Holds {
                 return Verdict::Covers;
             }
         }
@@ -500,10 +637,12 @@ impl<'a> Motion<'a> {
         let mut evaluations = 0;
         while let Some((a, b)) = queue.pop_front() {
             let m = a.midpoint(b);
-            let slack = self.lipschitz * (b - a) * 0.5;
-            self.sites_at(m, &mut sites);
+            // The instants of [a, b] are within max(m − a, b − m) of m.
+            let reach = up(m - a).max(up(b - m));
+            let slack = up(self.lipschitz * reach);
+            let err = self.sites_at(m, &mut sites);
             evaluations += 1;
-            match instant_verdict(&sites, k, cos_theta, theta - slack, &mut ws) {
+            match instant_verdict(&sites, err, k, cos_theta, down(theta - slack), &mut ws) {
                 Instant::Hole => return Verdict::Exceeds,
                 Instant::Holds => {}
                 Instant::Unknown => {
@@ -519,51 +658,122 @@ impl<'a> Motion<'a> {
     }
 }
 
+/// The exact direction `N cos u + M sin u` of a circular orbit's site, with `N = (cos Ω, sin Ω, 0)`
+/// the node and `M = (−sin Ω cos i, cos Ω cos i, sin i)`, for intervals of `Ω` and of the argument of
+/// latitude `u`: the box that holds it.
+fn direction(raan: Iv, inclination: f64, u: Iv) -> IvVec {
+    let (co, so) = (outward::cos(raan), outward::sin(raan));
+    let incl = Iv::point(inclination);
+    let (ci, si) = (outward::cos(incl), outward::sin(incl));
+    let (cu, su) = (outward::cos(u), outward::sin(u));
+    IvVec {
+        x: co * cu - so * ci * su,
+        y: so * cu + co * ci * su,
+        z: si * su,
+    }
+}
+
+/// The exact direction at `t` of a satellite on an ellipse, from the doubles' true anomaly
+/// `nu_hat` at `t`: a box that holds it. The eccentric anomaly `Ê` of `nu_hat` leaves Kepler's
+/// equation a residual `f` against the exact mean anomaly `M₀ + n t` (mod 2π); Kepler's function
+/// rises at least at `1 − e`, so the exact `E` is within `|f|/(1 − e)` of `Ê`, and the true anomaly
+/// moves at most `√((1 + e)/(1 − e))` times that. `None` when an angle's box holds the origin.
+fn kepler_direction(e: &KeplerianElements, t: f64, nu_hat: f64) -> Option<IvVec> {
+    let ecc = Iv::point(e.eccentricity);
+    let one = Iv::point(1.0);
+    let root = (one - ecc.sq()).sqrt();
+    // E₀ from the true anomaly at t = 0, as a ball; M₀ = E₀ − e sin E₀.
+    let nu0 = Iv::point(e.true_anomaly.radians());
+    let (e0, e0_radius) = outward::angle_ball(root * outward::sin(nu0), ecc + outward::cos(nu0))?;
+    let e0 = Iv {
+        lo: down(e0 - e0_radius),
+        hi: up(e0 + e0_radius),
+    };
+    let m = (e0 - ecc * outward::sin(e0)) + mean_motion(e) * Iv::point(t);
+    // Ê from the doubles' true anomaly at t, any double near it.
+    let (sin_nu, cos_nu) = libm::sincos(nu_hat);
+    let ecc_f = e.eccentricity;
+    let e_hat = libm::atan2(libm::sqrt(1.0 - ecc_f * ecc_f) * sin_nu, ecc_f + cos_nu);
+    let ep = Iv::point(e_hat);
+    let mut residual = ep - ecc * outward::sin(ep) - m;
+    let turns = (residual.mid() / core::f64::consts::TAU).round();
+    residual = residual - Iv::point(turns) * outward::TAU;
+    let slope = one - ecc;
+    let step = up(residual.mag() / slope.lo);
+    // ν at Ê, then the step to the exact E.
+    let (nu, nu_radius) = outward::angle_ball(root * outward::sin(ep), outward::cos(ep) - ecc)?;
+    let stretch = ((one + ecc) / slope).sqrt().hi;
+    let radius = up(nu_radius + up(stretch * step));
+    let u = Iv::point(e.arg_periapsis.radians()) + Iv::point(nu);
+    let u = Iv {
+        lo: down(u.lo - radius),
+        hi: up(u.hi + radius),
+    };
+    Some(direction(
+        Iv::point(e.raan.radians()),
+        e.inclination.radians(),
+        u,
+    ))
+}
+
 /// How one satellite's direction turns: about its fixed orbit normal, at a true-anomaly rate between
 /// `slow` and `fast`, `n(1 ∓ e)²/(1 − e²)^{3/2}` (`derivations/analysis_alpha_exact.mac`,
-/// `true_anomaly_rate`).
+/// `true_anomaly_rate`); the normal `(sin Ω sin i, −cos Ω sin i, cos i)` and the rates as intervals,
+/// and the mean velocity in doubles for grouping and for `W`.
 #[derive(Clone, Copy)]
 struct Turn {
-    normal: Vec3,
-    slow: f64,
-    fast: f64,
+    normal: IvVec,
+    slow: Iv,
+    fast: Iv,
+    mean: Vec3,
 }
 
 impl Turn {
-    fn of(e: &KeplerianElements) -> Self {
-        let (r, v) = e.to_state();
-        let ecc = e.eccentricity;
-        let q = 1.0 - ecc * ecc;
-        let scale = e.mean_motion() / (q * libm::sqrt(q));
+    fn of(e: &KeplerianElements, truth: Truth) -> Self {
+        let raan = match truth {
+            Truth::Circular { raan, .. } => raan,
+            Truth::Elliptic => Iv::point(e.raan.radians()),
+        };
+        let incl = Iv::point(e.inclination.radians());
+        let (si, ci) = (outward::sin(incl), outward::cos(incl));
+        let normal = IvVec {
+            x: outward::sin(raan) * si,
+            y: -(outward::cos(raan) * si),
+            z: ci,
+        };
+        let ecc = Iv::point(e.eccentricity);
+        let one = Iv::point(1.0);
+        let q = one - ecc.sq();
+        let scale = mean_motion(e) / (q * q.sqrt());
+        let (slow, fast) = (scale * (one - ecc).sq(), scale * (one + ecc).sq());
+        let mid = |v: Iv| v.mid();
+        let mean_rate = 0.5 * (mid(slow) + mid(fast));
+        let mean = Vec3::new(mid(normal.x), mid(normal.y), mid(normal.z)).scale(mean_rate);
         Self {
-            normal: unit(r.cross(v)),
-            slow: scale * (1.0 - ecc) * (1.0 - ecc),
-            fast: scale * (1.0 + ecc) * (1.0 + ecc),
+            normal,
+            slow,
+            fast,
+            mean,
         }
-    }
-
-    fn mean_velocity(self) -> Vec3 {
-        self.normal.scale(0.5 * (self.slow + self.fast))
     }
 }
 
-/// The Lipschitz constant of `t ↦ α_k(t)` for these satellites, rad/s: in a frame turning at the
-/// mean `W` of their angular velocities, a direction turning at `ν̇ ĥ` moves at `|(ν̇ ĥ − W) × s| ≤
-/// |ν̇ ĥ − W|` (`derivations/analysis_alpha_exact.mac`, `lagrange_identity`), the larger at one of the
-/// two ends of `ν̇`, and α is 1-Lipschitz in the sites and invariant under the frame's rotation.
+/// The Lipschitz constant of `t ↦ α_k(t)` for these satellites, rad/s: in a frame turning at `W`, a
+/// direction turning at `ν̇ ĥ` moves at `|(ν̇ ĥ − W) × s| ≤ |ν̇ ĥ − W|`
+/// (`derivations/analysis_alpha_exact.mac`, `lagrange_identity`), the larger at one of the two ends
+/// of `ν̇`, and α is 1-Lipschitz in the sites and invariant under the frame's rotation. Any `W`
+/// gives a bound; the mean of the doubles' velocities is taken, and the bound is outward-rounded.
 fn relative_rate(turns: &[Turn]) -> f64 {
     #[allow(clippy::cast_precision_loss)] // a satellite count is far below 2^52
     let inv = 1.0 / turns.len() as f64;
     let w = turns
         .iter()
-        .fold(Vec3::ZERO, |acc, t| acc + t.mean_velocity().scale(inv));
-    let worst = turns.iter().fold(0.0_f64, |acc, t| {
-        acc.max(norm(t.normal.scale(t.slow) - w))
-            .max(norm(t.normal.scale(t.fast) - w))
-    });
-    // The constant is a sum of rounded terms; a relative margin far above their rounding keeps it
-    // from landing below the exact value.
-    worst * (1.0 + 1e-12)
+        .fold(Vec3::ZERO, |acc, t| acc + t.mean.scale(inv));
+    let w = IvVec::of(w);
+    turns.iter().fold(0.0_f64, |acc, t| {
+        let at = |rate: Iv| t.normal.scale(rate).sub(w).norm().hi;
+        acc.max(at(t.slow)).max(at(t.fast))
+    })
 }
 
 /// A piece of the time axis with its end uppers and the bound they give on its interior.
@@ -577,16 +787,13 @@ struct Piece {
 
 impl Piece {
     /// On `[a, b]` an `L`-Lipschitz function under `ua` at `a` and `ub` at `b` stays under both cones:
-    /// at most where they cross, or the lower end plus `L(b − a)` when they cross outside.
+    /// at most `(ua + ub + L(b − a))/2`, and at most the lower end plus `L(b − a)`.
     fn new(a: f64, b: f64, ua: f64, ub: f64, lipschitz: f64) -> Self {
-        let rise = lipschitz * (b - a);
-        let bound = if (ua - ub).abs() <= rise {
-            0.5 * (ua + ub + rise)
-        } else {
-            ua.min(ub) + rise
-        };
+        let rise = up(lipschitz * up(b - a));
+        let crossing = up(0.5 * up(up(ua + ub) + rise));
+        let bound = crossing.min(up(ua.min(ub) + rise));
         Self {
-            bound: bound.min(PI.next_up()),
+            bound: bound.min(outward::PI.hi),
             a,
             b,
             ua,
@@ -624,79 +831,98 @@ struct Workspace {
     axes: Vec<Vec3>,
 }
 
-/// `α_k` at one instant, `(lower, upper)`, for unit `sites` and `1 ≤ k ≤ sites.len()`.
-fn instant_enclosure(sites: &[Vec3], k: usize, ws: &mut Workspace) -> (f64, f64) {
+/// `α_k` at one instant, `(lower, upper)`, for unit `sites` within `err` of the exact ones and
+/// `1 ≤ k ≤ sites.len()`.
+fn instant_enclosure(sites: &[Vec3], err: f64, k: usize, ws: &mut Workspace) -> (f64, f64) {
     let n = sites.len();
     if k == n {
-        return (PI, PI.next_up());
+        return (PI, outward::PI.hi);
+    }
+    if !in_range(sites, err) {
+        return (0.0, outward::PI.hi);
     }
     if n == 2 {
-        let c = two_site_dot(sites[0], sites[1]);
-        return (acos_low(c + GAMMA), acos_high(c - GAMMA));
+        let a = outward::acos(two_site_dot(sites[0], sites[1], err));
+        return (a.lo, a.hi);
     }
-    let moved = snap(sites, ws);
+    let moved = snap(sites, err, ws);
     let (mut min_all, mut min_small, mut loose) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY);
     let mut small_lambda = 0.0_f64;
     let mut scratch = core::mem::take(&mut ws.scratch);
-    let _ = for_each_candidate(ws, |x, lambda| {
+    let _ = for_each_candidate(ws, err, |x, lambda, gamma| {
         let c = kth_dot(x, sites, k, &mut scratch);
-        min_all = min_all.min(c);
+        min_all = min_all.min(up(c + gamma));
+        let c_lo = down(c - gamma);
         if lambda <= SMALL_LAMBDA {
-            min_small = min_small.min(c);
+            min_small = min_small.min(c_lo);
             small_lambda = small_lambda.max(lambda);
         } else {
-            loose = loose.max(acos_high(c - GAMMA) + lambda);
+            loose = loose.max(up(acos_high(c_lo) + lambda));
         }
         ControlFlow::Continue(())
     });
     ws.scratch = scratch;
-    let tight = acos_high(min_small - GAMMA) + small_lambda;
-    let upper = (tight.max(loose) + 2.0 * moved).min(PI.next_up());
-    (acos_low(min_all + GAMMA), upper)
+    let tight = up(acos_high(min_small) + small_lambda);
+    let upper = up(tight.max(loose) + up(2.0 * moved)).min(outward::PI.hi);
+    (acos_low(min_all), upper)
 }
 
-/// Whether `α_k ≤ theta_slack` at one instant, refusing on a candidate beyond `θ` itself.
+/// Whether the sites are inside the domain of [`DOT_ERR`] and `err` is a number.
+fn in_range(sites: &[Vec3], err: f64) -> bool {
+    err.is_finite()
+        && sites
+            .iter()
+            .all(|s| s.x.abs() <= DOT_RANGE && s.y.abs() <= DOT_RANGE && s.z.abs() <= DOT_RANGE)
+}
+
+/// Whether `α_k ≤ theta_slack` at one instant, refusing on a candidate beyond `θ` itself, whose
+/// cosine is at least `cos_theta`.
 fn instant_verdict(
     sites: &[Vec3],
+    err: f64,
     k: usize,
     cos_theta: f64,
     theta_slack: f64,
     ws: &mut Workspace,
 ) -> Instant {
+    // An upper bound of cos φ for every φ ≥ `angle` up to π; none below 0.
     let cos_or_never = |angle: f64| {
         if angle >= 0.0 {
-            libm::cos(angle)
+            outward::cos(Iv::point(angle)).hi
         } else {
             f64::INFINITY
         }
     };
+    if !in_range(sites, err) {
+        return Instant::Unknown;
+    }
     if sites.len() == 2 {
-        let c = two_site_dot(sites[0], sites[1]);
-        return if c + GAMMA < cos_theta {
+        let c = two_site_dot(sites[0], sites[1], err);
+        return if c.hi < cos_theta {
             Instant::Hole
-        } else if c - GAMMA >= cos_or_never(theta_slack) {
+        } else if c.lo >= cos_or_never(theta_slack) {
             Instant::Holds
         } else {
             Instant::Unknown
         };
     }
-    let moved = snap(sites, ws);
-    let base = theta_slack - 2.0 * moved;
-    let need_small = cos_or_never(base - SMALL_LAMBDA);
+    let moved = snap(sites, err, ws);
+    let base = down(theta_slack - up(2.0 * moved));
+    let need_small = cos_or_never(down(base - SMALL_LAMBDA));
     let mut holds = true;
     let mut scratch = core::mem::take(&mut ws.scratch);
-    let flow = for_each_candidate(ws, |x, lambda| {
+    let flow = for_each_candidate(ws, err, |x, lambda, gamma| {
         let c = kth_dot(x, sites, k, &mut scratch);
-        if c + GAMMA < cos_theta {
+        if up(c + gamma) < cos_theta {
             return ControlFlow::Break(());
         }
         if holds {
             let need = if lambda <= SMALL_LAMBDA {
                 need_small
             } else {
-                cos_or_never(base - lambda)
+                cos_or_never(down(base - lambda))
             };
-            holds = c - GAMMA >= need;
+            holds = down(c - gamma) >= need;
         }
         ControlFlow::Continue(())
     });
@@ -712,14 +938,22 @@ fn instant_verdict(
 
 /// The dot product of the anti-midpoint of two sites with either of them, `−|a + b|/2 = −cos(d/2)`,
 /// which is the `k = 1` maximum `π − d/2` in dot-product form and needs no location
-/// (`derivations/analysis_alpha_exact.mac`, `two_sites`).
-fn two_site_dot(a: Vec3, b: Vec3) -> f64 {
-    -0.5 * norm(a + b)
+/// (`derivations/analysis_alpha_exact.mac`, `two_sites`): for the exact sites, each within `err` of
+/// `a` and `b`, as an interval.
+fn two_site_dot(a: Vec3, b: Vec3, err: f64) -> Iv {
+    let len = IvVec::of(a).add(IvVec::of(b)).norm();
+    let both = up(2.0 * err);
+    let len = Iv {
+        lo: down(len.lo - both).max(0.0),
+        hi: up(len.hi + both),
+    };
+    -(len * Iv::point(0.5))
 }
 
 /// Move every site within [`SNAP_CHORD`] of another, or of its antipode, onto its cluster's first
-/// site or that site's antipode; fill `ws.points` and `ws.axes`; return the largest move (radians).
-fn snap(sites: &[Vec3], ws: &mut Workspace) -> f64 {
+/// site or that site's antipode; fill `ws.points` and `ws.axes`; return an upper bound of the largest
+/// move between exact sites (radians).
+fn snap(sites: &[Vec3], err: f64, ws: &mut Workspace) -> f64 {
     let n = sites.len();
     ws.parent.clear();
     ws.parent.extend(0..n);
@@ -748,10 +982,9 @@ fn snap(sites: &[Vec3], ws: &mut Workspace) -> f64 {
         if !same {
             ws.minus[r] = true;
         }
-        // Chord c between the exact unit vectors is at most the computed one plus 2η, and the angle
-        // 2·asin(c/2) is at most c(1 + c).
-        let c = norm(sites[i] - target) + 2.0 * ETA;
-        moved = moved.max(c * (1.0 + c));
+        // The chord between the exact sites is at most the computed one plus 2e.
+        let chord = up(IvVec::of(sites[i]).sub(IvVec::of(target)).norm().hi + up(2.0 * err));
+        moved = moved.max(outward::angle_of_chord(chord));
     }
     ws.points.clear();
     ws.axes.clear();
@@ -775,51 +1008,114 @@ fn root(parent: &mut [usize], mut i: usize) -> usize {
     i
 }
 
-/// Visit every candidate built from `ws.points` and `ws.axes` with its location bound (radians):
-/// the antipodes, the anti-midpoints of pairs from different clusters, both poles of every triple, and
-/// two points of each axis's equator. A location that cannot be bounded is visited with an infinite
-/// bound at a valid point, which keeps the lower end and gives up the upper.
+/// `||v| − 1|`, outward-rounded, and `|v|`.
+fn deviation(v: Vec3) -> (f64, Iv) {
+    let len = outward::length(v);
+    (up(len.hi - 1.0).max(up(1.0 - len.lo)).max(0.0), len)
+}
+
+/// `γ` for the candidate `x`: `|fl(x·s) − x̂·S| ≤ 7u + |x|·e + ||x| − 1|` for every site `s` within
+/// `e` of its exact `S`, `x̂ = x/|x|`.
+fn gamma(x: Vec3, err: f64) -> f64 {
+    if !(x.x.abs() <= DOT_RANGE && x.y.abs() <= DOT_RANGE && x.z.abs() <= DOT_RANGE) {
+        return f64::INFINITY;
+    }
+    let (dev, len) = deviation(x);
+    up(up(DOT_ERR + up(len.hi * err)) + dev)
+}
+
+/// The angle between a candidate `x`, the double vector `v` scaled by one double, and the exact
+/// direction of `V`, `|v − V| ≤ v_err`; infinite when `v_err` is not below half of `|v|`. `V` is within
+/// `asin(v_err/|v|) ≤ (π/2)·v_err/|v|` of `v`'s direction; scaling rounds each component once,
+/// `x = r(v + w)` with `|w| ≤ u|v|` plus underflow, so `x` is within `asin(u + 2⁻¹⁰⁷⁰) ≤ 2u` of it
+/// (`derivations/outward_rounding.mac`).
+fn located(v: Vec3, v_err: f64) -> f64 {
+    let len = outward::length(v);
+    if v_err < 0.5 * len.lo {
+        up(up(outward::HALF_PI.hi * up(v_err / len.lo)) + 2.0 * U)
+    } else {
+        f64::INFINITY
+    }
+}
+
+/// `a × b` in doubles, in the operations of [`Vec3::cross`], and an upper bound of its distance from
+/// the exact product: a component `t₁ − t₂` of two rounded products is within
+/// `u(|c| + |t₁| + |t₂|) + 2η` of the exact one, `η = 2⁻¹⁰⁷⁴` an underflowed product's error, and
+/// the 1-norm of the three bounds is at least the 2-norm of the error.
+fn cross_rounded(a: Vec3, b: Vec3) -> (Vec3, f64) {
+    let part = |p: f64, q: f64, r: f64, s: f64| {
+        let (t1, t2) = (p * q, r * s);
+        let c = t1 - t2;
+        (c, up(up(c.abs() + t1.abs()) + t2.abs()))
+    };
+    let (cx, ex) = part(a.y, b.z, a.z, b.y);
+    let (cy, ey) = part(a.z, b.x, a.x, b.z);
+    let (cz, ez) = part(a.x, b.y, a.y, b.x);
+    let bound = up(up(U * up(up(ex + ey) + ez)) + SIX_ETA);
+    (Vec3::new(cx, cy, cz), bound)
+}
+
+/// Visit every candidate built from `ws.points` and `ws.axes` with its location bound `λ` (radians)
+/// and its dot-product allowance `γ`, for sites within `err` of the exact ones: the antipodes, the
+/// anti-midpoints of pairs from different clusters, both poles of every triple, and two points of
+/// each axis's equator. A location that cannot be bounded is visited with an infinite bound at a
+/// valid point, which keeps the lower end and gives up the upper.
+///
+/// A sum or difference of two doubles rounds each component once, within `u` of itself, and is exact
+/// when it underflows; so `|fl(a ± b) − (a ± b)| ≤ u|fl(a ± b)|` as vectors, which with the sites'
+/// `e` bounds each building block.
 fn for_each_candidate(
     ws: &Workspace,
-    mut visit: impl FnMut(Vec3, f64) -> ControlFlow<()>,
+    err: f64,
+    mut visit: impl FnMut(Vec3, f64, f64) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
     let points = &ws.points;
     let m = points.len();
+    let two_err = up(2.0 * err);
+    // −p against −P, |p − P| ≤ e with |P| = 1: within asin(e) ≤ (π/2)e.
+    let antipode = if err < 1.0 {
+        up(outward::HALF_PI.hi * err)
+    } else {
+        f64::INFINITY
+    };
     for &(p, _) in points {
-        visit(-p, 0.0)?;
+        visit(-p, antipode, gamma(-p, err))?;
     }
     for a in 0..m {
         for b in (a + 1)..m {
             if points[a].1 == points[b].1 {
                 continue;
             }
-            let s = points[a].0 + points[b].0;
-            let len = norm(s);
-            // |s − (p̂_a + p̂_b)| ≤ 2η + 2u|s|.
-            let lambda = location_bound(2.0 * ETA + 2.0 * U * len, len);
+            let (pa, pb) = (points[a].0, points[b].0);
+            let s = pa + pb;
+            let s_err = up(two_err + up(U * outward::length(s).hi));
+            let lambda = located(s, s_err);
             let x = if lambda.is_finite() {
-                s.scale(-1.0 / len)
+                s.scale(-1.0 / norm(s))
             } else {
-                points[a].0
+                pa
             };
-            visit(x, lambda)?;
+            visit(x, lambda, gamma(x, err))?;
         }
     }
     for a in 0..m {
         for b in (a + 1)..m {
             for c in (b + 1)..m {
                 let (pa, pb, pc) = (points[a].0, points[b].0, points[c].0);
-                let pole = (pb - pa).cross(pc - pa);
-                let len = norm(pole);
-                // Each difference is within 16u of the exact one and at most 2 long; the cross
-                // product's own rounding is at most 3u|A||B|: 80u in all.
-                let lambda = location_bound(80.0 * U, len);
+                let (da, db) = (pb - pa, pc - pa);
+                let (la, lb) = (outward::length(da).hi, outward::length(db).hi);
+                let (ea, eb) = (up(two_err + up(U * la)), up(two_err + up(U * lb)));
+                // (da + δa) × (db + δb) − da × db, |δa| ≤ ea and |δb| ≤ eb.
+                let (pole, rounding) = cross_rounded(da, db);
+                let pole_err = up(up(up(rounding + up(ea * lb)) + up(la * eb)) + up(ea * eb));
+                let lambda = located(pole, pole_err);
                 if lambda.is_finite() {
-                    let x = pole.scale(1.0 / len);
-                    visit(x, lambda)?;
-                    visit(-x, lambda)?;
+                    let x = pole.scale(1.0 / norm(pole));
+                    let g = gamma(x, err);
+                    visit(x, lambda, g)?;
+                    visit(-x, lambda, g)?;
                 } else {
-                    visit(pa, lambda)?;
+                    visit(pa, lambda, gamma(pa, err))?;
                 }
             }
         }
@@ -836,20 +1132,16 @@ fn for_each_candidate(
         };
         let u1 = unit(r.cross(e));
         let u2 = unit(r.cross(u1));
-        visit(u1, 8.0 * U)?;
-        visit(u2, 8.0 * U)?;
+        for x in [u1, u2] {
+            // The distance to the great circle orthogonal to the exact R: asin(|x̂·R|), and
+            // |x·R| ≤ |x·r| + |x|·e.
+            let (_, len) = deviation(x);
+            let along = up(IvVec::of(x).dot(IvVec::of(r)).mag() + up(len.hi * err));
+            let lambda = up(outward::HALF_PI.hi * up(along / len.lo));
+            visit(x, lambda, gamma(x, err))?;
+        }
     }
     ControlFlow::Continue(())
-}
-
-/// The angle between a computed direction `s` of length `len` and an exact one within `err` of it,
-/// plus the rounding of the normalisation: `asin(err/len) ≤ (π/2)·err/len`, while `err < len/2`.
-fn location_bound(err: f64, len: f64) -> f64 {
-    if len.is_finite() && err < 0.5 * len {
-        2.0 * err / len + 4.0 * U
-    } else {
-        f64::INFINITY
-    }
 }
 
 /// The `k`-th largest dot product of `x` with `sites`.
@@ -866,7 +1158,8 @@ fn kth_dot(x: Vec3, sites: &[Vec3], k: usize, scratch: &mut Vec<f64>) -> f64 {
         .1
 }
 
-/// The plain three-term dot product: one rounding per operation, inside [`GAMMA`].
+/// The plain three-term dot product: one rounding per operation, the order
+/// `derivations/alpha_dot_roundoff.gappa` proves [`DOT_ERR`] for.
 fn dot(a: Vec3, b: Vec3) -> f64 {
     a.x * b.x + a.y * b.y + a.z * b.z
 }
@@ -879,27 +1172,21 @@ fn unit(v: Vec3) -> Vec3 {
     v.scale(1.0 / norm(v))
 }
 
-/// A lower bound of the angle whose cosine is at most `c`.
+/// A lower bound of the angle whose cosine is at most `c`, under H-libm.
 ///
 /// `acos` stays in this bound and in [`acos_high`], where an angle from a dot product elsewhere is
 /// `atan2` of the cross and dot products (`derivations/angle_from_vectors.mac`): its argument is an
 /// end of a cosine interval `c ± γ` already proved, so it maps an enclosure to an enclosure, and the
 /// decision compares cosines and never reads it. Next to π, where `acos` is flat, the `γ` interval
-/// becomes at most `√(2γ)` = 8.4e-8 rad of angle: measured on two and on three sites `ρ` from one
-/// point, `ρ = 10⁻¹ … 10⁻¹²`, the enclosure holds `π − ρ` at every `ρ` and is 8.4e-8 rad wide
-/// from `ρ = 10⁻⁸` down. Next to 0 the angle never is: `n` caps cover the sphere `k` times only if
-/// `n(1 − cos α) ≥ 2k`, so `α ≥ 0.020` rad up to `n = 10⁴`.
+/// becomes at most `√(2γ)` rad of angle. Next to 0 the angle never is: `n` caps cover the sphere `k`
+/// times only if `n(1 − cos α) ≥ 2k`, so `α ≥ 0.020` rad up to `n = 10⁴`.
 fn acos_low(c: f64) -> f64 {
-    if c >= 1.0 { 0.0 } else { libm::acos(c) }
+    outward::acos(Iv::point(c)).lo
 }
 
-/// An upper bound of the angle whose cosine is at least `c`; `PI` itself is below π.
+/// An upper bound of the angle whose cosine is at least `c`, under H-libm; below `PI`'s successor.
 fn acos_high(c: f64) -> f64 {
-    if c <= -1.0 {
-        PI.next_up()
-    } else {
-        libm::acos(c)
-    }
+    outward::acos(Iv::point(c)).hi
 }
 
 #[cfg(test)]
@@ -943,7 +1230,8 @@ mod tests {
         k: usize,
         tol: f64,
     ) -> AlphaEnclosure {
-        Motion::new(sats).enclose(k, walker_symmetry_span(w), tol)
+        let span = walker_symmetry_span(w);
+        Motion::walker(w, sats).enclose(k, span, span, tol)
     }
 
     fn contains(e: AlphaEnclosure, x: f64) -> bool {
@@ -1150,12 +1438,15 @@ mod tests {
         let e = alpha_characteristic(&sats, 1, 1e-12).unwrap();
         assert!(contains(e, PI / 2.0), "{e:?}");
         assert!(e.upper - e.lower < 1e-12, "{e:?}");
-        let motion = Motion::new(&sats);
-        let mut sites = Vec::new();
+        let (w, _) = walker_at(55.0, 1, 2, 0);
+        let motion = Motion::walker(&w, &sats);
+        let (mut sites, mut ws) = (Vec::new(), Workspace::default());
         for j in 0..7 {
-            motion.sites_at(f64::from(j) * 1234.5, &mut sites);
-            let at = covering_radius(&sites, 1).unwrap();
-            assert!(contains(at, PI / 2.0), "instant {j}: {at:?}");
+            let (lower, upper) = motion.instant(f64::from(j) * 1234.5, 1, &mut sites, &mut ws);
+            assert!(
+                lower <= PI / 2.0 && PI / 2.0 <= upper,
+                "instant {j}: {lower} {upper}"
+            );
         }
     }
 
@@ -1452,16 +1743,19 @@ mod tests {
                 0.655_389_278_908_896_844_123_4,
             ),
         ] {
-            let (_, sats) = walker_at(inc, planes, per_plane, phasing);
-            let motion = Motion::new(&sats);
+            let (w, sats) = walker_at(inc, planes, per_plane, phasing);
+            let motion = Motion::walker(&w, &sats);
             let n = sats[0].mean_motion();
-            let mut sites = Vec::new();
+            let (mut sites, mut ws) = (Vec::new(), Workspace::default());
             for (u0, want) in [(0.0, at_0), (0.3, at_3)] {
-                motion.sites_at(u0 / n, &mut sites);
-                let e = covering_radius(&sites, k).unwrap();
+                // The enclosure is of the exact pattern at the double inclination and at
+                // `u0 = n·t`, each a few ulps from the decimal the reference takes; α moves at most
+                // as fast as its sites, so 1e-15 covers both offsets.
+                let fold = usize::try_from(k).unwrap();
+                let (lower, upper) = motion.instant(u0 / n, fold, &mut sites, &mut ws);
                 assert!(
-                    contains(e, want) && e.upper - e.lower < 1e-12,
-                    "{}/{planes}/{phasing} at u0 = {u0}: {e:?} against {want}",
+                    lower - 1e-15 <= want && want <= upper + 1e-15 && upper - lower < 1e-12,
+                    "{}/{planes}/{phasing} at u0 = {u0}: [{lower}, {upper}] against {want}",
                     planes * per_plane
                 );
             }
@@ -1655,5 +1949,113 @@ mod tests {
         // One satellite leaves the antipode of its sub-point uncovered: α₁ is π.
         let e = alpha_characteristic(&walker(1, 1), 1, 1e-6).unwrap();
         assert!(e.lower == PI && e.upper > PI, "{e:?}");
+    }
+
+    /// The site balls are tight: random ellipses (e up to 0.95) and circles at random times up to
+    /// 2e5 s, and every slot of random Walker patterns, each within 1e-9 of its computed site. With
+    /// `SPACELAB_S2_SITES=n` the test prints `n` of them, the elements, the site and the radius, as
+    /// the S2 lines `derivations/enclosure_s2.gp` holds each exact direction to (`verify.sh`).
+    #[test]
+    fn s2_site_lines() {
+        let wanted: Option<u64> = std::env::var("SPACELAB_S2_SITES")
+            .ok()
+            .and_then(|v| v.parse().ok());
+        let (count, print) = wanted.map_or((200, false), |n| (n, true));
+        let mut widest = 0.0_f64;
+        let mut state = 0x5EED_F28E_0000_0001_u64;
+        let mut next = move || {
+            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            #[expect(clippy::cast_precision_loss, reason = "53 bits are exact in an f64")]
+            let unit = ((z ^ (z >> 31)) >> 11) as f64 / 9_007_199_254_740_992.0;
+            unit
+        };
+        let hex = |x: f64| format!("0x{:016x}", x.to_bits());
+        let mut line = |e: &KeplerianElements, slot: &str, t: f64, s: Vec3, radius: f64| {
+            assert!(radius < 1e-9, "{e:?} at {t}: {radius:e}");
+            widest = widest.max(radius);
+            if !print {
+                return;
+            }
+            println!(
+                "S([{},{},{},{},{},{},{}],[{slot}],{},[{},{},{}],{});",
+                hex(e.semi_major_axis),
+                hex(e.eccentricity),
+                hex(e.inclination.radians()),
+                hex(e.raan.radians()),
+                hex(e.arg_periapsis.radians()),
+                hex(e.true_anomaly.radians()),
+                hex(e.mu),
+                hex(t),
+                hex(s.x),
+                hex(s.y),
+                hex(s.z),
+                hex(radius)
+            );
+        };
+        for j in 0..count {
+            let ecc = if j % 3 == 0 { 0.0 } else { 0.95 * next() };
+            let e = KeplerianElements {
+                semi_major_axis: 6.6e6 + 3.6e7 * next(),
+                eccentricity: ecc,
+                inclination: Angle::from_radians(PI * next()),
+                raan: Angle::from_radians(TAU * next()),
+                arg_periapsis: Angle::from_radians(TAU * next()),
+                true_anomaly: Angle::from_radians(TAU * next()),
+                mu: MU,
+            };
+            let t = 2e5 * next();
+            let sats = [e];
+            let (s, radius) = Motion::new(&sats).site(0, t);
+            line(&e, "", t, s, radius);
+        }
+        for j in 0..count / 20 {
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "6x is in [0, 6)"
+            )]
+            let pick = |x: f64| 1 + (6.0 * x) as u32;
+            let (planes, per_plane) = (pick(next()), pick(next()));
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "the product is in [0, planes)"
+            )]
+            let phasing = (f64::from(planes) * next()) as u32;
+            let star = j % 4 == 0;
+            let walker = Walker {
+                pattern: if star {
+                    WalkerPattern::Star
+                } else {
+                    WalkerPattern::Delta
+                },
+                inclination: Angle::from_radians(PI * next()),
+                planes,
+                per_plane,
+                phasing,
+                semi_major_axis: RE + 2e7 * next(),
+                mu: MU,
+            };
+            let mut sats = Vec::new();
+            walker.generate(|e| sats.push(e));
+            let motion = Motion::walker(&walker, &sats);
+            let time = 2e5 * next();
+            for (i, e) in sats.iter().enumerate() {
+                let i = u32::try_from(i).unwrap();
+                let slot = format!(
+                    "{planes},{per_plane},{},{},{},{}",
+                    phasing % planes,
+                    i / per_plane,
+                    i % per_plane,
+                    u8::from(star)
+                );
+                let (s, radius) = motion.site(i as usize, time);
+                line(e, &slot, time, s, radius);
+            }
+        }
+        println!("site balls: widest radius {widest:.2e}");
     }
 }

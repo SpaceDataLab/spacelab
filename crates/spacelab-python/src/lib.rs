@@ -2820,8 +2820,10 @@ fn draim_constellation(
 /// epoch and `mu`: the smallest sub-satellite footprint at which the constellation continuously
 /// `fold`-fold covers the sphere, over one period of the first satellite. Returns an enclosure
 /// `(lower, upper)`: exact over the sphere, a Lipschitz branch and bound in time that stops at
-/// `tolerance` or after 65 536 instants. Under H-libm, not outward-rounded. `ValueError` for a fold
-/// of zero or above the satellite count, a state off a two-body ellipse, or a bad tolerance.
+/// `tolerance` or after 65 536 instants. Outward-rounded under H-libm for the two-body orbits of the
+/// elements the states convert to; that conversion rounds to nearest and is not in the enclosure.
+/// `ValueError` for a fold of zero or above the satellite count, a state off a two-body ellipse, or
+/// a bad tolerance.
 #[pyfunction]
 #[pyo3(signature = (states, mu, fold = 1, tolerance = 1e-8))]
 fn alpha_characteristic(

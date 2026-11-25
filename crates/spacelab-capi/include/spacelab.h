@@ -894,9 +894,10 @@ sl_status sl_draim_geometry(const sl_draim_params *p, sl_draim_orbit *out);
  * half-angle, in radians, at which those `n` satellites continuously `fold`-fold cover the sphere,
  * over one period of the first satellite. Written as an enclosure, `out[0] <= alpha <= out[1]`:
  * exact over the sphere, a Lipschitz branch and bound in time that stops when the enclosure is
- * narrower than `tolerance_rad` or after 65 536 instants (wider, still an enclosure). Under H-libm,
- * not outward-rounded. `SL_ERR_INVALID_ARGUMENT` for `fold` zero or above `n`; `SL_ERR_DOMAIN` for a
- * state that is not on a two-body ellipse. Nothing is written on failure.
+ * narrower than `tolerance_rad` or after 65 536 instants (wider, still an enclosure). Outward-rounded
+ * under H-libm for the two-body orbits of the elements the states convert to; that conversion rounds
+ * to nearest and is not in the enclosure. `SL_ERR_INVALID_ARGUMENT` for `fold` zero or above `n`;
+ * `SL_ERR_DOMAIN` for a state that is not on a two-body ellipse. Nothing is written on failure.
  */
 sl_status sl_alpha_characteristic(const sl_state *states, size_t n, double mu, uint32_t fold,
                                   double tolerance_rad, double *out);

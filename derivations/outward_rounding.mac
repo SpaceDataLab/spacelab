@@ -1,0 +1,137 @@
+/* The hand lemmas behind the outward-rounded enclosures of `crates/spacelab-constellation`
+   (plan 18 Ф28.V): `outward.rs`, the k-fold areas in `kfold.rs` and the α-characteristic in
+   `analysis.rs`. The one a-priori margin, the dot product's 7u, is Gappa's
+   (`alpha_dot_roundoff.gappa`); `+ - * / sqrt` and `fma` are correctly rounded, and the libm
+   elementary functions enter under H-libm (`h_libm.txt`). What is left is proved here: each lemma
+   as an identity that simplifies to 0, or an inequality evaluated in exact rationals or in 60-digit
+   bigfloats that prints 0 when it holds. `outward_rounding.gp` re-checks every one at sample points
+   and replays the rounded operations in binary64.
+
+   u = 2^-53 the unit roundoff, eta = 2^-1074 the smallest subnormal.
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/outward_rounding.mac </dev/null */
+
+display2d: false$
+fpprec: 60$
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+holds(name, p) := chk(name, if p then 0 else "FAILS")$
+u: 2^-53$
+eta: 2^-1074$
+
+/* ---- 1. libm_iv: |r - f| <= c ulp(f) with ulp(f) <= 2^-52 |f| + eta and |f| <= |r| + |r - f| gives
+   |r - f| (1 - c 2^-52) <= c 2^-52 |r| + c eta. For c <= 2 that is at most (c + 2^-40) 2^-52 |r|
+   + 2^-1072: c/(1 - c e) - c = c^2 e/(1 - c e) rises with c, and c eta/(1 - c e) <= 4 eta. ---- */
+chk("libm_rearranged",
+    ratsimp((c*2^-52*(R + x) + c*eta - x) - ((c*2^-52*R + c*eta) - x*(1 - c*2^-52))))$
+holds("libm_relative_slack_at_c2", is(4*2^-52/(1 - 2*2^-52) <= 2^-40))$
+holds("libm_slack_rises_with_c", is(ratsimp(diff(c^2*e/(1 - c*e), c) - c*e*(2 - c*e)/(1 - c*e)^2) = 0))$
+holds("libm_absolute_slack_at_c2", is(2*eta/(1 - 2*2^-52) <= 2^-1072))$
+
+/* ---- 2. The constants. PI < pi < next(PI); TAU and FRAC_PI_2 are PI times 2 and 1/2, exact. ---- */
+pid: 884279719003555/2^48$
+holds("pi_above_the_double", is(bfloat(pid) < bfloat(%pi)))$
+holds("pi_below_the_next_double", is(bfloat(pid + 2^-51) > bfloat(%pi)))$
+holds("PI_is_the_double_nearest_pi", is(abs(bfloat(pid - %pi)) < bfloat(2^-52)))$
+holds("exact_floor_is_2_to_minus_900", is(2^(123 - 1023) = 2^-900))$
+holds("length_floor_is_2_to_minus_449", is(2^(574 - 1023) = 2^-449))$
+
+/* ---- 3. Error-free residuals. Away from underflow a - q b (q = RN(a/b)) and a - s^2 (s = RN(sqrt a))
+   are doubles: with |a|, |q| >= 2^-900 the residual is a multiple of 2^(e_q + e_b - 104) >= 2^-1005,
+   inside the subnormal grid, and below ulp(q) |b| < 2^(e_q + e_b - 51): 53 bits. ---- */
+holds("quotient_residual_on_the_grid", is(-900 - 1 - 104 >= -1074))$
+holds("quotient_residual_fits_53_bits", is((-51) - (-104) <= 53))$
+
+/* ---- 4. A 1-Lipschitz sin or cos is monotone between two ends where its derivative has one strict
+   sign, on an interval shorter than pi: the derivative's zeros are pi apart and simple. ---- */
+holds("three_is_below_pi", is(3 < bfloat(%pi)))$
+chk("cos_zeros_pi_apart", trigsimp(cos(%pi/2 + %pi) - 0))$
+
+/* ---- 5. atan t within |t|^3/3 of t: t - atan t is the integral of s^2/(1 + s^2) <= s^2. The
+   series is used below |t| = 2^-50, where |t|^3/3 <= |t| 2^-100. ---- */
+chk("t_minus_atan_derivative", ratsimp(diff(t - atan(t), t) - t^2/(1 + t^2)))$
+holds("series_tail_below_two_to_minus_100", is((2^-50)^2/3 <= 2^-100))$
+
+/* ---- 6. The k-fold integrand. Along a circle of radius rho the form (1 - cos theta) dphi moves at
+   (1 - cos theta) |dphi/dpsi| <= sin rho (1 - cos theta)/sin theta = sin rho tan(theta/2); theta is
+   at most pi - kappa, kappa the pole's antipode's distance from the circle, and
+   tan((pi - kappa)/2) = cot(kappa/2) <= 2/kappa, as tan x >= x on [0, pi/2). ---- */
+/* theta = 2w and kappa = 2w */
+chk("one_minus_cos_over_sin_is_tan_half", trigsimp(trigexpand((1 - cos(2*w))/sin(2*w)) - tan(w)))$
+chk("tan_half_of_pi_minus_kappa", trigsimp(trigexpand(sin(%pi/2 - w)/cos(%pi/2 - w)) - cos(w)/sin(w)))$
+chk("tan_minus_x_rises", trigsimp(diff(tan(x) - x, x) - tan(x)^2))$
+
+/* ---- 7. Two arcs of one circle, centres c, c', half-lengths h, h' in [0, pi]: moving (c, h)
+   straight to (c', h') changes a point's membership only when an end passes it, so the symmetric
+   difference is at most |dc - dh| + |dc + dh| = 2 max(|dc|, |dh|) <= 2 (|dc| + |dh|). ---- */
+sd(a, b) := abs(a - b) + abs(a + b) - 2*max(abs(a), abs(b))$
+holds("ends_sweep_twice_the_larger_move",
+      every(lambda([p], is(sd(p[1], p[2]) = 0)),
+            [[0, 0], [1/3, 1/7], [-2, 5], [7/2, -7/2], [-1/9, -4], [3, 0]]))$
+
+/* ---- 8. The band within delta of a circle of radius rho has area 2 pi (cos(rho - delta)
+   - cos(rho + delta)) = 4 pi sin rho sin delta inside [0, pi], at most 2 pi . 2 delta . max sin,
+   and sin is 1-Lipschitz: at most 4 pi delta min(1, sin rho + delta). ---- */
+chk("band_area", trigsimp(trigexpand(2*%pi*(cos(r - d) - cos(r + d)) - 4*%pi*sin(r)*sin(d))))$
+
+/* ---- 9. Angles from small quantities. asin is convex on [0, 1], so asin z <= (pi/2) z there; a
+   chord c of two unit vectors is an angle 2 asin(c/2) <= (pi/2) c; and asin(u + 2^-1070) <= 2u,
+   the scaling of a vector by one double (located in analysis.rs). ---- */
+chk("asin_second_derivative", ratsimp(diff(asin(z), z, 2) - z/(1 - z^2)^(3/2)))$
+holds("asin_at_one_is_half_pi", is(asin(1) = %pi/2))$
+holds("scaling_angle_below_2u",
+      is(bfloat(asin(bfloat(u + 2^-1070))) <= bfloat(2*u)))$
+
+/* ---- 10. The length of a double vector (outward.rs `length`). Three squares within u of their
+   results plus 2^-1075 each, two sums of non-negative terms within u: |s - S| <= ((1 + u)^3 - 1) S
+   + 3 (1 + u)^2 2^-1075. With n = RN(sqrt s) >= 2^-449, S >= 2^-899, so the relative error of s is
+   at most theta below, and n is within sqrt(1 +- theta)(1 +- u) of sqrt S: 2.6u. Then
+   S^(1/2) lies in [n/(1 + 2.6u), n/(1 - 2.6u)], inside [n(1 - 4u), n(1 + 4u)]. ---- */
+theta: (1 + u)^3 - 1 + 3*(1 + u)^2*2^-1075/2^-899$
+holds("norm_relative_above", is(bfloat(sqrt(1 + theta)*(1 + u) - 1) <= bfloat(2.6b0*u)))$
+holds("norm_relative_below", is(bfloat(1 - sqrt(1 - theta)*(1 - u)) <= bfloat(2.6b0*u)))$
+holds("norm_upper_factor", is(bfloat(1/(1 - 2.6b0*u)) <= bfloat(1 + 4*u)))$
+holds("norm_lower_factor", is(bfloat(1/(1 + 2.6b0*u)) >= bfloat(1 - 4*u)))$
+holds("norm_floor_squared", is(bfloat((2^-449*(1 - u))^2/(1 + theta)) >= bfloat(2^-899)))$
+
+/* ---- 11. The cross product's rounding (analysis.rs `cross_rounded`): a component
+   c = RN(RN(p q) - RN(r s)) is within u |c| + u |t1| + u |t2| + 2 . 2^-1075 of p q - r s, since
+   |RN(t) - t| <= u |RN(t)| + 2^-1075 and a difference that underflows is exact. Three components
+   lose at most 3 . 2^-1074 to underflow; the code adds 6 . 2^-1074. And
+   |(a + da) x (b + db) - a x b| <= |da| |b| + |a| |db| + |da| |db|. ---- */
+holds("cross_underflow_allowance", is(3*2*2^-1075 <= 6*eta))$
+cross3(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+av: [a1, a2, a3]$ bv: [b1, b2, b3]$ dav: [d1, d2, d3]$ dbv: [f1, f2, f3]$
+sq3(v) := v[1]^2 + v[2]^2 + v[3]^2$
+chk("cross_of_perturbed",
+    ratsimp(sq3(cross3(av + dav, bv + dbv) - cross3(av, bv)
+                - (cross3(dav, bv) + cross3(av, dbv) + cross3(dav, dbv)))))$
+
+/* ---- 12. A candidate's cosine (analysis.rs `gamma`): with x a double vector, s within e of the
+   exact unit site S, and RN the 7u dot product, |RN(x.s) - (x/|x|).S| <= 7u + |x| e + ||x| - 1|:
+   x.S - (x/|x|).S = (x/|x|).S (|x| - 1), and |(x/|x|).S| <= 1. ---- */
+chk("candidate_length_split", ratsimp(L*w - w - (L - 1)*w))$
+
+/* ---- 13. The sites. A circular orbit's direction is N cos u + M sin u, N = (cos O, sin O, 0),
+   M = (-sin O cos i, cos O cos i, sin i), the rotation R3(-O) R1(-i) of (cos u, sin u, 0), and its
+   normal is N x M = (sin O sin i, -cos O sin i, cos i). On an ellipse, E from nu and back, the
+   eccentric anomaly within |f(E)|/(1 - e) of the root, since Kepler's f' = 1 - e cos E >= 1 - e, and
+   nu moves at dnu/dE = sqrt(1 - e^2)/(1 - e cos E) <= sqrt((1 + e)/(1 - e)). ---- */
+R3(t) := matrix([cos(t), sin(t), 0], [-sin(t), cos(t), 0], [0, 0, 1])$
+R1(t) := matrix([1, 0, 0], [0, cos(t), sin(t)], [0, -sin(t), cos(t)])$
+Nv: [cos(O), sin(O), 0]$ Mv: [-sin(O)*cos(i), cos(O)*cos(i), sin(i)]$
+D: R3(-O) . R1(-i) . transpose(matrix([cos(uu), sin(uu), 0]))$
+chk("circular_direction", trigsimp(sq3(list_matrix_entries(D) - (Nv*cos(uu) + Mv*sin(uu)))))$
+chk("orbit_normal", trigsimp(sq3(cross3(Nv, Mv) - [sin(O)*sin(i), -cos(O)*sin(i), cos(i)])))$
+assume(ec > 0, ec < 1)$
+/* nu = 2 atan(k tan(E/2)), k = sqrt((1 + e)/(1 - e)); with T = tan(E/2) everything is rational. */
+k: sqrt((1 + ec)/(1 - ec))$
+chk("nu_of_E_derivative",
+    trigsimp(diff(2*atan(kk*tan(EE/2)), EE) - kk*(1 + tan(EE/2)^2)/(1 + kk^2*tan(EE/2)^2)))$
+chk("true_anomaly_rate_in_E",
+    ratsimp(radcan(k*(1 + T^2)/(1 + k^2*T^2) - sqrt(1 - ec^2)*(1 + T^2)/((1 + T^2) - ec*(1 - T^2)))))$
+chk("rate_at_periapsis_is_the_bound",
+    ratsimp(radcan(sqrt(1 - ec^2)/(1 - ec) - sqrt((1 + ec)/(1 - ec)))))$
+chk("cos_of_twice_atan", ratsimp(trigexpand(cos(2*atan(z))) - (1 - z^2)/(1 + z^2)))$
+chk("cos_by_half_angle_tangent", trigsimp(trigexpand(cos(2*w)) - (1 - tan(w)^2)/(1 + tan(w)^2)))$
+chk("E_from_nu_cos",
+    ratsimp((ec + (1 - k^2*T^2)/(1 + k^2*T^2))/(1 + ec*(1 - k^2*T^2)/(1 + k^2*T^2))
+            - (1 - T^2)/(1 + T^2)))$

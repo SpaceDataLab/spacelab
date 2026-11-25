@@ -1,0 +1,44 @@
+# The round-off of the three-term dot product behind the α-characteristic's cosines, proved
+# (plans/18 Ф28.V): the a-priori margin of the enclosure's innermost loop.
+#
+#   timeout 120 gappa alpha_dot_roundoff.gappa     (Gappa 1.8.3; exit 1 and "not satisfied" on failure)
+#
+# Code: crates/spacelab-constellation/src/analysis.rs, `dot` (the constant DOT_ERR). For a candidate
+# point x and a site s, in this order, each operation one IEEE double rounding to nearest-even, no
+# FMA (Rust does not contract):
+#
+#   d = (x.x * s.x + x.y * s.y) + x.z * s.z
+#
+# It runs once per candidate and site, O(m^4) times an instant for m sites, so the bound is fixed in
+# advance rather than carried in intervals. Domain: every component of both vectors at most
+# 1 + 2^-40 in magnitude, which `in_range` and `gamma` check before the bound is used; the sites and
+# candidates are unit vectors to rounding, far inside it. Products that underflow are covered: Gappa
+# models the subnormal range of ieee_64.
+#
+# Result: |d - D| <= 7 * 2^-53 for D the exact dot product of the two double vectors, the DOT_ERR
+# = 7u that the enclosure adds to every cosine (with |x| e and ||x| - 1| for the sites' own error and
+# the candidate's length, by hand in analysis.rs `gamma`). The naive bound is gamma_3 * sum |a_i b_i|
+# <= 3u * (1 + 2^-40)^2 * 3 ~ 9u; Gappa's split of the five roundings gives 7u.
+
+@rnd = float<ieee_64, ne>;
+
+a1 = rnd(A1); a2 = rnd(A2); a3 = rnd(A3);
+b1 = rnd(B1); b2 = rnd(B2); b3 = rnd(B3);
+
+p1 = rnd(a1 * b1);
+p2 = rnd(a2 * b2);
+p3 = rnd(a3 * b3);
+s1 = rnd(p1 + p2);
+d = rnd(s1 + p3);
+
+D = a1 * b1 + a2 * b2 + a3 * b3;
+
+{ |a1| <= 1.0000000000009094947017729282379150390625
+  /\ |a2| <= 1.0000000000009094947017729282379150390625
+  /\ |a3| <= 1.0000000000009094947017729282379150390625
+  /\ |b1| <= 1.0000000000009094947017729282379150390625
+  /\ |b2| <= 1.0000000000009094947017729282379150390625
+  /\ |b3| <= 1.0000000000009094947017729282379150390625
+  -> |d - D| <= 7b-53 }
+
+d - D -> (d - (s1 + p3)) + (s1 - (p1 + p2)) + (p1 - a1 * b1) + (p2 - a2 * b2) + (p3 - a3 * b3);

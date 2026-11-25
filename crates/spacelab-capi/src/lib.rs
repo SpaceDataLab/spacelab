@@ -3690,7 +3690,8 @@ pub const SL_ALPHA_ENCLOSURE: usize = 2;
 /// The α-characteristic of a delta system: an enclosure `[lower, upper]` of the smallest footprint
 /// half-angle at which the given satellites continuously `fold`-fold cover the sphere, radians, over
 /// one period of the first satellite. Exact in space, a Lipschitz branch and bound in time, stopped
-/// at `tolerance_rad` or its budget; under H-libm, not outward-rounded.
+/// at `tolerance_rad` or its budget. Outward-rounded under H-libm for the two-body orbits of the
+/// elements the states convert to; that conversion rounds to nearest and is not in the enclosure.
 ///
 /// # Safety
 /// `states` is readable for `n` `sl_state`; `out` is writable for `SL_ALPHA_ENCLOSURE` doubles.

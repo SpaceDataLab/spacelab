@@ -50,13 +50,30 @@
 //!
 //! The cost is `O(m² log m)` for `m` caps: every pair of circles, then a sort per circle.
 //!
-//! Every area here is **under H-libm, not outward-rounded** ([`KfoldAreas::LABEL`]): the half-angles
-//! and the crossing points pass through `libm`'s `sin`, `cos` and `atan2`, and the arithmetic rounds
-//! to nearest.
+//! **The enclosure.** [`KfoldAreas::lower`] and [`KfoldAreas::upper`] hold each `A_k` of the input,
+//! **outward-rounded under H-libm** ([`KfoldAreas::LABEL`], plan 18 Ф28.V). The arcs the doubles
+//! chose are integrated again on the exact circles in intervals rounded down and up at every
+//! operation, the direction read from the operation's exact residual (`outward`); `libm`'s `sin`,
+//! `cos` and `atan2` enter widened by their measured H-libm constants (`docs/verification.md` §1.1),
+//! which is the hypothesis the label names. What the doubles may have chosen wrong is
+//! bounded, not assumed away: where an arc's ends sit is compared with an interval of where the
+//! exact arc's ends sit, by the extended half-angle formula, which is 0 or π exactly where the pair
+//! does not cross; along circle `i` the depth then differs only on the two arcs' symmetric
+//! difference, of measure at most `2(|Δc| + |Δh|)` for centres `c` and half-lengths `h`, and there
+//! `|dω/dψ| ≤ sin ρ·tan(θ/2) ≤ 2 sin ρ/κ`, `κ` the pole's clearance from the circle
+//! (`derivations/outward_rounding.mac`). Every pair of caps within [`COINCIDENT_ANGLE`] is moved
+//! onto one circle for the enclosure, two included, and pays its band. The bound is first
+//! order in the ends' error and takes the largest `|dω/dψ|` along each circle, so it is wider than
+//! the error of [`KfoldAreas::at_least`]: `6.7·10⁻¹²` sr for twelve caps in general position, about
+//! 500 times the round-off; `1.4·10⁻⁸` sr at a tangency or concentric pair, where the ends' error is
+//! `√u`-sized; up to `10⁻⁵` sr for the near-coincident corpus, whose snapped pairs pay their band
+//! (the tests measure each).
 //!
 //! This is design-time analysis (it allocates), so it lives behind the crate's `std` feature.
 
 use spacelab_core::Vec3;
+
+use crate::outward::{self, Iv, IvVec};
 
 const PI: f64 = core::f64::consts::PI;
 const TAU: f64 = core::f64::consts::TAU;
@@ -109,20 +126,25 @@ impl core::error::Error for CapError {}
 #[derive(Clone, Debug, PartialEq)]
 pub struct KfoldAreas {
     /// `at_least[k − 1]` is the area covered by at least `k` caps, `k = 1, …, n`; one entry per cap.
+    /// Rounded to nearest, not a bound; it lies in `[lower[k − 1], upper[k − 1]]`.
     pub at_least: Vec<f64>,
-    /// How far any `A_k` may be from the input's because caps were moved onto a shared circle: the
-    /// sum over moved caps of the band each swept. 0 when no cap was moved.
+    /// How far any `at_least` may be from the input's because caps were moved onto a shared circle:
+    /// the sum over moved caps of the band each swept. 0 when no cap was moved.
     pub snap_bound: f64,
+    /// `lower[k − 1] ≤ A_k`, outward-rounded under H-libm ([`KfoldAreas::LABEL`]).
+    pub lower: Vec<f64>,
+    /// `A_k ≤ upper[k − 1]`, outward-rounded under H-libm.
+    pub upper: Vec<f64>,
 }
 
 impl KfoldAreas {
-    /// What the areas rest on: the `libm` elementary functions within their measured error (H-libm),
-    /// and round-to-nearest arithmetic rather than outward rounding.
-    pub const LABEL: &'static str = "under H-libm, not outward-rounded";
+    /// What `[lower, upper]` rests on: outward rounding of every `+ − × ÷ √`, and the `libm`
+    /// elementary functions within their measured error (H-libm, a tested hypothesis).
+    pub const LABEL: &'static str = "outward-rounded under H-libm";
 }
 
 /// The area of the sphere covered at least `k` times by `caps`, for every `k` from 1 to the number of
-/// caps (module docs).
+/// caps (module docs): the value rounded to nearest, and its enclosure.
 ///
 /// # Errors
 /// [`CapError::BadCentre`] for a centre that is not finite or is zero, and
@@ -142,57 +164,76 @@ fn areas_with(caps: &[SphericalCap], coincident: f64) -> Result<KfoldAreas, CapE
         if !(cap.half_angle > 0.0 && cap.half_angle < PI) {
             return Err(CapError::BadHalfAngle { cap: i });
         }
-        unit_caps.push((cap.centre.scale(1.0 / len), cap.half_angle));
-    }
-    let (circles, snap_bound) = circles_of(&unit_caps, coincident);
-    let mut at_least = vec![0.0; caps.len()];
-    if circles.is_empty() {
-        return Ok(KfoldAreas {
-            at_least,
-            snap_bound,
+        unit_caps.push(Cap {
+            unit: cap.centre.scale(1.0 / len),
+            rho: cap.half_angle,
+            raw: cap.centre,
         });
     }
-    let s = clear_point(&circles);
-    let mut sweeps: Vec<Sweep> = circles.iter().map(|_| Sweep::default()).collect();
-    for i in 0..circles.len() {
-        for j in (i + 1)..circles.len() {
-            let (ci, cj) = (&circles[i], &circles[j]);
-            match relation(ci, cj) {
-                Relation::Apart {
-                    i_inside_j,
-                    j_inside_i,
-                } => {
-                    sweeps[i].base += if i_inside_j { cj.plus } else { cj.minus };
-                    sweeps[j].base += if j_inside_i { ci.plus } else { ci.minus };
-                }
-                Relation::Cross {
-                    enter,
-                    exit,
-                    h_i,
-                    h_j,
-                } => {
-                    // Circle i runs inside j's cap from `enter` to `exit`; circle j runs inside i's
-                    // cap from `exit` to `enter`, the same two points crossed the other way.
-                    sweeps[i].interval(ci, (enter, exit), 2.0 * h_i, cj.plus, cj.minus);
-                    sweeps[j].interval(cj, (exit, enter), 2.0 * h_j, ci.plus, ci.minus);
-                }
-            }
-        }
+    let point = circles_of(&unit_caps, coincident, 3);
+    let mut at_least = vec![0.0; caps.len()];
+    if point.circles.is_empty() {
+        return Ok(KfoldAreas {
+            lower: at_least.clone(),
+            upper: at_least.clone(),
+            at_least,
+            snap_bound: point.band,
+        });
     }
-    for (circle, sweep) in circles.iter().zip(&mut sweeps) {
+    let arrangement = arrange(&point.circles);
+    let s = arrangement.s;
+    for (circle, sweep) in point.circles.iter().zip(&arrangement.sweeps) {
         sweep.integrate(circle, -s, &mut at_least);
     }
-    let covered_at_s: usize = circles
+    let covered_at_s: usize = point
+        .circles
         .iter()
         .map(|c| if dot(s, c.c) > c.cos { c.plus } else { c.minus })
         .sum();
     for area in &mut at_least[..covered_at_s] {
         *area += 2.0 * TAU;
     }
+    // The enclosure moves pairs onto one circle too; when no class is a pair, the arrangement is
+    // the same.
+    let paired = circles_of(&unit_caps, coincident, 2);
+    let enclosure = if paired.pairs {
+        let arrangement = arrange(&paired.circles);
+        enclose(&paired.circles, &arrangement, caps.len())
+    } else {
+        enclose(&point.circles, &arrangement, caps.len())
+    };
+    let (mut lower, mut upper) = (
+        Vec::with_capacity(caps.len()),
+        Vec::with_capacity(caps.len()),
+    );
+    let whole = outward::up(2.0 * outward::TAU.hi);
+    for (k, &value) in at_least.iter().enumerate() {
+        let (lo, hi) = enclosure.as_ref().map_or((0.0, whole), |sums| {
+            let r = outward::up(sums.radius + paired.band_up);
+            (
+                outward::down(sums.levels[k].lo - r).max(0.0),
+                outward::up(sums.levels[k].hi + r).min(whole),
+            )
+        });
+        // Widening an enclosure keeps it one; the value rounded to nearest is inside it.
+        lower.push(lo.min(value));
+        upper.push(hi.max(value));
+    }
     Ok(KfoldAreas {
         at_least,
-        snap_bound,
+        snap_bound: point.band,
+        lower,
+        upper,
     })
+}
+
+/// One input cap: its centre normalised in doubles, its half-angle, and the centre as given, whose
+/// exact direction the enclosure takes.
+#[derive(Clone, Copy)]
+struct Cap {
+    unit: Vec3,
+    rho: f64,
+    raw: Vec3,
 }
 
 /// One circle of the arrangement with its frame and the caps it bounds.
@@ -203,6 +244,10 @@ struct Circle {
     rho: f64,
     cos: f64,
     sin: f64,
+    /// The centre as the input gave it, of the cap whose circle this is.
+    raw: Vec3,
+    /// The coordinate axis `u` was built from.
+    axis: Vec3,
     /// Caps on the `c` side, the left of `ψ` increasing.
     plus: usize,
     /// Caps on the `−c` side.
@@ -210,26 +255,29 @@ struct Circle {
 }
 
 impl Circle {
-    fn new(c: Vec3, rho: f64, plus: usize, minus: usize) -> Self {
+    fn new(cap: Cap, plus: usize, minus: usize) -> Self {
+        let c = cap.unit;
         // A coordinate axis at least √(2/3) across `c` makes `u` well defined; (u, v, c) is right-handed.
         let (ax, ay, az) = (c.x.abs(), c.y.abs(), c.z.abs());
-        let e = if ax <= ay && ax <= az {
+        let axis = if ax <= ay && ax <= az {
             Vec3::new(1.0, 0.0, 0.0)
         } else if ay <= az {
             Vec3::new(0.0, 1.0, 0.0)
         } else {
             Vec3::new(0.0, 0.0, 1.0)
         };
-        let u = unit(e.cross(c));
+        let u = unit(axis.cross(c));
         let v = c.cross(u);
-        let (sin, cos) = libm::sincos(rho);
+        let (sin, cos) = libm::sincos(cap.rho);
         Self {
             c,
             u,
             v,
-            rho,
+            rho: cap.rho,
             cos,
             sin,
+            raw: cap.raw,
+            axis,
             plus,
             minus,
         }
@@ -241,9 +289,20 @@ impl Circle {
     }
 }
 
-/// The circles of `caps` (unit centres): one per cap, except that three or more caps whose circles
-/// chain within `coincident` share their first cap's circle. Returns the swept-band bound.
-fn circles_of(caps: &[(Vec3, f64)], coincident: f64) -> (Vec<Circle>, f64) {
+/// The circles of an input and what moving caps onto shared circles cost.
+struct Snapped {
+    circles: Vec<Circle>,
+    /// The swept-band bound, rounded to nearest: [`KfoldAreas::snap_bound`].
+    band: f64,
+    /// The same bound outward-rounded, for the enclosure.
+    band_up: f64,
+    /// Whether some class of exactly two caps was moved.
+    pairs: bool,
+}
+
+/// The circles of `caps`: one per cap, except that `min_group` or more caps whose circles chain
+/// within `coincident` share their first cap's circle.
+fn circles_of(caps: &[Cap], coincident: f64, min_group: usize) -> Snapped {
     let m = caps.len();
     let mut parent: Vec<usize> = (0..m).collect();
     for i in 0..m {
@@ -261,42 +320,51 @@ fn circles_of(caps: &[(Vec3, f64)], coincident: f64) -> (Vec<Circle>, f64) {
         size[root(&mut parent, i)] += 1;
     }
     let mut counts = vec![(0_usize, 0_usize); m];
-    let mut snap_bound = 0.0;
+    let (mut band, mut band_up) = (0.0, 0.0);
     let mut circles = Vec::with_capacity(m);
     for i in 0..m {
         let r = root(&mut parent, i);
-        if size[r] < 3 {
-            circles.push(Circle::new(caps[i].0, caps[i].1, 1, 0));
+        if size[r] < min_group {
+            circles.push(Circle::new(caps[i], 1, 0));
             continue;
         }
-        let (rep, rep_rho) = caps[r];
-        let (c, rho) = caps[i];
-        let parallel = dot(c, rep) >= 0.0;
+        let rep = caps[r];
+        let cap = caps[i];
+        let parallel = dot(cap.unit, rep.unit) >= 0.0;
         let (target, target_rho) = if parallel {
-            (rep, rep_rho)
+            (rep.unit, rep.rho)
         } else {
-            (-rep, PI - rep_rho)
+            (-rep.unit, PI - rep.rho)
         };
         if parallel {
             counts[r].0 += 1;
         } else {
             counts[r].1 += 1;
         }
-        snap_bound += band_area(rho, angle(c, target) + (rho - target_rho).abs());
+        band += band_area(
+            cap.rho,
+            angle(cap.unit, target) + (cap.rho - target_rho).abs(),
+        );
+        band_up = outward::up(band_up + band_bound(cap, rep, parallel));
     }
     for (r, &(plus, minus)) in counts.iter().enumerate() {
         if plus + minus > 0 {
-            circles.push(Circle::new(caps[r].0, caps[r].1, plus, minus));
+            circles.push(Circle::new(caps[r], plus, minus));
         }
     }
-    (circles, snap_bound)
+    Snapped {
+        circles,
+        band,
+        band_up,
+        pairs: size.contains(&2),
+    }
 }
 
 /// Whether two caps' circles are within `coincident` of one circle, on either side.
-fn same_circle((ci, ri): (Vec3, f64), (cj, rj): (Vec3, f64), coincident: f64) -> bool {
-    let d = angle(ci, cj);
-    (d <= coincident && (ri - rj).abs() <= coincident)
-        || (PI - d <= coincident && (ri + rj - PI).abs() <= coincident)
+fn same_circle(a: Cap, b: Cap, coincident: f64) -> bool {
+    let d = angle(a.unit, b.unit);
+    (d <= coincident && (a.rho - b.rho).abs() <= coincident)
+        || (PI - d <= coincident && (a.rho + b.rho - PI).abs() <= coincident)
 }
 
 /// The area within `delta` of a circle of radius `rho`: the band a move of at most `delta` sweeps.
@@ -304,6 +372,26 @@ fn band_area(rho: f64, delta: f64) -> f64 {
     let lo = (rho - delta).max(0.0);
     let hi = (rho + delta).min(PI);
     2.0 * TAU * libm::sin(0.5 * (hi + lo)) * libm::sin(0.5 * (hi - lo))
+}
+
+/// An outward-rounded bound of the band `cap`'s circle sweeps when moved onto `rep`'s (or onto its
+/// complement's): the exact move `δ` is at most the angle between the exact centres plus the
+/// difference of half-angles, and the band within `δ` of a circle of radius `ρ` is at most
+/// `2π·2δ·min(1, sin ρ + δ)`, since `sin` is 1-Lipschitz.
+fn band_bound(cap: Cap, rep: Cap, parallel: bool) -> f64 {
+    let c = IvVec::of(cap.raw).unit();
+    let r = IvVec::of(rep.raw).unit();
+    let (target, target_rho) = if parallel {
+        (r, Iv::point(rep.rho))
+    } else {
+        (r.scale(Iv::point(-1.0)), outward::PI - Iv::point(rep.rho))
+    };
+    let between =
+        outward::atan2(c.cross(target).norm(), c.dot(target)).map_or(outward::PI.hi, |a| a.hi);
+    let delta = outward::up(between + (Iv::point(cap.rho) - target_rho).mag());
+    let sin = outward::sin(Iv::point(cap.rho)).hi;
+    let reach = outward::up(sin + delta).min(1.0);
+    outward::up(outward::up(outward::up(2.0 * outward::TAU.hi) * delta) * reach)
 }
 
 fn root(parent: &mut [usize], mut i: usize) -> usize {
@@ -424,6 +512,15 @@ fn relation(ci: &Circle, cj: &Circle) -> Relation {
     }
 }
 
+/// The part of one circle the doubles put inside another cap: nothing, everything, or the arc from
+/// `from` counterclockwise to `to`, `from ≠ to`.
+#[derive(Clone, Copy, Debug)]
+enum Chosen {
+    Empty,
+    Full,
+    Arc { from: f64, to: f64 },
+}
+
 /// A point where the depth along a circle changes: the count goes up by `add`, then down by `sub`.
 struct Event {
     psi: f64,
@@ -441,7 +538,8 @@ struct Sweep {
 
 impl Sweep {
     /// The circle runs inside a cap set on the arc `(from, to)`, `length` radians long: `inside` caps
-    /// cover it there, `outside` caps elsewhere.
+    /// cover it there, `outside` caps elsewhere. Returns the arc the doubles chose, or `None` when
+    /// `inside = outside` and the arc changes nothing.
     #[expect(
         clippy::float_cmp,
         reason = "ends on one angle are one point, not nearly one; `==` also holds -0 equal to +0, \
@@ -454,10 +552,10 @@ impl Sweep {
         length: f64,
         inside: usize,
         outside: usize,
-    ) {
+    ) -> Option<Chosen> {
         if inside == outside {
             self.base += outside;
-            return;
+            return None;
         }
         let a = circle.psi(from);
         let mut b = circle.psi(to);
@@ -491,16 +589,22 @@ impl Sweep {
             self.base += outside;
             self.events.extend([enter, leave]);
         }
+        Some(if b != a {
+            Chosen::Arc { from: a, to: b }
+        } else if wraps {
+            Chosen::Full
+        } else {
+            Chosen::Empty
+        })
     }
 
-    /// Add this circle's arcs to the areas, with `n` the pole of the form.
-    fn integrate(&mut self, circle: &Circle, n: Vec3, at_least: &mut [f64]) {
+    /// Add this circle's arcs to the areas, with `n` the pole of the form; the events are sorted.
+    fn integrate(&self, circle: &Circle, n: Vec3, at_least: &mut [f64]) {
         let form = ArcForm::new(circle, n);
         if self.events.is_empty() {
             add_arc(circle, self.base, form.integral(TAU, 0.0), at_least);
             return;
         }
-        self.events.sort_by(|a, b| a.psi.total_cmp(&b.psi));
         let g: Vec<f64> = self.events.iter().map(|e| form.g(e.point)).collect();
         let last = self.events.len() - 1;
         let mut depth = self.base;
@@ -516,6 +620,65 @@ impl Sweep {
             add_arc(circle, depth, arc, at_least);
         }
     }
+}
+
+/// The arcs of every circle with their depths, the pole's antipode `s`, and per circle the arc the
+/// doubles chose inside each other circle's caps.
+struct Arrangement {
+    s: Vec3,
+    sweeps: Vec<Sweep>,
+    chosen: Vec<Vec<(usize, Chosen)>>,
+}
+
+/// Classify every pair once, collect the events and sort them along each circle.
+fn arrange(circles: &[Circle]) -> Arrangement {
+    let s = clear_point(circles);
+    let mut sweeps: Vec<Sweep> = circles.iter().map(|_| Sweep::default()).collect();
+    let mut chosen: Vec<Vec<(usize, Chosen)>> = circles.iter().map(|_| Vec::new()).collect();
+    for i in 0..circles.len() {
+        for j in (i + 1)..circles.len() {
+            let (ci, cj) = (&circles[i], &circles[j]);
+            match relation(ci, cj) {
+                Relation::Apart {
+                    i_inside_j,
+                    j_inside_i,
+                } => {
+                    sweeps[i].base += if i_inside_j { cj.plus } else { cj.minus };
+                    sweeps[j].base += if j_inside_i { ci.plus } else { ci.minus };
+                    let whole = |inside: bool| if inside { Chosen::Full } else { Chosen::Empty };
+                    if cj.plus != cj.minus {
+                        chosen[i].push((j, whole(i_inside_j)));
+                    }
+                    if ci.plus != ci.minus {
+                        chosen[j].push((i, whole(j_inside_i)));
+                    }
+                }
+                Relation::Cross {
+                    enter,
+                    exit,
+                    h_i,
+                    h_j,
+                } => {
+                    // Circle i runs inside j's cap from `enter` to `exit`; circle j runs inside i's
+                    // cap from `exit` to `enter`, the same two points crossed the other way.
+                    if let Some(arc) =
+                        sweeps[i].interval(ci, (enter, exit), 2.0 * h_i, cj.plus, cj.minus)
+                    {
+                        chosen[i].push((j, arc));
+                    }
+                    if let Some(arc) =
+                        sweeps[j].interval(cj, (exit, enter), 2.0 * h_j, ci.plus, ci.minus)
+                    {
+                        chosen[j].push((i, arc));
+                    }
+                }
+            }
+        }
+    }
+    for sweep in &mut sweeps {
+        sweep.events.sort_by(|a, b| a.psi.total_cmp(&b.psi));
+    }
+    Arrangement { s, sweeps, chosen }
 }
 
 /// Add the integral of an arc at `depth` (caps of other circles around it) to the levels it bounds.
@@ -572,6 +735,240 @@ impl ArcForm {
     /// The integral over an arc of `dpsi` radians whose `G` rises by `dg`.
     fn integral(&self, dpsi: f64, dg: f64) -> f64 {
         (self.sigma - self.cos) * dpsi - 2.0 * self.sigma * dg
+    }
+}
+
+// ── The enclosure ─────────────────────────────────────────────────────────────────────────────────
+
+/// One circle of the arrangement as an exact circle, in outward-rounded intervals: the exact unit
+/// centre of the input's vector, a frame of it, and the form for the exact pole `n`.
+struct Exact {
+    c: IvVec,
+    u: IvVec,
+    v: IvVec,
+    rho: f64,
+    n: IvVec,
+    c_cross_n: IvVec,
+    cos: Iv,
+    sin: Iv,
+    /// `σ`, certain: the pole's antipode is off the circle.
+    sigma: f64,
+    a_cos: Iv,
+    two_p: Iv,
+    shift: Iv,
+    /// `σ − cos ρ`.
+    slope: Iv,
+    /// A bound of `|dF/dψ|` along the circle: `2 sin ρ/κ`, `κ` the antipode's clearance.
+    lipschitz: f64,
+}
+
+impl Exact {
+    /// `None` when the pole's antipode `s` cannot be shown off the circle.
+    fn new(circle: &Circle, pole: IvVec, antipode: IvVec) -> Option<Self> {
+        let c = IvVec::of(circle.raw).unit();
+        let u = IvVec::of(circle.axis).cross(c).unit();
+        let v = c.cross(u);
+        let rho = Iv::point(circle.rho);
+        let (cos, sin) = (outward::cos(rho), outward::sin(rho).max0());
+        let along = pole.dot(c);
+        let across = (pole.dot(u).sq() + pole.dot(v).sq()).sqrt();
+        let big_p = (Iv::point(1.0) + along * cos) + across * sin;
+        let gap_signed = cos + along;
+        if gap_signed.lo <= 0.0 && gap_signed.hi >= 0.0 {
+            return None;
+        }
+        let sigma = if gap_signed.hi < 0.0 { -1.0 } else { 1.0 };
+        let clear = (outward::atan2(antipode.cross(c).norm(), antipode.dot(c))? - rho).mig();
+        if clear <= 0.0 {
+            return None;
+        }
+        let two_p = Iv::point(2.0) * big_p;
+        Some(Self {
+            c,
+            u,
+            v,
+            rho: circle.rho,
+            n: pole,
+            c_cross_n: c.cross(pole),
+            cos,
+            sin,
+            sigma,
+            a_cos: along * cos,
+            two_p,
+            shift: (big_p + gap_signed.abs()).sq(),
+            slope: Iv::point(sigma) - cos,
+            lipschitz: outward::up(outward::up(2.0 * sin.hi) / clear),
+        })
+    }
+
+    /// `F(ψ) = (σ − cos ρ)ψ − 2σ G(X(ψ))` at the exact circle's point of parameter `psi`.
+    fn antiderivative(&self, psi: f64) -> Option<Iv> {
+        let p = Iv::point(psi);
+        let x = self.c.scale(self.cos).add(
+            self.u
+                .scale(self.sin * outward::cos(p))
+                .add(self.v.scale(self.sin * outward::sin(p))),
+        );
+        let num = self.two_p * self.c_cross_n.dot(x);
+        let den = self.shift + self.two_p * (self.n.dot(x) - self.a_cos);
+        let g = outward::atan2(num, den)?;
+        Some(self.slope * p - Iv::point(2.0 * self.sigma) * g)
+    }
+}
+
+/// Where the arc of one circle inside another cap really is: its centre on the circle as a ball
+/// (none when the centres are within rounding of equal or antipodal), and an interval of its
+/// half-length, in `[0, π]`.
+struct Truth {
+    centre: Option<(f64, f64)>,
+    half: Iv,
+}
+
+/// The true arcs of circle `i` inside `j`'s cap and of `j` inside `i`'s, by the extended half-angle
+/// formula: each sine factor is taken as `max(0, ·)`, which gives 0 or π exactly where the pair does
+/// not cross, as the relation's three cases do.
+fn truths(ei: &Exact, ej: &Exact) -> (Truth, Truth) {
+    let full = Iv {
+        lo: 0.0,
+        hi: outward::PI.hi,
+    };
+    let d = outward::atan2(ei.c.cross(ej.c).norm(), ei.c.dot(ej.c))
+        .unwrap_or(full)
+        .meet(full);
+    let (ri, rj, half) = (Iv::point(ei.rho), Iv::point(ej.rho), Iv::point(0.5));
+    let factor = |x: Iv| outward::sin(x * half).max0();
+    let sd = factor(ri + rj - d);
+    let sp = factor(outward::TAU - (ri + rj) - d);
+    let s1 = factor(d + rj - ri);
+    let s2 = factor(d + ri - rj);
+    let h = |num: Iv, den: Iv| {
+        let two = Iv::point(2.0);
+        (two * outward::atan2_first_quadrant(num.sqrt(), den.sqrt())).meet(full)
+    };
+    (
+        Truth {
+            centre: outward::angle_ball(ej.c.dot(ei.v), ej.c.dot(ei.u)),
+            half: h(sd * s1, sp * s2),
+        },
+        Truth {
+            centre: outward::angle_ball(ei.c.dot(ej.v), ei.c.dot(ej.u)),
+            half: h(sd * s2, sp * s1),
+        },
+    )
+}
+
+/// An upper bound of the measure of `ψ` where the chosen arc and the true one differ: at most
+/// `|A| + |B|`, at most `|Aᶜ| + |Bᶜ|`, and at most `2(|Δc| + |Δh|)`.
+fn sweep_bound(chosen: Chosen, truth: &Truth) -> f64 {
+    use outward::up;
+    let h = truth.half;
+    let (half, centre) = match chosen {
+        Chosen::Empty => (Iv::point(0.0), None),
+        Chosen::Full => (outward::PI, None),
+        Chosen::Arc { from, to } => {
+            let len = if to > from {
+                Iv::point(to) - Iv::point(from)
+            } else {
+                Iv::point(to) - Iv::point(from) + outward::TAU
+            };
+            let half = len * Iv::point(0.5);
+            (half, Some(Iv::point(from) + half))
+        }
+    };
+    let apart = up(up(2.0 * half.hi) + up(2.0 * h.hi));
+    let together =
+        up(up(2.0 * outward::TAU.hi) - outward::down(2.0 * half.lo) - outward::down(2.0 * h.lo));
+    let mut best = apart.min(together);
+    if let (Some(c), Some((mid, radius))) = (centre, truth.centre) {
+        let dc = up(outward::circle_distance(c - Iv::point(mid)) + radius);
+        let dh = up(half.hi - h.lo).max(up(h.hi - half.lo));
+        best = best.min(up(2.0 * up(dc + dh)));
+    }
+    best
+}
+
+/// The interval sums of every level and the radius every level shares.
+struct Sums {
+    levels: Vec<Iv>,
+    radius: f64,
+}
+
+/// The arcs the doubles chose, integrated on the exact circles in intervals, and the bound on what
+/// the choice may have got wrong (module docs). `None` when the pole cannot be shown clear of a
+/// circle or a denominator positive; the caller then reports `[0, 4π]`.
+fn enclose(circles: &[Circle], arrangement: &Arrangement, caps: usize) -> Option<Sums> {
+    let s = IvVec::of(arrangement.s).unit();
+    let n = s.scale(Iv::point(-1.0));
+    let exact: Vec<Exact> = circles
+        .iter()
+        .map(|c| Exact::new(c, n, s))
+        .collect::<Option<_>>()?;
+    let mut levels = vec![Iv::point(0.0); caps];
+    let mut radius = 0.0;
+    let mut truth_cache: Vec<Vec<Option<Truth>>> = circles
+        .iter()
+        .map(|_| circles.iter().map(|_| None).collect())
+        .collect();
+    for i in 0..circles.len() {
+        for j in (i + 1)..circles.len() {
+            let (ti, tj) = truths(&exact[i], &exact[j]);
+            truth_cache[i][j] = Some(ti);
+            truth_cache[j][i] = Some(tj);
+        }
+    }
+    for (i, (circle, sweep)) in circles.iter().zip(&arrangement.sweeps).enumerate() {
+        let ex = &exact[i];
+        let mut measure = 0.0;
+        for &(j, chosen) in &arrangement.chosen[i] {
+            let truth = truth_cache[i][j].as_ref()?;
+            measure = outward::up(measure + sweep_bound(chosen, truth));
+        }
+        radius = outward::up(radius + outward::up(ex.lipschitz * measure));
+        if sweep.events.is_empty() {
+            add_arc_enclosed(circle, sweep.base, ex.slope * outward::TAU, &mut levels);
+            continue;
+        }
+        let f: Vec<Iv> = sweep
+            .events
+            .iter()
+            .map(|e| ex.antiderivative(e.psi))
+            .collect::<Option<_>>()?;
+        let last = sweep.events.len() - 1;
+        let mut depth = sweep.base;
+        for (k, event) in sweep.events.iter().enumerate() {
+            depth += event.add;
+            depth -= event.sub;
+            let next = if k < last {
+                f[k + 1]
+            } else {
+                f[0] + ex.slope * outward::TAU
+            };
+            add_arc_enclosed(circle, depth, next - f[k], &mut levels);
+        }
+    }
+    let covered: usize = exact
+        .iter()
+        .zip(circles)
+        .map(|(e, c)| if e.sigma < 0.0 { c.plus } else { c.minus })
+        .sum();
+    let four_pi = Iv::point(2.0) * outward::TAU;
+    for level in &mut levels[..covered] {
+        *level = *level + four_pi;
+    }
+    Some(Sums { levels, radius })
+}
+
+/// [`add_arc`] in intervals.
+fn add_arc_enclosed(circle: &Circle, depth: usize, integral: Iv, levels: &mut [Iv]) {
+    let (plus, minus) = (circle.plus, circle.minus);
+    if plus > minus {
+        for level in &mut levels[depth + minus..depth + plus] {
+            *level = *level + integral;
+        }
+    } else {
+        for level in &mut levels[depth + plus..depth + minus] {
+            *level = *level - integral;
+        }
     }
 }
 
@@ -851,7 +1248,14 @@ mod tests {
     fn midpoint_labelled_areas(caps: &[SphericalCap]) -> Vec<f64> {
         let circles: Vec<Circle> = caps
             .iter()
-            .map(|c| Circle::new(unit(c.centre), c.half_angle, 1, 0))
+            .map(|c| {
+                let cap = Cap {
+                    unit: unit(c.centre),
+                    rho: c.half_angle,
+                    raw: c.centre,
+                };
+                Circle::new(cap, 1, 0)
+            })
             .collect();
         let s = clear_point(&circles);
         let inside = |c: &Circle, x: Vec3| dot(c.c, x) > c.cos;
@@ -1305,17 +1709,13 @@ mod tests {
             .collect()
     }
 
-    /// The f64 code against the same algorithm at 60 digits in `derivations/kfold_coverage_area.gp`,
-    /// whose values a different method there, the colatitude integral, reproduces to 1.7e-55 and
-    /// 7.6e-66: round-off, on twelve caps with integer centres and half-angles in sixteenths (one
-    /// larger than a hemisphere), and on three circles through one point, whose centres are exact
-    /// there and rounded to binary64 here, so its gap holds both.
-    #[test]
+    /// Twelve caps with integer centres and half-angles in sixteenths, one larger than a hemisphere,
+    /// exact in binary64, and their areas at 60 digits (`derivations/kfold_coverage_area.gp`).
     #[expect(
         clippy::excessive_precision,
         reason = "23 digits as derivations/kfold_coverage_area.gp prints them"
     )]
-    fn the_f64_areas_hold_the_60_digit_values() {
+    fn twelve_caps() -> (Vec<SphericalCap>, Vec<f64>) {
         let twelve: Vec<SphericalCap> = [
             ([3, 1, 2], 12),
             ([-1, 4, 1], 10),
@@ -1347,6 +1747,21 @@ mod tests {
             1.755_771_533_122_061_516_078_3e-1,
         ];
         want.resize(12, 0.0);
+        (twelve, want)
+    }
+
+    /// The f64 code against the same algorithm at 60 digits in `derivations/kfold_coverage_area.gp`,
+    /// whose values a different method there, the colatitude integral, reproduces to 1.7e-55 and
+    /// 7.6e-66: round-off, on twelve caps with integer centres and half-angles in sixteenths (one
+    /// larger than a hemisphere), and on three circles through one point, whose centres are exact
+    /// there and rounded to binary64 here, so its gap holds both.
+    #[test]
+    #[expect(
+        clippy::excessive_precision,
+        reason = "23 digits as derivations/kfold_coverage_area.gp prints them"
+    )]
+    fn the_f64_areas_hold_the_60_digit_values() {
+        let (twelve, want) = twelve_caps();
         let gap = worst_gap(&areas(&twelve), &want);
         println!("twelve caps: worst |f64 - 60 digits| = {gap:.2e}");
         assert!(gap < 1e-14, "{gap:e}");
@@ -1756,21 +2171,12 @@ mod tests {
         assert_eq!(wrong, 0, "worst {worst:e}");
     }
 
-    /// The near-coincident corpus of `derivations/kfold_coverage_area.gp`, section (f): 336 sets of
-    /// three or four circles through one point, `10⁻⁶ … 10⁻¹²` apart, as binary64 inputs with their
-    /// areas at 60 digits. A set's `δ` is its largest `angle(c_i, c_j) + |ρ_i − ρ_j|`. The shipped code
-    /// stays within [`KfoldAreas::snap_bound`] where it moved caps and within `4 · 2⁻⁵³/δ` where it did
-    /// not. For the docs the test prints, per decade, the worst errors of never moving (against
-    /// `2⁻⁵³/δ`) and of always moving (against `δ` and the bound), whose crossing sets
-    /// [`COINCIDENT_ANGLE`]; always moving stays within the bound in every set.
-    #[test]
-    fn near_coincident_corpus_within_its_bounds() {
+    /// The near-coincident corpus of `derivations/kfold_coverage_area.gp`, section (f): per set its
+    /// decade, the binary64 caps, and the areas at 60 digits.
+    fn corpus() -> Vec<(i32, Vec<SphericalCap>, Vec<f64>)> {
         const CORPUS: &str = include_str!("../tests/fixtures/kfold_near_coincident.txt");
-        let eps = 0.5 * f64::EPSILON;
         let mut lines = CORPUS.lines().filter(|l| !l.starts_with('#'));
-        // per decade: never moved, err·δ/2⁻⁵³; always moved, err/δ and err/bound; shipped, worst
-        // error and worst error over its allowance; sets the shipped code moved; sets
-        let mut table = std::collections::BTreeMap::<i32, [f64; 7]>::new();
+        let mut sets = Vec::new();
         while let Some(head) = lines.next() {
             let head: Vec<&str> = head.split_whitespace().collect();
             assert_eq!(head[0], "set");
@@ -1799,6 +2205,26 @@ mod tests {
                 .skip(1)
                 .map(|w| w.parse().unwrap())
                 .collect();
+            sets.push((decade, caps, want));
+        }
+        sets
+    }
+
+    /// The near-coincident corpus of `derivations/kfold_coverage_area.gp`, section (f): 336 sets of
+    /// three or four circles through one point, `10⁻⁶ … 10⁻¹²` apart, as binary64 inputs with their
+    /// areas at 60 digits. A set's `δ` is its largest `angle(c_i, c_j) + |ρ_i − ρ_j|`. The shipped code
+    /// stays within [`KfoldAreas::snap_bound`] where it moved caps and within `4 · 2⁻⁵³/δ` where it did
+    /// not. For the docs the test prints, per decade, the worst errors of never moving (against
+    /// `2⁻⁵³/δ`) and of always moving (against `δ` and the bound), whose crossing sets
+    /// [`COINCIDENT_ANGLE`]; always moving stays within the bound in every set.
+    #[test]
+    fn near_coincident_corpus_within_its_bounds() {
+        let eps = 0.5 * f64::EPSILON;
+        // per decade: never moved, err·δ/2⁻⁵³; always moved, err/δ and err/bound; shipped, worst
+        // error and worst error over its allowance; sets the shipped code moved; sets
+        let mut table = std::collections::BTreeMap::<i32, [f64; 7]>::new();
+        for (decade, caps, want) in corpus() {
+            let m = caps.len();
             let mut delta = 0.0_f64;
             for i in 0..m {
                 for j in (i + 1)..m {
@@ -1917,5 +2343,171 @@ mod tests {
             worst[0], worst[1], worst[2], worst[3]
         );
         assert!(worst.iter().all(|w| *w < 1e-14), "{worst:?}");
+    }
+
+    // ── The enclosure (plan 18 Ф28.V) ────────────────────────────────────────────────────────────
+
+    /// The tightest margin and the widest interval of `r` against references printed to more digits
+    /// than a double holds; a reference within one ulp of an end counts as held, for the rounding of
+    /// its decimal. `None` when one is outside.
+    fn enclosure_margin(r: &KfoldAreas, want: &[f64]) -> Option<(f64, f64)> {
+        let (mut margin, mut width) = (f64::INFINITY, 0.0_f64);
+        for ((&lo, &hi), &w) in r.lower.iter().zip(&r.upper).zip(want) {
+            if lo > w.next_up() || hi < w.next_down() {
+                return None;
+            }
+            margin = margin.min((w - lo).min(hi - w));
+            width = width.max(hi - lo);
+        }
+        Some((margin, width))
+    }
+
+    /// (S2) The enclosures hold the 60-digit areas: the twelve caps, exact in binary64, and the 336
+    /// near-coincident sets of the corpus, whose pairs within [`COINCIDENT_ANGLE`] the enclosure
+    /// moves onto one circle and pays for with their band. The margins and widths are printed.
+    #[test]
+    fn the_enclosure_holds_the_60_digit_areas() {
+        let (twelve, want) = twelve_caps();
+        let r = kfold_areas(&twelve).unwrap();
+        let Some((margin, width)) = enclosure_margin(&r, &want) else {
+            panic!("twelve caps: {:?} {:?} against {want:?}", r.lower, r.upper);
+        };
+        println!("twelve caps: tightest margin {margin:.2e}, widest {width:.2e}");
+        // First order in the ends' error, and at the largest |dω/dψ| along each circle: about 500
+        // times the round-off of `at_least` here (module docs).
+        assert!(width < 1e-10, "{width:e}");
+        let (mut margin, mut width) = (f64::INFINITY, 0.0_f64);
+        for (decade, caps, want) in corpus() {
+            let r = kfold_areas(&caps).unwrap();
+            let Some((m, w)) = enclosure_margin(&r, &want) else {
+                panic!(
+                    "1e-{decade}: {caps:?}: {:?} {:?} against {want:?}",
+                    r.lower, r.upper
+                );
+            };
+            margin = margin.min(m);
+            width = width.max(w);
+        }
+        println!("near-coincident corpus: tightest margin {margin:.2e}, widest {width:.2e}");
+    }
+
+    /// Rule 16 at the level of [`kfold_areas`]: one cap's enclosure, which carries no sweep
+    /// allowance, holds its area `2π(1 − cos ρ)`, given as a double-double `hi + lo` (to 1e-32) by
+    /// `derivations/binary64.gp`'s `f64` at 60 digits. Under the planted round to nearest of
+    /// `outward::NEAREST` the enclosure shrinks to the one-ulp width of `2π` between doubles, and the
+    /// same check, over the same three caps, refutes it.
+    #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "an end equal to `hi` is decided by the sign of `lo`"
+    )]
+    fn one_caps_enclosure_holds_its_area_and_the_planted_rounding_is_refuted() {
+        let rows = [
+            (0.5, 0.769_171_448_472_976_5, 5.062_423_379_803_522_5e-17),
+            (1.5, 5.838_730_360_990_076, 1.817_012_926_745_579e-16),
+            (3.0, 12.503_491_616_037_541, 7.542_614_871_023_817e-16),
+        ];
+        let holds = |r: &KfoldAreas, hi: f64, lo: f64| {
+            let (lower, upper) = (r.lower[0], r.upper[0]);
+            (lower < hi || (lower == hi && lo > 0.0)) && (upper > hi || (upper == hi && lo < 0.0))
+        };
+        let mut refuted = 0;
+        for (rho, hi, lo) in rows {
+            let caps = [cap(0.0, 0.0, 1.0, rho)];
+            let r = kfold_areas(&caps).unwrap();
+            outward::NEAREST.with(|p| p.set(true));
+            let planted = kfold_areas(&caps);
+            outward::NEAREST.with(|p| p.set(false));
+            let planted = planted.unwrap();
+            println!(
+                "rho {rho}: [{:e}, {:e}]; planted [{:e}, {:e}]; exact {hi:e} + {lo:e}",
+                r.lower[0], r.upper[0], planted.lower[0], planted.upper[0]
+            );
+            assert!(holds(&r, hi, lo), "rho {rho} misses its area");
+            refuted += usize::from(!holds(&planted, hi, lo));
+        }
+        assert!(refuted > 0, "the planted rounding holds every area");
+    }
+
+    /// The enclosures of degenerate sets hold their closed forms, each itself an outward interval:
+    /// equal caps; a cap and its complement, which `PI − 0.5` makes overlap by a sliver or miss by
+    /// one, both inside the closed form; concentric caps `10⁻ᵐ` apart; and a circle through the
+    /// hole of a cap an ulp short of π, whose areas are the circle's cap and 4π to within the hole.
+    #[test]
+    fn the_enclosure_holds_closed_forms_at_degenerate_sets() {
+        let area = |rho: Iv| {
+            let s = outward::sin(rho * Iv::point(0.5));
+            Iv::point(2.0) * outward::TAU * s.sq()
+        };
+        let four_pi = Iv::point(2.0) * outward::TAU;
+        let mut widest = 0.0_f64;
+        let mut check = |name: &str, caps: &[SphericalCap], want: &[Iv]| {
+            let r = kfold_areas(caps).unwrap();
+            for (k, w) in want.iter().enumerate() {
+                assert!(
+                    r.lower[k] <= w.hi && w.lo <= r.upper[k],
+                    "{name}, k = {}: [{}, {}] misses {w:?}",
+                    k + 1,
+                    r.lower[k],
+                    r.upper[k]
+                );
+                widest = widest.max(r.upper[k] - r.lower[k]);
+            }
+        };
+        let base = cap(0.3, -0.2, 0.9, 0.5);
+        let base_area = area(Iv::point(0.5));
+        check("two equal caps", &[base, base], &[base_area, base_area]);
+        check(
+            "three equal caps",
+            &[base, base, base],
+            &[base_area, base_area, base_area],
+        );
+        let rho_c = PI - 0.5;
+        let complement = SphericalCap {
+            centre: -base.centre,
+            half_angle: rho_c,
+        };
+        // Coaxial: the caps leave the band cos 0.5 + cos ρ_c > 0 uncovered, or overlap where it is
+        // negative.
+        let band = outward::TAU * (outward::cos(Iv::point(0.5)) + outward::cos(Iv::point(rho_c)));
+        check(
+            "a cap and its complement",
+            &[base, complement],
+            &[four_pi - band.max0(), (-band).max0()],
+        );
+        let polar = cap(0.0, 0.0, 1.0, 0.6);
+        for m in 1..=16 {
+            let rho = 0.6 + 10_f64.powi(-m);
+            let wider = SphericalCap {
+                half_angle: rho,
+                ..polar
+            };
+            check(
+                &format!("concentric 1e-{m}"),
+                &[polar, wider],
+                &[area(Iv::point(rho)), area(Iv::point(0.6))],
+            );
+        }
+        let mut rng = SplitMix(0x5EED_F28E_0000_0002);
+        for k in 1..=8_u64 {
+            let rho_j = f64::from_bits(PI.to_bits() - k);
+            let hole = area(outward::PI - Iv::point(rho_j));
+            let rho_i = 0.05 + 3.0 * rng.next();
+            let t = rho_i + (rng.next() - 0.5) * 4e-15;
+            let ci = area(Iv::point(rho_i));
+            let below = |x: Iv| Iv {
+                lo: (x - hole).lo,
+                hi: x.hi,
+            };
+            check(
+                &format!("hole {k} ulp short of pi"),
+                &[
+                    cap(libm::sin(t), 0.0, libm::cos(t), rho_i),
+                    cap(0.0, 0.0, -1.0, rho_j),
+                ],
+                &[below(four_pi), below(ci)],
+            );
+        }
+        println!("degenerate closed forms: widest enclosure {widest:.2e}");
     }
 }

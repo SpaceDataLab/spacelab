@@ -434,17 +434,17 @@ exclude_re = [
     # reads `(n1 == 0 && n2 == 0) || n3 == 0` and a single zero position in slot 1 or 2 walks past it.
     # Both still reach the same `Err(Degenerate)`, one check later. `r2 = 0` zeroes `r2 × r3` and the
     # plane check returns it. `r1 = 0` leaves `r2 × r3` intact, but every term of
-    # `N = |r1|(r2×r3) + |r2|(r3×r1) + |r3|(r1×r2)` carries a factor that vanishes with it, so
+    # `N = |r1|D + δ2 d13×r1 + δ3 r1×d12` carries a factor that vanishes with it, so
     # `|N| == 0` and the `D`/`N` check returns it. `gibbs_refuses_positions_that_are_not_one_orbit`
     # presents exactly that input and gets the same answer through the longer path.
-    "crates/spacelab-astro/src/iod\\.rs:214:18: replace \\|\\| with && in gibbs",
+    "crates/spacelab-astro/src/iod\\.rs:216:18: replace \\|\\| with && in gibbs",
 
     # `rho1 - damping * step1 > 0.0 && rho3 - damping * step3 > 0.0`, both tied to `>=`. They part only
     # when a damped Newton step lands a range at exactly zero — the object exactly at the observer,
     # which is the case the halving exists to step around. `damping` is a power of two, so that needs
     # `step == rho·2^k` bit for bit between two doubles computed from different Jacobian entries.
-    "crates/spacelab-astro/src/iod\\.rs:697:39: replace > with >= in gooding",
-    "crates/spacelab-astro/src/iod\\.rs:697:71: replace > with >= in gooding",
+    "crates/spacelab-astro/src/iod\\.rs:704:39: replace > with >= in gooding",
+    "crates/spacelab-astro/src/iod\\.rs:704:71: replace > with >= in gooding",
 
     # --- `laplace`'s degeneracy guard and range scan: the five `seal-laplace3` leaves behind.
     #
@@ -457,7 +457,7 @@ exclude_re = [
     # `shape.abs() < 1e-12`, tied to `<=`. They part only where the normalised triple product is
     # exactly the double nearest 1e-12 — one specific double out of a quotient of two cross-product
     # norms. No geometry can be aimed at it.
-    "crates/spacelab-astro/src/iod\\.rs:399:42: replace < with <= in laplace",
+    "crates/spacelab-astro/src/iod\\.rs:406:42: replace < with <= in laplace",
 
     # `previous * value <= 0.0 && previous != 0.0`, the product turned into a quotient. It is the
     # same sign test: the conjunct already rules out `previous == 0.0`, and `previous * value` and
@@ -466,12 +466,12 @@ exclude_re = [
     # consecutive values stays finite. They part only where `value` is exactly `0.0`, a sampled
     # abscissa landing on a root of the octic: the product form brackets it, the quotient form gets
     # `±inf` and does not.
-    "crates/spacelab-astro/src/iod\\.rs:431:21: replace \\* with / in laplace",
+    "crates/spacelab-astro/src/iod\\.rs:438:21: replace \\* with / in laplace",
 
     # `rho > 0.0`, tied to `>=`. The filter drops a range behind the observer; the two part only at
     # `rho == 0.0` exactly, the object *at* the observer, where the line of sight that produced the
     # sighting would have had to be a zero vector.
-    "crates/spacelab-astro/src/iod\\.rs:437:20: replace > with >= in laplace",
+    "crates/spacelab-astro/src/iod\\.rs:444:20: replace > with >= in laplace",
 
     # Both ends of the scan bracket `[0.01|R|, 1000|R|]`, each *widened* rather than narrowed:
     # `0.01 * scale -> 0.01 / scale` drops the bottom from `0.01|R|` to `0.01/|R|` — 6.2e4 m to
@@ -486,8 +486,8 @@ exclude_re = [
     # and nothing here exhibits a Laplace octic with more than one positive root — that would need
     # the multiple-solution geometry Gauss's method is also known for. The *narrowing* counterpart,
     # `0.01 * scale -> 0.01 + scale`, is caught, by `laplace_is_given_a_target_below_the_observer`.
-    "crates/spacelab-astro/src/iod\\.rs:425:26: replace \\* with / in laplace",
-    "crates/spacelab-astro/src/iod\\.rs:426:43: replace / with \\* in laplace",
+    "crates/spacelab-astro/src/iod\\.rs:432:26: replace \\* with / in laplace",
+    "crates/spacelab-astro/src/iod\\.rs:433:43: replace / with \\* in laplace",
 
     # --- `edl.rs`. The FNPEG corrector's acceptance test.
 
@@ -4483,13 +4483,13 @@ exclude_re = [
     # is a shortcut for a check below it that returns the *same* `IodError::Degenerate`, so weakening
     # the guard cannot change the answer. `r₂ = 0` or `r₃ = 0` zeroes `c23 = r₂ × r₃` and the
     # `plane == 0.0` check fires; `r₁ = 0` leaves `c23` alone but zeroes every term of
-    # `N = |r₁|c23 + |r₂|(r₃×r₁) + |r₃|(r₁×r₂)`, and `nn == 0.0` fires. The coplanarity screen does
+    # `N = |r₁|D + δ₂ d₁₃×r₁ + δ₃ r₁×d₁₂`, and `nn == 0.0` fires. The coplanarity screen does
     # not intercept that path first: `sine` is `0/0 = NaN` there and `NaN > 0.0603` is false. This is
     # the reasoning `gibbs_refuses_three_points_on_a_line` already sets out, and
     # `gibbs_refuses_positions_that_are_not_one_orbit` asserts the later check answers for the
-    # zero vector.
-    "crates/spacelab-astro/src/iod\\.rs:231:18: replace \\|\\| with && in gibbs",
-    "crates/spacelab-astro/src/iod\\.rs:214:31: replace \\|\\| with && in gibbs",
+    # zero vector. (`dn == 0.0 || nn == 0.0` -> `&&` was a tie here too while `D` was the classical
+    # sum; from the chords, `D = r₂×r₃ ≠ 0` at `r₁ = 0`, the answer is `√(µ/0)`, and it is caught.)
+    "crates/spacelab-astro/src/iod\\.rs:216:31: replace \\|\\| with && in gibbs",
 
     # The scan that brackets the 8th-degree polynomial — its lower bound `0.01·|R₂|`, the geometric
     # sample spacing `lo·(hi/lo)^(i/N)`, and the sign-change test. Six mutants, one proof: the scan
@@ -4506,18 +4506,18 @@ exclude_re = [
     # `f64`s. That pin was widened from `1e-12` relative to bit-exact for this block: a tolerance
     # sees none of these, because `ρ₁` cancels `r₂³` between numerator and denominator and `r₂`
     # reaches the ranges only through corrections of order `μτ²/r₂³`, 1e-5 on the shortest triple.
-    "crates/spacelab-astro/src/iod\\.rs:503:26: replace \\* with / in gauss_ranges",
-    "crates/spacelab-astro/src/iod\\.rs:504:43: replace / with \\* in gauss_ranges",
-    "crates/spacelab-astro/src/iod\\.rs:504:58: replace / with % in gauss_ranges",
-    "crates/spacelab-astro/src/iod\\.rs:511:21: replace \\* with / in gauss_ranges",
-    "crates/spacelab-astro/src/iod\\.rs:511:36: replace && with \\|\\| in gauss_ranges",
-    "crates/spacelab-astro/src/iod\\.rs:511:55: replace && with \\|\\| in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:510:26: replace \\* with / in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:511:43: replace / with \\* in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:511:58: replace / with % in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:518:21: replace \\* with / in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:518:36: replace && with \\|\\| in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:518:55: replace && with \\|\\| in gauss_ranges",
 
     # `ranges.iter().all(|&rho| rho > 0.0)` -> `>=`, the physical filter. The two differ only for a
     # slant range of exactly `0.0`, which puts the object exactly at its observer — and there the
     # unit line of sight `validate` requires cannot have been formed, because the direction from a
     # point to itself has no norm. There is no input behind the case the mutant decides differently.
-    "crates/spacelab-astro/src/iod\\.rs:514:63: replace > with >= in gauss_ranges",
+    "crates/spacelab-astro/src/iod\\.rs:521:63: replace > with >= in gauss_ranges",
 
     # `first == 0.0 || third == 0.0 || tau1 == 0.0 || tau3 == 0.0` -> `&&`, the divide-by-zero screen
     # in `ranges_at`. Every disjunct is redundant with the `is_finite` filter the function ends on:
@@ -4525,15 +4525,15 @@ exclude_re = [
     # whichever is zero makes its quotient `±∞` for a nonzero numerator or `NaN` for a zero one, and
     # `[ρ₁, ρ₂, ρ₃].all(is_finite)` then returns the same `None`. Two of the four cannot arise at
     # all: `validate` has already required `t₁ < t₂ < t₃`, so `tau1` and `tau3` are nonzero.
-    "crates/spacelab-astro/src/iod\\.rs:534:21: replace \\|\\| with && in ranges_at",
-    "crates/spacelab-astro/src/iod\\.rs:534:37: replace \\|\\| with && in ranges_at",
-    "crates/spacelab-astro/src/iod\\.rs:534:52: replace \\|\\| with && in ranges_at",
+    "crates/spacelab-astro/src/iod\\.rs:541:21: replace \\|\\| with && in ranges_at",
+    "crates/spacelab-astro/src/iod\\.rs:541:37: replace \\|\\| with && in ranges_at",
+    "crates/spacelab-astro/src/iod\\.rs:541:52: replace \\|\\| with && in ranges_at",
 
     # `let low_side = f(lo) < 0.0` -> `<=` in `bisect`. `bisect` has exactly one call site, and the
     # condition guarding it requires `previous != 0.0`, where `previous` *is* `f(lo)` — the same
     # deterministic closure at the same argument. `f(lo) == 0.0` is unreachable, so the two spellings
     # agree at every call the function receives.
-    "crates/spacelab-astro/src/iod\\.rs:560:26: replace < with <= in bisect",
+    "crates/spacelab-astro/src/iod\\.rs:567:26: replace < with <= in bisect",
 
     # `axis.x.abs() <= axis.y.abs() && …` -> `>`, the seed choice in `perpendicular_basis`. The
     # function's contract is *an* orthonormal basis of the plane perpendicular to `axis`, and the
@@ -4545,13 +4545,13 @@ exclude_re = [
     # and the Newton step solves `J δ = f`, so a common rotation gives `(RJ)⁻¹(Rf) = J⁻¹f`. Measured
     # with the converged state pinned bit for bit at three seeds in
     # `gooding_survives_seeds_that_are_not_gausss`: the mutant returns the identical `f64`s.
-    "crates/spacelab-astro/src/iod\\.rs:579:32: replace <= with > in perpendicular_basis",
+    "crates/spacelab-astro/src/iod\\.rs:586:32: replace <= with > in perpendicular_basis",
 
     # `residual < 1e-13` -> `<=`, Newton's convergence test. The two differ only where `residual` —
     # `hypot` of two differences of projected directions — is bit-exactly `fl(1e-13)`, and nothing in
     # the domain produces that value by construction. Where it did, the mutant would accept an
     # iterate the original refines once more from a point already at the tolerance.
-    "crates/spacelab-astro/src/iod\\.rs:669:21: replace < with <= in gooding",
+    "crates/spacelab-astro/src/iod\\.rs:676:21: replace < with <= in gooding",
 
     # `determinant == 0.0 || !determinant.is_finite()` -> `&&`, the singular-Jacobian escape. `0.0`
     # is finite, so the mutant's conjunction is never true and the guard is gone — and every path it
@@ -4562,7 +4562,7 @@ exclude_re = [
     # zero-valued steps instead, leaving the iterate unmoved, so the loop repeats identically and
     # returns that same residual after its 60 passes. What the guard buys is how long it takes, not
     # what it answers.
-    "crates/spacelab-astro/src/iod\\.rs:682:31: replace \\|\\| with && in gooding",
+    "crates/spacelab-astro/src/iod\\.rs:689:31: replace \\|\\| with && in gooding",
 
     # `!rho1.is_finite() || !rho3.is_finite()` -> `&&`, the post-step finiteness check. For the two
     # to disagree exactly one range must be non-finite, and the guard above has already taken the way
@@ -4571,7 +4571,7 @@ exclude_re = [
     # earlier. What is left is a numerator that overflows `f64` while the determinant does not, which
     # needs an observer within a few orders of `1.8e308` — `validate` asks only that it be finite, so
     # it is expressible — and there both branches return an error, differing only in which one.
-    "crates/spacelab-astro/src/iod\\.rs:704:30: replace \\|\\| with && in gooding",
+    "crates/spacelab-astro/src/iod\\.rs:711:30: replace \\|\\| with && in gooding",
     # --- `seal-robust-vector`: the vector-measurement robust updates (#283) ---------------------
     #
     # `prior + noise` -> `prior - noise` in `huber_weight`. `nominal` is read in exactly one place, the

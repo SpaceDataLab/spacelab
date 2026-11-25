@@ -796,11 +796,13 @@ fn gibbs_and_herrick_gibbs_swap_places_at_a_measurable_transfer_angle() {
     }
 
     let (below, above) = crossover.expect("the sweep never crossed over");
-    // Measured: Herrick–Gibbs is the better of the two below this angle and Gibbs above it. The
-    // interval is one step of the sweep, so it brackets rather than locates.
+    // Measured: Herrick–Gibbs is the better of the two below 0.363° and Gibbs above 0.420°. The
+    // interval is one step of the sweep, so it brackets rather than locates. Gibbs in its classical
+    // sums of cross products crossed one step later, between 0.420° and 0.487°: its arithmetic, not
+    // its inputs, set the crossover then (Ф28.N).
     assert!(
-        (0.2..3.0).contains(&below) && (0.2..3.0).contains(&above),
-        "crossover bracketed between {below}° and {above}°, outside the expected decade"
+        (0.36..0.37).contains(&below) && (0.41..0.43).contains(&above),
+        "crossover bracketed between {below}° and {above}°, outside the measured window"
     );
     assert!(above > below, "the bracket is inverted");
 }

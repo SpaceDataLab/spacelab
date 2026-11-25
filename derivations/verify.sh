@@ -1338,7 +1338,7 @@ if have maxima; then
     mac_zeros lambert_universal.mac 38 "Lambert in universal variables: y(z), dF/dz, Kepler's equation, the Wronskian; the chord parameter without cancellation at a half turn and y in its difference form on short arcs"
     mac_zeros lambert_izzo.mac 18 "Lambert in Izzo's variable: lambda without 1 - c/s, the time of flight in Stumpff form with its parabolic limit 2/3 (1 - lambda^3), two exact parabolas, dT/dx and the minimum time of an N-revolution family"
     mac_zeros gpu_porkchop.mac 18 "the f32 Lambert kernel: C in half-angle form, the degree-4 Stumpff series, y without Curtis's quotient, the short way's bracket from the y = 0 edge where y rises with z, A from the unit vectors"
-    mac_zeros iod_classical.mac 29 "Gibbs, Herrick-Gibbs, Gauss and Laplace on their own models"
+    mac_zeros iod_classical.mac 33 "Gibbs, Herrick-Gibbs, Gauss and Laplace on their own models; Gibbs in its chords"
     mac_zeros transfer_excess_speed.mac 10 "hyperbolic excess speed and C3 on exact conics"
     mac_zeros patched_conics.mac 10 "sphere of influence, flyby hyperbola and the B-plane"
     mac_zeros synodic_frame.mac 14 "the rotating-frame map, its inverse and the transport theorem"

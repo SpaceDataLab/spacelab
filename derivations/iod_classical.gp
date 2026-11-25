@@ -23,6 +23,12 @@
    -R'' - mu R/r^3 is linear in (rho, rho', rho''), and r is the root of |R + rho L| - r. Output:
    r2 = R + rho L and v2 = R' + rho L' + rho' L.
 
+   Gibbs on short arcs. Three points of the orbit p = 7000 km, e = 0.01, i = 51.6, RAAN 30,
+   argp 40 deg at true anomalies 1 - theta, 1, 1 + 5 theta/4 rad, theta = 1e-1 ... 1e-6, rounded to
+   doubles; the classical Gibbs formula on those doubles; and kappa = sum over the nine coordinates
+   of |x| |dv2/dx|, over |v2|, by central differences of step 1e-40 |x|. Output: the rows of the
+   short-arc test in iod.rs.
+
        timeout 300 gp -q -f derivations/iod_classical.gp </dev/null                              */
 
 default(realprecision, 100);
@@ -112,4 +118,35 @@ laplace_miss(r) = my(s = laplace_solve(r)); nrm(lR[2] + s[1] * lL[2]) - r;
   print("    // Laplace sightings: line of sight, observer");
   for (i = 1, 3, printf("    (%s, %s),\n", vfmt(lL[i]), vfmt(lR[i] * 1.)));
   printf("    // Laplace model solution: r2 %s\n    //                         v2 %s\n", vfmt(p2), vfmt(v2));
+}
+
+/* ---- Gibbs on short arcs ---- */
+cross(a, b) = [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]];
+gibbs(r1, r2, r3) = {
+  my(n1 = nrm(r1), n2 = nrm(r2), n3 = nrm(r3), D, N, S);
+  D = cross(r2, r3) + cross(r3, r1) + cross(r1, r2);
+  N = n1 * cross(r2, r3) + n2 * cross(r3, r1) + n3 * cross(r1, r2);
+  S = r1 * (n2 - n3) + r2 * (n3 - n1) + r3 * (n1 - n2);
+  sqrt(mu / (nrm(N) * nrm(D))) * (cross(D, r2) / n2 + S);
+}
+{
+  my(Rz, Rx, pos, vel, p = 7000, e = 1/100, Q, nu2 = 1, u = 2^-53);
+  Rz = ((a) -> [cos(a), -sin(a), 0; sin(a), cos(a), 0; 0, 0, 1]);
+  Rx = ((a) -> [1, 0, 0; 0, cos(a), -sin(a); 0, sin(a), cos(a)]);
+  Q = Rz(30 * Pi / 180) * Rx(516 / 10 * Pi / 180) * Rz(40 * Pi / 180);
+  pos = ((nu) -> (Q * (p / (1 + e * cos(nu)) * [cos(nu), sin(nu), 0]~))~);
+  vel = ((nu) -> (Q * (sqrt(mu / p) * [-sin(nu), e + cos(nu), 0]~))~);
+  print("    // Gibbs on short arcs: spacing, r1, r2, r3, exact Gibbs on these doubles, kappa");
+  for (k = 1, 6,
+    my(th = 10^-k, r, v, kap = 0, h, xp, xm);
+    r = [apply(dbl, pos(nu2 - th)), apply(dbl, pos(nu2)), apply(dbl, pos(nu2 + 5/4 * th))];
+    v = gibbs(r[1], r[2], r[3]);
+    for (i = 1, 3, for (j = 1, 3,
+      h = abs(r[i][j]) * 10^-40; xp = r; xm = r; xp[i][j] += h; xm[i][j] -= h;
+      kap += abs(r[i][j]) * nrm((gibbs(xp[1], xp[2], xp[3]) - gibbs(xm[1], xm[2], xm[3])) / (2 * h))));
+    kap /= nrm(v);
+    printf("    // 1e-%d: kappa u = %.3g; exact Gibbs on the rounded inputs is %.3g of |v2| off the orbit\n",
+           k, kap * u, nrm(v - vel(nu2)) / nrm(v));
+    printf("    (1e-%d, %s, %s, %s, %s, %s),\n", k, vfmt(r[1]), vfmt(r[2]), vfmt(r[3]), vfmt(v),
+           concat([ch | ch <- Vec(Strprintf("%.6g", kap)), ch != " "])));
 }

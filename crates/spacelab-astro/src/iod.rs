@@ -201,9 +201,11 @@ fn validate(sightings: &[Sighting; 3]) -> Result<(), IodError> {
 /// Velocity at `r2` from three coplanar, well-separated position vectors (Gibbs 1889).
 ///
 /// The classical construction: `N`, `D` and `S` are built so that `v₂ = √(μ/|N||D|)·(D×r̂₂ + S)` is
-/// the exact two-body velocity, with no series and no iteration. It needs a real transfer angle
-/// between the vectors to be conditioned — below about 1°, `D` is a difference of near-equal
-/// quantities and the answer is noise. [`herrick_gibbs`] is the method for that case.
+/// the exact two-body velocity, with no series and no iteration. `D`, `N` and `S` are formed from
+/// the chords `r₂ − r₁` and `r₃ − r₁` and the norm differences `d·(rⱼ + r₁)/(|rⱼ| + |r₁|)`, not
+/// from sums of large cross products, so on an arc of angle `θ` the arithmetic adds about `u/θ`
+/// where the rounding of the inputs alone allows `u/θ²`. That floor is the method's own: below
+/// about 0.4° [`herrick_gibbs`] is the better of the two.
 ///
 /// # Errors
 ///
@@ -225,21 +227,26 @@ pub fn gibbs(r1: Vec3, r2: Vec3, r3: Vec3, mu: f64) -> Result<Vec3, IodError> {
         return Err(IodError::NotCoplanar { sine });
     }
 
-    let d = c23 + r3.cross(r1) + r1.cross(r2);
-    let n = c23.scale(n1) + r3.cross(r1).scale(n2) + r1.cross(r2).scale(n3);
+    // The classical sums r₂×r₃ + r₃×r₁ + r₁×r₂ and the differences of norms cancel by 1/θ on an
+    // arc of θ; written in the chords from r₁, the same D, N and S lose only what the inputs lack.
+    let (d12, d13) = (r2 - r1, r3 - r1);
+    let dn2 = d12.dot(r2 + r1) / (n2 + n1);
+    let dn3 = d13.dot(r3 + r1) / (n3 + n1);
+    let d = d12.cross(d13);
+    let n = d.scale(n1) + d13.cross(r1).scale(dn2) + r1.cross(d12).scale(dn3);
     let (dn, nn) = (d.norm(), n.norm());
     if dn == 0.0 || nn == 0.0 {
         return Err(IodError::Degenerate);
     }
-    let s = r1.scale(n2 - n3) + r2.scale(n3 - n1) + r3.scale(n1 - n2);
+    let s = d12.scale(dn3) - d13.scale(dn2);
     Ok((d.cross(r2).scale(1.0 / n2) + s).scale(libm::sqrt(mu / (nn * dn))))
 }
 
 /// Velocity at `r2` from three closely spaced position vectors (Herrick–Gibbs).
 ///
 /// Where [`gibbs`] is exact but ill-conditioned on a short arc, this is a truncated Taylor series
-/// that is well-conditioned there and degrades as the arc opens. The two swap places between 0.42°
-/// and 0.49° of transfer angle — bracketed, not quoted, by
+/// that is well-conditioned there and degrades as the arc opens. The two swap places between 0.36°
+/// and 0.42° of transfer angle — bracketed, not quoted, by
 /// `tests/initial_orbit_determination.rs`, which walks the sweep and reports the step the ordering
 /// flips on.
 ///
@@ -819,6 +826,50 @@ mod tests {
             d <= 16.0 * f64::EPSILON * want.norm(),
             "Gibbs {v:?} against {want:?}: off by {d:.3e}"
         );
+    }
+
+    type ShortArc = (f64, [f64; 3], [f64; 3], [f64; 3], [f64; 3], f64);
+
+    /// Three positions of the orbit `p = 7000 km`, `e = 0.01`, `i = 51.6°`, `Ω = 30°`, `ω = 40°`,
+    /// at true anomalies `1 − θ`, `1` and `1 + 5θ/4` rad, rounded to doubles; Gibbs on those doubles
+    /// at 100 digits; and `κ`, the sum over the nine coordinates of `|x|·|∂v₂/∂x|`, over `|v₂|`.
+    /// `κ·u` is what one rounding of each input can move the answer by. From
+    /// `derivations/iod_classical.gp`, `µ = 398 600 km³/s²`.
+    #[rustfmt::skip]
+    const GIBBS_SHORT_ARCS: [ShortArc; 6] = [
+        (1e-1, [-2324.447309533039060625015, 3645.777142933546201675199, 5449.927459234896559792105], [-2910.535582819532464782242, 3272.868204839446661935654, 5412.197399257797769678291], [-3603.154520663691073423252, 2760.528237457752766204067, 5289.321852604549349052832], [-6.244502549662341179451781, -4.251124018915257272406272, -0.7056989811344478365326097], 162.580),
+        (1e-2, [-2853.091142041249895555666, 3311.713874579082130367169, 5418.403779585150914499536], [-2910.535582819532464782242, 3272.868204839446661935654, 5412.197399257797769678291], [-2981.946863279875287844334, 3223.844606017511068785097, 5403.680966112560781766661], [-6.244502549662442971277187, -4.251124018915341237169383, -0.7056989811344685632144769], 16087.9),
+        (1e-3, [-2904.803639821427623246564, 3276.767776249544567690464, 5412.842318138204063870944], [-2910.535582819532464782242, 3272.868204839446661935654, 5412.197399257797769678291], [-2917.696574845694158284459, 3267.989071448246249929070, 5411.383665470842061040457], [-6.244502549759801166881997, -4.251124018981608895440413, -0.7056989811454804956362048], 1.60864e6),
+        (1e-4, [-2909.962514379215463122819, 3273.258311468611736927414, 5412.262133881969020876568], [-2910.535582819532464782242, 3272.868204839446661935654, 5412.197399257797769678291], [-2911.251879008731521025766, 3272.380524857739601429785, 5412.116405125182609481271], [-6.244502579593732884687739, -4.251124039293799900261714, -0.7056989845156785751336878], 1.60864e8),
+        (1e-5, [-2910.478277234943561779801, 3272.907216996687111532083, 5412.203875147502003528643], [-2910.535582819532464782242, 3272.868204839446661935654, 5412.197399257797769678291], [-2910.607214406662933470216, 3272.819439175939351116540, 5412.189303637142984371167], [-6.244502656207093578483315, -4.251124091446873307010517, -0.7056989931840437182755342], 1.60864e10),
+        (1e-6, [-2910.529852273668893758440, 3272.872106070113659370691, 5412.198046871040787664242], [-2910.535582819532464782242, 3272.868204839446661935654, 5412.197399257797769678291], [-2910.542745997925976553233, 3272.863328296443796716630, 5412.196589733658584009390], [-6.244542760596177849813144, -4.251151393780944154871323, -0.7057035252808888879383982], 1.60867e12),
+    ];
+
+    /// (S1) Gibbs on short arcs keeps to the floor of its inputs (Ф28.N, F124), measured against
+    /// exact Gibbs on the same doubles. One rounding of each input can move the answer by `κ·u`,
+    /// about `1.6u/θ²` here. The coded form subtracts the positions first, which is exact this
+    /// close; what still cancels is `D = d₁₂×d₁₃`, by `c = |d₁₂||d₁₃|/|D|`, about `1.6/θ`, and the
+    /// error stays under `u·c` (measured: 0.06 to 0.15 of it) — `1.3e-2 κu` at 1e-1 rad and
+    /// `1.5e-7 κu` at 1e-6. The classical sums of cross products and differences of norms measured
+    /// 2.2, 16, 40, 4 483, 28 086 and 4 300 `κu` down the decades; at 1e-6 rad the answer was 77 %
+    /// of `|v₂|` off.
+    #[test]
+    fn gibbs_keeps_to_the_floor_of_its_inputs_on_short_arcs() {
+        let u = f64::EPSILON / 2.0;
+        let at = |r: [f64; 3]| Vec3::new(r[0], r[1], r[2]);
+        for (spacing, r1, r2, r3, want, kappa) in GIBBS_SHORT_ARCS {
+            let v = gibbs(at(r1), at(r2), at(r3), MU_KM).expect("three points of one orbit");
+            let error = relative(v, want);
+            let (d12, d13) = (at(r2) - at(r1), at(r3) - at(r1));
+            let c = d12.norm() * d13.norm() / d12.cross(d13).norm();
+            assert!(
+                error <= u * c && error <= 0.02 * kappa * u,
+                "spacing {spacing:e}: Gibbs is {error:.3e} off exact Gibbs on its inputs, \
+                 {:.3} u·c and {:.3e} κu",
+                error / (u * c),
+                error / (kappa * u)
+            );
+        }
     }
 
     /// (G3) Herrick–Gibbs on a circle, three equally spaced points `h` apart, is tangent with speed

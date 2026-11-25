@@ -41,7 +41,7 @@ for(i = 1, 20000,
   p = f64(a*b); if(abs(p) >= 2^-900 && f64(a*b - p) != a*b - p, bad++);
   q = f64(a/b); if(abs(a) >= 2^-900 && abs(q) >= 2^-900 && f64(a - q*b) != a - q*b, bad++);
   r = abs(a); sq = f64(sqrt(r)); if(r >= 2^-900 && f64(r - sq^2) != r - sq^2, bad++));
-chk("error_free_residuals", bad);
+chk("residuals_error_free", bad);
 }
 
 \\ 4. atan t within |t|^3/3 of t, and |t|^3/3 <= |t| 2^-100 below 2^-50

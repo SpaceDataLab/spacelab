@@ -2871,6 +2871,53 @@ fn minimum_walker(
     .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+/// The minimum distance between two satellites of the Walker `i: T/P/F` over all time, in closed
+/// form over its plane-offset classes. `pattern` is `"delta"` or `"star"`; angles are radians,
+/// `semi_major_axis` metres. Returns the enclosure `(angle_lower, angle_upper, chord_lower,
+/// chord_upper)` (radians, metres) and a plane offset whose pairs reach it, 0 for one plane. The
+/// shell is proven to keep a keep-out distance `d` when `chord_lower > d`, proven not to when
+/// `chord_upper <= d`. A pair that meets is reported as 0. Under H-libm, not outward-rounded.
+/// `ValueError` for a bad pattern, fewer than two satellites, a radius or `mu` that is not finite
+/// and positive, or an inclination that is not finite.
+// Defaults: derivations/binding_defaults.mac reads each back against its source.
+#[pyfunction]
+#[pyo3(signature = (pattern, inclination, planes, per_plane, phasing, semi_major_axis, mu = 3.986_004_418e14))]
+fn walker_min_separation(
+    pattern: &str,
+    inclination: f64,
+    planes: u32,
+    per_plane: u32,
+    phasing: u32,
+    semi_major_axis: f64,
+    mu: f64,
+) -> PyResult<(f64, f64, f64, f64, u32)> {
+    let pattern = match pattern {
+        "delta" => WalkerPattern::Delta,
+        "star" => WalkerPattern::Star,
+        _ => return Err(PyValueError::new_err("pattern must be 'delta' or 'star'")),
+    };
+    let w = Walker {
+        pattern,
+        inclination: Angle::from_radians(inclination),
+        planes,
+        per_plane,
+        phasing,
+        semi_major_axis,
+        mu,
+    };
+    spacelab_constellation::walker_min_separation(&w)
+        .map(|s| {
+            (
+                s.angle_lower,
+                s.angle_upper,
+                s.chord_lower,
+                s.chord_upper,
+                s.plane_offset,
+            )
+        })
+        .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 /// The Draim orbit geometry for the given `period` (s), eccentricity and inclination: returns
 /// `(semi_major_axis, perigee_radius, apogee_radius)` in metres.
 // Defaults: derivations/binding_defaults.mac reads each back against its source.
@@ -7283,6 +7330,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(draim_geometry, m)?)?;
     m.add_function(wrap_pyfunction!(alpha_characteristic, m)?)?;
     m.add_function(wrap_pyfunction!(minimum_walker, m)?)?;
+    m.add_function(wrap_pyfunction!(walker_min_separation, m)?)?;
     m.add_function(wrap_pyfunction!(gauss_newton, m)?)?;
     m.add_function(wrap_pyfunction!(propagate_geopotential_dense, m)?)?;
     m.add_function(wrap_pyfunction!(propagate_geopotential_itrf_dense, m)?)?;
@@ -11987,6 +12035,65 @@ mod interpreter_tests {
                 .any(|((nr, _), (lr, _))| (nr[0] - lr[0]).abs() > 1e3),
             "e = 0.3 produced the circular lattice"
         );
+    }
+
+    /// `walker_min_separation` is the crate's enclosure field for field, through the pattern string,
+    /// for a Delta and a Star; Galileo 24/3/1's 60-digit minimum (the crate's G3 row) is inside it;
+    /// a one-satellite shell and an unknown pattern are refused.
+    #[test]
+    fn the_walker_separation_binding_is_the_crate_enclosure() {
+        let mu = 3.986_004_418e14;
+        for (name, pattern, inc, planes, per_plane, phasing, a) in [
+            (
+                "delta",
+                WalkerPattern::Delta,
+                56.0_f64.to_radians(),
+                3,
+                8,
+                1,
+                29_600_318.0,
+            ),
+            (
+                "star",
+                WalkerPattern::Star,
+                86.4_f64.to_radians(),
+                6,
+                11,
+                2,
+                7_158_137.0,
+            ),
+        ] {
+            let got = walker_min_separation(name, inc, planes, per_plane, phasing, a, mu)
+                .expect("a shell with pairs");
+            let want = spacelab_constellation::walker_min_separation(&Walker {
+                pattern,
+                inclination: Angle::from_radians(inc),
+                planes,
+                per_plane,
+                phasing,
+                semi_major_axis: a,
+                mu,
+            })
+            .expect("a shell with pairs");
+            assert_eq!(
+                got,
+                (
+                    want.angle_lower,
+                    want.angle_upper,
+                    want.chord_lower,
+                    want.chord_upper,
+                    want.plane_offset
+                )
+            );
+        }
+        let (lower, upper, ..) =
+            walker_min_separation("delta", 56.0_f64.to_radians(), 3, 8, 1, 29_600_318.0, mu)
+                .expect("a shell with pairs");
+        #[expect(clippy::excessive_precision, reason = "the derivation's 22 digits")]
+        let psi = 0.159_811_370_789_058_354_985_6;
+        assert!(lower <= psi && psi <= upper);
+        assert!(walker_min_separation("delta", 1.0, 1, 1, 0, 7e6, mu).is_err());
+        assert!(walker_min_separation("spiral", 1.0, 3, 4, 1, 7e6, mu).is_err());
     }
 
     /// `minimum_walker` returns the cheapest Walker Delta meeting a footprint, so the answer has to

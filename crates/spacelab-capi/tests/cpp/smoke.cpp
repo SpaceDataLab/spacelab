@@ -104,6 +104,8 @@ void the_structs_have_the_layout_both_sides_assume() {
     static_assert(sizeof(::sl_walker_pattern) == sizeof(std::int32_t));
     static_assert(sizeof(::sl_sensor_kind) == sizeof(std::int32_t));
     static_assert(offsetof(::sl_walker_params, inclination_rad) == sizeof(double));
+    static_assert(sizeof(spacelab::shell_separation) == 5 * sizeof(double));
+    static_assert(offsetof(spacelab::shell_separation, plane_offset) == 4 * sizeof(double));
 
     CHECK(spacelab::abi_version() == SL_ABI_VERSION);
     CHECK(!spacelab::version().empty());
@@ -582,6 +584,13 @@ void the_new_families_generate_what_they_promise() {
         spacelab::alpha_characteristic(cheapest, spacelab::mu_earth, 1, 1e-6);
     CHECK(alpha[0] <= alpha[1]);
     CHECK(alpha[1] <= footprint);
+
+    /* The same design's own satellites never meet: its minimum chord encloses the angle's. */
+    const spacelab::shell_separation gap = spacelab::walker_min_separation(best);
+    CHECK(gap.angle_lower_rad <= gap.angle_upper_rad);
+    CHECK(gap.chord_lower_m <= gap.chord_upper_m);
+    CHECK_NEAR(gap.chord_lower_m,
+               2.0 * best.semi_major_axis_m * std::sin(gap.angle_lower_rad / 2.0), 1e-6);
 }
 
 /*

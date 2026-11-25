@@ -82,6 +82,8 @@ static void the_layout_is_the_one_the_library_assumes(void) {
     CHECK(sizeof(sl_consensus_protocol) == 4);
     CHECK(sizeof(sl_zone_access) == 4);
     CHECK(offsetof(sl_walker_params, inclination_rad) == sizeof(double));
+    CHECK(offsetof(sl_shell_separation, plane_offset) == 4 * sizeof(double));
+    CHECK(sizeof(sl_shell_separation) == 5 * sizeof(double));
 
     CHECK(sizeof(sl_latency) == 3 * sizeof(double));
     CHECK(sizeof(sl_attitude_state) == 12 * sizeof(double));
@@ -632,6 +634,33 @@ static void the_lattice_is_the_walker_it_contains(void) {
 }
 
 /* Draim's four, and the orbit the geometry says they fly -- against Kepler's third law. */
+/* Galileo 24/3/1 at 56 degrees: its 60-digit minimum angle (the crate's G3 row) is inside the
+ * enclosure, the chord is the angle's at the radius, and a one-satellite shell has no pair. */
+static void the_shell_separation_holds_the_derived_minimum(void) {
+    const double psi = 0.1598113707890583549856;
+    sl_walker_params w;
+    sl_shell_separation s;
+
+    sl_walker_params_init(&w);
+    w.inclination_rad = 56.0 * PI / 180.0;
+    w.planes = 3;
+    w.per_plane = 8;
+    w.phasing = 1;
+    w.semi_major_axis_m = 29600318.0;
+    CHECK(sl_walker_min_separation(&w, &s) == SL_OK);
+    CHECK(s.angle_lower_rad <= psi && psi <= s.angle_upper_rad);
+    CHECK_NEAR(s.chord_lower_m, 2.0 * w.semi_major_axis_m * sin(psi / 2.0), 1e-6);
+    CHECK(s.plane_offset <= 1);
+
+    w.planes = 1;
+    w.per_plane = 1;
+    s.plane_offset = 99;
+    CHECK(sl_walker_min_separation(&w, &s) == SL_ERR_DOMAIN);
+    CHECK(s.plane_offset == 99);
+    w.planes = 0;
+    CHECK(sl_walker_min_separation(&w, &s) == SL_ERR_INVALID_ARGUMENT);
+}
+
 static void the_draim_design_flies_the_orbit_it_reports(void) {
     sl_draim_params d;
     sl_draim_orbit orbit;
@@ -3075,6 +3104,7 @@ int main(void) {
     the_least_squares_solve_reaches_the_answer_it_should();
     the_information_filter_accumulates_and_solves();
     the_lattice_is_the_walker_it_contains();
+    the_shell_separation_holds_the_derived_minimum();
     the_draim_design_flies_the_orbit_it_reports();
     the_coverage_engine_answers_what_the_windows_say();
     the_gnss_models_answer_what_their_formulas_say();

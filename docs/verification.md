@@ -4867,6 +4867,7 @@ phantom to avoid — the blind spot of #260, convenient for once.
 | `sl_walker`, `sl_street_of_coverage` | §4 generators | the two-call protocol delivers what the crate generated; every state on the design radius | exact count; ± 1.0 m | src/lib.rs, tests/cpp/smoke.cpp |
 | `sl_flower`, `sl_lattice_flower`, `sl_draim`, `sl_draim_geometry` | §4 the three remaining families | the lattice's own containment property — a circular lattice `(No, Nso, Nc) = (P, S, F)` is a Walker Delta `i: T/P/F` satellite for satellite — plus Kepler's third law for Draim's orbit, so neither is checked against itself | position agreement < 1e-6 m over 24 satellites; `a` to 1e-12 relative of `(mu·(T/2π)²)^(1/3)` | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
 | `sl_alpha_characteristic`, `sl_minimum_walker` | §4 Mozhaev α-characteristic | the search answers with a complete `sl_walker_params`, so its own answer is fed back to `sl_walker` and the constellation that comes out is measured against the footprint that was asked for | the upper end of the returned design's α enclosure ≤ the 0.6 rad requested, total within the budget; 0.5 rad, which the sampled α once granted within 40 satellites, and an unreachable footprint are `SL_ERR_DOMAIN`; `fold` 0 or above `n` and a zero tolerance are `SL_ERR_INVALID_ARGUMENT`, nothing written | src/lib.rs, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_walker_min_separation` (Ф27.J) | §4 the exact minimum separation inside a Walker shell | the crate's `walker_min_separation` on a Delta and a Star through the pattern tag, and Galileo 24/3/1's 60-digit minimum from `derivations/walker_min_separation.gp` | bit-exact against the crate, field for field; the 60-digit angle inside the enclosure; a zero count, an unknown pattern, a non-finite inclination and a non-positive radius or `mu` are `SL_ERR_INVALID_ARGUMENT` by name, a one-satellite shell is `SL_ERR_DOMAIN`, nothing written | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
 | `sl_grid_cells`, `sl_coverage_scan`, `sl_access_windows`, `sl_figures_of_merit` | §5 coverage engine | the aggregate against what it aggregates: the pass count and coverage fraction each cell reports must be the windows `sl_access_windows` lists for that same cell | passes exact; fraction ± 1e-9 of the windows' own share of a 24 h horizon | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
 | `sl_rinex_gnss_positions`, `sl_rinex_glonass_positions` | §9 RINEX-3 broadcast navigation | the same mixed-constellation fixture the Python bridge's smoke test parses, so both bindings are read against the same bytes; each entry point must take only its own constellation out of it | one GPS record at 26.0-27.2 Mm, one GLONASS record at 24.5-26.5 Mm, and zero of the other in each case; non-UTF-8 is `SL_ERR_INVALID_ARGUMENT` | src/lib.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
 | `sl_glonass_l1/l2_frequency` | §9 FDMA channel plan | the closed form `(1602 + k*0.5625)` / `(1246 + k*0.4375)` MHz, over every channel the standard defines | exact to 1e-6 Hz on all 14; a channel outside the signed byte is NaN, not a wrap | src/lib.rs, tests/c/smoke.c |
@@ -5000,11 +5001,11 @@ are deliberately **self-checking rather than golden**: a copied constant agrees 
 argument, so instead each one either feeds a solver the answer to its own question, asserts an
 invariant only the correct wiring satisfies, or injects a bias the routine must recover exactly.
 
-There is now a Rust-side rung under them as well — 119 `#[test]` in `lib.rs`, written to the same
-rule and measured by mutation rather than by coverage. 51 of them need an interpreter in the
+There is now a Rust-side rung under them as well — 120 `#[test]` in `lib.rs`, written to the same
+rule and measured by mutation rather than by coverage. 52 of them need an interpreter in the
 test process and are gated behind `test-interpreter`, which is what
 `cargo test -p spacelab-python --no-default-features --features test-interpreter` turns on; the other
-68 run in an ordinary `cargo test --workspace`. One of the 51 also needs `onnx`, because
+68 run in an ordinary `cargo test --workspace`. One of the 52 also needs `onnx`, because
 `cloud_mask` is only compiled with it. What they reach and what they cannot is `spacelab-python`'s
 entry in §8.
 

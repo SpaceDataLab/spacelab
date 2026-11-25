@@ -915,6 +915,26 @@ sl_status sl_minimum_walker(double max_footprint_rad, double inclination_rad,
                             double semi_major_axis_m, double mu, uint32_t fold, uint32_t max_total,
                             sl_walker_params *out);
 
+/* The minimum distance between two satellites of a shell over all time, as an enclosure. */
+typedef struct {
+    double angle_lower_rad; /* the smallest angle between two position vectors, lower end */
+    double angle_upper_rad; /* its upper end */
+    double chord_lower_m;   /* the smallest chord at the shell's radius, lower end */
+    double chord_upper_m;   /* its upper end */
+    uint32_t plane_offset;  /* a plane offset whose pairs reach it; 0 is one plane */
+} sl_shell_separation;
+
+/*
+ * The minimum over all time and all pairs of the distance between two satellites of the Walker
+ * `p`, Delta or Star, in closed form over its plane-offset classes. Under H-libm, not
+ * outward-rounded. The shell is proven to keep a keep-out distance `d` when `chord_lower_m > d`,
+ * proven not to when `chord_upper_m <= d`, and neither is proven in between. A pair that meets is
+ * reported as 0, not refused. `SL_ERR_INVALID_ARGUMENT` for a zero count, an unknown pattern, an
+ * inclination that is not finite or a radius or mu that is not positive; `SL_ERR_DOMAIN` for a
+ * one-satellite shell, which has no pair. Nothing is written on failure.
+ */
+sl_status sl_walker_min_separation(const sl_walker_params *p, sl_shell_separation *out);
+
 /* ---- Coverage ---- */
 
 /* Which constraint decides whether a ground point is covered. */

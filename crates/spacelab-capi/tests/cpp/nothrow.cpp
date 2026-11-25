@@ -360,6 +360,17 @@ void the_new_families_still_generate_what_they_promise() {
         0.05, 60.0 * M_PI / 180.0, spacelab::re_earth + 1200e3, spacelab::mu_earth, 1, 4);
     CHECK(!impossible);
     CHECK(impossible.error() == SL_ERR_DOMAIN);
+
+    /* A one-satellite shell has no pair to separate: a status, not a number. */
+    spacelab::walker_params alone{};
+    ::sl_walker_params_init(&alone);
+    alone.planes = 1;
+    alone.per_plane = 1;
+    alone.semi_major_axis_m = spacelab::re_earth + 1200e3;
+    const spacelab::result<spacelab::shell_separation> none =
+        spacelab::try_walker_min_separation(alone);
+    CHECK(!none);
+    CHECK(none.error() == SL_ERR_DOMAIN);
 }
 
 /* Coverage without exceptions: the same agreement between the metrics and the windows. */

@@ -39,6 +39,7 @@ use spacelab_constellation::{
     AlphaError, DraimTetrahedral, FlowerConstellation, LatticeFlower, StreetOfCoverage, Walker,
     WalkerPattern, alpha_characteristic as constellation_alpha,
     minimum_walker as constellation_minimum_walker,
+    walker_min_separation as constellation_walker_min_separation,
 };
 use spacelab_control::attitude::{AttitudeError, ControlLaw, MrpLyapunov, QuaternionPd};
 use spacelab_control::closed_loop::{AttitudeLoop, AttitudeState};
@@ -3840,6 +3841,89 @@ pub unsafe extern "C" fn sl_minimum_walker(
         }
         SL_OK
     })
+}
+
+/// `sl_shell_separation`: the minimum distance between two satellites of a shell over all time, as
+/// an enclosure.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SlShellSeparation {
+    /// Lower end of the minimum angle between two position vectors, radians.
+    pub angle_lower_rad: f64,
+    /// Upper end of the minimum angle, radians.
+    pub angle_upper_rad: f64,
+    /// Lower end of the minimum chord at the shell's radius, metres.
+    pub chord_lower_m: f64,
+    /// Upper end of the minimum chord, metres.
+    pub chord_upper_m: f64,
+    /// A plane offset whose pairs reach the minimum; 0 is two satellites of one plane.
+    pub plane_offset: u32,
+}
+
+/// The minimum distance between two satellites of a Walker shell over all time. See the header.
+///
+/// # Safety
+/// `p` points at one initialised `sl_walker_params`; `out` is writable for one
+/// `sl_shell_separation`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_walker_min_separation(
+    p: *const SlWalkerParams,
+    out: *mut SlShellSeparation,
+) -> i32 {
+    guard(|| {
+        const WHO: &str = "sl_walker_min_separation";
+        if p.is_null() || out.is_null() {
+            return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null pointer"));
+        }
+        // SAFETY: checked non-null just above.
+        let p = unsafe { *p };
+        let pattern = match walker_pattern_of(WHO, p.pattern) {
+            Ok(pattern) => pattern,
+            Err(status) => return status,
+        };
+        if let Err(status) = check_walker_separation_inputs(WHO, p) {
+            return status;
+        }
+        let walker = Walker {
+            pattern,
+            inclination: Angle::from_radians(p.inclination_rad),
+            planes: p.planes,
+            per_plane: p.per_plane,
+            phasing: p.phasing,
+            semi_major_axis: p.semi_major_axis_m,
+            mu: p.mu,
+        };
+        // What the checks above leave is a one-satellite shell: well-formed, with no pair.
+        let s = match constellation_walker_min_separation(&walker) {
+            Ok(s) => s,
+            Err(error) => return fail(SL_ERR_DOMAIN, format!("{WHO}: {error}")),
+        };
+        // SAFETY: checked non-null; written only now that the answer exists.
+        unsafe {
+            *out = SlShellSeparation {
+                angle_lower_rad: s.angle_lower,
+                angle_upper_rad: s.angle_upper,
+                chord_lower_m: s.chord_lower,
+                chord_upper_m: s.chord_upper,
+                plane_offset: s.plane_offset,
+            };
+        }
+        SL_OK
+    })
+}
+
+/// A shell's orbit and counts: every refusal that names an argument is `SL_ERR_INVALID_ARGUMENT`.
+fn check_walker_separation_inputs(who: &str, p: SlWalkerParams) -> Result<(), i32> {
+    check_finite(who, "inclination_rad", p.inclination_rad)?;
+    check_positive(
+        who,
+        "semi_major_axis_m",
+        p.semi_major_axis_m,
+        SL_ERR_INVALID_ARGUMENT,
+    )?;
+    check_positive(who, "mu", p.mu, SL_ERR_INVALID_ARGUMENT)?;
+    check_nonzero(who, "planes", p.planes)?;
+    check_nonzero(who, "per_plane", p.per_plane)
 }
 
 // ── Coverage ──────────────────────────────────────────────────────────────────────────────────
@@ -15055,6 +15139,16 @@ mod tests {
             ),
             ("sl_corona_term", &["coefficient", "exponent"][..]),
             (
+                "sl_shell_separation",
+                &[
+                    "angle_lower_rad",
+                    "angle_upper_rad",
+                    "chord_lower_m",
+                    "chord_upper_m",
+                    "plane_offset",
+                ][..],
+            ),
+            (
                 "sl_decay_params",
                 &[
                     "cd",
@@ -17866,6 +17960,141 @@ mod tests {
             "{}",
             last_error()
         );
+    }
+
+    /// `sl_walker_min_separation` is the crate's `walker_min_separation` bit for bit, Delta and
+    /// Star, through the pattern tag; Galileo 24/3/1's 60-digit minimum (the crate's G3 row) is
+    /// inside the enclosure it writes. Each refusal is its status, named, with nothing written.
+    #[test]
+    fn the_walker_separation_is_the_crate_enclosure() {
+        let blank = SlShellSeparation {
+            angle_lower_rad: -1.0,
+            angle_upper_rad: -1.0,
+            chord_lower_m: -1.0,
+            chord_upper_m: -1.0,
+            plane_offset: 99,
+        };
+        let galileo = SlWalkerParams {
+            pattern: WALKER_DELTA,
+            inclination_rad: 56.0_f64.to_radians(),
+            planes: 3,
+            per_plane: 8,
+            phasing: 1,
+            semi_major_axis_m: 29_600_318.0,
+            mu: MU_EARTH,
+        };
+        let iridium = SlWalkerParams {
+            pattern: WALKER_STAR,
+            inclination_rad: 86.4_f64.to_radians(),
+            planes: 6,
+            per_plane: 11,
+            phasing: 2,
+            semi_major_axis_m: 7_158_137.0,
+            ..galileo
+        };
+        for (p, pattern) in [
+            (galileo, WalkerPattern::Delta),
+            (iridium, WalkerPattern::Star),
+        ] {
+            let mut out = blank;
+            // SAFETY: both pointers are to locals of the right type.
+            let status = unsafe { sl_walker_min_separation(&raw const p, &raw mut out) };
+            assert_eq!(status, SL_OK, "{}", last_error());
+            let want = spacelab_constellation::walker_min_separation(&Walker {
+                pattern,
+                inclination: Angle::from_radians(p.inclination_rad),
+                planes: p.planes,
+                per_plane: p.per_plane,
+                phasing: p.phasing,
+                semi_major_axis: p.semi_major_axis_m,
+                mu: p.mu,
+            })
+            .expect("a shell with pairs");
+            assert_eq!(
+                out,
+                SlShellSeparation {
+                    angle_lower_rad: want.angle_lower,
+                    angle_upper_rad: want.angle_upper,
+                    chord_lower_m: want.chord_lower,
+                    chord_upper_m: want.chord_upper,
+                    plane_offset: want.plane_offset,
+                }
+            );
+        }
+        let mut out = blank;
+        // SAFETY: both pointers are to locals of the right type.
+        let status = unsafe { sl_walker_min_separation(&raw const galileo, &raw mut out) };
+        assert_eq!(status, SL_OK);
+        #[expect(clippy::excessive_precision, reason = "the derivation's 22 digits")]
+        let psi = 0.159_811_370_789_058_354_985_6;
+        assert!(out.angle_lower_rad <= psi && psi <= out.angle_upper_rad);
+
+        for (bad, status, name) in [
+            (
+                SlWalkerParams {
+                    planes: 0,
+                    ..galileo
+                },
+                SL_ERR_INVALID_ARGUMENT,
+                "planes",
+            ),
+            (
+                SlWalkerParams {
+                    per_plane: 0,
+                    ..galileo
+                },
+                SL_ERR_INVALID_ARGUMENT,
+                "per_plane",
+            ),
+            (
+                SlWalkerParams { mu: 0.0, ..galileo },
+                SL_ERR_INVALID_ARGUMENT,
+                "mu",
+            ),
+            (
+                SlWalkerParams {
+                    semi_major_axis_m: f64::NAN,
+                    ..galileo
+                },
+                SL_ERR_INVALID_ARGUMENT,
+                "semi_major_axis_m",
+            ),
+            (
+                SlWalkerParams {
+                    inclination_rad: f64::INFINITY,
+                    ..galileo
+                },
+                SL_ERR_INVALID_ARGUMENT,
+                "inclination_rad",
+            ),
+            (
+                SlWalkerParams {
+                    pattern: 7,
+                    ..galileo
+                },
+                SL_ERR_INVALID_ARGUMENT,
+                "pattern",
+            ),
+            (
+                SlWalkerParams {
+                    planes: 1,
+                    per_plane: 1,
+                    ..galileo
+                },
+                SL_ERR_DOMAIN,
+                "fewer than two",
+            ),
+        ] {
+            let mut out = blank;
+            // SAFETY: both pointers are to locals of the right type.
+            let got = unsafe { sl_walker_min_separation(&raw const bad, &raw mut out) };
+            assert_eq!(got, status, "{}", last_error());
+            assert!(last_error().contains(name), "{}", last_error());
+            assert_eq!(out, blank, "nothing written");
+        }
+        // SAFETY: a null out-pointer is the case under test.
+        let status = unsafe { sl_walker_min_separation(&raw const galileo, core::ptr::null_mut()) };
+        assert_eq!(status, SL_ERR_INVALID_ARGUMENT);
     }
 
     /// The grid is the points it names: on the sphere, outward, and longitude-major within each

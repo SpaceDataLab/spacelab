@@ -4172,7 +4172,7 @@ exclude_re = [
     # condition collapses to `!is_char_boundary(keep)` -- but `str::is_char_boundary(0)` is
     # documented to return true unconditionally, so the loop exits at `keep == 0` either way. The
     # decrement is never reached at zero and cannot underflow under either operator.
-    "crates/spacelab-capi/src/lib\\.rs:451:16: replace > with >= in copy_to_c_buffer",
+    "crates/spacelab-capi/src/lib\\.rs:452:16: replace > with >= in copy_to_c_buffer",
 
     # `sl_abi_version -> 1` was excluded here while `ABI_VERSION` was 1 and the two functions were
     # the same function. The ABI is at 2 as of the `sl_cloud_mask*` family, so the mutant is

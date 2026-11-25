@@ -557,6 +557,22 @@ def test_constellation_generators():
     mw = sl.minimum_walker(1.2, math.radians(70), re + 20_000e3, mu, 1, 12)
     assert mw is not None and mw[3] <= 12  # (planes, per_plane, phasing, total)
 
+    # Galileo 24/3/1: the shell's minimum separation over all time encloses its 60-digit value
+    # (derivations/walker_min_separation.gp), and the chord is the angle's at the radius.
+    lo, hi, clo, chi, _offset = sl.walker_min_separation(
+        "delta", math.radians(56), 3, 8, 1, 29_600_318.0
+    )
+    assert lo <= 0.1598113707890583549856 <= hi and clo <= chi
+    assert abs(clo - 2 * 29_600_318.0 * math.sin(lo / 2)) < 1e-6
+    try:
+        sl.walker_min_separation("delta", 1.0, 1, 1, 0, re + 800e3)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            "a one-satellite shell has no pair and should raise ValueError"
+        )
+
     try:
         sl.walker_constellation("spiral", 0.9, 3, 3, 1, re + 800e3)
     except ValueError:

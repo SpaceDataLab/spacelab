@@ -79,6 +79,7 @@ using flower_params = ::sl_flower_params;
 using lattice_params = ::sl_lattice_params;
 using draim_params = ::sl_draim_params;
 using draim_orbit = ::sl_draim_orbit;
+using shell_separation = ::sl_shell_separation;
 using sensor = ::sl_sensor;
 using coverage_metrics = ::sl_coverage_metrics;
 using constellation_fom = ::sl_constellation_fom;
@@ -984,6 +985,12 @@ try_minimum_walker(double max_footprint_rad, double inclination_rad, double semi
     return s == SL_OK ? result<walker_params>(out) : detail::failure<walker_params>(s);
 }
 
+[[nodiscard]] inline result<shell_separation> try_walker_min_separation(const walker_params &p) {
+    shell_separation out{};
+    const ::sl_status s = ::sl_walker_min_separation(&p, &out);
+    return s == SL_OK ? result<shell_separation>(out) : detail::failure<shell_separation>(s);
+}
+
 #if defined(__cpp_exceptions)
 
 [[nodiscard]] inline std::vector<state> flower(const flower_params &p) {
@@ -1014,6 +1021,10 @@ alpha_characteristic(std::span<const state> states, double mu = mu_earth, std::u
                                                   std::uint32_t max_total = 40) {
     return detail::unwrap(try_minimum_walker(max_footprint_rad, inclination_rad, semi_major_axis_m,
                                              mu, fold, max_total));
+}
+
+[[nodiscard]] inline shell_separation walker_min_separation(const walker_params &p) {
+    return detail::unwrap(try_walker_min_separation(p));
 }
 
 #endif

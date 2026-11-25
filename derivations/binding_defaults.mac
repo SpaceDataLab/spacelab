@@ -93,6 +93,7 @@ signatures : [
   ["lattice_flower", ["mu" = gm_wgs84]],
   ["draim_constellation", ["mu" = gm_wgs84, "inclination" = draim_inclination]],
   ["minimum_walker", ["mu" = gm_wgs84]],
+  ["walker_min_separation", ["mu" = gm_wgs84]],
   ["draim_geometry", ["mu" = gm_wgs84, "inclination" = draim_inclination]],
   ["sun_synchronous_inclination", append(wgs("mu", "re"), ["j2" = J[1]])],
   ["repeat_ground_track_sma", append(wgs("mu", "re"), ["j2" = J[1], "earth_rotation_rate" = era_rate])],

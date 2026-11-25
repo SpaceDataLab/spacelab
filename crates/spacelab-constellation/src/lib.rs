@@ -26,7 +26,8 @@
 //! Plus the Mozhaev classification of symmetry groups ([`PointGroup`], [`MozhaevSymbol`]) and, behind
 //! the `std` feature, the α-characteristic coverage figure of merit as an enclosure
 //! ([`alpha_characteristic`], [`covering_radius`] at one instant) and the cheapest Walker Delta proven
-//! to reach a footprint ([`minimum_walker`]).
+//! to reach a footprint ([`minimum_walker`]); and the exact area covered at least `k` times by
+//! spherical caps at one instant ([`kfold_areas`]).
 
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 
@@ -34,6 +35,8 @@
 pub mod analysis;
 pub mod draim;
 pub mod flower;
+#[cfg(any(feature = "std", test))]
+pub mod kfold;
 pub mod lattice;
 pub mod mozhaev;
 pub mod shell;
@@ -47,6 +50,8 @@ pub use analysis::{
 };
 pub use draim::DraimTetrahedral;
 pub use flower::FlowerConstellation;
+#[cfg(any(feature = "std", test))]
+pub use kfold::{CapError, KfoldAreas, SphericalCap, kfold_areas};
 pub use lattice::LatticeFlower;
 pub use mozhaev::{GroupType, MozhaevSymbol, PointGroup};
 pub use shell::{ShellTier, TwoTierShell, characteristic_velocity, observes};

@@ -103,6 +103,21 @@ The covariance-form `unscented_transform` gives out two decades earlier than the
 offset that is zero in exact arithmetic, so what it multiplies is rounding. Prefer
 `SquareRootUnscentedKalman` when the state is large.
 
+**The `k`-fold coverage area loses digits where three or more cap circles nearly coincide.**
+`kfold_areas` (Ф31.D) cuts each circle at its crossings with the others. Circles `δ` apart that pass
+through one point cross there at an angle of order `δ`, so rounding moves those crossings by about
+`2⁻⁵³/δ` along the circles and can swap their order; `δ` is a set's largest
+`angle(c_i, c_j) + |ρ_i − ρ_j|`. Measured against the same arcs at 60 digits on 336 random sets of
+three or four such circles, `δ` from about `10⁻⁶` to `10⁻¹²` (2026-11-25; the test
+`near_coincident_corpus_within_its_bounds` prints the table again from the sets that
+`derivations/kfold_coverage_area.gp` writes and checks): left apart, the areas were off by up to
+`6.3 · 2⁻⁵³/δ`; moved onto one circle, by up to `3.3 δ`. Once three or more circles chain by pairs
+within `2⁻²⁸` in centre and in half-angle (each such pair at most `δ = 2⁻²⁷` apart), the code moves
+them and returns `snap_bound`, which held every measured error 4.4 times over; otherwise no bound is
+returned. The worst error the shipped code made on the corpus was 2.2e-8 sr, in the `10⁻⁸` decade.
+Circles more than `10⁻⁶` rad apart (6 m on the ground) lose at most about 7e-10 sr by the worst
+constant; the `10⁻⁶` decade measured 2.2e-10 sr.
+
 ## What an event scan can miss
 
 `spacelab_coverage::find_events` samples `g(t)` at a fixed step and refines each sign change between

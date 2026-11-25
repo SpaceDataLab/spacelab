@@ -1,0 +1,170 @@
+/* The exact k-fold coverage area of `crates/spacelab-constellation/src/kfold.rs` (plan 18 Ф31.D,
+   F133 (a)).
+
+   For caps C_i = {x : x.c_i >= cos rho_i} the area covered at least k times is a sum over the arcs
+   of the boundary circles between their crossing points. Pick a unit vector n whose antipode
+   s = -n lies on no circle. In a frame with n as the z axis the 1-form
+   omega = (x dy - y dx)/(1 + z) = (1 - cos theta) dphi has d(omega) = the area form on S^2 - {s},
+   so by Stokes area(R) = (integral of omega over the boundary of R) + 4 pi [s in R]. An arc of
+   circle i whose points lie in d other caps bounds {depth >= d + 1} with that set on its cap's
+   side, so A_k is the sum of the arc integrals at depth k - 1, plus 4 pi when depth(s) >= k.
+
+   This file derives what the code evaluates: the 1-form and its derivative; the integrand along a
+   circle; the antiderivative in the scaled atan2 form the code ships, with its denominator bounded
+   away from 0; that form read from the 3-D point rather than an angle; the crossing points of two
+   circles from the spherical half-angle formula, on both circles, with the side each circle enters
+   by and the angle each subtends at the other centre; the lens of two caps by Gauss-Bonnet at the regular polyhedra (G3); Girard's interior angle
+   for three hemispheres; and the code's coincidence threshold as the power of two its comment
+   names. Every identity prints `<name>: 0`.
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/kfold_coverage_area.mac </dev/null */
+
+display2d: false$
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+simp0(e) := ratsimp(radcan(trigsimp(e)))$
+cross3(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+dot3(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+
+/* ---- 1. The 1-form: omega = (x dy - y dx)/(1 + z) is (1 - cos theta) dphi, d(omega) = dA ---- */
+X: [sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta)]$
+chk("omega_has_no_dtheta_part",
+    simp0(X[1]*diff(X[2], theta) - X[2]*diff(X[1], theta)))$
+chk("omega_is_one_minus_cos_theta_dphi",
+    simp0((X[1]*diff(X[2], phi) - X[2]*diff(X[1], phi))/(1 + X[3]) - (1 - cos(theta))))$
+chk("d_omega_is_the_area_form", diff(1 - cos(theta), theta) - sin(theta))$
+chk("the_sphere_is_four_pi", integrate(integrate(sin(theta), theta, 0, %pi), phi, 0, 2*%pi) - 4*%pi)$
+assume(rho > 0, rho < %pi)$
+chk("a_cap_is_two_pi_one_minus_cos_rho",
+    ratsimp(integrate(2*%pi*sin(theta), theta, 0, rho) - 2*%pi*(1 - cos(rho))))$
+
+/* ---- 2. The integrand along circle i: c = e3, u = e1, v = e2, a = cos rho, b = sin rho ---- */
+Xc: [b*cos(psi), b*sin(psi), a]$
+dXc: diff(Xc, psi)$
+nn: [B*cos(psi0), B*sin(psi0), A]$
+p: 1 + a*A$
+q: b*B$
+on_sphere(e) := ratsimp(ratsubst(1 - A^2, B^2, ratsubst(1 - a^2, b^2, ratsimp(e))))$
+trigz(e) := ratsimp(radcan(exponentialize(e)))$
+integrand: dot3(nn, cross3(Xc, dXc)) / (1 + dot3(nn, Xc))$
+resid: num(ratsimp(integrand - (-a + (a + A)/(p + q*cos(psi - psi0)))))$
+chk("integrand_is_minus_cos_rho_plus_a_plus_A_over_p_plus_q_cos_t",
+    on_sphere(trigsimp(trigexpand(resid))))$
+chk("p2_minus_q2_is_a_plus_A_squared",
+    ratsimp(subst([b^2 = 1 - a^2, B^2 = 1 - A^2], expand(p^2 - q^2 - (a + A)^2))))$
+/* (c x n).X and n.X - aA are q sin t and q cos t, t = psi - psi0: G read from the point */
+chk("q_sin_t_is_c_cross_n_dot_X",
+    trigz(dot3(cross3([0, 0, 1], nn), Xc) - q*sin(psi - psi0)))$
+chk("q_cos_t_is_n_dot_X_minus_aA",
+    trigz(dot3(nn, Xc) - a*A - q*cos(psi - psi0)))$
+
+/* ---- 3. The antiderivative. e = |a + A| = sqrt(p^2 - q^2), P = p + q, kappa = e/P ---- */
+kill(p, q)$
+assume(qq > 0, ee > 0)$
+pp: sqrt(ee^2 + qq^2)$
+PP: pp + qq$
+G: atan(2*qq*PP*sin(t) / ((PP + ee)^2 + 2*qq*PP*cos(t)))$
+chk("G_prime_is_half_of_one_minus_e_over_p_plus_q_cos_t",
+    simp0(diff(G, t) - (1/2)*(1 - ee/(pp + qq*cos(t)))))$
+/* the atan2 denominator is at least 2 e (e + P) > 0, so G is continuous for every t */
+chk("G_denominator_minimum_is_2e_e_plus_P",
+    ratsimp(radcan(expand((PP + ee)^2 - 2*qq*PP - 2*ee*(ee + PP)))))$
+/* kappa^2 = (p - q)/(p + q): the scaled form is M0's atan2((1-k) sin t, (1+k) + (1-k) cos t) */
+kap: ee/PP$
+chk("kappa_squared_is_p_minus_q_over_p_plus_q",
+    ratsimp(radcan(kap^2 - (pp - qq)/(pp + qq))))$
+/* P (P + e) > 0 times the kappa form's arguments is the shipped form's */
+chk("scaled_atan2_y_is_P_P_plus_e_one_minus_kappa", ratsimp(radcan(2*qq*PP - PP*(PP + ee)*(1 - kap))))$
+chk("scaled_atan2_x_is_P_P_plus_e_one_plus_kappa", ratsimp(radcan((PP + ee)^2 - PP*(PP + ee)*(1 + kap))))$
+/* the arc integral: d/dt [(sigma - a) t - 2 sigma G] is the integrand -a + sigma e/(p + q cos t) */
+for sg in [1, -1] do
+  chk(concat("arc_integral_derivative_sigma_", sg),
+      simp0(diff((sg - aa)*t - 2*sg*G, t) - (-aa + sg*ee/(pp + qq*cos(t)))))$
+
+/* ---- 4. The crossing points of circles i and j, centres d apart ---- */
+cosh_lc: (cos(rj) - cos(ri)*cos(d))/(sin(ri)*sin(d))$
+s: (d + ri + rj)/2$
+chk("one_minus_cos_h_half_angle",
+    trigz(sin(ri)*sin(d)*(1 - cosh_lc) - 2*sin(s - d)*sin(s - ri)))$
+chk("one_plus_cos_h_half_angle",
+    trigz(sin(ri)*sin(d)*(1 + cosh_lc) - 2*sin(s)*sin(s - rj)))$
+chk("sin_s_is_sin_half_delta3", trigz(sin(s) - sin((2*%pi - d - ri - rj)/2)))$
+/* the angle h_j at c_j, which sets the length 2 h_j of circle j's arc inside cap i: the same
+   formula with ri and rj swapped */
+cosh_lc_j: (cos(ri) - cos(rj)*cos(d))/(sin(rj)*sin(d))$
+chk("one_minus_cos_h_j_half_angle",
+    trigz(sin(rj)*sin(d)*(1 - cosh_lc_j) - 2*sin(s - d)*sin(s - rj)))$
+chk("one_plus_cos_h_j_half_angle",
+    trigz(sin(rj)*sin(d)*(1 + cosh_lc_j) - 2*sin(s)*sin(s - ri)))$
+/* c_i = e3, c_j = (sin d, 0, cos d), w = e1, c_i x w = e2; x = cos ri c_i + sin ri (cos h w +- sin h c_i x w) */
+ci: [0, 0, 1]$
+cj: [sin(d), 0, cos(d)]$
+for sg in [1, -1] do block([xx: [sin(ri)*ch, sg*sin(ri)*sh, cos(ri)]],
+  chk(concat("crossing_is_on_circle_j_", sg),
+      ratsimp(subst(ch = cosh_lc, dot3(xx, cj)) - cos(rj))),
+  chk(concat("crossing_is_on_the_sphere_", sg),
+      ratsimp(trigsimp(subst(sh = sqrt(1 - ch^2), dot3(xx, xx))) - 1)),
+  /* moving along circle i (cap on the left), d/dpsi (X.c_j) = (c_i x X).c_j: exit at +, entry at - */
+  chk(concat("side_crossed_on_circle_i_", sg),
+      ratsimp(dot3(cross3(ci, xx), cj) + sg*sin(ri)*sh*sin(d))),
+  /* on circle j the same point is crossed the other way */
+  chk(concat("side_crossed_on_circle_j_", sg),
+      ratsimp(dot3(cross3(cj, xx), ci) + dot3(cross3(ci, xx), cj))),
+  /* seen from c_j the crossing is h_j from w_j = (-cos d, 0, sin d), the way to c_i */
+  chk(concat("crossing_is_h_j_from_c_i_on_circle_j_", sg),
+      trigsimp(ratsimp(subst(ch = cosh_lc, dot3(xx, [-cos(d), 0, sin(d)])) - sin(rj)*cosh_lc_j))))$
+
+/* ---- 5. G3: the lens of two caps by Gauss-Bonnet, at the regular polyhedra ----
+   lens = 2 pi - 2 gamma - 2 h_i cos ri - 2 h_j cos rj: two exterior angles gamma (the triangle
+   c_i c_j x's angle at x), and the geodesic curvature cot r over arcs of length 2 h sin r. */
+lens(d, r1, r2) := 2*(%pi - acos((cos(d) - cos(r1)*cos(r2))/(sin(r1)*sin(r2)))
+  - cos(r1)*acos((cos(r2) - cos(d)*cos(r1))/(sin(d)*sin(r1)))
+  - cos(r2)*acos((cos(r1) - cos(d)*cos(r2))/(sin(d)*sin(r2))))$
+cap(r) := 2*%pi*(1 - cos(r))$
+/* the covering radius of each polyhedron is its face's circumradius: cos = vertex . face centre */
+fc(vs) := block([m: (vs[1] + vs[2] + vs[3])], dot3(m, vs[1])/sqrt(dot3(m, m)*dot3(vs[1], vs[1])))$
+tet: [[1, 1, 1], [1, -1, -1], [-1, 1, -1]]$
+oct: [[1, 0, 0], [0, 1, 0], [0, 0, 1]]$
+cub: [[1, 1, 1], [1, -1, 1], [1, 1, -1]]$
+chk("tetrahedron_face_circumradius_cos_is_1_3", radcan(fc(tet) - 1/3))$
+chk("octahedron_face_circumradius_cos_is_1_sqrt3", radcan(fc(oct) - 1/sqrt(3)))$
+chk("cube_face_circumradius_cos_is_1_sqrt3",
+    radcan(dot3([1, 0, 0], [1, 1, 1])/sqrt(3) - 1/sqrt(3)))$
+rt: acos(1/3)$ ro: acos(1/sqrt(3))$
+chk("lens_tetrahedron_edge", ratsimp(lens(acos(-1/3), rt, rt) - 2*%pi/9))$
+chk("lens_octahedron_edge", ratsimp(radcan(lens(%pi/2, ro, ro) - (2 - sqrt(3))*%pi/3)))$
+chk("lens_cube_edge", ratsimp(radcan(lens(acos(1/3), ro, ro) - (%pi - 4*%pi/(3*sqrt(3))))))$
+chk("cube_face_diagonal_caps_are_tangent", ratsimp(trigexpand(cos(2*ro)) + 1/3))$
+/* A_1 = 4 pi (the radius covers), A_2 = the lenses, A_3 = 0: two relations, sum of caps and sum
+   of lenses, agree only if no region of positive area is covered three times */
+chk("tetrahedron_caps_minus_sphere_is_its_six_lenses",
+    ratsimp(4*cap(rt) - 4*%pi - 6*lens(acos(-1/3), rt, rt)))$
+chk("octahedron_caps_minus_sphere_is_its_twelve_lenses",
+    ratsimp(radcan(6*cap(ro) - 4*%pi - 12*lens(%pi/2, ro, ro))))$
+chk("cube_caps_minus_sphere_is_its_twelve_lenses",
+    ratsimp(radcan(8*cap(ro) - 4*%pi - 12*lens(acos(1/3), ro, ro))))$
+/* icosahedron: vertices (0, +-1, +-phi) cyclic; edge cos 1/sqrt5; checked at 60 digits */
+fpprec: 60$
+phi_g: (1 + sqrt(5))/2$
+ico: [[0, 1, phi_g], [0, -1, phi_g], [phi_g, 0, 1]]$
+ci_ico: fc(ico)$
+chk("icosahedron_edge_cos_is_1_sqrt5",
+    radcan(dot3(ico[1], ico[2])/dot3(ico[1], ico[1]) - 1/sqrt(5)))$
+ri_ico: acos(ci_ico)$
+block([r: bfloat(12*cap(ri_ico) - 4*%pi - 30*lens(acos(1/sqrt(5)), ri_ico, ri_ico))],
+  chk("icosahedron_caps_minus_sphere_is_its_thirty_lenses", if abs(r) < 1b-55 then 0 else r))$
+/* the second covering radius of the tetrahedron, pi - acos(1/3): A = (4 pi, 4 pi, 8 pi/3, 0) */
+chk("tetrahedron_second_fold_sum", ratsimp(4*cap(%pi - rt) - (4*%pi + 4*%pi + 8*%pi/3)))$
+/* six hemispheres on the axes cover every point three times: A = (4 pi, 4 pi, 4 pi, 0, 0, 0) */
+chk("octahedron_hemispheres_sum", ratsimp(6*cap(%pi/2) - 3*4*%pi))$
+
+/* ---- 6. Girard: x.c_k >= 0 for three hemispheres is a triangle with angles pi - theta_ij ----
+   At the vertex v = c1 x c2 / |c1 x c2|, with c1 = e3, c2 = (sin t, 0, cos t), v = e2: the edge
+   on c1's circle runs into {x.c2 >= 0} along e1, the edge on c2's circle into {x.c1 >= 0} along
+   (-cos t, 0, sin t); the interior angle is acos of their dot, pi - t. Area = 2 pi - sum theta. */
+c2g: [sin(t), 0, cos(t)]$
+vg: [0, 1, 0]$
+chk("girard_vertex_is_on_both_circles", ratsimp(dot3(vg, [0, 0, 1])^2 + dot3(vg, c2g)^2))$
+chk("girard_interior_angle_is_pi_minus_theta",
+    ratsimp(dot3([1, 0, 0], cross3(vg, c2g)*(-1)) + cos(t)))$
+
+/* ---- 7. The threshold the code writes as a reciprocal is the power of two it names ---- */
+chk("coincident_angle_is_2_to_the_minus_28", 1/268435456 - 2^-28)$

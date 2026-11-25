@@ -343,7 +343,7 @@ mod tests {
     /// (G3) `derivations/patched_conics.mac` shows the coded `B` is the limit of the aiming offset
     /// `r − (r·Ŝ)Ŝ` as the conic runs out along its incoming asymptote, and
     /// `derivations/patched_conics.gp` takes that limit at 100 digits on these states, matching `AIMING`
-    /// to the 25 digits written; rounding the decimal inputs to doubles moves it by 3e-17 of `|B|`.
+    /// to the 25 digits written; rounding the decimal inputs to doubles moves it by 2e-17 of `|B|`.
     #[test]
     fn the_b_plane_is_the_aiming_plane_of_the_incoming_asymptote() {
         for &(r, v, mu, north, b_dot_t, b_dot_r, b_magnitude) in &AIMING {

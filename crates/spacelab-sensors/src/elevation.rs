@@ -141,6 +141,9 @@ impl Constraint for ElevationMask {
 }
 
 /// Convenience: the elevation of `satellite` seen from `cell`, radians. Not used by the engine.
+///
+/// `atan2(d·ẑ, |d × ẑ|)`: `asin(d·ẑ/|d|)` would lose `√(2u)` of angle next to the zenith and the
+/// nadir, where the sine is flat (`derivations/angle_from_vectors.mac`).
 #[must_use]
 pub fn elevation(satellite: Vec3, cell: Vec3, zenith: Vec3) -> f64 {
     let d = Vec3::new(
@@ -148,5 +151,5 @@ pub fn elevation(satellite: Vec3, cell: Vec3, zenith: Vec3) -> f64 {
         satellite.y - cell.y,
         satellite.z - cell.z,
     );
-    libm::asin(d.dot(zenith) / d.norm())
+    libm::atan2(d.dot(zenith), d.cross(zenith).norm())
 }

@@ -2,13 +2,16 @@
    tables of the angle sites, at 100 digits on exact doubles. Each section prints the rows a test
    carries, and checks that every row is the angle it was built from; a row that is not prints FAIL.
 
-   1. The angle between two vectors. a = dbl((2, -3, 6)/7); b = dbl(cos t u + sin t w) with
-      u = (2, -3, 6)/7 and w = (3, 6, 2)/7 orthonormal, t = 10^-k and pi - 10^-k, k = 1..12. Rows: b,
-      atan2(|a x b|, a.b), exact for the doubles a and b, which the tests pass to the code as they
-      are: the solar and view zenith and the scattering angle of
+   1. The angle between two vectors, and the elevation of one above the plane normal to the other.
+      a = dbl((2, -3, 6)/7); b = dbl(cos t u + sin t w) with u = (2, -3, 6)/7 and w = (3, 6, 2)/7
+      orthonormal, t = 10^-k and pi - 10^-k, k = 1..12. Rows: b, then atan2(|a x b|, a.b) or
+      atan2(a.b, |a x b|), exact for the doubles a and b, which the tests pass to the code as they
+      are. The angle: the solar and view zenith and the scattering angle of
       `the_angles_keep_their_digits_next_to_zero_and_pi` (spacelab-earthvision/src/geometry.rs) and
       the phase angle of `the_phase_angle_keeps_its_digits_next_to_opposition_and_conjunction`
-      (spacelab-propagation/tests/lightcurve.rs).
+      (spacelab-propagation/tests/lightcurve.rs). The elevation:
+      `the_elevation_keeps_its_digits_next_to_the_zenith_and_the_nadir`
+      (spacelab-sensors/tests/elevation_gates.rs).
 
        timeout 120 gp -q -f derivations/angle_from_vectors.gp </dev/null                         */
 
@@ -28,12 +31,19 @@ check(name, got, want) = if (abs(got - want) > 2^-50, fails++; print("FAIL ", na
 {
   my(u = [2, -3, 6]/7, w = [3, 6, 2]/7, a = apply(dbl, u));
   printf("    // a = (%s, %s, %s)\n", fmt(a[1]), fmt(a[2]), fmt(a[3]));
-  print("    // angle: b, atan2(|a x b|, a.b)");
+  my(rows = List());
   for (s = 0, 1,
     for (k = 1, 12,
       my(t = 10^-k, b = apply(dbl, if (s, -cos(t), cos(t)) * u + sin(t) * w));
-      my(ang = at2(nrm(cr(a, b)), dt(a, b)));
+      my(ang = at2(nrm(cr(a, b)), dt(a, b)), el = at2(dt(a, b), nrm(cr(a, b))));
       check("angle", ang, if (s, Pi - t, t));
-      printf("        ([%s, %s, %s], %s),\n", fmt(b[1]), fmt(b[2]), fmt(b[3]), fmt(ang))));
+      check("elevation", el, if (s, -Pi/2 + t, Pi/2 - t));
+      listput(rows, [b, ang, el])));
+  print("    // angle: b, atan2(|a x b|, a.b)");
+  foreach (rows, r,
+    printf("        ([%s, %s, %s], %s),\n", fmt(r[1][1]), fmt(r[1][2]), fmt(r[1][3]), fmt(r[2])));
+  print("    // elevation: b, atan2(a.b, |a x b|)");
+  foreach (rows, r,
+    printf("        ([%s, %s, %s], %s),\n", fmt(r[1][1]), fmt(r[1][2]), fmt(r[1][3]), fmt(r[3])));
 }
 if (fails, print("FAIL: ", fails, " rows are not the angle they were built from"));

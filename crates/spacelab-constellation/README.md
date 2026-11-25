@@ -7,7 +7,7 @@ Constellation design: generators (Walker, Street-of-Coverage, Flower, 2-D Lattic
 Part of [spacelab](https://github.com/SpaceDataLab/spacelab), astrodynamics in Rust held to one rule: mathematics
 decides — a derivation, an exact value, the equation that defines the quantity — and
 another code's output is a comparison, never the proof. This crate is verified in
-[§4 Estimation, control, sensors, coverage & constellations](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#4--estimation-control-sensors-coverage--constellations) (8 rows).
+[§4 Estimation, control, sensors, coverage & constellations](https://github.com/SpaceDataLab/spacelab/blob/main/docs/verification.md#4--estimation-control-sensors-coverage--constellations) (9 rows).
 
 - API documentation: <https://docs.rs/spacelab-constellation>
 - Homepage: <https://spacedatalab.org>

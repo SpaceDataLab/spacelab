@@ -27,7 +27,9 @@
 //! the `std` feature, the α-characteristic coverage figure of merit as an enclosure
 //! ([`alpha_characteristic`], [`covering_radius`] at one instant) and the cheapest Walker Delta proven
 //! to reach a footprint ([`minimum_walker`]); and the exact area covered at least `k` times by
-//! spherical caps at one instant ([`kfold_areas`]).
+//! spherical caps at one instant ([`kfold_areas`]). Without allocating, the exact minimum distance
+//! between two satellites of a Walker or circular lattice shell over all time
+//! ([`walker_min_separation`]), with the verdict whether the shell keeps a keep-out distance.
 
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 
@@ -39,6 +41,7 @@ pub mod flower;
 pub mod kfold;
 pub mod lattice;
 pub mod mozhaev;
+pub mod separation;
 pub mod shell;
 pub mod soc;
 pub mod symmetric;
@@ -54,6 +57,10 @@ pub use flower::FlowerConstellation;
 pub use kfold::{CapError, KfoldAreas, SphericalCap, kfold_areas};
 pub use lattice::LatticeFlower;
 pub use mozhaev::{GroupType, MozhaevSymbol, PointGroup};
+pub use separation::{
+    SeparationError, SeparationVerdict, ShellSeparation, lattice_min_separation,
+    walker_min_separation,
+};
 pub use shell::{ShellTier, TwoTierShell, characteristic_velocity, observes};
 pub use soc::{SocGeometry, StreetOfCoverage};
 pub use symmetric::{KinematicallyRegular, Symmetry};

@@ -1,0 +1,111 @@
+/* The minimum distance between two satellites of a Walker or circular lattice shell, over all time,
+   of `crates/spacelab-constellation/src/separation.rs` (plans/18 Ф27.J).
+
+   Two satellites on circular orbits of one radius and one inclination i, nodes W_a and W_b = W_a + dw,
+   arguments of latitude u_a(t) = u0 + n t and u_b(t) = u0 + du + n t. The angle psi between their
+   position vectors obeys cos psi(t) = A + B cos(u_a + u_b) with A and B constant and B <= 0, so its
+   largest cosine over time is A - B, reached whenever u_a + u_b is an odd multiple of pi, and
+
+       sin(psi_min/2) = |sin(du/2) cos(dw/2) + cos(i) cos(du/2) sin(dw/2)| = rho |sin(du/2 + phi)|,
+
+   rho cos(phi) = cos(dw/2), rho sin(phi) = cos(i) sin(dw/2): the form the code evaluates, with
+   rho = hypot and phi = atan2. In a Walker pattern the differences between satellites with plane
+   offset dp are dw = 2 pi dp/P (Star: pi dp/P) and du = 2 pi (j P + dp F)/T, j any integer, so
+   du/2 + phi runs over (pi/S)(j + dp F/P + S phi/pi): one coset of a lattice of step pi/S, on which
+   |sin| is smallest at the point nearest a multiple of pi. The nearest-point step is not an identity;
+   walker_min_separation.gp checks it on every shell with P, S <= 7 against all pairs.
+
+   Every identity prints `<name>: 0`. The formula is derived here from the two circular motions; no
+   published form of it was read in full, so none is quoted.
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/walker_min_separation.mac </dev/null */
+
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+/* trigexpand to the atomic angles, back to multiple angles, then Pythagoras */
+z(e) := trigsimp(trigreduce(trigexpand(e)))$
+/* the same with every half angle replaced by a variable, so that trigexpand sees whole angles */
+zh(e) := z(subst([du = 2*x, dw = 2*y], e))$
+
+/* ---- (a) The two circular motions ---- */
+rz(w) := matrix([cos(w), -sin(w), 0], [sin(w), cos(w), 0], [0, 0, 1])$
+rx(i) := matrix([1, 0, 0], [0, cos(i), -sin(i)], [0, sin(i), cos(i)])$
+/* node w, inclination i, argument of latitude u: R3(-w) R1(-i) (cos u, sin u, 0) */
+pos(w, i, u) := rz(w) . rx(i) . matrix([cos(u)], [sin(u)], [0])$
+ua: u0 + n*t$
+ub: u0 + du + n*t$
+ra: pos(wa, inc, ua)$
+rb: pos(wa + dw, inc, ub)$
+chk("position_is_a_unit_vector", trigsimp(expand((transpose(ra) . ra) - 1)))$
+cospsi: transpose(ra) . rb$
+A: (1 - (1 + cos(inc)^2)*(1 - cos(dw))/2)*cos(du) - cos(inc)*sin(dw)*sin(du)$
+B: -sin(inc)^2*(1 - cos(dw))/2$
+sigma: ua + ub$
+chk("cos_psi_is_a_plus_b_cos_of_the_sum_of_latitudes", z(cospsi - (A + B*cos(sigma))))$
+/* the common node w_a and the common phase u0 have dropped out: only dw and du remain */
+chk("cos_psi_is_free_of_the_common_node", z(diff(cospsi, wa)))$
+
+/* ---- (b) B <= 0, the stationary instants, and which one is the minimum ---- */
+chk("b_is_minus_a_square", zh(B + (sin(inc)*sin(dw/2))^2))$
+/* d cos(psi)/dt = -2 n B sin(sigma): stationary where sin(sigma) = 0; there the second
+   derivative in sigma is -B cos(sigma), which is B <= 0 at sigma = pi: the largest cosine */
+chk("rate_of_cos_psi", z(diff(cospsi, t) - (-2*n*B*sin(sigma))))$
+chk("second_derivative_at_sigma_pi_is_b", subst(s = %pi, diff(A + B*cos(s), s, 2)) - B)$
+/* a full turn of sigma takes half an orbit: every value of cos(sigma) is reached */
+chk("sigma_turns_at_twice_the_mean_motion", diff(sigma, t) - 2*n)$
+
+/* ---- (c) The minimum's half-angle ---- */
+Q: sin(du/2)*cos(dw/2) + cos(inc)*cos(du/2)*sin(dw/2)$
+/* sin^2(psi_min/2) = (1 - cos psi_min)/2 with cos psi_min = A - B */
+chk("half_angle_sine_square_is_q_square", zh((1 - (A - B))/2 - Q^2))$
+/* the code's form: rho = hypot(cos b, cos i sin b), phi = atan2(cos i sin b, cos b), b = dw/2 */
+rho: sqrt(cos(dw/2)^2 + (cos(inc)*sin(dw/2))^2)$
+cphi: cos(dw/2)/rho$
+sphi: cos(inc)*sin(dw/2)/rho$
+chk("q_is_rho_sin_of_half_du_plus_phi", ratsimp(Q - rho*(sin(du/2)*cphi + cos(du/2)*sphi)))$
+chk("rho_square_is_one_less_sin_i_sin_half_dw_square",
+  zh(rho^2 - (1 - sin(inc)^2*sin(dw/2)^2)))$
+chk("rho_square_is_cos_square_of_half_the_planes_angle",
+  zh(rho^2 - (1 + (cos(inc)^2 + sin(inc)^2*cos(dw)))/2))$
+
+/* ---- (d) Symmetries: swapping the satellites, a full turn of node or phase ---- */
+Qf(a, b) := subst([du = a, dw = b], Q)$
+chk("swap_negates_q", zh(Qf(-du, -dw) + Q))$
+chk("node_turn_negates_q", zh(Qf(du, dw + 2*%pi) + Q))$
+chk("phase_turn_negates_q", zh(Qf(du + 2*%pi, dw) + Q))$
+
+/* ---- (e) The Walker classes ---- */
+/* Delta i: T/P/F with T = P S: plane p at node 2 pi p/P, slot s at u = 2 pi s/S + 2 pi p F/T */
+wnode(p) := 2*%pi*p/PP$
+wlat(p, s) := 2*%pi*s/SS + 2*%pi*p*FF/(PP*SS)$
+/* plane P is plane 0 with its slots moved on by F, so the pattern is a group under addition */
+chk("plane_p_is_plane_0_moved_by_f_slots", ratsimp(wlat(PP, s) - wlat(0, s + FF)))$
+chk("node_of_plane_p_is_a_full_turn", ratsimp(wnode(PP) - 2*%pi))$
+/* a difference with plane offset dp: du = 2 pi (j P + dp F)/T for some integer j */
+chk("phase_difference_lies_on_one_coset",
+  ratsimp((wlat(p + dp, s + ds) - wlat(p, s)) - 2*%pi*(ds*PP + dp*FF)/(PP*SS)))$
+/* du/2 + phi = (pi/S)(j + dp F/P + S phi/pi): the coset in units of pi/S */
+chk("coset_in_units_of_pi_over_s",
+  ratsimp(%pi*(j*PP + dp*FF)/(PP*SS) + ph - (%pi/SS)*(j + dp*FF/PP + SS*ph/%pi)))$
+/* the class of dp and the class of P - dp are each other's negatives (Delta) */
+chk("class_p_minus_dp_is_the_negative_class",
+  ratsimp(wnode(PP - dp) + wnode(dp) - 2*%pi))$
+
+/* ---- (f) Special cases (G3) ---- */
+chk("same_plane_q_is_sin_half_du", ratsimp(subst(dw = 0, Q) - sin(du/2)))$
+chk("equatorial_q_is_sin_half_the_longitude_difference",
+  zh(subst(inc = 0, Q) - sin((du + dw)/2)))$
+chk("retrograde_equatorial_q", zh(subst(inc = %pi, Q) - sin((du - dw)/2)))$
+chk("polar_q", ratsimp(subst(inc = %pi/2, Q) - sin(du/2)*cos(dw/2)))$
+/* two polar planes a half turn apart are one plane run both ways: they meet at every phasing */
+chk("counter_rotating_polar_planes_meet", ratsimp(subst([inc = %pi/2, dw = %pi], Q)))$
+/* 2/2/0: nodes 0 and pi, both satellites at their nodes at t = 0: psi_min = pi - 2 i */
+chk("two_planes_half_a_turn_apart", ratsimp(subst([du = 0, dw = %pi], Q) - cos(inc)))$
+/* so sin(psi_min/2) = cos(i) = sin(pi/2 - i): psi_min = pi - 2 i for i in [0, pi/2] */
+chk("two_planes_half_a_turn_apart_angle", trigexpand(sin(%pi/2 - inc) - cos(inc)))$
+
+/* ---- (g) The rate bound of the dense scan (S1) ---- */
+/* sin^2 psi (2n)^2 - (d cos psi/dt)^2 is a convex combination of 1 - (A - B)^2 and 1 - (A + B)^2,
+   both >= 0 because A - B and A + B are values of cos psi: so |d psi/dt| <= 2 n */
+c: cos(sigma)$
+chk("rate_bound_is_a_convex_combination",
+  expand((1 - (A + B*c)^2)*4*n^2 - (2*n*B)^2*(1 - c^2)
+    - 4*n^2*((1 - c)/2*(1 - (A - B)^2) + (1 + c)/2*(1 - (A + B)^2))))$

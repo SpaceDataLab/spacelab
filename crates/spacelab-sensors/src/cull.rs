@@ -69,6 +69,14 @@ pub trait Reach {
 }
 
 /// Footprint half-angle for the mask on a sphere at radius ratio `l`, plus nothing. `s = sin a`.
+///
+/// `acos` here, and `asin` in the cone's cap below, stay. Next to `λ = 0` (a satellite just above
+/// the surface, a mask near 90°) and to the cone's `λ = π/2` (an observer far out) they lose up to
+/// `√(2δ)` of angle for an error `δ` in the cosine or sine (`derivations/angle_from_vectors.mac`
+/// 4): measured against 100-digit values, at most 1.0e-8 rad, on either side, over masks 0°–89.99°
+/// at `L − 1 = 10⁻¹ … 10⁻¹²` and half-angles 1°–89.9° at `L = 10 … 10¹⁰`. The cap adds
+/// `deflection_margin_rad`, 4.2e-5 rad more than the largest deflection, so a half-angle short by
+/// 1.0e-8 rad cannot drop a covered cell.
 fn elevation_lambda(l: f64, s: f64) -> f64 {
     if l <= 1.0 {
         return core::f64::consts::PI;

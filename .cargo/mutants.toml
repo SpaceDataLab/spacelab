@@ -3653,7 +3653,7 @@ exclude_re = [
     # lies in `[0, 1]`. The only way to reach the boundary is `sa == 0.0`, and there `1.0 / sa` is
     # `+inf`, so `l >= 1.0 / sa` is false for every finite `l` and both `>` and `>=` take the same
     # branch. For `sa > 0` the two agree trivially.
-    "cull\\.rs:104:25: replace > with >= in <impl Reach for Cone>::reach",
+    "cull\\.rs:112:25: replace > with >= in <impl Reach for Cone>::reach",
 
     # A sign test whose two branches coincide at the value that distinguishes it.
     #

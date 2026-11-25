@@ -94,7 +94,7 @@ Each point is argued in full in [`docs/design.md`](docs/design.md).
 | Crate | What | Verified in |
 |---|---|---|
 | [`spacelab`](crates/spacelab) | Space data computation: time, Earth orientation, frames, propagation, geodesy | [§5 GNSS, ionosphere & Phase-8 (EO / SAR / vision)](docs/verification.md#5--gnss-ionosphere--phase-8-eo--sar--vision) |
-| [`spacelab-astro`](crates/spacelab-astro) | Two-body and conic mission design: universal-variable Kepler, Lambert transfers, patched conics | [§3 Orbital mechanics & automatic differentiation](docs/verification.md#3--orbital-mechanics--automatic-differentiation) (27 rows) |
+| [`spacelab-astro`](crates/spacelab-astro) | Two-body and conic mission design: universal-variable Kepler, Lambert transfers, patched conics | [§3 Orbital mechanics & automatic differentiation](docs/verification.md#3--orbital-mechanics--automatic-differentiation) (28 rows) |
 | [`spacelab-astrometry`](crates/spacelab-astrometry) | Astrometric plate solving: source detection, TAN/SIP world coordinates, blind asterism matching and reduction to a true topocentric direction | [§4 Estimation, control, sensors, coverage & constellations](docs/verification.md#4--estimation-control-sensors-coverage--constellations) (10 rows) |
 | [`spacelab-autodiff`](crates/spacelab-autodiff) | Forward-mode automatic differentiation: dual numbers for exact Jacobians and sensitivities | [§3 Orbital mechanics & automatic differentiation](docs/verification.md#3--orbital-mechanics--automatic-differentiation) (6 rows) |
 | [`spacelab-capi`](crates/spacelab-capi) | C ABI for the spacelab space-data computation core, and the C++ header that wraps it | [§6 The C and C++ boundary](docs/verification.md#6--the-c-and-c-boundary) |

@@ -14,6 +14,8 @@
    Every value is compared with the 25-digit constant in the test module; a mismatch above 1e-22
    relative prints FAIL.
 
+   Last, the turn-angle rows of `the_turn_angle_keeps_its_digits_near_the_parabola` (Ф28.N).
+
        timeout 300 gp -q -f derivations/patched_conics.gp </dev/null                              */
 
 default(realprecision, 160);
@@ -87,3 +89,15 @@ aim(r, v, mu, north) = {
 }
 printf("patched-conic reference values: %d checked, %d off by more than 1e-22\n", checks, fails);
 if (checks != 21, print("FAIL: expected 21 checks, ran ", checks));
+
+/* The asymptote turn angle near the parabola (plans/18 Ф28.N, C3 row 17): mu = 398600.4418 km^3/s^2
+   and r_p = 6678 km as doubles, v_inf = dbl(sqrt(k mu/r_p)) for e - 1 = k = 10^-j, j = 1..16, and
+   2 asin(mu/(mu + r_p v_inf^2)) at 100 digits on those doubles. Rows: v_inf, the turn angle. */
+fmt(v) = concat([ch | ch <- Vec(Strprintf("%.25g", v)), ch != " "]);
+{
+  my(mu = dbl(3986004418/10^4), rp = dbl(6678));
+  print("    // turn angle: v_inf, 2 asin(1/e)");
+  for (j = 1, 16,
+    my(v = dbl(sqrt(10^-j * mu / rp)));
+    printf("        (%s, %s),\n", fmt(v), fmt(2 * asin(mu / (mu + rp * v^2)))));
+}

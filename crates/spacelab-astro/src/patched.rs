@@ -40,7 +40,8 @@ pub struct HyperbolicArc {
     pub eccentricity: f64,
     /// Speed at periapsis, length/time.
     pub periapsis_speed: f64,
-    /// Asymptote turn angle `δ = 2·asin(1/e)`, radians.
+    /// Asymptote turn angle `δ = 2·asin(1/e)`, radians, evaluated as `2·atan2(1, √(k(k + 2)))`,
+    /// `k = e − 1`.
     pub turn_angle: f64,
 }
 
@@ -49,11 +50,14 @@ pub struct HyperbolicArc {
 #[must_use]
 pub fn hyperbolic_arc(v_inf: f64, mu: f64, r_periapsis: f64) -> HyperbolicArc {
     let v2 = v_inf * v_inf;
+    // e − 1. The turn angle is taken from it rather than from 1/e, which next to 1 is rounded to an
+    // absolute u that asin turns into √(2u) of angle.
+    let k = r_periapsis * v2 / mu;
     HyperbolicArc {
         semi_major_axis: -mu / v2,
-        eccentricity: 1.0 + r_periapsis * v2 / mu,
+        eccentricity: 1.0 + k,
         periapsis_speed: libm::sqrt(v2 + 2.0 * mu / r_periapsis),
-        turn_angle: 2.0 * libm::asin(mu / (mu + r_periapsis * v2)), // = 2·asin(1/e)
+        turn_angle: 2.0 * libm::atan2(1.0, libm::sqrt(k * (k + 2.0))), // = 2·asin(1/e)
     }
 }
 
@@ -288,6 +292,46 @@ mod tests {
                     "v_inf {v_inf}, mu {mu}: {name} {got:.17e}, want {want:.17e}"
                 );
             }
+        }
+    }
+
+    /// (S1) The turn angle keeps its digits as the flyby approaches the parabola (Ф28.N, C3 row 17).
+    /// `µ` = 398 600.4418 km³/s², `r_p` = 6678 km, and `v_∞` the double nearest `√(kµ/r_p)` for
+    /// `e − 1 = k = 10⁻ʲ`, j = 1..16; `2·asin(µ/(µ + r_p v_∞²))` on those doubles at 100 digits from
+    /// `derivations/patched_conics.gp`. `1/e` rounds to an absolute u next to 1, where `asin` turns
+    /// it into `√(2u)`; `2·atan2(1, √(k(k + 2)))` is the same angle (`derivations/patched_conics.mac`)
+    /// from `k` itself. Measured: every row rounded correctly, bound one ulp. `2·asin(1/e)` was 10 u
+    /// off at `e − 1` = 1e-3, 850 u at 1e-7 and 4.8e6 u, 1.7e-9 rad, at 1e-14.
+    #[test]
+    #[allow(clippy::unreadable_literal)]
+    fn the_turn_angle_keeps_its_digits_near_the_parabola() {
+        #[rustfmt::skip]
+        const ROWS: [(f64, f64); 16] = [
+            (2.443124959091991232895680, 2.282193321286944251479812),
+            (0.7725839479136390464120154, 2.859920906456958694866054),
+            (0.2443124959091991510451436, 3.052187178269350913314124),
+            (0.07725839479136389909008642, 3.113309560777624923297602),
+            (0.02443124959091991232895680, 3.132648418947353329672384),
+            (0.007725839479136390255953337, 3.138764227643557590100674),
+            (0.002443124959091991232895680, 3.140698226436061119859262),
+            (0.0007725839479136390472793772, 3.141309810878497130729049),
+            (0.0002443124959091991232895680, 3.141503210870730514679784),
+            (7.725839479136390472793772e-5, 3.141564369318546955071148),
+            (2.443124959091991300658316e-5, 3.141583709317883276571949),
+            (7.725839479136390472793772e-6, 3.141589825162668493450875),
+            (2.443124959091991554768200e-6, 3.141591759162602238583969),
+            (7.725839479136389837519061e-7, 3.141592370747080763844817),
+            (2.443124959091991237130845e-7, 3.141592564147074138471098),
+            (7.725839479136390631612449e-8, 3.141592625305521991000741),
+        ];
+        let u = f64::EPSILON / 2.0;
+        for (v_inf, want) in ROWS {
+            let got = hyperbolic_arc(v_inf, 398_600.441_8, 6678.0).turn_angle;
+            let off = (got - want).abs() / (want * u);
+            assert!(
+                off <= 2.0,
+                "v_inf = {v_inf:e}: δ = {got:.17e} against {want:.17e}, {off:.3} u"
+            );
         }
     }
 

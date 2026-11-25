@@ -1340,7 +1340,7 @@ if have maxima; then
     mac_zeros gpu_porkchop.mac 18 "the f32 Lambert kernel: C in half-angle form, the degree-4 Stumpff series, y without Curtis's quotient, the short way's bracket from the y = 0 edge where y rises with z, A from the unit vectors"
     mac_zeros iod_classical.mac 33 "Gibbs, Herrick-Gibbs, Gauss and Laplace on their own models; Gibbs in its chords"
     mac_zeros transfer_excess_speed.mac 10 "hyperbolic excess speed and C3 on exact conics"
-    mac_zeros patched_conics.mac 10 "sphere of influence, flyby hyperbola and the B-plane"
+    mac_zeros patched_conics.mac 14 "sphere of influence, flyby hyperbola and the B-plane; the turn angle from e - 1"
     mac_zeros synodic_frame.mac 14 "the rotating-frame map, its inverse and the transport theorem"
     mac_zeros targeting_hohmann.mac 6 "the apoapsis constraint's root is Hohmann's burn; least-squares point"
     mac_zeros powered_zem_zev.mac 15 "ZEM/ZEV guidance is the open-loop optimum along its own trajectory"

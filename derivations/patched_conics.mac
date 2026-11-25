@@ -17,7 +17,10 @@
            unit vector;
      10.   the coded B = |B| (S x h_hat) is the limit of the position's component perpendicular to
            S, r - (r.S) S, as nu -> -nu_inf: the B-plane is the aiming plane of the incoming
-           asymptote (G3).
+           asymptote (G3);
+     11-14. the coded turn angle 2 atan2(1, sqrt(k (k + 2))), k = e - 1 = r_p v_inf^2/mu, is
+           2 asin(1/e): sin and tan of the half angle agree, and the difference of the two half
+           angles has derivative 0 in k and limit 0 as k -> infinity (plans/18 Ф28.N, C3 row 17) (G1).
    Perifocal frame: e_hat = (1, 0, 0), h_hat = (0, 0, 1), h_hat x e_hat = (0, 1, 0).
    derivations/patched_conics.gp evaluates the same limit at 100 digits on the test states.
 
@@ -62,3 +65,10 @@ block([S, n, ninf : acos(-1/e), rv, perp, lim],
   lim : limit(ratsimp(trigexpand(subst(nu = -ninf + t, perp))), t, 0, plus),
   zero("b_vector_is_the_limit_of_the_incoming_aiming_offset",
        radcan(lim - (p/(e^2 - 1))*sqrt(e^2 - 1))))$
+/* 11-14: the turn angle from k = e - 1, with no 1/e next to 1. */
+block([g : asin(1/(1 + k)) - atan(1/sqrt(k*(k + 2)))],
+  assume(k > 0),
+  zero("turn_angle_half_sine_is_one_over_e", radcan(sin(atan2(1, sqrt(k*(k + 2)))) - 1/(1 + k))),
+  zero("turn_angle_half_tangent", radcan(tan(asin(1/(1 + k))) - 1/sqrt(k*(k + 2)))),
+  zero("turn_angle_half_angles_differ_by_a_constant", radcan(diff(g, k))),
+  zero("turn_angle_half_angles_agree_at_infinity", limit(g, k, inf)))$

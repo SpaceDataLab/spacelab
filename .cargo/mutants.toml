@@ -680,7 +680,7 @@ exclude_re = [
     # for bit is a measure-zero coincidence. The exactly-parallel case, `sxn_norm == 0`, is asserted
     # by `a_reference_along_the_asymptote_has_no_aiming_plane`, which is what kills the mutants of
     # the constant itself.
-    "patched\\.rs:110:17: replace < with <= in b_plane",
+    "patched\\.rs:114:17: replace < with <= in b_plane",
 
     # --- `richardson.rs`.
 

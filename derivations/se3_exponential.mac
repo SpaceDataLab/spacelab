@@ -29,6 +29,8 @@
  *      cos(th/2)) = th on (0, pi), so 2 atan2(|v|, w) v/|v| = th n (G1); at the half-turn the
  *      candidates are 0 and 4 n_i^2 and every skew numerator is 0, so w = 0 and the angle is
  *      2 atan2(|v|, 0) = pi exactly, where th/(2 sin th) was 0/0 (G3).
+ *   8. d = 1/th^2 - cos(th/2)/(2 th sin(th/2)), the form the code evaluates: 1 + cos th cancels to
+ *      eps^2/2 within eps of pi, cos(th/2) does not (G1).
  * Then it prints the fixture of `the_exponential_and_both_jacobians_are_their_series_definitions` in
  * se3.rs: Exp, V and V^-1 at phi = (3/10, -7/10, 11/10), and Exp(rho, phi)'s translation at
  * rho = (1, -2, 1/2), summed from the series to k = 80 at 50 digits. derivations/se3_exponential.gp
@@ -158,6 +160,12 @@ zero("at_the_half_turn_the_candidates_are_0_and_4_n_squared",
 zero("at_the_half_turn_every_skew_numerator_vanishes",
   ratsimp(sum(vee(Rpi - transpose(Rpi))[i]^2, i, 1, 3)))$
 zero("at_the_half_turn_the_angle_is_pi", 2*atan2(1, 0) - %pi)$
+
+/* 8. The inverse's coefficient in half angles (plans/18 Ф28.N, C3 row 13): with th = 2h,
+   (1 + cos th)/(2 th sin th) = cos(h)/(2 th sin h), cot(th/2)/(2 th), so d is the coded
+   1/th^2 - cos(th/2)/(2 th sin(th/2)) (G1). */
+zero("inverse_coefficient_in_half_angles",
+  ratsimp(trigsimp(trigexpand(subst(th = 2*h, d - (1/th^2 - cos(th/2)/(2*th*sin(th/2))))))))$
 
 /* The fixture: Exp(th n) rounded to doubles, th = pi - 10^-k, and the exact logarithm of those
    doubles at 60 digits; `moved` is how far rounding the matrix moved it from th n. */

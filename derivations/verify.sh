@@ -1377,7 +1377,7 @@ if have maxima; then
     mac_zeros chi_square_quantiles.mac 4 "NEES/NIS quadratic forms and exact chi-square quantiles"
     mac_zeros robust_weights.mac 28 "Huber and Student-t weights from their defining equations, limits and efficiency; the Student-t root without f - p, and its tests' tolerance"
     mac_zeros lie_quaternion.mac 12 "quaternion product, passive Rodrigues matrix, exp and log"
-    mac_zeros se3_exponential.mac 28 "SE(3) exponential, both Jacobians and the adjoint from their series; the logarithm through Shepperd's quaternion, pi at the half-turn"
+    mac_zeros se3_exponential.mac 29 "SE(3) exponential, both Jacobians and the adjoint from their series; the logarithm through Shepperd's quaternion, pi at the half-turn; the inverse Jacobian in half angles"
     mac_zeros se23_invariant_navigation.mac 19 "SE2(3) group-affine strapdown and the invariant error dynamics"
     mac_zeros iekf_attitude.mac 8 "invariant EKF: state-independent error transition and H = [r]x"
     mac_zeros mekf_attitude.mac 8 "multiplicative EKF: error kinematics, H, Q and the norm-preserving reset"

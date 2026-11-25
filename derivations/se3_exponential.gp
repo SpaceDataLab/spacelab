@@ -1,8 +1,10 @@
 \\ Second engine for derivations/se3_exponential.mac: at phi = (3/10, -7/10, 11/10), 100 digits, the
 \\ series definitions of Exp, V and V^-1 (sum_k K^k/k!, sum_k K^k/(k+1)!, sum_k B_k/k! K^k with
 \\ B_1 = -1/2) against the closed forms se3.rs evaluates. Prints the count of entries that disagree
-\\ by more than 1e-90 and the 20-digit fixture of the Rust test. Last, item 7's half-turn fixture
+\\ by more than 1e-90 and the 20-digit fixture of the Rust test. Next, item 7's half-turn fixture
 \\ from Rodrigues' formula and Shepperd's quaternion, against Maxima's; it prints FAIL if they differ.
+\\ Then V^-1 about the half-turn at 100 digits, the rows of se3.rs's half-turn test, against the
+\\ Bernoulli series; FAIL again if they differ.
 \\
 \\ Run: timeout 300 gp -q -f derivations/se3_exponential.gp </dev/null
 default(realprecision, 100);
@@ -72,5 +74,29 @@ for (k = 1, 10,
   for (i = 1, 3, my(d = abs(g[i] - HT[k][i])); worst = max(worst, d); if (d > 1e-38, off++)));
 printf("half-turn logarithms off Maxima's by more than 1e-38: %d off (largest %.3g)\n", off, worst);
 if (off, print("FAIL: the fixture disagrees with Maxima's"));
+}
+
+\\ The inverse Jacobian about the half-turn (plans/18 Ф28.N, C3 row 13): phi = th (2, -3, 6)/7
+\\ rounded to doubles for th = pi -+ 10^-k, k = 1..8, and V^-1 of those doubles at 100 digits from
+\\ the closed form, against the Bernoulli series to k = 400 (convergent for th < 2 pi, by about
+\\ 2^-400 here); it prints FAIL if they differ. The rows are the fixture of
+\\ `the_inverse_jacobian_keeps_its_digits_about_the_half_turn` in se3.rs.
+fmt(v) = if (v == 0, "0.0", concat([ch | ch <- Vec(Strprintf("%.25g", v)), ch != " "]));
+{
+my(off = 0);
+print("    // th - pi, phi, V^-1 of phi (rows)");
+foreach ([-1, 1], sg, for (k = 1, 8,
+  my(ph = apply(f64, (Pi + sg * 10^-k) * [2, -3, 6] / 7), Kp = hat(ph), t, cf, w, wS);
+  t = sqrt(ph[1]^2 + ph[2]^2 + ph[3]^2);
+  cf = 1 / t^2 - (1 + cos(t)) / (2 * t * sin(t));
+  w = I3 - Kp / 2 + cf * Kp^2;
+  wS = I3 - Kp / 2 + sum(j = 2, 400, bernfrac(j) / j! * Kp^j);
+  for (i = 1, 3, for (j = 1, 3, if (abs(w[i, j] - wS[i, j]) > 1e-80, off++)));
+  printf("    (%s1e-%d, [%s, %s, %s], [[%s, %s, %s], [%s, %s, %s], [%s, %s, %s]]),\n",
+         if (sg < 0, "-", ""), k, fmt(ph[1]), fmt(ph[2]), fmt(ph[3]),
+         fmt(w[1, 1]), fmt(w[1, 2]), fmt(w[1, 3]), fmt(w[2, 1]), fmt(w[2, 2]), fmt(w[2, 3]),
+         fmt(w[3, 1]), fmt(w[3, 2]), fmt(w[3, 3]))));
+printf("inverse Jacobian about the half-turn: %d of 144 entries off the Bernoulli series by more than 1e-80\n", off);
+if (off, print("FAIL: the closed form and the series disagree about the half-turn"));
 }
 quit;

@@ -1416,6 +1416,7 @@ if have maxima; then
         bad "maxima slab_doubling.mac" "expected 6 checks to hold, found $holds"
     fi
     mac_zeros attitude_control.mac 22 "attitude error kinematics, the Lyapunov derivative and the PD loop; the error angle as 2 atan2(|q_v|, q0)"
+    mac_zeros log1p_expm1_sites.mac 6 "the MRP potential as log1p and the conjunction inaccuracy indicator as -expm1, both well conditioned at 0"
     mac_zeros gmst82.mac 10 "GMST 1982 as the exact rational polynomial"
     out=$(macf gcrf_itrf_chain.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
@@ -1545,7 +1546,7 @@ if have gp; then
         targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step sdtm_column sdtm_composition sdtm_overcooling sdtm_nitric_flux sdtm_flux_memory gaussian_scores drag_error_growth central_difference \
         density_calibration_ridge \
         wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms nrlmsise00_flux_domain \
-        chi_square_quantiles robust_weights se3_exponential particle_resampling sampling_transforms \
+        chi_square_quantiles robust_weights se3_exponential log1p_expm1_sites particle_resampling sampling_transforms \
         conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \
         hull_delaunay spherical_triangle igrf_synthesis geomagnetic_dipole attitude_control gmst82 \
         cio_rotation gnss_combinations gpt3_evaluation gps_broadcast_orbit glonass_pz90_motion slr_two_way_range \

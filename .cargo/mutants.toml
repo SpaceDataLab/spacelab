@@ -5325,14 +5325,14 @@ exclude_re = [
     # move is anything `UsageViolations::assess` reads: the minimum by 1.8e-15 and the width by
     # 1.4e-15, both machine noise. `CurvilinearEncounter::time_of_minimum` is an accessor no check
     # consumes.
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:600:22: replace < with <= in bracket_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:626:19: replace < with <= in golden_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:639:36: replace \\* with / in golden_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:643:15: replace < with == in golden_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:643:15: replace < with > in golden_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:643:15: replace < with <= in golden_minimum",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:676:22: replace \\|\\| with && in unit_rise",
-    "crates/spacelab-estimation/src/conjunction_domain\\.rs:679:55: replace < with <= in unit_rise",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:602:22: replace < with <= in bracket_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:628:19: replace < with <= in golden_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:641:36: replace \\* with / in golden_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:645:15: replace < with == in golden_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:645:15: replace < with > in golden_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:645:15: replace < with <= in golden_minimum",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:678:22: replace \\|\\| with && in unit_rise",
+    "crates/spacelab-estimation/src/conjunction_domain\\.rs:681:55: replace < with <= in unit_rise",
 
     # radiometric.rs — two survivors of `reseal-radiometric`, both proved rather than measured
     # against a tolerance.

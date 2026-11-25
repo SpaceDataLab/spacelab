@@ -407,7 +407,9 @@ impl UsageViolations {
         let log_correction = libm::log(curvilinear.speed() / rectilinear.speed())
             + libm::log(curvilinear.width() / rectilinear.width())
             - 0.5 * (curvilinear.minimum() - rectilinear.minimum());
-        let inaccuracy_indicator = 1.0 - libm::exp(-libm::fabs(log_correction));
+        // `−expm1`: `exp(−|L|)` rounds to an absolute u near 1, which is all of `1 − e^{−|L|}` below
+        // 1e-16.
+        let inaccuracy_indicator = -libm::expm1(-libm::fabs(log_correction));
 
         Ok(Self {
             non_positive_definite: rectilinear.non_positive_definite(),
@@ -1046,6 +1048,63 @@ mod tests {
             (tail - DURATION_TAIL_FRACTION).abs() < 1e-12 * DURATION_TAIL_FRACTION,
             "the duration leaves {tail:e} outside it, not {DURATION_TAIL_FRACTION:e}"
         );
+    }
+
+    /// (S1) The inaccuracy indicator keeps its digits near a rectilinear encounter (Ф28.N, C3
+    /// row 14). Both encounters have unit speed and width and minima `0` and `2y`, so `L = −y`
+    /// exactly, for the doubles `y ≈ 10⁻ᵏ`, k = 1..18, on which
+    /// `derivations/log1p_expm1_sites.gp` evaluates `1 − e⁻ʸ` at 100 digits. The quantity is well
+    /// conditioned at 0 (`derivations/log1p_expm1_sites.mac`), so the bound is one ulp at every
+    /// decade. Measured: every row rounded correctly. `1 − exp(−y)` as written was 5.3 u
+    /// off at 1e-1, 9.7e6 u at 1e-8, 11 % at 1e-16 and 0 — all of it — below that.
+    #[test]
+    #[allow(clippy::unreadable_literal, clippy::excessive_precision)]
+    fn the_inaccuracy_indicator_keeps_its_digits_near_a_rectilinear_encounter() {
+        #[rustfmt::skip]
+        const ROWS: [(f64, f64); 18] = [
+            (0.1000000000000000055511151, 0.09516258196404043185860762),
+            (0.009999999999999998473443341, 0.009950166250831944914726857),
+            (0.001000000000000000020816682, 0.0009995001666250083527405183),
+            (9.999999999999999123964645e-5, 9.999500016666249132385438e-5),
+            (9.999999999999999123964645e-6, 9.999950000166665373974238e-6),
+            (1.000000000000000166506349e-6, 9.999995000001668331311821e-7),
+            (9.999999999999999547481118e-8, 9.999999500000016214147414e-8),
+            (1.000000000000000020922561e-8, 9.999999950000000375892272e-9),
+            (9.999999999999998554864383e-10, 9.999999994999998556531051e-10),
+            (9.999999999999999071852266e-11, 9.999999999499999071868933e-11),
+            (1.000000000000000101055683e-11, 9.999999999950001010556993e-12),
+            (1.000000000000000181835039e-12, 9.999999999995001818350395e-13),
+            (1.000000000000000030373746e-13, 9.999999999999500303737456e-14),
+            (1.000000000000000156591490e-14, 9.999999999999951565914904e-15),
+            (1.000000000000000077705400e-15, 9.999999999999995777053999e-16),
+            (9.999999999999999790977867e-17, 9.999999999999999290977867e-17),
+            (9.999999999999999174680285e-18, 9.999999999999999124680285e-18),
+            (1.000000000000000071542424e-18, 1.000000000000000071042424e-18),
+        ];
+        let rectilinear = RectilinearEncounter {
+            quadratic: 1.0,
+            linear: 0.0,
+            constant: 0.0,
+            speed: 1.0,
+            non_positive_definite: false,
+        };
+        let u = f64::EPSILON / 2.0;
+        for (y, want) in ROWS {
+            let curvilinear = CurvilinearEncounter {
+                time_of_minimum: 0.0,
+                minimum: 2.0 * y,
+                width: 1.0,
+                speed: 1.0,
+            };
+            let got = UsageViolations::assess(&rectilinear, &curvilinear, 5_400.0)
+                .unwrap()
+                .inaccuracy_indicator();
+            let off = (got - want).abs() / (want * u);
+            assert!(
+                off <= 2.0,
+                "y = {y:e}: V_i = {got:e} against {want:e}, {off:.3} u"
+            );
+        }
     }
 
     #[test]

@@ -346,7 +346,8 @@ impl MrpLyapunov {
         let s = error.mrp();
         let w = error.rate();
         let kinetic = 0.5 * dot(w, inertia.apply(w));
-        let potential = 2.0 * self.proportional * libm::log(1.0 + dot(s, s));
+        // `log1p`: `1 + σᵀσ` rounds σᵀσ to an absolute u, which is all of it below 1e-16.
+        let potential = 2.0 * self.proportional * libm::log1p(dot(s, s));
         kinetic + potential
     }
 }
@@ -652,6 +653,56 @@ mod tests {
             potential > 0.1,
             "the potential term must not be negligible here"
         );
+    }
+
+    /// (S1) The potential keeps its digits at small errors (Ф28.N, C3 row 14). The error quaternion
+    /// is set to `(1, q₁, 0, 0)` so that the code's `σ = q₁/2` and `x = σᵀσ` are the doubles
+    /// `derivations/log1p_expm1_sites.gp` evaluates `ln(1 + x)` on at 100 digits, for
+    /// `x ≈ 10⁻ᵏ`, k = 1..18; `K = ½` and a zero rate leave `V = ln(1 + x)` with no other rounding.
+    /// `ln(1 + x)` is well conditioned at 0 (`derivations/log1p_expm1_sites.mac`), so the bound is
+    /// one ulp at every decade. Measured: every row rounded correctly. `ln(1 + x)` as written was
+    /// 6.6 u off at 1e-1, 5.5e7 u at 1e-8, 11 % at 1e-15 and 0 — all of it — from 1e-16 down.
+    #[test]
+    #[allow(clippy::unreadable_literal, clippy::excessive_precision)]
+    fn the_potential_keeps_its_digits_at_small_errors() {
+        #[rustfmt::skip]
+        const ROWS: [(f64, f64, f64); 18] = [
+            (0.6324555320336758823529522, 0.1000000000000000055511151, 0.09531017980432486509042042),
+            (0.2000000000000000111022302, 0.01000000000000000194289029, 0.009950330853168084771869113),
+            (0.06324555320336758268418009, 0.0009999999999999998039762472, 0.0009995003330835329709814741),
+            (0.02000000000000000041633363, 0.0001000000000000000047921736, 9.999500033330834012486111e-5),
+            (0.006324555320336758788835052, 1.000000000000000081803054e-5, 9.999950000333331651375692e-6),
+            (0.002000000000000000041633363, 9.999999999999999547481118e-7, 9.999995000003332878314906e-7),
+            (0.0006324555320336758788835052, 1.000000000000000087097010e-7, 9.999999500000034204300845e-8),
+            (0.0002000000000000000095843472, 1.000000000000000020922561e-8, 9.999999950000000542558937e-9),
+            (6.324555320336759059885595e-5, 1.000000000000000062281591e-9, 9.999999995000000626149247e-10),
+            (2.000000000000000163606108e-5, 1.000000000000000165679168e-10, 9.999999999500001656825013e-11),
+            (6.324555320336758382259237e-6, 9.999999999999999394969693e-12, 9.999999999949999394970026e-12),
+            (1.999999999999999909496224e-6, 9.999999999999999798866476e-13, 9.999999999994999798866480e-13),
+            (6.324555320336758382259237e-7, 9.999999999999999041560007e-14, 9.999999999999499041560007e-14),
+            (1.999999999999999909496224e-7, 9.999999999999998410471283e-15, 9.999999999999948410471283e-15),
+            (6.324555320336758382259237e-8, 9.999999999999998804901736e-16, 9.999999999999993804901736e-16),
+            (2.000000000000000041845122e-8, 1.000000000000000102357303e-16, 1.000000000000000052357303e-16),
+            (6.324555320336759044003727e-9, 1.000000000000000071542424e-17, 1.000000000000000066542424e-17),
+            (2.000000000000000124563183e-9, 1.000000000000000071542424e-18, 1.000000000000000071042424e-18),
+        ];
+        let law = MrpLyapunov::new(0.5, 1.0).expect("valid");
+        let u = f64::EPSILON / 2.0;
+        for (q1, x, want) in ROWS {
+            let error = AttitudeError {
+                quaternion: [1.0, q1, 0.0, 0.0],
+                rate: [0.0; 3],
+                omega: [0.0; 3],
+            };
+            let s = error.mrp();
+            assert_eq!(dot(s, s), x, "the fixture's σᵀσ");
+            let got = law.lyapunov(&error, &inertia());
+            let off = (got - want).abs() / (want * u);
+            assert!(
+                off <= 2.0,
+                "x = {x:e}: V = {got:e} against {want:e}, {off:.3} u"
+            );
+        }
     }
 
     /// (G3) `σ = q_v/(1 + q₀) → δθ/4` makes the MRP law's linearised stiffness a *quarter* of its

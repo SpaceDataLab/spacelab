@@ -1,0 +1,40 @@
+/* The two small-argument sites of plans/18 Ф28.N (C3 row 14), from their definitions:
+   MrpLyapunov::lyapunov's potential 2K ln(1 + s.s) (spacelab-control/src/attitude.rs) and
+   UsageViolations::assess's inaccuracy indicator 1 - exp(-|L|)
+   (spacelab-estimation/src/conjunction_domain.rs).
+
+   Printed `<name>: 0`:
+     1. log1p(x) = log(1 + x) and -expm1(-y) = 1 - exp(-y), the coded forms by their definitions
+        (G1);
+     2. both quantities are well conditioned at 0: x/((1 + x) ln(1 + x)) and
+        y exp(-y)/(1 - exp(-y)) tend to 1, so a relative error above a few u at small arguments is
+        the formula's, not the problem's (G3). ln(1 + x) evaluated as written has absolute error
+        u, which is u/x relative;
+     3. two rows of derivations/log1p_expm1_sites.gp, recomputed here at 100 digits on the same
+        doubles: x = dbl(dbl(sqrt(1e-16))^2) and y = dbl(1e-16), within 1e-24 of the 25-digit
+        literals the tests carry.
+
+   Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/log1p_expm1_sites.mac </dev/null */
+
+display2d : false$
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+log1p(x) := log(1 + x)$
+expm1(t) := exp(t) - 1$
+
+zero("log1p_is_the_coded_potential", log1p(x) - log(1 + x))$
+zero("minus_expm1_is_the_coded_indicator", -expm1(-y) - (1 - exp(-y)))$
+zero("ln_one_plus_x_is_well_conditioned_at_zero", limit(x/((1 + x)*log(1 + x)), x, 0) - 1)$
+zero("one_minus_exp_is_well_conditioned_at_zero", limit(y*exp(-y)/(1 - exp(-y)), y, 0) - 1)$
+
+fpprec : 100$
+f64(x) := if x = 0 then 0 else block([e : floor(log(abs(x)) / log(2)), m],
+  if 2^e > abs(x) then e : e - 1, if 2^(e + 1) <= abs(x) then e : e + 1,
+  m : round(x * 2^(52 - e)), m * 2^(e - 52))$
+block([s, x, y],
+  s : f64(bfloat(sqrt(10^-16))), x : f64(s^2), y : f64(bfloat(10^-16)),
+  zero("potential_row_at_1e-16",
+    if abs(bfloat(log(1 + x)) / 1.000000000000000052357303b-16 - 1) < 1b-24 then 0 else 1),
+  zero("indicator_row_at_1e-16",
+    if abs(bfloat(1 - exp(-y)) / 9.999999999999999290977867b-17 - 1) < 1b-24 then 0 else 1))$

@@ -817,10 +817,17 @@ static void the_coverage_engine_answers_what_the_windows_say(void) {
 static void the_gnss_models_answer_what_their_formulas_say(void) {
     const double l1 = 1575.42e6;
     const double l2 = 1227.60e6;
+    const double l5 = 1176.45e6;
     const char *header = "     3.04           RINEX VERSION / TYPE\n";
     double alpha[4] = {0.0, 0.0, 0.0, 0.0};
     double beta[4] = {0.0, 0.0, 0.0, 0.0};
+    double navic_alpha[4];
+    double navic_beta[4];
     double night = 0.0;
+    double navic_l5 = 0.0;
+    double navic_l1 = 0.0;
+    double gps_l1 = 0.0;
+    double untouched = -1.0;
     double delay = 0.0;
     size_t len = 0;
     sl_vec3 receiver;
@@ -870,8 +877,41 @@ static void the_gnss_models_answer_what_their_formulas_say(void) {
     CHECK_NEAR(sl_ionospheric_path_delay(20.0, l2) / delay, (l1 * l1) / (l2 * l2), 1e-9);
 
     /* With zero coefficients Klobuchar is its 5 ns floor times the obliquity factor. */
-    CHECK(sl_klobuchar_iono_delay(alpha, beta, 0.0, 0.0, PI / 2.0, 0.0, 0.0, &night) == SL_OK);
+    CHECK(sl_klobuchar_iono_delay(SL_GNSS_GPS, alpha, beta, 0.0, 0.0, PI / 2.0, 0.0, 0.0, l1,
+                                  &night) == SL_OK);
     CHECK_NEAR(night, 5e-9 * 299792458.0 * (1.0 + (16.0 * 0.03 * 0.03 * 0.03)), 1e-6);
+
+    /* A NavIC set is referred to L5: there it is the GPS reading of the same eight numbers at L1,
+     * and at L1 it is 13225/23716 of that. Galileo and BeiDou are refused, as is a frequency that
+     * is not finite and positive, and a refusal writes nothing. The set is a real NavIC broadcast,
+     * as the integers ISRO-IRNSS-ICD-SPS-1.1 Table 17 scales. */
+    navic_alpha[0] = ldexp(45.0, -30);
+    navic_alpha[1] = ldexp(35.0, -27);
+    navic_alpha[2] = ldexp(-52.0, -24);
+    navic_alpha[3] = ldexp(16.0, -24);
+    navic_beta[0] = ldexp(82.0, 11);
+    navic_beta[1] = ldexp(22.0, 14);
+    navic_beta[2] = ldexp(-127.0, 16);
+    navic_beta[3] = ldexp(127.0, 16);
+    CHECK(sl_klobuchar_iono_delay(SL_GNSS_NAVIC, navic_alpha, navic_beta, 0.2265625, 1.3515625,
+                                  0.75, 2.5, 31000.0, l5, &navic_l5) == SL_OK);
+    CHECK(sl_klobuchar_iono_delay(SL_GNSS_NAVIC, navic_alpha, navic_beta, 0.2265625, 1.3515625,
+                                  0.75, 2.5, 31000.0, l1, &navic_l1) == SL_OK);
+    CHECK(sl_klobuchar_iono_delay(SL_GNSS_GPS, navic_alpha, navic_beta, 0.2265625, 1.3515625, 0.75,
+                                  2.5, 31000.0, l1, &gps_l1) == SL_OK);
+    CHECK(navic_l5 == gps_l1);
+    CHECK_NEAR(navic_l1 / navic_l5, 13225.0 / 23716.0, 1e-15);
+    /* The golden klobuchar_reference.mac computes for this case, metres. */
+    CHECK_NEAR(navic_l5, 20.020698501816227779, 1e-13);
+    CHECK(sl_klobuchar_iono_delay(SL_GNSS_GALILEO, navic_alpha, navic_beta, 0.2, 1.3, 0.75, 2.5,
+                                  31000.0, l1, &untouched) == SL_ERR_DOMAIN);
+    CHECK(sl_klobuchar_iono_delay(SL_GNSS_BEIDOU, navic_alpha, navic_beta, 0.2, 1.3, 0.75, 2.5,
+                                  31000.0, l1, &untouched) == SL_ERR_DOMAIN);
+    CHECK(sl_klobuchar_iono_delay(SL_GNSS_NAVIC, navic_alpha, navic_beta, 0.2, 1.3, 0.75, 2.5,
+                                  31000.0, 0.0, &untouched) == SL_ERR_INVALID_ARGUMENT);
+    CHECK(sl_klobuchar_iono_delay(9, navic_alpha, navic_beta, 0.2, 1.3, 0.75, 2.5, 31000.0, l1,
+                                  &untouched) == SL_ERR_INVALID_ARGUMENT);
+    CHECK(untouched == -1.0);
 
     /* Every mapping function is 1 at the zenith and refuses the horizon. */
     CHECK(sl_niell_mapping(0.7, 200.0, 90.0, PI / 2.0, &mapping) == SL_OK);

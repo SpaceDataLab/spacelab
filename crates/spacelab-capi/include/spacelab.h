@@ -1489,12 +1489,21 @@ sl_status sl_igrf_field_ecef(const sl_vec3 *position_m, double year, sl_vec3 *ou
 /* ---- Ionosphere ---- */
 
 /*
- * The broadcast (Klobuchar) L1 ionospheric slant delay, metres, from the eight broadcast
- * coefficients. `alpha` and `beta` are four doubles each.
+ * The broadcast (Klobuchar) ionospheric slant delay at `frequency_hz`, metres, from the eight
+ * broadcast coefficients. `alpha` and `beta` are four doubles each; `system`, an `sl_gnss_system`,
+ * is the constellation that broadcast them, and it fixes the carrier the delay is referred to: L1
+ * for GPS and QZSS, L5 for NavIC (ISRO-IRNSS-ICD-SPS-1.1, Appendix H). The delay is scaled from
+ * there by (f_ref/f)^2, so a NavIC set asked at L1 is 13225/23716 of its L5 delay.
+ * `seconds_of_day` is the broadcasting system's time of day.
+ *
+ * SL_ERR_INVALID_ARGUMENT for a null pointer, a `system` outside the enum, or a frequency that is
+ * not finite and positive; SL_ERR_DOMAIN for Galileo and BeiDou, whose broadcasts this algorithm
+ * does not take. A refusal writes nothing.
  */
-sl_status sl_klobuchar_iono_delay(const double *alpha, const double *beta, double latitude_rad,
-                                  double longitude_rad, double elevation_rad, double azimuth_rad,
-                                  double gps_seconds_of_day, double *out_metres);
+sl_status sl_klobuchar_iono_delay(int32_t system, const double *alpha, const double *beta,
+                                  double latitude_rad, double longitude_rad, double elevation_rad,
+                                  double azimuth_rad, double seconds_of_day, double frequency_hz,
+                                  double *out_metres);
 
 /* The first-order ionospheric range delay, `40.3 * TEC / f^2`, metres, from a slant TEC in TECU
  * and a carrier frequency in hertz. Total. */

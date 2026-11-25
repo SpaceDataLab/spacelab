@@ -1820,13 +1820,14 @@ try_rinex_obs_series(std::string_view text, char system, std::uint32_t prn, std:
 /* ---- Ionosphere ---- */
 
 [[nodiscard]] inline result<double>
-try_klobuchar_iono_delay(const std::array<double, 4> &alpha, const std::array<double, 4> &beta,
-                         double latitude_rad, double longitude_rad, double elevation_rad,
-                         double azimuth_rad, double gps_seconds_of_day) {
+try_klobuchar_iono_delay(gnss_system system, const std::array<double, 4> &alpha,
+                         const std::array<double, 4> &beta, double latitude_rad,
+                         double longitude_rad, double elevation_rad, double azimuth_rad,
+                         double seconds_of_day, double frequency_hz) {
     double out = 0.0;
-    const ::sl_status s =
-        ::sl_klobuchar_iono_delay(alpha.data(), beta.data(), latitude_rad, longitude_rad,
-                                  elevation_rad, azimuth_rad, gps_seconds_of_day, &out);
+    const ::sl_status s = ::sl_klobuchar_iono_delay(
+        static_cast<std::int32_t>(system), alpha.data(), beta.data(), latitude_rad, longitude_rad,
+        elevation_rad, azimuth_rad, seconds_of_day, frequency_hz, &out);
     return s == SL_OK ? result<double>(out) : detail::failure<double>(s);
 }
 
@@ -3391,13 +3392,15 @@ rinex_obs_series(std::string_view text, char system, std::uint32_t prn, std::str
     return detail::unwrap(try_igrf_field_ecef(position_m, year));
 }
 
-[[nodiscard]] inline double klobuchar_iono_delay(const std::array<double, 4> &alpha,
+[[nodiscard]] inline double klobuchar_iono_delay(gnss_system system,
+                                                 const std::array<double, 4> &alpha,
                                                  const std::array<double, 4> &beta,
                                                  double latitude_rad, double longitude_rad,
                                                  double elevation_rad, double azimuth_rad,
-                                                 double gps_seconds_of_day) {
-    return detail::unwrap(try_klobuchar_iono_delay(alpha, beta, latitude_rad, longitude_rad,
-                                                   elevation_rad, azimuth_rad, gps_seconds_of_day));
+                                                 double seconds_of_day, double frequency_hz) {
+    return detail::unwrap(try_klobuchar_iono_delay(system, alpha, beta, latitude_rad, longitude_rad,
+                                                   elevation_rad, azimuth_rad, seconds_of_day,
+                                                   frequency_hz));
 }
 
 [[nodiscard]] inline double nequick_galileo_stec(const std::array<double, 3> &alpha,

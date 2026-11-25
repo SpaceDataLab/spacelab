@@ -1,10 +1,17 @@
 //! Single-frequency propagation-delay models — the ionospheric and tropospheric corrections a
 //! receiver applies to a pseudorange, completing the GNSS error budget alongside the orbits.
 //!
-//! [`klobuchar_iono_delay`] is the broadcast ionosphere model of IS-GPS-200 §20.3.3.5.2.5 (the α/β
-//! coefficients are broadcast in the navigation message); [`saastamoinen_zenith_hydrostatic`] and
-//! [`saastamoinen_zenith_wet`] are the classic tropospheric zenith delays, projected to a slant path
-//! by [`obliquity_mapping`].
+//! [`klobuchar_iono_delay`] is the broadcast ionosphere model of IS-GPS-200 §20.3.3.5.2.5, the
+//! eight α/β coefficients GPS, QZSS and NavIC broadcast in their navigation messages. NavIC's user
+//! algorithm (ISRO-IRNSS-ICD-SPS-1.1, Appendix H) is the GPS one step for step; what differs is the
+//! carrier the delay is referred to, L1 for GPS and QZSS and L5 for NavIC, so the function takes the
+//! constellation and the frequency the delay is wanted at, and scales by `(f_ref/f)²`. Gates:
+//! `derivations/klobuchar_reference.mac` (γ₅₁ = (115/154)² exactly, the scaling from the
+//! first-order dispersion law, Appendix H against IS-GPS-200 symbolically, and the goldens the
+//! module tests hold; `.gp` the second engine) and `derivations/navic_klobuchar_icd.mac`, which
+//! reads the pinned ICD: the reference carrier, Appendix H's constants and Table 17's scale factors.
+//! [`saastamoinen_zenith_hydrostatic`] and [`saastamoinen_zenith_wet`] are the classic tropospheric
+//! zenith delays, projected to a slant path by [`obliquity_mapping`].
 
 // The Klobuchar/Saastamoinen notation uses single letters; the doc allow covers spec/author names;
 // the Niell/GMF coefficient tables are kept byte-identical to the primary source (no digit
@@ -24,6 +31,9 @@
 
 use spacelab_autodiff::Scalar;
 
+use crate::combinations::{L1_HZ, L5_HZ};
+use crate::gps::GnssSystem;
+
 const PI: f64 = core::f64::consts::PI;
 const TAU: f64 = core::f64::consts::TAU;
 /// Speed of light, m/s (IS-GPS-200 §20.3.4.3).
@@ -34,21 +44,99 @@ fn wrap_day(x: f64) -> f64 {
     x - 86_400.0 * libm::floor(x / 86_400.0)
 }
 
-/// The broadcast (Klobuchar) L1 ionospheric delay, **metres**, per IS-GPS-200 §20.3.3.5.2.5.
+/// A refusal of [`klobuchar_iono_delay`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KlobucharError {
+    /// The constellation broadcasts no coefficient set this algorithm evaluates. Galileo broadcasts
+    /// NeQuick-G's effective ionisation level instead; BeiDou's D1/D2 coefficients belong to the BDS
+    /// user algorithm, which differs from this one and is referred to B1I.
+    NoKlobuchar(GnssSystem),
+    /// The frequency the delay was asked at is not finite and positive.
+    NonPositiveFrequency,
+}
+
+impl core::fmt::Display for KlobucharError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::NoKlobuchar(system) => write!(
+                f,
+                "{system:?} broadcasts no coefficient set the Klobuchar algorithm of IS-GPS-200 evaluates"
+            ),
+            Self::NonPositiveFrequency => write!(f, "the frequency is not finite and positive"),
+        }
+    }
+}
+
+impl core::error::Error for KlobucharError {}
+
+/// The carrier a constellation's broadcast Klobuchar delay is referred to, Hz.
 ///
-/// `alpha`/`beta` are the eight broadcast coefficients; `lat`/`lon` the receiver geodetic latitude and
-/// longitude, `elevation`/`azimuth` the satellite look angles, all radians; `gps_sod` GPS time in
-/// seconds of the day. The result is the single-frequency slant delay to scale to another band by the
-/// squared frequency ratio.
-#[must_use]
+/// * GPS and QZSS: L1, 1575.42 MHz (IS-GPS-200 §20.3.3.5.2.5).
+/// * NavIC: **L5**, 1176.45 MHz. ISRO-IRNSS-ICD-SPS-1.1 (August 2017) addresses the coefficients
+///   to single-frequency L5 users (§6.2.5.2) and refers the delay of its Appendix H to L5, an
+///   S-band user scaling it by `(f_L5/f_S)²`. The NavIC L1 message's set (`L1NV KLOB`) is taken
+///   the same way, unread at source: its ICD, ISRO-NAVIC-ICD-SPS-L1-1.0, is not pinned here.
+///
+/// # Errors
+///
+/// [`KlobucharError::NoKlobuchar`] for Galileo and BeiDou.
+pub const fn klobuchar_reference_frequency(system: GnssSystem) -> Result<f64, KlobucharError> {
+    match system {
+        GnssSystem::Gps | GnssSystem::Qzss => Ok(L1_HZ),
+        GnssSystem::Navic => Ok(L5_HZ),
+        GnssSystem::Galileo | GnssSystem::Beidou => Err(KlobucharError::NoKlobuchar(system)),
+    }
+}
+
+/// The broadcast (Klobuchar) ionospheric slant delay at `frequency_hz`, **metres**.
+///
+/// `system` is the constellation that broadcast `alpha`/`beta`. It fixes the carrier the delay is
+/// referred to ([`klobuchar_reference_frequency`]), and the delay there is scaled to `frequency_hz`
+/// by `(f_ref/f)²`, the first-order dispersion law. The scale is what keeps a NavIC set honest: its
+/// delay is an L5 delay, and at L1 it is `γ₅₁ = (115/154)² = 0.5576` of it, not equal to it.
+/// At the reference itself the scale is exactly 1, so the value is the algorithm's own, to the bit.
+///
+/// `lat`/`lon` are the receiver geodetic latitude and longitude, `elevation`/`azimuth` the
+/// satellite look angles, all radians; `sod` the broadcasting system's time, seconds of the day
+/// (GPS time for GPS and QZSS, NavIC time for NavIC).
+///
+/// # Errors
+///
+/// [`KlobucharError::NoKlobuchar`] for a constellation that broadcasts no set this algorithm takes,
+/// and [`KlobucharError::NonPositiveFrequency`] when `frequency_hz` is not finite and positive.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the model's seven inputs, the constellation that fixes its reference and the frequency \
+              it is asked at; the C ABI and the Python bridge take the same list"
+)]
 pub fn klobuchar_iono_delay(
+    system: GnssSystem,
     alpha: [f64; 4],
     beta: [f64; 4],
     lat: f64,
     lon: f64,
     elevation: f64,
     azimuth: f64,
-    gps_sod: f64,
+    sod: f64,
+    frequency_hz: f64,
+) -> Result<f64, KlobucharError> {
+    let reference = klobuchar_reference_frequency(system)?;
+    if !(frequency_hz.is_finite() && frequency_hz > 0.0) {
+        return Err(KlobucharError::NonPositiveFrequency);
+    }
+    let ratio = reference / frequency_hz;
+    Ok(klobuchar_at_reference(alpha, beta, lat, lon, elevation, azimuth, sod) * (ratio * ratio))
+}
+
+/// IS-GPS-200 §20.3.3.5.2.5's delay at the carrier the coefficients are referred to, metres.
+fn klobuchar_at_reference(
+    alpha: [f64; 4],
+    beta: [f64; 4],
+    lat: f64,
+    lon: f64,
+    elevation: f64,
+    azimuth: f64,
+    sod: f64,
 ) -> f64 {
     // The algorithm works in semicircles (1 sc = π rad); azimuth stays in radians for sin/cos.
     let e = elevation / PI;
@@ -60,7 +148,7 @@ pub fn klobuchar_iono_delay(
     let lam_i = lam_u + psi * libm::sin(azimuth) / libm::cos(phi_i * PI); // sub-ionospheric lon
     let phi_m = phi_i + 0.064 * libm::cos((lam_i - 1.617) * PI); // geomagnetic lat
 
-    let t = wrap_day(43_200.0 * lam_i + gps_sod); // local time, s
+    let t = wrap_day(43_200.0 * lam_i + sod); // local time, s
     let f = 1.0 + 16.0 * libm::pow(0.53 - e, 3.0); // obliquity factor
 
     let amp = (alpha[0] + phi_m * (alpha[1] + phi_m * (alpha[2] + phi_m * alpha[3]))).max(0.0);
@@ -5474,11 +5562,40 @@ mod tests {
     const ALPHA: [f64; 4] = [1.0e-8, 0.0, 0.0, 0.0];
     const BETA: [f64; 4] = [9.0e4, 0.0, 0.0, 0.0];
 
+    /// A GPS set at L1, its own reference: the scale is exactly 1, so this is the algorithm's value
+    /// to the bit, which is what the IS-GPS-200 tests below hold.
+    #[expect(
+        clippy::expect_used,
+        reason = "GPS at L1 is inside the domain by construction"
+    )]
+    fn gps_l1(
+        alpha: [f64; 4],
+        beta: [f64; 4],
+        lat: f64,
+        lon: f64,
+        elevation: f64,
+        azimuth: f64,
+        sod: f64,
+    ) -> f64 {
+        klobuchar_iono_delay(
+            GnssSystem::Gps,
+            alpha,
+            beta,
+            lat,
+            lon,
+            elevation,
+            azimuth,
+            sod,
+            L1_HZ,
+        )
+        .expect("GPS at L1")
+    }
+
     #[test]
     fn klobuchar_night_zenith_is_the_five_nanosecond_floor() {
         // Midnight, zenith, on the equator: the local time falls in the night branch, so the delay is
         // the 5 ns floor × obliquity × c ≈ 1.5 m.
-        let d = klobuchar_iono_delay(ALPHA, BETA, 0.0, 0.0, PI / 2.0, 0.0, 0.0);
+        let d = gps_l1(ALPHA, BETA, 0.0, 0.0, PI / 2.0, 0.0, 0.0);
         let f = 1.0 + 16.0 * (0.53 - 0.5f64).powi(3);
         let expect = f * 5.0e-9 * SPEED_OF_LIGHT;
         assert!((d - expect).abs() < 1e-6, "{d} vs {expect}");
@@ -5489,9 +5606,8 @@ mod tests {
     fn klobuchar_delay_is_positive_and_grows_toward_the_horizon() {
         // A daytime local time so the cosine term is active; lower elevation ⇒ larger obliquity ⇒
         // larger delay.
-        let high =
-            klobuchar_iono_delay(ALPHA, BETA, 0.5, 0.3, 80.0_f64.to_radians(), 1.0, 50_400.0);
-        let low = klobuchar_iono_delay(ALPHA, BETA, 0.5, 0.3, 10.0_f64.to_radians(), 1.0, 50_400.0);
+        let high = gps_l1(ALPHA, BETA, 0.5, 0.3, 80.0_f64.to_radians(), 1.0, 50_400.0);
+        let low = gps_l1(ALPHA, BETA, 0.5, 0.3, 10.0_f64.to_radians(), 1.0, 50_400.0);
         assert!(high > 0.0 && low > 0.0);
         assert!(
             low > high,
@@ -5511,7 +5627,7 @@ mod tests {
         // is `gps_sod`. At `gps_sod = 0` the phase is 2π·(−50400)/72000 = −4.4, well past the 1.57
         // that selects the night branch, for every elevation.
         for deg in [5.0_f64, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0] {
-            let got = klobuchar_iono_delay(ALPHA, BETA, 0.0, 0.0, deg.to_radians(), 0.0, 0.0);
+            let got = gps_l1(ALPHA, BETA, 0.0, 0.0, deg.to_radians(), 0.0, 0.0);
             // The reference divides degrees by 180 where the code divides radians by pi, and it
             // cubes rather than calling `pow`. Both are the same real number and neither is the
             // same double, so the comparison is at the width of that difference, not exact.
@@ -5542,16 +5658,16 @@ mod tests {
         const ALPHA_BIG: [f64; 4] = [1.0e-7, 0.0, 0.0, 0.0];
         const BETA_TIE: [f64; 4] = [72_036.519_445_371_06, 0.0, 0.0, 0.0];
         let el = 45.0_f64.to_radians();
-        let at_cutoff = klobuchar_iono_delay(ALPHA_BIG, BETA_TIE, 0.0, 0.0, el, 0.0, 68_400.0);
+        let at_cutoff = gps_l1(ALPHA_BIG, BETA_TIE, 0.0, 0.0, el, 0.0, 68_400.0);
         // The night value depends on the elevation alone, so any clock past the cutoff gives it.
-        let night = klobuchar_iono_delay(ALPHA_BIG, BETA_TIE, 0.0, 0.0, el, 0.0, 86_000.0);
+        let night = gps_l1(ALPHA_BIG, BETA_TIE, 0.0, 0.0, el, 0.0, 86_000.0);
         assert_eq!(
             at_cutoff, night,
             "|x| = 1.57 exactly was treated as daytime"
         );
         // One second earlier is inside the cutoff, and the truncated cosine has not decayed there,
         // so the two branches really do disagree at the boundary.
-        let inside = klobuchar_iono_delay(ALPHA_BIG, BETA_TIE, 0.0, 0.0, el, 0.0, 68_399.0);
+        let inside = gps_l1(ALPHA_BIG, BETA_TIE, 0.0, 0.0, el, 0.0, 68_399.0);
         assert!(
             (inside / night - 1.0).abs() > 0.3,
             "the branches agree at the cutoff, so the test proves nothing: {inside} vs {night}"
@@ -5600,7 +5716,7 @@ mod tests {
             assert!(x.abs() < 1.57, "case needs the daytime branch, x = {x}");
             let cosine = 1.0 - x * x / 2.0 + x * x * x * x / 24.0;
 
-            let got = klobuchar_iono_delay(alpha, beta, lat, lon, el, az, sod);
+            let got = gps_l1(alpha, beta, lat, lon, el, az, sod);
             let want = f * (5.0e-9 + (A1 * phi_m).max(0.0) * cosine) * SPEED_OF_LIGHT;
             let rel = (got - want).abs() / want;
             assert!(
@@ -5631,7 +5747,7 @@ mod tests {
 
         let sample = |lat_deg: f64, sod: f64| {
             let phi_m = (lat_deg / 180.0 + psi).clamp(-0.416, 0.416) + offset;
-            let d = klobuchar_iono_delay(
+            let d = gps_l1(
                 alpha,
                 beta,
                 lat_deg.to_radians(),
@@ -5691,7 +5807,7 @@ mod tests {
             (170.0, 85_000.0),
             (0.0, 50_400.0),
         ] {
-            let d = klobuchar_iono_delay(alpha, beta, 0.0, lon_deg.to_radians(), el, az, sod);
+            let d = gps_l1(alpha, beta, 0.0, lon_deg.to_radians(), el, az, sod);
             let raw = 43_200.0 * (lon_deg / 180.0) + sod;
             let t = raw - 86_400.0 * (raw / 86_400.0).floor();
             assert!(
@@ -5712,6 +5828,182 @@ mod tests {
                 "lon {lon_deg} sod {sod}: {d:.15e} vs {want:.15e} (t {t})"
             );
         }
+    }
+
+    /// The fixture's NavIC set (`I02 LNAV`, 2026-07-19) as the integers ISRO-IRNSS-ICD-SPS-1.1
+    /// Table 17 scales: α by 2⁻³⁰, 2⁻²⁷, 2⁻²⁴, 2⁻²⁴ and β by 2¹¹, 2¹⁴, 2¹⁶, 2¹⁶, so each is exact.
+    fn navic_set() -> ([f64; 4], [f64; 4]) {
+        let p = |k: f64, e: i32| k * 2.0_f64.powi(e);
+        (
+            [p(45.0, -30), p(35.0, -27), p(-52.0, -24), p(16.0, -24)],
+            [p(82.0, 11), p(22.0, 14), p(-127.0, 16), p(127.0, 16)],
+        )
+    }
+
+    /// A NavIC set is an L5 delay, against values computed exactly (G3).
+    ///
+    /// `derivations/klobuchar_reference.mac` evaluates ISRO-IRNSS-ICD-SPS-1.1 Appendix H on
+    /// `navic_set` at 50 digits, and `klobuchar_reference.gp` again at 60: three geometries over
+    /// India with dyadic inputs, so the doubles here are its inputs exactly -- an afternoon, a night
+    /// past the day wrap, and a high latitude where the sub-ionospheric latitude clamps and the
+    /// amplitude and the period sit at their floors. The delay at L5 is the document's; the delay at
+    /// L1 is γ₅₁ = 13225/23716 of it. Measured: within 1 ulp of the goldens at both carriers;
+    /// asserted at 2. Asked for the L5 delay, the GPS reading of the same eight numbers at L1 is
+    /// the same double: one algorithm, two references (difference 0).
+    #[test]
+    fn the_navic_set_is_an_l5_delay_at_the_goldens() {
+        let (alpha, beta) = navic_set();
+        // (lat, lon, elevation, azimuth) rad, NavIC time of day s; then the L5 and L1 goldens, m.
+        let cases = [
+            (
+                "day",
+                29.0 / 128.0,
+                173.0 / 128.0,
+                0.75,
+                2.5,
+                31_000.0,
+                20.020698501816227779266241,
+                11.164350551801299223342724,
+            ),
+            (
+                "night",
+                29.0 / 128.0,
+                173.0 / 128.0,
+                0.75,
+                2.5,
+                70_000.0,
+                2.0915970986383946187995605,
+                1.1663590668532960378488863,
+            ),
+            (
+                "clamped",
+                1.25,
+                0.5,
+                0.125,
+                0.25,
+                50_000.0,
+                4.3242361354253647655566185,
+                2.4113688181396714886357851,
+            ),
+        ];
+        for (what, lat, lon, el, az, sod, want_l5, want_l1) in cases {
+            let at = |system, f| {
+                klobuchar_iono_delay(system, alpha, beta, lat, lon, el, az, sod, f)
+                    .unwrap_or_else(|e| panic!("{what}: {e}"))
+            };
+            let (l5, l1) = (at(GnssSystem::Navic, L5_HZ), at(GnssSystem::Navic, L1_HZ));
+            spacelab_testkit::assert_within_ulps(l5, want_l5, 2, &format!("{what} at L5"));
+            spacelab_testkit::assert_within_ulps(l1, want_l1, 2, &format!("{what} at L1"));
+            assert_eq!(
+                l5,
+                at(GnssSystem::Gps, L1_HZ),
+                "{what}: Appendix H is not IS-GPS-200's"
+            );
+        }
+    }
+
+    /// The scale is the first-order dispersion law: a delay at `f` is the reference delay times
+    /// `(f_ref/f)²` (G1; `derivations/klobuchar_reference.mac` derives it from `40.3·N/f²`).
+    ///
+    /// Over a grid of geometries and both day and night: a NavIC set at L1 is γ₅₁ = 13225/23716 of
+    /// its L5 delay; at S it is the ICD's own S-band factor, `(f_L5/f_S)²`, of it; a GPS set at L5 is
+    /// 1/γ₅₁ of its L1 delay; and each set at its own reference is the algorithm's value, unscaled.
+    #[test]
+    fn a_delay_moves_between_carriers_by_the_squared_frequency_ratio() {
+        use crate::combinations::NAVIC_S_HZ;
+        const GAMMA_51: f64 = 13_225.0 / 23_716.0;
+        const S_FACTOR: f64 = 330_625.0 / 1_483_524.0;
+        let (alpha, beta) = navic_set();
+        for lat_deg in [-30.0_f64, 0.0, 13.0, 45.0, 70.0] {
+            for el_deg in [5.0_f64, 30.0, 60.0, 90.0] {
+                for sod in [0.0_f64, 21_600.0, 50_400.0, 72_000.0] {
+                    let geometry = (lat_deg.to_radians(), 1.35, el_deg.to_radians(), 2.0, sod);
+                    let at = |system, f| {
+                        let (lat, lon, el, az, t) = geometry;
+                        klobuchar_iono_delay(system, alpha, beta, lat, lon, el, az, t, f)
+                            .unwrap_or_else(|e| panic!("{geometry:?}: {e}"))
+                    };
+                    let what = format!("lat {lat_deg} el {el_deg} sod {sod}");
+                    let navic_l5 = at(GnssSystem::Navic, L5_HZ);
+                    let gps_l1 = at(GnssSystem::Gps, L1_HZ);
+                    assert_eq!(
+                        navic_l5,
+                        klobuchar_at_reference(
+                            alpha, beta, geometry.0, geometry.1, geometry.2, geometry.3, geometry.4
+                        ),
+                        "{what}"
+                    );
+                    assert_eq!(gps_l1, navic_l5, "{what}");
+                    spacelab_testkit::assert_within_ulps(
+                        at(GnssSystem::Navic, L1_HZ),
+                        GAMMA_51 * navic_l5,
+                        4,
+                        &format!("{what}: NavIC at L1"),
+                    );
+                    spacelab_testkit::assert_within_ulps(
+                        at(GnssSystem::Navic, NAVIC_S_HZ),
+                        S_FACTOR * navic_l5,
+                        4,
+                        &format!("{what}: NavIC at S"),
+                    );
+                    spacelab_testkit::assert_within_ulps(
+                        at(GnssSystem::Gps, L5_HZ),
+                        gps_l1 / GAMMA_51,
+                        4,
+                        &format!("{what}: GPS at L5"),
+                    );
+                    assert_eq!(
+                        at(GnssSystem::Qzss, L1_HZ),
+                        gps_l1,
+                        "{what}: QZSS is referred to L1"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Rule 23: a constellation with no set this algorithm takes, or a frequency that is not
+    /// finite and positive, is a typed refusal, never a number (S2).
+    #[test]
+    fn a_constellation_without_a_klobuchar_set_or_a_bad_frequency_is_refused() {
+        let call =
+            |system, f| klobuchar_iono_delay(system, ALPHA, BETA, 0.2, 1.3, 0.8, 1.0, 40_000.0, f);
+        assert_eq!(klobuchar_reference_frequency(GnssSystem::Gps), Ok(L1_HZ));
+        assert_eq!(klobuchar_reference_frequency(GnssSystem::Qzss), Ok(L1_HZ));
+        assert_eq!(klobuchar_reference_frequency(GnssSystem::Navic), Ok(L5_HZ));
+        for system in [GnssSystem::Galileo, GnssSystem::Beidou] {
+            assert_eq!(
+                klobuchar_reference_frequency(system),
+                Err(KlobucharError::NoKlobuchar(system))
+            );
+            assert_eq!(
+                call(system, L1_HZ),
+                Err(KlobucharError::NoKlobuchar(system))
+            );
+        }
+        for f in [
+            0.0,
+            -0.0,
+            -L1_HZ,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            assert_eq!(
+                call(GnssSystem::Navic, f),
+                Err(KlobucharError::NonPositiveFrequency),
+                "frequency {f}"
+            );
+        }
+        // The smallest positive double is a frequency: the refusal is the domain, not a range.
+        assert!(call(GnssSystem::Gps, f64::MIN_POSITIVE).is_ok());
+        let messages = [
+            KlobucharError::NoKlobuchar(GnssSystem::Galileo).to_string(),
+            KlobucharError::NoKlobuchar(GnssSystem::Beidou).to_string(),
+            KlobucharError::NonPositiveFrequency.to_string(),
+        ];
+        assert!(messages[0].contains("Galileo") && messages[1].contains("Beidou"));
+        assert!(messages[2].contains("finite and positive"));
     }
 
     #[test]

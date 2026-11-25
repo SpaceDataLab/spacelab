@@ -3318,7 +3318,7 @@ exclude_re = [
     # NIELL_BH_AMP[0], NIELL_CH_AMP[0]). Each coefficient is therefore `avg - 0.0 * cos_coef`, and
     # `0.0 * x` is `0.0` for every finite `x`, so the seasonal phase cannot reach the result and
     # neither branch of `t0` is observable. The wet factor has no season at all.
-    "models\\.rs:196:26: replace < with <= in niell_mapping",
+    "models\\.rs:284:26: replace < with <= in niell_mapping",
 
     # GMF and VMF1 pick `c10h`, `c11h` and `psi` by `latitude < 0.0`, so `<=` differs only at
     # latitude exactly +/-0.0. There `1 - cos(latitude)` is exactly `+0.0`, and it multiplies the
@@ -3326,8 +3326,8 @@ exclude_re = [
     # finite and positive on both branches, so `ch` is `c0h` bit for bit. Neither function reads
     # `psi` anywhere else -- GMF's seasonal `a` term is `cos(phase)`, one phase on both hemispheres --
     # so these two are equivalent, not merely close.
-    "models\\.rs:365:41: replace < with <= in gmf_mapping",
-    "models\\.rs:435:41: replace < with <= in vmf1_mapping",
+    "models\\.rs:453:41: replace < with <= in gmf_mapping",
+    "models\\.rs:523:41: replace < with <= in vmf1_mapping",
 
     # `cos(phase + psi)` becomes `cos(phase - psi)`. `psi` is 0 or PI: at 0, `fl(phase - 0)` is
     # `phase` exactly; at PI, `cos(u - PI) = cos(u + PI) = -cos(u)` identically, so the mutant is the
@@ -3338,8 +3338,8 @@ exclude_re = [
     # `|d ln m / dc|` peaks at 16.1 on the horizon (Maxima, `a` in [1.1e-3, 1.5e-3], `c` in
     # [0.062, 0.071]; 0.136 at 5 degrees): the hydrostatic factor moves by at most 6.4e-17
     # relative, under one ulp. The wet factor does not read `ch`.
-    "models\\.rs:372:33: replace \\+ with - in gmf_mapping",
-    "models\\.rs:442:33: replace \\+ with - in vmf1_mapping",
+    "models\\.rs:460:33: replace \\+ with - in gmf_mapping",
+    "models\\.rs:530:33: replace \\+ with - in vmf1_mapping",
 
     # --- spacelab-gpu ------------------------------------------------------------------------------
     #

@@ -731,6 +731,19 @@ void the_gnss_wrapper_reads_a_file_and_refuses_a_geometry() {
     const double l1 = 1575.42e6;
     CHECK_NEAR(spacelab::ionospheric_path_delay(20.0, l1), 40.3e16 * 20.0 / (l1 * l1), 1e-12);
     CHECK_NEAR(spacelab::glonass_l1_frequency(-7), (1602.0 - (7 * 0.5625)) * 1e6, 1e-6);
+
+    /* A NavIC Klobuchar set is referred to L5; at L1 it is 13225/23716 of that. */
+    const std::array<double, 4> navic_alpha{std::ldexp(45.0, -30), std::ldexp(35.0, -27),
+                                            std::ldexp(-52.0, -24), std::ldexp(16.0, -24)};
+    const std::array<double, 4> navic_beta{std::ldexp(82.0, 11), std::ldexp(22.0, 14),
+                                           std::ldexp(-127.0, 16), std::ldexp(127.0, 16)};
+    const double navic_l5 =
+        spacelab::klobuchar_iono_delay(SL_GNSS_NAVIC, navic_alpha, navic_beta, 0.2265625, 1.3515625,
+                                       0.75, 2.5, 31000.0, 1176.45e6);
+    const double navic_l1 = spacelab::klobuchar_iono_delay(
+        SL_GNSS_NAVIC, navic_alpha, navic_beta, 0.2265625, 1.3515625, 0.75, 2.5, 31000.0, l1);
+    CHECK_NEAR(navic_l5, 20.020698501816227779, 1e-13);
+    CHECK_NEAR(navic_l1 / navic_l5, 13225.0 / 23716.0, 1e-15);
     CHECK_NEAR(spacelab::ionospheric_mapping_factor(M_PI / 2.0), 1.0, 1e-12);
 
     std::vector<spacelab::vec3> satellites;

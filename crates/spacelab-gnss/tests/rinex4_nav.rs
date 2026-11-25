@@ -22,8 +22,9 @@
 // that column, and the question is whether the reader produced that double.
 #![allow(clippy::doc_markdown, clippy::float_cmp, clippy::expect_used)]
 
-use spacelab_gnss::GnssSystem;
+use spacelab_gnss::combinations::{L1_HZ, L5_HZ};
 use spacelab_gnss::rinex4::{IonosphereModel, KeplerianRecord, NavMessage, Subtype, parse};
+use spacelab_gnss::{GnssSystem, KlobucharError, klobuchar_iono_delay};
 
 const FILE: &str = include_str!("fixtures/rinex4_nav_brd400dlr.rnx");
 
@@ -433,6 +434,96 @@ fn each_ionosphere_record_decodes_as_the_model_its_message_carries() {
         .find(|i| i.subtype == Some(Subtype::Japn))
         .expect("a QZSS Japan-area record");
     assert_ne!(wide.model, japan.model, "the two regions are the same set");
+}
+
+/// ISRO-IRNSS-ICD-SPS-1.1 Table 17's scale factors for NavIC's eight Klobuchar coefficients, as
+/// powers of two: `α₀…α₃`, then `β₀…β₃`, each sent as an 8-bit two's complement integer.
+/// `derivations/navic_klobuchar_icd.mac` reads them off the pinned document and holds this list to
+/// them.
+const NAVIC_TABLE_17_EXPONENTS: [i32; 8] = [-30, -27, -24, -24, 11, 14, 16, 16];
+
+/// The product's NavIC Klobuchar set is a Table 17 message, and its delay is an L5 delay (G5).
+///
+/// The record (`I02 LNAV`) is NavIC's legacy message type 11. Each coefficient over its Table 17
+/// scale is an integer in [-128, 127], to the 13 digits the file prints: the column read is the
+/// field the ICD sends, in the units the GPS algorithm reads. The set's delay is referred to L5 (§6.2.5.2, Appendix H), so at L5 it is
+/// the GPS algorithm's own value, bit for bit, and at L1 it is γ₅₁ = (115/154)² of that. Read as
+/// an L1 delay, as `klobuchar_iono_delay` once documented every set, it is 1.793 times too large.
+#[test]
+fn the_navic_klobuchar_set_is_on_table_17s_grid_and_is_an_l5_delay() {
+    let nav = parse(FILE).expect("a real RINEX 4.02 navigation file");
+    let ion = nav
+        .ionosphere
+        .iter()
+        .find(|i| i.constellation == 'I' && i.message == NavMessage::Lnav)
+        .expect("the product's NavIC LNAV ionosphere record");
+    let IonosphereModel::Klobuchar {
+        alpha,
+        beta,
+        region,
+    } = ion.model
+    else {
+        panic!("NavIC LNAV carries a Klobuchar set: {ion:?}");
+    };
+    assert_eq!(region, None, "the legacy message is global");
+    // The integers the satellite sent. Being on the grid alone would also pass a scale one power
+    // of two finer; the integers pin which power it is.
+    let sent = [45.0, 35.0, -52.0, 16.0, 82.0, 22.0, -127.0, 127.0];
+    for ((value, exponent), n) in alpha
+        .iter()
+        .chain(&beta)
+        .zip(NAVIC_TABLE_17_EXPONENTS)
+        .zip(sent)
+    {
+        let k = value / 2.0_f64.powi(exponent);
+        assert!(
+            (-128.0..=127.0).contains(&k.round()),
+            "{value} is {k} units of 2^{exponent}"
+        );
+        assert!(
+            (k - n).abs() <= 1e-12 * n.abs(),
+            "{value} is {k} units of 2^{exponent}, not the {n} the satellite sent"
+        );
+    }
+
+    let system = ion.system().expect("NavIC is a GnssSystem");
+    assert_eq!(system, GnssSystem::Navic);
+    // Bengaluru, a satellite 40° up in the south-east, 08:20 NavIC time.
+    let (lat, lon, el, az, sod) = (
+        12.97_f64.to_radians(),
+        77.59_f64.to_radians(),
+        40.0_f64.to_radians(),
+        135.0_f64.to_radians(),
+        30_000.0,
+    );
+    let at = |system, f| klobuchar_iono_delay(system, alpha, beta, lat, lon, el, az, sod, f);
+    let l5 = at(system, L5_HZ).expect("NavIC at L5");
+    let l1 = at(system, L1_HZ).expect("NavIC at L1");
+    assert_eq!(
+        Ok(l5),
+        at(GnssSystem::Gps, L1_HZ),
+        "Appendix H is IS-GPS-200's algorithm"
+    );
+    spacelab_testkit::assert_within_ulps(l1, 13_225.0 / 23_716.0 * l5, 2, "NavIC at L1");
+    assert!(
+        l5 / l1 > 1.79,
+        "the L1 user's delay is the smaller one: {l1} m vs {l5} m at L5"
+    );
+
+    // A BeiDou D1/D2 record has the same layout and is a different algorithm: refused, not read.
+    let beidou = nav
+        .ionosphere
+        .iter()
+        .find(|i| i.message == NavMessage::D1d2)
+        .expect("the product's BeiDou D1/D2 ionosphere record");
+    let IonosphereModel::Klobuchar { alpha, beta, .. } = beidou.model else {
+        panic!("BeiDou D1/D2 has the Klobuchar layout: {beidou:?}");
+    };
+    let system = beidou.system().expect("BeiDou is a GnssSystem");
+    assert_eq!(
+        klobuchar_iono_delay(system, alpha, beta, lat, lon, el, az, sod, L1_HZ),
+        Err(KlobucharError::NoKlobuchar(GnssSystem::Beidou))
+    );
 }
 
 // ---------------------------------------------------------------------------------------------

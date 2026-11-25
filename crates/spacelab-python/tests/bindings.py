@@ -1374,6 +1374,37 @@ def test_the_dual_frequency_combinations_recover_the_bias_they_were_built_from()
         raise AssertionError("an ascending frequency pair was accepted")
 
 
+def test_the_klobuchar_delay_is_referred_to_the_carrier_of_its_constellation():
+    """A NavIC set is an L5 delay and a GPS set an L1 delay: only the constellation says which.
+
+    Read at its own carrier each set is the same algorithm on the same numbers, so the two agree
+    exactly; moved to the other carrier, a delay scales by the squared frequency ratio, which for
+    L1 against L5 is (115/154)^2 = 13225/23716. A swapped carrier or a dropped constellation breaks
+    one of the two.
+    """
+    l1 = sl.carrier_frequency("G", "1")
+    l5 = sl.carrier_frequency("I", "5")
+    alpha, beta = [1e-8, 2e-8, 0.0, 0.0], [9e4, 0.0, 0.0, 0.0]
+
+    def at(system, frequency):
+        return sl.klobuchar_iono_delay(
+            system, alpha, beta, 0.4, 1.3, 0.7, 2.0, 45_000.0, frequency
+        )
+
+    gps_l1 = at("G", l1)
+    assert gps_l1 > 0.0
+    assert at("I", l5) == gps_l1, "a NavIC set was not read at L5"
+    close(at("I", l1) / at("I", l5), 13225 / 23716, 1e-15)
+    close(at("G", l5) / gps_l1, 23716 / 13225, 1e-15)
+    for system, frequency in (("E", l1), ("C", l1), ("R", l1), ("G", 0.0), ("I", -l5)):
+        try:
+            at(system, frequency)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{system} at {frequency} Hz was answered")
+
+
 def test_the_polynomial_detector_sees_the_slip_the_first_difference_cannot():
     """Two detectors because one is not enough, and this is the case that shows why."""
     times = [30.0 * k for k in range(20)]

@@ -460,6 +460,20 @@ void the_gnss_wrapper_still_reads_a_file_and_refuses_a_geometry() {
     CHECK_NEAR(spacelab::ionospheric_path_delay(20.0, l1), 40.3e16 * 20.0 / (l1 * l1), 1e-12);
     CHECK_NEAR(spacelab::glonass_l2_frequency(0), 1246.0e6, 1e-6);
 
+    /* The constellation reaches the reference carrier, and a refusal is a status, not a value. */
+    const std::array<double, 4> klobuchar_alpha{1e-8, 0.0, 0.0, 0.0};
+    const std::array<double, 4> klobuchar_beta{9e4, 0.0, 0.0, 0.0};
+    const spacelab::result<double> navic_l5 = spacelab::try_klobuchar_iono_delay(
+        SL_GNSS_NAVIC, klobuchar_alpha, klobuchar_beta, 0.2, 1.3, 0.75, 2.5, 50400.0, 1176.45e6);
+    const spacelab::result<double> gps_l1 = spacelab::try_klobuchar_iono_delay(
+        SL_GNSS_GPS, klobuchar_alpha, klobuchar_beta, 0.2, 1.3, 0.75, 2.5, 50400.0, l1);
+    CHECK(static_cast<bool>(navic_l5) && static_cast<bool>(gps_l1));
+    CHECK(*navic_l5 == *gps_l1);
+    const spacelab::result<double> galileo = spacelab::try_klobuchar_iono_delay(
+        SL_GNSS_GALILEO, klobuchar_alpha, klobuchar_beta, 0.2, 1.3, 0.75, 2.5, 50400.0, l1);
+    CHECK(!galileo);
+    CHECK(galileo.error() == SL_ERR_DOMAIN);
+
     std::vector<spacelab::vec3> satellites;
     for (std::size_t i = 0; i < 5; ++i) {
         const double theta = 0.25 * static_cast<double>(i);

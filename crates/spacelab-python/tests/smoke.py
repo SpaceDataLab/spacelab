@@ -591,6 +591,7 @@ def test_gnss_dop_and_propagation_delays():
 
     # Klobuchar ionospheric delay is a positive slant delay.
     d = sl.klobuchar_iono_delay(
+        "G",
         [1e-8, 0.0, 0.0, 0.0],
         [9e4, 0.0, 0.0, 0.0],
         0.5,
@@ -598,6 +599,7 @@ def test_gnss_dop_and_propagation_delays():
         math.radians(30),
         1.0,
         50_400.0,
+        1575.42e6,
     )
     assert d > 0.0
     # Saastamoinen zenith hydrostatic delay is ~2.3 m at sea level, mid-latitude.

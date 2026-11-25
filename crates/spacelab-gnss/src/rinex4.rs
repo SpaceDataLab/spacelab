@@ -656,7 +656,14 @@ pub struct EarthOrientation {
 /// The ionosphere model a record carries, and its coefficients.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum IonosphereModel {
-    /// The eight-coefficient Klobuchar model (GPS, BeiDou D1/D2, QZSS, NavIC).
+    /// The eight-coefficient Klobuchar layout (GPS, BeiDou D1/D2, QZSS, NavIC).
+    ///
+    /// One layout, not one model: the constellation decides what the numbers mean. GPS and QZSS
+    /// sets give a delay referred to L1 and NavIC sets one referred to L5, so a record is evaluated
+    /// as `klobuchar_iono_delay(record.system()?, alpha, beta, .., frequency_hz)`, which applies
+    /// the reference ([`crate::models::klobuchar_reference_frequency`]) and leaves `region` to the
+    /// caller. BeiDou's D1/D2 set feeds the BDS user algorithm, referred to B1I, which that
+    /// function refuses rather than evaluates.
     Klobuchar {
         /// `α₀…α₃`, s and s/semicircleⁿ.
         alpha: [f64; 4],
@@ -733,6 +740,18 @@ pub struct Ionosphere {
     pub issue_of_data: Option<f64>,
     /// The model and its coefficients.
     pub model: IonosphereModel,
+}
+
+impl Ionosphere {
+    /// The constellation that broadcast the record, as the [`GnssSystem`] the broadcast models take;
+    /// `None` for GLONASS and SBAS, which have no variant there.
+    ///
+    /// It is what [`crate::models::klobuchar_iono_delay`] needs to know which carrier a
+    /// [`IonosphereModel::Klobuchar`] set's delay is referred to.
+    #[must_use]
+    pub fn system(&self) -> Option<GnssSystem> {
+        keplerian_system(self.constellation)
+    }
 }
 
 /// Everything a RINEX 4 navigation file holds, sorted by record type rather than by file order.
@@ -816,7 +835,7 @@ fn label(line: &str) -> &str {
     line.get(60..).unwrap_or("").trim_end()
 }
 
-/// The constellation letter, as a [`GnssSystem`] where the Keplerian model applies to it.
+/// The constellation letter, as a [`GnssSystem`]: every constellation but GLONASS and SBAS.
 fn keplerian_system(letter: char) -> Option<GnssSystem> {
     Some(match letter {
         'G' => GnssSystem::Gps,

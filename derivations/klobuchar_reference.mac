@@ -1,0 +1,202 @@
+/* The carrier a broadcast Klobuchar set is referred to -- spacelab-gnss/src/models.rs,
+ * `klobuchar_iono_delay` -- and NavIC's user algorithm against the GPS one.
+ *
+ * GPS broadcasts eight coefficients whose delay is referred to L1 (IS-GPS-200 §20.3.3.5.2.5).
+ * NavIC broadcasts eight on the same scale (ISRO-IRNSS-ICD-SPS-1.1, Table 17) whose delay is
+ * referred to L5 (the same ICD, §6.2.5.2 and Appendix H). The function takes the constellation and
+ * the frequency the delay is wanted at, and scales the delay at the reference by (f_ref/f)^2.
+ * `navic_klobuchar_icd.mac` reads those facts off the pinned ICD; this file is the mathematics.
+ * Shown here, each line printing `<name>: 0`:
+ *   1. (G3) the carriers are 154, 115 and 243.6 times 10.23 MHz, the 1575.42, 1176.45 and
+ *      2492.028 MHz the ICDs print, so gamma_51 = (f_L5/f_L1)^2 = (115/154)^2 = 13225/23716 and
+ *      the S-band factor (f_L5/f_S)^2 = (575/1218)^2 = 330625/1483524, exactly;
+ *   2. (G1) the scale the function applies is the first-order dispersion law: with D(f) = K N/f^2,
+ *      D(f) = D(f_ref) (f_ref/f)^2 for every f and f_ref. So a NavIC set at L1 is gamma_51 times
+ *      its L5 delay, a GPS set at L5 is 1/gamma_51 times its L1 delay, and a NavIC set at S is the
+ *      ICD's own S-band factor times its L5 delay;
+ *   3. (G1) Appendix H's chain, written as the ICD prints it (semicircles, x^2/2! and x^4/4!,
+ *      4.32 x 10^4, 1.0 + 16.0 [0.53 - El]^3, 5.0 x 10^-9 s), minus IS-GPS-200's chain as that
+ *      prints it, is 0 in all 24 branches: the sub-ionospheric latitude free or clamped at either
+ *      0.416, the amplitude above or at its floor 0, the period above or at its floor 72 000 s,
+ *      day or night. So is the shipped chain minus Appendix H's, the shipped chain written as
+ *      `klobuchar_at_reference` computes it (radians in, Horner cubics, x*x*x*x) with the
+ *      constants read from its own lines in models.rs, so a changed literal fails here;
+ *   4. the day/night cutoff the code compares against is Appendix H's 1.57.
+ * Then the goldens the module test `the_navic_set_is_an_l5_delay_at_the_goldens` (G3) holds: the
+ * NavIC set the fixture's `I02 LNAV` record carries (2026-07-19), on Table 17's grid, at three
+ * geometries over India, its delay at L5 and at L1, exactly evaluated at 50 digits.
+ * `klobuchar_reference.gp` is the second engine for 1, 2 and the goldens.
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/klobuchar_reference.mac </dev/null      */
+
+load("rust_literals.mac")$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* ---- 1. the carriers and the two factors (G3) ------------------------------------------------ */
+f0 : 1023/100$                       /* 10.23 MHz, in MHz */
+fL1 : 154*f0$  fL5 : 115*f0$  fS : 1218/5*f0$
+zero("l1_is_1575_42_mhz", fL1 - 157542/100)$
+zero("l5_is_1176_45_mhz", fL5 - 117645/100)$
+zero("s_is_2492_028_mhz", fS - 2492028/1000)$
+gamma51 : (fL5/fL1)^2$
+zero("gamma_51_is_13225_over_23716", gamma51 - 13225/23716)$
+zero("gamma_51_is_115_over_154_squared", gamma51 - (115/154)^2)$
+zero("s_factor_is_330625_over_1483524", (fL5/fS)^2 - 330625/1483524)$
+
+/* ---- 2. the scale is the first-order dispersion law (G1) ------------------------------------ */
+D(f) := K*N/f^2$
+scale(fref, f) := block([ratio : fref/f], ratio*ratio)$      /* as the function computes it */
+zero("scale_is_the_dispersion_law", ratsimp(D(f) - D(fref)*scale(fref, f)))$
+/* A set is one number at its reference, T_ref; at f it is T_ref * scale(f_ref, f). */
+at(tref, fref, f) := tref*scale(fref, f)$
+zero("navic_l1_is_gamma_51_of_navic_l5", ratsimp(at(T, fL5, fL1) - gamma51*at(T, fL5, fL5)))$
+zero("gps_l5_is_its_l1_over_gamma_51", ratsimp(at(T, fL1, fL5) - at(T, fL1, fL1)/gamma51))$
+zero("navic_s_is_the_icd_s_factor_of_navic_l5", ratsimp(at(T, fL5, fS) - (fL5^2/fS^2)*at(T, fL5, fL5)))$
+zero("at_the_reference_the_scale_is_one", scale(fL5, fL5) - 1)$
+/* The hazard, measured: an L5 delay read as an L1 one is 1/gamma_51 too large. */
+printf(true, "an L5 delay read as L1 is too large by 1/gamma_51 = ~a~%", bfloat(1/gamma51))$
+
+/* ---- 3. Appendix H against IS-GPS-200, and the shipped chain against both (G1) --------------
+   Inputs: elevation E, latitude P, longitude L, azimuth A in radians; system time s; the day wrap
+   w (the whole days the local time is moved by, -1, 0 or 1); alpha a[n], beta b[n]. A chain is
+   ten stages, each a function of the inputs and of the stages before it, named PSI, PHI, LAM, PHM,
+   TT, FF, AM, PE, XX. Two chains whose every stage is the same function are the same function,
+   so the comparison is stage by stage, in every branch a stage has: the sub-ionospheric latitude
+   free or clamped at +-0.416, the amplitude above or at its floor 0, the period above or at its
+   floor 72 000 s, day or night. Constants are exact decimals, as each document prints them. */
+dec(t) := rust_rational(t)$
+stages : [PSI, PHI, LAM, PHM, TT, FF, AM, PE, XX, T]$
+branch_of : [[0], [0, 1, -1], [0], [0], [0], [0], [false, true], [false, true], [0], [true, false]]$
+
+/* ISRO-IRNSS-ICD-SPS-1.1, Appendix H: terms in semicircles, trigonometric arguments in radians. */
+icd(k, br) := block([El : E/%pi, phu : P/%pi, lau : L/%pi, Az : A/%pi],
+  [dec("0.0137")/(El + dec("0.11")) - dec("0.022"),
+   if br = 0 then phu + PSI*cos(%pi*Az) else br*dec("0.416"),
+   lau + PSI*sin(%pi*Az)/cos(%pi*PHI),
+   PHI + dec("0.064")*cos(%pi*(LAM - dec("1.617"))),
+   dec("4.32")*10^4*LAM + s - 86400*w,
+   dec("1.0") + dec("16.0")*(dec("0.53") - El)^3,
+   if br = true then 0 else sum(a[n]*PHM^n, n, 0, 3),
+   if br = true then dec("72000") else sum(b[n]*PHM^n, n, 0, 3),
+   2*%pi*(TT - 50400)/PE,
+   if br = true then FF*(dec("5.0")*10^-9 + AM*(1 - XX^2/2! + XX^4/4!)) else FF*(dec("5.0")*10^-9)][k])$
+
+/* IS-GPS-200 §20.3.3.5.2.5, as that document prints it: the same quantities, its own names. */
+gps(k, br) := block([Ei : E/%pi, phu : P/%pi, lau : L/%pi, Ai : A/%pi],
+  [dec("0.0137")/(Ei + dec("0.11")) - dec("0.022"),
+   if br = 0 then phu + PSI*cos(%pi*Ai) else br*dec("0.416"),
+   lau + PSI*sin(%pi*Ai)/cos(%pi*PHI),
+   PHI + dec("0.064")*cos(%pi*(LAM - dec("1.617"))),
+   dec("4.32")*10^4*LAM + s - 86400*w,
+   dec("1.0") + dec("16.0")*(dec("0.53") - Ei)^3,
+   if br = true then 0 else sum(a[n]*PHM^n, n, 0, 3),
+   if br = true then dec("72000") else sum(b[n]*PHM^n, n, 0, 3),
+   2*%pi*(TT - 50400)/PE,
+   if br = true then FF*(dec("5.0e-9") + AM*(1 - XX^2/2 + XX^4/24)) else FF*dec("5.0e-9")][k])$
+
+/* The shipped chain, its constants read from the lines of `klobuchar_at_reference` that hold them. */
+models : "../crates/spacelab-gnss/src/models.rs"$
+literal_tokens(line) := block([at : ssearch("//", line)],
+  if at # false then line : substring(line, 1, at),
+  line : ssubst(" ", "-", ssubst("e#", "e-", line)),
+  line : ssubst("e-", "e#", line),
+  for c in ["(", ")", "[", "]", "*", "/", "+", ",", ";", "="] do line : ssubst(" ", c, line),
+  sublist(split(line, " ", true), rust_is_number))$
+line_literals(key) := block([s : openr(models), line, inside : false, out : false],
+  while out = false and (line : readline(s)) # false do (
+    if inside and ssearch(key, line) # false then out : map(rust_rational, literal_tokens(line))
+    else if ssearch("fn klobuchar_at_reference(", line) # false then inside : true),
+  close(s),
+  if out = false then error("line_literals: no line", key, "in klobuchar_at_reference"),
+  out)$
+k_psi : line_literals("let psi =")$          /* 0.0137, 0.11, 0.022 */
+k_phi : line_literals("let phi_i =")$        /* 0.416, 0.416 */
+k_phm : line_literals("let phi_m =")$        /* 0.064, 1.617 */
+k_t   : line_literals("let t =")$            /* 43_200.0 */
+k_f   : line_literals("let f =")$            /* 1.0, 16.0, 0.53, 3.0 */
+k_amp : line_literals("let amp =")$          /* the indices 0..3, then the floor 0.0 */
+k_per : line_literals("let per =")$          /* the indices 0..3, then the floor 72_000.0 */
+k_x   : line_literals("let x =")$            /* 2.0, 50_400.0 */
+k_cut : line_literals("libm::fabs(x) <")$    /* 1.57 */
+k_day : line_literals("f * (5.0e-9 + amp")$  /* 5.0e-9, 1.0, 2.0, 24.0 */
+k_ngt : line_literals("f * 5.0e-9")$         /* 5.0e-9 */
+k_wrap : block([s : openr(models), line, out : false],
+  while out = false and (line : readline(s)) # false do
+    if ssearch("x - 86_400.0 * libm::floor(x / 86_400.0)", line) # false then out : 86400,
+  close(s),
+  if out = false then error("wrap_day: its line is not in models.rs"),
+  out)$
+printf(true, "read from klobuchar_at_reference: ~a~%",
+       [k_psi, k_phi, k_phm, k_t, k_f, k_amp, k_per, k_x, k_cut, k_day, k_ngt])$
+must(ok, what) := if ok then print(what) else error("FAILED:", what)$
+must(is(map(length, [k_psi, k_phi, k_phm, k_t, k_f, k_amp, k_per, k_x, k_cut, k_day, k_ngt])
+        = [3, 2, 2, 1, 4, 5, 5, 2, 1, 4, 1])
+     and is(firstn(k_amp, 4) = [0, 1, 2, 3]) and is(firstn(k_per, 4) = [0, 1, 2, 3]),
+     "every constant line of klobuchar_at_reference read, each with the count of literals it holds")$
+
+/* The shipped stages, as `klobuchar_at_reference` computes them: radians in, divided by PI;
+   azimuth kept in radians; Horner cubics; x*x and x*x*x*x; `clamp(-c, c)` the two bounds. */
+shipped(k, br) := block([e : E/%pi, phi_u : P/%pi, lam_u : L/%pi],
+  [k_psi[1]/(e + k_psi[2]) - k_psi[3],
+   if br = 0 then phi_u + PSI*cos(A) else (if br = 1 then k_phi[2] else -k_phi[1]),
+   lam_u + PSI*sin(A)/cos(PHI*%pi),
+   PHI + k_phm[1]*cos((LAM - k_phm[2])*%pi),
+   k_t[1]*LAM + s - k_wrap*w,
+   k_f[1] + k_f[2]*(k_f[3] - e)^k_f[4],
+   if br = true then k_amp[5] else a[0] + PHM*(a[1] + PHM*(a[2] + PHM*a[3])),
+   if br = true then k_per[5] else b[0] + PHM*(b[1] + PHM*(b[2] + PHM*b[3])),
+   k_x[1]*%pi*(TT - k_x[2])/PE,
+   if br = true then FF*(k_day[1] + AM*(k_day[2] - XX*XX/k_day[3] + XX*XX*XX*XX/k_day[4]))
+   else FF*k_ngt[1]][k])$
+
+/* The stages, with every branch each one has, where f and g differ: the count must be 0. */
+off(f, g) := block([n : 0],
+  for k thru length(stages) do
+    for br in branch_of[k] do
+      if ratsimp(f(k, br) - g(k, br)) # 0 then (n : n + 1, printf(true, "  stage ~a, branch ~a: ~a~%", stages[k], br, ratsimp(f(k, br) - g(k, br)))),
+  n)$
+printf(true, "stage-branches compared per pair: ~a~%", lsum(length(b), b, branch_of))$
+zero("appendix_h_minus_is_gps_200_stages_off", off(icd, gps))$
+zero("shipped_minus_appendix_h_stages_off", off(shipped, icd))$
+zero("the_cutoff_is_appendix_h_1_57", k_cut[1] - dec("1.57"))$
+zero("the_day_wrap_is_86400_s", k_wrap - 86400)$
+
+/* ---- goldens -------------------------------------------------------------------------------
+   The fixture's NavIC LNAV set (`I02 LNAV`, 2026-07-19) as the integers Table 17 scales: alpha
+   45, 35, -52, 16 times 2^-30, 2^-27, 2^-24, 2^-24 s/sc^n, beta 82, 22, -127, 127 times 2^11,
+   2^14, 2^16, 2^16 s/sc^n. Inputs are dyadic, so the doubles the Rust test passes are exact. */
+fpprec : 50$
+navic_a : [45*2^-30, 35*2^-27, -52*2^-24, 16*2^-24]$
+navic_b : [82*2^11, 22*2^14, -127*2^16, 127*2^16]$
+cc : 299792458$
+/* Appendix H evaluated exactly: each branch decided on the bigfloat value, then the chain at 50 digits. */
+evaluate(lat, lon, el, az, sod) := block([El : el/%pi, phu : lat/%pi, lau : lon/%pi, psi, phi, lam, phm, t, F, AMP, PER, x, clamp, amp0, per0, day, T],
+  psi : 137/10000/(El + 11/100) - 22/1000,
+  phi : phu + psi*cos(az),
+  clamp : if bfloat(phi) > 416/1000 then 1 else if bfloat(phi) < -416/1000 then -1 else 0,
+  if clamp # 0 then phi : clamp*416/1000,
+  lam : lau + psi*sin(az)/cos(%pi*phi),
+  phm : phi + 64/1000*cos(%pi*(lam - 1617/1000)),
+  t : 43200*lam + sod,
+  t : t - 86400*floor(bfloat(t)/86400),
+  F : 1 + 16*(53/100 - El)^3,
+  AMP : sum(navic_a[n + 1]*phm^n, n, 0, 3),
+  amp0 : is(bfloat(AMP) < 0), if amp0 then AMP : 0,
+  PER : sum(navic_b[n + 1]*phm^n, n, 0, 3),
+  per0 : is(bfloat(PER) < 72000), if per0 then PER : 72000,
+  x : 2*%pi*(t - 50400)/PER,
+  day : is(abs(bfloat(x)) < 157/100),
+  T : if day then F*(5/10^9 + AMP*(1 - x^2/2 + x^4/24)) else F*5/10^9,
+  printf(true, "  branch: clamp ~a, amplitude floor ~a, period floor ~a, day ~a; x = ~a, AMP = ~a~%",
+         clamp, amp0, per0, day, bfloat(x), bfloat(AMP)),
+  bfloat(T*cc))$
+show(name, d) := printf(true, "GOLDEN ~a ~a~%", name, d)$
+cases : [["day", 29/128, 173/128, 3/4, 5/2, 31000],
+         ["night", 29/128, 173/128, 3/4, 5/2, 70000],
+         ["clamped", 5/4, 1/2, 1/8, 1/4, 50000]]$
+for k in cases do block([d5 : evaluate(k[2], k[3], k[4], k[5], k[6])],
+  show(sconcat(k[1], "_l5"), d5),
+  show(sconcat(k[1], "_l1"), bfloat(d5*13225/23716)))$

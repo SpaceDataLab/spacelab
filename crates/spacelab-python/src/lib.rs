@@ -2933,21 +2933,56 @@ fn dilution_of_precision(
     gnss_dop(receiver, &satellites).map(|d| (d.gdop, d.pdop, d.hdop, d.vdop, d.tdop))
 }
 
-/// The broadcast (Klobuchar) L1 ionospheric slant delay in metres, from the eight broadcast
-/// coefficients, the receiver geodetic `lat`/`lon` (rad), the satellite `elevation`/`azimuth` (rad) and
-/// GPS time `gps_sod` (seconds of day).
+/// The broadcast (Klobuchar) ionospheric slant delay in metres at `frequency_hz`, from the eight
+/// coefficients constellation `system` broadcasts, the receiver geodetic `lat`/`lon` (rad), the
+/// satellite `elevation`/`azimuth` (rad) and `sod`, the seconds of day of the constellation's time.
+///
+/// `system` is the RINEX constellation letter, which names the carrier the set is referred to: L1
+/// for GPS (`G`) and QZSS (`J`), L5 for NavIC (`I`, ISRO-IRNSS-ICD-SPS-1.1 §6.2.5.2 and Appendix H).
+/// The delay there is scaled by `(f_ref/frequency_hz)^2`, so a NavIC set asked for at L1 is 0.558 of
+/// its L5 value. Raises `ValueError` for a letter that is no constellation, for Galileo (`E`) and
+/// BeiDou (`C`), which broadcast no set this algorithm evaluates, and for a frequency that is not
+/// finite and positive.
 #[pyfunction]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the constellation, two coefficient sets, the geometry, the time and the carrier"
+)]
 fn klobuchar_iono_delay(
+    system: char,
     alpha: [f64; 4],
     beta: [f64; 4],
     lat: f64,
     lon: f64,
     elevation: f64,
     azimuth: f64,
-    gps_sod: f64,
-) -> f64 {
-    gnss_klobuchar(alpha, beta, lat, lon, elevation, azimuth, gps_sod)
+    sod: f64,
+    frequency_hz: f64,
+) -> PyResult<f64> {
+    let system = match system {
+        'G' => GnssSystem::Gps,
+        'E' => GnssSystem::Galileo,
+        'C' => GnssSystem::Beidou,
+        'J' => GnssSystem::Qzss,
+        'I' => GnssSystem::Navic,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "system {other:?} is not a RINEX constellation letter with a broadcast ephemeris"
+            )));
+        }
+    };
+    gnss_klobuchar(
+        system,
+        alpha,
+        beta,
+        lat,
+        lon,
+        elevation,
+        azimuth,
+        sod,
+        frequency_hz,
+    )
+    .map_err(value_err)
 }
 
 /// The Saastamoinen zenith hydrostatic tropospheric delay in metres, from surface `pressure` (hPa),
@@ -9290,19 +9325,6 @@ mod tests {
             (hoi2_l2 / hoi2 - (l1 / l2).powi(3)).abs() < 1e-9,
             "the second-order term does not scale as 1/f³"
         );
-
-        // Klobuchar is a positive slant delay that grows as the satellite drops.
-        let (alpha, beta) = ([1e-8, 0.0, 0.0, 0.0], [9e4, 0.0, 0.0, 0.0]);
-        let high = klobuchar_iono_delay(alpha, beta, 0.5, 0.3, 1.2, 1.0, 50_400.0);
-        let low = klobuchar_iono_delay(alpha, beta, 0.5, 0.3, 0.3, 1.0, 50_400.0);
-        assert_eq!(
-            high,
-            gnss_klobuchar(alpha, beta, 0.5, 0.3, 1.2, 1.0, 50_400.0)
-        );
-        assert!(
-            high > 0.0 && low > high,
-            "{low} m at 17 deg against {high} m"
-        );
     }
 
     /// The Saastamoinen zenith delay and the two GLONASS FDMA carriers: thin wrappers whose value is
@@ -11096,6 +11118,60 @@ mod interpreter_tests {
             let metres = melbourne_wubbena(f1, f2, p1, p2, l1, l2, false).expect("a pair");
             assert!((metres - (n1 - n2) * wide).abs() < 1e-6, "{metres} m");
             assert!((graphic(p1, l1) - (rho + 0.5 * n1 * lambda1)).abs() < 1e-6);
+        });
+    }
+
+    /// The Klobuchar binding carries the constellation to the carrier its set is referred to. A
+    /// NavIC set is an L5 delay, so at L5 it is the GPS reading of the same numbers at L1, and at L1
+    /// it is 13225/23716 of that. A constellation with no Klobuchar set, a letter that is no
+    /// constellation and a frequency that is not positive raise, each with a message naming which.
+    #[test]
+    fn the_klobuchar_binding_refers_each_set_to_its_own_carrier() {
+        Python::attach(|_| {
+            let (alpha, beta) = ([1e-8, 0.0, 0.0, 0.0], [9e4, 0.0, 0.0, 0.0]);
+            let l1 = carrier_frequency('G', '1').expect("GPS L1 is a band");
+            let l5 = carrier_frequency('I', '5').expect("NavIC L5 is a band");
+            let at = |system, elevation, frequency| {
+                klobuchar_iono_delay(
+                    system, alpha, beta, 0.5, 0.3, elevation, 1.0, 50_400.0, frequency,
+                )
+            };
+            let high = at('G', 1.2, l1).expect("a GPS set at L1");
+            let low = at('G', 0.3, l1).expect("a GPS set at L1");
+            assert_eq!(
+                Ok(high),
+                gnss_klobuchar(
+                    GnssSystem::Gps,
+                    alpha,
+                    beta,
+                    0.5,
+                    0.3,
+                    1.2,
+                    1.0,
+                    50_400.0,
+                    l1
+                )
+            );
+            assert!(
+                high > 0.0 && low > high,
+                "{low} m at 17 deg against {high} m"
+            );
+
+            let navic_l5 = at('I', 1.2, l5).expect("a NavIC set at L5");
+            assert_eq!(navic_l5, high, "a NavIC set is not read at its own carrier");
+            let navic_l1 = at('I', 1.2, l1).expect("a NavIC set at L1");
+            assert!(
+                (navic_l1 / navic_l5 - 13_225.0 / 23_716.0).abs() < 1e-15,
+                "L1/L5 is {}",
+                navic_l1 / navic_l5
+            );
+            assert_eq!(at('J', 1.2, l1).ok(), Some(high), "QZSS is not read at L1");
+
+            assert!(refusal(at('E', 1.2, l1)).contains("Galileo"));
+            assert!(refusal(at('C', 1.2, l1)).contains("Beidou"));
+            assert!(refusal(at('R', 1.2, l1)).contains("'R'"));
+            assert!(refusal(at('G', 1.2, 0.0)).contains("frequency"));
+            assert!(refusal(at('I', 1.2, f64::NAN)).contains("frequency"));
         });
     }
 

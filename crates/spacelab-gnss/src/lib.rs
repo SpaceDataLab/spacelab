@@ -65,9 +65,9 @@ pub use dop::{Dop, dop};
 pub use glonass::{GlonassEphemeris, glonass_l1_frequency, glonass_l2_frequency};
 pub use gps::{BroadcastEphemeris, EARTH_GM, EARTH_ROTATION_RATE, GnssSystem, kepler_solve};
 pub use models::{
-    gmf_mapping, ionospheric_mapping_factor, klobuchar_iono_delay, niell_mapping,
-    obliquity_mapping, saastamoinen_zenith_hydrostatic, saastamoinen_zenith_wet, vmf1_mapping,
-    vmf3_mapping,
+    KlobucharError, gmf_mapping, ionospheric_mapping_factor, klobuchar_iono_delay,
+    klobuchar_reference_frequency, niell_mapping, obliquity_mapping,
+    saastamoinen_zenith_hydrostatic, saastamoinen_zenith_wet, vmf1_mapping, vmf3_mapping,
 };
 pub use rtcm::{
     ClockCorrection, DecodeError, Frame, Message, OrbitCorrection, RtcmDecoder, SsrClockBlock,

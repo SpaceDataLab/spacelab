@@ -122,9 +122,9 @@ use spacelab_frames::{
 use spacelab_geomagnetism::igrf::field_ecef as igrf_field_ecef;
 use spacelab_gnss::higher_order_iono::second_order_group_delay_geodetic as gnss_hoi2;
 use spacelab_gnss::{
-    FrequencyPair, GeometryFreeDetector, GnssSystem, PolynomialFitDetector, Reduction, SlipVerdict,
-    carrier_frequency as gnss_carrier_frequency, geometry_free as gnss_geometry_free,
-    graphic as gnss_graphic,
+    FrequencyPair, GeometryFreeDetector, GnssSystem, KlobucharError, PolynomialFitDetector,
+    Reduction, SlipVerdict, carrier_frequency as gnss_carrier_frequency,
+    geometry_free as gnss_geometry_free, graphic as gnss_graphic,
 };
 use spacelab_gnss::{
     ObsCode, ObsHeader, RinexObs, TimeSystem, VmfGrid, dop as gnss_dop,
@@ -4739,6 +4739,18 @@ const GNSS_BEIDOU: i32 = 2;
 const GNSS_QZSS: i32 = 3;
 const GNSS_NAVIC: i32 = 4;
 
+/// An `sl_gnss_system` tag as the constellation it names; `None` for a tag outside the enum.
+const fn gnss_system(tag: i32) -> Option<GnssSystem> {
+    match tag {
+        GNSS_GPS => Some(GnssSystem::Gps),
+        GNSS_GALILEO => Some(GnssSystem::Galileo),
+        GNSS_BEIDOU => Some(GnssSystem::Beidou),
+        GNSS_QZSS => Some(GnssSystem::Qzss),
+        GNSS_NAVIC => Some(GnssSystem::Navic),
+        _ => None,
+    }
+}
+
 /// `sl_gnss_state`: one satellite's broadcast position and velocity, with what identifies it.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -5338,19 +5350,25 @@ pub unsafe extern "C" fn sl_igrf_field_ecef(
 
 // ── Ionosphere ────────────────────────────────────────────────────────────────────────────────
 
-/// The broadcast (Klobuchar) L1 ionospheric slant delay, metres.
+/// The broadcast (Klobuchar) ionospheric slant delay at `frequency_hz`, metres.
+///
+/// `system`, an `sl_gnss_system`, is the constellation that broadcast `alpha` and `beta`: it fixes
+/// the carrier the delay is referred to, L1 for GPS and QZSS and L5 for NavIC, and the delay is
+/// scaled from there by `(f_ref/f)^2`.
 ///
 /// # Safety
 /// `alpha` and `beta` are each readable for four `double`; `out_metres` is writable for one.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sl_klobuchar_iono_delay(
+    system: i32,
     alpha: *const f64,
     beta: *const f64,
     latitude_rad: f64,
     longitude_rad: f64,
     elevation_rad: f64,
     azimuth_rad: f64,
-    gps_seconds_of_day: f64,
+    seconds_of_day: f64,
+    frequency_hz: f64,
     out_metres: *mut f64,
 ) -> i32 {
     guard(|| {
@@ -5360,20 +5378,38 @@ pub unsafe extern "C" fn sl_klobuchar_iono_delay(
                 "sl_klobuchar_iono_delay: null pointer",
             );
         }
+        let Some(system) = gnss_system(system) else {
+            return fail(
+                SL_ERR_INVALID_ARGUMENT,
+                format!("sl_klobuchar_iono_delay: {system} is not an sl_gnss_system"),
+            );
+        };
         // SAFETY: the caller states each coefficient array is readable for four doubles.
         let (a, b) = unsafe { (*alpha.cast::<[f64; 4]>(), *beta.cast::<[f64; 4]>()) };
-        let delay = gnss_klobuchar(
+        match gnss_klobuchar(
+            system,
             a,
             b,
             latitude_rad,
             longitude_rad,
             elevation_rad,
             azimuth_rad,
-            gps_seconds_of_day,
-        );
-        // SAFETY: checked non-null just above.
-        unsafe { *out_metres = delay };
-        SL_OK
+            seconds_of_day,
+            frequency_hz,
+        ) {
+            Ok(delay) => {
+                // SAFETY: checked non-null just above.
+                unsafe { *out_metres = delay };
+                SL_OK
+            }
+            Err(e @ KlobucharError::NoKlobuchar(_)) => {
+                fail(SL_ERR_DOMAIN, format!("sl_klobuchar_iono_delay: {e}"))
+            }
+            Err(e @ KlobucharError::NonPositiveFrequency) => fail(
+                SL_ERR_INVALID_ARGUMENT,
+                format!("sl_klobuchar_iono_delay: {e}"),
+            ),
+        }
     })
 }
 
@@ -18452,6 +18488,7 @@ mod tests {
         // SAFETY: both coefficient arrays are live locals of four doubles; `night` is a local.
         let status = unsafe {
             sl_klobuchar_iono_delay(
+                GNSS_GPS,
                 alpha.as_ptr(),
                 beta.as_ptr(),
                 0.0,
@@ -18459,6 +18496,7 @@ mod tests {
                 core::f64::consts::FRAC_PI_2,
                 0.0,
                 0.0,
+                spacelab_gnss::combinations::L1_HZ,
                 &raw mut night,
             )
         };
@@ -18472,6 +18510,64 @@ mod tests {
             (night - 5e-9 * C * obliquity).abs() < 1e-6,
             "with zero coefficients only the 5 ns floor times F is left, not {night} m"
         );
+
+        // The reference carrier crosses the boundary (rule 26, the scalar path's gate): a NavIC set
+        // at L5 is the Rust function's value to the bit and the GPS reading of the same set at L1,
+        // at L1 it is gamma_51 = 13225/23716 of that, and the refusals keep their status.
+        {
+            use spacelab_gnss::combinations::{L1_HZ, L5_HZ};
+            let p = |k: f64, e: i32| k * 2.0_f64.powi(e);
+            let alpha = [p(45.0, -30), p(35.0, -27), p(-52.0, -24), p(16.0, -24)];
+            let beta = [p(82.0, 11), p(22.0, 14), p(-127.0, 16), p(127.0, 16)];
+            let (lat, lon, el, az, sod) = (29.0 / 128.0, 173.0 / 128.0, 0.75, 2.5, 31_000.0);
+            let call = |system: i32, f: f64, out: &mut f64| {
+                // SAFETY: both coefficient arrays are live locals of four doubles; `out` is a local.
+                unsafe {
+                    sl_klobuchar_iono_delay(
+                        system,
+                        alpha.as_ptr(),
+                        beta.as_ptr(),
+                        lat,
+                        lon,
+                        el,
+                        az,
+                        sod,
+                        f,
+                        out,
+                    )
+                }
+            };
+            let (mut l5, mut l1, mut gps) = (0.0, 0.0, 0.0);
+            assert_eq!(call(GNSS_NAVIC, L5_HZ, &mut l5), SL_OK, "{}", last_error());
+            assert_eq!(call(GNSS_NAVIC, L1_HZ, &mut l1), SL_OK, "{}", last_error());
+            assert_eq!(call(GNSS_GPS, L1_HZ, &mut gps), SL_OK, "{}", last_error());
+            let rust = gnss_klobuchar(GnssSystem::Navic, alpha, beta, lat, lon, el, az, sod, L5_HZ);
+            assert_eq!(Ok(l5), rust);
+            assert_eq!(l5.to_bits(), gps.to_bits());
+            assert!(
+                (l1 / (13_225.0 / 23_716.0 * l5) - 1.0).abs() < 1e-15,
+                "{l1} vs {l5}"
+            );
+            let mut untouched = -1.0;
+            assert_eq!(call(GNSS_GALILEO, L1_HZ, &mut untouched), SL_ERR_DOMAIN);
+            assert!(last_error().contains("Galileo"), "{}", last_error());
+            assert_eq!(call(GNSS_BEIDOU, L1_HZ, &mut untouched), SL_ERR_DOMAIN);
+            assert_eq!(
+                call(GNSS_NAVIC, 0.0, &mut untouched),
+                SL_ERR_INVALID_ARGUMENT
+            );
+            assert_eq!(
+                call(GNSS_NAVIC, f64::NAN, &mut untouched),
+                SL_ERR_INVALID_ARGUMENT
+            );
+            assert_eq!(call(7, L1_HZ, &mut untouched), SL_ERR_INVALID_ARGUMENT);
+            assert!(
+                last_error().contains("not an sl_gnss_system"),
+                "{}",
+                last_error()
+            );
+            assert_eq!(untouched, -1.0, "a refusal wrote its out-parameter");
+        }
 
         // The obliquity factor is 1 at the zenith and grows towards the horizon, monotonically.
         let zenith = sl_ionospheric_mapping_factor(core::f64::consts::FRAC_PI_2, 350e3, RE_EARTH);

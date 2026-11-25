@@ -870,6 +870,29 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         skip "maxima tide_step2_iers.mac" "tools/fetch-specs.sh output and pdftotext"
     fi
 
+    # NavIC's SPS interface document, ISRO-IRNSS-ICD-SPS-1.1, pinned the same way. Its front matter
+    # forbids copying it, so it is never committed: its text is written beside it in the git-ignored
+    # `data/specs` and the derivation reads search keys against it.
+    navic_icd=../data/specs/isro-navic-sps-icd.321573a6.pdf
+    if [ -f "$navic_icd" ] && command -v pdftotext >/dev/null; then
+        if ! printf '%s  %s\n' \
+            321573a6903ebc5d7392a1baa26795ccd6997100449cb79836f849498ea8216f "$navic_icd" \
+            | sha256sum --check --quiet >/dev/null 2>&1; then
+            bad "maxima navic_klobuchar_icd.mac" "the NavIC SPS ICD snapshot is not the pinned file"
+        else
+            pdftotext -layout "$navic_icd" "${navic_icd%.pdf}.txt"
+            out=$(macf navic_klobuchar_icd.mac)
+            holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
+            if [ "$holds" -eq 5 ] && printf '%s' "$out" | grep -q '^DONE'; then
+                ok "maxima navic_klobuchar_icd.mac: the ICD's Table 17 scale is IS-GPS-200's, NavIC's Klobuchar delay is referred to L5, and klobuchar_at_reference has Appendix H's constants both ways round"
+            else
+                bad "maxima navic_klobuchar_icd.mac" "expected 5 checks to hold, found $holds"
+            fi
+        fi
+    else
+        skip "maxima navic_klobuchar_icd.mac" "tools/fetch-specs.sh output and pdftotext"
+    fi
+
     out=$(macf sgp4_regime.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9]\) holds:')
     if [ "$holds" -eq 2 ] && printf '%s' "$out" | grep -q '^DONE'; then
@@ -1489,6 +1512,7 @@ if have maxima; then
         bad "maxima geopotential_degree70.mac" "expected 2 checks to hold, found $holds"
     fi
     mac_zeros gnss_combinations.mac 32 "IF, GF, wide/narrow-lane and MW combinations as exact rationals of the ICD carriers"
+    mac_zeros klobuchar_reference.mac 15 "gamma_51 = (115/154)^2 exactly, the carrier scale from the dispersion law, NavIC's Appendix H and the shipped chain against IS-GPS-200 stage by stage"
     mac_zeros gnss_cycle_slip.mac 13 "the slip predictor is the least-squares polynomial extrapolation"
     mac_zeros gnss_dop.mac 31 "DOP from the cofactor traces; closed forms for zenith-plus-ring geometries"
     mac_zeros h3_definition.mac 13 "the H3 grid by its definition: an icosahedron's faces, axes on the vertices, u = (3 - sqrt 5)/2, the aperture-7 turn, 2 + 120 7^r cells, 24 cell centres, exact and in Arb balls"
@@ -1587,7 +1611,7 @@ if have gp; then
         chi_square_quantiles robust_weights se3_exponential log1p_expm1_sites particle_resampling sampling_transforms \
         conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \
         hull_delaunay spherical_triangle igrf_synthesis geomagnetic_dipole attitude_control gmst82 \
-        cio_rotation gnss_combinations gpt3_evaluation gps_broadcast_orbit glonass_pz90_motion slr_two_way_range \
+        cio_rotation gnss_combinations klobuchar_reference gpt3_evaluation gps_broadcast_orbit glonass_pz90_motion slr_two_way_range \
         kronrod_g7k15 cll_panel nequick_fourier gauss2_richardson swath_sphere observation_geometry angle_from_vectors \
         stereo_disparity pinhole_collinearity rpc_bias_affine ortho_bilinear_dem \
         ray_ellipsoid_geolocation gnomonic_tan_plate quad_hash source_moments \

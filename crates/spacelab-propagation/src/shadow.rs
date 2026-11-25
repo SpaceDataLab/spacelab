@@ -26,7 +26,7 @@
 //!
 //! # Checked against
 //!
-//! `tests/shadow_lens.rs`: on 184 exact binary64 inputs — seven radius pairs from a 400 km orbit's
+//! `tests/shadow_lens.rs`: on 183 exact binary64 inputs — seven radius pairs from a 400 km orbit's
 //! Earth (`r_E/r_S = 264`) to an occulter inside the Sun's disc, both tangencies to the last double,
 //! `d → 0`, and 13 points off that grid — [`lens_area`] against `derivations/shadow_lens.gp`'s
 //! 200-digit values, each inside an Arb ball (`derivations/shadow_lens_arb.c`). The bound is

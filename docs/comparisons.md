@@ -169,7 +169,7 @@ root-mean-square distance over them.
 | Orekit | 13.1.7 | box-wing drag with lift, Orekit's lift one incidence factor short (F89) | relative | 1 | 1.134e-01 | 1.134e-01 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |
 | Orekit | 13.1.7 | box-wing SRP | relative | 5 | 1.278e-15 | 8.422e-16 | `crates/spacelab-propagation/src/spacecraft.rs::box_wing_distance_to_orekit` |
 | Orekit | 13.1.7 | DSST zonal eccentricity cut over 1134 states | powers | 1134 | 0.000e+00 | 0.000e+00 | `crates/spacelab-propagation/tests/dsst_truncation.rs::the_eccentricity_truncation_order_distance_to_orekit` |
-| Orekit | 13.1.7 | eclipse masking ratio ν, Orekit's arrangement against the reference | 1 | 171 | 6.510e-07 | 7.041e-08 | `crates/spacelab-propagation/tests/shadow_lens.rs::orekit_masking_ratio_distance_to_the_reference` |
+| Orekit | 13.1.7 | eclipse masking ratio ν, Orekit's arrangement against the reference | 1 | 170 | 6.510e-07 | 7.062e-08 | `crates/spacelab-propagation/tests/shadow_lens.rs::orekit_masking_ratio_distance_to_the_reference` |
 | scipy | 1.16.2 | WAM-IPE density at grid nodes | relative | 6 | 1.332e-15 | 8.612e-16 | `crates/spacelab-propagation/tests/wam_ipe_product.rs::the_noaa_file_distance_to_scipy` |
 | scipy | 1.16.2 | WAM-IPE density off the grid | relative | 4 | 3.553e-15 | 1.776e-15 | `crates/spacelab-propagation/tests/wam_ipe_product.rs::the_noaa_file_distance_to_scipy` |
 | pyorbital | not recorded | scan roll and pitch, 11 instruments | rad | 1512 | 2.220e-16 | 1.221e-17 | `crates/spacelab-sensors/tests/pyorbital_geoloc.rs::scan_catalogue_distance_to_pyorbital` |

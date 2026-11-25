@@ -192,7 +192,8 @@ mod tests {
             t.v_inf_arrival
         );
         // The Lambert departure velocity, propagated by tof, reaches Mars's position.
-        let (rf, _) = propagate(r1, t.v_departure, MU_SUN_KM, tof);
+        let (rf, _) = propagate(r1, t.v_departure, MU_SUN_KM, tof)
+            .expect("the universal Kepler solve settles");
         let miss = ((rf.x - r2.x).powi(2) + (rf.y - r2.y).powi(2) + (rf.z - r2.z).powi(2)).sqrt();
         assert!(miss < 1.0, "transfer arc missed Mars by {miss:.3e} km");
     }

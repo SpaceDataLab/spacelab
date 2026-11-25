@@ -55,7 +55,8 @@ fn a_2026_mars_launch_window_has_physical_energy() {
         if tr.c3 < best_c3 {
             best_c3 = tr.c3;
             // Self-consistency of the best leg: the departure velocity reaches Mars.
-            let (rf, _) = spacelab_astro::propagate(e.position, tr.v_departure, MU_SUN, tof);
+            let (rf, _) = spacelab_astro::propagate(e.position, tr.v_departure, MU_SUN, tof)
+                .expect("the universal Kepler solve settles");
             best_miss = ((rf.x - m.position.x).powi(2)
                 + (rf.y - m.position.y).powi(2)
                 + (rf.z - m.position.z).powi(2))

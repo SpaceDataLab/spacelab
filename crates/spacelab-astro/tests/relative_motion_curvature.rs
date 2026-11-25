@@ -80,7 +80,8 @@ fn errors(along_track: f64, frac: f64, eccentricity: f64, cross_track: f64) -> (
     let a = 1.0 / (2.0 / CHIEF_RADIUS - speed * speed / MU);
     let n = (MU / (a * a * a)).sqrt();
 
-    let (lead_r, lead_v) = propagate(chief_r, chief_v, MU, along_track / speed);
+    let (lead_r, lead_v) = propagate(chief_r, chief_v, MU, along_track / speed)
+        .expect("the universal Kepler solve settles");
     let tilt = cross_track / CHIEF_RADIUS;
     let (sin, cos) = (tilt.sin(), tilt.cos());
     let rotate = |v: Vec3| Vec3::new(v.x, v.y * cos - v.z * sin, v.y * sin + v.z * cos);
@@ -89,8 +90,9 @@ fn errors(along_track: f64, frac: f64, eccentricity: f64, cross_track: f64) -> (
     let s0 = relative_lvlh_state(chief_r, chief_v, deputy_r - chief_r, deputy_v - chief_v, n);
 
     let dt = frac * TAU / n;
-    let (cr, cv) = propagate(chief_r, chief_v, MU, dt);
-    let (dr, dv) = propagate(deputy_r, deputy_v, MU, dt);
+    let (cr, cv) = propagate(chief_r, chief_v, MU, dt).expect("the universal Kepler solve settles");
+    let (dr, dv) =
+        propagate(deputy_r, deputy_v, MU, dt).expect("the universal Kepler solve settles");
     let truth = relative_lvlh_state(cr, cv, dr - cr, dv - cv, n);
 
     let gap = |p: [f64; 6]| {

@@ -133,7 +133,8 @@ pub enum IodError {
     /// Three position vectors that are collinear, or two that coincide, carry no orbit.
     Degenerate,
     /// [`lambert`](fn@crate::lambert) could not connect the trial positions — a 0° or 180° transfer, or
-    /// a non-positive time of flight.
+    /// a non-positive time of flight — or the arc it returned could not be carried to the middle
+    /// epoch ([`KeplerError`](crate::KeplerError)).
     LambertFailed,
     /// Newton did not converge in the iteration budget. The best residual reached is reported, in
     /// radians of angular miss at the middle sighting, so the caller can tell a hard failure from a
@@ -605,7 +606,8 @@ fn angular_miss(
     let tof = sightings[2].time - sightings[0].time;
     let (v1, _) = lambert(r1, r3, tof, mu, prograde).ok_or(IodError::LambertFailed)?;
 
-    let (r2, _) = kepler::propagate(r1, v1, mu, sightings[1].time - sightings[0].time);
+    let (r2, _) = kepler::propagate(r1, v1, mu, sightings[1].time - sightings[0].time)
+        .map_err(|_| IodError::LambertFailed)?;
     let slant = r2 - sightings[1].observer;
     let distance = slant.norm();
     if distance == 0.0 {
@@ -665,8 +667,8 @@ pub fn gooding(
         let f = [miss[0] - target[0], miss[1] - target[1]];
         residual = libm::hypot(f[0], f[1]);
         if residual < 1e-13 {
-            let (r2, v2) = kepler::propagate(r1, v1, mu, sightings[1].time - sightings[0].time);
-            return Ok((r2, v2));
+            return kepler::propagate(r1, v1, mu, sightings[1].time - sightings[0].time)
+                .map_err(|_| IodError::LambertFailed);
         }
 
         let h = 1e-6 * scale;
@@ -747,8 +749,9 @@ mod tests {
     /// there.
     fn synthesise(r0: Vec3, v0: Vec3, observer: Vec3, arc: f64) -> ([Sighting; 3], Vec3, Vec3) {
         let times = [-0.5 * arc, 0.0, 0.5 * arc];
-        let states: [(Vec3, Vec3); 3] =
-            core::array::from_fn(|i| kepler::propagate(r0, v0, MU, times[i]));
+        let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+            kepler::propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+        });
         let sightings = core::array::from_fn(|i| {
             let line = states[i].0 - observer;
             Sighting {
@@ -1014,7 +1017,9 @@ mod tests {
             let r = if i == 1 {
                 r2
             } else {
-                kepler::propagate(r2, v2, 1.0, sighting.time - times[1]).0
+                kepler::propagate(r2, v2, 1.0, sighting.time - times[1])
+                    .expect("the universal Kepler solve settles")
+                    .0
             };
             let line = r - sighting.observer;
             let miss = line.cross(sighting.line_of_sight).norm() / line.norm();
@@ -1042,8 +1047,9 @@ mod tests {
         for (fraction, wide) in [(0.20, true), (0.001, false)] {
             let arc = fraction * period;
             let times = [-0.5 * arc, 0.0, 0.5 * arc];
-            let states: [(Vec3, Vec3); 3] =
-                core::array::from_fn(|i| kepler::propagate(r0, v0, MU, times[i]));
+            let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+                kepler::propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+            });
             let recovered = if wide {
                 gibbs(states[0].0, states[1].0, states[2].0, MU).unwrap()
             } else {
@@ -1194,8 +1200,10 @@ mod tests {
     #[test]
     fn gibbs_refuses_positions_that_are_not_one_orbit() {
         let (r0, v0, _) = reference();
-        let (r1, _) = kepler::propagate(r0, v0, MU, -600.0);
-        let (r3, _) = kepler::propagate(r0, v0, MU, 600.0);
+        let (r1, _) =
+            kepler::propagate(r0, v0, MU, -600.0).expect("the universal Kepler solve settles");
+        let (r3, _) =
+            kepler::propagate(r0, v0, MU, 600.0).expect("the universal Kepler solve settles");
         // Tip the middle position a long way out of the plane.
         let normal = r0.cross(v0);
         let tilted = r0 + normal.scale(0.3 * r0.norm() / normal.norm());
@@ -1247,8 +1255,10 @@ mod tests {
     #[test]
     fn the_coplanarity_screen_is_measured_from_both_sides() {
         let (r0, v0, _) = reference();
-        let (r1, _) = kepler::propagate(r0, v0, MU, -600.0);
-        let (r3, _) = kepler::propagate(r0, v0, MU, 600.0);
+        let (r1, _) =
+            kepler::propagate(r0, v0, MU, -600.0).expect("the universal Kepler solve settles");
+        let (r3, _) =
+            kepler::propagate(r0, v0, MU, 600.0).expect("the universal Kepler solve settles");
         let normal = r1.cross(r3);
         let unit = normal.scale(1.0 / normal.norm());
         // `sin` of the out-of-plane angle is the tilt itself for a unit-normal displacement of this
@@ -1286,8 +1296,10 @@ mod tests {
     #[test]
     fn herrick_gibbs_refuses_epochs_that_do_not_advance() {
         let (r0, v0, _) = reference();
-        let (r1, _) = kepler::propagate(r0, v0, MU, -10.0);
-        let (r3, _) = kepler::propagate(r0, v0, MU, 10.0);
+        let (r1, _) =
+            kepler::propagate(r0, v0, MU, -10.0).expect("the universal Kepler solve settles");
+        let (r3, _) =
+            kepler::propagate(r0, v0, MU, 10.0).expect("the universal Kepler solve settles");
         assert_eq!(
             herrick_gibbs(r1, r0, r3, 0.0, 0.0, 10.0, MU),
             Err(IodError::NonMonotonicEpochs)
@@ -1401,8 +1413,8 @@ mod tests {
         // both of these stall around 0.96 rad, three quarters of a right angle away from the
         // observed direction.
         for (seed, pinned) in [
-            ((1.0e4_f64, 1.0e4), 9.572_028_909_268_555e-1),
-            ((1.0e5, 1.0e5), 9.601_328_172_703_223e-1),
+            ((1.0e4_f64, 1.0e4), 9.572_028_909_268_546e-1),
+            ((1.0e5, 1.0e5), 9.601_328_172_703_233e-1),
             ((1.0e7, 1.0e5), 7.858_533_458_287_102e-1),
         ] {
             match gooding(&sightings, MU, false, seed) {
@@ -1524,8 +1536,9 @@ mod tests {
                 ],
             ),
         ] {
-            let states: [(Vec3, Vec3); 3] =
-                core::array::from_fn(|i| kepler::propagate(r0, v0, MU, times[i]));
+            let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+                kepler::propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+            });
             let observers: [Vec3; 3] = core::array::from_fn(|i| {
                 if moving {
                     station(base, times[i])

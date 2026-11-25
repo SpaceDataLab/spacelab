@@ -144,8 +144,33 @@ fn comb(a: f64, u: Vec3, b: f64, w: Vec3) -> Vec3 {
     Vec3::new(a * u.x + b * w.x, a * u.y + b * w.y, a * u.z + b * w.z)
 }
 
+/// Why [`propagate`] returned no state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeplerError {
+    /// The universal Kepler equation was not solved: its residual did not change sign within a
+    /// hundred doublings of the bracket, or the safeguarded iteration did not settle within its
+    /// hundred steps. A non-finite input, `r = 0` or `μ ≤ 0` makes the residual not a number and
+    /// ends here; so does a span whose hyperbolic anomaly overflows `cosh`. No other input of
+    /// `the_solver_settles_on_every_conic_in_every_unit_system`'s sweep reaches it: that is a
+    /// measurement over the sweep, not a bound.
+    NoConvergence,
+}
+
+impl core::fmt::Display for KeplerError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::NoConvergence => write!(
+                f,
+                "the universal Kepler equation was not solved within the solver's step caps"
+            ),
+        }
+    }
+}
+
+impl core::error::Error for KeplerError {}
+
 /// The universal anomaly `χ` solving Kepler's equation for the span `dt`, and the number of solver
-/// iterations it took.
+/// iterations it took, or [`KeplerError::NoConvergence`] when the loop ends on its cap instead.
 ///
 /// The count is not diagnostics. The loop below is safeguarded, so its answer does not depend on the
 /// initial guess, on the Newton step, or on which steps get accepted --- corrupt any of them and
@@ -153,17 +178,32 @@ fn comb(a: f64, u: Vec3, b: f64, w: Vec3) -> Vec3 {
 /// *cost*, and the count is the only place it shows: it is what
 /// `the_solver_reaches_its_root_by_newton_and_not_by_bisection` asserts, and without it two dozen
 /// mutations of this function are indistinguishable from the function.
-pub(crate) fn universal_anomaly(r: Vec3, v: Vec3, mu: f64, dt: f64) -> (f64, u32) {
+///
+/// The cost is bounded only because a Newton step that does not shrink fast enough is replaced by a
+/// bisection. Before that rule a step inside the bracket was always taken, and above the root of a
+/// hyperbola `F` grows as `e^{√−α·χ}`, so Newton walks down by about `1/√−α` per step whatever the
+/// distance: a 252 km/s heliocentric arc started 77 times above its root used all hundred steps,
+/// stopped 0.29 % above it, and `propagate` missed by 13 719 km without a word.
+pub(crate) fn universal_anomaly(
+    r: Vec3,
+    v: Vec3,
+    mu: f64,
+    dt: f64,
+) -> Result<(f64, u32), KeplerError> {
     let r0 = r.norm();
     let v0 = v.norm();
-    let vr0 = r.dot(v) / r0;
     let alpha = 2.0 / r0 - v0 * v0 / mu; // reciprocal semi-major axis, 1/a
     let sqmu = libm::sqrt(mu);
 
     // The hyperbolic guess is a logarithm of a multiple of `dt`, so `dt = 0` is outside its domain:
     // there it is `−∞`, and the bracket and the Newton step below carry `±∞` and NaN from it. The
     // elliptic branch gives `0` there, which is the exact root, `F(0) = −√μ·dt = 0`.
-    let guess = if alpha < -1e-9 && dt != 0.0 {
+    //
+    // The split is on `α·r₀ = 2 − r₀v₀²/μ`, a pure number. On `α` itself, a reciprocal length, the
+    // same `1e-9` sent a hyperbola to the elliptic guess when `|a| > 1e9 km` in kilometres but
+    // already when `|a| > 1e6 km` in metres, which about the Sun is every hyperbola slower than
+    // 364 km/s at infinity: all of them took `√μ·|α|·dt`, 77 times the root on a 252 km/s arc.
+    let guess = if alpha * r0 < -1e-9 && dt != 0.0 {
         // Hyperbolic guess: a = 1/alpha < 0.
         let a = 1.0 / alpha;
         let s = if dt >= 0.0 { 1.0 } else { -1.0 };
@@ -173,37 +213,73 @@ pub(crate) fn universal_anomaly(r: Vec3, v: Vec3, mu: f64, dt: f64) -> (f64, u32
             )
     } else {
         // Elliptic guess `√μ·α·dt`, which for `α ≥ 0` is this expression bit for bit, and the
-        // near-parabolic fallback for the sliver below `1e-9`.
+        // near-parabolic fallback for the sliver `−1e-9 ≤ α·r₀ < 0`.
         sqmu * libm::fabs(alpha) * dt
     };
+    universal_anomaly_from(r, v, mu, dt, guess)
+}
+
+/// [`universal_anomaly`]'s bracket and safeguarded loop, started from `guess` instead of from its
+/// own. Apart so that a test can hand the loop the guess it once crawled from: with the guess fixed
+/// nothing in the domain starts it far above a root, and the rule that stops the crawl is otherwise
+/// exercised only by states no test reaches on purpose.
+fn universal_anomaly_from(
+    r: Vec3,
+    v: Vec3,
+    mu: f64,
+    dt: f64,
+    guess: f64,
+) -> Result<(f64, u32), KeplerError> {
+    let r0 = r.norm();
+    let v0 = v.norm();
+    let vr0 = r.dot(v) / r0;
+    let alpha = 2.0 / r0 - v0 * v0 / mu;
+    let sqmu = libm::sqrt(mu);
 
     // The universal Kepler equation as a root problem in `χ`. Its derivative is `r(χ)`, the radius,
     // which is positive on every conic --- so `F` is strictly increasing, its root is unique, and a
     // bracket around it can be walked out and then never lost.
-    let kepler = |chi: f64| -> (f64, f64) {
+    //
+    // The third value is the floor of an `f64` evaluation of `F`, `8ε` times the sum of its terms'
+    // magnitudes: the bound `the_universal_anomaly_is_the_root_of_kepler_s_equation` holds the
+    // solver to. Inside it the sign of `F` is round-off, not information.
+    let kepler = |chi: f64| -> (f64, f64, f64) {
         let z = alpha * chi * chi;
         let (c, s) = stumpff(z);
-        let f =
-            (r0 * vr0 / sqmu) * chi * chi * c + (1.0 - alpha * r0) * chi * chi * chi * s + r0 * chi
-                - sqmu * dt;
+        let (t1, t2, t3, t4) = (
+            (r0 * vr0 / sqmu) * chi * chi * c,
+            (1.0 - alpha * r0) * chi * chi * chi * s,
+            r0 * chi,
+            sqmu * dt,
+        );
+        let f = t1 + t2 + t3 - t4;
+        let floor = 8.0
+            * f64::EPSILON
+            * (libm::fabs(t1) + libm::fabs(t2) + libm::fabs(t3) + libm::fabs(t4));
         let fp = (r0 * vr0 / sqmu) * chi * (1.0 - z * s) + (1.0 - alpha * r0) * chi * chi * c + r0;
-        (f, fp)
+        (f, fp, floor)
     };
 
     // Bracket the root. `F(0) = −√μ·dt`, so the root lies on the side of zero that `dt` points to;
     // double outward from the guess until `F` changes sign. `F` grows without bound on both
-    // branches, so a hundred doublings from a magnitude of at least one cannot fail to bracket.
+    // branches, so for finite `F` a hundred doublings from a magnitude of at least one bracket any
+    // root below `2¹⁰⁰`. A NaN `F` never compares, and then no bracket exists to solve in.
     let dir = if dt >= 0.0 { 1.0 } else { -1.0 };
     let mut inner = 0.0;
     let mut outer = dir * f64::max(libm::fabs(guess), 1.0);
     let mut steps = 0;
+    let mut bracketed = false;
     for _ in 0..100 {
         steps += 1;
         if dir * kepler(outer).0 >= 0.0 {
+            bracketed = true;
             break;
         }
         inner = outer;
         outer *= 2.0;
+    }
+    if !bracketed {
+        return Err(KeplerError::NoConvergence);
     }
     let (mut lo, mut hi) = (f64::min(inner, outer), f64::max(inner, outer));
 
@@ -220,10 +296,24 @@ pub(crate) fn universal_anomaly(r: Vec3, v: Vec3, mu: f64, dt: f64) -> (f64, u32
     // interval as well as one that lands inside it. The stop is the fixed point and not a tolerance,
     // for the same reason as in `lambert`: a step floor stops short of the root by whatever that
     // floor happens to be worth in the state.
+    //
+    // Keeping the bracket is not enough to end the loop: a Newton step inside it is not a step that
+    // shrinks it. Above a hyperbola's root `F'/F → √−α`, so Newton's step tends to the constant
+    // `1/√−α` and the iterates descend arithmetically, never leaving the bracket and never
+    // bisecting it. So a Newton step is taken only if it is at most half the step taken two
+    // iterations before; otherwise the bracket is bisected (`rtsafe`, Press et al., *Numerical
+    // Recipes*, 3rd ed., §9.4). Where Newton converges its steps shrink faster than that and the
+    // rule never fires; where it crawls, every other iteration at least halves the bracket.
+    //
+    // The rule holds only while `|F|` is above its floor. `rtsafe` ends on a step tolerance before
+    // it gets there; this loop ends on the fixed point, so it walks the last few ulps on steps that
+    // are round-off and need not shrink. Bisecting there throws the root away: with `lo` still at
+    // zero, a converged `e = 5` arc was sent from `χ = 2.41` to `1.20` and took 41 steps for 11.
     let mut chi = guess.clamp(lo, hi);
+    let (mut last, mut before_last) = (hi - lo, hi - lo);
     for _ in 0..100 {
         steps += 1;
-        let (f, fp) = kepler(chi);
+        let (f, fp, floor) = kepler(chi);
         if f < 0.0 {
             lo = chi;
         } else {
@@ -241,9 +331,10 @@ pub(crate) fn universal_anomaly(r: Vec3, v: Vec3, mu: f64, dt: f64) -> (f64, u32
         )]
         let settled = newton == chi;
         if settled {
-            break;
+            return Ok((chi, steps));
         }
-        let next = if newton > lo && newton < hi {
+        let crawling = 2.0 * libm::fabs(newton - chi) > before_last && libm::fabs(f) > floor;
+        let next = if newton > lo && newton < hi && !crawling {
             newton
         } else {
             f64::midpoint(lo, hi)
@@ -259,11 +350,13 @@ pub(crate) fn universal_anomaly(r: Vec3, v: Vec3, mu: f64, dt: f64) -> (f64, u32
         )]
         let bottomed = next == chi;
         if bottomed {
-            break;
+            return Ok((chi, steps));
         }
+        before_last = last;
+        last = libm::fabs(next - chi);
         chi = next;
     }
-    (chi, steps)
+    Err(KeplerError::NoConvergence)
 }
 
 /// Propagate a two-body state `(r, v)` under gravitational parameter `mu` by time `dt`, returning
@@ -271,6 +364,12 @@ pub(crate) fn universal_anomaly(r: Vec3, v: Vec3, mu: f64, dt: f64) -> (f64, u32
 ///
 /// The universal anomaly comes from `universal_anomaly`; the state is then reconstructed from the
 /// Lagrange coefficients, whose identity `f·ġ − ḟ·g = 1` the tests check.
+///
+/// # Errors
+///
+/// [`KeplerError::NoConvergence`] when the universal Kepler equation is not solved: a non-finite
+/// input, `r = 0`, `μ ≤ 0`, or a hyperbolic span long enough to overflow `cosh`. A state is never
+/// returned from an unsettled solve.
 ///
 /// # Accuracy
 ///
@@ -281,13 +380,12 @@ pub(crate) fn universal_anomaly(r: Vec3, v: Vec3, mu: f64, dt: f64) -> (f64, u32
 /// against exact periodicity and pins it to a small multiple of the floor. Callers needing better
 /// over long spans must carry the epoch in something wider than one double, not ask this function
 /// for more.
-#[must_use]
-pub fn propagate(r: Vec3, v: Vec3, mu: f64, dt: f64) -> (Vec3, Vec3) {
+pub fn propagate(r: Vec3, v: Vec3, mu: f64, dt: f64) -> Result<(Vec3, Vec3), KeplerError> {
     let r0 = r.norm();
     let v0 = v.norm();
     let alpha = 2.0 / r0 - v0 * v0 / mu;
     let sqmu = libm::sqrt(mu);
-    let (chi, _) = universal_anomaly(r, v, mu, dt);
+    let (chi, _) = universal_anomaly(r, v, mu, dt)?;
 
     let z = alpha * chi * chi;
     let (c, s) = stumpff(z);
@@ -300,14 +398,18 @@ pub fn propagate(r: Vec3, v: Vec3, mu: f64, dt: f64) -> (Vec3, Vec3) {
     let lgd = 1.0 - chi * chi / rn * c;
     let v_new = comb(lfd, r, lgd, v);
 
-    (r_new, v_new)
+    Ok((r_new, v_new))
 }
 
 #[cfg(test)]
 mod tests {
     // The references below are carried at the precision they were computed to, so that
     // regenerating one is a copy rather than a rounding decision.
-    #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
+    #![allow(
+        clippy::excessive_precision,
+        clippy::expect_used,
+        clippy::unreadable_literal
+    )]
 
     /// (G3) At `dt = 0` the root of the universal Kepler equation is `χ = 0` on every conic, so the
     /// Lagrange coefficients are `f = ġ = 1`, `g = ḟ = 0` and the state comes back bit for bit. The
@@ -321,8 +423,18 @@ mod tests {
             let k = speed / libm::sqrt(0.91);
             let v = Vec3::new(0.3 * k, 0.9 * k, 0.1 * k);
             for dt in [0.0, -0.0] {
-                assert_eq!(universal_anomaly(r, v, mu, dt).0, 0.0, "speed {speed}");
-                assert_eq!(propagate(r, v, mu, dt), (r, v), "speed {speed}");
+                assert_eq!(
+                    universal_anomaly(r, v, mu, dt)
+                        .expect("the universal Kepler solve settles")
+                        .0,
+                    0.0,
+                    "speed {speed}"
+                );
+                assert_eq!(
+                    propagate(r, v, mu, dt).expect("the universal Kepler solve settles"),
+                    (r, v),
+                    "speed {speed}"
+                );
             }
         }
     }
@@ -612,7 +724,8 @@ mod tests {
             let scale = MU_EARTH_KM / rp;
             for &k in &[1e-4, 1e-2, 1.0, 5.0, 50.0, 500.0] {
                 for dt in [k * tc, -k * tc] {
-                    let (rf, vf) = propagate(r, v, MU_EARTH_KM, dt);
+                    let (rf, vf) = propagate(r, v, MU_EARTH_KM, dt)
+                        .expect("the universal Kepler solve settles");
                     let de = (vf.dot(vf) / 2.0 - MU_EARTH_KM / rf.norm() - e0).abs();
                     let dh = (rf.cross(vf) - h0).norm();
                     assert!(
@@ -622,7 +735,8 @@ mod tests {
                     assert!(dh < 3e-12 * h0.norm(), "e {e} dt {dt:e}: h off by {dh:.3e}");
                     // Back again: the round trip has no truncation error of its own, so what is left
                     // is the two representation floors.
-                    let (rb, _) = propagate(rf, vf, MU_EARTH_KM, -dt);
+                    let (rb, _) = propagate(rf, vf, MU_EARTH_KM, -dt)
+                        .expect("the universal Kepler solve settles");
                     let back = (rb - r).norm();
                     let tol = 4096.0 * f64::EPSILON * (rf.norm() + dt.abs() * vf.norm());
                     assert!(
@@ -644,7 +758,7 @@ mod tests {
     /// evaluations it costs, and that is what this asserts.
     ///
     /// The budget is measured, not chosen, and it is two-sided. Over the nine conics and twelve spans
-    /// below the worst call takes 19 steps and the mean is 8.28, the hard end being the near-parabolic
+    /// below the worst call takes 19 steps and the mean is 8.26, the hard end being the near-parabolic
     /// arcs over hundreds of revolutions; bisection alone over the same brackets would need fifty to
     /// sixty. The floor matters as much: a one-sided budget passes when the counter stops counting,
     /// and `steps += 1` mutated to `steps *= 1` in either loop did exactly that until this asserted
@@ -653,10 +767,10 @@ mod tests {
     ///
     /// The margins are small on purpose. Every transcendental here goes through `libm`, a
     /// deterministic pure-Rust implementation, and every other operation is IEEE-754, so the counts
-    /// are reproducible bit for bit and there is nothing to pad against. Measured against the mutants
-    /// that survive the accuracy assertions, `< 8.5` is what separates them: corrupting the hyperbolic
-    /// guess costs 10.15 steps per call, its logarithm 8.72 or 9.32, its argument 8.81, and the
-    /// elliptic guess 8.86. A change that legitimately moves these numbers should move them here too.
+    /// are reproducible bit for bit and there is nothing to pad against. Measured against the guess's
+    /// mutants, `< 8.5` is what separates them: corrupting its logarithm costs 8.72 or 9.33 steps per
+    /// call, its argument 8.78 to 8.98, and the split on `α·r₀` turned into one on `α/r₀` 8.54. A
+    /// change that legitimately moves these numbers should move them here too.
     #[test]
     fn the_solver_reaches_its_root_by_newton_and_not_by_bisection() {
         let rp = 7000.0;
@@ -668,7 +782,8 @@ mod tests {
             let v = Vec3::new(0.0, vp * 0.6, vp * 0.8);
             for &k in &[1e-4, 1e-2, 1.0, 5.0, 50.0, 500.0] {
                 for dt in [k * tc, -k * tc] {
-                    let (_, steps) = universal_anomaly(r, v, MU_EARTH_KM, dt);
+                    let (_, steps) = universal_anomaly(r, v, MU_EARTH_KM, dt)
+                        .expect("the universal Kepler solve settles");
                     assert!(
                         steps >= 2,
                         "e {e}, dt {dt:e}: the solve reported {steps} steps"
@@ -728,7 +843,8 @@ mod tests {
             ),
         ] {
             for &(dt, want) in table {
-                let (rf, vf) = propagate(r, v, MU_EARTH_KM, dt);
+                let (rf, vf) =
+                    propagate(r, v, MU_EARTH_KM, dt).expect("the universal Kepler solve settles");
                 let want_r = Vec3::new(want[0], want[1], want[2]);
                 let want_v = Vec3::new(want[3], want[4], want[5]);
                 let acc = MU_EARTH_KM / (r.norm() * r.norm());
@@ -1065,7 +1181,8 @@ mod tests {
     fn matches_curtis_example_3_7() {
         let r = Vec3::new(7000.0, -12124.0, 0.0);
         let v = Vec3::new(2.6679, 4.6210, 0.0);
-        let (rf, vf) = propagate(r, v, MU_EARTH_KM, 3600.0);
+        let (rf, vf) =
+            propagate(r, v, MU_EARTH_KM, 3600.0).expect("the universal Kepler solve settles");
         let r_exp = Vec3::new(-3297.8, 7413.4, 0.0);
         let v_exp = Vec3::new(-8.2977, -0.96309, 0.0);
         let dr = (rf.x - r_exp.x).hypot(rf.y - r_exp.y);
@@ -1079,8 +1196,10 @@ mod tests {
     fn propagation_is_reversible() {
         let r = Vec3::new(6500.0, 900.0, 1200.0);
         let v = Vec3::new(-1.2, 7.0, 2.1);
-        let (rf, vf) = propagate(r, v, MU_EARTH_KM, 5400.0);
-        let (r0, v0) = propagate(rf, vf, MU_EARTH_KM, -5400.0);
+        let (rf, vf) =
+            propagate(r, v, MU_EARTH_KM, 5400.0).expect("the universal Kepler solve settles");
+        let (r0, v0) =
+            propagate(rf, vf, MU_EARTH_KM, -5400.0).expect("the universal Kepler solve settles");
         let dr = ((r0.x - r.x).powi(2) + (r0.y - r.y).powi(2) + (r0.z - r.z).powi(2)).sqrt();
         let dv = ((v0.x - v.x).powi(2) + (v0.y - v.y).powi(2) + (v0.z - v.z).powi(2)).sqrt();
         assert!(dr < 1e-6, "position drifted {dr:.3e} km on round trip");
@@ -1105,11 +1224,13 @@ mod tests {
         let r = Vec3::new(rp, 0.0, 0.0);
         let v = Vec3::new(0.0, vp * 0.6, vp * 0.8);
         let period = core::f64::consts::TAU * (a * a * a / MU_EARTH_KM).sqrt();
-        let (truth, _) = propagate(r, v, MU_EARTH_KM, 0.25 * period);
+        let (truth, _) = propagate(r, v, MU_EARTH_KM, 0.25 * period)
+            .expect("the universal Kepler solve settles");
 
         for &revs in &[10.25_f64, 100.25, 1000.25] {
             let dt = revs * period;
-            let (far, _) = propagate(r, v, MU_EARTH_KM, dt);
+            let (far, _) =
+                propagate(r, v, MU_EARTH_KM, dt).expect("the universal Kepler solve settles");
             let dr =
                 ((far.x - truth.x).powi(2) + (far.y - truth.y).powi(2) + (far.z - truth.z).powi(2))
                     .sqrt();
@@ -1129,7 +1250,8 @@ mod tests {
         let r = Vec3::new(8000.0, 0.0, 600.0);
         let v = Vec3::new(0.0, 6.5, 3.0);
         let energy = |r: Vec3, v: Vec3| v.dot(v) / 2.0 - MU_EARTH_KM / r.norm();
-        let (rf, vf) = propagate(r, v, MU_EARTH_KM, 4000.0);
+        let (rf, vf) =
+            propagate(r, v, MU_EARTH_KM, 4000.0).expect("the universal Kepler solve settles");
         assert!(
             (energy(rf, vf) - energy(r, v)).abs() < 1e-9,
             "energy drifted"
@@ -1147,7 +1269,8 @@ mod tests {
         let energy = v.dot(v) / 2.0 - MU_EARTH_KM / r.norm();
         let a = -MU_EARTH_KM / (2.0 * energy);
         let period = core::f64::consts::TAU * (a * a * a / MU_EARTH_KM).sqrt();
-        let (rf, vf) = propagate(r, v, MU_EARTH_KM, period);
+        let (rf, vf) =
+            propagate(r, v, MU_EARTH_KM, period).expect("the universal Kepler solve settles");
         let dr = ((rf.x - r.x).powi(2) + (rf.y - r.y).powi(2) + (rf.z - r.z).powi(2)).sqrt();
         assert!(
             dr < 1e-3,
@@ -1162,9 +1285,11 @@ mod tests {
         let r = Vec3::new(7000.0, 0.0, 0.0);
         let v_esc = (2.0 * MU_EARTH_KM / 7000.0).sqrt();
         let v = Vec3::new(0.5, v_esc * 1.2, 0.0); // clearly hyperbolic
-        let (rf, vf) = propagate(r, v, MU_EARTH_KM, 1200.0);
+        let (rf, vf) =
+            propagate(r, v, MU_EARTH_KM, 1200.0).expect("the universal Kepler solve settles");
         // Reversibility on the hyperbola is the check that the branch worked.
-        let (r0, _) = propagate(rf, vf, MU_EARTH_KM, -1200.0);
+        let (r0, _) =
+            propagate(rf, vf, MU_EARTH_KM, -1200.0).expect("the universal Kepler solve settles");
         let dr = ((r0.x - r.x).powi(2) + (r0.y - r.y).powi(2) + (r0.z - r.z).powi(2)).sqrt();
         assert!(dr < 1e-5, "hyperbolic round trip drifted {dr:.3e} km");
     }
@@ -1230,6 +1355,50 @@ mod tests {
         ([7000.000000000000000000000, 0.0, 0.0], [0.0, 9.055258929729461669921875, 12.07367857266217470169067], -100.0000000000000000000000, -8.967682075521427172184780, 7120.860133511548072011848, 126992.8009657241076553821),
     ];
 
+    /// The Sun's `μ` in m³/s², the double `derivations/kepler_universal.gp` rounds it to.
+    const MU_SUN_SI: f64 = 1.327_124_400_18e20;
+
+    /// The same rows in SI heliocentric units, from the second table of
+    /// `derivations/kepler_universal.gp`: two fast hyperbolas at 1 au, `α·r₀ = −72` and `−4.9`. The
+    /// first is the 252 km/s arc of `spacelab-gpu`'s porkchop cell (46, 62), its velocity on a `2⁻¹⁰`
+    /// grid; the second is out of the plane. A day to a year, and backwards.
+    #[rustfmt::skip]
+    const HELIOCENTRIC_ROOTS: [UniversalRoot; 10] = [
+        ([-81028456448.00000000000000, -125753376768.0000000000000, 0.0], [-168605.0205078125000000000, 186730.3613281250000000000, 0.0], 86400.00000000000000000000, 6759.586222003304480109101, 145425410767.9905851242536, 2033437145683210.396470127),
+        ([-81028456448.00000000000000, -125753376768.0000000000000, 0.0], [-168605.0205078125000000000, 186730.3613281250000000000, 0.0], 864000.0000000000000000000, 59934.25706572309201314907, 227987153822.6612962851599, 26267654215211167.62779410),
+        ([-81028456448.00000000000000, -125753376768.0000000000000, 0.0], [-168605.0205078125000000000, 186730.3613281250000000000, 0.0], 2592000.000000000000000000, 111392.5027910329206750927, 623719922948.1124924585168, 101496239774725194.4787161),
+        ([-81028456448.00000000000000, -125753376768.0000000000000, 0.0], [-168605.0205078125000000000, 186730.3613281250000000000, 0.0], 31557600.00000000000000000, 229205.8440695584952678515, 7797678610433.849841705523, 1791881354772785737.827043),
+        ([-81028456448.00000000000000, -125753376768.0000000000000, 0.0], [-168605.0205078125000000000, 186730.3613281250000000000, 0.0], -864000.0000000000000000000, -49146.79582842033581050699, 292950946940.9453087422414, 21637703172483166.14607436),
+        ([100000000000.0000000000000, -110000000000.0000000000000, 7000000000.000000000000000], [60000.00000000000000000000, 50000.00000000000000000000, -8000.000000000000000000000], 1000000.000000000000000000, 73981.87985194905259324360, 168188654445.4180759196569, 23656621998769487.25402504),
+        ([100000000000.0000000000000, -110000000000.0000000000000, 7000000000.000000000000000], [60000.00000000000000000000, 50000.00000000000000000000, -8000.000000000000000000000], 10000000.00000000000000000, 361706.1360646375267336313, 722807003871.0678344261372, 342088960507146922.5861357),
+        ([100000000000.0000000000000, -110000000000.0000000000000, 7000000000.000000000000000], [60000.00000000000000000000, 50000.00000000000000000000, -8000.000000000000000000000], 100000000.0000000000000000, 746105.2899979959646758908, 6727209699178.807889969116, 5467866591201127972.429071),
+        ([100000000000.0000000000000, -110000000000.0000000000000, 7000000000.000000000000000], [60000.00000000000000000000, 50000.00000000000000000000, -8000.000000000000000000000], -30000000.00000000000000000, -554018.4632051200564913046, 2052699899331.378964278853, 1362211232514484001.452882),
+        ([100000000000.0000000000000, -110000000000.0000000000000, 7000000000.000000000000000], [60000.00000000000000000000, 50000.00000000000000000000, -8000.000000000000000000000], 31557600.00000000000000000, 550398.8626388187045758988, 2168171324336.363674141971, 1385830142678317624.011071),
+    ];
+
+    /// `|χ − χ*|` over a table of 100-digit roots, as a fraction of each row's conditioning bound
+    /// `8ε·scale/r`, asserting that none exceeds it.
+    fn worst_against_roots(table: &[UniversalRoot], mu: f64) -> f64 {
+        let mut worst = 0.0_f64;
+        for &(r, v, dt, chi, radius, scale) in table {
+            let (got, _) = universal_anomaly(
+                Vec3::new(r[0], r[1], r[2]),
+                Vec3::new(v[0], v[1], v[2]),
+                mu,
+                dt,
+            )
+            .expect("the universal Kepler solve settles");
+            let tol = 8.0 * f64::EPSILON * scale / radius;
+            let d = (got - chi).abs();
+            assert!(
+                d <= tol,
+                "r {r:?} v {v:?} dt {dt}: χ off by {d:.3e} (allowed {tol:.3e})"
+            );
+            worst = worst.max(d / tol);
+        }
+        worst
+    }
+
     /// (G2) The solver's `χ` is the root of the universal Kepler equation, solved independently at
     /// 100 digits.
     ///
@@ -1240,23 +1409,196 @@ mod tests {
     /// grow as `e^{√−α χ}`.
     #[test]
     fn the_universal_anomaly_is_the_root_of_kepler_s_equation() {
-        let mut worst = 0.0_f64;
-        for (r, v, dt, chi, radius, scale) in UNIVERSAL_ROOTS {
-            let (got, _) = universal_anomaly(
-                Vec3::new(r[0], r[1], r[2]),
-                Vec3::new(v[0], v[1], v[2]),
-                MU_EARTH_KM,
-                dt,
-            );
-            let tol = 8.0 * f64::EPSILON * scale / radius;
-            let d = (got - chi).abs();
-            assert!(
-                d <= tol,
-                "r {r:?} v {v:?} dt {dt}: χ off by {d:.3e} (allowed {tol:.3e})"
-            );
-            worst = worst.max(d / tol);
-        }
+        let worst = worst_against_roots(&UNIVERSAL_ROOTS, MU_EARTH_KM);
         println!("universal anomaly vs 100 digits: worst {worst:.3} of the conditioning bound");
+    }
+
+    /// (G2) The same, in SI heliocentric units on fast hyperbolas. These are the rows the solver ran
+    /// out its cap on: `α` is above `−1e-9` per metre there, so a threshold on `α` itself handed them
+    /// the elliptic guess, 77 times the root at ten days, and Newton crawled down `F`'s exponential
+    /// wall `1/√−α` at a time. Before the fix five of the ten rows ran out the cap and returned what
+    /// they held: the ten-day row 2.9e-3 relative off its root, which `propagate` turned into a
+    /// 13 720 km miss, the thirty-day row 82 times its root, the year 4.7e32 times.
+    #[test]
+    fn the_universal_anomaly_is_the_root_on_fast_heliocentric_hyperbolas() {
+        let worst = worst_against_roots(&HELIOCENTRIC_ROOTS, MU_SUN_SI);
+        println!("heliocentric universal anomaly vs 100 digits: worst {worst:.3} of the bound");
+    }
+
+    /// (S2) The loop leaves a Newton crawl by bisection, whatever its guess. Started where the old
+    /// threshold on `α` started the ten-day row --- the elliptic guess `√μ·|α|·dt`, 77 times the
+    /// root --- Newton walks down `F`'s exponential wall about `1/√−α` per step. Taking every step
+    /// that stays inside the bracket, the loop ran out its hundred steps 0.29 % above the root;
+    /// bisecting each step that does not halve the one before last, it settles in 19, the bracket
+    /// walk included.
+    #[test]
+    fn the_solver_bisects_out_of_a_newton_crawl() {
+        let (r, v, dt, chi, radius, scale) = HELIOCENTRIC_ROOTS[1];
+        let (r, v) = (Vec3::new(r[0], r[1], r[2]), Vec3::new(v[0], v[1], v[2]));
+        let v0 = v.norm();
+        let alpha = 2.0 / r.norm() - v0 * v0 / MU_SUN_SI;
+        let crawl = MU_SUN_SI.sqrt() * alpha.abs() * dt;
+        assert!(
+            crawl > 70.0 * chi,
+            "the guess {crawl:e} is not a crawl's start"
+        );
+        let solved = universal_anomaly_from(r, v, MU_SUN_SI, dt, crawl);
+        println!("from {:.1} times the root: {solved:?}", crawl / chi);
+        let (got, steps) = solved.expect("the universal Kepler solve settles");
+        let tol = 8.0 * f64::EPSILON * scale / radius;
+        assert!((got - chi).abs() <= tol, "χ {got} against {chi}");
+        assert!(steps <= 19, "{steps} steps");
+    }
+
+    /// A conic of eccentricity `e` and periapsis radius `rp` at true anomaly `nu`, tilted by
+    /// `i = 0.7`, `Ω = 0.4`, `ω = 1.1` so that no component of the state is zero.
+    fn conic_state(mu: f64, rp: f64, e: f64, nu: f64) -> (Vec3, Vec3) {
+        let p = rp * (1.0 + e);
+        let radius = p / (1.0 + e * nu.cos());
+        let speed = (mu / p).sqrt();
+        let (pr, pv) = (
+            [radius * nu.cos(), radius * nu.sin()],
+            [-speed * nu.sin(), speed * (e + nu.cos())],
+        );
+        let (ci, si, co, so, cw, sw) = (
+            0.7_f64.cos(),
+            0.7_f64.sin(),
+            0.4_f64.cos(),
+            0.4_f64.sin(),
+            1.1_f64.cos(),
+            1.1_f64.sin(),
+        );
+        let m = [
+            [co * cw - so * sw * ci, -co * sw - so * cw * ci],
+            [so * cw + co * sw * ci, -so * sw + co * cw * ci],
+            [sw * si, cw * si],
+        ];
+        let rotate = |a: [f64; 2]| {
+            Vec3::new(
+                m[0][0] * a[0] + m[0][1] * a[1],
+                m[1][0] * a[0] + m[1][1] * a[1],
+                m[2][0] * a[0] + m[2][1] * a[1],
+            )
+        };
+        (rotate(pr), rotate(pv))
+    }
+
+    /// (S2) The solver settles on every conic, at every span, in every unit system, and the state it
+    /// returns is the one two half-spans reach.
+    ///
+    /// Four unit systems (km and m about the Earth, m about the Sun at 1 au, and `μ = rₚ = 1`), so a
+    /// threshold with a unit in it cannot hide: the `α < −1e-9` split that sent every SI heliocentric
+    /// hyperbola to the elliptic guess passed every kilometre test the module had. Seventeen
+    /// eccentricities from circular through `1 ± 1e-6` and the double rounding of `e = 1` to `e = 100`;
+    /// five true anomalies from `−0.9` to `0.9` of the asymptote's (of `π` on an ellipse), inbound
+    /// and outbound; six spans from `1e-6` to `1000` periods of the circular orbit at periapsis; both
+    /// signs. 4080 calls.
+    ///
+    /// Every call settles, so no state is refused, and its closure against `propagate(dt/2)` twice is
+    /// held to `16 384·ε·(|r| + |dt|·|v|)`, the floor the module's `# Accuracy` puts on one call: the
+    /// measured worst is 6.5e3, an ellipse at `e = 0.1` over a thousand periods, where the along-track
+    /// error grows with the span. The most steps any call takes, bracket included, is 34 (the
+    /// near-parabolic arcs doubling out from a guess of one). On the solver before the fix, 120 of the
+    /// 1020 heliocentric calls ran out the cap and returned what they held, the split closure missing
+    /// by up to 1e95 m.
+    #[test]
+    fn the_solver_settles_on_every_conic_in_every_unit_system() {
+        const SPLIT_BOUND: f64 = 16_384.0;
+        let systems: [(&str, f64, f64); 4] = [
+            ("km, Earth", 398_600.441_8, 7000.0),
+            ("m, Earth", 3.986_004_418e14, 7.0e6),
+            ("m, Sun", MU_SUN_SI, 1.495_978_707e11),
+            ("canonical", 1.0, 1.0),
+        ];
+        let eccentricities: [f64; 17] = [
+            0.0, 0.1, 0.5, 0.9, 0.99, 0.999, 0.999_999, 1.0, 1.000_001, 1.001, 1.01, 1.1, 1.5, 2.0,
+            5.0, 20.0, 100.0,
+        ];
+        let (mut calls, mut most, mut worst) = (0u32, 0u32, 0.0_f64);
+        for (name, mu, rp) in systems {
+            let period = core::f64::consts::TAU * (rp * rp * rp / mu).sqrt();
+            for e in eccentricities {
+                let asymptote = if e < 1.0 {
+                    core::f64::consts::PI
+                } else {
+                    (-1.0 / e).acos()
+                };
+                for fraction in [-0.9, -0.4, 0.0, 0.4, 0.9] {
+                    let (r, v) = conic_state(mu, rp, e, fraction * asymptote);
+                    for k in [1e-6, 1e-3, 0.1, 1.0, 10.0, 1e3] {
+                        for dt in [k * period, -k * period] {
+                            let case =
+                                format!("{name}: e {e}, ν {fraction} of the limit, dt {dt:e}");
+                            let (_, steps) = universal_anomaly(r, v, mu, dt)
+                                .unwrap_or_else(|err| panic!("{case}: {err}"));
+                            let (rf, vf) = propagate(r, v, mu, dt)
+                                .unwrap_or_else(|err| panic!("{case}: {err}"));
+                            let (rh, vh) = propagate(r, v, mu, 0.5 * dt)
+                                .unwrap_or_else(|err| panic!("{case}: first half: {err}"));
+                            let (rs, _) = propagate(rh, vh, mu, 0.5 * dt)
+                                .unwrap_or_else(|err| panic!("{case}: second half: {err}"));
+                            let floor = f64::EPSILON * (rf.norm() + dt.abs() * vf.norm());
+                            let miss = (rs - rf).norm() / floor;
+                            assert!(
+                                miss <= SPLIT_BOUND,
+                                "{case}: split closure {miss:.3e} of the floor"
+                            );
+                            calls += 1;
+                            most = most.max(steps);
+                            worst = worst.max(miss);
+                        }
+                    }
+                }
+            }
+        }
+        println!(
+            "{calls} calls settled; most steps {most}; worst split closure {worst:.3e} of ε·(|r| + |dt|·|v|)"
+        );
+        assert_eq!(calls, 4080);
+        assert!(most <= 40, "a call took {most} steps");
+    }
+
+    /// (S2) A state with no root is refused, not returned. `F` is NaN for a non-finite input, a
+    /// zero position or a non-positive `μ`, and overflows for a span no `χ` can carry; the solver
+    /// once spun its cap on those and returned whatever it held, NaN or a finite wrong state.
+    #[test]
+    fn a_state_the_equation_has_no_root_for_is_refused() {
+        let mu = 398_600.441_8;
+        let r = Vec3::new(7000.0, -1200.0, 300.0);
+        let v = Vec3::new(1.0, 7.5, 0.5);
+        let fast = Vec3::new(1.0, 15.0, 0.5);
+        let nan = f64::NAN;
+        for (name, r, v, mu, dt) in [
+            ("NaN position", Vec3::new(nan, 0.0, 0.0), v, mu, 100.0),
+            ("NaN velocity", r, Vec3::new(0.0, nan, 0.0), mu, 100.0),
+            ("NaN μ", r, v, nan, 100.0),
+            ("NaN span", r, v, mu, nan),
+            ("infinite span", r, v, mu, f64::INFINITY),
+            ("infinite span backwards", r, v, mu, f64::NEG_INFINITY),
+            (
+                "infinite position",
+                Vec3::new(f64::INFINITY, 0.0, 0.0),
+                v,
+                mu,
+                100.0,
+            ),
+            ("zero position", Vec3::new(0.0, 0.0, 0.0), v, mu, 100.0),
+            ("zero μ", r, v, 0.0, 100.0),
+            ("negative μ", r, v, -mu, 100.0),
+            ("an ellipse over 1e308 s", r, v, mu, 1e308),
+            ("a hyperbola over 1e308 s", r, fast, mu, 1e308),
+            ("a hyperbola over 1e308 s backwards", r, fast, mu, -1e308),
+        ] {
+            assert_eq!(
+                propagate(r, v, mu, dt),
+                Err(KeplerError::NoConvergence),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            KeplerError::NoConvergence.to_string(),
+            "the universal Kepler equation was not solved within the solver's step caps"
+        );
     }
 
     /// (G4) The Lagrange coefficients `propagate` forms from the solver's `χ` keep the Wronskian
@@ -1277,7 +1619,8 @@ mod tests {
             let r0 = r0v.norm();
             let alpha = 2.0 / r0 - v0v.dot(v0v) / MU_EARTH_KM;
             let sqmu = MU_EARTH_KM.sqrt();
-            let (chi, _) = universal_anomaly(r0v, v0v, MU_EARTH_KM, dt);
+            let (chi, _) = universal_anomaly(r0v, v0v, MU_EARTH_KM, dt)
+                .expect("the universal Kepler solve settles");
             let (c, s) = stumpff(alpha * chi * chi);
             let f = 1.0 - chi * chi / r0 * c;
             let g = dt - chi * chi * chi / sqmu * s;

@@ -1376,7 +1376,12 @@ pub unsafe extern "C" fn sl_kepler_propagate(
         }
         // SAFETY: checked non-null just above.
         let s = unsafe { *r#in };
-        let (r, v) = astro_kepler(to_vec3(s.position), to_vec3(s.velocity), mu, dt);
+        let Ok((r, v)) = astro_kepler(to_vec3(s.position), to_vec3(s.velocity), mu, dt) else {
+            return fail(
+                SL_ERR_COMPUTE,
+                "sl_kepler_propagate: the universal Kepler equation was not solved",
+            );
+        };
         // SAFETY: checked non-null; written only now that the answer exists.
         unsafe { *out = from_state(r, v) };
         SL_OK
@@ -14964,7 +14969,8 @@ mod tests {
             to_vec3(s.velocity),
             MU_EARTH,
             dt * steps as f64,
-        );
+        )
+        .expect("the universal Kepler solve settles");
         assert_eq!(
             analytic,
             from_state(r, v),
@@ -15059,6 +15065,52 @@ mod tests {
             "an unknown precision tag must not default"
         );
         assert!(last_error().contains("precision tag 7"), "{}", last_error());
+    }
+
+    /// The Kepler binding carries the solver's refusal: a state the universal Kepler equation has no
+    /// root for is `SL_ERR_COMPUTE` with `out` untouched, where the loop once ran out its cap and
+    /// wrote what it held. And the 252 km/s heliocentric arc it once stopped short on, 13 720 km off
+    /// at arrival, now lands where two half-spans land.
+    #[test]
+    fn the_kepler_binding_refuses_an_unsolved_state_and_flies_the_fast_arc() {
+        let start = leo();
+        let mut out = state([7.0; 3], [7.0; 3]);
+        // SAFETY: both pointers are to locals of the right type.
+        let status = unsafe { sl_kepler_propagate(&raw const start, f64::NAN, 60.0, &raw mut out) };
+        assert_eq!(status, SL_ERR_COMPUTE, "a NaN μ has no root");
+        assert_eq!(
+            out,
+            state([7.0; 3], [7.0; 3]),
+            "nothing is written on failure"
+        );
+        assert!(last_error().contains("not solved"), "{}", last_error());
+
+        let mu_sun = 1.327_124_400_18e20;
+        let fast = state(
+            [-81_028_456_448.0, -125_753_376_768.0, 0.0],
+            [-168_605.020_507_812_5, 186_730.361_328_125, 0.0],
+        );
+        let (mut whole, mut half, mut twice) = (out, out, out);
+        // SAFETY: every pointer is to a local of the right type.
+        unsafe {
+            assert_eq!(
+                sl_kepler_propagate(&raw const fast, mu_sun, 864_000.0, &raw mut whole),
+                SL_OK
+            );
+            assert_eq!(
+                sl_kepler_propagate(&raw const fast, mu_sun, 432_000.0, &raw mut half),
+                SL_OK
+            );
+            assert_eq!(
+                sl_kepler_propagate(&raw const half, mu_sun, 432_000.0, &raw mut twice),
+                SL_OK
+            );
+        }
+        let miss = (to_vec3(whole.position) - to_vec3(twice.position)).norm();
+        assert!(
+            miss < 1e-12 * to_vec3(whole.position).norm(),
+            "the fast arc and its two halves part by {miss:e} m"
+        );
     }
 
     /// Lambert returns velocities that actually fly the transfer -- checked by flying it -- and
@@ -15900,7 +15952,8 @@ mod tests {
                 to_vec3(start.velocity),
                 SL_MU_EARTH_TEST,
                 t,
-            );
+            )
+            .expect("the universal Kepler solve settles");
             let want = from_state(r, v);
             let dr = ((got.position.x - want.position.x).powi(2)
                 + (got.position.y - want.position.y).powi(2)
@@ -16033,7 +16086,8 @@ mod tests {
             to_vec3(start.velocity),
             SL_MU_EARTH_TEST,
             600.0,
-        );
+        )
+        .expect("the universal Kepler solve settles");
         let dr = ((got.position.x - r.x).powi(2)
             + (got.position.y - r.y).powi(2)
             + (got.position.z - r.z).powi(2))

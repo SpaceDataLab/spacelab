@@ -244,11 +244,14 @@ fn lerp_at(ts: &[f64], ys: &[f64], t: f64) -> f64 {
 }
 
 /// Two-body (Kepler) propagation: advance state `(r, v)` by `dt` under gravity `mu`. Consistent SI-ish
-/// units (position, position/time, length³/time²). Returns `(r, v)` at `t + dt`.
+/// units (position, position/time, length³/time²). Returns `(r, v)` at `t + dt`. Raises `ValueError`
+/// if the universal Kepler equation is not solved: a non-finite input, `r = 0`, `mu <= 0`, or a span
+/// that overflows.
 #[pyfunction]
-fn kepler_propagate(r: [f64; 3], v: [f64; 3], mu: f64, dt: f64) -> ([f64; 3], [f64; 3]) {
-    let (rf, vf) = kepler(vec3(r), vec3(v), mu, dt);
-    (arr(rf), arr(vf))
+fn kepler_propagate(r: [f64; 3], v: [f64; 3], mu: f64, dt: f64) -> PyResult<([f64; 3], [f64; 3])> {
+    let (rf, vf) =
+        kepler(vec3(r), vec3(v), mu, dt).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok((arr(rf), arr(vf)))
 }
 
 /// Lambert transfer: the velocities `(v1, v2)` connecting positions `r1` and `r2` in time `tof` under
@@ -7349,32 +7352,6 @@ mod tests {
         assert!((n(east) - RE_EARTH).abs() < 1e-6);
     }
 
-    /// Two-body propagation across the bridge: the identity at `dt = 0`, and reversible, which is
-    /// what a dropped or mis-signed `dt` breaks.
-    #[test]
-    fn kepler_propagation_is_the_identity_at_zero_and_reverses() {
-        let r0 = [7_000e3, 0.0, 0.0];
-        let v0 = [0.0, 7_546.0, 0.0];
-        assert_eq!(kepler_propagate(r0, v0, MU_EARTH, 0.0), (r0, v0));
-
-        let (r1, v1) = kepler_propagate(r0, v0, MU_EARTH, 1_800.0);
-        assert!(
-            (r1[0] - r0[0]).abs() > 1e6,
-            "half an hour did not move the satellite: {r1:?}"
-        );
-        let (r2, v2) = kepler_propagate(r1, v1, MU_EARTH, -1_800.0);
-        for k in 0..3 {
-            assert!(
-                (r2[k] - r0[k]).abs() < 1e-3,
-                "position did not reverse: {r2:?} vs {r0:?}"
-            );
-            assert!(
-                (v2[k] - v0[k]).abs() < 1e-6,
-                "velocity did not reverse: {v2:?} vs {v0:?}"
-            );
-        }
-    }
-
     /// A real TU Delft CHAMP excerpt, thirty accelerometer rows, shared by the two density bridges
     /// below. Every row in it is nominal with a positive orbit mean, which is why the flag test
     /// appends its own rows rather than looking for one here.
@@ -10114,6 +10091,43 @@ mod interpreter_tests {
     /// Speed of light, m/s — the constant the two differenced observables are stated in.
     const LIGHT: f64 = 299_792_458.0;
 
+    /// Two-body propagation across the bridge: the identity at `dt = 0`, and reversible, which is
+    /// what a dropped or mis-signed `dt` breaks; a NaN `μ`, which has no root, raises.
+    #[test]
+    fn kepler_propagation_is_the_identity_at_zero_and_reverses() {
+        Python::attach(|_| {
+            let r0 = [7_000e3, 0.0, 0.0];
+            let v0 = [0.0, 7_546.0, 0.0];
+            assert_eq!(
+                kepler_propagate(r0, v0, MU_EARTH, 0.0).expect("the identity span settles"),
+                (r0, v0)
+            );
+            assert!(
+                kepler_propagate(r0, v0, f64::NAN, 1_800.0).is_err(),
+                "a NaN μ has no root and is refused"
+            );
+
+            let (r1, v1) =
+                kepler_propagate(r0, v0, MU_EARTH, 1_800.0).expect("half an hour settles");
+            assert!(
+                (r1[0] - r0[0]).abs() > 1e6,
+                "half an hour did not move the satellite: {r1:?}"
+            );
+            let (r2, v2) =
+                kepler_propagate(r1, v1, MU_EARTH, -1_800.0).expect("the way back settles");
+            for k in 0..3 {
+                assert!(
+                    (r2[k] - r0[k]).abs() < 1e-3,
+                    "position did not reverse: {r2:?} vs {r0:?}"
+                );
+                assert!(
+                    (v2[k] - v0[k]).abs() < 1e-6,
+                    "velocity did not reverse: {v2:?} vs {v0:?}"
+                );
+            }
+        });
+    }
+
     /// #314's multistatic observables against the single-station models they generalise. A bistatic
     /// link whose transmitter and receiver sit at one place is that station's monostatic range and
     /// range rate doubled; an inter-satellite link with one end at rest is the fixed-station pair
@@ -11157,7 +11171,8 @@ mod interpreter_tests {
         let r0 = [7_000e3, 0.0, 0.0];
         let v0 = [0.0, 6.2e3, 3.1e3];
         let (dt, steps) = (2.0, 900);
-        let (rk, vk) = kepler(vec3(r0), vec3(v0), MU_EARTH, dt * steps as f64);
+        let (rk, vk) = kepler(vec3(r0), vec3(v0), MU_EARTH, dt * steps as f64)
+            .expect("the universal Kepler solve settles");
         let (rk, vk) = (arr(rk), arr(vk));
         Python::attach(|py| {
             for precision in ["f64", "dd"] {
@@ -11479,7 +11494,8 @@ def one_row(x):
             // steps rather than on their boundaries.
             for k in 1..=7 {
                 let t = t1 * f64::from(k) / 7.3;
-                let (rk, vk) = kepler(vec3(r0), vec3(v0), MU_EARTH, t);
+                let (rk, vk) = kepler(vec3(r0), vec3(v0), MU_EARTH, t)
+                    .expect("the universal Kepler solve settles");
                 let (rk, vk) = (arr(rk), arr(vk));
                 for (name, (r, v)) in [("dop853", dop.eval(t)), ("ias15", ias.eval(t))] {
                     for i in 0..3 {

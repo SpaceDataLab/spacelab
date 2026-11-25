@@ -410,6 +410,8 @@ sl_status sl_sgp4_propagate(const char *line1, const char *line2, double minutes
 /*
  * Advance a state by `dt` seconds under a point mass, by the universal-variable Kepler solution:
  * exact for the two-body problem, and independent of step size because it does not step.
+ * `SL_ERR_COMPUTE` when the universal Kepler equation is not solved: a non-finite input, a zero
+ * position, `mu <= 0`, or a span that overflows. Nothing is written on failure.
  */
 sl_status sl_kepler_propagate(const sl_state *in, double mu, double dt, sl_state *out);
 

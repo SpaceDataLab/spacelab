@@ -1331,11 +1331,10 @@ mod tests {
     /// the kernel's bracket. The `f64` residual at the bracket's fixed ends says which cells those
     /// are; `derivations/gpu_porkchop.gp` gets the same counts from it at 100 digits (S1).
     ///
-    /// The comparator is the CPU path except at one cell, departure 46 and arrival 62 retrograde,
-    /// which the CPU refuses although its arc is right: its `z` is the 100-digit one to 2e-16, but
-    /// the closure check's `propagate` stops at its iteration cap on this 252 km/s arc and misses
-    /// `r2` by 13 719 km. There the comparator is the C3 that `gpu_porkchop.gp` solves at 100 digits
-    /// and checks by Kepler's equation.
+    /// The comparator is the CPU path at every cell. One, departure 46 and arrival 62 retrograde, the
+    /// CPU refused until Ф28.N although its arc was right: the closure check's `propagate` ran out
+    /// its iteration cap on this 252 km/s arc and missed `r2` by 13 719 km. Its C3 is held to the one
+    /// `gpu_porkchop.gp` solves at 100 digits and checks by Kepler's equation, to `f32` rounding.
     #[test]
     fn gpu_matches_cpu_porkchop() {
         #[derive(Debug, Default)]
@@ -1349,7 +1348,7 @@ mod tests {
             worst: f64,
         }
         // derivations/gpu_porkchop.gp, at 100 digits.
-        const STALLED: (usize, usize, f64) = (46, 62, 78_650_740_366.479_72);
+        const FAST_CELL: (usize, usize, f64) = (46, 62, 78_650_740_366.479_72);
         // The measured worst is 1.3e-4, on the long way next to z = −50, over three adapters.
         const BOUND: f64 = 1e-3;
         let Some(gpu) = Gpu::new() else {
@@ -1372,6 +1371,14 @@ mod tests {
             let g = gpu.porkchop_c3(&dep, &arr, &dep_t, &arr_t, mu, prograde);
             let c = porkchop_c3_cpu(&dep, &arr, &dep_t, &arr_t, mu, prograde);
             assert_eq!(g.len(), c.len());
+            if !prograde {
+                let cpu = f64::from(c[FAST_CELL.0 * arr.len() + FAST_CELL.1]);
+                assert!(
+                    (cpu - FAST_CELL.2).abs() <= f64::from(f32::EPSILON) * FAST_CELL.2,
+                    "the CPU's C3 at cell (46, 62) is {cpu}, the 100-digit one {}",
+                    FAST_CELL.2
+                );
+            }
             let mut branches = [Branch::default(), Branch::default()];
             for (i, di) in dep.iter().enumerate() {
                 for (j, aj) in arr.iter().enumerate() {
@@ -1382,11 +1389,7 @@ mod tests {
                         assert!(c[k] >= 1e29 && !solved, "cell {k} has no time of flight");
                         continue;
                     }
-                    let reference = if !prograde && (i, j) == (STALLED.0, STALLED.1) {
-                        Some(STALLED.2)
-                    } else {
-                        (c[k] < 1e29).then_some(f64::from(c[k]))
-                    };
+                    let reference = (c[k] < 1e29).then_some(f64::from(c[k]));
                     let (r1, r2) = (vec3(di.r), vec3(aj.r));
                     let (r1n, r2n, cross, dot) = (r1.norm(), r2.norm(), r1.cross(r2), r1.dot(r2));
                     let short = (cross.z >= 0.0) == prograde;

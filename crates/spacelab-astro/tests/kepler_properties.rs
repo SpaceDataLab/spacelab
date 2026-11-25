@@ -113,8 +113,8 @@ proptest! {
     /// loosest of the four, for the reason in the module doc.
     #[test]
     fn propagation_is_reversible((r, v, dt) in orbit()) {
-        let (r1, v1) = kepler::propagate(r, v, MU, dt);
-        let back = kepler::propagate(r1, v1, MU, -dt);
+        let (r1, v1) = kepler::propagate(r, v, MU, dt).expect("the universal Kepler solve settles");
+        let back = kepler::propagate(r1, v1, MU, -dt).expect("the universal Kepler solve settles");
         let d = drift(back, (r, v));
         prop_assert!(d < 1e-9, "state moved {d:.3e} of its own magnitude over dt {dt:.1} s");
     }
@@ -124,9 +124,9 @@ proptest! {
     #[test]
     fn propagation_composes((r, v, dt) in orbit()) {
         let half = dt / 2.0;
-        let (rm, vm) = kepler::propagate(r, v, MU, half);
-        let two = kepler::propagate(rm, vm, MU, dt - half);
-        let one = kepler::propagate(r, v, MU, dt);
+        let (rm, vm) = kepler::propagate(r, v, MU, half).expect("the universal Kepler solve settles");
+        let two = kepler::propagate(rm, vm, MU, dt - half).expect("the universal Kepler solve settles");
+        let one = kepler::propagate(r, v, MU, dt).expect("the universal Kepler solve settles");
         let d = drift(two, one);
         prop_assert!(d < 1e-11, "split step differs from the whole by {d:.3e}");
     }
@@ -135,7 +135,7 @@ proptest! {
     /// solver's error and nothing else. Worst measured: energy 2.368e-13, momentum 2.373e-14.
     #[test]
     fn the_two_body_integrals_are_conserved((r, v, dt) in orbit()) {
-        let (r1, v1) = kepler::propagate(r, v, MU, dt);
+        let (r1, v1) = kepler::propagate(r, v, MU, dt).expect("the universal Kepler solve settles");
 
         let (e0, e1) = (energy(r, v), energy(r1, v1));
         let de = ((e1 - e0) / e0).abs();

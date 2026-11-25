@@ -125,7 +125,8 @@ pub fn lambert(r1: Vec3, r2: Vec3, tof: f64, mu: f64, prograde: bool) -> Option<
     // position is far more sensitive to `z` than the time is, so a root can satisfy it to a
     // nanosecond and still be 87 km wide. `propagate` shares the Stumpff pair but not the iteration:
     // it solves for `χ` at fixed `dt`, where this solved for `z` at fixed endpoints.
-    let miss = (propagate(r1, v1, mu, tof).0 - r2).norm();
+    let (arrival, _) = propagate(r1, v1, mu, tof).ok()?;
+    let miss = (arrival - r2).norm();
     if !(miss.is_finite() && miss <= CLOSURE_TOLERANCE * r2n) {
         return None;
     }
@@ -1529,6 +1530,27 @@ mod tests {
         }
     }
 
+    /// (G2) The retrograde porkchop cell (46, 62) of `spacelab-gpu`'s test grid: a ten-day
+    /// heliocentric arc at 252 km/s, SI units. `lambert` solved its `z` to 2e-16 of the 100-digit
+    /// root and then refused it, because the closure check's `propagate` ran out its step cap on this
+    /// arc and missed `r2` by 13 719 km. The departure velocity is the one
+    /// `derivations/gpu_porkchop.gp` solves at 100 digits from the same `f32` inputs; measured 1.4e-14
+    /// relative from it.
+    #[test]
+    fn the_fast_heliocentric_porkchop_cell_is_solved() {
+        let r1 = Vec3::new(-81_028_456_448.0, -125_753_376_768.0, 0.0);
+        let r2 = Vec3::new(-225_017_004_032.0, 36_680_925_184.0, 0.0);
+        let mu = 132_712_443_255_260_708_864.0; // the Sun's μ in m³/s², rounded to `f32` by the grid
+        let want = Vec3::new(
+            -168_605.020_757_491_745_635_087,
+            186_730.361_114_462_195_696_811,
+            0.0,
+        );
+        let (v1, _) = lambert(r1, r2, 864_000.0, mu, false).expect("the cell has a transfer");
+        let rel = (v1 - want).norm() / want.norm();
+        assert!(rel < 1e-13, "v1 {v1:?} is {rel:.3e} from the 100-digit arc");
+    }
+
     /// The departure velocity, propagated forward by the time of flight, must arrive at `r2` — a
     /// self-consistency check that closes Lambert against the independent Kepler propagator.
     #[test]
@@ -1537,7 +1559,8 @@ mod tests {
         let r2 = Vec3::new(-14600.0, 2500.0, 7000.0);
         let tof = 3600.0;
         let (v1, v2) = lambert(r1, r2, tof, MU_EARTH_KM, true).expect("solvable");
-        let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof);
+        let (rf, vf) =
+            propagate(r1, v1, MU_EARTH_KM, tof).expect("the universal Kepler solve settles");
         let dr = ((rf.x - r2.x).powi(2) + (rf.y - r2.y).powi(2) + (rf.z - r2.z).powi(2)).sqrt();
         let dv = ((vf.x - v2.x).powi(2) + (vf.y - v2.y).powi(2) + (vf.z - v2.z).powi(2)).sqrt();
         assert!(dr < 1e-3, "arc missed r2 by {dr:.3e} km");
@@ -1567,7 +1590,8 @@ mod tests {
             d < 1e-6,
             "Izzo N=0 disagrees with universal-variable by {d:.3e} km/s"
         );
-        let (rf, _) = propagate(r1, v1, MU_EARTH_KM, tof);
+        let (rf, _) =
+            propagate(r1, v1, MU_EARTH_KM, tof).expect("the universal Kepler solve settles");
         let miss = ((rf.x - r2.x).powi(2) + (rf.y - r2.y).powi(2) + (rf.z - r2.z).powi(2)).sqrt();
         assert!(miss < 1e-3, "N=0 arc missed by {miss:.3e} km");
     }
@@ -1584,7 +1608,8 @@ mod tests {
                 for &tof in &TOFS {
                     let (v1, v2) = lambert(r1, r2, tof, MU_EARTH_KM, prograde)
                         .unwrap_or_else(|| panic!("no arc at tof {tof} s, prograde {prograde}"));
-                    let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof);
+                    let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof)
+                        .expect("the universal Kepler solve settles");
                     let scale = r2.norm() + tof * v1.norm();
                     let miss = (rf - r2).norm();
                     assert!(
@@ -1657,7 +1682,8 @@ mod tests {
                                 "no arc at tof {tof} s, geometry {geometry}, prograde {prograde}"
                             )
                         });
-                    let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof);
+                    let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof)
+                        .expect("the universal Kepler solve settles");
                     let miss = (rf - r2).norm() / (r2.norm() + tof * v1.norm());
                     assert!(
                         miss < 5e-10,
@@ -1723,7 +1749,8 @@ mod tests {
                         d < 1e-10 * v1.norm(),
                         "Izzo differs from universal-variable by {d:.3e} km/s at tof {tof} s"
                     );
-                    let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof);
+                    let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof)
+                        .expect("the universal Kepler solve settles");
                     let miss = (rf - r2).norm();
                     assert!(
                         miss < 5e-13 * (r2.norm() + tof * v1.norm()),
@@ -1758,7 +1785,8 @@ mod tests {
             let (vl, _) =
                 lambert_multirev(r1, r2, tof, MU_EARTH_KM, true, 1, true).expect("long branch");
             for (name, v) in [("short", vs), ("long", vl)] {
-                let (rf, _) = propagate(r1, v, MU_EARTH_KM, tof);
+                let (rf, _) =
+                    propagate(r1, v, MU_EARTH_KM, tof).expect("the universal Kepler solve settles");
                 let miss = (rf - r2).norm();
                 assert!(
                     miss < 5e-12 * (r2.norm() + tof * v.norm()),
@@ -1801,7 +1829,12 @@ mod tests {
         for (tof, bound) in [(60_000.0, 5e-11), (600_000.0, 3e-8), (6.0e6, 5e-7)] {
             let (v1, _) = lambert(r1, r2, tof, MU_EARTH_KM, false)
                 .unwrap_or_else(|| panic!("no long-way arc at tof {tof} s"));
-            let miss = (propagate(r1, v1, MU_EARTH_KM, tof).0 - r2).norm() / r2.norm();
+            let miss = (propagate(r1, v1, MU_EARTH_KM, tof)
+                .expect("the universal Kepler solve settles")
+                .0
+                - r2)
+                .norm()
+                / r2.norm();
             assert!(
                 miss < bound,
                 "long-way arc missed r2 by {miss:.3e} at {tof} s"
@@ -1823,7 +1856,12 @@ mod tests {
         );
         let (w1, _) = lambert_multirev(r1, r2, 2.0e7, MU_EARTH_KM, false, 0, false)
             .expect("Izzo solves what the universal variable cannot");
-        let miss = (propagate(r1, w1, MU_EARTH_KM, 2.0e7).0 - r2).norm() / r2.norm();
+        let miss = (propagate(r1, w1, MU_EARTH_KM, 2.0e7)
+            .expect("the universal Kepler solve settles")
+            .0
+            - r2)
+            .norm()
+            / r2.norm();
         assert!(miss < 1e-8, "the Izzo arc missed r2 by {miss:.3e} at 2e7 s");
     }
 
@@ -1885,7 +1923,8 @@ mod tests {
         let tof = 4.0e6;
         let (v1, _) = lambert_multirev(r1, r2, tof, MU_EARTH_KM, true, 0, false)
             .expect("a near-parabolic transfer whose root is in the first cell of the scan");
-        let (rf, _) = propagate(r1, v1, MU_EARTH_KM, tof);
+        let (rf, _) =
+            propagate(r1, v1, MU_EARTH_KM, tof).expect("the universal Kepler solve settles");
         let miss = (rf - r2).norm();
         assert!(
             miss < 1e-9 * (r2.norm() + tof * v1.norm()),
@@ -1928,7 +1967,8 @@ mod tests {
         let tof = 1.3 * period; // one full revolution plus the transfer
         let (v1, v2) =
             lambert_multirev(r1, r2, tof, MU_EARTH_KM, true, 1, false).expect("1-rev solution");
-        let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof);
+        let (rf, vf) =
+            propagate(r1, v1, MU_EARTH_KM, tof).expect("the universal Kepler solve settles");
         let miss = ((rf.x - r2.x).powi(2) + (rf.y - r2.y).powi(2) + (rf.z - r2.z).powi(2)).sqrt();
         assert!(miss < 1e-2, "1-rev arc missed the target by {miss:.3e} km");
         let dv = ((vf.x - v2.x).powi(2) + (vf.y - v2.y).powi(2) + (vf.z - v2.z).powi(2)).sqrt();
@@ -2577,7 +2617,11 @@ mod tests {
                             "geometry {geometry}, N = {n_rev}, long {long}: {e} above the minimum"
                         )
                     });
-                let miss = (propagate(r1, v1, MU_EARTH_KM, above).0 - r2).norm()
+                let miss = (propagate(r1, v1, MU_EARTH_KM, above)
+                    .expect("the universal Kepler solve settles")
+                    .0
+                    - r2)
+                    .norm()
                     / (r2.norm() + above * v1.norm());
                 worst = worst.max(miss);
                 assert!(
@@ -2620,7 +2664,8 @@ mod tests {
                                     .unwrap_or_else(|e| {
                                         panic!("no arc at {k} t_min, N = {n_rev}, long {long}: {e}")
                                     });
-                            let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof);
+                            let (rf, vf) = propagate(r1, v1, MU_EARTH_KM, tof)
+                                .expect("the universal Kepler solve settles");
                             let scale = r2.norm() + tof * v1.norm();
                             let miss = (rf - r2).norm() / scale;
                             let dv = (vf - v2).norm() / v1.norm();

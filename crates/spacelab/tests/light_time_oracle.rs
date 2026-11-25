@@ -107,7 +107,8 @@ fn ephemeris(epoch_state: [f64; 6]) -> impl Fn(f64) -> Option<[f64; 6]> {
             Vec3::new(epoch_state[3], epoch_state[4], epoch_state[5]),
             MU,
             t,
-        );
+        )
+        .ok()?;
         Some([r.x, r.y, r.z, v.x, v.y, v.z])
     }
 }

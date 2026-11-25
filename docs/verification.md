@@ -1323,6 +1323,7 @@ change to the seed or the corrector shows that the fixture must be generated aga
 | elements | state↔elements round-trip incl. circular/equatorial singulars | orbital-element definitions | self-consistency | rel < 1e-12 | tests/keplerian.rs, degenerate_orbits.rs |
 | astro | Universal-variable Kepler propagate | universal-variable / Stumpff formulation (Bate–Mueller–White) | Curtis *Orbital Mechanics* Ex 3.7 | dr < 1.0 km / dv < 1e-3 km·s⁻¹ | src/kepler.rs |
 | astro | Lambert (universal-variable) | Lambert's problem in universal variables | Curtis Ex 5.2 | Δv err < 1e-3 km·s⁻¹ | src/lambert.rs |
+| astro | `kepler::propagate` settles or refuses — G2, S2 (Ф28.N) | the universal Kepler equation, strictly increasing in χ; `rtsafe` (Numerical Recipes §9.4): a Newton step at most half the step two before, while \|F\| is above its 8ε floor | PARI/GP `kepler_universal.gp`: 10 heliocentric SI roots at 100 digits (two hyperbolas at 1 au, α·r₀ = −72 and −4.9, a day to a year, both signs); split-step closure; a typed `KeplerError::NoConvergence` | 58 roots ≤ 0.075 of 8ε·scale/r (5 of the 10 heliocentric ones were 2.9e-3 to 4.7e32 relative off, the cap run out in silence); 4080 calls over 4 unit systems × 17 eccentricities (0 to 100) × 5 anomalies × 6 spans × 2 signs: none refused (120 of the 1020 heliocentric calls ran out the cap before), at most 34 steps, split closure ≤ 6.5e3 of ε·(\|r\| + \|dt\|·\|v\|); 13 states with no root refused; started 77× above the ten-day root, where the old threshold started it, the loop settles in 19 steps (100, 0.29 % off, before the crawl rule); porkchop cell (46, 62) solved by `lambert` (refused before) to 1.4e-14 of the 100-digit `v1` | src/kepler.rs, src/lambert.rs |
 | astro | differential corrector (Target / Vary / Achieve) | the finite-difference Newton shooter every mission-sequence tool is built on, with Marquardt damping | **Izzo's Lambert solver** and the **closed-form Hohmann Δv**, both of which share no line with a black-box shooter. The three-control case gives the corrector a position target 3 000 s downrange and nothing else — no Lambert, no conic — and asks whether it finds the same initial velocity Izzo solves for analytically | Lambert: **1.8e-8, 5.0e-7, 2.8e-6 m·s⁻¹** per component, ≈2e-9 relative; Hohmann: < 1e-6 m·s⁻¹ against √(μ/r₁)(√(2r₂/(r₁+r₂)) − 1), from a 478 m·s⁻¹ initial miss in 7 iterations. Scale invariance is asserted directly rather than argued: metres and kilometres must cost the *identical* iteration and evaluation count (#251's lesson) | src/targeting.rs |
 | astro | CR3BP L1–L5 libration points | CR3BP equations of motion (Szebehely) | standard published values | L1–L3 < 1e-4, L4/L5 < 1e-6 | src/cr3bp.rs |
 | astro | Richardson halo coefficients (L1, L2), synodic seed | Richardson 1980; re-derived in `derivations/richardson_halo.mac` | Maxima CAS (`derivations/richardson_halo.mac`) | < 1e-9 / < 1e-8 | src/richardson.rs |
@@ -4918,10 +4919,10 @@ argument, so instead each one either feeds a solver the answer to its own questi
 invariant only the correct wiring satisfies, or injects a bias the routine must recover exactly.
 
 There is now a Rust-side rung under them as well — 114 `#[test]` in `lib.rs`, written to the same
-rule and measured by mutation rather than by coverage. 45 of them need an interpreter in the
+rule and measured by mutation rather than by coverage. 46 of them need an interpreter in the
 test process and are gated behind `test-interpreter`, which is what
 `cargo test -p spacelab-python --no-default-features --features test-interpreter` turns on; the other
-69 run in an ordinary `cargo test --workspace`. One of the 45 also needs `onnx`, because
+68 run in an ordinary `cargo test --workspace`. One of the 46 also needs `onnx`, because
 `cloud_mask` is only compiled with it. What they reach and what they cannot is `spacelab-python`'s
 entry in §8.
 

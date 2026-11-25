@@ -46,7 +46,7 @@ pub use edl::{
 pub use iod::{
     IodError, Sighting, gauss, gibbs, gooding, herrick_gibbs, laplace, orbit_from_angles,
 };
-pub use kepler::propagate;
+pub use kepler::{KeplerError, propagate};
 pub use lambert::{LambertError, lambert, lambert_multirev};
 pub use lowthrust::{Steering, propagate_lowthrust};
 pub use optimal::{MinEnergyTransfer, min_energy_transfer, optimal_control_at};

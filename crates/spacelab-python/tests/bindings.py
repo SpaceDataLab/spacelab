@@ -141,6 +141,26 @@ def test_lambert_solves_next_to_a_half_turn_and_on_a_short_arc():
         assert off <= 16.0 * sys.float_info.epsilon / delta, (delta, off)
 
 
+def test_kepler_propagate_solves_a_fast_heliocentric_arc_and_refuses_a_nan():
+    # The 252 km/s arc of the GPU porkchop's cell (46, 62), its velocity on a 2^-10 grid, SI units:
+    # the universal anomaly at ten days is the 100-digit root of derivations/kepler_universal.gp, and
+    # the old solver ran out its step cap there and arrived 13 720 km off without a word. Here the
+    # arc is flown whole and in two halves, and a state with no root raises instead of returning.
+    mu_sun = 1.32712440018e20
+    r0 = [-81028456448.0, -125753376768.0, 0.0]
+    v0 = [-168605.0205078125, 186730.361328125, 0.0]
+    whole, _ = sl.kepler_propagate(r0, v0, mu_sun, 864000.0)
+    rh, vh = sl.kepler_propagate(r0, v0, mu_sun, 432000.0)
+    twice, _ = sl.kepler_propagate(rh, vh, mu_sun, 432000.0)
+    assert far(whole, twice) < 1e-12 * norm(whole), far(whole, twice)
+    try:
+        sl.kepler_propagate(r0, v0, float("nan"), 864000.0)
+    except ValueError as refused:
+        assert "not solved" in str(refused), refused
+    else:
+        raise AssertionError("a NaN mu was propagated")
+
+
 def test_nrlmsise00_density_falls_with_altitude_and_uses_every_argument():
     base = {"doy": 80, "sec": 43200.0, "lat_deg": 35.0, "lon_deg": 140.0}
     profile = [

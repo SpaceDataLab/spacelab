@@ -11,9 +11,11 @@
       way's runs from the y = 0 edge to 39, the long way's from -50 to 39) and, on the prograde
       short way, those the shipped bracket could hold: it needed y(-50) > 0, and none has it.
    3. Departure 46, arrival 62, retrograde, short way: a 10-day arc at 252 km/s whose root lies
-      next to the y = 0 edge. The f64 solver of spacelab-astro refuses it; here it is solved at
-      100 digits from the f32 inputs the test prints, and its arc is checked by Kepler's equation
-      in the universal variable: alpha chi^2 = z, the time equation, and the arrival at r2.
+      next to the y = 0 edge. The f64 solver of spacelab-astro refused it until Ф28.N, its closure
+      check's universal propagator having stopped on its step cap; here it is solved at 100 digits
+      from the f32 inputs the test prints, and its arc is checked by Kepler's equation in the
+      universal variable: alpha chi^2 = z, the time equation, and the arrival at r2. The departure
+      velocity is printed for `lambert`'s test of the same cell.
    A failed check stops with an error.
 
        timeout 120 gp -q -f derivations/gpu_porkchop.gp </dev/null                               */
@@ -143,4 +145,5 @@ bits(b) = my(s = b >> 31, e = (b >> 23) % 256, m = b % 2^23); if (e == 0 && m ==
   check("arrival", sqrt((rarr - r2v) * (rarr - r2v)~) < 10^-80 * g[2]);
   printf("departure 46, arrival 62, retrograde: z_min %.6f, z %.17g, |v1| %.6f m/s, C3 %.25g m^2/s^2\n",
          zmin, z, sqrt(v1 * v1~), c3);
+  printf("departure 46, arrival 62, retrograde: v1 = [%.25g, %.25g, 0] m/s\n", v1[1], v1[2]);
 }

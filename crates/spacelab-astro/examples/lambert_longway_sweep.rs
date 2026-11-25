@@ -34,7 +34,8 @@ fn main() {
                     let Ok((iv1, _)) = lambert_multirev(r1, r2, tof, MU, prograde, 0, false) else {
                         continue;
                     };
-                    let izzo_miss = (propagate(r1, iv1, MU, tof).0 - r2).norm();
+                    let izzo_miss = propagate(r1, iv1, MU, tof)
+                        .map_or(f64::INFINITY, |(rf, _)| (rf - r2).norm());
                     if !(izzo_miss.is_finite() && izzo_miss <= 1e-9 * r2n) {
                         continue;
                     }
@@ -42,7 +43,8 @@ fn main() {
                     match lambert(r1, r2, tof, MU, prograde) {
                         None => refused += 1,
                         Some((v1, _)) => {
-                            let miss = (propagate(r1, v1, MU, tof).0 - r2).norm();
+                            let miss = propagate(r1, v1, MU, tof)
+                                .map_or(f64::INFINITY, |(rf, _)| (rf - r2).norm());
                             let rel = miss / r2n;
                             if !(rel.is_finite() && rel <= 1e-6) {
                                 inaccurate += 1;

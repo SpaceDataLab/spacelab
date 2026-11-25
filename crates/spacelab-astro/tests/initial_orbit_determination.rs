@@ -81,7 +81,9 @@ fn period(r: Vec3) -> f64 {
 /// there.
 fn synthesise(r0: Vec3, v0: Vec3, observer: Vec3, arc: f64) -> ([Sighting; 3], Vec3, Vec3) {
     let times = [-0.5 * arc, 0.0, 0.5 * arc];
-    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| propagate(r0, v0, MU, times[i]));
+    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+        propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+    });
     let sightings = core::array::from_fn(|i| {
         let line = states[i].0 - observer;
         Sighting {
@@ -95,7 +97,9 @@ fn synthesise(r0: Vec3, v0: Vec3, observer: Vec3, arc: f64) -> ([Sighting; 3], V
 
 /// Three sightings at arbitrary epochs: neither centred on zero nor evenly spaced.
 fn at_epochs(r0: Vec3, v0: Vec3, observer: Vec3, times: [f64; 3]) -> ([Sighting; 3], Vec3, Vec3) {
-    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| propagate(r0, v0, MU, times[i]));
+    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+        propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+    });
     let sightings = core::array::from_fn(|i| {
         let line = states[i].0 - observer;
         Sighting {
@@ -118,7 +122,9 @@ fn from_a_turning_station(
     times: [f64; 3],
 ) -> ([Sighting; 3], Vec3, Vec3) {
     const EARTH_RATE: f64 = 7.292_115e-5;
-    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| propagate(r0, v0, MU, times[i]));
+    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+        propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+    });
     let sightings = core::array::from_fn(|i| {
         let angle = EARTH_RATE * times[i];
         let (sin, cos) = (libm::sin(angle), libm::cos(angle));
@@ -149,9 +155,13 @@ fn from_a_second_satellite(
     observer_v0: Vec3,
     times: [f64; 3],
 ) -> ([Sighting; 3], Vec3, Vec3) {
-    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| propagate(r0, v0, MU, times[i]));
+    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+        propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+    });
     let sightings = core::array::from_fn(|i| {
-        let observer = propagate(observer0, observer_v0, MU, times[i]).0;
+        let observer = propagate(observer0, observer_v0, MU, times[i])
+            .expect("the universal Kepler solve settles")
+            .0;
         let line = states[i].0 - observer;
         Sighting {
             time: times[i],
@@ -232,7 +242,9 @@ fn the_methods_are_measured_at_epochs_that_are_neither_centred_nor_evenly_spaced
         "Laplace velocity {laplace_velocity:e} m/s"
     );
 
-    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| propagate(r0, v0, MU, times[i]));
+    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+        propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+    });
     let series = herrick_gibbs(
         states[0].0,
         states[1].0,
@@ -436,7 +448,9 @@ fn eccentric() -> (Vec3, Vec3, Vec3) {
 fn the_position_vector_methods_are_measured_on_an_eccentric_orbit() {
     let (r0, v0, observer) = eccentric();
     let times = [-500.0, 200.0, 900.0];
-    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| propagate(r0, v0, MU, times[i]));
+    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+        propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+    });
 
     let spread = (states[2].0.norm() - states[1].0.norm()) / states[1].0.norm();
     assert!(spread > 0.1, "the sample is not eccentric enough: {spread}");
@@ -544,7 +558,9 @@ fn noisy(
     noise: &mut Gaussian,
 ) -> ([Sighting; 3], Vec3) {
     let times = [-0.5 * arc, 0.0, 0.5 * arc];
-    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| propagate(r0, v0, MU, times[i]));
+    let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+        propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+    });
     let sightings = core::array::from_fn(|i| {
         let line = states[i].0 - observer;
         let direction = line.scale(1.0 / line.norm());
@@ -747,7 +763,9 @@ fn gibbs_and_herrick_gibbs_swap_places_at_a_measurable_transfer_angle() {
         let fraction = 2e-4 * libm::pow(1000.0, f64::from(step) / 47.0);
         let arc = fraction * period;
         let times = [-0.5 * arc, 0.0, 0.5 * arc];
-        let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| propagate(r0, v0, MU, times[i]));
+        let states: [(Vec3, Vec3); 3] = core::array::from_fn(|i| {
+            propagate(r0, v0, MU, times[i]).expect("the universal Kepler solve settles")
+        });
         let angle = libm::acos(
             (states[0].0.dot(states[2].0) / (states[0].0.norm() * states[2].0.norm()))
                 .clamp(-1.0, 1.0),

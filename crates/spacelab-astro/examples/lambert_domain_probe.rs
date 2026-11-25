@@ -80,7 +80,9 @@ fn main() {
                                 solved += 1;
                                 fingerprint.absorb_vec(v1);
                                 fingerprint.absorb_vec(v2);
-                                let rel = (propagate(r1, v1, MU, tof).0 - r2).norm() / r2n;
+                                let rel = propagate(r1, v1, MU, tof)
+                                    .map_or(f64::INFINITY, |(rf, _)| (rf - r2).norm())
+                                    / r2n;
                                 if rel > worst {
                                     worst = rel;
                                     worst_case = format!(

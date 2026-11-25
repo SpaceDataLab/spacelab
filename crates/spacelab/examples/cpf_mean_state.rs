@@ -204,7 +204,9 @@ fn check(zonal: &DsstZonal) {
     .to_state();
     let arc: Vec<Vec3> = (-4..=4)
         .map(|j| {
-            spacelab_astro::kepler::propagate(position, true_velocity, MU, 60.0 * f64::from(j)).0
+            spacelab_astro::kepler::propagate(position, true_velocity, MU, 60.0 * f64::from(j))
+                .expect("the universal Kepler solve settles")
+                .0
         })
         .collect();
     let velocity = central_difference(&arc, 60.0);

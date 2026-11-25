@@ -18,6 +18,12 @@
    Conics: an ellipse, a hyperbola, e = 0.999 and e = 1.0001 from a 7000 km periapsis, the double
    rounding of e = 1 (|alpha| below 1e-16), and e = 3; spans from 2^-10 s to 1e7 s, both signs.
 
+   A second table, in SI heliocentric units (mu the double nearest 1.32712440018e20 m^3/s^2): two
+   fast hyperbolas at 1 au, one the 252 km/s arc of the porkchop cell that `universal_anomaly` once
+   ran out its step cap on (departure 46, arrival 62, retrograde, its velocity on a 2^-10 grid),
+   from a day to a year and backwards. There alpha r0 is -72 and -4.9, but alpha itself is above
+   -1e-9 per metre, the threshold the solver once compared it with.
+
        timeout 120 gp -q -f derivations/kepler_universal.gp </dev/null                             */
 
 default(realprecision, 100);
@@ -81,3 +87,37 @@ worst = 0;
            fmt(sol[1]), fmt(sol[2]), fmt(sol[3]))));
 }
 printf("universal Kepler residual |F(chi)|/scale, worst over %d roots: %.3g\n", #cases * #spans, worst);
+
+/* ---- the heliocentric table -------------------------------------------------------------------- */
+/* round to 53 significant bits, ties to even */
+d64(x) = {
+  my(e, m, f, d);
+  if (x == 0, return(0));
+  e = exponent(x); m = x * 2^(52 - e); f = floor(m); d = m - f;
+  if (d > 1/2, f++, d == 1/2 && f % 2, f++);
+  f * 2^(e - 52);
+}
+mu = d64(132712440018 * 10^9);
+grid10(x) = round(x * 2^10) / 2^10;
+{
+  helio = [
+    [[-81028456448, -125753376768, 0], [grid10(-16860502075749397/10^11), grid10(18673036111446476/10^11), 0]],
+    [[100000000000, -110000000000, 7000000000], [60000, 50000, -8000]]
+  ];
+  hspans = [[86400, 864000, 2592000, 31557600, -864000], [10^6, 10^7, 10^8, -3 * 10^7, 31557600]];
+}
+worst = 0;
+{
+  for (i = 1, #helio, for (j = 1, #hspans[i],
+    my(r = helio[i][1], v = helio[i][2], dt = hspans[i][j], sol = root(r, v, dt), r0 = sqrt(r * r~),
+       alpha = 2 / r0 - (v * v~) / mu);
+    if (!(alpha * r0 < -1 && alpha > -10^-9), error("not the regime the table is for: ", alpha));
+    worst = max(worst, abs(kepler(r0, r * v~, alpha, sol[1], dt)) / sol[3]);
+    printf("    (%s, %s, %s, %s, %s, %s),\n", vfmt(r * 1.), vfmt(v * 1.), fmt(dt * 1.),
+           fmt(sol[1]), fmt(sol[2]), fmt(sol[3]))));
+}
+{
+  printf("heliocentric universal Kepler residual |F(chi)|/scale, worst over %d roots: %.3g\n",
+         #hspans[1] + #hspans[2], worst);
+}
+printf("mu = %s\n", fmt(mu * 1.));

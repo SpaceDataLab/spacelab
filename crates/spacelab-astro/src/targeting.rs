@@ -556,7 +556,8 @@ mod tests {
         let tof = 3_000.0;
         // Somewhere the transfer actually reaches: propagate the departure orbit and take the
         // point, then displace it so the arc is not the trivial one.
-        let (coasted, _) = propagate(r1, v1, MU_EARTH, tof);
+        let (coasted, _) =
+            propagate(r1, v1, MU_EARTH, tof).expect("the universal Kepler solve settles");
         let goal_position = Vec3::new(coasted.x + 300e3, coasted.y - 200e3, coasted.z + 150e3);
 
         let (departure, _) = crate::lambert(r1, goal_position, tof, MU_EARTH, true)
@@ -580,7 +581,8 @@ mod tests {
             ],
             |x| {
                 let v = Vec3::new(v1.x + x[0], v1.y + x[1], v1.z + x[2]);
-                let (r, _) = propagate(r1, v, MU_EARTH, tof);
+                let (r, _) =
+                    propagate(r1, v, MU_EARTH, tof).expect("the universal Kepler solve settles");
                 Some([r.x, r.y, r.z])
             },
         )

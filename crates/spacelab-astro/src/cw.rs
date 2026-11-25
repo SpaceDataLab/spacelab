@@ -205,6 +205,7 @@ mod tests {
     // regenerating one is a copy rather than a rounding decision.
     #![allow(
         clippy::excessive_precision,
+        clippy::expect_used,
         clippy::float_cmp,
         clippy::needless_range_loop
     )]
@@ -455,8 +456,10 @@ mod tests {
         let period = TAU / n;
         for frac in [0.1, 0.25, 0.5] {
             let dt = frac * period;
-            let (cr, cv) = propagate(chief_r, chief_v, MU, dt);
-            let (dr, dv) = propagate(dep_r, dep_v, MU, dt);
+            let (cr, cv) =
+                propagate(chief_r, chief_v, MU, dt).expect("the universal Kepler solve settles");
+            let (dr, dv) =
+                propagate(dep_r, dep_v, MU, dt).expect("the universal Kepler solve settles");
             let truth = relative_lvlh_state(cr, cv, dr - cr, dv - cv, n);
             let cw = cw_propagate(s0, n, dt);
             let perr = ((truth[0] - cw[0]).powi(2)
@@ -498,8 +501,10 @@ mod tests {
             ];
             let rel_r = Vec3::new(s0[0], s0[1], s0[2]);
             let rel_v = Vec3::new(s0[3] - n * s0[1], s0[4] + n * s0[0], s0[5]);
-            let (cr, cv) = propagate(chief_r, chief_v, MU, dt);
-            let (dr, dv) = propagate(chief_r + rel_r, chief_v + rel_v, MU, dt);
+            let (cr, cv) =
+                propagate(chief_r, chief_v, MU, dt).expect("the universal Kepler solve settles");
+            let (dr, dv) = propagate(chief_r + rel_r, chief_v + rel_v, MU, dt)
+                .expect("the universal Kepler solve settles");
             let truth = relative_lvlh_state(cr, cv, dr - cr, dv - cv, n);
             let cw = cw_propagate(s0, n, dt);
             ((truth[0] - cw[0]).powi(2) + (truth[1] - cw[1]).powi(2) + (truth[2] - cw[2]).powi(2))

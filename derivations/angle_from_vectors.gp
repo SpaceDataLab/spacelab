@@ -6,7 +6,9 @@
       u = (2, -3, 6)/7 and w = (3, 6, 2)/7 orthonormal, t = 10^-k and pi - 10^-k, k = 1..12. Rows: b,
       atan2(|a x b|, a.b), exact for the doubles a and b, which the tests pass to the code as they
       are: the solar and view zenith and the scattering angle of
-      `the_angles_keep_their_digits_next_to_zero_and_pi` (spacelab-earthvision/src/geometry.rs).
+      `the_angles_keep_their_digits_next_to_zero_and_pi` (spacelab-earthvision/src/geometry.rs) and
+      the phase angle of `the_phase_angle_keeps_its_digits_next_to_opposition_and_conjunction`
+      (spacelab-propagation/tests/lightcurve.rs).
 
        timeout 120 gp -q -f derivations/angle_from_vectors.gp </dev/null                         */
 

@@ -4776,7 +4776,7 @@ exclude_re = [
     # `==` stops a back-lit facet being flipped at all and `>` flips a front-lit one, both of which
     # `a_double_sided_facet_turns_its_normal_round_only_when_the_sun_is_behind_it` measures at the
     # full Lambertian intensity against zero.
-    "lightcurve\\.rs:209:45: replace < with <= in PhotometricBoxWing<P>::radiant_intensity",
+    "lightcurve\\.rs:216:45: replace < with <= in PhotometricBoxWing<P>::radiant_intensity",
 
     # --- `reseal-astrometry`: the Rodrigues term that the only caller cannot reach (#281) ---------
     #

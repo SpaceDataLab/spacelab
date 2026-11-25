@@ -60,7 +60,7 @@
 //! of that photometry, and the papers' figures are theirs. The mathematics is free to implement
 //! with a citation; the data has to be obtained before the residual can be quoted.
 
-use crate::attitude::Vec3;
+use crate::attitude::{Vec3, cross};
 use crate::spacecraft::BoxWing;
 
 /// Total solar irradiance at 1 au, W·m⁻² — the IAU 2015 Resolution B3 nominal value.
@@ -149,9 +149,16 @@ impl ViewGeometry {
 
     /// Sun–object–observer angle, radians. Zero at opposition, where the object is fully lit as seen
     /// from the observer, and `π` at conjunction, where its lit side is turned away.
+    ///
+    /// `atan2(|s × o|, s·o)`: `acos` of the dot product would lose `√(2u)` of angle next to
+    /// opposition and conjunction, where the cosine is flat (`derivations/angle_from_vectors.mac`).
     #[must_use]
     pub fn phase_angle(&self) -> f64 {
-        libm::acos(dot(self.sun_body, self.observer_body).clamp(-1.0, 1.0))
+        let normal = cross(self.sun_body, self.observer_body);
+        libm::atan2(
+            libm::sqrt(dot(normal, normal)),
+            dot(self.sun_body, self.observer_body),
+        )
     }
 
     /// Unit body-frame direction to the Sun.

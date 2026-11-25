@@ -235,6 +235,40 @@ all of it "holds" (0.0773 to 0.0931; "fails" 0.0048 to 0.0058): a cluster mean t
 small spread. A skewness of −2 moves the same excess to "fails". On §10.38's rows the storm-level differences to NRLMSISE-00 are skewed by −1.4: the long tail is
 where SDTM-1 is far better. Under a null of that shape, "fails" would be the word that rises.
 
+*Scope, measured (2026-11-25).* Added under `plans/18` Ф30.N on the user's decision of 2026-11-25, before the
+tag of A6; no blind file has been fetched. `tools/score-blind.py shape` forms each level's cluster means as (b)
+forms them, on the 2020 cut of the frozen corpus: §10.38's 109 221 rows from 2020-01-01 to 2026-04-30, all
+before `FROZEN_END`, under the fields frozen at 2020 and B5's rival fitted like them on the rows before 2020.
+It prints the skewness `G1` of the clusters' means, with a percentile interval of 4 000 draws of whole
+storm-level clusters; a day goes with the storm-level cluster of its earliest row. B5's difference is skewed by
++0.01 [−0.61, +0.59] over 136 storm-level clusters and by −0.12 [−0.38, +0.16] over 2 312 days. SDTM-1 minus
+NRLMSISE-00, put at −1.4 above, gives −1.60 [−2.01, −1.21] and −1.43 [−1.83, −1.05].
+`tools/score-blind.py level --skew` runs the rule over S2's 36 cells of calendars and spreads, each cluster's
+draw with the storm level's skewness and each day's with the day level's. A standardised Gamma(4/γ²), mirrored
+for γ < 0, has mean 0, variance 1 and skewness γ; to first order, a skewness γ adds γ(2z² + 1)φ(z)/(6√n) to the
+Studentized mean's lower tail, the side of "holds", and takes it from the upper tail, the side of "fails"
+(`derivations/group_sequential_skew.mac`, 18 identities, and `.gp`). A sampled skewness does not decide alone
+(`plans/18` rule 13): each hypothesis is read at its point estimates and at the ends of its intervals that move
+the level towards "holds". At 100 000 replicates a cell, seed 20261124 where no other is named:
+
+- **B2** is measured in the private tree, where its column is computed (A3). Its clusters' means are skewed to
+  the negative side, and at the storm level the interval excludes zero. Under a null of that shape, at the
+  point estimates and at the upper ends, "holds" stays below its share of 0.025 in every cell and the excess is
+  on "fails". That is the safe side (rule 13): "fails" is the word that counts against SDTM-1 (A7), and a false
+  "holds" would claim a lead it does not have. B2 keeps the registered bounds; under such a null its "fails"
+  carries a level above its share.
+- **B5**, read with the registered bounds, is near symmetric at its point estimates: "holds" 0.0231 to 0.0261,
+  "fails" 0.0226 to 0.0266. At the upper ends, +0.59 and +0.16, "holds" is 0.0351 to 0.0404 and "fails" 0.0151 to
+  0.0164: the excess is on "holds", the word that enters the rival into the ledger. So B5 reads **holds** when
+  `T ≤ −1.13 · bound` at both levels, at every look, and **fails** at (a)'s bound, as before; this changes (c)
+  for B5 only. 1.13 is the smallest factor, rounded up to 0.01, at which "holds" is at most 0.025 in every cell
+  under the upper-end null (1.1299 in the worst cell). Each replicate's largest factor that still reads "holds"
+  gives the rate at every factor from one run. With fresh seeds (20261125), the amended B5 gives "holds" 0.0218
+  to 0.0248 and "fails" 0.0150 to 0.0163 there. A factor above 1 can only lower the level, so under a symmetric
+  null (a)'s guarantee and S2's 72 gated cells still bound B5's. `tools/test_score_blind.py` holds "holds"
+  within its share on the nine calendars at B5's upper ends, at a storm's 1.4 and a day's 0.8, and fails on the
+  bound as registered.
+
 **A3 (2026-11-24). B2 in the public tree (D-38).** B2 stays registered. Its column is computed in the private
 tree, because its drivers are SET's index files `SOLFSMY.TXT` and `DTCFILE.TXT`, and the path that reads them,
 `space_weather::jb2008_drivers`, is not in the public cut (`docs/provenance.md`, `set-jb2008-indices`). The

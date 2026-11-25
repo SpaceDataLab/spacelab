@@ -7,6 +7,7 @@ Two reads, one code path:
     tools/score-blind.py rival        # B5's rival, fitted on every row of the frozen corpus
     tools/score-blind.py blind DIR    # the blind rows in DIR, under the shipped fields
     tools/score-blind.py gap DIR      # Swarm A, B and C of 2026-03, its own row (§9 A4)
+    tools/score-blind.py shape        # the skewness of B2's and B5's cluster means at the 2020 cut
     tools/score-blind.py level        # the level of §9 A2's rule under the null, by simulation
 
 `cut` is the protocol's §7 check. It scores the rows `tools/evaluate-sdtm.py run --kind frozen` scored,
@@ -45,7 +46,9 @@ The group-sequential rule (§9 A2) reads B2 and B5 at three looks: the blind row
 difference over its CR2 standard error, read against Student's law with Bell and McCaffrey's degrees of
 freedom. Look k may spend in all what the registered O'Brien-Fleming bounds spend by look k at equal
 information; its bound follows the clusters realised at the looks read, through the information
-`sum n_c^2` of each. A word needs both levels.
+`sum n_c^2` of each. A word needs both levels. B5 reads `holds` at `B5_HOLDS_FACTOR` times the bound and
+`fails` at the bound: the factor holds `holds` to its share of the level under the skewed null its
+cluster means show on the 2020 cut (`shape`; §9 A2, Scope, 2026-11-25).
 
 Run under `uv run --project tools --locked python -I`, after
 `cargo build -p spacelab-propagation --release --example blind_rows --example nrlmsise00_rows`.
@@ -98,6 +101,11 @@ ENDED_AFTER = np.timedelta64(183, "D")
 # O'Brien-Fleming for three equal looks at a two-sided 0.05, C sqrt(3/k) with C = 2.004036, rounded up:
 # `derivations/group_sequential_obf.mac` and `.gp`.
 REGISTERED_BOUNDS = (3.4711, 2.4545, 2.0041)
+# §9 A2, Scope (2026-11-25): B5 reads `holds` at this factor times the bound, `fails` at the bound. The
+# smallest factor, rounded up to 0.01, that holds `holds` to LEVEL / 2 in every cell of `level --skew 0.59
+# 0.16` (100 000 replicates, seed 20261124): the upper ends of the intervals of B5's skewness at the 2020
+# cut (`shape`). B2's skewness puts the excess on `fails`, and B2 keeps the registered bound.
+B5_HOLDS_FACTOR = 1.13
 SIMPSON_POINTS = 1001
 # §9 A4: the month of Swarm A, B and C the frozen corpus lacks, scored apart by `gap`.
 GAP_MONTH = np.datetime64("2026-03")
@@ -369,15 +377,16 @@ def studentized(
 
 def sequential(
     looks: list[dict[str, tuple[float, float, float, int, float]]],
+    holds_factor: float = 1.0,
 ) -> list[tuple[str, dict[str, float | None]]]:
     """§9 A2: the word at each look read, from each verdict level's `(mean, se, nu, clusters,
     information)`, with each level's bound on its Student statistic (`None` where the look takes no
     decision).
 
     A look decides only when every level holds `MIN_CLUSTERS` clusters. It reads `holds` when every
-    level's statistic lies at or below minus its bound, `fails` when every one lies at or above its
-    bound, `continue` otherwise; after a word the rule stops. At the last registered look `continue`
-    is `not shown`, and a last look that cannot decide is `not resolved`."""
+    level's statistic lies at or below minus `holds_factor` times its bound, `fails` when every one lies
+    at or above its bound, `continue` otherwise; after a word the rule stops. At the last registered
+    look `continue` is `not shown`, and a last look that cannot decide is `not resolved`."""
     decides = [
         all(look[level][3] >= MIN_CLUSTERS for level in VERDICT_LEVELS)
         for look in looks
@@ -411,7 +420,7 @@ def sequential(
             out.append((word, limit))
             continue
         statistic = {level: look[level][0] / look[level][1] for level in VERDICT_LEVELS}
-        if all(statistic[v] <= -limit[v] for v in VERDICT_LEVELS):
+        if all(statistic[v] <= -holds_factor * limit[v] for v in VERDICT_LEVELS):
             word = "holds"
         elif all(statistic[v] >= limit[v] for v in VERDICT_LEVELS):
             word = "fails"
@@ -449,9 +458,11 @@ def look_table(
     values: np.ndarray,
     labels: dict[str, np.ndarray],
     looks: int,
+    holds_factor: float = 1.0,
 ) -> None:
     """Print §9 A2's looks of one hypothesis: per look and level the clusters, the mean, its CR2
-    standard error, the degrees of freedom, the statistic and its bound; then the word."""
+    standard error, the degrees of freedom, the statistic and its bound, with the bound of `holds`
+    beside it where `holds_factor` moves it; then the word."""
     if looks == 0:
         print(
             f"{name}: no look complete; the first reads the rows before {LOOK_ENDS[0]}"
@@ -464,14 +475,20 @@ def look_table(
         }
         for end in LOOK_ENDS[:looks]
     ]
-    read = sequential(cells)
+    read = sequential(cells, holds_factor)
     print(
         f"{name}, by look: look | rows before | level | clusters | mean | se | nu | t | bound"
     )
     for k, (cell, (word, limit)) in enumerate(zip(cells, read, strict=True)):
         for level in VERDICT_LEVELS:
             mean, se, nu, n, _ = cell[level]
-            bound = "-" if limit[level] is None else f"{limit[level]:.4f}"
+            bound = (
+                "-"
+                if limit[level] is None
+                else f"{limit[level]:.4f}"
+                if holds_factor == 1.0
+                else f"{limit[level]:.4f}, holds at {-holds_factor * limit[level]:.4f}"
+            )
             print(
                 f"  {k + 1} | {LOOK_ENDS[k]} | {level} | {n} | {mean:+.3f} | {se:.3f} | {nu:.1f} | "
                 f"{mean / se:+.3f} | {bound}"
@@ -741,14 +758,15 @@ def read_verdicts(
         - intervals.absolute_percent(sdtm[both]),
         {level: clusters[level][both[every]] for level in VERDICT_LEVELS},
         looks,
+        B5_HOLDS_FACTOR,
     )
     print(f"  {storm_folds(harness)}")
 
 
-def command_cut(_args) -> int:
-    harness = load("evaluate_sdtm", "evaluate-sdtm.py")
+def cut_rows(harness):
+    """The rows of the 2020 cut, the fields frozen at 2020 and their saved folds, and every model's
+    `ln(model / measured)` on them: `blind_rows`' columns and NRLMSISE-00."""
     fit, g = harness.fit, harness.g
-    intervals = load("cluster_intervals", "cluster-intervals.py")
     fields = [harness.OUT / field / f"{SPLIT}.field" for field in FIELDS]
     for path in fields:
         if not path.exists():
@@ -764,6 +782,14 @@ def command_cut(_args) -> int:
     rows.attrs = corpus.attrs
     rust = evaluate(rows, g, fields)
     msis = fit.nrlmsise00(rows) - np.log(rows.rho.to_numpy())
+    return fields, saved, rows, rust, msis
+
+
+def command_cut(_args) -> int:
+    harness = load("evaluate_sdtm", "evaluate-sdtm.py")
+    fit, g = harness.fit, harness.g
+    intervals = load("cluster_intervals", "cluster-intervals.py")
+    fields, saved, rows, rust, msis = cut_rows(harness)
     print(f"{SPLIT}: {len(rows)} rows, the fields {', '.join(str(p) for p in fields)}")
     for path in [*fields, *feeds(g)]:
         print(f"  sha256 {sha256(path)}  {path.name}")
@@ -814,6 +840,103 @@ def command_rival(_args) -> int:
     return 0
 
 
+def skewness(x: np.ndarray) -> float:
+    """The sample skewness with its small-sample factor, `G1 = g1 sqrt(K (K - 1)) / (K - 2)`."""
+    d = x - x.mean()
+    k = x.size
+    g1 = np.mean(d**3) / np.mean(d**2) ** 1.5
+    return float(g1 * math.sqrt(k * (k - 1)) / (k - 2))
+
+
+def cluster_skewness(
+    values: np.ndarray, labels: np.ndarray, blocks: np.ndarray, t: np.ndarray, intervals
+) -> tuple[int, float, float, float, float]:
+    """The clusters `labels` of `values` as §9 A2 forms them: their number, the row mean, and the
+    skewness of the clusters' row means, with a percentile interval of `DRAWS` draws of whole storm-level
+    clusters `blocks`. A day goes with the storm-level cluster of its earliest row, so a draw keeps the
+    days a storm or a block shares; at the storm level each draw is one of whole clusters."""
+    ids = np.unique(labels, return_inverse=True)[1]
+    means = np.bincount(ids, weights=values) / np.bincount(ids)
+    owners = np.unique(blocks, return_inverse=True)[1]
+    order = np.argsort(t, kind="stable")
+    earliest = order[np.unique(ids[order], return_index=True)[1]]
+    members = [np.flatnonzero(owners[earliest] == b) for b in range(owners.max() + 1)]
+    rng = np.random.default_rng(intervals.SEED)
+    draws = np.array(
+        [
+            skewness(means[np.concatenate([members[b] for b in pick])])
+            for pick in rng.integers(0, len(members), (DRAWS, len(members)))
+        ]
+    )
+    return means.size, float(values.mean()), skewness(means), *intervals.interval(draws)
+
+
+def command_shape(_args) -> int:
+    """§9 A2's Scope: the skewness of B2's and B5's cluster means at the verdict levels, formed as the rule
+    forms them, on the 2020 cut: §10.38's rows, every one before `FROZEN_END`, under the fields frozen at
+    2020 and B5's rival fitted on the same rows before 2020 (`tools/evaluate-sdtm.py run --kind frozen
+    --field flux_boundary_latitude`). SDTM-1 minus NRLMSISE-00 is printed beside them. No blind row is
+    read."""
+    harness = load("evaluate_sdtm", "evaluate-sdtm.py")
+    intervals = load("cluster_intervals", "cluster-intervals.py")
+    _, saved, rows, rust, msis = cut_rows(harness)
+    t = rows.t.to_numpy()
+    if (t >= FROZEN_END).any():
+        sys.exit(f"the cut holds rows at or after {FROZEN_END}")
+    path = harness.OUT / RIVAL / f"{SPLIT}.npz"
+    if not path.exists():
+        sys.exit(
+            f"no {path}; run tools/evaluate-sdtm.py run --kind frozen --field {RIVAL} --only {SPLIT}"
+        )
+    fold = np.load(path)
+    if not np.array_equal(fold["test"], saved["default"]["test"]):
+        sys.exit(f"{path} scored other rows than the shipped form's fold")
+    series = {"SDTM-1": rust[:, 0], "SDTM-1 with the solar wind": rust[:, 1]}
+    series["NRLMSISE-00"] = msis
+    every = np.logical_and.reduce([np.isfinite(v) for v in series.values()])
+    clusters = intervals.levels(
+        t[every],
+        rows.family.to_numpy()[every],
+        intervals.storm_numbers(t[every], storm_windows(rows, harness.g)),
+    )
+    percent = intervals.absolute_percent
+    sdtm = series["SDTM-1"][every]
+    rival = fold["residual"][every]
+    both = np.isfinite(rival)
+    differences = {
+        "SDTM-1 minus NRLMSISE-00": (
+            percent(sdtm) - percent(series["NRLMSISE-00"][every]),
+            np.ones(sdtm.size, dtype=bool),
+        ),
+        f"B5, {RIVAL} minus SDTM-1": (percent(rival[both]) - percent(sdtm[both]), both),
+    }
+    if JB2008 in series:
+        differences[f"B2, SDTM-1 minus the {JB2008}"] = (
+            percent(sdtm) - percent(series[JB2008][every]),
+            np.ones(sdtm.size, dtype=bool),
+        )
+    print(
+        f"{SPLIT}: {every.sum()} rows, {t[every].min()} to {t[every].max()}; MAPE difference | level | "
+        f"clusters | row mean | skewness of the clusters' means [95 %, {DRAWS} draws of storm-level "
+        "clusters]"
+    )
+    for name, (values, keep) in differences.items():
+        for level in VERDICT_LEVELS:
+            n, mean, g1, low, high = cluster_skewness(
+                values,
+                clusters[level][keep],
+                clusters["storm"][keep],
+                t[every][keep],
+                intervals,
+            )
+            print(
+                f"{name} | {level} | {n} | {mean:+.3f} | {g1:+.2f} [{low:+.2f}, {high:+.2f}]"
+            )
+    if JB2008 not in series:
+        print(f"B2, SDTM-1 against the {JB2008}: {JB2008_SKIP}")
+    return 0
+
+
 # §9 A2's simulation under the null. Clusters added per look, at the storm level: every combination of
 # 10 and 14, and 12 at each look. A storm lasts three to five days; a day holds 36 to 48 scored rows
 # (four satellites at one row per 2 h, with gaps).
@@ -824,8 +947,10 @@ NULL_ROWS_PER_DAY = (36, 48)
 # paired MAPE differences to NRLMSISE-00 give a storm 0.6 of a block's spread and a day 0.7; the grid
 # brackets them. The gate holds the symmetric shapes, which a null of exchangeable errors within a
 # cluster implies (§9 A2); the skewed shape is printed beside them, not gated.
+NULL_SPREADS = tuple(itertools.product((0.6, 1.4), (0.4, 0.8)))
 NULL_MODELS = tuple(
-    itertools.product(("normal", "heavy", "skewed"), (0.6, 1.4), (0.4, 0.8))
+    (shape, *spread)
+    for shape, spread in itertools.product(("normal", "heavy", "skewed"), NULL_SPREADS)
 )
 GATED_SHAPES = ("normal", "heavy")
 LEVEL = 0.05
@@ -872,9 +997,16 @@ def null_design(per_look: tuple[int, ...], seed: int) -> dict[str, np.ndarray]:
     }
 
 
-def null_draw(shape: str, rng: np.random.Generator, size) -> np.ndarray:
-    """Draws of mean 0 and variance 1: normal; skewed (an exponential less 1, skewness 2); or heavy
-    (Student's t with 3 degrees of freedom over sqrt(3))."""
+def null_draw(shape: str | float, rng: np.random.Generator, size) -> np.ndarray:
+    """Draws of mean 0 and variance 1: normal; skewed (an exponential less 1, skewness 2); heavy
+    (Student's t with 3 degrees of freedom over sqrt(3)); or, for a number `gamma`, Gamma(4 / gamma^2)
+    standardised, and mirrored when `gamma` is negative: skewness `gamma`
+    (`derivations/group_sequential_skew.mac`)."""
+    if isinstance(shape, float):
+        k = 4.0 / shape**2
+        return (
+            math.copysign(1.0, shape) * (rng.standard_gamma(k, size) - k) / math.sqrt(k)
+        )
     if shape == "normal":
         return rng.standard_normal(size)
     if shape == "skewed":
@@ -886,20 +1018,25 @@ def null_draw(shape: str, rng: np.random.Generator, size) -> np.ndarray:
 
 def null_level(
     design: dict[str, np.ndarray],
-    shape: str,
+    shape: str | float | tuple[str | float, str | float],
     storm_sd: float,
     day_sd: float,
     reps: int,
     seed: int,
     chunk: int = 4000,
-) -> dict[str, dict[str, int]]:
+    holds_factor: float = 1.0,
+) -> dict[str, dict]:
     """§9 A2's rule, run as code under the null on `design`. A day's mean difference is its cluster's
-    draw (sd `storm_sd` for a storm, 1 for a block) plus its own (sd `day_sd`), all of `shape`, mean 0.
+    draw (sd `storm_sd` for a storm, 1 for a block) plus its own (sd `day_sd`), mean 0, all of `shape`,
+    or of a pair of shapes: the clusters' draws and the days'.
 
     For each reference law, `student` (the rule) and `normal` (its statistics read against the normal
     bounds, the defect §9 A2 (b) removes), counts the replicates that end in `holds` and in `fails`,
-    and those whose storm level alone crosses at some look (§9 A2 (c): the rule's level is at most
-    that one's)."""
+    with the bound on "holds" `holds_factor` times the registered one, and those whose storm level alone
+    crosses at some look (§9 A2 (c): the rule's level is at most that one's). `margin` holds each
+    replicate's largest factor at which it still reads `holds`: a replicate reads `holds` exactly when
+    the factor is at most its margin, so the rate at any factor is read from it."""
+    cluster_shape, day_shape = shape if isinstance(shape, tuple) else (shape, shape)
     rng = np.random.default_rng(seed)
     look, labels, rows = design["look"], design["labels"], design["rows"]
     member = np.zeros((labels.size, labels.max() + 1))
@@ -928,14 +1065,15 @@ def null_level(
         "normal": [{level: z[level][k] for level in z} for k in range(len(plan))],
     }
     found = {
-        law: {"reps": reps, "holds": 0, "fails": 0, "storm alone": 0} for law in limits
+        law: {"reps": reps, "holds": 0, "fails": 0, "storm alone": 0, "margin": []}
+        for law in limits
     }
     done = 0
     while done < reps:
         r = min(chunk, reps - done)
         sums = (
-            null_draw(shape, rng, (r, scale.size))[:, labels] * scale[labels]
-            + day_sd * null_draw(shape, rng, (r, labels.size))
+            null_draw(cluster_shape, rng, (r, scale.size))[:, labels] * scale[labels]
+            + day_sd * null_draw(day_shape, rng, (r, labels.size))
         ) * rows
         statistic = []
         for days, present, counts, storm_design, day_design in plan:
@@ -947,15 +1085,26 @@ def null_level(
         for law, by_look in limits.items():
             going = np.ones(r, dtype=bool)
             alone = np.zeros(r, dtype=bool)
+            # "holds" at a look for every factor up to `reach`; "fails" stops the margin's growth.
+            margin, failed = np.full(r, -np.inf), np.zeros(r, dtype=bool)
             for t, limit in zip(statistic, by_look, strict=True):
-                below = (t["storm"] <= -limit["storm"]) & (t["day"] <= -limit["day"])
+                low = {v: holds_factor * limit[v] for v in VERDICT_LEVELS}
+                below = (t["storm"] <= -low["storm"]) & (t["day"] <= -low["day"])
                 above = (t["storm"] >= limit["storm"]) & (t["day"] >= limit["day"])
                 found[law]["holds"] += int((going & below).sum())
                 found[law]["fails"] += int((going & above).sum())
                 going &= ~(below | above)
                 alone |= np.abs(t["storm"]) >= limit["storm"]
+                reach = np.minimum(
+                    -t["storm"] / limit["storm"], -t["day"] / limit["day"]
+                )
+                margin = np.where(failed, margin, np.maximum(margin, reach))
+                failed |= above
             found[law]["storm alone"] += int(alone.sum())
+            found[law]["margin"].append(margin)
         done += r
+    for law in found:
+        found[law]["margin"] = np.concatenate(found[law]["margin"])
     return found
 
 
@@ -977,7 +1126,14 @@ def command_level(args) -> int:
     """§9 A2's S2 gate: the rule's level under the null over `NULL_SCENARIOS` x `NULL_MODELS`. The
     gate passes when every Monte Carlo interval of the rule's level on a `GATED_SHAPES` model, 95 %
     jointly over those cells, reaches down to `LEVEL`; the skewed model's rows say how far a skewed
-    null moves it, and to which word."""
+    null moves it, and to which word.
+
+    With `--skew`, the nulls are those of the measured skewness instead, a pair each (the clusters'
+    draws, the days'), over the same spreads (Scope, §9 A2): each row prints "holds" with its interval,
+    95 % jointly over the cells, and the factor on the bound of "holds" that brings it to `LEVEL / 2`;
+    the run passes when every "holds" interval reaches down to `LEVEL / 2`."""
+    if args.skew:
+        return skewed_level(args)
     cells = len(NULL_SCENARIOS) * sum(m[0] in GATED_SHAPES for m in NULL_MODELS)
     print(
         f"§9 A2 under the null, {args.reps} replicates a cell, seed {args.seed}: clusters added per look "
@@ -1011,6 +1167,55 @@ def command_level(args) -> int:
     print(
         f"largest gated level {worst:.4f}; every gated interval reaches {LEVEL}: "
         f"{'yes' if passed else 'NO'}"
+    )
+    return 0 if passed else 1
+
+
+def skewed_level(args) -> int:
+    """`level --skew`: the rule, with the bound on "holds" `args.holds_factor` times the registered one,
+    under the mean-zero nulls of the measured skewness (§9 A2, Scope)."""
+    models = [
+        ((storm, day), *spread)
+        for (storm, day), spread in itertools.product(args.skew, NULL_SPREADS)
+    ]
+    cells = len(NULL_SCENARIOS) * len(models)
+    share = LEVEL / 2.0
+    print(
+        f"§9 A2 under skewed nulls, {args.reps} replicates a cell, seed {args.seed}, the bound on holds "
+        f"{args.holds_factor} times the registered one: clusters added per look | fractions | skewness of "
+        f"the clusters' and the days' draws, storm sd, day sd | level | holds [MC, 95 % jointly over the "
+        f"{cells} cells] | fails | storm level alone | factor on the bound of holds for {share}"
+    )
+    worst, factor, passed = 0.0, 0.0, True
+    for i, per_look in enumerate(NULL_SCENARIOS):
+        design = null_design(per_look, args.seed + i)
+        totals = np.cumsum(per_look)
+        fractions = ", ".join(f"{n / totals[-1]:.2f}" for n in totals)
+        for j, (shape, storm_sd, day_sd) in enumerate(models):
+            rule = null_level(
+                design,
+                shape,
+                storm_sd,
+                day_sd,
+                args.reps,
+                args.seed + 1000 * i + j,
+                holds_factor=args.holds_factor,
+            )["student"]
+            low, high = mc_interval(rule["holds"], args.reps, cells)
+            passed &= low <= share
+            worst = max(worst, rule["holds"] / args.reps)
+            # The smallest factor whose rate of holds is at most the share: the margin's upper quantile.
+            needed = float(np.quantile(rule["margin"], 1.0 - share, method="higher"))
+            factor = max(factor, needed)
+            print(
+                f"{per_look} | {fractions} | {shape[0]:+.2f}, {shape[1]:+.2f}, {storm_sd}, {day_sd} | "
+                f"{(rule['holds'] + rule['fails']) / args.reps:.4f} | {rule['holds'] / args.reps:.4f} "
+                f"[{low:.4f}, {high:.4f}] | {rule['fails'] / args.reps:.4f} | "
+                f"{rule['storm alone'] / args.reps:.4f} | {needed:.4f}"
+            )
+    print(
+        f"largest holds {worst:.4f}; every holds interval reaches {share}: "
+        f"{'yes' if passed else 'NO'}; the largest factor for {share}: {factor:.4f}"
     )
     return 0 if passed else 1
 
@@ -1136,6 +1341,7 @@ def main() -> int:
     sub = parser.add_subparsers(required=True)
     sub.add_parser("cut").set_defaults(func=command_cut)
     sub.add_parser("rival").set_defaults(func=command_rival)
+    sub.add_parser("shape").set_defaults(func=command_shape)
     blind = sub.add_parser("blind")
     blind.add_argument("directory", type=pathlib.Path)
     blind.set_defaults(func=command_blind)
@@ -1145,6 +1351,15 @@ def main() -> int:
     level = sub.add_parser("level")
     level.add_argument("--reps", type=int, default=100_000)
     level.add_argument("--seed", type=int, default=20261124)
+    level.add_argument(
+        "--skew",
+        type=float,
+        nargs=2,
+        action="append",
+        metavar=("CLUSTERS", "DAYS"),
+        help="the skewness of the clusters' and the days' draws; repeat for more nulls",
+    )
+    level.add_argument("--holds-factor", type=float, default=1.0)
     level.set_defaults(func=command_level)
     args = parser.parse_args()
     return args.func(args)

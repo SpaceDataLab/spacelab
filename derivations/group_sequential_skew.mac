@@ -1,0 +1,68 @@
+/* The skewed null of SDTM-1's blind test (docs/sdtm1-blind-protocol.md §9 A2, Scope; plans/18 Ф30.N).
+
+   (a) The null's shape. G ~ Gamma(k, 1) and X = (G - k) / sqrt(k) have mean 0, variance 1, skewness
+       2 / sqrt(k) and kurtosis 3 + 6 / k, so k = 4 / gamma^2 gives the skewness gamma > 0, and -X gives
+       -gamma. k = 1 is the exponential less 1, the shape `skewed` (gamma = 2). `tools/score-blind.py level
+       --skew` draws from this family at a measured gamma.
+   (b) Which word the skewness moves. For the one-sample Studentized mean T = sqrt(n) mean / sd of draws
+       with mean 0, variance 1 and skewness gamma, write A = sqrt(n) mean and S^2 = 1 + B / sqrt(n), with
+       B = sqrt(n) (mean of X^2 - 1) to first order. Then T = A - A B / (2 sqrt(n)) + O(1/n); E[A B] =
+       gamma, E[A^3] = gamma / sqrt(n), and (A, B) is jointly normal in the limit, so E[A^3 B] = 3 gamma
+       (Isserlis). Hence kappa1(T) = -gamma / (2 sqrt(n)) and kappa3(T) = -2 gamma / sqrt(n), and the
+       one-term Edgeworth expansion is P(T <= x) = Phi(x) + gamma (2 x^2 + 1) phi(x) / (6 sqrt(n))
+       (Hall 1992, The Bootstrap and Edgeworth Expansion, §2.6). The lower tail ("holds", T <= -z) gains
+       that term and the upper tail ("fails", T >= z) loses it: a positive gamma moves the level to
+       "holds", a negative one to "fails", and the two-sided level is unchanged at order 1 / sqrt(n).
+
+   Each check prints `<name>: 0`.
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/group_sequential_skew.mac */
+display2d:false$
+ratprint:false$
+
+/* (a) */
+assume(k > 0, g > 0)$
+raw(n):= minfactorial(makefact(integrate(x^(k + n - 1) * exp(-x), x, 0, inf) / gamma(k)))$
+central(n):= expand(sum(binomial(n, j) * raw(j) * (-k)^(n - j), j, 0, n))$
+print("density integrates to 1:", ratsimp(raw(0) - 1))$
+print("standardised mean:", ratsimp(central(1) / sqrt(k)))$
+print("standardised variance:", ratsimp(central(2) / k - 1))$
+print("standardised skewness 2/sqrt(k):", radcan(central(3) / k^(3 / 2) - 2 / sqrt(k)))$
+print("standardised kurtosis 3 + 6/k:", ratsimp(central(4) / k^2 - 3 - 6 / k))$
+print("k = 4/gamma^2 gives skewness gamma:", radcan(subst(k = 4 / g^2, 2 / sqrt(k)) - g))$
+print("the mirror -X has skewness -gamma:", radcan((-1)^3 * central(3) / k^(3 / 2) + 2 / sqrt(k)))$
+print("k = 1 is the exponential less 1:", ratsimp(subst(k = 1, x^(k - 1) * exp(-x) / gamma(k)) - exp(-x)))$
+forget(k > 0, g > 0)$
+
+/* (b) Draws with mean 0, variance 1, third moment g; n of them, indices i, j, l. */
+mu(p):= if p = 0 then 1 elseif p = 1 then 0 elseif p = 2 then 1 elseif p = 3 then g else 'mu[p]$
+/* E[A B] = (1/n) sum_i E[X_i (X_i^2 - 1)]: only i = j survives. */
+eab: n * (mu(3) - mu(1)) / n$
+print("E[A B] = gamma:", ratsimp(eab - g))$
+/* E[A^3] = n^(-3/2) sum E[X_i X_j X_l]: only i = j = l survives. */
+ea3: n * mu(3) / n^(3 / 2)$
+print("E[A^3] = gamma/sqrt(n):", radcan(ea3 - g / sqrt(n)))$
+/* The limit law of (A, B): Var A = 1, Cov(A, B) = E[A B]; Isserlis on A, A, A, B. */
+cov: matrix([1, eab], [eab, vb])$
+idx: [1, 1, 1, 2]$
+ea3b: cov[idx[1], idx[2]] * cov[idx[3], idx[4]] + cov[idx[1], idx[3]] * cov[idx[2], idx[4]]
+    + cov[idx[1], idx[4]] * cov[idx[2], idx[3]]$
+print("E[A^3 B] = 3 gamma:", ratsimp(ea3b - 3 * g))$
+/* T = A - A B / (2 sqrt(n)) to order 1/sqrt(n), and E[T^2] = 1 + O(1/n): kappa3 = E[T^3] - 3 kappa1. */
+k1: -eab / (2 * sqrt(n))$
+print("kappa1(T) = -gamma/(2 sqrt(n)):", radcan(k1 + g / (2 * sqrt(n))))$
+m3: ea3 - 3 / (2 * sqrt(n)) * ea3b$
+k3: m3 - 3 * k1$
+print("kappa3(T) = -2 gamma/sqrt(n):", radcan(k3 + 2 * g / sqrt(n)))$
+/* Edgeworth: the density phi (1 + kappa1 He1 + kappa3 He3 / 6) integrates to
+   Phi - phi (kappa1 + kappa3 He2 / 6), since d/dx (-phi He_{m-1}) = phi He_m. */
+phi(x):= exp(-x^2 / 2) / sqrt(2 * %pi)$
+print("d/dx(-phi He0) = phi He1:", ratsimp(diff(-phi(x), x) - phi(x) * x))$
+print("d/dx(-phi He2) = phi He3:", ratsimp(diff(-phi(x) * (x^2 - 1), x) - phi(x) * (x^3 - 3 * x)))$
+correction: -phi(x) * (k1 + k3 * (x^2 - 1) / 6)$
+print("P(T <= x) - Phi(x) = gamma (2x^2+1) phi / (6 sqrt(n)):",
+    radcan(correction - g * (2 * x^2 + 1) * phi(x) / (6 * sqrt(n))))$
+/* The two words at a bound z: "holds" is T <= -z, "fails" is T >= z. */
+holds: subst(x = -z, correction)$
+fails: -subst(x = z, correction)$
+print("the first-order terms of the two words cancel:", radcan(holds + fails))$
+print("holds gains what fails loses, sign of gamma:", radcan(holds - g * (2 * z^2 + 1) * phi(z) / (6 * sqrt(n))))$

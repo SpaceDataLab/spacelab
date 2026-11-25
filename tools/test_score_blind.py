@@ -2,8 +2,9 @@
 """The blind runner's amended rules (`docs/sdtm1-blind-protocol.md` §9, `plans/18` Ф30.N).
 
 G3: the rule's quadrature against `derivations/group_sequential_obf.gp`'s 30-digit values. S2: the
-rule's level under the null; the refusal of the frozen span; no word below the cluster count. Each S2
-check is also run on a planted defect, and must fail on it (`plans/18` rule 16).
+rule's level under the null; "holds" within its share under the skewed nulls the 2020 cut measured
+(§9 A2, Scope); the refusal of the frozen span; no word below the cluster count. Each S2 check is also
+run on a planted defect, and must fail on it (`plans/18` rule 16).
 
 uv run --project tools --locked python -I tools/test_score_blind.py
 """
@@ -17,6 +18,7 @@ import sys
 import tempfile
 
 import numpy as np
+from scipy import stats
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -42,6 +44,10 @@ PARI_LEVEL_ROUNDED_DOWN = 0.0500120045484412693393725711423
 PARI_LEVEL_TENTH = 0.0554298071494329898970189257448
 # The null-level test's replicates a cell: a Monte Carlo half-width of about 0.003 at 0.05.
 REPS = 20_000
+# §9 A2, Scope (2026-11-25): the skewness of B5's cluster means on the 2020 cut at the upper ends of
+# their intervals, the storm level's for the clusters' draws and the day level's for the days'
+# (`tools/score-blind.py shape`).
+B5_SKEW = (0.59, 0.16)
 
 
 def test_the_quadrature_agrees_with_the_derivation() -> None:
@@ -196,6 +202,76 @@ def test_the_rule_holds_its_level_under_the_null() -> None:
 def test_the_level_test_fails_on_a_planted_defect() -> None:
     # The statistics read against the normal bounds: the defect §9 A2 (b) removes.
     assert not level_holds("normal", [((10, 10, 10), "normal", 1.4, 0.8)])
+
+
+def draws_have_their_skewness(draw) -> bool:
+    """A draw of the skewed null has mean 0, variance 1 and the skewness it is asked for."""
+    rng = np.random.default_rng(3)
+    for gamma in (-1.5, 0.59, 2.0):
+        x = draw(gamma, rng, 1_000_000)
+        if abs(x.mean()) > 0.01 or abs(x.var() - 1.0) > 0.02:
+            return False
+        if abs(tool.skewness(x) - gamma) > 0.05 * max(1.0, abs(gamma)):
+            return False
+    return True
+
+
+def test_the_skewed_draws_have_their_skewness() -> None:
+    assert draws_have_their_skewness(tool.null_draw)
+    x = np.array([0.0, 1.0, 1.0, 5.0, -2.0, 0.5])
+    assert math.isclose(tool.skewness(x), stats.skew(x, bias=False), rel_tol=1e-12)
+
+
+def test_the_skewness_test_fails_on_a_planted_defect() -> None:
+    # Gamma(2 / gamma^2) for Gamma(4 / gamma^2): the skewness comes out sqrt(2) gamma.
+    def misshaped(gamma, rng, size):
+        k = 2.0 / gamma**2
+        return (
+            math.copysign(1.0, gamma) * (rng.standard_gamma(k, size) - k) / math.sqrt(k)
+        )
+
+    assert not draws_have_their_skewness(misshaped)
+
+
+def holds_within_its_share(shape, factor: float) -> bool:
+    """Under the mean-zero null of `shape`, "holds" read at `factor` times the registered bound has a
+    Monte Carlo interval, 95 % jointly over `NULL_SCENARIOS`, that reaches down to its share,
+    `LEVEL / 2`, in every calendar, at a storm's 1.4 and a day's 0.8."""
+    for per_look in tool.NULL_SCENARIOS:
+        design = tool.null_design(per_look, 11)
+        found = tool.null_level(design, shape, 1.4, 0.8, REPS, 5, holds_factor=factor)
+        rule = found["student"]
+        assert rule["holds"] == int((rule["margin"] >= factor).sum())
+        low, _ = tool.mc_interval(rule["holds"], REPS, len(tool.NULL_SCENARIOS))
+        if low > tool.LEVEL / 2:
+            return False
+    return True
+
+
+def test_b5_reads_holds_only_past_its_factor() -> None:
+    # One look at 30 degrees of freedom, every level's statistic 1.1 times the bound on either side.
+    bound = tool.t_bound(tool.REGISTERED_BOUNDS[0], 30.0)
+    assert 1.0 < 1.1 < tool.B5_HOLDS_FACTOR
+
+    def look(t: float) -> dict:
+        return {
+            "day": (t, 1.0, 30.0, 200, 200.0),
+            "storm": (t, 1.0, 30.0, 10, 10.0),
+        }
+
+    low, high = look(-1.1 * bound), look(1.1 * bound)
+    assert tool.sequential([low])[0][0] == "holds"
+    assert tool.sequential([low], tool.B5_HOLDS_FACTOR)[0][0] == "continue"
+    assert tool.sequential([high], tool.B5_HOLDS_FACTOR)[0][0] == "fails"
+
+
+def test_b5_holds_its_share_under_its_skewed_null() -> None:
+    assert holds_within_its_share(B5_SKEW, tool.B5_HOLDS_FACTOR)
+
+
+def test_b5_share_fails_on_the_unamended_rule() -> None:
+    # The bound of "holds" as registered, before the Scope's amendment of 2026-11-25.
+    assert not holds_within_its_share(B5_SKEW, 1.0)
 
 
 

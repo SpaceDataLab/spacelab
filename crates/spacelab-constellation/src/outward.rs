@@ -33,11 +33,11 @@ pub(crate) const H_ACOS: f64 = 0.9375;
 /// `2⁻⁵²`.
 const TWO_M52: f64 = f64::EPSILON;
 /// `2⁻⁴⁰`, the slack on an H-libm constant that absorbs `1/(1 − c·2⁻⁵²)`.
-const TWO_M40: f64 = 1.0 / 1_099_511_627_776.0;
+const TWO_M40: f64 = 4096.0 * f64::EPSILON;
 /// `2⁻¹⁰⁷²`, at least `c·2⁻¹⁰⁷⁴/(1 − c·2⁻⁵²)` for `c ≤ 2`: an ulp at a subnormal true value.
 const TINY: f64 = f64::from_bits(4);
 /// Below this `|y/x|`, `atan` is enclosed by its series instead of libm, whose row starts at `2⁻⁶⁰`.
-const SMALL_RATIO: f64 = 1.0 / 1_125_899_906_842_624.0;
+const SMALL_RATIO: f64 = 4.0 * f64::EPSILON;
 
 #[cfg(test)]
 std::thread_local! {

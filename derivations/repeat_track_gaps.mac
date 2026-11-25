@@ -1,0 +1,79 @@
+/* The repeat ground track of `crates/spacelab-constellation/src/repeat_track.rs` (plan 18 Ф27.D).
+
+   A circular orbit, argument of latitude u (rate 1 here), inclination i, seen in the frame that
+   turns with the Earth relative to the node: the sub-satellite point is R3(-kappa u) applied to
+   (cos u, cos i sin u, sin i sin u), kappa = (w_E - dOmega/dt)/(du/dt). A repeat track of Np
+   revolutions in Nd nodal days has kappa = Nd/Np.
+
+   This file derives what the code uses: the north and east rates of the track at both nodes, so
+   sin i' = sin i / sqrt(sin^2 i + (cos i - kappa)^2); the descending node pi (1 - kappa) east of
+   its ascending node, which is Np - Nd half-slots (pi/Np), and the j-th crossing at j (Np - Nd)
+   half-slots modulo 2 Np; the residue steps of the three-distance argument in the module docs;
+   the swath rule from the track's tangent plane, its edge, its decision form without an inverse
+   function, and its planar limit. Every identity prints `<name>: 0`.
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/repeat_track_gaps.mac </dev/null */
+
+display2d: false$
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+simp0(e) := ratsimp(trigsimp(trigreduce(e)))$
+
+/* ---- 1. The track at the nodes ---- */
+r0: [cos(u), cos(i)*sin(u), sin(i)*sin(u)]$
+rot(v, t) := [v[1]*cos(t) - v[2]*sin(t), v[1]*sin(t) + v[2]*cos(t), v[3]]$
+r: rot(r0, -kappa*u)$
+vel: diff(r, u)$
+/* at a point of the equator the north unit vector is z and the east one is z x r = (-r2, r1, 0) */
+north(u0) := subst(u = u0, vel[3])$
+east(u0) := subst(u = u0, -r[2]*vel[1] + r[1]*vel[2])$
+chk("north_rate_at_the_ascending_node_is_sin_i", simp0(north(0) - sin(i)))$
+chk("east_rate_at_the_ascending_node_is_cos_i_minus_kappa", simp0(east(0) - (cos(i) - kappa)))$
+chk("north_rate_at_the_descending_node_is_minus_sin_i", simp0(north(%pi) + sin(i)))$
+chk("east_rate_at_the_descending_node_is_cos_i_minus_kappa", simp0(east(%pi) - (cos(i) - kappa)))$
+/* sin^2 i' = north^2/(north^2 + east^2) is the same at both nodes */
+chk("sin_squared_ip_at_the_ascending_node",
+    simp0(north(0)^2/(north(0)^2 + east(0)^2) - sin(i)^2/(sin(i)^2 + (cos(i) - kappa)^2)))$
+chk("sin_squared_ip_at_the_descending_node",
+    simp0(north(%pi)^2/(north(%pi)^2 + east(%pi)^2) - sin(i)^2/(sin(i)^2 + (cos(i) - kappa)^2)))$
+
+/* ---- 2. The crossings in half-slots ---- */
+/* the descending node at u = pi lies at longitude pi - kappa pi: r = (cos L, sin L, 0) */
+L: %pi - kappa*%pi$
+rd: subst(u = %pi, r)$
+chk("descending_node_is_pi_one_minus_kappa_east_cos", simp0(rd[1]*cos(L) + rd[2]*sin(L) - 1))$
+chk("descending_node_is_pi_one_minus_kappa_east_sin", simp0(rd[2]*cos(L) - rd[1]*sin(L)))$
+chk("in_half_slots_it_is_np_minus_nd", ratsimp(subst(kappa = Nd/Np, L/(%pi/Np)) - (Np - Nd)))$
+/* the ascending node of revolution k is at -2 k Nd half-slots, its descending node Np - Nd further:
+   the j-th crossing, j = 2k or 2k + 1, is j (Np - Nd) modulo 2 Np */
+chk("crossing_2k_is_the_ascending_node_of_revolution_k",
+    ratsimp(2*k*(Np - Nd) - (-2*k*Nd) - k*(2*Np)))$
+chk("crossing_2k_plus_1_is_its_descending_node",
+    ratsimp((2*k + 1)*(Np - Nd) - (-2*k*Nd + Np - Nd) - k*(2*Np)))$
+
+/* ---- 3. The residue steps of the three-distance argument ---- */
+/* r_u = u a - m1 q = A and r_v = v a - m2 q = q - B */
+/* (u and v of the module docs are iu and iv here) */
+A: iu*a - m1*q$
+B: q - (iv*a - m2*q)$
+chk("index_u_plus_v_has_residue_a_minus_b_mod_q", ratsimp((iu + iv)*a - (m1 + m2 + 1)*q - (A - B)))$
+chk("step_u_minus_v_moves_by_a_plus_b_mod_q", ratsimp((iu - iv)*a - (m1 - m2 - 1)*q - (A + B)))$
+chk("the_three_counts_add_to_n", ratsimp((N - iu) + (N - iv) + (iu + iv - N) - N))$
+
+/* ---- 4. The swath rule from the track's tangent plane ---- */
+/* the equatorial point at arc x from the crossing, and the unit normal of the tangent plane */
+P: [cos(x), sin(x), 0]$
+nrm: [0, -sin(ip), cos(ip)]$
+chk("sin_distance_to_the_plane_is_sin_x_sin_ip", simp0(P . nrm + sin(x)*sin(ip)))$
+chk("the_normal_is_a_unit_vector", simp0(nrm . nrm - 1))$
+/* the swath's edge: the point at x_e = asin(sin(beta)/sin(ip)) lies at beta from the plane */
+xe: asin(sin(beta)/sin(ip))$
+chk("the_edge_lies_at_beta_from_the_plane", ratsimp(sin(xe)*sin(ip) - sin(beta)))$
+/* the decision without an inverse function: sin(x_g) sin(i') <= sin(beta) with
+   sin(i') = sin i / h; multiplied by h > 0 it is sin(x_g) sin i <= sin(beta) h */
+h: sqrt(sin(i)^2 + (cos(i) - kappa)^2)$
+chk("the_decision_times_h", ratsimp((sin(xg)*sin(i)/h - sin(beta))*h - (sin(xg)*sin(i) - sin(beta)*h)))$
+/* the planar limit, h1 = 1/(2R): asin(sin(W h1)/sin(ip))/h1 = W/sin(ip) + O(h1^2) */
+chk("planar_limit_series_first_order",
+    ratsimp(taylor(asin(sin(W*h1)/sin(ip))/h1, h1, 0, 1) - W/sin(ip)))$
+/* sp stands for sin(ip) > 0 */
+assume(W > 0, sp > 0)$
+chk("planar_limit_as_r_grows", ratsimp(limit(2*R*asin(sin(W/(2*R))/sp), R, inf) - W/sp))$

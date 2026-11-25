@@ -30,6 +30,9 @@
 //! spherical caps at one instant ([`kfold_areas`]). Without allocating, the exact minimum distance
 //! between two satellites of a Walker or circular lattice shell over all time
 //! ([`walker_min_separation`]), with the verdict whether the shell keeps a keep-out distance.
+//!
+//! And for a repeat ground track ([`RepeatTrack`], `no_std`): the exact gaps between its equator
+//! crossings after any number of revolutions, its sub-cycles, and whether a swath closes the equator.
 
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 
@@ -43,6 +46,7 @@ pub mod lattice;
 pub mod mozhaev;
 #[cfg(any(feature = "std", test))]
 mod outward;
+pub mod repeat_track;
 pub mod separation;
 pub mod shell;
 pub mod soc;
@@ -59,6 +63,9 @@ pub use flower::FlowerConstellation;
 pub use kfold::{CapError, KfoldAreas, SphericalCap, kfold_areas};
 pub use lattice::LatticeFlower;
 pub use mozhaev::{GroupType, MozhaevSymbol, PointGroup};
+pub use repeat_track::{
+    Gap, GapSet, Nodes, RepeatTrack, RepeatTrackError, SubCycle, SubCycles, Swath,
+};
 pub use separation::{
     SeparationError, SeparationVerdict, ShellSeparation, lattice_min_separation,
     walker_min_separation,

@@ -882,8 +882,8 @@ reachable, and §10.10 is its verdict, its splits and its envelope.
 | The storm driver, three hypotheses | which of the driver's cadence, the loss, or the regressor's *scale* caps the peak — the first was the obvious answer and it is wrong | GFZ hourly `ap60` (365 544-row contiguous series) against 3-hourly `ap`; a fit on nothing but the 3130 storm-window rows; four candidate regressor forms, all held out by calendar month | `ap60` **worse** (spread 14.8 → 18.0 %); storm-only fit **worse** (peak error 0.38 → 0.46); `ln(1 + storm/15)` at the same 35 coefficients **better on every aggregate** — spread → 9.4 %, mean peak error 0.58 → 0.36, worst 1.95 → 0.61 | tools/gen_sdtm_coefficients.py, src/sdtm/mod.rs |
 | The storm kernel's memory | whether a longer memory is what the storm peak is short of — the remedy §10.15 named, tested before it was built | eight kernels pinned with `--pin-kernel` at the shipped operating point against the free fit, all held out by calendar month; and the sixteen comparisons split on Bruinsma & Laurens's own multiple-peak label | **no.** The peak error is uncorrelated with activity (r = **−0.19** against `ln(peak ap)`) and the split is **multiple-peak against single-peak**: 0.619 against 1.127, and **all ten MP comparisons under-reach at every one of the eight rungs**. Unit DC gain means a longer kernel lowers every modelled peak, helping the storms that over-reach and hurting the ten that do not | tools/gen_sdtm_coefficients.py |
 | USGS Dst as the storm driver | whether the open `Dst` is what JB2008's 23.7 % is made of — JB2008 is the only `Dst`-driven model (Ф23.B, first step) | `--dst`: the screened hourly Dst4 depression drives the kernel, against the same fit on `ap`, held out by calendar month | **no.** Worse on every aggregate: held-out spread 10.8 → 13.3 %, mean peak error 0.35 → **0.64**, LOSMO 21.9 → 23.4 %; the kernel collapses to 0.02 / 1.02 h because `Dst` already carries the ring current's memory (§10.15) | tools/gen_sdtm_coefficients.py |
-| SDTM-1 on held-out missions | Ф15.E's gate: a model fitted on some missions must transfer to a mission it never saw, and beat NRLMSISE-00 in every bin | the shipped form refitted on the whole TU Delft archive (§10.20), one mission family held out at a time, against NRLMSISE-00 `ap[]` on the same 365 211 rows | pooled **23.5 %** (bar 25.5 %), worst edge 36.5 % (bar 40 %); **fails one bin**: `Ap` ≥ 50, 36.5 % against NRLMSISE-00's 35.4 % (§10.21) | tools/fit-sdtm-corpus.py |
-| SDTM-1 storms on held-out missions | Ф15.H: onset ±3 h, recovery ±6 h, peak within ±25 % on storms the model never saw | Bruinsma & Laurens (2024)'s protocol on all 204 covered storms since 2000 (630 comparisons), each satellite from the fold that held its family out, against NRLMSISE-00 `ap[]` on the same rows | **not passed**: 65 / 76 / **43 %** of comparisons (NRLMSISE-00 64 / 78 / 15 %); median peak ratio 0.98, but 0.73 at `ap` ≥ 300 (§10.22) | tools/fit-sdtm-corpus.py |
+| SDTM-1 on held-out missions | Ф15.E's gate: a model fitted on some missions must transfer to a mission it never saw, and beat NRLMSISE-00 in every bin | the shipped form refitted on the whole TU Delft archive (§10.20), one mission family held out at a time, against NRLMSISE-00 `ap[]` on the same 365 146 rows | pooled **22.9 %** (bar 25.5 %), worst edge 36.5 % (bar 40 %); **fails one bin**: `Ap` ≥ 50, 36.5 % against NRLMSISE-00's 35.4 % (§10.21, rerun with Ф23.AJ's refusal) | tools/fit-sdtm-corpus.py |
+| SDTM-1 storms on held-out missions | Ф15.H: onset ±3 h, recovery ±6 h, peak within ±25 % on storms the model never saw | Bruinsma & Laurens (2024)'s protocol on all 203 covered storms since 2000 (627 comparisons), each satellite from the fold that held its family out, against NRLMSISE-00 `ap[]` on the same rows | **not passed**: 65 / 76 / **44 %** of comparisons (NRLMSISE-00 64 / 78 / 15 %); median peak ratio 0.98, but 0.73 at `ap` ≥ 300 (§10.22, rerun with Ф23.AJ's refusal) | tools/fit-sdtm-corpus.py |
 | SDTM-1 storm regressor on the corpus | whether the storm term's shape, not a missing state equation, caps the storm-day level and the largest peaks | `storm-log1`, `storm-log` (a, a²) and `storm2` (linear + square), same folds, rows and storm protocol | **a trade-off, not a winner**: `storm-log` passes all of Ф15.E (30.6 % vs NRLMSISE-00's 35.4 % at `Ap` ≥ 50) and drops the peak to 27 % within ±25 % (median 0.65); `storm-log1` keeps 43 % and 0.98 (§10.23) | tools/fit-sdtm-corpus.py |
 | SDTM-1 with nitric-oxide cooling | Ф23.B: a heating + NO-cooling state in place of the storm kernel — the step, its fixed points and its error order derived before it is fitted | `derivations/sdtm_no_cooling.mac` (12 identities at 0, local error from `h³`) and `sdtm_no_cooling.gp` (60 digits); the §10.21 folds and §10.22 storms on both thinning phases | **Ф15.E passes all three** (23.1 % pooled; 30.3 % vs NRLMSISE-00's 35.4 % at `Ap` ≥ 50); storms: `ap` ≥ 300 peak 0.97, recovery ±6 h 80 %; peak ±25 % 40 % with the typical storm overshot (1.13) (§10.24) | tools/fit-sdtm-corpus.py, derivations/sdtm_no_cooling.mac |
 | SDTM-1 on the drag path | a fitted field is not a force model: the `Atmosphere` the STM reads must be the field, and its gradient the field's own | the wrapper against the field at the named point, the dual gradient against the analytic `dρ/dz`, the boundary degeneracy, a 6015-point positivity sweep, and `CalibratedAtmosphere` over it | bit-equal value; gradient < **1e-14** relative; `1/H` finite and positive everywhere, smallest ρ **9.0e-33 kg/m³**; no second model evaluation and no fallback arm, unlike the other three wrappers | src/sdtm/atmosphere.rs |
@@ -8602,50 +8602,54 @@ the absolute level. NRLMSISE-00 is the library's own, on the same rows, with §1
 
 **The Bates shape is fitted.** The pilot held `σ` at 0.020 /km because one altitude band could not
 identify it (§10.10). This corpus can, and fitting it is worth what §10.11 predicted: the GOCE fold
-falls from 24.0 % to 13.2 % raw, and the GOCE log scale the fixed-`σ` fit needed (1.29, at the
-bound) returns to 1.04. The fitted value is 0.034–0.037 /km on four folds and 0.022 /km on the fold
-that holds out GRACE. Pooled, fixed `σ` reads 23.9 % and fitted `σ` 23.5 %.
+falls from 24.0 % to 13.2 % raw over all its rows (23.7 % to 12.8 % on the rows NRLMSISE-00 answers), and
+the GOCE log scale the fixed-`σ` fit needed (1.29, at the bound) returns to 1.04. The fitted value is
+0.034–0.037 /km on four folds and 0.022 /km on the fold that holds out GRACE. Pooled, on the rows of the
+first run (see the correction below), fixed `σ` read 23.9 % and fitted `σ` 23.5 %.
 
 | held-out family | rows | SDTM-1 raw | SDTM-1 debiased | bias (geometric mean model/measured) | NRLMSISE-00 | NRLMSISE-00 debiased | fitted `σ` (/km) |
 |---|---|---|---|---|---|---|---|
-| CHAMP | 40 884 | 21.5 % | 20.9 % | 1.027 | 43.9 % | 20.0 % | 0.0368 |
-| GOCE | 15 280 | **13.2 %** | 12.3 % | 0.926 | 30.4 % | 18.3 % | 0.0338 |
-| GRACE A+B | 114 692 | 25.4 % | 26.2 % | 0.916 | 53.3 % | 34.0 % | 0.0219 |
+| CHAMP | 40 873 | 21.1 % | 20.5 % | 1.027 | 43.9 % | 19.9 % | 0.0368 |
+| GOCE | 15 268 | **12.8 %** | 11.9 % | 0.926 | 22.6 % | 11.9 % | 0.0338 |
+| GRACE A+B | 114 650 | 23.6 % | 24.2 % | 0.916 | 40.3 % | 24.1 % | 0.0219 |
 | GRACE-FO | 34 506 | 25.9 % | 25.2 % | 1.023 | 56.3 % | 28.2 % | 0.0345 |
 | Swarm A+B+C | 159 849 | 23.1 % | 23.4 % | 0.987 | 49.9 % | 27.4 % | 0.0368 |
-| **pooled** | 365 211 | **23.5 %** | 23.7 % | — | 50.1 % | 28.4 % | — |
+| **pooled** | 365 146 | **22.9 %** | 23.0 % | — | 45.7 % | 25.0 % | — |
+
+The bias is the fold's own, over all its rows, as the fit prints it.
 
 | bin (all folds pooled) | rows | SDTM-1 raw | NRLMSISE-00 raw | NRLMSISE-00 debiased |
 |---|---|---|---|---|
-| F10.7a < 100 | 179 543 | 26.3 % | 64.8 % | 31.0 % |
-| 100 ≤ F10.7a < 150 | 116 073 | 22.0 % | 40.7 % | 29.6 % |
+| F10.7a < 100 | 179 511 | 25.7 % | 64.8 % | 31.0 % |
+| 100 ≤ F10.7a < 150 | 116 040 | 20.9 % | 26.8 % | 18.9 % |
 | F10.7a ≥ 150 | 69 595 | 18.9 % | 27.8 % | 19.4 % |
-| Ap < 15 | 302 115 | 22.9 % | 53.2 % | 29.7 % |
-| 15 ≤ Ap < 50 | 58 797 | 25.5 % | 34.9 % | 21.9 % |
+| Ap < 15 | 302 082 | 22.5 % | 47.9 % | 25.5 % |
+| 15 ≤ Ap < 50 | 58 765 | 23.7 % | 34.9 % | 21.9 % |
 | **Ap ≥ 50** | 4 299 | **36.5 %** | **35.4 %** | 25.4 % |
 
 **Verdict, criterion by criterion:**
 
-1. **Pooled held-out-mission MAPE ≤ 25.5 %: passes**, at 23.5 % raw. Every fold but GRACE-FO is
+1. **Pooled held-out-mission MAPE ≤ 25.5 %: passes**, at 22.9 % raw. Every fold but GRACE-FO is
    under the bar on its own, and GRACE-FO is 0.4 points over.
 2. **Below NRLMSISE-00 in every bin: fails in one bin**, `Ap` ≥ 50, by 1.1 points (36.5 % against
-   35.4 %). Every other bin passes by 9 to 39 points. The storm bin is 1.2 % of the rows. Debiased,
+   35.4 %). Every other bin passes by 6 to 39 points. The storm bin is 1.2 % of the rows. Debiased,
    NRLMSISE-00 reads 25.4 % there: its storm *shape* is better than SDTM-1's, and what keeps the two
    level raw is NRLMSISE-00's high bias at quiet times. This is the peak under-reach §10.14 and §10.17
    measured on eight storms, now on a held-out corpus.
 3. **No regime-edge bin above 40 %: passes.** The worst edge is `Ap` ≥ 50 at 36.5 %; the solar-minimum
-   bin that failed §10.11 at 169.8 % is 26.3 %.
+   bin that failed §10.11 at 169.8 % is 25.7 %.
 
 **The gate is not passed**, and the failing criterion is now the storm response only. The level and
 the altitude transfer pass. The next work is the storm term: Ф15.H runs the full storm list on this
 corpus, and Ф23.B tests a state equation for the storm response against it.
 
-**How robust each number is.** The other half-phase of the thinning (rows 30, 90, …) reads 23.6 %
-pooled and 36.6 % against 35.8 % at `Ap` ≥ 50, so the storm-bin gap is 0.8–1.1 points and its sign
-holds. The boundary scale sits on its lower bound (`e^−0.7` = 0.497) in every fold. Widened to ±1.4,
-it moves to 0.25–0.33 and `σ` moves to its own upper bound (0.060 /km): the two trade along a ridge,
-and the pooled MAPE moves 0.1 point (23.4 %), the storm bin 1.4 points (35.1 %, still not below
-35.4 %). So the bound does not decide the verdict, and the ridge says the lower-thermosphere boundary
+**How robust each number is.** The other half-phase of the thinning (rows 30, 90, …) reads 23.0 %
+pooled (23.6 % before the refusal) and 36.6 % against 35.8 % at `Ap` ≥ 50, so the storm-bin gap is
+0.8–1.1 points and its sign holds. The boundary scale sits on its lower bound (`e^−0.7` = 0.497) in
+every fold. Widened to ±1.4, it moves to 0.25–0.33 and `σ` moves to its own upper bound (0.060 /km):
+the two trade along a ridge, and the pooled MAPE moves 0.1 point (23.4 %), the storm bin 1.4 points
+(35.1 %, still not below 35.4 %). That run is not repeated with the refusal: its pooled number is on
+the first run's rows, and no refused row is in its storm bin. So the bound does not decide the verdict, and the ridge says the lower-thermosphere boundary
 (fixed 380 K at 120 km) is the part of the form this corpus does not constrain.
 
 **What is not in it.** JB2008-open is not run on these rows: its solar and geomagnetic indices are
@@ -8653,10 +8657,12 @@ SET's products, not open data. NRLMSIS 2.1 is not run (oracle only). The coeffic
 not re-emitted: the shipped `coefficients.rs` is still the pilot fit, because the gate that would
 promote a corpus fit has not passed.
 
-**NRLMSISE-00 has no answer on three rows.** On 2005-09-10 and 2006-12-07 the previous day's
-observed F10.7 is 707.6 and 573.4 sfu — the 2005-09-09 and 2006-12-06 X-class flares in Penticton's
-noon measurement. At 2–3 rows of those days the model returns NaN; at 500 sfu the same row is finite.
-Those rows are dropped from both models. Whether the reference C does the same is not checked here.
+**NRLMSISE-00 has no answer on 68 rows.** On 2005-09-10 and 2011-03-08 the previous day's observed
+F10.7 is 707.6 and 938.6 sfu: the 2005-09-09 X-class flare and a flare on 2011-03-07, both in
+Penticton's noon measurement. At those fluxes NRLMSISE-00 has no temperature profile, and `gtd7d`
+refuses every row above 123.435 km (Ф23.AJ): 35 rows of 2005-09-10 and 33 of 2011-03-08 here. The
+refused rows of 2006-12-07 (573.4 sfu on 12-06) fall between the thinned rows. These rows are dropped
+from both models.
 
 *Correction (F128, Ф23.AJ).* The NaN is the model leaving its domain, not a fault of the port:
 `globe7`'s F10.7 term is concave in the daily flux, so these fluxes put `T∞` below `T_lb` and the
@@ -8664,11 +8670,37 @@ Bates–Walker profile has no exosphere (`derivations/nrlmsise00_flux_domain.mac
 compiled with gfortran in its own single precision, returns a NaN total density at both CHAMP rows
 of that file: `T∞` 9.7214 K and `T` 1.2386e7 K at 375 km on the first, `T` = +∞ on the second. On
 the rest of those days, and on 2011-03-08 (F10.7
-938.6 on 03-07), the port answered a finite density over that profile, and those rows were scored
-above. `gtd7d` now refuses all of them: over the whole archive, 21 912 607 rows, 3 967 rows that had
-a finite answer are refused (1 969 on 2005-09-10, 29 on 2006-12-07, 1 969 on 2011-03-08), the 143
-that were NaN stay unanswered, and every other row is bit-identical. The scores of this section and
-§10.22 are not rerun with the refusal.
+938.6 on 03-07), the port answered a finite density over that profile, and the first run of this
+section scored those rows. `gtd7d` now refuses all of them: over the whole archive, 21 912 607 rows,
+3 967 rows that had a finite answer are refused (1 969 on 2005-09-10, 29 on 2006-12-07, 1 969 on
+2011-03-08), the 143 that were NaN stay unanswered, and every other row is bit-identical.
+
+*Correction (2026-11-24, Ф30.O): the scores rerun with the refusal.* The first run of this section
+dropped 3 rows, all of 2005-09-10, where the port returned NaN. It scored the other 65 rows the
+refusal now drops. The tables above are rerun with the refusal. Both runs are `--fit-sigma --storms`
+on one tree, with the evaluator before and after `0b84338`. The run before it reproduces every number
+the first run printed. The fits do not move, because they read no NRLMSISE-00 value; only the set of
+scored rows moves.
+
+| | rows | SDTM-1 raw | SDTM-1 debiased | NRLMSISE-00 | NRLMSISE-00 debiased |
+|---|---|---|---|---|---|
+| pooled, first run | 365 211 | 23.5 % | 23.7 % | 50.1 % | 28.4 % |
+| pooled, with the refusal | 365 146 | 22.9 % | 23.0 % | 45.7 % | 25.0 % |
+| daily flux excess `d` ≥ 0.7, first run | 2 785 | 163.0 % | 174.4 % | 654.2 % | 482.4 % |
+| `d` ≥ 0.7, with the refusal | 2 720 | 81.3 % | 85.9 % | 76.4 % | 36.0 % |
+
+All 65 rows lie in the `d` ≥ 0.7 bin, and both models were far off on them. On the 33 rows of
+2011-03-08 the port read about 500 times the measured density. They alone lower NRLMSISE-00 in the
+100 ≤ F10.7a < 150 bin from 40.7 to 26.8 %. SDTM-1, whose flux excess is linear in this fit, read 35 to 40
+times the measured density on both days. The 32 rows of 2005-09-10 alone lower it in the
+15 ≤ Ap < 50 bin from 25.5 to 23.7 %. The first run's other bins were: F10.7a < 100, 26.3 % against
+64.8 %; 100 ≤ F10.7a < 150, 22.0 % against 40.7 %; Ap < 15, 22.9 % against 53.2 %; 15 ≤ Ap < 50,
+25.5 % against 34.9 %; by family, CHAMP 21.5 / 43.9 %, GOCE 13.2 / 30.4 %, GRACE 25.4 / 53.3 %.
+
+The verdict does not change. The pooled bar passes at 22.9 %. No refused row has a daily `Ap` of 50 or
+more, so the failing bin is untouched. The margin of the other bins narrows from 9–39 to 6–39 points.
+The sections from §10.23 on, and §10.36's NRLMSISE-00 column, read these rows before the refusal and
+are not rerun here.
 
 ### 10.22 Every storm the archive covers, on held-out missions (Ф15.H)
 
@@ -8676,25 +8708,25 @@ that were NaN stay unanswered, and every other row is bit-identical. The scores 
 every storm the archive covers, on §10.14's protocol (Bruinsma & Laurens 2024, the same code), with
 each satellite's residual taken from the §10.21 fold that held its mission family out. The fit reads
 thinned rows. The storm protocol averages over orbits, so it reads the corpus at the full 120 s inside
-the storm windows: 1 635 670 rows. `ap` reaches 80 at **213 storms** from 2000-07; **204** have all
-four phases covered by at least one satellite, for **630 comparisons** (storm × satellite). The three
+the storm windows: 1 635 670 rows. `ap` reaches 80 at **213 storms** from 2000-07; **203** have all
+four phases covered by at least one satellite, for **627 comparisons** (storm × satellite). The three
 storms §10.14 could not run are in it: 2003-10-29 (CHAMP, GRACE-A/B), 2015-03-17 (Swarm A/B/C,
-GRACE-A/B), 2017-09-08 (Swarm A/B/C, GRACE-A). NRLMSISE-00 has no answer on 125 window rows (the
+GRACE-A/B), 2017-09-08 (Swarm A/B/C, GRACE-A). NRLMSISE-00 has no answer on 1 966 window rows (the
 flare days of §10.21); they are dropped from both models.
 
-| statistic, 630 comparisons | SDTM-1, held-out mission | NRLMSISE-00 `ap[]` |
+| statistic, 627 comparisons | SDTM-1, held-out mission | NRLMSISE-00 `ap[]` |
 |---|---|---|
-| ⟨O/C⟩, measured over the model debiased on phase 1 | 1.007 | 1.056 |
-| StD of the per-storm ⟨O/C⟩ | 18.2 % | 13.1 % |
-| mean in-storm StD | 21.2 % | 21.2 % |
-| mean Pearson R | 0.870 | 0.869 |
-| onset within ±3 h | 408 / 630 (65 %) | 403 / 630 (64 %) |
-| recovery half-time within ±6 h | 453 / 595 (76 %) | 437 / 561 (78 %) |
-| **peak enhancement within ±25 %** | **273 / 630 (43 %)** | 94 / 630 (15 %) |
-| peak ratio model/measured, median | **0.980** | 0.587 |
-| \|peak ratio − 1\|, median | 0.302 | 0.434 |
+| ⟨O/C⟩, measured over the model debiased on phase 1 | 1.004 | 1.054 |
+| StD of the per-storm ⟨O/C⟩ | 17.3 % | 12.9 % |
+| mean in-storm StD | 20.8 % | 20.8 % |
+| mean Pearson R | 0.872 | 0.873 |
+| onset within ±3 h | 406 / 627 (65 %) | 401 / 627 (64 %) |
+| recovery half-time within ±6 h | 450 / 592 (76 %) | 437 / 561 (78 %) |
+| **peak enhancement within ±25 %** | **273 / 627 (44 %)** | 93 / 627 (15 %) |
+| peak ratio model/measured, median | **0.982** | 0.587 |
+| \|peak ratio − 1\|, median | 0.300 | 0.434 |
 
-The mean peak error is not in the table on purpose. It is 0.60 for SDTM-1 and 0.46 for NRLMSISE-00,
+The mean peak error is not in the table on purpose. It is 0.60 for SDTM-1 and 0.45 for NRLMSISE-00,
 and both are set by a few comparisons where the measured enhancement is near zero, so the ratio
 diverges (worst 29.5). The median is the statistic that describes the storms.
 
@@ -8703,9 +8735,9 @@ diverges (worst 29.5). The median is the statistic that describes the storms.
 | class | n | peak ratio, median | within ±25 % | onset within ±3 h |
 |---|---|---|---|---|
 | single peak | 378 | 1.005 (0.601) | 40 % (15 %) | 73 % (68 %) |
-| multiple peak | 252 | 0.906 (0.579) | 48 % (16 %) | 52 % (58 %) |
-| peak `ap` < 150 | 498 | 0.983 (0.595) | 47 % (14 %) | 66 % (63 %) |
-| peak `ap` ≥ 150 | 132 | 0.901 (0.543) | 29 % (21 %) | 60 % (67 %) |
+| multiple peak | 249 | 0.907 (0.576) | 49 % (15 %) | 52 % (58 %) |
+| peak `ap` < 150 | 498 | 0.983 (0.595) | 47 % (13 %) | 66 % (63 %) |
+| peak `ap` ≥ 150 | 129 | 0.939 (0.540) | 29 % (20 %) | 60 % (67 %) |
 | peak `ap` ≥ 300 | 33 | **0.727** (0.429) | 30 % (9 %) | 36 % (55 %) |
 
 **What changed from §10.14.** On eight storms the peak enhancement fell short by about half, and
@@ -8715,11 +8747,27 @@ ones, 0.73 at `ap` ≥ 300, and for timing on multiple-peak storms (52 % within 
 storms were few, recent and dominated by Gannon, so they over-weighted the class that is still short.
 
 **Verdict: not passed.** The criteria are onset ±3 h, recovery ±6 h and peak within ±25 % on held-out
-storms; they hold on 65 %, 76 % and 43 % of comparisons. SDTM-1 places the peak three times as often
+storms; they hold on 65 %, 76 % and 44 % of comparisons. SDTM-1 places the peak three times as often
 as NRLMSISE-00 within ±25 %, and matches it on timing and in-storm scatter. NRLMSISE-00 is more
-consistent from storm to storm in level (13.1 % against 18.2 %). The remaining storm work is the
+consistent from storm to storm in level (12.9 % against 17.3 %). The remaining storm work is the
 largest storms and the multiple-peak timing: Ф23.B, on this corpus. JB2008, the only `Dst`-driven
 model and §10.14's best on the peak, is not run on these rows (§10.21).
+
+*Correction (2026-11-24, Ф30.O): rerun with Ф23.AJ's refusal.* The first run dropped 125 window rows
+where the port returned NaN. With the refusal, 1 966 rows have no answer, all on the refused days of
+§10.21. They empty the first phase of the 2005-09-11 storm on CHAMP, GRACE-A and GRACE-B, so its three
+comparisons leave the table, and no other comparison moves. The run before the refusal reproduces the
+first run's numbers. The first run's values, where they differ: 204 storms, 630 comparisons; ⟨O/C⟩
+1.007 and 1.056; StD of the per-storm ⟨O/C⟩ 18.2 and 13.1 %; mean in-storm StD 21.2 and 21.2 %; mean
+R 0.870 and 0.869; onset 408 and 403 of 630; recovery 453 of 595 for SDTM-1; peak within ±25 % 273
+(43 %) and 94 of 630; median peak ratio 0.980; median `|peak ratio − 1|` 0.302 for SDTM-1; mean peak
+error 0.46 for NRLMSISE-00; multiple peak 252 comparisons, 0.906 (0.579), 48 % (16 %), 52 % (58 %);
+peak `ap` ≥ 150, 132 comparisons, 0.901 (0.543), 29 % (21 %), 60 % (67 %). The verdict does not
+change. The class table's NRLMSISE-00 brackets for ±25 % are now counted as the tool counts its 93 of
+627, `|peak ratio − 1| < 0.25` at full precision. The first run's table had counted otherwise: its own
+comparisons give 15, 13 and 20 % where it printed 16, 14 and 21 % (multiple peak, `ap` < 150,
+`ap` ≥ 150). Counting `≤ 0.25` on the printed three-decimal ratios gives the first two; no count found
+gives 21 %.
 
 ### 10.23 The storm regressor on the corpus: storm-day level against storm peak (Ф23.B, step 2)
 

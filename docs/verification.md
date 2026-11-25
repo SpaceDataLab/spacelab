@@ -12354,7 +12354,7 @@ tableaux, SABA₂ and SABA₄ on their Legendre roots in radicals, the Earth's r
 grid, the VMF grid, GPT3 at its ten sites, the IERS relativity lines and the box-wing lift, the EDL
 entry equations through one RK4 step, Niell, GMF, VMF1 and VMF3 at three elevations, IAS15's nodes
 and conversion matrices, the IERS ocean and solid tide goldens, the H3 cell centres, the maneuver
-goldens, the binding defaults, the named constants and the light-time down leg: 746 literals, the
+goldens, the binding defaults, the named constants and the light-time down leg: 747 literals, the
 closest at 0.997 of a half unit.
 A value defined only as a root goes over as one: `arb_root(sym, f, x, lo, hi, value)` prints `f`, `f′` and a dyadic
 bracket, and `arb_balls.c` takes the root only if `f` changes sign across the bracket and the ball

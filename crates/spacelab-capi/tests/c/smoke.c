@@ -2717,6 +2717,110 @@ static void the_control_surface_closes_its_own_loop(void) {
     }
 }
 
+/*
+ * Five days of `finals2000A` around the 2017 leap second, byte for byte from the excerpt
+ * `crates/spacelab-eop/tests/fixtures/finals2000A_excerpt.txt`. The values checked below are the
+ * Rust API's, from `crates/spacelab/tests/fixtures/bridge_time_reference.tsv`, as the bits of each
+ * double: the Rust suite holds every row of that file to the bit, and this holds the few a C
+ * consumer can reach without a file to the same bits through the header's own layouts.
+ */
+static const char FINALS_2017[] =
+    "161230 57752.00 I  0.082883 0.000052  0.263539 0.000038  I-0.4069180 0.0000079  0.8286 0.0056 "
+    " I     0.022    0.119    -0.155    0.024  0.082924  0.263518 -0.4069106    -0.023    -0.038  "
+    "\n"
+    "161231 57753.00 I  0.081400 0.000052  0.263094 0.000039  I-0.4077601 0.0000078  0.8842 0.0055 "
+    " I     0.025    0.119    -0.169    0.024  0.081318  0.262990 -0.4077600    -0.021    -0.048  "
+    "\n"
+    "17 1 1 57754.00 I  0.080504 0.000028  0.263145 0.000028  I 0.5912821 0.0000077  1.0342 0.0050 "
+    " I     0.012    0.119    -0.168    0.018  0.080450  0.263074  0.5912975    -0.019    -0.057  "
+    "\n"
+    "17 1 2 57755.00 I  0.080285 0.000029  0.263605 0.000032  I 0.5901752 0.0000063  1.1730 0.0048 "
+    " I    -0.001    0.040    -0.156    0.033  0.080275  0.263595  0.5902149    -0.027    -0.065  "
+    "\n"
+    "17 1 3 57756.00 I  0.080265 0.000034  0.264004 0.000031  I 0.5889406 0.0000058  1.2984 0.0042 "
+    " I    -0.009    0.049    -0.150    0.059  0.080351  0.264010  0.5889684    -0.027    -0.074  "
+    "\n";
+
+static uint64_t bits_of(double x) {
+    uint64_t b;
+    memcpy(&b, &x, sizeof b);
+    return b;
+}
+
+static void the_time_scales_answer_the_rust_values_to_the_bit(void) {
+    CHECK(sizeof(sl_utc_datetime) == 16);
+    CHECK(offsetof(sl_utc_datetime, second) == 8);
+    CHECK(sizeof(sl_eop_quality) == 4);
+    CHECK(offsetof(sl_eop_value, quality) == 9 * sizeof(double));
+    CHECK(offsetof(sl_leap_status, last_delta_at_seconds) == 5 * sizeof(sl_utc_datetime));
+
+    sl_leap_status status;
+    CHECK(sl_leap_table_status(&status) == SL_OK);
+    CHECK(status.first.year == 1972 && status.first.month == 1 && status.first.day == 1);
+    CHECK(status.last_step.year == 2017 && status.last_step.month == 1 &&
+          status.last_delta_at_seconds == 37);
+    CHECK(status.list_expires.year == 2027 && status.list_expires.month == 6 &&
+          status.list_expires.day == 28);
+    CHECK(status.continuous_from.year == 2027 && status.continuous_from.month == 5 &&
+          status.continuous_from.day == 20);
+
+    /* The leap second, the second after it, and their three scales. */
+    const sl_utc_datetime labels[2] = {{2016, 12, 31, 23, 59, 60.0}, {2017, 1, 1, 0, 0, 0.0}};
+    int64_t tai[2] = {0, 0};
+    int64_t tt[2] = {0, 0};
+    int64_t tdb[2] = {0, 0};
+    CHECK(sl_utc_to_tai(labels, 2, tai) == SL_OK);
+    CHECK(sl_utc_to_tt(labels, 2, tt) == SL_OK);
+    CHECK(sl_utc_to_tdb(labels, 2, tdb) == SL_OK);
+    CHECK(tai[0] == INT64_C(536500836000000000) && tai[1] == INT64_C(536500837000000000));
+    CHECK(tt[0] == INT64_C(536500868184000000));
+    CHECK(tdb[0] == INT64_C(536500868183950503));
+
+    /* The way back labels the leap second 23:59:60 again. */
+    sl_utc_datetime back[2];
+    CHECK(sl_tai_to_utc(tai, 2, back) == SL_OK);
+    CHECK(back[0].day == 31 && back[0].hour == 23 && back[0].minute == 59 &&
+          back[0].second == 60.0);
+    CHECK(back[1].year == 2017 && back[1].day == 1 && back[1].second == 0.0);
+
+    /* A refusal writes nothing and says which kind it is. */
+    const sl_utc_datetime spurious = {2018, 12, 31, 23, 59, 60.0};
+    const sl_utc_datetime malformed = {2017, 13, 1, 0, 0, 0.0};
+    int64_t untouched = -1;
+    CHECK(sl_utc_to_tai(&spurious, 1, &untouched) == SL_ERR_DOMAIN);
+    CHECK(sl_utc_to_tai(&malformed, 1, &untouched) == SL_ERR_INVALID_ARGUMENT);
+    CHECK(untouched == -1);
+
+    sl_eop_series *series = NULL;
+    CHECK(sl_eop_series_parse_finals2000a(FINALS_2017, sizeof FINALS_2017 - 1, &series) == SL_OK);
+    if (series == NULL) {
+        CHECK(0);
+        return;
+    }
+    double first = 0.0;
+    double last = 0.0;
+    CHECK(sl_eop_series_span(series, &first, &last) == SL_OK);
+    CHECK(first == 57752.0 && last == 57756.0);
+
+    const double node = 57754.0;
+    sl_eop_value value;
+    CHECK(sl_eop_series_at(series, &node, 1, &value) == SL_OK);
+    CHECK(bits_of(value.dut1_seconds) == UINT64_C(0x3fe2ebe8bc169c24)); /* Bulletin B's 0.5912975 */
+    CHECK(bits_of(value.xp_rad) == UINT64_C(0x3e9a2cb58b45458e));
+    CHECK(bits_of(value.dy_rad) == UINT64_C(0xbdf2fd7dd3a59bed));
+    CHECK(value.quality == SL_EOP_FINAL);
+
+    int64_t ut1[2] = {0, 0};
+    CHECK(sl_utc_to_ut1(series, labels, 2, ut1) == SL_OK);
+    CHECK(ut1[0] == INT64_C(536500799591297500) && ut1[1] == INT64_C(536500800591297500));
+
+    const double outside = 57757.5;
+    CHECK(sl_eop_series_at(series, &outside, 1, &value) == SL_ERR_DOMAIN);
+    CHECK(sl_utc_to_ut1(NULL, labels, 1, ut1) == SL_ERR_INVALID_ARGUMENT);
+    sl_eop_series_close(series);
+    sl_eop_series_close(NULL);
+}
+
 int main(void) {
     the_layout_is_the_one_the_library_assumes();
     the_version_string_sizes_itself();
@@ -2747,6 +2851,7 @@ int main(void) {
     the_conjunction_surface_estimates_and_screens();
     the_cloud_mask_symbols_are_here_whatever_the_build();
     the_control_surface_closes_its_own_loop();
+    the_time_scales_answer_the_rust_values_to_the_bit();
 
     if (failures != 0) {
         fprintf(stderr, "%d check(s) failed\n", failures);

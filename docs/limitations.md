@@ -395,11 +395,14 @@ scope:
   in its own second line; reading that is what would close this, and §9's "EOP series" row now
   carries the reason. Until then a station and a satellite are checked against each other, and
   neither is checked against the chain.
-- **Neither bridge can read an EOP series.** `spacelab-eop` is unreachable from C and from Python:
-  the bridges expose `teme_to_itrf` with `xp`, `yp` and `lod_seconds` as arguments defaulting to
-  zero, so a caller outside Rust either supplies Earth orientation from somewhere else or ships the
-  38.0 ms silently. `EopSource` closed that inside the workspace; it does not reach the bridges, and
-  that is the #319 drift pattern at crate granularity again, stated rather than closed in passing.
+- **The bridges read an EOP series but do not compose the frame chain from it.** Both read
+  `finals2000A` and EOP 20 C04 (`sl_eop_series_*`, `EopSeries`) and convert UTC to TAI, TT, TDB and
+  UT1 (Ф31.B). Their `teme_to_itrf` still takes `xp`, `yp` and `lod_seconds` as arguments defaulting
+  to zero: a caller passes what the series returned, and nothing stops one from passing nothing and
+  shipping the 38.0 ms silently. `EopSource` and `teme_to_itrf_at` close that inside the workspace
+  and do not reach the bridges; nor do the series' reference frame (`EopSeries::frame`), its raw rows
+  or the subdaily correction. The C ABI carries an epoch as `int64_t` nanoseconds, so it refuses a
+  label from April 2292 on with `SL_ERR_DOMAIN`, where Python's integers carry the epoch.
 - **`spacelab-astrometry` is otherwise Rust-only.** Exposing aberration in both bridges was the first
   time either depended on the crate at all; plate solving, TAN/SIP world coordinates, blind asterism
   matching and streak reduction are still unreachable from C and from Python. That is the #319 drift

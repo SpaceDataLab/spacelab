@@ -29,7 +29,7 @@
 
 use core::fmt;
 
-use spacelab_core::{Angle, Epoch, UtcDateTime, time::tai_to_tt};
+use spacelab_core::{Angle, Epoch, Ut1, UtcDateTime, time::tai_to_tt};
 use spacelab_eop::{EopError, EopQuality, EopSeries};
 use spacelab_fa::{LeapError, utc_to_tai};
 use spacelab_frames::{Itrf, Orientation, Teme, Transform, teme_to_itrf};
@@ -245,6 +245,22 @@ pub fn teme_to_itrf_at(
         teme_to_itrf(o.ut1, o.tt, o.xp, o.yp, o.lod_seconds),
         e.quality,
     ))
+}
+
+/// UTC to UT1 from a tabulated series: the `ut1` of [`earth_orientation_at`], leap-second label and
+/// all.
+///
+/// There is no `EopSource` argument because there is no UT1 without a series: [`EopSource::NoEop`]
+/// answers `UT1 = UTC`, which is a declaration about the frame chain, not a conversion.
+///
+/// # Errors
+///
+/// As [`earth_orientation_at`].
+pub fn utc_to_ut1(
+    utc: UtcDateTime,
+    series: &EopSeries,
+) -> Result<Epoch<Ut1>, EarthOrientationError> {
+    earth_orientation_at(utc, EopSource::Series(series)).map(|e| e.orientation.ut1)
 }
 
 /// `TT − TAI`, in nanoseconds. Exposed so a caller can check the chain by hand.

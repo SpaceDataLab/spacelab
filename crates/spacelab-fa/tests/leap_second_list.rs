@@ -11,7 +11,7 @@ use spacelab_core::{
     UtcDateTime,
     calendar::{civil_from_days, days_from_civil},
 };
-use spacelab_fa::delta_at;
+use spacelab_fa::{delta_at, leap_table_status};
 
 const LIST: &str = include_str!("fixtures/leap-seconds.list");
 
@@ -102,4 +102,24 @@ fn the_list_is_valid_past_the_start_of_continuous_utc() {
     assert_eq!(civil_from_days(list.expires), Some((2027, 6, 28)));
     assert!(LIST.contains("File expires on 28 June 2027"));
     assert!(list.expires > days_from_civil(2027, 5, 20));
+}
+
+/// The status the bridges report is the list's own lines: its first and last rows, its `#$` update
+/// and its `#@` expiry. The continuity date is CGPM 2026 Resolution 5's and is not in the list, so
+/// what is checked of it is the one relation the table's closure rests on: the list outlives it. (G5)
+#[test]
+fn the_status_is_the_list_s_own_lines() {
+    let list = parse();
+    let status = leap_table_status();
+    let day = |d: (i32, u8, u8)| days_from_civil(d.0, d.1, d.2);
+
+    let (first_day, _) = list.rows[0];
+    let (last_day, last_value) = *list.rows.last().expect("the list has rows");
+    assert_eq!(day(status.first), first_day, "first");
+    assert_eq!(day(status.last_step), last_day, "last step");
+    assert_eq!(status.last_delta_at, last_value, "last TAI − UTC");
+    assert_eq!(day(status.list_updated), list.updated, "the list's #$ line");
+    assert_eq!(day(status.list_expires), list.expires, "the list's #@ line");
+    assert_eq!(status.continuous_from, (2027, 5, 20));
+    assert!(day(status.list_expires) > day(status.continuous_from));
 }

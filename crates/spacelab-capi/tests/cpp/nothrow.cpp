@@ -1076,6 +1076,22 @@ void the_control_surface_reports_every_wall_as_a_status() {
               .error() == SL_ERR_DOMAIN);
 }
 
+/* The time surface without exceptions: every refusal is a status the caller branches on. */
+void the_time_surface_reports_its_refusals_as_statuses() {
+    const std::array<spacelab::utc_datetime, 2> labels{
+        {{2016, 12, 31, 23, 59, 60.0}, {2018, 12, 31, 23, 59, 60.0}}};
+    const spacelab::result<std::vector<std::int64_t>> spurious = spacelab::try_utc_to_tai(labels);
+    CHECK(!spurious && spurious.error() == SL_ERR_DOMAIN);
+    const spacelab::result<std::vector<std::int64_t>> one =
+        spacelab::try_utc_to_tai(std::span(labels).first(1));
+    CHECK(one && one->at(0) == INT64_C(536500836000000000));
+    const spacelab::result<spacelab::leap_status> status = spacelab::try_leap_table_status();
+    CHECK(status && status->first.year == 1972);
+    const spacelab::result<spacelab::eop_series> not_c04 =
+        spacelab::eop_series::parse_c04("no header, no rows\n");
+    CHECK(!not_c04 && not_c04.error() == SL_ERR_PARSE);
+}
+
 } // namespace
 
 int main() {
@@ -1098,6 +1114,7 @@ int main() {
     the_new_observables_still_report_a_refusal_as_a_status();
     the_cloud_masker_is_a_factory_without_exceptions();
     the_control_surface_reports_every_wall_as_a_status();
+    the_time_surface_reports_its_refusals_as_statuses();
 
     if (failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failures);

@@ -28,6 +28,8 @@ mod tdb_tables;
 
 pub use cio::{cio_locator_s, cip_xy, era};
 pub use earth_rotation::{equinox_kinematic_1982, gmst82};
-pub use leap_seconds::{LeapError, delta_at, tai_to_utc, utc_to_tai};
+pub use leap_seconds::{
+    LeapError, LeapTableStatus, delta_at, leap_table_status, tai_to_utc, utc_to_tai, utc_to_tt,
+};
 pub use nutation::{nutation_00a, nutation_06a};
-pub use tdb::{tdb_minus_tt, tdb_to_tt, tt_to_tdb};
+pub use tdb::{tdb_minus_tt, tdb_to_tt, tt_to_tdb, utc_to_tdb};

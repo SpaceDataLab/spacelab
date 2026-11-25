@@ -25,6 +25,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # the pure Rust core stays unsafe-free.
 
 [dependencies]
+spacelab = { path = "../spacelab", version = "0.3.0" }
 spacelab-astro = { path = "../spacelab-astro", version = "0.3.0" }
 spacelab-astrometry = { path = "../spacelab-astrometry", version = "0.3.0" }
 spacelab-autodiff = { path = "../spacelab-autodiff", version = "0.3.0" }
@@ -34,6 +35,7 @@ spacelab-core = { path = "../spacelab-core", version = "0.3.0" }
 spacelab-coverage = { path = "../spacelab-coverage", version = "0.3.0", features = ["std"] }
 spacelab-earth = { path = "../spacelab-earth", version = "0.3.0" }
 spacelab-elements = { path = "../spacelab-elements", version = "0.3.0" }
+spacelab-eop = { path = "../spacelab-eop", version = "0.3.0" }
 spacelab-fa = { path = "../spacelab-fa", version = "0.3.0" }
 spacelab-estimation = { path = "../spacelab-estimation", version = "0.3.0" }
 spacelab-earthvision = { path = "../spacelab-earthvision", version = "0.3.0" }

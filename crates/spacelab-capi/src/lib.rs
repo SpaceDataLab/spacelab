@@ -29,6 +29,7 @@ use std::cell::{Cell, RefCell};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 
+use spacelab::utc_to_ut1 as umbrella_utc_to_ut1;
 use spacelab_astro::{
     Cr3bp, lambert as astro_lambert, propagate as astro_kepler, richardson_halo_guess,
 };
@@ -51,7 +52,7 @@ use spacelab_control::orbit::{
     ElementFeedback, LqrError, characteristic_polynomial as control_characteristic_polynomial,
     clohessy_wiltshire_plant as capi_cw_plant, lqr as capi_lqr,
 };
-use spacelab_core::{Angle, Epoch, Length, Mat3, NoradId, Tt, Ut1, UtcDateTime, Vec3};
+use spacelab_core::{Angle, Epoch, Length, Mat3, NoradId, Tai, Tt, Ut1, UtcDateTime, Vec3};
 use spacelab_coverage::{
     ApparentAltitude, CoverageMetrics, Refraction, TrueAltitude, Window,
     access_windows as coverage_access_windows, constellation_fom as coverage_constellation_fom,
@@ -92,6 +93,7 @@ use spacelab_elements::design::{
     sun_synchronous_inclination as design_sun_synchronous_inclination,
 };
 use spacelab_elements::{BrouwerLyddane, KeplerianElements};
+use spacelab_eop::{EopError, EopQuality, EopSeries};
 use spacelab_estimation::{
     AKSIM_PAVLOV_2022, Band, BistaticGeometry, ConjunctionGeometry, CoronaSeries, CoronaTerm,
     DopplerLink, DopplerReference, DopplerSignature, GaussNewton, PlasmaSignature, Quasar,
@@ -108,6 +110,10 @@ use spacelab_estimation::{
     range_rate as m_range_rate, sequential_range as estimation_sequential_range,
     shapiro_delay as estimation_shapiro_delay, solar_corona_delay as estimation_solar_corona_delay,
     tdoa as estimation_tdoa, usage_violations as estimation_usage_violations,
+};
+use spacelab_fa::{
+    leap_table_status as fa_leap_table_status, tai_to_utc as fa_tai_to_utc,
+    utc_to_tai as fa_utc_to_tai, utc_to_tdb as fa_utc_to_tdb, utc_to_tt as fa_utc_to_tt,
 };
 use spacelab_frames::{
     CioInterpolator, Gcrf, Position, StateVector, Teme, gcrf_to_itrf as frames_gcrf_to_itrf,
@@ -214,7 +220,7 @@ use spacelab_vision::detect::{
 };
 
 /// The ABI revision. Must equal `SL_ABI_VERSION` in `spacelab.h`; a test checks that it does.
-const ABI_VERSION: u32 = 3;
+const ABI_VERSION: u32 = 4;
 
 /// The longest NUL-terminated string this library will scan for a terminator. Past it the input is
 /// rejected rather than read on: there is no way to learn a C string's buffer length, so a bound is
@@ -772,6 +778,424 @@ pub unsafe extern "C" fn sl_geodetic_to_itrf(g: *const SlGeodetic, out: *mut SlV
         });
         // SAFETY: checked non-null; written only now that the answer exists.
         unsafe { *out = from_vec3(p.vector) };
+        SL_OK
+    })
+}
+
+// ── Time scales and Earth orientation ─────────────────────────────────────────────────────────
+//
+// UTC enters as the calendar label `sl_utc_datetime`, because a leap second has a label and no
+// count. Each conversion is the Rust function of the same name, element by element, and
+// `tests/time_scales.rs` holds it to `crates/spacelab/tests/fixtures/bridge_time_reference.tsv`, the
+// Rust API on the IERS cases in the tree, to the bit.
+
+/// `sl_eop_quality`: whether the IERS observed the bracketing days or predicted them.
+const EOP_FINAL: i32 = 0;
+const EOP_PREDICTED: i32 = 1;
+
+/// `sl_leap_status`: each date as the label of its 00:00:00 UTC.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct SlLeapStatus {
+    /// The table's first day; earlier labels are refused.
+    pub first: SlUtcDateTime,
+    /// The day the last leap second took effect.
+    pub last_step: SlUtcDateTime,
+    /// The day the IERS list was last updated.
+    pub list_updated: SlUtcDateTime,
+    /// The day the IERS list expires.
+    pub list_expires: SlUtcDateTime,
+    /// The first day of continuous UTC.
+    pub continuous_from: SlUtcDateTime,
+    /// `TAI - UTC` from `last_step` on, seconds.
+    pub last_delta_at_seconds: i32,
+}
+
+/// `sl_eop_value`: an Earth-orientation series interpolated to one instant.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct SlEopValue {
+    /// Polar motion.
+    pub xp_rad: f64,
+    /// Polar motion.
+    pub yp_rad: f64,
+    /// `UT1 - UTC`.
+    pub dut1_seconds: f64,
+    /// Excess length of day.
+    pub lod_seconds: f64,
+    /// Celestial-pole offset.
+    pub dx_rad: f64,
+    /// Celestial-pole offset.
+    pub dy_rad: f64,
+    /// The IERS uncertainty on `xp_rad`.
+    pub xp_sigma_rad: f64,
+    /// The IERS uncertainty on `yp_rad`.
+    pub yp_sigma_rad: f64,
+    /// The IERS uncertainty on `dut1_seconds`.
+    pub dut1_sigma_seconds: f64,
+    /// `sl_eop_quality`.
+    pub quality: i32,
+}
+
+/// `sl_eop_series`: a parsed `finals2000A` or C04 series. Immutable once parsed.
+pub struct SlEopSeries {
+    series: EopSeries,
+}
+
+/// A date's 00:00:00 UTC label.
+fn midnight_label(date: (i32, u8, u8)) -> SlUtcDateTime {
+    SlUtcDateTime {
+        year: date.0,
+        month: date.1,
+        day: date.2,
+        hour: 0,
+        minute: 0,
+        second: 0.0,
+    }
+}
+
+/// The batch every UTC conversion shares: `n` labels in, `n` epochs out, written only when every
+/// label converted. A label the calendar refuses is `SL_ERR_INVALID_ARGUMENT`; one the conversion
+/// refuses, or whose epoch is outside `int64_t`, is `SL_ERR_DOMAIN`.
+///
+/// # Safety
+/// `utc` is readable and `out` writable for `n` elements.
+unsafe fn utc_batch<E: core::fmt::Display>(
+    who: &str,
+    utc: *const SlUtcDateTime,
+    n: usize,
+    out: *mut i64,
+    convert: impl Fn(UtcDateTime) -> Result<i128, E>,
+) -> i32 {
+    if utc.is_null() || out.is_null() {
+        return fail(SL_ERR_INVALID_ARGUMENT, format!("{who}: null pointer"));
+    }
+    // SAFETY: checked non-null; the caller states it is readable for `n`.
+    let labels = unsafe { core::slice::from_raw_parts(utc, n) };
+    let mut epochs = Vec::with_capacity(n);
+    for (i, e) in labels.iter().enumerate() {
+        let label = match UtcDateTime::new(e.year, e.month, e.day, e.hour, e.minute, e.second) {
+            Ok(label) => label,
+            Err(err) => return fail(SL_ERR_INVALID_ARGUMENT, format!("{who}: label {i}: {err}")),
+        };
+        let ns = match convert(label) {
+            Ok(ns) => ns,
+            Err(err) => return fail(SL_ERR_DOMAIN, format!("{who}: label {i} ({label}): {err}")),
+        };
+        let Ok(ns) = i64::try_from(ns) else {
+            return fail(
+                SL_ERR_DOMAIN,
+                format!("{who}: label {i} ({label}) is {ns} ns from J2000, outside int64_t"),
+            );
+        };
+        epochs.push(ns);
+    }
+    // SAFETY: `out` is writable for `n` and `epochs.len() == n`.
+    unsafe { core::ptr::copy_nonoverlapping(epochs.as_ptr(), out, n) };
+    SL_OK
+}
+
+/// UTC labels to TAI. See the header.
+///
+/// # Safety
+/// `utc` is readable and `out` writable for `n` elements.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_utc_to_tai(utc: *const SlUtcDateTime, n: usize, out: *mut i64) -> i32 {
+    guard(|| {
+        // SAFETY: forwarding the caller's own contract.
+        unsafe {
+            utc_batch("sl_utc_to_tai", utc, n, out, |u| {
+                fa_utc_to_tai(u).map(Epoch::ns_since_j2000)
+            })
+        }
+    })
+}
+
+/// UTC labels to TT. See the header.
+///
+/// # Safety
+/// `utc` is readable and `out` writable for `n` elements.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_utc_to_tt(utc: *const SlUtcDateTime, n: usize, out: *mut i64) -> i32 {
+    guard(|| {
+        // SAFETY: forwarding the caller's own contract.
+        unsafe {
+            utc_batch("sl_utc_to_tt", utc, n, out, |u| {
+                fa_utc_to_tt(u).map(Epoch::ns_since_j2000)
+            })
+        }
+    })
+}
+
+/// UTC labels to TDB. See the header.
+///
+/// # Safety
+/// `utc` is readable and `out` writable for `n` elements.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_utc_to_tdb(utc: *const SlUtcDateTime, n: usize, out: *mut i64) -> i32 {
+    guard(|| {
+        // SAFETY: forwarding the caller's own contract.
+        unsafe {
+            utc_batch("sl_utc_to_tdb", utc, n, out, |u| {
+                fa_utc_to_tdb(u).map(Epoch::ns_since_j2000)
+            })
+        }
+    })
+}
+
+/// UTC labels to UT1, through a series. See the header.
+///
+/// # Safety
+/// `series` is a live handle; `utc` is readable and `out` writable for `n` elements.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_utc_to_ut1(
+    series: *const SlEopSeries,
+    utc: *const SlUtcDateTime,
+    n: usize,
+    out: *mut i64,
+) -> i32 {
+    guard(|| {
+        if series.is_null() {
+            return fail(SL_ERR_INVALID_ARGUMENT, "sl_utc_to_ut1: null series");
+        }
+        // SAFETY: checked non-null; the caller states the handle is live.
+        let series = unsafe { &(*series).series };
+        // SAFETY: forwarding the caller's own contract.
+        unsafe {
+            utc_batch("sl_utc_to_ut1", utc, n, out, |u| {
+                umbrella_utc_to_ut1(u, series).map(Epoch::ns_since_j2000)
+            })
+        }
+    })
+}
+
+/// TAI epochs to UTC labels. See the header.
+///
+/// # Safety
+/// `tai_ns` is readable and `out` writable for `n` elements.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_tai_to_utc(
+    tai_ns: *const i64,
+    n: usize,
+    out: *mut SlUtcDateTime,
+) -> i32 {
+    guard(|| {
+        if tai_ns.is_null() || out.is_null() {
+            return fail(SL_ERR_INVALID_ARGUMENT, "sl_tai_to_utc: null pointer");
+        }
+        // SAFETY: checked non-null; the caller states it is readable for `n`.
+        let epochs = unsafe { core::slice::from_raw_parts(tai_ns, n) };
+        let mut labels = Vec::with_capacity(n);
+        for (i, &ns) in epochs.iter().enumerate() {
+            match fa_tai_to_utc(Epoch::<Tai>::from_ns_since_j2000(i128::from(ns))) {
+                Ok(u) => labels.push(SlUtcDateTime {
+                    year: u.year(),
+                    month: u.month(),
+                    day: u.day(),
+                    hour: u.hour(),
+                    minute: u.minute(),
+                    second: u.second(),
+                }),
+                Err(e) => {
+                    return fail(
+                        SL_ERR_DOMAIN,
+                        format!("sl_tai_to_utc: epoch {i} ({ns} ns): {e}"),
+                    );
+                }
+            }
+        }
+        // SAFETY: `out` is writable for `n` and `labels.len() == n`.
+        unsafe { core::ptr::copy_nonoverlapping(labels.as_ptr(), out, n) };
+        SL_OK
+    })
+}
+
+/// The leap-second table's status. See the header.
+///
+/// # Safety
+/// `out` is writable for one `sl_leap_status`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_leap_table_status(out: *mut SlLeapStatus) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return fail(
+                SL_ERR_INVALID_ARGUMENT,
+                "sl_leap_table_status: null pointer",
+            );
+        }
+        let s = fa_leap_table_status();
+        // SAFETY: checked non-null just above.
+        unsafe {
+            *out = SlLeapStatus {
+                first: midnight_label(s.first),
+                last_step: midnight_label(s.last_step),
+                list_updated: midnight_label(s.list_updated),
+                list_expires: midnight_label(s.list_expires),
+                continuous_from: midnight_label(s.continuous_from),
+                last_delta_at_seconds: s.last_delta_at,
+            };
+        }
+        SL_OK
+    })
+}
+
+/// Parse an EOP series with `parse` into a handle.
+///
+/// # Safety
+/// `text` is null or readable for `text_len` bytes; `out` is writable for one pointer.
+unsafe fn eop_series_open(
+    who: &str,
+    text: *const c_char,
+    text_len: usize,
+    out: *mut *mut SlEopSeries,
+    parse: fn(&str) -> Result<EopSeries, EopError>,
+) -> i32 {
+    if out.is_null() {
+        return fail(SL_ERR_INVALID_ARGUMENT, format!("{who}: null out pointer"));
+    }
+    // SAFETY: the caller states `text` is null or readable for `text_len` bytes.
+    let Some(text) = (unsafe { borrow_sized_str(text, text_len) }) else {
+        return fail(
+            SL_ERR_INVALID_ARGUMENT,
+            format!("{who}: the text is null or not UTF-8"),
+        );
+    };
+    match parse(text) {
+        Ok(series) => {
+            // SAFETY: checked non-null; written only now that the handle exists.
+            unsafe { *out = Box::into_raw(Box::new(SlEopSeries { series })) };
+            SL_OK
+        }
+        Err(e) => fail(SL_ERR_PARSE, format!("{who}: {e}")),
+    }
+}
+
+/// Parse a `finals2000A` series. See the header.
+///
+/// # Safety
+/// `text` is readable for `text_len` bytes; `out` is writable for one pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_eop_series_parse_finals2000a(
+    text: *const c_char,
+    text_len: usize,
+    out: *mut *mut SlEopSeries,
+) -> i32 {
+    guard(|| {
+        // SAFETY: forwarding the caller's own contract.
+        unsafe {
+            eop_series_open(
+                "sl_eop_series_parse_finals2000a",
+                text,
+                text_len,
+                out,
+                EopSeries::parse_finals2000a,
+            )
+        }
+    })
+}
+
+/// Parse an IERS EOP 20 C04 series. See the header.
+///
+/// # Safety
+/// `text` is readable for `text_len` bytes; `out` is writable for one pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_eop_series_parse_c04(
+    text: *const c_char,
+    text_len: usize,
+    out: *mut *mut SlEopSeries,
+) -> i32 {
+    guard(|| {
+        // SAFETY: forwarding the caller's own contract.
+        unsafe {
+            eop_series_open(
+                "sl_eop_series_parse_c04",
+                text,
+                text_len,
+                out,
+                EopSeries::parse_c04,
+            )
+        }
+    })
+}
+
+/// Release a series handle. `NULL` is a no-op.
+///
+/// # Safety
+/// `series` is null or came from an `sl_eop_series_parse_*` and has not been closed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_eop_series_close(series: *mut SlEopSeries) {
+    if series.is_null() {
+        return;
+    }
+    // SAFETY: the caller states this came from `Box::into_raw` in `eop_series_open`, unclosed.
+    drop(unsafe { Box::from_raw(series) });
+}
+
+/// The first and last tabulated MJD. See the header.
+///
+/// # Safety
+/// `series` is a live handle; both out-parameters are writable for one `double`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_eop_series_span(
+    series: *const SlEopSeries,
+    out_first_mjd: *mut f64,
+    out_last_mjd: *mut f64,
+) -> i32 {
+    guard(|| {
+        if series.is_null() || out_first_mjd.is_null() || out_last_mjd.is_null() {
+            return fail(SL_ERR_INVALID_ARGUMENT, "sl_eop_series_span: null pointer");
+        }
+        // SAFETY: checked non-null; the caller states the handle is live.
+        let (first, last) = unsafe { &(*series).series }.span();
+        // SAFETY: checked non-null just above.
+        unsafe {
+            *out_first_mjd = first;
+            *out_last_mjd = last;
+        }
+        SL_OK
+    })
+}
+
+/// The series interpolated to `n` UTC MJDs. See the header.
+///
+/// # Safety
+/// `series` is a live handle; `mjd` is readable and `out` writable for `n` elements.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_eop_series_at(
+    series: *const SlEopSeries,
+    mjd: *const f64,
+    n: usize,
+    out: *mut SlEopValue,
+) -> i32 {
+    guard(|| {
+        if series.is_null() || mjd.is_null() || out.is_null() {
+            return fail(SL_ERR_INVALID_ARGUMENT, "sl_eop_series_at: null pointer");
+        }
+        // SAFETY: checked non-null; the caller states the handle is live and `mjd` readable for `n`.
+        let (series, days) = unsafe { (&(*series).series, core::slice::from_raw_parts(mjd, n)) };
+        let mut values = Vec::with_capacity(n);
+        for (i, &day) in days.iter().enumerate() {
+            match series.at_mjd(day) {
+                Ok(e) => values.push(SlEopValue {
+                    xp_rad: e.xp.radians(),
+                    yp_rad: e.yp.radians(),
+                    dut1_seconds: e.dut1_seconds,
+                    lod_seconds: e.lod_seconds,
+                    dx_rad: e.dx.radians(),
+                    dy_rad: e.dy.radians(),
+                    xp_sigma_rad: e.xp_sigma.radians(),
+                    yp_sigma_rad: e.yp_sigma.radians(),
+                    dut1_sigma_seconds: e.dut1_sigma_seconds,
+                    quality: match e.quality {
+                        EopQuality::Final => EOP_FINAL,
+                        EopQuality::Predicted => EOP_PREDICTED,
+                    },
+                }),
+                Err(e) => return fail(SL_ERR_DOMAIN, format!("sl_eop_series_at: MJD {i}: {e}")),
+            }
+        }
+        // SAFETY: `out` is writable for `n` and `values.len() == n`.
+        unsafe { core::ptr::copy_nonoverlapping(values.as_ptr(), out, n) };
         SL_OK
     })
 }
@@ -11165,7 +11589,7 @@ pub unsafe extern "C" fn sl_ballistic_log_sensitivity(
     })
 }
 
-/// `sl_utc_datetime`: a civil epoch, which is what a TLE's columns carry.
+/// `sl_utc_datetime`: a UTC calendar label, the leap second's `23:59:60` included.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct SlUtcDateTime {
@@ -14011,6 +14435,8 @@ mod tests {
             ("SL_SLIP_ARC_START", SLIP_ARC_START),
             ("SL_SLIP_CONTINUOUS", SLIP_CONTINUOUS),
             ("SL_SLIP_SLIPPED", SLIP_SLIPPED),
+            ("SL_EOP_FINAL", EOP_FINAL),
+            ("SL_EOP_PREDICTED", EOP_PREDICTED),
         ] {
             let assigned = HEADER
                 .split_once(&format!("{name} = "))
@@ -14035,6 +14461,7 @@ mod tests {
             "SL_BAND_FORCE_INT32",
             "SL_LIFETIME_OUTCOME_FORCE_INT32",
             "SL_SLIP_FORCE_INT32",
+            "SL_EOP_QUALITY_FORCE_INT32",
         ] {
             assert!(
                 HEADER.contains(&format!("{pin} = 0x7FFFFFFF")),
@@ -14150,6 +14577,36 @@ mod tests {
             (
                 "sl_close_approach",
                 &["tca", "distance", "relative_speed"][..],
+            ),
+            (
+                "sl_utc_datetime",
+                &["year", "month", "day", "hour", "minute", "second"][..],
+            ),
+            (
+                "sl_leap_status",
+                &[
+                    "first",
+                    "last_step",
+                    "list_updated",
+                    "list_expires",
+                    "continuous_from",
+                    "last_delta_at_seconds",
+                ][..],
+            ),
+            (
+                "sl_eop_value",
+                &[
+                    "xp_rad",
+                    "yp_rad",
+                    "dut1_seconds",
+                    "lod_seconds",
+                    "dx_rad",
+                    "dy_rad",
+                    "xp_sigma_rad",
+                    "yp_sigma_rad",
+                    "dut1_sigma_seconds",
+                    "quality",
+                ][..],
             ),
         ] {
             let body = HEADER

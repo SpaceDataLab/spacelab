@@ -177,3 +177,99 @@ fn both_bridges_quote_the_hourly_history_the_solar_wind_field_needs() {
         );
     }
 }
+
+/// The time scales and the Earth-orientation series, capability for capability, on both bridges
+/// (Ф31.B). Where the C ABI takes the series handle as its first argument the Python bridge has a
+/// method of `EopSeries`; `sl_eop_series_close` alone has no counterpart, because Python's collector
+/// closes the handle. Both sections are read whole, so a capability added to one bridge and not the
+/// other fails here.
+#[test]
+fn both_bridges_name_the_same_time_surface() {
+    const FUNCTIONS: [&str; 6] = [
+        "utc_to_tai",
+        "utc_to_tt",
+        "utc_to_tdb",
+        "utc_to_ut1",
+        "tai_to_utc",
+        "leap_table_status",
+    ];
+    const METHODS: [(&str, &str); 4] = [
+        ("eop_series_parse_finals2000a", "parse_finals2000a"),
+        ("eop_series_parse_c04", "parse_c04"),
+        ("eop_series_span", "span"),
+        ("eop_series_at", "at"),
+    ];
+    const C_ONLY: &str = "eop_series_close";
+
+    let header = read("include/spacelab.h");
+    let (_, section) = header
+        .split_once("/* ---- Time scales and Earth orientation ---- */")
+        .expect("the header still has a time banner");
+    let (section, _) = section
+        .split_once("/* ---- SGP4 ---- */")
+        .expect("the SGP4 banner still follows it");
+    let declared: BTreeSet<&str> = section
+        .lines()
+        .filter_map(|line| {
+            let rest = line
+                .strip_prefix("sl_status sl_")
+                .or_else(|| line.strip_prefix("void sl_"))?;
+            Some(rest.split_once('(')?.0)
+        })
+        .collect();
+    let mut named: BTreeSet<&str> = FUNCTIONS.into_iter().collect();
+    named.extend(METHODS.map(|(c, _)| c));
+    named.insert(C_ONLY);
+    assert_eq!(declared, named, "the C time section");
+
+    let bridge = read("../spacelab-python/src/lib.rs");
+    let (_, section) = bridge
+        .split_once("// Time scales and Earth orientation (Ф31.B).")
+        .expect("the bridge still has a time banner");
+    let (section, _) = section
+        .split_once("// ── Control: the loop,")
+        .expect("the control banner still follows it");
+    let mut functions = BTreeSet::new();
+    let mut pending = false;
+    for line in section.lines() {
+        if line.trim_start() == "#[pyfunction]" {
+            pending = true;
+        } else if let (true, Some(rest)) = (pending, line.strip_prefix("fn ")) {
+            functions.insert(rest.split_once('(').expect("a `fn` opens its arguments").0);
+            pending = false;
+        }
+    }
+    assert_eq!(
+        functions,
+        FUNCTIONS.into_iter().collect(),
+        "the Python time section"
+    );
+    let (_, class) = section
+        .split_once("impl PyEopSeries {")
+        .expect("the bridge still has the EopSeries methods");
+    for (_, method) in METHODS {
+        assert!(
+            class.contains(&format!("    fn {method}(")),
+            "EopSeries has no {method}"
+        );
+    }
+
+    let registrations: String = bridge.split_whitespace().collect();
+    for name in FUNCTIONS {
+        assert!(
+            registrations.contains(&format!("wrap_pyfunction!({name},")),
+            "the Python bridge never registers {name}"
+        );
+    }
+    for registered in [
+        "m.add_class::<PyEopSeries>()".to_owned(),
+        "m.add(\"LeapSecondError\",m.py().get_type::<LeapSecondError>())".to_owned(),
+        "m.add(\"EopParseError\",m.py().get_type::<EopParseError>())".to_owned(),
+        "m.add(\"EopRangeError\",m.py().get_type::<EopRangeError>())".to_owned(),
+    ] {
+        assert!(
+            registrations.contains(&registered),
+            "the Python bridge never calls {registered}"
+        );
+    }
+}

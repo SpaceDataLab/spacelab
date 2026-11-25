@@ -2687,6 +2687,7 @@ dependencies = [
 name = "spacelab-capi"
 version = "0.3.0"
 dependencies = [
+ "spacelab",
  "spacelab-astro",
  "spacelab-astrometry",
  "spacelab-autodiff",
@@ -2697,6 +2698,7 @@ dependencies = [
  "spacelab-earth",
  "spacelab-earthvision",
  "spacelab-elements",
+ "spacelab-eop",
  "spacelab-estimation",
  "spacelab-fa",
  "spacelab-frames",
@@ -2924,6 +2926,7 @@ name = "spacelab-python"
 version = "0.3.0"
 dependencies = [
  "pyo3",
+ "spacelab",
  "spacelab-astro",
  "spacelab-astrometry",
  "spacelab-autodiff",
@@ -2934,6 +2937,7 @@ dependencies = [
  "spacelab-earth",
  "spacelab-earthvision",
  "spacelab-elements",
+ "spacelab-eop",
  "spacelab-ephemeris",
  "spacelab-estimation",
  "spacelab-fa",

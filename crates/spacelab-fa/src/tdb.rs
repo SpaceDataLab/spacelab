@@ -33,8 +33,10 @@
 //! are not implemented rather than implemented and silently passed zeros.
 
 use libm::sin;
+use spacelab_core::UtcDateTime;
 use spacelab_core::time::{Epoch, Tdb, Tt};
 
+use crate::leap_seconds::{LeapError, utc_to_tt};
 use crate::tdb_tables::{FAIRHEAD, GROUP_END, JPL_MASS, JPL_MASS_T2};
 
 /// Days in a Julian millennium. The series argument is millennia, not centuries.
@@ -96,6 +98,15 @@ pub fn tt_to_tdb(tt: Epoch<Tt>) -> Epoch<Tdb> {
 pub fn tdb_to_tt(tdb: Epoch<Tdb>) -> Epoch<Tt> {
     let at_tdb = Epoch::<Tt>::from_ns_since_j2000(tdb.ns_since_j2000());
     Epoch::from_ns_since_j2000(tdb.ns_since_j2000() - offset_ns(tdb_minus_tt(at_tdb)))
+}
+
+/// The UTC calendar to TDB: [`utc_to_tt`], then [`tt_to_tdb`].
+///
+/// # Errors
+///
+/// As [`crate::utc_to_tai`]: the series itself is total.
+pub fn utc_to_tdb(utc: UtcDateTime) -> Result<Epoch<Tdb>, LeapError> {
+    utc_to_tt(utc).map(tt_to_tdb)
 }
 
 /// Seconds to the exact nanosecond count an [`Epoch`] is built from.
@@ -215,5 +226,16 @@ mod tests {
         // And the size is milliseconds of general relativity, not the nanosecond an
         // always-one-nanosecond conversion would give.
         assert!(worst_ns > 1_000_000, "worst displacement was {worst_ns} ns");
+    }
+
+    /// From UTC the series is read at the TT the leap-second table gives, and a label the table
+    /// refuses is refused here too rather than read at some other TT.
+    #[test]
+    fn utc_to_tdb_reads_the_series_at_the_tt_of_the_label() {
+        let label = UtcDateTime::new(2016, 12, 31, 23, 59, 60.0).unwrap();
+        let tt = utc_to_tt(label).unwrap();
+        assert_eq!(utc_to_tdb(label), Ok(tt_to_tdb(tt)));
+        let spurious = UtcDateTime::new(2018, 12, 31, 23, 59, 60.0).unwrap();
+        assert_eq!(utc_to_tdb(spurious), Err(LeapError::SpuriousLeapSecond));
     }
 }

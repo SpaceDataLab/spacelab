@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -29,6 +30,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -1838,6 +1840,71 @@ void the_control_wrapper_closes_the_loop_and_carries_its_refusals() {
     CHECK(threw);
 }
 
+/*
+ * The time wrapper: three scales from a UTC label and the way back, and a series object that owns
+ * its handle. Five days of `finals2000A` around the 2017 leap second, byte for byte from the
+ * excerpt in `spacelab-eop`; the values are the Rust API's, from
+ * `crates/spacelab/tests/fixtures/bridge_time_reference.tsv`, which the Rust suite holds to the bit.
+ */
+constexpr std::string_view FINALS_2017 =
+    "161230 57752.00 I  0.082883 0.000052  0.263539 0.000038  I-0.4069180 0.0000079  0.8286 0.0056 "
+    " I     0.022    0.119    -0.155    0.024  0.082924  0.263518 -0.4069106    -0.023    -0.038  "
+    "\n"
+    "161231 57753.00 I  0.081400 0.000052  0.263094 0.000039  I-0.4077601 0.0000078  0.8842 0.0055 "
+    " I     0.025    0.119    -0.169    0.024  0.081318  0.262990 -0.4077600    -0.021    -0.048  "
+    "\n"
+    "17 1 1 57754.00 I  0.080504 0.000028  0.263145 0.000028  I 0.5912821 0.0000077  1.0342 0.0050 "
+    " I     0.012    0.119    -0.168    0.018  0.080450  0.263074  0.5912975    -0.019    -0.057  "
+    "\n"
+    "17 1 2 57755.00 I  0.080285 0.000029  0.263605 0.000032  I 0.5901752 0.0000063  1.1730 0.0048 "
+    " I    -0.001    0.040    -0.156    0.033  0.080275  0.263595  0.5902149    -0.027    -0.065  "
+    "\n"
+    "17 1 3 57756.00 I  0.080265 0.000034  0.264004 0.000031  I 0.5889406 0.0000058  1.2984 0.0042 "
+    " I    -0.009    0.049    -0.150    0.059  0.080351  0.264010  0.5889684    -0.027    -0.074  "
+    "\n";
+
+void the_time_wrapper_owns_its_series_and_keeps_the_leap_second() {
+    static_assert(sizeof(spacelab::utc_datetime) == 16);
+    static_assert(sizeof(spacelab::eop_quality) == 4);
+
+    const std::array<spacelab::utc_datetime, 2> labels{
+        {{2016, 12, 31, 23, 59, 60.0}, {2017, 1, 1, 0, 0, 0.0}}};
+    const std::vector<std::int64_t> tai = spacelab::utc_to_tai(labels);
+    CHECK(tai.at(0) == INT64_C(536500836000000000));
+    CHECK(tai.at(1) - tai.at(0) == 1'000'000'000);
+    CHECK(spacelab::utc_to_tt(labels).at(0) == tai.at(0) + 32'184'000'000);
+    CHECK(spacelab::utc_to_tdb(labels).at(0) == INT64_C(536500868183950503));
+    const std::vector<spacelab::utc_datetime> back = spacelab::tai_to_utc(tai);
+    CHECK(back.at(0).second == 60.0 && back.at(1).second == 0.0);
+    CHECK(spacelab::utc_to_tai(std::span<const spacelab::utc_datetime>{}).empty());
+
+    const spacelab::leap_status status = spacelab::leap_table_status();
+    CHECK(status.last_delta_at_seconds == 37 && status.list_expires.year == 2027);
+
+    auto parsed = spacelab::eop_series::parse_finals2000a(FINALS_2017);
+    CHECK(static_cast<bool>(parsed));
+    if (!parsed) {
+        return;
+    }
+    const spacelab::eop_series series = *std::move(parsed);
+    CHECK(series.span() == std::pair(57752.0, 57756.0));
+    const std::array<double, 1> node{57754.0};
+    const std::vector<spacelab::eop_value> value = series.at(node);
+    CHECK(std::bit_cast<std::uint64_t>(value.at(0).dut1_seconds) == 0x3fe2ebe8bc169c24U);
+    CHECK(value.at(0).quality == SL_EOP_FINAL);
+    const std::vector<std::int64_t> ut1 = series.utc_to_ut1(labels);
+    CHECK(ut1.at(0) == INT64_C(536500799591297500) && ut1.at(1) == INT64_C(536500800591297500));
+
+    bool refused = false;
+    try {
+        const std::array<double, 1> outside{57757.5};
+        (void)series.at(outside);
+    } catch (const spacelab::error &e) {
+        refused = e.status() == SL_ERR_DOMAIN;
+    }
+    CHECK(refused);
+}
+
 } // namespace
 
 /*
@@ -1887,6 +1954,7 @@ int main() {
         the_conjunction_wrapper_carries_an_exception_back_through_c();
         the_cloud_masker_reports_a_build_without_inference();
         the_control_wrapper_closes_the_loop_and_carries_its_refusals();
+        the_time_wrapper_owns_its_series_and_keeps_the_leap_second();
     } catch (const spacelab::error &e) {
         std::fprintf(stderr, "FAIL: uncaught spacelab::error, status %d: %s\n", e.status(),
                      e.what());

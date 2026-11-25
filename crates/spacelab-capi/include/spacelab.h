@@ -54,7 +54,7 @@ extern "C" {
  * `sl_abi_version()` at start-up if you load the shared object dynamically; a static link cannot
  * skew, but a `dlopen` can, and a struct that grew a field is not detectable any other way.
  */
-#define SL_ABI_VERSION 3U
+#define SL_ABI_VERSION 4U
 
 uint32_t sl_abi_version(void);
 
@@ -242,6 +242,128 @@ sl_status sl_itrf_to_geodetic(const sl_vec3 *r_itrf, sl_geodetic *out);
 
 /* WGS-84 geodetic to an ITRF Cartesian position -- the exact inverse, for placing stations. */
 sl_status sl_geodetic_to_itrf(const sl_geodetic *g, sl_vec3 *out);
+
+/* ---- Time scales and Earth orientation ---- */
+
+/*
+ * A UTC calendar label. UTC is a calendar rather than a count: a day with a leap second holds
+ * 86401 seconds and labels its last one 23:59:60, so `second` reaches 60 only inside a leap second.
+ * Month 1-12, day 1 to the month's length, hour 0-23, minute 0-59, second in [0, 61); a label the
+ * calendar does not admit is SL_ERR_INVALID_ARGUMENT wherever one is taken.
+ */
+typedef struct {
+    int32_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    double second;
+} sl_utc_datetime;
+
+/*
+ * UTC labels to TAI, TT and TDB, `n` at a time, as integer nanoseconds since J2000 on the target
+ * scale. TAI = UTC + (TAI - UTC), the integer from the IERS leap-second table; TT = TAI + 32.184 s,
+ * exactly; TDB = TT + the Fairhead & Bretagnon series at the geocentre, which stays inside 1.7 ms.
+ *
+ * SL_ERR_DOMAIN, with nothing written, for a label before 1972-01-01 (TAI - UTC was fractional then
+ * and is not modelled), for 23:59:60 on a day that had no leap second, and for an epoch an int64_t
+ * cannot hold, from April 2292 on. The message names the first label refused. Every pointer must be
+ * valid; `n` may be zero, and then nothing is written.
+ */
+sl_status sl_utc_to_tai(const sl_utc_datetime *utc, size_t n, int64_t *out);
+sl_status sl_utc_to_tt(const sl_utc_datetime *utc, size_t n, int64_t *out);
+sl_status sl_utc_to_tdb(const sl_utc_datetime *utc, size_t n, int64_t *out);
+
+/*
+ * TAI back to UTC labels, the inverse of `sl_utc_to_tai`: an instant inside a leap second is
+ * labelled 23:59:60, so a label survives the round trip. SL_ERR_DOMAIN before 1972-01-01.
+ */
+sl_status sl_tai_to_utc(const int64_t *tai_ns, size_t n, sl_utc_datetime *out);
+
+/*
+ * What the leap-second table answers for. The table is the IERS list `leap-seconds.list`, last
+ * updated on `list_updated` and valid until `list_expires`. CGPM 2026 Resolution 5 makes UTC
+ * continuous from `continuous_from`, which comes first, so no date is left unannounced and the
+ * table is closed: every label from `first` on has an answer, TAI - UTC is `last_delta_at_seconds`
+ * from `last_step` on, and only a label before `first` is refused. Each date is its 00:00:00 label.
+ */
+typedef struct {
+    sl_utc_datetime first;
+    sl_utc_datetime last_step;
+    sl_utc_datetime list_updated;
+    sl_utc_datetime list_expires;
+    sl_utc_datetime continuous_from;
+    int32_t last_delta_at_seconds;
+} sl_leap_status;
+
+sl_status sl_leap_table_status(sl_leap_status *out);
+
+/*
+ * A parsed IERS Earth-orientation series: `finals2000A` (`finals.all.iau2000.txt`), whose final
+ * Bulletin B values are read in preference to the rapid service where the IERS has published them,
+ * or the EOP 20 C04 series (`eopc04.1962-now`), whose header must name the IAU 2000
+ * precession-nutation model. Opaque and immutable once parsed, so one handle may be shared across
+ * threads; `sl_eop_series_close` frees it.
+ */
+typedef struct sl_eop_series sl_eop_series;
+
+/*
+ * Parse a file's text, `text_len` bytes, which need not be NUL-terminated. SL_ERR_INVALID_ARGUMENT
+ * for text that is not UTF-8; SL_ERR_PARSE for a field that is not a number, days out of order, a
+ * C04 header without the model line, or no usable row.
+ */
+sl_status sl_eop_series_parse_finals2000a(const char *text, size_t text_len, sl_eop_series **out);
+sl_status sl_eop_series_parse_c04(const char *text, size_t text_len, sl_eop_series **out);
+
+/* Release a handle. `sl_eop_series_close(NULL)` is a no-op. */
+void sl_eop_series_close(sl_eop_series *series);
+
+/* The first and the last tabulated day, as MJD at 0h UTC. */
+sl_status sl_eop_series_span(const sl_eop_series *series, double *out_first_mjd,
+                             double *out_last_mjd);
+
+/* Whether the IERS observed the days a value rests on, or predicted them. */
+typedef enum {
+    SL_EOP_FINAL = 0,
+    SL_EOP_PREDICTED = 1,
+    SL_EOP_QUALITY_FORCE_INT32 = 0x7FFFFFFF
+} sl_eop_quality;
+
+/*
+ * The series at one instant: four-point Lagrange between the tabulated days, linear at a block's
+ * ends, with a leap second's one-second step in dUT1 taken out first. `quality` is the weaker of the
+ * two bracketing days; the sigmas are the IERS's own, interpolated linearly.
+ */
+typedef struct {
+    double xp_rad; /* polar motion */
+    double yp_rad;
+    double dut1_seconds; /* UT1 - UTC */
+    double lod_seconds;  /* excess length of day */
+    double dx_rad;       /* celestial-pole offsets from IAU 2000A */
+    double dy_rad;
+    double xp_sigma_rad;
+    double yp_sigma_rad;
+    double dut1_sigma_seconds;
+    sl_eop_quality quality;
+} sl_eop_value;
+
+/*
+ * The series at `n` instants, each a UTC MJD. SL_ERR_DOMAIN, with nothing written, for an instant
+ * outside the tabulated span or inside a hole in it: the Earth's rotation is measured, and it is not
+ * extrapolated. With `sl_utc_to_ut1` and `sl_utc_to_tt` these are what `sl_teme_to_itrf` and
+ * `sl_gcrf_to_itrf` take.
+ */
+sl_status sl_eop_series_at(const sl_eop_series *series, const double *mjd_utc, size_t n,
+                           sl_eop_value *out);
+
+/*
+ * UTC labels to UT1 through a series: UT1 = UTC + dUT1, with dUT1 interpolated to the label. UT1
+ * does not stop for a leap second, so 23:59:60 lands one second before the next day's 00:00:00.
+ * SL_ERR_DOMAIN for each refusal of `sl_utc_to_tai` and of `sl_eop_series_at`. There is no UT1
+ * without a series, so `series` may not be NULL.
+ */
+sl_status sl_utc_to_ut1(const sl_eop_series *series, const sl_utc_datetime *utc, size_t n,
+                        int64_t *out);
 
 /* ---- SGP4 ---- */
 
@@ -2454,16 +2576,6 @@ sl_status sl_orbital_lifetime_ensemble(const sl_decay_params *params, const doub
 sl_status sl_ballistic_log_sensitivity(const sl_decay_params *params, const double *initial,
                                        const double *zonals, size_t zonal_count, double fraction,
                                        double *out);
-
-/* A civil epoch, which is what a TLE's columns carry. */
-typedef struct {
-    int32_t year;
-    uint8_t month;
-    uint8_t day;
-    uint8_t hour;
-    uint8_t minute;
-    double second;
-} sl_utc_datetime;
 
 /* Bytes each TLE line needs: 69 columns and the terminator. */
 #define SL_TLE_LINE_BYTES 70

@@ -25,6 +25,7 @@ Build and run:
 
 import math
 import os
+import struct
 import sys
 import sysconfig
 from itertools import pairwise
@@ -2195,6 +2196,224 @@ def test_threads_get_the_serial_answer_and_leave_the_gil_off():
     is_gil_enabled = getattr(sys, "_is_gil_enabled", None)
     if is_gil_enabled is not None and sysconfig.get_config_var("Py_GIL_DISABLED"):
         assert not is_gil_enabled(), "importing spacelab re-enabled the GIL"
+
+
+def _reference_rows():
+    """The Rust API's time scales on every IERS case in the tree (Ф31.B), one list per row."""
+    path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "spacelab",
+        "tests",
+        "fixtures",
+        "bridge_time_reference.tsv",
+    )
+    with open(path, encoding="utf-8") as handle:
+        return [
+            line.rstrip("\n").split("\t") for line in handle if not line.startswith("#")
+        ]
+
+
+def _f64_of(hex_bits):
+    return struct.unpack("<d", int(hex_bits, 16).to_bytes(8, "little"))[0]
+
+
+def _bits(x):
+    return f"{struct.unpack('<Q', struct.pack('<d', x))[0]:016x}"
+
+
+def _label(fields):
+    year, month, day, hour, minute = (int(f) for f in fields[:5])
+    return (year, month, day, hour, minute, _f64_of(fields[5]))
+
+
+def _same_label(got, want):
+    return got[:5] == want[:5] and _bits(got[5]) == _bits(want[5])
+
+
+# The exception each refusal kind of the reference is raised as. A label the calendar refuses is a
+# plain `ValueError`; the rest are the subclass that names what could not answer.
+_REFUSAL = {
+    "calendar": ValueError,
+    "before-1972": sl.LeapSecondError,
+    "spurious-leap-second": sl.LeapSecondError,
+    "outside-calendar": sl.LeapSecondError,
+    "out-of-range": sl.EopRangeError,
+    "gap": sl.EopRangeError,
+}
+
+
+def _refused(kind, call, *args):
+    try:
+        call(*args)
+    except ValueError as e:
+        assert type(e) is _REFUSAL[kind], f"{kind} raised {type(e).__name__}: {e}"
+        return
+    raise AssertionError(f"{kind} was answered")
+
+
+def test_time_scales_return_the_rust_reference_to_the_bit():
+    """Every row of the Rust API's reference, through the bridge, to the bit (S2, G5).
+
+    `crates/spacelab/tests/bridge_time_reference.rs` holds the file to the Rust API on the IERS
+    cases in the tree; the C ABI's `tests/time_scales.rs` holds the C ABI to it. Each epoch must
+    come back as the same integer, each double with the same bits, each refusal as the exception
+    its kind names. The set is counted, and the one divergence from the C ABI -- an epoch past
+    `int64_t`, which Python's integers carry and C refuses -- is counted by name.
+    """
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    rows = _reference_rows()
+    series, counted, past_int64 = {}, {}, 0
+    convert = (sl.utc_to_tai, sl.utc_to_tt, sl.utc_to_tdb)
+    batch_in, batch_out, eop_batch = [], [[], [], []], {}
+    for r in rows:
+        counted[r[0]] = counted.get(r[0], 0) + 1
+        if r[0] == "source":
+            with open(os.path.join(root, r[3]), encoding="utf-8") as handle:
+                text = handle.read()
+            parse = {
+                "finals2000a": sl.EopSeries.parse_finals2000a,
+                "c04": sl.EopSeries.parse_c04,
+            }[r[2]]
+            series[r[1]] = parse(text)
+        elif r[0] == "status":
+            s = sl.leap_table_status()
+            for key, at in (
+                ("first", 1),
+                ("last_step", 4),
+                ("list_updated", 8),
+                ("list_expires", 11),
+                ("continuous_from", 14),
+            ):
+                want = (int(r[at]), int(r[at + 1]), int(r[at + 2]), 0, 0, 0.0)
+                assert _same_label(s[key], want), f"{key}: {s[key]} is not {want}"
+            assert s["last_delta_at_seconds"] == int(r[7])
+            assert len(s) == 6, sorted(s)
+        elif r[0] == "span":
+            first, last = series[r[1]].span()
+            assert (_bits(first), _bits(last)) == (r[2], r[3]), r[1]
+        elif r[0] == "utc":
+            label = _label(r[1:7])
+            if r[7] == "refused":
+                for f in convert:
+                    _refused(r[8], f, [label])
+                continue
+            for k, f in enumerate(convert):
+                want = int(r[7 + k])
+                assert f([label]) == [want], f"{f.__name__} {label}"
+                batch_out[k].append(want)
+            batch_in.append(label)
+            past_int64 += not -(2**63) <= int(r[7]) < 2**63
+        elif r[0] == "tai":
+            ns = int(r[1])
+            if r[2] == "refused":
+                _refused(r[3], sl.tai_to_utc, [ns])
+            else:
+                (got,) = sl.tai_to_utc([ns])
+                assert _same_label(got, _label(r[2:8])), f"{ns}: {got}"
+        elif r[0] == "eop":
+            mjd = _f64_of(r[2])
+            if r[3] == "refused":
+                _refused(r[4], series[r[1]].at, [mjd])
+                continue
+            got = series[r[1]].at([mjd])
+            fields = (
+                "xp_rad",
+                "yp_rad",
+                "dut1_seconds",
+                "lod_seconds",
+                "dx_rad",
+                "dy_rad",
+            )
+            for k, key in enumerate(fields):
+                assert _bits(got[key][0]) == r[3 + k], f"{r[1]} at {mjd}, {key}"
+            assert got["quality"] == [r[9]], f"{r[1]} at {mjd}"
+            for k, key in enumerate(
+                ("xp_sigma_rad", "yp_sigma_rad", "dut1_sigma_seconds")
+            ):
+                assert _bits(got[key][0]) == r[10 + k], f"{r[1]} at {mjd}, {key}"
+            assert len(got) == 10, sorted(got)
+            eop_batch.setdefault(r[1], ([], []))[0].append(mjd)
+            eop_batch[r[1]][1].append(got)
+        elif r[0] == "ut1":
+            label = _label(r[2:8])
+            if r[8] == "refused":
+                _refused(r[9], sl.utc_to_ut1, series[r[1]], [label])
+            else:
+                assert sl.utc_to_ut1(series[r[1]], [label]) == [int(r[8])], (
+                    f"{r[1]} {label}"
+                )
+        else:
+            raise AssertionError(f"an unknown row kind {r[0]}")
+
+    assert sum(counted.values()) == len(rows)
+    for kind in ("source", "status", "span", "utc", "tai", "eop", "ut1"):
+        assert counted.get(kind, 0) > 0, f"no {kind} row"
+    assert past_int64 == 1, f"{past_int64} labels past int64_t"
+
+    # Batch is scalar: every answered label at once gives what one at a time gave, in order.
+    for f, want in zip(convert, batch_out, strict=True):
+        assert f(batch_in) == want, f.__name__
+    for name, (days, singles) in eop_batch.items():
+        columns = series[name].at(days)
+        for key, column in columns.items():
+            assert [_bits(v) if key != "quality" else v for v in column] == [
+                _bits(s[key][0]) if key != "quality" else s[key][0] for s in singles
+            ], f"{name}: {key}"
+
+
+def test_time_refusals_are_typed_and_take_the_whole_batch():
+    """A batch with one refused element returns nothing and names the element; the exceptions are
+    `ValueError` subclasses, so a caller that catches `ValueError` still catches them."""
+    for exc in (sl.LeapSecondError, sl.EopParseError, sl.EopRangeError):
+        assert issubclass(exc, ValueError) and exc is not ValueError
+    good = (2017, 1, 1, 0, 0, 0.0)
+    for f in (sl.utc_to_tai, sl.utc_to_tt, sl.utc_to_tdb):
+        assert f([]) == []
+        try:
+            f([good, (2018, 12, 31, 23, 59, 60.0), good])
+        except sl.LeapSecondError as e:
+            assert "label 1" in str(e), e
+        else:
+            raise AssertionError(f"{f.__name__} answered a spurious leap second")
+        try:
+            f([good, good, (2017, 13, 1, 0, 0, 0.0)])
+        except ValueError as e:
+            assert type(e) is ValueError and "label 2" in str(e), e
+        else:
+            raise AssertionError(f"{f.__name__} answered month 13")
+    finals = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "spacelab-eop",
+        "tests",
+        "fixtures",
+        "finals2000A_excerpt.txt",
+    )
+    with open(finals, encoding="utf-8") as handle:
+        text = handle.read()
+    # A finals2000A file is not a C04 one: it has no model line, and the reader says so.
+    for call in (
+        lambda: sl.EopSeries.parse_c04(text),
+        lambda: sl.EopSeries.parse_finals2000a(""),
+    ):
+        try:
+            call()
+        except sl.EopParseError:
+            pass
+        else:
+            raise AssertionError("text that does not parse was parsed")
+    s = sl.EopSeries.parse_finals2000a(text)
+    first, last = s.span()
+    try:
+        s.at([first, last + 1.0])
+    except sl.EopRangeError as e:
+        assert "MJD 1" in str(e), e
+    else:
+        raise AssertionError("the series was extrapolated")
+    assert sl.tai_to_utc([]) == [] and s.at([])["quality"] == []
 
 
 def test_every_export_is_named_by_a_test():

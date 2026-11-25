@@ -32,9 +32,9 @@
 use core::fmt;
 
 use spacelab_core::{
-    Epoch, Tai, UtcDateTime,
+    Epoch, Tai, Tt, UtcDateTime,
     calendar::{civil_from_days, days_from_civil},
-    time::NS_PER_DAY,
+    time::{NS_PER_DAY, tai_to_tt},
 };
 
 /// One entry: from 00:00:00 UTC on this date, `TAI - UTC` takes this value.
@@ -240,6 +240,62 @@ pub fn tai_to_utc(tai: Epoch<Tai>) -> Result<UtcDateTime, LeapError> {
     label.ok_or(LeapError::OutsideCalendar)
 }
 
+/// The UTC calendar to TT: [`utc_to_tai`], then `TT = TAI + 32.184 s`, exactly.
+///
+/// # Errors
+///
+/// As [`utc_to_tai`].
+pub fn utc_to_tt(utc: UtcDateTime) -> Result<Epoch<Tt>, LeapError> {
+    utc_to_tai(utc).map(tai_to_tt)
+}
+
+/// The day the IERS list was last updated, its `#$` line: Bulletin C 72.
+const LIST_UPDATED: (i32, u8, u8) = (2026, 7, 6);
+/// The day the IERS list expires, its `#@` line.
+const LIST_EXPIRES: (i32, u8, u8) = (2027, 6, 28);
+/// CGPM 2026 Resolution 5: "continuous UTC will become effective on 20 May 2027".
+const CONTINUOUS_UTC: (i32, u8, u8) = (2027, 5, 20);
+
+/// What the leap-second table answers for, and the dates of the two documents that close it.
+///
+/// The table is closed (module documentation). Its list expires on [`Self::list_expires`], after
+/// UTC becomes continuous on [`Self::continuous_from`], so no date is left unannounced: every date
+/// from [`Self::first`] on has an answer, and `TAI − UTC` is [`Self::last_delta_at`] from
+/// [`Self::last_step`] on. [`delta_at`] refuses only before [`Self::first`]. The dates are
+/// `(year, month, day)`, each from 00:00:00 UTC; `tests/leap_second_list.rs` holds every one of
+/// them to the list's own lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeapTableStatus {
+    /// The table's first day, 1972-01-01. Before it [`delta_at`] answers
+    /// [`LeapError::BeforeIntegerSecondEra`].
+    pub first: (i32, u8, u8),
+    /// The day the last leap second took effect.
+    pub last_step: (i32, u8, u8),
+    /// `TAI − UTC` from [`Self::last_step`] on, in seconds.
+    pub last_delta_at: i32,
+    /// The day the IERS list was last updated.
+    pub list_updated: (i32, u8, u8),
+    /// The day the IERS list expires.
+    pub list_expires: (i32, u8, u8),
+    /// The first day of continuous UTC. No leap second is inserted from it on.
+    pub continuous_from: (i32, u8, u8),
+}
+
+/// The leap-second table's status: see [`LeapTableStatus`].
+#[must_use]
+pub const fn leap_table_status() -> LeapTableStatus {
+    let first = TABLE[0];
+    let last = TABLE[TABLE.len() - 1];
+    LeapTableStatus {
+        first: (first.year, first.month, 1),
+        last_step: (last.year, last.month, 1),
+        last_delta_at: last.delta_at,
+        list_updated: LIST_UPDATED,
+        list_expires: LIST_EXPIRES,
+        continuous_from: CONTINUOUS_UTC,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)] // a panicking test is a failing test
@@ -315,6 +371,25 @@ mod tests {
         assert_eq!(
             after.ns_since_j2000() - leap.ns_since_j2000(),
             1_000_000_000
+        );
+    }
+
+    #[test]
+    fn utc_to_tt_is_tai_plus_32_184_seconds_and_refuses_what_tai_refuses() {
+        for label in [utc(2016, 12, 31, 23, 59, 60.0), utc(2017, 1, 1, 0, 0, 0.0)] {
+            assert_eq!(
+                utc_to_tt(label).unwrap().ns_since_j2000(),
+                utc_to_tai(label).unwrap().ns_since_j2000() + 32_184_000_000,
+                "{label}"
+            );
+        }
+        assert_eq!(
+            utc_to_tt(utc(2018, 12, 31, 23, 59, 60.0)),
+            Err(LeapError::SpuriousLeapSecond)
+        );
+        assert_eq!(
+            utc_to_tt(utc(1971, 12, 31, 23, 59, 59.0)),
+            Err(LeapError::BeforeIntegerSecondEra)
         );
     }
 

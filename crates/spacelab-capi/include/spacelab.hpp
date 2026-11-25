@@ -142,6 +142,9 @@ using decay_params = ::sl_decay_params;
 using lifetime = ::sl_lifetime;
 using lifetime_ensemble = ::sl_lifetime_ensemble;
 using utc_datetime = ::sl_utc_datetime;
+using leap_status = ::sl_leap_status;
+using eop_quality = ::sl_eop_quality;
+using eop_value = ::sl_eop_value;
 using lanes = ::sl_lanes;
 using slip = ::sl_slip;
 using slip_verdict = ::sl_slip_verdict;
@@ -364,6 +367,158 @@ template <class T> [[nodiscard]] T unwrap(result<T> r) {
 
 [[nodiscard]] inline vec3 geodetic_to_itrf(const geodetic &g) {
     return detail::unwrap(try_geodetic_to_itrf(g));
+}
+
+#endif
+
+/* ---- Time scales and Earth orientation ---- */
+
+namespace detail {
+
+/* `n` labels to `n` epochs through one of the `sl_utc_to_*` conversions. An empty span is an empty
+ * answer: its `data()` may be null, which the C side rightly refuses. */
+template <class Call>
+[[nodiscard]] inline result<std::vector<std::int64_t>> utc_epochs(std::span<const utc_datetime> utc,
+                                                                  Call call) {
+    if (utc.empty()) {
+        return std::vector<std::int64_t>{};
+    }
+    std::vector<std::int64_t> out(utc.size());
+    const ::sl_status s = call(utc.data(), utc.size(), out.data());
+    return s == SL_OK ? result<std::vector<std::int64_t>>(std::move(out))
+                      : detail::failure<std::vector<std::int64_t>>(s);
+}
+
+} // namespace detail
+
+[[nodiscard]] inline result<std::vector<std::int64_t>>
+try_utc_to_tai(std::span<const utc_datetime> utc) {
+    return detail::utc_epochs(utc, ::sl_utc_to_tai);
+}
+
+[[nodiscard]] inline result<std::vector<std::int64_t>>
+try_utc_to_tt(std::span<const utc_datetime> utc) {
+    return detail::utc_epochs(utc, ::sl_utc_to_tt);
+}
+
+[[nodiscard]] inline result<std::vector<std::int64_t>>
+try_utc_to_tdb(std::span<const utc_datetime> utc) {
+    return detail::utc_epochs(utc, ::sl_utc_to_tdb);
+}
+
+[[nodiscard]] inline result<std::vector<utc_datetime>>
+try_tai_to_utc(std::span<const std::int64_t> tai_ns) {
+    if (tai_ns.empty()) {
+        return std::vector<utc_datetime>{};
+    }
+    std::vector<utc_datetime> out(tai_ns.size());
+    const ::sl_status s = ::sl_tai_to_utc(tai_ns.data(), tai_ns.size(), out.data());
+    return s == SL_OK ? result<std::vector<utc_datetime>>(std::move(out))
+                      : detail::failure<std::vector<utc_datetime>>(s);
+}
+
+[[nodiscard]] inline result<leap_status> try_leap_table_status() {
+    leap_status out{};
+    const ::sl_status s = ::sl_leap_table_status(&out);
+    return s == SL_OK ? result<leap_status>(out) : detail::failure<leap_status>(s);
+}
+
+/*
+ * A parsed IERS Earth-orientation series. Parsing constructs it and destruction releases it, as for
+ * `sgp4`; movable, not copyable. `parse_finals2000a` and `parse_c04` are the factories a build
+ * without exceptions has.
+ */
+class eop_series {
+  public:
+    [[nodiscard]] static result<eop_series> parse_finals2000a(std::string_view text) {
+        return open(text, ::sl_eop_series_parse_finals2000a);
+    }
+
+    [[nodiscard]] static result<eop_series> parse_c04(std::string_view text) {
+        return open(text, ::sl_eop_series_parse_c04);
+    }
+
+    /* The first and the last tabulated day, MJD at 0h UTC. */
+    [[nodiscard]] result<std::pair<double, double>> try_span() const {
+        double first = 0.0;
+        double last = 0.0;
+        const ::sl_status s = ::sl_eop_series_span(handle_.get(), &first, &last);
+        return s == SL_OK ? result<std::pair<double, double>>(std::pair{first, last})
+                          : detail::failure<std::pair<double, double>>(s);
+    }
+
+    [[nodiscard]] result<std::vector<eop_value>> try_at(std::span<const double> mjd_utc) const {
+        if (mjd_utc.empty()) {
+            return std::vector<eop_value>{};
+        }
+        std::vector<eop_value> out(mjd_utc.size());
+        const ::sl_status s =
+            ::sl_eop_series_at(handle_.get(), mjd_utc.data(), mjd_utc.size(), out.data());
+        return s == SL_OK ? result<std::vector<eop_value>>(std::move(out))
+                          : detail::failure<std::vector<eop_value>>(s);
+    }
+
+    [[nodiscard]] result<std::vector<std::int64_t>>
+    try_utc_to_ut1(std::span<const utc_datetime> utc) const {
+        return detail::utc_epochs(utc,
+                                  [this](const utc_datetime *in, std::size_t n, std::int64_t *out) {
+                                      return ::sl_utc_to_ut1(handle_.get(), in, n, out);
+                                  });
+    }
+
+#if defined(__cpp_exceptions)
+    [[nodiscard]] std::pair<double, double> span() const {
+        return detail::unwrap(try_span());
+    }
+
+    [[nodiscard]] std::vector<eop_value> at(std::span<const double> mjd_utc) const {
+        return detail::unwrap(try_at(mjd_utc));
+    }
+
+    [[nodiscard]] std::vector<std::int64_t> utc_to_ut1(std::span<const utc_datetime> utc) const {
+        return detail::unwrap(try_utc_to_ut1(utc));
+    }
+#endif
+
+  private:
+    explicit eop_series(::sl_eop_series *raw) : handle_(raw) {}
+
+    template <class Parse>
+    [[nodiscard]] static result<eop_series> open(std::string_view text, Parse parse) {
+        ::sl_eop_series *raw = nullptr;
+        const ::sl_status s = parse(text.data(), text.size(), &raw);
+        return s == SL_OK ? result<eop_series>(eop_series(raw)) : detail::failure<eop_series>(s);
+    }
+
+    struct closer {
+        void operator()(::sl_eop_series *p) const noexcept {
+            ::sl_eop_series_close(p);
+        }
+    };
+
+    std::unique_ptr<::sl_eop_series, closer> handle_;
+};
+
+#if defined(__cpp_exceptions)
+
+[[nodiscard]] inline std::vector<std::int64_t> utc_to_tai(std::span<const utc_datetime> utc) {
+    return detail::unwrap(try_utc_to_tai(utc));
+}
+
+[[nodiscard]] inline std::vector<std::int64_t> utc_to_tt(std::span<const utc_datetime> utc) {
+    return detail::unwrap(try_utc_to_tt(utc));
+}
+
+[[nodiscard]] inline std::vector<std::int64_t> utc_to_tdb(std::span<const utc_datetime> utc) {
+    return detail::unwrap(try_utc_to_tdb(utc));
+}
+
+[[nodiscard]] inline std::vector<utc_datetime> tai_to_utc(std::span<const std::int64_t> tai_ns) {
+    return detail::unwrap(try_tai_to_utc(tai_ns));
+}
+
+[[nodiscard]] inline leap_status leap_table_status() {
+    return detail::unwrap(try_leap_table_status());
 }
 
 #endif

@@ -5733,6 +5733,276 @@ fn shapiro_delay(r_emitter: f64, r_receiver: f64, path: f64, gm: f64) -> f64 {
     estimation_shapiro_delay(r_emitter, r_receiver, path, gm)
 }
 
+// ---------------------------------------------------------------------------------------------
+// Time scales and Earth orientation (Ф31.B). UTC crosses as the calendar label
+// `(year, month, day, hour, minute, second)`, because a leap second has a label and no count; an
+// epoch crosses as integer nanoseconds since J2000 on its own scale, the `epoch_*_ns` the
+// propagation entry points above take. Each conversion is the Rust function of the same name,
+// element by element, and a batch with one refused element returns nothing. A label the calendar
+// refuses is a `ValueError`; a question the leap-second table or the series cannot answer raises
+// the `ValueError` subclass that says which.
+// ---------------------------------------------------------------------------------------------
+
+pyo3::create_exception!(
+    spacedatalab,
+    LeapSecondError,
+    PyValueError,
+    "The leap-second table cannot answer: a label before 1972-01-01, a `23:59:60` on a day that \
+     had no leap second, or an instant whose UTC year does not fit the calendar."
+);
+pyo3::create_exception!(
+    spacedatalab,
+    EopParseError,
+    PyValueError,
+    "Earth-orientation text that does not parse as the format it was read as."
+);
+pyo3::create_exception!(
+    spacedatalab,
+    EopRangeError,
+    PyValueError,
+    "An instant outside the tabulated Earth-orientation series, or inside a hole in it. The \
+     rotation of the Earth is not extrapolated."
+);
+
+/// A UTC calendar label as it crosses the boundary.
+type UtcLabel = (i32, u8, u8, u8, u8, f64);
+
+/// A date as the label of its 00:00:00 UTC.
+const fn midnight_label(date: (i32, u8, u8)) -> UtcLabel {
+    (date.0, date.1, date.2, 0, 0, 0.0)
+}
+
+/// The exception an EOP error is raised as: what a parse refuses, or what a lookup cannot answer.
+fn eop_err(e: &spacelab_eop::EopError, message: String) -> PyErr {
+    use spacelab_eop::EopError;
+    match e {
+        EopError::Field { .. }
+        | EopError::Empty
+        | EopError::Header { .. }
+        | EopError::NotMonotonic { .. } => EopParseError::new_err(message),
+        EopError::Gap { .. } | EopError::OutOfRange { .. } => EopRangeError::new_err(message),
+    }
+}
+
+/// The batch every UTC conversion shares, off the GIL. A label the calendar refuses is a
+/// `ValueError`; one `convert` refuses is raised as `refuse` says; both messages name the index.
+fn utc_batch<E: core::fmt::Display>(
+    py: Python<'_>,
+    utc: &[UtcLabel],
+    convert: impl Fn(UtcDateTime) -> Result<i128, E> + Sync,
+    refuse: impl Fn(&E, String) -> PyErr + Sync,
+) -> PyResult<Vec<i128>> {
+    py.detach(|| {
+        utc.iter()
+            .enumerate()
+            .map(|(i, &(year, month, day, hour, minute, second))| {
+                let label = UtcDateTime::new(year, month, day, hour, minute, second)
+                    .map_err(|e| PyValueError::new_err(format!("label {i}: {e}")))?;
+                convert(label).map_err(|e| refuse(&e, format!("label {i} ({label}): {e}")))
+            })
+            .collect()
+    })
+}
+
+/// UTC labels to TAI, integer nanoseconds since J2000. A `23:59:60` label is the leap second it
+/// names.
+///
+/// The leap-second table is closed: `TAI − UTC = 37 s` from 2017-01-01 holds for every later label,
+/// as `leap_table_status()` dates. Raises `ValueError` for a label the calendar refuses and
+/// `LeapSecondError` for one the table cannot answer.
+#[pyfunction]
+fn utc_to_tai(py: Python<'_>, utc: Vec<UtcLabel>) -> PyResult<Vec<i128>> {
+    utc_batch(
+        py,
+        &utc,
+        |u| spacelab_fa::utc_to_tai(u).map(Epoch::ns_since_j2000),
+        |_, message| LeapSecondError::new_err(message),
+    )
+}
+
+/// UTC labels to TT, integer nanoseconds since J2000: `utc_to_tai` plus 32.184 s. Raises as
+/// `utc_to_tai`.
+#[pyfunction]
+fn utc_to_tt(py: Python<'_>, utc: Vec<UtcLabel>) -> PyResult<Vec<i128>> {
+    utc_batch(
+        py,
+        &utc,
+        |u| spacelab_fa::utc_to_tt(u).map(Epoch::ns_since_j2000),
+        |_, message| LeapSecondError::new_err(message),
+    )
+}
+
+/// UTC labels to TDB at the geocentre, integer nanoseconds since J2000: `utc_to_tt`, then the
+/// Fairhead–Bretagnon series. Raises as `utc_to_tai`.
+#[pyfunction]
+fn utc_to_tdb(py: Python<'_>, utc: Vec<UtcLabel>) -> PyResult<Vec<i128>> {
+    utc_batch(
+        py,
+        &utc,
+        |u| spacelab_fa::utc_to_tdb(u).map(Epoch::ns_since_j2000),
+        |_, message| LeapSecondError::new_err(message),
+    )
+}
+
+/// UTC labels to UT1 through `series`, integer nanoseconds since J2000. A `23:59:60` label reads
+/// `UT1 − UTC` from its own day, not the next.
+///
+/// Raises `ValueError` for a label the calendar refuses, `LeapSecondError` for one the leap-second
+/// table cannot answer, and `EopRangeError` outside the series or inside a hole in it.
+#[pyfunction]
+fn utc_to_ut1(py: Python<'_>, series: &PyEopSeries, utc: Vec<UtcLabel>) -> PyResult<Vec<i128>> {
+    utc_batch(
+        py,
+        &utc,
+        |u| spacelab::utc_to_ut1(u, &series.inner).map(Epoch::ns_since_j2000),
+        |e, message| match e {
+            spacelab::EarthOrientationError::Leap(_) => LeapSecondError::new_err(message),
+            spacelab::EarthOrientationError::Eop(e) => eop_err(e, message),
+        },
+    )
+}
+
+/// TAI epochs, integer nanoseconds since J2000, to UTC labels; the leap second comes back as
+/// `23:59:60`. Raises `LeapSecondError` before 1972-01-01 or past the calendar.
+#[pyfunction]
+fn tai_to_utc(py: Python<'_>, tai_ns: Vec<i128>) -> PyResult<Vec<UtcLabel>> {
+    py.detach(|| {
+        tai_ns
+            .iter()
+            .enumerate()
+            .map(|(i, &ns)| {
+                spacelab_fa::tai_to_utc(Epoch::from_ns_since_j2000(ns))
+                    .map(|u| {
+                        (
+                            u.year(),
+                            u.month(),
+                            u.day(),
+                            u.hour(),
+                            u.minute(),
+                            u.second(),
+                        )
+                    })
+                    .map_err(|e| LeapSecondError::new_err(format!("epoch {i} ({ns} ns): {e}")))
+            })
+            .collect()
+    })
+}
+
+/// What `leap_table_status()` returns: each date as the UTC label of its 00:00:00.
+#[derive(IntoPyObject)]
+struct LeapStatus {
+    first: UtcLabel,
+    last_step: UtcLabel,
+    last_delta_at_seconds: i32,
+    list_updated: UtcLabel,
+    list_expires: UtcLabel,
+    continuous_from: UtcLabel,
+}
+
+/// The leap-second table's status, as a dict: from `first` on every label has an answer, and
+/// `TAI − UTC` is `last_delta_at_seconds` from `last_step` on. The IERS list it was taken from was
+/// updated on `list_updated` and expires on `list_expires`, after UTC becomes continuous on
+/// `continuous_from` (CGPM 2026 Resolution 5), so the table is closed rather than extrapolated.
+#[pyfunction]
+fn leap_table_status() -> LeapStatus {
+    let s = spacelab_fa::leap_table_status();
+    LeapStatus {
+        first: midnight_label(s.first),
+        last_step: midnight_label(s.last_step),
+        last_delta_at_seconds: s.last_delta_at,
+        list_updated: midnight_label(s.list_updated),
+        list_expires: midnight_label(s.list_expires),
+        continuous_from: midnight_label(s.continuous_from),
+    }
+}
+
+/// What `EopSeries.at` returns: one list per field, one element per MJD.
+#[derive(IntoPyObject)]
+struct EopColumns {
+    xp_rad: Vec<f64>,
+    yp_rad: Vec<f64>,
+    dut1_seconds: Vec<f64>,
+    lod_seconds: Vec<f64>,
+    dx_rad: Vec<f64>,
+    dy_rad: Vec<f64>,
+    xp_sigma_rad: Vec<f64>,
+    yp_sigma_rad: Vec<f64>,
+    dut1_sigma_seconds: Vec<f64>,
+    quality: Vec<&'static str>,
+}
+
+/// A parsed IERS Earth-orientation series, `finals2000A` or EOP 20 C04. Immutable once parsed.
+#[pyclass(name = "EopSeries", frozen)]
+struct PyEopSeries {
+    inner: spacelab_eop::EopSeries,
+}
+
+#[pymethods]
+impl PyEopSeries {
+    /// Parse the text of a `finals2000A` file (IERS Rapid Service). Raises `EopParseError`.
+    #[staticmethod]
+    fn parse_finals2000a(text: &str) -> PyResult<Self> {
+        spacelab_eop::EopSeries::parse_finals2000a(text)
+            .map(|inner| Self { inner })
+            .map_err(|e| eop_err(&e, format!("{e}")))
+    }
+
+    /// Parse the text of an IERS EOP 20 C04 file. Raises `EopParseError`.
+    #[staticmethod]
+    fn parse_c04(text: &str) -> PyResult<Self> {
+        spacelab_eop::EopSeries::parse_c04(text)
+            .map(|inner| Self { inner })
+            .map_err(|e| eop_err(&e, format!("{e}")))
+    }
+
+    /// The first and last tabulated MJD, `(first, last)`.
+    fn span(&self) -> (f64, f64) {
+        self.inner.span()
+    }
+
+    /// The series interpolated to each UTC MJD in `mjd`, as a dict of lists: polar motion `xp_rad`,
+    /// `yp_rad`; `dut1_seconds` (`UT1 − UTC`), `lod_seconds`; the celestial-pole offsets `dx_rad`,
+    /// `dy_rad`; the IERS uncertainties `xp_sigma_rad`, `yp_sigma_rad`, `dut1_sigma_seconds`; and
+    /// `quality`, `"final"` or `"predicted"`. Raises `EopRangeError` outside the series or inside a
+    /// hole in it.
+    fn at(&self, py: Python<'_>, mjd: Vec<f64>) -> PyResult<EopColumns> {
+        py.detach(|| {
+            let mut c = EopColumns {
+                xp_rad: Vec::with_capacity(mjd.len()),
+                yp_rad: Vec::with_capacity(mjd.len()),
+                dut1_seconds: Vec::with_capacity(mjd.len()),
+                lod_seconds: Vec::with_capacity(mjd.len()),
+                dx_rad: Vec::with_capacity(mjd.len()),
+                dy_rad: Vec::with_capacity(mjd.len()),
+                xp_sigma_rad: Vec::with_capacity(mjd.len()),
+                yp_sigma_rad: Vec::with_capacity(mjd.len()),
+                dut1_sigma_seconds: Vec::with_capacity(mjd.len()),
+                quality: Vec::with_capacity(mjd.len()),
+            };
+            for (i, &day) in mjd.iter().enumerate() {
+                let e = self
+                    .inner
+                    .at_mjd(day)
+                    .map_err(|e| eop_err(&e, format!("MJD {i} ({day}): {e}")))?;
+                c.xp_rad.push(e.xp.radians());
+                c.yp_rad.push(e.yp.radians());
+                c.dut1_seconds.push(e.dut1_seconds);
+                c.lod_seconds.push(e.lod_seconds);
+                c.dx_rad.push(e.dx.radians());
+                c.dy_rad.push(e.dy.radians());
+                c.xp_sigma_rad.push(e.xp_sigma.radians());
+                c.yp_sigma_rad.push(e.yp_sigma.radians());
+                c.dut1_sigma_seconds.push(e.dut1_sigma_seconds);
+                c.quality.push(match e.quality {
+                    spacelab_eop::EopQuality::Final => "final",
+                    spacelab_eop::EopQuality::Predicted => "predicted",
+                });
+            }
+            Ok(c)
+        })
+    }
+}
+
 // ── Control: the loop, its latency, and the two bounds the pair of them produce ────────────────
 
 /// The history capacity [`attitude_loop_run`] gives the loop, in samples.
@@ -6562,6 +6832,16 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<DenseEphemeris>()?;
     m.add_class::<Ias15Ephemeris>()?;
     m.add_class::<De440>()?;
+    m.add_class::<PyEopSeries>()?;
+    m.add("LeapSecondError", m.py().get_type::<LeapSecondError>())?;
+    m.add("EopParseError", m.py().get_type::<EopParseError>())?;
+    m.add("EopRangeError", m.py().get_type::<EopRangeError>())?;
+    m.add_function(wrap_pyfunction!(utc_to_tai, m)?)?;
+    m.add_function(wrap_pyfunction!(utc_to_tt, m)?)?;
+    m.add_function(wrap_pyfunction!(utc_to_tdb, m)?)?;
+    m.add_function(wrap_pyfunction!(utc_to_ut1, m)?)?;
+    m.add_function(wrap_pyfunction!(tai_to_utc, m)?)?;
+    m.add_function(wrap_pyfunction!(leap_table_status, m)?)?;
     m.add_function(wrap_pyfunction!(walker_constellation, m)?)?;
     m.add_function(wrap_pyfunction!(street_of_coverage, m)?)?;
     m.add_function(wrap_pyfunction!(street_of_coverage_geometry, m)?)?;

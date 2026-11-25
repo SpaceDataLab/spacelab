@@ -11,7 +11,12 @@
       the phase angle of `the_phase_angle_keeps_its_digits_next_to_opposition_and_conjunction`
       (spacelab-propagation/tests/lightcurve.rs). The elevation:
       `the_elevation_keeps_its_digits_next_to_the_zenith_and_the_nadir`
-      (spacelab-sensors/tests/elevation_gates.rs).
+      (spacelab-sensors/tests/elevation_gates.rs) and
+      `the_altitude_keeps_its_digits_next_to_the_zenith_and_the_nadir`
+      (spacelab-astrometry/src/reduce.rs).
+   2. The declination next to the celestial poles: d = dbl(cos t z + sin t (3, 4, 0)/5) and its
+      mirror in the equator, t = 10^-k. Rows: d, atan2(d_z, sqrt(d_x^2 + d_y^2)), for
+      `the_declination_keeps_its_digits_next_to_the_poles` (spacelab-astrometry/tests/reduction.rs).
 
        timeout 120 gp -q -f derivations/angle_from_vectors.gp </dev/null                         */
 
@@ -45,5 +50,14 @@ check(name, got, want) = if (abs(got - want) > 2^-50, fails++; print("FAIL ", na
   print("    // elevation: b, atan2(a.b, |a x b|)");
   foreach (rows, r,
     printf("        ([%s, %s, %s], %s),\n", fmt(r[1][1]), fmt(r[1][2]), fmt(r[1][3]), fmt(r[3])));
+}
+{
+  print("    // declination: d, atan2(d_z, sqrt(d_x^2 + d_y^2))");
+  for (s = 0, 1,
+    for (k = 1, 12,
+      my(t = 10^-k, d = apply(dbl, [3/5 * sin(t), 4/5 * sin(t), if (s, -cos(t), cos(t))]));
+      my(dec = at2(d[3], sqrt(d[1]^2 + d[2]^2)));
+      check("declination", dec, if (s, -Pi/2 + t, Pi/2 - t));
+      printf("        ([%s, %s, %s], %s),\n", fmt(d[1]), fmt(d[2]), fmt(d[3]), fmt(dec))));
 }
 if (fails, print("FAIL: ", fails, " rows are not the angle they were built from"));

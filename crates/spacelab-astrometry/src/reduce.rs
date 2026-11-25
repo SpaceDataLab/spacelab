@@ -82,6 +82,13 @@ fn tilt(direction: Vec3, up: Vec3, angle: f64) -> Option<Vec3> {
     Some(rotate(direction, axis, angle))
 }
 
+/// The altitude of `direction` above the horizon normal to `up`, `atan2(d·up, |d × up|)`. `asin` of
+/// the dot product would lose `√(2u)` of angle next to the zenith, where the sine is flat
+/// (`derivations/angle_from_vectors.mac`).
+fn altitude(direction: Vec3, up: Vec3) -> f64 {
+    libm::atan2(direction.dot(up), direction.cross(up).norm())
+}
+
 /// Remove atmospheric refraction: the direction the telescope pointed at → the direction the ray
 /// had outside the atmosphere.
 ///
@@ -96,7 +103,7 @@ fn tilt(direction: Vec3, up: Vec3, angle: f64) -> Option<Vec3> {
 #[must_use]
 pub fn remove_refraction(direction: Vec3, up: Vec3, refraction: Refraction) -> Option<Vec3> {
     let (direction, up) = (normalize(direction)?, normalize(up)?);
-    let apparent = ApparentAltitude(libm::asin(direction.dot(up).clamp(-1.0, 1.0)));
+    let apparent = ApparentAltitude(altitude(direction, up));
     let true_altitude = refraction.geometric(apparent)?;
     match tilt(direction, up, apparent.0 - true_altitude.0) {
         Some(bent) => normalize(bent),
@@ -114,7 +121,7 @@ pub fn remove_refraction(direction: Vec3, up: Vec3, refraction: Refraction) -> O
 #[must_use]
 pub fn apply_refraction(direction: Vec3, up: Vec3, refraction: Refraction) -> Option<Vec3> {
     let (direction, up) = (normalize(direction)?, normalize(up)?);
-    let true_altitude = TrueAltitude(libm::asin(direction.dot(up).clamp(-1.0, 1.0)));
+    let true_altitude = TrueAltitude(altitude(direction, up));
     let apparent = refraction.apparent(true_altitude)?;
     match tilt(direction, up, true_altitude.0 - apparent.0) {
         Some(bent) => normalize(bent),
@@ -385,7 +392,8 @@ impl Astrometric {
         let direction = normalize(direction)?;
         Some(Self {
             right_ascension: libm::atan2(direction.y, direction.x),
-            declination: libm::asin(direction.z.clamp(-1.0, 1.0)),
+            // Not `asin(z)`, which would lose `√(2u)` of angle next to the poles.
+            declination: libm::atan2(direction.z, libm::hypot(direction.x, direction.y)),
             ..self
         })
     }
@@ -403,5 +411,68 @@ impl Astrometric {
     ) -> Option<Self> {
         let unrefracted = remove_refraction(self.direction(), up, refraction)?;
         self.with_direction(aberration.remove(unrefracted)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// (S1) The altitude keeps its digits next to the zenith and the nadir (Ф28.N, C3 row 15). `UP` is
+    /// the double nearest `u = (2, −3, 6)/7` and each direction the doubles nearest
+    /// `cos t·u + sin t·w`, `w = (3, 6, 2)/7`, at `t = 10⁻ᵏ` and `π − 10⁻ᵏ`, k = 1..12;
+    /// `derivations/angle_from_vectors.gp` gives `atan2(d·up, |d × up|)` at 100 digits. The bound
+    /// is 2u of absolute error plus one ulp of the altitude (`derivations/angle_from_vectors.mac`
+    /// 4). Measured: exact on 23 rows and one ulp of π/2 on one. `asin` of the dot product was
+    /// 6 u off at `π/2 − 10⁻¹`, 930 u at `π/2 − 10⁻³` and 1.9e8 u (2.1e-8 rad) at `π/2 − 10⁻¹¹`.
+    #[test]
+    #[expect(
+        clippy::excessive_precision,
+        clippy::unreadable_literal,
+        reason = "the doubles and the 25-digit angles are copied from derivations/angle_from_vectors.gp"
+    )]
+    fn the_altitude_keeps_its_digits_next_to_the_zenith_and_the_nadir() {
+        const UP: [f64; 3] = [
+            0.2857142857142856984253854,
+            -0.4285714285714285476380780,
+            0.8571428571428570952761561,
+        ];
+        #[rustfmt::skip]
+        const ROWS: [([f64; 3], f64); 24] = [
+        ([0.3270726543566480071234537, -0.3408588565647297508043323, 0.8813845464231158111090281], 1.470796326794896605638574),
+        ([0.2899856429765472198845089, -0.4199787144635708235895777, 0.8599570955954749518213021], 1.560796326794896623200989),
+        ([0.2861427142142975998950760, -0.4277140715714464191954391, 0.8574281428095594792537781], 1.569796326794896640418848),
+        ([0.2857571414285000055421904, -0.4284857121430000193029741, 0.8571714242856666166048285], 1.570696326794896647701247),
+        ([0.2857185714142856380881597, -0.4285628571214287196866621, 0.8571457142428571263081949], 1.570786326794896617027660),
+        ([0.2857147142855714361253661, -0.4285705714283571388101279, 0.8571431428567143351315849], 1.570795326794896598239198),
+        ([0.2857143285714271452313540, -0.4285713428571407135336813, 0.8571428857142814328184954], 1.570796226794896616355589),
+        ([0.2857142899999999818838603, -0.4285714199999999807211282, 0.8571428599999999509151394], 1.570796316794896624494880),
+        ([0.2857142861428571545268085, -0.4285714277142856909463831, 0.8571428574285714363512056], 1.570796325794896592002102),
+        ([0.2857142857571428606888730, -0.4285714284857142786222539, 0.8571428571714285737925820], 1.570796326694896610957285),
+        ([0.2857142857185714368561946, -0.4285714285628571262876108, 0.8571428571457142542300289], 1.570796326784896610473741),
+        ([0.2857142857147143000240419, -0.4285714285705714554630674, 0.8571428571431428666826946], 1.570796326793896633422752),
+        ([-0.2415011543736524379788477, 0.5120018565307208335823930, -0.8243368797677854686867249], -1.470796326794896661664096),
+        ([-0.2814143572615472321807317, 0.4371212858935708545082832, -0.8542429051188082933521173], -1.560796326794896591719818),
+        ([-0.2852855715000118808077900, 0.4294283570000178573700111, -0.8568567143333690738771224], -1.569796326794896624621968),
+        ([-0.2856714271429285911807483, 0.4286571407141428480258583, -0.8571142814286190070305338], -1.570696326794896623910754),
+        ([-0.2857099999857143357573364, 0.4285799999785712688371575, -0.8571399999571428507394444], -1.570786326794896609096623),
+        ([-0.2857138571427143003411686, 0.4285722857140714103785228, -0.8571425714281428742680191], -1.570795326794896645820153),
+        ([-0.2857142428571414205507040, 0.4285715142857121628949812, -0.8571428285714243200388296], -1.570796226794896608425428),
+        ([-0.2857142814285714149669104, 0.4285714371428571145550279, -0.8571428542857142396371728], -1.570796316794896624494880),
+        ([-0.2857142852857142978351135, 0.4285714294285714043297730, -0.8571428568571428652234090], -1.570796325794896647513253),
+        ([-0.2857142856714285916730489, 0.4285714286571428721650534, -0.8571428571142857277820326], -1.570796326694896618887448),
+        ([-0.2857142857100000155057273, 0.4285714285800000244996966, -0.8571428571400000473445857], -1.570796326784896618403918),
+        ([-0.2857142857138571523378801, 0.4285714285722856953242399, -0.8571428571425714348919200], -1.570796326793896641353042),
+        ];
+        let up = Vec3::new(UP[0], UP[1], UP[2]);
+        let u = f64::EPSILON / 2.0;
+        for (d, want) in ROWS {
+            let got = altitude(Vec3::new(d[0], d[1], d[2]), up);
+            assert!(
+                (got - want).abs() <= 2.0 * u + (want.abs().next_up() - want.abs()),
+                "altitude at {want:e}: {got:.17e}, {:.3} u off",
+                (got - want).abs() / u
+            );
+        }
     }
 }

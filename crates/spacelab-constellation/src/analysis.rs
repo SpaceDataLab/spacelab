@@ -880,6 +880,15 @@ fn unit(v: Vec3) -> Vec3 {
 }
 
 /// A lower bound of the angle whose cosine is at most `c`.
+///
+/// `acos` stays in this bound and in [`acos_high`], where an angle from a dot product elsewhere is
+/// `atan2` of the cross and dot products (`derivations/angle_from_vectors.mac`): its argument is an
+/// end of a cosine interval `c ± γ` already proved, so it maps an enclosure to an enclosure, and the
+/// decision compares cosines and never reads it. Next to π, where `acos` is flat, the `γ` interval
+/// becomes at most `√(2γ)` = 8.4e-8 rad of angle: measured on two and on three sites `ρ` from one
+/// point, `ρ = 10⁻¹ … 10⁻¹²`, the enclosure holds `π − ρ` at every `ρ` and is 8.4e-8 rad wide
+/// from `ρ = 10⁻⁸` down. Next to 0 the angle never is: `n` caps cover the sphere `k` times only if
+/// `n(1 − cos α) ≥ 2k`, so `α ≥ 0.020` rad up to `n = 10⁴`.
 fn acos_low(c: f64) -> f64 {
     if c >= 1.0 { 0.0 } else { libm::acos(c) }
 }

@@ -15,7 +15,7 @@
 default(realprecision, 80);
 
 /* The nearest double to x (53-bit significand; a tie cannot occur for these irrationals). */
-nd(x) = if (x == 0, 0, my(e = exponent(x)); round(x * 2^(52 - e)) * 2^(e - 52));
+default(path, "derivations:."); read("binary64.gp"); nd = f64;
 
 /* The shortest %.Ng decimal whose nearest double is d. */
 {shortest(d) = for (k = 1, 17, my(s = Strprintf(Str("%.", k, "g"), d));

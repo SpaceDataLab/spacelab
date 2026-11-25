@@ -32,7 +32,7 @@
        timeout 300 gp -q -f derivations/iod_classical.gp </dev/null                              */
 
 default(realprecision, 100);
-dbl(x) = if (x == 0, 0, my(e = exponent(x)); round(x * 2^(52 - e)) / 2^(52 - e));
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 nrm(a) = sqrt(a * a~);
 unit(a) = a / nrm(a);
 fmt(v) = if (abs(v) < 10^-90, "0.0", concat([ch | ch <- Vec(Strprintf("%.25g", v)), ch != " "]));

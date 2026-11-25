@@ -16,7 +16,7 @@ default(realprecision, 60);
 chk(name, e) = printf("%s: %s\n", name, if(abs(e) < 1e-50, 0, e));
 fmt(v) = concat([c | c <- Vec(Strprintf("%.30e", v)), c != " "]);
 \\ The double nearest a real: 53 significant bits.
-dbl(x) = if(x == 0, 0, my(e = exponent(x)); round(x*2^(52 - e))/2^(52 - e));
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 
 \\ Transcribed from the fixture.
 lineOffset = dbl(19403.5);

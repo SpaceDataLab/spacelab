@@ -38,12 +38,7 @@
 default(realprecision, 80);
 
 /* The nearest binary64 to x, normal range, as an exact rational. */
-dbl(x) = {
-  my(r = x * 1., e);
-  if (r == 0, return(0));
-  e = exponent(r);
-  round(x * 2^(52 - e)) * 2^(e - 52);
-}
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 /* The shortest decimal in Rust syntax that parses back to the same double: at most 17 digits. */
 lit(y) = {
   my(s, e10, mant);

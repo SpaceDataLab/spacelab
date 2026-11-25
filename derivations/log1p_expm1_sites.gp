@@ -13,7 +13,7 @@
        timeout 120 gp -q -f derivations/log1p_expm1_sites.gp </dev/null                          */
 
 default(realprecision, 100);
-dbl(x) = if (x == 0, 0, my(e = exponent(x)); round(x * 2^(52 - e)) / 2^(52 - e));
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 fmt(v) = concat([ch | ch <- Vec(Strprintf("%.25g", v)), ch != " "]);
 {
   print("    // MRP potential: q1, x = s.s, ln(1 + x)");

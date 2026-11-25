@@ -11,7 +11,7 @@
 
 default(realprecision, 100);
 
-f64(x) = { my(e, k); if (x == 0, return(0)); e = exponent(x * 1.); k = 52 - e; round(x * 2^k) / 2^k; }
+default(path, "derivations:."); read("binary64.gp");
 check(name, got, want, tol) = {
   my(d = abs(got - want));
   if (d > tol, printf("FAIL %s: %.40g vs %.40g, |d| = %.3e\n", name, got, want, d),

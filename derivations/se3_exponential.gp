@@ -36,7 +36,7 @@ printf("Exp[0][1] = %.20g, V[2][1] = %.20g, Vinv[1][2] = %.20g, t[0] = %.20g\n",
 \\ Item 7's fixture (plans/18 Ф28.K, F117), from Rodrigues' formula here: Exp(th n) for
 \\ th = pi - 10^-k rounded to doubles, and the exact logarithm of those doubles through Shepperd's
 \\ quaternion, against the 40 digits se3_exponential.mac prints and se3.rs's test reads at 25.
-f64(x) = { my(e, k); if (x == 0, return(0)); e = exponent(x * 1.); k = 52 - e; round(x * 2^k) / 2^k; }
+default(path, "derivations:."); read("binary64.gp");
 \\ Shepperd's quaternion of an exact 3x3 matrix on the branch the code takes, sign-fixed to w >= 0,
 \\ and from it [angle, rotation vector]; atan2(s, w) is arg(w + i s), w >= 0.
 shep(m) = {

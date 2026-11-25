@@ -89,14 +89,7 @@ worst = 0;
 printf("universal Kepler residual |F(chi)|/scale, worst over %d roots: %.3g\n", #cases * #spans, worst);
 
 /* ---- the heliocentric table -------------------------------------------------------------------- */
-/* round to 53 significant bits, ties to even */
-d64(x) = {
-  my(e, m, f, d);
-  if (x == 0, return(0));
-  e = exponent(x); m = x * 2^(52 - e); f = floor(m); d = m - f;
-  if (d > 1/2, f++, d == 1/2 && f % 2, f++);
-  f * 2^(e - 52);
-}
+default(path, "derivations:."); read("binary64.gp"); d64 = f64;
 mu = d64(132712440018 * 10^9);
 grid10(x) = round(x * 2^10) / 2^10;
 {

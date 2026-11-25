@@ -50,7 +50,7 @@ propagate(mu, r0v, v0v, dt) = {
 }
 cross(a, b) = [a[2] * b[3] - a[3] * b[2], a[3] * b[1] - a[1] * b[3], a[1] * b[2] - a[2] * b[1]];
 nrm(v) = sqrt(v * v~);
-dbl(x) = my(e = exponent(x)); round(x * 2^(52 - e)) / 2^(52 - e);
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 fmt(v) = if (abs(v) < 10^-90, "0.0", concat([ch | ch <- Vec(Strprintf("%.25g", v)), ch != " "]));
 vfmt(v) = Str("[", fmt(v[1]), ", ", fmt(v[2]), ", ", fmt(v[3]), "]");
 fails = 0;

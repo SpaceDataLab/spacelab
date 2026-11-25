@@ -57,7 +57,7 @@ printf("states where Rr^T R lacks, or R Rr^T has, body-rate kinematics: %d\n", o
    rounded to doubles, and the exact angle of those doubles through Shepperd's quaternion, against
    the 40 digits attitude_control.mac prints and attitude.rs's test reads at 25. */
 default(realprecision, 100);
-f64(x) = { my(e, k); if (x == 0, return(0)); e = exponent(x * 1.); k = 52 - e; round(x * 2^k) / 2^k; }
+default(path, "derivations:."); read("binary64.gp");
 \\ Shepperd's quaternion of an exact 3x3 matrix on the branch the code takes, sign-fixed to w >= 0,
 \\ and from it [angle, rotation vector]; atan2(s, w) is arg(w + i s), w >= 0.
 shep(m) = {

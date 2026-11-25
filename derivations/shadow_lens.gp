@@ -32,12 +32,7 @@
 default(realprecision, 200);
 
 /* The nearest binary64 to x, normal range, as an exact rational. */
-dbl(x) = {
-  my(r = x * 1., e);
-  if (r == 0, return(0));
-  e = exponent(r);
-  round(x * 2^(52 - e)) * 2^(e - 52);
-}
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 /* The neighbouring doubles of a double y > 0. */
 up(y) = 2^(exponent(y * 1.) - 52) + y;
 down(y) = { my(e = exponent(y * 1.)); if (y == 2^e, y - 2^(e - 53), y - 2^(e - 52)); }

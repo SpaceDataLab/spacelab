@@ -61,16 +61,7 @@ ps(z) = 1/6 + z*(-1/120 + z*(1/5040 + z*(-1/362880 + z*(1/39916800))));
 }
 
 /* ---- 2. the test grid ------------------------------------------------------------------------- */
-/* round to p significant bits, ties to even */
-rn(x, p) = {
-  my(e, m, f, d);
-  if (x == 0, return(0));
-  e = exponent(x); m = x * 2^(p - 1 - e); f = floor(m); d = m - f;
-  if (d > 1/2, f++, d == 1/2 && f % 2, f++);
-  f * 2^(e - p + 1);
-}
-d64(x) = rn(x, 53);
-f32(x) = rn(x, 24);
+default(path, "derivations:."); read("binary64.gp"); d64 = f64;
 AU = 149597870700; DAY = 86400; MU = f32(d64(132712440018 * 10^9));
 body(radius, theta) = [f32(d64(radius * d64(cos(theta)))), f32(d64(radius * d64(sin(theta)))), 0];
 deps = vector(64, k, body(AU, d64((k - 1) * d64(9/100))));

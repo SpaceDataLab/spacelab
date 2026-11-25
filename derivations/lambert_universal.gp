@@ -131,7 +131,7 @@ printf("Lagrange-theorem arcs propagated by the universal Kepler equation, worst
 if (worst > 10^-80, print("FAIL: an arc does not solve the boundary-value problem"));
 
 /* The exact conics, at the double-rounded times of flight. */
-dbl(x) = my(e = exponent(x)); round(x * 2^(52 - e)) / 2^(52 - e);
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 {
   my(te = 2 * sqrt(2) * (Pi / 3 - sqrt(3) / 4), th = 2 * sqrt(3) - log(2 + sqrt(3)),
      ve = arc(1, [1, 0, 0], [0, 3/2, 0], dbl(te), 1), vh = arc(1, [1, 0, 0], [0, 3, 0], dbl(th), 1),

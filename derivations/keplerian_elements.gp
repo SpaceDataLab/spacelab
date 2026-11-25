@@ -22,12 +22,7 @@
 
 default(realprecision, 60);
 
-dbl(x) = {
-  my(r = x * 1., e);
-  if (r == 0, return(0));
-  e = exponent(r);
-  round(x * 2^(52 - e)) * 2^(e - 52);
-}
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 
 fmt(v) = if (abs(v) < 10^-50, "0.0", concat([c | c <- Vec(Strprintf("%.25g", v)), c != " "]));
 

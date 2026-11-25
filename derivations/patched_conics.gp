@@ -51,7 +51,7 @@ arcs = [
 /* AIMING: (r, v, mu, N, B.T, B.R, |B|). The table was evaluated on the decimal inputs as written;
    the test passes their doubles, and the shift that rounding causes is printed and must stay below
    a tenth of the test's 1e-12 |B| bound. */
-dbl(x) = if (x == 0, 0, my(e = exponent(x)); round(x * 2^(52 - e)) / 2^(52 - e));
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 {
 aiming = [
   [[10000, 2000, 500], [1, 11, 1/2], 398600, [0, 0, 1],

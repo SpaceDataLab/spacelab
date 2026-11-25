@@ -15,12 +15,7 @@
 
 default(realprecision, 60);
 
-dbl(x) = {
-  my(r = x * 1., e);
-  if (r == 0, return(0));
-  e = exponent(r);
-  round(x * 2^(52 - e)) * 2^(e - 52);
-}
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 
 mu = 398600441500000;
 Re = dbl(637813646 / 100);

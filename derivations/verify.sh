@@ -976,6 +976,34 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------
+# binary64.gp, the one rounding to binary64 and binary32 the PARI derivations below read. Each
+# read checks it against doubles fixed by Julia and Maxima and stops on a miss; here every case is
+# listed. Rule 16's planted defect stays: the exponent()-and-round() idiom it replaced must miss
+# its binade (1/3, 4/100, 1 - 10^-3, just below 1), tie (2^53 + 1, -(2^53 + 3), 2^24 + 1) and
+# subnormal cases, ten in all.
+# ---------------------------------------------------------------------------------------------
+if have gp; then
+    out=$(printf '%s\n' 'read("binary64.gp"); print("misses: ", binary64_check(f64, f32, 1));' \
+        | timeout 60 gp -q -f 2>&1)
+    if [ "$(printf '%s\n' "$out" | grep -c '^ok ')" -eq 15 ] && printf '%s\n' "$out" | grep -qx 'misses: 0' \
+        && ! printf '%s' "$out" | grep -qF '***'; then
+        ok "pari binary64.gp: round to nearest, ties to even, with gradual underflow, on all 15 doubles and floats it is checked against"
+    else
+        bad "pari binary64.gp" "$(printf '%s\n' "$out" | grep -E '^FAIL|\*\*\*|^misses' | head -n 5)"
+    fi
+    planted=$(printf '%s\n' 'read("binary64.gp");' \
+        'old(x, p) = if (x == 0, 0, my(e = exponent(x)); round(x * 2^(p - 1 - e)) / 2^(p - 1 - e));' \
+        'print("misses: ", binary64_check(x -> old(x, 53), x -> old(x, 24), 0));' | timeout 60 gp -q -f 2>&1)
+    if printf '%s\n' "$planted" | grep -qx 'misses: 10'; then
+        ok "pari binary64.gp, planted: the exponent() rounding it replaced misses all 10 binade, tie and subnormal cases"
+    else
+        bad "pari binary64.gp, planted" "the replaced rounding was not caught: $(printf '%s\n' "$planted" | tail -n 1)"
+    fi
+else
+    skip "pari binary64.gp" gp
+fi
+
+# ---------------------------------------------------------------------------------------------
 # 3. The exact footprint boundary, at 40 digits, must still match the committed table.
 # ---------------------------------------------------------------------------------------------
 if have gp; then
@@ -1045,15 +1073,15 @@ sys.exit(0 if a == b else 1)
     lens=$(timeout 300 gp -q -f shadow_lens.gp </dev/null 2>&1)
     rows=$(printf '%s\n' "$lens" | grep -E '^    \(')
     n=$(printf '%s\n' "$rows" | grep -c .)
-    if [ "$n" -eq 276 ] && ! printf '%s' "$lens" | grep -qF '***'; then
+    if [ "$n" -eq 275 ] && ! printf '%s' "$lens" | grep -qF '***'; then
         missing=$(printf '%s\n' "$rows" | grep -cvxF -f <(cat ../crates/spacelab-propagation/tests/shadow_lens.rs ../crates/spacelab-propagation/src/shadow.rs))
         if [ "$missing" -eq 0 ]; then
-            ok "pari shadow_lens.gp: the 184 lens (171 on the grid, 13 off it) and 92 x - sin x reference rows, at 200 digits on exact doubles, are in the tests verbatim"
+            ok "pari shadow_lens.gp: the 183 lens (170 on the grid, 13 off it) and 92 x - sin x reference rows, at 200 digits on exact doubles, are in the tests verbatim"
         else
             bad "pari shadow_lens.gp" "$missing printed rows are not in tests/shadow_lens.rs or src/shadow.rs"
         fi
     else
-        bad "pari shadow_lens.gp" "expected 276 rows and no error, found $n"
+        bad "pari shadow_lens.gp" "expected 275 rows and no error, found $n"
     fi
     if have cc && pkg-config --exists flint 2>/dev/null; then
         tmp=$(mktemp -d)

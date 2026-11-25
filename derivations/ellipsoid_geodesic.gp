@@ -84,7 +84,7 @@ ep2 = e2/(1 - e2);
 /* the phase of x + i y; a real zero (0.E-57) on either axis is read as zero, which arg() refuses */
 atan2(y, x) = if (y == 0, if (x < 0, Pi, 0), if (x == 0, sign(y)*Pi/2, arg(x + I*y)));
 /* the nearest double: 53 significant bits */
-tof64(v) = if (v == 0, 0, my(e = exponent(v), q = 2^(52 - e)); round(v*q)/q);
+default(path, "derivations:."); read("binary64.gp"); tof64 = f64;
 /* a Rust f64 literal: 17 significant digits round-trip a double; 25 for a result */
 lit(v, d) = {
   my(s);

@@ -15,7 +15,7 @@
 
 default(realprecision, 60);
 
-f64(x) = { my(e, k); if (x == 0, return(0)); e = exponent(x * 1.); k = 52 - e; round(x * 2^k) / 2^k; }
+default(path, "derivations:."); read("binary64.gp");
 huber(p, r, nu, c) = {
   my(z = polroots(nu^2 * 'w^3 - c^2 * p * 'w - c^2 * r), w = 0);
   for (i = 1, #z, if (abs(imag(z[i])) < 10^-50 && real(z[i]) > 0, w = real(z[i])));

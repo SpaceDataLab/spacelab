@@ -12,7 +12,7 @@
        timeout 300 gp -q -f derivations/edl_allen_eggers.gp </dev/null                           */
 
 default(realprecision, 100);
-dbl(x) = if (x == 0, 0, my(e = exponent(x)); round(x * 2^(52 - e)) / 2^(52 - e));
+default(path, "derivations:."); read("binary64.gp"); dbl = f64;
 rho0 = dbl(0.020); H = 11100; beta = 100; Ve = 6000; he = 120000; s = 1; g0 = dbl(9.80665);
 rho(h) = rho0 * exp(-h / H);
 V(h) = Ve * exp(-(rho(h) - rho(he)) * H / (2 * beta * s));

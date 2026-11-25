@@ -6,6 +6,8 @@
       det exp(A dt) = 1.
    2. `relative_lvlh_state` at the test's chief and deputy doubles: the LVLH triad from r and
       r x v, the projection onto it, less n z-hat x rho.
+   3. the curvilinear radial offset |P| - rc on the test's doubles (Ф28.N), the rows of
+      `the_curvilinear_radial_offset_keeps_its_digits_at_small_separations`.
    Every mismatch prints `FAIL`.
 
        timeout 300 gp -q -f derivations/cw.gp </dev/null                                           */
@@ -48,4 +50,17 @@ lvlh = concat(rl, vl);
 {want = [-353.5533905932737622004222, -1301.285520896677504480514, 1852.472939911582809357446,
         0.4070635580986780652728290, -0.6628830081639689664526549, 2.122200306347353030709691];}
 for (i = 1, 6, check(Str("relative_lvlh_state ", names[i]), lvlh[i], want[i], 1e-21));
+
+/* 3. The curvilinear radial offset dr = |P| - rc of `curvilinear_from_lvlh` (plans/18 Ф28.N, C3
+   row 16), at 100 digits on the test's doubles: rc = 7000 km and 42164 km, the LVLH position
+   d (1, 3/5, -3/10) rounded, d = 10^k m for k = 5 .. -6. Rows: rc, x, y, z, dr. */
+fmt(v) = concat([ch | ch <- Vec(Strprintf("%.25g", v)), ch != " "]);
+{
+  print("    // curvilinear dr: rc, x, y, z, |P| - rc");
+  foreach ([7000e3, 42164e3], rcd,
+    for (k = -5, 6,
+      my(rc = f64(rcd), d = 10^-k, x = f64(d), y = f64(3 * d / 5), z = f64(-3 * d / 10), dr);
+      dr = sqrt((rc + x)^2 + y^2 + z^2) - rc;
+      printf("        (%s, %s, %s, %s, %s),\n", fmt(rc), fmt(x), fmt(y), fmt(z), fmt(dr))));
+}
 quit;

@@ -17,7 +17,9 @@
  *   6. the curvilinear coordinates: the velocity formulas of `curvilinear_from_lvlh` are the time
  *      derivatives of (r, lambda, phi) along the position `lvlh_from_curvilinear` builds, the
  *      inverse's velocity is the derivative of its position, and to first order in the
- *      separation the curvilinear state is the rectilinear one (G1, G3).
+ *      separation the curvilinear state is the rectilinear one (G1, G3);
+ *   7. the coded radial offset (2 rc x + x^2 + y^2 + z^2)/(|P| + rc) is |P| - rc, with no
+ *      subtraction of near-equal radii (plans/18 Ф28.N, C3 row 16) (G1).
  * Phi(t) s0 at the test's (n, dt, s0) is evaluated at 100 digits by its matrix-exponential series
  * in derivations/cw.gp.
  *
@@ -113,3 +115,7 @@ zero("curvilinear_is_rectilinear_to_first_order",
                     curv, [x, y, z])))$
 zero("curvilinear_at_the_chief_is_zero",
      apply("+", map(lambda([q], abs(ratsimp(subst(e = 0, q)))), curv)))$
+/* 7. the radial offset without subtracting the radius */
+block([P2 : (rc + x)^2 + y^2 + z^2],
+  zero("curvilinear_radial_offset_without_subtracting_the_radius",
+       radcan((2*rc*x + x^2 + y^2 + z^2)/(sqrt(P2) + rc) - (sqrt(P2) - rc))))$

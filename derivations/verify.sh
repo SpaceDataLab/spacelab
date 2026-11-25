@@ -1332,7 +1332,7 @@ if have maxima; then
     mac_zeros taylor_jet_recurrences.mac 15 "the Taylor jet recurrences are the exact series"
     mac_zeros cr3bp.mac 20 "CR3BP field as grad Omega plus Coriolis, Jacobi constant, the Lagrange points"
     mac_zeros cr3bp_variational.mac 33 "the variational equations, symplectic form and the collinear Hessian"
-    mac_zeros cw.mac 19 "Clohessy-Wiltshire: closed form, unit determinant, limit of exact relative motion"
+    mac_zeros cw.mac 20 "Clohessy-Wiltshire: closed form, unit determinant, limit of exact relative motion; the curvilinear radial offset without cancellation"
     mac_zeros lowthrust.mac 12 "low-thrust energy rate, tangential steering, Edelbaum's quasi-circular rate"
     mac_zeros optimal_pmp.mac 16 "minimum-energy PMP: optimal control, Hamilton's equations, primer equation"
     mac_zeros lambert_universal.mac 38 "Lambert in universal variables: y(z), dF/dz, Kepler's equation, the Wronskian; the chord parameter without cancellation at a half turn and y in its difference form on short arcs"

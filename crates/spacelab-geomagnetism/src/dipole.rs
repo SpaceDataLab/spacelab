@@ -86,10 +86,14 @@ impl CentredDipole {
 
     /// Magnetic latitude of a geographic `(latitude, longitude)` in radians: the angle between the
     /// position and the dipole equator, positive toward the north geomagnetic pole.
+    ///
+    /// `atan2(r̂·m̂, |r̂ × m̂|)`: `asin` of the dot product would lose `√(2u)` of angle next to the
+    /// geomagnetic poles, where the sine is flat (`derivations/angle_from_vectors.mac`).
     #[must_use]
     pub fn magnetic_latitude(&self, latitude: f64, longitude: f64) -> f64 {
         let r = unit(latitude, longitude);
-        asin(dot(&r, &self.axis).clamp(-1.0, 1.0))
+        let normal = cross(&r, &self.axis);
+        atan2(dot(&r, &self.axis), sqrt(dot(&normal, &normal)))
     }
 
     /// Magnetic longitude of a geographic `(latitude, longitude)`, radians in `(−π, π]`.
@@ -704,6 +708,67 @@ mod tests {
                     want[k]
                 );
             }
+        }
+    }
+
+    /// (S1) The magnetic latitude keeps its digits next to the geomagnetic poles (Ф28.N, C3 row 15).
+    /// The axis is `at_year(2025.0)`'s, formed by IEEE operations alone and asserted bit for bit;
+    /// each `(lat, lon)` is the pair of doubles of a direction `10⁻ᵏ` from the axis or from its
+    /// antipode, k = 1..12, and `derivations/angle_from_vectors.gp` gives the magnetic latitude of
+    /// exactly that point at 100 digits. The code forms the position with `libm`'s `sin` and `cos`,
+    /// within an ulp of each; the bound is 2u of absolute error plus one ulp of the latitude
+    /// (`derivations/angle_from_vectors.mac` 4). Measured: exact on 22 rows and one ulp of π/2 on
+    /// two. `asin` of the dot product was 4 u off at `π/2 − 10⁻¹`, 930 u at `π/2 − 10⁻³` and
+    /// 1.3e8 u (1.5e-8 rad) at `π/2 − 10⁻¹²`, the same at the south pole.
+    #[test]
+    #[expect(
+        clippy::excessive_precision,
+        clippy::unreadable_literal,
+        reason = "the doubles and the 25-digit angles are copied from derivations/angle_from_vectors.gp"
+    )]
+    fn the_magnetic_latitude_keeps_its_digits_next_to_the_poles() {
+        const AXIS: [f64; 3] = [
+            0.04743156324080122221431566,
+            -0.1528753958101552734571982,
+            0.9871065596805758124432373,
+        ];
+        #[rustfmt::skip]
+        const ROWS: [(f64, f64, f64); 24] = [
+            (1.381703392052138879009249, -0.7100301348428040837390540, 1.470796326794896575205589),
+            (1.409732294033406274635922, -1.207555024083010630775448, 1.560796326794896628710992),
+            (1.410037261949420361872853, -1.263703423795293989684296, 1.569796326794896623823218),
+            (1.410040314550435214258073, -1.269326078487094111579836, 1.570696326794896635956985),
+            (1.410040345076738033114339, -1.269888351788991176505306, 1.570786326794896631858324),
+            (1.410040345382001181206988, -1.269944579127013639663346, 1.570795326794896608904001),
+            (1.410040345385053850435497, -1.269950201860823746358164, 1.570796226794896611006557),
+            (1.410040345385084270546372, -1.269950764134204712618725, 1.570796316794896602854722),
+            (1.410040345385084714635582, -1.269950820361542831449242, 1.570796325794896605592436),
+            (1.410040345385084714635582, -1.269950825984276665536754, 1.570796326694896609420336),
+            (1.410040345385084714635582, -1.269950826546550004536584, 1.570796326784896602694689),
+            (1.410040345385084714635582, -1.269950826602777471663330, 1.570796326793896623345534),
+            (-1.381703392052138879009249, 1.311721135214547473424318, -1.470796326794896576349158),
+            (-1.409732294033406274635922, 1.809246024454753909438409, -1.560796326794896612083833),
+            (-1.410037261949420361872853, 1.865394424167037268347258, -1.569796326794896607196059),
+            (-1.410040314550435214258073, 1.871017078858837390242797, -1.570696326794896619329826),
+            (-1.410040345076738033114339, 1.871579352160734455168267, -1.570786326794896615231165),
+            (-1.410040345382001181206988, 1.871635579498757140370913, -1.570795326794896627818298),
+            (-1.410040345385053850435497, 1.871641202232567247065731, -1.570796226794896629920854),
+            (-1.410040345385084270546372, 1.871641764505948213326292, -1.570796316794896621769019),
+            (-1.410040345385084714635582, 1.871641820733286332156808, -1.570796325794896624506733),
+            (-1.410040345385084714635582, 1.871641826356020166244321, -1.570796326694896628334633),
+            (-1.410040345385084714635582, 1.871641826918293505244151, -1.570796326784896621608986),
+            (-1.410040345385084714635582, 1.871641826974520750326292, -1.570796326793896606718375),
+        ];
+        let d = CentredDipole::at_year(2025.0);
+        assert_eq!(d.axis(), AXIS, "the fixture's axis");
+        let u = f64::EPSILON / 2.0;
+        for (lat, lon, want) in ROWS {
+            let got = d.magnetic_latitude(lat, lon);
+            assert!(
+                (got - want).abs() <= 2.0 * u + (want.abs().next_up() - want.abs()),
+                "magnetic latitude at ({lat}, {lon}): {got:.17e} against {want:.17e}, {:.3} u off",
+                (got - want).abs() / u
+            );
         }
     }
 }

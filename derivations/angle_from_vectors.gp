@@ -17,6 +17,15 @@
    2. The declination next to the celestial poles: d = dbl(cos t z + sin t (3, 4, 0)/5) and its
       mirror in the equator, t = 10^-k. Rows: d, atan2(d_z, sqrt(d_x^2 + d_y^2)), for
       `the_declination_keeps_its_digits_next_to_the_poles` (spacelab-astrometry/tests/reduction.rs).
+   3. The magnetic latitude next to the geomagnetic poles. The axis is
+      CentredDipole::at_year(2025.0)'s in the code's own arithmetic, m = sqrt(g10^2 + g11^2 + h11^2)
+      and the axis -(g11, h11, g10)/m, every operation rounded: IEEE operations only, so the test
+      asserts that the code formed exactly these doubles. A direction 10^-k from the axis or from its
+      antipode gives the doubles lat = dbl(asin(t_z)) and lon = dbl(atan2(t_y, t_x)). Rows: lat,
+      lon, and the magnetic latitude of exactly that point, atan2(r.axis, |r x axis|) with
+      r = (cos lat cos lon, cos lat sin lon, sin lat) unrounded, for
+      `the_magnetic_latitude_keeps_its_digits_next_to_the_poles`
+      (spacelab-geomagnetism/src/dipole.rs).
 
        timeout 120 gp -q -f derivations/angle_from_vectors.gp </dev/null                         */
 
@@ -59,5 +68,20 @@ check(name, got, want) = if (abs(got - want) > 2^-50, fails++; print("FAIL ", na
       my(dec = at2(d[3], sqrt(d[1]^2 + d[2]^2)));
       check("declination", dec, if (s, -Pi/2 + t, Pi/2 - t));
       printf("        ([%s, %s, %s], %s),\n", fmt(d[1]), fmt(d[2]), fmt(d[3]), fmt(dec))));
+}
+{
+  my(g10 = dbl(-29350), g11 = dbl(-14103/10), h11 = dbl(45455/10));
+  my(m = dbl(sqrt(dbl(dbl(dbl(g10^2) + dbl(g11^2)) + dbl(h11^2)))));
+  my(ax = [dbl(-g11/m), dbl(-h11/m), dbl(-g10/m)], q = cr([0, 0, 1], ax));
+  q = q / nrm(q);
+  printf("    // axis = (%s, %s, %s)\n", fmt(ax[1]), fmt(ax[2]), fmt(ax[3]));
+  print("    // magnetic latitude: lat, lon, atan2(r.axis, |r x axis|)");
+  for (s = 0, 1,
+    for (k = 1, 12,
+      my(t = 10^-k, p = if (s, -ax, ax) / nrm(ax), v = cos(t) * p + sin(t) * q);
+      my(lat = dbl(asin(v[3])), lon = dbl(at2(v[2], v[1])));
+      my(r = [cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat)], ml = at2(dt(r, ax), nrm(cr(r, ax))));
+      check("magnetic latitude", ml, if (s, -Pi/2 + t, Pi/2 - t));
+      printf("        (%s, %s, %s),\n", fmt(lat), fmt(lon), fmt(ml))));
 }
 if (fails, print("FAIL: ", fails, " rows are not the angle they were built from"));

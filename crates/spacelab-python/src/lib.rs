@@ -12420,6 +12420,17 @@ def one_row(x):
         let mut grazing = initial;
         grazing[1] = 1.0 - 1e-12;
         Python::attach(|py| {
+            type FullDsst = fn(
+                Python<'_>,
+                [f64; 6],
+                Vec<f64>,
+                f64,
+                f64,
+                f64,
+                Vec<f64>,
+                f64,
+                f64,
+            ) -> PyResult<Vec<[f64; 6]>>;
             for (state, times) in [
                 ([f64::NAN; 6], std::vec![3600.0]),
                 (parabolic, std::vec![3600.0]),
@@ -12439,19 +12450,8 @@ def one_row(x):
                         ),
                     ]
                 };
-                let full = |f: fn(
-                    Python<'_>,
-                    [f64; 6],
-                    Vec<f64>,
-                    f64,
-                    f64,
-                    f64,
-                    Vec<f64>,
-                    f64,
-                    f64,
-                ) -> PyResult<Vec<[f64; 6]>>| {
-                    f(py, state, times.clone(), 0.0, mu, re, j.clone(), 1.5, 0.02)
-                };
+                let full =
+                    |f: FullDsst| f(py, state, times.clone(), 0.0, mu, re, j.clone(), 1.5, 0.02);
                 for got in zonal(&j).into_iter().chain([
                     full(dsst_propagate_mean_full),
                     full(dsst_propagate_osculating_full),

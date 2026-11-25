@@ -1304,7 +1304,7 @@ if have maxima; then
     mac_zeros scan_catalogue.mac 12 "scan-angle catalogue end points, antisymmetry and VIIRS extent"
     mac_zeros wgs84_geodesy.mac 13 "WGS 84 derived constants and both geodetic maps"
     mac_zeros ellipsoid_geodesic.mac 43 "geodesic integrands from the metric and Clairaut, the series to sixth order as Karney prints them and against the elliptic-integral form at 50 digits (G1), the astroid root"
-    mac_zeros keplerian_elements.mac 31 "element <-> state maps invert each other on every branch; Kepler's equation"
+    mac_zeros keplerian_elements.mac 44 "element <-> state maps invert each other on every branch; Kepler's equation, and its near-parabolic forms"
     mac_zeros brouwer_m2_phipps.mac 7 "Phipps' along-track drag drift of a, e and the mean anomaly from Kepler's third law"
     mac_zeros zonal_secular.mac 6 "the first-order J2 secular rates of both zonal mean-element propagators from Lagrange's equations"
     mac_zeros design_orbit.mac 5 "repeat-ground-track and sun-synchronous conditions, critical inclination"

@@ -821,11 +821,31 @@ exclude_re = [
 
     # --- crates/spacelab-elements/src/keplerian.rs ---
 
-    # `if |step| < 1e-15`, the Kepler-solve exit, tied to `<=`. `step` is a quotient of two doubles
-    # near `E`; landing on exactly `1e-15` is a single-representation coincidence. Measured over the
-    # 2169-call budget grid: identical least (1), worst (64) and total (10970) steps, and every one
-    # of the 2169 roots identical to the last digit.
-    "keplerian\\.rs:92:29: replace < with <= in eccentric_from_mean",
+    # `if size < 1e-15`, the Kepler-solve exit, tied to `<=`. `size` is the magnitude of a quotient
+    # of two doubles near `E`; landing on exactly `1e-15` is a single-representation coincidence.
+    # Measured: the budget grid's least (1), worst (14) and mean (4.816) steps, the sweep's 272 816
+    # calls at most 22 steps, the decade table and the floor test's 11–12 steps, all unchanged.
+    "keplerian\\.rs:156:17: replace < with <= in eccentric_from_mean",
+
+    # `size < 1e-9` in the floor stop, tied to `<=`. They part only where a step that did not shrink
+    # is exactly `fl(1e-9)`; below `1e-9` an exact Newton step at least halves (`C·1e-9 < 0.034`,
+    # `keplerian_elements.mac` 6d), so a non-shrinking step there is round-off, far below `1e-9`.
+    # Measured: every count above unchanged.
+    "keplerian\\.rs:150:47: replace < with <= in eccentric_from_mean",
+
+    # `m > π`, the fold, tied to `>=`. They part only at `M == fl(π)`, where the mutant folds to
+    # `fl(2π) − fl(π) = fl(π)` — exact, `fl(2π)` being `2·fl(π)` — solves the same equation and
+    # returns `fl(2π) − E`. The sweep has `M = π` on every one of its 136 eccentricities: its steps
+    # (at most 22) and residual (1.776e-15), and every other count above, are unchanged.
+    "keplerian\\.rs:131:19: replace > with >= in eccentric_from_mean",
+
+    # `e > NEAR_PARABOLIC` in `mean_from_eccentric` and in `eccentric_anomaly`, each tied to `>=`.
+    # They part only at `e == fl(0.99)`, which the decade table has a row for: there the baseline
+    # runs the classic forms and the mutant the rearranged ones, `E → M` 40.8 u against 1.3 u and
+    # `ν → E` 1.6 u against 1.1 u. Both are inside the row's bounds, which are the classic forms'
+    # measured cost; which side owns the threshold is a choice, not a property of the maps.
+    "keplerian\\.rs:103:10: replace > with >= in mean_from_eccentric",
+    "keplerian\\.rs:387:26: replace > with >= in KeplerianElements::eccentric_anomaly",
 
     # `if h.z < 0.0 { -1.0 } else { 1.0 }`, the retrograde-equatorial sense factor, tied to `<=`.
     # Provable, not measured, and provable only since `from_state` began rejecting a state with no
@@ -838,7 +858,7 @@ exclude_re = [
     # true, `h_mag = 0` and `h_mag = ∞`. Geometrically the line is
     # unreachable for the plainer reason: `h.z == 0` is a polar orbit, `i = π/2`, the inclination
     # furthest from the equatorial branch this variable exists to orient.
-    "keplerian\\.rs:171:28: replace < with <= in KeplerianElements::from_state",
+    "keplerian\\.rs:235:28: replace < with <= in KeplerianElements::from_state",
 
     # --- crates/spacelab-elements/src/design.rs ---
 

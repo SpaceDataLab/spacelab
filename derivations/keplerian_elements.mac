@@ -18,7 +18,9 @@
  *   4. the anomaly maps: E = atan2(sqrt(1-e^2) sin nu, e + cos nu) with common factor
  *      1/(1 + e cos nu), its inverse nu = atan2(sqrt(1-e^2) sin E, cos E - e) with factor
  *      (1 - e^2)/(1 + e cos nu) once E is substituted, and r = a(1 - e cos E);
- *   5. Kepler's equation M = E - e sin E has derivative 1 - e cos E, the Newton denominator.
+ *   5. Kepler's equation M = E - e sin E has derivative 1 - e cos E, the Newton denominator;
+ *   6. the fold, the rearranged residual, the x - sin x series, Newton's quadratic constant and the
+ *      half-angle eccentric anomaly that the solver uses near the parabola (section 6 below).
  *
  * Kepler's equation itself is solved at 60 digits in derivations/keplerian_elements.gp, which also
  * evaluates to_state at 60 digits for the Rust tests.
@@ -101,3 +103,40 @@ zero("true_from_eccentric_scale", asimp(s1*sE*sin(nu) + (cE - e)*cos(nu) - (1 - 
 
 /* 5. Kepler's equation and its Newton derivative. */
 zero("kepler_newton_derivative", ratsimp(diff(EE - e*sin(EE), EE) - (1 - e*cos(EE))))$
+
+/* 6. Kepler's equation near the parabola (Ф28.N, C3 row 12).
+ *   6a. the fold E(2 pi - M) = 2 pi - E(M): 2 pi - E solves the equation at 2 pi - M;
+ *   6b. the rearranged residual (1 - e) sin E + (E - sin E) is E - e sin E, its slope
+ *       (1 - e) + 2 e sin^2(E/2) is 1 - e cos E, and that slope is its derivative;
+ *   6c. the nested series of x - sin x is its Taylor polynomial to x^21; the first term left out,
+ *       x^23/23!, is under 2.5e-22 of the sum for |x| <= 1, where the sum is at least
+ *       (x^3/6)(1 - x^2/20); above 1, sin x < 0.85 x, so the plain difference keeps its digits;
+ *   6d. sin E/(1 - e cos E) is stationary where cos E = e, and its value there is 1/sqrt(1 - e^2):
+ *       Newton's quadratic constant e sin E/(2(1 - e cos E)) is at most e/(2 sqrt(1 - e^2)), under
+ *       3.4e7 for the largest double below 1;
+ *   6e. the half-angle form of nu -> E: with c = sqrt(1 + e) cos(nu/2), s = sqrt(1 - e) sin(nu/2),
+ *       (c^2 - s^2, 2 s c) = (e + cos nu, sqrt(1 - e^2) sin nu) and c^2 + s^2 = 1 + e cos nu > 0, so
+ *       2 atan2(s, c) is the classic atan2(sqrt(1 - e^2) sin nu, e + cos nu). */
+zero("kepler_fold", trigsimp(trigexpand(((2*%pi - EE) - e*sin(2*%pi - EE)) - (2*%pi - (EE - e*sin(EE))))))$
+zero("kepler_rearranged_residual", ratsimp(((1 - e)*sin(EE) + (EE - sin(EE))) - (EE - e*sin(EE))))$
+zero("kepler_rearranged_slope", trigsimp(trigreduce(((1 - e) + 2*e*sin(EE/2)^2) - (1 - e*cos(EE)))))$
+zero("kepler_rearranged_derivative",
+     trigsimp(trigreduce(diff((1 - e)*sin(EE) + (EE - sin(EE)), EE) - ((1 - e) + 2*e*sin(EE/2)^2))))$
+nested : block([q : 1], for n in [20, 18, 16, 14, 12, 10, 8, 6, 4] do q : 1 - x^2*q/(n*(n + 1)), x^3/6*q)$
+zero("x_minus_sin_series", ratsimp(expand(nested - taylor(x - sin(x), x, 0, 22))))$
+zero("x_minus_sin_truncation", if is((6/23!)/(1 - 1/20) < 25/10^23) then 0 else 1)$
+zero("x_minus_sin_direct", if is(bfloat(sin(1)) < 0.85b0) then 0 else 1)$
+zero("newton_constant_stationary",
+     trigsimp(diff(sin(EE)/(1 - e*cos(EE)), EE) - (cos(EE) - e)/(1 - e*cos(EE))^2))$
+/* at cos E = e, sin E = s1 = sqrt(1 - e^2) */
+zero("newton_constant_maximum", asimp(s1/(1 - e*e) - 1/s1))$
+zero("newton_constant_bound",
+     block([fpprec : 40, eb : 1 - 2^-53],
+       if is(bfloat(eb/(2*sqrt(1 - eb^2))) < 3.4b7) then 0 else 1))$
+/* ha = sqrt(1 - e), hb = sqrt(1 + e) as symbols, ha^2 = 1 - e, hb^2 = 1 + e, sqrt(1 - e^2) = ha hb */
+cH : hb*cos(nu/2)$
+sH : ha*sin(nu/2)$
+hsimp(x) := ratsimp(subst([ha^2 = 1 - e, hb^2 = 1 + e], expand(trigsimp(trigreduce(expand(x))))))$
+zero("half_angle_cosine", hsimp(cH^2 - sH^2 - (e + cos(nu))))$
+zero("half_angle_sine", hsimp(2*sH*cH - ha*hb*sin(nu)))$
+zero("half_angle_scale", hsimp(cH^2 + sH^2 - (1 + e*cos(nu))))$

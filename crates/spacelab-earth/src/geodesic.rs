@@ -85,7 +85,7 @@ const MAX_ITERATIONS: usize = 100;
 /// A Newton correction of α1 this small (2⁻⁴⁰ rad) is the last one. Measured against iterating to
 /// the noise floor, a threshold of 3·10⁻¹⁰ already agrees to one ulp of s12 and 3·10⁻⁹ does not, so
 /// 2⁻⁴⁰ leaves a factor of 300 in the step and 10⁵ in its quadratic remainder.
-const NEWTON_LAST: f64 = 9.094_947_017_729_282e-13;
+const NEWTON_LAST: f64 = 4096.0 * f64::EPSILON;
 
 /// Where the astroid start is used instead of the spherical one, in the astroid's units (Karney
 /// eq. 53): `x = (λ12 − π)/(f π A3 cos β1)` and `y = (β1 + β2)/(f π A3 cos² β1)`. The box is the

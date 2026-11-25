@@ -313,6 +313,7 @@ fn kind(e: &AccessError) -> &'static str {
         AccessError::Interval => "interval",
         AccessError::Tolerance => "tolerance",
         AccessError::Samples => panic!("an SGP4 scan has no table to refuse"),
+        AccessError::BelowSurface { .. } => panic!("a station scan has no zone to refuse for"),
         AccessError::EarthOrientation { error, .. } => match error {
             EarthOrientationError::Leap(LeapError::BeforeIntegerSecondEra) => "before-1972",
             EarthOrientationError::Leap(LeapError::SpuriousLeapSecond) => "spurious-leap-second",

@@ -1,5 +1,5 @@
-//! Access windows of a ground station on the WGS-84 ellipsoid, from an SGP4 element set or a
-//! tabulated ephemeris (Ф31.C).
+//! Access windows of a ground station or a zone on the WGS-84 ellipsoid, from an SGP4 element set
+//! or a tabulated ephemeris (Ф31.C).
 //!
 //! This is the Rust API the two bridges return to the bit. It composes three pieces that exist
 //! elsewhere: the satellite's ITRF position, from SGP4 and [`teme_to_itrf_at`] or from a table's
@@ -53,18 +53,62 @@
 //! arithmetic: a grazing window in which `g` rises above zero by less than its own rounding,
 //! nanometres, can be lost, as in any floating-point scan.
 //!
+//! # Zones
+//!
+//! A zone ([`Zone`], Ф20.U) is in access while [`ZoneAccess::Any`] of its points, or
+//! [`ZoneAccess::All`] of them, see the satellite at least the mask above their geodetic horizon.
+//! The mask may be 90°, where `Any` is the satellite's geodetic nadir lying in the zone. For a
+//! satellite strictly above the ellipsoid the elevation over the ellipsoid has exactly two
+//! critical points: its maximum, 90°, at the geodetic nadir, and its minimum, −90°, at the far foot
+//! of the same normal (`derivations/access_zone_elevation.mac`, on any oblate ellipsoid with
+//! `a³ < 2b³`; the second engine is `access_zone_elevation.gp`). So the maximum over a zone is 90°
+//! if the nadir is in it and is reached on its boundary otherwise, and the minimum is −90° if the
+//! far foot is in it and is reached on its boundary otherwise. A satellite not above the ellipsoid
+//! is refused ([`AccessError::BelowSurface`]): there the property fails.
+//!
+//! The boundary is searched by branch and bound. Along an edge at unit speed, `f = sin ε` has
+//! `|f''| ≤ |n''| + 4κ_max/D + 3/D²` at distance `D` from the satellite, with
+//! `|n''| < 2.5·10⁻¹⁴ m⁻²` and `κ_max = a/b²` on WGS 84 (the same derivation), and every `D` is at
+//! least the satellite's height `h`; a stretch of length `L` therefore lies under its larger end
+//! value plus that bound times `L²/8`. The search stops when its two bounds on the extreme of
+//! `sin ε` are within `max(ON_EDGE_M/h, |f − sin ε_min|/8)` of each other.
+//!
+//! The scan refines [`ZoneConstraint::g`]. Let `q_p = |d_p| sin(ε_p − ε_min)`, the difference
+//! clamped to `[−π/2, π/2]`, for the line of sight `d_p` from the point `p`: the signed distance of
+//! `d_p` from the boundary of the mask's cone at `p`, positive inside it, which changes no faster
+//! than the satellite moves. For `Any`, `H = max_p q_p + |sin ε_min| σ`, where `σ` is the chord
+//! from the nadir to the nearest point of the boundary while the nadir is in the zone, and 0
+//! otherwise; the nadir moves no faster than the satellite, so `|dH/dt| ≤ (1 + |sin ε_min|)|ṙ|`.
+//! For `All`, `H = min_p q_p` and `|dH/dt| ≤ |ṙ|` ([`ZoneConstraint::rate_factor`]). `H` is at
+//! least zero exactly in access, and `g` has the sign of `H` and a magnitude no larger: it is `q`
+//! at the extreme the search reached, or the height `h ≤ |d_p|` times `sin(ε − ε_min)` at the
+//! search's bound, whichever side keeps it below `|H|`. So the scan's step, `|g|` over the bound
+//! on `|dH/dt|`, is one `H` cannot change sign in. The `σ` term keeps the scan from crawling
+//! through a window at a 90° mask, where no `q_p` is above zero.
+//!
+//! A zone scan therefore misses no window at least its step floor long, under the speed bound a
+//! station's scan rests on: proved for a table, tested but not proved for SGP4. Where the search
+//! ends within its tolerance of the mask without deciding, the extreme it reached decides: a window
+//! in which the zone's extreme passes the mask by less than a micrometre at the satellite's height
+//! can be lost, as a zone's boundary is itself a micrometre wide ([`ON_EDGE_M`]).
+//!
 //! Each edge is a Brent root of `g`, to the abscissa tolerance the caller gives.
 
 use core::cell::Cell;
+use core::f64::consts::FRAC_PI_2;
 use core::fmt;
 
 use spacelab_core::{Angle, Length, UtcDateTime, Vec3};
 use spacelab_coverage::windows;
-use spacelab_earth::{Geodetic, geodetic_to_itrf};
-use spacelab_frames::EARTH_ROTATION_RATE;
+use spacelab_earth::{Geodetic, geodetic_to_itrf, itrf_to_geodetic};
+use spacelab_frames::{EARTH_ROTATION_RATE, Position};
 use spacelab_sensors::{Constraint, ElevationMask, OrbitBound};
 use spacelab_sgp4::{PropagationError, Satellite};
 
+use crate::zone::{
+    CHORD_CURVATURE, KAPPA_MAX, NORMAL_SECOND_DERIVATIVE, ON_EDGE_M, Zone, far_foot, reduce, sight,
+    surface,
+};
 use crate::{EarthOrientationError, EopSource, teme_to_itrf_at};
 
 pub use spacelab_coverage::Window;
@@ -84,7 +128,8 @@ const NS_PER_SECOND: f64 = 1e9;
 pub enum AccessError {
     /// A station's latitude is outside `[−π/2, π/2]`, or a coordinate is not finite.
     Station,
-    /// The mask is not strictly inside `(−π/2, π/2)`.
+    /// The mask is not strictly inside `(−π/2, π/2)` for a station, or not in `(−π/2, π/2]` for a
+    /// zone.
     Mask,
     /// The span is not finite and positive, or its end is outside the calendar.
     Interval,
@@ -108,6 +153,12 @@ pub enum AccessError {
         /// What SGP4 refused.
         error: PropagationError,
     },
+    /// At a probed instant the satellite of a zone scan is not above the ellipsoid, where the
+    /// elevation over the ellipsoid has more than its two extremes and the zone's search fails.
+    BelowSurface {
+        /// Seconds on the scan's clock: past the start label, or the table's own.
+        at_seconds: f64,
+    },
 }
 
 impl fmt::Display for AccessError {
@@ -117,7 +168,11 @@ impl fmt::Display for AccessError {
                 f,
                 "a station's latitude is outside [-pi/2, pi/2] or a coordinate is not finite"
             ),
-            Self::Mask => write!(f, "the mask is not strictly inside (-pi/2, pi/2)"),
+            Self::Mask => write!(
+                f,
+                "the mask is not strictly inside (-pi/2, pi/2) for a station, or not in \
+                 (-pi/2, pi/2] for a zone"
+            ),
             Self::Interval => write!(
                 f,
                 "the span is not finite and positive, or it ends outside the calendar"
@@ -134,6 +189,11 @@ impl fmt::Display for AccessError {
             Self::Propagation { at_seconds, error } => {
                 write!(f, "at {at_seconds} s past the start: {error}")
             }
+            Self::BelowSurface { at_seconds } => write!(
+                f,
+                "at {at_seconds} s the satellite is not above the ellipsoid, where a zone's \
+                 elevation has more than its two extremes"
+            ),
         }
     }
 }
@@ -475,4 +535,265 @@ pub fn tabulated_windows(
         |w| found.push(w),
     );
     Ok(found)
+}
+
+/// Which points of a zone must see the satellite for the zone to be in access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZoneAccess {
+    /// Some point of the zone sees the satellite at or above the mask. At a 90° mask this is the
+    /// satellite's geodetic nadir lying in the zone.
+    Any,
+    /// Every point of the zone sees the satellite at or above the mask.
+    All,
+}
+
+/// The access constraint of a zone: the zone, which of its points must see the satellite, and the
+/// mask. The module documentation states the function [`ZoneConstraint::g`] it scans and what that
+/// function guarantees.
+#[derive(Debug, Clone, Copy)]
+pub struct ZoneConstraint<'a> {
+    zone: &'a Zone,
+    access: ZoneAccess,
+    mask_rad: f64,
+    sin_min: f64,
+}
+
+impl<'a> ZoneConstraint<'a> {
+    /// The constraint that `access` of `zone`'s points see the satellite at least `mask_rad` above
+    /// their geodetic horizon.
+    ///
+    /// # Errors
+    ///
+    /// [`AccessError::Mask`] if the mask is not in `(−π/2, π/2]`: a zone, unlike a station, takes
+    /// a 90° mask.
+    pub fn new(zone: &'a Zone, access: ZoneAccess, mask_rad: f64) -> Result<Self, AccessError> {
+        if !(mask_rad > -FRAC_PI_2 && mask_rad <= FRAC_PI_2) {
+            return Err(AccessError::Mask);
+        }
+        Ok(Self {
+            zone,
+            access,
+            mask_rad,
+            sin_min: libm::sin(mask_rad),
+        })
+    }
+
+    /// The factor on the satellite's speed bound that bounds the rate of [`ZoneConstraint::g`]:
+    /// `1 + |sin ε_min|` for [`ZoneAccess::Any`], 1 for [`ZoneAccess::All`].
+    #[must_use]
+    pub fn rate_factor(&self) -> f64 {
+        match self.access {
+            ZoneAccess::Any => 1.0 + libm::fabs(self.sin_min),
+            ZoneAccess::All => 1.0,
+        }
+    }
+
+    /// The function every zone scan refines, for a satellite at ITRF `satellite`, m: zero or
+    /// positive in access, negative out of it, and no larger in magnitude than the zone's
+    /// Lipschitz function `H` (the module documentation). `None` when the satellite is not above
+    /// the ellipsoid, where the elevation over a zone has more than two critical points.
+    #[must_use]
+    pub fn g(&self, satellite: Vec3) -> Option<f64> {
+        let nadir = itrf_to_geodetic(Position::new(satellite)).ok()?;
+        let h = nadir.height.metres();
+        if !(h.is_finite() && h > 0.0) {
+            return None;
+        }
+        let sat = [satellite.x, satellite.y, satellite.z];
+        let s = self.sin_min;
+        // |f''| along an edge at distance at least d, d never below the satellite's height.
+        let curvature = |d: f64| {
+            let d = d.max(h);
+            NORMAL_SECOND_DERIVATIVE + 4.0 * KAPPA_MAX / d + 3.0 / (d * d)
+        };
+        let sine = |lat: f64, lon: f64| {
+            let (d, n) = sight(sat, lat, lon);
+            let range = norm(d);
+            (dot(d, n) / range, range)
+        };
+        let tol = ON_EDGE_M / h;
+        Some(match self.access {
+            ZoneAccess::Any => {
+                let (lat, lon) = (nadir.latitude.radians(), reduce(nadir.longitude.radians()));
+                if self.zone.holds(lat, lon) {
+                    // In access through the nadir, at h (ε = 90°), and as far from leaving it as
+                    // the nadir is from the boundary, which the search bounds from below.
+                    let foot = surface(lat, lon);
+                    let chord = self.zone.boundary_max(
+                        |lat, lon| {
+                            let p = surface(lat, lon);
+                            let d = [p[0] - foot[0], p[1] - foot[1], p[2] - foot[2]];
+                            (-dot(d, d), 0.0)
+                        },
+                        |_| CHORD_CURVATURE,
+                        |best, bound| bound - best <= (ON_EDGE_M * ON_EDGE_M).max(-best / 4.0),
+                    );
+                    let sigma = libm::sqrt((-chord.bound).max(0.0));
+                    h * libm::sin((FRAC_PI_2 - self.mask_rad).min(FRAC_PI_2))
+                        + libm::fabs(s) * sigma
+                } else {
+                    let e = self.zone.boundary_max(sine, curvature, |best, bound| {
+                        bound - best <= tol.max(libm::fabs(best - s) / 8.0)
+                    });
+                    // The side is the reached point's, by its elevation from atan2: the sine is
+                    // flat at 90°, where it would put points metres from the nadir at the mask.
+                    let reached = self.cone_distance(sat, e.at);
+                    if reached >= 0.0 {
+                        reached
+                    } else if e.bound < s {
+                        let above = libm::asin(e.bound.max(-1.0)) - self.mask_rad;
+                        (h * libm::sin(above.max(-FRAC_PI_2))).min(-f64::MIN_POSITIVE)
+                    } else {
+                        -f64::MIN_POSITIVE
+                    }
+                }
+            }
+            ZoneAccess::All => {
+                let (lat, lon) = far_foot(sat);
+                if self.zone.holds(lat, lon) {
+                    self.cone_distance(sat, (lat, lon)).min(-f64::MIN_POSITIVE)
+                } else {
+                    let e = self.zone.boundary_max(
+                        |lat, lon| {
+                            let (v, range) = sine(lat, lon);
+                            (-v, range)
+                        },
+                        curvature,
+                        |best, bound| bound - best <= tol.max(libm::fabs(-best - s) / 8.0),
+                    );
+                    let reached = self.cone_distance(sat, e.at);
+                    let low = -e.bound;
+                    if reached < 0.0 {
+                        reached
+                    } else if low >= s {
+                        let above = libm::asin(low.min(1.0)) - self.mask_rad;
+                        (h * libm::sin(above.min(FRAC_PI_2))).max(0.0)
+                    } else {
+                        0.0
+                    }
+                }
+            }
+        })
+    }
+
+    /// `|d| sin(ε − ε_min)`, the difference clamped to `[−π/2, π/2]`, at the ellipsoid's point
+    /// `at`: the signed distance of the line of sight from the boundary of the mask's cone there,
+    /// m, positive inside it.
+    fn cone_distance(&self, sat: [f64; 3], (lat, lon): (f64, f64)) -> f64 {
+        let (d, n) = sight(sat, lat, lon);
+        let up = dot(d, n);
+        let side = [
+            d[1] * n[2] - d[2] * n[1],
+            d[2] * n[0] - d[0] * n[2],
+            d[0] * n[1] - d[1] * n[0],
+        ];
+        let elevation = libm::atan2(up, norm(side));
+        norm(d) * libm::sin((elevation - self.mask_rad).clamp(-FRAC_PI_2, FRAC_PI_2))
+    }
+}
+
+fn dot(u: [f64; 3], v: [f64; 3]) -> f64 {
+    u[0] * v[0] + u[1] * v[1] + u[2] * v[2]
+}
+
+fn norm(u: [f64; 3]) -> f64 {
+    libm::hypot(libm::hypot(u[0], u[1]), u[2])
+}
+
+/// The windows on `[0, span_seconds]` past `start` in which `satellite` is in access to the zone
+/// of `constraint`, each edge refined to `tol_seconds`.
+///
+/// Times are seconds past `start` on the naive UTC coordinate (the module's clock). A window open
+/// at the start or at the end of the span is clamped to it. The scan is
+/// [`spacelab_coverage::windows`] of [`ZoneConstraint::g`] with [`sgp4_rate_bound`] at the horizon
+/// times [`ZoneConstraint::rate_factor`]; the module documentation states what it guarantees and
+/// under which hypothesis.
+///
+/// # Errors
+///
+/// [`AccessError::Interval`] or [`AccessError::Tolerance`] for the arguments, before SGP4 runs;
+/// [`AccessError::Propagation`], [`AccessError::EarthOrientation`] or
+/// [`AccessError::BelowSurface`] for the first probed instant SGP4, the frame chain or the zone
+/// refuses. A refused scan returns no window.
+pub fn zone_sgp4_windows(
+    satellite: &Satellite,
+    eop: EopSource<'_>,
+    start: UtcDateTime,
+    span_seconds: f64,
+    constraint: &ZoneConstraint<'_>,
+    tol_seconds: f64,
+) -> Result<Vec<Window>, AccessError> {
+    check_scan(start, span_seconds, tol_seconds)?;
+    let refused: Cell<Option<AccessError>> = Cell::new(None);
+    let refuse = |e: AccessError| {
+        let first = refused.take().unwrap_or(e);
+        refused.set(Some(first));
+        f64::NEG_INFINITY
+    };
+    let g = |t: f64| match sgp4_itrf_position(satellite, eop, start, t) {
+        Ok(r) => constraint
+            .g(r)
+            .unwrap_or_else(|| refuse(AccessError::BelowSurface { at_seconds: t })),
+        Err(e) => refuse(e),
+    };
+    let mut found = Vec::new();
+    windows(
+        g,
+        constraint.rate_factor() * sgp4_rate_bound(satellite, &ElevationMask::HORIZON),
+        0.0,
+        span_seconds,
+        tol_seconds,
+        |w| found.push(w),
+    );
+    match refused.into_inner() {
+        Some(e) => Err(e),
+        None => Ok(found),
+    }
+}
+
+/// The windows on the table's span in which its interpolant is in access to the zone of
+/// `constraint`, each edge refined to `tol_seconds`.
+///
+/// Times are on the table's own coordinate. A window open at the first or the last sample is
+/// clamped to it. The scan is [`spacelab_coverage::windows`] of [`ZoneConstraint::g`] with
+/// [`tabulated_rate_bound`] at the horizon times [`ZoneConstraint::rate_factor`], which bounds the
+/// rate of the zone's `H` (the module documentation).
+///
+/// # Errors
+///
+/// [`AccessError::Tolerance`] for the argument, and [`AccessError::BelowSurface`] for the first
+/// probed instant at which the interpolant is not above the ellipsoid. A refused scan returns no
+/// window.
+pub fn zone_tabulated_windows(
+    ephemeris: &Tabulated,
+    constraint: &ZoneConstraint<'_>,
+    tol_seconds: f64,
+) -> Result<Vec<Window>, AccessError> {
+    if !(tol_seconds.is_finite() && tol_seconds > 0.0) {
+        return Err(AccessError::Tolerance);
+    }
+    let refused: Cell<Option<AccessError>> = Cell::new(None);
+    let g = |t: f64| {
+        constraint.g(ephemeris.at(t)).unwrap_or_else(|| {
+            let first = refused
+                .take()
+                .unwrap_or(AccessError::BelowSurface { at_seconds: t });
+            refused.set(Some(first));
+            f64::NEG_INFINITY
+        })
+    };
+    let (first, last) = ephemeris.span();
+    let mut found = Vec::new();
+    windows(
+        g,
+        constraint.rate_factor() * tabulated_rate_bound(ephemeris, &ElevationMask::HORIZON),
+        first,
+        last,
+        tol_seconds,
+        |w| found.push(w),
+    );
+    match refused.into_inner() {
+        Some(e) => Err(e),
+        None => Ok(found),
+    }
 }

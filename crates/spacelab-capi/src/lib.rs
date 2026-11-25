@@ -4572,8 +4572,9 @@ pub struct SlStationWindow {
 }
 
 /// The status of an access refusal: an argument the API refuses is `SL_ERR_INVALID_ARGUMENT`, an
-/// instant the frame chain cannot answer for `SL_ERR_DOMAIN`, and SGP4's own failure
-/// `SL_ERR_COMPUTE`, as `sl_sgp4_propagate_at` reports it.
+/// instant the frame chain cannot answer for or at which a zone's satellite is not above the
+/// ellipsoid `SL_ERR_DOMAIN`, and SGP4's own failure `SL_ERR_COMPUTE`, as `sl_sgp4_propagate_at`
+/// reports it.
 fn access_status(e: &spacelab::access::AccessError) -> i32 {
     use spacelab::access::AccessError;
     match e {
@@ -4582,7 +4583,7 @@ fn access_status(e: &spacelab::access::AccessError) -> i32 {
         | AccessError::Interval
         | AccessError::Tolerance
         | AccessError::Samples => SL_ERR_INVALID_ARGUMENT,
-        AccessError::EarthOrientation { .. } => SL_ERR_DOMAIN,
+        AccessError::EarthOrientation { .. } | AccessError::BelowSurface { .. } => SL_ERR_DOMAIN,
         AccessError::Propagation { .. } => SL_ERR_COMPUTE,
     }
 }
@@ -4792,6 +4793,242 @@ pub unsafe extern "C" fn sl_zone_contains(
         // that every point is answered.
         unsafe { core::ptr::copy_nonoverlapping(found.as_ptr(), inside, n_points) };
         SL_OK
+    })
+}
+
+/// `sl_zone_window`: one access window of one zone, in seconds on the scan's clock: past the start
+/// label for SGP4, the table's own for a table.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SlZoneWindow {
+    /// The zone's index in the list the scan was given.
+    pub zone: usize,
+    /// When the zone comes into access.
+    pub rise_s: f64,
+    /// When it leaves it.
+    pub set_s: f64,
+}
+
+/// `sl_zone_access`: some point of the zone must see the satellite.
+const ZONE_ANY: i32 = 0;
+/// `sl_zone_access`: every point of the zone must see the satellite.
+const ZONE_ALL: i32 = 1;
+
+fn zone_access(who: &str, access: i32) -> Result<spacelab::access::ZoneAccess, i32> {
+    match access {
+        ZONE_ANY => Ok(spacelab::access::ZoneAccess::Any),
+        ZONE_ALL => Ok(spacelab::access::ZoneAccess::All),
+        other => Err(fail(
+            SL_ERR_INVALID_ARGUMENT,
+            format!("{who}: access {other} is not an sl_zone_access"),
+        )),
+    }
+}
+
+/// The zones of a ragged list: zone `i` is the next `vertices_per_zone[i]` vertices of `vertices`,
+/// as `sl_zone_contains` takes them, built in order; the first a zone refuses refuses all.
+///
+/// # Safety
+/// `vertices_per_zone` is readable for `n_zones`, and `vertices` for their sum, both non-null.
+unsafe fn ragged_zones(
+    who: &str,
+    vertices: *const SlSurfacePoint,
+    vertices_per_zone: *const usize,
+    n_zones: usize,
+) -> Result<Vec<spacelab::zone::Zone>, i32> {
+    // SAFETY: the caller states `vertices_per_zone` is readable for `n_zones`.
+    let counts = unsafe { core::slice::from_raw_parts(vertices_per_zone, n_zones) };
+    let Some(total) = counts
+        .iter()
+        .try_fold(0_usize, |sum, &n| sum.checked_add(n))
+    else {
+        return Err(fail(
+            SL_ERR_INVALID_ARGUMENT,
+            format!("{who}: vertices_per_zone sums past SIZE_MAX"),
+        ));
+    };
+    // SAFETY: the caller states `vertices` is readable for the sum of the counts.
+    let mut rest = unsafe { core::slice::from_raw_parts(vertices, total) };
+    let mut zones = Vec::with_capacity(n_zones);
+    for (i, &n) in counts.iter().enumerate() {
+        let (these, after) = rest.split_at(n);
+        rest = after;
+        let points: Vec<_> = these.iter().copied().map(surface_point).collect();
+        match spacelab::zone::Zone::new(&points) {
+            Ok(zone) => zones.push(zone),
+            Err(e) => {
+                return Err(fail(
+                    SL_ERR_INVALID_ARGUMENT,
+                    format!("{who}: zone {i}: {e}"),
+                ));
+            }
+        }
+    }
+    Ok(zones)
+}
+
+/// The access windows of an SGP4 satellite over `n_zones` zones on WGS 84. See the header.
+///
+/// # Safety
+/// `sat` is a live handle; `eop` is null or a live series; `start` points at one label;
+/// `vertices_per_zone` is readable for `n_zones` and `vertices` for their sum; `out` is null or
+/// writable for `cap` windows; `out_len` is writable for one `size_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_access_zone_sgp4(
+    sat: *const SlSgp4,
+    eop: *const SlEopSeries,
+    start: *const SlUtcDateTime,
+    span_s: f64,
+    vertices: *const SlSurfacePoint,
+    vertices_per_zone: *const usize,
+    n_zones: usize,
+    access: i32,
+    mask_rad: f64,
+    tol_s: f64,
+    out: *mut SlZoneWindow,
+    cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    guard(|| {
+        const WHO: &str = "sl_access_zone_sgp4";
+        if sat.is_null()
+            || start.is_null()
+            || vertices.is_null()
+            || vertices_per_zone.is_null()
+            || out_len.is_null()
+        {
+            return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null pointer"));
+        }
+        if let Err(status) = check_nonzero(WHO, "n_zones", n_zones) {
+            return status;
+        }
+        let access = match zone_access(WHO, access) {
+            Ok(access) => access,
+            Err(status) => return status,
+        };
+        // SAFETY: checked non-null; the caller states each is live and initialised.
+        let (sat, l) = unsafe { (&*sat, *start) };
+        let source = if eop.is_null() {
+            spacelab::EopSource::NoEop
+        } else {
+            // SAFETY: checked non-null; the caller states the series is live.
+            spacelab::EopSource::Series(unsafe { &(*eop).series })
+        };
+        let start = match UtcDateTime::new(l.year, l.month, l.day, l.hour, l.minute, l.second) {
+            Ok(label) => label,
+            Err(err) => return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: start: {err}")),
+        };
+        // SAFETY: forwarding the caller's own contract on `vertices` and `vertices_per_zone`.
+        let zones = match unsafe { ragged_zones(WHO, vertices, vertices_per_zone, n_zones) } {
+            Ok(zones) => zones,
+            Err(status) => return status,
+        };
+        let mut found = Vec::new();
+        for (i, zone) in zones.iter().enumerate() {
+            let windows = spacelab::access::ZoneConstraint::new(zone, access, mask_rad).and_then(
+                |constraint| {
+                    spacelab::access::zone_sgp4_windows(
+                        &sat.satellite,
+                        source,
+                        start,
+                        span_s,
+                        &constraint,
+                        tol_s,
+                    )
+                },
+            );
+            match windows {
+                Ok(windows) => found.extend(windows.iter().map(|w| SlZoneWindow {
+                    zone: i,
+                    rise_s: w.rise,
+                    set_s: w.set,
+                })),
+                Err(e) => return fail(access_status(&e), format!("{WHO}: zone {i}: {e}")),
+            }
+        }
+        // SAFETY: forwarding the caller's own contract on `out`, `cap` and `out_len`.
+        unsafe { deliver(&found, out, cap, out_len) }
+    })
+}
+
+/// The access windows of a tabulated ITRF ephemeris over `n_zones` zones on WGS 84. See the
+/// header.
+///
+/// # Safety
+/// `times`, `positions` and `velocities` are readable for `n_samples` each; `vertices_per_zone`
+/// is readable for `n_zones` and `vertices` for their sum; `out` is null or writable for `cap`
+/// windows; `out_len` is writable for one `size_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_access_zone_tabulated(
+    times: *const f64,
+    positions: *const SlVec3,
+    velocities: *const SlVec3,
+    n_samples: usize,
+    vertices: *const SlSurfacePoint,
+    vertices_per_zone: *const usize,
+    n_zones: usize,
+    access: i32,
+    mask_rad: f64,
+    tol_s: f64,
+    out: *mut SlZoneWindow,
+    cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    guard(|| {
+        const WHO: &str = "sl_access_zone_tabulated";
+        if times.is_null()
+            || positions.is_null()
+            || velocities.is_null()
+            || vertices.is_null()
+            || vertices_per_zone.is_null()
+            || out_len.is_null()
+        {
+            return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null pointer"));
+        }
+        if let Err(status) = check_nonzero(WHO, "n_zones", n_zones) {
+            return status;
+        }
+        let access = match zone_access(WHO, access) {
+            Ok(access) => access,
+            Err(status) => return status,
+        };
+        // SAFETY: checked non-null; the caller states each is readable for its count.
+        let (times, positions, velocities) = unsafe {
+            (
+                core::slice::from_raw_parts(times, n_samples),
+                core::slice::from_raw_parts(positions, n_samples),
+                core::slice::from_raw_parts(velocities, n_samples),
+            )
+        };
+        let table = match spacelab::access::Tabulated::new(
+            times.to_vec(),
+            positions.iter().copied().map(to_vec3).collect(),
+            velocities.iter().copied().map(to_vec3).collect(),
+        ) {
+            Ok(table) => table,
+            Err(e) => return fail(access_status(&e), format!("{WHO}: {e}")),
+        };
+        // SAFETY: forwarding the caller's own contract on `vertices` and `vertices_per_zone`.
+        let zones = match unsafe { ragged_zones(WHO, vertices, vertices_per_zone, n_zones) } {
+            Ok(zones) => zones,
+            Err(status) => return status,
+        };
+        let mut found = Vec::new();
+        for (i, zone) in zones.iter().enumerate() {
+            let windows = spacelab::access::ZoneConstraint::new(zone, access, mask_rad).and_then(
+                |constraint| spacelab::access::zone_tabulated_windows(&table, &constraint, tol_s),
+            );
+            match windows {
+                Ok(windows) => found.extend(windows.iter().map(|w| SlZoneWindow {
+                    zone: i,
+                    rise_s: w.rise,
+                    set_s: w.set,
+                })),
+                Err(e) => return fail(access_status(&e), format!("{WHO}: zone {i}: {e}")),
+            }
+        }
+        // SAFETY: forwarding the caller's own contract on `out`, `cap` and `out_len`.
+        unsafe { deliver(&found, out, cap, out_len) }
     })
 }
 

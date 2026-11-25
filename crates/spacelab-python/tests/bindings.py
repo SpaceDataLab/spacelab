@@ -2792,6 +2792,146 @@ def test_zone_contains_returns_the_rust_reference():
     assert sl.zone_contains(cases[0]["vertices"], []) == []
 
 
+
+
+# The exception each refusal kind of the zone access reference is raised as.
+_ZONE_ACCESS_REFUSAL = {
+    "zone": sl.ZoneError,
+    "mask": ValueError,
+    "interval": ValueError,
+    "tolerance": ValueError,
+    "samples": ValueError,
+    "below-surface": sl.BelowSurfaceError,
+}
+
+
+def _zone_access_scans():
+    """The scans of `bridge_access_zone_reference.tsv`, each with its source, zones and the Rust
+    answer."""
+    path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "spacelab",
+        "tests",
+        "fixtures",
+        "bridge_access_zone_reference.tsv",
+    )
+    scans, rows = [], 0
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("#"):
+                continue
+            rows += 1
+            f = line.rstrip("\n").split("\t")
+            if f[0] in ("sgp4", "table"):
+                scan = {
+                    "name": f[1],
+                    "access": f[2],
+                    "mask": _f64_of(f[3]),
+                    "tol": _f64_of(f[4]),
+                    "sgp4": None,
+                    "times": [],
+                    "positions": [],
+                    "velocities": [],
+                    "zones": [],
+                    "windows": [],
+                    "refused": None,
+                }
+                if f[0] == "sgp4":
+                    scan["sgp4"] = {
+                        "tle": (f[5], f[6]),
+                        "eop": None if f[7] == "none" else f[7],
+                        "start": _label(f[8:14]),
+                        "span": _f64_of(f[14]),
+                    }
+                else:
+                    scan["count"] = int(f[5])
+                scans.append(scan)
+                continue
+            scan = scans[-1]
+            assert f[1] == scan["name"], f"a row outside its scan: {line}"
+            if f[0] == "sample":
+                x = [_f64_of(h) for h in f[3:10]]
+                scan["times"].append(x[0])
+                scan["positions"].append(tuple(x[1:4]))
+                scan["velocities"].append(tuple(x[4:7]))
+            elif f[0] == "zone":
+                assert int(f[2]) == len(scan["zones"]), line
+                scan["zones"].append([])
+            elif f[0] == "vertex":
+                scan["zones"][int(f[2])].append((_f64_of(f[4]), _f64_of(f[5])))
+            elif f[0] == "window":
+                scan["windows"].append((int(f[2]), f[3], f[4]))
+            elif f[0] == "refused":
+                scan["refused"] = f[2]
+            else:
+                raise AssertionError(f"an unknown row kind {f[0]}")
+    return scans, rows
+
+
+def test_zone_access_windows_return_the_rust_reference_to_the_bit():
+    """Every scan of the Rust API's zone access reference, through the bridge, to the bit (S2).
+
+    `crates/spacelab/tests/bridge_access_zone.rs` holds the file to `spacelab::access` and the API
+    to its mathematics; the C ABI's `tests/zone.rs` holds the C ABI to the same file. Here the whole
+    zone list goes in one call and then each zone alone: every window must come back with the same
+    bits in the same order, every refusal as the exception its kind names, and every row of the
+    file is counted. An access kind other than "any" or "all" is refused too.
+    """
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    scans, rows = _zone_access_scans()
+    counted, windows, refusals = 0, 0, 0
+    for scan in scans:
+        counted += 1 + len(scan["times"]) + len(scan["zones"]) + len(scan["windows"])
+        counted += sum(len(z) for z in scan["zones"]) + (scan["refused"] is not None)
+        if scan["sgp4"] is not None:
+            s = scan["sgp4"]
+            eop = None
+            if s["eop"] is not None:
+                with open(os.path.join(root, s["eop"]), encoding="utf-8") as handle:
+                    eop = sl.EopSeries.parse_finals2000a(handle.read())
+            scan_of = sl.access_zone_sgp4
+            head = (*s["tle"], s["start"], s["span"])
+            tail = (scan["mask"], scan["tol"], eop)
+        else:
+            assert scan["count"] == len(scan["times"]), scan["name"]
+            scan_of = sl.access_zone_tabulated
+            head = (scan["times"], scan["positions"], scan["velocities"])
+            tail = (scan["mask"], scan["tol"])
+        access = scan["access"]
+        if scan["refused"] is not None:
+            kind = scan["refused"]
+            try:
+                scan_of(*head, scan["zones"], access, *tail)
+            except ValueError as e:
+                assert type(e) is _ZONE_ACCESS_REFUSAL[kind], (
+                    f"{scan['name']}: {kind} raised {type(e).__name__}: {e}"
+                )
+                refusals += 1
+                continue
+            raise AssertionError(f"{scan['name']}: {kind} was answered")
+        got = [
+            (i, _bits(rise), _bits(set_))
+            for i, rise, set_ in scan_of(*head, scan["zones"], access, *tail)
+        ]
+        assert got == scan["windows"], scan["name"]
+        windows += len(got)
+        for i, zone in enumerate(scan["zones"]):
+            alone = [(_bits(r), _bits(t)) for _, r, t in scan_of(*head, [zone], access, *tail)]
+            assert alone == [(r, t) for j, r, t in scan["windows"] if j == i], (
+                f"{scan['name']}: zone {i} alone"
+            )
+        try:
+            scan_of(*head, scan["zones"], "some", *tail)
+        except ValueError as e:
+            assert type(e) is ValueError and "access" in str(e), e
+        else:
+            raise AssertionError(f"{scan['name']}: an unknown access kind was answered")
+    assert counted == rows, "a row of the reference was not read"
+    assert windows > 20 and refusals == 6, "the reference lost its cases"
+
+
 def test_every_export_is_named_by_a_test():
     """No public binding may exist without a test file naming it.
 

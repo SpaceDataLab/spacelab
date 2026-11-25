@@ -274,11 +274,18 @@ fn both_bridges_name_the_same_time_surface() {
     }
 }
 
-/// The access scans and point in zone, capability for capability, on both bridges (Ф31.C). Both
-/// sections are read whole, so a function added to one bridge and not the other fails here.
+/// The access scans, point in zone and zone access, capability for capability, on both bridges
+/// (Ф31.C). Both sections are read whole, so a function added to one bridge and not the other
+/// fails here.
 #[test]
 fn both_bridges_name_the_same_access_surface() {
-    const FUNCTIONS: [&str; 3] = ["access_sgp4", "access_tabulated", "zone_contains"];
+    const FUNCTIONS: [&str; 5] = [
+        "access_sgp4",
+        "access_tabulated",
+        "access_zone_sgp4",
+        "access_zone_tabulated",
+        "zone_contains",
+    ];
 
     let header = read("include/spacelab.h");
     let (_, section) = header
@@ -324,8 +331,11 @@ fn both_bridges_name_the_same_access_surface() {
         "wrap_pyfunction!(access_sgp4,",
         "wrap_pyfunction!(access_tabulated,",
         "wrap_pyfunction!(zone_contains,",
+        "wrap_pyfunction!(access_zone_sgp4,",
+        "wrap_pyfunction!(access_zone_tabulated,",
         "m.add(\"PropagationError\",m.py().get_type::<PropagationError>())",
         "m.add(\"ZoneError\",m.py().get_type::<ZoneError>())",
+        "m.add(\"BelowSurfaceError\",m.py().get_type::<BelowSurfaceError>())",
     ] {
         assert!(
             registrations.contains(registered),

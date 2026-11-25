@@ -1180,6 +1180,82 @@ typedef struct {
 sl_status sl_zone_contains(const sl_surface_point *vertices, size_t n_vertices,
                            const sl_surface_point *points, size_t n_points, uint8_t *inside);
 
+/* Which points of a zone must see the satellite for the zone to be in access. */
+typedef enum sl_zone_access {
+    SL_ZONE_ANY = 0,                        /* some point, at least the mask above its horizon */
+    SL_ZONE_ALL = 1,                        /* every point */
+    SL_ZONE_ACCESS_FORCE_INT32 = 0x7FFFFFFF /* see the note on sl_precision */
+} sl_zone_access;
+
+/* One access window of one zone: its index in the zone list, and the window in seconds on the
+ * scan's clock -- past the start label for SGP4, the table's own for a table. */
+typedef struct {
+    size_t zone;
+    double rise_s;
+    double set_s;
+} sl_zone_window;
+
+/*
+ * The windows on [0, span_s] past `start` in which an SGP4 satellite is in access to each of
+ * `n_zones` zones on WGS 84, every edge refined to `tol_s` seconds. Windows come grouped by zone,
+ * in zone order, and in time order within a zone; one open at the start or at the end of the span
+ * is clamped to it. Two-call protocol.
+ *
+ * `vertices` is the zones' vertex lists laid end to end and `vertices_per_zone` says how long
+ * each one is, because C has no ragged array; each zone is as `sl_zone_contains` takes it.
+ * `access` is an `sl_zone_access`: SL_ZONE_ANY is in access while some point of the zone sees the
+ * satellite at least `mask_rad` above its geodetic horizon, SL_ZONE_ALL while every point does.
+ * The mask is in (-pi/2, pi/2]: at pi/2, SL_ZONE_ANY is the satellite's geodetic nadir lying in
+ * the zone. The satellite, the clock and the Earth orientation are as in `sl_access_sgp4`.
+ *
+ * For a satellite above the ellipsoid the elevation over it has two critical points, 90 deg at the
+ * nadir and -90 deg at the far foot of the same normal (derivations/access_zone_elevation.mac), so
+ * a zone's extreme is there or on its boundary, which is searched by branch and bound under a
+ * proved bound on the second derivative. What the scan guarantees: no window at least a billionth
+ * of the span long is missed, under the speed hypothesis of `sl_access_sgp4`, except one in which
+ * the zone's extreme passes the mask by less than a micrometre at the satellite's height. The
+ * windows are the Rust API's to the bit.
+ *
+ * SL_ERR_INVALID_ARGUMENT for a null pointer, a zero `n_zones`, an `access` that is not an
+ * `sl_zone_access`, a start label the calendar refuses, counts that sum past SIZE_MAX, a zone
+ * `sl_zone_contains` refuses, a mask outside (-pi/2, pi/2], a span or tolerance not finite and
+ * positive, or a span ending outside the calendar; SL_ERR_DOMAIN for an instant the leap-second
+ * table or the series cannot answer for, or at which the satellite is not above the ellipsoid;
+ * SL_ERR_COMPUTE where SGP4 fails. The message names the zone. A refused scan writes nothing,
+ * `*out_len` included.
+ */
+sl_status sl_access_zone_sgp4(const sl_sgp4 *sat, const sl_eop_series *eop,
+                              const sl_utc_datetime *start, double span_s,
+                              const sl_surface_point *vertices, const size_t *vertices_per_zone,
+                              size_t n_zones, int32_t access, double mask_rad, double tol_s,
+                              sl_zone_window *out, size_t cap, size_t *out_len);
+
+/*
+ * The windows on [times[0], times[n_samples - 1]] in which a tabulated ephemeris is in access to
+ * each of `n_zones` zones on WGS 84, every edge refined to `tol_s` seconds. The table is as in
+ * `sl_access_tabulated`, and the zones, `access` and the mask as in `sl_access_zone_sgp4`. Windows
+ * come on the table's own time coordinate, grouped by zone, in zone order, and in time order
+ * within a zone; one open at the first or the last sample is clamped to it. Two-call protocol.
+ *
+ * What the scan guarantees: no window of the interpolant at least a billionth of the span long is
+ * missed, except one in which the zone's extreme passes the mask by less than a micrometre at the
+ * satellite's height. Its rate bound, the table's speed bound times 1 + |sin mask| for
+ * SL_ZONE_ANY and times 1 for SL_ZONE_ALL, is proved. The windows are the Rust API's to the bit.
+ *
+ * SL_ERR_INVALID_ARGUMENT for a null pointer, a zero `n_zones` or an `access` that is not an
+ * `sl_zone_access`; for a table `sl_access_tabulated` refuses; for counts that sum past SIZE_MAX
+ * or a zone `sl_zone_contains` refuses; and for a mask outside (-pi/2, pi/2] or a tolerance not
+ * finite and positive. SL_ERR_DOMAIN at an instant the interpolant is not above the ellipsoid.
+ * The message names the zone where it is one. A refused scan writes nothing, `*out_len`
+ * included.
+ */
+sl_status sl_access_zone_tabulated(const double *times, const sl_vec3 *positions,
+                                   const sl_vec3 *velocities, size_t n_samples,
+                                   const sl_surface_point *vertices,
+                                   const size_t *vertices_per_zone, size_t n_zones, int32_t access,
+                                   double mask_rad, double tol_s, sl_zone_window *out, size_t cap,
+                                   size_t *out_len);
+
 /* ---- Semi-analytical propagation (DSST) ---- */
 
 /*

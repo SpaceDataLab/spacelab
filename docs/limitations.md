@@ -430,8 +430,8 @@ scope:
   and do not reach the bridges; nor do the series' reference frame (`EopSeries::frame`), its raw rows
   or the subdaily correction. The C ABI carries an epoch as `int64_t` nanoseconds, so it refuses a
   label from April 2292 on with `SL_ERR_DOMAIN`, where Python's integers carry the epoch.
-- **Access windows reach the bridges from SGP4 and from ITRF tables over stations only, and an SGP4
-  scan's completeness rests on a tested hypothesis.** `sl_access_sgp4` and `access_sgp4` (Ф31.C)
+- **Access windows reach the bridges from SGP4 and from ITRF tables over stations and zones, and an
+  SGP4 scan's completeness rests on a tested hypothesis.** `sl_access_sgp4` and `access_sgp4` (Ф31.C)
   scan an element set over stations on WGS 84 with a geometric mask, composing the frame chain from
   a series handle or from none. A scan misses no window longer than a billionth of its span only if
   its rate bound — the element set's mean-orbit perigee speed plus the Earth's rotation at apogee,
@@ -443,18 +443,26 @@ scope:
   rate bound is proved for its cubic Hermite interpolant; but the windows are the interpolant's, the
   frame and time conversions to the table are the caller's, an SP3 file without velocity records
   has no entry point, and a table is one segment, so an OEM's segments are scanned one by one.
-  Access windows over a zone, and root isolation on the Taylor polynomial (Ф22.C, not yet written),
-  are in neither bridge.
-- **A zone answers point in zone only, and its boundary is a micrometre wide.** `spacelab::zone`,
-  `sl_zone_contains` and `zone_contains` (Ф31.C) take a polygon on WGS 84 whose edges are shortest
-  geodesics, interior on the left. A point within 1e-6 m of an edge, measured across it, is on the
+  Root isolation on the Taylor polynomial (Ф22.C, not yet written) is in neither bridge.
+- **A zone's boundary is a micrometre wide, and its access windows rest on a search of that
+  boundary.** `spacelab::zone`, `sl_zone_contains` and `zone_contains` (Ф31.C) take a polygon on
+  WGS 84 whose edges are shortest geodesics, interior on the left. A point within 1e-6 m of an edge, measured across it, is on the
   boundary and belongs to the zone and to its complement; nothing finer is resolved. An edge whose
   ends come within 2fπ (1.207°, 134 km) of antipodal on the auxiliary sphere is refused, so no edge
   spans more than about 19 900 km: split a longer one. Self-intersection is found by the signs of
   latitude differences at vertex longitudes, exactly as far as those doubles go — a meeting their
   rounding hides, such as two edges overlapping along a stretch other than a meridian, is not
   found. A latitude of ±π/2 is read as the geodesic code reads it, a point 0.4 nm from the pole on
-  its own meridian, so a vertex there is not "the pole" for every meridian at once.
+  its own meridian, so a vertex there is not "the pole" for every meridian at once. Zone access
+  (`spacelab::access::zone_sgp4_windows` and `zone_tabulated_windows`, `sl_access_zone_*`,
+  `access_zone_*`) asks whether any or all of a zone's points see the satellite above a geometric
+  mask, refraction being the caller's. It rests on the elevation over the ellipsoid having two
+  critical points only, which holds for a satellite strictly above it: an instant below the surface
+  is refused, and so is the whole scan. Every probe searches the boundary by branch and bound, so
+  its cost grows with the number of edges and with how close the extreme is to the mask; no
+  benchmark has measured it. A window in which the zone's extreme passes the mask by less than a
+  micrometre at the satellite's height can be lost, and the SGP4 scan carries the station scan's
+  rate hypothesis, tested but not proved for SGP4, times `1 + |sin mask|` for any point.
 - **`spacelab-astrometry` is otherwise Rust-only.** Exposing aberration in both bridges was the first
   time either depended on the crate at all; plate solving, TAN/SIP world coordinates, blind asterism
   matching and streak reduction are still unreachable from C and from Python. That is the #319 drift

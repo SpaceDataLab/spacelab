@@ -1,0 +1,222 @@
+/* The elevation of a satellite over a zone on WGS 84, which crates/spacelab/src/access.rs scans
+   (Ф31.C): the property the zone access rests on, and the bounds its edge search uses.
+
+   The ellipsoid x^2/a^2 + y^2/a^2 + z^2/b^2 = 1, b^2 = a^2 (1 - e2), A = diag(a^2, a^2, b^2), in
+   geodetic coordinates (phi, lam): N = a / W, M = a (1 - e2) / W^3, W = sqrt(1 - e2 sin^2 phi),
+       p = (N cos phi cos lam, N cos phi sin lam, N (1 - e2) sin phi),
+   n the outward normal, eN and eE the unit north and east vectors. A satellite S outside the
+   ellipsoid, d = S - p, D = |d|, u = d . n: the elevation of S seen from p has sin eps = u / D.
+
+   THE PROPERTY. For S at geodetic height h > 0, sin eps has exactly two critical points on the
+   ellipsoid: its maximum 1 at the geodetic nadir (the foot of the normal through S) and its minimum
+   -1 at the far foot of that normal. There is no other extremum and no saddle. So over a closed
+   zone Z the elevation's maximum is 90 degrees if the nadir is in Z and is reached on the boundary
+   otherwise, and its minimum is -90 degrees if the far foot is in Z and is reached on the boundary
+   otherwise. The proof, step by step; each claim prints a residual that must reduce to 0:
+
+     1-2  dn/dphi = (1/M) dp/dphi and dn/dlam = (1/N) dp/dlam: meridian and parallel are the
+          principal directions, with curvatures 1/M and 1/N, both positive.
+     3-4  the gradient: d(u/D)/dphi = (M/D)(1/M + u/D^2)(d . eN) and
+          d(u/D)/dlam = (N cos phi / D)(1/N + u/D^2)(d . eE). So a critical point (off the poles;
+          at a pole the same holds in any chart by continuity of the coordinate-free form
+          grad sin eps = (1/D)(Wk + (u/D^2) I) d_T, Wk the shape operator) has, for each principal
+          direction, d . e_i = 0 or 1/rho_i + u/D^2 = 0.
+     Case A, d . eN = d . eE = 0: S lies on the normal line at p, sin eps = +-1.
+     5    Such p are p_i = a_i^2 S_i / (a_i^2 + t), t real, with F(t) = a^2 r^2/(a^2 + t)^2 +
+          b^2 z^2/(b^2 + t)^2 = 1, S = (r cos L, r sin L, z): S - p = t A^-1 p. F falls from +inf to
+          0 on (-b^2, inf) and rises from 0 to +inf on (-inf, -a^2): one root on each, t > 0 the
+          nadir (S above p, sin eps = 1), t < -a^2 the far foot (sin eps = -1). On (-a^2, -b^2) F is
+          convex (F'' > 0); with u = a^2 + t, v = -(b^2 + t), u + v = a^2 - b^2, its minimum is
+     6    min A/u^2 + B/v^2 = (A^(1/3) + B^(1/3))^3 / (a^2 - b^2)^2 (at u = c A^(1/3)/(A^(1/3) + B^(1/3))),
+     7    and (x^(1/3) + y^(1/3))^3 >= x + y, so with |S| > b (h > 0) the minimum is at least
+          b^2 (r^2 + z^2)/(a^2 - b^2)^2 > b^4/(a^2 - b^2)^2,
+     8    which exceeds 1 when 2 b^2 > a^2, as on WGS 84: no root there, exactly two normals.
+     Case B, d along a principal direction e_i (d . e_j = 0) with 1/rho_i + u/D^2 = 0: then
+     9    d = rho_i sin psi (cos psi e_i - sin psi n) for some psi (u/D^2 = -1/rho_i), and S lies on
+          the sphere of diameter rho_i tangent to the ellipsoid at p from inside. For any unit
+          tangent e and w = cos psi e - sin psi n,
+    10-13 p^T A^-1 p = 1, p^T A^-1 eN = p^T A^-1 eE = 0, p^T A^-1 n = 1/H with H = p . n,
+    14    so S^T A^-1 S - 1 = D sin psi (-2 sin psi / H + D sin psi w^T A^-1 w) at D = rho_i,
+    15-17 with H^2 = a^2 cos^2 phi + b^2 sin^2 phi <= a^2, M <= a^2/b, N <= a^2/b, w^T A^-1 w <= 1/b^2:
+          S^T A^-1 S - 1 <= rho_i sin^2 psi (-2/a + a^2/b^3) < 0 when a^3 < 2 b^3, as on WGS 84:
+    18    S is strictly inside the ellipsoid, h < 0. So for h > 0 there is no Case B point.
+     The domain: every satellite strictly above the ellipsoid, h > 0, on any oblate ellipsoid with
+     a^3 < 2 b^3 (flattening below 0.206).
+
+   THE FAR FOOT. 19: at longitude L + pi the far foot's latitude solves
+     F(phi) = r sin phi + z cos phi + N e2 sin phi cos phi = 0,
+   the condition that S - p lie along the normal there.
+
+   THE EDGE SEARCH. Along an edge, a unit-speed geodesic with azimuth alpha, the code bounds
+   f = sin eps by its second derivative. 20-21: dphi/ds = cos alpha / M, dlam/ds = sin alpha/(N cos phi),
+   d alpha/ds = sin alpha tan phi / N; the tangent t = cos alpha eN + sin alpha eE turns as
+   dt/ds = -kappa n, kappa = cos^2 alpha / M + sin^2 alpha / N <= 1/M(0) = a/b^2. 22: n' =
+   (cos alpha / M) eN + (sin alpha / N) eE. 23: n'' = A_N eN + A_E eE + A_n n with
+     A_n = -(cos^2 alpha / M^2 + sin^2 alpha / N^2), A_E = -2 sin alpha cos alpha N_phi / (M N^2),
+     A_N = -cos^2 alpha M_phi / M^3 - sin^2 alpha N_phi / (M N^2).
+   24: f' = (d . n')/D + u (d . t)/D^3. 25-26: with d' = -t, D' = -(d . t)/D, u' = d . n',
+   D'' = (1 + kappa u)/D - (d . t)^2/D^3 and u'' = -kappa + d . n''. 27: f'' = u''/D - 2 u' D'/D^2
+   - u D''/D^2 + 2 u D'^2/D^3. With |D'| <= 1, |u| <= D, |u'| <= D kappa_max, |D''| <= 1/D + kappa_max
+   and |u''| <= kappa_max + D |n''|:
+       |f''| <= |n''| + 4 kappa_max / D + 3 / D^2.
+   28-29: N_phi = a e2 s c / (1 - e2 s^2)^(3/2) and M_phi / M^3 = 3 e2 s c (1 - e2 s^2)^2 /
+   (a^2 (1 - e2)^2) (s, c = sin, cos phi), so with |s c| <= 1/2, |A_n| <= (a/b^2)^2,
+   |A_E| <= e2 / (2 a^2 (1 - e2)^(5/2)) and |A_N| <= 3 e2/(2 a^2 (1 - e2)^2) + e2/(2 a^2 (1 - e2)^(5/2)).
+   30: the root of their squares on WGS 84 is below 2.5e-14 m^-2, the constant the code takes for
+   |n''|. 31: M(0) = b^2/a, so kappa_max = a/b^2.
+
+   derivations/access_zone_elevation.gp is the second engine: the gradient by finite differences,
+   the count of normals by Sturm sequences, Case B sampled, the far foot as the code finds it (its
+   root in the code's bracket, sin eps = -1 there), and |f''| against its bound on random
+   geodesics, at 60 digits. */
+
+declare([a, e2, phi, lam, alpha, X, Y, Z, t, r, zz, psi, beta, rho, DD], real)$
+assume(a > 0, e2 > 0, e2 < 1, cos(phi) > 0, rho > 0)$
+sq(v) := v . v$
+z0(e) := trigsimp(ratsimp(e))$
+
+W : sqrt(1 - e2 * sin(phi)^2)$
+N : a / W$
+M : a * (1 - e2) / W^3$
+p : [N * cos(phi) * cos(lam), N * cos(phi) * sin(lam), N * (1 - e2) * sin(phi)]$
+n : [cos(phi) * cos(lam), cos(phi) * sin(lam), sin(phi)]$
+eE : [-sin(lam), cos(lam), 0]$
+eN : [-sin(phi) * cos(lam), -sin(phi) * sin(lam), cos(phi)]$
+
+/* 1-2 */
+print("dn/dphi - (1/M) dp/dphi, squared:", z0(sq(diff(n, phi) - diff(p, phi) / M)))$
+print("dn/dlam - (1/N) dp/dlam, squared:", z0(sq(diff(n, lam) - diff(p, lam) / N)))$
+
+/* 3-4: sin eps along any curve on the surface, from its expansion at s = 0 in a frame where
+   the unit tangent is t = (1, 0, 0) and the normal m = (0, 0, 1): p(s) = p0 + s t - (s^2/2) kappa m
+   (a geodesic's acceleration is normal), n(s) = m + s n' + (s^2/2) n'' with n' = (g1, g2, 0)
+   tangent, and kappa = t . n' = g1 the normal curvature. The first-order coefficient is the
+   gradient along t: grad sin eps . t = (d . n')/D + u (d . t)/D^3 = (1/D)[(Wk + u/D^2) d_T] . t,
+   Wk the shape operator (n' = Wk t), which with Wk = diag(1/M, 1/N) in (eN, eE) gives the
+   components of claims 3-4. */
+declare([d1, d2, d3, g1, g2, h1, h2, h3, s], real)$
+tv : [1, 0, 0]$ mv : [0, 0, 1]$
+d0 : [d1, d2, d3]$
+n1v : [g1, g2, 0]$ n2v : [h1, h2, h3]$
+dd : d0 - s * tv + (s^2 / 2) * g1 * mv$
+nv : mv + s * n1v + (s^2 / 2) * n2v$
+fs : taylor((dd . nv) / sqrt(dd . dd), s, 0, 2)$
+D0 : sqrt(d0 . d0)$ u0 : d0 . mv$
+print("f'(0) - ((d.n')/D + u (d.t)/D^3):",
+      ratsimp(coeff(fs, s, 1) - ((d0 . n1v) / D0 + u0 * (d0 . tv) / D0^3)))$
+/* in the principal frame, the same with Wk t: d . (Wk t) = (d.eN)(t.eN)/M + (d.eE)(t.eE)/N */
+declare([kN, kE, dN, dE, tN, tE], real)$
+print("f'(0) in the principal frame, (1/D) sum (k_i + u/D^2) d_i t_i:",
+      ratsimp((dN * tN * kN + dE * tE * kE) / DD + u0 * (dN * tN + dE * tE) / DD^3
+              - (1 / DD) * ((kN + u0 / DD^2) * dN * tN + (kE + u0 / DD^2) * dE * tE)))$
+
+/* 5: the feet of the normals through S, Lagrange's form */
+S : [X, Y, Z]$
+declare([b], real)$ assume(b > 0, a > b)$
+Ainv : [1 / a^2, 1 / a^2, 1 / b^2]$
+pt : [a^2 * X / (a^2 + t), a^2 * Y / (a^2 + t), b^2 * Z / (b^2 + t)]$
+print("S - p - t A^-1 p, squared:", ratsimp(sq(S - pt - t * [pt[1] * Ainv[1], pt[2] * Ainv[2], pt[3] * Ainv[3]])))$
+
+/* 6: the minimum of A/u^2 + B/v^2 on u + v = c, with A = al^3, B = be^3 */
+declare([al, be, c], real)$ assume(al > 0, be > 0, c > 0)$
+us : c * al / (al + be)$
+vs : c - us$
+print("derivative of A/u^2 + B/(c - u)^2 at u*:", ratsimp(-2 * al^3 / us^3 + 2 * be^3 / vs^3))$
+print("A/u*^2 + B/v*^2 - (A^(1/3) + B^(1/3))^3/c^2:", ratsimp(al^3 / us^2 + be^3 / vs^2 - (al + be)^3 / c^2))$
+/* 7 */
+print("(x^(1/3) + y^(1/3))^3 - (x + y) - 3 x^(1/3) y^(1/3) (x^(1/3) + y^(1/3)):",
+      expand((al + be)^3 - (al^3 + be^3) - 3 * al * be * (al + be)))$
+
+/* WGS 84, exact: a = 6378137, f = 1/298.257223563 */
+fw : 1 / (298257223563 / 10^9)$
+aw : 6378137$
+bw : aw * (1 - fw)$
+e2w : fw * (2 - fw)$
+/* 8 */
+print("2 b^2 > a^2 on WGS 84 (0 if true):", if is(2 * bw^2 - aw^2 > 0) then 0 else 1)$
+
+/* 9: the critical configuration of Case B; e a unit tangent, so e . n = 0 and |w| = 1 */
+declare([en, ee], real)$
+nn3 : [0, 0, 1]$ e3 : [1, 0, 0]$
+w3 : cos(psi) * e3 - sin(psi) * nn3$
+d3 : rho * sin(psi) * w3$
+print("u/D^2 + 1/rho at d = rho sin psi (cos psi e - sin psi n):",
+      z0((d3 . nn3) / (d3 . d3) + 1 / rho))$
+
+/* 10-13 */
+qf(v, w) := v[1] * w[1] / a^2 + v[2] * w[2] / a^2 + v[3] * w[3] / (a^2 * (1 - e2))$
+print("p^T A^-1 p - 1:", z0(qf(p, p) - 1))$
+print("p^T A^-1 eN:", z0(qf(p, eN)))$
+print("p^T A^-1 eE:", z0(qf(p, eE)))$
+H : p . n$
+print("(p^T A^-1 n) H - 1:", z0(qf(p, n) * H - 1))$
+/* 14: the expansion, with p^T A^-1 e = 0 and p^T A^-1 n = 1/H for e = cos beta eN + sin beta eE */
+e : cos(beta) * eN + sin(beta) * eE$
+w : cos(psi) * e - sin(psi) * n$
+Sb : p + DD * sin(psi) * w$
+print("S^T A^-1 S - 1 - D sin psi (-2 sin psi/H + D sin psi w^T A^-1 w):",
+      z0(qf(Sb, Sb) - 1 - DD * sin(psi) * (-2 * sin(psi) / H + DD * sin(psi) * qf(w, w))))$
+/* 15-17 */
+print("H^2 - (a^2 cos^2 phi + b^2 sin^2 phi):", z0(H^2 - (a^2 * cos(phi)^2 + a^2 * (1 - e2) * sin(phi)^2)))$
+Mp : subst(phi = %pi / 2, M)$ Np : subst(phi = %pi / 2, N)$
+print("M(pi/2) - a^2/b:", radcan(Mp - a / sqrt(1 - e2)))$
+print("N(pi/2) - a^2/b:", radcan(Np - a / sqrt(1 - e2)))$
+/* M and N grow with s^2 = sin^2 phi, so their largest value is at the pole */
+declare(s2, real)$ assume(s2 >= 0, s2 <= 1)$
+print("dM/d(s^2) and dN/d(s^2) positive (0 if true):",
+      if is(diff(a * (1 - e2) * (1 - e2 * s2)^(-3/2), s2) > 0) and is(diff(a * (1 - e2 * s2)^(-1/2), s2) > 0)
+      then 0 else 1)$
+/* 18 */
+print("a^3 < 2 b^3 on WGS 84 (0 if true):", if is(2 * bw^3 - aw^3 > 0) then 0 else 1)$
+
+/* 19: the far foot at longitude pi (S in the plane y = 0, x = r >= 0) */
+pf : [-N * cos(phi), 0, N * (1 - e2) * sin(phi)]$
+nf : [-cos(phi), 0, sin(phi)]$
+Sf : [r, 0, zz]$
+crossy : (Sf - pf)[3] * nf[1] - (Sf - pf)[1] * nf[3]$
+Ff : r * sin(phi) + zz * cos(phi) + N * e2 * sin(phi) * cos(phi)$
+print("((S - p) x n)_y + F(phi) at the far foot:", z0(crossy + Ff))$
+
+/* 20-23: along a geodesic, d/ds = phi' d/dphi + lam' d/dlam + alpha' d/dalpha */
+phid : cos(alpha) / M$
+lamd : sin(alpha) / (N * cos(phi))$
+alphad : sin(alpha) * tan(phi) / N$
+dds(q) := phid * diff(q, phi) + lamd * diff(q, lam) + alphad * diff(q, alpha)$
+tt : cos(alpha) * eN + sin(alpha) * eE$
+kappa : cos(alpha)^2 / M + sin(alpha)^2 / N$
+print("dp/ds - t, squared:", z0(sq(dds(p) - tt)))$
+print("dt/ds + kappa n, squared:", z0(sq(dds(tt) + kappa * n)))$
+n1 : cos(alpha) / M * eN + sin(alpha) / N * eE$
+print("dn/ds - n', squared:", z0(sq(dds(n) - n1)))$
+Nphi : diff(N, phi)$ Mphi : diff(M, phi)$
+AN : -cos(alpha)^2 * Mphi / M^3 - sin(alpha)^2 * Nphi / (M * N^2)$
+AE : -2 * sin(alpha) * cos(alpha) * Nphi / (M * N^2)$
+An : -(cos(alpha)^2 / M^2 + sin(alpha)^2 / N^2)$
+print("d^2n/ds^2 - (A_N eN + A_E eE + A_n n), squared:", z0(sq(dds(n1) - (AN * eN + AE * eE + An * n))))$
+
+/* 24-27: f'' from the same expansion, to second order */
+Dp : -(d0 . tv) / D0$
+Dpp : (1 + g1 * u0) / D0 - (d0 . tv)^2 / D0^3$
+up : d0 . n1v$
+upp : -g1 + d0 . n2v$
+print("D'' - ((1 + kappa u)/D - (d.t)^2/D^3), from the expansion of |d|:",
+      ratsimp(2 * coeff(taylor(sqrt(dd . dd), s, 0, 2), s, 2) - Dpp))$
+print("u'' - (-kappa + d.n''), from the expansion of d.n:",
+      ratsimp(2 * coeff(taylor(dd . nv, s, 0, 2), s, 2) - upp))$
+print("f''(0) - (u''/D - 2u'D'/D^2 - uD''/D^2 + 2uD'^2/D^3):",
+      ratsimp(2 * coeff(fs, s, 2) - (upp / D0 - 2 * up * Dp / D0^2 - u0 * Dpp / D0^2
+                                     + 2 * u0 * Dp^2 / D0^3)))$
+
+/* 28-29 */
+print("N_phi - a e2 s c/(1 - e2 s^2)^(3/2):", z0(Nphi - a * e2 * sin(phi) * cos(phi) / W^3))$
+print("M_phi/M^3 - 3 e2 s c (1 - e2 s^2)^2/(a^2 (1 - e2)^2):",
+      z0(Mphi / M^3 - 3 * e2 * sin(phi) * cos(phi) * W^4 / (a^2 * (1 - e2)^2)))$
+/* 30: the bound on |n''| on WGS 84 */
+AnB : (aw / bw^2)^2$
+AEB : e2w / (2 * aw^2 * (1 - e2w)^(5/2))$
+ANB : 3 * e2w / (2 * aw^2 * (1 - e2w)^2) + AEB$
+n2b : sqrt(AnB^2 + AEB^2 + ANB^2)$
+print("|n''| bound on WGS 84, m^-2:", float(n2b))$
+print("|n''| bound below 2.5e-14 (0 if true):", if is(bfloat(n2b) < 25 * 10^-15) then 0 else 1)$
+/* 31 */
+print("M(0) - b^2/a:", radcan(subst(phi = 0, M) - a * (1 - e2)))$

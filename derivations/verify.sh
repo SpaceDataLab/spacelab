@@ -1363,6 +1363,7 @@ if have maxima; then
     mac_zeros access_station_geometry.mac 12 "a station is its foot plus h along the geodetic normal, that normal is the ellipsoid's, g is the elevation's sign, and the pieces of SGP4's speed bound"
     mac_zeros access_hermite_speed.mac 12 "the cubic Hermite interpolant of a tabulated ephemeris takes its samples, is de Casteljau's Bezier curve, and its velocity is a convex combination of v0, c, v1; its h^4/384 error kernel"
     mac_zeros zone_meridian_crossing.mac 8 "a zone's edge crosses each meridian once, with the interior on its left: the metric, Clairaut, the left of travel n x t and its north component"
+    mac_zeros access_zone_elevation.mac 32 "a satellite above the ellipsoid sees it at two critical elevations only, +90 deg at the nadir and -90 deg at the far foot (h > 0, a^3 < 2 b^3); the far foot's equation; |f''| along an edge under |n''| + 4 kappa/D + 3/D^2, |n''| < 2.5e-14"
     mac_zeros keplerian_elements.mac 44 "element <-> state maps invert each other on every branch; Kepler's equation, and its near-parabolic forms"
     mac_zeros brouwer_m2_phipps.mac 7 "Phipps' along-track drag drift of a, e and the mean anomaly from Kepler's third law"
     mac_zeros zonal_secular.mac 6 "the first-order J2 secular rates of both zonal mean-element propagators from Lagrange's equations"
@@ -1630,6 +1631,7 @@ if have gp; then
     second_engine rpc00b_inverse.gp "the RPC inverse roots on the Pleiades fixture at 60 digits"
     second_engine access_station_geometry.gp "the station geometry and SGP4's speed bound at 60 digits on 200 points"
     second_engine access_hermite_speed.gp "the Hermite interpolant's identities at 60 digits on 200 intervals, and its sampled speed under the hull bound"
+    second_engine access_zone_elevation.gp "the zone elevation at 60 digits: its gradient by differences, two normals through 400 points by Sturm, Case B empty, the far foot in the code's bracket, |f''| on 300 geodesics under its bound"
 else
     skip "Ф17.B PARI gates" gp
 fi

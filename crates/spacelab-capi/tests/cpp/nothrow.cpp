@@ -1166,6 +1166,53 @@ void the_zone_reports_its_refusals_as_statuses() {
     CHECK(!past && past.error() == SL_ERR_INVALID_ARGUMENT);
 }
 
+/* Zone access without exceptions: an answer or a status, for a mask, counts that do not add up to
+ * the vertices, and a table under the ellipsoid. */
+void the_zone_access_reports_its_refusals_as_statuses() {
+    const std::array<double, 3> times{0.0, 60.0, 120.0};
+    const std::array<spacelab::vec3, 3> positions{
+        {{6878137.0, -420e3, 0.0}, {6878137.0, 0.0, 0.0}, {6878137.0, 420e3, 0.0}}};
+    const std::array<spacelab::vec3, 3> velocities{
+        {{0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}}};
+    const double one = 0.017453292519943295;
+    const std::array<spacelab::surface_point, 4> square{
+        {{-one, -one}, {-one, one}, {one, one}, {one, -one}}};
+    const std::array<std::size_t, 1> four{4};
+    const double half_pi = std::numbers::pi / 2.0;
+    const spacelab::result<std::vector<spacelab::zone_window>> over =
+        spacelab::try_access_zones_tabulated(times, positions, velocities, square, four,
+                                             SL_ZONE_ANY, half_pi);
+    CHECK(over && over->size() == 1);
+    const spacelab::result<std::vector<spacelab::zone_window>> masked =
+        spacelab::try_access_zones_tabulated(times, positions, velocities, square, four,
+                                             SL_ZONE_ANY, 2.0);
+    CHECK(!masked && masked.error() == SL_ERR_INVALID_ARGUMENT);
+    const std::array<std::size_t, 1> three{3};
+    const spacelab::result<std::vector<spacelab::zone_window>> short_count =
+        spacelab::try_access_zones_tabulated(times, positions, velocities, square, three,
+                                             SL_ZONE_ALL, half_pi);
+    CHECK(!short_count && short_count.error() == SL_ERR_INVALID_ARGUMENT);
+    const std::array<spacelab::vec3, 3> under{
+        {{6368137.0, 0.0, 0.0}, {6368137.0, 0.0, 0.0}, {6368137.0, 0.0, 0.0}}};
+    const std::array<spacelab::vec3, 3> still{{{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}}};
+    const spacelab::result<std::vector<spacelab::zone_window>> below =
+        spacelab::try_access_zones_tabulated(times, under, still, square, four, SL_ZONE_ALL, 0.0);
+    CHECK(!below && below.error() == SL_ERR_DOMAIN);
+
+    const spacelab::result<spacelab::sgp4> sat = spacelab::sgp4::open(LINE1, LINE2);
+    CHECK(sat.has_value());
+    if (!sat) {
+        return;
+    }
+    const spacelab::utc_datetime start{2008, 9, 20, 12, 0, 0.0};
+    const spacelab::result<std::vector<spacelab::zone_window>> day =
+        sat->try_access_zones(nullptr, start, 43200.0, square, four, SL_ZONE_ANY, 0.0);
+    CHECK(day && !day->empty());
+    const spacelab::result<std::vector<spacelab::zone_window>> empty_span =
+        sat->try_access_zones(nullptr, start, 0.0, square, four, SL_ZONE_ANY, 0.0);
+    CHECK(!empty_span && empty_span.error() == SL_ERR_INVALID_ARGUMENT);
+}
+
 } // namespace
 
 int main() {
@@ -1192,6 +1239,7 @@ int main() {
     the_access_surface_reports_its_refusals_as_statuses();
     the_tabulated_access_reports_its_refusals_as_statuses();
     the_zone_reports_its_refusals_as_statuses();
+    the_zone_access_reports_its_refusals_as_statuses();
 
     if (failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failures);

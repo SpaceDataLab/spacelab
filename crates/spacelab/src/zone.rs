@@ -50,6 +50,7 @@
 
 use core::f64::consts::{FRAC_PI_2, PI, TAU};
 use core::fmt;
+use std::collections::BinaryHeap;
 
 use spacelab_core::{Angle, Length};
 use spacelab_coverage::brent;
@@ -140,7 +141,7 @@ impl std::error::Error for ZoneError {}
 
 /// `x` reduced to `(−π, π]`. `remainder` is exact, so a value already in the range comes back
 /// unchanged, bit for bit.
-fn reduce(x: f64) -> f64 {
+pub(crate) fn reduce(x: f64) -> f64 {
     let r = libm::remainder(x, TAU);
     if r <= -PI { r + TAU } else { r }
 }
@@ -161,7 +162,7 @@ fn auxiliary(lat: f64, lon: f64) -> [f64; 3] {
 }
 
 /// The point `(lat, lon)` of the ellipsoid, Earth-fixed, m.
-fn surface(lat: f64, lon: f64) -> [f64; 3] {
+pub(crate) fn surface(lat: f64, lon: f64) -> [f64; 3] {
     let (s, c) = libm::sincos(lat);
     let (sl, cl) = libm::sincos(lon);
     let n = EQUATORIAL_RADIUS / libm::sqrt(1.0 - E2 * s * s);
@@ -593,6 +594,194 @@ impl Zone {
     }
 }
 
+// ── The elevation of a satellite over a zone ──────────────────────────────────────────────────
+
+/// A bound on `|n''|`, the second derivative of the outward normal along a unit-speed geodesic of
+/// WGS 84, m⁻²: its components' bounds give 2.4917e-14 (`derivations/access_zone_elevation.mac`,
+/// claims 28–30).
+pub(crate) const NORMAL_SECOND_DERIVATIVE: f64 = 2.5e-14;
+
+/// The largest normal curvature of WGS 84, `a/b²`, 1/m: the meridian's at the equator (claim 31).
+pub(crate) const KAPPA_MAX: f64 = 1.0 / RHO_MIN;
+
+/// A bound on `|u''|` for the squared chord `u = |γ(s) − q|²` from a point `q` of the ellipsoid to
+/// a unit-speed geodesic `γ`: `u'' = 2 − 2κ (γ − q)·n` with `|γ − q| ≤ 2a`, so `2 + 4a²/b²`.
+pub(crate) const CHORD_CURVATURE: f64 = 2.0 + 4.0 * EQUATORIAL_RADIUS * KAPPA_MAX;
+
+/// The line of sight `d = S − p` from the ellipsoid's point `(lat, lon)` to `sat`, and the outward
+/// normal there, which is the zenith every elevation here is measured from.
+pub(crate) fn sight(sat: [f64; 3], lat: f64, lon: f64) -> ([f64; 3], [f64; 3]) {
+    let p = surface(lat, lon);
+    let (s, c) = libm::sincos(lat);
+    let (sl, cl) = libm::sincos(lon);
+    (
+        [sat[0] - p[0], sat[1] - p[1], sat[2] - p[2]],
+        [c * cl, c * sl, s],
+    )
+}
+
+/// The far foot of the normal through `sat`, `(lat, lon)`: the point of the ellipsoid other than
+/// the nadir whose normal line passes through `sat`, from which `sat` stands at −90°. The feet are
+/// `p = A S / (A + t)` (`derivations/access_zone_elevation.mac`, claim 5); with `x = −(a² + t)` the
+/// far one solves `a²r²/x² + b²z²/(x + c)² = 1`, `c = a² − b²`, whose left side falls through 1 on
+/// `[√(a²r² + b²z²) − c, √(a²r² + b²z²)]`, and lies at the longitude opposite the satellite's and
+/// the latitude `atan2(−z x, r (x + c))`.
+pub(crate) fn far_foot(sat: [f64; 3]) -> (f64, f64) {
+    let gap = EQUATORIAL_RADIUS * EQUATORIAL_RADIUS - POLAR_RADIUS * POLAR_RADIUS;
+    let r = libm::hypot(sat[0], sat[1]);
+    let z = sat[2];
+    let (ar, bz) = (EQUATORIAL_RADIUS * r, POLAR_RADIUS * z);
+    let hi = libm::hypot(ar, bz);
+    let lo = hi - gap;
+    let residual = |x: f64| {
+        let (across, along) = (ar / x, bz / (x + gap));
+        across * across + along * along - 1.0
+    };
+    // Over a pole or the equator the root is an end of the bracket, where the residual's rounding
+    // may keep it from changing sign; the latitude there does not depend on x.
+    let x = brent(residual, lo, hi, 4.0 * f64::EPSILON * hi).map_or_else(
+        |_| {
+            if residual(lo).abs() < residual(hi).abs() {
+                lo
+            } else {
+                hi
+            }
+        },
+        |bracket| bracket.estimate(),
+    );
+    (
+        libm::atan2(-z * x, r * (x + gap)),
+        reduce(libm::atan2(sat[1], sat[0]) + PI),
+    )
+}
+
+/// One stretch of an edge a boundary search has not ruled out: its ends along the edge, m, the
+/// values and the satellite's distances there, and a bound on the value anywhere on it.
+#[derive(Debug, Clone, Copy)]
+struct Stretch {
+    edge: usize,
+    s0: f64,
+    s1: f64,
+    f0: (f64, f64),
+    f1: (f64, f64),
+    bound: f64,
+}
+
+impl Stretch {
+    /// The stretch from `s0` to `s1` of `edge`, with its bound: along a unit-speed geodesic with
+    /// `|f''| ≤ K`, `f` lies under its chord plus `K (s − s0)(s1 − s)/2`, so under
+    /// `max(f₀, f₁) + K L²/8`. Every point of the stretch is within `L` of each end, so its
+    /// distance from the satellite is at least the larger end's less `L`, which `curvature` takes.
+    fn new(
+        edge: usize,
+        (s0, s1): (f64, f64),
+        f0: (f64, f64),
+        f1: (f64, f64),
+        curvature: &impl Fn(f64) -> f64,
+    ) -> Self {
+        let length = s1 - s0;
+        let k = curvature(f0.1.max(f1.1) - length);
+        Self {
+            edge,
+            s0,
+            s1,
+            f0,
+            f1,
+            bound: f0.0.max(f1.0) + k * length * length / 8.0,
+        }
+    }
+}
+
+impl PartialEq for Stretch {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == core::cmp::Ordering::Equal
+    }
+}
+
+impl Eq for Stretch {}
+
+impl PartialOrd for Stretch {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Stretch {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.bound.total_cmp(&other.bound)
+    }
+}
+
+/// What a search of a zone's boundary found: the largest value it reached, the point that reached
+/// it, and a bound no point of the boundary exceeds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Extreme {
+    pub(crate) best: f64,
+    pub(crate) at: (f64, f64),
+    pub(crate) bound: f64,
+}
+
+impl Zone {
+    /// The largest value of `f` over the boundary, by branch and bound. `f(lat, lon)` returns the
+    /// value and the satellite's distance from the point, and `curvature(d)` bounds `|f''|` along
+    /// an edge, at unit speed, wherever that distance is at least `d`. The stretch with the
+    /// largest bound is halved first; the search stops once `done(best, bound)`, or when no
+    /// stretch can be halved in floating point.
+    pub(crate) fn boundary_max(
+        &self,
+        f: impl Fn(f64, f64) -> (f64, f64),
+        curvature: impl Fn(f64) -> f64,
+        done: impl Fn(f64, f64) -> bool,
+    ) -> Extreme {
+        let mut found = Extreme {
+            best: f64::NEG_INFINITY,
+            at: (f64::NAN, f64::NAN),
+            bound: f64::NEG_INFINITY,
+        };
+        let reach = |found: &mut Extreme, value: f64, at: (f64, f64)| {
+            if value > found.best {
+                found.best = value;
+                found.at = at;
+            }
+        };
+        let mut open = BinaryHeap::with_capacity(4 * self.edges.len());
+        for (edge, e) in self.edges.iter().enumerate() {
+            let (f0, f1) = (f(e.lat_a, e.lon_a), f(e.lat_b, e.lon_b));
+            reach(&mut found, f0.0, (e.lat_a, e.lon_a));
+            reach(&mut found, f1.0, (e.lat_b, e.lon_b));
+            open.push(Stretch::new(edge, (0.0, e.length), f0, f1, &curvature));
+        }
+        // The largest bound of a stretch set aside: ruled out, or too short to halve.
+        let mut aside = f64::NEG_INFINITY;
+        loop {
+            let top = open.peek().map_or(f64::NEG_INFINITY, |s| s.bound);
+            let bound = top.max(aside).max(found.best);
+            let Some(s) = open.pop().filter(|_| !done(found.best, bound)) else {
+                found.bound = bound;
+                return found;
+            };
+            let mid = 0.5 * (s.s0 + s.s1);
+            if !(s.s0 < mid && mid < s.s1) {
+                aside = aside.max(s.bound);
+                continue;
+            }
+            let (lat, lon, _) = point_at(&self.edges[s.edge].line, mid);
+            let fm = f(lat, lon);
+            reach(&mut found, fm.0, (lat, lon));
+            for half in [
+                Stretch::new(s.edge, (s.s0, mid), s.f0, fm, &curvature),
+                Stretch::new(s.edge, (mid, s.s1), fm, s.f1, &curvature),
+            ] {
+                if half.bound > found.best {
+                    open.push(half);
+                } else {
+                    aside = aside.max(half.bound);
+                }
+            }
+        }
+    }
+}
+
 /// Whether the north pole's side is inside: the direction of the highest crossing of a meridian
 /// through no vertex, which an edge with a sweep crosses at mid-sweep.
 #[expect(
@@ -704,5 +893,101 @@ mod tests {
             CROSSINGS.len()
         );
         assert!(worst <= 1e-15, "{worst:e}");
+    }
+
+    /// The satellite at geodetic `(lat, lon)` in degrees, `h` metres up, Earth-fixed.
+    fn above(lat: f64, lon: f64, h: f64) -> [f64; 3] {
+        let (lat, lon) = (lat.to_radians(), lon.to_radians());
+        let p = surface(lat, lon);
+        let (s, c) = libm::sincos(lat);
+        let (sl, cl) = libm::sincos(lon);
+        [p[0] + h * c * cl, p[1] + h * c * sl, p[2] + h * s]
+    }
+
+    fn sine(sat: [f64; 3], lat: f64, lon: f64) -> (f64, f64) {
+        let (d, n) = sight(sat, lat, lon);
+        let range = libm::hypot(libm::hypot(d[0], d[1]), d[2]);
+        ((d[0] * n[0] + d[1] * n[1] + d[2] * n[2]) / range, range)
+    }
+
+    /// From the far foot the satellite stands at −90°: the line of sight is the inward normal
+    /// there, to rounding, over the poles, the equator and between, from 200 km to 40 000 km up.
+    #[test]
+    fn the_far_foot_sees_the_satellite_at_minus_90_degrees() {
+        let mut worst = 0.0_f64;
+        for &(lat, lon, h) in &[
+            (0.0, 0.0, 400e3),
+            (90.0, 0.0, 700e3),
+            (-90.0, 30.0, 700e3),
+            (45.0, 100.0, 200e3),
+            (-33.0, -70.0, 20_200e3),
+            (61.0, 179.0, 40_000e3),
+            (1e-9, -45.0, 35_786e3),
+        ] {
+            let (flat, flon) = far_foot(above(lat, lon, h));
+            worst = worst.max(sine(above(lat, lon, h), flat, flon).0 + 1.0);
+        }
+        eprintln!("1 + sin ε at the far foot, worst {worst:.2e}");
+        assert!(worst < 1e-15, "{worst:e}");
+    }
+
+    /// The boundary search brackets the extreme a dense sample of the boundary finds: every sample
+    /// lies under its bound, the search reaches the sample's best to its tolerance, and the point
+    /// it names has the value it reports, for satellites over the zone, beside it and far from it.
+    #[test]
+    fn the_boundary_search_brackets_a_dense_sample_of_the_boundary() {
+        let zones = [
+            Zone::new(&[
+                deg(30.0, 30.0),
+                deg(30.0, 36.0),
+                deg(36.0, 36.0),
+                deg(36.0, 30.0),
+            ])
+            .unwrap(),
+            Zone::new(&[
+                deg(75.0, 0.0),
+                deg(75.0, 90.0),
+                deg(75.0, 180.0),
+                deg(75.0, -90.0),
+            ])
+            .unwrap(),
+        ];
+        let satellites = [
+            (above(33.0, 33.0, 500e3), 500e3),
+            (above(37.0, 37.0, 700e3), 700e3),
+            (above(-10.0, 60.0, 800e3), 800e3),
+            (above(70.0, 45.0, 400e3), 400e3),
+            (above(0.0, -100.0, 35_786e3), 35_786e3),
+        ];
+        let mut cases = 0;
+        for zone in &zones {
+            for &(sat, h) in &satellites {
+                // Every point of the ellipsoid is at least the height away.
+                let curvature = |d: f64| {
+                    let d = d.max(h);
+                    NORMAL_SECOND_DERIVATIVE + 4.0 * KAPPA_MAX / d + 3.0 / (d * d)
+                };
+                let e = zone.boundary_max(
+                    |lat, lon| sine(sat, lat, lon),
+                    curvature,
+                    |best, bound| bound - best <= 1e-12,
+                );
+                let mut dense = f64::NEG_INFINITY;
+                for edge in &zone.edges {
+                    for k in 0..=4000 {
+                        let s = edge.length * f64::from(k) / 4000.0;
+                        let (lat, lon, _) = point_at(&edge.line, s);
+                        let v = sine(sat, lat, lon).0;
+                        assert!(v <= e.bound + 1e-15, "{v} over the bound {}", e.bound);
+                        dense = dense.max(v);
+                    }
+                }
+                assert!(e.best >= dense - 2e-12, "{e:?} against {dense}");
+                assert_eq!(sine(sat, e.at.0, e.at.1).0.to_bits(), e.best.to_bits());
+                assert!(e.bound - e.best <= 1e-12, "{e:?}");
+                cases += 1;
+            }
+        }
+        assert_eq!(cases, 10);
     }
 }

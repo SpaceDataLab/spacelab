@@ -5792,7 +5792,7 @@ fn shapiro_delay(r_emitter: f64, r_receiver: f64, path: f64, gm: f64) -> f64 {
 // its scan over a list of stations, station by station: angles in radians as the API takes them,
 // so that every window comes back with the Rust bits, and a batch with one refused station
 // returns nothing. `zone_contains` asks a zone of `spacelab::zone` about a list of points the same
-// way.
+// way, and `access_zone_sgp4` and `access_zone_tabulated` scan a list of zones zone by zone.
 // ---------------------------------------------------------------------------------------------
 
 pyo3::create_exception!(
@@ -5804,8 +5804,9 @@ pyo3::create_exception!(
 );
 
 /// The exception an access refusal is raised as: an argument the API refuses is a `ValueError`,
-/// an instant the frame chain cannot answer for the time error that says why, and SGP4's own
-/// failure `PropagationError`.
+/// an instant the frame chain cannot answer for the time error that says why, SGP4's own failure
+/// `PropagationError`, and an instant a zone's satellite is not above the ellipsoid
+/// `BelowSurfaceError`.
 fn access_err(e: &spacelab::access::AccessError, message: String) -> PyErr {
     use spacelab::access::AccessError;
     match e {
@@ -5819,6 +5820,7 @@ fn access_err(e: &spacelab::access::AccessError, message: String) -> PyErr {
             spacelab::EarthOrientationError::Eop(e) => eop_err(e, message),
         },
         AccessError::Propagation { .. } => PropagationError::new_err(message),
+        AccessError::BelowSurface { .. } => BelowSurfaceError::new_err(message),
     }
 }
 
@@ -5986,6 +5988,172 @@ fn zone_contains(
                     .map_err(|e| ZoneError::new_err(format!("point {i}: {e}")))
             })
             .collect()
+    })
+}
+
+pyo3::create_exception!(
+    spacedatalab,
+    BelowSurfaceError,
+    PyValueError,
+    "A zone scan probed an instant at which the satellite is not above the WGS-84 ellipsoid, where \
+     the elevation over a zone stops having only its two extremes, the nadir and the far foot, \
+     which the scan rests on."
+);
+
+/// `"any"` or `"all"` as the API's access kind.
+fn zone_access(access: &str) -> PyResult<spacelab::access::ZoneAccess> {
+    match access {
+        "any" => Ok(spacelab::access::ZoneAccess::Any),
+        "all" => Ok(spacelab::access::ZoneAccess::All),
+        other => Err(PyValueError::new_err(format!(
+            "access {other:?} is neither \"any\" nor \"all\""
+        ))),
+    }
+}
+
+/// The zones through each list of `(latitude_rad, longitude_rad)` vertices, in order; the first a
+/// zone refuses raises `ZoneError` naming it.
+fn zones_of(zones: &[Vec<(f64, f64)>]) -> PyResult<Vec<spacelab::zone::Zone>> {
+    zones
+        .iter()
+        .enumerate()
+        .map(|(i, vertices)| {
+            let points: Vec<_> = vertices
+                .iter()
+                .map(|&(latitude, longitude)| spacelab_earth::SurfacePoint {
+                    latitude: Angle::from_radians(latitude),
+                    longitude: Angle::from_radians(longitude),
+                })
+                .collect();
+            spacelab::zone::Zone::new(&points)
+                .map_err(|e| ZoneError::new_err(format!("zone {i}: {e}")))
+        })
+        .collect()
+}
+
+/// The access windows of a TLE's satellite over `zones` on WGS 84, as `(zone, rise_s, set_s)`
+/// tuples grouped by zone in the order given, and in time order within each.
+///
+/// A zone is a list of `(latitude_rad, longitude_rad)` vertices, as `zone_contains` takes them:
+/// bounded by the shortest geodesics through them, the interior on the left, closed. `access` is
+/// `"any"`, in access while some point of the zone sees the satellite at least `mask_rad` above its
+/// geodetic horizon, or `"all"`, while every point does. The mask is in `(-pi/2, pi/2]`: at
+/// `pi/2`, `"any"` is the satellite's geodetic nadir lying in the zone. The scan, the clock, the
+/// Earth orientation and the clamping at the span's ends are as in `access_sgp4`.
+///
+/// For a satellite above the ellipsoid the elevation over it has two critical points, 90 deg at
+/// the nadir and -90 deg at the far foot of the same normal, so a zone's extreme is there or on
+/// its boundary, which is searched by branch and bound under a proved bound on the second
+/// derivative. No window at least a billionth of the span long is missed under the speed
+/// hypothesis of `access_sgp4`, except one in which the zone's extreme passes the mask by less
+/// than a micrometre at the satellite's height. The windows are the Rust API's to the bit.
+///
+/// Raises `ValueError` for a malformed TLE, a label the calendar refuses, an `access` other than
+/// `"any"` or `"all"`, a mask outside `(-pi/2, pi/2]`, or a span or tolerance not finite and
+/// positive; `ZoneError` for a zone `zone_contains` refuses; `LeapSecondError` or `EopRangeError`
+/// for an instant the leap-second table or the series cannot answer for; `PropagationError` where
+/// SGP4 fails; and `BelowSurfaceError` at an instant the satellite is not above the ellipsoid. The
+/// message names the zone; a refused batch returns nothing.
+#[pyfunction]
+#[pyo3(signature = (line1, line2, start, span_s, zones, access, mask_rad, tol_s = 1e-3, eop = None))]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the satellite, the scan's interval, the zones, the access kind, the mask and the \
+              Earth orientation are each a distinct question"
+)]
+fn access_zone_sgp4(
+    py: Python<'_>,
+    line1: &str,
+    line2: &str,
+    start: UtcLabel,
+    span_s: f64,
+    zones: Vec<Vec<(f64, f64)>>,
+    access: &str,
+    mask_rad: f64,
+    tol_s: f64,
+    eop: Option<&PyEopSeries>,
+) -> PyResult<Vec<(usize, f64, f64)>> {
+    let satellite = Satellite::from_tle(line1, line2)
+        .map_err(|e| PyValueError::new_err(format!("invalid TLE: {e}")))?;
+    let (year, month, day, hour, minute, second) = start;
+    let start = UtcDateTime::new(year, month, day, hour, minute, second)
+        .map_err(|e| PyValueError::new_err(format!("start: {e}")))?;
+    let access = zone_access(access)?;
+    let source = eop.map_or(spacelab::EopSource::NoEop, |s| {
+        spacelab::EopSource::Series(&s.inner)
+    });
+    py.detach(|| {
+        let zones = zones_of(&zones)?;
+        let mut found = Vec::new();
+        for (i, zone) in zones.iter().enumerate() {
+            let windows = spacelab::access::ZoneConstraint::new(zone, access, mask_rad)
+                .and_then(|constraint| {
+                    spacelab::access::zone_sgp4_windows(
+                        &satellite,
+                        source,
+                        start,
+                        span_s,
+                        &constraint,
+                        tol_s,
+                    )
+                })
+                .map_err(|e| access_err(&e, format!("zone {i}: {e}")))?;
+            found.extend(windows.iter().map(|w| (i, w.rise, w.set)));
+        }
+        Ok(found)
+    })
+}
+
+/// The access windows of a tabulated ITRF ephemeris over `zones` on WGS 84, as `(zone, rise_s,
+/// set_s)` tuples grouped by zone in the order given, and in time order within each.
+///
+/// The table is as in `access_tabulated`, and the zones, `access` and the mask as in
+/// `access_zone_sgp4`. No window of the interpolant at least a billionth of the span long is
+/// missed, except one in which the zone's extreme passes the mask by less than a micrometre at the
+/// satellite's height: the scan's rate bound, the table's speed bound times `1 + |sin mask|` for
+/// `"any"` and times 1 for `"all"`, is proved. The windows are the Rust API's to the bit.
+///
+/// Raises `ValueError` for a table `access_tabulated` refuses, an `access` other than `"any"` or
+/// `"all"`, a mask outside `(-pi/2, pi/2]`, or a tolerance not finite and positive; `ZoneError`
+/// for a zone `zone_contains` refuses; and `BelowSurfaceError` at an instant the interpolant is not
+/// above the ellipsoid. The message names the zone; a refused batch returns nothing.
+#[pyfunction]
+#[pyo3(signature = (times, positions, velocities, zones, access, mask_rad, tol_s = 1e-3))]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the table's three arrays, the zones, the access kind, the mask and the tolerance are \
+              each a distinct question"
+)]
+fn access_zone_tabulated(
+    py: Python<'_>,
+    times: Vec<f64>,
+    positions: Vec<(f64, f64, f64)>,
+    velocities: Vec<(f64, f64, f64)>,
+    zones: Vec<Vec<(f64, f64)>>,
+    access: &str,
+    mask_rad: f64,
+    tol_s: f64,
+) -> PyResult<Vec<(usize, f64, f64)>> {
+    let vec = |&(x, y, z): &(f64, f64, f64)| Vec3::new(x, y, z);
+    let table = spacelab::access::Tabulated::new(
+        times,
+        positions.iter().map(vec).collect(),
+        velocities.iter().map(vec).collect(),
+    )
+    .map_err(|e| access_err(&e, e.to_string()))?;
+    let access = zone_access(access)?;
+    py.detach(|| {
+        let zones = zones_of(&zones)?;
+        let mut found = Vec::new();
+        for (i, zone) in zones.iter().enumerate() {
+            let windows = spacelab::access::ZoneConstraint::new(zone, access, mask_rad)
+                .and_then(|constraint| {
+                    spacelab::access::zone_tabulated_windows(&table, &constraint, tol_s)
+                })
+                .map_err(|e| access_err(&e, format!("zone {i}: {e}")))?;
+            found.extend(windows.iter().map(|w| (i, w.rise, w.set)));
+        }
+        Ok(found)
     })
 }
 
@@ -7097,6 +7265,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(access_tabulated, m)?)?;
     m.add("ZoneError", m.py().get_type::<ZoneError>())?;
     m.add_function(wrap_pyfunction!(zone_contains, m)?)?;
+    m.add("BelowSurfaceError", m.py().get_type::<BelowSurfaceError>())?;
+    m.add_function(wrap_pyfunction!(access_zone_sgp4, m)?)?;
+    m.add_function(wrap_pyfunction!(access_zone_tabulated, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tai, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tt, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tdb, m)?)?;
@@ -10620,6 +10791,133 @@ mod interpreter_tests {
                 let e = result.expect_err("a refused batch");
                 let name = e.get_type(py).name().expect("a type name").to_string();
                 assert_eq!(name, "ZoneError", "{e}");
+                assert!(e.is_instance_of::<PyValueError>(py), "{e}");
+            }
+        });
+    }
+
+    /// Zone access across the bridge: a straight pass over a square and its reversal, both access
+    /// kinds, every window the Rust API's to the bit and tagged with its zone; an access kind that
+    /// is neither raises `ValueError`, a refused zone `ZoneError`, and a table under the ellipsoid
+    /// `BelowSurfaceError`, each a `ValueError`.
+    #[test]
+    fn access_zone_tabulated_is_the_rust_api_and_raises_typed_errors() {
+        let d = |lat: f64, lon: f64| (lat.to_radians(), lon.to_radians());
+        let square = vec![d(-1.0, -1.0), d(-1.0, 1.0), d(1.0, 1.0), d(1.0, -1.0)];
+        let zones = vec![square.clone(), square.iter().rev().copied().collect()];
+        let times: Vec<f64> = vec![0.0, 60.0, 120.0];
+        let p: Vec<(f64, f64, f64)> = times
+            .iter()
+            .map(|t| (6_878_137.0, -420e3 + 7e3 * t, 0.0))
+            .collect();
+        let v = vec![(0.0, 7e3, 0.0); 3];
+        let surface = |&(lat, lon): &(f64, f64)| spacelab_earth::SurfacePoint {
+            latitude: Angle::from_radians(lat),
+            longitude: Angle::from_radians(lon),
+        };
+        let table = spacelab::access::Tabulated::new(
+            times.clone(),
+            p.iter().map(|&(x, y, z)| Vec3::new(x, y, z)).collect(),
+            v.iter().map(|&(x, y, z)| Vec3::new(x, y, z)).collect(),
+        )
+        .expect("a table");
+        Python::attach(|py| {
+            for (kind, access) in [
+                ("any", spacelab::access::ZoneAccess::Any),
+                ("all", spacelab::access::ZoneAccess::All),
+            ] {
+                let got = access_zone_tabulated(
+                    py,
+                    times.clone(),
+                    p.clone(),
+                    v.clone(),
+                    zones.clone(),
+                    kind,
+                    0.2,
+                    1e-4,
+                )
+                .expect("an answered scan");
+                let mut want = Vec::new();
+                for (i, vertices) in zones.iter().enumerate() {
+                    let zone = spacelab::zone::Zone::new(
+                        &vertices.iter().map(surface).collect::<Vec<_>>(),
+                    )
+                    .expect("a zone");
+                    let constraint =
+                        spacelab::access::ZoneConstraint::new(&zone, access, 0.2).expect("a mask");
+                    let windows =
+                        spacelab::access::zone_tabulated_windows(&table, &constraint, 1e-4)
+                            .expect("a scan");
+                    want.extend(windows.iter().map(|w| (i, w.rise, w.set)));
+                }
+                assert!(!want.is_empty(), "{kind}: the pass is never in access");
+                let bits = |w: &[(usize, f64, f64)]| -> Vec<(usize, u64, u64)> {
+                    w.iter()
+                        .map(|&(i, r, s)| (i, r.to_bits(), s.to_bits()))
+                        .collect()
+                };
+                assert_eq!(bits(&got), bits(&want), "{kind}");
+            }
+            let (under, still) = (vec![(6_368_137.0, 0.0, 0.0); 3], vec![(0.0, 0.0, 0.0); 3]);
+            let bow_tie = vec![d(0.0, 0.0), d(1.0, 1.0), d(1.0, 0.0), d(0.0, 1.0)];
+            let refused = [
+                (
+                    "ValueError",
+                    access_zone_tabulated(
+                        py,
+                        times.clone(),
+                        p.clone(),
+                        v.clone(),
+                        zones.clone(),
+                        "some",
+                        0.2,
+                        1e-4,
+                    ),
+                ),
+                (
+                    "ValueError",
+                    access_zone_tabulated(
+                        py,
+                        times.clone(),
+                        p.clone(),
+                        v.clone(),
+                        zones.clone(),
+                        "any",
+                        1.6,
+                        1e-4,
+                    ),
+                ),
+                (
+                    "ZoneError",
+                    access_zone_tabulated(
+                        py,
+                        times.clone(),
+                        p.clone(),
+                        v.clone(),
+                        vec![square, bow_tie],
+                        "any",
+                        0.2,
+                        1e-4,
+                    ),
+                ),
+                (
+                    "BelowSurfaceError",
+                    access_zone_tabulated(
+                        py,
+                        times.clone(),
+                        under,
+                        still,
+                        zones.clone(),
+                        "all",
+                        0.2,
+                        1e-4,
+                    ),
+                ),
+            ];
+            for (want, result) in refused {
+                let e = result.expect_err("a refused scan");
+                let name = e.get_type(py).name().expect("a type name").to_string();
+                assert_eq!(name, want, "{e}");
                 assert!(e.is_instance_of::<PyValueError>(py), "{e}");
             }
         });

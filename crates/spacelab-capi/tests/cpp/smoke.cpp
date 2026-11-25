@@ -1969,6 +1969,60 @@ void the_zone_wrapper_answers_per_point_and_throws_on_a_refused_zone() {
     CHECK(refused);
 }
 
+/*
+ * Zone access through both wrappers: the ISS over the 6 deg square about Cyprus at a 10 deg mask,
+ * the first zone of `iss-2008-any-10` in
+ * `crates/spacelab/tests/fixtures/bridge_access_zone_reference.tsv`, and the straight pass over
+ * the 2 deg square about (0, 0) at a 90 deg mask, `straight-pass-square-90`, whose windows the
+ * Rust suite holds to the bit. Counts that do not add up to the vertices throw.
+ */
+void the_zone_access_wrappers_size_their_windows_and_refuse_counts_that_do_not_add_up() {
+    const spacelab::sgp4 sat(LINE1, LINE2);
+    const spacelab::utc_datetime start{2008, 9, 20, 12, 0, 0.0};
+    const double lat32 = std::bit_cast<double>(0x3fe1df46a2529d39ULL);
+    const double lat38 = std::bit_cast<double>(0x3fe53923e0c21ab4ULL);
+    const double lon30 = std::bit_cast<double>(0x3fe0c152382d7365ULL);
+    const double lon36 = std::bit_cast<double>(0x3fe41b2f769cf0e0ULL);
+    const std::array<spacelab::surface_point, 4> cyprus{
+        {{lat32, lon30}, {lat32, lon36}, {lat38, lon36}, {lat38, lon30}}};
+    const std::array<std::size_t, 1> four{4};
+    const double ten = std::bit_cast<double>(0x3fc657184ae74487ULL);
+    const double tol = std::bit_cast<double>(0x3f1a36e2eb1c432dULL);
+    const std::vector<spacelab::zone_window> passes =
+        sat.access_zones(nullptr, start, 43200.0, cyprus, four, SL_ZONE_ANY, ten, tol);
+    CHECK(passes.size() == 5 && passes.at(4).zone == 0);
+    CHECK(std::bit_cast<std::uint64_t>(passes.at(0).rise_s) == 0x40c66b6c4d343ceaU);
+    CHECK(std::bit_cast<std::uint64_t>(passes.at(4).set_s) == 0x40e3dc1abda877d8U);
+    CHECK(sat.access_zones(nullptr, start, 43200.0, std::span<const spacelab::surface_point>{},
+                           std::span<const std::size_t>{}, SL_ZONE_ANY, ten)
+              .empty());
+
+    const std::array<double, 3> times{0.0, 60.0, 120.0};
+    const std::array<spacelab::vec3, 3> positions{
+        {{6878137.0, -420e3, 0.0}, {6878137.0, 0.0, 0.0}, {6878137.0, 420e3, 0.0}}};
+    const std::array<spacelab::vec3, 3> velocities{
+        {{0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}}};
+    const double one = std::bit_cast<double>(0x3f91df46a2529d39ULL);
+    const std::array<spacelab::surface_point, 4> square{
+        {{-one, -one}, {-one, one}, {one, one}, {one, -one}}};
+    const double half_pi = std::bit_cast<double>(0x3ff921fb54442d18ULL);
+    const std::vector<spacelab::zone_window> over = spacelab::access_zones_tabulated(
+        times, positions, velocities, square, four, SL_ZONE_ANY, half_pi, tol);
+    CHECK(over.size() == 1 && over.at(0).zone == 0);
+    CHECK(std::bit_cast<std::uint64_t>(over.at(0).rise_s) == 0x40456ca5d01943a7U);
+    CHECK(std::bit_cast<std::uint64_t>(over.at(0).set_s) == 0x405349ad17d7df0dU);
+
+    const std::array<std::size_t, 2> too_many{4, 1};
+    bool refused = false;
+    try {
+        (void)spacelab::access_zones_tabulated(times, positions, velocities, square, too_many,
+                                               SL_ZONE_ANY, half_pi, tol);
+    } catch (const spacelab::error &e) {
+        refused = e.status() == SL_ERR_INVALID_ARGUMENT;
+    }
+    CHECK(refused);
+}
+
 void the_tabulated_access_wrapper_sizes_its_windows_and_refuses_unequal_arrays() {
     const std::array<double, 3> times{0.0, 60.0, 120.0};
     const std::array<spacelab::vec3, 3> positions{
@@ -2051,6 +2105,7 @@ int main() {
         the_access_wrapper_sizes_its_windows_and_refuses_a_mask();
         the_tabulated_access_wrapper_sizes_its_windows_and_refuses_unequal_arrays();
         the_zone_wrapper_answers_per_point_and_throws_on_a_refused_zone();
+        the_zone_access_wrappers_size_their_windows_and_refuse_counts_that_do_not_add_up();
     } catch (const spacelab::error &e) {
         std::fprintf(stderr, "FAIL: uncaught spacelab::error, status %d: %s\n", e.status(),
                      e.what());

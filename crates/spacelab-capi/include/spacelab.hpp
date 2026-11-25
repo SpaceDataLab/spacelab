@@ -85,6 +85,8 @@ using constellation_fom = ::sl_constellation_fom;
 using window = ::sl_window;
 using station_window = ::sl_station_window;
 using surface_point = ::sl_surface_point;
+using zone_access = ::sl_zone_access;
+using zone_window = ::sl_zone_window;
 using gnss_state = ::sl_gnss_state;
 using glonass_state = ::sl_glonass_state;
 using gnss_system = ::sl_gnss_system;
@@ -248,6 +250,19 @@ template <class T> [[nodiscard]] result<T> failure(::sl_status status) {
 #else
     return result<T>::failure(status);
 #endif
+}
+
+/* Whether `counts` lays out exactly `total` items end to end, with no sum past SIZE_MAX. */
+[[nodiscard]] inline bool lays_out(std::span<const std::size_t> counts,
+                                   std::size_t total) noexcept {
+    std::size_t sum = 0;
+    for (const std::size_t n : counts) {
+        if (n > total - sum) {
+            return false;
+        }
+        sum += n;
+    }
+    return sum == total;
 }
 
 } // namespace detail
@@ -595,6 +610,40 @@ class sgp4 {
         return s == SL_OK ? result<many>(std::move(out)) : detail::failure<many>(s);
     }
 
+    /*
+     * The access windows over the zones `vertices_per_zone` cuts `vertices` into; see
+     * `sl_access_zone_sgp4`. `eop` is null for no Earth orientation. No zone is an empty answer;
+     * counts that do not add up to the vertices are refused here.
+     */
+    [[nodiscard]] result<std::vector<zone_window>>
+    try_access_zones(const eop_series *eop, const utc_datetime &start, double span_s,
+                     std::span<const surface_point> vertices,
+                     std::span<const std::size_t> vertices_per_zone, zone_access access,
+                     double mask_rad, double tol_s = 1e-3) const {
+        using many = std::vector<zone_window>;
+        if (!detail::lays_out(vertices_per_zone, vertices.size())) {
+            return detail::failure<many>(SL_ERR_INVALID_ARGUMENT);
+        }
+        if (vertices_per_zone.empty()) {
+            return many{};
+        }
+        const ::sl_eop_series *series = eop == nullptr ? nullptr : eop->handle_.get();
+        // The two-call protocol of `detail::sized`, which is declared after this class.
+        const auto call = [&](zone_window *out, std::size_t cap, std::size_t *len) {
+            return ::sl_access_zone_sgp4(handle_.get(), series, &start, span_s, vertices.data(),
+                                         vertices_per_zone.data(), vertices_per_zone.size(), access,
+                                         mask_rad, tol_s, out, cap, len);
+        };
+        std::size_t len = 0;
+        ::sl_status s = call(nullptr, 0, &len);
+        if (s != SL_OK) {
+            return detail::failure<many>(s);
+        }
+        many out(len);
+        s = call(out.data(), out.size(), &len);
+        return s == SL_OK ? result<many>(std::move(out)) : detail::failure<many>(s);
+    }
+
 #if defined(__cpp_exceptions)
     sgp4(const std::string &line1, const std::string &line2)
         : sgp4(detail::unwrap(open(line1, line2))) {}
@@ -604,6 +653,15 @@ class sgp4 {
                                                      std::span<const geodetic> stations,
                                                      double mask_rad, double tol_s = 1e-3) const {
         return detail::unwrap(try_access(eop, start, span_s, stations, mask_rad, tol_s));
+    }
+
+    [[nodiscard]] std::vector<zone_window>
+    access_zones(const eop_series *eop, const utc_datetime &start, double span_s,
+                 std::span<const surface_point> vertices,
+                 std::span<const std::size_t> vertices_per_zone, zone_access access,
+                 double mask_rad, double tol_s = 1e-3) const {
+        return detail::unwrap(try_access_zones(eop, start, span_s, vertices, vertices_per_zone,
+                                               access, mask_rad, tol_s));
     }
 
     [[nodiscard]] state at(double minutes) const {
@@ -1159,6 +1217,33 @@ try_zone_contains(std::span<const surface_point> vertices, std::span<const surfa
     return s == SL_OK ? result<many>(std::move(out)) : detail::failure<many>(s);
 }
 
+/*
+ * The access windows of a tabulated ITRF ephemeris over the zones `vertices_per_zone` cuts
+ * `vertices` into; see `sl_access_zone_tabulated`. The three sample arrays must be as long as each
+ * other and the counts must add up to the vertices; no zone is an empty answer.
+ */
+[[nodiscard]] inline result<std::vector<zone_window>>
+try_access_zones_tabulated(std::span<const double> times, std::span<const vec3> positions,
+                           std::span<const vec3> velocities,
+                           std::span<const surface_point> vertices,
+                           std::span<const std::size_t> vertices_per_zone, zone_access access,
+                           double mask_rad, double tol_s = 1e-3) {
+    using many = std::vector<zone_window>;
+    if (positions.size() != times.size() || velocities.size() != times.size() ||
+        !detail::lays_out(vertices_per_zone, vertices.size())) {
+        return detail::failure<many>(SL_ERR_INVALID_ARGUMENT);
+    }
+    if (vertices_per_zone.empty()) {
+        return many{};
+    }
+    return detail::sized<zone_window>([&](zone_window *out, std::size_t cap, std::size_t *len) {
+        return ::sl_access_zone_tabulated(times.data(), positions.data(), velocities.data(),
+                                          times.size(), vertices.data(), vertices_per_zone.data(),
+                                          vertices_per_zone.size(), access, mask_rad, tol_s, out,
+                                          cap, len);
+    });
+}
+
 #if defined(__cpp_exceptions)
 
 [[nodiscard]] inline double refraction_apparent(double true_altitude_rad,
@@ -1227,6 +1312,15 @@ access_tabulated(std::span<const double> times, std::span<const vec3> positions,
 [[nodiscard]] inline std::vector<std::uint8_t>
 zone_contains(std::span<const surface_point> vertices, std::span<const surface_point> points) {
     return detail::unwrap(try_zone_contains(vertices, points));
+}
+
+[[nodiscard]] inline std::vector<zone_window>
+access_zones_tabulated(std::span<const double> times, std::span<const vec3> positions,
+                       std::span<const vec3> velocities, std::span<const surface_point> vertices,
+                       std::span<const std::size_t> vertices_per_zone, zone_access access,
+                       double mask_rad, double tol_s = 1e-3) {
+    return detail::unwrap(try_access_zones_tabulated(times, positions, velocities, vertices,
+                                                     vertices_per_zone, access, mask_rad, tol_s));
 }
 
 #endif

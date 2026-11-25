@@ -80,6 +80,7 @@ static void the_layout_is_the_one_the_library_assumes(void) {
     CHECK(sizeof(sl_slip) == 4);
     CHECK(sizeof(sl_attitude_law) == 4);
     CHECK(sizeof(sl_consensus_protocol) == 4);
+    CHECK(sizeof(sl_zone_access) == 4);
     CHECK(offsetof(sl_walker_params, inclination_rad) == sizeof(double));
 
     CHECK(sizeof(sl_latency) == 3 * sizeof(double));
@@ -2997,6 +2998,68 @@ static void the_zone_answers_what_the_rust_api_answers(void) {
     CHECK(untouched[0] == 9 && untouched[4] == 9);
 }
 
+/*
+ * A straight pass 500 km over the equator at 0 E and the 2 deg square about (0, 0) at a 90 deg
+ * mask, where SL_ZONE_ANY is the nadir in the square; a fixed point 20 km over (35 N, 33 E) and two
+ * 6 deg squares, the one beneath it and one across the globe; and a fixed point 10 km under the
+ * ellipsoid: the tables `straight-pass-square-90`, `fixed-point-20km-up` and
+ * `refused-below-surface` of `crates/spacelab/tests/fixtures/bridge_access_zone_reference.tsv`,
+ * whose every window the Rust suite holds to the bit through `tests/zone.rs`. A refused scan
+ * writes nothing.
+ */
+static void the_zone_access_windows_answer_the_rust_values_to_the_bit(void) {
+    CHECK(sizeof(sl_zone_window) == sizeof(size_t) + 2 * sizeof(double));
+    CHECK(offsetof(sl_zone_window, rise_s) == sizeof(size_t));
+    const double times[3] = {0.0, 60.0, 120.0};
+    const sl_vec3 positions[3] = {
+        {6878137.0, -420e3, 0.0}, {6878137.0, 0.0, 0.0}, {6878137.0, 420e3, 0.0}};
+    const sl_vec3 velocities[3] = {{0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}, {0.0, 7e3, 0.0}};
+    const double one = double_of(UINT64_C(0x3f91df46a2529d39)); /* 1 deg */
+    const sl_surface_point square[4] = {{-one, -one}, {-one, one}, {one, one}, {one, -one}};
+    const size_t four[2] = {4, 4};
+    const double half_pi = double_of(UINT64_C(0x3ff921fb54442d18));
+    const double tol = double_of(UINT64_C(0x3f1a36e2eb1c432d)); /* 1e-4 s */
+    sl_zone_window pass[1];
+    size_t len = 0;
+    CHECK(sl_access_zone_tabulated(times, positions, velocities, 3, square, four, 1, SL_ZONE_ANY,
+                                   half_pi, tol, pass, 1, &len) == SL_OK);
+    CHECK(len == 1 && pass[0].zone == 0);
+    CHECK(bits_of(pass[0].rise_s) == UINT64_C(0x40456ca5d01943a7));
+    CHECK(bits_of(pass[0].set_s) == UINT64_C(0x405349ad17d7df0d));
+
+    const double still_times[2] = {0.0, 600.0};
+    const sl_vec3 up = {double_of(UINT64_C(0x4150c9364176bcda)),
+                        double_of(UINT64_C(0x4145cd48bc3ab8eb)),
+                        double_of(UINT64_C(0x414bd79d3813d415))};
+    const sl_vec3 still[2] = {up, up};
+    const sl_vec3 rest[2] = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+    const double lat32 = double_of(UINT64_C(0x3fe1df46a2529d39));
+    const double lat38 = double_of(UINT64_C(0x3fe53923e0c21ab4));
+    const double lon30 = double_of(UINT64_C(0x3fe0c152382d7365));
+    const double lon36 = double_of(UINT64_C(0x3fe41b2f769cf0e0));
+    const double lon_150w = double_of(UINT64_C(0xc004f1a6c638d03f));
+    const double lon_144w = double_of(UINT64_C(0xc0041b2f769cf0e0));
+    const sl_surface_point squares[8] = {{lat32, lon30},     {lat32, lon36},     {lat38, lon36},
+                                         {lat38, lon30},     {-lat38, lon_150w}, {-lat38, lon_144w},
+                                         {-lat32, lon_144w}, {-lat32, lon_150w}};
+    const double ten = double_of(UINT64_C(0x3fc657184ae74487)); /* 10 deg */
+    sl_zone_window held[2];
+    CHECK(sl_access_zone_tabulated(still_times, still, rest, 2, squares, four, 2, SL_ZONE_ANY, ten,
+                                   tol, held, 2, &len) == SL_OK);
+    CHECK(len == 1 && held[0].zone == 0 && held[0].rise_s == 0.0 && held[0].set_s == 600.0);
+
+    const sl_vec3 down = {double_of(UINT64_C(0x4150b515c3f0b10d)),
+                          double_of(UINT64_C(0x4145b3249a432517)),
+                          double_of(UINT64_C(0x414bb601928fd681))};
+    const sl_vec3 under[2] = {down, down};
+    size_t untouched = 99;
+    CHECK(sl_access_zone_tabulated(still_times, under, rest, 2, squares, four, 1, SL_ZONE_ALL, ten,
+                                   tol, NULL, 0, &untouched) == SL_ERR_DOMAIN);
+    CHECK(sl_access_zone_tabulated(times, positions, velocities, 3, square, four, 1, 7, half_pi,
+                                   tol, NULL, 0, &untouched) == SL_ERR_INVALID_ARGUMENT);
+    CHECK(untouched == 99);
+}
+
 int main(void) {
     the_layout_is_the_one_the_library_assumes();
     the_version_string_sizes_itself();
@@ -3031,6 +3094,7 @@ int main(void) {
     the_access_windows_answer_the_rust_values_to_the_bit();
     the_tabulated_access_windows_answer_the_rust_values_to_the_bit();
     the_zone_answers_what_the_rust_api_answers();
+    the_zone_access_windows_answer_the_rust_values_to_the_bit();
 
     if (failures != 0) {
         fprintf(stderr, "%d check(s) failed\n", failures);

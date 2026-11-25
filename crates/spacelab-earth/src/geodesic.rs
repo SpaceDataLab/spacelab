@@ -17,7 +17,11 @@
 // The bindings are the paper's symbols: `sb1, cb1` are sin β1 and cos β1, `ss12, cs12` sin σ12 and
 // cos σ12, and so on, so pairs differ in one letter by construction; the astroid's `p … w` are
 // Vermeille's.
-#![allow(clippy::similar_names, clippy::many_single_char_names)]
+#![expect(
+    clippy::similar_names,
+    clippy::many_single_char_names,
+    reason = "the bindings are the paper's symbols"
+)]
 
 use core::f64::consts::{PI, TAU};
 use core::fmt;
@@ -434,7 +438,10 @@ struct Hybrid {
 impl Canonical {
     // `cb2 == cb1` is meant exactly: both come from `|φ|`, so equal or opposite latitudes give the
     // same bits.
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "equal or opposite latitudes give the same bits"
+    )]
     fn hybrid(&self, sa1: f64, ca1: f64) -> Hybrid {
         let (sb1, cb1, sb2, cb2) = (self.sb1, self.cb1, self.sb2, self.cb2);
         let sa0 = sa1 * cb1;
@@ -567,7 +574,10 @@ fn astroid(x: f64, y: f64) -> f64 {
 /// [`GeodesicError::NonFinite`] or [`GeodesicError::LatitudeOutOfRange`] for an input outside the
 /// domain.
 // Coincident points are the same two doubles; nothing near them is special.
-#[allow(clippy::float_cmp)]
+#[expect(
+    clippy::float_cmp,
+    reason = "coincident points are the same two doubles"
+)]
 pub fn geodesic_inverse(
     from: SurfacePoint,
     to: SurfacePoint,
@@ -663,7 +673,10 @@ fn meridian(c: &Canonical) -> (f64, f64, f64, f64, f64) {
 /// root and the iteration cannot fail. It stops after a Newton step below [`NEWTON_LAST`], or when a
 /// step no longer moves `α1` or the residual stops falling, which is round-off.
 // A step that leaves (sin α1, cos α1) bit for bit unchanged is the test, not a tolerance.
-#[allow(clippy::float_cmp)]
+#[expect(
+    clippy::float_cmp,
+    reason = "an unchanged step is the stop, not a tolerance"
+)]
 fn general(c: &Canonical) -> (f64, f64, f64, f64, f64) {
     let (mut sa1, mut ca1) = c.start();
     // The bracket, as unit vectors: α = 0 and α = π.

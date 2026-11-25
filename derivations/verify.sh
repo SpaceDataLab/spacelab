@@ -17,6 +17,10 @@ cd "$(dirname "$0")"
 # loop, which reads stdin: with the caller's terminal or an open pipe there it waits for ever, and a
 # 300 s bound hung a run for 35 minutes. On an empty stdin the break loop reads EOF and exits.
 exec </dev/null
+# Nor is an empty stdin enough: SBCL can take SIGTERM while it holds a lock its own handler then
+# waits on, and sleep on a futex for ever (brouwer_lyddane.mac, 2026-11-25, 28 minutes past its
+# 300 s bound). Every timeout here therefore follows its SIGTERM with a SIGKILL ten seconds later.
+timeout() { command timeout --kill-after=10 "$@"; }
 
 PASS=0
 FAIL=0
@@ -300,7 +304,7 @@ if have maxima; then
     # Statements passed in $2 echo too; those call sites anchor their token to the start of a line,
     # where an echoed `print(TOKEN, ...)` cannot reach it.
     macf() {
-        timeout 300 maxima --very-quiet --batch-string \
+        timeout "${MACF_BOUND:-300}" maxima --very-quiet --batch-string \
             "display2d:false\$ linel:2000\$ batchload(\"$1\")\$ ${2-}" 2>&1 \
             | grep -vxF -e 'display2d:false' -e 'linel:2000' -e "batchload(\"$1\")"
     }
@@ -673,7 +677,8 @@ print(CONENUM, lmax(makelist(abs(bfloat(subst([L = g[1], a = g[2]], rho_cone_our
         bad "maxima earth_rotation_rate.mac" "expected 3 checks to hold, found $holds"
     fi
 
-    out=$(macf brouwer_lyddane.mac)
+    # 123-143 s alone; at a load of 22 on 16 threads it needed more than 300 s, so its bound is wider.
+    out=$(MACF_BOUND=900 macf brouwer_lyddane.mac)
     holds=$(printf '%s' "$out" | grep -cE '^\([0-9][ab]?\) holds:')
     if [ "$holds" -eq 12 ] && printf '%s' "$out" | grep -q '^DONE'; then
         ok "maxima brouwer_lyddane.mac: the J2^2/J4 secular rates by Lie-Deprit, the short-period terms the brackets of a generator solving the homological equation, the long-period terms those of the g-generator, G cos i kept, the osculating a by the energy integral equal to the second-order generator's"

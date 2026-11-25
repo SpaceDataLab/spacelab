@@ -243,6 +243,11 @@ regeneration above hold the tables to them.
 | earth | Geodetic↔Cartesian round-trip over whole ellipsoid | ellipsoid geometry | self-consistency | dlat < 1e-12 rad, dh < 1e-7 m | tests/geodetic.rs |
 | earth | Geodetic ≠ geocentric latitude (~11.5′ at 45°) | ellipsoid geometry | analytic closed-form | < 0.2′ | tests/geodetic.rs |
 | earth | Geodetic↔ITRF at cities/pole/equator | WGS-84 ellipsoid | self-consistency round-trip | lat/lon < 1e-9°, h < 1e-6 m | tests/wgs84.rs |
+| earth | Geodesic series `A1, C1, C1′, A2, C2, A3, C3` to sixth order (G1) | Karney 2013, *Algorithms for geodesics*, eqs. (15)–(25), (40)–(43) | **Maxima** `derivations/ellipsoid_geodesic.mac`: the integrands from the metric and Clairaut's relation, the series expanded and reverted, equal to Karney's printed eqs. (17), (18), (21), (24), (25), (42), (43); at 50 digits on WGS 84 the truncated series against the elliptic-integral forms `E`, `F`, `Π` at 42 `(α0, σ)` (G1); it emits `src/geodesic_series.rs`, compared byte for byte. **PARI** `derivations/ellipsoid_geodesic.gp` derives the same 85 coefficients by binomial series and Lagrange reversion | 1.5e-21 (bound 1e-20, below the smallest shipped term, 7.5e-20) | derivations/ellipsoid_geodesic.mac |
+| earth | Geodesic inverse problem, 80 pairs: random, nearly antipodal in the astroid's units, short (1e-12 … 1e-3 rad), poles, meridians, the equator past its conjugate point, coincident (G2) | Karney 2013 §§4–5 | **PARI** `derivations/ellipsoid_geodesic.gp` at 50 digits: quadrature of the defining integrals and a bracketed root on `α1`, each solution landing on its point through the file's own direct solution (1e-35 m); the reduced length `m12` by eq. (38). Azimuths are held as the sideways move `m12·δα` they cause. GeographicLib 2.1 a comparator, run by hand on the same rows: 3.7 nm and 2.8 nm | distance 3.7 nm, `m12·δα` 2.8 nm (bound 7.5 nm, two ulps of a 2e7 m line) | tests/geodesic.rs |
+| earth | Geodesic direct problem, 41 lines up to 9e7 m, negative and zero (G2) | Karney 2013 §3 | the same PARI file: the distance equation solved for `σ2` by a bracketed root; GeographicLib 2.1 a comparator, 5.1 nm | end point 7.6 nm, azimuth 4.9e-15 rad (bound 15 nm, Karney's stated double-precision bound) | tests/geodesic.rs |
+| earth | Geodesic closed forms: the equator to its conjugate point `s = aλ12`, the quarter meridian `a E(e)`, pole to pole, equatorial antipodes, coincident points (G3); Karney's Tables 2, 3 and 4–6 (G5) | ellipsoid geometry; Karney 2013 | `a E(e)` from PARI's `ellE`, equal to the quadrature to 25 digits; the tables to the digits printed | 2 ulp / 7.5 nm; half a unit of the last printed digit | tests/geodesic.rs |
+| earth | Geodesic direct ∘ inverse and inverse ∘ direct, 2000 each; swap and reflection symmetries (G4) | definitions | self-consistency on random pairs | lands 8.6 nm off, distance 4.7 nm, `s12·δα` 4.8 nm (bound 15 nm) | tests/geodesic.rs |
 
 *`spacelab-fa` is the workspace's oracle backbone — nearly every function pinned to SOFA golden
 vectors or pyerfa at sub-1e-13-rad tolerances, plus bit-exact coefficient certification and a vendored
@@ -11801,7 +11806,7 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today, in the public tree: 331 modules, 246 name a check, 85 do
+(`plans/16` Ф17.B orders them). **Today, in the public tree: 333 modules, 248 name a check, 85 do
 not** — no physics module, 26 parsers, 4 generated and 55 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
 the last 42 — GNSS, SLR, the NeQuick ionosphere, earthvision, signal, vision, sensors and
 astrometry (`earthvision/sfm.rs` and `cloud.rs` hold no formula of their own and moved to

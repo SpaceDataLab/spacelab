@@ -18,15 +18,30 @@
 //! This is the first place in the project where the oracle is of a genuinely
 //! different lineage. See `plans/04-validation-and-risks.md` §1.2.
 //!
+//! # Geodesics
+//!
+//! [`geodesic_inverse`] and [`geodesic_direct`] solve the two geodesic problems on the
+//! same ellipsoid to round-off, from Karney's series; [`GeodesicLine`] gives many
+//! points along one geodesic.
+//!
 //! # References
 //!
 //! Vermeille, H. (2002), *Direct transformation from geocentric coordinates to
 //! geodetic coordinates*, Journal of Geodesy 76, 451–454.
+//!
+//! Karney, C. F. F. (2013), *Algorithms for geodesics*, Journal of Geodesy 87,
+//! 43–55.
 
 #![cfg_attr(not(test), no_std)]
 
+mod geodesic;
+mod geodesic_series;
 mod wgs84;
 
+pub use geodesic::{
+    GeodesicDirect, GeodesicError, GeodesicInverse, GeodesicLine, SurfacePoint, geodesic_direct,
+    geodesic_inverse, geodesic_inverse_into,
+};
 pub use wgs84::{
     EQUATORIAL_RADIUS, FLATTENING, Geodetic, GeodeticError, POLAR_RADIUS, geodetic_nadir,
     geodetic_to_itrf, itrf_to_geodetic, itrf_to_geodetic_into,

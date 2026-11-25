@@ -1,6 +1,6 @@
 [package]
 name = "spacelab-earth"
-description = "The WGS-84 ellipsoid: geodetic and Cartesian coordinates"
+description = "The WGS-84 ellipsoid: geodetic and Cartesian coordinates, and geodesics"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

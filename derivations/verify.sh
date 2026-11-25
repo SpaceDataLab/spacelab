@@ -1303,6 +1303,7 @@ if have maxima; then
     mac_zeros sar_incidence.mac 7 "SAR incidence, band edges and look side"
     mac_zeros scan_catalogue.mac 12 "scan-angle catalogue end points, antisymmetry and VIIRS extent"
     mac_zeros wgs84_geodesy.mac 13 "WGS 84 derived constants and both geodetic maps"
+    mac_zeros ellipsoid_geodesic.mac 43 "geodesic integrands from the metric and Clairaut, the series to sixth order as Karney prints them and against the elliptic-integral form at 50 digits (G1), the astroid root"
     mac_zeros keplerian_elements.mac 31 "element <-> state maps invert each other on every branch; Kepler's equation"
     mac_zeros brouwer_m2_phipps.mac 7 "Phipps' along-track drag drift of a, e and the mean anomaly from Kepler's third law"
     mac_zeros zonal_secular.mac 6 "the first-order J2 secular rates of both zonal mean-element propagators from Lagrange's equations"
@@ -1571,6 +1572,32 @@ if have gap; then
     done
 else
     skip "Ф17.B GAP gates" gap
+fi
+
+# Ф20.U geodesics: geodesic_series.rs is the Maxima file's output byte for byte; the PARI file
+# derives the same 85 coefficients by another route, passes its own checks (Karney's printed
+# examples, the closed forms, every inverse row landing on its point), and its 50-digit reference
+# geodesics are the rows tests/geodesic.rs holds, byte for byte.
+if have maxima && have gp; then
+    mac_out=$(timeout 300 maxima --very-quiet --suppress-input-echo -Q -b ellipsoid_geodesic.mac </dev/null 2>&1)
+    gp_out=$(timeout 300 gp -q -f ellipsoid_geodesic.gp </dev/null 2>&1)
+    rc=$?
+    geodesic_test=../crates/spacelab-earth/tests/geodesic.rs
+    if [ "$rc" -eq 0 ] && ! printf '%s' "$gp_out" | grep -qE '\*\*\*|^FAIL' \
+        && [ "$(printf '%s\n' "$gp_out" | grep -c '^ok ')" -eq 13 ] \
+        && [ "$(printf '%s\n' "$mac_out" | grep -c '^COEF ')" -eq 85 ] \
+        && diff -q <(printf '%s\n' "$mac_out" | grep '^COEF ' | sort) \
+            <(printf '%s\n' "$gp_out" | grep '^COEF ' | sort) >/dev/null \
+        && diff -q <(printf '%s\n' "$mac_out" | sed -n '/^BEGIN geodesic_series.rs$/,/^END geodesic_series.rs$/p' | sed '1d;$d') \
+            ../crates/spacelab-earth/src/geodesic_series.rs >/dev/null \
+        && diff -q <(printf '%s\n' "$gp_out" | sed -n '/^BEGIN inverse$/,/^END direct$/p' | grep '^ *\[') \
+            <(sed -n '/BEGIN ellipsoid_geodesic.gp inverse/,/END ellipsoid_geodesic.gp direct/p' "$geodesic_test" | grep '^ *\[') >/dev/null; then
+        ok "maxima+pari ellipsoid_geodesic: geodesic_series.rs is the derived series; both engines give the same 85 coefficients; tests/geodesic.rs holds the 50-digit reference geodesics"
+    else
+        bad "maxima+pari ellipsoid_geodesic" "a PARI check failed, the engines' coefficients differ, or geodesic_series.rs / tests/geodesic.rs differ from the regenerated text"
+    fi
+else
+    skip "maxima+pari ellipsoid_geodesic" "maxima or gp"
 fi
 
 # ---------------------------------------------------------------------------------------------

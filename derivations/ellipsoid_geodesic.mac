@@ -1,0 +1,431 @@
+/* Geodesics on an ellipsoid of revolution: the auxiliary-sphere integrals, their Fourier series to
+ * sixth order, and the pieces of the inverse solution, derived from the mathematics of
+ *     C. F. F. Karney, "Algorithms for geodesics", J. Geodesy 87 (2013) 43-55,
+ *     doi:10.1007/s00190-012-0578-z, arXiv:1109.4448v2,
+ * for crates/spacelab-earth/src/geodesic.rs. The coefficient table that file evaluates,
+ * crates/spacelab-earth/src/geodesic_series.rs, is printed by this file between the markers
+ * `BEGIN geodesic_series.rs` and `END geodesic_series.rs`; derivations/verify.sh compares it byte
+ * for byte. Nothing is transcribed from an implementation: the series are expanded here from the
+ * integrands, and the paper's printed coefficients are the agreement check (section 7).
+ *
+ * Shown here, every line printing `<name>: 0`:
+ *   1. the integrands of Karney's eqs. (7) and (8) follow from the ellipsoid's metric, Clairaut's
+ *      relation and the auxiliary sphere's correspondence dbeta = cos(alpha) dsigma,
+ *      ds cos(alpha) = M dphi, ds sin(alpha) = a cos(beta) dlambda, dsigma sin(alpha) = cos(beta) domega:
+ *      M dphi/dbeta = b sqrt(1 + e'^2 sin^2 beta), d omega/d sigma from tan omega = sin alpha0 tan sigma,
+ *      and d omega - d lambda is f sin alpha0 times the I3 integrand;
+ *   2. eps = (sqrt(1 + k^2) - 1)/(sqrt(1 + k^2) + 1), its cancellation-free form, and
+ *      1 + k^2 sin^2 sigma = (1 - 2 eps cos 2 sigma + eps^2)/(1 - eps)^2;
+ *   3. the series of I1, I2 (in eps) and I3 (in n and eps, total order 5) and the reversion of I1,
+ *      each re-substituted: the Fourier series differentiated equals the expanded integrand, and
+ *      tau(sigma(tau)) = tau, through the truncation order;
+ *   4. the shipped table (the emitted Rust text, read back as rationals) equals the derivation;
+ *   5. Karney's printed eqs. (17), (18), (21), (24), (25), (42), (43) equal the derivation;
+ *   6. G1: at 50 digits (bfloat) on WGS 84, the truncated series against the elliptic-integral form,
+ *          I1 = E(sigma | -k^2),  I2 = F(sigma | -k^2),
+ *          lambda = sin alpha0 [Pi(cos^2 alpha0; sigma | -k^2)/(1 - f) - (1 - f) e'^2 F(sigma | -k^2)],
+ *      at sample (alpha0, sigma) with |sigma| <= pi/2 -- the integrands are pi-periodic and even, so
+ *      that range and the complete integral at pi/2 decide the whole line (and Maxima's bfloat
+ *      elliptic_pi loses digits beyond |phi| = pi/2: Pi(0.7; 7 | -0.0067) is off at 1e-14 against
+ *      PARI's intnum, while E and F agree to 50 digits there);
+ *   7. the astroid of Karney's sect. 5: x/sin a1 + y/cos a1 + 1 = 0 with x = -(1 + mu) sin a1,
+ *      y = mu cos a1 gives his quartic (55); its envelope is x = -sin^3, y = -cos^3; and the closed
+ *      form for the positive root (Vermeille's, the same quartic, plus its trigonometric branch)
+ *      solves the quartic at 50 digits on both branches;
+ *   8. the slope of lambda12 in alpha1 at cos alpha2 = 0 (Karney's eq. (47)) as the limit of
+ *      eq. (46) from the reduced length (38);
+ *   9. TAU_LO, the low part of 2 pi the longitude reduction carries, is the nearest double.
+ *
+ * Run: timeout 300 maxima --very-quiet -Q -b derivations/ellipsoid_geodesic.mac </dev/null
+ */
+
+display2d : false$
+ratprint : false$
+
+zero(name, expr) := block([d : expr],
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+
+/* ------------------------------------------------------------------------------------------------
+ * 1. The integrands from the metric and Clairaut. sb, cb = sin, cos beta; tan beta = (1 - f) tan phi.
+ * ------------------------------------------------------------------------------------------------ */
+b : a*(1 - f)$
+e2 : f*(2 - f)$
+ep2 : e2/(1 - e2)$
+zero("ep2_is_a2_minus_b2_over_b2", ratsimp(ep2 - (a^2 - b^2)/b^2))$
+/* phi(beta): sin phi = sb/W, cos phi = (1 - f) cb/W, W^2 = sb^2 + (1 - f)^2 cb^2. */
+W2 : sb^2 + (1 - f)^2*cb^2$
+cbsub(x) := ratsimp(ratsubst(1 - sb^2, cb^2, ratsimp(x)))$
+/* 1 - e^2 sin^2 phi = (1 - f)^2/W^2, so M = a (1 - e^2)/(1 - e^2 sin^2 phi)^(3/2) = a W^3/(1 - f) */
+zero("one_minus_e2_sin2phi", cbsub(1 - e2*sb^2/W2 - (1 - f)^2/W2))$
+/* d phi/d beta = (1 - f) / W^2 from d(tan phi) = d(tan beta)/(1 - f). Squares, since W > 0:
+   (M dphi/dbeta)^2 = (a W)^2 against b^2 (1 + e'^2 sin^2 beta). */
+dphidbeta : (1 - f)/W2$
+zero("dphi_dbeta", ratsimp(trigsimp(diff(atan(tan(be)/(1 - f)), be) - subst([sb = sin(be), cb = cos(be)], dphidbeta))))$
+zero("meridian_element_squared", cbsub(a^2*W2 - b^2*(1 + ep2*sb^2)))$
+/* Along the geodesic sin beta = cos alpha0 sin sigma, so 1 + e'^2 sin^2 beta = 1 + k^2 sin^2 sigma
+   with k^2 = e'^2 cos^2 alpha0: the integrand of eq. (7). d omega/d sigma from (12): */
+domega : sa0/(1 - ca0^2*sin(sg)^2)$
+zero("domega_dsigma", trigsimp(ratsimp(subst(1 - sa0^2, ca0^2,
+    diff(atan(sa0*tan(sg)), sg) - domega))))$
+/* d lambda/d omega = (ds/d sigma)/a, so d lambda/d sigma = (b/a) D domega, D = sqrt(1 + k^2 sin^2).
+   Karney's eq. (8): d omega - d lambda = f sin alpha0 (2 - f)/(1 + (1 - f) D) d sigma. With D
+   carried as a symbol, D^2 = 1 + e'^2 ca0^2 s^2, and the difference reduced over a common
+   denominator: */
+dsub(x) := ratsimp(ratsubst(1 + ep2*ca0^2*s^2, D^2, ratsimp(x)))$
+lhs8 : (domega - (b/a)*D*domega)$
+rhs8 : f*sa0*(2 - f)/(1 + (1 - f)*D)$
+zero("longitude_integrand_eq8",
+     dsub(num(ratsimp(subst(s, sin(sg), lhs8 - rhs8)))))$
+
+/* ------------------------------------------------------------------------------------------------
+ * 2. eps and k.
+ * ------------------------------------------------------------------------------------------------ */
+epsk : (sqrt(1 + k2) - 1)/(sqrt(1 + k2) + 1)$
+zero("eps_cancellation_free", ratsimp(radcan(epsk - k2/(2*(1 + sqrt(1 + k2)) + k2))))$
+zero("k2_from_eps", ratsimp(radcan(subst(epsk, ep, 4*ep/(1 - ep)^2) - k2)))$
+zero("integrand_in_eps", ratsimp(trigsimp(trigexpand(
+    (1 + 4*ep/(1 - ep)^2*sin(sg)^2) - (1 - 2*ep*cos(2*sg) + ep^2)/(1 - ep)^2))))$
+
+/* ------------------------------------------------------------------------------------------------
+ * 3. The series. R = sqrt(1 - 2 eps cos 2s + eps^2) = (1 - eps) sqrt(1 + k^2 sin^2 s).
+ *    fourier_cos(g, N) splits a polynomial in cos(2 s) into [c0, c1, ..., cN] with
+ *    g = c0 + sum c_l cos(2 l s); the integral is then c0 s + sum c_l sin(2 l s)/(2 l).
+ * ------------------------------------------------------------------------------------------------ */
+NORD : 6$
+fourier_cos(g, nmax) := block([h : expand(trigreduce(expand(g))), c],
+  c : makelist(ratsimp(coeff(h, cos(2*l*s))), l, 1, nmax),
+  cons(ratsimp(expand(h - sum(c[l]*cos(2*l*s), l, 1, nmax))), c))$
+trunc_ep(x, nmax) := ratdisrep(taylor(x, ep, 0, nmax))$
+/* a Fourier polynomial reduced to multiple angles, so that equal series cancel term by term */
+fz(x) := ratsimp(expand(trigreduce(expand(x))))$
+c2s : cos(2*s)$
+R : sqrt(1 - 2*ep*c2s + ep^2)$
+
+/* I1 = A1 (s + sum C1l sin 2ls), (1 - eps) A1 = c0 of R; C1l = c_l/(2 l c0). */
+fc1 : fourier_cos(trunc_ep(R, NORD), NORD)$
+A1M : trunc_ep(fc1[1], NORD)$                          /* (1 - eps) A1 */
+C1D : makelist(trunc_ep(fc1[l + 1]/(2*l*fc1[1]), NORD), l, 1, NORD)$
+/* I2 = A2 (s + sum C2l sin 2ls), A2/(1 - eps) = c0 of 1/R. */
+fc2 : fourier_cos(trunc_ep(1/R, NORD), NORD)$
+A2M : trunc_ep(fc2[1], NORD)$                          /* A2 / (1 - eps) */
+C2D : makelist(trunc_ep(fc2[l + 1]/(2*l*fc2[1]), NORD), l, 1, NORD)$
+/* Re-substitution: d/ds of the series equals the integrand through eps^6. */
+ser1 : A1M/(1 - ep)*(s + sum(C1D[l]*sin(2*l*s), l, 1, NORD))$
+zero("I1_series_differentiates_to_integrand",
+     fz(trunc_ep(diff(ser1, s) - R/(1 - ep), NORD)))$
+ser2 : A2M*(1 - ep)*(s + sum(C2D[l]*sin(2*l*s), l, 1, NORD))$
+zero("I2_series_differentiates_to_integrand",
+     fz(trunc_ep(diff(ser2, s) - (1 - ep)/R, NORD)))$
+
+/* Reversion of tau = s + sum C1l sin 2ls by fixed-point iteration s <- tau - sum C1l sin(2 l s):
+   each pass gains one order of eps. (The PARI file reverts by Lagrange's formula instead.) */
+sig : tau$
+for it : 1 thru NORD do
+  sig : expand(trunc_ep(tau - sum(C1D[l]*sin(2*l*sig), l, 1, NORD), NORD))$
+sig : expand(trigreduce(sig))$
+C1PD : makelist(ratsimp(coeff(sig, sin(2*l*tau))), l, 1, NORD)$
+zero("C1P_reversion_has_no_other_terms",
+     ratsimp(expand(sig - tau - sum(C1PD[l]*sin(2*l*tau), l, 1, NORD))))$
+zero("C1P_reverts_I1",
+     fz(trunc_ep(
+       subst(tau + sum(C1PD[l]*sin(2*l*tau), l, 1, NORD), s, s + sum(C1D[l]*sin(2*l*s), l, 1, NORD))
+       - tau, NORD)))$
+
+/* I3, jointly in n and eps to total order 5 (f I3 then carries order 6). f = 2n/(1 + n): the
+   integrand (2 - f)/(1 + (1 - f) R/(1 - eps)) = 2 (1 - eps)/((1 + n)(1 - eps) + (1 - n) R). */
+N3 : 5$
+trunc_t(x, nmax) := ratdisrep(taylor(x, t, 0, nmax))$
+tsc(x) := subst([n = t*n, ep = t*ep], x)$
+g3 : 2*(1 - ep)/((1 + n)*(1 - ep) + (1 - n)*R)$
+zero("I3_integrand_in_n", ratsimp(subst(2*n/(1 + n), f,
+     (2 - f)/(1 + (1 - f)*R/(1 - ep))) - g3))$
+g3t : expand(subst(t = 1, trunc_t(tsc(g3), N3)))$
+fc3 : fourier_cos(g3t, N3)$
+A3D : expand(subst(t = 1, trunc_t(tsc(fc3[1]), N3)))$
+C3D : makelist(expand(subst(t = 1, trunc_t(tsc(fc3[l + 1]/(2*l*fc3[1])), N3))), l, 1, N3)$
+ser3 : A3D*(s + sum(C3D[l]*sin(2*l*s), l, 1, N3))$
+zero("I3_series_differentiates_to_integrand",
+     fz(subst(t = 1, trunc_t(tsc(diff(ser3, s) - g3t), N3))))$
+
+/* ------------------------------------------------------------------------------------------------
+ * 4. The Rust table. Polynomials are written as coefficient lists, ascending; every coefficient is
+ *    an exact rational, written p.0 / q.0 (both exact doubles, so the division is the correctly
+ *    rounded value of p/q).
+ * ------------------------------------------------------------------------------------------------ */
+/* coefficients of x^0..x^deg in step `st` */
+clist(p, x, lo, hi, st) := makelist(ratcoef(expand(p), x, j), j, lo, hi, st)$
+rlit(r) := block([p : num(r), q : denom(r)],
+  if q = 1 then sconcat(string(p), ".0") else sconcat(string(p), ".0 / ", string(q), ".0"))$
+rslice(lst) := block([s : "&["],
+  for i : 1 thru length(lst) do
+    s : sconcat(s, if i > 1 then ", " else "", rlit(lst[i])),
+  sconcat(s, "]"))$
+rarray(lst) := block([s : "["],
+  for i : 1 thru length(lst) do
+    s : sconcat(s, if i > 1 then ", " else "", rlit(lst[i])),
+  sconcat(s, "]"))$
+
+/* (1 - eps) A1 and A2/(1 - eps): even in eps, degree 6 -> 4 coefficients of eps^(2j). */
+A1L : clist(A1M, ep, 0, NORD, 2)$
+A2L : clist(A2M, ep, 0, NORD, 2)$
+/* C1l = eps^l sum_j c_j eps^(2j), j = 0 .. floor((6 - l)/2). */
+evenpart(p, l) := clist(expand(p/ep^l), ep, 0, NORD - l, 2)$
+C1L : makelist(evenpart(C1D[l], l), l, 1, NORD)$
+C1PL : makelist(evenpart(C1PD[l], l), l, 1, NORD)$
+C2L : makelist(evenpart(C2D[l], l), l, 1, NORD)$
+/* A3 = sum_j eps^j P_j(n), P_j of degree 5 - j; C3l = sum_{j=l}^{5} eps^j Q_lj(n). */
+/* trailing zero coefficients dropped, so a Horner pass does no work on them */
+trim0(lst) := block([m : length(lst)],
+  while m > 1 and lst[m] = 0 do m : m - 1,
+  makelist(lst[i], i, 1, m))$
+A3L : makelist(trim0(clist(ratcoef(A3D, ep, j), n, 0, N3 - j, 1)), j, 0, N3)$
+C3L : makelist(makelist(trim0(clist(ratcoef(C3D[l], ep, j), n, 0, N3 - j, 1)), j, l, N3), l, 1, N3)$
+/* The lists cover every term: re-assembled, they are the series. */
+zero("table_A1", expand(A1M - sum(A1L[j + 1]*ep^(2*j), j, 0, 3)))$
+zero("table_A2", expand(A2M - sum(A2L[j + 1]*ep^(2*j), j, 0, 3)))$
+zero("table_C1", expand(sum((C1D[l] - ep^l*sum(C1L[l][j]*ep^(2*(j - 1)), j, 1, length(C1L[l])))^2, l, 1, NORD)))$
+zero("table_C1P", expand(sum((C1PD[l] - ep^l*sum(C1PL[l][j]*ep^(2*(j - 1)), j, 1, length(C1PL[l])))^2, l, 1, NORD)))$
+zero("table_C2", expand(sum((C2D[l] - ep^l*sum(C2L[l][j]*ep^(2*(j - 1)), j, 1, length(C2L[l])))^2, l, 1, NORD)))$
+zero("table_A3", expand(A3D - sum(ep^j*sum(A3L[j + 1][i + 1]*n^i, i, 0, length(A3L[j + 1]) - 1), j, 0, N3)))$
+zero("table_C3", expand(sum((C3D[l] - sum(ep^j*sum(C3L[l][j - l + 1][i + 1]*n^i, i, 0, length(C3L[l][j - l + 1]) - 1), j, l, N3))^2, l, 1, N3)))$
+
+/* ------------------------------------------------------------------------------------------------
+ * 5. Karney (2013), as printed: eqs. (17), (18), (21), (24), (25), (42), (43).
+ * ------------------------------------------------------------------------------------------------ */
+kA1 : 1 + ep^2/4 + ep^4/64 + ep^6/256$
+kC1 : [-ep/2 + 3*ep^3/16 - ep^5/32, -ep^2/16 + ep^4/32 - 9*ep^6/2048, -ep^3/48 + 3*ep^5/256,
+       -5*ep^4/512 + 3*ep^6/512, -7*ep^5/1280, -7*ep^6/2048]$
+kC1P : [ep/2 - 9*ep^3/32 + 205*ep^5/1536, 5*ep^2/16 - 37*ep^4/96 + 1335*ep^6/4096,
+        29*ep^3/96 - 75*ep^5/128, 539*ep^4/1536 - 2391*ep^6/2560, 3467*ep^5/7680, 38081*ep^6/61440]$
+kA2 : 1 + ep^2/4 + 9*ep^4/64 + 25*ep^6/256$
+kC2 : [ep/2 + ep^3/16 + ep^5/32, 3*ep^2/16 + ep^4/32 + 35*ep^6/2048, 5*ep^3/48 + 5*ep^5/256,
+       35*ep^4/512 + 7*ep^6/512, 63*ep^5/1280, 77*ep^6/2048]$
+kA3 : 1 - (1/2 - n/2)*ep - (1/4 + n/8 - 3*n^2/8)*ep^2 - (1/16 + 3*n/16 + n^2/16)*ep^3
+        - (3/64 + n/32)*ep^4 - 3*ep^5/128$
+kC3 : [(1/4 - n/4)*ep + (1/8 - n^2/8)*ep^2 + (3/64 + 3*n/64 - n^2/64)*ep^3 + (5/128 + n/64)*ep^4
+         + 3*ep^5/128,
+       (1/16 - 3*n/32 + n^2/32)*ep^2 + (3/64 - n/32 - 3*n^2/64)*ep^3 + (3/128 + n/128)*ep^4
+         + 5*ep^5/256,
+       (5/192 - 3*n/64 + 5*n^2/192)*ep^3 + (3/128 - 5*n/192)*ep^4 + 7*ep^5/512,
+       (7/512 - 7*n/256)*ep^4 + 7*ep^5/512,
+       21*ep^5/2560]$
+zero("karney_eq17_A1", expand(A1M - kA1))$
+zero("karney_eq18_C1", expand(sum((C1D[l] - kC1[l])^2, l, 1, NORD)))$
+zero("karney_eq21_C1P", expand(sum((C1PD[l] - kC1P[l])^2, l, 1, NORD)))$
+zero("karney_eq42_A2", expand(A2M - kA2))$
+zero("karney_eq43_C2", expand(sum((C2D[l] - kC2[l])^2, l, 1, NORD)))$
+zero("karney_eq24_A3", expand(A3D - kA3))$
+zero("karney_eq25_C3", expand(sum((C3D[l] - kC3[l])^2, l, 1, N3)))$
+
+/* ------------------------------------------------------------------------------------------------
+ * 6. G1 at 50 digits on WGS 84: the truncated series against the elliptic-integral form.
+ *    a = 6378137, f = 1/298.257223563 exactly (NIMA TR8350.2 sect. 3).
+ * ------------------------------------------------------------------------------------------------ */
+fpprec : 50$
+fw : 1000000000/298257223563$
+nw : fw/(2 - fw)$
+ep2w : fw*(2 - fw)/(1 - fw)^2$
+/* Horner in x^st over an ascending coefficient list (no 0^0 at x = 0) */
+ser_eval(lst, x, st) := block([r : 0],
+  for i : length(lst) thru 1 step -1 do r : r*x^st + lst[i],
+  r)$
+/* I1, I2, and lambda(sigma) - omega(sigma) = -f sin alpha0 I3 from the series, at bfloat. */
+series_at(sa0v, sgv) := block([ca0v, k2v, epv, a1, a2, a3, i1, i2, i3],
+  ca0v : sqrt(1 - sa0v^2),
+  k2v : ep2w*ca0v^2,
+  epv : k2v/(2*(1 + sqrt(1 + k2v)) + k2v),
+  a1 : ser_eval(A1L, epv, 2)/(1 - epv),
+  a2 : ser_eval(A2L, epv, 2)*(1 - epv),
+  i1 : a1*(sgv + sum(epv^l*ser_eval(C1L[l], epv, 2)*sin(2*l*sgv), l, 1, NORD)),
+  i2 : a2*(sgv + sum(epv^l*ser_eval(C2L[l], epv, 2)*sin(2*l*sgv), l, 1, NORD)),
+  a3 : ser_eval(makelist(ser_eval(A3L[j + 1], nw, 1), j, 0, N3), epv, 1),
+  /* explicit loops: Maxima's nested `sum` with a bound that is the outer index fails inside a block */
+  i3 : sgv,
+  for l : 1 thru N3 do block([c : 0],
+    for j : l thru N3 do c : c + epv^j*ser_eval(C3L[l][j - l + 1], nw, 1),
+    i3 : i3 + c*sin(2*l*sgv)),
+  i3 : a3*i3,
+  bfloat([i1, i2, -fw*sa0v*i3]))$
+elliptic_at(sa0v, sgv) := block([ca0v, k2v, om, F, E, P],
+  ca0v : sqrt(1 - sa0v^2),
+  k2v : ep2w*ca0v^2,
+  E : elliptic_e(sgv, -k2v),
+  F : elliptic_f(sgv, -k2v),
+  /* omega on |sigma| <= pi/2: atan(sin alpha0 tan sigma), and pi/2 at the end point */
+  om : if abs(sgv) = bfloat(%pi/2) then sgv else atan(sa0v*tan(sgv)),
+  if sa0v < 1.0b-30 then return(bfloat([E, F, 0])),
+  P : elliptic_pi(ca0v^2, sgv, -k2v),
+  bfloat([E, F, sa0v*(P/(1 - fw) - (1 - fw)*ep2w*F) - om]))$
+/* On a meridian (sin alpha0 = 0) lambda - omega is 0 on both sides and Pi(1; pi/2) diverges; the
+   longitude part is compared from sin alpha0 = 0.17 up. */
+worst : [0, 0, 0]$
+for sa0v in [0.0b0, 0.17b0, 0.5b0, 0.83b0, 0.999b0, 1.0b0] do
+  for sgv in [-1.3b0, -0.4b0, 0.05b0, 0.7b0, 1.1b0, 1.5b0, bfloat(%pi/2)] do block([u, v],
+    u : series_at(sa0v, sgv), v : elliptic_at(sa0v, sgv),
+    worst : makelist(max(worst[i], abs(u[i] - v[i])), i, 1, 3))$
+printf(true, "G1 worst |series - elliptic| over 42 (alpha0, sigma): I1 ~a, I2 ~a, lambda - omega ~a~%",
+       float(worst[1]), float(worst[2]), float(worst[3]))$
+/* The truncation is O(eps^7) with eps <= e'^2/4 + ... = 1.68e-3 on WGS 84: 4e-20 for I1 and I2;
+   O(f eps^6) for lambda. Measured: 5e-22, 1.5e-21 and 4e-21. The bound 1e-20 is below the
+   smallest shipped term each comparison sees -- C16's 7/2048 eps^6 is 7.5e-20, f A3's 3/128 eps^5
+   is 1e-18 -- so a dropped or wrong coefficient breaks it. C1' is decided by C1P_reverts_I1. */
+zero("G1_I1_series_vs_E", if worst[1] < 1.0b-20 then 0 else worst[1])$
+zero("G1_I2_series_vs_F", if worst[2] < 1.0b-20 then 0 else worst[2])$
+zero("G1_lambda_series_vs_Pi", if worst[3] < 1.0b-20 then 0 else worst[3])$
+
+/* ------------------------------------------------------------------------------------------------
+ * 7. The astroid (Karney sect. 5). Near the antipode of A, in units Delta = f a pi cos^2 beta1, the
+ *    geodesic with azimuth a1 is the line x/sin a1 + y/cos a1 + 1 = 0 (eq. 54).
+ * ------------------------------------------------------------------------------------------------ */
+line54 : x/sa1 + y/ca1 + 1$
+/* The envelope: line54 = 0 and d/d a1 = 0 at x = -sin^3, y = -cos^3. */
+env : [x = -sin(a1)^3, y = -cos(a1)^3]$
+zero("astroid_on_line", trigsimp(subst(env, subst([sa1 = sin(a1), ca1 = cos(a1)], line54))))$
+zero("astroid_envelope", trigsimp(subst(env, diff(subst([sa1 = sin(a1), ca1 = cos(a1)], line54), a1))))$
+/* Parametrise the point by mu: x = -(1 + mu) sin a1, y = mu cos a1 is on the line, and
+   sin^2 + cos^2 = 1 is Karney's x^2/(1 + mu)^2 + y^2/mu^2 = 1, i.e. the quartic (55). */
+zero("mu_point_on_line", ratsimp(subst([x = -(1 + mu)*sa1, y = mu*ca1], line54)))$
+quartic : mu^4 + 2*mu^3 + (1 - x^2 - y^2)*mu^2 - 2*y^2*mu - y^2$
+/* x^2 mu^2 + y^2 (1 + mu)^2 - mu^2 (1 + mu)^2 is minus the quartic */
+zero("quartic_55", ratsimp(num(ratsimp(x^2/(1 + mu)^2 + y^2/mu^2 - 1)) + quartic))$
+/* The positive root in closed form. With p = x^2, q = y^2, r = (p + q - 1)/6, S = p q/4: the
+   resolvent u is r + T + r^2/T with T^3 = S + r^3 + sqrt(S (S + 2 r^3)) when the radicand is
+   >= 0, and r + 2|r| cos(theta/3) with theta = ph(-(S + r^3) + i sqrt(-S (S + 2 r^3))) - read
+   with the sign of r - otherwise; then v = sqrt(u^2 + q), w = (u + v - q)/(2 v),
+   mu = (u + v)/(sqrt(u + v + w^2) + w). This is Vermeille's solution of the same quartic
+   (wgs84_geodesy.mac, with e^2 -> 1), extended through its trigonometric branch. */
+astroid_mu(xv, yv) := block([p, q, r, S, r3, disc, u, v, w, T3, T, ang],
+  p : xv^2, q : yv^2, r : (p + q - 1)/6, S : p*q/4, r3 : r^3,
+  disc : S*(S + 2*r3),
+  u : r,
+  if disc >= 0 then (
+    T3 : S + r3,
+    T3 : T3 + (if T3 < 0 then -sqrt(disc) else sqrt(disc)),
+    T : (if T3 < 0 then -1 else 1)*abs(T3)^(1/3),
+    u : u + T + (if T # 0 then r^2/T else 0))
+  else (
+    ang : atan2(sqrt(-disc), -(S + r3)),
+    u : u + 2*r*cos(ang/3)),
+  v : sqrt(u^2 + q),
+  w : (u + v - q)/(2*v),
+  (u + v)/(sqrt(u + v + w^2) + w))$
+worstq : 0$
+branches : [0, 0]$
+for xy in [[-0.38b0, -0.22b0], [-0.1b0, -0.05b0], [-2.5b0, -1.3b0], [-0.9b0, -0.9b0],
+           [-0.01b0, -3.0b0], [-4.0b0, -0.001b0], [-0.5b0, -1.0b-8], [-1.2b0, -0.6b0]] do
+  block([xv : xy[1], yv : xy[2], m, disc],
+    disc : (xv^2*yv^2/4)*(xv^2*yv^2/4 + 2*((xv^2 + yv^2 - 1)/6)^3),
+    if disc >= 0 then branches[1] : branches[1] + 1 else branches[2] : branches[2] + 1,
+    m : astroid_mu(xv, yv),
+    if m <= 0 then error("non-positive mu at", xy),
+    worstq : max(worstq, abs(subst([mu = m, x = xv, y = yv], quartic))))$
+printf(true, "astroid: 8 points, ~a on the radical branch and ~a on the trigonometric; worst |quartic| ~a~%",
+       branches[1], branches[2], float(worstq))$
+/* Where u < 0 the code forms u + v as q/(v - u), the same number without the cancellation. */
+zero("astroid_u_plus_v", ratsimp(ratsubst(u^2 + q, v^2, num(ratsimp(q/(v - u) - (u + v))))))$
+zero("astroid_closed_form_solves_quartic", if worstq < 1.0b-45 and branches[1] > 0 and branches[2] > 0 then 0 else worstq)$
+/* Karney's Table 4 prints x = -0.382 344, y = -0.220 189, mu = 0.231 633 (six digits). */
+mu4 : astroid_mu(-0.382344b0, -0.220189b0)$
+printf(true, "astroid: Karney's Table 4 point gives mu = ~a~%", float(mu4))$
+zero("astroid_karney_table4", if abs(mu4 - 0.231633b0) < 5.0b-7 then 0 else mu4)$
+
+/* ------------------------------------------------------------------------------------------------
+ * 8. d lambda12/d alpha1 where cos alpha2 = 0. With beta2 = -beta1 and alpha1 = pi/2 - delta the
+ *    end points sit near the vertices: sigma1 = -pi/2 + eta, sigma2 = pi/2 - eta with
+ *    tan eta = sin delta cos beta1/(-sin beta1). In eq. (38), D1 = D2 = D(eta), cos sigma1 =
+ *    cos sigma2 = sin eta, and the J term carries sin^2 eta; eq. (46) divides by a cos alpha2 cos beta2
+ *    = a sin delta cos beta1. As delta -> 0 this tends to 2 (b/a) D(0)/(-sin beta1), and
+ *    (b/a) D(0) = (1 - f) sqrt(1 + e'^2 sin^2 beta1) = sqrt(1 - e^2 cos^2 beta1): Karney's (47).
+ * ------------------------------------------------------------------------------------------------ */
+assume(sbeta < 0, cbeta > 0)$
+eta_of(dl) := atan(sin(dl)*cbeta/(-sbeta))$
+m12_over_b : DD*cos(-%pi/2 + et)*sin(%pi/2 - et) - DD*sin(-%pi/2 + et)*cos(%pi/2 - et)
+             - cos(-%pi/2 + et)*cos(%pi/2 - et)*JJ$
+slope : (1 - f)*m12_over_b/(sin(dl)*cbeta)$
+lim47 : limit(subst(eta_of(dl), et, slope), dl, 0, plus)$
+zero("eq47_limit", ratsimp(lim47 - 2*(1 - f)*DD/(-sbeta)))$
+zero("eq47_closed_form", cbsub(subst([sbeta = sb, cbeta = cb],
+     ((1 - f)^2*(1 + ep2*sb^2)) - (1 - e2*cb^2))))$
+
+/* ------------------------------------------------------------------------------------------------
+ * 9. 2 pi to twice double precision, for reducing longitudes with one rounding: TAU_LO is the
+ *    nearest double to 2 pi - TAU, TAU = fl(2 pi) read back exactly with rationalize().
+ * ------------------------------------------------------------------------------------------------ */
+fpprec : 60$
+tau_hi : rationalize(float(2*%pi))$
+tau_lo : float(bfloat(2*%pi - tau_hi))$
+zero("tau_hi_is_the_nearest_double", if abs(bfloat(2*%pi - tau_hi)) < bfloat(2^(-53))*tau_hi then 0 else tau_hi)$
+/* nearest: the gap to the next double either side is at least half a unit in the last place */
+zero("tau_lo_is_the_nearest_double",
+     if abs(bfloat(2*%pi - tau_hi - rationalize(tau_lo))) <= bfloat(2^(-53))*abs(rationalize(tau_lo)) then 0 else tau_lo)$
+fpprec : 50$
+
+/* ------------------------------------------------------------------------------------------------
+ * 10. The emitted table and the canonical list the PARI file compares against.
+ * ------------------------------------------------------------------------------------------------ */
+coef_line(name, l, i, j, r) := if r # 0 then printf(true, "COEF ~a ~d ~d ~d ~a~%", name, l, i, j, string(r))$
+for j : 0 thru 3 do coef_line("A1", 0, 0, 2*j, A1L[j + 1])$
+for j : 0 thru 3 do coef_line("A2", 0, 0, 2*j, A2L[j + 1])$
+for l : 1 thru NORD do for j : 1 thru length(C1L[l]) do coef_line("C1", l, 0, l + 2*(j - 1), C1L[l][j])$
+for l : 1 thru NORD do for j : 1 thru length(C1PL[l]) do coef_line("C1P", l, 0, l + 2*(j - 1), C1PL[l][j])$
+for l : 1 thru NORD do for j : 1 thru length(C2L[l]) do coef_line("C2", l, 0, l + 2*(j - 1), C2L[l][j])$
+for j : 0 thru N3 do for i : 0 thru length(A3L[j + 1]) - 1 do coef_line("A3", 0, i, j, A3L[j + 1][i + 1])$
+for l : 1 thru N3 do for j : l thru N3 do for i : 0 thru length(C3L[l][j - l + 1]) - 1 do
+  coef_line("C3", l, i, j, C3L[l][j - l + 1][i + 1])$
+
+pr(s) := printf(true, "~a~%", s)$
+pr("BEGIN geodesic_series.rs")$
+pr("//! The Fourier coefficients of the geodesic integrals I1, I2 and I3 and of the reversion of I1, to")$
+pr("//! sixth order (Karney, \"Algorithms for geodesics\", J. Geodesy 87 (2013) 43-55, eqs. 15-25 and")$
+pr("//! 41-43). Generated by `derivations/ellipsoid_geodesic.mac`, which expands them from the integrands")$
+pr("//! and checks them against the elliptic integrals at 50 digits; do not edit by hand.")$
+pr("//! `derivations/verify.sh` regenerates this file and compares it byte for byte.")$
+pr("//!")$
+pr("//! Every coefficient is an exact rational `p / q`; each list is ascending in its variable.")$
+pr("")$
+pr("/// `(1 - eps) A1`, in powers of `eps^2`.")$
+pr("#[rustfmt::skip]")$
+pr(sconcat("pub(crate) const A1: [f64; 4] = ", rarray(A1L), ";"))$
+pr("")$
+pr("/// `C1_l = eps^l sum_j C1[l - 1][j] eps^(2 j)`, `l = 1..=6`.")$
+pr("#[rustfmt::skip]")$
+pr("pub(crate) const C1: [&[f64]; 6] = [")$
+for l : 1 thru NORD do pr(sconcat("    ", rslice(C1L[l]), ","))$
+pr("];")$
+pr("")$
+pr("/// `C1'_l = eps^l sum_j C1P[l - 1][j] eps^(2 j)`: the reversion `sigma = tau + sum_l C1'_l sin 2 l tau`.")$
+pr("#[rustfmt::skip]")$
+pr("pub(crate) const C1P: [&[f64]; 6] = [")$
+for l : 1 thru NORD do pr(sconcat("    ", rslice(C1PL[l]), ","))$
+pr("];")$
+pr("")$
+pr("/// `A2 / (1 - eps)`, in powers of `eps^2`.")$
+pr("#[rustfmt::skip]")$
+pr(sconcat("pub(crate) const A2: [f64; 4] = ", rarray(A2L), ";"))$
+pr("")$
+pr("/// `C2_l = eps^l sum_j C2[l - 1][j] eps^(2 j)`, `l = 1..=6`.")$
+pr("#[rustfmt::skip]")$
+pr("pub(crate) const C2: [&[f64]; 6] = [")$
+for l : 1 thru NORD do pr(sconcat("    ", rslice(C2L[l]), ","))$
+pr("];")$
+pr("")$
+pr("/// `A3 = sum_j eps^j P_j(n)`, `j = 0..=5`; `A3[j]` holds the coefficients of `P_j` in powers of `n`.")$
+pr("#[rustfmt::skip]")$
+pr("pub(crate) const A3: [&[f64]; 6] = [")$
+for j : 0 thru N3 do pr(sconcat("    ", rslice(A3L[j + 1]), ","))$
+pr("];")$
+pr("")$
+pr("/// `C3_l = sum_j eps^j Q_lj(n)`, `j = l..=5`; `C3[l - 1][j - l]` holds the coefficients of `Q_lj` in powers of `n`.")$
+pr("#[rustfmt::skip]")$
+pr("pub(crate) const C3: [&[&[f64]]; 5] = [")$
+for l : 1 thru N3 do block([s : "    &["],
+  for j : 1 thru length(C3L[l]) do s : sconcat(s, if j > 1 then ", " else "", rslice(C3L[l][j])),
+  pr(sconcat(s, "],")))$
+pr("];")$
+pr("")$
+pr("/// `2 pi - TAU` to the nearest double: with `core::f64::consts::TAU` it carries 2 pi to twice")$
+pr("/// double precision.")$
+pr("#[allow(clippy::unreadable_literal)]")$
+pr(sconcat("pub(crate) const TAU_LO: f64 = ", string(tau_lo), ";"))$
+pr("END geodesic_series.rs")$

@@ -1949,6 +1949,26 @@ void the_access_wrapper_sizes_its_windows_and_refuses_a_mask() {
     CHECK(refused);
 }
 
+void the_zone_wrapper_answers_per_point_and_throws_on_a_refused_zone() {
+    const double lat80 = std::bit_cast<double>(0x3ff657184ae74487ULL);
+    const double half_pi = std::bit_cast<double>(0x3ff921fb54442d18ULL);
+    const double pi = std::bit_cast<double>(0x400921fb54442d18ULL);
+    const std::array<spacelab::surface_point, 4> cap{
+        {{lat80, 0.0}, {lat80, half_pi}, {lat80, pi}, {lat80, -half_pi}}};
+    const std::array<spacelab::surface_point, 2> poles{{{half_pi, 0.0}, {-half_pi, 0.0}}};
+    const std::vector<std::uint8_t> inside = spacelab::zone_contains(cap, poles);
+    CHECK(inside.size() == 2 && inside.at(0) == 1 && inside.at(1) == 0);
+    CHECK(spacelab::zone_contains(cap, std::span<const spacelab::surface_point>{}).empty());
+
+    bool refused = false;
+    try {
+        (void)spacelab::zone_contains(std::span(cap).first(2), poles);
+    } catch (const spacelab::error &e) {
+        refused = e.status() == SL_ERR_INVALID_ARGUMENT;
+    }
+    CHECK(refused);
+}
+
 void the_tabulated_access_wrapper_sizes_its_windows_and_refuses_unequal_arrays() {
     const std::array<double, 3> times{0.0, 60.0, 120.0};
     const std::array<spacelab::vec3, 3> positions{
@@ -2030,6 +2050,7 @@ int main() {
         the_time_wrapper_owns_its_series_and_keeps_the_leap_second();
         the_access_wrapper_sizes_its_windows_and_refuses_a_mask();
         the_tabulated_access_wrapper_sizes_its_windows_and_refuses_unequal_arrays();
+        the_zone_wrapper_answers_per_point_and_throws_on_a_refused_zone();
     } catch (const spacelab::error &e) {
         std::fprintf(stderr, "FAIL: uncaught spacelab::error, status %d: %s\n", e.status(),
                      e.what());

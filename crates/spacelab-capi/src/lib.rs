@@ -59,7 +59,7 @@ use spacelab_coverage::{
     revisit_map,
 };
 use spacelab_earth::{
-    Geodetic, geodetic_to_itrf as earth_geodetic_to_itrf,
+    Geodetic, SurfacePoint, geodetic_to_itrf as earth_geodetic_to_itrf,
     itrf_to_geodetic as earth_itrf_to_geodetic,
 };
 #[cfg(feature = "onnx")]
@@ -4727,6 +4727,71 @@ pub unsafe extern "C" fn sl_access_tabulated(
         }
         // SAFETY: forwarding the caller's own contract on `out`, `cap` and `out_len`.
         unsafe { deliver(&found, out, cap, out_len) }
+    })
+}
+
+/// `sl_surface_point`: a point on the WGS-84 surface, geodetic.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SlSurfacePoint {
+    /// Geodetic latitude, rad.
+    pub latitude_rad: f64,
+    /// Longitude, rad.
+    pub longitude_rad: f64,
+}
+
+fn surface_point(p: SlSurfacePoint) -> SurfacePoint {
+    SurfacePoint {
+        latitude: Angle::from_radians(p.latitude_rad),
+        longitude: Angle::from_radians(p.longitude_rad),
+    }
+}
+
+/// Whether each of `n_points` points lies in the zone through `n_vertices` vertices. See the
+/// header.
+///
+/// # Safety
+/// `vertices` is readable for `n_vertices`; `points` is readable for `n_points`; `inside` is
+/// writable for `n_points` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_zone_contains(
+    vertices: *const SlSurfacePoint,
+    n_vertices: usize,
+    points: *const SlSurfacePoint,
+    n_points: usize,
+    inside: *mut u8,
+) -> i32 {
+    guard(|| {
+        const WHO: &str = "sl_zone_contains";
+        if vertices.is_null() || points.is_null() || inside.is_null() {
+            return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null pointer"));
+        }
+        if let Err(status) = check_nonzero(WHO, "n_points", n_points) {
+            return status;
+        }
+        // SAFETY: checked non-null; the caller states each is readable for its count.
+        let (vertices, points) = unsafe {
+            (
+                core::slice::from_raw_parts(vertices, n_vertices),
+                core::slice::from_raw_parts(points, n_points),
+            )
+        };
+        let vertices: Vec<_> = vertices.iter().copied().map(surface_point).collect();
+        let zone = match spacelab::zone::Zone::new(&vertices) {
+            Ok(zone) => zone,
+            Err(e) => return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: {e}")),
+        };
+        let mut found = Vec::with_capacity(n_points);
+        for (i, p) in points.iter().enumerate() {
+            match zone.contains(surface_point(*p)) {
+                Ok(held) => found.push(u8::from(held)),
+                Err(e) => return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: point {i}: {e}")),
+            }
+        }
+        // SAFETY: the caller states `inside` is writable for `n_points` bytes; written only now
+        // that every point is answered.
+        unsafe { core::ptr::copy_nonoverlapping(found.as_ptr(), inside, n_points) };
+        SL_OK
     })
 }
 
@@ -14825,6 +14890,7 @@ mod tests {
                 &["year", "month", "day", "hour", "minute", "second"][..],
             ),
             ("sl_station_window", &["station", "rise_s", "set_s"][..]),
+            ("sl_surface_point", &["latitude_rad", "longitude_rad"][..]),
             (
                 "sl_leap_status",
                 &[

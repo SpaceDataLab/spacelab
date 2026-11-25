@@ -35,6 +35,7 @@ use spacelab_fa::{LeapError, utc_to_tai};
 use spacelab_frames::{Itrf, Orientation, Teme, Transform, teme_to_itrf};
 
 pub mod access;
+pub mod zone;
 
 pub use spacelab_core as core_types;
 pub use spacelab_earth as earth;

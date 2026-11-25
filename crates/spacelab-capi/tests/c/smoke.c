@@ -2964,6 +2964,39 @@ static void the_tabulated_access_windows_answer_the_rust_values_to_the_bit(void)
     CHECK(untouched == 99);
 }
 
+/*
+ * A zone round the north pole, its vertices on 80 N at 0, 90 E, 180 and 90 W, and its reversal:
+ * the case `north-polar-cap` of `crates/spacelab/tests/fixtures/bridge_zone_contains_reference.tsv`,
+ * whose every answer the Rust suite holds through `tests/zone.rs`. The points are both poles, the
+ * first edge's midpoint at 82.9 N 45 E, and a millimetre to its left and to its right. The
+ * boundary belongs to the zone and to its complement; a refused batch writes nothing.
+ */
+static void the_zone_answers_what_the_rust_api_answers(void) {
+    CHECK(sizeof(sl_surface_point) == 2 * sizeof(double));
+    CHECK(offsetof(sl_surface_point, longitude_rad) == sizeof(double));
+    const double lat80 = double_of(UINT64_C(0x3ff657184ae74487));
+    const double half_pi = double_of(UINT64_C(0x3ff921fb54442d18));
+    const double pi = double_of(UINT64_C(0x400921fb54442d18));
+    const double quarter_pi = double_of(UINT64_C(0x3fe921fb54442d18));
+    const sl_surface_point cap[4] = {
+        {lat80, 0.0}, {lat80, half_pi}, {lat80, pi}, {lat80, -half_pi}};
+    const sl_surface_point reversed[4] = {cap[3], cap[2], cap[1], cap[0]};
+    const sl_surface_point points[5] = {{half_pi, 0.0},
+                                        {-half_pi, 0.0},
+                                        {double_of(UINT64_C(0x3ff725ee9960dbb4)), quarter_pi},
+                                        {double_of(UINT64_C(0x3ff725ee996b9915)), quarter_pi},
+                                        {double_of(UINT64_C(0x3ff725ee99561e53)), quarter_pi}};
+    uint8_t inside[5] = {9, 9, 9, 9, 9};
+    CHECK(sl_zone_contains(cap, 4, points, 5, inside) == SL_OK);
+    CHECK(inside[0] == 1 && inside[1] == 0 && inside[2] == 1 && inside[3] == 1 && inside[4] == 0);
+    CHECK(sl_zone_contains(reversed, 4, points, 5, inside) == SL_OK);
+    CHECK(inside[0] == 0 && inside[1] == 1 && inside[2] == 1 && inside[3] == 0 && inside[4] == 1);
+
+    uint8_t untouched[5] = {9, 9, 9, 9, 9};
+    CHECK(sl_zone_contains(cap, 2, points, 5, untouched) == SL_ERR_INVALID_ARGUMENT);
+    CHECK(untouched[0] == 9 && untouched[4] == 9);
+}
+
 int main(void) {
     the_layout_is_the_one_the_library_assumes();
     the_version_string_sizes_itself();
@@ -2997,6 +3030,7 @@ int main(void) {
     the_time_scales_answer_the_rust_values_to_the_bit();
     the_access_windows_answer_the_rust_values_to_the_bit();
     the_tabulated_access_windows_answer_the_rust_values_to_the_bit();
+    the_zone_answers_what_the_rust_api_answers();
 
     if (failures != 0) {
         fprintf(stderr, "%d check(s) failed\n", failures);

@@ -442,9 +442,19 @@ scope:
   velocities — an OEM, an SP3 file with velocity records, a numerical propagator's output — whose
   rate bound is proved for its cubic Hermite interpolant; but the windows are the interpolant's, the
   frame and time conversions to the table are the caller's, an SP3 file without velocity records
-  has no entry point, and a table is one segment, so an OEM's segments are scanned one by one. A
-  zone as a polygon with geodesic edges, and root isolation on the Taylor polynomial (Ф22.C, not
-  yet written), are in neither bridge.
+  has no entry point, and a table is one segment, so an OEM's segments are scanned one by one.
+  Access windows over a zone, and root isolation on the Taylor polynomial (Ф22.C, not yet written),
+  are in neither bridge.
+- **A zone answers point in zone only, and its boundary is a micrometre wide.** `spacelab::zone`,
+  `sl_zone_contains` and `zone_contains` (Ф31.C) take a polygon on WGS 84 whose edges are shortest
+  geodesics, interior on the left. A point within 1e-6 m of an edge, measured across it, is on the
+  boundary and belongs to the zone and to its complement; nothing finer is resolved. An edge whose
+  ends come within 2fπ (1.207°, 134 km) of antipodal on the auxiliary sphere is refused, so no edge
+  spans more than about 19 900 km: split a longer one. Self-intersection is found by the signs of
+  latitude differences at vertex longitudes, exactly as far as those doubles go — a meeting their
+  rounding hides, such as two edges overlapping along a stretch other than a meridian, is not
+  found. A latitude of ±π/2 is read as the geodesic code reads it, a point 0.4 nm from the pole on
+  its own meridian, so a vertex there is not "the pole" for every meridian at once.
 - **`spacelab-astrometry` is otherwise Rust-only.** Exposing aberration in both bridges was the first
   time either depended on the crate at all; plate solving, TAN/SIP world coordinates, blind asterism
   matching and streak reduction are still unreachable from C and from Python. That is the #319 drift

@@ -1362,6 +1362,7 @@ if have maxima; then
     mac_zeros ellipsoid_geodesic.mac 43 "geodesic integrands from the metric and Clairaut, the series to sixth order as Karney prints them and against the elliptic-integral form at 50 digits (G1), the astroid root"
     mac_zeros access_station_geometry.mac 12 "a station is its foot plus h along the geodetic normal, that normal is the ellipsoid's, g is the elevation's sign, and the pieces of SGP4's speed bound"
     mac_zeros access_hermite_speed.mac 12 "the cubic Hermite interpolant of a tabulated ephemeris takes its samples, is de Casteljau's Bezier curve, and its velocity is a convex combination of v0, c, v1; its h^4/384 error kernel"
+    mac_zeros zone_meridian_crossing.mac 8 "a zone's edge crosses each meridian once, with the interior on its left: the metric, Clairaut, the left of travel n x t and its north component"
     mac_zeros keplerian_elements.mac 44 "element <-> state maps invert each other on every branch; Kepler's equation, and its near-parabolic forms"
     mac_zeros brouwer_m2_phipps.mac 7 "Phipps' along-track drag drift of a, e and the mean anomaly from Kepler's third law"
     mac_zeros zonal_secular.mac 6 "the first-order J2 secular rates of both zonal mean-element propagators from Lagrange's equations"
@@ -1665,6 +1666,26 @@ if have maxima && have gp; then
     fi
 else
     skip "maxima+pari ellipsoid_geodesic" "maxima or gp"
+fi
+
+# Ф31.C zones: the PARI file finds where an edge crosses a meridian from the defining integrals at
+# 50 digits, passes its own checks (each far end lands on its vertex, each crossing on its
+# longitude, the binary64 rounding), and its rows are the ones src/zone.rs holds, byte for byte.
+if have gp; then
+    gp_out=$(timeout 300 gp -q -f zone_meridian_crossing.gp </dev/null 2>&1)
+    rc=$?
+    zone_src=../crates/spacelab/src/zone.rs
+    if [ "$rc" -eq 0 ] && ! printf '%s' "$gp_out" | grep -qE '\*\*\*|^FAIL' \
+        && [ "$(printf '%s\n' "$gp_out" | grep -c '^ok ')" -eq 3 ] \
+        && [ "$(printf '%s\n' "$gp_out" | grep -c '^ *\[')" -eq 10 ] \
+        && diff -q <(printf '%s\n' "$gp_out" | sed -n '/^BEGIN zone_meridian_crossing.gp$/,/^END zone_meridian_crossing.gp$/p' | grep '^ *\[') \
+            <(sed -n '/BEGIN zone_meridian_crossing.gp/,/END zone_meridian_crossing.gp/p' "$zone_src" | grep '^ *\[') >/dev/null; then
+        ok "pari zone_meridian_crossing: 10 crossings of a meridian at 50 digits are the rows src/zone.rs holds"
+    else
+        bad "pari zone_meridian_crossing" "a PARI check failed, or src/zone.rs differs from the regenerated rows"
+    fi
+else
+    skip "pari zone_meridian_crossing" gp
 fi
 
 # ---------------------------------------------------------------------------------------------

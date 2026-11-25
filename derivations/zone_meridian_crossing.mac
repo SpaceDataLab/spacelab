@@ -1,0 +1,71 @@
+/* The meridian-crossing test of crates/spacelab/src/zone.rs (Ф31.C): a point is in a zone when
+   the crossings of its meridian north of it, by the zone's geodesic edges, have the parity that
+   puts it on the north pole's side, or the parity that does not when the pole is outside.
+
+   The ellipsoid x^2/a^2 + y^2/a^2 + z^2/b^2 = 1, b^2 = a^2 (1 - e2), in geodetic coordinates:
+       N = a / sqrt(1 - e2 sin^2 phi),  M = a (1 - e2) / (1 - e2 sin^2 phi)^(3/2),
+       p(phi, lam) = (N cos phi cos lam, N cos phi sin lam, N (1 - e2) sin phi),
+   the outward normal n and the unit east and north vectors eE, eN. A geodesic leaves azimuth
+   alpha clockwise from north: its unit tangent is t = cos alpha eN + sin alpha eE. The claims, each
+   a residual that must reduce to 0:
+     1-2  dp/dphi = M eN and dp/dlam = N cos phi eE: the metric ds^2 = M^2 dphi^2 + rho^2 dlam^2,
+          rho = N cos phi the radius of the parallel;
+     3    along a unit-speed curve with tangent t, rho dlam/ds = sin alpha (the east component of t);
+     4    Clairaut: c = rho sin alpha is constant along a geodesic of a surface of revolution, so
+          dlam/ds = c / rho^2 has the sign of c all along it -- the longitude is monotonic on every
+          geodesic that is not a meridian (c = 0). With the shortest geodesic's sweep, the reduced
+          longitude difference of its ends (|sweep| <= pi, Karney 2013 sect. 4), an edge crosses a
+          meridian at most once. The residual is drho/dphi = -M sin phi, the identity that makes
+          d(rho sin alpha)/ds = 0 with the geodesic's d alpha/ds = sin alpha tan phi / N;
+     5    the same: d(rho sin alpha)/ds with dphi/ds = cos alpha / M and that d alpha/ds;
+     6    the left of the direction of travel, seen from outside, is n x t; its north component is
+          sin alpha: an edge heading east (sin alpha > 0) has the interior to its north;
+     7    rho = a cos beta, tan beta = (1 - f) tan phi: Clairaut on the auxiliary sphere,
+          cos beta sin alpha = sin alpha0, so the geodesic's highest reduced latitude has
+          cos beta = |sin alpha0| -- the vertex zone.rs widens an edge's latitude range to;
+     8    n x t = sin alpha eN - cos alpha eE, the left of the direction of travel in the tangent
+          plane: zone.rs measures how far a point p lies across an edge as |(p - c) . (n x t)|, c
+          the edge's point on p's meridian, so a point M dphi north of c lies M |dphi| |sin alpha|
+          across, to first order.
+   Two shortest geodesics meet at most once unless they overlap, which is a theorem and no
+   identity: if they met twice, the two arcs between the meetings would both be shortest, and an
+   interior sub-arc of a shortest geodesic is its only shortest path.
+   derivations/zone_meridian_crossing.gp is the second engine: crossings at 50 digits by quadrature
+   on the auxiliary sphere, the reference rows crates/spacelab/src/zone.rs holds. */
+
+declare([a, e2, phi, lam, alpha], real)$
+assume(a > 0, e2 > 0, e2 < 1, cos(phi) > 0)$
+
+W : sqrt(1 - e2 * sin(phi)^2)$
+N : a / W$
+M : a * (1 - e2) / W^3$
+p : [N * cos(phi) * cos(lam), N * cos(phi) * sin(lam), N * (1 - e2) * sin(phi)]$
+n : [cos(phi) * cos(lam), cos(phi) * sin(lam), sin(phi)]$
+eE : [-sin(lam), cos(lam), 0]$
+eN : [-sin(phi) * cos(lam), -sin(phi) * sin(lam), cos(phi)]$
+sq(v) := v . v$
+cross(u, v) := [u[2] * v[3] - u[3] * v[2], u[3] * v[1] - u[1] * v[3], u[1] * v[2] - u[2] * v[1]]$
+z(e) := trigsimp(ratsimp(e))$
+
+print("dp/dphi - M eN, squared:", z(sq(diff(p, phi) - M * eN)))$
+rho : N * cos(phi)$
+print("dp/dlam - rho eE, squared:", z(sq(diff(p, lam) - rho * eE)))$
+
+/* A unit-speed curve: dp/ds = p_phi phi' + p_lam lam' = t. Its east component is rho lam'. */
+t : cos(alpha) * eN + sin(alpha) * eE$
+phid : cos(alpha) / M$
+lamd : sin(alpha) / rho$
+print("dp/ds - t, squared:", z(sq(diff(p, phi) * phid + diff(p, lam) * lamd - t)))$
+
+print("drho/dphi + M sin phi:", z(diff(rho, phi) + M * sin(phi)))$
+alphad : sin(alpha) * tan(phi) / N$
+print("d(rho sin alpha)/ds along a geodesic:",
+      z(diff(rho, phi) * phid * sin(alpha) + rho * cos(alpha) * alphad))$
+
+print("north component of n x t - sin alpha:", z(cross(n, t) . eN - sin(alpha)))$
+
+cb : cos(phi) / sqrt(cos(phi)^2 + (1 - e2) * sin(phi)^2)$
+print("rho - a cos beta:", z(rho - a * cb))$
+
+print("n x t - (sin alpha eN - cos alpha eE), squared:",
+      z(sq(cross(n, t) - (sin(alpha) * eN - cos(alpha) * eE))))$

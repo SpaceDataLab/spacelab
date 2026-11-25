@@ -1146,6 +1146,26 @@ void the_tabulated_access_reports_its_refusals_as_statuses() {
     CHECK(!masked && masked.error() == SL_ERR_INVALID_ARGUMENT);
 }
 
+void the_zone_reports_its_refusals_as_statuses() {
+    const double lat80 = 1.3962634015954636;
+    const double half_pi = std::numbers::pi / 2.0;
+    const std::array<spacelab::surface_point, 3> triangle{
+        {{lat80, 0.0}, {lat80, half_pi}, {half_pi, 0.0}}};
+    const std::array<spacelab::surface_point, 1> pole{{{half_pi, 1.0}}};
+    const spacelab::result<std::vector<std::uint8_t>> held =
+        spacelab::try_zone_contains(triangle, pole);
+    CHECK(held && held->size() == 1 && held->at(0) == 1);
+    const std::array<spacelab::surface_point, 3> crossed{
+        {{lat80, 0.0}, {lat80, 0.0}, {half_pi, 0.0}}};
+    const spacelab::result<std::vector<std::uint8_t>> coincident =
+        spacelab::try_zone_contains(crossed, pole);
+    CHECK(!coincident && coincident.error() == SL_ERR_INVALID_ARGUMENT);
+    const std::array<spacelab::surface_point, 1> nowhere{{{2.0, 0.0}}};
+    const spacelab::result<std::vector<std::uint8_t>> past =
+        spacelab::try_zone_contains(triangle, nowhere);
+    CHECK(!past && past.error() == SL_ERR_INVALID_ARGUMENT);
+}
+
 } // namespace
 
 int main() {
@@ -1171,6 +1191,7 @@ int main() {
     the_time_surface_reports_its_refusals_as_statuses();
     the_access_surface_reports_its_refusals_as_statuses();
     the_tabulated_access_reports_its_refusals_as_statuses();
+    the_zone_reports_its_refusals_as_statuses();
 
     if (failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failures);

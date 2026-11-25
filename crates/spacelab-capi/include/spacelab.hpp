@@ -84,6 +84,7 @@ using coverage_metrics = ::sl_coverage_metrics;
 using constellation_fom = ::sl_constellation_fom;
 using window = ::sl_window;
 using station_window = ::sl_station_window;
+using surface_point = ::sl_surface_point;
 using gnss_state = ::sl_gnss_state;
 using glonass_state = ::sl_glonass_state;
 using gnss_system = ::sl_gnss_system;
@@ -1142,6 +1143,22 @@ try_access_tabulated(std::span<const double> times, std::span<const vec3> positi
         });
 }
 
+/*
+ * Whether each of `points` lies in the zone through `vertices`, 1 or 0; see `sl_zone_contains`. No
+ * point is an empty answer.
+ */
+[[nodiscard]] inline result<std::vector<std::uint8_t>>
+try_zone_contains(std::span<const surface_point> vertices, std::span<const surface_point> points) {
+    using many = std::vector<std::uint8_t>;
+    if (points.empty()) {
+        return many{};
+    }
+    many out(points.size());
+    const ::sl_status s = ::sl_zone_contains(vertices.data(), vertices.size(), points.data(),
+                                             points.size(), out.data());
+    return s == SL_OK ? result<many>(std::move(out)) : detail::failure<many>(s);
+}
+
 #if defined(__cpp_exceptions)
 
 [[nodiscard]] inline double refraction_apparent(double true_altitude_rad,
@@ -1205,6 +1222,11 @@ access_tabulated(std::span<const double> times, std::span<const vec3> positions,
                  double mask_rad, double tol_s = 1e-3) {
     return detail::unwrap(
         try_access_tabulated(times, positions, velocities, stations, mask_rad, tol_s));
+}
+
+[[nodiscard]] inline std::vector<std::uint8_t>
+zone_contains(std::span<const surface_point> vertices, std::span<const surface_point> points) {
+    return detail::unwrap(try_zone_contains(vertices, points));
 }
 
 #endif

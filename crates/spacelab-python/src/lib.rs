@@ -5791,7 +5791,8 @@ fn shapiro_delay(r_emitter: f64, r_receiver: f64, path: f64, gm: f64) -> f64 {
 // Access on any ephemeris (Ф31.C). The Rust API is `spacelab::access`, and each function here is
 // its scan over a list of stations, station by station: angles in radians as the API takes them,
 // so that every window comes back with the Rust bits, and a batch with one refused station
-// returns nothing.
+// returns nothing. `zone_contains` asks a zone of `spacelab::zone` about a list of points the same
+// way.
 // ---------------------------------------------------------------------------------------------
 
 pyo3::create_exception!(
@@ -5934,6 +5935,57 @@ fn access_tabulated(
             found.extend(windows.iter().map(|w| (i, w.rise, w.set)));
         }
         Ok(found)
+    })
+}
+
+pyo3::create_exception!(
+    spacedatalab,
+    ZoneError,
+    PyValueError,
+    "A zone, or a point asked about it, that the model refuses: fewer than three vertices, a \
+     coordinate not finite or a latitude outside [-pi/2, pi/2], an edge whose geodesic is not \
+     unique, or edges that meet anywhere but at the vertex two consecutive edges share."
+);
+
+/// Whether each of `points` lies in the zone through `vertices`, in the order given.
+///
+/// A vertex or a point is `(latitude_rad, longitude_rad)`, geodetic on WGS 84. The zone is bounded
+/// by the shortest geodesics through its vertices, the last back to the first, and lies on the left
+/// of each directed edge: the vertices run counter-clockwise seen from outside the ellipsoid, as in
+/// GeoJSON (RFC 7946) and S2. Reversing them gives the complement, so a zone larger than a
+/// hemisphere is as legal as a small one. The zone is closed: a vertex, and a point within 1e-6 m
+/// of an edge measured across it, are in the zone and in its complement. A latitude of `+-pi/2` is
+/// read literally, a point 0.4 nm from the pole on its own meridian. The answers are the Rust
+/// API's (`spacelab::zone::Zone::contains`).
+///
+/// Raises `ZoneError`, a `ValueError`, for fewer than three vertices, a vertex coordinate not
+/// finite or a latitude outside `[-pi/2, pi/2]`; an edge whose geodesic is not unique -- its ends
+/// coincide, or come within `2 f pi` (1.207 deg, 134 km) of antipodal on the auxiliary sphere,
+/// twice the half-length of a point's cut locus; edges that meet anywhere but at the vertex two
+/// consecutive edges share; and a point coordinate not finite or a latitude outside
+/// `[-pi/2, pi/2]`. The message names the vertex, edge or point; a refused batch answers nothing.
+#[pyfunction]
+fn zone_contains(
+    py: Python<'_>,
+    vertices: Vec<(f64, f64)>,
+    points: Vec<(f64, f64)>,
+) -> PyResult<Vec<bool>> {
+    let point = |&(latitude, longitude): &(f64, f64)| spacelab_earth::SurfacePoint {
+        latitude: Angle::from_radians(latitude),
+        longitude: Angle::from_radians(longitude),
+    };
+    py.detach(|| {
+        let vertices: Vec<_> = vertices.iter().map(point).collect();
+        let zone =
+            spacelab::zone::Zone::new(&vertices).map_err(|e| ZoneError::new_err(e.to_string()))?;
+        points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                zone.contains(point(p))
+                    .map_err(|e| ZoneError::new_err(format!("point {i}: {e}")))
+            })
+            .collect()
     })
 }
 
@@ -7043,6 +7095,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("PropagationError", m.py().get_type::<PropagationError>())?;
     m.add_function(wrap_pyfunction!(access_sgp4, m)?)?;
     m.add_function(wrap_pyfunction!(access_tabulated, m)?)?;
+    m.add("ZoneError", m.py().get_type::<ZoneError>())?;
+    m.add_function(wrap_pyfunction!(zone_contains, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tai, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tt, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tdb, m)?)?;
@@ -10510,6 +10564,63 @@ mod interpreter_tests {
                 let e = result.expect_err("a refused scan");
                 let name = e.get_type(py).name().expect("a type name").to_string();
                 assert_eq!(name, "ValueError", "{e}");
+            }
+        });
+    }
+
+    /// Point in zone across the bridge: the Rust API's answers on a zone round the north pole and
+    /// on its reversal, the complement, and every refusal of a zone or a point a `ZoneError`.
+    #[test]
+    fn zone_contains_is_the_rust_api_and_refuses_with_zone_error() {
+        let d = |lat: f64, lon: f64| (lat.to_radians(), lon.to_radians());
+        let cap = vec![d(80.0, 0.0), d(80.0, 90.0), d(80.0, 180.0), d(80.0, -90.0)];
+        let points: Vec<(f64, f64)> = (0..36_i32)
+            .flat_map(|i| {
+                (0..7_i32).map(move |j| d(60.0 + 5.0 * f64::from(j), -175.0 + 10.0 * f64::from(i)))
+            })
+            .collect();
+        let surface = |&(lat, lon): &(f64, f64)| spacelab_earth::SurfacePoint {
+            latitude: Angle::from_radians(lat),
+            longitude: Angle::from_radians(lon),
+        };
+        Python::attach(|py| {
+            for vertices in [cap.clone(), cap.iter().rev().copied().collect()] {
+                let got =
+                    zone_contains(py, vertices.clone(), points.clone()).expect("an answered batch");
+                let zone =
+                    spacelab::zone::Zone::new(&vertices.iter().map(surface).collect::<Vec<_>>())
+                        .expect("a zone");
+                let want: Vec<bool> = points
+                    .iter()
+                    .map(|p| zone.contains(surface(p)).expect("a point"))
+                    .collect();
+                assert!(want.contains(&true) && want.contains(&false));
+                assert_eq!(got, want);
+            }
+            let refused = [
+                zone_contains(py, cap[..2].to_vec(), points.clone()),
+                zone_contains(
+                    py,
+                    vec![(2.0, 0.0), d(0.0, 1.0), d(1.0, 1.0)],
+                    points.clone(),
+                ),
+                zone_contains(
+                    py,
+                    vec![d(0.0, 0.0), d(0.0, 0.0), d(1.0, 1.0)],
+                    points.clone(),
+                ),
+                zone_contains(
+                    py,
+                    vec![d(0.0, 0.0), d(1.0, 1.0), d(1.0, 0.0), d(0.0, 1.0)],
+                    points.clone(),
+                ),
+                zone_contains(py, cap, vec![points[0], (f64::NAN, 0.0)]),
+            ];
+            for result in refused {
+                let e = result.expect_err("a refused batch");
+                let name = e.get_type(py).name().expect("a type name").to_string();
+                assert_eq!(name, "ZoneError", "{e}");
+                assert!(e.is_instance_of::<PyValueError>(py), "{e}");
             }
         });
     }

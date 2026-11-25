@@ -1151,6 +1151,35 @@ sl_status sl_access_tabulated(const double *times, const sl_vec3 *positions,
                               const sl_geodetic *stations, size_t n_stations, double mask_rad,
                               double tol_s, sl_station_window *out, size_t cap, size_t *out_len);
 
+/* A point on the WGS-84 surface: geodetic latitude and longitude, radians. */
+typedef struct {
+    double latitude_rad;
+    double longitude_rad;
+} sl_surface_point;
+
+/*
+ * Whether each of `n_points` points lies in a zone on WGS 84, written to `inside[i]` as 1 or 0:
+ * bytes rather than `bool`, for the reason `sl_cloud_mask` gives.
+ *
+ * The zone is bounded by the shortest geodesics through its `n_vertices` vertices, the last back
+ * to the first, and lies on the left of each directed edge: the vertices run counter-clockwise
+ * seen from outside the ellipsoid, as in GeoJSON (RFC 7946) and S2. Reversing them gives the
+ * complement, so a zone larger than a hemisphere is as legal as a small one. The zone is closed: a
+ * vertex, and a point within 1e-6 m of an edge measured across it, are in the zone and in its
+ * complement. A latitude of +-pi/2 is read literally, a point 0.4 nm from the pole on its own
+ * meridian; nothing treats a pole as special. The answers are the Rust API's
+ * (`spacelab::zone::Zone::contains`).
+ *
+ * SL_ERR_INVALID_ARGUMENT for a null pointer or a zero `n_points`; for fewer than three vertices,
+ * a vertex coordinate not finite or a latitude outside [-pi/2, pi/2]; an edge whose geodesic is
+ * not unique -- its ends coincide, or come within 2 f pi (1.207 deg, 134 km) of antipodal on the
+ * auxiliary sphere, twice the half-length of a point's cut locus; edges that meet anywhere but at
+ * the vertex two consecutive edges share; and a point coordinate not finite or a latitude outside
+ * [-pi/2, pi/2]. The message names the vertex, edge or point. A refused batch writes nothing.
+ */
+sl_status sl_zone_contains(const sl_surface_point *vertices, size_t n_vertices,
+                           const sl_surface_point *points, size_t n_points, uint8_t *inside);
+
 /* ---- Semi-analytical propagation (DSST) ---- */
 
 /*

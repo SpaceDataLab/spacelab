@@ -2722,6 +2722,76 @@ def test_tabulated_access_windows_return_the_rust_reference_to_the_bit():
         raise AssertionError("arrays of unequal lengths were answered")
 
 
+def _zone_cases():
+    """The cases of `bridge_zone_contains_reference.tsv`, each with its vertices, points and the
+    Rust answer."""
+    path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "spacelab",
+        "tests",
+        "fixtures",
+        "bridge_zone_contains_reference.tsv",
+    )
+    cases, rows = [], 0
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("#"):
+                continue
+            rows += 1
+            f = line.rstrip("\n").split("\t")
+            if f[0] == "zone":
+                cases.append(
+                    {"name": f[1], "vertices": [], "points": [], "answers": [], "refused": None}
+                )
+                continue
+            case = cases[-1]
+            assert f[1] == case["name"], f"a row outside its case: {line}"
+            if f[0] == "vertex":
+                case["vertices"].append((_f64_of(f[3]), _f64_of(f[4])))
+            elif f[0] == "point":
+                case["points"].append((_f64_of(f[3]), _f64_of(f[4])))
+                case["answers"].append({"1": True, "0": False, "-": None}[f[5]])
+            elif f[0] == "refused":
+                case["refused"] = f[2]
+            else:
+                raise AssertionError(f"an unknown row kind {f[0]}")
+    return cases, rows
+
+
+def test_zone_contains_returns_the_rust_reference():
+    """Every case of the Rust API's point-in-zone reference, through the bridge.
+
+    `crates/spacelab/tests/bridge_zone_contains.rs` holds the file to `spacelab::zone` and the API
+    to the cases its model names; the C ABI's `tests/zone.rs` holds the C ABI to the same file.
+    Here all points go in one call and then each point alone: every answer must come back the
+    same, every refusal as a `ZoneError`, which is a `ValueError`, and every row of the file is
+    counted.
+    """
+    cases, rows = _zone_cases()
+    counted, answered, refusals = 0, 0, 0
+    for case in cases:
+        counted += 1 + len(case["vertices"]) + len(case["points"])
+        counted += case["refused"] is not None
+        if case["refused"] is not None:
+            try:
+                sl.zone_contains(case["vertices"], case["points"])
+            except sl.ZoneError as e:
+                assert isinstance(e, ValueError), e
+                refusals += 1
+                continue
+            raise AssertionError(f"{case['name']}: {case['refused']} was answered")
+        got = sl.zone_contains(case["vertices"], case["points"])
+        assert got == case["answers"], case["name"]
+        for point, want in zip(case["points"], case["answers"], strict=True):
+            assert sl.zone_contains(case["vertices"], [point]) == [want], case["name"]
+        answered += len(got)
+    assert counted == rows, "a row of the reference was not read"
+    assert answered > 1500 and refusals == 7, "the reference lost its cases"
+    assert sl.zone_contains(cases[0]["vertices"], []) == []
+
+
 def test_every_export_is_named_by_a_test():
     """No public binding may exist without a test file naming it.
 

@@ -1905,6 +1905,37 @@ void the_time_wrapper_owns_its_series_and_keeps_the_leap_second() {
     CHECK(refused);
 }
 
+/*
+ * The ISS over (35 N, 33 E) for a day, no Earth orientation, a 0 deg mask: the reference's scan
+ * `iss-2008-no-eop`, whose windows the Rust suite holds to the bit. The wrapper sizes its own
+ * answer, groups it by station, and turns a refusal into an exception that carries the status.
+ */
+void the_access_wrapper_sizes_its_windows_and_refuses_a_mask() {
+    const spacelab::sgp4 sat(LINE1, LINE2);
+    const spacelab::utc_datetime start{2008, 9, 20, 12, 0, 0.0};
+    const std::array<spacelab::geodetic, 2> stations{
+        {{std::bit_cast<double>(0x3fe38c35418a5bf6ULL), std::bit_cast<double>(0x3fe26e40d7653223ULL),
+          0.0},
+         {std::bit_cast<double>(0x3fe38c35418a5bf6ULL), std::bit_cast<double>(0x3fe26e40d7653223ULL),
+          0.0}}};
+    const double tol = std::bit_cast<double>(0x3f1a36e2eb1c432dULL);
+    const std::vector<spacelab::station_window> windows =
+        sat.access(nullptr, start, 86400.0, stations, 0.0, tol);
+    CHECK(windows.size() == 14);
+    CHECK(windows.at(0).station == 0 && windows.at(7).station == 1);
+    CHECK(std::bit_cast<std::uint64_t>(windows.at(0).rise_s) == 0x40c63d3ac7bf9576U);
+    CHECK(std::bit_cast<std::uint64_t>(windows.at(13).set_s) == 0x40e6ac487e2a41c2U);
+    CHECK(sat.access(nullptr, start, 86400.0, std::span<const spacelab::geodetic>{}, 0.0).empty());
+
+    bool refused = false;
+    try {
+        (void)sat.access(nullptr, start, 86400.0, stations, 2.0);
+    } catch (const spacelab::error &e) {
+        refused = e.status() == SL_ERR_INVALID_ARGUMENT;
+    }
+    CHECK(refused);
+}
+
 } // namespace
 
 /*
@@ -1955,6 +1986,7 @@ int main() {
         the_cloud_masker_reports_a_build_without_inference();
         the_control_wrapper_closes_the_loop_and_carries_its_refusals();
         the_time_wrapper_owns_its_series_and_keeps_the_leap_second();
+        the_access_wrapper_sizes_its_windows_and_refuses_a_mask();
     } catch (const spacelab::error &e) {
         std::fprintf(stderr, "FAIL: uncaught spacelab::error, status %d: %s\n", e.status(),
                      e.what());

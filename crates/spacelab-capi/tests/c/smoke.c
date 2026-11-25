@@ -2832,6 +2832,54 @@ static void the_time_scales_answer_the_rust_values_to_the_bit(void) {
     sl_eop_series_close(NULL);
 }
 
+static double double_of(uint64_t b) {
+    double x;
+    memcpy(&x, &b, sizeof x);
+    return x;
+}
+
+/*
+ * The ISS over the Orekit comparison's station (35 N, 33 E) for a day with no Earth orientation and
+ * a 0 deg mask: the scan `iss-2008-no-eop` of `crates/spacelab/tests/fixtures/bridge_access_reference.tsv`,
+ * station 0. The Rust suite holds every window of that file to the bit through `tests/access.rs`;
+ * this holds the first and the last of these seven to the same bits through the header's layout.
+ */
+static void the_access_windows_answer_the_rust_values_to_the_bit(void) {
+    CHECK(sizeof(sl_station_window) == sizeof(size_t) + 2 * sizeof(double));
+    CHECK(offsetof(sl_station_window, rise_s) == sizeof(size_t));
+
+    sl_sgp4 *sat = NULL;
+    CHECK(sl_sgp4_open(LINE1, LINE2, &sat) == SL_OK);
+    if (sat == NULL) {
+        CHECK(0);
+        return;
+    }
+    const sl_utc_datetime start = {2008, 9, 20, 12, 0, 0.0};
+    const sl_geodetic station = {double_of(UINT64_C(0x3fe38c35418a5bf6)),
+                                 double_of(UINT64_C(0x3fe26e40d7653223)), 0.0};
+    const double tol = double_of(UINT64_C(0x3f1a36e2eb1c432d)); /* 1e-4 s */
+    size_t len = 0;
+    CHECK(sl_access_sgp4(sat, NULL, &start, 86400.0, &station, 1, 0.0, tol, NULL, 0, &len) ==
+          SL_OK);
+    CHECK(len == 7);
+    sl_station_window windows[7];
+    if (len == 7) {
+        CHECK(sl_access_sgp4(sat, NULL, &start, 86400.0, &station, 1, 0.0, tol, windows, 7, &len) ==
+              SL_OK);
+        CHECK(windows[0].station == 0 && windows[6].station == 0);
+        CHECK(bits_of(windows[0].rise_s) == UINT64_C(0x40c63d3ac7bf9576));
+        CHECK(bits_of(windows[0].set_s) == UINT64_C(0x40c72a7e29061a55));
+        CHECK(bits_of(windows[6].rise_s) == UINT64_C(0x40e66a78969f9284));
+        CHECK(bits_of(windows[6].set_s) == UINT64_C(0x40e6ac487e2a41c2));
+    }
+
+    size_t untouched = 99;
+    CHECK(sl_access_sgp4(sat, NULL, &start, 86400.0, &station, 1, 2.0, tol, NULL, 0,
+                         &untouched) == SL_ERR_INVALID_ARGUMENT);
+    CHECK(untouched == 99);
+    sl_sgp4_close(sat);
+}
+
 int main(void) {
     the_layout_is_the_one_the_library_assumes();
     the_version_string_sizes_itself();
@@ -2863,6 +2911,7 @@ int main(void) {
     the_cloud_mask_symbols_are_here_whatever_the_build();
     the_control_surface_closes_its_own_loop();
     the_time_scales_answer_the_rust_values_to_the_bit();
+    the_access_windows_answer_the_rust_values_to_the_bit();
 
     if (failures != 0) {
         fprintf(stderr, "%d check(s) failed\n", failures);

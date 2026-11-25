@@ -272,6 +272,8 @@ pub struct Satellite {
     convention: Convention,
     /// The Brouwer mean motion `n₀"`, rad/min — the un-Kozai'd value the model runs on.
     brouwer_mean_motion: f64,
+    /// The element set's mean eccentricity.
+    eccentricity: f64,
     regime: Regime,
 }
 
@@ -393,6 +395,7 @@ impl Satellite {
             constants,
             convention,
             brouwer_mean_motion: orbit.mean_motion,
+            eccentricity: elements.eccentricity,
             regime: Regime::classify(orbit.mean_motion, elements.eccentricity),
         })
     }
@@ -426,6 +429,15 @@ impl Satellite {
     #[must_use]
     pub const fn brouwer_mean_motion(&self) -> f64 {
         self.brouwer_mean_motion
+    }
+
+    /// The element set's mean eccentricity, as the TLE prints it.
+    ///
+    /// With [`Self::brouwer_mean_motion`] it fixes the mean orbit's perigee speed and apogee
+    /// radius, which bound how fast the satellite can move over the ground.
+    #[must_use]
+    pub const fn eccentricity(&self) -> f64 {
+        self.eccentricity
     }
 
     /// The element-set epoch, as the UTC label the elements carry.

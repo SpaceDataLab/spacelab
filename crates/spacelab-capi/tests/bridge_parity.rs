@@ -273,3 +273,60 @@ fn both_bridges_name_the_same_time_surface() {
         );
     }
 }
+
+/// The access scans, capability for capability, on both bridges (Ф31.C). Both sections are read
+/// whole, so a scan added to one bridge and not the other fails here.
+#[test]
+fn both_bridges_name_the_same_access_surface() {
+    const FUNCTIONS: [&str; 1] = ["access_sgp4"];
+
+    let header = read("include/spacelab.h");
+    let (_, section) = header
+        .split_once("/* ---- Access on any ephemeris (Ф31.C) ---- */")
+        .expect("the header still has an access banner");
+    let (section, _) = section
+        .split_once("/* ---- Semi-analytical propagation (DSST) ---- */")
+        .expect("the DSST banner still follows it");
+    let declared: BTreeSet<&str> = section
+        .lines()
+        .filter_map(|line| Some(line.strip_prefix("sl_status sl_")?.split_once('(')?.0))
+        .collect();
+    assert_eq!(
+        declared,
+        FUNCTIONS.into_iter().collect(),
+        "the C access section"
+    );
+
+    let bridge = read("../spacelab-python/src/lib.rs");
+    let (_, section) = bridge
+        .split_once("// Access on any ephemeris (Ф31.C).")
+        .expect("the bridge still has an access banner");
+    let (section, _) = section
+        .split_once("// Time scales and Earth orientation (Ф31.B).")
+        .expect("the time banner still follows it");
+    let mut functions = BTreeSet::new();
+    let mut pending = false;
+    for line in section.lines() {
+        if line.trim_start() == "#[pyfunction]" {
+            pending = true;
+        } else if let (true, Some(rest)) = (pending, line.strip_prefix("fn ")) {
+            functions.insert(rest.split_once('(').expect("a `fn` opens its arguments").0);
+            pending = false;
+        }
+    }
+    assert_eq!(
+        functions,
+        FUNCTIONS.into_iter().collect(),
+        "the Python access section"
+    );
+    let registrations: String = bridge.split_whitespace().collect();
+    for registered in [
+        "wrap_pyfunction!(access_sgp4,",
+        "m.add(\"PropagationError\",m.py().get_type::<PropagationError>())",
+    ] {
+        assert!(
+            registrations.contains(registered),
+            "the Python bridge never calls {registered}"
+        );
+    }
+}

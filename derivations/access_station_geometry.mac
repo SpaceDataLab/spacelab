@@ -1,0 +1,54 @@
+/* The station geometry and the SGP4 speed bound of crates/spacelab/src/access.rs (Ф31.C).
+
+   A station at geodetic (phi, lam, h) on the ellipsoid x^2/a^2 + y^2/a^2 + z^2/b^2 = 1,
+   b^2 = a^2 (1 - e2), sits at geodetic_to_itrf (spacelab-earth wgs84.rs):
+       N = a / sqrt(1 - e2 sin^2 phi),
+       P(h) = ((N + h) cos phi cos lam, (N + h) cos phi sin lam, (N (1 - e2) + h) sin phi).
+   Its zenith in access.rs is n = (cos phi cos lam, cos phi sin lam, sin phi). The claims, each a
+   residual that must reduce to 0:
+     1-3  P(h) = P(0) + h n: the station is its foot plus h along n, for every height;
+     4    P(0) is on the ellipsoid;
+     5-7  n is parallel to grad f at P(0): the zenith is the ellipsoid's normal at the foot;
+     8    |n| = 1;
+     9    g = d.n - s |d| equals |d| (sin eps - s), sin eps = d.n / |d|: g is the elevation's sign;
+    10    vis-viva at perigee, r = a (1 - e): v^2 = mu (1 + e) / (a (1 - e)), OrbitBound's v_p;
+    11    a = (mu / n^2)^(1/3) solves Kepler's third law n^2 a^3 = mu;
+    12    |w x r|^2 = |w|^2 |r|^2 - (w.r)^2 (Lagrange), so |v - w x r| <= |v| + |w| |r|.
+   The rate bound itself, |dg/dt| <= (1 + |s|) |rdot|, is derivations/step_bound.mac's. */
+
+declare([a, e2, h, phi, lam, s, mu, nn, ecc], real)$
+assume(a > 0, e2 >= 0, e2 < 1, mu > 0, nn > 0, ecc >= 0, ecc < 1)$
+
+N : a / sqrt(1 - e2 * sin(phi)^2)$
+P(hh) := [(N + hh) * cos(phi) * cos(lam), (N + hh) * cos(phi) * sin(lam),
+          (N * (1 - e2) + hh) * sin(phi)]$
+n : [cos(phi) * cos(lam), cos(phi) * sin(lam), sin(phi)]$
+
+z : P(h) - P(0) - h * n$
+for i : 1 thru 3 do print(sconcat("P(h) - P(0) - h n, component ", i, ":"), ratsimp(z[i]))$
+
+P0 : P(0)$
+b2 : a^2 * (1 - e2)$
+print("P(0) on the ellipsoid:",
+      trigsimp(ratsimp(P0[1]^2 / a^2 + P0[2]^2 / a^2 + P0[3]^2 / b2 - 1)))$
+
+grad : [2 * P0[1] / a^2, 2 * P0[2] / a^2, 2 * P0[3] / b2]$
+cr : [n[2] * grad[3] - n[3] * grad[2], n[3] * grad[1] - n[1] * grad[3],
+      n[1] * grad[2] - n[2] * grad[1]]$
+for i : 1 thru 3 do print(sconcat("n x grad f(P(0)), component ", i, ":"), trigsimp(ratsimp(cr[i])))$
+print("|n|^2 - 1:", trigsimp(n . n - 1))$
+
+d : [d1, d2, d3]$
+nd : sqrt(d . d)$
+print("g - |d| (sin eps - s):", ratsimp((d . n - s * nd) - nd * ((d . n) / nd - s)))$
+
+r_p : a * (1 - ecc)$
+print("vis-viva at perigee - OrbitBound's v_p^2:",
+      ratsimp(mu * (2 / r_p - 1 / a) - mu * (1 + ecc) / (a * (1 - ecc))))$
+
+ak : (mu / nn^2)^(1/3)$
+print("n^2 a^3 - mu:", radcan(nn^2 * ak^3 - mu))$
+
+w : [w1, w2, w3]$ r : [r1, r2, r3]$
+wxr : [w[2] * r[3] - w[3] * r[2], w[3] * r[1] - w[1] * r[3], w[1] * r[2] - w[2] * r[1]]$
+print("|w x r|^2 - (|w|^2 |r|^2 - (w.r)^2):", expand(wxr . wxr - ((w . w) * (r . r) - (w . r)^2)))$

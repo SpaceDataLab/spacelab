@@ -1304,6 +1304,7 @@ if have maxima; then
     mac_zeros scan_catalogue.mac 12 "scan-angle catalogue end points, antisymmetry and VIIRS extent"
     mac_zeros wgs84_geodesy.mac 13 "WGS 84 derived constants and both geodetic maps"
     mac_zeros ellipsoid_geodesic.mac 43 "geodesic integrands from the metric and Clairaut, the series to sixth order as Karney prints them and against the elliptic-integral form at 50 digits (G1), the astroid root"
+    mac_zeros access_station_geometry.mac 12 "a station is its foot plus h along the geodetic normal, that normal is the ellipsoid's, g is the elevation's sign, and the pieces of SGP4's speed bound"
     mac_zeros keplerian_elements.mac 44 "element <-> state maps invert each other on every branch; Kepler's equation, and its near-parabolic forms"
     mac_zeros brouwer_m2_phipps.mac 7 "Phipps' along-track drag drift of a, e and the mean anomaly from Kepler's third law"
     mac_zeros zonal_secular.mac 6 "the first-order J2 secular rates of both zonal mean-element propagators from Lagrange's equations"
@@ -1563,6 +1564,7 @@ if have gp; then
     second_engine multistatic_observables.gp "multistatic rates as numerical derivatives of the separation"
     second_engine radiometric_corona.gp "the corona electron column in arc length against its closed form"
     second_engine rpc00b_inverse.gp "the RPC inverse roots on the Pleiades fixture at 60 digits"
+    second_engine access_station_geometry.gp "the station geometry and SGP4's speed bound at 60 digits on 200 points"
 else
     skip "Ф17.B PARI gates" gp
 fi

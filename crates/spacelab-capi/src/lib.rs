@@ -4556,6 +4556,106 @@ pub unsafe extern "C" fn sl_figures_of_merit(
     })
 }
 
+// ── Access on any ephemeris (Ф31.C) ───────────────────────────────────────────────────────────
+
+/// `sl_station_window`: one access window of one station, seconds past the scan's start.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SlStationWindow {
+    /// The station's index in the array the scan was given.
+    pub station: usize,
+    /// When the satellite rises above the mask.
+    pub rise_s: f64,
+    /// When it sets below it.
+    pub set_s: f64,
+}
+
+/// The status of an access refusal: an argument the API refuses is `SL_ERR_INVALID_ARGUMENT`, an
+/// instant the frame chain cannot answer for `SL_ERR_DOMAIN`, and SGP4's own failure
+/// `SL_ERR_COMPUTE`, as `sl_sgp4_propagate_at` reports it.
+fn access_status(e: &spacelab::access::AccessError) -> i32 {
+    use spacelab::access::AccessError;
+    match e {
+        AccessError::Station
+        | AccessError::Mask
+        | AccessError::Interval
+        | AccessError::Tolerance => SL_ERR_INVALID_ARGUMENT,
+        AccessError::EarthOrientation { .. } => SL_ERR_DOMAIN,
+        AccessError::Propagation { .. } => SL_ERR_COMPUTE,
+    }
+}
+
+/// The access windows of an SGP4 satellite over `n_stations` stations on WGS 84. See the header.
+///
+/// # Safety
+/// `sat` is a live handle; `eop` is null or a live series; `start` points at one label; `stations`
+/// is readable for `n_stations`; `out` is null or writable for `cap` windows; `out_len` is
+/// writable for one `size_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sl_access_sgp4(
+    sat: *const SlSgp4,
+    eop: *const SlEopSeries,
+    start: *const SlUtcDateTime,
+    span_s: f64,
+    stations: *const SlGeodetic,
+    n_stations: usize,
+    mask_rad: f64,
+    tol_s: f64,
+    out: *mut SlStationWindow,
+    cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    guard(|| {
+        const WHO: &str = "sl_access_sgp4";
+        if sat.is_null() || start.is_null() || stations.is_null() || out_len.is_null() {
+            return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: null pointer"));
+        }
+        if let Err(status) = check_nonzero(WHO, "n_stations", n_stations) {
+            return status;
+        }
+        // SAFETY: checked non-null; the caller states each is live and initialised.
+        let (sat, l) = unsafe { (&*sat, *start) };
+        let source = if eop.is_null() {
+            spacelab::EopSource::NoEop
+        } else {
+            // SAFETY: checked non-null; the caller states the series is live.
+            spacelab::EopSource::Series(unsafe { &(*eop).series })
+        };
+        let start = match UtcDateTime::new(l.year, l.month, l.day, l.hour, l.minute, l.second) {
+            Ok(label) => label,
+            Err(err) => return fail(SL_ERR_INVALID_ARGUMENT, format!("{WHO}: start: {err}")),
+        };
+        // SAFETY: the caller states `stations` is readable for `n_stations`.
+        let stations = unsafe { core::slice::from_raw_parts(stations, n_stations) };
+        let mut found = Vec::new();
+        for (i, g) in stations.iter().enumerate() {
+            let windows =
+                spacelab::access::Station::geodetic(g.latitude_rad, g.longitude_rad, g.height_m)
+                    .and_then(|station| {
+                        spacelab::access::sgp4_windows(
+                            &sat.satellite,
+                            source,
+                            start,
+                            span_s,
+                            &station,
+                            mask_rad,
+                            tol_s,
+                        )
+                    });
+            match windows {
+                Ok(windows) => found.extend(windows.iter().map(|w| SlStationWindow {
+                    station: i,
+                    rise_s: w.rise,
+                    set_s: w.set,
+                })),
+                Err(e) => return fail(access_status(&e), format!("{WHO}: station {i}: {e}")),
+            }
+        }
+        // SAFETY: forwarding the caller's own contract on `out`, `cap` and `out_len`.
+        unsafe { deliver(&found, out, cap, out_len) }
+    })
+}
+
 // ── GNSS ──────────────────────────────────────────────────────────────────────────────────────
 
 /// `sl_gnss_system`: which constellation a broadcast record belongs to.
@@ -14614,6 +14714,7 @@ mod tests {
                 "sl_utc_datetime",
                 &["year", "month", "day", "hour", "minute", "second"][..],
             ),
+            ("sl_station_window", &["station", "rise_s", "set_s"][..]),
             (
                 "sl_leap_status",
                 &[

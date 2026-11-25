@@ -2635,6 +2635,7 @@ checksum = "5dd1c9b1b5d34e1e949deb0dac9ad612e20746c59eaa737e52fd29703c19ec5c"
 name = "spacelab"
 version = "0.3.0"
 dependencies = [
+ "libm",
  "spacelab-astro",
  "spacelab-autodiff",
  "spacelab-core",

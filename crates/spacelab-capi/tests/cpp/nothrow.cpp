@@ -1092,6 +1092,27 @@ void the_time_surface_reports_its_refusals_as_statuses() {
     CHECK(!not_c04 && not_c04.error() == SL_ERR_PARSE);
 }
 
+/* The access scan without exceptions: an answer or a status, and a refused mask is the latter. */
+void the_access_surface_reports_its_refusals_as_statuses() {
+    const spacelab::result<spacelab::sgp4> sat = spacelab::sgp4::open(LINE1, LINE2);
+    CHECK(sat.has_value());
+    if (!sat) {
+        return;
+    }
+    const spacelab::utc_datetime start{2008, 9, 20, 12, 0, 0.0};
+    const std::array<spacelab::geodetic, 1> station{{{0.6108652381980153, 0.5759586531581288, 0.0}}};
+    const spacelab::result<std::vector<spacelab::station_window>> day =
+        sat->try_access(nullptr, start, 86400.0, station, 0.0);
+    CHECK(day && day->size() == 7);
+    const spacelab::result<std::vector<spacelab::station_window>> masked =
+        sat->try_access(nullptr, start, 86400.0, station, 2.0);
+    CHECK(!masked && masked.error() == SL_ERR_INVALID_ARGUMENT);
+    const spacelab::utc_datetime early{1960, 1, 1, 0, 0, 0.0};
+    const spacelab::result<std::vector<spacelab::station_window>> before =
+        sat->try_access(nullptr, early, 3600.0, station, 0.0);
+    CHECK(!before && before.error() == SL_ERR_DOMAIN);
+}
+
 } // namespace
 
 int main() {
@@ -1115,6 +1136,7 @@ int main() {
     the_cloud_masker_is_a_factory_without_exceptions();
     the_control_surface_reports_every_wall_as_a_status();
     the_time_surface_reports_its_refusals_as_statuses();
+    the_access_surface_reports_its_refusals_as_statuses();
 
     if (failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failures);

@@ -5753,6 +5753,102 @@ fn shapiro_delay(r_emitter: f64, r_receiver: f64, path: f64, gm: f64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Access on any ephemeris (Ф31.C). The Rust API is `spacelab::access`, and each function here is
+// its scan over a list of stations, station by station: angles in radians as the API takes them,
+// so that every window comes back with the Rust bits, and a batch with one refused station
+// returns nothing.
+// ---------------------------------------------------------------------------------------------
+
+pyo3::create_exception!(
+    spacedatalab,
+    PropagationError,
+    PyValueError,
+    "SGP4 could not answer at an instant a scan probed: the object decayed, or its mean elements \
+     left the model's domain."
+);
+
+/// The exception an access refusal is raised as: an argument the API refuses is a `ValueError`,
+/// an instant the frame chain cannot answer for the time error that says why, and SGP4's own
+/// failure `PropagationError`.
+fn access_err(e: &spacelab::access::AccessError, message: String) -> PyErr {
+    use spacelab::access::AccessError;
+    match e {
+        AccessError::Station
+        | AccessError::Mask
+        | AccessError::Interval
+        | AccessError::Tolerance => PyValueError::new_err(message),
+        AccessError::EarthOrientation { error, .. } => match error {
+            spacelab::EarthOrientationError::Leap(_) => LeapSecondError::new_err(message),
+            spacelab::EarthOrientationError::Eop(e) => eop_err(e, message),
+        },
+        AccessError::Propagation { .. } => PropagationError::new_err(message),
+    }
+}
+
+/// The access windows of a TLE's satellite over `stations` on WGS 84, as `(station, rise_s,
+/// set_s)` tuples grouped by station in the order given, and in time order within each.
+///
+/// A station is `(latitude_rad, longitude_rad, height_m)`, geodetic. The satellite is visible
+/// when its geometric elevation above the plane normal to the ellipsoid at the station is at least
+/// `mask_rad`; refraction is the caller's (`Sensor.elevation_apparent` converts an apparent mask).
+/// SGP4 runs in TEME and is taken to ITRF with the Earth orientation of `eop`, or none: `UT1 = UTC`
+/// and no polar motion. The scan covers `span_s` seconds past the UTC label `start` on the naive
+/// UTC coordinate SGP4 itself uses, so a window across a leap second reads a second short; edges
+/// are refined to `tol_s` seconds, and a window open at either end of the span is clamped to it.
+///
+/// No window at least a billionth of the span long is missed, under the hypothesis that the scan's
+/// rate bound -- the mean orbit's perigee speed plus the Earth's rotation at its apogee, times 1.1
+/// -- bounds how fast the elevation constraint changes. It is tested on the reference scans, not
+/// proved for SGP4. The windows are the Rust API's to the bit.
+///
+/// Raises `ValueError` for a malformed TLE, a label the calendar refuses, a latitude outside
+/// `[-pi/2, pi/2]` or a coordinate that is not finite, a mask not strictly inside
+/// `(-pi/2, pi/2)`, or a span or tolerance not finite and positive; `LeapSecondError` or
+/// `EopRangeError` for an instant the leap-second table or the series cannot answer for; and
+/// `PropagationError` where SGP4 fails. The message names the station.
+#[pyfunction]
+#[pyo3(signature = (line1, line2, start, span_s, stations, mask_rad, tol_s = 1e-3, eop = None))]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the satellite, the scan's interval, the stations, the mask and the Earth orientation \
+              are each a distinct question"
+)]
+fn access_sgp4(
+    py: Python<'_>,
+    line1: &str,
+    line2: &str,
+    start: UtcLabel,
+    span_s: f64,
+    stations: Vec<(f64, f64, f64)>,
+    mask_rad: f64,
+    tol_s: f64,
+    eop: Option<&PyEopSeries>,
+) -> PyResult<Vec<(usize, f64, f64)>> {
+    let satellite = Satellite::from_tle(line1, line2)
+        .map_err(|e| PyValueError::new_err(format!("invalid TLE: {e}")))?;
+    let (year, month, day, hour, minute, second) = start;
+    let start = UtcDateTime::new(year, month, day, hour, minute, second)
+        .map_err(|e| PyValueError::new_err(format!("start: {e}")))?;
+    let source = eop.map_or(spacelab::EopSource::NoEop, |s| {
+        spacelab::EopSource::Series(&s.inner)
+    });
+    py.detach(|| {
+        let mut found = Vec::new();
+        for (i, &(latitude, longitude, height)) in stations.iter().enumerate() {
+            let windows = spacelab::access::Station::geodetic(latitude, longitude, height)
+                .and_then(|station| {
+                    spacelab::access::sgp4_windows(
+                        &satellite, source, start, span_s, &station, mask_rad, tol_s,
+                    )
+                })
+                .map_err(|e| access_err(&e, format!("station {i}: {e}")))?;
+            found.extend(windows.iter().map(|w| (i, w.rise, w.set)));
+        }
+        Ok(found)
+    })
+}
+
+// ---------------------------------------------------------------------------------------------
 // Time scales and Earth orientation (Ф31.B). UTC crosses as the calendar label
 // `(year, month, day, hour, minute, second)`, because a leap second has a label and no count; an
 // epoch crosses as integer nanoseconds since J2000 on its own scale, the `epoch_*_ns` the
@@ -6855,6 +6951,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("LeapSecondError", m.py().get_type::<LeapSecondError>())?;
     m.add("EopParseError", m.py().get_type::<EopParseError>())?;
     m.add("EopRangeError", m.py().get_type::<EopRangeError>())?;
+    m.add("PropagationError", m.py().get_type::<PropagationError>())?;
+    m.add_function(wrap_pyfunction!(access_sgp4, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tai, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tt, m)?)?;
     m.add_function(wrap_pyfunction!(utc_to_tdb, m)?)?;
@@ -10086,6 +10184,142 @@ mod interpreter_tests {
             (shifted / got - 1.0).abs() < 0.05,
             "same local time gave {shifted} against {got}"
         );
+    }
+
+    /// The access scan (Ф31.C) under `cargo test`, where the mutation harness can see it: the
+    /// windows are `spacelab::access::sgp4_windows`'s to the bit, station by station in the order
+    /// given, and each refusal is raised as the exception its kind names. `bindings.py` holds the
+    /// same entry point to the whole reference file from an installed wheel.
+    #[test]
+    fn the_access_scan_is_the_rust_api_and_types_its_refusals() {
+        const L1: &str = "1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927";
+        const L2: &str = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+        const DECAYING: (&str, &str) = (
+            "1 28872U 05037B   05333.02012661  .25992681  00000-0  24476-3 0  1534",
+            "2 28872  96.4736 157.9986 0303955 244.0492 110.6523 16.46015938 10708",
+        );
+        let start: UtcLabel = (2008, 9, 20, 12, 0, 0.0);
+        let stations = vec![(0.61, 0.57, 0.0), (-0.59, 0.32, 100.0)];
+        Python::attach(|py| {
+            let got = access_sgp4(
+                py,
+                L1,
+                L2,
+                start,
+                43_200.0,
+                stations.clone(),
+                0.0,
+                1e-3,
+                None,
+            )
+            .expect("an answered scan");
+            let satellite = Satellite::from_tle(L1, L2).expect("the TLE parses");
+            let label = UtcDateTime::new(2008, 9, 20, 12, 0, 0.0).expect("a label");
+            let mut want = Vec::new();
+            for (i, &(lat, lon, h)) in stations.iter().enumerate() {
+                let station = spacelab::access::Station::geodetic(lat, lon, h).expect("a station");
+                let windows = spacelab::access::sgp4_windows(
+                    &satellite,
+                    spacelab::EopSource::NoEop,
+                    label,
+                    43_200.0,
+                    &station,
+                    0.0,
+                    1e-3,
+                )
+                .expect("an answered scan");
+                want.extend(
+                    windows
+                        .iter()
+                        .map(|w| (i, w.rise.to_bits(), w.set.to_bits())),
+                );
+            }
+            let got_bits: Vec<_> = got
+                .iter()
+                .map(|&(i, r, s)| (i, r.to_bits(), s.to_bits()))
+                .collect();
+            assert!(want.len() > 4, "too few windows to mean anything");
+            assert_eq!(got_bits, want);
+
+            let finals = std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../spacelab/tests/fixtures/finals2000A_2025001.txt"
+            ))
+            .expect("an IERS fixture");
+            let series = PyEopSeries::parse_finals2000a(&finals).expect("the fixture parses");
+            let one = vec![(0.61, 0.57, 0.0)];
+            let cases: [(PyResult<Vec<(usize, f64, f64)>>, &str); 6] = [
+                (
+                    access_sgp4(py, L1, L2, start, 3_600.0, one.clone(), 2.0, 1e-3, None),
+                    "ValueError",
+                ),
+                (
+                    access_sgp4(
+                        py,
+                        L1,
+                        L2,
+                        start,
+                        3_600.0,
+                        vec![(2.0, 0.0, 0.0)],
+                        0.0,
+                        1e-3,
+                        None,
+                    ),
+                    "ValueError",
+                ),
+                (
+                    access_sgp4(py, L1, L2, start, -1.0, one.clone(), 0.0, 1e-3, None),
+                    "ValueError",
+                ),
+                (
+                    access_sgp4(
+                        py,
+                        L1,
+                        L2,
+                        (1960, 1, 1, 0, 0, 0.0),
+                        3_600.0,
+                        one.clone(),
+                        0.0,
+                        1e-3,
+                        None,
+                    ),
+                    "LeapSecondError",
+                ),
+                (
+                    access_sgp4(
+                        py,
+                        L1,
+                        L2,
+                        start,
+                        3_600.0,
+                        one.clone(),
+                        0.0,
+                        1e-3,
+                        Some(&series),
+                    ),
+                    "EopRangeError",
+                ),
+                (
+                    access_sgp4(
+                        py,
+                        DECAYING.0,
+                        DECAYING.1,
+                        (2005, 11, 29, 0, 0, 0.0),
+                        864_000.0,
+                        one,
+                        0.0,
+                        1e-3,
+                        None,
+                    ),
+                    "PropagationError",
+                ),
+            ];
+            for (result, kind) in cases {
+                let e = result.expect_err("a refused scan");
+                let name = e.get_type(py).name().expect("a type name").to_string();
+                assert_eq!(name, kind, "{e}");
+            }
+        });
     }
 
     /// Speed of light, m/s — the constant the two differenced observables are stated in.

@@ -4788,6 +4788,7 @@ phantom to avoid — the blind spot of #260, convenient for once.
 | Enum tags, struct field order and arity | `#[repr(C)]` layout | the header text, parsed | exact | src/lib.rs |
 | `sl_teme_to_itrf`, `sl_gcrf_to_itrf` | §1 transforms | the `spacelab-frames` function the binding calls | bit-exact | src/lib.rs |
 | `sl_utc_to_tai` / `_tt` / `_tdb` / `_ut1`, `sl_tai_to_utc`, `sl_leap_table_status`, `sl_eop_series_*` (Ф31.B) | IERS `leap-seconds.list`; `finals2000A` and EOP 20 C04 | `crates/spacelab/tests/fixtures/bridge_time_reference.tsv`, the Rust API on every IERS case in the tree — every leap-second step of the list, every node of the seven EOP fixtures and the gaps and edges between them — which `crates/spacelab/tests/bridge_time_reference.rs` holds to the API byte for byte; batch ≡ singles | bit-exact (`to_bits`) on all 1 256 rows; each refusal the status its kind names, nothing written; the one label past `int64_t` (2300) is `SL_ERR_DOMAIN` by name; `just capi` 12/12 | tests/time_scales.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
+| `sl_access_sgp4` (Ф31.C) | `spacelab::access::sgp4_windows`: SGP4 → ITRF, the WGS-84 geodetic zenith, a geometric mask, the rate-bounded scan of `spacelab-coverage` | `crates/spacelab/tests/fixtures/bridge_access_reference.tsv`, the Rust API on 16 SGP4 scans — seven answered (the ISS with and without the IERS series, a sun-synchronous orbit, a Molniya, a geostationary satellite, a negative mask) and nine refused, one per refusal kind — which `crates/spacelab/tests/bridge_access_reference.rs` holds to the API byte for byte; batch ≡ one station at a time | bit-exact (`to_bits`) on all 177 windows; each refusal the status its kind names, nothing written; a short buffer and null pointers refused | tests/access.rs, tests/bridge_parity.rs, tests/c/smoke.c, tests/cpp/smoke.cpp, tests/cpp/nothrow.cpp |
 | `sl_itrf_to_geodetic` / `sl_geodetic_to_itrf` | WGS84 | round-trip, and the crate function | 3 637 891.0 m ± 1.0 measured; round-trip < 1e-6 | src/lib.rs, tests/cpp/smoke.cpp |
 | `sl_sgp4_*` (open / at / batch / one-shot) | §2 SGP4 | the `Sgp4` propagator; batch ≡ singles | bit-exact; ISS radius 6 720 189.23 m ± 0.01 | src/lib.rs, tests/cpp/smoke.cpp |
 | `sl_lambert` | §3 Izzo | closure: fly the returned `v1`, arrive at `r2`; 1e-5 rad from a half turn and on a 1e-5 rad short arc, the 100-digit arc (§3.5) | < 1e-6 m; ≤ 16u/δ of `\|v1\|` | src/lib.rs, tests/cpp/smoke.cpp |
@@ -4927,11 +4928,11 @@ are deliberately **self-checking rather than golden**: a copied constant agrees 
 argument, so instead each one either feeds a solver the answer to its own question, asserts an
 invariant only the correct wiring satisfies, or injects a bias the routine must recover exactly.
 
-There is now a Rust-side rung under them as well — 114 `#[test]` in `lib.rs`, written to the same
-rule and measured by mutation rather than by coverage. 46 of them need an interpreter in the
+There is now a Rust-side rung under them as well — 115 `#[test]` in `lib.rs`, written to the same
+rule and measured by mutation rather than by coverage. 47 of them need an interpreter in the
 test process and are gated behind `test-interpreter`, which is what
 `cargo test -p spacelab-python --no-default-features --features test-interpreter` turns on; the other
-68 run in an ordinary `cargo test --workspace`. One of the 46 also needs `onnx`, because
+68 run in an ordinary `cargo test --workspace`. One of the 47 also needs `onnx`, because
 `cloud_mask` is only compiled with it. What they reach and what they cannot is `spacelab-python`'s
 entry in §8.
 
@@ -4981,6 +4982,7 @@ absent, and the distinction is the kind of thing that reads as coverage when it 
 | RPC block adjustment | Grodecki & Dial 2003 RPC bias model | an injected constant image bias | < 1e-6 px | tests/bindings.py |
 | Gram–Schmidt pan-sharpen | Gram–Schmidt spectral sharpening | identity when the pan adds no detail | < 1e-12 | tests/bindings.py |
 | Time scales and Earth orientation (Ф31.B): `utc_to_tai` / `_tt` / `_tdb` / `_ut1`, `tai_to_utc`, `leap_table_status`, `EopSeries` | the Rust API, on the IERS cases in the tree | the same reference file as the C ABI, row for row; batch ≡ singles; each refusal raised as the exception its kind names (`ValueError` for the calendar, `LeapSecondError`, `EopRangeError`, `EopParseError`), and the C ABI's surface name for name (`tests/bridge_parity.rs`) | bit-exact on all 1 256 rows, the label past `int64_t` included | tests/bindings.py |
+| Access windows (Ф31.C): `access_sgp4`, `PropagationError` | the Rust API, on its reference scans | the same reference file as the C ABI, scan for scan; the whole station list and each station alone; each refusal raised as the exception its kind names (`ValueError`, `LeapSecondError`, `EopRangeError`, `PropagationError`); the C ABI's surface name for name (`tests/bridge_parity.rs`) | bit-exact on all 177 windows and 9 refusals | tests/bindings.py, src/lib.rs |
 | The export surface itself | internal API contract (the export surface) | every public name appears in a test file | 0 unnamed | tests/bindings.py |
 
 The last row is a tripwire, not a proof — naming is not testing. It exists because the failure it
@@ -11965,7 +11967,7 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today, in the public tree: 334 modules, 248 name a check, 86 do
+(`plans/16` Ф17.B orders them). **Today, in the public tree: 335 modules, 249 name a check, 86 do
 not** — no physics module, 26 parsers, 4 generated and 56 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
 the last 42 — GNSS, SLR, the NeQuick ionosphere, earthvision, signal, vision, sensors and
 astrometry (`earthvision/sfm.rs` and `cloud.rs` hold no formula of their own and moved to

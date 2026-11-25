@@ -403,6 +403,16 @@ scope:
   and do not reach the bridges; nor do the series' reference frame (`EopSeries::frame`), its raw rows
   or the subdaily correction. The C ABI carries an epoch as `int64_t` nanoseconds, so it refuses a
   label from April 2292 on with `SL_ERR_DOMAIN`, where Python's integers carry the epoch.
+- **Access windows reach the bridges from SGP4 only, and their completeness rests on a tested
+  hypothesis.** `sl_access_sgp4` and `access_sgp4` (Ф31.C) scan an element set over stations on
+  WGS 84 with a geometric mask, composing the frame chain from a series handle or from none. A
+  tabulated ephemeris (OEM, SP3, a numerical propagator's output), a zone as a polygon with geodesic
+  edges, and root isolation on the Taylor polynomial (Ф22.C, not yet written) are in neither bridge.
+  A scan misses no window longer than a billionth of its span only if its rate bound — the element
+  set's mean-orbit perigee speed plus the Earth's rotation at apogee, times 1.1 — bounds the rate of
+  the elevation constraint. `crates/spacelab/tests/bridge_access_reference.rs` samples that rate on
+  every reference scan, where its largest difference quotient reaches 0.84 of the bound; nothing
+  proves it for SGP4's formulas.
 - **`spacelab-astrometry` is otherwise Rust-only.** Exposing aberration in both bridges was the first
   time either depended on the crate at all; plate solving, TAN/SIP world coordinates, blind asterism
   matching and streak reduction are still unreachable from C and from Python. That is the #319 drift

@@ -2463,6 +2463,123 @@ def test_time_refusals_are_typed_and_take_the_whole_batch():
     assert sl.tai_to_utc([]) == [] and s.at([])["quality"] == []
 
 
+# The exception each refusal kind of the access reference is raised as (Ф31.C): an argument the
+# API refuses is a plain `ValueError`, the rest the subclass that names what could not answer.
+_ACCESS_REFUSAL = {
+    "mask": ValueError,
+    "interval": ValueError,
+    "tolerance": ValueError,
+    "station": ValueError,
+    "out-of-range": sl.EopRangeError,
+    "gap": sl.EopRangeError,
+    "before-1972": sl.LeapSecondError,
+    "outside-calendar": sl.LeapSecondError,
+    "decayed": sl.PropagationError,
+    "diverged": sl.PropagationError,
+}
+
+
+def _access_scans():
+    """The scans of `bridge_access_reference.tsv`, each with its stations and the Rust answer."""
+    path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "spacelab",
+        "tests",
+        "fixtures",
+        "bridge_access_reference.tsv",
+    )
+    scans, rows = [], 0
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("#"):
+                continue
+            rows += 1
+            f = line.rstrip("\n").split("\t")
+            if f[0] == "scan":
+                scans.append(
+                    {
+                        "name": f[1],
+                        "tle": (f[2], f[3]),
+                        "eop": None if f[4] == "none" else f[4],
+                        "start": _label(f[5:11]),
+                        "span": _f64_of(f[11]),
+                        "mask": _f64_of(f[12]),
+                        "tol": _f64_of(f[13]),
+                        "stations": [],
+                        "windows": [],
+                        "refused": None,
+                    }
+                )
+                continue
+            scan = scans[-1]
+            assert f[1] == scan["name"], f"a row outside its scan: {line}"
+            if f[0] == "station":
+                scan["stations"].append(tuple(_f64_of(x) for x in f[3:6]))
+            elif f[0] == "window":
+                scan["windows"].append((int(f[2]), f[3], f[4]))
+            elif f[0] == "refused":
+                scan["refused"] = f[2]
+            else:
+                raise AssertionError(f"an unknown row kind {f[0]}")
+    return scans, rows
+
+
+def test_access_windows_return_the_rust_reference_to_the_bit():
+    """Every scan of the Rust API's access reference, through the bridge, to the bit (S2).
+
+    `crates/spacelab/tests/bridge_access_reference.rs` holds the file to `spacelab::access` and the
+    API to its mathematics; the C ABI's `tests/access.rs` holds the C ABI to the same file. Here the
+    whole station list goes in one call and then each station alone: every window must come back
+    with the same bits in the same order, every refusal as the exception its kind names, and every
+    row of the file is counted.
+    """
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    scans, rows = _access_scans()
+    counted, windows, refusals = 0, 0, 0
+    for scan in scans:
+        counted += 1 + len(scan["stations"]) + len(scan["windows"])
+        counted += scan["refused"] is not None
+        eop = None
+        if scan["eop"] is not None:
+            with open(os.path.join(root, scan["eop"]), encoding="utf-8") as handle:
+                eop = sl.EopSeries.parse_finals2000a(handle.read())
+        args = (*scan["tle"], scan["start"], scan["span"])
+        tail = (scan["mask"], scan["tol"], eop)
+        if scan["refused"] is not None:
+            kind = scan["refused"]
+            try:
+                sl.access_sgp4(*args, scan["stations"], *tail)
+            except ValueError as e:
+                assert type(e) is _ACCESS_REFUSAL[kind], (
+                    f"{scan['name']}: {kind} raised {type(e).__name__}: {e}"
+                )
+                refusals += 1
+                continue
+            raise AssertionError(f"{scan['name']}: {kind} was answered")
+        got = [
+            (i, _bits(rise), _bits(set_))
+            for i, rise, set_ in sl.access_sgp4(*args, scan["stations"], *tail)
+        ]
+        assert got == scan["windows"], scan["name"]
+        windows += len(got)
+        for i, station in enumerate(scan["stations"]):
+            alone = [(_bits(r), _bits(t)) for _, r, t in sl.access_sgp4(*args, [station], *tail)]
+            assert alone == [(r, t) for j, r, t in scan["windows"] if j == i], (
+                f"{scan['name']}: station {i} alone"
+            )
+    assert counted == rows, "a row of the reference was not read"
+    assert windows > 100 and refusals >= 9, "the reference lost its cases"
+    assert sl.access_sgp4(*scans[0]["tle"], scans[0]["start"], 3600.0, [], 0.0) == []
+    try:
+        sl.access_sgp4("1 25544U", "2 25544", scans[0]["start"], 3600.0, [(0.0, 0.0, 0.0)], 0.0)
+    except ValueError as e:
+        assert type(e) is ValueError and "TLE" in str(e), e
+    else:
+        raise AssertionError("a malformed TLE was answered")
+
+
 def test_every_export_is_named_by_a_test():
     """No public binding may exist without a test file naming it.
 

@@ -1083,6 +1083,44 @@ sl_status sl_access_windows(double a_m, double inclination_rad, double raan_rad,
 sl_status sl_figures_of_merit(const sl_coverage_metrics *cells, size_t n, const double *weights,
                               sl_constellation_fom *out);
 
+/* ---- Access on any ephemeris (Ф31.C) ---- */
+
+/* One access window of one station: its index in the stations array, and the window in seconds
+ * past the scan's start. */
+typedef struct {
+    size_t station;
+    double rise_s;
+    double set_s;
+} sl_station_window;
+
+/*
+ * The windows on [0, span_s] past `start` in which an SGP4 satellite stands at least `mask_rad`
+ * above the geodetic horizon of each of `n_stations` stations on WGS 84, every edge refined to
+ * `tol_s` seconds. Windows come grouped by station, in station order, and in time order within a
+ * station; one open at the start or at the end of the span is clamped to it. Two-call protocol.
+ *
+ * The model is `spacelab::access`'s: the zenith is the ellipsoid's normal at the station, the mask
+ * a geometric elevation (refraction is the caller's), SGP4 in TEME taken to ITRF with the Earth
+ * orientation `eop` gives -- NULL means none: UT1 = UTC and no polar motion. Times run on the naive
+ * UTC coordinate SGP4 itself uses, so a window across a leap second reads a second short.
+ *
+ * What the scan guarantees: no window at least a billionth of the span long is missed, under the
+ * hypothesis that its rate bound -- the mean orbit's perigee speed plus the Earth's rotation at its
+ * apogee, times 1.1 -- bounds how fast the elevation constraint changes. That bound is tested on
+ * the reference scans, not proved for SGP4. The windows are the Rust API's to the bit.
+ *
+ * SL_ERR_INVALID_ARGUMENT for a null pointer, a zero `n_stations`, a start label the calendar
+ * refuses, a latitude outside [-pi/2, pi/2] or a coordinate that is not finite, a mask not strictly
+ * inside (-pi/2, pi/2), a span or tolerance not finite and positive, or a span ending outside the
+ * calendar; SL_ERR_DOMAIN for an instant the leap-second table or the series cannot answer for;
+ * SL_ERR_COMPUTE where SGP4 fails -- the object decayed. The message names the station. A refused
+ * scan writes nothing, `*out_len` included.
+ */
+sl_status sl_access_sgp4(const sl_sgp4 *sat, const sl_eop_series *eop,
+                         const sl_utc_datetime *start, double span_s, const sl_geodetic *stations,
+                         size_t n_stations, double mask_rad, double tol_s, sl_station_window *out,
+                         size_t cap, size_t *out_len);
+
 /* ---- Semi-analytical propagation (DSST) ---- */
 
 /*

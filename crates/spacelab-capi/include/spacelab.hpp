@@ -83,6 +83,7 @@ using sensor = ::sl_sensor;
 using coverage_metrics = ::sl_coverage_metrics;
 using constellation_fom = ::sl_constellation_fom;
 using window = ::sl_window;
+using station_window = ::sl_station_window;
 using gnss_state = ::sl_gnss_state;
 using glonass_state = ::sl_glonass_state;
 using gnss_system = ::sl_gnss_system;
@@ -481,6 +482,9 @@ class eop_series {
 #endif
 
   private:
+    /* `sgp4::try_access` hands the series to the C side. */
+    friend class sgp4;
+
     explicit eop_series(::sl_eop_series *raw) : handle_(raw) {}
 
     template <class Parse>
@@ -563,9 +567,43 @@ class sgp4 {
                           : detail::failure<std::vector<state>>(s);
     }
 
+    /*
+     * The access windows over `stations` on WGS 84; see `sl_access_sgp4`. `eop` is null for no
+     * Earth orientation. No station is an empty answer.
+     */
+    [[nodiscard]] result<std::vector<station_window>>
+    try_access(const eop_series *eop, const utc_datetime &start, double span_s,
+               std::span<const geodetic> stations, double mask_rad, double tol_s = 1e-3) const {
+        if (stations.empty()) {
+            return std::vector<station_window>{};
+        }
+        using many = std::vector<station_window>;
+        const ::sl_eop_series *series = eop == nullptr ? nullptr : eop->handle_.get();
+        // The two-call protocol of `detail::sized`, which is declared after this class.
+        const auto call = [&](station_window *out, std::size_t cap, std::size_t *len) {
+            return ::sl_access_sgp4(handle_.get(), series, &start, span_s, stations.data(),
+                                    stations.size(), mask_rad, tol_s, out, cap, len);
+        };
+        std::size_t len = 0;
+        ::sl_status s = call(nullptr, 0, &len);
+        if (s != SL_OK) {
+            return detail::failure<many>(s);
+        }
+        many out(len);
+        s = call(out.data(), out.size(), &len);
+        return s == SL_OK ? result<many>(std::move(out)) : detail::failure<many>(s);
+    }
+
 #if defined(__cpp_exceptions)
     sgp4(const std::string &line1, const std::string &line2)
         : sgp4(detail::unwrap(open(line1, line2))) {}
+
+    [[nodiscard]] std::vector<station_window> access(const eop_series *eop,
+                                                     const utc_datetime &start, double span_s,
+                                                     std::span<const geodetic> stations,
+                                                     double mask_rad, double tol_s = 1e-3) const {
+        return detail::unwrap(try_access(eop, start, span_s, stations, mask_rad, tol_s));
+    }
 
     [[nodiscard]] state at(double minutes) const {
         return detail::unwrap(try_at(minutes));

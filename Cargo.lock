@@ -3006,6 +3006,9 @@ dependencies = [
 [[package]]
 name = "spacelab-testkit"
 version = "0.3.0"
+dependencies = [
+ "libm",
+]
 
 [[package]]
 name = "spacelab-vision"

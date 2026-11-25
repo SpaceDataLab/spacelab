@@ -1449,6 +1449,7 @@ if have maxima; then
     mac_zeros sampling_transforms.mac 13 "Box-Muller, Cholesky sampling and the xoshiro256++ recurrences"
     mac_zeros conjunction_pc.mac 32 "Foster, Patera and Chan collision probability against the defining integral"
     mac_zeros screening_tca.mac 19 "closest approach as the root of the range rate; the radial filter bound"
+    mac_zeros screening_set.mac 38 "the synthetic screening set's key: coplanar, crossing and comoving minima in closed form, every key re-derived from the fixture and bracketed on the Cartesian motion, the radial bound over all pairs, four planted wrong keys caught"
     mac_zeros lincov_recursion.mac 15 "linear covariance analysis from the error dynamics"
     mac_zeros measurement_modifiers.mac 8 "Shapiro delay in PPN form and its partials"
     mac_zeros multistatic_fdoa.mac 5 "FDOA as the first-order term of the relativistic Doppler law"
@@ -1610,7 +1611,7 @@ if have gp; then
         density_calibration_ridge \
         wind_model_vsh attitude_law_frames analytic_ephemeris eclipse_beta thermosphere_legendre_terms nrlmsise00_flux_domain \
         chi_square_quantiles robust_weights se3_exponential log1p_expm1_sites particle_resampling sampling_transforms \
-        conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \
+        conjunction_pc screening_tca screening_set lincov_recursion measurement_modifiers exact_predicates \
         hull_delaunay spherical_triangle igrf_synthesis geomagnetic_dipole attitude_control gmst82 \
         cio_rotation gnss_combinations klobuchar_reference gpt3_evaluation gps_broadcast_orbit glonass_pz90_motion slr_two_way_range \
         kronrod_g7k15 cll_panel nequick_fourier gauss2_richardson swath_sphere observation_geometry angle_from_vectors \

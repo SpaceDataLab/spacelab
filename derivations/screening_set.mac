@@ -1,0 +1,222 @@
+/* The synthetic all-against-all screening set of plan 18 Ф21.O (D-47) -- the answer key of
+ * crates/spacelab-testkit/tests/fixtures/screening_set.txt, re-derived. derivations/screening_set.gp
+ * wrote the file; this file shares no code with it, reads only the file, and re-derives every key
+ * from the integers that define the objects.
+ *
+ * Shown symbolically, each line printing `<name>: 0`:
+ *   1. the set's orbit frame: p, q unit and orthogonal, h = p x q, h x p = q, h x q = -p, and the
+ *      velocity r n (-p sin u + q cos u) the derivative of the position r (p cos u + q sin u);
+ *   2. measured from l = p cos s + q sin s, a unit vector of the plane, the position is
+ *      r (l cos(u - s) + (h x l) sin(u - s)); Lagrange's identity gives (h_a x l).(h_b x l) = h_a.h_b
+ *      when l is orthogonal to both normals, so two planes through the mutual node l = h_a x h_b
+ *      may be put in the frame l = x, h_a = z, h_b = (0, -sin g, cos g);
+ *   3. one radius, planes crossing at g: |dr|^2 = 2 r^2 (1 - A cos d - B cos(2 th + d)), A = (1 +
+ *      cos g)/2, B = (1 - cos g)/2, d = th_b - th_a; dr . dv = 2 n r^2 B sin(2 th + d); at
+ *      2 th + d = 2 pi k the rate vanishes, its slope is 4 n^2 r^2 B > 0 for 0 < g < pi, and the
+ *      distance is 2 r cos(g/2) |sin(d/2)| -- these are all the minima, two per revolution;
+ *   4. one plane, two radii: |dr|^2 = ra^2 + rb^2 - 2 ra rb cos(du), dr . dv = ra rb (nb - na) sin(du),
+ *      the minima at du = 2 pi k, t_k = (2 pi k - du_0)/(nb - na), slope ra rb (nb - na)^2, distance
+ *      |rb - ra|; one plane and one radius: the rate is identically 0 and |dr| = 2 r |sin(du_0/2)|;
+ *   5. the radial bound: |x - y|^2 - (|x| - |y|)^2 = 2 |x| |y| (1 - cos psi) >= 0.
+ * Then, at 50 digits from the fixture's integers, each line printing `<name>: 0` when no key is off:
+ *   every pair line's kind and least distance; every event and negative line against the closed-form
+ *   minima of its pair, one for one and in order; each listed minimum a negative-to-positive root of
+ *   dr . dv on the Cartesian motion within 1e-18 s, at its distance; no event pair within the
+ *   threshold at either end of the window; every pair not listed radially separated by more than the
+ *   threshold, over all pairs; and the keys this file is checked on, planted wrong, caught.
+ *
+ * Run: timeout 300 maxima --very-quiet --suppress-input-echo -Q -b derivations/screening_set.mac </dev/null
+ */
+
+load("stringproc")$
+
+/* A vector identity reduces to 0 when every component does. */
+zero(name, expr) := block([d : expr],
+  if listp(d) and every(lambda([e], is(e = 0)), d) then d : 0,
+  printf(true, "~a: ~a~%", name, d),
+  if d # 0 then error("identity does not reduce to zero:", name))$
+/* A count of keys found wrong: `name: 0` when there are none. */
+check(name, bad) := printf(true, "~a: ~a~%", name, if bad = 0 then 0 else concat("FAIL ", bad))$
+ts(e) := trigsimp(trigreduce(trigsimp(ratsimp(e))))$
+cross3(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+
+/* ---- 1. The orbit frame. ---- */
+pv(O) := [cos(O), sin(O), 0]$
+qv(i, O) := [-sin(O)*cos(i), cos(O)*cos(i), sin(i)]$
+hv(i, O) := [sin(O)*sin(i), -cos(O)*sin(i), cos(i)]$
+zero("frame_p_is_a_unit_vector", trigsimp(pv(O) . pv(O) - 1))$
+zero("frame_q_is_a_unit_vector", trigsimp(qv(i, O) . qv(i, O) - 1))$
+zero("frame_p_and_q_are_orthogonal", trigsimp(pv(O) . qv(i, O)))$
+zero("frame_normal_is_p_cross_q", trigsimp(cross3(pv(O), qv(i, O)) - hv(i, O)))$
+zero("normal_cross_p_is_q", trigsimp(cross3(hv(i, O), pv(O)) - qv(i, O)))$
+zero("normal_cross_q_is_minus_p", trigsimp(cross3(hv(i, O), qv(i, O)) + pv(O)))$
+xs(r, i, O, u) := r*(pv(O)*cos(u) + qv(i, O)*sin(u))$
+vs(r, n, i, O, u) := r*n*(-pv(O)*sin(u) + qv(i, O)*cos(u))$
+zero("velocity_is_the_derivative_of_position",
+  trigsimp(diff(xs(r, i, O, u0 + n*t), t) - vs(r, n, i, O, u0 + n*t)))$
+
+/* ---- 2. Measured from the mutual node. ---- */
+lv : pv(O)*cos(s) + qv(i, O)*sin(s)$
+zero("node_is_a_unit_vector", trigsimp(lv . lv - 1))$
+zero("normal_cross_node_is_the_quarter_turn_in_the_plane",
+  trigsimp(cross3(hv(i, O), lv) - (-pv(O)*sin(s) + qv(i, O)*cos(s))))$
+zero("position_measured_from_the_node",
+  trigsimp(trigexpand(xs(1, i, O, u) - (lv*cos(u - s) + cross3(hv(i, O), lv)*sin(u - s)))))$
+Av : [a1, a2, a3]$ Bv : [b1, b2, b3]$ Cv : [c1, c2, c3]$
+zero("lagrange_identity",
+  expand(cross3(Av, Cv) . cross3(Bv, Cv) - ((Av . Bv)*(Cv . Cv) - (Av . Cv)*(Bv . Cv))))$
+la : [1, 0, 0]$ ha : [0, 0, 1]$ hb : [0, -sin(g), cos(g)]$
+zero("frame_normals_meet_at_g_and_contain_the_node",
+  [trigsimp(hb . hb - 1), ha . hb - cos(g), ha . la, hb . la])$
+
+/* ---- 3. One radius, two planes. ---- */
+th : th0 + n*t$
+xa : r*(la*cos(th) + cross3(ha, la)*sin(th))$
+xb : r*(la*cos(th + d) + cross3(hb, la)*sin(th + d))$
+sq : expand((xb - xa) . (xb - xa))$
+zero("crossing_squared_separation",
+  ts(sq - 2*r^2*(1 - (1 + cos(g))/2*cos(d) - (1 - cos(g))/2*cos(2*th + d))))$
+gc : expand((xb - xa) . (diff(xb, t) - diff(xa, t)))$
+zero("crossing_range_rate_is_the_derivative", ts(gc - diff(sq, t)/2))$
+zero("crossing_range_rate", ts(gc - 2*n*r^2*(1 - cos(g))/2*sin(2*th + d)))$
+declare(kk, integer)$
+tk : (%pi*kk - d/2 - th0)/n$
+zero("crossing_minimum_phase", ts(subst(t = tk, 2*th + d) - 2*%pi*kk))$
+zero("crossing_rate_vanishes_at_the_minimum", ts(subst(t = tk, gc)))$
+zero("crossing_rate_slope_at_the_minimum",
+  ts(subst(t = tk, diff(gc, t)) - 4*n^2*r^2*(1 - cos(g))/2))$
+zero("crossing_minimum_distance",
+  ts(subst(t = tk, sq) - 4*r^2*cos(g/2)^2*sin(d/2)^2))$
+
+/* ---- 4. One plane. ---- */
+ua : ua0 + na*t$ ub : ub0 + nb*t$
+xca : xs(ra, i, O, ua)$ xcb : xs(rb, i, O, ub)$
+sqc : expand((xcb - xca) . (xcb - xca))$
+gcc : expand((xcb - xca) . (vs(rb, nb, i, O, ub) - vs(ra, na, i, O, ua)))$
+zero("coplanar_squared_separation", ts(sqc - (ra^2 + rb^2 - 2*ra*rb*cos(ub - ua))))$
+zero("coplanar_range_rate_is_the_derivative", ts(gcc - diff(sqc, t)/2))$
+zero("coplanar_range_rate", ts(gcc - ra*rb*(nb - na)*sin(ub - ua)))$
+tc : (2*%pi*kk - (ub0 - ua0))/(nb - na)$
+zero("coplanar_minimum_phase", ts(subst(t = tc, ub - ua) - 2*%pi*kk))$
+zero("coplanar_rate_vanishes_at_the_minimum", ts(subst(t = tc, gcc)))$
+zero("coplanar_rate_slope_at_the_minimum", ts(subst(t = tc, diff(gcc, t)) - ra*rb*(nb - na)^2))$
+zero("coplanar_minimum_distance", ts(subst(t = tc, sqc) - (rb - ra)^2))$
+zero("comoving_range_rate_vanishes", ts(subst([rb = ra, nb = na], gcc)))$
+zero("comoving_separation_is_constant",
+  ts(subst([rb = ra, nb = na], sqc) - 4*ra^2*sin((ub0 - ua0)/2)^2))$
+
+/* ---- 5. The radial bound. ---- */
+Xr : [p1, 0, 0]$ Yr : [p2*cos(psi), p2*sin(psi), 0]$
+zero("radial_bound", ts((Xr - Yr) . (Xr - Yr) - (p1 - p2)^2 - 2*p1*p2*(1 - cos(psi))))$
+
+/* ---- 6. The keys, from the fixture's integers. ---- */
+fpprec : 50$
+fixture : if file_search("../crates/spacelab-testkit/tests/fixtures/screening_set.txt") # false
+  then "../crates/spacelab-testkit/tests/fixtures/screening_set.txt"
+  else "crates/spacelab-testkit/tests/fixtures/screening_set.txt"$
+big(s) := parse_string(concat(s, "b0"))$
+int(s) := parse_string(s)$
+objs : []$ pairs : []$ mins : []$
+block([f : openr(fixture), line, w],
+  while (line : readline(f)) # false do (
+    if slength(line) > 0 and charat(line, 1) # "#" then (
+      w : split(line, " "),
+      if w[1] = "mu" then MU : int(w[2])
+      else if w[1] = "window" then (W0 : int(w[2]), W : int(w[3]))
+      else if w[1] = "threshold" then D : int(w[2])
+      else if w[1] = "angle_exponent" then UNIT : 2^int(w[2])
+      else if w[1] = "object" then (
+        if int(w[2]) # length(objs) then error("objects out of order at", w[2]),
+        objs : endcons([w[3], int(w[4]), int(w[5]), int(w[6]), int(w[7])], objs))
+      else if w[1] = "pair" then pairs : endcons([int(w[2]), int(w[3]), w[4], big(w[5])], pairs)
+      else if w[1] = "event" or w[1] = "negative" then
+        mins : endcons([w[1], int(w[2]), int(w[3]), big(w[4]), big(w[5])], mins)
+      else error("unknown line:", line))),
+  close(f))$
+N : length(objs)$
+printf(true, "read ~a objects, ~a pairs, ~a events, ~a negatives~%", N, length(pairs),
+  length(sublist(mins, lambda([m], m[1] = "event"))), length(sublist(mins, lambda([m], m[1] = "negative"))))$
+
+/* Each object's motion at 50 digits: [r, n, p, q, h, u0]; object k is M[k + 1]. */
+M : makelist(block([o : objs[k], i, O],
+    i : bfloat(o[3]*UNIT), O : bfloat(o[4]*UNIT),
+    [o[2], bfloat(sqrt(MU/o[2]^3)), bfloat(pv(O)), bfloat(qv(i, O)), bfloat(hv(i, O)), bfloat(o[5]*UNIT)]),
+  k, 1, N)$
+pos(k, t) := block([m : M[k + 1], u], u : m[6] + m[2]*t, m[1]*(m[3]*cos(u) + m[4]*sin(u)))$
+vel(k, t) := block([m : M[k + 1], u], u : m[6] + m[2]*t, m[1]*m[2]*(-m[3]*sin(u) + m[4]*cos(u)))$
+rate(a, b, t) := (pos(b, t) - pos(a, t)) . (vel(b, t) - vel(a, t))$
+sep(a, b, t) := sqrt((pos(b, t) - pos(a, t)) . (pos(b, t) - pos(a, t)))$
+same_plane(a, b) := is(objs[a + 1][3] = objs[b + 1][3] and objs[a + 1][4] = objs[b + 1][4])$
+
+/* The closed form of a pair: [kind, least distance, [t_1, ...] in the open window, in order]. */
+key(a, b) := block([oa : objs[a + 1], ob : objs[b + 1], ma : M[a + 1], mb : M[b + 1], x0, x1, k0, k1, l, sa, sb, gg, dd, t0],
+  if same_plane(a, b) and oa[2] # ob[2] then (
+    dd : bfloat((ob[5] - oa[5])*UNIT),
+    x0 : dd/(2*%pi), x1 : (dd + (mb[2] - ma[2])*W)/(2*%pi),
+    k0 : floor(bfloat(min(x0, x1))) + 1, k1 : ceiling(bfloat(max(x0, x1))) - 1,
+    ["coplanar", bfloat(abs(ob[2] - oa[2])),
+     sort(makelist(bfloat((2*%pi*k - dd)/(mb[2] - ma[2])), k, k0, k1))])
+  else if same_plane(a, b) then
+    ["comoving", bfloat(2*oa[2]*abs(sin((ob[5] - oa[5])*UNIT/2))), []]
+  else if oa[2] # ob[2] then error("no closed form for the pair", a, b)
+  else (
+    l : cross3(ma[5], mb[5]), l : l/sqrt(l . l),
+    sa : atan2(l . ma[4], l . ma[3]), sb : atan2(l . mb[4], l . mb[3]),
+    gg : atan2(sqrt(cross3(ma[5], mb[5]) . cross3(ma[5], mb[5])), ma[5] . mb[5]),
+    t0 : ma[6] - sa, dd : (mb[6] - sb) - t0,
+    k0 : floor(bfloat((t0 + dd/2)/%pi)) + 1, k1 : ceiling(bfloat((t0 + dd/2 + ma[2]*W)/%pi)) - 1,
+    ["crossing", bfloat(2*oa[2]*cos(gg/2)*abs(sin(dd/2))),
+     makelist(bfloat((%pi*k - dd/2 - t0)/ma[2]), k, k0, k1)]))$
+
+TOL : 1b-22$     /* the fixture prints 24 decimals */
+EPS : 1b-18$
+/* The wrong keys of one pair line and the minima listed for it. */
+pair_errors(p, listed) := block([a : p[1], b : p[2], k, bad : 0, want],
+  k : key(a, b),
+  if k[1] # p[3] then bad : bad + 1,
+  if abs(k[2] - p[4]) > TOL then bad : bad + 1,
+  /* every minimum is listed when the pair goes below the threshold, and on a planted pair */
+  want : if k[2] < D or member(objs[a + 1][1], ["crossing", "coplanar"]) then k[3] else [],
+  if length(listed) # length(want) then bad : bad + 1
+  else for j thru length(want) do block([m : listed[j]],
+    if abs(m[4] - want[j]) > TOL then bad : bad + 1,
+    if abs(m[5] - k[2]) > TOL then bad : bad + 1,
+    if m[1] # (if k[2] < D then "event" else "negative") then bad : bad + 1),
+  bad)$
+/* A listed minimum on the Cartesian motion: a negative-to-positive root of the range rate within
+ * EPS of its time, at its distance. */
+root_errors(m) := block([bad : 0],
+  if not(is(rate(m[2], m[3], m[4] - EPS) < 0) and is(rate(m[2], m[3], m[4] + EPS) > 0)) then bad : bad + 1,
+  if abs(sep(m[2], m[3], m[4]) - m[5]) > TOL then bad : bad + 1,
+  bad)$
+
+listed_of(p) := sublist(mins, lambda([m], m[2] = p[1] and m[3] = p[2]))$
+check("every_pair_kind_least_distance_and_listed_minimum_is_its_closed_form",
+  lsum(pair_errors(p, listed_of(p)), p, pairs))$
+check("every_listed_minimum_is_a_root_of_the_range_rate_on_the_cartesian_motion_at_its_distance",
+  lsum(root_errors(m), m, mins))$
+block([keyed : makelist([p[1], p[2]], p, pairs)],
+  check("every_listed_minimum_belongs_to_a_listed_pair",
+    length(sublist(mins, lambda([m], not member([m[2], m[3]], keyed))))))$
+check("no_event_pair_is_within_the_threshold_at_either_end_of_the_window",
+  length(sublist(pairs, lambda([p], is(p[4] < D) and
+    (is(sep(p[1], p[2], bfloat(W0)) <= D) or is(sep(p[1], p[2], bfloat(W)) <= D))))))$
+block([bad : 0],
+  for p in pairs do listedpair[p[1], p[2]] : true,
+  for a : 0 thru N - 1 do for b : a + 1 thru N - 1 do
+    if not is(listedpair[a, b] = true) and abs(objs[a + 1][2] - objs[b + 1][2]) <= D then bad : bad + 1,
+  check("every_pair_not_listed_is_radially_separated_by_more_than_the_threshold", bad))$
+
+/* Rule 16: the same checks on keys planted wrong. Each line prints 0 when the wrong key is caught. */
+block([e : first(sublist(mins, lambda([m], m[1] = "event"))), p, moved],
+  p : first(sublist(pairs, lambda([q], q[1] = e[2] and q[2] = e[3]))),
+  moved : subst(e[4] + 1b-15, e[4], listed_of(p)),
+  check("a_planted_wrong_tca_is_caught",
+    if pair_errors(p, moved) > 0 and root_errors(subst(e[4] + 1b-15, e[4], e)) > 0 then 0 else 1),
+  moved : subst(e[5] + 1b-15, e[5], listed_of(p)),
+  check("a_planted_wrong_distance_is_caught",
+    if pair_errors(p, moved) > 0 and root_errors(subst(e[5] + 1b-15, e[5], e)) > 0 then 0 else 1),
+  check("a_dropped_event_is_caught", if pair_errors(p, rest(listed_of(p))) > 0 then 0 else 1),
+  p : first(sublist(pairs, lambda([q], q[3] = "crossing" and objs[q[1] + 1][1] = "shell"))),
+  check("a_planted_wrong_shell_distance_is_caught",
+    if pair_errors([p[1], p[2], p[3], p[4] + 1b-15], []) > 0 then 0 else 1))$

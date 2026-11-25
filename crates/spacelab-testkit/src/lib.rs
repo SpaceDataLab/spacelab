@@ -26,6 +26,10 @@
 
 #![no_std]
 
+extern crate alloc;
+
+pub mod screening_set;
+
 /// The larger of `a` and `b`, keeping a NaN instead of discarding it.
 ///
 /// Use this, not `f64::max`, to reduce a sequence of measured errors to the worst one. Once a NaN

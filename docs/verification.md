@@ -1634,6 +1634,7 @@ short arc as a test (`the_lambert_binding_solves_next_to_a_half_turn_and_on_a_sh
 | estimation, umbrella | light time in the measurement geometry (§4.8) | Vallado §3 / Moyer 2000: an observation belongs to the emission epoch | the ISS day validated in `access_oracle.rs`, against `(v_sat·ρ̂)τ` and `v_⊥/c` | range 5.9e-4 m; angle 3.3e-5″; sizes 51.8 m and 5.30″ | spacelab/tests/light\_time\_in\_measurements.rs |
 | estimation | closest-approach search (§4.9) | `f' = Δr·Δv` vanishes at every extremum of the separation | a 200 000-sample dense scan of `\|Δr\|` written without the inner product the search evaluates, on a co-planar and on a 63.4°-inclined pair; and a rectilinear pass with a closed-form TCA | counts equal; TCA within the scan's own resolution; distance < 1e-6 m; closed form < 1e-9 s | src/screening.rs |
 | estimation | radial screening filter (§4.9) | Hoots, Crawford & Roehrich 1984, filter 1 | the exact closest approach of two concentric circular orbits, `\|r₂ − r₁\|` | verdict exact at and either side of the threshold | src/screening.rs |
+| estimation, testkit | The screen on a synthetic all-against-all set with an exact key (§4.23, Ф21.O) — the radial filter, then `closest_approaches` at 60 s refined to 1 µs, over 4 950 pairs of 100 circular orbits in one day; `spacelab_testkit::screening_set` holds the set, its motion and the scorer | coplanar minima at `|r_b − r_a|`, crossing minima at the mutual node at `2r cos(γ/2) \|sin(δ/2)\|`, comoving pairs constant, everything else radially separated — derived in `derivations/screening_set.mac` (38 lines: 29 identities, every key re-derived from the fixture at 50 digits and bracketed on the Cartesian motion, the radial bound over all pairs, four planted wrong keys caught) and written at 80 digits by `derivations/screening_set.gp`, which brackets every listed minimum and scans 145 pairs with `solve()` | G3 every one of the 179 keyed events recalled within 1 ms and 1 mm, and no report that recalls none; the `f64` motion at each of 324 keyed minima; S1 a 1 s dense scan of 33 pairs; S2 the scorer on six planted wrong reports and the parser on thirteen malformed sets; a 2 400 s step, past a quarter revolution | recall **179/179**, false alarms **0**; worst 4.4e-7 s and 2.8e-7 m; the motion within 1e-6 m of every key; at 2 400 s, **44/179**, every miss a crossing event | tests/screening_set.rs, spacelab-testkit/src/screening_set.rs |
 | estimation | consider (Schmidt) covariance | Schmidt 1966 consider analysis | analytic closed-form error variance | < 1e-12 | src/consider.rs |
 | estimation | linear covariance analysis (truth/filter split) | Geller 2006, *JGCD* **29**(6):1404–1414; Maybeck I §6.8 | a **40 000-trial Monte-Carlo ensemble** of the same scenario driven through the actual filter equations, sharing no code with the recursion. The scenario is mismodelled four ways at once — a truth state the filter does not estimate, a wrong transition, a quarter of the truth's process noise, and half its measurement variance — because a check on a *correctly* modelled filter only proves the recursion reduces to a Kalman filter, which the unit tests already show. Sample-covariance noise at 40 000 trials is √(2/T) = **0.71 %** | the four `Cee` entries land at ratios **0.9897 / 0.9911 / 0.9911 / 1.0079**, all inside 1.1 % against a 4 % gate (5–6σ of the ensemble's own noise); the filter's claimed covariance is optimistic by **4.21×** in position and **2.03×** in velocity, which is the number the analysis exists to produce | src/lincov.rs, tests/lincov_monte_carlo.rs |
 | estimation | filter consistency (NEES/NIS/χ²) | Bar-Shalom, Li & Kirubarajan 2001 | known χ²(100) quantiles (Wilson–Hilferty) + unit identities | quantiles < 1e-2; identities < 1e-12 | src/consistency.rs |
@@ -3086,6 +3087,65 @@ from C and from Python, and both expose `teme_to_itrf` with `xp`, `yp` and `lod_
 to zero. `EopSource` made the choice explicit inside the workspace and does not reach the boundary
 where a non-Rust caller would make it — the #319 drift pattern at crate granularity, recorded in
 `docs/limitations.md` rather than closed in passing.
+
+### 4.23 A screen scored against a key that is known to be complete (Ф21.O)
+
+A screen fails by omission, and an omission is only countable against a key that lists every
+conjunction there is. A catalogue of real objects has no such key — its truth would be another
+screen's output — and the public CC0 screening set takes its catalogue from Space-Track, which this
+project does not use (D-47). So the set is ours and synthetic, and every object in it is a
+circular two-body orbit: then every pair whose radii are within the threshold is one of three
+geometries with closed-form minima, and every other pair is kept apart by the difference of its
+radii, by the triangle inequality.
+
+- **Coplanar, two radii.** The separation is `√(r_a² + r_b² − 2 r_a r_b cos Δu)`; its minima are the
+  alignments, at `|r_b − r_a|`, at `t_k = (2πk − Δu₀)/(n_b − n_a)`.
+- **One radius, two planes meeting at `γ`.** Measured from the mutual node, `|Δr|² = 2r²(1 −
+  A cos δ − B cos(2θ_a + δ))` with `A = (1 + cos γ)/2`, `B = (1 − cos γ)/2`: two minima per
+  revolution, at the node, at `2r cos(γ/2) |sin(δ/2)|`. `B > 0` for every `0 < γ < π`, so these are
+  all the minima.
+- **One plane, one radius.** The separation is constant and has no minimum.
+
+**The set.** 100 objects over `[0, 86 400]` s with a 10 km threshold: a Walker 40/5/0 shell at
+6 928 km and 55°, whose 780 pairs never come within 26 037 m of each other; eleven crossing pairs
+planted at about 10 m, 100 m, 1 km, 5 km, 9 999 m and 9 999.99 m and, as hard negatives, at
+10 000.01 m, 10 001 m, 10.1 km, 12 km and 50 km, the planes 1° to 174° apart; six coplanar pairs at
+gaps of 300 m, 1 km, 5 km and 9 999 m and, beyond the threshold, 10 001 m and 15 km; 26 background
+orbits, each at a radius of its own. The key: **797 pairs** with their least distance, **179 events**
+(every local minimum below the threshold, over all 4 950 pairs) and **145 hard-negative minima**.
+Radii are whole metres and angles whole multiples of `2⁻³²` rad, so the key is exact for the doubles a
+test reads. At both ends of the window every pair with an event is beyond the threshold, so each
+interval a pair spends inside the threshold holds exactly one event.
+
+**The gate.** `derivations/screening_set.gp` writes the file from its design at 80 digits, brackets
+every listed minimum as a negative-to-positive root of `Δr·Δv` on the Cartesian motion, and on every
+planted pair and every fifth shell pair finds exactly the listed roots by a 60 s scan polished with
+`solve()` (5.1e-89 s apart). `derivations/screening_set.mac` shares no code with it: 29 identities —
+the orbit frame, the in-plane rotation to the mutual node, Lagrange's identity, the three
+geometries' separations, range rates, phases, slopes and distances, and the radial bound — then,
+reading only the file's integers, every key at 50 digits against its closed form, every listed
+minimum bracketed within 1e-18 s on the Cartesian motion, the window's ends, the radial separation of
+every pair it does not list, and four keys planted wrong (a time and a distance moved by 1e-15, an
+event dropped, a shell distance moved) caught. Planted 0.5 s off in the committed file, one event key
+turns both engines red (`36 of 38`; `FAIL` in the `.gp`), the screen's test reports the miss, and the
+`f64` motion's test fails at that key.
+
+**The score.** At a 60 s step refined to 1 µs, inside the condition `screening.rs` states — a step
+shorter than the quarter revolution between a crossing pair's extrema — the screen scans the 795
+pairs the radial filter keeps and recalls **all 179 events with no false alarm**, the worst within
+4.4e-7 s and 2.8e-7 m. None of the hard negatives it scans is reported below the threshold, the
+nearest 1 cm beyond it; the two coplanar ones the radial filter drops. At a 2 400 s step it recalls
+44 of 179, and every miss is a crossing event: the stated condition on the step is a real one, and
+the set sees it fail.
+
+**What the score does not show.** On the 140 shell pairs that share a plane and a radius, `Δr·Δv` is
+0 in exact arithmetic and rounding noise in `f64`, and the scan emits an approach at each sign change
+of the noise — 45 276 of the 64 878 approaches it emits in the day. Every one is at the pair's
+constant 5 302 km or more, so none is reported. A comoving pair *inside* the threshold — a train of
+satellites in one orbit — would be reported at random epochs, and the set keys no such pair, because
+its separation has no minimum to key. The set is also two-body and circular throughout: an eccentric
+orbit, a pair in distinct planes at distinct radii, and the drift J2 adds have no closed-form key, and
+are not in it.
 
 ---
 

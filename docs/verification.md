@@ -11975,7 +11975,7 @@ not** — 139 physics, 22 parsers, 6 generated tables, 51 infrastructure. The nu
 verdict on the modules — most of the 139 are covered by tests and by the oracle rows of §1–§5; what they lack is a re-runnable identity
 named where the formula lives. The CI step fails when a module joins this list silently or when an
 entry goes stale, so the list can only shrink deliberately, one named derivation at a time
-(`plans/16` Ф17.B orders them). **Today, in the public tree: 335 modules, 249 name a check, 86 do
+(`plans/16` Ф17.B orders them). **Today, in the public tree: 336 modules, 250 name a check, 86 do
 not** — no physics module, 26 parsers, 4 generated and 56 infrastructure. Ф17.B batches 4 and 5 (2026-10-27) took out
 the last 42 — GNSS, SLR, the NeQuick ionosphere, earthvision, signal, vision, sensors and
 astrometry (`earthvision/sfm.rs` and `cloud.rs` hold no formula of their own and moved to

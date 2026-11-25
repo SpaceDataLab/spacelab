@@ -13,6 +13,11 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
+# A timeout is only a bound if the engine dies of it. Maxima answers SIGTERM by entering its break
+# loop, which reads stdin: with the caller's terminal or an open pipe there it waits for ever, and a
+# 300 s bound hung a run for 35 minutes. On an empty stdin the break loop reads EOF and exits.
+exec </dev/null
+
 PASS=0
 FAIL=0
 SKIP=0

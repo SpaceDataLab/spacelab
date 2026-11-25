@@ -2917,6 +2917,7 @@ dependencies = [
  "spacelab-autodiff",
  "spacelab-core",
  "spacelab-coverage",
+ "spacelab-elements",
  "spacelab-geomagnetism",
  "spacelab-sensors",
  "spacelab-testkit",

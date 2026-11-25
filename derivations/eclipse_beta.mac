@@ -1,0 +1,220 @@
+/* The beta angle and the eclipse statistics of `crates/spacelab-propagation/src/eclipse.rs`
+   (plan 18 Ф31.G).
+
+   The orbit normal h = N x Q of a circular orbit, N the node and Q the point 90 degrees on; the
+   beta angle is the Sun's elevation above the orbit plane, sin(beta) = h . s, positive on the side
+   h points to. In the plane spanned by h and the Sun the satellite p(u) = r (cos u N + sin u Q) has
+   p . s = r cos(beta) cos(u - u_sun), so the angle phi between p and the anti-Sun direction obeys
+   cos(phi) = cos(beta) cos(v), v = u - u_sun - pi.
+
+   The cylinder: p is in shadow when p . s < 0 and |p|^2 - (p . s)^2 < R^2, which on the circle is
+   cos(v) > sqrt(1 - rho^2) / cos(beta), rho = R/r. The arc is 2 acos(cos(beta*)/cos(beta)), so the
+   eclipse fraction is f = acos(cos(beta*)/cos(beta))/pi below beta* = asin(rho), and 0 above. The
+   code evaluates it as atan2(sqrt((rho - s)(rho + s)), cos(beta*))/pi, s = sin|beta|, which needs
+   no beta* and has no cancellation at the onset.
+
+   The cones: from a point on the cone of lines tangent to both the Earth (R) and the Sun (R_S, at
+   distance D), the line is tangent to both discs, so the apparent separation of their centres is
+   the difference of their apparent radii (common external tangents: the umbra boundary) or their
+   sum (internal tangents: the penumbra boundary) -- the conditions of `shadow::lighting_ratio`.
+   On the circle the cone of half-angle theta is sin(phi + theta) = rho, so the onset moves from
+   beta* to phi_u = beta* - asin((R_S - R)/D) and phi_p = beta* + asin((R_S + R)/D), and each
+   fraction is the cylinder's formula with phi_x for beta*.
+
+   This file derives each step, the beta = 0 and onset values (G3), the onset series, the Hoelder
+   bound the error statement rests on, the rate bounds the season scan takes, and the 700 km
+   numbers the module documentation quotes. Every identity prints `<name>: 0`.
+   Run: timeout 300 maxima --very-quiet -Q -b derivations/eclipse_beta.mac </dev/null */
+
+display2d: false$
+fpprec: 50$
+chk(name, e) := printf(true, "~a: ~a~%", name, e)$
+simp0(e) := ratsimp(radcan(trigsimp(e)))$
+dot3(a, b) := a[1]*b[1] + a[2]*b[2] + a[3]*b[3]$
+cross3(a, b) := [a[2]*b[3] - a[3]*b[2], a[3]*b[1] - a[1]*b[3], a[1]*b[2] - a[2]*b[1]]$
+holds(b) := if b then 0 else 1$
+
+/* ---- 1. The orbit normal and the beta angle ---- */
+N: [cos(Om), sin(Om), 0]$
+Q: [-cos(i)*sin(Om), cos(i)*cos(Om), sin(i)]$
+h: [sin(i)*sin(Om), -sin(i)*cos(Om), cos(i)]$
+pos(u) := r*(cos(u)*N + sin(u)*Q)$
+chk("h_is_N_cross_Q", simp0(dot3(h - cross3(N, Q), h - cross3(N, Q))))$
+chk("h_is_a_unit_vector", simp0(dot3(h, h) - 1))$
+chk("h_is_normal_to_the_orbit", simp0(dot3(h, pos(u))))$
+chk("the_orbit_is_a_circle_of_radius_r", simp0(dot3(pos(u), pos(u)) - r^2))$
+/* the textbook form, with the Sun at ecliptic longitude G and obliquity e */
+sun: [cos(G), sin(G)*cos(e), sin(G)*sin(e)]$
+chk("sin_beta_is_the_textbook_form",
+    simp0(dot3(h, sun) - (cos(G)*sin(Om)*sin(i) - sin(G)*cos(e)*cos(Om)*sin(i)
+                          + sin(G)*sin(e)*cos(i))))$
+/* the normal turns about z at the node rate: |dh/dOmega| = sin(i) */
+chk("the_normal_turns_at_sin_i_times_the_node_rate",
+    simp0(dot3(diff(h, Om), diff(h, Om)) - sin(i)^2))$
+
+/* ---- 2. The Sun in the orbit frame: p . s = r cos(beta) cos(u - u_sun) ---- */
+s_in: cos(b)*(cos(us)*N + sin(us)*Q) + sin(b)*h$
+chk("the_sun_direction_is_a_unit_vector", simp0(dot3(s_in, s_in) - 1))$
+chk("sin_beta_is_h_dot_s", simp0(dot3(h, s_in) - sin(b)))$
+chk("p_dot_s_is_r_cos_beta_cos_of_u_minus_u_sun",
+    simp0(trigexpand(dot3(pos(u), s_in) - r*cos(b)*cos(u - us))))$
+/* the angle phi from the anti-Sun direction, v = u - u_sun - pi */
+chk("cos_phi_is_cos_beta_cos_v",
+    simp0(trigexpand(dot3(pos(us + %pi + v), -s_in)/r - cos(b)*cos(v))))$
+
+/* ---- 3. The cylinder's shadow condition on the circle ---- */
+/* |p|^2 - (p.s)^2 - R^2 vanishes where cos(v) = sqrt(1 - rho^2)/cos(beta), rho = R/r */
+assume(r > 0, R > 0, r > R)$
+cstar: sqrt(1 - (R/r)^2)$
+chk("the_cylinder_edge_is_cos_v_equal_cos_beta_star_over_cos_beta",
+    ratsimp(r^2 - (r*cos(b)*(cstar/cos(b)))^2 - R^2))$
+/* the perpendicular distance falls as cos(v) grows: d/dcos(v) of r^2(1 - cos^2 b cos^2 v) */
+chk("inside_the_edge_the_distance_is_below_R",
+    ratsimp(diff(r^2*(1 - cos(b)^2*cv^2), cv) + 2*r^2*cos(b)^2*cv))$
+
+/* ---- 4. The atan2 form: acos(x) = atan(sqrt(1 - x^2)/x), x = cos(beta*)/cos(beta) ---- */
+kill(cstar)$
+assume(rho > 0, rho < 1)$
+/* cos^2 beta - cos^2 beta* = rho^2 - sin^2 beta = (rho - s)(rho + s) with rho = sin beta* */
+chk("cos2_beta_minus_cos2_beta_star_is_rho_minus_s_times_rho_plus_s",
+    trigsimp(expand((cos(b)^2 - (1 - rho^2)) - (rho - sin(b))*(rho + sin(b)))))$
+xx: sqrt(1 - rho^2)/cos(b)$
+chk("tan_of_the_half_arc_is_the_atan2_ratio",
+    ratsimp(subst(sin(b)^2 = 1 - cos(b)^2,
+                  expand((1 - xx^2)/xx^2 - (rho - sin(b))*(rho + sin(b))/(1 - rho^2)))))$
+chk("acos_is_atan_of_the_ratio", trigsimp(tan(acos(x)) - sqrt(1 - x^2)/x))$
+
+/* ---- 5. G3: f(0) = asin(rho)/pi, f(beta*) = 0 ---- */
+chk("at_beta_zero_the_atan2_is_asin_rho",
+    radcan(trigsimp(tan(asin(rho)) - sqrt(rho*rho)/sqrt((1 - rho)*(1 + rho)))))$
+chk("at_the_onset_the_atan2_numerator_is_zero", (rho - rho)*(rho + rho))$
+
+/* ---- 6. The onset: (pi f)^2 = 2 tan(beta*) d + (2 cos^2 beta* - 5)/(3 cos^2 beta*) d^2 + O(d^3) ---- */
+assume(bs > 0, bs < %pi/2, d > 0)$
+Fon: atan(sqrt(sin(bs)^2 - sin(bs - d)^2)/cos(bs))$
+chk("onset_series_of_pi_f_squared",
+    trigsimp(taylor(Fon^2, d, 0, 2) - (2*tan(bs)*d + (2*cos(bs)^2 - 5)/(3*cos(bs)^2)*d^2)))$
+/* so pi f = sqrt(2 tan(beta*) d) (1 - (5 - 2 cos^2 beta*)/(12 sin beta* cos beta*) d + O(d^2)) */
+chk("onset_series_of_pi_f_over_the_square_root",
+    trigsimp(taylor(Fon^2/(2*tan(bs)*d), d, 0, 1)
+             - (1 + 2*(2*cos(bs)^2 - 5)/(12*sin(bs)*cos(bs))*d)))$
+
+/* ---- 7. The Hoelder bound: |f(b1) - f(b2)| <= kappa/pi sqrt(2 tan(beta*) |b1 - b2|) ----
+   x(b) = cos(beta*)/cos(b) rises on [0, beta*] with x' at most tan(beta*), its value at beta*;
+   acos is concave and falling on [0, 1], so acos(x1) - acos(x2) <= acos(1 - (x2 - x1)); and
+   acos(1 - h) = t with h = 1 - cos t, sqrt(2 h) = 2 sin(t/2), so acos(1 - h)/sqrt(2 h) =
+   (t/2)/sin(t/2), which rises with t, at most kappa = (bs/2)/sin(bs/2) for h <= 1 - cos(bs), bs = beta*. */
+xb: cos(bs)/cos(bb)$
+chk("x_prime_is_cos_beta_star_sin_b_over_cos2_b",
+    trigsimp(diff(xb, bb) - cos(bs)*sin(bb)/cos(bb)^2))$
+chk("x_second_is_cos_beta_star_times_one_plus_sin2_over_cos3",
+    trigsimp(diff(xb, bb, 2) - cos(bs)*(1 + sin(bb)^2)/cos(bb)^3))$
+chk("x_prime_at_beta_star_is_tan_beta_star", trigsimp(subst(bb = bs, diff(xb, bb)) - tan(bs)))$
+chk("acos_second_derivative_is_minus_x_over_one_minus_x2_three_halves",
+    ratsimp(diff(acos(x), x, 2) + x/(1 - x^2)^(3/2)))$
+chk("two_h_is_four_sin2_half_t", trigsimp(trigreduce(2*(1 - cos(t)) - 4*sin(t/2)^2)))$
+/* d/dt [(t/2)/sin(t/2)] = (sin(t/2) - (t/2) cos(t/2))/(2 sin^2(t/2)) > 0 as tan(x) > x */
+chk("kappa_rises_with_t",
+    trigsimp(diff((t/2)/sin(t/2), t) - (sin(t/2) - (t/2)*cos(t/2))/(2*sin(t/2)^2)))$
+chk("kappa_at_a_quarter_turn_is_pi_over_two_root_two",
+    radcan(subst(t = %pi/2, (t/2)/sin(t/2)) - %pi/(2*sqrt(2))))$
+
+/* ---- 8. The cones: the tangent line, the point on it, and the apparent-disc conditions ----
+   Axis x from the Earth away from the Sun, the Sun at (-D, 0). The line y = R/cos(th) - x tan(th)
+   has direction w = (cos th, -sin th) and normal m = (sin th, cos th): a point's signed distance
+   from it is m . P - R. */
+w: [cos(th), -sin(th)]$
+m: [sin(th), cos(th)]$
+dist(P) := m[1]*P[1] + m[2]*P[2] - R$
+chk("the_earth_centre_is_R_from_the_line", ratsimp(dist([0, 0]) + R))$
+/* the Sun's centre is R_S from it on the Earth's side when sin(th) = (R_S - R)/D (external) and on
+   the other side when sin(th) = -(R_S + R)/D (internal) */
+chk("external_tangent_the_sun_is_R_S_from_the_line_on_the_earth_side",
+    ratsimp(subst(sin(th) = (RS - R)/D, dist([-D, 0])) + RS))$
+chk("internal_tangent_the_sun_is_R_S_from_the_line_on_the_far_side",
+    ratsimp(subst(sin(th) = -(RS + R)/D, dist([-D, 0])) - RS))$
+/* P = r (cos phi, sin phi) is on the line exactly when r sin(phi + th) = R */
+chk("a_point_at_phi_is_on_the_line_when_r_sin_phi_plus_theta_is_R",
+    trigsimp(trigexpand(dist(r*[cos(phi), sin(phi)]) - (r*sin(phi + th) - R))))$
+/* from P on the line, |cross(-w, C - P)| is the distance of the centre C from the line, so the
+   angle from the line to the Earth's centre has sine R/r and to the Sun's sine R_S/|S - P|: the
+   apparent radii. Same side: separation = difference; opposite sides: separation = sum. */
+crs2(a, b) := a[1]*b[2] - a[2]*b[1]$
+onl: [x0, R/cos(th) - x0*tan(th)]$
+chk("the_cross_with_the_earth_centre_is_its_distance",
+    trigsimp(crs2(-w, -onl) + dist([0, 0])))$
+chk("the_cross_with_the_sun_centre_is_its_distance",
+    trigsimp(crs2(-w, [-D, 0] - onl) + dist([-D, 0])))$
+/* the onset angles in the code's expanded form: sin and cos of asin(rho) -/+ theta */
+chk("sin_phi_u_expanded",
+    trigsimp(trigexpand(sin(asin(rho) - tu)) - (rho*cos(tu) - sqrt(1 - rho^2)*sin(tu))))$
+chk("cos_phi_u_expanded",
+    trigsimp(trigexpand(cos(asin(rho) - tu)) - (sqrt(1 - rho^2)*cos(tu) + rho*sin(tu))))$
+chk("sin_phi_p_expanded",
+    trigsimp(trigexpand(sin(asin(rho) + tp)) - (rho*cos(tp) + sqrt(1 - rho^2)*sin(tp))))$
+chk("cos_phi_p_expanded",
+    trigsimp(trigexpand(cos(asin(rho) + tp)) - (sqrt(1 - rho^2)*cos(tp) - rho*sin(tp))))$
+/* cos(theta) without cancellation: 1 - ((R_S - R)/D)^2 = (D - R_S + R)(D + R_S - R)/D^2 */
+chk("cos2_theta_u_factored",
+    ratsimp(1 - ((RS - R)/D)^2 - (D - RS + R)*(D + RS - R)/D^2))$
+chk("cos2_theta_p_factored",
+    ratsimp(1 - ((RS + R)/D)^2 - (D - RS - R)*(D + RS + R)/D^2))$
+
+/* ---- 9. The rate of the Sun's direction, from the coefficients `AnalyticSun` evaluates ----
+   s = P(T) (cos L, cos e sin L, sin e sin L), T in Julian centuries: |ds/dT| <= |L'| + |e'| + the
+   rate of P. L = L0 + g-terms + kappa/r_au, in degrees, g' = 35999.050 deg/cy. Bounds for |T| <= 1. */
+gdot: bfloat(35999.050b0*%pi/180)$                   /* rad per century */
+lmean: 36000.771b0$                          /* deg per century */
+centre: (1.915b0 + 2*0.020b0)*gdot$          /* d/dT of 1.915 sin g + 0.020 sin 2g, deg/cy */
+rmin: 1.00014b0 - 0.01671b0 - 0.00014b0$
+rdotmax: (0.01671b0 + 2*0.00014b0)*gdot$
+aberr: (20.49552b0/3600)*rdotmax/rmin^2$     /* d/dT of kappa/r_au, deg/cy */
+obl: 0.0130042b0$
+/* the IAU 2006 precession angles' rates, arcseconds per century, |T| <= 1 */
+zeta_dot: 2306.083227b0 + 2*0.2988499b0 + 3*0.01801828b0 + 4*0.000005971b0 + 5*0.0000003173b0$
+z_dot: 2306.077181b0 + 2*1.0927348b0 + 3*0.01826837b0 + 4*0.000028596b0 + 5*0.0000002904b0$
+th_dot: 2004.191903b0 + 2*0.4294934b0 + 3*0.04182264b0 + 4*0.000007089b0 + 5*0.0000001274b0$
+prec: (zeta_dot + z_dot + th_dot)/3600$
+sun_rate: lmean + centre + aberr + obl + prec$
+print("sun direction rate bound, deg per Julian century:", sun_rate)$
+chk("the_sun_direction_rate_is_below_37300_degrees_a_century", holds(is(sun_rate < 37300)))$
+/* the bound is within 0.2 % of the largest series rate, at perihelion: lmean + centre */
+chk("the_bound_is_within_two_tenths_of_a_percent_of_the_perihelion_rate",
+    holds(is(37300/(lmean + centre) - 1 < 0.002b0)))$
+
+/* ---- 10. The numbers the module documentation quotes: 700 km, R = 6378137 m, 1 au ---- */
+Re: 6378137$ rr: Re + 700000$ Rs: 6957*10^5$ au: 149597870700$ mu: 3986004418*10^5$
+bstar: asin(Re/rr)$
+period: bfloat(2*%pi*sqrt(rr^3/mu))$
+fcyl(ph, bb) := acos(cos(ph)/cos(bb))/%pi$
+kap(p) := (p/2)/sin(p/2)$
+thu: asin((Rs - Re)/au)$ thp: asin((Rs + Re)/au)$
+chk("beta_star_at_700_km_is_64_30_degrees",
+    holds(is(abs(bfloat(bstar*180/%pi) - 64.30b0) < 0.005b0)))$
+chk("f_at_beta_zero_at_700_km_is_0_35724",
+    holds(is(abs(bfloat(asin(Re/rr)/%pi) - 0.35724b0) < 0.000005b0)))$
+chk("kappa_at_700_km_is_1_0545", holds(is(abs(bfloat(kap(bstar)) - 1.0545b0) < 0.00005b0)))$
+chk("tan_beta_star_at_700_km_is_2_078", holds(is(abs(bfloat(tan(bstar)) - 2.078b0) < 0.0005b0)))$
+chk("the_period_at_700_km_is_98_8_min", holds(is(abs(period/60 - 98.8b0) < 0.05b0)))$
+/* rounding: the computed f is exact at a beta within 8u tan(beta*), which moves f by at most 2.9e-8 */
+chk("the_rounding_band_moves_f_by_at_most_2_9e_minus_8",
+    holds(is(abs(bfloat(kap(bstar)/%pi*sqrt(2*tan(bstar)*8*2^(-53)*tan(bstar))) - 2.9b-8) < 0.05b-8)))$
+/* the analytic Sun's 0.0132 degrees moves f by at most 0.0104, 62 s, at the onset */
+dsun: bfloat(kap(bstar)/%pi*sqrt(2*tan(bstar)*0.0132b0*%pi/180))$
+chk("the_sun_error_moves_f_by_at_most_0_0104", holds(is(abs(dsun - 0.0104b0) < 0.00005b0)))$
+chk("that_is_62_seconds_at_700_km", holds(is(abs(dsun*period - 62) < 0.5b0)))$
+/* the cones at 1 au: theta_u = 0.2640, theta_p = 0.2689 degrees */
+chk("theta_u_at_one_au_is_0_2640_degrees", holds(is(abs(bfloat(thu*180/%pi) - 0.2640b0) < 0.00005b0)))$
+chk("theta_p_at_one_au_is_0_2689_degrees", holds(is(abs(bfloat(thp*180/%pi) - 0.2689b0) < 0.00005b0)))$
+/* at beta = 0 the cylinder is 8.7 s longer than the umbra and 8.9 s shorter than the penumbra */
+chk("at_beta_zero_the_umbra_is_8_7_s_shorter",
+    holds(is(abs(bfloat((fcyl(bstar, 0) - fcyl(bstar - thu, 0))*period) - 8.7b0) < 0.05b0)))$
+chk("at_beta_zero_the_penumbra_is_8_9_s_longer",
+    holds(is(abs(bfloat((fcyl(bstar + thp, 0) - fcyl(bstar, 0))*period) - 8.9b0) < 0.05b0)))$
+/* at beta = beta* the penumbra lasts 264 s, under its Hoelder bound of 280 s */
+chk("at_the_cylinder_onset_the_penumbra_lasts_264_s",
+    holds(is(abs(bfloat(fcyl(bstar + thp, bstar)*period) - 264) < 0.5b0)))$
+chk("the_hoelder_bound_on_the_cone_against_the_cylinder_is_0_0472_of_a_revolution",
+    holds(is(abs(bfloat(kap(bstar + thp)/%pi*sqrt(2*tan(bstar + thp)*thp)) - 0.0472b0) < 0.00005b0)))$
+chk("the_hoelder_bound_on_the_cone_against_the_cylinder_is_280_s",
+    holds(is(abs(bfloat(kap(bstar + thp)/%pi*sqrt(2*tan(bstar + thp)*thp))*period - 280) < 0.5b0)))$

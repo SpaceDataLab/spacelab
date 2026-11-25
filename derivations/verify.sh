@@ -1426,6 +1426,7 @@ if have maxima; then
     mac_zeros wind_model_vsh.mac 222 "the vector spherical harmonic basis by Rodrigues' formula; the ridge stationarity"
     mac_zeros attitude_law_frames.mac 75 "every attitude law is an orthonormal right-handed frame"
     mac_zeros analytic_ephemeris.mac 33 "the analytic Sun and Moon series and their precession to J2000"
+    mac_zeros eclipse_beta.mac 55 "the beta angle and the eclipse fraction of a circular orbit: the shadow condition on the circle, the atan2 form, beta = 0 and the onset, the onset series and the Hoelder bound in beta, the cones from their tangent lines, the Sun's rate bound"
     mac_zeros thermosphere_legendre_terms.mac 30 "Legendre and local-time terms of a thermosphere expansion"
     mac_zeros nrlmsise00_flux_domain.mac 34 "NRLMSISE-00 at a flare F10.7: Tinf falls below Tlb, the Bates-Walker profile has no exospheric limit, the port's NaN is inf*0 over it, and the test's refusal literals"
     mac_zeros kalman_square_root.mac 10 "the square-root Kalman array: Joseph, information form, the trace-minimising gain"
@@ -1607,7 +1608,7 @@ if have gp; then
         cr3bp cr3bp_variational cw lowthrust optimal_pmp lambert_universal lambert_izzo gpu_porkchop iod_classical patched_conics \
         targeting_hohmann powered_zem_zev edl_allen_eggers sdtm_uncertainty sdtm_no_cooling sdtm_flux_excess sdtm_storm_gain sdtm_solar_wind sdtm_ablation sdtm_no_step sdtm_column sdtm_composition sdtm_overcooling sdtm_nitric_flux sdtm_flux_memory gaussian_scores drag_error_growth central_difference \
         density_calibration_ridge \
-        wind_model_vsh attitude_law_frames analytic_ephemeris thermosphere_legendre_terms nrlmsise00_flux_domain \
+        wind_model_vsh attitude_law_frames analytic_ephemeris eclipse_beta thermosphere_legendre_terms nrlmsise00_flux_domain \
         chi_square_quantiles robust_weights se3_exponential log1p_expm1_sites particle_resampling sampling_transforms \
         conjunction_pc screening_tca lincov_recursion measurement_modifiers exact_predicates \
         hull_delaunay spherical_triangle igrf_synthesis geomagnetic_dipole attitude_control gmst82 \

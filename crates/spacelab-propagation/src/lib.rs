@@ -43,6 +43,8 @@ pub mod dopri5;
 pub mod drag_coefficient;
 #[cfg(feature = "std")]
 pub mod earth_radiation;
+#[cfg(feature = "std")]
+pub mod eclipse;
 pub mod ephemeris;
 mod float;
 pub mod forces;

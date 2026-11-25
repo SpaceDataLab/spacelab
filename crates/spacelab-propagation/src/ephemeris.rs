@@ -87,7 +87,7 @@ pub fn is_absent(position: [f64; 3]) -> bool {
 ///
 /// The `~17 mas` frame bias between J2000 and the GCRS is three orders below the series that
 /// consumes this and is not applied; the matrix is otherwise `erfa.pmat06` to `0.017″`.
-fn j2000_from_of_date(tc: f64, v: [f64; 3]) -> [f64; 3] {
+pub(crate) fn j2000_from_of_date(tc: f64, v: [f64; 3]) -> [f64; 3] {
     const ARCSEC: f64 = DEG / 3600.0;
     let zeta = ARCSEC
         * (2.650_545

@@ -118,6 +118,18 @@ returned. The worst error the shipped code made on the corpus was 2.2e-8 sr, in 
 Circles more than `10⁻⁶` rad apart (6 m on the ground) lose at most about 7e-10 sr by the worst
 constant; the `10⁻⁶` decade measured 2.2e-10 sr.
 
+**The eclipse fraction near its onset is bounded in β, not in the fraction.** `eclipse_fraction`
+(Ф31.G) leaves 0 as a square root: with `d = β* − |β|`, `πf ≈ √(2 tan β*·d)`. An error `δ` in β
+therefore moves `f` by up to `(κ/π)·√(2 tan β*·δ)`, `κ = (β*/2)/sin(β*/2) ≤ π/(2√2)`, and no bound
+in `f` alone is uniform there. The computed `f` is the exact fraction at a β within `8u·tan β*` of
+the input; at 700 km (`tan β* = 2.078`, `κ = 1.0545`) that is up to 2.9e-8 of `f` at the onset,
+and away from it the measured error is 1 ulp. The β the analytic Sun gives is good to `0.0132°`,
+which moves `f` by up to 0.0104 (62 s of the 98.8 min revolution), only near the onset. The
+cylinder ignores the Sun's disc: at 700 km the penumbra adds at most 0.0472 of a revolution (280 s)
+to it, 264 s at `β*`, and `conical_eclipse` gives both cones. The seasons rest on a circular orbit,
+its mean plane turning about the pole of date at the epoch (which moves `20″` a year), and on
+`AnalyticSun`, which is refused more than a Julian century from J2000.
+
 ## What an event scan can miss
 
 `spacelab_coverage::find_events` samples `g(t)` at a fixed step and refines each sign change between

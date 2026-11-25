@@ -35,6 +35,8 @@ spacelab-testkit = { path = "../spacelab-testkit" }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 spacelab-core = { path = "../spacelab-core" }
 spacelab-sensors = { path = "../spacelab-sensors" }
+# `tests/eclipse.rs` takes the node rate, the period and the plane of a propagated orbit from it.
+spacelab-elements = { path = "../spacelab-elements" }
 
 [[bench]]
 name = "propagation"
